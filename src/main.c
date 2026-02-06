@@ -6,17 +6,58 @@
 
 #define MAX_CHILDREN 32
 #define MAX_STYLES 16
+#define MAX_STATES 16
 
 typedef struct CSSProperty {
     char name[32];
     char value[64];
 } CSSProperty;
 
+// --- State Management ---
+typedef struct State {
+    char name[32];
+    int value;
+} State;
+
+typedef struct StateManager {
+    State states[MAX_STATES];
+    int stateCount;
+} StateManager;
+
+StateManager globalStateManager = {0};
+
+void setState(const char* name, int value) {
+    // Update existing or add new
+    for (int i = 0; i < globalStateManager.stateCount; i++) {
+        if (strcmp(globalStateManager.states[i].name, name) == 0) {
+            globalStateManager.states[i].value = value;
+            return;
+        }
+    }
+    
+    // Add new state
+    if (globalStateManager.stateCount < MAX_STATES) {
+        strcpy(globalStateManager.states[globalStateManager.stateCount].name, name);
+        globalStateManager.states[globalStateManager.stateCount].value = value;
+        globalStateManager.stateCount++;
+    }
+}
+
+int getState(const char* name) {
+    for (int i = 0; i < globalStateManager.stateCount; i++) {
+        if (strcmp(globalStateManager.states[i].name, name) == 0) {
+            return globalStateManager.states[i].value;
+        }
+    }
+    return 0;
+}
+
 typedef struct Node {
     char tag[16];
     char text[256];
     char id[32];
     char class[32];
+    char onClick[128];  // NEW: onClick handler
     
     CSSProperty styles[MAX_STYLES];
     int styleCount;
@@ -28,7 +69,15 @@ typedef struct Node {
     struct Node* children[MAX_CHILDREN];
     int childCount;
     struct Node* parent;
+    
+    int isButton;  // NEW: Flag to identify buttons
 } Node;
+
+// Forward declarations
+void computeLayout(Node* node, int parentWidth, int parentHeight, int offsetX, int offsetY);
+void renderNode(HDC hdc, Node* node);
+Node* globalRoot = NULL;
+HWND globalHwnd = NULL;
 
 // --- Helper functions ---
 char* trim(char* str) {
@@ -65,6 +114,8 @@ COLORREF parseColor(const char* color) {
     if (strcmp(color, "gray") == 0 || strcmp(color, "grey") == 0) return RGB(128, 128, 128);
     if (strcmp(color, "lightgray") == 0) return RGB(211, 211, 211);
     if (strcmp(color, "darkgray") == 0) return RGB(169, 169, 169);
+    if (strcmp(color, "orange") == 0) return RGB(255, 165, 0);
+    if (strcmp(color, "purple") == 0) return RGB(128, 0, 128);
     
     return RGB(255, 255, 255);
 }
@@ -76,6 +127,12 @@ Node* createNode(const char* tag) {
     strcpy(node->tag, tag);
     node->width = -1;  // auto
     node->height = -1; // auto
+    
+    // Check if it's a button
+    if (strcmp(tag, "button") == 0) {
+        node->isButton = 1;
+    }
+    
     return node;
 }
 
@@ -122,20 +179,50 @@ void parseInlineStyle(Node* node, const char* styleStr) {
     }
 }
 
-// --- HTML Parser ---
-const char* findTagEnd(const char* start) {
-    int depth = 1;
-    const char* p = start;
-    while (*p && depth > 0) {
-        if (*p == '<') {
-            if (*(p+1) == '/') depth--;
-            else if (*(p+1) != '!') depth++;
+// --- Variable substitution in text ---
+void substituteVariables(char* text, char* output, int maxLen) {
+    char* src = text;
+    char* dst = output;
+    int remaining = maxLen - 1;
+    
+    while (*src && remaining > 0) {
+        if (*src == '{' && *(src + 1) == '{') {
+            // Found variable start
+            src += 2;
+            char varName[32] = {0};
+            int i = 0;
+            
+            // Extract variable name
+            while (*src && *src != '}' && i < 31) {
+                varName[i++] = *src++;
+            }
+            varName[i] = '\0';
+            
+            // Skip closing braces
+            if (*src == '}' && *(src + 1) == '}') {
+                src += 2;
+            }
+            
+            // Get state value and convert to string
+            int value = getState(trim(varName));
+            char valueStr[32];
+            sprintf(valueStr, "%d", value);
+            
+            // Copy value to output
+            char* v = valueStr;
+            while (*v && remaining > 0) {
+                *dst++ = *v++;
+                remaining--;
+            }
+        } else {
+            *dst++ = *src++;
+            remaining--;
         }
-        p++;
     }
-    return p;
+    *dst = '\0';
 }
 
+// --- HTML Parser ---
 const char* parseAttributes(const char* str, Node* node) {
     const char* p = str;
     char attrName[32], attrValue[512];
@@ -148,7 +235,7 @@ const char* parseAttributes(const char* str, Node* node) {
         // Read attribute name
         int i = 0;
         while (*p && *p != '=' && *p != '>' && *p != '/' && !isspace(*p) && i < 31) {
-            attrName[i++] = *p++;
+            attrName[i++] = tolower(*p++);
         }
         attrName[i] = '\0';
         
@@ -184,6 +271,8 @@ const char* parseAttributes(const char* str, Node* node) {
                 strcpy(node->id, attrValue);
             } else if (strcmp(attrName, "class") == 0) {
                 strcpy(node->class, attrValue);
+            } else if (strcmp(attrName, "onclick") == 0) {
+                strcpy(node->onClick, attrValue);
             }
         }
     }
@@ -314,20 +403,27 @@ void computeLayout(Node* node, int parentWidth, int parentHeight, int offsetX, i
     // Get styles
     const char* widthStr = getStyle(node, "width");
     const char* heightStr = getStyle(node, "height");
-    const char* displayStr = getStyle(node, "display");
     
     // Compute dimensions
     if (widthStr) {
         node->computedWidth = atoi(widthStr);
     } else {
-        node->computedWidth = parentWidth > 0 ? parentWidth - 20 : 200;
+        if (node->isButton) {
+            node->computedWidth = 120;  // Default button width
+        } else {
+            node->computedWidth = parentWidth > 0 ? parentWidth - 20 : 200;
+        }
     }
     
     if (heightStr) {
         node->computedHeight = atoi(heightStr);
     } else {
-        // Auto height based on content
-        node->computedHeight = 30 + (node->childCount * 40);
+        if (node->isButton) {
+            node->computedHeight = 35;  // Default button height
+        } else {
+            // Auto height based on content
+            node->computedHeight = 30 + (node->childCount * 40);
+        }
     }
     
     // Position
@@ -343,6 +439,84 @@ void computeLayout(Node* node, int parentWidth, int parentHeight, int offsetX, i
     }
 }
 
+// --- Event Handler ---
+void executeOnClick(const char* onClick) {
+    char command[128];
+    strncpy(command, onClick, sizeof(command) - 1);
+    command[sizeof(command) - 1] = '\0';
+    
+    // Parse simple commands like: setState('count', getState('count') + 1)
+    // Or: count++, count--, count+=5, etc.
+    
+    if (strstr(command, "++")) {
+        // Simple increment: count++
+        char varName[32] = {0};
+        sscanf(command, "%[^+]", varName);
+        char* trimmed = trim(varName);
+        int currentValue = getState(trimmed);
+        setState(trimmed, currentValue + 1);
+    } 
+    else if (strstr(command, "--")) {
+        // Simple decrement: count--
+        char varName[32] = {0};
+        sscanf(command, "%[^-]", varName);
+        char* trimmed = trim(varName);
+        int currentValue = getState(trimmed);
+        setState(trimmed, currentValue - 1);
+    }
+    else if (strstr(command, "+=")) {
+        // Add value: count+=5
+        char varName[32] = {0};
+        int addValue = 0;
+        sscanf(command, "%[^+]+=%d", varName, &addValue);
+        char* trimmed = trim(varName);
+        int currentValue = getState(trimmed);
+        setState(trimmed, currentValue + addValue);
+    }
+    else if (strstr(command, "-=")) {
+        // Subtract value: count-=5
+        char varName[32] = {0};
+        int subValue = 0;
+        sscanf(command, "%[^-]-=%d", varName, &subValue);
+        char* trimmed = trim(varName);
+        int currentValue = getState(trimmed);
+        setState(trimmed, currentValue - subValue);
+    }
+    else if (strstr(command, "=")) {
+        // Direct assignment: count=10
+        char varName[32] = {0};
+        int newValue = 0;
+        sscanf(command, "%[^=]=%d", varName, &newValue);
+        char* trimmed = trim(varName);
+        setState(trimmed, newValue);
+    }
+    
+    // Trigger re-render
+    if (globalHwnd) {
+        InvalidateRect(globalHwnd, NULL, TRUE);
+    }
+}
+
+// --- Check if point is inside node ---
+Node* findNodeAtPoint(Node* node, int x, int y) {
+    if (!node) return NULL;
+    
+    // Check children first (front to back)
+    for (int i = node->childCount - 1; i >= 0; i--) {
+        Node* found = findNodeAtPoint(node->children[i], x, y);
+        if (found) return found;
+    }
+    
+    // Check this node
+    if (node->isButton && 
+        x >= node->x && x <= node->x + node->computedWidth &&
+        y >= node->y && y <= node->y + node->computedHeight) {
+        return node;
+    }
+    
+    return NULL;
+}
+
 // --- Renderer ---
 void renderNode(HDC hdc, Node* node) {
     if (!node) return;
@@ -351,6 +525,14 @@ void renderNode(HDC hdc, Node* node) {
     const char* color = getStyle(node, "color");
     const char* fontSize = getStyle(node, "font-size");
     const char* border = getStyle(node, "border");
+    
+    // Default button styling
+    if (node->isButton && !bgColor) {
+        bgColor = "#4CAF50";
+    }
+    if (node->isButton && !color) {
+        color = "white";
+    }
     
     // Draw background
     if (bgColor) {
@@ -362,8 +544,8 @@ void renderNode(HDC hdc, Node* node) {
         DeleteObject(brush);
     }
     
-    // Draw border
-    if (border) {
+    // Draw border (default for buttons)
+    if (border || node->isButton) {
         HPEN pen = CreatePen(PS_SOLID, 1, RGB(0, 0, 0));
         HPEN oldPen = SelectObject(hdc, pen);
         HBRUSH oldBrush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
@@ -375,8 +557,11 @@ void renderNode(HDC hdc, Node* node) {
         DeleteObject(pen);
     }
     
-    // Draw text
+    // Draw text (with variable substitution)
     if (strlen(node->text) > 0) {
+        char processedText[512];
+        substituteVariables(node->text, processedText, sizeof(processedText));
+        
         SetTextColor(hdc, color ? parseColor(color) : RGB(0, 0, 0));
         SetBkMode(hdc, TRANSPARENT);
         
@@ -389,12 +574,18 @@ void renderNode(HDC hdc, Node* node) {
                               DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                               DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Arial");
             hOldFont = SelectObject(hdc, hFont);
+        } else if (node->isButton) {
+            hFont = CreateFont(16, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+                              DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                              DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Arial");
+            hOldFont = SelectObject(hdc, hFont);
         }
         
         RECT textRect = {node->x + 5, node->y + 5, 
                         node->x + node->computedWidth - 5, 
                         node->y + node->computedHeight - 5};
-        DrawText(hdc, node->text, -1, &textRect, DT_LEFT | DT_TOP | DT_WORDBREAK);
+        DrawText(hdc, processedText, -1, &textRect, 
+                DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_WORDBREAK);
         
         if (hFont) {
             SelectObject(hdc, hOldFont);
@@ -419,26 +610,57 @@ void freeNode(Node* node) {
 
 // --- Window procedure ---
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
-    static Node* root = NULL;
-
     switch (uMsg) {
         case WM_CREATE: {
+            globalHwnd = hwnd;
+            
+            // Initialize states
+            setState("count", 0);
+            setState("score", 100);
+            
             const char* html = 
-                "<div style=\"background:#ff6b6b;width:350;height:200;border:1px;\">"
-                    "<h1 style=\"color:white;font-size:24;\">Welcome to HTML Renderer</h1>"
-                    "<p style=\"color:#fff;font-size:14;\">This is a proper HTML parser that supports:</p>"
-                    "<div style=\"background:#4ecdc4;width:300;height:80;\">"
-                        "<p style=\"color:white;font-size:12;\">• Multiple nested elements</p>"
-                        "<p style=\"color:white;font-size:12;\">• CSS styling with colors and sizes</p>"
+                "<div style=\"background:#f0f0f0;width:400;height:550;border:1px;\">"
+                    "<h1 style=\"color:#333;font-size:28;\">State Management Demo</h1>"
+                    
+                    "<div style=\"background:#fff;width:360;height:100;border:1px;\">"
+                        "<p style=\"color:#666;font-size:18;\">Counter: {{count}}</p>"
+                        "<button onclick=\"count++\">Increment</button>"
+                        "<button onclick=\"count--\" style=\"background:#f44336;\">Decrement</button>"
+                        "<button onclick=\"count=0\" style=\"background:#ff9800;\">Reset</button>"
+                    "</div>"
+                    
+                    "<div style=\"background:#e3f2fd;width:360;height:120;border:1px;\">"
+                        "<p style=\"color:#1976d2;font-size:16;\">Score System: {{score}}</p>"
+                        "<button onclick=\"score+=10\" style=\"background:#2196f3;\">+10 Points</button>"
+                        "<button onclick=\"score-=5\" style=\"background:#ff5722;\">-5 Points</button>"
+                        "<button onclick=\"score=100\" style=\"background:#9c27b0;\">Reset Score</button>"
+                    "</div>"
+                    
+                    "<div style=\"background:#c8e6c9;width:360;height:80;border:1px;\">"
+                        "<p style=\"color:#2e7d32;font-size:14;\">Total: {{count}} + {{score}} = {{count}}</p>"
+                        "<p style=\"color:#555;font-size:12;\">Click buttons to update state!</p>"
                     "</div>"
                 "</div>"
-                "<div style=\"background:#95e1d3;width:350;height:100;border:1px;\">"
-                    "<p style=\"color:#2c3e50;font-size:16;\">Multiple root elements work too!</p>"
+                
+                "<div style=\"background:#ffe0b2;width:400;height:100;border:1px;\">"
+                    "<p style=\"color:#e65100;font-size:14;\">Previous features still work:</p>"
+                    "<p style=\"color:#555;font-size:12;\">✓ Nested elements ✓ CSS styling ✓ Colors</p>"
                 "</div>";
             
             const char* p = html;
-            root = parseHTML(&p);
-            computeLayout(root, 400, 600, 10, 10);
+            globalRoot = parseHTML(&p);
+            computeLayout(globalRoot, 450, 700, 10, 10);
+            return 0;
+        }
+
+        case WM_LBUTTONDOWN: {
+            int x = LOWORD(lParam);
+            int y = HIWORD(lParam);
+            
+            Node* clickedNode = findNodeAtPoint(globalRoot, x, y);
+            if (clickedNode && clickedNode->isButton && strlen(clickedNode->onClick) > 0) {
+                executeOnClick(clickedNode->onClick);
+            }
             return 0;
         }
 
@@ -451,13 +673,13 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             GetClientRect(hwnd, &clientRect);
             FillRect(hdc, &clientRect, (HBRUSH)(COLOR_WINDOW+1));
             
-            renderNode(hdc, root);
+            renderNode(hdc, globalRoot);
             EndPaint(hwnd, &ps);
             return 0;
         }
 
         case WM_DESTROY:
-            freeNode(root);
+            freeNode(globalRoot);
             PostQuitMessage(0);
             return 0;
     }
@@ -471,13 +693,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     wc.hInstance = hInstance;
     wc.lpszClassName = "HTMLRendererWindow";
     wc.hbrBackground = (HBRUSH)(COLOR_WINDOW+1);
+    wc.hCursor = LoadCursor(NULL, IDC_HAND);  // Hand cursor for better UX
 
     RegisterClass(&wc);
 
     HWND hwnd = CreateWindowEx(
-        0, "HTMLRendererWindow", "HTML Renderer with Proper Parser",
+        0, "HTMLRendererWindow", "HTML Renderer with State Management",
         WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-        CW_USEDEFAULT, CW_USEDEFAULT, 450, 550,
+        CW_USEDEFAULT, CW_USEDEFAULT, 500, 750,
         NULL, NULL, hInstance, NULL
     );
 
