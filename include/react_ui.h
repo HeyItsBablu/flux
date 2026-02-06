@@ -7,6 +7,13 @@
 #include <stdlib.h>
 #include <ctype.h>
 
+// ============================================================================
+// HTML MACRO FOR CLEANER SYNTAX
+// ============================================================================
+
+// Allow multi-line HTML strings without quotes
+#define HTML(...) #__VA_ARGS__
+
 #define MAX_CHILDREN 32
 #define MAX_STYLES 16
 #define MAX_STATES 16
@@ -471,6 +478,49 @@ static void freeNode(Node* node) {
 }
 
 // ============================================================================
+// VARIABLE SUBSTITUTION
+// ============================================================================
+
+static void substituteVariables(ReactUI* ui, char* text, char* output, int maxLen) {
+    if (!ui || !text || !output || maxLen <= 0) return;
+    
+    char* src = text;
+    char* dst = output;
+    int remaining = maxLen - 1;
+    
+    while (*src && remaining > 0) {
+        if (*src == '{' && *(src + 1) == '{') {
+            src += 2;
+            char varName[32] = {0};
+            int i = 0;
+            
+            while (*src && *src != '}' && i < 31) {
+                varName[i++] = *src++;
+            }
+            varName[i] = '\0';
+            
+            if (*src == '}' && *(src + 1) == '}') {
+                src += 2;
+            }
+            
+            int value = getState(ui, trim(varName));
+            char valueStr[32];
+            safe_sprintf(valueStr, sizeof(valueStr), "%d", value);
+            
+            char* v = valueStr;
+            while (*v && remaining > 0) {
+                *dst++ = *v++;
+                remaining--;
+            }
+        } else {
+            *dst++ = *src++;
+            remaining--;
+        }
+    }
+    *dst = '\0';
+}
+
+// ============================================================================
 // FLEXBOX PARSER
 // ============================================================================
 
@@ -600,49 +650,6 @@ static void applyUtilityClasses(Node* node) {
     if (strlen(expandedStyles) > 0) {
         parseInlineStyle(node, expandedStyles);
     }
-}
-
-// ============================================================================
-// VARIABLE SUBSTITUTION
-// ============================================================================
-
-static void substituteVariables(ReactUI* ui, char* text, char* output, int maxLen) {
-    if (!ui || !text || !output || maxLen <= 0) return;
-    
-    char* src = text;
-    char* dst = output;
-    int remaining = maxLen - 1;
-    
-    while (*src && remaining > 0) {
-        if (*src == '{' && *(src + 1) == '{') {
-            src += 2;
-            char varName[32] = {0};
-            int i = 0;
-            
-            while (*src && *src != '}' && i < 31) {
-                varName[i++] = *src++;
-            }
-            varName[i] = '\0';
-            
-            if (*src == '}' && *(src + 1) == '}') {
-                src += 2;
-            }
-            
-            int value = getState(ui, trim(varName));
-            char valueStr[32];
-            safe_sprintf(valueStr, sizeof(valueStr), "%d", value);
-            
-            char* v = valueStr;
-            while (*v && remaining > 0) {
-                *dst++ = *v++;
-                remaining--;
-            }
-        } else {
-            *dst++ = *src++;
-            remaining--;
-        }
-    }
-    *dst = '\0';
 }
 
 // ============================================================================

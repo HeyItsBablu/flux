@@ -1,382 +1,228 @@
-#include "react_ui.h"
 #include <windows.h>
+#include "react_ui.h"
 
-void onError(const char* message) {
-    MessageBoxA(NULL, message, "ReactUI Error", MB_OK | MB_ICONERROR);
+// Example 1: Simple Counter
+void example_counter(HINSTANCE hInstance) {
+    ReactUI* ui = ReactUI_Create(hInstance);
+    
+    ReactUI_SetState(ui, "counter", 0);
+    
+    const char* html = HTML(
+        <div class='flex-col-center card' style='width: 400; height: 300;'>
+            <div class='text-3xl text-blue-700'>Counter Application</div>
+            <div class='text-2xl text-gray-700'>Count: {{counter}}</div>
+            <div class='flex-row gap-10'>
+                <button class='btn-success' onclick='counter++'>Increment</button>
+                <button class='btn-danger' onclick='counter--'>Decrement</button>
+                <button class='btn-warning' onclick='counter=0'>Reset</button>
+            </div>
+        </div>
+    );
+    
+    ReactUI_Render(ui, html);
+    ReactUI_CreateWindow(ui, "Counter App", 450, 350);
 }
 
+// Example 2: Dashboard
+void example_dashboard(HINSTANCE hInstance) {
+    ReactUI* ui = ReactUI_Create(hInstance);
+    
+    ReactUI_SetState(ui, "users", 150);
+    ReactUI_SetState(ui, "sessions", 42);
+    ReactUI_SetState(ui, "errors", 0);
+    ReactUI_SetState(ui, "uptime", 99);
+    
+    const char* html = HTML(
+        <div class='flex-col gap-20 p-20 bg-gray-50' style='width: 800; height: 500;'>
+            <div class='text-4xl text-center text-blue-700'>System Dashboard</div>
+            
+            <div class='flex-row gap-15'>
+                <div class='card flex-1 flex-col-center'>
+                    <div class='text-sm text-gray-600'>Total Users</div>
+                    <div class='text-3xl text-green-600'>{{users}}</div>
+                </div>
+                
+                <div class='card flex-1 flex-col-center'>
+                    <div class='text-sm text-gray-600'>Active Sessions</div>
+                    <div class='text-3xl text-blue-600'>{{sessions}}</div>
+                </div>
+                
+                <div class='card flex-1 flex-col-center'>
+                    <div class='text-sm text-gray-600'>Errors</div>
+                    <div class='text-3xl text-red-600'>{{errors}}</div>
+                </div>
+                
+                <div class='card flex-1 flex-col-center'>
+                    <div class='text-sm text-gray-600'>Uptime %</div>
+                    <div class='text-3xl text-purple-500'>{{uptime}}</div>
+                </div>
+            </div>
+            
+            <div class='flex-row-center gap-10'>
+                <button class='btn-success btn-lg' onclick='users++'>New User</button>
+                <button class='btn-warning btn-lg' onclick='errors++'>Log Error</button>
+                <button class='btn-danger btn-lg' onclick='sessions=0'>Clear Sessions</button>
+            </div>
+        </div>
+    );
+    
+    ReactUI_Render(ui, html);
+    ReactUI_CreateWindow(ui, "Dashboard", 850, 550);
+}
+
+// Example 3: Calculator
+void example_calculator(HINSTANCE hInstance) {
+    ReactUI* ui = ReactUI_Create(hInstance);
+    
+    ReactUI_SetState(ui, "result", 0);
+    
+    const char* html = HTML(
+        <div class='flex-col gap-15 p-20 card' style='width: 350; height: 450;'>
+            <div class='text-3xl text-center text-blue-700'>Calculator</div>
+            
+            <div class='card-header text-4xl text-center text-gray-700'>
+                {{result}}
+            </div>
+            
+            <div class='flex-col gap-10'>
+                <div class='flex-row gap-10'>
+                    <button class='btn-primary flex-1' onclick='result+=1'>1</button>
+                    <button class='btn-primary flex-1' onclick='result+=2'>2</button>
+                    <button class='btn-primary flex-1' onclick='result+=3'>3</button>
+                </div>
+                
+                <div class='flex-row gap-10'>
+                    <button class='btn-primary flex-1' onclick='result+=4'>4</button>
+                    <button class='btn-primary flex-1' onclick='result+=5'>5</button>
+                    <button class='btn-primary flex-1' onclick='result+=6'>6</button>
+                </div>
+                
+                <div class='flex-row gap-10'>
+                    <button class='btn-primary flex-1' onclick='result+=7'>7</button>
+                    <button class='btn-primary flex-1' onclick='result+=8'>8</button>
+                    <button class='btn-primary flex-1' onclick='result+=9'>9</button>
+                </div>
+                
+                <div class='flex-row gap-10'>
+                    <button class='btn-danger flex-1' onclick='result=0'>C</button>
+                    <button class='btn-primary flex-1' onclick='result+=0'>0</button>
+                    <button class='btn-success flex-1' onclick='result+=10'>+10</button>
+                </div>
+            </div>
+        </div>
+    );
+    
+    ReactUI_Render(ui, html);
+    ReactUI_CreateWindow(ui, "Calculator", 400, 500);
+}
+
+// Example 4: Todo Counter
+void example_todo(HINSTANCE hInstance) {
+    ReactUI* ui = ReactUI_Create(hInstance);
+    
+    ReactUI_SetState(ui, "total", 0);
+    ReactUI_SetState(ui, "completed", 0);
+    ReactUI_SetState(ui, "pending", 0);
+    
+    const char* html = HTML(
+        <div class='flex-col gap-20 p-20 bg-blue-50' style='width: 500; height: 400;'>
+            <div class='text-4xl text-center text-blue-700'>Todo Tracker</div>
+            
+            <div class='flex-row gap-15'>
+                <div class='card flex-1 flex-col-center gap-10'>
+                    <div class='text-sm text-gray-600'>Total Tasks</div>
+                    <div class='text-3xl text-blue-600'>{{total}}</div>
+                </div>
+                
+                <div class='card flex-1 flex-col-center gap-10'>
+                    <div class='text-sm text-gray-600'>Completed</div>
+                    <div class='text-3xl text-green-600'>{{completed}}</div>
+                </div>
+                
+                <div class='card flex-1 flex-col-center gap-10'>
+                    <div class='text-sm text-gray-600'>Pending</div>
+                    <div class='text-3xl text-orange-500'>{{pending}}</div>
+                </div>
+            </div>
+            
+            <div class='flex-col gap-10'>
+                <button class='btn-success btn-lg' onclick='total++'>Add Task</button>
+                <div class='flex-row gap-10'>
+                    <button class='btn-primary flex-1' onclick='completed++'>Complete Task</button>
+                    <button class='btn-warning flex-1' onclick='pending++'>Add Pending</button>
+                </div>
+                <button class='btn-danger' onclick='total=0'>Clear All</button>
+            </div>
+        </div>
+    );
+    
+    ReactUI_Render(ui, html);
+    ReactUI_CreateWindow(ui, "Todo Tracker", 550, 450);
+}
+
+// Example 5: Settings Panel
+void example_settings(HINSTANCE hInstance) {
+    ReactUI* ui = ReactUI_Create(hInstance);
+    
+    ReactUI_SetState(ui, "volume", 50);
+    ReactUI_SetState(ui, "brightness", 75);
+    ReactUI_SetState(ui, "notifications", 1);
+    
+    const char* html = HTML(
+        <div class='flex-col gap-20 p-20' style='width: 450; height: 450;'>
+            <div class='card-header text-3xl text-center'>Settings</div>
+            
+            <div class='card flex-col gap-15'>
+                <div class='flex-row-between'>
+                    <div class='text-lg'>Volume:</div>
+                    <div class='text-xl text-blue-600'>{{volume}}%</div>
+                </div>
+                <div class='flex-row gap-10'>
+                    <button class='btn-secondary flex-1' onclick='volume-=10'>-10</button>
+                    <button class='btn-secondary flex-1' onclick='volume+=10'>+10</button>
+                </div>
+            </div>
+            
+            <div class='card flex-col gap-15'>
+                <div class='flex-row-between'>
+                    <div class='text-lg'>Brightness:</div>
+                    <div class='text-xl text-blue-600'>{{brightness}}%</div>
+                </div>
+                <div class='flex-row gap-10'>
+                    <button class='btn-secondary flex-1' onclick='brightness-=10'>-10</button>
+                    <button class='btn-secondary flex-1' onclick='brightness+=10'>+10</button>
+                </div>
+            </div>
+            
+            <div class='card flex-col gap-15'>
+                <div class='flex-row-between'>
+                    <div class='text-lg'>Notifications:</div>
+                    <div class='text-xl text-blue-600'>{{notifications}}</div>
+                </div>
+                <div class='flex-row gap-10'>
+                    <button class='btn-success flex-1' onclick='notifications=1'>On</button>
+                    <button class='btn-danger flex-1' onclick='notifications=0'>Off</button>
+                </div>
+            </div>
+        </div>
+    );
+    
+    ReactUI_Render(ui, html);
+    ReactUI_CreateWindow(ui, "Settings", 500, 500);
+}
+
+// Main entry point
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, 
                    LPSTR lpCmdLine, int nCmdShow) {
     
-    // ========================================================================
-    // EXAMPLE 1: Simple Counter - Before vs After
-    // ========================================================================
+    // Choose which example to run:
+    // Uncomment one of the following lines:
     
-    // BEFORE: Pure inline styles (524 chars)
-    /*
-    const char* oldStyle = 
-        "<div style=\"display: flex; flex-direction: column; justify-content: center; "
-        "align-items: center; width: 400; height: 300; background: #f5f5f5; gap: 20;\">"
-            "<div style=\"font-size: 48; color: #1976D2; padding: 20;\">{{counter}}</div>"
-            "<div style=\"display: flex; flex-direction: row; gap: 10;\">"
-                "<button onclick=\"counter++\" style=\"width: 100; height: 50; "
-                "background: #4CAF50; color: white; font-size: 18; border-radius: 5;\">+</button>"
-                "<button onclick=\"counter--\" style=\"width: 100; height: 50; "
-                "background: #f44336; color: white; font-size: 18; border-radius: 5;\">-</button>"
-                "<button onclick=\"counter=0\" style=\"width: 100; height: 50; "
-                "background: #FF9800; color: white; font-size: 18; border-radius: 5;\">Reset</button>"
-            "</div>"
-        "</div>";
-    */
+    example_counter(hInstance);
+    // example_dashboard(hInstance);
+    // example_calculator(hInstance);
+    // example_todo(hInstance);
+    // example_settings(hInstance);
     
-    // AFTER: Utility classes (174 chars - 67% reduction!)
-    const char* html1 = 
-        "<div class=\"flex-col-center bg-gray-100 gap-20\" style=\"width: 400; height: 300;\">"
-            "<div class=\"text-5xl text-blue-600 p-20\">{{counter}}</div>"
-            "<div class=\"flex-row gap-10\">"
-                "<button class=\"btn-success rounded\" onclick=\"counter++\" style=\"width: 100;\">+</button>"
-                "<button class=\"btn-danger rounded\" onclick=\"counter--\" style=\"width: 100;\">-</button>"
-                "<button class=\"btn-warning rounded\" onclick=\"counter=0\" style=\"width: 100;\">Reset</button>"
-            "</div>"
-        "</div>";
-    
-    ReactUI* ui1 = ReactUI_Create(hInstance);
-    ReactUI_SetErrorCallback(ui1, onError);
-    ReactUI_SetState(ui1, "counter", 0);
-    ReactUI_Render(ui1, html1);
-    ReactUI_CreateWindow(ui1, "Example 1: Simple Counter (Utility Classes)", 450, 400);
-    
-    
-    // ========================================================================
-    // EXAMPLE 2: Button Variations
-    // ========================================================================
-    
-    const char* html2 = 
-        "<div class=\"flex-col-center bg-gray-50 gap-15 p-20\" style=\"width: 600; height: 500;\">"
-            "<div class=\"text-2xl text-gray-700 p-10\">Button Component Styles</div>"
-            
-            "<!-- Primary Buttons -->"
-            "<div class=\"flex-row gap-10\">"
-                "<button class=\"btn-primary\">Primary</button>"
-                "<button class=\"btn-secondary\">Secondary</button>"
-                "<button class=\"btn-success\">Success</button>"
-            "</div>"
-            
-            "<!-- Danger/Warning Buttons -->"
-            "<div class=\"flex-row gap-10\">"
-                "<button class=\"btn-danger\">Danger</button>"
-                "<button class=\"btn-warning\">Warning</button>"
-                "<button class=\"btn bg-info text-white\">Info</button>"
-            "</div>"
-            
-            "<!-- Size Variations -->"
-            "<div class=\"flex-row gap-10\">"
-                "<button class=\"btn-primary btn-sm\">Small</button>"
-                "<button class=\"btn-primary\">Regular</button>"
-                "<button class=\"btn-primary btn-lg\">Large</button>"
-            "</div>"
-            
-            "<!-- Rounded Variations -->"
-            "<div class=\"flex-row gap-10\">"
-                "<button class=\"btn-success rounded\">Rounded</button>"
-                "<button class=\"btn-success rounded-lg\">Rounded-LG</button>"
-                "<button class=\"btn-success rounded-full\">Pill</button>"
-            "</div>"
-            
-            "<!-- With Icons/Text -->"
-            "<div class=\"flex-row gap-10\">"
-                "<button class=\"btn-primary\" style=\"width: 150;\">Download</button>"
-                "<button class=\"btn-secondary\" style=\"width: 150;\">Upload</button>"
-            "</div>"
-        "</div>";
-    
-    ReactUI* ui2 = ReactUI_Create(hInstance);
-    ReactUI_SetErrorCallback(ui2, onError);
-    ReactUI_Render(ui2, html2);
-    ReactUI_CreateWindow(ui2, "Example 2: Button Variations", 650, 600);
-    
-    
-    // ========================================================================
-    // EXAMPLE 3: Dashboard Layout (Complex)
-    // ========================================================================
-    
-    const char* html3 = 
-        "<div class=\"flex-col gap-10\" style=\"width: 800; height: 600;\">"
-            
-            "<!-- Header -->"
-            "<div class=\"flex-row-between bg-blue-700 text-white p-10\" style=\"height: 60;\">"
-                "<div class=\"text-2xl p-10\">Dashboard</div>"
-                "<div class=\"text-lg p-10\">Score: {{total}}</div>"
-            "</div>"
-            
-            "<!-- Main Content Area -->"
-            "<div class=\"flex-row flex-1 gap-10\">"
-                
-                "<!-- Left Sidebar -->"
-                "<div class=\"flex-col bg-blue-50 gap-10 p-10\" style=\"width: 200;\">"
-                    "<div class=\"text-base text-gray-700 p-5\">Add Points</div>"
-                    "<button class=\"btn-primary\" onclick=\"total+=100\">+100</button>"
-                    "<button class=\"btn-primary\" onclick=\"total+=50\">+50</button>"
-                    "<button class=\"btn-primary\" onclick=\"total+=10\">+10</button>"
-                "</div>"
-                
-                "<!-- Center Content -->"
-                "<div class=\"flex-col-center flex-1 card gap-20\">"
-                    "<div class=\"text-5xl text-blue-600\">{{total}}</div>"
-                    "<div class=\"text-xl text-gray-600\">Total Points</div>"
-                    "<div class=\"flex-row gap-10\">"
-                        "<button class=\"btn-success\" onclick=\"total+=5\">+5</button>"
-                        "<button class=\"btn-danger\" onclick=\"total-=5\">-5</button>"
-                    "</div>"
-                    "<button class=\"btn-warning\" onclick=\"total=0\" style=\"width: 200;\">Reset All</button>"
-                "</div>"
-                
-                "<!-- Right Sidebar -->"
-                "<div class=\"flex-col bg-red-50 gap-10 p-10\" style=\"width: 200;\">"
-                    "<div class=\"text-base text-gray-700 p-5\">Subtract</div>"
-                    "<button class=\"btn-danger\" onclick=\"total-=10\">-10</button>"
-                    "<button class=\"btn-danger\" onclick=\"total-=50\">-50</button>"
-                    "<button class=\"btn-danger\" onclick=\"total-=100\">-100</button>"
-                "</div>"
-                
-            "</div>"
-            
-            "<!-- Footer -->"
-            "<div class=\"flex-row-center bg-gray-300 text-black p-10\" style=\"height: 50;\">"
-                "<div class=\"text-sm\">ReactUI Hybrid - Utility Classes Demo</div>"
-            "</div>"
-            
-        "</div>";
-    
-    ReactUI* ui3 = ReactUI_Create(hInstance);
-    ReactUI_SetErrorCallback(ui3, onError);
-    ReactUI_SetState(ui3, "total", 0);
-    ReactUI_Render(ui3, html3);
-    ReactUI_CreateWindow(ui3, "Example 3: Dashboard Layout", 850, 700);
-    
-    
-    // ========================================================================
-    // EXAMPLE 4: Card Components
-    // ========================================================================
-    
-    const char* html4 = 
-        "<div class=\"flex-row-center bg-gray-100 gap-20 p-20\" style=\"width: 900; height: 400;\">"
-            
-            "<!-- Card 1: User Profile -->"
-            "<div class=\"card\" style=\"width: 250; height: 300;\">"
-                "<div class=\"flex-col-center gap-10\">"
-                    "<div class=\"bg-blue-500 text-white rounded-full\" "
-                         "style=\"width: 80; height: 80; padding: 25;\">User</div>"
-                    "<div class=\"text-xl text-gray-700\">John Doe</div>"
-                    "<div class=\"text-sm text-gray-600\">Software Developer</div>"
-                    "<button class=\"btn-primary\" style=\"width: 200;\">View Profile</button>"
-                "</div>"
-            "</div>"
-            
-            "<!-- Card 2: Statistics -->"
-            "<div class=\"card\" style=\"width: 250; height: 300;\">"
-                "<div class=\"card-header text-lg text-gray-700\">Statistics</div>"
-                "<div class=\"flex-col gap-10 p-10\">"
-                    "<div class=\"flex-row-between\">"
-                        "<div class=\"text-sm text-gray-600\">Views</div>"
-                        "<div class=\"text-base text-blue-600\">{{views}}</div>"
-                    "</div>"
-                    "<div class=\"flex-row-between\">"
-                        "<div class=\"text-sm text-gray-600\">Likes</div>"
-                        "<div class=\"text-base text-green-600\">{{likes}}</div>"
-                    "</div>"
-                    "<div class=\"flex-row-between\">"
-                        "<div class=\"text-sm text-gray-600\">Shares</div>"
-                        "<div class=\"text-base text-orange-500\">{{shares}}</div>"
-                    "</div>"
-                    "<button class=\"btn-secondary btn-sm\" onclick=\"views++\">+View</button>"
-                "</div>"
-            "</div>"
-            
-            "<!-- Card 3: Actions -->"
-            "<div class=\"card\" style=\"width: 250; height: 300;\">"
-                "<div class=\"card-header text-lg text-gray-700\">Quick Actions</div>"
-                "<div class=\"flex-col gap-10 p-10\">"
-                    "<button class=\"btn-success\">Create New</button>"
-                    "<button class=\"btn-secondary\">Edit</button>"
-                    "<button class=\"btn-warning\">Archive</button>"
-                    "<button class=\"btn-danger\">Delete</button>"
-                "</div>"
-            "</div>"
-            
-        "</div>";
-    
-    ReactUI* ui4 = ReactUI_Create(hInstance);
-    ReactUI_SetErrorCallback(ui4, onError);
-    ReactUI_SetState(ui4, "views", 1234);
-    ReactUI_SetState(ui4, "likes", 567);
-    ReactUI_SetState(ui4, "shares", 89);
-    ReactUI_Render(ui4, html4);
-    ReactUI_CreateWindow(ui4, "Example 4: Card Components", 950, 500);
-    
-    
-    // ========================================================================
-    // EXAMPLE 5: Spacing & Layout Demo
-    // ========================================================================
-    
-    const char* html5 = 
-        "<div class=\"flex-col gap-20 p-20\" style=\"width: 700; height: 600;\">"
-            
-            "<div class=\"text-2xl text-gray-700\">Spacing & Layout Utilities</div>"
-            
-            "<!-- Gap Variations -->"
-            "<div class=\"card\">"
-                "<div class=\"card-header text-base\">Gap Utilities</div>"
-                "<div class=\"flex-col p-10\">"
-                    "<div class=\"flex-row gap-5 bg-gray-100 p-5\">"
-                        "<div class=\"bg-blue-500\" style=\"width: 50; height: 50;\"></div>"
-                        "<div class=\"bg-blue-500\" style=\"width: 50; height: 50;\"></div>"
-                        "<div class=\"bg-blue-500\" style=\"width: 50; height: 50;\"></div>"
-                        "<div class=\"text-sm text-gray-600 p-10\">gap-5</div>"
-                    "</div>"
-                    "<div class=\"flex-row gap-10 bg-gray-100 p-5\">"
-                        "<div class=\"bg-green-500\" style=\"width: 50; height: 50;\"></div>"
-                        "<div class=\"bg-green-500\" style=\"width: 50; height: 50;\"></div>"
-                        "<div class=\"bg-green-500\" style=\"width: 50; height: 50;\"></div>"
-                        "<div class=\"text-sm text-gray-600 p-10\">gap-10</div>"
-                    "</div>"
-                    "<div class=\"flex-row gap-20 bg-gray-100 p-5\">"
-                        "<div class=\"bg-red-500\" style=\"width: 50; height: 50;\"></div>"
-                        "<div class=\"bg-red-500\" style=\"width: 50; height: 50;\"></div>"
-                        "<div class=\"bg-red-500\" style=\"width: 50; height: 50;\"></div>"
-                        "<div class=\"text-sm text-gray-600 p-10\">gap-20</div>"
-                    "</div>"
-                "</div>"
-            "</div>"
-            
-            "<!-- Padding Variations -->"
-            "<div class=\"card\">"
-                "<div class=\"card-header text-base\">Padding Utilities</div>"
-                "<div class=\"flex-row gap-10 p-10\">"
-                    "<div class=\"bg-blue-100 border p-5\">"
-                        "<div class=\"bg-blue-500 text-white text-sm\">p-5</div>"
-                    "</div>"
-                    "<div class=\"bg-green-100 border p-10\">"
-                        "<div class=\"bg-green-500 text-white text-sm\">p-10</div>"
-                    "</div>"
-                    "<div class=\"bg-red-100 border p-20\">"
-                        "<div class=\"bg-red-500 text-white text-sm\">p-20</div>"
-                    "</div>"
-                "</div>"
-            "</div>"
-            
-            "<!-- Flex Grow Demo -->"
-            "<div class=\"card\">"
-                "<div class=\"card-header text-base\">Flex Grow</div>"
-                "<div class=\"flex-row gap-10 p-10\">"
-                    "<div class=\"flex-1 bg-blue-500 text-white p-10\">flex-1</div>"
-                    "<div class=\"flex-2 bg-green-500 text-white p-10\">flex-2</div>"
-                    "<div class=\"flex-1 bg-red-500 text-white p-10\">flex-1</div>"
-                "</div>"
-            "</div>"
-            
-        "</div>";
-    
-    ReactUI* ui5 = ReactUI_Create(hInstance);
-    ReactUI_SetErrorCallback(ui5, onError);
-    ReactUI_Render(ui5, html5);
-    ReactUI_CreateWindow(ui5, "Example 5: Spacing & Layout", 750, 700);
-    
-    
-    // ========================================================================
-    // EXAMPLE 6: Color Palette Showcase
-    // ========================================================================
-    
-    const char* html6 = 
-        "<div class=\"flex-col gap-15 p-20\" style=\"width: 600; height: 700;\">"
-            
-            "<div class=\"text-2xl text-gray-700\">Color Palette</div>"
-            
-            "<!-- Semantic Colors -->"
-            "<div class=\"card\">"
-                "<div class=\"card-header text-base\">Semantic Colors</div>"
-                "<div class=\"flex-row gap-10 p-10\">"
-                    "<button class=\"btn-primary\">Primary</button>"
-                    "<button class=\"btn-secondary\">Secondary</button>"
-                    "<button class=\"btn-success\">Success</button>"
-                    "<button class=\"btn-danger\">Danger</button>"
-                    "<button class=\"btn-warning\">Warning</button>"
-                "</div>"
-            "</div>"
-            
-            "<!-- Blue Shades -->"
-            "<div class=\"card\">"
-                "<div class=\"card-header text-base\">Blue Shades</div>"
-                "<div class=\"flex-row gap-10 p-10\">"
-                    "<div class=\"bg-blue-50 border\" style=\"width: 80; height: 60; padding: 5;\">"
-                        "<div class=\"text-xs\">50</div>"
-                    "</div>"
-                    "<div class=\"bg-blue-500 text-white\" style=\"width: 80; height: 60; padding: 5;\">"
-                        "<div class=\"text-xs\">500</div>"
-                    "</div>"
-                    "<div class=\"bg-blue-600 text-white\" style=\"width: 80; height: 60; padding: 5;\">"
-                        "<div class=\"text-xs\">600</div>"
-                    "</div>"
-                    "<div class=\"bg-blue-700 text-white\" style=\"width: 80; height: 60; padding: 5;\">"
-                        "<div class=\"text-xs\">700</div>"
-                    "</div>"
-                "</div>"
-            "</div>"
-            
-            "<!-- Green Shades -->"
-            "<div class=\"card\">"
-                "<div class=\"card-header text-base\">Green Shades</div>"
-                "<div class=\"flex-row gap-10 p-10\">"
-                    "<div class=\"bg-green-50 border\" style=\"width: 80; height: 60; padding: 5;\">"
-                        "<div class=\"text-xs\">50</div>"
-                    "</div>"
-                    "<div class=\"bg-green-500 text-white\" style=\"width: 80; height: 60; padding: 5;\">"
-                        "<div class=\"text-xs\">500</div>"
-                    "</div>"
-                    "<div class=\"bg-green-600 text-white\" style=\"width: 80; height: 60; padding: 5;\">"
-                        "<div class=\"text-xs\">600</div>"
-                    "</div>"
-                "</div>"
-            "</div>"
-            
-            "<!-- Gray Shades -->"
-            "<div class=\"card\">"
-                "<div class=\"card-header text-base\">Gray Shades</div>"
-                "<div class=\"flex-row gap-10 p-10\">"
-                    "<div class=\"bg-gray-50 border\" style=\"width: 80; height: 60; padding: 5;\">"
-                        "<div class=\"text-xs\">50</div>"
-                    "</div>"
-                    "<div class=\"bg-gray-100 border\" style=\"width: 80; height: 60; padding: 5;\">"
-                        "<div class=\"text-xs\">100</div>"
-                    "</div>"
-                    "<div class=\"bg-gray-200 border\" style=\"width: 80; height: 60; padding: 5;\">"
-                        "<div class=\"text-xs\">200</div>"
-                    "</div>"
-                    "<div class=\"bg-gray-300 text-white\" style=\"width: 80; height: 60; padding: 5;\">"
-                        "<div class=\"text-xs\">300</div>"
-                    "</div>"
-                "</div>"
-            "</div>"
-            
-            "<!-- Text Colors -->"
-            "<div class=\"card\">"
-                "<div class=\"card-header text-base\">Text Colors</div>"
-                "<div class=\"flex-col gap-5 p-10\">"
-                    "<div class=\"text-blue-600\">Blue Text</div>"
-                    "<div class=\"text-green-600\">Green Text</div>"
-                    "<div class=\"text-red-600\">Red Text</div>"
-                    "<div class=\"text-gray-600\">Gray Text</div>"
-                "</div>"
-            "</div>"
-            
-        "</div>";
-    
-    ReactUI* ui6 = ReactUI_Create(hInstance);
-    ReactUI_SetErrorCallback(ui6, onError);
-    ReactUI_Render(ui6, html6);
-    ReactUI_CreateWindow(ui6, "Example 6: Color Palette", 650, 800);
-    
-    
-    // Run message loop
     return ReactUI_Run();
 }
