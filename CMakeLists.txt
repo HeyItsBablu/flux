@@ -1,10 +1,12 @@
 cmake_minimum_required(VERSION 3.10)
 
-# Project name and language
-project(SimpleCProject C)
+project(ReactUIApp C)
 
-# Set the source file
-set(SRC src/main.c)
+# Add include directory
+include_directories(include)
 
-# Add executable
-add_executable(main ${SRC})
+# Create executable from main.c
+add_executable(main src/main.c)
+
+# Link Windows GDI library
+target_link_libraries(main gdi32)
