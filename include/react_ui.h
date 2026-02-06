@@ -1,5 +1,5 @@
-#ifndef REACT_UI_H
-#define REACT_UI_H
+#ifndef REACT_UI_HYBRID_H
+#define REACT_UI_HYBRID_H
 
 #include <windows.h>
 #include <stdio.h>
@@ -12,6 +12,134 @@
 #define MAX_STATES 16
 #define MAX_EFFECTS 16
 #define MAX_UI_INSTANCES 8
+#define MAX_CLASS_NAMES 8
+
+// ============================================================================
+// UTILITY CLASS DEFINITIONS
+// ============================================================================
+
+typedef struct UtilityClass {
+    const char* className;
+    const char* inlineStyle;
+} UtilityClass;
+
+// Pre-defined utility classes (Tailwind-inspired)
+static const UtilityClass utilityClasses[] = {
+    // Layout Classes
+    {"flex-row",           "display: flex; flex-direction: row;"},
+    {"flex-col",           "display: flex; flex-direction: column;"},
+    {"flex-row-center",    "display: flex; flex-direction: row; justify-content: center; align-items: center;"},
+    {"flex-col-center",    "display: flex; flex-direction: column; justify-content: center; align-items: center;"},
+    {"flex-row-between",   "display: flex; flex-direction: row; justify-content: space-between;"},
+    {"flex-row-around",    "display: flex; flex-direction: row; justify-content: space-around;"},
+    {"flex-row-evenly",    "display: flex; flex-direction: row; justify-content: space-evenly;"},
+    {"flex-row-start",     "display: flex; flex-direction: row; align-items: flex-start;"},
+    {"flex-row-end",       "display: flex; flex-direction: row; align-items: flex-end;"},
+    {"flex-col-start",     "display: flex; flex-direction: column; align-items: flex-start;"},
+    {"flex-col-end",       "display: flex; flex-direction: column; align-items: flex-end;"},
+    {"flex-wrap",          "flex-wrap: wrap;"},
+    {"flex-1",             "flex-grow: 1;"},
+    {"flex-2",             "flex-grow: 2;"},
+    {"flex-3",             "flex-grow: 3;"},
+    
+    // Spacing Classes
+    {"p-0",    "padding: 0;"},
+    {"p-5",    "padding: 5;"},
+    {"p-10",   "padding: 10;"},
+    {"p-15",   "padding: 15;"},
+    {"p-20",   "padding: 20;"},
+    {"gap-5",  "gap: 5;"},
+    {"gap-10", "gap: 10;"},
+    {"gap-15", "gap: 15;"},
+    {"gap-20", "gap: 20;"},
+    {"m-0",    "margin: 0;"},
+    {"m-5",    "margin: 5;"},
+    {"m-10",   "margin: 10;"},
+    
+    // Background Color Classes
+    {"bg-primary",     "background: #4CAF50;"},
+    {"bg-secondary",   "background: #2196F3;"},
+    {"bg-danger",      "background: #f44336;"},
+    {"bg-warning",     "background: #FF9800;"},
+    {"bg-success",     "background: #4CAF50;"},
+    {"bg-info",        "background: #00BCD4;"},
+    {"bg-white",       "background: #ffffff;"},
+    {"bg-black",       "background: #000000;"},
+    {"bg-gray-50",     "background: #fafafa;"},
+    {"bg-gray-100",    "background: #f5f5f5;"},
+    {"bg-gray-200",    "background: #eeeeee;"},
+    {"bg-gray-300",    "background: #e0e0e0;"},
+    {"bg-blue-50",     "background: #E3F2FD;"},
+    {"bg-blue-500",    "background: #2196F3;"},
+    {"bg-blue-600",    "background: #1976D2;"},
+    {"bg-blue-700",    "background: #1565C0;"},
+    {"bg-green-50",    "background: #E8F5E9;"},
+    {"bg-green-500",   "background: #4CAF50;"},
+    {"bg-green-600",   "background: #43A047;"},
+    {"bg-red-50",      "background: #FFEBEE;"},
+    {"bg-red-500",     "background: #f44336;"},
+    {"bg-red-600",     "background: #E53935;"},
+    {"bg-orange-500",  "background: #FF9800;"},
+    {"bg-purple-500",  "background: #9C27B0;"},
+    
+    // Text Color Classes
+    {"text-white",     "color: white;"},
+    {"text-black",     "color: black;"},
+    {"text-gray-600",  "color: #666666;"},
+    {"text-gray-700",  "color: #555555;"},
+    {"text-blue-600",  "color: #1976D2;"},
+    {"text-blue-700",  "color: #1565C0;"},
+    {"text-green-600", "color: #43A047;"},
+    {"text-red-600",   "color: #E53935;"},
+    
+    // Typography Classes
+    {"text-xs",   "font-size: 12;"},
+    {"text-sm",   "font-size: 14;"},
+    {"text-base", "font-size: 16;"},
+    {"text-lg",   "font-size: 18;"},
+    {"text-xl",   "font-size: 20;"},
+    {"text-2xl",  "font-size: 24;"},
+    {"text-3xl",  "font-size: 30;"},
+    {"text-4xl",  "font-size: 36;"},
+    {"text-5xl",  "font-size: 48;"},
+    
+    // Border Classes
+    {"border",         "border: 1px solid #e0e0e0;"},
+    {"border-2",       "border: 2px solid #e0e0e0;"},
+    {"border-gray",    "border: 1px solid #e0e0e0;"},
+    {"border-blue",    "border: 1px solid #2196F3;"},
+    {"rounded",        "border-radius: 5;"},
+    {"rounded-lg",     "border-radius: 8;"},
+    {"rounded-xl",     "border-radius: 12;"},
+    {"rounded-full",   "border-radius: 999;"},
+    
+    // Component Presets
+    {"btn",            "padding: 10; border-radius: 5; font-size: 16;"},
+    {"btn-primary",    "background: #4CAF50; color: white; padding: 10; border-radius: 5; font-size: 16;"},
+    {"btn-secondary",  "background: #2196F3; color: white; padding: 10; border-radius: 5; font-size: 16;"},
+    {"btn-danger",     "background: #f44336; color: white; padding: 10; border-radius: 5; font-size: 16;"},
+    {"btn-warning",    "background: #FF9800; color: white; padding: 10; border-radius: 5; font-size: 16;"},
+    {"btn-success",    "background: #4CAF50; color: white; padding: 10; border-radius: 5; font-size: 16;"},
+    {"btn-lg",         "padding: 15; border-radius: 5; font-size: 18;"},
+    {"btn-sm",         "padding: 8; border-radius: 5; font-size: 14;"},
+    {"card",           "background: white; border: 1px solid #e0e0e0; border-radius: 8; padding: 20;"},
+    {"card-header",    "background: #f5f5f5; padding: 15; border-radius: 8;"},
+    {"shadow",         "border: 1px solid #e0e0e0;"},
+    {"shadow-lg",      "border: 2px solid #d0d0d0;"},
+    
+    // Sizing Classes
+    {"w-full",   "width: 100%;"},
+    {"h-full",   "height: 100%;"},
+    {"w-50",     "width: 50;"},
+    {"w-100",    "width: 100;"},
+    {"w-200",    "width: 200;"},
+    {"w-300",    "width: 300;"},
+    {"h-50",     "height: 50;"},
+    {"h-100",    "height: 100;"},
+    {"h-200",    "height: 200;"},
+};
+
+static const int utilityClassCount = sizeof(utilityClasses) / sizeof(UtilityClass);
 
 // ============================================================================
 // CORE DATA STRUCTURES
@@ -79,7 +207,7 @@ typedef struct Node {
     char tag[16];
     char text[256];
     char id[32];
-    char class[32];
+    char class[256];  // Increased to hold multiple class names
     char onClick[128];
     
     CSSProperty styles[MAX_STYLES];
@@ -109,7 +237,7 @@ typedef struct ReactUI {
 } ReactUI;
 
 // ============================================================================
-// GLOBAL STATE - Fixed to support multiple instances
+// GLOBAL STATE
 // ============================================================================
 
 static ReactUI* g_reactUIInstances[MAX_UI_INSTANCES] = {0};
@@ -141,6 +269,45 @@ static int safe_sprintf(char* dst, size_t dst_size, const char* format, ...) {
     va_end(args);
     dst[dst_size - 1] = '\0';
     return result;
+}
+
+// ============================================================================
+// UTILITY CLASS EXPANSION
+// ============================================================================
+
+static void expandUtilityClasses(const char* classNames, char* output, size_t maxLen) {
+    if (!classNames || !output || maxLen == 0) return;
+    
+    output[0] = '\0';
+    char classCopy[256];
+    safe_strcpy(classCopy, classNames, sizeof(classCopy));
+    
+    // Split class names by space
+    char* token = strtok(classCopy, " ");
+    while (token) {
+        // Trim whitespace
+        while (*token && isspace(*token)) token++;
+        if (*token == '\0') {
+            token = strtok(NULL, " ");
+            continue;
+        }
+        
+        // Look up utility class
+        int found = 0;
+        for (int i = 0; i < utilityClassCount; i++) {
+            if (strcmp(token, utilityClasses[i].className) == 0) {
+                // Append the style
+                if (output[0] != '\0') {
+                    safe_strcat(output, " ", maxLen);
+                }
+                safe_strcat(output, utilityClasses[i].inlineStyle, maxLen);
+                found = 1;
+                break;
+            }
+        }
+        
+        token = strtok(NULL, " ");
+    }
 }
 
 // ============================================================================
@@ -395,7 +562,7 @@ static void parseFlexProperties(Node* node) {
 }
 
 // ============================================================================
-// CSS PARSER
+// CSS PARSER WITH UTILITY CLASS SUPPORT
 // ============================================================================
 
 static void parseInlineStyle(Node* node, const char* styleStr) {
@@ -420,6 +587,19 @@ static void parseInlineStyle(Node* node, const char* styleStr) {
     
     // Parse flexbox properties after all styles are added
     parseFlexProperties(node);
+}
+
+static void applyUtilityClasses(Node* node) {
+    if (!node || strlen(node->class) == 0) return;
+    
+    // Expand utility classes to inline styles
+    char expandedStyles[1024];
+    expandUtilityClasses(node->class, expandedStyles, sizeof(expandedStyles));
+    
+    // Parse the expanded styles
+    if (strlen(expandedStyles) > 0) {
+        parseInlineStyle(node, expandedStyles);
+    }
 }
 
 // ============================================================================
@@ -552,6 +732,9 @@ static Node* parseElement(const char** htmlPtr) {
     if (!node) return NULL;
     
     p = parseAttributes(p, node);
+    
+    // Apply utility classes AFTER parsing attributes
+    applyUtilityClasses(node);
     
     if (*p == '/') {
         p++;
@@ -1287,4 +1470,4 @@ static void ReactUI_Destroy(ReactUI* ui) {
     free(ui);
 }
 
-#endif // REACT_UI_H
+#endif // REACT_UI_HYBRID_H
