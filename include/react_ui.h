@@ -1,5 +1,5 @@
-#ifndef REACT_UI_OPTIMIZED_H
-#define REACT_UI_OPTIMIZED_H
+#ifndef REACT_UI_FUNCTION_CALLBACKS_H
+#define REACT_UI_FUNCTION_CALLBACKS_H
 
 #include <windows.h>
 #include <stdio.h>
@@ -7,6 +7,39 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <stdbool.h>
+
+// ============================================================================
+// ADDITIONS FOR FUNCTION CALLBACK SUPPORT
+// ============================================================================
+
+#define MAX_REGISTERED_FUNCTIONS 64
+
+// Function callback types
+typedef void (*ReactUICallback)(void);
+typedef void (*ReactUICallbackWithInt)(int);
+typedef void (*ReactUICallbackWithString)(const char*);
+
+typedef enum {
+    CALLBACK_VOID,
+    CALLBACK_INT,
+    CALLBACK_STRING
+} CallbackType;
+
+typedef struct {
+    char name[64];
+    CallbackType type;
+    union {
+        ReactUICallback voidFunc;
+        ReactUICallbackWithInt intFunc;
+        ReactUICallbackWithString stringFunc;
+    } func;
+    bool registered;
+} FunctionEntry;
+
+typedef struct {
+    FunctionEntry functions[MAX_REGISTERED_FUNCTIONS];
+    int count;
+} FunctionRegistry;
 
 // ============================================================================
 // HTML MACRO FOR CLEANER SYNTAX
@@ -123,12 +156,12 @@ typedef struct Node {
     
     int isButton;
     
-    // NEW: Selective rendering
+    // Selective rendering
     bool isDirty;
     bool needsLayout;
     RECT boundingBox;
     
-    // NEW: Dependency tracking
+    // Dependency tracking
     char dependencies[MAX_DEPENDENCIES][32];
     int depCount;
     
@@ -149,9 +182,12 @@ typedef struct ReactUI {
     int instanceId;
     void (*onError)(const char* message);
     
-    // NEW: Dependency tracking
+    // Dependency tracking
     VariableDependency dependencies[MAX_STATES];
     int depCount;
+    
+    // NEW: Function registry
+    FunctionRegistry functionRegistry;
     
 } ReactUI;
 
@@ -232,6 +268,81 @@ static void reportError(ReactUI* ui, const char* message) {
     if (ui && ui->onError) {
         ui->onError(message);
     }
+}
+
+// ============================================================================
+// FUNCTION REGISTRY API
+// ============================================================================
+
+static void ReactUI_RegisterFunction(ReactUI* ui, const char* name, ReactUICallback func) {
+    if (!ui || !name || !func) return;
+    
+    if (ui->functionRegistry.count >= MAX_REGISTERED_FUNCTIONS) {
+        reportError(ui, "Maximum registered functions exceeded");
+        return;
+    }
+    
+    // Check if already registered
+    for (int i = 0; i < ui->functionRegistry.count; i++) {
+        if (strcmp(ui->functionRegistry.functions[i].name, name) == 0) {
+            reportError(ui, "Function already registered");
+            return;
+        }
+    }
+    
+    FunctionEntry* entry = &ui->functionRegistry.functions[ui->functionRegistry.count];
+    safe_strcpy(entry->name, name, sizeof(entry->name));
+    entry->type = CALLBACK_VOID;
+    entry->func.voidFunc = func;
+    entry->registered = true;
+    
+    ui->functionRegistry.count++;
+}
+
+static void ReactUI_RegisterFunctionInt(ReactUI* ui, const char* name, ReactUICallbackWithInt func) {
+    if (!ui || !name || !func) return;
+    
+    if (ui->functionRegistry.count >= MAX_REGISTERED_FUNCTIONS) {
+        reportError(ui, "Maximum registered functions exceeded");
+        return;
+    }
+    
+    FunctionEntry* entry = &ui->functionRegistry.functions[ui->functionRegistry.count];
+    safe_strcpy(entry->name, name, sizeof(entry->name));
+    entry->type = CALLBACK_INT;
+    entry->func.intFunc = func;
+    entry->registered = true;
+    
+    ui->functionRegistry.count++;
+}
+
+static void ReactUI_RegisterFunctionString(ReactUI* ui, const char* name, ReactUICallbackWithString func) {
+    if (!ui || !name || !func) return;
+    
+    if (ui->functionRegistry.count >= MAX_REGISTERED_FUNCTIONS) {
+        reportError(ui, "Maximum registered functions exceeded");
+        return;
+    }
+    
+    FunctionEntry* entry = &ui->functionRegistry.functions[ui->functionRegistry.count];
+    safe_strcpy(entry->name, name, sizeof(entry->name));
+    entry->type = CALLBACK_STRING;
+    entry->func.stringFunc = func;
+    entry->registered = true;
+    
+    ui->functionRegistry.count++;
+}
+
+static FunctionEntry* findFunction(ReactUI* ui, const char* name) {
+    if (!ui || !name) return NULL;
+    
+    for (int i = 0; i < ui->functionRegistry.count; i++) {
+        if (ui->functionRegistry.functions[i].registered &&
+            strcmp(ui->functionRegistry.functions[i].name, name) == 0) {
+            return &ui->functionRegistry.functions[i];
+        }
+    }
+    return NULL;
 }
 
 // ============================================================================
@@ -640,6 +751,21 @@ static const char* parseAttributes(const char* str, Node* node) {
             char quote = 0;
             if (*p == '"' || *p == '\'') {
                 quote = *p++;
+            } else if (*p == '{') {
+                // Handle JSX-style onClick={functionName}
+                p++; // Skip opening {
+                i = 0;
+                while (*p && *p != '}' && i < 511) {
+                    attrValue[i++] = *p++;
+                }
+                attrValue[i] = '\0';
+                if (*p == '}') p++;
+                
+                // Store the function name in onClick
+                if (strcmp(attrName, "onclick") == 0) {
+                    safe_strcpy(node->onClick, attrValue, sizeof(node->onClick));
+                }
+                continue;
             }
             
             i = 0;
@@ -976,7 +1102,7 @@ static void computeLayout(Node* node, int parentWidth, int parentHeight,
 }
 
 // ============================================================================
-// EVENT HANDLING
+// EVENT HANDLING WITH FUNCTION CALLBACKS
 // ============================================================================
 
 static void executeOnClick(ReactUI* ui, const char* onClick) {
@@ -984,7 +1110,32 @@ static void executeOnClick(ReactUI* ui, const char* onClick) {
     
     char command[128];
     safe_strcpy(command, onClick, sizeof(command));
+    char* trimmed = trim(command);
     
+    // First check if it's a registered function
+    FunctionEntry* func = findFunction(ui, trimmed);
+    if (func) {
+        switch (func->type) {
+            case CALLBACK_VOID:
+                if (func->func.voidFunc) {
+                    func->func.voidFunc();
+                    // Trigger re-render
+                    if (ui->hwnd) {
+                        InvalidateRect(ui->hwnd, NULL, TRUE);
+                    }
+                }
+                return;
+            case CALLBACK_INT:
+                // Could be extended to pass parameters
+                return;
+            case CALLBACK_STRING:
+                // Could be extended to pass parameters
+                return;
+        }
+        return;
+    }
+    
+    // Fall back to inline state manipulation (original behavior)
     for (char* p = command; *p; p++) {
         if (!isalnum(*p) && !strchr("+-=_ ", *p)) {
             reportError(ui, "Invalid character in onClick handler");
@@ -995,7 +1146,7 @@ static void executeOnClick(ReactUI* ui, const char* onClick) {
     if (strstr(command, "++")) {
         char varName[32] = {0};
         if (sscanf(command, "%31[^+]", varName) == 1) {
-            char* trimmed = trim(varName);
+            trimmed = trim(varName);
             int currentValue = getStateInt(ui, trimmed);
             setStateInt(ui, trimmed, currentValue + 1);
             markDependentNodesDirty(ui, trimmed);
@@ -1004,7 +1155,7 @@ static void executeOnClick(ReactUI* ui, const char* onClick) {
     else if (strstr(command, "--")) {
         char varName[32] = {0};
         if (sscanf(command, "%31[^-]", varName) == 1) {
-            char* trimmed = trim(varName);
+            trimmed = trim(varName);
             int currentValue = getStateInt(ui, trimmed);
             setStateInt(ui, trimmed, currentValue - 1);
             markDependentNodesDirty(ui, trimmed);
@@ -1014,7 +1165,7 @@ static void executeOnClick(ReactUI* ui, const char* onClick) {
         char varName[32] = {0};
         int newValue = 0;
         if (sscanf(command, "%31[^=]=%d", varName, &newValue) == 2) {
-            char* trimmed = trim(varName);
+            trimmed = trim(varName);
             setStateInt(ui, trimmed, newValue);
             markDependentNodesDirty(ui, trimmed);
         }
@@ -1363,4 +1514,4 @@ static void ReactUI_Destroy(ReactUI* ui) {
         } \
     }
 
-#endif // REACT_UI_OPTIMIZED_H
+#endif // REACT_UI_FUNCTION_CALLBACKS_H
