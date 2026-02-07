@@ -24,6 +24,8 @@
 #define MAX_ATTRIBUTE_LENGTH 64
 #define MAX_STATES 64
 #define MAX_EVENT_HANDLERS 32
+#define MAX_VARIABLES 32
+#define MAX_VAR_NAME_LENGTH 64
 
 // ============================================================================
 // EVENT HANDLER TYPES
@@ -137,6 +139,136 @@ static void triggerRerender() {
     if (g_ui && g_ui->hwnd) {
         InvalidateRect(g_ui->hwnd, NULL, TRUE);
     }
+}
+
+// ============================================================================
+// VARIABLE REGISTRY FOR TEMPLATE RENDERING
+// ============================================================================
+
+typedef enum {
+    VAR_TYPE_INT,
+    VAR_TYPE_FLOAT,
+    VAR_TYPE_DOUBLE,
+    VAR_TYPE_CHAR,
+    VAR_TYPE_STRING
+} VarType;
+
+typedef struct Variable {
+    char name[MAX_VAR_NAME_LENGTH];
+    VarType type;
+    void* ptr;
+    bool active;
+} Variable;
+
+typedef struct VariableRegistry {
+    Variable vars[MAX_VARIABLES];
+    int varCount;
+} VariableRegistry;
+
+static VariableRegistry g_varRegistry = {0};
+
+// Register a variable for template rendering
+static void registerVariable(const char* name, VarType type, void* ptr) {
+    if (g_varRegistry.varCount >= MAX_VARIABLES) return;
+    
+    Variable* v = &g_varRegistry.vars[g_varRegistry.varCount++];
+    strncpy(v->name, name, MAX_VAR_NAME_LENGTH - 1);
+    v->name[MAX_VAR_NAME_LENGTH - 1] = '\0';
+    v->type = type;
+    v->ptr = ptr;
+    v->active = true;
+}
+
+// Get variable value as string
+static bool getVariableValue(const char* name, char* output, size_t outputSize) {
+    for (int i = 0; i < g_varRegistry.varCount; i++) {
+        if (strcmp(g_varRegistry.vars[i].name, name) == 0) {
+            Variable* v = &g_varRegistry.vars[i];
+            
+            switch (v->type) {
+                case VAR_TYPE_INT:
+                    snprintf(output, outputSize, "%d", *(int*)v->ptr);
+                    return true;
+                case VAR_TYPE_FLOAT:
+                    snprintf(output, outputSize, "%.1f", *(float*)v->ptr);
+                    return true;
+                case VAR_TYPE_DOUBLE:
+                    snprintf(output, outputSize, "%.2f", *(double*)v->ptr);
+                    return true;
+                case VAR_TYPE_CHAR:
+                    snprintf(output, outputSize, "%c", *(char*)v->ptr);
+                    return true;
+                case VAR_TYPE_STRING:
+                    snprintf(output, outputSize, "%s", (char*)v->ptr);
+                    return true;
+            }
+        }
+    }
+    return false;
+}
+
+// Macro to register variables easily
+#define REGISTER_VAR_INT(var) registerVariable(#var, VAR_TYPE_INT, &var)
+#define REGISTER_VAR_FLOAT(var) registerVariable(#var, VAR_TYPE_FLOAT, &var)
+#define REGISTER_VAR_DOUBLE(var) registerVariable(#var, VAR_TYPE_DOUBLE, &var)
+#define REGISTER_VAR_CHAR(var) registerVariable(#var, VAR_TYPE_CHAR, &var)
+#define REGISTER_VAR_STRING(var) registerVariable(#var, VAR_TYPE_STRING, var)
+
+// ============================================================================
+// TEMPLATE PROCESSOR
+// ============================================================================
+
+static char* processTemplate(const char* template) {
+    static char processed[4096];
+    char* out = processed;
+    const char* p = template;
+    size_t remaining = sizeof(processed) - 1;
+    
+    while (*p && remaining > 0) {
+        if (*p == '{') {
+            p++; // Skip '{'
+            
+            // Extract variable name
+            char varName[MAX_VAR_NAME_LENGTH];
+            int i = 0;
+            while (*p && *p != '}' && i < MAX_VAR_NAME_LENGTH - 1) {
+                varName[i++] = *p++;
+            }
+            varName[i] = '\0';
+            
+            if (*p == '}') p++; // Skip '}'
+            
+            // Get variable value
+            char value[256];
+            if (getVariableValue(varName, value, sizeof(value))) {
+                // Copy value to output
+                size_t valueLen = strlen(value);
+                if (valueLen > remaining) valueLen = remaining;
+                memcpy(out, value, valueLen);
+                out += valueLen;
+                remaining -= valueLen;
+            } else {
+                // Variable not found, keep original
+                *out++ = '{';
+                remaining--;
+                size_t nameLen = strlen(varName);
+                if (nameLen > remaining) nameLen = remaining;
+                memcpy(out, varName, nameLen);
+                out += nameLen;
+                remaining -= nameLen;
+                if (remaining > 0) {
+                    *out++ = '}';
+                    remaining--;
+                }
+            }
+        } else {
+            *out++ = *p++;
+            remaining--;
+        }
+    }
+    
+    *out = '\0';
+    return processed;
 }
 
 // ============================================================================
@@ -343,8 +475,14 @@ static Node* parseElement(const char** htmlPtr) {
                     int len = (int)(p - contentStart);
                     if (len > MAX_TEXT_LENGTH - 1) len = MAX_TEXT_LENGTH - 1;
                     
-                    strncpy(node->text, contentStart, len);
-                    node->text[len] = '\0';
+                    char tempText[MAX_TEXT_LENGTH];
+                    strncpy(tempText, contentStart, len);
+                    tempText[len] = '\0';
+                    
+                    // Process template variables
+                    char* processed = processTemplate(tempText);
+                    strncpy(node->text, processed, MAX_TEXT_LENGTH - 1);
+                    node->text[MAX_TEXT_LENGTH - 1] = '\0';
                     
                     // Trim the text
                     char* trimmed = trim(node->text);
