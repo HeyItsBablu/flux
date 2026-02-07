@@ -22,6 +22,26 @@
 #define MAX_TEXT_LENGTH 256
 #define MAX_TAG_LENGTH 16
 #define MAX_ATTRIBUTE_LENGTH 64
+#define MAX_STATES 64
+#define MAX_EVENT_HANDLERS 32
+
+// ============================================================================
+// EVENT HANDLER TYPES
+// ============================================================================
+
+typedef void (*ClickHandler)(void);
+
+typedef struct EventHandler {
+    char elementId[MAX_ATTRIBUTE_LENGTH];
+    ClickHandler onClick;
+} EventHandler;
+
+typedef struct EventManager {
+    EventHandler handlers[MAX_EVENT_HANDLERS];
+    int handlerCount;
+} EventManager;
+
+static EventManager g_eventManager = {0};
 
 // ============================================================================
 // CORE NODE STRUCTURE (Minimal)
@@ -30,10 +50,14 @@
 typedef struct Node {
     char tag[MAX_TAG_LENGTH];           // "div", "p", "button", etc.
     char text[MAX_TEXT_LENGTH];         // Text content
+    char id[MAX_ATTRIBUTE_LENGTH];      // Element ID for event binding
     
     // Basic properties
     int x, y;                           // Position
     int width, height;                  // Size
+    
+    // Event handler
+    ClickHandler onClick;
     
     // Tree structure
     struct Node* children[MAX_CHILDREN];
@@ -57,6 +81,89 @@ typedef struct ReactUI {
 // ============================================================================
 
 static ReactUI* g_ui = NULL;
+
+// ============================================================================
+// STATE MANAGEMENT (Primitive Types Only)
+// ============================================================================
+
+typedef struct StateEntry {
+    void* value;
+    size_t size;
+    void (*onChange)(void);
+    bool active;
+} StateEntry;
+
+typedef struct StateManager {
+    StateEntry states[MAX_STATES];
+    int stateCount;
+} StateManager;
+
+static StateManager g_stateManager = {0};
+
+// STATE macro for primitive types (int, float, double, char, etc.)
+#define STATE(type, var, setter, initial)                       \
+    static type var = initial;                                  \
+    static int var##_state_id = -1;                            \
+    void setter(type value) {                                   \
+        if (memcmp(&var, &value, sizeof(type)) != 0) {         \
+            var = value;                                        \
+            if (var##_state_id >= 0 &&                         \
+                g_stateManager.states[var##_state_id].onChange) { \
+                g_stateManager.states[var##_state_id].onChange(); \
+            }                                                   \
+        }                                                       \
+    }                                                           \
+    static void var##_register_state() {                       \
+        if (var##_state_id < 0 &&                              \
+            g_stateManager.stateCount < MAX_STATES) {          \
+            var##_state_id = g_stateManager.stateCount++;      \
+            g_stateManager.states[var##_state_id].value = &var; \
+            g_stateManager.states[var##_state_id].size = sizeof(type); \
+            g_stateManager.states[var##_state_id].active = true; \
+        }                                                       \
+    }
+
+// Register state with onChange callback
+#define USE_STATE(var, callback)                                \
+    do {                                                        \
+        var##_register_state();                                \
+        if (var##_state_id >= 0) {                             \
+            g_stateManager.states[var##_state_id].onChange = callback; \
+        }                                                       \
+    } while(0)
+
+// Trigger re-render when state changes
+static void triggerRerender() {
+    if (g_ui && g_ui->hwnd) {
+        InvalidateRect(g_ui->hwnd, NULL, TRUE);
+    }
+}
+
+// ============================================================================
+// EVENT HANDLER REGISTRATION
+// ============================================================================
+
+static void registerEventHandler(const char* elementId, ClickHandler handler) {
+    if (g_eventManager.handlerCount >= MAX_EVENT_HANDLERS) return;
+    
+    EventHandler* eh = &g_eventManager.handlers[g_eventManager.handlerCount++];
+    strncpy(eh->elementId, elementId, MAX_ATTRIBUTE_LENGTH - 1);
+    eh->elementId[MAX_ATTRIBUTE_LENGTH - 1] = '\0';
+    eh->onClick = handler;
+}
+
+static ClickHandler getEventHandler(const char* elementId) {
+    for (int i = 0; i < g_eventManager.handlerCount; i++) {
+        if (strcmp(g_eventManager.handlers[i].elementId, elementId) == 0) {
+            return g_eventManager.handlers[i].onClick;
+        }
+    }
+    return NULL;
+}
+
+static void clearEventHandlers() {
+    g_eventManager.handlerCount = 0;
+}
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -117,10 +224,68 @@ static void freeNode(Node* node) {
 }
 
 // ============================================================================
-// SIMPLE HTML PARSER
+// SIMPLE HTML PARSER WITH ATTRIBUTES
 // ============================================================================
 
 static Node* parseElement(const char** htmlPtr);
+
+static void parseAttributes(const char** p, Node* node) {
+    while (**p && **p != '>' && **p != '/') {
+        // Skip whitespace
+        while (**p && isspace(**p)) (*p)++;
+        
+        if (**p == '>' || **p == '/') break;
+        
+        // Extract attribute name
+        char attrName[MAX_ATTRIBUTE_LENGTH];
+        int i = 0;
+        while (**p && !isspace(**p) && **p != '=' && **p != '>' && **p != '/' && i < MAX_ATTRIBUTE_LENGTH - 1) {
+            attrName[i++] = tolower(**p);
+            (*p)++;
+        }
+        attrName[i] = '\0';
+        
+        // Skip whitespace and '='
+        while (**p && (isspace(**p) || **p == '=')) (*p)++;
+        
+        // Extract attribute value (handle quotes or braces)
+        char attrValue[MAX_ATTRIBUTE_LENGTH];
+        i = 0;
+        
+        if (**p == '"' || **p == '\'') {
+            char quote = **p;
+            (*p)++; // Skip opening quote
+            while (**p && **p != quote && i < MAX_ATTRIBUTE_LENGTH - 1) {
+                attrValue[i++] = **p;
+                (*p)++;
+            }
+            if (**p == quote) (*p)++; // Skip closing quote
+        } else if (**p == '{') {
+            (*p)++; // Skip opening brace
+            while (**p && **p != '}' && i < MAX_ATTRIBUTE_LENGTH - 1) {
+                attrValue[i++] = **p;
+                (*p)++;
+            }
+            if (**p == '}') (*p)++; // Skip closing brace
+        } else {
+            // No quotes
+            while (**p && !isspace(**p) && **p != '>' && **p != '/' && i < MAX_ATTRIBUTE_LENGTH - 1) {
+                attrValue[i++] = **p;
+                (*p)++;
+            }
+        }
+        attrValue[i] = '\0';
+        
+        // Process attributes
+        if (strcmp(attrName, "id") == 0) {
+            strncpy(node->id, attrValue, MAX_ATTRIBUTE_LENGTH - 1);
+            node->id[MAX_ATTRIBUTE_LENGTH - 1] = '\0';
+        } else if (strcmp(attrName, "onclick") == 0) {
+            // Get handler from registry
+            node->onClick = getEventHandler(attrValue);
+        }
+    }
+}
 
 static Node* parseElement(const char** htmlPtr) {
     if (!htmlPtr || !*htmlPtr) return NULL;
@@ -153,8 +318,8 @@ static Node* parseElement(const char** htmlPtr) {
     Node* node = createNode(tag);
     if (!node) return NULL;
     
-    // Skip attributes for now (we'll add them later)
-    while (*p && *p != '>' && *p != '/') p++;
+    // Parse attributes
+    parseAttributes(&p, node);
     
     // Self-closing tag?
     if (*p == '/') {
@@ -366,6 +531,28 @@ static void renderNode(HDC hdc, Node* node) {
 }
 
 // ============================================================================
+// HIT TESTING (Check if point is inside node)
+// ============================================================================
+
+static Node* findNodeAtPoint(Node* node, int x, int y) {
+    if (!node) return NULL;
+    
+    // Check children first (they're on top)
+    for (int i = 0; i < node->childCount; i++) {
+        Node* found = findNodeAtPoint(node->children[i], x, y);
+        if (found) return found;
+    }
+    
+    // Check this node
+    if (x >= node->x && x < node->x + node->width &&
+        y >= node->y && y < node->y + node->height) {
+        return node;
+    }
+    
+    return NULL;
+}
+
+// ============================================================================
 // WINDOW PROCEDURE
 // ============================================================================
 
@@ -386,6 +573,22 @@ static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
             }
             
             EndPaint(hwnd, &ps);
+            return 0;
+        }
+        
+        case WM_LBUTTONDOWN: {
+            int mouseX = LOWORD(lParam);
+            int mouseY = HIWORD(lParam);
+            
+            // Find node at click position
+            if (g_ui && g_ui->root) {
+                Node* clickedNode = findNodeAtPoint(g_ui->root, mouseX, mouseY);
+                
+                if (clickedNode && clickedNode->onClick) {
+                    // Call the onClick handler
+                    clickedNode->onClick();
+                }
+            }
             return 0;
         }
         
@@ -478,5 +681,11 @@ static void ReactUI_Destroy(ReactUI* ui) {
     free(ui);
     g_ui = NULL;
 }
+
+// ============================================================================
+// EVENT BINDING HELPER
+// ============================================================================
+
+#define BIND_EVENT(id, handler) registerEventHandler(id, handler)
 
 #endif // REACTUI_MINIMAL_H
