@@ -7,6 +7,7 @@
 #include <functional>
 #include <memory>
 #include <cstdio>
+#include <sstream>
 
 // ============================================================================
 // ENUMS
@@ -227,6 +228,11 @@ public:
         return shared_from_this();
     }
     
+    WidgetPtr setText(const std::string& t) {
+        text = t;
+        return shared_from_this();
+    }
+    
     void addChild(WidgetPtr child) {
         children.push_back(child);
         child->parent = this;
@@ -243,16 +249,22 @@ inline WidgetPtr Container(WidgetPtr child = nullptr) {
     return w;
 }
 
-inline WidgetPtr Text(const std::string& format, ...) {
+// Simple string version (recommended for dynamic content)
+inline WidgetPtr Text(const std::string& text) {
+    auto w = std::make_shared<Widget>(WidgetType::Text);
+    w->text = text;
+    return w;
+}
+
+// Variadic template version for convenience with literal strings
+template<typename... Args>
+inline WidgetPtr Text(const char* format, Args... args) {
     auto w = std::make_shared<Widget>(WidgetType::Text);
     
     char buffer[512];
-    va_list args;
-    va_start(args, format);
-    vsnprintf(buffer, sizeof(buffer), format.c_str(), args);
-    va_end(args);
-    
+    snprintf(buffer, sizeof(buffer), format, args...);
     w->text = buffer;
+    
     return w;
 }
 
@@ -620,9 +632,9 @@ public:
 inline Widget* findWidgetAt(Widget* w, int x, int y) {
     if (!w) return nullptr;
     
-    // Check children first
-    for (auto& child : w->children) {
-        Widget* found = findWidgetAt(child.get(), x, y);
+    // Check children first (front to back)
+    for (auto it = w->children.rbegin(); it != w->children.rend(); ++it) {
+        Widget* found = findWidgetAt(it->get(), x, y);
         if (found) return found;
     }
     
@@ -702,7 +714,8 @@ public:
     void rebuild() {
         if (!builder) return;
         
-        root = builder();  // Call builder function to get fresh widget tree!
+        // Call builder function to get fresh widget tree
+        root = builder();
         
         if (hwnd) {
             RECT rect;
@@ -752,6 +765,8 @@ public:
         }
         return (int)msg.wParam;
     }
+    
+    HWND getWindow() const { return hwnd; }
 };
 
 FlutterUI* FlutterUI::instance = nullptr;

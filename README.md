@@ -1,403 +1,343 @@
-# React UI Framework - Improved Version
+# FlutterUI - Flutter-style UI Framework for Windows
 
-A hardened, production-ready React-like UI framework for Windows with Flexbox support.
+A declarative UI framework for Windows that brings Flutter's widget composition model to C++ with Win32 API.
 
-## 🎉 What's New in This Version
+## Key Features
 
-### Security & Stability Improvements
+✅ **Declarative UI** - Build UIs using composable widgets
+✅ **Reactive Rebuilds** - Automatic UI updates when state changes
+✅ **Builder Pattern** - Fluent API for styling widgets
+✅ **Layout System** - Flex-like Row/Column with alignment
+✅ **Event Handling** - Lambda-based click handlers
+✅ **Modern C++** - Uses C++17 features (shared_ptr, variadic templates, fold expressions)
 
-1. **Safe String Operations**
-   - All `strcpy`, `strcat`, and `sprintf` replaced with bounds-checked versions
-   - Prevents buffer overflow vulnerabilities
-   - Proper null termination guaranteed
+## Installation
 
-2. **Multiple Instance Support**
-   - Removed global state dependency
-   - Can create up to 8 independent UI instances
-   - Each window maintains its own state
+1. Copy `flutter_ui.hpp` to your project
+2. Include it: `#include "flutter_ui.hpp"`
+3. Compile with C++17 or later: `/std:c++17`
 
-3. **Input Validation**
-   - HTML parsing validates buffer sizes
-   - onClick handlers sanitized for security
-   - Format string exploits prevented
+## Quick Start
 
-4. **Error Handling**
-   - Custom error callback support
-   - Graceful degradation on parse errors
-   - Null pointer checks throughout
+```cpp
+#include "flutter_ui.hpp"
 
-5. **Memory Safety**
-   - Better cleanup on errors
-   - Prevents memory leaks during parsing failures
-   - Validated allocation checks
+class MyApp {
+public:
+    FlutterUI ui;
+    int counter = 0;
+    
+    MyApp(HINSTANCE hInstance) : ui(hInstance) {}
+    
+    void increment() {
+        counter++;
+        ui.rebuild();  // Triggers UI update
+    }
+    
+    WidgetPtr buildUI() {
+        // IMPORTANT: Create dynamic text using stringstream or std::to_string
+        std::string countText = "Count: " + std::to_string(counter);
+        
+        return Center(
+            Card(
+                Column(
+                    Text("My Counter")->setFontSize(24),
+                    Text(countText)->setFontSize(48),
+                    Button("Increment", [this]() { increment(); })
+                )->setSpacing(20)
+            )
+        );
+    }
+    
+    int run() {
+        ui.createWindow("My App", 400, 300);
+        ui.build([this]() { return buildUI(); });
+        return ui.run();
+    }
+};
 
-### 🎨 Flexbox Layout System
-
-Complete CSS Flexbox implementation including:
-
-#### Flex Container Properties
-
-- **`display: flex`** - Enable flexbox layout
-- **`flex-direction`** - Control main axis direction
-  - `row` (default)
-  - `column`
-  - `row-reverse`
-  - `column-reverse`
-
-- **`justify-content`** - Align items on main axis
-  - `flex-start` (default)
-  - `flex-end`
-  - `center`
-  - `space-between`
-  - `space-around`
-  - `space-evenly`
-
-- **`align-items`** - Align items on cross axis
-  - `flex-start` (default)
-  - `flex-end`
-  - `center`
-  - `stretch`
-  - `baseline`
-
-- **`flex-wrap`** - Control wrapping (basic support)
-  - `nowrap` (default)
-  - `wrap`
-  - `wrap-reverse`
-
-- **`gap`** - Space between flex items (in pixels)
-
-#### Flex Item Properties
-
-- **`flex-grow`** - Grow factor (default: 0)
-- **`flex-shrink`** - Shrink factor (default: 1)
-- **`flex-basis`** - Base size before growing/shrinking
-
-## 📖 API Reference
-
-### Initialization
-
-```c
-ReactUI* ReactUI_Create(HINSTANCE hInstance);
-```
-Creates a new ReactUI instance. Returns NULL on failure.
-
-### Error Handling
-
-```c
-void ReactUI_SetErrorCallback(ReactUI* ui, void (*callback)(const char*));
-```
-Set a custom error handler for parsing and runtime errors.
-
-Example:
-```c
-void onError(const char* message) {
-    MessageBoxA(NULL, message, "Error", MB_OK | MB_ICONERROR);
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
+    MyApp app(hInstance);
+    return app.run();
 }
-
-ReactUI* ui = ReactUI_Create(hInstance);
-ReactUI_SetErrorCallback(ui, onError);
 ```
 
-### State Management
+## Important: Dynamic Text
 
-```c
-void ReactUI_SetState(ReactUI* ui, const char* name, int value);
-int ReactUI_GetState(ReactUI* ui, const char* name);
+When creating text that changes based on state, **always create the string first**:
+
+✅ **CORRECT:**
+```cpp
+std::string text = "Count: " + std::to_string(counter);
+Text(text)
 ```
 
-Safe state management with bounds checking. Maximum 16 states per instance.
+❌ **WRONG (won't update):**
+```cpp
+Text("Count: %d", counter)  // Formats once, won't update!
+```
+
+The variadic `Text()` function evaluates format strings immediately, so the value gets "baked in" and won't change on rebuild.
+
+## Widget Reference
+
+### Layout Widgets
+
+#### Container
+```cpp
+Container(child)
+    ->setBackgroundColor(RGB(255, 255, 255))
+    ->setPadding(10)
+    ->setBorderRadius(8)
+```
+
+#### Row / Column
+```cpp
+Row(widget1, widget2, widget3)
+    ->setSpacing(10)
+    ->setCrossAlignment(Alignment::Center)
+
+Column(widget1, widget2, widget3)
+    ->setSpacing(10)
+    ->setCrossAlignment(Alignment::Start)
+```
+
+#### Center
+```cpp
+Center(child)  // Centers child widget
+```
+
+#### Padding
+```cpp
+Padding(20, child)  // Adds padding around child
+```
+
+#### SizedBox
+```cpp
+SizedBox(200, 100, child)  // Fixed size container
+```
+
+#### Card
+```cpp
+Card(child)  // Material-style card with shadow effect
+```
+
+### Content Widgets
+
+#### Text
+```cpp
+Text("Hello World")
+    ->setFontSize(24)
+    ->setFontWeight(FontWeight::Bold)
+    ->setTextColor(RGB(0, 0, 0))
+```
+
+#### Button
+```cpp
+Button("Click Me", [this]() { handleClick(); })
+    ->setBackgroundColor(RGB(76, 175, 80))
+    ->setMinWidth(120)
+```
+
+#### Divider
+```cpp
+Divider()  // Horizontal line separator
+```
+
+## Styling Properties
+
+All widgets support method chaining for styling:
+
+```cpp
+widget
+    ->setWidth(200)
+    ->setHeight(100)
+    ->setMinWidth(100)
+    ->setMaxWidth(300)
+    ->setPadding(10)
+    ->setMargin(5)
+    ->setBackgroundColor(RGB(255, 255, 255))
+    ->setTextColor(RGB(0, 0, 0))
+    ->setBorderColor(RGB(200, 200, 200))
+    ->setBorderWidth(2)
+    ->setBorderRadius(8)
+```
+
+## Alignment Options
+
+```cpp
+enum class Alignment {
+    Start,    // Left/Top
+    Center,   // Center
+    End,      // Right/Bottom
+    Stretch   // Fill available space
+};
+
+// Usage:
+Column(...)
+    ->setAlignment(Alignment::Center)          // Main axis
+    ->setCrossAlignment(Alignment::Center)     // Cross axis
+```
+
+## Event Handling
+
+Use lambda functions to capture state:
+
+```cpp
+Button("Click", [this]() {
+    counter++;
+    ui.rebuild();
+})
+```
+
+**Important:** Always call `ui.rebuild()` after changing state to update the UI.
+
+## Rebuild Mechanism
+
+The rebuild system works by:
+
+1. Storing a builder function: `ui.build([this]() { return buildUI(); })`
+2. Calling `ui.rebuild()` when state changes
+3. The builder function is called, creating a **new widget tree** with updated values
+4. Layout is recomputed and UI is redrawn
+
+This is similar to Flutter's `setState()` mechanism.
+
+## Color Reference
+
+Use Windows RGB macro:
+```cpp
+RGB(255, 0, 0)      // Red
+RGB(0, 255, 0)      // Green
+RGB(0, 0, 255)      // Blue
+RGB(255, 255, 255)  // White
+RGB(0, 0, 0)        // Black
+```
+
+Common Material Design colors:
+```cpp
+RGB(244, 67, 54)    // Red
+RGB(76, 175, 80)    // Green
+RGB(33, 150, 243)   // Blue
+RGB(255, 193, 7)    // Amber
+RGB(158, 158, 158)  // Gray
+```
+
+## Examples
+
+### Simple Counter
+See `main.cpp` for a basic counter example.
+
+### Multi-Counter Dashboard
+See `advanced_example.cpp` for a more complex example with multiple counters.
+
+### Todo List
+```cpp
+class TodoApp {
+    std::vector<std::string> todos;
+    
+    WidgetPtr buildUI() {
+        auto column = Column();
+        
+        for (const auto& todo : todos) {
+            column->addChild(
+                Card(Text(todo))->setMargin(5)
+            );
+        }
+        
+        return Container(column);
+    }
+};
+```
+
+## Compilation
+
+### Visual Studio
+```
+cl /std:c++17 /EHsc main.cpp /link user32.lib gdi32.lib
+```
+
+### MinGW
+```
+g++ -std=c++17 main.cpp -o app.exe -lgdi32 -luser32
+```
+
+### CMake
+```cmake
+cmake_minimum_required(VERSION 3.10)
+project(FlutterUIApp)
+
+set(CMAKE_CXX_STANDARD 17)
+
+add_executable(app main.cpp)
+target_link_libraries(app gdi32 user32)
+```
+
+## Architecture
+
+### Widget Tree
+Widgets are organized in a tree structure using `shared_ptr`:
+- Parent widgets contain children via `std::vector<WidgetPtr>`
+- Builder pattern returns `shared_ptr` for chaining
+
+### Layout Engine
+Two-pass layout system:
+1. **Measure**: `computeLayout()` calculates widget sizes
+2. **Position**: `positionWidget()` assigns x,y coordinates
 
 ### Rendering
+`Renderer::renderWidget()` recursively draws widgets using GDI:
+- Backgrounds with rounded rectangles
+- Text with custom fonts
+- Borders and shadows
 
-```c
-void ReactUI_Render(ReactUI* ui, const char* html);
+## Debugging
+
+Enable console output:
+```cpp
+AllocConsole();
+FILE* fp;
+freopen_s(&fp, "CONOUT$", "w", stdout);
+
+std::cout << "Debug: counter = " << counter << std::endl;
 ```
 
-Parses and renders HTML with inline styles. Supports:
-- Standard HTML tags (div, button, etc.)
-- Inline CSS styles
-- Variable substitution with `{{stateName}}`
-- Event handlers (onClick)
+## Limitations
 
-### Window Management
+- Single window per application
+- No scrolling (yet)
+- No text input widgets (yet)
+- Basic event handling (click only)
+- Windows-only (Win32 API)
 
-```c
-HWND ReactUI_CreateWindow(ReactUI* ui, const char* title, int width, int height);
-int ReactUI_Run();
-void ReactUI_ForceUpdate(ReactUI* ui);
-void ReactUI_Destroy(ReactUI* ui);
-```
+## Roadmap
 
-## 🎯 Usage Examples
+- [ ] Text input widgets
+- [ ] Scrollable containers
+- [ ] Animations
+- [ ] More event types (hover, keyboard)
+- [ ] Image support
+- [ ] Grid layout
+- [ ] Theming system
 
-### Basic Flexbox Row
+## License
 
-```c
-const char* html = 
-    "<div style=\"display: flex; flex-direction: row; gap: 10;\">"
-        "<button onclick=\"count++\">+</button>"
-        "<div>Count: {{count}}</div>"
-        "<button onclick=\"count--\">-</button>"
-    "</div>";
+This is a demonstration project. Use freely for learning and prototyping.
 
-ReactUI* ui = ReactUI_Create(hInstance);
-ReactUI_SetState(ui, "count", 0);
-ReactUI_Render(ui, html);
-ReactUI_CreateWindow(ui, "Counter", 400, 200);
-```
+## Troubleshooting
 
-### Centered Column Layout
+### UI doesn't update after clicking
+- Make sure you call `ui.rebuild()` in your event handler
+- Check that your builder function is capturing `this` correctly
 
-```c
-const char* html = 
-    "<div style=\"display: flex; flex-direction: column; "
-    "justify-content: center; align-items: center; gap: 15;\">"
-        "<div style=\"font-size: 24;\">Score: {{score}}</div>"
-        "<button onclick=\"score+=10\" style=\"width: 200;\">Add 10</button>"
-        "<button onclick=\"score=0\" style=\"width: 200;\">Reset</button>"
-    "</div>";
-```
+### Text shows old values
+- Don't use `Text("Count: %d", counter)` for dynamic values
+- Instead: `std::string text = "Count: " + std::to_string(counter); Text(text)`
 
-### Flex-Grow Distribution
+### Compilation errors
+- Ensure C++17 is enabled: `/std:c++17` or `-std=c++17`
+- Link against: `user32.lib` and `gdi32.lib`
 
-```c
-const char* html = 
-    "<div style=\"display: flex; flex-direction: row; gap: 10;\">"
-        "<div style=\"flex-grow: 1; background: #ff6b6b;\">Grow: 1</div>"
-        "<div style=\"flex-grow: 2; background: #4ecdc4;\">Grow: 2</div>"
-        "<div style=\"flex-grow: 1; background: #95e1d3;\">Grow: 1</div>"
-    "</div>";
-```
+## Contributing
 
-### Nested Flexbox (Dashboard)
-
-```c
-const char* html = 
-    "<div style=\"display: flex; flex-direction: column; gap: 10;\">"
-        "<!-- Header -->"
-        "<div style=\"display: flex; flex-direction: row; "
-        "justify-content: space-between; background: #1976D2;\">"
-            "<div>Dashboard</div>"
-            "<div>Score: {{score}}</div>"
-        "</div>"
-        
-        "<!-- Main Content -->"
-        "<div style=\"display: flex; flex-direction: row; flex-grow: 1; gap: 10;\">"
-            "<div style=\"width: 200; background: #f0f0f0;\">Sidebar</div>"
-            "<div style=\"flex-grow: 1; background: white;\">Main</div>"
-        "</div>"
-    "</div>";
-```
-
-## 🎨 Supported CSS Properties
-
-### Layout
-- `display` (flex)
-- `flex-direction` (row, column, row-reverse, column-reverse)
-- `justify-content` (flex-start, flex-end, center, space-between, space-around, space-evenly)
-- `align-items` (flex-start, flex-end, center, stretch, baseline)
-- `flex-wrap` (nowrap, wrap, wrap-reverse)
-- `flex-grow` (number)
-- `flex-shrink` (number)
-- `flex-basis` (number or auto)
-- `gap` (number in pixels)
-
-### Sizing
-- `width` (pixels)
-- `height` (pixels)
-- `padding` (pixels)
-
-### Visual
-- `background` (color name or #hex)
-- `color` (text color)
-- `font-size` (pixels)
-- `border` (e.g., "2px solid #333")
-- `border-radius` (pixels)
-
-### Supported Colors
-Named colors: red, blue, green, yellow, cyan, magenta, white, black, gray, grey, lightgray, darkgray, orange, purple, pink, brown
-
-Hex colors: #RRGGBB format
-
-## 🔒 Security Features
-
-### Input Sanitization
-```c
-// onClick handlers are sanitized
-// Only allowed: alphanumeric, +, -, =, space, underscore
-onClick="count++"      // ✓ Valid
-onClick="alert(1)"     // ✗ Blocked
-onClick="count+=<script>" // ✗ Blocked
-```
-
-### Buffer Overflow Protection
-All string operations use safe variants:
-- `safe_strcpy()` - bounds-checked copy
-- `safe_strcat()` - bounds-checked concatenation  
-- `safe_sprintf()` - bounds-checked formatting
-
-### State Validation
-- Maximum 16 states per instance
-- State names limited to 32 characters
-- State operations validated
-
-## 📊 Performance Characteristics
-
-- **Parse Time**: O(n) where n is HTML length
-- **Layout Calculation**: O(n) where n is node count
-- **Render Time**: O(n) where n is visible nodes
-- **Memory**: ~100 bytes per node + string storage
-
-### Limitations
-
-- Maximum 32 children per node
-- Maximum 16 CSS properties per node
-- Maximum 16 states per UI instance
-- Maximum 8 concurrent UI instances
-- Text content limited to 256 characters per node
-- onClick handlers limited to 128 characters
-
-## 🛠️ Compilation
-
-### Using GCC (MinGW)
-```bash
-gcc example_flexbox.c -o example.exe -lgdi32 -luser32 -mwindows
-```
-
-### Using MSVC
-```bash
-cl example_flexbox.c /link user32.lib gdi32.lib
-```
-
-### Using CMake
-```cmake
-add_executable(example example_flexbox.c)
-target_link_libraries(example gdi32 user32)
-```
-
-## 🐛 Debugging
-
-Enable error callbacks to catch issues:
-
-```c
-void debugError(const char* msg) {
-    FILE* f = fopen("errors.log", "a");
-    fprintf(f, "[ERROR] %s\n", msg);
-    fclose(f);
-}
-
-ReactUI_SetErrorCallback(ui, debugError);
-```
-
-## 🔄 Migration from Original Version
-
-### Breaking Changes
-1. `ReactUI_Create()` now requires explicit HINSTANCE
-2. Global state removed - each instance is independent
-3. String operations have stricter bounds checking
-
-### Compatible Changes
-- All public API functions unchanged
-- HTML syntax fully backward compatible
-- State management API identical
-
-### Migration Example
-
-**Old Code:**
-```c
-ReactUI* ui = ReactUI_Create(hInstance);
-// global state was implicit
-```
-
-**New Code:**
-```c
-ReactUI* ui = ReactUI_Create(hInstance);
-ReactUI_SetErrorCallback(ui, myErrorHandler); // Optional but recommended
-```
-
-## 🎓 Advanced Topics
-
-### Dynamic State Updates
-
-```c
-// State changes trigger automatic re-render
-ReactUI_SetState(ui, "score", 100);
-// Window updates automatically
-
-// Or force update
-ReactUI_ForceUpdate(ui);
-```
-
-### Multiple Windows
-
-```c
-ReactUI* ui1 = ReactUI_Create(hInstance);
-ReactUI* ui2 = ReactUI_Create(hInstance);
-ReactUI* ui3 = ReactUI_Create(hInstance);
-
-// Each has independent state
-ReactUI_SetState(ui1, "counter", 0);
-ReactUI_SetState(ui2, "counter", 100);
-ReactUI_SetState(ui3, "counter", 200);
-
-// Create separate windows
-ReactUI_CreateWindow(ui1, "Window 1", 400, 300);
-ReactUI_CreateWindow(ui2, "Window 2", 400, 300);
-ReactUI_CreateWindow(ui3, "Window 3", 400, 300);
-```
-
-### Complex onClick Handlers
-
-Supported operations:
-- `count++` - Increment
-- `count--` - Decrement
-- `count+=10` - Add value
-- `count-=5` - Subtract value
-- `count=0` - Set value
-
-```c
-<button onclick="score+=100">Add 100</button>
-<button onclick="lives-=1">Lose Life</button>
-<button onclick="level++">Next Level</button>
-<button onclick="health=100">Full Health</button>
-```
-
-## 📝 License
-
-This is an improved version of the original React UI framework.
-Free to use for personal and commercial projects.
-
-## 🤝 Contributing
-
-Improvements welcome! Areas for contribution:
-- Additional CSS properties
-- More layout modes (Grid)
-- Animation support
-- Event types beyond onClick
-- Better text rendering
-
-## 📞 Support
-
-For bugs or feature requests, please provide:
-1. Minimal reproduction code
-2. Expected vs actual behavior
-3. Compiler and Windows version
-4. Error messages from callback
-
-## 🎯 Roadmap
-
-Future enhancements planned:
-- [ ] CSS Grid layout
-- [ ] Transitions and animations
-- [ ] More event types (onHover, onFocus)
-- [ ] External stylesheet support
-- [ ] Component templates
-- [ ] Virtual DOM diffing
-- [ ] Accessibility features
-- [ ] RTL text support
-
----
-
-**Version**: 2.0.0  
-**Last Updated**: 2026-02-06  
-**Compatibility**: Windows 7+, MinGW/MSVC
+This is a learning project demonstrating Flutter-style UI in C++. Feel free to extend and improve!
