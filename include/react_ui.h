@@ -1,152 +1,25 @@
-#ifndef REACT_UI_HYBRID_H
-#define REACT_UI_HYBRID_H
+#ifndef REACT_UI_OPTIMIZED_H
+#define REACT_UI_OPTIMIZED_H
 
 #include <windows.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include <stdbool.h>
 
 // ============================================================================
 // HTML MACRO FOR CLEANER SYNTAX
 // ============================================================================
 
-// Allow multi-line HTML strings without quotes
 #define HTML(...) #__VA_ARGS__
 
 #define MAX_CHILDREN 32
 #define MAX_STYLES 16
-#define MAX_STATES 16
-#define MAX_EFFECTS 16
+#define MAX_STATES 32
 #define MAX_UI_INSTANCES 8
-#define MAX_CLASS_NAMES 8
-
-// ============================================================================
-// UTILITY CLASS DEFINITIONS
-// ============================================================================
-
-typedef struct UtilityClass {
-    const char* className;
-    const char* inlineStyle;
-} UtilityClass;
-
-// Pre-defined utility classes (Tailwind-inspired)
-static const UtilityClass utilityClasses[] = {
-    // Layout Classes
-    {"flex-row",           "display: flex; flex-direction: row;"},
-    {"flex-col",           "display: flex; flex-direction: column;"},
-    {"flex-row-center",    "display: flex; flex-direction: row; justify-content: center; align-items: center;"},
-    {"flex-col-center",    "display: flex; flex-direction: column; justify-content: center; align-items: center;"},
-    {"flex-row-between",   "display: flex; flex-direction: row; justify-content: space-between;"},
-    {"flex-row-around",    "display: flex; flex-direction: row; justify-content: space-around;"},
-    {"flex-row-evenly",    "display: flex; flex-direction: row; justify-content: space-evenly;"},
-    {"flex-row-start",     "display: flex; flex-direction: row; align-items: flex-start;"},
-    {"flex-row-end",       "display: flex; flex-direction: row; align-items: flex-end;"},
-    {"flex-col-start",     "display: flex; flex-direction: column; align-items: flex-start;"},
-    {"flex-col-end",       "display: flex; flex-direction: column; align-items: flex-end;"},
-    {"flex-wrap",          "flex-wrap: wrap;"},
-    {"flex-1",             "flex-grow: 1;"},
-    {"flex-2",             "flex-grow: 2;"},
-    {"flex-3",             "flex-grow: 3;"},
-    
-    // Spacing Classes
-    {"p-0",    "padding: 0;"},
-    {"p-5",    "padding: 5;"},
-    {"p-10",   "padding: 10;"},
-    {"p-15",   "padding: 15;"},
-    {"p-20",   "padding: 20;"},
-    {"gap-5",  "gap: 5;"},
-    {"gap-10", "gap: 10;"},
-    {"gap-15", "gap: 15;"},
-    {"gap-20", "gap: 20;"},
-    {"m-0",    "margin: 0;"},
-    {"m-5",    "margin: 5;"},
-    {"m-10",   "margin: 10;"},
-    
-    // Background Color Classes
-    {"bg-primary",     "background: #4CAF50;"},
-    {"bg-secondary",   "background: #2196F3;"},
-    {"bg-danger",      "background: #f44336;"},
-    {"bg-warning",     "background: #FF9800;"},
-    {"bg-success",     "background: #4CAF50;"},
-    {"bg-info",        "background: #00BCD4;"},
-    {"bg-white",       "background: #ffffff;"},
-    {"bg-black",       "background: #000000;"},
-    {"bg-gray-50",     "background: #fafafa;"},
-    {"bg-gray-100",    "background: #f5f5f5;"},
-    {"bg-gray-200",    "background: #eeeeee;"},
-    {"bg-gray-300",    "background: #e0e0e0;"},
-    {"bg-blue-50",     "background: #E3F2FD;"},
-    {"bg-blue-500",    "background: #2196F3;"},
-    {"bg-blue-600",    "background: #1976D2;"},
-    {"bg-blue-700",    "background: #1565C0;"},
-    {"bg-green-50",    "background: #E8F5E9;"},
-    {"bg-green-500",   "background: #4CAF50;"},
-    {"bg-green-600",   "background: #43A047;"},
-    {"bg-red-50",      "background: #FFEBEE;"},
-    {"bg-red-500",     "background: #f44336;"},
-    {"bg-red-600",     "background: #E53935;"},
-    {"bg-orange-500",  "background: #FF9800;"},
-    {"bg-purple-500",  "background: #9C27B0;"},
-    
-    // Text Color Classes
-    {"text-white",     "color: white;"},
-    {"text-black",     "color: black;"},
-    {"text-gray-600",  "color: #666666;"},
-    {"text-gray-700",  "color: #555555;"},
-    {"text-blue-600",  "color: #1976D2;"},
-    {"text-blue-700",  "color: #1565C0;"},
-    {"text-green-600", "color: #43A047;"},
-    {"text-red-600",   "color: #E53935;"},
-    
-    // Typography Classes
-    {"text-xs",   "font-size: 12;"},
-    {"text-sm",   "font-size: 14;"},
-    {"text-base", "font-size: 16;"},
-    {"text-lg",   "font-size: 18;"},
-    {"text-xl",   "font-size: 20;"},
-    {"text-2xl",  "font-size: 24;"},
-    {"text-3xl",  "font-size: 30;"},
-    {"text-4xl",  "font-size: 36;"},
-    {"text-5xl",  "font-size: 48;"},
-    
-    // Border Classes
-    {"border",         "border: 1px solid #e0e0e0;"},
-    {"border-2",       "border: 2px solid #e0e0e0;"},
-    {"border-gray",    "border: 1px solid #e0e0e0;"},
-    {"border-blue",    "border: 1px solid #2196F3;"},
-    {"rounded",        "border-radius: 5;"},
-    {"rounded-lg",     "border-radius: 8;"},
-    {"rounded-xl",     "border-radius: 12;"},
-    {"rounded-full",   "border-radius: 999;"},
-    
-    // Component Presets
-    {"btn",            "padding: 10; border-radius: 5; font-size: 16;"},
-    {"btn-primary",    "background: #4CAF50; color: white; padding: 10; border-radius: 5; font-size: 16;"},
-    {"btn-secondary",  "background: #2196F3; color: white; padding: 10; border-radius: 5; font-size: 16;"},
-    {"btn-danger",     "background: #f44336; color: white; padding: 10; border-radius: 5; font-size: 16;"},
-    {"btn-warning",    "background: #FF9800; color: white; padding: 10; border-radius: 5; font-size: 16;"},
-    {"btn-success",    "background: #4CAF50; color: white; padding: 10; border-radius: 5; font-size: 16;"},
-    {"btn-lg",         "padding: 15; border-radius: 5; font-size: 18;"},
-    {"btn-sm",         "padding: 8; border-radius: 5; font-size: 14;"},
-    {"card",           "background: white; border: 1px solid #e0e0e0; border-radius: 8; padding: 20;"},
-    {"card-header",    "background: #f5f5f5; padding: 15; border-radius: 8;"},
-    {"shadow",         "border: 1px solid #e0e0e0;"},
-    {"shadow-lg",      "border: 2px solid #d0d0d0;"},
-    
-    // Sizing Classes
-    {"w-full",   "width: 100%;"},
-    {"h-full",   "height: 100%;"},
-    {"w-50",     "width: 50;"},
-    {"w-100",    "width: 100;"},
-    {"w-200",    "width: 200;"},
-    {"w-300",    "width: 300;"},
-    {"h-50",     "height: 50;"},
-    {"h-100",    "height: 100;"},
-    {"h-200",    "height: 200;"},
-};
-
-static const int utilityClassCount = sizeof(utilityClasses) / sizeof(UtilityClass);
+#define MAX_DEPENDENCIES 16
+#define MAX_DEPENDENT_NODES 64
 
 // ============================================================================
 // CORE DATA STRUCTURES
@@ -157,9 +30,26 @@ typedef struct CSSProperty {
     char value[64];
 } CSSProperty;
 
+// State with type support
+typedef enum {
+    STATE_INT,
+    STATE_FLOAT,
+    STATE_STRING,
+    STATE_BOOL
+} StateType;
+
+typedef union {
+    int intVal;
+    float floatVal;
+    char strVal[256];
+    bool boolVal;
+} StateValue;
+
 typedef struct State {
     char name[32];
-    int value;
+    StateType type;
+    StateValue value;
+    StateValue prevValue;
 } State;
 
 typedef struct StateManager {
@@ -214,7 +104,7 @@ typedef struct Node {
     char tag[16];
     char text[256];
     char id[32];
-    char class[256];  // Increased to hold multiple class names
+    char class[256];
     char onClick[128];
     
     CSSProperty styles[MAX_STYLES];
@@ -232,7 +122,24 @@ typedef struct Node {
     struct Node* parent;
     
     int isButton;
+    
+    // NEW: Selective rendering
+    bool isDirty;
+    bool needsLayout;
+    RECT boundingBox;
+    
+    // NEW: Dependency tracking
+    char dependencies[MAX_DEPENDENCIES][32];
+    int depCount;
+    
 } Node;
+
+// Dependency map: tracks which nodes depend on which state variables
+typedef struct {
+    char varName[32];
+    Node* dependentNodes[MAX_DEPENDENT_NODES];
+    int nodeCount;
+} VariableDependency;
 
 typedef struct ReactUI {
     Node* root;
@@ -241,6 +148,11 @@ typedef struct ReactUI {
     HINSTANCE hInstance;
     int instanceId;
     void (*onError)(const char* message);
+    
+    // NEW: Dependency tracking
+    VariableDependency dependencies[MAX_STATES];
+    int depCount;
+    
 } ReactUI;
 
 // ============================================================================
@@ -249,6 +161,7 @@ typedef struct ReactUI {
 
 static ReactUI* g_reactUIInstances[MAX_UI_INSTANCES] = {0};
 static int g_instanceCount = 0;
+static ReactUI* g_currentUI = NULL;
 
 // ============================================================================
 // SAFE STRING OPERATIONS
@@ -276,45 +189,6 @@ static int safe_sprintf(char* dst, size_t dst_size, const char* format, ...) {
     va_end(args);
     dst[dst_size - 1] = '\0';
     return result;
-}
-
-// ============================================================================
-// UTILITY CLASS EXPANSION
-// ============================================================================
-
-static void expandUtilityClasses(const char* classNames, char* output, size_t maxLen) {
-    if (!classNames || !output || maxLen == 0) return;
-    
-    output[0] = '\0';
-    char classCopy[256];
-    safe_strcpy(classCopy, classNames, sizeof(classCopy));
-    
-    // Split class names by space
-    char* token = strtok(classCopy, " ");
-    while (token) {
-        // Trim whitespace
-        while (*token && isspace(*token)) token++;
-        if (*token == '\0') {
-            token = strtok(NULL, " ");
-            continue;
-        }
-        
-        // Look up utility class
-        int found = 0;
-        for (int i = 0; i < utilityClassCount; i++) {
-            if (strcmp(token, utilityClasses[i].className) == 0) {
-                // Append the style
-                if (output[0] != '\0') {
-                    safe_strcat(output, " ", maxLen);
-                }
-                safe_strcat(output, utilityClasses[i].inlineStyle, maxLen);
-                found = 1;
-                break;
-            }
-        }
-        
-        token = strtok(NULL, " ");
-    }
 }
 
 // ============================================================================
@@ -347,18 +221,9 @@ static COLORREF parseColor(const char* color) {
     if (strcmp(color, "red") == 0) return RGB(255, 0, 0);
     if (strcmp(color, "blue") == 0) return RGB(0, 0, 255);
     if (strcmp(color, "green") == 0) return RGB(0, 255, 0);
-    if (strcmp(color, "yellow") == 0) return RGB(255, 255, 0);
-    if (strcmp(color, "cyan") == 0) return RGB(0, 255, 255);
-    if (strcmp(color, "magenta") == 0) return RGB(255, 0, 255);
     if (strcmp(color, "white") == 0) return RGB(255, 255, 255);
     if (strcmp(color, "black") == 0) return RGB(0, 0, 0);
     if (strcmp(color, "gray") == 0 || strcmp(color, "grey") == 0) return RGB(128, 128, 128);
-    if (strcmp(color, "lightgray") == 0) return RGB(211, 211, 211);
-    if (strcmp(color, "darkgray") == 0) return RGB(169, 169, 169);
-    if (strcmp(color, "orange") == 0) return RGB(255, 165, 0);
-    if (strcmp(color, "purple") == 0) return RGB(128, 0, 128);
-    if (strcmp(color, "pink") == 0) return RGB(255, 192, 203);
-    if (strcmp(color, "brown") == 0) return RGB(165, 42, 42);
     
     return RGB(255, 255, 255);
 }
@@ -370,38 +235,132 @@ static void reportError(ReactUI* ui, const char* message) {
 }
 
 // ============================================================================
-// STATE MANAGEMENT API
+// STATE MANAGEMENT API (WITH TYPES)
 // ============================================================================
 
-static void setState(ReactUI* ui, const char* name, int value) {
+static void setState_internal(ReactUI* ui, const char* name, StateType type, StateValue value);
+static StateValue getState_internal(ReactUI* ui, const char* name);
+
+static void setState_internal(ReactUI* ui, const char* name, StateType type, StateValue value) {
     if (!ui || !name) return;
     
+    // Find existing state
     for (int i = 0; i < ui->stateManager.stateCount; i++) {
         if (strcmp(ui->stateManager.states[i].name, name) == 0) {
+            ui->stateManager.states[i].prevValue = ui->stateManager.states[i].value;
             ui->stateManager.states[i].value = value;
             return;
         }
     }
     
+    // Create new state
     if (ui->stateManager.stateCount < MAX_STATES) {
         safe_strcpy(ui->stateManager.states[ui->stateManager.stateCount].name, 
                     name, sizeof(ui->stateManager.states[0].name));
+        ui->stateManager.states[ui->stateManager.stateCount].type = type;
         ui->stateManager.states[ui->stateManager.stateCount].value = value;
+        ui->stateManager.states[ui->stateManager.stateCount].prevValue = value;
         ui->stateManager.stateCount++;
     } else {
         reportError(ui, "Maximum state count exceeded");
     }
 }
 
-static int getState(ReactUI* ui, const char* name) {
-    if (!ui || !name) return 0;
+static StateValue getState_internal(ReactUI* ui, const char* name) {
+    StateValue empty = {0};
+    if (!ui || !name) return empty;
     
     for (int i = 0; i < ui->stateManager.stateCount; i++) {
         if (strcmp(ui->stateManager.states[i].name, name) == 0) {
             return ui->stateManager.states[i].value;
         }
     }
-    return 0;
+    return empty;
+}
+
+// Convenience functions
+static void setStateInt(ReactUI* ui, const char* name, int value) {
+    StateValue v = {0};
+    v.intVal = value;
+    setState_internal(ui, name, STATE_INT, v);
+}
+
+static int getStateInt(ReactUI* ui, const char* name) {
+    return getState_internal(ui, name).intVal;
+}
+
+static void setStateString(ReactUI* ui, const char* name, const char* value) {
+    StateValue v = {0};
+    safe_strcpy(v.strVal, value, sizeof(v.strVal));
+    setState_internal(ui, name, STATE_STRING, v);
+}
+
+static const char* getStateString(ReactUI* ui, const char* name) {
+    return getState_internal(ui, name).strVal;
+}
+
+static void setStateBool(ReactUI* ui, const char* name, bool value) {
+    StateValue v = {0};
+    v.boolVal = value;
+    setState_internal(ui, name, STATE_BOOL, v);
+}
+
+static bool getStateBool(ReactUI* ui, const char* name) {
+    return getState_internal(ui, name).boolVal;
+}
+
+// ============================================================================
+// DEPENDENCY TRACKING
+// ============================================================================
+
+static void registerDependency(ReactUI* ui, const char* varName, Node* node) {
+    if (!ui || !varName || !node) return;
+    
+    // Find existing dependency entry
+    for (int i = 0; i < ui->depCount; i++) {
+        if (strcmp(ui->dependencies[i].varName, varName) == 0) {
+            // Add node to this dependency
+            if (ui->dependencies[i].nodeCount < MAX_DEPENDENT_NODES) {
+                ui->dependencies[i].dependentNodes[ui->dependencies[i].nodeCount++] = node;
+            }
+            return;
+        }
+    }
+    
+    // Create new dependency entry
+    if (ui->depCount < MAX_STATES) {
+        safe_strcpy(ui->dependencies[ui->depCount].varName, varName, 
+                    sizeof(ui->dependencies[0].varName));
+        ui->dependencies[ui->depCount].dependentNodes[0] = node;
+        ui->dependencies[ui->depCount].nodeCount = 1;
+        ui->depCount++;
+    }
+}
+
+static void invalidateNode(ReactUI* ui, Node* node) {
+    if (!ui || !node) return;
+    
+    node->isDirty = true;
+    
+    // Invalidate this node's rectangle
+    if (ui->hwnd) {
+        InvalidateRect(ui->hwnd, &node->boundingBox, FALSE);
+    }
+}
+
+static void markDependentNodesDirty(ReactUI* ui, const char* varName) {
+    if (!ui || !varName) return;
+    
+    // Find all nodes that depend on this variable
+    for (int i = 0; i < ui->depCount; i++) {
+        if (strcmp(ui->dependencies[i].varName, varName) == 0) {
+            // Mark all dependent nodes as dirty
+            for (int j = 0; j < ui->dependencies[i].nodeCount; j++) {
+                invalidateNode(ui, ui->dependencies[i].dependentNodes[j]);
+            }
+            return;
+        }
+    }
 }
 
 // ============================================================================
@@ -429,6 +388,10 @@ static Node* createNode(const char* tag) {
     node->flex.flexShrink = 1;
     node->flex.flexBasis = -1;
     node->flex.gap = 0;
+    
+    // Initialize selective rendering
+    node->isDirty = true;  // New nodes start dirty
+    node->needsLayout = true;
     
     if (strcmp(tag, "button") == 0) {
         node->isButton = 1;
@@ -478,8 +441,40 @@ static void freeNode(Node* node) {
 }
 
 // ============================================================================
-// VARIABLE SUBSTITUTION
+// VARIABLE SUBSTITUTION WITH DEPENDENCY TRACKING
 // ============================================================================
+
+static void extractAndRegisterDependencies(ReactUI* ui, Node* node, const char* text) {
+    if (!ui || !node || !text) return;
+    
+    const char* start = strstr(text, "{{");
+    while (start) {
+        start += 2;
+        const char* end = strstr(start, "}}");
+        if (!end) break;
+        
+        int len = (int)(end - start);
+        if (len > 0 && len < 32 && node->depCount < MAX_DEPENDENCIES) {
+            // Extract variable name
+            char varName[32];
+            strncpy(varName, start, len);
+            varName[len] = '\0';
+            
+            // Trim whitespace
+            char* trimmed = trim(varName);
+            
+            // Store in node's dependencies
+            safe_strcpy(node->dependencies[node->depCount], trimmed, 
+                       sizeof(node->dependencies[0]));
+            node->depCount++;
+            
+            // Register in global dependency map
+            registerDependency(ui, trimmed, node);
+        }
+        
+        start = strstr(end + 2, "{{");
+    }
+}
 
 static void substituteVariables(ReactUI* ui, char* text, char* output, int maxLen) {
     if (!ui || !text || !output || maxLen <= 0) return;
@@ -503,7 +498,10 @@ static void substituteVariables(ReactUI* ui, char* text, char* output, int maxLe
                 src += 2;
             }
             
-            int value = getState(ui, trim(varName));
+            char* trimmedVar = trim(varName);
+            
+            // Get state value (as int for now - can be extended)
+            int value = getStateInt(ui, trimmedVar);
             char valueStr[32];
             safe_sprintf(valueStr, sizeof(valueStr), "%d", value);
             
@@ -577,32 +575,9 @@ static void parseFlexProperties(Node* node) {
         }
     }
     
-    const char* flexWrap = getStyle(node, "flex-wrap");
-    if (flexWrap) {
-        if (strcmp(flexWrap, "nowrap") == 0) {
-            node->flex.wrap = FLEX_WRAP_NOWRAP;
-        } else if (strcmp(flexWrap, "wrap") == 0) {
-            node->flex.wrap = FLEX_WRAP_WRAP;
-        } else if (strcmp(flexWrap, "wrap-reverse") == 0) {
-            node->flex.wrap = FLEX_WRAP_WRAP_REVERSE;
-        }
-    }
-    
     const char* flexGrow = getStyle(node, "flex-grow");
     if (flexGrow) {
         node->flex.flexGrow = atoi(flexGrow);
-    }
-    
-    const char* flexShrink = getStyle(node, "flex-shrink");
-    if (flexShrink) {
-        node->flex.flexShrink = atoi(flexShrink);
-    }
-    
-    const char* flexBasis = getStyle(node, "flex-basis");
-    if (flexBasis) {
-        if (strcmp(flexBasis, "auto") != 0) {
-            node->flex.flexBasis = atoi(flexBasis);
-        }
     }
     
     const char* gap = getStyle(node, "gap");
@@ -612,7 +587,7 @@ static void parseFlexProperties(Node* node) {
 }
 
 // ============================================================================
-// CSS PARSER WITH UTILITY CLASS SUPPORT
+// CSS PARSER (SIMPLIFIED)
 // ============================================================================
 
 static void parseInlineStyle(Node* node, const char* styleStr) {
@@ -635,21 +610,7 @@ static void parseInlineStyle(Node* node, const char* styleStr) {
         token = strtok(NULL, ";");
     }
     
-    // Parse flexbox properties after all styles are added
     parseFlexProperties(node);
-}
-
-static void applyUtilityClasses(Node* node) {
-    if (!node || strlen(node->class) == 0) return;
-    
-    // Expand utility classes to inline styles
-    char expandedStyles[1024];
-    expandUtilityClasses(node->class, expandedStyles, sizeof(expandedStyles));
-    
-    // Parse the expanded styles
-    if (strlen(expandedStyles) > 0) {
-        parseInlineStyle(node, expandedStyles);
-    }
 }
 
 // ============================================================================
@@ -709,9 +670,9 @@ static const char* parseAttributes(const char* str, Node* node) {
     return p;
 }
 
-static Node* parseElement(const char** htmlPtr);
+static Node* parseElement(ReactUI* ui, const char** htmlPtr);
 
-static Node* parseElement(const char** htmlPtr) {
+static Node* parseElement(ReactUI* ui, const char** htmlPtr) {
     if (!htmlPtr || !*htmlPtr) return NULL;
     
     const char* p = *htmlPtr;
@@ -739,9 +700,6 @@ static Node* parseElement(const char** htmlPtr) {
     if (!node) return NULL;
     
     p = parseAttributes(p, node);
-    
-    // Apply utility classes AFTER parsing attributes
-    applyUtilityClasses(node);
     
     if (*p == '/') {
         p++;
@@ -777,6 +735,11 @@ static Node* parseElement(const char** htmlPtr) {
                         if (trimmed != node->text) {
                             memmove(node->text, trimmed, strlen(trimmed) + 1);
                         }
+                        
+                        // Extract dependencies from text
+                        if (ui) {
+                            extractAndRegisterDependencies(ui, node, node->text);
+                        }
                     }
                     
                     while (*p && *p != '>') p++;
@@ -785,7 +748,7 @@ static Node* parseElement(const char** htmlPtr) {
                     break;
                 }
             } else if (*(p+1) != '!') {
-                Node* child = parseElement(&p);
+                Node* child = parseElement(ui, &p);
                 if (child) {
                     addChild(node, child);
                     contentStart = p;
@@ -800,7 +763,7 @@ static Node* parseElement(const char** htmlPtr) {
     return node;
 }
 
-static Node* parseHTML(const char** htmlPtr) {
+static Node* parseHTML(ReactUI* ui, const char** htmlPtr) {
     if (!htmlPtr || !*htmlPtr) return NULL;
     
     Node* root = createNode("root");
@@ -809,7 +772,7 @@ static Node* parseHTML(const char** htmlPtr) {
     const char* p = *htmlPtr;
     
     while (*p) {
-        Node* element = parseElement(&p);
+        Node* element = parseElement(ui, &p);
         if (element) {
             addChild(root, element);
         } else {
@@ -824,7 +787,7 @@ static Node* parseHTML(const char** htmlPtr) {
 }
 
 // ============================================================================
-// FLEXBOX LAYOUT ENGINE
+// FLEXBOX LAYOUT ENGINE (SIMPLIFIED)
 // ============================================================================
 
 static void computeFlexLayout(Node* node, int availableWidth, int availableHeight, 
@@ -833,200 +796,107 @@ static void computeFlexLayout(Node* node, int availableWidth, int availableHeigh
     
     int isRow = (node->flex.direction == FLEX_DIRECTION_ROW || 
                  node->flex.direction == FLEX_DIRECTION_ROW_REVERSE);
-    int isReverse = (node->flex.direction == FLEX_DIRECTION_ROW_REVERSE || 
-                     node->flex.direction == FLEX_DIRECTION_COLUMN_REVERSE);
     
-    // Calculate total flex grow and shrink
     int totalFlexGrow = 0;
-    int totalFlexShrink = 0;
     int fixedSize = 0;
     int flexItemCount = 0;
     
     for (int i = 0; i < node->childCount; i++) {
         Node* child = node->children[i];
         totalFlexGrow += child->flex.flexGrow;
-        totalFlexShrink += child->flex.flexShrink;
         
         if (isRow) {
-            if (child->flex.flexBasis >= 0) {
-                fixedSize += child->flex.flexBasis;
-            } else {
-                const char* widthStr = getStyle(child, "width");
-                if (widthStr) {
-                    fixedSize += atoi(widthStr);
-                }
+            const char* widthStr = getStyle(child, "width");
+            if (widthStr) {
+                fixedSize += atoi(widthStr);
             }
         } else {
-            if (child->flex.flexBasis >= 0) {
-                fixedSize += child->flex.flexBasis;
-            } else {
-                const char* heightStr = getStyle(child, "height");
-                if (heightStr) {
-                    fixedSize += atoi(heightStr);
-                }
+            const char* heightStr = getStyle(child, "height");
+            if (heightStr) {
+                fixedSize += atoi(heightStr);
             }
         }
         flexItemCount++;
     }
     
-    // Add gaps
     int totalGap = node->flex.gap * (flexItemCount > 0 ? flexItemCount - 1 : 0);
     fixedSize += totalGap;
     
     int availableSpace = isRow ? availableWidth : availableHeight;
     int remainingSpace = availableSpace - fixedSize;
     
-    // Distribute remaining space based on flex-grow
     int flexGrowUnit = (totalFlexGrow > 0 && remainingSpace > 0) ? 
                        remainingSpace / totalFlexGrow : 0;
     
-    // Calculate positions based on justify-content
     int currentPos = 0;
-    int spacing = 0;
-    
     switch (node->flex.justify) {
         case JUSTIFY_FLEX_START:
             currentPos = 0;
             break;
-        case JUSTIFY_FLEX_END:
-            currentPos = remainingSpace > 0 ? remainingSpace : 0;
-            break;
         case JUSTIFY_CENTER:
             currentPos = remainingSpace > 0 ? remainingSpace / 2 : 0;
             break;
-        case JUSTIFY_SPACE_BETWEEN:
+        case JUSTIFY_FLEX_END:
+            currentPos = remainingSpace > 0 ? remainingSpace : 0;
+            break;
+        default:
             currentPos = 0;
-            spacing = (flexItemCount > 1 && remainingSpace > 0) ? 
-                     remainingSpace / (flexItemCount - 1) : 0;
-            break;
-        case JUSTIFY_SPACE_AROUND:
-            spacing = (flexItemCount > 0 && remainingSpace > 0) ? 
-                     remainingSpace / flexItemCount : 0;
-            currentPos = spacing / 2;
-            break;
-        case JUSTIFY_SPACE_EVENLY:
-            spacing = (flexItemCount > 0 && remainingSpace > 0) ? 
-                     remainingSpace / (flexItemCount + 1) : 0;
-            currentPos = spacing;
             break;
     }
     
-    // Layout children
-    int startIndex = isReverse ? node->childCount - 1 : 0;
-    int endIndex = isReverse ? -1 : node->childCount;
-    int step = isReverse ? -1 : 1;
-    
-    for (int i = startIndex; i != endIndex; i += step) {
+    for (int i = 0; i < node->childCount; i++) {
         Node* child = node->children[i];
         
-        // Calculate child size
         int childMainSize = 0;
         int childCrossSize = 0;
         
         if (isRow) {
-            // Main axis (width)
-            if (child->flex.flexBasis >= 0) {
-                childMainSize = child->flex.flexBasis;
-            } else {
-                const char* widthStr = getStyle(child, "width");
-                childMainSize = widthStr ? atoi(widthStr) : 100;
-            }
+            const char* widthStr = getStyle(child, "width");
+            childMainSize = widthStr ? atoi(widthStr) : 100;
             
             if (child->flex.flexGrow > 0 && remainingSpace > 0) {
                 childMainSize += flexGrowUnit * child->flex.flexGrow;
             }
             
-            // Cross axis (height)
             const char* heightStr = getStyle(child, "height");
-            if (heightStr) {
-                childCrossSize = atoi(heightStr);
-            } else if (node->flex.align == ALIGN_STRETCH) {
-                childCrossSize = availableHeight;
-            } else {
-                childCrossSize = child->isButton ? 35 : 30;
-            }
+            childCrossSize = heightStr ? atoi(heightStr) : 30;
             
             child->computedWidth = childMainSize;
             child->computedHeight = childCrossSize;
+            child->x = offsetX + currentPos;
+            child->y = offsetY;
+            
+            currentPos += childMainSize + node->flex.gap;
             
         } else {
-            // Main axis (height)
-            if (child->flex.flexBasis >= 0) {
-                childMainSize = child->flex.flexBasis;
-            } else {
-                const char* heightStr = getStyle(child, "height");
-                childMainSize = heightStr ? atoi(heightStr) : (child->isButton ? 35 : 30);
-            }
+            const char* heightStr = getStyle(child, "height");
+            childMainSize = heightStr ? atoi(heightStr) : 30;
             
             if (child->flex.flexGrow > 0 && remainingSpace > 0) {
                 childMainSize += flexGrowUnit * child->flex.flexGrow;
             }
             
-            // Cross axis (width)
             const char* widthStr = getStyle(child, "width");
-            if (widthStr) {
-                childCrossSize = atoi(widthStr);
-            } else if (node->flex.align == ALIGN_STRETCH) {
-                childCrossSize = availableWidth;
-            } else {
-                childCrossSize = child->isButton ? 120 : 100;
-            }
+            childCrossSize = widthStr ? atoi(widthStr) : 100;
             
             child->computedWidth = childCrossSize;
             child->computedHeight = childMainSize;
-        }
-        
-        // Position child based on align-items
-        int crossOffset = 0;
-        switch (node->flex.align) {
-            case ALIGN_FLEX_START:
-                crossOffset = 0;
-                break;
-            case ALIGN_FLEX_END:
-                crossOffset = (isRow ? availableHeight : availableWidth) - 
-                             (isRow ? childCrossSize : childCrossSize);
-                break;
-            case ALIGN_CENTER:
-                crossOffset = ((isRow ? availableHeight : availableWidth) - 
-                              (isRow ? childCrossSize : childCrossSize)) / 2;
-                break;
-            case ALIGN_STRETCH:
-            case ALIGN_BASELINE:
-                crossOffset = 0;
-                break;
-        }
-        
-        if (isRow) {
-            child->x = offsetX + currentPos;
-            child->y = offsetY + crossOffset;
-            currentPos += childMainSize + node->flex.gap + spacing;
-        } else {
-            child->x = offsetX + crossOffset;
+            child->x = offsetX;
             child->y = offsetY + currentPos;
-            currentPos += childMainSize + node->flex.gap + spacing;
+            
+            currentPos += childMainSize + node->flex.gap;
         }
         
-        // Recursively layout child's children
+        // Update bounding box
+        child->boundingBox.left = child->x;
+        child->boundingBox.top = child->y;
+        child->boundingBox.right = child->x + child->computedWidth;
+        child->boundingBox.bottom = child->y + child->computedHeight;
+        
         if (child->flex.isFlexContainer) {
             computeFlexLayout(child, child->computedWidth - 20, 
                             child->computedHeight - 20, 
                             child->x + 10, child->y + 10);
-        } else if (child->childCount > 0) {
-            // Regular layout for non-flex containers
-            int childY = child->y + 10;
-            for (int j = 0; j < child->childCount; j++) {
-                Node* grandChild = child->children[j];
-                const char* widthStr = getStyle(grandChild, "width");
-                const char* heightStr = getStyle(grandChild, "height");
-                
-                grandChild->computedWidth = widthStr ? atoi(widthStr) : 
-                                           (grandChild->isButton ? 120 : child->computedWidth - 20);
-                grandChild->computedHeight = heightStr ? atoi(heightStr) : 
-                                            (grandChild->isButton ? 35 : 30);
-                grandChild->x = child->x + 10;
-                grandChild->y = childY;
-                childY += grandChild->computedHeight + 5;
-            }
         }
     }
 }
@@ -1039,7 +909,6 @@ static void computeLayout(Node* node, int parentWidth, int parentHeight,
                          int offsetX, int offsetY) {
     if (!node) return;
     
-    // Check if this is a flex container
     if (node->flex.isFlexContainer && node->childCount > 0) {
         const char* widthStr = getStyle(node, "width");
         const char* heightStr = getStyle(node, "height");
@@ -1052,37 +921,51 @@ static void computeLayout(Node* node, int parentWidth, int parentHeight,
         node->x = offsetX;
         node->y = offsetY;
         
+        node->boundingBox.left = node->x;
+        node->boundingBox.top = node->y;
+        node->boundingBox.right = node->x + node->computedWidth;
+        node->boundingBox.bottom = node->y + node->computedHeight;
+        
         computeFlexLayout(node, node->computedWidth - 20, node->computedHeight - 20,
                          offsetX + 10, offsetY + 10);
         return;
     }
     
-    // Regular layout (non-flex)
     const char* widthStr = getStyle(node, "width");
     const char* heightStr = getStyle(node, "height");
     
     if (widthStr) {
         node->computedWidth = atoi(widthStr);
     } else {
-        if (node->isButton) {
-            node->computedWidth = 120;
-        } else {
-            node->computedWidth = parentWidth > 0 ? parentWidth - 20 : 200;
-        }
+        node->computedWidth = node->isButton ? 120 : (parentWidth > 0 ? parentWidth - 20 : 200);
     }
     
     if (heightStr) {
         node->computedHeight = atoi(heightStr);
     } else {
+        // Set default heights based on element type
         if (node->isButton) {
             node->computedHeight = 35;
+        } else if (strcmp(node->tag, "h1") == 0) {
+            node->computedHeight = 50;
+        } else if (strcmp(node->tag, "h2") == 0) {
+            node->computedHeight = 40;
+        } else if (strcmp(node->tag, "h3") == 0) {
+            node->computedHeight = 35;
+        } else if (strcmp(node->tag, "p") == 0) {
+            node->computedHeight = 30;
         } else {
-            node->computedHeight = 30 + (node->childCount * 40);
+            node->computedHeight = 30;
         }
     }
     
     node->x = offsetX;
     node->y = offsetY;
+    
+    node->boundingBox.left = node->x;
+    node->boundingBox.top = node->y;
+    node->boundingBox.right = node->x + node->computedWidth;
+    node->boundingBox.bottom = node->y + node->computedHeight;
     
     int childY = offsetY + 10;
     for (int i = 0; i < node->childCount; i++) {
@@ -1102,7 +985,6 @@ static void executeOnClick(ReactUI* ui, const char* onClick) {
     char command[128];
     safe_strcpy(command, onClick, sizeof(command));
     
-    // Sanitize command - only allow alphanumeric, operators, and spaces
     for (char* p = command; *p; p++) {
         if (!isalnum(*p) && !strchr("+-=_ ", *p)) {
             reportError(ui, "Invalid character in onClick handler");
@@ -1114,34 +996,18 @@ static void executeOnClick(ReactUI* ui, const char* onClick) {
         char varName[32] = {0};
         if (sscanf(command, "%31[^+]", varName) == 1) {
             char* trimmed = trim(varName);
-            int currentValue = getState(ui, trimmed);
-            setState(ui, trimmed, currentValue + 1);
+            int currentValue = getStateInt(ui, trimmed);
+            setStateInt(ui, trimmed, currentValue + 1);
+            markDependentNodesDirty(ui, trimmed);
         }
     } 
     else if (strstr(command, "--")) {
         char varName[32] = {0};
         if (sscanf(command, "%31[^-]", varName) == 1) {
             char* trimmed = trim(varName);
-            int currentValue = getState(ui, trimmed);
-            setState(ui, trimmed, currentValue - 1);
-        }
-    }
-    else if (strstr(command, "+=")) {
-        char varName[32] = {0};
-        int addValue = 0;
-        if (sscanf(command, "%31[^+]+=%d", varName, &addValue) == 2) {
-            char* trimmed = trim(varName);
-            int currentValue = getState(ui, trimmed);
-            setState(ui, trimmed, currentValue + addValue);
-        }
-    }
-    else if (strstr(command, "-=")) {
-        char varName[32] = {0};
-        int subValue = 0;
-        if (sscanf(command, "%31[^-]-=%d", varName, &subValue) == 2) {
-            char* trimmed = trim(varName);
-            int currentValue = getState(ui, trimmed);
-            setState(ui, trimmed, currentValue - subValue);
+            int currentValue = getStateInt(ui, trimmed);
+            setStateInt(ui, trimmed, currentValue - 1);
+            markDependentNodesDirty(ui, trimmed);
         }
     }
     else if (strchr(command, '=')) {
@@ -1149,12 +1015,9 @@ static void executeOnClick(ReactUI* ui, const char* onClick) {
         int newValue = 0;
         if (sscanf(command, "%31[^=]=%d", varName, &newValue) == 2) {
             char* trimmed = trim(varName);
-            setState(ui, trimmed, newValue);
+            setStateInt(ui, trimmed, newValue);
+            markDependentNodesDirty(ui, trimmed);
         }
-    }
-    
-    if (ui->hwnd) {
-        InvalidateRect(ui->hwnd, NULL, TRUE);
     }
 }
 
@@ -1176,118 +1039,133 @@ static Node* findNodeAtPoint(Node* node, int x, int y) {
 }
 
 // ============================================================================
-// RENDERER
+// RENDERER WITH SELECTIVE UPDATE
 // ============================================================================
+
+static bool hasAnyDirtyChildren(Node* node) {
+    if (!node) return false;
+    
+    for (int i = 0; i < node->childCount; i++) {
+        if (node->children[i]->isDirty) return true;
+        if (hasAnyDirtyChildren(node->children[i])) return true;
+    }
+    return false;
+}
 
 static void renderNode(ReactUI* ui, HDC hdc, Node* node) {
     if (!node || !ui) return;
     
-    const char* bgColor = getStyle(node, "background");
-    const char* color = getStyle(node, "color");
-    const char* fontSize = getStyle(node, "font-size");
-    const char* border = getStyle(node, "border");
-    const char* borderRadius = getStyle(node, "border-radius");
-    const char* padding = getStyle(node, "padding");
-    
-    // Default button styles
-    if (node->isButton && !bgColor) {
-        bgColor = "#4CAF50";
-    }
-    if (node->isButton && !color) {
-        color = "white";
+    // OPTIMIZATION: Skip clean subtrees
+    if (!node->isDirty && !hasAnyDirtyChildren(node)) {
+        return;
     }
     
-    // Render background
-    if (bgColor) {
-        HBRUSH brush = CreateSolidBrush(parseColor(bgColor));
-        RECT rect = {node->x, node->y, 
-                     node->x + node->computedWidth, 
-                     node->y + node->computedHeight};
+    // Render this node if dirty
+    if (node->isDirty) {
+        const char* bgColor = getStyle(node, "background");
+        const char* color = getStyle(node, "color");
+        const char* fontSize = getStyle(node, "font-size");
+        const char* border = getStyle(node, "border");
+        const char* padding = getStyle(node, "padding");
         
-        if (borderRadius) {
-            int radius = atoi(borderRadius);
-            RoundRect(hdc, rect.left, rect.top, rect.right, rect.bottom, 
-                     radius * 2, radius * 2);
-        } else {
+        if (node->isButton && !bgColor) {
+            bgColor = "#4CAF50";
+        }
+        if (node->isButton && !color) {
+            color = "white";
+        }
+        
+        // Render background
+        if (bgColor) {
+            HBRUSH brush = CreateSolidBrush(parseColor(bgColor));
+            RECT rect = {node->x, node->y, 
+                         node->x + node->computedWidth, 
+                         node->y + node->computedHeight};
             FillRect(hdc, &rect, brush);
-        }
-        DeleteObject(brush);
-    }
-    
-    // Render border
-    if (border || node->isButton) {
-        COLORREF borderColor = RGB(0, 0, 0);
-        int borderWidth = 1;
-        
-        if (border) {
-            // Simple border parsing (e.g., "2px solid #333")
-            char borderStr[64];
-            safe_strcpy(borderStr, border, sizeof(borderStr));
-            char* token = strtok(borderStr, " ");
-            if (token) borderWidth = atoi(token);
-            token = strtok(NULL, " "); // skip style
-            token = strtok(NULL, " ");
-            if (token) borderColor = parseColor(token);
+            DeleteObject(brush);
         }
         
-        HPEN pen = CreatePen(PS_SOLID, borderWidth, borderColor);
-        HPEN oldPen = (HPEN)SelectObject(hdc, pen);
-        HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
-        
-        if (borderRadius) {
-            int radius = atoi(borderRadius);
-            RoundRect(hdc, node->x, node->y, 
-                     node->x + node->computedWidth, 
-                     node->y + node->computedHeight,
-                     radius * 2, radius * 2);
-        } else {
+        // Render border
+        if (border || node->isButton) {
+            COLORREF borderColor = RGB(0, 0, 0);
+            HPEN pen = CreatePen(PS_SOLID, 1, borderColor);
+            HPEN oldPen = (HPEN)SelectObject(hdc, pen);
+            HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
+            
             Rectangle(hdc, node->x, node->y, 
                      node->x + node->computedWidth, 
                      node->y + node->computedHeight);
+            
+            SelectObject(hdc, oldBrush);
+            SelectObject(hdc, oldPen);
+            DeleteObject(pen);
         }
         
-        SelectObject(hdc, oldBrush);
-        SelectObject(hdc, oldPen);
-        DeleteObject(pen);
-    }
-    
-    // Render text
-    if (strlen(node->text) > 0) {
-        char processedText[512];
-        substituteVariables(ui, node->text, processedText, sizeof(processedText));
-        
-        SetTextColor(hdc, color ? parseColor(color) : RGB(0, 0, 0));
-        SetBkMode(hdc, TRANSPARENT);
-        
-        HFONT hFont = NULL;
-        HFONT hOldFont = NULL;
-        if (fontSize) {
-            int size = atoi(fontSize);
-            hFont = CreateFont(size, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        // Render text with variable substitution
+        if (strlen(node->text) > 0) {
+            char processedText[512];
+            substituteVariables(ui, node->text, processedText, sizeof(processedText));
+            
+            SetTextColor(hdc, color ? parseColor(color) : RGB(0, 0, 0));
+            SetBkMode(hdc, TRANSPARENT);
+            
+            HFONT hFont = NULL;
+            HFONT hOldFont = NULL;
+            
+            // Determine font size and weight
+            int fontHeight = 16;  // Default size
+            int fontWeight = FW_NORMAL;
+            
+            if (fontSize) {
+                fontHeight = atoi(fontSize);
+            } else if (strcmp(node->tag, "h1") == 0) {
+                fontHeight = 32;
+                fontWeight = FW_BOLD;
+            } else if (strcmp(node->tag, "h2") == 0) {
+                fontHeight = 24;
+                fontWeight = FW_BOLD;
+            } else if (strcmp(node->tag, "h3") == 0) {
+                fontHeight = 20;
+                fontWeight = FW_BOLD;
+            } else if (strcmp(node->tag, "p") == 0) {
+                fontHeight = 16;
+            } else if (node->isButton) {
+                fontHeight = 16;
+                fontWeight = FW_BOLD;
+            }
+            
+            hFont = CreateFont(fontHeight, 0, 0, 0, fontWeight, FALSE, FALSE, FALSE,
                               DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                               DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Arial");
             hOldFont = (HFONT)SelectObject(hdc, hFont);
-        } else if (node->isButton) {
-            hFont = CreateFont(16, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-                              DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                              DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Arial");
-            hOldFont = (HFONT)SelectObject(hdc, hFont);
+            
+            int paddingValue = padding ? atoi(padding) : 5;
+            RECT textRect = {node->x + paddingValue, node->y + paddingValue, 
+                            node->x + node->computedWidth - paddingValue, 
+                            node->y + node->computedHeight - paddingValue};
+            
+            // Different text alignment for different elements
+            UINT textFormat = DT_VCENTER | DT_WORDBREAK;
+            if (node->isButton) {
+                textFormat |= DT_CENTER | DT_SINGLELINE;
+            } else if (strcmp(node->tag, "h1") == 0 || strcmp(node->tag, "h2") == 0) {
+                textFormat |= DT_LEFT | DT_SINGLELINE;
+            } else {
+                textFormat |= DT_LEFT;
+            }
+            
+            DrawText(hdc, processedText, -1, &textRect, textFormat);
+            
+            if (hFont) {
+                SelectObject(hdc, hOldFont);
+                DeleteObject(hFont);
+            }
         }
         
-        int paddingValue = padding ? atoi(padding) : 5;
-        RECT textRect = {node->x + paddingValue, node->y + paddingValue, 
-                        node->x + node->computedWidth - paddingValue, 
-                        node->y + node->computedHeight - paddingValue};
-        DrawText(hdc, processedText, -1, &textRect, 
-                DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_WORDBREAK);
-        
-        if (hFont) {
-            SelectObject(hdc, hOldFont);
-            DeleteObject(hFont);
-        }
+        node->isDirty = false;  // Clear dirty flag
     }
     
-    // Render children
+    // Recursively render children
     for (int i = 0; i < node->childCount; i++) {
         renderNode(ui, hdc, node->children[i]);
     }
@@ -1300,7 +1178,6 @@ static void renderNode(ReactUI* ui, HDC hdc, Node* node) {
 static LRESULT CALLBACK ReactUIWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     ReactUI* ui = NULL;
     
-    // Find the ReactUI instance for this window
     for (int i = 0; i < g_instanceCount; i++) {
         if (g_reactUIInstances[i] && g_reactUIInstances[i]->hwnd == hwnd) {
             ui = g_reactUIInstances[i];
@@ -1338,7 +1215,6 @@ static LRESULT CALLBACK ReactUIWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, L
         }
 
         case WM_DESTROY: {
-            // Remove from instances array
             for (int i = 0; i < g_instanceCount; i++) {
                 if (g_reactUIInstances[i] == ui) {
                     g_reactUIInstances[i] = NULL;
@@ -1361,7 +1237,6 @@ static LRESULT CALLBACK ReactUIWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, L
 // PUBLIC API
 // ============================================================================
 
-// Initialize ReactUI
 static ReactUI* ReactUI_Create(HINSTANCE hInstance) {
     if (g_instanceCount >= MAX_UI_INSTANCES) {
         return NULL;
@@ -1376,28 +1251,17 @@ static ReactUI* ReactUI_Create(HINSTANCE hInstance) {
     ui->onError = NULL;
     
     g_reactUIInstances[g_instanceCount++] = ui;
+    g_currentUI = ui;
     
     return ui;
 }
 
-// Set error callback
 static void ReactUI_SetErrorCallback(ReactUI* ui, void (*callback)(const char*)) {
     if (ui) {
         ui->onError = callback;
     }
 }
 
-// Set initial state
-static void ReactUI_SetState(ReactUI* ui, const char* name, int value) {
-    setState(ui, name, value);
-}
-
-// Get current state
-static int ReactUI_GetState(ReactUI* ui, const char* name) {
-    return getState(ui, name);
-}
-
-// Render HTML
 static void ReactUI_Render(ReactUI* ui, const char* html) {
     if (!ui || !html) return;
     
@@ -1406,11 +1270,14 @@ static void ReactUI_Render(ReactUI* ui, const char* html) {
         ui->root = NULL;
     }
     
+    // Clear dependency map
+    ui->depCount = 0;
+    memset(ui->dependencies, 0, sizeof(ui->dependencies));
+    
     const char* p = html;
-    ui->root = parseHTML(&p);
+    ui->root = parseHTML(ui, &p);
 }
 
-// Create window and show UI
 static HWND ReactUI_CreateWindow(ReactUI* ui, const char* title, int width, int height) {
     if (!ui) return NULL;
     
@@ -1442,7 +1309,6 @@ static HWND ReactUI_CreateWindow(ReactUI* ui, const char* title, int width, int 
     return ui->hwnd;
 }
 
-// Run message loop
 static int ReactUI_Run() {
     MSG msg;
     while(GetMessage(&msg, NULL, 0, 0)) {
@@ -1452,18 +1318,9 @@ static int ReactUI_Run() {
     return (int)msg.wParam;
 }
 
-// Force re-render
-static void ReactUI_ForceUpdate(ReactUI* ui) {
-    if (ui && ui->hwnd) {
-        InvalidateRect(ui->hwnd, NULL, TRUE);
-    }
-}
-
-// Cleanup
 static void ReactUI_Destroy(ReactUI* ui) {
     if (!ui) return;
     
-    // Remove from instances
     for (int i = 0; i < g_instanceCount; i++) {
         if (g_reactUIInstances[i] == ui) {
             g_reactUIInstances[i] = NULL;
@@ -1477,4 +1334,33 @@ static void ReactUI_Destroy(ReactUI* ui) {
     free(ui);
 }
 
-#endif // REACT_UI_HYBRID_H
+// ============================================================================
+// STATE MACRO API (React-like)
+// ============================================================================
+
+#define STATE(type, varName, setterName, init) \
+    static type varName = init; \
+    static void setterName(type value) { \
+        if (varName != value) { \
+            varName = value; \
+            if (g_currentUI) { \
+                setStateInt(g_currentUI, #varName, (int)value); \
+                markDependentNodesDirty(g_currentUI, #varName); \
+            } \
+        } \
+    }
+
+#define STATE_STR(varName, setterName, init) \
+    static char varName[256] = init; \
+    static void setterName(const char* value) { \
+        if (strcmp(varName, value) != 0) { \
+            strncpy(varName, value, 255); \
+            varName[255] = '\0'; \
+            if (g_currentUI) { \
+                setStateString(g_currentUI, #varName, value); \
+                markDependentNodesDirty(g_currentUI, #varName); \
+            } \
+        } \
+    }
+
+#endif // REACT_UI_OPTIMIZED_H
