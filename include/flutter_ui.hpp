@@ -660,9 +660,24 @@ public:
             break;
         }
 
+        case WidgetType::Center:
+        {
+            // FIX: Center should fill available space, not just wrap child
+            if (!w->children.empty())
+            {
+                computeLayout(hdc, w->children[0].get(), contentWidth, contentHeight, fontCache);
+            }
+            
+            // Center fills all available space (like Container with alignment)
+            if (w->autoWidth)
+                w->width = availableWidth;
+            if (w->autoHeight)
+                w->height = availableHeight;
+            break;
+        }
+
         case WidgetType::Container:
         case WidgetType::Padding:
-        case WidgetType::Center:
         case WidgetType::Card:
         {
             if (!w->children.empty())

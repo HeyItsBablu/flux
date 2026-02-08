@@ -25,7 +25,6 @@ public:
     {
         return Scaffold(
             AppBar("My App"),
-
             Center(
                 Text("Hello World")));
     }
