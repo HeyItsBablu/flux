@@ -1,170 +1,382 @@
-# FlutterUI - Flutter-style UI Framework for Windows
+# FlutterUI C++ Framework Documentation
 
-A declarative UI framework for Windows that brings Flutter's widget composition model to C++ with Win32 API.
+## Overview
 
-## Key Features
+FlutterUI is a lightweight, Flutter-inspired UI framework for Windows desktop applications written in C++. It provides a declarative API for building user interfaces using familiar Flutter-like widgets and patterns, while leveraging native Windows GDI for rendering.
 
-✅ **Declarative UI** - Build UIs using composable widgets
-✅ **Reactive Rebuilds** - Automatic UI updates when state changes
-✅ **Builder Pattern** - Fluent API for styling widgets
-✅ **Layout System** - Flex-like Row/Column with alignment
-✅ **Event Handling** - Lambda-based click handlers
-✅ **Modern C++** - Uses C++17 features (shared_ptr, variadic templates, fold expressions)
+## Table of Contents
 
-## Installation
+1. [Core Concepts](#core-concepts)
+2. [Architecture](#architecture)
+3. [Widget System](#widget-system)
+4. [Layout Engine](#layout-engine)
+5. [Reactive State Management](#reactive-state-management)
+6. [API Reference](#api-reference)
+7. [Usage Examples](#usage-examples)
+8. [Performance Optimization](#performance-optimization)
 
-1. Copy `flutter_ui.hpp` to your project
-2. Include it: `#include "flutter_ui.hpp"`
-3. Compile with C++17 or later: `/std:c++17`
+---
 
-## Quick Start
+## Core Concepts
+
+### Declarative UI
+FlutterUI follows a declarative paradigm where you describe *what* the UI should look like rather than *how* to construct it. Widgets are composed hierarchically to build complex interfaces.
+
+### Widget Tree
+The UI is represented as a tree of widgets, where each widget can have zero or more children. The framework handles layout calculation and rendering automatically.
+
+### Reactive Updates
+Changes to application state automatically trigger UI updates through the `State<T>` system, eliminating manual DOM manipulation.
+
+---
+
+## Architecture
+
+### Component Overview
+
+```
+┌─────────────────────────────────────────────┐
+│           FlutterUI Application             │
+└─────────────────┬───────────────────────────┘
+                  │
+        ┌─────────┴──────────┐
+        │                    │
+   ┌────▼─────┐      ┌──────▼───────┐
+   │  Widget  │      │    State<T>  │
+   │   Tree   │◄─────┤   Management │
+   └────┬─────┘      └──────────────┘
+        │
+   ┌────▼─────────┐
+   │    Layout    │
+   │    Engine    │
+   └────┬─────────┘
+        │
+   ┌────▼─────────┐
+   │   Renderer   │
+   │   (GDI)      │
+   └──────────────┘
+```
+
+### Key Components
+
+1. **Widget**: Base class for all UI elements
+2. **FlutterUI**: Main application class managing the window and widget tree
+3. **LayoutEngine**: Calculates widget positions and sizes
+4. **Renderer**: Draws widgets using Windows GDI
+5. **State<T>**: Generic reactive state container
+6. **FontCache**: Optimizes font resource management
+
+---
+
+## Widget System
+
+### Widget Types
+
+| Type | Description | Use Case |
+|------|-------------|----------|
+| `Scaffold` | Top-level container with AppBar support | App structure |
+| `AppBar` | Material-style app bar | Page headers |
+| `Container` | Generic container with styling | Wrapping content |
+| `Text` | Display text content | Labels, paragraphs |
+| `Button` | Clickable button | User interactions |
+| `Row` | Horizontal layout | Side-by-side elements |
+| `Column` | Vertical layout | Stacked elements |
+| `Padding` | Add spacing around child | Whitespace |
+| `Center` | Center child widget | Alignment |
+| `SizedBox` | Fixed-size container | Spacing, constraints |
+| `Card` | Material-style card | Grouped content |
+| `Divider` | Horizontal line separator | Visual separation |
+| `Expanded` | Flexible space in Row/Column | Responsive layouts |
+
+### Widget Properties
+
+#### Common Properties
 
 ```cpp
-#include "flutter_ui.hpp"
+// Layout
+int x, y;                    // Position (calculated)
+int width, height;           // Dimensions
+int minWidth, maxWidth;      // Size constraints
+int minHeight, maxHeight;
+bool autoWidth, autoHeight;  // Auto-sizing flags
 
-class MyApp {
+// Spacing
+int padding;                 // Uniform padding
+int paddingLeft, paddingRight, paddingTop, paddingBottom;
+int margin;                  // Uniform margin
+int marginLeft, marginRight, marginTop, marginBottom;
+
+// Styling
+COLORREF backgroundColor;
+COLORREF textColor;
+COLORREF borderColor;
+int borderWidth;
+int borderRadius;            // Rounded corners
+
+// Text
+int fontSize;
+FontWeight fontWeight;       // Light, Normal, Bold
+std::string text;
+```
+
+#### Alignment Properties
+
+```cpp
+Alignment alignment;              // Start, Center, End, Stretch
+Alignment crossAlignment;         // Cross-axis alignment
+MainAxisAlignment mainAxisAlignment; // Main-axis alignment
+int spacing;                      // Spacing between children
+```
+
+### Builder Pattern
+
+All widgets support method chaining for easy configuration:
+
+```cpp
+auto widget = Text("Hello")
+    ->setFontSize(18)
+    ->setFontWeight(FontWeight::Bold)
+    ->setTextColor(RGB(0, 0, 255))
+    ->setPadding(10);
+```
+
+---
+
+## Layout Engine
+
+### Layout Algorithm
+
+The layout engine uses a two-pass algorithm:
+
+1. **Measure Pass**: Calculate widget sizes bottom-up
+2. **Position Pass**: Position widgets top-down
+
+### Layout Constraints
+
+Widgets receive available space from their parent and determine their actual size within constraints:
+
+```
+finalSize = clamp(desiredSize, minSize, maxSize)
+```
+
+### Flex Layout (Row/Column)
+
+For Row and Column widgets with `Expanded` children:
+
+1. Calculate fixed-size children first
+2. Distribute remaining space proportionally based on `flex` values
+3. Apply alignment rules
+
+#### Flex Calculation
+
+```
+flexSpace = totalAvailableSpace - fixedChildrenSpace
+childSize = (flexSpace × child.flex) / totalFlex
+```
+
+### Main Axis Alignment
+
+- **Start**: Children at the beginning
+- **End**: Children at the end
+- **Center**: Children centered
+- **SpaceBetween**: Even spacing between children
+- **SpaceAround**: Even spacing around children
+- **SpaceEvenly**: Even spacing including edges
+
+---
+
+## Reactive State Management
+
+### State\<T\> Class
+
+The `State<T>` template provides reactive data binding:
+
+```cpp
+template <typename T>
+class State {
+    T value;
+    FlutterUI* ui;
+    std::vector<std::weak_ptr<Widget>> observers;
+    
 public:
-    FlutterUI ui;
-    int counter = 0;
-    
-    MyApp(HINSTANCE hInstance) : ui(hInstance) {}
-    
-    void increment() {
-        counter++;
-        ui.rebuild();  // Triggers UI update
-    }
-    
-    WidgetPtr buildUI() {
-        // IMPORTANT: Create dynamic text using stringstream or std::to_string
-        std::string countText = "Count: " + std::to_string(counter);
-        
-        return Center(
-            Card(
-                Column(
-                    Text("My Counter")->setFontSize(24),
-                    Text(countText)->setFontSize(48),
-                    Button("Increment", [this]() { increment(); })
-                )->setSpacing(20)
-            )
-        );
-    }
-    
-    int run() {
-        ui.createWindow("My App", 400, 300);
-        ui.build([this]() { return buildUI(); });
-        return ui.run();
-    }
+    State(T initial, FlutterUI* app = nullptr);
+    T get() const;
+    void set(T newValue);
+    void addObserver(std::shared_ptr<Widget> widget);
 };
-
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
-    MyApp app(hInstance);
-    return app.run();
-}
 ```
 
-## Important: Dynamic Text
+### Supported Types
 
-When creating text that changes based on state, **always create the string first**:
+- Arithmetic types (int, float, double, etc.)
+- std::string
+- Any type with equality operator
 
-✅ **CORRECT:**
+### Automatic Updates
+
+When state changes:
+1. New value is set
+2. All observer widgets are updated
+3. Smart invalidation triggers minimal repaints
+4. Layout recalculation only if size changes
+
+### Update Optimization
+
 ```cpp
-std::string text = "Count: " + std::to_string(counter);
-Text(text)
+// Same-size update → Only repaint
+state.set("A");  // Original
+state.set("B");  // Same length → just repaint
+
+// Size change → Full layout
+state.set("A");      // Original
+state.set("Hello");  // Different size → relayout
 ```
 
-❌ **WRONG (won't update):**
+---
+
+## API Reference
+
+### FlutterUI Class
+
+#### Constructor
 ```cpp
-Text("Count: %d", counter)  // Formats once, won't update!
+FlutterUI(HINSTANCE hInst);
 ```
 
-The variadic `Text()` function evaluates format strings immediately, so the value gets "baked in" and won't change on rebuild.
+#### Methods
 
-## Widget Reference
+##### build()
+```cpp
+void build(std::function<WidgetPtr()> buildFunc);
+```
+Sets the builder function that constructs the widget tree.
 
-### Layout Widgets
+##### rebuild()
+```cpp
+void rebuild();
+```
+Reconstructs the entire widget tree and triggers layout/paint.
+
+##### createWindow()
+```cpp
+HWND createWindow(const std::string& title, int width, int height);
+```
+Creates the main application window.
+
+##### run()
+```cpp
+int run();
+```
+Starts the message loop. Blocks until the window is closed.
+
+##### findById()
+```cpp
+WidgetPtr findById(const std::string& id);
+```
+Searches the widget tree for a widget with the specified ID.
+
+##### updateWidget()
+```cpp
+void updateWidget(Widget* widget);
+```
+Smart update for a specific widget. Chooses between repaint-only or full layout.
+
+##### partialRebuild()
+```cpp
+void partialRebuild(Widget* widget);
+```
+Recalculates layout from the widget up to the root.
+
+##### invalidateWidget()
+```cpp
+void invalidateWidget(Widget* widget);
+```
+Marks a widget's rectangle for repainting without layout recalculation.
+
+### Widget Factory Functions
 
 #### Container
 ```cpp
-Container(child)
-    ->setBackgroundColor(RGB(255, 255, 255))
-    ->setPadding(10)
-    ->setBorderRadius(8)
+WidgetPtr Container(WidgetPtr child = nullptr);
 ```
-
-#### Row / Column
-```cpp
-Row(widget1, widget2, widget3)
-    ->setSpacing(10)
-    ->setCrossAlignment(Alignment::Center)
-
-Column(widget1, widget2, widget3)
-    ->setSpacing(10)
-    ->setCrossAlignment(Alignment::Start)
-```
-
-#### Center
-```cpp
-Center(child)  // Centers child widget
-```
-
-#### Padding
-```cpp
-Padding(20, child)  // Adds padding around child
-```
-
-#### SizedBox
-```cpp
-SizedBox(200, 100, child)  // Fixed size container
-```
-
-#### Card
-```cpp
-Card(child)  // Material-style card with shadow effect
-```
-
-### Content Widgets
+Creates a generic container widget.
 
 #### Text
 ```cpp
-Text("Hello World")
-    ->setFontSize(24)
-    ->setFontWeight(FontWeight::Bold)
-    ->setTextColor(RGB(0, 0, 0))
+WidgetPtr Text(const std::string& text);
+WidgetPtr Text(State<T>& state);  // Reactive variant
 ```
+Creates a text display widget. The state variant automatically updates when state changes.
 
 #### Button
 ```cpp
-Button("Click Me", [this]() { handleClick(); })
-    ->setBackgroundColor(RGB(76, 175, 80))
-    ->setMinWidth(120)
+WidgetPtr Button(const std::string& text, ClickHandler onClick = nullptr);
 ```
+Creates a material-style button with default green styling.
+
+#### Row
+```cpp
+WidgetPtr Row(Widgets... widgets);
+```
+Creates a horizontal layout container. Variadic template accepts multiple children.
+
+#### Column
+```cpp
+WidgetPtr Column(Widgets... widgets);
+```
+Creates a vertical layout container. Variadic template accepts multiple children.
+
+#### Padding
+```cpp
+WidgetPtr Padding(int padding, WidgetPtr child);
+```
+Wraps a child with uniform padding on all sides.
+
+#### Center
+```cpp
+WidgetPtr Center(WidgetPtr child);
+```
+Centers its child both horizontally and vertically.
+
+#### SizedBox
+```cpp
+WidgetPtr SizedBox(int width, int height, WidgetPtr child = nullptr);
+```
+Container with fixed dimensions. Can be used for spacing or constraints.
+
+#### Card
+```cpp
+WidgetPtr Card(WidgetPtr child);
+```
+Material-style card with shadow effect (simulated with border), rounded corners, and padding.
 
 #### Divider
 ```cpp
-Divider()  // Horizontal line separator
+WidgetPtr Divider();
 ```
+Creates a 1-pixel horizontal line separator.
 
-## Styling Properties
-
-All widgets support method chaining for styling:
-
+#### Expanded
 ```cpp
-widget
-    ->setWidth(200)
-    ->setHeight(100)
-    ->setMinWidth(100)
-    ->setMaxWidth(300)
-    ->setPadding(10)
-    ->setMargin(5)
-    ->setBackgroundColor(RGB(255, 255, 255))
-    ->setTextColor(RGB(0, 0, 0))
-    ->setBorderColor(RGB(200, 200, 200))
-    ->setBorderWidth(2)
-    ->setBorderRadius(8)
+WidgetPtr Expanded(WidgetPtr child, int flex = 1);
 ```
+Makes a child take flexible space in Row or Column. Higher flex values get more space.
 
-## Alignment Options
+#### Scaffold
+```cpp
+WidgetPtr Scaffold(WidgetPtr appBar = nullptr, WidgetPtr body = nullptr);
+```
+Creates a material-style app structure with optional AppBar and body content.
 
+#### AppBar
+```cpp
+WidgetPtr AppBar(const std::string& title);
+```
+Creates a material-style app bar with title.
+
+### Enumerations
+
+#### Alignment
 ```cpp
 enum class Alignment {
     Start,    // Left/Top
@@ -172,172 +384,350 @@ enum class Alignment {
     End,      // Right/Bottom
     Stretch   // Fill available space
 };
-
-// Usage:
-Column(...)
-    ->setAlignment(Alignment::Center)          // Main axis
-    ->setCrossAlignment(Alignment::Center)     // Cross axis
 ```
 
-## Event Handling
-
-Use lambda functions to capture state:
-
+#### MainAxisAlignment
 ```cpp
-Button("Click", [this]() {
-    counter++;
-    ui.rebuild();
-})
-```
-
-**Important:** Always call `ui.rebuild()` after changing state to update the UI.
-
-## Rebuild Mechanism
-
-The rebuild system works by:
-
-1. Storing a builder function: `ui.build([this]() { return buildUI(); })`
-2. Calling `ui.rebuild()` when state changes
-3. The builder function is called, creating a **new widget tree** with updated values
-4. Layout is recomputed and UI is redrawn
-
-This is similar to Flutter's `setState()` mechanism.
-
-## Color Reference
-
-Use Windows RGB macro:
-```cpp
-RGB(255, 0, 0)      // Red
-RGB(0, 255, 0)      // Green
-RGB(0, 0, 255)      // Blue
-RGB(255, 255, 255)  // White
-RGB(0, 0, 0)        // Black
-```
-
-Common Material Design colors:
-```cpp
-RGB(244, 67, 54)    // Red
-RGB(76, 175, 80)    // Green
-RGB(33, 150, 243)   // Blue
-RGB(255, 193, 7)    // Amber
-RGB(158, 158, 158)  // Gray
-```
-
-## Examples
-
-### Simple Counter
-See `main.cpp` for a basic counter example.
-
-### Multi-Counter Dashboard
-See `advanced_example.cpp` for a more complex example with multiple counters.
-
-### Todo List
-```cpp
-class TodoApp {
-    std::vector<std::string> todos;
-    
-    WidgetPtr buildUI() {
-        auto column = Column();
-        
-        for (const auto& todo : todos) {
-            column->addChild(
-                Card(Text(todo))->setMargin(5)
-            );
-        }
-        
-        return Container(column);
-    }
+enum class MainAxisAlignment {
+    Start,        // Pack at start
+    Center,       // Center items
+    End,          // Pack at end
+    SpaceBetween, // Even spacing between items
+    SpaceAround,  // Even spacing around items
+    SpaceEvenly   // Even spacing including edges
 };
 ```
 
-## Compilation
-
-### Visual Studio
-```
-cl /std:c++17 /EHsc main.cpp /link user32.lib gdi32.lib
-```
-
-### MinGW
-```
-g++ -std=c++17 main.cpp -o app.exe -lgdi32 -luser32
-```
-
-### CMake
-```cmake
-cmake_minimum_required(VERSION 3.10)
-project(FlutterUIApp)
-
-set(CMAKE_CXX_STANDARD 17)
-
-add_executable(app main.cpp)
-target_link_libraries(app gdi32 user32)
-```
-
-## Architecture
-
-### Widget Tree
-Widgets are organized in a tree structure using `shared_ptr`:
-- Parent widgets contain children via `std::vector<WidgetPtr>`
-- Builder pattern returns `shared_ptr` for chaining
-
-### Layout Engine
-Two-pass layout system:
-1. **Measure**: `computeLayout()` calculates widget sizes
-2. **Position**: `positionWidget()` assigns x,y coordinates
-
-### Rendering
-`Renderer::renderWidget()` recursively draws widgets using GDI:
-- Backgrounds with rounded rectangles
-- Text with custom fonts
-- Borders and shadows
-
-## Debugging
-
-Enable console output:
+#### FontWeight
 ```cpp
-AllocConsole();
-FILE* fp;
-freopen_s(&fp, "CONOUT$", "w", stdout);
-
-std::cout << "Debug: counter = " << counter << std::endl;
+enum class FontWeight {
+    Light = FW_LIGHT,
+    Normal = FW_NORMAL,
+    Bold = FW_BOLD
+};
 ```
+
+---
+
+## Usage Examples
+
+### Basic Application
+
+```cpp
+#include "FlutterUI.hpp"
+
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
+    FlutterUI app(hInstance);
+    
+    app.build([]() {
+        return Scaffold(
+            AppBar("My Application"),
+            Center(
+                Text("Hello, FlutterUI!")
+                    ->setFontSize(24)
+            )
+        );
+    });
+    
+    app.createWindow("FlutterUI App", 800, 600);
+    return app.run();
+}
+```
+
+### Counter Example with State
+
+```cpp
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
+    FlutterUI app(hInstance);
+    State<int> counter(0, &app);
+    
+    app.build([&]() {
+        return Scaffold(
+            AppBar("Counter App"),
+            Center(
+                Column(
+                    Text("You clicked the button:")
+                        ->setFontSize(16),
+                    Text(counter)  // Reactive text
+                        ->setFontSize(48)
+                        ->setFontWeight(FontWeight::Bold)
+                        ->setTextColor(RGB(33, 150, 243)),
+                    Button("Increment", [&]() {
+                        counter.set(counter.get() + 1);
+                    })
+                )->setSpacing(20)
+            )
+        );
+    });
+    
+    app.createWindow("Counter", 400, 300);
+    return app.run();
+}
+```
+
+### Complex Layout
+
+```cpp
+app.build([&]() {
+    return Scaffold(
+        AppBar("Dashboard"),
+        Padding(20,
+            Column(
+                Card(
+                    Column(
+                        Text("Welcome!")
+                            ->setFontSize(20)
+                            ->setFontWeight(FontWeight::Bold),
+                        Divider(),
+                        Text("This is a sample dashboard")
+                    )->setSpacing(10)
+                ),
+                
+                SizedBox(0, 20),  // Vertical spacing
+                
+                Row(
+                    Expanded(
+                        Card(
+                            Text("Card 1")
+                                ->setFontSize(16)
+                        )
+                    ),
+                    SizedBox(10, 0),  // Horizontal spacing
+                    Expanded(
+                        Card(
+                            Text("Card 2")
+                                ->setFontSize(16)
+                        ),
+                        2  // Takes 2x space
+                    )
+                ),
+                
+                SizedBox(0, 20),
+                
+                Button("Action Button", [&]() {
+                    // Handle click
+                })
+                    ->setBackgroundColor(RGB(76, 175, 80))
+            )->setSpacing(0)
+        )
+    );
+});
+```
+
+### Dynamic Lists with State
+
+```cpp
+State<std::string> statusText("Ready", &app);
+int clickCount = 0;
+
+app.build([&]() {
+    return Scaffold(
+        AppBar("Dynamic UI"),
+        Padding(20,
+            Column(
+                Text(statusText),  // Reactive
+                
+                Row(
+                    Button("Click Me", [&]() {
+                        clickCount++;
+                        statusText.set("Clicked " + 
+                            std::to_string(clickCount) + " times");
+                    }),
+                    
+                    SizedBox(10, 0),
+                    
+                    Button("Reset", [&]() {
+                        clickCount = 0;
+                        statusText.set("Reset");
+                    })
+                )->setMainAxisAlignment(MainAxisAlignment::SpaceEvenly)
+            )->setSpacing(20)
+        )
+    );
+});
+```
+
+### Custom Styling
+
+```cpp
+auto myStyledButton = Button("Custom Button")
+    ->setBackgroundColor(RGB(255, 87, 34))  // Deep orange
+    ->setTextColor(RGB(255, 255, 255))
+    ->setBorderRadius(20)
+    ->setPaddingAll(30, 15, 30, 15)
+    ->setFontSize(18)
+    ->setFontWeight(FontWeight::Bold);
+
+auto myCard = Container(
+    Column(
+        Text("Custom Card"),
+        Divider(),
+        Text("With custom styling")
+    )->setSpacing(10)
+)
+->setBackgroundColor(RGB(240, 240, 240))
+->setBorderColor(RGB(100, 100, 100))
+->setBorderWidth(2)
+->setBorderRadius(12)
+->setPadding(20);
+```
+
+---
+
+## Performance Optimization
+
+### Built-in Optimizations
+
+1. **Font Caching**: Fonts are cached and reused across widgets
+2. **Double Buffering**: Eliminates flicker during redraws
+3. **Smart Invalidation**: Only updates changed regions when possible
+4. **Layout Caching**: Widgets track dirty state to avoid redundant calculations
+5. **Weak Pointers**: State observers use `weak_ptr` to prevent memory leaks
+
+### Update Strategy
+
+The framework uses three levels of update efficiency:
+
+1. **Full Rebuild**: `rebuild()` - Reconstructs entire tree
+2. **Partial Rebuild**: `partialRebuild()` - Updates widget and parents
+3. **Paint Only**: `invalidateWidget()` - Repaints without layout
+
+### State Update Optimization
+
+```cpp
+// Automatic optimization
+state.set(newValue);  // Framework chooses:
+                      // - Paint-only if size unchanged
+                      // - Partial layout if size changed
+```
+
+### Best Practices
+
+1. **Use State for Dynamic Content**: Avoids manual rebuild calls
+2. **Set Fixed Sizes When Possible**: Reduces layout calculations
+3. **Minimize Nested Layouts**: Flatten widget tree where reasonable
+4. **Use IDs Sparingly**: Only when you need to find widgets later
+5. **Batch State Updates**: Set multiple state values before triggering updates
+
+### Memory Management
+
+- Widgets use `std::shared_ptr` for automatic memory management
+- State observers use `weak_ptr` to prevent circular references
+- Font cache cleaned up automatically on app destruction
+- GDI resources (brushes, pens, fonts) properly released
+
+---
+
+## Advanced Topics
+
+### Event Handling
+
+Currently supports click events:
+
+```cpp
+widget->setOnClick([&]() {
+    // Handle click
+});
+```
+
+The framework performs automatic hit testing to find the clicked widget in the tree.
+
+### Widget Lifecycle
+
+1. **Construction**: Widget created via factory function
+2. **Build**: Added to widget tree
+3. **Layout**: Size and position calculated
+4. **Paint**: Rendered to screen
+5. **Update**: Properties changed, marks dirty
+6. **Destruction**: Automatic via shared_ptr
+
+### Custom Widget Creation
+
+While not directly supported, you can compose existing widgets to create reusable components:
+
+```cpp
+auto createCustomCard(const std::string& title, const std::string& content) {
+    return Card(
+        Column(
+            Text(title)
+                ->setFontSize(18)
+                ->setFontWeight(FontWeight::Bold),
+            Divider(),
+            Text(content)
+        )->setSpacing(8)
+    );
+}
+```
+
+### Finding Widgets at Runtime
+
+```cpp
+auto widget = app.findById("myWidget");
+if (widget) {
+    widget->setText("Updated");
+    app.updateWidget(widget.get());
+}
+```
+
+---
 
 ## Limitations
 
-- Single window per application
-- No scrolling (yet)
-- No text input widgets (yet)
-- Basic event handling (click only)
-- Windows-only (Win32 API)
+1. **Windows Only**: Uses Windows GDI, not cross-platform
+2. **Limited Widgets**: Subset of Flutter's widget catalog
+3. **No Animations**: Static rendering only
+4. **Single Window**: No multi-window support
+5. **No Touch**: Mouse input only
+6. **Fixed Fonts**: Uses Segoe UI exclusively
 
-## Roadmap
+---
 
-- [ ] Text input widgets
-- [ ] Scrollable containers
-- [ ] Animations
-- [ ] More event types (hover, keyboard)
-- [ ] Image support
-- [ ] Grid layout
-- [ ] Theming system
+## Future Enhancements
 
-## License
+Potential improvements:
+- Animation support
+- More widget types (ListView, GridView, etc.)
+- Custom font loading
+- Image support
+- Scrolling containers
+- Keyboard input handling
+- Accessibility features
+- Theme system
 
-This is a demonstration project. Use freely for learning and prototyping.
+---
+
+## License & Credits
+
+This is a custom implementation inspired by Flutter's declarative UI paradigm, adapted for Windows desktop applications using C++ and GDI.
+
+---
 
 ## Troubleshooting
 
-### UI doesn't update after clicking
-- Make sure you call `ui.rebuild()` in your event handler
-- Check that your builder function is capturing `this` correctly
+### Common Issues
 
-### Text shows old values
-- Don't use `Text("Count: %d", counter)` for dynamic values
-- Instead: `std::string text = "Count: " + std::to_string(counter); Text(text)`
+**Widgets not appearing:**
+- Ensure `rebuild()` is called after `build()`
+- Check that window size is sufficient
+- Verify parent constraints allow child to render
 
-### Compilation errors
-- Ensure C++17 is enabled: `/std:c++17` or `-std=c++17`
-- Link against: `user32.lib` and `gdi32.lib`
+**State updates not visible:**
+- Pass `&app` to State constructor
+- Ensure widget is added to tree before binding state
+- Check that state value actually changed
 
-## Contributing
+**Layout issues:**
+- Verify Expanded widgets are inside Row/Column
+- Check that auto-sizing conflicts with fixed sizes
+- Ensure constraints are reasonable (min ≤ size ≤ max)
 
-This is a learning project demonstrating Flutter-style UI in C++. Feel free to extend and improve!
+**Memory leaks:**
+- Avoid storing raw widget pointers
+- Use `shared_ptr` and `weak_ptr` correctly
+- Clean up event handlers that capture state by reference
+
+---
+
+## Conclusion
+
+FlutterUI provides a modern, declarative approach to Windows desktop UI development in C++. By borrowing concepts from Flutter while leveraging native Windows APIs, it offers a productive and intuitive way to build desktop applications with reactive state management and automatic layout.

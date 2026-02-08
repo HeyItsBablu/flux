@@ -30,6 +30,8 @@ using ClickHandler = std::function<void()>;
 
 enum class WidgetType
 {
+    Scaffold,
+    AppBar,
     Container,
     Text,
     Button,
@@ -491,6 +493,40 @@ public:
 
         switch (w->type)
         {
+
+        case WidgetType::AppBar:
+        {
+            // AppBar takes full width, fixed height
+            if (w->autoWidth)
+                w->width = availableWidth;
+
+            // Layout title (first child)
+            if (!w->children.empty())
+            {
+                auto title = w->children[0].get();
+                computeLayout(hdc, title,
+                              w->width - w->paddingLeft - w->paddingRight,
+                              w->height - w->paddingTop - w->paddingBottom,
+                              fontCache);
+            }
+            break;
+        }
+
+        case WidgetType::Scaffold:
+        {
+            // Scaffold fills entire window
+            if (w->autoWidth)
+                w->width = availableWidth;
+            if (w->autoHeight)
+                w->height = availableHeight;
+
+            // Layout the column child (appbar + body)
+            if (!w->children.empty())
+            {
+                computeLayout(hdc, w->children[0].get(), w->width, w->height, fontCache);
+            }
+            break;
+        }
         case WidgetType::Text:
         case WidgetType::Button:
         {
@@ -1469,6 +1505,7 @@ public:
     }
 };
 
+
 // ============================================================================
 // WIDGET FACTORY FUNCTIONS
 // ============================================================================
@@ -1614,5 +1651,62 @@ inline WidgetPtr Expanded(WidgetPtr child, int flex = 1)
         w->addChild(child);
     return w;
 }
+
+
+// ============================================================================
+// SCAFFOLD & APPBAR WIDGETS
+// ============================================================================
+
+inline WidgetPtr AppBar(const std::string &title)
+{
+    auto w = std::make_shared<Widget>(WidgetType::AppBar);
+
+    // AppBar styling
+    w->hasBackground = true;
+    w->backgroundColor = RGB(33, 150, 243); // Material blue
+    w->height = 56;
+    w->autoHeight = false;
+
+    // Title text
+    auto titleWidget = Text(title)
+                           ->setFontSize(20)
+                           ->setFontWeight(FontWeight::Bold)
+                           ->setTextColor(RGB(255, 255, 255))
+                           ->setPadding(16);
+
+    w->addChild(titleWidget);
+
+    return w;
+}
+
+inline WidgetPtr Scaffold(WidgetPtr appBar = nullptr, WidgetPtr body = nullptr)
+{
+    auto w = std::make_shared<Widget>(WidgetType::Scaffold);
+
+    // Default background
+    w->hasBackground = true;
+    w->backgroundColor = RGB(250, 250, 250);
+
+    auto column = std::make_shared<Widget>(WidgetType::Column);
+    column->setSpacing(0);
+
+    if (appBar)
+    {
+        column->addChild(appBar);
+    }
+
+    if (body)
+    {
+        auto bodyContainer = Container(body);
+        bodyContainer->autoWidth = true;
+        bodyContainer->autoHeight = true;
+        column->addChild(Expanded(bodyContainer));
+    }
+
+    w->addChild(column);
+
+    return w;
+}
+
 
 #endif // FLUTTERUI_HPP
