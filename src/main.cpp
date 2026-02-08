@@ -1,114 +1,63 @@
-#include "flutter_ui.hpp"
-#include <iostream>
-#include <sstream>
+// Your usage code - OPTIMIZED VERSION:
 
-class MultiCounterApp {
+#include "flutter_ui.hpp"
+
+class ReactiveCounter {
+private:
+    FlutterUI* ui;
+    State<int> counter;
+    
 public:
-    FlutterUI ui;
-    int redCounter = 0;
-    int greenCounter = 0;
-    int blueCounter = 0;
+    ReactiveCounter(FlutterUI* app) : ui(app), counter(0, app) {}
     
-    MultiCounterApp(HINSTANCE hInstance) : ui(hInstance) {}
+    void increment() {
+        counter.set(counter.get() + 1); 
+    }
     
-    WidgetPtr createCounter(const std::string& title, int value, COLORREF color, 
-                           std::function<void()> onIncrement, std::function<void()> onDecrement) {
-        std::stringstream ss;
-        ss << value;
-        
-        return Card(
+    void decrement() {
+        counter.set(counter.get() - 1);  
+    }
+    
+
+    WidgetPtr build() {
+        return Center(
             Column(
-                Text(title)
-                    ->setFontSize(18)
+                Text("Reactive Counter")
+                    ->setFontSize(24)
                     ->setFontWeight(FontWeight::Bold)
-                    ->setTextColor(color),
+                    ->setTextColor(RGB(33, 150, 243))
+                    ->setMargin(20),
                 
-                Text(ss.str())
+                // ✅ This widget is created once and bound to state
+                Text(counter)
                     ->setFontSize(48)
-                    ->setFontWeight(FontWeight::Bold)
-                    ->setTextColor(color),
+                    ->setTextColor(RGB(76, 175, 80))
+                    ->setMargin(20),
                 
                 Row(
-                    Button("−", onDecrement)
-                        ->setBackgroundColor(RGB(200, 200, 200))
-                        ->setMinWidth(60),
+                    Button("Decrement", [this]() { decrement(); })
+                        ->setBackgroundColor(RGB(244, 67, 54))
+                        ->setMargin(10),
                     
-                    Button("+", onIncrement)
-                        ->setBackgroundColor(color)
-                        ->setMinWidth(60)
-                )->setSpacing(10)
-                
-            )->setSpacing(10)
-            ->setCrossAlignment(Alignment::Center)
-        )->setMinWidth(150);
-    }
-    
-    WidgetPtr buildUI() {
-        int total = redCounter + greenCounter + blueCounter;
-        std::stringstream totalSS;
-        totalSS << "Total: " << total;
-        
-        return Container(
-            Column(
-                Container(
-                    Text("Multi-Counter Dashboard")
-                        ->setFontSize(32)
-                        ->setFontWeight(FontWeight::Bold)
-                        ->setTextColor(RGB(33, 150, 243))
-                )->setPadding(20)
-                ->setBackgroundColor(RGB(255, 255, 255))
-                ->setId("header"),
-                
-                Padding(20,
-                    Row(
-                        createCounter("Red", redCounter, RGB(244, 67, 54),
-                            [this]() { redCounter++; ui.rebuild(); },
-                            [this]() { redCounter--; ui.rebuild(); }),
-                        
-                        createCounter("Green", greenCounter, RGB(76, 175, 80),
-                            [this]() { greenCounter++; ui.rebuild(); },
-                            [this]() { greenCounter--; ui.rebuild(); }),
-                        
-                        createCounter("Blue", blueCounter, RGB(33, 150, 243),
-                            [this]() { blueCounter++; ui.rebuild(); },
-                            [this]() { blueCounter--; ui.rebuild(); })
-                    )->setSpacing(20)
-                    ->setCrossAlignment(Alignment::Start)
-                ),
-                
-                Container(
-                    Column(
-                        Text(totalSS.str())
-                            ->setFontSize(24)
-                            ->setFontWeight(FontWeight::Bold),
-                        
-                        Button("Reset All", [this]() {
-                            redCounter = greenCounter = blueCounter = 0;
-                            ui.rebuild();
-                        })->setBackgroundColor(RGB(158, 158, 158))
-                        ->setMinWidth(150)
-                        
-                    )->setSpacing(10)
-                    ->setCrossAlignment(Alignment::Center)
-                )->setPadding(20)
-                ->setBackgroundColor(RGB(245, 245, 245))
-                
-            )->setSpacing(0)
+                    Button("Increment", [this]() { increment(); })
+                        ->setBackgroundColor(RGB(76, 175, 80))
+                        ->setMargin(10)
+                )
+            )
         );
-    }
-    
-    int run() {
-        ui.createWindow("Multi-Counter Dashboard", 700, 500);
-        ui.build([this]() { return buildUI(); });
-        return ui.run();
     }
 };
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, 
-                   LPSTR lpCmdLine, int nCmdShow) {
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
+    FlutterUI app(hInstance);
+    ReactiveCounter counterApp(&app);
     
-
+    // ✅ Build is called ONCE during initialization
+    app.build([&counterApp]() {
+        return counterApp.build();
+    });
     
-    MultiCounterApp app(hInstance);
+    app.createWindow("Reactive Counter - Optimized!", 400, 300);
+    
     return app.run();
 }
