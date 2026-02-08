@@ -1,15 +1,21 @@
 // Your usage code - OPTIMIZED VERSION:
 
-#include "flutter_ui.hpp"
+#include "flux_ui.hpp"
 
 class ReactiveCounter
 {
 private:
-    FlutterUI *ui;
+    FluxUI *ui;
     State<int> counter;
+    State<std::string> username;
 
 public:
-    ReactiveCounter(FlutterUI *app) : ui(app), counter(0, app) {}
+    ReactiveCounter(FluxUI *app) : ui(app), username("Guest", app), counter(0, app) {}
+
+    void updateUsername(const std::string &name)
+    {
+        username.set(name);
+    }
 
     void increment()
     {
@@ -26,13 +32,24 @@ public:
         return Scaffold(
             AppBar("My App"),
             Center(
-                Text("Hello World")));
+                Container(
+                    Text("Hello, World!")
+                        ->setFontSize(24)
+                        ->setFontWeight(FontWeight::Bold)
+                        ->setTextColor(RGB(33, 150, 243)))
+                    ->setBackgroundColor(RGB(255, 255, 255))
+                    ->setPadding(30)
+                    ->setBorderRadius(12)
+                    ->setBorderColor(RGB(200, 200, 200))
+                    ->setBorderWidth(2)
+                    ->setWidth(200)
+                    ->setHeight(20)));
     }
 };
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
 {
-    FlutterUI app(hInstance);
+    FluxUI app(hInstance);
     ReactiveCounter counterApp(&app);
 
     // ✅ Build is called ONCE during initialization

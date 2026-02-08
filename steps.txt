@@ -1,5 +1,0 @@
-1. Parser + Basic rendering (1 week)
-2. State management (2 days)
-3. Event handlers (1 day)
-4. Simple layout (2 days)
-5. Flexbox (1 week)

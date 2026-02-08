@@ -1,5 +1,5 @@
-#ifndef FLUTTERUI_HPP
-#define FLUTTERUI_HPP
+#ifndef FLUX_HPP
+#define FLUX_HPP
 
 #include <windows.h>
 #include <string>
@@ -17,7 +17,7 @@
 // ============================================================================
 
 class Widget;
-class FlutterUI;
+class FluxUI;
 template <typename T>
 class State;
 
@@ -1057,7 +1057,7 @@ inline Widget *findWidgetAt(Widget *w, int x, int y)
 // FLUTTERUI CLASS
 // ============================================================================
 
-class FlutterUI
+class FluxUI
 {
 private:
     WidgetPtr root;
@@ -1107,14 +1107,14 @@ private:
 
     static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     {
-        FlutterUI *instance = reinterpret_cast<FlutterUI *>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
+        FluxUI *instance = reinterpret_cast<FluxUI *>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
 
         switch (uMsg)
         {
         case WM_CREATE:
         {
             CREATESTRUCT *pCreate = reinterpret_cast<CREATESTRUCT *>(lParam);
-            instance = reinterpret_cast<FlutterUI *>(pCreate->lpCreateParams);
+            instance = reinterpret_cast<FluxUI *>(pCreate->lpCreateParams);
             SetWindowLongPtr(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(instance));
             return 0;
         }
@@ -1199,9 +1199,9 @@ private:
     }
 
 public:
-    FlutterUI(HINSTANCE hInst) : hInstance(hInst) {}
+    FluxUI(HINSTANCE hInst) : hInstance(hInst) {}
 
-    ~FlutterUI()
+    ~FluxUI()
     {
         destroyBackBuffer();
         fontCache.clear();
@@ -1319,7 +1319,7 @@ public:
         wc.cbSize = sizeof(WNDCLASSEX);
         wc.lpfnWndProc = WindowProc;
         wc.hInstance = hInstance;
-        wc.lpszClassName = "FlutterUI";
+        wc.lpszClassName = "FluxUI";
         wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
         wc.hCursor = LoadCursor(NULL, IDC_ARROW);
         wc.style = CS_HREDRAW | CS_VREDRAW;
@@ -1331,7 +1331,7 @@ public:
 
         hwnd = CreateWindowEx(
             0,
-            "FlutterUI",
+            "FluxUI",
             title.c_str(),
             WS_OVERLAPPEDWINDOW | WS_VISIBLE,
             CW_USEDEFAULT, CW_USEDEFAULT,
@@ -1404,14 +1404,14 @@ private:
 // REACTIVE STATE CLASS
 // ============================================================================
 
-// In FlutterUI.hpp - Update State class:
+// In FluxUI.hpp - Update State class:
 
 template <typename T>
 class State
 {
 private:
     T value;
-    FlutterUI *ui;
+    FluxUI *ui;
     std::vector<std::weak_ptr<Widget>> observers; // ← Changed from raw pointers!
 
     template <typename U = T>
@@ -1429,7 +1429,7 @@ private:
     }
 
 public:
-    State(T initial, FlutterUI *app = nullptr) : value(initial), ui(app) {}
+    State(T initial, FluxUI *app = nullptr) : value(initial), ui(app) {}
 
     T get() const { return value; }
 
@@ -1724,4 +1724,4 @@ inline WidgetPtr Scaffold(WidgetPtr appBar = nullptr, WidgetPtr body = nullptr)
 }
 
 
-#endif // FLUTTERUI_HPP
+#endif // FLUX_HPP
