@@ -1,89 +1,113 @@
-#include "flux_ui.hpp"
-#include <iostream>
-#include <sstream>
+#include "flux.hpp"
 
-class CounterApp {
+class TestComponent
+{
+private:
+    FluxUI *ui;
+    State<int> counter;
+    State<std::string> message;
+
 public:
-    FluxUI ui;
-    int counter = 0;
-    
-    CounterApp(HINSTANCE hInstance) : ui(hInstance) {}
-    
-    void increment() {
+    TestComponent(FluxUI *app)
+        : ui(app),
+          counter(0, app),
+          message("Welcome! Click a button.", app) {}
+
+    void increment()
+    {
         counter++;
-        std::cout << "Incremented! Counter = " << counter << std::endl;
-        ui.rebuild();
+        message = "Counter incremented to " + std::to_string(counter.get());
     }
-    
-    void decrement() {
+
+    void decrement()
+    {
         counter--;
-        std::cout << "Decremented! Counter = " << counter << std::endl;
-        ui.rebuild();
+        message = "Counter decremented to " + std::to_string(counter.get());
     }
-    
-    void reset() {
+
+    void reset()
+    {
         counter = 0;
-        std::cout << "Reset! Counter = " << counter << std::endl;
-        ui.rebuild();
+        message = "Counter has been reset!";
     }
-    
-    WidgetPtr buildUI() {
-        std::cout << "Building UI with counter = " << counter << std::endl;
-        
-        // Create dynamic text using stringstream
-        std::stringstream ss;
-        ss << "Count: " << counter;
-        std::string countText = ss.str();
-        
+
+    WidgetPtr build()
+    {
         return Center(
             Card(
                 Column(
-                    Text("Counter Application")
-                        ->setFontSize(28)
+                    // Title
+                    Text("Test Center Widget")
+                        ->setFontSize(24)
                         ->setFontWeight(FontWeight::Bold)
                         ->setTextColor(RGB(33, 150, 243)),
-                    
+
                     Divider(),
-                    
-                    Text(countText)  // Dynamic text - updates on rebuild!
-                        ->setFontSize(64)
+
+                    // Counter display
+                    Text(counter)
+                        ->setFontSize(48)
                         ->setFontWeight(FontWeight::Bold)
                         ->setTextColor(RGB(76, 175, 80)),
-                    
+
+                    // Message display
+                    Text(message)
+                        ->setFontSize(14)
+                        ->setTextColor(RGB(100, 100, 100)),
                     Divider(),
-                    
+
                     Row(
-                        Button("−", [this]() { decrement(); })
-                            ->setBackgroundColor(RGB(244, 67, 54))
-                            ->setMinWidth(80),
-                        
-                        Button("Reset", [this]() { reset(); })
-                            ->setBackgroundColor(RGB(158, 158, 158))
-                            ->setMinWidth(80),
-                        
-                        Button("+", [this]() { increment(); })
+                        Button("Send Message", [this]()
+                               { increment(); })
                             ->setBackgroundColor(RGB(76, 175, 80))
-                            ->setMinWidth(80)
-                    )->setSpacing(10)
-                    
-                )->setSpacing(20)
-                ->setCrossAlignment(Alignment::Center)
-            )
+                            ->setMargin(5),
+                        Button("Read Message", [this]()
+                               { decrement(); })
+                            ->setBackgroundColor(RGB(76, 175, 80))
+                            ->setMargin(5),
+                        Button("Clear Messages", [this]()
+                               { reset(); })
+                            ->setBackgroundColor(RGB(244, 67, 54))
+                            ->setMargin(5))
+                        ->setMainAxisAlignment(MainAxisAlignment::Center)
+                        ->setSpacing(10),
+
+                    Divider(),
+
+                    // Control buttons
+                    Row(
+                        Button("-", [this]()
+                               { decrement(); })
+                            ->setBackgroundColor(RGB(244, 67, 54))
+                            ->setWidth(80),
+
+                        Button("Reset", [this]()
+                               { reset(); })
+                            ->setBackgroundColor(RGB(158, 158, 158))
+                            ->setWidth(80),
+
+                        Button("+", [this]()
+                               { increment(); })
+                            ->setBackgroundColor(RGB(76, 175, 80))
+                            ->setWidth(80))
+                        ->setSpacing(10)
+                        ->setMainAxisAlignment(MainAxisAlignment::Center))
+                    ->setSpacing(15)
+                    ->setCrossAlignment(Alignment::Center))
+
         );
-    }
-    
-    int run() {
-        ui.createWindow("Flutter-style Counter", 500, 400);
-        ui.build([this]() { return buildUI(); });
-        return ui.run();
     }
 };
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, 
-                   LPSTR lpCmdLine, int nCmdShow) {
-    
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
+{
+    FluxUI app(hInstance);
+    TestComponent test(&app);
 
-    
-    CounterApp app(hInstance);
+    app.build([&test]()
+              { return test.build(); });
+
+    app.createWindow("Testing Center Fix", 600, 400);
+
     return app.run();
 }

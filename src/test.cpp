@@ -1,14 +1,14 @@
-#include "flutter_ui.hpp"
+#include "flux_ui.hpp"
 
 class UserProfile {
 private:
-    FlutterUI* ui;
+    FluxUI* ui;
     State<std::string> username;
     State<std::string> status;
     State<int> messageCount;
     
 public:
-    UserProfile(FlutterUI* app) 
+    UserProfile(FluxUI* app) 
         : ui(app), 
           username("Guest", app),
           status("Offline", app),
@@ -146,7 +146,7 @@ public:
 };
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
-    FlutterUI app(hInstance);
+    FluxUI app(hInstance);
     UserProfile profile(&app);
     
     app.build([&profile]() {
