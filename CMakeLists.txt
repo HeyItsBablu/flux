@@ -5,7 +5,7 @@ project(MyCppProject
     LANGUAGES CXX
 )
 
-# 🔒 Enforce MSVC only
+
 if (NOT MSVC)
     message(FATAL_ERROR "MyCppProject must be built with MSVC (Visual C++).")
 endif()
