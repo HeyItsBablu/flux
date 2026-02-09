@@ -662,7 +662,7 @@ public:
 
         case WidgetType::Center:
         {
-            // FIX: Center should fill available space, not just wrap child
+
             if (!w->children.empty())
             {
                 computeLayout(hdc, w->children[0].get(), contentWidth, contentHeight, fontCache);

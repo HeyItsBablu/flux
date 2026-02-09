@@ -13,7 +13,7 @@ public:
     ReactiveCounter(FluxUI *app) : ui(app), username("Guest", app), counter(0, app) {}
 
     void updateUsername(const std::string &name)
-    {
+    { 
         username.set(name);
     }
 
