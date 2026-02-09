@@ -1,10 +1,10 @@
-#include "flutter_ui.hpp"
+#include "flux_ui.hpp"
 #include <iostream>
 #include <sstream>
 
 class CounterApp {
 public:
-    FlutterUI ui;
+    FluxUI ui;
     int counter = 0;
     
     CounterApp(HINSTANCE hInstance) : ui(hInstance) {}

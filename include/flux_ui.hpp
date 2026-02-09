@@ -10,7 +10,6 @@
 #include <tuple>
 #include <algorithm>
 #include <type_traits>
-#include <unordered_set>
 
 // ============================================================================
 // FORWARD DECLARATIONS
@@ -20,6 +19,7 @@ class Widget;
 class FluxUI;
 template <typename T>
 class State;
+class FontCache;
 
 using WidgetPtr = std::shared_ptr<Widget>;
 using ClickHandler = std::function<void()>;
@@ -27,23 +27,6 @@ using ClickHandler = std::function<void()>;
 // ============================================================================
 // ENUMS
 // ============================================================================
-
-enum class WidgetType
-{
-    Scaffold,
-    AppBar,
-    Container,
-    Text,
-    Button,
-    Row,
-    Column,
-    Padding,
-    Center,
-    SizedBox,
-    Card,
-    Divider,
-    Expanded
-};
 
 enum class Alignment
 {
@@ -121,13 +104,12 @@ public:
 };
 
 // ============================================================================
-// WIDGET CLASS
+// WIDGET BASE CLASS (NOW ABSTRACT WITH VIRTUAL METHODS)
 // ============================================================================
 
 class Widget : public std::enable_shared_from_this<Widget>
 {
 public:
-    WidgetType type;
     std::string id;
     std::string text;
 
@@ -171,7 +153,7 @@ public:
     // Events
     ClickHandler onClick;
 
-    // Dirty flags for optimization
+    // Dirty flags
     bool needsLayout = true;
     bool needsPaint = true;
 
@@ -179,11 +161,17 @@ public:
     std::vector<WidgetPtr> children;
     Widget *parent = nullptr;
 
-    // State binding (for reactive updates)
-    void *boundState = nullptr; // Pointer to State<T> object
+    // State binding
+    void *boundState = nullptr;
 
-    // Constructor
-    explicit Widget(WidgetType t) : type(t) {}
+    virtual ~Widget() = default;
+
+    virtual bool isExpanded() const { return false; }
+
+    // ✅ VIRTUAL METHODS - Override these in subclasses instead of switch/case!
+    virtual void computeLayout(HDC hdc, int availableWidth, int availableHeight, FontCache &fontCache);
+    virtual void positionChildren(int contentX, int contentY, int contentWidth, int contentHeight);
+    virtual void render(HDC hdc, FontCache &fontCache);
 
     // Mark this widget and all parents as needing layout
     void markNeedsLayout()
@@ -196,13 +184,12 @@ public:
         }
     }
 
-    // Mark this widget as needing repaint (without layout)
     void markNeedsPaint()
     {
         needsPaint = true;
     }
 
-    // Builder pattern methods
+    // Builder pattern methods (same as before)
     WidgetPtr setWidth(int w)
     {
         if (width != w)
@@ -451,510 +438,54 @@ public:
 
     const std::string &getText() const { return text; }
     const std::string &getId() const { return id; }
-};
 
-// ============================================================================
-// LAYOUT ENGINE
-// ============================================================================
-
-class LayoutEngine
-{
-public:
-    static void measureText(HDC hdc, Widget *w, FontCache &fontCache)
+    void measureText(HDC hdc, FontCache &fontCache)
     {
-        if (w->text.empty())
+        if (text.empty())
         {
-            w->width = 0;
-            w->height = 0;
+            width = 0;
+            height = 0;
             return;
         }
 
-        HFONT hFont = fontCache.getFont(w->fontSize, w->fontWeight);
+        HFONT hFont = fontCache.getFont(fontSize, fontWeight);
         HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
 
         SIZE size;
-        GetTextExtentPoint32(hdc, w->text.c_str(), (int)w->text.length(), &size);
+        GetTextExtentPoint32(hdc, text.c_str(), (int)text.length(), &size);
 
-        if (w->autoWidth)
-            w->width = size.cx;
-        if (w->autoHeight)
-            w->height = size.cy;
+        if (autoWidth)
+            width = size.cx;
+        if (autoHeight)
+            height = size.cy;
 
         SelectObject(hdc, hOldFont);
     }
 
-    static void computeLayout(HDC hdc, Widget *w, int availableWidth, int availableHeight, FontCache &fontCache)
+protected:
+    void applyConstraints()
     {
-        if (!w)
-            return;
-
-        int contentWidth = availableWidth - w->paddingLeft - w->paddingRight;
-        int contentHeight = availableHeight - w->paddingTop - w->paddingBottom;
-
-        switch (w->type)
-        {
-
-        case WidgetType::AppBar:
-        {
-            // AppBar takes full width, fixed height
-            if (w->autoWidth)
-                w->width = availableWidth;
-
-            // Layout title (first child)
-            if (!w->children.empty())
-            {
-                auto title = w->children[0].get();
-                computeLayout(hdc, title,
-                              w->width - w->paddingLeft - w->paddingRight,
-                              w->height - w->paddingTop - w->paddingBottom,
-                              fontCache);
-            }
-            break;
-        }
-
-        case WidgetType::Scaffold:
-        {
-            // Scaffold fills entire window
-            if (w->autoWidth)
-                w->width = availableWidth;
-            if (w->autoHeight)
-                w->height = availableHeight;
-
-            // Layout the column child (appbar + body)
-            if (!w->children.empty())
-            {
-                computeLayout(hdc, w->children[0].get(), w->width, w->height, fontCache);
-            }
-            break;
-        }
-        case WidgetType::Text:
-        case WidgetType::Button:
-        {
-            measureText(hdc, w, fontCache);
-            w->width += w->paddingLeft + w->paddingRight;
-            w->height += w->paddingTop + w->paddingBottom;
-            break;
-        }
-
-        case WidgetType::Column:
-        {
-            int totalFlex = 0;
-            int fixedHeight = 0;
-
-            for (auto &child : w->children)
-            {
-                if (child->type == WidgetType::Expanded)
-                {
-                    totalFlex += child->flex;
-                }
-                else
-                {
-                    computeLayout(hdc, child.get(), contentWidth, contentHeight, fontCache);
-                    fixedHeight += child->height;
-                }
-            }
-
-            if (!w->children.empty())
-            {
-                fixedHeight += w->spacing * (w->children.size() - 1);
-            }
-
-            int remainingHeight = contentHeight - fixedHeight;
-            if (totalFlex > 0 && remainingHeight > 0)
-            {
-                for (auto &child : w->children)
-                {
-                    if (child->type == WidgetType::Expanded)
-                    {
-                        int expandedHeight = (remainingHeight * child->flex) / totalFlex;
-                        child->height = expandedHeight;
-                        child->autoHeight = false;
-
-                        if (!child->children.empty())
-                        {
-                            computeLayout(hdc, child->children[0].get(), contentWidth, expandedHeight, fontCache);
-                        }
-                    }
-                }
-            }
-
-            int totalHeight = 0;
-            int maxWidth = 0;
-
-            for (size_t i = 0; i < w->children.size(); i++)
-            {
-                auto child = w->children[i].get();
-                if (child->width > maxWidth)
-                    maxWidth = child->width;
-                totalHeight += child->height;
-                if (i < w->children.size() - 1)
-                    totalHeight += w->spacing;
-            }
-
-            if (w->autoWidth)
-                w->width = maxWidth + w->paddingLeft + w->paddingRight;
-            if (w->autoHeight)
-                w->height = totalHeight + w->paddingTop + w->paddingBottom;
-            break;
-        }
-
-        case WidgetType::Row:
-        {
-            int totalFlex = 0;
-            int fixedWidth = 0;
-
-            for (auto &child : w->children)
-            {
-                if (child->type == WidgetType::Expanded)
-                {
-                    totalFlex += child->flex;
-                }
-                else
-                {
-                    computeLayout(hdc, child.get(), contentWidth, contentHeight, fontCache);
-                    fixedWidth += child->width;
-                }
-            }
-
-            if (!w->children.empty())
-            {
-                fixedWidth += w->spacing * (w->children.size() - 1);
-            }
-
-            int remainingWidth = contentWidth - fixedWidth;
-            if (totalFlex > 0 && remainingWidth > 0)
-            {
-                for (auto &child : w->children)
-                {
-                    if (child->type == WidgetType::Expanded)
-                    {
-                        int expandedWidth = (remainingWidth * child->flex) / totalFlex;
-                        child->width = expandedWidth;
-                        child->autoWidth = false;
-
-                        if (!child->children.empty())
-                        {
-                            computeLayout(hdc, child->children[0].get(), expandedWidth, contentHeight, fontCache);
-                        }
-                    }
-                }
-            }
-
-            int totalWidth = 0;
-            int maxHeight = 0;
-
-            for (size_t i = 0; i < w->children.size(); i++)
-            {
-                auto child = w->children[i].get();
-                totalWidth += child->width;
-                if (child->height > maxHeight)
-                    maxHeight = child->height;
-                if (i < w->children.size() - 1)
-                    totalWidth += w->spacing;
-            }
-
-            if (w->autoWidth)
-                w->width = totalWidth + w->paddingLeft + w->paddingRight;
-            if (w->autoHeight)
-                w->height = maxHeight + w->paddingTop + w->paddingBottom;
-            break;
-        }
-
-        case WidgetType::Center:
-        {
-
-            if (!w->children.empty())
-            {
-                computeLayout(hdc, w->children[0].get(), contentWidth, contentHeight, fontCache);
-            }
-            
-            // Center fills all available space (like Container with alignment)
-            if (w->autoWidth)
-                w->width = availableWidth;
-            if (w->autoHeight)
-                w->height = availableHeight;
-            break;
-        }
-
-        case WidgetType::Container:
-        case WidgetType::Padding:
-        case WidgetType::Card:
-        {
-            if (!w->children.empty())
-            {
-                computeLayout(hdc, w->children[0].get(), contentWidth, contentHeight, fontCache);
-                if (w->autoWidth)
-                    w->width = w->children[0]->width + w->paddingLeft + w->paddingRight;
-                if (w->autoHeight)
-                    w->height = w->children[0]->height + w->paddingTop + w->paddingBottom;
-            }
-            break;
-        }
-
-        case WidgetType::SizedBox:
-        {
-            if (!w->children.empty())
-            {
-                computeLayout(hdc, w->children[0].get(),
-                              w->width - w->paddingLeft - w->paddingRight,
-                              w->height - w->paddingTop - w->paddingBottom,
-                              fontCache);
-            }
-            break;
-        }
-
-        case WidgetType::Expanded:
-        {
-            if (!w->children.empty())
-            {
-                computeLayout(hdc, w->children[0].get(),
-                              w->width - w->paddingLeft - w->paddingRight,
-                              w->height - w->paddingTop - w->paddingBottom,
-                              fontCache);
-                if (w->autoWidth)
-                    w->width = w->children[0]->width + w->paddingLeft + w->paddingRight;
-                if (w->autoHeight)
-                    w->height = w->children[0]->height + w->paddingTop + w->paddingBottom;
-            }
-            break;
-        }
-
-        case WidgetType::Divider:
-        {
-            if (w->autoWidth)
-                w->width = availableWidth;
-            break;
-        }
-        }
-
-        if (w->width < w->minWidth)
-            w->width = w->minWidth;
-        if (w->height < w->minHeight)
-            w->height = w->minHeight;
-        if (w->width > w->maxWidth)
-            w->width = w->maxWidth;
-        if (w->height > w->maxHeight)
-            w->height = w->maxHeight;
-
-        w->needsLayout = false;
+        if (width < minWidth)
+            width = minWidth;
+        if (height < minHeight)
+            height = minHeight;
+        if (width > maxWidth)
+            width = maxWidth;
+        if (height > maxHeight)
+            height = maxHeight;
     }
 
-    static void positionWidget(Widget *w, int x, int y)
+    void drawRoundedRectangle(HDC hdc)
     {
-        if (!w)
-            return;
-
-        w->x = x + w->marginLeft;
-        w->y = y + w->marginTop;
-
-        int contentX = w->x + w->paddingLeft;
-        int contentY = w->y + w->paddingTop;
-        int contentWidth = w->width - w->paddingLeft - w->paddingRight;
-        int contentHeight = w->height - w->paddingTop - w->paddingBottom;
-
-        switch (w->type)
-        {
-        case WidgetType::Column:
-        {
-            int totalChildHeight = 0;
-            for (auto &child : w->children)
-            {
-                totalChildHeight += child->height;
-            }
-            totalChildHeight += w->spacing * (w->children.empty() ? 0 : w->children.size() - 1);
-
-            int currentY = contentY;
-
-            if (w->mainAxisAlignment == MainAxisAlignment::Center)
-            {
-                currentY += (contentHeight - totalChildHeight) / 2;
-            }
-            else if (w->mainAxisAlignment == MainAxisAlignment::End)
-            {
-                currentY += contentHeight - totalChildHeight;
-            }
-            else if (w->mainAxisAlignment == MainAxisAlignment::SpaceAround)
-            {
-                int extraSpace = contentHeight - totalChildHeight;
-                int gap = w->children.empty() ? 0 : extraSpace / w->children.size();
-                currentY += gap / 2;
-            }
-            else if (w->mainAxisAlignment == MainAxisAlignment::SpaceEvenly)
-            {
-                int extraSpace = contentHeight - totalChildHeight;
-                int gap = w->children.empty() ? 0 : extraSpace / (w->children.size() + 1);
-                currentY += gap;
-            }
-
-            for (size_t i = 0; i < w->children.size(); i++)
-            {
-                auto &child = w->children[i];
-                int childX = contentX;
-
-                if (w->crossAlignment == Alignment::Center)
-                {
-                    childX = contentX + (contentWidth - child->width) / 2;
-                }
-                else if (w->crossAlignment == Alignment::End)
-                {
-                    childX = contentX + contentWidth - child->width;
-                }
-                else if (w->crossAlignment == Alignment::Stretch)
-                {
-                    child->width = contentWidth;
-                }
-
-                positionWidget(child.get(), childX, currentY);
-                currentY += child->height;
-
-                if (w->mainAxisAlignment == MainAxisAlignment::SpaceBetween && i < w->children.size() - 1)
-                {
-                    int extraSpace = contentHeight - totalChildHeight;
-                    int gap = w->children.size() <= 1 ? 0 : extraSpace / (w->children.size() - 1);
-                    currentY += gap;
-                }
-                else if (w->mainAxisAlignment == MainAxisAlignment::SpaceEvenly && i < w->children.size() - 1)
-                {
-                    int extraSpace = contentHeight - totalChildHeight;
-                    int gap = w->children.empty() ? 0 : extraSpace / (w->children.size() + 1);
-                    currentY += gap;
-                }
-                else if (w->mainAxisAlignment == MainAxisAlignment::SpaceAround && i < w->children.size() - 1)
-                {
-                    int extraSpace = contentHeight - totalChildHeight;
-                    int gap = w->children.empty() ? 0 : extraSpace / w->children.size();
-                    currentY += gap;
-                }
-                else if (i < w->children.size() - 1)
-                {
-                    currentY += w->spacing;
-                }
-            }
-            break;
-        }
-
-        case WidgetType::Row:
-        {
-            int totalChildWidth = 0;
-            for (auto &child : w->children)
-            {
-                totalChildWidth += child->width;
-            }
-            totalChildWidth += w->spacing * (w->children.empty() ? 0 : w->children.size() - 1);
-
-            int currentX = contentX;
-
-            if (w->mainAxisAlignment == MainAxisAlignment::Center)
-            {
-                currentX += (contentWidth - totalChildWidth) / 2;
-            }
-            else if (w->mainAxisAlignment == MainAxisAlignment::End)
-            {
-                currentX += contentWidth - totalChildWidth;
-            }
-            else if (w->mainAxisAlignment == MainAxisAlignment::SpaceAround)
-            {
-                int extraSpace = contentWidth - totalChildWidth;
-                int gap = w->children.empty() ? 0 : extraSpace / w->children.size();
-                currentX += gap / 2;
-            }
-            else if (w->mainAxisAlignment == MainAxisAlignment::SpaceEvenly)
-            {
-                int extraSpace = contentWidth - totalChildWidth;
-                int gap = w->children.empty() ? 0 : extraSpace / (w->children.size() + 1);
-                currentX += gap;
-            }
-
-            for (size_t i = 0; i < w->children.size(); i++)
-            {
-                auto &child = w->children[i];
-                int childY = contentY;
-
-                if (w->crossAlignment == Alignment::Center)
-                {
-                    childY = contentY + (contentHeight - child->height) / 2;
-                }
-                else if (w->crossAlignment == Alignment::End)
-                {
-                    childY = contentY + contentHeight - child->height;
-                }
-                else if (w->crossAlignment == Alignment::Stretch)
-                {
-                    child->height = contentHeight;
-                }
-
-                positionWidget(child.get(), currentX, childY);
-                currentX += child->width;
-
-                if (w->mainAxisAlignment == MainAxisAlignment::SpaceBetween && i < w->children.size() - 1)
-                {
-                    int extraSpace = contentWidth - totalChildWidth;
-                    int gap = w->children.size() <= 1 ? 0 : extraSpace / (w->children.size() - 1);
-                    currentX += gap;
-                }
-                else if (w->mainAxisAlignment == MainAxisAlignment::SpaceEvenly && i < w->children.size() - 1)
-                {
-                    int extraSpace = contentWidth - totalChildWidth;
-                    int gap = w->children.empty() ? 0 : extraSpace / (w->children.size() + 1);
-                    currentX += gap;
-                }
-                else if (w->mainAxisAlignment == MainAxisAlignment::SpaceAround && i < w->children.size() - 1)
-                {
-                    int extraSpace = contentWidth - totalChildWidth;
-                    int gap = w->children.empty() ? 0 : extraSpace / w->children.size();
-                    currentX += gap;
-                }
-                else if (i < w->children.size() - 1)
-                {
-                    currentX += w->spacing;
-                }
-            }
-            break;
-        }
-
-        case WidgetType::Center:
-        {
-            if (!w->children.empty())
-            {
-                auto child = w->children[0].get();
-                int childX = contentX + (contentWidth - child->width) / 2;
-                int childY = contentY + (contentHeight - child->height) / 2;
-                positionWidget(child, childX, childY);
-            }
-            break;
-        }
-
-        default:
-        {
-            for (auto &child : w->children)
-            {
-                positionWidget(child.get(), contentX, contentY);
-            }
-            break;
-        }
-        }
-    }
-};
-
-// ============================================================================
-// RENDERER
-// ============================================================================
-
-class Renderer
-{
-public:
-    static void drawRoundedRectangle(HDC hdc, int x, int y, int width, int height, int radius,
-                                     COLORREF fillColor, COLORREF borderColor, int borderWidth, bool hasBorder)
-    {
-        if (radius > 0)
+        if (borderRadius > 0)
         {
             HPEN pen = hasBorder ? CreatePen(PS_SOLID, borderWidth, borderColor) : CreatePen(PS_NULL, 0, 0);
-            HBRUSH brush = CreateSolidBrush(fillColor);
+            HBRUSH brush = CreateSolidBrush(backgroundColor);
 
             HPEN oldPen = (HPEN)SelectObject(hdc, pen);
             HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, brush);
 
-            RoundRect(hdc, x, y, x + width, y + height, radius * 2, radius * 2);
+            RoundRect(hdc, x, y, x + width, y + height, borderRadius * 2, borderRadius * 2);
 
             SelectObject(hdc, oldBrush);
             SelectObject(hdc, oldPen);
@@ -963,7 +494,7 @@ public:
         }
         else
         {
-            HBRUSH brush = CreateSolidBrush(fillColor);
+            HBRUSH brush = CreateSolidBrush(backgroundColor);
             RECT rect = {x, y, x + width, y + height};
             FillRect(hdc, &rect, brush);
             DeleteObject(brush);
@@ -983,48 +514,584 @@ public:
         }
     }
 
-    static void renderWidget(HDC hdc, Widget *w, FontCache &fontCache)
+    void renderText(HDC hdc, FontCache &fontCache, UINT format = DT_LEFT | DT_VCENTER | DT_SINGLELINE)
+    {
+        if (text.empty())
+            return;
+
+        SetTextColor(hdc, textColor);
+        SetBkMode(hdc, TRANSPARENT);
+
+        HFONT hFont = fontCache.getFont(fontSize, fontWeight);
+        HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
+
+        RECT textRect = {
+            x + paddingLeft,
+            y + paddingTop,
+            x + width - paddingRight,
+            y + height - paddingBottom};
+
+        DrawText(hdc, text.c_str(), -1, &textRect, format);
+
+        SelectObject(hdc, hOldFont);
+    }
+};
+
+// ============================================================================
+// CONCRETE WIDGET CLASSES
+// ============================================================================
+
+// --- Text Widget ---
+class TextWidget : public Widget
+{
+public:
+    void computeLayout(HDC hdc, int availableWidth, int availableHeight, FontCache &fontCache) override
+    {
+        measureText(hdc, fontCache);
+        width += paddingLeft + paddingRight;
+        height += paddingTop + paddingBottom;
+        applyConstraints();
+        needsLayout = false;
+    }
+
+    void render(HDC hdc, FontCache &fontCache) override
+    {
+        if (hasBackground)
+        {
+            drawRoundedRectangle(hdc);
+        }
+        renderText(hdc, fontCache);
+        needsPaint = false;
+    }
+};
+
+// --- Button Widget ---
+class ButtonWidget : public Widget
+{
+public:
+    void computeLayout(HDC hdc, int availableWidth, int availableHeight, FontCache &fontCache) override
+    {
+        measureText(hdc, fontCache);
+        width += paddingLeft + paddingRight;
+        height += paddingTop + paddingBottom;
+        applyConstraints();
+        needsLayout = false;
+    }
+
+    void render(HDC hdc, FontCache &fontCache) override
+    {
+        if (hasBackground)
+        {
+            drawRoundedRectangle(hdc);
+        }
+        renderText(hdc, fontCache, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        needsPaint = false;
+    }
+};
+
+// --- Column Widget ---
+class ColumnWidget : public Widget
+{
+public:
+    void computeLayout(HDC hdc, int availableWidth, int availableHeight, FontCache &fontCache) override
+    {
+        int contentWidth = availableWidth - paddingLeft - paddingRight;
+        int contentHeight = availableHeight - paddingTop - paddingBottom;
+
+        int totalFlex = 0;
+        int fixedHeight = 0;
+
+        // ✅ FIXED: Use virtual method instead of dynamic_cast
+        for (auto &child : children)
+        {
+            if (child->isExpanded())
+            {
+                totalFlex += child->flex;
+            }
+            else
+            {
+                child->computeLayout(hdc, contentWidth, contentHeight, fontCache);
+                fixedHeight += child->height;
+            }
+        }
+
+        if (!children.empty())
+        {
+            fixedHeight += spacing * (children.size() - 1);
+        }
+
+        // Second pass: distribute remaining space to flex children
+        int remainingHeight = contentHeight - fixedHeight;
+        if (totalFlex > 0 && remainingHeight > 0)
+        {
+            for (auto &child : children)
+            {
+                if (child->isExpanded())
+                {
+                    int expandedHeight = (remainingHeight * child->flex) / totalFlex;
+                    child->height = expandedHeight;
+                    child->autoHeight = false;
+                    child->computeLayout(hdc, contentWidth, expandedHeight, fontCache);
+                }
+            }
+        }
+
+        // Calculate final size
+        int totalHeight = 0;
+        int maxWidth = 0;
+
+        for (size_t i = 0; i < children.size(); i++)
+        {
+            auto &child = children[i];
+            if (child->width > maxWidth)
+                maxWidth = child->width;
+            totalHeight += child->height;
+            if (i < children.size() - 1)
+                totalHeight += spacing;
+        }
+
+        if (autoWidth)
+            width = maxWidth + paddingLeft + paddingRight;
+        if (autoHeight)
+            height = totalHeight + paddingTop + paddingBottom;
+
+        applyConstraints();
+        needsLayout = false;
+    }
+
+    void positionChildren(int contentX, int contentY, int contentWidth, int contentHeight) override
+    {
+        int totalChildHeight = 0;
+        for (auto &child : children)
+        {
+            totalChildHeight += child->height;
+        }
+        totalChildHeight += spacing * (children.empty() ? 0 : children.size() - 1);
+
+        int currentY = contentY;
+
+        if (mainAxisAlignment == MainAxisAlignment::Center)
+        {
+            currentY += (contentHeight - totalChildHeight) / 2;
+        }
+        else if (mainAxisAlignment == MainAxisAlignment::End)
+        {
+            currentY += contentHeight - totalChildHeight;
+        }
+
+        for (size_t i = 0; i < children.size(); i++)
+        {
+            auto &child = children[i];
+            int childX = contentX;
+
+            if (crossAlignment == Alignment::Center)
+            {
+                childX = contentX + (contentWidth - child->width) / 2;
+            }
+            else if (crossAlignment == Alignment::End)
+            {
+                childX = contentX + contentWidth - child->width;
+            }
+            else if (crossAlignment == Alignment::Stretch)
+            {
+                child->width = contentWidth;
+            }
+
+            child->x = childX + child->marginLeft;
+            child->y = currentY + child->marginTop;
+
+            child->positionChildren(
+                child->x + child->paddingLeft,
+                child->y + child->paddingTop,
+                child->width - child->paddingLeft - child->paddingRight,
+                child->height - child->paddingTop - child->paddingBottom);
+
+            currentY += child->height + (i < children.size() - 1 ? spacing : 0);
+        }
+    }
+};
+
+// --- Row Widget ---
+class RowWidget : public Widget
+{
+public:
+    void computeLayout(HDC hdc, int availableWidth, int availableHeight, FontCache &fontCache) override
+    {
+        int contentWidth = availableWidth - paddingLeft - paddingRight;
+        int contentHeight = availableHeight - paddingTop - paddingBottom;
+
+        int totalFlex = 0;
+        int fixedWidth = 0;
+
+        // ✅ FIXED: Use virtual method
+        for (auto &child : children)
+        {
+            if (child->isExpanded())
+            {
+                totalFlex += child->flex;
+            }
+            else
+            {
+                child->computeLayout(hdc, contentWidth, contentHeight, fontCache);
+                fixedWidth += child->width;
+            }
+        }
+
+        if (!children.empty())
+        {
+            fixedWidth += spacing * (children.size() - 1);
+        }
+
+        int remainingWidth = contentWidth - fixedWidth;
+        if (totalFlex > 0 && remainingWidth > 0)
+        {
+            for (auto &child : children)
+            {
+                if (child->isExpanded())
+                {
+                    int expandedWidth = (remainingWidth * child->flex) / totalFlex;
+                    child->width = expandedWidth;
+                    child->autoWidth = false;
+                    child->computeLayout(hdc, expandedWidth, contentHeight, fontCache);
+                }
+            }
+        }
+
+        int totalWidth = 0;
+        int maxHeight = 0;
+
+        for (size_t i = 0; i < children.size(); i++)
+        {
+            auto &child = children[i];
+            totalWidth += child->width;
+            if (child->height > maxHeight)
+                maxHeight = child->height;
+            if (i < children.size() - 1)
+                totalWidth += spacing;
+        }
+
+        if (autoWidth)
+            width = totalWidth + paddingLeft + paddingRight;
+        if (autoHeight)
+            height = maxHeight + paddingTop + paddingBottom;
+
+        applyConstraints();
+        needsLayout = false;
+    }
+
+    void positionChildren(int contentX, int contentY, int contentWidth, int contentHeight) override
+    {
+        int totalChildWidth = 0;
+        for (auto &child : children)
+        {
+            totalChildWidth += child->width;
+        }
+        totalChildWidth += spacing * (children.empty() ? 0 : children.size() - 1);
+
+        int currentX = contentX;
+
+        if (mainAxisAlignment == MainAxisAlignment::Center)
+        {
+            currentX += (contentWidth - totalChildWidth) / 2;
+        }
+        else if (mainAxisAlignment == MainAxisAlignment::End)
+        {
+            currentX += contentWidth - totalChildWidth;
+        }
+
+        for (size_t i = 0; i < children.size(); i++)
+        {
+            auto &child = children[i];
+            int childY = contentY;
+
+            if (crossAlignment == Alignment::Center)
+            {
+                childY = contentY + (contentHeight - child->height) / 2;
+            }
+            else if (crossAlignment == Alignment::End)
+            {
+                childY = contentY + contentHeight - child->height;
+            }
+            else if (crossAlignment == Alignment::Stretch)
+            {
+                child->height = contentHeight;
+            }
+
+            child->x = currentX + child->marginLeft;
+            child->y = childY + child->marginTop;
+
+            child->positionChildren(
+                child->x + child->paddingLeft,
+                child->y + child->paddingTop,
+                child->width - child->paddingLeft - child->paddingRight,
+                child->height - child->paddingTop - child->paddingBottom);
+
+            currentX += child->width + (i < children.size() - 1 ? spacing : 0);
+        }
+    }
+};
+
+// --- Container/Padding/Card Widgets ---
+class ContainerWidget : public Widget
+{
+public:
+    void computeLayout(HDC hdc, int availableWidth, int availableHeight, FontCache &fontCache) override
+    {
+        int contentWidth = availableWidth - paddingLeft - paddingRight;
+        int contentHeight = availableHeight - paddingTop - paddingBottom;
+
+        if (!children.empty())
+        {
+            children[0]->computeLayout(hdc, contentWidth, contentHeight, fontCache);
+            if (autoWidth)
+                width = children[0]->width + paddingLeft + paddingRight;
+            if (autoHeight)
+                height = children[0]->height + paddingTop + paddingBottom;
+        }
+
+        applyConstraints();
+        needsLayout = false;
+    }
+};
+
+// --- Center Widget ---
+class CenterWidget : public Widget
+{
+public:
+    void computeLayout(HDC hdc, int availableWidth, int availableHeight, FontCache &fontCache) override
+    {
+        int contentWidth = availableWidth - paddingLeft - paddingRight;
+        int contentHeight = availableHeight - paddingTop - paddingBottom;
+
+        if (!children.empty())
+        {
+            children[0]->computeLayout(hdc, contentWidth, contentHeight, fontCache);
+        }
+
+        if (autoWidth)
+            width = availableWidth;
+        if (autoHeight)
+            height = availableHeight;
+
+        applyConstraints();
+        needsLayout = false;
+    }
+
+    void positionChildren(int contentX, int contentY, int contentWidth, int contentHeight) override
+    {
+        if (!children.empty())
+        {
+            auto &child = children[0];
+            int childX = contentX + (contentWidth - child->width) / 2;
+            int childY = contentY + (contentHeight - child->height) / 2;
+
+            child->x = childX + child->marginLeft;
+            child->y = childY + child->marginTop;
+
+            child->positionChildren(
+                child->x + child->paddingLeft,
+                child->y + child->paddingTop,
+                child->width - child->paddingLeft - child->paddingRight,
+                child->height - child->paddingTop - child->paddingBottom);
+        }
+    }
+};
+
+// --- SizedBox Widget ---
+class SizedBoxWidget : public Widget
+{
+public:
+    void computeLayout(HDC hdc, int availableWidth, int availableHeight, FontCache &fontCache) override
+    {
+        if (!children.empty())
+        {
+            children[0]->computeLayout(hdc,
+                                       width - paddingLeft - paddingRight,
+                                       height - paddingTop - paddingBottom,
+                                       fontCache);
+        }
+        applyConstraints();
+        needsLayout = false;
+    }
+};
+
+// --- Expanded Widget ---
+class ExpandedWidget : public Widget
+{
+public:
+    // ✅ OVERRIDE: Mark this as an expanded widget
+    bool isExpanded() const override { return true; }
+
+    void computeLayout(HDC hdc, int availableWidth, int availableHeight, FontCache &fontCache) override
+    {
+        if (!children.empty())
+        {
+            children[0]->computeLayout(hdc,
+                                       width - paddingLeft - paddingRight,
+                                       height - paddingTop - paddingBottom,
+                                       fontCache);
+            if (autoWidth)
+                width = children[0]->width + paddingLeft + paddingRight;
+            if (autoHeight)
+                height = children[0]->height + paddingTop + paddingBottom;
+        }
+        applyConstraints();
+        needsLayout = false;
+    }
+};
+
+// --- Divider Widget ---
+class DividerWidget : public Widget
+{
+public:
+    void computeLayout(HDC hdc, int availableWidth, int availableHeight, FontCache &fontCache) override
+    {
+        if (autoWidth)
+            width = availableWidth;
+        applyConstraints();
+        needsLayout = false;
+    }
+
+    void render(HDC hdc, FontCache &fontCache) override
+    {
+        if (hasBackground)
+        {
+            drawRoundedRectangle(hdc);
+        }
+        needsPaint = false;
+    }
+};
+
+// --- Scaffold Widget ---
+class ScaffoldWidget : public Widget
+{
+public:
+    void computeLayout(HDC hdc, int availableWidth, int availableHeight, FontCache &fontCache) override
+    {
+        if (autoWidth)
+            width = availableWidth;
+        if (autoHeight)
+            height = availableHeight;
+
+        if (!children.empty())
+        {
+            children[0]->computeLayout(hdc, width, height, fontCache);
+        }
+
+        applyConstraints();
+        needsLayout = false;
+    }
+};
+
+// --- AppBar Widget ---
+class AppBarWidget : public Widget
+{
+public:
+    void computeLayout(HDC hdc, int availableWidth, int availableHeight, FontCache &fontCache) override
+    {
+        if (autoWidth)
+            width = availableWidth;
+
+        if (!children.empty())
+        {
+            auto &title = children[0];
+            title->computeLayout(hdc,
+                                 width - paddingLeft - paddingRight,
+                                 height - paddingTop - paddingBottom,
+                                 fontCache);
+        }
+
+        applyConstraints();
+        needsLayout = false;
+    }
+};
+// ============================================================================
+// DEFAULT IMPLEMENTATIONS FOR BASE WIDGET
+// ============================================================================
+
+void Widget::computeLayout(HDC hdc, int availableWidth, int availableHeight, FontCache &fontCache)
+{
+    // Default: just apply constraints
+    applyConstraints();
+    needsLayout = false;
+}
+
+void Widget::positionChildren(int contentX, int contentY, int contentWidth, int contentHeight)
+{
+    // Default: position children at content origin
+    for (auto &child : children)
+    {
+        child->x = contentX + child->marginLeft;
+        child->y = contentY + child->marginTop;
+
+        child->positionChildren(
+            child->x + child->paddingLeft,
+            child->y + child->paddingTop,
+            child->width - child->paddingLeft - child->paddingRight,
+            child->height - child->paddingTop - child->paddingBottom);
+    }
+}
+
+void Widget::render(HDC hdc, FontCache &fontCache)
+{
+    // Default: draw background if has one
+    if (hasBackground)
+    {
+        drawRoundedRectangle(hdc);
+    }
+
+    // Render all children
+    for (auto &child : children)
+    {
+        child->render(hdc, fontCache);
+    }
+
+    needsPaint = false;
+}
+
+// ============================================================================
+// LAYOUT ENGINE (MUCH SIMPLER NOW!)
+// ============================================================================
+
+class LayoutEngine
+{
+public:
+    static void computeLayout(HDC hdc, Widget *w, int availableWidth, int availableHeight, FontCache &fontCache)
+    {
+        if (!w)
+            return;
+        w->computeLayout(hdc, availableWidth, availableHeight, fontCache);
+    }
+
+    static void positionWidget(Widget *w, int x, int y)
     {
         if (!w)
             return;
 
-        if (w->hasBackground)
-        {
-            drawRoundedRectangle(hdc, w->x, w->y, w->width, w->height, w->borderRadius,
-                                 w->backgroundColor, w->borderColor, w->borderWidth, w->hasBorder);
-        }
+        w->x = x + w->marginLeft;
+        w->y = y + w->marginTop;
 
-        if ((w->type == WidgetType::Text || w->type == WidgetType::Button) && !w->text.empty())
-        {
-            SetTextColor(hdc, w->textColor);
-            SetBkMode(hdc, TRANSPARENT);
+        int contentX = w->x + w->paddingLeft;
+        int contentY = w->y + w->paddingTop;
+        int contentWidth = w->width - w->paddingLeft - w->paddingRight;
+        int contentHeight = w->height - w->paddingTop - w->paddingBottom;
 
-            HFONT hFont = fontCache.getFont(w->fontSize, w->fontWeight);
-            HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
+        w->positionChildren(contentX, contentY, contentWidth, contentHeight);
+    }
+};
 
-            RECT textRect = {
-                w->x + w->paddingLeft,
-                w->y + w->paddingTop,
-                w->x + w->width - w->paddingRight,
-                w->y + w->height - w->paddingBottom};
+// ============================================================================
+// RENDERER (MUCH SIMPLER NOW!)
+// ============================================================================
 
-            UINT format = DT_LEFT | DT_VCENTER | DT_SINGLELINE;
-            if (w->type == WidgetType::Button)
-            {
-                format = DT_CENTER | DT_VCENTER | DT_SINGLELINE;
-            }
-
-            DrawText(hdc, w->text.c_str(), -1, &textRect, format);
-
-            SelectObject(hdc, hOldFont);
-        }
-
-        for (auto &child : w->children)
-        {
-            renderWidget(hdc, child.get(), fontCache);
-        }
-
-        w->needsPaint = false;
+class Renderer
+{
+public:
+    static void renderWidget(HDC hdc, Widget *w, FontCache &fontCache)
+    {
+        if (!w)
+            return;
+        w->render(hdc, fontCache);
     }
 };
 
@@ -1054,7 +1121,7 @@ inline Widget *findWidgetAt(Widget *w, int x, int y)
 }
 
 // ============================================================================
-// FLUTTERUI CLASS
+// FLUXUI CLASS (UNCHANGED)
 // ============================================================================
 
 class FluxUI
@@ -1236,45 +1303,37 @@ public:
         }
     }
 
-    // ✅ NEW: Smart selective update - only updates specific widget
     void updateWidget(Widget *widget)
     {
         if (!widget || !hwnd)
             return;
 
-        // Store old dimensions
         int oldWidth = widget->width;
         int oldHeight = widget->height;
 
-        // Remeasure the widget
         HDC hdc = GetDC(hwnd);
-        LayoutEngine::measureText(hdc, widget, fontCache);
+        widget->measureText(hdc, fontCache);
         widget->width += widget->paddingLeft + widget->paddingRight;
         widget->height += widget->paddingTop + widget->paddingBottom;
         ReleaseDC(hwnd, hdc);
 
-        // Check if size changed
         bool sizeChanged = (oldWidth != widget->width || oldHeight != widget->height);
 
         if (sizeChanged)
         {
-            // Size changed - need to recalculate parent layouts
             partialRebuild(widget);
         }
         else
         {
-            // Same size - just repaint this widget
             invalidateWidget(widget);
         }
     }
 
-    // ✅ NEW: Invalidate only a specific widget (for same-size updates)
     void invalidateWidget(Widget *widget)
     {
         if (!widget || !hwnd)
             return;
 
-        // Only invalidate this widget's rectangle
         RECT rect = {
             widget->x,
             widget->y,
@@ -1284,7 +1343,6 @@ public:
         InvalidateRect(hwnd, &rect, FALSE);
     }
 
-    // ✅ NEW: Partial rebuild (widget + parents only)
     void partialRebuild(Widget *widget)
     {
         if (!widget || !hwnd)
@@ -1295,7 +1353,6 @@ public:
         int width = rect.right - rect.left;
         int height = rect.bottom - rect.top;
 
-        // Recalculate from this widget up to root
         Widget *current = widget;
         while (current)
         {
@@ -1303,13 +1360,11 @@ public:
             current = current->parent;
         }
 
-        // Recalculate entire tree (parents affect children)
         HDC hdc = GetDC(hwnd);
         LayoutEngine::computeLayout(hdc, root.get(), width, height, fontCache);
         LayoutEngine::positionWidget(root.get(), 0, 0);
         ReleaseDC(hwnd, hdc);
 
-        // Invalidate entire window (since parent sizes might have changed)
         InvalidateRect(hwnd, NULL, FALSE);
     }
 
@@ -1404,15 +1459,13 @@ private:
 // REACTIVE STATE CLASS
 // ============================================================================
 
-// In FluxUI.hpp - Update State class:
-
 template <typename T>
 class State
 {
 private:
     T value;
     FluxUI *ui;
-    std::vector<std::weak_ptr<Widget>> observers; // ← Changed from raw pointers!
+    std::vector<std::weak_ptr<Widget>> observers;
 
     template <typename U = T>
     typename std::enable_if<std::is_arithmetic<U>::value, std::string>::type
@@ -1441,14 +1494,12 @@ public:
         value = newValue;
         std::string newText = valueToString(value);
 
-        // Remove expired observers (cleanup)
         observers.erase(
             std::remove_if(observers.begin(), observers.end(),
                            [](const std::weak_ptr<Widget> &w)
                            { return w.expired(); }),
             observers.end());
 
-        // Update all live observers
         for (auto &weakWidget : observers)
         {
             if (auto widget = weakWidget.lock())
@@ -1457,18 +1508,17 @@ public:
 
                 if (ui)
                 {
-                    ui->updateWidget(widget.get()); // Smart update!
+                    ui->updateWidget(widget.get());
                 }
             }
         }
     }
 
-    // ✅ Changed to accept shared_ptr
     void addObserver(std::shared_ptr<Widget> widget)
     {
         if (widget)
         {
-            observers.push_back(widget); // Store as weak_ptr
+            observers.push_back(widget);
             widget->boundState = this;
         }
     }
@@ -1520,14 +1570,13 @@ public:
     }
 };
 
-
 // ============================================================================
-// WIDGET FACTORY FUNCTIONS
+// WIDGET FACTORY FUNCTIONS (UPDATED TO USE NEW CLASSES)
 // ============================================================================
 
 inline WidgetPtr Container(WidgetPtr child = nullptr)
 {
-    auto w = std::make_shared<Widget>(WidgetType::Container);
+    auto w = std::make_shared<ContainerWidget>();
     if (child)
         w->addChild(child);
     return w;
@@ -1535,12 +1584,11 @@ inline WidgetPtr Container(WidgetPtr child = nullptr)
 
 inline WidgetPtr Text(const std::string &text)
 {
-    auto w = std::make_shared<Widget>(WidgetType::Text);
+    auto w = std::make_shared<TextWidget>();
     w->text = text;
     return w;
 }
 
-// Helper functions for state to string conversion
 template <typename T>
 typename std::enable_if<std::is_arithmetic<T>::value, std::string>::type
 convertStateToString(State<T> &state)
@@ -1558,20 +1606,15 @@ convertStateToString(State<T> &state)
 template <typename T>
 inline WidgetPtr Text(State<T> &state)
 {
-    auto w = std::make_shared<Widget>(WidgetType::Text);
-
-    // Convert state value to string
+    auto w = std::make_shared<TextWidget>();
     w->text = convertStateToString(state);
-
-    // ✅ Pass shared_ptr instead of raw pointer!
-    state.addObserver(w); // Now accepts shared_ptr
-
+    state.addObserver(w);
     return w;
 }
 
 inline WidgetPtr Button(const std::string &text, ClickHandler onClick = nullptr)
 {
-    auto w = std::make_shared<Widget>(WidgetType::Button);
+    auto w = std::make_shared<ButtonWidget>();
     w->text = text;
     w->onClick = onClick;
 
@@ -1589,7 +1632,7 @@ inline WidgetPtr Button(const std::string &text, ClickHandler onClick = nullptr)
 template <typename... Widgets>
 WidgetPtr Row(Widgets... widgets)
 {
-    auto w = std::make_shared<Widget>(WidgetType::Row);
+    auto w = std::make_shared<RowWidget>();
     (w->addChild(widgets), ...);
     return w;
 }
@@ -1597,14 +1640,14 @@ WidgetPtr Row(Widgets... widgets)
 template <typename... Widgets>
 WidgetPtr Column(Widgets... widgets)
 {
-    auto w = std::make_shared<Widget>(WidgetType::Column);
+    auto w = std::make_shared<ColumnWidget>();
     (w->addChild(widgets), ...);
     return w;
 }
 
 inline WidgetPtr Padding(int padding, WidgetPtr child)
 {
-    auto w = std::make_shared<Widget>(WidgetType::Padding);
+    auto w = std::make_shared<ContainerWidget>();
     w->padding = padding;
     w->paddingLeft = w->paddingRight = w->paddingTop = w->paddingBottom = padding;
     if (child)
@@ -1614,7 +1657,7 @@ inline WidgetPtr Padding(int padding, WidgetPtr child)
 
 inline WidgetPtr Center(WidgetPtr child)
 {
-    auto w = std::make_shared<Widget>(WidgetType::Center);
+    auto w = std::make_shared<CenterWidget>();
     w->alignment = Alignment::Center;
     if (child)
         w->addChild(child);
@@ -1623,7 +1666,7 @@ inline WidgetPtr Center(WidgetPtr child)
 
 inline WidgetPtr SizedBox(int width, int height, WidgetPtr child = nullptr)
 {
-    auto w = std::make_shared<Widget>(WidgetType::SizedBox);
+    auto w = std::make_shared<SizedBoxWidget>();
     w->width = width;
     w->height = height;
     w->autoWidth = false;
@@ -1635,7 +1678,7 @@ inline WidgetPtr SizedBox(int width, int height, WidgetPtr child = nullptr)
 
 inline WidgetPtr Card(WidgetPtr child)
 {
-    auto w = std::make_shared<Widget>(WidgetType::Card);
+    auto w = std::make_shared<ContainerWidget>();
     w->hasBackground = true;
     w->backgroundColor = RGB(255, 255, 255);
     w->hasBorder = true;
@@ -1650,7 +1693,7 @@ inline WidgetPtr Card(WidgetPtr child)
 
 inline WidgetPtr Divider()
 {
-    auto w = std::make_shared<Widget>(WidgetType::Divider);
+    auto w = std::make_shared<DividerWidget>();
     w->height = 1;
     w->autoHeight = false;
     w->hasBackground = true;
@@ -1660,29 +1703,22 @@ inline WidgetPtr Divider()
 
 inline WidgetPtr Expanded(WidgetPtr child, int flex = 1)
 {
-    auto w = std::make_shared<Widget>(WidgetType::Expanded);
+    auto w = std::make_shared<ExpandedWidget>();
     w->flex = flex;
     if (child)
         w->addChild(child);
     return w;
 }
 
-
-// ============================================================================
-// SCAFFOLD & APPBAR WIDGETS
-// ============================================================================
-
 inline WidgetPtr AppBar(const std::string &title)
 {
-    auto w = std::make_shared<Widget>(WidgetType::AppBar);
+    auto w = std::make_shared<AppBarWidget>();
 
-    // AppBar styling
     w->hasBackground = true;
-    w->backgroundColor = RGB(33, 150, 243); // Material blue
+    w->backgroundColor = RGB(33, 150, 243);
     w->height = 56;
     w->autoHeight = false;
 
-    // Title text
     auto titleWidget = Text(title)
                            ->setFontSize(20)
                            ->setFontWeight(FontWeight::Bold)
@@ -1696,13 +1732,12 @@ inline WidgetPtr AppBar(const std::string &title)
 
 inline WidgetPtr Scaffold(WidgetPtr appBar = nullptr, WidgetPtr body = nullptr)
 {
-    auto w = std::make_shared<Widget>(WidgetType::Scaffold);
+    auto w = std::make_shared<ScaffoldWidget>();
 
-    // Default background
     w->hasBackground = true;
     w->backgroundColor = RGB(250, 250, 250);
 
-    auto column = std::make_shared<Widget>(WidgetType::Column);
+    auto column = std::make_shared<ColumnWidget>();
     column->setSpacing(0);
 
     if (appBar)
@@ -1722,6 +1757,5 @@ inline WidgetPtr Scaffold(WidgetPtr appBar = nullptr, WidgetPtr body = nullptr)
 
     return w;
 }
-
 
 #endif // FLUX_HPP
