@@ -1,159 +1,84 @@
-#include "flux_ui.hpp"
+#include "flux.hpp"
 
-class UserProfile {
+#include <windows.h>
+
+// Counter component using class-based inheritance
+class CounterComponent : public StatefulComponent
+{
 private:
-    FluxUI* ui;
-    State<std::string> username;
-    State<std::string> status;
-    State<int> messageCount;
-    
+    State<int> counter;
+
 public:
-    UserProfile(FluxUI* app) 
-        : ui(app), 
-          username("Guest", app),
-          status("Offline", app),
-          messageCount(0, app) {}
-    
-    void updateUsername(const std::string& name) {
-        username.set(name);
+    CounterComponent(FluxUI *ctx)
+        : StatefulComponent(ctx),
+          counter(0, ctx) // Initialize counter state
+    {
     }
-    
-    void toggleStatus() {
-        if (status.get() == "Offline") {
-            status.set("Online");
-        } else {
-            status.set("Offline");
-        }
+
+    void initState() override
+    {
+        // Optional: Add listener to log changes
+        counter.listen([](int value)
+                       {
+                           // This runs whenever counter changes
+                           // OutputDebugString(("Counter changed to: " + std::to_string(value) + "\n").c_str());
+                       });
     }
-    
-    void sendMessage() {
-        messageCount++;  // Uses operator++
-    }
-    
-    void clearMessages() {
-        messageCount = 0;  // Uses operator=
-    }
-    
-    WidgetPtr build() {
-        return Center(
-            Card(
+
+    WidgetPtr build() override
+    {
+        return Scaffold(
+
+            Center(
                 Column(
-                    // Title
-                    Text("User Profile")
-                        ->setFontSize(28)
+                    // Display the counter value
+                    Text(counter)
+                        ->setFontSize(48)
                         ->setFontWeight(FontWeight::Bold)
-                        ->setTextColor(RGB(33, 150, 243))
-                        ->setMargin(10),
-                    
-                    Divider(),
-                    
-                    // Username display (State<string>)
+                        ->setTextColor(RGB(33, 150, 243)),
+
+                    SizedBox(0, 20), // Spacer
+
+                    // Row of buttons
                     Row(
-                        Text("Username: ")
-                            ->setFontSize(16)
-                            ->setMargin(10),
-                        
-                        Text(username)  // ← State<string> binding!
-                            ->setFontSize(16)
-                            ->setFontWeight(FontWeight::Bold)
-                            ->setTextColor(RGB(76, 175, 80))
-                    )->setSpacing(5),
-                    
-                    // Status display (State<string>)
-                    Row(
-                        Text("Status: ")
-                            ->setFontSize(16)
-                            ->setMargin(10),
-                        
-                        Text(status)  // ← State<string> binding!
-                            ->setFontSize(16)
-                            ->setFontWeight(FontWeight::Bold)
-                            ->setTextColor(RGB(255, 152, 0))
-                    )->setSpacing(5),
-                    
-                    // Message count (State<int>)
-                    Row(
-                        Text("Messages: ")
-                            ->setFontSize(16)
-                            ->setMargin(10),
-                        
-                        Text(messageCount)  // ← State<int> binding!
-                            ->setFontSize(16)
-                            ->setFontWeight(FontWeight::Bold)
-                            ->setTextColor(RGB(156, 39, 176))
-                    )->setSpacing(5),
-                    
-                    Divider(),
-                    
-                    // Username buttons
-                    Text("Change Username:")
-                        ->setFontSize(14)
-                        ->setMargin(10),
-                    
-                    Row(
-                        Button("Alice", [this]() { 
-                            updateUsername("Alice"); 
-                        })
-                            ->setBackgroundColor(RGB(33, 150, 243))
-                            ->setMargin(5),
-                        
-                        Button("Bob", [this]() { 
-                            updateUsername("Bob"); 
-                        })
-                            ->setBackgroundColor(RGB(33, 150, 243))
-                            ->setMargin(5),
-                        
-                        Button("Charlie", [this]() { 
-                            updateUsername("Charlie"); 
-                        })
-                            ->setBackgroundColor(RGB(33, 150, 243))
-                            ->setMargin(5)
-                    )
-                        ->setMainAxisAlignment(MainAxisAlignment::Center)
-                        ->setSpacing(10),
-                    
-                    // Status toggle
-                    Button("Toggle Status", [this]() { 
-                        toggleStatus(); 
-                    })
-                        ->setBackgroundColor(RGB(255, 152, 0))
-                        ->setMargin(10),
-                    
-                    Divider(),
-                    
-                    // Message controls
-                    Row(
-                        Button("Send Message", [this]() { 
-                            sendMessage(); 
-                        })
-                            ->setBackgroundColor(RGB(76, 175, 80))
-                            ->setMargin(5),
-                        
-                        Button("Clear Messages", [this]() { 
-                            clearMessages(); 
-                        })
-                            ->setBackgroundColor(RGB(244, 67, 54))
-                            ->setMargin(5)
-                    )
-                        ->setMainAxisAlignment(MainAxisAlignment::Center)
-                        ->setSpacing(10)
-                )
-                    ->setSpacing(5)
-            )
-                ->setWidth(400)
-        );
+                        Button("Decrement", [this]()
+                               {
+                                   counter--; // Decrease counter
+                               }),
+
+                        SizedBox(20, 0), // Horizontal spacer
+
+                        Button("Increment", [this]()
+                               {
+                                   counter++; // Increase counter
+                               })))
+                    ->setPadding(20)));
+    }
+
+    void dispose() override
+    {
+        // Optional: Cleanup when component is destroyed
+        counter.clearListeners();
+        StatefulComponent::dispose();
     }
 };
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
+{
+    // Create the FluxUI application
     FluxUI app(hInstance);
-    UserProfile profile(&app);
-    
-    app.build([&profile]() {
-        return profile.build();
-    });
-    
-    app.createWindow("String State Example - User Profile", 500, 500);
-    
+
+    // Build the UI using the component
+    auto component = ComponentBuilder::create<CounterComponent>(&app);
+    app.build([component]()
+              {
+                  return component->build();
+                  // ✅ Component stays alive!
+              });
+
+    // Create and show the window
+    app.createWindow("Counter Example - Component Based", 400, 300);
+
+    // Run the application
     return app.run();
 }

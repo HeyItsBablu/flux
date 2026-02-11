@@ -4,7 +4,9 @@
 // Backward-compatible header that includes both core and widgets
 // Include this file to get all FluxUI functionality
 
+#include "flux_widget.hpp"
+#include "flux_widget_list.hpp"
 #include "flux_core.hpp"
-#include "flux_widgets.hpp"
-
+#include "flux_state.hpp"
+#include "flux_component.hpp"
 #endif // FLUX_HPP

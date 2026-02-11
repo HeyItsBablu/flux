@@ -1,113 +1,149 @@
 #include "flux.hpp"
+#include <windows.h>
+#include <string>
 
-class TestComponent
+// Timer Component
+class TimerComponent : public StatefulComponent
 {
 private:
-    FluxUI *ui;
-    State<int> counter;
-    State<std::string> message;
+    State<int> seconds;
+    State<bool> isRunning;
+    State<std::string> displayTime;
+
+    // Format seconds as MM:SS
+    std::string formatTime(int totalSeconds)
+    {
+        int mins = totalSeconds / 60;
+        int secs = totalSeconds % 60;
+        
+        char buffer[10];
+        sprintf(buffer, "%02d:%02d", mins, secs);
+        return std::string(buffer);
+    }
 
 public:
-    TestComponent(FluxUI *app)
-        : ui(app),
-          counter(0, app),
-          message("Welcome! Click a button.", app) {}
-
-    void increment()
+    TimerComponent(FluxUI *ctx) 
+        : StatefulComponent(ctx),
+          seconds(0, ctx),
+          isRunning(false, ctx),
+          displayTime("00:00", ctx)
     {
-        counter++;
-        message = "Counter incremented to " + std::to_string(counter.get());
     }
 
-    void decrement()
+    void initState() override
     {
-        counter--;
-        message = "Counter decremented to " + std::to_string(counter.get());
+        // Update display whenever seconds change
+        seconds.listen([this](int s) {
+            displayTime.set(formatTime(s));
+        });
+        
+        // Note: In a real app, you'd need a timer callback
+        // For this example, we'll just have manual increment buttons
     }
 
-    void reset()
+    WidgetPtr build() override
     {
-        counter = 0;
-        message = "Counter has been reset!";
-    }
-
-    WidgetPtr build()
-    {
-        return Center(
-            Card(
-                Column(
-                    // Title
-                    Text("Test Center Widget")
-                        ->setFontSize(24)
-                        ->setFontWeight(FontWeight::Bold)
-                        ->setTextColor(RGB(33, 150, 243)),
-
-                    Divider(),
-
-                    // Counter display
-                    Text(counter)
-                        ->setFontSize(48)
-                        ->setFontWeight(FontWeight::Bold)
-                        ->setTextColor(RGB(76, 175, 80)),
-
-                    // Message display
-                    Text(message)
-                        ->setFontSize(14)
-                        ->setTextColor(RGB(100, 100, 100)),
-                    Divider(),
-
-                    Row(
-                        Button("Send Message", [this]()
-                               { increment(); })
+        return Scaffold(
+           
+            
+            Center(
+                Card(
+                    Column(
+                        // Timer Display
+                        Text(displayTime)
+                            ->setFontSize(72)
+                            ->setFontWeight(FontWeight::Bold)
+                            ->setTextColor(RGB(33, 150, 243)),
+                        
+                        SizedBox(0, 40),
+                        
+                        // Status
+                        Text(isRunning.get() ? "Running..." : "Stopped")
+                            ->setFontSize(18)
+                            ->setTextColor(isRunning.get() ? RGB(76, 175, 80) : RGB(158, 158, 158)),
+                        
+                        SizedBox(0, 40),
+                        
+                        // Control Buttons
+                        Row(
+                            Button(isRunning.get() ? "Pause" : "Start", [this]() {
+                                isRunning.toggle();
+                            })
                             ->setBackgroundColor(RGB(76, 175, 80))
-                            ->setMargin(5),
-                        Button("Read Message", [this]()
-                               { decrement(); })
-                            ->setBackgroundColor(RGB(76, 175, 80))
-                            ->setMargin(5),
-                        Button("Clear Messages", [this]()
-                               { reset(); })
+                            ->setMinWidth(100),
+                            
+                            SizedBox(20, 0),
+                            
+                            Button("Reset", [this]() {
+                                seconds.set(0);
+                                isRunning.set(false);
+                            })
                             ->setBackgroundColor(RGB(244, 67, 54))
-                            ->setMargin(5))
-                        ->setMainAxisAlignment(MainAxisAlignment::Center)
-                        ->setSpacing(10),
-
-                    Divider(),
-
-                    // Control buttons
-                    Row(
-                        Button("-", [this]()
-                               { decrement(); })
-                            ->setBackgroundColor(RGB(244, 67, 54))
-                            ->setWidth(80),
-
-                        Button("Reset", [this]()
-                               { reset(); })
-                            ->setBackgroundColor(RGB(158, 158, 158))
-                            ->setWidth(80),
-
-                        Button("+", [this]()
-                               { increment(); })
-                            ->setBackgroundColor(RGB(76, 175, 80))
-                            ->setWidth(80))
-                        ->setSpacing(10)
-                        ->setMainAxisAlignment(MainAxisAlignment::Center))
-                    ->setSpacing(15)
-                    ->setCrossAlignment(Alignment::Center))
-
+                            ->setMinWidth(100)
+                        ),
+                        
+                        SizedBox(0, 30),
+                        
+                        Divider(),
+                        
+                        SizedBox(0, 30),
+                        
+                        // Manual Time Controls (simulating timer ticks)
+                        Text("Manual Controls")
+                            ->setFontSize(14)
+                            ->setTextColor(RGB(158, 158, 158)),
+                        
+                        SizedBox(0, 10),
+                        
+                        Row(
+                            Button("+1 sec", [this]() {
+                                seconds++;
+                            })
+                            ->setBackgroundColor(RGB(33, 150, 243)),
+                            
+                            SizedBox(10, 0),
+                            
+                            Button("+10 sec", [this]() {
+                                seconds += 10;
+                            })
+                            ->setBackgroundColor(RGB(33, 150, 243)),
+                            
+                            SizedBox(10, 0),
+                            
+                            Button("+1 min", [this]() {
+                                seconds += 60;
+                            })
+                            ->setBackgroundColor(RGB(33, 150, 243))
+                        )
+                    )
+                    ->setSpacing(0)
+                )
+                ->setWidth(400)
+                ->setPadding(30)
+            )
         );
+    }
+
+    void dispose() override
+    {
+        seconds.clearListeners();
+        isRunning.clearListeners();
+        displayTime.clearListeners();
+        StatefulComponent::dispose();
     }
 };
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
     FluxUI app(hInstance);
-    TestComponent test(&app);
 
-    app.build([&test]()
-              { return test.build(); });
+    // ✅ CRITICAL: Keep component alive!
+    auto timerComponent = ComponentBuilder::create<TimerComponent>(&app);
 
-    app.createWindow("Testing Center Fix", 600, 400);
+    app.build([timerComponent]() {
+        return timerComponent->build();
+    });
 
+    app.createWindow("Timer Example - Component Based", 500, 500);
     return app.run();
 }
