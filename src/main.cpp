@@ -1,76 +1,104 @@
 #include "flux.hpp"
 #include <windows.h>
 
-// Counter Card as a proper StatefulComponent
-class CounterCardComponent : public StatefulComponent {
-private:
-    std::string title;
-    COLORREF color;
+// Simple test to verify no crashes on button click
+
+class SimpleCounter : public StatefulComponent
+{
     State<int> count;
-    
+
 public:
-    CounterCardComponent(FluxUI* ctx, const std::string& t, COLORREF c) 
-        : StatefulComponent(ctx), title(t), color(c), count(0, ctx) {}
-    
-    WidgetPtr build() override {
+    SimpleCounter() : count(0, context)
+    {
+        std::cout << "SimpleCounter created" << std::endl;
+    }
+
+    ~SimpleCounter()
+    {
+        std::cout << "SimpleCounter destroyed" << std::endl;
+    }
+
+    void initState() override
+    {
+        std::cout << "SimpleCounter initState()" << std::endl;
+    }
+
+    WidgetPtr build() override
+    {
+        std::cout << "SimpleCounter build() - count = " << count.get() << std::endl;
+
         return Card(
-            Column(
-                Text(title)
-                    ->setFontSize(16)
-                    ->setFontWeight(FontWeight::Bold)
-                    ->setTextColor(color),
-                
-                SizedBox(0, 10),
-                
-                Text(count)
-                    ->setFontSize(32)
-                    ->setFontWeight(FontWeight::Bold)
-                    ->setTextColor(color),
-                
-                SizedBox(0, 10),
-                
-                Row(
-                    Button("+", [this]() { count++; })
-                        ->setBackgroundColor(color)
-                        ->setPaddingAll(15, 8, 15, 8),
-                    
-                    Button("-", [this]() { count--; })
-                        ->setBackgroundColor(color)
-                        ->setPaddingAll(15, 8, 15, 8)
-                )
-                ->setSpacing(8)
-                ->setMainAxisAlignment(MainAxisAlignment::Center)
-            )
-            ->setSpacing(0)
-        )
-        ->setMinWidth(180);
+                   Column(
+                       Text("Counter Test")
+                           ->setFontSize(18)
+                           ->setFontWeight(FontWeight::Bold),
+
+                       SizedBox(0, 10),
+
+                       Text(count)
+                           ->setFontSize(48)
+                           ->setTextColor(RGB(33, 150, 243)),
+
+                       SizedBox(0, 10),
+
+                       Row(
+                           Button("+", [this]()
+                                  { 
+                        std::cout << "Button + clicked, count was: " << count.get() << std::endl;
+                        count++; 
+                        std::cout << "Button + clicked, count now: " << count.get() << std::endl; })
+                               ->setBackgroundColor(RGB(76, 175, 80)),
+
+                           Button("-", [this]()
+                                  { 
+                        std::cout << "Button - clicked, count was: " << count.get() << std::endl;
+                        if (count.get() > 0) count--; 
+                        std::cout << "Button - clicked, count now: " << count.get() << std::endl; })
+                               ->setBackgroundColor(RGB(244, 67, 54)),
+
+                           Button("Reset", [this]()
+                                  { 
+                        std::cout << "Button Reset clicked" << std::endl;
+                        count.set(0); })
+                               ->setBackgroundColor(RGB(128, 128, 128)))
+                           ->setSpacing(10)
+                           ->setMainAxisAlignment(MainAxisAlignment::Center))
+                       ->setSpacing(0))
+            ->setPadding(20);
     }
 };
 
-// Main app - keep components alive
-WidgetPtr multiCounterApp(FluxUI* app) {
-    // Keep component instances alive as static shared_ptrs
-    static auto redCounter = FLUX_CREATE_COMPONENT(CounterCardComponent, app, "Red Counter", RGB(244, 67, 54));
-    static auto blueCounter = FLUX_CREATE_COMPONENT(CounterCardComponent, app, "Blue Counter", RGB(33, 150, 243));
-    static auto greenCounter = FLUX_CREATE_COMPONENT(CounterCardComponent, app, "Green Counter", RGB(76, 175, 80));
-    
+WidgetPtr app(FluxUI *fluxApp)
+{
+    std::cout << "Building app..." << std::endl;
+
     return Scaffold(
 
         Center(
-            Row(
-                redCounter->build(),
-                blueCounter->build(),
-                greenCounter->build()
-            )
-            ->setSpacing(15)
-        )
-    );
+            Column(
+                BuildComponent<SimpleCounter>(),
+                    BuildComponent<SimpleCounter>())));
 }
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
 {
-    FluxUI app(hInstance);
-    app.build([&]() { return multiCounterApp(&app); });
-    app.createWindow("Multiple Counters", 700, 400);
-    return app.run();
+    // Enable console for debugging
+    AllocConsole();
+    FILE *fp;
+    freopen_s(&fp, "CONOUT$", "w", stdout);
+    freopen_s(&fp, "CONOUT$", "w", stderr);
+
+    std::cout << "Starting FluxUI..." << std::endl;
+
+    FluxUI fluxApp(hInstance);
+    fluxApp.build([&]()
+                  { return app(&fluxApp); });
+    fluxApp.createWindow("Crash Test", 400, 400);
+
+    std::cout << "Window created, entering message loop..." << std::endl;
+
+    int result = fluxApp.run();
+
+    std::cout << "Exiting..." << std::endl;
+    return result;
 }
