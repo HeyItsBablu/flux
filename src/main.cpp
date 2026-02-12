@@ -1,87 +1,95 @@
 #include "flux.hpp"
 #include <windows.h>
+#include <iostream>
 
-// Simple test to verify no crashes on button click
-
-class SimpleCounter : public StatefulComponent
+class ChildWidget : public StatefulComponent
 {
-    State<int> count;
+private:
+    std::string label;
+    State<int> counter;
 
 public:
-    SimpleCounter() : count(0, context)
-    {
-        std::cout << "SimpleCounter created" << std::endl;
-    }
+    ChildWidget(const std::string &lbl)
+        : label(lbl), counter(0, context) {}
 
-    ~SimpleCounter()
+    void updateVariable()
     {
-        std::cout << "SimpleCounter destroyed" << std::endl;
-    }
-
-    void initState() override
-    {
-        std::cout << "SimpleCounter initState()" << std::endl;
+        counter.set(counter.get() + 1);
     }
 
     WidgetPtr build() override
     {
-        std::cout << "SimpleCounter build() - count = " << count.get() << std::endl;
+        auto theme = ThemeProvider::getTheme();
 
-        return Card(
+        return ThemedCard(
                    Column(
-                       Text("Counter Test")
-                           ->setFontSize(18)
+                       Text(label)
+                           ->setFontSize(14)
+                           ->setTextColor(theme.secondaryTextColor),
+
+                       SizedBox(0, 10),
+
+                       Text(counter)
+                           ->setFontSize(32)
                            ->setFontWeight(FontWeight::Bold),
-
                        SizedBox(0, 10),
-
-                       Text(count)
-                           ->setFontSize(48)
-                           ->setTextColor(RGB(33, 150, 243)),
-
-                       SizedBox(0, 10),
-
-                       Row(
-                           Button("+", [this]()
-                                  { 
-                        std::cout << "Button + clicked, count was: " << count.get() << std::endl;
-                        count++; 
-                        std::cout << "Button + clicked, count now: " << count.get() << std::endl; })
-                               ->setBackgroundColor(RGB(76, 175, 80)),
-
-                           Button("-", [this]()
-                                  { 
-                        std::cout << "Button - clicked, count was: " << count.get() << std::endl;
-                        if (count.get() > 0) count--; 
-                        std::cout << "Button - clicked, count now: " << count.get() << std::endl; })
-                               ->setBackgroundColor(RGB(244, 67, 54)),
-
-                           Button("Reset", [this]()
-                                  { 
-                        std::cout << "Button Reset clicked" << std::endl;
-                        count.set(0); })
-                               ->setBackgroundColor(RGB(128, 128, 128)))
-                           ->setSpacing(10)
-                           ->setMainAxisAlignment(MainAxisAlignment::Center))
-                       ->setSpacing(0))
-            ->setPadding(20);
+                       ThemedButton("Add", [this]()
+                                    { updateVariable(); }))
+                       ->setSpacing(0)
+                       ->setCrossAlignment(Alignment::Center))
+            ->setMinWidth(150);
     }
 };
 
-WidgetPtr app(FluxUI *fluxApp)
+class ThemedDashboard : public StatefulComponent
 {
-    std::cout << "Building app..." << std::endl;
+    State<int> total;
+    State<int> active;
+    State<int> completed;
 
-    return Scaffold(
+public:
+    ThemedDashboard()
+        : total(0, context),
+          active(0, context),
+          completed(0, context) {}
 
-        Center(
-            Column(
-                BuildComponent<SimpleCounter>(),
-                    BuildComponent<SimpleCounter>())));
+    WidgetPtr build() override
+    {
+        auto theme = ThemeProvider::getTheme();
+
+        return Scaffold(
+            ThemedAppBar("Dashboard"),
+
+            Padding(20,
+                    Column(
+                        Text("Task Statistics")
+                            ->setFontSize(theme.titleFontSize)
+                            ->setFontWeight(theme.titleFontWeight)
+                            ->setTextColor(theme.textColor),
+
+                        SizedBox(0, 20),
+
+                        Row(
+                            BuildComponent<ChildWidget>("Hello"),
+                            BuildComponent<ChildWidget>("New"),
+                            BuildComponent<ChildWidget>("World"))
+                            ->setSpacing(15)
+                            ->setMainAxisAlignment(MainAxisAlignment::Center))
+                        ->setSpacing(0)));
+    }
+};
+
+WidgetPtr dashboardApp(FluxUI *app)
+{
+    return FluxApp(
+        "Themed Dashboard",
+        BuildComponent<ThemedDashboard>(),
+        AppTheme::materialBlue());
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
 {
+
     // Enable console for debugging
     AllocConsole();
     FILE *fp;
@@ -89,16 +97,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
     freopen_s(&fp, "CONOUT$", "w", stderr);
 
     std::cout << "Starting FluxUI..." << std::endl;
+    FluxUI app(hInstance);
 
-    FluxUI fluxApp(hInstance);
-    fluxApp.build([&]()
-                  { return app(&fluxApp); });
-    fluxApp.createWindow("Crash Test", 400, 400);
+    // Complex examples:
+    app.build([&]()
+              { return dashboardApp(&app); });
 
-    std::cout << "Window created, entering message loop..." << std::endl;
-
-    int result = fluxApp.run();
-
-    std::cout << "Exiting..." << std::endl;
-    return result;
+    app.createWindow("FluxApp Demo", 800, 600);
+    return app.run();
 }

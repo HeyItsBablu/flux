@@ -9,4 +9,5 @@
 #include "flux_core.hpp"
 #include "flux_state.hpp"
 #include "flux_component.hpp"
+#include "flux_app.hpp"
 #endif // FLUX_HPP
