@@ -1,296 +1,198 @@
-#include "flux_widget.hpp"
-#include "flux_widget_list.hpp"
-#include "flux_core.hpp"
-#include "flux_state.hpp"
+#include "flux.hpp"
 #include <windows.h>
-#include <sstream>
-#include <iomanip>
+#include <iostream>
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
+class StatCard : public StatefulComponent
 {
-    FluxUI app(hInstance);
+private:
+    std::string label;
+    State<int> value;
+    COLORREF color;
 
-    // RGB color states
-    State<int> red(128, &app);
-    State<int> green(128, &app);
-    State<int> blue(128, &app);
-    
-    // Computed hex color string
-    State<std::string> hexColor("#808080", &app);
+public:
+    StatCard(const std::string &lbl, COLORREF col)
+        : label(lbl), value(0, context), color(col)
+    {
+        // Log changes
+        value.listen([lbl](int newVal) {
+            std::cout << lbl << " updated to: " << newVal << std::endl;
+        });
+    }
 
-    // Helper lambda to update hex color
-    auto updateHexColor = [&]() {
-        std::ostringstream oss;
-        oss << "#" 
-            << std::hex << std::setfill('0') << std::setw(2) << red.get()
-            << std::setw(2) << green.get()
-            << std::setw(2) << blue.get();
-        std::string hex = oss.str();
-        
-        // Convert to uppercase
-        for (char &c : hex) {
-            if (c >= 'a' && c <= 'f') c = c - 'a' + 'A';
+    void increment()
+    {
+        value.update([](int v) { return v + 1; });
+    }
+
+    void decrement()
+    {
+        if (value.get() > 0)
+        {
+            value.update([](int v) { return v - 1; });
         }
-        
-        hexColor.set(hex);
-    };
+    }
 
-    // Listen to RGB changes
-    red.listen([&](int) { updateHexColor(); });
-    green.listen([&](int) { updateHexColor(); });
-    blue.listen([&](int) { updateHexColor(); });
+    void addTen()
+    {
+        value.update([](int v) { return v + 10; });
+    }
 
-    // Build the UI
-    app.build([&]() {
-        
-        return Scaffold(
-           
-            
-            Center(
-                Card(
-                    Column(
-                        // Title
-                        Text("RGB Color Picker")
-                            ->setFontSize(24)
-                            ->setFontWeight(FontWeight::Bold)
-                            ->setTextColor(RGB(33, 150, 243)),
-                        
-                        SizedBox(0, 30),
-                        
-                        // Color Preview Box
-                        Container(
-                            Center(
-                                Column(
-                                    Text("Preview")
-                                        ->setFontSize(16)
-                                        ->setFontWeight(FontWeight::Bold)
-                                        ->setTextColor(RGB(255, 255, 255)),
-                                    
-                                    SizedBox(0, 10),
-                                    
-                                    Text(hexColor)
-                                        ->setFontSize(20)
-                                        ->setFontWeight(FontWeight::Bold)
-                                        ->setTextColor(RGB(255, 255, 255))
-                                )
-                            )
-                        )
-                        ->setHeight(120)
-                        ->setWidth(120)
-                        ->setBackgroundColor(RGB(red.get(), green.get(), blue.get()))
-                        ->setBorderRadius(12)
-                        ->setPadding(20),
-                        
-                        SizedBox(0, 30),
-                        
-                        // Red Channel
-                        Column(
-                            Row(
-                                Text("Red:")
-                                    ->setFontSize(16)
-                                    ->setFontWeight(FontWeight::Bold)
-                                    ->setTextColor(RGB(244, 67, 54))
-                                    ->setWidth(80),
-                                
-                                Text(red)
-                                    ->setFontSize(16)
-                                    ->setFontWeight(FontWeight::Bold)
-                                    ->setTextColor(RGB(244, 67, 54))
-                            ),
-                            
-                            SizedBox(0, 8),
-                            
-                            Row(
-                                Button("-10", [&red]() {
-                                    int val = red.get() - 10;
-                                    if (val < 0) val = 0;
-                                    red.set(val);
-                                })
-                                ->setBackgroundColor(RGB(244, 67, 54)),
-                                
-                                SizedBox(5, 0),
-                                
-                                Button("-1", [&red]() {
-                                    if (red.get() > 0) red--;
-                                })
-                                ->setBackgroundColor(RGB(244, 67, 54)),
-                                
-                                SizedBox(5, 0),
-                                
-                                Button("+1", [&red]() {
-                                    if (red.get() < 255) red++;
-                                })
-                                ->setBackgroundColor(RGB(244, 67, 54)),
-                                
-                                SizedBox(5, 0),
-                                
-                                Button("+10", [&red]() {
-                                    int val = red.get() + 10;
-                                    if (val > 255) val = 255;
-                                    red.set(val);
-                                })
-                                ->setBackgroundColor(RGB(244, 67, 54))
-                            )
-                        )
-                        ->setSpacing(0),
-                        
-                        SizedBox(0, 20),
-                        
-                        // Green Channel
-                        Column(
-                            Row(
-                                Text("Green:")
-                                    ->setFontSize(16)
-                                    ->setFontWeight(FontWeight::Bold)
-                                    ->setTextColor(RGB(76, 175, 80))
-                                    ->setWidth(80),
-                                
-                                Text(green)
-                                    ->setFontSize(16)
-                                    ->setFontWeight(FontWeight::Bold)
-                                    ->setTextColor(RGB(76, 175, 80))
-                            ),
-                            
-                            SizedBox(0, 8),
-                            
-                            Row(
-                                Button("-10", [&green]() {
-                                    int val = green.get() - 10;
-                                    if (val < 0) val = 0;
-                                    green.set(val);
-                                })
-                                ->setBackgroundColor(RGB(76, 175, 80)),
-                                
-                                SizedBox(5, 0),
-                                
-                                Button("-1", [&green]() {
-                                    if (green.get() > 0) green--;
-                                })
-                                ->setBackgroundColor(RGB(76, 175, 80)),
-                                
-                                SizedBox(5, 0),
-                                
-                                Button("+1", [&green]() {
-                                    if (green.get() < 255) green++;
-                                })
-                                ->setBackgroundColor(RGB(76, 175, 80)),
-                                
-                                SizedBox(5, 0),
-                                
-                                Button("+10", [&green]() {
-                                    int val = green.get() + 10;
-                                    if (val > 255) val = 255;
-                                    green.set(val);
-                                })
-                                ->setBackgroundColor(RGB(76, 175, 80))
-                            )
-                        )
-                        ->setSpacing(0),
-                        
-                        SizedBox(0, 20),
-                        
-                        // Blue Channel
-                        Column(
-                            Row(
-                                Text("Blue:")
-                                    ->setFontSize(16)
-                                    ->setFontWeight(FontWeight::Bold)
-                                    ->setTextColor(RGB(33, 150, 243))
-                                    ->setWidth(80),
-                                
-                                Text(blue)
-                                    ->setFontSize(16)
-                                    ->setFontWeight(FontWeight::Bold)
-                                    ->setTextColor(RGB(33, 150, 243))
-                            ),
-                            
-                            SizedBox(0, 8),
-                            
-                            Row(
-                                Button("-10", [&blue]() {
-                                    int val = blue.get() - 10;
-                                    if (val < 0) val = 0;
-                                    blue.set(val);
-                                })
-                                ->setBackgroundColor(RGB(33, 150, 243)),
-                                
-                                SizedBox(5, 0),
-                                
-                                Button("-1", [&blue]() {
-                                    if (blue.get() > 0) blue--;
-                                })
-                                ->setBackgroundColor(RGB(33, 150, 243)),
-                                
-                                SizedBox(5, 0),
-                                
-                                Button("+1", [&blue]() {
-                                    if (blue.get() < 255) blue++;
-                                })
-                                ->setBackgroundColor(RGB(33, 150, 243)),
-                                
-                                SizedBox(5, 0),
-                                
-                                Button("+10", [&blue]() {
-                                    int val = blue.get() + 10;
-                                    if (val > 255) val = 255;
-                                    blue.set(val);
-                                })
-                                ->setBackgroundColor(RGB(33, 150, 243))
-                            )
-                        )
-                        ->setSpacing(0),
-                        
-                        SizedBox(0, 30),
-                        
-                        Divider(),
-                        
-                        SizedBox(0, 20),
-                        
-                        // Preset Colors
-                        Row(
-                            Button("Black", [&]() {
-                                red.set(0); green.set(0); blue.set(0);
-                            })
-                            ->setBackgroundColor(RGB(0, 0, 0)),
-                            
-                            SizedBox(5, 0),
-                            
-                            Button("White", [&]() {
-                                red.set(255); green.set(255); blue.set(255);
-                            })
-                            ->setBackgroundColor(RGB(255, 255, 255))
-                            ->setTextColor(RGB(0, 0, 0)),
-                            
-                            SizedBox(5, 0),
-                            
-                            Button("Red", [&]() {
-                                red.set(255); green.set(0); blue.set(0);
-                            })
-                            ->setBackgroundColor(RGB(244, 67, 54)),
-                            
-                            SizedBox(5, 0),
-                            
-                            Button("Green", [&]() {
-                                red.set(0); green.set(255); blue.set(0);
-                            })
-                            ->setBackgroundColor(RGB(76, 175, 80)),
-                            
-                            SizedBox(5, 0),
-                            
-                            Button("Blue", [&]() {
-                                red.set(0); green.set(0); blue.set(255);
-                            })
-                            ->setBackgroundColor(RGB(33, 150, 243))
-                        )
-                    )
-                    ->setSpacing(0)
+    void reset()
+    {
+        value.set(0);
+    }
+
+    WidgetPtr build() override
+    {
+        auto theme = ThemeProvider::getTheme();
+
+        return ThemedCard(
+            Column(
+                Text(label)
+                    ->setFontSize(14)
+                    ->setTextColor(theme.secondaryTextColor),
+
+                SizedBox(0, 10),
+
+                Text(value)
+                    ->setFontSize(48)
+                    ->setFontWeight(FontWeight::Bold)
+                    ->setTextColor(color),
+                    
+                SizedBox(0, 15),
+                
+                Column(
+                    ThemedButton("+1", [this]() { increment(); }),
+                    ThemedButton("+10", [this]() { addTen(); }),
+                    ThemedButton("-1", [this]() { decrement(); }),
+                    ThemedButton("Reset", [this]() { reset(); })
                 )
-                ->setWidth(500)
-                ->setPadding(30)
+                ->setSpacing(5)
+            )
+            ->setSpacing(0)
+            ->setCrossAlignment(Alignment::Center)
+        )->setMinWidth(180);
+    }
+};
+
+class Dashboard : public StatefulComponent
+{
+private:
+    State<int> totalClicks;
+    State<std::string> summary;
+
+public:
+    Dashboard()
+        : totalClicks(0, context),
+          summary("No activity yet", context)
+    {
+        // Update summary whenever total changes
+        totalClicks.listen([this](int total) {
+            if (total == 0)
+            {
+                summary.set("No activity yet");
+            }
+            else if (total < 10)
+            {
+                summary.set("Just getting started...");
+            }
+            else if (total < 50)
+            {
+                summary.set("Making progress!");
+            }
+            else
+            {
+                summary.set("You're on fire! 🔥");
+            }
+        });
+    }
+
+    void recordClick()
+    {
+        totalClicks.update([](int v) { return v + 1; });
+    }
+
+    void resetAll()
+    {
+        totalClicks.set(0);
+    }
+
+    WidgetPtr build() override
+    {
+        auto theme = ThemeProvider::getTheme();
+
+        return Scaffold(
+            ThemedAppBar("Analytics Dashboard"),
+
+            Padding(20,
+                Column(
+                    Text("Performance Metrics")
+                        ->setFontSize(theme.titleFontSize)
+                        ->setFontWeight(theme.titleFontWeight)
+                        ->setTextColor(theme.textColor),
+
+                    SizedBox(0, 10),
+                    
+                    Text(summary)
+                        ->setFontSize(16)
+                        ->setTextColor(theme.secondaryTextColor),
+
+                    SizedBox(0, 20),
+
+                    Row(
+                        BuildComponent<StatCard>("Sales", RGB(34, 139, 34)),
+                        BuildComponent<StatCard>("Leads", RGB(30, 144, 255)),
+                        BuildComponent<StatCard>("Revenue", RGB(255, 140, 0))
+                    )
+                    ->setSpacing(15)
+                    ->setMainAxisAlignment(MainAxisAlignment::Center),
+                    
+                    SizedBox(0, 30),
+                    
+                    ThemedCard(
+                        Column(
+                            Text("Total Activity")
+                                ->setFontSize(14),
+                            Text(totalClicks)
+                                ->setFontSize(32)
+                                ->setFontWeight(FontWeight::Bold)
+                                ->setTextColor(theme.primaryColor)
+                        )
+                        ->setSpacing(5)
+                        ->setCrossAlignment(Alignment::Center)
+                    ),
+                    
+                    SizedBox(0, 20),
+                    
+                    ThemedButton("Reset Dashboard", [this]() { resetAll(); })
+                )
+                ->setSpacing(0)
             )
         );
-    });
+    }
+};
 
-    app.createWindow("Color Picker Example", 600, 700);
+WidgetPtr dashboardApp(FluxUI *app)
+{
+    return FluxApp(
+        "Analytics Dashboard",
+        BuildComponent<Dashboard>(),
+        AppTheme::materialBlue()
+    );
+}
+
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
+{
+    AllocConsole();
+    FILE *fp;
+    freopen_s(&fp, "CONOUT$", "w", stdout);
+    freopen_s(&fp, "CONOUT$", "w", stderr);
+
+    std::cout << "Starting FluxUI Dashboard..." << std::endl;
+    
+    FluxUI app(hInstance);
+    app.build([&]() { return dashboardApp(&app); });
+    app.createWindow("FluxUI Demo", 900, 650);
+    
     return app.run();
 }

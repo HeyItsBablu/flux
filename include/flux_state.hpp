@@ -22,59 +22,40 @@ private:
     
     // Thread safety
     mutable std::mutex stateMutex;
-    
-    // Performance optimization: cache string representation
-    mutable std::string cachedString;
-    mutable bool stringDirty = true;
 
     // ========================================================================
     // PRIVATE HELPERS
     // ========================================================================
 
-    // Helper to convert value to string for display (with caching)
+    // Helper to convert value to string for display
     template <typename U = T>
     typename std::enable_if<std::is_integral<U>::value && !std::is_same<U, bool>::value, std::string>::type
     valueToString(const U &val) const
     {
-        if (stringDirty)
-        {
-            cachedString = std::to_string(val);
-            stringDirty = false;
-        }
-        return cachedString;
+        return std::to_string(val);
     }
 
     template <typename U = T>
     typename std::enable_if<std::is_floating_point<U>::value, std::string>::type
     valueToString(const U &val) const
     {
-        if (stringDirty)
-        {
-            std::ostringstream oss;
-            oss << std::fixed << std::setprecision(2) << val;
-            cachedString = oss.str();
-            stringDirty = false;
-        }
-        return cachedString;
+        std::ostringstream oss;
+        oss << std::fixed << std::setprecision(2) << val;
+        return oss.str();
     }
 
     template <typename U = T>
     typename std::enable_if<std::is_same<U, bool>::value, std::string>::type
     valueToString(const U &val) const
     {
-        if (stringDirty)
-        {
-            cachedString = val ? "true" : "false";
-            stringDirty = false;
-        }
-        return cachedString;
+        return val ? "true" : "false";
     }
 
     template <typename U = T>
     typename std::enable_if<std::is_same<U, std::string>::value, std::string>::type
     valueToString(const U &val) const
     {
-        return val; // No caching needed for strings
+        return val;
     }
 
     // Notify all observers (widgets) - MUST be called with lock held
@@ -166,8 +147,6 @@ public:
         ui = other.ui;
         observers = std::move(other.observers);
         listeners = std::move(other.listeners);
-        cachedString = std::move(other.cachedString);
-        stringDirty = other.stringDirty;
         other.ui = nullptr;
     }
 
@@ -184,8 +163,6 @@ public:
             ui = other.ui;
             observers = std::move(other.observers);
             listeners = std::move(other.listeners);
-            cachedString = std::move(other.cachedString);
-            stringDirty = other.stringDirty;
             other.ui = nullptr;
         }
         return *this;
@@ -196,35 +173,29 @@ public:
     State &operator=(const State &) = delete;
 
     // ========================================================================
-    // GETTERS
+    // CORE API - ONLY FOUR METHODS
     // ========================================================================
 
-    // Get current value (thread-safe)
+    /**
+     * Get current value (thread-safe)
+     * 
+     * Usage:
+     *   int currentValue = counter.get();
+     */
     T get() const
     {
         std::lock_guard<std::mutex> lock(stateMutex);
         return value;
     }
 
-    // Get reference to value (use with caution - returns copy for thread safety)
-    T snapshot() const
-    {
-        std::lock_guard<std::mutex> lock(stateMutex);
-        return value;
-    }
-
-    // Convert to string (thread-safe)
-    std::string toString() const
-    {
-        std::lock_guard<std::mutex> lock(stateMutex);
-        return valueToString(value);
-    }
-
-    // ========================================================================
-    // SETTERS
-    // ========================================================================
-
-    // Set new value (thread-safe)
+    /**
+     * Set new value (thread-safe)
+     * Only triggers update if value actually changes
+     * 
+     * Usage:
+     *   counter.set(42);
+     *   counter.set(counter.get() + 1);
+     */
     void set(T newValue)
     {
         std::lock_guard<std::mutex> lock(stateMutex);
@@ -233,13 +204,20 @@ public:
             return;
 
         value = newValue;
-        stringDirty = true; // Invalidate cached string
 
         notifyObserversLocked();
         notifyListenersLocked(value);
     }
 
-    // Update with function (Flutter-like setState) - thread-safe
+    /**
+     * Update with function (Flutter-like setState) - thread-safe
+     * Useful for updates that depend on current value
+     * 
+     * Usage:
+     *   counter.update([](int v) { return v + 1; });
+     *   toggle.update([](bool v) { return !v; });
+     *   name.update([](std::string s) { return s + "!"; });
+     */
     void update(std::function<T(T)> updater)
     {
         std::lock_guard<std::mutex> lock(stateMutex);
@@ -250,215 +228,31 @@ public:
             return;
 
         value = newValue;
-        stringDirty = true;
 
         notifyObserversLocked();
         notifyListenersLocked(value);
     }
 
-    // Force update (even if value is the same) - thread-safe
-    void forceUpdate()
+    /**
+     * Add a change listener (thread-safe)
+     * Callback is invoked whenever the state changes
+     * 
+     * Usage:
+     *   counter.listen([](int newValue) {
+     *       std::cout << "Counter changed to: " << newValue << std::endl;
+     *   });
+     */
+    void listen(std::function<void(T)> listener)
     {
+        if (!listener)
+            return;
+
         std::lock_guard<std::mutex> lock(stateMutex);
-        stringDirty = true;
-        notifyObserversLocked();
-        notifyListenersLocked(value);
+        listeners.push_back(listener);
     }
 
     // ========================================================================
-    // ARITHMETIC OPERATORS (for numeric types)
-    // ========================================================================
-
-    // Pre-increment: ++state
-    template <typename U = T>
-    typename std::enable_if<std::is_arithmetic<U>::value, State<T> &>::type
-    operator++()
-    {
-        std::lock_guard<std::mutex> lock(stateMutex);
-        value = value + 1;
-        stringDirty = true;
-        notifyObserversLocked();
-        notifyListenersLocked(value);
-        return *this;
-    }
-
-    // Post-increment: state++
-    template <typename U = T>
-    typename std::enable_if<std::is_arithmetic<U>::value, T>::type
-    operator++(int)
-    {
-        std::lock_guard<std::mutex> lock(stateMutex);
-        T oldValue = value;
-        value = value + 1;
-        stringDirty = true;
-        notifyObserversLocked();
-        notifyListenersLocked(value);
-        return oldValue;
-    }
-
-    // Pre-decrement: --state
-    template <typename U = T>
-    typename std::enable_if<std::is_arithmetic<U>::value, State<T> &>::type
-    operator--()
-    {
-        std::lock_guard<std::mutex> lock(stateMutex);
-        value = value - 1;
-        stringDirty = true;
-        notifyObserversLocked();
-        notifyListenersLocked(value);
-        return *this;
-    }
-
-    // Post-decrement: state--
-    template <typename U = T>
-    typename std::enable_if<std::is_arithmetic<U>::value, T>::type
-    operator--(int)
-    {
-        std::lock_guard<std::mutex> lock(stateMutex);
-        T oldValue = value;
-        value = value - 1;
-        stringDirty = true;
-        notifyObserversLocked();
-        notifyListenersLocked(value);
-        return oldValue;
-    }
-
-    // Compound assignment: state += 5
-    template <typename U = T>
-    typename std::enable_if<std::is_arithmetic<U>::value, State<T> &>::type
-    operator+=(const T &val)
-    {
-        std::lock_guard<std::mutex> lock(stateMutex);
-        value = value + val;
-        stringDirty = true;
-        notifyObserversLocked();
-        notifyListenersLocked(value);
-        return *this;
-    }
-
-    // Compound assignment: state -= 5
-    template <typename U = T>
-    typename std::enable_if<std::is_arithmetic<U>::value, State<T> &>::type
-    operator-=(const T &val)
-    {
-        std::lock_guard<std::mutex> lock(stateMutex);
-        value = value - val;
-        stringDirty = true;
-        notifyObserversLocked();
-        notifyListenersLocked(value);
-        return *this;
-    }
-
-    // Compound assignment: state *= 2
-    template <typename U = T>
-    typename std::enable_if<std::is_arithmetic<U>::value, State<T> &>::type
-    operator*=(const T &val)
-    {
-        std::lock_guard<std::mutex> lock(stateMutex);
-        value = value * val;
-        stringDirty = true;
-        notifyObserversLocked();
-        notifyListenersLocked(value);
-        return *this;
-    }
-
-    // Compound assignment: state /= 2
-    template <typename U = T>
-    typename std::enable_if<std::is_arithmetic<U>::value, State<T> &>::type
-    operator/=(const T &val)
-    {
-        std::lock_guard<std::mutex> lock(stateMutex);
-        if (val != 0)
-        {
-            value = value / val;
-            stringDirty = true;
-            notifyObserversLocked();
-            notifyListenersLocked(value);
-        }
-        #ifdef FLUX_DEBUG
-        else
-        {
-            std::cerr << "[FluxUI] Warning: Division by zero attempted" << std::endl;
-        }
-        #endif
-        return *this;
-    }
-
-    // ========================================================================
-    // COMPARISON OPERATORS (compare with value directly)
-    // ========================================================================
-
-    bool operator==(const T &other) const
-    {
-        std::lock_guard<std::mutex> lock(stateMutex);
-        return value == other;
-    }
-
-    bool operator!=(const T &other) const
-    {
-        std::lock_guard<std::mutex> lock(stateMutex);
-        return value != other;
-    }
-
-    template <typename U = T>
-    typename std::enable_if<std::is_arithmetic<U>::value, bool>::type
-    operator<(const T &other) const
-    {
-        std::lock_guard<std::mutex> lock(stateMutex);
-        return value < other;
-    }
-
-    template <typename U = T>
-    typename std::enable_if<std::is_arithmetic<U>::value, bool>::type
-    operator>(const T &other) const
-    {
-        std::lock_guard<std::mutex> lock(stateMutex);
-        return value > other;
-    }
-
-    template <typename U = T>
-    typename std::enable_if<std::is_arithmetic<U>::value, bool>::type
-    operator<=(const T &other) const
-    {
-        std::lock_guard<std::mutex> lock(stateMutex);
-        return value <= other;
-    }
-
-    template <typename U = T>
-    typename std::enable_if<std::is_arithmetic<U>::value, bool>::type
-    operator>=(const T &other) const
-    {
-        std::lock_guard<std::mutex> lock(stateMutex);
-        return value >= other;
-    }
-
-    // ========================================================================
-    // BOOLEAN OPERATORS (for bool type)
-    // ========================================================================
-
-    // Toggle: state.toggle() for bool
-    template <typename U = T>
-    typename std::enable_if<std::is_same<U, bool>::value, void>::type
-    toggle()
-    {
-        std::lock_guard<std::mutex> lock(stateMutex);
-        value = !value;
-        stringDirty = true;
-        notifyObserversLocked();
-        notifyListenersLocked(value);
-    }
-
-    // Logical NOT: !state for bool
-    template <typename U = T>
-    typename std::enable_if<std::is_same<U, bool>::value, bool>::type
-    operator!() const
-    {
-        std::lock_guard<std::mutex> lock(stateMutex);
-        return !value;
-    }
-
-    // ========================================================================
-    // OBSERVER MANAGEMENT
+    // INTERNAL OBSERVER MANAGEMENT (for Widget binding)
     // ========================================================================
 
     // Add a widget observer (thread-safe)
@@ -495,13 +289,6 @@ public:
             observers.end());
     }
 
-    // Remove all observers (thread-safe)
-    void clearObservers()
-    {
-        std::lock_guard<std::mutex> lock(stateMutex);
-        observers.clear();
-    }
-
     // Clean up expired observers (thread-safe)
     void cleanupExpiredObservers()
     {
@@ -514,35 +301,15 @@ public:
     }
 
     // ========================================================================
-    // LISTENER MANAGEMENT (callbacks)
-    // ========================================================================
-
-    // Add a change listener (thread-safe)
-    void addListener(std::function<void(T)> listener)
-    {
-        if (!listener)
-            return;
-
-        std::lock_guard<std::mutex> lock(stateMutex);
-        listeners.push_back(listener);
-    }
-
-    // Convenience method (Flutter-like) - thread-safe
-    void listen(std::function<void(T)> listener)
-    {
-        addListener(listener);
-    }
-
-    // Remove all listeners (thread-safe)
-    void clearListeners()
-    {
-        std::lock_guard<std::mutex> lock(stateMutex);
-        listeners.clear();
-    }
-
-    // ========================================================================
     // UTILITY METHODS
     // ========================================================================
+
+    // Convert to string (thread-safe)
+    std::string toString() const
+    {
+        std::lock_guard<std::mutex> lock(stateMutex);
+        return valueToString(value);
+    }
 
     // Check if state has a valid UI context
     bool hasContext() const
@@ -578,56 +345,11 @@ public:
         return listeners.size();
     }
 
-    // ========================================================================
-    // ADVANCED FEATURES
-    // ========================================================================
-
-    // Conditional update - only update if predicate is true
-    void setIf(T newValue, std::function<bool(T, T)> predicate)
+    // Clear all listeners (thread-safe)
+    void clearListeners()
     {
         std::lock_guard<std::mutex> lock(stateMutex);
-        
-        if (predicate(value, newValue))
-        {
-            value = newValue;
-            stringDirty = true;
-            notifyObserversLocked();
-            notifyListenersLocked(value);
-        }
-    }
-
-    // Batch update - update without notifications, then notify once
-    template <typename Func>
-    void batch(Func func)
-    {
-        std::lock_guard<std::mutex> lock(stateMutex);
-        
-        T oldValue = value;
-        func(*this);
-        
-        if (value != oldValue)
-        {
-            stringDirty = true;
-            notifyObserversLocked();
-            notifyListenersLocked(value);
-        }
-    }
-
-    // Transform state value
-    template <typename Func>
-    void transform(Func transformer)
-    {
-        std::lock_guard<std::mutex> lock(stateMutex);
-        
-        T newValue = transformer(value);
-        
-        if (value != newValue)
-        {
-            value = newValue;
-            stringDirty = true;
-            notifyObserversLocked();
-            notifyListenersLocked(value);
-        }
+        listeners.clear();
     }
 };
 
@@ -674,7 +396,7 @@ private:
             dirty = true; 
         };
         
-        (std::get<Is>(dependencies)->addListener(markDirty), ...);
+        (std::get<Is>(dependencies)->listen(markDirty), ...);
     }
 
     template <size_t... Is>
