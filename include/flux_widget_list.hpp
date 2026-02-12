@@ -3,6 +3,7 @@
 
 #include "flux_core.hpp"
 #include "flux_state.hpp"
+#include <iostream>
 
 // ============================================================================
 // CONCRETE WIDGET CLASSES
@@ -107,7 +108,10 @@ public:
                 {
                     int expandedHeight = (remainingHeight * child->flex) / totalFlex;
                     child->height = expandedHeight;
+                    child->width = contentWidth; // ✓ ADD THIS: Set width too!
                     child->autoHeight = false;
+                    child->autoWidth = false; // ✓ ADD THIS: Don't auto-size width
+                    // ✓ FIXED: Pass contentWidth for width parameter
                     child->computeLayout(hdc, contentWidth, expandedHeight, fontCache);
                 }
             }
@@ -228,7 +232,10 @@ public:
                 {
                     int expandedWidth = (remainingWidth * child->flex) / totalFlex;
                     child->width = expandedWidth;
+                    child->height = contentHeight;
                     child->autoWidth = false;
+                    child->autoHeight = false;
+
                     child->computeLayout(hdc, expandedWidth, contentHeight, fontCache);
                 }
             }
@@ -356,6 +363,7 @@ public:
     {
         int contentWidth = availableWidth - paddingLeft - paddingRight;
         int contentHeight = availableHeight - paddingTop - paddingBottom;
+        std::cout << "Width : " << availableWidth << "Height : " << availableHeight << std::endl;
 
         if (!children.empty())
         {
@@ -553,10 +561,10 @@ inline WidgetPtr Text(const std::string &text)
  * @tparam T Type of the state value
  * @param state State object to bind to
  * @return WidgetPtr Text widget that auto-updates
- * 
+ *
  * The text widget will automatically update when the state changes.
  * Uses the optimized toString() method from State for performance.
- * 
+ *
  * @example
  * State<int> counter(0, &app);
  * auto label = Text(counter);  // Auto-updates when counter changes
@@ -565,8 +573,8 @@ template <typename T>
 inline WidgetPtr Text(State<T> &state)
 {
     auto w = std::make_shared<TextWidget>();
-    w->text = state.toString();  // Use cached toString()
-    state.addObserver(w);        // Bind to state
+    w->text = state.toString(); // Use cached toString()
+    state.addObserver(w);       // Bind to state
     return w;
 }
 

@@ -1,118 +1,140 @@
-
-
 #include "flux.hpp"
+#include <windows.h>
+#include <iostream>
 
-class StatCard
+
+
+class ToggleApp : public StatefulComponent
 {
 private:
-    std::string label;
-    int value;
-    COLORREF color;
+    State<bool> isEnabled;
+    State<bool> isDarkMode;
+    State<std::string> message;
 
 public:
-    static WidgetPtr create(const std::string &label, State<int> &state, COLORREF color = RGB(33, 150, 243))
+    ToggleApp() 
+        : isEnabled(false, context),
+          isDarkMode(false, context),
+          message("Welcome!", context)
     {
-        return Card(
-                   Column(
-                       Text(label)
-                           ->setFontSize(12)
-                           ->setTextColor(RGB(150, 150, 150))
-                           ->setFontWeight(FontWeight::Normal),
+        // React to toggle changes
+        isEnabled.listen([this](bool enabled) {
+            message.set(enabled ? "Feature Enabled ✓" : "Feature Disabled");
+        });
+        
+        isDarkMode.listen([](bool dark) {
+            std::cout << "Dark mode: " << (dark ? "ON" : "OFF") << std::endl;
+        });
+    }
 
-                       Text(state) // Use the State<int> overload directly
-                           ->setFontSize(32)
-                           ->setFontWeight(FontWeight::Bold)
-                           ->setTextColor(color))
-                       ->setSpacing(5)
-                       ->setPadding(20)
-                       ->setCrossAlignment(Alignment::Center))
-            ->setBackgroundColor(RGB(250, 250, 250))
-            ->setBorderRadius(8)
-            ->setMinWidth(150);
+    void toggleEnabled()
+    {
+        // Toggle boolean using update
+        isEnabled.update([](bool v) { return !v; });
+    }
+
+    void toggleDarkMode()
+    {
+        isDarkMode.update([](bool v) { return !v; });
+    }
+
+    void enableAll()
+    {
+        isEnabled.set(true);
+        isDarkMode.set(true);
+    }
+
+    void disableAll()
+    {
+        isEnabled.set(false);
+        isDarkMode.set(false);
+    }
+
+    WidgetPtr build() override
+    {
+        auto theme = ThemeProvider::getTheme();
+        
+        COLORREF bgColor = isDarkMode.get() ? RGB(30, 30, 30) : RGB(250, 250, 250);
+        COLORREF textColor = isDarkMode.get() ? RGB(220, 220, 220) : RGB(30, 30, 30);
+
+        return Scaffold(
+            ThemedAppBar("Toggle Demo"),
+            
+            Center(
+                Padding(20,
+                    Column(
+                        Text(message)
+                            ->setFontSize(24)
+                            ->setFontWeight(FontWeight::Bold)
+                            ->setTextColor(textColor),
+                        
+                        SizedBox(0, 30),
+                        
+                        ThemedCard(
+                            Row(
+                                Text("Main Feature")
+                                    ->setFontSize(16),
+                                SizedBox(10, 0),
+                                ThemedButton(
+                                    isEnabled.get() ? "ON" : "OFF",
+                                    [this]() { toggleEnabled(); }
+                                )
+                            )
+                            ->setSpacing(10)
+                            ->setMainAxisAlignment(MainAxisAlignment::SpaceBetween)
+                        )->setMinWidth(300),
+                        
+                        ThemedCard(
+                            Row(
+                                Text("Dark Mode")
+                                    ->setFontSize(16),
+                                SizedBox(10, 0),
+                                ThemedButton(
+                                    isDarkMode.get() ? "ON" : "OFF",
+                                    [this]() { toggleDarkMode(); }
+                                )
+                            )
+                            ->setSpacing(10)
+                            ->setMainAxisAlignment(MainAxisAlignment::SpaceBetween)
+                        )->setMinWidth(300),
+                        
+                        SizedBox(0, 30),
+                        
+                        Row(
+                            ThemedButton("Enable All", [this]() { enableAll(); }),
+                            ThemedButton("Disable All", [this]() { disableAll(); })
+                        )
+                        ->setSpacing(10)
+                        ->setMainAxisAlignment(MainAxisAlignment::Center)
+                    )
+                    ->setSpacing(15)
+                    ->setCrossAlignment(Alignment::Center)
+                )
+            )->setBackgroundColor(bgColor)
+        );
     }
 };
 
-// ============================================================================
-// EXAMPLE USAGE - Main Application
-// ============================================================================
-class MyApp
+WidgetPtr toggleApp(FluxUI *app)
 {
-private:
-    FluxUI *ui;
-    State<int> clicks;
-    State<int> likes;
-    State<int> shares;
-
-public:
-    MyApp(FluxUI *app)
-        : ui(app),
-          clicks(0, app),
-          likes(42, app),
-          shares(17, app)
-    {
-    }
-
-    void handleClick()
-    {
-        clicks.set(clicks.get() + 1);
-    }
-
-    void handleLike()
-    {
-        likes.set(likes.get() + 1);
-    }
-
-    void handleShare()
-    {
-        shares.set(shares.get() + 1);
-    }
-
-    WidgetPtr build()
-    {
-        return Center(
-            Column(
-                StatCard::create("Total Clicks", clicks, RGB(76, 175, 80)),
-                StatCard::create("Likes", likes, RGB(33, 150, 243)),
-                StatCard::create("Shares", shares, RGB(255, 152, 0)),
-                Divider(),
-
-                // Control buttons
-                Row(
-                    Button("Click", [this]()
-                           { handleClick(); })
-                        ->setBackgroundColor(RGB(244, 67, 54))
-                        ->setWidth(80),
-
-                    Button("Like", [this]()
-                           { handleLike(); })
-                        ->setBackgroundColor(RGB(158, 158, 158))
-                        ->setWidth(80),
-
-                    Button("Share", [this]()
-                           { handleShare(); })
-                        ->setBackgroundColor(RGB(76, 175, 80))
-                        ->setWidth(80))
-                    ->setSpacing(10)
-                    ->setMainAxisAlignment(MainAxisAlignment::Center))
-                ->setSpacing(15)
-                ->setMainAxisAlignment(MainAxisAlignment::SpaceEvenly));
-    }
-};
-
+    return FluxApp(
+        "Toggle Demo",
+        BuildComponent<ToggleApp>(),
+        AppTheme::materialBlue()
+    );
+}
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
 {
+    AllocConsole();
+    FILE *fp;
+    freopen_s(&fp, "CONOUT$", "w", stdout);
+    freopen_s(&fp, "CONOUT$", "w", stderr);
+
+    std::cout << "Starting FluxUI Dashboard..." << std::endl;
+    
     FluxUI app(hInstance);
-    MyApp myApp(&app);
-
-    app.build([&myApp]()
-              { return myApp.build(); });
-
-    RECT workArea;
-    SystemParametersInfo(SPI_GETWORKAREA, 0, &workArea, 0);
-    int width = workArea.right - workArea.left;
-    int height = workArea.bottom - workArea.top;
-
-    app.createWindow("Custom Components Demo", width * 0.7, height * 0.7);
-
+    app.build([&]() { return toggleApp(&app); });
+    app.createWindow("FluxUI Demo", 900, 650);
+    
     return app.run();
 }

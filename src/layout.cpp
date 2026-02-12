@@ -1,8 +1,3 @@
-
-
-
-
-
 #include "flux.hpp"
 #include <windows.h>
 #include <iostream>
@@ -291,13 +286,6 @@ WidgetPtr layoutStateTestApp(FluxUI *app)
         AppTheme::materialBlue()
     );
 }
-
-
-
-
-
-
-
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
 {
     AllocConsole();
