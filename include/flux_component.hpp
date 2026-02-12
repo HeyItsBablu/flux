@@ -1,7 +1,7 @@
 #ifndef FLUX_COMPONENTS_HPP
 #define FLUX_COMPONENTS_HPP
 
-#include "flux_core.hpp"
+
 #include "flux_state.hpp"
 #include <cassert>
 #include <memory>
