@@ -6,12 +6,13 @@
 class SimpleConditionalApp : public StatefulComponent
 {
 private:
+    State<std::vector<std::string>> items;
     State<bool> showGreen; // The boolean state
     State<int> counter;
 
 public:
     SimpleConditionalApp()
-        : showGreen(true, context), counter(0, context)
+        : showGreen(true, context), counter(0, context), items({"A", "B", "C", "Hello", "Nice"}, context)
     {
     }
 
@@ -21,32 +22,20 @@ public:
             ThemedAppBar("Conditional Rendering Test"),
 
             Center(
-                Column(
-                    // Counter display
-                    Text(counter)
-                        ->setFontSize(24)
-                        ->setTextColor(RGB(30, 30, 30)),
 
-                    // Toggle button
-                    ThemedButton("Toggle Container", [this]()
-                                 { showGreen.update([](bool v)
-                                                    { return !v; }); }),
-
-                    // Increment button
-                    ThemedButton("+ Counter", [this]()
-                                 { counter.update([](int v)
-                                                  { return v + 1; }); }),
-
-                          Switch(counter)
-                        ->Case(0, []()
-                               { return Text("Home"); })
-                        ->Case(1, []()
-                               { return Text("Profile"); })
-                        ->Case(2, []()
-                               { return Text("Settings"); })
-                        ->Default([]()
-                                  { return Text("Unknown"); }))
-                    ->setSpacing(20)));
+                Row(
+                    ListView(items)
+                        ->itemBuilder([](int i, const std::string &item)
+                                      { return Card(Text(item)); })
+                        ->separator([]()
+                                    { return Divider(); })
+                        ->spacing(8),
+                    ListView(items)
+                        ->itemBuilder([](int i, const std::string &item)
+                                      { return Card(Text(item)); })
+                        ->separator([]()
+                                    { return Divider(); })
+                        ->spacing(8))));
     }
 };
 
