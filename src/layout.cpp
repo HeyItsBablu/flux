@@ -101,9 +101,9 @@ public:
         auto theme = ThemeProvider::getTheme();
 
         // Determine colors based on winner
-        COLORREF leftColor = RGB(100, 100, 100);
-        COLORREF centerColor = RGB(100, 100, 100);
-        COLORREF rightColor = RGB(100, 100, 100);
+COLORREF leftColor   = RGB(0, 120, 255);    // Bright Blue
+COLORREF centerColor = RGB(138, 43, 226);   // Purple
+COLORREF rightColor  = RGB(255, 20, 147);   // Deep Pink
 
         std::string winnerText = winner.get();
         if (winnerText.find("Left") != std::string::npos)
@@ -212,7 +212,7 @@ public:
                                             
                                             SizedBox(0, 15),
                                             
-                                            ThemedButton("+1", [this]() { incrementRight(); })
+                                            ThemedButton("+1", [this]() { incrementRight(); })->setBackgroundColor(rightColor)
                                         )
                                         ->setSpacing(0)
                                         ->setCrossAlignment(Alignment::Center)

@@ -10,4 +10,5 @@
 #include "flux_state.hpp"
 #include "flux_component.hpp"
 #include "flux_app.hpp"
+#include "flux_switch.hpp"
 #endif // FLUX_HPP
