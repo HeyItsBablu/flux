@@ -17,6 +17,7 @@ class FontCache;
 
 using WidgetPtr = std::shared_ptr<Widget>;
 using ClickHandler = std::function<void()>;
+using HoverHandler = std::function<void(bool)>;
 
 // ============================================================================
 // ENUMS
@@ -86,6 +87,14 @@ public:
     bool hasBackground = false;
     bool hasBorder = false;
 
+    // Hover colors (only used if hasHover* flags are set)
+    COLORREF hoverBackgroundColor = RGB(255, 255, 255);
+    COLORREF hoverTextColor = RGB(0, 0, 0);
+    COLORREF hoverBorderColor = RGB(0, 0, 0);
+    bool hasHoverBackground = false;
+    bool hasHoverTextColor = false;
+    bool hasHoverBorderColor = false;
+
     // Border
     int borderWidth = 1;
     int borderRadius = 0;
@@ -96,6 +105,10 @@ public:
 
     // Events
     ClickHandler onClick;
+    HoverHandler onHover;
+
+    // Hover state
+    bool isHovered = false;
 
     // Dirty flags
     bool needsLayout = true;
@@ -124,6 +137,58 @@ public:
     virtual bool handleMouseMove(int mx, int my) { return false; }
     virtual bool handleMouseLeave() { return false; }
 
+    // Hover handling
+    bool updateHoverState(int mouseX, int mouseY)
+    {
+        bool nowHovered = (mouseX >= x && mouseX < x + width &&
+                          mouseY >= y && mouseY < y + height);
+        
+        if (nowHovered != isHovered)
+        {
+            isHovered = nowHovered;
+            if (onHover)
+            {
+                onHover(isHovered);
+            }
+            markNeedsPaint();
+            return true;
+        }
+        return false;
+    }
+
+    void clearHoverState()
+    {
+        if (isHovered)
+        {
+            isHovered = false;
+            if (onHover)
+            {
+                onHover(false);
+            }
+            markNeedsPaint();
+        }
+        for (auto &child : children)
+        {
+            child->clearHoverState();
+        }
+    }
+
+    // Get current colors (applying hover if active)
+    COLORREF getCurrentBackgroundColor() const
+    {
+        return (isHovered && hasHoverBackground) ? hoverBackgroundColor : backgroundColor;
+    }
+
+    COLORREF getCurrentTextColor() const
+    {
+        return (isHovered && hasHoverTextColor) ? hoverTextColor : textColor;
+    }
+
+    COLORREF getCurrentBorderColor() const
+    {
+        return (isHovered && hasHoverBorderColor) ? hoverBorderColor : borderColor;
+    }
+
     // Mark this widget and all parents as needing layout
     void markNeedsLayout()
     {
@@ -143,7 +208,6 @@ public:
     // Builder pattern methods
     WidgetPtr setWidth(int w)
     {
-        std::cout << "The width changes " << w << std::endl;
         if (width != w)
         {
             width = w;
@@ -299,6 +363,31 @@ public:
         return shared_from_this();
     }
 
+    // Hover effect setters
+    WidgetPtr setHoverBackgroundColor(COLORREF color)
+    {
+        hoverBackgroundColor = color;
+        hasHoverBackground = true;
+        markNeedsPaint();
+        return shared_from_this();
+    }
+
+    WidgetPtr setHoverTextColor(COLORREF color)
+    {
+        hoverTextColor = color;
+        hasHoverTextColor = true;
+        markNeedsPaint();
+        return shared_from_this();
+    }
+
+    WidgetPtr setHoverBorderColor(COLORREF color)
+    {
+        hoverBorderColor = color;
+        hasHoverBorderColor = true;
+        markNeedsPaint();
+        return shared_from_this();
+    }
+
     WidgetPtr setFontSize(int size)
     {
         if (fontSize != size)
@@ -322,6 +411,12 @@ public:
     WidgetPtr setOnClick(ClickHandler handler)
     {
         onClick = handler;
+        return shared_from_this();
+    }
+
+    WidgetPtr setOnHover(HoverHandler handler)
+    {
+        onHover = handler;
         return shared_from_this();
     }
 
@@ -408,10 +503,13 @@ protected:
 
     void drawRoundedRectangle(HDC hdc)
     {
+        COLORREF bgColor = getCurrentBackgroundColor();
+        COLORREF bdColor = getCurrentBorderColor();
+
         if (borderRadius > 0)
         {
-            HPEN pen = hasBorder ? CreatePen(PS_SOLID, borderWidth, borderColor) : CreatePen(PS_NULL, 0, 0);
-            HBRUSH brush = CreateSolidBrush(backgroundColor);
+            HPEN pen = hasBorder ? CreatePen(PS_SOLID, borderWidth, bdColor) : CreatePen(PS_NULL, 0, 0);
+            HBRUSH brush = CreateSolidBrush(bgColor);
 
             HPEN oldPen = (HPEN)SelectObject(hdc, pen);
             HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, brush);
@@ -425,14 +523,14 @@ protected:
         }
         else
         {
-            HBRUSH brush = CreateSolidBrush(backgroundColor);
+            HBRUSH brush = CreateSolidBrush(bgColor);
             RECT rect = {x, y, x + width, y + height};
             FillRect(hdc, &rect, brush);
             DeleteObject(brush);
 
             if (hasBorder)
             {
-                HPEN pen = CreatePen(PS_SOLID, borderWidth, borderColor);
+                HPEN pen = CreatePen(PS_SOLID, borderWidth, bdColor);
                 HPEN oldPen = (HPEN)SelectObject(hdc, pen);
                 HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
 
@@ -548,6 +646,45 @@ inline bool findAndHandleMouseEvent(Widget* widget, int x, int y, Handler handle
     }
     
     return false;
+}
+
+/**
+ * Update hover state for all widgets in tree
+ * Returns true if any widget changed hover state
+ */
+inline bool updateHoverStates(Widget* widget, int mouseX, int mouseY)
+{
+    if (!widget)
+        return false;
+    
+    bool changed = false;
+    
+    // Check if mouse is over this widget
+    bool isOver = (mouseX >= widget->x && mouseX < widget->x + widget->width &&
+                   mouseY >= widget->y && mouseY < widget->y + widget->height);
+    
+    if (isOver)
+    {
+        // Update this widget's hover state
+        changed |= widget->updateHoverState(mouseX, mouseY);
+        
+        // Update children
+        for (auto &child : widget->children)
+        {
+            changed |= updateHoverStates(child.get(), mouseX, mouseY);
+        }
+    }
+    else
+    {
+        // Mouse not over this widget - clear hover state
+        if (widget->isHovered)
+        {
+            widget->clearHoverState();
+            changed = true;
+        }
+    }
+    
+    return changed;
 }
 
 #endif // FLUX_WIDGET_HPP

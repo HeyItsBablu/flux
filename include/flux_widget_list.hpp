@@ -108,10 +108,9 @@ public:
                 {
                     int expandedHeight = (remainingHeight * child->flex) / totalFlex;
                     child->height = expandedHeight;
-                    child->width = contentWidth; // ✓ ADD THIS: Set width too!
+                    child->width = contentWidth;
                     child->autoHeight = false;
-                    child->autoWidth = false; // ✓ ADD THIS: Don't auto-size width
-                    // ✓ FIXED: Pass contentWidth for width parameter
+                    child->autoWidth = false;
                     child->computeLayout(hdc, contentWidth, expandedHeight, fontCache);
                 }
             }
@@ -363,7 +362,6 @@ public:
     {
         int contentWidth = availableWidth - paddingLeft - paddingRight;
         int contentHeight = availableHeight - paddingTop - paddingBottom;
-        std::cout << "Width : " << availableWidth << "Height : " << availableHeight << std::endl;
 
         if (!children.empty())
         {
@@ -514,7 +512,6 @@ public:
         {
             auto &child = children[0];
 
-            // Position child at content origin (no centering or offset)
             child->x = contentX;
             child->y = contentY;
 
@@ -531,11 +528,6 @@ public:
 // WIDGET FACTORY FUNCTIONS
 // ============================================================================
 
-/**
- * @brief Create a container widget.
- * @param child Optional child widget
- * @return WidgetPtr Container widget
- */
 inline WidgetPtr Container(WidgetPtr child = nullptr)
 {
     auto w = std::make_shared<ContainerWidget>();
@@ -544,11 +536,6 @@ inline WidgetPtr Container(WidgetPtr child = nullptr)
     return w;
 }
 
-/**
- * @brief Create a text widget with static text.
- * @param text Text to display
- * @return WidgetPtr Text widget
- */
 inline WidgetPtr Text(const std::string &text)
 {
     auto w = std::make_shared<TextWidget>();
@@ -556,41 +543,21 @@ inline WidgetPtr Text(const std::string &text)
     return w;
 }
 
-/**
- * @brief Create a text widget bound to a State (reactive).
- * @tparam T Type of the state value
- * @param state State object to bind to
- * @return WidgetPtr Text widget that auto-updates
- *
- * The text widget will automatically update when the state changes.
- * Uses the optimized toString() method from State for performance.
- *
- * @example
- * State<int> counter(0, &app);
- * auto label = Text(counter);  // Auto-updates when counter changes
- */
 template <typename T>
 inline WidgetPtr Text(State<T> &state)
 {
     auto w = std::make_shared<TextWidget>();
-    w->text = state.toString(); // Use cached toString()
-    state.addObserver(w);       // Bind to state
+    w->text = state.toString();
+    state.addObserver(w);
     return w;
 }
 
-/**
- * @brief Create a button widget.
- * @param text Button label
- * @param onClick Click handler (optional)
- * @return WidgetPtr Button widget
- */
 inline WidgetPtr Button(const std::string &text, ClickHandler onClick = nullptr)
 {
     auto w = std::make_shared<ButtonWidget>();
     w->text = text;
     w->onClick = onClick;
 
-    // Default button styling
     w->hasBackground = true;
     w->backgroundColor = RGB(76, 175, 80);
     w->textColor = RGB(255, 255, 255);
@@ -602,12 +569,6 @@ inline WidgetPtr Button(const std::string &text, ClickHandler onClick = nullptr)
     return w;
 }
 
-/**
- * @brief Create a row layout widget.
- * @tparam Widgets Variadic widget types
- * @param widgets Child widgets
- * @return WidgetPtr Row widget
- */
 template <typename... Widgets>
 WidgetPtr Row(Widgets... widgets)
 {
@@ -616,12 +577,6 @@ WidgetPtr Row(Widgets... widgets)
     return w;
 }
 
-/**
- * @brief Create a column layout widget.
- * @tparam Widgets Variadic widget types
- * @param widgets Child widgets
- * @return WidgetPtr Column widget
- */
 template <typename... Widgets>
 WidgetPtr Column(Widgets... widgets)
 {
@@ -630,12 +585,6 @@ WidgetPtr Column(Widgets... widgets)
     return w;
 }
 
-/**
- * @brief Create a padding wrapper widget.
- * @param padding Padding amount (all sides)
- * @param child Child widget
- * @return WidgetPtr Padding widget
- */
 inline WidgetPtr Padding(int padding, WidgetPtr child)
 {
     auto w = std::make_shared<ContainerWidget>();
@@ -646,11 +595,6 @@ inline WidgetPtr Padding(int padding, WidgetPtr child)
     return w;
 }
 
-/**
- * @brief Create a center alignment widget.
- * @param child Child widget to center
- * @return WidgetPtr Center widget
- */
 inline WidgetPtr Center(WidgetPtr child)
 {
     auto w = std::make_shared<CenterWidget>();
@@ -660,13 +604,6 @@ inline WidgetPtr Center(WidgetPtr child)
     return w;
 }
 
-/**
- * @brief Create a fixed-size box widget.
- * @param width Fixed width
- * @param height Fixed height
- * @param child Optional child widget
- * @return WidgetPtr SizedBox widget
- */
 inline WidgetPtr SizedBox(int width, int height, WidgetPtr child = nullptr)
 {
     auto w = std::make_shared<SizedBoxWidget>();
@@ -679,11 +616,6 @@ inline WidgetPtr SizedBox(int width, int height, WidgetPtr child = nullptr)
     return w;
 }
 
-/**
- * @brief Create a card widget (styled container).
- * @param child Child widget
- * @return WidgetPtr Card widget
- */
 inline WidgetPtr Card(WidgetPtr child)
 {
     auto w = std::make_shared<ContainerWidget>();
@@ -699,10 +631,6 @@ inline WidgetPtr Card(WidgetPtr child)
     return w;
 }
 
-/**
- * @brief Create a horizontal divider.
- * @return WidgetPtr Divider widget
- */
 inline WidgetPtr Divider()
 {
     auto w = std::make_shared<DividerWidget>();
@@ -713,12 +641,6 @@ inline WidgetPtr Divider()
     return w;
 }
 
-/**
- * @brief Create an expanded widget (takes remaining space).
- * @param child Child widget
- * @param flex Flex factor (default 1)
- * @return WidgetPtr Expanded widget
- */
 inline WidgetPtr Expanded(WidgetPtr child, int flex = 1)
 {
     auto w = std::make_shared<ExpandedWidget>();
@@ -728,11 +650,6 @@ inline WidgetPtr Expanded(WidgetPtr child, int flex = 1)
     return w;
 }
 
-/**
- * @brief Create an app bar widget.
- * @param title App bar title text
- * @return WidgetPtr AppBar widget
- */
 inline WidgetPtr AppBar(const std::string &title)
 {
     auto w = std::make_shared<AppBarWidget>();
@@ -753,12 +670,6 @@ inline WidgetPtr AppBar(const std::string &title)
     return w;
 }
 
-/**
- * @brief Create a scaffold widget (full app structure).
- * @param appBar Optional app bar
- * @param body Optional body content
- * @return WidgetPtr Scaffold widget
- */
 inline WidgetPtr Scaffold(WidgetPtr appBar = nullptr, WidgetPtr body = nullptr)
 {
     auto w = std::make_shared<ScaffoldWidget>();
@@ -784,4 +695,4 @@ inline WidgetPtr Scaffold(WidgetPtr appBar = nullptr, WidgetPtr body = nullptr)
     return w;
 }
 
-#endif // FLUX_WIDGETS_HPP
+#endif // FLUX_WIDGET_LIST_HPP

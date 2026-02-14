@@ -96,7 +96,7 @@ inline void Widget::renderText(HDC hdc, FontCache &fontCache, UINT format)
     if (text.empty())
         return;
 
-    SetTextColor(hdc, textColor);
+    SetTextColor(hdc, getCurrentTextColor());
     SetBkMode(hdc, TRANSPARENT);
 
     HFONT hFont = fontCache.getFont(fontSize, fontWeight);
@@ -158,6 +158,31 @@ public:
         w->render(hdc, fontCache);
     }
 };
+
+// ============================================================================
+// MOUSE EVENT BROADCAST HELPERS (for captured mouse events)
+// ============================================================================
+
+// Broadcast mouse event to all widgets (used when mouse capture is active)
+inline bool broadcastMouseEvent(Widget* widget, int x, int y, 
+    std::function<bool(Widget*, int, int)> handler)
+{
+    if (!widget)
+        return false;
+    
+    // Try this widget first
+    if (handler(widget, x, y))
+        return true;
+    
+    // Then try all children
+    for (auto &child : widget->children)
+    {
+        if (broadcastMouseEvent(child.get(), x, y, handler))
+            return true;
+    }
+    
+    return false;
+}
 
 // ============================================================================
 // FLUXUI CLASS
@@ -333,6 +358,22 @@ private:
             int mouseX = LOWORD(lParam);
             int mouseY = HIWORD(lParam);
 
+            // ✅ FIX: Check if mouse is captured
+            bool hasCapturedMouse = (GetCapture() == hwnd);
+            
+            if (hasCapturedMouse)
+            {
+                // Mouse is captured - broadcast to ALL widgets
+                // (one of them has the capture and needs this event)
+                if (broadcastMouseEvent(instance->root.get(), mouseX, mouseY,
+                    [](Widget* w, int mx, int my) { return w->handleMouseUp(mx, my); }))
+                {
+                    InvalidateRect(hwnd, NULL, FALSE);
+                    return 0;
+                }
+            }
+
+            // Normal path (no capture) - use bounds checking
             if (findAndHandleMouseEvent(instance->root.get(), mouseX, mouseY,
                 [mouseX, mouseY](Widget* w) { return w->handleMouseUp(mouseX, mouseY); }))
             {
@@ -349,11 +390,49 @@ private:
             int mouseX = LOWORD(lParam);
             int mouseY = HIWORD(lParam);
 
-            if (findAndHandleMouseEvent(instance->root.get(), mouseX, mouseY,
-                [mouseX, mouseY](Widget* w) { return w->handleMouseMove(mouseX, mouseY); }))
+            // Track mouse for leave detection
+            TRACKMOUSEEVENT tme = {0};
+            tme.cbSize = sizeof(TRACKMOUSEEVENT);
+            tme.dwFlags = TME_LEAVE;
+            tme.hwndTrack = hwnd;
+            TrackMouseEvent(&tme);
+
+            // ✅ FIX: Check if mouse is captured
+            bool hasCapturedMouse = (GetCapture() == hwnd);
+            
+            if (hasCapturedMouse)
+            {
+                // Mouse is captured - broadcast to ALL widgets
+                if (broadcastMouseEvent(instance->root.get(), mouseX, mouseY,
+                    [](Widget* w, int mx, int my) { return w->handleMouseMove(mx, my); }))
+                {
+                    InvalidateRect(hwnd, NULL, FALSE);
+                    return 0;
+                }
+            }
+
+            // Normal path (no capture) - update hover states and custom handlers
+            bool hoverChanged = updateHoverStates(instance->root.get(), mouseX, mouseY);
+
+            // Handle custom mouse move events
+            bool customHandled = findAndHandleMouseEvent(instance->root.get(), mouseX, mouseY,
+                [mouseX, mouseY](Widget* w) { return w->handleMouseMove(mouseX, mouseY); });
+
+            if (hoverChanged || customHandled)
             {
                 InvalidateRect(hwnd, NULL, FALSE);
             }
+            return 0;
+        }
+
+        case WM_MOUSELEAVE:
+        {
+            if (!instance || !instance->root)
+                return 0;
+
+            // Clear all hover states when mouse leaves window
+            instance->root->clearHoverState();
+            InvalidateRect(hwnd, NULL, FALSE);
             return 0;
         }
 
