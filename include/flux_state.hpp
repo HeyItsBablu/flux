@@ -6,6 +6,7 @@
 #include <cassert>
 #include <sstream>
 #include <iomanip>
+#include <vector>
 
 // ============================================================================
 // STATE CLASS - REACTIVE STATE MANAGEMENT
@@ -27,7 +28,7 @@ private:
     // PRIVATE HELPERS
     // ========================================================================
 
-    // Helper to convert value to string for display
+    // Helper to convert value to string for display - integers
     template <typename U = T>
     typename std::enable_if<std::is_integral<U>::value && !std::is_same<U, bool>::value, std::string>::type
     valueToString(const U &val) const
@@ -35,6 +36,7 @@ private:
         return std::to_string(val);
     }
 
+    // Helper to convert value to string for display - floats
     template <typename U = T>
     typename std::enable_if<std::is_floating_point<U>::value, std::string>::type
     valueToString(const U &val) const
@@ -44,6 +46,7 @@ private:
         return oss.str();
     }
 
+    // Helper to convert value to string for display - bool
     template <typename U = T>
     typename std::enable_if<std::is_same<U, bool>::value, std::string>::type
     valueToString(const U &val) const
@@ -51,11 +54,27 @@ private:
         return val ? "true" : "false";
     }
 
+    // Helper to convert value to string for display - string
     template <typename U = T>
     typename std::enable_if<std::is_same<U, std::string>::value, std::string>::type
     valueToString(const U &val) const
     {
         return val;
+    }
+
+    // Fallback for other types (including std::vector)
+    template <typename U = T>
+    typename std::enable_if<
+        !std::is_integral<U>::value && 
+        !std::is_floating_point<U>::value && 
+        !std::is_same<U, bool>::value && 
+        !std::is_same<U, std::string>::value,
+        std::string
+    >::type
+    valueToString(const U &val) const
+    {
+        // For vectors and other complex types, just show a placeholder
+        return "[complex type]";
     }
 
     // Notify all observers (widgets) - MUST be called with lock held

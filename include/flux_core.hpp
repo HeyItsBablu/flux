@@ -4,6 +4,7 @@
 #include "flux_widget.hpp"
 #include <map>
 #include <tuple>
+#include <windowsx.h> 
 
 // ============================================================================
 // FORWARD DECLARATIONS
@@ -278,6 +279,27 @@ private:
             return 0;
         }
 
+        case WM_MOUSEWHEEL:
+        {
+            if (!instance || !instance->root)
+                return 0;
+
+            int delta = GET_WHEEL_DELTA_WPARAM(wParam);
+            int x = GET_X_LPARAM(lParam);
+            int y = GET_Y_LPARAM(lParam);
+
+            // Convert screen coordinates to client coordinates
+            POINT pt = {x, y};
+            ScreenToClient(hwnd, &pt);
+
+            if (findAndHandleMouseEvent(instance->root.get(), pt.x, pt.y,
+                [delta](Widget* w) { return w->handleMouseWheel(delta); }))
+            {
+                InvalidateRect(hwnd, NULL, FALSE);
+            }
+            return 0;
+        }
+
         case WM_LBUTTONDOWN:
         {
             if (!instance || !instance->root)
@@ -286,10 +308,51 @@ private:
             int mouseX = LOWORD(lParam);
             int mouseY = HIWORD(lParam);
 
+            // Try new mouse event system first
+            if (findAndHandleMouseEvent(instance->root.get(), mouseX, mouseY,
+                [mouseX, mouseY](Widget* w) { return w->handleMouseDown(mouseX, mouseY); }))
+            {
+                InvalidateRect(hwnd, NULL, FALSE);
+                return 0;
+            }
+
+            // Fall back to old onClick system
             Widget *clicked = findWidgetAt(instance->root.get(), mouseX, mouseY);
             if (clicked && clicked->onClick)
             {
                 clicked->onClick();
+            }
+            return 0;
+        }
+
+        case WM_LBUTTONUP:
+        {
+            if (!instance || !instance->root)
+                return 0;
+
+            int mouseX = LOWORD(lParam);
+            int mouseY = HIWORD(lParam);
+
+            if (findAndHandleMouseEvent(instance->root.get(), mouseX, mouseY,
+                [mouseX, mouseY](Widget* w) { return w->handleMouseUp(mouseX, mouseY); }))
+            {
+                InvalidateRect(hwnd, NULL, FALSE);
+            }
+            return 0;
+        }
+
+        case WM_MOUSEMOVE:
+        {
+            if (!instance || !instance->root)
+                return 0;
+
+            int mouseX = LOWORD(lParam);
+            int mouseY = HIWORD(lParam);
+
+            if (findAndHandleMouseEvent(instance->root.get(), mouseX, mouseY,
+                [mouseX, mouseY](Widget* w) { return w->handleMouseMove(mouseX, mouseY); }))
+            {
+                InvalidateRect(hwnd, NULL, FALSE);
             }
             return 0;
         }

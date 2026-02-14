@@ -117,6 +117,12 @@ public:
     virtual void positionChildren(int contentX, int contentY, int contentWidth, int contentHeight);
     virtual void render(HDC hdc, FontCache &fontCache);
 
+    // Mouse event handlers - Override these for interactive widgets
+    virtual bool handleMouseWheel(int delta) { return false; }
+    virtual bool handleMouseDown(int mx, int my) { return false; }
+    virtual bool handleMouseUp(int mx, int my) { return false; }
+    virtual bool handleMouseMove(int mx, int my) { return false; }
+
     // Mark this widget and all parents as needing layout
     void markNeedsLayout()
     {
@@ -508,6 +514,39 @@ inline Widget *findWidgetAt(Widget *w, int x, int y)
     }
 
     return nullptr;
+}
+
+// ============================================================================
+// MOUSE EVENT HELPER FUNCTIONS
+// ============================================================================
+
+/**
+ * Find widget at position and dispatch mouse event
+ * Returns true if event was handled
+ */
+template<typename Handler>
+inline bool findAndHandleMouseEvent(Widget* widget, int x, int y, Handler handler)
+{
+    if (!widget)
+        return false;
+    
+    // Check if point is within widget bounds
+    if (x >= widget->x && x < widget->x + widget->width &&
+        y >= widget->y && y < widget->y + widget->height)
+    {
+        // Try children first (they're on top)
+        for (auto it = widget->children.rbegin(); it != widget->children.rend(); ++it)
+        {
+            if (findAndHandleMouseEvent(it->get(), x, y, handler))
+                return true;
+        }
+        
+        // Then try this widget
+        if (handler(widget))
+            return true;
+    }
+    
+    return false;
 }
 
 #endif // FLUX_WIDGET_HPP

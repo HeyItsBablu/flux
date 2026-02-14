@@ -6,52 +6,59 @@
 #include "flux_widget_list.hpp"
 #include <functional>
 #include <vector>
+#include <iostream>
 
 // ============================================================================
-// LISTVIEW BUILDER WIDGET
+// SCROLLABLE LISTVIEW BUILDER WIDGET
 // ============================================================================
 
-/**
- * ListViewBuilder: Dynamic list with builder pattern (like Flutter)
- * 
- * Usage:
- *   State<std::vector<std::string>> items({"Item 1", "Item 2"}, &app);
- *   
- *   ListView(items)
- *       ->itemBuilder([](int index, const std::string& item) {
- *           return Card(Text(item));
- *       })
- *       ->separator([]() { return Divider(); })
- *       ->spacing(8)
- */
-template<typename T>
+template <typename T>
 class ListViewBuilder : public Widget
 {
 private:
-    State<std::vector<T>>* boundState = nullptr;
-    std::function<WidgetPtr(int, const T&)> builder;
+    State<std::vector<T>> *boundState = nullptr;
+    std::function<WidgetPtr(int, const T &)> builder;
     std::function<WidgetPtr()> separatorBuilder;
     int itemSpacing = 0;
     int lastItemCount = 0;
     std::shared_ptr<ListViewBuilder<T>> self;
+
+    // Scroll state
+    int scrollOffset = 0;
+    int contentHeight = 0;
+    int viewportHeight = 0;
+    bool isScrollable = false;
+
+    // Scrollbar properties
+    int scrollbarWidth = 8;
+    int scrollbarThumbHeight = 0;
+    int scrollbarThumbY = 0;
+    bool isDraggingScrollbar = false;
+    int dragStartY = 0;
+    int dragStartOffset = 0;
+    
+    // ✓ NEW: Hover state
+    bool isHoveringScrollbar = false;
+    
+    // ✓ NEW: Colors with hover states
+    COLORREF scrollbarColor = RGB(180, 180, 180);
+    COLORREF scrollbarHoverColor = RGB(140, 140, 140);
+    COLORREF scrollbarActiveColor = RGB(100, 100, 100);
+    COLORREF scrollbarTrackColor = RGB(245, 245, 245);
 
     void rebuildList()
     {
         if (!boundState || !builder)
             return;
 
-        const auto& items = boundState->get();
-        
-        // Only rebuild if count changed (optimization)
+        const auto &items = boundState->get();
+
         if (items.size() == lastItemCount && !children.empty())
             return;
 
         lastItemCount = items.size();
-
-        // Clear old children
         children.clear();
 
-        // Build new items
         for (size_t i = 0; i < items.size(); i++)
         {
             auto itemWidget = builder(i, items[i]);
@@ -60,7 +67,6 @@ private:
                 addChild(itemWidget);
             }
 
-            // Add separator if not last item
             if (separatorBuilder && i < items.size() - 1)
             {
                 auto separator = separatorBuilder();
@@ -74,13 +80,101 @@ private:
         markNeedsLayout();
     }
 
+    void updateScrollbar()
+    {
+        if (!isScrollable)
+        {
+            scrollbarThumbHeight = 0;
+            return;
+        }
+
+        float visibleRatio = (float)viewportHeight / (float)contentHeight;
+        scrollbarThumbHeight = (int)(viewportHeight * visibleRatio);
+
+        if (scrollbarThumbHeight < 30)
+            scrollbarThumbHeight = 30;
+
+        if (contentHeight > viewportHeight)
+        {
+            float scrollRatio = (float)scrollOffset / (float)(contentHeight - viewportHeight);
+            scrollbarThumbY = (int)(scrollRatio * (viewportHeight - scrollbarThumbHeight));
+        }
+        else
+        {
+            scrollbarThumbY = 0;
+        }
+    }
+
+    void clampScrollOffset()
+    {
+        int maxScroll = contentHeight - viewportHeight;
+        if (maxScroll < 0)
+            maxScroll = 0;
+
+        if (scrollOffset < 0)
+            scrollOffset = 0;
+        if (scrollOffset > maxScroll)
+            scrollOffset = maxScroll;
+    }
+
+    void renderScrollbar(HDC hdc)
+    {
+        if (!isScrollable)
+            return;
+
+        // Draw scrollbar track
+        HBRUSH trackBrush = CreateSolidBrush(scrollbarTrackColor);
+        RECT trackRect = {
+            x + width - scrollbarWidth,
+            y,
+            x + width,
+            y + height};
+        FillRect(hdc, &trackRect, trackBrush);
+        DeleteObject(trackBrush);
+
+        // ✓ NEW: Choose color based on state
+        COLORREF thumbColor = scrollbarColor;
+        if (isDraggingScrollbar)
+        {
+            thumbColor = scrollbarActiveColor;
+        }
+        else if (isHoveringScrollbar)
+        {
+            thumbColor = scrollbarHoverColor;
+        }
+
+        // Draw scrollbar thumb with state-based color
+        HBRUSH thumbBrush = CreateSolidBrush(thumbColor);
+        RECT thumbRect = {
+            x + width - scrollbarWidth,
+            y + scrollbarThumbY,
+            x + width,
+            y + scrollbarThumbY + scrollbarThumbHeight};
+        FillRect(hdc, &thumbRect, thumbBrush);
+        DeleteObject(thumbBrush);
+    }
+
+    // ✓ NEW: Helper to check if mouse is over scrollbar thumb
+    bool isMouseOverScrollbarThumb(int mx, int my) const
+    {
+        if (!isScrollable)
+            return false;
+
+        int scrollbarX = x + width - scrollbarWidth;
+        int thumbTop = y + scrollbarThumbY;
+        int thumbBottom = thumbTop + scrollbarThumbHeight;
+
+        return (mx >= scrollbarX && mx < x + width &&
+                my >= thumbTop && my < thumbBottom);
+    }
+
 public:
-    ListViewBuilder(State<std::vector<T>>& state) : boundState(&state)
+    ListViewBuilder(State<std::vector<T>> &state) : boundState(&state)
     {
         lastItemCount = state.get().size();
 
-        // Listen for state changes
-        state.listen([this](const std::vector<T>& newValue) {
+        state.listen([this](const std::vector<T> &newValue)
+                     {
             rebuildList();
             
             if (boundState && boundState->hasContext())
@@ -90,8 +184,7 @@ public:
                 {
                     ui->partialRebuild(this);
                 }
-            }
-        });
+            } });
     }
 
     void setSelf(std::shared_ptr<ListViewBuilder<T>> ptr)
@@ -99,87 +192,180 @@ public:
         self = ptr;
     }
 
-    /**
-     * Set the item builder function
-     * 
-     * @param builderFunc Function that takes (index, item) and returns a widget
-     * 
-     * @example
-     * ListView(items)->itemBuilder([](int i, const Item& item) {
-     *     return Text(item.name);
-     * })
-     */
-    std::shared_ptr<ListViewBuilder<T>> itemBuilder(std::function<WidgetPtr(int, const T&)> builderFunc)
+    std::shared_ptr<ListViewBuilder<T>> itemBuilder(std::function<WidgetPtr(int, const T &)> builderFunc)
     {
         builder = builderFunc;
-        rebuildList(); // Initial build
+        rebuildList();
         return self;
     }
 
-    /**
-     * Set separator between items
-     * 
-     * @example
-     * ListView(items)->separator([]() { return Divider(); })
-     */
     std::shared_ptr<ListViewBuilder<T>> separator(std::function<WidgetPtr()> separatorFunc)
     {
         separatorBuilder = separatorFunc;
         return self;
     }
 
-    /**
-     * Set spacing between items (in pixels)
-     */
     std::shared_ptr<ListViewBuilder<T>> spacing(int space)
     {
         itemSpacing = space;
         return self;
     }
 
-    void computeLayout(HDC hdc, int availableWidth, int availableHeight, FontCache& fontCache) override
+    bool handleMouseWheel(int delta) override
+    {
+        if (!isScrollable)
+            return false;
+
+        int scrollAmount = (delta / WHEEL_DELTA) * 40;
+        scrollOffset -= scrollAmount;
+
+        clampScrollOffset();
+        updateScrollbar();
+
+        positionChildren(
+            x + paddingLeft,
+            y + paddingTop,
+            width - paddingLeft - paddingRight - scrollbarWidth,
+            height - paddingTop - paddingBottom);
+
+        markNeedsPaint();
+        return true;
+    }
+
+    bool handleMouseDown(int mx, int my) override
+    {
+        if (!isScrollable)
+            return false;
+
+        int scrollbarX = x + width - scrollbarWidth;
+        if (mx >= scrollbarX && mx < x + width)
+        {
+            int thumbTop = y + scrollbarThumbY;
+            int thumbBottom = thumbTop + scrollbarThumbHeight;
+
+            if (my >= thumbTop && my < thumbBottom)
+            {
+                isDraggingScrollbar = true;
+                dragStartY = my;
+                dragStartOffset = scrollOffset;
+                markNeedsPaint(); // ✓ NEW: Repaint for active color
+                return true;
+            }
+
+            float clickRatio = (float)(my - y) / (float)viewportHeight;
+            scrollOffset = (int)(clickRatio * (contentHeight - viewportHeight));
+            clampScrollOffset();
+            updateScrollbar();
+
+            positionChildren(
+                x + paddingLeft,
+                y + paddingTop,
+                width - paddingLeft - paddingRight - scrollbarWidth,
+                height - paddingTop - paddingBottom);
+
+            markNeedsPaint();
+            return true;
+        }
+
+        return false;
+    }
+
+    bool handleMouseUp(int mx, int my) override
+    {
+        if (isDraggingScrollbar)
+        {
+            isDraggingScrollbar = false;
+            
+            // ✓ NEW: Update hover state after releasing
+            isHoveringScrollbar = isMouseOverScrollbarThumb(mx, my);
+            
+            markNeedsPaint(); // ✓ NEW: Repaint to show hover/normal color
+            return true;
+        }
+        return false;
+    }
+
+    bool handleMouseMove(int mx, int my) override
+    {
+        // ✓ NEW: Track hover state
+        bool wasHovering = isHoveringScrollbar;
+        isHoveringScrollbar = isMouseOverScrollbarThumb(mx, my);
+        
+        if (isDraggingScrollbar)
+        {
+            int deltaY = my - dragStartY;
+            float scrollRatio = (float)deltaY / (float)(viewportHeight - scrollbarThumbHeight);
+            scrollOffset = dragStartOffset + (int)(scrollRatio * (contentHeight - viewportHeight));
+
+            clampScrollOffset();
+            updateScrollbar();
+
+            positionChildren(
+                x + paddingLeft,
+                y + paddingTop,
+                width - paddingLeft - paddingRight - scrollbarWidth,
+                height - paddingTop - paddingBottom);
+
+            markNeedsPaint();
+            return true;
+        }
+        
+        // ✓ NEW: Repaint if hover state changed
+        if (wasHovering != isHoveringScrollbar)
+        {
+            markNeedsPaint();
+            return true;
+        }
+        
+        return false;
+    }
+
+    void computeLayout(HDC hdc, int availableWidth, int availableHeight, FontCache &fontCache) override
     {
         rebuildList();
 
-        int contentWidth = availableWidth - paddingLeft - paddingRight;
-        int contentHeight = availableHeight - paddingTop - paddingBottom;
+        viewportHeight = availableHeight - paddingTop - paddingBottom;
+        int contentWidth = availableWidth - paddingLeft - paddingRight - scrollbarWidth;
+
         int totalHeight = 0;
         int maxWidth = 0;
 
-        // Layout all children
         for (size_t i = 0; i < children.size(); i++)
         {
-            auto& child = children[i];
-            child->computeLayout(hdc, contentWidth, contentHeight, fontCache);
-            
+            auto &child = children[i];
+            child->computeLayout(hdc, contentWidth, viewportHeight, fontCache);
+
             totalHeight += child->height;
             if (child->width > maxWidth)
                 maxWidth = child->width;
-            
-            // Add spacing between items (but not after separators)
+
             if (itemSpacing > 0 && i < children.size() - 1)
             {
                 totalHeight += itemSpacing;
             }
         }
 
-        if (autoWidth)
-            width = maxWidth + paddingLeft + paddingRight;
-        if (autoHeight)
-            height = totalHeight + paddingTop + paddingBottom;
+        contentHeight = totalHeight;
+        isScrollable = (contentHeight > viewportHeight);
 
+        if (autoWidth)
+            width = maxWidth + paddingLeft + paddingRight + scrollbarWidth;
+        if (autoHeight)
+            height = viewportHeight + paddingTop + paddingBottom;
+
+        updateScrollbar();
         applyConstraints();
         needsLayout = false;
     }
 
     void positionChildren(int contentX, int contentY, int contentWidth, int contentHeight) override
     {
-        int currentY = contentY;
+        int currentY = contentY - scrollOffset;
 
         for (size_t i = 0; i < children.size(); i++)
         {
-            auto& child = children[i];
-            
+            auto &child = children[i];
+
             child->x = contentX;
             child->y = currentY;
 
@@ -187,328 +373,84 @@ public:
                 child->x + child->paddingLeft,
                 child->y + child->paddingTop,
                 child->width - child->paddingLeft - child->paddingRight,
-                child->height - child->paddingTop - child->paddingBottom
-            );
+                child->height - child->paddingTop - child->paddingBottom);
 
             currentY += child->height;
-            
+
             if (itemSpacing > 0 && i < children.size() - 1)
             {
                 currentY += itemSpacing;
             }
         }
     }
-};
 
-// ============================================================================
-// SIMPLE LISTVIEW (NON-BUILDER)
-// ============================================================================
-
-/**
- * SimpleListView: List with static children
- */
-class SimpleListView : public Widget
-{
-private:
-    int itemSpacing = 0;
-    std::shared_ptr<SimpleListView> self;
-
-public:
-    SimpleListView() = default;
-
-    void setSelf(std::shared_ptr<SimpleListView> ptr)
+    void render(HDC hdc, FontCache &fontCache) override
     {
-        self = ptr;
-    }
+        updateScrollbar();
 
-    std::shared_ptr<SimpleListView> spacing(int space)
-    {
-        itemSpacing = space;
-        return self;
-    }
+        HRGN clipRegion = CreateRectRgn(
+            x + paddingLeft,
+            y + paddingTop,
+            x + width - scrollbarWidth - paddingRight,
+            y + height - paddingBottom);
+        SelectClipRgn(hdc, clipRegion);
 
-    void computeLayout(HDC hdc, int availableWidth, int availableHeight, FontCache& fontCache) override
-    {
-        int contentWidth = availableWidth - paddingLeft - paddingRight;
-        int contentHeight = availableHeight - paddingTop - paddingBottom;
-        int totalHeight = 0;
-        int maxWidth = 0;
-
-        for (size_t i = 0; i < children.size(); i++)
+        if (hasBackground)
         {
-            auto& child = children[i];
-            child->computeLayout(hdc, contentWidth, contentHeight, fontCache);
-            
-            totalHeight += child->height;
-            if (child->width > maxWidth)
-                maxWidth = child->width;
-            
-            if (i < children.size() - 1)
+            drawRoundedRectangle(hdc);
+        }
+
+        for (auto &child : children)
+        {
+            int childTop = child->y;
+            int childBottom = child->y + child->height;
+            int viewportTop = y + paddingTop;
+            int viewportBottom = y + height - paddingBottom;
+
+            if (childBottom >= viewportTop && childTop < viewportBottom)
             {
-                totalHeight += itemSpacing;
+                child->render(hdc, fontCache);
             }
         }
 
-        if (autoWidth)
-            width = maxWidth + paddingLeft + paddingRight;
-        if (autoHeight)
-            height = totalHeight + paddingTop + paddingBottom;
+        SelectClipRgn(hdc, NULL);
+        DeleteObject(clipRegion);
 
-        applyConstraints();
-        needsLayout = false;
+        renderScrollbar(hdc);
+
+        needsPaint = false;
     }
-
-    void positionChildren(int contentX, int contentY, int contentWidth, int contentHeight) override
+    
+    // ✓ NEW: Optional customization methods
+    std::shared_ptr<ListViewBuilder<T>> setScrollbarColor(COLORREF color)
     {
-        int currentY = contentY;
-
-        for (size_t i = 0; i < children.size(); i++)
-        {
-            auto& child = children[i];
-            
-            child->x = contentX;
-            child->y = currentY;
-
-            child->positionChildren(
-                child->x + child->paddingLeft,
-                child->y + child->paddingTop,
-                child->width - child->paddingLeft - child->paddingRight,
-                child->height - child->paddingTop - child->paddingBottom
-            );
-
-            currentY += child->height + itemSpacing;
-        }
+        scrollbarColor = color;
+        return self;
+    }
+    
+    std::shared_ptr<ListViewBuilder<T>> setScrollbarHoverColor(COLORREF color)
+    {
+        scrollbarHoverColor = color;
+        return self;
+    }
+    
+    std::shared_ptr<ListViewBuilder<T>> setScrollbarActiveColor(COLORREF color)
+    {
+        scrollbarActiveColor = color;
+        return self;
     }
 };
 
 // ============================================================================
-// FACTORY FUNCTIONS
+// FACTORY FUNCTION
 // ============================================================================
 
-/**
- * Create a ListView.builder widget
- * 
- * @param state State containing vector of items
- * @return ListViewBuilder<T>* Chainable list widget
- * 
- * @example
- * State<std::vector<Task>> tasks({...}, &app);
- * 
- * ListView(tasks)
- *   ->itemBuilder([](int index, const Task& task) {
- *       return Card(
- *           Column(
- *               Text(task.title)->setFontWeight(FontWeight::Bold),
- *               Text(task.description)
- *           )
- *       );
- *   })
- *   ->separator([]() { return Divider(); })
- *   ->spacing(8)
- */
-template<typename T>
-inline std::shared_ptr<ListViewBuilder<T>> ListView(State<std::vector<T>>& state)
+template <typename T>
+inline std::shared_ptr<ListViewBuilder<T>> ListView(State<std::vector<T>> &state)
 {
     auto widget = std::make_shared<ListViewBuilder<T>>(state);
     widget->setSelf(widget);
     return widget;
 }
-
-/**
- * Create a simple ListView with static children
- * 
- * @example
- * ListViewStatic(
- *     Text("Item 1"),
- *     Text("Item 2"),
- *     Text("Item 3")
- * )->spacing(8)
- */
-template<typename... Widgets>
-inline std::shared_ptr<SimpleListView> ListViewStatic(Widgets... widgets)
-{
-    auto w = std::make_shared<SimpleListView>();
-    w->setSelf(w);
-    (w->addChild(widgets), ...);
-    return w;
-}
-
-// ============================================================================
-// USAGE EXAMPLES
-// ============================================================================
-
-/*
-
-EXAMPLE 1: Basic string list
------------------------------
-
-State<std::vector<std::string>> names({
-    "Alice", "Bob", "Charlie", "David"
-}, &app);
-
-auto list = ListView(names)
-    ->itemBuilder([](int index, const std::string& name) {
-        return Text(name);
-    })
-    ->spacing(4);
-
-
-EXAMPLE 2: List with separators
---------------------------------
-
-State<std::vector<std::string>> items({"A", "B", "C"}, &app);
-
-ListView(items)
-    ->itemBuilder([](int i, const std::string& item) {
-        return Card(Text(item));
-    })
-    ->separator([]() { 
-        return Divider(); 
-    });
-
-
-EXAMPLE 3: Complex item widgets
---------------------------------
-
-struct Task {
-    std::string title;
-    std::string description;
-    bool completed;
-};
-
-State<std::vector<Task>> tasks({...}, &app);
-
-ListView(tasks)
-    ->itemBuilder([&](int index, const Task& task) {
-        return Card(
-            Row(
-                Column(
-                    Text(task.title)
-                        ->setFontWeight(FontWeight::Bold),
-                    Text(task.description)
-                        ->setTextColor(RGB(100, 100, 100))
-                )->setFlex(1),
-                
-                Button(task.completed ? "✓" : "○", [&, index]() {
-                    tasks.update([index](std::vector<Task> t) {
-                        t[index].completed = !t[index].completed;
-                        return t;
-                    });
-                })
-            )
-        );
-    })
-    ->spacing(8);
-
-
-EXAMPLE 4: Dynamic list with add/remove
----------------------------------------
-
-State<std::vector<std::string>> items({"Item 1"}, &app);
-
-Column(
-    // Add button
-    Button("Add Item", [&]() {
-        items.update([](std::vector<std::string> v) {
-            v.push_back("Item " + std::to_string(v.size() + 1));
-            return v;
-        });
-    }),
-    
-    // List
-    Expanded(
-        ListView(items)
-            ->itemBuilder([&](int index, const std::string& item) {
-                return Row(
-                    Text(item)->setFlex(1),
-                    Button("Remove", [&, index]() {
-                        items.update([index](std::vector<std::string> v) {
-                            v.erase(v.begin() + index);
-                            return v;
-                        });
-                    })
-                );
-            })
-            ->spacing(4)
-    )
-);
-
-
-EXAMPLE 5: Index-based styling
--------------------------------
-
-ListView(items)
-    ->itemBuilder([](int index, const std::string& item) {
-        auto widget = Card(Text(item));
-        
-        // Alternate colors
-        if (index % 2 == 0) {
-            widget->setBackgroundColor(RGB(240, 240, 240));
-        } else {
-            widget->setBackgroundColor(RGB(255, 255, 255));
-        }
-        
-        return widget;
-    })
-    ->spacing(2);
-
-
-EXAMPLE 6: Numbers/Counters
----------------------------
-
-State<std::vector<int>> numbers({1, 2, 3, 4, 5}, &app);
-
-ListView(numbers)
-    ->itemBuilder([&](int index, int number) {
-        return Row(
-            Text(std::to_string(number))->setFlex(1),
-            Button("+", [&, index]() {
-                numbers.update([index](std::vector<int> v) {
-                    v[index]++;
-                    return v;
-                });
-            }),
-            Button("-", [&, index]() {
-                numbers.update([index](std::vector<int> v) {
-                    v[index]--;
-                    return v;
-                });
-            })
-        );
-    })
-    ->spacing(4);
-
-
-EXAMPLE 7: Static ListView (no builder)
----------------------------------------
-
-ListViewStatic(
-    Card(Text("First Item")),
-    Card(Text("Second Item")),
-    Card(Text("Third Item"))
-)->spacing(8);
-
-
-EXAMPLE 8: Empty state handling
---------------------------------
-
-State<std::vector<Item>> items({}, &app);
-
-Switch(itemsCount)
-    ->Case(0, []() {
-        return Center(
-            Text("No items yet")
-                ->setTextColor(RGB(150, 150, 150))
-        );
-    })
-    ->Default([&]() {
-        return ListView(items)
-            ->itemBuilder([](int i, const Item& item) {
-                return ItemWidget(item);
-            })
-            ->spacing(8);
-    });
-
-*/
 
 #endif // FLUX_LISTVIEW_HPP
