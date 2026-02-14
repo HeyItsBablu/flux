@@ -122,6 +122,7 @@ public:
     virtual bool handleMouseDown(int mx, int my) { return false; }
     virtual bool handleMouseUp(int mx, int my) { return false; }
     virtual bool handleMouseMove(int mx, int my) { return false; }
+    virtual bool handleMouseLeave() { return false; }
 
     // Mark this widget and all parents as needing layout
     void markNeedsLayout()

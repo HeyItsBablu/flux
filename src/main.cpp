@@ -19,7 +19,7 @@ public:
         std::vector<std::string> leftData;
         std::vector<std::string> rightData;
         
-        for (int i = 1; i <= 20; i++)
+        for (int i = 1; i <= 5; i++)
         {
             leftData.push_back("Left Item " + std::to_string(i));
             rightData.push_back("Right Item " + std::to_string(i));

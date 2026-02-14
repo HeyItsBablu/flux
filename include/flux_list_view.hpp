@@ -6,7 +6,6 @@
 #include "flux_widget_list.hpp"
 #include <functional>
 #include <vector>
-#include <iostream>
 
 // ============================================================================
 // SCROLLABLE LISTVIEW BUILDER WIDGET
@@ -36,11 +35,11 @@ private:
     bool isDraggingScrollbar = false;
     int dragStartY = 0;
     int dragStartOffset = 0;
-    
-    // ✓ NEW: Hover state
+
+    // Hover state
     bool isHoveringScrollbar = false;
-    
-    // ✓ NEW: Colors with hover states
+
+    // Colors with hover states
     COLORREF scrollbarColor = RGB(180, 180, 180);
     COLORREF scrollbarHoverColor = RGB(140, 140, 140);
     COLORREF scrollbarActiveColor = RGB(100, 100, 100);
@@ -85,6 +84,7 @@ private:
         if (!isScrollable)
         {
             scrollbarThumbHeight = 0;
+            scrollbarThumbY = 0;
             return;
         }
 
@@ -132,7 +132,7 @@ private:
         FillRect(hdc, &trackRect, trackBrush);
         DeleteObject(trackBrush);
 
-        // ✓ NEW: Choose color based on state
+        // Choose color based on state
         COLORREF thumbColor = scrollbarColor;
         if (isDraggingScrollbar)
         {
@@ -154,7 +154,7 @@ private:
         DeleteObject(thumbBrush);
     }
 
-    // ✓ NEW: Helper to check if mouse is over scrollbar thumb
+    // Helper to check if mouse is over scrollbar thumb
     bool isMouseOverScrollbarThumb(int mx, int my) const
     {
         if (!isScrollable)
@@ -248,7 +248,7 @@ public:
                 isDraggingScrollbar = true;
                 dragStartY = my;
                 dragStartOffset = scrollOffset;
-                markNeedsPaint(); // ✓ NEW: Repaint for active color
+                markNeedsPaint();
                 return true;
             }
 
@@ -276,10 +276,17 @@ public:
         {
             isDraggingScrollbar = false;
             
-            // ✓ NEW: Update hover state after releasing
-            isHoveringScrollbar = isMouseOverScrollbarThumb(mx, my);
-            
-            markNeedsPaint(); // ✓ NEW: Repaint to show hover/normal color
+            // ✅ FIX: Only update hover if still scrollable
+            if (isScrollable)
+            {
+                isHoveringScrollbar = isMouseOverScrollbarThumb(mx, my);
+            }
+            else
+            {
+                isHoveringScrollbar = false;
+            }
+
+            markNeedsPaint();
             return true;
         }
         return false;
@@ -287,12 +294,30 @@ public:
 
     bool handleMouseMove(int mx, int my) override
     {
-        // ✓ NEW: Track hover state
+        // ✅ FIX: Only track hover state if scrollable
         bool wasHovering = isHoveringScrollbar;
-        isHoveringScrollbar = isMouseOverScrollbarThumb(mx, my);
         
+        if (isScrollable)
+        {
+            isHoveringScrollbar = isMouseOverScrollbarThumb(mx, my);
+        }
+        else
+        {
+            isHoveringScrollbar = false;
+        }
+
         if (isDraggingScrollbar)
         {
+            // ✅ FIX: Check if still scrollable during drag
+            if (!isScrollable)
+            {
+                // List became non-scrollable during drag - stop dragging
+                isDraggingScrollbar = false;
+                isHoveringScrollbar = false;
+                markNeedsPaint();
+                return true;
+            }
+
             int deltaY = my - dragStartY;
             float scrollRatio = (float)deltaY / (float)(viewportHeight - scrollbarThumbHeight);
             scrollOffset = dragStartOffset + (int)(scrollRatio * (contentHeight - viewportHeight));
@@ -309,14 +334,29 @@ public:
             markNeedsPaint();
             return true;
         }
-        
-        // ✓ NEW: Repaint if hover state changed
+
+        // Repaint if hover state changed
         if (wasHovering != isHoveringScrollbar)
         {
             markNeedsPaint();
             return true;
         }
+
+        return false;
+    }
+
+    bool handleMouseLeave() override
+    {
+        // Clear hover and drag states when mouse leaves this widget
+        bool changed = isHoveringScrollbar || isDraggingScrollbar;
+        isHoveringScrollbar = false;
+        isDraggingScrollbar = false;
         
+        if (changed)
+        {
+            markNeedsPaint();
+            return true;
+        }
         return false;
     }
 
@@ -325,15 +365,19 @@ public:
         rebuildList();
 
         viewportHeight = availableHeight - paddingTop - paddingBottom;
-        int contentWidth = availableWidth - paddingLeft - paddingRight - scrollbarWidth;
-
+        
+        // ✅ FIX: Determine scrollbar width based on whether we'll need it
+        int potentialScrollbarWidth = scrollbarWidth;
+        
+        // First pass: compute content height without scrollbar
+        int contentWidth = availableWidth - paddingLeft - paddingRight;
         int totalHeight = 0;
         int maxWidth = 0;
 
         for (size_t i = 0; i < children.size(); i++)
         {
             auto &child = children[i];
-            child->computeLayout(hdc, contentWidth, viewportHeight, fontCache);
+            child->computeLayout(hdc, contentWidth - scrollbarWidth, viewportHeight, fontCache);
 
             totalHeight += child->height;
             if (child->width > maxWidth)
@@ -346,10 +390,32 @@ public:
         }
 
         contentHeight = totalHeight;
+        
+        // ✅ FIX: Determine if scrollable and adjust accordingly
+        bool wasScrollable = isScrollable;
         isScrollable = (contentHeight > viewportHeight);
+        
+        // ✅ FIX: If scrollability changed, clear scroll-related state
+        if (wasScrollable && !isScrollable)
+        {
+            // Became non-scrollable - reset everything
+            scrollOffset = 0;
+            isDraggingScrollbar = false;
+            isHoveringScrollbar = false;
+            scrollbarThumbHeight = 0;
+            scrollbarThumbY = 0;
+        }
+        else if (!wasScrollable && isScrollable)
+        {
+            // Became scrollable - make sure scroll offset is valid
+            clampScrollOffset();
+        }
+        
+        // Adjust content width based on scrollbar presence
+        contentWidth = availableWidth - paddingLeft - paddingRight - (isScrollable ? scrollbarWidth : 0);
 
         if (autoWidth)
-            width = maxWidth + paddingLeft + paddingRight + scrollbarWidth;
+            width = maxWidth + paddingLeft + paddingRight + (isScrollable ? scrollbarWidth : 0);
         if (autoHeight)
             height = viewportHeight + paddingTop + paddingBottom;
 
@@ -388,10 +454,13 @@ public:
     {
         updateScrollbar();
 
+        // ✅ FIX: Adjust clip region based on scrollbar presence
+        int clipRight = x + width - paddingRight - (isScrollable ? scrollbarWidth : 0);
+        
         HRGN clipRegion = CreateRectRgn(
             x + paddingLeft,
             y + paddingTop,
-            x + width - scrollbarWidth - paddingRight,
+            clipRight,
             y + height - paddingBottom);
         SelectClipRgn(hdc, clipRegion);
 
@@ -416,24 +485,28 @@ public:
         SelectClipRgn(hdc, NULL);
         DeleteObject(clipRegion);
 
-        renderScrollbar(hdc);
+        // ✅ FIX: Only render scrollbar if scrollable
+        if (isScrollable)
+        {
+            renderScrollbar(hdc);
+        }
 
         needsPaint = false;
     }
-    
-    // ✓ NEW: Optional customization methods
+
+    // Optional customization methods
     std::shared_ptr<ListViewBuilder<T>> setScrollbarColor(COLORREF color)
     {
         scrollbarColor = color;
         return self;
     }
-    
+
     std::shared_ptr<ListViewBuilder<T>> setScrollbarHoverColor(COLORREF color)
     {
         scrollbarHoverColor = color;
         return self;
     }
-    
+
     std::shared_ptr<ListViewBuilder<T>> setScrollbarActiveColor(COLORREF color)
     {
         scrollbarActiveColor = color;
