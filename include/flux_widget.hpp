@@ -63,6 +63,10 @@ public:
     int maxWidth = 10000, maxHeight = 10000;
     bool autoWidth = true, autoHeight = true;
 
+    // Focus support
+    bool isFocusable = false;
+    bool isFocused = false;
+
     // Flex property for Expanded widget
     int flex = 1;
 
@@ -137,6 +141,17 @@ public:
     virtual bool handleMouseMove(int mx, int my) { return false; }
     virtual bool handleMouseLeave() { return false; }
 
+    // New virtual handlers
+    virtual bool handleKeyDown(int keyCode) { return false; }
+    virtual bool handleChar(wchar_t ch) { return false; }
+    virtual bool handleFocus(bool focused)
+    {
+        isFocused = focused;
+        markNeedsPaint();
+        return true;
+    }
+    virtual bool handleTimer(UINT timerId) { return false; }
+
     // Hover handling
     bool updateHoverState(int mouseX, int mouseY)
     {
@@ -204,8 +219,6 @@ public:
     {
         needsPaint = true;
     }
-
-    
 
     // Builder pattern methods
     WidgetPtr setWidth(int w)

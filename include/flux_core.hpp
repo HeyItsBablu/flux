@@ -65,6 +65,16 @@ private:
     // Global instance for State to use
     static FluxUI *currentInstance;
 
+    Widget *focusedWidget = nullptr;
+
+    // Broadcast keyboard event to focused widget only
+    static bool broadcastToFocused(Widget *focused, std::function<bool(Widget *)> handler)
+    {
+        if (!focused)
+            return false;
+        return handler(focused);
+    }
+
     void createBackBuffer(int width, int height)
     {
         if (hdcMem && (width != bufferWidth || height != bufferHeight))
@@ -195,12 +205,20 @@ private:
 
             // Try new mouse event system first
             if (findAndHandleMouseEvent(instance->root.get(), mouseX, mouseY,
-                                        [mouseX, mouseY](Widget *w)
-                                        { return w->handleMouseDown(mouseX, mouseY); }))
+                                        [mouseX, mouseY, instance](Widget *w)
+                                        {
+                                            bool handled = w->handleMouseDown(mouseX, mouseY);
+                                            if (handled && w->isFocusable)
+                                                instance->setFocus(w); // ← focus on click
+                                            return handled;
+                                        }))
             {
                 InvalidateRect(hwnd, NULL, FALSE);
                 return 0;
             }
+
+            // Clicked outside any focusable widget - clear focus
+            instance->setFocus(nullptr);
 
             // Fall back to old onClick system
             Widget *clicked = findWidgetAt(instance->root.get(), mouseX, mouseY);
@@ -301,6 +319,47 @@ private:
             return 0;
         }
 
+        case WM_CHAR:
+        {
+            if (!instance || !instance->focusedWidget)
+                return 0;
+
+            wchar_t ch = (wchar_t)wParam;
+
+            if (instance->focusedWidget->handleChar(ch))
+            {
+                InvalidateRect(hwnd, NULL, FALSE);
+            }
+            return 0;
+        }
+
+        case WM_KEYDOWN:
+        {
+            if (!instance || !instance->focusedWidget)
+                return 0;
+
+            int keyCode = (int)wParam;
+
+            if (instance->focusedWidget->handleKeyDown(keyCode))
+            {
+                InvalidateRect(hwnd, NULL, FALSE);
+            }
+            return 0;
+        }
+
+        case WM_TIMER:
+        {
+            // Cursor blink timer for focused text input
+            if (!instance || !instance->focusedWidget)
+                return 0;
+
+            if (instance->focusedWidget->handleTimer((UINT)wParam))
+            {
+                instance->invalidateWidget(instance->focusedWidget);
+            }
+            return 0;
+        }
+
         case WM_DESTROY:
             if (instance)
             {
@@ -359,6 +418,30 @@ public:
     {
         return currentInstance;
     }
+
+    void setFocus(Widget *widget)
+    {
+        if (focusedWidget == widget)
+            return;
+
+        // Blur old focused widget
+        if (focusedWidget)
+        {
+            focusedWidget->handleFocus(false);
+            invalidateWidget(focusedWidget);
+        }
+
+        focusedWidget = widget;
+
+        // Focus new widget
+        if (focusedWidget)
+        {
+            focusedWidget->handleFocus(true);
+            invalidateWidget(focusedWidget);
+        }
+    }
+
+    Widget *getFocusedWidget() const { return focusedWidget; }
 
     void build(std::function<WidgetPtr()> buildFunc)
     {
