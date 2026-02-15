@@ -6,14 +6,22 @@ class ConditionalListApp : public Component
 {
 private:
     State<bool> isActive;
+    State<std::string> newText;
 
 public:
-    ConditionalListApp() : isActive(false, context) {} // Use useState instead
+    ConditionalListApp() : isActive(false, context), newText("Hello", context) {} // Use useState instead
 
     void updateState()
     {
         std::cout << "Button isActive" << isActive.get() << std::endl;
         isActive.set(!isActive.get());
+    }
+
+    void updateTextState()
+    {
+        std::cout << "Button isActive" << isActive.get() << std::endl;
+
+        newText.set(newText.get() + "World");
     }
 
     WidgetPtr build() override
@@ -25,7 +33,7 @@ public:
 
                     Container(
                         Text("Hello")
-                            ->setText(isActive, "Active", "Inactive")
+                            ->setText(newText)
                             ->setTextColor(isActive, RGB(255, 255, 255), RGB(0, 0, 0))
 
                             )
@@ -33,8 +41,7 @@ public:
                         ->setPadding(16),
 
                     Button("Toggle", [&]
-                           { isActive.update([](bool v)
-                                             { return !v; }); })
+                           { updateTextState(); })
 
                         )));
     }

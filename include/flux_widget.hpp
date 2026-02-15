@@ -7,6 +7,8 @@
 #include <functional>
 #include <memory>
 #include <iostream>
+#include <sstream>
+#include <iomanip>
 #include "flux_font.hpp"
 
 // ============================================================================
@@ -517,9 +519,25 @@ public:
     }
 
     template <typename T>
+    WidgetPtr setText(State<T> &state)
+    {
+        text = valueToString(state.get());
+
+        state.bindProperty(
+            shared_from_this(),
+            [](Widget *w, const T &val)
+            {
+                w->text = valueToString(val);
+            },
+            true);
+
+        return shared_from_this();
+    }
+
+    template <typename T>
     WidgetPtr setText(State<T> &state,
-                              const std::string &trueText,
-                              const std::string &falseText)
+                      const std::string &trueText,
+                      const std::string &falseText)
     {
         // Set initial value immediately
         text = state.get() ? trueText : falseText;
@@ -547,6 +565,24 @@ public:
     const std::string &getId() const { return id; }
 
 protected:
+    template <typename T>
+    static std::string valueToString(const T &val)
+    {
+        if constexpr (std::is_same_v<T, std::string>)
+            return val;
+        else if constexpr (std::is_same_v<T, bool>)
+            return val ? "true" : "false";
+        else if constexpr (std::is_floating_point_v<T>)
+        {
+            std::ostringstream oss;
+            oss << std::fixed << std::setprecision(2) << val;
+            return oss.str();
+        }
+        else if constexpr (std::is_integral_v<T>)
+            return std::to_string(val);
+        else
+            return "[unsupported type]";
+    }
     void applyConstraints()
     {
         if (width < minWidth)

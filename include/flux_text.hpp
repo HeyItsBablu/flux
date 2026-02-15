@@ -306,7 +306,7 @@ public:
                     textAreaX + endSize.cx - scrollOffset,
                     textAreaY + textAreaHeight};
 
-                HBRUSH selBrush = CreateSolidBrush(selectionColor);
+                HBRUSH selBrush = CreateSolidBrush(selectionColor); 
                 FillRect(hdc, &selRect, selBrush);
                 DeleteObject(selBrush);
             }
