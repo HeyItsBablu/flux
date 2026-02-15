@@ -2,185 +2,44 @@
 #define FLUX_CORE_HPP
 
 #include "flux_widget.hpp"
+#include "flux_font.hpp"
+#include "flux_layout.hpp"
+#include "flux_renderer.hpp"
+
 #include <map>
 #include <tuple>
-#include <windowsx.h> 
+#include <windowsx.h>
 
 // ============================================================================
 // FORWARD DECLARATIONS
 // ============================================================================
 
-class FluxUI;
+// Forward declarations
 template <typename T>
 class State;
-
-// ============================================================================
-// FONT CACHE
-// ============================================================================
-
-class FontCache
-{
-private:
-    std::map<std::tuple<int, FontWeight>, HFONT> cache;
-
-public:
-    ~FontCache()
-    {
-        for (auto &pair : cache)
-        {
-            DeleteObject(pair.second);
-        }
-        cache.clear();
-    }
-
-    HFONT getFont(int size, FontWeight weight)
-    {
-        auto key = std::make_tuple(size, weight);
-        auto it = cache.find(key);
-
-        if (it != cache.end())
-        {
-            return it->second;
-        }
-
-        HFONT hFont = CreateFont(
-            size, 0, 0, 0, static_cast<int>(weight),
-            FALSE, FALSE, FALSE,
-            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-            CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-            DEFAULT_PITCH | FF_DONTCARE, "Segoe UI");
-
-        cache[key] = hFont;
-        return hFont;
-    }
-
-    void clear()
-    {
-        for (auto &pair : cache)
-        {
-            DeleteObject(pair.second);
-        }
-        cache.clear();
-    }
-};
-
-// ============================================================================
-// WIDGET METHOD IMPLEMENTATIONS THAT NEED FONTCACHE
-// ============================================================================
-
-inline void Widget::measureText(HDC hdc, FontCache &fontCache)
-{
-    if (text.empty())
-    {
-        width = 0;
-        height = 0;
-        return;
-    }
-
-    HFONT hFont = fontCache.getFont(fontSize, fontWeight);
-    HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
-
-    SIZE size;
-    GetTextExtentPoint32(hdc, text.c_str(), (int)text.length(), &size);
-
-    if (autoWidth)
-        width = size.cx;
-    if (autoHeight)
-        height = size.cy;
-
-    SelectObject(hdc, hOldFont);
-}
-
-inline void Widget::renderText(HDC hdc, FontCache &fontCache, UINT format)
-{
-    if (text.empty())
-        return;
-
-    SetTextColor(hdc, getCurrentTextColor());
-    SetBkMode(hdc, TRANSPARENT);
-
-    HFONT hFont = fontCache.getFont(fontSize, fontWeight);
-    HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
-
-    RECT textRect = {
-        x + paddingLeft,
-        y + paddingTop,
-        x + width - paddingRight,
-        y + height - paddingBottom};
-
-    DrawText(hdc, text.c_str(), -1, &textRect, format);
-
-    SelectObject(hdc, hOldFont);
-}
-
-// ============================================================================
-// LAYOUT ENGINE
-// ============================================================================
-
-class LayoutEngine
-{
-public:
-    static void computeLayout(HDC hdc, Widget *w, int availableWidth, int availableHeight, FontCache &fontCache)
-    {
-        if (!w)
-            return;
-        w->computeLayout(hdc, availableWidth, availableHeight, fontCache);
-    }
-
-    static void positionWidget(Widget *w, int x, int y)
-    {
-        if (!w)
-            return;
-
-        w->x = x + w->marginLeft;
-        w->y = y + w->marginTop;
-
-        int contentX = w->x + w->paddingLeft;
-        int contentY = w->y + w->paddingTop;
-        int contentWidth = w->width - w->paddingLeft - w->paddingRight;
-        int contentHeight = w->height - w->paddingTop - w->paddingBottom;
-
-        w->positionChildren(contentX, contentY, contentWidth, contentHeight);
-    }
-};
-
-// ============================================================================
-// RENDERER
-// ============================================================================
-
-class Renderer
-{
-public:
-    static void renderWidget(HDC hdc, Widget *w, FontCache &fontCache)
-    {
-        if (!w)
-            return;
-        w->render(hdc, fontCache);
-    }
-};
 
 // ============================================================================
 // MOUSE EVENT BROADCAST HELPERS (for captured mouse events)
 // ============================================================================
 
 // Broadcast mouse event to all widgets (used when mouse capture is active)
-inline bool broadcastMouseEvent(Widget* widget, int x, int y, 
-    std::function<bool(Widget*, int, int)> handler)
+inline bool broadcastMouseEvent(Widget *widget, int x, int y,
+                                std::function<bool(Widget *, int, int)> handler)
 {
     if (!widget)
         return false;
-    
+
     // Try this widget first
     if (handler(widget, x, y))
         return true;
-    
+
     // Then try all children
     for (auto &child : widget->children)
     {
         if (broadcastMouseEvent(child.get(), x, y, handler))
             return true;
     }
-    
+
     return false;
 }
 
@@ -318,7 +177,8 @@ private:
             ScreenToClient(hwnd, &pt);
 
             if (findAndHandleMouseEvent(instance->root.get(), pt.x, pt.y,
-                [delta](Widget* w) { return w->handleMouseWheel(delta); }))
+                                        [delta](Widget *w)
+                                        { return w->handleMouseWheel(delta); }))
             {
                 InvalidateRect(hwnd, NULL, FALSE);
             }
@@ -335,7 +195,8 @@ private:
 
             // Try new mouse event system first
             if (findAndHandleMouseEvent(instance->root.get(), mouseX, mouseY,
-                [mouseX, mouseY](Widget* w) { return w->handleMouseDown(mouseX, mouseY); }))
+                                        [mouseX, mouseY](Widget *w)
+                                        { return w->handleMouseDown(mouseX, mouseY); }))
             {
                 InvalidateRect(hwnd, NULL, FALSE);
                 return 0;
@@ -360,13 +221,14 @@ private:
 
             // ✅ FIX: Check if mouse is captured
             bool hasCapturedMouse = (GetCapture() == hwnd);
-            
+
             if (hasCapturedMouse)
             {
                 // Mouse is captured - broadcast to ALL widgets
                 // (one of them has the capture and needs this event)
                 if (broadcastMouseEvent(instance->root.get(), mouseX, mouseY,
-                    [](Widget* w, int mx, int my) { return w->handleMouseUp(mx, my); }))
+                                        [](Widget *w, int mx, int my)
+                                        { return w->handleMouseUp(mx, my); }))
                 {
                     InvalidateRect(hwnd, NULL, FALSE);
                     return 0;
@@ -375,7 +237,8 @@ private:
 
             // Normal path (no capture) - use bounds checking
             if (findAndHandleMouseEvent(instance->root.get(), mouseX, mouseY,
-                [mouseX, mouseY](Widget* w) { return w->handleMouseUp(mouseX, mouseY); }))
+                                        [mouseX, mouseY](Widget *w)
+                                        { return w->handleMouseUp(mouseX, mouseY); }))
             {
                 InvalidateRect(hwnd, NULL, FALSE);
             }
@@ -399,12 +262,13 @@ private:
 
             // ✅ FIX: Check if mouse is captured
             bool hasCapturedMouse = (GetCapture() == hwnd);
-            
+
             if (hasCapturedMouse)
             {
                 // Mouse is captured - broadcast to ALL widgets
                 if (broadcastMouseEvent(instance->root.get(), mouseX, mouseY,
-                    [](Widget* w, int mx, int my) { return w->handleMouseMove(mx, my); }))
+                                        [](Widget *w, int mx, int my)
+                                        { return w->handleMouseMove(mx, my); }))
                 {
                     InvalidateRect(hwnd, NULL, FALSE);
                     return 0;
@@ -416,7 +280,8 @@ private:
 
             // Handle custom mouse move events
             bool customHandled = findAndHandleMouseEvent(instance->root.get(), mouseX, mouseY,
-                [mouseX, mouseY](Widget* w) { return w->handleMouseMove(mouseX, mouseY); });
+                                                         [mouseX, mouseY](Widget *w)
+                                                         { return w->handleMouseMove(mouseX, mouseY); });
 
             if (hoverChanged || customHandled)
             {

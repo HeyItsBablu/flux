@@ -7,13 +7,14 @@
 #include <functional>
 #include <memory>
 #include <iostream>
+#include "flux_font.hpp" 
 
 // ============================================================================
 // FORWARD DECLARATIONS
 // ============================================================================
 
 class Widget;
-class FontCache;
+
 
 using WidgetPtr = std::shared_ptr<Widget>;
 using ClickHandler = std::function<void()>;
@@ -41,12 +42,7 @@ enum class MainAxisAlignment
     SpaceEvenly
 };
 
-enum class FontWeight
-{
-    Light = FW_LIGHT,
-    Normal = FW_NORMAL,
-    Bold = FW_BOLD
-};
+
 
 // ============================================================================
 // WIDGET BASE CLASS
@@ -129,6 +125,8 @@ public:
     virtual void computeLayout(HDC hdc, int availableWidth, int availableHeight, FontCache &fontCache);
     virtual void positionChildren(int contentX, int contentY, int contentWidth, int contentHeight);
     virtual void render(HDC hdc, FontCache &fontCache);
+    void measureText(HDC hdc, FontCache &fontCache);
+    void renderText(HDC hdc, FontCache &fontCache, UINT format = DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     // Mouse event handlers - Override these for interactive widgets
     virtual bool handleMouseWheel(int delta) { return false; }
@@ -141,8 +139,8 @@ public:
     bool updateHoverState(int mouseX, int mouseY)
     {
         bool nowHovered = (mouseX >= x && mouseX < x + width &&
-                          mouseY >= y && mouseY < y + height);
-        
+                           mouseY >= y && mouseY < y + height);
+
         if (nowHovered != isHovered)
         {
             isHovered = nowHovered;
@@ -486,7 +484,7 @@ public:
     const std::string &getText() const { return text; }
     const std::string &getId() const { return id; }
 
-    void measureText(HDC hdc, FontCache &fontCache);
+
 
 protected:
     void applyConstraints()
@@ -543,12 +541,57 @@ protected:
         }
     }
 
-    void renderText(HDC hdc, FontCache &fontCache, UINT format = DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
 };
 
 // ============================================================================
 // VIRTUAL METHOD IMPLEMENTATIONS (need FontCache declaration)
 // ============================================================================
+
+inline void Widget::measureText(HDC hdc, FontCache &fontCache)
+{
+    if (text.empty())
+    {
+        width = 0;
+        height = 0;
+        return;
+    }
+
+    HFONT hFont = fontCache.getFont(fontSize, fontWeight);
+    HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
+
+    SIZE size;
+    GetTextExtentPoint32(hdc, text.c_str(), (int)text.length(), &size);
+
+    if (autoWidth)
+        width = size.cx;
+    if (autoHeight)
+        height = size.cy;
+
+    SelectObject(hdc, hOldFont);
+}
+
+inline void Widget::renderText(HDC hdc, FontCache &fontCache, UINT format)
+{
+    if (text.empty())
+        return;
+
+    SetTextColor(hdc, getCurrentTextColor());
+    SetBkMode(hdc, TRANSPARENT);
+
+    HFONT hFont = fontCache.getFont(fontSize, fontWeight);
+    HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
+
+    RECT textRect = {
+        x + paddingLeft,
+        y + paddingTop,
+        x + width - paddingRight,
+        y + height - paddingBottom};
+
+    DrawText(hdc, text.c_str(), -1, &textRect, format);
+
+    SelectObject(hdc, hOldFont);
+}
 
 inline void Widget::computeLayout(HDC hdc, int availableWidth, int availableHeight, FontCache &fontCache)
 {
@@ -623,12 +666,12 @@ inline Widget *findWidgetAt(Widget *w, int x, int y)
  * Find widget at position and dispatch mouse event
  * Returns true if event was handled
  */
-template<typename Handler>
-inline bool findAndHandleMouseEvent(Widget* widget, int x, int y, Handler handler)
+template <typename Handler>
+inline bool findAndHandleMouseEvent(Widget *widget, int x, int y, Handler handler)
 {
     if (!widget)
         return false;
-    
+
     // Check if point is within widget bounds
     if (x >= widget->x && x < widget->x + widget->width &&
         y >= widget->y && y < widget->y + widget->height)
@@ -639,12 +682,12 @@ inline bool findAndHandleMouseEvent(Widget* widget, int x, int y, Handler handle
             if (findAndHandleMouseEvent(it->get(), x, y, handler))
                 return true;
         }
-        
+
         // Then try this widget
         if (handler(widget))
             return true;
     }
-    
+
     return false;
 }
 
@@ -652,22 +695,22 @@ inline bool findAndHandleMouseEvent(Widget* widget, int x, int y, Handler handle
  * Update hover state for all widgets in tree
  * Returns true if any widget changed hover state
  */
-inline bool updateHoverStates(Widget* widget, int mouseX, int mouseY)
+inline bool updateHoverStates(Widget *widget, int mouseX, int mouseY)
 {
     if (!widget)
         return false;
-    
+
     bool changed = false;
-    
+
     // Check if mouse is over this widget
     bool isOver = (mouseX >= widget->x && mouseX < widget->x + widget->width &&
                    mouseY >= widget->y && mouseY < widget->y + widget->height);
-    
+
     if (isOver)
     {
         // Update this widget's hover state
         changed |= widget->updateHoverState(mouseX, mouseY);
-        
+
         // Update children
         for (auto &child : widget->children)
         {
@@ -683,7 +726,7 @@ inline bool updateHoverStates(Widget* widget, int mouseX, int mouseY)
             changed = true;
         }
     }
-    
+
     return changed;
 }
 
