@@ -25,6 +25,8 @@ public:
 
                     Container(
                         Text("Hello")
+                            ->setText(isActive, "Active", "Inactive")
+                            ->setTextColor(isActive, RGB(255, 255, 255), RGB(0, 0, 0))
 
                             )
                         ->setBackgroundColor(isActive, RGB(76, 175, 80), RGB(200, 200, 200))

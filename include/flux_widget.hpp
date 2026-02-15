@@ -9,7 +9,6 @@
 #include <iostream>
 #include "flux_font.hpp"
 
-
 // ============================================================================
 // FORWARD DECLARATIONS
 // ============================================================================
@@ -356,6 +355,25 @@ public:
         return shared_from_this();
     }
 
+    template <typename T>
+    WidgetPtr setTextColor(State<T> &state,
+                           COLORREF trueColor,
+                           COLORREF falseColor)
+    {
+        textColor = state.get() ? trueColor : falseColor;
+
+        state.bindProperty(
+            shared_from_this(),
+            [trueColor, falseColor](Widget *w, const T &val)
+            {
+                w->textColor = val ? trueColor : falseColor;
+            },
+            false // paint only
+        );
+
+        return shared_from_this();
+    }
+
     WidgetPtr setBorderColor(COLORREF color)
     {
         borderColor = color;
@@ -495,6 +513,26 @@ public:
             text = t;
             markNeedsLayout();
         }
+        return shared_from_this();
+    }
+
+    template <typename T>
+    WidgetPtr setText(State<T> &state,
+                              const std::string &trueText,
+                              const std::string &falseText)
+    {
+        // Set initial value immediately
+        text = state.get() ? trueText : falseText;
+
+        state.bindProperty(
+            shared_from_this(),
+            [trueText, falseText](Widget *w, const T &val)
+            {
+                w->text = val ? trueText : falseText;
+            },
+            true // needs layout - text change affects widget dimensions
+        );
+
         return shared_from_this();
     }
 
