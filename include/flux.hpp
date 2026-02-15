@@ -13,4 +13,5 @@
 #include "flux_switch.hpp"
 #include "flux_list_view.hpp"
 #include "flux_text.hpp"
+#include "flux_input.hpp"
 #endif // FLUX_HPP

@@ -40,8 +40,11 @@ public:
                         ->setBackgroundColor(isActive, RGB(76, 175, 80), RGB(200, 200, 200))
                         ->setPadding(16),
 
-                    Button("Toggle", [&]
-                           { updateTextState(); })
+                    CheckBox("Enable feature")
+                        ->setInputValue(isActive),
+
+                            Button("Toggle", [&]
+                                   { updateTextState(); })
 
                         )));
     }

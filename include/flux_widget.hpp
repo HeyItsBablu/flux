@@ -205,6 +205,8 @@ public:
         needsPaint = true;
     }
 
+    
+
     // Builder pattern methods
     WidgetPtr setWidth(int w)
     {
