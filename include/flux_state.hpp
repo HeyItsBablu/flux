@@ -20,7 +20,15 @@ private:
     FluxUI *ui;
     std::vector<std::weak_ptr<Widget>> observers;
     std::vector<std::function<void(T)>> listeners;
-    
+
+    struct PropertyBinding
+    {
+        std::weak_ptr<Widget> widget;
+        std::function<void(Widget *, const T &)> applier; // applies value to widget
+        bool needsLayout;                                 // true = re-layout, false = repaint only
+    };
+    std::vector<PropertyBinding> propertyBindings;
+
     // Thread safety
     mutable std::mutex stateMutex;
 
@@ -65,12 +73,11 @@ private:
     // Fallback for other types (including std::vector)
     template <typename U = T>
     typename std::enable_if<
-        !std::is_integral<U>::value && 
-        !std::is_floating_point<U>::value && 
-        !std::is_same<U, bool>::value && 
-        !std::is_same<U, std::string>::value,
-        std::string
-    >::type
+        !std::is_integral<U>::value &&
+            !std::is_floating_point<U>::value &&
+            !std::is_same<U, bool>::value &&
+            !std::is_same<U, std::string>::value,
+        std::string>::type
     valueToString(const U &val) const
     {
         // For vectors and other complex types, just show a placeholder
@@ -80,16 +87,19 @@ private:
     // Notify all observers (widgets) - MUST be called with lock held
     void notifyObserversLocked()
     {
+        // ================================================================
+        // TEXT OBSERVERS
+        // ================================================================
         std::string newText = valueToString(value);
 
-        // Clean up expired observers
+        // Clean up expired text observers
         observers.erase(
             std::remove_if(observers.begin(), observers.end(),
                            [](const std::weak_ptr<Widget> &w)
                            { return w.expired(); }),
             observers.end());
 
-        // Update all observer widgets
+        // Update all text observer widgets
         for (auto &weakWidget : observers)
         {
             if (auto widget = weakWidget.lock())
@@ -102,6 +112,35 @@ private:
                 }
             }
         }
+
+        // ================================================================
+        // PROPERTY BINDINGS
+        // ================================================================
+
+        // Clean up expired property bindings
+        propertyBindings.erase(
+            std::remove_if(propertyBindings.begin(), propertyBindings.end(),
+                           [](const PropertyBinding &b)
+                           { return b.widget.expired(); }),
+            propertyBindings.end());
+
+        // Fire each binding - surgically mutate only the bound property
+        for (auto &binding : propertyBindings)
+        {
+            if (auto widget = binding.widget.lock())
+            {
+                // Mutate ONLY the specific property, nothing else
+                binding.applier(widget.get(), value);
+
+                if (ui)
+                {
+                    if (binding.needsLayout)
+                        ui->partialRebuild(widget.get()); // font size, padding etc
+                    else
+                        ui->invalidateWidget(widget.get()); // color, border etc
+                }
+            }
+        }
     }
 
     // Notify all listeners (callbacks) - MUST be called with lock held
@@ -109,10 +148,10 @@ private:
     {
         // Make a copy of listeners to avoid issues if a listener modifies the list
         auto listenersCopy = listeners;
-        
+
         // Release lock before calling listeners to avoid deadlocks
         stateMutex.unlock();
-        
+
         for (auto &listener : listenersCopy)
         {
             if (listener)
@@ -123,14 +162,14 @@ private:
                 }
                 catch (const std::exception &e)
                 {
-                    // Log error but continue notifying other listeners
-                    #ifdef FLUX_DEBUG
+// Log error but continue notifying other listeners
+#ifdef FLUX_DEBUG
                     std::cerr << "[FluxUI] Listener error: " << e.what() << std::endl;
-                    #endif
+#endif
                 }
             }
         }
-        
+
         // Re-acquire lock for caller
         stateMutex.lock();
     }
@@ -150,12 +189,12 @@ public:
     State(T initial) : value(initial), ui(nullptr)
     {
         ui = FluxUI::getCurrentInstance();
-        #ifdef FLUX_DEBUG
+#ifdef FLUX_DEBUG
         if (!ui)
         {
             std::cerr << "[FluxUI] Warning: State created without valid context" << std::endl;
         }
-        #endif
+#endif
     }
 
     // Move constructor
@@ -197,7 +236,7 @@ public:
 
     /**
      * Get current value (thread-safe)
-     * 
+     *
      * Usage:
      *   int currentValue = counter.get();
      */
@@ -207,10 +246,26 @@ public:
         return value;
     }
 
+    // Register a property binding (called from widget builder methods)
+    void bindProperty(std::shared_ptr<Widget> widget,
+                      std::function<void(Widget *, const T &)> applier,
+                      bool needsLayout = false)
+    {
+        if (!widget)
+            return;
+
+        std::lock_guard<std::mutex> lock(stateMutex);
+
+        propertyBindings.push_back({widget, applier, needsLayout});
+
+        // Apply immediately - widget starts with correct value
+        applier(widget.get(), value);
+    }
+
     /**
      * Set new value (thread-safe)
      * Only triggers update if value actually changes
-     * 
+     *
      * Usage:
      *   counter.set(42);
      *   counter.set(counter.get() + 1);
@@ -218,7 +273,7 @@ public:
     void set(T newValue)
     {
         std::lock_guard<std::mutex> lock(stateMutex);
-        
+
         if (value == newValue)
             return;
 
@@ -231,7 +286,7 @@ public:
     /**
      * Update with function (Flutter-like setState) - thread-safe
      * Useful for updates that depend on current value
-     * 
+     *
      * Usage:
      *   counter.update([](int v) { return v + 1; });
      *   toggle.update([](bool v) { return !v; });
@@ -240,9 +295,9 @@ public:
     void update(std::function<T(T)> updater)
     {
         std::lock_guard<std::mutex> lock(stateMutex);
-        
+
         T newValue = updater(value);
-        
+
         if (value == newValue)
             return;
 
@@ -255,7 +310,7 @@ public:
     /**
      * Add a change listener (thread-safe)
      * Callback is invoked whenever the state changes
-     * 
+     *
      * Usage:
      *   counter.listen([](int newValue) {
      *       std::cout << "Counter changed to: " << newValue << std::endl;
@@ -283,7 +338,7 @@ public:
         std::lock_guard<std::mutex> lock(stateMutex);
         observers.push_back(widget);
         widget->boundState = this;
-        
+
         // Set initial text
         widget->text = valueToString(value);
     }
@@ -346,7 +401,7 @@ public:
     size_t observerCount() const
     {
         std::lock_guard<std::mutex> lock(stateMutex);
-        
+
         // Count only non-expired observers
         size_t count = 0;
         for (const auto &weak : observers)
@@ -382,13 +437,13 @@ class ComputedState
 {
 private:
     std::function<R(States...)> computer;
-    std::tuple<States*...> dependencies;
+    std::tuple<States *...> dependencies;
     mutable R cachedValue;
     mutable bool dirty = true;
     mutable std::mutex mutex;
 
 public:
-    ComputedState(std::function<R(States...)> comp, States&... deps)
+    ComputedState(std::function<R(States...)> comp, States &...deps)
         : computer(comp), dependencies(&deps...)
     {
         // Add listeners to all dependencies
@@ -410,11 +465,12 @@ private:
     template <size_t... Is>
     void addListenersImpl(std::index_sequence<Is...>)
     {
-        auto markDirty = [this](auto) { 
+        auto markDirty = [this](auto)
+        {
             std::lock_guard<std::mutex> lock(mutex);
-            dirty = true; 
+            dirty = true;
         };
-        
+
         (std::get<Is>(dependencies)->listen(markDirty), ...);
     }
 

@@ -7,14 +7,17 @@
 #include <functional>
 #include <memory>
 #include <iostream>
-#include "flux_font.hpp" 
+#include "flux_font.hpp"
+
 
 // ============================================================================
 // FORWARD DECLARATIONS
 // ============================================================================
 
-class Widget;
+template <typename T>
+class State;
 
+class Widget;
 
 using WidgetPtr = std::shared_ptr<Widget>;
 using ClickHandler = std::function<void()>;
@@ -41,8 +44,6 @@ enum class MainAxisAlignment
     SpaceAround,
     SpaceEvenly
 };
-
-
 
 // ============================================================================
 // WIDGET BASE CLASS
@@ -322,6 +323,29 @@ public:
         return shared_from_this();
     }
 
+    template <typename T>
+    WidgetPtr setBackgroundColor(State<T> &state,
+                                 COLORREF trueColor,
+                                 COLORREF falseColor)
+    {
+        // Set initial value immediately
+        backgroundColor = state.get() ? trueColor : falseColor;
+        hasBackground = true;
+
+        // Capture colors by value, bind to state
+        state.bindProperty(
+            shared_from_this(),
+            [trueColor, falseColor](Widget *w, const T &val)
+            {
+                w->backgroundColor = val ? trueColor : falseColor;
+                w->hasBackground = true;
+            },
+            false // paint only, no layout needed
+        );
+
+        return shared_from_this();
+    }
+
     WidgetPtr setTextColor(COLORREF color)
     {
         if (textColor != color)
@@ -484,8 +508,6 @@ public:
     const std::string &getText() const { return text; }
     const std::string &getId() const { return id; }
 
-
-
 protected:
     void applyConstraints()
     {
@@ -540,8 +562,6 @@ protected:
             }
         }
     }
-
-
 };
 
 // ============================================================================

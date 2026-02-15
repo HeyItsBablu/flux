@@ -21,12 +21,12 @@ protected:
 public:
     Component() : context(FluxUI::getCurrentInstance())
     {
-        #ifdef FLUX_DEBUG
+#ifdef FLUX_DEBUG
         if (!context)
         {
             std::cerr << "[FluxUI] Warning: Component created without active FluxUI context" << std::endl;
         }
-        #endif
+#endif
     }
 
     Component(FluxUI *ctx) : context(ctx)
@@ -60,8 +60,10 @@ public:
 
     void rebuild()
     {
-        if (disposed) return;
-        if (context) context->rebuild();
+        if (disposed)
+            return;
+        if (context)
+            context->rebuild();
     }
 
     bool isInitialized() const { return initialized; }
@@ -74,35 +76,13 @@ protected:
 };
 
 // ============================================================================
-// STATELESS & STATEFUL COMPONENTS
-// ============================================================================
-
-class StatelessComponent : public Component
-{
-public:
-    StatelessComponent() : Component() {}
-    StatelessComponent(FluxUI *ctx) : Component(ctx) {}
-    virtual WidgetPtr build() = 0;
-};
-
-class StatefulComponent : public Component
-{
-public:
-    StatefulComponent() : Component() {}
-    StatefulComponent(FluxUI *ctx) : Component(ctx) {}
-    virtual void initState() override {}
-    virtual WidgetPtr build() = 0;
-    virtual void dispose() override { Component::dispose(); }
-};
-
-// ============================================================================
 // COMPONENT HOLDER WIDGET - PREVENTS CRASHES BY KEEPING COMPONENT ALIVE
 // ============================================================================
 
 class ComponentHolderWidget : public Widget
 {
 private:
-    std::shared_ptr<Component> component;  // CRITICAL: Keeps component alive
+    std::shared_ptr<Component> component; // CRITICAL: Keeps component alive
     WidgetPtr childWidget;
 
 public:
@@ -120,8 +100,10 @@ public:
         if (!children.empty())
         {
             children[0]->computeLayout(hdc, availableWidth, availableHeight, fontCache);
-            if (autoWidth) width = children[0]->width;
-            if (autoHeight) height = children[0]->height;
+            if (autoWidth)
+                width = children[0]->width;
+            if (autoHeight)
+                height = children[0]->height;
         }
         applyConstraints();
         needsLayout = false;
@@ -174,7 +156,7 @@ public:
         }
 
         auto childWidget = component->build();
-        
+
         // Wrap in holder to keep component alive
         return std::make_shared<ComponentHolderWidget>(component, childWidget);
     }
@@ -198,71 +180,18 @@ public:
 };
 
 // ============================================================================
-// UTILITIES
-// ============================================================================
-
-class CompositeComponent : public StatefulComponent
-{
-protected:
-    std::vector<std::shared_ptr<Component>> children;
-
-public:
-    CompositeComponent() : StatefulComponent() {}
-    CompositeComponent(FluxUI *ctx) : StatefulComponent(ctx) {}
-
-    void addComponent(std::shared_ptr<Component> child)
-    {
-        if (child) children.push_back(child);
-    }
-
-    void dispose() override
-    {
-        for (auto &child : children)
-        {
-            if (child && !child->isDisposed())
-                child->dispose();
-        }
-        children.clear();
-        StatefulComponent::dispose();
-    }
-};
-
-// ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
 
 template <typename TComponent, typename... Args>
-WidgetPtr BuildComponent(Args&&... args) {
+WidgetPtr BuildComponent(Args &&...args)
+{
     return ComponentBuilder::build<TComponent>(std::forward<Args>(args)...);
 }
 
-template <typename T>
-WidgetPtr StatefulBuilder(std::function<WidgetPtr(Component*, State<T>&)> builder, T initialValue = T()) {
-    class InlineStatefulComponent : public StatefulComponent {
-        std::function<WidgetPtr(Component*, State<T>&)> buildFunc;
-        State<T> state;
-    public:
-        InlineStatefulComponent(std::function<WidgetPtr(Component*, State<T>&)> f, T initial) 
-            : StatefulComponent(), buildFunc(f), state(initial, context) {}
-        
-        WidgetPtr build() override { 
-            return buildFunc(this, state); 
-        }
-    };
-    
-    return ComponentBuilder::build<InlineStatefulComponent>(builder, initialValue);
-}
-
-template <typename T>
-WidgetPtr StatefulValue(std::function<WidgetPtr(State<T>&)> builder, T initialValue = T()) {
-    return StatefulBuilder<T>(
-        [builder](Component*, State<T>& state) { return builder(state); },
-        initialValue
-    );
-}
-
 template <typename TComponent, typename... Args>
-std::pair<WidgetPtr, std::shared_ptr<TComponent>> ComponentWithRef(Args&&... args) {
+std::pair<WidgetPtr, std::shared_ptr<TComponent>> ComponentWithRef(Args &&...args)
+{
     auto comp = ComponentBuilder::create<TComponent>(std::forward<Args>(args)...);
     auto childWidget = comp->build();
     auto holderWidget = std::make_shared<ComponentHolderWidget>(comp, childWidget);
@@ -278,11 +207,5 @@ std::pair<WidgetPtr, std::shared_ptr<TComponent>> ComponentWithRef(Args&&... arg
 
 #define COMPONENT_REF(ComponentType, ...) \
     ComponentWithRef<ComponentType>(__VA_ARGS__)
-
-#define FLUX_BUILD_COMPONENT(ComponentType, ...) \
-    ComponentBuilder::build<ComponentType>(__VA_ARGS__)
-
-#define FLUX_CREATE_COMPONENT(ComponentType, ...) \
-    ComponentBuilder::create<ComponentType>(__VA_ARGS__)
 
 #endif // FLUX_COMPONENTS_HPP

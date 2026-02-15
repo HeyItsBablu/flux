@@ -12,4 +12,5 @@
 #include "flux_app.hpp"
 #include "flux_switch.hpp"
 #include "flux_list_view.hpp"
+#include "flux_text.hpp"
 #endif // FLUX_HPP
