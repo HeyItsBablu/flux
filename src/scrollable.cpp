@@ -2,7 +2,7 @@
 
 #include <windows.h>
 
-class ScrollableListApp : public StatefulComponent
+class ScrollableListApp : public Component
 {
 private:
     State<std::vector<std::string>> leftItems;

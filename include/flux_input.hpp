@@ -94,10 +94,12 @@ public:
         }
         else
         {
+
             // Draw input text
             SetTextColor(hdc, inputTextColor);
             RECT tr = clipRect;
-            tr.left -= scrollOffset; // apply horizontal scroll
+            tr.left -= scrollOffset; 
+     
             DrawText(hdc, inputValue.c_str(), -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOCLIP);
         }
 
@@ -277,6 +279,7 @@ public:
         // State → Widget
         inputValue = state.get();
         cursorPos = (int)inputValue.size();
+         scrollOffset = 0;
 
         state.bindProperty(
             shared_from_this(),
@@ -285,7 +288,7 @@ public:
                 auto *input = static_cast<TextInputWidget *>(w);
                 input->inputValue = val;
                 input->cursorPos = (int)val.size();
-                input->updateScroll();
+                
             },
             false // paint only
         );
@@ -371,10 +374,11 @@ private:
         int textAreaWidth = width - paddingLeft - paddingRight;
         int cursorX = sz.cx - scrollOffset;
 
-        if (cursorX < 0)
-            scrollOffset = sz.cx;
-        else if (cursorX > textAreaWidth)
-            scrollOffset = sz.cx - textAreaWidth;
+        // Better approach:
+        if (cursorX < 10) // Add margin
+            scrollOffset = max(0, sz.cx - 10);
+        else if (cursorX > textAreaWidth - 10)
+            scrollOffset = sz.cx - textAreaWidth + 10;
     }
 };
 
