@@ -10,9 +10,17 @@ private:
     State<std::string> passwordText;
     State<double> valueState;
     State<std::string> selectedCountry;
+    State<bool> isEnabled;
+    State<std::string> selectedSize;
 
 public:
-    InputTestComponent() : isActive(false, context), newText("", context), passwordText("Hello there", context), valueState(50.0, context), selectedCountry("United States", context) {} // Use useState instead
+    InputTestComponent() : isActive(false, context),
+                           newText("", context),
+                           passwordText("Hello there", context),
+                           valueState(50.0, context),
+                           selectedCountry("United States", context),
+                           isEnabled(false, context),
+                           selectedSize("md", context) {} // Initialize with "md"
 
     void updateState()
     {
@@ -26,16 +34,17 @@ public:
         std::cout << "Username " << newText.get() << std::endl;
         std::cout << "Password " << passwordText.get() << std::endl;
         std::cout << "Country " << selectedCountry.get() << std::endl;
+        std::cout << "Size " << selectedSize.get() << std::endl;
+        std::cout << "Dark Mode " << isEnabled.get() << std::endl;
     }
 
     WidgetPtr build() override
     {
         return Scaffold(
-            AppBar("Conditional App"),
+            AppBar("Input Test App"),
             Center(
                 Column(
                     Text("Select Your Country:")
-                        
                         ->setFontSize(14)
                         ->setFontWeight(FontWeight::Bold),
 
@@ -56,6 +65,29 @@ public:
                     Text(selectedCountry)
                         ->setFontSize(12)
                         ->setTextColor(RGB(100, 100, 100)),
+
+                    SizedBox(0,20),
+
+                    Text("Select Size:")
+                        ->setFontSize(14)
+                        ->setFontWeight(FontWeight::Bold),
+
+                    RadioGroupWithOptions({
+                        RadioOption("xs", "Extra Small"),
+                        RadioOption("sm", "Small"),
+                        RadioOption("md", "Medium"),
+                        RadioOption("lg", "Large"),
+                        RadioOption("xl", "Extra Large")
+                    })
+                        ->bindValue(selectedSize)
+                        ->setSpacing(8),
+
+                    Text(selectedSize)
+                        ->setFontSize(12)
+                        ->setTextColor(RGB(100, 100, 100)),
+
+                    SizedBox(0,20),
+
                     Text(valueState),
 
                     TextInput("Enter username...")
@@ -64,6 +96,7 @@ public:
 
                     CheckBox("Enable feature")
                         ->setInputValue(isActive),
+
                     Slider(0, 100, 5)
                         ->setValue(valueState)
                         ->setTrackColor(RGB(220, 220, 220))
@@ -75,17 +108,25 @@ public:
                         ->setInputValue(passwordText)
                         ->setWidth(300),
 
+                    Toggle("Dark mode")
+                        ->setValue(isEnabled)
+                        ->setTrackOnColor(RGB(100, 150, 250)),
+
+                  
+
                     Button("Login", [&]
                            { login(); })
 
-                        )));
+                )
+                    ->setSpacing(12)
+                    ->setPadding(20)));
     }
 };
 
 WidgetPtr createApp(FluxUI *app)
 {
     return FluxApp(
-        "Conditional App",
+        "Input Test App",
         BuildComponent<InputTestComponent>(),
         AppTheme::materialGreen());
 }
@@ -96,12 +137,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
     FILE *fp;
     freopen_s(&fp, "CONOUT$", "w", stdout);
 
-    std::cout << "=== Conditional List Demo ===" << std::endl;
+    std::cout << "=== Input Test Demo ===" << std::endl;
 
     FluxUI app(hInstance);
     app.build([&]()
               { return createApp(&app); });
-    app.createWindow("FluxUI - Conditional App", 800, 700);
+    app.createWindow("FluxUI - Input Test App", 800, 800);
 
     return app.run();
 }

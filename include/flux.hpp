@@ -14,4 +14,6 @@
 #include "flux_list_view.hpp"
 #include "flux_input.hpp"
 #include "flux_dropdown.hpp"
+#include "flux_toggle.hpp"
+#include "flux_radio.hpp"
 #endif // FLUX_HPP
