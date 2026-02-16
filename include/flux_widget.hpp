@@ -238,7 +238,7 @@ public:
     {
         if (height != h)
         {
-            height = h;
+            height = h; 
             autoHeight = false;
             markNeedsLayout();
         }
@@ -333,139 +333,8 @@ public:
         return shared_from_this();
     }
 
-    WidgetPtr setBackgroundColor(COLORREF color)
-    {
-        backgroundColor = color;
-        hasBackground = true;
-        markNeedsPaint();
-        return shared_from_this();
-    }
 
-    template <typename T>
-    WidgetPtr setBackgroundColor(State<T> &state,
-                                 COLORREF trueColor,
-                                 COLORREF falseColor)
-    {
-        // Set initial value immediately
-        backgroundColor = state.get() ? trueColor : falseColor;
-        hasBackground = true;
 
-        // Capture colors by value, bind to state
-        state.bindProperty(
-            shared_from_this(),
-            [trueColor, falseColor](Widget *w, const T &val)
-            {
-                w->backgroundColor = val ? trueColor : falseColor;
-                w->hasBackground = true;
-            },
-            false // paint only, no layout needed
-        );
-
-        return shared_from_this();
-    }
-
-    WidgetPtr setTextColor(COLORREF color)
-    {
-        if (textColor != color)
-        {
-            textColor = color;
-            markNeedsPaint();
-        }
-        return shared_from_this();
-    }
-
-    template <typename T>
-    WidgetPtr setTextColor(State<T> &state,
-                           COLORREF trueColor,
-                           COLORREF falseColor)
-    {
-        textColor = state.get() ? trueColor : falseColor;
-
-        state.bindProperty(
-            shared_from_this(),
-            [trueColor, falseColor](Widget *w, const T &val)
-            {
-                w->textColor = val ? trueColor : falseColor;
-            },
-            false // paint only
-        );
-
-        return shared_from_this();
-    }
-
-    WidgetPtr setBorderColor(COLORREF color)
-    {
-        borderColor = color;
-        hasBorder = true;
-        markNeedsPaint();
-        return shared_from_this();
-    }
-
-    WidgetPtr setBorderWidth(int w)
-    {
-        if (borderWidth != w)
-        {
-            borderWidth = w;
-            hasBorder = true;
-            markNeedsLayout();
-        }
-        return shared_from_this();
-    }
-
-    WidgetPtr setBorderRadius(int r)
-    {
-        if (borderRadius != r)
-        {
-            borderRadius = r;
-            markNeedsPaint();
-        }
-        return shared_from_this();
-    }
-
-    // Hover effect setters
-    WidgetPtr setHoverBackgroundColor(COLORREF color)
-    {
-        hoverBackgroundColor = color;
-        hasHoverBackground = true;
-        markNeedsPaint();
-        return shared_from_this();
-    }
-
-    WidgetPtr setHoverTextColor(COLORREF color)
-    {
-        hoverTextColor = color;
-        hasHoverTextColor = true;
-        markNeedsPaint();
-        return shared_from_this();
-    }
-
-    WidgetPtr setHoverBorderColor(COLORREF color)
-    {
-        hoverBorderColor = color;
-        hasHoverBorderColor = true;
-        markNeedsPaint();
-        return shared_from_this();
-    }
-
-    WidgetPtr setFontSize(int size)
-    {
-        if (fontSize != size)
-        {
-            fontSize = size;
-            markNeedsLayout();
-        }
-        return shared_from_this();
-    }
-
-    WidgetPtr setFontWeight(FontWeight weight)
-    {
-        if (fontWeight != weight)
-        {
-            fontWeight = weight;
-            markNeedsLayout();
-        }
-        return shared_from_this();
-    }
 
     WidgetPtr setOnClick(ClickHandler handler)
     {
@@ -525,51 +394,7 @@ public:
         return shared_from_this();
     }
 
-    WidgetPtr setText(const std::string &t)
-    {
-        if (text != t)
-        {
-            text = t;
-            markNeedsLayout();
-        }
-        return shared_from_this();
-    }
 
-    template <typename T>
-    WidgetPtr setText(State<T> &state)
-    {
-        text = valueToString(state.get());
-
-        state.bindProperty(
-            shared_from_this(),
-            [](Widget *w, const T &val)
-            {
-                w->text = valueToString(val);
-            },
-            true);
-
-        return shared_from_this();
-    }
-
-    template <typename T>
-    WidgetPtr setText(State<T> &state,
-                      const std::string &trueText,
-                      const std::string &falseText)
-    {
-        // Set initial value immediately
-        text = state.get() ? trueText : falseText;
-
-        state.bindProperty(
-            shared_from_this(),
-            [trueText, falseText](Widget *w, const T &val)
-            {
-                w->text = val ? trueText : falseText;
-            },
-            true // needs layout - text change affects widget dimensions
-        );
-
-        return shared_from_this();
-    }
 
     void addChild(WidgetPtr child)
     {

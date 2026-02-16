@@ -65,20 +65,24 @@ public:
                     Text(selectedCountry)
                         ->setFontSize(12)
                         ->setTextColor(RGB(100, 100, 100)),
+                    SizedBox(0, 20),
+                    Text("")
+                        ->setText(isEnabled, "Dark Mode", "Light Mode")
+                        ->setFontSize(24)
+                        ->setTextColor(isEnabled, RGB(100, 100, 100), RGB(200, 100, 100)),
 
-                    SizedBox(0,20),
+                    SizedBox(0, 20),
 
                     Text("Select Size:")
-                        ->setFontSize(14)
-                        ->setFontWeight(FontWeight::Bold),
+                        ->setFontSize(24)
+                        ->setFontWeight(FontWeight::Bold)
+                        ->setHoverTextColor(RGB(200, 100, 100)),
 
-                    RadioGroupWithOptions({
-                        RadioOption("xs", "Extra Small"),
-                        RadioOption("sm", "Small"),
-                        RadioOption("md", "Medium"),
-                        RadioOption("lg", "Large"),
-                        RadioOption("xl", "Extra Large")
-                    })
+                    RadioGroupWithOptions({RadioOption("xs", "Extra Small"),
+                                           RadioOption("sm", "Small"),
+                                           RadioOption("md", "Medium"),
+                                           RadioOption("lg", "Large"),
+                                           RadioOption("xl", "Extra Large")})
                         ->bindValue(selectedSize)
                         ->setSpacing(8),
 
@@ -86,7 +90,7 @@ public:
                         ->setFontSize(12)
                         ->setTextColor(RGB(100, 100, 100)),
 
-                    SizedBox(0,20),
+                    SizedBox(0, 20),
 
                     Text(valueState),
 
@@ -112,12 +116,15 @@ public:
                         ->setValue(isEnabled)
                         ->setTrackOnColor(RGB(100, 150, 250)),
 
-                  
-
-                    Button("Login", [&]
+                    Button(Text("Click")
+                               ->setText(isEnabled, "Dark Mode", "Light Mode")
+                               ->setFontSize(12)
+                               ->setFontWeight(FontWeight::Bold)
+                               ->setTextColor(RGB(220, 220, 220)),
+                           [&]
                            { login(); })
 
-                )
+                        )
                     ->setSpacing(12)
                     ->setPadding(20)));
     }

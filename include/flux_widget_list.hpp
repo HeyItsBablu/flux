@@ -9,8 +9,6 @@
 // CONCRETE WIDGET CLASSES
 // ============================================================================
 
-
-
 // --- Text Widget ---
 class TextWidget : public Widget
 {
@@ -38,6 +36,109 @@ public:
         renderText(hdc, fontCache);
         needsPaint = false;
     }
+
+    std::shared_ptr<TextWidget> setFontSize(int size)
+    {
+        if (fontSize != size)
+        {
+            fontSize = size;
+            markNeedsLayout();
+        }
+        return std::static_pointer_cast<TextWidget>(shared_from_this());
+    }
+
+    std::shared_ptr<TextWidget> setFontWeight(FontWeight weight)
+    {
+        if (fontWeight != weight)
+        {
+            fontWeight = weight;
+            markNeedsLayout();
+        }
+        return std::static_pointer_cast<TextWidget>(shared_from_this());
+    }
+
+    std::shared_ptr<TextWidget> setText(const std::string &t)
+    {
+        if (text != t)
+        {
+            text = t;
+            markNeedsLayout();
+        }
+        return std::static_pointer_cast<TextWidget>(shared_from_this());
+    }
+
+    template <typename T>
+    std::shared_ptr<TextWidget> setText(State<T> &state)
+    {
+        text = valueToString(state.get());
+
+        state.bindProperty(
+            shared_from_this(),
+            [](Widget *w, const T &val)
+            {
+                w->text = valueToString(val);
+            },
+            true);
+
+        return std::static_pointer_cast<TextWidget>(shared_from_this());
+    }
+
+    template <typename T>
+    std::shared_ptr<TextWidget> setText(State<T> &state,
+                                        const std::string &trueText,
+                                        const std::string &falseText)
+    {
+        // Set initial value immediately
+        text = state.get() ? trueText : falseText;
+
+        state.bindProperty(
+            shared_from_this(),
+            [trueText, falseText](Widget *w, const T &val)
+            {
+                w->text = val ? trueText : falseText;
+            },
+            true // needs layout - text change affects widget dimensions
+        );
+
+        return std::static_pointer_cast<TextWidget>(shared_from_this());
+    }
+
+    std::shared_ptr<TextWidget> setTextColor(COLORREF color)
+    {
+        if (textColor != color)
+        {
+            textColor = color;
+            markNeedsPaint();
+        }
+        return std::static_pointer_cast<TextWidget>(shared_from_this());
+    }
+
+    template <typename T>
+    std::shared_ptr<TextWidget> setTextColor(State<T> &state,
+                                             COLORREF trueColor,
+                                             COLORREF falseColor)
+    {
+        textColor = state.get() ? trueColor : falseColor;
+
+        state.bindProperty(
+            shared_from_this(),
+            [trueColor, falseColor](Widget *w, const T &val)
+            {
+                w->textColor = val ? trueColor : falseColor;
+            },
+            false // paint only
+        );
+
+        return std::static_pointer_cast<TextWidget>(shared_from_this());
+    }
+
+    std::shared_ptr<TextWidget> setHoverTextColor(COLORREF color)
+    {
+        hoverTextColor = color;
+        hasHoverTextColor = true;
+        markNeedsPaint();
+        return std::static_pointer_cast<TextWidget>(shared_from_this());
+    }
 };
 
 // --- Button Widget ---
@@ -46,29 +147,98 @@ class ButtonWidget : public Widget
 public:
     void computeLayout(HDC hdc, int availableWidth, int availableHeight, FontCache &fontCache) override
     {
-        measureText(hdc, fontCache);
-
-        // Only add padding if we're auto-sizing
-        if (autoWidth)
-            width += paddingLeft + paddingRight;
-        if (autoHeight)
-            height += paddingTop + paddingBottom;
+        // If we have a child widget, compute its layout
+        if (!children.empty())
+        {
+            auto& child = children[0];
+            
+            // Compute child layout with available space minus padding
+            int availWidth = availableWidth - paddingLeft - paddingRight;
+            int availHeight = availableHeight - paddingTop - paddingBottom;
+            
+            child->computeLayout(hdc, availWidth, availHeight, fontCache);
+            
+            // Size button to fit child + padding
+            if (autoWidth)
+                width = child->width + child->marginLeft + child->marginRight + paddingLeft + paddingRight;
+            if (autoHeight)
+                height = child->height + child->marginTop + child->marginBottom + paddingTop + paddingBottom;
+        }
+        else if (!text.empty())
+        {
+            // Legacy text-only mode
+            measureText(hdc, fontCache);
+            
+            if (autoWidth)
+                width += paddingLeft + paddingRight;
+            if (autoHeight)
+                height += paddingTop + paddingBottom;
+        }
+        else
+        {
+            // Empty button - use minimum size
+            if (autoWidth)
+                width = paddingLeft + paddingRight;
+            if (autoHeight)
+                height = paddingTop + paddingBottom;
+        }
 
         applyConstraints();
         needsLayout = false;
     }
 
+    void positionChildren(int contentX, int contentY, int contentWidth, int contentHeight) override
+    {
+        if (!children.empty())
+        {
+            auto& child = children[0];
+            
+            // Center the child within the button
+            int childX = contentX + (contentWidth - child->width - child->marginLeft - child->marginRight) / 2;
+            int childY = contentY + (contentHeight - child->height - child->marginTop - child->marginBottom) / 2;
+            
+            child->x = childX + child->marginLeft;
+            child->y = childY + child->marginTop;
+            
+            child->positionChildren(
+                child->x + child->paddingLeft,
+                child->y + child->paddingTop,
+                child->width - child->paddingLeft - child->paddingRight,
+                child->height - child->paddingTop - child->paddingBottom
+            );
+        }
+    }
+
     void render(HDC hdc, FontCache &fontCache) override
     {
+        // Draw button background
         if (hasBackground)
         {
             drawRoundedRectangle(hdc);
         }
-        renderText(hdc, fontCache, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        
+        // Render child widget if present
+        if (!children.empty())
+        {
+            children[0]->render(hdc, fontCache);
+        }
+        else if (!text.empty())
+        {
+            // Legacy text rendering
+            renderText(hdc, fontCache, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        }
+        
         needsPaint = false;
     }
+    
+    // Helper method to set the child widget
+    std::shared_ptr<ButtonWidget> setChild(WidgetPtr child)
+    {
+        children.clear();
+        addChild(child);
+        return std::static_pointer_cast<ButtonWidget>(shared_from_this());
+    }
 };
-
 // --- Column Widget ---
 class ColumnWidget : public Widget
 {
@@ -354,6 +524,82 @@ public:
                 child->height - child->paddingTop - child->paddingBottom);
         }
     }
+
+    std::shared_ptr<ContainerWidget> setHoverBackgroundColor(COLORREF color)
+    {
+        hoverBackgroundColor = color;
+        hasHoverBackground = true;
+        markNeedsPaint();
+        return std::static_pointer_cast<ContainerWidget>(shared_from_this());
+    }
+
+    std::shared_ptr<ContainerWidget> setHoverBorderColor(COLORREF color)
+    {
+        hoverBorderColor = color;
+        hasHoverBorderColor = true;
+        markNeedsPaint();
+        return std::static_pointer_cast<ContainerWidget>(shared_from_this());
+    }
+
+    std::shared_ptr<ContainerWidget> setBorderWidth(int w)
+    {
+        if (borderWidth != w)
+        {
+            borderWidth = w;
+            hasBorder = true;
+            markNeedsLayout();
+        }
+        return std::static_pointer_cast<ContainerWidget>(shared_from_this());
+    }
+
+    std::shared_ptr<ContainerWidget> setBorderRadius(int r)
+    {
+        if (borderRadius != r)
+        {
+            borderRadius = r;
+            markNeedsPaint();
+        }
+        return std::static_pointer_cast<ContainerWidget>(shared_from_this());
+    }
+
+    std::shared_ptr<ContainerWidget> setBackgroundColor(COLORREF color)
+    {
+        backgroundColor = color;
+        hasBackground = true;
+        markNeedsPaint();
+        return std::static_pointer_cast<ContainerWidget>(shared_from_this());
+    }
+
+    template <typename T>
+    std::shared_ptr<ContainerWidget> setBackgroundColor(State<T> &state,
+                                 COLORREF trueColor,
+                                 COLORREF falseColor)
+    {
+        // Set initial value immediately
+        backgroundColor = state.get() ? trueColor : falseColor;
+        hasBackground = true;
+
+        // Capture colors by value, bind to state
+        state.bindProperty(
+            shared_from_this(),
+            [trueColor, falseColor](Widget *w, const T &val)
+            {
+                w->backgroundColor = val ? trueColor : falseColor;
+                w->hasBackground = true;
+            },
+            false // paint only, no layout needed
+        );
+
+        return std::static_pointer_cast<ContainerWidget>(shared_from_this());
+    }
+
+    std::shared_ptr<ContainerWidget> setBorderColor(COLORREF color)
+    {
+        borderColor = color;
+        hasBorder = true;
+        markNeedsPaint();
+        return std::static_pointer_cast<ContainerWidget>(shared_from_this());
+    }
 };
 
 // --- Center Widget ---
@@ -530,8 +776,6 @@ public:
 // WIDGET FACTORY FUNCTIONS
 // ============================================================================
 
-
-
 inline WidgetPtr Container(WidgetPtr child = nullptr)
 {
     auto w = std::make_shared<ContainerWidget>();
@@ -540,7 +784,9 @@ inline WidgetPtr Container(WidgetPtr child = nullptr)
     return w;
 }
 
-inline WidgetPtr Text(const std::string &text)
+using TextWidgetPtr = std::shared_ptr<TextWidget>;
+
+inline TextWidgetPtr Text(const std::string &text)
 {
     auto w = std::make_shared<TextWidget>();
     w->text = text;
@@ -548,7 +794,7 @@ inline WidgetPtr Text(const std::string &text)
 }
 
 template <typename T>
-inline WidgetPtr Text(State<T> &state)
+inline TextWidgetPtr Text(State<T> &state)
 {
     auto w = std::make_shared<TextWidget>();
     w->text = state.toString();
@@ -572,6 +818,25 @@ inline WidgetPtr Button(const std::string &text, ClickHandler onClick = nullptr)
 
     return w;
 }
+
+// New widget-based button
+inline WidgetPtr Button(WidgetPtr child, ClickHandler onClick = nullptr)
+{
+    auto w = std::make_shared<ButtonWidget>();
+    w->addChild(child);
+    w->onClick = onClick;
+
+    w->hasBackground = true;
+    w->backgroundColor = RGB(76, 175, 80);
+    w->paddingLeft = w->paddingRight = 20;
+    w->paddingTop = w->paddingBottom = 10;
+    w->borderRadius = 4;
+
+    return w;
+}
+
+
+ 
 
 template <typename... Widgets>
 WidgetPtr Row(Widgets... widgets)
