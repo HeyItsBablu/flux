@@ -6,7 +6,7 @@
 #include "flux_layout.hpp"
 #include "flux_renderer.hpp"
 
-#include <map> 
+#include <map>
 #include <tuple>
 #include <windowsx.h>
 
@@ -17,6 +17,7 @@
 // Forward declarations
 template <typename T>
 class State;
+class DropdownWidget;
 
 // ============================================================================
 // MOUSE EVENT BROADCAST HELPERS (for captured mouse events)
@@ -40,6 +41,25 @@ inline bool broadcastMouseEvent(Widget *widget, int x, int y,
             return true;
     }
 
+    return false;
+}
+
+inline bool checkDropdownOverlays(Widget *widget, int mouseX, int mouseY)
+{
+    if (!widget)
+        return false;
+
+    // Use virtual method - no dynamic_cast needed!
+    if (widget->hasOpenOverlay())
+    {
+        return widget->handleMouseDown(mouseX, mouseY);
+    }
+
+    for (auto &child : widget->children)
+    {
+        if (checkDropdownOverlays(child.get(), mouseX, mouseY))
+            return true;
+    }
     return false;
 }
 
@@ -197,11 +217,19 @@ private:
 
         case WM_LBUTTONDOWN:
         {
+
             if (!instance || !instance->root)
                 return 0;
 
             int mouseX = LOWORD(lParam);
             int mouseY = HIWORD(lParam);
+
+            // Check for open dropdown overlays FIRST
+            if (checkDropdownOverlays(instance->root.get(), mouseX, mouseY))
+            {
+                InvalidateRect(hwnd, NULL, FALSE);
+                return 0;
+            }
 
             // Try new mouse event system first
             if (findAndHandleMouseEvent(instance->root.get(), mouseX, mouseY,

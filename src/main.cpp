@@ -9,9 +9,10 @@ private:
     State<std::string> newText;
     State<std::string> passwordText;
     State<double> valueState;
+    State<std::string> selectedCountry;
 
 public:
-    InputTestComponent() : isActive(false, context), newText("", context), passwordText("Hello there", context), valueState(50.0, context) {} // Use useState instead
+    InputTestComponent() : isActive(false, context), newText("", context), passwordText("Hello there", context), valueState(50.0, context), selectedCountry("United States", context) {} // Use useState instead
 
     void updateState()
     {
@@ -24,6 +25,7 @@ public:
         std::cout << "Check box " << isActive.get() << std::endl;
         std::cout << "Username " << newText.get() << std::endl;
         std::cout << "Password " << passwordText.get() << std::endl;
+        std::cout << "Country " << selectedCountry.get() << std::endl;
     }
 
     WidgetPtr build() override
@@ -32,6 +34,28 @@ public:
             AppBar("Conditional App"),
             Center(
                 Column(
+                    Text("Select Your Country:")
+                        
+                        ->setFontSize(14)
+                        ->setFontWeight(FontWeight::Bold),
+
+                    Dropdown({"United States",
+                              "Canada",
+                              "United Kingdom",
+                              "Germany",
+                              "France",
+                              "Japan",
+                              "Australia",
+                              "Brazil",
+                              "India",
+                              "China"})
+                        ->setPlaceholder("Choose a country...")
+                        ->setSelectedValue(selectedCountry)
+                        ->setWidth(300),
+
+                    Text(selectedCountry)
+                        ->setFontSize(12)
+                        ->setTextColor(RGB(100, 100, 100)),
                     Text(valueState),
 
                     TextInput("Enter username...")

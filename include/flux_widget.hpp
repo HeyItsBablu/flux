@@ -131,6 +131,8 @@ public:
     virtual void computeLayout(HDC hdc, int availableWidth, int availableHeight, FontCache &fontCache);
     virtual void positionChildren(int contentX, int contentY, int contentWidth, int contentHeight);
     virtual void render(HDC hdc, FontCache &fontCache);
+    virtual void renderOverlay(HDC hdc, FontCache &fontCache) {}
+    virtual bool hasOpenOverlay() const { return false; }
     void measureText(HDC hdc, FontCache &fontCache);
     void renderText(HDC hdc, FontCache &fontCache, UINT format = DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
@@ -799,6 +801,7 @@ inline bool findAndHandleMouseEvent(Widget *widget, int x, int y, Handler handle
 
     return false;
 }
+
 
 /**
  * Update hover state for all widgets in tree

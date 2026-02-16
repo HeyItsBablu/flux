@@ -17,14 +17,13 @@ using HoverHandler = std::function<void(bool)>;
 class TextInputWidget : public Widget
 {
 public:
-    std::string inputValue; // actual input text (separate from label text)
+    std::string inputValue;
     std::string placeholder;
-    int cursorPos = 0;         // character index
-    bool cursorVisible = true; // blink state
+    int cursorPos = 0;
+    bool cursorVisible = true;
     UINT cursorTimerId = 1;
-    int scrollOffset = 0; // horizontal scroll for long text
+    int scrollOffset = 0;
 
-    // Colors
     COLORREF focusedBorderColor = RGB(33, 150, 243);
     COLORREF unfocusedBorderColor = RGB(180, 180, 180);
     COLORREF placeholderColor = RGB(180, 180, 180);
@@ -32,7 +31,7 @@ public:
 
     TextInputWidget()
     {
-        isFocusable = true; // opt in to focus system
+        isFocusable = true;
         hasBorder = true;
         hasBackground = true;
         backgroundColor = RGB(255, 255, 255);
@@ -45,9 +44,6 @@ public:
         autoHeight = false;
     }
 
-    // ----------------------------------------------------------------
-    // Layout
-    // ----------------------------------------------------------------
     void computeLayout(HDC hdc, int availableWidth, int availableHeight, FontCache &fontCache) override
     {
         if (autoWidth)
@@ -57,12 +53,8 @@ public:
         needsLayout = false;
     }
 
-    // ----------------------------------------------------------------
-    // Render
-    // ----------------------------------------------------------------
     void render(HDC hdc, FontCache &fontCache) override
     {
-        // Box
         borderColor = isFocused ? focusedBorderColor : unfocusedBorderColor;
         drawRoundedRectangle(hdc);
 
@@ -74,11 +66,9 @@ public:
         int textW = width - paddingLeft - paddingRight;
         int textH = height - paddingTop - paddingBottom;
 
-        // Clip to text area
         RECT clipRect = {x + paddingLeft, y + paddingTop,
                          x + width - paddingRight, y + height - paddingBottom};
 
-        // Set clip region so text doesn't overflow box
         HRGN clipRgn = CreateRectRgn(clipRect.left, clipRect.top,
                                      clipRect.right, clipRect.bottom);
         SelectClipRgn(hdc, clipRgn);
@@ -87,26 +77,20 @@ public:
 
         if (inputValue.empty() && !placeholder.empty())
         {
-            // Draw placeholder
             SetTextColor(hdc, placeholderColor);
             RECT pr = clipRect;
             DrawText(hdc, placeholder.c_str(), -1, &pr, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         }
         else
         {
-
-            // Draw input text
             SetTextColor(hdc, inputTextColor);
             RECT tr = clipRect;
-            tr.left -= scrollOffset; 
-     
+            tr.left -= scrollOffset;
             DrawText(hdc, inputValue.c_str(), -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOCLIP);
         }
 
-        // Draw cursor
         if (isFocused && cursorVisible)
         {
-            // Measure text up to cursor position to get cursor X
             SIZE textSize = {0};
             if (cursorPos > 0)
             {
@@ -127,7 +111,6 @@ public:
             DeleteObject(cursorPen);
         }
 
-        // Remove clip region
         SelectClipRgn(hdc, nullptr);
         DeleteObject(clipRgn);
 
@@ -135,23 +118,18 @@ public:
         needsPaint = false;
     }
 
-    // ----------------------------------------------------------------
-    // Focus
-    // ----------------------------------------------------------------
     bool handleFocus(bool focused) override
     {
         isFocused = focused;
 
         if (focused)
         {
-            // Start cursor blink timer
             HWND hwnd = FluxUI::getCurrentInstance()->getWindow();
             SetTimer(hwnd, cursorTimerId, 530, nullptr);
             cursorVisible = true;
         }
         else
         {
-            // Stop cursor blink timer
             HWND hwnd = FluxUI::getCurrentInstance()->getWindow();
             KillTimer(hwnd, cursorTimerId);
             cursorVisible = false;
@@ -161,44 +139,32 @@ public:
         return true;
     }
 
-    // ----------------------------------------------------------------
-    // Cursor blink
-    // ----------------------------------------------------------------
     bool handleTimer(UINT timerId) override
     {
         if (timerId == cursorTimerId)
         {
             cursorVisible = !cursorVisible;
-            return true; // needs repaint
+            return true;
         }
         return false;
     }
 
-    // ----------------------------------------------------------------
-    // Mouse - click to focus + position cursor
-    // ----------------------------------------------------------------
     bool handleMouseDown(int mx, int my) override
     {
         if (mx >= x && mx < x + width &&
             my >= y && my < y + height)
         {
-            // Position cursor at click point
             cursorPos = getCursorPosFromX(mx - x - paddingLeft + scrollOffset);
             return true;
         }
         return false;
     }
 
-    // ----------------------------------------------------------------
-    // Keyboard input
-    // ----------------------------------------------------------------
     bool handleChar(wchar_t ch) override
     {
-        // Ignore control characters (backspace handled in keydown)
         if (ch < 32)
             return false;
 
-        // Insert character at cursor position
         std::string charStr(1, (char)ch);
         inputValue.insert(cursorPos, charStr);
         cursorPos++;
@@ -213,7 +179,7 @@ public:
     {
         switch (keyCode)
         {
-        case VK_BACK: // Backspace
+        case VK_BACK:
             if (cursorPos > 0)
             {
                 inputValue.erase(cursorPos - 1, 1);
@@ -269,17 +235,11 @@ public:
         return false;
     }
 
-    // ----------------------------------------------------------------
-    // State binding
-    // ----------------------------------------------------------------
-    using CheckBoxWidgetPtr = std::shared_ptr<TextInputWidget>;
-
     std::shared_ptr<TextInputWidget> setInputValue(State<std::string> &state)
     {
-        // State → Widget
         inputValue = state.get();
         cursorPos = (int)inputValue.size();
-         scrollOffset = 0;
+        scrollOffset = 0;
 
         state.bindProperty(
             shared_from_this(),
@@ -288,12 +248,9 @@ public:
                 auto *input = static_cast<TextInputWidget *>(w);
                 input->inputValue = val;
                 input->cursorPos = (int)val.size();
-                
             },
-            false // paint only
-        );
+            false);
 
-        // Store reference for notifyStateBinding
         boundStringState = &state;
 
         return std::static_pointer_cast<TextInputWidget>(shared_from_this());
@@ -308,14 +265,12 @@ public:
 private:
     State<std::string> *boundStringState = nullptr;
 
-    // Push current inputValue back to bound state
     void notifyStateBinding()
     {
         if (boundStringState)
             boundStringState->set(inputValue);
     }
 
-    // Get cursor character index from pixel X offset
     int getCursorPosFromX(int pixelX)
     {
         if (inputValue.empty())
@@ -348,7 +303,6 @@ private:
         return bestPos;
     }
 
-    // Scroll so cursor is always visible
     void updateScroll()
     {
         if (inputValue.empty())
@@ -374,8 +328,7 @@ private:
         int textAreaWidth = width - paddingLeft - paddingRight;
         int cursorX = sz.cx - scrollOffset;
 
-        // Better approach:
-        if (cursorX < 10) // Add margin
+        if (cursorX < 10)
             scrollOffset = max(0, sz.cx - 10);
         else if (cursorX > textAreaWidth - 10)
             scrollOffset = sz.cx - textAreaWidth + 10;
@@ -390,11 +343,10 @@ public:
 
     void computeLayout(HDC hdc, int availableWidth, int availableHeight, FontCache &fontCache) override
     {
-        // box + spacing + text
         if (!text.empty())
         {
             measureText(hdc, fontCache);
-            width = boxSize + 8 + width; // box + gap + text
+            width = boxSize + 8 + width;
         }
         else
         {
@@ -412,11 +364,9 @@ public:
 
     void render(HDC hdc, FontCache &fontCache) override
     {
-        // --- Draw box ---
         int boxX = x + paddingLeft;
         int boxY = y + paddingTop + (height - paddingTop - paddingBottom - boxSize) / 2;
 
-        // Box background
         HBRUSH boxBrush = CreateSolidBrush(
             checked ? RGB(76, 175, 80) : RGB(255, 255, 255));
         HPEN boxPen = CreatePen(PS_SOLID, 1,
@@ -432,13 +382,11 @@ public:
         DeleteObject(boxBrush);
         DeleteObject(boxPen);
 
-        // --- Draw checkmark if checked ---
         if (checked)
         {
             HPEN checkPen = CreatePen(PS_SOLID, 2, RGB(255, 255, 255));
             HPEN oldCheckPen = (HPEN)SelectObject(hdc, checkPen);
 
-            // Checkmark: two lines forming a tick
             int cx = boxX + 3;
             int cy = boxY + boxSize / 2;
 
@@ -450,7 +398,6 @@ public:
             DeleteObject(checkPen);
         }
 
-        // --- Draw label text ---
         if (!text.empty())
         {
             RECT textRect = {
@@ -475,13 +422,11 @@ public:
 
     bool handleMouseDown(int mx, int my) override
     {
-        // Hit test
         if (mx >= x && mx < x + width &&
             my >= y && my < y + height)
         {
             checked = !checked;
 
-            // Fire onClick so state binding can pick it up
             if (onClick)
                 onClick();
 
@@ -492,7 +437,6 @@ public:
 
     WidgetPtr setInputValue(State<bool> &state)
     {
-        // State → Widget
         checked = state.get();
 
         state.bindProperty(
@@ -502,10 +446,8 @@ public:
                 auto *cb = static_cast<CheckBoxWidget *>(w);
                 cb->checked = val;
             },
-            false // paint only
-        );
+            false);
 
-        // Widget → State
         onClick = [&state, this]()
         {
             state.set(checked);
@@ -515,31 +457,26 @@ public:
     }
 };
 
-
 class SliderWidget : public Widget
 {
 public:
-    double value = 0.0;      // Current value
-    double minValue = 0.0;   // Minimum value
-    double maxValue = 100.0; // Maximum value
-    double step = 1.0;       // Step increment
+    double value = 0.0;
+    double minValue = 0.0;
+    double maxValue = 100.0;
+    double step = 1.0;
 
-    // Dimensions
     int trackHeight = 4;
     int thumbRadius = 10;
 
-    // Colors
     COLORREF trackColor = RGB(200, 200, 200);
     COLORREF trackFillColor = RGB(33, 150, 243);
     COLORREF thumbColor = RGB(33, 150, 243);
     COLORREF thumbHoverColor = RGB(25, 118, 210);
     COLORREF thumbDragColor = RGB(13, 71, 161);
 
-    // State
     bool isDragging = false;
     bool isThumbHovered = false;
 
-    // Callbacks
     std::function<void(double)> onValueChanged;
 
     SliderWidget()
@@ -550,9 +487,6 @@ public:
         paddingTop = paddingBottom = 10;
     }
 
-    // ----------------------------------------------------------------
-    // Layout
-    // ----------------------------------------------------------------
     void computeLayout(HDC hdc, int availableWidth, int availableHeight, FontCache &fontCache) override
     {
         if (autoWidth)
@@ -562,44 +496,34 @@ public:
         needsLayout = false;
     }
 
-    // ----------------------------------------------------------------
-    // Render
-    // ----------------------------------------------------------------
     void render(HDC hdc, FontCache &fontCache) override
     {
-        // Calculate positions
         int trackY = y + height / 2;
         int trackLeft = x + paddingLeft;
         int trackRight = x + width - paddingRight;
         int trackWidth = trackRight - trackLeft;
 
-        // Calculate thumb position based on value
         double normalizedValue = (value - minValue) / (maxValue - minValue);
         int thumbX = trackLeft + (int)(normalizedValue * trackWidth);
 
-        // Draw track background
         HBRUSH trackBrush = CreateSolidBrush(trackColor);
         RECT trackRect = {
             trackLeft,
             trackY - trackHeight / 2,
             trackRight,
-            trackY + trackHeight / 2
-        };
+            trackY + trackHeight / 2};
         FillRect(hdc, &trackRect, trackBrush);
         DeleteObject(trackBrush);
 
-        // Draw filled track (from start to thumb)
         HBRUSH fillBrush = CreateSolidBrush(trackFillColor);
         RECT fillRect = {
             trackLeft,
             trackY - trackHeight / 2,
             thumbX,
-            trackY + trackHeight / 2
-        };
+            trackY + trackHeight / 2};
         FillRect(hdc, &fillRect, fillBrush);
         DeleteObject(fillBrush);
 
-        // Draw thumb
         COLORREF currentThumbColor = thumbColor;
         if (isDragging)
             currentThumbColor = thumbDragColor;
@@ -608,7 +532,7 @@ public:
 
         HBRUSH thumbBrush = CreateSolidBrush(currentThumbColor);
         HPEN thumbPen = CreatePen(PS_SOLID, 1, RGB(255, 255, 255));
-        
+
         HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, thumbBrush);
         HPEN oldPen = (HPEN)SelectObject(hdc, thumbPen);
 
@@ -626,20 +550,16 @@ public:
         needsPaint = false;
     }
 
-    // ----------------------------------------------------------------
-    // Mouse Events
-    // ----------------------------------------------------------------
     bool handleMouseDown(int mx, int my) override
     {
         if (mx >= x && mx < x + width &&
             my >= y && my < y + height)
         {
             isDragging = true;
-            
-            // Capture mouse so we get events even outside widget
+
             HWND hwnd = FluxUI::getCurrentInstance()->getWindow();
             SetCapture(hwnd);
-            
+
             updateValueFromMouseX(mx);
             return true;
         }
@@ -666,17 +586,16 @@ public:
             return true;
         }
 
-        // Check if hovering over thumb
         int trackY = y + height / 2;
         int trackLeft = x + paddingLeft;
-        int trackRight = x + paddingRight;
+        int trackRight = x + width - paddingRight;
         int trackWidth = trackRight - trackLeft;
 
         double normalizedValue = (value - minValue) / (maxValue - minValue);
         int thumbX = trackLeft + (int)(normalizedValue * trackWidth);
 
         bool nowHovered = (mx >= thumbX - thumbRadius && mx <= thumbX + thumbRadius &&
-                          my >= trackY - thumbRadius && my <= trackY + thumbRadius);
+                           my >= trackY - thumbRadius && my <= trackY + thumbRadius);
 
         if (nowHovered != isThumbHovered)
         {
@@ -699,9 +618,6 @@ public:
         return false;
     }
 
-    // ----------------------------------------------------------------
-    // Keyboard Events (for accessibility)
-    // ----------------------------------------------------------------
     bool handleKeyDown(int keyCode) override
     {
         double oldValue = value;
@@ -730,7 +646,6 @@ public:
             return false;
         }
 
-        // Clamp value
         value = max(minValue, min(maxValue, value));
 
         if (value != oldValue)
@@ -743,9 +658,6 @@ public:
         return false;
     }
 
-    // ----------------------------------------------------------------
-    // Builder methods
-    // ----------------------------------------------------------------
     std::shared_ptr<SliderWidget> setMinValue(double min)
     {
         minValue = min;
@@ -797,15 +709,9 @@ public:
         return std::static_pointer_cast<SliderWidget>(shared_from_this());
     }
 
-    // ----------------------------------------------------------------
-    // State binding
-    // ----------------------------------------------------------------
     std::shared_ptr<SliderWidget> setValue(State<double> &state)
     {
-        // State → Widget
         value = state.get();
-        
-        // Clamp initial value
         value = max(minValue, min(maxValue, value));
 
         state.bindProperty(
@@ -815,22 +721,16 @@ public:
                 auto *slider = static_cast<SliderWidget *>(w);
                 slider->value = max(slider->minValue, min(slider->maxValue, val));
             },
-            false // paint only
-        );
+            false);
 
-        // Widget → State
         boundDoubleState = &state;
 
         return std::static_pointer_cast<SliderWidget>(shared_from_this());
     }
 
-    // Integer state binding
     std::shared_ptr<SliderWidget> setValue(State<int> &state)
     {
-        // State → Widget
         value = (double)state.get();
-        
-        // Clamp initial value
         value = max(minValue, min(maxValue, value));
 
         state.bindProperty(
@@ -840,10 +740,8 @@ public:
                 auto *slider = static_cast<SliderWidget *>(w);
                 slider->value = max(slider->minValue, min(slider->maxValue, (double)val));
             },
-            false // paint only
-        );
+            false);
 
-        // Widget → State
         boundIntState = &state;
 
         return std::static_pointer_cast<SliderWidget>(shared_from_this());
@@ -859,22 +757,17 @@ private:
         int trackRight = x + width - paddingRight;
         int trackWidth = trackRight - trackLeft;
 
-        // Clamp mouse position to track
         int clampedX = max(trackLeft, min(trackRight, mx));
 
-        // Calculate normalized position (0.0 to 1.0)
         double normalizedPos = (double)(clampedX - trackLeft) / trackWidth;
 
-        // Calculate new value
         double newValue = minValue + normalizedPos * (maxValue - minValue);
 
-        // Apply step
         if (step > 0)
         {
             newValue = round(newValue / step) * step;
         }
 
-        // Clamp to range
         newValue = max(minValue, min(maxValue, newValue));
 
         if (newValue != value)
@@ -887,23 +780,43 @@ private:
 
     void notifyValueChanged()
     {
-        // Notify callback
         if (onValueChanged)
             onValueChanged(value);
 
-        // Update bound state
         if (boundDoubleState)
             boundDoubleState->set(value);
-        
+
         if (boundIntState)
             boundIntState->set((int)round(value));
     }
 };
 
+
 // ----------------------------------------------------------------
-// Factory
+// Factory Functions
 // ----------------------------------------------------------------
+using TextInputWidgetPtr = std::shared_ptr<TextInputWidget>;
+using CheckBoxWidgetPtr = std::shared_ptr<CheckBoxWidget>;
 using SliderWidgetPtr = std::shared_ptr<SliderWidget>;
+
+
+inline TextInputWidgetPtr TextInput(const std::string &placeholder = "")
+{
+    auto w = std::make_shared<TextInputWidget>();
+    if (!placeholder.empty())
+        w->setPlaceholder(placeholder);
+    return w;
+}
+
+inline CheckBoxWidgetPtr CheckBox(const std::string &label = "")
+{
+    auto w = std::make_shared<CheckBoxWidget>();
+    w->text = label;
+    w->textColor = RGB(30, 30, 30);
+    w->paddingLeft = w->paddingRight = 4;
+    w->paddingTop = w->paddingBottom = 4;
+    return w;
+}
 
 inline SliderWidgetPtr Slider(double minValue = 0.0, double maxValue = 100.0, double step = 1.0)
 {
@@ -915,30 +828,5 @@ inline SliderWidgetPtr Slider(double minValue = 0.0, double maxValue = 100.0, do
 }
 
 
-// ----------------------------------------------------------------
-// Factory
-// ----------------------------------------------------------------
-using TextInputWidgetPtr = std::shared_ptr<TextInputWidget>;
-
-inline TextInputWidgetPtr TextInput(const std::string &placeholder = "")
-{
-    auto w = std::make_shared<TextInputWidget>();
-    if (!placeholder.empty())
-        w->setPlaceholder(placeholder);
-    return w;
-}
-
-// Change from returning WidgetPtr to CheckBoxWidgetPtr
-using CheckBoxWidgetPtr = std::shared_ptr<CheckBoxWidget>;
-
-inline CheckBoxWidgetPtr CheckBox(const std::string &label = "")
-{
-    auto w = std::make_shared<CheckBoxWidget>();
-    w->text = label;
-    w->textColor = RGB(30, 30, 30);
-    w->paddingLeft = w->paddingRight = 4;
-    w->paddingTop = w->paddingBottom = 4;
-    return w; // returns CheckBoxWidgetPtr, not WidgetPtr
-}
 
 #endif
