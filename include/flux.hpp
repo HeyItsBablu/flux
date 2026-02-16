@@ -18,4 +18,5 @@
 #include "flux_radio.hpp"
 #include "flux_checkbox.hpp"
 #include "flux_slider.hpp"
+#include "flux_image.hpp"
 #endif // FLUX_HPP
