@@ -8,9 +8,10 @@ private:
     State<bool> isActive;
     State<std::string> newText;
     State<std::string> passwordText;
+    State<double> valueState;
 
 public:
-    InputTestComponent() : isActive(false, context), newText("", context), passwordText("Hello there", context) {} // Use useState instead
+    InputTestComponent() : isActive(false, context), newText("", context), passwordText("Hello there", context), valueState(50.0, context) {} // Use useState instead
 
     void updateState()
     {
@@ -31,13 +32,20 @@ public:
             AppBar("Conditional App"),
             Center(
                 Column(
+                    Text(valueState),
 
-                    // TextInput("Enter username...")
-                    //     ->setInputValue(newText)
-                    //     ->setWidth(300),
+                    TextInput("Enter username...")
+                        ->setInputValue(newText)
+                        ->setWidth(300),
 
-                    // CheckBox("Enable feature")
-                    //     ->setInputValue(isActive),
+                    CheckBox("Enable feature")
+                        ->setInputValue(isActive),
+                    Slider(0, 100, 5)
+                        ->setValue(valueState)
+                        ->setTrackColor(RGB(220, 220, 220))
+                        ->setTrackFillColor(RGB(76, 175, 80))
+                        ->setThumbColor(RGB(76, 175, 80))
+                        ->setWidth(300),
 
                     TextInput("Enter PASSWORD...")
                         ->setInputValue(passwordText)

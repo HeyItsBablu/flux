@@ -515,6 +515,406 @@ public:
     }
 };
 
+
+class SliderWidget : public Widget
+{
+public:
+    double value = 0.0;      // Current value
+    double minValue = 0.0;   // Minimum value
+    double maxValue = 100.0; // Maximum value
+    double step = 1.0;       // Step increment
+
+    // Dimensions
+    int trackHeight = 4;
+    int thumbRadius = 10;
+
+    // Colors
+    COLORREF trackColor = RGB(200, 200, 200);
+    COLORREF trackFillColor = RGB(33, 150, 243);
+    COLORREF thumbColor = RGB(33, 150, 243);
+    COLORREF thumbHoverColor = RGB(25, 118, 210);
+    COLORREF thumbDragColor = RGB(13, 71, 161);
+
+    // State
+    bool isDragging = false;
+    bool isThumbHovered = false;
+
+    // Callbacks
+    std::function<void(double)> onValueChanged;
+
+    SliderWidget()
+    {
+        height = 40;
+        autoHeight = false;
+        paddingLeft = paddingRight = thumbRadius;
+        paddingTop = paddingBottom = 10;
+    }
+
+    // ----------------------------------------------------------------
+    // Layout
+    // ----------------------------------------------------------------
+    void computeLayout(HDC hdc, int availableWidth, int availableHeight, FontCache &fontCache) override
+    {
+        if (autoWidth)
+            width = availableWidth;
+
+        applyConstraints();
+        needsLayout = false;
+    }
+
+    // ----------------------------------------------------------------
+    // Render
+    // ----------------------------------------------------------------
+    void render(HDC hdc, FontCache &fontCache) override
+    {
+        // Calculate positions
+        int trackY = y + height / 2;
+        int trackLeft = x + paddingLeft;
+        int trackRight = x + width - paddingRight;
+        int trackWidth = trackRight - trackLeft;
+
+        // Calculate thumb position based on value
+        double normalizedValue = (value - minValue) / (maxValue - minValue);
+        int thumbX = trackLeft + (int)(normalizedValue * trackWidth);
+
+        // Draw track background
+        HBRUSH trackBrush = CreateSolidBrush(trackColor);
+        RECT trackRect = {
+            trackLeft,
+            trackY - trackHeight / 2,
+            trackRight,
+            trackY + trackHeight / 2
+        };
+        FillRect(hdc, &trackRect, trackBrush);
+        DeleteObject(trackBrush);
+
+        // Draw filled track (from start to thumb)
+        HBRUSH fillBrush = CreateSolidBrush(trackFillColor);
+        RECT fillRect = {
+            trackLeft,
+            trackY - trackHeight / 2,
+            thumbX,
+            trackY + trackHeight / 2
+        };
+        FillRect(hdc, &fillRect, fillBrush);
+        DeleteObject(fillBrush);
+
+        // Draw thumb
+        COLORREF currentThumbColor = thumbColor;
+        if (isDragging)
+            currentThumbColor = thumbDragColor;
+        else if (isThumbHovered)
+            currentThumbColor = thumbHoverColor;
+
+        HBRUSH thumbBrush = CreateSolidBrush(currentThumbColor);
+        HPEN thumbPen = CreatePen(PS_SOLID, 1, RGB(255, 255, 255));
+        
+        HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, thumbBrush);
+        HPEN oldPen = (HPEN)SelectObject(hdc, thumbPen);
+
+        Ellipse(hdc,
+                thumbX - thumbRadius,
+                trackY - thumbRadius,
+                thumbX + thumbRadius,
+                trackY + thumbRadius);
+
+        SelectObject(hdc, oldBrush);
+        SelectObject(hdc, oldPen);
+        DeleteObject(thumbBrush);
+        DeleteObject(thumbPen);
+
+        needsPaint = false;
+    }
+
+    // ----------------------------------------------------------------
+    // Mouse Events
+    // ----------------------------------------------------------------
+    bool handleMouseDown(int mx, int my) override
+    {
+        if (mx >= x && mx < x + width &&
+            my >= y && my < y + height)
+        {
+            isDragging = true;
+            
+            // Capture mouse so we get events even outside widget
+            HWND hwnd = FluxUI::getCurrentInstance()->getWindow();
+            SetCapture(hwnd);
+            
+            updateValueFromMouseX(mx);
+            return true;
+        }
+        return false;
+    }
+
+    bool handleMouseUp(int mx, int my) override
+    {
+        if (isDragging)
+        {
+            isDragging = false;
+            ReleaseCapture();
+            markNeedsPaint();
+            return true;
+        }
+        return false;
+    }
+
+    bool handleMouseMove(int mx, int my) override
+    {
+        if (isDragging)
+        {
+            updateValueFromMouseX(mx);
+            return true;
+        }
+
+        // Check if hovering over thumb
+        int trackY = y + height / 2;
+        int trackLeft = x + paddingLeft;
+        int trackRight = x + paddingRight;
+        int trackWidth = trackRight - trackLeft;
+
+        double normalizedValue = (value - minValue) / (maxValue - minValue);
+        int thumbX = trackLeft + (int)(normalizedValue * trackWidth);
+
+        bool nowHovered = (mx >= thumbX - thumbRadius && mx <= thumbX + thumbRadius &&
+                          my >= trackY - thumbRadius && my <= trackY + thumbRadius);
+
+        if (nowHovered != isThumbHovered)
+        {
+            isThumbHovered = nowHovered;
+            markNeedsPaint();
+            return true;
+        }
+
+        return false;
+    }
+
+    bool handleMouseLeave() override
+    {
+        if (isThumbHovered)
+        {
+            isThumbHovered = false;
+            markNeedsPaint();
+            return true;
+        }
+        return false;
+    }
+
+    // ----------------------------------------------------------------
+    // Keyboard Events (for accessibility)
+    // ----------------------------------------------------------------
+    bool handleKeyDown(int keyCode) override
+    {
+        double oldValue = value;
+
+        switch (keyCode)
+        {
+        case VK_LEFT:
+        case VK_DOWN:
+            value -= step;
+            break;
+
+        case VK_RIGHT:
+        case VK_UP:
+            value += step;
+            break;
+
+        case VK_HOME:
+            value = minValue;
+            break;
+
+        case VK_END:
+            value = maxValue;
+            break;
+
+        default:
+            return false;
+        }
+
+        // Clamp value
+        value = max(minValue, min(maxValue, value));
+
+        if (value != oldValue)
+        {
+            notifyValueChanged();
+            markNeedsPaint();
+            return true;
+        }
+
+        return false;
+    }
+
+    // ----------------------------------------------------------------
+    // Builder methods
+    // ----------------------------------------------------------------
+    std::shared_ptr<SliderWidget> setMinValue(double min)
+    {
+        minValue = min;
+        if (value < minValue)
+            value = minValue;
+        markNeedsPaint();
+        return std::static_pointer_cast<SliderWidget>(shared_from_this());
+    }
+
+    std::shared_ptr<SliderWidget> setMaxValue(double max)
+    {
+        maxValue = max;
+        if (value > maxValue)
+            value = maxValue;
+        markNeedsPaint();
+        return std::static_pointer_cast<SliderWidget>(shared_from_this());
+    }
+
+    std::shared_ptr<SliderWidget> setStep(double s)
+    {
+        step = s;
+        return std::static_pointer_cast<SliderWidget>(shared_from_this());
+    }
+
+    std::shared_ptr<SliderWidget> setTrackColor(COLORREF color)
+    {
+        trackColor = color;
+        markNeedsPaint();
+        return std::static_pointer_cast<SliderWidget>(shared_from_this());
+    }
+
+    std::shared_ptr<SliderWidget> setTrackFillColor(COLORREF color)
+    {
+        trackFillColor = color;
+        markNeedsPaint();
+        return std::static_pointer_cast<SliderWidget>(shared_from_this());
+    }
+
+    std::shared_ptr<SliderWidget> setThumbColor(COLORREF color)
+    {
+        thumbColor = color;
+        markNeedsPaint();
+        return std::static_pointer_cast<SliderWidget>(shared_from_this());
+    }
+
+    std::shared_ptr<SliderWidget> setOnValueChanged(std::function<void(double)> callback)
+    {
+        onValueChanged = callback;
+        return std::static_pointer_cast<SliderWidget>(shared_from_this());
+    }
+
+    // ----------------------------------------------------------------
+    // State binding
+    // ----------------------------------------------------------------
+    std::shared_ptr<SliderWidget> setValue(State<double> &state)
+    {
+        // State → Widget
+        value = state.get();
+        
+        // Clamp initial value
+        value = max(minValue, min(maxValue, value));
+
+        state.bindProperty(
+            shared_from_this(),
+            [](Widget *w, const double &val)
+            {
+                auto *slider = static_cast<SliderWidget *>(w);
+                slider->value = max(slider->minValue, min(slider->maxValue, val));
+            },
+            false // paint only
+        );
+
+        // Widget → State
+        boundDoubleState = &state;
+
+        return std::static_pointer_cast<SliderWidget>(shared_from_this());
+    }
+
+    // Integer state binding
+    std::shared_ptr<SliderWidget> setValue(State<int> &state)
+    {
+        // State → Widget
+        value = (double)state.get();
+        
+        // Clamp initial value
+        value = max(minValue, min(maxValue, value));
+
+        state.bindProperty(
+            shared_from_this(),
+            [](Widget *w, const int &val)
+            {
+                auto *slider = static_cast<SliderWidget *>(w);
+                slider->value = max(slider->minValue, min(slider->maxValue, (double)val));
+            },
+            false // paint only
+        );
+
+        // Widget → State
+        boundIntState = &state;
+
+        return std::static_pointer_cast<SliderWidget>(shared_from_this());
+    }
+
+private:
+    State<double> *boundDoubleState = nullptr;
+    State<int> *boundIntState = nullptr;
+
+    void updateValueFromMouseX(int mx)
+    {
+        int trackLeft = x + paddingLeft;
+        int trackRight = x + width - paddingRight;
+        int trackWidth = trackRight - trackLeft;
+
+        // Clamp mouse position to track
+        int clampedX = max(trackLeft, min(trackRight, mx));
+
+        // Calculate normalized position (0.0 to 1.0)
+        double normalizedPos = (double)(clampedX - trackLeft) / trackWidth;
+
+        // Calculate new value
+        double newValue = minValue + normalizedPos * (maxValue - minValue);
+
+        // Apply step
+        if (step > 0)
+        {
+            newValue = round(newValue / step) * step;
+        }
+
+        // Clamp to range
+        newValue = max(minValue, min(maxValue, newValue));
+
+        if (newValue != value)
+        {
+            value = newValue;
+            notifyValueChanged();
+            markNeedsPaint();
+        }
+    }
+
+    void notifyValueChanged()
+    {
+        // Notify callback
+        if (onValueChanged)
+            onValueChanged(value);
+
+        // Update bound state
+        if (boundDoubleState)
+            boundDoubleState->set(value);
+        
+        if (boundIntState)
+            boundIntState->set((int)round(value));
+    }
+};
+
+// ----------------------------------------------------------------
+// Factory
+// ----------------------------------------------------------------
+using SliderWidgetPtr = std::shared_ptr<SliderWidget>;
+
+inline SliderWidgetPtr Slider(double minValue = 0.0, double maxValue = 100.0, double step = 1.0)
+{
+    auto w = std::make_shared<SliderWidget>();
+    w->setMinValue(minValue);
+    w->setMaxValue(maxValue);
+    w->setStep(step);
+    return w;
+}
+
+
 // ----------------------------------------------------------------
 // Factory
 // ----------------------------------------------------------------
