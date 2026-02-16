@@ -12,8 +12,10 @@
 #include "flux_app.hpp"
 #include "flux_switch.hpp"
 #include "flux_list_view.hpp"
-#include "flux_input.hpp"
+#include "flux_text_input.hpp"
 #include "flux_dropdown.hpp"
 #include "flux_toggle.hpp"
 #include "flux_radio.hpp"
+#include "flux_checkbox.hpp"
+#include "flux_slider.hpp"
 #endif // FLUX_HPP
