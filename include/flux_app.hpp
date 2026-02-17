@@ -3,6 +3,7 @@
 
 #include "flux_widget_list.hpp"
 #include <string>
+#include <algorithm> 
 
 // ============================================================================
 // APP THEME - Similar to Flutter's ThemeData
@@ -162,10 +163,26 @@ inline WidgetPtr ThemedCard(WidgetPtr child) {
 }
 
 // ============================================================================
+// OVERLAY ENTRY - Represents a widget that renders on top
+// ============================================================================
+
+struct OverlayEntry {
+  Widget *widget;
+  std::function<void(HDC, FontCache &)> renderer;
+  int zIndex = 0; // Higher = renders later (on top)
+
+  OverlayEntry(Widget *w, std::function<void(HDC, FontCache &)> r, int z = 0)
+      : widget(w), renderer(r), zIndex(z) {}
+};
+
+// ============================================================================
 // FLUX APP WIDGET - Similar to MaterialApp
 // ============================================================================
 
 class FluxAppWidget : public Widget {
+private:
+  std::vector<OverlayEntry> overlayStack;
+
 public:
   std::string title;
   AppTheme theme;
@@ -182,6 +199,41 @@ public:
       addChild(home);
     }
   }
+
+  // ----------------------------------------------------------------
+  // OVERLAY MANAGEMENT
+  // ----------------------------------------------------------------
+
+  void addOverlay(Widget *widget,
+                  std::function<void(HDC, FontCache &)> renderer,
+                  int zIndex = 0) {
+    overlayStack.emplace_back(widget, renderer, zIndex);
+
+    // Sort by zIndex (lower zIndex renders first, higher renders on top)
+    std::sort(overlayStack.begin(), overlayStack.end(),
+              [](const OverlayEntry &a, const OverlayEntry &b) {
+                return a.zIndex < b.zIndex;
+              });
+
+    markNeedsPaint();
+  }
+
+  void removeOverlay(Widget *widget) {
+    overlayStack.erase(std::remove_if(overlayStack.begin(), overlayStack.end(),
+                                      [widget](const OverlayEntry &entry) {
+                                        return entry.widget == widget;
+                                      }),
+                       overlayStack.end());
+
+    markNeedsPaint();
+  }
+
+  void clearOverlays() {
+    overlayStack.clear();
+    markNeedsPaint();
+  }
+
+  bool hasOverlays() const { return !overlayStack.empty(); }
 
   void computeLayout(HDC hdc, int availableWidth, int availableHeight,
                      FontCache &fontCache) override {
@@ -222,6 +274,11 @@ public:
     // Render children
     if (!children.empty()) {
       children[0]->render(hdc, fontCache);
+    }
+
+    // RENDER OVERLAYS ON TOP (sorted by zIndex)
+    for (const auto &entry : overlayStack) {
+      entry.renderer(hdc, fontCache);
     }
 
     // Debug: Draw widget bounds

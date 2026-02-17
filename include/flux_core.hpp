@@ -14,47 +14,28 @@
 // FORWARD DECLARATIONS
 // ============================================================================
 
-// Forward declarations
 template <typename T> class State;
 class DropdownWidget;
+class FluxAppWidget;
 
 // ============================================================================
 // MOUSE EVENT BROADCAST HELPERS (for captured mouse events)
 // ============================================================================
 
-// Broadcast mouse event to all widgets (used when mouse capture is active)
 inline bool
 broadcastMouseEvent(Widget *widget, int x, int y,
                     std::function<bool(Widget *, int, int)> handler) {
   if (!widget)
     return false;
 
-  // Try this widget first
   if (handler(widget, x, y))
     return true;
 
-  // Then try all children
   for (auto &child : widget->children) {
     if (broadcastMouseEvent(child.get(), x, y, handler))
       return true;
   }
 
-  return false;
-}
-
-inline bool checkDropdownOverlays(Widget *widget, int mouseX, int mouseY) {
-  if (!widget)
-    return false;
-
-  // Use virtual method - no dynamic_cast needed!
-  if (widget->hasOpenOverlay()) {
-    return widget->handleMouseDown(mouseX, mouseY);
-  }
-
-  for (auto &child : widget->children) {
-    if (checkDropdownOverlays(child.get(), mouseX, mouseY))
-      return true;
-  }
   return false;
 }
 
@@ -76,18 +57,9 @@ private:
   int bufferWidth = 0;
   int bufferHeight = 0;
 
-  // Global instance for State to use
   static FluxUI *currentInstance;
 
   Widget *focusedWidget = nullptr;
-
-  // Broadcast keyboard event to focused widget only
-  static bool broadcastToFocused(Widget *focused,
-                                 std::function<bool(Widget *)> handler) {
-    if (!focused)
-      return false;
-    return handler(focused);
-  }
 
   void createBackBuffer(int width, int height) {
     if (hdcMem && (width != bufferWidth || height != bufferHeight)) {
@@ -116,6 +88,14 @@ private:
       hbmOld = nullptr;
     }
   }
+
+  bool handleDropdownOverlays(int mouseX, int mouseY) {
+    // Traverse widget tree looking for open dropdowns
+    return checkDropdownOverlays(root.get(), mouseX, mouseY);
+  }
+
+  bool checkDropdownOverlays(Widget *widget, int mouseX, int mouseY);
+  void wireFluxAppToWidgets(FluxAppWidget *fluxApp, Widget *widget);
 
   static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam,
                                      LPARAM lParam) {
@@ -188,7 +168,6 @@ private:
       int x = GET_X_LPARAM(lParam);
       int y = GET_Y_LPARAM(lParam);
 
-      // Convert screen coordinates to client coordinates
       POINT pt = {x, y};
       ScreenToClient(hwnd, &pt);
 
@@ -201,36 +180,33 @@ private:
     }
 
     case WM_LBUTTONDOWN: {
-
       if (!instance || !instance->root)
         return 0;
 
       int mouseX = LOWORD(lParam);
       int mouseY = HIWORD(lParam);
 
-      // Check for open dropdown overlays FIRST
-      if (checkDropdownOverlays(instance->root.get(), mouseX, mouseY)) {
+      // ✅ Check dropdown overlays FIRST (they render on top)
+      if (instance->handleDropdownOverlays(mouseX, mouseY)) {
         InvalidateRect(hwnd, NULL, FALSE);
         return 0;
       }
 
-      // Try new mouse event system first
+      // Try normal widget tree mouse event system
       if (findAndHandleMouseEvent(instance->root.get(), mouseX, mouseY,
                                   [mouseX, mouseY, instance](Widget *w) {
                                     bool handled =
                                         w->handleMouseDown(mouseX, mouseY);
                                     if (handled && w->isFocusable)
-                                      instance->setFocus(w); // ← focus on click
+                                      instance->setFocus(w);
                                     return handled;
                                   })) {
         InvalidateRect(hwnd, NULL, FALSE);
         return 0;
       }
 
-      // Clicked outside any focusable widget - clear focus
       instance->setFocus(nullptr);
 
-      // Fall back to old onClick system
       Widget *clicked = findWidgetAt(instance->root.get(), mouseX, mouseY);
       if (clicked && clicked->onClick) {
         clicked->onClick();
@@ -245,12 +221,9 @@ private:
       int mouseX = LOWORD(lParam);
       int mouseY = HIWORD(lParam);
 
-      // ✅ FIX: Check if mouse is captured
       bool hasCapturedMouse = (GetCapture() == hwnd);
 
       if (hasCapturedMouse) {
-        // Mouse is captured - broadcast to ALL widgets
-        // (one of them has the capture and needs this event)
         if (broadcastMouseEvent(instance->root.get(), mouseX, mouseY,
                                 [](Widget *w, int mx, int my) {
                                   return w->handleMouseUp(mx, my);
@@ -260,7 +233,6 @@ private:
         }
       }
 
-      // Normal path (no capture) - use bounds checking
       if (findAndHandleMouseEvent(instance->root.get(), mouseX, mouseY,
                                   [mouseX, mouseY](Widget *w) {
                                     return w->handleMouseUp(mouseX, mouseY);
@@ -277,18 +249,15 @@ private:
       int mouseX = LOWORD(lParam);
       int mouseY = HIWORD(lParam);
 
-      // Track mouse for leave detection
       TRACKMOUSEEVENT tme = {0};
       tme.cbSize = sizeof(TRACKMOUSEEVENT);
       tme.dwFlags = TME_LEAVE;
       tme.hwndTrack = hwnd;
       TrackMouseEvent(&tme);
 
-      // ✅ FIX: Check if mouse is captured
       bool hasCapturedMouse = (GetCapture() == hwnd);
 
       if (hasCapturedMouse) {
-        // Mouse is captured - broadcast to ALL widgets
         if (broadcastMouseEvent(instance->root.get(), mouseX, mouseY,
                                 [](Widget *w, int mx, int my) {
                                   return w->handleMouseMove(mx, my);
@@ -298,11 +267,9 @@ private:
         }
       }
 
-      // Normal path (no capture) - update hover states and custom handlers
       bool hoverChanged =
           updateHoverStates(instance->root.get(), mouseX, mouseY);
 
-      // Handle custom mouse move events
       bool customHandled = findAndHandleMouseEvent(
           instance->root.get(), mouseX, mouseY, [mouseX, mouseY](Widget *w) {
             return w->handleMouseMove(mouseX, mouseY);
@@ -318,7 +285,6 @@ private:
       if (!instance || !instance->root)
         return 0;
 
-      // Clear all hover states when mouse leaves window
       instance->root->clearHoverState();
       InvalidateRect(hwnd, NULL, FALSE);
       return 0;
@@ -349,7 +315,6 @@ private:
     }
 
     case WM_TIMER: {
-      // Cursor blink timer for focused text input
       if (!instance || !instance->focusedWidget)
         return 0;
 
@@ -397,19 +362,16 @@ public:
       currentInstance = nullptr;
   }
 
-  // Create a state bound to this FluxUI instance
   template <typename T> State<T> useState(T initialValue) {
     return State<T>(initialValue, this);
   }
 
-  // Get the current FluxUI instance (for State to use)
   static FluxUI *getCurrentInstance() { return currentInstance; }
 
   void setFocus(Widget *widget) {
     if (focusedWidget == widget)
       return;
 
-    // Blur old focused widget
     if (focusedWidget) {
       focusedWidget->handleFocus(false);
       invalidateWidget(focusedWidget);
@@ -417,7 +379,6 @@ public:
 
     focusedWidget = widget;
 
-    // Focus new widget
     if (focusedWidget) {
       focusedWidget->handleFocus(true);
       invalidateWidget(focusedWidget);
@@ -431,26 +392,7 @@ public:
     rebuild();
   }
 
-  void rebuild() {
-    if (!builder)
-      return;
-
-    root = builder();
-
-    if (hwnd) {
-      RECT rect;
-      GetClientRect(hwnd, &rect);
-      int width = rect.right - rect.left;
-      int height = rect.bottom - rect.top;
-
-      HDC hdc = GetDC(hwnd);
-      LayoutEngine::computeLayout(hdc, root.get(), width, height, fontCache);
-      LayoutEngine::positionWidget(root.get(), 0, 0);
-      ReleaseDC(hwnd, hdc);
-
-      InvalidateRect(hwnd, NULL, FALSE);
-    }
-  }
+  void rebuild(); // ✅ DECLARE but DON'T DEFINE here
 
   void updateWidget(Widget *widget) {
     if (!widget || !hwnd)
@@ -563,7 +505,6 @@ public:
   FontCache &getFontCache() { return fontCache; }
 };
 
-// Define static member
 inline FluxUI *FluxUI::currentInstance = nullptr;
 
 #endif // FLUX_CORE_HPP

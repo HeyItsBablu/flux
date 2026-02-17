@@ -124,8 +124,6 @@ public:
   virtual void positionChildren(int contentX, int contentY, int contentWidth,
                                 int contentHeight);
   virtual void render(HDC hdc, FontCache &fontCache);
-  virtual void renderOverlay(HDC hdc, FontCache &fontCache) {}
-  virtual bool hasOpenOverlay() const { return false; }
   void measureText(HDC hdc, FontCache &fontCache);
   void renderText(HDC hdc, FontCache &fontCache,
                   UINT format = DT_LEFT | DT_VCENTER | DT_SINGLELINE);

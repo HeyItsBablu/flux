@@ -18,6 +18,9 @@ using HoverHandler = std::function<void(bool)>;
 // ============================================================================
 
 class DropdownWidget : public Widget {
+private:
+  FluxAppWidget *fluxApp = nullptr; // Reference to app for overlay management
+
 public:
   std::vector<std::string> options;
   int selectedIndex = -1;
@@ -62,6 +65,11 @@ public:
   }
 
   // ----------------------------------------------------------------
+  // SET FLUX APP (Called during widget tree setup)
+  // ----------------------------------------------------------------
+  void setFluxApp(FluxAppWidget *app) { fluxApp = app; }
+
+  // ----------------------------------------------------------------
   // Layout
   // ----------------------------------------------------------------
   void computeLayout(HDC hdc, int availableWidth, int availableHeight,
@@ -74,7 +82,7 @@ public:
   }
 
   // ----------------------------------------------------------------
-  // Render (First Pass - Main Widget)
+  // Render (Only render the main dropdown box, not the list)
   // ----------------------------------------------------------------
   void render(HDC hdc, FontCache &fontCache) override {
     // Draw the main dropdown box
@@ -84,7 +92,6 @@ public:
     // Draw selected text or placeholder
     HFONT hFont = fontCache.getFont(fontSize, fontWeight);
     HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
-
     SetBkMode(hdc, TRANSPARENT);
 
     RECT textRect = {x + paddingLeft, y + paddingTop, x + width - paddingRight,
@@ -108,12 +115,10 @@ public:
     HPEN oldPen = (HPEN)SelectObject(hdc, arrowPen);
 
     if (isOpen) {
-      // Up arrow
       MoveToEx(hdc, arrowX - arrowSize / 2, arrowY + arrowSize / 4, nullptr);
       LineTo(hdc, arrowX, arrowY - arrowSize / 4);
       LineTo(hdc, arrowX + arrowSize / 2, arrowY + arrowSize / 4);
     } else {
-      // Down arrow
       MoveToEx(hdc, arrowX - arrowSize / 2, arrowY - arrowSize / 4, nullptr);
       LineTo(hdc, arrowX, arrowY + arrowSize / 4);
       LineTo(hdc, arrowX + arrowSize / 2, arrowY - arrowSize / 4);
@@ -121,89 +126,12 @@ public:
 
     SelectObject(hdc, oldPen);
     DeleteObject(arrowPen);
-
     SelectObject(hdc, hOldFont);
     needsPaint = false;
   }
 
   // ----------------------------------------------------------------
-  // Render Overlay (Second Pass - Dropdown List on Top)
-  // ----------------------------------------------------------------
-  void renderOverlay(HDC hdc, FontCache &fontCache) override {
-    if (!isOpen || options.empty())
-      return;
-
-    // Calculate dropdown list position and size
-    int listX = x;
-    int listY = y + height + 2;
-    int listWidth = width;
-
-    int visibleItemCount = min((int)options.size(), maxVisibleItems);
-    int listHeight = visibleItemCount * itemHeight + 2; // +2 for borders
-
-    // Draw dropdown list background and border
-    HBRUSH listBrush = CreateSolidBrush(listBgColor);
-    HPEN listPen = CreatePen(PS_SOLID, 1, listBorderColor);
-
-    HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, listBrush);
-    HPEN oldPen = (HPEN)SelectObject(hdc, listPen);
-
-    Rectangle(hdc, listX, listY, listX + listWidth, listY + listHeight);
-
-    SelectObject(hdc, oldBrush);
-    SelectObject(hdc, oldPen);
-    DeleteObject(listBrush);
-    DeleteObject(listPen);
-
-    // Set up clipping for list items
-    RECT clipRect = {listX + 1, listY + 1, listX + listWidth - 1,
-                     listY + listHeight - 1};
-    HRGN clipRgn = CreateRectRgn(clipRect.left, clipRect.top, clipRect.right,
-                                 clipRect.bottom);
-    SelectClipRgn(hdc, clipRgn);
-
-    // Draw items
-    HFONT hFont = fontCache.getFont(fontSize, fontWeight);
-    HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
-    SetBkMode(hdc, TRANSPARENT);
-
-    int startIndex = scrollOffset;
-    int endIndex = min((int)options.size(), scrollOffset + visibleItemCount);
-
-    for (int i = startIndex; i < endIndex; i++) {
-      int itemY = listY + 1 + (i - scrollOffset) * itemHeight;
-
-      // Draw item background if hovered or selected
-      if (i == hoveredItemIndex) {
-        HBRUSH hoverBrush = CreateSolidBrush(itemHoverColor);
-        RECT itemRect = {listX + 1, itemY, listX + listWidth - 1,
-                         itemY + itemHeight};
-        FillRect(hdc, &itemRect, hoverBrush);
-        DeleteObject(hoverBrush);
-      } else if (i == selectedIndex) {
-        HBRUSH selectedBrush = CreateSolidBrush(itemSelectedColor);
-        RECT itemRect = {listX + 1, itemY, listX + listWidth - 1,
-                         itemY + itemHeight};
-        FillRect(hdc, &itemRect, selectedBrush);
-        DeleteObject(selectedBrush);
-      }
-
-      // Draw item text
-      RECT textRect = {listX + 12, itemY, listX + listWidth - 12,
-                       itemY + itemHeight};
-
-      SetTextColor(hdc, RGB(30, 30, 30));
-      DrawText(hdc, options[i].c_str(), -1, &textRect,
-               DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-    }
-
-    SelectObject(hdc, hOldFont);
-    SelectClipRgn(hdc, nullptr);
-    DeleteObject(clipRgn);
-  }
-
-  // ----------------------------------------------------------------
-  // Mouse Events
+  // Mouse Events (Now register/unregister overlay with FluxApp)
   // ----------------------------------------------------------------
   bool handleMouseDown(int mx, int my) override {
     if (isOpen) {
@@ -217,7 +145,6 @@ public:
       // Check if clicked on dropdown list
       if (mx >= listX && mx < listX + listWidth && my >= listY &&
           my < listY + listHeight) {
-        // Clicked on list item
         int relativeY = my - listY - 1;
         int itemIndex = scrollOffset + (relativeY / itemHeight);
 
@@ -225,34 +152,23 @@ public:
           selectItem(itemIndex);
         }
 
-        isOpen = false;
-        hoveredItemIndex = -1;
-        markNeedsPaint();
+        closeDropdown();
         return true;
       }
 
-      // Check if clicked on the main dropdown box (to toggle closed)
+      // Check if clicked on the main dropdown box
       if (mx >= x && mx < x + width && my >= y && my < y + height) {
-        isOpen = false;
-        hoveredItemIndex = -1;
-        markNeedsPaint();
+        closeDropdown();
         return true;
       }
 
-      // Clicked outside dropdown entirely - close it
-      // IMPORTANT: Return true to consume the click and prevent
-      // it from reaching widgets behind the dropdown list
-      isOpen = false;
-      hoveredItemIndex = -1;
-      markNeedsPaint();
+      // Clicked outside - close dropdown
+      closeDropdown();
       return true;
     } else {
       // Dropdown is closed - check if clicked on main box to open
       if (mx >= x && mx < x + width && my >= y && my < y + height) {
-        isOpen = true;
-        hoveredItemIndex = -1;
-        scrollOffset = 0;
-        markNeedsPaint();
+        openDropdown();
         return true;
       }
     }
@@ -264,7 +180,6 @@ public:
     if (!isOpen)
       return false;
 
-    // Check if hovering over dropdown list
     int listX = x;
     int listY = y + height + 2;
     int listWidth = width;
@@ -323,17 +238,14 @@ public:
     case VK_RETURN:
     case VK_SPACE:
       if (isOpen) {
-        // Select the hovered item (or current selection if nothing hovered)
         int indexToSelect =
             (hoveredItemIndex >= 0) ? hoveredItemIndex : selectedIndex;
         if (indexToSelect >= 0 && indexToSelect < (int)options.size()) {
           selectItem(indexToSelect);
         }
-        isOpen = false;
-        hoveredItemIndex = -1;
+        closeDropdown();
       } else {
-        // Open dropdown and highlight current selection
-        isOpen = true;
+        openDropdown();
         hoveredItemIndex = selectedIndex;
         if (hoveredItemIndex >= 0) {
           ensureItemVisible(hoveredItemIndex);
@@ -344,8 +256,7 @@ public:
 
     case VK_ESCAPE:
       if (isOpen) {
-        isOpen = false;
-        hoveredItemIndex = -1;
+        closeDropdown();
         markNeedsPaint();
         return true;
       }
@@ -407,17 +318,12 @@ public:
 
   bool handleFocus(bool focused) override {
     isFocused = focused;
-
     if (!focused && isOpen) {
-      isOpen = false;
-      hoveredItemIndex = -1;
+      closeDropdown();
     }
-
     markNeedsPaint();
     return true;
   }
-
-  bool hasOpenOverlay() const override { return isOpen && !options.empty(); }
 
   // ----------------------------------------------------------------
   // Builder Methods
@@ -506,6 +412,116 @@ public:
 private:
   State<int> *boundIntState = nullptr;
   State<std::string> *boundStringState = nullptr;
+
+  // ----------------------------------------------------------------
+  // Open/Close Dropdown (Register/Unregister Overlay)
+  // ----------------------------------------------------------------
+  void openDropdown() {
+    if (isOpen || !fluxApp)
+      return;
+
+    isOpen = true;
+    hoveredItemIndex = -1;
+    scrollOffset = 0;
+
+    // 🎯 Register overlay with FluxApp
+    fluxApp->addOverlay(
+        this,
+        [this](HDC hdc, FontCache &fontCache) {
+          this->renderDropdownList(hdc, fontCache);
+        },
+        100 // zIndex: render on top of everything
+    );
+
+    markNeedsPaint();
+  }
+
+  void closeDropdown() {
+    if (!isOpen || !fluxApp)
+      return;
+
+    isOpen = false;
+    hoveredItemIndex = -1;
+
+    // 🎯 Unregister overlay from FluxApp
+    fluxApp->removeOverlay(this);
+
+    markNeedsPaint();
+  }
+
+  // ----------------------------------------------------------------
+  // Render Dropdown List (Called by FluxApp overlay system)
+  // ----------------------------------------------------------------
+  void renderDropdownList(HDC hdc, FontCache &fontCache) {
+    if (!isOpen || options.empty())
+      return;
+
+    // Calculate dropdown list position and size
+    int listX = x;
+    int listY = y + height + 2;
+    int listWidth = width;
+    int visibleItemCount = min((int)options.size(), maxVisibleItems);
+    int listHeight = visibleItemCount * itemHeight + 2;
+
+    // Draw dropdown list background and border
+    HBRUSH listBrush = CreateSolidBrush(listBgColor);
+    HPEN listPen = CreatePen(PS_SOLID, 1, listBorderColor);
+
+    HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, listBrush);
+    HPEN oldPen = (HPEN)SelectObject(hdc, listPen);
+
+    Rectangle(hdc, listX, listY, listX + listWidth, listY + listHeight);
+
+    SelectObject(hdc, oldBrush);
+    SelectObject(hdc, oldPen);
+    DeleteObject(listBrush);
+    DeleteObject(listPen);
+
+    // Set up clipping
+    RECT clipRect = {listX + 1, listY + 1, listX + listWidth - 1,
+                     listY + listHeight - 1};
+    HRGN clipRgn = CreateRectRgn(clipRect.left, clipRect.top, clipRect.right,
+                                 clipRect.bottom);
+    SelectClipRgn(hdc, clipRgn);
+
+    // Draw items
+    HFONT hFont = fontCache.getFont(fontSize, fontWeight);
+    HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
+    SetBkMode(hdc, TRANSPARENT);
+
+    int startIndex = scrollOffset;
+    int endIndex = min((int)options.size(), scrollOffset + visibleItemCount);
+
+    for (int i = startIndex; i < endIndex; i++) {
+      int itemY = listY + 1 + (i - scrollOffset) * itemHeight;
+
+      // Draw item background if hovered or selected
+      if (i == hoveredItemIndex) {
+        HBRUSH hoverBrush = CreateSolidBrush(itemHoverColor);
+        RECT itemRect = {listX + 1, itemY, listX + listWidth - 1,
+                         itemY + itemHeight};
+        FillRect(hdc, &itemRect, hoverBrush);
+        DeleteObject(hoverBrush);
+      } else if (i == selectedIndex) {
+        HBRUSH selectedBrush = CreateSolidBrush(itemSelectedColor);
+        RECT itemRect = {listX + 1, itemY, listX + listWidth - 1,
+                         itemY + itemHeight};
+        FillRect(hdc, &itemRect, selectedBrush);
+        DeleteObject(selectedBrush);
+      }
+
+      // Draw item text
+      RECT textRect = {listX + 12, itemY, listX + listWidth - 12,
+                       itemY + itemHeight};
+      SetTextColor(hdc, RGB(30, 30, 30));
+      DrawText(hdc, options[i].c_str(), -1, &textRect,
+               DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    }
+
+    SelectObject(hdc, hOldFont);
+    SelectClipRgn(hdc, nullptr);
+    DeleteObject(clipRgn);
+  }
 
   void selectItem(int index) {
     if (index < 0 || index >= (int)options.size())
