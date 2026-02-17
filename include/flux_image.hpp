@@ -238,12 +238,20 @@ public:
 
   // Fluent interface wrappers to return ImageWidget* for method chaining
   std::shared_ptr<ImageWidget> setWidth(int w) {
-    Widget::setWidth(w);
+    if (width != w) {
+      width = w;
+      autoWidth = false;
+      markNeedsLayout();
+    }
     return std::static_pointer_cast<ImageWidget>(shared_from_this());
   }
 
   std::shared_ptr<ImageWidget> setHeight(int h) {
-    Widget::setHeight(h);
+        if (height != h) {
+      height = h;
+      autoHeight = false;
+      markNeedsLayout();
+    }
     return std::static_pointer_cast<ImageWidget>(shared_from_this());
   }
 
@@ -266,7 +274,9 @@ public:
   //   }
 
   std::shared_ptr<ImageWidget> setPadding(int p) {
-    Widget::setPadding(p);
+    padding = p;
+    paddingLeft = paddingRight = paddingTop = paddingBottom = p;
+    markNeedsLayout();
     return std::static_pointer_cast<ImageWidget>(shared_from_this());
   }
 

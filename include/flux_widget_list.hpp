@@ -116,6 +116,42 @@ public:
     markNeedsPaint();
     return std::static_pointer_cast<TextWidget>(shared_from_this());
   }
+
+  std::shared_ptr<TextWidget> setPadding(int p) {
+    padding = p;
+    paddingLeft = paddingRight = paddingTop = paddingBottom = p;
+    markNeedsLayout();
+    return std::static_pointer_cast<TextWidget>(shared_from_this());
+  }
+
+  std::shared_ptr<TextWidget> setBackgroundColor(COLORREF color) {
+    backgroundColor = color;
+    hasBackground = true;
+    markNeedsPaint();
+    return std::static_pointer_cast<TextWidget>(shared_from_this());
+  }
+  std::shared_ptr<TextWidget> setBorderRadius(int r) {
+    borderRadius = r;
+    markNeedsPaint();
+    return std::static_pointer_cast<TextWidget>(shared_from_this());
+  }
+  std::shared_ptr<TextWidget> setMinWidth(int w) {
+    minWidth = w;
+    markNeedsLayout();
+    return std::static_pointer_cast<TextWidget>(shared_from_this());
+  }
+  std::shared_ptr<TextWidget> setWidth(int w) {
+    width = w;
+    autoWidth = false;
+    markNeedsLayout();
+    return std::static_pointer_cast<TextWidget>(shared_from_this());
+  }
+  std::shared_ptr<TextWidget> setHeight(int h) {
+    height = h;
+    autoHeight = false;
+    markNeedsLayout();
+    return std::static_pointer_cast<TextWidget>(shared_from_this());
+  }
 };
 
 // --- Button Widget ---
@@ -204,6 +240,50 @@ public:
   std::shared_ptr<ButtonWidget> setChild(WidgetPtr child) {
     children.clear();
     addChild(child);
+    return std::static_pointer_cast<ButtonWidget>(shared_from_this());
+  }
+
+  std::shared_ptr<ButtonWidget> setBackgroundColor(COLORREF color) {
+    backgroundColor = color;
+    hasBackground = true;
+    markNeedsPaint();
+    return std::static_pointer_cast<ButtonWidget>(shared_from_this());
+  }
+  std::shared_ptr<ButtonWidget> setHoverBackgroundColor(COLORREF color) {
+    hoverBackgroundColor = color;
+    hasHoverBackground = true;
+    markNeedsPaint();
+    return std::static_pointer_cast<ButtonWidget>(shared_from_this());
+  }
+  std::shared_ptr<ButtonWidget> setBorderRadius(int r) {
+    borderRadius = r;
+    markNeedsPaint();
+    return std::static_pointer_cast<ButtonWidget>(shared_from_this());
+  }
+  std::shared_ptr<ButtonWidget> setPadding(int p) {
+    paddingLeft = paddingRight = paddingTop = paddingBottom = p;
+    markNeedsLayout();
+    return std::static_pointer_cast<ButtonWidget>(shared_from_this());
+  }
+  std::shared_ptr<ButtonWidget> setWidth(int w) {
+    width = w;
+    autoWidth = false;
+    markNeedsLayout();
+    return std::static_pointer_cast<ButtonWidget>(shared_from_this());
+  }
+  std::shared_ptr<ButtonWidget> setHeight(int h) {
+    height = h;
+    autoHeight = false;
+    markNeedsLayout();
+    return std::static_pointer_cast<ButtonWidget>(shared_from_this());
+  }
+  std::shared_ptr<ButtonWidget> setTextColor(COLORREF color) {
+    textColor = color;
+    markNeedsPaint();
+    return std::static_pointer_cast<ButtonWidget>(shared_from_this());
+  }
+  std::shared_ptr<ButtonWidget> setOnClick(ClickHandler handler) {
+    onClick = handler;
     return std::static_pointer_cast<ButtonWidget>(shared_from_this());
   }
 };
@@ -308,6 +388,70 @@ public:
       currentY += child->height + (i < children.size() - 1 ? spacing : 0);
     }
   }
+
+  std::shared_ptr<ColumnWidget> setAlignment(Alignment align) {
+    if (alignment != align) {
+      alignment = align;
+      markNeedsLayout();
+    }
+    return std::static_pointer_cast<ColumnWidget>(shared_from_this());
+  }
+
+  std::shared_ptr<ColumnWidget> setCrossAlignment(Alignment align) {
+    if (crossAlignment != align) {
+      crossAlignment = align;
+      markNeedsLayout();
+    }
+    return std::static_pointer_cast<ColumnWidget>(shared_from_this());
+  }
+
+  std::shared_ptr<ColumnWidget> setMainAxisAlignment(MainAxisAlignment align) {
+    if (mainAxisAlignment != align) {
+      mainAxisAlignment = align;
+      markNeedsLayout();
+    }
+    return std::static_pointer_cast<ColumnWidget>(shared_from_this());
+  }
+
+  std::shared_ptr<ColumnWidget> setSpacing(int s) {
+    if (spacing != s) {
+      spacing = s;
+      markNeedsLayout();
+    }
+    return std::static_pointer_cast<ColumnWidget>(shared_from_this());
+  }
+
+  std::shared_ptr<ColumnWidget> setFlex(int f) {
+    if (flex != f) {
+      flex = f;
+      markNeedsLayout();
+    }
+    return std::static_pointer_cast<ColumnWidget>(shared_from_this());
+  }
+
+  std::shared_ptr<ColumnWidget> setWidth(int w) {
+    width = w;
+    autoWidth = false;
+    markNeedsLayout();
+    return std::static_pointer_cast<ColumnWidget>(shared_from_this());
+  }
+  std::shared_ptr<ColumnWidget> setHeight(int h) {
+    height = h;
+    autoHeight = false;
+    markNeedsLayout();
+    return std::static_pointer_cast<ColumnWidget>(shared_from_this());
+  }
+  std::shared_ptr<ColumnWidget> setPadding(int p) {
+    paddingLeft = paddingRight = paddingTop = paddingBottom = p;
+    markNeedsLayout();
+    return std::static_pointer_cast<ColumnWidget>(shared_from_this());
+  }
+  std::shared_ptr<ColumnWidget> setBackgroundColor(COLORREF color) {
+    backgroundColor = color;
+    hasBackground = true;
+    markNeedsPaint();
+    return std::static_pointer_cast<ColumnWidget>(shared_from_this());
+  }
 };
 
 // --- Row Widget ---
@@ -409,6 +553,70 @@ public:
 
       currentX += child->width + (i < children.size() - 1 ? spacing : 0);
     }
+  }
+
+  std::shared_ptr<RowWidget> setAlignment(Alignment align) {
+    if (alignment != align) {
+      alignment = align;
+      markNeedsLayout();
+    }
+    return std::static_pointer_cast<RowWidget>(shared_from_this());
+  }
+
+  std::shared_ptr<RowWidget> setCrossAlignment(Alignment align) {
+    if (crossAlignment != align) {
+      crossAlignment = align;
+      markNeedsLayout();
+    }
+    return std::static_pointer_cast<RowWidget>(shared_from_this());
+  }
+
+  std::shared_ptr<RowWidget> setMainAxisAlignment(MainAxisAlignment align) {
+    if (mainAxisAlignment != align) {
+      mainAxisAlignment = align;
+      markNeedsLayout();
+    }
+    return std::static_pointer_cast<RowWidget>(shared_from_this());
+  }
+
+  std::shared_ptr<RowWidget> setSpacing(int s) {
+    if (spacing != s) {
+      spacing = s;
+      markNeedsLayout();
+    }
+    return std::static_pointer_cast<RowWidget>(shared_from_this());
+  }
+
+  std::shared_ptr<RowWidget> setFlex(int f) {
+    if (flex != f) {
+      flex = f;
+      markNeedsLayout();
+    }
+    return std::static_pointer_cast<RowWidget>(shared_from_this());
+  }
+
+  std::shared_ptr<RowWidget> setWidth(int w) {
+    width = w;
+    autoWidth = false;
+    markNeedsLayout();
+    return std::static_pointer_cast<RowWidget>(shared_from_this());
+  }
+  std::shared_ptr<RowWidget> setHeight(int h) {
+    height = h;
+    autoHeight = false;
+    markNeedsLayout();
+    return std::static_pointer_cast<RowWidget>(shared_from_this());
+  }
+  std::shared_ptr<RowWidget> setPadding(int p) {
+    paddingLeft = paddingRight = paddingTop = paddingBottom = p;
+    markNeedsLayout();
+    return std::static_pointer_cast<RowWidget>(shared_from_this());
+  }
+  std::shared_ptr<RowWidget> setBackgroundColor(COLORREF color) {
+    backgroundColor = color;
+    hasBackground = true;
+    markNeedsPaint();
+    return std::static_pointer_cast<RowWidget>(shared_from_this());
   }
 };
 
@@ -520,6 +728,110 @@ public:
     markNeedsPaint();
     return std::static_pointer_cast<ContainerWidget>(shared_from_this());
   }
+
+  std::shared_ptr<ContainerWidget> setWidth(int w) {
+    if (width != w) {
+      width = w;
+      autoWidth = false;
+      markNeedsLayout();
+    }
+    return std::static_pointer_cast<ContainerWidget>(shared_from_this());
+  }
+
+  std::shared_ptr<ContainerWidget> setHeight(int h) {
+    if (height != h) {
+      height = h;
+      autoHeight = false;
+      markNeedsLayout();
+    }
+    return std::static_pointer_cast<ContainerWidget>(shared_from_this());
+  }
+
+  std::shared_ptr<ContainerWidget> setMinWidth(int w) {
+    if (minWidth != w) {
+      minWidth = w;
+      markNeedsLayout();
+    }
+    return std::static_pointer_cast<ContainerWidget>(shared_from_this());
+  }
+
+  std::shared_ptr<ContainerWidget> setMinHeight(int h) {
+    if (minHeight != h) {
+      minHeight = h;
+      markNeedsLayout();
+    }
+    return std::static_pointer_cast<ContainerWidget>(shared_from_this());
+  }
+
+  std::shared_ptr<ContainerWidget> setMaxWidth(int w) {
+    if (maxWidth != w) {
+      maxWidth = w;
+      markNeedsLayout();
+    }
+    return std::static_pointer_cast<ContainerWidget>(shared_from_this());
+  }
+
+  std::shared_ptr<ContainerWidget> setMaxHeight(int h) {
+    if (maxHeight != h) {
+      maxHeight = h;
+      markNeedsLayout();
+    }
+    return std::static_pointer_cast<ContainerWidget>(shared_from_this());
+  }
+
+  std::shared_ptr<ContainerWidget> setFlex(int f) {
+    if (flex != f) {
+      flex = f;
+      markNeedsLayout();
+    }
+    return std::static_pointer_cast<ContainerWidget>(shared_from_this());
+  }
+
+  std::shared_ptr<ContainerWidget> setPadding(int p) {
+    padding = p;
+    paddingLeft = paddingRight = paddingTop = paddingBottom = p;
+    markNeedsLayout();
+    return std::static_pointer_cast<ContainerWidget>(shared_from_this());
+  }
+
+  std::shared_ptr<ContainerWidget> setPaddingAll(int left, int top, int right,
+                                                 int bottom) {
+    paddingLeft = left;
+    paddingTop = top;
+    paddingRight = right;
+    paddingBottom = bottom;
+    padding = -1;
+    markNeedsLayout();
+    return std::static_pointer_cast<ContainerWidget>(shared_from_this());
+  }
+
+  std::shared_ptr<ContainerWidget> setMargin(int m) {
+    margin = m;
+    marginLeft = marginRight = marginTop = marginBottom = m;
+    markNeedsLayout();
+    return std::static_pointer_cast<ContainerWidget>(shared_from_this());
+  }
+
+  std::shared_ptr<ContainerWidget> setMarginAll(int left, int top, int right,
+                                                int bottom) {
+    marginLeft = left;
+    marginTop = top;
+    marginRight = right;
+    marginBottom = bottom;
+    margin = -1;
+    markNeedsLayout();
+    return std::static_pointer_cast<ContainerWidget>(shared_from_this());
+  }
+
+  std::shared_ptr<ContainerWidget> setOnClick(ClickHandler handler) {
+    onClick = handler;
+    return std::static_pointer_cast<ContainerWidget>(shared_from_this());
+  }
+
+  std::shared_ptr<ContainerWidget> setOnHover(HoverHandler handler) {
+    onHover = handler;
+    return std::static_pointer_cast<ContainerWidget>(shared_from_this());
+  }
 };
 
 // --- Center Widget ---
@@ -597,6 +909,18 @@ public:
 
     applyConstraints();
     needsLayout = false;
+  }
+
+  std::shared_ptr<ExpandedWidget> setPadding(int p) {
+    paddingLeft = paddingRight = paddingTop = paddingBottom = p;
+    markNeedsLayout();
+    return std::static_pointer_cast<ExpandedWidget>(shared_from_this());
+  }
+  std::shared_ptr<ExpandedWidget> setBackgroundColor(COLORREF color) {
+    backgroundColor = color;
+    hasBackground = true;
+    markNeedsPaint();
+    return std::static_pointer_cast<ExpandedWidget>(shared_from_this());
   }
 };
 
@@ -700,6 +1024,23 @@ template <typename T> inline TextWidgetPtr Text(State<T> &state) {
   return w;
 }
 
+template <typename T>
+inline TextWidgetPtr Text(State<T> &state, const std::string &trueText,
+                          const std::string &falseText) {
+  auto w = std::make_shared<TextWidget>();
+  w->text = state.get() ? trueText : falseText;
+
+  state.bindProperty(
+      w,
+      [trueText, falseText](Widget *widget, const T &val) {
+        widget->text = val ? trueText : falseText;
+      },
+      true // needs layout — text content changes
+  );
+
+  return w;
+}
+
 inline WidgetPtr Button(const std::string &text,
                         ClickHandler onClick = nullptr) {
   auto w = std::make_shared<ButtonWidget>();
@@ -732,13 +1073,17 @@ inline WidgetPtr Button(WidgetPtr child, ClickHandler onClick = nullptr) {
   return w;
 }
 
-template <typename... Widgets> WidgetPtr Row(Widgets... widgets) {
+using RowWidgetPtr = std::shared_ptr<RowWidget>;
+
+template <typename... Widgets> RowWidgetPtr Row(Widgets... widgets) {
   auto w = std::make_shared<RowWidget>();
   (w->addChild(widgets), ...);
   return w;
 }
 
-template <typename... Widgets> WidgetPtr Column(Widgets... widgets) {
+using ColumnWidgetPtr = std::shared_ptr<ColumnWidget>;
+
+template <typename... Widgets> ColumnWidgetPtr Column(Widgets... widgets) {
   auto w = std::make_shared<ColumnWidget>();
   (w->addChild(widgets), ...);
   return w;
@@ -815,7 +1160,7 @@ inline WidgetPtr AppBar(const std::string &title) {
                          ->setFontSize(20)
                          ->setFontWeight(FontWeight::Bold)
                          ->setTextColor(RGB(255, 255, 255))
-                         ->setPadding(16);
+                         ->setPadding(20);
 
   w->addChild(titleWidget);
 

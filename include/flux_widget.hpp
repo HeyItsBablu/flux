@@ -200,97 +200,6 @@ public:
   void markNeedsPaint() { needsPaint = true; }
 
   // Builder pattern methods
-  WidgetPtr setWidth(int w) {
-    if (width != w) {
-      width = w;
-      autoWidth = false;
-      markNeedsLayout();
-    }
-    return shared_from_this();
-  }
-
-  WidgetPtr setHeight(int h) {
-    if (height != h) {
-      height = h;
-      autoHeight = false;
-      markNeedsLayout();
-    }
-    return shared_from_this();
-  }
-
-  WidgetPtr setMinWidth(int w) {
-    if (minWidth != w) {
-      minWidth = w;
-      markNeedsLayout();
-    }
-    return shared_from_this();
-  }
-
-  WidgetPtr setMinHeight(int h) {
-    if (minHeight != h) {
-      minHeight = h;
-      markNeedsLayout();
-    }
-    return shared_from_this();
-  }
-
-  WidgetPtr setMaxWidth(int w) {
-    if (maxWidth != w) {
-      maxWidth = w;
-      markNeedsLayout();
-    }
-    return shared_from_this();
-  }
-
-  WidgetPtr setMaxHeight(int h) {
-    if (maxHeight != h) {
-      maxHeight = h;
-      markNeedsLayout();
-    }
-    return shared_from_this();
-  }
-
-  WidgetPtr setFlex(int f) {
-    if (flex != f) {
-      flex = f;
-      markNeedsLayout();
-    }
-    return shared_from_this();
-  }
-
-  WidgetPtr setPadding(int p) {
-    padding = p;
-    paddingLeft = paddingRight = paddingTop = paddingBottom = p;
-    markNeedsLayout();
-    return shared_from_this();
-  }
-
-  WidgetPtr setPaddingAll(int left, int top, int right, int bottom) {
-    paddingLeft = left;
-    paddingTop = top;
-    paddingRight = right;
-    paddingBottom = bottom;
-    padding = -1;
-    markNeedsLayout();
-    return shared_from_this();
-  }
-
-  WidgetPtr setMargin(int m) {
-    margin = m;
-    marginLeft = marginRight = marginTop = marginBottom = m;
-    markNeedsLayout();
-    return shared_from_this();
-  }
-
-  WidgetPtr setMarginAll(int left, int top, int right, int bottom) {
-    marginLeft = left;
-    marginTop = top;
-    marginRight = right;
-    marginBottom = bottom;
-    margin = -1;
-    markNeedsLayout();
-    return shared_from_this();
-  }
 
   WidgetPtr setOnClick(ClickHandler handler) {
     onClick = handler;
@@ -299,38 +208,6 @@ public:
 
   WidgetPtr setOnHover(HoverHandler handler) {
     onHover = handler;
-    return shared_from_this();
-  }
-
-  WidgetPtr setAlignment(Alignment align) {
-    if (alignment != align) {
-      alignment = align;
-      markNeedsLayout();
-    }
-    return shared_from_this();
-  }
-
-  WidgetPtr setCrossAlignment(Alignment align) {
-    if (crossAlignment != align) {
-      crossAlignment = align;
-      markNeedsLayout();
-    }
-    return shared_from_this();
-  }
-
-  WidgetPtr setMainAxisAlignment(MainAxisAlignment align) {
-    if (mainAxisAlignment != align) {
-      mainAxisAlignment = align;
-      markNeedsLayout();
-    }
-    return shared_from_this();
-  }
-
-  WidgetPtr setSpacing(int s) {
-    if (spacing != s) {
-      spacing = s;
-      markNeedsLayout();
-    }
     return shared_from_this();
   }
 

@@ -327,10 +327,10 @@ public:
     rebuildList();
     // Always constrain to available space — parent knows best
     if (autoHeight || height > availableHeight) {
-        height = availableHeight;
+      height = availableHeight;
     }
     if (autoWidth || width > availableWidth) {
-        width = availableWidth;
+      width = availableWidth;
     }
 
     viewportHeight = height - paddingTop - paddingBottom;
@@ -465,6 +465,14 @@ public:
   std::shared_ptr<ListViewBuilder<T>> setScrollbarWidth(int width) {
     scrollbarWidth = width;
     return self;
+  }
+
+  std::shared_ptr<ListViewBuilder<T>> setSpacing(int s) {
+    if (spacing != s) {
+      spacing = s;
+      markNeedsLayout();
+    }
+    return std::static_pointer_cast<ListViewBuilder<T>>(shared_from_this());
   }
 };
 
