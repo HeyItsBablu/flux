@@ -325,9 +325,15 @@ public:
   void computeLayout(HDC hdc, int availableWidth, int availableHeight,
                      FontCache &fontCache) override {
     rebuildList();
+    // Always constrain to available space — parent knows best
+    if (autoHeight || height > availableHeight) {
+        height = availableHeight;
+    }
+    if (autoWidth || width > availableWidth) {
+        width = availableWidth;
+    }
 
-    viewportHeight = availableHeight - paddingTop - paddingBottom;
-
+    viewportHeight = height - paddingTop - paddingBottom;
     int contentWidth = availableWidth - paddingLeft - paddingRight;
     int totalHeight = 0;
     int maxWidth = 0;

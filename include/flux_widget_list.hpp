@@ -417,11 +417,20 @@ class ContainerWidget : public Widget {
 public:
   void computeLayout(HDC hdc, int availableWidth, int availableHeight,
                      FontCache &fontCache) override {
-    int contentWidth = availableWidth - paddingLeft - paddingRight;
-    int contentHeight = availableHeight - paddingTop - paddingBottom;
+    // Resolve own size first
+    if (autoWidth)
+      width = availableWidth;
+    if (autoHeight)
+      height = availableHeight;
+
+    // Now content is derived from OUR size, not parent's offer
+    int contentWidth = width - paddingLeft - paddingRight;
+    int contentHeight = height - paddingTop - paddingBottom;
 
     if (!children.empty()) {
       children[0]->computeLayout(hdc, contentWidth, contentHeight, fontCache);
+
+      // Only shrink-wrap if auto-sizing
       if (autoWidth)
         width = children[0]->width + paddingLeft + paddingRight;
       if (autoHeight)
@@ -518,17 +527,18 @@ class CenterWidget : public Widget {
 public:
   void computeLayout(HDC hdc, int availableWidth, int availableHeight,
                      FontCache &fontCache) override {
-    int contentWidth = availableWidth - paddingLeft - paddingRight;
-    int contentHeight = availableHeight - paddingTop - paddingBottom;
-
-    if (!children.empty()) {
-      children[0]->computeLayout(hdc, contentWidth, contentHeight, fontCache);
-    }
-
+    // Resolve own size first
     if (autoWidth)
       width = availableWidth;
     if (autoHeight)
       height = availableHeight;
+
+    int contentWidth = width - paddingLeft - paddingRight;
+    int contentHeight = height - paddingTop - paddingBottom;
+
+    if (!children.empty()) {
+      children[0]->computeLayout(hdc, contentWidth, contentHeight, fontCache);
+    }
 
     applyConstraints();
     needsLayout = false;
@@ -576,15 +586,15 @@ public:
 
   void computeLayout(HDC hdc, int availableWidth, int availableHeight,
                      FontCache &fontCache) override {
+    // Width/height were pre-set by Row/Column — don't shrink-wrap
+    int contentWidth = width - paddingLeft - paddingRight;
+    int contentHeight = height - paddingTop - paddingBottom;
+
     if (!children.empty()) {
-      children[0]->computeLayout(hdc, width - paddingLeft - paddingRight,
-                                 height - paddingTop - paddingBottom,
-                                 fontCache);
-      if (autoWidth)
-        width = children[0]->width + paddingLeft + paddingRight;
-      if (autoHeight)
-        height = children[0]->height + paddingTop + paddingBottom;
+      children[0]->computeLayout(hdc, contentWidth, contentHeight, fontCache);
+      // Do NOT re-assign width/height here — keep the expanded size
     }
+
     applyConstraints();
     needsLayout = false;
   }
@@ -666,7 +676,9 @@ public:
 // WIDGET FACTORY FUNCTIONS
 // ============================================================================
 
-inline WidgetPtr Container(WidgetPtr child = nullptr) {
+using ContainerWidgetPtr = std::shared_ptr<ContainerWidget>;
+
+inline ContainerWidgetPtr Container(WidgetPtr child = nullptr) {
   auto w = std::make_shared<ContainerWidget>();
   if (child)
     w->addChild(child);
