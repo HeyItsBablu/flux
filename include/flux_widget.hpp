@@ -118,6 +118,12 @@ public:
 
   virtual bool isExpanded() const { return false; }
 
+  virtual void onDetach() {
+    // Propagate to children so the whole sub-tree is cleaned up
+    for (auto &child : children)
+      child->onDetach();
+  }
+
   // Virtual methods - Override these in subclasses
   virtual void computeLayout(HDC hdc, int availableWidth, int availableHeight,
                              FontCache &fontCache);
@@ -198,9 +204,6 @@ public:
   }
 
   void markNeedsPaint() { needsPaint = true; }
-
-
-
 
   WidgetPtr setId(const std::string &i) {
     id = i;

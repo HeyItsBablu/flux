@@ -515,6 +515,7 @@ public:
     return Scaffold(
         AppBar("FluxUI Widget Tests"),
         Column(
+            Tooltip(Button("Hover me", [] {}), "Click to submit"),
             // Controls bar
             Container(
                 Row(Text("Counter: ")->setFontSize(13),

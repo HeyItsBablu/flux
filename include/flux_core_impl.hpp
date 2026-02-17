@@ -5,6 +5,7 @@
 #include "flux_core.hpp"
 #include "flux_dialog.hpp"
 #include "flux_dropdown.hpp"
+#include "flux_tooltip.hpp"
 
 // ============================================================================
 // FLUXUI METHOD IMPLEMENTATIONS
@@ -14,7 +15,7 @@
 // wireFluxAppToWidgets
 // Walk the entire widget tree and hand every overlay-capable widget a pointer
 // to the FluxAppWidget so they can call addOverlay / removeOverlay.
-// Add new widget types here as they are introduced (tooltip, context menu…).
+// Add new widget types here as they are introduced.
 // ----------------------------------------------------------------------------
 
 inline void FluxUI::wireFluxAppToWidgets(FluxAppWidget *fluxApp,
@@ -28,9 +29,10 @@ inline void FluxUI::wireFluxAppToWidgets(FluxAppWidget *fluxApp,
   if (auto *dialog = dynamic_cast<DialogWidget *>(widget))
     dialog->setFluxApp(fluxApp);
 
-  // Future widgets that need overlay access go here, e.g.:
-  //   if (auto *tooltip = dynamic_cast<TooltipWidget *>(widget))
-  //       tooltip->setFluxApp(fluxApp);
+  if (auto *tooltip = dynamic_cast<TooltipWidget *>(widget))
+    tooltip->setFluxApp(fluxApp);
+
+  // Future overlay-capable widgets go here, e.g.:
   //   if (auto *ctxMenu = dynamic_cast<ContextMenuWidget *>(widget))
   //       ctxMenu->setFluxApp(fluxApp);
 
@@ -49,20 +51,11 @@ static inline FluxAppWidget *getFluxApp(const WidgetPtr &root) {
 
 // ============================================================================
 // UNIFIED OVERLAY DISPATCHERS
-//
-// All overlay hit-testing goes through these three functions.
-// They iterate the overlay stack in REVERSE zIndex order (highest first) so
-// the topmost rendered widget always wins input.
-//
-// Adding a new overlay type (tooltip, context menu, etc.) requires ZERO
-// changes here — as long as the widget registers itself via addOverlay and
-// implements the relevant handleXxx virtual, it just works.
 // ============================================================================
 
 // ----------------------------------------------------------------------------
-// handleOverlayMouseDown
-// Called from WM_LBUTTONDOWN before the normal widget tree.
-// Returns true if an overlay consumed the event.
+// handleDropdownOverlays — unified mouse-down dispatcher for ALL overlays.
+// Iterates highest zIndex first so topmost overlay wins.
 // ----------------------------------------------------------------------------
 inline bool FluxUI::handleDropdownOverlays(int mouseX, int mouseY) {
   FluxAppWidget *fluxApp = getFluxApp(root);
@@ -71,7 +64,6 @@ inline bool FluxUI::handleDropdownOverlays(int mouseX, int mouseY) {
 
   const auto &stack = fluxApp->getOverlayStack();
 
-  // Iterate highest zIndex first — topmost overlay wins
   for (auto it = stack.rbegin(); it != stack.rend(); ++it) {
     if (it->widget && it->widget->handleMouseDown(mouseX, mouseY))
       return true;
@@ -81,27 +73,17 @@ inline bool FluxUI::handleDropdownOverlays(int mouseX, int mouseY) {
 }
 
 // ----------------------------------------------------------------------------
-// handleOverlayMouseMove
-// Called from WM_MOUSEMOVE before the normal widget tree.
-// Needed for tooltips (show on hover) and context menu hover highlight.
-// Returns true if an overlay consumed the event.
+// handleDialogOverlays — no-op stub kept for source compatibility.
+// All overlay mouse-down routing goes through handleDropdownOverlays above.
 // ----------------------------------------------------------------------------
-// NOTE: reusing the "dialog overlays" slot for the unified mouse-move path.
-// Both functions are called from WindowProc; we keep the names from the header
-// to avoid changing flux_core.hpp's private declarations, but the
-// implementation is now fully unified.
 inline bool FluxUI::handleDialogOverlays(int mouseX, int mouseY) {
-  // This function is intentionally left as a no-op here.
-  // Mouse-move overlay routing is handled inside WM_MOUSEMOVE directly
-  // via handleOverlayMouseMove (see WindowProc).
-  // Keeping the symbol to satisfy the declaration in flux_core.hpp.
   (void)mouseX;
   (void)mouseY;
   return false;
 }
 
 // ----------------------------------------------------------------------------
-// handleOverlayMouseMove  (new — called from WM_MOUSEMOVE in WindowProc)
+// handleOverlayMouseMove — called from WM_MOUSEMOVE.
 // ----------------------------------------------------------------------------
 inline bool FluxUI::handleOverlayMouseMove(int mouseX, int mouseY) {
   FluxAppWidget *fluxApp = getFluxApp(root);
@@ -119,7 +101,7 @@ inline bool FluxUI::handleOverlayMouseMove(int mouseX, int mouseY) {
 }
 
 // ----------------------------------------------------------------------------
-// handleOverlayMouseWheel  (new — called from WM_MOUSEWHEEL in WindowProc)
+// handleOverlayMouseWheel — called from WM_MOUSEWHEEL.
 // ----------------------------------------------------------------------------
 inline bool FluxUI::handleOverlayMouseWheel(int delta) {
   FluxAppWidget *fluxApp = getFluxApp(root);
@@ -137,16 +119,15 @@ inline bool FluxUI::handleOverlayMouseWheel(int delta) {
 }
 
 // ----------------------------------------------------------------------------
-// handleOverlayKeyDown  (new — called from WM_KEYDOWN in WindowProc)
-// Sends key events to the topmost overlay first (e.g. Escape closes a
-// context menu before it reaches the focused text field behind it).
+// handleOverlayKeyDown — called from WM_KEYDOWN.
+// Only the topmost overlay receives keyboard events (e.g. Escape closes a
+// context menu before it reaches the text field behind it).
 // ----------------------------------------------------------------------------
 inline bool FluxUI::handleOverlayKeyDown(int keyCode) {
   FluxAppWidget *fluxApp = getFluxApp(root);
   if (!fluxApp || !fluxApp->hasOverlays())
     return false;
 
-  // Only the topmost overlay receives keyboard events
   Widget *top = fluxApp->getTopmostOverlay();
   if (top)
     return top->handleKeyDown(keyCode);
@@ -156,9 +137,7 @@ inline bool FluxUI::handleOverlayKeyDown(int keyCode) {
 
 // ----------------------------------------------------------------------------
 // checkDropdownOverlays / checkDialogOverlays
-// These two were the old per-type tree-walk hit-testers.
-// They are kept as empty stubs so flux_core.hpp compiles without changes.
-// All real work now goes through handleDropdownOverlays (unified above).
+// Legacy empty stubs — all real work goes through handleDropdownOverlays.
 // ----------------------------------------------------------------------------
 inline bool FluxUI::checkDropdownOverlays(Widget *, int, int) { return false; }
 inline bool FluxUI::checkDialogOverlays(Widget *, int, int) { return false; }
@@ -170,6 +149,22 @@ inline bool FluxUI::checkDialogOverlays(Widget *, int, int) { return false; }
 inline void FluxUI::rebuild() {
   if (!builder)
     return;
+
+  // ── Fix: detach the old tree before dropping it ─────────────────────────
+  // onDetach() propagates through the entire widget tree so every overlay-
+  // capable widget (Dropdown, Tooltip, Dialog, …) calls removeOverlay on
+  // itself.  This guarantees the FluxAppWidget's overlay stack is empty and
+  // contains no dangling pointers before we build the new tree.
+  if (root) {
+    root->onDetach();
+
+    // If root is a FluxAppWidget, belt-and-suspenders clear of the stack.
+    // onDetach() should have already emptied it, but this guards against any
+    // widget that forgot to call fluxApp->removeOverlay in its onDetach().
+    if (auto *fluxApp = dynamic_cast<FluxAppWidget *>(root.get()))
+      fluxApp->clearOverlays();
+  }
+  // ────────────────────────────────────────────────────────────────────────
 
   root = builder();
 
