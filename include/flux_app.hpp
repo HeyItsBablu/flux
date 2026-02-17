@@ -3,7 +3,7 @@
 
 #include "flux_widget_list.hpp"
 #include <string>
-#include <algorithm> 
+#include <algorithm>
 
 // ============================================================================
 // APP THEME - Similar to Flutter's ThemeData
@@ -50,9 +50,7 @@ struct AppTheme {
   int buttonPaddingV = 10;
 
   // Static themes
-  static AppTheme light() {
-    return AppTheme(); // Default is light theme
-  }
+  static AppTheme light() { return AppTheme(); }
 
   static AppTheme dark() {
     AppTheme theme;
@@ -98,15 +96,13 @@ private:
 
 public:
   static void setTheme(const AppTheme &theme) { currentTheme = theme; }
-
   static AppTheme &getTheme() { return currentTheme; }
 };
 
-// Initialize static member
 inline AppTheme ThemeProvider::currentTheme = AppTheme::light();
 
 // ============================================================================
-// THEMED WIDGET FACTORIES (Use theme colors automatically)
+// THEMED WIDGET FACTORIES
 // ============================================================================
 
 inline WidgetPtr ThemedAppBar(const std::string &title) {
@@ -163,13 +159,20 @@ inline WidgetPtr ThemedCard(WidgetPtr child) {
 }
 
 // ============================================================================
-// OVERLAY ENTRY - Represents a widget that renders on top
+// OVERLAY ENTRY
 // ============================================================================
 
+// zIndex convention:
+//   50  = Tooltip
+//   100 = Dropdown list
+//   150 = Context menu
+//   200 = Dialog (backdrop + box)
+//   300 = Dialog-internal dropdown / context menu
+
 struct OverlayEntry {
-  Widget *widget;
+  Widget *widget = nullptr;
   std::function<void(HDC, FontCache &)> renderer;
-  int zIndex = 0; // Higher = renders later (on top)
+  int zIndex = 0;
 
   OverlayEntry(Widget *w, std::function<void(HDC, FontCache &)> r, int z = 0)
       : widget(w), renderer(r), zIndex(z) {}
@@ -181,6 +184,9 @@ struct OverlayEntry {
 
 class FluxAppWidget : public Widget {
 private:
+  // Overlay stack is kept sorted ascending by zIndex at all times.
+  // Render order:  front → back  (lowest zIndex first, highest last = on top)
+  // Hit-test order: back → front (highest zIndex first = topmost widget wins)
   std::vector<OverlayEntry> overlayStack;
 
 public:
@@ -191,10 +197,7 @@ public:
 
   FluxAppWidget(const std::string &appTitle, WidgetPtr homeWidget)
       : title(appTitle), home(homeWidget), theme(AppTheme::light()) {
-    // Set global theme
     ThemeProvider::setTheme(theme);
-
-    // Add home as child
     if (home) {
       addChild(home);
     }
@@ -207,24 +210,30 @@ public:
   void addOverlay(Widget *widget,
                   std::function<void(HDC, FontCache &)> renderer,
                   int zIndex = 0) {
+    // Avoid duplicate registrations
+    for (auto &entry : overlayStack) {
+      if (entry.widget == widget) {
+        // Update renderer/zIndex in place then re-sort
+        entry.renderer = renderer;
+        entry.zIndex = zIndex;
+        sortOverlayStack();
+        markNeedsPaint();
+        return;
+      }
+    }
+
     overlayStack.emplace_back(widget, renderer, zIndex);
-
-    // Sort by zIndex (lower zIndex renders first, higher renders on top)
-    std::sort(overlayStack.begin(), overlayStack.end(),
-              [](const OverlayEntry &a, const OverlayEntry &b) {
-                return a.zIndex < b.zIndex;
-              });
-
+    sortOverlayStack();
     markNeedsPaint();
   }
 
   void removeOverlay(Widget *widget) {
-    overlayStack.erase(std::remove_if(overlayStack.begin(), overlayStack.end(),
-                                      [widget](const OverlayEntry &entry) {
-                                        return entry.widget == widget;
-                                      }),
-                       overlayStack.end());
-
+    overlayStack.erase(
+        std::remove_if(overlayStack.begin(), overlayStack.end(),
+                       [widget](const OverlayEntry &e) {
+                         return e.widget == widget;
+                       }),
+        overlayStack.end());
     markNeedsPaint();
   }
 
@@ -234,6 +243,22 @@ public:
   }
 
   bool hasOverlays() const { return !overlayStack.empty(); }
+
+  // Read-only access for FluxUI's unified hit-test dispatcher
+  const std::vector<OverlayEntry> &getOverlayStack() const {
+    return overlayStack;
+  }
+
+  // Returns the topmost (highest zIndex) overlay widget, or nullptr
+  Widget *getTopmostOverlay() const {
+    if (overlayStack.empty())
+      return nullptr;
+    return overlayStack.back().widget; // back = highest zIndex (sorted asc)
+  }
+
+  // ----------------------------------------------------------------
+  // LAYOUT
+  // ----------------------------------------------------------------
 
   void computeLayout(HDC hdc, int availableWidth, int availableHeight,
                      FontCache &fontCache) override {
@@ -256,7 +281,6 @@ public:
       auto &child = children[0];
       child->x = contentX;
       child->y = contentY;
-
       child->positionChildren(
           child->x + child->paddingLeft, child->y + child->paddingTop,
           child->width - child->paddingLeft - child->paddingRight,
@@ -264,24 +288,28 @@ public:
     }
   }
 
+  // ----------------------------------------------------------------
+  // RENDER
+  // ----------------------------------------------------------------
+
   void render(HDC hdc, FontCache &fontCache) override {
-    // Apply background color from theme
+    // Background
     HBRUSH bgBrush = CreateSolidBrush(theme.backgroundColor);
     RECT bgRect = {x, y, x + width, y + height};
     FillRect(hdc, &bgRect, bgBrush);
     DeleteObject(bgBrush);
 
-    // Render children
+    // Normal widget tree
     if (!children.empty()) {
       children[0]->render(hdc, fontCache);
     }
 
-    // RENDER OVERLAYS ON TOP (sorted by zIndex)
+    // Overlays in ascending zIndex order (lowest first, highest last = on top)
     for (const auto &entry : overlayStack) {
-      entry.renderer(hdc, fontCache);
+      if (entry.renderer)
+        entry.renderer(hdc, fontCache);
     }
 
-    // Debug: Draw widget bounds
     if (debugShowWidgetBounds) {
       drawDebugBounds(hdc);
     }
@@ -290,10 +318,14 @@ public:
   }
 
 private:
-  void drawDebugBounds(HDC hdc) {
-    // Draw red outline around all widgets for debugging
-    drawWidgetBounds(hdc, this);
+  void sortOverlayStack() {
+    std::stable_sort(overlayStack.begin(), overlayStack.end(),
+                     [](const OverlayEntry &a, const OverlayEntry &b) {
+                       return a.zIndex < b.zIndex;
+                     });
   }
+
+  void drawDebugBounds(HDC hdc) { drawWidgetBounds(hdc, this); }
 
   void drawWidgetBounds(HDC hdc, Widget *w) {
     if (!w)
@@ -316,37 +348,16 @@ private:
 };
 
 // ============================================================================
-// FLUX APP FACTORY FUNCTION
+// FLUX APP FACTORY
 // ============================================================================
 
-/**
- * @brief Create a FluxApp (similar to MaterialApp in Flutter)
- *
- * @param title Window title
- * @param home Root widget
- * @param theme Optional theme (defaults to light theme)
- * @param debugShowWidgetBounds Show red outlines around widgets for debugging
- *
- * @example
- * return FluxApp("My App",
- *     Scaffold(
- *         ThemedAppBar("Home"),
- *         Center(Text("Hello World"))
- *     ),
- *     AppTheme::dark(),
- *     false  // debugShowWidgetBounds
- * );
- */
 inline WidgetPtr FluxApp(const std::string &title, WidgetPtr home,
                          const AppTheme &theme = AppTheme::light(),
                          bool debugShowWidgetBounds = false) {
   auto app = std::make_shared<FluxAppWidget>(title, home);
   app->theme = theme;
   app->debugShowWidgetBounds = debugShowWidgetBounds;
-
-  // Set global theme
   ThemeProvider::setTheme(theme);
-
   return app;
 }
 

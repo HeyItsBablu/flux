@@ -62,10 +62,13 @@ private:
 
   Widget *focusedWidget = nullptr;
 
+  // ----------------------------------------------------------------
+  // Back-buffer management
+  // ----------------------------------------------------------------
+
   void createBackBuffer(int width, int height) {
-    if (hdcMem && (width != bufferWidth || height != bufferHeight)) {
+    if (hdcMem && (width != bufferWidth || height != bufferHeight))
       destroyBackBuffer();
-    }
 
     if (!hdcMem) {
       HDC hdc = GetDC(hwnd);
@@ -73,7 +76,6 @@ private:
       hbmMem = CreateCompatibleBitmap(hdc, width, height);
       hbmOld = (HBITMAP)SelectObject(hdcMem, hbmMem);
       ReleaseDC(hwnd, hdc);
-
       bufferWidth = width;
       bufferHeight = height;
     }
@@ -90,20 +92,33 @@ private:
     }
   }
 
-  bool handleDropdownOverlays(int mouseX, int mouseY) {
-    // Traverse widget tree looking for open dropdowns
-    return checkDropdownOverlays(root.get(), mouseX, mouseY);
-  }
+  // ----------------------------------------------------------------
+  // OVERLAY DISPATCHERS (declarations — defined in flux_core_impl.hpp)
+  // ----------------------------------------------------------------
 
+  // Unified mouse-down dispatcher: iterates overlay stack highest-zIndex first.
+  // Replaces the old per-type checkDropdownOverlays / checkDialogOverlays tree
+  // walks. Called from WM_LBUTTONDOWN before the normal widget tree.
+  bool handleDropdownOverlays(int mouseX, int mouseY);
+
+  // Kept for linker compatibility; implementation is a no-op stub.
+  bool handleDialogOverlays(int mouseX, int mouseY);
+
+  // NEW: overlay routing for move, wheel, and keyboard.
+  bool handleOverlayMouseMove(int mouseX, int mouseY);
+  bool handleOverlayMouseWheel(int delta);
+  bool handleOverlayKeyDown(int keyCode);
+
+  // Legacy tree-walk stubs (no-op, kept so flux_core.hpp compiles unchanged).
   bool checkDropdownOverlays(Widget *widget, int mouseX, int mouseY);
-
-  bool handleDialogOverlays(int mouseX, int mouseY) {
-    // Traverse widget tree looking for open dropdowns
-    return checkDialogOverlays(root.get(), mouseX, mouseY);
-  }
-
   bool checkDialogOverlays(Widget *widget, int mouseX, int mouseY);
+
+  // Wire FluxAppWidget pointer into every overlay-capable widget in the tree.
   void wireFluxAppToWidgets(FluxAppWidget *fluxApp, Widget *widget);
+
+  // ----------------------------------------------------------------
+  // WINDOW PROCEDURE
+  // ----------------------------------------------------------------
 
   static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam,
                                      LPARAM lParam) {
@@ -111,6 +126,8 @@ private:
         reinterpret_cast<FluxUI *>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
 
     switch (uMsg) {
+
+    // ----------------------------------------------------------------
     case WM_CREATE: {
       CREATESTRUCT *pCreate = reinterpret_cast<CREATESTRUCT *>(lParam);
       instance = reinterpret_cast<FluxUI *>(pCreate->lpCreateParams);
@@ -119,6 +136,7 @@ private:
       return 0;
     }
 
+    // ----------------------------------------------------------------
     case WM_PAINT: {
       if (!instance || !instance->root) {
         PAINTSTRUCT ps;
@@ -150,6 +168,7 @@ private:
       return 0;
     }
 
+    // ----------------------------------------------------------------
     case WM_SIZE: {
       if (instance && instance->root) {
         RECT rect;
@@ -168,6 +187,7 @@ private:
       return 0;
     }
 
+    // ----------------------------------------------------------------
     case WM_MOUSEWHEEL: {
       if (!instance || !instance->root)
         return 0;
@@ -179,6 +199,13 @@ private:
       POINT pt = {x, y};
       ScreenToClient(hwnd, &pt);
 
+      // 1. Overlays get wheel events first (e.g. scrollable dropdown list)
+      if (instance->handleOverlayMouseWheel(delta)) {
+        InvalidateRect(hwnd, NULL, FALSE);
+        return 0;
+      }
+
+      // 2. Normal widget tree
       if (findAndHandleMouseEvent(
               instance->root.get(), pt.x, pt.y,
               [delta](Widget *w) { return w->handleMouseWheel(delta); })) {
@@ -187,6 +214,7 @@ private:
       return 0;
     }
 
+    // ----------------------------------------------------------------
     case WM_LBUTTONDOWN: {
       if (!instance || !instance->root)
         return 0;
@@ -194,18 +222,15 @@ private:
       int mouseX = LOWORD(lParam);
       int mouseY = HIWORD(lParam);
 
-      //  Check dropdown overlays FIRST (they render on top)
+      // 1. Unified overlay hit-test (highest zIndex wins)
+      //    handleDropdownOverlays is now the unified dispatcher for ALL overlays.
+      //    handleDialogOverlays is a no-op stub kept for source compatibility.
       if (instance->handleDropdownOverlays(mouseX, mouseY)) {
         InvalidateRect(hwnd, NULL, FALSE);
         return 0;
       }
 
-      if (instance->handleDialogOverlays(mouseX, mouseY)) {
-        InvalidateRect(hwnd, NULL, FALSE);
-        return 0;
-      }
-
-      // Try normal widget tree mouse event system
+      // 2. Normal widget tree — handleMouseDown
       if (findAndHandleMouseEvent(instance->root.get(), mouseX, mouseY,
                                   [mouseX, mouseY, instance](Widget *w) {
                                     bool handled =
@@ -218,8 +243,10 @@ private:
         return 0;
       }
 
+      // 3. Click landed on no interactive widget — clear focus
       instance->setFocus(nullptr);
 
+      // 4. Fallback onClick
       Widget *clicked = findWidgetAt(instance->root.get(), mouseX, mouseY);
       if (clicked && clicked->onClick) {
         clicked->onClick();
@@ -228,6 +255,7 @@ private:
       return 0;
     }
 
+    // ----------------------------------------------------------------
     case WM_LBUTTONUP: {
       if (!instance || !instance->root)
         return 0;
@@ -256,6 +284,7 @@ private:
       return 0;
     }
 
+    // ----------------------------------------------------------------
     case WM_MOUSEMOVE: {
       if (!instance || !instance->root)
         return 0;
@@ -271,6 +300,7 @@ private:
 
       bool hasCapturedMouse = (GetCapture() == hwnd);
 
+      // 1. Captured-mouse broadcast (e.g. drag operations)
       if (hasCapturedMouse) {
         if (broadcastMouseEvent(instance->root.get(), mouseX, mouseY,
                                 [](Widget *w, int mx, int my) {
@@ -281,6 +311,10 @@ private:
         }
       }
 
+      // 2. Overlays get move events (tooltip show/hide, context menu highlight)
+      bool overlayHandled = instance->handleOverlayMouseMove(mouseX, mouseY);
+
+      // 3. Normal hover state update + widget tree move
       bool hoverChanged =
           updateHoverStates(instance->root.get(), mouseX, mouseY);
 
@@ -289,12 +323,13 @@ private:
             return w->handleMouseMove(mouseX, mouseY);
           });
 
-      if (hoverChanged || customHandled) {
+      if (overlayHandled || hoverChanged || customHandled) {
         InvalidateRect(hwnd, NULL, FALSE);
       }
       return 0;
     }
 
+    // ----------------------------------------------------------------
     case WM_MOUSELEAVE: {
       if (!instance || !instance->root)
         return 0;
@@ -304,6 +339,7 @@ private:
       return 0;
     }
 
+    // ----------------------------------------------------------------
     case WM_CHAR: {
       if (!instance || !instance->focusedWidget)
         return 0;
@@ -316,18 +352,29 @@ private:
       return 0;
     }
 
+    // ----------------------------------------------------------------
     case WM_KEYDOWN: {
-      if (!instance || !instance->focusedWidget)
+      if (!instance)
         return 0;
 
       int keyCode = (int)wParam;
 
-      if (instance->focusedWidget->handleKeyDown(keyCode)) {
+      // 1. Topmost overlay gets keyboard first (Escape closes context menu
+      //    before it reaches a text field, arrow keys navigate dropdown, etc.)
+      if (instance->handleOverlayKeyDown(keyCode)) {
+        InvalidateRect(hwnd, NULL, FALSE);
+        return 0;
+      }
+
+      // 2. Focused widget
+      if (instance->focusedWidget &&
+          instance->focusedWidget->handleKeyDown(keyCode)) {
         InvalidateRect(hwnd, NULL, FALSE);
       }
       return 0;
     }
 
+    // ----------------------------------------------------------------
     case WM_TIMER: {
       if (!instance || !instance->focusedWidget)
         return 0;
@@ -338,6 +385,7 @@ private:
       return 0;
     }
 
+    // ----------------------------------------------------------------
     case WM_DESTROY:
       if (instance) {
         instance->destroyBackBuffer();
@@ -349,13 +397,15 @@ private:
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
   }
 
+  // ----------------------------------------------------------------
+  // findByIdRecursive
+  // ----------------------------------------------------------------
   WidgetPtr findByIdRecursive(WidgetPtr widget, const std::string &id) {
     if (!widget)
       return nullptr;
 
-    if (widget->getId() == id) {
+    if (widget->getId() == id)
       return widget;
-    }
 
     for (auto &child : widget->children) {
       auto found = findByIdRecursive(child, id);
@@ -406,7 +456,7 @@ public:
     rebuild();
   }
 
-  void rebuild(); // ✅ DECLARE but DON'T DEFINE here
+  void rebuild(); // Defined in flux_core_impl.hpp
 
   void updateWidget(Widget *widget) {
     if (!widget || !hwnd)
@@ -424,11 +474,10 @@ public:
     bool sizeChanged =
         (oldWidth != widget->width || oldHeight != widget->height);
 
-    if (sizeChanged) {
+    if (sizeChanged)
       partialRebuild(widget);
-    } else {
+    else
       invalidateWidget(widget);
-    }
   }
 
   void invalidateWidget(Widget *widget) {
@@ -437,7 +486,6 @@ public:
 
     RECT rect = {widget->x, widget->y, widget->x + widget->width,
                  widget->y + widget->height};
-
     InvalidateRect(hwnd, &rect, FALSE);
   }
 

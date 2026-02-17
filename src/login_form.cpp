@@ -26,9 +26,7 @@ public:
     return Scaffold(AppBar("Conditional App"),
                     Center(Column(
 
-                        TextInput("Enter username...")
-                            ->setInputValue(newText)
-                            ->setWidth(300),
+                        TextInput("Enter username...")->setInputValue(newText),
 
                         CheckBox("Enable feature")->setInputValue(isActive),
 

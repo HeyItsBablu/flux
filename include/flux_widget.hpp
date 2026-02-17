@@ -199,17 +199,8 @@ public:
 
   void markNeedsPaint() { needsPaint = true; }
 
-  // Builder pattern methods
 
-  WidgetPtr setOnClick(ClickHandler handler) {
-    onClick = handler;
-    return shared_from_this();
-  }
 
-  WidgetPtr setOnHover(HoverHandler handler) {
-    onHover = handler;
-    return shared_from_this();
-  }
 
   WidgetPtr setId(const std::string &i) {
     id = i;
