@@ -20,4 +20,5 @@
 #include "flux_slider.hpp"
 #include "flux_image.hpp"
 #include "flux_core_impl.hpp"
+
 #endif // FLUX_HPP

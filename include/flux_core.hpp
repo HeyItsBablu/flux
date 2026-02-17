@@ -17,6 +17,7 @@
 template <typename T> class State;
 class DropdownWidget;
 class FluxAppWidget;
+class DialogWidget;
 
 // ============================================================================
 // MOUSE EVENT BROADCAST HELPERS (for captured mouse events)
@@ -95,6 +96,13 @@ private:
   }
 
   bool checkDropdownOverlays(Widget *widget, int mouseX, int mouseY);
+
+  bool handleDialogOverlays(int mouseX, int mouseY) {
+    // Traverse widget tree looking for open dropdowns
+    return checkDialogOverlays(root.get(), mouseX, mouseY);
+  }
+
+  bool checkDialogOverlays(Widget *widget, int mouseX, int mouseY);
   void wireFluxAppToWidgets(FluxAppWidget *fluxApp, Widget *widget);
 
   static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam,
@@ -186,8 +194,13 @@ private:
       int mouseX = LOWORD(lParam);
       int mouseY = HIWORD(lParam);
 
-      // ✅ Check dropdown overlays FIRST (they render on top)
+      //  Check dropdown overlays FIRST (they render on top)
       if (instance->handleDropdownOverlays(mouseX, mouseY)) {
+        InvalidateRect(hwnd, NULL, FALSE);
+        return 0;
+      }
+
+      if (instance->handleDialogOverlays(mouseX, mouseY)) {
         InvalidateRect(hwnd, NULL, FALSE);
         return 0;
       }
@@ -210,6 +223,7 @@ private:
       Widget *clicked = findWidgetAt(instance->root.get(), mouseX, mouseY);
       if (clicked && clicked->onClick) {
         clicked->onClick();
+        InvalidateRect(hwnd, NULL, FALSE);
       }
       return 0;
     }

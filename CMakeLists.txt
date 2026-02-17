@@ -31,6 +31,12 @@ target_include_directories(my_app
         ${PROJECT_SOURCE_DIR}/include
 )
 
+target_link_libraries(my_app
+    PRIVATE
+        Msimg32     # AlphaBlend (used in Dialog overlay)
+        Gdiplus     # GDI+ (if you use GdiplusInitializer)
+)
+
 # MSVC-specific link options (optional but common for GUI apps)
 target_link_options(my_app
     PRIVATE

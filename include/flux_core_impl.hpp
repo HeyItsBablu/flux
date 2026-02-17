@@ -4,6 +4,7 @@
 #include "flux_app.hpp"
 #include "flux_core.hpp"
 #include "flux_dropdown.hpp"
+#include "flux_dialog.hpp"
 
 // ============================================================================
 // FLUXUI METHOD IMPLEMENTATIONS (Need full class definitions)
@@ -19,13 +20,18 @@ inline void FluxUI::wireFluxAppToWidgets(FluxAppWidget *fluxApp,
     dropdown->setFluxApp(fluxApp);
   }
 
+  if (auto *dialog = dynamic_cast<DialogWidget *>(widget)) {
+    dialog->setFluxApp(fluxApp);
+  }
+
   // Recursively wire children
   for (auto &child : widget->children) {
     wireFluxAppToWidgets(fluxApp, child.get());
   }
 }
 
-inline bool FluxUI::checkDropdownOverlays(Widget *widget, int mouseX, int mouseY) {
+inline bool FluxUI::checkDropdownOverlays(Widget *widget, int mouseX,
+                                          int mouseY) {
   if (!widget)
     return false;
 
@@ -36,6 +42,7 @@ inline bool FluxUI::checkDropdownOverlays(Widget *widget, int mouseX, int mouseY
       return true;
   }
 
+
   // Check if this is an open dropdown
   if (auto *dropdown = dynamic_cast<DropdownWidget *>(widget)) {
     if (dropdown->isOpen) {
@@ -45,6 +52,30 @@ inline bool FluxUI::checkDropdownOverlays(Widget *widget, int mouseX, int mouseY
         return true;
     }
   }
+
+  return false;
+}
+
+inline bool FluxUI::checkDialogOverlays(Widget *widget, int mouseX,
+                                          int mouseY) {
+  if (!widget)
+    return false;
+
+  // Check children first (they render on top)
+  for (auto it = widget->children.rbegin(); it != widget->children.rend();
+       ++it) {
+    if (checkDialogOverlays(it->get(), mouseX, mouseY))
+      return true;
+  }
+
+  //Check if this is an open dialog
+  if (auto *dialog = dynamic_cast<DialogWidget *>(widget)) {
+    if (dialog->isOpen) {
+      if (dialog->handleMouseDown(mouseX, mouseY))
+        return true;
+    }
+  }
+
 
   return false;
 }
