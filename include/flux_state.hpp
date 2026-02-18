@@ -247,8 +247,8 @@ public:
   void set(T newValue) {
     std::lock_guard<std::mutex> lock(stateMutex);
 
-    if (value == newValue)
-      return;
+    // if (value == newValue)
+    //   return;
 
     value = newValue;
 
