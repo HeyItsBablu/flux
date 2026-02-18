@@ -21,4 +21,5 @@
 #include "flux_image.hpp"
 #include "flux_core_impl.hpp"
 #include "flux_context_menu.hpp"
+#include "flux_progressbar.hpp"
 #endif // FLUX_HPP
