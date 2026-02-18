@@ -119,6 +119,22 @@ private:
   // Wire FluxAppWidget pointer into every overlay-capable widget in the tree.
   void wireFluxAppToWidgets(FluxAppWidget *fluxApp, Widget *widget);
 
+
+
+  Widget *findLayoutBoundary(Widget *widget) {
+    Widget *boundary = widget;
+    Widget *current = widget->parent;
+
+    while (current) {
+      boundary = current;
+      // This ancestor has fixed size — layout below it is self-contained
+      if (!current->autoWidth && !current->autoHeight)
+        break;
+      current = current->parent;
+    }
+    return boundary;
+  }
+
   // ----------------------------------------------------------------
   // WINDOW PROCEDURE
   // ----------------------------------------------------------------
@@ -523,23 +539,39 @@ public:
     if (!widget || !hwnd)
       return;
 
-    RECT rect;
-    GetClientRect(hwnd, &rect);
-    int width = rect.right - rect.left;
-    int height = rect.bottom - rect.top;
+    Widget *boundary = findLayoutBoundary(widget);
 
+    // Mark dirty from the changed widget up to the boundary
     Widget *current = widget;
-    while (current) {
+    while (current && current != boundary) {
       current->markNeedsLayout();
       current = current->parent;
     }
+    boundary->markNeedsLayout();
 
     HDC hdc = GetDC(hwnd);
-    LayoutEngine::computeLayout(hdc, root.get(), width, height, fontCache);
-    LayoutEngine::positionWidget(root.get(), 0, 0);
+
+    if (boundary == root.get()) {
+      // Boundary is root — full layout unavoidable, but still limit repaint
+      RECT rect;
+      GetClientRect(hwnd, &rect);
+      int w = rect.right - rect.left;
+      int h = rect.bottom - rect.top;
+      LayoutEngine::computeLayout(hdc, root.get(), w, h, fontCache);
+      LayoutEngine::positionWidget(root.get(), 0, 0);
+    } else {
+      // Layout only the subtree rooted at boundary
+      LayoutEngine::computeLayout(hdc, boundary, boundary->width,
+                                  boundary->height, fontCache);
+      LayoutEngine::positionWidget(boundary, boundary->x, boundary->y);
+    }
+
     ReleaseDC(hwnd, hdc);
 
-    InvalidateRect(hwnd, NULL, FALSE);
+    // Invalidate only the boundary's rect instead of the whole window
+    RECT dirtyRect = {boundary->x, boundary->y, boundary->x + boundary->width,
+                      boundary->y + boundary->height};
+    InvalidateRect(hwnd, &dirtyRect, FALSE);
   }
 
   HWND createWindow(const std::string &title, int width, int height) {

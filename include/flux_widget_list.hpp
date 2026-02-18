@@ -1053,7 +1053,9 @@ inline TextWidgetPtr Text(State<T> &state, const std::string &trueText,
   return w;
 }
 
-inline WidgetPtr Button(const std::string &text,
+using ButtonWidgetPtr = std::shared_ptr<ButtonWidget>;
+
+inline ButtonWidgetPtr Button(const std::string &text,
                         ClickHandler onClick = nullptr) {
   auto w = std::make_shared<ButtonWidget>();
   w->text = text;
@@ -1071,7 +1073,7 @@ inline WidgetPtr Button(const std::string &text,
 }
 
 // New widget-based button
-inline WidgetPtr Button(WidgetPtr child, ClickHandler onClick = nullptr) {
+inline ButtonWidgetPtr Button(WidgetPtr child, ClickHandler onClick = nullptr) {
   auto w = std::make_shared<ButtonWidget>();
   w->addChild(child);
   w->onClick = onClick;
