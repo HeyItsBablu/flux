@@ -10,6 +10,8 @@
 #include <string>
 #include <vector>
 #include <windows.h>
+#include <gdiplus.h>          
+#pragma comment(lib, "gdiplus.lib")  
 
 // ============================================================================
 // FORWARD DECLARATIONS
@@ -77,6 +79,11 @@ public:
   COLORREF backgroundColor = RGB(255, 255, 255);
   COLORREF textColor = RGB(0, 0, 0);
   COLORREF borderColor = RGB(0, 0, 0);
+
+  BYTE backgroundAlpha = 255;
+  BYTE borderAlpha = 255;
+  BYTE textAlpha = 255;
+
   bool hasBackground = false;
   bool hasBorder = false;
 
@@ -256,204 +263,218 @@ protected:
     COLORREF bgColor = getCurrentBackgroundColor();
     COLORREF bdColor = getCurrentBorderColor();
 
-    if (borderRadius > 0) {
-      HPEN pen = hasBorder ? CreatePen(PS_SOLID, borderWidth, bdColor)
-                           : CreatePen(PS_NULL, 0, 0);
-      HBRUSH brush = CreateSolidBrush(bgColor);
+    Gdiplus::Graphics g(hdc);
+    g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
 
-      HPEN oldPen = (HPEN)SelectObject(hdc, pen);
-      HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, brush);
+    auto makeRoundedPath = [&](Gdiplus::GraphicsPath &path, int left, int top,
+                               int w, int h, int r) {
+      int d = r * 2;
+      path.AddArc(left, top, d, d, 180, 90);
+      path.AddArc(left + w - d, top, d, d, 270, 90);
+      path.AddArc(left + w - d, top + h - d, d, d, 0, 90);
+      path.AddArc(left, top + h - d, d, d, 90, 90);
+      path.CloseFigure();
+    };
 
-      RoundRect(hdc, x, y, x + width, y + height, borderRadius * 2,
-                borderRadius * 2);
+    // Fill background
+    if (hasBackground) {
+      Gdiplus::Color fillColor(backgroundAlpha, GetRValue(bgColor),
+                               GetGValue(bgColor), GetBValue(bgColor));
+      Gdiplus::SolidBrush brush(fillColor);
 
-      SelectObject(hdc, oldBrush);
-      SelectObject(hdc, oldPen);
-      DeleteObject(brush);
-      DeleteObject(pen);
-    } else {
-      HBRUSH brush = CreateSolidBrush(bgColor);
-      RECT rect = {x, y, x + width, y + height};
-      FillRect(hdc, &rect, brush);
-      DeleteObject(brush);
+      if (borderRadius > 0) {
+        Gdiplus::GraphicsPath path;
+        makeRoundedPath(path, x, y, width, height, borderRadius);
+        g.FillPath(&brush, &path);
+      } else {
+        Gdiplus::RectF rect((Gdiplus::REAL)x, (Gdiplus::REAL)y,
+                            (Gdiplus::REAL)width, (Gdiplus::REAL)height);
+        g.FillRectangle(&brush, rect);
+      }
+    }
 
-      if (hasBorder) {
-        HPEN pen = CreatePen(PS_SOLID, borderWidth, bdColor);
-        HPEN oldPen = (HPEN)SelectObject(hdc, pen);
-        HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
+    // Draw border
+    if (hasBorder) {
+      Gdiplus::Color strokeColor(borderAlpha, GetRValue(bdColor),
+                                 GetGValue(bdColor), GetBValue(bdColor));
+      Gdiplus::Pen pen(strokeColor, (Gdiplus::REAL)borderWidth);
 
-        Rectangle(hdc, x, y, x + width, y + height);
-
-        SelectObject(hdc, oldBrush);
-        SelectObject(hdc, oldPen);
-        DeleteObject(pen);
+      if (borderRadius > 0) {
+        Gdiplus::GraphicsPath path;
+        makeRoundedPath(path, x, y, width, height, borderRadius);
+        g.DrawPath(&pen, &path);
+      } else {
+        Gdiplus::RectF rect((Gdiplus::REAL)x, (Gdiplus::REAL)y,
+                            (Gdiplus::REAL)width, (Gdiplus::REAL)height);
+        g.DrawRectangle(&pen, rect);
       }
     }
   }
+
 };
 
-// ============================================================================
-// VIRTUAL METHOD IMPLEMENTATIONS (need FontCache declaration)
-// ============================================================================
+  // ============================================================================
+  // VIRTUAL METHOD IMPLEMENTATIONS (need FontCache declaration)
+  // ============================================================================
 
-inline void Widget::measureText(HDC hdc, FontCache &fontCache) {
-  if (text.empty()) {
-    width = 0;
-    height = 0;
-    return;
+  inline void Widget::measureText(HDC hdc, FontCache &fontCache) {
+    if (text.empty()) {
+      width = 0;
+      height = 0;
+      return;
+    }
+
+    HFONT hFont = fontCache.getFont(fontSize, fontWeight);
+    HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
+
+    SIZE size;
+    GetTextExtentPoint32(hdc, text.c_str(), (int)text.length(), &size);
+
+    if (autoWidth)
+      width = size.cx;
+    if (autoHeight)
+      height = size.cy;
+
+    SelectObject(hdc, hOldFont);
   }
 
-  HFONT hFont = fontCache.getFont(fontSize, fontWeight);
-  HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
+  inline void Widget::renderText(HDC hdc, FontCache &fontCache, UINT format) {
+    if (text.empty())
+      return;
 
-  SIZE size;
-  GetTextExtentPoint32(hdc, text.c_str(), (int)text.length(), &size);
+    SetTextColor(hdc, getCurrentTextColor());
+    SetBkMode(hdc, TRANSPARENT);
 
-  if (autoWidth)
-    width = size.cx;
-  if (autoHeight)
-    height = size.cy;
+    HFONT hFont = fontCache.getFont(fontSize, fontWeight);
+    HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
 
-  SelectObject(hdc, hOldFont);
-}
+    RECT textRect = {x + paddingLeft, y + paddingTop, x + width - paddingRight,
+                     y + height - paddingBottom};
 
-inline void Widget::renderText(HDC hdc, FontCache &fontCache, UINT format) {
-  if (text.empty())
-    return;
+    DrawText(hdc, text.c_str(), -1, &textRect, format);
 
-  SetTextColor(hdc, getCurrentTextColor());
-  SetBkMode(hdc, TRANSPARENT);
-
-  HFONT hFont = fontCache.getFont(fontSize, fontWeight);
-  HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
-
-  RECT textRect = {x + paddingLeft, y + paddingTop, x + width - paddingRight,
-                   y + height - paddingBottom};
-
-  DrawText(hdc, text.c_str(), -1, &textRect, format);
-
-  SelectObject(hdc, hOldFont);
-}
-
-inline void Widget::computeLayout(HDC hdc, int availableWidth,
-                                  int availableHeight, FontCache &fontCache) {
-  // Default: just apply constraints
-  applyConstraints();
-  needsLayout = false;
-}
-
-inline void Widget::positionChildren(int contentX, int contentY,
-                                     int contentWidth, int contentHeight) {
-  // Default: position children at content origin
-  for (auto &child : children) {
-    child->x = contentX + child->marginLeft;
-    child->y = contentY + child->marginTop;
-
-    child->positionChildren(
-        child->x + child->paddingLeft, child->y + child->paddingTop,
-        child->width - child->paddingLeft - child->paddingRight,
-        child->height - child->paddingTop - child->paddingBottom);
-  }
-}
-
-inline void Widget::render(HDC hdc, FontCache &fontCache) {
-  // Default: draw background if has one
-  if (hasBackground) {
-    drawRoundedRectangle(hdc);
+    SelectObject(hdc, hOldFont);
   }
 
-  // Render all children
-  for (auto &child : children) {
-    child->render(hdc, fontCache);
+  inline void Widget::computeLayout(HDC hdc, int availableWidth,
+                                    int availableHeight, FontCache &fontCache) {
+    // Default: just apply constraints
+    applyConstraints();
+    needsLayout = false;
   }
 
-  needsPaint = false;
-}
+  inline void Widget::positionChildren(int contentX, int contentY,
+                                       int contentWidth, int contentHeight) {
+    // Default: position children at content origin
+    for (auto &child : children) {
+      child->x = contentX + child->marginLeft;
+      child->y = contentY + child->marginTop;
 
-// ============================================================================
-// HIT TESTING
-// ============================================================================
+      child->positionChildren(
+          child->x + child->paddingLeft, child->y + child->paddingTop,
+          child->width - child->paddingLeft - child->paddingRight,
+          child->height - child->paddingTop - child->paddingBottom);
+    }
+  }
 
-inline Widget *findWidgetAt(Widget *w, int x, int y) {
-  if (!w)
+  inline void Widget::render(HDC hdc, FontCache &fontCache) {
+    // Default: draw background if has one
+    if (hasBackground) {
+      drawRoundedRectangle(hdc);
+    }
+
+    // Render all children
+    for (auto &child : children) {
+      child->render(hdc, fontCache);
+    }
+
+    needsPaint = false;
+  }
+
+  // ============================================================================
+  // HIT TESTING
+  // ============================================================================
+
+  inline Widget *findWidgetAt(Widget *w, int x, int y) {
+    if (!w)
+      return nullptr;
+
+    for (auto it = w->children.rbegin(); it != w->children.rend(); ++it) {
+      Widget *found = findWidgetAt(it->get(), x, y);
+      if (found)
+        return found;
+    }
+
+    if (x >= w->x && x < w->x + w->width && y >= w->y && y < w->y + w->height) {
+      return w;
+    }
+
     return nullptr;
-
-  for (auto it = w->children.rbegin(); it != w->children.rend(); ++it) {
-    Widget *found = findWidgetAt(it->get(), x, y);
-    if (found)
-      return found;
   }
 
-  if (x >= w->x && x < w->x + w->width && y >= w->y && y < w->y + w->height) {
-    return w;
-  }
+  // ============================================================================
+  // MOUSE EVENT HELPER FUNCTIONS
+  // ============================================================================
 
-  return nullptr;
-}
+  /**
+   * Find widget at position and dispatch mouse event
+   * Returns true if event was handled
+   */
+  template <typename Handler>
+  inline bool findAndHandleMouseEvent(Widget *widget, int x, int y,
+                                      Handler handler) {
+    if (!widget)
+      return false;
 
-// ============================================================================
-// MOUSE EVENT HELPER FUNCTIONS
-// ============================================================================
+    // Check if point is within widget bounds
+    if (x >= widget->x && x < widget->x + widget->width && y >= widget->y &&
+        y < widget->y + widget->height) {
+      // Try children first (they're on top)
+      for (auto it = widget->children.rbegin(); it != widget->children.rend();
+           ++it) {
+        if (findAndHandleMouseEvent(it->get(), x, y, handler))
+          return true;
+      }
 
-/**
- * Find widget at position and dispatch mouse event
- * Returns true if event was handled
- */
-template <typename Handler>
-inline bool findAndHandleMouseEvent(Widget *widget, int x, int y,
-                                    Handler handler) {
-  if (!widget)
-    return false;
-
-  // Check if point is within widget bounds
-  if (x >= widget->x && x < widget->x + widget->width && y >= widget->y &&
-      y < widget->y + widget->height) {
-    // Try children first (they're on top)
-    for (auto it = widget->children.rbegin(); it != widget->children.rend();
-         ++it) {
-      if (findAndHandleMouseEvent(it->get(), x, y, handler))
+      // Then try this widget
+      if (handler(widget))
         return true;
     }
 
-    // Then try this widget
-    if (handler(widget))
-      return true;
-  }
-
-  return false;
-}
-
-/**
- * Update hover state for all widgets in tree
- * Returns true if any widget changed hover state
- */
-inline bool updateHoverStates(Widget *widget, int mouseX, int mouseY) {
-  if (!widget)
     return false;
-
-  bool changed = false;
-
-  // Check if mouse is over this widget
-  bool isOver = (mouseX >= widget->x && mouseX < widget->x + widget->width &&
-                 mouseY >= widget->y && mouseY < widget->y + widget->height);
-
-  if (isOver) {
-    // Update this widget's hover state
-    changed |= widget->updateHoverState(mouseX, mouseY);
-
-    // Update children
-    for (auto &child : widget->children) {
-      changed |= updateHoverStates(child.get(), mouseX, mouseY);
-    }
-  } else {
-    // Mouse not over this widget - clear hover state
-    if (widget->isHovered) {
-      widget->clearHoverState();
-      changed = true;
-    }
   }
 
-  return changed;
-}
+  /**
+   * Update hover state for all widgets in tree
+   * Returns true if any widget changed hover state
+   */
+  inline bool updateHoverStates(Widget *widget, int mouseX, int mouseY) {
+    if (!widget)
+      return false;
+
+    bool changed = false;
+
+    // Check if mouse is over this widget
+    bool isOver = (mouseX >= widget->x && mouseX < widget->x + widget->width &&
+                   mouseY >= widget->y && mouseY < widget->y + widget->height);
+
+    if (isOver) {
+      // Update this widget's hover state
+      changed |= widget->updateHoverState(mouseX, mouseY);
+
+      // Update children
+      for (auto &child : widget->children) {
+        changed |= updateHoverStates(child.get(), mouseX, mouseY);
+      }
+    } else {
+      // Mouse not over this widget - clear hover state
+      if (widget->isHovered) {
+        widget->clearHoverState();
+        changed = true;
+      }
+    }
+
+    return changed;
+  }
 
 #endif // FLUX_WIDGET_HPP

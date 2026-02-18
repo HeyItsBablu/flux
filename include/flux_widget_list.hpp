@@ -832,6 +832,18 @@ public:
     onHover = handler;
     return std::static_pointer_cast<ContainerWidget>(shared_from_this());
   }
+
+  std::shared_ptr<ContainerWidget> setBackgroundAlpha(BYTE alpha) {
+    backgroundAlpha = alpha;
+    markNeedsPaint();
+    return std::static_pointer_cast<ContainerWidget>(shared_from_this());
+  }
+
+  std::shared_ptr<ContainerWidget> setBorderAlpha(BYTE alpha) {
+    borderAlpha = alpha;
+    markNeedsPaint();
+    return std::static_pointer_cast<ContainerWidget>(shared_from_this());
+  }
 };
 
 // --- Center Widget ---

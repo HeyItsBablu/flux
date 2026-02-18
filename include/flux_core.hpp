@@ -52,6 +52,8 @@ private:
   HINSTANCE hInstance;
   FontCache fontCache;
 
+  ULONG_PTR gdiplusToken = 0;
+
   HDC hdcMem = nullptr;
   HBITMAP hbmMem = nullptr;
   HBITMAP hbmOld = nullptr;
@@ -106,7 +108,7 @@ private:
   bool handleOverlayMouseMove(int mouseX, int mouseY);
   bool handleOverlayMouseWheel(int delta);
   bool handleOverlayKeyDown(int keyCode);
-  
+
   // Right-click dispatcher for context menus
   bool handleOverlayRightClick(int mouseX, int mouseY);
 
@@ -441,15 +443,19 @@ private:
   }
 
 public:
-  FluxUI(HINSTANCE hInst) : hInstance(hInst) { currentInstance = this; }
+  FluxUI(HINSTANCE hInst) : hInstance(hInst) {
+    currentInstance = this;
+    Gdiplus::GdiplusStartupInput input;
+    Gdiplus::GdiplusStartup(&gdiplusToken, &input, NULL);
+  }
 
   ~FluxUI() {
     destroyBackBuffer();
     fontCache.clear();
+    Gdiplus::GdiplusShutdown(gdiplusToken); // ADD
     if (currentInstance == this)
       currentInstance = nullptr;
   }
-
   template <typename T> State<T> useState(T initialValue) {
     return State<T>(initialValue, this);
   }
