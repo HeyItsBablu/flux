@@ -21,7 +21,7 @@ private:
 public:
   WidgetTestComponent()
       : inputText("Hello", context), counter(0, context),
-        toggleState(false, context), hoverFlag(false, context),
+        toggleState(true, context), hoverFlag(false, context),
         listItems({}, context), activeTab(0, context) {
 
     std::vector<std::string> items;
@@ -511,11 +511,24 @@ public:
         ->setBorderWidth(1);
   }
 
+  void callingFrom() { std::cout << "Calling from the menu" << std::endl; }
+
   WidgetPtr build() override {
     return Scaffold(
         AppBar("FluxUI Widget Tests"),
         Column(
             Tooltip(Button("Hover me", [] {}), "Click to submit"),
+            ContextMenu(
+                Text("Right-click me!")->setFontSize(16)->setPadding(12),
+                {ContextMenuItem::Action("Cut", [this]{callingFrom();}),
+                 ContextMenuItem::Action(
+                     "Copy", [] { MessageBox(NULL, "Copy", "Action", MB_OK); }),
+                 ContextMenuItem::Action(
+                     "Paste",
+                     [] { MessageBox(NULL, "Paste", "Action", MB_OK); }),
+                 ContextMenuItem::Separator(),
+                 ContextMenuItem::Action("Disabled Item", nullptr, toggleState.get())}),
+
             // Controls bar
             Container(
                 Row(Text("Counter: ")->setFontSize(13),

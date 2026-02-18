@@ -2,6 +2,7 @@
 #define FLUX_CORE_IMPL_HPP
 
 #include "flux_app.hpp"
+#include "flux_context_menu.hpp"
 #include "flux_core.hpp"
 #include "flux_dialog.hpp"
 #include "flux_dropdown.hpp"
@@ -32,9 +33,10 @@ inline void FluxUI::wireFluxAppToWidgets(FluxAppWidget *fluxApp,
   if (auto *tooltip = dynamic_cast<TooltipWidget *>(widget))
     tooltip->setFluxApp(fluxApp);
 
-  // Future overlay-capable widgets go here, e.g.:
-  //   if (auto *ctxMenu = dynamic_cast<ContextMenuWidget *>(widget))
-  //       ctxMenu->setFluxApp(fluxApp);
+  if (auto *ctxMenu = dynamic_cast<ContextMenuWidget *>(widget))
+    ctxMenu->setFluxApp(fluxApp);
+
+  // Future overlay-capable widgets go here
 
   for (auto &child : widget->children)
     wireFluxAppToWidgets(fluxApp, child.get());
@@ -136,6 +138,25 @@ inline bool FluxUI::handleOverlayKeyDown(int keyCode) {
 }
 
 // ----------------------------------------------------------------------------
+// handleOverlayRightClick — called from WM_RBUTTONDOWN.
+// Right-click on an open overlay (context menu, dropdown, etc.) should close it.
+// ----------------------------------------------------------------------------
+inline bool FluxUI::handleOverlayRightClick(int mouseX, int mouseY) {
+  FluxAppWidget *fluxApp = getFluxApp(root);
+  if (!fluxApp || !fluxApp->hasOverlays())
+    return false;
+
+  const auto &stack = fluxApp->getOverlayStack();
+
+  for (auto it = stack.rbegin(); it != stack.rend(); ++it) {
+    if (it->widget && it->widget->handleRightClick(mouseX, mouseY))
+      return true;
+  }
+
+  return false;
+}
+
+// ----------------------------------------------------------------------------
 // checkDropdownOverlays / checkDialogOverlays
 // Legacy empty stubs — all real work goes through handleDropdownOverlays.
 // ----------------------------------------------------------------------------
@@ -152,9 +173,10 @@ inline void FluxUI::rebuild() {
 
   // ── Fix: detach the old tree before dropping it ─────────────────────────
   // onDetach() propagates through the entire widget tree so every overlay-
-  // capable widget (Dropdown, Tooltip, Dialog, …) calls removeOverlay on
-  // itself.  This guarantees the FluxAppWidget's overlay stack is empty and
-  // contains no dangling pointers before we build the new tree.
+  // capable widget (Dropdown, Tooltip, Dialog, ContextMenu, …) calls
+  // removeOverlay on itself.  This guarantees the FluxAppWidget's overlay
+  // stack is empty and contains no dangling pointers before we build the new
+  // tree.
   if (root) {
     root->onDetach();
 

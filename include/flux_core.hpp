@@ -97,17 +97,18 @@ private:
   // ----------------------------------------------------------------
 
   // Unified mouse-down dispatcher: iterates overlay stack highest-zIndex first.
-  // Replaces the old per-type checkDropdownOverlays / checkDialogOverlays tree
-  // walks. Called from WM_LBUTTONDOWN before the normal widget tree.
   bool handleDropdownOverlays(int mouseX, int mouseY);
 
   // Kept for linker compatibility; implementation is a no-op stub.
   bool handleDialogOverlays(int mouseX, int mouseY);
 
-  // NEW: overlay routing for move, wheel, and keyboard.
+  // Overlay routing for move, wheel, and keyboard.
   bool handleOverlayMouseMove(int mouseX, int mouseY);
   bool handleOverlayMouseWheel(int delta);
   bool handleOverlayKeyDown(int keyCode);
+  
+  // Right-click dispatcher for context menus
+  bool handleOverlayRightClick(int mouseX, int mouseY);
 
   // Legacy tree-walk stubs (no-op, kept so flux_core.hpp compiles unchanged).
   bool checkDropdownOverlays(Widget *widget, int mouseX, int mouseY);
@@ -223,8 +224,6 @@ private:
       int mouseY = HIWORD(lParam);
 
       // 1. Unified overlay hit-test (highest zIndex wins)
-      //    handleDropdownOverlays is now the unified dispatcher for ALL overlays.
-      //    handleDialogOverlays is a no-op stub kept for source compatibility.
       if (instance->handleDropdownOverlays(mouseX, mouseY)) {
         InvalidateRect(hwnd, NULL, FALSE);
         return 0;
@@ -252,6 +251,32 @@ private:
         clicked->onClick();
         InvalidateRect(hwnd, NULL, FALSE);
       }
+      return 0;
+    }
+
+    // ----------------------------------------------------------------
+    case WM_RBUTTONDOWN: {
+      if (!instance || !instance->root)
+        return 0;
+
+      int mouseX = LOWORD(lParam);
+      int mouseY = HIWORD(lParam);
+
+      // 1. Unified overlay hit-test (highest zIndex wins)
+      if (instance->handleOverlayRightClick(mouseX, mouseY)) {
+        InvalidateRect(hwnd, NULL, FALSE);
+        return 0;
+      }
+
+      // 2. Normal widget tree — handleRightClick
+      if (findAndHandleMouseEvent(instance->root.get(), mouseX, mouseY,
+                                  [mouseX, mouseY](Widget *w) {
+                                    return w->handleRightClick(mouseX, mouseY);
+                                  })) {
+        InvalidateRect(hwnd, NULL, FALSE);
+        return 0;
+      }
+
       return 0;
     }
 
@@ -359,8 +384,7 @@ private:
 
       int keyCode = (int)wParam;
 
-      // 1. Topmost overlay gets keyboard first (Escape closes context menu
-      //    before it reaches a text field, arrow keys navigate dropdown, etc.)
+      // 1. Topmost overlay gets keyboard first
       if (instance->handleOverlayKeyDown(keyCode)) {
         InvalidateRect(hwnd, NULL, FALSE);
         return 0;

@@ -99,6 +99,7 @@ public:
   // Events
   ClickHandler onClick;
   HoverHandler onHover;
+  std::function<bool(int, int)> onRightClick;
 
   // Hover state
   bool isHovered = false;
@@ -140,6 +141,12 @@ public:
   virtual bool handleMouseUp(int mx, int my) { return false; }
   virtual bool handleMouseMove(int mx, int my) { return false; }
   virtual bool handleMouseLeave() { return false; }
+
+  virtual bool handleRightClick(int mx, int my) {
+    if (onRightClick)
+      return onRightClick(mx, my);
+    return false;
+  }
 
   // New virtual handlers
   virtual bool handleKeyDown(int keyCode) { return false; }
