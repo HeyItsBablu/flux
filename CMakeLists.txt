@@ -35,6 +35,8 @@ target_link_libraries(my_app
     PRIVATE
         Msimg32     # AlphaBlend (used in Dialog overlay)
         Gdiplus     # GDI+ (if you use GdiplusInitializer)
+        opengl32    # OpenGL
+        glu32       # GLU (for GraphWidget)
 )
 
 # MSVC-specific link options (optional but common for GUI apps)

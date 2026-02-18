@@ -119,8 +119,6 @@ private:
   // Wire FluxAppWidget pointer into every overlay-capable widget in the tree.
   void wireFluxAppToWidgets(FluxAppWidget *fluxApp, Widget *widget);
 
-
-
   Widget *findLayoutBoundary(Widget *widget) {
     Widget *boundary = widget;
     Widget *current = widget->parent;
@@ -155,7 +153,10 @@ private:
       return 0;
     }
 
-    // ----------------------------------------------------------------
+      // ----------------------------------------------------------------
+      // ----------------------------------------------------------------
+      // REPLACE THIS SECTION IN flux_core.hpp — WM_PAINT case
+      // ----------------------------------------------------------------
     case WM_PAINT: {
       if (!instance || !instance->root) {
         PAINTSTRUCT ps;
@@ -180,6 +181,17 @@ private:
 
       Renderer::renderWidget(instance->hdcMem, instance->root.get(),
                              instance->fontCache);
+
+      // Exclude all GL child windows from the BitBlt so the GDI back-buffernever stomps on the OpenGL surface
+
+      HWND child = GetWindow(hwnd, GW_CHILD);
+      while (child) {
+        RECT cr;
+        GetWindowRect(child, &cr);
+        MapWindowPoints(HWND_DESKTOP, hwnd, (POINT *)&cr, 2);
+        ExcludeClipRect(hdc, cr.left, cr.top, cr.right, cr.bottom);
+        child = GetNextWindow(child, GW_HWNDNEXT);
+      }
 
       BitBlt(hdc, 0, 0, width, height, instance->hdcMem, 0, 0, SRCCOPY);
 

@@ -286,6 +286,17 @@ public:
     onClick = handler;
     return std::static_pointer_cast<ButtonWidget>(shared_from_this());
   }
+
+  std::shared_ptr<ButtonWidget> setPaddingAll(int left, int top, int right,
+                                                 int bottom) {
+    paddingLeft = left;
+    paddingTop = top;
+    paddingRight = right;
+    paddingBottom = bottom;
+    padding = -1;
+    markNeedsLayout();
+    return std::static_pointer_cast<ButtonWidget>(shared_from_this());
+  }
 };
 // --- Column Widget ---
 class ColumnWidget : public Widget {
@@ -1056,7 +1067,7 @@ inline TextWidgetPtr Text(State<T> &state, const std::string &trueText,
 using ButtonWidgetPtr = std::shared_ptr<ButtonWidget>;
 
 inline ButtonWidgetPtr Button(const std::string &text,
-                        ClickHandler onClick = nullptr) {
+                              ClickHandler onClick = nullptr) {
   auto w = std::make_shared<ButtonWidget>();
   w->text = text;
   w->onClick = onClick;
