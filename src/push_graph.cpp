@@ -15,7 +15,7 @@ public:
     data = { 10, 25, 18, 40, 33 };
   }
 
-  WidgetPtr build() override {
+  WidgetPtr build() override { 
 
     chart = Graph(600, 300)
         ->addSeries("Data", data, 0.2f, 0.7f, 1.0f)

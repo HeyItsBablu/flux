@@ -80,6 +80,71 @@ public:
     return std::static_pointer_cast<GraphWidget>(shared_from_this());
   }
 
+  // ----------------------------------------------------------------
+  // Reactive binding — mirrors TextWidget::setText(State<T>&)
+  //
+  // Usage:
+  //   State<std::vector<float>> dataSeries;
+  //   Graph(600,300)->addSeries("CPU", dataSeries, 1.f,0.4f,0.2f);
+  //
+  //   // later, anywhere:
+  //   dataSeries.set(newVector);   // graph repaints itself, nothing else needed
+  // ----------------------------------------------------------------
+
+  std::shared_ptr<GraphWidget> addSeries(const std::string &label,
+                                         State<std::vector<float>> &state,
+                                         float r = 0.2f, float g = 0.6f,
+                                         float b = 1.0f) {
+    // Push the series slot and remember its index
+    GraphSeries s;
+    s.label  = label;
+    s.values = state.get();
+    s.r = r; s.g = g; s.b = b;
+    int idx = (int)series.size();
+    series.push_back(s);
+
+    // Bind: when the state changes, patch only that series slot and repaint
+    state.bindProperty(
+        shared_from_this(),
+        [idx](Widget *w, const std::vector<float> &vals) {
+          auto *self = static_cast<GraphWidget *>(w);
+          if (idx < (int)self->series.size())
+            self->series[idx].values = vals;
+          // markNeedsPaint is called automatically by bindProperty
+        },
+        false // values change doesn't affect layout — repaint only
+    );
+
+    markNeedsPaint();
+    return std::static_pointer_cast<GraphWidget>(shared_from_this());
+  }
+
+  // Convenience: bind an existing series slot (0-based) to a State after
+  // the fact.  Useful when the series was created via the plain addSeries()
+  // overload and you want to retrofit reactive updates later.
+  //
+  //   chart->bindSeries(0, myState);
+  std::shared_ptr<GraphWidget> bindSeries(int idx,
+                                          State<std::vector<float>> &state) {
+    // Make sure the slot exists
+    while ((int)series.size() <= idx)
+      series.push_back({});
+
+    series[idx].values = state.get();
+
+    state.bindProperty(
+        shared_from_this(),
+        [idx](Widget *w, const std::vector<float> &vals) {
+          auto *self = static_cast<GraphWidget *>(w);
+          if (idx < (int)self->series.size())
+            self->series[idx].values = vals;
+        },
+        false);
+
+    markNeedsPaint();
+    return std::static_pointer_cast<GraphWidget>(shared_from_this());
+  }
+
   std::shared_ptr<GraphWidget> setType(GraphType t) {
     graphType = t;
     markNeedsPaint();
@@ -157,11 +222,9 @@ private:
   // ----------------------------------------------------------------
 
   static LRESULT CALLBACK ChildProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
-    // Suppress background erase to prevent flicker
     if (msg == WM_ERASEBKGND)
       return 1;
 
-    // Suppress default paint — GL handles all drawing via SwapBuffers
     if (msg == WM_PAINT) {
       PAINTSTRUCT ps;
       BeginPaint(hwnd, &ps);
@@ -169,7 +232,6 @@ private:
       return 0;
     }
 
-    // Forward mouse events to parent with corrected coordinates
     if (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN ||
         msg == WM_MOUSEMOVE   || msg == WM_MOUSEWHEEL) {
       HWND parent = GetParent(hwnd);
@@ -217,7 +279,7 @@ private:
     registerChildClass();
 
     childHwnd = CreateWindowExW(
-        WS_EX_NOPARENTNOTIFY,           // don't trigger parent repaints
+        WS_EX_NOPARENTNOTIFY,
         L"FluxGLGraph", nullptr,
         WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
         x, y, width, height,
@@ -281,7 +343,6 @@ private:
     if (!glRC || !glDC)
       return;
 
-    // Only switch context if not already current
     if (wglGetCurrentContext() != glRC)
       wglMakeCurrent(glDC, glRC);
 
@@ -370,8 +431,8 @@ private:
     glLineWidth(1.5f);
     glColor4f(0.6f, 0.6f, 0.6f, 1.0f);
     glBegin(GL_LINES);
-    glVertex2f(px0, py0); glVertex2f(px1, py0); // X axis
-    glVertex2f(px0, py0); glVertex2f(px0, py1); // Y axis
+    glVertex2f(px0, py0); glVertex2f(px1, py0);
+    glVertex2f(px0, py0); glVertex2f(px0, py1);
     glEnd();
   }
 
@@ -421,14 +482,12 @@ private:
       float l   = cx - barW * 0.5f;
       float r   = cx + barW * 0.5f;
 
-      // Fill
       glColor4f(s.r, s.g, s.b, 0.85f);
       glBegin(GL_QUADS);
       glVertex2f(l, baseline); glVertex2f(r, baseline);
       glVertex2f(r, top);      glVertex2f(l, top);
       glEnd();
 
-      // Outline — clamp to [0,1] to avoid undefined GL behavior
       glColor4f(min(s.r * 1.3f, 1.0f),
                 min(s.g * 1.3f, 1.0f),
                 min(s.b * 1.3f, 1.0f), 1.0f);
@@ -464,30 +523,48 @@ inline GraphWidgetPtr Graph(int w, int h) {
 // USAGE EXAMPLES
 // ============================================================================
 
-// 1. Simple line chart
+// 1. Simple line chart (unchanged)
 Graph(500, 300)
     ->addSeries("Temperature", {22,24,27,23,19,21,26}, 1.0f,0.4f,0.2f)
     ->setTitle("Daily Temps")
     ->setXLabels({"Mon","Tue","Wed","Thu","Fri","Sat","Sun"});
 
-// 2. Bar chart with multiple series
-Graph(600, 350)
-    ->setType(GraphType::Bar)
-    ->addSeries("Sales",  {120,95,180,75,200}, 0.2f,0.7f,1.0f)
-    ->addSeries("Target", {100,100,150,100,180},1.0f,0.6f,0.2f)
-    ->setXLabels({"Q1","Q2","Q3","Q4","Q5"});
+// 2. Reactive binding — State<vector<float>> drives the chart automatically
+//    No manual markNeedsPaint() or InvalidateRect() required.
+State<std::vector<float>> cpuData;
+Graph(600, 300)->addSeries("CPU", cpuData, 0.0f, 1.0f, 0.4f);
+// anywhere later:
+cpuData.set(newVector);          // chart repaints itself
 
-// 3. Area chart
-Graph(500, 280)
-    ->setType(GraphType::Area)
-    ->addSeries("Revenue", {10,40,30,80,60,95,110}, 0.3f,1.0f,0.5f)
-    ->setYRange(0, 130);
+// 3. Retrofit an existing series slot with bindSeries()
+auto chart = Graph(600, 300)->addSeries("CPU", initialVec);
+chart->bindSeries(0, cpuState);  // now series[0] tracks cpuState
 
-// 4. Update data at runtime (e.g. live sensor feed)
-auto liveChart = Graph(600, 300);
-liveChart->addSeries("CPU", cpuData, 0.0f,1.0f,0.4f);
-// later:
-liveChart->series[0].values.push_back(newValue);
-liveChart->markNeedsPaint();
+// 4. Live ring-buffer pattern (push graph example, cleaned up)
+class PushGraphComponent : public Component {
+  State<std::vector<float>> data{ {10,25,18,40,33}, context };
+  float phase = 0.0f;
 
+  WidgetPtr build() override {
+    return Scaffold(
+      AppBar("Push Graph"),
+      Column(
+        Graph(600, 300)->addSeries("Data", data, 0.2f,0.7f,1.0f)->setShowGrid(true),
+        Row(
+          Button(Text("Push"), [&]{
+            phase += 0.4f;
+            auto v = data.get();
+            v.push_back(std::sin(phase)*40.f + 50.f);
+            if ((int)v.size() > 40) v.erase(v.begin());
+            data.set(v);          // <-- that's it
+          }),
+          Button(Text("Clear"), [&]{
+            phase = 0.f;
+            data.set({});
+          })
+        )
+      )
+    );
+  }
+};
 */
