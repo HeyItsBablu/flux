@@ -58,6 +58,21 @@ public:
     return std::static_pointer_cast<TextWidget>(shared_from_this());
   }
 
+  template <typename T>
+  std::shared_ptr<TextWidget>
+  setText(State<T> &state, std::function<std::string(const T &)> transform) {
+    // Set initial value immediately using the transform
+    text = transform(state.get());
+
+    state.bindProperty(
+        shared_from_this(),
+        [transform](Widget *w, const T &val) { w->text = transform(val); },
+        true // needs layout — text content may change size
+    );
+
+    return std::static_pointer_cast<TextWidget>(shared_from_this());
+  }
+
   template <typename T> std::shared_ptr<TextWidget> setText(State<T> &state) {
     text = valueToString(state.get());
 
@@ -264,8 +279,6 @@ public:
           child->height - child->paddingTop - child->paddingBottom);
     }
   }
-
-
 
   // Helper method to set the child widget
   std::shared_ptr<ButtonWidget> setChild(WidgetPtr child) {
@@ -1095,6 +1108,14 @@ inline TextWidgetPtr Text(State<T> &state, const std::string &trueText,
       true // needs layout — text content changes
   );
 
+  return w;
+}
+
+template <typename T>
+inline TextWidgetPtr Text(State<T> &state,
+                          std::function<std::string(const T &)> transform) {
+  auto w = std::make_shared<TextWidget>();
+  w->setText(state, transform);
   return w;
 }
 
