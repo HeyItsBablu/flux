@@ -51,6 +51,7 @@ typedef char GLchar;
 // stb_image — drop stb_image.h next to this file
 // In exactly ONE .cpp file define STB_IMAGE_IMPLEMENTATION before including
 #include "stb_image.h"
+#include "stb_image_write.h"
 
 // ============================================================================
 // PRECISION SWITCH
@@ -466,6 +467,14 @@ public:
   // Public API
   // ----------------------------------------------------------------
 
+  HDC getGLDC() const { return glDC; }
+  HGLRC getGLRC() const { return glRC; }
+
+  void exportToFile(const std::string &path) {
+    wglMakeCurrent(glDC, glRC);
+    exportAdjustedImage(fboClarity.tex, imgW, imgH, path);
+  }
+
   // Load from file path
   std::shared_ptr<EditableImageWidget> loadImage(const std::string &path) {
     imagePath = path;
@@ -542,7 +551,19 @@ public:
   // Widget overrides
   // ----------------------------------------------------------------
 
-  void computeLayout(HDC, int, int, FontCache &) override {
+  void computeLayout(HDC hdc, int availableWidth, int availableHeight,
+                     FontCache &fontCache) override {
+    // Respect parent's offered space as a hard ceiling
+    if (autoWidth)
+      width = availableWidth;
+    else
+      width = min(width, availableWidth); // never exceed what parent offers
+
+    if (autoHeight)
+      height = availableHeight;
+    else
+      height = min(height, availableHeight); // never exceed what parent offers
+
     applyConstraints();
     needsLayout = false;
   }
@@ -696,6 +717,31 @@ private:
     glReady = true;
   }
 
+  void exportAdjustedImage(GLuint fboTex, int imgW, int imgH,
+                           const std::string &outPath) {
+    // Bind the FBO texture to read from it
+    GLuint fbo;
+    gl2.GenFramebuffers(1, &fbo);
+    gl2.BindFramebuffer(GL_FRAMEBUFFER, fbo);
+    gl2.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                             GL_TEXTURE_2D, fboTex, 0);
+
+    std::vector<unsigned char> pixels(imgW * imgH * 4);
+    glReadPixels(0, 0, imgW, imgH, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+
+    gl2.BindFramebuffer(GL_FRAMEBUFFER, 0);
+    gl2.DeleteFramebuffers(1, &fbo);
+
+    // Flip vertically (GL origin is bottom-left)
+    for (int y = 0; y < imgH / 2; y++) {
+      int opposite = imgH - 1 - y;
+      for (int x = 0; x < imgW * 4; x++)
+        std::swap(pixels[y * imgW * 4 + x], pixels[opposite * imgW * 4 + x]);
+    }
+
+    // Save using stb_image_write
+    stbi_write_png(outPath.c_str(), imgW, imgH, 4, pixels.data(), imgW * 4);
+  }
   // ----------------------------------------------------------------
   // Image upload
   // ----------------------------------------------------------------
@@ -764,8 +810,7 @@ private:
     gl2.EnableVertexAttribArray(aPos);
     gl2.EnableVertexAttribArray(aUV);
 
-
-    gl2.ActiveTexture(GL_TEXTURE0); 
+    gl2.ActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, tex);
     prog.set("uTex", 0);
 
