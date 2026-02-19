@@ -371,7 +371,7 @@ private:
 
       // 3. Normal hover state update + widget tree move
       bool hoverChanged =
-          updateHoverStates(instance->root.get(), mouseX, mouseY);
+          updateHoverStates(instance->root.get(), mouseX, mouseY); 
 
       bool customHandled = findAndHandleMouseEvent(
           instance->root.get(), mouseX, mouseY, [mouseX, mouseY](Widget *w) {

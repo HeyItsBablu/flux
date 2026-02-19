@@ -265,47 +265,113 @@ public:
                     ->Else([this]() -> WidgetPtr {
                       return Container(
                                  Column(
-                                     Container(
-                                         Center(
-                                             Column(
-                                                 Text("⬆")
-                                                     ->setFontSize(48)
-                                                     ->setTextColor(
-                                                         RGB(130, 100, 255)),
-                                                 Button(
-                                                     Text("Click to browse")
+                                     // Icon area
+                                     GestureDetector(
+                                         Container(
+                                             Center(
+                                                 Column(
+                                                     Text("⬆")
+                                                         ->setFontSize(48)
+                                                         ->setTextColor(RGB(
+                                                             130, 100, 255)),
+                                                     Text("Drop image here")
                                                          ->setFontSize(18)
                                                          ->setFontWeight(
                                                              FontWeight::Bold)
                                                          ->setTextColor(RGB(
                                                              255, 255, 255)),
-                                                     [this] {
-                                                       std::cout << "clicked"
-                                                                 << std::endl;
-                                                       std::string path =
-                                                           getOpenPath();
-                                                       if (!path.empty())
-                                                         imagePath.set(path);
-                                                     }
+                                                     Text("or click to browse")
+                                                         ->setFontSize(13)
+                                                         ->setTextColor(RGB(
+                                                             140, 140, 160)))
+                                                     ->setSpacing(10)
+                                                     ->setCrossAlignment(
+                                                         Alignment::Center)))
+                                             ->setWidth(420)
+                                             ->setHeight(260)
+                                             ->setBackgroundColor(
+                                                 RGB(30, 34, 52))
+                                             ->setBorderColor(
+                                                 RGB(130, 100, 255))
+                                             ->setBorderWidth(2)
+                                             ->setBorderRadius(16)
+                                             ->setHoverBackgroundColor(
+                                                 RGB(38, 42, 64))
+                                             ->setHoverBorderColor(
+                                                 RGB(170, 140, 255)))
+                                         ->setOnTap([this] {
+                                           std::cout << "Button Clicked"
+                                                     << std ::endl;
+                                           std::string path = getOpenPath();
 
-                                                     ),
-                                                 Text("or click to browse")
-                                                     ->setFontSize(13)
-                                                     ->setTextColor(
-                                                         RGB(140, 140, 160)))
-                                                 ->setSpacing(10)
-                                                 ->setCrossAlignment(
-                                                     Alignment::Center)))
-                                         ->setWidth(420)
-                                         ->setHeight(260)
-                                         ->setBackgroundColor(RGB(30, 34, 52))
-                                         ->setBorderColor(RGB(130, 100, 255))
-                                         ->setBorderWidth(2)
-                                         ->setBorderRadius(16)
-                                         ->setHoverBackgroundColor(
-                                             RGB(38, 42, 64))
+                                           if (!path.empty())
+                                             imagePath.set(path);
+                                         }),
 
-                                         )
+                                     // Divider row
+                                     Row(Container()
+                                             ->setHeight(1)
+                                             ->setFlex(1)
+                                             ->setBackgroundColor(
+                                                 RGB(50, 54, 72)),
+                                         Text("supported formats")
+                                             ->setFontSize(11)
+                                             ->setTextColor(RGB(80, 84, 100)),
+                                         Container()
+                                             ->setHeight(1)
+                                             ->setFlex(1)
+                                             ->setBackgroundColor(
+                                                 RGB(50, 54, 72)))
+                                         ->setSpacing(12)
+                                         ->setCrossAlignment(Alignment::Center)
+                                         ->setWidth(420),
+
+                                     // Format badges
+                                     Row(Container(Text("PNG")
+                                                       ->setFontSize(11)
+                                                       ->setTextColor(
+                                                           RGB(130, 100, 255)))
+                                             ->setPadding(6)
+                                             ->setBorderRadius(6)
+                                             ->setBackgroundColor(
+                                                 RGB(130, 100, 255, 25))
+                                             ->setBorderColor(
+                                                 RGB(130, 100, 255))
+                                             ->setBorderWidth(1),
+                                         Container(Text("JPG")
+                                                       ->setFontSize(11)
+                                                       ->setTextColor(
+                                                           RGB(130, 100, 255)))
+                                             ->setPadding(6)
+                                             ->setBorderRadius(6)
+                                             ->setBackgroundColor(
+                                                 RGB(130, 100, 255, 25))
+                                             ->setBorderColor(
+                                                 RGB(130, 100, 255))
+                                             ->setBorderWidth(1),
+                                         Container(Text("BMP")
+                                                       ->setFontSize(11)
+                                                       ->setTextColor(
+                                                           RGB(130, 100, 255)))
+                                             ->setPadding(6)
+                                             ->setBorderRadius(6)
+                                             ->setBackgroundColor(
+                                                 RGB(130, 100, 255, 25))
+                                             ->setBorderColor(
+                                                 RGB(130, 100, 255))
+                                             ->setBorderWidth(1),
+                                         Container(Text("JPEG")
+                                                       ->setFontSize(11)
+                                                       ->setTextColor(
+                                                           RGB(130, 100, 255)))
+                                             ->setPadding(6)
+                                             ->setBorderRadius(6)
+                                             ->setBackgroundColor(
+                                                 RGB(130, 100, 255, 25))
+                                             ->setBorderColor(
+                                                 RGB(130, 100, 255))
+                                             ->setBorderWidth(1))
+                                         ->setSpacing(8))
                                      ->setSpacing(24)
                                      ->setCrossAlignment(Alignment::Center))
                           ->setBackgroundColor(RGB(20, 24, 36))
