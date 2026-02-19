@@ -157,6 +157,52 @@ public:
 // --- Button Widget ---
 class ButtonWidget : public Widget {
 public:
+  bool handleMouseDown(int mx, int my) override {
+    if (mx >= x && mx < x + width && my >= y && my < y + height) {
+      _pressed = true;
+      markNeedsPaint(); // for press visual feedback
+      return true;      // consumed — stops tree-walk going into child
+    }
+    return false;
+  }
+
+  bool handleMouseUp(int mx, int my) override {
+    if (!_pressed)
+      return false;
+    _pressed = false;
+    markNeedsPaint();
+    if (mx >= x && mx < x + width && my >= y && my < y + height) {
+      if (onClick)
+        onClick();
+    }
+    return true;
+  }
+
+  // Optional: visual press state in render
+  void render(HDC hdc, FontCache &fontCache) override {
+    if (hasBackground) {
+      // Slightly darken when pressed
+      if (_pressed) {
+        COLORREF orig = backgroundColor;
+        backgroundColor =
+            RGB(max(0, GetRValue(orig) - 20), max(0, GetGValue(orig) - 20),
+                max(0, GetBValue(orig) - 20));
+        drawRoundedRectangle(hdc);
+        backgroundColor = orig;
+      } else {
+        drawRoundedRectangle(hdc);
+      }
+    }
+
+    if (!children.empty()) {
+      children[0]->render(hdc, fontCache);
+    } else if (!text.empty()) {
+      renderText(hdc, fontCache, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    }
+
+    needsPaint = false;
+  }
+
   void computeLayout(HDC hdc, int availableWidth, int availableHeight,
                      FontCache &fontCache) override {
     // If we have a child widget, compute its layout
@@ -219,22 +265,7 @@ public:
     }
   }
 
-  void render(HDC hdc, FontCache &fontCache) override {
-    // Draw button background
-    if (hasBackground) {
-      drawRoundedRectangle(hdc);
-    }
 
-    // Render child widget if present
-    if (!children.empty()) {
-      children[0]->render(hdc, fontCache);
-    } else if (!text.empty()) {
-      // Legacy text rendering
-      renderText(hdc, fontCache, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-    }
-
-    needsPaint = false;
-  }
 
   // Helper method to set the child widget
   std::shared_ptr<ButtonWidget> setChild(WidgetPtr child) {
@@ -288,7 +319,7 @@ public:
   }
 
   std::shared_ptr<ButtonWidget> setPaddingAll(int left, int top, int right,
-                                                 int bottom) {
+                                              int bottom) {
     paddingLeft = left;
     paddingTop = top;
     paddingRight = right;
@@ -297,6 +328,9 @@ public:
     markNeedsLayout();
     return std::static_pointer_cast<ButtonWidget>(shared_from_this());
   }
+
+private:
+  bool _pressed = false;
 };
 // --- Column Widget ---
 class ColumnWidget : public Widget {
