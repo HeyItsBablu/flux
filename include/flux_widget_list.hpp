@@ -58,20 +58,17 @@ public:
     return std::static_pointer_cast<TextWidget>(shared_from_this());
   }
 
-  template <typename T>
-  std::shared_ptr<TextWidget>
-  setText(State<T> &state, std::function<std::string(const T &)> transform) {
-    // Set initial value immediately using the transform
-    text = transform(state.get());
-
+template <typename T, typename F>
+std::shared_ptr<TextWidget> setText(State<T> &state, F transform) {
+    std::function<std::string(const T &)> fn = transform;
+    text = fn(state.get());
     state.bindProperty(
         shared_from_this(),
-        [transform](Widget *w, const T &val) { w->text = transform(val); },
-        true // needs layout — text content may change size
+        [fn](Widget *w, const T &val) { w->text = fn(val); },
+        true
     );
-
     return std::static_pointer_cast<TextWidget>(shared_from_this());
-  }
+}
 
   template <typename T> std::shared_ptr<TextWidget> setText(State<T> &state) {
     text = valueToString(state.get());
@@ -83,23 +80,7 @@ public:
     return std::static_pointer_cast<TextWidget>(shared_from_this());
   }
 
-  template <typename T>
-  std::shared_ptr<TextWidget> setText(State<T> &state,
-                                      const std::string &trueText,
-                                      const std::string &falseText) {
-    // Set initial value immediately
-    text = state.get() ? trueText : falseText;
 
-    state.bindProperty(
-        shared_from_this(),
-        [trueText, falseText](Widget *w, const T &val) {
-          w->text = val ? trueText : falseText;
-        },
-        true // needs layout - text change affects widget dimensions
-    );
-
-    return std::static_pointer_cast<TextWidget>(shared_from_this());
-  }
 
   std::shared_ptr<TextWidget> setTextColor(COLORREF color) {
     if (textColor != color) {
@@ -1094,28 +1075,12 @@ template <typename T> inline TextWidgetPtr Text(State<T> &state) {
   return w;
 }
 
-template <typename T>
-inline TextWidgetPtr Text(State<T> &state, const std::string &trueText,
-                          const std::string &falseText) {
+
+
+template <typename T, typename F>
+inline TextWidgetPtr Text(State<T> &state, F transform) {
   auto w = std::make_shared<TextWidget>();
-  w->text = state.get() ? trueText : falseText;
-
-  state.bindProperty(
-      w,
-      [trueText, falseText](Widget *widget, const T &val) {
-        widget->text = val ? trueText : falseText;
-      },
-      true // needs layout — text content changes
-  );
-
-  return w;
-}
-
-template <typename T>
-inline TextWidgetPtr Text(State<T> &state,
-                          std::function<std::string(const T &)> transform) {
-  auto w = std::make_shared<TextWidget>();
-  w->setText(state, transform);
+  w->setText(state, std::function<std::string(const T &)>(transform));
   return w;
 }
 
