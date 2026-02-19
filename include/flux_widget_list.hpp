@@ -862,10 +862,10 @@ public:
     return std::static_pointer_cast<ContainerWidget>(shared_from_this());
   }
 
-  std::shared_ptr<ContainerWidget> setOnClick(ClickHandler handler) {
-    onClick = handler;
-    return std::static_pointer_cast<ContainerWidget>(shared_from_this());
-  }
+  // std::shared_ptr<ContainerWidget> setOnClick(ClickHandler handler) {
+  //   onClick = handler;
+  //   return std::static_pointer_cast<ContainerWidget>(shared_from_this());
+  // }
 
   std::shared_ptr<ContainerWidget> setOnHover(HoverHandler handler) {
     onHover = handler;

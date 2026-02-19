@@ -270,6 +270,28 @@ public:
     return std::static_pointer_cast<SliderWidget>(shared_from_this());
   }
 
+  template <typename T, typename F>
+  std::shared_ptr<SliderWidget> setValue(State<T> &state, F transform) {
+    std::function<double(const T &)> fn = transform;
+
+    // Initial value
+    value = fn(state.get());
+    value = max(minValue, min(maxValue, value));
+
+    state.bindProperty(
+        shared_from_this(),
+        [fn](Widget *w, const T &val) {
+          auto *slider = static_cast<SliderWidget *>(w);
+
+          slider->value = fn(val);
+          slider->value =
+              max(slider->minValue, min(slider->maxValue, slider->value));
+        },
+        false);
+
+    return std::static_pointer_cast<SliderWidget>(shared_from_this());
+  }
+
 private:
   State<double> *boundDoubleState = nullptr;
   State<int> *boundIntState = nullptr;
