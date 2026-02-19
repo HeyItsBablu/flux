@@ -10,482 +10,418 @@
 // ============================================================================
 // SCROLLABLE LISTVIEW BUILDER WIDGET
 // ============================================================================
+//
+// Vertical (default):   ListView(state)->itemBuilder(...)
+// Horizontal:           ListView(state)->setHorizontal(true)->itemBuilder(...)
+//
+// Scrollbar appears on the right  (vertical mode)
+//                   or the bottom (horizontal mode)
 
-template <typename T> class ListViewBuilder : public Widget {
+template <typename T>
+class ListViewBuilder : public Widget {
 private:
-  State<std::vector<T>> *boundState = nullptr;
-  std::function<WidgetPtr(int, const T &)> builder;
-  std::function<WidgetPtr()> separatorBuilder;
-  int itemSpacing = 0;
-  int lastItemCount = 0;
-  std::shared_ptr<ListViewBuilder<T>> self;
+    State<std::vector<T>> *boundState     = nullptr;
+    std::function<WidgetPtr(int, const T &)> builder;
+    std::function<WidgetPtr()>               separatorBuilder;
+    int  itemSpacing   = 0;
+    int  lastItemCount = 0;
+    bool horizontal    = false;      // ← the one flag that changes everything
+    std::shared_ptr<ListViewBuilder<T>> self;
 
-  // Scroll state
-  int scrollOffset = 0;
-  int contentHeight = 0;
-  int viewportHeight = 0;
-  bool isScrollable = false;
+    // ── Scroll state ──────────────────────────────────────────────────────
+    int  scrollOffset    = 0;
+    int  contentMain     = 0;   // total length along the scroll axis
+    int  viewportMain    = 0;   // visible length along the scroll axis
+    bool isScrollable    = false;
 
-  // Scrollbar properties
-  int scrollbarWidth = 8;
-  int scrollbarThumbHeight = 0;
-  int scrollbarThumbY = 0;
-  bool isDraggingScrollbar = false;
-  int dragStartY = 0;
-  int dragStartOffset = 0;
+    // ── Scrollbar ─────────────────────────────────────────────────────────
+    int  scrollbarSize        = 8;   // width (vertical) or height (horizontal)
+    int  scrollbarThumbLength = 0;
+    int  scrollbarThumbOffset = 0;
+    bool isDraggingScrollbar  = false;
+    int  dragStartPos         = 0;
+    int  dragStartOffset      = 0;
+    bool isHoveringScrollbar  = false;
 
-  // Hover state
-  bool isHoveringScrollbar = false;
+    COLORREF scrollbarColor       = RGB(180, 180, 180);
+    COLORREF scrollbarHoverColor  = RGB(140, 140, 140);
+    COLORREF scrollbarActiveColor = RGB(100, 100, 100);
+    COLORREF scrollbarTrackColor  = RGB(245, 245, 245);
 
-  // Colors with hover states
-  COLORREF scrollbarColor = RGB(180, 180, 180);
-  COLORREF scrollbarHoverColor = RGB(140, 140, 140);
-  COLORREF scrollbarActiveColor = RGB(100, 100, 100);
-  COLORREF scrollbarTrackColor = RGB(245, 245, 245);
+    // ── Helpers ───────────────────────────────────────────────────────────
 
-  void rebuildList() {
-    if (!boundState || !builder)
-      return;
+    void rebuildList() {
+        if (!boundState || !builder) return;
 
-    const auto &items = boundState->get();
+        const auto &items = boundState->get();
+        if ((int)items.size() == lastItemCount && !children.empty()) return;
 
-    if (items.size() == lastItemCount && !children.empty())
-      return;
+        lastItemCount = (int)items.size();
+        children.clear();
 
-    lastItemCount = items.size();
-    children.clear();
+        for (size_t i = 0; i < items.size(); i++) {
+            auto w = builder((int)i, items[i]);
+            if (w) addChild(w);
 
-    for (size_t i = 0; i < items.size(); i++) {
-      auto itemWidget = builder(i, items[i]);
-      if (itemWidget) {
-        addChild(itemWidget);
-      }
-
-      if (separatorBuilder && i < items.size() - 1) {
-        auto separator = separatorBuilder();
-        if (separator) {
-          addChild(separator);
+            if (separatorBuilder && i < items.size() - 1) {
+                auto sep = separatorBuilder();
+                if (sep) addChild(sep);
+            }
         }
-      }
+        markNeedsLayout();
     }
 
-    markNeedsLayout();
-  }
-
-  void updateScrollbar() {
-    if (!isScrollable) {
-      scrollbarThumbHeight = 0;
-      scrollbarThumbY = 0;
-      return;
+    void clampScrollOffset() {
+        int maxScroll =max(0, contentMain - viewportMain);
+        scrollOffset  =max(0,min(scrollOffset, maxScroll));
     }
 
-    float visibleRatio = (float)viewportHeight / (float)contentHeight;
-    scrollbarThumbHeight = (int)(viewportHeight * visibleRatio);
+    void updateScrollbar() {
+        if (!isScrollable) { scrollbarThumbLength = scrollbarThumbOffset = 0; return; }
 
-    if (scrollbarThumbHeight < 30)
-      scrollbarThumbHeight = 30;
+        float visRatio        = (float)viewportMain / (float)contentMain;
+        scrollbarThumbLength  =max(30, (int)(viewportMain * visRatio));
 
-    if (contentHeight > viewportHeight) {
-      float scrollRatio =
-          (float)scrollOffset / (float)(contentHeight - viewportHeight);
-      scrollbarThumbY =
-          (int)(scrollRatio * (viewportHeight - scrollbarThumbHeight));
-    } else {
-      scrollbarThumbY = 0;
-    }
-  }
-
-  void clampScrollOffset() {
-    int maxScroll = contentHeight - viewportHeight;
-    if (maxScroll < 0)
-      maxScroll = 0;
-
-    if (scrollOffset < 0)
-      scrollOffset = 0;
-    if (scrollOffset > maxScroll)
-      scrollOffset = maxScroll;
-  }
-
-  void renderScrollbar(HDC hdc) {
-    if (!isScrollable)
-      return;
-
-    // Draw scrollbar track
-    HBRUSH trackBrush = CreateSolidBrush(scrollbarTrackColor);
-    RECT trackRect = {x + width - scrollbarWidth, y, x + width, y + height};
-    FillRect(hdc, &trackRect, trackBrush);
-    DeleteObject(trackBrush);
-
-    // Choose color based on state
-    COLORREF thumbColor = scrollbarColor;
-    if (isDraggingScrollbar) {
-      thumbColor = scrollbarActiveColor;
-    } else if (isHoveringScrollbar) {
-      thumbColor = scrollbarHoverColor;
+        float scrollRatio     = (float)scrollOffset /
+                                (float)(contentMain - viewportMain);
+        scrollbarThumbOffset  = (int)(scrollRatio *
+                                (viewportMain - scrollbarThumbLength));
     }
 
-    // Draw scrollbar thumb with state-based color
-    HBRUSH thumbBrush = CreateSolidBrush(thumbColor);
-    RECT thumbRect = {x + width - scrollbarWidth, y + scrollbarThumbY,
-                      x + width, y + scrollbarThumbY + scrollbarThumbHeight};
-    FillRect(hdc, &thumbRect, thumbBrush);
-    DeleteObject(thumbBrush);
-  }
-
-  // Helper to check if mouse is over scrollbar thumb
-  bool isMouseOverScrollbarThumb(int mx, int my) const {
-    if (!isScrollable)
-      return false;
-
-    int scrollbarX = x + width - scrollbarWidth;
-    int thumbTop = y + scrollbarThumbY;
-    int thumbBottom = thumbTop + scrollbarThumbHeight;
-
-    return (mx >= scrollbarX && mx < x + width && my >= thumbTop &&
-            my < thumbBottom);
-  }
-
-  // Release drag and reset to initial state
-  void releaseDragCapture() {
-    if (isDraggingScrollbar) {
-      isDraggingScrollbar = false;
-      isHoveringScrollbar = false;
-      ReleaseCapture();
+    void releaseDragCapture() {
+        if (isDraggingScrollbar) {
+            isDraggingScrollbar = false;
+            isHoveringScrollbar = false;
+            ReleaseCapture();
+        }
     }
-  }
+
+    bool isMouseOverThumb(int mx, int my) const {
+        if (!isScrollable) return false;
+        if (horizontal) {
+            int sbY = y + height - scrollbarSize;
+            return mx >= x + scrollbarThumbOffset &&
+                   mx <  x + scrollbarThumbOffset + scrollbarThumbLength &&
+                   my >= sbY && my < y + height;
+        } else {
+            int sbX = x + width - scrollbarSize;
+            return mx >= sbX && mx < x + width &&
+                   my >= y + scrollbarThumbOffset &&
+                   my <  y + scrollbarThumbOffset + scrollbarThumbLength;
+        }
+    }
+
+    void renderScrollbar(HDC hdc) {
+        COLORREF thumbColor = isDraggingScrollbar ? scrollbarActiveColor
+                            : isHoveringScrollbar ? scrollbarHoverColor
+                                                  : scrollbarColor;
+        RECT trackRect, thumbRect;
+
+        if (horizontal) {
+            int sbY   = y + height - scrollbarSize;
+            trackRect = { x,                         sbY, x + width,                              y + height };
+            thumbRect = { x + scrollbarThumbOffset,  sbY, x + scrollbarThumbOffset + scrollbarThumbLength, y + height };
+        } else {
+            int sbX   = x + width - scrollbarSize;
+            trackRect = { sbX, y,                          x + width, y + height                             };
+            thumbRect = { sbX, y + scrollbarThumbOffset,   x + width, y + scrollbarThumbOffset + scrollbarThumbLength };
+        }
+
+        HBRUSH br = CreateSolidBrush(scrollbarTrackColor);
+        FillRect(hdc, &trackRect, br);
+        DeleteObject(br);
+
+        br = CreateSolidBrush(thumbColor);
+        FillRect(hdc, &thumbRect, br);
+        DeleteObject(br);
+    }
+
+    void repositionChildren() {
+        int sbSize = isScrollable ? scrollbarSize : 0;
+
+        if (horizontal) {
+            int curX     = x + paddingLeft - scrollOffset;
+            int contentY = y + paddingTop;
+            int availH   = height - paddingTop - paddingBottom - sbSize;
+
+            for (size_t i = 0; i < children.size(); i++) {
+                auto &child = children[i];
+                child->x = curX;
+                child->y = contentY;
+                child->positionChildren(
+                    child->x + child->paddingLeft, child->y + child->paddingTop,
+                    child->width  - child->paddingLeft - child->paddingRight,
+                    child->height - child->paddingTop  - child->paddingBottom);
+                curX += child->width;
+                if (itemSpacing > 0 && i < children.size() - 1)
+                    curX += itemSpacing;
+            }
+        } else {
+            int curY     = y + paddingTop - scrollOffset;
+            int contentX = x + paddingLeft;
+
+            for (size_t i = 0; i < children.size(); i++) {
+                auto &child = children[i];
+                child->x = contentX;
+                child->y = curY;
+                child->positionChildren(
+                    child->x + child->paddingLeft, child->y + child->paddingTop,
+                    child->width  - child->paddingLeft - child->paddingRight,
+                    child->height - child->paddingTop  - child->paddingBottom);
+                curY += child->height;
+                if (itemSpacing > 0 && i < children.size() - 1)
+                    curY += itemSpacing;
+            }
+        }
+    }
 
 public:
-  ListViewBuilder(State<std::vector<T>> &state) : boundState(&state) {
-    lastItemCount = state.get().size();
+    explicit ListViewBuilder(State<std::vector<T>> &state)
+        : boundState(&state)
+    {
+        lastItemCount = (int)state.get().size();
 
-    state.listen([this](const std::vector<T> &newValue) {
-      rebuildList();
-
-      if (boundState && boundState->hasContext()) {
-        auto *ui = boundState->getContext();
-        if (ui) {
-          ui->partialRebuild(this);
-        }
-      }
-    });
-  }
-
-  ~ListViewBuilder() override {
-    if (isDraggingScrollbar) {
-      ReleaseCapture();
+        state.listen([this](const std::vector<T> &) {
+            rebuildList();
+            if (boundState && boundState->hasContext())
+                if (auto *ui = boundState->getContext())
+                    ui->partialRebuild(this);
+        });
     }
-  }
 
-  void setSelf(std::shared_ptr<ListViewBuilder<T>> ptr) { self = ptr; }
+    ~ListViewBuilder() override { if (isDraggingScrollbar) ReleaseCapture(); }
 
-  std::shared_ptr<ListViewBuilder<T>>
-  itemBuilder(std::function<WidgetPtr(int, const T &)> builderFunc) {
-    builder = builderFunc;
-    rebuildList();
-    return self;
-  }
+    void setSelf(std::shared_ptr<ListViewBuilder<T>> ptr) { self = ptr; }
 
-  std::shared_ptr<ListViewBuilder<T>>
-  separator(std::function<WidgetPtr()> separatorFunc) {
-    separatorBuilder = separatorFunc;
-    return self;
-  }
+    // ── Configuration ─────────────────────────────────────────────────────
 
-  std::shared_ptr<ListViewBuilder<T>> spacing(int space) {
-    itemSpacing = space;
-    return self;
-  }
+    std::shared_ptr<ListViewBuilder<T>>
+    itemBuilder(std::function<WidgetPtr(int, const T &)> fn) {
+        builder = fn; rebuildList(); return self;
+    }
 
-  bool handleMouseWheel(int delta) override {
-    if (!isScrollable)
-      return false;
+    std::shared_ptr<ListViewBuilder<T>>
+    separator(std::function<WidgetPtr()> fn) {
+        separatorBuilder = fn; return self;
+    }
 
-    int scrollAmount = (delta / WHEEL_DELTA) * 40;
-    scrollOffset -= scrollAmount;
+    std::shared_ptr<ListViewBuilder<T>> setSpacing(int s)
+        { itemSpacing = s; return self; }
 
-    clampScrollOffset();
-    updateScrollbar();
+    std::shared_ptr<ListViewBuilder<T>> setHorizontal(bool h) {
+        horizontal = h;
+        scrollOffset = 0;         // reset scroll when direction switches
+        markNeedsLayout();
+        return self;
+    }
 
-    positionChildren(x + paddingLeft, y + paddingTop,
-                     width - paddingLeft - paddingRight - scrollbarWidth,
-                     height - paddingTop - paddingBottom);
+    std::shared_ptr<ListViewBuilder<T>> setScrollbarSize(int s)
+        { scrollbarSize = s; return self; }
+    std::shared_ptr<ListViewBuilder<T>> setScrollbarColor(COLORREF c)
+        { scrollbarColor = c; return self; }
+    std::shared_ptr<ListViewBuilder<T>> setScrollbarHoverColor(COLORREF c)
+        { scrollbarHoverColor = c; return self; }
+    std::shared_ptr<ListViewBuilder<T>> setScrollbarActiveColor(COLORREF c)
+        { scrollbarActiveColor = c; return self; }
+    std::shared_ptr<ListViewBuilder<T>> setScrollbarTrackColor(COLORREF c)
+        { scrollbarTrackColor = c; return self; }
 
-    markNeedsPaint();
-    return true;
-  }
+    // ── Layout ────────────────────────────────────────────────────────────
 
-  bool handleMouseDown(int mx, int my) override {
-    if (!isScrollable)
-      return false;
+    void computeLayout(HDC hdc, int availableWidth, int availableHeight,
+                       FontCache &fontCache) override
+    {
+        rebuildList();
 
-    int scrollbarX = x + width - scrollbarWidth;
-    if (mx >= scrollbarX && mx < x + width) {
-      int thumbTop = y + scrollbarThumbY;
-      int thumbBottom = thumbTop + scrollbarThumbHeight;
+        if (autoWidth  || width  > availableWidth)  width  = availableWidth;
+        if (autoHeight || height > availableHeight)  height = availableHeight;
 
-      if (my >= thumbTop && my < thumbBottom) {
-        isDraggingScrollbar = true;
-        dragStartY = my;
-        dragStartOffset = scrollOffset;
+        int sbSize = isScrollable ? scrollbarSize : 0;
 
-        if (boundState && boundState->hasContext()) {
-          auto *ui = boundState->getContext();
-          if (ui && ui->getWindow()) {
-            SetCapture(ui->getWindow());
-          }
+        if (horizontal) {
+            viewportMain = width - paddingLeft - paddingRight;
+            int availH   = height - paddingTop - paddingBottom - sbSize;
+            int total    = 0, maxCross = 0;
+
+            for (size_t i = 0; i < children.size(); i++) {
+                children[i]->computeLayout(hdc, availableWidth, availH, fontCache);
+                total    += children[i]->width;
+                maxCross  = max(maxCross, children[i]->height);
+                if (itemSpacing > 0 && i < children.size() - 1)
+                    total += itemSpacing;
+            }
+            contentMain = total;
+        } else {
+            viewportMain = height - paddingTop - paddingBottom;
+            int availW   = width - paddingLeft - paddingRight - sbSize;
+            int total    = 0, maxCross = 0;
+
+            for (size_t i = 0; i < children.size(); i++) {
+                children[i]->computeLayout(hdc, availW, availableHeight, fontCache);
+                total    += children[i]->height;
+                maxCross  = max(maxCross, children[i]->width);
+                if (itemSpacing > 0 && i < children.size() - 1)
+                    total += itemSpacing;
+            }
+            contentMain = total;
         }
 
+        bool wasScrollable = isScrollable;
+        isScrollable = (contentMain > viewportMain);
+
+        if (wasScrollable && !isScrollable) {
+            scrollOffset = 0;
+            releaseDragCapture();
+            isHoveringScrollbar = false;
+        } else if (!wasScrollable && isScrollable) {
+            clampScrollOffset();
+        }
+
+        updateScrollbar();
+        applyConstraints();
+        needsLayout = false;
+    }
+
+    void positionChildren(int, int, int, int) override {
+        repositionChildren();
+    }
+
+    // ── Mouse events ──────────────────────────────────────────────────────
+
+    bool handleMouseWheel(int delta) override {
+        if (!isScrollable) return false;
+        scrollOffset -= (delta / WHEEL_DELTA) * 40;
+        clampScrollOffset();
+        updateScrollbar();
+        repositionChildren();
         markNeedsPaint();
         return true;
-      }
-
-      // Click on track - jump to position
-      float clickRatio = (float)(my - y) / (float)viewportHeight;
-      scrollOffset = (int)(clickRatio * (contentHeight - viewportHeight));
-      clampScrollOffset();
-      updateScrollbar();
-
-      positionChildren(x + paddingLeft, y + paddingTop,
-                       width - paddingLeft - paddingRight - scrollbarWidth,
-                       height - paddingTop - paddingBottom);
-
-      markNeedsPaint();
-      return true;
     }
 
-    return false;
-  }
+    bool handleMouseDown(int mx, int my) override {
+        if (!isScrollable) return false;
 
-  bool handleMouseUp(int mx, int my) override {
-    if (isDraggingScrollbar) {
-      releaseDragCapture();
-      markNeedsPaint();
-      return true;
-    }
-    return false;
-  }
+        // Check if click is inside the scrollbar strip
+        bool inScrollbarStrip = horizontal
+            ? (my >= y + height - scrollbarSize && my < y + height)
+            : (mx >= x + width  - scrollbarSize && mx < x + width);
 
-  bool handleMouseMove(int mx, int my) override {
-    if (isDraggingScrollbar) {
-      // Check if still scrollable during drag
-      if (!isScrollable) {
-        releaseDragCapture();
+        if (!inScrollbarStrip) return false;
+
+        int pos = horizontal ? mx - x : my - y;
+
+        if (pos >= scrollbarThumbOffset &&
+            pos <  scrollbarThumbOffset + scrollbarThumbLength)
+        {
+            // Drag thumb
+            isDraggingScrollbar = true;
+            dragStartPos        = horizontal ? mx : my;
+            dragStartOffset     = scrollOffset;
+
+            if (boundState && boundState->hasContext())
+                if (auto *ui = boundState->getContext())
+                    if (ui->getWindow())
+                        SetCapture(ui->getWindow());
+            markNeedsPaint();
+            return true;
+        }
+
+        // Click on track — jump
+        float ratio  = (float)pos / (float)viewportMain;
+        scrollOffset = (int)(ratio * (contentMain - viewportMain));
+        clampScrollOffset();
+        updateScrollbar();
+        repositionChildren();
         markNeedsPaint();
         return true;
-      }
-
-      // Continue dragging - works even outside bounds thanks to SetCapture()
-      int deltaY = my - dragStartY;
-      float scrollRatio =
-          (float)deltaY / (float)(viewportHeight - scrollbarThumbHeight);
-      scrollOffset = dragStartOffset +
-                     (int)(scrollRatio * (contentHeight - viewportHeight));
-
-      clampScrollOffset();
-      updateScrollbar();
-
-      positionChildren(x + paddingLeft, y + paddingTop,
-                       width - paddingLeft - paddingRight - scrollbarWidth,
-                       height - paddingTop - paddingBottom);
-
-      markNeedsPaint();
-      return true;
     }
 
-    // Update hover state if not dragging
-    bool wasHovering = isHoveringScrollbar;
-
-    if (isScrollable) {
-      isHoveringScrollbar = isMouseOverScrollbarThumb(mx, my);
-    } else {
-      isHoveringScrollbar = false;
+    bool handleMouseUp(int mx, int my) override {
+        if (isDraggingScrollbar) {
+            releaseDragCapture();
+            markNeedsPaint();
+            return true;
+        }
+        return false;
     }
 
-    // Repaint if hover state changed
-    if (wasHovering != isHoveringScrollbar) {
-      markNeedsPaint();
-      return true;
+    bool handleMouseMove(int mx, int my) override {
+        if (isDraggingScrollbar) {
+            if (!isScrollable) { releaseDragCapture(); markNeedsPaint(); return true; }
+
+            int   curPos  = horizontal ? mx : my;
+            int   delta   = curPos - dragStartPos;
+            float ratio   = (float)delta / (float)(viewportMain - scrollbarThumbLength);
+            scrollOffset  = dragStartOffset + (int)(ratio * (contentMain - viewportMain));
+            clampScrollOffset();
+            updateScrollbar();
+            repositionChildren();
+            markNeedsPaint();
+            return true;
+        }
+
+        bool wasHovering    = isHoveringScrollbar;
+        isHoveringScrollbar = isScrollable && isMouseOverThumb(mx, my);
+        if (wasHovering != isHoveringScrollbar) { markNeedsPaint(); return true; }
+        return false;
     }
 
-    return false;
-  }
-
-  bool handleMouseLeave() override {
-    // Clear hover state when mouse leaves
-    bool changed = isHoveringScrollbar;
-    isHoveringScrollbar = false;
-
-    if (changed) {
-      markNeedsPaint();
-      return true;
-    }
-    return false;
-  }
-
-  void computeLayout(HDC hdc, int availableWidth, int availableHeight,
-                     FontCache &fontCache) override {
-    rebuildList();
-    // Always constrain to available space — parent knows best
-    if (autoHeight || height > availableHeight) {
-      height = availableHeight;
-    }
-    if (autoWidth || width > availableWidth) {
-      width = availableWidth;
+    bool handleMouseLeave() override {
+        bool changed        = isHoveringScrollbar;
+        isHoveringScrollbar = false;
+        if (changed) { markNeedsPaint(); return true; }
+        return false;
     }
 
-    viewportHeight = height - paddingTop - paddingBottom;
-    int contentWidth = availableWidth - paddingLeft - paddingRight;
-    int totalHeight = 0;
-    int maxWidth = 0;
+    // ── Render ────────────────────────────────────────────────────────────
 
-    for (size_t i = 0; i < children.size(); i++) {
-      auto &child = children[i];
-      child->computeLayout(hdc, contentWidth - scrollbarWidth, viewportHeight,
-                           fontCache);
+    void render(HDC hdc, FontCache &fontCache) override {
+        updateScrollbar();
 
-      totalHeight += child->height;
-      if (child->width > maxWidth)
-        maxWidth = child->width;
+        int sbSize = isScrollable ? scrollbarSize : 0;
 
-      if (itemSpacing > 0 && i < children.size() - 1) {
-        totalHeight += itemSpacing;
-      }
+        // Clip to viewport
+        RECT clipRect;
+        if (horizontal) {
+            clipRect = { x + paddingLeft,  y + paddingTop,
+                         x + width - paddingRight, y + height - paddingBottom - sbSize };
+        } else {
+            clipRect = { x + paddingLeft,  y + paddingTop,
+                         x + width - paddingRight - sbSize, y + height - paddingBottom };
+        }
+
+        HRGN clip = CreateRectRgn(clipRect.left, clipRect.top,
+                                  clipRect.right, clipRect.bottom);
+        SelectClipRgn(hdc, clip);
+
+        if (hasBackground) drawRoundedRectangle(hdc);
+
+        for (auto &child : children) {
+            bool visible = horizontal
+                ? (child->x + child->width  >= clipRect.left && child->x < clipRect.right)
+                : (child->y + child->height >= clipRect.top  && child->y < clipRect.bottom);
+            if (visible) child->render(hdc, fontCache);
+        }
+
+        SelectClipRgn(hdc, NULL);
+        DeleteObject(clip);
+
+        if (isScrollable) renderScrollbar(hdc);
+
+        needsPaint = false;
     }
-
-    contentHeight = totalHeight;
-
-    bool wasScrollable = isScrollable;
-    isScrollable = (contentHeight > viewportHeight);
-
-    if (wasScrollable && !isScrollable) {
-      // Became non-scrollable - reset everything
-      scrollOffset = 0;
-      releaseDragCapture();
-      isHoveringScrollbar = false;
-      scrollbarThumbHeight = 0;
-      scrollbarThumbY = 0;
-    } else if (!wasScrollable && isScrollable) {
-      // Became scrollable - ensure valid scroll offset
-      clampScrollOffset();
-    }
-
-    contentWidth = availableWidth - paddingLeft - paddingRight -
-                   (isScrollable ? scrollbarWidth : 0);
-
-    if (autoWidth)
-      width = maxWidth + paddingLeft + paddingRight +
-              (isScrollable ? scrollbarWidth : 0);
-    if (autoHeight)
-      height = viewportHeight + paddingTop + paddingBottom;
-
-    updateScrollbar();
-    applyConstraints();
-    needsLayout = false;
-  }
-
-  void positionChildren(int contentX, int contentY, int contentWidth,
-                        int contentHeight) override {
-    int currentY = contentY - scrollOffset;
-
-    for (size_t i = 0; i < children.size(); i++) {
-      auto &child = children[i];
-
-      child->x = contentX;
-      child->y = currentY;
-
-      child->positionChildren(
-          child->x + child->paddingLeft, child->y + child->paddingTop,
-          child->width - child->paddingLeft - child->paddingRight,
-          child->height - child->paddingTop - child->paddingBottom);
-
-      currentY += child->height;
-
-      if (itemSpacing > 0 && i < children.size() - 1) {
-        currentY += itemSpacing;
-      }
-    }
-  }
-
-  void render(HDC hdc, FontCache &fontCache) override {
-    updateScrollbar();
-
-    int clipRight =
-        x + width - paddingRight - (isScrollable ? scrollbarWidth : 0);
-
-    HRGN clipRegion = CreateRectRgn(x + paddingLeft, y + paddingTop, clipRight,
-                                    y + height - paddingBottom);
-    SelectClipRgn(hdc, clipRegion);
-
-    if (hasBackground) {
-      drawRoundedRectangle(hdc);
-    }
-
-    for (auto &child : children) {
-      int childTop = child->y;
-      int childBottom = child->y + child->height;
-      int viewportTop = y + paddingTop;
-      int viewportBottom = y + height - paddingBottom;
-
-      if (childBottom >= viewportTop && childTop < viewportBottom) {
-        child->render(hdc, fontCache);
-      }
-    }
-
-    SelectClipRgn(hdc, NULL);
-    DeleteObject(clipRegion);
-
-    if (isScrollable) {
-      renderScrollbar(hdc);
-    }
-
-    needsPaint = false;
-  }
-
-  // Optional scrollbar customization
-  std::shared_ptr<ListViewBuilder<T>> setScrollbarColor(COLORREF color) {
-    scrollbarColor = color;
-    return self;
-  }
-
-  std::shared_ptr<ListViewBuilder<T>> setScrollbarHoverColor(COLORREF color) {
-    scrollbarHoverColor = color;
-    return self;
-  }
-
-  std::shared_ptr<ListViewBuilder<T>> setScrollbarActiveColor(COLORREF color) {
-    scrollbarActiveColor = color;
-    return self;
-  }
-
-  std::shared_ptr<ListViewBuilder<T>> setScrollbarTrackColor(COLORREF color) {
-    scrollbarTrackColor = color;
-    return self;
-  }
-
-  std::shared_ptr<ListViewBuilder<T>> setScrollbarWidth(int width) {
-    scrollbarWidth = width;
-    return self;
-  }
-
-  std::shared_ptr<ListViewBuilder<T>> setSpacing(int s) {
-    if (spacing != s) {
-      spacing = s;
-      markNeedsLayout();
-    }
-    return std::static_pointer_cast<ListViewBuilder<T>>(shared_from_this());
-  }
 };
 
 // ============================================================================
-// FACTORY FUNCTION
+// FACTORY
 // ============================================================================
 
 template <typename T>
 inline std::shared_ptr<ListViewBuilder<T>>
 ListView(State<std::vector<T>> &state) {
-  auto widget = std::make_shared<ListViewBuilder<T>>(state);
-  widget->setSelf(widget);
-  return widget;
+    auto w = std::make_shared<ListViewBuilder<T>>(state);
+    w->setSelf(w);
+    return w;
 }
 
 #endif // FLUX_LISTVIEW_HPP
