@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flux Widget API</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Sora:wght@300;400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d0f14;
+    --surface: #13161e;
+    --surface2: #1a1e2a;
+    --border: #252a38;
+    --accent: #5b8af0;
+    --accent2: #a78bfa;
+    --green: #4ade80;
+    --amber: #fbbf24;
+    --red: #f87171;
+    --text: #e2e8f0;
+    --muted: #6b7280;
+    --code-bg: #0a0c10;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Sora', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    font-size: 15px;
+  }
+
+  /* Layout */
+  .shell { display: flex; min-height: 100vh; }
+
+  /* Sidebar */
+  nav {
+    width: 260px;
+    flex-shrink: 0;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: 32px 0;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+  }
+
+  .nav-logo {
+    padding: 0 24px 28px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+  }
+  .nav-logo span {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .nav-logo p { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  .nav-section { padding: 6px 24px 4px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px; color: var(--muted); margin-top: 12px; }
+
+  nav a {
+    display: block;
+    padding: 7px 24px;
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 13.5px;
+    transition: all 0.15s;
+    border-left: 2px solid transparent;
+  }
+  nav a:hover {
+    color: var(--text);
+    background: var(--surface2);
+    border-left-color: var(--accent);
+  }
+
+  /* Main */
+  main {
+    flex: 1;
+    padding: 60px 72px;
+    max-width: 980px;
+  }
+
+  /* Hero */
+  .hero {
+    margin-bottom: 64px;
+    padding-bottom: 48px;
+    border-bottom: 1px solid var(--border);
+  }
+  .hero .tag {
+    display: inline-block;
+    background: rgba(91,138,240,0.12);
+    color: var(--accent);
+    border: 1px solid rgba(91,138,240,0.25);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 4px 12px;
+    border-radius: 20px;
+    margin-bottom: 18px;
+  }
+  .hero h1 {
+    font-size: 46px;
+    font-weight: 700;
+    letter-spacing: -1.5px;
+    line-height: 1.1;
+    background: linear-gradient(160deg, #fff 0%, #94a3b8 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 16px;
+  }
+  .hero p {
+    font-size: 17px;
+    color: var(--muted);
+    max-width: 560px;
+    font-weight: 300;
+  }
+
+  /* Section headings */
+  h2 {
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    color: #fff;
+    margin-bottom: 8px;
+    scroll-margin-top: 32px;
+  }
+  h3 {
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--text);
+    margin: 28px 0 10px;
+    scroll-margin-top: 32px;
+  }
+  .section-desc {
+    color: var(--muted);
+    font-size: 14.5px;
+    margin-bottom: 28px;
+  }
+
+  /* Widget card */
+  .widget-section {
+    margin-bottom: 64px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+  }
+  .widget-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 12px;
+  }
+  .widget-badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 4px 12px;
+    border-radius: 6px;
+    white-space: nowrap;
+  }
+  .badge-layout { background: rgba(251,191,36,0.1); color: var(--amber); border: 1px solid rgba(251,191,36,0.2); }
+  .badge-display { background: rgba(74,222,128,0.1); color: var(--green); border: 1px solid rgba(74,222,128,0.2); }
+  .badge-interaction { background: rgba(248,113,113,0.1); color: var(--red); border: 1px solid rgba(248,113,113,0.2); }
+  .badge-structure { background: rgba(167,139,250,0.1); color: var(--accent2); border: 1px solid rgba(167,139,250,0.2); }
+  .badge-utility { background: rgba(91,138,240,0.1); color: var(--accent); border: 1px solid rgba(91,138,240,0.2); }
+
+  /* Code */
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 22px;
+    overflow-x: auto;
+    margin: 14px 0 20px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    line-height: 1.8;
+  }
+  code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    background: rgba(255,255,255,0.06);
+    padding: 2px 7px;
+    border-radius: 4px;
+    color: #c4b5fd;
+  }
+  pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+
+  /* Syntax colors */
+  .kw { color: #f472b6; }
+  .type { color: #60a5fa; }
+  .fn { color: #fbbf24; }
+  .str { color: #4ade80; }
+  .num { color: #fb923c; }
+  .cm { color: #4b5563; font-style: italic; }
+  .punct { color: #9ca3af; }
+
+  /* Props table */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0 28px;
+    font-size: 13.5px;
+  }
+  th {
+    text-align: left;
+    padding: 10px 16px;
+    background: var(--surface2);
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    border: 1px solid var(--border);
+  }
+  td {
+    padding: 10px 16px;
+    border: 1px solid var(--border);
+    vertical-align: top;
+    color: var(--text);
+  }
+  tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+  td:first-child { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; color: var(--accent); }
+  td:nth-child(2) { color: var(--amber); font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+  td:last-child { color: var(--muted); font-size: 13px; }
+
+  /* Note callout */
+  .note {
+    background: rgba(91,138,240,0.07);
+    border: 1px solid rgba(91,138,240,0.2);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 8px 8px 0;
+    padding: 14px 18px;
+    font-size: 13.5px;
+    color: #94a3b8;
+    margin: 16px 0;
+  }
+  .note strong { color: var(--accent); }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- Sidebar -->
+  <nav>
+    <div class="nav-logo">
+      <span>Flux</span>
+      <p>Widget API Reference</p>
+    </div>
+
+    <div class="nav-section">Display</div>
+    <a href="#text">Text</a>
+    <a href="#divider">Divider</a>
+
+    <div class="nav-section">Interaction</div>
+    <a href="#button">Button</a>
+
+    <div class="nav-section">Layout</div>
+    <a href="#row">Row</a>
+    <a href="#column">Column</a>
+    <a href="#container">Container</a>
+    <a href="#center">Center</a>
+    <a href="#expanded">Expanded</a>
+    <a href="#sizedbox">SizedBox</a>
+    <a href="#padding">Padding</a>
+
+    <div class="nav-section">Structure</div>
+    <a href="#scaffold">Scaffold</a>
+    <a href="#appbar">AppBar</a>
+    <a href="#card">Card</a>
+
+    <div class="nav-section">State</div>
+    <a href="#state">State Binding</a>
+  </nav>
+
+  <!-- Main content -->
+  <main>
+
+    <!-- Hero -->
+    <div class="hero">
+      <div class="tag">C++ / Win32</div>
+      <h1>Flux Widgets</h1>
+      <p>A declarative, Flutter-inspired widget toolkit for building native Windows UIs. Chain methods, compose layouts, and bind reactive state.</p>
+    </div>
+
+    <!-- ── TEXT ── -->
+    <div class="widget-section" id="text">
+      <div class="widget-header">
+        <h2>Text</h2>
+        <span class="widget-badge badge-display">Display</span>
+      </div>
+      <p class="section-desc">Renders a string of text. Auto-sizes to its content by default.</p>
+
+      <pre><code><span class="cm">// Basic usage</span>
+<span class="kw">auto</span> label <span class="punct">=</span> <span class="fn">Text</span><span class="punct">(</span><span class="str">"Hello, world!"</span><span class="punct">)</span>
+    <span class="punct">-></span><span class="fn">setFontSize</span><span class="punct">(</span><span class="num">18</span><span class="punct">)</span>
+    <span class="punct">-></span><span class="fn">setFontWeight</span><span class="punct">(</span><span class="type">FontWeight</span><span class="punct">::</span>Bold<span class="punct">)</span>
+    <span class="punct">-></span><span class="fn">setTextColor</span><span class="punct">(</span><span class="fn">RGB</span><span class="punct">(</span><span class="num">30, 30, 30</span><span class="punct">))</span>
+    <span class="punct">-></span><span class="fn">setPadding</span><span class="punct">(</span><span class="num">12</span><span class="punct">);</span>
+
+<span class="cm">// Bound to state</span>
+<span class="kw">auto</span> counter <span class="punct">=</span> <span class="fn">Text</span><span class="punct">(</span>myState<span class="punct">);</span></code></pre>
+
+      <h3>Factory</h3>
+      <table>
+        <tr><th>Signature</th><th>Description</th></tr>
+        <tr><td>Text(string)</td><td>Static text</td></tr>
+        <tr><td>Text(State&lt;T&gt;)</td><td>Reactive text, auto-updates when state changes</td></tr>
+        <tr><td>Text(State&lt;T&gt;, trueStr, falseStr)</td><td>Toggle between two strings based on bool state</td></tr>
+      </table>
+
+      <h3>Methods</h3>
+      <table>
+        <tr><th>Method</th><th>Type</th><th>Description</th></tr>
+        <tr><td>setText(string)</td><td>string</td><td>Set or change the displayed text</td></tr>
+        <tr><td>setFontSize(size)</td><td>int</td><td>Font size in points</td></tr>
+        <tr><td>setFontWeight(weight)</td><td>FontWeight</td><td>Normal or Bold</td></tr>
+        <tr><td>setTextColor(color)</td><td>COLORREF</td><td>Text color</td></tr>
+        <tr><td>setHoverTextColor(color)</td><td>COLORREF</td><td>Text color on mouse hover</td></tr>
+        <tr><td>setPadding(p)</td><td>int</td><td>Uniform padding on all sides</td></tr>
+        <tr><td>setBackgroundColor(color)</td><td>COLORREF</td><td>Fill background behind text</td></tr>
+        <tr><td>setBorderRadius(r)</td><td>int</td><td>Corner rounding for background</td></tr>
+        <tr><td>setWidth(w)</td><td>int</td><td>Fixed width (disables auto-sizing)</td></tr>
+        <tr><td>setHeight(h)</td><td>int</td><td>Fixed height (disables auto-sizing)</td></tr>
+        <tr><td>setMinWidth(w)</td><td>int</td><td>Minimum width constraint</td></tr>
+      </table>
+    </div>
+
+    <!-- ── BUTTON ── -->
+    <div class="widget-section" id="button">
+      <div class="widget-header">
+        <h2>Button</h2>
+        <span class="widget-badge badge-interaction">Interaction</span>
+      </div>
+      <p class="section-desc">A clickable widget with a background. Accepts either a text label or a child widget for fully custom content.</p>
+
+      <pre><code><span class="cm">// Text button</span>
+<span class="kw">auto</span> btn <span class="punct">=</span> <span class="fn">Button</span><span class="punct">(</span><span class="str">"Save"</span><span class="punct">, [</span><span class="punct">&</span><span class="punct">](){</span>
+    <span class="cm">// handle click</span>
+<span class="punct">})</span>
+    <span class="punct">-></span><span class="fn">setBackgroundColor</span><span class="punct">(</span><span class="fn">RGB</span><span class="punct">(</span><span class="num">59, 130, 246</span><span class="punct">))</span>
+    <span class="punct">-></span><span class="fn">setHoverBackgroundColor</span><span class="punct">(</span><span class="fn">RGB</span><span class="punct">(</span><span class="num">37, 99, 235</span><span class="punct">))</span>
+    <span class="punct">-></span><span class="fn">setBorderRadius</span><span class="punct">(</span><span class="num">6</span><span class="punct">)</span>
+    <span class="punct">-></span><span class="fn">setPadding</span><span class="punct">(</span><span class="num">12</span><span class="punct">);</span>
+
+<span class="cm">// Widget child button</span>
+<span class="kw">auto</span> iconBtn <span class="punct">=</span> <span class="fn">Button</span><span class="punct">(</span><span class="fn">Text</span><span class="punct">(</span><span class="str">"★ Star"</span><span class="punct">)</span>
+    <span class="punct">-></span><span class="fn">setFontSize</span><span class="punct">(</span><span class="num">16</span><span class="punct">),</span> onClick<span class="punct">);</span></code></pre>
+
+      <h3>Factory</h3>
+      <table>
+        <tr><th>Signature</th><th>Description</th></tr>
+        <tr><td>Button(string, onClick?)</td><td>Text-only button with optional click handler</td></tr>
+        <tr><td>Button(WidgetPtr, onClick?)</td><td>Custom child widget inside the button</td></tr>
+      </table>
+
+      <h3>Methods</h3>
+      <table>
+        <tr><th>Method</th><th>Type</th><th>Description</th></tr>
+        <tr><td>setOnClick(handler)</td><td>function</td><td>Click callback — <code>[](){}</code></td></tr>
+        <tr><td>setBackgroundColor(color)</td><td>COLORREF</td><td>Default background</td></tr>
+        <tr><td>setHoverBackgroundColor(color)</td><td>COLORREF</td><td>Background on hover</td></tr>
+        <tr><td>setTextColor(color)</td><td>COLORREF</td><td>Text color (text mode only)</td></tr>
+        <tr><td>setBorderRadius(r)</td><td>int</td><td>Corner rounding</td></tr>
+        <tr><td>setPadding(p)</td><td>int</td><td>Uniform padding</td></tr>
+        <tr><td>setPaddingAll(l, t, r, b)</td><td>int×4</td><td>Individual side padding</td></tr>
+        <tr><td>setWidth(w)</td><td>int</td><td>Fixed width</td></tr>
+        <tr><td>setHeight(h)</td><td>int</td><td>Fixed height</td></tr>
+        <tr><td>setChild(widget)</td><td>WidgetPtr</td><td>Replace child widget</td></tr>
+      </table>
+    </div>
+
+    <!-- ── ROW ── -->
+    <div class="widget-section" id="row">
+      <div class="widget-header">
+        <h2>Row</h2>
+        <span class="widget-badge badge-layout">Layout</span>
+      </div>
+      <p class="section-desc">Lays out children horizontally. Supports flex expansion and alignment on both axes.</p>
+
+      <pre><code><span class="kw">auto</span> row <span class="punct">=</span> <span class="fn">Row</span><span class="punct">(</span>
+    <span class="fn">Text</span><span class="punct">(</span><span class="str">"Left"</span><span class="punct">),</span>
+    <span class="fn">Expanded</span><span class="punct">(</span><span class="fn">SizedBox</span><span class="punct">(</span><span class="num">0</span><span class="punct">,</span> <span class="num">0</span><span class="punct">)),</span>  <span class="cm">// spacer</span>
+    <span class="fn">Text</span><span class="punct">(</span><span class="str">"Right"</span><span class="punct">)</span>
+<span class="punct">)</span>
+    <span class="punct">-></span><span class="fn">setSpacing</span><span class="punct">(</span><span class="num">12</span><span class="punct">)</span>
+    <span class="punct">-></span><span class="fn">setCrossAlignment</span><span class="punct">(</span><span class="type">Alignment</span><span class="punct">::</span>Center<span class="punct">);</span></code></pre>
+
+      <h3>Methods</h3>
+      <table>
+        <tr><th>Method</th><th>Type</th><th>Description</th></tr>
+        <tr><td>setSpacing(s)</td><td>int</td><td>Gap between children</td></tr>
+        <tr><td>setMainAxisAlignment(a)</td><td>MainAxisAlignment</td><td>Horizontal distribution: Start, Center, End</td></tr>
+        <tr><td>setCrossAlignment(a)</td><td>Alignment</td><td>Vertical alignment: Start, Center, End, Stretch</td></tr>
+        <tr><td>setAlignment(a)</td><td>Alignment</td><td>General alignment shorthand</td></tr>
+        <tr><td>setWidth(w)</td><td>int</td><td>Fixed width</td></tr>
+        <tr><td>setHeight(h)</td><td>int</td><td>Fixed height</td></tr>
+        <tr><td>setPadding(p)</td><td>int</td><td>Uniform padding</td></tr>
+        <tr><td>setBackgroundColor(color)</td><td>COLORREF</td><td>Background fill</td></tr>
+        <tr><td>setFlex(f)</td><td>int</td><td>Flex factor when inside Column</td></tr>
+      </table>
+    </div>
+
+    <!-- ── COLUMN ── -->
+    <div class="widget-section" id="column">
+      <div class="widget-header">
+        <h2>Column</h2>
+        <span class="widget-badge badge-layout">Layout</span>
+      </div>
+      <p class="section-desc">Lays out children vertically. Works symmetrically to Row — identical API, vertical axis.</p>
+
+      <pre><code><span class="kw">auto</span> col <span class="punct">=</span> <span class="fn">Column</span><span class="punct">(</span>
+    <span class="fn">Text</span><span class="punct">(</span><span class="str">"Title"</span><span class="punct">)-></span><span class="fn">setFontSize</span><span class="punct">(</span><span class="num">20</span><span class="punct">),</span>
+    <span class="fn">Text</span><span class="punct">(</span><span class="str">"Subtitle"</span><span class="punct">),</span>
+    <span class="fn">Expanded</span><span class="punct">(</span>contentWidget<span class="punct">)</span>
+<span class="punct">)</span>
+    <span class="punct">-></span><span class="fn">setSpacing</span><span class="punct">(</span><span class="num">8</span><span class="punct">)</span>
+    <span class="punct">-></span><span class="fn">setCrossAlignment</span><span class="punct">(</span><span class="type">Alignment</span><span class="punct">::</span>Stretch<span class="punct">);</span></code></pre>
+
+      <h3>Methods</h3>
+      <table>
+        <tr><th>Method</th><th>Type</th><th>Description</th></tr>
+        <tr><td>setSpacing(s)</td><td>int</td><td>Gap between children</td></tr>
+        <tr><td>setMainAxisAlignment(a)</td><td>MainAxisAlignment</td><td>Vertical distribution: Start, Center, End</td></tr>
+        <tr><td>setCrossAlignment(a)</td><td>Alignment</td><td>Horizontal alignment: Start, Center, End, Stretch</td></tr>
+        <tr><td>setAlignment(a)</td><td>Alignment</td><td>General alignment shorthand</td></tr>
+        <tr><td>setWidth(w)</td><td>int</td><td>Fixed width</td></tr>
+        <tr><td>setHeight(h)</td><td>int</td><td>Fixed height</td></tr>
+        <tr><td>setPadding(p)</td><td>int</td><td>Uniform padding</td></tr>
+        <tr><td>setBackgroundColor(color)</td><td>COLORREF</td><td>Background fill</td></tr>
+        <tr><td>setFlex(f)</td><td>int</td><td>Flex factor when inside another Column</td></tr>
+      </table>
+    </div>
+
+    <!-- ── CONTAINER ── -->
+    <div class="widget-section" id="container">
+      <div class="widget-header">
+        <h2>Container</h2>
+        <span class="widget-badge badge-layout">Layout</span>
+      </div>
+      <p class="section-desc">A single-child box widget with full styling support — borders, background, padding, margin, constraints, and event handlers. The most versatile primitive.</p>
+
+      <pre><code><span class="kw">auto</span> box <span class="punct">=</span> <span class="fn">Container</span><span class="punct">(</span>child<span class="punct">)</span>
+    <span class="punct">-></span><span class="fn">setBackgroundColor</span><span class="punct">(</span><span class="fn">RGB</span><span class="punct">(</span><span class="num">255, 255, 255</span><span class="punct">))</span>
+    <span class="punct">-></span><span class="fn">setBorderColor</span><span class="punct">(</span><span class="fn">RGB</span><span class="punct">(</span><span class="num">200, 200, 200</span><span class="punct">))</span>
+    <span class="punct">-></span><span class="fn">setBorderWidth</span><span class="punct">(</span><span class="num">1</span><span class="punct">)</span>
+    <span class="punct">-></span><span class="fn">setBorderRadius</span><span class="punct">(</span><span class="num">8</span><span class="punct">)</span>
+    <span class="punct">-></span><span class="fn">setPadding</span><span class="punct">(</span><span class="num">16</span><span class="punct">)</span>
+    <span class="punct">-></span><span class="fn">setMinWidth</span><span class="punct">(</span><span class="num">200</span><span class="punct">)</span>
+    <span class="punct">-></span><span class="fn">setOnClick</span><span class="punct">([&](){ </span><span class="cm">/* ... */</span> <span class="punct">});</span></code></pre>
+
+      <h3>Methods</h3>
+      <table>
+        <tr><th>Method</th><th>Type</th><th>Description</th></tr>
+        <tr><td>setBackgroundColor(color)</td><td>COLORREF</td><td>Background fill</td></tr>
+        <tr><td>setHoverBackgroundColor(color)</td><td>COLORREF</td><td>Background on hover</td></tr>
+        <tr><td>setBorderColor(color)</td><td>COLORREF</td><td>Border color</td></tr>
+        <tr><td>setHoverBorderColor(color)</td><td>COLORREF</td><td>Border color on hover</td></tr>
+        <tr><td>setBorderWidth(w)</td><td>int</td><td>Border thickness in pixels</td></tr>
+        <tr><td>setBorderRadius(r)</td><td>int</td><td>Corner rounding</td></tr>
+        <tr><td>setPadding(p)</td><td>int</td><td>Uniform inner padding</td></tr>
+        <tr><td>setPaddingAll(l,t,r,b)</td><td>int×4</td><td>Per-side inner padding</td></tr>
+        <tr><td>setMargin(m)</td><td>int</td><td>Uniform outer margin</td></tr>
+        <tr><td>setMarginAll(l,t,r,b)</td><td>int×4</td><td>Per-side outer margin</td></tr>
+        <tr><td>setWidth(w)</td><td>int</td><td>Fixed width</td></tr>
+        <tr><td>setHeight(h)</td><td>int</td><td>Fixed height</td></tr>
+        <tr><td>setMinWidth(w)</td><td>int</td><td>Minimum width</td></tr>
+        <tr><td>setMinHeight(h)</td><td>int</td><td>Minimum height</td></tr>
+        <tr><td>setMaxWidth(w)</td><td>int</td><td>Maximum width</td></tr>
+        <tr><td>setMaxHeight(h)</td><td>int</td><td>Maximum height</td></tr>
+        <tr><td>setFlex(f)</td><td>int</td><td>Flex factor inside Row/Column</td></tr>
+        <tr><td>setOnClick(handler)</td><td>function</td><td>Click callback</td></tr>
+        <tr><td>setOnHover(handler)</td><td>function</td><td>Hover enter/leave callback</td></tr>
+        <tr><td>setBackgroundAlpha(a)</td><td>BYTE</td><td>Background opacity (0–255)</td></tr>
+        <tr><td>setBorderAlpha(a)</td><td>BYTE</td><td>Border opacity (0–255)</td></tr>
+      </table>
+    </div>
+
+    <!-- ── CENTER ── -->
+    <div class="widget-section" id="center">
+      <div class="widget-header">
+        <h2>Center</h2>
+        <span class="widget-badge badge-layout">Layout</span>
+      </div>
+      <p class="section-desc">Centers a single child both horizontally and vertically within the available space.</p>
+
+      <pre><code><span class="kw">auto</span> centered <span class="punct">=</span> <span class="fn">Center</span><span class="punct">(</span>
+    <span class="fn">Text</span><span class="punct">(</span><span class="str">"I'm centered!"</span><span class="punct">)</span>
+<span class="punct">);</span></code></pre>
+
+      <div class="note"><strong>Note:</strong> Center expands to fill all available space by default, then centers its child within that space.</div>
+    </div>
+
+    <!-- ── EXPANDED ── -->
+    <div class="widget-section" id="expanded">
+      <div class="widget-header">
+        <h2>Expanded</h2>
+        <span class="widget-badge badge-layout">Layout</span>
+      </div>
+      <p class="section-desc">Makes a child fill the remaining space inside a Row or Column. Use the <code>flex</code> parameter to control proportional sizing between multiple Expanded widgets.</p>
+
+      <pre><code><span class="fn">Row</span><span class="punct">(</span>
+    <span class="fn">Expanded</span><span class="punct">(</span>panelA<span class="punct">,</span> <span class="num">2</span><span class="punct">),</span>  <span class="cm">// takes 2/3 of space</span>
+    <span class="fn">Expanded</span><span class="punct">(</span>panelB<span class="punct">,</span> <span class="num">1</span><span class="punct">)   </span><span class="cm">// takes 1/3 of space</span>
+<span class="punct">);</span></code></pre>
+
+      <h3>Factory</h3>
+      <table>
+        <tr><th>Signature</th><th>Description</th></tr>
+        <tr><td>Expanded(child, flex = 1)</td><td>Wrap a child to make it flex-expand</td></tr>
+      </table>
+    </div>
+
+    <!-- ── SIZEDBOX ── -->
+    <div class="widget-section" id="sizedbox">
+      <div class="widget-header">
+        <h2>SizedBox</h2>
+        <span class="widget-badge badge-layout">Layout</span>
+      </div>
+      <p class="section-desc">A fixed-size box. Use it to constrain a child widget's dimensions, or as an empty spacer.</p>
+
+      <pre><code><span class="cm">// Spacer between items</span>
+<span class="fn">SizedBox</span><span class="punct">(</span><span class="num">16</span><span class="punct">,</span> <span class="num">0</span><span class="punct">);</span>
+
+<span class="cm">// Constrained child</span>
+<span class="fn">SizedBox</span><span class="punct">(</span><span class="num">200</span><span class="punct">,</span> <span class="num">48</span><span class="punct">,</span> myWidget<span class="punct">);</span></code></pre>
+
+      <h3>Factory</h3>
+      <table>
+        <tr><th>Signature</th><th>Description</th></tr>
+        <tr><td>SizedBox(width, height, child?)</td><td>Fixed-dimension box, child is optional</td></tr>
+      </table>
+    </div>
+
+    <!-- ── PADDING ── -->
+    <div class="widget-section" id="padding">
+      <div class="widget-header">
+        <h2>Padding</h2>
+        <span class="widget-badge badge-layout">Layout</span>
+      </div>
+      <p class="section-desc">A convenience shorthand for wrapping a widget in uniform padding. Equivalent to a <code>Container</code> with only padding set.</p>
+
+      <pre><code><span class="fn">Padding</span><span class="punct">(</span><span class="num">24</span><span class="punct">,</span> myWidget<span class="punct">);</span></code></pre>
+
+      <h3>Factory</h3>
+      <table>
+        <tr><th>Signature</th><th>Description</th></tr>
+        <tr><td>Padding(amount, child)</td><td>Wraps child with uniform padding on all sides</td></tr>
+      </table>
+    </div>
+
+    <!-- ── DIVIDER ── -->
+    <div class="widget-section" id="divider">
+      <div class="widget-header">
+        <h2>Divider</h2>
+        <span class="widget-badge badge-display">Display</span>
+      </div>
+      <p class="section-desc">A 1px horizontal rule that fills the available width. Used to visually separate sections.</p>
+
+      <pre><code><span class="fn">Column</span><span class="punct">(</span>
+    sectionA<span class="punct">,</span>
+    <span class="fn">Divider</span><span class="punct">(),</span>
+    sectionB
+<span class="punct">);</span></code></pre>
+    </div>
+
+    <!-- ── SCAFFOLD ── -->
+    <div class="widget-section" id="scaffold">
+      <div class="widget-header">
+        <h2>Scaffold</h2>
+        <span class="widget-badge badge-structure">Structure</span>
+      </div>
+      <p class="section-desc">The root-level page wrapper. Composes an optional AppBar with a body that fills the remaining space.</p>
+
+      <pre><code><span class="kw">auto</span> page <span class="punct">=</span> <span class="fn">Scaffold</span><span class="punct">(</span>
+    <span class="fn">AppBar</span><span class="punct">(</span><span class="str">"My App"</span><span class="punct">),</span>
+    <span class="fn">Center</span><span class="punct">(</span><span class="fn">Text</span><span class="punct">(</span><span class="str">"Hello!"</span><span class="punct">))</span>
+<span class="punct">);</span></code></pre>
+
+      <h3>Factory</h3>
+      <table>
+        <tr><th>Signature</th><th>Description</th></tr>
+        <tr><td>Scaffold(appBar?, body?)</td><td>Both parameters are optional</td></tr>
+      </table>
+    </div>
+
+    <!-- ── APPBAR ── -->
+    <div class="widget-section" id="appbar">
+      <div class="widget-header">
+        <h2>AppBar</h2>
+        <span class="widget-badge badge-structure">Structure</span>
+      </div>
+      <p class="section-desc">A 56px top navigation bar with a built-in title. Blue background with white bold text out of the box.</p>
+
+      <pre><code><span class="fn">AppBar</span><span class="punct">(</span><span class="str">"Settings"</span><span class="punct">);</span></code></pre>
+
+      <h3>Factory</h3>
+      <table>
+        <tr><th>Signature</th><th>Description</th></tr>
+        <tr><td>AppBar(title)</td><td>Creates an AppBar with the given title string</td></tr>
+      </table>
+    </div>
+
+    <!-- ── CARD ── -->
+    <div class="widget-section" id="card">
+      <div class="widget-header">
+        <h2>Card</h2>
+        <span class="widget-badge badge-structure">Structure</span>
+      </div>
+      <p class="section-desc">A pre-styled elevated container: white background, light border, 8px rounded corners, and 16px padding on all sides.</p>
+
+      <pre><code><span class="fn">Card</span><span class="punct">(</span>
+    <span class="fn">Column</span><span class="punct">(</span>
+        <span class="fn">Text</span><span class="punct">(</span><span class="str">"Card Title"</span><span class="punct">)-></span><span class="fn">setFontSize</span><span class="punct">(</span><span class="num">18</span><span class="punct">),</span>
+        <span class="fn">Text</span><span class="punct">(</span><span class="str">"Some content here."</span><span class="punct">)</span>
+    <span class="punct">)-></span><span class="fn">setSpacing</span><span class="punct">(</span><span class="num">8</span><span class="punct">)</span>
+<span class="punct">);</span></code></pre>
+
+      <h3>Factory</h3>
+      <table>
+        <tr><th>Signature</th><th>Description</th></tr>
+        <tr><td>Card(child)</td><td>Wraps child in a styled card container</td></tr>
+      </table>
+    </div>
+
+    <!-- ── STATE BINDING ── -->
+    <div class="widget-section" id="state">
+      <div class="widget-header">
+        <h2>State Binding</h2>
+        <span class="widget-badge badge-utility">Reactive</span>
+      </div>
+      <p class="section-desc">Many widget properties accept a <code>State&lt;T&gt;</code> object. When state changes, bound widgets automatically re-render — no manual refresh needed.</p>
+
+      <pre><code><span class="cm">// Declare state</span>
+<span class="type">State</span><span class="punct">&lt;</span><span class="type">bool</span><span class="punct">&gt;</span> isActive<span class="punct">{</span><span class="kw">false</span><span class="punct">};</span>
+<span class="type">State</span><span class="punct">&lt;</span><span class="type">int</span><span class="punct">&gt;</span> count<span class="punct">{</span><span class="num">0</span><span class="punct">};</span>
+
+<span class="cm">// Bind text to state</span>
+<span class="fn">Text</span><span class="punct">(</span>count<span class="punct">);</span>  <span class="cm">// shows "0", updates automatically</span>
+
+<span class="cm">// Toggle text based on bool state</span>
+<span class="fn">Text</span><span class="punct">(</span>isActive<span class="punct">,</span> <span class="str">"ON"</span><span class="punct">,</span> <span class="str">"OFF"</span><span class="punct">);</span>
+
+<span class="cm">// Bind background color</span>
+<span class="fn">Container</span><span class="punct">(</span>child<span class="punct">)</span>
+    <span class="punct">-></span><span class="fn">setBackgroundColor</span><span class="punct">(</span>isActive<span class="punct">,</span>
+        <span class="fn">RGB</span><span class="punct">(</span><span class="num">74, 222, 128</span><span class="punct">),</span>   <span class="cm">// true: green</span>
+        <span class="fn">RGB</span><span class="punct">(</span><span class="num">248, 113, 113</span><span class="punct">)</span>    <span class="cm">// false: red</span>
+    <span class="punct">);</span>
+
+<span class="cm">// Update state on click → widgets auto-repaint</span>
+<span class="fn">Button</span><span class="punct">(</span><span class="str">"Toggle"</span><span class="punct">, [&](){</span>
+    isActive<span class="punct">.</span><span class="fn">set</span><span class="punct">(!</span>isActive<span class="punct">.</span><span class="fn">get</span><span class="punct">());</span>
+<span class="punct">});</span></code></pre>
+
+      <h3>State-aware properties</h3>
+      <table>
+        <tr><th>Widget</th><th>Method</th><th>Description</th></tr>
+        <tr><td>Text</td><td>setText(State&lt;T&gt;)</td><td>Bind displayed string to any state value</td></tr>
+        <tr><td>Text</td><td>setText(State, true, false)</td><td>Toggle between two strings on bool state</td></tr>
+        <tr><td>Text</td><td>setTextColor(State, tc, fc)</td><td>Toggle text color on bool state</td></tr>
+        <tr><td>Container</td><td>setBackgroundColor(State, tc, fc)</td><td>Toggle background color on bool state</td></tr>
+      </table>
+
+      <div class="note"><strong>Tip:</strong> State binding causes either a layout pass or a paint-only pass depending on whether the change affects widget size. Text content changes trigger layout; color changes are paint-only.</div>
+    </div>
+
+  </main>
+</div>
+
+</body>
+</html>

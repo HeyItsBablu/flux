@@ -143,6 +143,190 @@ public:
   }
 };
 
+
+// ============================================================================
+// CONDITIONAL WIDGET - TERNARY STYLE
+// ============================================================================
+
+/**
+ * ConditionalWidget: Ternary-style conditional rendering
+ *
+ * Usage:
+ *   State<bool> isLoggedIn(false, &app);
+ *
+ *   Conditional(isLoggedIn)
+ *       ->Then([]() { return Text("Welcome back!"); })
+ *       ->Else([]() { return Text("Please log in."); })
+ *
+ * Also works with any State<T> and a custom predicate:
+ *
+ *   State<int> count(0, &app);
+ *
+ *   Conditional(count, [](int v) { return v > 0; })
+ *       ->Then([]() { return Text("Has items"); })
+ *       ->Else([]() { return Text("Empty"); })
+ */
+template <typename T> class ConditionalWidget : public Widget {
+private:
+  State<T> *boundState = nullptr;
+  std::function<bool(T)> predicate;
+  std::function<WidgetPtr()> thenBuilder;
+  std::function<WidgetPtr()> elseBuilder;
+  WidgetPtr currentChild = nullptr;
+  bool lastCondition;
+  std::shared_ptr<ConditionalWidget<T>> self;
+
+  void rebuildChild() {
+    if (!boundState)
+      return;
+
+    bool condition = predicate(boundState->get());
+
+    // Only rebuild if condition changed
+    if (currentChild && condition == lastCondition)
+      return;
+
+    lastCondition = condition;
+
+    // Clear old child
+    children.clear();
+    currentChild = nullptr;
+
+    // Pick the appropriate branch
+    auto &builder = condition ? thenBuilder : elseBuilder;
+    if (builder) {
+      currentChild = builder();
+    }
+
+    if (currentChild) {
+      addChild(currentChild);
+    }
+
+    markNeedsLayout();
+  }
+
+public:
+  ConditionalWidget(State<T> &state, std::function<bool(T)> pred)
+      : boundState(&state), predicate(pred) {
+    lastCondition = predicate(state.get());
+
+    state.listen([this](T newValue) {
+      rebuildChild();
+
+      if (boundState && boundState->hasContext()) {
+        auto *ui = boundState->getContext();
+        if (ui) {
+          ui->partialRebuild(this);
+        }
+      }
+    });
+  }
+
+  void setSelf(std::shared_ptr<ConditionalWidget<T>> ptr) { self = ptr; }
+
+  /**
+   * Builder to render when the condition is true
+   *
+   * @example
+   * Conditional(isLoggedIn)
+   *   ->Then([]() { return Dashboard(); })
+   */
+  std::shared_ptr<ConditionalWidget<T>> Then(std::function<WidgetPtr()> builder) {
+    thenBuilder = builder;
+    return self;
+  }
+
+  /**
+   * Builder to render when the condition is false
+   *
+   * @example
+   * Conditional(isLoggedIn)
+   *   ->Then([]() { return Dashboard(); })
+   *   ->Else([]() { return LoginPage(); })
+   */
+  std::shared_ptr<ConditionalWidget<T>> Else(std::function<WidgetPtr()> builder) {
+    elseBuilder = builder;
+    return self;
+  }
+
+  void computeLayout(HDC hdc, int availableWidth, int availableHeight,
+                     FontCache &fontCache) override {
+    rebuildChild();
+
+    if (!children.empty()) {
+      children[0]->computeLayout(
+          hdc, availableWidth - paddingLeft - paddingRight,
+          availableHeight - paddingTop - paddingBottom, fontCache);
+
+      if (autoWidth)
+        width = children[0]->width + paddingLeft + paddingRight;
+      if (autoHeight)
+        height = children[0]->height + paddingTop + paddingBottom;
+    }
+
+    applyConstraints();
+    needsLayout = false;
+  }
+
+  void positionChildren(int contentX, int contentY, int contentWidth,
+                        int contentHeight) override {
+    if (!children.empty()) {
+      auto &child = children[0];
+      child->x = contentX;
+      child->y = contentY;
+
+      child->positionChildren(
+          child->x + child->paddingLeft, child->y + child->paddingTop,
+          child->width - child->paddingLeft - child->paddingRight,
+          child->height - child->paddingTop - child->paddingBottom);
+    }
+  }
+};
+
+// ============================================================================
+// FACTORY FUNCTIONS
+// ============================================================================
+
+/**
+ * Create a conditional widget from a bool state (no predicate needed)
+ *
+ * @param state State<bool> to evaluate directly
+ * @return std::shared_ptr<ConditionalWidget<bool>> Chainable widget pointer
+ *
+ * @example
+ * State<bool> isVisible(true, &app);
+ *
+ * Conditional(isVisible)
+ *   ->Then([]() { return Text("Visible!"); })
+ *   ->Else([]() { return Text("Hidden!"); })
+ */
+inline std::shared_ptr<ConditionalWidget<bool>> Conditional(State<bool> &state) {
+  auto widget = std::make_shared<ConditionalWidget<bool>>(
+      state, [](bool v) { return v; });
+  widget->setSelf(widget);
+  return widget;
+}
+
+/**
+ * Create a conditional widget from any State<T> with a custom predicate
+ *
+ * @param state State to observe
+ * @param predicate Function mapping T -> bool
+ * @return std::shared_ptr<ConditionalWidget<T>> Chainable widget pointer
+ *
+ * @example
+ * State<int> itemCount(0, &app);
+ *
+ * Conditional(itemCount, [](int v) { return v > 0; })
+ *   ->Then([]() { return ItemList(); })
+ *   ->Else([]() { return EmptyState(); })
+ */
+inline std::shared_ptr<ConditionalWidget<std::string>>
+Conditional(State<std::string> &state, std::function<bool(const std::string&)> predicate) {
+    auto widget = std::make_shared<ConditionalWidget<std::string>>(state, predicate);
+    widget->setSelf(widget);
+    return widget;
+}
 // ============================================================================
 // FACTORY FUNCTION
 // ============================================================================

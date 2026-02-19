@@ -189,7 +189,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
 
   GdiplusInitializer gdiplusInit;
   FluxUI app(hInstance);
+  HWND hwnd = app.getWindow(); // however you access the HWND
+
+  // Client area (excludes title bar and borders — usually what you want for
+  // rendering)
+  RECT clientRect;
+  GetClientRect(hwnd, &clientRect);
+  int width = clientRect.right - clientRect.left;  // left is always 0
+  int height = clientRect.bottom - clientRect.top; // top is always 0
+
   app.build([&]() { return createApp(&app); });
-  app.createWindow("FluxUI - Glass Demo", 900, 700);
+  app.createWindow("FluxUI - Glass Demo", height, width);
   return app.run();
 }

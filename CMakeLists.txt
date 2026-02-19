@@ -24,7 +24,7 @@ add_compile_options(
 
 add_executable(my_app WIN32
     src/main.cpp
-    src/stb_impl.cpp
+
 )
 
 target_include_directories(my_app
