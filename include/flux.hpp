@@ -23,4 +23,5 @@
 #include "flux_switch.hpp"
 #include "flux_text_input.hpp"
 #include "flux_toggle.hpp"
+#include "flux_grid.hpp"
 #endif // FLUX_HPP
