@@ -9,6 +9,12 @@
 
 ## Table of Contents
 
+- [Components](#components)
+  - [Component](#component)
+  - [CHILD macro](#child-macro)
+  - [BuildComponent](#buildcomponent)
+  - [Passing state to children](#passing-state-to-children)
+  - [deref helper](#deref-helper)
 - [Display](#display)
   - [Text](#text)
   - [Divider](#divider)
@@ -48,6 +54,208 @@
   - [Tooltip](#tooltip)
   - [Dialog](#dialog)
   - [ContextMenu](#contextmenu)
+
+---
+
+## Components
+
+### Component
+
+Base class for encapsulating stateful UI logic. Use when a section of UI needs its own private state that must survive parent rebuilds.
+
+```cpp
+class MyComponent : public Component {
+  State<int> count;
+
+public:
+  MyComponent() : count(0, context) {}
+
+  WidgetPtr build() override {
+    return Column(
+        Text(count)->setFontSize(32),
+        Button("Increment", [this]() { count.set(count.get() + 1); })
+    )->setSpacing(10);
+  }
+};
+```
+
+**Lifecycle**
+
+| Method | Description |
+|---|---|
+| `build()` | Returns the widget tree. Called once at startup — never again on state change |
+| `initState()` | Optional setup hook. Called once after construction |
+| `dispose()` | Optional cleanup hook. Called on destruction |
+
+> **Key difference from Flutter:** `build()` is called **once**. State changes flow directly to widgets via the observer system — no rebuild is ever triggered.
+
+---
+
+### CHILD macro
+
+Instantiates a child component inline inside a parent's `build()`. The component is created once and survives for the lifetime of the app — its private state is never reset.
+
+```cpp
+CHILD(ComponentType, args...)
+```
+
+```cpp
+// No args
+CHILD(MyComponent)
+
+// With parent state pointer
+CHILD(ChildCounter, &count)
+
+// With multiple args
+CHILD(ChildForm, &name, &age, &email)
+```
+
+> **Safe to use inside `build()`** because `build()` itself is only called once at startup. Unlike Flutter, there is no risk of recreating children on every rebuild.
+
+---
+
+### BuildComponent
+
+Alternative to `CHILD` for top-level component instantiation, typically used inside `app.build()`.
+
+```cpp
+BuildComponent<ComponentType>(args...)
+```
+
+```cpp
+// Top-level entry point
+app.build([&]() {
+    return FluxApp("My App", BuildComponent<MyComponent>(), AppTheme::light());
+});
+
+// Also fine inside build() — called once at startup
+WidgetPtr build() override {
+    return Column(
+        BuildComponent<ChildCounter>(&count)
+    );
+}
+```
+
+**CHILD vs BuildComponent**
+
+| | `CHILD` | `BuildComponent` |
+|---|---|---|
+| Usage | Inside `build()` | Inside `app.build()` or `build()` |
+| Syntax | `CHILD(Type, args...)` | `BuildComponent<Type>(args...)` |
+| Behavior | Identical — both create component once |  |
+
+---
+
+### Passing state to children
+
+Parent owns the state and passes a raw pointer to the child. The child can freely read and write via `.get()` and `.set()`. Parent widgets update automatically since they observe the same `State<T>` object — no manual sync needed.
+
+```cpp
+// Parent — owns state
+class ParentCounter : public Component {
+  State<int> count;
+
+public:
+  ParentCounter() : count(0, context) {}
+
+  WidgetPtr build() override {
+    return Column(
+        Text(count)->setFontSize(32),                               // reads count
+        Button("Increment", [this]() { count.set(count.get() + 1); }),
+        Divider(),
+        CHILD(ChildCounter, &count)                                 // shares count
+    )->setSpacing(10);
+  }
+};
+
+// Child — receives pointer, also has its own private state
+class ChildCounter : public Component {
+  State<int> *count;       // pointer — does not own, parent cannot see childCount
+  State<int> childCount;   // private — parent never sees this
+
+public:
+  explicit ChildCounter(State<int> *count)
+      : count(count), childCount(0, context) {}
+
+  WidgetPtr build() override {
+    return Column(
+        Text(deref(count))->setFontSize(32),                        // shared state
+        Button("Decrement", [this]() { count->set(count->get() - 1); }),
+        Text(childCount)->setFontSize(32),                          // private state
+        Button("Decrement Child", [this]() { childCount.set(childCount.get() - 1); })
+    )->setSpacing(10);
+  }
+};
+```
+
+**State ownership rules**
+
+| | Parent | Child |
+|---|---|---|
+| `State<int> count` | Owns, reads, writes | — |
+| `State<int> *count` | Cannot see | Reads and writes via pointer |
+| `State<int> childCount` | Cannot see | Owns, reads, writes |
+
+**Multiple state arguments**
+
+```cpp
+class ChildForm : public Component {
+  State<std::string> *name;
+  State<int>         *age;
+  State<bool>        *enabled;
+
+public:
+  ChildForm(State<std::string> *name, State<int> *age, State<bool> *enabled)
+      : name(name), age(age), enabled(enabled) {}
+
+  WidgetPtr build() override {
+    return Column(
+        TextInput("Name")->setInputValue(deref(name)),
+        Slider(0, 100, 1)->setValue(deref(age)),
+        Toggle("Enabled")->setValue(deref(enabled))
+    )->setSpacing(8);
+  }
+};
+
+// Parent passes all three
+CHILD(ChildForm, &name, &age, &enabled)
+```
+
+---
+
+### deref helper
+
+Converts a `State<T>*` pointer to a `State<T>&` reference so it works with all widget APIs that expect a reference — no extra overloads needed anywhere.
+
+```cpp
+template <typename T>
+State<T>& deref(State<T> *state);
+```
+
+```cpp
+// Without deref — won't compile, widget APIs expect a reference
+Text(count)                                     // ❌ count is a pointer
+
+// With deref — works with every widget that accepts State<T>
+Text(deref(count))                              // ✅
+Text(deref(count), [](int v) { return "Value: " + std::to_string(v); }) // ✅
+TextInput("...")->setInputValue(deref(text))    // ✅
+Slider(0, 100, 1)->setValue(deref(value))       // ✅
+Toggle("...")->setValue(deref(enabled))         // ✅
+CheckBox("...")->setInputValue(deref(checked))  // ✅
+Dropdown(opts)->setSelectedValue(deref(selected)) // ✅
+ProgressBar()->setValue(deref(progress))        // ✅
+Conditional(deref(flag))->Then(...)->Else(...)  // ✅
+```
+
+> Defined in `flux_state.hpp`. Available everywhere via `#include "flux.hpp"`.
+
+**When to use deref**
+
+| Context | Syntax |
+|---|---|
+| Component owns the state | `Text(count)` — direct reference, no deref needed |
+| Component receives a pointer | `Text(deref(count))` — deref required |
 
 ---
 
