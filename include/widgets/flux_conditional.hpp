@@ -327,6 +327,15 @@ Conditional(State<std::string> &state, std::function<bool(const std::string&)> p
     widget->setSelf(widget);
     return widget;
 }
+
+template <typename T, typename Pred>
+inline std::shared_ptr<ConditionalWidget<T>>
+Conditional(State<T> &state, Pred predicate) {
+    auto widget = std::make_shared<ConditionalWidget<T>>(
+        state, std::function<bool(T)>(predicate));
+    widget->setSelf(widget);
+    return widget;
+}
 // ============================================================================
 // FACTORY FUNCTION
 // ============================================================================

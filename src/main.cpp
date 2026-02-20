@@ -1,175 +1,172 @@
+// Simple Pulse — NowPlaying + TrackList
+
 #include "flux.hpp"
 
-// ============================================================================
-// CHILD — TextInput that writes to parent's State<string>
-// ============================================================================
+constexpr COLORREF BG      = RGB( 14,  14,  20);
+constexpr COLORREF SURFACE = RGB( 24,  24,  36);
+constexpr COLORREF ACCENT  = RGB(255, 180,  60);
+constexpr COLORREF TEXT1   = RGB(235, 230, 215);
+constexpr COLORREF TEXT2   = RGB(130, 120, 105);
 
-class ChildTextInput : public Component {
-  State<std::string> *text;
-
-public:
-  explicit ChildTextInput(State<std::string> *text) : text(text) {}
-
-  WidgetPtr build() override {
-    return Column(
-        Text("Child TextInput")->setFontSize(14),
-        TextInput("Type something...")
-            ->setInputValue(deref(text))
-            ->setWidth(300),
-        Text(deref(text), [](const std::string &v) { return "Value: " + v; })
-    )->setSpacing(8);
-  }
+struct Track {
+    std::string title;
+    std::string artist;
+    std::string duration;
 };
 
-// ============================================================================
-// CHILD — Slider that writes to parent's State<int>
-// ============================================================================
-
-class ChildSlider : public Component {
-  State<int> *value;
-
-public:
-  explicit ChildSlider(State<int> *value) : value(value) {}
-
-  WidgetPtr build() override {
-    return Column(
-        Text("Child Slider")->setFontSize(14),
-        Slider(0, 100, 1)
-            ->setValue(deref(value))
-            ->setTrackFillColor(RGB(99, 102, 241))
-            ->setWidth(300),
-        Text(deref(value), [](int v) { return "Value: " + std::to_string(v); })
-    )->setSpacing(8);
-  }
+static const std::vector<Track> TRACKS = {
+    { "Midnight Architecture", "Neon Vessel",  "5:42" },
+    { "Amber Static",          "Pale Ghost",   "4:18" },
+    { "The Long Descent",      "Orbweaver",    "7:01" },
+    { "Copper Signal",         "Neon Vessel",  "3:55" },
+    { "Frozen Latitude",       "Mirelle Sanz", "6:13" },
 };
 
-// ============================================================================
-// CHILD — Toggle that writes to parent's State<bool>
-// ============================================================================
 
-class ChildToggle : public Component {
-  State<bool> *enabled;
+// ── NowPlaying ────────────────────────────────────────────────
+class NowPlaying : public Component {
+    State<int>* current;
 
 public:
-  explicit ChildToggle(State<bool> *enabled) : enabled(enabled) {}
+    explicit NowPlaying(State<int>* current) : current(current) {}
 
-  WidgetPtr build() override {
-    return Column(
-        Text("Child Toggle")->setFontSize(14),
-        Toggle("Enable feature")
-            ->setValue(deref(enabled))
-            ->setTrackOnColor(RGB(76, 175, 80)),
-        Text(deref(enabled), [](bool v) { return v ? "ON" : "OFF"; })
-    )->setSpacing(8);
-  }
+    WidgetPtr build() override {
+        return Card(
+            Column(
+                Text("NOW PLAYING")
+                    ->setFontSize(10)
+                    ->setTextColor(ACCENT),
+
+                Text(*current, [](int i) { return TRACKS[i].title; })
+                    ->setFontSize(22)
+                    ->setFontWeight(FontWeight::Bold)
+                    ->setTextColor(TEXT1),
+
+                Text(*current, [](int i) { return TRACKS[i].artist; })
+                    ->setFontSize(13)
+                    ->setTextColor(TEXT2),
+
+                SizedBox(0, 8),
+
+                ProgressBar(0.4)
+                    ->setProgressColors({ ACCENT })
+                    ->setHeight(4)
+                    ->setBorderRadius(2),
+
+                Row(
+                    Text("2:18")
+                        ->setFontSize(11)
+                        ->setTextColor(TEXT2),
+                    Expanded(SizedBox(0, 0)),
+                    Text(*current, [](int i) { return TRACKS[i].duration; })
+                        ->setFontSize(11)
+                        ->setTextColor(TEXT2)
+                )
+            )->setSpacing(6)
+        )->setHeight(160);  // fixed height so parent Column knows its size
+    }
 };
 
-// ============================================================================
-// CHILD — CheckBox that writes to parent's State<bool>
-// ============================================================================
 
-class ChildCheckBox : public Component {
-  State<bool> *checked;
+// ── TrackList ─────────────────────────────────────────────────
+class TrackList : public Component {
+    State<int>*               current;
+    State<std::vector<Track>> tracks;
 
 public:
-  explicit ChildCheckBox(State<bool> *checked) : checked(checked) {}
+    explicit TrackList(State<int>* current)
+        : current(current), tracks(TRACKS, context) {}
 
-  WidgetPtr build() override {
-    return Column(
-        Text("Child CheckBox")->setFontSize(14),
-        CheckBox("I agree to terms")
-            ->setInputValue(deref(checked)),
-        Text(deref(checked), [](bool v) { return v ? "Agreed" : "Not agreed"; })
-    )->setSpacing(8);
-  }
+    WidgetPtr build() override {
+        return Card(
+            Column(
+                Text("QUEUE")
+                    ->setFontSize(10)
+                    ->setTextColor(ACCENT),
+
+                Divider(),
+
+                ListView(tracks)
+                    ->itemBuilder([this](int i, const Track& t) -> WidgetPtr {
+                        return GestureDetector(
+                            Container(
+                                Row(
+                                    Text(*current, [i](int sel) -> std::string {
+                                        return sel == i ? "▶" : std::to_string(i + 1);
+                                    })->setFontSize(12)
+                                      ->setTextColor(TEXT2)
+                                      ->setMinWidth(24),
+
+                                    Expanded(
+                                        Column(
+                                            Text(t.title)
+                                                ->setFontSize(13)
+                                                ->setFontWeight(FontWeight::Bold)
+                                                ->setTextColor(TEXT1),
+                                            Text(t.artist)
+                                                ->setFontSize(11)
+                                                ->setTextColor(TEXT2)
+                                        )->setSpacing(2)
+                                    ),
+
+                                    Text(t.duration)
+                                        ->setFontSize(11)
+                                        ->setTextColor(TEXT2)
+
+                                )->setSpacing(12)
+                                 ->setCrossAlignment(Alignment::Center)
+                            )->setBackgroundColor(BG)
+                             ->setHoverBackgroundColor(SURFACE)
+                             ->setBorderRadius(6)
+                             ->setPadding(10)
+                             ->setHeight(100)
+                        )->setOnTap([this, i]{ current->set(i); });
+                    })
+                    ->separator([]{ return SizedBox(0, 4); })
+
+            )->setSpacing(8)
+        )->setFlex(1);  // stretch to fill Expanded parent
+    }
 };
 
-// ============================================================================
-// CHILD — Dropdown that writes to parent's State<string>
-// ============================================================================
 
-class ChildDropdown : public Component {
-  State<std::string> *selected;
+// ── Root ──────────────────────────────────────────────────────
+class PulseApp : public Component {
+    State<int> current;
 
 public:
-  explicit ChildDropdown(State<std::string> *selected) : selected(selected) {}
+    PulseApp() : current(0, context) {}
 
-  WidgetPtr build() override {
-    return Column(
-        Text("Child Dropdown")->setFontSize(14),
-        Dropdown({"Nepal", "India", "USA", "UK"})
-            ->setPlaceholder("Select country...")
-            ->setSelectedValue(deref(selected))
-            ->setWidth(300),
-        Text(deref(selected), [](const std::string &v) {
-            return "Selected: " + (v.empty() ? "none" : v);
-        })
-    )->setSpacing(8);
-  }
+    WidgetPtr build() override {
+        return Scaffold(
+            AppBar("PULSE"),
+            Column(
+                CHILD(NowPlaying, &current),   // fixed 160px
+                Expanded(
+                    CHILD(TrackList, &current)  // fills remaining space
+                )
+            )->setSpacing(12)
+             ->setPadding(16)
+             ->setBackgroundColor(BG)
+        );
+    }
 };
 
-// ============================================================================
-// PARENT — owns all state, displays it, passes pointers to children
-// ============================================================================
 
-class ParentForm : public Component {
-  State<std::string> text;
-  State<int>         sliderValue;
-  State<bool>        enabled;
-  State<bool>        checked;
-  State<std::string> country;
-
-public:
-  ParentForm()
-      : text("", context),
-        sliderValue(50, context),
-        enabled(false, context),
-        checked(false, context),
-        country("", context) {}
-
-  WidgetPtr build() override {
-    return Scaffold(
-        AppBar("Input Sharing Test"),
-
-        Center(
-            Card(
-                Column(
-
-                    // Parent reads all state
-                    Text("--- Parent View ---")->setFontWeight(FontWeight::Bold),
-                    Text(text,        [](const std::string &v) { return "Text: "    + v; }),
-                    Text(sliderValue, [](int v)                { return "Slider: "  + std::to_string(v); }),
-                    Text(enabled,     [](bool v)               { return "Toggle: "  + std::string(v ? "ON" : "OFF"); }),
-                    Text(checked,     [](bool v)               { return "Checked: " + std::string(v ? "Yes" : "No"); }),
-                    Text(country,     [](const std::string &v) { return "Country: " + (v.empty() ? "none" : v); }),
-
-                    Divider(),
-
-                    // Children write to parent state via pointer
-                    CHILD(ChildTextInput, &text),
-                    CHILD(ChildSlider,    &sliderValue),
-                    CHILD(ChildToggle,    &enabled),
-                    CHILD(ChildCheckBox,  &checked),
-                    CHILD(ChildDropdown,  &country)
-
-                )->setSpacing(16)
-            )
-        )
-    );
-  }
-};
-
-WidgetPtr dashboardApp(FluxUI *app) {
-  return FluxApp("Input Test", BuildComponent<ParentForm>(), AppTheme::light());
+// ── Entry Point ───────────────────────────────────────────────
+WidgetPtr createApp(FluxUI* app) {
+    return FluxApp("PULSE", BuildComponent<PulseApp>(), AppTheme::materialBlue());
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
-  AllocConsole();
-  FILE *fp;
-  freopen_s(&fp, "CONOUT$", "w", stdout);
+    GdiplusInitializer gdiplusInit;
+    FluxUI app(hInstance);
 
-  FluxUI app(hInstance);
-  app.build([&]() { return dashboardApp(&app); });
-  app.createWindow("FluxApp Demo", 800, 600);
-  return app.run();
+    app.build([&]() { return createApp(&app); });
+
+    int screenWidth  = GetSystemMetrics(SM_CXSCREEN);
+    int screenHeight = GetSystemMetrics(SM_CYSCREEN);
+    app.createWindow("PULSE — Music Player", screenWidth, screenHeight);
+
+    return app.run();
 }

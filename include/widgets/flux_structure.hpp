@@ -143,7 +143,10 @@ public:
   }
 };
 
-inline WidgetPtr Card(WidgetPtr child) {
+using ContainerWidgetPtr = std::shared_ptr<ContainerWidget>;
+
+
+inline ContainerWidgetPtr Card(WidgetPtr child) {
   auto w = std::make_shared<ContainerWidget>();
   w->hasBackground = true;
   w->backgroundColor = RGB(255, 255, 255);

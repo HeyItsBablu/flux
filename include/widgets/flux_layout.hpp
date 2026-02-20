@@ -2,14 +2,13 @@
 #define FLUX_LAYOUT_HPP
 
 #include "flux_core.hpp"
-#include "flux_state.hpp"
 #include "flux_display.hpp"
+#include "flux_state.hpp"
 #include <iostream>
 
 // ============================================================================
 // CONCRETE WIDGET CLASSES
 // ============================================================================
-
 
 // --- Column Widget ---
 class ColumnWidget : public Widget {
@@ -174,6 +173,14 @@ public:
     backgroundColor = color;
     hasBackground = true;
     markNeedsPaint();
+    return std::static_pointer_cast<ColumnWidget>(shared_from_this());
+  }
+
+  std::shared_ptr<ColumnWidget> setBorderRadius(int r) {
+    if (borderRadius != r) {
+      borderRadius = r;
+      markNeedsPaint();
+    }
     return std::static_pointer_cast<ColumnWidget>(shared_from_this());
   }
 };
@@ -660,9 +667,6 @@ public:
   }
 };
 
-
-
-
 // ============================================================================
 // WIDGET FACTORY FUNCTIONS
 // ============================================================================
@@ -675,9 +679,6 @@ inline ContainerWidgetPtr Container(WidgetPtr child = nullptr) {
     w->addChild(child);
   return w;
 }
-
-
-
 
 using RowWidgetPtr = std::shared_ptr<RowWidget>;
 
@@ -722,9 +723,6 @@ inline WidgetPtr SizedBox(int width, int height, WidgetPtr child = nullptr) {
     w->addChild(child);
   return w;
 }
-
-
-
 
 inline WidgetPtr Expanded(WidgetPtr child, int flex = 1) {
   auto w = std::make_shared<ExpandedWidget>();
