@@ -1,509 +1,973 @@
-# FluxUI Framework - Bug Report & Code Analysis
+# Flux Widget API Reference
 
-## Executive Summary
-This report identifies critical bugs, design issues, and potential improvements in the FluxUI C++ framework (a Flutter-inspired Windows GUI library).
+> A declarative, Flutter-inspired widget toolkit for building native Windows UIs.  
+> Chain methods, compose layouts, and bind reactive state.
+
+**Platform:** C++ / WIN32
 
 ---
 
-## 🔴 CRITICAL BUGS
+## Table of Contents
 
-### 1. **Race Condition in State Notification System**
-**Location:** `flux_state.hpp` - `notifyListenersLocked()`
-**Severity:** CRITICAL
+- [Display](#display)
+  - [Text](#text)
+  - [Divider](#divider)
+  - [ProgressBar](#progressbar)
+  - [Graph](#graph)
+  - [Image](#image)
+- [Interaction](#interaction)
+  - [Button](#button)
+  - [GestureDetector](#gesturedetector)
+- [Input](#input)
+  - [TextInput](#textinput)
+  - [Slider](#slider)
+  - [Toggle](#toggle)
+  - [CheckBox](#checkbox)
+  - [RadioGroup / RadioButton](#radiogroup--radiobutton)
+- [Collection](#collection)
+  - [ListView](#listview)
+  - [GridView](#gridview)
+  - [Grid](#grid)
+- [State](#state)
+  - [Conditional](#conditional)
+  - [Switch](#switch)
+- [Layout](#layout)
+  - [Row](#row)
+  - [Column](#column)
+  - [Container](#container)
+  - [Center](#center)
+  - [Expanded](#expanded)
+  - [SizedBox](#sizedbox)
+  - [Padding](#padding)
+- [Structure](#structure)
+  - [Scaffold](#scaffold)
+  - [AppBar](#appbar)
+  - [Card](#card)
+- [Overlay](#overlay)
+  - [Dropdown](#dropdown)
+  - [Tooltip](#tooltip)
+  - [Dialog](#dialog)
+  - [ContextMenu](#contextmenu)
+
+---
+
+## Display
+
+### Text
+
+Renders a string of text. Auto-sizes to its content by default.
 
 ```cpp
-void notifyListenersLocked(const T &newValue)
-{
-    auto listenersCopy = listeners;
-    
-    // BUG: Mutex is unlocked BEFORE the function returns
-    stateMutex.unlock();
-    
-    for (auto &listener : listenersCopy) {
-        // ... call listeners
-    }
-    
-    // BUG: Re-acquiring lock that caller expects to be held
-    stateMutex.lock();
-}
+// Basic usage
+auto label = Text("Hello, world!")
+    ->setFontSize(18)
+    ->setFontWeight(FontWeight::Bold)
+    ->setTextColor(RGB(30, 30, 30))
+    ->setPadding(12);
+
+// Bound to state
+auto counter = Text(myState);
+
+// With transform
+auto label2 = Text(count, [](int v){ return "Count: " + std::to_string(v); });
 ```
 
-**Problem:** The function is called with the lock held (indicated by "Locked" suffix), but it unlocks and re-locks the mutex internally. This violates the caller's expectations and can lead to:
-- Data races when the caller tries to access state members after the call
-- Undefined behavior if another thread modifies state during listener callbacks
-- Lock ordering issues and potential deadlocks
+**Factory**
 
-**Fix:** Use `std::unique_lock` with manual unlock/lock or rename to indicate behavior.
+| Signature | Description |
+|---|---|
+| `Text(string)` | Static text |
+| `Text(State<T>)` | Reactive text, auto-updates when state changes |
+| `Text(State<T>, transform)` | Reactive text with a custom format function |
+
+**Methods**
+
+| Method | Type | Description |
+|---|---|---|
+| `setText(string)` | `string` | Set or change the displayed text |
+| `setFontSize(size)` | `int` | Font size in points |
+| `setFontWeight(weight)` | `FontWeight` | Normal or Bold |
+| `setTextColor(color)` | `COLORREF` | Text color |
+| `setHoverTextColor(color)` | `COLORREF` | Text color on mouse hover |
+| `setPadding(p)` | `int` | Uniform padding on all sides |
+| `setBackgroundColor(color)` | `COLORREF` | Fill background behind text |
+| `setBorderRadius(r)` | `int` | Corner rounding for background |
+| `setWidth(w)` | `int` | Fixed width (disables auto-sizing) |
+| `setHeight(h)` | `int` | Fixed height (disables auto-sizing) |
+| `setMinWidth(w)` | `int` | Minimum width constraint |
 
 ---
 
-### 2. **Memory Leak in FontCache**
-**Location:** `flux_core.hpp` - `FontCache::getFont()`
-**Severity:** HIGH
+### Divider
+
+A 1px horizontal rule. Fills available width automatically.
 
 ```cpp
-HFONT getFont(int size, FontWeight weight)
-{
-    auto key = std::make_tuple(size, weight);
-    auto it = cache.find(key);
-    
-    if (it != cache.end()) {
-        return it->second;
-    }
-    
-    HFONT hFont = CreateFont(/* ... */);
-    
-    cache[key] = hFont;
-    return hFont;
-}
+auto sep = Divider();  // 1px light gray horizontal line
 ```
 
-**Problem:** If `CreateFont()` fails and returns NULL, the NULL is cached. Subsequent calls will return NULL without attempting to create the font again. This could cause:
-- Persistent rendering failures
-- Accumulation of failed font creation attempts in cache
-- No error reporting or recovery mechanism
-
-**Fix:** Check for NULL and don't cache failed creations.
+| Signature | Description |
+|---|---|
+| `Divider()` | 1px divider, `RGB(224,224,224)`, full width |
 
 ---
 
-### 3. **Dangling Pointer in Widget Parent References**
-**Location:** `flux_widget.hpp` - `Widget::parent`
-**Severity:** CRITICAL
+### ProgressBar
+
+Horizontal progress indicator. Supports solid or multi-stop gradient fills, reactive state binding, and rounded corners.
 
 ```cpp
-class Widget {
-    Widget *parent = nullptr;  // BUG: Raw pointer
-    // ...
-    
-    void addChild(WidgetPtr child) {
-        children.push_back(child);
-        child->parent = this;  // BUG: Creates dangling pointer risk
-    }
-};
+// Static value
+ProgressBar(0.65)
+    ->setProgressColors({ RGB(33,150,243), RGB(0,200,150) })
+    ->setHeight(8)
+    ->setBorderRadius(4);
+
+// Reactive
+State<double> progress(0.0, &app);
+ProgressBar()->setValue(progress);
 ```
 
-**Problem:** 
-- `parent` is a raw pointer while `children` are shared_ptr
-- If parent widget is destroyed but child still exists, child has dangling pointer
-- Calling `child->parent->markNeedsLayout()` causes use-after-free
-- No lifetime guarantees between parent and child
+**Methods**
 
-**Fix:** Use `std::weak_ptr<Widget>` for parent reference.
+| Method | Type | Description |
+|---|---|---|
+| `setValue(v)` | `double` 0–1 | Set fill level statically |
+| `setValue(State<double>)` | State | Reactive fill level binding |
+| `setProgressColors(colors)` | `vector<COLORREF>` | Solid or gradient fill colors |
+| `setBackgroundColor(color)` | `COLORREF` | Track background color |
+| `setBorderColor(color)` | `COLORREF` | Track border color |
+| `setBorderWidth(w)` | `int` | Track border thickness |
+| `setBorderRadius(r)` | `int` | Corner rounding |
+| `setHeight(h)` | `int` | Bar height (default 12px) |
 
 ---
 
-### 4. **State Lock Acquisition After Exception**
-**Location:** `flux_state.hpp` - Various operator overloads
-**Severity:** HIGH
+### Graph
+
+OpenGL-rendered chart widget. Supports Line, Bar, and Area graph types with reactive `State<vector<float>>` data binding, axis labels, titles, grid, and legend.
 
 ```cpp
-template <typename U = T>
-typename std::enable_if<std::is_arithmetic<U>::value, State<T> &>::type
-operator/=(const T &val)
-{
-    std::lock_guard<std::mutex> lock(stateMutex);
-    if (val != 0) {
-        value = value / val;
-        stringDirty = true;
-        notifyObserversLocked();
-        notifyListenersLocked(value);  // BUG: Can throw with lock held
-    }
-    return *this;
-}
+// Static line chart
+Graph(500, 300)
+    ->addSeries("Temperature", {22,24,27,23,19}, 1.0f, 0.4f, 0.2f)
+    ->setTitle("Daily Temps")
+    ->setXLabels({"Mon","Tue","Wed","Thu","Fri"});
+
+// Reactive binding
+State<std::vector<float>> cpuData;
+Graph(600, 300)
+    ->addSeries("CPU", cpuData, 0.0f, 1.0f, 0.4f)
+    ->setType(GraphType::Area);
 ```
 
-**Problem:**
-- If `notifyListenersLocked()` throws during listener callback, the lock_guard will release the mutex
-- However, `notifyListenersLocked()` will try to re-acquire it in the catch path
-- This causes undefined behavior and potential deadlock
-- Exception safety is not guaranteed
+**Factory**
 
-**Fix:** Use RAII properly or catch exceptions before re-locking.
+| Signature | Description |
+|---|---|
+| `Graph()` | Default 400×300 graph |
+| `Graph(w, h)` | Fixed-size graph |
+
+**Methods**
+
+| Method | Type | Description |
+|---|---|---|
+| `addSeries(label, values, r, g, b)` | `string`, `vector<float>` | Add a static data series |
+| `addSeries(label, State<...>, r,g,b)` | State binding | Reactive series — repaints on state change |
+| `bindSeries(idx, State)` | `int`, State | Retrofit reactive binding to existing series |
+| `setType(type)` | `GraphType` | `Line` · `Bar` · `Area` |
+| `setTitle(t)` | `string` | Chart title (top center) |
+| `setXLabels(labels)` | `vector<string>` | X-axis tick labels |
+| `setYRange(min, max)` | `float, float` | Manual Y-axis range (disables autoRange) |
+| `setShowGrid(v)` | `bool` | Toggle background grid lines |
+| `clearSeries()` | — | Remove all series |
+| `setSize(w, h)` | `int, int` | Resize the graph widget |
 
 ---
 
-### 5. **Double Deletion in Back Buffer Management**
-**Location:** `flux_core.hpp` - `FluxUI::destroyBackBuffer()`
-**Severity:** MEDIUM-HIGH
+### Image
+
+Renders an image file via GDI+. Supports five fit modes, rounded corners, aspect-ratio-preserving auto-sizing, and graceful error/placeholder states.
 
 ```cpp
-void destroyBackBuffer()
-{
-    if (hdcMem)
+// Basic
+Image("photo.jpg")
+    ->setWidth(300)
+    ->setHeight(200)
+    ->setFit(ImageFit::Cover);
+
+// Circle avatar
+Image("avatar.png")
+    ->setWidth(64)
+    ->setHeight(64)
+    ->setBorderRadius(32);
+
+// Lazy-loaded
+auto img = Image()->setWidth(200)->setHeight(200);
+// ... later:
+img->setImagePath("loaded.jpg");
+```
+
+**ImageFit Modes**
+
+| Value | Description |
+|---|---|
+| `ImageFit::Fill` | Stretch to fill exactly — may distort aspect ratio |
+| `ImageFit::Contain` | Scale to fit inside bounds — letterbox if needed (default) |
+| `ImageFit::Cover` | Scale to cover bounds — crops edges if needed |
+| `ImageFit::None` | Display at original pixel size, centered |
+| `ImageFit::ScaleDown` | Like None, but scales down if image exceeds container |
+
+**Methods**
+
+| Method | Type | Description |
+|---|---|---|
+| `setImagePath(path)` | `string` | Load or swap image at runtime |
+| `setFit(mode)` | `ImageFit` | Sizing/cropping mode |
+| `setWidth(w)` | `int` | Fixed width (disables auto-sizing) |
+| `setHeight(h)` | `int` | Fixed height (disables auto-sizing) |
+| `setBorderRadius(r)` | `int` | Corner rounding — half of w/h for a circle |
+| `setPadding(p)` | `int` | Inner padding around image |
+| `setPlaceholderColor(c)` | `COLORREF` | Fill shown before image loads |
+| `setErrorColor(c)` | `COLORREF` | Fill shown on load error |
+
+> **Note:** Requires GDI+ initialized at app startup via `GdiplusInitializer`. Auto-sizes to native image dimensions when both `autoWidth` and `autoHeight` are true.
+
+---
+
+## Interaction
+
+### Button
+
+A clickable widget with a background. Accepts either a text label or a child widget for fully custom content. Darkens slightly on press.
+
+```cpp
+// Text button
+Button("Save", [&]{ save(); })
+    ->setBackgroundColor(RGB(76,175,80))
+    ->setBorderRadius(6)
+    ->setPadding(12);
+
+// Widget child button
+Button(Row(Icon(...), Text("Upload")), [&]{ upload(); });
+```
+
+**Factory**
+
+| Signature | Description |
+|---|---|
+| `Button(text, onClick)` | Text label button |
+| `Button(child, onClick)` | Widget child button |
+
+**Methods**
+
+| Method | Type | Description |
+|---|---|---|
+| `setOnClick(handler)` | `ClickHandler` | Click callback |
+| `setChild(widget)` | `WidgetPtr` | Replace content widget |
+| `setBackgroundColor(color)` | `COLORREF` | Button background |
+| `setHoverBackgroundColor(color)` | `COLORREF` | Background on hover |
+| `setTextColor(color)` | `COLORREF` | Label text color |
+| `setBorderRadius(r)` | `int` | Corner rounding |
+| `setPadding(p)` | `int` | Uniform padding |
+| `setPaddingAll(l,t,r,b)` | `int ×4` | Per-side padding |
+| `setWidth(w)` | `int` | Fixed width |
+| `setHeight(h)` | `int` | Fixed height |
+
+---
+
+### GestureDetector
+
+Wraps any widget and attaches pointer/gesture callbacks without any WndProc edits. Hooks directly into the widget tree's virtual mouse methods.
+
+```cpp
+GestureDetector(Card(Text("Click me")))
+    ->setOnTap([&]{ handleTap(); })
+    ->setOnDoubleTap([&]{ handleDouble(); })
+    ->setOnLongPress([&]{ showMenu(); })
+    ->setOnDragUpdate([&](int dx, int dy){ pan(dx, dy); })
+    ->setOnScrollUp([&](int delta){ zoom(delta); });
+```
+
+> **Thresholds:** Long press fires after `500ms`. Double-tap window is `300ms`. Drag starts after `5px` of movement. Mouse capture is set automatically during drags.
+
+**Callbacks**
+
+| Method | Signature | Description |
+|---|---|---|
+| `setOnTap` | `void()` | Single click / tap |
+| `setOnDoubleTap` | `void()` | Two taps within 300 ms |
+| `setOnLongPress` | `void()` | Press held for 500 ms |
+| `setOnSecondaryTap` | `void()` | Right-click |
+| `setOnHoverEnter` | `void()` | Cursor enters bounds |
+| `setOnHoverExit` | `void()` | Cursor leaves bounds |
+| `setOnPointerMove` | `void(x, y)` | Mouse position while inside |
+| `setOnDragStart` | `void()` | Drag threshold exceeded |
+| `setOnDragUpdate` | `void(dx, dy)` | Delta since last move during drag |
+| `setOnDragEnd` | `void()` | Mouse released after drag |
+| `setOnScrollUp` | `void(delta)` | Wheel scrolled upward |
+| `setOnScrollDown` | `void(delta)` | Wheel scrolled downward |
+
+---
+
+## Input
+
+### TextInput
+
+Single-line text field with cursor, scrolling, placeholder, and two-way `State<string>` binding.
+
+```cpp
+State<std::string> name("", &app);
+
+TextInput("Enter your name...")
+    ->setInputValue(name)
+    ->setWidth(320);
+```
+
+| Method | Type | Description |
+|---|---|---|
+| `setInputValue(State<string>)` | State | Two-way reactive binding |
+| `setPlaceholder(text)` | `string` | Hint shown when empty |
+
+> **Keyboard:** `←/→` move cursor, `Home/End` jump to start/end, `Backspace/Delete` delete characters, blinking cursor via `WM_TIMER`.
+
+---
+
+### Slider
+
+Horizontal range input. Draggable thumb with keyboard support and two-way state binding for `double` or `int` states.
+
+```cpp
+State<double> volume(50.0, &app);
+
+Slider(0.0, 100.0, 1.0)
+    ->setValue(volume)
+    ->setTrackFillColor(RGB(99,102,241))
+    ->setOnValueChanged([&](double v){ setVolume(v); });
+```
+
+**Factory**
+
+| Signature | Description |
+|---|---|
+| `Slider(min, max, step)` | Range slider with optional step |
+
+**Methods**
+
+| Method | Type | Description |
+|---|---|---|
+| `setValue(State<double>)` | State | Two-way double binding |
+| `setValue(State<int>)` | State | Two-way int binding |
+| `setMinValue(v)` | `double` | Range minimum |
+| `setMaxValue(v)` | `double` | Range maximum |
+| `setStep(v)` | `double` | Snap step size |
+| `setTrackColor(c)` | `COLORREF` | Unfilled track color |
+| `setTrackFillColor(c)` | `COLORREF` | Filled track color |
+| `setThumbColor(c)` | `COLORREF` | Thumb circle color |
+| `setOnValueChanged(fn)` | `void(double)` | Change callback |
+
+---
+
+### Toggle
+
+On/off switch with animated thumb and optional text label. Binds to `State<bool>`.
+
+```cpp
+State<bool> darkMode(false, &app);
+
+Toggle("Dark mode")
+    ->setValue(darkMode)
+    ->setTrackOnColor(RGB(99,102,241))
+    ->setOnToggleChanged([&](bool v){ applyTheme(v); });
+```
+
+| Method | Type | Description |
+|---|---|---|
+| `setValue(State<bool>)` | State | Two-way binding |
+| `setToggled(bool)` | `bool` | Set initial state |
+| `setLabel(text)` | `string` | Text shown beside the toggle |
+| `setTrackOnColor(c)` | `COLORREF` | Track color when on |
+| `setTrackOffColor(c)` | `COLORREF` | Track color when off |
+| `setThumbColor(c)` | `COLORREF` | Thumb color |
+| `setOnToggleChanged(fn)` | `void(bool)` | Change callback |
+
+---
+
+### CheckBox
+
+Standard checkbox with optional label. Binds to `State<bool>` via `setInputValue`.
+
+```cpp
+State<bool> agreed(false, &app);
+
+CheckBox("I agree to the terms")
+    ->setInputValue(agreed);
+```
+
+| Signature | Description |
+|---|---|
+| `CheckBox(label)` | Checkbox with optional text label |
+| `setInputValue(State<bool>)` | Two-way bool binding |
+
+---
+
+### RadioGroup / RadioButton
+
+Mutually-exclusive radio buttons. Group manages selection; individual buttons belong to one group. Binds to `State<string>`.
+
+```cpp
+State<std::string> plan("free", &app);
+
+RadioGroupWithOptions({
+    {"free",  "Free tier"},
+    {"pro",   "Pro — $9/mo"},
+    {"team",  "Team — $29/mo"},
+})->bindValue(plan)
+  ->setOnSelectionChanged([&](const std::string& v){ changePlan(v); });
+
+// Manual construction
+auto group = RadioGroup();
+group->addRadioButton(RadioButton("opt_a", "Option A"));
+group->addRadioButton(RadioButton("opt_b", "Option B"));
+group->setHorizontal();
+```
+
+**RadioGroup Methods**
+
+| Method | Description |
+|---|---|
+| `addRadioButton(RadioButtonPtr)` | Add a button to the group |
+| `bindValue(State<string>)` | Two-way selected-value binding |
+| `setSelectedValue(string)` | Set selected value imperatively |
+| `setOnSelectionChanged(fn)` | Callback with newly selected value |
+| `setHorizontal()` / `setVertical()` | Layout direction |
+| `getSelectedValue()` | Returns current selection string |
+
+---
+
+## Collection
+
+### ListView
+
+Scrollable list driven by `State<vector<T>>`. Supports vertical or horizontal orientation, separators, custom scrollbar styling, and thumb drag.
+
+```cpp
+State<std::vector<Contact>> contacts(data, &app);
+
+ListView(contacts)
+    ->itemBuilder([](int i, const Contact& c) -> WidgetPtr {
+        return Card(Text(c.name));
+    })
+    ->separator([]{ return Divider(); })
+    ->setSpacing(8)
+    ->setScrollbarColor(RGB(100,100,120));
+```
+
+| Method | Description |
+|---|---|
+| `itemBuilder(fn)` | Builder `(int index, const T&) -> WidgetPtr` |
+| `separator(fn)` | Widget inserted between items |
+| `setSpacing(px)` | Gap between items |
+| `setHorizontal(bool)` | Switch to horizontal scroll |
+| `setScrollbarSize(px)` | Scrollbar thickness |
+| `setScrollbarColor(c)` | Idle thumb color |
+| `setScrollbarHoverColor(c)` | Hover thumb color |
+| `setScrollbarActiveColor(c)` | Drag thumb color |
+| `setScrollbarTrackColor(c)` | Track background color |
+
+---
+
+### GridView
+
+Scrollable grid driven by `State<vector<T>>`. Supports fixed column count or responsive fixed-cell-width mode.
+
+```cpp
+GridView(photos)
+    ->columns(3)
+    ->itemBuilder([](int i, const Photo& p) -> WidgetPtr {
+        return Thumbnail(p);
+    })
+    ->setSpacing(12);
+
+// Responsive mode
+GridView(items)->columnWidth(200)->...
+```
+
+| Method | Description |
+|---|---|
+| `itemBuilder(fn)` | Builder `(int index, const T&) -> WidgetPtr` |
+| `columns(n)` | Fixed column count mode |
+| `columnWidth(px)` | Responsive mode — derive column count from width |
+| `setSpacingH(px)` | Horizontal gap |
+| `setSpacingV(px)` | Vertical gap |
+| `setSpacing(px)` | Set both H and V spacing |
+| `setScrollbarWidth(px)` | Scrollbar thickness |
+
+---
+
+### Grid
+
+Static fixed-column grid for laying out a known set of children. Non-scrolling. Supports alignment, spacing, and responsive cell-width mode.
+
+```cpp
+// Fixed 3-column grid
+Grid(3,
+    Card(Text("A")),
+    Card(Text("B")),
+    Card(Text("C"))
+)->setSpacing(16)
+ ->setCrossAlignment(Alignment::Stretch);
+
+// Responsive
+GridFixedWidth(200, items...);
+
+// From vector
+GridFromList(4, widgetVector);
+```
+
+**Factory**
+
+| Signature | Description |
+|---|---|
+| `Grid(columns, widgets...)` | Fixed column count with variadic children |
+| `GridFixedWidth(cellWidth, widgets...)` | Responsive, column count derived from width |
+| `GridFromList(columns, vector)` | Fixed columns from a runtime vector |
+| `GridFixedWidthFromList(cellWidth, vector)` | Responsive from a runtime vector |
+
+**Methods**
+
+| Method | Description |
+|---|---|
+| `setColumnCount(n)` | Switch to fixed column count mode |
+| `setColumnWidth(px)` | Switch to responsive mode |
+| `setSpacing(px)` | Uniform H and V gap |
+| `setSpacingH(px)` | Horizontal gap only |
+| `setSpacingV(px)` | Vertical gap only |
+| `setCrossAlignment(a)` | Cell alignment: Start · Center · End · Stretch |
+| `setMainAxisAlignment(a)` | Row distribution: Start · Center · End |
+| `setPadding(px)` | Uniform padding |
+| `setBackgroundColor(c)` | Grid background fill |
+| `setFlex(n)` | Flex factor in parent Flex container |
+
+---
+
+## State
+
+### Conditional
+
+Ternary-style conditional rendering. Rebuilds its child whenever the observed state's predicate changes.
+
+```cpp
+// Bool state — no predicate needed
+Conditional(isLoggedIn)
+    ->Then([]{ return Dashboard(); })
+    ->Else([]{ return LoginPage(); });
+
+// Custom predicate on any State<T>
+Conditional(itemCount, [](int v){ return v > 0; })
+    ->Then([]{ return ItemList(); })
+    ->Else([]{ return EmptyState(); });
+```
+
+| Method | Description |
+|---|---|
+| `Then(builder)` | Widget to render when condition is **true** |
+| `Else(builder)` | Widget to render when condition is **false** |
+
+---
+
+### Switch
+
+C++-style switch-case conditional rendering. Rebuilds its child whenever the bound state value changes. Works with any comparable `T`.
+
+```cpp
+State<int> tabIndex(0, &app);
+
+Switch(tabIndex)
+    ->Case(0, []{ return HomePage(); })
+    ->Case(1, []{ return ProfilePage(); })
+    ->Case(2, []{ return SettingsPage(); })
+    ->Default([]{ return ErrorPage(); });
+```
+
+| Method | Description |
+|---|---|
+| `Case(value, builder)` | Widget to render when state equals *value* |
+| `Default(builder)` | Fallback widget when no case matches |
+
+---
+
+## Layout
+
+### Row
+
+Lays children out horizontally. Supports flex expansion, spacing, cross-axis alignment, and main-axis distribution.
+
+```cpp
+Row(
+    Text("Label"),
+    Expanded(TextInput()),
+    Button("Send")
+)->setSpacing(8)
+ ->setCrossAlignment(Alignment::Center);
+```
+
+| Method | Type | Description |
+|---|---|---|
+| `setSpacing(px)` | `int` | Gap between children |
+| `setCrossAlignment(a)` | `Alignment` | Vertical alignment: Start · Center · End · Stretch |
+| `setMainAxisAlignment(a)` | `MainAxisAlignment` | Horizontal distribution: Start · Center · End |
+| `setWidth(w)` | `int` | Fixed width |
+| `setHeight(h)` | `int` | Fixed height |
+| `setPadding(p)` | `int` | Uniform padding |
+| `setBackgroundColor(c)` | `COLORREF` | Row background fill |
+| `setFlex(n)` | `int` | Flex factor when nested in a Row/Column |
+
+---
+
+### Column
+
+Lays children out vertically. Supports flex expansion, spacing, cross-axis alignment, and main-axis distribution.
+
+```cpp
+Column(
+    AppBar("Title"),
+    Expanded(ListView(items)...),
+    BottomBar(...)
+)->setSpacing(0)
+ ->setMainAxisAlignment(MainAxisAlignment::Start);
+```
+
+| Method | Type | Description |
+|---|---|---|
+| `setSpacing(px)` | `int` | Gap between children |
+| `setCrossAlignment(a)` | `Alignment` | Horizontal alignment: Start · Center · End · Stretch |
+| `setMainAxisAlignment(a)` | `MainAxisAlignment` | Vertical distribution: Start · Center · End |
+| `setWidth(w)` | `int` | Fixed width |
+| `setHeight(h)` | `int` | Fixed height |
+| `setPadding(p)` | `int` | Uniform padding |
+| `setBackgroundColor(c)` | `COLORREF` | Column background fill |
+| `setFlex(n)` | `int` | Flex factor when nested in a Row/Column |
+
+---
+
+### Container
+
+Single-child box with full styling support — background, border, radius, padding, margin, size constraints, and hover effects. The most versatile layout primitive.
+
+```cpp
+Container(Text("Hello"))
+    ->setBackgroundColor(RGB(240,248,255))
+    ->setBorderColor(RGB(33,150,243))
+    ->setBorderWidth(1)
+    ->setBorderRadius(8)
+    ->setPadding(16)
+    ->setHoverBackgroundColor(RGB(220,240,255));
+
+// State-driven background
+Container(child)
+    ->setBackgroundColor(isSelected, RGB(230,245,255), RGB(255,255,255));
+```
+
+| Method | Type | Description |
+|---|---|---|
+| `setBackgroundColor(color)` | `COLORREF` | Fill color |
+| `setBackgroundColor(State, true, false)` | State + `COLORREF ×2` | Reactive background based on bool state |
+| `setHoverBackgroundColor(color)` | `COLORREF` | Fill on mouse hover |
+| `setBorderColor(color)` | `COLORREF` | Border stroke color |
+| `setHoverBorderColor(color)` | `COLORREF` | Border color on hover |
+| `setBorderWidth(w)` | `int` | Border stroke thickness |
+| `setBorderRadius(r)` | `int` | Corner rounding |
+| `setPadding(p)` | `int` | Uniform inner padding |
+| `setPaddingAll(l,t,r,b)` | `int ×4` | Per-side inner padding |
+| `setMargin(m)` | `int` | Uniform outer margin |
+| `setMarginAll(l,t,r,b)` | `int ×4` | Per-side outer margin |
+| `setWidth(w)` | `int` | Fixed width |
+| `setHeight(h)` | `int` | Fixed height |
+| `setMinWidth(w)` | `int` | Minimum width constraint |
+| `setMinHeight(h)` | `int` | Minimum height constraint |
+| `setMaxWidth(w)` | `int` | Maximum width constraint |
+| `setMaxHeight(h)` | `int` | Maximum height constraint |
+| `setFlex(n)` | `int` | Flex factor in parent Row/Column |
+| `setOnHover(fn)` | `void(bool)` | Hover enter/leave callback |
+| `setBackgroundAlpha(a)` | `BYTE` | Background opacity (0–255) |
+| `setBorderAlpha(a)` | `BYTE` | Border opacity (0–255) |
+
+---
+
+### Center
+
+Centers its single child both horizontally and vertically within the available space.
+
+```cpp
+Center(Text("No items found")->setTextColor(RGB(150,150,150)));
+```
+
+| Signature | Description |
+|---|---|
+| `Center(child)` | Centers child in available space |
+
+---
+
+### Expanded
+
+Causes its child to fill all remaining space along the main axis of a parent Row or Column. Supports proportional flex ratios.
+
+```cpp
+Row(
+    Text("Label"),
+    Expanded(TextInput()),   // takes all remaining width
+    Button("Go")
+);
+
+// Proportional flex — 2:1 split
+Row(
+    Expanded(Column(...), 2),  // 2/3 of width
+    Expanded(Column(...), 1)   // 1/3 of width
+);
+```
+
+| Signature | Description |
+|---|---|
+| `Expanded(child, flex = 1)` | Flex-expand child with optional flex weight |
+
+---
+
+### SizedBox
+
+A fixed-size box. Used as a spacer (no child) or to constrain a child to an exact size.
+
+```cpp
+SizedBox(0, 24);               // 24px vertical gap
+SizedBox(16, 0);               // 16px horizontal gap
+SizedBox(200, 48, Button("Submit"));  // constrained child
+```
+
+| Signature | Description |
+|---|---|
+| `SizedBox(w, h)` | Fixed-size spacer |
+| `SizedBox(w, h, child)` | Child constrained to w × h |
+
+---
+
+### Padding
+
+Wraps a child in uniform padding. Convenience shorthand for `Container` with a single padding value.
+
+```cpp
+Padding(16, Text("Padded content"));
+```
+
+| Signature | Description |
+|---|---|
+| `Padding(p, child)` | Uniform padding on all sides |
+
+---
+
+## Structure
+
+### Scaffold
+
+The root structure widget. Manages the overlay stack used by Dropdown, Tooltip, Dialog, and ContextMenu. Composes an optional AppBar with an Expanded body in a Column.
+
+```cpp
+Scaffold(
+    AppBar("My App"),
+    Column(
+        Text("Content goes here")
+    )
+);
+```
+
+> **Overlay zIndex order:** Tooltip = 50, Dropdown = 100, ContextMenu = 150, Dialog = 200. Higher zIndex renders on top.
+
+| Signature | Description |
+|---|---|
+| `Scaffold(appBar, body)` | Root scaffold with optional AppBar and body |
+
+**Overlay API (ScaffoldWidget)**
+
+| Method | Description |
+|---|---|
+| `addOverlay(widget, renderer, zIndex)` | Register a floating overlay renderer |
+| `removeOverlay(widget)` | Unregister a floating overlay |
+| `clearOverlays()` | Remove all active overlays |
+| `hasOverlays()` | Returns true if any overlays are active |
+| `getTopmostOverlay()` | Returns the topmost overlay widget pointer |
+
+---
+
+### AppBar
+
+A 56px tall header bar with a blue background and bold white title text.
+
+```cpp
+AppBar("Dashboard");
+```
+
+| Signature | Description |
+|---|---|
+| `AppBar(title)` | Header bar with title string. Default height 56px, blue background. |
+
+---
+
+### Card
+
+A white rounded-corner box with a light border and 16px padding. Convenience wrapper over `Container` with sensible card defaults.
+
+```cpp
+Card(
+    Column(
+        Text("Card Title")->setFontWeight(FontWeight::Bold),
+        Text("Some description text")
+    )->setSpacing(8)
+);
+```
+
+| Signature | Description |
+|---|---|
+| `Card(child)` | White bg, 1px border, 8px radius, 16px padding on all sides |
+
+---
+
+## Overlay
+
+### Dropdown
+
+A select input that opens a scrollable overlay list. Supports keyboard navigation, scroll-wheel, placeholder, and two-way state binding by index or string value.
+
+```cpp
+State<std::string> country("", &app);
+
+Dropdown({"Nepal", "India", "USA", "UK"})
+    ->setPlaceholder("Select a country")
+    ->setSelectedValue(country)
+    ->setOnSelectionChanged([&](int i, const std::string& v){
+        handleSelect(v);
+    });
+```
+
+**Factory**
+
+| Signature | Description |
+|---|---|
+| `Dropdown(options)` | Dropdown with initial options vector |
+| `Dropdown()` | Empty dropdown, set options later |
+
+**Methods**
+
+| Method | Type | Description |
+|---|---|---|
+| `setOptions(opts)` | `vector<string>` | Set or replace option list |
+| `setPlaceholder(text)` | `string` | Text shown when nothing is selected |
+| `setSelectedIndex(State<int>)` | State | Two-way binding by index |
+| `setSelectedValue(State<string>)` | State | Two-way binding by string value |
+| `setOnSelectionChanged(fn)` | `void(int, string)` | Change callback with index and value |
+| `setItemHeight(h)` | `int` | Height of each list row (default 32px) |
+| `setMaxVisibleItems(n)` | `int` | Max rows before scroll kicks in (default 6) |
+
+> **Keyboard:** `↑/↓` navigate, `Enter/Space` open/confirm, `Escape` close, `Home/End` jump to first/last.
+
+---
+
+### Tooltip
+
+Wraps any widget and shows a floating text bubble on hover. Chains the anchor's existing `onHover` callback so existing hover effects continue to work.
+
+```cpp
+Tooltip(
+    Button("Delete", [&]{ deleteItem(); }),
+    "Permanently removes the item"
+)
+->setPosition(TooltipPosition::Above)
+->setTooltipBackground(RGB(30,30,30))
+->setTooltipMaxWidth(200);
+```
+
+**Factory**
+
+| Signature | Description |
+|---|---|
+| `Tooltip(anchor, text)` | Wraps anchor and attaches tooltip text |
+
+**Methods**
+
+| Method | Type | Description |
+|---|---|---|
+| `setTooltipText(text)` | `string` | Update tooltip content |
+| `setPosition(pos)` | `TooltipPosition` | `Above` · `Below` · `Auto` (default: prefer Above) |
+| `setTooltipBackground(color)` | `COLORREF` | Bubble background (default dark gray) |
+| `setTooltipTextColor(color)` | `COLORREF` | Bubble text color (default white) |
+| `setTooltipFontSize(size)` | `int` | Font size inside bubble |
+| `setTooltipMaxWidth(w)` | `int` | Max bubble width before word-wrap (default 240px) |
+
+---
+
+### Dialog
+
+A modal overlay with a semi-transparent backdrop and a centered content panel. Dispatches input events to its content tree. Closes on outside click by default.
+
+```cpp
+auto dlg = Dialog(
+    Column(
+        Text("Confirm delete?")->setFontSize(16),
+        Row(
+            Button("Cancel", [&]{ dlg->close(); }),
+            Button("Delete", [&]{ deleteItem(); dlg->close(); })
+        )->setSpacing(8)
+    )
+)->setSize(360, 160)
+ ->setCloseOnClickOutside(true);
+
+// Open it later
+dlg->open();
+```
+
+| Method | Type | Description |
+|---|---|---|
+| `open()` | — | Show the dialog |
+| `close()` | — | Dismiss the dialog |
+| `setContent(widget)` | `WidgetPtr` | Set or replace dialog content |
+| `setSize(w, h)` | `int, int` | Dialog panel dimensions (default 400×300) |
+| `setCloseOnClickOutside(bool)` | `bool` | Close when backdrop is clicked (default true) |
+| `setOverlayAlpha(alpha)` | `int` 0–255 | Backdrop opacity (default 128 = 50%) |
+| `setOnClose(fn)` | `void()` | Called when dialog is dismissed |
+
+---
+
+### ContextMenu
+
+Attaches a right-click context menu to any anchor widget. Renders at the cursor position with automatic edge clamping. Supports separators, disabled items, and keyboard navigation.
+
+```cpp
+ContextMenu(
+    Text("Right click me"),
     {
-        SelectObject(hdcMem, hbmOld);  // Restore old bitmap
-        DeleteObject(hbmMem);          // Delete current bitmap
-        DeleteDC(hdcMem);              // Delete DC
-        hdcMem = nullptr;
-        hbmMem = nullptr;
-        hbmOld = nullptr;
+        {"Cut",   [&]{ cut(); }},
+        {"Copy",  [&]{ copy(); }},
+        ContextMenuItem::Separator(),
+        {"Paste", [&]{ paste(); }, false}  // disabled
     }
-}
+);
 ```
 
-**Problem:**
-- If `createBackBuffer()` is called twice without destroying (size change detection could fail), old resources leak
-- `hbmOld` might point to a deleted object if the original DC had a bitmap selected
-- No verification that `SelectObject` succeeded before deletion
-
-**Fix:** Track original object separately and verify operations.
-
----
-
-## 🟡 DESIGN ISSUES
-
-### 6. **Invalid Widget State After Move**
-**Location:** `flux_state.hpp` - Move operations
-**Severity:** MEDIUM
-
-```cpp
-State(State &&other) noexcept
-{
-    std::lock_guard<std::mutex> lock(other.stateMutex);
-    // ... move data
-    other.ui = nullptr;  // BUG: Moved-from state is partially valid
-}
-```
-
-**Problem:**
-- Moved-from state still has `value`, `observers`, and `listeners` populated
-- Only `ui` is nulled, but observers still reference the old state
-- Calling methods on moved-from state could still work partially
-- No way to detect moved-from state in debug builds
-
-**Fix:** Clear all members or mark moved-from explicitly.
-
----
-
-### 7. **Inconsistent Layout Dirty Tracking**
-**Location:** `flux_widget.hpp` - `markNeedsLayout()`
-**Severity:** MEDIUM
-
-```cpp
-void markNeedsLayout()
-{
-    needsLayout = true;
-    needsPaint = true;
-    if (parent)
-    {
-        parent->markNeedsLayout();  // BUG: Infinite loop if circular ref
-    }
-}
-```
-
-**Problem:**
-- No cycle detection - circular parent references cause stack overflow
-- Marks entire tree dirty even if only one widget changed
-- No way to mark only subtree
-- Performance issue on large widget trees
-
-**Fix:** Implement cycle detection and optimize dirty propagation.
-
----
-
-### 8. **Thread-Safety Violation in State Observers**
-**Location:** `flux_state.hpp` - `addObserver()`
-**Severity:** HIGH
-
-```cpp
-void addObserver(std::shared_ptr<Widget> widget)
-{
-    if (!widget)
-        return;
-
-    std::lock_guard<std::mutex> lock(stateMutex);
-    observers.push_back(widget);
-    widget->boundState = this;  // BUG: Race - widget might be accessed by UI thread
-    widget->text = valueToString(value);  // BUG: Modifying widget without UI thread sync
-}
-```
-
-**Problem:**
-- Widget is modified outside the main/UI thread
-- Windows GDI calls are not thread-safe
-- Setting `widget->text` could happen while widget is being rendered
-- No guarantee that `updateWidget()` is called on UI thread
-
-**Fix:** Queue updates for UI thread instead of direct modification.
-
----
-
-### 9. **Static Instance Anti-Pattern**
-**Location:** `flux_core.hpp` - `FluxUI::currentInstance`
-**Severity:** MEDIUM
-
-```cpp
-class FluxUI {
-    static FluxUI *currentInstance;
-    
-    FluxUI(HINSTANCE hInst) : hInstance(hInst)
-    {
-        currentInstance = this;  // BUG: Not thread-safe, multiple instances break
-    }
-};
-```
-
-**Problem:**
-- Global mutable state
-- Multiple FluxUI instances will overwrite each other
-- No thread-safety on access
-- Makes testing difficult
-- Violates RAII principles
-
-**Fix:** Use thread-local storage or explicit context passing.
-
----
-
-### 10. **Exception Safety in Component Lifecycle**
-**Location:** `flux_components.hpp` - `ComponentBuilder::build()`
-**Severity:** MEDIUM
-
-```cpp
-template <typename TComponent, typename... Args>
-static WidgetPtr build(Args &&...args)
-{
-    auto component = std::make_unique<TComponent>(std::forward<Args>(args)...);
-    
-    if (!component->isInitialized())
-    {
-        try {
-            component->initState();
-            component->markInitialized();
-        }
-        catch (const std::exception &e) {
-            // BUG: Component is destroyed without calling dispose()
-            throw;
-        }
-    }
-    
-    return component->build();  // BUG: component destroyed before widget uses it
-}
-```
-
-**Problem:**
-- Component is destroyed immediately after `build()` returns
-- If widget needs component (closures, lambdas), dangling reference
-- No disposal called on exception in `build()`
-- Temporary component cannot maintain state
-
-**Fix:** Either keep component alive or make it fully stateless.
-
----
-
-## 🟠 POTENTIAL BUGS
-
-### 11. **Invalid Mutex Lock After Move**
-**Location:** `flux_state.hpp` - State move operations
-**Severity:** MEDIUM
-
-```cpp
-State(State &&other) noexcept
-{
-    std::lock_guard<std::mutex> lock(other.stateMutex);
-    // ... move happens
-}
-// Mutex is moved, but it was locked!
-```
-
-**Problem:**
-- Moving a mutex while it's locked is undefined behavior (C++ standard)
-- `std::mutex` is not moveable - the code won't compile correctly
-- Lock guard holds reference to mutex that gets moved
-
-**Fix:** State should not be moveable, or mutex should be separate.
-
----
-
-### 12. **Window Procedure Race Condition**
-**Location:** `flux_core.hpp` - `WindowProc()`
-**Severity:** MEDIUM
-
-```cpp
-case WM_CREATE:
-{
-    CREATESTRUCT *pCreate = reinterpret_cast<CREATESTRUCT *>(lParam);
-    instance = reinterpret_cast<FluxUI *>(pCreate->lpCreateParams);
-    SetWindowLongPtr(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(instance));
-    return 0;
-}
-```
-
-**Problem:**
-- Between window creation and `WM_CREATE`, other messages might arrive
-- These messages will have `instance == nullptr`
-- Could cause null pointer dereference if messages handled before `WM_CREATE`
-- Windows doesn't guarantee `WM_CREATE` is first message
-
-**Fix:** Handle null instance gracefully in all message handlers.
-
----
-
-### 13. **Inefficient String Caching**
-**Location:** `flux_state.hpp` - `valueToString()`
-**Severity:** LOW
-
-```cpp
-template <typename U = T>
-typename std::enable_if<std::is_same<U, std::string>::value, std::string>::type
-valueToString(const U &val) const
-{
-    return val; // No caching needed for strings
-}
-```
-
-**Problem:**
-- For string types, caching is bypassed
-- But `stringDirty` flag is still set/checked
-- Inconsistent behavior between types
-- Memory overhead of unused cache for strings
-
-**Fix:** Specialize State for strings or make caching uniform.
-
----
-
-### 14. **Missing Virtual Destructor**
-**Location:** `flux_widget.hpp` - Widget hierarchy
-**Severity:** LOW-MEDIUM
-
-```cpp
-class Widget : public std::enable_shared_from_this<Widget>
-{
-    virtual ~Widget() = default;  // OK
-};
-
-class LayoutEngine {
-    // BUG: No virtual destructor, but has static polymorphic methods
-};
-```
-
-**Problem:**
-- If someone tries to delete through base pointer (unlikely with factory functions)
-- Static polymorphism used, but virtual destructor present (overhead for no reason)
-- Inconsistent design - either fully static or fully virtual
-
-**Fix:** Clarify design - either remove virtual destructor or make methods virtual.
-
----
-
-### 15. **Unvalidated Widget Tree Mutations**
-**Location:** `flux_widget.hpp` - `addChild()`
-**Severity:** MEDIUM
-
-```cpp
-void addChild(WidgetPtr child)
-{
-    children.push_back(child);
-    child->parent = this;
-    markNeedsLayout();
-}
-```
-
-**Problem:**
-- No check if child is null
-- No check if child already has a parent (would create multi-parent situation)
-- No check for circular references (widget adding itself as child)
-- Could add child that's already in children vector (duplicates)
-
-**Fix:** Add validation before adding child.
-
----
-
-## 📊 CODE QUALITY ISSUES
-
-### 16. **Inconsistent Error Handling**
-- Some functions silently fail (division by zero returns without error)
-- Some throw exceptions (component lifecycle)
-- Some use debug output only (`#ifdef FLUX_DEBUG`)
-- No consistent error reporting strategy
-
-### 17. **Poor Const Correctness**
-```cpp
-WidgetPtr getRoot() const { return root; }  // Returns mutable shared_ptr from const method
-```
-Should return `std::shared_ptr<const Widget>` from const method.
-
-### 18. **Magic Numbers**
-```cpp
-int maxWidth = 10000, maxHeight = 10000;  // Why 10000?
-if (bufferWidth != width || height != bufferHeight)  // Should check both dimensions consistently
-```
-
-### 19. **Resource Leaks on Exception**
-```cpp
-HFONT hFont = fontCache.getFont(fontSize, fontWeight);
-HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
-// If exception thrown here, hOldFont never restored
-SIZE size;
-GetTextExtentPoint32(hdc, text.c_str(), (int)text.length(), &size);
-SelectObject(hdc, hOldFont);  // Might not execute
-```
-
-### 20. **Undefined Behavior: Lock After Throw**
-The `notifyListenersLocked` pattern of unlocking → calling callbacks → re-locking is fundamentally broken:
-```cpp
-void notifyListenersLocked(const T &newValue)
-{
-    auto listenersCopy = listeners;
-    stateMutex.unlock();  // Unlock
-    
-    for (auto &listener : listenersCopy) {
-        listener(newValue);  // Could throw
-    }
-    
-    stateMutex.lock();  // If exception thrown, this doesn't execute
-    // Caller expects lock to be held!
-}
-```
-
----
-
-## 🔧 RECOMMENDATIONS
-
-### High Priority Fixes
-1. **Fix State locking mechanism** - Rewrite notification system with proper exception safety
-2. **Fix parent pointer issue** - Use weak_ptr for parent references
-3. **Add thread-safety for widget modification** - Queue updates for UI thread
-4. **Fix component lifetime** - Components should persist or be fully stateless
-
-### Medium Priority Fixes
-5. **Add validation** - Validate widget tree operations (null checks, cycle detection)
-6. **Improve error handling** - Consistent strategy across framework
-7. **Fix resource management** - RAII for GDI objects
-
-### Low Priority Improvements
-8. **Performance optimization** - Better dirty tracking, string caching
-9. **Code cleanup** - Remove magic numbers, improve const correctness
-10. **Documentation** - Add preconditions, postconditions, thread-safety guarantees
-
----
-
-## 🧪 TESTING RECOMMENDATIONS
-
-### Critical Test Cases
-1. **Concurrent state modification** - Multiple threads updating same state
-2. **Widget tree cycles** - Parent-child cycles causing stack overflow
-3. **Exception safety** - Exceptions during layout, rendering, state updates
-4. **Resource cleanup** - Font cache under memory pressure
-5. **Component lifecycle** - State persistence after component destruction
-
-### Stress Tests
-1. Large widget trees (1000+ widgets)
-2. Rapid state changes (100+ updates/second)
-3. Memory allocation failures
-4. GDI resource exhaustion
-
----
-
-## 📝 CONCLUSION
-
-The FluxUI framework has a solid architectural foundation but suffers from several critical concurrency and lifetime management issues. The most severe problems are:
-
-1. **Thread-safety violations** in state management
-2. **Lifetime issues** with parent pointers and components
-3. **Exception safety** problems throughout
-
-These issues could lead to crashes, data corruption, and resource leaks in production use. The framework needs significant hardening before being production-ready, particularly around concurrent state updates and widget lifecycle management.
-
-**Risk Assessment:** ⚠️ **HIGH RISK** for production use without fixes
-**Recommended Action:** Address critical bugs before deployment
+**ContextMenuItem**
+
+| Factory | Description |
+|---|---|
+| `ContextMenuItem(label, action, enabled)` | Action item with optional enabled state |
+| `ContextMenuItem::Action(label, action, enabled)` | Explicit action item factory |
+| `ContextMenuItem::Separator()` | Visual divider between items |
+
+**ContextMenuWidget Methods**
+
+| Method | Type | Description |
+|---|---|---|
+| `setMenuItems(items)` | `vector<ContextMenuItem>` | Replace all menu items |
+| `setItemHeight(h)` | `int` | Row height (default 28px) |
+| `setMinWidth(w)` | `int` | Minimum menu width (default 160px) |
+| `setMenuBackground(color)` | `COLORREF` | Menu panel background |
+| `setMenuBorder(color)` | `COLORREF` | Menu panel border color |
+| `setItemHoverColor(color)` | `COLORREF` | Row highlight on hover |
+
+> **Keyboard:** `↑/↓` navigate, `Enter/Space` activate, `Escape` close, `Home/End` jump to first/last enabled item.
