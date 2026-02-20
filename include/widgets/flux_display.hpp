@@ -1,9 +1,9 @@
 #ifndef FLUX_DISPLAY_HPP
 #define FLUX_DISPLAY_HPP
 
-#include "flux_widget.hpp"
 #include "flux_core.hpp"
 #include "flux_state.hpp"
+#include "flux_widget.hpp"
 
 #include <iostream>
 #define NOMINMAX // prevent windows.h from defining min/max macros
@@ -540,7 +540,7 @@ private:
         drawLine(s, plotX0, plotX1, plotY0, plotY1);
         break;
       case GraphType::Bar:
-        drawBars(s, plotX0 + 0.1f, plotX1+ 0.1f, plotY0, plotY1);
+        drawBars(s, plotX0 + 0.1f, plotX1 + 0.1f, plotY0, plotY1);
         break;
       case GraphType::Area:
         drawArea(s, plotX0, plotX1, plotY0, plotY1);
@@ -912,7 +912,6 @@ public:
   }
 };
 
-
 // ============================================================================
 // FACTORY
 // ============================================================================
@@ -926,7 +925,6 @@ inline GraphWidgetPtr Graph(int w, int h) {
   g->setSize(w, h);
   return g;
 }
-
 
 /*
 // ============================================================================
@@ -1054,6 +1052,13 @@ public:
     height = h;
     autoHeight = false;
     markNeedsPaint();
+    return std::static_pointer_cast<ProgressBarWidget>(shared_from_this());
+  }
+
+  std::shared_ptr<ProgressBarWidget> setWidth(int w) {
+    width = w;
+    autoWidth = false;
+    markNeedsLayout();
     return std::static_pointer_cast<ProgressBarWidget>(shared_from_this());
   }
 

@@ -183,6 +183,12 @@ public:
     }
     return std::static_pointer_cast<ColumnWidget>(shared_from_this());
   }
+
+    std::shared_ptr<ColumnWidget> setMinWidth(int w) {
+    minWidth = w;
+    markNeedsLayout();
+    return std::static_pointer_cast<ColumnWidget>(shared_from_this());
+  }
 };
 
 // --- Row Widget ---
@@ -354,31 +360,32 @@ public:
 // --- Container/Padding/Card Widgets ---
 class ContainerWidget : public Widget {
 public:
-  void computeLayout(HDC hdc, int availableWidth, int availableHeight,
-                     FontCache &fontCache) override {
-    // Resolve own size first
-    if (autoWidth)
-      width = availableWidth;
-    if (autoHeight)
-      height = availableHeight;
-
-    // Now content is derived from OUR size, not parent's offer
-    int contentWidth = width - paddingLeft - paddingRight;
-    int contentHeight = height - paddingTop - paddingBottom;
+void computeLayout(HDC hdc, int availableWidth, int availableHeight,
+                   FontCache &fontCache) override {
 
     if (!children.empty()) {
-      children[0]->computeLayout(hdc, contentWidth, contentHeight, fontCache);
+        // Tell child it can use up to available space minus our padding
+        int childAvailW = availableWidth - paddingLeft - paddingRight;
+        int childAvailH = availableHeight - paddingTop - paddingBottom;
 
-      // Only shrink-wrap if auto-sizing
-      if (autoWidth)
-        width = children[0]->width + paddingLeft + paddingRight;
-      if (autoHeight)
-        height = children[0]->height + paddingTop + paddingBottom;
+        // If we have a fixed size, constrain child to it
+        if (!autoWidth)  childAvailW = width - paddingLeft - paddingRight;
+        if (!autoHeight) childAvailH = height - paddingTop - paddingBottom;
+
+        children[0]->computeLayout(hdc, childAvailW, childAvailH, fontCache);
+
+        // Shrink-wrap to child if auto
+        if (autoWidth)  width  = children[0]->width  + paddingLeft + paddingRight;
+        if (autoHeight) height = children[0]->height + paddingTop  + paddingBottom;
+    } else {
+        // No child: size is 0 (plus explicit size if set, padding doesn't inflate 0)
+        if (autoWidth)  width  = 0;
+        if (autoHeight) height = 0;
     }
 
     applyConstraints();
     needsLayout = false;
-  }
+}
 
   void positionChildren(int contentX, int contentY, int contentWidth,
                         int contentHeight) override {
