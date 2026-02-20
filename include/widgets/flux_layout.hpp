@@ -15,13 +15,19 @@ class ColumnWidget : public Widget {
 public:
   void computeLayout(HDC hdc, int availableWidth, int availableHeight,
                      FontCache &fontCache) override {
-    int contentWidth = availableWidth - paddingLeft - paddingRight;
-    int contentHeight = availableHeight - paddingTop - paddingBottom;
+
+    // Content box (respect padding)
+    int contentWidth = max(0, availableWidth - paddingLeft - paddingRight);
+    int contentHeight =
+        max(0, availableHeight - paddingTop - paddingBottom);
 
     int totalFlex = 0;
     int fixedHeight = 0;
+    int visibleChildren = static_cast<int>(children.size());
 
-    // First pass: compute fixed-size children
+    // -------------------------------
+    // PASS 1: Measure non-flex children
+    // -------------------------------
     for (auto &child : children) {
       if (child->isExpanded()) {
         totalFlex += child->flex;
@@ -31,47 +37,75 @@ public:
       }
     }
 
-    if (!children.empty()) {
-      fixedHeight += spacing * (children.size() - 1);
+    // Add spacing between children
+    if (visibleChildren > 1) {
+      fixedHeight += spacing * (visibleChildren - 1);
     }
 
-    // Second pass: distribute remaining space to flex children
+    // -------------------------------
+    // PASS 2: Distribute remaining height to flex children
+    // -------------------------------
     int remainingHeight = contentHeight - fixedHeight;
+    remainingHeight = max(0, remainingHeight);
+
     if (totalFlex > 0 && remainingHeight > 0) {
+
+      int allocatedHeight = 0;
+      Widget *lastFlexChild = nullptr;
+
       for (auto &child : children) {
         if (child->isExpanded()) {
+
+          lastFlexChild = child.get();
+
           int expandedHeight = (remainingHeight * child->flex) / totalFlex;
-          child->height = expandedHeight;
+
+          allocatedHeight += expandedHeight;
+
           child->width = contentWidth;
-          child->autoHeight = false;
+          child->height = expandedHeight;
           child->autoWidth = false;
+          child->autoHeight = false;
+
           child->computeLayout(hdc, contentWidth, expandedHeight, fontCache);
         }
       }
+
+      // Fix rounding error (assign leftover pixels to last flex child)
+      int leftover = remainingHeight - allocatedHeight;
+      if (lastFlexChild && leftover > 0) {
+        lastFlexChild->height += leftover;
+      }
     }
 
-    // Calculate final size
+    // -------------------------------
+    // PASS 3: Compute final size
+    // -------------------------------
     int totalHeight = 0;
     int maxWidth = 0;
 
-    for (size_t i = 0; i < children.size(); i++) {
+    for (size_t i = 0; i < children.size(); ++i) {
       auto &child = children[i];
-      if (child->width > maxWidth)
-        maxWidth = child->width;
+
       totalHeight += child->height;
-      if (i < children.size() - 1)
+      maxWidth = max(maxWidth, child->width);
+
+      if (i < children.size() - 1) {
         totalHeight += spacing;
+      }
     }
 
-    if (autoWidth)
+    if (autoWidth) {
       width = maxWidth + paddingLeft + paddingRight;
-    if (autoHeight)
+    }
+
+    if (autoHeight) {
       height = totalHeight + paddingTop + paddingBottom;
+    }
 
     applyConstraints();
     needsLayout = false;
   }
-
   void positionChildren(int contentX, int contentY, int contentWidth,
                         int contentHeight) override {
     int totalChildHeight = 0;
@@ -184,7 +218,7 @@ public:
     return std::static_pointer_cast<ColumnWidget>(shared_from_this());
   }
 
-    std::shared_ptr<ColumnWidget> setMinWidth(int w) {
+  std::shared_ptr<ColumnWidget> setMinWidth(int w) {
     minWidth = w;
     markNeedsLayout();
     return std::static_pointer_cast<ColumnWidget>(shared_from_this());
@@ -360,32 +394,39 @@ public:
 // --- Container/Padding/Card Widgets ---
 class ContainerWidget : public Widget {
 public:
-void computeLayout(HDC hdc, int availableWidth, int availableHeight,
-                   FontCache &fontCache) override {
+  void computeLayout(HDC hdc, int availableWidth, int availableHeight,
+                     FontCache &fontCache) override {
 
     if (!children.empty()) {
-        // Tell child it can use up to available space minus our padding
-        int childAvailW = availableWidth - paddingLeft - paddingRight;
-        int childAvailH = availableHeight - paddingTop - paddingBottom;
+      // Tell child it can use up to available space minus our padding
+      int childAvailW = availableWidth - paddingLeft - paddingRight;
+      int childAvailH = availableHeight - paddingTop - paddingBottom;
 
-        // If we have a fixed size, constrain child to it
-        if (!autoWidth)  childAvailW = width - paddingLeft - paddingRight;
-        if (!autoHeight) childAvailH = height - paddingTop - paddingBottom;
+      // If we have a fixed size, constrain child to it
+      if (!autoWidth)
+        childAvailW = width - paddingLeft - paddingRight;
+      if (!autoHeight)
+        childAvailH = height - paddingTop - paddingBottom;
 
-        children[0]->computeLayout(hdc, childAvailW, childAvailH, fontCache);
+      children[0]->computeLayout(hdc, childAvailW, childAvailH, fontCache);
 
-        // Shrink-wrap to child if auto
-        if (autoWidth)  width  = children[0]->width  + paddingLeft + paddingRight;
-        if (autoHeight) height = children[0]->height + paddingTop  + paddingBottom;
+      // Shrink-wrap to child if auto
+      if (autoWidth)
+        width = children[0]->width + paddingLeft + paddingRight;
+      if (autoHeight)
+        height = children[0]->height + paddingTop + paddingBottom;
     } else {
-        // No child: size is 0 (plus explicit size if set, padding doesn't inflate 0)
-        if (autoWidth)  width  = 0;
-        if (autoHeight) height = 0;
+      // No child: size is 0 (plus explicit size if set, padding doesn't inflate
+      // 0)
+      if (autoWidth)
+        width = 0;
+      if (autoHeight)
+        height = 0;
     }
 
     applyConstraints();
     needsLayout = false;
-}
+  }
 
   void positionChildren(int contentX, int contentY, int contentWidth,
                         int contentHeight) override {
@@ -738,7 +779,5 @@ inline WidgetPtr Expanded(WidgetPtr child, int flex = 1) {
     w->addChild(child);
   return w;
 }
-
-
 
 #endif // FLUX_WIDGET_LIST_HPP

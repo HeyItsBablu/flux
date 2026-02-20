@@ -208,16 +208,8 @@ public:
   // ----------------------------------------------------------------
   void computeLayout(HDC hdc, int availableWidth, int availableHeight,
                      FontCache &fontCache) override {
-    // Respect parent's offered space as a hard ceiling
-    if (autoWidth)
-      width = availableWidth;
-    else
-      width = min(width, availableWidth); // never exceed what parent offers
-
-    if (autoHeight)
-      height = availableHeight;
-    else
-      height = min(height, availableHeight); // never exceed what parent offers
+    width = autoWidth ? availableWidth : min(width, availableWidth);
+    height = autoHeight ? availableHeight : min(height, availableHeight);
 
     applyConstraints();
     needsLayout = false;
