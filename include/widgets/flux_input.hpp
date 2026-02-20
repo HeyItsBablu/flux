@@ -614,6 +614,13 @@ public:
     return std::static_pointer_cast<SliderWidget>(shared_from_this());
   }
 
+    std::shared_ptr<SliderWidget> setWidth(int w) {
+    width = w;
+    autoWidth = false;
+
+    return std::static_pointer_cast<SliderWidget>(shared_from_this());
+  }
+
 private:
   State<double> *boundDoubleState = nullptr;
   State<int> *boundIntState = nullptr;
@@ -1433,6 +1440,13 @@ public:
     placeholder = ph;
     return std::static_pointer_cast<TextInputWidget>(shared_from_this());
   }
+    std::shared_ptr<TextInputWidget> setWidth(int w) {
+    width = w;
+    autoWidth = false;
+
+    return std::static_pointer_cast<TextInputWidget>(shared_from_this());
+  }
+
 
 private:
   State<std::string> *boundStringState = nullptr;

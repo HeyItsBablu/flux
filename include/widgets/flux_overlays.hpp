@@ -19,8 +19,8 @@ struct ContextMenuItem {
 
   // Factory: Action item
   static ContextMenuItem Action(const std::string &label,
-                                 std::function<void()> action,
-                                 bool enabled = true) {
+                                std::function<void()> action,
+                                bool enabled = true) {
     ContextMenuItem item;
     item.type = Type::Action;
     item.label = label;
@@ -72,7 +72,7 @@ struct ContextMenuItem {
 
 class ContextMenuWidget : public Widget {
 private:
-  ScaffoldWidget *scaffold = nullptr;  
+  ScaffoldWidget *scaffold = nullptr;
 
   // Menu geometry (computed on open)
   int menuX = 0, menuY = 0;
@@ -337,20 +337,20 @@ private:
   // Captures right-click on the anchor widget to open the menu.
   // Similar pattern to Tooltip's onHover chaining.
   // ----------------------------------------------------------------
-void chainAnchorRightClick(Widget *anchor) {
+  void chainAnchorRightClick(Widget *anchor) {
     std::function<bool(int, int)> previous = anchor->onRightClick;
 
     anchor->onRightClick = [this, anchor, previous](int mx, int my) {
-        if (mx >= anchor->x && mx < anchor->x + anchor->width &&
-            my >= anchor->y && my < anchor->y + anchor->height) {
-            openMenuAt(mx, my);
-            return true;
-        }
-        if (previous)
-            return previous(mx, my);
-        return false;
+      if (mx >= anchor->x && mx < anchor->x + anchor->width &&
+          my >= anchor->y && my < anchor->y + anchor->height) {
+        openMenuAt(mx, my);
+        return true;
+      }
+      if (previous)
+        return previous(mx, my);
+      return false;
     };
-}
+  }
 
   // ----------------------------------------------------------------
   // openMenuAt
@@ -436,10 +436,9 @@ void chainAnchorRightClick(Widget *anchor) {
     RECT shadowRect = {menuX + shadowOffset, menuY + shadowOffset,
                        menuX + menuW + shadowOffset,
                        menuY + menuH + shadowOffset};
-    HRGN shadowRgn =
-        CreateRoundRectRgn(shadowRect.left, shadowRect.top, shadowRect.right,
-                           shadowRect.bottom, menuBorderRadius * 2,
-                           menuBorderRadius * 2);
+    HRGN shadowRgn = CreateRoundRectRgn(
+        shadowRect.left, shadowRect.top, shadowRect.right, shadowRect.bottom,
+        menuBorderRadius * 2, menuBorderRadius * 2);
     FillRgn(hdc, shadowRgn, shadowBrush);
     DeleteObject(shadowRgn);
     DeleteObject(shadowBrush);
@@ -582,7 +581,7 @@ void chainAnchorRightClick(Widget *anchor) {
     for (int i = 0; i < (int)items.size(); i++) {
       const auto &item = items[i];
       int h = (item.type == ContextMenuItem::Type::Separator) ? separatorHeight
-                                                               : itemHeight;
+                                                              : itemHeight;
 
       if (relativeY >= currentY && relativeY < currentY + h) {
         // Don't return separators as selectable
@@ -604,7 +603,7 @@ void chainAnchorRightClick(Widget *anchor) {
 
 class DialogWidget : public Widget {
 private:
-  ScaffoldWidget *scaffold = nullptr;  
+  ScaffoldWidget *scaffold = nullptr;
   bool contentLayoutDirty = true; // Track whether layout needs to run
 
 public:
@@ -684,9 +683,9 @@ public:
                                     bool handled = w->handleMouseDown(mx, my);
                                     // Also trigger onClick for button-like
                                     // widgets
-                                    if (!handled && w->onClick &&
-                                        mx >= w->x && mx < w->x + w->width &&
-                                        my >= w->y && my < w->y + w->height) {
+                                    if (!handled && w->onClick && mx >= w->x &&
+                                        mx < w->x + w->width && my >= w->y &&
+                                        my < w->y + w->height) {
                                       w->onClick();
                                       handled = true;
                                     }
@@ -736,8 +735,9 @@ public:
 
     // Run layout eagerly so hit-testing is valid before the first click
     if (content) {
-      HWND hwnd =
-          FluxUI::getCurrentInstance() ? FluxUI::getCurrentInstance()->getWindow() : nullptr;
+      HWND hwnd = FluxUI::getCurrentInstance()
+                      ? FluxUI::getCurrentInstance()->getWindow()
+                      : nullptr;
       if (hwnd) {
         HDC hdc = GetDC(hwnd);
         FontCache &fontCache = FluxUI::getCurrentInstance()->getFontCache();
@@ -827,8 +827,8 @@ public:
 
     FillRect(hdcOverlay, &windowRect, overlayBrush);
 
-    AlphaBlend(hdc, 0, 0, windowRect.right, windowRect.bottom, hdcOverlay, 0,
-               0, windowRect.right, windowRect.bottom, blend);
+    AlphaBlend(hdc, 0, 0, windowRect.right, windowRect.bottom, hdcOverlay, 0, 0,
+               windowRect.right, windowRect.bottom, blend);
 
     SelectObject(hdcOverlay, hbmOldOverlay);
     DeleteObject(hbmOverlay);
@@ -954,14 +954,14 @@ private:
 // ============================================================================
 
 enum class TooltipPosition {
-  Above,  // Prefer above anchor; fall back to below if no room
-  Below,  // Prefer below anchor; fall back to above if no room
-  Auto    // Default: prefer Above
+  Above, // Prefer above anchor; fall back to below if no room
+  Below, // Prefer below anchor; fall back to above if no room
+  Auto   // Default: prefer Above
 };
 
 class TooltipWidget : public Widget {
 private:
-ScaffoldWidget *scaffold = nullptr;  
+  ScaffoldWidget *scaffold = nullptr;
 
   // Tooltip bubble geometry (computed on open)
   int tipX = 0, tipY = 0;
@@ -970,15 +970,15 @@ ScaffoldWidget *scaffold = nullptr;
   // Configurable appearance
   std::string tipText;
   TooltipPosition preferredPosition = TooltipPosition::Auto;
-  COLORREF tipBgColor     = RGB(50,  50,  50);
-  COLORREF tipTextColor   = RGB(255, 255, 255);
-  COLORREF tipBorderColor = RGB(80,  80,  80);
-  int tipFontSize         = 12;
-  int tipPadH             = 10; // horizontal padding inside bubble
-  int tipPadV             = 6;  // vertical padding inside bubble
-  int tipBorderRadius     = 4;
-  int tipMaxWidth         = 240;
-  int windowHeight        = 0;  // set from anchor position, used for bounds check
+  COLORREF tipBgColor = RGB(50, 50, 50);
+  COLORREF tipTextColor = RGB(255, 255, 255);
+  COLORREF tipBorderColor = RGB(80, 80, 80);
+  int tipFontSize = 12;
+  int tipPadH = 10; // horizontal padding inside bubble
+  int tipPadV = 6;  // vertical padding inside bubble
+  int tipBorderRadius = 4;
+  int tipMaxWidth = 240;
+  int windowHeight = 0; // set from anchor position, used for bounds check
 
 public:
   bool isVisible = false;
@@ -994,7 +994,7 @@ public:
     }
   }
 
-void setScaffold(ScaffoldWidget *s) { scaffold = s; }
+  void setScaffold(ScaffoldWidget *s) { scaffold = s; }
 
   // ----------------------------------------------------------------
   // onDetach — called by FluxUI::rebuild() before old tree is dropped.
@@ -1050,15 +1050,19 @@ void setScaffold(ScaffoldWidget *s) { scaffold = s; }
     // Remember window height for Above/Below bounds check
     windowHeight = availableHeight;
 
-    if (autoWidth)  width  = availableWidth;
-    if (autoHeight) height = availableHeight;
+    if (autoWidth)
+      width = availableWidth;
+    if (autoHeight)
+      height = availableHeight;
 
     if (!children.empty()) {
       auto &anchor = children[0];
       anchor->computeLayout(hdc, availableWidth, availableHeight, fontCache);
       // Shrink-wrap to anchor size so we don't steal extra hit area
-      if (autoWidth)  width  = anchor->width;
-      if (autoHeight) height = anchor->height;
+      if (autoWidth)
+        width = anchor->width;
+      if (autoHeight)
+        height = anchor->height;
     }
 
     applyConstraints();
@@ -1072,10 +1076,9 @@ void setScaffold(ScaffoldWidget *s) { scaffold = s; }
       anchor->x = x;
       anchor->y = y;
       anchor->positionChildren(
-          anchor->x + anchor->paddingLeft,
-          anchor->y + anchor->paddingTop,
-          anchor->width  - anchor->paddingLeft - anchor->paddingRight,
-          anchor->height - anchor->paddingTop  - anchor->paddingBottom);
+          anchor->x + anchor->paddingLeft, anchor->y + anchor->paddingTop,
+          anchor->width - anchor->paddingLeft - anchor->paddingRight,
+          anchor->height - anchor->paddingTop - anchor->paddingBottom);
     }
   }
 
@@ -1122,8 +1125,7 @@ private:
     isVisible = true;
 
     scaffold->addOverlay(
-        this,
-        [this](HDC hdc, FontCache &fc) { renderBubble(hdc, fc); },
+        this, [this](HDC hdc, FontCache &fc) { renderBubble(hdc, fc); },
         50 // zIndex: below Dropdown(100) and Dialog(200)
     );
   }
@@ -1148,12 +1150,13 @@ private:
     // A proper implementation would use a temporary HDC + GetTextExtentPoint32,
     // but we don't have an HDC here.  The average character width at
     // tipFontSize pt on a 96-dpi screen is roughly (tipFontSize * 0.6) px.
-    int charW    = (int)(tipFontSize * 0.62);
-    int lineH    = tipFontSize + 4;
-    int textW    = (int)tipText.size() * charW;
-    int maxTW    = tipMaxWidth - tipPadH * 2;
-    int lines    = (textW + maxTW - 1) / maxTW; // word-wrap estimate
-    if (lines < 1) lines = 1;
+    int charW = (int)(tipFontSize * 0.62);
+    int lineH = tipFontSize + 4;
+    int textW = (int)tipText.size() * charW;
+    int maxTW = tipMaxWidth - tipPadH * 2;
+    int lines = (textW + maxTW - 1) / maxTW; // word-wrap estimate
+    if (lines < 1)
+      lines = 1;
 
     tipW = min(textW + tipPadH * 2, tipMaxWidth);
     tipH = lines * lineH + tipPadV * 2;
@@ -1161,7 +1164,8 @@ private:
     // Horizontal: centre on anchor, clamped to [0, anchorParentWidth]
     int anchorCX = x + width / 2;
     tipX = anchorCX - tipW / 2;
-    if (tipX < 0) tipX = 0;
+    if (tipX < 0)
+      tipX = 0;
 
     // Vertical: prefer above, fall back to below
     bool wantAbove = (preferredPosition != TooltipPosition::Below);
@@ -1188,10 +1192,10 @@ private:
 
     // Shadow (simple 1px offset darker box)
     HBRUSH shadowBrush = CreateSolidBrush(RGB(0, 0, 0));
-    RECT shadowRect    = {tipX + 2, tipY + 2, tipX + tipW + 2, tipY + tipH + 2};
-    HRGN shadowRgn     = CreateRoundRectRgn(shadowRect.left, shadowRect.top,
-                                            shadowRect.right, shadowRect.bottom,
-                                            tipBorderRadius * 2, tipBorderRadius * 2);
+    RECT shadowRect = {tipX + 2, tipY + 2, tipX + tipW + 2, tipY + tipH + 2};
+    HRGN shadowRgn = CreateRoundRectRgn(
+        shadowRect.left, shadowRect.top, shadowRect.right, shadowRect.bottom,
+        tipBorderRadius * 2, tipBorderRadius * 2);
     // Paint shadow at 25% opacity via a blended fill
     // (Win32 has no native alpha for arbitrary shapes without layered windows;
     //  we approximate with a darker solid and paint before the bubble.)
@@ -1200,13 +1204,13 @@ private:
     DeleteObject(shadowBrush);
 
     // Bubble background
-    HPEN   pen   = CreatePen(PS_SOLID, 1, tipBorderColor);
+    HPEN pen = CreatePen(PS_SOLID, 1, tipBorderColor);
     HBRUSH brush = CreateSolidBrush(tipBgColor);
-    HPEN   oldPen   = (HPEN)  SelectObject(hdc, pen);
+    HPEN oldPen = (HPEN)SelectObject(hdc, pen);
     HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, brush);
 
-    RoundRect(hdc, tipX, tipY, tipX + tipW, tipY + tipH,
-              tipBorderRadius * 2, tipBorderRadius * 2);
+    RoundRect(hdc, tipX, tipY, tipX + tipW, tipY + tipH, tipBorderRadius * 2,
+              tipBorderRadius * 2);
 
     SelectObject(hdc, oldBrush);
     SelectObject(hdc, oldPen);
@@ -1214,13 +1218,13 @@ private:
     DeleteObject(pen);
 
     // Text
-    HFONT hFont    = fontCache.getFont(tipFontSize, FontWeight::Normal);
+    HFONT hFont = fontCache.getFont(tipFontSize, FontWeight::Normal);
     HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
     SetTextColor(hdc, tipTextColor);
     SetBkMode(hdc, TRANSPARENT);
 
-    RECT textRect = {tipX + tipPadH, tipY + tipPadV,
-                     tipX + tipW - tipPadH, tipY + tipH - tipPadV};
+    RECT textRect = {tipX + tipPadH, tipY + tipPadV, tipX + tipW - tipPadH,
+                     tipY + tipH - tipPadV};
 
     DrawText(hdc, tipText.c_str(), -1, &textRect,
              DT_CENTER | DT_VCENTER | DT_WORDBREAK | DT_END_ELLIPSIS);
@@ -1235,7 +1239,7 @@ private:
 
 class DropdownWidget : public Widget {
 private:
- ScaffoldWidget *scaffold = nullptr;  // Reference to app for overlay management
+  ScaffoldWidget *scaffold = nullptr; // Reference to app for overlay management
 
 public:
   std::vector<std::string> options;
@@ -1283,7 +1287,7 @@ public:
   // ----------------------------------------------------------------
   // SET FLUX APP (Called during widget tree setup)
   // ----------------------------------------------------------------
-void setScaffold(ScaffoldWidget *s) { scaffold = s; }
+  void setScaffold(ScaffoldWidget *s) { scaffold = s; }
 
   // ----------------------------------------------------------------
   // Layout
@@ -1620,6 +1624,13 @@ void setScaffold(ScaffoldWidget *s) { scaffold = s; }
     return std::static_pointer_cast<DropdownWidget>(shared_from_this());
   }
 
+  std::shared_ptr<DropdownWidget> setWidth(int w) {
+    width = w;
+    autoWidth = false;
+
+    return std::static_pointer_cast<DropdownWidget>(shared_from_this());
+  }
+
   // ----------------------------------------------------------------
   // Helper: Check if dropdown list should be rendered
   // ----------------------------------------------------------------
@@ -1804,7 +1815,6 @@ inline DialogWidgetPtr Dialog(WidgetPtr content = nullptr) {
     w->setContent(content);
   return w;
 }
-
 
 using ContextMenuWidgetPtr = std::shared_ptr<ContextMenuWidget>;
 

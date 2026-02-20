@@ -1,140 +1,175 @@
 #include "flux.hpp"
-#include <windows.h>
-#include <iostream>
 
+// ============================================================================
+// CHILD — TextInput that writes to parent's State<string>
+// ============================================================================
 
-
-class ToggleApp : public StatefulComponent
-{
-private:
-    State<bool> isEnabled;
-    State<bool> isDarkMode;
-    State<std::string> message;
+class ChildTextInput : public Component {
+  State<std::string> *text;
 
 public:
-    ToggleApp() 
-        : isEnabled(false, context),
-          isDarkMode(false, context),
-          message("Welcome!", context)
-    {
-        // React to toggle changes
-        isEnabled.listen([this](bool enabled) {
-            message.set(enabled ? "Feature Enabled ✓" : "Feature Disabled");
-        });
-        
-        isDarkMode.listen([](bool dark) {
-            std::cout << "Dark mode: " << (dark ? "ON" : "OFF") << std::endl;
-        });
-    }
+  explicit ChildTextInput(State<std::string> *text) : text(text) {}
 
-    void toggleEnabled()
-    {
-        // Toggle boolean using update
-        isEnabled.update([](bool v) { return !v; });
-    }
-
-    void toggleDarkMode()
-    {
-        isDarkMode.update([](bool v) { return !v; });
-    }
-
-    void enableAll()
-    {
-        isEnabled.set(true);
-        isDarkMode.set(true);
-    }
-
-    void disableAll()
-    {
-        isEnabled.set(false);
-        isDarkMode.set(false);
-    }
-
-    WidgetPtr build() override
-    {
-        auto theme = ThemeProvider::getTheme();
-        
-        COLORREF bgColor = isDarkMode.get() ? RGB(30, 30, 30) : RGB(250, 250, 250);
-        COLORREF textColor = isDarkMode.get() ? RGB(220, 220, 220) : RGB(30, 30, 30);
-
-        return Scaffold(
-            ThemedAppBar("Toggle Demo"),
-            
-            Center(
-                Padding(20,
-                    Column(
-                        Text(message)
-                            ->setFontSize(24)
-                            ->setFontWeight(FontWeight::Bold)
-                            ->setTextColor(textColor),
-                        
-                        SizedBox(0, 30),
-                        
-                        ThemedCard(
-                            Row(
-                                Text("Main Feature")
-                                    ->setFontSize(16),
-                                SizedBox(10, 0),
-                                ThemedButton(
-                                    isEnabled.get() ? "ON" : "OFF",
-                                    [this]() { toggleEnabled(); }
-                                )
-                            )
-                            ->setSpacing(10)
-                            ->setMainAxisAlignment(MainAxisAlignment::SpaceBetween)
-                        )->setMinWidth(300),
-                        
-                        ThemedCard(
-                            Row(
-                                Text("Dark Mode")
-                                    ->setFontSize(16),
-                                SizedBox(10, 0),
-                                ThemedButton(
-                                    isDarkMode.get() ? "ON" : "OFF",
-                                    [this]() { toggleDarkMode(); }
-                                )
-                            )
-                            ->setSpacing(10)
-                            ->setMainAxisAlignment(MainAxisAlignment::SpaceBetween)
-                        )->setMinWidth(300),
-                        
-                        SizedBox(0, 30),
-                        
-                        Row(
-                            ThemedButton("Enable All", [this]() { enableAll(); }),
-                            ThemedButton("Disable All", [this]() { disableAll(); })
-                        )
-                        ->setSpacing(10)
-                        ->setMainAxisAlignment(MainAxisAlignment::Center)
-                    )
-                    ->setSpacing(15)
-                    ->setCrossAlignment(Alignment::Center)
-                )
-            )->setBackgroundColor(bgColor)
-        );
-    }
+  WidgetPtr build() override {
+    return Column(
+        Text("Child TextInput")->setFontSize(14),
+        TextInput("Type something...")
+            ->setInputValue(deref(text))
+            ->setWidth(300),
+        Text(deref(text), [](const std::string &v) { return "Value: " + v; })
+    )->setSpacing(8);
+  }
 };
 
-WidgetPtr toggleApp(FluxUI *app)
-{
-    return FluxApp(
-        "Toggle Demo",
-        BuildComponent<ToggleApp>(),
-        AppTheme::materialBlue()
-    );
-}
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
-{
-    AllocConsole();
-    FILE *fp;
-    freopen_s(&fp, "CONOUT$", "w", stdout);
-    freopen_s(&fp, "CONOUT$", "w", stderr);
+// ============================================================================
+// CHILD — Slider that writes to parent's State<int>
+// ============================================================================
 
-    std::cout << "Starting FluxUI Dashboard..." << std::endl;
-    
-    FluxUI app(hInstance);
-    app.build([&]() { return toggleApp(&app); });
-    app.createWindow("FluxUI Demo", 900, 650);
-    
-    return app.run();
+class ChildSlider : public Component {
+  State<int> *value;
+
+public:
+  explicit ChildSlider(State<int> *value) : value(value) {}
+
+  WidgetPtr build() override {
+    return Column(
+        Text("Child Slider")->setFontSize(14),
+        Slider(0, 100, 1)
+            ->setValue(deref(value))
+            ->setTrackFillColor(RGB(99, 102, 241))
+            ->setWidth(300),
+        Text(deref(value), [](int v) { return "Value: " + std::to_string(v); })
+    )->setSpacing(8);
+  }
+};
+
+// ============================================================================
+// CHILD — Toggle that writes to parent's State<bool>
+// ============================================================================
+
+class ChildToggle : public Component {
+  State<bool> *enabled;
+
+public:
+  explicit ChildToggle(State<bool> *enabled) : enabled(enabled) {}
+
+  WidgetPtr build() override {
+    return Column(
+        Text("Child Toggle")->setFontSize(14),
+        Toggle("Enable feature")
+            ->setValue(deref(enabled))
+            ->setTrackOnColor(RGB(76, 175, 80)),
+        Text(deref(enabled), [](bool v) { return v ? "ON" : "OFF"; })
+    )->setSpacing(8);
+  }
+};
+
+// ============================================================================
+// CHILD — CheckBox that writes to parent's State<bool>
+// ============================================================================
+
+class ChildCheckBox : public Component {
+  State<bool> *checked;
+
+public:
+  explicit ChildCheckBox(State<bool> *checked) : checked(checked) {}
+
+  WidgetPtr build() override {
+    return Column(
+        Text("Child CheckBox")->setFontSize(14),
+        CheckBox("I agree to terms")
+            ->setInputValue(deref(checked)),
+        Text(deref(checked), [](bool v) { return v ? "Agreed" : "Not agreed"; })
+    )->setSpacing(8);
+  }
+};
+
+// ============================================================================
+// CHILD — Dropdown that writes to parent's State<string>
+// ============================================================================
+
+class ChildDropdown : public Component {
+  State<std::string> *selected;
+
+public:
+  explicit ChildDropdown(State<std::string> *selected) : selected(selected) {}
+
+  WidgetPtr build() override {
+    return Column(
+        Text("Child Dropdown")->setFontSize(14),
+        Dropdown({"Nepal", "India", "USA", "UK"})
+            ->setPlaceholder("Select country...")
+            ->setSelectedValue(deref(selected))
+            ->setWidth(300),
+        Text(deref(selected), [](const std::string &v) {
+            return "Selected: " + (v.empty() ? "none" : v);
+        })
+    )->setSpacing(8);
+  }
+};
+
+// ============================================================================
+// PARENT — owns all state, displays it, passes pointers to children
+// ============================================================================
+
+class ParentForm : public Component {
+  State<std::string> text;
+  State<int>         sliderValue;
+  State<bool>        enabled;
+  State<bool>        checked;
+  State<std::string> country;
+
+public:
+  ParentForm()
+      : text("", context),
+        sliderValue(50, context),
+        enabled(false, context),
+        checked(false, context),
+        country("", context) {}
+
+  WidgetPtr build() override {
+    return Scaffold(
+        AppBar("Input Sharing Test"),
+
+        Center(
+            Card(
+                Column(
+
+                    // Parent reads all state
+                    Text("--- Parent View ---")->setFontWeight(FontWeight::Bold),
+                    Text(text,        [](const std::string &v) { return "Text: "    + v; }),
+                    Text(sliderValue, [](int v)                { return "Slider: "  + std::to_string(v); }),
+                    Text(enabled,     [](bool v)               { return "Toggle: "  + std::string(v ? "ON" : "OFF"); }),
+                    Text(checked,     [](bool v)               { return "Checked: " + std::string(v ? "Yes" : "No"); }),
+                    Text(country,     [](const std::string &v) { return "Country: " + (v.empty() ? "none" : v); }),
+
+                    Divider(),
+
+                    // Children write to parent state via pointer
+                    CHILD(ChildTextInput, &text),
+                    CHILD(ChildSlider,    &sliderValue),
+                    CHILD(ChildToggle,    &enabled),
+                    CHILD(ChildCheckBox,  &checked),
+                    CHILD(ChildDropdown,  &country)
+
+                )->setSpacing(16)
+            )
+        )
+    );
+  }
+};
+
+WidgetPtr dashboardApp(FluxUI *app) {
+  return FluxApp("Input Test", BuildComponent<ParentForm>(), AppTheme::light());
+}
+
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
+  AllocConsole();
+  FILE *fp;
+  freopen_s(&fp, "CONOUT$", "w", stdout);
+
+  FluxUI app(hInstance);
+  app.build([&]() { return dashboardApp(&app); });
+  app.createWindow("FluxApp Demo", 800, 600);
+  return app.run();
 }

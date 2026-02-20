@@ -1,85 +1,175 @@
 #include "flux.hpp"
 
-struct Product {
-  std::string name;
-  double price;
-  bool inStock;
-};
+// ============================================================================
+// CHILD — TextInput that writes to parent's State<string>
+// ============================================================================
 
-class TransformDemoComponent : public Component {
-private:
-  State<Product> product{Product{"Headphones", 49.99, true}, context};
-  State<std::string> selectedSize{"", context};
-
-  DialogWidgetPtr confirmDialog;
-  ContextMenuWidgetPtr cardMenu;
-  bool widgetsInitialized = false;  // ← guard
+class ChildTextInput : public Component {
+  State<std::string> *text;
 
 public:
+  explicit ChildTextInput(State<std::string> *text) : text(text) {}
+
   WidgetPtr build() override {
+    return Column(
+        Text("Child TextInput")->setFontSize(14),
+        TextInput("Type something...")
+            ->setInputValue(deref(text))
+            ->setWidth(300),
+        Text(deref(text), [](const std::string &v) { return "Value: " + v; })
+    )->setSpacing(8);
+  }
+};
 
-    // ── Only create overlay widgets ONCE ────────────────────────────
-    if (!widgetsInitialized) {
-      widgetsInitialized = true;
+// ============================================================================
+// CHILD — Slider that writes to parent's State<int>
+// ============================================================================
 
-      confirmDialog = Dialog(
-        Column(
-          Text("Are you sure?"),
-          Text("This will update the product."),
-          Button(Text("Close"), [this] { confirmDialog->close(); })
-        )
-      );
-      confirmDialog->setSize(320, 180);
+class ChildSlider : public Component {
+  State<int> *value;
 
-      auto menuAnchor = Button(Text("Right-click me"));
-      cardMenu = ContextMenu(menuAnchor, {
-        {"Edit Product",   [this] { confirmDialog->open(); }},
-        {"Toggle Stock",   [this] {
-          auto p = product.get();
-          p.inStock = !p.inStock;
-          product.set(p);
-        }},
-        ContextMenuItem::Separator(),
-        {"Disabled Option", [] {}, false}
-      });
-    }
-    // ────────────────────────────────────────────────────────────────
+public:
+  explicit ChildSlider(State<int> *value) : value(value) {}
 
-    auto sizeDropdown = Dropdown({"Small", "Medium", "Large", "XL"})
-      ->setPlaceholder("Pick a size")
-      ->setSelectedValue(selectedSize);
+  WidgetPtr build() override {
+    return Column(
+        Text("Child Slider")->setFontSize(14),
+        Slider(0, 100, 1)
+            ->setValue(deref(value))
+            ->setTrackFillColor(RGB(99, 102, 241))
+            ->setWidth(300),
+        Text(deref(value), [](int v) { return "Value: " + std::to_string(v); })
+    )->setSpacing(8);
+  }
+};
 
+// ============================================================================
+// CHILD — Toggle that writes to parent's State<bool>
+// ============================================================================
+
+class ChildToggle : public Component {
+  State<bool> *enabled;
+
+public:
+  explicit ChildToggle(State<bool> *enabled) : enabled(enabled) {}
+
+  WidgetPtr build() override {
+    return Column(
+        Text("Child Toggle")->setFontSize(14),
+        Toggle("Enable feature")
+            ->setValue(deref(enabled))
+            ->setTrackOnColor(RGB(76, 175, 80)),
+        Text(deref(enabled), [](bool v) { return v ? "ON" : "OFF"; })
+    )->setSpacing(8);
+  }
+};
+
+// ============================================================================
+// CHILD — CheckBox that writes to parent's State<bool>
+// ============================================================================
+
+class ChildCheckBox : public Component {
+  State<bool> *checked;
+
+public:
+  explicit ChildCheckBox(State<bool> *checked) : checked(checked) {}
+
+  WidgetPtr build() override {
+    return Column(
+        Text("Child CheckBox")->setFontSize(14),
+        CheckBox("I agree to terms")
+            ->setInputValue(deref(checked)),
+        Text(deref(checked), [](bool v) { return v ? "Agreed" : "Not agreed"; })
+    )->setSpacing(8);
+  }
+};
+
+// ============================================================================
+// CHILD — Dropdown that writes to parent's State<string>
+// ============================================================================
+
+class ChildDropdown : public Component {
+  State<std::string> *selected;
+
+public:
+  explicit ChildDropdown(State<std::string> *selected) : selected(selected) {}
+
+  WidgetPtr build() override {
+    return Column(
+        Text("Child Dropdown")->setFontSize(14),
+        Dropdown({"Nepal", "India", "USA", "UK"})
+            ->setPlaceholder("Select country...")
+            ->setSelectedValue(deref(selected))
+            ->setWidth(300),
+        Text(deref(selected), [](const std::string &v) {
+            return "Selected: " + (v.empty() ? "none" : v);
+        })
+    )->setSpacing(8);
+  }
+};
+
+// ============================================================================
+// PARENT — owns all state, displays it, passes pointers to children
+// ============================================================================
+
+class ParentForm : public Component {
+  State<std::string> text;
+  State<int>         sliderValue;
+  State<bool>        enabled;
+  State<bool>        checked;
+  State<std::string> country;
+
+public:
+  ParentForm()
+      : text("", context),
+        sliderValue(50, context),
+        enabled(false, context),
+        checked(false, context),
+        country("", context) {}
+
+  WidgetPtr build() override {
     return Scaffold(
-      AppBar("Overlay Widgets Demo"),
-      Center(
-        Column(
-          Tooltip(
-            Button(Text("Hover for info"), [] {}),
-            "This button does something cool!"
-          ),
-          cardMenu,
-          sizeDropdown,
-          Button(Text("Open Dialog"), [this] { confirmDialog->open(); }),
-          confirmDialog   // zero-size, wires scaffold on each rebuild
+        AppBar("Input Sharing Test"),
+
+        Center(
+            Card(
+                Column(
+
+                    // Parent reads all state
+                    Text("--- Parent View ---")->setFontWeight(FontWeight::Bold),
+                    Text(text,        [](const std::string &v) { return "Text: "    + v; }),
+                    Text(sliderValue, [](int v)                { return "Slider: "  + std::to_string(v); }),
+                    Text(enabled,     [](bool v)               { return "Toggle: "  + std::string(v ? "ON" : "OFF"); }),
+                    Text(checked,     [](bool v)               { return "Checked: " + std::string(v ? "Yes" : "No"); }),
+                    Text(country,     [](const std::string &v) { return "Country: " + (v.empty() ? "none" : v); }),
+
+                    Divider(),
+
+                    // Children write to parent state via pointer
+                    CHILD(ChildTextInput, &text),
+                    CHILD(ChildSlider,    &sliderValue),
+                    CHILD(ChildToggle,    &enabled),
+                    CHILD(ChildCheckBox,  &checked),
+                    CHILD(ChildDropdown,  &country)
+
+                )->setSpacing(16)
+            )
         )
-        ->setSpacing(20)
-        ->setCrossAlignment(Alignment::Center)
-      )
     );
   }
 };
 
-WidgetPtr createApp(FluxUI *app) {
-  return FluxApp("Overlay Demo", BuildComponent<TransformDemoComponent>(),
-                 AppTheme::materialBlue());
+WidgetPtr dashboardApp(FluxUI *app) {
+  return FluxApp("Input Test", BuildComponent<ParentForm>(), AppTheme::light());
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
   AllocConsole();
   FILE *fp;
   freopen_s(&fp, "CONOUT$", "w", stdout);
+
   FluxUI app(hInstance);
-  app.build([&]() { return createApp(&app); });
-  app.createWindow("FluxUI - Overlay Demo", 1000, 700);
+  app.build([&]() { return dashboardApp(&app); });
+  app.createWindow("FluxApp Demo", 800, 600);
   return app.run();
 }

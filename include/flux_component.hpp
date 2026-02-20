@@ -188,4 +188,6 @@ ComponentWithRef(Args &&...args) {
 #define COMPONENT_REF(ComponentType, ...)                                      \
   ComponentWithRef<ComponentType>(__VA_ARGS__)
 
+#define CHILD(ComponentType, ...) BuildComponent<ComponentType>(__VA_ARGS__)
+
 #endif // FLUX_COMPONENTS_HPP

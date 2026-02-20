@@ -387,6 +387,15 @@ public:
 // HELPER FUNCTIONS
 // ============================================================================
 
+// ============================================================================
+// DEREF HELPER — allows pointer-to-state to work with all reference-based APIs
+// ============================================================================
+
+template <typename T>
+inline State<T>& deref(State<T> *state) {
+    return *state;
+}
+
 // Create a computed state that depends on other states
 template <typename R, typename... States> class ComputedState {
 private:

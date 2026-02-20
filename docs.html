@@ -1,409 +1,517 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Flux — Widget API Reference</title>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
-<style>
-  :root {
-    --bg: #0d0f14;
-    --bg2: #13161e;
-    --bg3: #1a1d27;
-    --bg4: #20243200;
-    --surface: #1e2230;
-    --surface2: #252940;
-    --border: #2a2f45;
-    --border2: #343a54;
-    --text: #e2e6f3;
-    --text-muted: #7a82a3;
-    --text-dim: #4a5175;
-    --accent: #6574f8;
-    --accent2: #8b95ff;
-    --green: #3ecf8e;
-    --orange: #f59e42;
-    --pink: #f06292;
-    --cyan: #38bdf8;
-    --yellow: #fbbf24;
-    --red: #f87171;
-    --sidebar-w: 220px;
-    --header-h: 56px;
-  }
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Flux — Widget API Reference</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #0d0f14;
+        --bg2: #13161e;
+        --bg3: #1a1d27;
+        --bg4: #20243200;
+        --surface: #1e2230;
+        --surface2: #252940;
+        --border: #2a2f45;
+        --border2: #343a54;
+        --text: #e2e6f3;
+        --text-muted: #7a82a3;
+        --text-dim: #4a5175;
+        --accent: #6574f8;
+        --accent2: #8b95ff;
+        --green: #3ecf8e;
+        --orange: #f59e42;
+        --pink: #f06292;
+        --cyan: #38bdf8;
+        --yellow: #fbbf24;
+        --red: #f87171;
+        --sidebar-w: 220px;
+        --header-h: 56px;
+      }
 
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
 
-  html { scroll-behavior: smooth; }
+      html {
+        scroll-behavior: smooth;
+      }
 
-  body {
-    font-family: 'DM Sans', sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    font-size: 15px;
-    line-height: 1.65;
-  }
+      body {
+        font-family: "DM Sans", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        font-size: 15px;
+        line-height: 1.65;
+      }
 
-  /* ── Scrollbar ─────────────────────────────────────── */
-  ::-webkit-scrollbar { width: 6px; }
-  ::-webkit-scrollbar-track { background: var(--bg); }
-  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+      /* ── Scrollbar ─────────────────────────────────────── */
+      ::-webkit-scrollbar {
+        width: 6px;
+      }
+      ::-webkit-scrollbar-track {
+        background: var(--bg);
+      }
+      ::-webkit-scrollbar-thumb {
+        background: var(--border2);
+        border-radius: 3px;
+      }
 
-  /* ── Top bar ───────────────────────────────────────── */
-  .topbar {
-    position: fixed; top: 0; left: 0; right: 0;
-    height: var(--header-h);
-    background: rgba(13,15,20,0.92);
-    backdrop-filter: blur(12px);
-    border-bottom: 1px solid var(--border);
-    display: flex; align-items: center;
-    padding: 0 24px;
-    z-index: 100;
-    gap: 16px;
-  }
-  .topbar-logo {
-    font-family: 'Syne', sans-serif;
-    font-weight: 800;
-    font-size: 18px;
-    color: #fff;
-    letter-spacing: -0.5px;
-  }
-  .topbar-sep { width: 1px; height: 20px; background: var(--border); }
-  .topbar-sub {
-    font-size: 12px;
-    color: var(--text-muted);
-    font-family: 'DM Sans', sans-serif;
-  }
-  .topbar-badge {
-    margin-left: auto;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    color: var(--text-muted);
-    background: var(--surface);
-    border: 1px solid var(--border);
-    padding: 3px 10px;
-    border-radius: 4px;
-  }
+      /* ── Top bar ───────────────────────────────────────── */
+      .topbar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: var(--header-h);
+        background: rgba(13, 15, 20, 0.92);
+        backdrop-filter: blur(12px);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        padding: 0 24px;
+        z-index: 100;
+        gap: 16px;
+      }
+      .topbar-logo {
+        font-family: "Syne", sans-serif;
+        font-weight: 800;
+        font-size: 18px;
+        color: #fff;
+        letter-spacing: -0.5px;
+      }
+      .topbar-sep {
+        width: 1px;
+        height: 20px;
+        background: var(--border);
+      }
+      .topbar-sub {
+        font-size: 12px;
+        color: var(--text-muted);
+        font-family: "DM Sans", sans-serif;
+      }
+      .topbar-badge {
+        margin-left: auto;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        color: var(--text-muted);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        padding: 3px 10px;
+        border-radius: 4px;
+      }
 
-  /* ── Layout ────────────────────────────────────────── */
-  .layout {
-    display: flex;
-    padding-top: var(--header-h);
-    min-height: 100vh;
-  }
+      /* ── Layout ────────────────────────────────────────── */
+      .layout {
+        display: flex;
+        padding-top: var(--header-h);
+        min-height: 100vh;
+      }
 
-  /* ── Sidebar ───────────────────────────────────────── */
-  .sidebar {
-    position: fixed;
-    top: var(--header-h);
-    left: 0;
-    width: var(--sidebar-w);
-    height: calc(100vh - var(--header-h));
-    overflow-y: auto;
-    border-right: 1px solid var(--border);
-    background: var(--bg);
-    padding: 24px 0 40px;
-  }
-  .nav-section {
-    padding: 0 18px;
-    margin-bottom: 20px;
-  }
-  .nav-label {
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--text-dim);
-    margin-bottom: 8px;
-    padding: 0 4px;
-  }
-  .nav-link {
-    display: block;
-    padding: 5px 8px;
-    border-radius: 5px;
-    font-size: 13.5px;
-    color: var(--text-muted);
-    text-decoration: none;
-    transition: color 0.15s, background 0.15s;
-    cursor: pointer;
-  }
-  .nav-link:hover { color: var(--text); background: var(--surface); }
-  .nav-link.active { color: var(--accent2); background: rgba(101,116,248,0.12); }
+      /* ── Sidebar ───────────────────────────────────────── */
+      .sidebar {
+        position: fixed;
+        top: var(--header-h);
+        left: 0;
+        width: var(--sidebar-w);
+        height: calc(100vh - var(--header-h));
+        overflow-y: auto;
+        border-right: 1px solid var(--border);
+        background: var(--bg);
+        padding: 24px 0 40px;
+      }
+      .nav-section {
+        padding: 0 18px;
+        margin-bottom: 20px;
+      }
+      .nav-label {
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--text-dim);
+        margin-bottom: 8px;
+        padding: 0 4px;
+      }
+      .nav-link {
+        display: block;
+        padding: 5px 8px;
+        border-radius: 5px;
+        font-size: 13.5px;
+        color: var(--text-muted);
+        text-decoration: none;
+        transition:
+          color 0.15s,
+          background 0.15s;
+        cursor: pointer;
+      }
+      .nav-link:hover {
+        color: var(--text);
+        background: var(--surface);
+      }
+      .nav-link.active {
+        color: var(--accent2);
+        background: rgba(101, 116, 248, 0.12);
+      }
 
-  /* ── Main content ──────────────────────────────────── */
-  .main {
-    margin-left: var(--sidebar-w);
-    flex: 1;
-    max-width: 900px;
-    padding: 56px 64px 100px;
-  }
+      /* ── Main content ──────────────────────────────────── */
+      .main {
+        margin-left: var(--sidebar-w);
+        flex: 1;
+        max-width: 900px;
+        padding: 56px 64px 100px;
+      }
 
-  /* ── Hero ──────────────────────────────────────────── */
-  .hero {
-    margin-bottom: 56px;
-    padding-bottom: 40px;
-    border-bottom: 1px solid var(--border);
-  }
-  .lang-tag {
-    display: inline-block;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    color: var(--cyan);
-    background: rgba(56,189,248,0.1);
-    border: 1px solid rgba(56,189,248,0.25);
-    padding: 3px 10px;
-    border-radius: 4px;
-    margin-bottom: 18px;
-  }
-  .hero h1 {
-    font-family: 'Syne', sans-serif;
-    font-size: 44px;
-    font-weight: 800;
-    color: #fff;
-    letter-spacing: -1.5px;
-    line-height: 1.1;
-    margin-bottom: 16px;
-  }
-  .hero p {
-    font-size: 16px;
-    color: var(--text-muted);
-    max-width: 520px;
-    line-height: 1.7;
-  }
+      /* ── Hero ──────────────────────────────────────────── */
+      .hero {
+        margin-bottom: 56px;
+        padding-bottom: 40px;
+        border-bottom: 1px solid var(--border);
+      }
+      .lang-tag {
+        display: inline-block;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        color: var(--cyan);
+        background: rgba(56, 189, 248, 0.1);
+        border: 1px solid rgba(56, 189, 248, 0.25);
+        padding: 3px 10px;
+        border-radius: 4px;
+        margin-bottom: 18px;
+      }
+      .hero h1 {
+        font-family: "Syne", sans-serif;
+        font-size: 44px;
+        font-weight: 800;
+        color: #fff;
+        letter-spacing: -1.5px;
+        line-height: 1.1;
+        margin-bottom: 16px;
+      }
+      .hero p {
+        font-size: 16px;
+        color: var(--text-muted);
+        max-width: 520px;
+        line-height: 1.7;
+      }
 
-  /* ── Section ───────────────────────────────────────── */
-  .section { margin-bottom: 64px; scroll-margin-top: 80px; }
+      /* ── Section ───────────────────────────────────────── */
+      .section {
+        margin-bottom: 64px;
+        scroll-margin-top: 80px;
+      }
 
-  .section-head {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 10px;
-  }
-  .section-head h2 {
-    font-family: 'Syne', sans-serif;
-    font-size: 26px;
-    font-weight: 700;
-    color: #fff;
-    letter-spacing: -0.5px;
-  }
+      .section-head {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 10px;
+      }
+      .section-head h2 {
+        font-family: "Syne", sans-serif;
+        font-size: 26px;
+        font-weight: 700;
+        color: #fff;
+        letter-spacing: -0.5px;
+      }
 
-  /* Category badges */
-  .badge {
-    font-size: 10.5px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    padding: 3px 9px;
-    border-radius: 4px;
-  }
-  .badge-display  { background: rgba(62,207,142,0.15); color: var(--green);  border: 1px solid rgba(62,207,142,0.3); }
-  .badge-interaction { background: rgba(248,96,144,0.15); color: var(--pink); border: 1px solid rgba(248,96,144,0.3); }
-  .badge-input    { background: rgba(251,191,36,0.15); color: var(--yellow); border: 1px solid rgba(251,191,36,0.3); }
-  .badge-layout   { background: rgba(56,189,248,0.15); color: var(--cyan);   border: 1px solid rgba(56,189,248,0.3); }
-  .badge-state    { background: rgba(245,158,66,0.15); color: var(--orange); border: 1px solid rgba(245,158,66,0.3); }
-  .badge-collection { background: rgba(101,116,248,0.15); color: var(--accent2); border: 1px solid rgba(101,116,248,0.3); }
+      /* Category badges */
+      .badge {
+        font-size: 10.5px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        padding: 3px 9px;
+        border-radius: 4px;
+      }
+      .badge-display {
+        background: rgba(62, 207, 142, 0.15);
+        color: var(--green);
+        border: 1px solid rgba(62, 207, 142, 0.3);
+      }
+      .badge-interaction {
+        background: rgba(248, 96, 144, 0.15);
+        color: var(--pink);
+        border: 1px solid rgba(248, 96, 144, 0.3);
+      }
+      .badge-input {
+        background: rgba(251, 191, 36, 0.15);
+        color: var(--yellow);
+        border: 1px solid rgba(251, 191, 36, 0.3);
+      }
+      .badge-layout {
+        background: rgba(56, 189, 248, 0.15);
+        color: var(--cyan);
+        border: 1px solid rgba(56, 189, 248, 0.3);
+      }
+      .badge-state {
+        background: rgba(245, 158, 66, 0.15);
+        color: var(--orange);
+        border: 1px solid rgba(245, 158, 66, 0.3);
+      }
+      .badge-collection {
+        background: rgba(101, 116, 248, 0.15);
+        color: var(--accent2);
+        border: 1px solid rgba(101, 116, 248, 0.3);
+      }
 
-  .section-desc {
-    color: var(--text-muted);
-    font-size: 14.5px;
-    margin-bottom: 20px;
-  }
+      .section-desc {
+        color: var(--text-muted);
+        font-size: 14.5px;
+        margin-bottom: 20px;
+      }
 
-  /* ── Code block ────────────────────────────────────── */
-  .code-block {
-    background: var(--bg2);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 20px 22px;
-    margin-bottom: 24px;
-    overflow-x: auto;
-    position: relative;
-  }
-  .code-block pre {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12.5px;
-    line-height: 1.75;
-    color: var(--text);
-  }
-  .code-block .comment { color: #4a5580; }
-  .code-block .kw { color: #c792ea; }
-  .code-block .fn { color: #82aaff; }
-  .code-block .str { color: #c3e88d; }
-  .code-block .num { color: var(--orange); }
-  .code-block .type { color: var(--cyan); }
-  .code-block .method { color: var(--accent2); }
-  .code-block .arrow { color: var(--text-muted); }
-  .code-block .punc { color: #676e95; }
+      /* ── Code block ────────────────────────────────────── */
+      .code-block {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 20px 22px;
+        margin-bottom: 24px;
+        overflow-x: auto;
+        position: relative;
+      }
+      .code-block pre {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 12.5px;
+        line-height: 1.75;
+        color: var(--text);
+      }
+      .code-block .comment {
+        color: #4a5580;
+      }
+      .code-block .kw {
+        color: #c792ea;
+      }
+      .code-block .fn {
+        color: #82aaff;
+      }
+      .code-block .str {
+        color: #c3e88d;
+      }
+      .code-block .num {
+        color: var(--orange);
+      }
+      .code-block .type {
+        color: var(--cyan);
+      }
+      .code-block .method {
+        color: var(--accent2);
+      }
+      .code-block .arrow {
+        color: var(--text-muted);
+      }
+      .code-block .punc {
+        color: #676e95;
+      }
 
-  /* ── Tables ────────────────────────────────────────── */
-  .tbl-wrap { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 12px; }
-  table { width: 100%; border-collapse: collapse; }
-  thead tr { background: var(--surface); }
-  thead th {
-    text-align: left;
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--text-dim);
-    padding: 10px 16px;
-  }
-  tbody tr { border-top: 1px solid var(--border); }
-  tbody tr:hover { background: rgba(255,255,255,0.02); }
-  tbody td { padding: 10px 16px; font-size: 13.5px; vertical-align: top; }
-  td:first-child {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    color: var(--accent2);
-    white-space: nowrap;
-  }
-  td:nth-child(2) {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    color: var(--orange);
-  }
-  td:last-child { color: var(--text-muted); }
+      /* ── Tables ────────────────────────────────────────── */
+      .tbl-wrap {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: hidden;
+        margin-bottom: 12px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      thead tr {
+        background: var(--surface);
+      }
+      thead th {
+        text-align: left;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--text-dim);
+        padding: 10px 16px;
+      }
+      tbody tr {
+        border-top: 1px solid var(--border);
+      }
+      tbody tr:hover {
+        background: rgba(255, 255, 255, 0.02);
+      }
+      tbody td {
+        padding: 10px 16px;
+        font-size: 13.5px;
+        vertical-align: top;
+      }
+      td:first-child {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 12px;
+        color: var(--accent2);
+        white-space: nowrap;
+      }
+      td:nth-child(2) {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 12px;
+        color: var(--orange);
+      }
+      td:last-child {
+        color: var(--text-muted);
+      }
 
-  /* ── Divider ───────────────────────────────────────── */
-  .section-divider {
-    border: none;
-    border-top: 1px solid var(--border);
-    margin: 56px 0;
-  }
+      /* ── Divider ───────────────────────────────────────── */
+      .section-divider {
+        border: none;
+        border-top: 1px solid var(--border);
+        margin: 56px 0;
+      }
 
-  /* ── Sub-heading ───────────────────────────────────── */
-  .sub-head {
-    font-family: 'Syne', sans-serif;
-    font-size: 13px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--text-dim);
-    margin: 28px 0 10px;
-  }
+      /* ── Sub-heading ───────────────────────────────────── */
+      .sub-head {
+        font-family: "Syne", sans-serif;
+        font-size: 13px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--text-dim);
+        margin: 28px 0 10px;
+      }
 
-  /* ── Note box ──────────────────────────────────────── */
-  .note {
-    background: rgba(101,116,248,0.07);
-    border-left: 3px solid var(--accent);
-    border-radius: 0 6px 6px 0;
-    padding: 12px 16px;
-    font-size: 13.5px;
-    color: var(--text-muted);
-    margin-bottom: 20px;
-  }
-  .note strong { color: var(--accent2); }
+      /* ── Note box ──────────────────────────────────────── */
+      .note {
+        background: rgba(101, 116, 248, 0.07);
+        border-left: 3px solid var(--accent);
+        border-radius: 0 6px 6px 0;
+        padding: 12px 16px;
+        font-size: 13.5px;
+        color: var(--text-muted);
+        margin-bottom: 20px;
+      }
+      .note strong {
+        color: var(--accent2);
+      }
 
-  /* ── Inline code ───────────────────────────────────── */
-  code {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    padding: 1px 6px;
-    border-radius: 3px;
-    color: var(--accent2);
-  }
+      /* ── Inline code ───────────────────────────────────── */
+      code {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 12px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        padding: 1px 6px;
+        border-radius: 3px;
+        color: var(--accent2);
+      }
 
-  /* ── Responsive ────────────────────────────────────── */
-  @media (max-width: 900px) {
-    .sidebar { display: none; }
-    .main { margin-left: 0; padding: 32px 24px 80px; }
-  }
-</style>
-</head>
-<body>
+      /* ── Responsive ────────────────────────────────────── */
+      @media (max-width: 900px) {
+        .sidebar {
+          display: none;
+        }
+        .main {
+          margin-left: 0;
+          padding: 32px 24px 80px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Top Bar -->
+    <header class="topbar">
+      <span class="topbar-logo">Flux</span>
+      <span class="topbar-sep"></span>
+      <span class="topbar-sub">Widget API Reference</span>
+      <span class="topbar-badge">C++ / WIN32</span>
+    </header>
 
-<!-- Top Bar -->
-<header class="topbar">
-  <span class="topbar-logo">Flux</span>
-  <span class="topbar-sep"></span>
-  <span class="topbar-sub">Widget API Reference</span>
-  <span class="topbar-badge">C++ / WIN32</span>
-</header>
+    <div class="layout">
+      <!-- Sidebar -->
+      <nav class="sidebar">
+        <div class="nav-section">
+          <div class="nav-label">Display</div>
+          <a class="nav-link" href="#text">Text</a>
+          <a class="nav-link" href="#divider">Divider</a>
+          <a class="nav-link" href="#progressbar">ProgressBar</a>
+          <a class="nav-link" href="#graph">Graph</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-label">Interaction</div>
+          <a class="nav-link" href="#button">Button</a>
+          <a class="nav-link" href="#gesture">GestureDetector</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-label">Input</div>
+          <a class="nav-link" href="#textinput">TextInput</a>
+          <a class="nav-link" href="#slider">Slider</a>
+          <a class="nav-link" href="#toggle">Toggle</a>
+          <a class="nav-link" href="#checkbox">CheckBox</a>
+          <a class="nav-link" href="#radiogroup">RadioGroup</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-label">Collection</div>
+          <a class="nav-link" href="#listview">ListView</a>
+          <a class="nav-link" href="#gridview">GridView</a>
+          <a class="nav-link" href="#grid">Grid</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-label">State</div>
+          <a class="nav-link" href="#conditional">Conditional</a>
+          <a class="nav-link" href="#switch">Switch</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-label">Layout</div>
+          <a class="nav-link" href="#row">Row</a>
+          <a class="nav-link" href="#column">Column</a>
+          <a class="nav-link" href="#container">Container</a>
+          <a class="nav-link" href="#center">Center</a>
+          <a class="nav-link" href="#expanded">Expanded</a>
+          <a class="nav-link" href="#sizedbox">SizedBox</a>
+          <a class="nav-link" href="#padding">Padding</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-label">Structure</div>
+          <a class="nav-link" href="#scaffold">Scaffold</a>
+          <a class="nav-link" href="#appbar">AppBar</a>
+          <a class="nav-link" href="#card">Card</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-label">Overlay</div>
+          <a class="nav-link" href="#dropdown">Dropdown</a>
+          <a class="nav-link" href="#tooltip">Tooltip</a>
+          <a class="nav-link" href="#dialog">Dialog</a>
+          <a class="nav-link" href="#contextmenu">ContextMenu</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-label">Media</div>
+          <a class="nav-link" href="#image">Image</a>
+        </div>
+      </nav>
 
-<div class="layout">
+      <!-- Main -->
+      <main class="main">
+        <!-- Hero -->
+        <div class="hero">
+          <div class="lang-tag">C++ / WIN32</div>
+          <h1>Flux Widgets</h1>
+          <p>
+            A declarative, Flutter-inspired widget toolkit for building native
+            Windows UIs. Chain methods, compose layouts, and bind reactive
+            state.
+          </p>
+        </div>
 
-  <!-- Sidebar -->
-  <nav class="sidebar">
-    <div class="nav-section">
-      <div class="nav-label">Display</div>
-      <a class="nav-link" href="#text">Text</a>
-      <a class="nav-link" href="#divider">Divider</a>
-      <a class="nav-link" href="#progressbar">ProgressBar</a>
-      <a class="nav-link" href="#graph">Graph</a>
-    </div>
-    <div class="nav-section">
-      <div class="nav-label">Interaction</div>
-      <a class="nav-link" href="#button">Button</a>
-      <a class="nav-link" href="#gesture">GestureDetector</a>
-    </div>
-    <div class="nav-section">
-      <div class="nav-label">Input</div>
-      <a class="nav-link" href="#textinput">TextInput</a>
-      <a class="nav-link" href="#slider">Slider</a>
-      <a class="nav-link" href="#toggle">Toggle</a>
-      <a class="nav-link" href="#checkbox">CheckBox</a>
-      <a class="nav-link" href="#radiogroup">RadioGroup</a>
-    </div>
-    <div class="nav-section">
-      <div class="nav-label">Collection</div>
-      <a class="nav-link" href="#listview">ListView</a>
-      <a class="nav-link" href="#gridview">GridView</a>
-      <a class="nav-link" href="#grid">Grid</a>
-    </div>
-    <div class="nav-section">
-      <div class="nav-label">State</div>
-      <a class="nav-link" href="#conditional">Conditional</a>
-      <a class="nav-link" href="#switch">Switch</a>
-    </div>
-    <div class="nav-section">
-      <div class="nav-label">Layout</div>
-      <a class="nav-link" href="#row">Row</a>
-      <a class="nav-link" href="#column">Column</a>
-      <a class="nav-link" href="#container">Container</a>
-      <a class="nav-link" href="#center">Center</a>
-      <a class="nav-link" href="#expanded">Expanded</a>
-      <a class="nav-link" href="#sizedbox">SizedBox</a>
-      <a class="nav-link" href="#padding">Padding</a>
-    </div>
-    <div class="nav-section">
-      <div class="nav-label">Structure</div>
-      <a class="nav-link" href="#scaffold">Scaffold</a>
-      <a class="nav-link" href="#appbar">AppBar</a>
-      <a class="nav-link" href="#card">Card</a>
-    </div>
-    <div class="nav-section">
-      <div class="nav-label">Overlay</div>
-      <a class="nav-link" href="#dropdown">Dropdown</a>
-      <a class="nav-link" href="#tooltip">Tooltip</a>
-      <a class="nav-link" href="#dialog">Dialog</a>
-      <a class="nav-link" href="#contextmenu">ContextMenu</a>
-    </div>
-    <div class="nav-section">
-      <div class="nav-label">Media</div>
-      <a class="nav-link" href="#image">Image</a>
-    </div>
-  </nav>
+        <!-- ── TEXT ───────────────────────────────── -->
+        <div class="section" id="text">
+          <div class="section-head">
+            <h2>Text</h2>
+            <span class="badge badge-display">Display</span>
+          </div>
+          <p class="section-desc">
+            Renders a string of text. Auto-sizes to its content by default.
+          </p>
 
-  <!-- Main -->
-  <main class="main">
-
-    <!-- Hero -->
-    <div class="hero">
-      <div class="lang-tag">C++ / WIN32</div>
-      <h1>Flux Widgets</h1>
-      <p>A declarative, Flutter-inspired widget toolkit for building native Windows UIs. Chain methods, compose layouts, and bind reactive state.</p>
-    </div>
-
-    <!-- ── TEXT ───────────────────────────────── -->
-    <div class="section" id="text">
-      <div class="section-head">
-        <h2>Text</h2>
-        <span class="badge badge-display">Display</span>
-      </div>
-      <p class="section-desc">Renders a string of text. Auto-sizes to its content by default.</p>
-
-      <div class="code-block"><pre>
+          <div class="code-block">
+            <pre>
 <span class="comment">// Basic usage</span>
 <span class="kw">auto</span> label = <span class="fn">Text</span>(<span class="str">"Hello, world!"</span>)
     <span class="arrow">-></span><span class="method">setFontSize</span>(<span class="num">18</span>)
@@ -416,68 +524,157 @@
 
 <span class="comment">// With transform</span>
 <span class="kw">auto</span> label2 = <span class="fn">Text</span>(count, [](<span class="kw">int</span> v){ <span class="kw">return</span> <span class="str">"Count: "</span> + std::to_string(v); });
-</pre></div>
+</pre>
+          </div>
 
-      <div class="sub-head">Factory</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Signature</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>Text(string)</td><td>Static text</td></tr>
-          <tr><td>Text(State&lt;T&gt;)</td><td>Reactive text, auto-updates when state changes</td></tr>
-          <tr><td>Text(State&lt;T&gt;, transform)</td><td>Reactive text with a custom format function</td></tr>
-        </tbody>
-      </table></div>
+          <div class="sub-head">Factory</div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Signature</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Text(string)</td>
+                  <td>Static text</td>
+                </tr>
+                <tr>
+                  <td>Text(State&lt;T&gt;)</td>
+                  <td>Reactive text, auto-updates when state changes</td>
+                </tr>
+                <tr>
+                  <td>Text(State&lt;T&gt;, transform)</td>
+                  <td>Reactive text with a custom format function</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
-      <div class="sub-head">Methods</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>setText(string)</td><td>string</td><td>Set or change the displayed text</td></tr>
-          <tr><td>setFontSize(size)</td><td>int</td><td>Font size in points</td></tr>
-          <tr><td>setFontWeight(weight)</td><td>FontWeight</td><td>Normal or Bold</td></tr>
-          <tr><td>setTextColor(color)</td><td>COLORREF</td><td>Text color</td></tr>
-          <tr><td>setHoverTextColor(color)</td><td>COLORREF</td><td>Text color on mouse hover</td></tr>
-          <tr><td>setPadding(p)</td><td>int</td><td>Uniform padding on all sides</td></tr>
-          <tr><td>setBackgroundColor(color)</td><td>COLORREF</td><td>Fill background behind text</td></tr>
-          <tr><td>setBorderRadius(r)</td><td>int</td><td>Corner rounding for background</td></tr>
-          <tr><td>setWidth(w)</td><td>int</td><td>Fixed width (disables auto-sizing)</td></tr>
-          <tr><td>setHeight(h)</td><td>int</td><td>Fixed height (disables auto-sizing)</td></tr>
-          <tr><td>setMinWidth(w)</td><td>int</td><td>Minimum width constraint</td></tr>
-        </tbody>
-      </table></div>
-    </div>
+          <div class="sub-head">Methods</div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Method</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>setText(string)</td>
+                  <td>string</td>
+                  <td>Set or change the displayed text</td>
+                </tr>
+                <tr>
+                  <td>setFontSize(size)</td>
+                  <td>int</td>
+                  <td>Font size in points</td>
+                </tr>
+                <tr>
+                  <td>setFontWeight(weight)</td>
+                  <td>FontWeight</td>
+                  <td>Normal or Bold</td>
+                </tr>
+                <tr>
+                  <td>setTextColor(color)</td>
+                  <td>COLORREF</td>
+                  <td>Text color</td>
+                </tr>
+                <tr>
+                  <td>setHoverTextColor(color)</td>
+                  <td>COLORREF</td>
+                  <td>Text color on mouse hover</td>
+                </tr>
+                <tr>
+                  <td>setPadding(p)</td>
+                  <td>int</td>
+                  <td>Uniform padding on all sides</td>
+                </tr>
+                <tr>
+                  <td>setBackgroundColor(color)</td>
+                  <td>COLORREF</td>
+                  <td>Fill background behind text</td>
+                </tr>
+                <tr>
+                  <td>setBorderRadius(r)</td>
+                  <td>int</td>
+                  <td>Corner rounding for background</td>
+                </tr>
+                <tr>
+                  <td>setWidth(w)</td>
+                  <td>int</td>
+                  <td>Fixed width (disables auto-sizing)</td>
+                </tr>
+                <tr>
+                  <td>setHeight(h)</td>
+                  <td>int</td>
+                  <td>Fixed height (disables auto-sizing)</td>
+                </tr>
+                <tr>
+                  <td>setMinWidth(w)</td>
+                  <td>int</td>
+                  <td>Minimum width constraint</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-    <hr class="section-divider">
+        <hr class="section-divider" />
 
-    <!-- ── DIVIDER ────────────────────────────── -->
-    <div class="section" id="divider">
-      <div class="section-head">
-        <h2>Divider</h2>
-        <span class="badge badge-display">Display</span>
-      </div>
-      <p class="section-desc">A 1px horizontal rule. Fills available width automatically.</p>
-      <div class="code-block"><pre>
+        <!-- ── DIVIDER ────────────────────────────── -->
+        <div class="section" id="divider">
+          <div class="section-head">
+            <h2>Divider</h2>
+            <span class="badge badge-display">Display</span>
+          </div>
+          <p class="section-desc">
+            A 1px horizontal rule. Fills available width automatically.
+          </p>
+          <div class="code-block">
+            <pre>
 <span class="kw">auto</span> sep = <span class="fn">Divider</span>();  <span class="comment">// 1px light gray horizontal line</span>
-</pre></div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Signature</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>Divider()</td><td>1px divider, <code>RGB(224,224,224)</code>, full width</td></tr>
-        </tbody>
-      </table></div>
-    </div>
+</pre>
+          </div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Signature</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Divider()</td>
+                  <td>
+                    1px divider, <code>RGB(224,224,224)</code>, full width
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-    <hr class="section-divider">
+        <hr class="section-divider" />
 
-    <!-- ── PROGRESSBAR ───────────────────────── -->
-    <div class="section" id="progressbar">
-      <div class="section-head">
-        <h2>ProgressBar</h2>
-        <span class="badge badge-display">Display</span>
-      </div>
-      <p class="section-desc">Horizontal progress indicator. Supports solid or multi-stop gradient fills, reactive state binding, and rounded corners.</p>
+        <!-- ── PROGRESSBAR ───────────────────────── -->
+        <div class="section" id="progressbar">
+          <div class="section-head">
+            <h2>ProgressBar</h2>
+            <span class="badge badge-display">Display</span>
+          </div>
+          <p class="section-desc">
+            Horizontal progress indicator. Supports solid or multi-stop gradient
+            fills, reactive state binding, and rounded corners.
+          </p>
 
-      <div class="code-block"><pre>
+          <div class="code-block">
+            <pre>
 <span class="comment">// Static value</span>
 <span class="fn">ProgressBar</span>(<span class="num">0.65</span>)
     <span class="arrow">-></span><span class="method">setProgressColors</span>({ <span class="fn">RGB</span>(<span class="num">33</span>,<span class="num">150</span>,<span class="num">243</span>), <span class="fn">RGB</span>(<span class="num">0</span>,<span class="num">200</span>,<span class="num">150</span>) })
@@ -487,35 +684,82 @@
 <span class="comment">// Reactive</span>
 <span class="type">State</span>&lt;<span class="kw">double</span>&gt; progress(<span class="num">0.0</span>, &app);
 <span class="fn">ProgressBar</span>()-><span class="method">setValue</span>(progress);
-</pre></div>
+</pre>
+          </div>
 
-      <div class="sub-head">Methods</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>setValue(v)</td><td>double 0–1</td><td>Set fill level statically</td></tr>
-          <tr><td>setValue(State&lt;double&gt;)</td><td>State</td><td>Reactive fill level binding</td></tr>
-          <tr><td>setProgressColors(colors)</td><td>vector&lt;COLORREF&gt;</td><td>Solid or gradient fill colors</td></tr>
-          <tr><td>setBackgroundColor(color)</td><td>COLORREF</td><td>Track background color</td></tr>
-          <tr><td>setBorderColor(color)</td><td>COLORREF</td><td>Track border color</td></tr>
-          <tr><td>setBorderWidth(w)</td><td>int</td><td>Track border thickness</td></tr>
-          <tr><td>setBorderRadius(r)</td><td>int</td><td>Corner rounding</td></tr>
-          <tr><td>setHeight(h)</td><td>int</td><td>Bar height (default 12px)</td></tr>
-        </tbody>
-      </table></div>
-    </div>
+          <div class="sub-head">Methods</div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Method</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>setValue(v)</td>
+                  <td>double 0–1</td>
+                  <td>Set fill level statically</td>
+                </tr>
+                <tr>
+                  <td>setValue(State&lt;double&gt;)</td>
+                  <td>State</td>
+                  <td>Reactive fill level binding</td>
+                </tr>
+                <tr>
+                  <td>setProgressColors(colors)</td>
+                  <td>vector&lt;COLORREF&gt;</td>
+                  <td>Solid or gradient fill colors</td>
+                </tr>
+                <tr>
+                  <td>setBackgroundColor(color)</td>
+                  <td>COLORREF</td>
+                  <td>Track background color</td>
+                </tr>
+                <tr>
+                  <td>setBorderColor(color)</td>
+                  <td>COLORREF</td>
+                  <td>Track border color</td>
+                </tr>
+                <tr>
+                  <td>setBorderWidth(w)</td>
+                  <td>int</td>
+                  <td>Track border thickness</td>
+                </tr>
+                <tr>
+                  <td>setBorderRadius(r)</td>
+                  <td>int</td>
+                  <td>Corner rounding</td>
+                </tr>
+                <tr>
+                  <td>setHeight(h)</td>
+                  <td>int</td>
+                  <td>Bar height (default 12px)</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-    <hr class="section-divider">
+        <hr class="section-divider" />
 
-    <!-- ── GRAPH ──────────────────────────────── -->
-    <div class="section" id="graph">
-      <div class="section-head">
-        <h2>Graph</h2>
-        <span class="badge badge-display">Display</span>
-      </div>
-      <p class="section-desc">OpenGL-rendered chart widget. Supports Line, Bar, and Area graph types with reactive <code>State&lt;vector&lt;float&gt;&gt;</code> data binding, axis labels, titles, grid, and legend.</p>
+        <!-- ── GRAPH ──────────────────────────────── -->
+        <div class="section" id="graph">
+          <div class="section-head">
+            <h2>Graph</h2>
+            <span class="badge badge-display">Display</span>
+          </div>
+          <p class="section-desc">
+            OpenGL-rendered chart widget. Supports Line, Bar, and Area graph
+            types with reactive
+            <code>State&lt;vector&lt;float&gt;&gt;</code> data binding, axis
+            labels, titles, grid, and legend.
+          </p>
 
-      <div class="code-block"><pre>
+          <div class="code-block">
+            <pre>
 <span class="comment">// Static line chart</span>
 <span class="fn">Graph</span>(<span class="num">500</span>, <span class="num">300</span>)
     <span class="arrow">-></span><span class="method">addSeries</span>(<span class="str">"Temperature"</span>, {<span class="num">22</span>,<span class="num">24</span>,<span class="num">27</span>,<span class="num">23</span>,<span class="num">19</span>}, <span class="num">1.0f</span>, <span class="num">0.4f</span>, <span class="num">0.2f</span>)
@@ -527,46 +771,112 @@
 <span class="fn">Graph</span>(<span class="num">600</span>, <span class="num">300</span>)
     <span class="arrow">-></span><span class="method">addSeries</span>(<span class="str">"CPU"</span>, cpuData, <span class="num">0.0f</span>, <span class="num">1.0f</span>, <span class="num">0.4f</span>)
     <span class="arrow">-></span><span class="method">setType</span>(<span class="type">GraphType</span>::Area);
-</pre></div>
+</pre>
+          </div>
 
-      <div class="sub-head">Factory</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Signature</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>Graph()</td><td>Default 400×300 graph</td></tr>
-          <tr><td>Graph(w, h)</td><td>Fixed-size graph</td></tr>
-        </tbody>
-      </table></div>
+          <div class="sub-head">Factory</div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Signature</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Graph()</td>
+                  <td>Default 400×300 graph</td>
+                </tr>
+                <tr>
+                  <td>Graph(w, h)</td>
+                  <td>Fixed-size graph</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
-      <div class="sub-head">Methods</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>addSeries(label, values, r, g, b)</td><td>string, vector&lt;float&gt;</td><td>Add a static data series</td></tr>
-          <tr><td>addSeries(label, State&lt;...&gt;, r,g,b)</td><td>State binding</td><td>Reactive series — repaints on state change</td></tr>
-          <tr><td>bindSeries(idx, State)</td><td>int, State</td><td>Retrofit reactive binding to existing series</td></tr>
-          <tr><td>setType(type)</td><td>GraphType</td><td>Line · Bar · Area</td></tr>
-          <tr><td>setTitle(t)</td><td>string</td><td>Chart title (top center)</td></tr>
-          <tr><td>setXLabels(labels)</td><td>vector&lt;string&gt;</td><td>X-axis tick labels</td></tr>
-          <tr><td>setYRange(min, max)</td><td>float, float</td><td>Manual Y-axis range (disables autoRange)</td></tr>
-          <tr><td>setShowGrid(v)</td><td>bool</td><td>Toggle background grid lines</td></tr>
-          <tr><td>clearSeries()</td><td>—</td><td>Remove all series</td></tr>
-          <tr><td>setSize(w, h)</td><td>int, int</td><td>Resize the graph widget</td></tr>
-        </tbody>
-      </table></div>
-    </div>
+          <div class="sub-head">Methods</div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Method</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>addSeries(label, values, r, g, b)</td>
+                  <td>string, vector&lt;float&gt;</td>
+                  <td>Add a static data series</td>
+                </tr>
+                <tr>
+                  <td>addSeries(label, State&lt;...&gt;, r,g,b)</td>
+                  <td>State binding</td>
+                  <td>Reactive series — repaints on state change</td>
+                </tr>
+                <tr>
+                  <td>bindSeries(idx, State)</td>
+                  <td>int, State</td>
+                  <td>Retrofit reactive binding to existing series</td>
+                </tr>
+                <tr>
+                  <td>setType(type)</td>
+                  <td>GraphType</td>
+                  <td>Line · Bar · Area</td>
+                </tr>
+                <tr>
+                  <td>setTitle(t)</td>
+                  <td>string</td>
+                  <td>Chart title (top center)</td>
+                </tr>
+                <tr>
+                  <td>setXLabels(labels)</td>
+                  <td>vector&lt;string&gt;</td>
+                  <td>X-axis tick labels</td>
+                </tr>
+                <tr>
+                  <td>setYRange(min, max)</td>
+                  <td>float, float</td>
+                  <td>Manual Y-axis range (disables autoRange)</td>
+                </tr>
+                <tr>
+                  <td>setShowGrid(v)</td>
+                  <td>bool</td>
+                  <td>Toggle background grid lines</td>
+                </tr>
+                <tr>
+                  <td>clearSeries()</td>
+                  <td>—</td>
+                  <td>Remove all series</td>
+                </tr>
+                <tr>
+                  <td>setSize(w, h)</td>
+                  <td>int, int</td>
+                  <td>Resize the graph widget</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-    <hr class="section-divider">
+        <hr class="section-divider" />
 
-    <!-- ── BUTTON ────────────────────────────── -->
-    <div class="section" id="button">
-      <div class="section-head">
-        <h2>Button</h2>
-        <span class="badge badge-interaction">Interaction</span>
-      </div>
-      <p class="section-desc">A clickable widget with a background. Accepts either a text label or a child widget for fully custom content. Darkens slightly on press.</p>
+        <!-- ── BUTTON ────────────────────────────── -->
+        <div class="section" id="button">
+          <div class="section-head">
+            <h2>Button</h2>
+            <span class="badge badge-interaction">Interaction</span>
+          </div>
+          <p class="section-desc">
+            A clickable widget with a background. Accepts either a text label or
+            a child widget for fully custom content. Darkens slightly on press.
+          </p>
 
-      <div class="code-block"><pre>
+          <div class="code-block">
+            <pre>
 <span class="comment">// Text button</span>
 <span class="fn">Button</span>(<span class="str">"Save"</span>, [&]{ save(); })
     <span class="arrow">-></span><span class="method">setBackgroundColor</span>(<span class="fn">RGB</span>(<span class="num">76</span>,<span class="num">175</span>,<span class="num">80</span>))
@@ -575,225 +885,500 @@
 
 <span class="comment">// Widget child button</span>
 <span class="fn">Button</span>(<span class="fn">Row</span>(<span class="fn">Icon</span>(...), <span class="fn">Text</span>(<span class="str">"Upload"</span>)), [&]{ upload(); });
-</pre></div>
+</pre>
+          </div>
 
-      <div class="sub-head">Factory</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Signature</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>Button(text, onClick)</td><td>Text label button</td></tr>
-          <tr><td>Button(child, onClick)</td><td>Widget child button</td></tr>
-        </tbody>
-      </table></div>
+          <div class="sub-head">Factory</div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Signature</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Button(text, onClick)</td>
+                  <td>Text label button</td>
+                </tr>
+                <tr>
+                  <td>Button(child, onClick)</td>
+                  <td>Widget child button</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
-      <div class="sub-head">Methods</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>setOnClick(handler)</td><td>ClickHandler</td><td>Click callback</td></tr>
-          <tr><td>setChild(widget)</td><td>WidgetPtr</td><td>Replace content widget</td></tr>
-          <tr><td>setBackgroundColor(color)</td><td>COLORREF</td><td>Button background</td></tr>
-          <tr><td>setHoverBackgroundColor(color)</td><td>COLORREF</td><td>Background on hover</td></tr>
-          <tr><td>setTextColor(color)</td><td>COLORREF</td><td>Label text color</td></tr>
-          <tr><td>setBorderRadius(r)</td><td>int</td><td>Corner rounding</td></tr>
-          <tr><td>setPadding(p)</td><td>int</td><td>Uniform padding</td></tr>
-          <tr><td>setPaddingAll(l,t,r,b)</td><td>int ×4</td><td>Per-side padding</td></tr>
-          <tr><td>setWidth(w)</td><td>int</td><td>Fixed width</td></tr>
-          <tr><td>setHeight(h)</td><td>int</td><td>Fixed height</td></tr>
-        </tbody>
-      </table></div>
-    </div>
+          <div class="sub-head">Methods</div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Method</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>setOnClick(handler)</td>
+                  <td>ClickHandler</td>
+                  <td>Click callback</td>
+                </tr>
+                <tr>
+                  <td>setChild(widget)</td>
+                  <td>WidgetPtr</td>
+                  <td>Replace content widget</td>
+                </tr>
+                <tr>
+                  <td>setBackgroundColor(color)</td>
+                  <td>COLORREF</td>
+                  <td>Button background</td>
+                </tr>
+                <tr>
+                  <td>setHoverBackgroundColor(color)</td>
+                  <td>COLORREF</td>
+                  <td>Background on hover</td>
+                </tr>
+                <tr>
+                  <td>setTextColor(color)</td>
+                  <td>COLORREF</td>
+                  <td>Label text color</td>
+                </tr>
+                <tr>
+                  <td>setBorderRadius(r)</td>
+                  <td>int</td>
+                  <td>Corner rounding</td>
+                </tr>
+                <tr>
+                  <td>setPadding(p)</td>
+                  <td>int</td>
+                  <td>Uniform padding</td>
+                </tr>
+                <tr>
+                  <td>setPaddingAll(l,t,r,b)</td>
+                  <td>int ×4</td>
+                  <td>Per-side padding</td>
+                </tr>
+                <tr>
+                  <td>setWidth(w)</td>
+                  <td>int</td>
+                  <td>Fixed width</td>
+                </tr>
+                <tr>
+                  <td>setHeight(h)</td>
+                  <td>int</td>
+                  <td>Fixed height</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-    <hr class="section-divider">
+        <hr class="section-divider" />
 
-    <!-- ── GESTURE ────────────────────────────── -->
-    <div class="section" id="gesture">
-      <div class="section-head">
-        <h2>GestureDetector</h2>
-        <span class="badge badge-interaction">Interaction</span>
-      </div>
-      <p class="section-desc">Wraps any widget and attaches pointer/gesture callbacks without any WndProc edits. Hooks directly into the widget tree's virtual mouse methods.</p>
+        <!-- ── GESTURE ────────────────────────────── -->
+        <div class="section" id="gesture">
+          <div class="section-head">
+            <h2>GestureDetector</h2>
+            <span class="badge badge-interaction">Interaction</span>
+          </div>
+          <p class="section-desc">
+            Wraps any widget and attaches pointer/gesture callbacks without any
+            WndProc edits. Hooks directly into the widget tree's virtual mouse
+            methods.
+          </p>
 
-      <div class="code-block"><pre>
+          <div class="code-block">
+            <pre>
 <span class="fn">GestureDetector</span>(<span class="fn">Card</span>(<span class="fn">Text</span>(<span class="str">"Click me"</span>)))
     <span class="arrow">-></span><span class="method">setOnTap</span>([&]{ handleTap(); })
     <span class="arrow">-></span><span class="method">setOnDoubleTap</span>([&]{ handleDouble(); })
     <span class="arrow">-></span><span class="method">setOnLongPress</span>([&]{ showMenu(); })
     <span class="arrow">-></span><span class="method">setOnDragUpdate</span>([&](<span class="kw">int</span> dx, <span class="kw">int</span> dy){ pan(dx, dy); })
     <span class="arrow">-></span><span class="method">setOnScrollUp</span>([&](<span class="kw">int</span> delta){ zoom(delta); });
-</pre></div>
+</pre>
+          </div>
 
-      <div class="note">
-        <strong>Thresholds:</strong> Long press fires after <code>500ms</code>. Double-tap window is <code>300ms</code>. Drag starts after <code>5px</code> of movement. Mouse capture is set automatically during drags.
-      </div>
+          <div class="note">
+            <strong>Thresholds:</strong> Long press fires after
+            <code>500ms</code>. Double-tap window is <code>300ms</code>. Drag
+            starts after <code>5px</code> of movement. Mouse capture is set
+            automatically during drags.
+          </div>
 
-      <div class="sub-head">Callbacks</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Method</th><th>Signature</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>setOnTap</td><td>void()</td><td>Single click / tap</td></tr>
-          <tr><td>setOnDoubleTap</td><td>void()</td><td>Two taps within 300 ms</td></tr>
-          <tr><td>setOnLongPress</td><td>void()</td><td>Press held for 500 ms</td></tr>
-          <tr><td>setOnSecondaryTap</td><td>void()</td><td>Right-click</td></tr>
-          <tr><td>setOnHoverEnter</td><td>void()</td><td>Cursor enters bounds</td></tr>
-          <tr><td>setOnHoverExit</td><td>void()</td><td>Cursor leaves bounds</td></tr>
-          <tr><td>setOnPointerMove</td><td>void(x, y)</td><td>Mouse position while inside</td></tr>
-          <tr><td>setOnDragStart</td><td>void()</td><td>Drag threshold exceeded</td></tr>
-          <tr><td>setOnDragUpdate</td><td>void(dx, dy)</td><td>Delta since last move during drag</td></tr>
-          <tr><td>setOnDragEnd</td><td>void()</td><td>Mouse released after drag</td></tr>
-          <tr><td>setOnScrollUp</td><td>void(delta)</td><td>Wheel scrolled upward</td></tr>
-          <tr><td>setOnScrollDown</td><td>void(delta)</td><td>Wheel scrolled downward</td></tr>
-        </tbody>
-      </table></div>
-    </div>
+          <div class="sub-head">Callbacks</div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Method</th>
+                  <th>Signature</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>setOnTap</td>
+                  <td>void()</td>
+                  <td>Single click / tap</td>
+                </tr>
+                <tr>
+                  <td>setOnDoubleTap</td>
+                  <td>void()</td>
+                  <td>Two taps within 300 ms</td>
+                </tr>
+                <tr>
+                  <td>setOnLongPress</td>
+                  <td>void()</td>
+                  <td>Press held for 500 ms</td>
+                </tr>
+                <tr>
+                  <td>setOnSecondaryTap</td>
+                  <td>void()</td>
+                  <td>Right-click</td>
+                </tr>
+                <tr>
+                  <td>setOnHoverEnter</td>
+                  <td>void()</td>
+                  <td>Cursor enters bounds</td>
+                </tr>
+                <tr>
+                  <td>setOnHoverExit</td>
+                  <td>void()</td>
+                  <td>Cursor leaves bounds</td>
+                </tr>
+                <tr>
+                  <td>setOnPointerMove</td>
+                  <td>void(x, y)</td>
+                  <td>Mouse position while inside</td>
+                </tr>
+                <tr>
+                  <td>setOnDragStart</td>
+                  <td>void()</td>
+                  <td>Drag threshold exceeded</td>
+                </tr>
+                <tr>
+                  <td>setOnDragUpdate</td>
+                  <td>void(dx, dy)</td>
+                  <td>Delta since last move during drag</td>
+                </tr>
+                <tr>
+                  <td>setOnDragEnd</td>
+                  <td>void()</td>
+                  <td>Mouse released after drag</td>
+                </tr>
+                <tr>
+                  <td>setOnScrollUp</td>
+                  <td>void(delta)</td>
+                  <td>Wheel scrolled upward</td>
+                </tr>
+                <tr>
+                  <td>setOnScrollDown</td>
+                  <td>void(delta)</td>
+                  <td>Wheel scrolled downward</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-    <hr class="section-divider">
+        <hr class="section-divider" />
 
-    <!-- ── TEXTINPUT ──────────────────────────── -->
-    <div class="section" id="textinput">
-      <div class="section-head">
-        <h2>TextInput</h2>
-        <span class="badge badge-input">Input</span>
-      </div>
-      <p class="section-desc">Single-line text field with cursor, scrolling, placeholder, and two-way <code>State&lt;string&gt;</code> binding.</p>
+        <!-- ── TEXTINPUT ──────────────────────────── -->
+        <div class="section" id="textinput">
+          <div class="section-head">
+            <h2>TextInput</h2>
+            <span class="badge badge-input">Input</span>
+          </div>
+          <p class="section-desc">
+            Single-line text field with cursor, scrolling, placeholder, and
+            two-way <code>State&lt;string&gt;</code> binding.
+          </p>
 
-      <div class="code-block"><pre>
+          <div class="code-block">
+            <pre>
 <span class="type">State</span>&lt;std::string&gt; name(<span class="str">""</span>, &app);
 
 <span class="fn">TextInput</span>(<span class="str">"Enter your name..."</span>)
     <span class="arrow">-></span><span class="method">setInputValue</span>(name)
     <span class="arrow">-></span><span class="method">setWidth</span>(<span class="num">320</span>);
-</pre></div>
+</pre>
+          </div>
 
-      <div class="sub-head">Methods</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>setInputValue(State&lt;string&gt;)</td><td>State</td><td>Two-way reactive binding</td></tr>
-          <tr><td>setPlaceholder(text)</td><td>string</td><td>Hint shown when empty</td></tr>
-        </tbody>
-      </table></div>
+          <div class="sub-head">Methods</div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Method</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>setInputValue(State&lt;string&gt;)</td>
+                  <td>State</td>
+                  <td>Two-way reactive binding</td>
+                </tr>
+                <tr>
+                  <td>setPlaceholder(text)</td>
+                  <td>string</td>
+                  <td>Hint shown when empty</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
-      <div class="note">
-        Supports keyboard navigation: <strong>←/→</strong> move cursor, <strong>Home/End</strong> jump to start/end, <strong>Backspace/Delete</strong> delete, blinking cursor via <code>WM_TIMER</code>.
-      </div>
-    </div>
+          <div class="note">
+            Supports keyboard navigation: <strong>←/→</strong> move cursor,
+            <strong>Home/End</strong> jump to start/end,
+            <strong>Backspace/Delete</strong> delete, blinking cursor via
+            <code>WM_TIMER</code>.
+          </div>
+        </div>
 
-    <hr class="section-divider">
+        <hr class="section-divider" />
 
-    <!-- ── SLIDER ─────────────────────────────── -->
-    <div class="section" id="slider">
-      <div class="section-head">
-        <h2>Slider</h2>
-        <span class="badge badge-input">Input</span>
-      </div>
-      <p class="section-desc">Horizontal range input. Draggable thumb with keyboard support and two-way state binding for <code>double</code> or <code>int</code> states.</p>
+        <!-- ── SLIDER ─────────────────────────────── -->
+        <div class="section" id="slider">
+          <div class="section-head">
+            <h2>Slider</h2>
+            <span class="badge badge-input">Input</span>
+          </div>
+          <p class="section-desc">
+            Horizontal range input. Draggable thumb with keyboard support and
+            two-way state binding for <code>double</code> or
+            <code>int</code> states.
+          </p>
 
-      <div class="code-block"><pre>
+          <div class="code-block">
+            <pre>
 <span class="type">State</span>&lt;<span class="kw">double</span>&gt; volume(<span class="num">50.0</span>, &app);
 
 <span class="fn">Slider</span>(<span class="num">0.0</span>, <span class="num">100.0</span>, <span class="num">1.0</span>)
     <span class="arrow">-></span><span class="method">setValue</span>(volume)
     <span class="arrow">-></span><span class="method">setTrackFillColor</span>(<span class="fn">RGB</span>(<span class="num">99</span>,<span class="num">102</span>,<span class="num">241</span>))
     <span class="arrow">-></span><span class="method">setOnValueChanged</span>([&](<span class="kw">double</span> v){ setVolume(v); });
-</pre></div>
+</pre>
+          </div>
 
-      <div class="sub-head">Factory</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Signature</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>Slider(min, max, step)</td><td>Range slider with optional step</td></tr>
-        </tbody>
-      </table></div>
+          <div class="sub-head">Factory</div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Signature</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Slider(min, max, step)</td>
+                  <td>Range slider with optional step</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
-      <div class="sub-head">Methods</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>setValue(State&lt;double&gt;)</td><td>State</td><td>Two-way double binding</td></tr>
-          <tr><td>setValue(State&lt;int&gt;)</td><td>State</td><td>Two-way int binding</td></tr>
-          <tr><td>setMinValue(v)</td><td>double</td><td>Range minimum</td></tr>
-          <tr><td>setMaxValue(v)</td><td>double</td><td>Range maximum</td></tr>
-          <tr><td>setStep(v)</td><td>double</td><td>Snap step size</td></tr>
-          <tr><td>setTrackColor(c)</td><td>COLORREF</td><td>Unfilled track color</td></tr>
-          <tr><td>setTrackFillColor(c)</td><td>COLORREF</td><td>Filled track color</td></tr>
-          <tr><td>setThumbColor(c)</td><td>COLORREF</td><td>Thumb circle color</td></tr>
-          <tr><td>setOnValueChanged(fn)</td><td>void(double)</td><td>Change callback</td></tr>
-        </tbody>
-      </table></div>
-    </div>
+          <div class="sub-head">Methods</div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Method</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>setValue(State&lt;double&gt;)</td>
+                  <td>State</td>
+                  <td>Two-way double binding</td>
+                </tr>
+                <tr>
+                  <td>setValue(State&lt;int&gt;)</td>
+                  <td>State</td>
+                  <td>Two-way int binding</td>
+                </tr>
+                <tr>
+                  <td>setMinValue(v)</td>
+                  <td>double</td>
+                  <td>Range minimum</td>
+                </tr>
+                <tr>
+                  <td>setMaxValue(v)</td>
+                  <td>double</td>
+                  <td>Range maximum</td>
+                </tr>
+                <tr>
+                  <td>setStep(v)</td>
+                  <td>double</td>
+                  <td>Snap step size</td>
+                </tr>
+                <tr>
+                  <td>setTrackColor(c)</td>
+                  <td>COLORREF</td>
+                  <td>Unfilled track color</td>
+                </tr>
+                <tr>
+                  <td>setTrackFillColor(c)</td>
+                  <td>COLORREF</td>
+                  <td>Filled track color</td>
+                </tr>
+                <tr>
+                  <td>setThumbColor(c)</td>
+                  <td>COLORREF</td>
+                  <td>Thumb circle color</td>
+                </tr>
+                <tr>
+                  <td>setOnValueChanged(fn)</td>
+                  <td>void(double)</td>
+                  <td>Change callback</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-    <hr class="section-divider">
+        <hr class="section-divider" />
 
-    <!-- ── TOGGLE ─────────────────────────────── -->
-    <div class="section" id="toggle">
-      <div class="section-head">
-        <h2>Toggle</h2>
-        <span class="badge badge-input">Input</span>
-      </div>
-      <p class="section-desc">On/off switch with animated thumb and optional text label. Binds to <code>State&lt;bool&gt;</code>.</p>
+        <!-- ── TOGGLE ─────────────────────────────── -->
+        <div class="section" id="toggle">
+          <div class="section-head">
+            <h2>Toggle</h2>
+            <span class="badge badge-input">Input</span>
+          </div>
+          <p class="section-desc">
+            On/off switch with animated thumb and optional text label. Binds to
+            <code>State&lt;bool&gt;</code>.
+          </p>
 
-      <div class="code-block"><pre>
+          <div class="code-block">
+            <pre>
 <span class="type">State</span>&lt;<span class="kw">bool</span>&gt; darkMode(<span class="kw">false</span>, &app);
 
 <span class="fn">Toggle</span>(<span class="str">"Dark mode"</span>)
     <span class="arrow">-></span><span class="method">setValue</span>(darkMode)
     <span class="arrow">-></span><span class="method">setTrackOnColor</span>(<span class="fn">RGB</span>(<span class="num">99</span>,<span class="num">102</span>,<span class="num">241</span>))
     <span class="arrow">-></span><span class="method">setOnToggleChanged</span>([&](<span class="kw">bool</span> v){ applyTheme(v); });
-</pre></div>
+</pre>
+          </div>
 
-      <div class="sub-head">Methods</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>setValue(State&lt;bool&gt;)</td><td>State</td><td>Two-way binding</td></tr>
-          <tr><td>setToggled(bool)</td><td>bool</td><td>Set initial state</td></tr>
-          <tr><td>setLabel(text)</td><td>string</td><td>Text shown beside the toggle</td></tr>
-          <tr><td>setTrackOnColor(c)</td><td>COLORREF</td><td>Track color when on</td></tr>
-          <tr><td>setTrackOffColor(c)</td><td>COLORREF</td><td>Track color when off</td></tr>
-          <tr><td>setThumbColor(c)</td><td>COLORREF</td><td>Thumb color</td></tr>
-          <tr><td>setOnToggleChanged(fn)</td><td>void(bool)</td><td>Change callback</td></tr>
-        </tbody>
-      </table></div>
-    </div>
+          <div class="sub-head">Methods</div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Method</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>setValue(State&lt;bool&gt;)</td>
+                  <td>State</td>
+                  <td>Two-way binding</td>
+                </tr>
+                <tr>
+                  <td>setToggled(bool)</td>
+                  <td>bool</td>
+                  <td>Set initial state</td>
+                </tr>
+                <tr>
+                  <td>setLabel(text)</td>
+                  <td>string</td>
+                  <td>Text shown beside the toggle</td>
+                </tr>
+                <tr>
+                  <td>setTrackOnColor(c)</td>
+                  <td>COLORREF</td>
+                  <td>Track color when on</td>
+                </tr>
+                <tr>
+                  <td>setTrackOffColor(c)</td>
+                  <td>COLORREF</td>
+                  <td>Track color when off</td>
+                </tr>
+                <tr>
+                  <td>setThumbColor(c)</td>
+                  <td>COLORREF</td>
+                  <td>Thumb color</td>
+                </tr>
+                <tr>
+                  <td>setOnToggleChanged(fn)</td>
+                  <td>void(bool)</td>
+                  <td>Change callback</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-    <hr class="section-divider">
+        <hr class="section-divider" />
 
-    <!-- ── CHECKBOX ───────────────────────────── -->
-    <div class="section" id="checkbox">
-      <div class="section-head">
-        <h2>CheckBox</h2>
-        <span class="badge badge-input">Input</span>
-      </div>
-      <p class="section-desc">Standard checkbox with optional label. Binds to <code>State&lt;bool&gt;</code> via <code>setInputValue</code>.</p>
+        <!-- ── CHECKBOX ───────────────────────────── -->
+        <div class="section" id="checkbox">
+          <div class="section-head">
+            <h2>CheckBox</h2>
+            <span class="badge badge-input">Input</span>
+          </div>
+          <p class="section-desc">
+            Standard checkbox with optional label. Binds to
+            <code>State&lt;bool&gt;</code> via <code>setInputValue</code>.
+          </p>
 
-      <div class="code-block"><pre>
+          <div class="code-block">
+            <pre>
 <span class="type">State</span>&lt;<span class="kw">bool</span>&gt; agreed(<span class="kw">false</span>, &app);
 
 <span class="fn">CheckBox</span>(<span class="str">"I agree to the terms"</span>)
     <span class="arrow">-></span><span class="method">setInputValue</span>(agreed);
-</pre></div>
+</pre>
+          </div>
 
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Signature</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>CheckBox(label)</td><td>Checkbox with optional text label</td></tr>
-          <tr><td>setInputValue(State&lt;bool&gt;)</td><td>Two-way bool binding</td></tr>
-        </tbody>
-      </table></div>
-    </div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Signature</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>CheckBox(label)</td>
+                  <td>Checkbox with optional text label</td>
+                </tr>
+                <tr>
+                  <td>setInputValue(State&lt;bool&gt;)</td>
+                  <td>Two-way bool binding</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-    <hr class="section-divider">
+        <hr class="section-divider" />
 
-    <!-- ── RADIOGROUP ────────────────────────── -->
-    <div class="section" id="radiogroup">
-      <div class="section-head">
-        <h2>RadioGroup / RadioButton</h2>
-        <span class="badge badge-input">Input</span>
-      </div>
-      <p class="section-desc">Mutually-exclusive radio buttons. Group manages selection; individual buttons belong to one group. Binds to <code>State&lt;string&gt;</code>.</p>
+        <!-- ── RADIOGROUP ────────────────────────── -->
+        <div class="section" id="radiogroup">
+          <div class="section-head">
+            <h2>RadioGroup / RadioButton</h2>
+            <span class="badge badge-input">Input</span>
+          </div>
+          <p class="section-desc">
+            Mutually-exclusive radio buttons. Group manages selection;
+            individual buttons belong to one group. Binds to
+            <code>State&lt;string&gt;</code>.
+          </p>
 
-      <div class="code-block"><pre>
+          <div class="code-block">
+            <pre>
 <span class="type">State</span>&lt;std::string&gt; plan(<span class="str">"free"</span>, &app);
 
 <span class="fn">RadioGroupWithOptions</span>({
@@ -808,33 +1393,64 @@
 group-><span class="method">addRadioButton</span>(<span class="fn">RadioButton</span>(<span class="str">"opt_a"</span>, <span class="str">"Option A"</span>));
 group-><span class="method">addRadioButton</span>(<span class="fn">RadioButton</span>(<span class="str">"opt_b"</span>, <span class="str">"Option B"</span>));
 group-><span class="method">setHorizontal</span>();
-</pre></div>
+</pre>
+          </div>
 
-      <div class="sub-head">RadioGroup Methods</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Method</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>addRadioButton(RadioButtonPtr)</td><td>Add a button to the group</td></tr>
-          <tr><td>bindValue(State&lt;string&gt;)</td><td>Two-way selected-value binding</td></tr>
-          <tr><td>setSelectedValue(string)</td><td>Set selected value imperatively</td></tr>
-          <tr><td>setOnSelectionChanged(fn)</td><td>Callback with newly selected value</td></tr>
-          <tr><td>setHorizontal() / setVertical()</td><td>Layout direction</td></tr>
-          <tr><td>getSelectedValue()</td><td>Returns current selection string</td></tr>
-        </tbody>
-      </table></div>
-    </div>
+          <div class="sub-head">RadioGroup Methods</div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Method</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>addRadioButton(RadioButtonPtr)</td>
+                  <td>Add a button to the group</td>
+                </tr>
+                <tr>
+                  <td>bindValue(State&lt;string&gt;)</td>
+                  <td>Two-way selected-value binding</td>
+                </tr>
+                <tr>
+                  <td>setSelectedValue(string)</td>
+                  <td>Set selected value imperatively</td>
+                </tr>
+                <tr>
+                  <td>setOnSelectionChanged(fn)</td>
+                  <td>Callback with newly selected value</td>
+                </tr>
+                <tr>
+                  <td>setHorizontal() / setVertical()</td>
+                  <td>Layout direction</td>
+                </tr>
+                <tr>
+                  <td>getSelectedValue()</td>
+                  <td>Returns current selection string</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-    <hr class="section-divider">
+        <hr class="section-divider" />
 
-    <!-- ── LISTVIEW ───────────────────────────── -->
-    <div class="section" id="listview">
-      <div class="section-head">
-        <h2>ListView</h2>
-        <span class="badge badge-collection">Collection</span>
-      </div>
-      <p class="section-desc">Scrollable list driven by <code>State&lt;vector&lt;T&gt;&gt;</code>. Supports vertical or horizontal orientation, separators, custom scrollbar styling, and thumb drag.</p>
+        <!-- ── LISTVIEW ───────────────────────────── -->
+        <div class="section" id="listview">
+          <div class="section-head">
+            <h2>ListView</h2>
+            <span class="badge badge-collection">Collection</span>
+          </div>
+          <p class="section-desc">
+            Scrollable list driven by <code>State&lt;vector&lt;T&gt;&gt;</code>.
+            Supports vertical or horizontal orientation, separators, custom
+            scrollbar styling, and thumb drag.
+          </p>
 
-      <div class="code-block"><pre>
+          <div class="code-block">
+            <pre>
 <span class="type">State</span>&lt;std::vector&lt;<span class="type">Contact</span>&gt;&gt; contacts(data, &app);
 
 <span class="fn">ListView</span>(contacts)
@@ -844,36 +1460,78 @@ group-><span class="method">setHorizontal</span>();
     <span class="arrow">-></span><span class="method">separator</span>([]{ <span class="kw">return</span> <span class="fn">Divider</span>(); })
     <span class="arrow">-></span><span class="method">setSpacing</span>(<span class="num">8</span>)
     <span class="arrow">-></span><span class="method">setScrollbarColor</span>(<span class="fn">RGB</span>(<span class="num">100</span>,<span class="num">100</span>,<span class="num">120</span>));
-</pre></div>
+</pre>
+          </div>
 
-      <div class="sub-head">Methods</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Method</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>itemBuilder(fn)</td><td>Builder <code>(int index, const T&amp;) -&gt; WidgetPtr</code></td></tr>
-          <tr><td>separator(fn)</td><td>Widget inserted between items</td></tr>
-          <tr><td>setSpacing(px)</td><td>Gap between items</td></tr>
-          <tr><td>setHorizontal(bool)</td><td>Switch to horizontal scroll</td></tr>
-          <tr><td>setScrollbarSize(px)</td><td>Scrollbar thickness</td></tr>
-          <tr><td>setScrollbarColor(c)</td><td>Idle thumb color</td></tr>
-          <tr><td>setScrollbarHoverColor(c)</td><td>Hover thumb color</td></tr>
-          <tr><td>setScrollbarActiveColor(c)</td><td>Drag thumb color</td></tr>
-          <tr><td>setScrollbarTrackColor(c)</td><td>Track background color</td></tr>
-        </tbody>
-      </table></div>
-    </div>
+          <div class="sub-head">Methods</div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Method</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>itemBuilder(fn)</td>
+                  <td>
+                    Builder
+                    <code>(int index, const T&amp;) -&gt; WidgetPtr</code>
+                  </td>
+                </tr>
+                <tr>
+                  <td>separator(fn)</td>
+                  <td>Widget inserted between items</td>
+                </tr>
+                <tr>
+                  <td>setSpacing(px)</td>
+                  <td>Gap between items</td>
+                </tr>
+                <tr>
+                  <td>setHorizontal(bool)</td>
+                  <td>Switch to horizontal scroll</td>
+                </tr>
+                <tr>
+                  <td>setScrollbarSize(px)</td>
+                  <td>Scrollbar thickness</td>
+                </tr>
+                <tr>
+                  <td>setScrollbarColor(c)</td>
+                  <td>Idle thumb color</td>
+                </tr>
+                <tr>
+                  <td>setScrollbarHoverColor(c)</td>
+                  <td>Hover thumb color</td>
+                </tr>
+                <tr>
+                  <td>setScrollbarActiveColor(c)</td>
+                  <td>Drag thumb color</td>
+                </tr>
+                <tr>
+                  <td>setScrollbarTrackColor(c)</td>
+                  <td>Track background color</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-    <hr class="section-divider">
+        <hr class="section-divider" />
 
-    <!-- ── GRIDVIEW ───────────────────────────── -->
-    <div class="section" id="gridview">
-      <div class="section-head">
-        <h2>GridView</h2>
-        <span class="badge badge-collection">Collection</span>
-      </div>
-      <p class="section-desc">Scrollable grid driven by <code>State&lt;vector&lt;T&gt;&gt;</code>. Supports fixed column count or responsive fixed-cell-width mode.</p>
+        <!-- ── GRIDVIEW ───────────────────────────── -->
+        <div class="section" id="gridview">
+          <div class="section-head">
+            <h2>GridView</h2>
+            <span class="badge badge-collection">Collection</span>
+          </div>
+          <p class="section-desc">
+            Scrollable grid driven by <code>State&lt;vector&lt;T&gt;&gt;</code>.
+            Supports fixed column count or responsive fixed-cell-width mode.
+          </p>
 
-      <div class="code-block"><pre>
+          <div class="code-block">
+            <pre>
 <span class="fn">GridView</span>(photos)
     <span class="arrow">-></span><span class="method">columns</span>(<span class="num">3</span>)
     <span class="arrow">-></span><span class="method">itemBuilder</span>([](int i, <span class="kw">const</span> <span class="type">Photo</span>& p) -> <span class="type">WidgetPtr</span> {
@@ -883,34 +1541,71 @@ group-><span class="method">setHorizontal</span>();
 
 <span class="comment">// Responsive mode — column count auto from width</span>
 <span class="fn">GridView</span>(items)-><span class="method">columnWidth</span>(<span class="num">200</span>)->...
-</pre></div>
+</pre>
+          </div>
 
-      <div class="sub-head">Methods</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Method</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>itemBuilder(fn)</td><td>Builder <code>(int index, const T&amp;) -&gt; WidgetPtr</code></td></tr>
-          <tr><td>columns(n)</td><td>Fixed column count mode</td></tr>
-          <tr><td>columnWidth(px)</td><td>Responsive mode — derive column count from width</td></tr>
-          <tr><td>setSpacingH(px)</td><td>Horizontal gap</td></tr>
-          <tr><td>setSpacingV(px)</td><td>Vertical gap</td></tr>
-          <tr><td>setSpacing(px)</td><td>Set both H and V spacing</td></tr>
-          <tr><td>setScrollbarWidth(px)</td><td>Scrollbar thickness</td></tr>
-        </tbody>
-      </table></div>
-    </div>
+          <div class="sub-head">Methods</div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Method</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>itemBuilder(fn)</td>
+                  <td>
+                    Builder
+                    <code>(int index, const T&amp;) -&gt; WidgetPtr</code>
+                  </td>
+                </tr>
+                <tr>
+                  <td>columns(n)</td>
+                  <td>Fixed column count mode</td>
+                </tr>
+                <tr>
+                  <td>columnWidth(px)</td>
+                  <td>Responsive mode — derive column count from width</td>
+                </tr>
+                <tr>
+                  <td>setSpacingH(px)</td>
+                  <td>Horizontal gap</td>
+                </tr>
+                <tr>
+                  <td>setSpacingV(px)</td>
+                  <td>Vertical gap</td>
+                </tr>
+                <tr>
+                  <td>setSpacing(px)</td>
+                  <td>Set both H and V spacing</td>
+                </tr>
+                <tr>
+                  <td>setScrollbarWidth(px)</td>
+                  <td>Scrollbar thickness</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-    <hr class="section-divider">
+        <hr class="section-divider" />
 
-    <!-- ── GRID ───────────────────────────────── -->
-    <div class="section" id="grid">
-      <div class="section-head">
-        <h2>Grid</h2>
-        <span class="badge badge-collection">Collection</span>
-      </div>
-      <p class="section-desc">Static fixed-column grid for laying out a known set of children. Non-scrolling. Supports alignment, spacing, and responsive cell-width mode.</p>
+        <!-- ── GRID ───────────────────────────────── -->
+        <div class="section" id="grid">
+          <div class="section-head">
+            <h2>Grid</h2>
+            <span class="badge badge-collection">Collection</span>
+          </div>
+          <p class="section-desc">
+            Static fixed-column grid for laying out a known set of children.
+            Non-scrolling. Supports alignment, spacing, and responsive
+            cell-width mode.
+          </p>
 
-      <div class="code-block"><pre>
+          <div class="code-block">
+            <pre>
 <span class="comment">// Fixed 3-column grid</span>
 <span class="fn">Grid</span>(<span class="num">3</span>,
     <span class="fn">Card</span>(<span class="fn">Text</span>(<span class="str">"A"</span>)),
@@ -924,48 +1619,109 @@ group-><span class="method">setHorizontal</span>();
 
 <span class="comment">// From vector</span>
 <span class="fn">GridFromList</span>(<span class="num">4</span>, widgetVector);
-</pre></div>
+</pre>
+          </div>
 
-      <div class="sub-head">Factory</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Signature</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>Grid(columns, widgets...)</td><td>Fixed column count with variadic children</td></tr>
-          <tr><td>GridFixedWidth(cellWidth, widgets...)</td><td>Responsive, column count derived from width</td></tr>
-          <tr><td>GridFromList(columns, vector)</td><td>Fixed columns from a runtime vector</td></tr>
-          <tr><td>GridFixedWidthFromList(cellWidth, vector)</td><td>Responsive from a runtime vector</td></tr>
-        </tbody>
-      </table></div>
+          <div class="sub-head">Factory</div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Signature</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Grid(columns, widgets...)</td>
+                  <td>Fixed column count with variadic children</td>
+                </tr>
+                <tr>
+                  <td>GridFixedWidth(cellWidth, widgets...)</td>
+                  <td>Responsive, column count derived from width</td>
+                </tr>
+                <tr>
+                  <td>GridFromList(columns, vector)</td>
+                  <td>Fixed columns from a runtime vector</td>
+                </tr>
+                <tr>
+                  <td>GridFixedWidthFromList(cellWidth, vector)</td>
+                  <td>Responsive from a runtime vector</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
-      <div class="sub-head">Methods</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Method</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>setColumnCount(n)</td><td>Switch to fixed column count mode</td></tr>
-          <tr><td>setColumnWidth(px)</td><td>Switch to responsive mode</td></tr>
-          <tr><td>setSpacing(px)</td><td>Uniform H and V gap</td></tr>
-          <tr><td>setSpacingH(px)</td><td>Horizontal gap only</td></tr>
-          <tr><td>setSpacingV(px)</td><td>Vertical gap only</td></tr>
-          <tr><td>setCrossAlignment(a)</td><td>Cell alignment: Start · Center · End · Stretch</td></tr>
-          <tr><td>setMainAxisAlignment(a)</td><td>Row distribution: Start · Center · End</td></tr>
-          <tr><td>setPadding(px)</td><td>Uniform padding</td></tr>
-          <tr><td>setBackgroundColor(c)</td><td>Grid background fill</td></tr>
-          <tr><td>setFlex(n)</td><td>Flex factor in parent Flex container</td></tr>
-        </tbody>
-      </table></div>
-    </div>
+          <div class="sub-head">Methods</div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Method</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>setColumnCount(n)</td>
+                  <td>Switch to fixed column count mode</td>
+                </tr>
+                <tr>
+                  <td>setColumnWidth(px)</td>
+                  <td>Switch to responsive mode</td>
+                </tr>
+                <tr>
+                  <td>setSpacing(px)</td>
+                  <td>Uniform H and V gap</td>
+                </tr>
+                <tr>
+                  <td>setSpacingH(px)</td>
+                  <td>Horizontal gap only</td>
+                </tr>
+                <tr>
+                  <td>setSpacingV(px)</td>
+                  <td>Vertical gap only</td>
+                </tr>
+                <tr>
+                  <td>setCrossAlignment(a)</td>
+                  <td>Cell alignment: Start · Center · End · Stretch</td>
+                </tr>
+                <tr>
+                  <td>setMainAxisAlignment(a)</td>
+                  <td>Row distribution: Start · Center · End</td>
+                </tr>
+                <tr>
+                  <td>setPadding(px)</td>
+                  <td>Uniform padding</td>
+                </tr>
+                <tr>
+                  <td>setBackgroundColor(c)</td>
+                  <td>Grid background fill</td>
+                </tr>
+                <tr>
+                  <td>setFlex(n)</td>
+                  <td>Flex factor in parent Flex container</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-    <hr class="section-divider">
+        <hr class="section-divider" />
 
-    <!-- ── CONDITIONAL ────────────────────────── -->
-    <div class="section" id="conditional">
-      <div class="section-head">
-        <h2>Conditional</h2>
-        <span class="badge badge-state">State</span>
-      </div>
-      <p class="section-desc">Ternary-style conditional rendering. Rebuilds its child whenever the observed state's predicate changes.</p>
+        <!-- ── CONDITIONAL ────────────────────────── -->
+        <div class="section" id="conditional">
+          <div class="section-head">
+            <h2>Conditional</h2>
+            <span class="badge badge-state">State</span>
+          </div>
+          <p class="section-desc">
+            Ternary-style conditional rendering. Rebuilds its child whenever the
+            observed state's predicate changes.
+          </p>
 
-      <div class="code-block"><pre>
+          <div class="code-block">
+            <pre>
 <span class="comment">// Bool state — no predicate needed</span>
 <span class="fn">Conditional</span>(isLoggedIn)
     <span class="arrow">-></span><span class="method">Then</span>([]{ <span class="kw">return</span> <span class="fn">Dashboard</span>(); })
@@ -975,28 +1731,51 @@ group-><span class="method">setHorizontal</span>();
 <span class="fn">Conditional</span>(itemCount, [](<span class="kw">int</span> v){ <span class="kw">return</span> v > <span class="num">0</span>; })
     <span class="arrow">-></span><span class="method">Then</span>([]{ <span class="kw">return</span> <span class="fn">ItemList</span>(); })
     <span class="arrow">-></span><span class="method">Else</span>([]{ <span class="kw">return</span> <span class="fn">EmptyState</span>(); });
-</pre></div>
+</pre>
+          </div>
 
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Method</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>Then(builder)</td><td>Widget to render when condition is <strong>true</strong></td></tr>
-          <tr><td>Else(builder)</td><td>Widget to render when condition is <strong>false</strong></td></tr>
-        </tbody>
-      </table></div>
-    </div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Method</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Then(builder)</td>
+                  <td>
+                    Widget to render when condition is <strong>true</strong>
+                  </td>
+                </tr>
+                <tr>
+                  <td>Else(builder)</td>
+                  <td>
+                    Widget to render when condition is <strong>false</strong>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-    <hr class="section-divider">
+        <hr class="section-divider" />
 
-    <!-- ── SWITCH ─────────────────────────────── -->
-    <div class="section" id="switch">
-      <div class="section-head">
-        <h2>Switch</h2>
-        <span class="badge badge-state">State</span>
-      </div>
-      <p class="section-desc">C++-style switch-case conditional rendering. Rebuilds its child whenever the bound state value changes. Works with any comparable <code>T</code>.</p>
+        <!-- ── SWITCH ─────────────────────────────── -->
+        <div class="section" id="switch">
+          <div class="section-head">
+            <h2>Switch</h2>
+            <span class="badge badge-state">State</span>
+          </div>
+          <p class="section-desc">
+            C++-style switch-case conditional rendering. Rebuilds its child
+            whenever the bound state value changes. Works with any comparable
+            <code>T</code>.
+          </p>
 
-      <div class="code-block"><pre>
+          <div class="code-block">
+            <pre>
 <span class="type">State</span>&lt;<span class="kw">int</span>&gt; tabIndex(<span class="num">0</span>, &app);
 
 <span class="fn">Switch</span>(tabIndex)
@@ -1004,98 +1783,207 @@ group-><span class="method">setHorizontal</span>();
     <span class="arrow">-></span><span class="method">Case</span>(<span class="num">1</span>, []{ <span class="kw">return</span> <span class="fn">ProfilePage</span>(); })
     <span class="arrow">-></span><span class="method">Case</span>(<span class="num">2</span>, []{ <span class="kw">return</span> <span class="fn">SettingsPage</span>(); })
     <span class="arrow">-></span><span class="method">Default</span>([]{ <span class="kw">return</span> <span class="fn">ErrorPage</span>(); });
-</pre></div>
+</pre>
+          </div>
 
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Method</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>Case(value, builder)</td><td>Widget to render when state equals <em>value</em></td></tr>
-          <tr><td>Default(builder)</td><td>Fallback widget when no case matches</td></tr>
-        </tbody>
-      </table></div>
-    </div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Method</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Case(value, builder)</td>
+                  <td>Widget to render when state equals <em>value</em></td>
+                </tr>
+                <tr>
+                  <td>Default(builder)</td>
+                  <td>Fallback widget when no case matches</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-    <hr class="section-divider">
+        <hr class="section-divider" />
 
-    <!-- ── ROW ───────────────────────────────────────── -->
-    <div class="section" id="row">
-      <div class="section-head">
-        <h2>Row</h2>
-        <span class="badge badge-layout">Layout</span>
-      </div>
-      <p class="section-desc">Lays children out horizontally. Supports flex expansion, spacing, cross-axis alignment, and main-axis distribution.</p>
+        <!-- ── ROW ───────────────────────────────────────── -->
+        <div class="section" id="row">
+          <div class="section-head">
+            <h2>Row</h2>
+            <span class="badge badge-layout">Layout</span>
+          </div>
+          <p class="section-desc">
+            Lays children out horizontally. Supports flex expansion, spacing,
+            cross-axis alignment, and main-axis distribution.
+          </p>
 
-      <div class="code-block"><pre>
+          <div class="code-block">
+            <pre>
 <span class="fn">Row</span>(
     <span class="fn">Text</span>(<span class="str">"Label"</span>),
     <span class="fn">Expanded</span>(<span class="fn">TextInput</span>()),
     <span class="fn">Button</span>(<span class="str">"Send"</span>)
 )-><span class="method">setSpacing</span>(<span class="num">8</span>)
  -><span class="method">setCrossAlignment</span>(<span class="type">Alignment</span>::Center);
-</pre></div>
+</pre>
+          </div>
 
-      <div class="sub-head">Methods</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>setSpacing(px)</td><td>int</td><td>Gap between children</td></tr>
-          <tr><td>setCrossAlignment(a)</td><td>Alignment</td><td>Vertical alignment: Start · Center · End · Stretch</td></tr>
-          <tr><td>setMainAxisAlignment(a)</td><td>MainAxisAlignment</td><td>Horizontal distribution: Start · Center · End</td></tr>
-          <tr><td>setWidth(w)</td><td>int</td><td>Fixed width (disables auto-sizing)</td></tr>
-          <tr><td>setHeight(h)</td><td>int</td><td>Fixed height (disables auto-sizing)</td></tr>
-          <tr><td>setPadding(p)</td><td>int</td><td>Uniform padding</td></tr>
-          <tr><td>setBackgroundColor(c)</td><td>COLORREF</td><td>Row background fill</td></tr>
-          <tr><td>setFlex(n)</td><td>int</td><td>Flex factor when nested inside another Row/Column</td></tr>
-        </tbody>
-      </table></div>
-    </div>
+          <div class="sub-head">Methods</div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Method</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>setSpacing(px)</td>
+                  <td>int</td>
+                  <td>Gap between children</td>
+                </tr>
+                <tr>
+                  <td>setCrossAlignment(a)</td>
+                  <td>Alignment</td>
+                  <td>Vertical alignment: Start · Center · End · Stretch</td>
+                </tr>
+                <tr>
+                  <td>setMainAxisAlignment(a)</td>
+                  <td>MainAxisAlignment</td>
+                  <td>Horizontal distribution: Start · Center · End</td>
+                </tr>
+                <tr>
+                  <td>setWidth(w)</td>
+                  <td>int</td>
+                  <td>Fixed width (disables auto-sizing)</td>
+                </tr>
+                <tr>
+                  <td>setHeight(h)</td>
+                  <td>int</td>
+                  <td>Fixed height (disables auto-sizing)</td>
+                </tr>
+                <tr>
+                  <td>setPadding(p)</td>
+                  <td>int</td>
+                  <td>Uniform padding</td>
+                </tr>
+                <tr>
+                  <td>setBackgroundColor(c)</td>
+                  <td>COLORREF</td>
+                  <td>Row background fill</td>
+                </tr>
+                <tr>
+                  <td>setFlex(n)</td>
+                  <td>int</td>
+                  <td>Flex factor when nested inside another Row/Column</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-    <hr class="section-divider">
+        <hr class="section-divider" />
 
-    <!-- ── COLUMN ─────────────────────────────────────── -->
-    <div class="section" id="column">
-      <div class="section-head">
-        <h2>Column</h2>
-        <span class="badge badge-layout">Layout</span>
-      </div>
-      <p class="section-desc">Lays children out vertically. Supports flex expansion, spacing, cross-axis alignment, and main-axis distribution.</p>
+        <!-- ── COLUMN ─────────────────────────────────────── -->
+        <div class="section" id="column">
+          <div class="section-head">
+            <h2>Column</h2>
+            <span class="badge badge-layout">Layout</span>
+          </div>
+          <p class="section-desc">
+            Lays children out vertically. Supports flex expansion, spacing,
+            cross-axis alignment, and main-axis distribution.
+          </p>
 
-      <div class="code-block"><pre>
+          <div class="code-block">
+            <pre>
 <span class="fn">Column</span>(
     <span class="fn">AppBar</span>(<span class="str">"Title"</span>),
     <span class="fn">Expanded</span>(<span class="fn">ListView</span>(items)...),
     <span class="fn">BottomBar</span>(...)
 )-><span class="method">setSpacing</span>(<span class="num">0</span>)
  -><span class="method">setMainAxisAlignment</span>(<span class="type">MainAxisAlignment</span>::Start);
-</pre></div>
+</pre>
+          </div>
 
-      <div class="sub-head">Methods</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>setSpacing(px)</td><td>int</td><td>Gap between children</td></tr>
-          <tr><td>setCrossAlignment(a)</td><td>Alignment</td><td>Horizontal alignment: Start · Center · End · Stretch</td></tr>
-          <tr><td>setMainAxisAlignment(a)</td><td>MainAxisAlignment</td><td>Vertical distribution: Start · Center · End</td></tr>
-          <tr><td>setWidth(w)</td><td>int</td><td>Fixed width</td></tr>
-          <tr><td>setHeight(h)</td><td>int</td><td>Fixed height</td></tr>
-          <tr><td>setPadding(p)</td><td>int</td><td>Uniform padding</td></tr>
-          <tr><td>setBackgroundColor(c)</td><td>COLORREF</td><td>Column background fill</td></tr>
-          <tr><td>setFlex(n)</td><td>int</td><td>Flex factor when nested inside another Row/Column</td></tr>
-        </tbody>
-      </table></div>
-    </div>
+          <div class="sub-head">Methods</div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Method</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>setSpacing(px)</td>
+                  <td>int</td>
+                  <td>Gap between children</td>
+                </tr>
+                <tr>
+                  <td>setCrossAlignment(a)</td>
+                  <td>Alignment</td>
+                  <td>Horizontal alignment: Start · Center · End · Stretch</td>
+                </tr>
+                <tr>
+                  <td>setMainAxisAlignment(a)</td>
+                  <td>MainAxisAlignment</td>
+                  <td>Vertical distribution: Start · Center · End</td>
+                </tr>
+                <tr>
+                  <td>setWidth(w)</td>
+                  <td>int</td>
+                  <td>Fixed width</td>
+                </tr>
+                <tr>
+                  <td>setHeight(h)</td>
+                  <td>int</td>
+                  <td>Fixed height</td>
+                </tr>
+                <tr>
+                  <td>setPadding(p)</td>
+                  <td>int</td>
+                  <td>Uniform padding</td>
+                </tr>
+                <tr>
+                  <td>setBackgroundColor(c)</td>
+                  <td>COLORREF</td>
+                  <td>Column background fill</td>
+                </tr>
+                <tr>
+                  <td>setFlex(n)</td>
+                  <td>int</td>
+                  <td>Flex factor when nested inside another Row/Column</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-    <hr class="section-divider">
+        <hr class="section-divider" />
 
-    <!-- ── CONTAINER ─────────────────────────────────── -->
-    <div class="section" id="container">
-      <div class="section-head">
-        <h2>Container</h2>
-        <span class="badge badge-layout">Layout</span>
-      </div>
-      <p class="section-desc">Single-child box with full styling support — background, border, radius, padding, margin, size constraints, and hover effects. The most versatile layout primitive.</p>
+        <!-- ── CONTAINER ─────────────────────────────────── -->
+        <div class="section" id="container">
+          <div class="section-head">
+            <h2>Container</h2>
+            <span class="badge badge-layout">Layout</span>
+          </div>
+          <p class="section-desc">
+            Single-child box with full styling support — background, border,
+            radius, padding, margin, size constraints, and hover effects. The
+            most versatile layout primitive.
+          </p>
 
-      <div class="code-block"><pre>
+          <div class="code-block">
+            <pre>
 <span class="fn">Container</span>(<span class="fn">Text</span>(<span class="str">"Hello"</span>))
     <span class="arrow">-></span><span class="method">setBackgroundColor</span>(<span class="fn">RGB</span>(<span class="num">240</span>,<span class="num">248</span>,<span class="num">255</span>))
     <span class="arrow">-></span><span class="method">setBorderColor</span>(<span class="fn">RGB</span>(<span class="num">33</span>,<span class="num">150</span>,<span class="num">243</span>))
@@ -1107,70 +1995,182 @@ group-><span class="method">setHorizontal</span>();
 <span class="comment">// State-driven background</span>
 <span class="fn">Container</span>(child)
     <span class="arrow">-></span><span class="method">setBackgroundColor</span>(isSelected, <span class="fn">RGB</span>(<span class="num">230</span>,<span class="num">245</span>,<span class="num">255</span>), <span class="fn">RGB</span>(<span class="num">255</span>,<span class="num">255</span>,<span class="num">255</span>));
-</pre></div>
+</pre>
+          </div>
 
-      <div class="sub-head">Methods</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>setBackgroundColor(color)</td><td>COLORREF</td><td>Fill color</td></tr>
-          <tr><td>setBackgroundColor(State, true, false)</td><td>State + COLORREF ×2</td><td>Reactive background based on bool state</td></tr>
-          <tr><td>setHoverBackgroundColor(color)</td><td>COLORREF</td><td>Fill on mouse hover</td></tr>
-          <tr><td>setBorderColor(color)</td><td>COLORREF</td><td>Border stroke color</td></tr>
-          <tr><td>setHoverBorderColor(color)</td><td>COLORREF</td><td>Border color on hover</td></tr>
-          <tr><td>setBorderWidth(w)</td><td>int</td><td>Border stroke thickness</td></tr>
-          <tr><td>setBorderRadius(r)</td><td>int</td><td>Corner rounding</td></tr>
-          <tr><td>setPadding(p)</td><td>int</td><td>Uniform inner padding</td></tr>
-          <tr><td>setPaddingAll(l,t,r,b)</td><td>int ×4</td><td>Per-side inner padding</td></tr>
-          <tr><td>setMargin(m)</td><td>int</td><td>Uniform outer margin</td></tr>
-          <tr><td>setMarginAll(l,t,r,b)</td><td>int ×4</td><td>Per-side outer margin</td></tr>
-          <tr><td>setWidth(w)</td><td>int</td><td>Fixed width</td></tr>
-          <tr><td>setHeight(h)</td><td>int</td><td>Fixed height</td></tr>
-          <tr><td>setMinWidth(w)</td><td>int</td><td>Minimum width constraint</td></tr>
-          <tr><td>setMinHeight(h)</td><td>int</td><td>Minimum height constraint</td></tr>
-          <tr><td>setMaxWidth(w)</td><td>int</td><td>Maximum width constraint</td></tr>
-          <tr><td>setMaxHeight(h)</td><td>int</td><td>Maximum height constraint</td></tr>
-          <tr><td>setFlex(n)</td><td>int</td><td>Flex factor in parent Row/Column</td></tr>
-          <tr><td>setOnHover(fn)</td><td>void(bool)</td><td>Hover enter/leave callback</td></tr>
-          <tr><td>setBackgroundAlpha(a)</td><td>BYTE</td><td>Background opacity (0–255)</td></tr>
-          <tr><td>setBorderAlpha(a)</td><td>BYTE</td><td>Border opacity (0–255)</td></tr>
-        </tbody>
-      </table></div>
-    </div>
+          <div class="sub-head">Methods</div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Method</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>setBackgroundColor(color)</td>
+                  <td>COLORREF</td>
+                  <td>Fill color</td>
+                </tr>
+                <tr>
+                  <td>setBackgroundColor(State, true, false)</td>
+                  <td>State + COLORREF ×2</td>
+                  <td>Reactive background based on bool state</td>
+                </tr>
+                <tr>
+                  <td>setHoverBackgroundColor(color)</td>
+                  <td>COLORREF</td>
+                  <td>Fill on mouse hover</td>
+                </tr>
+                <tr>
+                  <td>setBorderColor(color)</td>
+                  <td>COLORREF</td>
+                  <td>Border stroke color</td>
+                </tr>
+                <tr>
+                  <td>setHoverBorderColor(color)</td>
+                  <td>COLORREF</td>
+                  <td>Border color on hover</td>
+                </tr>
+                <tr>
+                  <td>setBorderWidth(w)</td>
+                  <td>int</td>
+                  <td>Border stroke thickness</td>
+                </tr>
+                <tr>
+                  <td>setBorderRadius(r)</td>
+                  <td>int</td>
+                  <td>Corner rounding</td>
+                </tr>
+                <tr>
+                  <td>setPadding(p)</td>
+                  <td>int</td>
+                  <td>Uniform inner padding</td>
+                </tr>
+                <tr>
+                  <td>setPaddingAll(l,t,r,b)</td>
+                  <td>int ×4</td>
+                  <td>Per-side inner padding</td>
+                </tr>
+                <tr>
+                  <td>setMargin(m)</td>
+                  <td>int</td>
+                  <td>Uniform outer margin</td>
+                </tr>
+                <tr>
+                  <td>setMarginAll(l,t,r,b)</td>
+                  <td>int ×4</td>
+                  <td>Per-side outer margin</td>
+                </tr>
+                <tr>
+                  <td>setWidth(w)</td>
+                  <td>int</td>
+                  <td>Fixed width</td>
+                </tr>
+                <tr>
+                  <td>setHeight(h)</td>
+                  <td>int</td>
+                  <td>Fixed height</td>
+                </tr>
+                <tr>
+                  <td>setMinWidth(w)</td>
+                  <td>int</td>
+                  <td>Minimum width constraint</td>
+                </tr>
+                <tr>
+                  <td>setMinHeight(h)</td>
+                  <td>int</td>
+                  <td>Minimum height constraint</td>
+                </tr>
+                <tr>
+                  <td>setMaxWidth(w)</td>
+                  <td>int</td>
+                  <td>Maximum width constraint</td>
+                </tr>
+                <tr>
+                  <td>setMaxHeight(h)</td>
+                  <td>int</td>
+                  <td>Maximum height constraint</td>
+                </tr>
+                <tr>
+                  <td>setFlex(n)</td>
+                  <td>int</td>
+                  <td>Flex factor in parent Row/Column</td>
+                </tr>
+                <tr>
+                  <td>setOnHover(fn)</td>
+                  <td>void(bool)</td>
+                  <td>Hover enter/leave callback</td>
+                </tr>
+                <tr>
+                  <td>setBackgroundAlpha(a)</td>
+                  <td>BYTE</td>
+                  <td>Background opacity (0–255)</td>
+                </tr>
+                <tr>
+                  <td>setBorderAlpha(a)</td>
+                  <td>BYTE</td>
+                  <td>Border opacity (0–255)</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-    <hr class="section-divider">
+        <hr class="section-divider" />
 
-    <!-- ── CENTER ─────────────────────────────────────── -->
-    <div class="section" id="center">
-      <div class="section-head">
-        <h2>Center</h2>
-        <span class="badge badge-layout">Layout</span>
-      </div>
-      <p class="section-desc">Centers its single child both horizontally and vertically within the available space.</p>
+        <!-- ── CENTER ─────────────────────────────────────── -->
+        <div class="section" id="center">
+          <div class="section-head">
+            <h2>Center</h2>
+            <span class="badge badge-layout">Layout</span>
+          </div>
+          <p class="section-desc">
+            Centers its single child both horizontally and vertically within the
+            available space.
+          </p>
 
-      <div class="code-block"><pre>
+          <div class="code-block">
+            <pre>
 <span class="fn">Center</span>(<span class="fn">Text</span>(<span class="str">"No items found"</span>)->setTextColor(<span class="fn">RGB</span>(<span class="num">150</span>,<span class="num">150</span>,<span class="num">150</span>)));
-</pre></div>
+</pre>
+          </div>
 
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Signature</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>Center(child)</td><td>Centers child in available space</td></tr>
-        </tbody>
-      </table></div>
-    </div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Signature</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Center(child)</td>
+                  <td>Centers child in available space</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-    <hr class="section-divider">
+        <hr class="section-divider" />
 
-    <!-- ── EXPANDED ───────────────────────────────────── -->
-    <div class="section" id="expanded">
-      <div class="section-head">
-        <h2>Expanded</h2>
-        <span class="badge badge-layout">Layout</span>
-      </div>
-      <p class="section-desc">Causes its child to fill all remaining space along the main axis of a parent Row or Column. Supports proportional flex ratios.</p>
+        <!-- ── EXPANDED ───────────────────────────────────── -->
+        <div class="section" id="expanded">
+          <div class="section-head">
+            <h2>Expanded</h2>
+            <span class="badge badge-layout">Layout</span>
+          </div>
+          <p class="section-desc">
+            Causes its child to fill all remaining space along the main axis of
+            a parent Row or Column. Supports proportional flex ratios.
+          </p>
 
-      <div class="code-block"><pre>
+          <div class="code-block">
+            <pre>
 <span class="fn">Row</span>(
     <span class="fn">Text</span>(<span class="str">"Label"</span>),
     <span class="fn">Expanded</span>(<span class="fn">TextInput</span>()),   <span class="comment">// takes all remaining width</span>
@@ -1182,169 +2182,296 @@ group-><span class="method">setHorizontal</span>();
     <span class="fn">Expanded</span>(<span class="fn">Column</span>(...), <span class="num">2</span>),  <span class="comment">// 2/3 of width</span>
     <span class="fn">Expanded</span>(<span class="fn">Column</span>(...), <span class="num">1</span>)   <span class="comment">// 1/3 of width</span>
 );
-</pre></div>
+</pre>
+          </div>
 
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Signature</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>Expanded(child, flex = 1)</td><td>Flex-expand child with optional flex weight</td></tr>
-        </tbody>
-      </table></div>
-    </div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Signature</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Expanded(child, flex = 1)</td>
+                  <td>Flex-expand child with optional flex weight</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-    <hr class="section-divider">
+        <hr class="section-divider" />
 
-    <!-- ── SIZEDBOX ───────────────────────────────────── -->
-    <div class="section" id="sizedbox">
-      <div class="section-head">
-        <h2>SizedBox</h2>
-        <span class="badge badge-layout">Layout</span>
-      </div>
-      <p class="section-desc">A fixed-size box. Used as spacer (no child) or to constrain a child to an exact size.</p>
+        <!-- ── SIZEDBOX ───────────────────────────────────── -->
+        <div class="section" id="sizedbox">
+          <div class="section-head">
+            <h2>SizedBox</h2>
+            <span class="badge badge-layout">Layout</span>
+          </div>
+          <p class="section-desc">
+            A fixed-size box. Used as spacer (no child) or to constrain a child
+            to an exact size.
+          </p>
 
-      <div class="code-block"><pre>
+          <div class="code-block">
+            <pre>
 <span class="comment">// Spacer</span>
 <span class="fn">SizedBox</span>(<span class="num">0</span>, <span class="num">24</span>);          <span class="comment">// 24px vertical gap</span>
 <span class="fn">SizedBox</span>(<span class="num">16</span>, <span class="num">0</span>);          <span class="comment">// 16px horizontal gap</span>
 
 <span class="comment">// Constrained child</span>
 <span class="fn">SizedBox</span>(<span class="num">200</span>, <span class="num">48</span>, <span class="fn">Button</span>(<span class="str">"Submit"</span>));
-</pre></div>
+</pre>
+          </div>
 
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Signature</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>SizedBox(w, h)</td><td>Fixed-size spacer</td></tr>
-          <tr><td>SizedBox(w, h, child)</td><td>Child constrained to w × h</td></tr>
-        </tbody>
-      </table></div>
-    </div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Signature</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>SizedBox(w, h)</td>
+                  <td>Fixed-size spacer</td>
+                </tr>
+                <tr>
+                  <td>SizedBox(w, h, child)</td>
+                  <td>Child constrained to w × h</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-    <hr class="section-divider">
+        <hr class="section-divider" />
 
-    <!-- ── PADDING ────────────────────────────────────── -->
-    <div class="section" id="padding">
-      <div class="section-head">
-        <h2>Padding</h2>
-        <span class="badge badge-layout">Layout</span>
-      </div>
-      <p class="section-desc">Wraps a child in uniform padding. Convenience shorthand for <code>Container</code> with a single padding value.</p>
+        <!-- ── PADDING ────────────────────────────────────── -->
+        <div class="section" id="padding">
+          <div class="section-head">
+            <h2>Padding</h2>
+            <span class="badge badge-layout">Layout</span>
+          </div>
+          <p class="section-desc">
+            Wraps a child in uniform padding. Convenience shorthand for
+            <code>Container</code> with a single padding value.
+          </p>
 
-      <div class="code-block"><pre>
+          <div class="code-block">
+            <pre>
 <span class="fn">Padding</span>(<span class="num">16</span>, <span class="fn">Text</span>(<span class="str">"Padded content"</span>));
-</pre></div>
+</pre>
+          </div>
 
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Signature</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>Padding(p, child)</td><td>Uniform padding on all sides</td></tr>
-        </tbody>
-      </table></div>
-    </div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Signature</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Padding(p, child)</td>
+                  <td>Uniform padding on all sides</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-    <hr class="section-divider">
+        <hr class="section-divider" />
 
-    <!-- ── SCAFFOLD ───────────────────────────────────── -->
-    <div class="section" id="scaffold">
-      <div class="section-head">
-        <h2>Scaffold</h2>
-        <span class="badge badge-layout">Structure</span>
-      </div>
-      <p class="section-desc">The root structure widget. Manages the overlay stack used by Dropdown, Tooltip, Dialog, and ContextMenu. Composes an optional AppBar with an Expanded body in a Column.</p>
+        <!-- ── SCAFFOLD ───────────────────────────────────── -->
+        <div class="section" id="scaffold">
+          <div class="section-head">
+            <h2>Scaffold</h2>
+            <span class="badge badge-layout">Structure</span>
+          </div>
+          <p class="section-desc">
+            The root structure widget. Manages the overlay stack used by
+            Dropdown, Tooltip, Dialog, and ContextMenu. Composes an optional
+            AppBar with an Expanded body in a Column.
+          </p>
 
-      <div class="code-block"><pre>
+          <div class="code-block">
+            <pre>
 <span class="fn">Scaffold</span>(
     <span class="fn">AppBar</span>(<span class="str">"My App"</span>),
     <span class="fn">Column</span>(
         <span class="fn">Text</span>(<span class="str">"Content goes here"</span>)
     )
 );
-</pre></div>
+</pre>
+          </div>
 
-      <div class="note">
-        <strong>Overlay system:</strong> Dropdown, Tooltip, Dialog, and ContextMenu all call <code>scaffold->addOverlay()</code> / <code>removeOverlay()</code> to render on top of the normal widget tree. Overlays are sorted by <strong>zIndex</strong> — Tooltip=50, Dropdown=100, ContextMenu=150, Dialog=200.
-      </div>
+          <div class="note">
+            <strong>Overlay system:</strong> Dropdown, Tooltip, Dialog, and
+            ContextMenu all call <code>scaffold->addOverlay()</code> /
+            <code>removeOverlay()</code> to render on top of the normal widget
+            tree. Overlays are sorted by <strong>zIndex</strong> — Tooltip=50,
+            Dropdown=100, ContextMenu=150, Dialog=200.
+          </div>
 
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Signature</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>Scaffold(appBar, body)</td><td>Root scaffold with optional AppBar and body</td></tr>
-        </tbody>
-      </table></div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Signature</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Scaffold(appBar, body)</td>
+                  <td>Root scaffold with optional AppBar and body</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
-      <div class="sub-head">Overlay API (ScaffoldWidget)</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Method</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>addOverlay(widget, renderer, zIndex)</td><td>Register a floating overlay renderer</td></tr>
-          <tr><td>removeOverlay(widget)</td><td>Unregister a floating overlay</td></tr>
-          <tr><td>clearOverlays()</td><td>Remove all active overlays</td></tr>
-          <tr><td>hasOverlays()</td><td>Returns true if any overlays are active</td></tr>
-          <tr><td>getTopmostOverlay()</td><td>Returns the topmost overlay widget pointer</td></tr>
-        </tbody>
-      </table></div>
-    </div>
+          <div class="sub-head">Overlay API (ScaffoldWidget)</div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Method</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>addOverlay(widget, renderer, zIndex)</td>
+                  <td>Register a floating overlay renderer</td>
+                </tr>
+                <tr>
+                  <td>removeOverlay(widget)</td>
+                  <td>Unregister a floating overlay</td>
+                </tr>
+                <tr>
+                  <td>clearOverlays()</td>
+                  <td>Remove all active overlays</td>
+                </tr>
+                <tr>
+                  <td>hasOverlays()</td>
+                  <td>Returns true if any overlays are active</td>
+                </tr>
+                <tr>
+                  <td>getTopmostOverlay()</td>
+                  <td>Returns the topmost overlay widget pointer</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-    <hr class="section-divider">
+        <hr class="section-divider" />
 
-    <!-- ── APPBAR ─────────────────────────────────────── -->
-    <div class="section" id="appbar">
-      <div class="section-head">
-        <h2>AppBar</h2>
-        <span class="badge badge-layout">Structure</span>
-      </div>
-      <p class="section-desc">A 56px tall header bar with a blue background and bold white title text.</p>
+        <!-- ── APPBAR ─────────────────────────────────────── -->
+        <div class="section" id="appbar">
+          <div class="section-head">
+            <h2>AppBar</h2>
+            <span class="badge badge-layout">Structure</span>
+          </div>
+          <p class="section-desc">
+            A 56px tall header bar with a blue background and bold white title
+            text.
+          </p>
 
-      <div class="code-block"><pre>
+          <div class="code-block">
+            <pre>
 <span class="fn">AppBar</span>(<span class="str">"Dashboard"</span>);
-</pre></div>
+</pre>
+          </div>
 
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Signature</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>AppBar(title)</td><td>Header bar with title string. Default height 56px, blue background.</td></tr>
-        </tbody>
-      </table></div>
-    </div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Signature</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>AppBar(title)</td>
+                  <td>
+                    Header bar with title string. Default height 56px, blue
+                    background.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-    <hr class="section-divider">
+        <hr class="section-divider" />
 
-    <!-- ── CARD ───────────────────────────────────────── -->
-    <div class="section" id="card">
-      <div class="section-head">
-        <h2>Card</h2>
-        <span class="badge badge-layout">Structure</span>
-      </div>
-      <p class="section-desc">A white rounded-corner box with a light border and 16px padding. Convenience wrapper over <code>Container</code> with sensible card defaults.</p>
+        <!-- ── CARD ───────────────────────────────────────── -->
+        <div class="section" id="card">
+          <div class="section-head">
+            <h2>Card</h2>
+            <span class="badge badge-layout">Structure</span>
+          </div>
+          <p class="section-desc">
+            A white rounded-corner box with a light border and 16px padding.
+            Convenience wrapper over <code>Container</code> with sensible card
+            defaults.
+          </p>
 
-      <div class="code-block"><pre>
+          <div class="code-block">
+            <pre>
 <span class="fn">Card</span>(
     <span class="fn">Column</span>(
         <span class="fn">Text</span>(<span class="str">"Card Title"</span>)-><span class="method">setFontWeight</span>(<span class="type">FontWeight</span>::Bold),
         <span class="fn">Text</span>(<span class="str">"Some description text"</span>)
     )-><span class="method">setSpacing</span>(<span class="num">8</span>)
 );
-</pre></div>
+</pre>
+          </div>
 
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Signature</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>Card(child)</td><td>White bg, 1px border, 8px radius, 16px padding on all sides</td></tr>
-        </tbody>
-      </table></div>
-    </div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Signature</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Card(child)</td>
+                  <td>
+                    White bg, 1px border, 8px radius, 16px padding on all sides
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-    <hr class="section-divider">
+        <hr class="section-divider" />
 
-    <!-- ── DROPDOWN ───────────────────────────────────── -->
-    <div class="section" id="dropdown">
-      <div class="section-head">
-        <h2>Dropdown</h2>
-        <span class="badge badge-state">Overlay</span>
-      </div>
-      <p class="section-desc">A select input that opens a scrollable overlay list. Supports keyboard navigation, scroll-wheel, placeholder, and two-way state binding by index or string value.</p>
+        <!-- ── DROPDOWN ───────────────────────────────────── -->
+        <div class="section" id="dropdown">
+          <div class="section-head">
+            <h2>Dropdown</h2>
+            <span class="badge badge-state">Overlay</span>
+          </div>
+          <p class="section-desc">
+            A select input that opens a scrollable overlay list. Supports
+            keyboard navigation, scroll-wheel, placeholder, and two-way state
+            binding by index or string value.
+          </p>
 
-      <div class="code-block"><pre>
+          <div class="code-block">
+            <pre>
 <span class="type">State</span>&lt;std::string&gt; country(<span class="str">""</span>, &app);
 
 <span class="fn">Dropdown</span>({<span class="str">"Nepal"</span>, <span class="str">"India"</span>, <span class="str">"USA"</span>, <span class="str">"UK"</span>})
@@ -1353,47 +2480,106 @@ group-><span class="method">setHorizontal</span>();
     <span class="arrow">-></span><span class="method">setOnSelectionChanged</span>([&](<span class="kw">int</span> i, <span class="kw">const</span> std::string& v){
         handleSelect(v);
     });
-</pre></div>
+</pre>
+          </div>
 
-      <div class="sub-head">Factory</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Signature</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>Dropdown(options)</td><td>Dropdown with initial options vector</td></tr>
-          <tr><td>Dropdown()</td><td>Empty dropdown, set options later</td></tr>
-        </tbody>
-      </table></div>
+          <div class="sub-head">Factory</div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Signature</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Dropdown(options)</td>
+                  <td>Dropdown with initial options vector</td>
+                </tr>
+                <tr>
+                  <td>Dropdown()</td>
+                  <td>Empty dropdown, set options later</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
-      <div class="sub-head">Methods</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>setOptions(opts)</td><td>vector&lt;string&gt;</td><td>Set or replace option list</td></tr>
-          <tr><td>setPlaceholder(text)</td><td>string</td><td>Text shown when nothing selected</td></tr>
-          <tr><td>setSelectedIndex(State&lt;int&gt;)</td><td>State</td><td>Two-way binding by index</td></tr>
-          <tr><td>setSelectedValue(State&lt;string&gt;)</td><td>State</td><td>Two-way binding by string value</td></tr>
-          <tr><td>setOnSelectionChanged(fn)</td><td>void(int, string)</td><td>Change callback with index and value</td></tr>
-          <tr><td>setItemHeight(h)</td><td>int</td><td>Height of each list row (default 32px)</td></tr>
-          <tr><td>setMaxVisibleItems(n)</td><td>int</td><td>Max rows before scroll kicks in (default 6)</td></tr>
-        </tbody>
-      </table></div>
+          <div class="sub-head">Methods</div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Method</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>setOptions(opts)</td>
+                  <td>vector&lt;string&gt;</td>
+                  <td>Set or replace option list</td>
+                </tr>
+                <tr>
+                  <td>setPlaceholder(text)</td>
+                  <td>string</td>
+                  <td>Text shown when nothing selected</td>
+                </tr>
+                <tr>
+                  <td>setSelectedIndex(State&lt;int&gt;)</td>
+                  <td>State</td>
+                  <td>Two-way binding by index</td>
+                </tr>
+                <tr>
+                  <td>setSelectedValue(State&lt;string&gt;)</td>
+                  <td>State</td>
+                  <td>Two-way binding by string value</td>
+                </tr>
+                <tr>
+                  <td>setOnSelectionChanged(fn)</td>
+                  <td>void(int, string)</td>
+                  <td>Change callback with index and value</td>
+                </tr>
+                <tr>
+                  <td>setItemHeight(h)</td>
+                  <td>int</td>
+                  <td>Height of each list row (default 32px)</td>
+                </tr>
+                <tr>
+                  <td>setMaxVisibleItems(n)</td>
+                  <td>int</td>
+                  <td>Max rows before scroll kicks in (default 6)</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
-      <div class="note">
-        <strong>Keyboard:</strong> <code>↑/↓</code> navigate, <code>Enter/Space</code> open/confirm, <code>Escape</code> close, <code>Home/End</code> jump to first/last. Requires <code>setScaffold()</code> to be called by the widget tree setup.
-      </div>
-    </div>
+          <div class="note">
+            <strong>Keyboard:</strong> <code>↑/↓</code> navigate,
+            <code>Enter/Space</code> open/confirm, <code>Escape</code> close,
+            <code>Home/End</code> jump to first/last. Requires
+            <code>setScaffold()</code> to be called by the widget tree setup.
+          </div>
+        </div>
 
-    <hr class="section-divider">
+        <hr class="section-divider" />
 
-    <!-- ── TOOLTIP ────────────────────────────────────── -->
-    <div class="section" id="tooltip">
-      <div class="section-head">
-        <h2>Tooltip</h2>
-        <span class="badge badge-state">Overlay</span>
-      </div>
-      <p class="section-desc">Wraps any widget and shows a floating text bubble on hover. Chains the anchor's existing <code>onHover</code> callback so existing hover effects continue to work. Positions above or below the anchor with automatic edge clamping.</p>
+        <!-- ── TOOLTIP ────────────────────────────────────── -->
+        <div class="section" id="tooltip">
+          <div class="section-head">
+            <h2>Tooltip</h2>
+            <span class="badge badge-state">Overlay</span>
+          </div>
+          <p class="section-desc">
+            Wraps any widget and shows a floating text bubble on hover. Chains
+            the anchor's existing <code>onHover</code> callback so existing
+            hover effects continue to work. Positions above or below the anchor
+            with automatic edge clamping.
+          </p>
 
-      <div class="code-block"><pre>
+          <div class="code-block">
+            <pre>
 <span class="fn">Tooltip</span>(
     <span class="fn">Button</span>(<span class="str">"Delete"</span>, [&]{ deleteItem(); }),
     <span class="str">"Permanently removes the item"</span>
@@ -1401,41 +2587,89 @@ group-><span class="method">setHorizontal</span>();
 -><span class="method">setPosition</span>(<span class="type">TooltipPosition</span>::Above)
 -><span class="method">setTooltipBackground</span>(<span class="fn">RGB</span>(<span class="num">30</span>,<span class="num">30</span>,<span class="num">30</span>))
 -><span class="method">setTooltipMaxWidth</span>(<span class="num">200</span>);
-</pre></div>
+</pre>
+          </div>
 
-      <div class="sub-head">Factory</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Signature</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>Tooltip(anchor, text)</td><td>Wraps anchor and attaches tooltip text</td></tr>
-        </tbody>
-      </table></div>
+          <div class="sub-head">Factory</div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Signature</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Tooltip(anchor, text)</td>
+                  <td>Wraps anchor and attaches tooltip text</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
-      <div class="sub-head">Methods</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>setTooltipText(text)</td><td>string</td><td>Update tooltip content</td></tr>
-          <tr><td>setPosition(pos)</td><td>TooltipPosition</td><td>Above · Below · Auto (default: Auto = prefer Above)</td></tr>
-          <tr><td>setTooltipBackground(color)</td><td>COLORREF</td><td>Bubble background (default dark gray)</td></tr>
-          <tr><td>setTooltipTextColor(color)</td><td>COLORREF</td><td>Bubble text color (default white)</td></tr>
-          <tr><td>setTooltipFontSize(size)</td><td>int</td><td>Font size inside bubble</td></tr>
-          <tr><td>setTooltipMaxWidth(w)</td><td>int</td><td>Max bubble width before word-wrap (default 240px)</td></tr>
-        </tbody>
-      </table></div>
-    </div>
+          <div class="sub-head">Methods</div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Method</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>setTooltipText(text)</td>
+                  <td>string</td>
+                  <td>Update tooltip content</td>
+                </tr>
+                <tr>
+                  <td>setPosition(pos)</td>
+                  <td>TooltipPosition</td>
+                  <td>Above · Below · Auto (default: Auto = prefer Above)</td>
+                </tr>
+                <tr>
+                  <td>setTooltipBackground(color)</td>
+                  <td>COLORREF</td>
+                  <td>Bubble background (default dark gray)</td>
+                </tr>
+                <tr>
+                  <td>setTooltipTextColor(color)</td>
+                  <td>COLORREF</td>
+                  <td>Bubble text color (default white)</td>
+                </tr>
+                <tr>
+                  <td>setTooltipFontSize(size)</td>
+                  <td>int</td>
+                  <td>Font size inside bubble</td>
+                </tr>
+                <tr>
+                  <td>setTooltipMaxWidth(w)</td>
+                  <td>int</td>
+                  <td>Max bubble width before word-wrap (default 240px)</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-    <hr class="section-divider">
+        <hr class="section-divider" />
 
-    <!-- ── DIALOG ─────────────────────────────────────── -->
-    <div class="section" id="dialog">
-      <div class="section-head">
-        <h2>Dialog</h2>
-        <span class="badge badge-state">Overlay</span>
-      </div>
-      <p class="section-desc">A modal overlay with a semi-transparent backdrop and a centered content panel. Dispatches input events to its content tree. Closes on outside click by default.</p>
+        <!-- ── DIALOG ─────────────────────────────────────── -->
+        <div class="section" id="dialog">
+          <div class="section-head">
+            <h2>Dialog</h2>
+            <span class="badge badge-state">Overlay</span>
+          </div>
+          <p class="section-desc">
+            A modal overlay with a semi-transparent backdrop and a centered
+            content panel. Dispatches input events to its content tree. Closes
+            on outside click by default.
+          </p>
 
-      <div class="code-block"><pre>
+          <div class="code-block">
+            <pre>
 <span class="kw">auto</span> dlg = <span class="fn">Dialog</span>(
     <span class="fn">Column</span>(
         <span class="fn">Text</span>(<span class="str">"Confirm delete?"</span>)-><span class="method">setFontSize</span>(<span class="num">16</span>),
@@ -1449,34 +2683,76 @@ group-><span class="method">setHorizontal</span>();
 
 <span class="comment">// Open it later</span>
 dlg-><span class="method">open</span>();
-</pre></div>
+</pre>
+          </div>
 
-      <div class="sub-head">Methods</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>open()</td><td>—</td><td>Show the dialog</td></tr>
-          <tr><td>close()</td><td>—</td><td>Dismiss the dialog</td></tr>
-          <tr><td>setContent(widget)</td><td>WidgetPtr</td><td>Set or replace dialog content</td></tr>
-          <tr><td>setSize(w, h)</td><td>int, int</td><td>Dialog panel dimensions (default 400×300)</td></tr>
-          <tr><td>setCloseOnClickOutside(bool)</td><td>bool</td><td>Close when backdrop is clicked (default true)</td></tr>
-          <tr><td>setOverlayAlpha(alpha)</td><td>int 0–255</td><td>Backdrop opacity (default 128 = 50%)</td></tr>
-          <tr><td>setOnClose(fn)</td><td>void()</td><td>Called when dialog is dismissed</td></tr>
-        </tbody>
-      </table></div>
-    </div>
+          <div class="sub-head">Methods</div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Method</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>open()</td>
+                  <td>—</td>
+                  <td>Show the dialog</td>
+                </tr>
+                <tr>
+                  <td>close()</td>
+                  <td>—</td>
+                  <td>Dismiss the dialog</td>
+                </tr>
+                <tr>
+                  <td>setContent(widget)</td>
+                  <td>WidgetPtr</td>
+                  <td>Set or replace dialog content</td>
+                </tr>
+                <tr>
+                  <td>setSize(w, h)</td>
+                  <td>int, int</td>
+                  <td>Dialog panel dimensions (default 400×300)</td>
+                </tr>
+                <tr>
+                  <td>setCloseOnClickOutside(bool)</td>
+                  <td>bool</td>
+                  <td>Close when backdrop is clicked (default true)</td>
+                </tr>
+                <tr>
+                  <td>setOverlayAlpha(alpha)</td>
+                  <td>int 0–255</td>
+                  <td>Backdrop opacity (default 128 = 50%)</td>
+                </tr>
+                <tr>
+                  <td>setOnClose(fn)</td>
+                  <td>void()</td>
+                  <td>Called when dialog is dismissed</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-    <hr class="section-divider">
+        <hr class="section-divider" />
 
-    <!-- ── CONTEXTMENU ────────────────────────────────── -->
-    <div class="section" id="contextmenu">
-      <div class="section-head">
-        <h2>ContextMenu</h2>
-        <span class="badge badge-state">Overlay</span>
-      </div>
-      <p class="section-desc">Attaches a right-click context menu to any anchor widget. Renders at the cursor position with automatic edge clamping. Supports separators, disabled items, and keyboard navigation.</p>
+        <!-- ── CONTEXTMENU ────────────────────────────────── -->
+        <div class="section" id="contextmenu">
+          <div class="section-head">
+            <h2>ContextMenu</h2>
+            <span class="badge badge-state">Overlay</span>
+          </div>
+          <p class="section-desc">
+            Attaches a right-click context menu to any anchor widget. Renders at
+            the cursor position with automatic edge clamping. Supports
+            separators, disabled items, and keyboard navigation.
+          </p>
 
-      <div class="code-block"><pre>
+          <div class="code-block">
+            <pre>
 <span class="fn">ContextMenu</span>(
     <span class="fn">Text</span>(<span class="str">"Right click me"</span>),
     {
@@ -1486,47 +2762,103 @@ dlg-><span class="method">open</span>();
         {<span class="str">"Paste"</span>, [&]{ paste(); }, <span class="kw">false</span>}  <span class="comment">// disabled</span>
     }
 );
-</pre></div>
+</pre>
+          </div>
 
-      <div class="sub-head">ContextMenuItem</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Factory</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>ContextMenuItem(label, action, enabled)</td><td>Action item with optional enabled state</td></tr>
-          <tr><td>ContextMenuItem::Action(label, action, enabled)</td><td>Explicit action item factory</td></tr>
-          <tr><td>ContextMenuItem::Separator()</td><td>Visual divider between items</td></tr>
-        </tbody>
-      </table></div>
+          <div class="sub-head">ContextMenuItem</div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Factory</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>ContextMenuItem(label, action, enabled)</td>
+                  <td>Action item with optional enabled state</td>
+                </tr>
+                <tr>
+                  <td>ContextMenuItem::Action(label, action, enabled)</td>
+                  <td>Explicit action item factory</td>
+                </tr>
+                <tr>
+                  <td>ContextMenuItem::Separator()</td>
+                  <td>Visual divider between items</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
-      <div class="sub-head">ContextMenuWidget Methods</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>setMenuItems(items)</td><td>vector&lt;ContextMenuItem&gt;</td><td>Replace all menu items</td></tr>
-          <tr><td>setItemHeight(h)</td><td>int</td><td>Row height (default 28px)</td></tr>
-          <tr><td>setMinWidth(w)</td><td>int</td><td>Minimum menu width (default 160px)</td></tr>
-          <tr><td>setMenuBackground(color)</td><td>COLORREF</td><td>Menu panel background</td></tr>
-          <tr><td>setMenuBorder(color)</td><td>COLORREF</td><td>Menu panel border color</td></tr>
-          <tr><td>setItemHoverColor(color)</td><td>COLORREF</td><td>Row highlight on hover</td></tr>
-        </tbody>
-      </table></div>
+          <div class="sub-head">ContextMenuWidget Methods</div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Method</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>setMenuItems(items)</td>
+                  <td>vector&lt;ContextMenuItem&gt;</td>
+                  <td>Replace all menu items</td>
+                </tr>
+                <tr>
+                  <td>setItemHeight(h)</td>
+                  <td>int</td>
+                  <td>Row height (default 28px)</td>
+                </tr>
+                <tr>
+                  <td>setMinWidth(w)</td>
+                  <td>int</td>
+                  <td>Minimum menu width (default 160px)</td>
+                </tr>
+                <tr>
+                  <td>setMenuBackground(color)</td>
+                  <td>COLORREF</td>
+                  <td>Menu panel background</td>
+                </tr>
+                <tr>
+                  <td>setMenuBorder(color)</td>
+                  <td>COLORREF</td>
+                  <td>Menu panel border color</td>
+                </tr>
+                <tr>
+                  <td>setItemHoverColor(color)</td>
+                  <td>COLORREF</td>
+                  <td>Row highlight on hover</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
-      <div class="note">
-        <strong>Keyboard:</strong> <code>↑/↓</code> navigate, <code>Enter/Space</code> activate, <code>Escape</code> close, <code>Home/End</code> jump to first/last enabled item.
-      </div>
-    </div>
+          <div class="note">
+            <strong>Keyboard:</strong> <code>↑/↓</code> navigate,
+            <code>Enter/Space</code> activate, <code>Escape</code> close,
+            <code>Home/End</code> jump to first/last enabled item.
+          </div>
+        </div>
 
-    <hr class="section-divider">
+        <hr class="section-divider" />
 
-    <!-- ── IMAGE ──────────────────────────────────────── -->
-    <div class="section" id="image">
-      <div class="section-head">
-        <h2>Image</h2>
-        <span class="badge badge-display">Media</span>
-      </div>
-      <p class="section-desc">Renders an image file via GDI+. Supports five fit modes, rounded corners, aspect-ratio-preserving auto-sizing, and graceful error/placeholder states.</p>
+        <!-- ── IMAGE ──────────────────────────────────────── -->
+        <div class="section" id="image">
+          <div class="section-head">
+            <h2>Image</h2>
+            <span class="badge badge-display">Media</span>
+          </div>
+          <p class="section-desc">
+            Renders an image file via GDI+. Supports five fit modes, rounded
+            corners, aspect-ratio-preserving auto-sizing, and graceful
+            error/placeholder states.
+          </p>
 
-      <div class="code-block"><pre>
+          <div class="code-block">
+            <pre>
 <span class="comment">// Basic</span>
 <span class="fn">Image</span>(<span class="str">"photo.jpg"</span>)
     <span class="arrow">-></span><span class="method">setWidth</span>(<span class="num">300</span>)
@@ -1543,60 +2875,133 @@ dlg-><span class="method">open</span>();
 <span class="kw">auto</span> img = <span class="fn">Image</span>()-><span class="method">setWidth</span>(<span class="num">200</span>)-><span class="method">setHeight</span>(<span class="num">200</span>);
 <span class="comment">// ... later:</span>
 img-><span class="method">setImagePath</span>(<span class="str">"loaded.jpg"</span>);
-</pre></div>
+</pre>
+          </div>
 
-      <div class="sub-head">ImageFit Modes</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Value</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>ImageFit::Fill</td><td>Stretch to fill exactly — may distort aspect ratio</td></tr>
-          <tr><td>ImageFit::Contain</td><td>Scale to fit inside bounds — letterbox if needed (default)</td></tr>
-          <tr><td>ImageFit::Cover</td><td>Scale to cover bounds — crops edges if needed</td></tr>
-          <tr><td>ImageFit::None</td><td>Display at original pixel size, centered</td></tr>
-          <tr><td>ImageFit::ScaleDown</td><td>Like None, but scales down if image exceeds container</td></tr>
-        </tbody>
-      </table></div>
+          <div class="sub-head">ImageFit Modes</div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Value</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>ImageFit::Fill</td>
+                  <td>Stretch to fill exactly — may distort aspect ratio</td>
+                </tr>
+                <tr>
+                  <td>ImageFit::Contain</td>
+                  <td>
+                    Scale to fit inside bounds — letterbox if needed (default)
+                  </td>
+                </tr>
+                <tr>
+                  <td>ImageFit::Cover</td>
+                  <td>Scale to cover bounds — crops edges if needed</td>
+                </tr>
+                <tr>
+                  <td>ImageFit::None</td>
+                  <td>Display at original pixel size, centered</td>
+                </tr>
+                <tr>
+                  <td>ImageFit::ScaleDown</td>
+                  <td>Like None, but scales down if image exceeds container</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
-      <div class="sub-head">Methods</div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td>setImagePath(path)</td><td>string</td><td>Load or swap image at runtime</td></tr>
-          <tr><td>setFit(mode)</td><td>ImageFit</td><td>Sizing/cropping mode</td></tr>
-          <tr><td>setWidth(w)</td><td>int</td><td>Fixed width (disables auto-sizing)</td></tr>
-          <tr><td>setHeight(h)</td><td>int</td><td>Fixed height (disables auto-sizing)</td></tr>
-          <tr><td>setBorderRadius(r)</td><td>int</td><td>Corner rounding — set to half of width/height for a circle</td></tr>
-          <tr><td>setPadding(p)</td><td>int</td><td>Inner padding around image</td></tr>
-          <tr><td>setPlaceholderColor(c)</td><td>COLORREF</td><td>Fill color shown before image loads</td></tr>
-          <tr><td>setErrorColor(c)</td><td>COLORREF</td><td>Fill color shown on load error</td></tr>
-        </tbody>
-      </table></div>
+          <div class="sub-head">Methods</div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Method</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>setImagePath(path)</td>
+                  <td>string</td>
+                  <td>Load or swap image at runtime</td>
+                </tr>
+                <tr>
+                  <td>setFit(mode)</td>
+                  <td>ImageFit</td>
+                  <td>Sizing/cropping mode</td>
+                </tr>
+                <tr>
+                  <td>setWidth(w)</td>
+                  <td>int</td>
+                  <td>Fixed width (disables auto-sizing)</td>
+                </tr>
+                <tr>
+                  <td>setHeight(h)</td>
+                  <td>int</td>
+                  <td>Fixed height (disables auto-sizing)</td>
+                </tr>
+                <tr>
+                  <td>setBorderRadius(r)</td>
+                  <td>int</td>
+                  <td>
+                    Corner rounding — set to half of width/height for a circle
+                  </td>
+                </tr>
+                <tr>
+                  <td>setPadding(p)</td>
+                  <td>int</td>
+                  <td>Inner padding around image</td>
+                </tr>
+                <tr>
+                  <td>setPlaceholderColor(c)</td>
+                  <td>COLORREF</td>
+                  <td>Fill color shown before image loads</td>
+                </tr>
+                <tr>
+                  <td>setErrorColor(c)</td>
+                  <td>COLORREF</td>
+                  <td>Fill color shown on load error</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
-      <div class="note">
-        Requires <strong>GDI+</strong> to be initialized at app startup via <code>GdiplusInitializer</code>. Auto-sizes to the image's native dimensions when both <code>autoWidth</code> and <code>autoHeight</code> are true.
-      </div>
+          <div class="note">
+            Requires <strong>GDI+</strong> to be initialized at app startup via
+            <code>GdiplusInitializer</code>. Auto-sizes to the image's native
+            dimensions when both <code>autoWidth</code> and
+            <code>autoHeight</code> are true.
+          </div>
+        </div>
+      </main>
     </div>
 
-  </main>
-</div>
+    <script>
+      // Active nav link tracking
+      const sections = document.querySelectorAll(".section");
+      const navLinks = document.querySelectorAll(".nav-link");
 
-<script>
-  // Active nav link tracking
-  const sections = document.querySelectorAll('.section');
-  const navLinks = document.querySelectorAll('.nav-link');
+      const observer = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((e) => {
+            if (e.isIntersecting) {
+              navLinks.forEach((l) => l.classList.remove("active"));
+              const active = document.querySelector(
+                `.nav-link[href="#${e.target.id}"]`,
+              );
+              if (active) active.classList.add("active");
+            }
+          });
+        },
+        { rootMargin: "-20% 0px -70% 0px" },
+      );
 
-  const observer = new IntersectionObserver(entries => {
-    entries.forEach(e => {
-      if (e.isIntersecting) {
-        navLinks.forEach(l => l.classList.remove('active'));
-        const active = document.querySelector(`.nav-link[href="#${e.target.id}"]`);
-        if (active) active.classList.add('active');
-      }
-    });
-  }, { rootMargin: '-20% 0px -70% 0px' });
-
-  sections.forEach(s => observer.observe(s));
-</script>
-
-</body>
+      sections.forEach((s) => observer.observe(s));
+    </script>
+  </body>
 </html>
