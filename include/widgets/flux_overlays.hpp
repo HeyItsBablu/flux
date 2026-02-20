@@ -72,7 +72,7 @@ struct ContextMenuItem {
 
 class ContextMenuWidget : public Widget {
 private:
-  FluxAppWidget *fluxApp = nullptr;
+  ScaffoldWidget *scaffold = nullptr;  
 
   // Menu geometry (computed on open)
   int menuX = 0, menuY = 0;
@@ -119,14 +119,14 @@ public:
     }
   }
 
-  void setFluxApp(FluxAppWidget *app) { fluxApp = app; }
+  void setScaffold(ScaffoldWidget *s) { scaffold = s; }
 
   // ----------------------------------------------------------------
   // onDetach — called by FluxUI::rebuild() before old tree is dropped
   // ----------------------------------------------------------------
   void onDetach() override {
-    if (isOpen && fluxApp) {
-      fluxApp->removeOverlay(this);
+    if (isOpen && scaffold) {
+      scaffold->removeOverlay(this);
       isOpen = false;
     }
     Widget::onDetach();
@@ -356,7 +356,7 @@ void chainAnchorRightClick(Widget *anchor) {
   // openMenuAt
   // ----------------------------------------------------------------
   void openMenuAt(int cursorX, int cursorY) {
-    if (isOpen || !fluxApp || items.empty())
+    if (isOpen || !scaffold || items.empty())
       return;
 
     computeMenuGeometry(cursorX, cursorY);
@@ -364,7 +364,7 @@ void chainAnchorRightClick(Widget *anchor) {
     hoveredIndex = -1;
     selectedIndex = findFirstActionIndex(); // Start keyboard nav at first item
 
-    fluxApp->addOverlay(
+    scaffold->addOverlay(
         this, [this](HDC hdc, FontCache &fc) { renderMenu(hdc, fc); },
         150 // zIndex: above Dropdown(100) and Tooltip(50), below Dialog(200)
     );
@@ -374,13 +374,13 @@ void chainAnchorRightClick(Widget *anchor) {
   // closeMenu
   // ----------------------------------------------------------------
   void closeMenu() {
-    if (!isOpen || !fluxApp)
+    if (!isOpen || !scaffold)
       return;
 
     isOpen = false;
     hoveredIndex = -1;
     selectedIndex = -1;
-    fluxApp->removeOverlay(this);
+    scaffold->removeOverlay(this);
   }
 
   // ----------------------------------------------------------------
@@ -425,7 +425,7 @@ void chainAnchorRightClick(Widget *anchor) {
   }
 
   // ----------------------------------------------------------------
-  // renderMenu — called by FluxApp overlay system
+  // renderMenu — called by scaffold overlay system
   // ----------------------------------------------------------------
   void renderMenu(HDC hdc, FontCache &fontCache) {
     if (!isOpen || items.empty())
@@ -604,7 +604,7 @@ void chainAnchorRightClick(Widget *anchor) {
 
 class DialogWidget : public Widget {
 private:
-  FluxAppWidget *fluxApp = nullptr;
+  ScaffoldWidget *scaffold = nullptr;  
   bool contentLayoutDirty = true; // Track whether layout needs to run
 
 public:
@@ -630,7 +630,7 @@ public:
   // ----------------------------------------------------------------
   // SET FLUX APP
   // ----------------------------------------------------------------
-  void setFluxApp(FluxAppWidget *app) { fluxApp = app; }
+  void setScaffold(ScaffoldWidget *s) { scaffold = s; }
 
   // ----------------------------------------------------------------
   // Layout
@@ -656,9 +656,9 @@ public:
       return false;
 
     RECT windowRect = {0, 0, 800, 600};
-    if (fluxApp) {
-      windowRect.right = fluxApp->width;
-      windowRect.bottom = fluxApp->height;
+    if (scaffold) {
+      windowRect.right = scaffold->width;
+      windowRect.bottom = scaffold->height;
     }
 
     int dialogX = (windowRect.right - dialogWidth) / 2;
@@ -728,7 +728,7 @@ public:
   // Open/Close Dialog
   // ----------------------------------------------------------------
   void open() {
-    if (isOpen || !fluxApp)
+    if (isOpen || !scaffold)
       return;
 
     isOpen = true;
@@ -747,8 +747,8 @@ public:
         content->computeLayout(hdc, contentW, contentH, fontCache);
 
         RECT windowRect = {0, 0, 800, 600};
-        windowRect.right = fluxApp->width;
-        windowRect.bottom = fluxApp->height;
+        windowRect.right = scaffold->width;
+        windowRect.bottom = scaffold->height;
         int dialogX = (windowRect.right - dialogWidth) / 2;
         int dialogY = (windowRect.bottom - dialogHeight) / 2;
         int contentX = dialogX + dialogPadding;
@@ -766,8 +766,8 @@ public:
       }
     }
 
-    // Register overlay with FluxApp
-    fluxApp->addOverlay(
+    // Register overlay with scaffold
+    scaffold->addOverlay(
         this,
         [this](HDC hdc, FontCache &fontCache) {
           this->renderDialog(hdc, fontCache);
@@ -779,7 +779,7 @@ public:
   }
 
   void close() {
-    if (!isOpen || !fluxApp)
+    if (!isOpen || !scaffold)
       return;
 
     isOpen = false;
@@ -794,7 +794,7 @@ public:
     }
 
     // Unregister overlay
-    fluxApp->removeOverlay(this);
+    scaffold->removeOverlay(this);
 
     if (onClose) {
       onClose();
@@ -804,16 +804,16 @@ public:
   }
 
   // ----------------------------------------------------------------
-  // Render Dialog (Called by FluxApp overlay system)
+  // Render Dialog (Called by scaffold overlay system)
   // ----------------------------------------------------------------
   void renderDialog(HDC hdc, FontCache &fontCache) {
     if (!isOpen)
       return;
 
     RECT windowRect = {0, 0, 800, 600};
-    if (fluxApp) {
-      windowRect.right = fluxApp->width;
-      windowRect.bottom = fluxApp->height;
+    if (scaffold) {
+      windowRect.right = scaffold->width;
+      windowRect.bottom = scaffold->height;
     }
 
     // Draw semi-transparent overlay
@@ -941,7 +941,7 @@ private:
 // Design:
 //   - TooltipWidget wraps an anchor child widget.
 //   - It hijacks (chains) the anchor's onHover callback to open/close itself.
-//   - When open it registers a renderer with FluxAppWidget at zIndex 50
+//   - When open it registers a renderer with scaffoldWidget at zIndex 50
 //     (below Dropdown=100, Dialog=200).
 //   - No new input mechanism needed: the existing onHover bool already delivers
 //     mouse-enter (true) and mouse-leave / WM_MOUSELEAVE (false).
@@ -961,7 +961,7 @@ enum class TooltipPosition {
 
 class TooltipWidget : public Widget {
 private:
-  FluxAppWidget *fluxApp = nullptr;
+ScaffoldWidget *scaffold = nullptr;  
 
   // Tooltip bubble geometry (computed on open)
   int tipX = 0, tipY = 0;
@@ -994,15 +994,15 @@ public:
     }
   }
 
-  void setFluxApp(FluxAppWidget *app) { fluxApp = app; }
+void setScaffold(ScaffoldWidget *s) { scaffold = s; }
 
   // ----------------------------------------------------------------
   // onDetach — called by FluxUI::rebuild() before old tree is dropped.
   // Ensures the overlay stack never holds a dangling pointer.
   // ----------------------------------------------------------------
   void onDetach() override {
-    if (isVisible && fluxApp) {
-      fluxApp->removeOverlay(this);
+    if (isVisible && scaffold) {
+      scaffold->removeOverlay(this);
       isVisible = false;
     }
     // Propagate to children
@@ -1115,13 +1115,13 @@ private:
   // openTooltip
   // ----------------------------------------------------------------
   void openTooltip() {
-    if (isVisible || !fluxApp || tipText.empty())
+    if (isVisible || !scaffold || tipText.empty())
       return;
 
     computeBubbleGeometry();
     isVisible = true;
 
-    fluxApp->addOverlay(
+    scaffold->addOverlay(
         this,
         [this](HDC hdc, FontCache &fc) { renderBubble(hdc, fc); },
         50 // zIndex: below Dropdown(100) and Dialog(200)
@@ -1132,11 +1132,11 @@ private:
   // closeTooltip
   // ----------------------------------------------------------------
   void closeTooltip() {
-    if (!isVisible || !fluxApp)
+    if (!isVisible || !scaffold)
       return;
 
     isVisible = false;
-    fluxApp->removeOverlay(this);
+    scaffold->removeOverlay(this);
   }
 
   // ----------------------------------------------------------------
@@ -1180,7 +1180,7 @@ private:
   }
 
   // ----------------------------------------------------------------
-  // renderBubble — called by the FluxApp overlay renderer
+  // renderBubble — called by the scaffold overlay renderer
   // ----------------------------------------------------------------
   void renderBubble(HDC hdc, FontCache &fontCache) {
     if (!isVisible || tipText.empty())
@@ -1235,7 +1235,7 @@ private:
 
 class DropdownWidget : public Widget {
 private:
-  FluxAppWidget *fluxApp = nullptr; // Reference to app for overlay management
+ ScaffoldWidget *scaffold = nullptr;  // Reference to app for overlay management
 
 public:
   std::vector<std::string> options;
@@ -1283,7 +1283,7 @@ public:
   // ----------------------------------------------------------------
   // SET FLUX APP (Called during widget tree setup)
   // ----------------------------------------------------------------
-  void setFluxApp(FluxAppWidget *app) { fluxApp = app; }
+void setScaffold(ScaffoldWidget *s) { scaffold = s; }
 
   // ----------------------------------------------------------------
   // Layout
@@ -1347,7 +1347,7 @@ public:
   }
 
   // ----------------------------------------------------------------
-  // Mouse Events (Now register/unregister overlay with FluxApp)
+  // Mouse Events (Now register/unregister overlay with scaffold)
   // ----------------------------------------------------------------
   bool handleMouseDown(int mx, int my) override {
     if (isOpen) {
@@ -1633,15 +1633,15 @@ private:
   // Open/Close Dropdown (Register/Unregister Overlay)
   // ----------------------------------------------------------------
   void openDropdown() {
-    if (isOpen || !fluxApp)
+    if (isOpen || !scaffold)
       return;
 
     isOpen = true;
     hoveredItemIndex = -1;
     scrollOffset = 0;
 
-    // 🎯 Register overlay with FluxApp
-    fluxApp->addOverlay(
+    // 🎯 Register overlay with scaffold
+    scaffold->addOverlay(
         this,
         [this](HDC hdc, FontCache &fontCache) {
           this->renderDropdownList(hdc, fontCache);
@@ -1653,20 +1653,20 @@ private:
   }
 
   void closeDropdown() {
-    if (!isOpen || !fluxApp)
+    if (!isOpen || !scaffold)
       return;
 
     isOpen = false;
     hoveredItemIndex = -1;
 
-    // 🎯 Unregister overlay from FluxApp
-    fluxApp->removeOverlay(this);
+    // 🎯 Unregister overlay from scaffold
+    scaffold->removeOverlay(this);
 
     markNeedsPaint();
   }
 
   // ----------------------------------------------------------------
-  // Render Dropdown List (Called by FluxApp overlay system)
+  // Render Dropdown List (Called by scaffold overlay system)
   // ----------------------------------------------------------------
   void renderDropdownList(HDC hdc, FontCache &fontCache) {
     if (!isOpen || options.empty())

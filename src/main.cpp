@@ -13,34 +13,38 @@ private:
 
   DialogWidgetPtr confirmDialog;
   ContextMenuWidgetPtr cardMenu;
+  bool widgetsInitialized = false;  // ← guard
 
 public:
   WidgetPtr build() override {
 
-    // --- Dialog ---
-    confirmDialog = Dialog(
-      Column(
-        Text("Are you sure?"),
-        Text("This will update the product."),
-        Button(Text("Close"), [this] { confirmDialog->close(); })
-      )
-    );
-    confirmDialog->setSize(320, 180);
+    // ── Only create overlay widgets ONCE ────────────────────────────
+    if (!widgetsInitialized) {
+      widgetsInitialized = true;
 
-    // --- Context Menu ---
-    auto menuAnchor = Button(Text("Right-click me"));
-    cardMenu = ContextMenu(menuAnchor, {
-      {"Edit Product",   [this] { confirmDialog->open(); }},
-      {"Toggle Stock",   [this] {
-        auto p = product.get();
-        p.inStock = !p.inStock;
-        product.set(p);
-      }},
-      ContextMenuItem::Separator(),
-      {"Disabled Option", [] {}, false}
-    });
+      confirmDialog = Dialog(
+        Column(
+          Text("Are you sure?"),
+          Text("This will update the product."),
+          Button(Text("Close"), [this] { confirmDialog->close(); })
+        )
+      );
+      confirmDialog->setSize(320, 180);
 
-    // --- Dropdown ---
+      auto menuAnchor = Button(Text("Right-click me"));
+      cardMenu = ContextMenu(menuAnchor, {
+        {"Edit Product",   [this] { confirmDialog->open(); }},
+        {"Toggle Stock",   [this] {
+          auto p = product.get();
+          p.inStock = !p.inStock;
+          product.set(p);
+        }},
+        ContextMenuItem::Separator(),
+        {"Disabled Option", [] {}, false}
+      });
+    }
+    // ────────────────────────────────────────────────────────────────
+
     auto sizeDropdown = Dropdown({"Small", "Medium", "Large", "XL"})
       ->setPlaceholder("Pick a size")
       ->setSelectedValue(selectedSize);
@@ -49,23 +53,14 @@ public:
       AppBar("Overlay Widgets Demo"),
       Center(
         Column(
-          // Tooltip example
           Tooltip(
             Button(Text("Hover for info"), [] {}),
             "This button does something cool!"
           ),
-
-          // Context menu example
           cardMenu,
-
-          // Dropdown example
           sizeDropdown,
-
-          // Dialog trigger
           Button(Text("Open Dialog"), [this] { confirmDialog->open(); }),
-
-          // Dialog itself (zero-size, renders via overlay)
-          confirmDialog
+          confirmDialog   // zero-size, wires scaffold on each rebuild
         )
         ->setSpacing(20)
         ->setCrossAlignment(Alignment::Center)

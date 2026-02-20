@@ -169,14 +169,7 @@ inline WidgetPtr ThemedCard(WidgetPtr child) {
 //   200 = Dialog (backdrop + box)
 //   300 = Dialog-internal dropdown / context menu
 
-struct OverlayEntry {
-  Widget *widget = nullptr;
-  std::function<void(HDC, FontCache &)> renderer;
-  int zIndex = 0;
 
-  OverlayEntry(Widget *w, std::function<void(HDC, FontCache &)> r, int z = 0)
-      : widget(w), renderer(r), zIndex(z) {}
-};
 
 // ============================================================================
 // FLUX APP WIDGET - Similar to MaterialApp
@@ -187,7 +180,7 @@ private:
   // Overlay stack is kept sorted ascending by zIndex at all times.
   // Render order:  front → back  (lowest zIndex first, highest last = on top)
   // Hit-test order: back → front (highest zIndex first = topmost widget wins)
-  std::vector<OverlayEntry> overlayStack;
+
 
 public:
   std::string title;
@@ -203,58 +196,7 @@ public:
     }
   }
 
-  // ----------------------------------------------------------------
-  // OVERLAY MANAGEMENT
-  // ----------------------------------------------------------------
 
-  void addOverlay(Widget *widget,
-                  std::function<void(HDC, FontCache &)> renderer,
-                  int zIndex = 0) {
-    // Avoid duplicate registrations
-    for (auto &entry : overlayStack) {
-      if (entry.widget == widget) {
-        // Update renderer/zIndex in place then re-sort
-        entry.renderer = renderer;
-        entry.zIndex = zIndex;
-        sortOverlayStack();
-        markNeedsPaint();
-        return;
-      }
-    }
-
-    overlayStack.emplace_back(widget, renderer, zIndex);
-    sortOverlayStack();
-    markNeedsPaint();
-  }
-
-  void removeOverlay(Widget *widget) {
-    overlayStack.erase(
-        std::remove_if(overlayStack.begin(), overlayStack.end(),
-                       [widget](const OverlayEntry &e) {
-                         return e.widget == widget;
-                       }),
-        overlayStack.end());
-    markNeedsPaint();
-  }
-
-  void clearOverlays() {
-    overlayStack.clear();
-    markNeedsPaint();
-  }
-
-  bool hasOverlays() const { return !overlayStack.empty(); }
-
-  // Read-only access for FluxUI's unified hit-test dispatcher
-  const std::vector<OverlayEntry> &getOverlayStack() const {
-    return overlayStack;
-  }
-
-  // Returns the topmost (highest zIndex) overlay widget, or nullptr
-  Widget *getTopmostOverlay() const {
-    if (overlayStack.empty())
-      return nullptr;
-    return overlayStack.back().widget; // back = highest zIndex (sorted asc)
-  }
 
   // ----------------------------------------------------------------
   // LAYOUT
@@ -304,11 +246,7 @@ public:
       children[0]->render(hdc, fontCache);
     }
 
-    // Overlays in ascending zIndex order (lowest first, highest last = on top)
-    for (const auto &entry : overlayStack) {
-      if (entry.renderer)
-        entry.renderer(hdc, fontCache);
-    }
+
 
     if (debugShowWidgetBounds) {
       drawDebugBounds(hdc);
@@ -318,13 +256,6 @@ public:
   }
 
 private:
-  void sortOverlayStack() {
-    std::stable_sort(overlayStack.begin(), overlayStack.end(),
-                     [](const OverlayEntry &a, const OverlayEntry &b) {
-                       return a.zIndex < b.zIndex;
-                     });
-  }
-
   void drawDebugBounds(HDC hdc) { drawWidgetBounds(hdc, this); }
 
   void drawWidgetBounds(HDC hdc, Widget *w) {

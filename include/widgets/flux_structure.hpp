@@ -3,17 +3,85 @@
 
 #include "flux_core.hpp"
 
-#include "flux_state.hpp"
 #include "flux_layout.hpp"
+#include "flux_state.hpp"
 #include <iostream>
 
 // ============================================================================
 // CONCRETE WIDGET CLASSES
 // ============================================================================
 
+struct OverlayEntry {
+  Widget *widget = nullptr;
+  std::function<void(HDC, FontCache &)> renderer;
+  int zIndex = 0;
+
+  OverlayEntry(Widget *w, std::function<void(HDC, FontCache &)> r, int z = 0)
+      : widget(w), renderer(r), zIndex(z) {}
+};
+
 // --- Scaffold Widget ---
 class ScaffoldWidget : public Widget {
+private:
+  std::vector<OverlayEntry> overlayStack;
+
+  //   // Overlays in ascending zIndex order (lowest first, highest last = on
+  //   top)
+  // for (const auto &entry : overlayStack) {
+  //   if (entry.renderer)
+  //     entry.renderer(hdc, fontCache);
+  // }
+
+  void sortOverlayStack() {
+    std::stable_sort(overlayStack.begin(), overlayStack.end(),
+                     [](const OverlayEntry &a, const OverlayEntry &b) {
+                       return a.zIndex < b.zIndex;
+                     });
+  }
+
 public:
+  // --- Overlay Management (moved from FluxAppWidget) ---
+  void addOverlay(Widget *widget,
+                  std::function<void(HDC, FontCache &)> renderer,
+                  int zIndex = 0) {
+    for (auto &entry : overlayStack) {
+      if (entry.widget == widget) {
+        entry.renderer = renderer;
+        entry.zIndex = zIndex;
+        sortOverlayStack();
+        markNeedsPaint();
+        return;
+      }
+    }
+    overlayStack.emplace_back(widget, renderer, zIndex);
+    sortOverlayStack();
+    markNeedsPaint();
+  }
+
+  void removeOverlay(Widget *widget) {
+    overlayStack.erase(std::remove_if(overlayStack.begin(), overlayStack.end(),
+                                      [widget](const OverlayEntry &e) {
+                                        return e.widget == widget;
+                                      }),
+                       overlayStack.end());
+    markNeedsPaint();
+  }
+
+  void clearOverlays() {
+    overlayStack.clear();
+    markNeedsPaint();
+  }
+  bool hasOverlays() const { return !overlayStack.empty(); }
+
+  const std::vector<OverlayEntry> &getOverlayStack() const {
+    return overlayStack;
+  }
+
+  Widget *getTopmostOverlay() const {
+    return overlayStack.empty() ? nullptr : overlayStack.back().widget;
+  }
+
+  // --- Layout ---
   void computeLayout(HDC hdc, int availableWidth, int availableHeight,
                      FontCache &fontCache) override {
     if (autoWidth)
@@ -21,12 +89,23 @@ public:
     if (autoHeight)
       height = availableHeight;
 
-    if (!children.empty()) {
-      children[0]->computeLayout(hdc, width, height, fontCache);
-    }
+    for (auto &child : children)
+      child->computeLayout(hdc, width, height, fontCache);
 
     applyConstraints();
     needsLayout = false;
+  }
+
+  // --- Render (overlays painted after normal tree) ---
+  void render(HDC hdc, FontCache &fontCache) override {
+    for (auto &child : children)
+      child->render(hdc, fontCache);
+
+    for (const auto &entry : overlayStack)
+      if (entry.renderer)
+        entry.renderer(hdc, fontCache);
+
+    needsPaint = false;
   }
 };
 

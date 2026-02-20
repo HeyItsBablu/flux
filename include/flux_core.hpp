@@ -16,7 +16,7 @@
 
 template <typename T> class State;
 class DropdownWidget;
-class FluxAppWidget;
+class ScaffoldWidget;
 class DialogWidget;
 
 // ============================================================================
@@ -116,8 +116,7 @@ private:
   bool checkDropdownOverlays(Widget *widget, int mouseX, int mouseY);
   bool checkDialogOverlays(Widget *widget, int mouseX, int mouseY);
 
-  // Wire FluxAppWidget pointer into every overlay-capable widget in the tree.
-  void wireFluxAppToWidgets(FluxAppWidget *fluxApp, Widget *widget);
+  void wireScaffoldToWidgets(ScaffoldWidget *scaffold, Widget *widget);
 
   Widget *findLayoutBoundary(Widget *widget) {
     Widget *boundary = widget;
@@ -182,7 +181,8 @@ private:
       Renderer::renderWidget(instance->hdcMem, instance->root.get(),
                              instance->fontCache);
 
-      // Exclude all GL child windows from the BitBlt so the GDI back-buffernever stomps on the OpenGL surface
+      // Exclude all GL child windows from the BitBlt so the GDI
+      // back-buffernever stomps on the OpenGL surface
 
       HWND child = GetWindow(hwnd, GW_CHILD);
       while (child) {
@@ -371,7 +371,7 @@ private:
 
       // 3. Normal hover state update + widget tree move
       bool hoverChanged =
-          updateHoverStates(instance->root.get(), mouseX, mouseY); 
+          updateHoverStates(instance->root.get(), mouseX, mouseY);
 
       bool customHandled = findAndHandleMouseEvent(
           instance->root.get(), mouseX, mouseY, [mouseX, mouseY](Widget *w) {
@@ -601,7 +601,7 @@ public:
 
     hwnd = CreateWindowEx(
         0, "FluxUI", title.c_str(), WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-        CW_USEDEFAULT, CW_USEDEFAULT, windowRect.right - windowRect.left, 
+        CW_USEDEFAULT, CW_USEDEFAULT, windowRect.right - windowRect.left,
         windowRect.bottom - windowRect.top, NULL, NULL, hInstance, this);
 
     if (hwnd && root) {
