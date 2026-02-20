@@ -1,6 +1,6 @@
 #include "flux.hpp"
-#include "flux_graph.hpp"
-#include "flux_image_editor.hpp"
+
+#include "widgets/flux_image_editor.hpp"
 #include <cmath>
 #include <commdlg.h>
 #include <windows.h>
@@ -11,10 +11,10 @@
 // stb_image_write — define implementation in exactly ONE .cpp file
 // ============================================================================
 #define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
+#include "widgets/stb_image.h"
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "stb_image_write.h"
+#include "widgets/stb_image_write.h"
 
 // ============================================================================
 // EXPORT HELPERS

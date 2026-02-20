@@ -1,7 +1,7 @@
 #ifndef FLUX_STATE_HPP
 #define FLUX_STATE_HPP
 
-#include "flux_core.hpp"
+
 #include <cassert>
 #include <iomanip>
 #include <mutex>
@@ -11,6 +11,8 @@
 // ============================================================================
 // STATE CLASS - REACTIVE STATE MANAGEMENT
 // ============================================================================
+
+class FluxUI;
 
 template <typename T> class State {
 private:

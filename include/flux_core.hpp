@@ -484,9 +484,7 @@ public:
     if (currentInstance == this)
       currentInstance = nullptr;
   }
-  template <typename T> State<T> useState(T initialValue) {
-    return State<T>(initialValue, this);
-  }
+  template <typename T> State<T> useState(T initialValue);
 
   static FluxUI *getCurrentInstance() { return currentInstance; }
 
@@ -603,7 +601,7 @@ public:
 
     hwnd = CreateWindowEx(
         0, "FluxUI", title.c_str(), WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-        CW_USEDEFAULT, CW_USEDEFAULT, windowRect.right - windowRect.left,
+        CW_USEDEFAULT, CW_USEDEFAULT, windowRect.right - windowRect.left, 
         windowRect.bottom - windowRect.top, NULL, NULL, hInstance, this);
 
     if (hwnd && root) {

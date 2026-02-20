@@ -1,16 +1,21 @@
 #ifndef FLUX_CORE_IMPL_HPP
 #define FLUX_CORE_IMPL_HPP
 
-#include "flux_app.hpp"
-#include "flux_context_menu.hpp"
+
 #include "flux_core.hpp"
-#include "flux_dialog.hpp"
-#include "flux_dropdown.hpp"
-#include "flux_tooltip.hpp"
+#include "flux_app.hpp"
+#include "widgets/flux_overlays.hpp"
+
 
 // ============================================================================
 // FLUXUI METHOD IMPLEMENTATIONS
 // ============================================================================
+
+
+template <typename T>
+inline State<T> FluxUI::useState(T initialValue) {
+    return State<T>(initialValue, this);
+}
 
 // ----------------------------------------------------------------------------
 // wireFluxAppToWidgets
