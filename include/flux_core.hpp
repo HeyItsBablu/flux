@@ -2,7 +2,7 @@
 #define FLUX_CORE_HPP
 
 #include "flux_font.hpp"
-#include "flux_layout.hpp"
+#include "flux_layoutengine.hpp"
 #include "flux_renderer.hpp"
 #include "flux_widget.hpp"
 

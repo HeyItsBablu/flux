@@ -1,5 +1,5 @@
-#ifndef FLUX_LAYOUT_HPP
-#define FLUX_LAYOUT_HPP
+#ifndef FLUX_LAYOUTENGINE_HPP
+#define FLUX_LAYOUTENGINE_HPP
 
 #include "flux_widget.hpp"
 

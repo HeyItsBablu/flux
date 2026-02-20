@@ -1,7 +1,7 @@
 #ifndef FLUX_APP_HPP
 #define FLUX_APP_HPP
 
-#include "flux_widget_list.hpp"
+#include "widgets/widgets.hpp"
 #include <string>
 #include <algorithm>
 
