@@ -79,6 +79,7 @@ public:
                    SizedBox(0, 6),
                    Graph(700, 200)
                        ->addSeries("CPU", cpuData, 1.f, 0.45f, 0.2f)
+                       ->addSeries("Memory", memData, 0.2f, 0.7f, 1.f)
                        ->setType(GraphType::Area)
                        ->setYRange(0.f, 100.f)
                        ->setShowGrid(true),

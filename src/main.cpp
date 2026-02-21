@@ -25,7 +25,7 @@ public:
     memData.set(std::vector<float>(MAX_POINTS, 0.f));
     networkData.set(std::vector<float>(MAX_POINTS, 0.f));
 
-    timerId = context->setInterval(1000, [this]() {
+    timerId = context->setInterval(10, [this]() {
       time += 1.0f;
       elapsed.set(elapsed.get() + 1);
 
@@ -79,10 +79,12 @@ public:
                    SizedBox(0, 6),
                    Graph(700, 200)
                        ->addSeries("CPU", cpuData, 1.f, 0.45f, 0.2f)
+                       ->addSeries("Memory", memData, 0.2f, 0.7f, 1.f)
                        ->setType(GraphType::Area)
                        ->setYRange(0.f, 100.f)
                        ->setShowGrid(true),
 
+                       
                    SizedBox(0, 20),
 
                    // ── Memory graph ────────────────────────────────────
