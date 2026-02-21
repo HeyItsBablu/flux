@@ -428,12 +428,21 @@ private:
       return 0;
     }
 
-    // ----------------------------------------------------------------
+      // ----------------------------------------------------------------
     case WM_TIMER: {
-      if (!instance || !instance->focusedWidget)
+      if (!instance)
         return 0;
 
-      if (instance->focusedWidget->handleTimer((UINT)wParam)) {
+      // Check registered interval callbacks first
+      auto it = instance->timerCallbacks.find((UINT)wParam);
+      if (it != instance->timerCallbacks.end()) {
+        it->second();
+        return 0;
+      }
+
+      // Fall through to focused widget timer
+      if (instance->focusedWidget &&
+          instance->focusedWidget->handleTimer((UINT)wParam)) {
         instance->invalidateWidget(instance->focusedWidget);
       }
       return 0;
@@ -484,6 +493,42 @@ public:
     if (currentInstance == this)
       currentInstance = nullptr;
   }
+
+  // Add to FluxUI class:
+  std::map<UINT, std::function<void()>> timerCallbacks;
+
+  // In FluxUI, add a post-create hook list:
+  std::vector<std::pair<UINT, std::function<void()>>> pendingTimers;
+
+  UINT setInterval(int ms, std::function<void()> callback) {
+    static UINT nextId = 100;
+    UINT id = nextId++;
+    timerCallbacks[id] = callback;
+
+    if (hwnd) {
+      SetTimer(hwnd, id, ms, nullptr);
+    } else {
+      pendingTimers.push_back(
+          {id, [this, id, ms]() { SetTimer(hwnd, id, ms, nullptr); }});
+    }
+    return id;
+  }
+
+  void clearInterval(UINT id) {
+    if (hwnd) {
+      KillTimer(hwnd, id);
+    }
+    timerCallbacks.erase(id);
+
+    // Remove from pending if window hasn't been created yet
+    pendingTimers.erase(
+        std::remove_if(pendingTimers.begin(), pendingTimers.end(),
+                       [id](const std::pair<UINT, std::function<void()>> &p) {
+                         return p.first == id;
+                       }),
+        pendingTimers.end());
+  }
+
   template <typename T> State<T> useState(T initialValue);
 
   static FluxUI *getCurrentInstance() { return currentInstance; }
@@ -617,7 +662,11 @@ public:
       ReleaseDC(hwnd, hdc);
     }
 
-    return hwnd;
+    for (auto &[id, fn] : pendingTimers)
+      fn();
+    pendingTimers.clear();
+
+    return hwnd; 
   }
 
   int run() {
