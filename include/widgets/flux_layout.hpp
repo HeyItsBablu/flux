@@ -453,20 +453,22 @@ public:
 
     // ── Overflow detection ──────────────────────────────────────────────────
     overflow.reset();
-    int contentW = width - paddingLeft - paddingRight;
-    int contentH = height - paddingTop - paddingBottom;
 
-    // Only check an axis that the user explicitly fixed.
-    // Auto-sized axes grow to fit, so overflow is impossible on them.
-    if (!autoWidth && children[0]->width > contentW + kOverflowThreshold) {
-      overflow.overflowX = children[0]->width - contentW;
-      overflow.axis = OverflowAxis::Horizontal;
-    }
-    if (!autoHeight && children[0]->height > contentH + kOverflowThreshold) {
-      overflow.overflowY = children[0]->height - contentH;
-      overflow.axis = (overflow.axis == OverflowAxis::Horizontal)
-                          ? OverflowAxis::Both
-                          : OverflowAxis::Vertical;
+    if (!children.empty()) {
+      int contentW = width - paddingLeft - paddingRight;
+      int contentH = height - paddingTop - paddingBottom;
+
+      if (!autoWidth && children[0]->width > contentW + kOverflowThreshold) {
+        overflow.overflowX = children[0]->width - contentW;
+        overflow.axis = OverflowAxis::Horizontal;
+      }
+
+      if (!autoHeight && children[0]->height > contentH + kOverflowThreshold) {
+        overflow.overflowY = children[0]->height - contentH;
+        overflow.axis = (overflow.axis == OverflowAxis::Horizontal)
+                            ? OverflowAxis::Both
+                            : OverflowAxis::Vertical;
+      }
     }
     if (overflow.hasOverflow())
       FluxOverflow::logWarning("Container", overflow, id);

@@ -1,5 +1,2 @@
 Needs Overflow Detection
-Row Sums children horizontally — classic horizontal overflow
-Column Sums children vertically — classic vertical overflow
-Container When setWidth/setHeight is called and child exceeds that fixed size
 Scaffold Root widget with fixed window bounds — body can overflow

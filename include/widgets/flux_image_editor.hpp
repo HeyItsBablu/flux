@@ -551,22 +551,33 @@ public:
   // Widget overrides
   // ----------------------------------------------------------------
 
-  void computeLayout(HDC hdc, int availableWidth, int availableHeight,
-                     FontCache &fontCache) override {
-    // Respect parent's offered space as a hard ceiling
-    if (autoWidth)
-      width = availableWidth;
-    else
-      width = min(width, availableWidth); // never exceed what parent offers
+void computeLayout(HDC hdc,
+                   const BoxConstraints& constraints,
+                   FontCache& fontCache) override
+{
+    // Intersect parent constraints with our own min/max constraints
+    BoxConstraints self = selfConstraints(constraints);
 
-    if (autoHeight)
-      height = availableHeight;
-    else
-      height = min(height, availableHeight); // never exceed what parent offers
+    // Width handling
+    if (autoWidth) {
+        // Take as much as allowed
+        width = self.maxWidth;
+    } else {
+        // Respect fixed width but clamp within allowed range
+        width = self.clampWidth(width);
+    }
 
-    applyConstraints();
+    // Height handling
+    if (autoHeight) {
+        // Take as much as allowed
+        height = self.maxHeight;
+    } else {
+        // Respect fixed height but clamp within allowed range
+        height = self.clampHeight(height);
+    }
+
     needsLayout = false;
-  }
+}
 
   void render(HDC hdc, FontCache &) override {
     ensureChildWindow(hdc);
