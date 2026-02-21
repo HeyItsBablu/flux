@@ -109,22 +109,40 @@ public:
     return self;
   }
 
-  void computeLayout(HDC hdc, int availableWidth, int availableHeight,
+  void computeLayout(HDC hdc, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     rebuildChild();
 
-    if (!children.empty()) {
-      children[0]->computeLayout(
-          hdc, availableWidth - paddingLeft - paddingRight,
-          availableHeight - paddingTop - paddingBottom, fontCache);
 
-      if (autoWidth)
-        width = children[0]->width + paddingLeft + paddingRight;
-      if (autoHeight)
-        height = children[0]->height + paddingTop + paddingBottom;
+    BoxConstraints self = selfConstraints(constraints);
+
+    if (!children.empty()) {
+
+      int maxW = autoWidth ? self.maxWidth : width;
+      int maxH = autoHeight ? self.maxHeight : height;
+
+      BoxConstraints childConstraints =
+          BoxConstraints(0, maxW, 0, maxH)
+              .deflate(paddingLeft + paddingRight, paddingTop + paddingBottom);
+
+
+      children[0]->computeLayout(hdc, childConstraints, fontCache);
+
+
+      if (autoWidth) {
+        width =
+            self.clampWidth(children[0]->width + paddingLeft + paddingRight);
+      }
+      if (autoHeight) {
+        height =
+            self.clampHeight(children[0]->height + paddingTop + paddingBottom);
+      }
+    } else {
+
+      width = autoWidth ? self.clampWidth(0) : self.clampWidth(width);
+      height = autoHeight ? self.clampHeight(0) : self.clampHeight(height);
     }
 
-    applyConstraints();
     needsLayout = false;
   }
 
@@ -142,7 +160,6 @@ public:
     }
   }
 };
-
 
 // ============================================================================
 // CONDITIONAL WIDGET - TERNARY STYLE
@@ -231,7 +248,8 @@ public:
    * Conditional(isLoggedIn)
    *   ->Then([]() { return Dashboard(); })
    */
-  std::shared_ptr<ConditionalWidget<T>> Then(std::function<WidgetPtr()> builder) {
+  std::shared_ptr<ConditionalWidget<T>>
+  Then(std::function<WidgetPtr()> builder) {
     thenBuilder = builder;
     return self;
   }
@@ -244,27 +262,32 @@ public:
    *   ->Then([]() { return Dashboard(); })
    *   ->Else([]() { return LoginPage(); })
    */
-  std::shared_ptr<ConditionalWidget<T>> Else(std::function<WidgetPtr()> builder) {
+  std::shared_ptr<ConditionalWidget<T>>
+  Else(std::function<WidgetPtr()> builder) {
     elseBuilder = builder;
     return self;
   }
 
-void computeLayout(HDC hdc, const BoxConstraints &constraints,
-                   FontCache &fontCache) override {
-  rebuildChild();
+  void computeLayout(HDC hdc, const BoxConstraints &constraints,
+                     FontCache &fontCache) override {
+    rebuildChild();
 
-  if (!children.empty()) {
-    children[0]->computeLayout(hdc, constraints.deflate(paddingLeft + paddingRight,
-                                                         paddingTop + paddingBottom),
-                               fontCache);
+    if (!children.empty()) {
+      children[0]->computeLayout(
+          hdc,
+          constraints.deflate(paddingLeft + paddingRight,
+                              paddingTop + paddingBottom),
+          fontCache);
 
-    if (autoWidth)  width  = children[0]->width  + paddingLeft + paddingRight;
-    if (autoHeight) height = children[0]->height + paddingTop  + paddingBottom;
+      if (autoWidth)
+        width = children[0]->width + paddingLeft + paddingRight;
+      if (autoHeight)
+        height = children[0]->height + paddingTop + paddingBottom;
+    }
+
+    applyConstraints();
+    needsLayout = false;
   }
-
-  applyConstraints();
-  needsLayout = false;
-}
 
   void positionChildren(int contentX, int contentY, int contentWidth,
                         int contentHeight) override {
@@ -298,7 +321,8 @@ void computeLayout(HDC hdc, const BoxConstraints &constraints,
  *   ->Then([]() { return Text("Visible!"); })
  *   ->Else([]() { return Text("Hidden!"); })
  */
-inline std::shared_ptr<ConditionalWidget<bool>> Conditional(State<bool> &state) {
+inline std::shared_ptr<ConditionalWidget<bool>>
+Conditional(State<bool> &state) {
   auto widget = std::make_shared<ConditionalWidget<bool>>(
       state, [](bool v) { return v; });
   widget->setSelf(widget);
@@ -320,19 +344,21 @@ inline std::shared_ptr<ConditionalWidget<bool>> Conditional(State<bool> &state) 
  *   ->Else([]() { return EmptyState(); })
  */
 inline std::shared_ptr<ConditionalWidget<std::string>>
-Conditional(State<std::string> &state, std::function<bool(const std::string&)> predicate) {
-    auto widget = std::make_shared<ConditionalWidget<std::string>>(state, predicate);
-    widget->setSelf(widget);
-    return widget;
+Conditional(State<std::string> &state,
+            std::function<bool(const std::string &)> predicate) {
+  auto widget =
+      std::make_shared<ConditionalWidget<std::string>>(state, predicate);
+  widget->setSelf(widget);
+  return widget;
 }
 
 template <typename T, typename Pred>
-inline std::shared_ptr<ConditionalWidget<T>>
-Conditional(State<T> &state, Pred predicate) {
-    auto widget = std::make_shared<ConditionalWidget<T>>(
-        state, std::function<bool(T)>(predicate));
-    widget->setSelf(widget);
-    return widget;
+inline std::shared_ptr<ConditionalWidget<T>> Conditional(State<T> &state,
+                                                         Pred predicate) {
+  auto widget = std::make_shared<ConditionalWidget<T>>(
+      state, std::function<bool(T)>(predicate));
+  widget->setSelf(widget);
+  return widget;
 }
 // ============================================================================
 // FACTORY FUNCTION
