@@ -87,33 +87,28 @@ public:
     return true;
   }
 
-  void computeLayout(HDC hdc, int availableWidth, int availableHeight,
+  void computeLayout(HDC hdc, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     if (imageLoaded) {
       if (autoWidth && autoHeight) {
-        // Use original image dimensions
         width = imageWidth;
         height = imageHeight;
       } else if (autoWidth) {
-        // Fixed height, auto width (maintain aspect ratio)
         float aspect = (float)imageWidth / imageHeight;
         width = (int)(height * aspect);
       } else if (autoHeight) {
-        // Fixed width, auto height (maintain aspect ratio)
         float aspect = (float)imageHeight / imageWidth;
         height = (int)(width * aspect);
       }
-      // else: both width and height are fixed
     } else {
-      // No image loaded - use specified size or default
       if (autoWidth)
         width = 100;
       if (autoHeight)
         height = 100;
     }
 
-    width += paddingLeft + paddingRight;
-    height += paddingTop + paddingBottom;
+    width = constraints.clampWidth(width + paddingLeft + paddingRight);
+    height = constraints.clampHeight(height + paddingTop + paddingBottom);
 
     applyConstraints();
     needsLayout = false;
@@ -247,7 +242,7 @@ public:
   }
 
   std::shared_ptr<ImageWidget> setHeight(int h) {
-        if (height != h) {
+    if (height != h) {
       height = h;
       autoHeight = false;
       markNeedsLayout();

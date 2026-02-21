@@ -82,15 +82,16 @@ public:
   }
 
   // --- Layout ---
-  void computeLayout(HDC hdc, int availableWidth, int availableHeight,
+  void computeLayout(HDC hdc, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     if (autoWidth)
-      width = availableWidth;
+      width = constraints.maxWidth;
     if (autoHeight)
-      height = availableHeight;
+      height = constraints.maxHeight;
 
+    BoxConstraints childConstraints = BoxConstraints::tight(width, height);
     for (auto &child : children)
-      child->computeLayout(hdc, width, height, fontCache);
+      child->computeLayout(hdc, childConstraints, fontCache);
 
     applyConstraints();
     needsLayout = false;
@@ -112,15 +113,17 @@ public:
 // --- AppBar Widget ---
 class AppBarWidget : public Widget {
 public:
-  void computeLayout(HDC hdc, int availableWidth, int availableHeight,
+  void computeLayout(HDC hdc, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     if (autoWidth)
-      width = availableWidth;
+      width = constraints.maxWidth;
 
     if (!children.empty()) {
-      auto &title = children[0];
-      title->computeLayout(hdc, width - paddingLeft - paddingRight,
-                           height - paddingTop - paddingBottom, fontCache);
+      children[0]->computeLayout(
+          hdc,
+          BoxConstraints::loose(width - paddingLeft - paddingRight,
+                                height - paddingTop - paddingBottom),
+          fontCache);
     }
 
     applyConstraints();
@@ -144,7 +147,6 @@ public:
 };
 
 using ContainerWidgetPtr = std::shared_ptr<ContainerWidget>;
-
 
 inline ContainerWidgetPtr Card(WidgetPtr child) {
   auto w = std::make_shared<ContainerWidget>();

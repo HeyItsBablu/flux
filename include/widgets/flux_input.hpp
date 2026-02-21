@@ -3,8 +3,8 @@
 
 #include "flux_core.hpp"
 #include "flux_state.hpp"
-#include <iostream>
 #include <algorithm>
+#include <iostream>
 
 template <typename T> class State;
 
@@ -14,9 +14,6 @@ class RadioGroupWidget;
 using WidgetPtr = std::shared_ptr<Widget>;
 using ClickHandler = std::function<void()>;
 using HoverHandler = std::function<void(bool)>;
-
-
-
 
 class ToggleWidget : public Widget {
 public:
@@ -52,9 +49,8 @@ public:
     paddingTop = paddingBottom = 4;
   }
 
-  void computeLayout(HDC hdc, int availableWidth, int availableHeight,
+  void computeLayout(HDC hdc, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
-    // If there's text (label), measure it and add to width
     if (!text.empty()) {
       HFONT hFont = fontCache.getFont(fontSize, fontWeight);
       HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
@@ -62,9 +58,8 @@ public:
       SIZE textSize;
       GetTextExtentPoint32(hdc, text.c_str(), (int)text.length(), &textSize);
 
-      width = toggleWidth + 12 +
-              textSize.cx; // 12px spacing between toggle and label
-      height = max(toggleHeight, textSize.cy);
+      width = toggleWidth + 12 + textSize.cx;
+      height = max(toggleHeight, (int)textSize.cy);
 
       SelectObject(hdc, hOldFont);
     } else {
@@ -72,8 +67,8 @@ public:
       height = toggleHeight;
     }
 
-    width += paddingLeft + paddingRight;
-    height += paddingTop + paddingBottom;
+    width = constraints.clampWidth(width + paddingLeft + paddingRight);
+    height = constraints.clampHeight(height + paddingTop + paddingBottom);
 
     applyConstraints();
     needsLayout = false;
@@ -363,11 +358,10 @@ public:
     paddingTop = paddingBottom = 10;
   }
 
-  void computeLayout(HDC hdc, int availableWidth, int availableHeight,
+  void computeLayout(HDC hdc, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     if (autoWidth)
-      width = availableWidth;
-
+      width = constraints.maxWidth;
     applyConstraints();
     needsLayout = false;
   }
@@ -614,7 +608,7 @@ public:
     return std::static_pointer_cast<SliderWidget>(shared_from_this());
   }
 
-    std::shared_ptr<SliderWidget> setWidth(int w) {
+  std::shared_ptr<SliderWidget> setWidth(int w) {
     width = w;
     autoWidth = false;
 
@@ -672,13 +666,12 @@ inline SliderWidgetPtr Slider(double minValue = 0.0, double maxValue = 100.0,
   return w;
 }
 
-
 class CheckBoxWidget : public Widget {
 public:
   bool checked = false;
   int boxSize = 16;
 
-  void computeLayout(HDC hdc, int availableWidth, int availableHeight,
+  void computeLayout(HDC hdc, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     if (!text.empty()) {
       measureText(hdc, fontCache);
@@ -689,8 +682,8 @@ public:
 
     height = max(boxSize, height);
 
-    width += paddingLeft + paddingRight;
-    height += paddingTop + paddingBottom;
+    width = constraints.clampWidth(width + paddingLeft + paddingRight);
+    height = constraints.clampHeight(height + paddingTop + paddingBottom);
 
     applyConstraints();
     needsLayout = false;
@@ -794,8 +787,6 @@ inline CheckBoxWidgetPtr CheckBox(const std::string &label = "") {
   return w;
 }
 
-
-
 // ============================================================================
 // RADIO BUTTON WIDGET (Individual radio button)
 // ============================================================================
@@ -819,7 +810,7 @@ public:
     paddingTop = paddingBottom = 4;
   }
 
-  void computeLayout(HDC hdc, int availableWidth, int availableHeight,
+  void computeLayout(HDC hdc, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     if (!text.empty()) {
       measureText(hdc, fontCache);
@@ -830,8 +821,8 @@ public:
 
     height = max(circleSize, height);
 
-    width += paddingLeft + paddingRight;
-    height += paddingTop + paddingBottom;
+    width = constraints.clampWidth(width + paddingLeft + paddingRight);
+    height = constraints.clampHeight(height + paddingTop + paddingBottom);
 
     applyConstraints();
     needsLayout = false;
@@ -957,45 +948,40 @@ public:
 
   RadioGroupWidget() { spacing = 8; }
 
-  void computeLayout(HDC hdc, int availableWidth, int availableHeight,
-                     FontCache &fontCache) override {
-    int totalWidth = 0;
-    int totalHeight = 0;
-    int maxWidth = 0;
-    int maxHeight = 0;
+void computeLayout(HDC hdc, const BoxConstraints &constraints,
+                   FontCache &fontCache) override {
+  int totalWidth  = 0;
+  int totalHeight = 0;
+  int maxWidth    = 0;
+  int maxHeight   = 0;
 
-    // First, compute layout for all children
-    for (auto &child : children) {
-      child->computeLayout(hdc, availableWidth, availableHeight, fontCache);
-
-      if (isVertical) {
-        totalHeight += child->height + child->marginTop + child->marginBottom;
-        maxWidth = max(maxWidth,
-                       child->width + child->marginLeft + child->marginRight);
-      } else {
-        totalWidth += child->width + child->marginLeft + child->marginRight;
-        maxHeight = max(maxHeight,
-                        child->height + child->marginTop + child->marginBottom);
-      }
-    }
-
-    // Add spacing between items
-    int spacingTotal =
-        children.empty() ? 0 : (int)(children.size() - 1) * spacing;
+  for (auto &child : children) {
+    child->computeLayout(hdc, constraints, fontCache);
 
     if (isVertical) {
-      totalHeight += spacingTotal;
-      width = autoWidth ? (maxWidth + paddingLeft + paddingRight) : width;
-      height = autoHeight ? (totalHeight + paddingTop + paddingBottom) : height;
+      totalHeight += child->height + child->marginTop  + child->marginBottom;
+      maxWidth     = max(maxWidth,  child->width  + child->marginLeft + child->marginRight);
     } else {
-      totalWidth += spacingTotal;
-      width = autoWidth ? (totalWidth + paddingLeft + paddingRight) : width;
-      height = autoHeight ? (maxHeight + paddingTop + paddingBottom) : height;
+      totalWidth  += child->width  + child->marginLeft + child->marginRight;
+      maxHeight    = max(maxHeight, child->height + child->marginTop  + child->marginBottom);
     }
-
-    applyConstraints();
-    needsLayout = false;
   }
+
+  int spacingTotal = children.empty() ? 0 : (int)(children.size() - 1) * spacing;
+
+  if (isVertical) {
+    totalHeight += spacingTotal;
+    width  = constraints.clampWidth(autoWidth   ? maxWidth    + paddingLeft + paddingRight  : width);
+    height = constraints.clampHeight(autoHeight ? totalHeight + paddingTop  + paddingBottom : height);
+  } else {
+    totalWidth += spacingTotal;
+    width  = constraints.clampWidth(autoWidth   ? totalWidth  + paddingLeft + paddingRight  : width);
+    height = constraints.clampHeight(autoHeight ? maxHeight   + paddingTop  + paddingBottom : height);
+  }
+
+  applyConstraints();
+  needsLayout = false;
+}
 
   void positionChildren(int contentX, int contentY, int contentWidth,
                         int contentHeight) override {
@@ -1217,7 +1203,6 @@ RadioGroupWithOptions(const std::initializer_list<std::string> &options) {
   return group;
 }
 
-
 class TextInputWidget : public Widget {
 public:
   std::string inputValue;
@@ -1246,14 +1231,12 @@ public:
     autoHeight = false;
   }
 
-  void computeLayout(HDC hdc, int availableWidth, int availableHeight,
-                     FontCache &fontCache) override {
-    if (autoWidth)
-      width = availableWidth;
-
-    applyConstraints();
-    needsLayout = false;
-  }
+void computeLayout(HDC hdc, const BoxConstraints &constraints,
+                   FontCache &fontCache) override {
+  if (autoWidth) width = constraints.maxWidth;
+  applyConstraints();
+  needsLayout = false;
+}
 
   void render(HDC hdc, FontCache &fontCache) override {
     borderColor = isFocused ? focusedBorderColor : unfocusedBorderColor;
@@ -1440,13 +1423,12 @@ public:
     placeholder = ph;
     return std::static_pointer_cast<TextInputWidget>(shared_from_this());
   }
-    std::shared_ptr<TextInputWidget> setWidth(int w) {
+  std::shared_ptr<TextInputWidget> setWidth(int w) {
     width = w;
     autoWidth = false;
 
     return std::static_pointer_cast<TextInputWidget>(shared_from_this());
   }
-
 
 private:
   State<std::string> *boundStringState = nullptr;

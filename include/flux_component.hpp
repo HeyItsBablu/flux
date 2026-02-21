@@ -85,11 +85,10 @@ public:
     }
   }
 
-  void computeLayout(HDC hdc, int availableWidth, int availableHeight,
+  void computeLayout(HDC hdc, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     if (!children.empty()) {
-      children[0]->computeLayout(hdc, availableWidth, availableHeight,
-                                 fontCache);
+      children[0]->computeLayout(hdc, constraints, fontCache);
       if (autoWidth)
         width = children[0]->width;
       if (autoHeight)

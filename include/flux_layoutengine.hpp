@@ -9,7 +9,8 @@ public:
                             int availableHeight, FontCache &fontCache) {
     if (!w)
       return;
-    w->computeLayout(hdc, availableWidth, availableHeight, fontCache);
+    w->computeLayout(
+        hdc, BoxConstraints::loose(availableWidth, availableHeight), fontCache);
   }
 
   static void positionWidget(Widget *w, int x, int y) {

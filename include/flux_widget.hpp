@@ -26,6 +26,70 @@ using ClickHandler = std::function<void()>;
 using HoverHandler = std::function<void(bool)>;
 
 // ============================================================================
+// BOX CONSTRAINTS
+// ============================================================================
+
+struct BoxConstraints {
+  int minWidth;
+  int maxWidth;
+  int minHeight;
+  int maxHeight;
+
+  BoxConstraints(int minW, int maxW, int minH, int maxH)
+      : minWidth(minW), maxWidth(maxW), minHeight(minH), maxHeight(maxH) {
+    normalize();
+  }
+
+  // Tight constraints: exactly this size
+  static BoxConstraints tight(int w, int h) {
+    return BoxConstraints(w, w, h, h);
+  }
+
+  // Loose constraints: 0 to given size
+  static BoxConstraints loose(int w, int h) {
+    return BoxConstraints(0, w, 0, h);
+  }
+
+  // Infinite (unconstrained) constraints
+  static BoxConstraints infinite() {
+    return BoxConstraints(0, 10000, 0, 10000);
+  }
+
+  void normalize() {
+    minWidth = max(0, minWidth);
+    minHeight = max(0, minHeight);
+    if (maxWidth < minWidth)
+      maxWidth = minWidth;
+    if (maxHeight < minHeight)
+      maxHeight = minHeight;
+  }
+
+  int clampWidth(int w) const {
+    return max(minWidth, min(maxWidth, w));
+  }
+
+  int clampHeight(int h) const {
+    return max(minHeight, min(maxHeight, h));
+  }
+
+  // Shrink by padding/border amounts
+  BoxConstraints deflate(int horizontal, int vertical) const {
+    return BoxConstraints(0, max(0, maxWidth - horizontal), 0,
+                          max(0, maxHeight - vertical));
+  }
+
+  // Enforce widget's own min/max on top of these constraints
+  BoxConstraints intersect(int wMin, int wMax, int hMin, int hMax) const {
+    int newMinW = max(minWidth, wMin);
+    int newMaxW = min(maxWidth, wMax);
+    int newMinH = max(minHeight, hMin);
+    int newMaxH = min(maxHeight, hMax);
+    return BoxConstraints(newMinW, max(newMinW, newMaxW), newMinH,
+                          max(newMinH, newMaxH));
+  }
+};
+
+// ============================================================================
 // ENUMS
 // ============================================================================
 
@@ -87,7 +151,7 @@ public:
   bool hasBackground = false;
   bool hasBorder = false;
 
-  // Hover colors (only used if hasHover* flags are set)
+  // Hover colors
   COLORREF hoverBackgroundColor = RGB(255, 255, 255);
   COLORREF hoverTextColor = RGB(0, 0, 0);
   COLORREF hoverBorderColor = RGB(0, 0, 0);
@@ -127,22 +191,32 @@ public:
   virtual bool isExpanded() const { return false; }
 
   virtual void onDetach() {
-    // Propagate to children so the whole sub-tree is cleaned up
     for (auto &child : children)
       child->onDetach();
   }
 
-  // Virtual methods - Override these in subclasses
-  virtual void computeLayout(HDC hdc, int availableWidth, int availableHeight,
-                             FontCache &fontCache);
+  // -----------------------------------------------------------------------
+  // Core layout / render virtuals
+  // -----------------------------------------------------------------------
+
+  /// Measure and set width/height given the incoming constraints.
+  /// Replaces the old (availableWidth, availableHeight) pair.
+  virtual void computeLayout(HDC hdc, const BoxConstraints &constraints,
+                              FontCache &fontCache);
+
   virtual void positionChildren(int contentX, int contentY, int contentWidth,
                                 int contentHeight);
+
   virtual void render(HDC hdc, FontCache &fontCache);
+
   void measureText(HDC hdc, FontCache &fontCache);
   void renderText(HDC hdc, FontCache &fontCache,
                   UINT format = DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-  // Mouse event handlers - Override these for interactive widgets
+  // -----------------------------------------------------------------------
+  // Mouse / keyboard event handlers
+  // -----------------------------------------------------------------------
+
   virtual bool handleMouseWheel(int delta) { return false; }
   virtual bool handleMouseDown(int mx, int my) { return false; }
   virtual bool handleMouseUp(int mx, int my) { return false; }
@@ -155,7 +229,6 @@ public:
     return false;
   }
 
-  // New virtual handlers
   virtual bool handleKeyDown(int keyCode) { return false; }
   virtual bool handleChar(wchar_t ch) { return false; }
   virtual bool handleFocus(bool focused) {
@@ -165,16 +238,17 @@ public:
   }
   virtual bool handleTimer(UINT timerId) { return false; }
 
-  // Hover handling
+  // -----------------------------------------------------------------------
+  // Hover helpers
+  // -----------------------------------------------------------------------
+
   bool updateHoverState(int mouseX, int mouseY) {
     bool nowHovered = (mouseX >= x && mouseX < x + width && mouseY >= y &&
                        mouseY < y + height);
-
     if (nowHovered != isHovered) {
       isHovered = nowHovered;
-      if (onHover) {
+      if (onHover)
         onHover(isHovered);
-      }
       markNeedsPaint();
       return true;
     }
@@ -184,40 +258,41 @@ public:
   void clearHoverState() {
     if (isHovered) {
       isHovered = false;
-      if (onHover) {
+      if (onHover)
         onHover(false);
-      }
       markNeedsPaint();
     }
-    for (auto &child : children) {
+    for (auto &child : children)
       child->clearHoverState();
-    }
   }
 
-  // Get current colors (applying hover if active)
   COLORREF getCurrentBackgroundColor() const {
     return (isHovered && hasHoverBackground) ? hoverBackgroundColor
                                              : backgroundColor;
   }
-
   COLORREF getCurrentTextColor() const {
     return (isHovered && hasHoverTextColor) ? hoverTextColor : textColor;
   }
-
   COLORREF getCurrentBorderColor() const {
     return (isHovered && hasHoverBorderColor) ? hoverBorderColor : borderColor;
   }
 
-  // Mark this widget and all parents as needing layout
+  // -----------------------------------------------------------------------
+  // Dirty tracking
+  // -----------------------------------------------------------------------
+
   void markNeedsLayout() {
     needsLayout = true;
     needsPaint = true;
-    if (parent) {
+    if (parent)
       parent->markNeedsLayout();
-    }
   }
 
   void markNeedsPaint() { needsPaint = true; }
+
+  // -----------------------------------------------------------------------
+  // Tree helpers
+  // -----------------------------------------------------------------------
 
   WidgetPtr setId(const std::string &i) {
     id = i;
@@ -232,6 +307,23 @@ public:
 
   const std::string &getText() const { return text; }
   const std::string &getId() const { return id; }
+
+  // -----------------------------------------------------------------------
+  // Constraint helpers for subclasses
+  // -----------------------------------------------------------------------
+
+  /// Build the BoxConstraints that apply to this widget, intersecting the
+  /// incoming constraints with the widget's own min/max bounds.
+  BoxConstraints selfConstraints(const BoxConstraints &incoming) const {
+    return incoming.intersect(minWidth, maxWidth, minHeight, maxHeight);
+  }
+
+  /// Content-area constraints (subtract padding from incoming).
+  BoxConstraints contentConstraints(const BoxConstraints &incoming) const {
+    int padH = paddingLeft + paddingRight;
+    int padV = paddingTop + paddingBottom;
+    return incoming.deflate(padH, padV);
+  }
 
 protected:
   template <typename T> static std::string valueToString(const T &val) {
@@ -248,6 +340,7 @@ protected:
     else
       return "[unsupported type]";
   }
+
   void applyConstraints() {
     if (width < minWidth)
       width = minWidth;
@@ -276,12 +369,10 @@ protected:
       path.CloseFigure();
     };
 
-    // Fill background
     if (hasBackground) {
       Gdiplus::Color fillColor(backgroundAlpha, GetRValue(bgColor),
                                GetGValue(bgColor), GetBValue(bgColor));
       Gdiplus::SolidBrush brush(fillColor);
-
       if (borderRadius > 0) {
         Gdiplus::GraphicsPath path;
         makeRoundedPath(path, x, y, width, height, borderRadius);
@@ -293,12 +384,10 @@ protected:
       }
     }
 
-    // Draw border
     if (hasBorder) {
       Gdiplus::Color strokeColor(borderAlpha, GetRValue(bdColor),
                                  GetGValue(bdColor), GetBValue(bdColor));
       Gdiplus::Pen pen(strokeColor, (Gdiplus::REAL)borderWidth);
-
       if (borderRadius > 0) {
         Gdiplus::GraphicsPath path;
         makeRoundedPath(path, x, y, width, height, borderRadius);
@@ -313,7 +402,7 @@ protected:
 };
 
 // ============================================================================
-// VIRTUAL METHOD IMPLEMENTATIONS (need FontCache declaration)
+// VIRTUAL METHOD IMPLEMENTATIONS
 // ============================================================================
 
 inline void Widget::measureText(HDC hdc, FontCache &fontCache) {
@@ -326,7 +415,6 @@ inline void Widget::measureText(HDC hdc, FontCache &fontCache) {
   HFONT hFont = fontCache.getFont(fontSize, fontWeight);
   HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
 
-  // UTF-8 → UTF-16
   int wlen = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
   std::wstring wtext(wlen, L'\0');
   MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, wtext.data(), wlen);
@@ -341,6 +429,7 @@ inline void Widget::measureText(HDC hdc, FontCache &fontCache) {
 
   SelectObject(hdc, hOldFont);
 }
+
 inline void Widget::renderText(HDC hdc, FontCache &fontCache, UINT format) {
   if (text.empty())
     return;
@@ -354,30 +443,30 @@ inline void Widget::renderText(HDC hdc, FontCache &fontCache, UINT format) {
   RECT textRect = {x + paddingLeft, y + paddingTop, x + width - paddingRight,
                    y + height - paddingBottom};
 
-  // Convert UTF-8 → UTF-16 so DrawTextW handles all unicode correctly
   int wlen = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
   std::wstring wtext(wlen, L'\0');
   MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, wtext.data(), wlen);
 
   DrawTextW(hdc, wtext.c_str(), -1, &textRect, format);
-
   SelectObject(hdc, hOldFont);
 }
 
-inline void Widget::computeLayout(HDC hdc, int availableWidth,
-                                  int availableHeight, FontCache &fontCache) {
-  // Default: just apply constraints
+inline void Widget::computeLayout(HDC hdc, const BoxConstraints &constraints,
+                                  FontCache &fontCache) {
+  // Default: clamp to constraints and stop.
+  if (!autoWidth)
+    width = constraints.clampWidth(width);
+  if (!autoHeight)
+    height = constraints.clampHeight(height);
   applyConstraints();
   needsLayout = false;
 }
 
 inline void Widget::positionChildren(int contentX, int contentY,
                                      int contentWidth, int contentHeight) {
-  // Default: position children at content origin
   for (auto &child : children) {
     child->x = contentX + child->marginLeft;
     child->y = contentY + child->marginTop;
-
     child->positionChildren(
         child->x + child->paddingLeft, child->y + child->paddingTop,
         child->width - child->paddingLeft - child->paddingRight,
@@ -386,16 +475,10 @@ inline void Widget::positionChildren(int contentX, int contentY,
 }
 
 inline void Widget::render(HDC hdc, FontCache &fontCache) {
-  // Default: draw background if has one
-  if (hasBackground) {
+  if (hasBackground)
     drawRoundedRectangle(hdc);
-  }
-
-  // Render all children
-  for (auto &child : children) {
+  for (auto &child : children)
     child->render(hdc, fontCache);
-  }
-
   needsPaint = false;
 }
 
@@ -406,17 +489,13 @@ inline void Widget::render(HDC hdc, FontCache &fontCache) {
 inline Widget *findWidgetAt(Widget *w, int x, int y) {
   if (!w)
     return nullptr;
-
   for (auto it = w->children.rbegin(); it != w->children.rend(); ++it) {
     Widget *found = findWidgetAt(it->get(), x, y);
     if (found)
       return found;
   }
-
-  if (x >= w->x && x < w->x + w->width && y >= w->y && y < w->y + w->height) {
+  if (x >= w->x && x < w->x + w->width && y >= w->y && y < w->y + w->height)
     return w;
-  }
-
   return nullptr;
 }
 
@@ -424,64 +503,40 @@ inline Widget *findWidgetAt(Widget *w, int x, int y) {
 // MOUSE EVENT HELPER FUNCTIONS
 // ============================================================================
 
-/**
- * Find widget at position and dispatch mouse event
- * Returns true if event was handled
- */
 template <typename Handler>
 inline bool findAndHandleMouseEvent(Widget *widget, int x, int y,
                                     Handler handler) {
   if (!widget)
     return false;
-
-  // Check if point is within widget bounds
   if (x >= widget->x && x < widget->x + widget->width && y >= widget->y &&
       y < widget->y + widget->height) {
-    // Try children first (they're on top)
     for (auto it = widget->children.rbegin(); it != widget->children.rend();
          ++it) {
       if (findAndHandleMouseEvent(it->get(), x, y, handler))
         return true;
     }
-
-    // Then try this widget
     if (handler(widget))
       return true;
   }
-
   return false;
 }
 
-/**
- * Update hover state for all widgets in tree
- * Returns true if any widget changed hover state
- */
 inline bool updateHoverStates(Widget *widget, int mouseX, int mouseY) {
   if (!widget)
     return false;
-
   bool changed = false;
-
-  // Check if mouse is over this widget
   bool isOver = (mouseX >= widget->x && mouseX < widget->x + widget->width &&
                  mouseY >= widget->y && mouseY < widget->y + widget->height);
-
   if (isOver) {
-    // Update this widget's hover state
     changed |= widget->updateHoverState(mouseX, mouseY);
-
-    // Update children
-    for (auto &child : widget->children) {
+    for (auto &child : widget->children)
       changed |= updateHoverStates(child.get(), mouseX, mouseY);
-    }
   } else {
-    // Mouse not over this widget - clear hover state
     if (widget->isHovered) {
       widget->clearHoverState();
       changed = true;
     }
   }
-
   return changed;
 }
 

@@ -169,29 +169,24 @@ public:
   // ----------------------------------------------------------------
   // Layout — pass-through to anchor child
   // ----------------------------------------------------------------
-  void computeLayout(HDC hdc, int availableWidth, int availableHeight,
-                     FontCache &fontCache) override {
-    // Remember window size for edge clamping
-    windowW = availableWidth;
-    windowH = availableHeight;
+void computeLayout(HDC hdc, const BoxConstraints &constraints,
+                   FontCache &fontCache) override {
+  windowW = constraints.maxWidth;
+  windowH = constraints.maxHeight;
 
-    if (autoWidth)
-      width = availableWidth;
-    if (autoHeight)
-      height = availableHeight;
+  if (autoWidth)  width  = constraints.maxWidth;
+  if (autoHeight) height = constraints.maxHeight;
 
-    if (!children.empty()) {
-      auto &anchor = children[0];
-      anchor->computeLayout(hdc, availableWidth, availableHeight, fontCache);
-      if (autoWidth)
-        width = anchor->width;
-      if (autoHeight)
-        height = anchor->height;
-    }
-
-    applyConstraints();
-    needsLayout = false;
+  if (!children.empty()) {
+    auto &anchor = children[0];
+    anchor->computeLayout(hdc, constraints, fontCache);
+    if (autoWidth)  width  = anchor->width;
+    if (autoHeight) height = anchor->height;
   }
+
+  applyConstraints();
+  needsLayout = false;
+}
 
   void positionChildren(int contentX, int contentY, int contentWidth,
                         int contentHeight) override {
@@ -634,14 +629,12 @@ public:
   // ----------------------------------------------------------------
   // Layout
   // ----------------------------------------------------------------
-  void computeLayout(HDC hdc, int availableWidth, int availableHeight,
-                     FontCache &fontCache) override {
-    // Dialog doesn't take up space in normal layout
-    width = 0;
-    height = 0;
-    needsLayout = false;
-  }
-
+void computeLayout(HDC hdc, const BoxConstraints &constraints,
+                   FontCache &fontCache) override {
+  width = 0;
+  height = 0;
+  needsLayout = false;
+}
   void render(HDC hdc, FontCache &fontCache) override {
     // Dialog renders via overlay system, not normal render
     needsPaint = false;
@@ -744,7 +737,7 @@ public:
 
         int contentW = dialogWidth - dialogPadding * 2;
         int contentH = dialogHeight - dialogPadding * 2;
-        content->computeLayout(hdc, contentW, contentH, fontCache);
+       content->computeLayout(hdc, BoxConstraints::tight(contentW, contentH), fontCache);
 
         RECT windowRect = {0, 0, 800, 600};
         windowRect.right = scaffold->width;
@@ -863,7 +856,7 @@ public:
 
       // Only re-layout if dirty (e.g. content changed), not every frame
       if (contentLayoutDirty) {
-        content->computeLayout(hdc, contentW, contentH, fontCache);
+        content->computeLayout(hdc, BoxConstraints::tight(contentW, contentH), fontCache);
 
         content->x = contentX;
         content->y = contentY;
@@ -1045,29 +1038,23 @@ public:
   // ----------------------------------------------------------------
   // Layout — pass-through to the single anchor child
   // ----------------------------------------------------------------
-  void computeLayout(HDC hdc, int availableWidth, int availableHeight,
-                     FontCache &fontCache) override {
-    // Remember window height for Above/Below bounds check
-    windowHeight = availableHeight;
+void computeLayout(HDC hdc, const BoxConstraints &constraints,
+                   FontCache &fontCache) override {
+  windowHeight = constraints.maxHeight;
 
-    if (autoWidth)
-      width = availableWidth;
-    if (autoHeight)
-      height = availableHeight;
+  if (autoWidth)  width  = constraints.maxWidth;
+  if (autoHeight) height = constraints.maxHeight;
 
-    if (!children.empty()) {
-      auto &anchor = children[0];
-      anchor->computeLayout(hdc, availableWidth, availableHeight, fontCache);
-      // Shrink-wrap to anchor size so we don't steal extra hit area
-      if (autoWidth)
-        width = anchor->width;
-      if (autoHeight)
-        height = anchor->height;
-    }
-
-    applyConstraints();
-    needsLayout = false;
+  if (!children.empty()) {
+    auto &anchor = children[0];
+    anchor->computeLayout(hdc, constraints, fontCache);
+    if (autoWidth)  width  = anchor->width;
+    if (autoHeight) height = anchor->height;
   }
+
+  applyConstraints();
+  needsLayout = false;
+}
 
   void positionChildren(int contentX, int contentY, int contentWidth,
                         int contentHeight) override {
@@ -1292,14 +1279,12 @@ public:
   // ----------------------------------------------------------------
   // Layout
   // ----------------------------------------------------------------
-  void computeLayout(HDC hdc, int availableWidth, int availableHeight,
-                     FontCache &fontCache) override {
-    if (autoWidth)
-      width = availableWidth;
-
-    applyConstraints();
-    needsLayout = false;
-  }
+void computeLayout(HDC hdc, const BoxConstraints &constraints,
+                   FontCache &fontCache) override {
+  if (autoWidth) width = constraints.maxWidth;
+  applyConstraints();
+  needsLayout = false;
+}
 
   // ----------------------------------------------------------------
   // Render (Only render the main dropdown box, not the list)

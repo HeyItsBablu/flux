@@ -2,8 +2,8 @@
 #define FLUX_APP_HPP
 
 #include "widgets/widgets.hpp"
-#include <string>
 #include <algorithm>
+#include <string>
 
 // ============================================================================
 // APP THEME - Similar to Flutter's ThemeData
@@ -169,8 +169,6 @@ inline WidgetPtr ThemedCard(WidgetPtr child) {
 //   200 = Dialog (backdrop + box)
 //   300 = Dialog-internal dropdown / context menu
 
-
-
 // ============================================================================
 // FLUX APP WIDGET - Similar to MaterialApp
 // ============================================================================
@@ -180,7 +178,6 @@ private:
   // Overlay stack is kept sorted ascending by zIndex at all times.
   // Render order:  front → back  (lowest zIndex first, highest last = on top)
   // Hit-test order: back → front (highest zIndex first = topmost widget wins)
-
 
 public:
   std::string title;
@@ -196,27 +193,28 @@ public:
     }
   }
 
-
-
   // ----------------------------------------------------------------
   // LAYOUT
   // ----------------------------------------------------------------
 
-  void computeLayout(HDC hdc, int availableWidth, int availableHeight,
+  void computeLayout(HDC hdc, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     if (autoWidth)
-      width = availableWidth;
+      width = constraints.maxWidth;
     if (autoHeight)
-      height = availableHeight;
+      height = constraints.maxHeight;
 
     if (!children.empty()) {
-      children[0]->computeLayout(hdc, width, height, fontCache);
+      children[0]->computeLayout(
+          hdc,
+          BoxConstraints::tight(width - paddingLeft - paddingRight,
+                                height - paddingTop - paddingBottom),
+          fontCache);
     }
 
     applyConstraints();
     needsLayout = false;
   }
-
   void positionChildren(int contentX, int contentY, int contentWidth,
                         int contentHeight) override {
     if (!children.empty()) {
@@ -245,8 +243,6 @@ public:
     if (!children.empty()) {
       children[0]->render(hdc, fontCache);
     }
-
-
 
     if (debugShowWidgetBounds) {
       drawDebugBounds(hdc);

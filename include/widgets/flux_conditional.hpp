@@ -249,24 +249,22 @@ public:
     return self;
   }
 
-  void computeLayout(HDC hdc, int availableWidth, int availableHeight,
-                     FontCache &fontCache) override {
-    rebuildChild();
+void computeLayout(HDC hdc, const BoxConstraints &constraints,
+                   FontCache &fontCache) override {
+  rebuildChild();
 
-    if (!children.empty()) {
-      children[0]->computeLayout(
-          hdc, availableWidth - paddingLeft - paddingRight,
-          availableHeight - paddingTop - paddingBottom, fontCache);
+  if (!children.empty()) {
+    children[0]->computeLayout(hdc, constraints.deflate(paddingLeft + paddingRight,
+                                                         paddingTop + paddingBottom),
+                               fontCache);
 
-      if (autoWidth)
-        width = children[0]->width + paddingLeft + paddingRight;
-      if (autoHeight)
-        height = children[0]->height + paddingTop + paddingBottom;
-    }
-
-    applyConstraints();
-    needsLayout = false;
+    if (autoWidth)  width  = children[0]->width  + paddingLeft + paddingRight;
+    if (autoHeight) height = children[0]->height + paddingTop  + paddingBottom;
   }
+
+  applyConstraints();
+  needsLayout = false;
+}
 
   void positionChildren(int contentX, int contentY, int contentWidth,
                         int contentHeight) override {

@@ -206,10 +206,11 @@ public:
   // ----------------------------------------------------------------
   // Widget overrides
   // ----------------------------------------------------------------
-  void computeLayout(HDC hdc, int availableWidth, int availableHeight,
+  void computeLayout(HDC hdc, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
-    width = autoWidth ? availableWidth : min(width, availableWidth);
-    height = autoHeight ? availableHeight : min(height, availableHeight);
+    width = constraints.clampWidth(autoWidth ? constraints.maxWidth : width);
+    height =
+        constraints.clampHeight(autoHeight ? constraints.maxHeight : height);
 
     applyConstraints();
     needsLayout = false;
@@ -770,15 +771,17 @@ private:
 // --- Text Widget ---
 class TextWidget : public Widget {
 public:
-  void computeLayout(HDC hdc, int availableWidth, int availableHeight,
+  void computeLayout(HDC hdc, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     measureText(hdc, fontCache);
 
-    // Only add padding if we're auto-sizing
     if (autoWidth)
       width += paddingLeft + paddingRight;
     if (autoHeight)
       height += paddingTop + paddingBottom;
+
+    width = constraints.clampWidth(width);
+    height = constraints.clampHeight(height);
 
     applyConstraints();
     needsLayout = false;
@@ -1058,10 +1061,10 @@ public:
   // Layout
   // ----------------------------------------------------------------
 
-  void computeLayout(HDC hdc, int availableWidth, int availableHeight,
+  void computeLayout(HDC hdc, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     if (autoWidth)
-      width = availableWidth;
+      width = constraints.maxWidth;
     applyConstraints();
     needsLayout = false;
   }
@@ -1166,10 +1169,10 @@ inline ProgressBarWidgetPtr ProgressBar(double value = 0.0) {
 // --- Divider Widget ---
 class DividerWidget : public Widget {
 public:
-  void computeLayout(HDC hdc, int availableWidth, int availableHeight,
+  void computeLayout(HDC hdc, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     if (autoWidth)
-      width = availableWidth;
+      width = constraints.maxWidth;
     applyConstraints();
     needsLayout = false;
   }

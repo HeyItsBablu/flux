@@ -1,325 +1,232 @@
 #include "flux.hpp"
-#include "flux_app.hpp"
-#include <windows.h>
 
-// ============================================================================
-// EXAMPLE 1: Basic FluxApp with Light Theme
-// ============================================================================
 
-class SimpleCounter : public StatefulComponent {
-    State<int> count;
-public:
-    SimpleCounter() : count(0, context) {}
-    
-    WidgetPtr build() override {
-        return Scaffold(
-            ThemedAppBar("Counter App"),  // Uses theme colors!
-            
-            Center(
-                Column(
-                    Text("Count: " + count.toString())
-                        ->setFontSize(32)
-                        ->setTextColor(ThemeProvider::getTheme().primaryColor),
-                    
-                    SizedBox(0, 20),
-                    
-                    ThemedButton("Increment", [this]() { count++; })
-                )
-                ->setSpacing(10)
-            )
-        );
-    }
+struct LogEntry {
+  int id;
+  std::string message;
+  COLORREF color;
 };
 
-WidgetPtr lightThemeApp(FluxUI* app) {
-    return FluxApp(
-        "Light Theme App",                // Title
-        BuildComponent<SimpleCounter>(),  // Home widget
-        AppTheme::light()                 // Theme
-    );
-}
+class ScrollStressTest : public Component {
+  State<std::vector<LogEntry>> logItems;
+  State<std::vector<int>>      gridItems;
+  State<int>                   nextId;
+  State<bool>                  showGrid;
 
-// ============================================================================
-// EXAMPLE 2: Dark Theme App
-// ============================================================================
+  UINT_PTR timerId = 0;
+  int autoAddCount = 0;
 
-class DarkThemeCounter : public StatefulComponent {
-    State<int> count;
+  const std::vector<std::string> messages = {
+    "Constraint propagation OK",
+    "BoxConstraints::tight applied",
+    "Flex child allocated",
+    "Scrollbar thumb updated",
+    "Layout pass complete",
+    "Viewport clamped",
+    "Child remeasured",
+    "Padding deflated",
+  };
+
+  const COLORREF tagColors[6] = {
+    RGB(239, 83,  80),
+    RGB(66,  165, 245),
+    RGB(102, 187, 106),
+    RGB(255, 167, 38),
+    RGB(171, 71,  188),
+    RGB(38,  198, 218),
+  };
+
 public:
-    DarkThemeCounter() : count(0, context) {}
-    
-    WidgetPtr build() override {
-        auto theme = ThemeProvider::getTheme();
-        
-        return Scaffold(
-            ThemedAppBar("Dark Theme"),
-            
-            Center(
-                ThemedCard(
-                    Column(
-                        Text("Dark Mode Counter")
-                            ->setFontSize(18)
-                            ->setFontWeight(FontWeight::Bold)
-                            ->setTextColor(theme.textColor),
-                        
-                        SizedBox(0, 10),
-                        
-                        Text(count)
-                            ->setFontSize(48)
-                            ->setTextColor(theme.primaryColor),
-                        
-                        SizedBox(0, 10),
-                        
-                        Row(
-                            ThemedButton("+", [this]() { count++; }),
-                            ThemedButton("-", [this]() { if (count.get() > 0) count--; })
+  ScrollStressTest()
+    : logItems({}, context),
+      gridItems({}, context),
+      nextId(1, context),
+      showGrid(false, context) {}
+
+  void initState() override {
+    for (int i = 0; i < 12; i++) addOne();
+
+    timerId = context->setInterval(1000, [this]() {
+      if (autoAddCount >= 20) {
+        context->clearInterval(timerId);
+        timerId = 0;
+        return;
+      }
+      addOne();
+      autoAddCount++;
+    });
+  }
+
+  void dispose() override {
+    if (timerId) { context->clearInterval(timerId); timerId = 0; }
+    Component::dispose();
+  }
+
+  void addOne() {
+    int id = nextId.get();
+
+    auto lg = logItems.get();
+    lg.push_back({ id, "#" + std::to_string(id) + " — " + messages[id % 8], tagColors[id % 6] });
+    logItems.set(lg);
+
+    auto gi = gridItems.get();
+    gi.push_back(id);
+    gridItems.set(gi);
+
+    nextId.set(id + 1);
+  }
+
+  void removeFirst() {
+    auto lg = logItems.get();
+    if (!lg.empty()) { lg.erase(lg.begin()); logItems.set(lg); }
+    auto gi = gridItems.get();
+    if (!gi.empty()) { gi.erase(gi.begin()); gridItems.set(gi); }
+  }
+
+  void clearAll() {
+    logItems.set({});
+    gridItems.set({});
+    nextId.set(1);
+    autoAddCount = 0;
+  }
+
+  WidgetPtr build() override {
+    return Scaffold(
+        AppBar("Scroll Stress Test"),
+        Column(
+
+            // ── Toolbar ───────────────────────────────────────────────
+            Row(
+                Button("+ Add",    [this]{ addOne(); }),
+                Button("- Remove", [this]{ removeFirst(); }),
+                Button("Clear",    [this]{ clearAll(); }),
+                SizedBox(16, 0),
+                Text(logItems, [](const std::vector<LogEntry> &v) {
+                    return std::to_string(v.size()) + " items";
+                })->setTextColor(RGB(100, 100, 100)),
+                SizedBox(16, 0),
+                Button("List", [this]{ showGrid.set(false); }),
+                Button("Grid", [this]{ showGrid.set(true); })
+            )
+            ->setSpacing(8)
+            ->setPadding(12),
+
+            Divider(),
+
+            // ── Switch between list and grid via bool state ───────────
+            Expanded(
+                Conditional(showGrid)
+                ->Then([this]() -> WidgetPtr {
+                    return Padding(12,
+                        Column(
+                            Text("GridView — 3 columns")
+                                ->setFontSize(12)
+                                ->setTextColor(RGB(120, 120, 120)),
+                            SizedBox(0, 6),
+                            Expanded(
+                                GridView(gridItems)
+                                    ->columns(3)
+                                    ->setSpacing(10)
+                                    ->itemBuilder([this](int i, const int &id) -> WidgetPtr {
+                                        COLORREF c = tagColors[id % 6];
+                                        return Container(
+                                            Center(
+                                                Text(std::to_string(id))
+                                                    ->setFontSize(22)
+                                                    ->setFontWeight(FontWeight::Bold)
+                                                    ->setTextColor(RGB(255, 255, 255))
+                                            )
+                                        )
+                                        ->setHeight(90)
+                                        ->setBackgroundColor(c)
+                                        ->setBorderRadius(8);
+                                    })
+                            )
+                        )->setSpacing(0)
+                    );
+                })
+                ->Else([this]() -> WidgetPtr {
+                    return Row(
+
+                        // Vertical ListView
+                        Expanded(
+                            Column(
+                                Text("Vertical List")
+                                    ->setFontSize(12)
+                                    ->setTextColor(RGB(120, 120, 120)),
+                                SizedBox(0, 6),
+                                Expanded(
+                                    ListView(logItems)
+                                        ->itemBuilder([this](int i, const LogEntry &e) -> WidgetPtr {
+                                            return Row(
+                                                Container()
+                                                    ->setWidth(4)
+                                                    ->setBackgroundColor(e.color)
+                                                    ->setMinHeight(36),
+                                                SizedBox(8, 0),
+                                                Text(e.message)->setFontSize(12)
+                                            )
+                                            ->setCrossAlignment(Alignment::Center);
+                                        })
+                                        ->separator([]() -> WidgetPtr { return Divider(); })
+                                        ->setScrollbarColor(RGB(180, 180, 200))
+                                )
+                            )
+                            ->setSpacing(0)
+                            ->setPadding(12)
+                        ),
+
+                        Container()->setWidth(1)->setBackgroundColor(RGB(220, 220, 220)),
+
+                        // Horizontal ListView
+                        Expanded(
+                            Column(
+                                Text("Horizontal List")
+                                    ->setFontSize(12)
+                                    ->setTextColor(RGB(120, 120, 120)),
+                                SizedBox(0, 6),
+                                Container(
+                                    ListView(logItems)
+                                        ->setHorizontal(true)
+                                        ->itemBuilder([this](int i, const LogEntry &e) -> WidgetPtr {
+                                            return Container(
+                                                Center(
+                                                    Text(std::to_string(e.id))
+                                                        ->setFontSize(20)
+                                                        ->setFontWeight(FontWeight::Bold)
+                                                        ->setTextColor(RGB(255, 255, 255))
+                                                )
+                                            )
+                                            ->setWidth(80)
+                                            ->setHeight(80)
+                                            ->setBackgroundColor(e.color)
+                                            ->setBorderRadius(8);
+                                        })
+                                        ->setSpacing(8)
+                                )
+                                ->setHeight(110)
+                            )
+                            ->setSpacing(0)
+                            ->setPadding(12)
                         )
-                        ->setSpacing(10)
-                        ->setMainAxisAlignment(MainAxisAlignment::Center)
-                    )
-                    ->setSpacing(0)
-                )
+
+                    )->setSpacing(0);
+                })
             )
-        );
-    }
+
+        )->setSpacing(0)
+    );
+  }
 };
 
-WidgetPtr darkThemeApp(FluxUI* app) {
-    return FluxApp(
-        "Dark Theme App",
-        BuildComponent<DarkThemeCounter>(),
-        AppTheme::dark()  // Dark theme!
-    );
+WidgetPtr createApp(FluxUI *app) {
+  return FluxApp("Scroll Stress Test", BuildComponent<ScrollStressTest>(),
+                 AppTheme::light());
 }
 
-// ============================================================================
-// EXAMPLE 3: Custom Theme with Material Colors
-// ============================================================================
-
-WidgetPtr customThemeApp(FluxUI* app) {
-    // Create custom theme
-    AppTheme customTheme;
-    customTheme.primaryColor = RGB(156, 39, 176);    // Purple
-    customTheme.accentColor = RGB(255, 235, 59);     // Yellow
-    customTheme.backgroundColor = RGB(245, 245, 245);
-    customTheme.appBarColor = RGB(156, 39, 176);
-    customTheme.buttonColor = RGB(156, 39, 176);
-    
-    return FluxApp(
-        "Custom Theme",
-        BuildComponent<SimpleCounter>(),
-        customTheme
-    );
-}
-
-// ============================================================================
-// EXAMPLE 4: Material Color Themes
-// ============================================================================
-
-WidgetPtr materialRedApp(FluxUI* app) {
-    return FluxApp(
-        "Material Red",
-        BuildComponent<SimpleCounter>(),
-        AppTheme::materialRed()
-    );
-}
-
-WidgetPtr materialGreenApp(FluxUI* app) {
-    return FluxApp(
-        "Material Green",
-        BuildComponent<SimpleCounter>(),
-        AppTheme::materialGreen()
-    );
-}
-
-// ============================================================================
-// EXAMPLE 5: Debug Mode (Show Widget Bounds)
-// ============================================================================
-
-WidgetPtr debugApp(FluxUI* app) {
-    return FluxApp(
-        "Debug Mode",
-        BuildComponent<SimpleCounter>(),
-        AppTheme::light(),
-        true  // debugShowWidgetBounds = true (shows red outlines)
-    );
-}
-
-// ============================================================================
-// EXAMPLE 6: Complex App with Multiple Themed Widgets
-// ============================================================================
-
-class ThemedDashboard : public StatefulComponent {
-    State<int> total;
-    State<int> active;
-    State<int> completed;
-    
-public:
-    ThemedDashboard() 
-        : total(0, context),
-          active(0, context),
-          completed(0, context) {}
-    
-    WidgetPtr build() override {
-        auto theme = ThemeProvider::getTheme();
-        
-        auto createStatCard = [&](const std::string& title, State<int>& value, COLORREF color) {
-            return ThemedCard(
-                Column(
-                    Text(title)
-                        ->setFontSize(14)
-                        ->setTextColor(theme.secondaryTextColor),
-                    
-                    SizedBox(0, 10),
-                    
-                    Text(value)
-                        ->setFontSize(32)
-                        ->setFontWeight(FontWeight::Bold)
-                        ->setTextColor(color),
-                    
-                    SizedBox(0, 10),
-                    
-                    ThemedButton("Add", [&value]() { value++; })
-                )
-                ->setSpacing(0)
-                ->setCrossAlignment(Alignment::Center)
-            )
-            ->setMinWidth(150);
-        };
-        
-        return Scaffold(
-            ThemedAppBar("Dashboard"),
-            
-            Padding(20,
-                Column(
-                    Text("Task Statistics")
-                        ->setFontSize(theme.titleFontSize)
-                        ->setFontWeight(theme.titleFontWeight)
-                        ->setTextColor(theme.textColor),
-                    
-                    SizedBox(0, 20),
-                    
-                    Row(
-                        createStatCard("Total", total, theme.primaryColor),
-                        createStatCard("Active", active, RGB(255, 152, 0)),
-                        createStatCard("Done", completed, RGB(76, 175, 80))
-                    )
-                    ->setSpacing(15)
-                    ->setMainAxisAlignment(MainAxisAlignment::Center)
-                )
-                ->setSpacing(0)
-            )
-        );
-    }
-};
-
-WidgetPtr dashboardApp(FluxUI* app) {
-    return FluxApp(
-        "Themed Dashboard",
-        BuildComponent<ThemedDashboard>(),
-        AppTheme::materialBlue()
-    );
-}
-
-// ============================================================================
-// EXAMPLE 7: Theme Switcher
-// ============================================================================
-
-class ThemeSwitcherApp : public StatefulComponent {
-    State<int> themeIndex;
-    
-public:
-    ThemeSwitcherApp() : themeIndex(0, context) {}
-    
-    void switchTheme() {
-        themeIndex.set((themeIndex.get() + 1) % 3);
-        
-        // Update global theme
-        switch (themeIndex.get()) {
-            case 0: ThemeProvider::setTheme(AppTheme::light()); break;
-            case 1: ThemeProvider::setTheme(AppTheme::dark()); break;
-            case 2: ThemeProvider::setTheme(AppTheme::materialGreen()); break;
-        }
-        
-        // Rebuild to apply new theme
-        rebuild();
-    }
-    
-    WidgetPtr build() override {
-        auto theme = ThemeProvider::getTheme();
-        
-        std::string themeName;
-        switch (themeIndex.get()) {
-            case 0: themeName = "Light Theme"; break;
-            case 1: themeName = "Dark Theme"; break;
-            case 2: themeName = "Green Theme"; break;
-        }
-        
-        return Scaffold(
-            ThemedAppBar("Theme Switcher"),
-            
-            Center(
-                ThemedCard(
-                    Column(
-                        Text("Current Theme")
-                            ->setFontSize(14)
-                            ->setTextColor(theme.secondaryTextColor),
-                        
-                        SizedBox(0, 10),
-                        
-                        Text(themeName)
-                            ->setFontSize(24)
-                            ->setFontWeight(FontWeight::Bold)
-                            ->setTextColor(theme.primaryColor),
-                        
-                        SizedBox(0, 20),
-                        
-                        ThemedButton("Switch Theme", [this]() { switchTheme(); })
-                    )
-                    ->setSpacing(0)
-                    ->setCrossAlignment(Alignment::Center)
-                )
-            )
-        );
-    }
-};
-
-WidgetPtr themeSwitcherApp(FluxUI* app) {
-    return FluxApp(
-        "Theme Switcher",
-        BuildComponent<ThemeSwitcherApp>(),
-        AppTheme::light()
-    );
-}
-
-// ============================================================================
-// ENTRY POINT - Choose which demo to run
-// ============================================================================
-
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
-{
-    FluxUI app(hInstance);
-    
-    // Choose which example to run:
-    
-    // Basic examples:
-    // app.build([&]() { return lightThemeApp(&app); });
-    // app.build([&]() { return darkThemeApp(&app); });
-    // app.build([&]() { return customThemeApp(&app); });
-    
-    // Material color themes:
-    // app.build([&]() { return materialRedApp(&app); });
-    // app.build([&]() { return materialGreenApp(&app); });
-    
-    // Debug mode:
-    // app.build([&]() { return debugApp(&app); });
-    
-    // Complex examples:
-    app.build([&]() { return dashboardApp(&app); });
-    
-    // Theme switcher:
-    // app.build([&]() { return themeSwitcherApp(&app); });
-    
-    app.createWindow("FluxApp Demo", 800, 600);
-    return app.run();
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
+  FluxUI app(hInstance);
+  app.build([&]() { return createApp(&app); });
+  app.createWindow("FluxUI - Scroll Stress Test", 900, 700);
+  return app.run();
 }
