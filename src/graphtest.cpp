@@ -1,92 +1,132 @@
 #include "flux.hpp"
-#include "flux_graph.hpp"
+#include <cmath>
 #include <windows.h>
-// ============================================================================
-// PARTIAL REBUILD TEST
-//
-// Layout of the window:
-//
-//  ┌─────────────────────────────────────────────────────┐
-//  │  AppBar                                             │
-//  ├──────────────────────┬──────────────────────────────┤
-//  │  LEFT PANEL          │  RIGHT PANEL                 │
-//  │  (fixed 380px wide)  │  (fixed 380px wide)          │
-//  │                      │                              │
-//  │  [Counter Card]      │  [Text Input Card]           │
-//  │   count state        │   inputText state            │
-//  │                      │                              │
-//  │  [Toggle Card]       │  [Slider Card]               │
-//  │   toggleState        │   sliderValue state          │
-//  │                      │                              │
-//  │  [Repaint Log]       │  [Progress Card]             │
-//  │   shows which zone   │   driven by slider           │
-//  │   last changed       │                              │
-//  └──────────────────────┴──────────────────────────────┘
-//
-//  Each card is a fixed-size Container (autoWidth=false, autoHeight=false)
-//  so it acts as a layout boundary.  When its state changes only its own
-//  rect should be invalidated — the opposite panel must NOT flicker.
-//
-//  To visually verify: watch the window while clicking/typing.  The areas
-//  that do NOT have focus should stay perfectly still (no full-window flash).
-// ============================================================================
 
-class PartialRebuildTestComponent : public Component {
+class SystemMonitorApp : public Component {
 private:
-  State<int> counter;
-  State<bool> toggleState;
-  State<std::string> inputText;
-  State<double> sliderValue;
-  State<std::string> lastChanged; // tracks which zone was touched
+  State<std::vector<float>> cpuData;
+  State<std::vector<float>> memData;
+  State<std::vector<float>> networkData;
+  State<int> elapsed;
+  State<std::string> statusText;
+
+  UINT_PTR timerId = 0;
+  static constexpr int MAX_POINTS = 60;
+  float time = 0.0f;
 
 public:
-  PartialRebuildTestComponent()
-      : counter(0, context), toggleState(false, context),
-        inputText("Edit me", context), sliderValue(0.4, context),
-        lastChanged("none", context) {}
+  SystemMonitorApp()
+      : cpuData({}, context), memData({}, context), networkData({}, context),
+        elapsed(0, context), statusText("Running...", context) {}
+
+  void initState() override {
+    // Seed with initial flat data
+    cpuData.set(std::vector<float>(MAX_POINTS, 0.f));
+    memData.set(std::vector<float>(MAX_POINTS, 0.f));
+    networkData.set(std::vector<float>(MAX_POINTS, 0.f));
+
+    timerId = context->setInterval(1000, [this]() {
+      time += 1.0f;
+      elapsed.set(elapsed.get() + 1);
+
+      // Simulate CPU — sine wave + noise
+      pushValue(cpuData, 30.f + 20.f * std::sin(time * 0.3f) +
+                             5.f * std::sin(time * 1.7f));
+
+      // Simulate Memory — slow climb
+      pushValue(memData, 40.f + 15.f * std::sin(time * 0.1f) +
+                             3.f * std::cos(time * 0.5f));
+
+      // Simulate Network — spiky
+      float spike = (std::fmod(time, 7.f) < 1.f) ? 60.f : 0.f;
+      pushValue(networkData,
+                10.f + 8.f * std::abs(std::sin(time * 0.8f)) + spike);
+
+      // Update status
+      std::string s = "Uptime: " + std::to_string(elapsed.get()) + "s";
+      statusText.set(s);
+    });
+  }
+
+  void dispose() override {
+    if (timerId) {
+      context->clearInterval(timerId);
+      timerId = 0;
+    }
+    Component::dispose();
+  }
 
   WidgetPtr build() override {
-
-    // ── ROOT ──────────────────────────────────────────────────────────────
-
     return Scaffold(
-        AppBar("Partial Rebuild Test — each card is an independent layout "
-               "boundary"),
+        AppBar("System Monitor"),
+        Center(Column(
 
-        Container(
-            Center(
-                Column(Graph(500, 300)
-                           ->addSeries("Temperature",
-                                       {22, 24, 27, 23, 19, 21, 26}, 1.0f, 0.4f,
-                                       0.2f)
-                           ->setTitle("Daily Temps")
-                           ->setXLabels({"Mon", "Tue", "Wed", "Thu", "Fri",
-                                         "Sat", "Sun"}),
-                       Graph(600, 350)
-                           ->setType(GraphType::Bar)
-                           ->addSeries("Sales", {120, 95, 180, 75, 200}, 0.2f,
-                                       0.7f, 1.0f)
-                           ->addSeries("Target", {100, 100, 150, 100, 180},
-                                       1.0f, 0.6f, 0.2f)
-                           ->setXLabels({"Q1", "Q2", "Q3", "Q4", "Q5"}),
-                       Graph(500, 280)
-                           ->setType(GraphType::Area)
-                           ->addSeries("Revenue", {10, 40, 30, 80, 60, 95, 110},
-                                       0.3f, 1.0f, 0.5f)
-                           ->setYRange(0, 130))
-                    ->setSpacing(16)
-                    ->setCrossAlignment(Alignment::Center)))
-            ->setBackgroundColor(RGB(235, 240, 252))
-            ->setPadding(24));
+                   // ── Status bar ──────────────────────────────────────
+                   Row(Text("● LIVE")
+                           ->setTextColor(RGB(76, 175, 80))
+                           ->setFontSize(12),
+                       Text(statusText)
+                           ->setTextColor(RGB(150, 150, 150))
+                           ->setFontSize(12))
+                       ->setSpacing(12),
+
+                   SizedBox(0, 16),
+
+                   // ── CPU graph ───────────────────────────────────────
+                   Text("CPU Usage %")
+                       ->setTextColor(RGB(200, 200, 200))
+                       ->setFontSize(13),
+                   SizedBox(0, 6),
+                   Graph(700, 200)
+                       ->addSeries("CPU", cpuData, 1.f, 0.45f, 0.2f)
+                       ->setType(GraphType::Area)
+                       ->setYRange(0.f, 100.f)
+                       ->setShowGrid(true),
+
+                   SizedBox(0, 20),
+
+                   // ── Memory graph ────────────────────────────────────
+                   Text("Memory Usage %")
+                       ->setTextColor(RGB(200, 200, 200))
+                       ->setFontSize(13),
+                   SizedBox(0, 6),
+                   Graph(700, 200)
+                       ->addSeries("Memory", memData, 0.2f, 0.7f, 1.f)
+                       ->setType(GraphType::Area)
+                       ->setYRange(0.f, 100.f)
+                       ->setShowGrid(true),
+
+                   SizedBox(0, 20),
+
+                   // ── Network — multi-series bar chart ────────────────
+                   Text("Network MB/s")
+                       ->setTextColor(RGB(200, 200, 200))
+                       ->setFontSize(13),
+                   SizedBox(0, 6),
+                   Graph(700, 200)
+                       ->addSeries("Network",  networkData, 0.4f, 1.f, 0.6f)
+                       ->setType(GraphType::Bar)
+                       ->setYRange(0.f, 100.f)
+                       ->setShowGrid(true)
+
+                       )
+                   ->setSpacing(0)));
+  }
+
+private:
+  void pushValue(State<std::vector<float>> &state, float val) {
+    auto data = state.get();
+    data.push_back(std::clamp(val, 0.f, 100.f));
+    if ((int)data.size() > MAX_POINTS)
+      data.erase(data.begin());
+    state.set(data);
   }
 };
 
-// ============================================================================
-// ENTRY POINT
-// ============================================================================
+// ── Entry Point ──────────────────────────────────────────────────────────────
 
 WidgetPtr createApp(FluxUI *app) {
-  return FluxApp("Graph Test", BuildComponent<PartialRebuildTestComponent>(),
+  return FluxApp("System Monitor", BuildComponent<SystemMonitorApp>(),
                  AppTheme::materialBlue());
 }
 
@@ -94,11 +134,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
   AllocConsole();
   FILE *fp;
   freopen_s(&fp, "CONOUT$", "w", stdout);
-  std::cout << "=== Graph Test ===" << std::endl;
 
-  GdiplusInitializer gdiplusInit;
   FluxUI app(hInstance);
   app.build([&]() { return createApp(&app); });
-  app.createWindow("FluxUI - Graph Test", 820, 700);
+  app.createWindow("FluxUI - System Monitor", 800, 900);
+
   return app.run();
 }
