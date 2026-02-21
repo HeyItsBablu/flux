@@ -24,7 +24,6 @@ add_compile_options(
 
 add_executable(my_app WIN32
     src/main.cpp
-
 )
 
 target_include_directories(my_app
@@ -44,4 +43,10 @@ target_link_libraries(my_app
 target_link_options(my_app
     PRIVATE
         /SUBSYSTEM:WINDOWS
+)
+
+# Enable Flux debug tools (overflow indicators, warnings) in Debug builds only
+target_compile_definitions(my_app
+    PRIVATE
+        $<$<CONFIG:Debug>:FLUX_DEBUG>
 )

@@ -1,6 +1,8 @@
 #ifndef FLUX_WIDGET_HPP
 #define FLUX_WIDGET_HPP
 
+#include "flux_overflow.hpp"
+
 #include "flux_font.hpp"
 #include <functional>
 #include <gdiplus.h>
@@ -11,6 +13,7 @@
 #include <string>
 #include <vector>
 #include <windows.h>
+
 #pragma comment(lib, "gdiplus.lib")
 
 // ============================================================================
@@ -64,13 +67,9 @@ struct BoxConstraints {
       maxHeight = minHeight;
   }
 
-  int clampWidth(int w) const {
-    return max(minWidth, min(maxWidth, w));
-  }
+  int clampWidth(int w) const { return max(minWidth, min(maxWidth, w)); }
 
-  int clampHeight(int h) const {
-    return max(minHeight, min(maxHeight, h));
-  }
+  int clampHeight(int h) const { return max(minHeight, min(maxHeight, h)); }
 
   // Shrink by padding/border amounts
   BoxConstraints deflate(int horizontal, int vertical) const {
@@ -139,6 +138,8 @@ public:
   MainAxisAlignment mainAxisAlignment = MainAxisAlignment::Start;
   int spacing = 0;
 
+  OverflowInfo overflow;
+
   // Colors
   COLORREF backgroundColor = RGB(255, 255, 255);
   COLORREF textColor = RGB(0, 0, 0);
@@ -202,7 +203,7 @@ public:
   /// Measure and set width/height given the incoming constraints.
   /// Replaces the old (availableWidth, availableHeight) pair.
   virtual void computeLayout(HDC hdc, const BoxConstraints &constraints,
-                              FontCache &fontCache);
+                             FontCache &fontCache);
 
   virtual void positionChildren(int contentX, int contentY, int contentWidth,
                                 int contentHeight);
@@ -300,6 +301,7 @@ public:
   }
 
   void addChild(WidgetPtr child) {
+    if (!child) return; 
     children.push_back(child);
     child->parent = this;
     markNeedsLayout();
@@ -479,6 +481,7 @@ inline void Widget::render(HDC hdc, FontCache &fontCache) {
     drawRoundedRectangle(hdc);
   for (auto &child : children)
     child->render(hdc, fontCache);
+  FluxOverflow::render(hdc, overflow, x, y, width, height);
   needsPaint = false;
 }
 

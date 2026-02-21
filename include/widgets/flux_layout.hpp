@@ -4,6 +4,7 @@
 #include "flux_core.hpp"
 #include "flux_display.hpp"
 #include "flux_state.hpp"
+
 #include <iostream>
 
 // ============================================================================
@@ -62,8 +63,9 @@ public:
           child->width = content.maxWidth;
           child->height = expandedH;
 
-          child->computeLayout(hdc, BoxConstraints::tight(content.maxWidth, expandedH),
-                               fontCache);
+          child->computeLayout(
+              hdc, BoxConstraints::tight(content.maxWidth, expandedH),
+              fontCache);
         }
       }
 
@@ -87,13 +89,22 @@ public:
         totalHeight += spacing;
     }
 
-    width = self.clampWidth(autoWidth
-                                ? maxChildWidth + paddingLeft + paddingRight
-                                : width);
-    height = self.clampHeight(autoHeight
-                                  ? totalHeight + paddingTop + paddingBottom
-                                  : height);
+    int finalW = self.clampWidth(
+        autoWidth ? maxChildWidth + paddingLeft + paddingRight : width);
+    int finalH = self.clampHeight(
+        autoHeight ? totalHeight + paddingTop + paddingBottom : height);
 
+    // ── Overflow detection ──────────────────────────────────────────────────
+    overflow.reset();
+    if (!autoHeight) {
+      overflow = detectColumnOverflow(totalHeight + paddingTop + paddingBottom,
+                                      finalH);
+      if (overflow.hasOverflow())
+        FluxOverflow::logWarning("Column", overflow, id);
+    }
+
+    width = finalW;
+    height = finalH;
     needsLayout = false;
   }
 
@@ -101,8 +112,10 @@ public:
                         int contentHeight) override {
     int totalChildHeight = 0;
     for (auto &child : children)
-      totalChildHeight += child->height + child->marginTop + child->marginBottom;
-    totalChildHeight += spacing * (children.empty() ? 0 : (int)children.size() - 1);
+      totalChildHeight +=
+          child->height + child->marginTop + child->marginBottom;
+    totalChildHeight +=
+        spacing * (children.empty() ? 0 : (int)children.size() - 1);
 
     int currentY = contentY;
 
@@ -140,47 +153,73 @@ public:
   // ------------------------------------------------------------------
 
   std::shared_ptr<ColumnWidget> setAlignment(Alignment align) {
-    if (alignment != align) { alignment = align; markNeedsLayout(); }
+    if (alignment != align) {
+      alignment = align;
+      markNeedsLayout();
+    }
     return std::static_pointer_cast<ColumnWidget>(shared_from_this());
   }
   std::shared_ptr<ColumnWidget> setCrossAlignment(Alignment align) {
-    if (crossAlignment != align) { crossAlignment = align; markNeedsLayout(); }
+    if (crossAlignment != align) {
+      crossAlignment = align;
+      markNeedsLayout();
+    }
     return std::static_pointer_cast<ColumnWidget>(shared_from_this());
   }
   std::shared_ptr<ColumnWidget> setMainAxisAlignment(MainAxisAlignment align) {
-    if (mainAxisAlignment != align) { mainAxisAlignment = align; markNeedsLayout(); }
+    if (mainAxisAlignment != align) {
+      mainAxisAlignment = align;
+      markNeedsLayout();
+    }
     return std::static_pointer_cast<ColumnWidget>(shared_from_this());
   }
   std::shared_ptr<ColumnWidget> setSpacing(int s) {
-    if (spacing != s) { spacing = s; markNeedsLayout(); }
+    if (spacing != s) {
+      spacing = s;
+      markNeedsLayout();
+    }
     return std::static_pointer_cast<ColumnWidget>(shared_from_this());
   }
   std::shared_ptr<ColumnWidget> setFlex(int f) {
-    if (flex != f) { flex = f; markNeedsLayout(); }
+    if (flex != f) {
+      flex = f;
+      markNeedsLayout();
+    }
     return std::static_pointer_cast<ColumnWidget>(shared_from_this());
   }
   std::shared_ptr<ColumnWidget> setWidth(int w) {
-    width = w; autoWidth = false; markNeedsLayout();
+    width = w;
+    autoWidth = false;
+    markNeedsLayout();
     return std::static_pointer_cast<ColumnWidget>(shared_from_this());
   }
   std::shared_ptr<ColumnWidget> setHeight(int h) {
-    height = h; autoHeight = false; markNeedsLayout();
+    height = h;
+    autoHeight = false;
+    markNeedsLayout();
     return std::static_pointer_cast<ColumnWidget>(shared_from_this());
   }
   std::shared_ptr<ColumnWidget> setPadding(int p) {
-    paddingLeft = paddingRight = paddingTop = paddingBottom = p; markNeedsLayout();
+    paddingLeft = paddingRight = paddingTop = paddingBottom = p;
+    markNeedsLayout();
     return std::static_pointer_cast<ColumnWidget>(shared_from_this());
   }
   std::shared_ptr<ColumnWidget> setBackgroundColor(COLORREF color) {
-    backgroundColor = color; hasBackground = true; markNeedsPaint();
+    backgroundColor = color;
+    hasBackground = true;
+    markNeedsPaint();
     return std::static_pointer_cast<ColumnWidget>(shared_from_this());
   }
   std::shared_ptr<ColumnWidget> setBorderRadius(int r) {
-    if (borderRadius != r) { borderRadius = r; markNeedsPaint(); }
+    if (borderRadius != r) {
+      borderRadius = r;
+      markNeedsPaint();
+    }
     return std::static_pointer_cast<ColumnWidget>(shared_from_this());
   }
   std::shared_ptr<ColumnWidget> setMinWidth(int w) {
-    minWidth = w; markNeedsLayout();
+    minWidth = w;
+    markNeedsLayout();
     return std::static_pointer_cast<ColumnWidget>(shared_from_this());
   }
 };
@@ -254,18 +293,28 @@ public:
     for (size_t i = 0; i < children.size(); ++i) {
       auto &child = children[i];
       totalWidth += child->width + child->marginLeft + child->marginRight;
-      maxChildHeight = max(maxChildHeight,
-                                child->height + child->marginTop + child->marginBottom);
+      maxChildHeight = max(maxChildHeight, child->height + child->marginTop +
+                                               child->marginBottom);
       if (i + 1 < children.size())
         totalWidth += spacing;
     }
 
-    width = self.clampWidth(autoWidth ? totalWidth + paddingLeft + paddingRight
-                                      : width);
-    height = self.clampHeight(autoHeight
-                                  ? maxChildHeight + paddingTop + paddingBottom
-                                  : height);
+    int finalW = self.clampWidth(
+        autoWidth ? totalWidth + paddingLeft + paddingRight : width);
+    int finalH = self.clampHeight(
+        autoHeight ? maxChildHeight + paddingTop + paddingBottom : height);
 
+    // ── Overflow detection ──────────────────────────────────────────────────
+    overflow.reset();
+    if (!autoWidth) {
+      overflow =
+          detectRowOverflow(totalWidth + paddingLeft + paddingRight, finalW);
+      if (overflow.hasOverflow())
+        FluxOverflow::logWarning("Row", overflow, id);
+    }
+
+    width = finalW;
+    height = finalH;
     needsLayout = false;
   }
 
@@ -274,7 +323,8 @@ public:
     int totalChildWidth = 0;
     for (auto &child : children)
       totalChildWidth += child->width + child->marginLeft + child->marginRight;
-    totalChildWidth += spacing * (children.empty() ? 0 : (int)children.size() - 1);
+    totalChildWidth +=
+        spacing * (children.empty() ? 0 : (int)children.size() - 1);
 
     int currentX = contentX;
 
@@ -312,39 +362,61 @@ public:
   // ------------------------------------------------------------------
 
   std::shared_ptr<RowWidget> setAlignment(Alignment align) {
-    if (alignment != align) { alignment = align; markNeedsLayout(); }
+    if (alignment != align) {
+      alignment = align;
+      markNeedsLayout();
+    }
     return std::static_pointer_cast<RowWidget>(shared_from_this());
   }
   std::shared_ptr<RowWidget> setCrossAlignment(Alignment align) {
-    if (crossAlignment != align) { crossAlignment = align; markNeedsLayout(); }
+    if (crossAlignment != align) {
+      crossAlignment = align;
+      markNeedsLayout();
+    }
     return std::static_pointer_cast<RowWidget>(shared_from_this());
   }
   std::shared_ptr<RowWidget> setMainAxisAlignment(MainAxisAlignment align) {
-    if (mainAxisAlignment != align) { mainAxisAlignment = align; markNeedsLayout(); }
+    if (mainAxisAlignment != align) {
+      mainAxisAlignment = align;
+      markNeedsLayout();
+    }
     return std::static_pointer_cast<RowWidget>(shared_from_this());
   }
   std::shared_ptr<RowWidget> setSpacing(int s) {
-    if (spacing != s) { spacing = s; markNeedsLayout(); }
+    if (spacing != s) {
+      spacing = s;
+      markNeedsLayout();
+    }
     return std::static_pointer_cast<RowWidget>(shared_from_this());
   }
   std::shared_ptr<RowWidget> setFlex(int f) {
-    if (flex != f) { flex = f; markNeedsLayout(); }
+    if (flex != f) {
+      flex = f;
+      markNeedsLayout();
+    }
     return std::static_pointer_cast<RowWidget>(shared_from_this());
   }
   std::shared_ptr<RowWidget> setWidth(int w) {
-    width = w; autoWidth = false; markNeedsLayout();
+    width = w;
+    autoWidth = false;
+    markNeedsLayout();
     return std::static_pointer_cast<RowWidget>(shared_from_this());
   }
   std::shared_ptr<RowWidget> setHeight(int h) {
-    height = h; autoHeight = false; markNeedsLayout();
+    height = h;
+    autoHeight = false;
+    markNeedsLayout();
     return std::static_pointer_cast<RowWidget>(shared_from_this());
   }
   std::shared_ptr<RowWidget> setPadding(int p) {
-    paddingLeft = paddingRight = paddingTop = paddingBottom = p; markNeedsLayout();
+    paddingLeft = paddingRight = paddingTop = paddingBottom = p;
+    markNeedsLayout();
     return std::static_pointer_cast<RowWidget>(shared_from_this());
   }
   std::shared_ptr<RowWidget> setBackgroundColor(COLORREF color) {
-    backgroundColor = color; hasBackground = true; markNeedsPaint();
+    backgroundColor = color;
+    hasBackground = true;
+    markNeedsPaint();
     return std::static_pointer_cast<RowWidget>(shared_from_this());
   }
 };
@@ -360,22 +432,44 @@ public:
     if (!children.empty()) {
       // Content constraints: remove our padding from the available space.
       // If we have a fixed size, use that as the maximum for the child.
-      int maxW = autoWidth ? self.maxWidth  : width;
+      int maxW = autoWidth ? self.maxWidth : width;
       int maxH = autoHeight ? self.maxHeight : height;
-      BoxConstraints childConstraints = BoxConstraints(0, maxW, 0, maxH)
-                                            .deflate(paddingLeft + paddingRight,
-                                                     paddingTop + paddingBottom);
+      BoxConstraints childConstraints =
+          BoxConstraints(0, maxW, 0, maxH)
+              .deflate(paddingLeft + paddingRight, paddingTop + paddingBottom);
 
       children[0]->computeLayout(hdc, childConstraints, fontCache);
 
       if (autoWidth)
-        width = self.clampWidth(children[0]->width + paddingLeft + paddingRight);
+        width =
+            self.clampWidth(children[0]->width + paddingLeft + paddingRight);
       if (autoHeight)
-        height = self.clampHeight(children[0]->height + paddingTop + paddingBottom);
+        height =
+            self.clampHeight(children[0]->height + paddingTop + paddingBottom);
     } else {
-      width  = autoWidth  ? self.clampWidth(0)  : self.clampWidth(width);
+      width = autoWidth ? self.clampWidth(0) : self.clampWidth(width);
       height = autoHeight ? self.clampHeight(0) : self.clampHeight(height);
     }
+
+    // ── Overflow detection ──────────────────────────────────────────────────
+    overflow.reset();
+    int contentW = width - paddingLeft - paddingRight;
+    int contentH = height - paddingTop - paddingBottom;
+
+    // Only check an axis that the user explicitly fixed.
+    // Auto-sized axes grow to fit, so overflow is impossible on them.
+    if (!autoWidth && children[0]->width > contentW + kOverflowThreshold) {
+      overflow.overflowX = children[0]->width - contentW;
+      overflow.axis = OverflowAxis::Horizontal;
+    }
+    if (!autoHeight && children[0]->height > contentH + kOverflowThreshold) {
+      overflow.overflowY = children[0]->height - contentH;
+      overflow.axis = (overflow.axis == OverflowAxis::Horizontal)
+                          ? OverflowAxis::Both
+                          : OverflowAxis::Vertical;
+    }
+    if (overflow.hasOverflow())
+      FluxOverflow::logWarning("Container", overflow, id);
 
     needsLayout = false;
   }
@@ -398,23 +492,36 @@ public:
   // ------------------------------------------------------------------
 
   std::shared_ptr<ContainerWidget> setHoverBackgroundColor(COLORREF color) {
-    hoverBackgroundColor = color; hasHoverBackground = true; markNeedsPaint();
+    hoverBackgroundColor = color;
+    hasHoverBackground = true;
+    markNeedsPaint();
     return std::static_pointer_cast<ContainerWidget>(shared_from_this());
   }
   std::shared_ptr<ContainerWidget> setHoverBorderColor(COLORREF color) {
-    hoverBorderColor = color; hasHoverBorderColor = true; markNeedsPaint();
+    hoverBorderColor = color;
+    hasHoverBorderColor = true;
+    markNeedsPaint();
     return std::static_pointer_cast<ContainerWidget>(shared_from_this());
   }
   std::shared_ptr<ContainerWidget> setBorderWidth(int w) {
-    if (borderWidth != w) { borderWidth = w; hasBorder = true; markNeedsLayout(); }
+    if (borderWidth != w) {
+      borderWidth = w;
+      hasBorder = true;
+      markNeedsLayout();
+    }
     return std::static_pointer_cast<ContainerWidget>(shared_from_this());
   }
   std::shared_ptr<ContainerWidget> setBorderRadius(int r) {
-    if (borderRadius != r) { borderRadius = r; markNeedsPaint(); }
+    if (borderRadius != r) {
+      borderRadius = r;
+      markNeedsPaint();
+    }
     return std::static_pointer_cast<ContainerWidget>(shared_from_this());
   }
   std::shared_ptr<ContainerWidget> setBackgroundColor(COLORREF color) {
-    backgroundColor = color; hasBackground = true; markNeedsPaint();
+    backgroundColor = color;
+    hasBackground = true;
+    markNeedsPaint();
     return std::static_pointer_cast<ContainerWidget>(shared_from_this());
   }
   template <typename T>
@@ -432,57 +539,92 @@ public:
     return std::static_pointer_cast<ContainerWidget>(shared_from_this());
   }
   std::shared_ptr<ContainerWidget> setBorderColor(COLORREF color) {
-    borderColor = color; hasBorder = true; markNeedsPaint();
+    borderColor = color;
+    hasBorder = true;
+    markNeedsPaint();
     return std::static_pointer_cast<ContainerWidget>(shared_from_this());
   }
   std::shared_ptr<ContainerWidget> setWidth(int w) {
-    if (width != w) { width = w; autoWidth = false; markNeedsLayout(); }
+    if (width != w) {
+      width = w;
+      autoWidth = false;
+      markNeedsLayout();
+    }
     return std::static_pointer_cast<ContainerWidget>(shared_from_this());
   }
   std::shared_ptr<ContainerWidget> setHeight(int h) {
-    if (height != h) { height = h; autoHeight = false; markNeedsLayout(); }
+    if (height != h) {
+      height = h;
+      autoHeight = false;
+      markNeedsLayout();
+    }
     return std::static_pointer_cast<ContainerWidget>(shared_from_this());
   }
   std::shared_ptr<ContainerWidget> setMinWidth(int w) {
-    if (minWidth != w) { minWidth = w; markNeedsLayout(); }
+    if (minWidth != w) {
+      minWidth = w;
+      markNeedsLayout();
+    }
     return std::static_pointer_cast<ContainerWidget>(shared_from_this());
   }
   std::shared_ptr<ContainerWidget> setMinHeight(int h) {
-    if (minHeight != h) { minHeight = h; markNeedsLayout(); }
+    if (minHeight != h) {
+      minHeight = h;
+      markNeedsLayout();
+    }
     return std::static_pointer_cast<ContainerWidget>(shared_from_this());
   }
   std::shared_ptr<ContainerWidget> setMaxWidth(int w) {
-    if (maxWidth != w) { maxWidth = w; markNeedsLayout(); }
+    if (maxWidth != w) {
+      maxWidth = w;
+      markNeedsLayout();
+    }
     return std::static_pointer_cast<ContainerWidget>(shared_from_this());
   }
   std::shared_ptr<ContainerWidget> setMaxHeight(int h) {
-    if (maxHeight != h) { maxHeight = h; markNeedsLayout(); }
+    if (maxHeight != h) {
+      maxHeight = h;
+      markNeedsLayout();
+    }
     return std::static_pointer_cast<ContainerWidget>(shared_from_this());
   }
   std::shared_ptr<ContainerWidget> setFlex(int f) {
-    if (flex != f) { flex = f; markNeedsLayout(); }
+    if (flex != f) {
+      flex = f;
+      markNeedsLayout();
+    }
     return std::static_pointer_cast<ContainerWidget>(shared_from_this());
   }
   std::shared_ptr<ContainerWidget> setPadding(int p) {
     padding = p;
-    paddingLeft = paddingRight = paddingTop = paddingBottom = p; markNeedsLayout();
+    paddingLeft = paddingRight = paddingTop = paddingBottom = p;
+    markNeedsLayout();
     return std::static_pointer_cast<ContainerWidget>(shared_from_this());
   }
   std::shared_ptr<ContainerWidget> setPaddingAll(int left, int top, int right,
                                                  int bottom) {
-    paddingLeft = left; paddingTop = top; paddingRight = right;
-    paddingBottom = bottom; padding = -1; markNeedsLayout();
+    paddingLeft = left;
+    paddingTop = top;
+    paddingRight = right;
+    paddingBottom = bottom;
+    padding = -1;
+    markNeedsLayout();
     return std::static_pointer_cast<ContainerWidget>(shared_from_this());
   }
   std::shared_ptr<ContainerWidget> setMargin(int m) {
     margin = m;
-    marginLeft = marginRight = marginTop = marginBottom = m; markNeedsLayout();
+    marginLeft = marginRight = marginTop = marginBottom = m;
+    markNeedsLayout();
     return std::static_pointer_cast<ContainerWidget>(shared_from_this());
   }
   std::shared_ptr<ContainerWidget> setMarginAll(int left, int top, int right,
                                                 int bottom) {
-    marginLeft = left; marginTop = top; marginRight = right;
-    marginBottom = bottom; margin = -1; markNeedsLayout();
+    marginLeft = left;
+    marginTop = top;
+    marginRight = right;
+    marginBottom = bottom;
+    margin = -1;
+    markNeedsLayout();
     return std::static_pointer_cast<ContainerWidget>(shared_from_this());
   }
   std::shared_ptr<ContainerWidget> setOnHover(HoverHandler handler) {
@@ -490,11 +632,13 @@ public:
     return std::static_pointer_cast<ContainerWidget>(shared_from_this());
   }
   std::shared_ptr<ContainerWidget> setBackgroundAlpha(BYTE alpha) {
-    backgroundAlpha = alpha; markNeedsPaint();
+    backgroundAlpha = alpha;
+    markNeedsPaint();
     return std::static_pointer_cast<ContainerWidget>(shared_from_this());
   }
   std::shared_ptr<ContainerWidget> setBorderAlpha(BYTE alpha) {
-    borderAlpha = alpha; markNeedsPaint();
+    borderAlpha = alpha;
+    markNeedsPaint();
     return std::static_pointer_cast<ContainerWidget>(shared_from_this());
   }
 };
@@ -507,8 +651,10 @@ public:
     BoxConstraints self = selfConstraints(constraints);
 
     // Take all available space (like a tight constraint on max).
-    if (autoWidth)  width  = self.maxWidth;
-    if (autoHeight) height = self.maxHeight;
+    if (autoWidth)
+      width = self.maxWidth;
+    if (autoHeight)
+      height = self.maxHeight;
 
     BoxConstraints childConstraints = contentConstraints(self);
 
@@ -522,12 +668,12 @@ public:
                         int contentHeight) override {
     if (!children.empty()) {
       auto &child = children[0];
-      child->x = contentX + (contentWidth  - child->width)  / 2;
+      child->x = contentX + (contentWidth - child->width) / 2;
       child->y = contentY + (contentHeight - child->height) / 2;
       child->positionChildren(
           child->x + child->paddingLeft, child->y + child->paddingTop,
-          child->width  - child->paddingLeft - child->paddingRight,
-          child->height - child->paddingTop  - child->paddingBottom);
+          child->width - child->paddingLeft - child->paddingRight,
+          child->height - child->paddingTop - child->paddingBottom);
     }
   }
 };
@@ -539,12 +685,12 @@ public:
                      FontCache &fontCache) override {
     // width/height are pre-set; clamp to constraints but respect fixed size.
     BoxConstraints self = selfConstraints(constraints);
-    width  = self.clampWidth(width);
+    width = self.clampWidth(width);
     height = self.clampHeight(height);
 
     if (!children.empty()) {
-      BoxConstraints childConstraints(0, width  - paddingLeft - paddingRight,
-                                      0, height - paddingTop  - paddingBottom);
+      BoxConstraints childConstraints(0, width - paddingLeft - paddingRight, 0,
+                                      height - paddingTop - paddingBottom);
       children[0]->computeLayout(hdc, childConstraints, fontCache);
     }
     needsLayout = false;
@@ -560,23 +706,26 @@ public:
                      FontCache &fontCache) override {
     // Parent (Row/Column) pre-sets width and height to the allocated flex size;
     // pass that down as tight constraints to children.
-    int contentW = width  - paddingLeft - paddingRight;
-    int contentH = height - paddingTop  - paddingBottom;
+    int contentW = width - paddingLeft - paddingRight;
+    int contentH = height - paddingTop - paddingBottom;
 
     if (!children.empty()) {
-      children[0]->computeLayout(
-          hdc, BoxConstraints::loose(contentW, contentH), fontCache);
+      children[0]->computeLayout(hdc, BoxConstraints::loose(contentW, contentH),
+                                 fontCache);
     }
 
     needsLayout = false;
   }
 
   std::shared_ptr<ExpandedWidget> setPadding(int p) {
-    paddingLeft = paddingRight = paddingTop = paddingBottom = p; markNeedsLayout();
+    paddingLeft = paddingRight = paddingTop = paddingBottom = p;
+    markNeedsLayout();
     return std::static_pointer_cast<ExpandedWidget>(shared_from_this());
   }
   std::shared_ptr<ExpandedWidget> setBackgroundColor(COLORREF color) {
-    backgroundColor = color; hasBackground = true; markNeedsPaint();
+    backgroundColor = color;
+    hasBackground = true;
+    markNeedsPaint();
     return std::static_pointer_cast<ExpandedWidget>(shared_from_this());
   }
 };
@@ -589,7 +738,8 @@ using ContainerWidgetPtr = std::shared_ptr<ContainerWidget>;
 
 inline ContainerWidgetPtr Container(WidgetPtr child = nullptr) {
   auto w = std::make_shared<ContainerWidget>();
-  if (child) w->addChild(child);
+  if (child)
+    w->addChild(child);
   return w;
 }
 
@@ -613,14 +763,16 @@ inline WidgetPtr Padding(int p, WidgetPtr child) {
   auto w = std::make_shared<ContainerWidget>();
   w->padding = p;
   w->paddingLeft = w->paddingRight = w->paddingTop = w->paddingBottom = p;
-  if (child) w->addChild(child);
+  if (child)
+    w->addChild(child);
   return w;
 }
 
 inline WidgetPtr Center(WidgetPtr child) {
   auto w = std::make_shared<CenterWidget>();
   w->alignment = Alignment::Center;
-  if (child) w->addChild(child);
+  if (child)
+    w->addChild(child);
   return w;
 }
 
@@ -630,14 +782,16 @@ inline WidgetPtr SizedBox(int width, int height, WidgetPtr child = nullptr) {
   w->height = height;
   w->autoWidth = false;
   w->autoHeight = false;
-  if (child) w->addChild(child);
+  if (child)
+    w->addChild(child);
   return w;
 }
 
 inline WidgetPtr Expanded(WidgetPtr child, int flex = 1) {
   auto w = std::make_shared<ExpandedWidget>();
   w->flex = flex;
-  if (child) w->addChild(child);
+  if (child)
+    w->addChild(child);
   return w;
 }
 
