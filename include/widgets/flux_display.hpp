@@ -924,7 +924,45 @@ class IconWidget : public TextWidget {
 public:
   IconWidget() { fontFamily = "Segoe MDL2 Assets"; }
 
-  // Fluent size setter — returns IconWidget& instead of TextWidget&
+  void computeLayout(HDC hdc, const BoxConstraints &constraints,
+                     FontCache &fontCache) override {
+    if (autoWidth)
+      width = fontSize + paddingLeft + paddingRight;
+    if (autoHeight)
+      height = fontSize + paddingTop + paddingBottom;
+
+    width = constraints.clampWidth(width);
+    height = constraints.clampHeight(height);
+    applyConstraints();
+    needsLayout = false;
+  }
+
+  void render(HDC hdc, FontCache &fontCache) override {
+    if (hasBackground)
+      drawRoundedRectangle(hdc);
+
+    HFONT hFont = fontCache.getFont(fontFamily, fontSize, fontWeight);
+    HFONT hOld = (HFONT)SelectObject(hdc, hFont);
+
+    SetTextColor(hdc, getCurrentTextColor());
+    SetBkMode(hdc, TRANSPARENT);
+
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
+    std::wstring wtext(wlen, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, wtext.data(), wlen);
+
+    SIZE sz = {};
+    GetTextExtentPoint32W(hdc, wtext.c_str(), 1, &sz);
+
+    int tx = x + (width - sz.cx) / 2;
+    int ty = y + (height - sz.cy) / 2;
+
+    TextOutW(hdc, tx, ty, wtext.c_str(), 1);
+
+    SelectObject(hdc, hOld);
+    needsPaint = false;
+  }
+ 
   std::shared_ptr<IconWidget> setSize(int size) {
     setFontSize(size);
     return std::static_pointer_cast<IconWidget>(shared_from_this());

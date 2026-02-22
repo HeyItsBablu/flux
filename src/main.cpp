@@ -49,8 +49,9 @@ public:
                     Container(
                         Column(Row(Text("Left Panel")
                                        ->setFontWeight(FontWeight::Bold),
-                                   Icon(FluxIcons::Add)
-                                       ->setSize(34)
+                                   SizedBox(10, 0),
+                                   Icon(FluxIcons::Settings)
+                                       ->setSize(14)
                                        ->setColor(RGB(0, 0, 0))
                                        ->setHoverColor(RGB(200, 200, 200)))
                                    ->setCrossAxisAlignment(
