@@ -128,11 +128,11 @@ public:
       auto &child = children[i];
       int childX = contentX + child->marginLeft;
 
-      if (crossAlignment == Alignment::Center)
+      if (crossAxisAlignment == CrossAxisAlignment::Center)
         childX = contentX + (contentWidth - child->width) / 2;
-      else if (crossAlignment == Alignment::End)
+      else if (crossAxisAlignment == CrossAxisAlignment::End)
         childX = contentX + contentWidth - child->width - child->marginRight;
-      else if (crossAlignment == Alignment::Stretch)
+      else if (crossAxisAlignment == CrossAxisAlignment::Stretch)
         child->width = contentWidth - child->marginLeft - child->marginRight;
 
       child->x = childX;
@@ -159,9 +159,10 @@ public:
     }
     return std::static_pointer_cast<ColumnWidget>(shared_from_this());
   }
-  std::shared_ptr<ColumnWidget> setCrossAlignment(Alignment align) {
-    if (crossAlignment != align) {
-      crossAlignment = align;
+  std::shared_ptr<ColumnWidget>
+  setCrossAxisAlignment(CrossAxisAlignment align) {
+    if (crossAxisAlignment != align) {
+      crossAxisAlignment = align;
       markNeedsLayout();
     }
     return std::static_pointer_cast<ColumnWidget>(shared_from_this());
@@ -337,11 +338,11 @@ public:
       auto &child = children[i];
       int childY = contentY + child->marginTop;
 
-      if (crossAlignment == Alignment::Center)
+      if (crossAxisAlignment == CrossAxisAlignment::Center)
         childY = contentY + (contentHeight - child->height) / 2;
-      else if (crossAlignment == Alignment::End)
+      else if (crossAxisAlignment == CrossAxisAlignment::End)
         childY = contentY + contentHeight - child->height - child->marginBottom;
-      else if (crossAlignment == Alignment::Stretch)
+      else if (crossAxisAlignment == CrossAxisAlignment::Stretch)
         child->height = contentHeight - child->marginTop - child->marginBottom;
 
       child->x = currentX + child->marginLeft;
@@ -368,9 +369,9 @@ public:
     }
     return std::static_pointer_cast<RowWidget>(shared_from_this());
   }
-  std::shared_ptr<RowWidget> setCrossAlignment(Alignment align) {
-    if (crossAlignment != align) {
-      crossAlignment = align;
+  std::shared_ptr<RowWidget> setCrossAxisAlignment(CrossAxisAlignment align) {
+    if (crossAxisAlignment != align) {
+      crossAxisAlignment = align;
       markNeedsLayout();
     }
     return std::static_pointer_cast<RowWidget>(shared_from_this());

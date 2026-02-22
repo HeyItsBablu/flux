@@ -234,18 +234,18 @@ State<T>& deref(State<T> *state);
 
 ```cpp
 // Without deref — won't compile, widget APIs expect a reference
-Text(count)                                     // ❌ count is a pointer
+Text(count)                                     //  count is a pointer
 
 // With deref — works with every widget that accepts State<T>
-Text(deref(count))                              // ✅
-Text(deref(count), [](int v) { return "Value: " + std::to_string(v); }) // ✅
-TextInput("...")->setInputValue(deref(text))    // ✅
-Slider(0, 100, 1)->setValue(deref(value))       // ✅
-Toggle("...")->setValue(deref(enabled))         // ✅
-CheckBox("...")->setInputValue(deref(checked))  // ✅
-Dropdown(opts)->setSelectedValue(deref(selected)) // ✅
-ProgressBar()->setValue(deref(progress))        // ✅
-Conditional(deref(flag))->Then(...)->Else(...)  // ✅
+Text(deref(count))                              // 
+Text(deref(count), [](int v) { return "Value: " + std::to_string(v); }) // 
+TextInput("...")->setInputValue(deref(text))    // 
+Slider(0, 100, 1)->setValue(deref(value))       // 
+Toggle("...")->setValue(deref(enabled))         // 
+CheckBox("...")->setInputValue(deref(checked))  // 
+Dropdown(opts)->setSelectedValue(deref(selected)) // 
+ProgressBar()->setValue(deref(progress))        // 
+Conditional(deref(flag))->Then(...)->Else(...)  // 
 ```
 
 > Defined in `flux_state.hpp`. Available everywhere via `#include "flux.hpp"`.

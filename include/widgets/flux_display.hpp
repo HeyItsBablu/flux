@@ -771,6 +771,8 @@ private:
 // --- Text Widget ---
 class TextWidget : public Widget {
 public:
+  std::string fontFamily = "Segoe UI";
+
   void computeLayout(HDC hdc, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     measureText(hdc, fontCache);
@@ -905,7 +907,98 @@ public:
     markNeedsLayout();
     return std::static_pointer_cast<TextWidget>(shared_from_this());
   }
+
+  std::shared_ptr<TextWidget> setFontFamily(const std::string &family) {
+    if (fontFamily != family) {
+      fontFamily = family;
+      markNeedsLayout();
+    }
+    return std::static_pointer_cast<TextWidget>(shared_from_this());
+  }
 };
+
+// ── IconWidget
+// ────────────────────────────────────────────────────────────────
+
+class IconWidget : public TextWidget {
+public:
+  IconWidget() { fontFamily = "Segoe MDL2 Assets"; }
+
+  // Fluent size setter — returns IconWidget& instead of TextWidget&
+  std::shared_ptr<IconWidget> setSize(int size) {
+    setFontSize(size);
+    return std::static_pointer_cast<IconWidget>(shared_from_this());
+  }
+
+  std::shared_ptr<IconWidget> setColor(COLORREF color) {
+    setTextColor(color);
+    return std::static_pointer_cast<IconWidget>(shared_from_this());
+  }
+
+  std::shared_ptr<IconWidget> setHoverColor(COLORREF color) {
+    setHoverTextColor(color);
+    return std::static_pointer_cast<IconWidget>(shared_from_this());
+  }
+
+  std::shared_ptr<IconWidget> setIconFontFamily(const std::string &family) {
+    if (fontFamily != family) {
+      fontFamily = family;
+      markNeedsLayout();
+    }
+    return std::static_pointer_cast<IconWidget>(shared_from_this());
+  }
+
+  // Reactive glyph binding
+  template <typename T>
+  std::shared_ptr<IconWidget>
+  setGlyph(State<T> &state, std::function<wchar_t(const T &)> transform) {
+    auto glyphToString = [transform](const T &val) -> std::string {
+      wchar_t g = transform(val);
+      return wcharToUtf8(g); // see helper below
+    };
+    setText(state, glyphToString);
+    return std::static_pointer_cast<IconWidget>(shared_from_this());
+  }
+
+  // Convert a single icon glyph (wchar_t) to a UTF-8 std::string for TextWidget
+  static std::string wcharToUtf8(wchar_t glyph) {
+    wchar_t buf[2] = {glyph, L'\0'};
+    int len =
+        WideCharToMultiByte(CP_UTF8, 0, buf, 1, nullptr, 0, nullptr, nullptr);
+    std::string result(len, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, buf, 1, result.data(), len, nullptr,
+                        nullptr);
+    return result;
+  }
+};
+
+using IconWidgetPtr = std::shared_ptr<IconWidget>;
+
+inline IconWidgetPtr Icon(wchar_t glyph,
+                          const std::string &fontFamily = "Segoe MDL2 Assets",
+                          int size = 16) {
+  auto w = std::make_shared<IconWidget>();
+  w->fontFamily = fontFamily;
+  w->fontSize = size;
+
+  // Store as UTF-8 — safe because renderText converts back to wide via
+  // MultiByteToWideChar
+  w->text = IconWidget::wcharToUtf8(glyph);
+
+  return w;
+}
+
+// Reactive variant: glyph changes with state
+template <typename T>
+inline IconWidgetPtr
+Icon(State<T> &state, std::function<wchar_t(const T &)> transform,
+     const std::string &fontFamily = "Segoe MDL2 Assets", int size = 16) {
+  auto w = std::make_shared<IconWidget>();
+  w->fontFamily = fontFamily;
+  w->setFontSize(size);
+  w->setGlyph(state, transform);
+  return w;
+}
 
 // ============================================================================
 // FACTORY

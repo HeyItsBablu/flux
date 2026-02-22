@@ -94,13 +94,24 @@ struct BoxConstraints {
 
 enum class Alignment { Start, Center, End, Stretch };
 
+enum class CrossAxisAlignment {
+  Start,
+  Center,
+  End,
+  SpaceBetween,
+  SpaceAround,
+  SpaceEvenly,
+  Stretch
+};
+
 enum class MainAxisAlignment {
   Start,
   Center,
   End,
   SpaceBetween,
   SpaceAround,
-  SpaceEvenly
+  SpaceEvenly,
+  Stretch
 };
 
 // ============================================================================
@@ -134,7 +145,7 @@ public:
 
   // Alignment
   Alignment alignment = Alignment::Start;
-  Alignment crossAlignment = Alignment::Start;
+  CrossAxisAlignment crossAxisAlignment = CrossAxisAlignment::Start;
   MainAxisAlignment mainAxisAlignment = MainAxisAlignment::Start;
   int spacing = 0;
 
@@ -167,6 +178,7 @@ public:
   // Text styling
   int fontSize = 14;
   FontWeight fontWeight = FontWeight::Normal;
+  std::string fontFamily = "Segoe UI";
 
   // Events
   ClickHandler onClick;
@@ -301,7 +313,8 @@ public:
   }
 
   void addChild(WidgetPtr child) {
-    if (!child) return; 
+    if (!child)
+      return;
     children.push_back(child);
     child->parent = this;
     markNeedsLayout();
@@ -413,8 +426,7 @@ inline void Widget::measureText(HDC hdc, FontCache &fontCache) {
     height = 0;
     return;
   }
-
-  HFONT hFont = fontCache.getFont(fontSize, fontWeight);
+  HFONT hFont = fontCache.getFont(fontFamily, fontSize, fontWeight);
   HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
 
   int wlen = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
@@ -439,7 +451,7 @@ inline void Widget::renderText(HDC hdc, FontCache &fontCache, UINT format) {
   SetTextColor(hdc, getCurrentTextColor());
   SetBkMode(hdc, TRANSPARENT);
 
-  HFONT hFont = fontCache.getFont(fontSize, fontWeight);
+  HFONT hFont = fontCache.getFont(fontFamily, fontSize, fontWeight);
   HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
 
   RECT textRect = {x + paddingLeft, y + paddingTop, x + width - paddingRight,

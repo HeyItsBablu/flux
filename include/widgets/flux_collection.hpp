@@ -981,7 +981,7 @@ public:
       int row = i / cols;
       auto &child = children[i];
 
-      int childW = (crossAlignment == Alignment::Stretch)
+      int childW = (crossAxisAlignment == CrossAxisAlignment::Stretch)
                        ? cellW
                        : min(cellW, contentWidth);
       child->computeLayout(
@@ -1042,11 +1042,11 @@ public:
         int cellX = startX + col * (cellW + spacingH);
         int childX = cellX;
 
-        if (crossAlignment == Alignment::Center)
+        if (crossAxisAlignment == CrossAxisAlignment::Center)
           childX = cellX + (cellW - child->width) / 2;
-        else if (crossAlignment == Alignment::End)
+        else if (crossAxisAlignment == CrossAxisAlignment::End)
           childX = cellX + cellW - child->width;
-        else if (crossAlignment == Alignment::Stretch)
+        else if (crossAxisAlignment == CrossAxisAlignment::Stretch)
           child->width = cellW;
 
         // Vertical position within row — top-align by default
@@ -1110,8 +1110,8 @@ public:
     return self();
   }
 
-  std::shared_ptr<GridWidget> setCrossAlignment(Alignment a) {
-    crossAlignment = a;
+  std::shared_ptr<GridWidget> setCrossAxisAlignment(CrossAxisAlignment a) {
+    crossAxisAlignment = a;
     markNeedsLayout();
     return self();
   }
