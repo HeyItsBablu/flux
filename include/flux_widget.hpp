@@ -92,7 +92,19 @@ struct BoxConstraints {
 // ENUMS
 // ============================================================================
 
-enum class Alignment { Start, Center, End, Stretch };
+enum class Alignment {
+  Start,
+  Center,
+  End,
+  Stretch,
+  TopCenter,
+  BottomCenter,
+  CenterLeft,
+  CenterRight,
+  TopRight,
+  BottomLeft,
+  BottomRight
+};
 
 enum class CrossAxisAlignment {
   Start,

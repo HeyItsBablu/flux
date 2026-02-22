@@ -11,6 +11,220 @@
 // CONCRETE WIDGET CLASSES
 // ============================================================================
 
+// --- Stack Widget ---
+// Children are layered on top of one another (last child on top).
+// The stack sizes itself to the largest child unless a fixed size is given.
+// Each child can opt in to Positioned behaviour via positional margin fields
+// (marginLeft/Top as x/y offsets, width/height as explicit size).
+
+class StackWidget : public Widget {
+public:
+  // When true, the stack expands to fill the available space rather than
+  // shrink-wrapping the largest child.
+  bool expand = false;
+
+  void computeLayout(HDC hdc, const BoxConstraints &constraints,
+                     FontCache &fontCache) override {
+
+    BoxConstraints self = selfConstraints(constraints);
+    BoxConstraints content = contentConstraints(self);
+
+    // -----------------------------------------------------------------------
+    // PASS 1: Measure every child with loose content constraints so each can
+    //         report its natural size.  Positioned children (isPositioned())
+    //         are given the full content area; unpositioned ones get loose.
+    // -----------------------------------------------------------------------
+    for (auto &child : children) {
+      BoxConstraints childConstraints =
+          isPositioned(child)
+              ? BoxConstraints::loose(content.maxWidth, content.maxHeight)
+              : BoxConstraints(0, content.maxWidth, 0, content.maxHeight);
+
+      child->computeLayout(hdc, childConstraints, fontCache);
+    }
+
+    // -----------------------------------------------------------------------
+    // PASS 2: Determine our own size.
+    //   - If fixed, use that.
+    //   - If expand, fill available space.
+    //   - Otherwise shrink-wrap to the largest unpositioned child.
+    // -----------------------------------------------------------------------
+    int intrinsicW = 0, intrinsicH = 0;
+
+    if (expand) {
+      intrinsicW = content.maxWidth;
+      intrinsicH = content.maxHeight;
+    } else {
+      for (auto &child : children) {
+        if (!isPositioned(child)) {
+          intrinsicW = max(intrinsicW, child->width + child->marginLeft +
+                                           child->marginRight);
+          intrinsicH = max(intrinsicH, child->height + child->marginTop +
+                                           child->marginBottom);
+        }
+      }
+    }
+
+    int finalW = self.clampWidth(
+        autoWidth ? intrinsicW + paddingLeft + paddingRight : width);
+    int finalH = self.clampHeight(
+        autoHeight ? intrinsicH + paddingTop + paddingBottom : height);
+
+    width = finalW;
+    height = finalH;
+    needsLayout = false;
+  }
+
+  void positionChildren(int contentX, int contentY, int contentWidth,
+                        int contentHeight) override {
+    for (auto &child : children) {
+      if (isPositioned(child)) {
+        // Positioned child: marginLeft/Top are used as explicit x/y offsets.
+        // A negative margin value means "align from the far edge".
+        int cx = contentX + child->marginLeft;
+        int cy = contentY + child->marginTop;
+
+        // Right-anchor: if marginRight is set (> 0) and no left offset.
+        if (child->marginLeft == 0 && child->marginRight > 0)
+          cx = contentX + contentWidth - child->width - child->marginRight;
+
+        // Bottom-anchor: same logic vertically.
+        if (child->marginTop == 0 && child->marginBottom > 0)
+          cy = contentY + contentHeight - child->height - child->marginBottom;
+
+        child->x = cx;
+        child->y = cy;
+      } else {
+        // Unpositioned child: honour alignment (default top-left).
+        int cx = contentX + child->marginLeft;
+        int cy = contentY + child->marginTop;
+
+        switch (alignment) {
+        case Alignment::Center:
+          cx = contentX + (contentWidth - child->width) / 2;
+          cy = contentY + (contentHeight - child->height) / 2;
+          break;
+        case Alignment::TopCenter:
+          cx = contentX + (contentWidth - child->width) / 2;
+          break;
+        case Alignment::BottomCenter:
+          cx = contentX + (contentWidth - child->width) / 2;
+          cy = contentY + contentHeight - child->height - child->marginBottom;
+          break;
+        case Alignment::CenterLeft:
+          cy = contentY + (contentHeight - child->height) / 2;
+          break;
+        case Alignment::CenterRight:
+          cx = contentX + contentWidth - child->width - child->marginRight;
+          cy = contentY + (contentHeight - child->height) / 2;
+          break;
+        case Alignment::TopRight:
+          cx = contentX + contentWidth - child->width - child->marginRight;
+          break;
+        case Alignment::BottomLeft:
+          cy = contentY + contentHeight - child->height - child->marginBottom;
+          break;
+        case Alignment::BottomRight:
+          cx = contentX + contentWidth - child->width - child->marginRight;
+          cy = contentY + contentHeight - child->height - child->marginBottom;
+          break;
+        default: // TopLeft — already set above
+          break;
+        }
+
+        child->x = cx;
+        child->y = cy;
+      }
+
+      child->positionChildren(
+          child->x + child->paddingLeft, child->y + child->paddingTop,
+          child->width - child->paddingLeft - child->paddingRight,
+          child->height - child->paddingTop - child->paddingBottom);
+    }
+  }
+
+
+  std::shared_ptr<StackWidget> setAlignment(Alignment align) {
+    if (alignment != align) {
+      alignment = align;
+      markNeedsLayout();
+    }
+    return std::static_pointer_cast<StackWidget>(shared_from_this());
+  }
+  std::shared_ptr<StackWidget> setExpand(bool e) {
+    if (expand != e) {
+      expand = e;
+      markNeedsLayout();
+    }
+    return std::static_pointer_cast<StackWidget>(shared_from_this());
+  }
+  std::shared_ptr<StackWidget> setWidth(int w) {
+    width = w;
+    autoWidth = false;
+    markNeedsLayout();
+    return std::static_pointer_cast<StackWidget>(shared_from_this());
+  }
+  std::shared_ptr<StackWidget> setHeight(int h) {
+    height = h;
+    autoHeight = false;
+    markNeedsLayout();
+    return std::static_pointer_cast<StackWidget>(shared_from_this());
+  }
+  std::shared_ptr<StackWidget> setPadding(int p) {
+    paddingLeft = paddingRight = paddingTop = paddingBottom = p;
+    markNeedsLayout();
+    return std::static_pointer_cast<StackWidget>(shared_from_this());
+  }
+  std::shared_ptr<StackWidget> setBackgroundColor(COLORREF color) {
+    backgroundColor = color;
+    hasBackground = true;
+    markNeedsPaint();
+    return std::static_pointer_cast<StackWidget>(shared_from_this());
+  }
+  std::shared_ptr<StackWidget> setBorderRadius(int r) {
+    if (borderRadius != r) {
+      borderRadius = r;
+      markNeedsPaint();
+    }
+    return std::static_pointer_cast<StackWidget>(shared_from_this());
+  }
+  std::shared_ptr<StackWidget> setFlex(int f) {
+    if (flex != f) {
+      flex = f;
+      markNeedsLayout();
+    }
+    return std::static_pointer_cast<StackWidget>(shared_from_this());
+  }
+
+private:
+  // A child is "positioned" when any of its offset margins are non-zero.
+  // This mirrors Flutter's Positioned semantics without a separate wrapper.
+  static bool isPositioned(const std::shared_ptr<Widget> &child) {
+    return child->marginLeft != 0 || child->marginTop != 0 ||
+           child->marginRight != 0 || child->marginBottom != 0;
+  }
+};
+
+// --- Positioned helper ---
+// Wraps a child and stamps offset margins onto it so StackWidget knows
+// to treat it as absolutely positioned.  Use inside a Stack().
+inline WidgetPtr Positioned(WidgetPtr child, int left = 0, int top = 0,
+                            int right = 0, int bottom = 0) {
+  child->marginLeft = left;
+  child->marginTop = top;
+  child->marginRight = right;
+  child->marginBottom = bottom;
+  return child;
+}
+
+using StackWidgetPtr = std::shared_ptr<StackWidget>;
+
+template <typename... Widgets> StackWidgetPtr Stack(Widgets... widgets) {
+  auto w = std::make_shared<StackWidget>();
+  (w->addChild(widgets), ...);
+  return w;
+}
+
 // --- Column Widget ---
 class ColumnWidget : public Widget {
 public:
