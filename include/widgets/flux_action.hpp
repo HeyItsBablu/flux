@@ -471,6 +471,12 @@ inline GestureDetectorPtr GestureDetector(WidgetPtr child = nullptr) {
     w->addChild(child);
   return w;
 }
+inline WidgetPtr GestureDetector(WidgetPtr child, DragHandler onDrag) {
+    auto g = std::make_shared<GestureDetectorWidget>();
+    g->addChild(child);
+    g->onDragUpdate = std::move(onDrag);
+    return g;
+}
 
 using ButtonWidgetPtr = std::shared_ptr<ButtonWidget>;
 

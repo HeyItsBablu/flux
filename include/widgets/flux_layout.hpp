@@ -143,7 +143,6 @@ public:
     }
   }
 
-
   std::shared_ptr<StackWidget> setAlignment(Alignment align) {
     if (alignment != align) {
       alignment = align;
@@ -196,6 +195,62 @@ public:
     return std::static_pointer_cast<StackWidget>(shared_from_this());
   }
 
+  template <typename T, typename F>
+  std::shared_ptr<Widget> setMarginLeft(State<T> &state, F transform) {
+    std::function<int(const T &)> fn = transform;
+    marginLeft = fn(state.get());
+    state.bindProperty(
+        shared_from_this(),
+        [fn](Widget *w, const T &val) {
+          w->marginLeft = fn(val);
+          w->markNeedsLayout();
+        },
+        true);
+    return shared_from_this();
+  }
+
+  template <typename T, typename F>
+  std::shared_ptr<Widget> setMarginTop(State<T> &state, F transform) {
+    std::function<int(const T &)> fn = transform;
+    marginTop = fn(state.get());
+    state.bindProperty(
+        shared_from_this(),
+        [fn](Widget *w, const T &val) {
+          w->marginTop = fn(val);
+          w->markNeedsLayout();
+        },
+        true);
+    return shared_from_this();
+  }
+
+  template <typename T, typename F>
+  std::shared_ptr<Widget> setMarginRight(State<T> &state, F transform) {
+    std::function<int(const T &)> fn = transform;
+    marginRight = fn(state.get());
+    state.bindProperty(
+        shared_from_this(),
+        [fn](Widget *w, const T &val) {
+          w->marginRight = fn(val);
+          w->markNeedsLayout();
+        },
+        true);
+    return shared_from_this();
+  }
+
+  template <typename T, typename F>
+  std::shared_ptr<Widget> setMarginBottom(State<T> &state, F transform) {
+    std::function<int(const T &)> fn = transform;
+    marginBottom = fn(state.get());
+    state.bindProperty(
+        shared_from_this(),
+        [fn](Widget *w, const T &val) {
+          w->marginBottom = fn(val);
+          w->markNeedsLayout();
+        },
+        true);
+    return shared_from_this();
+  }
+
 private:
   // A child is "positioned" when any of its offset margins are non-zero.
   // This mirrors Flutter's Positioned semantics without a separate wrapper.
@@ -208,6 +263,8 @@ private:
 // --- Positioned helper ---
 // Wraps a child and stamps offset margins onto it so StackWidget knows
 // to treat it as absolutely positioned.  Use inside a Stack().
+
+
 inline WidgetPtr Positioned(WidgetPtr child, int left = 0, int top = 0,
                             int right = 0, int bottom = 0) {
   child->marginLeft = left;
@@ -215,6 +272,59 @@ inline WidgetPtr Positioned(WidgetPtr child, int left = 0, int top = 0,
   child->marginRight = right;
   child->marginBottom = bottom;
   return child;
+}
+
+// Reactive Positioned — binds x/y to state
+// Reactive Positioned — single state, separate x/y transforms
+template <typename T, typename FX, typename FY>
+inline WidgetPtr Positioned(WidgetPtr child,
+                            State<T> &state,
+                            FX xTransform,
+                            FY yTransform) {
+    std::function<int(const T &)> xFn = xTransform;
+    std::function<int(const T &)> yFn = yTransform;
+
+    child->marginLeft = xFn(state.get());
+    child->marginTop  = yFn(state.get());
+
+    state.bindProperty(child,
+        [xFn](Widget *w, const T &val) {
+            w->marginLeft = xFn(val);
+            w->markNeedsLayout();
+        }, true);
+
+    state.bindProperty(child,
+        [yFn](Widget *w, const T &val) {
+            w->marginTop = yFn(val);
+            w->markNeedsLayout();
+        }, true);
+
+    return child;
+}
+// Reactive Positioned — two independent states for x and y
+template <typename TX, typename TY, typename FX, typename FY>
+inline WidgetPtr Positioned(WidgetPtr child,
+                            State<TX> &xState, FX xTransform,
+                            State<TY> &yState, FY yTransform) {
+    std::function<int(const TX &)> xFn = xTransform;
+    std::function<int(const TY &)> yFn = yTransform;
+
+    child->marginLeft = xFn(xState.get());
+    child->marginTop  = yFn(yState.get());
+
+    xState.bindProperty(child,
+        [xFn](Widget *w, const TX &val) {
+            w->marginLeft = xFn(val);
+            w->markNeedsLayout();
+        }, true);
+
+    yState.bindProperty(child,
+        [yFn](Widget *w, const TY &val) {
+            w->marginTop = yFn(val);
+            w->markNeedsLayout();
+        }, true);
+
+    return child;
 }
 
 using StackWidgetPtr = std::shared_ptr<StackWidget>;

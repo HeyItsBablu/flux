@@ -1343,7 +1343,7 @@ inline WidgetPtr Divider() {
   w->height = 1;
   w->autoHeight = false;
   w->hasBackground = true;
-  w->backgroundColor = RGB(224, 224, 224);
+  w->backgroundColor = RGB(0, 0, 0);
   return w;
 }
 
