@@ -1,7 +1,5 @@
 #include "flux.hpp"
 
-
-
 class MouseTest : public Component {
 
   State<int> dotX;
@@ -14,10 +12,11 @@ public:
 
   WidgetPtr build() override {
 
-   
-
     auto canvas =
         Canvas(400, 300)
+            ->bindState(dotX)
+            ->bindState(dotY)
+            ->bindState(dragging)
             ->onDraw([=](CanvasContext &ctx) {
               // Background
               ctx.fillStyle("#1e1e2e").fillRect(0, 0, 400, 300);
@@ -35,6 +34,7 @@ public:
 
               // Outer glow when dragging
               if (dragging.get()) {
+
                 ctx.strokeStyle("rgba(243,139,168,0.3)").lineWidth(16);
                 ctx.strokeCircle(dotX.get(), dotY.get(), 18);
               }
@@ -47,7 +47,8 @@ public:
 
               // Label
               ctx.fillStyle("#cdd6f4").font("12px", "Consolas");
-              ctx.fillText(dragging.get() ? "dragging..." : "drag the dot", 10, 20);
+              ctx.fillText(dragging.get() ? "dragging..." : "drag the dot", 10,
+                           20);
 
               char buf[32];
               std::snprintf(buf, sizeof(buf), "x:%d  y:%d", dotX.get(),
@@ -58,8 +59,10 @@ public:
             ->onMouseDown([this](int mx, int my) {
               // Start drag only if click is within 16px of the dot
               int dx = dotX.get(), dy = dotY.get();
-              if (std::abs(mx - dx) < 16 && std::abs(my - dy) < 16)
+              if (std::abs(mx - dx) < 16 && std::abs(my - dy) < 16) {
+
                 dragging.set(true);
+              }
             })
             ->onMouseMove([this](int mx, int my) {
               if (!dragging.get())

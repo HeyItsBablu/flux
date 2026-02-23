@@ -313,7 +313,7 @@ public:
       parent->markNeedsLayout();
   }
 
-  void markNeedsPaint() { needsPaint = true; }
+  virtual void markNeedsPaint() { needsPaint = true; }
 
   // -----------------------------------------------------------------------
   // Tree helpers
