@@ -11,5 +11,6 @@
 #include "flux_state.hpp"
 #include "flux_structure.hpp"
 #include "fluxicons.hpp"
+#include "flux_canvas.hpp"
 
 #endif // WIDGETS_HPP
