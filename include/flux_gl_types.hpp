@@ -3,6 +3,14 @@
 
 // ============================================================================
 // flux_gl_types.hpp
+//
+// All OpenGL types that the Windows <gl/GL.h> (frozen at GL 1.1) does NOT
+// define.  Include this AFTER <gl/GL.h> / <windows.h> and BEFORE any GL 2.0+
+// function-pointer typedefs.
+//
+// We define them unconditionally with a static_assert size-check so that a
+// future gl.h that does define them would produce a hard error rather than a
+// silent mismatch.
 // ============================================================================
 
 #include <cstddef>   // std::ptrdiff_t, std::size_t
