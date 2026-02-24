@@ -264,7 +264,6 @@ private:
 // Wraps a child and stamps offset margins onto it so StackWidget knows
 // to treat it as absolutely positioned.  Use inside a Stack().
 
-
 inline WidgetPtr Positioned(WidgetPtr child, int left = 0, int top = 0,
                             int right = 0, int bottom = 0) {
   child->marginLeft = left;
@@ -277,54 +276,59 @@ inline WidgetPtr Positioned(WidgetPtr child, int left = 0, int top = 0,
 // Reactive Positioned — binds x/y to state
 // Reactive Positioned — single state, separate x/y transforms
 template <typename T, typename FX, typename FY>
-inline WidgetPtr Positioned(WidgetPtr child,
-                            State<T> &state,
-                            FX xTransform,
+inline WidgetPtr Positioned(WidgetPtr child, State<T> &state, FX xTransform,
                             FY yTransform) {
-    std::function<int(const T &)> xFn = xTransform;
-    std::function<int(const T &)> yFn = yTransform;
+  std::function<int(const T &)> xFn = xTransform;
+  std::function<int(const T &)> yFn = yTransform;
 
-    child->marginLeft = xFn(state.get());
-    child->marginTop  = yFn(state.get());
+  child->marginLeft = xFn(state.get());
+  child->marginTop = yFn(state.get());
 
-    state.bindProperty(child,
-        [xFn](Widget *w, const T &val) {
-            w->marginLeft = xFn(val);
-            w->markNeedsLayout();
-        }, true);
+  state.bindProperty(
+      child,
+      [xFn](Widget *w, const T &val) {
+        w->marginLeft = xFn(val);
+        w->markNeedsLayout();
+      },
+      true);
 
-    state.bindProperty(child,
-        [yFn](Widget *w, const T &val) {
-            w->marginTop = yFn(val);
-            w->markNeedsLayout();
-        }, true);
+  state.bindProperty(
+      child,
+      [yFn](Widget *w, const T &val) {
+        w->marginTop = yFn(val);
+        w->markNeedsLayout();
+      },
+      true);
 
-    return child;
+  return child;
 }
 // Reactive Positioned — two independent states for x and y
 template <typename TX, typename TY, typename FX, typename FY>
-inline WidgetPtr Positioned(WidgetPtr child,
-                            State<TX> &xState, FX xTransform,
+inline WidgetPtr Positioned(WidgetPtr child, State<TX> &xState, FX xTransform,
                             State<TY> &yState, FY yTransform) {
-    std::function<int(const TX &)> xFn = xTransform;
-    std::function<int(const TY &)> yFn = yTransform;
+  std::function<int(const TX &)> xFn = xTransform;
+  std::function<int(const TY &)> yFn = yTransform;
 
-    child->marginLeft = xFn(xState.get());
-    child->marginTop  = yFn(yState.get());
+  child->marginLeft = xFn(xState.get());
+  child->marginTop = yFn(yState.get());
 
-    xState.bindProperty(child,
-        [xFn](Widget *w, const TX &val) {
-            w->marginLeft = xFn(val);
-            w->markNeedsLayout();
-        }, true);
+  xState.bindProperty(
+      child,
+      [xFn](Widget *w, const TX &val) {
+        w->marginLeft = xFn(val);
+        w->markNeedsLayout();
+      },
+      true);
 
-    yState.bindProperty(child,
-        [yFn](Widget *w, const TY &val) {
-            w->marginTop = yFn(val);
-            w->markNeedsLayout();
-        }, true);
+  yState.bindProperty(
+      child,
+      [yFn](Widget *w, const TY &val) {
+        w->marginTop = yFn(val);
+        w->markNeedsLayout();
+      },
+      true);
 
-    return child;
+  return child;
 }
 
 using StackWidgetPtr = std::shared_ptr<StackWidget>;
@@ -818,6 +822,118 @@ public:
   // Fluent setters (unchanged from original)
   // ------------------------------------------------------------------
 
+  // ── Reactive setter overloads ──────────────────────────────────────────────
+
+  template <typename T, typename F>
+  std::shared_ptr<ContainerWidget> setWidth(State<T> &state, F transform) {
+    std::function<int(const T &)> fn = transform;
+    width = fn(state.get());
+    autoWidth = false;
+    markNeedsLayout();
+    state.bindProperty(
+        shared_from_this(),
+        [fn](Widget *w, const T &val) {
+          auto *self = static_cast<ContainerWidget *>(w);
+          self->width = fn(val);
+          self->autoWidth = false;
+          self->markNeedsLayout();
+        },
+        true);
+    return std::static_pointer_cast<ContainerWidget>(shared_from_this());
+  }
+
+  template <typename T, typename F>
+  std::shared_ptr<ContainerWidget> setHeight(State<T> &state, F transform) {
+    std::function<int(const T &)> fn = transform;
+    height = fn(state.get());
+    autoHeight = false;
+    markNeedsLayout();
+    state.bindProperty(
+        shared_from_this(),
+        [fn](Widget *w, const T &val) {
+          auto *self = static_cast<ContainerWidget *>(w);
+          self->height = fn(val);
+          self->autoHeight = false;
+          self->markNeedsLayout();
+        },
+        true);
+    return std::static_pointer_cast<ContainerWidget>(shared_from_this());
+  }
+
+  template <typename T, typename F>
+  std::shared_ptr<ContainerWidget> setBackgroundColor(State<T> &state,
+                                                      F transform) {
+    std::function<COLORREF(const T &)> fn = transform;
+    backgroundColor = fn(state.get());
+    hasBackground = true;
+    markNeedsPaint();
+    state.bindProperty(
+        shared_from_this(),
+        [fn](Widget *w, const T &val) {
+          auto *self = static_cast<ContainerWidget *>(w);
+          self->backgroundColor = fn(val);
+          self->hasBackground = true;
+          self->markNeedsPaint();
+        },
+        true);
+    return std::static_pointer_cast<ContainerWidget>(shared_from_this());
+  }
+
+  template <typename T, typename F>
+  std::shared_ptr<ContainerWidget> setBorderColor(State<T> &state,
+                                                  F transform) {
+    std::function<COLORREF(const T &)> fn = transform;
+    borderColor = fn(state.get());
+    hasBorder = true;
+    markNeedsPaint();
+    state.bindProperty(
+        shared_from_this(),
+        [fn](Widget *w, const T &val) {
+          auto *self = static_cast<ContainerWidget *>(w);
+          self->borderColor = fn(val);
+          self->hasBorder = true;
+          self->markNeedsPaint();
+        },
+        true);
+    return std::static_pointer_cast<ContainerWidget>(shared_from_this());
+  }
+
+  template <typename T, typename F>
+  std::shared_ptr<ContainerWidget> setBorderWidth(State<T> &state,
+                                                  F transform) {
+    std::function<int(const T &)> fn = transform;
+    borderWidth = fn(state.get());
+    hasBorder = true;
+    markNeedsLayout();
+    state.bindProperty(
+        shared_from_this(),
+        [fn](Widget *w, const T &val) {
+          auto *self = static_cast<ContainerWidget *>(w);
+          self->borderWidth = fn(val);
+          self->hasBorder = true;
+          self->markNeedsLayout();
+        },
+        true);
+    return std::static_pointer_cast<ContainerWidget>(shared_from_this());
+  }
+
+  template <typename T, typename F>
+  std::shared_ptr<ContainerWidget> setBorderRadius(State<T> &state,
+                                                   F transform) {
+    std::function<int(const T &)> fn = transform;
+    borderRadius = fn(state.get());
+    markNeedsPaint();
+    state.bindProperty(
+        shared_from_this(),
+        [fn](Widget *w, const T &val) {
+          auto *self = static_cast<ContainerWidget *>(w);
+          self->borderRadius = fn(val);
+          self->markNeedsPaint();
+        },
+        true);
+    return std::static_pointer_cast<ContainerWidget>(shared_from_this());
+  }
+
   std::shared_ptr<ContainerWidget> setHoverBackgroundColor(COLORREF color) {
     hoverBackgroundColor = color;
     hasHoverBackground = true;
@@ -851,20 +967,7 @@ public:
     markNeedsPaint();
     return std::static_pointer_cast<ContainerWidget>(shared_from_this());
   }
-  template <typename T>
-  std::shared_ptr<ContainerWidget>
-  setBackgroundColor(State<T> &state, COLORREF trueColor, COLORREF falseColor) {
-    backgroundColor = state.get() ? trueColor : falseColor;
-    hasBackground = true;
-    state.bindProperty(
-        shared_from_this(),
-        [trueColor, falseColor](Widget *w, const T &val) {
-          w->backgroundColor = val ? trueColor : falseColor;
-          w->hasBackground = true;
-        },
-        false);
-    return std::static_pointer_cast<ContainerWidget>(shared_from_this());
-  }
+
   std::shared_ptr<ContainerWidget> setBorderColor(COLORREF color) {
     borderColor = color;
     hasBorder = true;
@@ -1078,11 +1181,25 @@ template <typename... Widgets> RowWidgetPtr Row(Widgets... widgets) {
   return w;
 }
 
+inline RowWidgetPtr Row(std::vector<WidgetPtr> children) {
+  auto w = std::make_shared<RowWidget>();
+  for (auto &child : children)
+    w->addChild(child);
+  return w;
+}
+
 using ColumnWidgetPtr = std::shared_ptr<ColumnWidget>;
 
 template <typename... Widgets> ColumnWidgetPtr Column(Widgets... widgets) {
   auto w = std::make_shared<ColumnWidget>();
   (w->addChild(widgets), ...);
+  return w;
+}
+
+inline ColumnWidgetPtr Column(std::vector<WidgetPtr> children) {
+  auto w = std::make_shared<ColumnWidget>();
+  for (auto &child : children)
+    w->addChild(child);
   return w;
 }
 
