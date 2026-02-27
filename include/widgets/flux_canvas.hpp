@@ -643,6 +643,8 @@ public:
     clearFBO(committedFBO_, w_, h_, 255, 255, 255, 255);
     clearFBO(scratchFBO_, w_, h_, 0, 0, 0, 0);
     glutil::ortho((float)w_, (float)h_, proj_);
+    glutil::ortho((float)w_, (float)h_,
+                  canvasProj_); // ← same as proj_ initially
   }
 
   void resize(int w, int h) override {
@@ -679,8 +681,10 @@ public:
 
     w_ = w;
     h_ = h;
+    glutil::ortho((float)w_, (float)h_, canvasProj_);
     glutil::ortho((float)w_, (float)h_, proj_);
-    if (projOverride_) std::memcpy(proj_, projOverride_, sizeof(proj_));
+    if (projOverride_)
+      std::memcpy(proj_, projOverride_, sizeof(proj_));
     glViewport(0, 0, w_, h_);
     dirty_ = true;
   }
@@ -693,8 +697,10 @@ public:
 
     glViewport(0, 0, w_, h_);
     glDisable(GL_SCISSOR_TEST);
-    glClearColor(1, 1, 1, 1);
+    glClearColor(0.18f, 0.18f, 0.20f, 1.f);
     glClear(GL_COLOR_BUFFER_BIT);
+
+
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     blitTexture(committedTex_, 1.f);
@@ -761,8 +767,9 @@ protected:
   void pushUndoSnapshotPublic() { pushUndoSnapshot(); }
   void setProjOverride(const float *m) {
     projOverride_ = m;
-    if (m) std::memcpy(proj_, m, sizeof(proj_));
-}
+    if (m)
+      std::memcpy(proj_, m, sizeof(proj_));
+  }
 
 private:
   int w_ = 0, h_ = 0;
@@ -774,6 +781,7 @@ private:
   GLuint scratchFBO_ = 0, scratchTex_ = 0;
   GLuint blitProg_ = 0, quadVAO_ = 0, quadVBO_ = 0;
   float proj_[16]{};
+  float canvasProj_[16]{};
   const float *projOverride_ = nullptr;
 
   // Fix [N]: uniform locations cached after program link — never re-queried.
@@ -814,6 +822,8 @@ private:
     dq.clear();
     byteCounter = 0;
   }
+
+
 
   // ── Stroke ───────────────────────────────────────────────────────────────
 
@@ -980,7 +990,7 @@ private:
     glViewport(0, 0, w_, h_);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    blitTexture(scratchTex_, 1.f);
+    blitTexture(scratchTex_, 1.f, canvasProj_);
     glDisable(GL_BLEND);
     // Fix [K]: restore framebuffer binding
     GL.bindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -994,7 +1004,7 @@ private:
 
     GL.useProgram(blitProg_);
     // Fix [N]: use cached uniform locations — no per-draw getUniformLocation
-    GL.uniformMatrix4fv(uniforms_.mvp, 1, GL_FALSE, proj_);
+    GL.uniformMatrix4fv(uniforms_.mvp, 1, GL_FALSE, canvasProj_);
     GL.uniform1i(uniforms_.mode, 1);
     GL.uniform4f(uniforms_.color, s.r, s.g, s.b, s.a * s.opacity);
 
@@ -1020,10 +1030,10 @@ private:
     GL.useProgram(0);
   }
 
-  void blitTexture(GLuint tex, float alpha) {
+  void blitTexture(GLuint tex, float alpha, const float *mvp = nullptr) {
     GL.useProgram(blitProg_);
     // Fix [N]: use cached uniform locations
-    GL.uniformMatrix4fv(uniforms_.mvp, 1, GL_FALSE, proj_);
+    GL.uniformMatrix4fv(uniforms_.mvp, 1, GL_FALSE, mvp ? mvp : proj_);
     GL.uniform1i(uniforms_.mode, 0);
     GL.uniform1i(uniforms_.tex, 0);
     GL.uniform1f(uniforms_.alpha, alpha);
