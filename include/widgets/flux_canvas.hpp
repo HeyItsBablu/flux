@@ -193,22 +193,31 @@ using PFNGLVERTEXATTRIBPOINTERPROC = void(APIENTRY *)(GLuint, GLint, GLenum,
 #ifndef NDEBUG
 namespace glcheck_detail {
 inline void check(const char *file, int line) {
-    GLenum err;
-    while ((err = glGetError()) != GL_NO_ERROR) {
-        char buf[128];
-        (void)_snprintf_s(buf, sizeof(buf), _TRUNCATE,
-                          "glGetError() = 0x%04X at %s:%d\n",
-                          (unsigned)err, file, line);
-        OutputDebugStringA(buf);
-        assert(false && "OpenGL error — see Output window");
-    }
+  GLenum err;
+  while ((err = glGetError()) != GL_NO_ERROR) {
+    char buf[128];
+    (void)_snprintf_s(buf, sizeof(buf), _TRUNCATE,
+                      "glGetError() = 0x%04X at %s:%d\n", (unsigned)err, file,
+                      line);
+    OutputDebugStringA(buf);
+    assert(false && "OpenGL error — see Output window");
+  }
 }
 } // namespace glcheck_detail
-#  define GL_CHECK()          glcheck_detail::check(__FILE__, __LINE__)
-#  define GL_CHECK_CALL(expr) do { (expr); GL_CHECK(); } while(0)
+#define GL_CHECK() glcheck_detail::check(__FILE__, __LINE__)
+#define GL_CHECK_CALL(expr)                                                    \
+  do {                                                                         \
+    (expr);                                                                    \
+    GL_CHECK();                                                                \
+  } while (0)
 #else
-#  define GL_CHECK()          do {} while(0)
-#  define GL_CHECK_CALL(expr) do { (expr); } while(0)
+#define GL_CHECK()                                                             \
+  do {                                                                         \
+  } while (0)
+#define GL_CHECK_CALL(expr)                                                    \
+  do {                                                                         \
+    (expr);                                                                    \
+  } while (0)
 #endif
 
 // ============================================================================
@@ -218,14 +227,13 @@ inline void check(const char *file, int line) {
 // Fix [E]: wglGetProcAddress returns sentinel values (0, 1, 2, 3, -1) on
 // failure.  Filter them and fall back to the opengl32.dll export table.
 static void *safeGetProc(HMODULE gl32, const char *name) {
-    void *p = reinterpret_cast<void *>(wglGetProcAddress(name));
-    if (!p || p == reinterpret_cast<void *>(1) ||
-        p == reinterpret_cast<void *>(2) ||
-        p == reinterpret_cast<void *>(3) ||
-        p == reinterpret_cast<void *>(-1)) {
-        p = reinterpret_cast<void *>(GetProcAddress(gl32, name));
-    }
-    return p;
+  void *p = reinterpret_cast<void *>(wglGetProcAddress(name));
+  if (!p || p == reinterpret_cast<void *>(1) ||
+      p == reinterpret_cast<void *>(2) || p == reinterpret_cast<void *>(3) ||
+      p == reinterpret_cast<void *>(-1)) {
+    p = reinterpret_cast<void *>(GetProcAddress(gl32, name));
+  }
+  return p;
 }
 
 struct GLProcs {
@@ -273,80 +281,82 @@ struct GLProcs {
   void init() {
     HMODULE gl32 = GetModuleHandleA("opengl32.dll");
 
-#define LOAD(fn, name) \
-    fn = reinterpret_cast<decltype(fn)>(safeGetProc(gl32, name))
+#define LOAD(fn, name)                                                         \
+  fn = reinterpret_cast<decltype(fn)>(safeGetProc(gl32, name))
 
-    LOAD(genBuffers,            "glGenBuffers");
-    LOAD(deleteBuffers,         "glDeleteBuffers");
-    LOAD(bindBuffer,            "glBindBuffer");
-    LOAD(bufferData,            "glBufferData");
-    LOAD(bufferSubData,         "glBufferSubData");
-    LOAD(genVertexArrays,       "glGenVertexArrays");
-    LOAD(deleteVertexArrays,    "glDeleteVertexArrays");
-    LOAD(bindVertexArray,       "glBindVertexArray");
-    LOAD(genFramebuffers,       "glGenFramebuffers");
-    LOAD(deleteFramebuffers,    "glDeleteFramebuffers");
-    LOAD(bindFramebuffer,       "glBindFramebuffer");
-    LOAD(framebufferTexture2D,  "glFramebufferTexture2D");
-    LOAD(checkFramebufferStatus,"glCheckFramebufferStatus");
-    LOAD(blitFramebuffer,       "glBlitFramebuffer");
-    LOAD(createShader,          "glCreateShader");
-    LOAD(deleteShader,          "glDeleteShader");
-    LOAD(shaderSource,          "glShaderSource");
-    LOAD(compileShader,         "glCompileShader");
-    LOAD(getShaderiv,           "glGetShaderiv");
-    LOAD(getShaderInfoLog,      "glGetShaderInfoLog");
-    LOAD(createProgram,         "glCreateProgram");
-    LOAD(deleteProgram,         "glDeleteProgram");
-    LOAD(attachShader,          "glAttachShader");
-    LOAD(linkProgram,           "glLinkProgram");
-    LOAD(getProgramiv,          "glGetProgramiv");
-    LOAD(getProgramInfoLog,     "glGetProgramInfoLog");
-    LOAD(useProgram,            "glUseProgram");
-    LOAD(getUniformLocation,    "glGetUniformLocation");
-    LOAD(uniform1i,             "glUniform1i");
-    LOAD(uniform1f,             "glUniform1f");
-    LOAD(uniform4f,             "glUniform4f");
-    LOAD(uniformMatrix4fv,      "glUniformMatrix4fv");
-    LOAD(enableVertexAttribArray,  "glEnableVertexAttribArray");
+    LOAD(genBuffers, "glGenBuffers");
+    LOAD(deleteBuffers, "glDeleteBuffers");
+    LOAD(bindBuffer, "glBindBuffer");
+    LOAD(bufferData, "glBufferData");
+    LOAD(bufferSubData, "glBufferSubData");
+    LOAD(genVertexArrays, "glGenVertexArrays");
+    LOAD(deleteVertexArrays, "glDeleteVertexArrays");
+    LOAD(bindVertexArray, "glBindVertexArray");
+    LOAD(genFramebuffers, "glGenFramebuffers");
+    LOAD(deleteFramebuffers, "glDeleteFramebuffers");
+    LOAD(bindFramebuffer, "glBindFramebuffer");
+    LOAD(framebufferTexture2D, "glFramebufferTexture2D");
+    LOAD(checkFramebufferStatus, "glCheckFramebufferStatus");
+    LOAD(blitFramebuffer, "glBlitFramebuffer");
+    LOAD(createShader, "glCreateShader");
+    LOAD(deleteShader, "glDeleteShader");
+    LOAD(shaderSource, "glShaderSource");
+    LOAD(compileShader, "glCompileShader");
+    LOAD(getShaderiv, "glGetShaderiv");
+    LOAD(getShaderInfoLog, "glGetShaderInfoLog");
+    LOAD(createProgram, "glCreateProgram");
+    LOAD(deleteProgram, "glDeleteProgram");
+    LOAD(attachShader, "glAttachShader");
+    LOAD(linkProgram, "glLinkProgram");
+    LOAD(getProgramiv, "glGetProgramiv");
+    LOAD(getProgramInfoLog, "glGetProgramInfoLog");
+    LOAD(useProgram, "glUseProgram");
+    LOAD(getUniformLocation, "glGetUniformLocation");
+    LOAD(uniform1i, "glUniform1i");
+    LOAD(uniform1f, "glUniform1f");
+    LOAD(uniform4f, "glUniform4f");
+    LOAD(uniformMatrix4fv, "glUniformMatrix4fv");
+    LOAD(enableVertexAttribArray, "glEnableVertexAttribArray");
     LOAD(disableVertexAttribArray, "glDisableVertexAttribArray");
-    LOAD(vertexAttribPointer,   "glVertexAttribPointer");
+    LOAD(vertexAttribPointer, "glVertexAttribPointer");
 #undef LOAD
 
     // Fix [F]: validate minimum required GL 3.3 entry points.
-    assert(genBuffers            && "GL: glGenBuffers not resolved");
-    assert(deleteBuffers         && "GL: glDeleteBuffers not resolved");
-    assert(bindBuffer            && "GL: glBindBuffer not resolved");
-    assert(bufferData            && "GL: glBufferData not resolved");
-    assert(genVertexArrays       && "GL: glGenVertexArrays not resolved");
-    assert(deleteVertexArrays    && "GL: glDeleteVertexArrays not resolved");
-    assert(bindVertexArray       && "GL: glBindVertexArray not resolved");
-    assert(genFramebuffers       && "GL: glGenFramebuffers not resolved");
-    assert(deleteFramebuffers    && "GL: glDeleteFramebuffers not resolved");
-    assert(bindFramebuffer       && "GL: glBindFramebuffer not resolved");
-    assert(framebufferTexture2D  && "GL: glFramebufferTexture2D not resolved");
-    assert(checkFramebufferStatus&& "GL: glCheckFramebufferStatus not resolved");
-    assert(blitFramebuffer       && "GL: glBlitFramebuffer not resolved");
-    assert(createShader          && "GL: glCreateShader not resolved");
-    assert(deleteShader          && "GL: glDeleteShader not resolved");
-    assert(shaderSource          && "GL: glShaderSource not resolved");
-    assert(compileShader         && "GL: glCompileShader not resolved");
-    assert(getShaderiv           && "GL: glGetShaderiv not resolved");
-    assert(getShaderInfoLog      && "GL: glGetShaderInfoLog not resolved");
-    assert(createProgram         && "GL: glCreateProgram not resolved");
-    assert(deleteProgram         && "GL: glDeleteProgram not resolved");
-    assert(attachShader          && "GL: glAttachShader not resolved");
-    assert(linkProgram           && "GL: glLinkProgram not resolved");
-    assert(getProgramiv          && "GL: glGetProgramiv not resolved");
-    assert(getProgramInfoLog     && "GL: glGetProgramInfoLog not resolved");
-    assert(useProgram            && "GL: glUseProgram not resolved");
-    assert(getUniformLocation    && "GL: glGetUniformLocation not resolved");
-    assert(uniform1i             && "GL: glUniform1i not resolved");
-    assert(uniform1f             && "GL: glUniform1f not resolved");
-    assert(uniform4f             && "GL: glUniform4f not resolved");
-    assert(uniformMatrix4fv      && "GL: glUniformMatrix4fv not resolved");
-    assert(enableVertexAttribArray  && "GL: glEnableVertexAttribArray not resolved");
-    assert(vertexAttribPointer      && "GL: glVertexAttribPointer not resolved");
+    assert(genBuffers && "GL: glGenBuffers not resolved");
+    assert(deleteBuffers && "GL: glDeleteBuffers not resolved");
+    assert(bindBuffer && "GL: glBindBuffer not resolved");
+    assert(bufferData && "GL: glBufferData not resolved");
+    assert(genVertexArrays && "GL: glGenVertexArrays not resolved");
+    assert(deleteVertexArrays && "GL: glDeleteVertexArrays not resolved");
+    assert(bindVertexArray && "GL: glBindVertexArray not resolved");
+    assert(genFramebuffers && "GL: glGenFramebuffers not resolved");
+    assert(deleteFramebuffers && "GL: glDeleteFramebuffers not resolved");
+    assert(bindFramebuffer && "GL: glBindFramebuffer not resolved");
+    assert(framebufferTexture2D && "GL: glFramebufferTexture2D not resolved");
+    assert(checkFramebufferStatus &&
+           "GL: glCheckFramebufferStatus not resolved");
+    assert(blitFramebuffer && "GL: glBlitFramebuffer not resolved");
+    assert(createShader && "GL: glCreateShader not resolved");
+    assert(deleteShader && "GL: glDeleteShader not resolved");
+    assert(shaderSource && "GL: glShaderSource not resolved");
+    assert(compileShader && "GL: glCompileShader not resolved");
+    assert(getShaderiv && "GL: glGetShaderiv not resolved");
+    assert(getShaderInfoLog && "GL: glGetShaderInfoLog not resolved");
+    assert(createProgram && "GL: glCreateProgram not resolved");
+    assert(deleteProgram && "GL: glDeleteProgram not resolved");
+    assert(attachShader && "GL: glAttachShader not resolved");
+    assert(linkProgram && "GL: glLinkProgram not resolved");
+    assert(getProgramiv && "GL: glGetProgramiv not resolved");
+    assert(getProgramInfoLog && "GL: glGetProgramInfoLog not resolved");
+    assert(useProgram && "GL: glUseProgram not resolved");
+    assert(getUniformLocation && "GL: glGetUniformLocation not resolved");
+    assert(uniform1i && "GL: glUniform1i not resolved");
+    assert(uniform1f && "GL: glUniform1f not resolved");
+    assert(uniform4f && "GL: glUniform4f not resolved");
+    assert(uniformMatrix4fv && "GL: glUniformMatrix4fv not resolved");
+    assert(enableVertexAttribArray &&
+           "GL: glEnableVertexAttribArray not resolved");
+    assert(vertexAttribPointer && "GL: glVertexAttribPointer not resolved");
   }
 
 private:
@@ -384,8 +394,10 @@ inline GLuint linkProgram(const char *vert, const char *frag) {
   GLuint vs = compileShader(GL_VERTEX_SHADER, vert);
   GLuint fs = compileShader(GL_FRAGMENT_SHADER, frag);
   if (!vs || !fs) {
-    if (vs) GL.deleteShader(vs);
-    if (fs) GL.deleteShader(fs);
+    if (vs)
+      GL.deleteShader(vs);
+    if (fs)
+      GL.deleteShader(fs);
     return 0;
   }
   GLuint p = GL.createProgram();
@@ -412,10 +424,22 @@ inline GLuint linkProgram(const char *vert, const char *frag) {
 // Column-major 4x4 orthographic: [0,w]x[0,h] -> NDC, y=0 at top.
 inline void ortho(float w, float h, float out[16]) {
   float r = 1.f / w, t = 1.f / h;
-  out[0] = 2 * r;  out[1] = 0;      out[2] = 0;   out[3] = 0;
-  out[4] = 0;      out[5] = -2 * t; out[6] = 0;   out[7] = 0;
-  out[8] = 0;      out[9] = 0;      out[10] = -1; out[11] = 0;
-  out[12] = -1;    out[13] = 1;     out[14] = 0;  out[15] = 1;
+  out[0] = 2 * r;
+  out[1] = 0;
+  out[2] = 0;
+  out[3] = 0;
+  out[4] = 0;
+  out[5] = -2 * t;
+  out[6] = 0;
+  out[7] = 0;
+  out[8] = 0;
+  out[9] = 0;
+  out[10] = -1;
+  out[11] = 0;
+  out[12] = -1;
+  out[13] = 1;
+  out[14] = 0;
+  out[15] = 1;
 }
 
 } // namespace glutil
@@ -447,7 +471,8 @@ inline RGBA parseHexColor(const std::string &css) {
       }
       if (h.size() == 6) {
         unsigned n = (unsigned)std::stoul(h, nullptr, 16);
-        return {h2f((n >> 16) & 0xFF), h2f((n >> 8) & 0xFF), h2f(n & 0xFF), 1.f};
+        return {h2f((n >> 16) & 0xFF), h2f((n >> 8) & 0xFF), h2f(n & 0xFF),
+                1.f};
       }
       if (h.size() == 8) {
         unsigned n = (unsigned)std::stoul(h, nullptr, 16);
@@ -464,8 +489,9 @@ inline RGBA parseHexColor(const std::string &css) {
         size_t pos = 0;
         while (i < 4) {
           size_t comma = inner.find(',', pos);
-          std::string tok = inner.substr(
-              pos, comma == std::string::npos ? std::string::npos : comma - pos);
+          std::string tok =
+              inner.substr(pos, comma == std::string::npos ? std::string::npos
+                                                           : comma - pos);
           vals[i++] = std::stof(tok);
           if (comma == std::string::npos)
             break;
@@ -523,7 +549,8 @@ struct Stroke {
 
 // Context-ownership contract [Fix K]:
 //   A RenderSurface implementation MUST restore the following GL state to
-//   whatever value it observed on entry before returning from any public method:
+//   whatever value it observed on entry before returning from any public
+//   method:
 //     - GL_READ_FRAMEBUFFER and GL_DRAW_FRAMEBUFFER bindings
 //     - Current program (glUseProgram)
 //     - GL_BLEND enabled/disabled
@@ -573,7 +600,7 @@ public:
     // Restore from top of undo stack
     Snapshot snap = undoStack_.back();
     undoStack_.pop_back();
-    undoBytes_ -= snap.bytes;   // Fix [L]: per-snapshot size, not current size
+    undoBytes_ -= snap.bytes; // Fix [L]: per-snapshot size, not current size
     restoreCommitted(snap.tex);
     glDeleteTextures(1, &snap.tex);
     dirty_ = true;
@@ -587,7 +614,7 @@ public:
     undoBytes_ += sz;
     Snapshot snap = redoStack_.back();
     redoStack_.pop_back();
-    redoBytes_ -= snap.bytes;   // Fix [L]: per-snapshot size
+    redoBytes_ -= snap.bytes; // Fix [L]: per-snapshot size
     restoreCommitted(snap.tex);
     glDeleteTextures(1, &snap.tex);
     dirty_ = true;
@@ -599,7 +626,7 @@ public:
   void clear() {
     pushUndoSnapshot();
     clearFBO(committedFBO_, w_, h_, 255, 255, 255, 255);
-    clearFBO(scratchFBO_,   w_, h_, 0,   0,   0,   0);
+    clearFBO(scratchFBO_, w_, h_, 0, 0, 0, 0);
     dirty_ = true;
   }
 
@@ -612,9 +639,9 @@ public:
     buildQuadVAO();
     buildDabVerts();
     allocFBOPair(committedFBO_, committedTex_, w_, h_);
-    allocFBOPair(scratchFBO_,   scratchTex_,  w_, h_);
+    allocFBOPair(scratchFBO_, scratchTex_, w_, h_);
     clearFBO(committedFBO_, w_, h_, 255, 255, 255, 255);
-    clearFBO(scratchFBO_,   w_, h_, 0,   0,   0,   0);
+    clearFBO(scratchFBO_, w_, h_, 0, 0, 0, 0);
     glutil::ortho((float)w_, (float)h_, proj_);
   }
 
@@ -622,12 +649,13 @@ public:
     if (w == w_ && h == h_)
       return;
 
-    // Fix [D]: GPU-to-GPU blit into new FBOs; no CPU readback, no snapshot leak.
+    // Fix [D]: GPU-to-GPU blit into new FBOs; no CPU readback, no snapshot
+    // leak.
     GLuint newCFBO = 0, newCTex = 0, newSFBO = 0, newSTex = 0;
     allocFBOPair(newCFBO, newCTex, w, h);
     allocFBOPair(newSFBO, newSTex, w, h);
     clearFBO(newCFBO, w, h, 255, 255, 255, 255);
-    clearFBO(newSFBO, w, h, 0,   0,   0,   0);
+    clearFBO(newSFBO, w, h, 0, 0, 0, 0);
 
     int copyW = min(w_, w), copyH = min(h_, h);
     GL.bindFramebuffer(GL_READ_FRAMEBUFFER, committedFBO_);
@@ -639,9 +667,11 @@ public:
     GL.bindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 
     destroyFBOPair(committedFBO_, committedTex_);
-    destroyFBOPair(scratchFBO_,   scratchTex_);
-    committedFBO_ = newCFBO;  committedTex_ = newCTex;
-    scratchFBO_   = newSFBO;  scratchTex_   = newSTex;
+    destroyFBOPair(scratchFBO_, scratchTex_);
+    committedFBO_ = newCFBO;
+    committedTex_ = newCTex;
+    scratchFBO_ = newSFBO;
+    scratchTex_ = newSTex;
 
     // Snapshots from the old resolution are no longer meaningful; flush them.
     flushSnapshotDeque(undoStack_, undoBytes_);
@@ -667,38 +697,67 @@ public:
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     blitTexture(committedTex_, 1.f);
-    blitTexture(scratchTex_,   1.f);
+    blitTexture(scratchTex_, 1.f);
     glDisable(GL_BLEND);
     dirty_ = false;
 
     // Fix [K]: restore program and blend state on exit from render()
     GL.useProgram(0);
-    if (blendWasEnabled) glEnable(GL_BLEND);
+    if (blendWasEnabled)
+      glEnable(GL_BLEND);
     // render() does not bind any framebuffer — no restore needed here.
   }
 
   void onMouseDown(int x, int y) override { beginStroke(x, y); }
-  void onMouseMove(int x, int y) override { if (drawing_) drawSegment(x, y); }
-  void onMouseUp(int x, int y) override   { if (drawing_) endStroke(x, y);   }
+  void onMouseMove(int x, int y) override {
+    if (drawing_)
+      drawSegment(x, y);
+  }
+  void onMouseUp(int x, int y) override {
+    if (drawing_)
+      endStroke(x, y);
+  }
 
   void onKeyDown(int key) override {
-    bool ctrl  = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
-    bool shift = (GetKeyState(VK_SHIFT)   & 0x8000) != 0;
-    if (ctrl && key == 'Z') { if (shift) redo(); else undo(); }
-    if (ctrl && key == 'Y') redo();
+    bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+    bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+    if (ctrl && key == 'Z') {
+      if (shift)
+        redo();
+      else
+        undo();
+    }
+    if (ctrl && key == 'Y')
+      redo();
   }
   void onKeyUp(int /*key*/) override {}
 
   void destroy() override {
     destroyFBOPair(committedFBO_, committedTex_);
-    destroyFBOPair(scratchFBO_,   scratchTex_);
-    if (blitProg_)  { GL.deleteProgram(blitProg_);        blitProg_ = 0; }
-    if (quadVAO_)   { GL.deleteVertexArrays(1, &quadVAO_); quadVAO_ = 0; }
-    if (quadVBO_)   { GL.deleteBuffers(1, &quadVBO_);       quadVBO_ = 0; }
+    destroyFBOPair(scratchFBO_, scratchTex_);
+    if (blitProg_) {
+      GL.deleteProgram(blitProg_);
+      blitProg_ = 0;
+    }
+    if (quadVAO_) {
+      GL.deleteVertexArrays(1, &quadVAO_);
+      quadVAO_ = 0;
+    }
+    if (quadVBO_) {
+      GL.deleteBuffers(1, &quadVBO_);
+      quadVBO_ = 0;
+    }
     // Fix [C]: delete GPU textures through the safe helper, never bare .clear()
     flushSnapshotDeque(undoStack_, undoBytes_);
     flushSnapshotDeque(redoStack_, redoBytes_);
   }
+
+protected:
+  int canvasWidth() const { return w_; }
+  int canvasHeight() const { return h_; }
+  GLuint committedFBOHandle() const { return committedFBO_; }
+  GLuint committedTexHandle() const { return committedTex_; }
+  void pushUndoSnapshotPublic() { pushUndoSnapshot(); }
 
 private:
   int w_ = 0, h_ = 0;
@@ -707,15 +766,15 @@ private:
   StrokeStyle style_{};
 
   GLuint committedFBO_ = 0, committedTex_ = 0;
-  GLuint scratchFBO_   = 0, scratchTex_   = 0;
+  GLuint scratchFBO_ = 0, scratchTex_ = 0;
   GLuint blitProg_ = 0, quadVAO_ = 0, quadVBO_ = 0;
-  float  proj_[16]{};
+  float proj_[16]{};
 
   // Fix [N]: uniform locations cached after program link — never re-queried.
   struct ULocs {
-    GLint mvp   = -1;
-    GLint mode  = -1;
-    GLint tex   = -1;
+    GLint mvp = -1;
+    GLint mode = -1;
+    GLint tex = -1;
     GLint alpha = -1;
     GLint color = -1;
   } uniforms_;
@@ -742,7 +801,8 @@ private:
   float dabVerts[(kDabVerts + 2) * 2];
 
   // Fix [L] / Fix [C]: always use this helper instead of bare .clear().
-  static void flushSnapshotDeque(std::deque<Snapshot> &dq, size_t &byteCounter) {
+  static void flushSnapshotDeque(std::deque<Snapshot> &dq,
+                                 size_t &byteCounter) {
     for (const Snapshot &s : dq)
       glDeleteTextures(1, &s.tex);
     dq.clear();
@@ -768,8 +828,8 @@ private:
     float dist = std::sqrt(dx * dx + dy * dy);
     if (dist < 0.0001f)
       return;
-    float step  = max(1.f, style_.radius * 0.25f);
-    int   steps = max(1, (int)(dist / step));
+    float step = max(1.f, style_.radius * 0.25f);
+    int steps = max(1, (int)(dist / step));
     for (int i = 1; i <= steps; ++i) {
       float t = (float)i / steps;
       paintDab(scratchFBO_, lastPt_.x + dx * t, lastPt_.y + dy * t, style_);
@@ -784,7 +844,7 @@ private:
     mergeScratchIntoCommitted();
     clearFBO(scratchFBO_, w_, h_, 0, 0, 0, 0);
     drawing_ = false;
-    dirty_   = true;
+    dirty_ = true;
   }
 
   // ── FBO helpers ──────────────────────────────────────────────────────────
@@ -796,14 +856,14 @@ private:
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA,
-                 GL_UNSIGNED_BYTE, nullptr);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                 nullptr);
     glBindTexture(GL_TEXTURE_2D, 0);
 
     GL.genFramebuffers(1, &fbo);
     GL.bindFramebuffer(GL_FRAMEBUFFER, fbo);
-    GL.framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-                            GL_TEXTURE_2D, tex, 0);
+    GL.framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                            tex, 0);
 
     // Fix [G]: assert completeness immediately on allocation.
     GLenum status = GL.checkFramebufferStatus(GL_FRAMEBUFFER);
@@ -816,12 +876,18 @@ private:
   }
 
   void destroyFBOPair(GLuint &fbo, GLuint &tex) {
-    if (fbo) { GL.deleteFramebuffers(1, &fbo); fbo = 0; }
-    if (tex) { glDeleteTextures(1, &tex);       tex = 0; }
+    if (fbo) {
+      GL.deleteFramebuffers(1, &fbo);
+      fbo = 0;
+    }
+    if (tex) {
+      glDeleteTextures(1, &tex);
+      tex = 0;
+    }
   }
 
-  void clearFBO(GLuint fbo, int w, int h,
-                uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+  void clearFBO(GLuint fbo, int w, int h, uint8_t r, uint8_t g, uint8_t b,
+                uint8_t a) {
     GL.bindFramebuffer(GL_FRAMEBUFFER, fbo);
     glViewport(0, 0, w, h);
     glClearColor(r / 255.f, g / 255.f, b / 255.f, a / 255.f);
@@ -852,13 +918,12 @@ private:
 
     // Fix [J]: check completeness of the temporary FBO — not covered by [G].
     GLenum status = GL.checkFramebufferStatus(GL_DRAW_FRAMEBUFFER);
-    assert(status == GL_FRAMEBUFFER_COMPLETE &&
-           "Snapshot draw FBO incomplete");
+    assert(status == GL_FRAMEBUFFER_COMPLETE && "Snapshot draw FBO incomplete");
     (void)status;
 
     GL.bindFramebuffer(GL_READ_FRAMEBUFFER, committedFBO_);
-    GL.blitFramebuffer(0, 0, w_, h_, 0, 0, w_, h_,
-                       GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    GL.blitFramebuffer(0, 0, w_, h_, 0, 0, w_, h_, GL_COLOR_BUFFER_BIT,
+                       GL_NEAREST);
     // Fix [K]: restore framebuffer bindings
     GL.bindFramebuffer(GL_READ_FRAMEBUFFER, 0);
     GL.bindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
@@ -875,13 +940,12 @@ private:
 
     // Fix [J]: check completeness of the temporary restore FBO.
     GLenum status = GL.checkFramebufferStatus(GL_READ_FRAMEBUFFER);
-    assert(status == GL_FRAMEBUFFER_COMPLETE &&
-           "Restore read FBO incomplete");
+    assert(status == GL_FRAMEBUFFER_COMPLETE && "Restore read FBO incomplete");
     (void)status;
 
     GL.bindFramebuffer(GL_DRAW_FRAMEBUFFER, committedFBO_);
-    GL.blitFramebuffer(0, 0, w_, h_, 0, 0, w_, h_,
-                       GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    GL.blitFramebuffer(0, 0, w_, h_, 0, 0, w_, h_, GL_COLOR_BUFFER_BIT,
+                       GL_NEAREST);
     // Fix [K]: restore framebuffer bindings
     GL.bindFramebuffer(GL_READ_FRAMEBUFFER, 0);
     GL.bindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
@@ -892,8 +956,7 @@ private:
   void pushUndoSnapshot() {
     size_t sz = snapshotBytes();
     // Evict oldest entries until budget is satisfied (0 = no eviction).
-    while (undoBudgetBytes_ > 0 &&
-           !undoStack_.empty() &&
+    while (undoBudgetBytes_ > 0 && !undoStack_.empty() &&
            undoBytes_ + sz > undoBudgetBytes_) {
       Snapshot oldest = undoStack_.front();
       undoStack_.pop_front();
@@ -925,8 +988,8 @@ private:
 
     GL.useProgram(blitProg_);
     // Fix [N]: use cached uniform locations — no per-draw getUniformLocation
-    GL.uniformMatrix4fv(uniforms_.mvp,   1, GL_FALSE, proj_);
-    GL.uniform1i(uniforms_.mode,  1);
+    GL.uniformMatrix4fv(uniforms_.mvp, 1, GL_FALSE, proj_);
+    GL.uniform1i(uniforms_.mode, 1);
     GL.uniform4f(uniforms_.color, s.r, s.g, s.b, s.a * s.opacity);
 
     float verts[(kDabVerts + 2) * 2];
@@ -954,19 +1017,16 @@ private:
   void blitTexture(GLuint tex, float alpha) {
     GL.useProgram(blitProg_);
     // Fix [N]: use cached uniform locations
-    GL.uniformMatrix4fv(uniforms_.mvp,   1, GL_FALSE, proj_);
-    GL.uniform1i(uniforms_.mode,  0);
-    GL.uniform1i(uniforms_.tex,   0);
+    GL.uniformMatrix4fv(uniforms_.mvp, 1, GL_FALSE, proj_);
+    GL.uniform1i(uniforms_.mode, 0);
+    GL.uniform1i(uniforms_.tex, 0);
     GL.uniform1f(uniforms_.alpha, alpha);
     glBindTexture(GL_TEXTURE_2D, tex);
 
     float q[] = {
-        0.f,       0.f,       0.f, 1.f,
-        (float)w_, 0.f,       1.f, 1.f,
-        (float)w_, (float)h_, 1.f, 0.f,
-        (float)w_, (float)h_, 1.f, 0.f,
-        0.f,       (float)h_, 0.f, 0.f,
-        0.f,       0.f,       0.f, 1.f,
+        0.f,       0.f,       0.f, 1.f, (float)w_, 0.f,       1.f, 1.f,
+        (float)w_, (float)h_, 1.f, 0.f, (float)w_, (float)h_, 1.f, 0.f,
+        0.f,       (float)h_, 0.f, 0.f, 0.f,       0.f,       0.f, 1.f,
     };
     GL.bindVertexArray(quadVAO_);
     GL.bindBuffer(GL_ARRAY_BUFFER, quadVBO_);
@@ -1010,10 +1070,11 @@ void main(){
     blitProg_ = glutil::linkProgram(vert, frag);
     assert(blitProg_ && "RasterSurface: shader program failed to compile/link");
 
-    // Fix [N]: cache all uniform locations once — avoids per-draw string lookup.
-    uniforms_.mvp   = GL.getUniformLocation(blitProg_, "uMVP");
-    uniforms_.mode  = GL.getUniformLocation(blitProg_, "uMode");
-    uniforms_.tex   = GL.getUniformLocation(blitProg_, "uTex");
+    // Fix [N]: cache all uniform locations once — avoids per-draw string
+    // lookup.
+    uniforms_.mvp = GL.getUniformLocation(blitProg_, "uMVP");
+    uniforms_.mode = GL.getUniformLocation(blitProg_, "uMode");
+    uniforms_.tex = GL.getUniformLocation(blitProg_, "uTex");
     uniforms_.alpha = GL.getUniformLocation(blitProg_, "uAlpha");
     uniforms_.color = GL.getUniformLocation(blitProg_, "uColor");
   }
@@ -1023,8 +1084,9 @@ void main(){
     // (6 vertices x 4 floats = 96 bytes) and the dab fan
     // ((kDabVerts+2) x 2 floats).  Both draw paths then use bufferSubData only.
     constexpr GLsizeiptr kBlitBytes = sizeof(float) * 6 * 4;
-    constexpr GLsizeiptr kDabBytes  = sizeof(float) * (kDabVerts + 2) * 2;
-    constexpr GLsizeiptr kVBOBytes  = kBlitBytes > kDabBytes ? kBlitBytes : kDabBytes;
+    constexpr GLsizeiptr kDabBytes = sizeof(float) * (kDabVerts + 2) * 2;
+    constexpr GLsizeiptr kVBOBytes =
+        kBlitBytes > kDabBytes ? kBlitBytes : kDabBytes;
 
     GL.genVertexArrays(1, &quadVAO_);
     GL.genBuffers(1, &quadVBO_);
@@ -1081,7 +1143,7 @@ public:
   }
 
   void computeLayout(HDC, const BoxConstraints &c, FontCache &) override {
-    width  = c.clampWidth( autoWidth  ? c.maxWidth  : width);
+    width = c.clampWidth(autoWidth ? c.maxWidth : width);
     height = c.clampHeight(autoHeight ? c.maxHeight : height);
     needsLayout = false;
   }
@@ -1116,19 +1178,22 @@ private:
   using Clock = std::chrono::steady_clock;
   Clock::time_point lastTick_ = Clock::now();
 
-  HWND  childHwnd    = nullptr;
-  HDC   glDC_        = nullptr;
-  HGLRC glRC_        = nullptr;
-  HWND  parentHwnd   = nullptr;
-  bool  repaintPending_ = false, mouseInside_ = false, trackingLeave_ = false;
-  int   lastW_ = 0, lastH_ = 0;
+  HWND childHwnd = nullptr;
+  HDC glDC_ = nullptr;
+  HGLRC glRC_ = nullptr;
+  HWND parentHwnd = nullptr;
+  bool repaintPending_ = false, mouseInside_ = false, trackingLeave_ = false;
+  int lastW_ = 0, lastH_ = 0;
 
   static LRESULT CALLBACK ChildProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     CanvasWidget *self = reinterpret_cast<CanvasWidget *>(
         GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     switch (msg) {
     case WM_USER + 1:
-      if (self) { self->repaintPending_ = false; self->tickAndRender(); }
+      if (self) {
+        self->repaintPending_ = false;
+        self->tickAndRender();
+      }
       return 0;
     case WM_ERASEBKGND:
       return 1;
@@ -1159,8 +1224,8 @@ private:
       if (self) {
         if (!self->trackingLeave_) {
           TRACKMOUSEEVENT tme{};
-          tme.cbSize   = sizeof(tme);
-          tme.dwFlags  = TME_LEAVE;
+          tme.cbSize = sizeof(tme);
+          tme.dwFlags = TME_LEAVE;
           tme.hwndTrack = hwnd;
           TrackMouseEvent(&tme);
           self->trackingLeave_ = true;
@@ -1173,7 +1238,10 @@ private:
       return 0;
     }
     case WM_MOUSELEAVE:
-      if (self) { self->trackingLeave_ = false; self->mouseInside_ = false; }
+      if (self) {
+        self->trackingLeave_ = false;
+        self->mouseInside_ = false;
+      }
       return 0;
     case WM_MOUSEWHEEL:
       forwardToParent(hwnd, msg, wp, lp);
@@ -1193,7 +1261,8 @@ private:
 
   static void forwardToParent(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     HWND parent = GetParent(hwnd);
-    if (!parent) return;
+    if (!parent)
+      return;
     POINT pt = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
     MapWindowPoints(hwnd, parent, &pt, 1);
     PostMessage(parent, msg, wp, MAKELPARAM(pt.x, pt.y));
@@ -1201,30 +1270,35 @@ private:
 
   static void registerChildClass() {
     static bool done = false;
-    if (done) return;
+    if (done)
+      return;
     WNDCLASSEXW wc{};
-    wc.cbSize       = sizeof(wc);
-    wc.lpfnWndProc  = ChildProc;
-    wc.hInstance    = GetModuleHandle(nullptr);
+    wc.cbSize = sizeof(wc);
+    wc.lpfnWndProc = ChildProc;
+    wc.hInstance = GetModuleHandle(nullptr);
     wc.lpszClassName = L"FluxGLCanvas2";
-    wc.style        = CS_OWNDC | CS_HREDRAW | CS_VREDRAW;
+    wc.style = CS_OWNDC | CS_HREDRAW | CS_VREDRAW;
     RegisterClassExW(&wc);
     done = true;
   }
 
   void ensureChildWindow(HDC parentDC) {
-    if (childHwnd) return;
+    if (childHwnd)
+      return;
     HWND owner = WindowFromDC(parentDC);
-    if (!owner) owner = GetActiveWindow();
+    if (!owner)
+      owner = GetActiveWindow();
     parentHwnd = owner;
     registerChildClass();
 
     childHwnd = CreateWindowExW(
         WS_EX_NOPARENTNOTIFY, L"FluxGLCanvas2", nullptr,
-        WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
-        x, y, width, height, owner, nullptr, GetModuleHandle(nullptr), nullptr);
-    if (!childHwnd) return;
-    SetWindowLongPtrW(childHwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
+        WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN, x, y, width,
+        height, owner, nullptr, GetModuleHandle(nullptr), nullptr);
+    if (!childHwnd)
+      return;
+    SetWindowLongPtrW(childHwnd, GWLP_USERDATA,
+                      reinterpret_cast<LONG_PTR>(this));
 
     glDC_ = GetDC(childHwnd);
     setupPixelFormat(glDC_);
@@ -1239,11 +1313,13 @@ private:
             wglGetProcAddress("wglCreateContextAttribsARB"));
 
     if (wglCreateCtxAttribs) {
-      const int attribs[] = {
-          WGL_CONTEXT_MAJOR_VERSION_ARB, 3,
-          WGL_CONTEXT_MINOR_VERSION_ARB, 3,
-          WGL_CONTEXT_PROFILE_MASK_ARB,  WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
-          0};
+      const int attribs[] = {WGL_CONTEXT_MAJOR_VERSION_ARB,
+                             3,
+                             WGL_CONTEXT_MINOR_VERSION_ARB,
+                             3,
+                             WGL_CONTEXT_PROFILE_MASK_ARB,
+                             WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
+                             0};
       HGLRC coreRC = wglCreateCtxAttribs(glDC_, nullptr, attribs);
       if (coreRC) {
         // Fix [A]: success → discard legacy, use core context
@@ -1267,43 +1343,53 @@ private:
 
   void setupPixelFormat(HDC dc) {
     PIXELFORMATDESCRIPTOR pfd{};
-    pfd.nSize        = sizeof(pfd);
-    pfd.nVersion     = 1;
-    pfd.dwFlags      = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
-    pfd.iPixelType   = PFD_TYPE_RGBA;
-    pfd.cColorBits   = 32;
-    pfd.cDepthBits   = 24;
-    pfd.iLayerType   = PFD_MAIN_PLANE;
+    pfd.nSize = sizeof(pfd);
+    pfd.nVersion = 1;
+    pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
+    pfd.iPixelType = PFD_TYPE_RGBA;
+    pfd.cColorBits = 32;
+    pfd.cDepthBits = 24;
+    pfd.iLayerType = PFD_MAIN_PLANE;
     SetPixelFormat(dc, ChoosePixelFormat(dc, &pfd), &pfd);
   }
 
   void activatePendingSurface() {
-    if (!pendingSurface_) return;
-    if (activeSurface_) { activeSurface_->destroy(); activeSurface_.reset(); }
+    if (!pendingSurface_)
+      return;
+    if (activeSurface_) {
+      activeSurface_->destroy();
+      activeSurface_.reset();
+    }
     activeSurface_ = pendingSurface_;
     pendingSurface_.reset();
     activeSurface_->initialize(width, height);
   }
 
   void tickAndRender() {
-    if (!glRC_ || !glDC_) return;
-    if (pendingSurface_) activatePendingSurface();
-    if (!activeSurface_) return;
-    if (wglGetCurrentContext() != glRC_) wglMakeCurrent(glDC_, glRC_);
-    auto   now = Clock::now();
-    double dt  = std::chrono::duration<double>(now - lastTick_).count();
-    lastTick_  = now;
+    if (!glRC_ || !glDC_)
+      return;
+    if (pendingSurface_)
+      activatePendingSurface();
+    if (!activeSurface_)
+      return;
+    if (wglGetCurrentContext() != glRC_)
+      wglMakeCurrent(glDC_, glRC_);
+    auto now = Clock::now();
+    double dt = std::chrono::duration<double>(now - lastTick_).count();
+    lastTick_ = now;
     activeSurface_->update(dt);
     activeSurface_->render();
     SwapBuffers(glDC_);
   }
 
   void moveChildWindow() {
-    if (!childHwnd) return;
+    if (!childHwnd)
+      return;
     SetWindowPos(childHwnd, nullptr, x, y, width, height,
                  SWP_NOZORDER | SWP_NOACTIVATE);
     if (activeSurface_ && (width != lastW_ || height != lastH_)) {
-      if (wglGetCurrentContext() != glRC_) wglMakeCurrent(glDC_, glRC_);
+      if (wglGetCurrentContext() != glRC_)
+        wglMakeCurrent(glDC_, glRC_);
       activeSurface_->resize(width, height);
       lastW_ = width;
       lastH_ = height;
@@ -1313,14 +1399,24 @@ private:
   void destroyGL() {
     if (glRC_) {
       wglMakeCurrent(glDC_, glRC_);
-      if (activeSurface_) { activeSurface_->destroy(); activeSurface_.reset(); }
-      if (pendingSurface_)  pendingSurface_.reset();
+      if (activeSurface_) {
+        activeSurface_->destroy();
+        activeSurface_.reset();
+      }
+      if (pendingSurface_)
+        pendingSurface_.reset();
       wglMakeCurrent(nullptr, nullptr);
       wglDeleteContext(glRC_);
       glRC_ = nullptr;
     }
-    if (childHwnd && glDC_) { ReleaseDC(childHwnd, glDC_); glDC_ = nullptr; }
-    if (childHwnd)          { DestroyWindow(childHwnd);     childHwnd = nullptr; }
+    if (childHwnd && glDC_) {
+      ReleaseDC(childHwnd, glDC_);
+      glDC_ = nullptr;
+    }
+    if (childHwnd) {
+      DestroyWindow(childHwnd);
+      childHwnd = nullptr;
+    }
   }
 };
 
@@ -1330,7 +1426,7 @@ private:
 
 using CanvasPtr = std::shared_ptr<CanvasWidget>;
 
-inline CanvasPtr Canvas()         { return std::make_shared<CanvasWidget>(); }
+inline CanvasPtr Canvas() { return std::make_shared<CanvasWidget>(); }
 inline CanvasPtr Canvas(int w, int h) {
   return std::make_shared<CanvasWidget>()->setSize(w, h);
 }
