@@ -5,39 +5,29 @@
 // flux_canvas.hpp  —  CanvasWidget + pluggable RenderSurface architecture
 // ============================================================================
 //
+// Window hierarchy
+// ────────────────
+//   parentHwnd  (FluxUI root)
+//     └─ frameHwnd_   "FluxGLFrame"    WS_CHILD | WS_HSCROLL | WS_VSCROLL
+//                                       owns scrollbars, sized to widget
+//           └─ glHwnd_   "FluxGLCanvas4"   WS_CHILD | CS_OWNDC
+//                                           pure GL surface, no scrollbars
+//                                           sized to frame interior
+//
+//   Scrollbar messages (WM_HSCROLL / WM_VSCROLL) go to frameHwnd_.
+//   Mouse / keyboard messages go to glHwnd_ and are forwarded up.
+//   The GL context lives on glHwnd_'s DC.
+//
 // Changes in this revision
 // ────────────────────────
-//  [V1] Viewport integrated — CanvasWidget owns a Viewport instance.
-//       All zoom/pan logic removed from RenderSurface entirely.
-//
-//  [V2] Input routing split:
-//         CanvasWidget handles:  Ctrl+= / Ctrl+- / Ctrl+0  (zoom)
-//                                MMB drag / Space+LMB drag  (pan)
-//         Surface receives:      canvas-space coords already transformed
-//                                by Viewport::screenToCanvas()
-//         Keyboard (Ctrl+Z etc): forwarded to surface unchanged
-//
-//  [V3] Scrollbars on childHwnd (WS_HSCROLL | WS_VSCROLL).
-//         Auto-hide when canvas fits in view.
-//         Thumb drag → real-time Viewport::setOffset().
-//         Arrow clicks → step 32 canvas pixels.
-//         Page click   → step one full view width/height.
-//         syncScrollbars() called after every Viewport::update().
-//
-//  [V4] Frame loop: tickAndRender() calls viewport_.update(dt).
-//       If update() returns true (still animating) another WM_USER+1 is
-//       posted so the easing runs to completion without a busy-poll.
-//
-//  [V5] RenderSurface::render() now receives a const float[16] MVP matrix
-//       built by Viewport::buildMatrix() so surfaces never build their own
-//       projection.  Legacy surfaces that ignored the parameter still compile.
-//
-//  [V6] setProjOverride() removed from RasterSurface — no longer needed.
-//       RasterSurface::render() accepts and forwards the matrix parameter.
+//  [V1-V5]  See previous revision history (viewport, input routing, etc.)
+//  [V6]  Scrollbars moved from glHwnd_ to frameHwnd_ so they sit outside
+//        the OpenGL drawable area.  glHwnd_ is sized to the frame interior
+//        (frame minus scrollbar tracks) and has no WS_HSCROLL/WS_VSCROLL.
 //
 // ============================================================================
 
-#include "flux_viewport.hpp"   // Viewport, ScrollbarInfo
+#include "flux_viewport.hpp"
 #include "flux_widget.hpp"
 
 #define NOMINMAX
@@ -63,7 +53,7 @@
 using namespace Gdiplus;
 
 // ============================================================================
-// §1  GL FUNCTION POINTER TYPEDEFS  (unchanged)
+// §1  GL FUNCTION POINTER TYPEDEFS
 // ============================================================================
 
 using PFNWGLCREATECONTEXTATTRIBSARBPROC = HGLRC(WINAPI *)(HDC, HGLRC, const int *);
@@ -104,7 +94,6 @@ using PFNGLENABLEVERTEXATTRIBARRAYPROC = void(APIENTRY *)(GLuint);
 using PFNGLDISABLEVERTEXATTRIBARRAYPROC= void(APIENTRY *)(GLuint);
 using PFNGLVERTEXATTRIBPOINTERPROC     = void(APIENTRY *)(GLuint, GLint, GLenum, GLboolean, GLsizei, const void *);
 
-// GL constants absent from the frozen Windows gl.h
 #define GL_ARRAY_BUFFER                  0x8892
 #define GL_STATIC_DRAW                   0x88B4
 #define GL_DYNAMIC_DRAW                  0x88E8
@@ -331,8 +320,6 @@ inline GLuint linkProgram(const char *vert, const char *frag) {
     return p;
 }
 
-// Column-major ortho: maps [l,r]×[b,t] → NDC.
-// y-up: pass b < t. y-down: pass b > t.
 inline void ortho(float l, float r, float b, float t, float out[16]) {
     float rml = r - l, tmb = t - b;
     out[0]  =  2/rml; out[1]  = 0;      out[2]  = 0;  out[3]  = 0;
@@ -343,7 +330,6 @@ inline void ortho(float l, float r, float b, float t, float out[16]) {
     out[14] = 0; out[15] = 1;
 }
 
-// Convenience: [0,w]×[0,h] with y-down (legacy path)
 inline void ortho(float w, float h, float out[16]) {
     ortho(0, w, h, 0, out);
 }
@@ -422,20 +408,6 @@ struct Stroke { StrokeStyle style; std::vector<StrokePoint> points; };
 // ============================================================================
 // §6  RENDER SURFACE  —  pure abstract interface
 // ============================================================================
-//
-// Context-ownership contract:
-//   Implementations MUST restore GL_READ_FRAMEBUFFER, GL_DRAW_FRAMEBUFFER,
-//   current program, and GL_BLEND on exit from every public method.
-//
-// Coordinate contract  [V2]:
-//   All x/y coordinates passed to onMouse* are canvas-space (y-up, origin
-//   bottom-left).  CanvasWidget applies Viewport::screenToCanvas() before
-//   calling these methods.  Surfaces must NOT do any coordinate transform.
-//
-// Projection contract  [V5]:
-//   render(mvp) receives a column-major 4×4 MVP built by Viewport::buildMatrix().
-//   Surfaces should pass this directly to their shaders' uMVP uniform.
-//   The default no-arg render() shim is kept for ABI compatibility only.
 
 class RenderSurface {
 public:
@@ -444,8 +416,6 @@ public:
     virtual void initialize(int w, int h)       = 0;
     virtual void resize(int w, int h)            = 0;
     virtual void update(double dt)               = 0;
-
-    // [V5] Primary render entry point — receives MVP from Viewport.
     virtual void render(const float mvp[16])     = 0;
 
     virtual void onMouseDown(float x, float y)   {}
@@ -470,8 +440,6 @@ public:
 
     void setStrokeStyle(const StrokeStyle &s) { style_ = s; }
     const StrokeStyle &getStrokeStyle() const  { return style_; }
-
-    // ── Undo / redo ──────────────────────────────────────────────────────────
 
     void undo() {
         if (undoStack_.empty()) return;
@@ -508,8 +476,6 @@ public:
         clearFBO(scratchFBO_,   w_, h_,   0,   0,   0,   0);
         dirty_ = true;
     }
-
-    // ── RenderSurface interface ──────────────────────────────────────────────
 
     void initialize(int w, int h) override {
         w_ = w; h_ = h;
@@ -552,11 +518,9 @@ public:
 
     void update(double /*dt*/) override {}
 
-    // [V5] render() receives the MVP from Viewport — no internal projection.
     void render(const float mvp[16]) override {
         GLboolean blendWas = glIsEnabled(GL_BLEND);
 
-        glViewport(0, 0, w_, h_);
         glDisable(GL_SCISSOR_TEST);
         glClearColor(0.18f, 0.18f, 0.20f, 1.f);
         glClear(GL_COLOR_BUFFER_BIT);
@@ -573,7 +537,6 @@ public:
         if (blendWas) glEnable(GL_BLEND);
     }
 
-    // [V2] Coords arrive pre-transformed in canvas space (y-up).
     void onMouseDown(float x, float y) override { beginStroke(x, y); }
     void onMouseMove(float x, float y) override { if (drawing_) drawSegment(x, y); }
     void onMouseUp  (float x, float y) override { if (drawing_) endStroke(x, y); }
@@ -589,9 +552,9 @@ public:
     void destroy() override {
         destroyFBOPair(committedFBO_, committedTex_);
         destroyFBOPair(scratchFBO_,   scratchTex_);
-        if (blitProg_)  { GL.deleteProgram(blitProg_);      blitProg_ = 0; }
-        if (quadVAO_)   { GL.deleteVertexArrays(1,&quadVAO_); quadVAO_ = 0; }
-        if (quadVBO_)   { GL.deleteBuffers(1,&quadVBO_);     quadVBO_ = 0; }
+        if (blitProg_)  { GL.deleteProgram(blitProg_);        blitProg_ = 0; }
+        if (quadVAO_)   { GL.deleteVertexArrays(1, &quadVAO_); quadVAO_ = 0; }
+        if (quadVBO_)   { GL.deleteBuffers(1, &quadVBO_);      quadVBO_ = 0; }
         flushSnapshotDeque(undoStack_, undoBytes_);
         flushSnapshotDeque(redoStack_, redoBytes_);
     }
@@ -630,8 +593,6 @@ private:
         dq.clear(); counter = 0;
     }
 
-    // ── Stroke ───────────────────────────────────────────────────────────────
-
     void beginStroke(float x, float y) {
         if (drawing_) return;
         drawing_ = true;
@@ -665,8 +626,6 @@ private:
         dirty_   = true;
     }
 
-    // ── FBO helpers ──────────────────────────────────────────────────────────
-
     void allocFBOPair(GLuint &fbo, GLuint &tex, int w, int h) {
         glGenTextures(1, &tex);
         glBindTexture(GL_TEXTURE_2D, tex);
@@ -698,8 +657,6 @@ private:
         GL.bindFramebuffer(GL_FRAMEBUFFER, 0);
     }
 
-    // ── Snapshots ─────────────────────────────────────────────────────────────
-
     GLuint snapshotCommitted() {
         GLuint snapTex;
         glGenTextures(1, &snapTex);
@@ -713,9 +670,6 @@ private:
         GL.genFramebuffers(1, &snapFBO);
         GL.bindFramebuffer(GL_DRAW_FRAMEBUFFER, snapFBO);
         GL.framebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, snapTex, 0);
-        GLenum status = GL.checkFramebufferStatus(GL_DRAW_FRAMEBUFFER);
-        assert(status == GL_FRAMEBUFFER_COMPLETE && "Snapshot draw FBO incomplete");
-        (void)status;
         GL.bindFramebuffer(GL_READ_FRAMEBUFFER, committedFBO_);
         GL.blitFramebuffer(0,0,w_,h_, 0,0,w_,h_, GL_COLOR_BUFFER_BIT, GL_NEAREST);
         GL.bindFramebuffer(GL_READ_FRAMEBUFFER, 0);
@@ -729,9 +683,6 @@ private:
         GL.genFramebuffers(1, &readFBO);
         GL.bindFramebuffer(GL_READ_FRAMEBUFFER, readFBO);
         GL.framebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, snapTex, 0);
-        GLenum status = GL.checkFramebufferStatus(GL_READ_FRAMEBUFFER);
-        assert(status == GL_FRAMEBUFFER_COMPLETE && "Restore read FBO incomplete");
-        (void)status;
         GL.bindFramebuffer(GL_DRAW_FRAMEBUFFER, committedFBO_);
         GL.blitFramebuffer(0,0,w_,h_, 0,0,w_,h_, GL_COLOR_BUFFER_BIT, GL_NEAREST);
         GL.bindFramebuffer(GL_READ_FRAMEBUFFER, 0);
@@ -752,10 +703,6 @@ private:
         undoBytes_ += sz;
     }
 
-    // ── Draw helpers ──────────────────────────────────────────────────────────
-
-    // Internal canvas-space ortho for drawing into FBOs
-    // [0,w]×[0,h], y-up (matches canvas-space coords from Viewport)
     float canvasOrtho_[16]{};
 
     void updateCanvasOrtho() {
@@ -812,7 +759,6 @@ private:
         GL.uniform1f(uniforms_.alpha, alpha);
         glBindTexture(GL_TEXTURE_2D, tex);
 
-        // Quad in canvas space: bottom-left origin, y-up
         float q[] = {
             0.f,      0.f,      0.f, 0.f,
             (float)w_,0.f,      1.f, 0.f,
@@ -891,18 +837,17 @@ void main(){
 // §8  CANVAS WIDGET
 // ============================================================================
 //
-// Input routing summary  [V2]
-// ───────────────────────────
-//   CanvasWidget intercepts:
-//     Ctrl+=  / Ctrl+NumpadPlus   → viewport_.zoomIn()
-//     Ctrl+-  / Ctrl+NumpadMinus  → viewport_.zoomOut()
-//     Ctrl+0                      → viewport_.resetZoom()
-//     MMB down/move/up            → viewport pan
-//     Space+LMB down/move/up      → viewport pan
-//     WM_HSCROLL / WM_VSCROLL     → viewport_.setOffset()
+// Window hierarchy  [V6]
+// ──────────────────────
+//   frameHwnd_  "FluxGLFrame"    WS_CHILD | WS_HSCROLL | WS_VSCROLL
+//     └─ glHwnd_  "FluxGLCanvas4"  WS_CHILD | CS_OWNDC   (no scrollbars)
 //
-//   Everything else (LMB, RMB, WM_KEYDOWN for Ctrl+Z etc.) is forwarded
-//   to activeSurface_ with coords already in canvas space.
+//   frameHwnd_ is positioned to the widget rect.
+//   glHwnd_    fills frameHwnd_'s client area minus scrollbar tracks
+//              (GetSystemMetrics SM_CXVSCROLL / SM_CYHSCROLL).
+//
+//   WM_HSCROLL / WM_VSCROLL go to frameHwnd_.
+//   All mouse / keyboard events go to glHwnd_ and are forwarded up.
 
 class CanvasWidget : public Widget {
 public:
@@ -919,9 +864,9 @@ public:
         return s;
     }
 
-    RenderSurface *getSurface()   const { return activeSurface_.get(); }
-    const Viewport &viewport()    const { return viewport_; }
-    Viewport       &viewport()          { return viewport_; }
+    RenderSurface   *getSurface() const { return activeSurface_.get(); }
+    const Viewport  &viewport()   const { return viewport_; }
+    Viewport        &viewport()         { return viewport_; }
 
     std::shared_ptr<CanvasWidget> setSize(int w, int h) {
         width = w; height = h;
@@ -932,7 +877,7 @@ public:
 
     std::shared_ptr<CanvasWidget> setCanvasSize(int w, int h) {
         canvasW_ = w; canvasH_ = h;
-        if (childHwnd) {
+        if (frameHwnd_) {
             viewport_.setCanvasSize(w, h);
             if (activeSurface_) {
                 if (wglGetCurrentContext() != glRC_)
@@ -952,8 +897,8 @@ public:
     }
 
     void render(HDC hdc, FontCache &) override {
-        ensureChildWindow(hdc);
-        moveChildWindow();
+        ensureWindows(hdc);
+        moveWindows();
         tickAndRender();
         needsPaint = false;
     }
@@ -965,9 +910,9 @@ public:
 
     void markNeedsPaint() override {
         Widget::markNeedsPaint();
-        if (childHwnd && !repaintPending_) {
+        if (glHwnd_ && !repaintPending_) {
             repaintPending_ = true;
-            PostMessage(childHwnd, WM_USER + 1, 0, 0);
+            PostMessage(glHwnd_, WM_USER + 1, 0, 0);
         }
     }
 
@@ -985,29 +930,43 @@ private:
     using Clock = std::chrono::steady_clock;
     Clock::time_point lastTick_ = Clock::now();
 
-    HWND  childHwnd    = nullptr;
+    // [V6] Two windows: frame owns scrollbars, GL child is pure render surface
+    HWND  frameHwnd_   = nullptr;   // outer frame: WS_HSCROLL | WS_VSCROLL
+    HWND  glHwnd_      = nullptr;   // inner GL surface: CS_OWNDC, no scrollbars
     HDC   glDC_        = nullptr;
     HGLRC glRC_        = nullptr;
-    HWND  parentHwnd   = nullptr;
+    HWND  parentHwnd_  = nullptr;
 
     bool repaintPending_ = false;
-    bool mouseInside_    = false;
     bool trackingLeave_  = false;
 
-    int lastW_ = 0, lastH_ = 0;
+    int lastGLW_ = 0, lastGLH_ = 0;  // last GL child size
 
-    // Pan drag state — owned by CanvasWidget, surface never sees it
-    bool  panning_     = false;
-    int   panStartSX_  = 0, panStartSY_  = 0;
-    float panStartOX_  = 0, panStartOY_  = 0;
+    bool  panning_    = false;
+    int   panStartSX_ = 0, panStartSY_  = 0;
+    float panStartOX_ = 0, panStartOY_  = 0;
+
+    // ── Scrollbar geometry helpers ────────────────────────────────────────────
+
+    // Width of the vertical scrollbar track (pixels).
+    static int sbW() { return GetSystemMetrics(SM_CXVSCROLL); }
+    // Height of the horizontal scrollbar track (pixels).
+    static int sbH() { return GetSystemMetrics(SM_CYHSCROLL); }
+
+    // GL child size = frame size minus scrollbar tracks (when visible).
+    void glChildSize(int frameW, int frameH, int &outW, int &outH) const {
+        ScrollbarInfo h = viewport_.scrollbarH();
+        ScrollbarInfo v = viewport_.scrollbarV();
+        outW = frameW - (v.visible ? sbW() : 0);
+        outH = frameH - (h.visible ? sbH() : 0);
+        if (outW < 1) outW = 1;
+        if (outH < 1) outH = 1;
+    }
 
     // ── Scroll helpers ────────────────────────────────────────────────────────
 
-    // Maps [0,1] normalised scrollbar position → canvas offset and calls setOffset.
-    // Called from WM_HSCROLL / WM_VSCROLL with the SCROLLINFO thumb position.
     void applyHScrollPos(int pos, int maxPos) {
         if (maxPos <= 0) return;
-        // pos is in [0, maxPos]; map to canvas x offset
         float canvasRange = viewport_.canvasW() - viewport_.viewW() / viewport_.zoom();
         viewport_.setOffset(
             (float)pos / maxPos * max(0.f, canvasRange),
@@ -1017,7 +976,6 @@ private:
 
     void applyVScrollPos(int pos, int maxPos) {
         if (maxPos <= 0) return;
-        // Vertical scrollbar: pos=0 → top of canvas → high canvas-y
         float canvasRange = viewport_.canvasH() - viewport_.viewH() / viewport_.zoom();
         float canvasY = (1.f - (float)pos / maxPos) * max(0.f, canvasRange);
         viewport_.setOffset(viewport_.offsetX(), canvasY);
@@ -1025,82 +983,73 @@ private:
     }
 
     void syncScrollbars() {
-        if (!childHwnd) return;
+        if (!frameHwnd_) return;
 
         ScrollbarInfo h = viewport_.scrollbarH();
         ScrollbarInfo v = viewport_.scrollbarV();
 
-        // Show/hide scrollbars (auto-hide when canvas fits)
-        ShowScrollBar(childHwnd, SB_HORZ, h.visible ? TRUE : FALSE);
-        ShowScrollBar(childHwnd, SB_VERT, v.visible ? TRUE : FALSE);
+        ShowScrollBar(frameHwnd_, SB_HORZ, h.visible ? TRUE : FALSE);
+        ShowScrollBar(frameHwnd_, SB_VERT, v.visible ? TRUE : FALSE);
 
-        constexpr int kScrollRange = 10000; // normalised integer range
+        constexpr int kRange = 10000;
 
         if (h.visible) {
-            SCROLLINFO si{};
-            si.cbSize = sizeof(si);
-            si.fMask  = SIF_RANGE | SIF_PAGE | SIF_POS;
-            si.nMin   = 0;
-            si.nMax   = kScrollRange;
-            // Page size = thumb size = fraction of range
-            si.nPage  = (UINT)((h.thumbMax - h.thumbMin) * kScrollRange);
-            si.nPos   = (int)(h.thumbMin * kScrollRange);
-            SetScrollInfo(childHwnd, SB_HORZ, &si, TRUE);
+            SCROLLINFO si{}; si.cbSize = sizeof(si);
+            si.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
+            si.nMin  = 0; si.nMax = kRange;
+            si.nPage = (UINT)((h.thumbMax - h.thumbMin) * kRange);
+            si.nPos  = (int)(h.thumbMin * kRange);
+            SetScrollInfo(frameHwnd_, SB_HORZ, &si, TRUE);
+        }
+        if (v.visible) {
+            SCROLLINFO si{}; si.cbSize = sizeof(si);
+            si.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
+            si.nMin  = 0; si.nMax = kRange;
+            si.nPage = (UINT)((v.thumbMax - v.thumbMin) * kRange);
+            si.nPos  = (int)(v.thumbMin * kRange);
+            SetScrollInfo(frameHwnd_, SB_VERT, &si, TRUE);
         }
 
-        if (v.visible) {
-            SCROLLINFO si{};
-            si.cbSize = sizeof(si);
-            si.fMask  = SIF_RANGE | SIF_PAGE | SIF_POS;
-            si.nMin   = 0;
-            si.nMax   = kScrollRange;
-            si.nPage  = (UINT)((v.thumbMax - v.thumbMin) * kScrollRange);
-            si.nPos   = (int)(v.thumbMin * kScrollRange);
-            SetScrollInfo(childHwnd, SB_VERT, &si, TRUE);
-        }
+        // Resize the GL child whenever scrollbar visibility may have changed
+        RECT rc; GetClientRect(frameHwnd_, &rc);
+        int gw, gh;
+        glChildSize(rc.right, rc.bottom, gw, gh);
+        SetWindowPos(glHwnd_, nullptr, 0, 0, gw, gh,
+                     SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE);
     }
 
     void scheduleRepaint() {
         if (!repaintPending_) {
             repaintPending_ = true;
-            PostMessage(childHwnd, WM_USER + 1, 0, 0);
+            PostMessage(glHwnd_, WM_USER + 1, 0, 0);
         }
     }
 
-    // ── Win32 child window ────────────────────────────────────────────────────
+    // ── Frame window proc (owns scrollbars) ───────────────────────────────────
 
-    static LRESULT CALLBACK ChildProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    static LRESULT CALLBACK FrameProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         CanvasWidget *self = reinterpret_cast<CanvasWidget *>(
             GetWindowLongPtrW(hwnd, GWLP_USERDATA));
 
         switch (msg) {
-
-        // ── Frame pump ──────────────────────────────────────────────────────
-        case WM_USER + 1:
-            if (self) { self->repaintPending_ = false; self->tickAndRender(); }
-            return 0;
-
         case WM_ERASEBKGND: return 1;
         case WM_PAINT: {
-            PAINTSTRUCT ps;
-            BeginPaint(hwnd, &ps);
-            EndPaint(hwnd, &ps);
+            PAINTSTRUCT ps; BeginPaint(hwnd, &ps); EndPaint(hwnd, &ps);
             return 0;
         }
 
-        // ── Scrollbars ───────────────────────────────────────────────────────
         case WM_HSCROLL: {
             if (!self) return 0;
             SCROLLINFO si{}; si.cbSize = sizeof(si); si.fMask = SIF_ALL;
             GetScrollInfo(hwnd, SB_HORZ, &si);
             int newPos = si.nPos;
             switch (LOWORD(wp)) {
-                case SB_LINELEFT:       newPos -= 200;          break;
-                case SB_LINERIGHT:      newPos += 200;          break;
-                case SB_PAGELEFT:       newPos -= si.nPage;     break;
-                case SB_PAGERIGHT:      newPos += si.nPage;     break;
+                case SB_LINELEFT:      newPos -= 200;          break;
+                case SB_LINERIGHT:     newPos += 200;          break;
+                case SB_PAGELEFT:      newPos -= si.nPage;     break;
+                case SB_PAGERIGHT:     newPos += si.nPage;     break;
                 case SB_THUMBTRACK:
-                case SB_THUMBPOSITION:  newPos  = si.nTrackPos; break;
+                case SB_THUMBPOSITION: newPos  = si.nTrackPos; break;
                 default: break;
             }
             newPos = std::clamp(newPos, si.nMin, si.nMax - (int)si.nPage);
@@ -1114,16 +1063,45 @@ private:
             GetScrollInfo(hwnd, SB_VERT, &si);
             int newPos = si.nPos;
             switch (LOWORD(wp)) {
-                case SB_LINEUP:         newPos -= 200;          break;
-                case SB_LINEDOWN:       newPos += 200;          break;
-                case SB_PAGEUP:         newPos -= si.nPage;     break;
-                case SB_PAGEDOWN:       newPos += si.nPage;     break;
+                case SB_LINEUP:        newPos -= 200;          break;
+                case SB_LINEDOWN:      newPos += 200;          break;
+                case SB_PAGEUP:        newPos -= si.nPage;     break;
+                case SB_PAGEDOWN:      newPos += si.nPage;     break;
                 case SB_THUMBTRACK:
-                case SB_THUMBPOSITION:  newPos  = si.nTrackPos; break;
+                case SB_THUMBPOSITION: newPos  = si.nTrackPos; break;
                 default: break;
             }
             newPos = std::clamp(newPos, si.nMin, si.nMax - (int)si.nPage);
             self->applyVScrollPos(newPos, si.nMax - (int)si.nPage);
+            return 0;
+        }
+
+        // Forward mouse wheel from frame to GL child so it reaches the parent chain
+        case WM_MOUSEWHEEL:
+            if (self && self->glHwnd_)
+                PostMessage(self->glHwnd_, msg, wp, lp);
+            return 0;
+
+        default:
+            return DefWindowProc(hwnd, msg, wp, lp);
+        }
+    }
+
+    // ── GL child window proc (pure render surface + input) ────────────────────
+
+    static LRESULT CALLBACK GLProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+        CanvasWidget *self = reinterpret_cast<CanvasWidget *>(
+            GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+
+        switch (msg) {
+
+        case WM_USER + 1:
+            if (self) { self->repaintPending_ = false; self->tickAndRender(); }
+            return 0;
+
+        case WM_ERASEBKGND: return 1;
+        case WM_PAINT: {
+            PAINTSTRUCT ps; BeginPaint(hwnd, &ps); EndPaint(hwnd, &ps);
             return 0;
         }
 
@@ -1139,19 +1117,17 @@ private:
             }
             return 0;
         }
-        case WM_MBUTTONUP: {
+        case WM_MBUTTONUP:
             ReleaseCapture();
             if (self) self->panning_ = false;
             return 0;
-        }
 
-        // ── Mouse: LMB / RMB ─────────────────────────────────────────────────
+        // ── Mouse: LMB ───────────────────────────────────────────────────────
         case WM_LBUTTONDOWN: {
             SetCapture(hwnd);
             if (!self) return 0;
             bool space = (GetKeyState(VK_SPACE) & 0x8000) != 0;
             if (space) {
-                // Space+LMB = pan
                 self->panning_    = true;
                 self->panStartSX_ = GET_X_LPARAM(lp);
                 self->panStartSY_ = GET_Y_LPARAM(lp);
@@ -1199,19 +1175,16 @@ private:
             if (!self) return 0;
             int sx = GET_X_LPARAM(lp), sy = GET_Y_LPARAM(lp);
 
-            // Track leave for hover state
             if (!self->trackingLeave_) {
                 TRACKMOUSEEVENT tme{};
-                tme.cbSize   = sizeof(tme);
-                tme.dwFlags  = TME_LEAVE;
+                tme.cbSize    = sizeof(tme);
+                tme.dwFlags   = TME_LEAVE;
                 tme.hwndTrack = hwnd;
                 TrackMouseEvent(&tme);
                 self->trackingLeave_ = true;
             }
-            self->mouseInside_ = true;
 
             if (self->panning_) {
-                // Real-time pan: reconstruct canvas offset from start + delta
                 float dx = (float)(sx - self->panStartSX_);
                 float dy = (float)(sy - self->panStartSY_);
                 self->viewport_.setOffset(
@@ -1226,7 +1199,7 @@ private:
             return 0;
         }
         case WM_MOUSELEAVE:
-            if (self) { self->trackingLeave_ = false; self->mouseInside_ = false; }
+            if (self) self->trackingLeave_ = false;
             return 0;
 
         case WM_MOUSEWHEEL:
@@ -1234,15 +1207,11 @@ private:
             return 0;
 
         // ── Keyboard ─────────────────────────────────────────────────────────
-        //  [V2] Ctrl+= / Ctrl+-  / Ctrl+0  → viewport zoom
-        //  Everything else → surface
         case WM_KEYDOWN: {
             if (!self) return 0;
             bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
-
             bool consumed = false;
             if (ctrl) {
-                // '=' shares key with '+' on most layouts; also handle numpad
                 if (wp == VK_OEM_PLUS || wp == VK_ADD) {
                     self->viewport_.zoomIn();
                     self->scheduleRepaint();
@@ -1272,58 +1241,86 @@ private:
     }
 
     static void forwardToParent(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
-        HWND parent = GetParent(hwnd);
+        // Forward to the FluxUI root (grandparent of glHwnd_)
+        HWND frame  = GetParent(hwnd);
+        HWND parent = frame ? GetParent(frame) : nullptr;
         if (!parent) return;
         POINT pt = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
         MapWindowPoints(hwnd, parent, &pt, 1);
         PostMessage(parent, msg, wp, MAKELPARAM(pt.x, pt.y));
     }
 
-    static void registerChildClass() {
+    // ── Window class registration ─────────────────────────────────────────────
+
+    static void registerClasses() {
         static bool done = false;
         if (done) return;
-        WNDCLASSEXW wc{};
-        wc.cbSize       = sizeof(wc);
-        wc.lpfnWndProc  = ChildProc;
-        wc.hInstance    = GetModuleHandle(nullptr);
-        wc.lpszClassName= L"FluxGLCanvas3";
-        // CS_OWNDC is critical — we keep the DC alive for the context lifetime
-        wc.style        = CS_OWNDC | CS_HREDRAW | CS_VREDRAW;
-        RegisterClassExW(&wc);
+        HINSTANCE hi = GetModuleHandle(nullptr);
+
+        // Frame class — plain, handles scrollbars
+        WNDCLASSEXW wf{};
+        wf.cbSize       = sizeof(wf);
+        wf.lpfnWndProc  = FrameProc;
+        wf.hInstance    = hi;
+        wf.lpszClassName= L"FluxGLFrame";
+        wf.style        = CS_HREDRAW | CS_VREDRAW;
+        RegisterClassExW(&wf);
+
+        // GL child class — CS_OWNDC, no scrollbars
+        WNDCLASSEXW wg{};
+        wg.cbSize       = sizeof(wg);
+        wg.lpfnWndProc  = GLProc;
+        wg.hInstance    = hi;
+        wg.lpszClassName= L"FluxGLCanvas4";
+        wg.style        = CS_OWNDC | CS_HREDRAW | CS_VREDRAW;
+        RegisterClassExW(&wg);
+
         done = true;
     }
 
-    void ensureChildWindow(HDC parentDC) {
-        if (childHwnd) return;
+    // ── Window creation + GL init ─────────────────────────────────────────────
+
+    void ensureWindows(HDC parentDC) {
+        if (frameHwnd_) return;
+
         HWND owner = WindowFromDC(parentDC);
         if (!owner) owner = GetActiveWindow();
-        parentHwnd = owner;
-        registerChildClass();
+        parentHwnd_ = owner;
+        registerClasses();
 
-        childHwnd = CreateWindowExW(
+        // 1. Create the frame window (no GL, owns scrollbars)
+        frameHwnd_ = CreateWindowExW(
             WS_EX_NOPARENTNOTIFY,
-            L"FluxGLCanvas3", nullptr,
-            // WS_HSCROLL | WS_VSCROLL added for native scrollbars [V3]
+            L"FluxGLFrame", nullptr,
             WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN
             | WS_HSCROLL | WS_VSCROLL,
             x, y, width, height,
             owner, nullptr, GetModuleHandle(nullptr), nullptr);
-        if (!childHwnd) return;
+        assert(frameHwnd_ && "CanvasWidget: failed to create frame window");
+        SetWindowLongPtrW(frameHwnd_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
 
-        SetWindowLongPtrW(childHwnd, GWLP_USERDATA,
-                          reinterpret_cast<LONG_PTR>(this));
+        // 2. Create the GL child inside the frame, sized to interior
+        int gw, gh;
+        glChildSize(width, height, gw, gh);
 
-        glDC_ = GetDC(childHwnd);
+        glHwnd_ = CreateWindowExW(
+            WS_EX_NOPARENTNOTIFY,
+            L"FluxGLCanvas4", nullptr,
+            WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
+            0, 0, gw, gh,
+            frameHwnd_, nullptr, GetModuleHandle(nullptr), nullptr);
+        assert(glHwnd_ && "CanvasWidget: failed to create GL window");
+        SetWindowLongPtrW(glHwnd_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
+
+        // 3. Set up OpenGL on the GL child's DC
+        glDC_ = GetDC(glHwnd_);
         setupPixelFormat(glDC_);
 
-        // Step 1: legacy context to resolve wglCreateContextAttribsARB
         HGLRC tmpRC = wglCreateContext(glDC_);
         wglMakeCurrent(glDC_, tmpRC);
 
-        // Step 2: upgrade to Core 3.3
         auto wglCreateCtxAttribs = reinterpret_cast<PFNWGLCREATECONTEXTATTRIBSARBPROC>(
             wglGetProcAddress("wglCreateContextAttribsARB"));
-
         if (wglCreateCtxAttribs) {
             const int attribs[] = {
                 WGL_CONTEXT_MAJOR_VERSION_ARB, 3,
@@ -1345,8 +1342,8 @@ private:
         wglMakeCurrent(glDC_, glRC_);
         GL.init();
 
-        // Initialise viewport with view size = widget size, canvas size explicit
-        viewport_.init(width, height, canvasW_, canvasH_);
+        viewport_.init(gw, gh, canvasW_, canvasH_);
+        lastGLW_ = gw; lastGLH_ = gh;
 
         activatePendingSurface();
         lastTick_ = Clock::now();
@@ -1373,10 +1370,12 @@ private:
         viewport_.setCanvasSize(canvasW_, canvasH_);
     }
 
+    // ── Per-frame tick ────────────────────────────────────────────────────────
+
     void tickAndRender() {
         if (!glRC_ || !glDC_) return;
-        if (pendingSurface_)  activatePendingSurface();
-        if (!activeSurface_)  return;
+        if (pendingSurface_) activatePendingSurface();
+        if (!activeSurface_) return;
 
         if (wglGetCurrentContext() != glRC_)
             wglMakeCurrent(glDC_, glRC_);
@@ -1386,50 +1385,63 @@ private:
         lastTick_ = now;
 
         activeSurface_->update(dt);
+        viewport_.update(dt);   // no-op without animation, kept for compat
 
-        // [V4] Advance viewport animation; keep pumping if still moving
-        bool animating = viewport_.update(dt);
+        // Resize GL viewport to current GL child size
+        RECT rc; GetClientRect(glHwnd_, &rc);
+        int glW = rc.right, glH = rc.bottom;
+        if (glW < 1) glW = 1;
+        if (glH < 1) glH = 1;
+        glViewport(0, 0, glW, glH);
 
-        // Build MVP and render
         float mvp[16];
         viewport_.buildMatrix(mvp);
         activeSurface_->render(mvp);
 
         SwapBuffers(glDC_);
-
-        // [V3] Sync scrollbar thumbs after every frame
         syncScrollbars();
-
-        // [V4] If viewport is still easing, schedule another frame
-        if (animating) scheduleRepaint();
     }
 
-    void moveChildWindow() {
-        if (!childHwnd) return;
-        SetWindowPos(childHwnd, nullptr, x, y, width, height,
+    // ── Layout / resize ───────────────────────────────────────────────────────
+
+    void moveWindows() {
+        if (!frameHwnd_) return;
+
+        // Reposition the frame to the widget rect
+        SetWindowPos(frameHwnd_, nullptr, x, y, width, height,
                      SWP_NOZORDER | SWP_NOACTIVATE);
 
-        if (width != lastW_ || height != lastH_) {
+        // Recompute GL child size from current frame client area
+        RECT rc; GetClientRect(frameHwnd_, &rc);
+        int gw, gh;
+        glChildSize(rc.right, rc.bottom, gw, gh);
+
+        SetWindowPos(glHwnd_, nullptr, 0, 0, gw, gh,
+                     SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE);
+
+        if (gw != lastGLW_ || gh != lastGLH_) {
             if (wglGetCurrentContext() != glRC_)
                 wglMakeCurrent(glDC_, glRC_);
-            viewport_.setViewSize(width, height);
-            // Surface keeps its canvas resolution; only view size changed
-            glViewport(0, 0, width, height);
-            lastW_ = width; lastH_ = height;
+            viewport_.setViewSize(gw, gh);
+            glViewport(0, 0, gw, gh);
+            lastGLW_ = gw; lastGLH_ = gh;
         }
     }
+
+    // ── Cleanup ───────────────────────────────────────────────────────────────
 
     void destroyGL() {
         if (glRC_) {
             wglMakeCurrent(glDC_, glRC_);
-            if (activeSurface_) { activeSurface_->destroy(); activeSurface_.reset(); }
-            if (pendingSurface_) pendingSurface_.reset();
+            if (activeSurface_)  { activeSurface_->destroy();  activeSurface_.reset(); }
+            if (pendingSurface_)   pendingSurface_.reset();
             wglMakeCurrent(nullptr, nullptr);
             wglDeleteContext(glRC_);
             glRC_ = nullptr;
         }
-        if (childHwnd && glDC_) { ReleaseDC(childHwnd, glDC_); glDC_ = nullptr; }
-        if (childHwnd)           { DestroyWindow(childHwnd); childHwnd = nullptr; }
+        if (glHwnd_ && glDC_) { ReleaseDC(glHwnd_, glDC_); glDC_ = nullptr; }
+        if (glHwnd_)           { DestroyWindow(glHwnd_);    glHwnd_ = nullptr; }
+        if (frameHwnd_)        { DestroyWindow(frameHwnd_); frameHwnd_ = nullptr; }
     }
 };
 
@@ -1447,7 +1459,6 @@ inline CanvasPtr Canvas(int w, int h) {
     return std::make_shared<CanvasWidget>()->setSize(w, h);
 }
 
-// View size = canvas size (1:1 default)
 inline CanvasPtr RasterCanvas(int w, int h) {
     auto c = std::make_shared<CanvasWidget>()->setSize(w, h);
     c->setCanvasSize(w, h);
@@ -1455,7 +1466,6 @@ inline CanvasPtr RasterCanvas(int w, int h) {
     return c;
 }
 
-// View size = canvas size, custom undo VRAM budget
 inline CanvasPtr RasterCanvas(int w, int h, size_t undoBudgetBytes) {
     auto c = std::make_shared<CanvasWidget>()->setSize(w, h);
     c->setCanvasSize(w, h);
@@ -1463,8 +1473,6 @@ inline CanvasPtr RasterCanvas(int w, int h, size_t undoBudgetBytes) {
     return c;
 }
 
-// View size and canvas size independent
-// e.g. RasterCanvas(800, 600, 2048, 2048) — view window 800×600, 2K canvas
 inline CanvasPtr RasterCanvas(int viewW, int viewH, int canvasW, int canvasH) {
     auto c = std::make_shared<CanvasWidget>()->setSize(viewW, viewH);
     c->setCanvasSize(canvasW, canvasH);
