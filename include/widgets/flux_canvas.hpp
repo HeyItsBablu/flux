@@ -680,6 +680,7 @@ public:
     w_ = w;
     h_ = h;
     glutil::ortho((float)w_, (float)h_, proj_);
+    if (projOverride_) std::memcpy(proj_, projOverride_, sizeof(proj_));
     glViewport(0, 0, w_, h_);
     dirty_ = true;
   }
@@ -758,6 +759,10 @@ protected:
   GLuint committedFBOHandle() const { return committedFBO_; }
   GLuint committedTexHandle() const { return committedTex_; }
   void pushUndoSnapshotPublic() { pushUndoSnapshot(); }
+  void setProjOverride(const float *m) {
+    projOverride_ = m;
+    if (m) std::memcpy(proj_, m, sizeof(proj_));
+}
 
 private:
   int w_ = 0, h_ = 0;
@@ -769,6 +774,7 @@ private:
   GLuint scratchFBO_ = 0, scratchTex_ = 0;
   GLuint blitProg_ = 0, quadVAO_ = 0, quadVBO_ = 0;
   float proj_[16]{};
+  const float *projOverride_ = nullptr;
 
   // Fix [N]: uniform locations cached after program link — never re-queried.
   struct ULocs {
