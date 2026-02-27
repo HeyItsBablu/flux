@@ -33,8 +33,7 @@ public:
             Container(
                 Row(Text("Scroll with mouse wheel or drag scrollbar!")
                         ->setFontSize(14)
-                        ->setTextColor(RGB(100, 100, 100))
-                        ->setFlex(1),
+                        ->setTextColor(RGB(100, 100, 100)),
 
                     Button("Add Items",
                            [this]() {
@@ -103,12 +102,12 @@ public:
                                                       })
                                                       ->setPadding(8))
                                                   ->setSpacing(8)
-                                                  ->setCrossAlignment(
-                                                      Alignment::Center))
+                                                  ->setCrossAxisAlignment(
+                                                      CrossAxisAlignment::Center))
                                       ->setPadding(12);
                                 })
                                 ->separator([]() { return SizedBox(0, 4); })
-                                ->spacing(0))
+                                )
                             ->setBackgroundColor(RGB(250, 250, 250))
                             ->setPadding(8)),
 
@@ -139,8 +138,7 @@ public:
                                                      ->setFontSize(14),
 
                                                  Text(item)
-                                                     ->setFontSize(14)
-                                                     ->setFlex(1),
+                                                     ->setFontSize(14),
 
                                                  Button(
                                                      "Delete",
@@ -159,11 +157,10 @@ public:
 
                                                      ->setPadding(6))
                                                  ->setSpacing(12)
-                                                 ->setCrossAlignment(
-                                                     Alignment::Center))
+                                                 ->setCrossAxisAlignment(
+                                                     CrossAxisAlignment::Center))
                                       ->setPadding(12);
-                                })
-                                ->spacing(4))
+                                }))
                             ->setPadding(8)))
                     ->setSpacing(0)))
             ->setSpacing(0));
