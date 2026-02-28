@@ -12,5 +12,6 @@
 #include "flux_structure.hpp"
 #include "fluxicons.hpp"
 #include "flux_canvas.hpp"
+#include "flux_colorpicker.hpp"
 
 #endif // WIDGETS_HPP

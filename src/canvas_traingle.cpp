@@ -10,7 +10,7 @@ public:
     void initialize(int w, int h) override {
         w_ = w; h_ = h;
         buildShaders();
-        buildTriangleVAO();
+        buildTriangleVAO(); 
     }
 
     void resize(int w, int h) override {
