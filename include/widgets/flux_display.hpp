@@ -865,6 +865,17 @@ public:
     return std::static_pointer_cast<TextWidget>(shared_from_this());
   }
 
+  template <typename T, typename F>
+  std::shared_ptr<TextWidget> setTextColor(State<T> &state, F transform) { 
+    std::function<COLORREF(const T &)> fn = transform;
+    backgroundColor = fn(state.get());
+  
+    state.bindProperty(
+        shared_from_this(),
+        [fn](Widget *w, const T &val) { w->textColor = fn(val); }, true);
+    return std::static_pointer_cast<TextWidget>(shared_from_this());
+  }
+
   std::shared_ptr<TextWidget> setHoverTextColor(COLORREF color) {
     hoverTextColor = color;
     hasHoverTextColor = true;
@@ -962,7 +973,7 @@ public:
     SelectObject(hdc, hOld);
     needsPaint = false;
   }
- 
+
   std::shared_ptr<IconWidget> setSize(int size) {
     setFontSize(size);
     return std::static_pointer_cast<IconWidget>(shared_from_this());
