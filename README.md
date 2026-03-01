@@ -30,10 +30,15 @@
   - [Toggle](#toggle)
   - [CheckBox](#checkbox)
   - [RadioGroup / RadioButton](#radiogroup--radiobutton)
+  - [ColorPicker](#colorpicker)
 - [Collection](#collection)
   - [ListView](#listview)
   - [GridView](#gridview)
   - [Grid](#grid)
+- [Canvas](#canvas)
+  - [CanvasWidget](#canvaswidget)
+  - [RasterSurface](#rastersurface)
+  - [Viewport](#viewport)
 - [State](#state)
   - [Conditional](#conditional)
   - [Switch](#switch)
@@ -478,7 +483,7 @@ Button(Row(Icon(...), Text("Upload")), [&]{ upload(); });
 | `setTextColor(color)` | `COLORREF` | Label text color |
 | `setBorderRadius(r)` | `int` | Corner rounding |
 | `setPadding(p)` | `int` | Uniform padding |
-| `setPaddingAll(l,t,r,b)` | `int ×4` | Per-side padding |
+| `setPaddingAll(l, t, r, b)` | `int ×4` | Per-side padding |
 | `setWidth(w)` | `int` | Fixed width |
 | `setHeight(h)` | `int` | Fixed height |
 
@@ -495,9 +500,19 @@ GestureDetector(Card(Text("Click me")))
     ->setOnLongPress([&]{ showMenu(); })
     ->setOnDragUpdate([&](int dx, int dy){ pan(dx, dy); })
     ->setOnScrollUp([&](int delta){ zoom(delta); });
+
+// Shorthand: wrap child with a drag handler directly
+GestureDetector(myWidget, [&](int dx, int dy){ pan(dx, dy); });
 ```
 
 > **Thresholds:** Long press fires after `500ms`. Double-tap window is `300ms`. Drag starts after `5px` of movement. Mouse capture is set automatically during drags.
+
+**Factory**
+
+| Signature | Description |
+|---|---|
+| `GestureDetector(child)` | Wraps child with no initial callbacks |
+| `GestureDetector(child, onDrag)` | Shorthand — wraps child with a `DragHandler` for drag updates |
 
 **Callbacks**
 
@@ -653,13 +668,54 @@ group->setHorizontal();
 
 ---
 
+### ColorPicker
+
+An HSV color picker with a saturation/value square, hue bar, optional alpha bar, and a live preview swatch with hex display. Supports two-way `State<COLORREF>` binding.
+
+```cpp
+State<COLORREF> brushColor(RGB(255, 0, 0), &app);
+
+ColorPicker(RGB(255, 0, 0))
+    ->bindValue(brushColor)
+    ->setShowAlpha(false)
+    ->setOnColorChanged([&](COLORREF c){ applyColor(c); });
+```
+
+**Factory**
+
+| Signature | Description |
+|---|---|
+| `ColorPicker(initialColor)` | Picker initialized to the given `COLORREF` |
+
+**Methods**
+
+| Method | Type | Description |
+|---|---|---|
+| `setColor(color)` | `COLORREF` | Set picker color imperatively |
+| `getColor()` | `COLORREF` | Read the current selected color |
+| `setShowAlpha(show)` | `bool` | Show or hide the alpha bar (default `true`) |
+| `setOnColorChanged(fn)` | `void(COLORREF)` | Callback fired on every color change |
+| `bindValue(State<COLORREF>)` | State | Two-way reactive binding |
+
+> **Layout:** The picker auto-sizes its height based on whether the alpha bar is visible. The SV square is 200×200px by default. Dragging any region captures the mouse automatically.
+
+---
+
 ## Collection
 
 ### ListView
 
-Scrollable list driven by `State<vector<T>>`. Supports vertical or horizontal orientation, separators, custom scrollbar styling, and thumb drag.
+Scrollable list. Supports two construction modes: a **static** initializer-list form for known children, and a **reactive builder** form driven by `State<vector<T>>`. Both orientations (vertical / horizontal), separators, custom scrollbar styling, and thumb drag are available in both modes.
 
 ```cpp
+// Static — known children passed directly
+ListView({
+    Card(Text("Item A")),
+    Card(Text("Item B")),
+    Card(Text("Item C")),
+})->setSpacing(8);
+
+// Reactive builder — driven by state
 State<std::vector<Contact>> contacts(data, &app);
 
 ListView(contacts)
@@ -671,10 +727,17 @@ ListView(contacts)
     ->setScrollbarColor(RGB(100,100,120));
 ```
 
+**Factory**
+
+| Signature | Description |
+|---|---|
+| `ListView({item, item, ...})` | Static list from an initializer list of widgets |
+| `ListView(State<vector<T>>)` | Reactive list driven by a state vector |
+
+**Methods (both modes)**
+
 | Method | Description |
 |---|---|
-| `itemBuilder(fn)` | Builder `(int index, const T&) -> WidgetPtr` |
-| `separator(fn)` | Widget inserted between items |
 | `setSpacing(px)` | Gap between items |
 | `setHorizontal(bool)` | Switch to horizontal scroll |
 | `setScrollbarSize(px)` | Scrollbar thickness |
@@ -682,6 +745,15 @@ ListView(contacts)
 | `setScrollbarHoverColor(c)` | Hover thumb color |
 | `setScrollbarActiveColor(c)` | Drag thumb color |
 | `setScrollbarTrackColor(c)` | Track background color |
+| `setPadding(px)` | Inner padding (static mode) |
+| `setBackgroundColor(c)` | Background fill (static mode) |
+
+**Methods (reactive builder only)**
+
+| Method | Description |
+|---|---|
+| `itemBuilder(fn)` | Builder `(int index, const T&) -> WidgetPtr` |
+| `separator(fn)` | Widget inserted between items |
 
 ---
 
@@ -697,7 +769,7 @@ GridView(photos)
     })
     ->setSpacing(12);
 
-// Responsive mode
+// Responsive mode — column count adapts to available width
 GridView(items)->columnWidth(200)->...
 ```
 
@@ -710,6 +782,10 @@ GridView(items)->columnWidth(200)->...
 | `setSpacingV(px)` | Vertical gap |
 | `setSpacing(px)` | Set both H and V spacing |
 | `setScrollbarWidth(px)` | Scrollbar thickness |
+| `setScrollbarColor(c)` | Idle thumb color |
+| `setScrollbarHoverColor(c)` | Hover thumb color |
+| `setScrollbarActiveColor(c)` | Drag thumb color |
+| `setScrollbarTrackColor(c)` | Track background color |
 
 ---
 
@@ -724,13 +800,14 @@ Grid(3,
     Card(Text("B")),
     Card(Text("C"))
 )->setSpacing(16)
- ->setCrossAlignment(Alignment::Stretch);
+ ->setCrossAxisAlignment(CrossAxisAlignment::Stretch);
 
-// Responsive
+// Responsive — column count derived from available width
 GridFixedWidth(200, items...);
 
-// From vector
+// From a runtime vector
 GridFromList(4, widgetVector);
+GridFixedWidthFromList(200, widgetVector);
 ```
 
 **Factory**
@@ -751,11 +828,179 @@ GridFromList(4, widgetVector);
 | `setSpacing(px)` | Uniform H and V gap |
 | `setSpacingH(px)` | Horizontal gap only |
 | `setSpacingV(px)` | Vertical gap only |
-| `setCrossAlignment(a)` | Cell alignment: Start · Center · End · Stretch |
+| `setCrossAxisAlignment(a)` | Cell alignment: Start · Center · End · Stretch |
 | `setMainAxisAlignment(a)` | Row distribution: Start · Center · End |
 | `setPadding(px)` | Uniform padding |
+| `setPaddingAll(l, t, r, b)` | Per-side padding |
 | `setBackgroundColor(c)` | Grid background fill |
 | `setFlex(n)` | Flex factor in parent Flex container |
+| `setWidth(w)` | Fixed width |
+| `setHeight(h)` | Fixed height |
+
+---
+
+## Canvas
+
+### CanvasWidget
+
+An OpenGL-powered drawing surface embedded in the widget tree. Manages its own child HWND hierarchy, pixel format, and GL context. Optionally includes a pan/zoom viewport with scrollbars.
+
+```cpp
+// Minimal raster canvas — same view and canvas size, no viewport
+auto canvas = RasterCanvas(800, 600);
+
+// Raster canvas with pan/zoom viewport
+auto canvas = RasterCanvas(800, 600, 2048, 2048);  // viewW, viewH, canvasW, canvasH
+
+// Custom undo budget
+auto canvas = RasterCanvas(800, 600, 64ULL * 1024 * 1024);
+
+// Full manual setup
+auto canvas = Canvas(800, 600)
+    ->setCanvasSize(2048, 2048)
+    ->setViewportEnabled(true)
+    ->setSurface<RasterSurface>()
+    ->setSize(800, 600);
+
+canvas->onViewportChanged = [&](float zoom){ updateZoomLabel(zoom); };
+```
+
+**Factory**
+
+| Signature | Description |
+|---|---|
+| `Canvas()` | Bare canvas widget, 400×300, no surface |
+| `Canvas(w, h)` | Bare canvas widget at given view size |
+| `RasterCanvas(w, h)` | Canvas + `RasterSurface`, same view and canvas size, viewport disabled |
+| `RasterCanvas(w, h, undoBudget)` | As above with a custom undo memory budget in bytes |
+| `RasterCanvas(viewW, viewH, canvasW, canvasH)` | Canvas + `RasterSurface` with separate view and canvas sizes, viewport enabled |
+
+**Methods**
+
+| Method | Type | Description |
+|---|---|---|
+| `setSize(w, h)` | `int, int` | View (widget) dimensions |
+| `setCanvasSize(w, h)` | `int, int` | Drawing surface dimensions |
+| `setViewportEnabled(bool)` | `bool` | Enable or disable pan/zoom with scrollbars |
+| `setSurface<T>(args...)` | Template | Attach a `RenderSurface` subclass |
+| `getSurface()` | `RenderSurface*` | Access the active surface |
+| `viewport()` | `Viewport&` | Access the `Viewport` for zoom/pan control |
+| `redraw()` | — | Schedule a repaint |
+| `onViewportChanged` | `std::function<void(float)>` | Callback fired when zoom or pan changes |
+
+> **Navigation:** Middle-mouse or `Space + Left-drag` to pan. `Ctrl + Scroll` to zoom. `Ctrl++/-` and `Ctrl+0` for keyboard zoom. Scrollbars appear automatically when the canvas is larger than the view.
+
+---
+
+### RasterSurface
+
+A GDI+-backed OpenGL raster painting surface. Manages two FBOs (committed layer + scratch layer), a dab-based brush engine, undo/redo history, and PNG export.
+
+```cpp
+// Attach to a canvas
+auto surface = canvas->setSurface<RasterSurface>();
+
+// Tool selection
+surface->setTool(kToolBrush);
+surface->setTool(kToolEraser);
+
+// Style
+StrokeStyle style;
+style.r = 0.2f; style.g = 0.4f; style.b = 1.0f; style.a = 1.0f;
+style.radius = 8.f;
+style.hardness = 0.9f;
+style.opacity = 0.8f;
+surface->setStrokeStyle(style);
+
+// Undo / Redo
+surface->undo();
+surface->redo();
+surface->clear();  // fill white
+
+// Export
+surface->savePNG(L"output.png");
+```
+
+**Tool IDs**
+
+| Constant | Description |
+|---|---|
+| `kToolBrush` | Paints onto the scratch FBO, merges into committed on mouse up |
+| `kToolEraser` | Paints white directly onto the committed FBO |
+
+**Methods**
+
+| Method | Type | Description |
+|---|---|---|
+| `setTool(id)` | `ToolId` | Switch active tool (`kToolBrush` or `kToolEraser`) |
+| `getTool()` | `ToolId` | Current tool |
+| `setStrokeStyle(style)` | `StrokeStyle` | Set color, radius, hardness, opacity |
+| `getStrokeStyle()` | `const StrokeStyle&` | Current stroke style |
+| `setOpacity(op)` | `float` 0–1 | Stroke opacity shortcut |
+| `getOpacity()` | `float` | Current stroke opacity |
+| `undo()` | — | Undo last stroke |
+| `redo()` | — | Redo last undone stroke |
+| `canUndo()` | `bool` | True if undo history exists |
+| `canRedo()` | `bool` | True if redo history exists |
+| `clear()` | — | Pushes undo snapshot then fills canvas white |
+| `savePNG(path)` | `wstring` | Export committed layer to a PNG file |
+| `colorHistory()` | `const vector<RGBA>&` | Most recently used brush colors (up to 16) |
+
+**StrokeStyle fields**
+
+| Field | Type | Description |
+|---|---|---|
+| `r, g, b, a` | `float` 0–1 | Brush color and alpha |
+| `radius` | `float` | Brush radius in canvas pixels |
+| `hardness` | `float` 0–1 | Edge softness (1 = hard edge) |
+| `opacity` | `float` 0–1 | Per-stroke opacity |
+| `tool` | `ToolId` | Set automatically from `setTool()` |
+
+> **Undo budget:** Default is 256 MB. Each snapshot costs `canvasWidth × canvasHeight × 4` bytes. Pass a custom budget (in bytes) to `RasterCanvas(w, h, budget)`.
+
+> **Keyboard shortcuts:** `Ctrl+Z` undo, `Ctrl+Shift+Z` / `Ctrl+Y` redo.
+
+---
+
+### Viewport
+
+Controls zoom and pan for the canvas view. Accessible via `canvas->viewport()`. Usually you interact with it indirectly through mouse/keyboard events, but direct access is useful for programmatic control.
+
+```cpp
+auto& vp = canvas->viewport();
+
+vp.zoomIn();
+vp.zoomOut();
+vp.resetZoom();   // zoom = 1, center canvas
+vp.fitToView();   // fit entire canvas inside the view
+
+vp.panByScreen(dx, dy);  // pan by screen-space pixels
+vp.setOffset(cx, cy);    // set canvas-space origin directly
+
+// Convert screen coordinates to canvas coordinates
+auto [cx, cy] = vp.screenToCanvas(screenX, screenY);
+
+// Scrollbar info (for custom scrollbar rendering)
+ScrollbarInfo h = vp.scrollbarH();
+ScrollbarInfo v = vp.scrollbarV();
+```
+
+**Zoom levels:** Snaps to `0.0625, 0.125, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 4.0, 8.0, 16.0, 32.0` within a 4% tolerance window.
+
+**Key methods**
+
+| Method | Description |
+|---|---|
+| `zoomIn()` | Zoom in by 1.25× toward view center |
+| `zoomOut()` | Zoom out by 0.8× toward view center |
+| `zoomToward(sx, sy, factor)` | Zoom toward a screen-space point |
+| `resetZoom()` | Set zoom = 1 and center the canvas |
+| `fitToView()` | Scale and center to fit canvas in viewport |
+| `panByScreen(dx, dy)` | Pan by screen-space pixel deltas |
+| `setOffset(cx, cy)` | Set canvas-space pan origin |
+| `screenToCanvas(sx, sy)` | Convert screen coords to canvas coords |
+| `zoom()` | Current zoom factor |
+| `offsetX()` / `offsetY()` | Current canvas-space pan origin |
 
 ---
 
