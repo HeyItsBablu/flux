@@ -1,34 +1,28 @@
 // test_paint_viewport.cpp
 #include "flux.hpp"
-#include <commdlg.h> // GetSaveFileName
-#include <shlobj.h>  // SHGetKnownFolderPath (for default save dir)
+#include <commdlg.h>
+#include <shlobj.h>
 #pragma comment(lib, "comdlg32.lib")
 
 // ── App-level tool enum ──────────────────────────────────────────────────────
-//
-// Values must match the kTool* constants from flux_canvas.hpp for the two
-// built-in behaviours.  New tools (Line, Rect, Fill, ...) get fresh IDs ≥ 2
-// and are handled entirely in PaintSurface / PaintApp.
-//
 enum class Tool {
   Brush = kToolBrush,   // 0 — built-in paint
   Eraser = kToolEraser, // 1 — built-in erase
-  Line = 2,             // app-handled: draw a straight line on mouse-up
-  Rect = 3,             // app-handled: draw a filled/stroked rectangle
-  // Add more here freely without touching flux_canvas.hpp
+  Line = 2,
+  Rect = 3,
+  Fill = 4,
 };
 
-// ── Hex ↔ COLORREF helpers ───────────────────────────────────────────────────
+// ── Hex helpers
+// ───────────────────────────────────────────────────────────────
 static COLORREF hexToRef(const std::string &css) {
   RGBA c = parseHexColor(css);
   return RGB((BYTE)(c.r * 255), (BYTE)(c.g * 255), (BYTE)(c.b * 255));
 }
-static std::string refToHex(COLORREF c) {
-  return ColorToHex(c); // from flux_colorpicker.hpp
-}
+static std::string refToHex(COLORREF c) { return ColorToHex(c); }
 
-// ── Save PNG via common dialog ───────────────────────────────────────────────
-// Returns wide path chosen by user, or empty string if cancelled.
+// ── Save dialog
+// ───────────────────────────────────────────────────────────────
 static std::wstring promptSavePath(HWND owner) {
   wchar_t buf[MAX_PATH] = L"painting.png";
   OPENFILENAMEW ofn{};
@@ -40,9 +34,97 @@ static std::wstring promptSavePath(HWND owner) {
   ofn.lpstrDefExt = L"png";
   ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
   ofn.lpstrTitle = L"Save as PNG";
-  if (GetSaveFileNameW(&ofn))
-    return buf;
-  return {};
+  return GetSaveFileNameW(&ofn) ? buf : L"";
+}
+
+// ── Geometry helpers
+// ──────────────────────────────────────────────────────────
+
+// Thick line as two triangles (GL_TRIANGLES, 6 verts, 12 floats)
+static int makeThickLineVerts(float x0, float y0, float x1, float y1,
+                              float half, float out[12]) {
+  float dx = x1 - x0, dy = y1 - y0, len = std::sqrt(dx * dx + dy * dy);
+  if (len < 0.001f) {
+    out[0] = x0 - half;
+    out[1] = y0 - half;
+    out[2] = x0 + half;
+    out[3] = y0 - half;
+    out[4] = x0 + half;
+    out[5] = y0 + half;
+    out[6] = x0 + half;
+    out[7] = y0 + half;
+    out[8] = x0 - half;
+    out[9] = y0 + half;
+    out[10] = x0 - half;
+    out[11] = y0 - half;
+    return 6;
+  }
+  float nx = -dy / len * half, ny = dx / len * half;
+  out[0] = x0 + nx;
+  out[1] = y0 + ny;
+  out[2] = x0 - nx;
+  out[3] = y0 - ny;
+  out[4] = x1 - nx;
+  out[5] = y1 - ny;
+  out[6] = x1 - nx;
+  out[7] = y1 - ny;
+  out[8] = x1 + nx;
+  out[9] = y1 + ny;
+  out[10] = x0 + nx;
+  out[11] = y0 + ny;
+  return 6;
+}
+
+// Rect corner coords for outline (4 corners, 8 floats)
+static void makeRectCorners(float x0, float y0, float x1, float y1,
+                            float out[8]) {
+  float lx = min(x0, x1), rx = max(x0, x1);
+  float by = min(y0, y1), ty = max(y0, y1);
+  out[0] = lx;
+  out[1] = by;
+  out[2] = rx;
+  out[3] = by;
+  out[4] = rx;
+  out[5] = ty;
+  out[6] = lx;
+  out[7] = ty;
+}
+
+// ── Flood fill (BFS, 4-connected, with tolerance)
+// ─────────────────────────────
+static void floodFill(uint8_t *pixels, int w, int h, int px, int py, uint8_t tr,
+                      uint8_t tg, uint8_t tb, uint8_t fr, uint8_t fg,
+                      uint8_t fb) {
+  if (px < 0 || py < 0 || px >= w || py >= h)
+    return;
+  if (tr == fr && tg == fg && tb == fb)
+    return;
+  auto match = [&](int x, int y) -> bool {
+    const uint8_t *p = pixels + (y * w + x) * 4;
+    return std::abs((int)p[0] - (int)tr) <= 10 &&
+           std::abs((int)p[1] - (int)tg) <= 10 &&
+           std::abs((int)p[2] - (int)tb) <= 10;
+  };
+  if (!match(px, py))
+    return;
+  std::vector<std::pair<int, int>> stack;
+  stack.reserve(w * h / 8);
+  stack.push_back({px, py});
+  while (!stack.empty()) {
+    auto [x, y] = stack.back();
+    stack.pop_back();
+    if (x < 0 || x >= w || y < 0 || y >= h || !match(x, y))
+      continue;
+    uint8_t *p = pixels + (y * w + x) * 4;
+    p[0] = fr;
+    p[1] = fg;
+    p[2] = fb;
+    p[3] = 255;
+    stack.push_back({x + 1, y});
+    stack.push_back({x - 1, y});
+    stack.push_back({x, y + 1});
+    stack.push_back({x, y - 1});
+  }
 }
 
 // ============================================================================
@@ -60,11 +142,13 @@ public:
 
   std::string activeColor = "#cba6f7";
   float activeSize = 4.f;
-  float activeOpacity = 1.0f; // 0..1
+  float activeOpacity = 1.0f;
   Tool activeTool = Tool::Brush;
 
   std::function<void()> onStateChanged;
   std::function<void(const std::vector<RGBA> &)> onHistoryChanged;
+  std::function<void(const std::string &)> onStatusMessage;
+  std::function<void()> onRedrawNeeded;
 
   void setColor(const std::string &col) {
     activeColor = col;
@@ -80,8 +164,11 @@ public:
   }
   void setActiveTool(Tool t) {
     activeTool = t;
-    setTool(static_cast<ToolId>(t)); // cast app enum → infrastructure ToolId
+    setTool(static_cast<ToolId>(t));
     syncStyle();
+    // Cancel any in-progress shape
+    shapeDrawing_ = false;
+    scratchClear();
   }
 
   void initialize(int w, int h) override {
@@ -89,35 +176,147 @@ public:
     syncStyle();
   }
 
+  // ── Mouse ─────────────────────────────────────────────────────────────────
   void onMouseDown(float x, float y) override {
-    RasterSurface::onMouseDown(x, y);
+    if (isShapeTool())
+      shapeStart(x, y);
+    else
+      RasterSurface::onMouseDown(x, y);
+  }
+  void onMouseMove(float x, float y) override {
+    if (isShapeTool()) {
+      if (shapeDrawing_)
+        shapePreview(x, y);
+    } else
+      RasterSurface::onMouseMove(x, y);
   }
   void onMouseUp(float x, float y) override {
-    RasterSurface::onMouseUp(x, y);
-    if (onStateChanged)
-      onStateChanged();
-    if (onHistoryChanged)
-      onHistoryChanged(colorHistory());
+    if (isShapeTool()) {
+      if (shapeDrawing_)
+        shapeCommit(x, y);
+    } else {
+      RasterSurface::onMouseUp(x, y);
+      if (onStateChanged)
+        onStateChanged();
+      if (onHistoryChanged)
+        onHistoryChanged(colorHistory());
+    }
   }
+
   void onKeyDown(int key) override {
     RasterSurface::onKeyDown(key);
-    if (onStateChanged)
-      onStateChanged();
-
-    // E = eraser, B = brush (quick-switch shortcuts)
-    if (key == 'E') {
-      activeTool = Tool::Eraser;
-      setTool(static_cast<ToolId>(Tool::Eraser));
-    } else if (key == 'B') {
+    switch (key) {
+    case 'B':
       activeTool = Tool::Brush;
-      setTool(static_cast<ToolId>(Tool::Brush));
+      setTool(kToolBrush);
       syncStyle();
+      break;
+    case 'E':
+      activeTool = Tool::Eraser;
+      setTool(kToolEraser);
+      break;
+    case 'L':
+      activeTool = Tool::Line;
+      setTool(2);
+      break;
+    case 'R':
+      activeTool = Tool::Rect;
+      setTool(3);
+      break;
+    case 'F':
+      activeTool = Tool::Fill;
+      setTool(4);
+      break;
     }
     if (onStateChanged)
       onStateChanged();
   }
+  void onKeyUp(int) override {}
 
 private:
+  bool shapeDrawing_ = false;
+  float shapeX0_ = 0, shapeY0_ = 0;
+
+  bool isShapeTool() const {
+    return activeTool == Tool::Line || activeTool == Tool::Rect ||
+           activeTool == Tool::Fill;
+  }
+
+  // ── Shape lifecycle ────────────────────────────────────────────────────────
+  void shapeStart(float x, float y) {
+    if (activeTool == Tool::Fill) {
+      doFill(x, y);
+      return;
+    }
+    shapeX0_ = x;
+    shapeY0_ = y;
+    shapeDrawing_ = true;
+    scratchClear();
+  }
+
+  void shapePreview(float x, float y) {
+    scratchClear();
+    drawShapeInto(scratchFBOHandle(), shapeX0_, shapeY0_, x, y);
+    if (onRedrawNeeded)
+      onRedrawNeeded();
+  }
+
+  void shapeCommit(float x, float y) {
+    shapeDrawing_ = false;
+    scratchClear();
+    pushUndoSnapshotPublic();
+    drawShapeInto(committedFBOHandle(), shapeX0_, shapeY0_, x, y);
+    if (onStateChanged)
+      onStateChanged();
+    if (onRedrawNeeded)
+      onRedrawNeeded();
+  }
+
+  void drawShapeInto(GLuint fbo, float x0, float y0, float x1, float y1) {
+    RGBA c = parseHexColor(activeColor);
+    float r = c.r, g = c.g, b = c.b, a = activeOpacity;
+    float half = max(0.5f, activeSize * 0.5f);
+
+    if (activeTool == Tool::Line) {
+      float v[12];
+      int n = makeThickLineVerts(x0, y0, x1, y1, half, v);
+      drawVertsToFBO(fbo, v, n, GL_TRIANGLES, r, g, b, a);
+    } else if (activeTool == Tool::Rect) {
+      // Outline only: draw 4 thick edge lines using the active stroke size
+      float cv[8];
+      makeRectCorners(x0, y0, x1, y1, cv);
+      float ov[12];
+      for (int i = 0; i < 4; i++) {
+        int j = (i + 1) % 4;
+        makeThickLineVerts(cv[i * 2], cv[i * 2 + 1], cv[j * 2], cv[j * 2 + 1],
+                           half, ov);
+        drawVertsToFBO(fbo, ov, 6, GL_TRIANGLES, r, g, b, a);
+      }
+    }
+  }
+
+  // ── Flood fill ─────────────────────────────────────────────────────────────
+  void doFill(float cx, float cy) {
+    int w = canvasWidth(), h = canvasHeight();
+    int px = int(std::floor(cx)), py = int(std::floor(cy));
+    if (px < 0 || py < 0 || px >= w || py >= h)
+      return;
+    std::vector<uint8_t> buf(size_t(w) * h * 4);
+    readCommitted(buf.data());
+    uint8_t *seed = buf.data() + (py * w + px) * 4;
+    uint8_t tr = seed[0], tg = seed[1], tb = seed[2];
+    RGBA fc = parseHexColor(activeColor);
+    pushUndoSnapshotPublic();
+    floodFill(buf.data(), w, h, px, py, tr, tg, tb, uint8_t(fc.r * 255),
+              uint8_t(fc.g * 255), uint8_t(fc.b * 255));
+    uploadToCommitted(buf.data());
+    if (onStateChanged)
+      onStateChanged();
+    if (onRedrawNeeded)
+      onRedrawNeeded();
+  }
+
+  // ── Style ──────────────────────────────────────────────────────────────────
   void syncStyle() {
     RGBA c = parseHexColor(activeColor);
     StrokeStyle s;
@@ -140,24 +339,21 @@ private:
 
 class PaintApp : public Component {
   State<std::string> activeColor;
-  State<float> activeSize;
+  State<double> activeSize;
   State<double> activeOpacity;
   State<Tool> activeTool;
   State<bool> canUndo, canRedo;
   State<double> zoomLevel;
   State<std::vector<RGBA>> colorHistory;
+  State<std::string> statusMsg;
 
   std::shared_ptr<PaintSurface> surface_;
   CanvasWidget *canvasPtr_ = nullptr;
-  HWND mainHwnd_ = nullptr; // for save dialog owner
+  HWND mainHwnd_ = nullptr;
 
-  static constexpr double kZoomMin = 6.25;
-  static constexpr double kZoomMax = 200.0;
-
-  static constexpr int kSidebarWidth = 240;
-  static constexpr int kToolbarHeight = 58;
-  static constexpr int kHintsHeight = 24;
-  static constexpr int kAppBarHeight = 32;
+  static constexpr double kZoomMin = 6.25, kZoomMax = 200.0;
+  static constexpr int kSidebarWidth = 256, kToolbarHeight = 48;
+  static constexpr int kHintsHeight = 24, kAppBarHeight = 32;
 
   void refreshUndoRedo() {
     if (!surface_)
@@ -165,8 +361,8 @@ class PaintApp : public Component {
     canUndo.set(surface_->canUndo());
     canRedo.set(surface_->canRedo());
   }
-  void syncZoomState(float zoom) {
-    double pct = double(zoom) * 100.0;
+  void syncZoomState(float z) {
+    double pct = z * 100.0;
     if (std::abs(pct - zoomLevel.get()) > 0.5)
       zoomLevel.set(pct);
   }
@@ -174,72 +370,68 @@ class PaintApp : public Component {
     if (!canvasPtr_)
       return;
     Viewport &vp = canvasPtr_->viewport();
-    float target = float(pct / 100.0);
-    float current = vp.zoom();
-    if (std::abs(target - current) < 0.0001f)
+    float t = float(pct / 100.0), cur = vp.zoom();
+    if (std::abs(t - cur) < 0.0001f)
       return;
-    vp.zoomToward(vp.viewW() * 0.5f, vp.viewH() * 0.5f, target / current);
+    vp.zoomToward(vp.viewW() * .5f, vp.viewH() * .5f, t / cur);
     canvasPtr_->redraw();
   }
-
   void doSavePNG() {
     if (!surface_ || !canvasPtr_)
       return;
-    // Ensure GL context is current before reading pixels
     std::wstring path = promptSavePath(mainHwnd_);
     if (path.empty())
       return;
-    bool ok = surface_->savePNG(path);
-    if (!ok) {
+    if (!surface_->savePNG(path))
       MessageBoxW(mainHwnd_, L"Failed to save PNG.", L"Error",
                   MB_ICONERROR | MB_OK);
-    }
   }
 
 public:
   PaintApp()
-      : activeColor("#cba6f7", context), activeSize(4.f, context),
-        activeOpacity(1.0f, context), activeTool(Tool::Brush, context),
+      : activeColor("#cba6f7", context), activeSize(4.0, context),
+        activeOpacity(1.0, context), activeTool(Tool::Brush, context),
         canUndo(false, context), canRedo(false, context),
-        zoomLevel(100.0, context), colorHistory({}, context) {}
+        zoomLevel(100.0, context), colorHistory({}, context),
+        statusMsg("", context) {}
 
   WidgetPtr build() override {
-
     int screenW = GetSystemMetrics(SM_CXSCREEN);
     int screenH = GetSystemMetrics(SM_CYSCREEN);
     int viewW = screenW - kSidebarWidth;
     int viewH = screenH - kAppBarHeight - kToolbarHeight - kHintsHeight;
 
-    static constexpr int kPaperW = 1240;
-    static constexpr int kPaperH = 1754;
+    static constexpr int kPaperW = 1240, kPaperH = 1754;
 
-    // ── Canvas ────────────────────────────────────────────────────────────
     auto canvas = RasterCanvas(viewW, viewH, kPaperW, kPaperH);
     surface_ = canvas->setSurface<PaintSurface>();
     canvasPtr_ = canvas.get();
-
-    // Grab main HWND for save dialog — GetActiveWindow() works before first
-    // paint
     mainHwnd_ = GetActiveWindow();
 
     surface_->onStateChanged = [this]() { refreshUndoRedo(); };
     surface_->onHistoryChanged = [this](const std::vector<RGBA> &h) {
       colorHistory.set(h);
     };
+    surface_->onStatusMessage = [this](const std::string &m) {
+      statusMsg.set(m);
+    };
     canvas->onViewportChanged = [this](float z) { syncZoomState(z); };
+    surface_->onRedrawNeeded = [this]() {
+      if (canvasPtr_)
+        canvasPtr_->redraw();
+    };
 
-    // State → surface bindings
     activeColor.listen([this](const std::string &col) {
       if (surface_)
         surface_->setColor(col);
     });
-    activeSize.listen([this](float sz) {
+    activeSize.listen([this](double sz) {
       if (surface_)
-        surface_->setSize(sz);
+        surface_->setSize(float(sz));
     });
-    activeOpacity.listen([this](float op) {
+    activeOpacity.listen([this](double op) {
       if (surface_)
-        surface_->setOpacity(op);
+        surface_->setOpacity(float(op));
     });
     activeTool.listen([this](Tool t) {
       if (surface_)
@@ -247,9 +439,9 @@ public:
     });
     zoomLevel.listen([this](double pct) { applyZoomFromSlider(pct); });
 
-    // =====================================================================
-    // LEFT SIDEBAR
-    // =====================================================================
+    // ===================================================================
+    // SIDEBAR
+    // ===================================================================
 
     auto sectionLabel = [](const std::string &txt) -> WidgetPtr {
       return Text(txt)
@@ -258,78 +450,94 @@ public:
           ->setFontWeight(FontWeight::Bold);
     };
 
-    // ── Tool selector (Brush / Eraser) ────────────────────────────────────
-    auto toolBtn = [&](Tool t, const std::string &icon,
-                       const std::string &label) -> WidgetPtr {
-      Tool tv = t;
-      return GestureDetector(
-                 Container(
-                     Column(Text(icon)->setFontSize(18)->setTextColor(
-                                activeTool,
-                                [tv](const Tool &at) {
-                                  return at == tv ? RGB(203, 166, 247)
-                                                  : RGB(150, 150, 170);
-                                }),
-                            SizedBox(0, 2),
-                            Text(label)->setFontSize(9)->setTextColor(
-                                activeTool,
-                                [tv](const Tool &at) {
-                                  return at == tv ? RGB(220, 200, 255)
-                                                  : RGB(110, 110, 130);
-                                }))
-                         ->setSpacing(0)
-                         ->setCrossAxisAlignment(CrossAxisAlignment::Center))
-                     ->setWidth(72)
-                     ->setHeight(52)
-                     ->setBorderRadius(8)
-                     ->setBackgroundColor(activeTool,
-                                          [tv](const Tool &at) {
-                                            return at == tv ? RGB(40, 35, 58)
-                                                            : RGB(24, 24, 37);
-                                          })
-                     ->setBorderWidth(
-                         activeTool,
-                         [tv](const Tool &at) { return at == tv ? 2 : 1; })
-                     ->setBorderColor(activeTool,
-                                      [tv](const Tool &at) {
-                                        return at == tv ? RGB(147, 112, 219)
-                                                        : RGB(49, 50, 68);
-                                      }))
-          ->setOnTap([this, tv]() { activeTool.set(tv); });
+    // ── Tools (3-column grid, now 5 tools in two rows: 3 + 2) ─────────────
+    struct TD {
+      Tool t;
+      std::string icon;
+      std::string label;
+    };
+    const std::vector<TD> tds = {
+        {Tool::Brush, "🖌", "Brush"}, {Tool::Eraser, "⬜", "Eraser"},
+        {Tool::Line, "╱", "Line"},    {Tool::Rect, "▭", "Rect"},
+        {Tool::Fill, "🪣", "Fill"},
     };
 
-    auto toolSection =
-        Container(
-            Column(sectionLabel("TOOL"), SizedBox(0, 8),
-                   Row(toolBtn(Tool::Brush, "🖌", "Brush"), SizedBox(8, 0),
-                       toolBtn(Tool::Eraser, "⬜", "Eraser"))
-                       ->setSpacing(0))
-                ->setSpacing(0))
-            ->setBackgroundColor(RGB(24, 24, 37))
-            ->setBorderRadius(8)
-            ->setBorderWidth(1)
-            ->setBorderColor(RGB(49, 50, 68))
-            ->setPaddingAll(10, 10, 10, 10);
+    auto r0 = std::make_shared<RowWidget>();
+    r0->setSpacing(6);
+    auto r1 = std::make_shared<RowWidget>();
+    r1->setSpacing(6);
 
-    // ── Selected color display ────────────────────────────────────────────
+    for (int i = 0; i < (int)tds.size(); i++) {
+      Tool tv = tds[i].t;
+      std::string icon = tds[i].icon, lbl = tds[i].label;
+      auto btn =
+          GestureDetector(
+              Container(Column(Text(icon)->setFontSize(18)->setTextColor(
+                                   activeTool,
+                                   [tv](const Tool &at) {
+                                     return at == tv ? RGB(203, 166, 247)
+                                                     : RGB(140, 140, 160);
+                                   }),
+                               SizedBox(0, 2),
+                               Text(lbl)->setFontSize(8)->setTextColor(
+                                   activeTool,
+                                   [tv](const Tool &at) {
+                                     return at == tv ? RGB(220, 200, 255)
+                                                     : RGB(100, 100, 120);
+                                   }))
+                            ->setSpacing(0)
+                            ->setCrossAxisAlignment(CrossAxisAlignment::Center))
+                  ->setWidth(68)
+                  ->setHeight(48)
+                  ->setBorderRadius(8)
+                  ->setBackgroundColor(activeTool,
+                                       [tv](const Tool &at) {
+                                         return at == tv ? RGB(40, 35, 58)
+                                                         : RGB(24, 24, 37);
+                                       })
+                  ->setBorderWidth(
+                      activeTool,
+                      [tv](const Tool &at) { return at == tv ? 2 : 1; })
+                  ->setBorderColor(activeTool,
+                                   [tv](const Tool &at) {
+                                     return at == tv ? RGB(147, 112, 219)
+                                                     : RGB(49, 50, 68);
+                                   }))
+              ->setOnTap([this, tv]() { activeTool.set(tv); });
+      if (i < 3)
+        r0->addChild(btn);
+      else
+        r1->addChild(btn);
+    }
+
+    auto toolSection = Container(Column(sectionLabel("TOOLS"), SizedBox(0, 8),
+                                        r0, SizedBox(0, 6), r1)
+                                     ->setSpacing(0))
+                           ->setBackgroundColor(RGB(24, 24, 37))
+                           ->setBorderRadius(8)
+                           ->setBorderWidth(1)
+                           ->setBorderColor(RGB(49, 50, 68))
+                           ->setPaddingAll(10, 10, 10, 10);
+
+    // ── Selected colour ────────────────────────────────────────────────────
     auto selectedSwatch =
         Container(
             Row(Container(nullptr)
-                    ->setWidth(40)
-                    ->setHeight(40)
+                    ->setWidth(36)
+                    ->setHeight(36)
                     ->setBorderRadius(6)
                     ->setBackgroundColor(
                         activeColor,
                         [](const std::string &c) { return hexToRef(c); })
                     ->setBorderWidth(1)
                     ->setBorderColor(RGB(69, 71, 90)),
-                SizedBox(10, 0),
+                SizedBox(8, 0),
                 Column(Text("Selected")
-                           ->setFontSize(10)
+                           ->setFontSize(9)
                            ->setTextColor(RGB(100, 105, 125)),
-                       SizedBox(0, 4),
+                       SizedBox(0, 3),
                        Text(activeColor, [](const std::string &c) { return c; })
-                           ->setFontSize(12)
+                           ->setFontSize(11)
                            ->setTextColor(RGB(205, 214, 244)))
                     ->setSpacing(0))
                 ->setSpacing(0)
@@ -340,28 +548,24 @@ public:
             ->setBorderColor(RGB(49, 50, 68))
             ->setPaddingAll(10, 10, 10, 10);
 
-    // ── Inline color picker ───────────────────────────────────────────────
+    // ── Color picker ──────────────────────────────────────────────────────
     auto picker = ColorPicker(hexToRef(activeColor.get()))
                       ->setShowAlpha(false)
                       ->setOnColorChanged(
                           [this](COLORREF c) { activeColor.set(refToHex(c)); });
-
     auto pickerSection = Container(picker)
                              ->setBackgroundColor(RGB(24, 24, 37))
                              ->setBorderRadius(8)
                              ->setBorderWidth(1)
                              ->setBorderColor(RGB(49, 50, 68));
 
-    // ── Color history ─────────────────────────────────────────────────────
-    // Horizontal ListView driven by colorHistory state.
-    // Each swatch is 22×22; the list is fixed-height at 26px so it sits
-    // flush inside the section card without a visible scrollbar track.
+    // ── Color history ──────────────────────────────────────────────────────
     auto historyList =
         ListView(colorHistory)
-            ->itemBuilder([this](int /*i*/, const RGBA &c) -> WidgetPtr {
+            ->itemBuilder([this](int, const RGBA &c) -> WidgetPtr {
               char hex[8];
               _snprintf_s(hex, sizeof(hex), _TRUNCATE, "#%02x%02x%02x",
-                          (int)(c.r * 255), (int)(c.g * 255), (int)(c.b * 255));
+                          int(c.r * 255), int(c.g * 255), int(c.b * 255));
               std::string col = hex;
               return GestureDetector(Container(nullptr)
                                          ->setWidth(22)
@@ -384,7 +588,7 @@ public:
                    Conditional(
                        colorHistory,
                        [](const std::vector<RGBA> &h) { return !h.empty(); })
-                       ->Then([&] { return SizedBox(196, 26, historyList); })
+                       ->Then([&] { return SizedBox(210, 26, historyList); })
                        ->Else([&] {
                          return Text("Paint a stroke to record colors")
                              ->setFontSize(9)
@@ -397,14 +601,13 @@ public:
             ->setBorderColor(RGB(49, 50, 68))
             ->setPaddingAll(10, 10, 10, 10);
 
-    // ── Palette ───────────────────────────────────────────────────────────
-    auto pcol1 = std::make_shared<ColumnWidget>();
-    auto pcol2 = std::make_shared<ColumnWidget>();
-    pcol1->setSpacing(4);
-    pcol2->setSpacing(4);
-
+    // ── Palette ────────────────────────────────────────────────────────────
+    auto pc1 = std::make_shared<RowWidget>();
+    pc1->setSpacing(4);
+    auto pc2 = std::make_shared<RowWidget>();
+    pc2->setSpacing(4);
     for (int i = 0; i < (int)surface_->kPalette.size(); i++) {
-      const auto &[col, label] = surface_->kPalette[i];
+      const auto &[col, lbl] = surface_->kPalette[i];
       std::string c = col;
       auto sw =
           GestureDetector(Container(nullptr)
@@ -424,14 +627,13 @@ public:
                                                }))
               ->setOnTap([this, c]() { activeColor.set(c); });
       if (i % 2 == 0)
-        pcol1->addChild(sw);
+        pc1->addChild(sw);
       else
-        pcol2->addChild(sw);
+        pc2->addChild(sw);
     }
-
     auto paletteSection =
         Container(Column(sectionLabel("PRESETS"), SizedBox(0, 8),
-                         Row(pcol1, SizedBox(4, 0), pcol2)->setSpacing(0))
+                         Column(pc1, SizedBox(0, 4), pc2)->setSpacing(0))
                       ->setSpacing(0))
             ->setBackgroundColor(RGB(24, 24, 37))
             ->setBorderRadius(8)
@@ -439,49 +641,36 @@ public:
             ->setBorderColor(RGB(49, 50, 68))
             ->setPaddingAll(10, 10, 10, 10);
 
-    // ── Brush size ────────────────────────────────────────────────────────
-    auto sizeBtn = [&](float sz, const std::string &lbl) -> WidgetPtr {
-      float s = sz;
-      return GestureDetector(
-                 Container(Text(lbl)->setFontSize(11))
-                     ->setWidth(38)
-                     ->setHeight(28)
-                     ->setBorderRadius(5)
-                     ->setBackgroundColor(activeSize,
-                                          [s](const float &a) {
-                                            return a == s ? RGB(49, 50, 68)
-                                                          : RGB(30, 30, 46);
-                                          })
-                     ->setBorderColor(activeSize,
-                                      [s](const float &a) {
-                                        return a == s ? RGB(203, 166, 247)
-                                                      : RGB(49, 50, 68);
-                                      })
-                     ->setBorderWidth(
-                         activeSize,
-                         [s](const float &a) { return a == s ? 2 : 1; })
-                     ->setPadding(4))
-          ->setOnTap([this, s]() { activeSize.set(s); });
-    };
-
+    // ── Size slider ────────────────────────────────────────────────────────
     auto sizeSection =
-        Container(Column(sectionLabel("BRUSH SIZE"), SizedBox(0, 8),
-                         Row(sizeBtn(2.f, "S"), sizeBtn(5.f, "M"),
-                             sizeBtn(10.f, "L"), sizeBtn(20.f, "XL"))
-                             ->setSpacing(4))
-                      ->setSpacing(0))
+        Container(
+            Column(Row(sectionLabel("SIZE"), SizedBox(6, 0),
+                       Text(activeSize,
+                            [](double v) {
+                              return std::to_string(int(std::round(v))) + "px";
+                            })
+                           ->setFontSize(9)
+                           ->setTextColor(RGB(160, 160, 180)))
+                       ->setSpacing(0)
+                       ->setCrossAxisAlignment(CrossAxisAlignment::Center),
+                   SizedBox(0, 8),
+                   Slider(1.0, 40.0, 0.5)
+                       ->setValue(activeSize)
+                       ->setTrackFillColor(RGB(174, 129, 255))
+                       ->setWidth(210))
+                ->setSpacing(0))
             ->setBackgroundColor(RGB(24, 24, 37))
             ->setBorderRadius(8)
             ->setBorderWidth(1)
             ->setBorderColor(RGB(49, 50, 68))
             ->setPaddingAll(10, 10, 10, 10);
 
-    // ── Opacity slider ────────────────────────────────────────────────────
+    // ── Opacity slider ─────────────────────────────────────────────────────
     auto opacitySection =
         Container(
             Column(Row(sectionLabel("OPACITY"), SizedBox(6, 0),
                        Text(activeOpacity,
-                            [](const float &op) {
+                            [](double op) {
                               return std::to_string(int(std::round(op * 100))) +
                                      "%";
                             })
@@ -493,7 +682,7 @@ public:
                    Slider(0.0, 1.0, 0.01)
                        ->setValue(activeOpacity)
                        ->setTrackFillColor(RGB(174, 129, 255))
-                       ->setWidth(196))
+                       ->setWidth(210))
                 ->setSpacing(0))
             ->setBackgroundColor(RGB(24, 24, 37))
             ->setBorderRadius(8)
@@ -501,131 +690,125 @@ public:
             ->setBorderColor(RGB(49, 50, 68))
             ->setPaddingAll(10, 10, 10, 10);
 
-    // ── Undo / Redo / Clear / Save ────────────────────────────────────────
-    auto makeActionBtn = [](const std::string &lbl, COLORREF txtCol,
-                            std::function<void()> fn) -> WidgetPtr {
-      return Button(lbl, fn)
-          ->setBackgroundColor(RGB(30, 30, 46))
-          ->setTextColor(txtCol)
-          ->setBorderRadius(5)
-          ->setHeight(28)
-          ->setPadding(4);
-    };
-
-    auto actionSection =
-        Container(Row(makeActionBtn("↩  Undo", RGB(137, 180, 250),
-                                    [this] {
-                                      if (surface_) {
-                                        surface_->undo();
-                                        refreshUndoRedo();
-                                      }
-                                    }),
-
-                      makeActionBtn("Redo  ↪", RGB(166, 226, 46),
-                                    [this] {
-                                      if (surface_) {
-                                        surface_->redo();
-                                        refreshUndoRedo();
-                                      }
-                                    }),
-
-                      makeActionBtn("✕  Clear", RGB(243, 139, 168),
-                                    [this] {
-                                      if (surface_) {
-                                        surface_->clear();
-                                        refreshUndoRedo();
-                                      }
-                                    }),
-
-                      makeActionBtn("💾  Save PNG", RGB(148, 226, 213),
-                                    [this] { doSavePNG(); }))
-                      ->setSpacing(10)
-                      ->setCrossAxisAlignment(CrossAxisAlignment::Stretch))
-            ->setBackgroundColor(RGB(24, 24, 37))
-            ->setBorderRadius(8)
-            ->setBorderWidth(1)
-            ->setBorderColor(RGB(49, 50, 68))
-            ->setPaddingAll(10, 10, 10, 10);
-
-    // ── Sidebar assembly ──────────────────────────────────────────────────
+    // ── Sidebar assembly ───────────────────────────────────────────────────
     auto sidebar =
         Container(Column(toolSection, SizedBox(0, 8), selectedSwatch,
                          SizedBox(0, 8), pickerSection, SizedBox(0, 8),
                          historySection, SizedBox(0, 8), paletteSection,
                          SizedBox(0, 8), sizeSection, SizedBox(0, 8),
-                         opacitySection, SizedBox(0, 8))
+                         opacitySection)
                       ->setSpacing(0))
             ->setWidth(kSidebarWidth)
             ->setBackgroundColor(RGB(17, 17, 27))
             ->setPaddingAll(12, 12, 12, 12);
 
-    // =====================================================================
-    // TOP TOOLBAR  (zoom only)
-    // =====================================================================
+    // ===================================================================
+    // TOOLBAR
+    // ===================================================================
 
-    auto resetBtn = Button("1:1",
-                           [this] {
-                             if (canvasPtr_) {
-                               canvasPtr_->viewport().resetZoom();
-                               canvasPtr_->redraw();
-                               syncZoomState(1.f);
-                             }
-                           })
-                        ->setBackgroundColor(RGB(24, 24, 37))
-                        ->setTextColor(RGB(174, 129, 255))
-                        ->setBorderRadius(5)
-                        ->setWidth(32)
-                        ->setHeight(24)
-                        ->setPadding(4);
+    auto makeBtn = [](const std::string &lbl, COLORREF txt,
+                      std::function<void()> fn) -> WidgetPtr {
+      return Button(lbl, fn)
+          ->setBackgroundColor(RGB(30, 30, 46))
+          ->setTextColor(txt)
+          ->setBorderRadius(5)
+          ->setHeight(26)
+          ->setPadding(4);
+    };
 
-    auto fitBtn = Button("Fit",
-                         [this] {
-                           if (canvasPtr_) {
-                             canvasPtr_->viewport().fitToView();
-                             canvasPtr_->redraw();
-                             syncZoomState(canvasPtr_->viewport().zoom());
-                           }
-                         })
-                      ->setBackgroundColor(RGB(24, 24, 37))
-                      ->setTextColor(RGB(174, 129, 255))
-                      ->setBorderRadius(5)
-                      ->setWidth(32)
-                      ->setHeight(24)
-                      ->setPadding(4);
+    auto toolbar =
+        Container(
+            Row(Text("Zoom")->setFontSize(11)->setTextColor(RGB(140, 140, 160)),
+                Slider(kZoomMin, kZoomMax, 0.25)
+                    ->setValue(zoomLevel)
+                    ->setTrackFillColor(RGB(174, 129, 255))
+                    ->setWidth(110),
+                Text(zoomLevel,
+                     [](double v) {
+                       return std::to_string(int(std::round(v))) + "%";
+                     })
+                    ->setFontSize(11)
+                    ->setTextColor(RGB(180, 180, 200))
+                    ->setMinWidth(38),
+                Button("1:1",
+                       [this] {
+                         if (canvasPtr_) {
+                           canvasPtr_->viewport().resetZoom();
+                           canvasPtr_->redraw();
+                           syncZoomState(1.f);
+                         }
+                       })
+                    ->setBackgroundColor(RGB(24, 24, 37))
+                    ->setTextColor(RGB(174, 129, 255))
+                    ->setBorderRadius(5)
+                    ->setWidth(30)
+                    ->setHeight(26)
+                    ->setPadding(4),
+                Button("Fit",
+                       [this] {
+                         if (canvasPtr_) {
+                           canvasPtr_->viewport().fitToView();
+                           canvasPtr_->redraw();
+                           syncZoomState(canvasPtr_->viewport().zoom());
+                         }
+                       })
+                    ->setBackgroundColor(RGB(24, 24, 37))
+                    ->setTextColor(RGB(174, 129, 255))
+                    ->setBorderRadius(5)
+                    ->setWidth(30)
+                    ->setHeight(26)
+                    ->setPadding(4),
+                SizedBox(12, 0),
+                makeBtn("↩ Undo", RGB(137, 180, 250),
+                        [this] {
+                          if (surface_) {
+                            surface_->undo();
+                            refreshUndoRedo();
+                            if (canvasPtr_)
+                              canvasPtr_->redraw();
+                          }
+                        }),
+                makeBtn("Redo ↪", RGB(166, 226, 46),
+                        [this] {
+                          if (surface_) {
+                            surface_->redo();
+                            refreshUndoRedo();
+                            if (canvasPtr_)
+                              canvasPtr_->redraw();
+                          }
+                        }),
+                makeBtn("✕ Clear", RGB(243, 139, 168),
+                        [this] {
+                          if (surface_) {
+                            surface_->clear();
+                            refreshUndoRedo();
+                            if (canvasPtr_)
+                              canvasPtr_->redraw();
+                          }
+                        }),
+                makeBtn("💾 Save", RGB(148, 226, 213), [this] { doSavePNG(); }))
+                ->setSpacing(8)
+                ->setCrossAxisAlignment(CrossAxisAlignment::Center))
+            ->setBackgroundColor(RGB(17, 17, 27))
+            ->setPaddingAll(10, 7, 10, 7)
+            ->setHeight(kToolbarHeight);
 
-    auto zoomRow = Row(
-        Text("Zoom")->setFontSize(11)->setTextColor(RGB(140, 140, 160)),
-
-        Slider(kZoomMin, kZoomMax, 0.25)
-            ->setValue(zoomLevel)
-            ->setTrackFillColor(RGB(174, 129, 255))
-            ->setWidth(120),
-
-        Text(zoomLevel,
-             [](double v) { return std::to_string(int(std::round(v))) + "%"; })
-            ->setFontSize(11)
-            ->setTextColor(RGB(180, 180, 200))
-            ->setMinWidth(40),
-        resetBtn, fitBtn, actionSection);
-    zoomRow->setSpacing(10);
-    zoomRow->setCrossAxisAlignment(CrossAxisAlignment::Center);
-
-    auto toolbar = Container(zoomRow)
-                       ->setBackgroundColor(RGB(17, 17, 27))
-                       ->setPaddingAll(10, 7, 10, 7)
-                       ->setHeight(kToolbarHeight);
-
-    // ── Context menu ──────────────────────────────────────────────────────
+    // ── Context menu ───────────────────────────────────────────────────────
     auto canvasWithMenu = ContextMenu(
         canvas, {
-                    {"Brush  (B)", [this] { activeTool.set(Tool::Brush); }},
+                    {"Brush (B)", [this] { activeTool.set(Tool::Brush); }},
                     {"Eraser (E)", [this] { activeTool.set(Tool::Eraser); }},
+                    {"Line (L)", [this] { activeTool.set(Tool::Line); }},
+                    {"Rect (R)", [this] { activeTool.set(Tool::Rect); }},
+                    {"Fill (F)", [this] { activeTool.set(Tool::Fill); }},
                     ContextMenuItem::Separator(),
                     {"Undo",
                      [this] {
                        if (surface_) {
                          surface_->undo();
                          refreshUndoRedo();
+                         if (canvasPtr_)
+                           canvasPtr_->redraw();
                        }
                      }},
                     {"Redo",
@@ -633,6 +816,8 @@ public:
                        if (surface_) {
                          surface_->redo();
                          refreshUndoRedo();
+                         if (canvasPtr_)
+                           canvasPtr_->redraw();
                        }
                      }},
                     ContextMenuItem::Separator(),
@@ -659,54 +844,59 @@ public:
                        if (surface_) {
                          surface_->clear();
                          refreshUndoRedo();
+                         if (canvasPtr_)
+                           canvasPtr_->redraw();
                        }
                      }},
                 });
 
-    // ── Hints strip ───────────────────────────────────────────────────────
-    auto hints = Container(Row(Text("MMB / Space+LMB: Pan")
-                                   ->setFontSize(10)
-                                   ->setTextColor(RGB(75, 75, 95)),
-                               SizedBox(10, 0),
-                               Text("Ctrl+Scroll: Zoom")
-                                   ->setFontSize(10)
-                                   ->setTextColor(RGB(75, 75, 95)),
-                               SizedBox(10, 0),
-                               Text("Ctrl+Z/Y: Undo/Redo")
-                                   ->setFontSize(10)
-                                   ->setTextColor(RGB(75, 75, 95)),
-                               SizedBox(10, 0),
-                               Text("B: Brush  E: Eraser")
-                                   ->setFontSize(10)
-                                   ->setTextColor(RGB(75, 75, 95)))
-                               ->setSpacing(0))
-                     ->setBackgroundColor(RGB(17, 17, 27))
-                     ->setPaddingAll(10, 3, 10, 3)
-                     ->setHeight(kHintsHeight);
+    // ── Hints strip ────────────────────────────────────────────────────────
+    auto hints =
+        Container(Conditional(statusMsg,
+                              [](const std::string &s) { return !s.empty(); })
+                      ->Then([&] {
+                        return Text(statusMsg,
+                                    [](const std::string &s) { return s; })
+                            ->setFontSize(10)
+                            ->setTextColor(RGB(148, 226, 213));
+                      })
+                      ->Else([&] {
+                        return Row(Text("MMB/Space: Pan")
+                                       ->setFontSize(10)
+                                       ->setTextColor(RGB(75, 75, 95)),
+                                   SizedBox(10, 0),
+                                   Text("Ctrl+Scroll: Zoom")
+                                       ->setFontSize(10)
+                                       ->setTextColor(RGB(75, 75, 95)),
+                                   SizedBox(10, 0),
+                                   Text("Ctrl+Z/Y: Undo/Redo")
+                                       ->setFontSize(10)
+                                       ->setTextColor(RGB(75, 75, 95)),
+                                   SizedBox(10, 0),
+                                   Text("B E L R F: Tools")
+                                       ->setFontSize(10)
+                                       ->setTextColor(RGB(75, 75, 95)))
+                            ->setSpacing(0);
+                      }))
+            ->setBackgroundColor(RGB(17, 17, 27))
+            ->setPaddingAll(10, 3, 10, 3)
+            ->setHeight(kHintsHeight);
 
-    // ── Canvas column ─────────────────────────────────────────────────────
     auto canvasColumn = Column(toolbar, hints, canvasWithMenu)->setSpacing(0);
-
-    // ── Root: sidebar | canvas ────────────────────────────────────────────
     auto root = Row(sidebar, canvasColumn)->setSpacing(0);
-
     return Scaffold(root);
   }
 };
 
-// ── Entry point ──────────────────────────────────────────────────────────────
-
+// ── Entry point
+// ────────────────────────────────────────────────────────────────
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
   FluxUI app(hInstance);
   app.build([&]() {
     return FluxApp("Paint", BuildComponent<PaintApp>(), AppTheme::dark());
   });
-
-  RECT workArea;
-  SystemParametersInfo(SPI_GETWORKAREA, 0, &workArea, 0);
-  int screenW = workArea.right - workArea.left;
-  int screenH = workArea.bottom - workArea.top;
-
-  app.createWindow("FluxUI - Paint", screenW, screenH);
+  RECT wa;
+  SystemParametersInfo(SPI_GETWORKAREA, 0, &wa, 0);
+  app.createWindow("FluxUI - Paint", wa.right - wa.left, wa.bottom - wa.top);
   return app.run();
 }

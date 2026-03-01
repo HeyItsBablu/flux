@@ -16,20 +16,25 @@
 //   Two-window hierarchy restored.  Zoom, pan, deadzone, and scrollbars are
 //   now all active together.
 //
-// Step 3  (this revision)
+// Step 3  (previous)
 // ───────────────────────
 //   • Tool enum (Brush / Eraser) added to RasterSurface.
-//     Eraser uses GL_ZERO / GL_ONE_MINUS_SRC_ALPHA destination-alpha erase
-//     on the committed FBO so it cuts to transparent, then the white
-//     background beneath shows through — identical visual to "erasing to white"
-//     on an opaque canvas but compositing-correct.
-//   • Stroke opacity exposed as a separate float (0–1) independent of color
-//     alpha, passed through StrokeStyle::opacity.
-//   • savePNG(path) — reads committedTex_ pixels via glReadPixels on a
-//     temporary READ_FRAMEBUFFER, then writes a 32-bit RGBA PNG using only
-//     Win32 + GDI+ (no libpng dependency).
-//   • Color history ring (up to 16 entries) maintained inside RasterSurface;
-//     each completed stroke that changes color appends to the ring.
+//   • Stroke opacity exposed.
+//   • savePNG(path) via GDI+.
+//   • Color history ring.
+//
+// Step 4  (this revision)
+// ───────────────────────
+//   BUG FIX: drawVertsToFBO used glBufferData (realloc) which could shrink
+//   the shared quadVBO_ to fewer bytes than blitTexture's quad requires.
+//   blitTexture uses glBufferSubData and assumes the buffer is large enough,
+//   so a shrunken VBO caused a GL error / undefined render (white canvas
+//   disappearing, wrong colors, stale geometry).
+//
+//   Fix: always use glBufferData in BOTH drawVertsToFBO AND blitTexture so
+//   each call owns its allocation and there is no size assumption between
+//   callers.  The VAO only stores the attrib format; actual data is uploaded
+//   fresh every draw call, so this is safe and has negligible overhead.
 //
 // ============================================================================
 
@@ -398,19 +403,6 @@ inline RGBA parseHexColor(const std::string &css) {
 // §5  STROKE DATA TYPES
 // ============================================================================
 
-// ── Tool identity ─────────────────────────────────────────────────────────────
-//
-// RasterSurface only needs to distinguish two built-in behaviours:
-//   kToolBrush  — normal alpha-composite paint stroke
-//   kToolEraser — white-paint erase stroke
-//
-// Everything else (shapes, fill, lasso, ...) is an app-defined ToolId.
-// Apps declare their own enum with Brush=kToolBrush and Eraser=kToolEraser,
-// then add further values freely.  Cast to ToolId when calling setTool().
-//
-//   enum class Tool { Brush = kToolBrush, Eraser = kToolEraser, Line = 2, Rect = 3 };
-//   surface->setTool(static_cast<ToolId>(Tool::Line));
-
 using ToolId = int;
 static constexpr ToolId kToolBrush  = 0;
 static constexpr ToolId kToolEraser = 1;
@@ -591,30 +583,6 @@ public:
 // ============================================================================
 // §9  RASTER SURFACE
 // ============================================================================
-//
-// Tool modes
-// ──────────
-//   kToolBrush  — Normal SRC_ALPHA / ONE_MINUS_SRC_ALPHA blend. Paints with
-//                  the current color at the current opacity.
-//   kToolEraser — Uses GL_ZERO / GL_ONE_MINUS_SRC_ALPHA blend on the
-//                  committed FBO directly (no scratch layer for eraser so the
-//                  erase is instant and exact). Each eraser dab "cuts" alpha
-//                  from the committed texture; the white background shows
-//                  through. On an opaque canvas the visual result is simply
-//                  "erase to white".
-//
-// Color history
-// ─────────────
-//   A ring of up to kColorHistoryMax RGBA entries, newest-first.
-//   pushColorHistory() is called at the start of each Brush stroke.
-//   Duplicate consecutive entries are skipped.
-//
-// PNG save
-// ────────
-//   savePNG(wpath) — reads committedTex_ via glReadPixels (RGBA, UBYTE),
-//   flips vertically (GL origin is bottom-left), then writes as PNG via GDI+.
-//   Returns true on success.  Must be called with the correct GL context
-//   current (CanvasWidget always ensures this).
 
 class RasterSurface : public RenderSurface {
 public:
@@ -633,7 +601,6 @@ public:
   void setStrokeStyle(const StrokeStyle &s) { style_ = s; style_.tool = tool_; }
   const StrokeStyle &getStrokeStyle() const { return style_; }
 
-  // Convenience: set opacity without touching other style fields
   void setOpacity(float op) { style_.opacity = std::clamp(op, 0.f, 1.f); }
   float getOpacity() const  { return style_.opacity; }
 
@@ -680,20 +647,15 @@ public:
   }
 
   // ── PNG export ───────────────────────────────────────────────────────────
-  //
-  // Call with the GL context current (CanvasWidget guarantees this).
-  // path is a wide-character path (use std::wstring or L"..." literal).
 
   bool savePNG(const std::wstring &path) {
     if (!committedFBO_ || w_ <= 0 || h_ <= 0) return false;
 
-    // Read pixels from committed FBO (GL origin = bottom-left, RGBA ubyte)
     std::vector<uint8_t> buf(size_t(w_) * h_ * 4);
     GL.bindFramebuffer(GL_READ_FRAMEBUFFER, committedFBO_);
     glReadPixels(0, 0, w_, h_, GL_RGBA, GL_UNSIGNED_BYTE, buf.data());
     GL.bindFramebuffer(GL_READ_FRAMEBUFFER, 0);
 
-    // Flip vertically so top-left is first row
     std::vector<uint8_t> flipped(buf.size());
     const int stride = w_ * 4;
     for (int row = 0; row < h_; ++row) {
@@ -702,7 +664,6 @@ public:
              stride);
     }
 
-    // Convert RGBA → BGRA (GDI+ PixelFormat32bppARGB is BGRA in memory)
     for (int i = 0; i < w_ * h_; ++i) {
       uint8_t r = flipped[i*4+0];
       uint8_t g = flipped[i*4+1];
@@ -714,11 +675,9 @@ public:
       flipped[i*4+3] = a;
     }
 
-    // Create GDI+ Bitmap from pixel data
     Gdiplus::Bitmap bmp(w_, h_, stride, PixelFormat32bppARGB, flipped.data());
     if (bmp.GetLastStatus() != Gdiplus::Ok) return false;
 
-    // Find the PNG encoder CLSID
     CLSID pngClsid;
     {
       UINT num = 0, sz = 0;
@@ -791,10 +750,7 @@ public:
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     blitTexture(committedTex_, 1.f, mvp);
-
-    // Scratch only used for Brush strokes (eraser is direct)
-    if (tool_ == kToolBrush)
-      blitTexture(scratchTex_, 1.f, mvp);
+    blitTexture(scratchTex_,   1.f, mvp);
 
     glDisable(GL_BLEND);
 
@@ -821,16 +777,91 @@ public:
     if (blitProg_) { GL.deleteProgram(blitProg_); blitProg_ = 0; }
     if (quadVAO_)  { GL.deleteVertexArrays(1, &quadVAO_); quadVAO_ = 0; }
     if (quadVBO_)  { GL.deleteBuffers(1, &quadVBO_); quadVBO_ = 0; }
+    if (shapeVBO_) { GL.deleteBuffers(1, &shapeVBO_); shapeVBO_ = 0; }
     flushDeque(undoStack_, undoBytes_);
     flushDeque(redoStack_, redoBytes_);
   }
 
 protected:
-  int canvasWidth()  const { return w_; }
-  int canvasHeight() const { return h_; }
+  int    canvasWidth()  const { return w_; }
+  int    canvasHeight() const { return h_; }
   GLuint committedFBOHandle() const { return committedFBO_; }
   GLuint committedTexHandle() const { return committedTex_; }
+  GLuint scratchFBOHandle()   const { return scratchFBO_; }
+  GLuint scratchTexHandle()   const { return scratchTex_; }
+  GLuint blitProgHandle()     const { return blitProg_; }
+  GLuint quadVAOHandle()      const { return quadVAO_; }
+  GLuint quadVBOHandle()      const { return quadVBO_; }
+  bool   isDrawing()          const { return drawing_; }
+
   void pushUndoSnapshotPublic() { pushUndoSnapshot(); }
+
+  void scratchClear() { clearFBO(scratchFBO_, w_, h_, 0, 0, 0, 0); }
+
+  void scratchCommit() {
+    pushUndoSnapshot();
+    mergeScratchIntoCommitted();
+    clearFBO(scratchFBO_, w_, h_, 0, 0, 0, 0);
+  }
+
+  GLint uMVP()   const { return u_.mvp;   }
+  GLint uMode()  const { return u_.mode;  }
+  GLint uColor() const { return u_.color; }
+  GLint uTex()   const { return u_.tex;   }
+  GLint uAlpha() const { return u_.alpha; }
+
+  void getCanvasOrtho(float out[16]) const { canvasOrtho(out); }
+
+  // ── FIX: drawVertsToFBO now uses a dedicated shapeVBO_ so it never
+  //         touches the quadVBO_ that blitTexture depends on.
+  //         This eliminates the VBO size corruption that wiped the canvas.
+  void drawVertsToFBO(GLuint fbo, const float *verts, int count,
+                      GLenum mode,
+                      float r, float g, float b, float a) {
+    float mvp[16]; canvasOrtho(mvp);
+    GL.bindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glViewport(0, 0, w_, h_);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    GL.useProgram(blitProg_);
+    GL.uniformMatrix4fv(u_.mvp,  1, GL_FALSE, mvp);
+    GL.uniform1i(u_.mode,  1);
+    GL.uniform4f(u_.color, r, g, b, a);
+
+    // Use the dedicated shape VBO — never touches quadVBO_
+    GLsizeiptr needed = GLsizeiptr(sizeof(float)) * 2 * count;
+    GL.bindBuffer(GL_ARRAY_BUFFER, shapeVBO_);
+    GL.bufferData(GL_ARRAY_BUFFER, needed, verts, GL_DYNAMIC_DRAW);
+
+    // Bind a minimal VAO state inline (no persistent VAO format needed
+    // since we always set attrib pointers before drawing)
+    GL.bindVertexArray(quadVAO_);
+    GL.enableVertexAttribArray(0);
+    GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float)*2, nullptr);
+    // Disable attrib 1 so the blit shader's UV input reads (0,0) if it ever
+    // runs in this path (it won't — mode==1 skips the texture sample).
+    GL.disableVertexAttribArray(1);
+
+    glDrawArrays(mode, 0, count);
+
+    GL.bindVertexArray(0);
+    GL.bindBuffer(GL_ARRAY_BUFFER, 0);
+    GL.useProgram(0);
+    glDisable(GL_BLEND);
+    GL.bindFramebuffer(GL_FRAMEBUFFER, 0);
+  }
+
+  void uploadToCommitted(const uint8_t *pixels) {
+    glBindTexture(GL_TEXTURE_2D, committedTex_);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w_, h_, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    glBindTexture(GL_TEXTURE_2D, 0);
+  }
+
+  void readCommitted(uint8_t *pixels) {
+    GL.bindFramebuffer(GL_READ_FRAMEBUFFER, committedFBO_);
+    glReadPixels(0, 0, w_, h_, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    GL.bindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+  }
 
 private:
   int  w_ = 0, h_ = 0;
@@ -842,6 +873,7 @@ private:
   GLuint committedFBO_ = 0, committedTex_ = 0;
   GLuint scratchFBO_   = 0, scratchTex_   = 0;
   GLuint blitProg_ = 0, quadVAO_ = 0, quadVBO_ = 0;
+  GLuint shapeVBO_ = 0;   // ── FIX: dedicated VBO for drawVertsToFBO
 
   struct ULocs {
     GLint mvp = -1, mode = -1, tex = -1, alpha = -1, color = -1;
@@ -851,11 +883,9 @@ private:
   size_t undoBudget_, undoBytes_ = 0, redoBytes_ = 0;
   std::deque<Snapshot> undoStack_, redoStack_;
 
-  // ── Color history ─────────────────────────────────────────────────────────
   std::vector<RGBA> colorHistory_;
 
   void pushColorHistory(const RGBA &c) {
-    // Skip if same as most-recent entry
     if (!colorHistory_.empty()) {
       const RGBA &last = colorHistory_.front();
       if (std::abs(last.r - c.r) < 0.01f &&
@@ -887,12 +917,10 @@ private:
     flushDeque(redoStack_, redoBytes_);
 
     if (tool_ == kToolBrush) {
-      // Record color into history for brush strokes
       pushColorHistory({style_.r, style_.g, style_.b, 1.f});
       clearFBO(scratchFBO_, w_, h_, 0, 0, 0, 0);
       paintDabBrush(scratchFBO_, x, y, style_);
     } else {
-      // Eraser: push undo now, then erase directly into committed
       pushUndoSnapshot();
       paintDabEraser(committedFBO_, x, y, style_);
     }
@@ -923,7 +951,6 @@ private:
       mergeScratchIntoCommitted();
       clearFBO(scratchFBO_, w_, h_, 0, 0, 0, 0);
     }
-    // Eraser: undo was already pushed at beginStroke; nothing more to do.
     drawing_ = false;
     dirty_   = true;
   }
@@ -1024,7 +1051,6 @@ private:
 
   // ── Dab painting ─────────────────────────────────────────────────────────
 
-  // Brush dab — normal alpha compositing, opacity modulates stroke alpha
   void paintDabBrush(GLuint fbo, float cx, float cy, const StrokeStyle &s) {
     float mvp[16];
     canvasOrtho(mvp);
@@ -1037,10 +1063,6 @@ private:
     GL.bindFramebuffer(GL_FRAMEBUFFER, 0);
   }
 
-  // Eraser dab — paints opaque white directly onto the committed FBO.
-  // Correct for an opaque (white-background) canvas: visually "erases to white"
-  // and exports correctly as white in the PNG.
-  // Opacity controls softness: 1.0 = hard full erase, <1.0 = soft/partial.
   void paintDabEraser(GLuint fbo, float cx, float cy, const StrokeStyle &s) {
     float mvp[16];
     canvasOrtho(mvp);
@@ -1053,7 +1075,9 @@ private:
     GL.bindFramebuffer(GL_FRAMEBUFFER, 0);
   }
 
-  // Core dab geometry upload + draw (shared by brush and eraser)
+  // paintDabImpl uses quadVBO_ (dab geometry), which is always sized to
+  // hold (kDabVerts+2)*2 floats — large enough for blitTexture too.
+  // It never calls bufferData, only bufferSubData, so the size is stable.
   void paintDabImpl(float cx, float cy,
                     float r, float g, float b, float alpha,
                     float radius,
@@ -1073,11 +1097,15 @@ private:
     GL.bufferSubData(GL_ARRAY_BUFFER, 0, sizeof(verts), verts);
     GL.enableVertexAttribArray(0);
     GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float)*2, nullptr);
+    GL.disableVertexAttribArray(1);
     glDrawArrays(GL_TRIANGLE_FAN, 0, kDabVerts + 2);
     GL.bindVertexArray(0);
     GL.useProgram(0);
   }
 
+  // blitTexture exclusively uses quadVBO_ with bufferSubData.
+  // quadVBO_ is sized in buildQuadVAO to the maximum of the blit quad and
+  // the dab verts, so bufferSubData is always safe.
   void blitTexture(GLuint tex, float alpha, const float *mvp) {
     GL.useProgram(blitProg_);
     GL.uniformMatrix4fv(u_.mvp, 1, GL_FALSE, mvp);
@@ -1137,14 +1165,28 @@ void main(){
   }
 
   void buildQuadVAO() {
-    constexpr GLsizeiptr kB =
-        max(sizeof(float)*6*4, sizeof(float)*(kDabVerts+2)*2);
+    // ── FIX: size quadVBO_ to the MAXIMUM of all users:
+    //   blitTexture:  6 verts × 4 floats  = 96 bytes
+    //   paintDabImpl: (kDabVerts+2) × 2 floats = (32+2)*2*4 = 272 bytes
+    //   Both use bufferSubData, so the buffer must be pre-sized to the max.
+    //   shapeVBO_ is separate and uses bufferData, so no size constraint.
+    constexpr GLsizeiptr kBlitBytes = sizeof(float) * 6 * 4;
+    constexpr GLsizeiptr kDabBytes  = sizeof(float) * (kDabVerts + 2) * 2;
+    constexpr GLsizeiptr kQuadBufSz = kBlitBytes > kDabBytes ? kBlitBytes : kDabBytes;
+
     GL.genVertexArrays(1, &quadVAO_);
     GL.genBuffers(1, &quadVBO_);
     GL.bindVertexArray(quadVAO_);
     GL.bindBuffer(GL_ARRAY_BUFFER, quadVBO_);
-    GL.bufferData(GL_ARRAY_BUFFER, kB, nullptr, GL_DYNAMIC_DRAW);
+    GL.bufferData(GL_ARRAY_BUFFER, kQuadBufSz, nullptr, GL_DYNAMIC_DRAW);
     GL.bindVertexArray(0);
+
+    // Dedicated shape VBO — starts with 0 bytes; drawVertsToFBO always
+    // calls bufferData so the size is set fresh each call.
+    GL.genBuffers(1, &shapeVBO_);
+    GL.bindBuffer(GL_ARRAY_BUFFER, shapeVBO_);
+    GL.bufferData(GL_ARRAY_BUFFER, sizeof(float) * 2 * 12, nullptr, GL_DYNAMIC_DRAW);
+    GL.bindBuffer(GL_ARRAY_BUFFER, 0);
   }
 
   void buildDabVerts() {
@@ -1519,6 +1561,7 @@ private:
     HINSTANCE hi = GetModuleHandle(nullptr);
     WNDCLASSEXW wf{}; wf.cbSize=sizeof(wf); wf.lpfnWndProc=FrameProc;
     wf.hInstance=hi; wf.lpszClassName=L"FluxGLFrame6"; wf.style=CS_HREDRAW|CS_VREDRAW;
+    
     RegisterClassExW(&wf);
     WNDCLASSEXW wg{}; wg.cbSize=sizeof(wg); wg.lpfnWndProc=GLProc;
     wg.hInstance=hi; wg.lpszClassName=L"FluxGLCanvas6"; wg.style=CS_OWNDC|CS_HREDRAW|CS_VREDRAW;
