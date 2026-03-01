@@ -398,21 +398,31 @@ inline RGBA parseHexColor(const std::string &css) {
 // §5  STROKE DATA TYPES
 // ============================================================================
 
-// ── Tool enum ────────────────────────────────────────────────────────────────
-enum class Tool {
-  Brush,
-  Eraser,
-  // Future tools can be added here: Lasso, Fill, Shape, ...
-};
+// ── Tool identity ─────────────────────────────────────────────────────────────
+//
+// RasterSurface only needs to distinguish two built-in behaviours:
+//   kToolBrush  — normal alpha-composite paint stroke
+//   kToolEraser — white-paint erase stroke
+//
+// Everything else (shapes, fill, lasso, ...) is an app-defined ToolId.
+// Apps declare their own enum with Brush=kToolBrush and Eraser=kToolEraser,
+// then add further values freely.  Cast to ToolId when calling setTool().
+//
+//   enum class Tool { Brush = kToolBrush, Eraser = kToolEraser, Line = 2, Rect = 3 };
+//   surface->setTool(static_cast<ToolId>(Tool::Line));
+
+using ToolId = int;
+static constexpr ToolId kToolBrush  = 0;
+static constexpr ToolId kToolEraser = 1;
 
 struct StrokePoint {
   float x, y, pressure;
 };
 
 struct StrokeStyle {
-  float r = 0, g = 0, b = 0, a = 1;
-  float radius = 4, hardness = 0.8f, opacity = 1;
-  Tool  tool = Tool::Brush;  // ← which tool produced this stroke
+  float  r = 0, g = 0, b = 0, a = 1;
+  float  radius = 4, hardness = 0.8f, opacity = 1;
+  ToolId tool = kToolBrush;
 };
 
 struct Stroke {
@@ -584,9 +594,9 @@ public:
 //
 // Tool modes
 // ──────────
-//   Tool::Brush  — Normal SRC_ALPHA / ONE_MINUS_SRC_ALPHA blend. Paints with
+//   kToolBrush  — Normal SRC_ALPHA / ONE_MINUS_SRC_ALPHA blend. Paints with
 //                  the current color at the current opacity.
-//   Tool::Eraser — Uses GL_ZERO / GL_ONE_MINUS_SRC_ALPHA blend on the
+//   kToolEraser — Uses GL_ZERO / GL_ONE_MINUS_SRC_ALPHA blend on the
 //                  committed FBO directly (no scratch layer for eraser so the
 //                  erase is instant and exact). Each eraser dab "cuts" alpha
 //                  from the committed texture; the white background shows
@@ -617,8 +627,8 @@ public:
 
   // ── Tool / style setters ─────────────────────────────────────────────────
 
-  void setTool(Tool t)               { tool_ = t; }
-  Tool getTool() const               { return tool_; }
+  void setTool(ToolId t)               { tool_ = t; }
+  ToolId getTool() const               { return tool_; }
 
   void setStrokeStyle(const StrokeStyle &s) { style_ = s; style_.tool = tool_; }
   const StrokeStyle &getStrokeStyle() const { return style_; }
@@ -783,7 +793,7 @@ public:
     blitTexture(committedTex_, 1.f, mvp);
 
     // Scratch only used for Brush strokes (eraser is direct)
-    if (tool_ == Tool::Brush)
+    if (tool_ == kToolBrush)
       blitTexture(scratchTex_, 1.f, mvp);
 
     glDisable(GL_BLEND);
@@ -827,7 +837,7 @@ private:
   bool drawing_ = false, dirty_ = false;
   StrokePoint lastPt_{};
   StrokeStyle style_{};
-  Tool        tool_  = Tool::Brush;
+  ToolId      tool_  = kToolBrush;
 
   GLuint committedFBO_ = 0, committedTex_ = 0;
   GLuint scratchFBO_   = 0, scratchTex_   = 0;
@@ -876,7 +886,7 @@ private:
     lastPt_ = {x, y, 1.f};
     flushDeque(redoStack_, redoBytes_);
 
-    if (tool_ == Tool::Brush) {
+    if (tool_ == kToolBrush) {
       // Record color into history for brush strokes
       pushColorHistory({style_.r, style_.g, style_.b, 1.f});
       clearFBO(scratchFBO_, w_, h_, 0, 0, 0, 0);
@@ -897,7 +907,7 @@ private:
     int   steps = max(1, (int)(dist / step));
     for (int i = 1; i <= steps; ++i) {
       float t = float(i) / steps;
-      if (tool_ == Tool::Brush)
+      if (tool_ == kToolBrush)
         paintDabBrush(scratchFBO_, lastPt_.x + dx * t, lastPt_.y + dy * t, style_);
       else
         paintDabEraser(committedFBO_, lastPt_.x + dx * t, lastPt_.y + dy * t, style_);
@@ -908,7 +918,7 @@ private:
 
   void endStroke(float x, float y) {
     drawSegment(x, y);
-    if (tool_ == Tool::Brush) {
+    if (tool_ == kToolBrush) {
       pushUndoSnapshot();
       mergeScratchIntoCommitted();
       clearFBO(scratchFBO_, w_, h_, 0, 0, 0, 0);
