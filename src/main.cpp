@@ -9,28 +9,30 @@ enum class Tool {
   Brush  = kToolBrush,   // 0
   Eraser = kToolEraser,  // 1
   // Shape tools (values ≥ 2)
-  Line        = 2,
-  Rect        = 3,
-  Fill        = 4,
-  Ellipse     = 5,
-  Triangle    = 6,
+  Line          = 2,
+  Rect          = 3,
+  Fill          = 4,
+  Ellipse       = 5,
+  Triangle      = 6,
   RightTriangle = 7,
-  Diamond     = 8,
-  Pentagon    = 9,
-  Hexagon     = 10,
-  Star5       = 11,
-  Star6       = 12,
-  Arrow       = 13,
-  ArrowDouble = 14,
+  Diamond       = 8,
+  Pentagon      = 9,
+  Hexagon       = 10,
+  Star5         = 11,
+  Star6         = 12,
+  Arrow         = 13,
+  ArrowDouble   = 14,
   Parallelogram = 15,
-  Trapezoid   = 16,
-  RoundRect   = 17,  // approximated with many segments
-  Cross       = 18,
-  Heart       = 19,
+  Trapezoid     = 16,
+  RoundRect     = 17,
+  Cross         = 18,
+  Heart         = 19,
+  Select        = 20,
 };
 
 static bool isShapeToolEnum(Tool t) {
-  return t != Tool::Brush && t != Tool::Eraser && t != Tool::Fill;
+  return t != Tool::Brush && t != Tool::Eraser &&
+         t != Tool::Fill  && t != Tool::Select;
 }
 static bool isDrawTool(Tool t) {
   return t == Tool::Brush || t == Tool::Eraser;
@@ -60,7 +62,6 @@ static std::wstring promptSavePath(HWND owner) {
 // §1  GEOMETRY HELPERS
 // ============================================================================
 
-// Append a thick line (2 triangles = 6 verts) to out[], return new count
 static int appendThickLine(float x0,float y0,float x1,float y1,float half,
                             float *out, int base) {
   float dx=x1-x0,dy=y1-y0,len=std::sqrt(dx*dx+dy*dy);
@@ -75,8 +76,6 @@ static int appendThickLine(float x0,float y0,float x1,float y1,float half,
   memcpy(out+base*2,v,sizeof(v)); return base+6;
 }
 
-// Build a filled convex polygon (triangle fan) from a list of perimeter points.
-// out must hold at least (n+2)*2 floats.  Returns vertex count for GL_TRIANGLE_FAN.
 static int buildFan(float cx,float cy,const std::vector<std::pair<float,float>> &pts,
                     float *out) {
   int n=(int)pts.size();
@@ -86,7 +85,6 @@ static int buildFan(float cx,float cy,const std::vector<std::pair<float,float>> 
   return n+2;
 }
 
-// Regular n-gon (outline via thick lines), filled=false → outline verts as thick lines
 static std::vector<float> nGonOutline(float cx,float cy,float rx,float ry,
                                        int n,float rot,float half) {
   std::vector<float> buf(6*n*2);
@@ -101,7 +99,6 @@ static std::vector<float> nGonOutline(float cx,float cy,float rx,float ry,
   buf.resize(total*2); return buf;
 }
 
-// Filled regular n-gon
 static std::vector<float> nGonFilled(float cx,float cy,float rx,float ry,
                                       int n,float rot) {
   std::vector<std::pair<float,float>> pts;
@@ -114,9 +111,7 @@ static std::vector<float> nGonFilled(float cx,float cy,float rx,float ry,
   return buf;
 }
 
-// 5-point star outline
-static std::vector<float> star5Outline(float cx,float cy,float ro,float ri,
-                                        float half) {
+static std::vector<float> star5Outline(float cx,float cy,float ro,float ri,float half) {
   std::vector<float> buf(10*6*2);
   int total=0;
   float off=-3.14159265f/2;
@@ -130,9 +125,7 @@ static std::vector<float> star5Outline(float cx,float cy,float ro,float ri,
   buf.resize(total*2); return buf;
 }
 
-// 6-point star outline
-static std::vector<float> star6Outline(float cx,float cy,float ro,float ri,
-                                        float half) {
+static std::vector<float> star6Outline(float cx,float cy,float ro,float ri,float half) {
   std::vector<float> buf(12*6*2);
   int total=0;
   float off=0.f;
@@ -146,28 +139,23 @@ static std::vector<float> star6Outline(float cx,float cy,float ro,float ri,
   buf.resize(total*2); return buf;
 }
 
-// Arrow (right-pointing, from x0,y0 to x1,y1)
 static std::vector<float> arrowVerts(float x0,float y0,float x1,float y1,float half) {
   float dx=x1-x0,dy=y1-y0,len=std::sqrt(dx*dx+dy*dy);
   if(len<1.f) return {};
   float ux=dx/len,uy=dy/len;
-  float px=-uy,py=ux; // perp
-  float hs=half*1.2f; // shaft half-width
+  float px=-uy,py=ux;
+  float hs=half*1.2f;
   float headLen=min(len*0.4f,half*4.f);
   float headW=half*2.5f;
   float mx=x1-ux*headLen, my=y1-uy*headLen;
-
-  // shaft rectangle (2 triangles)
   std::vector<float> v={
     x0+px*hs, y0+py*hs,  x0-px*hs, y0-py*hs,  mx-px*hs, my-py*hs,
     mx-px*hs, my-py*hs,  mx+px*hs, my+py*hs,   x0+px*hs, y0+py*hs,
-    // arrowhead triangle
     x1,y1,  mx+px*headW,my+py*headW,  mx-px*headW,my-py*headW
   };
   return v;
 }
 
-// Double-headed arrow
 static std::vector<float> doubleArrowVerts(float x0,float y0,float x1,float y1,float half){
   float dx=x1-x0,dy=y1-y0,len=std::sqrt(dx*dx+dy*dy);
   if(len<1.f) return {};
@@ -178,7 +166,6 @@ static std::vector<float> doubleArrowVerts(float x0,float y0,float x1,float y1,f
   float headW=half*2.5f;
   float m0x=x0+ux*headLen,m0y=y0+uy*headLen;
   float m1x=x1-ux*headLen,m1y=y1-uy*headLen;
-
   std::vector<float> v={
     m0x+px*hs,m0y+py*hs, m0x-px*hs,m0y-py*hs, m1x-px*hs,m1y-py*hs,
     m1x-px*hs,m1y-py*hs, m1x+px*hs,m1y+py*hs, m0x+px*hs,m0y+py*hs,
@@ -188,7 +175,6 @@ static std::vector<float> doubleArrowVerts(float x0,float y0,float x1,float y1,f
   return v;
 }
 
-// Ellipse outline (via thick line segments)
 static std::vector<float> ellipseOutline(float cx,float cy,float rx,float ry,
                                           int segs,float half){
   std::vector<float> buf(segs*6*2);
@@ -202,16 +188,13 @@ static std::vector<float> ellipseOutline(float cx,float cy,float rx,float ry,
   buf.resize(total*2); return buf;
 }
 
-// Cross / plus sign
 static std::vector<float> crossVerts(float cx,float cy,float rx,float ry,float arm){
-  // 12-point polygon approximation
   float hx=arm,hy=arm;
   std::vector<float> buf={
     cx-hx,cy-ry, cx+hx,cy-ry, cx+hx,cy-hy, cx+rx,cy-hy,
     cx+rx,cy+hy, cx+hx,cy+hy, cx+hx,cy+ry, cx-hx,cy+ry,
     cx-hx,cy+hy, cx-rx,cy+hy, cx-rx,cy-hy, cx-hx,cy-hy
   };
-  // fan from center
   std::vector<float> fan;
   fan.push_back(cx); fan.push_back(cy);
   for(int i=0;i<12;i++){fan.push_back(buf[i*2]);fan.push_back(buf[i*2+1]);}
@@ -219,13 +202,11 @@ static std::vector<float> crossVerts(float cx,float cy,float rx,float ry,float a
   return fan;
 }
 
-// Simple heart (bezier approximated with line segments)
 static std::vector<float> heartFan(float cx,float cy,float rx,float ry){
   const int segs=64;
   std::vector<std::pair<float,float>> pts;
   for(int i=0;i<segs;i++){
     float t=float(i)/segs*6.2831853f;
-    // parametric heart
     float hx=rx*(16.f*sinf(t)*sinf(t)*sinf(t))/16.f;
     float hy=-ry*(13.f*cosf(t)-5.f*cosf(2*t)-2.f*cosf(3*t)-cosf(4*t))/16.f;
     pts.push_back({cx+hx,cy+hy});
@@ -235,7 +216,6 @@ static std::vector<float> heartFan(float cx,float cy,float rx,float ry){
   return buf;
 }
 
-// Parallelogram (outline via 4 thick lines)
 static std::vector<float> parallelogramOutline(float x0,float y0,float x1,float y1,
                                                 float shear,float half){
   float lx=min(x0,x1),rx=max(x0,x1);
@@ -252,7 +232,6 @@ static std::vector<float> parallelogramOutline(float x0,float y0,float x1,float 
   buf.resize(total*2); return buf;
 }
 
-// Trapezoid outline
 static std::vector<float> trapezoidOutline(float x0,float y0,float x1,float y1,
                                             float taper,float half){
   float lx=min(x0,x1),rx=max(x0,x1);
@@ -312,7 +291,7 @@ public:
   float activeSize    = 4.f;
   float activeOpacity = 1.f;
   Tool  activeTool    = Tool::Brush;
-  bool  filled        = false;  // fill interior of shapes
+  bool  filled        = false;
 
   std::function<void()>                          onStateChanged;
   std::function<void(const std::vector<RGBA>&)>  onHistoryChanged;
@@ -325,6 +304,15 @@ public:
   void setFilled(bool f)               { filled=f; }
 
   void setActiveTool(Tool t){
+    // Commit any in-progress selection move before switching tools
+    if(activeTool==Tool::Select && moving_){
+      commitPixels(selX0_+(moveCurX_-moveAnchorX_), selY0_+(moveCurY_-moveAnchorY_),
+                   selX1_+(moveCurX_-moveAnchorX_), selY1_+(moveCurY_-moveAnchorY_));
+      moving_=false;
+    }
+    // Clear select state
+    selDrawing_=false; hasSelection_=false; pixelBuf_.clear();
+
     activeTool=t;
     setTool(isDrawTool(t) ? static_cast<ToolId>(t) : kToolBrush);
     syncStyle();
@@ -339,26 +327,29 @@ public:
 
   // ── Mouse ──────────────────────────────────────────────────────────────────
   void onMouseDown(float x,float y) override {
-    if(activeTool==Tool::Fill){ doFill(x,y); return; }
+    if(activeTool==Tool::Select){ selectMouseDown(x,y); return; }
+    if(activeTool==Tool::Fill)  { doFill(x,y); return; }
     if(isShapeToolEnum(activeTool)){ shapeStart(x,y); return; }
     RasterSurface::onMouseDown(x,y);
   }
   void onMouseMove(float x,float y) override {
-    if(isShapeToolEnum(activeTool)&&activeTool!=Tool::Fill){
+    if(activeTool==Tool::Select){ selectMouseMove(x,y); return; }
+    if(isShapeToolEnum(activeTool)){
       if(shapeDrawing_) shapePreview(x,y);
       return;
     }
     RasterSurface::onMouseMove(x,y);
   }
   void onMouseUp(float x,float y) override {
+    if(activeTool==Tool::Select){ selectMouseUp(x,y); return; }
     if(activeTool==Tool::Fill) return;
     if(isShapeToolEnum(activeTool)){
       if(shapeDrawing_) shapeCommit(x,y);
       return;
     }
     RasterSurface::onMouseUp(x,y);
-    if(onStateChanged)    onStateChanged();
-    if(onHistoryChanged)  onHistoryChanged(colorHistory());
+    if(onStateChanged)   onStateChanged();
+    if(onHistoryChanged) onHistoryChanged(colorHistory());
   }
 
   void onKeyDown(int key) override {
@@ -369,37 +360,226 @@ public:
       case 'L': setActiveTool(Tool::Line);   break;
       case 'R': setActiveTool(Tool::Rect);   break;
       case 'F': setActiveTool(Tool::Fill);   break;
+      case 'S': setActiveTool(Tool::Select); break;
+      case VK_ESCAPE:
+        if(activeTool==Tool::Select){
+          if(moving_){
+            commitPixels(selX0_+(moveCurX_-moveAnchorX_), selY0_+(moveCurY_-moveAnchorY_),
+                         selX1_+(moveCurX_-moveAnchorX_), selY1_+(moveCurY_-moveAnchorY_));
+            moving_=false;
+          }
+          hasSelection_=false; selDrawing_=false; pixelBuf_.clear();
+          scratchClear();
+          if(onRedrawNeeded) onRedrawNeeded();
+        }
+        break;
     }
     if(onStateChanged) onStateChanged();
   }
   void onKeyUp(int) override {}
 
 private:
+  // ── Shape state ─────────────────────────────────────────────────────────────
   bool  shapeDrawing_=false;
   float shapeX0_=0,shapeY0_=0;
 
-  // ── Shape lifecycle ─────────────────────────────────────────────────────────
+  // ── Select state ────────────────────────────────────────────────────────────
+  bool  selDrawing_   = false;
+  bool  hasSelection_ = false;
+  float selX0_=0,selY0_=0,selX1_=0,selY1_=0;
+
+  bool  moving_       = false;
+  float moveAnchorX_=0,moveAnchorY_=0;
+  float moveCurX_=0,  moveCurY_=0;
+
+  std::vector<uint8_t> pixelBuf_;
+  int grabW_=0,grabH_=0;
+  int grabLX_=0,grabBY_=0;
+
+  // ── Shape lifecycle ──────────────────────────────────────────────────────────
   void shapeStart(float x,float y){
     shapeX0_=x; shapeY0_=y;
     shapeDrawing_=true;
     scratchClear();
   }
-
   void shapePreview(float x,float y){
     scratchClear();
     drawShapeInto(scratchFBOHandle(),shapeX0_,shapeY0_,x,y);
     if(onRedrawNeeded) onRedrawNeeded();
   }
-
   void shapeCommit(float x,float y){
     shapeDrawing_=false;
     scratchClear();
     pushUndoSnapshotPublic();
     drawShapeInto(committedFBOHandle(),shapeX0_,shapeY0_,x,y);
-    if(onStateChanged)   onStateChanged();
-    if(onRedrawNeeded)   onRedrawNeeded();
+    if(onStateChanged)  onStateChanged();
+    if(onRedrawNeeded)  onRedrawNeeded();
   }
 
+  // ── Select lifecycle ─────────────────────────────────────────────────────────
+  void selectMouseDown(float x,float y){
+    if(hasSelection_ && insideSelection(x,y)){
+      moving_=true;
+      moveAnchorX_=x; moveAnchorY_=y;
+      moveCurX_=x;    moveCurY_=y;
+      pushUndoSnapshotPublic();
+      grabPixels();
+      eraseSource();
+    } else {
+      moving_=false;
+      hasSelection_=false;
+      pixelBuf_.clear();
+      selDrawing_=true;
+      selX0_=selX1_=x;
+      selY0_=selY1_=y;
+      scratchClear();
+    }
+  }
+
+  void selectMouseMove(float x,float y){
+    if(moving_){
+      moveCurX_=x; moveCurY_=y;
+      scratchClear();
+      float dx=moveCurX_-moveAnchorX_, dy=moveCurY_-moveAnchorY_;
+      blitPixelsToScratch(selX0_+dx,selY0_+dy,selX1_+dx,selY1_+dy);
+      drawDots(selX0_+dx,selY0_+dy,selX1_+dx,selY1_+dy);
+      if(onRedrawNeeded) onRedrawNeeded();
+    } else if(selDrawing_){
+      selX1_=x; selY1_=y;
+      scratchClear();
+      drawDots(selX0_,selY0_,selX1_,selY1_);
+      if(onRedrawNeeded) onRedrawNeeded();
+    }
+  }
+
+  void selectMouseUp(float x,float y){
+    if(moving_){
+      moving_=false;
+      float dx=x-moveAnchorX_, dy=y-moveAnchorY_;
+      commitPixels(selX0_+dx,selY0_+dy,selX1_+dx,selY1_+dy);
+      selX0_+=dx; selX1_+=dx;
+      selY0_+=dy; selY1_+=dy;
+      scratchClear();
+      drawDots(selX0_,selY0_,selX1_,selY1_);
+      if(onRedrawNeeded) onRedrawNeeded();
+    } else if(selDrawing_){
+      selDrawing_=false;
+      selX1_=x; selY1_=y;
+      hasSelection_=(fabsf(selX1_-selX0_)>2.f && fabsf(selY1_-selY0_)>2.f);
+      scratchClear();
+      if(hasSelection_) drawDots(selX0_,selY0_,selX1_,selY1_);
+      if(onRedrawNeeded) onRedrawNeeded();
+    }
+  }
+
+  // ── Select helpers ────────────────────────────────────────────────────────────
+  bool insideSelection(float x,float y) const {
+    float lx=min(selX0_,selX1_),rx=max(selX0_,selX1_);
+    float by=min(selY0_,selY1_),ty=max(selY0_,selY1_);
+    return x>=lx && x<=rx && y>=by && y<=ty;
+  }
+
+  void grabPixels(){
+    int cw=canvasWidth(),ch=canvasHeight();
+    grabLX_=int(min(selX0_,selX1_));
+    grabBY_=int(min(selY0_,selY1_));
+    grabW_ =int(max(selX0_,selX1_))-grabLX_;
+    grabH_ =int(max(selY0_,selY1_))-grabBY_;
+    grabLX_=max(0,min(grabLX_,cw-1));
+    grabBY_=max(0,min(grabBY_,ch-1));
+    grabW_ =max(1,min(grabW_, cw-grabLX_));
+    grabH_ =max(1,min(grabH_, ch-grabBY_));
+
+    std::vector<uint8_t> full(size_t(cw)*ch*4);
+    readCommitted(full.data());
+    pixelBuf_.resize(size_t(grabW_)*grabH_*4);
+    for(int row=0;row<grabH_;row++){
+      int srcRow=grabBY_+row;
+      memcpy(pixelBuf_.data()+row*grabW_*4,
+             full.data()+(srcRow*cw+grabLX_)*4,
+             size_t(grabW_)*4);
+    }
+  }
+
+  void eraseSource(){
+    int cw=canvasWidth(),ch=canvasHeight();
+    std::vector<uint8_t> full(size_t(cw)*ch*4);
+    readCommitted(full.data());
+    for(int row=0;row<grabH_;row++){
+      int dstRow=grabBY_+row;
+      uint8_t *p=full.data()+(dstRow*cw+grabLX_)*4;
+      for(int col=0;col<grabW_;col++){
+        p[col*4+0]=255;p[col*4+1]=255;
+        p[col*4+2]=255;p[col*4+3]=255;
+      }
+    }
+    uploadToCommitted(full.data());
+  }
+
+  void blitPixelsToScratch(float x0,float y0,float x1,float y1){
+    if(pixelBuf_.empty()) return;
+    int cw=canvasWidth(),ch=canvasHeight();
+    int dstLX=max(0,min(int(min(x0,x1)),cw-1));
+    int dstBY=max(0,min(int(min(y0,y1)),ch-1));
+    int dstW =max(1,min(grabW_,cw-dstLX));
+    int dstH =max(1,min(grabH_,ch-dstBY));
+
+    std::vector<uint8_t> sub(size_t(dstW)*dstH*4);
+    for(int r=0;r<dstH;r++){
+      int srcRow=r<grabH_?r:grabH_-1;
+      memcpy(sub.data()+r*dstW*4,
+             pixelBuf_.data()+srcRow*grabW_*4,
+             size_t(dstW)*4);
+    }
+    glBindTexture(GL_TEXTURE_2D,scratchTexHandle());
+    glTexSubImage2D(GL_TEXTURE_2D,0,dstLX,dstBY,dstW,dstH,
+                    GL_RGBA,GL_UNSIGNED_BYTE,sub.data());
+    glBindTexture(GL_TEXTURE_2D,0);
+  }
+
+  void commitPixels(float x0,float y0,float x1,float y1){
+    if(pixelBuf_.empty()) return;
+    int cw=canvasWidth(),ch=canvasHeight();
+    int dstLX=max(0,min(int(min(x0,x1)),cw-1));
+    int dstBY=max(0,min(int(min(y0,y1)),ch-1));
+    int dstW =max(1,min(grabW_,cw-dstLX));
+    int dstH =max(1,min(grabH_,ch-dstBY));
+
+    std::vector<uint8_t> full(size_t(cw)*ch*4);
+    readCommitted(full.data());
+    for(int row=0;row<dstH;row++){
+      int srcRow=row<grabH_?row:grabH_-1;
+      memcpy(full.data()+((dstBY+row)*cw+dstLX)*4,
+             pixelBuf_.data()+srcRow*grabW_*4,
+             size_t(dstW)*4);
+    }
+    uploadToCommitted(full.data());
+    pixelBuf_.clear();
+  }
+
+  void drawDots(float x0,float y0,float x1,float y1){
+    float lx=min(x0,x1),rx=max(x0,x1);
+    float by=min(y0,y1),ty=max(y0,y1);
+    const float dotSize=1.5f,gap=6.f;
+    std::vector<float> buf;
+    auto dotEdge=[&](float ax,float ay,float bx,float by2){
+      float dx=bx-ax,dy=by2-ay,len=sqrtf(dx*dx+dy*dy);
+      if(len<1.f) return;
+      float ux=dx/len,uy=dy/len;
+      for(float d=0.f;d<len;d+=gap){
+        float cx=ax+ux*d,cy=ay+uy*d;
+        buf.insert(buf.end(),{cx-dotSize,cy-dotSize,cx+dotSize,cy-dotSize,
+                              cx+dotSize,cy+dotSize,cx+dotSize,cy+dotSize,
+                              cx-dotSize,cy+dotSize,cx-dotSize,cy-dotSize});
+      }
+    };
+    dotEdge(lx,by,rx,by); dotEdge(rx,by,rx,ty);
+    dotEdge(rx,ty,lx,ty); dotEdge(lx,ty,lx,by);
+    drawVertsToFBO(scratchFBOHandle(),buf.data(),int(buf.size()/2),
+                   GL_TRIANGLES,0.f,0.f,0.f,1.f);
+  }
+
+  // ── Shape drawing ─────────────────────────────────────────────────────────────
   void drawShapeInto(GLuint fbo,float x0,float y0,float x1,float y1){
     RGBA c=parseHexColor(activeColor);
     float r=c.r,g=c.g,b=c.b,a=activeOpacity;
@@ -408,19 +588,13 @@ private:
     float cx=(x0+x1)*0.5f, cy=(y0+y1)*0.5f;
     float rx=std::abs(x1-x0)*0.5f, ry=std::abs(y1-y0)*0.5f;
 
-    // Helper to emit outline or filled fan
     auto emit=[&](const std::vector<float>&v, GLenum mode){
       if(v.empty()) return;
       drawVertsToFBO(fbo,v.data(),(int)(v.size()/2),mode,r,g,b,a);
     };
-    auto emitOutline=[&](const std::vector<float>&v){
-      emit(v,GL_TRIANGLES);
-    };
-    auto emitFan=[&](const std::vector<float>&v){
-      emit(v,GL_TRIANGLE_FAN);
-    };
+    auto emitOutline=[&](const std::vector<float>&v){ emit(v,GL_TRIANGLES); };
+    auto emitFan    =[&](const std::vector<float>&v){ emit(v,GL_TRIANGLE_FAN); };
 
-    // 4-side rect helper (outline via 4 thick lines)
     auto rectOutline=[&](float lx,float by,float rx2,float ty){
       float buf[4*12]; int total=0;
       total=appendThickLine(lx,by,rx2,by,half,buf,total);
@@ -449,21 +623,13 @@ private:
         break;
       }
       case Tool::Ellipse:{
-        if(filled){
-          auto v=nGonFilled(cx,cy,rx,ry,64,0);
-          emitFan(v);
-        } else {
-          auto v=ellipseOutline(cx,cy,rx,ry,64,half);
-          emitOutline(v);
-        }
+        if(filled){ auto v=nGonFilled(cx,cy,rx,ry,64,0); emitFan(v); }
+        else       { auto v=ellipseOutline(cx,cy,rx,ry,64,half); emitOutline(v); }
         break;
       }
       case Tool::Triangle:{
-        // Equilateral-ish: apex top-center, base bottom
         std::vector<std::pair<float,float>> pts={
-          {cx,    cy-ry},
-          {cx+rx, cy+ry},
-          {cx-rx, cy+ry}
+          {cx,cy-ry},{cx+rx,cy+ry},{cx-rx,cy+ry}
         };
         if(filled){
           auto v=std::vector<float>((3+2)*2);
@@ -531,7 +697,6 @@ private:
       case Tool::Star5:{
         float ro=min(rx,ry), ri=ro*0.4f;
         if(filled){
-          // fan: alternate outer/inner points
           std::vector<std::pair<float,float>> pts;
           float off=-1.5708f;
           for(int i=0;i<10;i++){
@@ -587,7 +752,6 @@ private:
         break;
       }
       case Tool::RoundRect:{
-        // approximate with 8-sided polygon per corner
         const int cornSegs=8;
         float lx=min(x0,x1),bby=min(y0,y1);
         float rxx=max(x0,x1),ty=max(y0,y1);
@@ -635,7 +799,7 @@ private:
     }
   }
 
-  // ── Flood fill ──────────────────────────────────────────────────────────────
+  // ── Flood fill ───────────────────────────────────────────────────────────────
   void doFill(float cx,float cy){
     int w=canvasWidth(),h=canvasHeight();
     int px=int(std::floor(cx)),py=int(std::floor(cy));
@@ -653,7 +817,7 @@ private:
     if(onRedrawNeeded)  onRedrawNeeded();
   }
 
-  // ── Style sync ──────────────────────────────────────────────────────────────
+  // ── Style sync ───────────────────────────────────────────────────────────────
   void syncStyle(){
     RGBA c=parseHexColor(activeColor);
     StrokeStyle s;
@@ -747,7 +911,7 @@ public:
     filledShapes.listen([this](bool f)   { if(surface_) surface_->setFilled(f); });
     zoomLevel.listen([this](double pct)  { applyZoomFromSlider(pct); });
 
-    // ── Shared style helpers ─────────────────────────────────────────────────
+    // ── Shared style helpers ──────────────────────────────────────────────────
     auto sectionLabel=[](const std::string&txt)->WidgetPtr{
       return Text(txt)->setFontSize(9)->setTextColor(RGB(100,105,125))->setFontWeight(FontWeight::Bold);
     };
@@ -765,9 +929,8 @@ public:
         ->setPaddingAll(10,10,10,10);
     };
 
-    // ── Tool button factory ───────────────────────────────────────────────────
-    auto makeToolBtn=[&](Tool tv,const std::string&icon,
-                         const std::string&lbl)->WidgetPtr{
+    // ── Tool button factory ────────────────────────────────────────────────────
+    auto makeToolBtn=[&](Tool tv,const std::string&icon,const std::string&lbl)->WidgetPtr{
       return GestureDetector(
         Container(
           Column(
@@ -784,17 +947,18 @@ public:
       )->setOnTap([this,tv](){ activeTool.set(tv); });
     };
 
-    // ── §A  DRAW TOOLS section ────────────────────────────────────────────────
+    // ── §A  DRAW TOOLS section ─────────────────────────────────────────────────
     auto drawRow=std::make_shared<RowWidget>(); drawRow->setSpacing(4);
-    drawRow->addChild(makeToolBtn(Tool::Brush, "🖌","Brush"));
-    drawRow->addChild(makeToolBtn(Tool::Eraser,"⬜","Eraser"));
-    drawRow->addChild(makeToolBtn(Tool::Fill,  "🪣","Fill"));
+    drawRow->addChild(makeToolBtn(Tool::Brush,  "🖌", "Brush"));
+    drawRow->addChild(makeToolBtn(Tool::Eraser, "⬜", "Eraser"));
+    drawRow->addChild(makeToolBtn(Tool::Fill,   "🪣", "Fill"));
+    drawRow->addChild(makeToolBtn(Tool::Select, "⬚", "Select"));
 
     auto drawSection=cardWrap(
       Column(sectionLabel("DRAW"),SizedBox(0,8),drawRow)->setSpacing(0)
     );
 
-    // ── §B  SHAPE TOOLS section ───────────────────────────────────────────────
+    // ── §B  SHAPE TOOLS section ────────────────────────────────────────────────
     struct SD{ Tool t; std::string icon; std::string label; };
     const std::vector<SD> basicShapes={
       {Tool::Line,       "╱",  "Line"},
@@ -815,13 +979,13 @@ public:
       {Tool::Cross,      "✛",  "Cross"},
     };
     const std::vector<SD> specialShapes={
-      {Tool::Arrow,       "→",  "Arrow"},
-      {Tool::ArrowDouble, "↔",  "Dbl Arrow"},
-      {Tool::Parallelogram,"▱", "Parallel."},
-      {Tool::Trapezoid,  "⏢",  "Trapezoid"},
+      {Tool::Arrow,        "→",  "Arrow"},
+      {Tool::ArrowDouble,  "↔",  "Dbl Arrow"},
+      {Tool::Parallelogram,"▱",  "Parallel."},
+      {Tool::Trapezoid,    "⏢",  "Trapezoid"},
     };
     const std::vector<SD> extraShapes={
-      {Tool::Heart,      "♥",  "Heart"},
+      {Tool::Heart, "♥", "Heart"},
     };
 
     auto makeShapeRow=[&](const std::vector<SD>&shapes)->std::shared_ptr<RowWidget>{
@@ -856,7 +1020,7 @@ public:
       )->setSpacing(0)
     );
 
-    // ── §C  Color ─────────────────────────────────────────────────────────────
+    // ── §C  Color ──────────────────────────────────────────────────────────────
     auto selectedSwatch=cardWrap(
       Row(
         Container(nullptr)->setWidth(32)->setHeight(32)->setBorderRadius(6)
@@ -876,7 +1040,6 @@ public:
       ->setOnColorChanged([this](COLORREF c){ activeColor.set(refToHex(c)); });
     auto pickerSection=cardWrap(picker);
 
-    // Color history
     auto historyList=ListView(colorHistory)->itemBuilder([this](int,const RGBA&c)->WidgetPtr{
       char hex[8]; _snprintf_s(hex,sizeof(hex),_TRUNCATE,"#%02x%02x%02x",
         int(c.r*255),int(c.g*255),int(c.b*255));
@@ -898,7 +1061,6 @@ public:
       )->setSpacing(0)
     );
 
-    // Palette
     auto pc1=std::make_shared<RowWidget>(); pc1->setSpacing(4);
     auto pc2=std::make_shared<RowWidget>(); pc2->setSpacing(4);
     for(int i=0;i<(int)surface_->kPalette.size();i++){
@@ -918,7 +1080,6 @@ public:
       )->setSpacing(0)
     );
 
-    // Size & Opacity
     auto sizeSection=cardWrap(
       Column(
         Row(sectionLabel("SIZE"),SizedBox(6,0),
@@ -940,7 +1101,7 @@ public:
       )->setSpacing(0)
     );
 
-    // ── §D  Sidebar assembly ──────────────────────────────────────────────────
+    // ── §D  Sidebar assembly ───────────────────────────────────────────────────
     auto sidebar=Container(
       Column(
         drawSection,   SizedBox(0,6),
@@ -954,7 +1115,7 @@ public:
       )->setSpacing(0)
     )->setWidth(kSidebarWidth)->setBackgroundColor(kBg1)->setPaddingAll(10,10,10,10);
 
-    // ── §E  Toolbar ───────────────────────────────────────────────────────────
+    // ── §E  Toolbar ────────────────────────────────────────────────────────────
     auto makeBtn=[&](const std::string&lbl,COLORREF txt,std::function<void()>fn)->WidgetPtr{
       return Button(lbl,fn)->setBackgroundColor(RGB(30,30,46))->setTextColor(txt)
         ->setBorderRadius(5)->setHeight(26)->setPadding(4);
@@ -977,11 +1138,12 @@ public:
       )->setSpacing(8)->setCrossAxisAlignment(CrossAxisAlignment::Center)
     )->setBackgroundColor(kBg1)->setPaddingAll(10,7,10,7)->setHeight(kToolbarHeight);
 
-    // ── §F  Context menu ──────────────────────────────────────────────────────
+    // ── §F  Context menu ───────────────────────────────────────────────────────
     auto canvasWithMenu=ContextMenu(canvas,{
       {"Brush (B)",       [this]{ activeTool.set(Tool::Brush);   }},
       {"Eraser (E)",      [this]{ activeTool.set(Tool::Eraser);  }},
       {"Fill (F)",        [this]{ activeTool.set(Tool::Fill);    }},
+      {"Select (S)",      [this]{ activeTool.set(Tool::Select);  }},
       ContextMenuItem::Separator(),
       {"Line (L)",        [this]{ activeTool.set(Tool::Line);    }},
       {"Rectangle (R)",   [this]{ activeTool.set(Tool::Rect);    }},
@@ -1001,7 +1163,7 @@ public:
       {"Clear",           [this]{ if(surface_){ surface_->clear(); refreshUndoRedo(); if(canvasPtr_) canvasPtr_->redraw(); } }},
     });
 
-    // ── §G  Hints strip ───────────────────────────────────────────────────────
+    // ── §G  Hints strip ────────────────────────────────────────────────────────
     auto hints=Container(
       Conditional(statusMsg,[](const std::string&s){ return !s.empty(); })
         ->Then([&]{ return Text(statusMsg,[](const std::string&s){ return s; })
@@ -1010,7 +1172,8 @@ public:
             Text("MMB/Space: Pan")->setFontSize(10)->setTextColor(RGB(75,75,95)),SizedBox(10,0),
             Text("Ctrl+Scroll: Zoom")->setFontSize(10)->setTextColor(RGB(75,75,95)),SizedBox(10,0),
             Text("Ctrl+Z/Y: Undo/Redo")->setFontSize(10)->setTextColor(RGB(75,75,95)),SizedBox(10,0),
-            Text("B E L R F: Tools")->setFontSize(10)->setTextColor(RGB(75,75,95))
+            Text("B E L R F S: Tools  |  S=Select, drag to move region, ESC=deselect")
+              ->setFontSize(10)->setTextColor(RGB(75,75,95))
           )->setSpacing(0); })
     )->setBackgroundColor(kBg1)->setPaddingAll(10,3,10,3)->setHeight(kHintsHeight);
 
@@ -1020,7 +1183,7 @@ public:
   }
 };
 
-// ── Entry point ───────────────────────────────────────────────────────────────
+// ── Entry point ────────────────────────────────────────────────────────────────
 int WINAPI WinMain(HINSTANCE hInstance,HINSTANCE,LPSTR,int){
   FluxUI app(hInstance);
   app.build([&](){ return FluxApp("Paint",BuildComponent<PaintApp>(),AppTheme::dark()); });
