@@ -1,4 +1,4 @@
-// test_paint_viewport.cpp
+// main.cpp
 #include "flux.hpp"
 #include <commdlg.h>
 #include <shlobj.h>
@@ -28,11 +28,13 @@ enum class Tool {
   Cross         = 18,
   Heart         = 19,
   Select        = 20,
+  Text          = 21,   // ← NEW
 };
 
 static bool isShapeToolEnum(Tool t) {
   return t != Tool::Brush && t != Tool::Eraser &&
-         t != Tool::Fill  && t != Tool::Select;
+         t != Tool::Fill  && t != Tool::Select &&
+         t != Tool::Text;
 }
 static bool isDrawTool(Tool t) {
   return t == Tool::Brush || t == Tool::Eraser;
@@ -57,6 +59,17 @@ static std::wstring promptSavePath(HWND owner) {
   ofn.lpstrTitle = L"Save as PNG";
   return GetSaveFileNameW(&ofn) ? buf : L"";
 }
+
+// ============================================================================
+// §0  TEXT SESSION  (ported from test.cpp)
+// ============================================================================
+
+struct TextSession {
+  bool         active   = false;
+  float        x        = 0, y = 0;   // canvas-space anchor (GL Y-up)
+  std::wstring text;                   // accumulated typed characters
+  TextStyle    style;                  // font / color — copied from sidebar state
+};
 
 // ============================================================================
 // §1  GEOMETRY HELPERS
@@ -303,15 +316,17 @@ public:
   void setOpacity(float op)            { activeOpacity=op;syncStyle(); }
   void setFilled(bool f)               { filled=f; }
 
+  // ── Text style accessors (called from sidebar) ────────────────────────────
+  void setTextStyle(const TextStyle &s) { pendingTextStyle_ = s; }
+  const TextStyle &getTextStyle() const { return pendingTextStyle_; }
+
   void setActiveTool(Tool t){
-    // Commit any in-progress selection move before switching tools
-    if(activeTool==Tool::Select && moving_){
-      commitPixels(selX0_+(moveCurX_-moveAnchorX_), selY0_+(moveCurY_-moveAnchorY_),
-                   selX1_+(moveCurX_-moveAnchorX_), selY1_+(moveCurY_-moveAnchorY_));
-      moving_=false;
-    }
-    // Clear select state
+    // Commit any in-progress work before switching tools
+    commitFloatingSelect();
+    commitTextSession();
+
     selDrawing_=false; hasSelection_=false; pixelBuf_.clear();
+    textSession_.active = false;
 
     activeTool=t;
     setTool(isDrawTool(t) ? static_cast<ToolId>(t) : kToolBrush);
@@ -325,14 +340,24 @@ public:
     syncStyle();
   }
 
+  // ── needsContinuousRedraw — arms the 500 ms blink timer ──────────────────
+  bool needsContinuousRedraw() const override {
+    return textSession_.active;
+  }
+
   // ── Mouse ──────────────────────────────────────────────────────────────────
   void onMouseDown(float x,float y) override {
+    if(activeTool==Tool::Text)  { textMouseDown(x,y);  return; }
     if(activeTool==Tool::Select){ selectMouseDown(x,y); return; }
     if(activeTool==Tool::Fill)  { doFill(x,y); return; }
     if(isShapeToolEnum(activeTool)){ shapeStart(x,y); return; }
     RasterSurface::onMouseDown(x,y);
   }
   void onMouseMove(float x,float y) override {
+    if(activeTool==Tool::Text)  {
+      if(onCursorChange) onCursorChange(LoadCursor(nullptr, IDC_IBEAM));
+      return;
+    }
     if(activeTool==Tool::Select){ selectMouseMove(x,y); return; }
     if(isShapeToolEnum(activeTool)){
       if(shapeDrawing_) shapePreview(x,y);
@@ -341,6 +366,7 @@ public:
     RasterSurface::onMouseMove(x,y);
   }
   void onMouseUp(float x,float y) override {
+    if(activeTool==Tool::Text)   return;  // no mouse-up action for text
     if(activeTool==Tool::Select){ selectMouseUp(x,y); return; }
     if(activeTool==Tool::Fill) return;
     if(isShapeToolEnum(activeTool)){
@@ -352,7 +378,22 @@ public:
     if(onHistoryChanged) onHistoryChanged(colorHistory());
   }
 
+  void onRightMouseDown(float x,float y) override {
+    if(activeTool==Tool::Text){
+      commitTextSession();
+      if(onRedrawNeeded) onRedrawNeeded();
+      return;
+    }
+    RasterSurface::onRightMouseDown(x,y);
+  }
+
   void onKeyDown(int key) override {
+    // Text tool intercepts ALL keys while a session is active
+    if(activeTool==Tool::Text && textSession_.active){
+      handleTextKey(key);
+      return;
+    }
+
     RasterSurface::onKeyDown(key);
     switch(key){
       case 'B': setActiveTool(Tool::Brush);  break;
@@ -361,6 +402,7 @@ public:
       case 'R': setActiveTool(Tool::Rect);   break;
       case 'F': setActiveTool(Tool::Fill);   break;
       case 'S': setActiveTool(Tool::Select); break;
+      case 'T': setActiveTool(Tool::Text);   break;   // ← NEW
       case VK_ESCAPE:
         if(activeTool==Tool::Select){
           if(moving_){
@@ -378,25 +420,137 @@ public:
   }
   void onKeyUp(int) override {}
 
+  // ── Render override — drives cursor blink and keeps overlays alive ────────
+  void render(const float mvp[16]) override {
+    RasterSurface::render(mvp);
+    redrawSelectionOverlay();
+    advanceTextBlink();
+  }
+
+  // Cursor change callback (set by PaintApp)
+  std::function<void(HCURSOR)> onCursorChange;
+
 private:
-  // ── Shape state ─────────────────────────────────────────────────────────────
+  // ══════════════════════════════════════════════════════════════════════════
+  // TEXT SESSION  (ported from test.cpp)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  TextSession   textSession_;
+  TextStyle     pendingTextStyle_;
+
+  bool          cursorVisible_ = true;
+  std::chrono::steady_clock::time_point lastBlink_ =
+      std::chrono::steady_clock::now();
+
+  void textMouseDown(float x, float y) {
+    if(textSession_.active){
+      commitTextSession();
+    }
+    textSession_.active = true;
+    textSession_.text.clear();
+    textSession_.x     = x;
+    textSession_.y     = y;
+    textSession_.style = pendingTextStyle_;
+    cursorVisible_     = true;
+    lastBlink_         = std::chrono::steady_clock::now();
+    scratchClear();
+    renderTextToScratch(textSession_.text, x, y,
+                        textSession_.style, /*showCursor=*/true);
+    if(onRedrawNeeded) onRedrawNeeded();
+  }
+
+  // Called every frame — toggles cursor every 500 ms
+  void advanceTextBlink() {
+    if(!textSession_.active) return;
+    auto now = std::chrono::steady_clock::now();
+    double elapsed =
+        std::chrono::duration<double>(now - lastBlink_).count();
+    if(elapsed >= 0.5){
+      cursorVisible_ = !cursorVisible_;
+      lastBlink_     = now;
+      scratchClear();
+      renderTextToScratch(textSession_.text,
+                          textSession_.x, textSession_.y,
+                          textSession_.style,
+                          /*showCursor=*/cursorVisible_);
+      if(onRedrawNeeded) onRedrawNeeded();
+    }
+  }
+
+  // Route a VK code to text editing actions while a session is open
+  void handleTextKey(int vk) {
+    const bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+
+    if(vk == VK_RETURN){
+      commitTextSession();
+      if(onRedrawNeeded) onRedrawNeeded();
+      return;
+    }
+    if(vk == VK_ESCAPE){
+      textSession_.active = false;
+      textSession_.text.clear();
+      scratchClear();
+      if(onRedrawNeeded) onRedrawNeeded();
+      return;
+    }
+    if(vk == VK_BACK){
+      if(!textSession_.text.empty())
+        textSession_.text.pop_back();
+      refreshTextPreview();
+      return;
+    }
+    if(ctrl && vk == 'A'){
+      textSession_.text.clear();
+      refreshTextPreview();
+      return;
+    }
+
+    // Translate VK → Unicode character via the current keyboard layout
+    BYTE ks[256] = {};
+    GetKeyboardState(ks);
+    wchar_t buf[4] = {};
+    int n = ToUnicode(vk, MapVirtualKey(vk, MAPVK_VK_TO_VSC),
+                      ks, buf, 4, 0);
+    if(n == 1 && buf[0] >= 0x20){
+      textSession_.text += buf[0];
+      refreshTextPreview();
+    }
+  }
+
+  // Redraw text preview after any edit (resets blink so cursor is visible)
+  void refreshTextPreview() {
+    cursorVisible_ = true;
+    lastBlink_     = std::chrono::steady_clock::now();
+    scratchClear();
+    renderTextToScratch(textSession_.text,
+                        textSession_.x, textSession_.y,
+                        textSession_.style,
+                        /*showCursor=*/true);
+    if(onRedrawNeeded) onRedrawNeeded();
+  }
+
+  // Write text permanently to canvas and close the session
+  void commitTextSession() {
+    if(!textSession_.active) return;
+    if(!textSession_.text.empty()){
+      commitTextToCanvas(textSession_.text,
+                         textSession_.x, textSession_.y,
+                         textSession_.style);
+    }
+    textSession_.active = false;
+    textSession_.text.clear();
+    scratchClear();
+    if(onStateChanged) onStateChanged();
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // SHAPE STATE
+  // ══════════════════════════════════════════════════════════════════════════
+
   bool  shapeDrawing_=false;
   float shapeX0_=0,shapeY0_=0;
 
-  // ── Select state ────────────────────────────────────────────────────────────
-  bool  selDrawing_   = false;
-  bool  hasSelection_ = false;
-  float selX0_=0,selY0_=0,selX1_=0,selY1_=0;
-
-  bool  moving_       = false;
-  float moveAnchorX_=0,moveAnchorY_=0;
-  float moveCurX_=0,  moveCurY_=0;
-
-  std::vector<uint8_t> pixelBuf_;
-  int grabW_=0,grabH_=0;
-  int grabLX_=0,grabBY_=0;
-
-  // ── Shape lifecycle ──────────────────────────────────────────────────────────
+  // ── Shape lifecycle ──────────────────────────────────────────────────────
   void shapeStart(float x,float y){
     shapeX0_=x; shapeY0_=y;
     shapeDrawing_=true;
@@ -416,7 +570,23 @@ private:
     if(onRedrawNeeded)  onRedrawNeeded();
   }
 
-  // ── Select lifecycle ─────────────────────────────────────────────────────────
+  // ══════════════════════════════════════════════════════════════════════════
+  // SELECTION STATE
+  // ══════════════════════════════════════════════════════════════════════════
+
+  bool  selDrawing_   = false;
+  bool  hasSelection_ = false;
+  float selX0_=0,selY0_=0,selX1_=0,selY1_=0;
+
+  bool  moving_       = false;
+  float moveAnchorX_=0,moveAnchorY_=0;
+  float moveCurX_=0,  moveCurY_=0;
+
+  std::vector<uint8_t> pixelBuf_;
+  int grabW_=0,grabH_=0;
+  int grabLX_=0,grabBY_=0;
+
+  // ── Select lifecycle ─────────────────────────────────────────────────────
   void selectMouseDown(float x,float y){
     if(hasSelection_ && insideSelection(x,y)){
       moving_=true;
@@ -472,7 +642,30 @@ private:
     }
   }
 
-  // ── Select helpers ────────────────────────────────────────────────────────────
+  void commitFloatingSelect(){
+    if(pixelBuf_.empty()) return;
+    if(moving_){
+      float dx=moveCurX_-moveAnchorX_, dy=moveCurY_-moveAnchorY_;
+      commitPixels(selX0_+dx,selY0_+dy,selX1_+dx,selY1_+dy);
+      moving_=false;
+    } else {
+      commitPixels(selX0_,selY0_,selX1_,selY1_);
+    }
+  }
+
+  void redrawSelectionOverlay(){
+    if(!hasSelection_ && !selDrawing_) return;
+    float x0,y0,x1,y1;
+    if(moving_){
+      float dx=moveCurX_-moveAnchorX_, dy=moveCurY_-moveAnchorY_;
+      x0=selX0_+dx; y0=selY0_+dy; x1=selX1_+dx; y1=selY1_+dy;
+    } else {
+      x0=selX0_; y0=selY0_; x1=selX1_; y1=selY1_;
+    }
+    drawDots(x0,y0,x1,y1);
+  }
+
+  // ── Select helpers ────────────────────────────────────────────────────────
   bool insideSelection(float x,float y) const {
     float lx=min(selX0_,selX1_),rx=max(selX0_,selX1_);
     float by=min(selY0_,selY1_),ty=max(selY0_,selY1_);
@@ -579,7 +772,7 @@ private:
                    GL_TRIANGLES,0.f,0.f,0.f,1.f);
   }
 
-  // ── Shape drawing ─────────────────────────────────────────────────────────────
+  // ── Shape drawing ─────────────────────────────────────────────────────────
   void drawShapeInto(GLuint fbo,float x0,float y0,float x1,float y1){
     RGBA c=parseHexColor(activeColor);
     float r=c.r,g=c.g,b=c.b,a=activeOpacity;
@@ -799,7 +992,7 @@ private:
     }
   }
 
-  // ── Flood fill ───────────────────────────────────────────────────────────────
+  // ── Flood fill ───────────────────────────────────────────────────────────
   void doFill(float cx,float cy){
     int w=canvasWidth(),h=canvasHeight();
     int px=int(std::floor(cx)),py=int(std::floor(cy));
@@ -817,7 +1010,7 @@ private:
     if(onRedrawNeeded)  onRedrawNeeded();
   }
 
-  // ── Style sync ───────────────────────────────────────────────────────────────
+  // ── Style sync ───────────────────────────────────────────────────────────
   void syncStyle(){
     RGBA c=parseHexColor(activeColor);
     StrokeStyle s;
@@ -827,6 +1020,10 @@ private:
     s.tool=kToolBrush;
     setStrokeStyle(s);
     RasterSurface::setOpacity(activeOpacity);
+    // Keep pending text style in sync with current color
+    pendingTextStyle_.r = c.r;
+    pendingTextStyle_.g = c.g;
+    pendingTextStyle_.b = c.b;
   }
 };
 
@@ -843,6 +1040,7 @@ class PaintApp : public Component {
   State<double>      zoomLevel;
   State<std::vector<RGBA>> colorHistory;
   State<std::string> statusMsg;
+  State<int>         fontSize;    // ← NEW: font size for Text tool
 
   std::shared_ptr<PaintSurface> surface_;
   CanvasWidget *canvasPtr_ = nullptr;
@@ -884,7 +1082,8 @@ public:
       filledShapes(false,context),
       canUndo(false,context),canRedo(false,context),
       zoomLevel(100.0,context),colorHistory({},context),
-      statusMsg("",context) {}
+      statusMsg("",context),
+      fontSize(20,context) {}      // ← NEW
 
   WidgetPtr build() override {
     int screenW=GetSystemMetrics(SM_CXSCREEN);
@@ -902,6 +1101,7 @@ public:
     surface_->onHistoryChanged=[this](const std::vector<RGBA>&h){ colorHistory.set(h); };
     surface_->onStatusMessage =[this](const std::string&m){ statusMsg.set(m); };
     surface_->onRedrawNeeded  =[this](){ if(canvasPtr_) canvasPtr_->redraw(); };
+    surface_->onCursorChange  =[](HCURSOR c){ SetCursor(c); };    // ← NEW
     canvas->onViewportChanged =[this](float z){ syncZoomState(z); };
 
     activeColor.listen([this](const std::string&col){ if(surface_) surface_->setColor(col); });
@@ -910,6 +1110,14 @@ public:
     activeTool.listen([this](Tool t)     { if(surface_) surface_->setActiveTool(t); });
     filledShapes.listen([this](bool f)   { if(surface_) surface_->setFilled(f); });
     zoomLevel.listen([this](double pct)  { applyZoomFromSlider(pct); });
+
+    // ── NEW: font size listener ──────────────────────────────────────────────
+    fontSize.listen([this](int sz){
+      if(!surface_) return;
+      TextStyle s = surface_->getTextStyle();
+      s.fontSize = sz;
+      surface_->setTextStyle(s);
+    });
 
     // ── Shared style helpers ──────────────────────────────────────────────────
     auto sectionLabel=[](const std::string&txt)->WidgetPtr{
@@ -954,8 +1162,11 @@ public:
     drawRow->addChild(makeToolBtn(Tool::Fill,   "🪣", "Fill"));
     drawRow->addChild(makeToolBtn(Tool::Select, "⬚", "Select"));
 
+    auto drawRow2=std::make_shared<RowWidget>(); drawRow2->setSpacing(4);
+    drawRow2->addChild(makeToolBtn(Tool::Text,  "𝐓",  "Text"));    // ← NEW
+
     auto drawSection=cardWrap(
-      Column(sectionLabel("DRAW"),SizedBox(0,8),drawRow)->setSpacing(0)
+      Column(sectionLabel("DRAW"),SizedBox(0,8),drawRow,SizedBox(0,4),drawRow2)->setSpacing(0)
     );
 
     // ── §B  SHAPE TOOLS section ────────────────────────────────────────────────
@@ -1017,6 +1228,33 @@ public:
         makeShapeRow(specialShapes), SizedBox(0,4),
         makeShapeRow(extraShapes),   SizedBox(0,8),
         fillToggle
+      )->setSpacing(0)
+    );
+
+    // ── §B2  FONT SIZE section (shown when Text tool active)  ─────────────────
+    auto fontSizeSection=cardWrap(
+      Column(
+        sectionLabel("FONT SIZE"),
+        SizedBox(0,6),
+        Row(
+          GestureDetector(
+            Container(Text("–")->setFontSize(14)->setTextColor(RGB(180,180,200)))
+              ->setWidth(24)->setHeight(24)->setBorderRadius(4)
+              ->setBackgroundColor(RGB(35,35,55))->setBorderWidth(1)->setBorderColor(kBorder)
+          )->setOnTap([this](){ fontSize.set(max(8, fontSize.get()-2)); }),
+          SizedBox(4,0),
+          Container(
+            Text(fontSize,[](const int&sz){ return std::to_string(sz); })
+              ->setFontSize(10)->setTextColor(RGB(200,200,220))
+          )->setWidth(32)->setHeight(24)->setBorderRadius(4)
+           ->setBackgroundColor(RGB(22,22,38))->setBorderWidth(1)->setBorderColor(kBorder),
+          SizedBox(4,0),
+          GestureDetector(
+            Container(Text("+")->setFontSize(14)->setTextColor(RGB(180,180,200)))
+              ->setWidth(24)->setHeight(24)->setBorderRadius(4)
+              ->setBackgroundColor(RGB(35,35,55))->setBorderWidth(1)->setBorderColor(kBorder)
+          )->setOnTap([this](){ fontSize.set(min(96, fontSize.get()+2)); })
+        )->setSpacing(0)
       )->setSpacing(0)
     );
 
@@ -1104,13 +1342,14 @@ public:
     // ── §D  Sidebar assembly ───────────────────────────────────────────────────
     auto sidebar=Container(
       Column(
-        drawSection,   SizedBox(0,6),
-        shapeSection,  SizedBox(0,6),
-        selectedSwatch,SizedBox(0,6),
-        pickerSection, SizedBox(0,6),
-        historySection,SizedBox(0,6),
-        paletteSection,SizedBox(0,6),
-        sizeSection,   SizedBox(0,6),
+        drawSection,     SizedBox(0,6),
+        shapeSection,    SizedBox(0,6),
+        fontSizeSection, SizedBox(0,6),   // ← NEW: always visible font size card
+        selectedSwatch,  SizedBox(0,6),
+        pickerSection,   SizedBox(0,6),
+        historySection,  SizedBox(0,6),
+        paletteSection,  SizedBox(0,6),
+        sizeSection,     SizedBox(0,6),
         opacitySection
       )->setSpacing(0)
     )->setWidth(kSidebarWidth)->setBackgroundColor(kBg1)->setPaddingAll(10,10,10,10);
@@ -1144,6 +1383,7 @@ public:
       {"Eraser (E)",      [this]{ activeTool.set(Tool::Eraser);  }},
       {"Fill (F)",        [this]{ activeTool.set(Tool::Fill);    }},
       {"Select (S)",      [this]{ activeTool.set(Tool::Select);  }},
+      {"Text (T)",        [this]{ activeTool.set(Tool::Text);    }},   // ← NEW
       ContextMenuItem::Separator(),
       {"Line (L)",        [this]{ activeTool.set(Tool::Line);    }},
       {"Rectangle (R)",   [this]{ activeTool.set(Tool::Rect);    }},
@@ -1172,7 +1412,7 @@ public:
             Text("MMB/Space: Pan")->setFontSize(10)->setTextColor(RGB(75,75,95)),SizedBox(10,0),
             Text("Ctrl+Scroll: Zoom")->setFontSize(10)->setTextColor(RGB(75,75,95)),SizedBox(10,0),
             Text("Ctrl+Z/Y: Undo/Redo")->setFontSize(10)->setTextColor(RGB(75,75,95)),SizedBox(10,0),
-            Text("B E L R F S: Tools  |  S=Select, drag to move region, ESC=deselect")
+            Text("B E L R F S T: Tools  |  T=Text, click to place, type, Enter=commit, Esc=cancel")
               ->setFontSize(10)->setTextColor(RGB(75,75,95))
           )->setSpacing(0); })
     )->setBackgroundColor(kBg1)->setPaddingAll(10,3,10,3)->setHeight(kHintsHeight);

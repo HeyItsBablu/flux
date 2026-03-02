@@ -1,4 +1,4 @@
-// main.cpp  —  Paint app: Brush + Eraser + Select + Text
+// test.cpp  —  Paint app: Brush + Eraser + Select + Text
 //
 // PaintSurface extends RasterSurface.  All text rasterization lives in
 // RasterSurface (flux_canvas.hpp); this file owns only the tool state
