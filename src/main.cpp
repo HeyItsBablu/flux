@@ -325,7 +325,7 @@ public:
     commitFloatingSelect();
     commitTextSession();
 
-    selDrawing_=false; hasSelection_=false; pixelBuf_.clear();
+    selDrawing_=false; hasSelection_=false; grabbed_=false; pixelBuf_.clear();
     textSession_.active = false;
 
     activeTool=t;
@@ -358,7 +358,14 @@ public:
       if(onCursorChange) onCursorChange(LoadCursor(nullptr, IDC_IBEAM));
       return;
     }
-    if(activeTool==Tool::Select){ selectMouseMove(x,y); return; }
+    if(activeTool==Tool::Select){
+      if(onCursorChange){
+        bool inside = hasSelection_ && insideSelection(x,y);
+        onCursorChange(LoadCursor(nullptr, inside ? IDC_SIZEALL : IDC_CROSS));
+      }
+      selectMouseMove(x,y);
+      return;
+    }
     if(isShapeToolEnum(activeTool)){
       if(shapeDrawing_) shapePreview(x,y);
       return;
@@ -384,6 +391,13 @@ public:
       if(onRedrawNeeded) onRedrawNeeded();
       return;
     }
+    if(activeTool==Tool::Select){
+      commitFloatingSelect();
+      hasSelection_=false; selDrawing_=false;
+      scratchClear();
+      if(onRedrawNeeded) onRedrawNeeded();
+      return;
+    }
     RasterSurface::onRightMouseDown(x,y);
   }
 
@@ -405,12 +419,9 @@ public:
       case 'T': setActiveTool(Tool::Text);   break;   // ← NEW
       case VK_ESCAPE:
         if(activeTool==Tool::Select){
-          if(moving_){
-            commitPixels(selX0_+(moveCurX_-moveAnchorX_), selY0_+(moveCurY_-moveAnchorY_),
-                         selX1_+(moveCurX_-moveAnchorX_), selY1_+(moveCurY_-moveAnchorY_));
-            moving_=false;
-          }
-          hasSelection_=false; selDrawing_=false; pixelBuf_.clear();
+          commitFloatingSelect();
+          hasSelection_=false; selDrawing_=false; grabbed_=false;
+          pixelBuf_.clear();
           scratchClear();
           if(onRedrawNeeded) onRedrawNeeded();
         }
@@ -579,6 +590,7 @@ private:
   float selX0_=0,selY0_=0,selX1_=0,selY1_=0;
 
   bool  moving_       = false;
+  bool  grabbed_      = false;   // pixels lifted lazily on first drag
   float moveAnchorX_=0,moveAnchorY_=0;
   float moveCurX_=0,  moveCurY_=0;
 
@@ -592,12 +604,17 @@ private:
       moving_=true;
       moveAnchorX_=x; moveAnchorY_=y;
       moveCurX_=x;    moveCurY_=y;
-      pushUndoSnapshotPublic();
-      grabPixels();
-      eraseSource();
+      if(!grabbed_){
+        pushUndoSnapshotPublic();
+        grabPixels();
+        eraseSource();
+        grabbed_=true;
+      }
     } else {
-      moving_=false;
+      commitFloatingSelect();
       hasSelection_=false;
+      moving_=false;
+      grabbed_=false;
       pixelBuf_.clear();
       selDrawing_=true;
       selX0_=selX1_=x;
@@ -609,9 +626,9 @@ private:
   void selectMouseMove(float x,float y){
     if(moving_){
       moveCurX_=x; moveCurY_=y;
-      scratchClear();
       float dx=moveCurX_-moveAnchorX_, dy=moveCurY_-moveAnchorY_;
-      blitPixelsToScratch(selX0_+dx,selY0_+dy,selX1_+dx,selY1_+dy);
+      scratchClear();
+      blitPixelsToScratch(selX0_+dx, selY0_+dy);
       drawDots(selX0_+dx,selY0_+dy,selX1_+dx,selY1_+dy);
       if(onRedrawNeeded) onRedrawNeeded();
     } else if(selDrawing_){
@@ -626,31 +643,37 @@ private:
     if(moving_){
       moving_=false;
       float dx=x-moveAnchorX_, dy=y-moveAnchorY_;
-      commitPixels(selX0_+dx,selY0_+dy,selX1_+dx,selY1_+dy);
       selX0_+=dx; selX1_+=dx;
       selY0_+=dy; selY1_+=dy;
       scratchClear();
+      blitPixelsToScratch(selX0_, selY0_);
       drawDots(selX0_,selY0_,selX1_,selY1_);
       if(onRedrawNeeded) onRedrawNeeded();
     } else if(selDrawing_){
       selDrawing_=false;
       selX1_=x; selY1_=y;
       hasSelection_=(fabsf(selX1_-selX0_)>2.f && fabsf(selY1_-selY0_)>2.f);
+      // Normalise so selX0_/selY0_ are always the min corner
+      if(selX0_>selX1_) std::swap(selX0_,selX1_);
+      if(selY0_>selY1_) std::swap(selY0_,selY1_);
       scratchClear();
       if(hasSelection_) drawDots(selX0_,selY0_,selX1_,selY1_);
       if(onRedrawNeeded) onRedrawNeeded();
     }
   }
 
+  // Commit any floating (grabbed but not yet stamped) selection to canvas
   void commitFloatingSelect(){
     if(pixelBuf_.empty()) return;
     if(moving_){
       float dx=moveCurX_-moveAnchorX_, dy=moveCurY_-moveAnchorY_;
-      commitPixels(selX0_+dx,selY0_+dy,selX1_+dx,selY1_+dy);
+      selX0_+=dx; selX1_+=dx;
+      selY0_+=dy; selY1_+=dy;
       moving_=false;
-    } else {
-      commitPixels(selX0_,selY0_,selX1_,selY1_);
     }
+    commitPixels(selX0_, selY0_);
+    grabbed_=false;
+    scratchClear();
   }
 
   void redrawSelectionOverlay(){
@@ -662,35 +685,38 @@ private:
     } else {
       x0=selX0_; y0=selY0_; x1=selX1_; y1=selY1_;
     }
+    // Keep the floating content visible when grabbed but not actively moving
+    if(grabbed_ && !moving_)
+      blitPixelsToScratch(x0, y0);
     drawDots(x0,y0,x1,y1);
   }
 
   // ── Select helpers ────────────────────────────────────────────────────────
   bool insideSelection(float x,float y) const {
-    float lx=min(selX0_,selX1_),rx=max(selX0_,selX1_);
-    float by=min(selY0_,selY1_),ty=max(selY0_,selY1_);
-    return x>=lx && x<=rx && y>=by && y<=ty;
+    return x>=selX0_ && x<=selX1_ && y>=selY0_ && y<=selY1_;
   }
 
+  // Read selected rectangle from committed FBO; near-white pixels get alpha=0
+  // so they composite transparently when the selection is moved.
   void grabPixels(){
     int cw=canvasWidth(),ch=canvasHeight();
-    grabLX_=int(min(selX0_,selX1_));
-    grabBY_=int(min(selY0_,selY1_));
-    grabW_ =int(max(selX0_,selX1_))-grabLX_;
-    grabH_ =int(max(selY0_,selY1_))-grabBY_;
-    grabLX_=max(0,min(grabLX_,cw-1));
-    grabBY_=max(0,min(grabBY_,ch-1));
-    grabW_ =max(1,min(grabW_, cw-grabLX_));
-    grabH_ =max(1,min(grabH_, ch-grabBY_));
+    grabLX_ = max(0, min((int)selX0_, cw-1));
+    grabBY_ = max(0, min((int)selY0_, ch-1));
+    grabW_  = max(1, min((int)(selX1_-selX0_), cw-grabLX_));
+    grabH_  = max(1, min((int)(selY1_-selY0_), ch-grabBY_));
 
     std::vector<uint8_t> full(size_t(cw)*ch*4);
     readCommitted(full.data());
     pixelBuf_.resize(size_t(grabW_)*grabH_*4);
-    for(int row=0;row<grabH_;row++){
-      int srcRow=grabBY_+row;
-      memcpy(pixelBuf_.data()+row*grabW_*4,
-             full.data()+(srcRow*cw+grabLX_)*4,
-             size_t(grabW_)*4);
+    for(int r=0;r<grabH_;r++){
+      for(int c=0;c<grabW_;c++){
+        const uint8_t *src = full.data()+((grabBY_+r)*cw+grabLX_+c)*4;
+        uint8_t *dst = pixelBuf_.data()+(r*grabW_+c)*4;
+        dst[0]=src[0]; dst[1]=src[1]; dst[2]=src[2];
+        // Treat near-white as transparent so background shows through
+        bool isBg = (src[0]>=250 && src[1]>=250 && src[2]>=250);
+        dst[3] = isBg ? 0 : src[3];
+      }
     }
   }
 
@@ -709,42 +735,64 @@ private:
     uploadToCommitted(full.data());
   }
 
-  void blitPixelsToScratch(float x0,float y0,float x1,float y1){
+  // Upload pixelBuf_ into the scratch texture at canvas position (x0, y0).
+  // Handles clipping correctly when dragged to canvas edges.
+  void blitPixelsToScratch(float x0, float y0){
     if(pixelBuf_.empty()) return;
     int cw=canvasWidth(),ch=canvasHeight();
-    int dstLX=max(0,min(int(min(x0,x1)),cw-1));
-    int dstBY=max(0,min(int(min(y0,y1)),ch-1));
-    int dstW =max(1,min(grabW_,cw-dstLX));
-    int dstH =max(1,min(grabH_,ch-dstBY));
+    int dstLX=(int)x0, dstBY=(int)y0;
+    int srcOffX=0, srcOffY=0;
+    if(dstLX<0){ srcOffX=-dstLX; dstLX=0; }
+    if(dstBY<0){ srcOffY=-dstBY; dstBY=0; }
+    int dstW=min(grabW_-srcOffX, cw-dstLX);
+    int dstH=min(grabH_-srcOffY, ch-dstBY);
+    if(dstW<=0||dstH<=0) return;
 
     std::vector<uint8_t> sub(size_t(dstW)*dstH*4);
-    for(int r=0;r<dstH;r++){
-      int srcRow=r<grabH_?r:grabH_-1;
+    for(int r=0;r<dstH;r++)
       memcpy(sub.data()+r*dstW*4,
-             pixelBuf_.data()+srcRow*grabW_*4,
+             pixelBuf_.data()+((srcOffY+r)*grabW_+srcOffX)*4,
              size_t(dstW)*4);
-    }
+
     glBindTexture(GL_TEXTURE_2D,scratchTexHandle());
     glTexSubImage2D(GL_TEXTURE_2D,0,dstLX,dstBY,dstW,dstH,
                     GL_RGBA,GL_UNSIGNED_BYTE,sub.data());
     glBindTexture(GL_TEXTURE_2D,0);
   }
 
-  void commitPixels(float x0,float y0,float x1,float y1){
+  // SRC_OVER alpha-composite pixelBuf_ onto committed at (x0, y0).
+  void commitPixels(float x0, float y0){
     if(pixelBuf_.empty()) return;
     int cw=canvasWidth(),ch=canvasHeight();
-    int dstLX=max(0,min(int(min(x0,x1)),cw-1));
-    int dstBY=max(0,min(int(min(y0,y1)),ch-1));
-    int dstW =max(1,min(grabW_,cw-dstLX));
-    int dstH =max(1,min(grabH_,ch-dstBY));
+    int dstLX=(int)x0, dstBY=(int)y0;
+    int srcOffX=0, srcOffY=0;
+    if(dstLX<0){ srcOffX=-dstLX; dstLX=0; }
+    if(dstBY<0){ srcOffY=-dstBY; dstBY=0; }
+    int dstW=min(grabW_-srcOffX, cw-dstLX);
+    int dstH=min(grabH_-srcOffY, ch-dstBY);
+    if(dstW<=0||dstH<=0){ pixelBuf_.clear(); return; }
 
     std::vector<uint8_t> full(size_t(cw)*ch*4);
     readCommitted(full.data());
-    for(int row=0;row<dstH;row++){
-      int srcRow=row<grabH_?row:grabH_-1;
-      memcpy(full.data()+((dstBY+row)*cw+dstLX)*4,
-             pixelBuf_.data()+srcRow*grabW_*4,
-             size_t(dstW)*4);
+    for(int r=0;r<dstH;r++){
+      for(int c=0;c<dstW;c++){
+        const uint8_t *s = pixelBuf_.data()+((srcOffY+r)*grabW_+srcOffX+c)*4;
+        uint8_t *d = full.data()+((dstBY+r)*cw+dstLX+c)*4;
+        float sa=s[3]/255.f;
+        if(sa<=0.f) continue;
+        if(sa>=1.f){
+          d[0]=s[0]; d[1]=s[1]; d[2]=s[2]; d[3]=s[3];
+        } else {
+          float da=d[3]/255.f;
+          float oa=sa+da*(1.f-sa);
+          if(oa>0.f){
+            d[0]=(uint8_t)((s[0]*sa+d[0]*da*(1.f-sa))/oa);
+            d[1]=(uint8_t)((s[1]*sa+d[1]*da*(1.f-sa))/oa);
+            d[2]=(uint8_t)((s[2]*sa+d[2]*da*(1.f-sa))/oa);
+            d[3]=(uint8_t)(oa*255.f);
+          }
+        }
+      }
     }
     uploadToCommitted(full.data());
     pixelBuf_.clear();
