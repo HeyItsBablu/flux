@@ -121,7 +121,8 @@ using PFNGLDISABLEVERTEXATTRIBARRAYPROC = void(APIENTRY *)(GLuint);
 using PFNGLVERTEXATTRIBPOINTERPROC = void(APIENTRY *)(GLuint, GLint, GLenum,
                                                       GLboolean, GLsizei,
                                                       const void *);
-using PFNGLBLENDFUNCSEPARATEPROC = void(APIENTRY *)(GLenum, GLenum, GLenum, GLenum);
+using PFNGLBLENDFUNCSEPARATEPROC = void(APIENTRY *)(GLenum, GLenum, GLenum,
+                                                    GLenum);
 
 #define GL_ARRAY_BUFFER 0x8892
 #define GL_DYNAMIC_DRAW 0x88E8
@@ -142,10 +143,10 @@ using PFNGLBLENDFUNCSEPARATEPROC = void(APIENTRY *)(GLenum, GLenum, GLenum, GLen
 
 // Blend factors needed for eraser (destination-alpha punch-through)
 #define GL_ONE_MINUS_SRC_ALPHA 0x0303
-#define GL_DST_ALPHA           0x0304
+#define GL_DST_ALPHA 0x0304
 #define GL_ONE_MINUS_DST_ALPHA 0x0305
-#define GL_ZERO                0x0000
-#define GL_ONE                 0x0001
+#define GL_ZERO 0x0000
+#define GL_ONE 0x0001
 
 // ============================================================================
 // §1b  DEBUG GL ERROR CHECK
@@ -219,7 +220,7 @@ struct GLProcs {
   PFNGLENABLEVERTEXATTRIBARRAYPROC enableVertexAttribArray{};
   PFNGLDISABLEVERTEXATTRIBARRAYPROC disableVertexAttribArray{};
   PFNGLVERTEXATTRIBPOINTERPROC vertexAttribPointer{};
-  PFNGLBLENDFUNCSEPARATEPROC   blendFuncSeparate{};
+  PFNGLBLENDFUNCSEPARATEPROC blendFuncSeparate{};
 
   static GLProcs &get() {
     static GLProcs p;
@@ -265,7 +266,7 @@ struct GLProcs {
     LOAD(enableVertexAttribArray, "glEnableVertexAttribArray");
     LOAD(disableVertexAttribArray, "glDisableVertexAttribArray");
     LOAD(vertexAttribPointer, "glVertexAttribPointer");
-    LOAD(blendFuncSeparate,   "glBlendFuncSeparate");
+    LOAD(blendFuncSeparate, "glBlendFuncSeparate");
 #undef LOAD
     assert(genBuffers && bindBuffer && bufferData && genVertexArrays &&
            bindVertexArray && genFramebuffers && bindFramebuffer &&
@@ -404,7 +405,7 @@ inline RGBA parseHexColor(const std::string &css) {
 // ============================================================================
 
 using ToolId = int;
-static constexpr ToolId kToolBrush  = 0;
+static constexpr ToolId kToolBrush = 0;
 static constexpr ToolId kToolEraser = 1;
 
 struct StrokePoint {
@@ -412,8 +413,8 @@ struct StrokePoint {
 };
 
 struct StrokeStyle {
-  float  r = 0, g = 0, b = 0, a = 1;
-  float  radius = 4, hardness = 0.8f, opacity = 1;
+  float r = 0, g = 0, b = 0, a = 1;
+  float radius = 4, hardness = 0.8f, opacity = 1;
   ToolId tool = kToolBrush;
 };
 
@@ -479,9 +480,12 @@ public:
     clampOffset();
   }
 
-  void zoomIn()  { zoomToward(vw_ * .5f, vh_ * .5f, 1.25f); }
-  void zoomOut() { zoomToward(vw_ * .5f, vh_ * .5f, 0.8f);  }
-  void resetZoom() { zoom_ = 1.f; centerCanvas(); }
+  void zoomIn() { zoomToward(vw_ * .5f, vh_ * .5f, 1.25f); }
+  void zoomOut() { zoomToward(vw_ * .5f, vh_ * .5f, 0.8f); }
+  void resetZoom() {
+    zoom_ = 1.f;
+    centerCanvas();
+  }
   void fitToView() {
     float f = min(vw_ / cw_, vh_ / ch_);
     zoom_ = snapZoom(std::clamp(f, kMinZoom, kMaxZoom));
@@ -494,8 +498,14 @@ public:
     clampOffset();
   }
 
-  void setOffsetX(float cx) { offsetX_ = cx; clampOffset(); }
-  void setOffsetY(float cy) { offsetY_ = cy; clampOffset(); }
+  void setOffsetX(float cx) {
+    offsetX_ = cx;
+    clampOffset();
+  }
+  void setOffsetY(float cy) {
+    offsetY_ = cy;
+    clampOffset();
+  }
   void setOffset(float cx, float cy) {
     offsetX_ = cx;
     offsetY_ = cy;
@@ -508,14 +518,16 @@ public:
 
   ScrollbarInfo scrollbarH() const {
     float view = vw_ / zoom_;
-    if (view >= cw_) return {0, 1, false};
+    if (view >= cw_)
+      return {0, 1, false};
     return {std::clamp(offsetX_ / cw_, 0.f, 1.f),
             std::clamp((offsetX_ + view) / cw_, 0.f, 1.f), true};
   }
 
   ScrollbarInfo scrollbarV() const {
     float view = vh_ / zoom_;
-    if (view >= ch_) return {0, 1, false};
+    if (view >= ch_)
+      return {0, 1, false};
     float end = offsetY_ + view;
     return {std::clamp(1.f - end / ch_, 0.f, 1.f),
             std::clamp(1.f - offsetY_ / ch_, 0.f, 1.f), true};
@@ -527,13 +539,13 @@ public:
     glutil::ortho(l, r, b, t, out);
   }
 
-  float zoom()    const { return zoom_;    }
+  float zoom() const { return zoom_; }
   float offsetX() const { return offsetX_; }
   float offsetY() const { return offsetY_; }
-  float viewW()   const { return vw_;      }
-  float viewH()   const { return vh_;      }
-  float canvasW() const { return cw_;      }
-  float canvasH() const { return ch_;      }
+  float viewW() const { return vw_; }
+  float viewH() const { return vh_; }
+  float canvasW() const { return cw_; }
+  float canvasH() const { return ch_; }
 
 private:
   float vw_ = 1, vh_ = 1, cw_ = 1, ch_ = 1;
@@ -541,7 +553,8 @@ private:
 
   static float snapZoom(float z) {
     for (float s : kSnapZooms)
-      if (std::abs(z - s) / s < kSnapTolerance) return s;
+      if (std::abs(z - s) / s < kSnapTolerance)
+        return s;
     return z;
   }
 
@@ -554,10 +567,14 @@ private:
   void clampOffset() {
     float viewW = vw_ / zoom_;
     float viewH = vh_ / zoom_;
-    if (viewW >= cw_) offsetX_ = (cw_ - viewW) * 0.5f;
-    else              offsetX_ = std::clamp(offsetX_, 0.f, cw_ - viewW);
-    if (viewH >= ch_) offsetY_ = (ch_ - viewH) * 0.5f;
-    else              offsetY_ = std::clamp(offsetY_, 0.f, ch_ - viewH);
+    if (viewW >= cw_)
+      offsetX_ = (cw_ - viewW) * 0.5f;
+    else
+      offsetX_ = std::clamp(offsetX_, 0.f, cw_ - viewW);
+    if (viewH >= ch_)
+      offsetY_ = (ch_ - viewH) * 0.5f;
+    else
+      offsetY_ = std::clamp(offsetY_, 0.f, ch_ - viewH);
   }
 };
 
@@ -574,9 +591,10 @@ public:
   virtual void render(const float mvp[16]) = 0;
   virtual void onMouseDown(float x, float y) {}
   virtual void onMouseMove(float x, float y) {}
-  virtual void onMouseUp(float x, float y)   {}
+  virtual void onMouseUp(float x, float y) {}
   virtual void onKeyDown(int key) {}
-  virtual void onKeyUp(int key)   {}
+  virtual void onKeyUp(int key) {}
+  virtual void onRightMouseDown(float x, float y) {}
   virtual void destroy() = 0;
 };
 
@@ -587,7 +605,7 @@ public:
 class RasterSurface : public RenderSurface {
 public:
   static constexpr size_t kDefaultUndoBudgetBytes = 256ULL * 1024 * 1024;
-  static constexpr int    kColorHistoryMax        = 16;
+  static constexpr int kColorHistoryMax = 16;
 
   explicit RasterSurface(size_t budget = kDefaultUndoBudgetBytes)
       : undoBudget_(budget) {}
@@ -595,14 +613,17 @@ public:
 
   // ── Tool / style setters ─────────────────────────────────────────────────
 
-  void setTool(ToolId t)               { tool_ = t; }
-  ToolId getTool() const               { return tool_; }
+  void setTool(ToolId t) { tool_ = t; }
+  ToolId getTool() const { return tool_; }
 
-  void setStrokeStyle(const StrokeStyle &s) { style_ = s; style_.tool = tool_; }
+  void setStrokeStyle(const StrokeStyle &s) {
+    style_ = s;
+    style_.tool = tool_;
+  }
   const StrokeStyle &getStrokeStyle() const { return style_; }
 
   void setOpacity(float op) { style_.opacity = std::clamp(op, 0.f, 1.f); }
-  float getOpacity() const  { return style_.opacity; }
+  float getOpacity() const { return style_.opacity; }
 
   // ── Color history ────────────────────────────────────────────────────────
 
@@ -611,7 +632,8 @@ public:
   // ── Undo / Redo ──────────────────────────────────────────────────────────
 
   void undo() {
-    if (undoStack_.empty()) return;
+    if (undoStack_.empty())
+      return;
     size_t sz = snapshotBytes();
     redoStack_.push_back({snapshotCommitted(), sz});
     redoBytes_ += sz;
@@ -624,7 +646,8 @@ public:
   }
 
   void redo() {
-    if (redoStack_.empty()) return;
+    if (redoStack_.empty())
+      return;
     size_t sz = snapshotBytes();
     undoStack_.push_back({snapshotCommitted(), sz});
     undoBytes_ += sz;
@@ -642,14 +665,15 @@ public:
   void clear() {
     pushUndoSnapshot();
     clearFBO(committedFBO_, w_, h_, 255, 255, 255, 255);
-    clearFBO(scratchFBO_,   w_, h_,   0,   0,   0,   0);
+    clearFBO(scratchFBO_, w_, h_, 0, 0, 0, 0);
     dirty_ = true;
   }
 
   // ── PNG export ───────────────────────────────────────────────────────────
 
   bool savePNG(const std::wstring &path) {
-    if (!committedFBO_ || w_ <= 0 || h_ <= 0) return false;
+    if (!committedFBO_ || w_ <= 0 || h_ <= 0)
+      return false;
 
     std::vector<uint8_t> buf(size_t(w_) * h_ * 4);
     GL.bindFramebuffer(GL_READ_FRAMEBUFFER, committedFBO_);
@@ -660,29 +684,30 @@ public:
     const int stride = w_ * 4;
     for (int row = 0; row < h_; ++row) {
       memcpy(flipped.data() + row * stride,
-             buf.data()     + (h_ - 1 - row) * stride,
-             stride);
+             buf.data() + (h_ - 1 - row) * stride, stride);
     }
 
     for (int i = 0; i < w_ * h_; ++i) {
-      uint8_t r = flipped[i*4+0];
-      uint8_t g = flipped[i*4+1];
-      uint8_t b = flipped[i*4+2];
-      uint8_t a = flipped[i*4+3];
-      flipped[i*4+0] = b;
-      flipped[i*4+1] = g;
-      flipped[i*4+2] = r;
-      flipped[i*4+3] = a;
+      uint8_t r = flipped[i * 4 + 0];
+      uint8_t g = flipped[i * 4 + 1];
+      uint8_t b = flipped[i * 4 + 2];
+      uint8_t a = flipped[i * 4 + 3];
+      flipped[i * 4 + 0] = b;
+      flipped[i * 4 + 1] = g;
+      flipped[i * 4 + 2] = r;
+      flipped[i * 4 + 3] = a;
     }
 
     Gdiplus::Bitmap bmp(w_, h_, stride, PixelFormat32bppARGB, flipped.data());
-    if (bmp.GetLastStatus() != Gdiplus::Ok) return false;
+    if (bmp.GetLastStatus() != Gdiplus::Ok)
+      return false;
 
     CLSID pngClsid;
     {
       UINT num = 0, sz = 0;
       Gdiplus::GetImageEncodersSize(&num, &sz);
-      if (sz == 0) return false;
+      if (sz == 0)
+        return false;
       std::vector<uint8_t> ebuf(sz);
       auto *encoders = reinterpret_cast<Gdiplus::ImageCodecInfo *>(ebuf.data());
       Gdiplus::GetImageEncoders(num, sz, encoders);
@@ -694,7 +719,8 @@ public:
           break;
         }
       }
-      if (!found) return false;
+      if (!found)
+        return false;
     }
 
     Gdiplus::Status st = bmp.Save(path.c_str(), &pngClsid, nullptr);
@@ -710,31 +736,36 @@ public:
     buildQuadVAO();
     buildDabVerts();
     allocFBOPair(committedFBO_, committedTex_, w_, h_);
-    allocFBOPair(scratchFBO_,   scratchTex_,  w_, h_);
+    allocFBOPair(scratchFBO_, scratchTex_, w_, h_);
     clearFBO(committedFBO_, w_, h_, 255, 255, 255, 255);
-    clearFBO(scratchFBO_,   w_, h_,   0,   0,   0,   0);
+    clearFBO(scratchFBO_, w_, h_, 0, 0, 0, 0);
   }
 
   void resize(int w, int h) override {
-    if (w == w_ && h == h_) return;
+    if (w == w_ && h == h_)
+      return;
     GLuint nCF = 0, nCT = 0, nSF = 0, nST = 0;
     allocFBOPair(nCF, nCT, w, h);
     allocFBOPair(nSF, nST, w, h);
     clearFBO(nCF, w, h, 255, 255, 255, 255);
-    clearFBO(nSF, w, h,   0,   0,   0,   0);
+    clearFBO(nSF, w, h, 0, 0, 0, 0);
     int cw = min(w_, w), ch = min(h_, h);
     GL.bindFramebuffer(GL_READ_FRAMEBUFFER, committedFBO_);
     GL.bindFramebuffer(GL_DRAW_FRAMEBUFFER, nCF);
-    GL.blitFramebuffer(0, 0, cw, ch, 0, 0, cw, ch, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    GL.blitFramebuffer(0, 0, cw, ch, 0, 0, cw, ch, GL_COLOR_BUFFER_BIT,
+                       GL_NEAREST);
     GL.bindFramebuffer(GL_READ_FRAMEBUFFER, 0);
     GL.bindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
     destroyFBOPair(committedFBO_, committedTex_);
-    destroyFBOPair(scratchFBO_,   scratchTex_);
-    committedFBO_ = nCF; committedTex_ = nCT;
-    scratchFBO_   = nSF; scratchTex_   = nST;
+    destroyFBOPair(scratchFBO_, scratchTex_);
+    committedFBO_ = nCF;
+    committedTex_ = nCT;
+    scratchFBO_ = nSF;
+    scratchTex_ = nST;
     flushDeque(undoStack_, undoBytes_);
     flushDeque(redoStack_, redoBytes_);
-    w_ = w; h_ = h;
+    w_ = w;
+    h_ = h;
     dirty_ = true;
   }
 
@@ -750,49 +781,74 @@ public:
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     blitTexture(committedTex_, 1.f, mvp);
-    blitTexture(scratchTex_,   1.f, mvp);
+    blitTexture(scratchTex_, 1.f, mvp);
 
     glDisable(GL_BLEND);
 
     dirty_ = false;
     GL.useProgram(0);
-    if (blendWas) glEnable(GL_BLEND);
+    if (blendWas)
+      glEnable(GL_BLEND);
   }
 
   void onMouseDown(float x, float y) override { beginStroke(x, y); }
-  void onMouseMove(float x, float y) override { if (drawing_) drawSegment(x, y); }
-  void onMouseUp(float x, float y)   override { if (drawing_) endStroke(x, y); }
+  void onMouseMove(float x, float y) override {
+    if (drawing_)
+      drawSegment(x, y);
+  }
+  void onMouseUp(float x, float y) override {
+    if (drawing_)
+      endStroke(x, y);
+  }
 
   void onKeyDown(int key) override {
-    bool ctrl  = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
-    bool shift = (GetKeyState(VK_SHIFT)   & 0x8000) != 0;
-    if (ctrl && key == 'Z') { if (shift) redo(); else undo(); }
-    if (ctrl && key == 'Y') redo();
+    bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+    bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+    if (ctrl && key == 'Z') {
+      if (shift)
+        redo();
+      else
+        undo();
+    }
+    if (ctrl && key == 'Y')
+      redo();
   }
   void onKeyUp(int) override {}
 
   void destroy() override {
     destroyFBOPair(committedFBO_, committedTex_);
-    destroyFBOPair(scratchFBO_,   scratchTex_);
-    if (blitProg_) { GL.deleteProgram(blitProg_); blitProg_ = 0; }
-    if (quadVAO_)  { GL.deleteVertexArrays(1, &quadVAO_); quadVAO_ = 0; }
-    if (quadVBO_)  { GL.deleteBuffers(1, &quadVBO_); quadVBO_ = 0; }
-    if (shapeVBO_) { GL.deleteBuffers(1, &shapeVBO_); shapeVBO_ = 0; }
+    destroyFBOPair(scratchFBO_, scratchTex_);
+    if (blitProg_) {
+      GL.deleteProgram(blitProg_);
+      blitProg_ = 0;
+    }
+    if (quadVAO_) {
+      GL.deleteVertexArrays(1, &quadVAO_);
+      quadVAO_ = 0;
+    }
+    if (quadVBO_) {
+      GL.deleteBuffers(1, &quadVBO_);
+      quadVBO_ = 0;
+    }
+    if (shapeVBO_) {
+      GL.deleteBuffers(1, &shapeVBO_);
+      shapeVBO_ = 0;
+    }
     flushDeque(undoStack_, undoBytes_);
     flushDeque(redoStack_, redoBytes_);
   }
 
 protected:
-  int    canvasWidth()  const { return w_; }
-  int    canvasHeight() const { return h_; }
+  int canvasWidth() const { return w_; }
+  int canvasHeight() const { return h_; }
   GLuint committedFBOHandle() const { return committedFBO_; }
   GLuint committedTexHandle() const { return committedTex_; }
-  GLuint scratchFBOHandle()   const { return scratchFBO_; }
-  GLuint scratchTexHandle()   const { return scratchTex_; }
-  GLuint blitProgHandle()     const { return blitProg_; }
-  GLuint quadVAOHandle()      const { return quadVAO_; }
-  GLuint quadVBOHandle()      const { return quadVBO_; }
-  bool   isDrawing()          const { return drawing_; }
+  GLuint scratchFBOHandle() const { return scratchFBO_; }
+  GLuint scratchTexHandle() const { return scratchTex_; }
+  GLuint blitProgHandle() const { return blitProg_; }
+  GLuint quadVAOHandle() const { return quadVAO_; }
+  GLuint quadVBOHandle() const { return quadVBO_; }
+  bool isDrawing() const { return drawing_; }
 
   void pushUndoSnapshotPublic() { pushUndoSnapshot(); }
 
@@ -804,10 +860,10 @@ protected:
     clearFBO(scratchFBO_, w_, h_, 0, 0, 0, 0);
   }
 
-  GLint uMVP()   const { return u_.mvp;   }
-  GLint uMode()  const { return u_.mode;  }
+  GLint uMVP() const { return u_.mvp; }
+  GLint uMode() const { return u_.mode; }
   GLint uColor() const { return u_.color; }
-  GLint uTex()   const { return u_.tex;   }
+  GLint uTex() const { return u_.tex; }
   GLint uAlpha() const { return u_.alpha; }
 
   void getCanvasOrtho(float out[16]) const { canvasOrtho(out); }
@@ -815,17 +871,17 @@ protected:
   // ── FIX: drawVertsToFBO now uses a dedicated shapeVBO_ so it never
   //         touches the quadVBO_ that blitTexture depends on.
   //         This eliminates the VBO size corruption that wiped the canvas.
-  void drawVertsToFBO(GLuint fbo, const float *verts, int count,
-                      GLenum mode,
+  void drawVertsToFBO(GLuint fbo, const float *verts, int count, GLenum mode,
                       float r, float g, float b, float a) {
-    float mvp[16]; canvasOrtho(mvp);
+    float mvp[16];
+    canvasOrtho(mvp);
     GL.bindFramebuffer(GL_FRAMEBUFFER, fbo);
     glViewport(0, 0, w_, h_);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     GL.useProgram(blitProg_);
-    GL.uniformMatrix4fv(u_.mvp,  1, GL_FALSE, mvp);
-    GL.uniform1i(u_.mode,  1);
+    GL.uniformMatrix4fv(u_.mvp, 1, GL_FALSE, mvp);
+    GL.uniform1i(u_.mode, 1);
     GL.uniform4f(u_.color, r, g, b, a);
 
     // Use the dedicated shape VBO — never touches quadVBO_
@@ -837,7 +893,8 @@ protected:
     // since we always set attrib pointers before drawing)
     GL.bindVertexArray(quadVAO_);
     GL.enableVertexAttribArray(0);
-    GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float)*2, nullptr);
+    GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 2,
+                           nullptr);
     // Disable attrib 1 so the blit shader's UV input reads (0,0) if it ever
     // runs in this path (it won't — mode==1 skips the texture sample).
     GL.disableVertexAttribArray(1);
@@ -853,7 +910,8 @@ protected:
 
   void uploadToCommitted(const uint8_t *pixels) {
     glBindTexture(GL_TEXTURE_2D, committedTex_);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w_, h_, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w_, h_, GL_RGBA, GL_UNSIGNED_BYTE,
+                    pixels);
     glBindTexture(GL_TEXTURE_2D, 0);
   }
 
@@ -864,22 +922,25 @@ protected:
   }
 
 private:
-  int  w_ = 0, h_ = 0;
+  int w_ = 0, h_ = 0;
   bool drawing_ = false, dirty_ = false;
   StrokePoint lastPt_{};
   StrokeStyle style_{};
-  ToolId      tool_  = kToolBrush;
+  ToolId tool_ = kToolBrush;
 
   GLuint committedFBO_ = 0, committedTex_ = 0;
-  GLuint scratchFBO_   = 0, scratchTex_   = 0;
+  GLuint scratchFBO_ = 0, scratchTex_ = 0;
   GLuint blitProg_ = 0, quadVAO_ = 0, quadVBO_ = 0;
-  GLuint shapeVBO_ = 0;   // ── FIX: dedicated VBO for drawVertsToFBO
+  GLuint shapeVBO_ = 0; // ── FIX: dedicated VBO for drawVertsToFBO
 
   struct ULocs {
     GLint mvp = -1, mode = -1, tex = -1, alpha = -1, color = -1;
   } u_;
 
-  struct Snapshot { GLuint tex; size_t bytes; };
+  struct Snapshot {
+    GLuint tex;
+    size_t bytes;
+  };
   size_t undoBudget_, undoBytes_ = 0, redoBytes_ = 0;
   std::deque<Snapshot> undoStack_, redoStack_;
 
@@ -888,9 +949,9 @@ private:
   void pushColorHistory(const RGBA &c) {
     if (!colorHistory_.empty()) {
       const RGBA &last = colorHistory_.front();
-      if (std::abs(last.r - c.r) < 0.01f &&
-          std::abs(last.g - c.g) < 0.01f &&
-          std::abs(last.b - c.b) < 0.01f) return;
+      if (std::abs(last.r - c.r) < 0.01f && std::abs(last.g - c.g) < 0.01f &&
+          std::abs(last.b - c.b) < 0.01f)
+        return;
     }
     colorHistory_.insert(colorHistory_.begin(), c);
     if ((int)colorHistory_.size() > kColorHistoryMax)
@@ -903,7 +964,8 @@ private:
   float dabVerts[(kDabVerts + 2) * 2]{};
 
   static void flushDeque(std::deque<Snapshot> &dq, size_t &cnt) {
-    for (auto &s : dq) glDeleteTextures(1, &s.tex);
+    for (auto &s : dq)
+      glDeleteTextures(1, &s.tex);
     dq.clear();
     cnt = 0;
   }
@@ -911,7 +973,8 @@ private:
   // ── Stroke lifecycle ──────────────────────────────────────────────────────
 
   void beginStroke(float x, float y) {
-    if (drawing_) return;
+    if (drawing_)
+      return;
     drawing_ = true;
     lastPt_ = {x, y, 1.f};
     flushDeque(redoStack_, redoBytes_);
@@ -930,15 +993,18 @@ private:
   void drawSegment(float x, float y) {
     float dx = x - lastPt_.x, dy = y - lastPt_.y;
     float dist = std::sqrt(dx * dx + dy * dy);
-    if (dist < 0.0001f) return;
-    float step  = max(1.f, style_.radius * .25f);
-    int   steps = max(1, (int)(dist / step));
+    if (dist < 0.0001f)
+      return;
+    float step = max(1.f, style_.radius * .25f);
+    int steps = max(1, (int)(dist / step));
     for (int i = 1; i <= steps; ++i) {
       float t = float(i) / steps;
       if (tool_ == kToolBrush)
-        paintDabBrush(scratchFBO_, lastPt_.x + dx * t, lastPt_.y + dy * t, style_);
+        paintDabBrush(scratchFBO_, lastPt_.x + dx * t, lastPt_.y + dy * t,
+                      style_);
       else
-        paintDabEraser(committedFBO_, lastPt_.x + dx * t, lastPt_.y + dy * t, style_);
+        paintDabEraser(committedFBO_, lastPt_.x + dx * t, lastPt_.y + dy * t,
+                       style_);
     }
     lastPt_ = {x, y, 1.f};
     dirty_ = true;
@@ -952,7 +1018,7 @@ private:
       clearFBO(scratchFBO_, w_, h_, 0, 0, 0, 0);
     }
     drawing_ = false;
-    dirty_   = true;
+    dirty_ = true;
   }
 
   // ── FBO helpers ───────────────────────────────────────────────────────────
@@ -964,25 +1030,34 @@ private:
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                 nullptr);
     glBindTexture(GL_TEXTURE_2D, 0);
     GL.genFramebuffers(1, &fbo);
     GL.bindFramebuffer(GL_FRAMEBUFFER, fbo);
-    GL.framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
-    assert(GL.checkFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
+    GL.framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                            tex, 0);
+    assert(GL.checkFramebufferStatus(GL_FRAMEBUFFER) ==
+           GL_FRAMEBUFFER_COMPLETE);
     GL.bindFramebuffer(GL_FRAMEBUFFER, 0);
   }
 
   void destroyFBOPair(GLuint &fbo, GLuint &tex) {
-    if (fbo) { GL.deleteFramebuffers(1, &fbo); fbo = 0; }
-    if (tex) { glDeleteTextures(1, &tex);       tex = 0; }
+    if (fbo) {
+      GL.deleteFramebuffers(1, &fbo);
+      fbo = 0;
+    }
+    if (tex) {
+      glDeleteTextures(1, &tex);
+      tex = 0;
+    }
   }
 
-  void clearFBO(GLuint fbo, int w, int h,
-                uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+  void clearFBO(GLuint fbo, int w, int h, uint8_t r, uint8_t g, uint8_t b,
+                uint8_t a) {
     GL.bindFramebuffer(GL_FRAMEBUFFER, fbo);
     glViewport(0, 0, w, h);
-    glClearColor(r/255.f, g/255.f, b/255.f, a/255.f);
+    glClearColor(r / 255.f, g / 255.f, b / 255.f, a / 255.f);
     glClear(GL_COLOR_BUFFER_BIT);
     GL.bindFramebuffer(GL_FRAMEBUFFER, 0);
   }
@@ -993,14 +1068,18 @@ private:
     glBindTexture(GL_TEXTURE_2D, st);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w_, h_, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w_, h_, 0, GL_RGBA,
+                 GL_UNSIGNED_BYTE, nullptr);
     glBindTexture(GL_TEXTURE_2D, 0);
     GL.genFramebuffers(1, &sf);
     GL.bindFramebuffer(GL_DRAW_FRAMEBUFFER, sf);
-    GL.framebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, st, 0);
-    assert(GL.checkFramebufferStatus(GL_DRAW_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
+    GL.framebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                            GL_TEXTURE_2D, st, 0);
+    assert(GL.checkFramebufferStatus(GL_DRAW_FRAMEBUFFER) ==
+           GL_FRAMEBUFFER_COMPLETE);
     GL.bindFramebuffer(GL_READ_FRAMEBUFFER, committedFBO_);
-    GL.blitFramebuffer(0, 0, w_, h_, 0, 0, w_, h_, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    GL.blitFramebuffer(0, 0, w_, h_, 0, 0, w_, h_, GL_COLOR_BUFFER_BIT,
+                       GL_NEAREST);
     GL.bindFramebuffer(GL_READ_FRAMEBUFFER, 0);
     GL.bindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
     GL.deleteFramebuffers(1, &sf);
@@ -1011,10 +1090,13 @@ private:
     GLuint rf;
     GL.genFramebuffers(1, &rf);
     GL.bindFramebuffer(GL_READ_FRAMEBUFFER, rf);
-    GL.framebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, snapTex, 0);
-    assert(GL.checkFramebufferStatus(GL_READ_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
+    GL.framebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                            GL_TEXTURE_2D, snapTex, 0);
+    assert(GL.checkFramebufferStatus(GL_READ_FRAMEBUFFER) ==
+           GL_FRAMEBUFFER_COMPLETE);
     GL.bindFramebuffer(GL_DRAW_FRAMEBUFFER, committedFBO_);
-    GL.blitFramebuffer(0, 0, w_, h_, 0, 0, w_, h_, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    GL.blitFramebuffer(0, 0, w_, h_, 0, 0, w_, h_, GL_COLOR_BUFFER_BIT,
+                       GL_NEAREST);
     GL.bindFramebuffer(GL_READ_FRAMEBUFFER, 0);
     GL.bindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
     GL.deleteFramebuffers(1, &rf);
@@ -1078,10 +1160,8 @@ private:
   // paintDabImpl uses quadVBO_ (dab geometry), which is always sized to
   // hold (kDabVerts+2)*2 floats — large enough for blitTexture too.
   // It never calls bufferData, only bufferSubData, so the size is stable.
-  void paintDabImpl(float cx, float cy,
-                    float r, float g, float b, float alpha,
-                    float radius,
-                    const float mvp[16]) {
+  void paintDabImpl(float cx, float cy, float r, float g, float b, float alpha,
+                    float radius, const float mvp[16]) {
     GL.useProgram(blitProg_);
     GL.uniformMatrix4fv(u_.mvp, 1, GL_FALSE, mvp);
     GL.uniform1i(u_.mode, 1);
@@ -1089,14 +1169,15 @@ private:
 
     float verts[(kDabVerts + 2) * 2];
     for (int i = 0; i < kDabVerts + 2; ++i) {
-      verts[i*2+0] = cx + dabVerts[i*2+0] * radius;
-      verts[i*2+1] = cy + dabVerts[i*2+1] * radius;
+      verts[i * 2 + 0] = cx + dabVerts[i * 2 + 0] * radius;
+      verts[i * 2 + 1] = cy + dabVerts[i * 2 + 1] * radius;
     }
     GL.bindVertexArray(quadVAO_);
     GL.bindBuffer(GL_ARRAY_BUFFER, quadVBO_);
     GL.bufferSubData(GL_ARRAY_BUFFER, 0, sizeof(verts), verts);
     GL.enableVertexAttribArray(0);
-    GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float)*2, nullptr);
+    GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 2,
+                           nullptr);
     GL.disableVertexAttribArray(1);
     glDrawArrays(GL_TRIANGLE_FAN, 0, kDabVerts + 2);
     GL.bindVertexArray(0);
@@ -1114,20 +1195,19 @@ private:
     GL.uniform1f(u_.alpha, alpha);
     glBindTexture(GL_TEXTURE_2D, tex);
     float q[] = {
-        0.f,       0.f,       0.f, 0.f,
-        float(w_), 0.f,       1.f, 0.f,
-        float(w_), float(h_), 1.f, 1.f,
-        float(w_), float(h_), 1.f, 1.f,
-        0.f,       float(h_), 0.f, 1.f,
-        0.f,       0.f,       0.f, 0.f,
+        0.f,       0.f,       0.f, 0.f, float(w_), 0.f,       1.f, 0.f,
+        float(w_), float(h_), 1.f, 1.f, float(w_), float(h_), 1.f, 1.f,
+        0.f,       float(h_), 0.f, 1.f, 0.f,       0.f,       0.f, 0.f,
     };
     GL.bindVertexArray(quadVAO_);
     GL.bindBuffer(GL_ARRAY_BUFFER, quadVBO_);
     GL.bufferSubData(GL_ARRAY_BUFFER, 0, sizeof(q), q);
     GL.enableVertexAttribArray(0);
-    GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float)*4, (void*)0);
+    GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 4,
+                           (void *)0);
     GL.enableVertexAttribArray(1);
-    GL.vertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(float)*4, (void*)(sizeof(float)*2));
+    GL.vertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 4,
+                           (void *)(sizeof(float) * 2));
     glDrawArrays(GL_TRIANGLES, 0, 6);
     GL.bindVertexArray(0);
     glBindTexture(GL_TEXTURE_2D, 0);
@@ -1157,9 +1237,9 @@ void main(){
 )GLSL";
     blitProg_ = glutil::linkProgram(vert, frag);
     assert(blitProg_);
-    u_.mvp   = GL.getUniformLocation(blitProg_, "uMVP");
-    u_.mode  = GL.getUniformLocation(blitProg_, "uMode");
-    u_.tex   = GL.getUniformLocation(blitProg_, "uTex");
+    u_.mvp = GL.getUniformLocation(blitProg_, "uMVP");
+    u_.mode = GL.getUniformLocation(blitProg_, "uMode");
+    u_.tex = GL.getUniformLocation(blitProg_, "uTex");
     u_.alpha = GL.getUniformLocation(blitProg_, "uAlpha");
     u_.color = GL.getUniformLocation(blitProg_, "uColor");
   }
@@ -1171,8 +1251,9 @@ void main(){
     //   Both use bufferSubData, so the buffer must be pre-sized to the max.
     //   shapeVBO_ is separate and uses bufferData, so no size constraint.
     constexpr GLsizeiptr kBlitBytes = sizeof(float) * 6 * 4;
-    constexpr GLsizeiptr kDabBytes  = sizeof(float) * (kDabVerts + 2) * 2;
-    constexpr GLsizeiptr kQuadBufSz = kBlitBytes > kDabBytes ? kBlitBytes : kDabBytes;
+    constexpr GLsizeiptr kDabBytes = sizeof(float) * (kDabVerts + 2) * 2;
+    constexpr GLsizeiptr kQuadBufSz =
+        kBlitBytes > kDabBytes ? kBlitBytes : kDabBytes;
 
     GL.genVertexArrays(1, &quadVAO_);
     GL.genBuffers(1, &quadVBO_);
@@ -1185,16 +1266,18 @@ void main(){
     // calls bufferData so the size is set fresh each call.
     GL.genBuffers(1, &shapeVBO_);
     GL.bindBuffer(GL_ARRAY_BUFFER, shapeVBO_);
-    GL.bufferData(GL_ARRAY_BUFFER, sizeof(float) * 2 * 12, nullptr, GL_DYNAMIC_DRAW);
+    GL.bufferData(GL_ARRAY_BUFFER, sizeof(float) * 2 * 12, nullptr,
+                  GL_DYNAMIC_DRAW);
     GL.bindBuffer(GL_ARRAY_BUFFER, 0);
   }
 
   void buildDabVerts() {
-    dabVerts[0] = 0.f; dabVerts[1] = 0.f;
+    dabVerts[0] = 0.f;
+    dabVerts[1] = 0.f;
     for (int i = 0; i <= kDabVerts; ++i) {
       float a = float(i) / kDabVerts * 6.2831853f;
-      dabVerts[2 + i*2 + 0] = cosf(a);
-      dabVerts[2 + i*2 + 1] = sinf(a);
+      dabVerts[2 + i * 2 + 0] = cosf(a);
+      dabVerts[2 + i * 2 + 1] = sinf(a);
     }
   }
 };
@@ -1217,8 +1300,7 @@ public:
     return ptr();
   }
 
-  template <typename T, typename... A>
-  std::shared_ptr<T> setSurface(A &&...a) {
+  template <typename T, typename... A> std::shared_ptr<T> setSurface(A &&...a) {
     auto s = std::make_shared<T>(std::forward<A>(a)...);
     pendingSurface_ = s;
     return s;
@@ -1226,17 +1308,19 @@ public:
 
   RenderSurface *getSurface() const { return activeSurface_.get(); }
   const Viewport &viewport() const { return vp_; }
-  Viewport       &viewport()       { return vp_; }
+  Viewport &viewport() { return vp_; }
 
   std::shared_ptr<CanvasWidget> setSize(int w, int h) {
-    width = w; height = h;
+    width = w;
+    height = h;
     autoWidth = autoHeight = false;
     markNeedsLayout();
     return ptr();
   }
 
   std::shared_ptr<CanvasWidget> setCanvasSize(int w, int h) {
-    canvasW_ = w; canvasH_ = h;
+    canvasW_ = w;
+    canvasH_ = h;
     if (frameHwnd_) {
       vp_.setCanvasSize(w, h);
       if (activeSurface_) {
@@ -1248,14 +1332,17 @@ public:
     return ptr();
   }
 
-  std::shared_ptr<CanvasWidget> redraw() { markNeedsPaint(); return ptr(); }
+  std::shared_ptr<CanvasWidget> redraw() {
+    markNeedsPaint();
+    return ptr();
+  }
 
   std::function<void(float zoom)> onViewportChanged;
 
   // ── Widget virtuals ───────────────────────────────────────────────────────
 
   void computeLayout(HDC, const BoxConstraints &c, FontCache &) override {
-    width  = c.clampWidth(autoWidth   ? c.maxWidth  : width);
+    width = c.clampWidth(autoWidth ? c.maxWidth : width);
     height = c.clampHeight(autoHeight ? c.maxHeight : height);
     needsLayout = false;
   }
@@ -1267,7 +1354,10 @@ public:
     needsPaint = false;
   }
 
-  void onDetach() override { destroyGL(); Widget::onDetach(); }
+  void onDetach() override {
+    destroyGL();
+    Widget::onDetach();
+  }
 
   void markNeedsPaint() override {
     Widget::markNeedsPaint();
@@ -1291,24 +1381,26 @@ private:
   using Clock = std::chrono::steady_clock;
   Clock::time_point lastTick_ = Clock::now();
 
-  HWND  frameHwnd_   = nullptr;
-  HWND  glHwnd_      = nullptr;
-  HDC   glDC_        = nullptr;
-  HGLRC glRC_        = nullptr;
-  HWND  parentHwnd_  = nullptr;
+  HWND frameHwnd_ = nullptr;
+  HWND glHwnd_ = nullptr;
+  HDC glDC_ = nullptr;
+  HGLRC glRC_ = nullptr;
+  HWND parentHwnd_ = nullptr;
 
-  bool repaintPending_  = false;
-  bool trackingLeave_   = false;
-  int  lastGLW_ = 0, lastGLH_ = 0;
+  bool repaintPending_ = false;
+  bool trackingLeave_ = false;
+  int lastGLW_ = 0, lastGLH_ = 0;
 
-  bool  panning_    = false;
-  int   panStartSX_ = 0, panStartSY_ = 0;
+  bool panning_ = false;
+  int panStartSX_ = 0, panStartSY_ = 0;
   float panStartOX_ = 0, panStartOY_ = 0;
 
   void beginPan(int sx, int sy) {
-    panning_    = true;
-    panStartSX_ = sx; panStartSY_ = sy;
-    panStartOX_ = vp_.offsetX(); panStartOY_ = vp_.offsetY();
+    panning_ = true;
+    panStartSX_ = sx;
+    panStartSY_ = sy;
+    panStartOX_ = vp_.offsetX();
+    panStartOY_ = vp_.offsetY();
   }
 
   void continuePan(int sx, int sy) {
@@ -1318,7 +1410,8 @@ private:
   }
 
   void scheduleRepaint() {
-    if (onViewportChanged) onViewportChanged(vp_.zoom());
+    if (onViewportChanged)
+      onViewportChanged(vp_.zoom());
     if (!repaintPending_) {
       repaintPending_ = true;
       PostMessage(glHwnd_, WM_USER + 1, 0, 0);
@@ -1330,51 +1423,65 @@ private:
   static int sbH() { return GetSystemMetrics(SM_CYHSCROLL); }
 
   void glChildSize(int fw, int fh, int &ow, int &oh) const {
-    if (!viewportEnabled_) { ow = fw; oh = fh; }
-    else {
+    if (!viewportEnabled_) {
+      ow = fw;
+      oh = fh;
+    } else {
       ScrollbarInfo h = vp_.scrollbarH(), v = vp_.scrollbarV();
       ow = fw - (v.visible ? sbW() : 0);
       oh = fh - (h.visible ? sbH() : 0);
     }
-    if (ow < 1) ow = 1;
-    if (oh < 1) oh = 1;
+    if (ow < 1)
+      ow = 1;
+    if (oh < 1)
+      oh = 1;
   }
 
   void syncScrollbars() {
-    if (!frameHwnd_ || !viewportEnabled_) return;
+    if (!frameHwnd_ || !viewportEnabled_)
+      return;
     ScrollbarInfo h = vp_.scrollbarH(), v = vp_.scrollbarV();
     ShowScrollBar(frameHwnd_, SB_HORZ, h.visible ? TRUE : FALSE);
     ShowScrollBar(frameHwnd_, SB_VERT, v.visible ? TRUE : FALSE);
     if (h.visible) {
-      SCROLLINFO si{}; si.cbSize = sizeof(si);
+      SCROLLINFO si{};
+      si.cbSize = sizeof(si);
       si.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
-      si.nMin = 0; si.nMax = kSBRange;
+      si.nMin = 0;
+      si.nMax = kSBRange;
       si.nPage = UINT((h.thumbMax - h.thumbMin) * kSBRange);
-      si.nPos  = int(h.thumbMin * kSBRange);
+      si.nPos = int(h.thumbMin * kSBRange);
       SetScrollInfo(frameHwnd_, SB_HORZ, &si, TRUE);
     }
     if (v.visible) {
-      SCROLLINFO si{}; si.cbSize = sizeof(si);
+      SCROLLINFO si{};
+      si.cbSize = sizeof(si);
       si.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
-      si.nMin = 0; si.nMax = kSBRange;
+      si.nMin = 0;
+      si.nMax = kSBRange;
       si.nPage = UINT((v.thumbMax - v.thumbMin) * kSBRange);
-      si.nPos  = int(v.thumbMin * kSBRange);
+      si.nPos = int(v.thumbMin * kSBRange);
       SetScrollInfo(frameHwnd_, SB_VERT, &si, TRUE);
     }
-    RECT rc; GetClientRect(frameHwnd_, &rc);
-    int gw, gh; glChildSize(rc.right, rc.bottom, gw, gh);
-    SetWindowPos(glHwnd_, nullptr, 0, 0, gw, gh, SWP_NOZORDER|SWP_NOACTIVATE|SWP_NOMOVE);
+    RECT rc;
+    GetClientRect(frameHwnd_, &rc);
+    int gw, gh;
+    glChildSize(rc.right, rc.bottom, gw, gh);
+    SetWindowPos(glHwnd_, nullptr, 0, 0, gw, gh,
+                 SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE);
   }
 
   void applyHScroll(int pos, int maxPos) {
-    if (maxPos <= 0) return;
+    if (maxPos <= 0)
+      return;
     float range = vp_.canvasW() - vp_.viewW() / vp_.zoom();
     vp_.setOffsetX(float(pos) / maxPos * max(0.f, range));
     scheduleRepaint();
   }
 
   void applyVScroll(int pos, int maxPos) {
-    if (maxPos <= 0) return;
+    if (maxPos <= 0)
+      return;
     float range = vp_.canvasH() - vp_.viewH() / vp_.zoom();
     float t = 1.f - float(pos) / maxPos;
     vp_.setOffsetY(t * max(0.f, range));
@@ -1387,40 +1494,72 @@ private:
     auto *self = reinterpret_cast<CanvasWidget *>(
         GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     switch (msg) {
-    case WM_ERASEBKGND: return 1;
-    case WM_PAINT: { PAINTSTRUCT ps; BeginPaint(hwnd,&ps); EndPaint(hwnd,&ps); return 0; }
+    case WM_ERASEBKGND:
+      return 1;
+    case WM_PAINT: {
+      PAINTSTRUCT ps;
+      BeginPaint(hwnd, &ps);
+      EndPaint(hwnd, &ps);
+      return 0;
+    }
     case WM_HSCROLL: {
-      if (!self) return 0;
-      SCROLLINFO si{}; si.cbSize=sizeof(si); si.fMask=SIF_ALL;
+      if (!self)
+        return 0;
+      SCROLLINFO si{};
+      si.cbSize = sizeof(si);
+      si.fMask = SIF_ALL;
       GetScrollInfo(hwnd, SB_HORZ, &si);
       int p = si.nPos;
-      switch(LOWORD(wp)){
-        case SB_LINELEFT:      p -= kSBRange/50; break;
-        case SB_LINERIGHT:     p += kSBRange/50; break;
-        case SB_PAGELEFT:      p -= si.nPage;    break;
-        case SB_PAGERIGHT:     p += si.nPage;    break;
-        case SB_THUMBTRACK:
-        case SB_THUMBPOSITION: p = si.nTrackPos; break;
+      switch (LOWORD(wp)) {
+      case SB_LINELEFT:
+        p -= kSBRange / 50;
+        break;
+      case SB_LINERIGHT:
+        p += kSBRange / 50;
+        break;
+      case SB_PAGELEFT:
+        p -= si.nPage;
+        break;
+      case SB_PAGERIGHT:
+        p += si.nPage;
+        break;
+      case SB_THUMBTRACK:
+      case SB_THUMBPOSITION:
+        p = si.nTrackPos;
+        break;
       }
-      p = std::clamp(p, si.nMin, si.nMax-(int)si.nPage);
-      self->applyHScroll(p, si.nMax-(int)si.nPage);
+      p = std::clamp(p, si.nMin, si.nMax - (int)si.nPage);
+      self->applyHScroll(p, si.nMax - (int)si.nPage);
       return 0;
     }
     case WM_VSCROLL: {
-      if (!self) return 0;
-      SCROLLINFO si{}; si.cbSize=sizeof(si); si.fMask=SIF_ALL;
+      if (!self)
+        return 0;
+      SCROLLINFO si{};
+      si.cbSize = sizeof(si);
+      si.fMask = SIF_ALL;
       GetScrollInfo(hwnd, SB_VERT, &si);
       int p = si.nPos;
-      switch(LOWORD(wp)){
-        case SB_LINEUP:        p -= kSBRange/50; break;
-        case SB_LINEDOWN:      p += kSBRange/50; break;
-        case SB_PAGEUP:        p -= si.nPage;    break;
-        case SB_PAGEDOWN:      p += si.nPage;    break;
-        case SB_THUMBTRACK:
-        case SB_THUMBPOSITION: p = si.nTrackPos; break;
+      switch (LOWORD(wp)) {
+      case SB_LINEUP:
+        p -= kSBRange / 50;
+        break;
+      case SB_LINEDOWN:
+        p += kSBRange / 50;
+        break;
+      case SB_PAGEUP:
+        p -= si.nPage;
+        break;
+      case SB_PAGEDOWN:
+        p += si.nPage;
+        break;
+      case SB_THUMBTRACK:
+      case SB_THUMBPOSITION:
+        p = si.nTrackPos;
+        break;
       }
-      p = std::clamp(p, si.nMin, si.nMax-(int)si.nPage);
-      self->applyVScroll(p, si.nMax-(int)si.nPage);
+      p = std::clamp(p, si.nMin, si.nMax - (int)si.nPage);
+      self->applyVScroll(p, si.nMax - (int)si.nPage);
       return 0;
     }
     case WM_MOUSEWHEEL:
@@ -1438,83 +1577,118 @@ private:
     auto *self = reinterpret_cast<CanvasWidget *>(
         GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     switch (msg) {
-    case WM_USER+1:
-      if (self) { self->repaintPending_ = false; self->tickAndRender(); }
+    case WM_USER + 1:
+      if (self) {
+        self->repaintPending_ = false;
+        self->tickAndRender();
+      }
       return 0;
-    case WM_ERASEBKGND: return 1;
-    case WM_PAINT: { PAINTSTRUCT ps; BeginPaint(hwnd,&ps); EndPaint(hwnd,&ps); return 0; }
+    case WM_ERASEBKGND:
+      return 1;
+    case WM_PAINT: {
+      PAINTSTRUCT ps;
+      BeginPaint(hwnd, &ps);
+      EndPaint(hwnd, &ps);
+      return 0;
+    }
 
     case WM_MBUTTONDOWN:
-      if (!self || !self->viewportEnabled_) return 0;
-      SetCapture(hwnd); self->beginPan(GET_X_LPARAM(lp), GET_Y_LPARAM(lp)); return 0;
+      if (!self || !self->viewportEnabled_)
+        return 0;
+      SetCapture(hwnd);
+      self->beginPan(GET_X_LPARAM(lp), GET_Y_LPARAM(lp));
+      return 0;
     case WM_MBUTTONUP:
-      if (!self || !self->viewportEnabled_) return 0;
-      ReleaseCapture(); self->panning_ = false; return 0;
+      if (!self || !self->viewportEnabled_)
+        return 0;
+      ReleaseCapture();
+      self->panning_ = false;
+      return 0;
 
     case WM_LBUTTONDOWN: {
       SetCapture(hwnd);
-      if (!self) return 0;
+      if (!self)
+        return 0;
       if (self->viewportEnabled_ && (GetKeyState(VK_SPACE) & 0x8000)) {
         self->beginPan(GET_X_LPARAM(lp), GET_Y_LPARAM(lp));
       } else if (self->activeSurface_) {
-        auto [cx,cy] = self->vp_.screenToCanvas(float(GET_X_LPARAM(lp)), float(GET_Y_LPARAM(lp)));
+        auto [cx, cy] = self->vp_.screenToCanvas(float(GET_X_LPARAM(lp)),
+                                                 float(GET_Y_LPARAM(lp)));
         self->activeSurface_->onMouseDown(cx, cy);
       }
-      forwardToParent(hwnd, msg, wp, lp); return 0;
+      forwardToParent(hwnd, msg, wp, lp);
+      return 0;
     }
     case WM_LBUTTONUP: {
       ReleaseCapture();
-      if (!self) return 0;
-      if (self->panning_) { self->panning_ = false; }
-      else if (self->activeSurface_) {
-        auto [cx,cy] = self->vp_.screenToCanvas(float(GET_X_LPARAM(lp)), float(GET_Y_LPARAM(lp)));
+      if (!self)
+        return 0;
+      if (self->panning_) {
+        self->panning_ = false;
+      } else if (self->activeSurface_) {
+        auto [cx, cy] = self->vp_.screenToCanvas(float(GET_X_LPARAM(lp)),
+                                                 float(GET_Y_LPARAM(lp)));
         self->activeSurface_->onMouseUp(cx, cy);
       }
-      forwardToParent(hwnd, msg, wp, lp); return 0;
+      forwardToParent(hwnd, msg, wp, lp);
+      return 0;
     }
     case WM_RBUTTONDOWN: {
       SetCapture(hwnd);
       if (self && self->activeSurface_) {
-        auto [cx,cy] = self->vp_.screenToCanvas(float(GET_X_LPARAM(lp)), float(GET_Y_LPARAM(lp)));
-        self->activeSurface_->onMouseDown(cx, cy);
+        auto [cx, cy] = self->vp_.screenToCanvas(float(GET_X_LPARAM(lp)),
+                                                 float(GET_Y_LPARAM(lp)));
+        self->activeSurface_->onRightMouseDown(cx, cy);
       }
-      forwardToParent(hwnd, msg, wp, lp); return 0;
+      forwardToParent(hwnd, msg, wp, lp);
+      return 0;
     }
     case WM_RBUTTONUP: {
       ReleaseCapture();
       if (self && self->activeSurface_) {
-        auto [cx,cy] = self->vp_.screenToCanvas(float(GET_X_LPARAM(lp)), float(GET_Y_LPARAM(lp)));
+        auto [cx, cy] = self->vp_.screenToCanvas(float(GET_X_LPARAM(lp)),
+                                                 float(GET_Y_LPARAM(lp)));
         self->activeSurface_->onMouseUp(cx, cy);
       }
-      forwardToParent(hwnd, msg, wp, lp); return 0;
+      forwardToParent(hwnd, msg, wp, lp);
+      return 0;
     }
     case WM_MOUSEMOVE: {
-      if (!self) return 0;
+      if (!self)
+        return 0;
       int sx = GET_X_LPARAM(lp), sy = GET_Y_LPARAM(lp);
       if (!self->trackingLeave_) {
-        TRACKMOUSEEVENT tme{}; tme.cbSize=sizeof(tme);
-        tme.dwFlags=TME_LEAVE; tme.hwndTrack=hwnd;
-        TrackMouseEvent(&tme); self->trackingLeave_ = true;
+        TRACKMOUSEEVENT tme{};
+        tme.cbSize = sizeof(tme);
+        tme.dwFlags = TME_LEAVE;
+        tme.hwndTrack = hwnd;
+        TrackMouseEvent(&tme);
+        self->trackingLeave_ = true;
       }
-      if (self->panning_) { self->continuePan(sx, sy); }
-      else if (self->activeSurface_) {
-        auto [cx,cy] = self->vp_.screenToCanvas(float(sx), float(sy));
+      if (self->panning_) {
+        self->continuePan(sx, sy);
+      } else if (self->activeSurface_) {
+        auto [cx, cy] = self->vp_.screenToCanvas(float(sx), float(sy));
         self->activeSurface_->onMouseMove(cx, cy);
       }
-      forwardToParent(hwnd, msg, wp, lp); return 0;
+      forwardToParent(hwnd, msg, wp, lp);
+      return 0;
     }
     case WM_MOUSELEAVE:
-      if (self) self->trackingLeave_ = false; return 0;
+      if (self)
+        self->trackingLeave_ = false;
+      return 0;
 
     case WM_MOUSEWHEEL: {
-      if (!self || !self->viewportEnabled_) return 0;
-      int   delta = GET_WHEEL_DELTA_WPARAM(wp);
-      bool  ctrl  = (GET_KEYSTATE_WPARAM(wp) & MK_CONTROL) != 0;
-      bool  shift = (GET_KEYSTATE_WPARAM(wp) & MK_SHIFT)   != 0;
-      POINT pt    = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+      if (!self || !self->viewportEnabled_)
+        return 0;
+      int delta = GET_WHEEL_DELTA_WPARAM(wp);
+      bool ctrl = (GET_KEYSTATE_WPARAM(wp) & MK_CONTROL) != 0;
+      bool shift = (GET_KEYSTATE_WPARAM(wp) & MK_SHIFT) != 0;
+      POINT pt = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
       ScreenToClient(hwnd, &pt);
       if (ctrl) {
-        float f = (delta > 0) ? 1.1f : 1.f/1.1f;
+        float f = (delta > 0) ? 1.1f : 1.f / 1.1f;
         self->vp_.zoomToward(float(pt.x), float(pt.y), f);
       } else if (shift) {
         self->vp_.panByScreen(float(delta) * .5f, 0.f);
@@ -1523,23 +1697,36 @@ private:
         self->vp_.panByScreen(0.f, -steps * 40.f);
       }
       self->scheduleRepaint();
-      forwardToParent(hwnd, msg, wp, lp); return 0;
+      forwardToParent(hwnd, msg, wp, lp);
+      return 0;
     }
     case WM_KEYDOWN: {
-      if (!self) return 0;
+      if (!self)
+        return 0;
       bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
       bool consumed = false;
       if (ctrl && self->viewportEnabled_) {
-        if (wp == VK_OEM_PLUS || wp == VK_ADD)    { self->vp_.zoomIn();    self->scheduleRepaint(); consumed=true; }
-        else if (wp == VK_OEM_MINUS || wp == VK_SUBTRACT) { self->vp_.zoomOut(); self->scheduleRepaint(); consumed=true; }
-        else if (wp == '0')                        { self->vp_.resetZoom(); self->scheduleRepaint(); consumed=true; }
+        if (wp == VK_OEM_PLUS || wp == VK_ADD) {
+          self->vp_.zoomIn();
+          self->scheduleRepaint();
+          consumed = true;
+        } else if (wp == VK_OEM_MINUS || wp == VK_SUBTRACT) {
+          self->vp_.zoomOut();
+          self->scheduleRepaint();
+          consumed = true;
+        } else if (wp == '0') {
+          self->vp_.resetZoom();
+          self->scheduleRepaint();
+          consumed = true;
+        }
       }
       if (!consumed && self->activeSurface_)
         self->activeSurface_->onKeyDown(int(wp));
       return 0;
     }
     case WM_KEYUP:
-      if (self && self->activeSurface_) self->activeSurface_->onKeyUp(int(wp));
+      if (self && self->activeSurface_)
+        self->activeSurface_->onKeyUp(int(wp));
       return 0;
     default:
       return DefWindowProc(hwnd, msg, wp, lp);
@@ -1547,9 +1734,10 @@ private:
   }
 
   static void forwardToParent(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
-    HWND frame  = GetParent(hwnd);
+    HWND frame = GetParent(hwnd);
     HWND parent = frame ? GetParent(frame) : nullptr;
-    if (!parent) return;
+    if (!parent)
+      return;
     POINT pt = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
     MapWindowPoints(hwnd, parent, &pt, 1);
     PostMessage(parent, msg, wp, MAKELPARAM(pt.x, pt.y));
@@ -1557,38 +1745,51 @@ private:
 
   static void registerClasses() {
     static bool done = false;
-    if (done) return;
+    if (done)
+      return;
     HINSTANCE hi = GetModuleHandle(nullptr);
-    WNDCLASSEXW wf{}; wf.cbSize=sizeof(wf); wf.lpfnWndProc=FrameProc;
-    wf.hInstance=hi; wf.lpszClassName=L"FluxGLFrame6"; wf.style=CS_HREDRAW|CS_VREDRAW;
-    
+    WNDCLASSEXW wf{};
+    wf.cbSize = sizeof(wf);
+    wf.lpfnWndProc = FrameProc;
+    wf.hInstance = hi;
+    wf.lpszClassName = L"FluxGLFrame6";
+    wf.style = CS_HREDRAW | CS_VREDRAW;
+
     RegisterClassExW(&wf);
-    WNDCLASSEXW wg{}; wg.cbSize=sizeof(wg); wg.lpfnWndProc=GLProc;
-    wg.hInstance=hi; wg.lpszClassName=L"FluxGLCanvas6"; wg.style=CS_OWNDC|CS_HREDRAW|CS_VREDRAW;
+    WNDCLASSEXW wg{};
+    wg.cbSize = sizeof(wg);
+    wg.lpfnWndProc = GLProc;
+    wg.hInstance = hi;
+    wg.lpszClassName = L"FluxGLCanvas6";
+    wg.style = CS_OWNDC | CS_HREDRAW | CS_VREDRAW;
     RegisterClassExW(&wg);
     done = true;
   }
 
   void ensureWindows(HDC parentDC) {
-    if (frameHwnd_) return;
+    if (frameHwnd_)
+      return;
     HWND owner = WindowFromDC(parentDC);
-    if (!owner) owner = GetActiveWindow();
+    if (!owner)
+      owner = GetActiveWindow();
     parentHwnd_ = owner;
     registerClasses();
 
-    const DWORD sbStyles = viewportEnabled_ ? (WS_HSCROLL|WS_VSCROLL) : 0;
+    const DWORD sbStyles = viewportEnabled_ ? (WS_HSCROLL | WS_VSCROLL) : 0;
     frameHwnd_ = CreateWindowExW(
         WS_EX_NOPARENTNOTIFY, L"FluxGLFrame6", nullptr,
-        WS_CHILD|WS_VISIBLE|WS_CLIPSIBLINGS|WS_CLIPCHILDREN|sbStyles,
-        x, y, width, height, owner, nullptr, GetModuleHandle(nullptr), nullptr);
+        WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | sbStyles, x,
+        y, width, height, owner, nullptr, GetModuleHandle(nullptr), nullptr);
     assert(frameHwnd_);
-    SetWindowLongPtrW(frameHwnd_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
+    SetWindowLongPtrW(frameHwnd_, GWLP_USERDATA,
+                      reinterpret_cast<LONG_PTR>(this));
 
-    int gw, gh; glChildSize(width, height, gw, gh);
+    int gw, gh;
+    glChildSize(width, height, gw, gh);
     glHwnd_ = CreateWindowExW(
         WS_EX_NOPARENTNOTIFY, L"FluxGLCanvas6", nullptr,
-        WS_CHILD|WS_VISIBLE|WS_CLIPSIBLINGS|WS_CLIPCHILDREN,
-        0, 0, gw, gh, frameHwnd_, nullptr, GetModuleHandle(nullptr), nullptr);
+        WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN, 0, 0, gw, gh,
+        frameHwnd_, nullptr, GetModuleHandle(nullptr), nullptr);
     assert(glHwnd_);
     SetWindowLongPtrW(glHwnd_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
 
@@ -1599,36 +1800,53 @@ private:
     auto wglCA = reinterpret_cast<PFNWGLCREATECONTEXTATTRIBSARBPROC>(
         wglGetProcAddress("wglCreateContextAttribsARB"));
     if (wglCA) {
-      const int att[] = {
-          WGL_CONTEXT_MAJOR_VERSION_ARB, 3,
-          WGL_CONTEXT_MINOR_VERSION_ARB, 3,
-          WGL_CONTEXT_PROFILE_MASK_ARB,  WGL_CONTEXT_CORE_PROFILE_BIT_ARB, 0};
+      const int att[] = {WGL_CONTEXT_MAJOR_VERSION_ARB,
+                         3,
+                         WGL_CONTEXT_MINOR_VERSION_ARB,
+                         3,
+                         WGL_CONTEXT_PROFILE_MASK_ARB,
+                         WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
+                         0};
       HGLRC core = wglCA(glDC_, nullptr, att);
-      if (core) { wglMakeCurrent(nullptr,nullptr); wglDeleteContext(tmp); glRC_=core; }
-      else glRC_ = tmp;
-    } else glRC_ = tmp;
+      if (core) {
+        wglMakeCurrent(nullptr, nullptr);
+        wglDeleteContext(tmp);
+        glRC_ = core;
+      } else
+        glRC_ = tmp;
+    } else
+      glRC_ = tmp;
     wglMakeCurrent(glDC_, glRC_);
     GL.init();
 
     vp_.init(gw, gh, canvasW_, canvasH_);
-    lastGLW_ = gw; lastGLH_ = gh;
+    lastGLW_ = gw;
+    lastGLH_ = gh;
     activatePendingSurface();
     lastTick_ = Clock::now();
-    if (onViewportChanged) onViewportChanged(vp_.zoom());
+    if (onViewportChanged)
+      onViewportChanged(vp_.zoom());
   }
 
   void setupPixelFormat(HDC dc) {
     PIXELFORMATDESCRIPTOR pfd{};
-    pfd.nSize=sizeof(pfd); pfd.nVersion=1;
-    pfd.dwFlags=PFD_DRAW_TO_WINDOW|PFD_SUPPORT_OPENGL|PFD_DOUBLEBUFFER;
-    pfd.iPixelType=PFD_TYPE_RGBA; pfd.cColorBits=32; pfd.cDepthBits=24;
-    pfd.iLayerType=PFD_MAIN_PLANE;
+    pfd.nSize = sizeof(pfd);
+    pfd.nVersion = 1;
+    pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
+    pfd.iPixelType = PFD_TYPE_RGBA;
+    pfd.cColorBits = 32;
+    pfd.cDepthBits = 24;
+    pfd.iLayerType = PFD_MAIN_PLANE;
     SetPixelFormat(dc, ChoosePixelFormat(dc, &pfd), &pfd);
   }
 
   void activatePendingSurface() {
-    if (!pendingSurface_) return;
-    if (activeSurface_) { activeSurface_->destroy(); activeSurface_.reset(); }
+    if (!pendingSurface_)
+      return;
+    if (activeSurface_) {
+      activeSurface_->destroy();
+      activeSurface_.reset();
+    }
     activeSurface_ = pendingSurface_;
     pendingSurface_.reset();
     activeSurface_->initialize(canvasW_, canvasH_);
@@ -1636,52 +1854,78 @@ private:
   }
 
   void tickAndRender() {
-    if (!glRC_ || !glDC_) return;
-    if (pendingSurface_) activatePendingSurface();
-    if (!activeSurface_) return;
-    if (wglGetCurrentContext() != glRC_) wglMakeCurrent(glDC_, glRC_);
+    if (!glRC_ || !glDC_)
+      return;
+    if (pendingSurface_)
+      activatePendingSurface();
+    if (!activeSurface_)
+      return;
+    if (wglGetCurrentContext() != glRC_)
+      wglMakeCurrent(glDC_, glRC_);
 
     auto now = Clock::now();
     double dt = std::chrono::duration<double>(now - lastTick_).count();
     lastTick_ = now;
 
     activeSurface_->update(dt);
-    RECT rc; GetClientRect(glHwnd_, &rc);
-    int glW = rc.right  < 1 ? 1 : rc.right;
+    RECT rc;
+    GetClientRect(glHwnd_, &rc);
+    int glW = rc.right < 1 ? 1 : rc.right;
     int glH = rc.bottom < 1 ? 1 : rc.bottom;
     glViewport(0, 0, glW, glH);
 
-    float mvp[16]; vp_.buildMVP(mvp);
+    float mvp[16];
+    vp_.buildMVP(mvp);
     activeSurface_->render(mvp);
     SwapBuffers(glDC_);
     syncScrollbars();
   }
 
   void moveWindows() {
-    if (!frameHwnd_) return;
-    SetWindowPos(frameHwnd_, nullptr, x, y, width, height, SWP_NOZORDER|SWP_NOACTIVATE);
-    RECT rc; GetClientRect(frameHwnd_, &rc);
-    int gw, gh; glChildSize(rc.right, rc.bottom, gw, gh);
-    SetWindowPos(glHwnd_, nullptr, 0, 0, gw, gh, SWP_NOZORDER|SWP_NOACTIVATE|SWP_NOMOVE);
+    if (!frameHwnd_)
+      return;
+    SetWindowPos(frameHwnd_, nullptr, x, y, width, height,
+                 SWP_NOZORDER | SWP_NOACTIVATE);
+    RECT rc;
+    GetClientRect(frameHwnd_, &rc);
+    int gw, gh;
+    glChildSize(rc.right, rc.bottom, gw, gh);
+    SetWindowPos(glHwnd_, nullptr, 0, 0, gw, gh,
+                 SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE);
     if (gw != lastGLW_ || gh != lastGLH_) {
-      if (wglGetCurrentContext() != glRC_) wglMakeCurrent(glDC_, glRC_);
+      if (wglGetCurrentContext() != glRC_)
+        wglMakeCurrent(glDC_, glRC_);
       vp_.setViewSize(gw, gh);
       glViewport(0, 0, gw, gh);
-      lastGLW_ = gw; lastGLH_ = gh;
+      lastGLW_ = gw;
+      lastGLH_ = gh;
     }
   }
 
   void destroyGL() {
     if (glRC_) {
       wglMakeCurrent(glDC_, glRC_);
-      if (activeSurface_) { activeSurface_->destroy(); activeSurface_.reset(); }
+      if (activeSurface_) {
+        activeSurface_->destroy();
+        activeSurface_.reset();
+      }
       pendingSurface_.reset();
       wglMakeCurrent(nullptr, nullptr);
-      wglDeleteContext(glRC_); glRC_ = nullptr;
+      wglDeleteContext(glRC_);
+      glRC_ = nullptr;
     }
-    if (glHwnd_ && glDC_) { ReleaseDC(glHwnd_, glDC_); glDC_ = nullptr; }
-    if (glHwnd_)   { DestroyWindow(glHwnd_);   glHwnd_   = nullptr; }
-    if (frameHwnd_){ DestroyWindow(frameHwnd_); frameHwnd_ = nullptr; }
+    if (glHwnd_ && glDC_) {
+      ReleaseDC(glHwnd_, glDC_);
+      glDC_ = nullptr;
+    }
+    if (glHwnd_) {
+      DestroyWindow(glHwnd_);
+      glHwnd_ = nullptr;
+    }
+    if (frameHwnd_) {
+      DestroyWindow(frameHwnd_);
+      frameHwnd_ = nullptr;
+    }
   }
 };
 
