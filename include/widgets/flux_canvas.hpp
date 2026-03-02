@@ -23,7 +23,7 @@
 //   • savePNG(path) via GDI+.
 //   • Color history ring.
 //
-// Step 4  (this revision)
+// Step 4  (previous)
 // ───────────────────────
 //   BUG FIX: drawVertsToFBO used glBufferData (realloc) which could shrink
 //   the shared quadVBO_ to fewer bytes than blitTexture's quad requires.
@@ -36,6 +36,40 @@
 //   callers.  The VAO only stores the attrib format; actual data is uploaded
 //   fresh every draw call, so this is safe and has negligible overhead.
 //
+// Step 5  (this revision)
+// ───────────────────────
+//   TEXT RENDERING PRIMITIVES added to RasterSurface:
+//
+//   • TextStyle struct (§5) — font face, size, color (0–1 floats), bold,
+//     italic, underline.
+//
+//   • rasterizeTextGDI()  [private]
+//     Single GDI offscreen DIB rasterizer shared by both public helpers.
+//     Converts GL canvas-space Y-up coords to GDI top-down, renders with
+//     ClearType into a full-canvas DIB, extracts a tight RGBA bounding box,
+//     and returns the pixel data plus the bounding rect.  White pixels
+//     (all channels >= 250) are made transparent so text composites cleanly
+//     over painted strokes.
+//
+//   • renderTextToScratch()  [protected]
+//     Calls rasterizeTextGDI and uploads the result to the scratch texture
+//     via glTexSubImage2D.  Flips rows for GL Y-up.  Caller manages
+//     scratchClear() timing.  showCursor=true appends a '|' caret for live
+//     preview — this is the only cursor concern inside flux_canvas; blink
+//     timing remains the subclass's responsibility.
+//
+//   • commitTextToCanvas()  [protected]
+//     Pushes an undo snapshot, then calls rasterizeTextGDI (no cursor),
+//     reads the committed buffer, CPU-composites text pixels over it with
+//     SRC_OVER blending, and uploads the result back.  No GL FBO ops are
+//     needed for the composite — the read-modify-write is done in RAM to
+//     avoid any blend-state entanglement.
+//
+//   • gdiplusToken_  [private member]
+//     GDI+ lifetime now owned by RasterSurface.  initialize() starts it,
+//     destroy() shuts it down.  Subclasses must NOT call GdiplusStartup /
+//     GdiplusShutdown themselves.
+//
 // ============================================================================
 
 #include "flux_widget.hpp"
@@ -45,7 +79,7 @@
 #include <windows.h>
 #include <windowsx.h>
 
-// GDI+ for PNG save
+// GDI+ for PNG save + text rasterization
 #include <gdiplus.h>
 #pragma comment(lib, "gdiplus.lib")
 
@@ -401,7 +435,7 @@ inline RGBA parseHexColor(const std::string &css) {
 }
 
 // ============================================================================
-// §5  STROKE DATA TYPES
+// §5  STROKE + TEXT DATA TYPES
 // ============================================================================
 
 using ToolId = int;
@@ -421,6 +455,25 @@ struct StrokeStyle {
 struct Stroke {
   StrokeStyle style;
   std::vector<StrokePoint> points;
+};
+
+// ── TextStyle ────────────────────────────────────────────────────────────────
+// Describes how text should be rendered by RasterSurface::renderTextToScratch
+// and RasterSurface::commitTextToCanvas.
+//
+// Color channels (r, g, b) are in 0–1 float range, matching StrokeStyle.
+// fontSize is in canvas pixels (not points — no DPI scaling applied here;
+// the caller should account for canvas-vs-screen resolution if needed).
+//
+// fontFace must be a font family name recognised by GDI on the host machine.
+// Falls back to "Arial" silently if the face is not found.
+struct TextStyle {
+  std::wstring fontFace = L"Arial";
+  int fontSize = 20;         // canvas pixels
+  float r = 0, g = 0, b = 0; // text color, 0–1
+  bool bold = false;
+  bool italic = false;
+  bool underline = false;
 };
 
 // ============================================================================
@@ -595,6 +648,7 @@ public:
   virtual void onKeyDown(int key) {}
   virtual void onKeyUp(int key) {}
   virtual void onRightMouseDown(float x, float y) {}
+  virtual bool needsContinuousRedraw() const { return false; }
   virtual void destroy() = 0;
 };
 
@@ -732,6 +786,13 @@ public:
   void initialize(int w, int h) override {
     w_ = w;
     h_ = h;
+
+    // Own the GDI+ lifetime so subclasses never need to touch it.
+    if (!gdiplusToken_) {
+      Gdiplus::GdiplusStartupInput gsi;
+      Gdiplus::GdiplusStartup(&gdiplusToken_, &gsi, nullptr);
+    }
+
     buildShaders();
     buildQuadVAO();
     buildDabVerts();
@@ -836,6 +897,11 @@ public:
     }
     flushDeque(undoStack_, undoBytes_);
     flushDeque(redoStack_, redoBytes_);
+
+    if (gdiplusToken_) {
+      Gdiplus::GdiplusShutdown(gdiplusToken_);
+      gdiplusToken_ = 0;
+    }
   }
 
 protected:
@@ -868,9 +934,6 @@ protected:
 
   void getCanvasOrtho(float out[16]) const { canvasOrtho(out); }
 
-  // ── FIX: drawVertsToFBO now uses a dedicated shapeVBO_ so it never
-  //         touches the quadVBO_ that blitTexture depends on.
-  //         This eliminates the VBO size corruption that wiped the canvas.
   void drawVertsToFBO(GLuint fbo, const float *verts, int count, GLenum mode,
                       float r, float g, float b, float a) {
     float mvp[16];
@@ -884,19 +947,14 @@ protected:
     GL.uniform1i(u_.mode, 1);
     GL.uniform4f(u_.color, r, g, b, a);
 
-    // Use the dedicated shape VBO — never touches quadVBO_
     GLsizeiptr needed = GLsizeiptr(sizeof(float)) * 2 * count;
     GL.bindBuffer(GL_ARRAY_BUFFER, shapeVBO_);
     GL.bufferData(GL_ARRAY_BUFFER, needed, verts, GL_DYNAMIC_DRAW);
 
-    // Bind a minimal VAO state inline (no persistent VAO format needed
-    // since we always set attrib pointers before drawing)
     GL.bindVertexArray(quadVAO_);
     GL.enableVertexAttribArray(0);
     GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 2,
                            nullptr);
-    // Disable attrib 1 so the blit shader's UV input reads (0,0) if it ever
-    // runs in this path (it won't — mode==1 skips the texture sample).
     GL.disableVertexAttribArray(1);
 
     glDrawArrays(mode, 0, count);
@@ -921,6 +979,136 @@ protected:
     GL.bindFramebuffer(GL_READ_FRAMEBUFFER, 0);
   }
 
+  // ── Text rendering primitives ─────────────────────────────────────────────
+  //
+  // Coordinate convention for both functions:
+  //   canvasX, canvasY  — GL canvas space (Y-up, origin at bottom-left).
+  //   This maps directly from Viewport::screenToCanvas() so callers never
+  //   need to flip anything themselves.
+  //
+  // The internal GDI DIB is top-down, so the Y-flip is:
+  //   gdiY = h_ - (int)canvasY - style.fontSize
+  // The resulting pixel rows are flipped back before glTexSubImage2D so the
+  // upload lands in the correct GL Y-up position.
+
+  // renderTextToScratch ───────────────────────────────────────────────────────
+  // Rasterizes `text` into the scratch texture at (canvasX, canvasY).
+  // If showCursor is true a '|' caret is appended — use this during live
+  // preview.  The caller controls scratchClear() timing; this function only
+  // writes the tight bounding box, it does not clear the rest of scratch.
+  // Call scratchClear() before calling this if you want a clean preview.
+  void renderTextToScratch(const std::wstring &text, float canvasX,
+                           float canvasY, const TextStyle &style,
+                           bool showCursor = false) {
+    if (w_ <= 0 || h_ <= 0)
+      return;
+
+    int bx, by, bw, bh;
+    std::wstring display = showCursor ? text + L'|' : text;
+    std::vector<uint8_t> rgba =
+        rasterizeTextGDI(display, canvasX, canvasY, style, bx, by, bw, bh);
+    if (rgba.empty())
+      return;
+
+    // rasterizeTextGDI returns rows in GL Y-up order already (bottom row
+    // first). The bounding rect (bx, by) is also in GL canvas space. Clamp to
+    // canvas bounds before upload.
+    int uploadX = max(0, bx);
+    int uploadY = max(0, by);
+    int cropLeft = uploadX - bx;   // columns to skip from the left
+    int cropBottom = uploadY - by; // rows to skip from the bottom
+    int uploadW = min(bw - cropLeft, w_ - uploadX);
+    int uploadH = min(bh - cropBottom, h_ - uploadY);
+    if (uploadW <= 0 || uploadH <= 0)
+      return;
+
+    // Build a contiguous sub-buffer if we had to crop, otherwise use as-is.
+    const uint8_t *src = rgba.data();
+    std::vector<uint8_t> cropped;
+    if (cropLeft > 0 || cropBottom > 0) {
+      cropped.resize(size_t(uploadW) * uploadH * 4);
+      for (int row = 0; row < uploadH; ++row) {
+        memcpy(cropped.data() + row * uploadW * 4,
+               src + (size_t(cropBottom + row) * bw + cropLeft) * 4,
+               size_t(uploadW) * 4);
+      }
+      src = cropped.data();
+    }
+
+    glBindTexture(GL_TEXTURE_2D, scratchTex_);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, uploadX, uploadY, uploadW, uploadH,
+                    GL_RGBA, GL_UNSIGNED_BYTE, src);
+    glBindTexture(GL_TEXTURE_2D, 0);
+  }
+
+  // commitTextToCanvas ────────────────────────────────────────────────────────
+  // Pushes an undo snapshot, then permanently composites `text` onto the
+  // committed FBO at (canvasX, canvasY) using CPU SRC_OVER blending.
+  // Transparent (background-white) pixels in the rasterized text are skipped
+  // so existing strokes underneath are not overwritten.
+  // After this call the caller should scratchClear() to remove any preview.
+  void commitTextToCanvas(const std::wstring &text, float canvasX,
+                          float canvasY, const TextStyle &style) {
+    if (text.empty() || w_ <= 0 || h_ <= 0)
+      return;
+
+    int bx, by, bw, bh;
+    std::vector<uint8_t> rgba =
+        rasterizeTextGDI(text, canvasX, canvasY, style, bx, by, bw, bh);
+    if (rgba.empty())
+      return;
+
+    // Clamp bounding rect to canvas.
+    int dstX = max(0, bx);
+    int dstY = max(0, by);
+    int srcOffX = dstX - bx;
+    int srcOffY = dstY - by;
+    int dstW = min(bw - srcOffX, w_ - dstX);
+    int dstH = min(bh - srcOffY, h_ - dstY);
+    if (dstW <= 0 || dstH <= 0)
+      return;
+
+    // Push undo before modifying committed.
+    pushUndoSnapshot();
+
+    // Read back the committed buffer (GL Y-up, bottom row first).
+    std::vector<uint8_t> committed(size_t(w_) * h_ * 4);
+    readCommitted(committed.data());
+
+    // SRC_OVER composite: text pixels over committed pixels.
+    // rgba rows are in GL Y-up order (bottom row at index 0).
+    for (int row = 0; row < dstH; ++row) {
+      for (int col = 0; col < dstW; ++col) {
+        const uint8_t *s =
+            rgba.data() + ((size_t(srcOffY + row) * bw) + srcOffX + col) * 4;
+        uint8_t *d =
+            committed.data() + ((size_t(dstY + row) * w_) + dstX + col) * 4;
+        float sa = s[3] / 255.f;
+        if (sa <= 0.f)
+          continue; // fully transparent → skip
+
+        if (sa >= 1.f) { // fully opaque → overwrite
+          d[0] = s[0];
+          d[1] = s[1];
+          d[2] = s[2];
+          d[3] = 255;
+        } else { // partial → SRC_OVER
+          float da = d[3] / 255.f;
+          float oa = sa + da * (1.f - sa);
+          if (oa > 0.f) {
+            d[0] = (uint8_t)((s[0] * sa + d[0] * da * (1.f - sa)) / oa);
+            d[1] = (uint8_t)((s[1] * sa + d[1] * da * (1.f - sa)) / oa);
+            d[2] = (uint8_t)((s[2] * sa + d[2] * da * (1.f - sa)) / oa);
+            d[3] = (uint8_t)(oa * 255.f);
+          }
+        }
+      }
+    }
+
+    uploadToCommitted(committed.data());
+    dirty_ = true;
+  }
+
 private:
   int w_ = 0, h_ = 0;
   bool drawing_ = false, dirty_ = false;
@@ -931,7 +1119,11 @@ private:
   GLuint committedFBO_ = 0, committedTex_ = 0;
   GLuint scratchFBO_ = 0, scratchTex_ = 0;
   GLuint blitProg_ = 0, quadVAO_ = 0, quadVBO_ = 0;
-  GLuint shapeVBO_ = 0; // ── FIX: dedicated VBO for drawVertsToFBO
+  GLuint shapeVBO_ = 0;
+
+  // GDI+ lifetime — initialised in initialize(), released in destroy().
+  // Zero means not yet started.
+  ULONG_PTR gdiplusToken_ = 0;
 
   struct ULocs {
     GLint mvp = -1, mode = -1, tex = -1, alpha = -1, color = -1;
@@ -968,6 +1160,164 @@ private:
       glDeleteTextures(1, &s.tex);
     dq.clear();
     cnt = 0;
+  }
+
+  // ── rasterizeTextGDI ───────────────────────────────────────────────────────
+  // Core GDI text rasterizer shared by renderTextToScratch and
+  // commitTextToCanvas.
+  //
+  // Renders `text` into a full-canvas top-down 32-bit DIB using ClearType,
+  // then extracts a tight RGBA bounding box around the rendered glyphs.
+  // Background pixels (all RGB channels >= 250) get alpha=0 so they composite
+  // transparently; all other pixels get alpha=255.
+  //
+  // Output rows are flipped to GL Y-up order (bottom row first) before return.
+  // outX, outY are the bounding rect origin in GL canvas space (Y-up).
+  // outW, outH are the bounding rect dimensions.
+  //
+  // Returns an empty vector if text is empty or canvas size is zero.
+  //
+  // Coordinate mapping:
+  //   canvasX  → gdiX  (same, X-axis is identical)
+  //   canvasY  → gdiY = h_ - (int)canvasY - style.fontSize
+  //              (flip Y-up to top-down; place baseline at canvasY)
+  std::vector<uint8_t> rasterizeTextGDI(const std::wstring &text, float canvasX,
+                                        float canvasY, const TextStyle &style,
+                                        int &outX, int &outY, int &outW,
+                                        int &outH) {
+    outX = outY = outW = outH = 0;
+    if (text.empty() || w_ <= 0 || h_ <= 0)
+      return {};
+
+    // ── 1. Create a full-canvas top-down 32-bit DIB ──────────────────────────
+    BITMAPINFO bmi = {};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = w_;
+    bmi.bmiHeader.biHeight = -h_; // negative = top-down
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    void *bits = nullptr;
+    HDC hdcMem = CreateCompatibleDC(nullptr);
+    HBITMAP hBmp =
+        CreateDIBSection(hdcMem, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+    if (!hBmp) {
+      DeleteDC(hdcMem);
+      return {};
+    }
+    HGDIOBJ oldBmp = SelectObject(hdcMem, hBmp);
+
+    // Fill with white — our "transparent background" sentinel.
+    {
+      RECT rc = {0, 0, w_, h_};
+      HBRUSH br = CreateSolidBrush(RGB(255, 255, 255));
+      FillRect(hdcMem, &rc, br);
+      DeleteObject(br);
+    }
+
+    // ── 2. Create GDI font ───────────────────────────────────────────────────
+    int weight = style.bold ? FW_BOLD : FW_NORMAL;
+    DWORD italic = style.italic ? TRUE : FALSE;
+    DWORD uline = style.underline ? TRUE : FALSE;
+    HFONT hFont = CreateFontW(
+        -style.fontSize, // height in logical units (negative = char height)
+        0,               // width (0 = auto)
+        0, 0,            // escapement, orientation
+        weight, italic, uline,
+        FALSE, // strikeout
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, style.fontFace.c_str());
+    HGDIOBJ oldFont = SelectObject(hdcMem, hFont);
+
+    // Text color from 0–1 floats → COLORREF (GDI uses BGR in the DIB but
+    // SetTextColor takes RGB).
+    COLORREF cr =
+        RGB((int)(style.r * 255.f + 0.5f), (int)(style.g * 255.f + 0.5f),
+            (int)(style.b * 255.f + 0.5f));
+    SetTextColor(hdcMem, cr);
+    SetBkMode(hdcMem, TRANSPARENT);
+
+    // ── 3. Compute GDI draw position ─────────────────────────────────────────
+    // canvasY is Y-up (0 = bottom of canvas).
+    // GDI top-down: row 0 is the top.
+    // We place the TOP of the text box at gdiY.
+    //   gdiY = h_ - (int)canvasY - style.fontSize
+    // This means the baseline sits approximately at canvas Y = canvasY,
+    // which matches what the subclass passed in from a mouse-click position.
+    int gdiX = (int)canvasX;
+    int gdiY = h_ - (int)canvasY - style.fontSize;
+
+    // Measure text so we can build a tight bounding box.
+    SIZE tsz = {};
+    GetTextExtentPoint32W(hdcMem, text.c_str(), (int)text.size(), &tsz);
+
+    // ── 4. Render ────────────────────────────────────────────────────────────
+    TextOutW(hdcMem, gdiX, gdiY, text.c_str(), (int)text.size());
+    GdiFlush();
+
+    // ── 5. Extract tight bounding box ────────────────────────────────────────
+    // Add a small margin so descenders and the cursor bar are not clipped.
+    const int kMargin = 2;
+    int bboxGdiX0 = max(0, gdiX - kMargin);
+    int bboxGdiY0 = max(0, gdiY - kMargin);
+    int bboxGdiX1 = min(w_, gdiX + tsz.cx + kMargin);
+    int bboxGdiY1 = min(h_, gdiY + tsz.cy + kMargin);
+    int bboxW = bboxGdiX1 - bboxGdiX0;
+    int bboxH = bboxGdiY1 - bboxGdiY0;
+
+    if (bboxW <= 0 || bboxH <= 0) {
+      // Nothing visible — clean up and return empty.
+      SelectObject(hdcMem, oldFont);
+      DeleteObject(hFont);
+      SelectObject(hdcMem, oldBmp);
+      DeleteObject(hBmp);
+      DeleteDC(hdcMem);
+      return {};
+    }
+
+    // ── 6. Convert DIB pixels → RGBA, flip to GL Y-up ───────────────────────
+    // DIB bits are BGRA (GDI pads to 32-bit with the 4th byte unused/zero).
+    // We produce RGBA with alpha = 0 for background-white, 255 otherwise.
+    const uint8_t *dibBits = reinterpret_cast<const uint8_t *>(bits);
+
+    std::vector<uint8_t> rgba(size_t(bboxW) * bboxH * 4);
+    for (int row = 0; row < bboxH; ++row) {
+      // Flip: GL row 0 = bottom of bounding box = GDI row (bboxGdiY1 - 1).
+      int gdiRow = bboxGdiY0 + (bboxH - 1 - row); // GL Y-up flip
+      for (int col = 0; col < bboxW; ++col) {
+        const uint8_t *p =
+            dibBits + (size_t(gdiRow) * w_ + bboxGdiX0 + col) * 4;
+        uint8_t b8 = p[0], g8 = p[1], r8 = p[2]; // DIB is BGR
+        // Background sentinel: all channels >= 250 → transparent.
+        bool isBg = (r8 >= 250 && g8 >= 250 && b8 >= 250);
+        uint8_t *d = rgba.data() + (size_t(row) * bboxW + col) * 4;
+        d[0] = r8;
+        d[1] = g8;
+        d[2] = b8;
+        d[3] = isBg ? 0 : 255;
+      }
+    }
+
+    // ── 7. Cleanup
+    // ────────────────────────────────────────────────────────────
+    SelectObject(hdcMem, oldFont);
+    DeleteObject(hFont);
+    SelectObject(hdcMem, oldBmp);
+    DeleteObject(hBmp);
+    DeleteDC(hdcMem);
+
+    // ── 8. Output bounding rect in GL canvas space (Y-up) ────────────────────
+    // bboxGdiX0 maps directly (X is the same axis).
+    // bboxGdiY0 is the top edge in GDI (top-down) space.
+    // In GL canvas space the bottom edge of the bbox is:
+    //   glBottomY = h_ - bboxGdiY1   (= h_ - bboxGdiY0 - bboxH)
+    outX = bboxGdiX0;
+    outY = h_ - bboxGdiY1; // GL Y of the bottom edge of the bbox
+    outW = bboxW;
+    outH = bboxH;
+
+    return rgba;
   }
 
   // ── Stroke lifecycle ──────────────────────────────────────────────────────
@@ -1157,9 +1507,6 @@ private:
     GL.bindFramebuffer(GL_FRAMEBUFFER, 0);
   }
 
-  // paintDabImpl uses quadVBO_ (dab geometry), which is always sized to
-  // hold (kDabVerts+2)*2 floats — large enough for blitTexture too.
-  // It never calls bufferData, only bufferSubData, so the size is stable.
   void paintDabImpl(float cx, float cy, float r, float g, float b, float alpha,
                     float radius, const float mvp[16]) {
     GL.useProgram(blitProg_);
@@ -1184,9 +1531,6 @@ private:
     GL.useProgram(0);
   }
 
-  // blitTexture exclusively uses quadVBO_ with bufferSubData.
-  // quadVBO_ is sized in buildQuadVAO to the maximum of the blit quad and
-  // the dab verts, so bufferSubData is always safe.
   void blitTexture(GLuint tex, float alpha, const float *mvp) {
     GL.useProgram(blitProg_);
     GL.uniformMatrix4fv(u_.mvp, 1, GL_FALSE, mvp);
@@ -1245,11 +1589,6 @@ void main(){
   }
 
   void buildQuadVAO() {
-    // ── FIX: size quadVBO_ to the MAXIMUM of all users:
-    //   blitTexture:  6 verts × 4 floats  = 96 bytes
-    //   paintDabImpl: (kDabVerts+2) × 2 floats = (32+2)*2*4 = 272 bytes
-    //   Both use bufferSubData, so the buffer must be pre-sized to the max.
-    //   shapeVBO_ is separate and uses bufferData, so no size constraint.
     constexpr GLsizeiptr kBlitBytes = sizeof(float) * 6 * 4;
     constexpr GLsizeiptr kDabBytes = sizeof(float) * (kDabVerts + 2) * 2;
     constexpr GLsizeiptr kQuadBufSz =
@@ -1262,8 +1601,6 @@ void main(){
     GL.bufferData(GL_ARRAY_BUFFER, kQuadBufSz, nullptr, GL_DYNAMIC_DRAW);
     GL.bindVertexArray(0);
 
-    // Dedicated shape VBO — starts with 0 bytes; drawVertsToFBO always
-    // calls bufferData so the size is set fresh each call.
     GL.genBuffers(1, &shapeVBO_);
     GL.bindBuffer(GL_ARRAY_BUFFER, shapeVBO_);
     GL.bufferData(GL_ARRAY_BUFFER, sizeof(float) * 2 * 12, nullptr,
@@ -1566,6 +1903,7 @@ private:
       if (self && self->viewportEnabled_ && self->glHwnd_)
         PostMessage(self->glHwnd_, msg, wp, lp);
       return 0;
+
     default:
       return DefWindowProc(hwnd, msg, wp, lp);
     }
@@ -1591,7 +1929,6 @@ private:
       EndPaint(hwnd, &ps);
       return 0;
     }
-
     case WM_MBUTTONDOWN:
       if (!self || !self->viewportEnabled_)
         return 0;
@@ -1604,9 +1941,9 @@ private:
       ReleaseCapture();
       self->panning_ = false;
       return 0;
-
     case WM_LBUTTONDOWN: {
       SetCapture(hwnd);
+      SetFocus(hwnd);
       if (!self)
         return 0;
       if (self->viewportEnabled_ && (GetKeyState(VK_SPACE) & 0x8000)) {
@@ -1678,7 +2015,6 @@ private:
       if (self)
         self->trackingLeave_ = false;
       return 0;
-
     case WM_MOUSEWHEEL: {
       if (!self || !self->viewportEnabled_)
         return 0;
@@ -1693,8 +2029,7 @@ private:
       } else if (shift) {
         self->vp_.panByScreen(float(delta) * .5f, 0.f);
       } else {
-        float steps = float(delta) / WHEEL_DELTA;
-        self->vp_.panByScreen(0.f, -steps * 40.f);
+        self->vp_.panByScreen(0.f, -(float(delta) / WHEEL_DELTA) * 40.f);
       }
       self->scheduleRepaint();
       forwardToParent(hwnd, msg, wp, lp);
@@ -1728,6 +2063,13 @@ private:
       if (self && self->activeSurface_)
         self->activeSurface_->onKeyUp(int(wp));
       return 0;
+    case WM_TIMER:
+      KillTimer(hwnd, 1);
+      if (self) {
+        self->repaintPending_ = false;
+        self->tickAndRender();
+      }
+      return 0;
     default:
       return DefWindowProc(hwnd, msg, wp, lp);
     }
@@ -1754,8 +2096,8 @@ private:
     wf.hInstance = hi;
     wf.lpszClassName = L"FluxGLFrame6";
     wf.style = CS_HREDRAW | CS_VREDRAW;
-
     RegisterClassExW(&wf);
+
     WNDCLASSEXW wg{};
     wg.cbSize = sizeof(wg);
     wg.lpfnWndProc = GLProc;
@@ -1812,10 +2154,12 @@ private:
         wglMakeCurrent(nullptr, nullptr);
         wglDeleteContext(tmp);
         glRC_ = core;
-      } else
+      } else {
         glRC_ = tmp;
-    } else
+      }
+    } else {
       glRC_ = tmp;
+    }
     wglMakeCurrent(glDC_, glRC_);
     GL.init();
 
@@ -1879,6 +2223,11 @@ private:
     activeSurface_->render(mvp);
     SwapBuffers(glDC_);
     syncScrollbars();
+
+    if (activeSurface_->needsContinuousRedraw() && !repaintPending_) {
+      repaintPending_ = true;
+      SetTimer(glHwnd_, 1, 500, nullptr); // ~60fps, or use 500ms
+    }
   }
 
   void moveWindows() {
