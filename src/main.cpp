@@ -1,1359 +1,1028 @@
-// main.cpp
+// =============================================================================
+// image_editor.hpp  —  Lightroom-style non-destructive image editor
+
+#pragma once
+
+#define STB_IMAGE_IMPLEMENTATION
+#include "widgets/stb_image.h"
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "widgets/stb_image_write.h"
+
 #include "flux.hpp"
-#include "widgets/flux_layers.hpp"   // ← layers support
+#include "widgets/flux_histogram.hpp"
+#include "widgets/flux_tonecurve.hpp"
+#include "widgets/flux_hsl_panel.hpp"   // ← HSL panel
+
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
 #include <commdlg.h>
-#include <shlobj.h>
-#include <unordered_map>
-#include <unordered_set>
+#include <windows.h>
 #pragma comment(lib, "comdlg32.lib")
 
-// ── App-level tool enum ──────────────────────────────────────────────────────
-enum class Tool {
-  Brush  = kToolBrush,   // 0
-  Eraser = kToolEraser,  // 1
-  // Shape tools (values ≥ 2)
-  Line          = 2,
-  Rect          = 3,
-  Fill          = 4,
-  Ellipse       = 5,
-  Triangle      = 6,
-  RightTriangle = 7,
-  Diamond       = 8,
-  Pentagon      = 9,
-  Hexagon       = 10,
-  Star5         = 11,
-  Star6         = 12,
-  Arrow         = 13,
-  ArrowDouble   = 14,
-  Parallelogram = 15,
-  Trapezoid     = 16,
-  RoundRect     = 17,
-  Cross         = 18,
-  Heart         = 19,
-  Select        = 20,
-  Text          = 21,
-};
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <functional>
+#include <memory>
+#include <string>
+#include <vector>
 
-static bool isShapeToolEnum(Tool t) {
-  return t != Tool::Brush && t != Tool::Eraser &&
-         t != Tool::Fill  && t != Tool::Select &&
-         t != Tool::Text;
-}
-static bool isDrawTool(Tool t) {
-  return t == Tool::Brush || t == Tool::Eraser;
-}
+#ifndef GL_STATIC_DRAW
+#  define GL_STATIC_DRAW 0x88E4
+#endif
+#ifndef GL_TEXTURE0
+#  define GL_TEXTURE0 0x84C0
+#endif
+#ifndef GL_TEXTURE1
+#  define GL_TEXTURE1 0x84C1
+#endif
+#ifndef GL_TEXTURE2
+#  define GL_TEXTURE2 0x84C2
+#endif
+#ifndef GL_CLAMP_TO_EDGE
+#  define GL_CLAMP_TO_EDGE 0x812F
+#endif
+#ifndef GL_R8
+#  define GL_R8  0x8229
+#endif
+#ifndef GL_RED
+#  define GL_RED 0x1903
+#endif
 
-// ── Hex helpers ──────────────────────────────────────────────────────────────
-static COLORREF hexToRef(const std::string &css) {
-  RGBA c = parseHexColor(css);
-  return RGB((BYTE)(c.r*255),(BYTE)(c.g*255),(BYTE)(c.b*255));
-}
-static std::string refToHex(COLORREF c) { return ColorToHex(c); }
+using PFNGLUNIFORM2FPROC     = void(APIENTRY*)(GLint, GLfloat, GLfloat);
+using PFNGLACTIVETEXTUREPROC = void(APIENTRY*)(GLenum);
 
-// ── Save dialog ──────────────────────────────────────────────────────────────
-static std::wstring promptSavePath(HWND owner) {
-  wchar_t buf[MAX_PATH] = L"painting.png";
-  OPENFILENAMEW ofn{};
-  ofn.lStructSize = sizeof(ofn); ofn.hwndOwner = owner;
-  ofn.lpstrFilter = L"PNG Image\0*.png\0All Files\0*.*\0";
-  ofn.lpstrFile = buf; ofn.nMaxFile = MAX_PATH;
-  ofn.lpstrDefExt = L"png";
-  ofn.Flags = OFN_OVERWRITEPROMPT|OFN_PATHMUSTEXIST;
-  ofn.lpstrTitle = L"Save as PNG";
-  return GetSaveFileNameW(&ofn) ? buf : L"";
-}
+namespace ie_gl {
+    inline PFNGLUNIFORM2FPROC     uniform2f     = nullptr;
+    inline PFNGLACTIVETEXTUREPROC activeTexture = nullptr;
 
-// ============================================================================
-// §0  TEXT SESSION
-// ============================================================================
-
-struct TextSession {
-  bool         active   = false;
-  float        x        = 0, y = 0;
-  std::wstring text;
-  TextStyle    style;
-};
-
-// ============================================================================
-// §1  GEOMETRY HELPERS
-// ============================================================================
-
-static int appendThickLine(float x0,float y0,float x1,float y1,float half,
-                            float *out, int base) {
-  float dx=x1-x0,dy=y1-y0,len=std::sqrt(dx*dx+dy*dy);
-  if (len<0.001f){
-    float v[12]={x0-half,y0-half, x0+half,y0-half, x0+half,y0+half,
-                 x0+half,y0+half, x0-half,y0+half, x0-half,y0-half};
-    memcpy(out+base*2,v,sizeof(v)); return base+6;
-  }
-  float nx=-dy/len*half, ny=dx/len*half;
-  float v[12]={x0+nx,y0+ny, x0-nx,y0-ny, x1-nx,y1-ny,
-               x1-nx,y1-ny, x1+nx,y1+ny, x0+nx,y0+ny};
-  memcpy(out+base*2,v,sizeof(v)); return base+6;
-}
-
-static int buildFan(float cx,float cy,const std::vector<std::pair<float,float>> &pts,
-                    float *out) {
-  int n=(int)pts.size();
-  out[0]=cx; out[1]=cy;
-  for(int i=0;i<n;i++){ out[2+i*2]=pts[i].first; out[3+i*2]=pts[i].second; }
-  out[2+n*2]=pts[0].first; out[3+n*2]=pts[0].second;
-  return n+2;
-}
-
-static std::vector<float> nGonOutline(float cx,float cy,float rx,float ry,
-                                       int n,float rot,float half) {
-  std::vector<float> buf(6*n*2);
-  int total=0;
-  for(int i=0;i<n;i++){
-    float a0=rot+float(i)/n*6.2831853f;
-    float a1=rot+float(i+1)/n*6.2831853f;
-    float x0=cx+cosf(a0)*rx, y0=cy+sinf(a0)*ry;
-    float x1=cx+cosf(a1)*rx, y1=cy+sinf(a1)*ry;
-    total=appendThickLine(x0,y0,x1,y1,half,buf.data(),total);
-  }
-  buf.resize(total*2); return buf;
-}
-
-static std::vector<float> nGonFilled(float cx,float cy,float rx,float ry,
-                                      int n,float rot) {
-  std::vector<std::pair<float,float>> pts;
-  for(int i=0;i<n;i++){
-    float a=rot+float(i)/n*6.2831853f;
-    pts.push_back({cx+cosf(a)*rx, cy+sinf(a)*ry});
-  }
-  std::vector<float> buf((n+2)*2);
-  buildFan(cx,cy,pts,buf.data());
-  return buf;
-}
-
-static std::vector<float> star5Outline(float cx,float cy,float ro,float ri,float half) {
-  std::vector<float> buf(10*6*2);
-  int total=0;
-  float off=-3.14159265f/2;
-  for(int i=0;i<10;i++){
-    float a0=off+float(i)/10*6.2831853f;
-    float a1=off+float(i+1)/10*6.2831853f;
-    float r0=(i%2==0)?ro:ri, r1=(i%2==1)?ro:ri;
-    total=appendThickLine(cx+cosf(a0)*r0,cy+sinf(a0)*r0,
-                          cx+cosf(a1)*r1,cy+sinf(a1)*r1,half,buf.data(),total);
-  }
-  buf.resize(total*2); return buf;
-}
-
-static std::vector<float> star6Outline(float cx,float cy,float ro,float ri,float half) {
-  std::vector<float> buf(12*6*2);
-  int total=0;
-  float off=0.f;
-  for(int i=0;i<12;i++){
-    float a0=off+float(i)/12*6.2831853f;
-    float a1=off+float(i+1)/12*6.2831853f;
-    float r0=(i%2==0)?ro:ri, r1=(i%2==1)?ro:ri;
-    total=appendThickLine(cx+cosf(a0)*r0,cy+sinf(a0)*r0,
-                          cx+cosf(a1)*r1,cy+sinf(a1)*r1,half,buf.data(),total);
-  }
-  buf.resize(total*2); return buf;
-}
-
-static std::vector<float> arrowVerts(float x0,float y0,float x1,float y1,float half) {
-  float dx=x1-x0,dy=y1-y0,len=std::sqrt(dx*dx+dy*dy);
-  if(len<1.f) return {};
-  float ux=dx/len,uy=dy/len;
-  float px=-uy,py=ux;
-  float hs=half*1.2f;
-  float headLen=min(len*0.4f,half*4.f);
-  float headW=half*2.5f;
-  float mx=x1-ux*headLen, my=y1-uy*headLen;
-  std::vector<float> v={
-    x0+px*hs, y0+py*hs,  x0-px*hs, y0-py*hs,  mx-px*hs, my-py*hs,
-    mx-px*hs, my-py*hs,  mx+px*hs, my+py*hs,   x0+px*hs, y0+py*hs,
-    x1,y1,  mx+px*headW,my+py*headW,  mx-px*headW,my-py*headW
-  };
-  return v;
-}
-
-static std::vector<float> doubleArrowVerts(float x0,float y0,float x1,float y1,float half){
-  float dx=x1-x0,dy=y1-y0,len=std::sqrt(dx*dx+dy*dy);
-  if(len<1.f) return {};
-  float ux=dx/len,uy=dy/len;
-  float px=-uy,py=ux;
-  float hs=half*1.2f;
-  float headLen=min(len*0.3f,half*4.f);
-  float headW=half*2.5f;
-  float m0x=x0+ux*headLen,m0y=y0+uy*headLen;
-  float m1x=x1-ux*headLen,m1y=y1-uy*headLen;
-  std::vector<float> v={
-    m0x+px*hs,m0y+py*hs, m0x-px*hs,m0y-py*hs, m1x-px*hs,m1y-py*hs,
-    m1x-px*hs,m1y-py*hs, m1x+px*hs,m1y+py*hs, m0x+px*hs,m0y+py*hs,
-    x0,y0, m0x+px*headW,m0y+py*headW, m0x-px*headW,m0y-py*headW,
-    x1,y1, m1x+px*headW,m1y+py*headW, m1x-px*headW,m1y-py*headW
-  };
-  return v;
-}
-
-static std::vector<float> ellipseOutline(float cx,float cy,float rx,float ry,
-                                          int segs,float half){
-  std::vector<float> buf(segs*6*2);
-  int total=0;
-  for(int i=0;i<segs;i++){
-    float a0=float(i)/segs*6.2831853f;
-    float a1=float(i+1)/segs*6.2831853f;
-    total=appendThickLine(cx+cosf(a0)*rx,cy+sinf(a0)*ry,
-                          cx+cosf(a1)*rx,cy+sinf(a1)*ry,half,buf.data(),total);
-  }
-  buf.resize(total*2); return buf;
-}
-
-static std::vector<float> crossVerts(float cx,float cy,float rx,float ry,float arm){
-  float hx=arm,hy=arm;
-  std::vector<float> buf={
-    cx-hx,cy-ry, cx+hx,cy-ry, cx+hx,cy-hy, cx+rx,cy-hy,
-    cx+rx,cy+hy, cx+hx,cy+hy, cx+hx,cy+ry, cx-hx,cy+ry,
-    cx-hx,cy+hy, cx-rx,cy+hy, cx-rx,cy-hy, cx-hx,cy-hy
-  };
-  std::vector<float> fan;
-  fan.push_back(cx); fan.push_back(cy);
-  for(int i=0;i<12;i++){fan.push_back(buf[i*2]);fan.push_back(buf[i*2+1]);}
-  fan.push_back(buf[0]); fan.push_back(buf[1]);
-  return fan;
-}
-
-static std::vector<float> heartFan(float cx,float cy,float rx,float ry){
-  const int segs=64;
-  std::vector<std::pair<float,float>> pts;
-  for(int i=0;i<segs;i++){
-    float t=float(i)/segs*6.2831853f;
-    float hx=rx*(16.f*sinf(t)*sinf(t)*sinf(t))/16.f;
-    float hy=-ry*(13.f*cosf(t)-5.f*cosf(2*t)-2.f*cosf(3*t)-cosf(4*t))/16.f;
-    pts.push_back({cx+hx,cy+hy});
-  }
-  std::vector<float> buf((segs+2)*2);
-  buildFan(cx,cy,pts,buf.data());
-  return buf;
-}
-
-static std::vector<float> parallelogramOutline(float x0,float y0,float x1,float y1,
-                                                float shear,float half){
-  float lx=min(x0,x1),rx=max(x0,x1);
-  float by=min(y0,y1),ty=max(y0,y1);
-  float sh=(rx-lx)*shear;
-  float ax=lx+sh,bx=rx+sh,cx=rx,dx=lx;
-  float ay=by,   bby=by,   ccy=ty,ddy=ty;
-  std::vector<float> buf(4*6*2);
-  int total=0;
-  total=appendThickLine(ax,ay,bx,bby,half,buf.data(),total);
-  total=appendThickLine(bx,bby,cx,ccy,half,buf.data(),total);
-  total=appendThickLine(cx,ccy,dx,ddy,half,buf.data(),total);
-  total=appendThickLine(dx,ddy,ax,ay, half,buf.data(),total);
-  buf.resize(total*2); return buf;
-}
-
-static std::vector<float> trapezoidOutline(float x0,float y0,float x1,float y1,
-                                            float taper,float half){
-  float lx=min(x0,x1),rx=max(x0,x1);
-  float by=min(y0,y1),ty=max(y0,y1);
-  float w=rx-lx,t=w*taper;
-  float ax=lx,bx=rx,cx=rx-t,dx=lx+t;
-  std::vector<float> buf(4*6*2);
-  int total=0;
-  total=appendThickLine(ax,by,bx,by,half,buf.data(),total);
-  total=appendThickLine(bx,by,cx,ty,half,buf.data(),total);
-  total=appendThickLine(cx,ty,dx,ty,half,buf.data(),total);
-  total=appendThickLine(dx,ty,ax,by,half,buf.data(),total);
-  buf.resize(total*2); return buf;
-}
-
-// ============================================================================
-// §2  FLOOD FILL
-// ============================================================================
-static void floodFill(uint8_t *pixels,int w,int h,int px,int py,
-                      uint8_t tr,uint8_t tg,uint8_t tb,
-                      uint8_t fr,uint8_t fg,uint8_t fb){
-  if(px<0||py<0||px>=w||py>=h) return;
-  if(tr==fr&&tg==fg&&tb==fb) return;
-  auto match=[&](int x,int y)->bool{
-    const uint8_t*p=pixels+(y*w+x)*4;
-    return std::abs((int)p[0]-(int)tr)<=10&&
-           std::abs((int)p[1]-(int)tg)<=10&&
-           std::abs((int)p[2]-(int)tb)<=10;
-  };
-  if(!match(px,py)) return;
-  std::vector<std::pair<int,int>> stack;
-  stack.reserve(w*h/8);
-  stack.push_back({px,py});
-  while(!stack.empty()){
-    auto[x,y]=stack.back(); stack.pop_back();
-    if(x<0||x>=w||y<0||y>=h||!match(x,y)) continue;
-    uint8_t*p=pixels+(y*w+x)*4;
-    p[0]=fr;p[1]=fg;p[2]=fb;p[3]=255;
-    stack.push_back({x+1,y});stack.push_back({x-1,y});
-    stack.push_back({x,y+1});stack.push_back({x,y-1});
-  }
-}
-
-// ============================================================================
-// §3  PaintSurface  (now extends LayeredSurface)
-// ============================================================================
-class PaintSurface : public LayeredSurface {
-public:
-  const std::vector<std::pair<std::string,std::string>> kPalette = {
-    {"#cba6f7","Purple"},{"#f38ba8","Pink"},{"#fab387","Peach"},
-    {"#f9e2af","Yellow"},{"#a6e3a1","Green"},{"#89dceb","Sky"},
-    {"#89b4fa","Blue"},  {"#ffffff","White"},{"#6c7086","Gray"},
-    {"#1e1e2e","Black"},
-  };
-
-  std::string activeColor = "#cba6f7";
-  float activeSize    = 4.f;
-  float activeOpacity = 1.f;
-  Tool  activeTool    = Tool::Brush;
-  bool  filled        = false;
-
-  std::function<void()>                          onStateChanged;
-  std::function<void(const std::vector<RGBA>&)>  onHistoryChanged;
-  std::function<void(const std::string&)>        onStatusMessage;
-  std::function<void()>                          onRedrawNeeded;
-
-  void setColor(const std::string& col){ activeColor=col; syncStyle(); }
-  void setSize (float sz)              { activeSize=sz;   syncStyle(); }
-  void setOpacity(float op)            { activeOpacity=op;syncStyle(); }
-  void setFilled(bool f)               { filled=f; }
-
-  void setTextStyle(const TextStyle &s) { pendingTextStyle_ = s; }
-  const TextStyle &getTextStyle() const { return pendingTextStyle_; }
-
-  void setActiveTool(Tool t){
-    commitFloatingSelect();
-    commitTextSession();
-
-    selDrawing_=false; hasSelection_=false; grabbed_=false; pixelBuf_.clear();
-    textSession_.active = false;
-
-    activeTool=t;
-    setTool(isDrawTool(t) ? static_cast<ToolId>(t) : kToolBrush);
-    syncStyle();
-    shapeDrawing_=false;
-    scratchClear();
-  }
-
-  void initialize(int w,int h) override {
-    LayeredSurface::initialize(w,h);
-    syncStyle();
-  }
-
-  bool needsContinuousRedraw() const override {
-    return textSession_.active;
-  }
-
-  // ── Mouse ──────────────────────────────────────────────────────────────────
-  void onMouseDown(float x,float y) override {
-    if(activeTool==Tool::Text)  { textMouseDown(x,y);  return; }
-    if(activeTool==Tool::Select){ selectMouseDown(x,y); return; }
-    if(activeTool==Tool::Fill)  { doFill(x,y); return; }
-    if(isShapeToolEnum(activeTool)){ shapeStart(x,y); return; }
-    LayeredSurface::onMouseDown(x,y);
-  }
-  void onMouseMove(float x,float y) override {
-    if(activeTool==Tool::Text)  {
-      if(onCursorChange) onCursorChange(LoadCursor(nullptr, IDC_IBEAM));
-      return;
+    inline void init() {
+        if (uniform2f) return;
+        HMODULE gl32 = GetModuleHandleA("opengl32.dll");
+        auto load = [&](const char* name) -> void* {
+            void* p = reinterpret_cast<void*>(wglGetProcAddress(name));
+            if (!p||p==(void*)1||p==(void*)2||p==(void*)3||p==(void*)-1)
+                p = reinterpret_cast<void*>(GetProcAddress(gl32, name));
+            return p;
+        };
+        uniform2f     = reinterpret_cast<PFNGLUNIFORM2FPROC>    (load("glUniform2f"));
+        activeTexture = reinterpret_cast<PFNGLACTIVETEXTUREPROC>(load("glActiveTexture"));
+        assert(uniform2f && activeTexture);
     }
-    if(activeTool==Tool::Select){
-      if(onCursorChange){
-        bool inside = hasSelection_ && insideSelection(x,y);
-        onCursorChange(LoadCursor(nullptr, inside ? IDC_SIZEALL : IDC_CROSS));
-      }
-      selectMouseMove(x,y);
-      return;
-    }
-    if(isShapeToolEnum(activeTool)){
-      if(shapeDrawing_) shapePreview(x,y);
-      return;
-    }
-    LayeredSurface::onMouseMove(x,y);
-  }
-  void onMouseUp(float x,float y) override {
-    if(activeTool==Tool::Text)   return;
-    if(activeTool==Tool::Select){ selectMouseUp(x,y); return; }
-    if(activeTool==Tool::Fill) return;
-    if(isShapeToolEnum(activeTool)){
-      if(shapeDrawing_) shapeCommit(x,y);
-      return;
-    }
-    LayeredSurface::onMouseUp(x,y);
-    if(onStateChanged)   onStateChanged();
-    if(onHistoryChanged) onHistoryChanged(colorHistory());
-  }
+}
 
-  void onRightMouseDown(float x,float y) override {
-    if(activeTool==Tool::Text){
-      commitTextSession();
-      if(onRedrawNeeded) onRedrawNeeded();
-      return;
-    }
-    if(activeTool==Tool::Select){
-      commitFloatingSelect();
-      hasSelection_=false; selDrawing_=false;
-      scratchClear();
-      if(onRedrawNeeded) onRedrawNeeded();
-      return;
-    }
-    LayeredSurface::onRightMouseDown(x,y);
-  }
+// =============================================================================
+// §1  EDIT PARAMETERS
+// =============================================================================
 
-  void onKeyDown(int key) override {
-    if(activeTool==Tool::Text && textSession_.active){
-      handleTextKey(key);
-      return;
+struct EditParams {
+    // ── Tone ─────────────────────────────────────────────────────────────────
+    float exposure    =  0.f;
+    float contrast    =  0.f;
+    float highlights  =  0.f;
+    float shadows     =  0.f;
+    float whites      =  0.f;
+    float blacks      =  0.f;
+    // ── Color ────────────────────────────────────────────────────────────────
+    float temperature =  0.f;
+    float tint        =  0.f;
+    float saturation  =  0.f;
+    float vibrance    =  0.f;
+    // ── Detail ───────────────────────────────────────────────────────────────
+    float sharpness   =  0.f;
+    float noiseReduce =  0.f;
+    // ── Effects ──────────────────────────────────────────────────────────────
+    float vignette    =  0.f;
+    float grain       =  0.f;
+
+    // ── Tone curve LUTs (256-entry) ───────────────────────────────────────────
+    std::array<uint8_t,256> lutRGB{};
+    std::array<uint8_t,256> lutR{};
+    std::array<uint8_t,256> lutG{};
+    std::array<uint8_t,256> lutB{};
+
+    // ── HSL LUTs (360-entry) ──────────────────────────────────────────────────
+    std::array<uint8_t,360> hslHue{};  // encoded: 0.5=neutral, shift ±30°
+    std::array<uint8_t,360> hslSat{};  // encoded: 0.5=1× multiplier
+    std::array<uint8_t,360> hslLum{};  // encoded: 0.5=neutral, shift ±1
+
+    EditParams() { resetCurves(); resetHSL(); }
+
+    void resetCurves() {
+        for (int i = 0; i < 256; ++i)
+            lutRGB[i] = lutR[i] = lutG[i] = lutB[i] = uint8_t(i);
     }
 
-    LayeredSurface::onKeyDown(key);
-    switch(key){
-      case 'B': setActiveTool(Tool::Brush);  break;
-      case 'E': setActiveTool(Tool::Eraser); break;
-      case 'L': setActiveTool(Tool::Line);   break;
-      case 'R': setActiveTool(Tool::Rect);   break;
-      case 'F': setActiveTool(Tool::Fill);   break;
-      case 'S': setActiveTool(Tool::Select); break;
-      case 'T': setActiveTool(Tool::Text);   break;
-      case VK_ESCAPE:
-        if(activeTool==Tool::Select){
-          commitFloatingSelect();
-          hasSelection_=false; selDrawing_=false; grabbed_=false;
-          pixelBuf_.clear();
-          scratchClear();
-          if(onRedrawNeeded) onRedrawNeeded();
+    void resetHSL() {
+        // Identity: hue shift=0 (128), sat scale=1× (128), lum shift=0 (128)
+        for (int i = 0; i < 360; ++i) {
+            hslHue[i] = 128;
+            hslSat[i] = 128;
+            hslLum[i] = 128;
         }
-        break;
     }
-    if(onStateChanged) onStateChanged();
-  }
-  void onKeyUp(int) override {}
 
-  void render(const float mvp[16]) override {
-    LayeredSurface::render(mvp);
-    redrawSelectionOverlay();
-    advanceTextBlink();
-  }
+    void reset() { *this = EditParams{}; }
+};
 
-  std::function<void(HCURSOR)> onCursorChange;
+// =============================================================================
+// §2  GLSL SHADER
+//     Texture unit layout:
+//       0 = uOriginal   (source image)
+//       1 = uNoise      (grain noise)
+//       2 = uLutRGB     (tone curve composite, 256×1)
+//       3 = uLutR       (tone curve red,       256×1)
+//       4 = uLutG       (tone curve green,     256×1)
+//       5 = uLutB       (tone curve blue,      256×1)
+//       6 = uHSLHue     (HSL hue shift,        360×1)
+//       7 = uHSLSat     (HSL sat scale,        360×1)
+//       8 = uHSLLum     (HSL lum shift,        360×1)
+// =============================================================================
+
+static const char* kEditVert = R"GLSL(
+#version 330 core
+layout(location=0) in vec2 aPos;
+layout(location=1) in vec2 aUV;
+out vec2 vUV;
+void main(){ vUV=aUV; gl_Position=vec4(aPos,0.0,1.0); }
+)GLSL";
+
+static const char* kEditFrag = R"GLSL(
+#version 330 core
+in  vec2 vUV;
+out vec4 fragColor;
+
+// Source + utility textures
+uniform sampler2D uOriginal;
+uniform sampler2D uNoise;
+
+// Tone curve LUTs (256×1 R8)
+uniform sampler2D uLutRGB;
+uniform sampler2D uLutR;
+uniform sampler2D uLutG;
+uniform sampler2D uLutB;
+
+// HSL LUTs (360×1 R8)
+// Encoding:
+//   uHSLHue : 0=–30°  0.5=0°  1=+30°   → actual shift = (sample–0.5)*60°
+//   uHSLSat : 0=0×    0.5=1×  1=2×     → actual scale = sample * 2.0
+//   uHSLLum : 0=–1    0.5=0   1=+1     → actual shift = (sample–0.5)*2.0
+uniform sampler2D uHSLHue;
+uniform sampler2D uHSLSat;
+uniform sampler2D uHSLLum;
+
+// Scalar uniforms
+uniform float uExposure, uContrast, uHighlights, uShadows, uWhites, uBlacks;
+uniform float uTemperature, uTint, uSaturation, uVibrance;
+uniform float uSharpness, uNoiseReduce;
+uniform vec2  uTexelSize;
+uniform float uVignette, uGrain;
+
+// ── Utility ───────────────────────────────────────────────────────────────────
+vec3 toLinear(vec3 c){ return pow(clamp(c,0.0,1.0),vec3(2.2)); }
+vec3 toSRGB  (vec3 c){ return pow(clamp(c,0.0,1.0),vec3(1.0/2.2)); }
+float luma(vec3 c){ return dot(c,vec3(0.2126,0.7152,0.0722)); }
+
+vec3 rgb2hsl(vec3 c){
+    float mx=max(c.r,max(c.g,c.b)), mn=min(c.r,min(c.g,c.b)), d=mx-mn;
+    float l=(mx+mn)*0.5;
+    if(d<0.0001) return vec3(0,0,l);
+    float s=d/(1.0-abs(2.0*l-1.0)), h;
+    if(mx==c.r)      h=mod((c.g-c.b)/d,6.0)/6.0;
+    else if(mx==c.g) h=((c.b-c.r)/d+2.0)/6.0;
+    else             h=((c.r-c.g)/d+4.0)/6.0;
+    return vec3(h,s,l);
+}
+float hue2rgb(float p,float q,float t){
+    if(t<0.0)t+=1.0; if(t>1.0)t-=1.0;
+    if(t<1.0/6.0) return p+(q-p)*6.0*t;
+    if(t<0.5)     return q;
+    if(t<2.0/3.0) return p+(q-p)*(2.0/3.0-t)*6.0;
+    return p;
+}
+vec3 hsl2rgb(vec3 h){
+    if(h.y<0.0001) return vec3(h.z);
+    float q=h.z<0.5?h.z*(1.0+h.y):h.z+h.y-h.z*h.y, p=2.0*h.z-q;
+    return vec3(hue2rgb(p,q,h.x+1.0/3.0),hue2rgb(p,q,h.x),hue2rgb(p,q,h.x-1.0/3.0));
+}
+
+float applyLUT256(sampler2D lut, float v){
+    return texture(lut, vec2(clamp(v,0.0,1.0), 0.5)).r;
+}
+
+// Sample a 360-entry HSL LUT using the current hue (0..1)
+float sampleHSLLut(sampler2D lut, float hueNorm){
+    // 360 texels wide — offset by 0.5/360 to hit texel centres
+    float u = clamp(hueNorm, 0.0, 1.0);
+    return texture(lut, vec2(u, 0.5)).r;
+}
+
+float shadowMask   (float l){ return pow(1.0-l,2.0); }
+float highlightMask(float l){ return pow(l,    2.0); }
+
+void main(){
+    // ── 1. Sample + optional sharpen / denoise ────────────────────────────────
+    vec3 c;
+    if(uSharpness>0.001||uNoiseReduce>0.001){
+        vec3 blur=vec3(0);
+        for(int dy=-1;dy<=1;dy++) for(int dx=-1;dx<=1;dx++)
+            blur+=texture(uOriginal,vUV+vec2(dx,dy)*uTexelSize).rgb;
+        blur/=9.0;
+        vec3 orig=texture(uOriginal,vUV).rgb;
+        vec3 blended=mix(orig,blur,clamp(uNoiseReduce,0.0,1.0));
+        c=clamp(blended+uSharpness*0.6*(orig-blur),0.0,1.0);
+    } else {
+        c=texture(uOriginal,vUV).rgb;
+    }
+
+    // ── 2–6. Tone adjustments (linear light) ──────────────────────────────────
+    c=toLinear(c);
+    c*=pow(2.0,uExposure);
+    { float pv=0.18; c=(c-pv)*(1.0+uContrast)+pv; c=clamp(c,0.0,1.0); }
+    { float l=luma(c);
+      c*=1.0+uHighlights*highlightMask(l)*0.7;
+      c*=1.0+uShadows*shadowMask(l)*0.7;
+      c=clamp(c,0.0,1.0); }
+    c=clamp(c*(1.0+uWhites*0.3)-uBlacks*0.15,0.0,1.0);
+
+    // ── 7. Tone curves: composite RGB then per-channel ────────────────────────
+    c.r=applyLUT256(uLutRGB,c.r);
+    c.g=applyLUT256(uLutRGB,c.g);
+    c.b=applyLUT256(uLutRGB,c.b);
+    c.r=applyLUT256(uLutR,  c.r);
+    c.g=applyLUT256(uLutG,  c.g);
+    c.b=applyLUT256(uLutB,  c.b);
+    c=clamp(c,0.0,1.0);
+
+    // ── 8. Temperature / Tint ─────────────────────────────────────────────────
+    { float t=uTemperature*0.15, g=uTint*0.10;
+      c.r=clamp(c.r+t,0.0,1.0);
+      c.b=clamp(c.b-t,0.0,1.0);
+      c.r=clamp(c.r+g,0.0,1.0);
+      c.g=clamp(c.g-g,0.0,1.0);
+      c.b=clamp(c.b+g,0.0,1.0); }
+
+    // ── 9. Global Saturation / Vibrance (sRGB) ────────────────────────────────
+    c=toSRGB(c);
+    { vec3 hsl=rgb2hsl(c);
+      hsl.y=clamp(hsl.y*(1.0+uSaturation),0.0,1.0);
+      c=hsl2rgb(hsl); }
+    { vec3 hsl=rgb2hsl(c);
+      float sat=hsl.y, mask=(1.0-sat)*(1.0-sat);
+      hsl.y=clamp(hsl.y+uVibrance*mask*0.8,0.0,1.0);
+      c=hsl2rgb(hsl); }
+    c=clamp(c,0.0,1.0);
+
+    // ── 10. HSL per-band adjustments ──────────────────────────────────────────
+    {
+        vec3 hsl = rgb2hsl(c);
+        float hueNorm = hsl.x;  // 0..1
+
+        // Hue shift: encoded 0..1 → shift –30°..+30°  (÷360 for normalised hue)
+        float hShift = (sampleHSLLut(uHSLHue, hueNorm) - 0.5) * (60.0/360.0);
+        hsl.x = fract(hsl.x + hShift);
+
+        // Saturation scale: encoded 0..1 → multiplier 0×..2×
+        float sScale = sampleHSLLut(uHSLSat, hueNorm) * 2.0;
+        hsl.y = clamp(hsl.y * sScale, 0.0, 1.0);
+
+        // Luminance shift: encoded 0..1 → shift –1..+1
+        float lShift = (sampleHSLLut(uHSLLum, hueNorm) - 0.5) * 2.0;
+        hsl.z = clamp(hsl.z + lShift * 0.5, 0.0, 1.0);  // ×0.5 = ±50% max
+
+        c = hsl2rgb(hsl);
+        c = clamp(c, 0.0, 1.0);
+    }
+
+    // ── 11. Vignette ──────────────────────────────────────────────────────────
+    { vec2 uv2=vUV*2.0-1.0;
+      float dist=dot(uv2,uv2);
+      float mask=smoothstep(0.5,1.6,dist);
+      c=clamp(c*(1.0-mask*(-uVignette)*0.8),0.0,1.0); }
+
+    // ── 12. Grain ─────────────────────────────────────────────────────────────
+    if(uGrain>0.001){
+        vec3 n=texture(uNoise,vUV*5.0).rgb;
+        c=clamp(c+(n.r-0.5)*uGrain*0.12,0.0,1.0);
+    }
+
+    fragColor=vec4(c,1.0);
+}
+)GLSL";
+
+// =============================================================================
+// §3  IMAGE EDIT SURFACE
+// =============================================================================
+
+class ImageEditSurface : public RenderSurface {
+public:
+    std::function<void()>                     onImageLoaded;
+    std::function<void(const char*)>          onStatusMessage;
+    std::function<void(const HistogramData&)> onHistogramUpdated;
+
+    bool loadImage(const wchar_t* path) {
+        char utf8[MAX_PATH*3]={};
+        WideCharToMultiByte(CP_UTF8,0,path,-1,utf8,sizeof(utf8),nullptr,nullptr);
+        int w,h,ch;
+        stbi_set_flip_vertically_on_load(1);
+        unsigned char* data=stbi_load(utf8,&w,&h,&ch,4);
+        if(!data){ if(onStatusMessage) onStatusMessage("Failed to load image."); return false; }
+        imgW_=w; imgH_=h;
+        originalPixels_.assign(data,data+size_t(w)*h*4);
+        stbi_image_free(data);
+        uploadOriginal();
+        params_.reset();
+        buildIdentityLUTs();
+        buildIdentityHSLLUTs();
+        if(onImageLoaded) onImageLoaded();
+        if(onStatusMessage){
+            char msg[128];
+            _snprintf_s(msg,sizeof(msg),_TRUNCATE,"Loaded %dx%d",w,h);
+            onStatusMessage(msg);
+        }
+        return true;
+    }
+
+    bool exportImage(const wchar_t* path) {
+        if(originalPixels_.empty()||!editFBO_) return false;
+        renderToExportFBO();
+        std::vector<uint8_t> buf(size_t(imgW_)*imgH_*4);
+        GL.bindFramebuffer(GL_READ_FRAMEBUFFER,editFBO_);
+        glReadPixels(0,0,imgW_,imgH_,GL_RGBA,GL_UNSIGNED_BYTE,buf.data());
+        GL.bindFramebuffer(GL_READ_FRAMEBUFFER,0);
+        std::vector<uint8_t> flipped(buf.size());
+        int stride=imgW_*4;
+        for(int r=0;r<imgH_;r++)
+            memcpy(flipped.data()+r*stride,buf.data()+(imgH_-1-r)*stride,stride);
+        char utf8[MAX_PATH*3]={};
+        WideCharToMultiByte(CP_UTF8,0,path,-1,utf8,sizeof(utf8),nullptr,nullptr);
+        std::string ps(utf8);
+        bool ok=false;
+        if(ps.size()>=4&&(ps.substr(ps.size()-4)==".jpg"||ps.substr(ps.size()-5)==".jpeg"))
+            ok=stbi_write_jpg(utf8,imgW_,imgH_,4,flipped.data(),95)!=0;
+        else
+            ok=stbi_write_png(utf8,imgW_,imgH_,4,flipped.data(),stride)!=0;
+        if(onStatusMessage) onStatusMessage(ok?"Export saved.":"Export failed.");
+        return ok;
+    }
+
+    bool hasImage()    const { return !originalPixels_.empty(); }
+    int  imageWidth()  const { return imgW_; }
+    int  imageHeight() const { return imgH_; }
+    EditParams&       params()       { return params_; }
+    const EditParams& params() const { return params_; }
+
+    // ── Tone curve LUT upload ─────────────────────────────────────────────────
+    void uploadCurveLUTs(const std::array<uint8_t,256>& rgb,
+                         const std::array<uint8_t,256>& r,
+                         const std::array<uint8_t,256>& g,
+                         const std::array<uint8_t,256>& b) {
+        params_.lutRGB=rgb; params_.lutR=r; params_.lutG=g; params_.lutB=b;
+        uploadOneLUT256(lutTexRGB_, rgb.data());
+        uploadOneLUT256(lutTexR_,   r  .data());
+        uploadOneLUT256(lutTexG_,   g  .data());
+        uploadOneLUT256(lutTexB_,   b  .data());
+    }
+
+    // ── HSL LUT upload ────────────────────────────────────────────────────────
+    // Accepts the raw uint8 arrays from HSLData::buildGPULUTs()
+    void uploadHSLLUTs(const uint8_t* hue360,
+                       const uint8_t* sat360,
+                       const uint8_t* lum360) {
+        memcpy(params_.hslHue.data(), hue360, 360);
+        memcpy(params_.hslSat.data(), sat360, 360);
+        memcpy(params_.hslLum.data(), lum360, 360);
+        uploadOneLUT360(hslTexHue_, hue360);
+        uploadOneLUT360(hslTexSat_, sat360);
+        uploadOneLUT360(hslTexLum_, lum360);
+    }
+
+    void computeHistogram() {
+        if(originalPixels_.empty()) return;
+        histData_=HistogramData::fromPixels(originalPixels_.data(),imgW_*imgH_,4);
+        if(onHistogramUpdated) onHistogramUpdated(histData_);
+    }
+
+    const HistogramData& histogramData() const { return histData_; }
+
+    // ── RenderSurface ─────────────────────────────────────────────────────────
+    void initialize(int w, int h) override {
+        ie_gl::init(); viewW_=w; viewH_=h;
+        buildShader(); buildQuad(); buildNoiseTexture();
+        buildIdentityLUTs();
+        buildIdentityHSLLUTs();
+    }
+    void resize(int w, int h) override { viewW_=w; viewH_=h; }
+    void update(double) override {}
+
+    void render(const float /*mvp*/[16]) override {
+        if(originalPixels_.empty()||!origTex_){
+            glViewport(0,0,viewW_,viewH_);
+            glClearColor(0.12f,0.12f,0.14f,1.f);
+            glClear(GL_COLOR_BUFFER_BIT);
+            return;
+        }
+        glViewport(0,0,viewW_,viewH_);
+        glClearColor(0.08f,0.08f,0.09f,1.f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        drawEditPass(0);
+    }
+
+    void destroy() override {
+        auto del=[](GLuint& t){ if(t){glDeleteTextures(1,&t);t=0;} };
+        del(origTex_); del(noiseTex_);
+        del(lutTexRGB_); del(lutTexR_); del(lutTexG_); del(lutTexB_);
+        del(hslTexHue_); del(hslTexSat_); del(hslTexLum_);
+        del(editTex_);
+        if(editProg_){ GL.deleteProgram(editProg_);           editProg_=0; }
+        if(quadVAO_) { GL.deleteVertexArrays(1,&quadVAO_);   quadVAO_=0;  }
+        if(quadVBO_) { GL.deleteBuffers(1,&quadVBO_);         quadVBO_=0;  }
+        if(editFBO_) { GL.deleteFramebuffers(1,&editFBO_);    editFBO_=0;  }
+    }
 
 private:
-  // ══════════════════════════════════════════════════════════════════════════
-  // TEXT SESSION
-  // ══════════════════════════════════════════════════════════════════════════
+    int viewW_=1,viewH_=1,imgW_=0,imgH_=0;
+    EditParams    params_;
+    HistogramData histData_;
+    std::vector<uint8_t> originalPixels_;
 
-  TextSession   textSession_;
-  TextStyle     pendingTextStyle_;
+    GLuint editProg_=0, quadVAO_=0, quadVBO_=0;
+    GLuint origTex_=0,  noiseTex_=0;
+    GLuint editFBO_=0,  editTex_=0;
 
-  bool          cursorVisible_ = true;
-  std::chrono::steady_clock::time_point lastBlink_ =
-      std::chrono::steady_clock::now();
+    // Tone curve LUT textures (256×1 R8)
+    GLuint lutTexRGB_=0, lutTexR_=0, lutTexG_=0, lutTexB_=0;
 
-  void textMouseDown(float x, float y) {
-    if(textSession_.active){ commitTextSession(); }
-    textSession_.active = true;
-    textSession_.text.clear();
-    textSession_.x     = x;
-    textSession_.y     = y;
-    textSession_.style = pendingTextStyle_;
-    cursorVisible_     = true;
-    lastBlink_         = std::chrono::steady_clock::now();
-    scratchClear();
-    renderTextToScratch(textSession_.text, x, y,
-                        textSession_.style, /*showCursor=*/true);
-    if(onRedrawNeeded) onRedrawNeeded();
-  }
+    // HSL LUT textures (360×1 R8)
+    GLuint hslTexHue_=0, hslTexSat_=0, hslTexLum_=0;
 
-  void advanceTextBlink() {
-    if(!textSession_.active) return;
-    auto now = std::chrono::steady_clock::now();
-    double elapsed =
-        std::chrono::duration<double>(now - lastBlink_).count();
-    if(elapsed >= 0.5){
-      cursorVisible_ = !cursorVisible_;
-      lastBlink_     = now;
-      scratchClear();
-      renderTextToScratch(textSession_.text,
-                          textSession_.x, textSession_.y,
-                          textSession_.style,
-                          /*showCursor=*/cursorVisible_);
-      if(onRedrawNeeded) onRedrawNeeded();
+    void buildShader(){
+        editProg_=glutil::linkProgram(kEditVert,kEditFrag);
+        assert(editProg_);
     }
-  }
 
-  void handleTextKey(int vk) {
-    const bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
-    if(vk == VK_RETURN){ commitTextSession(); if(onRedrawNeeded) onRedrawNeeded(); return; }
-    if(vk == VK_ESCAPE){ textSession_.active=false; textSession_.text.clear(); scratchClear(); if(onRedrawNeeded) onRedrawNeeded(); return; }
-    if(vk == VK_BACK){ if(!textSession_.text.empty()) textSession_.text.pop_back(); refreshTextPreview(); return; }
-    if(ctrl && vk == 'A'){ textSession_.text.clear(); refreshTextPreview(); return; }
-    BYTE ks[256] = {};
-    GetKeyboardState(ks);
-    wchar_t buf[4] = {};
-    int n = ToUnicode(vk, MapVirtualKey(vk, MAPVK_VK_TO_VSC), ks, buf, 4, 0);
-    if(n == 1 && buf[0] >= 0x20){ textSession_.text += buf[0]; refreshTextPreview(); }
-  }
-
-  void refreshTextPreview() {
-    cursorVisible_ = true;
-    lastBlink_     = std::chrono::steady_clock::now();
-    scratchClear();
-    renderTextToScratch(textSession_.text, textSession_.x, textSession_.y,
-                        textSession_.style, /*showCursor=*/true);
-    if(onRedrawNeeded) onRedrawNeeded();
-  }
-
-  void commitTextSession() {
-    if(!textSession_.active) return;
-    if(!textSession_.text.empty())
-      commitTextToCanvas(textSession_.text, textSession_.x, textSession_.y, textSession_.style);
-    textSession_.active = false;
-    textSession_.text.clear();
-    scratchClear();
-    if(onStateChanged) onStateChanged();
-  }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // SHAPE STATE
-  // ══════════════════════════════════════════════════════════════════════════
-
-  bool  shapeDrawing_=false;
-  float shapeX0_=0,shapeY0_=0;
-
-  void shapeStart(float x,float y){ shapeX0_=x; shapeY0_=y; shapeDrawing_=true; scratchClear(); }
-  void shapePreview(float x,float y){ scratchClear(); drawShapeInto(scratchFBOHandle(),shapeX0_,shapeY0_,x,y); if(onRedrawNeeded) onRedrawNeeded(); }
-  void shapeCommit(float x,float y){
-    shapeDrawing_=false; scratchClear();
-    pushUndoSnapshotPublic();
-    drawShapeInto(committedFBOHandle(),shapeX0_,shapeY0_,x,y);
-    if(onStateChanged) onStateChanged();
-    if(onRedrawNeeded) onRedrawNeeded();
-  }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // SELECTION STATE
-  // ══════════════════════════════════════════════════════════════════════════
-
-  bool  selDrawing_   = false;
-  bool  hasSelection_ = false;
-  float selX0_=0,selY0_=0,selX1_=0,selY1_=0;
-
-  bool  moving_       = false;
-  bool  grabbed_      = false;
-  float moveAnchorX_=0,moveAnchorY_=0;
-  float moveCurX_=0,  moveCurY_=0;
-
-  std::vector<uint8_t> pixelBuf_;
-  int grabW_=0,grabH_=0;
-  int grabLX_=0,grabBY_=0;
-
-  void selectMouseDown(float x,float y){
-    if(hasSelection_ && insideSelection(x,y)){
-      moving_=true;
-      moveAnchorX_=x; moveAnchorY_=y;
-      moveCurX_=x;    moveCurY_=y;
-      if(!grabbed_){ pushUndoSnapshotPublic(); grabPixels(); eraseSource(); grabbed_=true; }
-    } else {
-      commitFloatingSelect();
-      hasSelection_=false; moving_=false; grabbed_=false; pixelBuf_.clear();
-      selDrawing_=true; selX0_=selX1_=x; selY0_=selY1_=y; scratchClear();
+    void buildQuad(){
+        float v[]={-1,-1,0,0, 1,-1,1,0, 1,1,1,1,
+                    1, 1,1,1,-1, 1,0,1,-1,-1,0,0};
+        GL.genVertexArrays(1,&quadVAO_); GL.genBuffers(1,&quadVBO_);
+        GL.bindVertexArray(quadVAO_);
+        GL.bindBuffer(GL_ARRAY_BUFFER,quadVBO_);
+        GL.bufferData(GL_ARRAY_BUFFER,sizeof(v),v,GL_STATIC_DRAW);
+        GL.enableVertexAttribArray(0);
+        GL.vertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,4*sizeof(float),(void*)0);
+        GL.enableVertexAttribArray(1);
+        GL.vertexAttribPointer(1,2,GL_FLOAT,GL_FALSE,4*sizeof(float),(void*)(8));
+        GL.bindVertexArray(0);
     }
-  }
 
-  void selectMouseMove(float x,float y){
-    if(moving_){
-      moveCurX_=x; moveCurY_=y;
-      float dx=moveCurX_-moveAnchorX_, dy=moveCurY_-moveAnchorY_;
-      scratchClear(); blitPixelsToScratch(selX0_+dx, selY0_+dy);
-      drawDots(selX0_+dx,selY0_+dy,selX1_+dx,selY1_+dy);
-      if(onRedrawNeeded) onRedrawNeeded();
-    } else if(selDrawing_){
-      selX1_=x; selY1_=y; scratchClear(); drawDots(selX0_,selY0_,selX1_,selY1_);
-      if(onRedrawNeeded) onRedrawNeeded();
+    void buildNoiseTexture(){
+        const int N=64;
+        std::vector<uint8_t> noise(N*N*3);
+        srand(42);
+        for(auto& v:noise) v=uint8_t(rand()&0xFF);
+        glGenTextures(1,&noiseTex_); glBindTexture(GL_TEXTURE_2D,noiseTex_);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+        glTexImage2D(GL_TEXTURE_2D,0,GL_RGB,N,N,0,GL_RGB,GL_UNSIGNED_BYTE,noise.data());
+        glBindTexture(GL_TEXTURE_2D,0);
     }
-  }
 
-  void selectMouseUp(float x,float y){
-    if(moving_){
-      moving_=false;
-      float dx=x-moveAnchorX_, dy=y-moveAnchorY_;
-      selX0_+=dx; selX1_+=dx; selY0_+=dy; selY1_+=dy;
-      scratchClear(); blitPixelsToScratch(selX0_, selY0_);
-      drawDots(selX0_,selY0_,selX1_,selY1_);
-      if(onRedrawNeeded) onRedrawNeeded();
-    } else if(selDrawing_){
-      selDrawing_=false; selX1_=x; selY1_=y;
-      hasSelection_=(fabsf(selX1_-selX0_)>2.f && fabsf(selY1_-selY0_)>2.f);
-      if(selX0_>selX1_) std::swap(selX0_,selX1_);
-      if(selY0_>selY1_) std::swap(selY0_,selY1_);
-      scratchClear(); if(hasSelection_) drawDots(selX0_,selY0_,selX1_,selY1_);
-      if(onRedrawNeeded) onRedrawNeeded();
+    // ── 256×1 R8 LUT (tone curves) ───────────────────────────────────────────
+    void uploadOneLUT256(GLuint& tex, const uint8_t* data){
+        if(!tex){
+            glGenTextures(1,&tex);
+            glBindTexture(GL_TEXTURE_2D,tex);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+        } else {
+            glBindTexture(GL_TEXTURE_2D,tex);
+        }
+        glTexImage2D(GL_TEXTURE_2D,0,GL_R8,256,1,0,GL_RED,GL_UNSIGNED_BYTE,data);
+        glBindTexture(GL_TEXTURE_2D,0);
     }
-  }
 
-  void commitFloatingSelect(){
-    if(pixelBuf_.empty()) return;
-    if(moving_){ float dx=moveCurX_-moveAnchorX_,dy=moveCurY_-moveAnchorY_; selX0_+=dx; selX1_+=dx; selY0_+=dy; selY1_+=dy; moving_=false; }
-    commitPixels(selX0_, selY0_); grabbed_=false; scratchClear();
-  }
-
-  void redrawSelectionOverlay(){
-    if(!hasSelection_ && !selDrawing_) return;
-    float x0,y0,x1,y1;
-    if(moving_){ float dx=moveCurX_-moveAnchorX_,dy=moveCurY_-moveAnchorY_; x0=selX0_+dx; y0=selY0_+dy; x1=selX1_+dx; y1=selY1_+dy; }
-    else { x0=selX0_; y0=selY0_; x1=selX1_; y1=selY1_; }
-    if(grabbed_ && !moving_) blitPixelsToScratch(x0, y0);
-    drawDots(x0,y0,x1,y1);
-  }
-
-  bool insideSelection(float x,float y) const {
-    return x>=selX0_ && x<=selX1_ && y>=selY0_ && y<=selY1_;
-  }
-
-  void grabPixels(){
-    int cw=canvasWidth(),ch=canvasHeight();
-    grabLX_=max(0,min((int)selX0_,cw-1)); grabBY_=max(0,min((int)selY0_,ch-1));
-    grabW_=max(1,min((int)(selX1_-selX0_),cw-grabLX_)); grabH_=max(1,min((int)(selY1_-selY0_),ch-grabBY_));
-    std::vector<uint8_t> full(size_t(cw)*ch*4); readCommitted(full.data());
-    pixelBuf_.resize(size_t(grabW_)*grabH_*4);
-    for(int r=0;r<grabH_;r++) for(int c=0;c<grabW_;c++){
-      const uint8_t *src=full.data()+((grabBY_+r)*cw+grabLX_+c)*4;
-      uint8_t *dst=pixelBuf_.data()+(r*grabW_+c)*4;
-      dst[0]=src[0]; dst[1]=src[1]; dst[2]=src[2];
-      dst[3]=(src[0]>=250&&src[1]>=250&&src[2]>=250)?0:src[3];
+    // ── 360×1 R8 LUT (HSL) ───────────────────────────────────────────────────
+    void uploadOneLUT360(GLuint& tex, const uint8_t* data){
+        if(!tex){
+            glGenTextures(1,&tex);
+            glBindTexture(GL_TEXTURE_2D,tex);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+        } else {
+            glBindTexture(GL_TEXTURE_2D,tex);
+        }
+        glTexImage2D(GL_TEXTURE_2D,0,GL_R8,360,1,0,GL_RED,GL_UNSIGNED_BYTE,data);
+        glBindTexture(GL_TEXTURE_2D,0);
     }
-  }
 
-  void eraseSource(){
-    int cw=canvasWidth(),ch=canvasHeight();
-    std::vector<uint8_t> full(size_t(cw)*ch*4); readCommitted(full.data());
-    for(int row=0;row<grabH_;row++){
-      uint8_t *p=full.data()+((grabBY_+row)*cw+grabLX_)*4;
-      for(int col=0;col<grabW_;col++){ p[col*4+0]=255; p[col*4+1]=255; p[col*4+2]=255; p[col*4+3]=255; }
+    void buildIdentityLUTs(){
+        uint8_t id[256];
+        for(int i=0;i<256;++i) id[i]=uint8_t(i);
+        uploadOneLUT256(lutTexRGB_,id);
+        uploadOneLUT256(lutTexR_,  id);
+        uploadOneLUT256(lutTexG_,  id);
+        uploadOneLUT256(lutTexB_,  id);
     }
-    uploadToCommitted(full.data());
-  }
 
-  void blitPixelsToScratch(float x0, float y0){
-    if(pixelBuf_.empty()) return;
-    int cw=canvasWidth(),ch=canvasHeight();
-    int dstLX=(int)x0,dstBY=(int)y0,srcOffX=0,srcOffY=0;
-    if(dstLX<0){srcOffX=-dstLX;dstLX=0;} if(dstBY<0){srcOffY=-dstBY;dstBY=0;}
-    int dstW=min(grabW_-srcOffX,cw-dstLX),dstH=min(grabH_-srcOffY,ch-dstBY);
-    if(dstW<=0||dstH<=0) return;
-    std::vector<uint8_t> sub(size_t(dstW)*dstH*4);
-    for(int r=0;r<dstH;r++) memcpy(sub.data()+r*dstW*4,pixelBuf_.data()+((srcOffY+r)*grabW_+srcOffX)*4,size_t(dstW)*4);
-    glBindTexture(GL_TEXTURE_2D,scratchTexHandle());
-    glTexSubImage2D(GL_TEXTURE_2D,0,dstLX,dstBY,dstW,dstH,GL_RGBA,GL_UNSIGNED_BYTE,sub.data());
-    glBindTexture(GL_TEXTURE_2D,0);
-  }
-
-  void commitPixels(float x0, float y0){
-    if(pixelBuf_.empty()) return;
-    int cw=canvasWidth(),ch=canvasHeight();
-    int dstLX=(int)x0,dstBY=(int)y0,srcOffX=0,srcOffY=0;
-    if(dstLX<0){srcOffX=-dstLX;dstLX=0;} if(dstBY<0){srcOffY=-dstBY;dstBY=0;}
-    int dstW=min(grabW_-srcOffX,cw-dstLX),dstH=min(grabH_-srcOffY,ch-dstBY);
-    if(dstW<=0||dstH<=0){pixelBuf_.clear();return;}
-    std::vector<uint8_t> full(size_t(cw)*ch*4); readCommitted(full.data());
-    for(int r=0;r<dstH;r++) for(int c=0;c<dstW;c++){
-      const uint8_t *s=pixelBuf_.data()+((srcOffY+r)*grabW_+srcOffX+c)*4;
-      uint8_t *d=full.data()+((dstBY+r)*cw+dstLX+c)*4;
-      float sa=s[3]/255.f; if(sa<=0.f) continue;
-      if(sa>=1.f){d[0]=s[0];d[1]=s[1];d[2]=s[2];d[3]=s[3];}
-      else{ float da=d[3]/255.f,oa=sa+da*(1.f-sa); if(oa>0.f){ d[0]=(uint8_t)((s[0]*sa+d[0]*da*(1.f-sa))/oa); d[1]=(uint8_t)((s[1]*sa+d[1]*da*(1.f-sa))/oa); d[2]=(uint8_t)((s[2]*sa+d[2]*da*(1.f-sa))/oa); d[3]=(uint8_t)(oa*255.f); } }
+    void buildIdentityHSLLUTs(){
+        // Identity: all neutral (128 = 0 shift, 128 = 1× scale)
+        uint8_t id[360];
+        memset(id,128,360);
+        uploadOneLUT360(hslTexHue_,id);
+        uploadOneLUT360(hslTexSat_,id);
+        uploadOneLUT360(hslTexLum_,id);
     }
-    uploadToCommitted(full.data()); pixelBuf_.clear();
-  }
 
-  void drawDots(float x0,float y0,float x1,float y1){
-    float lx=min(x0,x1),rx=max(x0,x1),by=min(y0,y1),ty=max(y0,y1);
-    const float dotSize=1.5f,gap=6.f;
-    std::vector<float> buf;
-    auto dotEdge=[&](float ax,float ay,float bx,float by2){
-      float dx=bx-ax,dy=by2-ay,len=sqrtf(dx*dx+dy*dy); if(len<1.f) return;
-      float ux=dx/len,uy=dy/len;
-      for(float d=0.f;d<len;d+=gap){
-        float cx=ax+ux*d,cy=ay+uy*d;
-        buf.insert(buf.end(),{cx-dotSize,cy-dotSize,cx+dotSize,cy-dotSize,cx+dotSize,cy+dotSize,cx+dotSize,cy+dotSize,cx-dotSize,cy+dotSize,cx-dotSize,cy-dotSize});
-      }
-    };
-    dotEdge(lx,by,rx,by); dotEdge(rx,by,rx,ty); dotEdge(rx,ty,lx,ty); dotEdge(lx,ty,lx,by);
-    drawVertsToFBO(scratchFBOHandle(),buf.data(),int(buf.size()/2),GL_TRIANGLES,0.f,0.f,0.f,1.f);
-  }
-
-  // ── Shape drawing ─────────────────────────────────────────────────────────
-  void drawShapeInto(GLuint fbo,float x0,float y0,float x1,float y1){
-    RGBA c=parseHexColor(activeColor);
-    float r=c.r,g=c.g,b=c.b,a=activeOpacity;
-    float half=max(0.5f,activeSize*0.5f);
-    float cx=(x0+x1)*0.5f, cy=(y0+y1)*0.5f;
-    float rx=std::abs(x1-x0)*0.5f, ry=std::abs(y1-y0)*0.5f;
-
-    auto emit=[&](const std::vector<float>&v,GLenum mode){ if(v.empty()) return; drawVertsToFBO(fbo,v.data(),(int)(v.size()/2),mode,r,g,b,a); };
-    auto emitOutline=[&](const std::vector<float>&v){ emit(v,GL_TRIANGLES); };
-    auto emitFan    =[&](const std::vector<float>&v){ emit(v,GL_TRIANGLE_FAN); };
-
-    auto rectOutline=[&](float lx,float by,float rx2,float ty){
-      float buf[4*12]; int total=0;
-      total=appendThickLine(lx,by,rx2,by,half,buf,total);
-      total=appendThickLine(rx2,by,rx2,ty,half,buf,total);
-      total=appendThickLine(rx2,ty,lx,ty,half,buf,total);
-      total=appendThickLine(lx,ty,lx,by,half,buf,total);
-      drawVertsToFBO(fbo,buf,total,GL_TRIANGLES,r,g,b,a);
-    };
-    auto rectFilled=[&](float lx,float by,float rx2,float ty){
-      float v[]={lx,by, rx2,by, rx2,ty, rx2,ty, lx,ty, lx,by};
-      drawVertsToFBO(fbo,v,6,GL_TRIANGLES,r,g,b,a);
-    };
-
-    switch(activeTool){
-      case Tool::Line:{ float v[12]; int n=appendThickLine(x0,y0,x1,y1,half,v,0); drawVertsToFBO(fbo,v,n,GL_TRIANGLES,r,g,b,a); break; }
-      case Tool::Rect:{ float lx=min(x0,x1),bby=min(y0,y1),rxx=max(x0,x1),ty=max(y0,y1); if(filled) rectFilled(lx,bby,rxx,ty); else rectOutline(lx,bby,rxx,ty); break; }
-      case Tool::Ellipse:{ if(filled){auto v=nGonFilled(cx,cy,rx,ry,64,0);emitFan(v);}else{auto v=ellipseOutline(cx,cy,rx,ry,64,half);emitOutline(v);} break; }
-      case Tool::Triangle:{
-        std::vector<std::pair<float,float>> pts={{cx,cy-ry},{cx+rx,cy+ry},{cx-rx,cy+ry}};
-        if(filled){auto v=std::vector<float>((3+2)*2);buildFan(cx,cy+ry*0.3f,pts,v.data());emitFan(v);}
-        else{float buf[3*12];int total=0;for(int i=0;i<3;i++){int j=(i+1)%3;total=appendThickLine(pts[i].first,pts[i].second,pts[j].first,pts[j].second,half,buf,total);}drawVertsToFBO(fbo,buf,total,GL_TRIANGLES,r,g,b,a);}
-        break;
-      }
-      case Tool::RightTriangle:{
-        std::vector<std::pair<float,float>> pts={{x0,y1},{x1,y1},{x0,y0}};
-        if(filled){float v[(3+2)*2];buildFan((x0+x1)/3.f,(y0+y1*2)/3.f,pts,v);emitFan(std::vector<float>(v,v+10));}
-        else{float buf[3*12];int total=0;for(int i=0;i<3;i++){int j=(i+1)%3;total=appendThickLine(pts[i].first,pts[i].second,pts[j].first,pts[j].second,half,buf,total);}drawVertsToFBO(fbo,buf,total,GL_TRIANGLES,r,g,b,a);}
-        break;
-      }
-      case Tool::Diamond:{
-        std::vector<std::pair<float,float>> pts={{cx,cy-ry},{cx+rx,cy},{cx,cy+ry},{cx-rx,cy}};
-        if(filled){auto v=std::vector<float>((4+2)*2);buildFan(cx,cy,pts,v.data());emitFan(v);}
-        else{float buf[4*12];int total=0;for(int i=0;i<4;i++){int j=(i+1)%4;total=appendThickLine(pts[i].first,pts[i].second,pts[j].first,pts[j].second,half,buf,total);}drawVertsToFBO(fbo,buf,total,GL_TRIANGLES,r,g,b,a);}
-        break;
-      }
-      case Tool::Pentagon:{ if(filled){auto v=nGonFilled(cx,cy,rx,ry,5,-1.5708f);emitFan(v);}else{auto v=nGonOutline(cx,cy,rx,ry,5,-1.5708f,half);emitOutline(v);} break; }
-      case Tool::Hexagon:{ if(filled){auto v=nGonFilled(cx,cy,rx,ry,6,0);emitFan(v);}else{auto v=nGonOutline(cx,cy,rx,ry,6,0,half);emitOutline(v);} break; }
-      case Tool::Star5:{
-        float ro=min(rx,ry),ri=ro*0.4f;
-        if(filled){std::vector<std::pair<float,float>> pts;float off=-1.5708f;for(int i=0;i<10;i++){float aa=off+float(i)/10*6.2831853f;float rr=(i%2==0)?ro:ri;pts.push_back({cx+cosf(aa)*rr,cy+sinf(aa)*rr});}auto v=std::vector<float>((10+2)*2);buildFan(cx,cy,pts,v.data());emitFan(v);}
-        else{auto v=star5Outline(cx,cy,ro,ri,half);emitOutline(v);}
-        break;
-      }
-      case Tool::Star6:{
-        float ro=min(rx,ry),ri=ro*0.5f;
-        if(filled){std::vector<std::pair<float,float>> pts;for(int i=0;i<12;i++){float aa=float(i)/12*6.2831853f;float rr=(i%2==0)?ro:ri;pts.push_back({cx+cosf(aa)*rr,cy+sinf(aa)*rr});}auto v=std::vector<float>((12+2)*2);buildFan(cx,cy,pts,v.data());emitFan(v);}
-        else{auto v=star6Outline(cx,cy,ro,ri,half);emitOutline(v);}
-        break;
-      }
-      case Tool::Arrow:{ auto v=arrowVerts(x0,y0,x1,y1,half); if(!v.empty()) drawVertsToFBO(fbo,v.data(),(int)(v.size()/2),GL_TRIANGLES,r,g,b,a); break; }
-      case Tool::ArrowDouble:{ auto v=doubleArrowVerts(x0,y0,x1,y1,half); if(!v.empty()) drawVertsToFBO(fbo,v.data(),(int)(v.size()/2),GL_TRIANGLES,r,g,b,a); break; }
-      case Tool::Parallelogram:{ auto v=parallelogramOutline(x0,y0,x1,y1,0.25f,half); emitOutline(v); break; }
-      case Tool::Trapezoid:{ auto v=trapezoidOutline(x0,y0,x1,y1,0.2f,half); emitOutline(v); break; }
-      case Tool::RoundRect:{
-        const int cornSegs=8;
-        float lx=min(x0,x1),bby=min(y0,y1),rxx=max(x0,x1),ty=max(y0,y1);
-        float cr=min(min(rx,ry)*0.3f,12.f);
-        std::vector<std::pair<float,float>> pts;
-        auto addCorner=[&](float ox,float oy,float startA){
-          for(int i=0;i<=cornSegs;i++){float aa=startA+float(i)/cornSegs*1.5708f;pts.push_back({ox+cosf(aa)*cr,oy+sinf(aa)*cr});}
-        };
-        addCorner(rxx-cr,ty-cr,0); addCorner(lx+cr,ty-cr,1.5708f); addCorner(lx+cr,bby+cr,3.1416f); addCorner(rxx-cr,bby+cr,4.7124f);
-        if(filled){auto v=std::vector<float>((pts.size()+2)*2);buildFan(cx,cy,pts,v.data());emitFan(v);}
-        else{int n=(int)pts.size(),total=0;std::vector<float> bufv(n*12);for(int i=0;i<n;i++){int j=(i+1)%n;total=appendThickLine(pts[i].first,pts[i].second,pts[j].first,pts[j].second,half,bufv.data(),total);}drawVertsToFBO(fbo,bufv.data(),total,GL_TRIANGLES,r,g,b,a);}
-        break;
-      }
-      case Tool::Cross:{ float arm=min(rx,ry)*0.35f; auto v=crossVerts(cx,cy,rx,ry,arm); emitFan(v); break; }
-      case Tool::Heart:{ auto v=heartFan(cx,cy,rx,ry); emitFan(v); break; }
-      default: break;
+    void rebuildEditFBOForImage(){
+        if(editFBO_){ GL.deleteFramebuffers(1,&editFBO_); editFBO_=0; }
+        if(editTex_){ glDeleteTextures(1,&editTex_);      editTex_=0; }
+        glGenTextures(1,&editTex_); glBindTexture(GL_TEXTURE_2D,editTex_);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+        glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,imgW_,imgH_,0,GL_RGBA,GL_UNSIGNED_BYTE,nullptr);
+        glBindTexture(GL_TEXTURE_2D,0);
+        GL.genFramebuffers(1,&editFBO_);
+        GL.bindFramebuffer(GL_FRAMEBUFFER,editFBO_);
+        GL.framebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,editTex_,0);
+        GL.bindFramebuffer(GL_FRAMEBUFFER,0);
     }
-  }
 
-  // ── Flood fill ───────────────────────────────────────────────────────────
-  void doFill(float cx,float cy){
-    int w=canvasWidth(),h=canvasHeight();
-    int px=int(std::floor(cx)),py=int(std::floor(cy));
-    if(px<0||py<0||px>=w||py>=h) return;
-    std::vector<uint8_t> buf(size_t(w)*h*4);
-    readCommitted(buf.data());
-    uint8_t *seed=buf.data()+(py*w+px)*4;
-    uint8_t tr=seed[0],tg=seed[1],tb=seed[2];
-    RGBA fc=parseHexColor(activeColor);
-    pushUndoSnapshotPublic();
-    floodFill(buf.data(),w,h,px,py,tr,tg,tb,uint8_t(fc.r*255),uint8_t(fc.g*255),uint8_t(fc.b*255));
-    uploadToCommitted(buf.data());
-    if(onStateChanged) onStateChanged();
-    if(onRedrawNeeded) onRedrawNeeded();
-  }
+    void uploadOriginal(){
+        if(origTex_){ glDeleteTextures(1,&origTex_); origTex_=0; }
+        glGenTextures(1,&origTex_); glBindTexture(GL_TEXTURE_2D,origTex_);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+        glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,imgW_,imgH_,0,GL_RGBA,GL_UNSIGNED_BYTE,
+                     originalPixels_.data());
+        glBindTexture(GL_TEXTURE_2D,0);
+        rebuildEditFBOForImage();
+        computeHistogram();
+    }
 
-  // ── Style sync ───────────────────────────────────────────────────────────
-  void syncStyle(){
-    RGBA c=parseHexColor(activeColor);
-    StrokeStyle s;
-    s.r=c.r;s.g=c.g;s.b=c.b;s.a=1.f;
-    s.radius=activeSize*0.5f;
-    s.opacity=activeOpacity;
-    s.tool=kToolBrush;
-    setStrokeStyle(s);
-    LayeredSurface::setOpacity(activeOpacity);
-    pendingTextStyle_.r = c.r;
-    pendingTextStyle_.g = c.g;
-    pendingTextStyle_.b = c.b;
-  }
+    void setUniforms(){
+        auto loc=[&](const char* n){ return GL.getUniformLocation(editProg_,n); };
+        const EditParams& p=params_;
+        GL.uniform1f(loc("uExposure"),    p.exposure);
+        GL.uniform1f(loc("uContrast"),    p.contrast);
+        GL.uniform1f(loc("uHighlights"),  p.highlights);
+        GL.uniform1f(loc("uShadows"),     p.shadows);
+        GL.uniform1f(loc("uWhites"),      p.whites);
+        GL.uniform1f(loc("uBlacks"),      p.blacks);
+        GL.uniform1f(loc("uTemperature"), p.temperature);
+        GL.uniform1f(loc("uTint"),        p.tint);
+        GL.uniform1f(loc("uSaturation"),  p.saturation);
+        GL.uniform1f(loc("uVibrance"),    p.vibrance);
+        GL.uniform1f(loc("uSharpness"),   p.sharpness);
+        GL.uniform1f(loc("uNoiseReduce"), p.noiseReduce);
+        GL.uniform1f(loc("uVignette"),    p.vignette);
+        GL.uniform1f(loc("uGrain"),       p.grain);
+        ie_gl::uniform2f(loc("uTexelSize"),1.f/float(imgW_),1.f/float(imgH_));
+
+        // Texture unit assignments
+        GL.uniform1i(loc("uOriginal"), 0);
+        GL.uniform1i(loc("uNoise"),    1);
+        GL.uniform1i(loc("uLutRGB"),   2);
+        GL.uniform1i(loc("uLutR"),     3);
+        GL.uniform1i(loc("uLutG"),     4);
+        GL.uniform1i(loc("uLutB"),     5);
+        GL.uniform1i(loc("uHSLHue"),   6);
+        GL.uniform1i(loc("uHSLSat"),   7);
+        GL.uniform1i(loc("uHSLLum"),   8);
+    }
+
+    void bindTextureUnit(int unit, GLuint tex){
+        ie_gl::activeTexture(GL_TEXTURE0 + unit);
+        glBindTexture(GL_TEXTURE_2D,tex);
+    }
+
+    void drawEditPass(GLuint fbo){
+        GL.bindFramebuffer(GL_FRAMEBUFFER,fbo);
+        glViewport(0,0,fbo?imgW_:viewW_,fbo?imgH_:viewH_);
+        GL.useProgram(editProg_);
+        setUniforms();
+        bindTextureUnit(0, origTex_);
+        bindTextureUnit(1, noiseTex_);
+        bindTextureUnit(2, lutTexRGB_);
+        bindTextureUnit(3, lutTexR_);
+        bindTextureUnit(4, lutTexG_);
+        bindTextureUnit(5, lutTexB_);
+        bindTextureUnit(6, hslTexHue_);
+        bindTextureUnit(7, hslTexSat_);
+        bindTextureUnit(8, hslTexLum_);
+        GL.bindVertexArray(quadVAO_);
+        glDrawArrays(GL_TRIANGLES,0,6);
+        GL.bindVertexArray(0);
+        GL.useProgram(0);
+        GL.bindFramebuffer(GL_FRAMEBUFFER,0);
+    }
+
+    void renderToExportFBO(){ drawEditPass(editFBO_); }
 };
 
-// ============================================================================
-// §4  PaintApp
-// ============================================================================
-class PaintApp : public Component {
-  State<std::string> activeColor;
-  State<double>      activeSize;
-  State<double>      activeOpacity;
-  State<Tool>        activeTool;
-  State<bool>        filledShapes;
-  State<bool>        canUndo,canRedo;
-  State<double>      zoomLevel;
-  State<std::vector<RGBA>> colorHistory;
-  State<std::string> statusMsg;
-  State<int>         fontSize;
+// =============================================================================
+// §4  FILE DIALOGS
+// =============================================================================
 
-  // ── Layer state (ported from test.cpp) ───────────────────────────────────
-  using LayerRef = ReactiveItemPtr<LayerDesc>;
-  State<std::vector<LayerRef>> layerDescs;
-  std::unordered_map<std::string, LayerRef> layerRefByName_;
+static std::wstring promptOpenImage(HWND owner){
+    wchar_t buf[MAX_PATH]={};
+    OPENFILENAMEW ofn{}; ofn.lStructSize=sizeof(ofn); ofn.hwndOwner=owner;
+    ofn.lpstrFilter=L"Image Files\0*.jpg;*.jpeg;*.png;*.bmp;*.tga\0All\0*.*\0";
+    ofn.lpstrFile=buf; ofn.nMaxFile=MAX_PATH;
+    ofn.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST; ofn.lpstrTitle=L"Open Image";
+    return GetOpenFileNameW(&ofn)?buf:L"";
+}
+static std::wstring promptExportImage(HWND owner){
+    wchar_t buf[MAX_PATH]=L"edited.png";
+    OPENFILENAMEW ofn{}; ofn.lStructSize=sizeof(ofn); ofn.hwndOwner=owner;
+    ofn.lpstrFilter=L"PNG\0*.png\0JPEG\0*.jpg\0All\0*.*\0";
+    ofn.lpstrFile=buf; ofn.nMaxFile=MAX_PATH;
+    ofn.lpstrDefExt=L"png"; ofn.Flags=OFN_OVERWRITEPROMPT|OFN_PATHMUSTEXIST;
+    ofn.lpstrTitle=L"Export Image";
+    return GetSaveFileNameW(&ofn)?buf:L"";
+}
 
-  std::shared_ptr<PaintSurface> surface_;
-  CanvasWidget *canvasPtr_ = nullptr;
-  HWND mainHwnd_ = nullptr;
+// =============================================================================
+// §5  IMAGE EDITOR APP
+// =============================================================================
 
-  static constexpr double kZoomMin=6.25,kZoomMax=200.0;
-  static constexpr int kSidebarWidth=268, kToolbarHeight=48;
-  static constexpr int kHintsHeight=24,  kAppBarHeight=32;
-  static constexpr int kLayerPanelWidth=192;
+class ImageEditorApp : public Component {
+    // ── UI state ──────────────────────────────────────────────────────────────
+    State<std::string>   statusMsg;
+    State<bool>          hasImage;
+    State<bool>          beforeMode;
+    State<HistogramData> histState;
+    State<ToneCurveData> curveState;
+    State<HSLData>       hslState;       // ← new
 
-  void refreshUndoRedo(){
-    if(!surface_) return;
-    canUndo.set(surface_->canUndo());
-    canRedo.set(surface_->canRedo());
-  }
-  void syncZoomState(float z){
-    double pct=z*100.0;
-    if(std::abs(pct-zoomLevel.get())>0.5) zoomLevel.set(pct);
-  }
-  void applyZoomFromSlider(double pct){
-    if(!canvasPtr_) return;
-    Viewport&vp=canvasPtr_->viewport();
-    float t=float(pct/100.0),cur=vp.zoom();
-    if(std::abs(t-cur)<0.0001f) return;
-    vp.zoomToward(vp.viewW()*.5f,vp.viewH()*.5f,t/cur);
-    canvasPtr_->redraw();
-  }
-  void doSavePNG(){
-    if(!surface_||!canvasPtr_) return;
-    std::wstring path=promptSavePath(mainHwnd_);
-    if(path.empty()) return;
-    if(!surface_->savePNG(path))
-      MessageBoxW(mainHwnd_,L"Failed to save PNG.",L"Error",MB_ICONERROR|MB_OK);
-  }
+    // ── Tone sliders ──────────────────────────────────────────────────────────
+    State<double> sExposure,sContrast,sHighlights,sShadows,sWhites,sBlacks;
+    // ── Color sliders ─────────────────────────────────────────────────────────
+    State<double> sTemperature,sTint,sSaturation,sVibrance;
+    // ── Detail sliders ────────────────────────────────────────────────────────
+    State<double> sSharpness,sNoiseReduce;
+    // ── Effects sliders ───────────────────────────────────────────────────────
+    State<double> sVignette,sGrain;
+
+    std::shared_ptr<ImageEditSurface> surface_;
+    ToneCurveWidget* curveWidgetPtr_ = nullptr;
+    HSLPanelWidget*  hslWidgetPtr_   = nullptr;  // ← new
+    CanvasWidget*    canvasPtr_      = nullptr;
+    HWND             mainHwnd_       = nullptr;
+
+    static constexpr int kPanelW=290, kToolbarH=44, kHintsH=22;
+
+    template<typename F>
+    void wire(State<double>& st, F EditParams::* field){
+        st.listen([this,field](double v){
+            if(!surface_) return;
+            surface_->params().*field=float(v);
+            if(canvasPtr_) canvasPtr_->redraw();
+        });
+    }
 
 public:
-  PaintApp()
-    : activeColor("#cba6f7",context),activeSize(4.0,context),
-      activeOpacity(1.0,context),activeTool(Tool::Brush,context),
-      filledShapes(false,context),
-      canUndo(false,context),canRedo(false,context),
-      zoomLevel(100.0,context),colorHistory({},context),
-      statusMsg("",context),
-      fontSize(20,context),
-      layerDescs({},context) {}
+    ImageEditorApp()
+        : statusMsg("Open an image to begin.",context)
+        , hasImage(false,context), beforeMode(false,context)
+        , histState(HistogramData{},context)
+        , curveState(ToneCurveData{},context)
+        , hslState(HSLData{},context)         // ← new
+        , sExposure(0.0,context),  sContrast(0.0,context)
+        , sHighlights(0.0,context),sShadows(0.0,context)
+        , sWhites(0.0,context),    sBlacks(0.0,context)
+        , sTemperature(0.0,context),sTint(0.0,context)
+        , sSaturation(0.0,context),sVibrance(0.0,context)
+        , sSharpness(0.0,context), sNoiseReduce(0.0,context)
+        , sVignette(0.0,context),  sGrain(0.0,context)
+    {}
 
-  WidgetPtr build() override {
-    int screenW=GetSystemMetrics(SM_CXSCREEN);
-    int screenH=GetSystemMetrics(SM_CYSCREEN);
-    int viewW=screenW-kSidebarWidth-kLayerPanelWidth;
-    int viewH=screenH-kAppBarHeight-kToolbarHeight-kHintsHeight;
-    static constexpr int kPaperW=1240,kPaperH=1754;
+    WidgetPtr build() override {
+        int screenW=GetSystemMetrics(SM_CXSCREEN);
+        int screenH=GetSystemMetrics(SM_CYSCREEN);
+        int viewW=screenW-kPanelW, viewH=screenH-kToolbarH-kHintsH;
 
-    // ── LayeredCanvas instead of RasterCanvas ─────────────────────────────
-    auto canvas=LayeredCanvas(viewW,viewH,kPaperW,kPaperH);
-    surface_=canvas->setSurface<PaintSurface>();
-    canvasPtr_=canvas.get();
-    mainHwnd_=GetActiveWindow();
+        auto canvas=std::make_shared<CanvasWidget>()->setSize(viewW,viewH);
+        canvas->setCanvasSize(1,1);
+        surface_=canvas->setSurface<ImageEditSurface>();
+        canvasPtr_=canvas.get();
+        mainHwnd_=GetActiveWindow();
 
-    surface_->onStateChanged  =[this](){ refreshUndoRedo(); };
-    surface_->onHistoryChanged=[this](const std::vector<RGBA>&h){ colorHistory.set(h); };
-    surface_->onStatusMessage =[this](const std::string&m){ statusMsg.set(m); };
-    surface_->onRedrawNeeded  =[this](){ if(canvasPtr_) canvasPtr_->redraw(); };
-    surface_->onCursorChange  =[](HCURSOR c){ SetCursor(c); };
-    canvas->onViewportChanged =[this](float z){ syncZoomState(z); };
+        surface_->onImageLoaded=[this](){
+            hasImage.set(true);
+            if(canvasPtr_){
+                canvasPtr_->setCanvasSize(surface_->imageWidth(),surface_->imageHeight());
+                canvasPtr_->viewport().fitToView();
+                canvasPtr_->redraw();
+            }
+        };
+        surface_->onStatusMessage=[this](const char* m){ statusMsg.set(m); };
+        surface_->onHistogramUpdated=[this](const HistogramData& d){
+            histState.set(d);
+            if(curveWidgetPtr_) curveWidgetPtr_->setHistogram(d.r,d.g,d.b);
+        };
 
-    // ── Layer change handler (ported from test.cpp) ────────────────────────
-    surface_->onLayersChanged = [this](const LayerState& ls) {
-      int count = int(ls.layers.size());
-      std::vector<LayerDesc> ordered;
-      ordered.reserve(count);
-      for (int i = count - 1; i >= 0; i--)
-        ordered.push_back(ls.layers[i]);
+        wire(sExposure,    &EditParams::exposure);
+        wire(sContrast,    &EditParams::contrast);
+        wire(sHighlights,  &EditParams::highlights);
+        wire(sShadows,     &EditParams::shadows);
+        wire(sWhites,      &EditParams::whites);
+        wire(sBlacks,      &EditParams::blacks);
+        wire(sTemperature, &EditParams::temperature);
+        wire(sTint,        &EditParams::tint);
+        wire(sSaturation,  &EditParams::saturation);
+        wire(sVibrance,    &EditParams::vibrance);
+        wire(sSharpness,   &EditParams::sharpness);
+        wire(sNoiseReduce, &EditParams::noiseReduce);
+        wire(sVignette,    &EditParams::vignette);
+        wire(sGrain,       &EditParams::grain);
 
-      std::unordered_set<std::string> activeNames;
-      for (auto& ld : ordered) activeNames.insert(ld.name);
+        // ── Colors ────────────────────────────────────────────────────────────
+        COLORREF kBg1=RGB(17,17,27),  kBg2=RGB(24,24,37);
+        COLORREF kBorder=RGB(49,50,68), kText=RGB(205,214,244);
+        COLORREF kDim=RGB(100,105,130), kAccent=RGB(174,129,255);
+        COLORREF kGreen=RGB(148,226,213), kOrange=RGB(250,179,135);
 
-      for (auto it = layerRefByName_.begin(); it != layerRefByName_.end(); ) {
-        if (!activeNames.count(it->first)) it = layerRefByName_.erase(it);
-        else ++it;
-      }
+        auto sectionLabel=[&](const std::string& t)->WidgetPtr{
+            return Text(t)->setFontSize(9)->setTextColor(RGB(100,105,125))
+                ->setFontWeight(FontWeight::Bold);
+        };
+        auto cardWrap=[&](WidgetPtr child)->WidgetPtr{
+            return Container(child)->setBackgroundColor(kBg2)->setBorderRadius(8)
+                ->setBorderWidth(1)->setBorderColor(kBorder)->setPaddingAll(10,10,10,10);
+        };
+        auto makeSlider=[&](const std::string& label,double lo,double hi,double step,
+                             State<double>& st,COLORREF col=RGB(174,129,255))->WidgetPtr{
+            return Column(
+                Row(Text(label)->setFontSize(9)->setTextColor(kDim)->setMinWidth(80),
+                    SizedBox(4,0),
+                    Text(st,[](double v){char b[16];_snprintf_s(b,sizeof(b),_TRUNCATE,"%.2f",v);
+                                         return std::string(b);})
+                        ->setFontSize(9)->setTextColor(kText)->setMinWidth(36)
+                )->setSpacing(0)->setCrossAxisAlignment(CrossAxisAlignment::Center),
+                SizedBox(0,4),
+                Slider(lo,hi,step)->setValue(st)->setTrackFillColor(col)->setWidth(258)
+            )->setSpacing(0);
+        };
 
-      bool structuralChange = false;
-      std::vector<LayerRef> newVec;
-      newVec.reserve(count);
-      for (auto& ld : ordered) {
-        auto it = layerRefByName_.find(ld.name);
-        if (it != layerRefByName_.end()) {
-          it->second->set(ld);
-          newVec.push_back(it->second);
-        } else {
-          auto ref = MakeReactive(ld);
-          layerRefByName_[ld.name] = ref;
-          newVec.push_back(ref);
-          structuralChange = true;
-        }
-      }
+        // ── §A  HISTOGRAM ─────────────────────────────────────────────────────
+        auto histSection=cardWrap(Column(
+            Row(sectionLabel("HISTOGRAM"),SizedBox(4,0),
+                Text(hasImage,[](bool b)->std::string{return b?"":" (no image)";})->setFontSize(9)->setTextColor(kDim)
+            )->setSpacing(0)->setCrossAxisAlignment(CrossAxisAlignment::Center),
+            SizedBox(0,6),
+            Histogram(258,90)->setData(histState)->setMode(HistogramMode::RGB)
+                ->setShowGrid(true)->setShowClip(true)->setShowChannelToggles(true)
+                ->setLogScale(false)->setBgColor(RGB(14,14,22))
+                ->setOnZoneClicked([this](float pos){
+                    sExposure.set(max(-5.0,min(5.0,(pos-0.5)*4.0)));
+                })
+        )->setSpacing(0));
 
-      bool orderChanged = false;
-      {
-        const auto& cur = layerDescs.get();
-        if (cur.size() != newVec.size()) { orderChanged = true; }
-        else { for (size_t i = 0; i < cur.size(); i++) { if (cur[i].get() != newVec[i].get()) { orderChanged = true; break; } } }
-      }
-      if (structuralChange || int(layerDescs.get().size()) != count || orderChanged)
-        layerDescs.set(newVec);
+        // ── §B  TONE CURVE ────────────────────────────────────────────────────
+        auto curveWidget=ToneCurve(258,220)
+            ->setShowHistogram(true)->setShowRegions(true)->setShowGrid(true)
+            ->setCurveData(curveState)
+            ->setOnCurveChanged([this](const ToneCurveData& d){
+                curveState.set(d);
+                if(!surface_) return;
+                surface_->uploadCurveLUTs(
+                    d.rgb.buildLUT(), d.r.buildLUT(),
+                    d.g.buildLUT(),   d.b.buildLUT());
+                if(canvasPtr_) canvasPtr_->redraw();
+            });
+        curveWidgetPtr_=curveWidget.get();
 
-      if (canvasPtr_) canvasPtr_->redraw();
-    };
+        auto modeBtn=[&](const std::string& lbl,COLORREF col,std::function<void()> fn)->WidgetPtr{
+            return GestureDetector(
+                Container(Text(lbl)->setFontSize(9)->setTextColor(col))
+                    ->setBackgroundColor(RGB(24,24,34))->setBorderRadius(4)
+                    ->setPaddingAll(6,3,6,3)->setBorderWidth(1)->setBorderColor(kBorder)
+            )->setOnTap(fn);
+        };
+        auto curveModeRow=Row(
+            modeBtn("Point Curve",kAccent,[cw=curveWidget.get()]{ cw->setParametricMode(false); }),
+            SizedBox(5,0),
+            modeBtn("Parametric", kDim,  [cw=curveWidget.get()]{ cw->setParametricMode(true); }),
+            SizedBox(5,0),
+            modeBtn("Reset",RGB(200,100,100),[this,cw=curveWidget.get()]{
+                cw->resetCurve();
+                curveState.set(ToneCurveData{});
+                if(surface_){
+                    ToneCurveData id;
+                    surface_->uploadCurveLUTs(
+                        id.rgb.buildLUT(),id.r.buildLUT(),
+                        id.g.buildLUT(), id.b.buildLUT());
+                    if(canvasPtr_) canvasPtr_->redraw();
+                }
+            })
+        )->setSpacing(0)->setCrossAxisAlignment(CrossAxisAlignment::Center);
 
-    activeColor.listen([this](const std::string&col){ if(surface_) surface_->setColor(col); });
-    activeSize.listen([this](double sz)  { if(surface_) surface_->setSize(float(sz)); });
-    activeOpacity.listen([this](double op){ if(surface_) surface_->setOpacity(float(op)); });
-    activeTool.listen([this](Tool t)     { if(surface_) surface_->setActiveTool(t); });
-    filledShapes.listen([this](bool f)   { if(surface_) surface_->setFilled(f); });
-    zoomLevel.listen([this](double pct)  { applyZoomFromSlider(pct); });
+        auto curveSection=cardWrap(Column(
+            Row(sectionLabel("TONE CURVE"),SizedBox(8,0),curveModeRow)
+                ->setSpacing(0)->setCrossAxisAlignment(CrossAxisAlignment::Center),
+            SizedBox(0,8),
+            curveWidget
+        )->setSpacing(0));
 
-    fontSize.listen([this](int sz){
-      if(!surface_) return;
-      TextStyle s = surface_->getTextStyle();
-      s.fontSize = sz;
-      surface_->setTextStyle(s);
-    });
+        // ── §C  TONE SLIDERS ──────────────────────────────────────────────────
+        auto toneSection=cardWrap(Column(
+            sectionLabel("TONE"),SizedBox(0,8),
+            makeSlider("Exposure",  -5.0,5.0,0.05,sExposure,  RGB(250,220,100)),SizedBox(0,6),
+            makeSlider("Contrast",  -1.0,1.0,0.01,sContrast,  kAccent),         SizedBox(0,6),
+            makeSlider("Highlights",-1.0,1.0,0.01,sHighlights,RGB(200,200,220)),SizedBox(0,6),
+            makeSlider("Shadows",   -1.0,1.0,0.01,sShadows,   RGB(80,100,160)), SizedBox(0,6),
+            makeSlider("Whites",    -1.0,1.0,0.01,sWhites,    RGB(230,230,230)),SizedBox(0,6),
+            makeSlider("Blacks",    -1.0,1.0,0.01,sBlacks,    RGB(60,60,80))
+        )->setSpacing(0));
 
-    // ── Shared style helpers ──────────────────────────────────────────────
-    auto sectionLabel=[](const std::string&txt)->WidgetPtr{
-      return Text(txt)->setFontSize(9)->setTextColor(RGB(100,105,125))->setFontWeight(FontWeight::Bold);
-    };
+        // ── §D  COLOR ─────────────────────────────────────────────────────────
+        auto colorSection=cardWrap(Column(
+            sectionLabel("COLOR"),SizedBox(0,8),
+            makeSlider("Temperature",-1.0,1.0,0.01,sTemperature,RGB(100,180,250)),SizedBox(0,6),
+            makeSlider("Tint",       -1.0,1.0,0.01,sTint,        RGB(200,120,200)),SizedBox(0,6),
+            makeSlider("Saturation", -1.0,1.0,0.01,sSaturation,  RGB(220,120,100)),SizedBox(0,6),
+            makeSlider("Vibrance",   -1.0,1.0,0.01,sVibrance,    RGB(170,220,120))
+        )->setSpacing(0));
 
-    COLORREF kAccent=RGB(174,129,255);
-    COLORREF kBg1   =RGB(17,17,27);
-    COLORREF kBg2   =RGB(24,24,37);
-    COLORREF kBorder=RGB(49,50,68);
-    COLORREF kText  =RGB(205,214,244);
-    COLORREF kDim   =RGB(100,105,130);
-    COLORREF kSubtext=RGB(130,132,155);
-    COLORREF kCard  =RGB(30,30,46);
+        // ── §E  HSL / COLOR MIX ───────────────────────────────────────────────
+        // The HSL panel widget handles its own internal layout and scrolling.
+        // We wrap it in a card just like the other sections.
+        auto hslWidget = HSLPanel(258)
+            ->setData(hslState)
+            ->setActiveTab(HSLTab::All)
+            ->setOnHSLChanged([this](const HSLData& d){
+                hslState.set(d);
+                if(!surface_) return;
+                auto luts = d.buildGPULUTs();
+                surface_->uploadHSLLUTs(
+                    luts.hue.data(),
+                    luts.sat.data(),
+                    luts.lum.data());
+                if(canvasPtr_) canvasPtr_->redraw();
+            });
+        hslWidgetPtr_ = hslWidget.get();
 
-    auto cardWrap=[&](WidgetPtr child)->WidgetPtr{
-      return Container(child)
-        ->setBackgroundColor(kBg2)->setBorderRadius(8)
-        ->setBorderWidth(1)->setBorderColor(kBorder)
-        ->setPaddingAll(10,10,10,10);
-    };
+        // Reset button for the HSL panel
+        auto hslResetBtn = modeBtn("Reset", RGB(200,100,100), [this](){
+            if(hslWidgetPtr_) hslWidgetPtr_->resetAll();
+            hslState.set(HSLData{});
+            if(surface_){
+                HSLData id;
+                auto luts = id.buildGPULUTs();
+                surface_->uploadHSLLUTs(
+                    luts.hue.data(),
+                    luts.sat.data(),
+                    luts.lum.data());
+                if(canvasPtr_) canvasPtr_->redraw();
+            }
+        });
 
-    // ── Tool button factory ────────────────────────────────────────────────
-    auto makeToolBtn=[&](Tool tv,const std::string&icon,const std::string&lbl)->WidgetPtr{
-      return GestureDetector(
-        Container(
-          Column(
-            Text(icon)->setFontSize(14)->setTextColor(
-              activeTool,[tv](const Tool&at){ return at==tv?RGB(203,166,247):RGB(140,140,160); }),
-            SizedBox(0,1),
-            Text(lbl)->setFontSize(7)->setTextColor(
-              activeTool,[tv](const Tool&at){ return at==tv?RGB(220,200,255):RGB(100,100,120); })
-          )->setSpacing(0)->setCrossAxisAlignment(CrossAxisAlignment::Center)
-        )->setWidth(56)->setHeight(42)->setBorderRadius(6)
-         ->setBackgroundColor(activeTool,[tv](const Tool&at){ return at==tv?RGB(40,35,58):RGB(24,24,37); })
-         ->setBorderWidth(activeTool,[tv](const Tool&at){ return at==tv?2:1; })
-         ->setBorderColor(activeTool,[tv](const Tool&at){ return at==tv?RGB(147,112,219):RGB(49,50,68); })
-      )->setOnTap([this,tv](){ activeTool.set(tv); });
-    };
+        auto hslSection=cardWrap(Column(
+            Row(sectionLabel("HSL / COLOR MIX"),SizedBox(8,0), hslResetBtn)
+                ->setSpacing(0)->setCrossAxisAlignment(CrossAxisAlignment::Center),
+            SizedBox(0,8),
+            hslWidget
+        )->setSpacing(0));
 
-    // ── §A  DRAW TOOLS section ─────────────────────────────────────────────
-    auto drawRow=std::make_shared<RowWidget>(); drawRow->setSpacing(4);
-    drawRow->addChild(makeToolBtn(Tool::Brush,  "🖌", "Brush"));
-    drawRow->addChild(makeToolBtn(Tool::Eraser, "⬜", "Eraser"));
-    drawRow->addChild(makeToolBtn(Tool::Fill,   "🪣", "Fill"));
-    drawRow->addChild(makeToolBtn(Tool::Select, "⬚", "Select"));
+        // ── §F  DETAIL ────────────────────────────────────────────────────────
+        auto detailSection=cardWrap(Column(
+            sectionLabel("DETAIL"),SizedBox(0,8),
+            makeSlider("Sharpness",   0.0,1.0,0.01,sSharpness,  kAccent), SizedBox(0,6),
+            makeSlider("Noise Reduce",0.0,1.0,0.01,sNoiseReduce,kGreen)
+        )->setSpacing(0));
 
-    auto drawRow2=std::make_shared<RowWidget>(); drawRow2->setSpacing(4);
-    drawRow2->addChild(makeToolBtn(Tool::Text,  "𝐓",  "Text"));
+        // ── §G  EFFECTS ───────────────────────────────────────────────────────
+        auto effectsSection=cardWrap(Column(
+            sectionLabel("EFFECTS"),SizedBox(0,8),
+            makeSlider("Vignette",-1.0,1.0,0.01,sVignette,RGB(80,80,100)), SizedBox(0,6),
+            makeSlider("Grain",    0.0,1.0,0.01,sGrain,   RGB(180,160,130))
+        )->setSpacing(0));
 
-    auto drawSection=cardWrap(
-      Column(sectionLabel("DRAW"),SizedBox(0,8),drawRow,SizedBox(0,4),drawRow2)->setSpacing(0)
-    );
+        // ── §H  PANEL (scrollable) ────────────────────────────────────────────
+        auto panel=Container(
+            ListView({
+                histSection,   SizedBox(0,6),
+                curveSection,  SizedBox(0,6),
+                toneSection,   SizedBox(0,6),
+                colorSection,  SizedBox(0,6),
+                hslSection,    SizedBox(0,6),   // ← inserted between color and detail
+                detailSection, SizedBox(0,6),
+                effectsSection
+            })->setSpacing(0)
+        )->setWidth(kPanelW)->setBackgroundColor(kBg1)->setPaddingAll(10,10,10,10);
 
-    // ── §B  SHAPE TOOLS section ────────────────────────────────────────────
-    struct SD{ Tool t; std::string icon; std::string label; };
-    const std::vector<SD> basicShapes={{Tool::Line,"╱","Line"},{Tool::Rect,"▭","Rect"},{Tool::RoundRect,"▢","RndRect"},{Tool::Ellipse,"⬭","Ellipse"}};
-    const std::vector<SD> polyShapes={{Tool::Triangle,"△","Triangle"},{Tool::RightTriangle,"◺","R.Tri"},{Tool::Diamond,"◇","Diamond"},{Tool::Pentagon,"⬠","Pentagon"}};
-    const std::vector<SD> starShapes={{Tool::Hexagon,"⬡","Hexagon"},{Tool::Star5,"★","Star 5"},{Tool::Star6,"✡","Star 6"},{Tool::Cross,"✛","Cross"}};
-    const std::vector<SD> specialShapes={{Tool::Arrow,"→","Arrow"},{Tool::ArrowDouble,"↔","Dbl Arrow"},{Tool::Parallelogram,"▱","Parallel."},{Tool::Trapezoid,"⏢","Trapezoid"}};
-    const std::vector<SD> extraShapes={{Tool::Heart,"♥","Heart"}};
+        // ── §I  TOOLBAR ───────────────────────────────────────────────────────
+        auto mkBtn=[&](const std::string& lbl,COLORREF c,std::function<void()> fn)->WidgetPtr{
+            return Button(lbl,fn)->setBackgroundColor(RGB(30,30,46))->setTextColor(c)
+                ->setBorderRadius(5)->setHeight(26)->setPadding(4);
+        };
+        auto toolbar=Container(Row(
+            mkBtn("📂 Open",kGreen,[this](){
+                std::wstring p=promptOpenImage(mainHwnd_);
+                if(!p.empty()&&surface_) surface_->loadImage(p.c_str());
+            }),SizedBox(8,0),
+            mkBtn("💾 Export",kAccent,[this](){
+                if(!surface_||!surface_->hasImage()) return;
+                std::wstring p=promptExportImage(mainHwnd_);
+                if(!p.empty()) surface_->exportImage(p.c_str());
+            }),SizedBox(8,0),
+            mkBtn("↺ Reset All",kOrange,[this](){
+                if(!surface_) return;
+                surface_->params().reset();
 
-    auto makeShapeRow=[&](const std::vector<SD>&shapes)->std::shared_ptr<RowWidget>{
-      auto row=std::make_shared<RowWidget>(); row->setSpacing(4);
-      for(auto&s:shapes) row->addChild(makeToolBtn(s.t,s.icon,s.label));
-      return row;
-    };
+                // Reset tone curve
+                if(curveWidgetPtr_) curveWidgetPtr_->resetCurve();
+                curveState.set(ToneCurveData{});
+                {
+                    ToneCurveData id;
+                    surface_->uploadCurveLUTs(
+                        id.rgb.buildLUT(),id.r.buildLUT(),
+                        id.g.buildLUT(), id.b.buildLUT());
+                }
 
-    auto fillToggle=GestureDetector(
-      Container(
-        Row(
-          Container(nullptr)->setWidth(14)->setHeight(14)->setBorderRadius(3)
-           ->setBackgroundColor(filledShapes,[](const bool&f){ return f?RGB(174,129,255):RGB(17,17,27); })
-           ->setBorderWidth(1)->setBorderColor(RGB(147,112,219)),
-          SizedBox(6,0),
-          Text("Fill shapes")->setFontSize(10)->setTextColor(RGB(160,165,190))
-        )->setSpacing(0)->setCrossAxisAlignment(CrossAxisAlignment::Center)
-      )->setPaddingAll(6,4,6,4)->setBorderRadius(5)
-       ->setBackgroundColor(RGB(24,24,37))->setBorderWidth(1)->setBorderColor(kBorder)
-    )->setOnTap([this](){ filledShapes.set(!filledShapes.get()); });
+                // Reset HSL
+                if(hslWidgetPtr_) hslWidgetPtr_->resetAll();
+                hslState.set(HSLData{});
+                {
+                    HSLData id;
+                    auto luts = id.buildGPULUTs();
+                    surface_->uploadHSLLUTs(
+                        luts.hue.data(),
+                        luts.sat.data(),
+                        luts.lum.data());
+                }
 
-    auto shapeSection=cardWrap(
-      Column(
-        sectionLabel("SHAPES"),SizedBox(0,8),
-        makeShapeRow(basicShapes),   SizedBox(0,4),
-        makeShapeRow(polyShapes),    SizedBox(0,4),
-        makeShapeRow(starShapes),    SizedBox(0,4),
-        makeShapeRow(specialShapes), SizedBox(0,4),
-        makeShapeRow(extraShapes),   SizedBox(0,8),
-        fillToggle
-      )->setSpacing(0)
-    );
+                // Reset all sliders
+                sExposure.set(0);   sContrast.set(0);
+                sHighlights.set(0); sShadows.set(0);
+                sWhites.set(0);     sBlacks.set(0);
+                sTemperature.set(0);sTint.set(0);
+                sSaturation.set(0); sVibrance.set(0);
+                sSharpness.set(0);  sNoiseReduce.set(0);
+                sVignette.set(0);   sGrain.set(0);
 
-    // ── §B2  FONT SIZE section ─────────────────────────────────────────────
-    auto fontSizeSection=cardWrap(
-      Column(
-        sectionLabel("FONT SIZE"),SizedBox(0,6),
-        Row(
-          GestureDetector(
-            Container(Text("–")->setFontSize(14)->setTextColor(RGB(180,180,200)))
-              ->setWidth(24)->setHeight(24)->setBorderRadius(4)
-              ->setBackgroundColor(RGB(35,35,55))->setBorderWidth(1)->setBorderColor(kBorder)
-          )->setOnTap([this](){ fontSize.set(max(8, fontSize.get()-2)); }),
-          SizedBox(4,0),
-          Container(
-            Text(fontSize,[](const int&sz){ return std::to_string(sz); })
-              ->setFontSize(10)->setTextColor(RGB(200,200,220))
-          )->setWidth(32)->setHeight(24)->setBorderRadius(4)
-           ->setBackgroundColor(RGB(22,22,38))->setBorderWidth(1)->setBorderColor(kBorder),
-          SizedBox(4,0),
-          GestureDetector(
-            Container(Text("+")->setFontSize(14)->setTextColor(RGB(180,180,200)))
-              ->setWidth(24)->setHeight(24)->setBorderRadius(4)
-              ->setBackgroundColor(RGB(35,35,55))->setBorderWidth(1)->setBorderColor(kBorder)
-          )->setOnTap([this](){ fontSize.set(min(96, fontSize.get()+2)); })
-        )->setSpacing(0)
-      )->setSpacing(0)
-    );
+                if(canvasPtr_) canvasPtr_->redraw();
+            }),SizedBox(8,0),
+            GestureDetector(
+                Container(Text(beforeMode,[](const bool& b){
+                    return std::string(b?"After ▶":"Before ◀");
+                })->setFontSize(11)->setTextColor(kText))
+                ->setBackgroundColor(RGB(30,30,46))->setBorderRadius(5)
+                ->setPaddingAll(6,3,6,3)->setBorderWidth(1)->setBorderColor(kBorder)
+            )->setOnTap([this](){
+                bool b=!beforeMode.get(); beforeMode.set(b);
+                if(surface_){
+                    if(b){ savedParams_=surface_->params(); surface_->params().reset(); }
+                    else { surface_->params()=savedParams_; }
+                    if(canvasPtr_) canvasPtr_->redraw();
+                }
+            }),
+            SizedBox(16,0),
+            Text("Zoom:")->setFontSize(10)->setTextColor(kDim),
+            Button("Fit",[this](){if(canvasPtr_){canvasPtr_->viewport().fitToView();canvasPtr_->redraw();}})
+                ->setBackgroundColor(RGB(24,24,37))->setTextColor(kAccent)
+                ->setBorderRadius(5)->setWidth(32)->setHeight(26)->setPadding(4),
+            Button("1:1",[this](){if(canvasPtr_){canvasPtr_->viewport().resetZoom();canvasPtr_->redraw();}})
+                ->setBackgroundColor(RGB(24,24,37))->setTextColor(kAccent)
+                ->setBorderRadius(5)->setWidth(32)->setHeight(26)->setPadding(4),
+            SizedBox(16,0),
+            Text(statusMsg,[](const std::string& s){return s;})
+                ->setFontSize(10)->setTextColor(kGreen)
+        )->setSpacing(4)->setCrossAxisAlignment(CrossAxisAlignment::Center))
+        ->setBackgroundColor(kBg1)->setPaddingAll(10,7,10,7)->setHeight(kToolbarH);
 
-    // ── §C  Color ─────────────────────────────────────────────────────────
-    auto selectedSwatch=cardWrap(
-      Row(
-        Container(nullptr)->setWidth(32)->setHeight(32)->setBorderRadius(6)
-         ->setBackgroundColor(activeColor,[](const std::string&c){ return hexToRef(c); })
-         ->setBorderWidth(1)->setBorderColor(RGB(69,71,90)),
-        SizedBox(8,0),
-        Column(
-          Text("Selected")->setFontSize(9)->setTextColor(RGB(100,105,125)),
-          SizedBox(0,2),
-          Text(activeColor,[](const std::string&c){ return c; })->setFontSize(11)->setTextColor(kText)
-        )->setSpacing(0)
-      )->setSpacing(0)->setCrossAxisAlignment(CrossAxisAlignment::Center)
-    );
+        // ── §J  HINTS ─────────────────────────────────────────────────────────
+        auto hints=Container(Row(
+            Text("MMB/Space: Pan")->setFontSize(10)->setTextColor(RGB(60,60,80)),SizedBox(10,0),
+            Text("Ctrl+Scroll: Zoom")->setFontSize(10)->setTextColor(RGB(60,60,80)),SizedBox(10,0),
+            Text("Curve: click=add  dbl-click=delete  arrow keys=nudge  |  HSL: dbl-click label=reset band")
+                ->setFontSize(10)->setTextColor(RGB(60,60,80))
+        )->setSpacing(0))->setBackgroundColor(kBg1)->setPaddingAll(10,3,10,3)->setHeight(kHintsH);
 
-    auto picker=ColorPicker(hexToRef(activeColor.get()))->setShowAlpha(false)
-      ->setOnColorChanged([this](COLORREF c){ activeColor.set(refToHex(c)); });
-    auto pickerSection=cardWrap(picker);
-
-    auto historyList=ListView(colorHistory)->itemBuilder([this](int,const RGBA&c)->WidgetPtr{
-      char hex[8]; _snprintf_s(hex,sizeof(hex),_TRUNCATE,"#%02x%02x%02x",int(c.r*255),int(c.g*255),int(c.b*255));
-      std::string col=hex;
-      return GestureDetector(
-        Container(nullptr)->setWidth(20)->setHeight(20)->setBorderRadius(10)
-         ->setBackgroundColor(hexToRef(col))->setBorderWidth(1)->setBorderColor(RGB(80,80,100))
-      )->setOnTap([this,col](){ activeColor.set(col); });
-    })->setHorizontal(true)->setSpacing(4)->setScrollbarSize(3)
-      ->setScrollbarColor(RGB(60,62,80))->setScrollbarHoverColor(RGB(100,102,120));
-
-    auto historySection=cardWrap(
-      Column(
-        sectionLabel("RECENT COLORS"),SizedBox(0,8),
-        Conditional(colorHistory,[](const std::vector<RGBA>&h){ return !h.empty(); })
-          ->Then([&]{ return SizedBox(224,22,historyList); })
-          ->Else([&]{ return Text("Paint a stroke to record colors")->setFontSize(9)->setTextColor(RGB(70,72,90)); })
-      )->setSpacing(0)
-    );
-
-    auto pc1=std::make_shared<RowWidget>(); pc1->setSpacing(4);
-    auto pc2=std::make_shared<RowWidget>(); pc2->setSpacing(4);
-    for(int i=0;i<(int)surface_->kPalette.size();i++){
-      const auto&[col,lbl]=surface_->kPalette[i]; std::string c=col;
-      auto sw=GestureDetector(
-        Container(nullptr)->setWidth(20)->setHeight(20)->setBorderRadius(10)
-         ->setBackgroundColor(hexToRef(col))
-         ->setBorderWidth(activeColor,[c](const std::string&a){ return a==c?2:0; })
-         ->setBorderColor(activeColor,[c](const std::string&a){ return a==c?RGB(255,255,255):RGB(0,0,0); })
-      )->setOnTap([this,c](){ activeColor.set(c); });
-      if(i%2==0) pc1->addChild(sw); else pc2->addChild(sw);
+        auto canvasCol=Column(toolbar,hints,canvas)->setSpacing(0);
+        return Scaffold(Row(canvasCol,panel)->setSpacing(0));
     }
-    auto paletteSection=cardWrap(Column(sectionLabel("PRESETS"),SizedBox(0,8),Column(pc1,SizedBox(0,4),pc2)->setSpacing(0))->setSpacing(0));
 
-    auto sizeSection=cardWrap(
-      Column(
-        Row(sectionLabel("SIZE"),SizedBox(6,0),
-          Text(activeSize,[](double v){ return std::to_string(int(std::round(v)))+"px"; })->setFontSize(9)->setTextColor(RGB(160,160,180))
-        )->setSpacing(0)->setCrossAxisAlignment(CrossAxisAlignment::Center),
-        SizedBox(0,8),
-        Slider(1.0,40.0,0.5)->setValue(activeSize)->setTrackFillColor(kAccent)->setWidth(224)
-      )->setSpacing(0)
-    );
-    auto opacitySection=cardWrap(
-      Column(
-        Row(sectionLabel("OPACITY"),SizedBox(6,0),
-          Text(activeOpacity,[](double op){ return std::to_string(int(std::round(op*100)))+"%"; })->setFontSize(9)->setTextColor(RGB(160,160,180))
-        )->setSpacing(0)->setCrossAxisAlignment(CrossAxisAlignment::Center),
-        SizedBox(0,8),
-        Slider(0.0,1.0,0.01)->setValue(activeOpacity)->setTrackFillColor(kAccent)->setWidth(224)
-      )->setSpacing(0)
-    );
-
-    // ── §D  Sidebar assembly ───────────────────────────────────────────────
-    auto sidebar=Container(
-      Column(
-        drawSection,     SizedBox(0,6),
-        shapeSection,    SizedBox(0,6),
-        fontSizeSection, SizedBox(0,6),
-        selectedSwatch,  SizedBox(0,6),
-        pickerSection,   SizedBox(0,6),
-        historySection,  SizedBox(0,6),
-        paletteSection,  SizedBox(0,6),
-        sizeSection,     SizedBox(0,6),
-        opacitySection
-      )->setSpacing(0)
-    )->setWidth(kSidebarWidth)->setBackgroundColor(kBg1)->setPaddingAll(10,10,10,10);
-
-    // ── §E  Toolbar ────────────────────────────────────────────────────────
-    auto makeBtn=[&](const std::string&lbl,COLORREF txt,std::function<void()>fn)->WidgetPtr{
-      return Button(lbl,fn)->setBackgroundColor(RGB(30,30,46))->setTextColor(txt)
-        ->setBorderRadius(5)->setHeight(26)->setPadding(4);
-    };
-    auto toolbar=Container(
-      Row(
-        Text("Zoom")->setFontSize(11)->setTextColor(RGB(140,140,160)),
-        Slider(kZoomMin,kZoomMax,0.25)->setValue(zoomLevel)->setTrackFillColor(kAccent)->setWidth(110),
-        Text(zoomLevel,[](double v){ return std::to_string(int(std::round(v)))+"%"; })->setFontSize(11)->setTextColor(RGB(180,180,200))->setMinWidth(38),
-        Button("1:1",[this]{ if(canvasPtr_){ canvasPtr_->viewport().resetZoom(); canvasPtr_->redraw(); syncZoomState(1.f); } })->setBackgroundColor(RGB(24,24,37))->setTextColor(kAccent)->setBorderRadius(5)->setWidth(30)->setHeight(26)->setPadding(4),
-        Button("Fit",[this]{ if(canvasPtr_){ canvasPtr_->viewport().fitToView(); canvasPtr_->redraw(); syncZoomState(canvasPtr_->viewport().zoom()); } })->setBackgroundColor(RGB(24,24,37))->setTextColor(kAccent)->setBorderRadius(5)->setWidth(30)->setHeight(26)->setPadding(4),
-        SizedBox(12,0),
-        makeBtn("↩ Undo",RGB(137,180,250),[this]{ if(surface_){ surface_->undo(); refreshUndoRedo(); if(canvasPtr_) canvasPtr_->redraw(); } }),
-        makeBtn("Redo ↪",RGB(166,226,46), [this]{ if(surface_){ surface_->redo(); refreshUndoRedo(); if(canvasPtr_) canvasPtr_->redraw(); } }),
-        makeBtn("✕ Clear",RGB(243,139,168),[this]{ if(surface_){ surface_->clear(); refreshUndoRedo(); if(canvasPtr_) canvasPtr_->redraw(); } }),
-        makeBtn("💾 Save",RGB(148,226,213),[this]{ doSavePNG(); })
-      )->setSpacing(8)->setCrossAxisAlignment(CrossAxisAlignment::Center)
-    )->setBackgroundColor(kBg1)->setPaddingAll(10,7,10,7)->setHeight(kToolbarHeight);
-
-    // ── §F  Context menu ───────────────────────────────────────────────────
-    auto canvasWithMenu=ContextMenu(canvas,{
-      {"Brush (B)",       [this]{ activeTool.set(Tool::Brush);   }},
-      {"Eraser (E)",      [this]{ activeTool.set(Tool::Eraser);  }},
-      {"Fill (F)",        [this]{ activeTool.set(Tool::Fill);    }},
-      {"Select (S)",      [this]{ activeTool.set(Tool::Select);  }},
-      {"Text (T)",        [this]{ activeTool.set(Tool::Text);    }},
-      ContextMenuItem::Separator(),
-      {"Line (L)",        [this]{ activeTool.set(Tool::Line);    }},
-      {"Rectangle (R)",   [this]{ activeTool.set(Tool::Rect);    }},
-      {"Ellipse",         [this]{ activeTool.set(Tool::Ellipse); }},
-      {"Triangle",        [this]{ activeTool.set(Tool::Triangle);}},
-      {"Diamond",         [this]{ activeTool.set(Tool::Diamond); }},
-      {"Star",            [this]{ activeTool.set(Tool::Star5);   }},
-      {"Arrow",           [this]{ activeTool.set(Tool::Arrow);   }},
-      ContextMenuItem::Separator(),
-      {"Undo",            [this]{ if(surface_){ surface_->undo(); refreshUndoRedo(); if(canvasPtr_) canvasPtr_->redraw(); } }},
-      {"Redo",            [this]{ if(surface_){ surface_->redo(); refreshUndoRedo(); if(canvasPtr_) canvasPtr_->redraw(); } }},
-      ContextMenuItem::Separator(),
-      {"Zoom 1:1",        [this]{ if(canvasPtr_){ canvasPtr_->viewport().resetZoom(); canvasPtr_->redraw(); syncZoomState(1.f); } }},
-      {"Fit to view",     [this]{ if(canvasPtr_){ canvasPtr_->viewport().fitToView(); canvasPtr_->redraw(); syncZoomState(canvasPtr_->viewport().zoom()); } }},
-      ContextMenuItem::Separator(),
-      {"Save as PNG",     [this]{ doSavePNG(); }},
-      {"Clear",           [this]{ if(surface_){ surface_->clear(); refreshUndoRedo(); if(canvasPtr_) canvasPtr_->redraw(); } }},
-    });
-
-    // ── §G  Hints strip ────────────────────────────────────────────────────
-    auto hints=Container(
-      Conditional(statusMsg,[](const std::string&s){ return !s.empty(); })
-        ->Then([&]{ return Text(statusMsg,[](const std::string&s){ return s; })->setFontSize(10)->setTextColor(RGB(148,226,213)); })
-        ->Else([&]{ return Row(
-            Text("MMB/Space: Pan")->setFontSize(10)->setTextColor(RGB(75,75,95)),SizedBox(10,0),
-            Text("Ctrl+Scroll: Zoom")->setFontSize(10)->setTextColor(RGB(75,75,95)),SizedBox(10,0),
-            Text("Ctrl+Z/Y: Undo/Redo")->setFontSize(10)->setTextColor(RGB(75,75,95)),SizedBox(10,0),
-            Text("B E L R F S T: Tools  |  T=Text, click to place, type, Enter=commit, Esc=cancel")
-              ->setFontSize(10)->setTextColor(RGB(75,75,95))
-          )->setSpacing(0); })
-    )->setBackgroundColor(kBg1)->setPaddingAll(10,3,10,3)->setHeight(kHintsHeight);
-
-    // ── §H  Layer panel (ported from test.cpp) ─────────────────────────────
-    auto layerList =
-      ListView(layerDescs)
-        ->itemBuilder([this, kCard, kBorder, kAccent, kDim, kSubtext]
-                      (int di, const LayerRef& ri) -> WidgetPtr {
-          const LayerDesc& ld  = ri->get();
-          const bool       act = ld.isActive;
-          const COLORREF rowBg   = act ? RGB(38,30,58) : kCard;
-          const COLORREF rowBord = act ? kAccent : kBorder;
-          const int      bw      = act ? 2 : 1;
-
-          auto liveStackIndex = [this](int displayIdx) -> int {
-            const auto& snap = layerDescs.get();
-            if (displayIdx >= int(snap.size())) return -1;
-            return int(snap.size()) - 1 - displayIdx;
-          };
-
-          auto eye = Tooltip(
-            GestureDetector(
-              Container(
-                Text(ld.visible ? "👁" : "🚫")
-                  ->setFontSize(11)
-                  ->setTextColor(ld.visible ? RGB(180,180,210) : RGB(80,80,100)))
-                ->setWidth(24)->setHeight(24)->setBorderRadius(4)
-                ->setBackgroundColor(ld.visible ? RGB(30,30,48) : RGB(22,22,32))
-                ->setBorderWidth(1)->setBorderColor(kBorder))
-              ->setOnTap([this, di, liveStackIndex]() {
-                if (!surface_) return;
-                int li = liveStackIndex(di);
-                if (li < 0) return;
-                const auto& snap = layerDescs.get();
-                surface_->setLayerVisible(li, !snap[di]->get().visible);
-              }),
-            ld.visible ? "Hide layer" : "Show layer");
-
-          auto name =
-            GestureDetector(
-              Text(ld.name)
-                ->setFontSize(10)
-                ->setTextColor(act ? RGB(220,200,255) : kSubtext)
-                ->setMinWidth(56))
-              ->setOnTap([this, di, liveStackIndex]() {
-                if (!surface_) return;
-                int li = liveStackIndex(di);
-                if (li < 0) return;
-                surface_->setActiveLayer(li);
-              });
-
-          auto upBtn = Tooltip(
-            GestureDetector(
-              Container(Text("▲")->setFontSize(8)->setTextColor(kDim))
-                ->setWidth(20)->setHeight(20)->setBorderRadius(3)
-                ->setBackgroundColor(kCard)->setBorderWidth(1)->setBorderColor(kBorder))
-              ->setOnTap([this, di, liveStackIndex]() {
-                if (!surface_) return;
-                int li = liveStackIndex(di);
-                if (li < 0) return;
-                surface_->moveLayerUp(li);
-              }),
-            "Move up");
-
-          auto dnBtn = Tooltip(
-            GestureDetector(
-              Container(Text("▼")->setFontSize(8)->setTextColor(kDim))
-                ->setWidth(20)->setHeight(20)->setBorderRadius(3)
-                ->setBackgroundColor(kCard)->setBorderWidth(1)->setBorderColor(kBorder))
-              ->setOnTap([this, di, liveStackIndex]() {
-                if (!surface_) return;
-                int li = liveStackIndex(di);
-                if (li < 0) return;
-                surface_->moveLayerDown(li);
-              }),
-            "Move down");
-
-          auto delBtn = Tooltip(
-            GestureDetector(
-              Container(Text("✕")->setFontSize(9)->setTextColor(RGB(190,70,70)))
-                ->setWidth(20)->setHeight(20)->setBorderRadius(3)
-                ->setBackgroundColor(RGB(36,20,20))->setBorderWidth(1)->setBorderColor(kBorder))
-              ->setOnTap([this, di, liveStackIndex]() {
-                if (!surface_) return;
-                int li = liveStackIndex(di);
-                if (li < 0) return;
-                surface_->deleteLayer(li);
-              }),
-            "Delete layer");
-
-          return Container(
-            Row(eye, SizedBox(5,0), name,
-                upBtn, SizedBox(2,0), dnBtn, SizedBox(3,0), delBtn)
-              ->setSpacing(0)
-              ->setCrossAxisAlignment(CrossAxisAlignment::Center))
-            ->setBackgroundColor(rowBg)
-            ->setBorderRadius(6)
-            ->setBorderWidth(bw)
-            ->setBorderColor(rowBord)
-            ->setPaddingAll(6,5,6,5)
-            ->setHeight(34);
-        })
-        ->setSpacing(4)
-        ->setScrollbarColor(RGB(60,60,90))
-        ->setScrollbarHoverColor(RGB(90,90,130));
-
-    auto layerPanel = Container(
-      Column(
-        Row(
-          Text("LAYERS")->setFontSize(8)->setFontWeight(FontWeight::Bold)->setTextColor(kDim),
-          Tooltip(
-            GestureDetector(
-              Container(Text("+")->setFontSize(16)->setTextColor(RGB(160,220,160)))
-                ->setWidth(28)->setHeight(28)->setBorderRadius(6)
-                ->setBackgroundColor(RGB(24,40,24))->setBorderWidth(1)->setBorderColor(RGB(60,100,60))
-                ->setHoverBackgroundColor(RGB(30,52,30)))
-              ->setOnTap([this](){ if(surface_) surface_->addLayer(); }),
-            "Add layer")
-        )->setSpacing(0)->setCrossAxisAlignment(CrossAxisAlignment::Center),
-        SizedBox(0,10),
-        Expanded(layerList),
-        SizedBox(0,8),
-        Tooltip(
-          GestureDetector(
-            Container(
-              Row(Text("⊞")->setFontSize(12)->setTextColor(RGB(170,170,200)),
-                  SizedBox(5,0),
-                  Text("Flatten All")->setFontSize(10)->setTextColor(RGB(160,160,185)))
-                ->setSpacing(0)->setCrossAxisAlignment(CrossAxisAlignment::Center))
-              ->setBackgroundColor(kCard)->setBorderRadius(6)->setBorderWidth(1)
-              ->setBorderColor(kBorder)->setHoverBackgroundColor(RGB(36,36,56))
-              ->setPaddingAll(8,6,8,6))
-            ->setOnTap([this](){ if(surface_) surface_->flattenToSingle(); }),
-          "Merge all visible layers into one")
-      )->setSpacing(0))
-      ->setWidth(kLayerPanelWidth)
-      ->setBackgroundColor(RGB(24,24,36))
-      ->setPaddingAll(12,12,12,12);
-
-    // ── §I  Root layout ────────────────────────────────────────────────────
-    auto canvasColumn=Column(toolbar,hints,canvasWithMenu)->setSpacing(0);
-    auto root=Row(sidebar,canvasColumn,layerPanel)->setSpacing(0);
-    return Scaffold(root);
-  }
+private:
+    EditParams savedParams_;
 };
 
-// ── Entry point ────────────────────────────────────────────────────────────────
+// =============================================================================
+// §6  ENTRY POINT
+// =============================================================================
+
 int WINAPI WinMain(HINSTANCE hInstance,HINSTANCE,LPSTR,int){
-  FluxUI app(hInstance);
-  app.build([&](){ return FluxApp("Paint",BuildComponent<PaintApp>(),AppTheme::dark()); });
-  RECT wa; SystemParametersInfo(SPI_GETWORKAREA,0,&wa,0);
-  app.createWindow("FluxUI - Paint",wa.right-wa.left,wa.bottom-wa.top);
-  return app.run();
+    FluxUI app(hInstance);
+    app.build([&](){ return FluxApp("Paint",BuildComponent<ImageEditorApp>(),AppTheme::dark()); });
+    RECT wa; SystemParametersInfo(SPI_GETWORKAREA,0,&wa,0);
+    app.createWindow("FluxUI - Paint",wa.right-wa.left,wa.bottom-wa.top);
+    return app.run();
 }
