@@ -406,6 +406,18 @@ public:
     markNeedsPaint();
     return std::static_pointer_cast<ButtonWidget>(shared_from_this());
   }
+  template <typename T, typename F>
+  std::shared_ptr<ButtonWidget> setBackgroundColor(State<T> &state,
+                                                   F transform) {
+    std::function<COLORREF(const T &)> fn = transform;
+    backgroundColor = fn(state.get());
+    hasBackground = true;
+    state.bindProperty(
+        shared_from_this(),
+        [fn](Widget *w, const T &val) { w->backgroundColor = fn(val); }, false);
+    return std::static_pointer_cast<ButtonWidget>(shared_from_this());
+  }
+
   std::shared_ptr<ButtonWidget> setHoverBackgroundColor(COLORREF color) {
     hoverBackgroundColor = color;
     hasHoverBackground = true;
@@ -472,10 +484,10 @@ inline GestureDetectorPtr GestureDetector(WidgetPtr child = nullptr) {
   return w;
 }
 inline WidgetPtr GestureDetector(WidgetPtr child, DragHandler onDrag) {
-    auto g = std::make_shared<GestureDetectorWidget>();
-    g->addChild(child);
-    g->onDragUpdate = std::move(onDrag);
-    return g;
+  auto g = std::make_shared<GestureDetectorWidget>();
+  g->addChild(child);
+  g->onDragUpdate = std::move(onDrag);
+  return g;
 }
 
 using ButtonWidgetPtr = std::shared_ptr<ButtonWidget>;

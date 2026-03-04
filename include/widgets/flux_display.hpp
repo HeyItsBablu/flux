@@ -849,30 +849,14 @@ public:
     return std::static_pointer_cast<TextWidget>(shared_from_this());
   }
 
-  template <typename T>
-  std::shared_ptr<TextWidget> setTextColor(State<T> &state, COLORREF trueColor,
-                                           COLORREF falseColor) {
-    textColor = state.get() ? trueColor : falseColor;
-
-    state.bindProperty(
-        shared_from_this(),
-        [trueColor, falseColor](Widget *w, const T &val) {
-          w->textColor = val ? trueColor : falseColor;
-        },
-        false // paint only
-    );
-
-    return std::static_pointer_cast<TextWidget>(shared_from_this());
-  }
-
   template <typename T, typename F>
-  std::shared_ptr<TextWidget> setTextColor(State<T> &state, F transform) { 
+  std::shared_ptr<TextWidget> setTextColor(State<T> &state, F transform) {
     std::function<COLORREF(const T &)> fn = transform;
-    backgroundColor = fn(state.get());
-  
+    textColor = fn(state.get());
+
     state.bindProperty(
         shared_from_this(),
-        [fn](Widget *w, const T &val) { w->textColor = fn(val); }, true);
+        [fn](Widget *w, const T &val) { w->textColor = fn(val); }, false);
     return std::static_pointer_cast<TextWidget>(shared_from_this());
   }
 
