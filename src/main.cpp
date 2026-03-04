@@ -1,7 +1,10 @@
 // main.cpp
 #include "flux.hpp"
+#include "widgets/flux_layers.hpp"   // ← layers support
 #include <commdlg.h>
 #include <shlobj.h>
+#include <unordered_map>
+#include <unordered_set>
 #pragma comment(lib, "comdlg32.lib")
 
 // ── App-level tool enum ──────────────────────────────────────────────────────
@@ -28,7 +31,7 @@ enum class Tool {
   Cross         = 18,
   Heart         = 19,
   Select        = 20,
-  Text          = 21,   // ← NEW
+  Text          = 21,
 };
 
 static bool isShapeToolEnum(Tool t) {
@@ -61,14 +64,14 @@ static std::wstring promptSavePath(HWND owner) {
 }
 
 // ============================================================================
-// §0  TEXT SESSION  (ported from test.cpp)
+// §0  TEXT SESSION
 // ============================================================================
 
 struct TextSession {
   bool         active   = false;
-  float        x        = 0, y = 0;   // canvas-space anchor (GL Y-up)
-  std::wstring text;                   // accumulated typed characters
-  TextStyle    style;                  // font / color — copied from sidebar state
+  float        x        = 0, y = 0;
+  std::wstring text;
+  TextStyle    style;
 };
 
 // ============================================================================
@@ -289,9 +292,9 @@ static void floodFill(uint8_t *pixels,int w,int h,int px,int py,
 }
 
 // ============================================================================
-// §3  PaintSurface
+// §3  PaintSurface  (now extends LayeredSurface)
 // ============================================================================
-class PaintSurface : public RasterSurface {
+class PaintSurface : public LayeredSurface {
 public:
   const std::vector<std::pair<std::string,std::string>> kPalette = {
     {"#cba6f7","Purple"},{"#f38ba8","Pink"},{"#fab387","Peach"},
@@ -316,12 +319,10 @@ public:
   void setOpacity(float op)            { activeOpacity=op;syncStyle(); }
   void setFilled(bool f)               { filled=f; }
 
-  // ── Text style accessors (called from sidebar) ────────────────────────────
   void setTextStyle(const TextStyle &s) { pendingTextStyle_ = s; }
   const TextStyle &getTextStyle() const { return pendingTextStyle_; }
 
   void setActiveTool(Tool t){
-    // Commit any in-progress work before switching tools
     commitFloatingSelect();
     commitTextSession();
 
@@ -336,11 +337,10 @@ public:
   }
 
   void initialize(int w,int h) override {
-    RasterSurface::initialize(w,h);
+    LayeredSurface::initialize(w,h);
     syncStyle();
   }
 
-  // ── needsContinuousRedraw — arms the 500 ms blink timer ──────────────────
   bool needsContinuousRedraw() const override {
     return textSession_.active;
   }
@@ -351,7 +351,7 @@ public:
     if(activeTool==Tool::Select){ selectMouseDown(x,y); return; }
     if(activeTool==Tool::Fill)  { doFill(x,y); return; }
     if(isShapeToolEnum(activeTool)){ shapeStart(x,y); return; }
-    RasterSurface::onMouseDown(x,y);
+    LayeredSurface::onMouseDown(x,y);
   }
   void onMouseMove(float x,float y) override {
     if(activeTool==Tool::Text)  {
@@ -370,17 +370,17 @@ public:
       if(shapeDrawing_) shapePreview(x,y);
       return;
     }
-    RasterSurface::onMouseMove(x,y);
+    LayeredSurface::onMouseMove(x,y);
   }
   void onMouseUp(float x,float y) override {
-    if(activeTool==Tool::Text)   return;  // no mouse-up action for text
+    if(activeTool==Tool::Text)   return;
     if(activeTool==Tool::Select){ selectMouseUp(x,y); return; }
     if(activeTool==Tool::Fill) return;
     if(isShapeToolEnum(activeTool)){
       if(shapeDrawing_) shapeCommit(x,y);
       return;
     }
-    RasterSurface::onMouseUp(x,y);
+    LayeredSurface::onMouseUp(x,y);
     if(onStateChanged)   onStateChanged();
     if(onHistoryChanged) onHistoryChanged(colorHistory());
   }
@@ -398,17 +398,16 @@ public:
       if(onRedrawNeeded) onRedrawNeeded();
       return;
     }
-    RasterSurface::onRightMouseDown(x,y);
+    LayeredSurface::onRightMouseDown(x,y);
   }
 
   void onKeyDown(int key) override {
-    // Text tool intercepts ALL keys while a session is active
     if(activeTool==Tool::Text && textSession_.active){
       handleTextKey(key);
       return;
     }
 
-    RasterSurface::onKeyDown(key);
+    LayeredSurface::onKeyDown(key);
     switch(key){
       case 'B': setActiveTool(Tool::Brush);  break;
       case 'E': setActiveTool(Tool::Eraser); break;
@@ -416,7 +415,7 @@ public:
       case 'R': setActiveTool(Tool::Rect);   break;
       case 'F': setActiveTool(Tool::Fill);   break;
       case 'S': setActiveTool(Tool::Select); break;
-      case 'T': setActiveTool(Tool::Text);   break;   // ← NEW
+      case 'T': setActiveTool(Tool::Text);   break;
       case VK_ESCAPE:
         if(activeTool==Tool::Select){
           commitFloatingSelect();
@@ -431,19 +430,17 @@ public:
   }
   void onKeyUp(int) override {}
 
-  // ── Render override — drives cursor blink and keeps overlays alive ────────
   void render(const float mvp[16]) override {
-    RasterSurface::render(mvp);
+    LayeredSurface::render(mvp);
     redrawSelectionOverlay();
     advanceTextBlink();
   }
 
-  // Cursor change callback (set by PaintApp)
   std::function<void(HCURSOR)> onCursorChange;
 
 private:
   // ══════════════════════════════════════════════════════════════════════════
-  // TEXT SESSION  (ported from test.cpp)
+  // TEXT SESSION
   // ══════════════════════════════════════════════════════════════════════════
 
   TextSession   textSession_;
@@ -454,9 +451,7 @@ private:
       std::chrono::steady_clock::now();
 
   void textMouseDown(float x, float y) {
-    if(textSession_.active){
-      commitTextSession();
-    }
+    if(textSession_.active){ commitTextSession(); }
     textSession_.active = true;
     textSession_.text.clear();
     textSession_.x     = x;
@@ -470,7 +465,6 @@ private:
     if(onRedrawNeeded) onRedrawNeeded();
   }
 
-  // Called every frame — toggles cursor every 500 ms
   void advanceTextBlink() {
     if(!textSession_.active) return;
     auto now = std::chrono::steady_clock::now();
@@ -488,66 +482,32 @@ private:
     }
   }
 
-  // Route a VK code to text editing actions while a session is open
   void handleTextKey(int vk) {
     const bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
-
-    if(vk == VK_RETURN){
-      commitTextSession();
-      if(onRedrawNeeded) onRedrawNeeded();
-      return;
-    }
-    if(vk == VK_ESCAPE){
-      textSession_.active = false;
-      textSession_.text.clear();
-      scratchClear();
-      if(onRedrawNeeded) onRedrawNeeded();
-      return;
-    }
-    if(vk == VK_BACK){
-      if(!textSession_.text.empty())
-        textSession_.text.pop_back();
-      refreshTextPreview();
-      return;
-    }
-    if(ctrl && vk == 'A'){
-      textSession_.text.clear();
-      refreshTextPreview();
-      return;
-    }
-
-    // Translate VK → Unicode character via the current keyboard layout
+    if(vk == VK_RETURN){ commitTextSession(); if(onRedrawNeeded) onRedrawNeeded(); return; }
+    if(vk == VK_ESCAPE){ textSession_.active=false; textSession_.text.clear(); scratchClear(); if(onRedrawNeeded) onRedrawNeeded(); return; }
+    if(vk == VK_BACK){ if(!textSession_.text.empty()) textSession_.text.pop_back(); refreshTextPreview(); return; }
+    if(ctrl && vk == 'A'){ textSession_.text.clear(); refreshTextPreview(); return; }
     BYTE ks[256] = {};
     GetKeyboardState(ks);
     wchar_t buf[4] = {};
-    int n = ToUnicode(vk, MapVirtualKey(vk, MAPVK_VK_TO_VSC),
-                      ks, buf, 4, 0);
-    if(n == 1 && buf[0] >= 0x20){
-      textSession_.text += buf[0];
-      refreshTextPreview();
-    }
+    int n = ToUnicode(vk, MapVirtualKey(vk, MAPVK_VK_TO_VSC), ks, buf, 4, 0);
+    if(n == 1 && buf[0] >= 0x20){ textSession_.text += buf[0]; refreshTextPreview(); }
   }
 
-  // Redraw text preview after any edit (resets blink so cursor is visible)
   void refreshTextPreview() {
     cursorVisible_ = true;
     lastBlink_     = std::chrono::steady_clock::now();
     scratchClear();
-    renderTextToScratch(textSession_.text,
-                        textSession_.x, textSession_.y,
-                        textSession_.style,
-                        /*showCursor=*/true);
+    renderTextToScratch(textSession_.text, textSession_.x, textSession_.y,
+                        textSession_.style, /*showCursor=*/true);
     if(onRedrawNeeded) onRedrawNeeded();
   }
 
-  // Write text permanently to canvas and close the session
   void commitTextSession() {
     if(!textSession_.active) return;
-    if(!textSession_.text.empty()){
-      commitTextToCanvas(textSession_.text,
-                         textSession_.x, textSession_.y,
-                         textSession_.style);
-    }
+    if(!textSession_.text.empty())
+      commitTextToCanvas(textSession_.text, textSession_.x, textSession_.y, textSession_.style);
     textSession_.active = false;
     textSession_.text.clear();
     scratchClear();
@@ -561,24 +521,14 @@ private:
   bool  shapeDrawing_=false;
   float shapeX0_=0,shapeY0_=0;
 
-  // ── Shape lifecycle ──────────────────────────────────────────────────────
-  void shapeStart(float x,float y){
-    shapeX0_=x; shapeY0_=y;
-    shapeDrawing_=true;
-    scratchClear();
-  }
-  void shapePreview(float x,float y){
-    scratchClear();
-    drawShapeInto(scratchFBOHandle(),shapeX0_,shapeY0_,x,y);
-    if(onRedrawNeeded) onRedrawNeeded();
-  }
+  void shapeStart(float x,float y){ shapeX0_=x; shapeY0_=y; shapeDrawing_=true; scratchClear(); }
+  void shapePreview(float x,float y){ scratchClear(); drawShapeInto(scratchFBOHandle(),shapeX0_,shapeY0_,x,y); if(onRedrawNeeded) onRedrawNeeded(); }
   void shapeCommit(float x,float y){
-    shapeDrawing_=false;
-    scratchClear();
+    shapeDrawing_=false; scratchClear();
     pushUndoSnapshotPublic();
     drawShapeInto(committedFBOHandle(),shapeX0_,shapeY0_,x,y);
-    if(onStateChanged)  onStateChanged();
-    if(onRedrawNeeded)  onRedrawNeeded();
+    if(onStateChanged) onStateChanged();
+    if(onRedrawNeeded) onRedrawNeeded();
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -590,7 +540,7 @@ private:
   float selX0_=0,selY0_=0,selX1_=0,selY1_=0;
 
   bool  moving_       = false;
-  bool  grabbed_      = false;   // pixels lifted lazily on first drag
+  bool  grabbed_      = false;
   float moveAnchorX_=0,moveAnchorY_=0;
   float moveCurX_=0,  moveCurY_=0;
 
@@ -598,28 +548,16 @@ private:
   int grabW_=0,grabH_=0;
   int grabLX_=0,grabBY_=0;
 
-  // ── Select lifecycle ─────────────────────────────────────────────────────
   void selectMouseDown(float x,float y){
     if(hasSelection_ && insideSelection(x,y)){
       moving_=true;
       moveAnchorX_=x; moveAnchorY_=y;
       moveCurX_=x;    moveCurY_=y;
-      if(!grabbed_){
-        pushUndoSnapshotPublic();
-        grabPixels();
-        eraseSource();
-        grabbed_=true;
-      }
+      if(!grabbed_){ pushUndoSnapshotPublic(); grabPixels(); eraseSource(); grabbed_=true; }
     } else {
       commitFloatingSelect();
-      hasSelection_=false;
-      moving_=false;
-      grabbed_=false;
-      pixelBuf_.clear();
-      selDrawing_=true;
-      selX0_=selX1_=x;
-      selY0_=selY1_=y;
-      scratchClear();
+      hasSelection_=false; moving_=false; grabbed_=false; pixelBuf_.clear();
+      selDrawing_=true; selX0_=selX1_=x; selY0_=selY1_=y; scratchClear();
     }
   }
 
@@ -627,14 +565,11 @@ private:
     if(moving_){
       moveCurX_=x; moveCurY_=y;
       float dx=moveCurX_-moveAnchorX_, dy=moveCurY_-moveAnchorY_;
-      scratchClear();
-      blitPixelsToScratch(selX0_+dx, selY0_+dy);
+      scratchClear(); blitPixelsToScratch(selX0_+dx, selY0_+dy);
       drawDots(selX0_+dx,selY0_+dy,selX1_+dx,selY1_+dy);
       if(onRedrawNeeded) onRedrawNeeded();
     } else if(selDrawing_){
-      selX1_=x; selY1_=y;
-      scratchClear();
-      drawDots(selX0_,selY0_,selX1_,selY1_);
+      selX1_=x; selY1_=y; scratchClear(); drawDots(selX0_,selY0_,selX1_,selY1_);
       if(onRedrawNeeded) onRedrawNeeded();
     }
   }
@@ -643,181 +578,109 @@ private:
     if(moving_){
       moving_=false;
       float dx=x-moveAnchorX_, dy=y-moveAnchorY_;
-      selX0_+=dx; selX1_+=dx;
-      selY0_+=dy; selY1_+=dy;
-      scratchClear();
-      blitPixelsToScratch(selX0_, selY0_);
+      selX0_+=dx; selX1_+=dx; selY0_+=dy; selY1_+=dy;
+      scratchClear(); blitPixelsToScratch(selX0_, selY0_);
       drawDots(selX0_,selY0_,selX1_,selY1_);
       if(onRedrawNeeded) onRedrawNeeded();
     } else if(selDrawing_){
-      selDrawing_=false;
-      selX1_=x; selY1_=y;
+      selDrawing_=false; selX1_=x; selY1_=y;
       hasSelection_=(fabsf(selX1_-selX0_)>2.f && fabsf(selY1_-selY0_)>2.f);
-      // Normalise so selX0_/selY0_ are always the min corner
       if(selX0_>selX1_) std::swap(selX0_,selX1_);
       if(selY0_>selY1_) std::swap(selY0_,selY1_);
-      scratchClear();
-      if(hasSelection_) drawDots(selX0_,selY0_,selX1_,selY1_);
+      scratchClear(); if(hasSelection_) drawDots(selX0_,selY0_,selX1_,selY1_);
       if(onRedrawNeeded) onRedrawNeeded();
     }
   }
 
-  // Commit any floating (grabbed but not yet stamped) selection to canvas
   void commitFloatingSelect(){
     if(pixelBuf_.empty()) return;
-    if(moving_){
-      float dx=moveCurX_-moveAnchorX_, dy=moveCurY_-moveAnchorY_;
-      selX0_+=dx; selX1_+=dx;
-      selY0_+=dy; selY1_+=dy;
-      moving_=false;
-    }
-    commitPixels(selX0_, selY0_);
-    grabbed_=false;
-    scratchClear();
+    if(moving_){ float dx=moveCurX_-moveAnchorX_,dy=moveCurY_-moveAnchorY_; selX0_+=dx; selX1_+=dx; selY0_+=dy; selY1_+=dy; moving_=false; }
+    commitPixels(selX0_, selY0_); grabbed_=false; scratchClear();
   }
 
   void redrawSelectionOverlay(){
     if(!hasSelection_ && !selDrawing_) return;
     float x0,y0,x1,y1;
-    if(moving_){
-      float dx=moveCurX_-moveAnchorX_, dy=moveCurY_-moveAnchorY_;
-      x0=selX0_+dx; y0=selY0_+dy; x1=selX1_+dx; y1=selY1_+dy;
-    } else {
-      x0=selX0_; y0=selY0_; x1=selX1_; y1=selY1_;
-    }
-    // Keep the floating content visible when grabbed but not actively moving
-    if(grabbed_ && !moving_)
-      blitPixelsToScratch(x0, y0);
+    if(moving_){ float dx=moveCurX_-moveAnchorX_,dy=moveCurY_-moveAnchorY_; x0=selX0_+dx; y0=selY0_+dy; x1=selX1_+dx; y1=selY1_+dy; }
+    else { x0=selX0_; y0=selY0_; x1=selX1_; y1=selY1_; }
+    if(grabbed_ && !moving_) blitPixelsToScratch(x0, y0);
     drawDots(x0,y0,x1,y1);
   }
 
-  // ── Select helpers ────────────────────────────────────────────────────────
   bool insideSelection(float x,float y) const {
     return x>=selX0_ && x<=selX1_ && y>=selY0_ && y<=selY1_;
   }
 
-  // Read selected rectangle from committed FBO; near-white pixels get alpha=0
-  // so they composite transparently when the selection is moved.
   void grabPixels(){
     int cw=canvasWidth(),ch=canvasHeight();
-    grabLX_ = max(0, min((int)selX0_, cw-1));
-    grabBY_ = max(0, min((int)selY0_, ch-1));
-    grabW_  = max(1, min((int)(selX1_-selX0_), cw-grabLX_));
-    grabH_  = max(1, min((int)(selY1_-selY0_), ch-grabBY_));
-
-    std::vector<uint8_t> full(size_t(cw)*ch*4);
-    readCommitted(full.data());
+    grabLX_=max(0,min((int)selX0_,cw-1)); grabBY_=max(0,min((int)selY0_,ch-1));
+    grabW_=max(1,min((int)(selX1_-selX0_),cw-grabLX_)); grabH_=max(1,min((int)(selY1_-selY0_),ch-grabBY_));
+    std::vector<uint8_t> full(size_t(cw)*ch*4); readCommitted(full.data());
     pixelBuf_.resize(size_t(grabW_)*grabH_*4);
-    for(int r=0;r<grabH_;r++){
-      for(int c=0;c<grabW_;c++){
-        const uint8_t *src = full.data()+((grabBY_+r)*cw+grabLX_+c)*4;
-        uint8_t *dst = pixelBuf_.data()+(r*grabW_+c)*4;
-        dst[0]=src[0]; dst[1]=src[1]; dst[2]=src[2];
-        // Treat near-white as transparent so background shows through
-        bool isBg = (src[0]>=250 && src[1]>=250 && src[2]>=250);
-        dst[3] = isBg ? 0 : src[3];
-      }
+    for(int r=0;r<grabH_;r++) for(int c=0;c<grabW_;c++){
+      const uint8_t *src=full.data()+((grabBY_+r)*cw+grabLX_+c)*4;
+      uint8_t *dst=pixelBuf_.data()+(r*grabW_+c)*4;
+      dst[0]=src[0]; dst[1]=src[1]; dst[2]=src[2];
+      dst[3]=(src[0]>=250&&src[1]>=250&&src[2]>=250)?0:src[3];
     }
   }
 
   void eraseSource(){
     int cw=canvasWidth(),ch=canvasHeight();
-    std::vector<uint8_t> full(size_t(cw)*ch*4);
-    readCommitted(full.data());
+    std::vector<uint8_t> full(size_t(cw)*ch*4); readCommitted(full.data());
     for(int row=0;row<grabH_;row++){
-      int dstRow=grabBY_+row;
-      uint8_t *p=full.data()+(dstRow*cw+grabLX_)*4;
-      for(int col=0;col<grabW_;col++){
-        p[col*4+0]=255;p[col*4+1]=255;
-        p[col*4+2]=255;p[col*4+3]=255;
-      }
+      uint8_t *p=full.data()+((grabBY_+row)*cw+grabLX_)*4;
+      for(int col=0;col<grabW_;col++){ p[col*4+0]=255; p[col*4+1]=255; p[col*4+2]=255; p[col*4+3]=255; }
     }
     uploadToCommitted(full.data());
   }
 
-  // Upload pixelBuf_ into the scratch texture at canvas position (x0, y0).
-  // Handles clipping correctly when dragged to canvas edges.
   void blitPixelsToScratch(float x0, float y0){
     if(pixelBuf_.empty()) return;
     int cw=canvasWidth(),ch=canvasHeight();
-    int dstLX=(int)x0, dstBY=(int)y0;
-    int srcOffX=0, srcOffY=0;
-    if(dstLX<0){ srcOffX=-dstLX; dstLX=0; }
-    if(dstBY<0){ srcOffY=-dstBY; dstBY=0; }
-    int dstW=min(grabW_-srcOffX, cw-dstLX);
-    int dstH=min(grabH_-srcOffY, ch-dstBY);
+    int dstLX=(int)x0,dstBY=(int)y0,srcOffX=0,srcOffY=0;
+    if(dstLX<0){srcOffX=-dstLX;dstLX=0;} if(dstBY<0){srcOffY=-dstBY;dstBY=0;}
+    int dstW=min(grabW_-srcOffX,cw-dstLX),dstH=min(grabH_-srcOffY,ch-dstBY);
     if(dstW<=0||dstH<=0) return;
-
     std::vector<uint8_t> sub(size_t(dstW)*dstH*4);
-    for(int r=0;r<dstH;r++)
-      memcpy(sub.data()+r*dstW*4,
-             pixelBuf_.data()+((srcOffY+r)*grabW_+srcOffX)*4,
-             size_t(dstW)*4);
-
+    for(int r=0;r<dstH;r++) memcpy(sub.data()+r*dstW*4,pixelBuf_.data()+((srcOffY+r)*grabW_+srcOffX)*4,size_t(dstW)*4);
     glBindTexture(GL_TEXTURE_2D,scratchTexHandle());
-    glTexSubImage2D(GL_TEXTURE_2D,0,dstLX,dstBY,dstW,dstH,
-                    GL_RGBA,GL_UNSIGNED_BYTE,sub.data());
+    glTexSubImage2D(GL_TEXTURE_2D,0,dstLX,dstBY,dstW,dstH,GL_RGBA,GL_UNSIGNED_BYTE,sub.data());
     glBindTexture(GL_TEXTURE_2D,0);
   }
 
-  // SRC_OVER alpha-composite pixelBuf_ onto committed at (x0, y0).
   void commitPixels(float x0, float y0){
     if(pixelBuf_.empty()) return;
     int cw=canvasWidth(),ch=canvasHeight();
-    int dstLX=(int)x0, dstBY=(int)y0;
-    int srcOffX=0, srcOffY=0;
-    if(dstLX<0){ srcOffX=-dstLX; dstLX=0; }
-    if(dstBY<0){ srcOffY=-dstBY; dstBY=0; }
-    int dstW=min(grabW_-srcOffX, cw-dstLX);
-    int dstH=min(grabH_-srcOffY, ch-dstBY);
-    if(dstW<=0||dstH<=0){ pixelBuf_.clear(); return; }
-
-    std::vector<uint8_t> full(size_t(cw)*ch*4);
-    readCommitted(full.data());
-    for(int r=0;r<dstH;r++){
-      for(int c=0;c<dstW;c++){
-        const uint8_t *s = pixelBuf_.data()+((srcOffY+r)*grabW_+srcOffX+c)*4;
-        uint8_t *d = full.data()+((dstBY+r)*cw+dstLX+c)*4;
-        float sa=s[3]/255.f;
-        if(sa<=0.f) continue;
-        if(sa>=1.f){
-          d[0]=s[0]; d[1]=s[1]; d[2]=s[2]; d[3]=s[3];
-        } else {
-          float da=d[3]/255.f;
-          float oa=sa+da*(1.f-sa);
-          if(oa>0.f){
-            d[0]=(uint8_t)((s[0]*sa+d[0]*da*(1.f-sa))/oa);
-            d[1]=(uint8_t)((s[1]*sa+d[1]*da*(1.f-sa))/oa);
-            d[2]=(uint8_t)((s[2]*sa+d[2]*da*(1.f-sa))/oa);
-            d[3]=(uint8_t)(oa*255.f);
-          }
-        }
-      }
+    int dstLX=(int)x0,dstBY=(int)y0,srcOffX=0,srcOffY=0;
+    if(dstLX<0){srcOffX=-dstLX;dstLX=0;} if(dstBY<0){srcOffY=-dstBY;dstBY=0;}
+    int dstW=min(grabW_-srcOffX,cw-dstLX),dstH=min(grabH_-srcOffY,ch-dstBY);
+    if(dstW<=0||dstH<=0){pixelBuf_.clear();return;}
+    std::vector<uint8_t> full(size_t(cw)*ch*4); readCommitted(full.data());
+    for(int r=0;r<dstH;r++) for(int c=0;c<dstW;c++){
+      const uint8_t *s=pixelBuf_.data()+((srcOffY+r)*grabW_+srcOffX+c)*4;
+      uint8_t *d=full.data()+((dstBY+r)*cw+dstLX+c)*4;
+      float sa=s[3]/255.f; if(sa<=0.f) continue;
+      if(sa>=1.f){d[0]=s[0];d[1]=s[1];d[2]=s[2];d[3]=s[3];}
+      else{ float da=d[3]/255.f,oa=sa+da*(1.f-sa); if(oa>0.f){ d[0]=(uint8_t)((s[0]*sa+d[0]*da*(1.f-sa))/oa); d[1]=(uint8_t)((s[1]*sa+d[1]*da*(1.f-sa))/oa); d[2]=(uint8_t)((s[2]*sa+d[2]*da*(1.f-sa))/oa); d[3]=(uint8_t)(oa*255.f); } }
     }
-    uploadToCommitted(full.data());
-    pixelBuf_.clear();
+    uploadToCommitted(full.data()); pixelBuf_.clear();
   }
 
   void drawDots(float x0,float y0,float x1,float y1){
-    float lx=min(x0,x1),rx=max(x0,x1);
-    float by=min(y0,y1),ty=max(y0,y1);
+    float lx=min(x0,x1),rx=max(x0,x1),by=min(y0,y1),ty=max(y0,y1);
     const float dotSize=1.5f,gap=6.f;
     std::vector<float> buf;
     auto dotEdge=[&](float ax,float ay,float bx,float by2){
-      float dx=bx-ax,dy=by2-ay,len=sqrtf(dx*dx+dy*dy);
-      if(len<1.f) return;
+      float dx=bx-ax,dy=by2-ay,len=sqrtf(dx*dx+dy*dy); if(len<1.f) return;
       float ux=dx/len,uy=dy/len;
       for(float d=0.f;d<len;d+=gap){
         float cx=ax+ux*d,cy=ay+uy*d;
-        buf.insert(buf.end(),{cx-dotSize,cy-dotSize,cx+dotSize,cy-dotSize,
-                              cx+dotSize,cy+dotSize,cx+dotSize,cy+dotSize,
-                              cx-dotSize,cy+dotSize,cx-dotSize,cy-dotSize});
+        buf.insert(buf.end(),{cx-dotSize,cy-dotSize,cx+dotSize,cy-dotSize,cx+dotSize,cy+dotSize,cx+dotSize,cy+dotSize,cx-dotSize,cy+dotSize,cx-dotSize,cy-dotSize});
       }
     };
-    dotEdge(lx,by,rx,by); dotEdge(rx,by,rx,ty);
-    dotEdge(rx,ty,lx,ty); dotEdge(lx,ty,lx,by);
-    drawVertsToFBO(scratchFBOHandle(),buf.data(),int(buf.size()/2),
-                   GL_TRIANGLES,0.f,0.f,0.f,1.f);
+    dotEdge(lx,by,rx,by); dotEdge(rx,by,rx,ty); dotEdge(rx,ty,lx,ty); dotEdge(lx,ty,lx,by);
+    drawVertsToFBO(scratchFBOHandle(),buf.data(),int(buf.size()/2),GL_TRIANGLES,0.f,0.f,0.f,1.f);
   }
 
   // ── Shape drawing ─────────────────────────────────────────────────────────
@@ -825,14 +688,10 @@ private:
     RGBA c=parseHexColor(activeColor);
     float r=c.r,g=c.g,b=c.b,a=activeOpacity;
     float half=max(0.5f,activeSize*0.5f);
-
     float cx=(x0+x1)*0.5f, cy=(y0+y1)*0.5f;
     float rx=std::abs(x1-x0)*0.5f, ry=std::abs(y1-y0)*0.5f;
 
-    auto emit=[&](const std::vector<float>&v, GLenum mode){
-      if(v.empty()) return;
-      drawVertsToFBO(fbo,v.data(),(int)(v.size()/2),mode,r,g,b,a);
-    };
+    auto emit=[&](const std::vector<float>&v,GLenum mode){ if(v.empty()) return; drawVertsToFBO(fbo,v.data(),(int)(v.size()/2),mode,r,g,b,a); };
     auto emitOutline=[&](const std::vector<float>&v){ emit(v,GL_TRIANGLES); };
     auto emitFan    =[&](const std::vector<float>&v){ emit(v,GL_TRIANGLE_FAN); };
 
@@ -850,192 +709,60 @@ private:
     };
 
     switch(activeTool){
-      case Tool::Line:{
-        float v[12]; int n=0;
-        n=appendThickLine(x0,y0,x1,y1,half,v,0);
-        drawVertsToFBO(fbo,v,n,GL_TRIANGLES,r,g,b,a);
-        break;
-      }
-      case Tool::Rect:{
-        float lx=min(x0,x1),bby=min(y0,y1);
-        float rxx=max(x0,x1),ty=max(y0,y1);
-        if(filled) rectFilled(lx,bby,rxx,ty);
-        else       rectOutline(lx,bby,rxx,ty);
-        break;
-      }
-      case Tool::Ellipse:{
-        if(filled){ auto v=nGonFilled(cx,cy,rx,ry,64,0); emitFan(v); }
-        else       { auto v=ellipseOutline(cx,cy,rx,ry,64,half); emitOutline(v); }
-        break;
-      }
+      case Tool::Line:{ float v[12]; int n=appendThickLine(x0,y0,x1,y1,half,v,0); drawVertsToFBO(fbo,v,n,GL_TRIANGLES,r,g,b,a); break; }
+      case Tool::Rect:{ float lx=min(x0,x1),bby=min(y0,y1),rxx=max(x0,x1),ty=max(y0,y1); if(filled) rectFilled(lx,bby,rxx,ty); else rectOutline(lx,bby,rxx,ty); break; }
+      case Tool::Ellipse:{ if(filled){auto v=nGonFilled(cx,cy,rx,ry,64,0);emitFan(v);}else{auto v=ellipseOutline(cx,cy,rx,ry,64,half);emitOutline(v);} break; }
       case Tool::Triangle:{
-        std::vector<std::pair<float,float>> pts={
-          {cx,cy-ry},{cx+rx,cy+ry},{cx-rx,cy+ry}
-        };
-        if(filled){
-          auto v=std::vector<float>((3+2)*2);
-          buildFan(cx,cy+ry*0.3f,pts,v.data());
-          emitFan(v);
-        } else {
-          float buf[3*12]; int total=0;
-          for(int i=0;i<3;i++){
-            int j=(i+1)%3;
-            total=appendThickLine(pts[i].first,pts[i].second,
-                                  pts[j].first,pts[j].second,half,buf,total);
-          }
-          drawVertsToFBO(fbo,buf,total,GL_TRIANGLES,r,g,b,a);
-        }
+        std::vector<std::pair<float,float>> pts={{cx,cy-ry},{cx+rx,cy+ry},{cx-rx,cy+ry}};
+        if(filled){auto v=std::vector<float>((3+2)*2);buildFan(cx,cy+ry*0.3f,pts,v.data());emitFan(v);}
+        else{float buf[3*12];int total=0;for(int i=0;i<3;i++){int j=(i+1)%3;total=appendThickLine(pts[i].first,pts[i].second,pts[j].first,pts[j].second,half,buf,total);}drawVertsToFBO(fbo,buf,total,GL_TRIANGLES,r,g,b,a);}
         break;
       }
       case Tool::RightTriangle:{
-        std::vector<std::pair<float,float>> pts={
-          {x0,y1},{x1,y1},{x0,y0}
-        };
-        if(filled){
-          float v[(3+2)*2];
-          buildFan((x0+x1)/3.f,(y0+y1*2)/3.f,pts,v);
-          emitFan(std::vector<float>(v,v+10));
-        } else {
-          float buf[3*12]; int total=0;
-          for(int i=0;i<3;i++){
-            int j=(i+1)%3;
-            total=appendThickLine(pts[i].first,pts[i].second,
-                                  pts[j].first,pts[j].second,half,buf,total);
-          }
-          drawVertsToFBO(fbo,buf,total,GL_TRIANGLES,r,g,b,a);
-        }
+        std::vector<std::pair<float,float>> pts={{x0,y1},{x1,y1},{x0,y0}};
+        if(filled){float v[(3+2)*2];buildFan((x0+x1)/3.f,(y0+y1*2)/3.f,pts,v);emitFan(std::vector<float>(v,v+10));}
+        else{float buf[3*12];int total=0;for(int i=0;i<3;i++){int j=(i+1)%3;total=appendThickLine(pts[i].first,pts[i].second,pts[j].first,pts[j].second,half,buf,total);}drawVertsToFBO(fbo,buf,total,GL_TRIANGLES,r,g,b,a);}
         break;
       }
       case Tool::Diamond:{
-        std::vector<std::pair<float,float>> pts={
-          {cx,cy-ry},{cx+rx,cy},{cx,cy+ry},{cx-rx,cy}
-        };
-        if(filled){
-          auto v=std::vector<float>((4+2)*2);
-          buildFan(cx,cy,pts,v.data());
-          emitFan(v);
-        } else {
-          float buf[4*12]; int total=0;
-          for(int i=0;i<4;i++){
-            int j=(i+1)%4;
-            total=appendThickLine(pts[i].first,pts[i].second,
-                                  pts[j].first,pts[j].second,half,buf,total);
-          }
-          drawVertsToFBO(fbo,buf,total,GL_TRIANGLES,r,g,b,a);
-        }
+        std::vector<std::pair<float,float>> pts={{cx,cy-ry},{cx+rx,cy},{cx,cy+ry},{cx-rx,cy}};
+        if(filled){auto v=std::vector<float>((4+2)*2);buildFan(cx,cy,pts,v.data());emitFan(v);}
+        else{float buf[4*12];int total=0;for(int i=0;i<4;i++){int j=(i+1)%4;total=appendThickLine(pts[i].first,pts[i].second,pts[j].first,pts[j].second,half,buf,total);}drawVertsToFBO(fbo,buf,total,GL_TRIANGLES,r,g,b,a);}
         break;
       }
-      case Tool::Pentagon:{
-        if(filled){ auto v=nGonFilled(cx,cy,rx,ry,5,-1.5708f); emitFan(v); }
-        else       { auto v=nGonOutline(cx,cy,rx,ry,5,-1.5708f,half); emitOutline(v); }
-        break;
-      }
-      case Tool::Hexagon:{
-        if(filled){ auto v=nGonFilled(cx,cy,rx,ry,6,0); emitFan(v); }
-        else       { auto v=nGonOutline(cx,cy,rx,ry,6,0,half); emitOutline(v); }
-        break;
-      }
+      case Tool::Pentagon:{ if(filled){auto v=nGonFilled(cx,cy,rx,ry,5,-1.5708f);emitFan(v);}else{auto v=nGonOutline(cx,cy,rx,ry,5,-1.5708f,half);emitOutline(v);} break; }
+      case Tool::Hexagon:{ if(filled){auto v=nGonFilled(cx,cy,rx,ry,6,0);emitFan(v);}else{auto v=nGonOutline(cx,cy,rx,ry,6,0,half);emitOutline(v);} break; }
       case Tool::Star5:{
-        float ro=min(rx,ry), ri=ro*0.4f;
-        if(filled){
-          std::vector<std::pair<float,float>> pts;
-          float off=-1.5708f;
-          for(int i=0;i<10;i++){
-            float aa=off+float(i)/10*6.2831853f;
-            float rr=(i%2==0)?ro:ri;
-            pts.push_back({cx+cosf(aa)*rr,cy+sinf(aa)*rr});
-          }
-          auto v=std::vector<float>((10+2)*2);
-          buildFan(cx,cy,pts,v.data());
-          emitFan(v);
-        } else {
-          auto v=star5Outline(cx,cy,ro,ri,half);
-          emitOutline(v);
-        }
+        float ro=min(rx,ry),ri=ro*0.4f;
+        if(filled){std::vector<std::pair<float,float>> pts;float off=-1.5708f;for(int i=0;i<10;i++){float aa=off+float(i)/10*6.2831853f;float rr=(i%2==0)?ro:ri;pts.push_back({cx+cosf(aa)*rr,cy+sinf(aa)*rr});}auto v=std::vector<float>((10+2)*2);buildFan(cx,cy,pts,v.data());emitFan(v);}
+        else{auto v=star5Outline(cx,cy,ro,ri,half);emitOutline(v);}
         break;
       }
       case Tool::Star6:{
-        float ro=min(rx,ry), ri=ro*0.5f;
-        if(filled){
-          std::vector<std::pair<float,float>> pts;
-          for(int i=0;i<12;i++){
-            float aa=float(i)/12*6.2831853f;
-            float rr=(i%2==0)?ro:ri;
-            pts.push_back({cx+cosf(aa)*rr,cy+sinf(aa)*rr});
-          }
-          auto v=std::vector<float>((12+2)*2);
-          buildFan(cx,cy,pts,v.data());
-          emitFan(v);
-        } else {
-          auto v=star6Outline(cx,cy,ro,ri,half);
-          emitOutline(v);
-        }
+        float ro=min(rx,ry),ri=ro*0.5f;
+        if(filled){std::vector<std::pair<float,float>> pts;for(int i=0;i<12;i++){float aa=float(i)/12*6.2831853f;float rr=(i%2==0)?ro:ri;pts.push_back({cx+cosf(aa)*rr,cy+sinf(aa)*rr});}auto v=std::vector<float>((12+2)*2);buildFan(cx,cy,pts,v.data());emitFan(v);}
+        else{auto v=star6Outline(cx,cy,ro,ri,half);emitOutline(v);}
         break;
       }
-      case Tool::Arrow:{
-        auto v=arrowVerts(x0,y0,x1,y1,half);
-        if(!v.empty()) drawVertsToFBO(fbo,v.data(),(int)(v.size()/2),GL_TRIANGLES,r,g,b,a);
-        break;
-      }
-      case Tool::ArrowDouble:{
-        auto v=doubleArrowVerts(x0,y0,x1,y1,half);
-        if(!v.empty()) drawVertsToFBO(fbo,v.data(),(int)(v.size()/2),GL_TRIANGLES,r,g,b,a);
-        break;
-      }
-      case Tool::Parallelogram:{
-        auto v=parallelogramOutline(x0,y0,x1,y1,0.25f,half);
-        emitOutline(v);
-        break;
-      }
-      case Tool::Trapezoid:{
-        auto v=trapezoidOutline(x0,y0,x1,y1,0.2f,half);
-        emitOutline(v);
-        break;
-      }
+      case Tool::Arrow:{ auto v=arrowVerts(x0,y0,x1,y1,half); if(!v.empty()) drawVertsToFBO(fbo,v.data(),(int)(v.size()/2),GL_TRIANGLES,r,g,b,a); break; }
+      case Tool::ArrowDouble:{ auto v=doubleArrowVerts(x0,y0,x1,y1,half); if(!v.empty()) drawVertsToFBO(fbo,v.data(),(int)(v.size()/2),GL_TRIANGLES,r,g,b,a); break; }
+      case Tool::Parallelogram:{ auto v=parallelogramOutline(x0,y0,x1,y1,0.25f,half); emitOutline(v); break; }
+      case Tool::Trapezoid:{ auto v=trapezoidOutline(x0,y0,x1,y1,0.2f,half); emitOutline(v); break; }
       case Tool::RoundRect:{
         const int cornSegs=8;
-        float lx=min(x0,x1),bby=min(y0,y1);
-        float rxx=max(x0,x1),ty=max(y0,y1);
+        float lx=min(x0,x1),bby=min(y0,y1),rxx=max(x0,x1),ty=max(y0,y1);
         float cr=min(min(rx,ry)*0.3f,12.f);
         std::vector<std::pair<float,float>> pts;
         auto addCorner=[&](float ox,float oy,float startA){
-          for(int i=0;i<=cornSegs;i++){
-            float aa=startA+float(i)/cornSegs*1.5708f;
-            pts.push_back({ox+cosf(aa)*cr,oy+sinf(aa)*cr});
-          }
+          for(int i=0;i<=cornSegs;i++){float aa=startA+float(i)/cornSegs*1.5708f;pts.push_back({ox+cosf(aa)*cr,oy+sinf(aa)*cr});}
         };
-        addCorner(rxx-cr,ty-cr,0);
-        addCorner(lx+cr, ty-cr,1.5708f);
-        addCorner(lx+cr, bby+cr,3.1416f);
-        addCorner(rxx-cr,bby+cr,4.7124f);
-        if(filled){
-          auto v=std::vector<float>((pts.size()+2)*2);
-          buildFan(cx,cy,pts,v.data());
-          emitFan(v);
-        } else {
-          int n=(int)pts.size();
-          int total=0;
-          std::vector<float> bufv(n*12);
-          for(int i=0;i<n;i++){
-            int j=(i+1)%n;
-            total=appendThickLine(pts[i].first,pts[i].second,
-                                  pts[j].first,pts[j].second,half,bufv.data(),total);
-          }
-          drawVertsToFBO(fbo,bufv.data(),total,GL_TRIANGLES,r,g,b,a);
-        }
+        addCorner(rxx-cr,ty-cr,0); addCorner(lx+cr,ty-cr,1.5708f); addCorner(lx+cr,bby+cr,3.1416f); addCorner(rxx-cr,bby+cr,4.7124f);
+        if(filled){auto v=std::vector<float>((pts.size()+2)*2);buildFan(cx,cy,pts,v.data());emitFan(v);}
+        else{int n=(int)pts.size(),total=0;std::vector<float> bufv(n*12);for(int i=0;i<n;i++){int j=(i+1)%n;total=appendThickLine(pts[i].first,pts[i].second,pts[j].first,pts[j].second,half,bufv.data(),total);}drawVertsToFBO(fbo,bufv.data(),total,GL_TRIANGLES,r,g,b,a);}
         break;
       }
-      case Tool::Cross:{
-        float arm=min(rx,ry)*0.35f;
-        auto v=crossVerts(cx,cy,rx,ry,arm);
-        emitFan(v);
-        break;
-      }
-      case Tool::Heart:{
-        auto v=heartFan(cx,cy,rx,ry);
-        emitFan(v);
-        break;
-      }
+      case Tool::Cross:{ float arm=min(rx,ry)*0.35f; auto v=crossVerts(cx,cy,rx,ry,arm); emitFan(v); break; }
+      case Tool::Heart:{ auto v=heartFan(cx,cy,rx,ry); emitFan(v); break; }
       default: break;
     }
   }
@@ -1051,11 +778,10 @@ private:
     uint8_t tr=seed[0],tg=seed[1],tb=seed[2];
     RGBA fc=parseHexColor(activeColor);
     pushUndoSnapshotPublic();
-    floodFill(buf.data(),w,h,px,py,tr,tg,tb,
-              uint8_t(fc.r*255),uint8_t(fc.g*255),uint8_t(fc.b*255));
+    floodFill(buf.data(),w,h,px,py,tr,tg,tb,uint8_t(fc.r*255),uint8_t(fc.g*255),uint8_t(fc.b*255));
     uploadToCommitted(buf.data());
-    if(onStateChanged)  onStateChanged();
-    if(onRedrawNeeded)  onRedrawNeeded();
+    if(onStateChanged) onStateChanged();
+    if(onRedrawNeeded) onRedrawNeeded();
   }
 
   // ── Style sync ───────────────────────────────────────────────────────────
@@ -1067,8 +793,7 @@ private:
     s.opacity=activeOpacity;
     s.tool=kToolBrush;
     setStrokeStyle(s);
-    RasterSurface::setOpacity(activeOpacity);
-    // Keep pending text style in sync with current color
+    LayeredSurface::setOpacity(activeOpacity);
     pendingTextStyle_.r = c.r;
     pendingTextStyle_.g = c.g;
     pendingTextStyle_.b = c.b;
@@ -1088,7 +813,12 @@ class PaintApp : public Component {
   State<double>      zoomLevel;
   State<std::vector<RGBA>> colorHistory;
   State<std::string> statusMsg;
-  State<int>         fontSize;    // ← NEW: font size for Text tool
+  State<int>         fontSize;
+
+  // ── Layer state (ported from test.cpp) ───────────────────────────────────
+  using LayerRef = ReactiveItemPtr<LayerDesc>;
+  State<std::vector<LayerRef>> layerDescs;
+  std::unordered_map<std::string, LayerRef> layerRefByName_;
 
   std::shared_ptr<PaintSurface> surface_;
   CanvasWidget *canvasPtr_ = nullptr;
@@ -1097,6 +827,7 @@ class PaintApp : public Component {
   static constexpr double kZoomMin=6.25,kZoomMax=200.0;
   static constexpr int kSidebarWidth=268, kToolbarHeight=48;
   static constexpr int kHintsHeight=24,  kAppBarHeight=32;
+  static constexpr int kLayerPanelWidth=192;
 
   void refreshUndoRedo(){
     if(!surface_) return;
@@ -1131,16 +862,18 @@ public:
       canUndo(false,context),canRedo(false,context),
       zoomLevel(100.0,context),colorHistory({},context),
       statusMsg("",context),
-      fontSize(20,context) {}      // ← NEW
+      fontSize(20,context),
+      layerDescs({},context) {}
 
   WidgetPtr build() override {
     int screenW=GetSystemMetrics(SM_CXSCREEN);
     int screenH=GetSystemMetrics(SM_CYSCREEN);
-    int viewW=screenW-kSidebarWidth;
+    int viewW=screenW-kSidebarWidth-kLayerPanelWidth;
     int viewH=screenH-kAppBarHeight-kToolbarHeight-kHintsHeight;
     static constexpr int kPaperW=1240,kPaperH=1754;
 
-    auto canvas=RasterCanvas(viewW,viewH,kPaperW,kPaperH);
+    // ── LayeredCanvas instead of RasterCanvas ─────────────────────────────
+    auto canvas=LayeredCanvas(viewW,viewH,kPaperW,kPaperH);
     surface_=canvas->setSurface<PaintSurface>();
     canvasPtr_=canvas.get();
     mainHwnd_=GetActiveWindow();
@@ -1149,8 +882,52 @@ public:
     surface_->onHistoryChanged=[this](const std::vector<RGBA>&h){ colorHistory.set(h); };
     surface_->onStatusMessage =[this](const std::string&m){ statusMsg.set(m); };
     surface_->onRedrawNeeded  =[this](){ if(canvasPtr_) canvasPtr_->redraw(); };
-    surface_->onCursorChange  =[](HCURSOR c){ SetCursor(c); };    // ← NEW
+    surface_->onCursorChange  =[](HCURSOR c){ SetCursor(c); };
     canvas->onViewportChanged =[this](float z){ syncZoomState(z); };
+
+    // ── Layer change handler (ported from test.cpp) ────────────────────────
+    surface_->onLayersChanged = [this](const LayerState& ls) {
+      int count = int(ls.layers.size());
+      std::vector<LayerDesc> ordered;
+      ordered.reserve(count);
+      for (int i = count - 1; i >= 0; i--)
+        ordered.push_back(ls.layers[i]);
+
+      std::unordered_set<std::string> activeNames;
+      for (auto& ld : ordered) activeNames.insert(ld.name);
+
+      for (auto it = layerRefByName_.begin(); it != layerRefByName_.end(); ) {
+        if (!activeNames.count(it->first)) it = layerRefByName_.erase(it);
+        else ++it;
+      }
+
+      bool structuralChange = false;
+      std::vector<LayerRef> newVec;
+      newVec.reserve(count);
+      for (auto& ld : ordered) {
+        auto it = layerRefByName_.find(ld.name);
+        if (it != layerRefByName_.end()) {
+          it->second->set(ld);
+          newVec.push_back(it->second);
+        } else {
+          auto ref = MakeReactive(ld);
+          layerRefByName_[ld.name] = ref;
+          newVec.push_back(ref);
+          structuralChange = true;
+        }
+      }
+
+      bool orderChanged = false;
+      {
+        const auto& cur = layerDescs.get();
+        if (cur.size() != newVec.size()) { orderChanged = true; }
+        else { for (size_t i = 0; i < cur.size(); i++) { if (cur[i].get() != newVec[i].get()) { orderChanged = true; break; } } }
+      }
+      if (structuralChange || int(layerDescs.get().size()) != count || orderChanged)
+        layerDescs.set(newVec);
+
+      if (canvasPtr_) canvasPtr_->redraw();
+    };
 
     activeColor.listen([this](const std::string&col){ if(surface_) surface_->setColor(col); });
     activeSize.listen([this](double sz)  { if(surface_) surface_->setSize(float(sz)); });
@@ -1159,7 +936,6 @@ public:
     filledShapes.listen([this](bool f)   { if(surface_) surface_->setFilled(f); });
     zoomLevel.listen([this](double pct)  { applyZoomFromSlider(pct); });
 
-    // ── NEW: font size listener ──────────────────────────────────────────────
     fontSize.listen([this](int sz){
       if(!surface_) return;
       TextStyle s = surface_->getTextStyle();
@@ -1167,7 +943,7 @@ public:
       surface_->setTextStyle(s);
     });
 
-    // ── Shared style helpers ──────────────────────────────────────────────────
+    // ── Shared style helpers ──────────────────────────────────────────────
     auto sectionLabel=[](const std::string&txt)->WidgetPtr{
       return Text(txt)->setFontSize(9)->setTextColor(RGB(100,105,125))->setFontWeight(FontWeight::Bold);
     };
@@ -1177,6 +953,9 @@ public:
     COLORREF kBg2   =RGB(24,24,37);
     COLORREF kBorder=RGB(49,50,68);
     COLORREF kText  =RGB(205,214,244);
+    COLORREF kDim   =RGB(100,105,130);
+    COLORREF kSubtext=RGB(130,132,155);
+    COLORREF kCard  =RGB(30,30,46);
 
     auto cardWrap=[&](WidgetPtr child)->WidgetPtr{
       return Container(child)
@@ -1185,7 +964,7 @@ public:
         ->setPaddingAll(10,10,10,10);
     };
 
-    // ── Tool button factory ────────────────────────────────────────────────────
+    // ── Tool button factory ────────────────────────────────────────────────
     auto makeToolBtn=[&](Tool tv,const std::string&icon,const std::string&lbl)->WidgetPtr{
       return GestureDetector(
         Container(
@@ -1203,7 +982,7 @@ public:
       )->setOnTap([this,tv](){ activeTool.set(tv); });
     };
 
-    // ── §A  DRAW TOOLS section ─────────────────────────────────────────────────
+    // ── §A  DRAW TOOLS section ─────────────────────────────────────────────
     auto drawRow=std::make_shared<RowWidget>(); drawRow->setSpacing(4);
     drawRow->addChild(makeToolBtn(Tool::Brush,  "🖌", "Brush"));
     drawRow->addChild(makeToolBtn(Tool::Eraser, "⬜", "Eraser"));
@@ -1211,41 +990,19 @@ public:
     drawRow->addChild(makeToolBtn(Tool::Select, "⬚", "Select"));
 
     auto drawRow2=std::make_shared<RowWidget>(); drawRow2->setSpacing(4);
-    drawRow2->addChild(makeToolBtn(Tool::Text,  "𝐓",  "Text"));    // ← NEW
+    drawRow2->addChild(makeToolBtn(Tool::Text,  "𝐓",  "Text"));
 
     auto drawSection=cardWrap(
       Column(sectionLabel("DRAW"),SizedBox(0,8),drawRow,SizedBox(0,4),drawRow2)->setSpacing(0)
     );
 
-    // ── §B  SHAPE TOOLS section ────────────────────────────────────────────────
+    // ── §B  SHAPE TOOLS section ────────────────────────────────────────────
     struct SD{ Tool t; std::string icon; std::string label; };
-    const std::vector<SD> basicShapes={
-      {Tool::Line,       "╱",  "Line"},
-      {Tool::Rect,       "▭",  "Rect"},
-      {Tool::RoundRect,  "▢",  "RndRect"},
-      {Tool::Ellipse,    "⬭",  "Ellipse"},
-    };
-    const std::vector<SD> polyShapes={
-      {Tool::Triangle,      "△",  "Triangle"},
-      {Tool::RightTriangle, "◺",  "R.Tri"},
-      {Tool::Diamond,       "◇",  "Diamond"},
-      {Tool::Pentagon,      "⬠",  "Pentagon"},
-    };
-    const std::vector<SD> starShapes={
-      {Tool::Hexagon,    "⬡",  "Hexagon"},
-      {Tool::Star5,      "★",  "Star 5"},
-      {Tool::Star6,      "✡",  "Star 6"},
-      {Tool::Cross,      "✛",  "Cross"},
-    };
-    const std::vector<SD> specialShapes={
-      {Tool::Arrow,        "→",  "Arrow"},
-      {Tool::ArrowDouble,  "↔",  "Dbl Arrow"},
-      {Tool::Parallelogram,"▱",  "Parallel."},
-      {Tool::Trapezoid,    "⏢",  "Trapezoid"},
-    };
-    const std::vector<SD> extraShapes={
-      {Tool::Heart, "♥", "Heart"},
-    };
+    const std::vector<SD> basicShapes={{Tool::Line,"╱","Line"},{Tool::Rect,"▭","Rect"},{Tool::RoundRect,"▢","RndRect"},{Tool::Ellipse,"⬭","Ellipse"}};
+    const std::vector<SD> polyShapes={{Tool::Triangle,"△","Triangle"},{Tool::RightTriangle,"◺","R.Tri"},{Tool::Diamond,"◇","Diamond"},{Tool::Pentagon,"⬠","Pentagon"}};
+    const std::vector<SD> starShapes={{Tool::Hexagon,"⬡","Hexagon"},{Tool::Star5,"★","Star 5"},{Tool::Star6,"✡","Star 6"},{Tool::Cross,"✛","Cross"}};
+    const std::vector<SD> specialShapes={{Tool::Arrow,"→","Arrow"},{Tool::ArrowDouble,"↔","Dbl Arrow"},{Tool::Parallelogram,"▱","Parallel."},{Tool::Trapezoid,"⏢","Trapezoid"}};
+    const std::vector<SD> extraShapes={{Tool::Heart,"♥","Heart"}};
 
     auto makeShapeRow=[&](const std::vector<SD>&shapes)->std::shared_ptr<RowWidget>{
       auto row=std::make_shared<RowWidget>(); row->setSpacing(4);
@@ -1253,7 +1010,6 @@ public:
       return row;
     };
 
-    // Fill toggle
     auto fillToggle=GestureDetector(
       Container(
         Row(
@@ -1279,11 +1035,10 @@ public:
       )->setSpacing(0)
     );
 
-    // ── §B2  FONT SIZE section (shown when Text tool active)  ─────────────────
+    // ── §B2  FONT SIZE section ─────────────────────────────────────────────
     auto fontSizeSection=cardWrap(
       Column(
-        sectionLabel("FONT SIZE"),
-        SizedBox(0,6),
+        sectionLabel("FONT SIZE"),SizedBox(0,6),
         Row(
           GestureDetector(
             Container(Text("–")->setFontSize(14)->setTextColor(RGB(180,180,200)))
@@ -1306,7 +1061,7 @@ public:
       )->setSpacing(0)
     );
 
-    // ── §C  Color ──────────────────────────────────────────────────────────────
+    // ── §C  Color ─────────────────────────────────────────────────────────
     auto selectedSwatch=cardWrap(
       Row(
         Container(nullptr)->setWidth(32)->setHeight(32)->setBorderRadius(6)
@@ -1316,8 +1071,7 @@ public:
         Column(
           Text("Selected")->setFontSize(9)->setTextColor(RGB(100,105,125)),
           SizedBox(0,2),
-          Text(activeColor,[](const std::string&c){ return c; })
-           ->setFontSize(11)->setTextColor(kText)
+          Text(activeColor,[](const std::string&c){ return c; })->setFontSize(11)->setTextColor(kText)
         )->setSpacing(0)
       )->setSpacing(0)->setCrossAxisAlignment(CrossAxisAlignment::Center)
     );
@@ -1327,8 +1081,7 @@ public:
     auto pickerSection=cardWrap(picker);
 
     auto historyList=ListView(colorHistory)->itemBuilder([this](int,const RGBA&c)->WidgetPtr{
-      char hex[8]; _snprintf_s(hex,sizeof(hex),_TRUNCATE,"#%02x%02x%02x",
-        int(c.r*255),int(c.g*255),int(c.b*255));
+      char hex[8]; _snprintf_s(hex,sizeof(hex),_TRUNCATE,"#%02x%02x%02x",int(c.r*255),int(c.g*255),int(c.b*255));
       std::string col=hex;
       return GestureDetector(
         Container(nullptr)->setWidth(20)->setHeight(20)->setBorderRadius(10)
@@ -1342,16 +1095,14 @@ public:
         sectionLabel("RECENT COLORS"),SizedBox(0,8),
         Conditional(colorHistory,[](const std::vector<RGBA>&h){ return !h.empty(); })
           ->Then([&]{ return SizedBox(224,22,historyList); })
-          ->Else([&]{ return Text("Paint a stroke to record colors")
-              ->setFontSize(9)->setTextColor(RGB(70,72,90)); })
+          ->Else([&]{ return Text("Paint a stroke to record colors")->setFontSize(9)->setTextColor(RGB(70,72,90)); })
       )->setSpacing(0)
     );
 
     auto pc1=std::make_shared<RowWidget>(); pc1->setSpacing(4);
     auto pc2=std::make_shared<RowWidget>(); pc2->setSpacing(4);
     for(int i=0;i<(int)surface_->kPalette.size();i++){
-      const auto&[col,lbl]=surface_->kPalette[i];
-      std::string c=col;
+      const auto&[col,lbl]=surface_->kPalette[i]; std::string c=col;
       auto sw=GestureDetector(
         Container(nullptr)->setWidth(20)->setHeight(20)->setBorderRadius(10)
          ->setBackgroundColor(hexToRef(col))
@@ -1360,17 +1111,12 @@ public:
       )->setOnTap([this,c](){ activeColor.set(c); });
       if(i%2==0) pc1->addChild(sw); else pc2->addChild(sw);
     }
-    auto paletteSection=cardWrap(
-      Column(sectionLabel("PRESETS"),SizedBox(0,8),
-        Column(pc1,SizedBox(0,4),pc2)->setSpacing(0)
-      )->setSpacing(0)
-    );
+    auto paletteSection=cardWrap(Column(sectionLabel("PRESETS"),SizedBox(0,8),Column(pc1,SizedBox(0,4),pc2)->setSpacing(0))->setSpacing(0));
 
     auto sizeSection=cardWrap(
       Column(
         Row(sectionLabel("SIZE"),SizedBox(6,0),
-          Text(activeSize,[](double v){ return std::to_string(int(std::round(v)))+"px"; })
-           ->setFontSize(9)->setTextColor(RGB(160,160,180))
+          Text(activeSize,[](double v){ return std::to_string(int(std::round(v)))+"px"; })->setFontSize(9)->setTextColor(RGB(160,160,180))
         )->setSpacing(0)->setCrossAxisAlignment(CrossAxisAlignment::Center),
         SizedBox(0,8),
         Slider(1.0,40.0,0.5)->setValue(activeSize)->setTrackFillColor(kAccent)->setWidth(224)
@@ -1379,20 +1125,19 @@ public:
     auto opacitySection=cardWrap(
       Column(
         Row(sectionLabel("OPACITY"),SizedBox(6,0),
-          Text(activeOpacity,[](double op){ return std::to_string(int(std::round(op*100)))+"%"; })
-           ->setFontSize(9)->setTextColor(RGB(160,160,180))
+          Text(activeOpacity,[](double op){ return std::to_string(int(std::round(op*100)))+"%"; })->setFontSize(9)->setTextColor(RGB(160,160,180))
         )->setSpacing(0)->setCrossAxisAlignment(CrossAxisAlignment::Center),
         SizedBox(0,8),
         Slider(0.0,1.0,0.01)->setValue(activeOpacity)->setTrackFillColor(kAccent)->setWidth(224)
       )->setSpacing(0)
     );
 
-    // ── §D  Sidebar assembly ───────────────────────────────────────────────────
+    // ── §D  Sidebar assembly ───────────────────────────────────────────────
     auto sidebar=Container(
       Column(
         drawSection,     SizedBox(0,6),
         shapeSection,    SizedBox(0,6),
-        fontSizeSection, SizedBox(0,6),   // ← NEW: always visible font size card
+        fontSizeSection, SizedBox(0,6),
         selectedSwatch,  SizedBox(0,6),
         pickerSection,   SizedBox(0,6),
         historySection,  SizedBox(0,6),
@@ -1402,7 +1147,7 @@ public:
       )->setSpacing(0)
     )->setWidth(kSidebarWidth)->setBackgroundColor(kBg1)->setPaddingAll(10,10,10,10);
 
-    // ── §E  Toolbar ────────────────────────────────────────────────────────────
+    // ── §E  Toolbar ────────────────────────────────────────────────────────
     auto makeBtn=[&](const std::string&lbl,COLORREF txt,std::function<void()>fn)->WidgetPtr{
       return Button(lbl,fn)->setBackgroundColor(RGB(30,30,46))->setTextColor(txt)
         ->setBorderRadius(5)->setHeight(26)->setPadding(4);
@@ -1411,12 +1156,9 @@ public:
       Row(
         Text("Zoom")->setFontSize(11)->setTextColor(RGB(140,140,160)),
         Slider(kZoomMin,kZoomMax,0.25)->setValue(zoomLevel)->setTrackFillColor(kAccent)->setWidth(110),
-        Text(zoomLevel,[](double v){ return std::to_string(int(std::round(v)))+"%"; })
-         ->setFontSize(11)->setTextColor(RGB(180,180,200))->setMinWidth(38),
-        Button("1:1",[this]{ if(canvasPtr_){ canvasPtr_->viewport().resetZoom(); canvasPtr_->redraw(); syncZoomState(1.f); } })
-          ->setBackgroundColor(RGB(24,24,37))->setTextColor(kAccent)->setBorderRadius(5)->setWidth(30)->setHeight(26)->setPadding(4),
-        Button("Fit",[this]{ if(canvasPtr_){ canvasPtr_->viewport().fitToView(); canvasPtr_->redraw(); syncZoomState(canvasPtr_->viewport().zoom()); } })
-          ->setBackgroundColor(RGB(24,24,37))->setTextColor(kAccent)->setBorderRadius(5)->setWidth(30)->setHeight(26)->setPadding(4),
+        Text(zoomLevel,[](double v){ return std::to_string(int(std::round(v)))+"%"; })->setFontSize(11)->setTextColor(RGB(180,180,200))->setMinWidth(38),
+        Button("1:1",[this]{ if(canvasPtr_){ canvasPtr_->viewport().resetZoom(); canvasPtr_->redraw(); syncZoomState(1.f); } })->setBackgroundColor(RGB(24,24,37))->setTextColor(kAccent)->setBorderRadius(5)->setWidth(30)->setHeight(26)->setPadding(4),
+        Button("Fit",[this]{ if(canvasPtr_){ canvasPtr_->viewport().fitToView(); canvasPtr_->redraw(); syncZoomState(canvasPtr_->viewport().zoom()); } })->setBackgroundColor(RGB(24,24,37))->setTextColor(kAccent)->setBorderRadius(5)->setWidth(30)->setHeight(26)->setPadding(4),
         SizedBox(12,0),
         makeBtn("↩ Undo",RGB(137,180,250),[this]{ if(surface_){ surface_->undo(); refreshUndoRedo(); if(canvasPtr_) canvasPtr_->redraw(); } }),
         makeBtn("Redo ↪",RGB(166,226,46), [this]{ if(surface_){ surface_->redo(); refreshUndoRedo(); if(canvasPtr_) canvasPtr_->redraw(); } }),
@@ -1425,13 +1167,13 @@ public:
       )->setSpacing(8)->setCrossAxisAlignment(CrossAxisAlignment::Center)
     )->setBackgroundColor(kBg1)->setPaddingAll(10,7,10,7)->setHeight(kToolbarHeight);
 
-    // ── §F  Context menu ───────────────────────────────────────────────────────
+    // ── §F  Context menu ───────────────────────────────────────────────────
     auto canvasWithMenu=ContextMenu(canvas,{
       {"Brush (B)",       [this]{ activeTool.set(Tool::Brush);   }},
       {"Eraser (E)",      [this]{ activeTool.set(Tool::Eraser);  }},
       {"Fill (F)",        [this]{ activeTool.set(Tool::Fill);    }},
       {"Select (S)",      [this]{ activeTool.set(Tool::Select);  }},
-      {"Text (T)",        [this]{ activeTool.set(Tool::Text);    }},   // ← NEW
+      {"Text (T)",        [this]{ activeTool.set(Tool::Text);    }},
       ContextMenuItem::Separator(),
       {"Line (L)",        [this]{ activeTool.set(Tool::Line);    }},
       {"Rectangle (R)",   [this]{ activeTool.set(Tool::Rect);    }},
@@ -1451,11 +1193,10 @@ public:
       {"Clear",           [this]{ if(surface_){ surface_->clear(); refreshUndoRedo(); if(canvasPtr_) canvasPtr_->redraw(); } }},
     });
 
-    // ── §G  Hints strip ────────────────────────────────────────────────────────
+    // ── §G  Hints strip ────────────────────────────────────────────────────
     auto hints=Container(
       Conditional(statusMsg,[](const std::string&s){ return !s.empty(); })
-        ->Then([&]{ return Text(statusMsg,[](const std::string&s){ return s; })
-            ->setFontSize(10)->setTextColor(RGB(148,226,213)); })
+        ->Then([&]{ return Text(statusMsg,[](const std::string&s){ return s; })->setFontSize(10)->setTextColor(RGB(148,226,213)); })
         ->Else([&]{ return Row(
             Text("MMB/Space: Pan")->setFontSize(10)->setTextColor(RGB(75,75,95)),SizedBox(10,0),
             Text("Ctrl+Scroll: Zoom")->setFontSize(10)->setTextColor(RGB(75,75,95)),SizedBox(10,0),
@@ -1465,8 +1206,145 @@ public:
           )->setSpacing(0); })
     )->setBackgroundColor(kBg1)->setPaddingAll(10,3,10,3)->setHeight(kHintsHeight);
 
+    // ── §H  Layer panel (ported from test.cpp) ─────────────────────────────
+    auto layerList =
+      ListView(layerDescs)
+        ->itemBuilder([this, kCard, kBorder, kAccent, kDim, kSubtext]
+                      (int di, const LayerRef& ri) -> WidgetPtr {
+          const LayerDesc& ld  = ri->get();
+          const bool       act = ld.isActive;
+          const COLORREF rowBg   = act ? RGB(38,30,58) : kCard;
+          const COLORREF rowBord = act ? kAccent : kBorder;
+          const int      bw      = act ? 2 : 1;
+
+          auto liveStackIndex = [this](int displayIdx) -> int {
+            const auto& snap = layerDescs.get();
+            if (displayIdx >= int(snap.size())) return -1;
+            return int(snap.size()) - 1 - displayIdx;
+          };
+
+          auto eye = Tooltip(
+            GestureDetector(
+              Container(
+                Text(ld.visible ? "👁" : "🚫")
+                  ->setFontSize(11)
+                  ->setTextColor(ld.visible ? RGB(180,180,210) : RGB(80,80,100)))
+                ->setWidth(24)->setHeight(24)->setBorderRadius(4)
+                ->setBackgroundColor(ld.visible ? RGB(30,30,48) : RGB(22,22,32))
+                ->setBorderWidth(1)->setBorderColor(kBorder))
+              ->setOnTap([this, di, liveStackIndex]() {
+                if (!surface_) return;
+                int li = liveStackIndex(di);
+                if (li < 0) return;
+                const auto& snap = layerDescs.get();
+                surface_->setLayerVisible(li, !snap[di]->get().visible);
+              }),
+            ld.visible ? "Hide layer" : "Show layer");
+
+          auto name =
+            GestureDetector(
+              Text(ld.name)
+                ->setFontSize(10)
+                ->setTextColor(act ? RGB(220,200,255) : kSubtext)
+                ->setMinWidth(56))
+              ->setOnTap([this, di, liveStackIndex]() {
+                if (!surface_) return;
+                int li = liveStackIndex(di);
+                if (li < 0) return;
+                surface_->setActiveLayer(li);
+              });
+
+          auto upBtn = Tooltip(
+            GestureDetector(
+              Container(Text("▲")->setFontSize(8)->setTextColor(kDim))
+                ->setWidth(20)->setHeight(20)->setBorderRadius(3)
+                ->setBackgroundColor(kCard)->setBorderWidth(1)->setBorderColor(kBorder))
+              ->setOnTap([this, di, liveStackIndex]() {
+                if (!surface_) return;
+                int li = liveStackIndex(di);
+                if (li < 0) return;
+                surface_->moveLayerUp(li);
+              }),
+            "Move up");
+
+          auto dnBtn = Tooltip(
+            GestureDetector(
+              Container(Text("▼")->setFontSize(8)->setTextColor(kDim))
+                ->setWidth(20)->setHeight(20)->setBorderRadius(3)
+                ->setBackgroundColor(kCard)->setBorderWidth(1)->setBorderColor(kBorder))
+              ->setOnTap([this, di, liveStackIndex]() {
+                if (!surface_) return;
+                int li = liveStackIndex(di);
+                if (li < 0) return;
+                surface_->moveLayerDown(li);
+              }),
+            "Move down");
+
+          auto delBtn = Tooltip(
+            GestureDetector(
+              Container(Text("✕")->setFontSize(9)->setTextColor(RGB(190,70,70)))
+                ->setWidth(20)->setHeight(20)->setBorderRadius(3)
+                ->setBackgroundColor(RGB(36,20,20))->setBorderWidth(1)->setBorderColor(kBorder))
+              ->setOnTap([this, di, liveStackIndex]() {
+                if (!surface_) return;
+                int li = liveStackIndex(di);
+                if (li < 0) return;
+                surface_->deleteLayer(li);
+              }),
+            "Delete layer");
+
+          return Container(
+            Row(eye, SizedBox(5,0), name,
+                upBtn, SizedBox(2,0), dnBtn, SizedBox(3,0), delBtn)
+              ->setSpacing(0)
+              ->setCrossAxisAlignment(CrossAxisAlignment::Center))
+            ->setBackgroundColor(rowBg)
+            ->setBorderRadius(6)
+            ->setBorderWidth(bw)
+            ->setBorderColor(rowBord)
+            ->setPaddingAll(6,5,6,5)
+            ->setHeight(34);
+        })
+        ->setSpacing(4)
+        ->setScrollbarColor(RGB(60,60,90))
+        ->setScrollbarHoverColor(RGB(90,90,130));
+
+    auto layerPanel = Container(
+      Column(
+        Row(
+          Text("LAYERS")->setFontSize(8)->setFontWeight(FontWeight::Bold)->setTextColor(kDim),
+          Tooltip(
+            GestureDetector(
+              Container(Text("+")->setFontSize(16)->setTextColor(RGB(160,220,160)))
+                ->setWidth(28)->setHeight(28)->setBorderRadius(6)
+                ->setBackgroundColor(RGB(24,40,24))->setBorderWidth(1)->setBorderColor(RGB(60,100,60))
+                ->setHoverBackgroundColor(RGB(30,52,30)))
+              ->setOnTap([this](){ if(surface_) surface_->addLayer(); }),
+            "Add layer")
+        )->setSpacing(0)->setCrossAxisAlignment(CrossAxisAlignment::Center),
+        SizedBox(0,10),
+        Expanded(layerList),
+        SizedBox(0,8),
+        Tooltip(
+          GestureDetector(
+            Container(
+              Row(Text("⊞")->setFontSize(12)->setTextColor(RGB(170,170,200)),
+                  SizedBox(5,0),
+                  Text("Flatten All")->setFontSize(10)->setTextColor(RGB(160,160,185)))
+                ->setSpacing(0)->setCrossAxisAlignment(CrossAxisAlignment::Center))
+              ->setBackgroundColor(kCard)->setBorderRadius(6)->setBorderWidth(1)
+              ->setBorderColor(kBorder)->setHoverBackgroundColor(RGB(36,36,56))
+              ->setPaddingAll(8,6,8,6))
+            ->setOnTap([this](){ if(surface_) surface_->flattenToSingle(); }),
+          "Merge all visible layers into one")
+      )->setSpacing(0))
+      ->setWidth(kLayerPanelWidth)
+      ->setBackgroundColor(RGB(24,24,36))
+      ->setPaddingAll(12,12,12,12);
+
+    // ── §I  Root layout ────────────────────────────────────────────────────
     auto canvasColumn=Column(toolbar,hints,canvasWithMenu)->setSpacing(0);
-    auto root=Row(sidebar,canvasColumn)->setSpacing(0);
+    auto root=Row(sidebar,canvasColumn,layerPanel)->setSpacing(0);
     return Scaffold(root);
   }
 };
