@@ -919,6 +919,24 @@ protected:
   void pushUndoSnapshotPublic() { pushUndoSnapshot(); }
 
   void scratchClear() { clearFBO(scratchFBO_, w_, h_, 0, 0, 0, 0); }
+  // Used by LayeredSurface to redirect painting to the active layer's FBOs.
+  void swapActiveFBOs(GLuint newCFBO, GLuint newCTex, GLuint newSFBO,
+                      GLuint newSTex, GLuint &oldCFBO, GLuint &oldCTex,
+                      GLuint &oldSFBO, GLuint &oldSTex) {
+    oldCFBO = committedFBO_;
+    oldCTex = committedTex_;
+    oldSFBO = scratchFBO_;
+    oldSTex = scratchTex_;
+    committedFBO_ = newCFBO;
+    committedTex_ = newCTex;
+    scratchFBO_ = newSFBO;
+    scratchTex_ = newSTex;
+  }
+
+  void flushUndoRedoPublic() {
+    flushDeque(undoStack_, undoBytes_);
+    flushDeque(redoStack_, redoBytes_);
+  }
 
   void scratchCommit() {
     pushUndoSnapshot();
