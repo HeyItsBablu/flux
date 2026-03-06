@@ -1,8 +1,8 @@
 // =============================================================================
-// logic_sim.hpp  —  Logic Gate Simulator  v5  (wire connections added)
+// logic_sim.hpp  —  Logic Gate Simulator  v7  (clean sim, no wire animation)
+// =============================================================================
 
 #pragma once
-
 #include "flux.hpp"
 
 #define NOMINMAX
@@ -14,61 +14,56 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <vector>
 
 // ---------------------------------------------------------------------------
 // Extra GL procs
 // ---------------------------------------------------------------------------
-using PFNGLUNIFORM4FPROC_LS = void(APIENTRY *)(GLint, GLfloat, GLfloat, GLfloat, GLfloat);
-using PFNGLUNIFORM2FPROC_LS = void(APIENTRY *)(GLint, GLfloat, GLfloat);
-
+using PFNGLUNIFORM4FPROC_LS = void(APIENTRY*)(GLint,GLfloat,GLfloat,GLfloat,GLfloat);
+using PFNGLUNIFORM2FPROC_LS = void(APIENTRY*)(GLint,GLfloat,GLfloat);
 namespace ls_gl {
-inline PFNGLUNIFORM4FPROC_LS uniform4f = nullptr;
-inline PFNGLUNIFORM2FPROC_LS uniform2f = nullptr;
-inline void init() {
-    if (uniform4f) return;
-    HMODULE gl32 = GetModuleHandleA("opengl32.dll");
-    auto load = [&](const char *n) -> void * {
-        void *p = (void *)wglGetProcAddress(n);
-        if (!p || p==(void*)1 || p==(void*)2 || p==(void*)3 || p==(void*)-1)
-            p = (void *)GetProcAddress(gl32, n);
-        return p;
-    };
-    uniform4f = (PFNGLUNIFORM4FPROC_LS)load("glUniform4f");
-    uniform2f = (PFNGLUNIFORM2FPROC_LS)load("glUniform2f");
-    assert(uniform4f && uniform2f);
+    inline PFNGLUNIFORM4FPROC_LS uniform4f = nullptr;
+    inline PFNGLUNIFORM2FPROC_LS uniform2f = nullptr;
+    inline void init() {
+        if (uniform4f) return;
+        HMODULE gl32 = GetModuleHandleA("opengl32.dll");
+        auto load = [&](const char* n) -> void* {
+            void* p = (void*)wglGetProcAddress(n);
+            if (!p||p==(void*)1||p==(void*)2||p==(void*)3||p==(void*)-1)
+                p = (void*)GetProcAddress(gl32,n);
+            return p;
+        };
+        uniform4f = (PFNGLUNIFORM4FPROC_LS)load("glUniform4f");
+        uniform2f = (PFNGLUNIFORM2FPROC_LS)load("glUniform2f");
+        assert(uniform4f && uniform2f);
+    }
 }
-} // namespace ls_gl
 
 // =============================================================================
 // §1  DATA MODEL
 // =============================================================================
 
-enum class GateType {
-    AND=0, OR, NOT, NAND, NOR, XOR, XNOR, INPUT, OUTPUT, COUNT
-};
+enum class GateType { AND=0,OR,NOT,NAND,NOR,XOR,XNOR,INPUT,OUTPUT,COUNT };
 static constexpr int kGTC = (int)GateType::COUNT;
-static constexpr int kInPins[kGTC]  = {2,2,1,2,2,2,2,0,1};
+static constexpr int kInPins [kGTC] = {2,2,1,2,2,2,2,0,1};
 static constexpr int kOutPins[kGTC] = {1,1,1,1,1,1,1,1,0};
-static const char *kGateName[kGTC]  = {
+static const char*   kGateName[kGTC] = {
     "AND","OR","NOT","NAND","NOR","XOR","XNOR","INPUT","OUTPUT"};
 
-static constexpr float kGW     = 88.f;
-static constexpr float kGH     = 60.f;
-static constexpr float kPinR   = 5.f;
-static constexpr float kPinLen = 16.f;
-static constexpr float kCorner = 8.f;
+static constexpr float kGW=88.f, kGH=60.f, kPinR=5.f, kPinLen=16.f, kCorner=8.f;
 
-struct Pin { float cx=0, cy=0; bool connected=false; };
+struct Pin { float cx=0,cy=0; bool connected=false; };
 
 struct Gate {
-    int id=0;
+    int      id=0;
     GateType type=GateType::AND;
-    float x=0, y=0;
-    bool selected=false;
-    bool inputVal=false;
-    std::vector<Pin> inPins, outPins;
+    float    x=0,y=0;
+    bool     selected=false;
+    bool     inputVal=false;
+    bool     simVal=false;
+    std::vector<Pin> inPins,outPins;
 
     void recomputePins() {
         int ni=kInPins[(int)type], no=kOutPins[(int)type];
@@ -85,130 +80,215 @@ struct Gate {
     }
 };
 
-// ── Wire types ───────────────────────────────────────────────────────────────
-
-struct WireEndpoint {
-    int  gateId  = -1;
-    int  pinIdx  = 0;
-    bool isOutput= false;
-};
+struct WireEndpoint { int gateId=-1; int pinIdx=0; bool isOutput=false; };
 
 struct Wire {
-    int          id       = 0;
-    WireEndpoint src;       // output pin side
-    WireEndpoint dst;       // input  pin side
-    bool         value    = false;
-    bool         selected = false;
+    int          id=0;
+    WireEndpoint src,dst;
+    bool         value=false;
+    bool         selected=false;
 };
 
-struct PinRef {
-    int   gateId;
-    int   pinIdx;
-    bool  isOutput;
-    float cx, cy;   // world-space coords
+struct PinRef { int gateId; int pinIdx; bool isOutput; float cx,cy; };
+
+// ── Truth table ───────────────────────────────────────────────────────────────
+struct TruthRow {
+    std::vector<bool> inputs;
+    std::vector<bool> outputs;
 };
 
-// ── Circuit ──────────────────────────────────────────────────────────────────
+enum class SimMode { Edit, Running, Paused };
 
+// ── Circuit ───────────────────────────────────────────────────────────────────
 struct Circuit {
     std::vector<Gate> gates;
     std::vector<Wire> wires;
-    int nextId     = 1;
-    int nextWireId = 1;
+    int nextId=1, nextWireId=1;
 
-    // Gate helpers
-    int add(GateType t, float x, float y) {
+    int add(GateType t,float x,float y) {
         Gate g; g.id=nextId++; g.type=t; g.x=x; g.y=y;
         g.recomputePins(); gates.push_back(g); return g.id;
     }
-    Gate *find(int id) {
-        for (auto &g:gates) if (g.id==id) return &g; return nullptr;
+    Gate* find(int id) {
+        for (auto& g:gates) if(g.id==id) return &g; return nullptr;
     }
-    const Gate *find(int id) const {
-        for (auto &g:gates) if (g.id==id) return &g; return nullptr;
+    const Gate* find(int id) const {
+        for (auto& g:gates) if(g.id==id) return &g; return nullptr;
     }
     void remove(int id) {
         gates.erase(std::remove_if(gates.begin(),gates.end(),
-            [id](const Gate &g){return g.id==id;}),gates.end());
+            [id](const Gate& g){return g.id==id;}),gates.end());
     }
-
-    // Wire helpers
-    int connect(int srcGateId, int srcPin, int dstGateId, int dstPin) {
-        Wire w;
-        w.id  = nextWireId++;
-        w.src = {srcGateId, srcPin, true };
-        w.dst = {dstGateId, dstPin, false};
+    int connect(int srcId,int srcPin,int dstId,int dstPin) {
+        Wire w; w.id=nextWireId++;
+        w.src={srcId,srcPin,true}; w.dst={dstId,dstPin,false};
         wires.push_back(w);
-        markPin(srcGateId, srcPin, true,  true);
-        markPin(dstGateId, dstPin, false, true);
+        markPin(srcId,srcPin,true,true);
+        markPin(dstId,dstPin,false,true);
         return w.id;
     }
-
     void disconnect(int wireId) {
         for (int i=int(wires.size())-1;i>=0;--i) {
             if (wires[i].id!=wireId) continue;
-            auto &w=wires[i];
-            recomputePin(w.src.gateId, w.src.pinIdx, true,  wireId);
-            recomputePin(w.dst.gateId, w.dst.pinIdx, false, wireId);
-            wires.erase(wires.begin()+i);
-            return;
+            auto& w=wires[i];
+            recomputePin(w.src.gateId,w.src.pinIdx,true, wireId);
+            recomputePin(w.dst.gateId,w.dst.pinIdx,false,wireId);
+            wires.erase(wires.begin()+i); return;
         }
     }
-
     void removeGateWires(int gateId) {
         std::vector<int> ids;
-        for (auto &w:wires)
-            if (w.src.gateId==gateId||w.dst.gateId==gateId)
-                ids.push_back(w.id);
+        for (auto& w:wires)
+            if (w.src.gateId==gateId||w.dst.gateId==gateId) ids.push_back(w.id);
         for (int id:ids) disconnect(id);
     }
+    void clearAll() { gates.clear(); wires.clear(); nextId=1; nextWireId=1; }
 
-    Wire *findWire(int id) {
-        for (auto &w:wires) if (w.id==id) return &w; return nullptr;
-    }
-
-    void clearAll() {
-        gates.clear(); wires.clear();
-        nextId=1; nextWireId=1;
-    }
-
-    // Multi-pass combinational evaluation
+    // ── Evaluate: topological sort then single pass ───────────────────────
     void evaluate() {
-        for (int pass=0;pass<12;++pass) {
-            bool changed=false;
-            for (auto &g:gates) {
-                bool out=computeGate(g);
-                for (auto &w:wires) {
-                    if (w.src.gateId!=g.id) continue;
-                    if (w.value!=out){w.value=out;changed=true;}
+        // Build adjacency: for each gate, which gates feed into it
+        int n = (int)gates.size();
+        // Map id -> index
+        std::vector<int> order = topoSort();
+
+        // Evaluate in order
+        for (int idx : order) {
+            Gate& g = gates[idx];
+            bool out = computeGate(g);
+            g.simVal = out;
+            // Push value onto outgoing wires
+            for (auto& w : wires)
+                if (w.src.gateId == g.id) w.value = out;
+        }
+    }
+
+    // Build truth table
+    std::vector<TruthRow> buildTruthTable(
+        std::vector<int>& outInputIds,
+        std::vector<int>& outOutputIds) const
+    {
+        outInputIds.clear(); outOutputIds.clear();
+        std::vector<int> inIdx, outIdx;
+        for (int i=0;i<(int)gates.size();i++) {
+            if (gates[i].type==GateType::INPUT)  { inIdx.push_back(i);  outInputIds.push_back(gates[i].id);  }
+            if (gates[i].type==GateType::OUTPUT) { outIdx.push_back(i); outOutputIds.push_back(gates[i].id); }
+        }
+        if (inIdx.empty()||outIdx.empty()) return {};
+
+        int numIn  = (int)inIdx.size();
+        int combos = 1 << min(numIn, 6);
+        std::vector<TruthRow> table;
+
+        std::vector<Gate> gs = gates;
+        std::vector<Wire> ws = wires;
+
+        // Topo order on copies (by index into gs)
+        auto topoStatic = [&]() -> std::vector<int> {
+            int sz = (int)gs.size();
+            std::vector<int> indegree(sz, 0);
+            // indegree = number of gates that feed this gate
+            for (auto& w : ws) {
+                int dstIdx = -1;
+                for (int i=0;i<sz;i++) if(gs[i].id==w.dst.gateId){dstIdx=i;break;}
+                if (dstIdx>=0) indegree[dstIdx]++;
+            }
+            std::vector<int> q, result;
+            for (int i=0;i<sz;i++) if(indegree[i]==0) q.push_back(i);
+            while (!q.empty()) {
+                int cur = q.back(); q.pop_back();
+                result.push_back(cur);
+                for (auto& w : ws) {
+                    if (w.src.gateId != gs[cur].id) continue;
+                    int dstIdx = -1;
+                    for (int i=0;i<sz;i++) if(gs[i].id==w.dst.gateId){dstIdx=i;break;}
+                    if (dstIdx<0) continue;
+                    if (--indegree[dstIdx]==0) q.push_back(dstIdx);
                 }
             }
-            if (!changed) break;
+            // append anything not reached (cycles)
+            if ((int)result.size()<sz) {
+                std::vector<bool> visited(sz,false);
+                for (int i:result) visited[i]=true;
+                for (int i=0;i<sz;i++) if(!visited[i]) result.push_back(i);
+            }
+            return result;
+        };
+
+        auto evalStatic = [&]() {
+            auto order = topoStatic();
+            for (int idx : order) {
+                Gate& g = gs[idx];
+                if (g.type==GateType::INPUT) { g.simVal=g.inputVal; }
+                else {
+                    bool ins[2]={false,false};
+                    for (auto& w:ws)
+                        if (w.dst.gateId==g.id&&w.dst.pinIdx<2) ins[w.dst.pinIdx]=w.value;
+                    bool a=ins[0],b=ins[1];
+                    switch(g.type){
+                        case GateType::AND:  g.simVal=a&&b; break;
+                        case GateType::OR:   g.simVal=a||b; break;
+                        case GateType::NOT:  g.simVal=!a;   break;
+                        case GateType::NAND: g.simVal=!(a&&b); break;
+                        case GateType::NOR:  g.simVal=!(a||b); break;
+                        case GateType::XOR:  g.simVal=a^b;  break;
+                        case GateType::XNOR: g.simVal=!(a^b); break;
+                        default:             g.simVal=false; break;
+                    }
+                }
+                for (auto& w:ws) if(w.src.gateId==g.id) w.value=g.simVal;
+            }
+        };
+
+        for (int mask=0;mask<combos;mask++) {
+            for (int b=0;b<numIn;b++)
+                gs[inIdx[b]].inputVal = (mask>>b)&1;
+            evalStatic();
+            TruthRow row;
+            for (int i:inIdx)  row.inputs.push_back(gs[i].inputVal);
+            for (int i:outIdx) row.outputs.push_back(gs[i].simVal);
+            table.push_back(row);
         }
+        return table;
     }
 
 private:
-    void markPin(int gateId, int pinIdx, bool isOut, bool val) {
-        Gate *g=find(gateId); if(!g) return;
-        if ( isOut && pinIdx<(int)g->outPins.size()) g->outPins[pinIdx].connected=val;
-        if (!isOut && pinIdx<(int)g->inPins.size())  g->inPins[pinIdx].connected =val;
-    }
-    void recomputePin(int gateId, int pinIdx, bool isOut, int skipId) {
-        bool still=false;
-        for (auto &w:wires) {
-            if (w.id==skipId) continue;
-            if ( isOut && w.src.gateId==gateId && w.src.pinIdx==pinIdx){still=true;break;}
-            if (!isOut && w.dst.gateId==gateId && w.dst.pinIdx==pinIdx){still=true;break;}
+    // ── Topological sort (Kahn's) → indices into gates[] ─────────────────
+    std::vector<int> topoSort() const {
+        int sz = (int)gates.size();
+        std::vector<int> indegree(sz, 0);
+        for (auto& w : wires) {
+            int dstIdx = -1;
+            for (int i=0;i<sz;i++) if(gates[i].id==w.dst.gateId){dstIdx=i;break;}
+            if (dstIdx>=0) indegree[dstIdx]++;
         }
-        markPin(gateId,pinIdx,isOut,still);
+        std::vector<int> q, result;
+        for (int i=0;i<sz;i++) if(indegree[i]==0) q.push_back(i);
+        while (!q.empty()) {
+            int cur = q.back(); q.pop_back();
+            result.push_back(cur);
+            for (auto& w : wires) {
+                if (w.src.gateId != gates[cur].id) continue;
+                int dstIdx = -1;
+                for (int i=0;i<sz;i++) if(gates[i].id==w.dst.gateId){dstIdx=i;break;}
+                if (dstIdx<0) continue;
+                if (--indegree[dstIdx]==0) q.push_back(dstIdx);
+            }
+        }
+        // Append unvisited (cycle members) at end
+        if ((int)result.size() < sz) {
+            std::vector<bool> visited(sz, false);
+            for (int i : result) visited[i] = true;
+            for (int i=0;i<sz;i++) if(!visited[i]) result.push_back(i);
+        }
+        return result;
     }
-    bool computeGate(const Gate &g) {
+
+    bool computeGate(const Gate& g) const {
         if (g.type==GateType::INPUT) return g.inputVal;
         bool ins[2]={false,false};
-        for (auto &w:wires)
-            if (w.dst.gateId==g.id && w.dst.pinIdx<2)
-                ins[w.dst.pinIdx]=w.value;
-        bool a=ins[0], b=ins[1];
+        for (auto& w:wires)
+            if (w.dst.gateId==g.id&&w.dst.pinIdx<2) ins[w.dst.pinIdx]=w.value;
+        bool a=ins[0],b=ins[1];
         switch(g.type){
             case GateType::AND:  return a&&b;
             case GateType::OR:   return a||b;
@@ -220,166 +300,133 @@ private:
             default:             return false;
         }
     }
+
+    void markPin(int gateId,int pinIdx,bool isOut,bool val) {
+        Gate* g=find(gateId); if(!g) return;
+        if ( isOut&&pinIdx<(int)g->outPins.size()) g->outPins[pinIdx].connected=val;
+        if (!isOut&&pinIdx<(int)g->inPins.size())  g->inPins[pinIdx].connected=val;
+    }
+    void recomputePin(int gateId,int pinIdx,bool isOut,int skipId) {
+        bool still=false;
+        for (auto& w:wires) {
+            if (w.id==skipId) continue;
+            if ( isOut&&w.src.gateId==gateId&&w.src.pinIdx==pinIdx){still=true;break;}
+            if (!isOut&&w.dst.gateId==gateId&&w.dst.pinIdx==pinIdx){still=true;break;}
+        }
+        markPin(gateId,pinIdx,isOut,still);
+    }
 };
 
 // =============================================================================
 // §2  VERTEX HELPERS
 // =============================================================================
 
-static void pushQuad(std::vector<float> &v,
-                     float x0,float y0,float x1,float y1) {
-    v.insert(v.end(),{x0,y0, x1,y0, x1,y1, x1,y1, x0,y1, x0,y0});
+static void pushQuad(std::vector<float>& v,float x0,float y0,float x1,float y1){
+    v.insert(v.end(),{x0,y0,x1,y0,x1,y1,x1,y1,x0,y1,x0,y0});
 }
-
-static void pushLine(std::vector<float> &v,
-                     float x0,float y0,float x1,float y1,float hw) {
+static void pushLine(std::vector<float>& v,
+                     float x0,float y0,float x1,float y1,float hw){
     float dx=x1-x0,dy=y1-y0,len=sqrtf(dx*dx+dy*dy);
-    if (len<0.001f){pushQuad(v,x0-hw,y0-hw,x0+hw,y0+hw);return;}
-    float nx=-dy/len*hw, ny=dx/len*hw;
-    v.insert(v.end(),{x0+nx,y0+ny, x0-nx,y0-ny, x1-nx,y1-ny,
-                      x1-nx,y1-ny, x1+nx,y1+ny, x0+nx,y0+ny});
+    if(len<0.001f){pushQuad(v,x0-hw,y0-hw,x0+hw,y0+hw);return;}
+    float nx=-dy/len*hw,ny=dx/len*hw;
+    v.insert(v.end(),{x0+nx,y0+ny,x0-nx,y0-ny,x1-nx,y1-ny,
+                      x1-nx,y1-ny,x1+nx,y1+ny,x0+nx,y0+ny});
 }
-
-static void pushCircle(std::vector<float> &v,
-                       float cx,float cy,float r,int segs=16) {
-    for (int i=0;i<segs;i++) {
-        float a0=float(i)/segs*6.2831853f, a1=float(i+1)/segs*6.2831853f;
-        v.insert(v.end(),{cx,cy,
-                          cx+cosf(a0)*r,cy+sinf(a0)*r,
-                          cx+cosf(a1)*r,cy+sinf(a1)*r});
+static void pushCircle(std::vector<float>& v,float cx,float cy,float r,int s=16){
+    for(int i=0;i<s;i++){
+        float a0=float(i)/s*6.2831853f,a1=float(i+1)/s*6.2831853f;
+        v.insert(v.end(),{cx,cy,cx+cosf(a0)*r,cy+sinf(a0)*r,
+                                cx+cosf(a1)*r,cy+sinf(a1)*r});
     }
 }
-
-static void pushRoundRectFilled(std::vector<float> &v,
-                                float L,float B,float R2,float T,float cr) {
+static void pushRoundRectFilled(std::vector<float>& v,
+                                float L,float B,float R2,float T,float cr){
     cr=min(cr,min((R2-L)*.45f,(T-B)*.45f));
-    pushQuad(v,L+cr,B,R2-cr,T);
-    pushQuad(v,L,B+cr,L+cr,T-cr);
+    pushQuad(v,L+cr,B,R2-cr,T); pushQuad(v,L,B+cr,L+cr,T-cr);
     pushQuad(v,R2-cr,B+cr,R2,T-cr);
-    int segs=8;
-    float ccx[4]={R2-cr,L+cr,L+cr,R2-cr}, ccy[4]={T-cr,T-cr,B+cr,B+cr};
+    float ccx[4]={R2-cr,L+cr,L+cr,R2-cr},ccy[4]={T-cr,T-cr,B+cr,B+cr};
     float sa[4]={0,1.5708f,3.1416f,4.7124f};
-    for (int c=0;c<4;c++)
-        for (int i=0;i<segs;i++) {
-            float a0=sa[c]+float(i)/segs*1.5708f, a1=sa[c]+float(i+1)/segs*1.5708f;
-            v.insert(v.end(),{ccx[c],ccy[c],
-                              ccx[c]+cosf(a0)*cr,ccy[c]+sinf(a0)*cr,
-                              ccx[c]+cosf(a1)*cr,ccy[c]+sinf(a1)*cr});
-        }
+    for(int c=0;c<4;c++) for(int i=0;i<8;i++){
+        float a0=sa[c]+float(i)/8*1.5708f,a1=sa[c]+float(i+1)/8*1.5708f;
+        v.insert(v.end(),{ccx[c],ccy[c],ccx[c]+cosf(a0)*cr,ccy[c]+sinf(a0)*cr,
+                                        ccx[c]+cosf(a1)*cr,ccy[c]+sinf(a1)*cr});
+    }
 }
-
-static void pushRoundRect(std::vector<float> &v,
-                          float L,float B,float R2,float T,float cr,float hw,
-                          int cornSegs=6) {
+static void pushRoundRect(std::vector<float>& v,
+                          float L,float B,float R2,float T,float cr,float hw,int cs=6){
     cr=min(cr,min((R2-L)*.4f,(T-B)*.4f));
     pushLine(v,L+cr,B,R2-cr,B,hw); pushLine(v,R2,B+cr,R2,T-cr,hw);
     pushLine(v,R2-cr,T,L+cr,T,hw); pushLine(v,L,T-cr,L,B+cr,hw);
-    float ox[4]={R2-cr,L+cr,L+cr,R2-cr}, oy[4]={T-cr,T-cr,B+cr,B+cr};
+    float ox[4]={R2-cr,L+cr,L+cr,R2-cr},oy[4]={T-cr,T-cr,B+cr,B+cr};
     float sa[4]={0,1.5708f,3.1416f,4.7124f};
-    for (int c=0;c<4;c++)
-        for (int i=0;i<cornSegs;i++) {
-            float a0=sa[c]+float(i)/cornSegs*1.5708f,
-                  a1=sa[c]+float(i+1)/cornSegs*1.5708f;
-            pushLine(v,ox[c]+cosf(a0)*cr,oy[c]+sinf(a0)*cr,
-                       ox[c]+cosf(a1)*cr,oy[c]+sinf(a1)*cr,hw);
-        }
+    for(int c=0;c<4;c++) for(int i=0;i<cs;i++){
+        float a0=sa[c]+float(i)/cs*1.5708f,a1=sa[c]+float(i+1)/cs*1.5708f;
+        pushLine(v,ox[c]+cosf(a0)*cr,oy[c]+sinf(a0)*cr,
+                   ox[c]+cosf(a1)*cr,oy[c]+sinf(a1)*cr,hw);
+    }
 }
 
-// ── Bezier wire geometry ──────────────────────────────────────────────────────
-
+// ── Bezier helpers ────────────────────────────────────────────────────────────
 static void bezierPt(float x0,float y0,float x1,float y1,
                      float x2,float y2,float x3,float y3,
-                     float t,float &ox,float &oy) {
+                     float t,float& ox,float& oy){
     float u=1-t,u2=u*u,u3=u2*u,t2=t*t,t3=t2*t;
     ox=u3*x0+3*u2*t*x1+3*u*t2*x2+t3*x3;
     oy=u3*y0+3*u2*t*y1+3*u*t2*y2+t3*y3;
 }
+static float bezierSpread(float x0,float x3){ return fabsf(x3-x0)*0.52f+20.f; }
 
-static void pushBezierWire(std::vector<float> &v,
+static void pushBezierWire(std::vector<float>& v,
                            float x0,float y0,float x3,float y3,
-                           float hw,int segs=24) {
-    float spread=fabsf(x3-x0)*0.52f+20.f;
-    float x1=x0+spread,y1=y0, x2=x3-spread,y2=y3;
-    float px=0,py=0;
-    for (int i=0;i<=segs;i++) {
+                           float hw,int segs=24){
+    float sp=bezierSpread(x0,x3);
+    float x1=x0+sp,y1=y0,x2=x3-sp,y2=y3,px=0,py=0;
+    for(int i=0;i<=segs;i++){
         float t=float(i)/segs,qx,qy;
         bezierPt(x0,y0,x1,y1,x2,y2,x3,y3,t,qx,qy);
-        if (i>0) pushLine(v,px,py,qx,qy,hw);
+        if(i>0) pushLine(v,px,py,qx,qy,hw);
         px=qx; py=qy;
     }
 }
 
-static void pushBezierDashes(std::vector<float> &v,
-                              float x0,float y0,float x3,float y3,
-                              float hw,float dashLen,float gapLen,
-                              float phase=0.f,int segs=48) {
-    float spread=fabsf(x3-x0)*0.52f+20.f;
-    float x1=x0+spread,y1=y0, x2=x3-spread,y2=y3;
-    std::vector<std::pair<float,float>> pts(segs+1);
-    for (int i=0;i<=segs;i++) {
-        float t=float(i)/segs;
-        bezierPt(x0,y0,x1,y1,x2,y2,x3,y3,t,pts[i].first,pts[i].second);
-    }
-    float acc=fmodf(phase,dashLen+gapLen);
-    bool  inDash=acc<dashLen;
-    float remain=inDash?(dashLen-acc):(dashLen+gapLen-acc);
-    for (int i=1;i<(int)pts.size();i++) {
-        float ex=pts[i-1].first,ey=pts[i-1].second;
-        float nx=pts[i].first, ny=pts[i].second;
-        float dx=nx-ex,dy=ny-ey,segLen=sqrtf(dx*dx+dy*dy);
-        if (segLen<0.001f) continue;
-        float ux=dx/segLen,uy=dy/segLen,walked=0;
-        while (walked<segLen) {
-            float take=min(remain,segLen-walked);
-            if (inDash) {
-                float sx=ex+ux*walked,sy=ey+uy*walked;
-                float tx=ex+ux*(walked+take),ty=ey+uy*(walked+take);
-                pushLine(v,sx,sy,tx,ty,hw);
-            }
-            walked+=take; remain-=take;
-            if (remain<=0.f){inDash=!inDash;remain=inDash?dashLen:gapLen;}
-        }
-    }
-}
-
 static bool wireHitTest(float x0,float y0,float x3,float y3,
-                         float px,float py,float thr=8.f,int segs=24) {
-    float spread=fabsf(x3-x0)*0.52f+20.f;
-    float x1=x0+spread,y1=y0,x2=x3-spread,y2=y3;
+                         float px,float py,float thr=8.f,int segs=24){
+    float sp=bezierSpread(x0,x3);
+    float x1=x0+sp,y1=y0,x2=x3-sp,y2=y3;
     float t2=thr*thr,lx=x0,ly=y0;
-    for (int i=1;i<=segs;i++) {
+    for(int i=1;i<=segs;i++){
         float t=float(i)/segs,qx,qy;
         bezierPt(x0,y0,x1,y1,x2,y2,x3,y3,t,qx,qy);
         float dx=qx-lx,dy=qy-ly,len2=dx*dx+dy*dy;
         float s=(len2>0)?((px-lx)*dx+(py-ly)*dy)/len2:0;
         s=max(0.f,min(1.f,s));
         float cx2=lx+dx*s-px,cy2=ly+dy*s-py;
-        if (cx2*cx2+cy2*cy2<=t2) return true;
+        if(cx2*cx2+cy2*cy2<=t2) return true;
         lx=qx; ly=qy;
     }
     return false;
 }
 
-static std::vector<PinRef> collectPins(const Circuit &c) {
+static std::vector<PinRef> collectPins(const Circuit& c){
     std::vector<PinRef> out;
-    for (auto &g:c.gates) {
-        for (int i=0;i<(int)g.outPins.size();i++)
+    for(auto& g:c.gates){
+        for(int i=0;i<(int)g.outPins.size();i++)
             out.push_back({g.id,i,true, g.outPins[i].cx,g.outPins[i].cy});
-        for (int i=0;i<(int)g.inPins.size();i++)
+        for(int i=0;i<(int)g.inPins.size();i++)
             out.push_back({g.id,i,false,g.inPins[i].cx,g.inPins[i].cy});
     }
     return out;
 }
 
-static bool nearestPin(const std::vector<PinRef> &pins,
+static bool nearestPin(const std::vector<PinRef>& pins,
                         float wx,float wy,float radius,
-                        bool mustOut,bool mustIn,PinRef &out) {
+                        bool mustOut,bool mustIn,PinRef& out){
     float best=radius*radius; bool found=false;
-    for (auto &p:pins) {
-        if (mustOut && !p.isOutput) continue;
-        if (mustIn  &&  p.isOutput) continue;
+    for(auto& p:pins){
+        if(mustOut&&!p.isOutput) continue;
+        if(mustIn&& p.isOutput)  continue;
         float dx=p.cx-wx,dy=p.cy-wy,d2=dx*dx+dy*dy;
-        if (d2<best){best=d2;out=p;found=true;}
+        if(d2<best){best=d2;out=p;found=true;}
     }
     return found;
 }
@@ -388,7 +435,7 @@ static bool nearestPin(const std::vector<PinRef> &pins,
 // §3  SHADERS
 // =============================================================================
 
-static const char *kGVert = R"GLSL(
+static const char* kGVert = R"GLSL(
 #version 330 core
 layout(location=0) in vec2 aPos;
 uniform vec2 uViewSize;
@@ -399,7 +446,7 @@ void main(){
 }
 )GLSL";
 
-static const char *kGFrag = R"GLSL(
+static const char* kGFrag = R"GLSL(
 #version 330 core
 out vec4 fragColor;
 uniform vec4 uColor;
@@ -410,29 +457,24 @@ void main(){ fragColor = uColor; }
 // §4  GATE COLORS
 // =============================================================================
 
-struct GateColors { float body[4], border[4], label[4]; };
+struct GateColors { float body[4],border[4],label[4]; };
 
-static GateColors gateColors(GateType t, bool selected) {
-    static const float bodies[kGTC][4] = {
+static GateColors gateColors(GateType t,bool selected){
+    static const float bodies[kGTC][4]={
         {0.08f,0.15f,0.30f,1},{0.08f,0.25f,0.15f,1},{0.22f,0.10f,0.28f,1},
         {0.26f,0.08f,0.10f,1},{0.20f,0.08f,0.22f,1},{0.08f,0.20f,0.30f,1},
         {0.12f,0.12f,0.28f,1},{0.08f,0.22f,0.13f,1},{0.24f,0.14f,0.05f,1},
     };
-    static const float borders[kGTC][4] = {
+    static const float borders[kGTC][4]={
         {0.27f,0.47f,0.86f,1},{0.27f,0.75f,0.43f,1},{0.66f,0.27f,0.86f,1},
         {0.86f,0.27f,0.27f,1},{0.78f,0.27f,0.67f,1},{0.27f,0.67f,0.86f,1},
         {0.43f,0.43f,0.86f,1},{0.27f,0.82f,0.43f,1},{0.86f,0.51f,0.16f,1},
     };
-    int i=(int)t;
-    GateColors c;
+    int i=(int)t; GateColors c;
     memcpy(c.body,  bodies[i], 16);
     memcpy(c.label, borders[i],16);
-    if (selected){
-        c.border[0]=0.80f;c.border[1]=0.65f;
-        c.border[2]=0.97f;c.border[3]=1.f;
-    } else {
-        memcpy(c.border,borders[i],16);
-    }
+    if(selected){c.border[0]=0.80f;c.border[1]=0.65f;c.border[2]=0.97f;c.border[3]=1.f;}
+    else memcpy(c.border,borders[i],16);
     return c;
 }
 
@@ -443,60 +485,100 @@ static GateColors gateColors(GateType t, bool selected) {
 class CircuitSurface : public RenderSurface {
 public:
     Circuit circuit;
+    SimMode simMode = SimMode::Edit;
 
     std::function<void()>            onCircuitChanged;
     std::function<void(const char*)> onStatusMessage;
     std::function<void()>            onRedrawNeeded;
     std::function<void(float)>       onZoomChanged;
+    std::function<void(SimMode)>     onSimModeChanged;
+    std::function<void()>            onSimUpdated;
 
-    // ── Camera controls ───────────────────────────────────────────────────
-    void resetZoom() { zoom_=1.f; camX_=0.f; camY_=0.f; redraw(); }
-    void fitToView() {
-        if (circuit.gates.empty()){resetZoom();return;}
-        float minX=1e9,minY=1e9,maxX=-1e9,maxY=-1e9;
-        for (auto &g:circuit.gates) {
-            minX=min(minX,g.x-kGW); maxX=max(maxX,g.x+kGW);
-            minY=min(minY,g.y-kGH); maxY=max(maxY,g.y+kGH);
+    // ── Simulation controls ───────────────────────────────────────────────
+    void simPlay() {
+        if (circuit.gates.empty()) return;
+        simMode = SimMode::Running;
+        circuit.evaluate();
+        notifyMode();
+        if (onSimUpdated) onSimUpdated();
+        if (onStatusMessage)
+            onStatusMessage("▶ Running  ·  Click INPUT gates to toggle  ·  Space = pause");
+        redraw();
+    }
+    void simPause() {
+        if (simMode==SimMode::Edit) return;
+        simMode = (simMode==SimMode::Running) ? SimMode::Paused : SimMode::Running;
+        notifyMode();
+        if (onStatusMessage)
+            onStatusMessage(simMode==SimMode::Paused
+                ? "⏸ Paused  ·  Space or ▶ to resume"
+                : "▶ Running  ·  Click INPUT gates to toggle  ·  Space = pause");
+        redraw();
+    }
+    void simStop() {
+        simMode = SimMode::Edit;
+        for (auto& w : circuit.wires) w.value = false;
+        for (auto& g : circuit.gates) { g.simVal = false; }
+        notifyMode();
+        if (onSimUpdated) onSimUpdated();
+        if (onStatusMessage)
+            onStatusMessage("■ Stopped  ·  Edit your circuit then press ▶ Play");
+        redraw();
+    }
+    void simStep() {
+        if (simMode==SimMode::Edit) simMode = SimMode::Paused;
+        circuit.evaluate();
+        notifyMode();
+        if (onSimUpdated) onSimUpdated();
+        if (onStatusMessage) onStatusMessage("⏭ Stepped");
+        redraw();
+    }
+
+    bool isSimActive()  const { return simMode != SimMode::Edit; }
+    bool isSimRunning() const { return simMode == SimMode::Running; }
+
+    // ── Camera ────────────────────────────────────────────────────────────
+    void resetZoom(){ zoom_=1.f; camX_=0.f; camY_=0.f; redraw(); }
+    void fitToView(){
+        if(circuit.gates.empty()){resetZoom();return;}
+        float mnX=1e9f,mnY=1e9f,mxX=-1e9f,mxY=-1e9f;
+        for(auto& g:circuit.gates){
+            mnX=min(mnX,g.x-kGW); mxX=max(mxX,g.x+kGW);
+            mnY=min(mnY,g.y-kGH); mxY=max(mxY,g.y+kGH);
         }
-        float ww=maxX-minX,wh=maxY-minY;
-        if (ww<1||wh<1){resetZoom();return;}
+        float ww=mxX-mnX,wh=mxY-mnY; if(ww<1||wh<1){resetZoom();return;}
         float pad=60.f;
         float zx=(viewW_-pad*2)/ww, zy=(viewH_-pad*2)/wh;
         zoom_=std::clamp(min(zx,zy),0.05f,4.f);
-        camX_=(minX+maxX)*.5f-viewW_*.5f/zoom_;
-        camY_=(minY+maxY)*.5f-viewH_*.5f/zoom_;
+        camX_=(mnX+mxX)*.5f-viewW_*.5f/zoom_;
+        camY_=(mnY+mxY)*.5f-viewH_*.5f/zoom_;
         redraw();
     }
-    void setZoomLevel(float z) {
-        zoom_=std::clamp(z,0.05f,8.f); redraw();
-        if (onZoomChanged) onZoomChanged(zoom_);
-    }
+    void setZoomLevel(float z){ zoom_=std::clamp(z,0.05f,8.f); redraw(); if(onZoomChanged) onZoomChanged(zoom_); }
     float getZoom() const { return zoom_; }
 
-    void dropGate(GateType type) {
+    void dropGate(GateType type){
+        if(isSimActive()) return;
         float wx=camX_+viewW_*.5f/zoom_, wy=camY_+viewH_*.5f/zoom_;
         static int n=0; int slot=(n++)%7;
         wx+=float(slot-3)*(kGW+24.f);
         wy+=float(slot%3-1)*(kGH+18.f);
         circuit.add(type,wx,wy);
-        if (onCircuitChanged) onCircuitChanged();
+        if(onCircuitChanged) onCircuitChanged();
         redraw();
     }
 
-    // ── RenderSurface interface ───────────────────────────────────────────
-    void initialize(int w, int h) override {
-        ls_gl::init();
-        viewW_=w; viewH_=h;
+    // ── RenderSurface ─────────────────────────────────────────────────────
+    void initialize(int w,int h) override {
+        ls_gl::init(); viewW_=w; viewH_=h;
         camX_=-w*.5f; camY_=-h*.5f;
         buildShader(); buildVAO();
     }
-    void resize(int w, int h) override { viewW_=w; viewH_=h; }
+    void resize(int w,int h) override { viewW_=w; viewH_=h; }
 
     void update(double dt) override {
-        bool anyHigh=false;
-        for (auto &w:circuit.wires) if(w.value){anyHigh=true;break;}
-        if (anyHigh||dragWire_)
-            flowPhase_=fmodf(flowPhase_+float(dt)*55.f,200.f);
+        // No wire animation — nothing to advance
+        (void)dt;
     }
 
     void render(const float*) override {
@@ -512,8 +594,9 @@ public:
         drawGrid();
         drawAllWires();
         drawDragPreview();
-        for (auto &g:circuit.gates) drawGate(g);
+        for(auto& g:circuit.gates) drawGate(g);
         drawPinHovers();
+        if(isSimActive()) drawSimBorder();
 
         GL.bindVertexArray(0);
         GL.useProgram(0);
@@ -521,523 +604,489 @@ public:
     }
 
     void destroy() override {
-        if (prog_){GL.deleteProgram(prog_);       prog_=0;}
-        if (vao_) {GL.deleteVertexArrays(1,&vao_);vao_=0;}
-        if (vbo_) {GL.deleteBuffers(1,&vbo_);     vbo_=0;}
+        if(prog_){GL.deleteProgram(prog_);         prog_=0;}
+        if(vao_) {GL.deleteVertexArrays(1,&vao_);  vao_=0;}
+        if(vbo_) {GL.deleteBuffers(1,&vbo_);       vbo_=0;}
     }
 
-    bool needsContinuousRedraw() const override {
-        if (dragWire_) return true;
-        for (auto &w:circuit.wires) if(w.value) return true;
-        return false;
-    }
+    bool needsContinuousRedraw() const override { return false; }
 
     // ── Mouse ─────────────────────────────────────────────────────────────
-    void onMouseDown(float sx, float sy) override {
+    void onMouseDown(float sx,float sy) override {
         lastSX_=sx; lastSY_=sy;
         float wx,wy; s2w(sx,sy,wx,wy);
 
-        // 1. Start wire drag from output pin
+        if(isSimActive()){
+            int hit=hitGate(wx,wy);
+            if(hit>=0){
+                Gate* g=circuit.find(hit);
+                if(g&&g->type==GateType::INPUT){
+                    g->inputVal=!g->inputVal;
+                    circuit.evaluate();
+                    if(onSimUpdated) onSimUpdated();
+                    if(onCircuitChanged) onCircuitChanged();
+                    redraw();
+                }
+            }
+            return;
+        }
+
+        // Wire drag from output pin
         {
-            auto pins=collectPins(circuit);
-            PinRef src{};
-            if (nearestPin(pins,wx,wy,16.f/zoom_,true,false,src)) {
+            auto pins=collectPins(circuit); PinRef src{};
+            if(nearestPin(pins,wx,wy,16.f/zoom_,true,false,src)){
                 dragWire_=true; dragSrc_=src;
-                dragCurWX_=wx; dragCurWY_=wy;
-                hasDstSnap_=false;
-                for (auto &g:circuit.gates) g.selected=false;
-                for (auto &w:circuit.wires)  w.selected=false;
-                if (onStatusMessage)
-                    onStatusMessage("Drag to an input pin to connect  ·  Esc to cancel");
+                dragCurWX_=wx; dragCurWY_=wy; hasDstSnap_=false;
+                for(auto& g:circuit.gates) g.selected=false;
+                for(auto& w:circuit.wires) w.selected=false;
+                if(onStatusMessage) onStatusMessage("Drag to an input pin  ·  Esc to cancel");
                 redraw(); return;
             }
         }
-
-        // 2. Click to select a wire
-        for (auto &w:circuit.wires) w.selected=false;
-        for (auto &w:circuit.wires) {
-            auto [sx0,sy0,sx1,sy1]=wireScrCoords(w);
-            if (wireHitTest(sx0,sy0,sx1,sy1,sx,sy,8.f)) {
+        // Select wire
+        for(auto& w:circuit.wires) w.selected=false;
+        for(auto& w:circuit.wires){
+            auto [sx0,sy0,sx1,sy1]=wireSC(w);
+            if(wireHitTest(sx0,sy0,sx1,sy1,sx,sy,8.f)){
                 w.selected=true;
-                for (auto &g:circuit.gates) g.selected=false;
-                if (onStatusMessage)
+                for(auto& g:circuit.gates) g.selected=false;
+                if(onStatusMessage)
                     onStatusMessage("Wire selected  ·  Del to remove  ·  Right-click to delete");
                 redraw(); return;
             }
         }
-
-        // 3. Select / drag a gate
-        for (auto &g:circuit.gates) g.selected=false;
+        // Select/drag gate
+        for(auto& g:circuit.gates) g.selected=false;
         int hit=hitGate(wx,wy);
-        if (hit>=0) {
-            Gate *g=circuit.find(hit);
-            if (g){
-                g->selected=true;
-                dragId_=hit; dragOx_=wx-g->x; dragOy_=wy-g->y;
-            }
-        } else { dragId_=-1; }
+        if(hit>=0){
+            Gate* g=circuit.find(hit);
+            if(g){ g->selected=true; dragId_=hit; dragOx_=wx-g->x; dragOy_=wy-g->y; }
+        } else dragId_=-1;
         redraw();
     }
 
-    void onMouseMove(float sx, float sy) override {
+    void onMouseMove(float sx,float sy) override {
         float wx,wy; s2w(sx,sy,wx,wy);
-
-        if (mmb_) {
-            camX_-=(sx-lastSX_)/zoom_;
-            camY_-=(sy-lastSY_)/zoom_;
-            lastSX_=sx; lastSY_=sy;
-            redraw(); return;
+        if(mmb_){
+            camX_-=(sx-lastSX_)/zoom_; camY_-=(sy-lastSY_)/zoom_;
+            lastSX_=sx; lastSY_=sy; redraw(); return;
         }
         lastSX_=sx; lastSY_=sy;
+        if(isSimActive()) return;
 
-        // Wire drag: snap to nearest valid input pin
-        if (dragWire_) {
+        if(dragWire_){
             dragCurWX_=wx; dragCurWY_=wy;
-            auto pins=collectPins(circuit);
-            PinRef dst{};
+            auto pins=collectPins(circuit); PinRef dst{};
             hasDstSnap_=nearestPin(pins,wx,wy,20.f/zoom_,false,true,dst);
-            if (hasDstSnap_ && dst.gateId==dragSrc_.gateId) hasDstSnap_=false;
-            if (hasDstSnap_) dstSnap_=dst;
+            if(hasDstSnap_&&dst.gateId==dragSrc_.gateId) hasDstSnap_=false;
+            if(hasDstSnap_) dstSnap_=dst;
             redraw(); return;
         }
-
-        // Hover glow over pins
+        // Pin hover glow
         {
-            auto pins=collectPins(circuit);
-            PinRef h{};
+            auto pins=collectPins(circuit); PinRef h{};
             bool found=nearestPin(pins,wx,wy,16.f/zoom_,false,false,h);
             bool changed=(found!=hovPinValid_);
-            if (!changed&&found)
-                changed=(h.gateId!=hovPin_.gateId||h.pinIdx!=hovPin_.pinIdx
-                         ||h.isOutput!=hovPin_.isOutput);
+            if(!changed&&found)
+                changed=(h.gateId!=hovPin_.gateId||h.pinIdx!=hovPin_.pinIdx||h.isOutput!=hovPin_.isOutput);
             hovPinValid_=found; if(found) hovPin_=h;
-            if (changed) redraw();
+            if(changed) redraw();
         }
-
-        // Gate drag
-        if (dragId_>=0) {
-            Gate *g=circuit.find(dragId_);
-            if (g){g->x=wx-dragOx_; g->y=wy-dragOy_; g->recomputePins(); redraw();}
+        if(dragId_>=0){
+            Gate* g=circuit.find(dragId_);
+            if(g){ g->x=wx-dragOx_; g->y=wy-dragOy_; g->recomputePins(); redraw(); }
         }
     }
 
-    void onMouseUp(float sx, float sy) override {
+    void onMouseUp(float sx,float sy) override {
         mmb_=false;
-
-        if (dragWire_) {
+        if(isSimActive()) return;
+        if(dragWire_){
             dragWire_=false;
-            if (hasDstSnap_) {
-                // Reject if input already occupied
-                bool occupied=false;
-                for (auto &w:circuit.wires)
-                    if (w.dst.gateId==dstSnap_.gateId&&w.dst.pinIdx==dstSnap_.pinIdx)
-                    {occupied=true;break;}
-                if (!occupied) {
+            if(hasDstSnap_){
+                bool occ=false;
+                for(auto& w:circuit.wires)
+                    if(w.dst.gateId==dstSnap_.gateId&&w.dst.pinIdx==dstSnap_.pinIdx)
+                    {occ=true;break;}
+                if(!occ){
                     circuit.connect(dragSrc_.gateId,dragSrc_.pinIdx,
-                                    dstSnap_.gateId, dstSnap_.pinIdx);
+                                    dstSnap_.gateId,dstSnap_.pinIdx);
                     circuit.evaluate();
-                    if (onCircuitChanged) onCircuitChanged();
-                    if (onStatusMessage)
-                        onStatusMessage("Connected  ·  Right-click or double-click wire to remove");
+                    if(onCircuitChanged) onCircuitChanged();
+                    if(onStatusMessage)
+                        onStatusMessage("Connected  ·  Press ▶ Play to simulate");
                 } else {
-                    if (onStatusMessage)
+                    if(onStatusMessage)
                         onStatusMessage("Input already connected — remove existing wire first");
                 }
             }
-            hasDstSnap_=false;
-            redraw(); return;
+            hasDstSnap_=false; redraw(); return;
         }
-
-        if (dragId_>=0) {
-            dragId_=-1;
-            if (onCircuitChanged) onCircuitChanged();
-        }
+        if(dragId_>=0){ dragId_=-1; if(onCircuitChanged) onCircuitChanged(); }
     }
 
-    void onRightMouseDown(float sx, float sy) override {
-        // Right-click wire → delete immediately
-        for (int i=int(circuit.wires.size())-1;i>=0;--i) {
-            auto [sx0,sy0,sx1,sy1]=wireScrCoords(circuit.wires[i]);
-            if (wireHitTest(sx0,sy0,sx1,sy1,sx,sy,10.f)) {
+    void onRightMouseDown(float sx,float sy) override {
+        if(isSimActive()) return;
+        for(int i=int(circuit.wires.size())-1;i>=0;--i){
+            auto [sx0,sy0,sx1,sy1]=wireSC(circuit.wires[i]);
+            if(wireHitTest(sx0,sy0,sx1,sy1,sx,sy,10.f)){
                 circuit.disconnect(circuit.wires[i].id);
                 circuit.evaluate();
-                if (onCircuitChanged) onCircuitChanged();
-                if (onStatusMessage) onStatusMessage("Wire removed");
+                if(onCircuitChanged) onCircuitChanged();
+                if(onStatusMessage) onStatusMessage("Wire removed");
                 redraw(); return;
             }
         }
     }
 
-    // Call this from the app when a WM_LBUTTONDBLCLK arrives on the canvas
-    void onDoubleClick(float sx, float sy) {
+    void onDoubleClick(float sx,float sy){
         float wx,wy; s2w(sx,sy,wx,wy);
-        // Double-click wire → delete
-        for (int i=int(circuit.wires.size())-1;i>=0;--i) {
-            auto [sx0,sy0,sx1,sy1]=wireScrCoords(circuit.wires[i]);
-            if (wireHitTest(sx0,sy0,sx1,sy1,sx,sy,10.f)) {
+        if(isSimActive()){
+            int hit=hitGate(wx,wy);
+            if(hit>=0){
+                Gate* g=circuit.find(hit);
+                if(g&&g->type==GateType::INPUT){
+                    g->inputVal=!g->inputVal;
+                    circuit.evaluate();
+                    if(onSimUpdated) onSimUpdated();
+                    redraw();
+                }
+            }
+            return;
+        }
+        for(int i=int(circuit.wires.size())-1;i>=0;--i){
+            auto [sx0,sy0,sx1,sy1]=wireSC(circuit.wires[i]);
+            if(wireHitTest(sx0,sy0,sx1,sy1,sx,sy,10.f)){
                 circuit.disconnect(circuit.wires[i].id);
                 circuit.evaluate();
-                if (onCircuitChanged) onCircuitChanged();
-                if (onStatusMessage) onStatusMessage("Wire removed");
+                if(onCircuitChanged) onCircuitChanged();
+                if(onStatusMessage) onStatusMessage("Wire removed");
                 redraw(); return;
-            }
-        }
-        // Double-click INPUT gate → toggle value
-        int hit=hitGate(wx,wy);
-        if (hit>=0) {
-            Gate *g=circuit.find(hit);
-            if (g&&g->type==GateType::INPUT) {
-                g->inputVal=!g->inputVal;
-                circuit.evaluate();
-                if (onCircuitChanged) onCircuitChanged();
-                redraw();
             }
         }
     }
 
-    void onMiddleDown(float sx,float sy){mmb_=true;lastSX_=sx;lastSY_=sy;}
-    void onMiddleUp()                   {mmb_=false;}
+    void onMiddleDown(float sx,float sy){ mmb_=true; lastSX_=sx; lastSY_=sy; }
+    void onMiddleUp(){ mmb_=false; }
 
-    void onScroll(float cx,float cy,float dy,bool ctrl) {
-        if (ctrl) {
+    void onScroll(float cx,float cy,float dy,bool ctrl){
+        if(ctrl){
             float wx0,wy0; s2w(cx,cy,wx0,wy0);
             float f=(dy>0)?1.12f:1.f/1.12f;
             zoom_=std::clamp(zoom_*f,0.05f,8.f);
             camX_=wx0-cx/zoom_; camY_=wy0-cy/zoom_;
-            if (onZoomChanged) onZoomChanged(zoom_);
-        } else {
-            camY_+=dy*40.f/zoom_;
-        }
+            if(onZoomChanged) onZoomChanged(zoom_);
+        } else camY_+=dy*40.f/zoom_;
         redraw();
     }
 
     void onKeyDown(int key) override {
-        if (key==VK_ESCAPE&&dragWire_) {
-            dragWire_=false; hasDstSnap_=false; redraw(); return;
-        }
-        // Space toggles selected INPUT gate
-        if (key==VK_SPACE) {
-            for (auto &g:circuit.gates)
-                if (g.selected&&g.type==GateType::INPUT) {
-                    g.inputVal=!g.inputVal;
-                    circuit.evaluate();
-                    if (onCircuitChanged) onCircuitChanged();
-                    redraw();
+        if(key==VK_ESCAPE&&dragWire_){ dragWire_=false; hasDstSnap_=false; redraw(); return; }
+        if(key==VK_SPACE){
+            if(isSimActive()){ simPause(); return; }
+            for(auto& g:circuit.gates)
+                if(g.selected&&g.type==GateType::INPUT){
+                    g.inputVal=!g.inputVal; circuit.evaluate();
+                    if(onCircuitChanged) onCircuitChanged(); redraw();
                 }
         }
-        if (key==VK_DELETE||key==VK_BACK) {
-            // Delete selected wires first
-            bool anyWire=false;
-            for (int i=int(circuit.wires.size())-1;i>=0;--i)
-                if (circuit.wires[i].selected)
-                    {circuit.disconnect(circuit.wires[i].id);anyWire=true;}
-            if (anyWire) {
-                circuit.evaluate();
-                if (onCircuitChanged) onCircuitChanged();
-                redraw(); return;
-            }
-            // Then delete selected gates + their wires
-            bool anyGate=false;
-            for (int i=int(circuit.gates.size())-1;i>=0;--i)
-                if (circuit.gates[i].selected) {
+        if(!isSimActive()&&(key==VK_DELETE||key==VK_BACK)){
+            bool anyW=false;
+            for(int i=int(circuit.wires.size())-1;i>=0;--i)
+                if(circuit.wires[i].selected){ circuit.disconnect(circuit.wires[i].id); anyW=true; }
+            if(anyW){ circuit.evaluate(); if(onCircuitChanged) onCircuitChanged(); redraw(); return; }
+            bool anyG=false;
+            for(int i=int(circuit.gates.size())-1;i>=0;--i)
+                if(circuit.gates[i].selected){
                     circuit.removeGateWires(circuit.gates[i].id);
-                    circuit.remove(circuit.gates[i].id);
-                    anyGate=true;
+                    circuit.remove(circuit.gates[i].id); anyG=true;
                 }
-            if (anyGate) {
-                circuit.evaluate();
-                if (onCircuitChanged) onCircuitChanged();
-                redraw();
-            }
+            if(anyG){ circuit.evaluate(); if(onCircuitChanged) onCircuitChanged(); redraw(); }
         }
     }
 
 private:
-    int   viewW_=1, viewH_=1;
-    float camX_=0, camY_=0, zoom_=1.f;
-
-    GLuint prog_=0, vao_=0, vbo_=0;
-    GLint  uViewSize_=-1, uColor_=-1;
-
+    int   viewW_=1,viewH_=1;
+    float camX_=0,camY_=0,zoom_=1.f;
+    GLuint prog_=0,vao_=0,vbo_=0;
+    GLint  uViewSize_=-1,uColor_=-1;
     int   dragId_=-1;
-    float dragOx_=0, dragOy_=0;
-    float lastSX_=0, lastSY_=0;
+    float dragOx_=0,dragOy_=0,lastSX_=0,lastSY_=0;
     bool  mmb_=false;
+    bool  dragWire_=false;
+    PinRef dragSrc_{},dstSnap_{};
+    float  dragCurWX_=0,dragCurWY_=0;
+    bool   hasDstSnap_=false;
+    bool   hovPinValid_=false;
+    PinRef hovPin_{};
 
-    // Wire drag
-    bool   dragWire_   = false;
-    PinRef dragSrc_    = {};
-    float  dragCurWX_  = 0, dragCurWY_=0;
-    bool   hasDstSnap_ = false;
-    PinRef dstSnap_    = {};
+    void redraw(){ if(onRedrawNeeded) onRedrawNeeded(); }
+    void notifyMode(){ if(onSimModeChanged) onSimModeChanged(simMode); }
 
-    // Pin hover
-    bool   hovPinValid_= false;
-    PinRef hovPin_     = {};
-
-    float  flowPhase_  = 0.f;
-
-    void redraw(){if(onRedrawNeeded)onRedrawNeeded();}
-
-    void w2s(float wx,float wy,float &sx,float &sy) const {
-        sx=(wx-camX_)*zoom_;
-        sy=viewH_-(wy-camY_)*zoom_;
+    void w2s(float wx,float wy,float& sx,float& sy) const {
+        sx=(wx-camX_)*zoom_; sy=viewH_-(wy-camY_)*zoom_;
     }
-    void s2w(float sx,float sy,float &wx,float &wy) const {
-        wx=camX_+sx/zoom_;
-        wy=camY_+sy/zoom_;
+    void s2w(float sx,float sy,float& wx,float& wy) const {
+        wx=camX_+sx/zoom_; wy=camY_+sy/zoom_;
     }
 
-    std::tuple<float,float,float,float> wireScrCoords(const Wire &w) const {
+    std::tuple<float,float,float,float> wireSC(const Wire& w) const {
         float sx0=0,sy0=0,sx1=0,sy1=0;
-        if (auto *g=circuit.find(w.src.gateId))
-            if (w.src.pinIdx<(int)g->outPins.size())
+        if(auto* g=circuit.find(w.src.gateId))
+            if(w.src.pinIdx<(int)g->outPins.size())
                 w2s(g->outPins[w.src.pinIdx].cx,g->outPins[w.src.pinIdx].cy,sx0,sy0);
-        if (auto *g=circuit.find(w.dst.gateId))
-            if (w.dst.pinIdx<(int)g->inPins.size())
+        if(auto* g=circuit.find(w.dst.gateId))
+            if(w.dst.pinIdx<(int)g->inPins.size())
                 w2s(g->inPins[w.dst.pinIdx].cx,g->inPins[w.dst.pinIdx].cy,sx1,sy1);
         return {sx0,sy0,sx1,sy1};
     }
 
     int hitGate(float wx,float wy) const {
-        for (int i=int(circuit.gates.size())-1;i>=0;--i) {
-            const Gate &g=circuit.gates[i];
-            if (wx>=g.x-kGW*.5f&&wx<=g.x+kGW*.5f&&
-                wy>=g.y-kGH*.5f&&wy<=g.y+kGH*.5f) return g.id;
+        for(int i=int(circuit.gates.size())-1;i>=0;--i){
+            const Gate& g=circuit.gates[i];
+            if(wx>=g.x-kGW*.5f&&wx<=g.x+kGW*.5f&&
+               wy>=g.y-kGH*.5f&&wy<=g.y+kGH*.5f) return g.id;
         }
         return -1;
     }
 
-    void buildShader() {
-        prog_=glutil::linkProgram(kGVert,kGFrag);
-        assert(prog_);
+    void buildShader(){
+        prog_=glutil::linkProgram(kGVert,kGFrag); assert(prog_);
         uViewSize_=GL.getUniformLocation(prog_,"uViewSize");
         uColor_   =GL.getUniformLocation(prog_,"uColor");
     }
-    void buildVAO() {
+    void buildVAO(){
         GL.genVertexArrays(1,&vao_); GL.genBuffers(1,&vbo_);
-        GL.bindVertexArray(vao_);
-        GL.bindBuffer(GL_ARRAY_BUFFER,vbo_);
+        GL.bindVertexArray(vao_); GL.bindBuffer(GL_ARRAY_BUFFER,vbo_);
         GL.enableVertexAttribArray(0);
         GL.vertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,2*sizeof(float),(void*)0);
         GL.bindVertexArray(0);
     }
-    void upload(const std::vector<float> &v) {
+    void upload(const std::vector<float>& v){
         GL.bindBuffer(GL_ARRAY_BUFFER,vbo_);
         GL.bufferData(GL_ARRAY_BUFFER,(GLsizeiptr)(v.size()*sizeof(float)),
                       v.data(),GL_DYNAMIC_DRAW);
     }
-    void drawColored(const std::vector<float> &v,
-                     float r,float g,float b,float a=1.f) {
+    void dc(const std::vector<float>& v,float r,float g,float b,float a=1.f){
         if(v.empty()) return;
-        upload(v);
-        ls_gl::uniform4f(uColor_,r,g,b,a);
+        upload(v); ls_gl::uniform4f(uColor_,r,g,b,a);
         glDrawArrays(GL_TRIANGLES,0,(GLsizei)(v.size()/2));
     }
 
-    // ── Grid ─────────────────────────────────────────────────────────────
-    void drawGrid() {
-        float gs=40.f,step=gs*zoom_;
-        if(step<4.f) return;
+    // ── Grid ──────────────────────────────────────────────────────────────
+    void drawGrid(){
+        float gs=40.f,step=gs*zoom_; if(step<4.f) return;
         float vw=float(viewW_),vh=float(viewH_);
         std::vector<float> lines; lines.reserve(2048);
-        float startWX=std::floor(camX_/gs)*gs;
-        for (float wx=startWX;;wx+=gs) {
+        for(float wx=std::floor(camX_/gs)*gs;;wx+=gs){
             float sx=(wx-camX_)*zoom_; if(sx>vw+step) break;
             pushLine(lines,sx,0,sx,vh,0.5f);
         }
-        float startWY=std::floor(camY_/gs)*gs;
-        for (float wy=startWY;;wy+=gs) {
+        for(float wy=std::floor(camY_/gs)*gs;;wy+=gs){
             float sy=vh-(wy-camY_)*zoom_; if(sy<-step) break;
             pushLine(lines,0,sy,vw,sy,0.5f);
         }
-        drawColored(lines,0.12f,0.13f,0.19f,1.f);
+        dc(lines,0.12f,0.13f,0.19f);
         float ox,oy; w2s(0,0,ox,oy);
         std::vector<float> cross;
         pushLine(cross,ox-10,oy,ox+10,oy,1.f);
         pushLine(cross,ox,oy-10,ox,oy+10,1.f);
-        drawColored(cross,0.22f,0.23f,0.36f,1.f);
+        dc(cross,0.22f,0.23f,0.36f);
     }
 
-    // ── All committed wires ───────────────────────────────────────────────
-    void drawAllWires() {
-        for (auto &w:circuit.wires) {
-            auto [sx0,sy0,sx1,sy1]=wireScrCoords(w);
-            float hw=max(1.0f,zoom_*1.4f);
+    // ── Wires: two states, no animation ───────────────────────────────────
+    void drawAllWires(){
+        bool sim=isSimActive();
+        float hw=max(1.0f,zoom_*1.4f);
 
-            // Selection glow
-            if (w.selected) {
+        for(auto& w:circuit.wires){
+            auto [sx0,sy0,sx1,sy1]=wireSC(w);
+
+            // Selection highlight (edit mode only)
+            if(!sim&&w.selected){
                 std::vector<float> halo;
                 pushBezierWire(halo,sx0,sy0,sx1,sy1,hw+4.f);
-                drawColored(halo,0.9f,0.78f,0.2f,0.28f);
+                dc(halo,0.9f,0.78f,0.2f,0.25f);
             }
 
-            if (w.value) {
-                // HIGH: dark green base + animated bright dashes
-                {std::vector<float> base;
-                 pushBezierWire(base,sx0,sy0,sx1,sy1,hw);
-                 drawColored(base,0.08f,0.35f,0.12f,1.f);}
-                {std::vector<float> dash;
-                 pushBezierDashes(dash,sx0,sy0,sx1,sy1,hw*0.8f,10.f,7.f,flowPhase_);
-                 if(w.selected) drawColored(dash,1.f,0.95f,0.3f,1.f);
-                 else           drawColored(dash,0.28f,1.f,0.48f,1.f);}
+            if(w.value){
+                // HIGH — bright wire
+                std::vector<float> v;
+                pushBezierWire(v,sx0,sy0,sx1,sy1,hw+0.5f);
+                dc(v,0.28f,0.92f,0.48f);
             } else {
-                // LOW: dim blue + faint static dots
-                {std::vector<float> line;
-                 pushBezierWire(line,sx0,sy0,sx1,sy1,hw);
-                 if(w.selected) drawColored(line,0.88f,0.75f,0.18f,1.f);
-                 else           drawColored(line,0.22f,0.25f,0.42f,1.f);}
-                if(zoom_>0.35f) {
-                    std::vector<float> dots;
-                    pushBezierDashes(dots,sx0,sy0,sx1,sy1,hw*0.45f,3.f,16.f,0.f);
-                    if(w.selected) drawColored(dots,1.f,0.9f,0.35f,0.55f);
-                    else           drawColored(dots,0.32f,0.36f,0.60f,0.65f);
-                }
+                // LOW — dim wire
+                std::vector<float> v;
+                pushBezierWire(v,sx0,sy0,sx1,sy1,hw);
+                if(!sim&&w.selected) dc(v,0.88f,0.75f,0.18f);
+                else                 dc(v,0.22f,0.25f,0.42f);
             }
 
-            // Junction dots at pin ends
-            {std::vector<float> ep;
-             float dr=max(2.8f,hw*1.5f);
-             pushCircle(ep,sx0,sy0,dr); pushCircle(ep,sx1,sy1,dr);
-             if(w.value)         drawColored(ep,0.28f,1.f,0.48f,1.f);
-             else if(w.selected) drawColored(ep,0.88f,0.75f,0.18f,1.f);
-             else                drawColored(ep,0.28f,0.32f,0.55f,1.f);}
+            // Junction dots at endpoints
+            {
+                std::vector<float> ep;
+                float dr=max(2.8f,hw*1.4f);
+                pushCircle(ep,sx0,sy0,dr);
+                pushCircle(ep,sx1,sy1,dr);
+                if(w.value)               dc(ep,0.28f,0.92f,0.48f);
+                else if(!sim&&w.selected) dc(ep,0.88f,0.75f,0.18f);
+                else                      dc(ep,0.28f,0.32f,0.55f);
+            }
         }
     }
 
-    // ── In-progress wire drag preview ─────────────────────────────────────
-    void drawDragPreview() {
-        if (!dragWire_) return;
+    // ── Wire drag preview ─────────────────────────────────────────────────
+    void drawDragPreview(){
+        if(!dragWire_) return;
         float sx0,sy0;
-        {
-            auto *g=circuit.find(dragSrc_.gateId);
-            if (!g||dragSrc_.pinIdx>=(int)g->outPins.size()) return;
-            w2s(g->outPins[dragSrc_.pinIdx].cx,
-                g->outPins[dragSrc_.pinIdx].cy,sx0,sy0);
-        }
+        { auto* g=circuit.find(dragSrc_.gateId);
+          if(!g||dragSrc_.pinIdx>=(int)g->outPins.size()) return;
+          w2s(g->outPins[dragSrc_.pinIdx].cx,g->outPins[dragSrc_.pinIdx].cy,sx0,sy0); }
         float sx1,sy1;
-        if (hasDstSnap_) w2s(dstSnap_.cx,dstSnap_.cy,sx1,sy1);
-        else             w2s(dragCurWX_,dragCurWY_,sx1,sy1);
-
+        if(hasDstSnap_) w2s(dstSnap_.cx,dstSnap_.cy,sx1,sy1);
+        else            w2s(dragCurWX_,dragCurWY_,sx1,sy1);
         float hw=max(1.f,zoom_*1.3f);
-        bool  snapped=hasDstSnap_;
-
-        // Outer glow
-        {std::vector<float> glow;
-         pushBezierWire(glow,sx0,sy0,sx1,sy1,hw+5.f);
-         drawColored(glow,snapped?.25f:.50f,snapped?.90f:.45f,snapped?.45f:.95f,0.22f);}
-        // Wire body
-        {std::vector<float> line;
-         pushBezierWire(line,sx0,sy0,sx1,sy1,hw);
-         drawColored(line,snapped?.28f:.52f,snapped?1.f:.50f,snapped?.52f:.98f,0.88f);}
-        // Animated dashes
-        {std::vector<float> dash;
-         pushBezierDashes(dash,sx0,sy0,sx1,sy1,hw*0.7f,8.f,6.f,flowPhase_);
-         drawColored(dash,snapped?.75f:.72f,snapped?1.f:.68f,snapped?.80f:1.f,0.9f);}
-        // Cursor dot
-        {std::vector<float> dot;
-         pushCircle(dot,sx1,sy1,max(4.f,hw*2.f));
-         drawColored(dot,snapped?.28f:.52f,snapped?1.f:.50f,snapped?.52f:.98f,1.f);}
+        bool sn=hasDstSnap_;
+        { std::vector<float> g; pushBezierWire(g,sx0,sy0,sx1,sy1,hw+5.f);
+          dc(g,sn?.25f:.50f,sn?.90f:.45f,sn?.45f:.95f,0.18f); }
+        { std::vector<float> l; pushBezierWire(l,sx0,sy0,sx1,sy1,hw);
+          dc(l,sn?.28f:.52f,sn?1.f:.50f,sn?.52f:.98f,0.85f); }
+        { std::vector<float> dot; pushCircle(dot,sx1,sy1,max(4.f,hw*2.f));
+          dc(dot,sn?.28f:.52f,sn?1.f:.50f,sn?.52f:.98f); }
     }
 
     // ── Pin hover glows ───────────────────────────────────────────────────
-    void drawPinHovers() {
-        // Snap ring on destination pin while dragging
-        if (dragWire_&&hasDstSnap_) {
+    void drawPinHovers(){
+        if(dragWire_&&hasDstSnap_){
             float sx,sy; w2s(dstSnap_.cx,dstSnap_.cy,sx,sy);
-            std::vector<float> ring;
-            pushCircle(ring,sx,sy,max(6.f,kPinR*zoom_*2.f),24);
-            drawColored(ring,0.28f,1.f,0.5f,0.45f);
+            std::vector<float> r; pushCircle(r,sx,sy,max(6.f,kPinR*zoom_*2.f),24);
+            dc(r,0.28f,1.f,0.5f,0.45f);
         }
-        // General hover glow when idle
-        if (!dragWire_&&hovPinValid_) {
+        if(!dragWire_&&hovPinValid_&&!isSimActive()){
             float sx,sy; w2s(hovPin_.cx,hovPin_.cy,sx,sy);
-            std::vector<float> ring;
-            pushCircle(ring,sx,sy,max(6.f,kPinR*zoom_*2.f),24);
-            if (hovPin_.isOutput) drawColored(ring,1.f,0.72f,0.28f,0.40f);
-            else                  drawColored(ring,0.4f,0.6f, 1.f,  0.40f);
+            std::vector<float> r; pushCircle(r,sx,sy,max(6.f,kPinR*zoom_*2.f),24);
+            if(hovPin_.isOutput) dc(r,1.f,0.72f,0.28f,0.40f);
+            else                 dc(r,0.4f,0.6f,1.f,0.40f);
         }
     }
 
+    // ── Sim border — thin colored edge so user knows they're in sim mode ──
+    void drawSimBorder(){
+        float vw=float(viewW_),vh=float(viewH_),bw=3.f;
+        std::vector<float> border;
+        pushLine(border,0,bw,vw,bw,bw);
+        pushLine(border,0,vh-bw,vw,vh-bw,bw);
+        pushLine(border,bw,0,bw,vh,bw);
+        pushLine(border,vw-bw,0,vw-bw,vh,bw);
+        if(simMode==SimMode::Running) dc(border,0.28f,0.86f,0.47f,0.55f);
+        else                          dc(border,0.86f,0.78f,0.28f,0.55f);
+    }
+
     // ── Gate drawing ──────────────────────────────────────────────────────
-    void drawGate(const Gate &g) {
+    void drawGate(const Gate& g){
         float sx,sy; w2s(g.x,g.y,sx,sy);
-        float z=zoom_;
-        float hw=kGW*z*.5f, hh=kGH*z*.5f;
-        float L=sx-hw,R=sx+hw, yT=sy-hh,yB=sy+hh;
-        float cr=kCorner*z, bw=max(1.f,z);
+        float z=zoom_,hw=kGW*z*.5f,hh=kGH*z*.5f;
+        float L=sx-hw,R=sx+hw,yT=sy-hh,yB=sy+hh;
+        float cr=kCorner*z,bw=max(1.f,z);
+        bool sim=isSimActive();
 
         GateColors col=gateColors(g.type,g.selected);
 
         // Shadow
-        {std::vector<float> v; pushRoundRectFilled(v,L+3,yT+3,R+3,yB+3,cr);
-         drawColored(v,0,0,0,0.45f);}
+        { std::vector<float> v; pushRoundRectFilled(v,L+3,yT+3,R+3,yB+3,cr); dc(v,0,0,0,0.45f); }
         // Body
-        {std::vector<float> v; pushRoundRectFilled(v,L,yT,R,yB,cr);
-         drawColored(v,col.body[0],col.body[1],col.body[2],col.body[3]);}
+        { std::vector<float> v; pushRoundRectFilled(v,L,yT,R,yB,cr);
+          dc(v,col.body[0],col.body[1],col.body[2],col.body[3]); }
         // Border
-        {std::vector<float> v; pushRoundRect(v,L,yT,R,yB,cr,bw*.5f+.5f);
-         drawColored(v,col.border[0],col.border[1],col.border[2],col.border[3]);}
+        { std::vector<float> v; pushRoundRect(v,L,yT,R,yB,cr,bw*.5f+.5f);
+          dc(v,col.border[0],col.border[1],col.border[2],col.border[3]); }
         // Selection inner ring
-        if (g.selected) {
+        if(g.selected){
             std::vector<float> v; pushRoundRect(v,L+2,yT+2,R-2,yB-2,cr-2,bw*.5f);
-            drawColored(v,col.border[0],col.border[1],col.border[2],0.3f);
+            dc(v,col.border[0],col.border[1],col.border[2],0.3f);
         }
-        // Top colour band
-        {float bh=max(3.f,hh*.22f);
-         std::vector<float> v;
-         pushQuad(v,L+cr,yT,R-cr,yT+bh);
-         pushRoundRectFilled(v,L,yT,R,yT+bh*1.5f,cr);
-         drawColored(v,col.border[0]*.4f,col.border[1]*.4f,col.border[2]*.4f,0.8f);}
-        // Label bar
-        {float lh=max(1.5f,z*1.5f),lw=hw*0.55f;
-         std::vector<float> v;
-         pushQuad(v,sx-lw,sy-lh*.5f,sx+lw,sy+lh*.5f);
-         drawColored(v,col.border[0],col.border[1],col.border[2],0.55f);}
+        // Top accent bar
+        { float bh=max(3.f,hh*.22f);
+          std::vector<float> v;
+          pushQuad(v,L+cr,yT,R-cr,yT+bh);
+          pushRoundRectFilled(v,L,yT,R,yT+bh*1.5f,cr);
+          dc(v,col.border[0]*.4f,col.border[1]*.4f,col.border[2]*.4f,0.8f); }
+        // Center label line
+        { float lh=max(1.5f,z*1.5f),lw=hw*.55f;
+          std::vector<float> v; pushQuad(v,sx-lw,sy-lh*.5f,sx+lw,sy+lh*.5f);
+          dc(v,col.border[0],col.border[1],col.border[2],0.55f); }
 
-        // Input pin stubs + dots
-        for (auto &pin:g.inPins) {
+        // Pins
+        for(auto& pin:g.inPins){
             float psx,psy; w2s(pin.cx,pin.cy,psx,psy);
-            {std::vector<float> v; pushLine(v,L,psy,psx,psy,max(0.8f,z*.7f));
-             drawColored(v,0.38f,0.42f,0.60f,1.f);}
-            {std::vector<float> v; pushCircle(v,psx,psy,max(2.5f,kPinR*z));
-             drawColored(v,
-               pin.connected?1.f:0.f,
-               pin.connected?.86f:.31f,
-               pin.connected?.47f:.51f,1.f);}
+            { std::vector<float> v; pushLine(v,L,psy,psx,psy,max(0.8f,z*.7f)); dc(v,0.38f,0.42f,0.60f); }
+            { std::vector<float> v; pushCircle(v,psx,psy,max(2.5f,kPinR*z));
+              dc(v,pin.connected?1.f:0.f,pin.connected?.86f:.31f,pin.connected?.47f:.51f); }
         }
-        // Output pin stubs + dots
-        for (auto &pin:g.outPins) {
+        for(auto& pin:g.outPins){
             float psx,psy; w2s(pin.cx,pin.cy,psx,psy);
-            {std::vector<float> v; pushLine(v,R,psy,psx,psy,max(0.8f,z*.7f));
-             drawColored(v,0.38f,0.42f,0.60f,1.f);}
-            {std::vector<float> v; pushCircle(v,psx,psy,max(2.5f,kPinR*z));
-             drawColored(v,
-               pin.connected?1.f:.86f,
-               pin.connected?.86f:.51f,
-               pin.connected?.47f:.16f,1.f);}
+            { std::vector<float> v; pushLine(v,R,psy,psx,psy,max(0.8f,z*.7f)); dc(v,0.38f,0.42f,0.60f); }
+            { std::vector<float> v; pushCircle(v,psx,psy,max(2.5f,kPinR*z));
+              dc(v,pin.connected?1.f:.86f,pin.connected?.86f:.51f,pin.connected?.47f:.16f); }
         }
 
-        // INPUT value badge
-        if (g.type==GateType::INPUT) {
+        // ── INPUT gate ────────────────────────────────────────────────────
+        if(g.type==GateType::INPUT){
+            bool on = g.inputVal;
             float cr2=max(5.f,8.f*z);
             float bcx=R-cr2-2*z, bcy=yT+cr2+2*z;
-            std::vector<float> v; pushCircle(v,bcx,bcy,cr2);
-            if(g.inputVal) drawColored(v,0.31f,0.86f,0.47f,1.f);
-            else           drawColored(v,0.86f,0.31f,0.31f,1.f);
+
+            // Glow ring around gate when ON (sim only)
+            if(sim&&on){
+                std::vector<float> ring;
+                pushRoundRect(ring,L-1,yT-1,R+1,yB+1,cr+1,max(1.5f,z));
+                dc(ring,0.28f,0.86f,0.47f,0.55f);
+            }
+
+            // LED dot — bright green (ON) or dim red (OFF)
+            if(on){
+                // outer glow
+                std::vector<float> glow; pushCircle(glow,bcx,bcy,cr2*1.8f,20);
+                dc(glow,0.28f,0.86f,0.47f,0.20f);
+            }
+            { std::vector<float> v; pushCircle(v,bcx,bcy,cr2);
+              dc(v,on?.28f:.55f, on?.86f:.18f, on?.47f:.18f); }
+
+            // 0 / 1 label bar (color matches state)
+            { float lw=hw*.3f,lh=max(1.5f,z*1.5f);
+              std::vector<float> v; pushQuad(v,sx-lw,sy-lh*.5f,sx+lw,sy+lh*.5f);
+              dc(v,on?.28f:.55f,on?.86f:.18f,on?.47f:.18f,0.7f); }
         }
 
-        // OUTPUT indicator — shows live evaluated value
-        if (g.type==GateType::OUTPUT) {
+        // ── OUTPUT gate ───────────────────────────────────────────────────
+        if(g.type==GateType::OUTPUT){
+            // Read value from the wire feeding this gate
             bool live=false;
-            for (auto &w:circuit.wires)
-                if (w.dst.gateId==g.id){live=w.value;break;}
+            for(auto& w:circuit.wires)
+                if(w.dst.gateId==g.id){ live=w.value; break; }
+
             float cr2=max(4.f,7.f*z);
             float bcx=R-cr2-2*z, bcy=yT+cr2+2*z;
-            {std::vector<float> v; pushCircle(v,bcx,bcy,cr2);
-             drawColored(v,live?.31f:.86f,live?.86f:.51f,live?.47f:.16f,0.4f);}
-            {std::vector<float> v; pushCircle(v,bcx,bcy,cr2*.6f);
-             drawColored(v,live?.31f:.86f,live?.86f:.51f,live?.47f:.16f,0.9f);}
+
+            if(live){
+                // Glow ring around whole gate
+                std::vector<float> ring;
+                pushRoundRect(ring,L-1,yT-1,R+1,yB+1,cr+1,max(1.5f,z));
+                dc(ring,0.28f,0.86f,0.47f,0.60f);
+                // Body tint
+                std::vector<float> tint; pushRoundRectFilled(tint,L,yT,R,yB,cr);
+                dc(tint,0.05f,0.32f,0.10f,0.22f);
+                // Outer glow on LED
+                std::vector<float> glow; pushCircle(glow,bcx,bcy,cr2*2.2f,24);
+                dc(glow,0.28f,0.86f,0.47f,0.22f);
+            }
+
+            // LED — bright (ON) or dim (OFF)
+            { std::vector<float> v; pushCircle(v,bcx,bcy,cr2);
+              dc(v,live?.28f:.55f,live?.86f:.22f,live?.47f:.10f, live?1.f:0.5f); }
+            // Inner bright core
+            { std::vector<float> v; pushCircle(v,bcx,bcy,cr2*.5f);
+              dc(v,live?.5f:.4f,live?1.f:.28f,live?.65f:.12f, live?1.f:0.35f); }
         }
     }
 };
@@ -1050,27 +1099,64 @@ class LogicSimApp : public Component {
     State<int>         gateCount;
     State<std::string> statusMsg;
     State<double>      zoomPct;
+    State<bool>        simRunning;
+    State<bool>        simActive;
+    State<std::string> ttText;
 
     std::shared_ptr<CircuitSurface> surface_;
-    CanvasWidget *canvas_ = nullptr;
+    CanvasWidget* canvas_ = nullptr;
 
-    static constexpr int kSW=180, kTH=46, kHH=24;
+    static constexpr int kSW=190, kTH=56, kHH=26;
 
-    void notifyZoom(float z) {
+    void notifyZoom(float z){
         double p=double(z)*100.0;
-        if (std::abs(p-zoomPct.get())>0.4) zoomPct.set(p);
+        if(std::abs(p-zoomPct.get())>0.4) zoomPct.set(p);
     }
-    void applyZoomFromSlider(double p) {
-        if (!surface_) return;
+    void applyZoom(double p){
+        if(!surface_) return;
         surface_->setZoomLevel(float(p/100.0));
-        if (canvas_) canvas_->redraw();
+        if(canvas_) canvas_->redraw();
+    }
+
+    void rebuildTruthTable(){
+        if(!surface_){ ttText.set("No circuit"); return; }
+        std::vector<int> inIds,outIds;
+        auto table=surface_->circuit.buildTruthTable(inIds,outIds);
+        if(table.empty()||inIds.empty()||outIds.empty()){
+            ttText.set("Connect INPUT → gates → OUTPUT\nto see truth table");
+            return;
+        }
+        std::ostringstream ss;
+        for(int i=0;i<(int)inIds.size();i++) ss<<"I"<<(i+1)<<" ";
+        ss<<"| ";
+        for(int i=0;i<(int)outIds.size();i++) ss<<"O"<<(i+1)<<" ";
+        ss<<"\n";
+        int w=int(inIds.size())*3+2+int(outIds.size())*3;
+        for(int i=0;i<w;i++) ss<<"-"; ss<<"\n";
+
+        for(auto& row:table){
+            bool isCur=true;
+            for(int i=0;i<(int)row.inputs.size();i++){
+                auto* g=surface_->circuit.find(inIds[i]);
+                if(!g||g->inputVal!=row.inputs[i]){ isCur=false; break; }
+            }
+            ss<<(isCur?"►":" ");
+            for(bool v:row.inputs)  ss<<" "<<(v?"1":"0");
+            ss<<" |";
+            for(bool v:row.outputs) ss<<" "<<(v?"1":"0");
+            ss<<"\n";
+        }
+        ttText.set(ss.str());
     }
 
 public:
     LogicSimApp()
         : gateCount(0,context),
-          statusMsg("Click a gate type to place it  ·  Drag output pin to connect  ·  Del to remove",context),
-          zoomPct(100.0,context) {}
+          statusMsg("Place gates · Connect wires · Press ▶ Play",context),
+          zoomPct(100.0,context),
+          simRunning(false,context),
+          simActive(false,context),
+          ttText("No circuit yet",context) {}
 
     WidgetPtr build() override {
         int SW=GetSystemMetrics(SM_CXSCREEN);
@@ -1078,133 +1164,194 @@ public:
         int vW=SW-kSW, vH=SH-kTH-kHH;
 
         auto cv=std::make_shared<CanvasWidget>()->setSize(vW,vH);
-        cv->setCanvasSize(vW,vH);
-        cv->setViewportEnabled(false);
+        cv->setCanvasSize(vW,vH); cv->setViewportEnabled(false);
         surface_=cv->setSurface<CircuitSurface>();
-        canvas_ =cv.get();
+        canvas_=cv.get();
 
-        surface_->onCircuitChanged=[this](){
-            gateCount.set(int(surface_->circuit.gates.size()));
+        surface_->onCircuitChanged=[this](){ gateCount.set(int(surface_->circuit.gates.size())); };
+        surface_->onStatusMessage=[this](const char* m){ statusMsg.set(m); };
+        surface_->onRedrawNeeded=[this](){ if(canvas_) canvas_->redraw(); };
+        surface_->onZoomChanged=[this](float z){ notifyZoom(z); };
+        surface_->onSimModeChanged=[this](SimMode m){
+            simRunning.set(m==SimMode::Running);
+            simActive.set(m!=SimMode::Edit);
         };
-        surface_->onStatusMessage=[this](const char *m){statusMsg.set(m);};
-        surface_->onRedrawNeeded =[this](){if(canvas_)canvas_->redraw();};
-        surface_->onZoomChanged  =[this](float z){notifyZoom(z);};
+        surface_->onSimUpdated=[this](){ rebuildTruthTable(); };
 
-        zoomPct.listen([this](double p){applyZoomFromSlider(p);});
+        zoomPct.listen([this](double p){ applyZoom(p); });
 
-        // Colors
-        COLORREF kBg     = RGB(12,12,18);
-        COLORREF kCard   = RGB(18,18,28);
-        COLORREF kBord   = RGB(40,42,62);
-        COLORREF kAccent = RGB(174,129,255);
-        COLORREF kGreen  = RGB(148,226,213);
-        COLORREF kDim    = RGB(80,84,110);
-        COLORREF kText   = RGB(192,202,232);
+        COLORREF kBg    =RGB(12,12,18);
+        COLORREF kCard  =RGB(18,18,28);
+        COLORREF kBord  =RGB(40,42,62);
+        COLORREF kAccent=RGB(174,129,255);
+        COLORREF kGreen =RGB(148,226,213);
+        COLORREF kDim   =RGB(80,84,110);
+        COLORREF kText  =RGB(192,202,232);
 
-        // Sidebar tiles
-        struct TileInfo { GateType type; COLORREF ac; const char *sub; };
-        const std::vector<TileInfo> tiles = {
-            {GateType::AND,   RGB(70,120,220), "A & B"},
-            {GateType::OR,    RGB(70,190,110), "A | B"},
-            {GateType::NOT,   RGB(170,70,220), "! A"},
-            {GateType::NAND,  RGB(220,70,70),  "!(A & B)"},
-            {GateType::NOR,   RGB(200,70,170), "!(A | B)"},
-            {GateType::XOR,   RGB(70,170,220), "A ^ B"},
-            {GateType::XNOR,  RGB(110,110,220),"!(A ^ B)"},
-            {GateType::INPUT, RGB(70,210,110), "Toggle 0/1"},
-            {GateType::OUTPUT,RGB(220,130,40), "LED output"},
+        struct TI{ GateType t; COLORREF ac; const char* sub; };
+        const std::vector<TI> tiles={
+            {GateType::AND,  RGB(70,120,220),"A & B"},
+            {GateType::OR,   RGB(70,190,110),"A | B"},
+            {GateType::NOT,  RGB(170,70,220),"! A"},
+            {GateType::NAND, RGB(220,70,70), "!(A&B)"},
+            {GateType::NOR,  RGB(200,70,170),"!(A|B)"},
+            {GateType::XOR,  RGB(70,170,220),"A ^ B"},
+            {GateType::XNOR, RGB(110,110,220),"!(A^B)"},
+            {GateType::INPUT,RGB(70,210,110),"Toggle 0/1"},
+            {GateType::OUTPUT,RGB(220,130,40),"LED output"},
         };
-
-        auto makeTile=[&](const TileInfo &ti)->WidgetPtr {
-            GateType t=ti.type; COLORREF ac=ti.ac;
+        auto makeTile=[&](const TI& ti)->WidgetPtr{
+            GateType t=ti.t; COLORREF ac=ti.ac;
             return GestureDetector(
-                Container(
-                    Row(
-                        Container(nullptr)
-                            ->setWidth(3)->setHeight(34)
-                            ->setBackgroundColor(ac)->setBorderRadius(2),
-                        SizedBox(8,0),
-                        Column(
-                            Text(kGateName[(int)t])
-                                ->setFontSize(11)->setFontWeight(FontWeight::Bold)
-                                ->setTextColor(ac),
-                            SizedBox(0,2),
-                            Text(ti.sub)->setFontSize(8)->setTextColor(kDim)
-                        )->setSpacing(0)
-                    )->setSpacing(0)->setCrossAxisAlignment(CrossAxisAlignment::Center)
-                )->setWidth(kSW-20)->setHeight(42)
-                 ->setBackgroundColor(kCard)->setBorderRadius(6)
-                 ->setBorderWidth(1)->setBorderColor(kBord)
-                 ->setHoverBackgroundColor(RGB(26,26,42))
+                Container(Row(
+                    Container(nullptr)->setWidth(3)->setHeight(32)
+                        ->setBackgroundColor(ac)->setBorderRadius(2),
+                    SizedBox(7,0),
+                    Column(
+                        Text(kGateName[(int)t])->setFontSize(10)
+                            ->setFontWeight(FontWeight::Bold)->setTextColor(ac),
+                        SizedBox(0,1),
+                        Text(ti.sub)->setFontSize(8)->setTextColor(kDim)
+                    )->setSpacing(0)
+                )->setSpacing(0)->setCrossAxisAlignment(CrossAxisAlignment::Center))
+                ->setWidth(kSW-16)->setHeight(38)
+                ->setBackgroundColor(kCard)->setBorderRadius(6)
+                ->setBorderWidth(1)->setBorderColor(kBord)
+                ->setHoverBackgroundColor(RGB(26,26,42))
             )->setOnTap([this,t](){
                 if(!surface_) return;
+                if(surface_->isSimActive()){
+                    statusMsg.set("Stop simulation first  (■ Stop button)"); return;
+                }
                 surface_->dropGate(t);
                 statusMsg.set(std::string("Placed ")+kGateName[(int)t]
-                              +" gate  ·  Drag its output pin (right side) to connect");
+                    +"  ·  Drag output pin → input pin");
             });
         };
+        auto tileCol=std::make_shared<ColumnWidget>(); tileCol->setSpacing(4);
+        for(auto& ti:tiles) tileCol->addChild(makeTile(ti));
 
-        auto tileList=std::make_shared<ColumnWidget>(); tileList->setSpacing(5);
-        for (auto &ti:tiles) tileList->addChild(makeTile(ti));
+        auto ttPanel=Container(
+            Column(
+                Text("TRUTH TABLE")->setFontSize(7)
+                    ->setFontWeight(FontWeight::Bold)->setTextColor(kDim),
+                SizedBox(0,5),
+                Text(ttText,[](const std::string& s){return s;})
+                    ->setFontSize(9)->setTextColor(RGB(120,200,140))
+            )->setSpacing(0)
+        )->setWidth(kSW-8)->setBackgroundColor(RGB(10,14,10))
+         ->setBorderRadius(6)->setBorderWidth(1)->setBorderColor(RGB(30,60,35))
+         ->setPaddingAll(7,7,7,7);
 
         auto sidebar=Container(
             Column(
-                Text("GATES")->setFontSize(8)
-                    ->setFontWeight(FontWeight::Bold)->setTextColor(RGB(70,74,100)),
+                Text("GATES")->setFontSize(7)->setFontWeight(FontWeight::Bold)
+                    ->setTextColor(kDim),
+                SizedBox(0,6),
+                tileCol,
                 SizedBox(0,10),
-                tileList
+                ttPanel
             )->setSpacing(0)
-        )->setWidth(kSW)->setBackgroundColor(kBg)->setPaddingAll(10,10,10,10);
+        )->setWidth(kSW)->setBackgroundColor(kBg)->setPaddingAll(8,8,8,8);
 
-        auto mkBtn=[&](const std::string &lbl,COLORREF col,
-                       std::function<void()> fn)->WidgetPtr {
-            return Button(lbl,fn)
-                ->setBackgroundColor(RGB(24,24,38))->setTextColor(col)
-                ->setBorderRadius(5)->setHeight(26)->setPadding(4);
+        auto mkBtn=[&](const std::string& lbl,COLORREF col,COLORREF bg,
+                       COLORREF bord,std::function<void()> fn)->WidgetPtr{
+            return GestureDetector(
+                Container(
+                    Text(lbl)->setFontSize(11)->setFontWeight(FontWeight::Bold)
+                        ->setTextColor(col)
+                )->setHeight(30)->setBorderRadius(6)
+                 ->setBackgroundColor(bg)->setBorderWidth(1)->setBorderColor(bord)
+                 ->setPaddingAll(10,4,10,4)
+                 ->setHoverBackgroundColor(RGB(GetRValue(bg)+8,GetGValue(bg)+8,GetBValue(bg)+8))
+            )->setOnTap(fn);
         };
+
+        auto playPauseBtn=GestureDetector(
+            Container(
+                Text(simRunning,[](bool r){return r?"⏸ Pause":"▶ Play";})
+                    ->setFontSize(11)->setFontWeight(FontWeight::Bold)
+                    ->setTextColor(RGB(80,220,120))
+            )->setHeight(30)->setBorderRadius(6)
+             ->setBackgroundColor(RGB(14,34,18))
+             ->setBorderWidth(1)->setBorderColor(RGB(40,120,55))
+             ->setPaddingAll(10,4,10,4)
+             ->setHoverBackgroundColor(RGB(18,44,22))
+        )->setOnTap([this](){
+            if(!surface_) return;
+            if(!surface_->isSimActive()) surface_->simPlay();
+            else                         surface_->simPause();
+        });
+
+        auto stopBtn=mkBtn("■ Stop",RGB(230,80,80),RGB(34,14,14),RGB(120,40,40),[this](){
+            if(surface_) surface_->simStop();
+        });
+        auto stepBtn=mkBtn("⏭ Step",RGB(100,180,255),RGB(14,22,38),RGB(40,80,150),[this](){
+            if(surface_) surface_->simStep();
+        });
+
+        auto modeBadge=Container(
+            Text(simActive,[](bool a){return a?"● SIM MODE":"○ EDIT MODE";})
+                ->setFontSize(9)->setFontWeight(FontWeight::Bold)
+                ->setTextColor(RGB(220,200,60))
+        )->setPaddingAll(7,3,7,3)->setBorderRadius(4)
+         ->setBackgroundColor(RGB(20,18,8))
+         ->setBorderWidth(1)->setBorderColor(RGB(70,62,15));
 
         auto toolbar=Container(
             Row(
-                Text("⚡ Logic Sim")
-                    ->setFontSize(13)->setFontWeight(FontWeight::Bold)
-                    ->setTextColor(kAccent),
-                SizedBox(16,0),
-                Text("Zoom")->setFontSize(9)->setTextColor(kDim),
-                SizedBox(4,0),
-                Slider(10.0,400.0,1.0)->setValue(zoomPct)
-                    ->setTrackFillColor(kAccent)->setWidth(100),
-                SizedBox(4,0),
-                Text(zoomPct,[](double v){
-                    char b[16]; _snprintf_s(b,sizeof(b),_TRUNCATE,"%.0f%%",v);
-                    return std::string(b);
-                })->setFontSize(10)->setTextColor(kText)->setMinWidth(40),
-                mkBtn("Fit",kAccent,[this](){
-                    if(surface_){surface_->fitToView();notifyZoom(surface_->getZoom());}
-                }),
-                mkBtn("1:1",kAccent,[this](){
-                    if(surface_){surface_->resetZoom();notifyZoom(1.f);}
-                }),
-                SizedBox(14,0),
-                mkBtn("🗑 Clear",RGB(243,139,168),[this](){
-                    if(!surface_) return;
-                    surface_->circuit.clearAll();   // clears gates + wires
-                    gateCount.set(0);
-                    if(canvas_) canvas_->redraw();
-                }),
-                SizedBox(14,0),
-                Text(gateCount,[](int n){
-                    return std::to_string(n)+(n==1?" gate":" gates");
-                })->setFontSize(10)->setTextColor(kDim)
-            )->setSpacing(8)->setCrossAxisAlignment(CrossAxisAlignment::Center)
-        )->setBackgroundColor(kBg)->setPaddingAll(12,8,12,8)->setHeight(kTH);
+                Row(
+                    Text("⚡ Logic Sim")->setFontSize(13)
+                        ->setFontWeight(FontWeight::Bold)->setTextColor(kAccent),
+                    SizedBox(14,0),
+                    Text("Zoom")->setFontSize(9)->setTextColor(kDim),
+                    SizedBox(4,0),
+                    Slider(10.0,400.0,1.0)->setValue(zoomPct)
+                        ->setTrackFillColor(kAccent)->setWidth(88),
+                    SizedBox(4,0),
+                    Text(zoomPct,[](double v){
+                        char b[16]; _snprintf_s(b,sizeof(b),_TRUNCATE,"%.0f%%",v);
+                        return std::string(b);
+                    })->setFontSize(10)->setTextColor(kText)->setMinWidth(34),
+                    mkBtn("Fit",kAccent,RGB(22,20,34),RGB(70,55,100),[this](){
+                        if(surface_){ surface_->fitToView(); notifyZoom(surface_->getZoom()); }
+                    }),
+                    mkBtn("1:1",kAccent,RGB(22,20,34),RGB(70,55,100),[this](){
+                        if(surface_){ surface_->resetZoom(); notifyZoom(1.f); }
+                    }),
+                    SizedBox(12,0),
+                    mkBtn("🗑 Clear",RGB(243,139,168),RGB(34,14,20),RGB(120,40,60),[this](){
+                        if(!surface_) return;
+                        surface_->simStop();
+                        surface_->circuit.clearAll();
+                        gateCount.set(0);
+                        ttText.set("No circuit yet");
+                        if(canvas_) canvas_->redraw();
+                    }),
+                    SizedBox(10,0),
+                    Text(gateCount,[](int n){
+                        return std::to_string(n)+(n==1?" gate":" gates");
+                    })->setFontSize(10)->setTextColor(kDim)
+                )->setSpacing(7)->setCrossAxisAlignment(CrossAxisAlignment::Center),
+                SizedBox(0,5),
+                Row(
+                    playPauseBtn, SizedBox(5,0),
+                    stopBtn,      SizedBox(5,0),
+                    stepBtn,      SizedBox(14,0),
+                    modeBadge,    SizedBox(14,0),
+                    Text("SIM: click INPUT to toggle · Space=play/pause · ■ Stop to edit")
+                        ->setFontSize(9)->setTextColor(kDim)
+                )->setSpacing(0)->setCrossAxisAlignment(CrossAxisAlignment::Center)
+            )->setSpacing(0)
+        )->setBackgroundColor(kBg)->setPaddingAll(10,5,10,5)->setHeight(kTH);
 
         auto hints=Container(
             Row(
-                Text(statusMsg,[](const std::string &s){return s;})
+                Text(statusMsg,[](const std::string& s){return s;})
                     ->setFontSize(10)->setTextColor(kGreen),
-                SizedBox(16,0),
-                Text("Drag output pin→input pin=connect  ·  Right-click/Dbl-click wire=remove  ·  Space=toggle INPUT  ·  Del=remove  ·  Ctrl+Scroll=zoom")
-                    ->setFontSize(9)->setTextColor(RGB(48,52,72))
+                SizedBox(14,0),
+                Text("Edit: drag out→in=wire · Right-click/Dbl-click=delete wire · Del=remove · Ctrl+Scroll=zoom")
+                    ->setFontSize(9)->setTextColor(RGB(44,48,68))
             )->setSpacing(0)
         )->setBackgroundColor(kBg)->setPaddingAll(10,3,10,3)->setHeight(kHH);
 
@@ -1217,7 +1364,7 @@ public:
 // §7  ENTRY POINT
 // =============================================================================
 
-int WINAPI WinMain(HINSTANCE hInst,HINSTANCE,LPSTR,int) {
+int WINAPI WinMain(HINSTANCE hInst,HINSTANCE,LPSTR,int){
     FluxUI app(hInst);
     app.build([&](){
         return FluxApp("Logic Sim",BuildComponent<LogicSimApp>(),AppTheme::dark());
