@@ -13,5 +13,6 @@
 #include "fluxicons.hpp"
 #include "flux_canvas.hpp"
 #include "flux_colorpicker.hpp"
+#include "flux_overlays.hpp"
 
 #endif // WIDGETS_HPP

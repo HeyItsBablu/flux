@@ -15,9 +15,7 @@
 // ============================================================================
 
 template <typename T> class State;
-class DropdownWidget;
-class ScaffoldWidget;
-class DialogWidget;
+class ScaffoldWidget;  
 
 // ============================================================================
 // MOUSE EVENT BROADCAST HELPERS (for captured mouse events)

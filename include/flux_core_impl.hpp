@@ -3,7 +3,8 @@
 
 #include "flux_app.hpp"
 #include "flux_core.hpp"
-#include "widgets/flux_overlays.hpp"
+#include "flux_overlay_host.hpp"          // ← only new include needed
+
 
 // ============================================================================
 // FLUXUI METHOD IMPLEMENTATIONS
@@ -14,25 +15,23 @@ template <typename T> inline State<T> FluxUI::useState(T initialValue) {
 }
 
 // ----------------------------------------------------------------------------
-// wireFluxAppToWidgets
-// Walk the entire widget tree and hand every overlay-capable widget a pointer
-// to the FluxAppWidget so they can call addOverlay / removeOverlay.
-// Add new widget types here as they are introduced.
+// wireScaffoldToWidgets
+//
+// OLD: one dynamic_cast branch per concrete overlay type — every new overlay
+//      widget required a matching line here.
+//
+// NEW: a single OverlayHost cast.  Any widget that inherits OverlayHost is
+//      automatically wired; no changes to this function ever needed again.
 // ----------------------------------------------------------------------------
-
-// wireScaffoldToWidgets — inject scaffold into every overlay-capable widget
-inline void FluxUI::wireScaffoldToWidgets(ScaffoldWidget *scaffold, Widget *widget) {
+inline void FluxUI::wireScaffoldToWidgets(ScaffoldWidget *scaffold,
+                                          Widget *widget) {
   if (!widget) return;
 
-  if (auto *d = dynamic_cast<DropdownWidget *>(widget))
-    d->setScaffold(scaffold);
-  if (auto *t = dynamic_cast<TooltipWidget *>(widget))
-    t->setScaffold(scaffold);
-  if (auto *c = dynamic_cast<ContextMenuWidget *>(widget))
-    c->setScaffold(scaffold);
-  if (auto *dlg = dynamic_cast<DialogWidget *>(widget))
-    dlg->setScaffold(scaffold);
+  // If the widget opted in to the overlay system, wire it.
+  if (auto *host = dynamic_cast<OverlayHost *>(widget))
+    host->setScaffold(scaffold);
 
+  // Always recurse — non-overlay widgets may have overlay-widget descendants.
   for (auto &child : widget->children)
     wireScaffoldToWidgets(scaffold, child.get());
 }
@@ -49,9 +48,7 @@ static inline ScaffoldWidget *findScaffold(Widget *widget) {
 
 // ----------------------------------------------------------------------------
 // getFluxApp  (private helper used throughout this file)
-// Returns the FluxAppWidget if the root is one, otherwise nullptr.
 // ----------------------------------------------------------------------------
-
 static inline FluxAppWidget *getFluxApp(const WidgetPtr &root) {
   return dynamic_cast<FluxAppWidget *>(root.get());
 }
@@ -60,10 +57,6 @@ static inline FluxAppWidget *getFluxApp(const WidgetPtr &root) {
 // UNIFIED OVERLAY DISPATCHERS
 // ============================================================================
 
-// ----------------------------------------------------------------------------
-// handleDropdownOverlays — unified mouse-down dispatcher for ALL overlays.
-// Iterates highest zIndex first so topmost overlay wins.
-// ----------------------------------------------------------------------------
 inline bool FluxUI::handleDropdownOverlays(int mouseX, int mouseY) {
   auto *scaffold = findScaffold(root.get());
   if (!scaffold || !scaffold->hasOverlays()) return false;
@@ -72,19 +65,12 @@ inline bool FluxUI::handleDropdownOverlays(int mouseX, int mouseY) {
     if (it->widget && it->widget->handleMouseDown(mouseX, mouseY)) return true;
   return false;
 }
-// ----------------------------------------------------------------------------
-// handleDialogOverlays — no-op stub kept for source compatibility.
-// All overlay mouse-down routing goes through handleDropdownOverlays above.
-// ----------------------------------------------------------------------------
+
 inline bool FluxUI::handleDialogOverlays(int mouseX, int mouseY) {
-  (void)mouseX;
-  (void)mouseY;
+  (void)mouseX; (void)mouseY;
   return false;
 }
 
-// ----------------------------------------------------------------------------
-// handleOverlayMouseMove — called from WM_MOUSEMOVE.
-// ----------------------------------------------------------------------------
 inline bool FluxUI::handleOverlayMouseMove(int mouseX, int mouseY) {
   auto *scaffold = findScaffold(root.get());
   if (!scaffold || !scaffold->hasOverlays()) return false;
@@ -93,9 +79,7 @@ inline bool FluxUI::handleOverlayMouseMove(int mouseX, int mouseY) {
     if (it->widget && it->widget->handleMouseMove(mouseX, mouseY)) return true;
   return false;
 }
-// ----------------------------------------------------------------------------
-// handleOverlayMouseWheel — called from WM_MOUSEWHEEL.
-// ----------------------------------------------------------------------------
+
 inline bool FluxUI::handleOverlayMouseWheel(int delta) {
   auto *scaffold = findScaffold(root.get());
   if (!scaffold || !scaffold->hasOverlays()) return false;
@@ -105,11 +89,6 @@ inline bool FluxUI::handleOverlayMouseWheel(int delta) {
   return false;
 }
 
-// ----------------------------------------------------------------------------
-// handleOverlayKeyDown — called from WM_KEYDOWN.
-// Only the topmost overlay receives keyboard events (e.g. Escape closes a
-// context menu before it reaches the text field behind it).
-// ----------------------------------------------------------------------------
 inline bool FluxUI::handleOverlayKeyDown(int keyCode) {
   auto *scaffold = findScaffold(root.get());
   if (!scaffold || !scaffold->hasOverlays()) return false;
@@ -117,11 +96,6 @@ inline bool FluxUI::handleOverlayKeyDown(int keyCode) {
   return top ? top->handleKeyDown(keyCode) : false;
 }
 
-// ----------------------------------------------------------------------------
-// handleOverlayRightClick — called from WM_RBUTTONDOWN.
-// Right-click on an open overlay (context menu, dropdown, etc.) should close
-// it.
-// ----------------------------------------------------------------------------
 inline bool FluxUI::handleOverlayRightClick(int mouseX, int mouseY) {
   auto *scaffold = findScaffold(root.get());
   if (!scaffold || !scaffold->hasOverlays()) return false;
@@ -131,34 +105,26 @@ inline bool FluxUI::handleOverlayRightClick(int mouseX, int mouseY) {
   return false;
 }
 
-
-// ----------------------------------------------------------------------------
-// checkDropdownOverlays / checkDialogOverlays
-// Legacy empty stubs — all real work goes through handleDropdownOverlays.
-// ----------------------------------------------------------------------------
-
 inline bool FluxUI::checkDropdownOverlays(Widget *, int, int) { return false; }
-inline bool FluxUI::checkDialogOverlays(Widget *, int, int) { return false; }
-
+inline bool FluxUI::checkDialogOverlays(Widget *, int, int)   { return false; }
 
 // ============================================================================
 // REBUILD
 // ============================================================================
 
-// rebuild
 inline void FluxUI::rebuild() {
   if (!builder) return;
 
   if (root) {
     root->onDetach();
-    // Belt-and-suspenders: clear scaffold overlays if still populated
     if (auto *scaffold = findScaffold(root.get()))
       scaffold->clearOverlays();
   }
 
   root = builder();
 
-  // Wire scaffold into all overlay-capable widgets
+  // Wire scaffold into ALL overlay-capable widgets via the OverlayHost mixin.
+  // No manual registration needed for new widget types.
   if (auto *scaffold = findScaffold(root.get()))
     wireScaffoldToWidgets(scaffold, root.get());
 
