@@ -1,5 +1,5 @@
 // =============================================================================
-// logic_sim.hpp  —  Logic Gate Simulator  v9  (IEEE/ANSI symbols)
+// logic_sim.hpp  —  Logic Gate Simulator  v10  (IEEE/ANSI symbols + CLOCK gate)
 // =============================================================================
 
 #pragma once
@@ -143,11 +143,17 @@ namespace js {
 // §1  DATA MODEL
 // =============================================================================
 
-enum class GateType { AND=0,OR,NOT,NAND,NOR,XOR,XNOR,INPUT,OUTPUT,COUNT };
+// CLOCK is appended after OUTPUT — all existing indices are preserved
+enum class GateType { AND=0,OR,NOT,NAND,NOR,XOR,XNOR,INPUT,OUTPUT,CLOCK,COUNT };
 static constexpr int kGTC=(int)GateType::COUNT;
-static constexpr int kInPins [kGTC]={2,2,1,2,2,2,2,0,1};
-static constexpr int kOutPins[kGTC]={1,1,1,1,1,1,1,1,0};
-static const char*   kGateName[kGTC]={"AND","OR","NOT","NAND","NOR","XOR","XNOR","INPUT","OUTPUT"};
+//                                         AND OR NOT NAND NOR XOR XNOR IN  OUT CLK
+static constexpr int kInPins [kGTC]={       2, 2,  1,  2,  2,  2,   2,  0,  1,  0};
+static constexpr int kOutPins[kGTC]={       1, 1,  1,  1,  1,  1,   1,  1,  0,  1};
+static const char*   kGateName[kGTC]={"AND","OR","NOT","NAND","NOR","XOR","XNOR","INPUT","OUTPUT","CLOCK"};
+
+// Clock frequency presets (Hz) – cycled with double-click or via label
+static constexpr float kClockFreqPresets[] = {0.5f, 1.f, 2.f, 4.f, 8.f};
+static constexpr int   kClockFreqCount = 5;
 
 static constexpr float kGW=88.f,kGH=60.f,kPinR=5.f,kPinLen=16.f,kCorner=8.f;
 static constexpr float kGrid=20.f;
@@ -161,9 +167,11 @@ struct Gate {
     GateType type=GateType::AND;
     float    x=0,y=0;
     bool     selected=false;
-    bool     inputVal=false;
+    bool     inputVal=false;    // current logical value (CLOCK toggles this)
     bool     simVal=false;
     std::string label;
+    // CLOCK-specific: frequency in Hz (stored so it survives save/load)
+    float    clockHz=1.f;
     std::vector<Pin> inPins,outPins;
 
     void recomputePins(){
@@ -176,7 +184,8 @@ struct Gate {
     std::string toJson() const {
         return js::obj({js::kv("id",id),js::kv("type",(int)type),
                         js::kv("x",x),js::kv("y",y),
-                        js::kv("inputVal",inputVal),js::kv("label",label)});
+                        js::kv("inputVal",inputVal),js::kv("label",label),
+                        js::kv("clockHz",clockHz)});
     }
     void fromKV(const js::KVList& m){
         for(auto&[k,v]:m){
@@ -186,7 +195,9 @@ struct Gate {
             else if(k=="y")   y=js::asFloat(v);
             else if(k=="inputVal")inputVal=js::asBool(v);
             else if(k=="label")   label=js::asStr(v);
+            else if(k=="clockHz") clockHz=js::asFloat(v);
         }
+        if(clockHz<=0.f)clockHz=1.f;
         recomputePins();
     }
 };
@@ -227,6 +238,7 @@ struct Circuit {
 
     int add(GateType t,float x,float y,const std::string& lbl=""){
         Gate g;g.id=nextId++;g.type=t;g.x=x;g.y=y;g.label=lbl;
+        if(t==GateType::CLOCK)g.clockHz=1.f;
         g.recomputePins();gates.push_back(g);return g.id;
     }
     Gate* find(int id){for(auto&g:gates)if(g.id==id)return&g;return nullptr;}
@@ -275,7 +287,9 @@ struct Circuit {
         inIds.clear();outIds.clear();
         std::vector<int>inIdx,outIdx;
         for(int i=0;i<(int)gates.size();i++){
-            if(gates[i].type==GateType::INPUT) {inIdx.push_back(i); inIds.push_back(gates[i].id);}
+            // CLOCK behaves like INPUT for truth table purposes
+            if(gates[i].type==GateType::INPUT||gates[i].type==GateType::CLOCK)
+               {inIdx.push_back(i); inIds.push_back(gates[i].id);}
             if(gates[i].type==GateType::OUTPUT){outIdx.push_back(i);outIds.push_back(gates[i].id);}
         }
         if(inIdx.empty()||outIdx.empty())return{};
@@ -297,7 +311,7 @@ struct Circuit {
         auto eval=[&](){
             for(int idx:topo()){
                 Gate&g=gs[idx];
-                if(g.type==GateType::INPUT){g.simVal=g.inputVal;}
+                if(g.type==GateType::INPUT||g.type==GateType::CLOCK){g.simVal=g.inputVal;}
                 else{bool ins[2]={};
                     for(auto&w:ws)if(w.dst.gateId==g.id&&w.dst.pinIdx<2)ins[w.dst.pinIdx]=w.value;
                     bool a=ins[0],b=ins[1];
@@ -366,7 +380,7 @@ private:
         return r;
     }
     bool computeGate(const Gate&g)const{
-        if(g.type==GateType::INPUT)return g.inputVal;
+        if(g.type==GateType::INPUT||g.type==GateType::CLOCK)return g.inputVal;
         bool ins[2]={};
         for(auto&w:wires)if(w.dst.gateId==g.id&&w.dst.pinIdx<2)ins[w.dst.pinIdx]=w.value;
         bool a=ins[0],b=ins[1];
@@ -481,21 +495,8 @@ static bool nearestPin(const std::vector<PinRef>&pins,float wx,float wy,float ra
 
 // =============================================================================
 // §2b  IEEE/ANSI SHAPE BUILDERS
-//
-// Coordinate convention (matches CircuitSurface::w2s):
-//   sx = (wx - camX) * zoom
-//   sy = viewH - (wy - camY) * zoom       ← Y is FLIPPED
-//
-// So for a gate centred at (sx,sy):
-//   L = sx - halfW,  R = sx + halfW
-//   yT = sy - halfH  (screen-top    = smaller Y value)
-//   yB = sy + halfH  (screen-bottom = larger  Y value)
-//
-// All shape builders receive (L, yT, R, yB) where yT < yB.
-// "top" of the gate in world space = yT in screen space.
 // =============================================================================
 
-// ── Cubic bezier stroke (segs segments) ──────────────────────────────────────
 static void pushCubic(std::vector<float>&v,
                        float x0,float y0,float x1,float y1,
                        float x2,float y2,float x3,float y3,
@@ -509,7 +510,6 @@ static void pushCubic(std::vector<float>&v,
     }
 }
 
-// ── Arc stroke from angle a0 to a1 (radians) ─────────────────────────────────
 static void pushArc(std::vector<float>&v,
                     float cx,float cy,float r,
                     float a0,float a1,float hw,int segs=24){
@@ -522,29 +522,22 @@ static void pushArc(std::vector<float>&v,
     }
 }
 
-// ── Hollow-ring stroke (bubble / inversion circle) ───────────────────────────
 static void pushRing(std::vector<float>&v,float cx,float cy,float r,float hw){
     pushArc(v,cx,cy,r, 0.f, 6.2831853f, hw, 20);
 }
 
-// ── Triangle fill (for NOT / BUF body fill) ──────────────────────────────────
 static void pushTriFill(std::vector<float>&v,
                          float L,float yT,float R,float yB){
     float MY=(yT+yB)*0.5f;
     v.insert(v.end(),{L,yT, R,MY, L,yB});
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// AND fill  –  rectangle left portion + right semicircle fan
-// ─────────────────────────────────────────────────────────────────────────────
 static void pushANDFill(std::vector<float>&v,
                          float L,float yT,float R,float yB){
     float H=yB-yT, MY=(yT+yB)*0.5f;
-    float flatX = L + (R-L)*0.44f;   // flat-to-arc transition x
+    float flatX = L + (R-L)*0.44f;
     float arcR  = H*0.5f;
-    // left rectangle
     pushQuad(v, L, yT, flatX, yB);
-    // right semicircle fan  (screen: top=-π/2, bottom=+π/2)
     const int S=24;
     for(int i=0;i<S;++i){
         float a0 = -1.5707963f + float(i)  /S*3.1415926f;
@@ -557,44 +550,32 @@ static void pushANDFill(std::vector<float>&v,
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// AND outline  –  flat left + top/bottom edges + right semicircle
-// ─────────────────────────────────────────────────────────────────────────────
 static void pushANDOutline(std::vector<float>&v,
                             float L,float yT,float R,float yB,
                             float hw){
     float H=yB-yT, MY=(yT+yB)*0.5f;
     float flatX = L + (R-L)*0.44f;
     float arcR  = H*0.5f;
-    pushLine(v, L, yT, L, yB, hw);          // left edge
-    pushLine(v, L, yT, flatX, yT, hw);      // top edge
-    pushLine(v, L, yB, flatX, yB, hw);      // bottom edge
-    pushArc (v, flatX, MY, arcR, -1.5707963f, 1.5707963f, hw, 28); // right arc
+    pushLine(v, L, yT, L, yB, hw);
+    pushLine(v, L, yT, flatX, yT, hw);
+    pushLine(v, L, yB, flatX, yB, hw);
+    pushArc (v, flatX, MY, arcR, -1.5707963f, 1.5707963f, hw, 28);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// OR fill  –  polygon approximated as horizontal spans
-//   Back: concave bezier   (L,yT)→(L+bulgX,MY)→(L,yB)
-//   Front: two beziers meeting at tip  (L,yT/yB) → tip=(R,MY)
-// ─────────────────────────────────────────────────────────────────────────────
 static void pushORFill(std::vector<float>&v,
                         float L,float yT,float R,float yB){
     float H=yB-yT, W=R-L, MY=(yT+yB)*0.5f;
-    float bulgX=W*0.30f; // how far the concave back bows right
+    float bulgX=W*0.30f;
     const int ROWS=32;
     for(int i=0;i<ROWS;++i){
         float t0=float(i)  /ROWS;
         float t1=float(i+1)/ROWS;
         float y0=yT+t0*H, y1=yT+t1*H;
 
-        // back x at parameter t  (cubic: L→L+bulgX→L+bulgX→L)
         auto backX=[&](float t)->float{
             float u=1.f-t;
             return u*u*u*L + 3*u*u*t*(L+bulgX) + 3*u*t*t*(L+bulgX) + t*t*t*L;
         };
-        // front x at parameter t  (mirrors about MY)
-        //   top half: t∈[0,0.5] → param goes 0→1
-        //   bot half: t∈[0.5,1] → param goes 1→0
         auto frontX=[&](float t)->float{
             float tp=(t<0.5f)?(1.f-t*2.f):((t-0.5f)*2.f);
             float u=1.f-tp;
@@ -603,40 +584,30 @@ static void pushORFill(std::vector<float>&v,
 
         float lx=backX(t0),  rx=frontX(t0);
         float lx1=backX(t1), rx1=frontX(t1);
-        // push two triangles to fill the span
         v.insert(v.end(),{lx,y0, rx,y0, rx1,y1});
         v.insert(v.end(),{lx,y0, rx1,y1, lx1,y1});
         (void)lx1;
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// OR outline  –  concave back arc + two front bezier curves
-// ─────────────────────────────────────────────────────────────────────────────
 static void pushOROutline(std::vector<float>&v,
                            float L,float yT,float R,float yB,
                            float hw){
     float W=R-L, MY=(yT+yB)*0.5f;
     float bulgX=W*0.30f;
 
-    // Concave back arc (left side)
     pushCubic(v, L,yT, L+bulgX,yT, L+bulgX,yB, L,yB, hw);
 
-    // Top curve → tip
     pushCubic(v, L,yT,
                  L+W*0.55f, yT,
                  R-W*0.12f, MY - (yB-yT)*0.10f,
                  R, MY,  hw);
-    // Bottom curve → tip
     pushCubic(v, L,yB,
                  L+W*0.55f, yB,
                  R-W*0.12f, MY + (yB-yT)*0.10f,
                  R, MY,  hw);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// XOR extra back arc  –  a second parallel arc offset to the left
-// ─────────────────────────────────────────────────────────────────────────────
 static void pushXORBackArc(std::vector<float>&v,
                              float L,float yT,float R,float yB,
                              float hw){
@@ -644,19 +615,46 @@ static void pushXORBackArc(std::vector<float>&v,
     pushCubic(v, L-offset,yT, L-offset+bulgX,yT, L-offset+bulgX,yB, L-offset,yB, hw);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// NOT / BUF triangle outline
-// ─────────────────────────────────────────────────────────────────────────────
 static void pushTRIOutline(std::vector<float>&v,
                             float L,float yT,float R,float yB,
                             float hw, bool negate){
     float MY=(yT+yB)*0.5f;
     float H=yB-yT;
-    // For NOT the tip is slightly inset to make room for the bubble
     float tipX = negate ? (R - H*0.20f) : R;
-    pushLine(v, L, yT, L, yB, hw);       // left vertical
-    pushLine(v, L, yT, tipX, MY, hw);    // top slant
-    pushLine(v, tipX, MY, L, yB, hw);    // bottom slant
+    pushLine(v, L, yT, L, yB, hw);
+    pushLine(v, L, yT, tipX, MY, hw);
+    pushLine(v, tipX, MY, L, yB, hw);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §2c  CLOCK SQUARE-WAVE GLYPH
+//   Draws a small square wave icon centered at (cx,cy) within a given width/height.
+//   Used inside the clock gate body to make it immediately recognisable.
+// ─────────────────────────────────────────────────────────────────────────────
+static void pushSquareWave(std::vector<float>&v,
+                            float cx,float cy,
+                            float gW,float gH,   // total glyph width/height
+                            float hw){
+    // Draw 1.5 cycles of a square wave
+    float x0=cx-gW*0.5f;
+    float y_lo=cy+gH*0.35f;
+    float y_hi=cy-gH*0.35f;
+    float pw=gW/3.f;  // one pulse width
+
+    // Segment sequence: _|‾|_|‾|_  (lo-rise-hi-fall-lo-rise-hi-fall-lo)
+    //  x:  x0 → x0+pw/2 → x0+pw/2 → x0+pw → x0+3pw/2 → x0+3pw/2 → x0+2pw → x0+5pw/2 → x0+5pw/2 → x0+3pw
+    float xs[10]={
+        x0,
+        x0+pw*0.5f, x0+pw*0.5f,
+        x0+pw,
+        x0+pw*1.5f, x0+pw*1.5f,
+        x0+pw*2.f,
+        x0+pw*2.5f, x0+pw*2.5f,
+        x0+pw*3.f
+    };
+    float ys[10]={y_lo, y_lo, y_hi, y_hi, y_lo, y_lo, y_hi, y_hi, y_lo, y_lo};
+    for(int i=0;i<9;++i)
+        pushLine(v,xs[i],ys[i],xs[i+1],ys[i+1],hw);
 }
 
 // =============================================================================
@@ -685,15 +683,18 @@ void main(){fragColor=uColor;}
 
 struct GateColors{float body[4],border[4],label[4];};
 static GateColors gateColors(GateType t,bool sel){
+    //                          AND           OR            NOT           NAND          NOR           XOR           XNOR          INPUT         OUTPUT        CLOCK
     static const float bodies[kGTC][4]={
         {0.08f,0.15f,0.30f,1},{0.08f,0.25f,0.15f,1},{0.22f,0.10f,0.28f,1},
         {0.26f,0.08f,0.10f,1},{0.20f,0.08f,0.22f,1},{0.08f,0.20f,0.30f,1},
         {0.12f,0.12f,0.28f,1},{0.08f,0.22f,0.13f,1},{0.24f,0.14f,0.05f,1},
+        {0.05f,0.15f,0.28f,1},  // CLOCK – dark teal-blue
     };
     static const float borders[kGTC][4]={
         {0.27f,0.47f,0.86f,1},{0.27f,0.75f,0.43f,1},{0.66f,0.27f,0.86f,1},
         {0.86f,0.27f,0.27f,1},{0.78f,0.27f,0.67f,1},{0.27f,0.67f,0.86f,1},
         {0.43f,0.43f,0.86f,1},{0.27f,0.82f,0.43f,1},{0.86f,0.51f,0.16f,1},
+        {0.18f,0.82f,0.90f,1},  // CLOCK – bright cyan
     };
     int i=(int)t;GateColors c;
     memcpy(c.body,bodies[i],16);memcpy(c.label,borders[i],16);
@@ -705,6 +706,10 @@ static GateColors gateColors(GateType t,bool sel){
 // =============================================================================
 // §5  CIRCUIT SURFACE
 // =============================================================================
+
+// Timer IDs for per-clock-gate WM_TIMER messages
+// We use CLOCK_TIMER_BASE + gateId as the timer ID so each clock is independent.
+static constexpr UINT_PTR kClockTimerBase = 0x4C4B0000; // 'LK' prefix
 
 class CircuitSurface : public RenderSurface {
 public:
@@ -741,32 +746,86 @@ public:
         afterEdit("Redo");
     }
 
+    // ── Clock timer management ────────────────────────────────────────────
+    void startClockTimers(){
+        if(!hwnd_)return;
+        for(auto&g:circuit.gates){
+            if(g.type==GateType::CLOCK){
+                float hz=g.clockHz;if(hz<=0.f)hz=1.f;
+                // Timer fires at half-period (toggle each half-period = full cycle)
+                UINT ms=max(16u,(UINT)(500.f/hz));
+                SetTimer(hwnd_,kClockTimerBase+(UINT_PTR)g.id,ms,nullptr);
+            }
+        }
+    }
+    void stopClockTimers(){
+        if(!hwnd_)return;
+        for(auto&g:circuit.gates)
+            if(g.type==GateType::CLOCK)
+                KillTimer(hwnd_,kClockTimerBase+(UINT_PTR)g.id);
+    }
+    void restartClockTimer(int gateId){
+        Gate*g=circuit.find(gateId);if(!g||!hwnd_)return;
+        KillTimer(hwnd_,kClockTimerBase+(UINT_PTR)gateId);
+        if(simMode==SimMode::Running){
+            float hz=g->clockHz;if(hz<=0.f)hz=1.f;
+            UINT ms=max(16u,(UINT)(500.f/hz));
+            SetTimer(hwnd_,kClockTimerBase+(UINT_PTR)gateId,ms,nullptr);
+        }
+    }
+
+    // ── Cycle frequency preset on click ──────────────────────────────────
+    void cycleClockFreq(int gateId){
+        Gate*g=circuit.find(gateId);if(!g||g->type!=GateType::CLOCK)return;
+        pushUndo();
+        // Find current preset index and advance
+        int best=0;float bdiff=1e9f;
+        for(int i=0;i<kClockFreqCount;++i){
+            float d=fabsf(g->clockHz-kClockFreqPresets[i]);
+            if(d<bdiff){bdiff=d;best=i;}
+        }
+        int next=(best+1)%kClockFreqCount;
+        g->clockHz=kClockFreqPresets[next];
+        restartClockTimer(gateId);
+        char buf[64];snprintf(buf,sizeof(buf),"Clock %.1f Hz",g->clockHz);
+        if(onStatusMessage)onStatusMessage(buf);
+        if(onCircuitChanged)onCircuitChanged();
+        redraw();
+    }
+
     void simPlay(){
         if(circuit.gates.empty())return;
         simMode=SimMode::Running;circuit.evaluate();notifyMode();
+        startClockTimers();
         if(onSimUpdated)onSimUpdated();
-        if(onStatusMessage)onStatusMessage("▶ Running  ·  Click INPUT to toggle  ·  Space = pause");
+        if(onStatusMessage)onStatusMessage("▶ Running  ·  Click INPUT/CLOCK to interact  ·  Space = pause");
         redraw();
     }
     void simPause(){
         if(simMode==SimMode::Edit)return;
         simMode=(simMode==SimMode::Running)?SimMode::Paused:SimMode::Running;
+        if(simMode==SimMode::Running) startClockTimers();
+        else                          stopClockTimers();
         notifyMode();
         if(onStatusMessage)onStatusMessage(simMode==SimMode::Paused
             ?"⏸ Paused  ·  Space or ▶ to resume"
-            :"▶ Running  ·  Click INPUT to toggle  ·  Space = pause");
+            :"▶ Running  ·  Click INPUT/CLOCK to interact  ·  Space = pause");
         redraw();
     }
     void simStop(){
+        stopClockTimers();
         simMode=SimMode::Edit;
         for(auto&w:circuit.wires)w.value=false;
-        for(auto&g:circuit.gates)g.simVal=false;
+        for(auto&g:circuit.gates){g.simVal=false;if(g.type==GateType::CLOCK)g.inputVal=false;}
         notifyMode();if(onSimUpdated)onSimUpdated();
         if(onStatusMessage)onStatusMessage("■ Stopped  ·  Edit circuit then press ▶ Play");
         redraw();
     }
     void simStep(){
         if(simMode==SimMode::Edit)simMode=SimMode::Paused;
+        // Advance clocks one half-period manually
+        for(auto&g:circuit.gates)
+            if(g.type==GateType::CLOCK)g.inputVal=!g.inputVal;
         circuit.evaluate();notifyMode();if(onSimUpdated)onSimUpdated();
         if(onStatusMessage)onStatusMessage("⏭ Stepped");redraw();
     }
@@ -842,6 +901,7 @@ public:
         GL.bindVertexArray(0);GL.useProgram(0);glDisable(GL_BLEND);
     }
     void destroy()override{
+        stopClockTimers();
         if(prog_){GL.deleteProgram(prog_);prog_=0;}
         if(vao_) {GL.deleteVertexArrays(1,&vao_);vao_=0;}
         if(vbo_) {GL.deleteBuffers(1,&vbo_);vbo_=0;}
@@ -856,7 +916,11 @@ public:
             if(hit>=0){Gate*g=circuit.find(hit);
                 if(g&&g->type==GateType::INPUT){
                     g->inputVal=!g->inputVal;circuit.evaluate();
-                    if(onSimUpdated)onSimUpdated();if(onCircuitChanged)onCircuitChanged();redraw();}}
+                    if(onSimUpdated)onSimUpdated();if(onCircuitChanged)onCircuitChanged();redraw();}
+                // CLOCK: single-click cycles frequency in sim mode
+                else if(g&&g->type==GateType::CLOCK){
+                    cycleClockFreq(hit);
+                }}
             return;
         }
         {auto pins=collectPins(circuit);PinRef src{};
@@ -939,11 +1003,16 @@ public:
         if(isSimActive()){
             int hit=hitGate(wx,wy);
             if(hit>=0){Gate*g=circuit.find(hit);
-                if(g&&g->type==GateType::INPUT){g->inputVal=!g->inputVal;circuit.evaluate();if(onSimUpdated)onSimUpdated();redraw();}}
+                if(g&&g->type==GateType::INPUT){g->inputVal=!g->inputVal;circuit.evaluate();if(onSimUpdated)onSimUpdated();redraw();}
+                else if(g&&g->type==GateType::CLOCK){cycleClockFreq(hit);}
+            }
             return;
         }
         int hit=hitGate(wx,wy);
-        if(hit>=0){Gate*g=circuit.find(hit);if(g&&onLabelEdit)onLabelEdit(hit,g->label);return;}
+        if(hit>=0){Gate*g=circuit.find(hit);
+            // CLOCK: double-click in edit mode cycles frequency
+            if(g&&g->type==GateType::CLOCK){cycleClockFreq(hit);return;}
+            if(g&&onLabelEdit)onLabelEdit(hit,g->label);return;}
         for(int i=int(circuit.wires.size())-1;i>=0;--i){
             auto[sx0,sy0,sx1,sy1]=wireSC(circuit.wires[i]);
             if(bezHit(sx0,sy0,sx1,sy1,sx,sy,10.f)){
@@ -991,7 +1060,25 @@ private:
                 if(s->onZoomChanged)s->onZoomChanged(s->zoom_);
                 s->redraw();return 0;
             }
+            // ── Clock timer tick ──────────────────────────────────────────
+            case WM_TIMER:{
+                UINT_PTR tid=(UINT_PTR)wp;
+                if(tid>=kClockTimerBase && s->simMode==SimMode::Running){
+                    int gateId=(int)(tid-kClockTimerBase);
+                    Gate* g=s->circuit.find(gateId);
+                    if(g&&g->type==GateType::CLOCK){
+                        g->inputVal=!g->inputVal;
+                        s->circuit.evaluate();
+                        if(s->onSimUpdated)s->onSimUpdated();
+                        if(s->onCircuitChanged)s->onCircuitChanged();
+                        s->redraw();
+                    }
+                    return 0;
+                }
+                break;
+            }
             case WM_NCDESTROY:{
+                s->stopClockTimers();
                 sMap().erase(h);
                 SetWindowLongPtrW(h,GWLP_WNDPROC,(LONG_PTR)orig);
                 return CallWindowProcW(orig,h,msg,wp,lp);
@@ -1026,7 +1113,12 @@ public:
             if(anyW){pushUndo();circuit.evaluate();if(onCircuitChanged)onCircuitChanged();redraw();return;}
             bool anyG=false;
             for(int i=int(circuit.gates.size())-1;i>=0;--i)
-                if(circuit.gates[i].selected){circuit.removeGateWires(circuit.gates[i].id);circuit.remove(circuit.gates[i].id);anyG=true;}
+                if(circuit.gates[i].selected){
+                    // stop its timer if it's a clock
+                    if(circuit.gates[i].type==GateType::CLOCK&&hwnd_)
+                        KillTimer(hwnd_,kClockTimerBase+(UINT_PTR)circuit.gates[i].id);
+                    circuit.removeGateWires(circuit.gates[i].id);
+                    circuit.remove(circuit.gates[i].id);anyG=true;}
             if(anyG){pushUndo();circuit.evaluate();if(onCircuitChanged)onCircuitChanged();redraw();}
         }
     }
@@ -1160,31 +1252,28 @@ private:
     // ── Gate  (IEEE/ANSI symbols) ─────────────────────────────────────────────
     // =========================================================================
     void drawGate(const Gate& g){
-        // ── screen-space bounding box ──────────────────────────────────────
         float sx,sy; w2s(g.x,g.y,sx,sy);
         float z=zoom_;
         float hw=kGW*z*0.5f, hh=kGH*z*0.5f;
         float L=sx-hw, R=sx+hw;
-        float yT=sy-hh, yB=sy+hh;   // yT < yB  (screen-top = smaller Y)
-        float lw=max(1.0f, z);  // outline stroke half-width
-        float cr=kCorner*z;          // corner radius (used by INPUT/OUTPUT only)
+        float yT=sy-hh, yB=sy+hh;
+        float lw=max(1.0f, z);
+        float cr=kCorner*z;
         bool  sim=isSimActive();
         GateColors col=gateColors(g.type,g.selected);
 
-        // Shorthand: draw with colour
         auto DC=[&](const std::vector<float>&v,float r,float gg,float b,float a=1.f){
             dc(v,r,gg,b,a);
         };
-        auto DCb=[&](const std::vector<float>&v,float a=1.f){  // border colour
+        auto DCb=[&](const std::vector<float>&v,float a=1.f){
             DC(v,col.border[0],col.border[1],col.border[2],a);
         };
-        auto DCbd=[&](const std::vector<float>&v,float a=1.f){ // body colour
+        auto DCbd=[&](const std::vector<float>&v,float a=1.f){
             DC(v,col.body[0],col.body[1],col.body[2],a);
         };
 
         // ── INPUT ─────────────────────────────────────────────────────────
         if(g.type==GateType::INPUT){
-            // Rounded rect body (same as original)
             {std::vector<float>v;pushRRFill(v,L+3,yT+3,R+3,yB+3,cr);DC(v,0,0,0,0.45f);}
             {std::vector<float>v;pushRRFill(v,L,yT,R,yB,cr);DCbd(v);}
             {std::vector<float>v;pushRR(v,L,yT,R,yB,cr,lw*0.5f+0.5f);DCb(v);}
@@ -1195,7 +1284,6 @@ private:
             if(on){std::vector<float>gv;pushCircle(gv,bcx,bcy,cr2*1.8f,20);DC(gv,0.28f,0.86f,0.47f,0.20f);}
             {std::vector<float>v;pushCircle(v,bcx,bcy,cr2);DC(v,on?.28f:.55f,on?.86f:.18f,on?.47f:.18f);}
             {float lw2=hw*.3f,lh=max(1.5f,z*1.5f);std::vector<float>v;pushQuad(v,sx-lw2,sy-lh*.5f,sx+lw2,sy+lh*.5f);DC(v,on?.28f:.55f,on?.86f:.18f,on?.47f:.18f,0.7f);}
-            // output pin
             for(auto&pin:g.outPins){
                 float psx,psy;w2s(pin.cx,pin.cy,psx,psy);
                 {std::vector<float>v;pushLine(v,R,psy,psx,psy,max(0.8f,z*.7f));DC(v,0.38f,0.42f,0.60f);}
@@ -1219,7 +1307,6 @@ private:
             }
             {std::vector<float>v;pushCircle(v,bcx,bcy,cr2);DC(v,live?.28f:.55f,live?.86f:.22f,live?.47f:.10f,live?1.f:.5f);}
             {std::vector<float>v;pushCircle(v,bcx,bcy,cr2*.5f);DC(v,live?.5f:.4f,live?1.f:.28f,live?.65f:.12f,live?1.f:.35f);}
-            // input pin
             for(auto&pin:g.inPins){
                 float psx,psy;w2s(pin.cx,pin.cy,psx,psy);
                 {std::vector<float>v;pushLine(v,L,psy,psx,psy,max(0.8f,z*.7f));DC(v,0.38f,0.42f,0.60f);}
@@ -1228,8 +1315,69 @@ private:
             return;
         }
 
+        // ── CLOCK ─────────────────────────────────────────────────────────
+        if(g.type==GateType::CLOCK){
+            bool on=g.inputVal;
+
+            // Shadow
+            {std::vector<float>v;pushRRFill(v,L+3,yT+3,R+3,yB+3,cr);DC(v,0,0,0,0.45f);}
+            // Body fill
+            {std::vector<float>v;pushRRFill(v,L,yT,R,yB,cr);DCbd(v);}
+            // Border
+            {std::vector<float>v;pushRR(v,L,yT,R,yB,cr,lw*0.5f+0.5f);DCb(v);}
+            // Selection inner ring
+            if(g.selected){std::vector<float>v;pushRR(v,L+2,yT+2,R-2,yB-2,cr-2,lw*0.5f);DCb(v,0.3f);}
+
+            // Running glow when HIGH
+            if(sim&&on){
+                std::vector<float>ring;pushRR(ring,L-1,yT-1,R+1,yB+1,cr+1,max(1.5f,z));
+                DC(ring,0.18f,0.82f,0.90f,0.65f);
+                // body tint
+                std::vector<float>tint;pushRRFill(tint,L,yT,R,yB,cr);
+                DC(tint,0.02f,0.22f,0.30f,0.22f);
+            }
+
+            // Square-wave glyph drawn in the body centre
+            {
+                float glyphW=(R-L)*0.68f;
+                float glyphH=(yB-yT)*0.38f;
+                float gcx=sx-(R-L)*0.05f; // slight left bias to leave room for freq badge
+                float gcy=(yT+yB)*0.5f;
+                float strokeW=max(1.2f,z*1.1f);
+                std::vector<float>wv;
+                pushSquareWave(wv,gcx,gcy,glyphW,glyphH,strokeW);
+                DC(wv,
+                   on?0.18f:0.30f,
+                   on?0.90f:0.65f,
+                   on?0.95f:0.80f,
+                   on?1.f:0.65f);
+            }
+
+            // Frequency badge: small filled circle in top-right corner
+            {
+                float cr2=max(4.5f,6.5f*z);
+                float bcx=R-cr2-2*z,bcy=yT+cr2+2*z;
+                // outer glow when running
+                if(sim){std::vector<float>gv;pushCircle(gv,bcx,bcy,cr2*1.9f,20);DC(gv,0.18f,0.82f,0.90f,on?0.22f:0.08f);}
+                {std::vector<float>v;pushCircle(v,bcx,bcy,cr2);
+                 DC(v,on?0.18f:0.25f,on?0.82f:0.45f,on?0.90f:0.55f);}
+                // inner dot (pulse indicator)
+                {std::vector<float>v;pushCircle(v,bcx,bcy,cr2*0.45f);
+                 DC(v,0.7f,0.95f,1.f,on?1.f:0.4f);}
+            }
+
+            // Output pin stub
+            for(auto&pin:g.outPins){
+                float psx,psy;w2s(pin.cx,pin.cy,psx,psy);
+                {std::vector<float>v;pushLine(v,R,psy,psx,psy,max(0.8f,z*.7f));DC(v,0.38f,0.42f,0.60f);}
+                {std::vector<float>v;pushCircle(v,psx,psy,max(2.5f,kPinR*z));
+                 DC(v,pin.connected?1.f:.86f,pin.connected?.86f:.51f,pin.connected?.47f:.16f);}
+            }
+            return;
+        }
+
         // =====================================================================
-        // IEEE / ANSI LOGIC GATES
+        // IEEE / ANSI LOGIC GATES (AND/OR/NOT/NAND/NOR/XOR/XNOR)
         // =====================================================================
 
         bool isNeg = (g.type==GateType::NAND || g.type==GateType::NOR  ||
@@ -1237,28 +1385,25 @@ private:
         bool isOR  = (g.type==GateType::OR  || g.type==GateType::NOR  ||
                       g.type==GateType::XOR || g.type==GateType::XNOR);
         bool isAND = (g.type==GateType::AND || g.type==GateType::NAND);
-        bool isTRI = (g.type==GateType::NOT);  // triangle (NOT only; no plain BUF in enum)
+        bool isTRI = (g.type==GateType::NOT);
 
-        // Bubble radius and centre
         float H      = yB - yT;
-        float bubR   = H * 0.115f;               // inversion bubble radius
-        float tipX   = isTRI ? (R - H*0.20f) : R; // triangle tip (inset for NOT)
-        float bubCX  = isAND ? (L+(R-L)*0.44f + H*0.5f + bubR)   // AND arc end
+        float bubR   = H * 0.115f;
+        float tipX   = isTRI ? (R - H*0.20f) : R;
+        float bubCX  = isAND ? (L+(R-L)*0.44f + H*0.5f + bubR)
                       : isTRI ? (tipX + bubR)
-                      : (R + bubR);               // OR/XOR tip + bubble
+                      : (R + bubR);
         float MY     = (yT+yB)*0.5f;
 
-        // ── 1. Drop shadow ─────────────────────────────────────────────────
+        // 1. Drop shadow
         {
-            std::vector<float> sv;
-            float s=3.f;
+            std::vector<float> sv;float s=3.f;
             if(isAND) pushANDFill(sv,L+s,yT+s,R+s,yB+s);
             else if(isOR) pushORFill(sv,L+s,yT+s,R+s,yB+s);
             else          pushTriFill(sv,L+s,yT+s,R+s,yB+s);
             DC(sv, 0,0,0, 0.38f);
         }
-
-        // ── 2. Body fill ───────────────────────────────────────────────────
+        // 2. Body fill
         {
             std::vector<float> fv;
             if(isAND) pushANDFill(fv,L,yT,R,yB);
@@ -1266,8 +1411,7 @@ private:
             else          pushTriFill(fv,L,yT,R,yB);
             DCbd(fv);
         }
-
-        // ── 3. Selection fill tint ─────────────────────────────────────────
+        // 3. Selection fill tint
         if(g.selected){
             std::vector<float> sv;
             if(isAND) pushANDFill(sv,L,yT,R,yB);
@@ -1275,11 +1419,9 @@ private:
             else          pushTriFill(sv,L,yT,R,yB);
             DC(sv, 0.80f,0.65f,0.97f, 0.18f);
         }
-
-        // ── 4. Sim output HIGH glow (outer halo on body outline) ────────────
+        // 4. Sim HIGH glow
         if(sim && g.simVal){
-            std::vector<float> gv;
-            float e=lw*0.8f;
+            std::vector<float> gv;float e=lw*0.8f;
             if(isAND) pushANDOutline(gv,L-e,yT-e,R+e,yB+e,lw*1.8f);
             else if(isOR){pushOROutline(gv,L-e,yT-e,R+e,yB+e,lw*1.8f);
                           if(g.type==GateType::XOR||g.type==GateType::XNOR)
@@ -1288,34 +1430,24 @@ private:
             if(isNeg) pushRing(gv, bubCX, MY, bubR+e, lw*1.8f);
             DC(gv, 0.28f,0.86f,0.47f, 0.38f);
         }
-
-        // ── 5. Body outline ────────────────────────────────────────────────
+        // 5. Body outline
         {
             std::vector<float> ov;
-            if(isAND){
-                pushANDOutline(ov,L,yT,R,yB,lw);
-            } else if(isOR){
-                pushOROutline(ov,L,yT,R,yB,lw);
+            if(isAND)     pushANDOutline(ov,L,yT,R,yB,lw);
+            else if(isOR){ pushOROutline(ov,L,yT,R,yB,lw);
                 if(g.type==GateType::XOR||g.type==GateType::XNOR)
-                    pushXORBackArc(ov,L,yT,R,yB,lw);
-            } else {
-                pushTRIOutline(ov,L,yT,R,yB,lw,isNeg);
-            }
+                    pushXORBackArc(ov,L,yT,R,yB,lw);}
+            else           pushTRIOutline(ov,L,yT,R,yB,lw,isNeg);
             DCb(ov);
         }
-
-        // ── 6. Inversion bubble ────────────────────────────────────────────
+        // 6. Inversion bubble
         if(isNeg){
-            // Fill bubble with body colour so it occludes the shape edge behind it
             {std::vector<float>v;pushCircle(v,bubCX,MY,bubR,18);DCbd(v);}
-            // Bubble ring
             {std::vector<float>v;pushRing(v,bubCX,MY,bubR,lw);DCb(v);}
         }
-
-        // ── 7. Selection inner ring ────────────────────────────────────────
+        // 7. Selection inner ring
         if(g.selected){
-            std::vector<float> rv;
-            float i2=lw*0.45f;
+            std::vector<float> rv;float i2=lw*0.45f;
             if(isAND) pushANDOutline(rv,L+2,yT+2,R-2,yB-2,i2);
             else if(isOR){pushOROutline(rv,L+2,yT+2,R-2,yB-2,i2);
                           if(g.type==GateType::XOR||g.type==GateType::XNOR)
@@ -1323,35 +1455,18 @@ private:
             else pushTRIOutline(rv,L+2,yT+2,R-2,yB-2,i2,isNeg);
             DCb(rv,0.35f);
         }
-
-        // ── 8. Input pin stubs + dots ──────────────────────────────────────
-        //
-        // recomputePins places inPins at (x - kGW/2 - kPinLen, …)  in world-space.
-        // In screen-space that maps to psx < L.
-        // We draw the stub from the body's left edge (L) to the pin dot (psx).
-        // For XOR/XNOR the stub must cross the extra back arc; we extend it
-        // leftward by the arc offset so it emerges cleanly from behind it.
-        //
+        // 8. Input pins
         for(auto&pin:g.inPins){
             float psx,psy; w2s(pin.cx,pin.cy,psx,psy);
-            float stubL = psx;  // leftmost point of stub (= pin dot x)
-            // XOR/XNOR: extend stub past the back arc gap
+            float stubL = psx;
             float arcOff = (g.type==GateType::XOR||g.type==GateType::XNOR)
                            ? (R-L)*0.11f : 0.f;
             {std::vector<float>v;pushLine(v,stubL,psy, L+arcOff,psy, max(0.8f,z*.7f));
              DC(v,0.38f,0.42f,0.60f);}
-            // pin dot
             {std::vector<float>v;pushCircle(v,psx,psy,max(2.5f,kPinR*z));
              DC(v, pin.connected?1.f:0.f, pin.connected?.86f:.31f, pin.connected?.47f:.51f);}
         }
-
-        // ── 9. Output pin stub + dot ───────────────────────────────────────
-        //
-        // recomputePins places outPins at (x + kGW/2 + kPinLen, …).
-        // For non-negated gates stub runs from R to psx.
-        // For negated gates the bubble centre is at bubCX; stub starts from
-        // the bubble's right edge (bubCX + bubR) so there's no gap or overlap.
-        //
+        // 9. Output pin
         for(auto&pin:g.outPins){
             float psx,psy; w2s(pin.cx,pin.cy,psx,psy);
             float stubStart = isNeg ? (bubCX + bubR) : R;
@@ -1545,6 +1660,7 @@ public:
             {GateType::XNOR, RGB(110,110,220),"!(A^B)"},
             {GateType::INPUT,RGB(70,210,110),"Toggle 0/1"},
             {GateType::OUTPUT,RGB(220,130,40),"LED output"},
+            {GateType::CLOCK,RGB(47,210,229),"0.5–8 Hz auto"},  // ← NEW
         };
         auto makeTile=[&](const TI&ti)->WidgetPtr{
             GateType t=ti.t;COLORREF ac=ti.ac;
@@ -1564,7 +1680,10 @@ public:
                 if(!surface_)return;
                 if(surface_->isSimActive()){statusMsg.set("Stop simulation first");return;}
                 surface_->dropGate(t);
-                statusMsg.set(std::string("Placed ")+kGateName[(int)t]+"  ·  Drag out→in  ·  Dbl-click to label");
+                std::string extra=(t==GateType::CLOCK)
+                    ?"  ·  Dbl-click to change Hz  ·  Click in SIM to cycle Hz"
+                    :"  ·  Drag out→in  ·  Dbl-click to label";
+                statusMsg.set(std::string("Placed ")+kGateName[(int)t]+extra);
             });
         };
         auto tileCol=std::make_shared<ColumnWidget>();tileCol->setSpacing(4);
@@ -1644,7 +1763,7 @@ public:
                     ->setPaddingAll(7,3,7,3)->setBorderRadius(4)->setBackgroundColor(RGB(20,18,8))
                     ->setBorderWidth(1)->setBorderColor(RGB(70,62,15)),
                     SizedBox(12,0),
-                    Text("SIM: click INPUT to toggle · Space=pause  |  EDIT: Dbl-click=label · G=snap · Ctrl+Z/Y · Ctrl+S/O  |  Scroll=zoom · MMB=pan")
+                    Text("SIM: click INPUT to toggle · click/dbl-click CLOCK to cycle Hz · Space=pause  |  EDIT: Dbl-click=label/Hz · G=snap · Ctrl+Z/Y · Ctrl+S/O  |  Scroll=zoom · MMB=pan")
                         ->setFontSize(9)->setTextColor(kDim)
                 )->setSpacing(0)->setCrossAxisAlignment(CrossAxisAlignment::Center)
             )->setSpacing(0)
