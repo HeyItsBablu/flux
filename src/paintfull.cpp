@@ -1,4 +1,4 @@
-// main.cpp
+// paint.cpp
 #include "flux.hpp"
 #include "widgets/flux_layers.hpp"   // ← layers support
 #include <commdlg.h>

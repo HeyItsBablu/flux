@@ -26,11 +26,20 @@
 // ---------------------------------------------------------------------------
 // Extra GL procs
 // ---------------------------------------------------------------------------
-using PFNGLUNIFORM4FPROC_LS = void(APIENTRY*)(GLint,GLfloat,GLfloat,GLfloat,GLfloat);
-using PFNGLUNIFORM2FPROC_LS = void(APIENTRY*)(GLint,GLfloat,GLfloat);
+using PFNGLUNIFORM4FPROC_LS    = void(APIENTRY*)(GLint,GLfloat,GLfloat,GLfloat,GLfloat);
+using PFNGLUNIFORM2FPROC_LS    = void(APIENTRY*)(GLint,GLfloat,GLfloat);
+using PFNGLACTIVETEXTUREPROC_LS = void(APIENTRY*)(GLenum);
+using PFNGLUNIFORM1IPROC_LS    = void(APIENTRY*)(GLint,GLint);
+
+#ifndef GL_TEXTURE0
+#define GL_TEXTURE0 0x84C0
+#endif
+
 namespace ls_gl {
-    inline PFNGLUNIFORM4FPROC_LS uniform4f = nullptr;
-    inline PFNGLUNIFORM2FPROC_LS uniform2f = nullptr;
+    inline PFNGLUNIFORM4FPROC_LS     uniform4f      = nullptr;
+    inline PFNGLUNIFORM2FPROC_LS     uniform2f      = nullptr;
+    inline PFNGLACTIVETEXTUREPROC_LS activeTexture  = nullptr;
+    inline PFNGLUNIFORM1IPROC_LS     uniform1i      = nullptr;
     inline void init() {
         if (uniform4f) return;
         HMODULE gl32 = GetModuleHandleA("opengl32.dll");
@@ -40,9 +49,11 @@ namespace ls_gl {
                 p = (void*)GetProcAddress(gl32,n);
             return p;
         };
-        uniform4f = (PFNGLUNIFORM4FPROC_LS)load("glUniform4f");
-        uniform2f = (PFNGLUNIFORM2FPROC_LS)load("glUniform2f");
-        assert(uniform4f && uniform2f);
+        uniform4f     = (PFNGLUNIFORM4FPROC_LS)    load("glUniform4f");
+        uniform2f     = (PFNGLUNIFORM2FPROC_LS)    load("glUniform2f");
+        activeTexture = (PFNGLACTIVETEXTUREPROC_LS) load("glActiveTexture");
+        uniform1i     = (PFNGLUNIFORM1IPROC_LS)    load("glUniform1i");
+        assert(uniform4f && uniform2f && activeTexture && uniform1i);
     }
 }
 
@@ -287,7 +298,6 @@ struct Circuit {
         inIds.clear();outIds.clear();
         std::vector<int>inIdx,outIdx;
         for(int i=0;i<(int)gates.size();i++){
-            // CLOCK behaves like INPUT for truth table purposes
             if(gates[i].type==GateType::INPUT||gates[i].type==GateType::CLOCK)
                {inIdx.push_back(i); inIds.push_back(gates[i].id);}
             if(gates[i].type==GateType::OUTPUT){outIdx.push_back(i);outIds.push_back(gates[i].id);}
@@ -628,21 +638,16 @@ static void pushTRIOutline(std::vector<float>&v,
 
 // ─────────────────────────────────────────────────────────────────────────────
 // §2c  CLOCK SQUARE-WAVE GLYPH
-//   Draws a small square wave icon centered at (cx,cy) within a given width/height.
-//   Used inside the clock gate body to make it immediately recognisable.
 // ─────────────────────────────────────────────────────────────────────────────
 static void pushSquareWave(std::vector<float>&v,
                             float cx,float cy,
-                            float gW,float gH,   // total glyph width/height
+                            float gW,float gH,
                             float hw){
-    // Draw 1.5 cycles of a square wave
     float x0=cx-gW*0.5f;
     float y_lo=cy+gH*0.35f;
     float y_hi=cy-gH*0.35f;
-    float pw=gW/3.f;  // one pulse width
+    float pw=gW/3.f;
 
-    // Segment sequence: _|‾|_|‾|_  (lo-rise-hi-fall-lo-rise-hi-fall-lo)
-    //  x:  x0 → x0+pw/2 → x0+pw/2 → x0+pw → x0+3pw/2 → x0+3pw/2 → x0+2pw → x0+5pw/2 → x0+5pw/2 → x0+3pw
     float xs[10]={
         x0,
         x0+pw*0.5f, x0+pw*0.5f,
@@ -661,6 +666,7 @@ static void pushSquareWave(std::vector<float>&v,
 // §3  SHADERS
 // =============================================================================
 
+// ── Geometry shader (unchanged) ───────────────────────────────────────────────
 static const char* kGVert=R"GLSL(
 #version 330 core
 layout(location=0) in vec2 aPos;
@@ -677,24 +683,49 @@ uniform vec4 uColor;
 void main(){fragColor=uColor;}
 )GLSL";
 
+// ── Texture blit shader — used to draw the context-menu label texture ─────────
+// Positions are in screen pixels (Y-down), same coordinate space as kGVert.
+// UV (0,0) = top-left of texture, (1,1) = bottom-right.
+static const char* kTexVert=R"GLSL(
+#version 330 core
+layout(location=0) in vec2 aPos;
+layout(location=1) in vec2 aUV;
+uniform vec2 uViewSize;
+out vec2 vUV;
+void main(){
+    vUV = aUV;
+    vec2 ndc = aPos / uViewSize * 2.0 - 1.0;
+    ndc.y = -ndc.y;
+    gl_Position = vec4(ndc, 0.0, 1.0);
+}
+)GLSL";
+static const char* kTexFrag=R"GLSL(
+#version 330 core
+in vec2 vUV;
+uniform sampler2D uTex;
+out vec4 fragColor;
+void main(){
+    fragColor = texture(uTex, vUV);
+}
+)GLSL";
+
 // =============================================================================
 // §4  GATE COLORS
 // =============================================================================
 
 struct GateColors{float body[4],border[4],label[4];};
 static GateColors gateColors(GateType t,bool sel){
-    //                          AND           OR            NOT           NAND          NOR           XOR           XNOR          INPUT         OUTPUT        CLOCK
     static const float bodies[kGTC][4]={
         {0.08f,0.15f,0.30f,1},{0.08f,0.25f,0.15f,1},{0.22f,0.10f,0.28f,1},
         {0.26f,0.08f,0.10f,1},{0.20f,0.08f,0.22f,1},{0.08f,0.20f,0.30f,1},
         {0.12f,0.12f,0.28f,1},{0.08f,0.22f,0.13f,1},{0.24f,0.14f,0.05f,1},
-        {0.05f,0.15f,0.28f,1},  // CLOCK – dark teal-blue
+        {0.05f,0.15f,0.28f,1},
     };
     static const float borders[kGTC][4]={
         {0.27f,0.47f,0.86f,1},{0.27f,0.75f,0.43f,1},{0.66f,0.27f,0.86f,1},
         {0.86f,0.27f,0.27f,1},{0.78f,0.27f,0.67f,1},{0.27f,0.67f,0.86f,1},
         {0.43f,0.43f,0.86f,1},{0.27f,0.82f,0.43f,1},{0.86f,0.51f,0.16f,1},
-        {0.18f,0.82f,0.90f,1},  // CLOCK – bright cyan
+        {0.18f,0.82f,0.90f,1},
     };
     int i=(int)t;GateColors c;
     memcpy(c.body,bodies[i],16);memcpy(c.label,borders[i],16);
@@ -704,12 +735,81 @@ static GateColors gateColors(GateType t,bool sel){
 }
 
 // =============================================================================
+// §4b  GATE CONTEXT MENU
+// =============================================================================
+
+enum class GateMenuAction { None=-1, Delete=0, Copy=1 };
+
+struct GateMenuItem {
+    GateMenuAction action;
+    const char*    label;
+    int            iconType;   // 0 = trash, 1 = copy-stack
+};
+
+static constexpr GateMenuItem kGateMenuItems[] = {
+    { GateMenuAction::Copy,   "Copy",   1 },
+    { GateMenuAction::Delete, "Delete", 0 },
+};
+static constexpr int kGateMenuItemCount = 2;
+
+// Layout constants (screen pixels)
+static constexpr float kCMItemH    = 28.f;
+static constexpr float kCMWidth    = 130.f;
+static constexpr float kCMPadV     = 6.f;
+static constexpr float kCMCorner   = 6.f;
+static constexpr float kCMRowGap   = 4.f;
+static constexpr float kCMRowStride= kCMItemH + kCMRowGap;
+static constexpr float kCMIconSize = 11.f;
+static constexpr float kCMIconOff  = 14.f;
+static constexpr float kCMTextOff  = 28.f;
+
+static constexpr float kCMHeight =
+    kCMPadV * 2.f
+    + kGateMenuItemCount * kCMItemH
+    + (kGateMenuItemCount - 1) * kCMRowGap;
+
+// ── tiny icon helpers ────────────────────────────────────────────────────────
+
+static void pushIconTrash(std::vector<float>&v, float cx, float cy, float sz, float lw) {
+    float hs = sz * 0.5f;
+    float bW = sz * 0.68f, bH = sz * 0.62f;
+    float bL = cx - bW*0.5f, bR = cx + bW*0.5f;
+    float bT = cy - hs * 0.10f, bB = cy + hs * 0.78f;
+    pushLine(v, bL, bT, bL, bB, lw);
+    pushLine(v, bR, bT, bR, bB, lw);
+    pushLine(v, bL, bB, bR, bB, lw);
+    float lidT = bT - sz * 0.22f;
+    pushLine(v, bL - sz*0.10f, bT, bR + sz*0.10f, bT, lw);
+    pushLine(v, cx - sz*0.18f, lidT, cx + sz*0.18f, lidT, lw);
+    pushLine(v, cx - sz*0.18f, lidT, bL - sz*0.10f, bT,   lw);
+    pushLine(v, cx + sz*0.18f, lidT, bR + sz*0.10f, bT,   lw);
+    float lineY0 = bT + bH * 0.18f, lineY1 = bB - sz*0.08f;
+    pushLine(v, cx,            lineY0, cx,            lineY1, lw * 0.8f);
+    pushLine(v, cx - bW*0.22f, lineY0, cx - bW*0.22f, lineY1, lw * 0.8f);
+    pushLine(v, cx + bW*0.22f, lineY0, cx + bW*0.22f, lineY1, lw * 0.8f);
+}
+
+static void pushIconCopy(std::vector<float>&v, float cx, float cy, float sz, float lw) {
+    float hs = sz * 0.5f;
+    float pW = sz * 0.58f, pH = sz * 0.68f;
+    float off = sz * 0.14f;
+    float bL = cx - pW*0.5f + off, bB = cy - pH*0.5f + off;
+    pushRR(v, bL, bB, bL+pW, bB+pH, 2.f, lw * 0.7f, 3);
+    float fL = cx - pW*0.5f, fB = cy - pH*0.5f;
+    pushRRFill(v, fL, fB, fL+pW, fB+pH, 2.f);
+    pushRR(v, fL, fB, fL+pW, fB+pH, 2.f, lw, 3);
+    float lx0 = fL + pW*0.18f, lx1 = fL + pW*0.82f;
+    float ly0  = fB + pH*0.30f, ly1 = fB + pH*0.55f, ly2 = fB + pH*0.75f;
+    pushLine(v, lx0, ly0, lx1, ly0, lw * 0.7f);
+    pushLine(v, lx0, ly1, lx1, ly1, lw * 0.7f);
+    pushLine(v, lx0, ly2, lx1*0.75f+lx0*0.25f, ly2, lw * 0.7f);
+}
+
+// =============================================================================
 // §5  CIRCUIT SURFACE
 // =============================================================================
 
-// Timer IDs for per-clock-gate WM_TIMER messages
-// We use CLOCK_TIMER_BASE + gateId as the timer ID so each clock is independent.
-static constexpr UINT_PTR kClockTimerBase = 0x4C4B0000; // 'LK' prefix
+static constexpr UINT_PTR kClockTimerBase = 0x4C4B0000;
 
 class CircuitSurface : public RenderSurface {
 public:
@@ -752,7 +852,6 @@ public:
         for(auto&g:circuit.gates){
             if(g.type==GateType::CLOCK){
                 float hz=g.clockHz;if(hz<=0.f)hz=1.f;
-                // Timer fires at half-period (toggle each half-period = full cycle)
                 UINT ms=max(16u,(UINT)(500.f/hz));
                 SetTimer(hwnd_,kClockTimerBase+(UINT_PTR)g.id,ms,nullptr);
             }
@@ -774,11 +873,9 @@ public:
         }
     }
 
-    // ── Cycle frequency preset on click ──────────────────────────────────
     void cycleClockFreq(int gateId){
         Gate*g=circuit.find(gateId);if(!g||g->type!=GateType::CLOCK)return;
         pushUndo();
-        // Find current preset index and advance
         int best=0;float bdiff=1e9f;
         for(int i=0;i<kClockFreqCount;++i){
             float d=fabsf(g->clockHz-kClockFreqPresets[i]);
@@ -823,7 +920,6 @@ public:
     }
     void simStep(){
         if(simMode==SimMode::Edit)simMode=SimMode::Paused;
-        // Advance clocks one half-period manually
         for(auto&g:circuit.gates)
             if(g.type==GateType::CLOCK)g.inputVal=!g.inputVal;
         circuit.evaluate();notifyMode();if(onSimUpdated)onSimUpdated();
@@ -879,11 +975,18 @@ public:
     void initialize(int w,int h)override{
         ls_gl::init();viewW_=w;viewH_=h;
         camX_=-w*.5f;camY_=-h*.5f;
-        buildShader();buildVAO();
+        buildShader();
+        buildTexShader();   // ← new: texture blit program for menu labels
+        buildVAO();
+        buildTexVAO();      // ← new: separate VAO for textured quads
         HWND hwnd=WindowFromDC(wglGetCurrentDC());
         if(hwnd) hookWindow(hwnd);
     }
-    void resize(int w,int h)override{viewW_=w;viewH_=h;}
+    void resize(int w,int h)override{
+        viewW_=w;viewH_=h;
+        // Menu texture dimensions may have used old viewW_/viewH_ — invalidate
+        ctxMenuTexDirty_=true;
+    }
     void update(double)override{}
 
     void render(const float*)override{
@@ -898,17 +1001,70 @@ public:
         for(auto&g:circuit.gates)drawGate(g);
         drawPinHovers();
         if(isSimActive())drawSimBorder();
+        // Context menu: all rendering happens inside the GL pass — no post-swap GDI
+        if(ctxMenu_.open) drawContextMenu();
         GL.bindVertexArray(0);GL.useProgram(0);glDisable(GL_BLEND);
+        // ── NO GetDC/DrawTextA here — labels are now a GL texture ──
     }
     void destroy()override{
         stopClockTimers();
         if(prog_){GL.deleteProgram(prog_);prog_=0;}
+        if(texProg_){GL.deleteProgram(texProg_);texProg_=0;}
         if(vao_) {GL.deleteVertexArrays(1,&vao_);vao_=0;}
         if(vbo_) {GL.deleteBuffers(1,&vbo_);vbo_=0;}
+        if(texVao_){GL.deleteVertexArrays(1,&texVao_);texVao_=0;}
+        if(texVbo_){GL.deleteBuffers(1,&texVbo_);texVbo_=0;}
+        destroyCtxMenuTex();
     }
     bool needsContinuousRedraw()const override{return false;}
 
+    // =========================================================================
+    // Mouse events
+    // =========================================================================
+
     void onMouseDown(float sx,float sy)override{
+        if(ctxMenu_.open){
+            float mx=sx,my=sy;
+            if(hwnd_){ POINT pt; GetCursorPos(&pt); ScreenToClient(hwnd_,&pt); mx=float(pt.x); my=float(pt.y); }
+            int item   = ctxMenuHitItem(mx, my);
+            int gateId = ctxMenu_.gateId;
+            ctxMenuClose();
+            if(item >= 0 && gateId >= 0){
+                switch(kGateMenuItems[item].action){
+                    case GateMenuAction::Delete:{
+                        Gate* g = circuit.find(gateId);
+                        if(g){
+                            if(g->type==GateType::CLOCK && hwnd_)
+                                KillTimer(hwnd_, kClockTimerBase+(UINT_PTR)gateId);
+                            pushUndo();
+                            circuit.removeGateWires(gateId);
+                            circuit.remove(gateId);
+                            circuit.evaluate();
+                            if(onCircuitChanged) onCircuitChanged();
+                            if(onStatusMessage)  onStatusMessage("Gate deleted");
+                        }
+                        break;
+                    }
+                    case GateMenuAction::Copy:{
+                        Gate* g = circuit.find(gateId);
+                        if(g){
+                            pushUndo();
+                            int newId = circuit.add(g->type, g->x + kGW + 20.f, g->y, g->label);
+                            Gate* ng  = circuit.find(newId);
+                            if(ng){ ng->inputVal = g->inputVal; ng->clockHz = g->clockHz; }
+                            circuit.evaluate();
+                            if(onCircuitChanged) onCircuitChanged();
+                            if(onStatusMessage)  onStatusMessage("Gate copied");
+                        }
+                        break;
+                    }
+                    default: break;
+                }
+            }
+            redraw();
+            return;
+        }
+
         lastSX_=sx;lastSY_=sy;
         float wx,wy;s2w(sx,sy,wx,wy);
         if(isSimActive()){
@@ -917,7 +1073,6 @@ public:
                 if(g&&g->type==GateType::INPUT){
                     g->inputVal=!g->inputVal;circuit.evaluate();
                     if(onSimUpdated)onSimUpdated();if(onCircuitChanged)onCircuitChanged();redraw();}
-                // CLOCK: single-click cycles frequency in sim mode
                 else if(g&&g->type==GateType::CLOCK){
                     cycleClockFreq(hit);
                 }}
@@ -944,6 +1099,18 @@ public:
     }
 
     void onMouseMove(float sx,float sy)override{
+        if(ctxMenu_.open){
+            float mx=sx,my=sy;
+            if(hwnd_){ POINT pt; GetCursorPos(&pt); ScreenToClient(hwnd_,&pt); mx=float(pt.x); my=float(pt.y); }
+            int item = ctxMenuHitItem(mx, my);
+            if(item != ctxMenu_.hoveredItem){
+                ctxMenu_.hoveredItem = item;
+                ctxMenuTexDirty_ = true;   // rebuild label texture for new hover colours
+                redraw();
+            }
+            return;
+        }
+
         float wx,wy;s2w(sx,sy,wx,wy);
         if(mmb_){camX_-=(sx-lastSX_)/zoom_;camY_-=(sy-lastSY_)/zoom_;lastSX_=sx;lastSY_=sy;redraw();return;}
         lastSX_=sx;lastSY_=sy;
@@ -989,7 +1156,24 @@ public:
     }
 
     void onRightMouseDown(float sx,float sy)override{
+        if(ctxMenu_.open){ ctxMenuClose(); redraw(); return; }
+
         if(isSimActive())return;
+
+        float wx,wy; s2w(sx,sy,wx,wy);
+        int hit = hitGate(wx,wy);
+        if(hit >= 0){
+            for(auto&g:circuit.gates) g.selected=(g.id==hit);
+            for(auto&w:circuit.wires) w.selected=false;
+            // Use raw Win32 cursor coords so menu position is in the same physical-pixel
+            // space as viewW_/viewH_ and the GL viewport — flux sx/sy may be DPI-scaled.
+            float mx = sx, my = sy;
+            if(hwnd_){ POINT pt; GetCursorPos(&pt); ScreenToClient(hwnd_,&pt); mx=float(pt.x); my=float(pt.y); }
+            ctxMenuOpen(hit, mx, my);
+            redraw();
+            return;
+        }
+
         for(int i=int(circuit.wires.size())-1;i>=0;--i){
             auto[sx0,sy0,sx1,sy1]=wireSC(circuit.wires[i]);
             if(bezHit(sx0,sy0,sx1,sy1,sx,sy,10.f)){
@@ -1010,7 +1194,6 @@ public:
         }
         int hit=hitGate(wx,wy);
         if(hit>=0){Gate*g=circuit.find(hit);
-            // CLOCK: double-click in edit mode cycles frequency
             if(g&&g->type==GateType::CLOCK){cycleClockFreq(hit);return;}
             if(g&&onLabelEdit)onLabelEdit(hit,g->label);return;}
         for(int i=int(circuit.wires.size())-1;i>=0;--i){
@@ -1060,7 +1243,6 @@ private:
                 if(s->onZoomChanged)s->onZoomChanged(s->zoom_);
                 s->redraw();return 0;
             }
-            // ── Clock timer tick ──────────────────────────────────────────
             case WM_TIMER:{
                 UINT_PTR tid=(UINT_PTR)wp;
                 if(tid>=kClockTimerBase && s->simMode==SimMode::Running){
@@ -1089,6 +1271,8 @@ private:
 public:
 
     void onKeyDown(int key)override{
+        if(key==VK_ESCAPE&&ctxMenu_.open){ ctxMenuClose(); redraw(); return; }
+
         bool ctrl=(GetKeyState(VK_CONTROL)&0x8000)!=0;
         if(ctrl&&key=='Z'){undo();return;}
         if(ctrl&&key=='Y'){redo();return;}
@@ -1114,7 +1298,6 @@ public:
             bool anyG=false;
             for(int i=int(circuit.gates.size())-1;i>=0;--i)
                 if(circuit.gates[i].selected){
-                    // stop its timer if it's a clock
                     if(circuit.gates[i].type==GateType::CLOCK&&hwnd_)
                         KillTimer(hwnd_,kClockTimerBase+(UINT_PTR)circuit.gates[i].id);
                     circuit.removeGateWires(circuit.gates[i].id);
@@ -1130,8 +1313,21 @@ private:
 
     int   viewW_=1,viewH_=1;
     float camX_=0,camY_=0,zoom_=1.f;
+
+    // Geometry program
     GLuint prog_=0,vao_=0,vbo_=0;
     GLint  uViewSize_=-1,uColor_=-1;
+
+    // Texture blit program (for context-menu labels)
+    GLuint texProg_=0,texVao_=0,texVbo_=0;
+    GLint  uTexViewSize_=-1,uTexSampler_=-1;
+
+    // Context-menu label texture (rebuilt via GDI into a DIB → uploaded once per dirty)
+    GLuint ctxMenuTex_    = 0;
+    int    ctxMenuTexW_   = 0;
+    int    ctxMenuTexH_   = 0;
+    bool   ctxMenuTexDirty_ = true;
+
     int   dragId_=-1;
     float dragOx_=0,dragOy_=0,lastSX_=0,lastSY_=0;
     bool  mmb_=false,dragWire_=false;
@@ -1140,7 +1336,301 @@ private:
     bool   hasDstSnap_=false,hovPinValid_=false;
     PinRef hovPin_{};
 
-    void redraw(){if(onRedrawNeeded)onRedrawNeeded();}
+    // ── Context menu state ────────────────────────────────────────────────
+    struct CtxMenuState {
+        bool  open       = false;
+        int   gateId     = -1;
+        float sx         = 0.f;
+        float sy         = 0.f;
+        int   hoveredItem= -1;
+    } ctxMenu_;
+
+    float ctxRowY(int i) const {
+        return ctxMenu_.sy + kCMPadV + float(i) * kCMRowStride;
+    }
+
+    void ctxMenuOpen(int gateId, float sx, float sy){
+        ctxMenu_.gateId      = gateId;
+        ctxMenu_.hoveredItem = -1;
+        ctxMenu_.open        = true;
+        float mx = sx + 4.f;
+        float my = sy + 4.f;
+        if(mx + kCMWidth  > float(viewW_)) mx = sx - kCMWidth  - 4.f;
+        if(my + kCMHeight > float(viewH_)) my = sy - kCMHeight - 4.f;
+        ctxMenu_.sx = mx;
+        ctxMenu_.sy = my;
+        ctxMenuTexDirty_ = true;   // force texture rebuild on first draw
+    }
+
+    void ctxMenuClose(){
+        ctxMenu_.open        = false;
+        ctxMenu_.gateId      = -1;
+        ctxMenu_.hoveredItem = -1;
+        destroyCtxMenuTex();       // free texture immediately when menu closes
+    }
+
+    int ctxMenuHitItem(float sx, float sy) const {
+        if(!ctxMenu_.open) return -1;
+        float mx = ctxMenu_.sx, my = ctxMenu_.sy;
+        if(sx < mx || sx > mx+kCMWidth || sy < my || sy > my+kCMHeight) return -1;
+        for(int i=0; i<kGateMenuItemCount; ++i){
+            float iy = ctxRowY(i);
+            float hitH = (i < kGateMenuItemCount-1) ? kCMRowStride : kCMItemH;
+            if(sy >= iy && sy < iy + hitH) return i;
+        }
+        return -1;
+    }
+
+    // ── Texture lifecycle ─────────────────────────────────────────────────
+    void destroyCtxMenuTex(){
+        if(ctxMenuTex_){ glDeleteTextures(1,&ctxMenuTex_); ctxMenuTex_=0; }
+        ctxMenuTexW_=0; ctxMenuTexH_=0;
+        ctxMenuTexDirty_=true;
+    }
+
+    // ── GDI → GL texture: rasterize all menu labels into one RGBA texture ──
+    //
+    // This is called from drawContextMenu() the first time the menu is shown
+    // and whenever hoveredItem changes. The resulting texture is then blitted
+    // via GL in the same render pass as the rest of the menu geometry — no
+    // post-SwapBuffers GDI drawing, no flickering.
+    //
+    // The texture covers exactly the menu bounding rect [sx, sy, sx+W, sy+H]
+    // in screen-pixel space. Each label is drawn at its row-centred position
+    // into a white-filled DIB; white pixels become alpha=0 so they composite
+    // transparently over the GL background.
+    void rebuildCtxMenuTexture(){
+        ctxMenuTexDirty_ = false;
+
+        int texW = int(kCMWidth);
+        int texH = int(kCMHeight);
+
+        // ── 1. Allocate (or reallocate) GL texture ────────────────────────
+        if(!ctxMenuTex_ || ctxMenuTexW_!=texW || ctxMenuTexH_!=texH){
+            if(ctxMenuTex_) glDeleteTextures(1,&ctxMenuTex_);
+            glGenTextures(1,&ctxMenuTex_);
+            glBindTexture(GL_TEXTURE_2D,ctxMenuTex_);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,0x812F/*GL_CLAMP_TO_EDGE*/);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,0x812F);
+            glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,texW,texH,0,GL_RGBA,GL_UNSIGNED_BYTE,nullptr);
+            glBindTexture(GL_TEXTURE_2D,0);
+            ctxMenuTexW_=texW; ctxMenuTexH_=texH;
+        }
+
+        // ── 2. GDI: render labels into a top-down 32-bit DIB ─────────────
+        BITMAPINFO bmi={};
+        bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
+        bmi.bmiHeader.biWidth       = texW;
+        bmi.bmiHeader.biHeight      = -texH; // negative = top-down
+        bmi.bmiHeader.biPlanes      = 1;
+        bmi.bmiHeader.biBitCount    = 32;
+        bmi.bmiHeader.biCompression = BI_RGB;
+
+        void* bits = nullptr;
+        HDC hdcMem = CreateCompatibleDC(nullptr);
+        HBITMAP hBmp = CreateDIBSection(hdcMem,&bmi,DIB_RGB_COLORS,&bits,nullptr,0);
+        if(!hBmp){ DeleteDC(hdcMem); return; }
+        HGDIOBJ oldBmp = SelectObject(hdcMem,hBmp);
+
+        // Fill with black, alpha channel will be built per-pixel below.
+        // We use (0,0,0) as the transparent-background sentinel so that the
+        // dark menu background shows through where there's no text.
+        // Actually: fill with a unique sentinel colour that cannot appear in
+        // any label text. We use magenta (255,0,255) — highly unlikely in UI.
+        {
+            RECT rc={0,0,texW,texH};
+            HBRUSH br=CreateSolidBrush(RGB(255,0,255)); // sentinel
+            FillRect(hdcMem,&rc,br);
+            DeleteObject(br);
+        }
+
+        HFONT hFont = CreateFontA(
+            13,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,
+            DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,
+            CLEARTYPE_QUALITY,DEFAULT_PITCH|FF_DONTCARE,"Segoe UI");
+        HGDIOBJ oldFont = SelectObject(hdcMem,hFont);
+        SetBkMode(hdcMem,TRANSPARENT);
+
+        for(int i=0;i<kGateMenuItemCount;++i){
+            float iy = ctxRowY(i) - ctxMenu_.sy; // local Y within texture
+            bool  hov = (i == ctxMenu_.hoveredItem);
+
+            // Per-item text colour matches the original GDI version exactly
+            COLORREF col;
+            if(kGateMenuItems[i].action == GateMenuAction::Delete)
+                col = hov ? RGB(255,145,145) : RGB(200,110,110);
+            else
+                col = hov ? RGB(230,215,255) : RGB(175,168,205);
+
+            SetTextColor(hdcMem,col);
+
+            RECT r;
+            r.left   = (LONG)kCMTextOff;
+            r.top    = (LONG)iy;
+            r.right  = (LONG)(kCMWidth - 8.f);
+            r.bottom = (LONG)(iy + kCMItemH);
+
+            DrawTextA(hdcMem,kGateMenuItems[i].label,-1,&r,
+                      DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS);
+        }
+        GdiFlush();
+
+        // ── 3. Convert DIB → RGBA; sentinel pixels become alpha=0 ─────────
+        // DIB pixels are BGRA (B at lowest address).
+        const uint8_t* dibBits = reinterpret_cast<const uint8_t*>(bits);
+        std::vector<uint8_t> rgba(size_t(texW)*texH*4);
+
+        for(int row=0;row<texH;++row){
+            // GL texture is Y-up (row 0 = bottom), DIB is top-down.
+            // Flip so the texture matches screen-pixel Y used by kTexVert.
+            // kTexVert maps Y-down screen coords → NDC with y=-y,
+            // and UV (0,0) samples the bottom of the texture by default in GL.
+            // We want UV (0,0) = top-left of the label image, so we flip here:
+            int glRow = texH - 1 - row;   // flip for GL Y-up storage
+            for(int col=0;col<texW;++col){
+                const uint8_t* p = dibBits + (row*texW + col)*4;
+                uint8_t b=p[0],g=p[1],r=p[2]; // DIB is BGR
+                // Sentinel = magenta (255,0,255) → transparent
+                bool isSentinel = (r>=250 && g<10 && b>=250);
+                uint8_t* d = rgba.data() + (glRow*texW + col)*4;
+                d[0]=r; d[1]=g; d[2]=b;
+                d[3]= isSentinel ? 0 : 255;
+            }
+        }
+
+        // ── 4. Upload to GL texture ────────────────────────────────────────
+        glBindTexture(GL_TEXTURE_2D,ctxMenuTex_);
+        glTexSubImage2D(GL_TEXTURE_2D,0,0,0,texW,texH,GL_RGBA,GL_UNSIGNED_BYTE,rgba.data());
+        glBindTexture(GL_TEXTURE_2D,0);
+
+        // ── 5. GDI cleanup ────────────────────────────────────────────────
+        SelectObject(hdcMem,oldFont);  DeleteObject(hFont);
+        SelectObject(hdcMem,oldBmp);   DeleteObject(hBmp);
+        DeleteDC(hdcMem);
+    }
+
+    // ── Blit the label texture over the menu at [sx,sy] ───────────────────
+    void blitCtxMenuLabelTex(){
+        if(!ctxMenuTex_) return;
+
+        float x0 = ctxMenu_.sx,              y0 = ctxMenu_.sy;
+        float x1 = ctxMenu_.sx + kCMWidth,   y1 = ctxMenu_.sy + kCMHeight;
+
+        // 6 vertices: position (2f) + UV (2f)
+        // Screen Y-down: y0 = top, y1 = bottom
+        // UV: (0,1)=top-left in GL texture (we flipped rows in rebuildCtxMenuTexture)
+        float verts[] = {
+            x0, y0,  0.f, 1.f,
+            x1, y0,  1.f, 1.f,
+            x1, y1,  1.f, 0.f,
+            x1, y1,  1.f, 0.f,
+            x0, y1,  0.f, 0.f,
+            x0, y0,  0.f, 1.f,
+        };
+
+        GL.useProgram(texProg_);
+        ls_gl::uniform2f(uTexViewSize_, float(viewW_), float(viewH_));
+        ls_gl::uniform1i(uTexSampler_, 0);
+
+        ls_gl::activeTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, ctxMenuTex_);
+
+        GL.bindVertexArray(texVao_);
+        GL.bindBuffer(GL_ARRAY_BUFFER, texVbo_);
+        GL.bufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_DYNAMIC_DRAW);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+        GL.bindVertexArray(0);
+
+        glBindTexture(GL_TEXTURE_2D, 0);
+        GL.useProgram(0);
+
+        // Restore geometry program state for subsequent draws
+        GL.useProgram(prog_);
+        ls_gl::uniform2f(uViewSize_, float(viewW_), float(viewH_));
+        GL.bindVertexArray(vao_);
+    }
+
+    // ── GL rendering of menu background + highlight + icons + labels ───────
+    void drawContextMenu(){
+        // Rebuild texture if hover state changed or menu just opened
+        if(ctxMenuTexDirty_) rebuildCtxMenuTexture();
+
+        float mx = ctxMenu_.sx, my = ctxMenu_.sy;
+        float mR = mx + kCMWidth, mB = my + kCMHeight;
+
+        // Drop shadow
+        {std::vector<float>v;
+         pushRRFill(v, mx+4, my+4, mR+4, mB+4, kCMCorner);
+         dc(v, 0.f,0.f,0.f, 0.55f);}
+
+        // Menu background
+        {std::vector<float>v;
+         pushRRFill(v, mx, my, mR, mB, kCMCorner);
+         dc(v, 0.10f,0.10f,0.16f, 0.97f);}
+
+        // Border
+        {std::vector<float>v;
+         pushRR(v, mx, my, mR, mB, kCMCorner, 1.0f);
+         dc(v, 0.32f,0.30f,0.52f, 1.0f);}
+
+        // Items
+        for(int i=0; i<kGateMenuItemCount; ++i){
+            float iy = ctxRowY(i);
+            float iB = iy + kCMItemH;
+
+            // Hover highlight
+            if(i == ctxMenu_.hoveredItem){
+                std::vector<float>v;
+                float hcr = (i==0 || i==kGateMenuItemCount-1) ? kCMCorner-1.f : 0.f;
+                pushRRFill(v, mx+2, iy, mR-2, iB, hcr);
+                dc(v, 0.28f,0.22f,0.50f, 0.85f);
+                // Left accent stripe
+                std::vector<float>acc;
+                pushQuad(acc, mx+2, iy+3, mx+4, iB-3);
+                dc(acc, 0.68f,0.48f,1.0f, 1.0f);
+            }
+
+            // Separator in the gap above row i (i > 0)
+            if(i > 0){
+                float sepY = iy - kCMRowGap * 0.5f;
+                std::vector<float>v;
+                pushLine(v, mx+8, sepY, mR-8, sepY, 0.5f);
+                dc(v, 0.28f,0.28f,0.42f, 0.6f);
+            }
+
+            // Icon
+            float icx = mx + kCMIconOff;
+            float icy = iy + kCMItemH * 0.5f;
+            bool hov = (i == ctxMenu_.hoveredItem);
+            std::vector<float>iv;
+            if(kGateMenuItems[i].iconType == 0){
+                pushIconTrash(iv, icx, icy, kCMIconSize, 1.1f);
+                dc(iv, hov?0.95f:0.72f, hov?0.38f:0.30f, hov?0.38f:0.30f, hov?1.f:0.80f);
+            } else {
+                {std::vector<float>fv;
+                 float pW=kCMIconSize*0.58f, pH=kCMIconSize*0.68f;
+                 float fL=icx-pW*0.5f, fB=icy-pH*0.5f;
+                 pushRRFill(fv, fL, fB, fL+pW, fB+pH, 2.f);
+                 dc(fv, hov?0.18f:0.12f, hov?0.14f:0.10f, hov?0.26f:0.18f, 1.f);}
+                pushIconCopy(iv, icx, icy, kCMIconSize, 1.1f);
+                dc(iv, hov?0.75f:0.55f, hov?0.65f:0.48f, hov?1.0f:0.82f, hov?1.f:0.80f);
+            }
+        }
+
+        // ── Label texture blit: entirely within the GL pass, no GDI post-swap ──
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        blitCtxMenuLabelTex();
+        // Restore blend state used by the rest of the render
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    }
+
+    // ── redraw ────────────────────────────────────────────────────────────
+    void redraw(){
+        if(onRedrawNeeded) onRedrawNeeded();
+    }
     void notifyMode(){if(onSimModeChanged)onSimModeChanged(simMode);}
     void afterEdit(const char*msg){
         if(onCircuitChanged)onCircuitChanged();if(onSimUpdated)onSimUpdated();
@@ -1159,12 +1649,31 @@ private:
             if(wx>=g.x-kGW*.5f&&wx<=g.x+kGW*.5f&&wy>=g.y-kGH*.5f&&wy<=g.y+kGH*.5f)return g.id;}
         return -1;
     }
-    void buildShader(){prog_=glutil::linkProgram(kGVert,kGFrag);assert(prog_);
-        uViewSize_=GL.getUniformLocation(prog_,"uViewSize");uColor_=GL.getUniformLocation(prog_,"uColor");}
+    void buildShader(){
+        prog_=glutil::linkProgram(kGVert,kGFrag);assert(prog_);
+        uViewSize_=GL.getUniformLocation(prog_,"uViewSize");
+        uColor_   =GL.getUniformLocation(prog_,"uColor");
+    }
+    void buildTexShader(){
+        texProg_=glutil::linkProgram(kTexVert,kTexFrag);assert(texProg_);
+        uTexViewSize_=GL.getUniformLocation(texProg_,"uViewSize");
+        uTexSampler_ =GL.getUniformLocation(texProg_,"uTex");
+    }
     void buildVAO(){
         GL.genVertexArrays(1,&vao_);GL.genBuffers(1,&vbo_);
         GL.bindVertexArray(vao_);GL.bindBuffer(GL_ARRAY_BUFFER,vbo_);
         GL.enableVertexAttribArray(0);GL.vertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,2*sizeof(float),(void*)0);
+        GL.bindVertexArray(0);
+    }
+    void buildTexVAO(){
+        GL.genVertexArrays(1,&texVao_);GL.genBuffers(1,&texVbo_);
+        GL.bindVertexArray(texVao_);GL.bindBuffer(GL_ARRAY_BUFFER,texVbo_);
+        // Layout: vec2 pos + vec2 uv = 4 floats per vertex
+        GL.enableVertexAttribArray(0);
+        GL.vertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,4*sizeof(float),(void*)0);
+        GL.enableVertexAttribArray(1);
+        GL.vertexAttribPointer(1,2,GL_FLOAT,GL_FALSE,4*sizeof(float),(void*)(2*sizeof(float)));
+        GL.bufferData(GL_ARRAY_BUFFER,6*4*sizeof(float),nullptr,GL_DYNAMIC_DRAW);
         GL.bindVertexArray(0);
     }
     void upload(const std::vector<float>&v){
@@ -1172,7 +1681,10 @@ private:
         GL.bufferData(GL_ARRAY_BUFFER,(GLsizeiptr)(v.size()*sizeof(float)),v.data(),GL_DYNAMIC_DRAW);
     }
     void dc(const std::vector<float>&v,float r,float g,float b,float a=1.f){
-        if(v.empty())return;upload(v);ls_gl::uniform4f(uColor_,r,g,b,a);
+        if(v.empty())return;
+        // Temporarily switch to geometry program if we're in the middle of tex blit
+        upload(v);
+        ls_gl::uniform4f(uColor_,r,g,b,a);
         glDrawArrays(GL_TRIANGLES,0,(GLsizei)(v.size()/2));
     }
 
@@ -1318,55 +1830,35 @@ private:
         // ── CLOCK ─────────────────────────────────────────────────────────
         if(g.type==GateType::CLOCK){
             bool on=g.inputVal;
-
-            // Shadow
             {std::vector<float>v;pushRRFill(v,L+3,yT+3,R+3,yB+3,cr);DC(v,0,0,0,0.45f);}
-            // Body fill
             {std::vector<float>v;pushRRFill(v,L,yT,R,yB,cr);DCbd(v);}
-            // Border
             {std::vector<float>v;pushRR(v,L,yT,R,yB,cr,lw*0.5f+0.5f);DCb(v);}
-            // Selection inner ring
             if(g.selected){std::vector<float>v;pushRR(v,L+2,yT+2,R-2,yB-2,cr-2,lw*0.5f);DCb(v,0.3f);}
-
-            // Running glow when HIGH
             if(sim&&on){
                 std::vector<float>ring;pushRR(ring,L-1,yT-1,R+1,yB+1,cr+1,max(1.5f,z));
                 DC(ring,0.18f,0.82f,0.90f,0.65f);
-                // body tint
                 std::vector<float>tint;pushRRFill(tint,L,yT,R,yB,cr);
                 DC(tint,0.02f,0.22f,0.30f,0.22f);
             }
-
-            // Square-wave glyph drawn in the body centre
             {
                 float glyphW=(R-L)*0.68f;
                 float glyphH=(yB-yT)*0.38f;
-                float gcx=sx-(R-L)*0.05f; // slight left bias to leave room for freq badge
+                float gcx=sx-(R-L)*0.05f;
                 float gcy=(yT+yB)*0.5f;
                 float strokeW=max(1.2f,z*1.1f);
                 std::vector<float>wv;
                 pushSquareWave(wv,gcx,gcy,glyphW,glyphH,strokeW);
-                DC(wv,
-                   on?0.18f:0.30f,
-                   on?0.90f:0.65f,
-                   on?0.95f:0.80f,
-                   on?1.f:0.65f);
+                DC(wv, on?0.18f:0.30f, on?0.90f:0.65f, on?0.95f:0.80f, on?1.f:0.65f);
             }
-
-            // Frequency badge: small filled circle in top-right corner
             {
                 float cr2=max(4.5f,6.5f*z);
                 float bcx=R-cr2-2*z,bcy=yT+cr2+2*z;
-                // outer glow when running
                 if(sim){std::vector<float>gv;pushCircle(gv,bcx,bcy,cr2*1.9f,20);DC(gv,0.18f,0.82f,0.90f,on?0.22f:0.08f);}
                 {std::vector<float>v;pushCircle(v,bcx,bcy,cr2);
                  DC(v,on?0.18f:0.25f,on?0.82f:0.45f,on?0.90f:0.55f);}
-                // inner dot (pulse indicator)
                 {std::vector<float>v;pushCircle(v,bcx,bcy,cr2*0.45f);
                  DC(v,0.7f,0.95f,1.f,on?1.f:0.4f);}
             }
-
-            // Output pin stub
             for(auto&pin:g.outPins){
                 float psx,psy;w2s(pin.cx,pin.cy,psx,psy);
                 {std::vector<float>v;pushLine(v,R,psy,psx,psy,max(0.8f,z*.7f));DC(v,0.38f,0.42f,0.60f);}
@@ -1395,7 +1887,6 @@ private:
                       : (R + bubR);
         float MY     = (yT+yB)*0.5f;
 
-        // 1. Drop shadow
         {
             std::vector<float> sv;float s=3.f;
             if(isAND) pushANDFill(sv,L+s,yT+s,R+s,yB+s);
@@ -1403,7 +1894,6 @@ private:
             else          pushTriFill(sv,L+s,yT+s,R+s,yB+s);
             DC(sv, 0,0,0, 0.38f);
         }
-        // 2. Body fill
         {
             std::vector<float> fv;
             if(isAND) pushANDFill(fv,L,yT,R,yB);
@@ -1411,7 +1901,6 @@ private:
             else          pushTriFill(fv,L,yT,R,yB);
             DCbd(fv);
         }
-        // 3. Selection fill tint
         if(g.selected){
             std::vector<float> sv;
             if(isAND) pushANDFill(sv,L,yT,R,yB);
@@ -1419,7 +1908,6 @@ private:
             else          pushTriFill(sv,L,yT,R,yB);
             DC(sv, 0.80f,0.65f,0.97f, 0.18f);
         }
-        // 4. Sim HIGH glow
         if(sim && g.simVal){
             std::vector<float> gv;float e=lw*0.8f;
             if(isAND) pushANDOutline(gv,L-e,yT-e,R+e,yB+e,lw*1.8f);
@@ -1430,7 +1918,6 @@ private:
             if(isNeg) pushRing(gv, bubCX, MY, bubR+e, lw*1.8f);
             DC(gv, 0.28f,0.86f,0.47f, 0.38f);
         }
-        // 5. Body outline
         {
             std::vector<float> ov;
             if(isAND)     pushANDOutline(ov,L,yT,R,yB,lw);
@@ -1440,12 +1927,10 @@ private:
             else           pushTRIOutline(ov,L,yT,R,yB,lw,isNeg);
             DCb(ov);
         }
-        // 6. Inversion bubble
         if(isNeg){
             {std::vector<float>v;pushCircle(v,bubCX,MY,bubR,18);DCbd(v);}
             {std::vector<float>v;pushRing(v,bubCX,MY,bubR,lw);DCb(v);}
         }
-        // 7. Selection inner ring
         if(g.selected){
             std::vector<float> rv;float i2=lw*0.45f;
             if(isAND) pushANDOutline(rv,L+2,yT+2,R-2,yB-2,i2);
@@ -1455,7 +1940,6 @@ private:
             else pushTRIOutline(rv,L+2,yT+2,R-2,yB-2,i2,isNeg);
             DCb(rv,0.35f);
         }
-        // 8. Input pins
         for(auto&pin:g.inPins){
             float psx,psy; w2s(pin.cx,pin.cy,psx,psy);
             float stubL = psx;
@@ -1466,7 +1950,6 @@ private:
             {std::vector<float>v;pushCircle(v,psx,psy,max(2.5f,kPinR*z));
              DC(v, pin.connected?1.f:0.f, pin.connected?.86f:.31f, pin.connected?.47f:.51f);}
         }
-        // 9. Output pin
         for(auto&pin:g.outPins){
             float psx,psy; w2s(pin.cx,pin.cy,psx,psy);
             float stubStart = isNeg ? (bubCX + bubR) : R;
@@ -1660,7 +2143,7 @@ public:
             {GateType::XNOR, RGB(110,110,220),"!(A^B)"},
             {GateType::INPUT,RGB(70,210,110),"Toggle 0/1"},
             {GateType::OUTPUT,RGB(220,130,40),"LED output"},
-            {GateType::CLOCK,RGB(47,210,229),"0.5–8 Hz auto"},  // ← NEW
+            {GateType::CLOCK,RGB(47,210,229),"0.5–8 Hz auto"},
         };
         auto makeTile=[&](const TI&ti)->WidgetPtr{
             GateType t=ti.t;COLORREF ac=ti.ac;
@@ -1763,7 +2246,7 @@ public:
                     ->setPaddingAll(7,3,7,3)->setBorderRadius(4)->setBackgroundColor(RGB(20,18,8))
                     ->setBorderWidth(1)->setBorderColor(RGB(70,62,15)),
                     SizedBox(12,0),
-                    Text("SIM: click INPUT to toggle · click/dbl-click CLOCK to cycle Hz · Space=pause  |  EDIT: Dbl-click=label/Hz · G=snap · Ctrl+Z/Y · Ctrl+S/O  |  Scroll=zoom · MMB=pan")
+                    Text("SIM: click INPUT to toggle · click/dbl-click CLOCK to cycle Hz · Space=pause  |  EDIT: Dbl-click=label/Hz · Right-click gate=menu · G=snap · Ctrl+Z/Y · Ctrl+S/O  |  Scroll=zoom · MMB=pan")
                         ->setFontSize(9)->setTextColor(kDim)
                 )->setSpacing(0)->setCrossAxisAlignment(CrossAxisAlignment::Center)
             )->setSpacing(0)
