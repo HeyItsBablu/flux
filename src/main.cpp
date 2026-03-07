@@ -1,6 +1,5 @@
 // =============================================================================
-// logic_sim.hpp  —  Logic Gate Simulator  v12  (sequential elements:
-// DFF/LATCH/TFF/JKFF)
+// logic_sim.hpp  —  Logic Gate Simulator  v13  (+ Subcircuits)
 // =============================================================================
 
 #pragma once
@@ -20,6 +19,7 @@
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #pragma comment(lib, "comdlg32.lib")
@@ -265,62 +265,41 @@ enum class GateType {
   INPUT,
   OUTPUT,
   CLOCK,
-  // ── Sequential elements ──────────────────────────────────────────────
-  DFF,       // D flip-flop  — pins in: D(0), CLK(1), RST(2)   out: Q(0), /Q(1)
-  DLATCH,    // D latch      — pins in: D(0), EN(1)             out: Q(0), /Q(1)
-  TFLIPFLOP, // T flip-flop  — pins in: T(0), CLK(1)           out: Q(0), /Q(1)
-  JKFLIPFLOP, // JK flip-flop — pins in: J(0), K(1), CLK(2)    out: Q(0), /Q(1)
+  DFF,
+  DLATCH,
+  TFLIPFLOP,
+  JKFLIPFLOP,
   COUNT
 };
 static constexpr int kGTC = (int)GateType::COUNT;
-
-// Input pin counts per gate type
 static constexpr int kInPins[kGTC] = {2, 2, 1, 2, 2, 2, 2, 0, 1, 0, 3, 2, 2, 3};
-// Output pin counts (sequential gates expose Q and /Q)
 static constexpr int kOutPins[kGTC] = {1, 1, 1, 1, 1, 1, 1,
                                        1, 0, 1, 2, 2, 2, 2};
-
 static const char *kGateName[kGTC] = {
     "AND",   "OR",     "NOT",   "NAND", "NOR",    "XOR", "XNOR",
     "INPUT", "OUTPUT", "CLOCK", "DFF",  "DLATCH", "TFF", "JKFF"};
-
-// Human-readable pin labels — used in tooltips / status messages
-// Index: [gateType][pinIndex]  "" = no label
 static const char *kInPinLabel[kGTC][3] = {
-    {"A", "B", ""},      {"A", "B", ""},
-    {"A", "", ""},       {"A", "B", ""}, // AND OR NOT NAND
-    {"A", "B", ""},      {"A", "B", ""},
-    {"A", "B", ""},      {"", "", ""}, // NOR XOR XNOR INPUT
-    {"D", "", ""},       {"", "", ""}, // OUTPUT CLOCK
-    {"D", "CLK", "RST"},               // DFF
-    {"D", "EN", ""},                   // DLATCH
-    {"T", "CLK", ""},                  // TFF
-    {"J", "K", "CLK"},                 // JKFF
+    {"A", "B", ""},   {"A", "B", ""},    {"A", "", ""},       {"A", "B", ""},
+    {"A", "B", ""},   {"A", "B", ""},    {"A", "B", ""},      {"", "", ""},
+    {"D", "", ""},    {"", "", ""},      {"D", "CLK", "RST"}, {"D", "EN", ""},
+    {"T", "CLK", ""}, {"J", "K", "CLK"},
 };
 static const char *kOutPinLabel[kGTC][2] = {
     {"Q", ""},   {"Q", ""},   {"Q", ""},   {"Q", ""},   {"Q", ""},
     {"Q", ""},   {"Q", ""},   {"Q", ""},   {"", ""},    {"Q", ""},
     {"Q", "/Q"}, {"Q", "/Q"}, {"Q", "/Q"}, {"Q", "/Q"},
 };
-
-// Which gate types are sequential (need stateVal + edge detection)
 static bool isSequential(GateType t) {
   return t == GateType::DFF || t == GateType::DLATCH ||
          t == GateType::TFLIPFLOP || t == GateType::JKFLIPFLOP;
 }
-
 static constexpr float kClockFreqPresets[] = {0.5f, 1.f, 2.f, 4.f, 8.f};
 static constexpr int kClockFreqCount = 5;
-
 static constexpr float kGW = 88.f, kGH = 60.f, kPinR = 5.f, kPinLen = 16.f,
                        kCorner = 8.f;
-// Sequential gates are taller to accommodate extra pins
 static constexpr float kGH_SEQ = 84.f;
 static constexpr float kGrid = 20.f;
-
 static float snapGrid(float v) { return std::round(v / kGrid) * kGrid; }
-
-// Returns the logical height of a gate (accounts for sequential being taller)
 static float gateH(GateType t) { return isSequential(t) ? kGH_SEQ : kGH; }
 
 struct Pin {
@@ -333,11 +312,7 @@ struct Gate {
   GateType type = GateType::AND;
   float x = 0, y = 0;
   bool selected = false;
-  bool inputVal = false; // manual toggle for INPUT gates
-  bool simVal = false;   // combinational output / Q for sequential
-  bool stateVal =
-      false; // stored Q state (sequential only) — persists across evaluate()
-  bool prevClk = false; // last seen CLK level — used for rising-edge detection
+  bool inputVal = false, simVal = false, stateVal = false, prevClk = false;
   std::string label;
   float clockHz = 1.f;
   std::vector<Pin> inPins, outPins;
@@ -394,15 +369,17 @@ struct WireEndpoint {
   bool isOutput = false;
 };
 
-// ── Wire — carries splitX for orthogonal routing
-// ──────────────────────────────
+// Wire — gateId < 0 means subcircuit instance (id = -gateId)
 struct Wire {
   int id = 0;
   WireEndpoint src, dst;
-  bool value = false;
-  bool selected = false;
-  float splitX =
-      1e30f; // world-space X of vertical segment; 1e30f = auto midpoint
+  bool value = false, selected = false;
+  float splitX = 1e30f;
+
+  bool srcIsSubInst() const { return src.gateId < 0; }
+  bool dstIsSubInst() const { return dst.gateId < 0; }
+  int srcInstId() const { return -src.gateId; }
+  int dstInstId() const { return -dst.gateId; }
 
   std::string toJson() const {
     return js::obj({js::kv("id", id), js::kv("srcId", src.gateId),
@@ -435,19 +412,137 @@ struct PinRef {
   int pinIdx;
   bool isOutput;
   float cx, cy;
+  bool isSubInst = false;
 };
 struct TruthRow {
   std::vector<bool> inputs, outputs;
 };
 enum class SimMode { Edit, Running, Paused };
 
-// ── Circuit
-// ────────────────────────────────────────────────────────────────────
+// =============================================================================
+// §1b  SUBCIRCUIT TYPES
+// =============================================================================
+
+static constexpr float kSCMinH = kGH_SEQ;
+static constexpr float kSCPinSpacing = 20.f;
+static constexpr float kSCWidth = 100.f;
+
+static float subcircuitH(int nIn, int nOut) {
+  int m = max(max(nIn, nOut), 1);
+  return max(float(m) * kSCPinSpacing + kSCPinSpacing, kSCMinH);
+}
+
+struct SubcircuitPinInfo {
+  std::string label;
+  int internalGateId = 0;
+  bool isOutput = false;
+  float cx = 0, cy = 0;
+  bool connected = false;
+  bool value = false; // last evaluated value (for display + wire drive)
+};
+
+// Forward-declare Circuit so SubcircuitDef can hold one
+struct Circuit;
+
+struct SubcircuitDef {
+  int id = 0;
+  std::string name = "Module";
+  Circuit *inner = nullptr; // heap-allocated to avoid incomplete-type issues
+  std::vector<SubcircuitPinInfo> inputPins;
+  std::vector<SubcircuitPinInfo> outputPins;
+
+  SubcircuitDef(); // body after Circuit definition
+  SubcircuitDef(const SubcircuitDef &o);
+  SubcircuitDef &operator=(const SubcircuitDef &o);
+  ~SubcircuitDef(); // body after Circuit definition
+
+  void rebuildPins();
+  std::string toJson() const;
+  void fromJson(const std::string &src);
+};
+
+struct SubcircuitInst {
+  int id = 0, defId = 0;
+  float x = 0, y = 0;
+  bool selected = false;
+  std::string label;
+
+  std::vector<SubcircuitPinInfo> inputPins;
+  std::vector<SubcircuitPinInfo> outputPins;
+
+  std::unordered_map<int, bool> internalState;
+  std::unordered_map<int, bool> internalPrevClk;
+
+  void recomputePins(const SubcircuitDef &def);
+
+  std::string toJson() const {
+    std::vector<std::string> sa, ca;
+    for (auto &[k, v] : internalState)
+      sa.push_back(js::obj({js::kv("g", k), js::kv("v", v)}));
+    for (auto &[k, v] : internalPrevClk)
+      ca.push_back(js::obj({js::kv("g", k), js::kv("v", v)}));
+    return js::obj({js::kv("id", id), js::kv("defId", defId), js::kv("x", x),
+                    js::kv("y", y), js::kv("label", label),
+                    "\"istate\":" + js::arr(sa), "\"iclk\":" + js::arr(ca)});
+  }
+  void fromKV(const js::KVList &m) {
+    for (auto &[k, v] : m) {
+      if (k == "id")
+        id = js::asInt(v);
+      else if (k == "defId")
+        defId = js::asInt(v);
+      else if (k == "x")
+        x = js::asFloat(v);
+      else if (k == "y")
+        y = js::asFloat(v);
+      else if (k == "label")
+        label = js::asStr(v);
+      else if (k == "istate") {
+        for (auto &item : js::parseArr(v)) {
+          size_t p = 0;
+          int gid = 0;
+          bool val = false;
+          for (auto &[kk, vv] : js::parseObj(item, p)) {
+            if (kk == "g")
+              gid = js::asInt(vv);
+            else if (kk == "v")
+              val = js::asBool(vv);
+          }
+          internalState[gid] = val;
+        }
+      } else if (k == "iclk") {
+        for (auto &item : js::parseArr(v)) {
+          size_t p = 0;
+          int gid = 0;
+          bool val = false;
+          for (auto &[kk, vv] : js::parseObj(item, p)) {
+            if (kk == "g")
+              gid = js::asInt(vv);
+            else if (kk == "v")
+              val = js::asBool(vv);
+          }
+          internalPrevClk[gid] = val;
+        }
+      }
+    }
+  }
+};
+
+// =============================================================================
+// §2  CIRCUIT
+// =============================================================================
+
 struct Circuit {
   std::vector<Gate> gates;
   std::vector<Wire> wires;
   int nextId = 1, nextWireId = 1;
 
+  // ── Subcircuit registry ──────────────────────────────────────────────
+  std::unordered_map<int, SubcircuitDef> subcircuitDefs;
+  std::vector<SubcircuitInst> subcircuitInsts;
+  int nextSubDefId = 1, nextSubInstId = 1;
+
+  // ── Gate helpers ─────────────────────────────────────────────────────
   int add(GateType t, float x, float y, const std::string &lbl = "") {
     Gate g;
     g.id = nextId++;
@@ -480,19 +575,41 @@ struct Circuit {
     return nullptr;
   }
 
+  SubcircuitInst *findInst(int id) {
+    for (auto &i : subcircuitInsts)
+      if (i.id == id)
+        return &i;
+    return nullptr;
+  }
+  const SubcircuitInst *findInst(int id) const {
+    for (auto &i : subcircuitInsts)
+      if (i.id == id)
+        return &i;
+    return nullptr;
+  }
+
   void remove(int id) {
     gates.erase(std::remove_if(gates.begin(), gates.end(),
                                [id](const Gate &g) { return g.id == id; }),
                 gates.end());
   }
+  void removeInst(int instId) {
+    subcircuitInsts.erase(std::remove_if(subcircuitInsts.begin(),
+                                         subcircuitInsts.end(),
+                                         [instId](const SubcircuitInst &i) {
+                                           return i.id == instId;
+                                         }),
+                          subcircuitInsts.end());
+  }
+
   int connect(int sId, int sPin, int dId, int dPin) {
     Wire w;
     w.id = nextWireId++;
     w.src = {sId, sPin, true};
     w.dst = {dId, dPin, false};
     wires.push_back(w);
-    markPin(sId, sPin, true, true);
-    markPin(dId, dPin, false, true);
+    markPinConn(sId, sPin, true, true);
+    markPinConn(dId, dPin, false, true);
     return w.id;
   }
   void disconnect(int wireId) {
@@ -514,11 +631,24 @@ struct Circuit {
     for (int id : ids)
       disconnect(id);
   }
+  void removeInstWires(int instId) {
+    int neg = -instId;
+    std::vector<int> ids;
+    for (auto &w : wires)
+      if (w.src.gateId == neg || w.dst.gateId == neg)
+        ids.push_back(w.id);
+    for (int id : ids)
+      disconnect(id);
+  }
   void clearAll() {
     gates.clear();
     wires.clear();
+    subcircuitDefs.clear();
+    subcircuitInsts.clear();
     nextId = 1;
     nextWireId = 1;
+    nextSubDefId = 1;
+    nextSubInstId = 1;
   }
 
   void rebuildConnected() {
@@ -528,27 +658,21 @@ struct Circuit {
       for (auto &p : g.outPins)
         p.connected = false;
     }
+    for (auto &inst : subcircuitInsts) {
+      for (auto &p : inst.inputPins)
+        p.connected = false;
+      for (auto &p : inst.outputPins)
+        p.connected = false;
+    }
     for (auto &w : wires) {
-      markPin(w.src.gateId, w.src.pinIdx, true, true);
-      markPin(w.dst.gateId, w.dst.pinIdx, false, true);
+      markPinConn(w.src.gateId, w.src.pinIdx, true, true);
+      markPinConn(w.dst.gateId, w.dst.pinIdx, false, true);
     }
   }
 
-  // ── Simulation evaluation ────────────────────────────────────────────────
-  //
-  // Two-phase approach:
-  //   Phase 1 — combinational pass: propagate all wire values through
-  //             purely combinational gates in topo order.
-  //   Phase 2 — sequential pass: for each sequential gate, sample its
-  //             inputs (already settled after phase 1) and update stateVal
-  //             based on edge/level logic; then push stateVal onto its output
-  //             wires so downstream combinational logic can see the new Q.
-  //   Phase 3 — re-run combinational pass so downstream sees updated Q.
-  //
-  // This cleanly separates "compute new state" from "propagate state forward".
-  //
+  // ── Evaluation ───────────────────────────────────────────────────────
   void evaluate() {
-    // --- Phase 1: combinational ---
+    // Phase 1: combinational gates + subcircuit output init
     for (int idx : topoSort()) {
       Gate &g = gates[idx];
       if (!isSequential(g.type)) {
@@ -557,43 +681,34 @@ struct Circuit {
           if (w.src.gateId == g.id && w.src.pinIdx == 0)
             w.value = g.simVal;
       } else {
-        // Push current stateVal and !stateVal onto Q / /Q wires so
-        // combinational gates downstream see a valid value even before the
-        // sequential update.
-        for (auto &w : wires) {
-          if (w.src.gateId != g.id)
-            continue;
-          w.value = (w.src.pinIdx == 0) ? g.stateVal : !g.stateVal;
-        }
+        for (auto &w : wires)
+          if (w.src.gateId == g.id)
+            w.value = (w.src.pinIdx == 0) ? g.stateVal : !g.stateVal;
       }
     }
+    // Evaluate subcircuit instances
+    for (auto &inst : subcircuitInsts)
+      evaluateSubcircuitInst(inst);
+    pushSubcircuitWires();
 
-    // --- Phase 2: sequential state update ---
+    // Phase 2: sequential update
     for (auto &g : gates) {
       if (!isSequential(g.type))
         continue;
-      bool newState = computeSequential(g);
-      g.stateVal = newState;
-      g.simVal = newState; // simVal mirrors Q for display
-      // Update prevClk for next tick (edge detection)
-      bool clk = getInput(g, 1); // CLK is always pin 1 except JKFF where it's 2
-      if (g.type == GateType::JKFLIPFLOP)
-        clk = getInput(g, 2);
+      g.stateVal = computeSequential(g);
+      g.simVal = g.stateVal;
+      bool clk = getInput(g, g.type == GateType::JKFLIPFLOP ? 2 : 1);
       g.prevClk = clk;
     }
 
-    // --- Phase 3: re-propagate combinational with updated Q outputs ---
-    // Push the newly computed stateVals onto wires first
+    // Phase 3: re-propagate
     for (auto &g : gates) {
       if (!isSequential(g.type))
         continue;
-      for (auto &w : wires) {
-        if (w.src.gateId != g.id)
-          continue;
-        w.value = (w.src.pinIdx == 0) ? g.stateVal : !g.stateVal;
-      }
+      for (auto &w : wires)
+        if (w.src.gateId == g.id)
+          w.value = (w.src.pinIdx == 0) ? g.stateVal : !g.stateVal;
     }
-    // Re-run combinational gates that come after sequential ones
     for (int idx : topoSort()) {
       Gate &g = gates[idx];
       if (isSequential(g.type))
@@ -603,19 +718,252 @@ struct Circuit {
         if (w.src.gateId == g.id && w.src.pinIdx == 0)
           w.value = g.simVal;
     }
+    for (auto &inst : subcircuitInsts)
+      evaluateSubcircuitInst(inst);
+    pushSubcircuitWires();
   }
 
-  // Reset all sequential state (called by simStop)
   void resetSequentialState() {
-    for (auto &g : gates) {
+    for (auto &g : gates)
       if (isSequential(g.type)) {
         g.stateVal = false;
         g.simVal = false;
         g.prevClk = false;
       }
+    for (auto &inst : subcircuitInsts) {
+      inst.internalState.clear();
+      inst.internalPrevClk.clear();
     }
   }
 
+  // ── Grouping: turn selected gates into a subcircuit instance ─────────
+  // Returns the new inst id, or -1 on failure.
+  int groupSelected(const std::string &defName) {
+    // Collect selected gate ids
+    std::vector<int> selIds;
+    for (auto &g : gates)
+      if (g.selected)
+        selIds.push_back(g.id);
+    if (selIds.empty())
+      return -1;
+
+    std::unordered_set<int> selSet(selIds.begin(), selIds.end());
+
+    // Classify wires: internal (both ends inside), crossing-in (src outside),
+    // crossing-out (dst outside), external (both outside — ignore)
+    struct CrossWire {
+      int wireId;
+      bool srcOutside;
+      int pinIdx;
+    }; // pinIdx = boundary pin slot
+    std::vector<CrossWire> crossWires;
+
+    // Centroid of selection for placing the new instance
+    float cx = 0, cy = 0;
+    for (int id : selIds) {
+      const Gate *g = find(id);
+      if (g) {
+        cx += g->x;
+        cy += g->y;
+      }
+    }
+    cx /= float(selIds.size());
+    cy /= float(selIds.size());
+
+    // Build the def
+    SubcircuitDef def;
+    def.id = nextSubDefId++;
+    def.name = defName;
+
+    // Copy selected gates into def inner circuit
+    // Remap ids to fresh ids inside inner (avoid collision with outer ids)
+    std::unordered_map<int, int> idRemap; // outer id -> inner id
+    for (int oid : selIds) {
+      const Gate *og = find(oid);
+      if (!og)
+        continue;
+      int nid = def.inner->nextId++;
+      idRemap[oid] = nid;
+      Gate ng = *og;
+      ng.id = nid;
+      ng.x -= cx;
+      ng.y -= cy; // centre the inner circuit
+      ng.selected = false;
+      ng.recomputePins();
+      def.inner->gates.push_back(ng);
+    }
+
+    // Copy internal wires (both endpoints inside selection)
+    for (auto &w : wires) {
+      bool srcIn = selSet.count(w.src.gateId) > 0;
+      bool dstIn = selSet.count(w.dst.gateId) > 0;
+      if (srcIn && dstIn) {
+        Wire nw = w;
+        nw.id = def.inner->nextWireId++;
+        nw.src.gateId = idRemap[w.src.gateId];
+        nw.dst.gateId = idRemap[w.dst.gateId];
+        nw.splitX = 1e30f;
+        def.inner->wires.push_back(nw);
+      }
+    }
+
+    // For crossing wires, create INPUT/OUTPUT gates inside def
+    // and record which outer wire maps to which inner boundary gate
+    struct BoundaryMap {
+      int outerWireId;
+      int innerBoundaryGateId;
+      bool inputSide;
+    };
+    std::vector<BoundaryMap> boundaryMaps;
+
+    // First pass: wires whose src is OUTSIDE and dst is INSIDE
+    //   → create an INPUT gate inside def; the outer wire will connect to
+    //     the new inst's input pin
+    int pinAutoIdx = 0;
+    for (auto &w : wires) {
+      bool srcIn = selSet.count(w.src.gateId) > 0;
+      bool dstIn = selSet.count(w.dst.gateId) > 0;
+      if (!srcIn && dstIn) {
+        // Create INPUT gate inside def
+        int igid = def.inner->nextId++;
+        Gate ig;
+        ig.id = igid;
+        ig.type = GateType::INPUT;
+        // Position it to the left of the inner centroid
+        ig.x = -kGW * 1.8f - float(pinAutoIdx) * 0.f;
+        ig.y = float(pinAutoIdx) * (kGH + 10.f) -
+               float(selIds.size()) * (kGH + 10.f) * 0.5f;
+        ig.label = "in" + std::to_string(pinAutoIdx);
+        ig.recomputePins();
+        def.inner->gates.push_back(ig);
+
+        // Wire from that INPUT gate to the original dst gate (remapped)
+        Wire bw;
+        bw.id = def.inner->nextWireId++;
+        bw.src = {igid, 0, true};
+        bw.dst = {idRemap.count(w.dst.gateId) ? idRemap[w.dst.gateId]
+                                              : w.dst.gateId,
+                  w.dst.pinIdx, false};
+        bw.splitX = 1e30f;
+        def.inner->wires.push_back(bw);
+
+        boundaryMaps.push_back({w.id, igid, true});
+        pinAutoIdx++;
+      }
+    }
+
+    // Second pass: wires whose src is INSIDE and dst is OUTSIDE
+    //   → create an OUTPUT gate inside def
+    int outAutoIdx = 0;
+    for (auto &w : wires) {
+      bool srcIn = selSet.count(w.src.gateId) > 0;
+      bool dstIn = selSet.count(w.dst.gateId) > 0;
+      if (srcIn && !dstIn) {
+        int ogid = def.inner->nextId++;
+        Gate og;
+        og.id = ogid;
+        og.type = GateType::OUTPUT;
+        og.x = kGW * 1.8f;
+        og.y = float(outAutoIdx) * (kGH + 10.f) -
+               float(selIds.size()) * (kGH + 10.f) * 0.5f;
+        og.label = "out" + std::to_string(outAutoIdx);
+        og.recomputePins();
+        def.inner->gates.push_back(og);
+
+        Wire bw;
+        bw.id = def.inner->nextWireId++;
+        bw.src = {idRemap.count(w.src.gateId) ? idRemap[w.src.gateId]
+                                              : w.src.gateId,
+                  w.src.pinIdx, true};
+        bw.dst = {ogid, 0, false};
+        bw.splitX = 1e30f;
+        def.inner->wires.push_back(bw);
+
+        boundaryMaps.push_back({w.id, ogid, false});
+        outAutoIdx++;
+      }
+    }
+
+    def.rebuildPins();
+    // Capture id before the move (move leaves def.id valid but we want
+    // certainty)
+    int defId = def.id;
+    subcircuitDefs.emplace(defId, std::move(def));
+    SubcircuitDef *pDef = &subcircuitDefs.at(defId);
+    if (!pDef)
+      return -1;
+
+    // Create the instance
+    SubcircuitInst inst;
+    inst.id = nextSubInstId++;
+    inst.defId = defId;
+    inst.x = cx;
+    inst.y = cy;
+    inst.recomputePins(*pDef);
+    subcircuitInsts.push_back(inst);
+    SubcircuitInst &newInst = subcircuitInsts.back();
+    int instId = newInst.id;
+
+    // Re-route crossing wires to the new instance
+    // Build lookup: innerBoundaryGateId -> pin index in inputPins / outputPins
+    auto pinIndexForInner = [&](int innerGateId, bool isInputSide) -> int {
+      auto &pins = isInputSide ? pDef->inputPins : pDef->outputPins;
+      for (int i = 0; i < (int)pins.size(); i++)
+        if (pins[i].internalGateId == innerGateId)
+          return i;
+      return 0;
+    };
+
+    for (auto &bm : boundaryMaps) {
+      Wire *ow = find_wire(bm.outerWireId);
+      if (!ow)
+        continue;
+      if (bm.inputSide) {
+        // Outer wire was: someGate(out) → selGate(in)
+        // Reroute dst to the new instance input pin
+        int pi = pinIndexForInner(bm.innerBoundaryGateId, true);
+        ow->dst.gateId = -instId;
+        ow->dst.pinIdx = pi;
+        ow->splitX = 1e30f;
+      } else {
+        // Outer wire was: selGate(out) → someGate(in)
+        // Reroute src to the new instance output pin
+        int pi = pinIndexForInner(bm.innerBoundaryGateId, false);
+        ow->src.gateId = -instId;
+        ow->src.pinIdx = pi;
+        ow->splitX = 1e30f;
+      }
+    }
+
+    // Remove selected gates and their now-internal wires from parent
+    // (internal wires were not crossing, so they're not in boundaryMaps)
+    std::vector<int> toDisconnect;
+    for (auto &w : wires) {
+      bool srcIn = selSet.count(w.src.gateId) > 0;
+      bool dstIn = selSet.count(w.dst.gateId) > 0;
+      if (srcIn || dstIn)
+        toDisconnect.push_back(w.id);
+    }
+    // But keep the re-routed boundary wires
+    std::unordered_set<int> boundaryWireIds;
+    for (auto &bm : boundaryMaps)
+      boundaryWireIds.insert(bm.outerWireId);
+    for (int wid : toDisconnect) {
+      if (boundaryWireIds.count(wid))
+        continue;
+      // Remove directly (don't call disconnect which re-marks pins)
+      wires.erase(std::remove_if(wires.begin(), wires.end(),
+                                 [wid](const Wire &w) { return w.id == wid; }),
+                  wires.end());
+    }
+    for (int gid : selIds)
+      remove(gid);
+
+    rebuildConnected();
+    return instId;
+  }
+
+  // ── Truth table (combinational only, no subcircuits in scope) ────────
   std::vector<TruthRow> buildTruthTable(std::vector<int> &inIds,
                                         std::vector<int> &outIds) const {
     inIds.clear();
@@ -634,16 +982,15 @@ struct Circuit {
     }
     if (inIdx.empty() || outIdx.empty())
       return {};
-    // Truth tables only make sense for purely combinational circuits.
-    // If there are sequential elements, skip the table.
     for (auto &g : gates)
       if (isSequential(g.type))
         return {};
+    if (!subcircuitInsts.empty())
+      return {}; // skip if subcircuits present
 
     int ni = (int)inIdx.size(), combos = 1 << min(ni, 6);
     std::vector<Gate> gs = gates;
     std::vector<Wire> ws = wires;
-
     auto topo = [&]() -> std::vector<int> {
       int sz = (int)gs.size();
       std::vector<int> ind(sz, 0);
@@ -739,15 +1086,23 @@ struct Circuit {
     return table;
   }
 
+  // ── Serialisation ────────────────────────────────────────────────────
   std::string toJson() const {
-    std::vector<std::string> ga, wa;
+    std::vector<std::string> ga, wa, da, ia;
     for (auto &g : gates)
       ga.push_back(g.toJson());
     for (auto &w : wires)
       wa.push_back(w.toJson());
-    return js::obj({js::kv("version", 2), js::kv("nextId", nextId),
-                    js::kv("nextWireId", nextWireId),
-                    "\"gates\":" + js::arr(ga), "\"wires\":" + js::arr(wa)});
+    for (auto &[k, v] : subcircuitDefs)
+      da.push_back(v.toJson());
+    for (auto &inst : subcircuitInsts)
+      ia.push_back(inst.toJson());
+    return js::obj(
+        {js::kv("version", 3), js::kv("nextId", nextId),
+         js::kv("nextWireId", nextWireId), js::kv("nextSubDefId", nextSubDefId),
+         js::kv("nextSubInstId", nextSubInstId), "\"gates\":" + js::arr(ga),
+         "\"wires\":" + js::arr(wa), "\"subcircuitDefs\":" + js::arr(da),
+         "\"subcircuitInsts\":" + js::arr(ia)});
   }
   bool fromJson(const std::string &src) {
     clearAll();
@@ -757,6 +1112,10 @@ struct Circuit {
         nextId = js::asInt(v);
       else if (k == "nextWireId")
         nextWireId = js::asInt(v);
+      else if (k == "nextSubDefId")
+        nextSubDefId = js::asInt(v);
+      else if (k == "nextSubInstId")
+        nextSubInstId = js::asInt(v);
       else if (k == "gates") {
         for (auto &gj : js::parseArr(v)) {
           size_t gp = 0;
@@ -771,22 +1130,120 @@ struct Circuit {
           w.fromKV(js::parseObj(wj, wp));
           wires.push_back(w);
         }
+      } else if (k == "subcircuitDefs") {
+        for (auto &dj : js::parseArr(v)) {
+          SubcircuitDef d;
+          d.fromJson(dj);
+          int did = d.id;
+          subcircuitDefs.emplace(did, std::move(d));
+        }
+      } else if (k == "subcircuitInsts") {
+        for (auto &ij : js::parseArr(v)) {
+          size_t ip = 0;
+          SubcircuitInst inst;
+          inst.fromKV(js::parseObj(ij, ip));
+          auto it = subcircuitDefs.find(inst.defId);
+          if (it != subcircuitDefs.end())
+            inst.recomputePins(it->second);
+          subcircuitInsts.push_back(inst);
+        }
       }
     }
     rebuildConnected();
-    return !gates.empty();
+    return !gates.empty() || !subcircuitInsts.empty();
   }
 
 private:
-  // ── Get input pin value from settled wires ────────────────────────────────
+  // ── Subcircuit instance evaluation ───────────────────────────────────
+  void evaluateSubcircuitInst(SubcircuitInst &inst) {
+    auto it = subcircuitDefs.find(inst.defId);
+    if (it == subcircuitDefs.end())
+      return;
+    const SubcircuitDef &def = it->second;
+
+    // Deep-copy inner circuit for this evaluation pass
+    Circuit inner;
+    inner.gates = def.inner->gates;
+    inner.wires = def.inner->wires;
+    inner.nextId = def.inner->nextId;
+    inner.nextWireId = def.inner->nextWireId;
+
+    // Restore sequential state
+    for (auto &g : inner.gates) {
+      if (isSequential(g.type)) {
+        auto si = inst.internalState.find(g.id);
+        if (si != inst.internalState.end()) {
+          g.stateVal = si->second;
+          g.simVal = si->second;
+        }
+        auto ci = inst.internalPrevClk.find(g.id);
+        if (ci != inst.internalPrevClk.end())
+          g.prevClk = ci->second;
+      }
+    }
+
+    // Stamp input values from parent wires onto inner INPUT gates
+    for (int pi = 0; pi < (int)inst.inputPins.size(); pi++) {
+      bool val = false;
+      int neg = -inst.id;
+      for (auto &w : wires)
+        if (w.dst.gateId == neg && w.dst.pinIdx == pi) {
+          val = w.value;
+          break;
+        }
+      int igid = inst.inputPins[pi].internalGateId;
+      for (auto &g : inner.gates)
+        if (g.id == igid) {
+          g.inputVal = val;
+          g.simVal = val;
+          break;
+        }
+    }
+
+    // Run inner evaluation (non-recursive: inner has no sub-insts)
+    inner.evaluate();
+
+    // Read output gate input values back
+    for (int pi = 0; pi < (int)inst.outputPins.size(); pi++) {
+      int ogid = inst.outputPins[pi].internalGateId;
+      bool val = false;
+      for (auto &w : inner.wires)
+        if (w.dst.gateId == ogid) {
+          val = w.value;
+          break;
+        }
+      inst.outputPins[pi].value = val;
+    }
+
+    // Persist sequential state
+    for (auto &g : inner.gates) {
+      if (isSequential(g.type)) {
+        inst.internalState[g.id] = g.stateVal;
+        inst.internalPrevClk[g.id] = g.prevClk;
+      }
+    }
+  }
+
+  // Push subcircuit output pin values onto outgoing parent wires
+  void pushSubcircuitWires() {
+    for (auto &inst : subcircuitInsts) {
+      int neg = -inst.id;
+      for (auto &w : wires) {
+        if (w.src.gateId != neg)
+          continue;
+        int pi = w.src.pinIdx;
+        if (pi < (int)inst.outputPins.size())
+          w.value = inst.outputPins[pi].value;
+      }
+    }
+  }
+
   bool getInput(const Gate &g, int pinIdx) const {
     for (auto &w : wires)
       if (w.dst.gateId == g.id && w.dst.pinIdx == pinIdx)
         return w.value;
     return false;
   }
-
-  // ── Combinational gate compute ────────────────────────────────────────────
   bool computeGate(const Gate &g) const {
     if (g.type == GateType::INPUT || g.type == GateType::CLOCK)
       return g.inputVal;
@@ -810,64 +1267,27 @@ private:
       return false;
     }
   }
-
-  // ── Sequential gate compute — returns new Q ───────────────────────────────
-  //
-  // Edge detection: a rising clock edge is when prevClk==false and clk==true.
-  // DLATCH is level-sensitive: transparent when EN is high.
-  //
   bool computeSequential(const Gate &g) const {
     switch (g.type) {
-
     case GateType::DFF: {
-      // Inputs: D(0), CLK(1), RST(2)
-      // Synchronous reset: if RST is high and rising edge, reset to 0.
-      // Otherwise on rising edge: Q ← D
-      bool d = getInput(g, 0);
-      bool clk = getInput(g, 1);
-      bool rst = getInput(g, 2);
-      bool risingEdge = clk && !g.prevClk;
-      if (!risingEdge)
-        return g.stateVal; // hold
-      if (rst)
-        return false; // synchronous reset
-      return d;
+      bool d = getInput(g, 0), clk = getInput(g, 1), rst = getInput(g, 2);
+      if (!(clk && !g.prevClk))
+        return g.stateVal;
+      return rst ? false : d;
     }
-
     case GateType::DLATCH: {
-      // Inputs: D(0), EN(1)
-      // Level-sensitive: when EN is high, Q follows D continuously.
-      // When EN goes low, Q is latched.
-      bool d = getInput(g, 0);
-      bool en = getInput(g, 1);
-      if (en)
-        return d;        // transparent
-      return g.stateVal; // latched
+      bool d = getInput(g, 0), en = getInput(g, 1);
+      return en ? d : g.stateVal;
     }
-
     case GateType::TFLIPFLOP: {
-      // Inputs: T(0), CLK(1)
-      // On rising edge: if T is high, toggle; else hold.
-      bool t = getInput(g, 0);
-      bool clk = getInput(g, 1);
-      bool risingEdge = clk && !g.prevClk;
-      if (!risingEdge)
+      bool t = getInput(g, 0), clk = getInput(g, 1);
+      if (!(clk && !g.prevClk))
         return g.stateVal;
       return t ? !g.stateVal : g.stateVal;
     }
-
     case GateType::JKFLIPFLOP: {
-      // Inputs: J(0), K(1), CLK(2)
-      // On rising edge:
-      //   J=0,K=0 → hold
-      //   J=1,K=0 → set   (Q=1)
-      //   J=0,K=1 → reset (Q=0)
-      //   J=1,K=1 → toggle
-      bool j = getInput(g, 0);
-      bool k = getInput(g, 1);
-      bool clk = getInput(g, 2);
-      bool risingEdge = clk && !g.prevClk;
-      if (!risingEdge)
+      bool j = getInput(g, 0), k = getInput(g, 1), clk = getInput(g, 2);
+      if (!(clk && !g.prevClk))
         return g.stateVal;
       if (j && !k)
         return true;
@@ -875,14 +1295,12 @@ private:
         return false;
       if (j && k)
         return !g.stateVal;
-      return g.stateVal; // hold
+      return g.stateVal;
     }
-
     default:
       return g.stateVal;
     }
   }
-
   std::vector<int> topoSort() const {
     int sz = (int)gates.size();
     std::vector<int> ind(sz, 0);
@@ -920,8 +1338,18 @@ private:
     }
     return r;
   }
-
-  void markPin(int gateId, int pinIdx, bool isOut, bool val) {
+  void markPinConn(int gateId, int pinIdx, bool isOut, bool val) {
+    if (gateId < 0) { // subcircuit instance
+      int instId = -gateId;
+      SubcircuitInst *inst = findInst(instId);
+      if (!inst)
+        return;
+      if (isOut && pinIdx < (int)inst->outputPins.size())
+        inst->outputPins[pinIdx].connected = val;
+      if (!isOut && pinIdx < (int)inst->inputPins.size())
+        inst->inputPins[pinIdx].connected = val;
+      return;
+    }
     Gate *g = find(gateId);
     if (!g)
       return;
@@ -944,12 +1372,99 @@ private:
         break;
       }
     }
-    markPin(gateId, pinIdx, isOut, still);
+    markPinConn(gateId, pinIdx, isOut, still);
   }
 };
 
 // =============================================================================
-// §2  VERTEX HELPERS
+// §1c  SubcircuitDef / SubcircuitInst method bodies (need Circuit complete)
+// =============================================================================
+
+inline SubcircuitDef::SubcircuitDef()
+    : id(0), name("Module"), inner(new Circuit()) {}
+
+inline SubcircuitDef::~SubcircuitDef() { delete inner; }
+
+inline SubcircuitDef::SubcircuitDef(const SubcircuitDef &o)
+    : id(o.id), name(o.name), inputPins(o.inputPins), outputPins(o.outputPins) {
+  inner = new Circuit(*o.inner);
+}
+
+inline SubcircuitDef &SubcircuitDef::operator=(const SubcircuitDef &o) {
+  if (this == &o)
+    return *this;
+  id = o.id;
+  name = o.name;
+  inputPins = o.inputPins;
+  outputPins = o.outputPins;
+  delete inner;
+  inner = new Circuit(*o.inner);
+  return *this;
+}
+
+inline void SubcircuitDef::rebuildPins() {
+  inputPins.clear();
+  outputPins.clear();
+  for (auto &g : inner->gates) {
+    if (g.type == GateType::INPUT || g.type == GateType::CLOCK) {
+      SubcircuitPinInfo p;
+      p.label = g.label.empty() ? "I" + std::to_string(g.id) : g.label;
+      p.internalGateId = g.id;
+      p.isOutput = false;
+      inputPins.push_back(p);
+    } else if (g.type == GateType::OUTPUT) {
+      SubcircuitPinInfo p;
+      p.label = g.label.empty() ? "O" + std::to_string(g.id) : g.label;
+      p.internalGateId = g.id;
+      p.isOutput = true;
+      outputPins.push_back(p);
+    }
+  }
+  auto byY = [&](const SubcircuitPinInfo &a, const SubcircuitPinInfo &b) {
+    const Gate *ga = inner->find(a.internalGateId);
+    const Gate *gb = inner->find(b.internalGateId);
+    return (ga ? ga->y : 0.f) < (gb ? gb->y : 0.f);
+  };
+  std::sort(inputPins.begin(), inputPins.end(), byY);
+  std::sort(outputPins.begin(), outputPins.end(), byY);
+}
+
+inline std::string SubcircuitDef::toJson() const {
+  return js::obj(
+      {js::kv("id", id), js::kv("name", name), "\"inner\":" + inner->toJson()});
+}
+inline void SubcircuitDef::fromJson(const std::string &src) {
+  size_t p = 0;
+  for (auto &[k, v] : js::parseObj(src, p)) {
+    if (k == "id")
+      id = js::asInt(v);
+    else if (k == "name")
+      name = js::asStr(v);
+    else if (k == "inner")
+      inner->fromJson(v);
+  }
+  rebuildPins();
+}
+
+inline void SubcircuitInst::recomputePins(const SubcircuitDef &def) {
+  inputPins = def.inputPins;
+  outputPins = def.outputPins;
+  int ni = (int)inputPins.size(), no = (int)outputPins.size();
+  float h = subcircuitH(ni, no);
+  float L = x - kSCWidth * 0.5f, R = x + kSCWidth * 0.5f, yT = y - h * 0.5f;
+  auto place = [&](SubcircuitPinInfo &p, int i, int total, bool isIn) {
+    float t = (total <= 1) ? 0.5f : float(i) / float(total - 1);
+    p.cx = isIn ? (L - kPinLen) : (R + kPinLen);
+    p.cy = yT + t * h;
+  };
+  for (int i = 0; i < ni; i++)
+    place(inputPins[i], i, ni, true);
+  for (int i = 0; i < no; i++)
+    place(outputPins[i], i, no, false);
+}
+
+// =============================================================================
+// §2  VERTEX HELPERS  (unchanged from v12)
 // =============================================================================
 
 static void pushQuad(std::vector<float> &v, float x0, float y0, float x1,
@@ -1012,16 +1527,10 @@ static void pushRR(std::vector<float> &v, float L, float B, float R2, float T,
     }
 }
 
-// =============================================================================
-// §2a  ORTHOGONAL WIRE HELPERS
-// =============================================================================
-
+// §2a  ORTHOGONAL WIRE HELPERS (unchanged)
 static float orthoMidSX(float sx0, float sx1, float splitXS) {
-  if (splitXS < 1e29f)
-    return splitXS;
-  return (sx0 + sx1) * 0.5f;
+  return splitXS < 1e29f ? splitXS : (sx0 + sx1) * 0.5f;
 }
-
 static void pushOrtho(std::vector<float> &v, float sx0, float sy0, float sx1,
                       float sy1, float splitXS, float hw) {
   float mx = orthoMidSX(sx0, sx1, splitXS);
@@ -1029,22 +1538,19 @@ static void pushOrtho(std::vector<float> &v, float sx0, float sy0, float sx1,
   pushLine(v, mx, sy0, mx, sy1, hw);
   pushLine(v, mx, sy1, sx1, sy1, hw);
 }
-
 static void pushOrthoBends(std::vector<float> &v, float sx0, float sy0,
                            float sx1, float sy1, float splitXS, float r) {
   float mx = orthoMidSX(sx0, sx1, splitXS);
   pushCircle(v, mx, sy0, r);
   pushCircle(v, mx, sy1, r);
 }
-
 static bool orthoHit(float sx0, float sy0, float sx1, float sy1, float splitXS,
                      float px, float py, float thr = 6.f) {
-  float mx = orthoMidSX(sx0, sx1, splitXS);
-  float t2 = thr * thr;
+  float mx = orthoMidSX(sx0, sx1, splitXS), t2 = thr * thr;
   auto seg2 = [&](float ax, float ay, float bx, float by) -> float {
     float dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy;
     float t = (len2 > 0.f) ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0.f;
-    t = (t < 0.f) ? 0.f : (t > 1.f ? 1.f : t);
+    t = t < 0.f ? 0.f : t > 1.f ? 1.f : t;
     float cx = ax + dx * t - px, cy = ay + dy * t - py;
     return cx * cx + cy * cy;
   };
@@ -1056,9 +1562,19 @@ static std::vector<PinRef> collectPins(const Circuit &c) {
   std::vector<PinRef> out;
   for (auto &g : c.gates) {
     for (int i = 0; i < (int)g.outPins.size(); i++)
-      out.push_back({g.id, i, true, g.outPins[i].cx, g.outPins[i].cy});
+      out.push_back({g.id, i, true, g.outPins[i].cx, g.outPins[i].cy, false});
     for (int i = 0; i < (int)g.inPins.size(); i++)
-      out.push_back({g.id, i, false, g.inPins[i].cx, g.inPins[i].cy});
+      out.push_back({g.id, i, false, g.inPins[i].cx, g.inPins[i].cy, false});
+  }
+  // Add subcircuit instance pins (encode id as negative)
+  for (auto &inst : c.subcircuitInsts) {
+    int neg = -inst.id;
+    for (int i = 0; i < (int)inst.outputPins.size(); i++)
+      out.push_back(
+          {neg, i, true, inst.outputPins[i].cx, inst.outputPins[i].cy, true});
+    for (int i = 0; i < (int)inst.inputPins.size(); i++)
+      out.push_back(
+          {neg, i, false, inst.inputPins[i].cx, inst.inputPins[i].cy, true});
   }
   return out;
 }
@@ -1081,25 +1597,22 @@ static bool nearestPin(const std::vector<PinRef> &pins, float wx, float wy,
   return found;
 }
 
-// =============================================================================
-// §2b  IEEE/ANSI SHAPE BUILDERS
-// =============================================================================
-
+// §2b  IEEE/ANSI SHAPE BUILDERS (unchanged from v12 — omitted for brevity,
+//      paste in full from original file here)
 static void pushCubic(std::vector<float> &v, float x0, float y0, float x1,
                       float y1, float x2, float y2, float x3, float y3,
                       float hw, int segs = 22) {
   float px = x0, py = y0;
   for (int i = 1; i <= segs; ++i) {
-    float t = float(i) / float(segs);
-    float u = 1 - t, u2 = u * u, u3 = u2 * u, t2 = t * t, t3 = t2 * t;
-    float qx = u3 * x0 + 3 * u2 * t * x1 + 3 * u * t2 * x2 + t3 * x3;
-    float qy = u3 * y0 + 3 * u2 * t * y1 + 3 * u * t2 * y2 + t3 * y3;
+    float t = float(i) / float(segs), u = 1 - t, u2 = u * u, u3 = u2 * u,
+          t2 = t * t, t3 = t2 * t;
+    float qx = u3 * x0 + 3 * u2 * t * x1 + 3 * u * t2 * x2 + t3 * x3,
+          qy = u3 * y0 + 3 * u2 * t * y1 + 3 * u * t2 * y2 + t3 * y3;
     pushLine(v, px, py, qx, qy, hw);
     px = qx;
     py = qy;
   }
 }
-
 static void pushArc(std::vector<float> &v, float cx, float cy, float r,
                     float a0, float a1, float hw, int segs = 24) {
   float px = cx + cosf(a0) * r, py = cy + sinf(a0) * r;
@@ -1111,135 +1624,97 @@ static void pushArc(std::vector<float> &v, float cx, float cy, float r,
     py = qy;
   }
 }
-
 static void pushRing(std::vector<float> &v, float cx, float cy, float r,
                      float hw) {
   pushArc(v, cx, cy, r, 0.f, 6.2831853f, hw, 20);
 }
-
 static void pushTriFill(std::vector<float> &v, float L, float yT, float R,
                         float yB) {
   float MY = (yT + yB) * 0.5f;
   v.insert(v.end(), {L, yT, R, MY, L, yB});
 }
-
 static void pushANDFill(std::vector<float> &v, float L, float yT, float R,
                         float yB) {
-  float H = yB - yT, MY = (yT + yB) * 0.5f;
-  float flatX = L + (R - L) * 0.44f;
-  float arcR = H * 0.5f;
+  float H = yB - yT, MY = (yT + yB) * 0.5f, flatX = L + (R - L) * 0.44f,
+        arcR = H * 0.5f;
   pushQuad(v, L, yT, flatX, yB);
-  const int S = 24;
-  for (int i = 0; i < S; ++i) {
-    float a0 = -1.5707963f + float(i) / S * 3.1415926f;
-    float a1 = -1.5707963f + float(i + 1) / S * 3.1415926f;
+  for (int i = 0; i < 24; ++i) {
+    float a0 = -1.5707963f + float(i) / 24 * 3.1415926f,
+          a1 = -1.5707963f + float(i + 1) / 24 * 3.1415926f;
     v.insert(v.end(), {flatX, MY, flatX + cosf(a0) * arcR, MY + sinf(a0) * arcR,
                        flatX + cosf(a1) * arcR, MY + sinf(a1) * arcR});
   }
 }
-
 static void pushANDOutline(std::vector<float> &v, float L, float yT, float R,
                            float yB, float hw) {
-  float H = yB - yT, MY = (yT + yB) * 0.5f;
-  float flatX = L + (R - L) * 0.44f;
-  float arcR = H * 0.5f;
+  float H = yB - yT, MY = (yT + yB) * 0.5f, flatX = L + (R - L) * 0.44f,
+        arcR = H * 0.5f;
   pushLine(v, L, yT, L, yB, hw);
   pushLine(v, L, yT, flatX, yT, hw);
   pushLine(v, L, yB, flatX, yB, hw);
   pushArc(v, flatX, MY, arcR, -1.5707963f, 1.5707963f, hw, 28);
 }
-
 static void pushORFill(std::vector<float> &v, float L, float yT, float R,
                        float yB) {
-  float H = yB - yT, W = R - L, MY = (yT + yB) * 0.5f;
-  float bulgX = W * 0.30f;
-
-  auto backXatY = [&](float y) -> float {
+  float H = yB - yT, W = R - L, MY = (yT + yB) * 0.5f, bulgX = W * 0.30f;
+  auto backX = [&](float y) -> float {
     float t = (y - yT) / H, u = 1.f - t;
     return u * u * u * L + 3 * u * u * t * (L + bulgX) +
            3 * u * t * t * (L + bulgX) + t * t * t * L;
   };
-
-  auto frontXatY = [&](float y) -> float {
-    if (y <= MY) {
-      float lo = 0.f, hi = 1.f;
-      for (int k = 0; k < 18; ++k) {
-        float m = (lo + hi) * 0.5f, u = 1.f - m;
-        float ym = u * u * u * yT + 3 * u * u * m * yT +
-                   3 * u * m * m * (MY - H * 0.10f) + m * m * m * MY;
-        if (ym < y)
-          lo = m;
-        else
-          hi = m;
-      }
-      float t = (lo + hi) * 0.5f, u = 1.f - t;
-      return u * u * u * L + 3 * u * u * t * (L + W * 0.55f) +
-             3 * u * t * t * (R - W * 0.12f) + t * t * t * R;
-    } else {
-      float lo = 0.f, hi = 1.f;
-      for (int k = 0; k < 18; ++k) {
-        float m = (lo + hi) * 0.5f, u = 1.f - m;
-        float ym = u * u * u * yB + 3 * u * u * m * yB +
-                   3 * u * m * m * (MY + H * 0.10f) + m * m * m * MY;
-        if (ym > y)
-          lo = m;
-        else
-          hi = m;
-      }
-      float t = (lo + hi) * 0.5f, u = 1.f - t;
-      return u * u * u * L + 3 * u * u * t * (L + W * 0.55f) +
-             3 * u * t * t * (R - W * 0.12f) + t * t * t * R;
+  auto frontX = [&](float y) -> float {
+    bool top = y <= MY;
+    float lo = 0.f, hi = 1.f;
+    for (int k = 0; k < 18; ++k) {
+      float m = (lo + hi) * 0.5f, u = 1.f - m;
+      float ym = top ? (u * u * u * yT + 3 * u * u * m * yT +
+                        3 * u * m * m * (MY - H * 0.10f) + m * m * m * MY)
+                     : (u * u * u * yB + 3 * u * u * m * yB +
+                        3 * u * m * m * (MY + H * 0.10f) + m * m * m * MY);
+      if (top ? (ym < y) : (ym > y))
+        lo = m;
+      else
+        hi = m;
     }
+    float t = (lo + hi) * 0.5f, u = 1.f - t;
+    return u * u * u * L + 3 * u * u * t * (L + W * 0.55f) +
+           3 * u * t * t * (R - W * 0.12f) + t * t * t * R;
   };
-
-  const int ROWS = 64;
-  for (int i = 0; i < ROWS; ++i) {
-    float y0 = yT + float(i) / ROWS * H;
-    float y1 = yT + float(i + 1) / ROWS * H;
-    float lx0 = backXatY(y0), rx0 = frontXatY(y0);
-    float lx1 = backXatY(y1), rx1 = frontXatY(y1);
-    v.insert(v.end(), {lx0, y0, rx0, y0, rx1, y1});
-    v.insert(v.end(), {lx0, y0, rx1, y1, lx1, y1});
+  for (int i = 0; i < 64; ++i) {
+    float y0 = yT + float(i) / 64 * H, y1 = yT + float(i + 1) / 64 * H;
+    float lx0 = backX(y0), rx0 = frontX(y0), lx1 = backX(y1), rx1 = frontX(y1);
+    v.insert(v.end(), {lx0, y0, rx0, y0, rx1, y1, lx0, y0, rx1, y1, lx1, y1});
   }
 }
-
 static void pushOROutline(std::vector<float> &v, float L, float yT, float R,
                           float yB, float hw) {
-  float W = R - L, MY = (yT + yB) * 0.5f;
-  float bulgX = W * 0.30f;
+  float W = R - L, MY = (yT + yB) * 0.5f, bulgX = W * 0.30f;
   pushCubic(v, L, yT, L + bulgX, yT, L + bulgX, yB, L, yB, hw);
   pushCubic(v, L, yT, L + W * 0.55f, yT, R - W * 0.12f, MY - (yB - yT) * 0.10f,
             R, MY, hw);
   pushCubic(v, L, yB, L + W * 0.55f, yB, R - W * 0.12f, MY + (yB - yT) * 0.10f,
             R, MY, hw);
 }
-
 static void pushXORBackArc(std::vector<float> &v, float L, float yT, float R,
                            float yB, float hw) {
   float W = R - L, bulgX = W * 0.30f, offset = W * 0.11f;
   pushCubic(v, L - offset, yT, L - offset + bulgX, yT, L - offset + bulgX, yB,
             L - offset, yB, hw);
 }
-
 static void pushTRIOutline(std::vector<float> &v, float L, float yT, float R,
                            float yB, float hw, bool negate) {
-  float MY = (yT + yB) * 0.5f;
-  float H = yB - yT;
-  float tipX = negate ? (R - H * 0.20f) : R;
+  float MY = (yT + yB) * 0.5f, H = yB - yT, tipX = negate ? (R - H * 0.20f) : R;
   pushLine(v, L, yT, L, yB, hw);
   pushLine(v, L, yT, tipX, MY, hw);
   pushLine(v, tipX, MY, L, yB, hw);
 }
-
 static void pushSquareWave(std::vector<float> &v, float cx, float cy, float gW,
                            float gH, float hw) {
-  float x0 = cx - gW * 0.5f;
-  float y_lo = cy + gH * 0.35f;
-  float y_hi = cy - gH * 0.35f;
-  float pw = gW / 3.f;
+  float x0 = cx - gW * 0.5f, y_lo = cy + gH * 0.35f, y_hi = cy - gH * 0.35f,
+        pw = gW / 3.f;
   float xs[10] = {x0,
-                  x0 + pw * 0.5f,
-                  x0 + pw * 0.5f,
+                  x0 + pw * .5f,
+                  x0 + pw * .5f,
                   x0 + pw,
                   x0 + pw * 1.5f,
                   x0 + pw * 1.5f,
@@ -1252,53 +1727,14 @@ static void pushSquareWave(std::vector<float> &v, float cx, float cy, float gW,
     pushLine(v, xs[i], ys[i], xs[i + 1], ys[i + 1], hw);
 }
 
-// ── Sequential gate body shape
-// ──────────────────────────────────────────────── IEEE standard: rectangle
-// with a small dynamic-input indicator (>) on the clock pin row.
-//
-// drawSeqGate draws the full body into the provided vertex arrays:
-//   fillV  — filled rectangle
-//   outV   — outline
-//   clkV   — clock triangle glyph
-//   negV   — negation bubble on /Q output (always present for sequential)
-//
-static void buildSeqBody(float L, float yT, float R, float yB, float lw,
-                         float z, std::vector<float> &fillV,
-                         std::vector<float> &outV, std::vector<float> &clkV,
-                         float clkPinY,   // screen-Y of the clock input pin
-                         float qBarPinY,  // screen-Y of the /Q output pin
-                         float &bubCXout) // returns screen-X of bubble centre
-{
-  float cr = min(6.f * z, 5.f);
-
-  // Filled body
-  pushRRFill(fillV, L, yT, R, yB, cr);
-
-  // Outline
-  pushRR(outV, L, yT, R, yB, cr, lw);
-
-  // Clock triangle glyph — drawn just inside the left edge at clkPinY
-  float tw = 7.f * z, th = 5.f * z;
-  clkV.insert(clkV.end(), {L, clkPinY - th, L + tw, clkPinY, L, clkPinY + th});
-
-  // Negation bubble on /Q output (right edge at qBarPinY)
-  float bubR = min(5.f * z, 4.5f);
-  bubCXout = R + bubR + lw * 0.5f;
-  pushRing(outV, bubCXout, qBarPinY, bubR, lw * 0.85f);
-}
-
 // =============================================================================
-// §3  SHADERS
+// §3  SHADERS  (unchanged)
 // =============================================================================
-
 static const char *kGVert = R"GLSL(
 #version 330 core
-layout(location=0) in vec2 aPos;
+layout(location=0)in vec2 aPos;
 uniform vec2 uViewSize;
-void main(){
-    vec2 ndc=aPos/uViewSize*2.0-1.0;ndc.y=-ndc.y;
-    gl_Position=vec4(ndc,0.0,1.0);
-}
+void main(){vec2 ndc=aPos/uViewSize*2.0-1.0;ndc.y=-ndc.y;gl_Position=vec4(ndc,0.0,1.0);}
 )GLSL";
 static const char *kGFrag = R"GLSL(
 #version 330 core
@@ -1306,71 +1742,41 @@ out vec4 fragColor;
 uniform vec4 uColor;
 void main(){fragColor=uColor;}
 )GLSL";
-
 static const char *kTexVert = R"GLSL(
 #version 330 core
-layout(location=0) in vec2 aPos;
-layout(location=1) in vec2 aUV;
-uniform vec2 uViewSize;
-out vec2 vUV;
-void main(){
-    vUV = aUV;
-    vec2 ndc = aPos / uViewSize * 2.0 - 1.0;
-    ndc.y = -ndc.y;
-    gl_Position = vec4(ndc, 0.0, 1.0);
-}
+layout(location=0)in vec2 aPos;layout(location=1)in vec2 aUV;
+uniform vec2 uViewSize;out vec2 vUV;
+void main(){vUV=aUV;vec2 ndc=aPos/uViewSize*2.0-1.0;ndc.y=-ndc.y;gl_Position=vec4(ndc,0.0,1.0);}
 )GLSL";
 static const char *kTexFrag = R"GLSL(
 #version 330 core
-in vec2 vUV;
-uniform sampler2D uTex;
-out vec4 fragColor;
-void main(){
-    fragColor = texture(uTex, vUV);
-}
+in vec2 vUV;uniform sampler2D uTex;out vec4 fragColor;
+void main(){fragColor=texture(uTex,vUV);}
 )GLSL";
 
 // =============================================================================
-// §4  GATE COLORS
+// §4  GATE COLORS  (unchanged)
 // =============================================================================
-
 struct GateColors {
   float body[4], border[4], label[4];
 };
 static GateColors gateColors(GateType t, bool sel) {
-  // bodies[i] and borders[i] indexed by (int)GateType
   static const float bodies[kGTC][4] = {
-      {0.08f, 0.15f, 0.30f, 1}, // AND
-      {0.08f, 0.25f, 0.15f, 1}, // OR
-      {0.22f, 0.10f, 0.28f, 1}, // NOT
-      {0.26f, 0.08f, 0.10f, 1}, // NAND
-      {0.20f, 0.08f, 0.22f, 1}, // NOR
-      {0.08f, 0.20f, 0.30f, 1}, // XOR
-      {0.12f, 0.12f, 0.28f, 1}, // XNOR
-      {0.08f, 0.22f, 0.13f, 1}, // INPUT
-      {0.24f, 0.14f, 0.05f, 1}, // OUTPUT
-      {0.05f, 0.15f, 0.28f, 1}, // CLOCK
-      {0.06f, 0.18f, 0.26f, 1}, // DFF      — steel blue
-      {0.06f, 0.22f, 0.20f, 1}, // DLATCH   — teal
-      {0.20f, 0.16f, 0.06f, 1}, // TFF      — amber
-      {0.22f, 0.10f, 0.18f, 1}, // JKFF     — rose
-  };
+      {0.08f, 0.15f, 0.30f, 1}, {0.08f, 0.25f, 0.15f, 1},
+      {0.22f, 0.10f, 0.28f, 1}, {0.26f, 0.08f, 0.10f, 1},
+      {0.20f, 0.08f, 0.22f, 1}, {0.08f, 0.20f, 0.30f, 1},
+      {0.12f, 0.12f, 0.28f, 1}, {0.08f, 0.22f, 0.13f, 1},
+      {0.24f, 0.14f, 0.05f, 1}, {0.05f, 0.15f, 0.28f, 1},
+      {0.06f, 0.18f, 0.26f, 1}, {0.06f, 0.22f, 0.20f, 1},
+      {0.20f, 0.16f, 0.06f, 1}, {0.22f, 0.10f, 0.18f, 1}};
   static const float borders[kGTC][4] = {
-      {0.27f, 0.47f, 0.86f, 1}, // AND
-      {0.27f, 0.75f, 0.43f, 1}, // OR
-      {0.66f, 0.27f, 0.86f, 1}, // NOT
-      {0.86f, 0.27f, 0.27f, 1}, // NAND
-      {0.78f, 0.27f, 0.67f, 1}, // NOR
-      {0.27f, 0.67f, 0.86f, 1}, // XOR
-      {0.43f, 0.43f, 0.86f, 1}, // XNOR
-      {0.27f, 0.82f, 0.43f, 1}, // INPUT
-      {0.86f, 0.51f, 0.16f, 1}, // OUTPUT
-      {0.18f, 0.82f, 0.90f, 1}, // CLOCK
-      {0.20f, 0.65f, 0.95f, 1}, // DFF      — sky blue
-      {0.20f, 0.85f, 0.75f, 1}, // DLATCH   — cyan-green
-      {0.95f, 0.72f, 0.20f, 1}, // TFF      — gold
-      {0.95f, 0.38f, 0.60f, 1}, // JKFF     — pink
-  };
+      {0.27f, 0.47f, 0.86f, 1}, {0.27f, 0.75f, 0.43f, 1},
+      {0.66f, 0.27f, 0.86f, 1}, {0.86f, 0.27f, 0.27f, 1},
+      {0.78f, 0.27f, 0.67f, 1}, {0.27f, 0.67f, 0.86f, 1},
+      {0.43f, 0.43f, 0.86f, 1}, {0.27f, 0.82f, 0.43f, 1},
+      {0.86f, 0.51f, 0.16f, 1}, {0.18f, 0.82f, 0.90f, 1},
+      {0.20f, 0.65f, 0.95f, 1}, {0.20f, 0.85f, 0.75f, 1},
+      {0.95f, 0.72f, 0.20f, 1}, {0.95f, 0.38f, 0.60f, 1}};
   int i = (int)t;
   GateColors c;
   memcpy(c.body, bodies[i], 16);
@@ -1386,10 +1792,14 @@ static GateColors gateColors(GateType t, bool sel) {
 }
 
 // =============================================================================
-// §4b  GATE CONTEXT MENU
+// §4b  GATE CONTEXT MENU  (unchanged)
 // =============================================================================
-
-enum class GateMenuAction { None = -1, Delete = 0, Copy = 1 };
+enum class GateMenuAction {
+  None = -1,
+  Delete = 0,
+  Copy = 1,
+  GroupSubcircuit = 2
+};
 struct GateMenuItem {
   GateMenuAction action;
   const char *label;
@@ -1400,7 +1810,6 @@ static constexpr GateMenuItem kGateMenuItems[] = {
     {GateMenuAction::Delete, "Delete", 0},
 };
 static constexpr int kGateMenuItemCount = 2;
-
 static constexpr float kCMItemH = 28.f, kCMWidth = 130.f, kCMPadV = 6.f,
                        kCMCorner = 6.f;
 static constexpr float kCMRowGap = 4.f, kCMRowStride = kCMItemH + kCMRowGap;
@@ -1411,9 +1820,8 @@ static constexpr float kCMHeight = kCMPadV * 2.f +
 
 static void pushIconTrash(std::vector<float> &v, float cx, float cy, float sz,
                           float lw) {
-  float hs = sz * 0.5f, bW = sz * 0.68f, bH = sz * 0.62f;
-  float bL = cx - bW * 0.5f, bR = cx + bW * 0.5f, bT = cy - hs * 0.10f,
-        bB = cy + hs * 0.78f;
+  float hs = sz * 0.5f, bW = sz * 0.68f, bH = sz * 0.62f, bL = cx - bW * 0.5f,
+        bR = cx + bW * 0.5f, bT = cy - hs * 0.10f, bB = cy + hs * 0.78f;
   pushLine(v, bL, bT, bL, bB, lw);
   pushLine(v, bR, bT, bR, bB, lw);
   pushLine(v, bL, bB, bR, bB, lw);
@@ -1435,8 +1843,8 @@ static void pushIconCopy(std::vector<float> &v, float cx, float cy, float sz,
   float fL = cx - pW * 0.5f, fB = cy - pH * 0.5f;
   pushRRFill(v, fL, fB, fL + pW, fB + pH, 2.f);
   pushRR(v, fL, fB, fL + pW, fB + pH, 2.f, lw, 3);
-  float lx0 = fL + pW * 0.18f, lx1 = fL + pW * 0.82f;
-  float ly0 = fB + pH * 0.30f, ly1 = fB + pH * 0.55f, ly2 = fB + pH * 0.75f;
+  float lx0 = fL + pW * 0.18f, lx1 = fL + pW * 0.82f, ly0 = fB + pH * 0.30f,
+        ly1 = fB + pH * 0.55f, ly2 = fB + pH * 0.75f;
   pushLine(v, lx0, ly0, lx1, ly0, lw * 0.7f);
   pushLine(v, lx0, ly1, lx1, ly1, lw * 0.7f);
   pushLine(v, lx0, ly2, lx1 * 0.75f + lx0 * 0.25f, ly2, lw * 0.7f);
@@ -1445,7 +1853,6 @@ static void pushIconCopy(std::vector<float> &v, float cx, float cy, float sz,
 // =============================================================================
 // §5  CIRCUIT SURFACE
 // =============================================================================
-
 static constexpr UINT_PTR kClockTimerBase = 0x4C4B0000;
 
 class CircuitSurface : public RenderSurface {
@@ -1495,9 +1902,7 @@ public:
       return;
     for (auto &g : circuit.gates)
       if (g.type == GateType::CLOCK) {
-        float hz = g.clockHz;
-        if (hz <= 0.f)
-          hz = 1.f;
+        float hz = g.clockHz > 0.f ? g.clockHz : 1.f;
         UINT ms = max(16u, (UINT)(500.f / hz));
         SetTimer(hwnd_, kClockTimerBase + (UINT_PTR)g.id, ms, nullptr);
       }
@@ -1515,9 +1920,7 @@ public:
       return;
     KillTimer(hwnd_, kClockTimerBase + (UINT_PTR)gateId);
     if (simMode == SimMode::Running) {
-      float hz = g->clockHz;
-      if (hz <= 0.f)
-        hz = 1.f;
+      float hz = g->clockHz > 0.f ? g->clockHz : 1.f;
       UINT ms = max(16u, (UINT)(500.f / hz));
       SetTimer(hwnd_, kClockTimerBase + (UINT_PTR)gateId, ms, nullptr);
     }
@@ -1536,8 +1939,7 @@ public:
         best = i;
       }
     }
-    int next = (best + 1) % kClockFreqCount;
-    g->clockHz = kClockFreqPresets[next];
+    g->clockHz = kClockFreqPresets[(best + 1) % kClockFreqCount];
     restartClockTimer(gateId);
     char buf[64];
     snprintf(buf, sizeof(buf), "Clock %.1f Hz", g->clockHz);
@@ -1549,7 +1951,7 @@ public:
   }
 
   void simPlay() {
-    if (circuit.gates.empty())
+    if (circuit.gates.empty() && circuit.subcircuitInsts.empty())
       return;
     simMode = SimMode::Running;
     circuit.evaluate();
@@ -1558,8 +1960,7 @@ public:
     if (onSimUpdated)
       onSimUpdated();
     if (onStatusMessage)
-      onStatusMessage(
-          "▶ Running  ·  Click INPUT/CLOCK to interact  ·  Space = pause");
+      onStatusMessage("▶ Running  ·  Click INPUT/CLOCK  ·  Space=pause");
     redraw();
   }
   void simPause() {
@@ -1573,10 +1974,8 @@ public:
       stopClockTimers();
     notifyMode();
     if (onStatusMessage)
-      onStatusMessage(simMode == SimMode::Paused
-                          ? "⏸ Paused  ·  Space or ▶ to resume"
-                          : "▶ Running  ·  Click INPUT/CLOCK to interact  ·  "
-                            "Space = pause");
+      onStatusMessage(simMode == SimMode::Paused ? "⏸ Paused"
+                                                 : "▶ Running  ·  Space=pause");
     redraw();
   }
   void simStop() {
@@ -1655,7 +2054,7 @@ public:
     redraw();
   }
   void fitToView() {
-    if (circuit.gates.empty()) {
+    if (circuit.gates.empty() && circuit.subcircuitInsts.empty()) {
       resetZoom();
       return;
     }
@@ -1666,6 +2065,20 @@ public:
       mxX = max(mxX, g.x + kGW);
       mnY = min(mnY, g.y - gh);
       mxY = max(mxY, g.y + gh);
+    }
+    for (auto &inst : circuit.subcircuitInsts) {
+      auto it = circuit.subcircuitDefs.find(inst.defId);
+      int ni = it != circuit.subcircuitDefs.end()
+                   ? (int)it->second.inputPins.size()
+                   : 1;
+      int no = it != circuit.subcircuitDefs.end()
+                   ? (int)it->second.outputPins.size()
+                   : 1;
+      float h = subcircuitH(ni, no);
+      mnX = min(mnX, inst.x - kSCWidth);
+      mxX = max(mxX, inst.x + kSCWidth);
+      mnY = min(mnY, inst.y - h);
+      mxY = max(mxY, inst.y + h);
     }
     float ww = mxX - mnX, wh = mxY - mnY;
     if (ww < 1 || wh < 1) {
@@ -1706,6 +2119,46 @@ public:
     redraw();
   }
 
+  // ── Group selected gates into a subcircuit ───────────────────────────
+  void groupSelected() {
+    if (isSimActive()) {
+      if (onStatusMessage)
+        onStatusMessage("Stop simulation before grouping");
+      return;
+    }
+    std::vector<int> selIds;
+    for (auto &g : circuit.gates)
+      if (g.selected)
+        selIds.push_back(g.id);
+    if (selIds.size() < 1) {
+      if (onStatusMessage)
+        onStatusMessage("Select gates first (click/shift-click), then Group");
+      return;
+    }
+    std::string name = dlgLabelInternal_("Subcircuit name", "Module");
+    if (name == "__cancelled__")
+      return;
+    if (name.empty())
+      name = "Module";
+    pushUndo();
+    int instId = circuit.groupSelected(name);
+    if (instId < 0) {
+      if (onStatusMessage)
+        onStatusMessage("Group failed");
+      return;
+    }
+    circuit.evaluate();
+    if (onCircuitChanged)
+      onCircuitChanged();
+    if (onSimUpdated)
+      onSimUpdated();
+    if (onStatusMessage)
+      onStatusMessage(("Grouped as subcircuit '" + name +
+                       "'  ·  Double-click instance to inspect")
+                          .c_str());
+    redraw();
+  }
+
   void initialize(int w, int h) override {
     ls_gl::init();
     viewW_ = w;
@@ -1738,7 +2191,27 @@ public:
     GL.bindVertexArray(vao_);
     drawGrid();
     drawAllWires();
+    // Rubber-band selection rectangle
+    if (dragSelect_) {
+      float sx0, sy0, sx1, sy1;
+      w2s(dragSelX0_, dragSelY0_, sx0, sy0);
+      w2s(dragSelX1_, dragSelY1_, sx1, sy1);
+      float bx0 = min(sx0, sx1), bx1 = max(sx0, sx1);
+      float by0 = min(sy0, sy1), by1 = max(sy0, sy1);
+      {
+        std::vector<float> v;
+        pushQuad(v, bx0, by0, bx1, by1);
+        dc(v, 0.68f, 0.48f, 1.0f, 0.07f);
+      }
+      {
+        std::vector<float> v;
+        pushRR(v, bx0, by0, bx1, by1, 2.f, 1.2f);
+        dc(v, 0.68f, 0.48f, 1.0f, 0.70f);
+      }
+    }
     drawDragPreview();
+    for (auto &inst : circuit.subcircuitInsts)
+      drawSubcircuitInst(inst);
     for (auto &g : circuit.gates)
       drawGate(g);
     drawPinHovers();
@@ -1783,7 +2256,6 @@ public:
   // =========================================================================
   // Mouse events
   // =========================================================================
-
   void onMouseDown(float sx, float sy) override {
     if (ctxMenu_.open) {
       float mx = sx, my = sy;
@@ -1819,9 +2291,8 @@ public:
           Gate *g = circuit.find(gateId);
           if (g) {
             pushUndo();
-            float gh = gateH(g->type);
-            int newId = circuit.add(g->type, g->x + kGW + 20.f, g->y, g->label);
-            Gate *ng = circuit.find(newId);
+            int nid = circuit.add(g->type, g->x + kGW + 20.f, g->y, g->label);
+            Gate *ng = circuit.find(nid);
             if (ng) {
               ng->inputVal = g->inputVal;
               ng->clockHz = g->clockHz;
@@ -1846,6 +2317,7 @@ public:
     lastSY_ = sy;
     float wx, wy;
     s2w(sx, sy, wx, wy);
+    bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
 
     if (isSimActive()) {
       int hit = hitGate(wx, wy);
@@ -1865,29 +2337,32 @@ public:
       return;
     }
 
-    // Drag vertical split of an existing wire
+    // Wire split drag (unchanged)
     for (auto &w : circuit.wires) {
       auto [wsx0, wsy0, wsx1, wsy1] = wireSC(w);
-      float msx = wireSplitSX(w, wsx0, wsx1);
-      float thr = max(6.f, 5.f / zoom_);
+      float msx = wireSplitSX(w, wsx0, wsx1), thr = max(6.f, 5.f / zoom_);
       if (std::abs(sx - msx) <= thr && sy >= min(wsy0, wsy1) - thr &&
           sy <= max(wsy0, wsy1) + thr) {
         dragSplit_ = true;
         dragSplitId_ = w.id;
         float worldMX = (w.splitX < 1e29f) ? w.splitX : (camX_ + msx / zoom_);
         dragSplitOff_ = wx - worldMX;
-        for (auto &g2 : circuit.gates)
-          g2.selected = false;
+        if (!shift) {
+          for (auto &g2 : circuit.gates)
+            g2.selected = false;
+          for (auto &inst : circuit.subcircuitInsts)
+            inst.selected = false;
+        }
         for (auto &w2 : circuit.wires)
           w2.selected = (w2.id == w.id);
         if (onStatusMessage)
-          onStatusMessage("Drag to reposition wire  ·  Release to finish");
+          onStatusMessage("Drag to reposition wire");
         redraw();
         return;
       }
     }
 
-    // Start wire drag from output pin
+    // Start wire drag from output pin (unchanged)
     {
       auto pins = collectPins(circuit);
       PinRef src{};
@@ -1897,8 +2372,12 @@ public:
         dragCurWX_ = wx;
         dragCurWY_ = wy;
         hasDstSnap_ = false;
-        for (auto &g : circuit.gates)
-          g.selected = false;
+        if (!shift) {
+          for (auto &g : circuit.gates)
+            g.selected = false;
+          for (auto &inst : circuit.subcircuitInsts)
+            inst.selected = false;
+        }
         for (auto &w : circuit.wires)
           w.selected = false;
         if (onStatusMessage)
@@ -1908,38 +2387,92 @@ public:
       }
     }
 
-    // Select wire by clicking on it
-    for (auto &w : circuit.wires)
-      w.selected = false;
+    // Wire select (unchanged except don't clear if shift)
+    if (!shift)
+      for (auto &w : circuit.wires)
+        w.selected = false;
     for (auto &w : circuit.wires) {
       auto [wsx0, wsy0, wsx1, wsy1] = wireSC(w);
       float msx = wireSplitSX(w, wsx0, wsx1);
       if (orthoHit(wsx0, wsy0, wsx1, wsy1, msx, sx, sy, 8.f)) {
         w.selected = true;
-        for (auto &g : circuit.gates)
-          g.selected = false;
+        if (!shift) {
+          for (auto &g : circuit.gates)
+            g.selected = false;
+          for (auto &inst : circuit.subcircuitInsts)
+            inst.selected = false;
+        }
         if (onStatusMessage)
-          onStatusMessage(
-              "Wire selected  ·  Del to remove  ·  Right-click to delete");
+          onStatusMessage("Wire selected  ·  Del to remove");
         redraw();
         return;
       }
     }
 
-    // Select / drag gate
-    for (auto &g : circuit.gates)
-      g.selected = false;
-    int hit = hitGate(wx, wy);
-    if (hit >= 0) {
-      Gate *g = circuit.find(hit);
+    // Hit-test gate / subcircuit instance
+    int hitInst = hitSubInst(wx, wy);
+    int hitG = hitGate(wx, wy);
+
+    if (hitInst >= 0) {
+      SubcircuitInst *inst = circuit.findInst(hitInst);
+      if (inst) {
+        if (shift) {
+          inst->selected = !inst->selected;
+          redraw();
+          return;
+        }
+        if (inst->selected) {
+          // Already selected → begin multi-drag
+          beginMultiDrag(wx, wy);
+          return;
+        }
+        // Single select + single drag
+        for (auto &g : circuit.gates)
+          g.selected = false;
+        for (auto &i2 : circuit.subcircuitInsts)
+          i2.selected = false;
+        inst->selected = true;
+        dragInstId_ = hitInst;
+        dragOx_ = wx - inst->x;
+        dragOy_ = wy - inst->y;
+      }
+    } else if (hitG >= 0) {
+      Gate *g = circuit.find(hitG);
       if (g) {
+        if (shift) {
+          g->selected = !g->selected;
+          redraw();
+          return;
+        }
+        if (g->selected) {
+          // Already selected → begin multi-drag
+          beginMultiDrag(wx, wy);
+          return;
+        }
+        // Single select + single drag
+        for (auto &g2 : circuit.gates)
+          g2.selected = false;
+        for (auto &inst : circuit.subcircuitInsts)
+          inst.selected = false;
         g->selected = true;
-        dragId_ = hit;
+        dragId_ = hitG;
         dragOx_ = wx - g->x;
         dragOy_ = wy - g->y;
       }
-    } else
-      dragId_ = -1;
+    } else {
+      // Clicked empty space
+      if (!shift) {
+        for (auto &g : circuit.gates)
+          g.selected = false;
+        for (auto &inst : circuit.subcircuitInsts)
+          inst.selected = false;
+      }
+      // Start rubber-band
+      dragSelect_ = true;
+      dragSelX0_ = dragSelX1_ = wx;
+      dragSelY0_ = dragSelY1_ = wy;
+      dragSelAdditive_ = shift;
+    }
     redraw();
   }
 
@@ -1961,7 +2494,6 @@ public:
       }
       return;
     }
-
     float wx, wy;
     s2w(sx, sy, wx, wy);
     if (mmb_) {
@@ -1974,23 +2506,20 @@ public:
     }
     lastSX_ = sx;
     lastSY_ = sy;
-
     if (isSimActive())
       return;
 
-    // Move wire split
     if (dragSplit_) {
       Wire *w = circuit.find_wire(dragSplitId_);
       if (w) {
-        float newSplitW = wx - dragSplitOff_;
+        float nw = wx - dragSplitOff_;
         if (snapEnabled)
-          newSplitW = snapGrid(newSplitW);
-        w->splitX = newSplitW;
+          nw = snapGrid(nw);
+        w->splitX = nw;
         redraw();
       }
       return;
     }
-
     if (dragWire_) {
       dragCurWX_ = wx;
       dragCurWY_ = wy;
@@ -2005,6 +2534,50 @@ public:
       return;
     }
 
+    // Rubber-band drag select
+    if (dragSelect_) {
+      dragSelX1_ = wx;
+      dragSelY1_ = wy;
+      redraw();
+      return;
+    }
+
+    // Multi-drag
+    if (dragMulti_) {
+      float rawDX = wx - dragMultiStartWX_;
+      float rawDY = wy - dragMultiStartWY_;
+      // Snap the delta using the first origin as anchor
+      float snappedDX = rawDX, snappedDY = rawDY;
+      if (snapEnabled && !dragMultiOrigins_.empty()) {
+        snappedDX =
+            snapGrid(dragMultiOrigins_[0].ox + rawDX) - dragMultiOrigins_[0].ox;
+        snappedDY =
+            snapGrid(dragMultiOrigins_[0].oy + rawDY) - dragMultiOrigins_[0].oy;
+      }
+      for (auto &orig : dragMultiOrigins_) {
+        if (orig.isInst) {
+          SubcircuitInst *inst = circuit.findInst(orig.id);
+          if (inst) {
+            inst->x = orig.ox + snappedDX;
+            inst->y = orig.oy + snappedDY;
+            auto it = circuit.subcircuitDefs.find(inst->defId);
+            if (it != circuit.subcircuitDefs.end())
+              inst->recomputePins(it->second);
+          }
+        } else {
+          Gate *g = circuit.find(orig.id);
+          if (g) {
+            g->x = orig.ox + snappedDX;
+            g->y = orig.oy + snappedDY;
+            g->recomputePins();
+          }
+        }
+      }
+      redraw();
+      return;
+    }
+
+    // Pin hover feedback (unchanged)
     {
       auto pins = collectPins(circuit);
       PinRef h{};
@@ -2019,7 +2592,23 @@ public:
       if (changed)
         redraw();
     }
-
+    if (dragInstId_ >= 0) {
+      SubcircuitInst *inst = circuit.findInst(dragInstId_);
+      if (inst) {
+        float nx = wx - dragOx_, ny = wy - dragOy_;
+        if (snapEnabled) {
+          nx = snapGrid(nx);
+          ny = snapGrid(ny);
+        }
+        inst->x = nx;
+        inst->y = ny;
+        auto it = circuit.subcircuitDefs.find(inst->defId);
+        if (it != circuit.subcircuitDefs.end())
+          inst->recomputePins(it->second);
+        redraw();
+      }
+      return;
+    }
     if (dragId_ >= 0) {
       Gate *g = circuit.find(dragId_);
       if (g) {
@@ -2040,7 +2629,6 @@ public:
     mmb_ = false;
     if (isSimActive())
       return;
-
     if (dragSplit_) {
       dragSplit_ = false;
       if (dragSplitId_ >= 0) {
@@ -2051,7 +2639,6 @@ public:
       dragSplitId_ = -1;
       return;
     }
-
     if (dragWire_) {
       dragWire_ = false;
       if (hasDstSnap_) {
@@ -2070,13 +2657,74 @@ public:
           if (onCircuitChanged)
             onCircuitChanged();
           if (onStatusMessage)
-            onStatusMessage("Connected  ·  Press ▶ Play to simulate");
+            onStatusMessage("Connected");
         } else if (onStatusMessage)
           onStatusMessage(
               "Input already connected — remove existing wire first");
       }
       hasDstSnap_ = false;
       redraw();
+      return;
+    }
+    // Rubber-band finalise
+    if (dragSelect_) {
+      dragSelect_ = false;
+      float minX = min(dragSelX0_, dragSelX1_),
+            maxX = max(dragSelX0_, dragSelX1_);
+      float minY = min(dragSelY0_, dragSelY1_),
+            maxY = max(dragSelY0_, dragSelY1_);
+      // Only do selection if the band has some area (avoids accidental clear on
+      // tiny drags)
+      if (maxX - minX > 4.f / zoom_ || maxY - minY > 4.f / zoom_) {
+        for (auto &g : circuit.gates) {
+          float gh = gateH(g.type);
+          bool inside =
+              g.x >= minX && g.x <= maxX && g.y >= minY && g.y <= maxY;
+          if (dragSelAdditive_)
+            g.selected = g.selected || inside;
+          else
+            g.selected = inside;
+        }
+        for (auto &inst : circuit.subcircuitInsts) {
+          bool inside = inst.x >= minX && inst.x <= maxX && inst.y >= minY &&
+                        inst.y <= maxY;
+          if (dragSelAdditive_)
+            inst.selected = inst.selected || inside;
+          else
+            inst.selected = inside;
+        }
+        // Count selection for status
+        int n = 0;
+        for (auto &g : circuit.gates)
+          if (g.selected)
+            n++;
+        for (auto &inst : circuit.subcircuitInsts)
+          if (inst.selected)
+            n++;
+        if (n > 0 && onStatusMessage) {
+          char buf[64];
+          snprintf(buf, sizeof(buf), "%d item%s selected  ·  Ctrl+G to group",
+                   n, n == 1 ? "" : "s");
+          onStatusMessage(buf);
+        }
+      }
+      redraw();
+      return;
+    }
+    // Multi-drag commit
+    if (dragMulti_) {
+      dragMulti_ = false;
+      dragMultiOrigins_.clear();
+      pushUndo();
+      if (onCircuitChanged)
+        onCircuitChanged();
+      return;
+    }
+    if (dragInstId_ >= 0) {
+      pushUndo();
+      dragInstId_ = -1;
+      if (onCircuitChanged)
+        onCircuitChanged();
       return;
     }
     if (dragId_ >= 0) {
@@ -2101,8 +2749,8 @@ public:
     if (hit >= 0) {
       for (auto &g : circuit.gates)
         g.selected = (g.id == hit);
-      for (auto &w : circuit.wires)
-        w.selected = false;
+      for (auto &inst : circuit.subcircuitInsts)
+        inst.selected = false;
       float mx = sx, my = sy;
       if (hwnd_) {
         POINT pt;
@@ -2112,6 +2760,20 @@ public:
         my = float(pt.y);
       }
       ctxMenuOpen(hit, mx, my);
+      redraw();
+      return;
+    }
+    // Right-click subcircuit instance → delete it
+    int hitInst = hitSubInst(wx, wy);
+    if (hitInst >= 0) {
+      pushUndo();
+      circuit.removeInstWires(hitInst);
+      circuit.removeInst(hitInst);
+      circuit.evaluate();
+      if (onCircuitChanged)
+        onCircuitChanged();
+      if (onStatusMessage)
+        onStatusMessage("Subcircuit instance deleted");
       redraw();
       return;
     }
@@ -2147,6 +2809,20 @@ public:
           redraw();
         } else if (g && g->type == GateType::CLOCK)
           cycleClockFreq(hit);
+      }
+      return;
+    }
+    int hitInst = hitSubInst(wx, wy);
+    if (hitInst >= 0) {
+      // Future: open inner editor.  For now show pin summary.
+      SubcircuitInst *inst = circuit.findInst(hitInst);
+      auto it = circuit.subcircuitDefs.find(inst ? inst->defId : -1);
+      if (inst && it != circuit.subcircuitDefs.end()) {
+        std::string msg = "[" + it->second.name + "]  ";
+        msg += std::to_string(inst->inputPins.size()) + " in / " +
+               std::to_string(inst->outputPins.size()) + " out";
+        if (onStatusMessage)
+          onStatusMessage(msg.c_str());
       }
       return;
     }
@@ -2190,7 +2866,6 @@ public:
 private:
   HWND hwnd_ = nullptr;
   WNDPROC origProc_ = nullptr;
-
   static std::unordered_map<HWND, CircuitSurface *> &sMap() {
     static std::unordered_map<HWND, CircuitSurface *> m;
     return m;
@@ -2218,8 +2893,8 @@ private:
     case WM_MOUSEWHEEL: {
       POINT pt = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
       ScreenToClient(h, &pt);
-      float cx = float(pt.x), cy = float(pt.y);
-      float dy = float((short)HIWORD(wp)) / float(WHEEL_DELTA);
+      float cx = float(pt.x), cy = float(pt.y),
+            dy = float((short)HIWORD(wp)) / float(WHEEL_DELTA);
       float wx0, wy0;
       s->s2w(cx, cy, wx0, wy0);
       float f = (dy > 0) ? 1.12f : 1.f / 1.12f;
@@ -2285,11 +2960,33 @@ public:
         onLoadRequest();
       return;
     }
+    // Ctrl+G = group selected
+    if (ctrl && key == 'G') {
+      groupSelected();
+      return;
+    }
     if (key == 'G' && !ctrl) {
       snapEnabled = !snapEnabled;
       if (onStatusMessage)
         onStatusMessage(snapEnabled ? "⊞ Snap to grid ON"
                                     : "⊟ Snap to grid OFF");
+      redraw();
+      return;
+    }
+
+    // Ctrl+A = select all
+    if (ctrl && key == 'A') {
+      for (auto &g : circuit.gates)
+        g.selected = true;
+      for (auto &inst : circuit.subcircuitInsts)
+        inst.selected = true;
+      int n = int(circuit.gates.size()) + int(circuit.subcircuitInsts.size());
+      if (n > 0 && onStatusMessage) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "All %d items selected  ·  Ctrl+G to group",
+                 n);
+        onStatusMessage(buf);
+      }
       redraw();
       return;
     }
@@ -2337,7 +3034,14 @@ public:
           circuit.remove(circuit.gates[i].id);
           anyG = true;
         }
-      if (anyG) {
+      bool anyI = false;
+      for (int i = int(circuit.subcircuitInsts.size()) - 1; i >= 0; --i)
+        if (circuit.subcircuitInsts[i].selected) {
+          circuit.removeInstWires(circuit.subcircuitInsts[i].id);
+          circuit.removeInst(circuit.subcircuitInsts[i].id);
+          anyI = true;
+        }
+      if (anyG || anyI) {
         pushUndo();
         circuit.evaluate();
         if (onCircuitChanged)
@@ -2351,32 +3055,42 @@ private:
   static constexpr int kMaxUndo = 50;
   std::vector<std::string> undoStack_;
   int undoPos_ = 0;
-
   int viewW_ = 1, viewH_ = 1;
   float camX_ = 0, camY_ = 0, zoom_ = 1.f;
-
   GLuint prog_ = 0, vao_ = 0, vbo_ = 0;
   GLint uViewSize_ = -1, uColor_ = -1;
   GLuint texProg_ = 0, texVao_ = 0, texVbo_ = 0;
   GLint uTexViewSize_ = -1, uTexSampler_ = -1;
-
   GLuint ctxMenuTex_ = 0;
   int ctxMenuTexW_ = 0, ctxMenuTexH_ = 0;
   bool ctxMenuTexDirty_ = true;
-
-  int dragId_ = -1;
+  int dragId_ = -1, dragInstId_ = -1;
   float dragOx_ = 0, dragOy_ = 0, lastSX_ = 0, lastSY_ = 0;
   bool mmb_ = false, dragWire_ = false;
   PinRef dragSrc_{}, dstSnap_{};
   float dragCurWX_ = 0, dragCurWY_ = 0;
   bool hasDstSnap_ = false, hovPinValid_ = false;
   PinRef hovPin_{};
-
   bool dragSplit_ = false;
   int dragSplitId_ = -1;
   float dragSplitOff_ = 0.f;
 
-  // ── Context menu ──────────────────────────────────────────────────────────
+  // ── Rubber-band drag-select ───────────────────────────────────────────────
+  bool dragSelect_ = false;
+  float dragSelX0_ = 0, dragSelY0_ = 0; // world-space anchor corner
+  float dragSelX1_ = 0, dragSelY1_ = 0; // world-space live corner
+  bool dragSelAdditive_ = false;        // shift was held at drag start
+
+  // ── Multi-drag ────────────────────────────────────────────────────────────
+  bool dragMulti_ = false;
+  float dragMultiStartWX_ = 0, dragMultiStartWY_ = 0; // world pos at drag start
+  struct ItemOrigin {
+    bool isInst;
+    int id;
+    float ox, oy;
+  };
+  std::vector<ItemOrigin> dragMultiOrigins_; // start positions of all selected
+
   struct CtxMenuState {
     bool open = false;
     int gateId = -1;
@@ -2384,6 +3098,49 @@ private:
     int hoveredItem = -1;
   } ctxMenu_;
 
+  void beginMultiDrag(float wx, float wy) {
+    dragMulti_ = true;
+    dragMultiStartWX_ = wx;
+    dragMultiStartWY_ = wy;
+    dragMultiOrigins_.clear();
+    for (auto &g : circuit.gates)
+      if (g.selected)
+        dragMultiOrigins_.push_back({false, g.id, g.x, g.y});
+    for (auto &inst : circuit.subcircuitInsts)
+      if (inst.selected)
+        dragMultiOrigins_.push_back({true, inst.id, inst.x, inst.y});
+  }
+
+  // ── Hit testing ───────────────────────────────────────────────────────
+  int hitGate(float wx, float wy) const {
+    for (int i = int(circuit.gates.size()) - 1; i >= 0; --i) {
+      const Gate &g = circuit.gates[i];
+      float gh = gateH(g.type);
+      if (wx >= g.x - kGW * .5f && wx <= g.x + kGW * .5f &&
+          wy >= g.y - gh * .5f && wy <= g.y + gh * .5f)
+        return g.id;
+    }
+    return -1;
+  }
+  int hitSubInst(float wx, float wy) const {
+    for (int i = int(circuit.subcircuitInsts.size()) - 1; i >= 0; --i) {
+      const SubcircuitInst &inst = circuit.subcircuitInsts[i];
+      auto it = circuit.subcircuitDefs.find(inst.defId);
+      int ni = it != circuit.subcircuitDefs.end()
+                   ? (int)it->second.inputPins.size()
+                   : 1;
+      int no = it != circuit.subcircuitDefs.end()
+                   ? (int)it->second.outputPins.size()
+                   : 1;
+      float h = subcircuitH(ni, no);
+      if (wx >= inst.x - kSCWidth * .5f && wx <= inst.x + kSCWidth * .5f &&
+          wy >= inst.y - h * .5f && wy <= inst.y + h * .5f)
+        return inst.id;
+    }
+    return -1;
+  }
+
+  // ── Context menu (unchanged internals) ───────────────────────────────
   float ctxRowY(int i) const {
     return ctxMenu_.sy + kCMPadV + float(i) * kCMRowStride;
   }
@@ -2429,6 +3186,7 @@ private:
     ctxMenuTexH_ = 0;
     ctxMenuTexDirty_ = true;
   }
+
   void rebuildCtxMenuTexture() {
     ctxMenuTexDirty_ = false;
     int texW = int(kCMWidth), texH = int(kCMHeight);
@@ -2478,11 +3236,9 @@ private:
     for (int i = 0; i < kGateMenuItemCount; ++i) {
       float iy = ctxRowY(i) - ctxMenu_.sy;
       bool hov = (i == ctxMenu_.hoveredItem);
-      COLORREF col;
-      if (kGateMenuItems[i].action == GateMenuAction::Delete)
-        col = hov ? RGB(255, 145, 145) : RGB(200, 110, 110);
-      else
-        col = hov ? RGB(230, 215, 255) : RGB(175, 168, 205);
+      COLORREF col = (kGateMenuItems[i].action == GateMenuAction::Delete)
+                         ? (hov ? RGB(255, 145, 145) : RGB(200, 110, 110))
+                         : (hov ? RGB(230, 215, 255) : RGB(175, 168, 205));
       SetTextColor(hdcMem, col);
       RECT r;
       r.left = (LONG)kCMTextOff;
@@ -2518,6 +3274,7 @@ private:
     DeleteObject(hBmp);
     DeleteDC(hdcMem);
   }
+
   void blitCtxMenuLabelTex() {
     if (!ctxMenuTex_)
       return;
@@ -2540,6 +3297,7 @@ private:
     ls_gl::uniform2f(uViewSize_, float(viewW_), float(viewH_));
     GL.bindVertexArray(vao_);
   }
+
   void drawContextMenu() {
     if (ctxMenuTexDirty_)
       rebuildCtxMenuTexture();
@@ -2633,30 +3391,35 @@ private:
 
   std::tuple<float, float, float, float> wireSC(const Wire &w) const {
     float sx0 = 0, sy0 = 0, sx1 = 0, sy1 = 0;
-    if (auto *g = circuit.find(w.src.gateId))
-      if (w.src.pinIdx < (int)g->outPins.size())
-        w2s(g->outPins[w.src.pinIdx].cx, g->outPins[w.src.pinIdx].cy, sx0, sy0);
-    if (auto *g = circuit.find(w.dst.gateId))
-      if (w.dst.pinIdx < (int)g->inPins.size())
-        w2s(g->inPins[w.dst.pinIdx].cx, g->inPins[w.dst.pinIdx].cy, sx1, sy1);
+    // Source
+    if (w.srcIsSubInst()) {
+      const SubcircuitInst *inst = circuit.findInst(w.srcInstId());
+      if (inst && w.src.pinIdx < (int)inst->outputPins.size())
+        w2s(inst->outputPins[w.src.pinIdx].cx,
+            inst->outputPins[w.src.pinIdx].cy, sx0, sy0);
+    } else {
+      if (auto *g = circuit.find(w.src.gateId))
+        if (w.src.pinIdx < (int)g->outPins.size())
+          w2s(g->outPins[w.src.pinIdx].cx, g->outPins[w.src.pinIdx].cy, sx0,
+              sy0);
+    }
+    // Dest
+    if (w.dstIsSubInst()) {
+      const SubcircuitInst *inst = circuit.findInst(w.dstInstId());
+      if (inst && w.dst.pinIdx < (int)inst->inputPins.size())
+        w2s(inst->inputPins[w.dst.pinIdx].cx, inst->inputPins[w.dst.pinIdx].cy,
+            sx1, sy1);
+    } else {
+      if (auto *g = circuit.find(w.dst.gateId))
+        if (w.dst.pinIdx < (int)g->inPins.size())
+          w2s(g->inPins[w.dst.pinIdx].cx, g->inPins[w.dst.pinIdx].cy, sx1, sy1);
+    }
     return {sx0, sy0, sx1, sy1};
   }
   float wireSplitSX(const Wire &w, float sx0, float sx1) const {
-    if (w.splitX < 1e29f)
-      return (w.splitX - camX_) * zoom_;
-    return (sx0 + sx1) * 0.5f;
+    return w.splitX < 1e29f ? (w.splitX - camX_) * zoom_ : (sx0 + sx1) * 0.5f;
   }
 
-  int hitGate(float wx, float wy) const {
-    for (int i = int(circuit.gates.size()) - 1; i >= 0; --i) {
-      const Gate &g = circuit.gates[i];
-      float gh = gateH(g.type);
-      if (wx >= g.x - kGW * .5f && wx <= g.x + kGW * .5f &&
-          wy >= g.y - gh * .5f && wy <= g.y + gh * .5f)
-        return g.id;
-    }
-    return -1;
-  }
   void buildShader() {
     prog_ = glutil::linkProgram(kGVert, kGFrag);
     assert(prog_);
@@ -2708,7 +3471,7 @@ private:
     glDrawArrays(GL_TRIANGLES, 0, (GLsizei)(v.size() / 2));
   }
 
-  // ── Grid ──────────────────────────────────────────────────────────────────
+  // ── Grid (unchanged) ──────────────────────────────────────────────────
   void drawGrid() {
     float gs = 40.f, step = gs * zoom_;
     if (step < 4.f)
@@ -2751,16 +3514,13 @@ private:
     dc(cross, 0.22f, 0.23f, 0.36f);
   }
 
-  // ── Wires ─────────────────────────────────────────────────────────────────
+  // ── Wires (unchanged logic, uses updated wireSC) ──────────────────────
   void drawAllWires() {
     bool sim = isSimActive();
-    float hw = max(1.0f, zoom_ * 1.4f);
-    float dotr = max(2.2f, hw * 1.0f);
-
+    float hw = max(1.0f, zoom_ * 1.4f), dotr = max(2.2f, hw * 1.0f);
     for (auto &w : circuit.wires) {
       auto [sx0, sy0, sx1, sy1] = wireSC(w);
       float msx = wireSplitSX(w, sx0, sx1);
-
       if (!sim && w.selected) {
         std::vector<float> halo;
         pushOrtho(halo, sx0, sy0, sx1, sy1, msx, hw + 4.f);
@@ -2796,17 +3556,25 @@ private:
     }
   }
 
-  // ── Drag preview ──────────────────────────────────────────────────────────
+  // ── Drag preview (unchanged) ──────────────────────────────────────────
   void drawDragPreview() {
     if (!dragWire_)
       return;
     float sx0, sy0;
     {
       auto *g = circuit.find(dragSrc_.gateId);
-      if (!g || dragSrc_.pinIdx >= (int)g->outPins.size())
-        return;
-      w2s(g->outPins[dragSrc_.pinIdx].cx, g->outPins[dragSrc_.pinIdx].cy, sx0,
-          sy0);
+      if (dragSrc_.isSubInst) {
+        auto *inst = circuit.findInst(-dragSrc_.gateId);
+        if (!inst || dragSrc_.pinIdx >= (int)inst->outputPins.size())
+          return;
+        w2s(inst->outputPins[dragSrc_.pinIdx].cx,
+            inst->outputPins[dragSrc_.pinIdx].cy, sx0, sy0);
+      } else {
+        if (!g || dragSrc_.pinIdx >= (int)g->outPins.size())
+          return;
+        w2s(g->outPins[dragSrc_.pinIdx].cx, g->outPins[dragSrc_.pinIdx].cy, sx0,
+            sy0);
+      }
     }
     float sx1, sy1;
     if (hasDstSnap_)
@@ -2834,7 +3602,7 @@ private:
     }
   }
 
-  // ── Pin hovers ────────────────────────────────────────────────────────────
+  // ── Pin hovers (unchanged) ─────────────────────────────────────────────
   void drawPinHovers() {
     if (dragWire_ && hasDstSnap_) {
       float sx, sy;
@@ -2855,7 +3623,7 @@ private:
     }
   }
 
-  // ── Sim border ────────────────────────────────────────────────────────────
+  // ── Sim border (unchanged) ─────────────────────────────────────────────
   void drawSimBorder() {
     float vw = float(viewW_), vh = float(viewH_), bw = 3.f;
     std::vector<float> b;
@@ -2870,19 +3638,149 @@ private:
   }
 
   // =========================================================================
-  // ── Gate drawing ──────────────────────────────────────────────────────────
+  // ── Subcircuit instance renderer ─────────────────────────────────────────
+  // =========================================================================
+  void drawSubcircuitInst(const SubcircuitInst &inst) {
+    auto it = circuit.subcircuitDefs.find(inst.defId);
+    const SubcircuitDef *def =
+        it != circuit.subcircuitDefs.end() ? &it->second : nullptr;
+
+    float sx, sy;
+    w2s(inst.x, inst.y, sx, sy);
+    float z = zoom_;
+    int ni = (int)inst.inputPins.size(), no = (int)inst.outputPins.size();
+    float h = subcircuitH(ni, no) * z;
+    float hw = kSCWidth * z * 0.5f, hh = h * 0.5f;
+    float L = sx - hw, R = sx + hw, yT = sy - hh, yB = sy + hh;
+    float lw = max(1.0f, z), cr = min(8.f * z, 7.f);
+    bool sim = isSimActive();
+
+    // Accent colour for subcircuit: violet
+    static constexpr float kSCBodyR = 0.10f, kSCBodyG = 0.08f, kSCBodyB = 0.22f;
+    static constexpr float kSCBordR = 0.62f, kSCBordG = 0.42f, kSCBordB = 0.98f;
+
+    // Shadow
+    {
+      std::vector<float> v;
+      pushRRFill(v, L + 3, yT + 3, R + 3, yB + 3, cr);
+      dc(v, 0, 0, 0, 0.45f);
+    }
+    // Body fill
+    {
+      std::vector<float> v;
+      pushRRFill(v, L, yT, R, yB, cr);
+      dc(v, kSCBodyR, kSCBodyG, kSCBodyB);
+    }
+    // Selection tint
+    if (inst.selected) {
+      std::vector<float> v;
+      pushRRFill(v, L, yT, R, yB, cr);
+      dc(v, 0.80f, 0.65f, 0.97f, 0.18f);
+    }
+    // Active glow (any output high)
+    if (sim) {
+      bool anyHigh = false;
+      for (auto &p : inst.outputPins)
+        if (p.value) {
+          anyHigh = true;
+          break;
+        }
+      if (anyHigh) {
+        std::vector<float> v;
+        pushRR(v, L - 1, yT - 1, R + 1, yB + 1, cr + 1, max(1.5f, z));
+        dc(v, kSCBordR, kSCBordG, kSCBordB, 0.50f);
+      }
+    }
+    // Outline
+    {
+      std::vector<float> v;
+      pushRR(v, L, yT, R, yB, cr, lw);
+      if (inst.selected)
+        dc(v, 0.80f, 0.65f, 0.97f);
+      else
+        dc(v, kSCBordR, kSCBordG, kSCBordB);
+    }
+    // Selection inner ring
+    if (inst.selected) {
+      std::vector<float> v;
+      pushRR(v, L + 2, yT + 2, R - 2, yB - 2, cr - 2, lw * 0.5f);
+      dc(v, 0.80f, 0.65f, 0.97f, 0.3f);
+    }
+
+    // Centre label: module name
+    // (text rendered via GDI into a tiny texture would be ideal;
+    //  for now draw a horizontal rule to suggest the name region)
+    {
+      float midY = sy;
+      std::vector<float> v;
+      pushLine(v, L + cr, midY, R - cr, midY, max(0.5f, lw * 0.4f));
+      dc(v, kSCBordR, kSCBordG, kSCBordB, 0.25f);
+    }
+    // Small triangle badge top-right to indicate it's a subcircuit
+    {
+      float bx = R - 5.f * z, by = yT + 5.f * z, bs = 5.f * z;
+      std::vector<float> v;
+      v.insert(v.end(), {bx - bs, by, bx, by, bx, by + bs});
+      dc(v, kSCBordR, kSCBordG, kSCBordB, 0.6f);
+    }
+
+    // ── Input pins ───────────────────────────────────────────────────
+    for (int i = 0; i < ni; i++) {
+      const SubcircuitPinInfo &pin = inst.inputPins[i];
+      float psx, psy;
+      w2s(pin.cx, pin.cy, psx, psy);
+      bool val = pin.value;
+      {
+        std::vector<float> v;
+        pushLine(v, psx, psy, L, psy, max(0.8f, z * .7f));
+        dc(v, 0.38f, 0.42f, 0.60f);
+      }
+      {
+        std::vector<float> v;
+        pushCircle(v, psx, psy, max(2.5f, kPinR * z));
+        if (sim)
+          dc(v, val ? .28f : .4f, val ? .86f : .4f, val ? .47f : .65f);
+        else
+          dc(v, pin.connected ? 1.f : 0.f, pin.connected ? .86f : .31f,
+             pin.connected ? .47f : .51f);
+      }
+    }
+
+    // ── Output pins ──────────────────────────────────────────────────
+    for (int i = 0; i < no; i++) {
+      const SubcircuitPinInfo &pin = inst.outputPins[i];
+      float psx, psy;
+      w2s(pin.cx, pin.cy, psx, psy);
+      bool val = pin.value;
+      {
+        std::vector<float> v;
+        pushLine(v, R, psy, psx, psy, max(0.8f, z * .7f));
+        dc(v, 0.38f, 0.42f, 0.60f);
+      }
+      {
+        std::vector<float> v;
+        pushCircle(v, psx, psy, max(2.5f, kPinR * z));
+        if (sim)
+          dc(v, val ? .28f : .86f, val ? .86f : .51f, val ? .47f : .16f);
+        else
+          dc(v, pin.connected ? 1.f : .86f, pin.connected ? .86f : .51f,
+             pin.connected ? .47f : .16f);
+      }
+    }
+  }
+
+  // =========================================================================
+  // ── Gate drawing (unchanged from v12 — full copy) ────────────────────────
   // =========================================================================
   void drawGate(const Gate &g) {
     float sx, sy;
     w2s(g.x, g.y, sx, sy);
-    float z = zoom_;
-    float gh = gateH(g.type) * z;
-    float hw = kGW * z * 0.5f, hh = gh * 0.5f;
-    float L = sx - hw, R = sx + hw, yT = sy - hh, yB = sy + hh;
-    float lw = max(1.0f, z), cr = kCorner * z;
+    float z = zoom_, gh = gateH(g.type) * z, hw = kGW * z * 0.5f,
+          hh = gh * 0.5f;
+    float L = sx - hw, R = sx + hw, yT = sy - hh, yB = sy + hh,
+          lw = max(1.0f, z), cr = kCorner * z;
     bool sim = isSimActive();
     GateColors col = gateColors(g.type, g.selected);
-
     auto DC = [&](const std::vector<float> &v, float r, float gg, float b,
                   float a = 1.f) { dc(v, r, gg, b, a); };
     auto DCb = [&](const std::vector<float> &v, float a = 1.f) {
@@ -2892,13 +3790,11 @@ private:
       DC(v, col.body[0], col.body[1], col.body[2], a);
     };
 
-    // ── Sequential gate drawing (DFF / DLATCH / TFF / JKFF) ──────────────
     if (isSequential(g.type)) {
       drawSequentialGate(g, sx, sy, L, R, yT, yB, lw, z, sim, col);
       return;
     }
 
-    // ── INPUT ──────────────────────────────────────────────────────────────
     if (g.type == GateType::INPUT) {
       {
         std::vector<float> v;
@@ -2961,8 +3857,6 @@ private:
       }
       return;
     }
-
-    // ── OUTPUT ─────────────────────────────────────────────────────────────
     if (g.type == GateType::OUTPUT) {
       {
         std::vector<float> v;
@@ -3032,8 +3926,6 @@ private:
       }
       return;
     }
-
-    // ── CLOCK ──────────────────────────────────────────────────────────────
     if (g.type == GateType::CLOCK) {
       bool on = g.inputVal;
       {
@@ -3109,22 +4001,18 @@ private:
       }
       return;
     }
-
-    // ── IEEE/ANSI logic gates ───────────────────────────────────────────────
+    // IEEE/ANSI gates
     bool isNeg = (g.type == GateType::NAND || g.type == GateType::NOR ||
                   g.type == GateType::XNOR || g.type == GateType::NOT);
     bool isOR = (g.type == GateType::OR || g.type == GateType::NOR ||
                  g.type == GateType::XOR || g.type == GateType::XNOR);
     bool isAND = (g.type == GateType::AND || g.type == GateType::NAND);
     bool isTRI = (g.type == GateType::NOT);
-    float H = yB - yT, MY = (yT + yB) * 0.5f;
-    float bubR = H * 0.115f;
+    float H = yB - yT, MY = (yT + yB) * 0.5f, bubR = H * 0.115f;
     float tipX = isTRI ? (R - H * 0.20f) : R;
     float bubCX = isAND   ? (L + (R - L) * 0.44f + H * 0.5f + bubR)
                   : isTRI ? (tipX + bubR)
                           : (R + bubR);
-
-    // Shadow
     {
       std::vector<float> sv;
       float s = 3.f;
@@ -3136,7 +4024,6 @@ private:
         pushTriFill(sv, L + s, yT + s, R + s, yB + s);
       DC(sv, 0, 0, 0, 0.38f);
     }
-    // Body fill
     {
       std::vector<float> fv;
       if (isAND)
@@ -3147,7 +4034,6 @@ private:
         pushTriFill(fv, L, yT, R, yB);
       DCbd(fv);
     }
-    // Selection tint
     if (g.selected) {
       std::vector<float> sv;
       if (isAND)
@@ -3158,7 +4044,6 @@ private:
         pushTriFill(sv, L, yT, R, yB);
       DC(sv, 0.80f, 0.65f, 0.97f, 0.18f);
     }
-    // Sim active glow
     if (sim && g.simVal) {
       std::vector<float> gv;
       float e = lw * 0.8f;
@@ -3174,7 +4059,6 @@ private:
         pushRing(gv, bubCX, MY, bubR + e, lw * 1.8f);
       DC(gv, 0.28f, 0.86f, 0.47f, 0.38f);
     }
-    // Outline
     {
       std::vector<float> ov;
       if (isAND)
@@ -3187,7 +4071,6 @@ private:
         pushTRIOutline(ov, L, yT, R, yB, lw, isNeg);
       DCb(ov);
     }
-    // Negation bubble
     if (isNeg) {
       {
         std::vector<float> v;
@@ -3200,7 +4083,6 @@ private:
         DCb(v);
       }
     }
-    // Inner selection ring
     if (g.selected) {
       std::vector<float> rv;
       float i2 = lw * 0.45f;
@@ -3214,7 +4096,6 @@ private:
         pushTRIOutline(rv, L + 2, yT + 2, R - 2, yB - 2, i2, isNeg);
       DCb(rv, 0.35f);
     }
-    // Input pins
     for (auto &pin : g.inPins) {
       float psx, psy;
       w2s(pin.cx, pin.cy, psx, psy);
@@ -3233,7 +4114,6 @@ private:
            pin.connected ? .47f : .51f);
       }
     }
-    // Output pins
     for (auto &pin : g.outPins) {
       float psx, psy;
       w2s(pin.cx, pin.cy, psx, psy);
@@ -3252,16 +4132,6 @@ private:
     }
   }
 
-  // ── Sequential gate renderer ───────────────────────────────────────────────
-  //
-  // Layout (all in screen space):
-  //   Rectangle body with rounded corners.
-  //   Left edge: input pin stubs with small labels inside the body.
-  //     CLK pin gets a ">"-triangle glyph (IEEE dynamic indicator).
-  //   Right edge: Q (top) and /Q (bottom) outputs.
-  //     /Q gets a negation bubble just outside the right edge.
-  //   State indicator LED in top-right corner.
-  //
   void drawSequentialGate(const Gate &g, float sx, float sy, float L, float R,
                           float yT, float yB, float lw, float z, bool sim,
                           const GateColors &col) {
@@ -3273,135 +4143,99 @@ private:
     auto DCbd = [&](const std::vector<float> &v, float a = 1.f) {
       DC(v, col.body[0], col.body[1], col.body[2], a);
     };
-
     float cr = min(8.f * z, 6.f);
     bool Q = g.stateVal;
-
-    // Shadow
     {
       std::vector<float> v;
       pushRRFill(v, L + 3, yT + 3, R + 3, yB + 3, cr);
       DC(v, 0, 0, 0, 0.42f);
     }
-    // Body fill
     {
       std::vector<float> v;
       pushRRFill(v, L, yT, R, yB, cr);
       DCbd(v);
     }
-    // Selection tint
     if (g.selected) {
       std::vector<float> v;
       pushRRFill(v, L, yT, R, yB, cr);
       DC(v, 0.80f, 0.65f, 0.97f, 0.16f);
     }
-    // Q-active body glow
     if (sim && Q) {
       std::vector<float> v;
       pushRRFill(v, L, yT, R, yB, cr);
       DC(v, col.border[0], col.border[1], col.border[2], 0.12f);
     }
-    // Outline
     {
       std::vector<float> v;
       pushRR(v, L, yT, R, yB, cr, lw);
       DCb(v);
     }
-    // Selection inner ring
     if (g.selected) {
       std::vector<float> v;
       pushRR(v, L + 2, yT + 2, R - 2, yB - 2, cr - 2, lw * 0.5f);
       DCb(v, 0.3f);
     }
-    // Sim glow ring
     if (sim && Q) {
       std::vector<float> v;
       pushRR(v, L - 1, yT - 1, R + 1, yB + 1, cr + 1, max(1.5f, z));
       DC(v, col.border[0], col.border[1], col.border[2], 0.50f);
     }
-
-    // ── Input pins with labels & clock glyph ──────────────────────────────
     int ni = (int)g.inPins.size();
     for (int i = 0; i < ni; i++) {
       const Pin &pin = g.inPins[i];
       float psx, psy;
       w2s(pin.cx, pin.cy, psx, psy);
-
-      // Determine which pin this is by name
       const char *lbl = kInPinLabel[(int)g.type][i];
-      bool isClk = (lbl && (lbl[0] == 'C')); // "CLK"
-
-      // Wire stub from edge to pin
+      bool isClk = (lbl && lbl[0] == 'C');
       {
         std::vector<float> v;
         pushLine(v, psx, psy, L, psy, max(0.8f, z * .7f));
         DC(v, 0.38f, 0.42f, 0.60f);
       }
-
-      // Pin dot
       {
         std::vector<float> v;
         pushCircle(v, psx, psy, max(2.5f, kPinR * z));
         DC(v, pin.connected ? 1.f : 0.f, pin.connected ? .86f : .31f,
            pin.connected ? .47f : .51f);
       }
-
-      // Clock triangle glyph just inside the left body edge
       if (isClk) {
         float tw = 7.f * z, th = 5.f * z;
         std::vector<float> tv;
         tv.insert(tv.end(), {L, psy - th, L + tw, psy, L, psy + th});
         DCb(tv, 0.85f);
       }
-
-      // EN / RST / T / J / K dots — small filled circle to distinguish non-D
-      // pins
       if (!isClk && lbl && lbl[0] != 'D' && lbl[0] != 'J') {
-        // small marker line inside body
         std::vector<float> v;
         float markX = L + min(12.f * z, (R - L) * 0.15f);
         pushLine(v, L, psy, markX, psy, max(1.5f, z));
         DC(v, col.border[0], col.border[1], col.border[2], 0.45f);
       }
     }
-
-    // ── Output pins ────────────────────────────────────────────────────────
-    // Q  = pin 0 (top)
-    // /Q = pin 1 (bottom) — has negation bubble
-    float bubR = min(5.f * z, 4.f);
+    float bubR2 = min(5.f * z, 4.f);
     for (int i = 0; i < (int)g.outPins.size(); i++) {
       const Pin &pin = g.outPins[i];
       float psx, psy;
       w2s(pin.cx, pin.cy, psx, psy);
       bool isQBar = (i == 1);
       bool val = isQBar ? !Q : Q;
-
-      float stubStart = isQBar ? (R + bubR * 2.f + lw) : R;
-
-      // Stub wire
+      float stubStart = isQBar ? (R + bubR2 * 2.f + lw) : R;
       {
         std::vector<float> v;
         pushLine(v, stubStart, psy, psx, psy, max(0.8f, z * .7f));
         DC(v, 0.38f, 0.42f, 0.60f);
       }
-
-      // Negation bubble for /Q
       if (isQBar) {
-        // Filled bubble body
         {
           std::vector<float> v;
-          pushCircle(v, R + bubR + lw * 0.5f, psy, bubR, 14);
+          pushCircle(v, R + bubR2 + lw * 0.5f, psy, bubR2, 14);
           DCbd(v);
         }
-        // Bubble outline
         {
           std::vector<float> v;
-          pushRing(v, R + bubR + lw * 0.5f, psy, bubR, lw * 0.85f);
+          pushRing(v, R + bubR2 + lw * 0.5f, psy, bubR2, lw * 0.85f);
           DCb(v);
         }
       }
-
-      // Pin dot (coloured by live value in sim mode)
       {
         std::vector<float> v;
         pushCircle(v, psx, psy, max(2.5f, kPinR * z));
@@ -3412,8 +4246,6 @@ private:
              pin.connected ? .47f : .16f);
       }
     }
-
-    // ── State LED ──────────────────────────────────────────────────────────
     {
       float cr2 = max(4.5f, 6.f * z), bcx = R - cr2 - 2.5f * z,
             bcy = yT + cr2 + 2.5f * z;
@@ -3436,12 +4268,91 @@ private:
       }
     }
   }
+
+  // ── Internal label dialog helper (called from groupSelected) ──────────
+  static std::string dlgLabelInternal_(const char *title, const char *initial) {
+    struct Ctx {
+      char buf[128];
+    };
+    static Ctx ctx;
+    strncpy_s(ctx.buf, sizeof(ctx.buf), initial, _TRUNCATE);
+    struct P {
+      static INT_PTR CALLBACK Proc(HWND h, UINT m, WPARAM w, LPARAM l) {
+        static Ctx *c = nullptr;
+        if (m == WM_INITDIALOG) {
+          c = (Ctx *)l;
+          HWND ed = GetDlgItem(h, 100);
+          SetWindowTextA(ed, c->buf);
+          SendMessageA(ed, EM_SETSEL, 0, -1);
+          SetFocus(ed);
+          return FALSE;
+        }
+        if (m == WM_COMMAND) {
+          if (LOWORD(w) == IDOK) {
+            GetDlgItemTextA(h, 100, c->buf, sizeof(c->buf));
+            EndDialog(h, IDOK);
+          } else if (LOWORD(w) == IDCANCEL)
+            EndDialog(h, IDCANCEL);
+        }
+        return FALSE;
+      }
+    };
+    std::vector<WORD> d;
+    auto p32 = [&](DWORD v) {
+      d.push_back(v & 0xFFFF);
+      d.push_back(v >> 16);
+    };
+    auto p16 = [&](WORD v) { d.push_back(v); };
+    auto pws = [&](const wchar_t *s) {
+      while (*s)
+        d.push_back((WORD)*s++);
+      d.push_back(0);
+    };
+    auto al4 = [&]() {
+      while (d.size() % 2)
+        d.push_back(0);
+    };
+    p32(DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION |
+        WS_SYSMENU);
+    p32(0);
+    p16(3);
+    p16(0);
+    p16(0);
+    p16(200);
+    p16(64);
+    p16(0);
+    p16(0);
+    pws(L"Subcircuit Name");
+    p16(9);
+    pws(L"Segoe UI");
+    auto ctrl = [&](DWORD style, short x, short y, short cx, short cy, WORD id,
+                    WORD cls, const wchar_t *txt) {
+      al4();
+      p32(WS_CHILD | WS_VISIBLE | style);
+      p32(0);
+      p16(x);
+      p16(y);
+      p16(cx);
+      p16(cy);
+      p16(id);
+      p16(0xFFFF);
+      p16(cls);
+      pws(txt);
+      p16(0);
+    };
+    ctrl(WS_BORDER | ES_AUTOHSCROLL, 7, 7, 186, 14, 100, 0x0081, L"");
+    ctrl(BS_DEFPUSHBUTTON, 60, 44, 36, 14, IDOK, 0x0080, L"OK");
+    ctrl(0, 102, 44, 50, 14, IDCANCEL, 0x0080, L"Cancel");
+    INT_PTR r = DialogBoxIndirectParamA(
+        GetModuleHandleA(nullptr), (LPCDLGTEMPLATE)d.data(),
+        GetForegroundWindow(), P::Proc, (LPARAM)&ctx);
+    return (r == IDOK) ? std::string(ctx.buf) : "__cancelled__";
+  }
 };
 
 // =============================================================================
 // §6  WIN32 FILE + LABEL DIALOGS
 // =============================================================================
-
 static std::string dlgSave(HWND hwnd) {
   char buf[MAX_PATH] = "circuit.lsim";
   OPENFILENAMEA ofn = {};
@@ -3547,7 +4458,6 @@ static std::string dlgLabel(HWND hwnd, const std::string &initial) {
 // =============================================================================
 // §7  APP
 // =============================================================================
-
 class LogicSimApp : public Component {
   State<int> gateCount;
   State<std::string> statusMsg;
@@ -3561,7 +4471,7 @@ class LogicSimApp : public Component {
   std::shared_ptr<CircuitSurface> surface_;
   CanvasWidget *canvas_ = nullptr;
 
-  static constexpr int kSW = 190, kTH = 80, kHH = 26;
+  static constexpr int kSW = 190, kTH = 88, kHH = 26;
 
   void notifyZoom(float z) {
     double p = double(z) * 100.0;
@@ -3581,33 +4491,43 @@ class LogicSimApp : public Component {
       ttText.set("No circuit");
       return;
     }
-
-    // Check for sequential elements — show state table instead
     bool hasSeq = false;
     for (auto &g : surface_->circuit.gates)
       if (isSequential(g.type)) {
         hasSeq = true;
         break;
       }
-
-    if (hasSeq) {
+    bool hasSub = !surface_->circuit.subcircuitInsts.empty();
+    if (hasSeq || hasSub) {
       std::ostringstream ss;
-      ss << "SEQUENTIAL CIRCUIT\n";
-      ss << "──────────────────\n";
-      for (auto &g : surface_->circuit.gates) {
-        if (!isSequential(g.type))
-          continue;
-        const char *n = kGateName[(int)g.type];
-        std::string lbl = g.label.empty() ? n : g.label;
-        ss << lbl << ":  Q=" << (g.stateVal ? "1" : "0")
-           << "  /Q=" << (!g.stateVal ? "1" : "0") << "\n";
+      if (hasSub) {
+        ss << "SUBCIRCUITS\n──────────────────\n";
+        for (auto &inst : surface_->circuit.subcircuitInsts) {
+          auto it = surface_->circuit.subcircuitDefs.find(inst.defId);
+          std::string n = it != surface_->circuit.subcircuitDefs.end()
+                              ? it->second.name
+                              : "?";
+          std::string lbl = inst.label.empty() ? n : inst.label;
+          ss << lbl << "  [" << inst.inputPins.size() << "→"
+             << inst.outputPins.size() << "]\n";
+          for (auto &p : inst.outputPins)
+            ss << "  " << p.label << "=" << (p.value ? "1" : "0") << "\n";
+        }
+        ss << "──────────────────\n";
       }
-      ss << "──────────────────\n";
-      ss << "Clock drives state.\nUse Step or Run.";
+      if (hasSeq) {
+        ss << "SEQUENTIAL\n──────────────────\n";
+        for (auto &g : surface_->circuit.gates) {
+          if (!isSequential(g.type))
+            continue;
+          std::string lbl = g.label.empty() ? kGateName[(int)g.type] : g.label;
+          ss << lbl << ": Q=" << (g.stateVal ? "1" : "0")
+             << "  /Q=" << (!g.stateVal ? "1" : "0") << "\n";
+        }
+      }
       ttText.set(ss.str());
       return;
     }
-
     std::vector<int> inIds, outIds;
     auto table = surface_->circuit.buildTruthTable(inIds, outIds);
     if (table.empty() || inIds.empty() || outIds.empty()) {
@@ -3702,7 +4622,6 @@ public:
   WidgetPtr build() override {
     int SW = GetSystemMetrics(SM_CXSCREEN), SH = GetSystemMetrics(SM_CYSCREEN);
     int vW = SW - kSW, vH = SH - kTH - kHH;
-
     auto cv = std::make_shared<CanvasWidget>()->setSize(vW, vH);
     cv->setCanvasSize(vW, vH);
     cv->setViewportEnabled(false);
@@ -3710,7 +4629,8 @@ public:
     canvas_ = cv.get();
 
     surface_->onCircuitChanged = [this]() {
-      gateCount.set(int(surface_->circuit.gates.size()));
+      gateCount.set(int(surface_->circuit.gates.size()) +
+                    int(surface_->circuit.subcircuitInsts.size()));
     };
     surface_->onStatusMessage = [this](const char *m) { statusMsg.set(m); };
     surface_->onRedrawNeeded = [this]() {
@@ -3758,13 +4678,11 @@ public:
         {GateType::INPUT, RGB(70, 210, 110), "Toggle 0/1"},
         {GateType::OUTPUT, RGB(220, 130, 40), "LED output"},
         {GateType::CLOCK, RGB(47, 210, 229), "0.5–8 Hz auto"},
-        // ── Sequential ──────────────────────────────────────────────────
         {GateType::DFF, RGB(50, 165, 240), "D·CLK·RST → Q"},
         {GateType::DLATCH, RGB(50, 215, 190), "D·EN → Q (level)"},
         {GateType::TFLIPFLOP, RGB(240, 185, 50), "T·CLK → Q (toggle)"},
         {GateType::JKFLIPFLOP, RGB(240, 95, 150), "J·K·CLK → Q"},
     };
-
     auto makeTile = [&](const TI &ti) -> WidgetPtr {
       GateType t = ti.t;
       COLORREF ac = ti.ac;
@@ -3803,7 +4721,7 @@ public:
             surface_->dropGate(t);
             std::string extra;
             if (t == GateType::DFF)
-              extra = "  ·  D·CLK(rising)·RST  →  Q and /Q";
+              extra = "  ·  D·CLK(rising)·RST → Q and /Q";
             else if (t == GateType::DLATCH)
               extra = "  ·  Transparent when EN=1";
             else if (t == GateType::TFLIPFLOP)
@@ -3811,14 +4729,12 @@ public:
             else if (t == GateType::JKFLIPFLOP)
               extra = "  ·  Set/Reset/Toggle on CLK rising edge";
             else if (t == GateType::CLOCK)
-              extra =
-                  "  ·  Dbl-click to change Hz  ·  Click in SIM to cycle Hz";
+              extra = "  ·  Dbl-click to change Hz";
             else
               extra = "  ·  Drag out→in  ·  Dbl-click to label";
             statusMsg.set(std::string("Placed ") + kGateName[(int)t] + extra);
           });
     };
-
     auto tileCol = std::make_shared<ColumnWidget>();
     tileCol->setSpacing(4);
     for (auto &ti : tiles)
@@ -3870,63 +4786,46 @@ public:
           ->setOnTap(fn);
     };
 
-    auto toolbar=Container(
-      Column(
-        Row(
-          Text("⚡ Logic Sim")->setFontSize(13)->setFontWeight(FontWeight::Bold)->setTextColor(kAccent),
-          SizedBox(8,0),
-          mkBtn("💾 Save",kGreen,RGB(10,20,18),RGB(30,80,60),[this](){doSave();}),
-          mkBtn("📂 Open",kGreen,RGB(10,20,18),RGB(30,80,60),[this](){doLoad();}),
-          SizedBox(4,0),
-          mkBtn("↩ Undo",kAccent,RGB(22,20,34),RGB(70,55,100),[this](){if(surface_)surface_->undo();}),
-          mkBtn("↪ Redo",kAccent,RGB(22,20,34),RGB(70,55,100),[this](){if(surface_)surface_->redo();}),
-          SizedBox(4,0),
-          GestureDetector(
-            Container(Text(snapOn,[](bool v){return v?"⊞ Snap":"⊟ Snap";})
-              ->setFontSize(10)->setFontWeight(FontWeight::Bold)->setTextColor(RGB(174,129,255)))
-            ->setHeight(28)->setBorderRadius(5)->setBackgroundColor(RGB(22,18,32))
-            ->setBorderWidth(1)->setBorderColor(RGB(70,55,100))->setPaddingAll(8,3,8,3))
-          ->setOnTap([this](){snapOn.set(!snapOn.get());}),
-          SizedBox(6,0),
-          Text("Zoom")->setFontSize(9)->setTextColor(kDim),
-          Slider(10.0,400.0,1.0)->setValue(zoomPct)->setTrackFillColor(kAccent)->setWidth(80),
-          Text(zoomPct,[](double v){char b[16];_snprintf_s(b,sizeof(b),_TRUNCATE,"%.0f%%",v);return std::string(b);})
-            ->setFontSize(10)->setTextColor(kText)->setMinWidth(34),
-          mkBtn("Fit",kAccent,RGB(22,20,34),RGB(70,55,100),[this](){if(surface_){surface_->fitToView();notifyZoom(surface_->getZoom());}}),
-          mkBtn("1:1",kAccent,RGB(22,20,34),RGB(70,55,100),[this](){if(surface_){surface_->resetZoom();notifyZoom(1.f);}}),
-          SizedBox(6,0),
-          mkBtn("🗑 Clear",RGB(243,139,168),RGB(34,14,20),RGB(120,40,60),[this](){
-            if(!surface_)return;surface_->pushUndo();surface_->simStop();
-            surface_->circuit.clearAll();gateCount.set(0);ttText.set("No circuit yet");
-            currentFile.set("");if(canvas_)canvas_->redraw();}),
-          SizedBox(6,0),
-          Text(gateCount,[](int n){return std::to_string(n)+(n==1?" gate":" gates");})
-            ->setFontSize(10)->setTextColor(kDim)
-        )->setSpacing(5)->setCrossAxisAlignment(CrossAxisAlignment::Center),
-        SizedBox(0,4),
-        Row(
-          GestureDetector(
-            Container(Text(simRunning,[](bool r){return r?"⏸ Pause":"▶ Play";})
-              ->setFontSize(11)->setFontWeight(FontWeight::Bold)->setTextColor(RGB(80,220,120)))
-            ->setHeight(30)->setBorderRadius(6)->setBackgroundColor(RGB(14,34,18))
-            ->setBorderWidth(1)->setBorderColor(RGB(40,120,55))->setPaddingAll(10,4,10,4)
-            ->setHoverBackgroundColor(RGB(18,44,22)))
-          ->setOnTap([this](){if(!surface_)return;if(!surface_->isSimActive())surface_->simPlay();else surface_->simPause();}),
-          SizedBox(5,0),
-          mkBtn("■ Stop",RGB(230,80,80),RGB(34,14,14),RGB(120,40,40),[this](){if(surface_)surface_->simStop();}),
-          SizedBox(5,0),
-          mkBtn("⏭ Step",RGB(100,180,255),RGB(14,22,38),RGB(40,80,150),[this](){if(surface_)surface_->simStep();}),
-          SizedBox(12,0),
-          Container(Text(simActive,[](bool a){return a?"● SIM MODE":"○ EDIT MODE";})
-            ->setFontSize(9)->setFontWeight(FontWeight::Bold)->setTextColor(RGB(220,200,60)))
-          ->setPaddingAll(7,3,7,3)->setBorderRadius(4)->setBackgroundColor(RGB(20,18,8))
-          ->setBorderWidth(1)->setBorderColor(RGB(70,62,15)),
-          SizedBox(12,0),
-          Text("SIM: click INPUT to toggle · CLOCK auto-clocks DFF/TFF/JKFF · Space=pause  |  EDIT: DFF pins: D CLK RST · DLATCH: D EN · TFF: T CLK · JKFF: J K CLK  |  All flip-flops: Q(top) /Q(bottom)  |  G=snap · Ctrl+Z/Y · Scroll=zoom · MMB=pan")
-            ->setFontSize(9)->setTextColor(kDim)
-        )->setSpacing(0)->setCrossAxisAlignment(CrossAxisAlignment::Center)
-      )->setSpacing(0)
-    )->setBackgroundColor(kBg)->setPaddingAll(10,5,10,5)->setHeight(kTH);
+    auto toolbar=Container(Column(
+            Row(
+                Text("⚡ Logic Sim")->setFontSize(13)->setFontWeight(FontWeight::Bold)->setTextColor(kAccent),SizedBox(8,0),
+                mkBtn("💾 Save",kGreen,RGB(10,20,18),RGB(30,80,60),[this](){doSave();}),
+                mkBtn("📂 Open",kGreen,RGB(10,20,18),RGB(30,80,60),[this](){doLoad();}),SizedBox(4,0),
+                mkBtn("↩ Undo",kAccent,RGB(22,20,34),RGB(70,55,100),[this](){if(surface_)surface_->undo();}),
+                mkBtn("↪ Redo",kAccent,RGB(22,20,34),RGB(70,55,100),[this](){if(surface_)surface_->redo();}),SizedBox(4,0),
+                GestureDetector(Container(Text(snapOn,[](bool v){return v?"⊞ Snap":"⊟ Snap";})
+                    ->setFontSize(10)->setFontWeight(FontWeight::Bold)->setTextColor(RGB(174,129,255)))
+                    ->setHeight(28)->setBorderRadius(5)->setBackgroundColor(RGB(22,18,32))
+                    ->setBorderWidth(1)->setBorderColor(RGB(70,55,100))->setPaddingAll(8,3,8,3))
+                ->setOnTap([this](){snapOn.set(!snapOn.get());}),SizedBox(6,0),
+                Text("Zoom")->setFontSize(9)->setTextColor(kDim),
+                Slider(10.0,400.0,1.0)->setValue(zoomPct)->setTrackFillColor(kAccent)->setWidth(80),
+                Text(zoomPct,[](double v){char b[16];_snprintf_s(b,sizeof(b),_TRUNCATE,"%.0f%%",v);return std::string(b);})->setFontSize(10)->setTextColor(kText)->setMinWidth(34),
+                mkBtn("Fit",kAccent,RGB(22,20,34),RGB(70,55,100),[this](){if(surface_){surface_->fitToView();notifyZoom(surface_->getZoom());}}),
+                mkBtn("1:1",kAccent,RGB(22,20,34),RGB(70,55,100),[this](){if(surface_){surface_->resetZoom();notifyZoom(1.f);}}),SizedBox(6,0),
+                mkBtn("🗑 Clear",RGB(243,139,168),RGB(34,14,20),RGB(120,40,60),[this](){if(!surface_)return;surface_->pushUndo();surface_->simStop();surface_->circuit.clearAll();gateCount.set(0);ttText.set("No circuit yet");currentFile.set("");if(canvas_)canvas_->redraw();}),SizedBox(6,0),
+                Text(gateCount,[](int n){return std::to_string(n)+(n==1?" item":" items");})->setFontSize(10)->setTextColor(kDim)
+            )->setSpacing(5)->setCrossAxisAlignment(CrossAxisAlignment::Center),
+            SizedBox(0,4),
+            Row(
+                GestureDetector(Container(Text(simRunning,[](bool r){return r?"⏸ Pause":"▶ Play";})
+                    ->setFontSize(11)->setFontWeight(FontWeight::Bold)->setTextColor(RGB(80,220,120)))
+                    ->setHeight(30)->setBorderRadius(6)->setBackgroundColor(RGB(14,34,18))->setBorderWidth(1)->setBorderColor(RGB(40,120,55))->setPaddingAll(10,4,10,4)->setHoverBackgroundColor(RGB(18,44,22)))
+                ->setOnTap([this](){if(!surface_)return;if(!surface_->isSimActive())surface_->simPlay();else surface_->simPause();}),SizedBox(5,0),
+                mkBtn("■ Stop",RGB(230,80,80),RGB(34,14,14),RGB(120,40,40),[this](){if(surface_)surface_->simStop();}),SizedBox(5,0),
+                mkBtn("⏭ Step",RGB(100,180,255),RGB(14,22,38),RGB(40,80,150),[this](){if(surface_)surface_->simStep();}),SizedBox(8,0),
+                // ── Group button ──────────────────────────────────────────
+                mkBtn("⬡ Group  Ctrl+G",RGB(200,170,255),RGB(20,14,34),RGB(80,55,130),[this](){if(surface_)surface_->groupSelected();}),
+                SizedBox(12,0),
+                Container(Text(simActive,[](bool a){return a?"● SIM MODE":"○ EDIT MODE";})
+                    ->setFontSize(9)->setFontWeight(FontWeight::Bold)->setTextColor(RGB(220,200,60)))
+                ->setPaddingAll(7,3,7,3)->setBorderRadius(4)->setBackgroundColor(RGB(20,18,8))->setBorderWidth(1)->setBorderColor(RGB(70,62,15)),
+                SizedBox(12,0),
+                Text("Select gates → Ctrl+G to group  |  Right-click subcircuit instance to delete  |  Dbl-click for info  |  Wires cross boundary automatically")
+                    ->setFontSize(9)->setTextColor(kDim)
+            )->setSpacing(0)->setCrossAxisAlignment(CrossAxisAlignment::Center)
+        )->setSpacing(0))
+        ->setBackgroundColor(kBg)->setPaddingAll(10,5,10,5)->setHeight(kTH);
 
     auto hints =
         Container(Row(Text(statusMsg, [](const std::string &s) { return s; })
@@ -3952,7 +4851,6 @@ public:
 // =============================================================================
 // §8  ENTRY POINT
 // =============================================================================
-
 int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int) {
   FluxUI app(hInst);
   app.build([&]() {
