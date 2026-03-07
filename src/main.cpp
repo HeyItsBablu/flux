@@ -254,6 +254,24 @@ static std::string asStr(const std::string &v) {
 // §1  DATA MODEL
 // =============================================================================
 
+// ---------------------------------------------------------------------------
+// Bus widths (1 = normal single-bit wire, stays unchanged)
+// ---------------------------------------------------------------------------
+enum class BusWidth : uint8_t { B1 = 1, B2 = 2, B4 = 4, B8 = 8 };
+static int busWidthBits(BusWidth w) { return (int)w; }
+static const char *busWidthLabel(BusWidth w) {
+  switch (w) {
+  case BusWidth::B2:
+    return "2b";
+  case BusWidth::B4:
+    return "4b";
+  case BusWidth::B8:
+    return "8b";
+  default:
+    return "";
+  }
+}
+
 enum class GateType {
   AND = 0,
   OR,
@@ -269,29 +287,98 @@ enum class GateType {
   DLATCH,
   TFLIPFLOP,
   JKFLIPFLOP,
+  BUS_IN_2,  // packs 2 × 1-bit inputs  → 1 × 2-bit bus output
+  BUS_IN_4,  // packs 4 × 1-bit inputs  → 1 × 4-bit bus output
+  BUS_IN_8,  // packs 8 × 1-bit inputs  → 1 × 8-bit bus output
+  BUS_OUT_2, // unpacks 1 × 2-bit bus   → 2 × 1-bit outputs
+  BUS_OUT_4, // unpacks 1 × 4-bit bus   → 4 × 1-bit outputs
+  BUS_OUT_8, // unpacks 1 × 8-bit bus   → 8 × 1-bit outputs
   COUNT
 };
 static constexpr int kGTC = (int)GateType::COUNT;
-static constexpr int kInPins[kGTC] = {2, 2, 1, 2, 2, 2, 2, 0, 1, 0, 3, 2, 2, 3};
-static constexpr int kOutPins[kGTC] = {1, 1, 1, 1, 1, 1, 1,
-                                       1, 0, 1, 2, 2, 2, 2};
+static constexpr int kInPins[kGTC] = {
+    2, 2, 1, 2, 2, 2, 2, 0, 1,
+    0, 3, 2, 2, 3, 2, 4, 8, // BUS_IN_2/4/8  (N single-bit inputs)
+    1, 1, 1                 // BUS_OUT_2/4/8 (1 bus input)
+};
+static constexpr int kOutPins[kGTC] = {
+    1, 1, 1, 1, 1, 1, 1, 1, 0,
+    1, 2, 2, 2, 2, 1, 1, 1, // BUS_IN_2/4/8  (1 bus output)
+    2, 4, 8                 // BUS_OUT_2/4/8 (N single-bit outputs)
+};
 static const char *kGateName[kGTC] = {
-    "AND",   "OR",     "NOT",   "NAND", "NOR",    "XOR", "XNOR",
-    "INPUT", "OUTPUT", "CLOCK", "DFF",  "DLATCH", "TFF", "JKFF"};
+    "AND",   "OR",     "NOT",   "NAND",  "NOR",    "XOR",  "XNOR",
+    "INPUT", "OUTPUT", "CLOCK", "DFF",   "DLATCH", "TFF",  "JKFF",
+    "BUS▲2", "BUS▲4",  "BUS▲8", "BUS▼2", "BUS▼4",  "BUS▼8"};
 static const char *kInPinLabel[kGTC][3] = {
-    {"A", "B", ""},   {"A", "B", ""},    {"A", "", ""},       {"A", "B", ""},
-    {"A", "B", ""},   {"A", "B", ""},    {"A", "B", ""},      {"", "", ""},
-    {"D", "", ""},    {"", "", ""},      {"D", "CLK", "RST"}, {"D", "EN", ""},
-    {"T", "CLK", ""}, {"J", "K", "CLK"},
+    {"A", "B", ""},
+    {"A", "B", ""},
+    {"A", "", ""},
+    {"A", "B", ""},
+    {"A", "B", ""},
+    {"A", "B", ""},
+    {"A", "B", ""},
+    {"", "", ""},
+    {"D", "", ""},
+    {"", "", ""},
+    {"D", "CLK", "RST"},
+    {"D", "EN", ""},
+    {"T", "CLK", ""},
+    {"J", "K", "CLK"},
+    // BUS_IN  — up to 3 shown (gate drawing only shows first 3 labels)
+    {"b0", "b1", ""},
+    {"b0", "b1", ""},
+    {"b0", "b1", ""},
+    // BUS_OUT
+    {"BUS", "", ""},
+    {"BUS", "", ""},
+    {"BUS", "", ""},
 };
 static const char *kOutPinLabel[kGTC][2] = {
-    {"Q", ""},   {"Q", ""},   {"Q", ""},   {"Q", ""},   {"Q", ""},
-    {"Q", ""},   {"Q", ""},   {"Q", ""},   {"", ""},    {"Q", ""},
-    {"Q", "/Q"}, {"Q", "/Q"}, {"Q", "/Q"}, {"Q", "/Q"},
+    {"Q", ""},
+    {"Q", ""},
+    {"Q", ""},
+    {"Q", ""},
+    {"Q", ""},
+    {"Q", ""},
+    {"Q", ""},
+    {"Q", ""},
+    {"", ""},
+    {"Q", ""},
+    {"Q", "/Q"},
+    {"Q", "/Q"},
+    {"Q", "/Q"},
+    {"Q", "/Q"},
+    // BUS_IN
+    {"BUS", ""},
+    {"BUS", ""},
+    {"BUS", ""},
+    // BUS_OUT
+    {"b0", "b1"},
+    {"b0", "b1"},
+    {"b0", "b1"},
 };
 static bool isSequential(GateType t) {
   return t == GateType::DFF || t == GateType::DLATCH ||
          t == GateType::TFLIPFLOP || t == GateType::JKFLIPFLOP;
+}
+static bool isBusIn(GateType t) {
+  return t == GateType::BUS_IN_2 || t == GateType::BUS_IN_4 ||
+         t == GateType::BUS_IN_8;
+}
+static bool isBusOut(GateType t) {
+  return t == GateType::BUS_OUT_2 || t == GateType::BUS_OUT_4 ||
+         t == GateType::BUS_OUT_8;
+}
+static bool isBusGate(GateType t) { return isBusIn(t) || isBusOut(t); }
+static BusWidth busGateWidth(GateType t) {
+  if (t == GateType::BUS_IN_2 || t == GateType::BUS_OUT_2)
+    return BusWidth::B2;
+  if (t == GateType::BUS_IN_4 || t == GateType::BUS_OUT_4)
+    return BusWidth::B4;
+  if (t == GateType::BUS_IN_8 || t == GateType::BUS_OUT_8)
+    return BusWidth::B8;
+  return BusWidth::B1;
 }
 static constexpr float kClockFreqPresets[] = {0.5f, 1.f, 2.f, 4.f, 8.f};
 static constexpr int kClockFreqCount = 5;
@@ -373,21 +460,57 @@ struct WireEndpoint {
 struct Wire {
   int id = 0;
   WireEndpoint src, dst;
+  // Single-bit wires: value is used, busValue is empty
+  // Bus wires: value unused, busValue holds each bit
   bool value = false, selected = false;
   float splitX = 1e30f;
+  BusWidth width = BusWidth::B1;
+  std::vector<bool> busValue; // size == busWidthBits(width) when width != B1
+
+  bool isBus() const { return width != BusWidth::B1; }
 
   bool srcIsSubInst() const { return src.gateId < 0; }
   bool dstIsSubInst() const { return dst.gateId < 0; }
   int srcInstId() const { return -src.gateId; }
   int dstInstId() const { return -dst.gateId; }
 
+  // Returns bit i (0-indexed). Safe to call on 1-bit wires (returns value).
+  bool bit(int i) const {
+    if (!isBus())
+      return value;
+    if (i < (int)busValue.size())
+      return busValue[i];
+    return false;
+  }
+  void setBit(int i, bool v) {
+    if (!isBus()) {
+      value = v;
+      return;
+    }
+    if (i < (int)busValue.size())
+      busValue[i] = v;
+  }
+  void resizeBus() {
+    if (isBus())
+      busValue.assign(busWidthBits(width), false);
+  }
+
   std::string toJson() const {
+    std::string bvStr = "[]";
+    if (isBus()) {
+      std::vector<std::string> bits;
+      for (bool b : busValue)
+        bits.push_back(b ? "1" : "0");
+      bvStr = js::arr(bits);
+    }
     return js::obj({js::kv("id", id), js::kv("srcId", src.gateId),
                     js::kv("srcPin", src.pinIdx), js::kv("dstId", dst.gateId),
-                    js::kv("dstPin", dst.pinIdx), js::kv("splitX", splitX)});
+                    js::kv("dstPin", dst.pinIdx), js::kv("splitX", splitX),
+                    js::kv("busWidth", (int)width), "\"busValue\":" + bvStr});
   }
   void fromKV(const js::KVList &m) {
     splitX = 1e30f;
+    width = BusWidth::B1;
     for (auto &[k, v] : m) {
       if (k == "id")
         id = js::asInt(v);
@@ -401,9 +524,17 @@ struct Wire {
         dst.pinIdx = js::asInt(v);
       else if (k == "splitX")
         splitX = js::asFloat(v);
+      else if (k == "busWidth")
+        width = (BusWidth)js::asInt(v);
+      else if (k == "busValue") {
+        busValue.clear();
+        for (auto &bv : js::parseArr(v))
+          busValue.push_back(js::asInt(bv) != 0);
+      }
     }
     src.isOutput = true;
     dst.isOutput = false;
+    resizeBus();
   }
 };
 
@@ -602,11 +733,43 @@ struct Circuit {
                           subcircuitInsts.end());
   }
 
-  int connect(int sId, int sPin, int dId, int dPin) {
+  // Returns -1 and sets errOut if there is a width mismatch.
+  int connect(int sId, int sPin, int dId, int dPin,
+              std::string *errOut = nullptr) {
+    // Determine widths of both endpoints
+    BusWidth sw = BusWidth::B1, dw = BusWidth::B1;
+    // Source gate
+    if (sId >= 0) {
+      Gate *sg = find(sId);
+      if (sg && isBusIn(sg->type))
+        sw = busGateWidth(sg->type); // bus output side
+    } else {
+      SubcircuitInst *si = findInst(-sId);
+      (void)si; // subcircuit bus pins: extend later
+    }
+    // Destination gate
+    if (dId >= 0) {
+      Gate *dg = find(dId);
+      if (dg && isBusOut(dg->type))
+        dw = busGateWidth(dg->type); // bus input side
+    } else {
+      SubcircuitInst *di = findInst(-dId);
+      (void)di;
+    }
+    if (sw != dw) {
+      if (errOut)
+        *errOut = std::string("Width mismatch: source is ") +
+                  (sw == BusWidth::B1 ? "1-bit" : busWidthLabel(sw)) +
+                  ", destination is " +
+                  (dw == BusWidth::B1 ? "1-bit" : busWidthLabel(dw));
+      return -1;
+    }
     Wire w;
     w.id = nextWireId++;
     w.src = {sId, sPin, true};
     w.dst = {dId, dPin, false};
+    w.width = sw;
+    w.resizeBus();
     wires.push_back(w);
     markPinConn(sId, sPin, true, true);
     markPinConn(dId, dPin, false, true);
@@ -684,6 +847,40 @@ struct Circuit {
         for (auto &w : wires)
           if (w.src.gateId == g.id)
             w.value = (w.src.pinIdx == 0) ? g.stateVal : !g.stateVal;
+      }
+    }
+
+    // ── Bus gate evaluation ──────────────────────────────────────────
+    for (auto &g : gates) {
+      if (isBusIn(g.type)) {
+        int bits = busWidthBits(busGateWidth(g.type));
+        // Find the single bus output wire and pack bits into it
+        for (auto &w : wires) {
+          if (w.src.gateId == g.id && w.src.pinIdx == 0) {
+            w.resizeBus();
+            for (int i = 0; i < bits; i++) {
+              bool b = false;
+              for (auto &wIn : wires)
+                if (wIn.dst.gateId == g.id && wIn.dst.pinIdx == i) {
+                  b = wIn.value;
+                  break;
+                }
+              w.setBit(i, b);
+            }
+          }
+        }
+      }
+      if (isBusOut(g.type)) {
+        int bits = busWidthBits(busGateWidth(g.type));
+        // Read the single bus input wire and unpack bits to output wires
+        bool busInput[8] = {};
+        for (auto &w : wires)
+          if (w.dst.gateId == g.id && w.dst.pinIdx == 0)
+            for (int i = 0; i < bits; i++)
+              busInput[i] = w.bit(i);
+        for (auto &w : wires)
+          if (w.src.gateId == g.id && w.src.pinIdx < bits)
+            w.value = busInput[w.src.pinIdx];
       }
     }
     // Evaluate subcircuit instances
@@ -1061,6 +1258,16 @@ struct Circuit {
           case GateType::XNOR:
             g.simVal = !(a ^ b);
             break;
+          case GateType::BUS_IN_2:
+          case GateType::BUS_IN_4:
+          case GateType::BUS_IN_8:
+            // Packing happens in evaluate(), not here. Return false as
+            // placeholder.
+            return false;
+          case GateType::BUS_OUT_2:
+          case GateType::BUS_OUT_4:
+          case GateType::BUS_OUT_8:
+            return false;
           default:
             g.simVal = false;
             break;
@@ -1761,23 +1968,33 @@ struct GateColors {
   float body[4], border[4], label[4];
 };
 static GateColors gateColors(GateType t, bool sel) {
-  static const float bodies[kGTC][4] = {
-      {0.08f, 0.15f, 0.30f, 1}, {0.08f, 0.25f, 0.15f, 1},
-      {0.22f, 0.10f, 0.28f, 1}, {0.26f, 0.08f, 0.10f, 1},
-      {0.20f, 0.08f, 0.22f, 1}, {0.08f, 0.20f, 0.30f, 1},
-      {0.12f, 0.12f, 0.28f, 1}, {0.08f, 0.22f, 0.13f, 1},
-      {0.24f, 0.14f, 0.05f, 1}, {0.05f, 0.15f, 0.28f, 1},
-      {0.06f, 0.18f, 0.26f, 1}, {0.06f, 0.22f, 0.20f, 1},
-      {0.20f, 0.16f, 0.06f, 1}, {0.22f, 0.10f, 0.18f, 1}};
-  static const float borders[kGTC][4] = {
-      {0.27f, 0.47f, 0.86f, 1}, {0.27f, 0.75f, 0.43f, 1},
-      {0.66f, 0.27f, 0.86f, 1}, {0.86f, 0.27f, 0.27f, 1},
-      {0.78f, 0.27f, 0.67f, 1}, {0.27f, 0.67f, 0.86f, 1},
-      {0.43f, 0.43f, 0.86f, 1}, {0.27f, 0.82f, 0.43f, 1},
-      {0.86f, 0.51f, 0.16f, 1}, {0.18f, 0.82f, 0.90f, 1},
-      {0.20f, 0.65f, 0.95f, 1}, {0.20f, 0.85f, 0.75f, 1},
-      {0.95f, 0.72f, 0.20f, 1}, {0.95f, 0.38f, 0.60f, 1}};
-  int i = (int)t;
+static const float bodies[kGTC][4] = {
+    {0.08f, 0.15f, 0.30f, 1}, {0.08f, 0.25f, 0.15f, 1},
+    {0.22f, 0.10f, 0.28f, 1}, {0.26f, 0.08f, 0.10f, 1},
+    {0.20f, 0.08f, 0.22f, 1}, {0.08f, 0.20f, 0.30f, 1},
+    {0.12f, 0.12f, 0.28f, 1}, {0.08f, 0.22f, 0.13f, 1},
+    {0.24f, 0.14f, 0.05f, 1}, {0.05f, 0.15f, 0.28f, 1},
+    {0.06f, 0.18f, 0.26f, 1}, {0.06f, 0.22f, 0.20f, 1},
+    {0.20f, 0.16f, 0.06f, 1}, {0.22f, 0.10f, 0.18f, 1},
+    // BUS_IN_2/4/8  — blue tint
+    {0.05f, 0.14f, 0.30f, 1}, {0.05f, 0.14f, 0.30f, 1}, {0.05f, 0.14f, 0.30f, 1},
+    // BUS_OUT_2/4/8 — amber tint
+    {0.28f, 0.14f, 0.04f, 1}, {0.28f, 0.14f, 0.04f, 1}, {0.28f, 0.14f, 0.04f, 1},
+};
+static const float borders[kGTC][4] = {
+    {0.27f, 0.47f, 0.86f, 1}, {0.27f, 0.75f, 0.43f, 1},
+    {0.66f, 0.27f, 0.86f, 1}, {0.86f, 0.27f, 0.27f, 1},
+    {0.78f, 0.27f, 0.67f, 1}, {0.27f, 0.67f, 0.86f, 1},
+    {0.43f, 0.43f, 0.86f, 1}, {0.27f, 0.82f, 0.43f, 1},
+    {0.86f, 0.51f, 0.16f, 1}, {0.18f, 0.82f, 0.90f, 1},
+    {0.20f, 0.65f, 0.95f, 1}, {0.20f, 0.85f, 0.75f, 1},
+    {0.95f, 0.72f, 0.20f, 1}, {0.95f, 0.38f, 0.60f, 1},
+    // BUS_IN_2/4/8
+    {0.31f, 0.63f, 0.95f, 1}, {0.31f, 0.63f, 0.95f, 1}, {0.31f, 0.63f, 0.95f, 1},
+    // BUS_OUT_2/4/8
+    {0.95f, 0.63f, 0.31f, 1}, {0.95f, 0.63f, 0.31f, 1}, {0.95f, 0.63f, 0.31f, 1},
+};
+int i = (int)t;
   GateColors c;
   memcpy(c.body, bodies[i], 16);
   memcpy(c.label, borders[i], 16);
@@ -2650,14 +2867,22 @@ public:
             break;
           }
         if (!occ) {
-          pushUndo();
-          circuit.connect(dragSrc_.gateId, dragSrc_.pinIdx, dstSnap_.gateId,
-                          dstSnap_.pinIdx);
-          circuit.evaluate();
-          if (onCircuitChanged)
-            onCircuitChanged();
-          if (onStatusMessage)
-            onStatusMessage("Connected");
+
+          std::string err;
+          int wid = circuit.connect(dragSrc_.gateId, dragSrc_.pinIdx,
+                                    dstSnap_.gateId, dstSnap_.pinIdx, &err);
+          if (wid < 0) {
+            if (onStatusMessage)
+              onStatusMessage(("⚠ " + err).c_str());
+          } else {
+            pushUndo();
+            circuit.evaluate();
+            if (onCircuitChanged)
+              onCircuitChanged();
+            if (onStatusMessage)
+              onStatusMessage("Connected");
+          }
+
         } else if (onStatusMessage)
           onStatusMessage(
               "Input already connected — remove existing wire first");
@@ -3528,13 +3753,40 @@ private:
       }
       {
         std::vector<float> body;
-        pushOrtho(body, sx0, sy0, sx1, sy1, msx, hw);
-        if (w.value)
+        float busHW = w.isBus() ? hw * 2.8f : hw;
+        pushOrtho(body, sx0, sy0, sx1, sy1, msx, busHW);
+        if (w.isBus()) {
+          // Color encodes how many bits are HIGH
+          int hi = 0;
+          for (bool b : w.busValue)
+            if (b)
+              hi++;
+          float t =
+              w.busValue.empty() ? 0.f : float(hi) / float(w.busValue.size());
+          dc(body, 0.28f + t * 0.4f, 0.55f + t * 0.37f, 0.92f, 0.9f);
+        } else if (w.value)
           dc(body, 0.28f, 0.92f, 0.48f);
         else if (!sim && w.selected)
           dc(body, 0.88f, 0.75f, 0.18f);
         else
           dc(body, 0.22f, 0.25f, 0.42f);
+      }
+      // Bus width badge drawn at midpoint
+      if (w.isBus()) {
+        float bmx = (sx0 + sx1) * 0.5f, bmy = (sy0 + sy1) * 0.5f;
+        std::vector<float> badge;
+        pushCircle(badge, bmx, bmy, max(7.f, zoom_ * 5.f), 12);
+        dc(badge, 0.12f, 0.16f, 0.32f);
+        // Tick marks indicating bus width
+        int bits = busWidthBits(w.width);
+        float tr = max(5.f, zoom_ * 3.5f);
+        std::vector<float> ticks;
+        for (int i = 0; i < bits; i++) {
+          float a = float(i) / float(bits) * 6.2831853f;
+          pushLine(ticks, bmx, bmy, bmx + cosf(a) * tr, bmy + sinf(a) * tr,
+                   max(0.8f, zoom_ * 0.6f));
+        }
+        dc(ticks, 0.62f, 0.72f, 0.98f);
       }
       {
         std::vector<float> dots;
@@ -3792,6 +4044,10 @@ private:
 
     if (isSequential(g.type)) {
       drawSequentialGate(g, sx, sy, L, R, yT, yB, lw, z, sim, col);
+      return;
+    }
+    if (isBusGate(g.type)) {
+      drawBusGate(g, sx, sy, L, R, yT, yB, lw, z, sim, col);
       return;
     }
 
@@ -4129,6 +4385,83 @@ private:
         DC(v, pin.connected ? 1.f : .86f, pin.connected ? .86f : .51f,
            pin.connected ? .47f : .16f);
       }
+    }
+  }
+
+  void drawBusGate(const Gate &g, float sx, float sy, float L, float R,
+                   float yT, float yB, float lw, float z, bool sim,
+                   const GateColors &col) {
+    auto DC = [&](const std::vector<float> &v, float r, float gg, float b,
+                  float a = 1.f) { dc(v, r, gg, b, a); };
+    auto DCb = [&](const std::vector<float> &v, float a = 1.f) {
+      DC(v, col.border[0], col.border[1], col.border[2], a);
+    };
+    auto DCbd = [&](const std::vector<float> &v) {
+      DC(v, col.body[0], col.body[1], col.body[2]);
+    };
+    float cr = min(8.f * z, 6.f);
+    bool isIn = isBusIn(g.type);
+    int bits = busWidthBits(busGateWidth(g.type));
+
+    // Shadow
+    { std::vector<float> v; pushRRFill(v, L+3, yT+3, R+3, yB+3, cr); DC(v,0,0,0,0.42f); }
+    // Body
+    { std::vector<float> v; pushRRFill(v, L, yT, R, yB, cr); DCbd(v); }
+    // Selection tint
+    if (g.selected) {
+      std::vector<float> v; pushRRFill(v, L, yT, R, yB, cr);
+      DC(v, 0.80f, 0.65f, 0.97f, 0.18f);
+    }
+    // Outline
+    { std::vector<float> v; pushRR(v, L, yT, R, yB, cr, lw); DCb(v); }
+    if (g.selected) {
+      std::vector<float> v; pushRR(v, L+2, yT+2, R-2, yB-2, cr-2, lw*0.5f);
+      DCb(v, 0.3f);
+    }
+
+    // Arrow stripe in centre showing pack ▲ or unpack ▼ direction
+    {
+      float ax = sx, ay = (yT + yB) * 0.5f, aw = (R-L)*0.28f, ah = (yB-yT)*0.22f;
+      std::vector<float> v;
+      if (isIn) {
+        // right-pointing arrow = packing toward output
+        v.insert(v.end(), { ax-aw, ay-ah, ax+aw, ay, ax-aw, ay+ah });
+      } else {
+        // left-pointing arrow = unpacking toward outputs
+        v.insert(v.end(), { ax+aw, ay-ah, ax-aw, ay, ax+aw, ay+ah });
+      }
+      DCb(v, 0.7f);
+    }
+
+    // Bus width label: "2b" / "4b" / "8b" centred in gate
+    // (drawn as tick marks on the bus-side edge)
+    {
+      float edgeX = isIn ? R : L;
+      float tickLen = 5.f * z;
+      float spacing = (yB - yT) / float(bits + 1);
+      std::vector<float> ticks;
+      for (int i = 0; i < bits; i++) {
+        float ty = yT + spacing * float(i + 1);
+        float x0 = isIn ? edgeX - tickLen : edgeX;
+        float x1 = isIn ? edgeX          : edgeX + tickLen;
+        pushLine(ticks, x0, ty, x1, ty, max(1.0f, z * 0.8f));
+      }
+      DCb(ticks, 0.55f);
+    }
+
+    // Input pins
+    for (auto &pin : g.inPins) {
+      float psx, psy; w2s(pin.cx, pin.cy, psx, psy);
+      { std::vector<float> v; pushLine(v, psx, psy, L, psy, max(0.8f, z*.7f)); DC(v, 0.38f,0.42f,0.60f); }
+      { std::vector<float> v; pushCircle(v, psx, psy, max(2.5f, kPinR*z));
+        DC(v, pin.connected?1.f:0.f, pin.connected?.86f:.31f, pin.connected?.47f:.51f); }
+    }
+    // Output pins
+    for (auto &pin : g.outPins) {
+      float psx, psy; w2s(pin.cx, pin.cy, psx, psy);
+      { std::vector<float> v; pushLine(v, R, psy, psx, psy, max(0.8f, z*.7f)); DC(v, 0.38f,0.42f,0.60f); }
+      { std::vector<float> v; pushCircle(v, psx, psy, max(2.5f, kPinR*z));
+        DC(v, pin.connected?1.f:.86f, pin.connected?.86f:.51f, pin.connected?.47f:.16f); }
     }
   }
 
@@ -4682,6 +5015,12 @@ public:
         {GateType::DLATCH, RGB(50, 215, 190), "D·EN → Q (level)"},
         {GateType::TFLIPFLOP, RGB(240, 185, 50), "T·CLK → Q (toggle)"},
         {GateType::JKFLIPFLOP, RGB(240, 95, 150), "J·K·CLK → Q"},
+        {GateType::BUS_IN_2, RGB(80, 160, 240), "2×1b → 2b bus"},
+        {GateType::BUS_IN_4, RGB(80, 160, 240), "4×1b → 4b bus"},
+        {GateType::BUS_IN_8, RGB(80, 160, 240), "8×1b → 8b bus"},
+        {GateType::BUS_OUT_2, RGB(240, 160, 80), "2b bus → 2×1b"},
+        {GateType::BUS_OUT_4, RGB(240, 160, 80), "4b bus → 4×1b"},
+        {GateType::BUS_OUT_8, RGB(240, 160, 80), "8b bus → 8×1b"},
     };
     auto makeTile = [&](const TI &ti) -> WidgetPtr {
       GateType t = ti.t;
