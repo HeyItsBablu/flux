@@ -576,27 +576,60 @@ static void pushORFill(std::vector<float>&v,
                         float L,float yT,float R,float yB){
     float H=yB-yT, W=R-L, MY=(yT+yB)*0.5f;
     float bulgX=W*0.30f;
-    const int ROWS=32;
-    for(int i=0;i<ROWS;++i){
-        float t0=float(i)  /ROWS;
-        float t1=float(i+1)/ROWS;
-        float y0=yT+t0*H, y1=yT+t1*H;
 
-        auto backX=[&](float t)->float{
-            float u=1.f-t;
-            return u*u*u*L + 3*u*u*t*(L+bulgX) + 3*u*t*t*(L+bulgX) + t*t*t*L;
-        };
-        auto frontX=[&](float t)->float{
-            float tp=(t<0.5f)?(1.f-t*2.f):((t-0.5f)*2.f);
-            float u=1.f-tp;
-            return u*u*u*L + 3*u*u*tp*(L+W*0.55f) + 3*u*tp*tp*(R-W*0.12f) + tp*tp*tp*R;
-        };
+    // ── Back-arc cubic (identical control points to pushOROutline) ────────────
+    // Y is linear along this curve (both inner ctrl pts share bulgX, same Y span)
+    // so we can invert Y trivially: t = (y - yT) / H
+    auto backXatY=[&](float y)->float{
+        float t=(y-yT)/H;
+        float u=1.f-t;
+        return u*u*u*L + 3*u*u*t*(L+bulgX) + 3*u*t*t*(L+bulgX) + t*t*t*L;
+    };
 
-        float lx=backX(t0),  rx=frontX(t0);
-        float lx1=backX(t1), rx1=frontX(t1);
-        v.insert(v.end(),{lx,y0, rx,y0, rx1,y1});
-        v.insert(v.end(),{lx,y0, rx1,y1, lx1,y1});
-        (void)lx1;
+    // ── Front cubics (top/bottom halves, matching pushOROutline exactly) ──────
+    // Top:    L,yT  →  L+W*0.55,yT  →  R-W*0.12,MY-H*0.10  →  R,MY
+    // Bottom: L,yB  →  L+W*0.55,yB  →  R-W*0.12,MY+H*0.10  →  R,MY
+    //
+    // For a given Y we binary-search for the parameter t, then evaluate X.
+    auto frontXatY=[&](float y)->float{
+        if(y <= MY){
+            // top cubic: y runs yT → MY  as t runs 0 → 1
+            float lo=0.f, hi=1.f;
+            for(int k=0;k<18;++k){
+                float m=(lo+hi)*0.5f, u=1.f-m;
+                float ym = u*u*u*yT + 3*u*u*m*yT
+                         + 3*u*m*m*(MY - H*0.10f) + m*m*m*MY;
+                if(ym < y) lo=m; else hi=m;
+            }
+            float t=(lo+hi)*0.5f, u=1.f-t;
+            return u*u*u*L + 3*u*u*t*(L+W*0.55f)
+                 + 3*u*t*t*(R-W*0.12f) + t*t*t*R;
+        } else {
+            // bottom cubic: y runs yB → MY  as t runs 0 → 1
+            float lo=0.f, hi=1.f;
+            for(int k=0;k<18;++k){
+                float m=(lo+hi)*0.5f, u=1.f-m;
+                float ym = u*u*u*yB + 3*u*u*m*yB
+                         + 3*u*m*m*(MY + H*0.10f) + m*m*m*MY;
+                // ym decreases yB → MY, so invert sense
+                if(ym > y) lo=m; else hi=m;
+            }
+            float t=(lo+hi)*0.5f, u=1.f-t;
+            return u*u*u*L + 3*u*u*t*(L+W*0.55f)
+                 + 3*u*t*t*(R-W*0.12f) + t*t*t*R;
+        }
+    };
+
+    // ── Scanline fill ─────────────────────────────────────────────────────────
+    // More rows near the tip (y ≈ MY) where the front curve is most curved.
+    const int ROWS = 64;
+    for(int i=0; i<ROWS; ++i){
+        float y0 = yT + float(i)  /ROWS * H;
+        float y1 = yT + float(i+1)/ROWS * H;
+        float lx0 = backXatY(y0),  rx0 = frontXatY(y0);
+        float lx1 = backXatY(y1),  rx1 = frontXatY(y1);
+        v.insert(v.end(), {lx0,y0,  rx0,y0,  rx1,y1});
+        v.insert(v.end(), {lx0,y0,  rx1,y1,  lx1,y1});
     }
 }
 
