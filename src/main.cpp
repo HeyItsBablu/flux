@@ -1968,33 +1968,55 @@ struct GateColors {
   float body[4], border[4], label[4];
 };
 static GateColors gateColors(GateType t, bool sel) {
-static const float bodies[kGTC][4] = {
-    {0.08f, 0.15f, 0.30f, 1}, {0.08f, 0.25f, 0.15f, 1},
-    {0.22f, 0.10f, 0.28f, 1}, {0.26f, 0.08f, 0.10f, 1},
-    {0.20f, 0.08f, 0.22f, 1}, {0.08f, 0.20f, 0.30f, 1},
-    {0.12f, 0.12f, 0.28f, 1}, {0.08f, 0.22f, 0.13f, 1},
-    {0.24f, 0.14f, 0.05f, 1}, {0.05f, 0.15f, 0.28f, 1},
-    {0.06f, 0.18f, 0.26f, 1}, {0.06f, 0.22f, 0.20f, 1},
-    {0.20f, 0.16f, 0.06f, 1}, {0.22f, 0.10f, 0.18f, 1},
-    // BUS_IN_2/4/8  — blue tint
-    {0.05f, 0.14f, 0.30f, 1}, {0.05f, 0.14f, 0.30f, 1}, {0.05f, 0.14f, 0.30f, 1},
-    // BUS_OUT_2/4/8 — amber tint
-    {0.28f, 0.14f, 0.04f, 1}, {0.28f, 0.14f, 0.04f, 1}, {0.28f, 0.14f, 0.04f, 1},
-};
-static const float borders[kGTC][4] = {
-    {0.27f, 0.47f, 0.86f, 1}, {0.27f, 0.75f, 0.43f, 1},
-    {0.66f, 0.27f, 0.86f, 1}, {0.86f, 0.27f, 0.27f, 1},
-    {0.78f, 0.27f, 0.67f, 1}, {0.27f, 0.67f, 0.86f, 1},
-    {0.43f, 0.43f, 0.86f, 1}, {0.27f, 0.82f, 0.43f, 1},
-    {0.86f, 0.51f, 0.16f, 1}, {0.18f, 0.82f, 0.90f, 1},
-    {0.20f, 0.65f, 0.95f, 1}, {0.20f, 0.85f, 0.75f, 1},
-    {0.95f, 0.72f, 0.20f, 1}, {0.95f, 0.38f, 0.60f, 1},
-    // BUS_IN_2/4/8
-    {0.31f, 0.63f, 0.95f, 1}, {0.31f, 0.63f, 0.95f, 1}, {0.31f, 0.63f, 0.95f, 1},
-    // BUS_OUT_2/4/8
-    {0.95f, 0.63f, 0.31f, 1}, {0.95f, 0.63f, 0.31f, 1}, {0.95f, 0.63f, 0.31f, 1},
-};
-int i = (int)t;
+  static const float bodies[kGTC][4] = {
+      {0.08f, 0.15f, 0.30f, 1},
+      {0.08f, 0.25f, 0.15f, 1},
+      {0.22f, 0.10f, 0.28f, 1},
+      {0.26f, 0.08f, 0.10f, 1},
+      {0.20f, 0.08f, 0.22f, 1},
+      {0.08f, 0.20f, 0.30f, 1},
+      {0.12f, 0.12f, 0.28f, 1},
+      {0.08f, 0.22f, 0.13f, 1},
+      {0.24f, 0.14f, 0.05f, 1},
+      {0.05f, 0.15f, 0.28f, 1},
+      {0.06f, 0.18f, 0.26f, 1},
+      {0.06f, 0.22f, 0.20f, 1},
+      {0.20f, 0.16f, 0.06f, 1},
+      {0.22f, 0.10f, 0.18f, 1},
+      // BUS_IN_2/4/8  — blue tint
+      {0.05f, 0.14f, 0.30f, 1},
+      {0.05f, 0.14f, 0.30f, 1},
+      {0.05f, 0.14f, 0.30f, 1},
+      // BUS_OUT_2/4/8 — amber tint
+      {0.28f, 0.14f, 0.04f, 1},
+      {0.28f, 0.14f, 0.04f, 1},
+      {0.28f, 0.14f, 0.04f, 1},
+  };
+  static const float borders[kGTC][4] = {
+      {0.27f, 0.47f, 0.86f, 1},
+      {0.27f, 0.75f, 0.43f, 1},
+      {0.66f, 0.27f, 0.86f, 1},
+      {0.86f, 0.27f, 0.27f, 1},
+      {0.78f, 0.27f, 0.67f, 1},
+      {0.27f, 0.67f, 0.86f, 1},
+      {0.43f, 0.43f, 0.86f, 1},
+      {0.27f, 0.82f, 0.43f, 1},
+      {0.86f, 0.51f, 0.16f, 1},
+      {0.18f, 0.82f, 0.90f, 1},
+      {0.20f, 0.65f, 0.95f, 1},
+      {0.20f, 0.85f, 0.75f, 1},
+      {0.95f, 0.72f, 0.20f, 1},
+      {0.95f, 0.38f, 0.60f, 1},
+      // BUS_IN_2/4/8
+      {0.31f, 0.63f, 0.95f, 1},
+      {0.31f, 0.63f, 0.95f, 1},
+      {0.31f, 0.63f, 0.95f, 1},
+      // BUS_OUT_2/4/8
+      {0.95f, 0.63f, 0.31f, 1},
+      {0.95f, 0.63f, 0.31f, 1},
+      {0.95f, 0.63f, 0.31f, 1},
+  };
+  int i = (int)t;
   GateColors c;
   memcpy(c.body, bodies[i], 16);
   memcpy(c.label, borders[i], 16);
@@ -4404,31 +4426,46 @@ private:
     int bits = busWidthBits(busGateWidth(g.type));
 
     // Shadow
-    { std::vector<float> v; pushRRFill(v, L+3, yT+3, R+3, yB+3, cr); DC(v,0,0,0,0.42f); }
+    {
+      std::vector<float> v;
+      pushRRFill(v, L + 3, yT + 3, R + 3, yB + 3, cr);
+      DC(v, 0, 0, 0, 0.42f);
+    }
     // Body
-    { std::vector<float> v; pushRRFill(v, L, yT, R, yB, cr); DCbd(v); }
+    {
+      std::vector<float> v;
+      pushRRFill(v, L, yT, R, yB, cr);
+      DCbd(v);
+    }
     // Selection tint
     if (g.selected) {
-      std::vector<float> v; pushRRFill(v, L, yT, R, yB, cr);
+      std::vector<float> v;
+      pushRRFill(v, L, yT, R, yB, cr);
       DC(v, 0.80f, 0.65f, 0.97f, 0.18f);
     }
     // Outline
-    { std::vector<float> v; pushRR(v, L, yT, R, yB, cr, lw); DCb(v); }
+    {
+      std::vector<float> v;
+      pushRR(v, L, yT, R, yB, cr, lw);
+      DCb(v);
+    }
     if (g.selected) {
-      std::vector<float> v; pushRR(v, L+2, yT+2, R-2, yB-2, cr-2, lw*0.5f);
+      std::vector<float> v;
+      pushRR(v, L + 2, yT + 2, R - 2, yB - 2, cr - 2, lw * 0.5f);
       DCb(v, 0.3f);
     }
 
     // Arrow stripe in centre showing pack ▲ or unpack ▼ direction
     {
-      float ax = sx, ay = (yT + yB) * 0.5f, aw = (R-L)*0.28f, ah = (yB-yT)*0.22f;
+      float ax = sx, ay = (yT + yB) * 0.5f, aw = (R - L) * 0.28f,
+            ah = (yB - yT) * 0.22f;
       std::vector<float> v;
       if (isIn) {
         // right-pointing arrow = packing toward output
-        v.insert(v.end(), { ax-aw, ay-ah, ax+aw, ay, ax-aw, ay+ah });
+        v.insert(v.end(), {ax - aw, ay - ah, ax + aw, ay, ax - aw, ay + ah});
       } else {
         // left-pointing arrow = unpacking toward outputs
-        v.insert(v.end(), { ax+aw, ay-ah, ax-aw, ay, ax+aw, ay+ah });
+        v.insert(v.end(), {ax + aw, ay - ah, ax - aw, ay, ax + aw, ay + ah});
       }
       DCb(v, 0.7f);
     }
@@ -4443,7 +4480,7 @@ private:
       for (int i = 0; i < bits; i++) {
         float ty = yT + spacing * float(i + 1);
         float x0 = isIn ? edgeX - tickLen : edgeX;
-        float x1 = isIn ? edgeX          : edgeX + tickLen;
+        float x1 = isIn ? edgeX : edgeX + tickLen;
         pushLine(ticks, x0, ty, x1, ty, max(1.0f, z * 0.8f));
       }
       DCb(ticks, 0.55f);
@@ -4451,17 +4488,35 @@ private:
 
     // Input pins
     for (auto &pin : g.inPins) {
-      float psx, psy; w2s(pin.cx, pin.cy, psx, psy);
-      { std::vector<float> v; pushLine(v, psx, psy, L, psy, max(0.8f, z*.7f)); DC(v, 0.38f,0.42f,0.60f); }
-      { std::vector<float> v; pushCircle(v, psx, psy, max(2.5f, kPinR*z));
-        DC(v, pin.connected?1.f:0.f, pin.connected?.86f:.31f, pin.connected?.47f:.51f); }
+      float psx, psy;
+      w2s(pin.cx, pin.cy, psx, psy);
+      {
+        std::vector<float> v;
+        pushLine(v, psx, psy, L, psy, max(0.8f, z * .7f));
+        DC(v, 0.38f, 0.42f, 0.60f);
+      }
+      {
+        std::vector<float> v;
+        pushCircle(v, psx, psy, max(2.5f, kPinR * z));
+        DC(v, pin.connected ? 1.f : 0.f, pin.connected ? .86f : .31f,
+           pin.connected ? .47f : .51f);
+      }
     }
     // Output pins
     for (auto &pin : g.outPins) {
-      float psx, psy; w2s(pin.cx, pin.cy, psx, psy);
-      { std::vector<float> v; pushLine(v, R, psy, psx, psy, max(0.8f, z*.7f)); DC(v, 0.38f,0.42f,0.60f); }
-      { std::vector<float> v; pushCircle(v, psx, psy, max(2.5f, kPinR*z));
-        DC(v, pin.connected?1.f:.86f, pin.connected?.86f:.51f, pin.connected?.47f:.16f); }
+      float psx, psy;
+      w2s(pin.cx, pin.cy, psx, psy);
+      {
+        std::vector<float> v;
+        pushLine(v, R, psy, psx, psy, max(0.8f, z * .7f));
+        DC(v, 0.38f, 0.42f, 0.60f);
+      }
+      {
+        std::vector<float> v;
+        pushCircle(v, psx, psy, max(2.5f, kPinR * z));
+        DC(v, pin.connected ? 1.f : .86f, pin.connected ? .86f : .51f,
+           pin.connected ? .47f : .16f);
+      }
     }
   }
 
@@ -4944,6 +4999,1033 @@ class LogicSimApp : public Component {
     rebuildTruthTable();
   }
 
+  // =========================================================================
+  // §7a  ARITHMETIC PRESET BUILDERS
+  // =========================================================================
+
+  // Helper: add a gate, wire it, return id
+  // All positions are relative; caller passes an offset.
+  // Returns new gate id.
+
+  void buildHalfAdder() {
+    if (!surface_)
+      return;
+    surface_->simStop();
+    surface_->pushUndo();
+    Circuit &c = surface_->circuit;
+    c.clearAll();
+
+    // Layout (world coords):
+    //  A INPUT  @ (-160, -60)
+    //  B INPUT  @ (-160,  60)
+    //  XOR gate @ (  0, -60)  → SUM output
+    //  AND gate @ (  0,  60)  → CARRY output
+    //  SUM  OUTPUT @ (160, -60)
+    //  CARRY OUTPUT @ (160,  60)
+
+    int iA = c.add(GateType::INPUT, -160, -60, "A");
+    int iB = c.add(GateType::INPUT, -160, 60, "B");
+    int xorG = c.add(GateType::XOR, 0, -60, "SUM");
+    int andG = c.add(GateType::AND, 0, 60, "CARRY");
+    int oS = c.add(GateType::OUTPUT, 160, -60, "S");
+    int oC = c.add(GateType::OUTPUT, 160, 60, "Co");
+
+    c.connect(iA, 0, xorG, 0);
+    c.connect(iB, 0, xorG, 1);
+    c.connect(iA, 0, andG, 0);
+    c.connect(iB, 0, andG, 1);
+    c.connect(xorG, 0, oS, 0);
+    c.connect(andG, 0, oC, 0);
+
+    c.evaluate();
+    gateCount.set(int(c.gates.size()));
+    rebuildTruthTable();
+    surface_->fitToView();
+    statusMsg.set("Half Adder: S = A⊕B   Co = A·B");
+    if (canvas_)
+      canvas_->redraw();
+    if (surface_->onCircuitChanged)
+      surface_->onCircuitChanged();
+  }
+
+  void buildFullAdder() {
+    if (!surface_)
+      return;
+    surface_->simStop();
+    surface_->pushUndo();
+    Circuit &c = surface_->circuit;
+    c.clearAll();
+
+    // Inputs
+    int iA = c.add(GateType::INPUT, -200, -80, "A");
+    int iB = c.add(GateType::INPUT, -200, 0, "B");
+    int iCi = c.add(GateType::INPUT, -200, 80, "Ci");
+
+    // First half-adder level: XOR1, AND1
+    int xor1 = c.add(GateType::XOR, -60, -40, "XOR1");
+    int and1 = c.add(GateType::AND, -60, 60, "AND1");
+
+    // Second half-adder level: XOR2, AND2
+    int xor2 = c.add(GateType::XOR, 80, -40, "XOR2");
+    int and2 = c.add(GateType::AND, 80, 60, "AND2");
+
+    // OR for carry out
+    int orG = c.add(GateType::OR, 200, 60, "OR");
+
+    // Outputs
+    int oS = c.add(GateType::OUTPUT, 320, -40, "S");
+    int oC = c.add(GateType::OUTPUT, 320, 60, "Co");
+
+    // First stage
+    c.connect(iA, 0, xor1, 0);
+    c.connect(iB, 0, xor1, 1);
+    c.connect(iA, 0, and1, 0);
+    c.connect(iB, 0, and1, 1);
+
+    // Second stage
+    c.connect(xor1, 0, xor2, 0);
+    c.connect(iCi, 0, xor2, 1);
+    c.connect(xor1, 0, and2, 0);
+    c.connect(iCi, 0, and2, 1);
+
+    // Carry OR
+    c.connect(and1, 0, orG, 0);
+    c.connect(and2, 0, orG, 1);
+
+    // Outputs
+    c.connect(xor2, 0, oS, 0);
+    c.connect(orG, 0, oC, 0);
+
+    c.evaluate();
+    gateCount.set(int(c.gates.size()));
+    rebuildTruthTable();
+    surface_->fitToView();
+    statusMsg.set("Full Adder: S = A⊕B⊕Ci   Co = AB + BCi + ACi");
+    if (canvas_)
+      canvas_->redraw();
+    if (surface_->onCircuitChanged)
+      surface_->onCircuitChanged();
+  }
+
+  void buildRippleAdder4() {
+    if (!surface_)
+      return;
+    surface_->simStop();
+    surface_->pushUndo();
+    Circuit &c = surface_->circuit;
+    c.clearAll();
+
+    // 4 full adder stages laid out horizontally
+    // Each FA: XOR1, AND1, XOR2, AND2, OR  (5 gates per stage)
+    // Inputs: A0-A3, B0-B3, Cin
+    // Outputs: S0-S3, Cout
+
+    const float stageW = 280.f;
+    const float yBase = 0.f;
+
+    // Ci wire starts from carry-in input
+    int cinGate = c.add(GateType::INPUT, -160, 160, "Cin");
+
+    struct FAIds {
+      int xor1, and1, xor2, and2, orG;
+    };
+    std::vector<FAIds> stages(4);
+
+    std::vector<int> inA(4), inB(4), outS(4);
+    int outCo = -1;
+
+    // Build inputs A0..A3, B0..B3
+    for (int i = 0; i < 4; i++) {
+      float x = i * stageW;
+      inA[i] =
+          c.add(GateType::INPUT, x - 60, yBase - 140, "A" + std::to_string(i));
+      inB[i] =
+          c.add(GateType::INPUT, x - 60, yBase - 80, "B" + std::to_string(i));
+    }
+
+    // Build 4 FA stages
+    int prevCarry = cinGate;
+    for (int i = 0; i < 4; i++) {
+      float ox = i * stageW;
+      FAIds &fa = stages[i];
+      fa.xor1 =
+          c.add(GateType::XOR, ox + 40, yBase - 40, "X1_" + std::to_string(i));
+      fa.and1 =
+          c.add(GateType::AND, ox + 40, yBase + 40, "A1_" + std::to_string(i));
+      fa.xor2 =
+          c.add(GateType::XOR, ox + 160, yBase - 40, "X2_" + std::to_string(i));
+      fa.and2 =
+          c.add(GateType::AND, ox + 160, yBase + 40, "A2_" + std::to_string(i));
+      fa.orG =
+          c.add(GateType::OR, ox + 200, yBase + 120, "OR_" + std::to_string(i));
+
+      // First half-adder
+      c.connect(inA[i], 0, fa.xor1, 0);
+      c.connect(inB[i], 0, fa.xor1, 1);
+      c.connect(inA[i], 0, fa.and1, 0);
+      c.connect(inB[i], 0, fa.and1, 1);
+
+      // Second half-adder (Ci is prevCarry output)
+      c.connect(fa.xor1, 0, fa.xor2, 0);
+      c.connect(prevCarry, 0, fa.xor2, 1);
+      c.connect(fa.xor1, 0, fa.and2, 0);
+      c.connect(prevCarry, 0, fa.and2, 1);
+
+      // Carry OR
+      c.connect(fa.and1, 0, fa.orG, 0);
+      c.connect(fa.and2, 0, fa.orG, 1);
+
+      // Sum output
+      outS[i] = c.add(GateType::OUTPUT, ox + 260, yBase - 40,
+                      "S" + std::to_string(i));
+      c.connect(fa.xor2, 0, outS[i], 0);
+
+      prevCarry = fa.orG;
+    }
+
+    // Final carry out
+    outCo = c.add(GateType::OUTPUT, 4 * stageW - 20, yBase + 120, "Cout");
+    c.connect(stages[3].orG, 0, outCo, 0);
+
+    c.evaluate();
+    gateCount.set(int(c.gates.size()));
+    rebuildTruthTable();
+    surface_->fitToView();
+    statusMsg.set(
+        "4-bit Ripple Carry Adder  |  A[3:0] + B[3:0] + Cin = S[3:0] + Cout");
+    if (canvas_)
+      canvas_->redraw();
+    if (surface_->onCircuitChanged)
+      surface_->onCircuitChanged();
+  }
+
+  void buildSubtractor4() {
+    if (!surface_)
+      return;
+    surface_->simStop();
+    surface_->pushUndo();
+    Circuit &c = surface_->circuit;
+    c.clearAll();
+
+    // 4-bit subtractor = ripple adder with B inputs inverted + Cin=1
+    // A - B = A + (~B) + 1
+    // Each bit: NOT(Bi) feeds into FA instead of Bi directly
+    // Borrow out = ~Cout (we show Cout and label it Bout)
+
+    const float stageW = 320.f;
+    const float yBase = 0.f;
+
+    // Cin = 1 modelled as a fixed INPUT set to true
+    int cinGate = c.add(GateType::INPUT, -160, 200, "Cin=1");
+    // We'll set its inputVal below
+
+    struct FAIds {
+      int xor1, and1, xor2, and2, orG, notB;
+    };
+    std::vector<FAIds> stages(4);
+    std::vector<int> inA(4), inB(4), outS(4);
+
+    for (int i = 0; i < 4; i++) {
+      float x = i * stageW;
+      inA[i] =
+          c.add(GateType::INPUT, x - 60, yBase - 160, "A" + std::to_string(i));
+      inB[i] =
+          c.add(GateType::INPUT, x - 60, yBase - 80, "B" + std::to_string(i));
+    }
+
+    int prevCarry = cinGate;
+    for (int i = 0; i < 4; i++) {
+      float ox = i * stageW;
+      FAIds &fa = stages[i];
+
+      // NOT gate on B input
+      fa.notB = c.add(GateType::NOT, ox - 20, yBase, "~B" + std::to_string(i));
+      fa.xor1 =
+          c.add(GateType::XOR, ox + 60, yBase - 40, "X1_" + std::to_string(i));
+      fa.and1 =
+          c.add(GateType::AND, ox + 60, yBase + 60, "A1_" + std::to_string(i));
+      fa.xor2 =
+          c.add(GateType::XOR, ox + 180, yBase - 40, "X2_" + std::to_string(i));
+      fa.and2 =
+          c.add(GateType::AND, ox + 180, yBase + 60, "A2_" + std::to_string(i));
+      fa.orG =
+          c.add(GateType::OR, ox + 220, yBase + 140, "OR_" + std::to_string(i));
+
+      // NOT(B)
+      c.connect(inB[i], 0, fa.notB, 0);
+
+      // First HA: A XOR ~B,  A AND ~B
+      c.connect(inA[i], 0, fa.xor1, 0);
+      c.connect(fa.notB, 0, fa.xor1, 1);
+      c.connect(inA[i], 0, fa.and1, 0);
+      c.connect(fa.notB, 0, fa.and1, 1);
+
+      // Second HA: (A XOR ~B) XOR Ci
+      c.connect(fa.xor1, 0, fa.xor2, 0);
+      c.connect(prevCarry, 0, fa.xor2, 1);
+      c.connect(fa.xor1, 0, fa.and2, 0);
+      c.connect(prevCarry, 0, fa.and2, 1);
+
+      // Carry
+      c.connect(fa.and1, 0, fa.orG, 0);
+      c.connect(fa.and2, 0, fa.orG, 1);
+
+      // Difference bit output
+      outS[i] = c.add(GateType::OUTPUT, ox + 280, yBase - 40,
+                      "D" + std::to_string(i));
+      c.connect(fa.xor2, 0, outS[i], 0);
+
+      prevCarry = fa.orG;
+    }
+
+    // Cout = borrow indicator (active HIGH means no borrow / result positive)
+    int outCo = c.add(GateType::OUTPUT, 4 * stageW - 40, yBase + 140, "Cout");
+    c.connect(stages[3].orG, 0, outCo, 0);
+
+    // Set Cin=1 so subtractor initialises correctly
+    Gate *cinG = c.find(cinGate);
+    if (cinG)
+      cinG->inputVal = true;
+
+    c.evaluate();
+    gateCount.set(int(c.gates.size()));
+    rebuildTruthTable();
+    surface_->fitToView();
+    statusMsg.set(
+        "4-bit Subtractor  |  D = A - B = A + (~B) + 1  |  Cout=1 → no borrow");
+    if (canvas_)
+      canvas_->redraw();
+    if (surface_->onCircuitChanged)
+      surface_->onCircuitChanged();
+  }
+
+  // =========================================================================
+  // §7b  LOGIC / MUX PRESET BUILDERS
+  // =========================================================================
+
+  void buildMux21() {
+    if (!surface_)
+      return;
+    surface_->simStop();
+    surface_->pushUndo();
+    Circuit &c = surface_->circuit;
+    c.clearAll();
+
+    // 2:1 MUX truth table:
+    //   S=0 → Y = D0
+    //   S=1 → Y = D1
+    // Gate implementation:
+    //   NOT(S)      → notS
+    //   AND(D0,notS)→ and0   (D0 passes when S=0)
+    //   AND(D1, S)  → and1   (D1 passes when S=1)
+    //   OR(and0,and1)→ Y
+
+    // Layout:
+    //  D0 INPUT  @ (-220, -100)
+    //  D1 INPUT  @ (-220,   60)
+    //  S  INPUT  @ (-220,  180)
+    //  NOT(S)    @ ( -60,  180)
+    //  AND0      @ (  80,  -60)
+    //  AND1      @ (  80,   80)
+    //  OR        @ ( 220,   20)
+    //  Y  OUTPUT @ ( 360,   20)
+
+    int iD0 = c.add(GateType::INPUT, -220, -100, "D0");
+    int iD1 = c.add(GateType::INPUT, -220, 60, "D1");
+    int iS = c.add(GateType::INPUT, -220, 180, "S");
+
+    int notS = c.add(GateType::NOT, -60, 180, "~S");
+    int and0 = c.add(GateType::AND, 80, -60, "D0·~S");
+    int and1 = c.add(GateType::AND, 80, 80, "D1·S");
+    int orG = c.add(GateType::OR, 220, 20, "Y");
+    int oY = c.add(GateType::OUTPUT, 360, 20, "Y");
+
+    c.connect(iS, 0, notS, 0);
+    c.connect(iD0, 0, and0, 0);
+    c.connect(notS, 0, and0, 1);
+    c.connect(iD1, 0, and1, 0);
+    c.connect(iS, 0, and1, 1);
+    c.connect(and0, 0, orG, 0);
+    c.connect(and1, 0, orG, 1);
+    c.connect(orG, 0, oY, 0);
+
+    c.evaluate();
+    gateCount.set(int(c.gates.size()));
+    rebuildTruthTable();
+    surface_->fitToView();
+    statusMsg.set(
+        "2:1 MUX  |  S=0→Y=D0   S=1→Y=D1  |  Toggle S to switch input");
+    if (canvas_)
+      canvas_->redraw();
+    if (surface_->onCircuitChanged)
+      surface_->onCircuitChanged();
+  }
+
+  void buildMux41() {
+    if (!surface_)
+      return;
+    surface_->simStop();
+    surface_->pushUndo();
+    Circuit &c = surface_->circuit;
+    c.clearAll();
+
+    // 4:1 MUX  — 2 select lines S1,S0
+    //   S1 S0 | Y
+    //    0  0 | D0
+    //    0  1 | D1
+    //    1  0 | D2
+    //    1  1 | D3
+    //
+    // Implementation:
+    //   ~S0, ~S1
+    //   AND3(D0, ~S1, ~S0)  → g0
+    //   AND3(D1, ~S1,  S0)  → g1
+    //   AND3(D2,  S1, ~S0)  → g2
+    //   AND3(D3,  S1,  S0)  → g3
+    //   4-input OR via two 2-input ORs:
+    //     OR(g0,g1) → or01
+    //     OR(g2,g3) → or23
+    //     OR(or01,or23) → Y
+    //
+    // We only have 2-input AND, so build AND3 as two ANDs in series.
+
+    // Inputs
+    int iD0 = c.add(GateType::INPUT, -300, -200, "D0");
+    int iD1 = c.add(GateType::INPUT, -300, -80, "D1");
+    int iD2 = c.add(GateType::INPUT, -300, 80, "D2");
+    int iD3 = c.add(GateType::INPUT, -300, 200, "D3");
+    int iS0 = c.add(GateType::INPUT, -300, 340, "S0");
+    int iS1 = c.add(GateType::INPUT, -300, 440, "S1");
+
+    // Inverters
+    int nS0 = c.add(GateType::NOT, -140, 340, "~S0");
+    int nS1 = c.add(GateType::NOT, -140, 440, "~S1");
+    c.connect(iS0, 0, nS0, 0);
+    c.connect(iS1, 0, nS1, 0);
+
+    // AND3 for each data line (2 ANDs chained)
+    // g0 = D0 & ~S1 & ~S0
+    int a0a = c.add(GateType::AND, 40, -200, "D0·~S1");
+    int a0b = c.add(GateType::AND, 160, -200, "g0");
+    c.connect(iD0, 0, a0a, 0);
+    c.connect(nS1, 0, a0a, 1);
+    c.connect(a0a, 0, a0b, 0);
+    c.connect(nS0, 0, a0b, 1);
+
+    // g1 = D1 & ~S1 & S0
+    int a1a = c.add(GateType::AND, 40, -80, "D1·~S1");
+    int a1b = c.add(GateType::AND, 160, -80, "g1");
+    c.connect(iD1, 0, a1a, 0);
+    c.connect(nS1, 0, a1a, 1);
+    c.connect(a1a, 0, a1b, 0);
+    c.connect(iS0, 0, a1b, 1);
+
+    // g2 = D2 & S1 & ~S0
+    int a2a = c.add(GateType::AND, 40, 80, "D2·S1");
+    int a2b = c.add(GateType::AND, 160, 80, "g2");
+    c.connect(iD2, 0, a2a, 0);
+    c.connect(iS1, 0, a2a, 1);
+    c.connect(a2a, 0, a2b, 0);
+    c.connect(nS0, 0, a2b, 1);
+
+    // g3 = D3 & S1 & S0
+    int a3a = c.add(GateType::AND, 40, 200, "D3·S1");
+    int a3b = c.add(GateType::AND, 160, 200, "g3");
+    c.connect(iD3, 0, a3a, 0);
+    c.connect(iS1, 0, a3a, 1);
+    c.connect(a3a, 0, a3b, 0);
+    c.connect(iS0, 0, a3b, 1);
+
+    // OR tree
+    int or01 = c.add(GateType::OR, 300, -140, "g0|g1");
+    int or23 = c.add(GateType::OR, 300, 140, "g2|g3");
+    int orY = c.add(GateType::OR, 420, 0, "Y");
+    int oY = c.add(GateType::OUTPUT, 540, 0, "Y");
+
+    c.connect(a0b, 0, or01, 0);
+    c.connect(a1b, 0, or01, 1);
+    c.connect(a2b, 0, or23, 0);
+    c.connect(a3b, 0, or23, 1);
+    c.connect(or01, 0, orY, 0);
+    c.connect(or23, 0, orY, 1);
+    c.connect(orY, 0, oY, 0);
+
+    c.evaluate();
+    gateCount.set(int(c.gates.size()));
+    rebuildTruthTable();
+    surface_->fitToView();
+    statusMsg.set("4:1 MUX  |  S1S0: 00→D0  01→D1  10→D2  11→D3  |  Toggle "
+                  "S0,S1 to select");
+    if (canvas_)
+      canvas_->redraw();
+    if (surface_->onCircuitChanged)
+      surface_->onCircuitChanged();
+  }
+
+  void buildDecoder38() {
+    if (!surface_)
+      return;
+    surface_->simStop();
+    surface_->pushUndo();
+    Circuit &c = surface_->circuit;
+    c.clearAll();
+
+    // 3-to-8 Decoder
+    // Inputs: A2, A1, A0  (3 address bits)
+    // Outputs: Y0..Y7  — exactly one HIGH
+    //
+    // Yi = (A2==bi2) & (A1==bi1) & (A0==bi0)
+    // where b2b1b0 is the binary representation of i
+    //
+    // Each output is a 3-input AND built from two 2-input ANDs.
+    // We need ~A2, ~A1, ~A0 first.
+
+    // Inputs
+    int iA0 = c.add(GateType::INPUT, -300, 0, "A0");
+    int iA1 = c.add(GateType::INPUT, -300, 120, "A1");
+    int iA2 = c.add(GateType::INPUT, -300, 240, "A2");
+
+    // Inverters
+    int nA0 = c.add(GateType::NOT, -140, 0, "~A0");
+    int nA1 = c.add(GateType::NOT, -140, 120, "~A1");
+    int nA2 = c.add(GateType::NOT, -140, 240, "~A2");
+
+    c.connect(iA0, 0, nA0, 0);
+    c.connect(iA1, 0, nA1, 0);
+    c.connect(iA2, 0, nA2, 0);
+
+    // For each output Yi (i = 0..7):
+    //   bit pattern i:  b2 = (i>>2)&1,  b1 = (i>>1)&1,  b0 = i&1
+    //   select true or inverted form of each address bit
+
+    // Intermediary AND(A2sel, A1sel) then AND(result, A0sel)
+    // Outputs spread vertically with 100-unit spacing
+
+    float outX0 = 80.f;  // first AND column x
+    float outX1 = 220.f; // second AND column x
+    float outX2 = 360.f; // OUTPUT x
+    float yStart = -350.f;
+    float yStep = 100.f;
+
+    for (int i = 0; i < 8; i++) {
+      int b0 = (i >> 0) & 1; // selects A0 or ~A0
+      int b1 = (i >> 1) & 1; // selects A1 or ~A1
+      int b2 = (i >> 2) & 1; // selects A2 or ~A2
+
+      int selA0 = b0 ? iA0 : nA0;
+      int selA1 = b1 ? iA1 : nA1;
+      int selA2 = b2 ? iA2 : nA2;
+
+      float gy = yStart + i * yStep;
+
+      // First AND: A2sel & A1sel
+      int andHi = c.add(GateType::AND, outX0, gy,
+                        "A2" + std::string(b2 ? "" : "~") + "·A1" +
+                            std::string(b1 ? "" : "~"));
+      c.connect(selA2, 0, andHi, 0);
+      c.connect(selA1, 0, andHi, 1);
+
+      // Second AND: result & A0sel  →  Yi
+      int andLo = c.add(GateType::AND, outX1, gy, "Y" + std::to_string(i));
+      c.connect(andHi, 0, andLo, 0);
+      c.connect(selA0, 0, andLo, 1);
+
+      // Output
+      int oYi = c.add(GateType::OUTPUT, outX2, gy, "Y" + std::to_string(i));
+      c.connect(andLo, 0, oYi, 0);
+    }
+
+    c.evaluate();
+    gateCount.set(int(c.gates.size()));
+    rebuildTruthTable();
+    surface_->fitToView();
+    statusMsg.set("3-to-8 Decoder  |  A2A1A0 selects exactly one of Y0..Y7 "
+                  "HIGH  |  Toggle inputs to test");
+    if (canvas_)
+      canvas_->redraw();
+    if (surface_->onCircuitChanged)
+      surface_->onCircuitChanged();
+  }
+
+  // =========================================================================
+  // §7c  STORAGE PRESET BUILDERS
+  // =========================================================================
+
+  void buildRegister4() {
+    if (!surface_)
+      return;
+    surface_->simStop();
+    surface_->pushUndo();
+    Circuit &c = surface_->circuit;
+    c.clearAll();
+
+    // 4-bit D Register: 4 DFFs sharing one CLK and one RST line
+    //
+    // Inputs:  D0..D3  (data), CLK (shared clock), RST (shared reset)
+    // Outputs: Q0..Q3, /Q0../Q3
+    //
+    // Layout: DFFs stacked vertically, CLK and RST fan out horizontally
+    //
+    //   D0  INPUT  @ (-240, -180)
+    //   D1  INPUT  @ (-240,  -60)
+    //   D2  INPUT  @ (-240,   60)
+    //   D3  INPUT  @ (-240,  180)
+    //   CLK INPUT  @ (-240,  320)
+    //   RST INPUT  @ (-240,  420)
+    //
+    //   DFF0 @ (0, -180)
+    //   DFF1 @ (0,  -60)
+    //   DFF2 @ (0,   60)
+    //   DFF3 @ (0,  180)
+    //
+    //   Q0..Q3   OUTPUT @ (220, -180..-60..60..180)
+    //   /Q0../Q3 OUTPUT @ (340, -180..-60..60..180)
+
+    int iD[4], dff[4], oQ[4], oQn[4];
+    const float dffY[4] = {-180.f, -60.f, 60.f, 180.f};
+
+    for (int i = 0; i < 4; i++)
+      iD[i] = c.add(GateType::INPUT, -240.f, dffY[i], "D" + std::to_string(i));
+
+    int iCLK = c.add(GateType::INPUT, -240.f, 320.f, "CLK");
+    int iRST = c.add(GateType::INPUT, -240.f, 420.f, "RST");
+
+    for (int i = 0; i < 4; i++) {
+      dff[i] = c.add(GateType::DFF, 0.f, dffY[i], "FF" + std::to_string(i));
+
+      // D input
+      c.connect(iD[i], 0, dff[i], 0); // pin 0 = D
+      // CLK
+      c.connect(iCLK, 0, dff[i], 1); // pin 1 = CLK
+      // RST
+      c.connect(iRST, 0, dff[i], 2); // pin 2 = RST
+
+      // Q output (pin 0 of DFF outPins)
+      oQ[i] = c.add(GateType::OUTPUT, 220.f, dffY[i], "Q" + std::to_string(i));
+      c.connect(dff[i], 0, oQ[i], 0);
+
+      // /Q output (pin 1 of DFF outPins)
+      oQn[i] =
+          c.add(GateType::OUTPUT, 360.f, dffY[i], "/Q" + std::to_string(i));
+      c.connect(dff[i], 1, oQn[i], 0);
+    }
+
+    c.evaluate();
+    gateCount.set(int(c.gates.size()));
+    rebuildTruthTable();
+    surface_->fitToView();
+    statusMsg.set("4-bit D Register  |  Set D0-D3, pulse CLK to latch  |  "
+                  "RST=1 clears all  |  ▶ Play then click CLK");
+    if (canvas_)
+      canvas_->redraw();
+    if (surface_->onCircuitChanged)
+      surface_->onCircuitChanged();
+  }
+
+  void buildShiftReg4() {
+    if (!surface_)
+      return;
+    surface_->simStop();
+    surface_->pushUndo();
+    Circuit &c = surface_->circuit;
+    c.clearAll();
+
+    // 4-bit Serial-In Parallel-Out (SIPO) Shift Register
+    //
+    // Each rising CLK edge shifts data one stage right:
+    //   SIN → FF0 → FF1 → FF2 → FF3
+    //
+    // Inputs:  SIN (serial in), CLK (shared), RST (shared)
+    // Outputs: Q0..Q3 (parallel out), SOUT (= Q3, serial out)
+    //
+    // Layout: DFFs in a horizontal chain
+    //
+    //   SIN INPUT  @ (-300,    0)
+    //   CLK INPUT  @ (   0,  200)
+    //   RST INPUT  @ (   0,  300)
+    //
+    //   DFF0 @ (  0,   0)
+    //   DFF1 @ (180,   0)
+    //   DFF2 @ (360,   0)
+    //   DFF3 @ (540,   0)
+    //
+    //   Q0   OUTPUT @ (  0,  -140)
+    //   Q1   OUTPUT @ (180,  -140)
+    //   Q2   OUTPUT @ (360,  -140)
+    //   Q3   OUTPUT @ (540,  -140)   ← also SOUT
+    //   SOUT OUTPUT @ (680,     0)
+
+    int iSIN = c.add(GateType::INPUT, -300.f, 0.f, "SIN");
+    int iCLK = c.add(GateType::INPUT, 0.f, 200.f, "CLK");
+    int iRST = c.add(GateType::INPUT, 0.f, 300.f, "RST");
+
+    const float dffX[4] = {0.f, 180.f, 360.f, 540.f};
+    int dff[4], oQ[4];
+
+    for (int i = 0; i < 4; i++) {
+      dff[i] = c.add(GateType::DFF, dffX[i], 0.f, "FF" + std::to_string(i));
+
+      // CLK and RST shared to all stages
+      c.connect(iCLK, 0, dff[i], 1);
+      c.connect(iRST, 0, dff[i], 2);
+
+      // Q parallel output (above each DFF)
+      oQ[i] = c.add(GateType::OUTPUT, dffX[i], -140.f, "Q" + std::to_string(i));
+      c.connect(dff[i], 0, oQ[i], 0);
+    }
+
+    // Serial data path: SIN → FF0.D, FF0.Q → FF1.D, ... FF2.Q → FF3.D
+    c.connect(iSIN, 0, dff[0], 0);
+    c.connect(dff[0], 0, dff[1], 0);
+    c.connect(dff[1], 0, dff[2], 0);
+    c.connect(dff[2], 0, dff[3], 0);
+
+    // Serial output
+    int oSOUT = c.add(GateType::OUTPUT, 680.f, 0.f, "SOUT");
+    c.connect(dff[3], 0, oSOUT, 0);
+
+    c.evaluate();
+    gateCount.set(int(c.gates.size()));
+    rebuildTruthTable();
+    surface_->fitToView();
+    statusMsg.set("4-bit Shift Register (SIPO)  |  Set SIN, pulse CLK to shift "
+                  "right  |  RST clears  |  ▶ Play then click CLK");
+    if (canvas_)
+      canvas_->redraw();
+    if (surface_->onCircuitChanged)
+      surface_->onCircuitChanged();
+  }
+
+  // =========================================================================
+// §7d  ALU PRESET BUILDER
+// =========================================================================
+
+void buildALU4() {
+    if (!surface_) return;
+    surface_->simStop();
+    surface_->pushUndo();
+    Circuit &c = surface_->circuit;
+    c.clearAll();
+
+    // 4-bit ALU with 3 operation-select bits (Op2, Op1, Op0)
+    //
+    // Op2 Op1 Op0 | Operation
+    //  0   0   0  | ADD   (A + B)
+    //  0   0   1  | SUB   (A - B  =  A + ~B + 1)
+    //  0   1   0  | AND   (A & B)
+    //  0   1   1  | OR    (A | B)
+    //  1   0   0  | XOR   (A ^ B)
+    //  1   0   1  | (reserved / same as XOR here)
+    //  1   1   0  | (reserved)
+    //  1   1   1  | (reserved)
+    //
+    // Architecture:
+    //   For each bit i (0..3):
+    //     - Compute all five candidate results independently
+    //     - Use a 5-way mux built from AND/OR to select based on Op
+    //
+    //   ADD/SUB share the ripple-carry adder core:
+    //     SUB_SEL  = ~Op2 & ~Op1 & Op0        (select subtract mode)
+    //     Each Bi is XORed with SUB_SEL before the adder
+    //     Carry-in = SUB_SEL
+    //
+    //   Logic ops are purely combinational per-bit:
+    //     AND_i  = Ai & Bi
+    //     OR_i   = Ai | Bi
+    //     XOR_i  = Ai ^ Bi
+    //
+    //   Output mux per bit (one-hot select from op decode):
+    //     sel_add = ~Op2 & ~Op1 & ~Op0
+    //     sel_sub = ~Op2 & ~Op1 &  Op0
+    //     sel_and = ~Op2 &  Op1 & ~Op0
+    //     sel_or  = ~Op2 &  Op1 &  Op0
+    //     sel_xor =  Op2 & ~Op1 & ~Op0
+    //
+    //     Ri = (add_i & sel_add)
+    //        | (sub_i & sel_sub)
+    //        | (and_i & sel_and)
+    //        | (or_i  & sel_or )
+    //        | (xor_i & sel_xor)
+    //
+    // Layout strategy:
+    //   Column A:  A inputs        x = -520
+    //   Column B:  B inputs        x = -520  (offset y)
+    //   Column Op: Op inputs       x = -520  (lower)
+    //   Column 0:  Op decode       x = -300
+    //   Column 1:  B-invert + FA   x = -100 .. 300  (per bit, stacked)
+    //   Column 2:  Logic ops       x = 100
+    //   Column 3:  Output mux      x = 480
+    //   Column 4:  Outputs         x = 640
+
+    // ── Op select inputs ────────────────────────────────────────────────
+    int iOp0 = c.add(GateType::INPUT, -520.f,  420.f, "Op0");
+    int iOp1 = c.add(GateType::INPUT, -520.f,  520.f, "Op1");
+    int iOp2 = c.add(GateType::INPUT, -520.f,  620.f, "Op2");
+
+    // Inverters for op bits
+    int nOp0 = c.add(GateType::NOT, -360.f,  420.f, "~Op0");
+    int nOp1 = c.add(GateType::NOT, -360.f,  520.f, "~Op1");
+    int nOp2 = c.add(GateType::NOT, -360.f,  620.f, "~Op2");
+    c.connect(iOp0, 0, nOp0, 0);
+    c.connect(iOp1, 0, nOp1, 0);
+    c.connect(iOp2, 0, nOp2, 0);
+
+    // ── One-hot op decode (all built from 3-input ANDs via 2×AND) ───────
+    // sel_add = ~Op2 & ~Op1 & ~Op0
+    int saA = c.add(GateType::AND, -200.f, 380.f, "~O2·~O1");
+    int selAdd = c.add(GateType::AND, -80.f, 380.f, "sel_ADD");
+    c.connect(nOp2, 0, saA, 0);
+    c.connect(nOp1, 0, saA, 1);
+    c.connect(saA,  0, selAdd, 0);
+    c.connect(nOp0, 0, selAdd, 1);
+
+    // sel_sub = ~Op2 & ~Op1 & Op0
+    int ssA = c.add(GateType::AND, -200.f, 460.f, "~O2·~O1");
+    int selSub = c.add(GateType::AND, -80.f, 460.f, "sel_SUB");
+    c.connect(nOp2, 0, ssA, 0);
+    c.connect(nOp1, 0, ssA, 1);
+    c.connect(ssA,  0, selSub, 0);
+    c.connect(iOp0, 0, selSub, 1);
+
+    // sel_and = ~Op2 & Op1 & ~Op0
+    int sanA = c.add(GateType::AND, -200.f, 540.f, "~O2·O1");
+    int selAnd = c.add(GateType::AND, -80.f, 540.f, "sel_AND");
+    c.connect(nOp2, 0, sanA, 0);
+    c.connect(iOp1, 0, sanA, 1);
+    c.connect(sanA, 0, selAnd, 0);
+    c.connect(nOp0, 0, selAnd, 1);
+
+    // sel_or  = ~Op2 & Op1 & Op0
+    int sorA = c.add(GateType::AND, -200.f, 620.f, "~O2·O1");
+    int selOr = c.add(GateType::AND, -80.f, 620.f, "sel_OR");
+    c.connect(nOp2, 0, sorA, 0);
+    c.connect(iOp1, 0, sorA, 1);
+    c.connect(sorA, 0, selOr, 0);
+    c.connect(iOp0, 0, selOr, 1);
+
+    // sel_xor = Op2 & ~Op1 & ~Op0
+    int sxA = c.add(GateType::AND, -200.f, 700.f, "O2·~O1");
+    int selXor = c.add(GateType::AND, -80.f, 700.f, "sel_XOR");
+    c.connect(iOp2, 0, sxA, 0);
+    c.connect(nOp1, 0, sxA, 1);
+    c.connect(sxA,  0, selXor, 0);
+    c.connect(nOp0, 0, selXor, 1);
+
+    // ── Data inputs ─────────────────────────────────────────────────────
+    const float bitY[4] = { -300.f, -100.f, 100.f, 300.f };
+    int iA[4], iB[4];
+    for (int i = 0; i < 4; i++) {
+        iA[i] = c.add(GateType::INPUT, -520.f, bitY[i] - 30.f,
+                      "A" + std::to_string(i));
+        iB[i] = c.add(GateType::INPUT, -520.f, bitY[i] + 30.f,
+                      "B" + std::to_string(i));
+    }
+
+    // ── Per-bit logic ────────────────────────────────────────────────────
+    // For the adder/subtractor core we need the ripple carry chain.
+    // SUB_SEL = sel_sub (already decoded above — reuse selSub as Cin
+    // and as the XOR control for B inversion)
+    //
+    // B_i_eff = Bi XOR selSub   (invert B when subtracting)
+    // Then full-adder on (Ai, B_i_eff, carry_i)
+
+    int prevCarry = selSub;  // Cin = 1 when subtracting, 0 when adding
+
+    // Storage for per-bit intermediate nodes
+    int bEff[4];   // B XOR selSub
+    int faXor1[4], faAnd1[4], faXor2[4], faAnd2[4], faOr[4]; // FA internals
+    int logAnd[4], logOr[4], logXor[4];  // logic results
+    int outR[4];   // final result OUTPUT gates
+
+    for (int i = 0; i < 4; i++) {
+        float bx = 80.f + i * 0.f;   // all at same x, different y
+        float by = bitY[i];
+
+        // ── B inversion for subtract ─────────────────────────────────
+        bEff[i] = c.add(GateType::XOR, 60.f, by - 60.f,
+                        "Beff" + std::to_string(i));
+        c.connect(iB[i],  0, bEff[i], 0);
+        c.connect(selSub, 0, bEff[i], 1);
+
+        // ── Full adder ───────────────────────────────────────────────
+        // XOR1 = Ai ^ Beff
+        faXor1[i] = c.add(GateType::XOR,  180.f, by - 80.f,
+                          "X1_" + std::to_string(i));
+        faAnd1[i] = c.add(GateType::AND,  180.f, by - 20.f,
+                          "A1_" + std::to_string(i));
+        c.connect(iA[i],   0, faXor1[i], 0);
+        c.connect(bEff[i], 0, faXor1[i], 1);
+        c.connect(iA[i],   0, faAnd1[i], 0);
+        c.connect(bEff[i], 0, faAnd1[i], 1);
+
+        // XOR2 = XOR1 ^ Cin  (= sum bit)
+        faXor2[i] = c.add(GateType::XOR,  300.f, by - 80.f,
+                          "X2_" + std::to_string(i));
+        faAnd2[i] = c.add(GateType::AND,  300.f, by - 20.f,
+                          "A2_" + std::to_string(i));
+        c.connect(faXor1[i], 0, faXor2[i], 0);
+        c.connect(prevCarry, 0, faXor2[i], 1);
+        c.connect(faXor1[i], 0, faAnd2[i], 0);
+        c.connect(prevCarry, 0, faAnd2[i], 1);
+
+        // Carry out
+        faOr[i] = c.add(GateType::OR, 360.f, by,
+                        "Co_" + std::to_string(i));
+        c.connect(faAnd1[i], 0, faOr[i], 0);
+        c.connect(faAnd2[i], 0, faOr[i], 1);
+        prevCarry = faOr[i];
+
+        // ── Logic operations ─────────────────────────────────────────
+        logAnd[i] = c.add(GateType::AND, 180.f, by + 60.f,
+                          "AND_" + std::to_string(i));
+        logOr[i]  = c.add(GateType::OR,  180.f, by + 120.f,
+                          "OR_"  + std::to_string(i));
+        logXor[i] = c.add(GateType::XOR, 180.f, by + 180.f,
+                          "XOR_" + std::to_string(i));
+        c.connect(iA[i], 0, logAnd[i], 0);
+        c.connect(iB[i], 0, logAnd[i], 1);
+        c.connect(iA[i], 0, logOr[i],  0);
+        c.connect(iB[i], 0, logOr[i],  1);
+        c.connect(iA[i], 0, logXor[i], 0);
+        c.connect(iB[i], 0, logXor[i], 1);
+
+        // ── Output mux (5-way: one AND per candidate, then OR tree) ──
+        // Each candidate: result_gate & sel_X
+        float mx = 480.f;
+
+        int mAdd = c.add(GateType::AND, mx,        by - 160.f,
+                         "mADD" + std::to_string(i));
+        int mSub = c.add(GateType::AND, mx,        by - 100.f,
+                         "mSUB" + std::to_string(i));
+        int mAnd = c.add(GateType::AND, mx,        by -  40.f,
+                         "mAND" + std::to_string(i));
+        int mOr  = c.add(GateType::AND, mx,        by +  20.f,
+                         "mOR"  + std::to_string(i));
+        int mXor = c.add(GateType::AND, mx,        by +  80.f,
+                         "mXOR" + std::to_string(i));
+
+        c.connect(faXor2[i], 0, mAdd, 0);
+        c.connect(selAdd,    0, mAdd, 1);
+
+        c.connect(faXor2[i], 0, mSub, 0);
+        c.connect(selSub,    0, mSub, 1);
+
+        c.connect(logAnd[i], 0, mAnd, 0);
+        c.connect(selAnd,    0, mAnd, 1);
+
+        c.connect(logOr[i],  0, mOr,  0);
+        c.connect(selOr,     0, mOr,  1);
+
+        c.connect(logXor[i], 0, mXor, 0);
+        c.connect(selXor,    0, mXor, 1);
+
+        // OR tree: (mAdd|mSub) | (mAnd|mOr) | mXor
+        int or01 = c.add(GateType::OR, mx + 100.f, by - 130.f,
+                         "o01_" + std::to_string(i));
+        int or23 = c.add(GateType::OR, mx + 100.f, by -  10.f,
+                         "o23_" + std::to_string(i));
+        int or45 = c.add(GateType::OR, mx + 200.f, by -  70.f,
+                         "o45_" + std::to_string(i));
+        int orFin= c.add(GateType::OR, mx + 300.f, by -  70.f,
+                         "Ri_"  + std::to_string(i));
+
+        c.connect(mAdd,  0, or01, 0);
+        c.connect(mSub,  0, or01, 1);
+        c.connect(mAnd,  0, or23, 0);
+        c.connect(mOr,   0, or23, 1);
+        c.connect(or01,  0, or45, 0);
+        c.connect(or23,  0, or45, 1);
+        c.connect(or45,  0, orFin,0);
+        c.connect(mXor,  0, orFin,1);
+
+        // Result output
+        outR[i] = c.add(GateType::OUTPUT, mx + 440.f, by - 70.f,
+                        "R"  + std::to_string(i));
+        c.connect(orFin, 0, outR[i], 0);
+    }
+
+    // ── Carry-out / overflow output ──────────────────────────────────────
+    // Show final carry out (useful for ADD/SUB overflow detection)
+    int oCout = c.add(GateType::OUTPUT, 480.f, 460.f, "Cout");
+    c.connect(faOr[3], 0, oCout, 0);
+
+    // ── Zero flag ────────────────────────────────────────────────────────
+    // Zero = ~R0 & ~R1 & ~R2 & ~R3
+    // Built as NOR tree: NOR(R0,R1) & NOR(R2,R3)  then AND
+    // We use NOR = NOT(OR) but we only have OR+NOT separately,
+    // so: nor01 = NOT(OR(outR[0]fanout, outR[1]fanout))
+    // For simplicity we fan from the orFin nodes directly.
+
+    // Re-collect the final OR nodes for zero flag
+    // We stored them in orFin — but we don't have a reference after the loop.
+    // Instead add NOR gates directly connected to the output gates' input wires.
+    // Simplest correct approach: use XNOR chain isn't right.
+    // Use: zero = NOR(R0,R1) AND NOR(R2,R3) — but we need to tap
+    // before the OUTPUT gates. We'll tap faXor2 / orFin outputs by
+    // reconnecting. Easier: just add OR+NOT pairs.
+
+    // Tap point: we need the result bits BEFORE the OUTPUT gate.
+    // The orFin gate for each bit already drives outR[i].
+    // We'll wire orFin outputs to the zero-flag logic too.
+    // But we lost those gate ids after the loop — fix: store them.
+    // Workaround: add NOR(R0,R1) by connecting to outR inputs.
+    // outR[i] input pin 0 is already connected so we need a different tap.
+    // Best fix: store orFin ids in an array.
+
+    // *** Restructure: we'll redo the zero flag using a stored array.
+    // Add a small NOR tree now using the result OUTPUT gates as proxies.
+    // Since OUTPUT gates pass their input through as simVal, we can wire
+    // from them — but OUTPUT has no output pin.
+    // The cleanest solution without restructuring: add 4 NOT gates on
+    // the result lines, then AND them together.
+
+    // Note: we connect to the same source as outR[i] — which is orFin.
+    // We stored orFin ids implicitly. Let's just add the zero flag
+    // as a separate subchain. We need to find the wire driving outR[i].
+    // Instead, use a simpler approach: wire a fresh set.
+    // Since orFin drove outR[i] and we can also connect orFin to more gates,
+    // we'll find those gates by their label "Ri_X".
+
+    // Find orFin gate ids by label
+    int orFinIds[4] = {-1,-1,-1,-1};
+    for (auto &g : c.gates) {
+        for (int i = 0; i < 4; i++) {
+            std::string lbl = "Ri_" + std::to_string(i);
+            if (g.label == lbl) orFinIds[i] = g.id;
+        }
+    }
+
+    if (orFinIds[0]>=0 && orFinIds[1]>=0 && orFinIds[2]>=0 && orFinIds[3]>=0) {
+        // NOR(R0,R1): OR then NOT
+        int zOr01 = c.add(GateType::OR,  480.f, 560.f, "zOR01");
+        int zOr23 = c.add(GateType::OR,  480.f, 640.f, "zOR23");
+        int zN01  = c.add(GateType::NOT, 600.f, 560.f, "zN01");
+        int zN23  = c.add(GateType::NOT, 600.f, 640.f, "zN23");
+        int zAnd  = c.add(GateType::AND, 720.f, 600.f, "ZERO");
+        int oZero = c.add(GateType::OUTPUT, 840.f, 600.f, "Zero");
+
+        c.connect(orFinIds[0], 0, zOr01, 0);
+        c.connect(orFinIds[1], 0, zOr01, 1);
+        c.connect(orFinIds[2], 0, zOr23, 0);
+        c.connect(orFinIds[3], 0, zOr23, 1);
+        c.connect(zOr01, 0, zN01, 0);
+        c.connect(zOr23, 0, zN23, 0);
+        c.connect(zN01,  0, zAnd, 0);
+        c.connect(zN23,  0, zAnd, 1);
+        c.connect(zAnd,  0, oZero, 0);
+    }
+
+    c.evaluate();
+    gateCount.set(int(c.gates.size()));
+    rebuildTruthTable();
+    surface_->fitToView();
+    statusMsg.set(
+        "4-bit ALU  |  Op: 000=ADD  001=SUB  010=AND  011=OR  100=XOR  "
+        "|  Set A,B inputs + Op bits  |  R=result  Cout=carry  Zero=all-zero flag");
+    if (canvas_) canvas_->redraw();
+    if (surface_->onCircuitChanged) surface_->onCircuitChanged();
+}
+
 public:
   LogicSimApp()
       : gateCount(0, context),
@@ -5155,6 +6237,21 @@ public:
                 mkBtn("⏭ Step",RGB(100,180,255),RGB(14,22,38),RGB(40,80,150),[this](){if(surface_)surface_->simStep();}),SizedBox(8,0),
                 // ── Group button ──────────────────────────────────────────
                 mkBtn("⬡ Group  Ctrl+G",RGB(200,170,255),RGB(20,14,34),RGB(80,55,130),[this](){if(surface_)surface_->groupSelected();}),
+                SizedBox(8,0),
+mkBtn("½ Half Add",   RGB(100,200,255),RGB(10,18,28),RGB(30,80,130),[this](){buildHalfAdder();}),
+mkBtn("Full Add",     RGB(100,200,255),RGB(10,18,28),RGB(30,80,130),[this](){buildFullAdder();}),
+mkBtn("4b Adder",     RGB(130,220,180),RGB(10,22,16),RGB(30,100,60),[this](){buildRippleAdder4();}),
+mkBtn("4b Subtract",  RGB(255,160,100),RGB(28,14, 8),RGB(120,60,20),[this](){buildSubtractor4();}),
+SizedBox(8,0),
+mkBtn("2:1 MUX",     RGB(180,140,255),RGB(18,12,32),RGB(80,50,140),[this](){buildMux21();}),
+mkBtn("4:1 MUX",     RGB(200,150,255),RGB(20,12,34),RGB(90,55,150),[this](){buildMux41();}),
+mkBtn("3→8 Dec",     RGB(255,200,100),RGB(28,20, 8),RGB(120,90,20),[this](){buildDecoder38();}),
+SizedBox(8,0),
+mkBtn("4b Reg",      RGB(100,220,200),RGB( 8,22,20),RGB(25,100,90),[this](){buildRegister4();}),
+mkBtn("4b ShiftReg", RGB(100,200,220),RGB( 8,18,22),RGB(25, 85,110),[this](){buildShiftReg4();}),
+SizedBox(8,0),
+mkBtn("4b ALU",      RGB(255,180,100),RGB(28,16, 4),RGB(130,70,15),[this](){buildALU4();}),
+SizedBox(8,0),
                 SizedBox(12,0),
                 Container(Text(simActive,[](bool a){return a?"● SIM MODE":"○ EDIT MODE";})
                     ->setFontSize(9)->setFontWeight(FontWeight::Bold)->setTextColor(RGB(220,200,60)))
