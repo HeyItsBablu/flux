@@ -70,7 +70,7 @@
 //     destroy() shuts it down.  Subclasses must NOT call GdiplusStartup /
 //     GdiplusShutdown themselves.
 //
-// Step 6  (this revision)
+// Step 6  (previous)
 // ───────────────────────
 //   • setScrollbarsEnabled(bool) added to CanvasWidget — hides/shows
 //     scrollbars at any time and resizes the GL child to fill freed space.
@@ -79,6 +79,36 @@
 //     child window is resized (distinct from canvas/image resize).
 //     Used by ImageEditSurface to track the GL window size independently
 //     of the canvas/image dimensions that come through resize().
+//
+// Step 7  (this revision)
+// ───────────────────────
+//   CUSTOM GL SCROLLBARS replacing Win32 OS scrollbars entirely.
+//
+//   • CustomScrollbar (§6b) — self-contained scrollbar renderer/tracker.
+//     Drawn as OpenGL quads in screen-space NDC inside the GL child window.
+//     Features:
+//       - Thin minimal style (12 px track, 6 px thumb width when idle,
+//         8 px when hovered/dragging).
+//       - Smooth alpha fade: opaque on hover/drag → fades to kIdleAlpha
+//         (0.15) after kIdleDelay (1.5 s) of inactivity.
+//       - Arrow buttons at both ends with triangle glyphs.
+//       - Rounded-rect thumb via GL_TRIANGLE_FAN circle caps.
+//       - Hit-test: arrow, track-before, thumb, track-after zones.
+//       - Drag: captures relative delta from thumb-center on mousedown.
+//
+//   • CanvasWidget changes:
+//       - Frame window no longer has WS_HSCROLL | WS_VSCROLL.
+//       - kSBThick (12 px) reserved on right/bottom edges of GL child.
+//         Viewport view-size = (glW − kSBThick, glH − kSBThick) when
+//         both bars are visible, shrinking accordingly when only one or
+//         neither is shown.
+//       - syncScrollbars() feeds CustomScrollbar::setThumb() instead of
+//         Win32 SetScrollInfo().
+//       - GLProc routes WM_LBUTTONDOWN/MOVE/UP to scrollbar hit-test
+//         before forwarding to the surface.
+//       - tickAndRender() calls CustomScrollbar::tick(dt) and
+//         CustomScrollbar::render() after the surface render.
+//       - needsContinuousRedraw() returns true while any bar is fading.
 //
 // ============================================================================
 
@@ -478,13 +508,450 @@ struct TextStyle {
 };
 
 // ============================================================================
-// §6  SCROLLBAR INFO
+// §6  SCROLLBAR INFO  (used by Viewport; fed into CustomScrollbar)
 // ============================================================================
 
 struct ScrollbarInfo {
   float thumbMin = 0.f;
   float thumbMax = 1.f;
   bool visible = false;
+};
+
+// ============================================================================
+// §6b  CUSTOM GL SCROLLBAR
+// ============================================================================
+//
+// Draws a thin macOS/VS-Code-style scrollbar directly in the GL child window
+// using screen-space quads.  No Win32 SCROLLBAR control is involved.
+//
+// Coordinate system: screen pixels, origin top-left (matches WM_MOUSEMOVE).
+// The caller (CanvasWidget) must:
+//   1. Call setGeometry() whenever the GL window is resized.
+//   2. Call setThumb() every frame from Viewport::scrollbarH/V().
+//   3. Call tick(dt) every frame (drives fade animation).
+//   4. Call render(prog, vao, vbo, uMVP, uColor, glW, glH) after the
+//      surface render, with blend already enabled.
+//   5. Forward WM_LBUTTONDOWN/MOVE/UP to onMouseDown/Move/Up.
+//   6. Forward WM_MOUSEMOVE (even without button) to onMouseMove for hover.
+//   7. Forward WM_MOUSELEAVE to onMouseLeave.
+//
+// Returns needsRedraw() == true while alpha is still animating so the caller
+// can schedule a continuous repaint.
+
+class CustomScrollbar {
+public:
+  // ── Tuning constants ──────────────────────────────────────────────────────
+  static constexpr float kTrackThick    = 12.f; // px — full track strip width
+  static constexpr float kThumbThin     =  5.f; // px — thumb width at rest
+  static constexpr float kThumbFat      =  8.f; // px — thumb width on hover/drag
+  static constexpr float kArrowSize     = 12.f; // px — square arrow button
+  static constexpr float kThumbMinLen   = 24.f; // px — minimum thumb length
+  static constexpr float kCornerR       =  3.f; // px — thumb cap radius
+  static constexpr int   kCapSegs       = 8;    // semicircle segments per cap
+  static constexpr float kIdleAlpha     = 0.15f;// alpha when content overflows
+  static constexpr float kActiveAlpha   = 0.90f;// alpha when hovered/dragging
+  static constexpr float kIdleDelay     = 1.5f; // seconds before fade starts
+  static constexpr float kFadeSpeed     = 3.5f; // alpha units per second
+  static constexpr float kExpandSpeed   = 10.f; // thickness lerp speed (1/s)
+
+  enum class Axis { Horizontal, Vertical };
+
+  // Hit zones returned by hitTest()
+  enum class Zone { None, ArrowStart, TrackBefore, Thumb, TrackAfter, ArrowEnd };
+
+  explicit CustomScrollbar(Axis axis) : axis_(axis) {}
+
+  // Called when GL window resizes.  x0,y0 = top-left of track strip in
+  // screen pixels; trackLen = usable length excluding the two arrow buttons.
+  void setGeometry(float stripX0, float stripY0, float stripLen) {
+    stripX0_  = stripX0;
+    stripY0_  = stripY0;
+    stripLen_ = stripLen;
+  }
+
+  // thumbMin/Max in [0,1].  visible = whether content overflows.
+  void setThumb(float thumbMin, float thumbMax, bool visible) {
+    visible_   = visible;
+    thumbMin_  = std::clamp(thumbMin, 0.f, 1.f);
+    thumbMax_  = std::clamp(thumbMax, 0.f, 1.f);
+    if (thumbMin_ > thumbMax_) std::swap(thumbMin_, thumbMax_);
+  }
+
+  // dt in seconds.  Returns true while animation is still running.
+  bool tick(double dt) {
+    float f = float(dt);
+
+    // ── Thumb width lerp (idle ↔ hovered/dragging) ────────────────────────
+    float targetW = (hovered_ || dragging_) ? kThumbFat : kThumbThin;
+    currentW_ += (targetW - currentW_) * min(1.f, kExpandSpeed * f);
+
+    // ── Alpha animation ───────────────────────────────────────────────────
+    if (!visible_) {
+      // No overflow — hide completely
+      alpha_ += (0.f - alpha_) * min(1.f, kFadeSpeed * f);
+      idleTimer_ = 0.f;
+      return std::abs(alpha_) > 0.005f;
+    }
+
+    float targetAlpha;
+    if (hovered_ || dragging_) {
+      targetAlpha = kActiveAlpha;
+      idleTimer_  = 0.f;
+    } else {
+      idleTimer_ += f;
+      if (idleTimer_ < kIdleDelay)
+        targetAlpha = kActiveAlpha; // stay bright immediately after activity
+      else
+        targetAlpha = kIdleAlpha;
+    }
+    float prev = alpha_;
+    alpha_ += (targetAlpha - alpha_) * min(1.f, kFadeSpeed * f);
+    return std::abs(alpha_ - prev) > 0.002f;
+  }
+
+  bool needsRedraw() const { return visible_ && alpha_ > 0.005f; }
+  bool isVisible()   const { return visible_; }
+
+  // ── Render ────────────────────────────────────────────────────────────────
+  // prog    : the flat-color shader (uMode=1 path of the blit shader)
+  // vao/vbo : shared geometry buffers (already large enough)
+  // uMVP, uColor : uniform locations in prog
+  // glW, glH : current GL window dimensions (screen pixels)
+  void render(GLuint prog, GLuint vao, GLuint vbo,
+              GLint uMVP, GLint uColor,
+              int glW, int glH) const {
+    if (alpha_ < 0.005f) return;
+
+    // Build screen-space ortho: x in [0,glW], y in [0,glH] top-down.
+    // We flip Y so that pixel y=0 is the top of the window.
+    float mvp[16];
+    glutil::ortho(0.f, float(glW), float(glH), 0.f, mvp);
+
+    GL.useProgram(prog);
+    GL.uniformMatrix4fv(uMVP, 1, GL_FALSE, mvp);
+    GL.uniform1i(GL.getUniformLocation(prog, "uMode"), 1);
+
+    // ── track background ─────────────────────────────────────────────────
+    {
+      float ta = alpha_ * 0.25f;
+      GL.uniform4f(uColor, 0.12f, 0.12f, 0.12f, ta);
+      pushRect(vao, vbo, stripX0_, stripY0_, trackStripW(), stripLen_);
+    }
+
+    // ── arrow buttons ────────────────────────────────────────────────────
+    {
+      float aa = alpha_;
+      GL.uniform4f(uColor, 0.75f, 0.75f, 0.75f, aa);
+      drawArrow(vao, vbo, true,  glW, glH, prog, uMVP, uColor);
+      drawArrow(vao, vbo, false, glW, glH, prog, uMVP, uColor);
+    }
+
+    // ── thumb ─────────────────────────────────────────────────────────────
+    if (thumbMax_ > thumbMin_) {
+      float thumbAlpha = dragging_ ? 1.f : alpha_;
+      float tc = dragging_ ? 0.92f : 0.72f;
+      GL.uniform4f(uColor, tc, tc, tc, thumbAlpha);
+      drawThumb(vao, vbo);
+    }
+  }
+
+  // ── Mouse input ───────────────────────────────────────────────────────────
+
+  // Returns true if the event was consumed by the scrollbar.
+  bool onMouseDown(int sx, int sy, std::function<void(float)> scrollTo) {
+    Zone z = hitTest(sx, sy);
+    if (z == Zone::None) return false;
+
+    hovered_    = true;
+    idleTimer_  = 0.f;
+    scrollToFn_ = scrollTo;
+
+    if (z == Zone::Thumb) {
+      dragging_     = true;
+      dragStartPx_  = axis_ == Axis::Horizontal ? float(sx) : float(sy);
+      dragStartMin_ = thumbMin_;
+      return true;
+    }
+    if (z == Zone::ArrowStart) {
+      scrollBy(-kArrowStep, scrollTo);
+      return true;
+    }
+    if (z == Zone::ArrowEnd) {
+      scrollBy(+kArrowStep, scrollTo);
+      return true;
+    }
+    if (z == Zone::TrackBefore) {
+      scrollBy(-(thumbMax_ - thumbMin_), scrollTo);
+      return true;
+    }
+    if (z == Zone::TrackAfter) {
+      scrollBy(+(thumbMax_ - thumbMin_), scrollTo);
+      return true;
+    }
+    return false;
+  }
+
+  // Returns true if dragging (caller should suppress surface mouse move).
+  bool onMouseMove(int sx, int sy) {
+    Zone z = hitTest(sx, sy);
+    bool wasHovered = hovered_;
+    hovered_ = (z != Zone::None);
+    if (hovered_ != wasHovered) idleTimer_ = 0.f;
+
+    if (dragging_ && scrollToFn_) {
+      float pos  = axis_ == Axis::Horizontal ? float(sx) : float(sy);
+      float delta = pos - dragStartPx_;
+      float usable = usableLen();
+      float thumbPx = (thumbMax_ - thumbMin_) * usable;
+      float range   = usable - thumbPx;
+      if (range > 0.f) {
+        float newMin = std::clamp(dragStartMin_ + delta / range, 0.f, 1.f - (thumbMax_ - thumbMin_));
+        scrollToFn_(newMin);
+      }
+      return true;
+    }
+    return false;
+  }
+
+  bool onMouseUp(int /*sx*/, int /*sy*/) {
+    bool was = dragging_;
+    dragging_ = false;
+    idleTimer_ = 0.f;
+    return was;
+  }
+
+  void onMouseLeave() {
+    hovered_  = false;
+    dragging_ = false;
+  }
+
+  // Wakes the bar (resets idle timer) — call on any viewport change.
+  void poke() { idleTimer_ = 0.f; }
+
+private:
+  Axis  axis_;
+  float stripX0_ = 0, stripY0_ = 0, stripLen_ = 100.f;
+  float thumbMin_ = 0.f, thumbMax_ = 1.f;
+  bool  visible_  = false;
+  bool  hovered_  = false;
+  bool  dragging_ = false;
+  float alpha_    = kIdleAlpha;
+  float idleTimer_= 0.f;
+  float currentW_ = kThumbThin;
+  float dragStartPx_  = 0.f;
+  float dragStartMin_ = 0.f;
+
+  std::function<void(float)> scrollToFn_;
+
+  static constexpr float kArrowStep = 0.05f; // fraction per arrow click
+
+  // Total width of the track strip (cross-axis dimension)
+  float trackStripW() const { return kTrackThick; }
+
+  // Usable track length (minus two arrow buttons)
+  float usableLen() const { return max(1.f, stripLen_ - kArrowSize * 2.f); }
+
+  // Thumb position along the track axis (pixels from track start, after arrow)
+  void thumbPixels(float &pxStart, float &pxLen) const {
+    float ul = usableLen();
+    pxLen  = max(kThumbMinLen, (thumbMax_ - thumbMin_) * ul);
+    pxStart = kArrowSize + thumbMin_ * (ul - pxLen + (thumbMax_ - thumbMin_) * ul - pxLen);
+    // Simpler: map thumbMin to [0, ul - pxLen]
+    float range = ul - pxLen;
+    pxStart = kArrowSize + thumbMin_ / (1.f - (thumbMax_ - thumbMin_)) * range;
+    if (!std::isfinite(pxStart)) pxStart = kArrowSize;
+    pxStart = std::clamp(pxStart, kArrowSize, kArrowSize + range);
+  }
+
+  Zone hitTest(int sx, int sy) const {
+    if (!visible_) return Zone::None;
+    float px = axis_ == Axis::Horizontal ? float(sx) : float(sy);
+    float py = axis_ == Axis::Horizontal ? float(sy) : float(sx);
+    float trackCross = axis_ == Axis::Horizontal ? stripY0_ : stripX0_;
+
+    // Must be within the cross-axis strip
+    if (py < trackCross || py >= trackCross + kTrackThick) return Zone::None;
+    float along = axis_ == Axis::Horizontal
+                  ? px - stripX0_
+                  : px - stripY0_;
+    if (along < 0 || along > stripLen_) return Zone::None;
+
+    if (along < kArrowSize)                   return Zone::ArrowStart;
+    if (along > stripLen_ - kArrowSize)       return Zone::ArrowEnd;
+
+    float ts, tl;
+    thumbPixels(ts, tl);
+    if (along < ts)         return Zone::TrackBefore;
+    if (along < ts + tl)    return Zone::Thumb;
+    return Zone::TrackAfter;
+  }
+
+  void scrollBy(float delta, std::function<void(float)> fn) {
+    if (!fn) return;
+    float span   = thumbMax_ - thumbMin_;
+    float newMin = std::clamp(thumbMin_ + delta, 0.f, 1.f - span);
+    fn(newMin);
+  }
+
+  // ── geometry helpers ──────────────────────────────────────────────────────
+
+  // Push a screen-space quad [x,y,w,h] using the shared vbo.
+  // The quad is axis-aligned in the top-left-origin screen coord system.
+  static void pushRect(GLuint vao, GLuint vbo,
+                       float x, float y, float w, float h) {
+    float v[] = {
+      x,     y,
+      x + w, y,
+      x + w, y + h,
+      x + w, y + h,
+      x,     y + h,
+      x,     y,
+    };
+    GL.bindVertexArray(vao);
+    GL.bindBuffer(GL_ARRAY_BUFFER, vbo);
+    GL.bufferData(GL_ARRAY_BUFFER, sizeof(v), v, GL_DYNAMIC_DRAW);
+    GL.enableVertexAttribArray(0);
+    GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float)*2, nullptr);
+    GL.disableVertexAttribArray(1);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+    GL.bindVertexArray(0);
+  }
+
+  // Rounded-rectangle thumb drawn as a central rect + two circular caps.
+  void drawThumb(GLuint vao, GLuint vbo) const {
+    float ts, tl;
+    thumbPixels(ts, tl);
+
+    // Thumb rect in track-local coords, then map to screen
+    float halfW = currentW_ * 0.5f;
+    float crossCenter = (axis_ == Axis::Horizontal)
+                        ? stripY0_ + kTrackThick * 0.5f
+                        : stripX0_ + kTrackThick * 0.5f;
+
+    // Build rounded rect verts
+    // We'll approximate with a central rect + semicircle fans at each end.
+    static const int kSegs = kCapSegs;
+    const float cr = min(kCornerR, halfW); // cap radius = half-thickness
+
+    // Central rect (excluding cap zones)
+    float rLen = tl - cr * 2.f;
+    if (rLen > 0.f) {
+      float rx, ry, rw, rh;
+      if (axis_ == Axis::Horizontal) {
+        rx = stripX0_ + ts + cr;
+        ry = crossCenter - halfW;
+        rw = rLen; rh = currentW_;
+      } else {
+        rx = crossCenter - halfW;
+        ry = stripY0_ + ts + cr;
+        rw = currentW_; rh = rLen;
+      }
+      pushRect(vao, vbo, rx, ry, rw, rh);
+    }
+
+    // Two semicircle caps
+    for (int cap = 0; cap < 2; ++cap) {
+      float capAlong = (cap == 0) ? (stripX0_ + ts + cr)
+                                  : (stripX0_ + ts + tl - cr);
+      float capCross = crossCenter;
+      if (axis_ == Axis::Vertical) {
+        capAlong = (cap == 0) ? (stripY0_ + ts + cr)
+                              : (stripY0_ + ts + tl - cr);
+        capCross = crossCenter;
+      }
+
+      float startAngle = (axis_ == Axis::Horizontal)
+                         ? (cap == 0 ? 3.14159265f * 0.5f  : -3.14159265f * 0.5f)
+                         : (cap == 0 ? 3.14159265f          : 0.f);
+      float sweep = 3.14159265f;
+
+      // Fan: center + kSegs+1 rim verts
+      std::vector<float> fan;
+      fan.reserve((kSegs + 2) * 2);
+      if (axis_ == Axis::Horizontal) {
+        fan.push_back(capAlong); fan.push_back(capCross);
+      } else {
+        fan.push_back(capCross); fan.push_back(capAlong);
+      }
+      for (int i = 0; i <= kSegs; ++i) {
+        float a = startAngle + sweep * float(i) / kSegs;
+        float dx = cosf(a) * cr;
+        float dy = sinf(a) * cr;
+        if (axis_ == Axis::Horizontal) {
+          fan.push_back(capAlong + dx);
+          fan.push_back(capCross + dy);
+        } else {
+          fan.push_back(capCross + dx);
+          fan.push_back(capAlong + dy);
+        }
+      }
+      GL.bindVertexArray(vao);
+      GL.bindBuffer(GL_ARRAY_BUFFER, vbo);
+      GL.bufferData(GL_ARRAY_BUFFER,
+                    GLsizeiptr(fan.size() * sizeof(float)),
+                    fan.data(), GL_DYNAMIC_DRAW);
+      GL.enableVertexAttribArray(0);
+      GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float)*2, nullptr);
+      GL.disableVertexAttribArray(1);
+      glDrawArrays(GL_TRIANGLE_FAN, 0, int(fan.size() / 2));
+      GL.bindVertexArray(0);
+    }
+  }
+
+  // Arrow button: a small triangle glyph centered in a kArrowSize square.
+  void drawArrow(GLuint vao, GLuint vbo,
+                 bool isStart, int /*glW*/, int /*glH*/,
+                 GLuint /*prog*/, GLint /*uMVP*/, GLint /*uColor*/) const {
+    // Arrow button background (subtle)
+    float ax, ay;
+    if (axis_ == Axis::Horizontal) {
+      ax = isStart ? stripX0_ : stripX0_ + stripLen_ - kArrowSize;
+      ay = stripY0_;
+    } else {
+      ax = stripX0_;
+      ay = isStart ? stripY0_ : stripY0_ + stripLen_ - kArrowSize;
+    }
+    pushRect(vao, vbo, ax, ay, kArrowSize,
+             axis_ == Axis::Horizontal ? kTrackThick : kArrowSize);
+
+    // Triangle glyph (3 verts)
+    float cx = ax + kArrowSize * 0.5f;
+    float cy = ay + kTrackThick * 0.5f;
+    if (axis_ == Axis::Vertical)
+      cy = ay + kArrowSize * 0.5f;
+    float hs = 3.f; // half-size of the triangle
+
+    float v[6];
+    if (axis_ == Axis::Horizontal) {
+      if (isStart) { // ◀
+        v[0]=cx+hs; v[1]=cy-hs;
+        v[2]=cx-hs; v[3]=cy;
+        v[4]=cx+hs; v[5]=cy+hs;
+      } else {       // ▶
+        v[0]=cx-hs; v[1]=cy-hs;
+        v[2]=cx+hs; v[3]=cy;
+        v[4]=cx-hs; v[5]=cy+hs;
+      }
+    } else {
+      if (isStart) { // ▲
+        v[0]=cx-hs; v[1]=cy+hs;
+        v[2]=cx;    v[3]=cy-hs;
+        v[4]=cx+hs; v[5]=cy+hs;
+      } else {       // ▼
+        v[0]=cx-hs; v[1]=cy-hs;
+        v[2]=cx;    v[3]=cy+hs;
+        v[4]=cx+hs; v[5]=cy-hs;
+      }
+    }
+    GL.bindVertexArray(vao);
+    GL.bindBuffer(GL_ARRAY_BUFFER, vbo);
+    GL.bufferData(GL_ARRAY_BUFFER, sizeof(v), v, GL_DYNAMIC_DRAW);
+    GL.enableVertexAttribArray(0);
+    GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float)*2, nullptr);
+    GL.disableVertexAttribArray(1);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    GL.bindVertexArray(0);
+  }
 };
 
 // ============================================================================
@@ -618,30 +1085,26 @@ private:
     clampOffset();
   }
 
-void clampOffset() {
+  void clampOffset() {
     float viewW = vw_ / zoom_;
     float viewH = vh_ / zoom_;
 
-    // Allow panning up to half a view-length beyond each edge,
-    // so the image never disappears but can still be nudged around.
     constexpr float kPanSlack = 0.5f;
-
     float slackX = viewW * kPanSlack;
     float slackY = viewH * kPanSlack;
 
     if (viewW >= cw_) {
-        // Image narrower than view: allow free horizontal pan within slack
-        offsetX_ = std::clamp(offsetX_, -slackX, cw_ - viewW + slackX);
+      offsetX_ = std::clamp(offsetX_, -slackX, cw_ - viewW + slackX);
     } else {
-        offsetX_ = std::clamp(offsetX_, 0.f, cw_ - viewW);
+      offsetX_ = std::clamp(offsetX_, 0.f, cw_ - viewW);
     }
 
     if (viewH >= ch_) {
-        offsetY_ = std::clamp(offsetY_, -slackY, ch_ - viewH + slackY);
+      offsetY_ = std::clamp(offsetY_, -slackY, ch_ - viewH + slackY);
     } else {
-        offsetY_ = std::clamp(offsetY_, 0.f, ch_ - viewH);
+      offsetY_ = std::clamp(offsetY_, 0.f, ch_ - viewH);
     }
-}
+  }
 };
 
 // ============================================================================
@@ -800,7 +1263,6 @@ public:
     w_ = w;
     h_ = h;
 
-    // Own the GDI+ lifetime so subclasses never need to touch it.
     if (!gdiplusToken_) {
       Gdiplus::GdiplusStartupInput gsi;
       Gdiplus::GdiplusStartup(&gdiplusToken_, &gsi, nullptr);
@@ -1566,12 +2028,20 @@ void main(){
 };
 
 // ============================================================================
-// §10  CANVAS WIDGET  (two-window hierarchy)
+// §10  CANVAS WIDGET  (two-window hierarchy + custom GL scrollbars)
 // ============================================================================
 
 class CanvasWidget : public Widget {
 public:
-  explicit CanvasWidget() {
+  // Thickness of the custom scrollbar strip in pixels (screen-space).
+  // The viewport sees (glW - kSBThick) x (glH - kSBThick) as its view area
+  // when both bars are present, adjusted when only one or neither is visible.
+  static constexpr float kSBThick = CustomScrollbar::kTrackThick;
+
+  explicit CanvasWidget()
+      : hBar_(CustomScrollbar::Axis::Horizontal)
+      , vBar_(CustomScrollbar::Axis::Vertical)
+  {
     autoWidth = autoHeight = false;
     width = 400;
     height = 300;
@@ -1583,20 +2053,13 @@ public:
     return ptr();
   }
 
-  // Show or hide the scrollbars independently of the viewport.
-  // When disabled the GL child expands to fill the space the scrollbars
-  // occupied.  Can be toggled at any time, even after the window is created.
+  // Show or hide the custom scrollbars.  Can be toggled at any time.
   std::shared_ptr<CanvasWidget> setScrollbarsEnabled(bool enabled) {
     scrollbarsEnabled_ = enabled;
-    if (frameHwnd_) {
-      if (!enabled)
-        ShowScrollBar(frameHwnd_, SB_BOTH, FALSE);
+    if (glHwnd_) {
       RECT rc;
-      GetClientRect(frameHwnd_, &rc);
-      int gw, gh;
-      glChildSize(rc.right, rc.bottom, gw, gh);
-      SetWindowPos(glHwnd_, nullptr, 0, 0, gw, gh,
-                   SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE);
+      GetClientRect(glHwnd_, &rc);
+      updateViewportSize(rc.right, rc.bottom);
       scheduleRepaint();
     }
     return ptr();
@@ -1625,7 +2088,7 @@ public:
   std::shared_ptr<CanvasWidget> setCanvasSize(int w, int h) {
     canvasW_ = w;
     canvasH_ = h;
-    if (frameHwnd_) {
+    if (glHwnd_) {
       vp_.setCanvasSize(w, h);
       if (activeSurface_) {
         if (wglGetCurrentContext() != glRC_)
@@ -1642,11 +2105,6 @@ public:
   }
 
   // ── Callbacks ─────────────────────────────────────────────────────────────
-  // onViewportChanged — fires on any zoom/pan change, passes current zoom.
-  // onGLResize        — fires when the GL child window is resized (not the
-  //                     canvas).  Use this to keep ImageEditSurface's internal
-  //                     GL window size tracker in sync without routing it
-  //                     through resize() which carries canvas dimensions.
   std::function<void(float zoom)> onViewportChanged;
   std::function<void(int w, int h)> onGLResize;
 
@@ -1679,7 +2137,7 @@ public:
   }
 
 private:
-  bool viewportEnabled_ = true;
+  bool viewportEnabled_   = true;
   bool scrollbarsEnabled_ = true;
 
   std::shared_ptr<CanvasWidget> ptr() {
@@ -1690,25 +2148,74 @@ private:
   Viewport vp_;
   int canvasW_ = 512, canvasH_ = 512;
 
+  // ── Custom scrollbars ─────────────────────────────────────────────────────
+  CustomScrollbar hBar_;  // horizontal
+  CustomScrollbar vBar_;  // vertical
+
+  // Dedicated VAO/VBO for scrollbar geometry (avoids touching the surface's
+  // shared quadVBO_ which has a fixed pre-allocated size for dab/blit quads).
+  GLuint sbVAO_ = 0, sbVBO_ = 0;
+  GLuint sbProg_ = 0;
+  GLint  sbUMVP_ = -1, sbUColor_ = -1, sbUMode_ = -1;
+
   using Clock = std::chrono::steady_clock;
   Clock::time_point lastTick_ = Clock::now();
 
   HWND frameHwnd_ = nullptr;
-  HWND glHwnd_ = nullptr;
-  HDC glDC_ = nullptr;
-  HGLRC glRC_ = nullptr;
+  HWND glHwnd_    = nullptr;
+  HDC  glDC_      = nullptr;
+  HGLRC glRC_     = nullptr;
   HWND parentHwnd_ = nullptr;
 
-  bool repaintPending_ = false;
-  bool trackingLeave_ = false;
-  int lastGLW_ = 0, lastGLH_ = 0;
+  bool repaintPending_  = false;
+  bool trackingLeave_   = false;
+  int  lastGLW_ = 0, lastGLH_ = 0;
 
-  bool panning_ = false;
-  int panStartSX_ = 0, panStartSY_ = 0;
-  float panStartOX_ = 0, panStartOY_ = 0;
+  bool  panning_     = false;
+  int   panStartSX_  = 0, panStartSY_ = 0;
+  float panStartOX_  = 0, panStartOY_ = 0;
+
+  // ── Viewport helpers ──────────────────────────────────────────────────────
+
+  // Compute the effective viewport dimensions accounting for scrollbar strips.
+  void viewportDims(int glW, int glH, int &vpW, int &vpH) const {
+    if (!viewportEnabled_ || !scrollbarsEnabled_) {
+      vpW = glW; vpH = glH;
+      return;
+    }
+    ScrollbarInfo h = vp_.scrollbarH();
+    ScrollbarInfo v = vp_.scrollbarV();
+    vpW = glW - (v.visible ? (int)kSBThick : 0);
+    vpH = glH - (h.visible ? (int)kSBThick : 0);
+    if (vpW < 1) vpW = 1;
+    if (vpH < 1) vpH = 1;
+  }
+
+  void updateViewportSize(int glW, int glH) {
+    int vpW, vpH;
+    viewportDims(glW, glH, vpW, vpH);
+    vp_.setViewSize(vpW, vpH);
+  }
+
+  // Recompute and push geometry to both bars based on current glW/glH.
+  void updateSBGeometry(int glW, int glH) {
+    // Horizontal bar: bottom strip, full width minus vertical bar
+    ScrollbarInfo h = vp_.scrollbarH();
+    ScrollbarInfo v = vp_.scrollbarV();
+    float hLen = float(glW) - (v.visible ? kSBThick : 0.f);
+    hBar_.setGeometry(0.f, float(glH) - kSBThick, hLen);
+    hBar_.setThumb(h.thumbMin, h.thumbMax, h.visible && scrollbarsEnabled_ && viewportEnabled_);
+
+    // Vertical bar: right strip, full height minus horizontal bar
+    float vLen = float(glH) - (h.visible ? kSBThick : 0.f);
+    vBar_.setGeometry(float(glW) - kSBThick, 0.f, vLen);
+    vBar_.setThumb(v.thumbMin, v.thumbMax, v.visible && scrollbarsEnabled_ && viewportEnabled_);
+  }
+
+  // ── Pan helpers ───────────────────────────────────────────────────────────
 
   void beginPan(int sx, int sy) {
-    panning_ = true;
+    panning_    = true;
     panStartSX_ = sx;
     panStartSY_ = sy;
     panStartOX_ = vp_.offsetX();
@@ -1718,7 +2225,13 @@ private:
   void continuePan(int sx, int sy) {
     float dx = float(sx - panStartSX_), dy = float(sy - panStartSY_);
     vp_.setOffset(panStartOX_ - dx / vp_.zoom(), panStartOY_ + dy / vp_.zoom());
+    pokeScrollbars();
     scheduleRepaint();
+  }
+
+  void pokeScrollbars() {
+    hBar_.poke();
+    vBar_.poke();
   }
 
   void scheduleRepaint() {
@@ -1730,130 +2243,87 @@ private:
     }
   }
 
-  static constexpr int kSBRange = 10000;
-  static int sbW() { return GetSystemMetrics(SM_CXVSCROLL); }
-  static int sbH() { return GetSystemMetrics(SM_CYHSCROLL); }
+  // ── Scrollbar scroll callbacks ────────────────────────────────────────────
 
-  void glChildSize(int fw, int fh, int &ow, int &oh) const {
-    if (!viewportEnabled_ || !scrollbarsEnabled_) {
-      ow = fw;
-      oh = fh;
-    } else {
-      ScrollbarInfo h = vp_.scrollbarH(), v = vp_.scrollbarV();
-      ow = fw - (v.visible ? sbW() : 0);
-      oh = fh - (h.visible ? sbH() : 0);
-    }
-    if (ow < 1) ow = 1;
-    if (oh < 1) oh = 1;
-  }
-
-  void syncScrollbars() {
-    if (!frameHwnd_ || !viewportEnabled_ || !scrollbarsEnabled_) {
-      if (frameHwnd_ && !scrollbarsEnabled_)
-        ShowScrollBar(frameHwnd_, SB_BOTH, FALSE);
-      return;
-    }
-    ScrollbarInfo h = vp_.scrollbarH(), v = vp_.scrollbarV();
-    ShowScrollBar(frameHwnd_, SB_HORZ, h.visible ? TRUE : FALSE);
-    ShowScrollBar(frameHwnd_, SB_VERT, v.visible ? TRUE : FALSE);
-    if (h.visible) {
-      SCROLLINFO si{};
-      si.cbSize = sizeof(si);
-      si.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
-      si.nMin = 0;
-      si.nMax = kSBRange;
-      si.nPage = UINT((h.thumbMax - h.thumbMin) * kSBRange);
-      si.nPos = int(h.thumbMin * kSBRange);
-      SetScrollInfo(frameHwnd_, SB_HORZ, &si, TRUE);
-    }
-    if (v.visible) {
-      SCROLLINFO si{};
-      si.cbSize = sizeof(si);
-      si.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
-      si.nMin = 0;
-      si.nMax = kSBRange;
-      si.nPage = UINT((v.thumbMax - v.thumbMin) * kSBRange);
-      si.nPos = int(v.thumbMin * kSBRange);
-      SetScrollInfo(frameHwnd_, SB_VERT, &si, TRUE);
-    }
-    RECT rc;
-    GetClientRect(frameHwnd_, &rc);
-    int gw, gh;
-    glChildSize(rc.right, rc.bottom, gw, gh);
-    SetWindowPos(glHwnd_, nullptr, 0, 0, gw, gh,
-                 SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE);
-  }
-
-  void applyHScroll(int pos, int maxPos) {
-    if (maxPos <= 0)
-      return;
+  void applyHScrollFraction(float thumbMin) {
+    float span  = vp_.scrollbarH().thumbMax - vp_.scrollbarH().thumbMin;
     float range = vp_.canvasW() - vp_.viewW() / vp_.zoom();
-    vp_.setOffsetX(float(pos) / maxPos * max(0.f, range));
+    if (range <= 0.f) return;
+    vp_.setOffsetX(thumbMin / (1.f - span) * range);
+    pokeScrollbars();
     scheduleRepaint();
   }
 
-  void applyVScroll(int pos, int maxPos) {
-    if (maxPos <= 0)
-      return;
+  void applyVScrollFraction(float thumbMin) {
+    float span  = vp_.scrollbarV().thumbMax - vp_.scrollbarV().thumbMin;
     float range = vp_.canvasH() - vp_.viewH() / vp_.zoom();
-    float t = 1.f - float(pos) / maxPos;
-    vp_.setOffsetY(t * max(0.f, range));
+    if (range <= 0.f) return;
+    // Vertical scrollbar: thumbMin=0 → top (max offsetY), thumbMin=1-span → bottom (offsetY=0)
+    float t = 1.f - thumbMin - span;
+    vp_.setOffsetY(t / (1.f - span) * range);
+    pokeScrollbars();
     scheduleRepaint();
+  }
+
+  // ── Scrollbar GL resources ────────────────────────────────────────────────
+
+  void buildSBResources() {
+    // Reuse the same flat-color shader as RasterSurface but compiled fresh
+    // for this widget so it owns its program handle independently.
+    const char *vert = R"GLSL(
+#version 330 core
+layout(location=0) in vec2 aPos;
+uniform mat4 uMVP;
+void main(){ gl_Position = uMVP * vec4(aPos, 0.0, 1.0); }
+)GLSL";
+    const char *frag = R"GLSL(
+#version 330 core
+uniform vec4 uColor;
+uniform int  uMode;
+out vec4 fragColor;
+void main(){ fragColor = uColor; }
+)GLSL";
+    sbProg_   = glutil::linkProgram(vert, frag);
+    assert(sbProg_);
+    sbUMVP_   = GL.getUniformLocation(sbProg_, "uMVP");
+    sbUColor_ = GL.getUniformLocation(sbProg_, "uColor");
+    sbUMode_  = GL.getUniformLocation(sbProg_, "uMode");
+
+    // Large enough for any single draw call the scrollbar emits
+    // (fan caps: (kCapSegs+2)*2 floats is the largest single upload)
+    constexpr GLsizeiptr kSBBufSz = sizeof(float) * 2 * 64;
+    GL.genVertexArrays(1, &sbVAO_);
+    GL.genBuffers(1, &sbVBO_);
+    GL.bindVertexArray(sbVAO_);
+    GL.bindBuffer(GL_ARRAY_BUFFER, sbVBO_);
+    GL.bufferData(GL_ARRAY_BUFFER, kSBBufSz, nullptr, GL_DYNAMIC_DRAW);
+    GL.enableVertexAttribArray(0);
+    GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float)*2, nullptr);
+    GL.bindVertexArray(0);
+  }
+
+  void destroySBResources() {
+    if (sbProg_) { GL.deleteProgram(sbProg_); sbProg_ = 0; }
+    if (sbVAO_)  { GL.deleteVertexArrays(1, &sbVAO_); sbVAO_ = 0; }
+    if (sbVBO_)  { GL.deleteBuffers(1, &sbVBO_); sbVBO_ = 0; }
   }
 
   // ── Frame window proc ────────────────────────────────────────────────────
+  // Frame window is now a plain clip container — no WS_HSCROLL/WS_VSCROLL.
 
   static LRESULT CALLBACK FrameProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     auto *self = reinterpret_cast<CanvasWidget *>(
         GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     switch (msg) {
-    case WM_ERASEBKGND:
-      return 1;
+    case WM_ERASEBKGND: return 1;
     case WM_PAINT: {
       PAINTSTRUCT ps;
       BeginPaint(hwnd, &ps);
       EndPaint(hwnd, &ps);
       return 0;
     }
-    case WM_HSCROLL: {
-      if (!self) return 0;
-      SCROLLINFO si{};
-      si.cbSize = sizeof(si);
-      si.fMask = SIF_ALL;
-      GetScrollInfo(hwnd, SB_HORZ, &si);
-      int p = si.nPos;
-      switch (LOWORD(wp)) {
-      case SB_LINELEFT:   p -= kSBRange / 50; break;
-      case SB_LINERIGHT:  p += kSBRange / 50; break;
-      case SB_PAGELEFT:   p -= si.nPage;      break;
-      case SB_PAGERIGHT:  p += si.nPage;      break;
-      case SB_THUMBTRACK:
-      case SB_THUMBPOSITION: p = si.nTrackPos; break;
-      }
-      p = std::clamp(p, si.nMin, si.nMax - (int)si.nPage);
-      self->applyHScroll(p, si.nMax - (int)si.nPage);
-      return 0;
-    }
-    case WM_VSCROLL: {
-      if (!self) return 0;
-      SCROLLINFO si{};
-      si.cbSize = sizeof(si);
-      si.fMask = SIF_ALL;
-      GetScrollInfo(hwnd, SB_VERT, &si);
-      int p = si.nPos;
-      switch (LOWORD(wp)) {
-      case SB_LINEUP:   p -= kSBRange / 50; break;
-      case SB_LINEDOWN: p += kSBRange / 50; break;
-      case SB_PAGEUP:   p -= si.nPage;      break;
-      case SB_PAGEDOWN: p += si.nPage;      break;
-      case SB_THUMBTRACK:
-      case SB_THUMBPOSITION: p = si.nTrackPos; break;
-      }
-      p = std::clamp(p, si.nMin, si.nMax - (int)si.nPage);
-      self->applyVScroll(p, si.nMax - (int)si.nPage);
-      return 0;
-    }
     case WM_MOUSEWHEEL:
+      // Forward wheel events to GL child
       if (self && self->viewportEnabled_ && self->glHwnd_)
         PostMessage(self->glHwnd_, msg, wp, lp);
       return 0;
@@ -1868,20 +2338,23 @@ private:
     auto *self = reinterpret_cast<CanvasWidget *>(
         GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     switch (msg) {
+
     case WM_USER + 1:
       if (self) {
         self->repaintPending_ = false;
         self->tickAndRender();
       }
       return 0;
-    case WM_ERASEBKGND:
-      return 1;
+
+    case WM_ERASEBKGND: return 1;
     case WM_PAINT: {
       PAINTSTRUCT ps;
       BeginPaint(hwnd, &ps);
       EndPaint(hwnd, &ps);
       return 0;
     }
+
+    // ── Middle-button pan ────────────────────────────────────────────────
     case WM_MBUTTONDOWN:
       if (!self || !self->viewportEnabled_) return 0;
       SetCapture(hwnd);
@@ -1892,33 +2365,52 @@ private:
       ReleaseCapture();
       self->panning_ = false;
       return 0;
+
+    // ── Left button ──────────────────────────────────────────────────────
     case WM_LBUTTONDOWN: {
       SetCapture(hwnd);
       SetFocus(hwnd);
       if (!self) return 0;
-      if (self->viewportEnabled_ && (GetKeyState(VK_SPACE) & 0x8000)) {
-        self->beginPan(GET_X_LPARAM(lp), GET_Y_LPARAM(lp));
-      } else if (self->activeSurface_) {
-        auto [cx, cy] = self->vp_.screenToCanvas(float(GET_X_LPARAM(lp)),
-                                                  float(GET_Y_LPARAM(lp)));
-        self->activeSurface_->onMouseDown(cx, cy);
+      int sx = GET_X_LPARAM(lp), sy = GET_Y_LPARAM(lp);
+
+      // Offer to scrollbars first
+      bool hConsumed = self->hBar_.onMouseDown(sx, sy,
+          [self](float t){ self->applyHScrollFraction(t); });
+      bool vConsumed = !hConsumed && self->vBar_.onMouseDown(sx, sy,
+          [self](float t){ self->applyVScrollFraction(t); });
+
+      if (!hConsumed && !vConsumed) {
+        if (self->viewportEnabled_ && (GetKeyState(VK_SPACE) & 0x8000)) {
+          self->beginPan(sx, sy);
+        } else if (self->activeSurface_) {
+          auto [cx, cy] = self->vp_.screenToCanvas(float(sx), float(sy));
+          self->activeSurface_->onMouseDown(cx, cy);
+        }
+        forwardToParent(hwnd, msg, wp, lp);
       }
-      forwardToParent(hwnd, msg, wp, lp);
+      self->scheduleRepaint();
       return 0;
     }
     case WM_LBUTTONUP: {
       ReleaseCapture();
       if (!self) return 0;
-      if (self->panning_) {
-        self->panning_ = false;
-      } else if (self->activeSurface_) {
-        auto [cx, cy] = self->vp_.screenToCanvas(float(GET_X_LPARAM(lp)),
-                                                  float(GET_Y_LPARAM(lp)));
-        self->activeSurface_->onMouseUp(cx, cy);
+      int sx = GET_X_LPARAM(lp), sy = GET_Y_LPARAM(lp);
+      bool hRel = self->hBar_.onMouseUp(sx, sy);
+      bool vRel = self->vBar_.onMouseUp(sx, sy);
+      if (!hRel && !vRel) {
+        if (self->panning_) {
+          self->panning_ = false;
+        } else if (self->activeSurface_) {
+          auto [cx, cy] = self->vp_.screenToCanvas(float(sx), float(sy));
+          self->activeSurface_->onMouseUp(cx, cy);
+        }
+        forwardToParent(hwnd, msg, wp, lp);
       }
-      forwardToParent(hwnd, msg, wp, lp);
+      self->scheduleRepaint();
       return 0;
     }
+
+    // ── Right button ─────────────────────────────────────────────────────
     case WM_RBUTTONDOWN: {
       SetCapture(hwnd);
       if (self && self->activeSurface_) {
@@ -1939,17 +2431,28 @@ private:
       forwardToParent(hwnd, msg, wp, lp);
       return 0;
     }
+
+    // ── Mouse move ───────────────────────────────────────────────────────
     case WM_MOUSEMOVE: {
       if (!self) return 0;
       int sx = GET_X_LPARAM(lp), sy = GET_Y_LPARAM(lp);
+
       if (!self->trackingLeave_) {
         TRACKMOUSEEVENT tme{};
-        tme.cbSize = sizeof(tme);
-        tme.dwFlags = TME_LEAVE;
+        tme.cbSize    = sizeof(tme);
+        tme.dwFlags   = TME_LEAVE;
         tme.hwndTrack = hwnd;
         TrackMouseEvent(&tme);
         self->trackingLeave_ = true;
       }
+
+      // Always update hover state on scrollbars (no button required)
+      bool hDrag = self->hBar_.onMouseMove(sx, sy);
+      bool vDrag = self->vBar_.onMouseMove(sx, sy);
+      self->scheduleRepaint(); // re-draw hover highlight
+
+      if (hDrag || vDrag) return 0; // scrollbar drag suppresses canvas
+
       if (self->panning_) {
         self->continuePan(sx, sy);
       } else if (self->activeSurface_) {
@@ -1960,14 +2463,21 @@ private:
       return 0;
     }
     case WM_MOUSELEAVE:
-      if (self) self->trackingLeave_ = false;
+      if (self) {
+        self->trackingLeave_ = false;
+        self->hBar_.onMouseLeave();
+        self->vBar_.onMouseLeave();
+        self->scheduleRepaint();
+      }
       return 0;
+
+    // ── Scroll wheel ─────────────────────────────────────────────────────
     case WM_MOUSEWHEEL: {
       if (!self || !self->viewportEnabled_) return 0;
-      int delta = GET_WHEEL_DELTA_WPARAM(wp);
-      bool ctrl = (GET_KEYSTATE_WPARAM(wp) & MK_CONTROL) != 0;
-      bool shift = (GET_KEYSTATE_WPARAM(wp) & MK_SHIFT) != 0;
-      POINT pt = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+      int   delta = GET_WHEEL_DELTA_WPARAM(wp);
+      bool  ctrl  = (GET_KEYSTATE_WPARAM(wp) & MK_CONTROL) != 0;
+      bool  shift = (GET_KEYSTATE_WPARAM(wp) & MK_SHIFT) != 0;
+      POINT pt    = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
       ScreenToClient(hwnd, &pt);
       if (ctrl) {
         float f = (delta > 0) ? 1.1f : 1.f / 1.1f;
@@ -1977,26 +2487,26 @@ private:
       } else {
         self->vp_.panByScreen(0.f, -(float(delta) / WHEEL_DELTA) * 40.f);
       }
+      self->pokeScrollbars();
       self->scheduleRepaint();
       forwardToParent(hwnd, msg, wp, lp);
       return 0;
     }
+
+    // ── Keyboard ─────────────────────────────────────────────────────────
     case WM_KEYDOWN: {
       if (!self) return 0;
-      bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+      bool ctrl     = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
       bool consumed = false;
       if (ctrl && self->viewportEnabled_) {
         if (wp == VK_OEM_PLUS || wp == VK_ADD) {
-          self->vp_.zoomIn();
-          self->scheduleRepaint();
+          self->vp_.zoomIn(); self->pokeScrollbars(); self->scheduleRepaint();
           consumed = true;
         } else if (wp == VK_OEM_MINUS || wp == VK_SUBTRACT) {
-          self->vp_.zoomOut();
-          self->scheduleRepaint();
+          self->vp_.zoomOut(); self->pokeScrollbars(); self->scheduleRepaint();
           consumed = true;
         } else if (wp == '0') {
-          self->vp_.resetZoom();
-          self->scheduleRepaint();
+          self->vp_.resetZoom(); self->pokeScrollbars(); self->scheduleRepaint();
           consumed = true;
         }
       }
@@ -2008,6 +2518,7 @@ private:
       if (self && self->activeSurface_)
         self->activeSurface_->onKeyUp(int(wp));
       return 0;
+
     case WM_TIMER:
       KillTimer(hwnd, 1);
       if (self) {
@@ -2015,13 +2526,14 @@ private:
         self->tickAndRender();
       }
       return 0;
+
     default:
       return DefWindowProc(hwnd, msg, wp, lp);
     }
   }
 
   static void forwardToParent(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
-    HWND frame = GetParent(hwnd);
+    HWND frame  = GetParent(hwnd);
     HWND parent = frame ? GetParent(frame) : nullptr;
     if (!parent) return;
     POINT pt = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
@@ -2033,21 +2545,23 @@ private:
     static bool done = false;
     if (done) return;
     HINSTANCE hi = GetModuleHandle(nullptr);
+
     WNDCLASSEXW wf{};
-    wf.cbSize = sizeof(wf);
-    wf.lpfnWndProc = FrameProc;
-    wf.hInstance = hi;
-    wf.lpszClassName = L"FluxGLFrame6";
-    wf.style = CS_HREDRAW | CS_VREDRAW;
+    wf.cbSize        = sizeof(wf);
+    wf.lpfnWndProc   = FrameProc;
+    wf.hInstance     = hi;
+    wf.lpszClassName = L"FluxGLFrame7";   // bumped class name for Step 7
+    wf.style         = CS_HREDRAW | CS_VREDRAW;
     RegisterClassExW(&wf);
 
     WNDCLASSEXW wg{};
-    wg.cbSize = sizeof(wg);
-    wg.lpfnWndProc = GLProc;
-    wg.hInstance = hi;
-    wg.lpszClassName = L"FluxGLCanvas6";
-    wg.style = CS_OWNDC | CS_HREDRAW | CS_VREDRAW;
+    wg.cbSize        = sizeof(wg);
+    wg.lpfnWndProc   = GLProc;
+    wg.hInstance     = hi;
+    wg.lpszClassName = L"FluxGLCanvas7";
+    wg.style         = CS_OWNDC | CS_HREDRAW | CS_VREDRAW;
     RegisterClassExW(&wg);
+
     done = true;
   }
 
@@ -2058,21 +2572,20 @@ private:
     parentHwnd_ = owner;
     registerClasses();
 
-    const DWORD sbStyles = viewportEnabled_ ? (WS_HSCROLL | WS_VSCROLL) : 0;
+    // Frame window: plain child, no scrollbar styles
     frameHwnd_ = CreateWindowExW(
-        WS_EX_NOPARENTNOTIFY, L"FluxGLFrame6", nullptr,
-        WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | sbStyles,
+        WS_EX_NOPARENTNOTIFY, L"FluxGLFrame7", nullptr,
+        WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
         x, y, width, height, owner, nullptr, GetModuleHandle(nullptr), nullptr);
     assert(frameHwnd_);
     SetWindowLongPtrW(frameHwnd_, GWLP_USERDATA,
                       reinterpret_cast<LONG_PTR>(this));
 
-    int gw, gh;
-    glChildSize(width, height, gw, gh);
+    // GL child fills the entire frame (scrollbars are drawn inside it)
     glHwnd_ = CreateWindowExW(
-        WS_EX_NOPARENTNOTIFY, L"FluxGLCanvas6", nullptr,
+        WS_EX_NOPARENTNOTIFY, L"FluxGLCanvas7", nullptr,
         WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
-        0, 0, gw, gh, frameHwnd_, nullptr, GetModuleHandle(nullptr), nullptr);
+        0, 0, width, height, frameHwnd_, nullptr, GetModuleHandle(nullptr), nullptr);
     assert(glHwnd_);
     SetWindowLongPtrW(glHwnd_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
 
@@ -2101,24 +2614,29 @@ private:
     wglMakeCurrent(glDC_, glRC_);
     GL.init();
 
-    vp_.init(gw, gh, canvasW_, canvasH_);
-    lastGLW_ = gw;
-    lastGLH_ = gh;
+    // Initialise viewport — scrollbars not yet known so use full size
+    vp_.init(width, height, canvasW_, canvasH_);
+    lastGLW_ = width;
+    lastGLH_ = height;
+    updateViewportSize(width, height);
+    updateSBGeometry(width, height);
+
+    buildSBResources();
     activatePendingSurface();
     lastTick_ = Clock::now();
     if (onViewportChanged) onViewportChanged(vp_.zoom());
-    if (onGLResize) onGLResize(gw, gh);
+    if (onGLResize) onGLResize(width, height);
   }
 
   void setupPixelFormat(HDC dc) {
     PIXELFORMATDESCRIPTOR pfd{};
-    pfd.nSize = sizeof(pfd);
-    pfd.nVersion = 1;
-    pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
-    pfd.iPixelType = PFD_TYPE_RGBA;
-    pfd.cColorBits = 32;
-    pfd.cDepthBits = 24;
-    pfd.iLayerType = PFD_MAIN_PLANE;
+    pfd.nSize        = sizeof(pfd);
+    pfd.nVersion     = 1;
+    pfd.dwFlags      = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
+    pfd.iPixelType   = PFD_TYPE_RGBA;
+    pfd.cColorBits   = 32;
+    pfd.cDepthBits   = 24;
+    pfd.iLayerType   = PFD_MAIN_PLANE;
     SetPixelFormat(dc, ChoosePixelFormat(dc, &pfd), &pfd);
   }
 
@@ -2141,24 +2659,74 @@ private:
     if (wglGetCurrentContext() != glRC_)
       wglMakeCurrent(glDC_, glRC_);
 
-    auto now = Clock::now();
-    double dt = std::chrono::duration<double>(now - lastTick_).count();
-    lastTick_ = now;
+    auto   now = Clock::now();
+    double dt  = std::chrono::duration<double>(now - lastTick_).count();
+    lastTick_  = now;
 
     activeSurface_->update(dt);
+
     RECT rc;
     GetClientRect(glHwnd_, &rc);
-    int glW = rc.right < 1 ? 1 : rc.right;
+    int glW = rc.right  < 1 ? 1 : rc.right;
     int glH = rc.bottom < 1 ? 1 : rc.bottom;
     glViewport(0, 0, glW, glH);
 
     float mvp[16];
     vp_.buildMVP(mvp);
     activeSurface_->render(mvp);
-    SwapBuffers(glDC_);
-    syncScrollbars();
 
-    if (activeSurface_->needsContinuousRedraw() && !repaintPending_) {
+    // ── Tick and render custom scrollbars ─────────────────────────────────
+    updateSBGeometry(glW, glH);
+    bool hFade = hBar_.tick(dt);
+    bool vFade = vBar_.tick(dt);
+
+    if (hBar_.needsRedraw() || vBar_.needsRedraw()) {
+      glEnable(GL_BLEND);
+      glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+      glDisable(GL_SCISSOR_TEST);
+
+      // Render directly to the default framebuffer (screen) in screen-space.
+      GL.bindFramebuffer(GL_FRAMEBUFFER, 0);
+      glViewport(0, 0, glW, glH);
+
+      hBar_.render(sbProg_, sbVAO_, sbVBO_, sbUMVP_, sbUColor_, glW, glH);
+      vBar_.render(sbProg_, sbVAO_, sbVBO_, sbUMVP_, sbUColor_, glW, glH);
+
+      // Corner square where both bars meet
+      if (hBar_.isVisible() && vBar_.isVisible() && scrollbarsEnabled_) {
+        float mvpCorner[16];
+        glutil::ortho(0.f, float(glW), float(glH), 0.f, mvpCorner);
+        GL.useProgram(sbProg_);
+        GL.uniformMatrix4fv(sbUMVP_, 1, GL_FALSE, mvpCorner);
+        GL.uniform4f(sbUColor_, 0.12f, 0.12f, 0.12f, 0.35f);
+        float cx = float(glW) - kSBThick, cy = float(glH) - kSBThick;
+        float cv[] = {
+          cx,              cy,
+          cx + kSBThick,   cy,
+          cx + kSBThick,   cy + kSBThick,
+          cx + kSBThick,   cy + kSBThick,
+          cx,              cy + kSBThick,
+          cx,              cy,
+        };
+        GL.bindVertexArray(sbVAO_);
+        GL.bindBuffer(GL_ARRAY_BUFFER, sbVBO_);
+        GL.bufferData(GL_ARRAY_BUFFER, sizeof(cv), cv, GL_DYNAMIC_DRAW);
+        GL.enableVertexAttribArray(0);
+        GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float)*2, nullptr);
+        GL.disableVertexAttribArray(1);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+        GL.bindVertexArray(0);
+      }
+
+      glDisable(GL_BLEND);
+    }
+
+    SwapBuffers(glDC_);
+
+    // Keep animating while bars are fading
+    bool needsCont = activeSurface_->needsContinuousRedraw()
+                     || hFade || vFade;
+    if (needsCont && !repaintPending_) {
       repaintPending_ = true;
       SetTimer(glHwnd_, 1, 16, nullptr);
     }
@@ -2168,30 +2736,25 @@ private:
     if (!frameHwnd_) return;
     SetWindowPos(frameHwnd_, nullptr, x, y, width, height,
                  SWP_NOZORDER | SWP_NOACTIVATE);
-    RECT rc;
-    GetClientRect(frameHwnd_, &rc);
-    int gw, gh;
-    glChildSize(rc.right, rc.bottom, gw, gh);
-    SetWindowPos(glHwnd_, nullptr, 0, 0, gw, gh,
+    // GL child fills the entire frame — scrollbars live inside it
+    SetWindowPos(glHwnd_, nullptr, 0, 0, width, height,
                  SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE);
-    if (gw != lastGLW_ || gh != lastGLH_) {
+
+    if (width != lastGLW_ || height != lastGLH_) {
       if (wglGetCurrentContext() != glRC_)
         wglMakeCurrent(glDC_, glRC_);
-      vp_.setViewSize(gw, gh);
-      glViewport(0, 0, gw, gh);
-      lastGLW_ = gw;
-      lastGLH_ = gh;
-      // Notify the surface of the GL window size change.
-      // This is intentionally separate from setCanvasSize()/resize() which
-      // carries canvas/image dimensions.  ImageEditSurface uses this to keep
-      // its glViewport size correct without polluting RasterSurface::resize().
-      if (onGLResize) onGLResize(gw, gh);
+      lastGLW_ = width;
+      lastGLH_ = height;
+      updateViewportSize(width, height);
+      glViewport(0, 0, width, height);
+      if (onGLResize) onGLResize(width, height);
     }
   }
 
   void destroyGL() {
     if (glRC_) {
       wglMakeCurrent(glDC_, glRC_);
+      destroySBResources();
       if (activeSurface_) {
         activeSurface_->destroy();
         activeSurface_.reset();
