@@ -618,18 +618,30 @@ private:
     clampOffset();
   }
 
-  void clampOffset() {
+void clampOffset() {
     float viewW = vw_ / zoom_;
     float viewH = vh_ / zoom_;
-    if (viewW >= cw_)
-      offsetX_ = (cw_ - viewW) * 0.5f;
-    else
-      offsetX_ = std::clamp(offsetX_, 0.f, cw_ - viewW);
-    if (viewH >= ch_)
-      offsetY_ = (ch_ - viewH) * 0.5f;
-    else
-      offsetY_ = std::clamp(offsetY_, 0.f, ch_ - viewH);
-  }
+
+    // Allow panning up to half a view-length beyond each edge,
+    // so the image never disappears but can still be nudged around.
+    constexpr float kPanSlack = 0.5f;
+
+    float slackX = viewW * kPanSlack;
+    float slackY = viewH * kPanSlack;
+
+    if (viewW >= cw_) {
+        // Image narrower than view: allow free horizontal pan within slack
+        offsetX_ = std::clamp(offsetX_, -slackX, cw_ - viewW + slackX);
+    } else {
+        offsetX_ = std::clamp(offsetX_, 0.f, cw_ - viewW);
+    }
+
+    if (viewH >= ch_) {
+        offsetY_ = std::clamp(offsetY_, -slackY, ch_ - viewH + slackY);
+    } else {
+        offsetY_ = std::clamp(offsetY_, 0.f, ch_ - viewH);
+    }
+}
 };
 
 // ============================================================================

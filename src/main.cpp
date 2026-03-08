@@ -1,6305 +1,1359 @@
 // =============================================================================
-// logic_sim.hpp  —  Logic Gate Simulator  v13  (+ Subcircuits)
-// =============================================================================
+// image_editor.hpp  —  Lightroom-style non-destructive image editor
 
 #pragma once
+
+#define STB_IMAGE_IMPLEMENTATION
+#include "widgets/stb_image.h"
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "widgets/stb_image_write.h"
+
 #include "flux.hpp"
+#include "widgets/flux_histogram.hpp"
+#include "widgets/flux_hsl_panel.hpp" // ← HSL panel
+#include "widgets/flux_tonecurve.hpp"
 
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
 #include <commdlg.h>
 #include <windows.h>
-#include <windowsx.h>
-
-#include <algorithm>
-#include <cmath>
-#include <fstream>
-#include <functional>
-#include <memory>
-#include <sstream>
-#include <string>
-#include <unordered_map>
-#include <unordered_set>
-#include <vector>
-
 #pragma comment(lib, "comdlg32.lib")
 
-// ---------------------------------------------------------------------------
-// Extra GL procs
-// ---------------------------------------------------------------------------
-using PFNGLUNIFORM4FPROC_LS = void(APIENTRY *)(GLint, GLfloat, GLfloat, GLfloat,
-                                               GLfloat);
-using PFNGLUNIFORM2FPROC_LS = void(APIENTRY *)(GLint, GLfloat, GLfloat);
-using PFNGLACTIVETEXTUREPROC_LS = void(APIENTRY *)(GLenum);
-using PFNGLUNIFORM1IPROC_LS = void(APIENTRY *)(GLint, GLint);
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <functional>
+#include <memory>
+#include <string>
+#include <vector>
 
+#ifndef GL_STATIC_DRAW
+#define GL_STATIC_DRAW 0x88E4
+#endif
 #ifndef GL_TEXTURE0
 #define GL_TEXTURE0 0x84C0
 #endif
+#ifndef GL_TEXTURE1
+#define GL_TEXTURE1 0x84C1
+#endif
+#ifndef GL_TEXTURE2
+#define GL_TEXTURE2 0x84C2
+#endif
+#ifndef GL_CLAMP_TO_EDGE
+#define GL_CLAMP_TO_EDGE 0x812F
+#endif
+#ifndef GL_R8
+#define GL_R8 0x8229
+#endif
+#ifndef GL_RED
+#define GL_RED 0x1903
+#endif
 
-namespace ls_gl {
-inline PFNGLUNIFORM4FPROC_LS uniform4f = nullptr;
-inline PFNGLUNIFORM2FPROC_LS uniform2f = nullptr;
-inline PFNGLACTIVETEXTUREPROC_LS activeTexture = nullptr;
-inline PFNGLUNIFORM1IPROC_LS uniform1i = nullptr;
+using PFNGLUNIFORM2FPROC = void(APIENTRY *)(GLint, GLfloat, GLfloat);
+using PFNGLACTIVETEXTUREPROC = void(APIENTRY *)(GLenum);
+
+namespace ie_gl {
+inline PFNGLUNIFORM2FPROC uniform2f = nullptr;
+inline PFNGLACTIVETEXTUREPROC activeTexture = nullptr;
+
 inline void init() {
-  if (uniform4f)
+  if (uniform2f)
     return;
   HMODULE gl32 = GetModuleHandleA("opengl32.dll");
-  auto load = [&](const char *n) -> void * {
-    void *p = (void *)wglGetProcAddress(n);
+  auto load = [&](const char *name) -> void * {
+    void *p = reinterpret_cast<void *>(wglGetProcAddress(name));
     if (!p || p == (void *)1 || p == (void *)2 || p == (void *)3 ||
         p == (void *)-1)
-      p = (void *)GetProcAddress(gl32, n);
+      p = reinterpret_cast<void *>(GetProcAddress(gl32, name));
     return p;
   };
-  uniform4f = (PFNGLUNIFORM4FPROC_LS)load("glUniform4f");
-  uniform2f = (PFNGLUNIFORM2FPROC_LS)load("glUniform2f");
-  activeTexture = (PFNGLACTIVETEXTUREPROC_LS)load("glActiveTexture");
-  uniform1i = (PFNGLUNIFORM1IPROC_LS)load("glUniform1i");
-  assert(uniform4f && uniform2f && activeTexture && uniform1i);
+  uniform2f = reinterpret_cast<PFNGLUNIFORM2FPROC>(load("glUniform2f"));
+  activeTexture =
+      reinterpret_cast<PFNGLACTIVETEXTUREPROC>(load("glActiveTexture"));
+  assert(uniform2f && activeTexture);
 }
-} // namespace ls_gl
+} // namespace ie_gl
 
 // =============================================================================
-// §0  MINIMAL JSON
-// =============================================================================
-namespace js {
-static std::string esc(const std::string &s) {
-  std::string r;
-  r.reserve(s.size() + 2);
-  r += '"';
-  for (char c : s) {
-    if (c == '"')
-      r += "\\\"";
-    else if (c == '\\')
-      r += "\\\\";
-    else if (c == '\n')
-      r += "\\n";
-    else
-      r += c;
-  }
-  r += '"';
-  return r;
-}
-static std::string kv(const std::string &k, const std::string &v) {
-  return esc(k) + ":" + v;
-}
-static std::string kv(const std::string &k, int v) {
-  return esc(k) + ":" + std::to_string(v);
-}
-static std::string kv(const std::string &k, float v) {
-  char b[32];
-  snprintf(b, 32, "%.4g", v);
-  return esc(k) + ":" + b;
-}
-static std::string kv(const std::string &k, bool v) {
-  return esc(k) + ":" + (v ? "true" : "false");
-}
-static std::string obj(std::initializer_list<std::string> fs) {
-  std::string r = "{";
-  bool f = true;
-  for (auto &x : fs) {
-    if (!f)
-      r += ",";
-    r += x;
-    f = false;
-  }
-  return r + "}";
-}
-static std::string arr(const std::vector<std::string> &items) {
-  std::string r = "[";
-  bool f = true;
-  for (auto &x : items) {
-    if (!f)
-      r += ",";
-    r += x;
-    f = false;
-  }
-  return r + "]";
-}
-static void skipWS(const std::string &s, size_t &p) {
-  while (p < s.size() &&
-         (s[p] == ' ' || s[p] == '\t' || s[p] == '\r' || s[p] == '\n'))
-    ++p;
-}
-static std::string readStr(const std::string &s, size_t &p) {
-  if (p >= s.size() || s[p] != '"')
-    return {};
-  ++p;
-  std::string r;
-  while (p < s.size() && s[p] != '"') {
-    if (s[p] == '\\' && p + 1 < s.size()) {
-      ++p;
-      if (s[p] == 'n')
-        r += '\n';
-      else
-        r += s[p];
-    } else
-      r += s[p];
-    ++p;
-  }
-  if (p < s.size())
-    ++p;
-  return r;
-}
-static std::string grabVal(const std::string &s, size_t &p) {
-  skipWS(s, p);
-  if (p >= s.size())
-    return {};
-  char o = s[p];
-  if (o == '{' || o == '[') {
-    char c = (o == '{') ? '}' : ']';
-    int d = 0;
-    size_t st = p;
-    while (p < s.size()) {
-      if (s[p] == o)
-        d++;
-      else if (s[p] == c) {
-        d--;
-        if (d == 0) {
-          ++p;
-          break;
-        }
-      } else if (s[p] == '"') {
-        ++p;
-        while (p < s.size() && s[p] != '"') {
-          if (s[p] == '\\')
-            ++p;
-          ++p;
-        }
-      }
-      ++p;
-    }
-    return s.substr(st, p - st);
-  }
-  if (o == '"') {
-    size_t st = p;
-    readStr(s, p);
-    return s.substr(st, p - st);
-  }
-  size_t st = p;
-  while (p < s.size() && s[p] != ',' && s[p] != '}' && s[p] != ']')
-    ++p;
-  return s.substr(st, p - st);
-}
-using KVList = std::vector<std::pair<std::string, std::string>>;
-static KVList parseObj(const std::string &s, size_t &p) {
-  KVList out;
-  skipWS(s, p);
-  if (p >= s.size() || s[p] != '{')
-    return out;
-  ++p;
-  while (p < s.size() && s[p] != '}') {
-    skipWS(s, p);
-    if (s[p] == '}')
-      break;
-    auto key = readStr(s, p);
-    skipWS(s, p);
-    if (p < s.size() && s[p] == ':')
-      ++p;
-    auto val = grabVal(s, p);
-    out.push_back({key, val});
-    skipWS(s, p);
-    if (p < s.size() && s[p] == ',')
-      ++p;
-  }
-  if (p < s.size() && s[p] == '}')
-    ++p;
-  return out;
-}
-static std::vector<std::string> parseArr(const std::string &s) {
-  std::vector<std::string> out;
-  size_t p = 0;
-  skipWS(s, p);
-  if (p >= s.size() || s[p] != '[')
-    return out;
-  ++p;
-  while (p < s.size() && s[p] != ']') {
-    skipWS(s, p);
-    if (s[p] == ']')
-      break;
-    out.push_back(grabVal(s, p));
-    skipWS(s, p);
-    if (p < s.size() && s[p] == ',')
-      ++p;
-  }
-  return out;
-}
-static int asInt(const std::string &v) {
-  try {
-    return std::stoi(v);
-  } catch (...) {
-    return 0;
-  }
-}
-static float asFloat(const std::string &v) {
-  try {
-    return std::stof(v);
-  } catch (...) {
-    return 0.f;
-  }
-}
-static bool asBool(const std::string &v) { return v == "true" || v == "1"; }
-static std::string asStr(const std::string &v) {
-  if (v.size() >= 2 && v.front() == '"' && v.back() == '"') {
-    size_t p = 0;
-    return readStr(v, p);
-  }
-  return v;
-}
-} // namespace js
-
-// =============================================================================
-// §1  DATA MODEL
+// §1  EDIT PARAMETERS
 // =============================================================================
 
-// ---------------------------------------------------------------------------
-// Bus widths (1 = normal single-bit wire, stays unchanged)
-// ---------------------------------------------------------------------------
-enum class BusWidth : uint8_t { B1 = 1, B2 = 2, B4 = 4, B8 = 8 };
-static int busWidthBits(BusWidth w) { return (int)w; }
-static const char *busWidthLabel(BusWidth w) {
-  switch (w) {
-  case BusWidth::B2:
-    return "2b";
-  case BusWidth::B4:
-    return "4b";
-  case BusWidth::B8:
-    return "8b";
-  default:
-    return "";
+struct EditParams {
+  // ── Tone ─────────────────────────────────────────────────────────────────
+  float exposure = 0.f;
+  float contrast = 0.f;
+  float highlights = 0.f;
+  float shadows = 0.f;
+  float whites = 0.f;
+  float blacks = 0.f;
+  // ── Color ────────────────────────────────────────────────────────────────
+  float temperature = 0.f;
+  float tint = 0.f;
+  float saturation = 0.f;
+  float vibrance = 0.f;
+  // ── Detail ───────────────────────────────────────────────────────────────
+  float sharpness = 0.f;
+  float noiseReduce = 0.f;
+  // ── Effects ──────────────────────────────────────────────────────────────
+  float vignette = 0.f;
+  float grain = 0.f;
+
+  // ── Tone curve LUTs (256-entry) ───────────────────────────────────────────
+  std::array<uint8_t, 256> lutRGB{};
+  std::array<uint8_t, 256> lutR{};
+  std::array<uint8_t, 256> lutG{};
+  std::array<uint8_t, 256> lutB{};
+
+  // ── HSL LUTs (360-entry) ──────────────────────────────────────────────────
+  std::array<uint8_t, 360> hslHue{}; // encoded: 0.5=neutral, shift ±30°
+  std::array<uint8_t, 360> hslSat{}; // encoded: 0.5=1× multiplier
+  std::array<uint8_t, 360> hslLum{}; // encoded: 0.5=neutral, shift ±1
+
+  EditParams() {
+    resetCurves();
+    resetHSL();
   }
-}
 
-enum class GateType {
-  AND = 0,
-  OR,
-  NOT,
-  NAND,
-  NOR,
-  XOR,
-  XNOR,
-  INPUT,
-  OUTPUT,
-  CLOCK,
-  DFF,
-  DLATCH,
-  TFLIPFLOP,
-  JKFLIPFLOP,
-  BUS_IN_2,  // packs 2 × 1-bit inputs  → 1 × 2-bit bus output
-  BUS_IN_4,  // packs 4 × 1-bit inputs  → 1 × 4-bit bus output
-  BUS_IN_8,  // packs 8 × 1-bit inputs  → 1 × 8-bit bus output
-  BUS_OUT_2, // unpacks 1 × 2-bit bus   → 2 × 1-bit outputs
-  BUS_OUT_4, // unpacks 1 × 4-bit bus   → 4 × 1-bit outputs
-  BUS_OUT_8, // unpacks 1 × 8-bit bus   → 8 × 1-bit outputs
-  COUNT
-};
-static constexpr int kGTC = (int)GateType::COUNT;
-static constexpr int kInPins[kGTC] = {
-    2, 2, 1, 2, 2, 2, 2, 0, 1,
-    0, 3, 2, 2, 3, 2, 4, 8, // BUS_IN_2/4/8  (N single-bit inputs)
-    1, 1, 1                 // BUS_OUT_2/4/8 (1 bus input)
-};
-static constexpr int kOutPins[kGTC] = {
-    1, 1, 1, 1, 1, 1, 1, 1, 0,
-    1, 2, 2, 2, 2, 1, 1, 1, // BUS_IN_2/4/8  (1 bus output)
-    2, 4, 8                 // BUS_OUT_2/4/8 (N single-bit outputs)
-};
-static const char *kGateName[kGTC] = {
-    "AND",   "OR",     "NOT",   "NAND",  "NOR",    "XOR",  "XNOR",
-    "INPUT", "OUTPUT", "CLOCK", "DFF",   "DLATCH", "TFF",  "JKFF",
-    "BUS▲2", "BUS▲4",  "BUS▲8", "BUS▼2", "BUS▼4",  "BUS▼8"};
-static const char *kInPinLabel[kGTC][3] = {
-    {"A", "B", ""},
-    {"A", "B", ""},
-    {"A", "", ""},
-    {"A", "B", ""},
-    {"A", "B", ""},
-    {"A", "B", ""},
-    {"A", "B", ""},
-    {"", "", ""},
-    {"D", "", ""},
-    {"", "", ""},
-    {"D", "CLK", "RST"},
-    {"D", "EN", ""},
-    {"T", "CLK", ""},
-    {"J", "K", "CLK"},
-    // BUS_IN  — up to 3 shown (gate drawing only shows first 3 labels)
-    {"b0", "b1", ""},
-    {"b0", "b1", ""},
-    {"b0", "b1", ""},
-    // BUS_OUT
-    {"BUS", "", ""},
-    {"BUS", "", ""},
-    {"BUS", "", ""},
-};
-static const char *kOutPinLabel[kGTC][2] = {
-    {"Q", ""},
-    {"Q", ""},
-    {"Q", ""},
-    {"Q", ""},
-    {"Q", ""},
-    {"Q", ""},
-    {"Q", ""},
-    {"Q", ""},
-    {"", ""},
-    {"Q", ""},
-    {"Q", "/Q"},
-    {"Q", "/Q"},
-    {"Q", "/Q"},
-    {"Q", "/Q"},
-    // BUS_IN
-    {"BUS", ""},
-    {"BUS", ""},
-    {"BUS", ""},
-    // BUS_OUT
-    {"b0", "b1"},
-    {"b0", "b1"},
-    {"b0", "b1"},
-};
-static bool isSequential(GateType t) {
-  return t == GateType::DFF || t == GateType::DLATCH ||
-         t == GateType::TFLIPFLOP || t == GateType::JKFLIPFLOP;
-}
-static bool isBusIn(GateType t) {
-  return t == GateType::BUS_IN_2 || t == GateType::BUS_IN_4 ||
-         t == GateType::BUS_IN_8;
-}
-static bool isBusOut(GateType t) {
-  return t == GateType::BUS_OUT_2 || t == GateType::BUS_OUT_4 ||
-         t == GateType::BUS_OUT_8;
-}
-static bool isBusGate(GateType t) { return isBusIn(t) || isBusOut(t); }
-static BusWidth busGateWidth(GateType t) {
-  if (t == GateType::BUS_IN_2 || t == GateType::BUS_OUT_2)
-    return BusWidth::B2;
-  if (t == GateType::BUS_IN_4 || t == GateType::BUS_OUT_4)
-    return BusWidth::B4;
-  if (t == GateType::BUS_IN_8 || t == GateType::BUS_OUT_8)
-    return BusWidth::B8;
-  return BusWidth::B1;
-}
-static constexpr float kClockFreqPresets[] = {0.5f, 1.f, 2.f, 4.f, 8.f};
-static constexpr int kClockFreqCount = 5;
-static constexpr float kGW = 88.f, kGH = 60.f, kPinR = 5.f, kPinLen = 16.f,
-                       kCorner = 8.f;
-static constexpr float kGH_SEQ = 84.f;
-static constexpr float kGrid = 20.f;
-static float snapGrid(float v) { return std::round(v / kGrid) * kGrid; }
-static float gateH(GateType t) { return isSequential(t) ? kGH_SEQ : kGH; }
+  void resetCurves() {
+    for (int i = 0; i < 256; ++i)
+      lutRGB[i] = lutR[i] = lutG[i] = lutB[i] = uint8_t(i);
+  }
 
-struct Pin {
-  float cx = 0, cy = 0;
-  bool connected = false;
-};
-
-struct Gate {
-  int id = 0;
-  GateType type = GateType::AND;
-  float x = 0, y = 0;
-  bool selected = false;
-  bool inputVal = false, simVal = false, stateVal = false, prevClk = false;
-  std::string label;
-  float clockHz = 1.f;
-  std::vector<Pin> inPins, outPins;
-
-  void recomputePins() {
-    int ni = kInPins[(int)type], no = kOutPins[(int)type];
-    inPins.resize(ni);
-    outPins.resize(no);
-    float gh = gateH(type);
-    float L = x - kGW * .5f, R = x + kGW * .5f, B = y - gh * .5f;
-    for (int i = 0; i < ni; i++) {
-      float t = (ni == 1) ? .5f : float(i) / (ni - 1);
-      inPins[i] = {L - kPinLen, B + t * gh};
-    }
-    for (int i = 0; i < no; i++) {
-      float t = (no == 1) ? .5f : float(i) / (no - 1);
-      outPins[i] = {R + kPinLen, B + t * gh};
+  void resetHSL() {
+    // Identity: hue shift=0 (128), sat scale=1× (128), lum shift=0 (128)
+    for (int i = 0; i < 360; ++i) {
+      hslHue[i] = 128;
+      hslSat[i] = 128;
+      hslLum[i] = 128;
     }
   }
-  std::string toJson() const {
-    return js::obj({js::kv("id", id), js::kv("type", (int)type), js::kv("x", x),
-                    js::kv("y", y), js::kv("inputVal", inputVal),
-                    js::kv("label", label), js::kv("clockHz", clockHz),
-                    js::kv("stateVal", stateVal)});
-  }
-  void fromKV(const js::KVList &m) {
-    for (auto &[k, v] : m) {
-      if (k == "id")
-        id = js::asInt(v);
-      else if (k == "type")
-        type = (GateType)js::asInt(v);
-      else if (k == "x")
-        x = js::asFloat(v);
-      else if (k == "y")
-        y = js::asFloat(v);
-      else if (k == "inputVal")
-        inputVal = js::asBool(v);
-      else if (k == "label")
-        label = js::asStr(v);
-      else if (k == "clockHz")
-        clockHz = js::asFloat(v);
-      else if (k == "stateVal")
-        stateVal = js::asBool(v);
-    }
-    if (clockHz <= 0.f)
-      clockHz = 1.f;
-    recomputePins();
-  }
-};
 
-struct WireEndpoint {
-  int gateId = -1;
-  int pinIdx = 0;
-  bool isOutput = false;
-};
-
-// Wire — gateId < 0 means subcircuit instance (id = -gateId)
-struct Wire {
-  int id = 0;
-  WireEndpoint src, dst;
-  // Single-bit wires: value is used, busValue is empty
-  // Bus wires: value unused, busValue holds each bit
-  bool value = false, selected = false;
-  float splitX = 1e30f;
-  BusWidth width = BusWidth::B1;
-  std::vector<bool> busValue; // size == busWidthBits(width) when width != B1
-
-  bool isBus() const { return width != BusWidth::B1; }
-
-  bool srcIsSubInst() const { return src.gateId < 0; }
-  bool dstIsSubInst() const { return dst.gateId < 0; }
-  int srcInstId() const { return -src.gateId; }
-  int dstInstId() const { return -dst.gateId; }
-
-  // Returns bit i (0-indexed). Safe to call on 1-bit wires (returns value).
-  bool bit(int i) const {
-    if (!isBus())
-      return value;
-    if (i < (int)busValue.size())
-      return busValue[i];
-    return false;
-  }
-  void setBit(int i, bool v) {
-    if (!isBus()) {
-      value = v;
-      return;
-    }
-    if (i < (int)busValue.size())
-      busValue[i] = v;
-  }
-  void resizeBus() {
-    if (isBus())
-      busValue.assign(busWidthBits(width), false);
-  }
-
-  std::string toJson() const {
-    std::string bvStr = "[]";
-    if (isBus()) {
-      std::vector<std::string> bits;
-      for (bool b : busValue)
-        bits.push_back(b ? "1" : "0");
-      bvStr = js::arr(bits);
-    }
-    return js::obj({js::kv("id", id), js::kv("srcId", src.gateId),
-                    js::kv("srcPin", src.pinIdx), js::kv("dstId", dst.gateId),
-                    js::kv("dstPin", dst.pinIdx), js::kv("splitX", splitX),
-                    js::kv("busWidth", (int)width), "\"busValue\":" + bvStr});
-  }
-  void fromKV(const js::KVList &m) {
-    splitX = 1e30f;
-    width = BusWidth::B1;
-    for (auto &[k, v] : m) {
-      if (k == "id")
-        id = js::asInt(v);
-      else if (k == "srcId")
-        src.gateId = js::asInt(v);
-      else if (k == "srcPin")
-        src.pinIdx = js::asInt(v);
-      else if (k == "dstId")
-        dst.gateId = js::asInt(v);
-      else if (k == "dstPin")
-        dst.pinIdx = js::asInt(v);
-      else if (k == "splitX")
-        splitX = js::asFloat(v);
-      else if (k == "busWidth")
-        width = (BusWidth)js::asInt(v);
-      else if (k == "busValue") {
-        busValue.clear();
-        for (auto &bv : js::parseArr(v))
-          busValue.push_back(js::asInt(bv) != 0);
-      }
-    }
-    src.isOutput = true;
-    dst.isOutput = false;
-    resizeBus();
-  }
-};
-
-struct PinRef {
-  int gateId;
-  int pinIdx;
-  bool isOutput;
-  float cx, cy;
-  bool isSubInst = false;
-};
-struct TruthRow {
-  std::vector<bool> inputs, outputs;
-};
-enum class SimMode { Edit, Running, Paused };
-
-// =============================================================================
-// §1b  SUBCIRCUIT TYPES
-// =============================================================================
-
-static constexpr float kSCMinH = kGH_SEQ;
-static constexpr float kSCPinSpacing = 20.f;
-static constexpr float kSCWidth = 100.f;
-
-static float subcircuitH(int nIn, int nOut) {
-  int m = max(max(nIn, nOut), 1);
-  return max(float(m) * kSCPinSpacing + kSCPinSpacing, kSCMinH);
-}
-
-struct SubcircuitPinInfo {
-  std::string label;
-  int internalGateId = 0;
-  bool isOutput = false;
-  float cx = 0, cy = 0;
-  bool connected = false;
-  bool value = false; // last evaluated value (for display + wire drive)
-};
-
-// Forward-declare Circuit so SubcircuitDef can hold one
-struct Circuit;
-
-struct SubcircuitDef {
-  int id = 0;
-  std::string name = "Module";
-  Circuit *inner = nullptr; // heap-allocated to avoid incomplete-type issues
-  std::vector<SubcircuitPinInfo> inputPins;
-  std::vector<SubcircuitPinInfo> outputPins;
-
-  SubcircuitDef(); // body after Circuit definition
-  SubcircuitDef(const SubcircuitDef &o);
-  SubcircuitDef &operator=(const SubcircuitDef &o);
-  ~SubcircuitDef(); // body after Circuit definition
-
-  void rebuildPins();
-  std::string toJson() const;
-  void fromJson(const std::string &src);
-};
-
-struct SubcircuitInst {
-  int id = 0, defId = 0;
-  float x = 0, y = 0;
-  bool selected = false;
-  std::string label;
-
-  std::vector<SubcircuitPinInfo> inputPins;
-  std::vector<SubcircuitPinInfo> outputPins;
-
-  std::unordered_map<int, bool> internalState;
-  std::unordered_map<int, bool> internalPrevClk;
-
-  void recomputePins(const SubcircuitDef &def);
-
-  std::string toJson() const {
-    std::vector<std::string> sa, ca;
-    for (auto &[k, v] : internalState)
-      sa.push_back(js::obj({js::kv("g", k), js::kv("v", v)}));
-    for (auto &[k, v] : internalPrevClk)
-      ca.push_back(js::obj({js::kv("g", k), js::kv("v", v)}));
-    return js::obj({js::kv("id", id), js::kv("defId", defId), js::kv("x", x),
-                    js::kv("y", y), js::kv("label", label),
-                    "\"istate\":" + js::arr(sa), "\"iclk\":" + js::arr(ca)});
-  }
-  void fromKV(const js::KVList &m) {
-    for (auto &[k, v] : m) {
-      if (k == "id")
-        id = js::asInt(v);
-      else if (k == "defId")
-        defId = js::asInt(v);
-      else if (k == "x")
-        x = js::asFloat(v);
-      else if (k == "y")
-        y = js::asFloat(v);
-      else if (k == "label")
-        label = js::asStr(v);
-      else if (k == "istate") {
-        for (auto &item : js::parseArr(v)) {
-          size_t p = 0;
-          int gid = 0;
-          bool val = false;
-          for (auto &[kk, vv] : js::parseObj(item, p)) {
-            if (kk == "g")
-              gid = js::asInt(vv);
-            else if (kk == "v")
-              val = js::asBool(vv);
-          }
-          internalState[gid] = val;
-        }
-      } else if (k == "iclk") {
-        for (auto &item : js::parseArr(v)) {
-          size_t p = 0;
-          int gid = 0;
-          bool val = false;
-          for (auto &[kk, vv] : js::parseObj(item, p)) {
-            if (kk == "g")
-              gid = js::asInt(vv);
-            else if (kk == "v")
-              val = js::asBool(vv);
-          }
-          internalPrevClk[gid] = val;
-        }
-      }
-    }
-  }
+  void reset() { *this = EditParams{}; }
 };
 
 // =============================================================================
-// §2  CIRCUIT
+// §2  GLSL SHADER
+//     Texture unit layout:
+//       0 = uOriginal   (source image)
+//       1 = uNoise      (grain noise)
+//       2 = uLutRGB     (tone curve composite, 256×1)
+//       3 = uLutR       (tone curve red,       256×1)
+//       4 = uLutG       (tone curve green,     256×1)
+//       5 = uLutB       (tone curve blue,      256×1)
+//       6 = uHSLHue     (HSL hue shift,        360×1)
+//       7 = uHSLSat     (HSL sat scale,        360×1)
+//       8 = uHSLLum     (HSL lum shift,        360×1)
 // =============================================================================
 
-struct Circuit {
-  std::vector<Gate> gates;
-  std::vector<Wire> wires;
-  int nextId = 1, nextWireId = 1;
-
-  // ── Subcircuit registry ──────────────────────────────────────────────
-  std::unordered_map<int, SubcircuitDef> subcircuitDefs;
-  std::vector<SubcircuitInst> subcircuitInsts;
-  int nextSubDefId = 1, nextSubInstId = 1;
-
-  // ── Gate helpers ─────────────────────────────────────────────────────
-  int add(GateType t, float x, float y, const std::string &lbl = "") {
-    Gate g;
-    g.id = nextId++;
-    g.type = t;
-    g.x = x;
-    g.y = y;
-    g.label = lbl;
-    if (t == GateType::CLOCK)
-      g.clockHz = 1.f;
-    g.recomputePins();
-    gates.push_back(g);
-    return g.id;
-  }
-  Gate *find(int id) {
-    for (auto &g : gates)
-      if (g.id == id)
-        return &g;
-    return nullptr;
-  }
-  const Gate *find(int id) const {
-    for (auto &g : gates)
-      if (g.id == id)
-        return &g;
-    return nullptr;
-  }
-  Wire *find_wire(int id) {
-    for (auto &w : wires)
-      if (w.id == id)
-        return &w;
-    return nullptr;
-  }
-
-  SubcircuitInst *findInst(int id) {
-    for (auto &i : subcircuitInsts)
-      if (i.id == id)
-        return &i;
-    return nullptr;
-  }
-  const SubcircuitInst *findInst(int id) const {
-    for (auto &i : subcircuitInsts)
-      if (i.id == id)
-        return &i;
-    return nullptr;
-  }
-
-  void remove(int id) {
-    gates.erase(std::remove_if(gates.begin(), gates.end(),
-                               [id](const Gate &g) { return g.id == id; }),
-                gates.end());
-  }
-  void removeInst(int instId) {
-    subcircuitInsts.erase(std::remove_if(subcircuitInsts.begin(),
-                                         subcircuitInsts.end(),
-                                         [instId](const SubcircuitInst &i) {
-                                           return i.id == instId;
-                                         }),
-                          subcircuitInsts.end());
-  }
-
-  // Returns -1 and sets errOut if there is a width mismatch.
-  int connect(int sId, int sPin, int dId, int dPin,
-              std::string *errOut = nullptr) {
-    // Determine widths of both endpoints
-    BusWidth sw = BusWidth::B1, dw = BusWidth::B1;
-    // Source gate
-    if (sId >= 0) {
-      Gate *sg = find(sId);
-      if (sg && isBusIn(sg->type))
-        sw = busGateWidth(sg->type); // bus output side
-    } else {
-      SubcircuitInst *si = findInst(-sId);
-      (void)si; // subcircuit bus pins: extend later
-    }
-    // Destination gate
-    if (dId >= 0) {
-      Gate *dg = find(dId);
-      if (dg && isBusOut(dg->type))
-        dw = busGateWidth(dg->type); // bus input side
-    } else {
-      SubcircuitInst *di = findInst(-dId);
-      (void)di;
-    }
-    if (sw != dw) {
-      if (errOut)
-        *errOut = std::string("Width mismatch: source is ") +
-                  (sw == BusWidth::B1 ? "1-bit" : busWidthLabel(sw)) +
-                  ", destination is " +
-                  (dw == BusWidth::B1 ? "1-bit" : busWidthLabel(dw));
-      return -1;
-    }
-    Wire w;
-    w.id = nextWireId++;
-    w.src = {sId, sPin, true};
-    w.dst = {dId, dPin, false};
-    w.width = sw;
-    w.resizeBus();
-    wires.push_back(w);
-    markPinConn(sId, sPin, true, true);
-    markPinConn(dId, dPin, false, true);
-    return w.id;
-  }
-  void disconnect(int wireId) {
-    for (int i = int(wires.size()) - 1; i >= 0; --i) {
-      if (wires[i].id != wireId)
-        continue;
-      auto &w = wires[i];
-      recomputePin(w.src.gateId, w.src.pinIdx, true, wireId);
-      recomputePin(w.dst.gateId, w.dst.pinIdx, false, wireId);
-      wires.erase(wires.begin() + i);
-      return;
-    }
-  }
-  void removeGateWires(int gateId) {
-    std::vector<int> ids;
-    for (auto &w : wires)
-      if (w.src.gateId == gateId || w.dst.gateId == gateId)
-        ids.push_back(w.id);
-    for (int id : ids)
-      disconnect(id);
-  }
-  void removeInstWires(int instId) {
-    int neg = -instId;
-    std::vector<int> ids;
-    for (auto &w : wires)
-      if (w.src.gateId == neg || w.dst.gateId == neg)
-        ids.push_back(w.id);
-    for (int id : ids)
-      disconnect(id);
-  }
-  void clearAll() {
-    gates.clear();
-    wires.clear();
-    subcircuitDefs.clear();
-    subcircuitInsts.clear();
-    nextId = 1;
-    nextWireId = 1;
-    nextSubDefId = 1;
-    nextSubInstId = 1;
-  }
-
-  void rebuildConnected() {
-    for (auto &g : gates) {
-      for (auto &p : g.inPins)
-        p.connected = false;
-      for (auto &p : g.outPins)
-        p.connected = false;
-    }
-    for (auto &inst : subcircuitInsts) {
-      for (auto &p : inst.inputPins)
-        p.connected = false;
-      for (auto &p : inst.outputPins)
-        p.connected = false;
-    }
-    for (auto &w : wires) {
-      markPinConn(w.src.gateId, w.src.pinIdx, true, true);
-      markPinConn(w.dst.gateId, w.dst.pinIdx, false, true);
-    }
-  }
-
-  // ── Evaluation ───────────────────────────────────────────────────────
-  void evaluate() {
-    // Phase 1: combinational gates + subcircuit output init
-    for (int idx : topoSort()) {
-      Gate &g = gates[idx];
-      if (!isSequential(g.type)) {
-        g.simVal = computeGate(g);
-        for (auto &w : wires)
-          if (w.src.gateId == g.id && w.src.pinIdx == 0)
-            w.value = g.simVal;
-      } else {
-        for (auto &w : wires)
-          if (w.src.gateId == g.id)
-            w.value = (w.src.pinIdx == 0) ? g.stateVal : !g.stateVal;
-      }
-    }
-
-    // ── Bus gate evaluation ──────────────────────────────────────────
-    for (auto &g : gates) {
-      if (isBusIn(g.type)) {
-        int bits = busWidthBits(busGateWidth(g.type));
-        // Find the single bus output wire and pack bits into it
-        for (auto &w : wires) {
-          if (w.src.gateId == g.id && w.src.pinIdx == 0) {
-            w.resizeBus();
-            for (int i = 0; i < bits; i++) {
-              bool b = false;
-              for (auto &wIn : wires)
-                if (wIn.dst.gateId == g.id && wIn.dst.pinIdx == i) {
-                  b = wIn.value;
-                  break;
-                }
-              w.setBit(i, b);
-            }
-          }
-        }
-      }
-      if (isBusOut(g.type)) {
-        int bits = busWidthBits(busGateWidth(g.type));
-        // Read the single bus input wire and unpack bits to output wires
-        bool busInput[8] = {};
-        for (auto &w : wires)
-          if (w.dst.gateId == g.id && w.dst.pinIdx == 0)
-            for (int i = 0; i < bits; i++)
-              busInput[i] = w.bit(i);
-        for (auto &w : wires)
-          if (w.src.gateId == g.id && w.src.pinIdx < bits)
-            w.value = busInput[w.src.pinIdx];
-      }
-    }
-    // Evaluate subcircuit instances
-    for (auto &inst : subcircuitInsts)
-      evaluateSubcircuitInst(inst);
-    pushSubcircuitWires();
-
-    // Phase 2: sequential update
-    for (auto &g : gates) {
-      if (!isSequential(g.type))
-        continue;
-      g.stateVal = computeSequential(g);
-      g.simVal = g.stateVal;
-      bool clk = getInput(g, g.type == GateType::JKFLIPFLOP ? 2 : 1);
-      g.prevClk = clk;
-    }
-
-    // Phase 3: re-propagate
-    for (auto &g : gates) {
-      if (!isSequential(g.type))
-        continue;
-      for (auto &w : wires)
-        if (w.src.gateId == g.id)
-          w.value = (w.src.pinIdx == 0) ? g.stateVal : !g.stateVal;
-    }
-    for (int idx : topoSort()) {
-      Gate &g = gates[idx];
-      if (isSequential(g.type))
-        continue;
-      g.simVal = computeGate(g);
-      for (auto &w : wires)
-        if (w.src.gateId == g.id && w.src.pinIdx == 0)
-          w.value = g.simVal;
-    }
-    for (auto &inst : subcircuitInsts)
-      evaluateSubcircuitInst(inst);
-    pushSubcircuitWires();
-  }
-
-  void resetSequentialState() {
-    for (auto &g : gates)
-      if (isSequential(g.type)) {
-        g.stateVal = false;
-        g.simVal = false;
-        g.prevClk = false;
-      }
-    for (auto &inst : subcircuitInsts) {
-      inst.internalState.clear();
-      inst.internalPrevClk.clear();
-    }
-  }
-
-  // ── Grouping: turn selected gates into a subcircuit instance ─────────
-  // Returns the new inst id, or -1 on failure.
-  int groupSelected(const std::string &defName) {
-    // Collect selected gate ids
-    std::vector<int> selIds;
-    for (auto &g : gates)
-      if (g.selected)
-        selIds.push_back(g.id);
-    if (selIds.empty())
-      return -1;
-
-    std::unordered_set<int> selSet(selIds.begin(), selIds.end());
-
-    // Classify wires: internal (both ends inside), crossing-in (src outside),
-    // crossing-out (dst outside), external (both outside — ignore)
-    struct CrossWire {
-      int wireId;
-      bool srcOutside;
-      int pinIdx;
-    }; // pinIdx = boundary pin slot
-    std::vector<CrossWire> crossWires;
-
-    // Centroid of selection for placing the new instance
-    float cx = 0, cy = 0;
-    for (int id : selIds) {
-      const Gate *g = find(id);
-      if (g) {
-        cx += g->x;
-        cy += g->y;
-      }
-    }
-    cx /= float(selIds.size());
-    cy /= float(selIds.size());
-
-    // Build the def
-    SubcircuitDef def;
-    def.id = nextSubDefId++;
-    def.name = defName;
-
-    // Copy selected gates into def inner circuit
-    // Remap ids to fresh ids inside inner (avoid collision with outer ids)
-    std::unordered_map<int, int> idRemap; // outer id -> inner id
-    for (int oid : selIds) {
-      const Gate *og = find(oid);
-      if (!og)
-        continue;
-      int nid = def.inner->nextId++;
-      idRemap[oid] = nid;
-      Gate ng = *og;
-      ng.id = nid;
-      ng.x -= cx;
-      ng.y -= cy; // centre the inner circuit
-      ng.selected = false;
-      ng.recomputePins();
-      def.inner->gates.push_back(ng);
-    }
-
-    // Copy internal wires (both endpoints inside selection)
-    for (auto &w : wires) {
-      bool srcIn = selSet.count(w.src.gateId) > 0;
-      bool dstIn = selSet.count(w.dst.gateId) > 0;
-      if (srcIn && dstIn) {
-        Wire nw = w;
-        nw.id = def.inner->nextWireId++;
-        nw.src.gateId = idRemap[w.src.gateId];
-        nw.dst.gateId = idRemap[w.dst.gateId];
-        nw.splitX = 1e30f;
-        def.inner->wires.push_back(nw);
-      }
-    }
-
-    // For crossing wires, create INPUT/OUTPUT gates inside def
-    // and record which outer wire maps to which inner boundary gate
-    struct BoundaryMap {
-      int outerWireId;
-      int innerBoundaryGateId;
-      bool inputSide;
-    };
-    std::vector<BoundaryMap> boundaryMaps;
-
-    // First pass: wires whose src is OUTSIDE and dst is INSIDE
-    //   → create an INPUT gate inside def; the outer wire will connect to
-    //     the new inst's input pin
-    int pinAutoIdx = 0;
-    for (auto &w : wires) {
-      bool srcIn = selSet.count(w.src.gateId) > 0;
-      bool dstIn = selSet.count(w.dst.gateId) > 0;
-      if (!srcIn && dstIn) {
-        // Create INPUT gate inside def
-        int igid = def.inner->nextId++;
-        Gate ig;
-        ig.id = igid;
-        ig.type = GateType::INPUT;
-        // Position it to the left of the inner centroid
-        ig.x = -kGW * 1.8f - float(pinAutoIdx) * 0.f;
-        ig.y = float(pinAutoIdx) * (kGH + 10.f) -
-               float(selIds.size()) * (kGH + 10.f) * 0.5f;
-        ig.label = "in" + std::to_string(pinAutoIdx);
-        ig.recomputePins();
-        def.inner->gates.push_back(ig);
-
-        // Wire from that INPUT gate to the original dst gate (remapped)
-        Wire bw;
-        bw.id = def.inner->nextWireId++;
-        bw.src = {igid, 0, true};
-        bw.dst = {idRemap.count(w.dst.gateId) ? idRemap[w.dst.gateId]
-                                              : w.dst.gateId,
-                  w.dst.pinIdx, false};
-        bw.splitX = 1e30f;
-        def.inner->wires.push_back(bw);
-
-        boundaryMaps.push_back({w.id, igid, true});
-        pinAutoIdx++;
-      }
-    }
-
-    // Second pass: wires whose src is INSIDE and dst is OUTSIDE
-    //   → create an OUTPUT gate inside def
-    int outAutoIdx = 0;
-    for (auto &w : wires) {
-      bool srcIn = selSet.count(w.src.gateId) > 0;
-      bool dstIn = selSet.count(w.dst.gateId) > 0;
-      if (srcIn && !dstIn) {
-        int ogid = def.inner->nextId++;
-        Gate og;
-        og.id = ogid;
-        og.type = GateType::OUTPUT;
-        og.x = kGW * 1.8f;
-        og.y = float(outAutoIdx) * (kGH + 10.f) -
-               float(selIds.size()) * (kGH + 10.f) * 0.5f;
-        og.label = "out" + std::to_string(outAutoIdx);
-        og.recomputePins();
-        def.inner->gates.push_back(og);
-
-        Wire bw;
-        bw.id = def.inner->nextWireId++;
-        bw.src = {idRemap.count(w.src.gateId) ? idRemap[w.src.gateId]
-                                              : w.src.gateId,
-                  w.src.pinIdx, true};
-        bw.dst = {ogid, 0, false};
-        bw.splitX = 1e30f;
-        def.inner->wires.push_back(bw);
-
-        boundaryMaps.push_back({w.id, ogid, false});
-        outAutoIdx++;
-      }
-    }
-
-    def.rebuildPins();
-    // Capture id before the move (move leaves def.id valid but we want
-    // certainty)
-    int defId = def.id;
-    subcircuitDefs.emplace(defId, std::move(def));
-    SubcircuitDef *pDef = &subcircuitDefs.at(defId);
-    if (!pDef)
-      return -1;
-
-    // Create the instance
-    SubcircuitInst inst;
-    inst.id = nextSubInstId++;
-    inst.defId = defId;
-    inst.x = cx;
-    inst.y = cy;
-    inst.recomputePins(*pDef);
-    subcircuitInsts.push_back(inst);
-    SubcircuitInst &newInst = subcircuitInsts.back();
-    int instId = newInst.id;
-
-    // Re-route crossing wires to the new instance
-    // Build lookup: innerBoundaryGateId -> pin index in inputPins / outputPins
-    auto pinIndexForInner = [&](int innerGateId, bool isInputSide) -> int {
-      auto &pins = isInputSide ? pDef->inputPins : pDef->outputPins;
-      for (int i = 0; i < (int)pins.size(); i++)
-        if (pins[i].internalGateId == innerGateId)
-          return i;
-      return 0;
-    };
-
-    for (auto &bm : boundaryMaps) {
-      Wire *ow = find_wire(bm.outerWireId);
-      if (!ow)
-        continue;
-      if (bm.inputSide) {
-        // Outer wire was: someGate(out) → selGate(in)
-        // Reroute dst to the new instance input pin
-        int pi = pinIndexForInner(bm.innerBoundaryGateId, true);
-        ow->dst.gateId = -instId;
-        ow->dst.pinIdx = pi;
-        ow->splitX = 1e30f;
-      } else {
-        // Outer wire was: selGate(out) → someGate(in)
-        // Reroute src to the new instance output pin
-        int pi = pinIndexForInner(bm.innerBoundaryGateId, false);
-        ow->src.gateId = -instId;
-        ow->src.pinIdx = pi;
-        ow->splitX = 1e30f;
-      }
-    }
-
-    // Remove selected gates and their now-internal wires from parent
-    // (internal wires were not crossing, so they're not in boundaryMaps)
-    std::vector<int> toDisconnect;
-    for (auto &w : wires) {
-      bool srcIn = selSet.count(w.src.gateId) > 0;
-      bool dstIn = selSet.count(w.dst.gateId) > 0;
-      if (srcIn || dstIn)
-        toDisconnect.push_back(w.id);
-    }
-    // But keep the re-routed boundary wires
-    std::unordered_set<int> boundaryWireIds;
-    for (auto &bm : boundaryMaps)
-      boundaryWireIds.insert(bm.outerWireId);
-    for (int wid : toDisconnect) {
-      if (boundaryWireIds.count(wid))
-        continue;
-      // Remove directly (don't call disconnect which re-marks pins)
-      wires.erase(std::remove_if(wires.begin(), wires.end(),
-                                 [wid](const Wire &w) { return w.id == wid; }),
-                  wires.end());
-    }
-    for (int gid : selIds)
-      remove(gid);
-
-    rebuildConnected();
-    return instId;
-  }
-
-  // ── Truth table (combinational only, no subcircuits in scope) ────────
-  std::vector<TruthRow> buildTruthTable(std::vector<int> &inIds,
-                                        std::vector<int> &outIds) const {
-    inIds.clear();
-    outIds.clear();
-    std::vector<int> inIdx, outIdx;
-    for (int i = 0; i < (int)gates.size(); i++) {
-      if (gates[i].type == GateType::INPUT ||
-          gates[i].type == GateType::CLOCK) {
-        inIdx.push_back(i);
-        inIds.push_back(gates[i].id);
-      }
-      if (gates[i].type == GateType::OUTPUT) {
-        outIdx.push_back(i);
-        outIds.push_back(gates[i].id);
-      }
-    }
-    if (inIdx.empty() || outIdx.empty())
-      return {};
-    for (auto &g : gates)
-      if (isSequential(g.type))
-        return {};
-    if (!subcircuitInsts.empty())
-      return {}; // skip if subcircuits present
-
-    int ni = (int)inIdx.size(), combos = 1 << min(ni, 6);
-    std::vector<Gate> gs = gates;
-    std::vector<Wire> ws = wires;
-    auto topo = [&]() -> std::vector<int> {
-      int sz = (int)gs.size();
-      std::vector<int> ind(sz, 0);
-      for (auto &w : ws)
-        for (int i = 0; i < sz; i++)
-          if (gs[i].id == w.dst.gateId) {
-            ind[i]++;
-            break;
-          }
-      std::vector<int> q, r;
-      for (int i = 0; i < sz; i++)
-        if (ind[i] == 0)
-          q.push_back(i);
-      while (!q.empty()) {
-        int c = q.back();
-        q.pop_back();
-        r.push_back(c);
-        for (auto &w : ws) {
-          if (w.src.gateId != gs[c].id)
-            continue;
-          for (int i = 0; i < sz; i++)
-            if (gs[i].id == w.dst.gateId && --ind[i] == 0) {
-              q.push_back(i);
-              break;
-            }
-        }
-      }
-      if ((int)r.size() < sz) {
-        std::vector<bool> vis(sz, false);
-        for (int i : r)
-          vis[i] = true;
-        for (int i = 0; i < sz; i++)
-          if (!vis[i])
-            r.push_back(i);
-      }
-      return r;
-    };
-    auto eval = [&]() {
-      for (int idx : topo()) {
-        Gate &g = gs[idx];
-        if (g.type == GateType::INPUT || g.type == GateType::CLOCK) {
-          g.simVal = g.inputVal;
-        } else {
-          bool ins[2] = {};
-          for (auto &w : ws)
-            if (w.dst.gateId == g.id && w.dst.pinIdx < 2)
-              ins[w.dst.pinIdx] = w.value;
-          bool a = ins[0], b = ins[1];
-          switch (g.type) {
-          case GateType::AND:
-            g.simVal = a && b;
-            break;
-          case GateType::OR:
-            g.simVal = a || b;
-            break;
-          case GateType::NOT:
-            g.simVal = !a;
-            break;
-          case GateType::NAND:
-            g.simVal = !(a && b);
-            break;
-          case GateType::NOR:
-            g.simVal = !(a || b);
-            break;
-          case GateType::XOR:
-            g.simVal = a ^ b;
-            break;
-          case GateType::XNOR:
-            g.simVal = !(a ^ b);
-            break;
-          case GateType::BUS_IN_2:
-          case GateType::BUS_IN_4:
-          case GateType::BUS_IN_8:
-            // Packing happens in evaluate(), not here. Return false as
-            // placeholder.
-            return false;
-          case GateType::BUS_OUT_2:
-          case GateType::BUS_OUT_4:
-          case GateType::BUS_OUT_8:
-            return false;
-          default:
-            g.simVal = false;
-            break;
-          }
-        }
-        for (auto &w : ws)
-          if (w.src.gateId == g.id)
-            w.value = g.simVal;
-      }
-    };
-    std::vector<TruthRow> table;
-    for (int mask = 0; mask < combos; mask++) {
-      for (int b = 0; b < ni; b++)
-        gs[inIdx[b]].inputVal = (mask >> b) & 1;
-      eval();
-      TruthRow row;
-      for (int i : inIdx)
-        row.inputs.push_back(gs[i].inputVal);
-      for (int i : outIdx)
-        row.outputs.push_back(gs[i].simVal);
-      table.push_back(row);
-    }
-    return table;
-  }
-
-  // ── Serialisation ────────────────────────────────────────────────────
-  std::string toJson() const {
-    std::vector<std::string> ga, wa, da, ia;
-    for (auto &g : gates)
-      ga.push_back(g.toJson());
-    for (auto &w : wires)
-      wa.push_back(w.toJson());
-    for (auto &[k, v] : subcircuitDefs)
-      da.push_back(v.toJson());
-    for (auto &inst : subcircuitInsts)
-      ia.push_back(inst.toJson());
-    return js::obj(
-        {js::kv("version", 3), js::kv("nextId", nextId),
-         js::kv("nextWireId", nextWireId), js::kv("nextSubDefId", nextSubDefId),
-         js::kv("nextSubInstId", nextSubInstId), "\"gates\":" + js::arr(ga),
-         "\"wires\":" + js::arr(wa), "\"subcircuitDefs\":" + js::arr(da),
-         "\"subcircuitInsts\":" + js::arr(ia)});
-  }
-  bool fromJson(const std::string &src) {
-    clearAll();
-    size_t p = 0;
-    for (auto &[k, v] : js::parseObj(src, p)) {
-      if (k == "nextId")
-        nextId = js::asInt(v);
-      else if (k == "nextWireId")
-        nextWireId = js::asInt(v);
-      else if (k == "nextSubDefId")
-        nextSubDefId = js::asInt(v);
-      else if (k == "nextSubInstId")
-        nextSubInstId = js::asInt(v);
-      else if (k == "gates") {
-        for (auto &gj : js::parseArr(v)) {
-          size_t gp = 0;
-          Gate g;
-          g.fromKV(js::parseObj(gj, gp));
-          gates.push_back(g);
-        }
-      } else if (k == "wires") {
-        for (auto &wj : js::parseArr(v)) {
-          size_t wp = 0;
-          Wire w;
-          w.fromKV(js::parseObj(wj, wp));
-          wires.push_back(w);
-        }
-      } else if (k == "subcircuitDefs") {
-        for (auto &dj : js::parseArr(v)) {
-          SubcircuitDef d;
-          d.fromJson(dj);
-          int did = d.id;
-          subcircuitDefs.emplace(did, std::move(d));
-        }
-      } else if (k == "subcircuitInsts") {
-        for (auto &ij : js::parseArr(v)) {
-          size_t ip = 0;
-          SubcircuitInst inst;
-          inst.fromKV(js::parseObj(ij, ip));
-          auto it = subcircuitDefs.find(inst.defId);
-          if (it != subcircuitDefs.end())
-            inst.recomputePins(it->second);
-          subcircuitInsts.push_back(inst);
-        }
-      }
-    }
-    rebuildConnected();
-    return !gates.empty() || !subcircuitInsts.empty();
-  }
-
-private:
-  // ── Subcircuit instance evaluation ───────────────────────────────────
-  void evaluateSubcircuitInst(SubcircuitInst &inst) {
-    auto it = subcircuitDefs.find(inst.defId);
-    if (it == subcircuitDefs.end())
-      return;
-    const SubcircuitDef &def = it->second;
-
-    // Deep-copy inner circuit for this evaluation pass
-    Circuit inner;
-    inner.gates = def.inner->gates;
-    inner.wires = def.inner->wires;
-    inner.nextId = def.inner->nextId;
-    inner.nextWireId = def.inner->nextWireId;
-
-    // Restore sequential state
-    for (auto &g : inner.gates) {
-      if (isSequential(g.type)) {
-        auto si = inst.internalState.find(g.id);
-        if (si != inst.internalState.end()) {
-          g.stateVal = si->second;
-          g.simVal = si->second;
-        }
-        auto ci = inst.internalPrevClk.find(g.id);
-        if (ci != inst.internalPrevClk.end())
-          g.prevClk = ci->second;
-      }
-    }
-
-    // Stamp input values from parent wires onto inner INPUT gates
-    for (int pi = 0; pi < (int)inst.inputPins.size(); pi++) {
-      bool val = false;
-      int neg = -inst.id;
-      for (auto &w : wires)
-        if (w.dst.gateId == neg && w.dst.pinIdx == pi) {
-          val = w.value;
-          break;
-        }
-      int igid = inst.inputPins[pi].internalGateId;
-      for (auto &g : inner.gates)
-        if (g.id == igid) {
-          g.inputVal = val;
-          g.simVal = val;
-          break;
-        }
-    }
-
-    // Run inner evaluation (non-recursive: inner has no sub-insts)
-    inner.evaluate();
-
-    // Read output gate input values back
-    for (int pi = 0; pi < (int)inst.outputPins.size(); pi++) {
-      int ogid = inst.outputPins[pi].internalGateId;
-      bool val = false;
-      for (auto &w : inner.wires)
-        if (w.dst.gateId == ogid) {
-          val = w.value;
-          break;
-        }
-      inst.outputPins[pi].value = val;
-    }
-
-    // Persist sequential state
-    for (auto &g : inner.gates) {
-      if (isSequential(g.type)) {
-        inst.internalState[g.id] = g.stateVal;
-        inst.internalPrevClk[g.id] = g.prevClk;
-      }
-    }
-  }
-
-  // Push subcircuit output pin values onto outgoing parent wires
-  void pushSubcircuitWires() {
-    for (auto &inst : subcircuitInsts) {
-      int neg = -inst.id;
-      for (auto &w : wires) {
-        if (w.src.gateId != neg)
-          continue;
-        int pi = w.src.pinIdx;
-        if (pi < (int)inst.outputPins.size())
-          w.value = inst.outputPins[pi].value;
-      }
-    }
-  }
-
-  bool getInput(const Gate &g, int pinIdx) const {
-    for (auto &w : wires)
-      if (w.dst.gateId == g.id && w.dst.pinIdx == pinIdx)
-        return w.value;
-    return false;
-  }
-  bool computeGate(const Gate &g) const {
-    if (g.type == GateType::INPUT || g.type == GateType::CLOCK)
-      return g.inputVal;
-    bool a = getInput(g, 0), b = getInput(g, 1);
-    switch (g.type) {
-    case GateType::AND:
-      return a && b;
-    case GateType::OR:
-      return a || b;
-    case GateType::NOT:
-      return !a;
-    case GateType::NAND:
-      return !(a && b);
-    case GateType::NOR:
-      return !(a || b);
-    case GateType::XOR:
-      return a ^ b;
-    case GateType::XNOR:
-      return !(a ^ b);
-    default:
-      return false;
-    }
-  }
-  bool computeSequential(const Gate &g) const {
-    switch (g.type) {
-    case GateType::DFF: {
-      bool d = getInput(g, 0), clk = getInput(g, 1), rst = getInput(g, 2);
-      if (!(clk && !g.prevClk))
-        return g.stateVal;
-      return rst ? false : d;
-    }
-    case GateType::DLATCH: {
-      bool d = getInput(g, 0), en = getInput(g, 1);
-      return en ? d : g.stateVal;
-    }
-    case GateType::TFLIPFLOP: {
-      bool t = getInput(g, 0), clk = getInput(g, 1);
-      if (!(clk && !g.prevClk))
-        return g.stateVal;
-      return t ? !g.stateVal : g.stateVal;
-    }
-    case GateType::JKFLIPFLOP: {
-      bool j = getInput(g, 0), k = getInput(g, 1), clk = getInput(g, 2);
-      if (!(clk && !g.prevClk))
-        return g.stateVal;
-      if (j && !k)
-        return true;
-      if (!j && k)
-        return false;
-      if (j && k)
-        return !g.stateVal;
-      return g.stateVal;
-    }
-    default:
-      return g.stateVal;
-    }
-  }
-  std::vector<int> topoSort() const {
-    int sz = (int)gates.size();
-    std::vector<int> ind(sz, 0);
-    for (auto &w : wires)
-      for (int i = 0; i < sz; i++)
-        if (gates[i].id == w.dst.gateId) {
-          ind[i]++;
-          break;
-        }
-    std::vector<int> q, r;
-    for (int i = 0; i < sz; i++)
-      if (ind[i] == 0)
-        q.push_back(i);
-    while (!q.empty()) {
-      int c = q.back();
-      q.pop_back();
-      r.push_back(c);
-      for (auto &w : wires) {
-        if (w.src.gateId != gates[c].id)
-          continue;
-        for (int i = 0; i < sz; i++)
-          if (gates[i].id == w.dst.gateId && --ind[i] == 0) {
-            q.push_back(i);
-            break;
-          }
-      }
-    }
-    if ((int)r.size() < sz) {
-      std::vector<bool> vis(sz, false);
-      for (int i : r)
-        vis[i] = true;
-      for (int i = 0; i < sz; i++)
-        if (!vis[i])
-          r.push_back(i);
-    }
-    return r;
-  }
-  void markPinConn(int gateId, int pinIdx, bool isOut, bool val) {
-    if (gateId < 0) { // subcircuit instance
-      int instId = -gateId;
-      SubcircuitInst *inst = findInst(instId);
-      if (!inst)
-        return;
-      if (isOut && pinIdx < (int)inst->outputPins.size())
-        inst->outputPins[pinIdx].connected = val;
-      if (!isOut && pinIdx < (int)inst->inputPins.size())
-        inst->inputPins[pinIdx].connected = val;
-      return;
-    }
-    Gate *g = find(gateId);
-    if (!g)
-      return;
-    if (isOut && pinIdx < (int)g->outPins.size())
-      g->outPins[pinIdx].connected = val;
-    if (!isOut && pinIdx < (int)g->inPins.size())
-      g->inPins[pinIdx].connected = val;
-  }
-  void recomputePin(int gateId, int pinIdx, bool isOut, int skipId) {
-    bool still = false;
-    for (auto &w : wires) {
-      if (w.id == skipId)
-        continue;
-      if (isOut && w.src.gateId == gateId && w.src.pinIdx == pinIdx) {
-        still = true;
-        break;
-      }
-      if (!isOut && w.dst.gateId == gateId && w.dst.pinIdx == pinIdx) {
-        still = true;
-        break;
-      }
-    }
-    markPinConn(gateId, pinIdx, isOut, still);
-  }
-};
-
-// =============================================================================
-// §1c  SubcircuitDef / SubcircuitInst method bodies (need Circuit complete)
-// =============================================================================
-
-inline SubcircuitDef::SubcircuitDef()
-    : id(0), name("Module"), inner(new Circuit()) {}
-
-inline SubcircuitDef::~SubcircuitDef() { delete inner; }
-
-inline SubcircuitDef::SubcircuitDef(const SubcircuitDef &o)
-    : id(o.id), name(o.name), inputPins(o.inputPins), outputPins(o.outputPins) {
-  inner = new Circuit(*o.inner);
-}
-
-inline SubcircuitDef &SubcircuitDef::operator=(const SubcircuitDef &o) {
-  if (this == &o)
-    return *this;
-  id = o.id;
-  name = o.name;
-  inputPins = o.inputPins;
-  outputPins = o.outputPins;
-  delete inner;
-  inner = new Circuit(*o.inner);
-  return *this;
-}
-
-inline void SubcircuitDef::rebuildPins() {
-  inputPins.clear();
-  outputPins.clear();
-  for (auto &g : inner->gates) {
-    if (g.type == GateType::INPUT || g.type == GateType::CLOCK) {
-      SubcircuitPinInfo p;
-      p.label = g.label.empty() ? "I" + std::to_string(g.id) : g.label;
-      p.internalGateId = g.id;
-      p.isOutput = false;
-      inputPins.push_back(p);
-    } else if (g.type == GateType::OUTPUT) {
-      SubcircuitPinInfo p;
-      p.label = g.label.empty() ? "O" + std::to_string(g.id) : g.label;
-      p.internalGateId = g.id;
-      p.isOutput = true;
-      outputPins.push_back(p);
-    }
-  }
-  auto byY = [&](const SubcircuitPinInfo &a, const SubcircuitPinInfo &b) {
-    const Gate *ga = inner->find(a.internalGateId);
-    const Gate *gb = inner->find(b.internalGateId);
-    return (ga ? ga->y : 0.f) < (gb ? gb->y : 0.f);
-  };
-  std::sort(inputPins.begin(), inputPins.end(), byY);
-  std::sort(outputPins.begin(), outputPins.end(), byY);
-}
-
-inline std::string SubcircuitDef::toJson() const {
-  return js::obj(
-      {js::kv("id", id), js::kv("name", name), "\"inner\":" + inner->toJson()});
-}
-inline void SubcircuitDef::fromJson(const std::string &src) {
-  size_t p = 0;
-  for (auto &[k, v] : js::parseObj(src, p)) {
-    if (k == "id")
-      id = js::asInt(v);
-    else if (k == "name")
-      name = js::asStr(v);
-    else if (k == "inner")
-      inner->fromJson(v);
-  }
-  rebuildPins();
-}
-
-inline void SubcircuitInst::recomputePins(const SubcircuitDef &def) {
-  inputPins = def.inputPins;
-  outputPins = def.outputPins;
-  int ni = (int)inputPins.size(), no = (int)outputPins.size();
-  float h = subcircuitH(ni, no);
-  float L = x - kSCWidth * 0.5f, R = x + kSCWidth * 0.5f, yT = y - h * 0.5f;
-  auto place = [&](SubcircuitPinInfo &p, int i, int total, bool isIn) {
-    float t = (total <= 1) ? 0.5f : float(i) / float(total - 1);
-    p.cx = isIn ? (L - kPinLen) : (R + kPinLen);
-    p.cy = yT + t * h;
-  };
-  for (int i = 0; i < ni; i++)
-    place(inputPins[i], i, ni, true);
-  for (int i = 0; i < no; i++)
-    place(outputPins[i], i, no, false);
-}
-
-// =============================================================================
-// §2  VERTEX HELPERS  (unchanged from v12)
-// =============================================================================
-
-static void pushQuad(std::vector<float> &v, float x0, float y0, float x1,
-                     float y1) {
-  v.insert(v.end(), {x0, y0, x1, y0, x1, y1, x1, y1, x0, y1, x0, y0});
-}
-static void pushLine(std::vector<float> &v, float x0, float y0, float x1,
-                     float y1, float hw) {
-  float dx = x1 - x0, dy = y1 - y0, len = sqrtf(dx * dx + dy * dy);
-  if (len < 0.001f) {
-    pushQuad(v, x0 - hw, y0 - hw, x0 + hw, y0 + hw);
-    return;
-  }
-  float nx = -dy / len * hw, ny = dx / len * hw;
-  v.insert(v.end(), {x0 + nx, y0 + ny, x0 - nx, y0 - ny, x1 - nx, y1 - ny,
-                     x1 - nx, y1 - ny, x1 + nx, y1 + ny, x0 + nx, y0 + ny});
-}
-static void pushCircle(std::vector<float> &v, float cx, float cy, float r,
-                       int s = 16) {
-  for (int i = 0; i < s; i++) {
-    float a0 = float(i) / s * 6.2831853f, a1 = float(i + 1) / s * 6.2831853f;
-    v.insert(v.end(), {cx, cy, cx + cosf(a0) * r, cy + sinf(a0) * r,
-                       cx + cosf(a1) * r, cy + sinf(a1) * r});
-  }
-}
-static void pushRRFill(std::vector<float> &v, float L, float B, float R2,
-                       float T, float cr) {
-  cr = min(cr, min((R2 - L) * .45f, (T - B) * .45f));
-  pushQuad(v, L + cr, B, R2 - cr, T);
-  pushQuad(v, L, B + cr, L + cr, T - cr);
-  pushQuad(v, R2 - cr, B + cr, R2, T - cr);
-  float ccx[4] = {R2 - cr, L + cr, L + cr, R2 - cr},
-        ccy[4] = {T - cr, T - cr, B + cr, B + cr},
-        sa[4] = {0, 1.5708f, 3.1416f, 4.7124f};
-  for (int c = 0; c < 4; c++)
-    for (int i = 0; i < 8; i++) {
-      float a0 = sa[c] + float(i) / 8 * 1.5708f,
-            a1 = sa[c] + float(i + 1) / 8 * 1.5708f;
-      v.insert(v.end(),
-               {ccx[c], ccy[c], ccx[c] + cosf(a0) * cr, ccy[c] + sinf(a0) * cr,
-                ccx[c] + cosf(a1) * cr, ccy[c] + sinf(a1) * cr});
-    }
-}
-static void pushRR(std::vector<float> &v, float L, float B, float R2, float T,
-                   float cr, float hw, int cs = 6) {
-  cr = min(cr, min((R2 - L) * .4f, (T - B) * .4f));
-  pushLine(v, L + cr, B, R2 - cr, B, hw);
-  pushLine(v, R2, B + cr, R2, T - cr, hw);
-  pushLine(v, R2 - cr, T, L + cr, T, hw);
-  pushLine(v, L, T - cr, L, B + cr, hw);
-  float ox[4] = {R2 - cr, L + cr, L + cr, R2 - cr},
-        oy[4] = {T - cr, T - cr, B + cr, B + cr},
-        sa[4] = {0, 1.5708f, 3.1416f, 4.7124f};
-  for (int c = 0; c < 4; c++)
-    for (int i = 0; i < cs; i++) {
-      float a0 = sa[c] + float(i) / cs * 1.5708f,
-            a1 = sa[c] + float(i + 1) / cs * 1.5708f;
-      pushLine(v, ox[c] + cosf(a0) * cr, oy[c] + sinf(a0) * cr,
-               ox[c] + cosf(a1) * cr, oy[c] + sinf(a1) * cr, hw);
-    }
-}
-
-// §2a  ORTHOGONAL WIRE HELPERS (unchanged)
-static float orthoMidSX(float sx0, float sx1, float splitXS) {
-  return splitXS < 1e29f ? splitXS : (sx0 + sx1) * 0.5f;
-}
-static void pushOrtho(std::vector<float> &v, float sx0, float sy0, float sx1,
-                      float sy1, float splitXS, float hw) {
-  float mx = orthoMidSX(sx0, sx1, splitXS);
-  pushLine(v, sx0, sy0, mx, sy0, hw);
-  pushLine(v, mx, sy0, mx, sy1, hw);
-  pushLine(v, mx, sy1, sx1, sy1, hw);
-}
-static void pushOrthoBends(std::vector<float> &v, float sx0, float sy0,
-                           float sx1, float sy1, float splitXS, float r) {
-  float mx = orthoMidSX(sx0, sx1, splitXS);
-  pushCircle(v, mx, sy0, r);
-  pushCircle(v, mx, sy1, r);
-}
-static bool orthoHit(float sx0, float sy0, float sx1, float sy1, float splitXS,
-                     float px, float py, float thr = 6.f) {
-  float mx = orthoMidSX(sx0, sx1, splitXS), t2 = thr * thr;
-  auto seg2 = [&](float ax, float ay, float bx, float by) -> float {
-    float dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy;
-    float t = (len2 > 0.f) ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0.f;
-    t = t < 0.f ? 0.f : t > 1.f ? 1.f : t;
-    float cx = ax + dx * t - px, cy = ay + dy * t - py;
-    return cx * cx + cy * cy;
-  };
-  return seg2(sx0, sy0, mx, sy0) <= t2 || seg2(mx, sy0, mx, sy1) <= t2 ||
-         seg2(mx, sy1, sx1, sy1) <= t2;
-}
-
-static std::vector<PinRef> collectPins(const Circuit &c) {
-  std::vector<PinRef> out;
-  for (auto &g : c.gates) {
-    for (int i = 0; i < (int)g.outPins.size(); i++)
-      out.push_back({g.id, i, true, g.outPins[i].cx, g.outPins[i].cy, false});
-    for (int i = 0; i < (int)g.inPins.size(); i++)
-      out.push_back({g.id, i, false, g.inPins[i].cx, g.inPins[i].cy, false});
-  }
-  // Add subcircuit instance pins (encode id as negative)
-  for (auto &inst : c.subcircuitInsts) {
-    int neg = -inst.id;
-    for (int i = 0; i < (int)inst.outputPins.size(); i++)
-      out.push_back(
-          {neg, i, true, inst.outputPins[i].cx, inst.outputPins[i].cy, true});
-    for (int i = 0; i < (int)inst.inputPins.size(); i++)
-      out.push_back(
-          {neg, i, false, inst.inputPins[i].cx, inst.inputPins[i].cy, true});
-  }
-  return out;
-}
-static bool nearestPin(const std::vector<PinRef> &pins, float wx, float wy,
-                       float radius, bool mustOut, bool mustIn, PinRef &out) {
-  float best = radius * radius;
-  bool found = false;
-  for (auto &p : pins) {
-    if (mustOut && !p.isOutput)
-      continue;
-    if (mustIn && p.isOutput)
-      continue;
-    float dx = p.cx - wx, dy = p.cy - wy, d2 = dx * dx + dy * dy;
-    if (d2 < best) {
-      best = d2;
-      out = p;
-      found = true;
-    }
-  }
-  return found;
-}
-
-// §2b  IEEE/ANSI SHAPE BUILDERS (unchanged from v12 — omitted for brevity,
-//      paste in full from original file here)
-static void pushCubic(std::vector<float> &v, float x0, float y0, float x1,
-                      float y1, float x2, float y2, float x3, float y3,
-                      float hw, int segs = 22) {
-  float px = x0, py = y0;
-  for (int i = 1; i <= segs; ++i) {
-    float t = float(i) / float(segs), u = 1 - t, u2 = u * u, u3 = u2 * u,
-          t2 = t * t, t3 = t2 * t;
-    float qx = u3 * x0 + 3 * u2 * t * x1 + 3 * u * t2 * x2 + t3 * x3,
-          qy = u3 * y0 + 3 * u2 * t * y1 + 3 * u * t2 * y2 + t3 * y3;
-    pushLine(v, px, py, qx, qy, hw);
-    px = qx;
-    py = qy;
-  }
-}
-static void pushArc(std::vector<float> &v, float cx, float cy, float r,
-                    float a0, float a1, float hw, int segs = 24) {
-  float px = cx + cosf(a0) * r, py = cy + sinf(a0) * r;
-  for (int i = 1; i <= segs; ++i) {
-    float a = a0 + (a1 - a0) * float(i) / float(segs);
-    float qx = cx + cosf(a) * r, qy = cy + sinf(a) * r;
-    pushLine(v, px, py, qx, qy, hw);
-    px = qx;
-    py = qy;
-  }
-}
-static void pushRing(std::vector<float> &v, float cx, float cy, float r,
-                     float hw) {
-  pushArc(v, cx, cy, r, 0.f, 6.2831853f, hw, 20);
-}
-static void pushTriFill(std::vector<float> &v, float L, float yT, float R,
-                        float yB) {
-  float MY = (yT + yB) * 0.5f;
-  v.insert(v.end(), {L, yT, R, MY, L, yB});
-}
-static void pushANDFill(std::vector<float> &v, float L, float yT, float R,
-                        float yB) {
-  float H = yB - yT, MY = (yT + yB) * 0.5f, flatX = L + (R - L) * 0.44f,
-        arcR = H * 0.5f;
-  pushQuad(v, L, yT, flatX, yB);
-  for (int i = 0; i < 24; ++i) {
-    float a0 = -1.5707963f + float(i) / 24 * 3.1415926f,
-          a1 = -1.5707963f + float(i + 1) / 24 * 3.1415926f;
-    v.insert(v.end(), {flatX, MY, flatX + cosf(a0) * arcR, MY + sinf(a0) * arcR,
-                       flatX + cosf(a1) * arcR, MY + sinf(a1) * arcR});
-  }
-}
-static void pushANDOutline(std::vector<float> &v, float L, float yT, float R,
-                           float yB, float hw) {
-  float H = yB - yT, MY = (yT + yB) * 0.5f, flatX = L + (R - L) * 0.44f,
-        arcR = H * 0.5f;
-  pushLine(v, L, yT, L, yB, hw);
-  pushLine(v, L, yT, flatX, yT, hw);
-  pushLine(v, L, yB, flatX, yB, hw);
-  pushArc(v, flatX, MY, arcR, -1.5707963f, 1.5707963f, hw, 28);
-}
-static void pushORFill(std::vector<float> &v, float L, float yT, float R,
-                       float yB) {
-  float H = yB - yT, W = R - L, MY = (yT + yB) * 0.5f, bulgX = W * 0.30f;
-  auto backX = [&](float y) -> float {
-    float t = (y - yT) / H, u = 1.f - t;
-    return u * u * u * L + 3 * u * u * t * (L + bulgX) +
-           3 * u * t * t * (L + bulgX) + t * t * t * L;
-  };
-  auto frontX = [&](float y) -> float {
-    bool top = y <= MY;
-    float lo = 0.f, hi = 1.f;
-    for (int k = 0; k < 18; ++k) {
-      float m = (lo + hi) * 0.5f, u = 1.f - m;
-      float ym = top ? (u * u * u * yT + 3 * u * u * m * yT +
-                        3 * u * m * m * (MY - H * 0.10f) + m * m * m * MY)
-                     : (u * u * u * yB + 3 * u * u * m * yB +
-                        3 * u * m * m * (MY + H * 0.10f) + m * m * m * MY);
-      if (top ? (ym < y) : (ym > y))
-        lo = m;
-      else
-        hi = m;
-    }
-    float t = (lo + hi) * 0.5f, u = 1.f - t;
-    return u * u * u * L + 3 * u * u * t * (L + W * 0.55f) +
-           3 * u * t * t * (R - W * 0.12f) + t * t * t * R;
-  };
-  for (int i = 0; i < 64; ++i) {
-    float y0 = yT + float(i) / 64 * H, y1 = yT + float(i + 1) / 64 * H;
-    float lx0 = backX(y0), rx0 = frontX(y0), lx1 = backX(y1), rx1 = frontX(y1);
-    v.insert(v.end(), {lx0, y0, rx0, y0, rx1, y1, lx0, y0, rx1, y1, lx1, y1});
-  }
-}
-static void pushOROutline(std::vector<float> &v, float L, float yT, float R,
-                          float yB, float hw) {
-  float W = R - L, MY = (yT + yB) * 0.5f, bulgX = W * 0.30f;
-  pushCubic(v, L, yT, L + bulgX, yT, L + bulgX, yB, L, yB, hw);
-  pushCubic(v, L, yT, L + W * 0.55f, yT, R - W * 0.12f, MY - (yB - yT) * 0.10f,
-            R, MY, hw);
-  pushCubic(v, L, yB, L + W * 0.55f, yB, R - W * 0.12f, MY + (yB - yT) * 0.10f,
-            R, MY, hw);
-}
-static void pushXORBackArc(std::vector<float> &v, float L, float yT, float R,
-                           float yB, float hw) {
-  float W = R - L, bulgX = W * 0.30f, offset = W * 0.11f;
-  pushCubic(v, L - offset, yT, L - offset + bulgX, yT, L - offset + bulgX, yB,
-            L - offset, yB, hw);
-}
-static void pushTRIOutline(std::vector<float> &v, float L, float yT, float R,
-                           float yB, float hw, bool negate) {
-  float MY = (yT + yB) * 0.5f, H = yB - yT, tipX = negate ? (R - H * 0.20f) : R;
-  pushLine(v, L, yT, L, yB, hw);
-  pushLine(v, L, yT, tipX, MY, hw);
-  pushLine(v, tipX, MY, L, yB, hw);
-}
-static void pushSquareWave(std::vector<float> &v, float cx, float cy, float gW,
-                           float gH, float hw) {
-  float x0 = cx - gW * 0.5f, y_lo = cy + gH * 0.35f, y_hi = cy - gH * 0.35f,
-        pw = gW / 3.f;
-  float xs[10] = {x0,
-                  x0 + pw * .5f,
-                  x0 + pw * .5f,
-                  x0 + pw,
-                  x0 + pw * 1.5f,
-                  x0 + pw * 1.5f,
-                  x0 + pw * 2.f,
-                  x0 + pw * 2.5f,
-                  x0 + pw * 2.5f,
-                  x0 + pw * 3.f};
-  float ys[10] = {y_lo, y_lo, y_hi, y_hi, y_lo, y_lo, y_hi, y_hi, y_lo, y_lo};
-  for (int i = 0; i < 9; ++i)
-    pushLine(v, xs[i], ys[i], xs[i + 1], ys[i + 1], hw);
-}
-
-// =============================================================================
-// §3  SHADERS  (unchanged)
-// =============================================================================
-static const char *kGVert = R"GLSL(
+static const char *kEditVert = R"GLSL(
 #version 330 core
-layout(location=0)in vec2 aPos;
-uniform vec2 uViewSize;
-void main(){vec2 ndc=aPos/uViewSize*2.0-1.0;ndc.y=-ndc.y;gl_Position=vec4(ndc,0.0,1.0);}
+layout(location=0) in vec2 aPos;
+layout(location=1) in vec2 aUV;
+uniform mat4 uMVP;
+out vec2 vUV;
+void main(){ vUV=aUV; gl_Position=uMVP*vec4(aPos,0.0,1.0); }
 )GLSL";
-static const char *kGFrag = R"GLSL(
+
+static const char *kEditFrag = R"GLSL(
 #version 330 core
+in  vec2 vUV;
 out vec4 fragColor;
-uniform vec4 uColor;
-void main(){fragColor=uColor;}
-)GLSL";
-static const char *kTexVert = R"GLSL(
-#version 330 core
-layout(location=0)in vec2 aPos;layout(location=1)in vec2 aUV;
-uniform vec2 uViewSize;out vec2 vUV;
-void main(){vUV=aUV;vec2 ndc=aPos/uViewSize*2.0-1.0;ndc.y=-ndc.y;gl_Position=vec4(ndc,0.0,1.0);}
-)GLSL";
-static const char *kTexFrag = R"GLSL(
-#version 330 core
-in vec2 vUV;uniform sampler2D uTex;out vec4 fragColor;
-void main(){fragColor=texture(uTex,vUV);}
-)GLSL";
 
-// =============================================================================
-// §4  GATE COLORS  (unchanged)
-// =============================================================================
-struct GateColors {
-  float body[4], border[4], label[4];
-};
-static GateColors gateColors(GateType t, bool sel) {
-  static const float bodies[kGTC][4] = {
-      {0.08f, 0.15f, 0.30f, 1},
-      {0.08f, 0.25f, 0.15f, 1},
-      {0.22f, 0.10f, 0.28f, 1},
-      {0.26f, 0.08f, 0.10f, 1},
-      {0.20f, 0.08f, 0.22f, 1},
-      {0.08f, 0.20f, 0.30f, 1},
-      {0.12f, 0.12f, 0.28f, 1},
-      {0.08f, 0.22f, 0.13f, 1},
-      {0.24f, 0.14f, 0.05f, 1},
-      {0.05f, 0.15f, 0.28f, 1},
-      {0.06f, 0.18f, 0.26f, 1},
-      {0.06f, 0.22f, 0.20f, 1},
-      {0.20f, 0.16f, 0.06f, 1},
-      {0.22f, 0.10f, 0.18f, 1},
-      // BUS_IN_2/4/8  — blue tint
-      {0.05f, 0.14f, 0.30f, 1},
-      {0.05f, 0.14f, 0.30f, 1},
-      {0.05f, 0.14f, 0.30f, 1},
-      // BUS_OUT_2/4/8 — amber tint
-      {0.28f, 0.14f, 0.04f, 1},
-      {0.28f, 0.14f, 0.04f, 1},
-      {0.28f, 0.14f, 0.04f, 1},
-  };
-  static const float borders[kGTC][4] = {
-      {0.27f, 0.47f, 0.86f, 1},
-      {0.27f, 0.75f, 0.43f, 1},
-      {0.66f, 0.27f, 0.86f, 1},
-      {0.86f, 0.27f, 0.27f, 1},
-      {0.78f, 0.27f, 0.67f, 1},
-      {0.27f, 0.67f, 0.86f, 1},
-      {0.43f, 0.43f, 0.86f, 1},
-      {0.27f, 0.82f, 0.43f, 1},
-      {0.86f, 0.51f, 0.16f, 1},
-      {0.18f, 0.82f, 0.90f, 1},
-      {0.20f, 0.65f, 0.95f, 1},
-      {0.20f, 0.85f, 0.75f, 1},
-      {0.95f, 0.72f, 0.20f, 1},
-      {0.95f, 0.38f, 0.60f, 1},
-      // BUS_IN_2/4/8
-      {0.31f, 0.63f, 0.95f, 1},
-      {0.31f, 0.63f, 0.95f, 1},
-      {0.31f, 0.63f, 0.95f, 1},
-      // BUS_OUT_2/4/8
-      {0.95f, 0.63f, 0.31f, 1},
-      {0.95f, 0.63f, 0.31f, 1},
-      {0.95f, 0.63f, 0.31f, 1},
-  };
-  int i = (int)t;
-  GateColors c;
-  memcpy(c.body, bodies[i], 16);
-  memcpy(c.label, borders[i], 16);
-  if (sel) {
-    c.border[0] = 0.80f;
-    c.border[1] = 0.65f;
-    c.border[2] = 0.97f;
-    c.border[3] = 1.f;
-  } else
-    memcpy(c.border, borders[i], 16);
-  return c;
+// Source + utility textures
+uniform sampler2D uOriginal;
+uniform sampler2D uNoise;
+
+// Tone curve LUTs (256×1 R8)
+uniform sampler2D uLutRGB;
+uniform sampler2D uLutR;
+uniform sampler2D uLutG;
+uniform sampler2D uLutB;
+
+// HSL LUTs (360×1 R8)
+// Encoding:
+//   uHSLHue : 0=–30°  0.5=0°  1=+30°   → actual shift = (sample–0.5)*60°
+//   uHSLSat : 0=0×    0.5=1×  1=2×     → actual scale = sample * 2.0
+//   uHSLLum : 0=–1    0.5=0   1=+1     → actual shift = (sample–0.5)*2.0
+uniform sampler2D uHSLHue;
+uniform sampler2D uHSLSat;
+uniform sampler2D uHSLLum;
+
+// Scalar uniforms
+uniform float uExposure, uContrast, uHighlights, uShadows, uWhites, uBlacks;
+uniform float uTemperature, uTint, uSaturation, uVibrance;
+uniform float uSharpness, uNoiseReduce;
+uniform vec2  uTexelSize;
+uniform float uVignette, uGrain;
+
+// ── Utility ───────────────────────────────────────────────────────────────────
+vec3 toLinear(vec3 c){ return pow(clamp(c,0.0,1.0),vec3(2.2)); }
+vec3 toSRGB  (vec3 c){ return pow(clamp(c,0.0,1.0),vec3(1.0/2.2)); }
+float luma(vec3 c){ return dot(c,vec3(0.2126,0.7152,0.0722)); }
+
+vec3 rgb2hsl(vec3 c){
+    float mx=max(c.r,max(c.g,c.b)), mn=min(c.r,min(c.g,c.b)), d=mx-mn;
+    float l=(mx+mn)*0.5;
+    if(d<0.0001) return vec3(0,0,l);
+    float s=d/(1.0-abs(2.0*l-1.0)), h;
+    if(mx==c.r)      h=mod((c.g-c.b)/d,6.0)/6.0;
+    else if(mx==c.g) h=((c.b-c.r)/d+2.0)/6.0;
+    else             h=((c.r-c.g)/d+4.0)/6.0;
+    return vec3(h,s,l);
+}
+float hue2rgb(float p,float q,float t){
+    if(t<0.0)t+=1.0; if(t>1.0)t-=1.0;
+    if(t<1.0/6.0) return p+(q-p)*6.0*t;
+    if(t<0.5)     return q;
+    if(t<2.0/3.0) return p+(q-p)*(2.0/3.0-t)*6.0;
+    return p;
+}
+vec3 hsl2rgb(vec3 h){
+    if(h.y<0.0001) return vec3(h.z);
+    float q=h.z<0.5?h.z*(1.0+h.y):h.z+h.y-h.z*h.y, p=2.0*h.z-q;
+    return vec3(hue2rgb(p,q,h.x+1.0/3.0),hue2rgb(p,q,h.x),hue2rgb(p,q,h.x-1.0/3.0));
 }
 
-// =============================================================================
-// §4b  GATE CONTEXT MENU  (unchanged)
-// =============================================================================
-enum class GateMenuAction {
-  None = -1,
-  Delete = 0,
-  Copy = 1,
-  GroupSubcircuit = 2
-};
-struct GateMenuItem {
-  GateMenuAction action;
-  const char *label;
-  int iconType;
-};
-static constexpr GateMenuItem kGateMenuItems[] = {
-    {GateMenuAction::Copy, "Copy", 1},
-    {GateMenuAction::Delete, "Delete", 0},
-};
-static constexpr int kGateMenuItemCount = 2;
-static constexpr float kCMItemH = 28.f, kCMWidth = 130.f, kCMPadV = 6.f,
-                       kCMCorner = 6.f;
-static constexpr float kCMRowGap = 4.f, kCMRowStride = kCMItemH + kCMRowGap;
-static constexpr float kCMIconSize = 11.f, kCMIconOff = 14.f, kCMTextOff = 28.f;
-static constexpr float kCMHeight = kCMPadV * 2.f +
-                                   kGateMenuItemCount * kCMItemH +
-                                   (kGateMenuItemCount - 1) * kCMRowGap;
-
-static void pushIconTrash(std::vector<float> &v, float cx, float cy, float sz,
-                          float lw) {
-  float hs = sz * 0.5f, bW = sz * 0.68f, bH = sz * 0.62f, bL = cx - bW * 0.5f,
-        bR = cx + bW * 0.5f, bT = cy - hs * 0.10f, bB = cy + hs * 0.78f;
-  pushLine(v, bL, bT, bL, bB, lw);
-  pushLine(v, bR, bT, bR, bB, lw);
-  pushLine(v, bL, bB, bR, bB, lw);
-  float lidT = bT - sz * 0.22f;
-  pushLine(v, bL - sz * 0.10f, bT, bR + sz * 0.10f, bT, lw);
-  pushLine(v, cx - sz * 0.18f, lidT, cx + sz * 0.18f, lidT, lw);
-  pushLine(v, cx - sz * 0.18f, lidT, bL - sz * 0.10f, bT, lw);
-  pushLine(v, cx + sz * 0.18f, lidT, bR + sz * 0.10f, bT, lw);
-  float lineY0 = bT + bH * 0.18f, lineY1 = bB - sz * 0.08f;
-  pushLine(v, cx, lineY0, cx, lineY1, lw * 0.8f);
-  pushLine(v, cx - bW * 0.22f, lineY0, cx - bW * 0.22f, lineY1, lw * 0.8f);
-  pushLine(v, cx + bW * 0.22f, lineY0, cx + bW * 0.22f, lineY1, lw * 0.8f);
-}
-static void pushIconCopy(std::vector<float> &v, float cx, float cy, float sz,
-                         float lw) {
-  float hs = sz * 0.5f, pW = sz * 0.58f, pH = sz * 0.68f, off = sz * 0.14f;
-  float bL = cx - pW * 0.5f + off, bB = cy - pH * 0.5f + off;
-  pushRR(v, bL, bB, bL + pW, bB + pH, 2.f, lw * 0.7f, 3);
-  float fL = cx - pW * 0.5f, fB = cy - pH * 0.5f;
-  pushRRFill(v, fL, fB, fL + pW, fB + pH, 2.f);
-  pushRR(v, fL, fB, fL + pW, fB + pH, 2.f, lw, 3);
-  float lx0 = fL + pW * 0.18f, lx1 = fL + pW * 0.82f, ly0 = fB + pH * 0.30f,
-        ly1 = fB + pH * 0.55f, ly2 = fB + pH * 0.75f;
-  pushLine(v, lx0, ly0, lx1, ly0, lw * 0.7f);
-  pushLine(v, lx0, ly1, lx1, ly1, lw * 0.7f);
-  pushLine(v, lx0, ly2, lx1 * 0.75f + lx0 * 0.25f, ly2, lw * 0.7f);
+float applyLUT256(sampler2D lut, float v){
+    return texture(lut, vec2(clamp(v,0.0,1.0), 0.5)).r;
 }
 
-// =============================================================================
-// §5  CIRCUIT SURFACE
-// =============================================================================
-static constexpr UINT_PTR kClockTimerBase = 0x4C4B0000;
+// Sample a 360-entry HSL LUT using the current hue (0..1)
+float sampleHSLLut(sampler2D lut, float hueNorm){
+    // 360 texels wide — offset by 0.5/360 to hit texel centres
+    float u = clamp(hueNorm, 0.0, 1.0);
+    return texture(lut, vec2(u, 0.5)).r;
+}
 
-class CircuitSurface : public RenderSurface {
+float shadowMask   (float l){ return pow(1.0-l,2.0); }
+float highlightMask(float l){ return pow(l,    2.0); }
+
+void main(){
+    // ── 1. Sample + optional sharpen / denoise ────────────────────────────────
+    vec3 c;
+    if(uSharpness>0.001||uNoiseReduce>0.001){
+        vec3 blur=vec3(0);
+        for(int dy=-1;dy<=1;dy++) for(int dx=-1;dx<=1;dx++)
+            blur+=texture(uOriginal,vUV+vec2(dx,dy)*uTexelSize).rgb;
+        blur/=9.0;
+        vec3 orig=texture(uOriginal,vUV).rgb;
+        vec3 blended=mix(orig,blur,clamp(uNoiseReduce,0.0,1.0));
+        c=clamp(blended+uSharpness*0.6*(orig-blur),0.0,1.0);
+    } else {
+        c=texture(uOriginal,vUV).rgb;
+    }
+
+    // ── 2–6. Tone adjustments (linear light) ──────────────────────────────────
+    c=toLinear(c);
+    c*=pow(2.0,uExposure);
+    { float pv=0.18; c=(c-pv)*(1.0+uContrast)+pv; c=clamp(c,0.0,1.0); }
+    { float l=luma(c);
+      c*=1.0+uHighlights*highlightMask(l)*0.7;
+      c*=1.0+uShadows*shadowMask(l)*0.7;
+      c=clamp(c,0.0,1.0); }
+    c=clamp(c*(1.0+uWhites*0.3)-uBlacks*0.15,0.0,1.0);
+
+    // ── 7. Tone curves: composite RGB then per-channel ────────────────────────
+    c.r=applyLUT256(uLutRGB,c.r);
+    c.g=applyLUT256(uLutRGB,c.g);
+    c.b=applyLUT256(uLutRGB,c.b);
+    c.r=applyLUT256(uLutR,  c.r);
+    c.g=applyLUT256(uLutG,  c.g);
+    c.b=applyLUT256(uLutB,  c.b);
+    c=clamp(c,0.0,1.0);
+
+    // ── 8. Temperature / Tint ─────────────────────────────────────────────────
+    { float t=uTemperature*0.15, g=uTint*0.10;
+      c.r=clamp(c.r+t,0.0,1.0);
+      c.b=clamp(c.b-t,0.0,1.0);
+      c.r=clamp(c.r+g,0.0,1.0);
+      c.g=clamp(c.g-g,0.0,1.0);
+      c.b=clamp(c.b+g,0.0,1.0); }
+
+    // ── 9. Global Saturation / Vibrance (sRGB) ────────────────────────────────
+    c=toSRGB(c);
+    { vec3 hsl=rgb2hsl(c);
+      hsl.y=clamp(hsl.y*(1.0+uSaturation),0.0,1.0);
+      c=hsl2rgb(hsl); }
+    { vec3 hsl=rgb2hsl(c);
+      float sat=hsl.y, mask=(1.0-sat)*(1.0-sat);
+      hsl.y=clamp(hsl.y+uVibrance*mask*0.8,0.0,1.0);
+      c=hsl2rgb(hsl); }
+    c=clamp(c,0.0,1.0);
+
+    // ── 10. HSL per-band adjustments ──────────────────────────────────────────
+    {
+        vec3 hsl = rgb2hsl(c);
+        float hueNorm = hsl.x;  // 0..1
+
+        // Hue shift: encoded 0..1 → shift –30°..+30°  (÷360 for normalised hue)
+        float hShift = (sampleHSLLut(uHSLHue, hueNorm) - 0.5) * (60.0/360.0);
+        hsl.x = fract(hsl.x + hShift);
+
+        // Saturation scale: encoded 0..1 → multiplier 0×..2×
+        float sScale = sampleHSLLut(uHSLSat, hueNorm) * 2.0;
+        hsl.y = clamp(hsl.y * sScale, 0.0, 1.0);
+
+        // Luminance shift: encoded 0..1 → shift –1..+1
+        float lShift = (sampleHSLLut(uHSLLum, hueNorm) - 0.5) * 2.0;
+        hsl.z = clamp(hsl.z + lShift * 0.5, 0.0, 1.0);  // ×0.5 = ±50% max
+
+        c = hsl2rgb(hsl);
+        c = clamp(c, 0.0, 1.0);
+    }
+
+    // ── 11. Vignette ──────────────────────────────────────────────────────────
+    { vec2 uv2=vUV*2.0-1.0;
+      float dist=dot(uv2,uv2);
+      float mask=smoothstep(0.5,1.6,dist);
+      c=clamp(c*(1.0-mask*(-uVignette)*0.8),0.0,1.0); }
+
+    // ── 12. Grain ─────────────────────────────────────────────────────────────
+    if(uGrain>0.001){
+        vec3 n=texture(uNoise,vUV*5.0).rgb;
+        c=clamp(c+(n.r-0.5)*uGrain*0.12,0.0,1.0);
+    }
+
+    fragColor=vec4(c,1.0);
+}
+)GLSL";
+
+// =============================================================================
+// §3  IMAGE EDIT SURFACE
+// =============================================================================
+
+class ImageEditSurface : public RenderSurface {
 public:
-  Circuit circuit;
-  SimMode simMode = SimMode::Edit;
-  bool snapEnabled = true;
-
-  std::function<void()> onCircuitChanged;
+  std::function<void()> onImageLoaded;
   std::function<void(const char *)> onStatusMessage;
-  std::function<void()> onRedrawNeeded;
-  std::function<void(float)> onZoomChanged;
-  std::function<void(SimMode)> onSimModeChanged;
-  std::function<void()> onSimUpdated;
-  std::function<void(int, const std::string &)> onLabelEdit;
-  std::function<void()> onSaveRequest;
-  std::function<void()> onLoadRequest;
+  std::function<void(const HistogramData &)> onHistogramUpdated;
 
-  void pushUndo() {
-    if (undoPos_ < (int)undoStack_.size())
-      undoStack_.erase(undoStack_.begin() + undoPos_, undoStack_.end());
-    undoStack_.push_back(circuit.toJson());
-    if ((int)undoStack_.size() > kMaxUndo)
-      undoStack_.erase(undoStack_.begin());
-    undoPos_ = (int)undoStack_.size();
-  }
-  void undo() {
-    if (undoPos_ <= 0)
-      return;
-    if (undoPos_ == (int)undoStack_.size())
-      undoStack_.push_back(circuit.toJson());
-    --undoPos_;
-    circuit.fromJson(undoStack_[undoPos_]);
-    afterEdit("Undo");
-  }
-  void redo() {
-    if (undoPos_ >= (int)undoStack_.size() - 1)
-      return;
-    ++undoPos_;
-    circuit.fromJson(undoStack_[undoPos_]);
-    afterEdit("Redo");
-  }
-
-  // ── Clock timers ──────────────────────────────────────────────────────
-  void startClockTimers() {
-    if (!hwnd_)
-      return;
-    for (auto &g : circuit.gates)
-      if (g.type == GateType::CLOCK) {
-        float hz = g.clockHz > 0.f ? g.clockHz : 1.f;
-        UINT ms = max(16u, (UINT)(500.f / hz));
-        SetTimer(hwnd_, kClockTimerBase + (UINT_PTR)g.id, ms, nullptr);
-      }
-  }
-  void stopClockTimers() {
-    if (!hwnd_)
-      return;
-    for (auto &g : circuit.gates)
-      if (g.type == GateType::CLOCK)
-        KillTimer(hwnd_, kClockTimerBase + (UINT_PTR)g.id);
-  }
-  void restartClockTimer(int gateId) {
-    Gate *g = circuit.find(gateId);
-    if (!g || !hwnd_)
-      return;
-    KillTimer(hwnd_, kClockTimerBase + (UINT_PTR)gateId);
-    if (simMode == SimMode::Running) {
-      float hz = g->clockHz > 0.f ? g->clockHz : 1.f;
-      UINT ms = max(16u, (UINT)(500.f / hz));
-      SetTimer(hwnd_, kClockTimerBase + (UINT_PTR)gateId, ms, nullptr);
-    }
-  }
-  void cycleClockFreq(int gateId) {
-    Gate *g = circuit.find(gateId);
-    if (!g || g->type != GateType::CLOCK)
-      return;
-    pushUndo();
-    int best = 0;
-    float bdiff = 1e9f;
-    for (int i = 0; i < kClockFreqCount; ++i) {
-      float d = fabsf(g->clockHz - kClockFreqPresets[i]);
-      if (d < bdiff) {
-        bdiff = d;
-        best = i;
-      }
-    }
-    g->clockHz = kClockFreqPresets[(best + 1) % kClockFreqCount];
-    restartClockTimer(gateId);
-    char buf[64];
-    snprintf(buf, sizeof(buf), "Clock %.1f Hz", g->clockHz);
-    if (onStatusMessage)
-      onStatusMessage(buf);
-    if (onCircuitChanged)
-      onCircuitChanged();
-    redraw();
-  }
-
-  void simPlay() {
-    if (circuit.gates.empty() && circuit.subcircuitInsts.empty())
-      return;
-    simMode = SimMode::Running;
-    circuit.evaluate();
-    notifyMode();
-    startClockTimers();
-    if (onSimUpdated)
-      onSimUpdated();
-    if (onStatusMessage)
-      onStatusMessage("▶ Running  ·  Click INPUT/CLOCK  ·  Space=pause");
-    redraw();
-  }
-  void simPause() {
-    if (simMode == SimMode::Edit)
-      return;
-    simMode =
-        (simMode == SimMode::Running) ? SimMode::Paused : SimMode::Running;
-    if (simMode == SimMode::Running)
-      startClockTimers();
-    else
-      stopClockTimers();
-    notifyMode();
-    if (onStatusMessage)
-      onStatusMessage(simMode == SimMode::Paused ? "⏸ Paused"
-                                                 : "▶ Running  ·  Space=pause");
-    redraw();
-  }
-  void simStop() {
-    stopClockTimers();
-    simMode = SimMode::Edit;
-    for (auto &w : circuit.wires)
-      w.value = false;
-    for (auto &g : circuit.gates) {
-      g.simVal = false;
-      if (g.type == GateType::CLOCK)
-        g.inputVal = false;
-    }
-    circuit.resetSequentialState();
-    notifyMode();
-    if (onSimUpdated)
-      onSimUpdated();
-    if (onStatusMessage)
-      onStatusMessage("■ Stopped  ·  Edit circuit then press ▶ Play");
-    redraw();
-  }
-  void simStep() {
-    if (simMode == SimMode::Edit)
-      simMode = SimMode::Paused;
-    for (auto &g : circuit.gates)
-      if (g.type == GateType::CLOCK)
-        g.inputVal = !g.inputVal;
-    circuit.evaluate();
-    notifyMode();
-    if (onSimUpdated)
-      onSimUpdated();
-    if (onStatusMessage)
-      onStatusMessage("⏭ Stepped");
-    redraw();
-  }
-  bool isSimActive() const { return simMode != SimMode::Edit; }
-  bool isSimRunning() const { return simMode == SimMode::Running; }
-
-  void applyLabel(int gateId, const std::string &lbl) {
-    Gate *g = circuit.find(gateId);
-    if (!g)
-      return;
-    pushUndo();
-    g->label = lbl;
-    if (onCircuitChanged)
-      onCircuitChanged();
-    if (onSimUpdated)
-      onSimUpdated();
-    redraw();
-  }
-  bool saveToFile(const std::string &path) {
-    std::ofstream f(path);
-    if (!f)
+  bool loadImage(const wchar_t *path) {
+    char utf8[MAX_PATH * 3] = {};
+    WideCharToMultiByte(CP_UTF8, 0, path, -1, utf8, sizeof(utf8), nullptr,
+                        nullptr);
+    int w, h, ch;
+    stbi_set_flip_vertically_on_load(1);
+    unsigned char *data = stbi_load(utf8, &w, &h, &ch, 4);
+    if (!data) {
+      if (onStatusMessage)
+        onStatusMessage("Failed to load image.");
       return false;
-    f << circuit.toJson();
-    return f.good();
-  }
-  bool loadFromFile(const std::string &path) {
-    std::ifstream f(path);
-    if (!f)
-      return false;
-    std::string src((std::istreambuf_iterator<char>(f)),
-                    std::istreambuf_iterator<char>());
-    if (!circuit.fromJson(src))
-      return false;
-    undoStack_.clear();
-    undoPos_ = 0;
-    pushUndo();
-    afterEdit("Loaded");
+    }
+    imgW_ = w;
+    imgH_ = h;
+    originalPixels_.assign(data, data + size_t(w) * h * 4);
+    stbi_image_free(data);
+    uploadOriginal();
+    params_.reset();
+    buildIdentityLUTs();
+    buildIdentityHSLLUTs();
+    if (onImageLoaded)
+      onImageLoaded();
+    if (onStatusMessage) {
+      char msg[128];
+      _snprintf_s(msg, sizeof(msg), _TRUNCATE, "Loaded %dx%d", w, h);
+      onStatusMessage(msg);
+    }
     return true;
   }
 
-  void resetZoom() {
-    zoom_ = 1.f;
-    camX_ = 0.f;
-    camY_ = 0.f;
-    redraw();
-  }
-  void fitToView() {
-    if (circuit.gates.empty() && circuit.subcircuitInsts.empty()) {
-      resetZoom();
-      return;
-    }
-    float mnX = 1e9f, mnY = 1e9f, mxX = -1e9f, mxY = -1e9f;
-    for (auto &g : circuit.gates) {
-      float gh = gateH(g.type);
-      mnX = min(mnX, g.x - kGW);
-      mxX = max(mxX, g.x + kGW);
-      mnY = min(mnY, g.y - gh);
-      mxY = max(mxY, g.y + gh);
-    }
-    for (auto &inst : circuit.subcircuitInsts) {
-      auto it = circuit.subcircuitDefs.find(inst.defId);
-      int ni = it != circuit.subcircuitDefs.end()
-                   ? (int)it->second.inputPins.size()
-                   : 1;
-      int no = it != circuit.subcircuitDefs.end()
-                   ? (int)it->second.outputPins.size()
-                   : 1;
-      float h = subcircuitH(ni, no);
-      mnX = min(mnX, inst.x - kSCWidth);
-      mxX = max(mxX, inst.x + kSCWidth);
-      mnY = min(mnY, inst.y - h);
-      mxY = max(mxY, inst.y + h);
-    }
-    float ww = mxX - mnX, wh = mxY - mnY;
-    if (ww < 1 || wh < 1) {
-      resetZoom();
-      return;
-    }
-    float pad = 60.f, zx = (viewW_ - pad * 2) / ww,
-          zy = (viewH_ - pad * 2) / wh;
-    zoom_ = std::clamp(min(zx, zy), 0.05f, 4.f);
-    camX_ = (mnX + mxX) * .5f - viewW_ * .5f / zoom_;
-    camY_ = (mnY + mxY) * .5f - viewH_ * .5f / zoom_;
-    redraw();
-  }
-  void setZoomLevel(float z) {
-    zoom_ = std::clamp(z, 0.05f, 8.f);
-    redraw();
-    if (onZoomChanged)
-      onZoomChanged(zoom_);
-  }
-  float getZoom() const { return zoom_; }
-
-  void dropGate(GateType type) {
-    if (isSimActive())
-      return;
-    float wx = camX_ + viewW_ * .5f / zoom_, wy = camY_ + viewH_ * .5f / zoom_;
-    static int n = 0;
-    int slot = (n++) % 7;
-    wx += float(slot - 3) * (kGW + 24.f);
-    wy += float(slot % 3 - 1) * (kGH + 18.f);
-    if (snapEnabled) {
-      wx = snapGrid(wx);
-      wy = snapGrid(wy);
-    }
-    pushUndo();
-    circuit.add(type, wx, wy);
-    if (onCircuitChanged)
-      onCircuitChanged();
-    redraw();
-  }
-
-  // ── Group selected gates into a subcircuit ───────────────────────────
-  void groupSelected() {
-    if (isSimActive()) {
-      if (onStatusMessage)
-        onStatusMessage("Stop simulation before grouping");
-      return;
-    }
-    std::vector<int> selIds;
-    for (auto &g : circuit.gates)
-      if (g.selected)
-        selIds.push_back(g.id);
-    if (selIds.size() < 1) {
-      if (onStatusMessage)
-        onStatusMessage("Select gates first (click/shift-click), then Group");
-      return;
-    }
-    std::string name = dlgLabelInternal_("Subcircuit name", "Module");
-    if (name == "__cancelled__")
-      return;
-    if (name.empty())
-      name = "Module";
-    pushUndo();
-    int instId = circuit.groupSelected(name);
-    if (instId < 0) {
-      if (onStatusMessage)
-        onStatusMessage("Group failed");
-      return;
-    }
-    circuit.evaluate();
-    if (onCircuitChanged)
-      onCircuitChanged();
-    if (onSimUpdated)
-      onSimUpdated();
+  bool exportImage(const wchar_t *path) {
+    if (originalPixels_.empty() || !editFBO_)
+      return false;
+    renderToExportFBO();
+    std::vector<uint8_t> buf(size_t(imgW_) * imgH_ * 4);
+    GL.bindFramebuffer(GL_READ_FRAMEBUFFER, editFBO_);
+    glReadPixels(0, 0, imgW_, imgH_, GL_RGBA, GL_UNSIGNED_BYTE, buf.data());
+    GL.bindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    std::vector<uint8_t> flipped(buf.size());
+    int stride = imgW_ * 4;
+    for (int r = 0; r < imgH_; r++)
+      memcpy(flipped.data() + r * stride, buf.data() + (imgH_ - 1 - r) * stride,
+             stride);
+    char utf8[MAX_PATH * 3] = {};
+    WideCharToMultiByte(CP_UTF8, 0, path, -1, utf8, sizeof(utf8), nullptr,
+                        nullptr);
+    std::string ps(utf8);
+    bool ok = false;
+    if (ps.size() >= 4 && (ps.substr(ps.size() - 4) == ".jpg" ||
+                           ps.substr(ps.size() - 5) == ".jpeg"))
+      ok = stbi_write_jpg(utf8, imgW_, imgH_, 4, flipped.data(), 95) != 0;
+    else
+      ok = stbi_write_png(utf8, imgW_, imgH_, 4, flipped.data(), stride) != 0;
     if (onStatusMessage)
-      onStatusMessage(("Grouped as subcircuit '" + name +
-                       "'  ·  Double-click instance to inspect")
-                          .c_str());
-    redraw();
+      onStatusMessage(ok ? "Export saved." : "Export failed.");
+    return ok;
   }
 
-  void initialize(int w, int h) override {
-    ls_gl::init();
-    viewW_ = w;
-    viewH_ = h;
-    camX_ = -w * .5f;
-    camY_ = -h * .5f;
-    buildShader();
-    buildTexShader();
-    buildVAO();
-    buildTexVAO();
-    HWND hwnd = WindowFromDC(wglGetCurrentDC());
-    if (hwnd)
-      hookWindow(hwnd);
+  bool hasImage() const { return !originalPixels_.empty(); }
+  int imageWidth() const { return imgW_; }
+  int imageHeight() const { return imgH_; }
+  EditParams &params() { return params_; }
+  const EditParams &params() const { return params_; }
+
+  // ── Tone curve LUT upload ─────────────────────────────────────────────────
+  void uploadCurveLUTs(const std::array<uint8_t, 256> &rgb,
+                       const std::array<uint8_t, 256> &r,
+                       const std::array<uint8_t, 256> &g,
+                       const std::array<uint8_t, 256> &b) {
+    params_.lutRGB = rgb;
+    params_.lutR = r;
+    params_.lutG = g;
+    params_.lutB = b;
+    uploadOneLUT256(lutTexRGB_, rgb.data());
+    uploadOneLUT256(lutTexR_, r.data());
+    uploadOneLUT256(lutTexG_, g.data());
+    uploadOneLUT256(lutTexB_, b.data());
   }
-  void resize(int w, int h) override {
+
+  // ── HSL LUT upload ────────────────────────────────────────────────────────
+  // Accepts the raw uint8 arrays from HSLData::buildGPULUTs()
+  void uploadHSLLUTs(const uint8_t *hue360, const uint8_t *sat360,
+                     const uint8_t *lum360) {
+    memcpy(params_.hslHue.data(), hue360, 360);
+    memcpy(params_.hslSat.data(), sat360, 360);
+    memcpy(params_.hslLum.data(), lum360, 360);
+    uploadOneLUT360(hslTexHue_, hue360);
+    uploadOneLUT360(hslTexSat_, sat360);
+    uploadOneLUT360(hslTexLum_, lum360);
+  }
+
+  void computeHistogram() {
+    if (originalPixels_.empty())
+      return;
+    histData_ =
+        HistogramData::fromPixels(originalPixels_.data(), imgW_ * imgH_, 4);
+    if (onHistogramUpdated)
+      onHistogramUpdated(histData_);
+  }
+
+  const HistogramData &histogramData() const { return histData_; }
+
+  // ── RenderSurface ─────────────────────────────────────────────────────────
+  void initialize(int w, int h) override {
+    ie_gl::init();
     viewW_ = w;
     viewH_ = h;
-    ctxMenuTexDirty_ = true;
+    buildShader();
+    buildQuad();
+    buildNoiseTexture();
+    buildIdentityLUTs();
+    buildIdentityHSLLUTs();
+  }
+
+  // Called by CanvasWidget when the GL child window is resized.
+  // This is distinct from resize() which receives canvas/image dimensions.
+  void setGLSize(int w, int h) {
+    viewW_ = w;
+    viewH_ = h;
+  }
+
+void resize(int w, int h) override {
+    // setCanvasSize calls this with image dimensions — we don't use those
+    // for glViewport. Use setGLSize() for the GL window size instead.
+    (void)w; (void)h;
   }
   void update(double) override {}
 
-  void render(const float *) override {
-    glViewport(0, 0, viewW_, viewH_);
-    glClearColor(0.055f, 0.055f, 0.08f, 1.f);
+void render(const float mvp[16]) override {
+    // CanvasWidget::tickAndRender already called glViewport(0,0,glW,glH).
+    // We must NOT override it here with viewW_/viewH_.
+    if (originalPixels_.empty() || !origTex_) {
+      glClearColor(0.12f, 0.12f, 0.14f, 1.f);
+      glClear(GL_COLOR_BUFFER_BIT);
+      return;
+    }
+    glClearColor(0.08f, 0.08f, 0.09f, 1.f);
     glClear(GL_COLOR_BUFFER_BIT);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    GL.useProgram(prog_);
-    ls_gl::uniform2f(uViewSize_, float(viewW_), float(viewH_));
-    GL.bindVertexArray(vao_);
-    drawGrid();
-    drawAllWires();
-    // Rubber-band selection rectangle
-    if (dragSelect_) {
-      float sx0, sy0, sx1, sy1;
-      w2s(dragSelX0_, dragSelY0_, sx0, sy0);
-      w2s(dragSelX1_, dragSelY1_, sx1, sy1);
-      float bx0 = min(sx0, sx1), bx1 = max(sx0, sx1);
-      float by0 = min(sy0, sy1), by1 = max(sy0, sy1);
-      {
-        std::vector<float> v;
-        pushQuad(v, bx0, by0, bx1, by1);
-        dc(v, 0.68f, 0.48f, 1.0f, 0.07f);
-      }
-      {
-        std::vector<float> v;
-        pushRR(v, bx0, by0, bx1, by1, 2.f, 1.2f);
-        dc(v, 0.68f, 0.48f, 1.0f, 0.70f);
-      }
-    }
-    drawDragPreview();
-    for (auto &inst : circuit.subcircuitInsts)
-      drawSubcircuitInst(inst);
-    for (auto &g : circuit.gates)
-      drawGate(g);
-    drawPinHovers();
-    if (isSimActive())
-      drawSimBorder();
-    if (ctxMenu_.open)
-      drawContextMenu();
-    GL.bindVertexArray(0);
-    GL.useProgram(0);
-    glDisable(GL_BLEND);
+    drawEditPass(0, mvp);
   }
+
   void destroy() override {
-    stopClockTimers();
-    if (prog_) {
-      GL.deleteProgram(prog_);
-      prog_ = 0;
-    }
-    if (texProg_) {
-      GL.deleteProgram(texProg_);
-      texProg_ = 0;
-    }
-    if (vao_) {
-      GL.deleteVertexArrays(1, &vao_);
-      vao_ = 0;
-    }
-    if (vbo_) {
-      GL.deleteBuffers(1, &vbo_);
-      vbo_ = 0;
-    }
-    if (texVao_) {
-      GL.deleteVertexArrays(1, &texVao_);
-      texVao_ = 0;
-    }
-    if (texVbo_) {
-      GL.deleteBuffers(1, &texVbo_);
-      texVbo_ = 0;
-    }
-    destroyCtxMenuTex();
-  }
-  bool needsContinuousRedraw() const override { return false; }
-
-  // =========================================================================
-  // Mouse events
-  // =========================================================================
-  void onMouseDown(float sx, float sy) override {
-    if (ctxMenu_.open) {
-      float mx = sx, my = sy;
-      if (hwnd_) {
-        POINT pt;
-        GetCursorPos(&pt);
-        ScreenToClient(hwnd_, &pt);
-        mx = float(pt.x);
-        my = float(pt.y);
+    auto del = [](GLuint &t) {
+      if (t) {
+        glDeleteTextures(1, &t);
+        t = 0;
       }
-      int item = ctxMenuHitItem(mx, my);
-      int gateId = ctxMenu_.gateId;
-      ctxMenuClose();
-      if (item >= 0 && gateId >= 0) {
-        switch (kGateMenuItems[item].action) {
-        case GateMenuAction::Delete: {
-          Gate *g = circuit.find(gateId);
-          if (g) {
-            if (g->type == GateType::CLOCK && hwnd_)
-              KillTimer(hwnd_, kClockTimerBase + (UINT_PTR)gateId);
-            pushUndo();
-            circuit.removeGateWires(gateId);
-            circuit.remove(gateId);
-            circuit.evaluate();
-            if (onCircuitChanged)
-              onCircuitChanged();
-            if (onStatusMessage)
-              onStatusMessage("Gate deleted");
-          }
-          break;
-        }
-        case GateMenuAction::Copy: {
-          Gate *g = circuit.find(gateId);
-          if (g) {
-            pushUndo();
-            int nid = circuit.add(g->type, g->x + kGW + 20.f, g->y, g->label);
-            Gate *ng = circuit.find(nid);
-            if (ng) {
-              ng->inputVal = g->inputVal;
-              ng->clockHz = g->clockHz;
-            }
-            circuit.evaluate();
-            if (onCircuitChanged)
-              onCircuitChanged();
-            if (onStatusMessage)
-              onStatusMessage("Gate copied");
-          }
-          break;
-        }
-        default:
-          break;
-        }
-      }
-      redraw();
-      return;
+    };
+    del(origTex_);
+    del(noiseTex_);
+    del(lutTexRGB_);
+    del(lutTexR_);
+    del(lutTexG_);
+    del(lutTexB_);
+    del(hslTexHue_);
+    del(hslTexSat_);
+    del(hslTexLum_);
+    del(editTex_);
+    if (editProg_) {
+      GL.deleteProgram(editProg_);
+      editProg_ = 0;
     }
-
-    lastSX_ = sx;
-    lastSY_ = sy;
-    float wx, wy;
-    s2w(sx, sy, wx, wy);
-    bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
-
-    if (isSimActive()) {
-      int hit = hitGate(wx, wy);
-      if (hit >= 0) {
-        Gate *g = circuit.find(hit);
-        if (g && g->type == GateType::INPUT) {
-          g->inputVal = !g->inputVal;
-          circuit.evaluate();
-          if (onSimUpdated)
-            onSimUpdated();
-          if (onCircuitChanged)
-            onCircuitChanged();
-          redraw();
-        } else if (g && g->type == GateType::CLOCK)
-          cycleClockFreq(hit);
-      }
-      return;
+    if (quadVAO_) {
+      GL.deleteVertexArrays(1, &quadVAO_);
+      quadVAO_ = 0;
     }
-
-    // Wire split drag (unchanged)
-    for (auto &w : circuit.wires) {
-      auto [wsx0, wsy0, wsx1, wsy1] = wireSC(w);
-      float msx = wireSplitSX(w, wsx0, wsx1), thr = max(6.f, 5.f / zoom_);
-      if (std::abs(sx - msx) <= thr && sy >= min(wsy0, wsy1) - thr &&
-          sy <= max(wsy0, wsy1) + thr) {
-        dragSplit_ = true;
-        dragSplitId_ = w.id;
-        float worldMX = (w.splitX < 1e29f) ? w.splitX : (camX_ + msx / zoom_);
-        dragSplitOff_ = wx - worldMX;
-        if (!shift) {
-          for (auto &g2 : circuit.gates)
-            g2.selected = false;
-          for (auto &inst : circuit.subcircuitInsts)
-            inst.selected = false;
-        }
-        for (auto &w2 : circuit.wires)
-          w2.selected = (w2.id == w.id);
-        if (onStatusMessage)
-          onStatusMessage("Drag to reposition wire");
-        redraw();
-        return;
-      }
+    if (quadVBO_) {
+      GL.deleteBuffers(1, &quadVBO_);
+      quadVBO_ = 0;
     }
-
-    // Start wire drag from output pin (unchanged)
-    {
-      auto pins = collectPins(circuit);
-      PinRef src{};
-      if (nearestPin(pins, wx, wy, 16.f / zoom_, true, false, src)) {
-        dragWire_ = true;
-        dragSrc_ = src;
-        dragCurWX_ = wx;
-        dragCurWY_ = wy;
-        hasDstSnap_ = false;
-        if (!shift) {
-          for (auto &g : circuit.gates)
-            g.selected = false;
-          for (auto &inst : circuit.subcircuitInsts)
-            inst.selected = false;
-        }
-        for (auto &w : circuit.wires)
-          w.selected = false;
-        if (onStatusMessage)
-          onStatusMessage("Drag to an input pin  ·  Esc to cancel");
-        redraw();
-        return;
-      }
-    }
-
-    // Wire select (unchanged except don't clear if shift)
-    if (!shift)
-      for (auto &w : circuit.wires)
-        w.selected = false;
-    for (auto &w : circuit.wires) {
-      auto [wsx0, wsy0, wsx1, wsy1] = wireSC(w);
-      float msx = wireSplitSX(w, wsx0, wsx1);
-      if (orthoHit(wsx0, wsy0, wsx1, wsy1, msx, sx, sy, 8.f)) {
-        w.selected = true;
-        if (!shift) {
-          for (auto &g : circuit.gates)
-            g.selected = false;
-          for (auto &inst : circuit.subcircuitInsts)
-            inst.selected = false;
-        }
-        if (onStatusMessage)
-          onStatusMessage("Wire selected  ·  Del to remove");
-        redraw();
-        return;
-      }
-    }
-
-    // Hit-test gate / subcircuit instance
-    int hitInst = hitSubInst(wx, wy);
-    int hitG = hitGate(wx, wy);
-
-    if (hitInst >= 0) {
-      SubcircuitInst *inst = circuit.findInst(hitInst);
-      if (inst) {
-        if (shift) {
-          inst->selected = !inst->selected;
-          redraw();
-          return;
-        }
-        if (inst->selected) {
-          // Already selected → begin multi-drag
-          beginMultiDrag(wx, wy);
-          return;
-        }
-        // Single select + single drag
-        for (auto &g : circuit.gates)
-          g.selected = false;
-        for (auto &i2 : circuit.subcircuitInsts)
-          i2.selected = false;
-        inst->selected = true;
-        dragInstId_ = hitInst;
-        dragOx_ = wx - inst->x;
-        dragOy_ = wy - inst->y;
-      }
-    } else if (hitG >= 0) {
-      Gate *g = circuit.find(hitG);
-      if (g) {
-        if (shift) {
-          g->selected = !g->selected;
-          redraw();
-          return;
-        }
-        if (g->selected) {
-          // Already selected → begin multi-drag
-          beginMultiDrag(wx, wy);
-          return;
-        }
-        // Single select + single drag
-        for (auto &g2 : circuit.gates)
-          g2.selected = false;
-        for (auto &inst : circuit.subcircuitInsts)
-          inst.selected = false;
-        g->selected = true;
-        dragId_ = hitG;
-        dragOx_ = wx - g->x;
-        dragOy_ = wy - g->y;
-      }
-    } else {
-      // Clicked empty space
-      if (!shift) {
-        for (auto &g : circuit.gates)
-          g.selected = false;
-        for (auto &inst : circuit.subcircuitInsts)
-          inst.selected = false;
-      }
-      // Start rubber-band
-      dragSelect_ = true;
-      dragSelX0_ = dragSelX1_ = wx;
-      dragSelY0_ = dragSelY1_ = wy;
-      dragSelAdditive_ = shift;
-    }
-    redraw();
-  }
-
-  void onMouseMove(float sx, float sy) override {
-    if (ctxMenu_.open) {
-      float mx = sx, my = sy;
-      if (hwnd_) {
-        POINT pt;
-        GetCursorPos(&pt);
-        ScreenToClient(hwnd_, &pt);
-        mx = float(pt.x);
-        my = float(pt.y);
-      }
-      int item = ctxMenuHitItem(mx, my);
-      if (item != ctxMenu_.hoveredItem) {
-        ctxMenu_.hoveredItem = item;
-        ctxMenuTexDirty_ = true;
-        redraw();
-      }
-      return;
-    }
-    float wx, wy;
-    s2w(sx, sy, wx, wy);
-    if (mmb_) {
-      camX_ -= (sx - lastSX_) / zoom_;
-      camY_ -= (sy - lastSY_) / zoom_;
-      lastSX_ = sx;
-      lastSY_ = sy;
-      redraw();
-      return;
-    }
-    lastSX_ = sx;
-    lastSY_ = sy;
-    if (isSimActive())
-      return;
-
-    if (dragSplit_) {
-      Wire *w = circuit.find_wire(dragSplitId_);
-      if (w) {
-        float nw = wx - dragSplitOff_;
-        if (snapEnabled)
-          nw = snapGrid(nw);
-        w->splitX = nw;
-        redraw();
-      }
-      return;
-    }
-    if (dragWire_) {
-      dragCurWX_ = wx;
-      dragCurWY_ = wy;
-      auto pins = collectPins(circuit);
-      PinRef dst{};
-      hasDstSnap_ = nearestPin(pins, wx, wy, 20.f / zoom_, false, true, dst);
-      if (hasDstSnap_ && dst.gateId == dragSrc_.gateId)
-        hasDstSnap_ = false;
-      if (hasDstSnap_)
-        dstSnap_ = dst;
-      redraw();
-      return;
-    }
-
-    // Rubber-band drag select
-    if (dragSelect_) {
-      dragSelX1_ = wx;
-      dragSelY1_ = wy;
-      redraw();
-      return;
-    }
-
-    // Multi-drag
-    if (dragMulti_) {
-      float rawDX = wx - dragMultiStartWX_;
-      float rawDY = wy - dragMultiStartWY_;
-      // Snap the delta using the first origin as anchor
-      float snappedDX = rawDX, snappedDY = rawDY;
-      if (snapEnabled && !dragMultiOrigins_.empty()) {
-        snappedDX =
-            snapGrid(dragMultiOrigins_[0].ox + rawDX) - dragMultiOrigins_[0].ox;
-        snappedDY =
-            snapGrid(dragMultiOrigins_[0].oy + rawDY) - dragMultiOrigins_[0].oy;
-      }
-      for (auto &orig : dragMultiOrigins_) {
-        if (orig.isInst) {
-          SubcircuitInst *inst = circuit.findInst(orig.id);
-          if (inst) {
-            inst->x = orig.ox + snappedDX;
-            inst->y = orig.oy + snappedDY;
-            auto it = circuit.subcircuitDefs.find(inst->defId);
-            if (it != circuit.subcircuitDefs.end())
-              inst->recomputePins(it->second);
-          }
-        } else {
-          Gate *g = circuit.find(orig.id);
-          if (g) {
-            g->x = orig.ox + snappedDX;
-            g->y = orig.oy + snappedDY;
-            g->recomputePins();
-          }
-        }
-      }
-      redraw();
-      return;
-    }
-
-    // Pin hover feedback (unchanged)
-    {
-      auto pins = collectPins(circuit);
-      PinRef h{};
-      bool found = nearestPin(pins, wx, wy, 16.f / zoom_, false, false, h);
-      bool changed = (found != hovPinValid_);
-      if (!changed && found)
-        changed = (h.gateId != hovPin_.gateId || h.pinIdx != hovPin_.pinIdx ||
-                   h.isOutput != hovPin_.isOutput);
-      hovPinValid_ = found;
-      if (found)
-        hovPin_ = h;
-      if (changed)
-        redraw();
-    }
-    if (dragInstId_ >= 0) {
-      SubcircuitInst *inst = circuit.findInst(dragInstId_);
-      if (inst) {
-        float nx = wx - dragOx_, ny = wy - dragOy_;
-        if (snapEnabled) {
-          nx = snapGrid(nx);
-          ny = snapGrid(ny);
-        }
-        inst->x = nx;
-        inst->y = ny;
-        auto it = circuit.subcircuitDefs.find(inst->defId);
-        if (it != circuit.subcircuitDefs.end())
-          inst->recomputePins(it->second);
-        redraw();
-      }
-      return;
-    }
-    if (dragId_ >= 0) {
-      Gate *g = circuit.find(dragId_);
-      if (g) {
-        float nx = wx - dragOx_, ny = wy - dragOy_;
-        if (snapEnabled) {
-          nx = snapGrid(nx);
-          ny = snapGrid(ny);
-        }
-        g->x = nx;
-        g->y = ny;
-        g->recomputePins();
-        redraw();
-      }
-    }
-  }
-
-  void onMouseUp(float sx, float sy) override {
-    mmb_ = false;
-    if (isSimActive())
-      return;
-    if (dragSplit_) {
-      dragSplit_ = false;
-      if (dragSplitId_ >= 0) {
-        pushUndo();
-        if (onCircuitChanged)
-          onCircuitChanged();
-      }
-      dragSplitId_ = -1;
-      return;
-    }
-    if (dragWire_) {
-      dragWire_ = false;
-      if (hasDstSnap_) {
-        bool occ = false;
-        for (auto &w : circuit.wires)
-          if (w.dst.gateId == dstSnap_.gateId &&
-              w.dst.pinIdx == dstSnap_.pinIdx) {
-            occ = true;
-            break;
-          }
-        if (!occ) {
-
-          std::string err;
-          int wid = circuit.connect(dragSrc_.gateId, dragSrc_.pinIdx,
-                                    dstSnap_.gateId, dstSnap_.pinIdx, &err);
-          if (wid < 0) {
-            if (onStatusMessage)
-              onStatusMessage(("⚠ " + err).c_str());
-          } else {
-            pushUndo();
-            circuit.evaluate();
-            if (onCircuitChanged)
-              onCircuitChanged();
-            if (onStatusMessage)
-              onStatusMessage("Connected");
-          }
-
-        } else if (onStatusMessage)
-          onStatusMessage(
-              "Input already connected — remove existing wire first");
-      }
-      hasDstSnap_ = false;
-      redraw();
-      return;
-    }
-    // Rubber-band finalise
-    if (dragSelect_) {
-      dragSelect_ = false;
-      float minX = min(dragSelX0_, dragSelX1_),
-            maxX = max(dragSelX0_, dragSelX1_);
-      float minY = min(dragSelY0_, dragSelY1_),
-            maxY = max(dragSelY0_, dragSelY1_);
-      // Only do selection if the band has some area (avoids accidental clear on
-      // tiny drags)
-      if (maxX - minX > 4.f / zoom_ || maxY - minY > 4.f / zoom_) {
-        for (auto &g : circuit.gates) {
-          float gh = gateH(g.type);
-          bool inside =
-              g.x >= minX && g.x <= maxX && g.y >= minY && g.y <= maxY;
-          if (dragSelAdditive_)
-            g.selected = g.selected || inside;
-          else
-            g.selected = inside;
-        }
-        for (auto &inst : circuit.subcircuitInsts) {
-          bool inside = inst.x >= minX && inst.x <= maxX && inst.y >= minY &&
-                        inst.y <= maxY;
-          if (dragSelAdditive_)
-            inst.selected = inst.selected || inside;
-          else
-            inst.selected = inside;
-        }
-        // Count selection for status
-        int n = 0;
-        for (auto &g : circuit.gates)
-          if (g.selected)
-            n++;
-        for (auto &inst : circuit.subcircuitInsts)
-          if (inst.selected)
-            n++;
-        if (n > 0 && onStatusMessage) {
-          char buf[64];
-          snprintf(buf, sizeof(buf), "%d item%s selected  ·  Ctrl+G to group",
-                   n, n == 1 ? "" : "s");
-          onStatusMessage(buf);
-        }
-      }
-      redraw();
-      return;
-    }
-    // Multi-drag commit
-    if (dragMulti_) {
-      dragMulti_ = false;
-      dragMultiOrigins_.clear();
-      pushUndo();
-      if (onCircuitChanged)
-        onCircuitChanged();
-      return;
-    }
-    if (dragInstId_ >= 0) {
-      pushUndo();
-      dragInstId_ = -1;
-      if (onCircuitChanged)
-        onCircuitChanged();
-      return;
-    }
-    if (dragId_ >= 0) {
-      pushUndo();
-      dragId_ = -1;
-      if (onCircuitChanged)
-        onCircuitChanged();
-    }
-  }
-
-  void onRightMouseDown(float sx, float sy) override {
-    if (ctxMenu_.open) {
-      ctxMenuClose();
-      redraw();
-      return;
-    }
-    if (isSimActive())
-      return;
-    float wx, wy;
-    s2w(sx, sy, wx, wy);
-    int hit = hitGate(wx, wy);
-    if (hit >= 0) {
-      for (auto &g : circuit.gates)
-        g.selected = (g.id == hit);
-      for (auto &inst : circuit.subcircuitInsts)
-        inst.selected = false;
-      float mx = sx, my = sy;
-      if (hwnd_) {
-        POINT pt;
-        GetCursorPos(&pt);
-        ScreenToClient(hwnd_, &pt);
-        mx = float(pt.x);
-        my = float(pt.y);
-      }
-      ctxMenuOpen(hit, mx, my);
-      redraw();
-      return;
-    }
-    // Right-click subcircuit instance → delete it
-    int hitInst = hitSubInst(wx, wy);
-    if (hitInst >= 0) {
-      pushUndo();
-      circuit.removeInstWires(hitInst);
-      circuit.removeInst(hitInst);
-      circuit.evaluate();
-      if (onCircuitChanged)
-        onCircuitChanged();
-      if (onStatusMessage)
-        onStatusMessage("Subcircuit instance deleted");
-      redraw();
-      return;
-    }
-    for (int i = int(circuit.wires.size()) - 1; i >= 0; --i) {
-      auto [wsx0, wsy0, wsx1, wsy1] = wireSC(circuit.wires[i]);
-      float msx = wireSplitSX(circuit.wires[i], wsx0, wsx1);
-      if (orthoHit(wsx0, wsy0, wsx1, wsy1, msx, sx, sy, 10.f)) {
-        pushUndo();
-        circuit.disconnect(circuit.wires[i].id);
-        circuit.evaluate();
-        if (onCircuitChanged)
-          onCircuitChanged();
-        if (onStatusMessage)
-          onStatusMessage("Wire removed");
-        redraw();
-        return;
-      }
-    }
-  }
-
-  void onDoubleClick(float sx, float sy) {
-    float wx, wy;
-    s2w(sx, sy, wx, wy);
-    if (isSimActive()) {
-      int hit = hitGate(wx, wy);
-      if (hit >= 0) {
-        Gate *g = circuit.find(hit);
-        if (g && g->type == GateType::INPUT) {
-          g->inputVal = !g->inputVal;
-          circuit.evaluate();
-          if (onSimUpdated)
-            onSimUpdated();
-          redraw();
-        } else if (g && g->type == GateType::CLOCK)
-          cycleClockFreq(hit);
-      }
-      return;
-    }
-    int hitInst = hitSubInst(wx, wy);
-    if (hitInst >= 0) {
-      // Future: open inner editor.  For now show pin summary.
-      SubcircuitInst *inst = circuit.findInst(hitInst);
-      auto it = circuit.subcircuitDefs.find(inst ? inst->defId : -1);
-      if (inst && it != circuit.subcircuitDefs.end()) {
-        std::string msg = "[" + it->second.name + "]  ";
-        msg += std::to_string(inst->inputPins.size()) + " in / " +
-               std::to_string(inst->outputPins.size()) + " out";
-        if (onStatusMessage)
-          onStatusMessage(msg.c_str());
-      }
-      return;
-    }
-    int hit = hitGate(wx, wy);
-    if (hit >= 0) {
-      Gate *g = circuit.find(hit);
-      if (g && g->type == GateType::CLOCK) {
-        cycleClockFreq(hit);
-        return;
-      }
-      if (g && onLabelEdit)
-        onLabelEdit(hit, g->label);
-      return;
-    }
-    for (int i = int(circuit.wires.size()) - 1; i >= 0; --i) {
-      auto [wsx0, wsy0, wsx1, wsy1] = wireSC(circuit.wires[i]);
-      float msx = wireSplitSX(circuit.wires[i], wsx0, wsx1);
-      if (orthoHit(wsx0, wsy0, wsx1, wsy1, msx, sx, sy, 10.f)) {
-        pushUndo();
-        circuit.disconnect(circuit.wires[i].id);
-        circuit.evaluate();
-        if (onCircuitChanged)
-          onCircuitChanged();
-        if (onStatusMessage)
-          onStatusMessage("Wire removed");
-        redraw();
-        return;
-      }
-    }
-  }
-
-  void hookWindow(HWND hwnd) {
-    if (hwnd_)
-      return;
-    hwnd_ = hwnd;
-    sMap()[hwnd] = this;
-    origProc_ =
-        (WNDPROC)SetWindowLongPtrW(hwnd, GWLP_WNDPROC, (LONG_PTR)WndProcHook);
-  }
-
-private:
-  HWND hwnd_ = nullptr;
-  WNDPROC origProc_ = nullptr;
-  static std::unordered_map<HWND, CircuitSurface *> &sMap() {
-    static std::unordered_map<HWND, CircuitSurface *> m;
-    return m;
-  }
-
-  static LRESULT CALLBACK WndProcHook(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
-    auto it = sMap().find(h);
-    if (it == sMap().end())
-      return DefWindowProcW(h, msg, wp, lp);
-    CircuitSurface *s = it->second;
-    WNDPROC orig = s->origProc_;
-    switch (msg) {
-    case WM_MBUTTONDOWN: {
-      SetCapture(h);
-      s->mmb_ = true;
-      s->lastSX_ = float(GET_X_LPARAM(lp));
-      s->lastSY_ = float(GET_Y_LPARAM(lp));
-      return 0;
-    }
-    case WM_MBUTTONUP: {
-      ReleaseCapture();
-      s->mmb_ = false;
-      return 0;
-    }
-    case WM_MOUSEWHEEL: {
-      POINT pt = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
-      ScreenToClient(h, &pt);
-      float cx = float(pt.x), cy = float(pt.y),
-            dy = float((short)HIWORD(wp)) / float(WHEEL_DELTA);
-      float wx0, wy0;
-      s->s2w(cx, cy, wx0, wy0);
-      float f = (dy > 0) ? 1.12f : 1.f / 1.12f;
-      s->zoom_ = std::clamp(s->zoom_ * f, 0.05f, 8.f);
-      s->camX_ = wx0 - cx / s->zoom_;
-      s->camY_ = wy0 - cy / s->zoom_;
-      if (s->onZoomChanged)
-        s->onZoomChanged(s->zoom_);
-      s->redraw();
-      return 0;
-    }
-    case WM_TIMER: {
-      UINT_PTR tid = (UINT_PTR)wp;
-      if (tid >= kClockTimerBase && s->simMode == SimMode::Running) {
-        int gateId = (int)(tid - kClockTimerBase);
-        Gate *g = s->circuit.find(gateId);
-        if (g && g->type == GateType::CLOCK) {
-          g->inputVal = !g->inputVal;
-          s->circuit.evaluate();
-          if (s->onSimUpdated)
-            s->onSimUpdated();
-          if (s->onCircuitChanged)
-            s->onCircuitChanged();
-          s->redraw();
-        }
-        return 0;
-      }
-      break;
-    }
-    case WM_NCDESTROY: {
-      s->stopClockTimers();
-      sMap().erase(h);
-      SetWindowLongPtrW(h, GWLP_WNDPROC, (LONG_PTR)orig);
-      return CallWindowProcW(orig, h, msg, wp, lp);
-    }
-    }
-    return CallWindowProcW(orig, h, msg, wp, lp);
-  }
-
-public:
-  void onKeyDown(int key) override {
-    if (key == VK_ESCAPE && ctxMenu_.open) {
-      ctxMenuClose();
-      redraw();
-      return;
-    }
-    bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
-    if (ctrl && key == 'Z') {
-      undo();
-      return;
-    }
-    if (ctrl && key == 'Y') {
-      redo();
-      return;
-    }
-    if (ctrl && key == 'S') {
-      if (onSaveRequest)
-        onSaveRequest();
-      return;
-    }
-    if (ctrl && key == 'O') {
-      if (onLoadRequest)
-        onLoadRequest();
-      return;
-    }
-    // Ctrl+G = group selected
-    if (ctrl && key == 'G') {
-      groupSelected();
-      return;
-    }
-    if (key == 'G' && !ctrl) {
-      snapEnabled = !snapEnabled;
-      if (onStatusMessage)
-        onStatusMessage(snapEnabled ? "⊞ Snap to grid ON"
-                                    : "⊟ Snap to grid OFF");
-      redraw();
-      return;
-    }
-
-    // Ctrl+A = select all
-    if (ctrl && key == 'A') {
-      for (auto &g : circuit.gates)
-        g.selected = true;
-      for (auto &inst : circuit.subcircuitInsts)
-        inst.selected = true;
-      int n = int(circuit.gates.size()) + int(circuit.subcircuitInsts.size());
-      if (n > 0 && onStatusMessage) {
-        char buf[64];
-        snprintf(buf, sizeof(buf), "All %d items selected  ·  Ctrl+G to group",
-                 n);
-        onStatusMessage(buf);
-      }
-      redraw();
-      return;
-    }
-    if (key == VK_ESCAPE && dragWire_) {
-      dragWire_ = false;
-      hasDstSnap_ = false;
-      redraw();
-      return;
-    }
-    if (key == VK_SPACE) {
-      if (isSimActive()) {
-        simPause();
-        return;
-      }
-      for (auto &g : circuit.gates)
-        if (g.selected && g.type == GateType::INPUT) {
-          g.inputVal = !g.inputVal;
-          circuit.evaluate();
-          if (onCircuitChanged)
-            onCircuitChanged();
-          redraw();
-        }
-    }
-    if (!isSimActive() && (key == VK_DELETE || key == VK_BACK)) {
-      bool anyW = false;
-      for (int i = int(circuit.wires.size()) - 1; i >= 0; --i)
-        if (circuit.wires[i].selected) {
-          circuit.disconnect(circuit.wires[i].id);
-          anyW = true;
-        }
-      if (anyW) {
-        pushUndo();
-        circuit.evaluate();
-        if (onCircuitChanged)
-          onCircuitChanged();
-        redraw();
-        return;
-      }
-      bool anyG = false;
-      for (int i = int(circuit.gates.size()) - 1; i >= 0; --i)
-        if (circuit.gates[i].selected) {
-          if (circuit.gates[i].type == GateType::CLOCK && hwnd_)
-            KillTimer(hwnd_, kClockTimerBase + (UINT_PTR)circuit.gates[i].id);
-          circuit.removeGateWires(circuit.gates[i].id);
-          circuit.remove(circuit.gates[i].id);
-          anyG = true;
-        }
-      bool anyI = false;
-      for (int i = int(circuit.subcircuitInsts.size()) - 1; i >= 0; --i)
-        if (circuit.subcircuitInsts[i].selected) {
-          circuit.removeInstWires(circuit.subcircuitInsts[i].id);
-          circuit.removeInst(circuit.subcircuitInsts[i].id);
-          anyI = true;
-        }
-      if (anyG || anyI) {
-        pushUndo();
-        circuit.evaluate();
-        if (onCircuitChanged)
-          onCircuitChanged();
-        redraw();
-      }
+    if (editFBO_) {
+      GL.deleteFramebuffers(1, &editFBO_);
+      editFBO_ = 0;
     }
   }
 
 private:
-  static constexpr int kMaxUndo = 50;
-  std::vector<std::string> undoStack_;
-  int undoPos_ = 0;
-  int viewW_ = 1, viewH_ = 1;
-  float camX_ = 0, camY_ = 0, zoom_ = 1.f;
-  GLuint prog_ = 0, vao_ = 0, vbo_ = 0;
-  GLint uViewSize_ = -1, uColor_ = -1;
-  GLuint texProg_ = 0, texVao_ = 0, texVbo_ = 0;
-  GLint uTexViewSize_ = -1, uTexSampler_ = -1;
-  GLuint ctxMenuTex_ = 0;
-  int ctxMenuTexW_ = 0, ctxMenuTexH_ = 0;
-  bool ctxMenuTexDirty_ = true;
-  int dragId_ = -1, dragInstId_ = -1;
-  float dragOx_ = 0, dragOy_ = 0, lastSX_ = 0, lastSY_ = 0;
-  bool mmb_ = false, dragWire_ = false;
-  PinRef dragSrc_{}, dstSnap_{};
-  float dragCurWX_ = 0, dragCurWY_ = 0;
-  bool hasDstSnap_ = false, hovPinValid_ = false;
-  PinRef hovPin_{};
-  bool dragSplit_ = false;
-  int dragSplitId_ = -1;
-  float dragSplitOff_ = 0.f;
+  int viewW_ = 1, viewH_ = 1, imgW_ = 0, imgH_ = 0;
+  EditParams params_;
+  HistogramData histData_;
+  std::vector<uint8_t> originalPixels_;
 
-  // ── Rubber-band drag-select ───────────────────────────────────────────────
-  bool dragSelect_ = false;
-  float dragSelX0_ = 0, dragSelY0_ = 0; // world-space anchor corner
-  float dragSelX1_ = 0, dragSelY1_ = 0; // world-space live corner
-  bool dragSelAdditive_ = false;        // shift was held at drag start
+  GLuint editProg_ = 0, quadVAO_ = 0, quadVBO_ = 0;
+  GLuint origTex_ = 0, noiseTex_ = 0;
+  GLuint editFBO_ = 0, editTex_ = 0;
 
-  // ── Multi-drag ────────────────────────────────────────────────────────────
-  bool dragMulti_ = false;
-  float dragMultiStartWX_ = 0, dragMultiStartWY_ = 0; // world pos at drag start
-  struct ItemOrigin {
-    bool isInst;
-    int id;
-    float ox, oy;
-  };
-  std::vector<ItemOrigin> dragMultiOrigins_; // start positions of all selected
+  // Tone curve LUT textures (256×1 R8)
+  GLuint lutTexRGB_ = 0, lutTexR_ = 0, lutTexG_ = 0, lutTexB_ = 0;
 
-  struct CtxMenuState {
-    bool open = false;
-    int gateId = -1;
-    float sx = 0, sy = 0;
-    int hoveredItem = -1;
-  } ctxMenu_;
-
-  void beginMultiDrag(float wx, float wy) {
-    dragMulti_ = true;
-    dragMultiStartWX_ = wx;
-    dragMultiStartWY_ = wy;
-    dragMultiOrigins_.clear();
-    for (auto &g : circuit.gates)
-      if (g.selected)
-        dragMultiOrigins_.push_back({false, g.id, g.x, g.y});
-    for (auto &inst : circuit.subcircuitInsts)
-      if (inst.selected)
-        dragMultiOrigins_.push_back({true, inst.id, inst.x, inst.y});
-  }
-
-  // ── Hit testing ───────────────────────────────────────────────────────
-  int hitGate(float wx, float wy) const {
-    for (int i = int(circuit.gates.size()) - 1; i >= 0; --i) {
-      const Gate &g = circuit.gates[i];
-      float gh = gateH(g.type);
-      if (wx >= g.x - kGW * .5f && wx <= g.x + kGW * .5f &&
-          wy >= g.y - gh * .5f && wy <= g.y + gh * .5f)
-        return g.id;
-    }
-    return -1;
-  }
-  int hitSubInst(float wx, float wy) const {
-    for (int i = int(circuit.subcircuitInsts.size()) - 1; i >= 0; --i) {
-      const SubcircuitInst &inst = circuit.subcircuitInsts[i];
-      auto it = circuit.subcircuitDefs.find(inst.defId);
-      int ni = it != circuit.subcircuitDefs.end()
-                   ? (int)it->second.inputPins.size()
-                   : 1;
-      int no = it != circuit.subcircuitDefs.end()
-                   ? (int)it->second.outputPins.size()
-                   : 1;
-      float h = subcircuitH(ni, no);
-      if (wx >= inst.x - kSCWidth * .5f && wx <= inst.x + kSCWidth * .5f &&
-          wy >= inst.y - h * .5f && wy <= inst.y + h * .5f)
-        return inst.id;
-    }
-    return -1;
-  }
-
-  // ── Context menu (unchanged internals) ───────────────────────────────
-  float ctxRowY(int i) const {
-    return ctxMenu_.sy + kCMPadV + float(i) * kCMRowStride;
-  }
-  void ctxMenuOpen(int gateId, float sx, float sy) {
-    ctxMenu_.gateId = gateId;
-    ctxMenu_.hoveredItem = -1;
-    ctxMenu_.open = true;
-    float mx = sx + 4.f, my = sy + 4.f;
-    if (mx + kCMWidth > float(viewW_))
-      mx = sx - kCMWidth - 4.f;
-    if (my + kCMHeight > float(viewH_))
-      my = sy - kCMHeight - 4.f;
-    ctxMenu_.sx = mx;
-    ctxMenu_.sy = my;
-    ctxMenuTexDirty_ = true;
-  }
-  void ctxMenuClose() {
-    ctxMenu_.open = false;
-    ctxMenu_.gateId = -1;
-    ctxMenu_.hoveredItem = -1;
-    destroyCtxMenuTex();
-  }
-  int ctxMenuHitItem(float sx, float sy) const {
-    if (!ctxMenu_.open)
-      return -1;
-    float mx = ctxMenu_.sx, my = ctxMenu_.sy;
-    if (sx < mx || sx > mx + kCMWidth || sy < my || sy > my + kCMHeight)
-      return -1;
-    for (int i = 0; i < kGateMenuItemCount; ++i) {
-      float iy = ctxRowY(i),
-            hitH = (i < kGateMenuItemCount - 1) ? kCMRowStride : kCMItemH;
-      if (sy >= iy && sy < iy + hitH)
-        return i;
-    }
-    return -1;
-  }
-  void destroyCtxMenuTex() {
-    if (ctxMenuTex_) {
-      glDeleteTextures(1, &ctxMenuTex_);
-      ctxMenuTex_ = 0;
-    }
-    ctxMenuTexW_ = 0;
-    ctxMenuTexH_ = 0;
-    ctxMenuTexDirty_ = true;
-  }
-
-  void rebuildCtxMenuTexture() {
-    ctxMenuTexDirty_ = false;
-    int texW = int(kCMWidth), texH = int(kCMHeight);
-    if (!ctxMenuTex_ || ctxMenuTexW_ != texW || ctxMenuTexH_ != texH) {
-      if (ctxMenuTex_)
-        glDeleteTextures(1, &ctxMenuTex_);
-      glGenTextures(1, &ctxMenuTex_);
-      glBindTexture(GL_TEXTURE_2D, ctxMenuTex_);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, 0x812F);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, 0x812F);
-      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, texW, texH, 0, GL_RGBA,
-                   GL_UNSIGNED_BYTE, nullptr);
-      glBindTexture(GL_TEXTURE_2D, 0);
-      ctxMenuTexW_ = texW;
-      ctxMenuTexH_ = texH;
-    }
-    BITMAPINFO bmi = {};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = texW;
-    bmi.bmiHeader.biHeight = -texH;
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
-    void *bits = nullptr;
-    HDC hdcMem = CreateCompatibleDC(nullptr);
-    HBITMAP hBmp =
-        CreateDIBSection(hdcMem, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
-    if (!hBmp) {
-      DeleteDC(hdcMem);
-      return;
-    }
-    HGDIOBJ oldBmp = SelectObject(hdcMem, hBmp);
-    {
-      RECT rc = {0, 0, texW, texH};
-      HBRUSH br = CreateSolidBrush(RGB(255, 0, 255));
-      FillRect(hdcMem, &rc, br);
-      DeleteObject(br);
-    }
-    HFONT hFont =
-        CreateFontA(13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                    CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Segoe UI");
-    HGDIOBJ oldFont = SelectObject(hdcMem, hFont);
-    SetBkMode(hdcMem, TRANSPARENT);
-    for (int i = 0; i < kGateMenuItemCount; ++i) {
-      float iy = ctxRowY(i) - ctxMenu_.sy;
-      bool hov = (i == ctxMenu_.hoveredItem);
-      COLORREF col = (kGateMenuItems[i].action == GateMenuAction::Delete)
-                         ? (hov ? RGB(255, 145, 145) : RGB(200, 110, 110))
-                         : (hov ? RGB(230, 215, 255) : RGB(175, 168, 205));
-      SetTextColor(hdcMem, col);
-      RECT r;
-      r.left = (LONG)kCMTextOff;
-      r.top = (LONG)iy;
-      r.right = (LONG)(kCMWidth - 8.f);
-      r.bottom = (LONG)(iy + kCMItemH);
-      DrawTextA(hdcMem, kGateMenuItems[i].label, -1, &r,
-                DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-    }
-    GdiFlush();
-    const uint8_t *dibBits = reinterpret_cast<const uint8_t *>(bits);
-    std::vector<uint8_t> rgba(size_t(texW) * texH * 4);
-    for (int row = 0; row < texH; ++row) {
-      int glRow = texH - 1 - row;
-      for (int col = 0; col < texW; ++col) {
-        const uint8_t *p = dibBits + (row * texW + col) * 4;
-        uint8_t b = p[0], g = p[1], r = p[2];
-        bool isSentinel = (r >= 250 && g < 10 && b >= 250);
-        uint8_t *d = rgba.data() + (glRow * texW + col) * 4;
-        d[0] = r;
-        d[1] = g;
-        d[2] = b;
-        d[3] = isSentinel ? 0 : 255;
-      }
-    }
-    glBindTexture(GL_TEXTURE_2D, ctxMenuTex_);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, texW, texH, GL_RGBA,
-                    GL_UNSIGNED_BYTE, rgba.data());
-    glBindTexture(GL_TEXTURE_2D, 0);
-    SelectObject(hdcMem, oldFont);
-    DeleteObject(hFont);
-    SelectObject(hdcMem, oldBmp);
-    DeleteObject(hBmp);
-    DeleteDC(hdcMem);
-  }
-
-  void blitCtxMenuLabelTex() {
-    if (!ctxMenuTex_)
-      return;
-    float x0 = ctxMenu_.sx, y0 = ctxMenu_.sy, x1 = ctxMenu_.sx + kCMWidth,
-          y1 = ctxMenu_.sy + kCMHeight;
-    float verts[] = {x0, y0, 0.f, 1.f, x1, y0, 1.f, 1.f, x1, y1, 1.f, 0.f,
-                     x1, y1, 1.f, 0.f, x0, y1, 0.f, 0.f, x0, y0, 0.f, 1.f};
-    GL.useProgram(texProg_);
-    ls_gl::uniform2f(uTexViewSize_, float(viewW_), float(viewH_));
-    ls_gl::uniform1i(uTexSampler_, 0);
-    ls_gl::activeTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, ctxMenuTex_);
-    GL.bindVertexArray(texVao_);
-    GL.bindBuffer(GL_ARRAY_BUFFER, texVbo_);
-    GL.bufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_DYNAMIC_DRAW);
-    glDrawArrays(GL_TRIANGLES, 0, 6);
-    GL.bindVertexArray(0);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    GL.useProgram(prog_);
-    ls_gl::uniform2f(uViewSize_, float(viewW_), float(viewH_));
-    GL.bindVertexArray(vao_);
-  }
-
-  void drawContextMenu() {
-    if (ctxMenuTexDirty_)
-      rebuildCtxMenuTexture();
-    float mx = ctxMenu_.sx, my = ctxMenu_.sy, mR = mx + kCMWidth,
-          mB = my + kCMHeight;
-    {
-      std::vector<float> v;
-      pushRRFill(v, mx + 4, my + 4, mR + 4, mB + 4, kCMCorner);
-      dc(v, 0, 0, 0, 0.55f);
-    }
-    {
-      std::vector<float> v;
-      pushRRFill(v, mx, my, mR, mB, kCMCorner);
-      dc(v, 0.10f, 0.10f, 0.16f, 0.97f);
-    }
-    {
-      std::vector<float> v;
-      pushRR(v, mx, my, mR, mB, kCMCorner, 1.0f);
-      dc(v, 0.32f, 0.30f, 0.52f, 1.0f);
-    }
-    for (int i = 0; i < kGateMenuItemCount; ++i) {
-      float iy = ctxRowY(i), iB = iy + kCMItemH;
-      if (i == ctxMenu_.hoveredItem) {
-        std::vector<float> v;
-        float hcr =
-            (i == 0 || i == kGateMenuItemCount - 1) ? kCMCorner - 1.f : 0.f;
-        pushRRFill(v, mx + 2, iy, mR - 2, iB, hcr);
-        dc(v, 0.28f, 0.22f, 0.50f, 0.85f);
-        std::vector<float> acc;
-        pushQuad(acc, mx + 2, iy + 3, mx + 4, iB - 3);
-        dc(acc, 0.68f, 0.48f, 1.0f, 1.0f);
-      }
-      if (i > 0) {
-        float sepY = iy - kCMRowGap * 0.5f;
-        std::vector<float> v;
-        pushLine(v, mx + 8, sepY, mR - 8, sepY, 0.5f);
-        dc(v, 0.28f, 0.28f, 0.42f, 0.6f);
-      }
-      float icx = mx + kCMIconOff, icy = iy + kCMItemH * 0.5f;
-      bool hov = (i == ctxMenu_.hoveredItem);
-      std::vector<float> iv;
-      if (kGateMenuItems[i].iconType == 0) {
-        pushIconTrash(iv, icx, icy, kCMIconSize, 1.1f);
-        dc(iv, hov ? 0.95f : 0.72f, hov ? 0.38f : 0.30f, hov ? 0.38f : 0.30f,
-           hov ? 1.f : 0.80f);
-      } else {
-        {
-          std::vector<float> fv;
-          float pW = kCMIconSize * 0.58f, pH = kCMIconSize * 0.68f,
-                fL = icx - pW * 0.5f, fB = icy - pH * 0.5f;
-          pushRRFill(fv, fL, fB, fL + pW, fB + pH, 2.f);
-          dc(fv, hov ? 0.18f : 0.12f, hov ? 0.14f : 0.10f, hov ? 0.26f : 0.18f,
-             1.f);
-        }
-        pushIconCopy(iv, icx, icy, kCMIconSize, 1.1f);
-        dc(iv, hov ? 0.75f : 0.55f, hov ? 0.65f : 0.48f, hov ? 1.0f : 0.82f,
-           hov ? 1.f : 0.80f);
-      }
-    }
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    blitCtxMenuLabelTex();
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-  }
-
-  void redraw() {
-    if (onRedrawNeeded)
-      onRedrawNeeded();
-  }
-  void notifyMode() {
-    if (onSimModeChanged)
-      onSimModeChanged(simMode);
-  }
-  void afterEdit(const char *msg) {
-    if (onCircuitChanged)
-      onCircuitChanged();
-    if (onSimUpdated)
-      onSimUpdated();
-    if (onStatusMessage)
-      onStatusMessage(msg);
-    redraw();
-  }
-  void w2s(float wx, float wy, float &sx, float &sy) const {
-    sx = (wx - camX_) * zoom_;
-    sy = viewH_ - (wy - camY_) * zoom_;
-  }
-  void s2w(float sx, float sy, float &wx, float &wy) const {
-    wx = camX_ + sx / zoom_;
-    wy = camY_ + sy / zoom_;
-  }
-
-  std::tuple<float, float, float, float> wireSC(const Wire &w) const {
-    float sx0 = 0, sy0 = 0, sx1 = 0, sy1 = 0;
-    // Source
-    if (w.srcIsSubInst()) {
-      const SubcircuitInst *inst = circuit.findInst(w.srcInstId());
-      if (inst && w.src.pinIdx < (int)inst->outputPins.size())
-        w2s(inst->outputPins[w.src.pinIdx].cx,
-            inst->outputPins[w.src.pinIdx].cy, sx0, sy0);
-    } else {
-      if (auto *g = circuit.find(w.src.gateId))
-        if (w.src.pinIdx < (int)g->outPins.size())
-          w2s(g->outPins[w.src.pinIdx].cx, g->outPins[w.src.pinIdx].cy, sx0,
-              sy0);
-    }
-    // Dest
-    if (w.dstIsSubInst()) {
-      const SubcircuitInst *inst = circuit.findInst(w.dstInstId());
-      if (inst && w.dst.pinIdx < (int)inst->inputPins.size())
-        w2s(inst->inputPins[w.dst.pinIdx].cx, inst->inputPins[w.dst.pinIdx].cy,
-            sx1, sy1);
-    } else {
-      if (auto *g = circuit.find(w.dst.gateId))
-        if (w.dst.pinIdx < (int)g->inPins.size())
-          w2s(g->inPins[w.dst.pinIdx].cx, g->inPins[w.dst.pinIdx].cy, sx1, sy1);
-    }
-    return {sx0, sy0, sx1, sy1};
-  }
-  float wireSplitSX(const Wire &w, float sx0, float sx1) const {
-    return w.splitX < 1e29f ? (w.splitX - camX_) * zoom_ : (sx0 + sx1) * 0.5f;
-  }
+  // HSL LUT textures (360×1 R8)
+  GLuint hslTexHue_ = 0, hslTexSat_ = 0, hslTexLum_ = 0;
 
   void buildShader() {
-    prog_ = glutil::linkProgram(kGVert, kGFrag);
-    assert(prog_);
-    uViewSize_ = GL.getUniformLocation(prog_, "uViewSize");
-    uColor_ = GL.getUniformLocation(prog_, "uColor");
+    editProg_ = glutil::linkProgram(kEditVert, kEditFrag);
+    assert(editProg_);
   }
-  void buildTexShader() {
-    texProg_ = glutil::linkProgram(kTexVert, kTexFrag);
-    assert(texProg_);
-    uTexViewSize_ = GL.getUniformLocation(texProg_, "uViewSize");
-    uTexSampler_ = GL.getUniformLocation(texProg_, "uTex");
-  }
-  void buildVAO() {
-    GL.genVertexArrays(1, &vao_);
-    GL.genBuffers(1, &vbo_);
-    GL.bindVertexArray(vao_);
-    GL.bindBuffer(GL_ARRAY_BUFFER, vbo_);
+
+void buildQuad() {
+    // Allocate VAO/VBO with enough space; data uploaded in uploadQuadForSize()
+    GL.genVertexArrays(1, &quadVAO_);
+    GL.genBuffers(1, &quadVBO_);
+    GL.bindVertexArray(quadVAO_);
+    GL.bindBuffer(GL_ARRAY_BUFFER, quadVBO_);
+    GL.bufferData(GL_ARRAY_BUFFER, sizeof(float) * 6 * 4, nullptr, GL_DYNAMIC_DRAW);
     GL.enableVertexAttribArray(0);
-    GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float),
-                           (void *)0);
-    GL.bindVertexArray(0);
-  }
-  void buildTexVAO() {
-    GL.genVertexArrays(1, &texVao_);
-    GL.genBuffers(1, &texVbo_);
-    GL.bindVertexArray(texVao_);
-    GL.bindBuffer(GL_ARRAY_BUFFER, texVbo_);
-    GL.enableVertexAttribArray(0);
-    GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
-                           (void *)0);
+    GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
     GL.enableVertexAttribArray(1);
-    GL.vertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
-                           (void *)(2 * sizeof(float)));
-    GL.bufferData(GL_ARRAY_BUFFER, 6 * 4 * sizeof(float), nullptr,
-                  GL_DYNAMIC_DRAW);
+    GL.vertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(8));
     GL.bindVertexArray(0);
   }
-  void upload(const std::vector<float> &v) {
-    GL.bindBuffer(GL_ARRAY_BUFFER, vbo_);
-    GL.bufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(v.size() * sizeof(float)),
-                  v.data(), GL_DYNAMIC_DRAW);
-  }
-  void dc(const std::vector<float> &v, float r, float g, float b,
-          float a = 1.f) {
-    if (v.empty())
-      return;
-    upload(v);
-    ls_gl::uniform4f(uColor_, r, g, b, a);
-    glDrawArrays(GL_TRIANGLES, 0, (GLsizei)(v.size() / 2));
-  }
 
-  // ── Grid (unchanged) ──────────────────────────────────────────────────
-  void drawGrid() {
-    float gs = 40.f, step = gs * zoom_;
-    if (step < 4.f)
-      return;
-    float vw = float(viewW_), vh = float(viewH_);
-    std::vector<float> lines;
-    lines.reserve(2048);
-    for (float wx = std::floor(camX_ / gs) * gs;; wx += gs) {
-      float sx = (wx - camX_) * zoom_;
-      if (sx > vw + step)
-        break;
-      pushLine(lines, sx, 0, sx, vh, 0.5f);
-    }
-    for (float wy = std::floor(camY_ / gs) * gs;; wy += gs) {
-      float sy = vh - (wy - camY_) * zoom_;
-      if (sy < -step)
-        break;
-      pushLine(lines, 0, sy, vw, sy, 0.5f);
-    }
-    dc(lines, 0.12f, 0.13f, 0.19f);
-    if (snapEnabled && zoom_ > 0.35f) {
-      float gsnap = kGrid, sdot = max(1.f, zoom_ * 1.1f);
-      std::vector<float> dots;
-      for (float wx = std::floor(camX_ / gsnap) * gsnap;
-           wx < camX_ + viewW_ / zoom_; wx += gsnap) {
-        float sx = (wx - camX_) * zoom_;
-        for (float wy = std::floor(camY_ / gsnap) * gsnap;
-             wy < camY_ + viewH_ / zoom_; wy += gsnap) {
-          float sy = vh - (wy - camY_) * zoom_;
-          pushCircle(dots, sx, sy, sdot, 6);
-        }
-      }
-      dc(dots, 0.22f, 0.24f, 0.38f, 0.65f);
-    }
-    float ox, oy;
-    w2s(0, 0, ox, oy);
-    std::vector<float> cross;
-    pushLine(cross, ox - 10, oy, ox + 10, oy, 1.f);
-    pushLine(cross, ox, oy - 10, ox, oy + 10, 1.f);
-    dc(cross, 0.22f, 0.23f, 0.36f);
+  // Upload a canvas-space quad matching the current image dimensions.
+  // UV (0,0) = bottom-left, (1,1) = top-right  (GL Y-up convention).
+  void uploadQuadForSize(float w, float h) {
+    float v[] = {
+      0.f, 0.f,  0.f, 0.f,
+      w,   0.f,  1.f, 0.f,
+      w,   h,    1.f, 1.f,
+      w,   h,    1.f, 1.f,
+      0.f, h,    0.f, 1.f,
+      0.f, 0.f,  0.f, 0.f,
+    };
+    GL.bindBuffer(GL_ARRAY_BUFFER, quadVBO_);
+    GL.bufferSubData(GL_ARRAY_BUFFER, 0, sizeof(v), v);
+    GL.bindBuffer(GL_ARRAY_BUFFER, 0);
   }
 
-  // ── Wires (unchanged logic, uses updated wireSC) ──────────────────────
-  void drawAllWires() {
-    bool sim = isSimActive();
-    float hw = max(1.0f, zoom_ * 1.4f), dotr = max(2.2f, hw * 1.0f);
-    for (auto &w : circuit.wires) {
-      auto [sx0, sy0, sx1, sy1] = wireSC(w);
-      float msx = wireSplitSX(w, sx0, sx1);
-      if (!sim && w.selected) {
-        std::vector<float> halo;
-        pushOrtho(halo, sx0, sy0, sx1, sy1, msx, hw + 4.f);
-        dc(halo, 0.9f, 0.78f, 0.2f, 0.25f);
-      }
-      {
-        std::vector<float> body;
-        float busHW = w.isBus() ? hw * 2.8f : hw;
-        pushOrtho(body, sx0, sy0, sx1, sy1, msx, busHW);
-        if (w.isBus()) {
-          // Color encodes how many bits are HIGH
-          int hi = 0;
-          for (bool b : w.busValue)
-            if (b)
-              hi++;
-          float t =
-              w.busValue.empty() ? 0.f : float(hi) / float(w.busValue.size());
-          dc(body, 0.28f + t * 0.4f, 0.55f + t * 0.37f, 0.92f, 0.9f);
-        } else if (w.value)
-          dc(body, 0.28f, 0.92f, 0.48f);
-        else if (!sim && w.selected)
-          dc(body, 0.88f, 0.75f, 0.18f);
-        else
-          dc(body, 0.22f, 0.25f, 0.42f);
-      }
-      // Bus width badge drawn at midpoint
-      if (w.isBus()) {
-        float bmx = (sx0 + sx1) * 0.5f, bmy = (sy0 + sy1) * 0.5f;
-        std::vector<float> badge;
-        pushCircle(badge, bmx, bmy, max(7.f, zoom_ * 5.f), 12);
-        dc(badge, 0.12f, 0.16f, 0.32f);
-        // Tick marks indicating bus width
-        int bits = busWidthBits(w.width);
-        float tr = max(5.f, zoom_ * 3.5f);
-        std::vector<float> ticks;
-        for (int i = 0; i < bits; i++) {
-          float a = float(i) / float(bits) * 6.2831853f;
-          pushLine(ticks, bmx, bmy, bmx + cosf(a) * tr, bmy + sinf(a) * tr,
-                   max(0.8f, zoom_ * 0.6f));
-        }
-        dc(ticks, 0.62f, 0.72f, 0.98f);
-      }
-      {
-        std::vector<float> dots;
-        pushOrthoBends(dots, sx0, sy0, sx1, sy1, msx, dotr);
-        pushCircle(dots, sx0, sy0, dotr);
-        pushCircle(dots, sx1, sy1, dotr);
-        if (w.value)
-          dc(dots, 0.28f, 0.92f, 0.48f);
-        else if (!sim && w.selected)
-          dc(dots, 0.88f, 0.75f, 0.18f);
-        else
-          dc(dots, 0.28f, 0.32f, 0.55f);
-      }
-      if (!sim && w.selected) {
-        std::vector<float> vs;
-        pushLine(vs, msx, sy0, msx, sy1, hw + 1.5f);
-        dc(vs, 0.68f, 0.48f, 1.0f, 0.55f);
-      }
-    }
+  void buildNoiseTexture() {
+    const int N = 64;
+    std::vector<uint8_t> noise(N * N * 3);
+    srand(42);
+    for (auto &v : noise)
+      v = uint8_t(rand() & 0xFF);
+    glGenTextures(1, &noiseTex_);
+    glBindTexture(GL_TEXTURE_2D, noiseTex_);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, N, N, 0, GL_RGB, GL_UNSIGNED_BYTE,
+                 noise.data());
+    glBindTexture(GL_TEXTURE_2D, 0);
   }
 
-  // ── Drag preview (unchanged) ──────────────────────────────────────────
-  void drawDragPreview() {
-    if (!dragWire_)
-      return;
-    float sx0, sy0;
-    {
-      auto *g = circuit.find(dragSrc_.gateId);
-      if (dragSrc_.isSubInst) {
-        auto *inst = circuit.findInst(-dragSrc_.gateId);
-        if (!inst || dragSrc_.pinIdx >= (int)inst->outputPins.size())
-          return;
-        w2s(inst->outputPins[dragSrc_.pinIdx].cx,
-            inst->outputPins[dragSrc_.pinIdx].cy, sx0, sy0);
-      } else {
-        if (!g || dragSrc_.pinIdx >= (int)g->outPins.size())
-          return;
-        w2s(g->outPins[dragSrc_.pinIdx].cx, g->outPins[dragSrc_.pinIdx].cy, sx0,
-            sy0);
-      }
+  // ── 256×1 R8 LUT (tone curves) ───────────────────────────────────────────
+  void uploadOneLUT256(GLuint &tex, const uint8_t *data) {
+    if (!tex) {
+      glGenTextures(1, &tex);
+      glBindTexture(GL_TEXTURE_2D, tex);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    } else {
+      glBindTexture(GL_TEXTURE_2D, tex);
     }
-    float sx1, sy1;
-    if (hasDstSnap_)
-      w2s(dstSnap_.cx, dstSnap_.cy, sx1, sy1);
-    else
-      w2s(dragCurWX_, dragCurWY_, sx1, sy1);
-    float hw = max(1.f, zoom_ * 1.3f);
-    bool sn = hasDstSnap_;
-    float msx = (sx0 + sx1) * 0.5f;
-    {
-      std::vector<float> g;
-      pushOrtho(g, sx0, sy0, sx1, sy1, msx, hw + 5.f);
-      dc(g, sn ? .25f : .50f, sn ? .90f : .45f, sn ? .45f : .95f, 0.18f);
-    }
-    {
-      std::vector<float> l;
-      pushOrtho(l, sx0, sy0, sx1, sy1, msx, hw);
-      dc(l, sn ? .28f : .52f, sn ? 1.f : .50f, sn ? .52f : .98f, 0.85f);
-    }
-    {
-      std::vector<float> dots;
-      pushOrthoBends(dots, sx0, sy0, sx1, sy1, msx, max(3.f, hw * 1.2f));
-      pushCircle(dots, sx1, sy1, max(4.f, hw * 2.f));
-      dc(dots, sn ? .28f : .52f, sn ? 1.f : .50f, sn ? .52f : .98f);
-    }
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, 256, 1, 0, GL_RED, GL_UNSIGNED_BYTE,
+                 data);
+    glBindTexture(GL_TEXTURE_2D, 0);
   }
 
-  // ── Pin hovers (unchanged) ─────────────────────────────────────────────
-  void drawPinHovers() {
-    if (dragWire_ && hasDstSnap_) {
-      float sx, sy;
-      w2s(dstSnap_.cx, dstSnap_.cy, sx, sy);
-      std::vector<float> r;
-      pushCircle(r, sx, sy, max(6.f, kPinR * zoom_ * 2.f), 24);
-      dc(r, 0.28f, 1.f, 0.5f, 0.45f);
+  // ── 360×1 R8 LUT (HSL) ───────────────────────────────────────────────────
+  void uploadOneLUT360(GLuint &tex, const uint8_t *data) {
+    if (!tex) {
+      glGenTextures(1, &tex);
+      glBindTexture(GL_TEXTURE_2D, tex);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    } else {
+      glBindTexture(GL_TEXTURE_2D, tex);
     }
-    if (!dragWire_ && hovPinValid_ && !isSimActive()) {
-      float sx, sy;
-      w2s(hovPin_.cx, hovPin_.cy, sx, sy);
-      std::vector<float> r;
-      pushCircle(r, sx, sy, max(6.f, kPinR * zoom_ * 2.f), 24);
-      if (hovPin_.isOutput)
-        dc(r, 1.f, 0.72f, 0.28f, 0.40f);
-      else
-        dc(r, 0.4f, 0.6f, 1.f, 0.40f);
-    }
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, 360, 1, 0, GL_RED, GL_UNSIGNED_BYTE,
+                 data);
+    glBindTexture(GL_TEXTURE_2D, 0);
   }
 
-  // ── Sim border (unchanged) ─────────────────────────────────────────────
-  void drawSimBorder() {
-    float vw = float(viewW_), vh = float(viewH_), bw = 3.f;
-    std::vector<float> b;
-    pushLine(b, 0, bw, vw, bw, bw);
-    pushLine(b, 0, vh - bw, vw, vh - bw, bw);
-    pushLine(b, bw, 0, bw, vh, bw);
-    pushLine(b, vw - bw, 0, vw - bw, vh, bw);
-    if (simMode == SimMode::Running)
-      dc(b, 0.28f, 0.86f, 0.47f, 0.55f);
-    else
-      dc(b, 0.86f, 0.78f, 0.28f, 0.55f);
+  void buildIdentityLUTs() {
+    uint8_t id[256];
+    for (int i = 0; i < 256; ++i)
+      id[i] = uint8_t(i);
+    uploadOneLUT256(lutTexRGB_, id);
+    uploadOneLUT256(lutTexR_, id);
+    uploadOneLUT256(lutTexG_, id);
+    uploadOneLUT256(lutTexB_, id);
   }
 
-  // =========================================================================
-  // ── Subcircuit instance renderer ─────────────────────────────────────────
-  // =========================================================================
-  void drawSubcircuitInst(const SubcircuitInst &inst) {
-    auto it = circuit.subcircuitDefs.find(inst.defId);
-    const SubcircuitDef *def =
-        it != circuit.subcircuitDefs.end() ? &it->second : nullptr;
-
-    float sx, sy;
-    w2s(inst.x, inst.y, sx, sy);
-    float z = zoom_;
-    int ni = (int)inst.inputPins.size(), no = (int)inst.outputPins.size();
-    float h = subcircuitH(ni, no) * z;
-    float hw = kSCWidth * z * 0.5f, hh = h * 0.5f;
-    float L = sx - hw, R = sx + hw, yT = sy - hh, yB = sy + hh;
-    float lw = max(1.0f, z), cr = min(8.f * z, 7.f);
-    bool sim = isSimActive();
-
-    // Accent colour for subcircuit: violet
-    static constexpr float kSCBodyR = 0.10f, kSCBodyG = 0.08f, kSCBodyB = 0.22f;
-    static constexpr float kSCBordR = 0.62f, kSCBordG = 0.42f, kSCBordB = 0.98f;
-
-    // Shadow
-    {
-      std::vector<float> v;
-      pushRRFill(v, L + 3, yT + 3, R + 3, yB + 3, cr);
-      dc(v, 0, 0, 0, 0.45f);
-    }
-    // Body fill
-    {
-      std::vector<float> v;
-      pushRRFill(v, L, yT, R, yB, cr);
-      dc(v, kSCBodyR, kSCBodyG, kSCBodyB);
-    }
-    // Selection tint
-    if (inst.selected) {
-      std::vector<float> v;
-      pushRRFill(v, L, yT, R, yB, cr);
-      dc(v, 0.80f, 0.65f, 0.97f, 0.18f);
-    }
-    // Active glow (any output high)
-    if (sim) {
-      bool anyHigh = false;
-      for (auto &p : inst.outputPins)
-        if (p.value) {
-          anyHigh = true;
-          break;
-        }
-      if (anyHigh) {
-        std::vector<float> v;
-        pushRR(v, L - 1, yT - 1, R + 1, yB + 1, cr + 1, max(1.5f, z));
-        dc(v, kSCBordR, kSCBordG, kSCBordB, 0.50f);
-      }
-    }
-    // Outline
-    {
-      std::vector<float> v;
-      pushRR(v, L, yT, R, yB, cr, lw);
-      if (inst.selected)
-        dc(v, 0.80f, 0.65f, 0.97f);
-      else
-        dc(v, kSCBordR, kSCBordG, kSCBordB);
-    }
-    // Selection inner ring
-    if (inst.selected) {
-      std::vector<float> v;
-      pushRR(v, L + 2, yT + 2, R - 2, yB - 2, cr - 2, lw * 0.5f);
-      dc(v, 0.80f, 0.65f, 0.97f, 0.3f);
-    }
-
-    // Centre label: module name
-    // (text rendered via GDI into a tiny texture would be ideal;
-    //  for now draw a horizontal rule to suggest the name region)
-    {
-      float midY = sy;
-      std::vector<float> v;
-      pushLine(v, L + cr, midY, R - cr, midY, max(0.5f, lw * 0.4f));
-      dc(v, kSCBordR, kSCBordG, kSCBordB, 0.25f);
-    }
-    // Small triangle badge top-right to indicate it's a subcircuit
-    {
-      float bx = R - 5.f * z, by = yT + 5.f * z, bs = 5.f * z;
-      std::vector<float> v;
-      v.insert(v.end(), {bx - bs, by, bx, by, bx, by + bs});
-      dc(v, kSCBordR, kSCBordG, kSCBordB, 0.6f);
-    }
-
-    // ── Input pins ───────────────────────────────────────────────────
-    for (int i = 0; i < ni; i++) {
-      const SubcircuitPinInfo &pin = inst.inputPins[i];
-      float psx, psy;
-      w2s(pin.cx, pin.cy, psx, psy);
-      bool val = pin.value;
-      {
-        std::vector<float> v;
-        pushLine(v, psx, psy, L, psy, max(0.8f, z * .7f));
-        dc(v, 0.38f, 0.42f, 0.60f);
-      }
-      {
-        std::vector<float> v;
-        pushCircle(v, psx, psy, max(2.5f, kPinR * z));
-        if (sim)
-          dc(v, val ? .28f : .4f, val ? .86f : .4f, val ? .47f : .65f);
-        else
-          dc(v, pin.connected ? 1.f : 0.f, pin.connected ? .86f : .31f,
-             pin.connected ? .47f : .51f);
-      }
-    }
-
-    // ── Output pins ──────────────────────────────────────────────────
-    for (int i = 0; i < no; i++) {
-      const SubcircuitPinInfo &pin = inst.outputPins[i];
-      float psx, psy;
-      w2s(pin.cx, pin.cy, psx, psy);
-      bool val = pin.value;
-      {
-        std::vector<float> v;
-        pushLine(v, R, psy, psx, psy, max(0.8f, z * .7f));
-        dc(v, 0.38f, 0.42f, 0.60f);
-      }
-      {
-        std::vector<float> v;
-        pushCircle(v, psx, psy, max(2.5f, kPinR * z));
-        if (sim)
-          dc(v, val ? .28f : .86f, val ? .86f : .51f, val ? .47f : .16f);
-        else
-          dc(v, pin.connected ? 1.f : .86f, pin.connected ? .86f : .51f,
-             pin.connected ? .47f : .16f);
-      }
-    }
+  void buildIdentityHSLLUTs() {
+    // Identity: all neutral (128 = 0 shift, 128 = 1× scale)
+    uint8_t id[360];
+    memset(id, 128, 360);
+    uploadOneLUT360(hslTexHue_, id);
+    uploadOneLUT360(hslTexSat_, id);
+    uploadOneLUT360(hslTexLum_, id);
   }
 
-  // =========================================================================
-  // ── Gate drawing (unchanged from v12 — full copy) ────────────────────────
-  // =========================================================================
-  void drawGate(const Gate &g) {
-    float sx, sy;
-    w2s(g.x, g.y, sx, sy);
-    float z = zoom_, gh = gateH(g.type) * z, hw = kGW * z * 0.5f,
-          hh = gh * 0.5f;
-    float L = sx - hw, R = sx + hw, yT = sy - hh, yB = sy + hh,
-          lw = max(1.0f, z), cr = kCorner * z;
-    bool sim = isSimActive();
-    GateColors col = gateColors(g.type, g.selected);
-    auto DC = [&](const std::vector<float> &v, float r, float gg, float b,
-                  float a = 1.f) { dc(v, r, gg, b, a); };
-    auto DCb = [&](const std::vector<float> &v, float a = 1.f) {
-      DC(v, col.border[0], col.border[1], col.border[2], a);
-    };
-    auto DCbd = [&](const std::vector<float> &v, float a = 1.f) {
-      DC(v, col.body[0], col.body[1], col.body[2], a);
-    };
-
-    if (isSequential(g.type)) {
-      drawSequentialGate(g, sx, sy, L, R, yT, yB, lw, z, sim, col);
-      return;
+  void rebuildEditFBOForImage() {
+    if (editFBO_) {
+      GL.deleteFramebuffers(1, &editFBO_);
+      editFBO_ = 0;
     }
-    if (isBusGate(g.type)) {
-      drawBusGate(g, sx, sy, L, R, yT, yB, lw, z, sim, col);
-      return;
+    if (editTex_) {
+      glDeleteTextures(1, &editTex_);
+      editTex_ = 0;
     }
-
-    if (g.type == GateType::INPUT) {
-      {
-        std::vector<float> v;
-        pushRRFill(v, L + 3, yT + 3, R + 3, yB + 3, cr);
-        DC(v, 0, 0, 0, 0.45f);
-      }
-      {
-        std::vector<float> v;
-        pushRRFill(v, L, yT, R, yB, cr);
-        DCbd(v);
-      }
-      {
-        std::vector<float> v;
-        pushRR(v, L, yT, R, yB, cr, lw * 0.5f + 0.5f);
-        DCb(v);
-      }
-      if (g.selected) {
-        std::vector<float> v;
-        pushRR(v, L + 2, yT + 2, R - 2, yB - 2, cr - 2, lw * 0.5f);
-        DCb(v, 0.3f);
-      }
-      bool on = g.inputVal;
-      float cr2 = max(5.f, 8.f * z), bcx = R - cr2 - 2 * z,
-            bcy = yT + cr2 + 2 * z;
-      if (sim && on) {
-        std::vector<float> ring;
-        pushRR(ring, L - 1, yT - 1, R + 1, yB + 1, cr + 1, max(1.5f, z));
-        DC(ring, 0.28f, 0.86f, 0.47f, 0.55f);
-      }
-      if (on) {
-        std::vector<float> gv;
-        pushCircle(gv, bcx, bcy, cr2 * 1.8f, 20);
-        DC(gv, 0.28f, 0.86f, 0.47f, 0.20f);
-      }
-      {
-        std::vector<float> v;
-        pushCircle(v, bcx, bcy, cr2);
-        DC(v, on ? .28f : .55f, on ? .86f : .18f, on ? .47f : .18f);
-      }
-      {
-        float lw2 = hw * .3f, lh = max(1.5f, z * 1.5f);
-        std::vector<float> v;
-        pushQuad(v, sx - lw2, sy - lh * .5f, sx + lw2, sy + lh * .5f);
-        DC(v, on ? .28f : .55f, on ? .86f : .18f, on ? .47f : .18f, 0.7f);
-      }
-      for (auto &pin : g.outPins) {
-        float psx, psy;
-        w2s(pin.cx, pin.cy, psx, psy);
-        {
-          std::vector<float> v;
-          pushLine(v, R, psy, psx, psy, max(0.8f, z * .7f));
-          DC(v, 0.38f, 0.42f, 0.60f);
-        }
-        {
-          std::vector<float> v;
-          pushCircle(v, psx, psy, max(2.5f, kPinR * z));
-          DC(v, pin.connected ? 1.f : .86f, pin.connected ? .86f : .51f,
-             pin.connected ? .47f : .16f);
-        }
-      }
-      return;
-    }
-    if (g.type == GateType::OUTPUT) {
-      {
-        std::vector<float> v;
-        pushRRFill(v, L + 3, yT + 3, R + 3, yB + 3, cr);
-        DC(v, 0, 0, 0, 0.45f);
-      }
-      {
-        std::vector<float> v;
-        pushRRFill(v, L, yT, R, yB, cr);
-        DCbd(v);
-      }
-      {
-        std::vector<float> v;
-        pushRR(v, L, yT, R, yB, cr, lw * 0.5f + 0.5f);
-        DCb(v);
-      }
-      if (g.selected) {
-        std::vector<float> v;
-        pushRR(v, L + 2, yT + 2, R - 2, yB - 2, cr - 2, lw * 0.5f);
-        DCb(v, 0.3f);
-      }
-      bool live = false;
-      for (auto &w : circuit.wires)
-        if (w.dst.gateId == g.id) {
-          live = w.value;
-          break;
-        }
-      float cr2 = max(4.f, 7.f * z), bcx = R - cr2 - 2 * z,
-            bcy = yT + cr2 + 2 * z;
-      if (live) {
-        std::vector<float> ring;
-        pushRR(ring, L - 1, yT - 1, R + 1, yB + 1, cr + 1, max(1.5f, z));
-        DC(ring, 0.28f, 0.86f, 0.47f, 0.60f);
-        std::vector<float> tint;
-        pushRRFill(tint, L, yT, R, yB, cr);
-        DC(tint, 0.05f, 0.32f, 0.10f, 0.22f);
-        std::vector<float> gv;
-        pushCircle(gv, bcx, bcy, cr2 * 2.2f, 24);
-        DC(gv, 0.28f, 0.86f, 0.47f, 0.22f);
-      }
-      {
-        std::vector<float> v;
-        pushCircle(v, bcx, bcy, cr2);
-        DC(v, live ? .28f : .55f, live ? .86f : .22f, live ? .47f : .10f,
-           live ? 1.f : .5f);
-      }
-      {
-        std::vector<float> v;
-        pushCircle(v, bcx, bcy, cr2 * .5f);
-        DC(v, live ? .5f : .4f, live ? 1.f : .28f, live ? .65f : .12f,
-           live ? 1.f : .35f);
-      }
-      for (auto &pin : g.inPins) {
-        float psx, psy;
-        w2s(pin.cx, pin.cy, psx, psy);
-        {
-          std::vector<float> v;
-          pushLine(v, L, psy, psx, psy, max(0.8f, z * .7f));
-          DC(v, 0.38f, 0.42f, 0.60f);
-        }
-        {
-          std::vector<float> v;
-          pushCircle(v, psx, psy, max(2.5f, kPinR * z));
-          DC(v, pin.connected ? 1.f : 0.f, pin.connected ? .86f : .31f,
-             pin.connected ? .47f : .51f);
-        }
-      }
-      return;
-    }
-    if (g.type == GateType::CLOCK) {
-      bool on = g.inputVal;
-      {
-        std::vector<float> v;
-        pushRRFill(v, L + 3, yT + 3, R + 3, yB + 3, cr);
-        DC(v, 0, 0, 0, 0.45f);
-      }
-      {
-        std::vector<float> v;
-        pushRRFill(v, L, yT, R, yB, cr);
-        DCbd(v);
-      }
-      {
-        std::vector<float> v;
-        pushRR(v, L, yT, R, yB, cr, lw * 0.5f + 0.5f);
-        DCb(v);
-      }
-      if (g.selected) {
-        std::vector<float> v;
-        pushRR(v, L + 2, yT + 2, R - 2, yB - 2, cr - 2, lw * 0.5f);
-        DCb(v, 0.3f);
-      }
-      if (sim && on) {
-        std::vector<float> ring;
-        pushRR(ring, L - 1, yT - 1, R + 1, yB + 1, cr + 1, max(1.5f, z));
-        DC(ring, 0.18f, 0.82f, 0.90f, 0.65f);
-        std::vector<float> tint;
-        pushRRFill(tint, L, yT, R, yB, cr);
-        DC(tint, 0.02f, 0.22f, 0.30f, 0.22f);
-      }
-      {
-        float glyphW = (R - L) * 0.68f, glyphH = (yB - yT) * 0.38f,
-              gcx = sx - (R - L) * 0.05f, gcy = (yT + yB) * 0.5f,
-              strokeW = max(1.2f, z * 1.1f);
-        std::vector<float> wv;
-        pushSquareWave(wv, gcx, gcy, glyphW, glyphH, strokeW);
-        DC(wv, on ? 0.18f : 0.30f, on ? 0.90f : 0.65f, on ? 0.95f : 0.80f,
-           on ? 1.f : 0.65f);
-      }
-      {
-        float cr2 = max(4.5f, 6.5f * z), bcx = R - cr2 - 2 * z,
-              bcy = yT + cr2 + 2 * z;
-        if (sim) {
-          std::vector<float> gv;
-          pushCircle(gv, bcx, bcy, cr2 * 1.9f, 20);
-          DC(gv, 0.18f, 0.82f, 0.90f, on ? 0.22f : 0.08f);
-        }
-        {
-          std::vector<float> v;
-          pushCircle(v, bcx, bcy, cr2);
-          DC(v, on ? 0.18f : 0.25f, on ? 0.82f : 0.45f, on ? 0.90f : 0.55f);
-        }
-        {
-          std::vector<float> v;
-          pushCircle(v, bcx, bcy, cr2 * 0.45f);
-          DC(v, 0.7f, 0.95f, 1.f, on ? 1.f : 0.4f);
-        }
-      }
-      for (auto &pin : g.outPins) {
-        float psx, psy;
-        w2s(pin.cx, pin.cy, psx, psy);
-        {
-          std::vector<float> v;
-          pushLine(v, R, psy, psx, psy, max(0.8f, z * .7f));
-          DC(v, 0.38f, 0.42f, 0.60f);
-        }
-        {
-          std::vector<float> v;
-          pushCircle(v, psx, psy, max(2.5f, kPinR * z));
-          DC(v, pin.connected ? 1.f : .86f, pin.connected ? .86f : .51f,
-             pin.connected ? .47f : .16f);
-        }
-      }
-      return;
-    }
-    // IEEE/ANSI gates
-    bool isNeg = (g.type == GateType::NAND || g.type == GateType::NOR ||
-                  g.type == GateType::XNOR || g.type == GateType::NOT);
-    bool isOR = (g.type == GateType::OR || g.type == GateType::NOR ||
-                 g.type == GateType::XOR || g.type == GateType::XNOR);
-    bool isAND = (g.type == GateType::AND || g.type == GateType::NAND);
-    bool isTRI = (g.type == GateType::NOT);
-    float H = yB - yT, MY = (yT + yB) * 0.5f, bubR = H * 0.115f;
-    float tipX = isTRI ? (R - H * 0.20f) : R;
-    float bubCX = isAND   ? (L + (R - L) * 0.44f + H * 0.5f + bubR)
-                  : isTRI ? (tipX + bubR)
-                          : (R + bubR);
-    {
-      std::vector<float> sv;
-      float s = 3.f;
-      if (isAND)
-        pushANDFill(sv, L + s, yT + s, R + s, yB + s);
-      else if (isOR)
-        pushORFill(sv, L + s, yT + s, R + s, yB + s);
-      else
-        pushTriFill(sv, L + s, yT + s, R + s, yB + s);
-      DC(sv, 0, 0, 0, 0.38f);
-    }
-    {
-      std::vector<float> fv;
-      if (isAND)
-        pushANDFill(fv, L, yT, R, yB);
-      else if (isOR)
-        pushORFill(fv, L, yT, R, yB);
-      else
-        pushTriFill(fv, L, yT, R, yB);
-      DCbd(fv);
-    }
-    if (g.selected) {
-      std::vector<float> sv;
-      if (isAND)
-        pushANDFill(sv, L, yT, R, yB);
-      else if (isOR)
-        pushORFill(sv, L, yT, R, yB);
-      else
-        pushTriFill(sv, L, yT, R, yB);
-      DC(sv, 0.80f, 0.65f, 0.97f, 0.18f);
-    }
-    if (sim && g.simVal) {
-      std::vector<float> gv;
-      float e = lw * 0.8f;
-      if (isAND)
-        pushANDOutline(gv, L - e, yT - e, R + e, yB + e, lw * 1.8f);
-      else if (isOR) {
-        pushOROutline(gv, L - e, yT - e, R + e, yB + e, lw * 1.8f);
-        if (g.type == GateType::XOR || g.type == GateType::XNOR)
-          pushXORBackArc(gv, L - e, yT - e, R + e, yB + e, lw * 1.8f);
-      } else
-        pushTRIOutline(gv, L - e, yT - e, R + e, yB + e, lw * 1.8f, isNeg);
-      if (isNeg)
-        pushRing(gv, bubCX, MY, bubR + e, lw * 1.8f);
-      DC(gv, 0.28f, 0.86f, 0.47f, 0.38f);
-    }
-    {
-      std::vector<float> ov;
-      if (isAND)
-        pushANDOutline(ov, L, yT, R, yB, lw);
-      else if (isOR) {
-        pushOROutline(ov, L, yT, R, yB, lw);
-        if (g.type == GateType::XOR || g.type == GateType::XNOR)
-          pushXORBackArc(ov, L, yT, R, yB, lw);
-      } else
-        pushTRIOutline(ov, L, yT, R, yB, lw, isNeg);
-      DCb(ov);
-    }
-    if (isNeg) {
-      {
-        std::vector<float> v;
-        pushCircle(v, bubCX, MY, bubR, 18);
-        DCbd(v);
-      }
-      {
-        std::vector<float> v;
-        pushRing(v, bubCX, MY, bubR, lw);
-        DCb(v);
-      }
-    }
-    if (g.selected) {
-      std::vector<float> rv;
-      float i2 = lw * 0.45f;
-      if (isAND)
-        pushANDOutline(rv, L + 2, yT + 2, R - 2, yB - 2, i2);
-      else if (isOR) {
-        pushOROutline(rv, L + 2, yT + 2, R - 2, yB - 2, i2);
-        if (g.type == GateType::XOR || g.type == GateType::XNOR)
-          pushXORBackArc(rv, L + 2, yT + 2, R - 2, yB - 2, i2);
-      } else
-        pushTRIOutline(rv, L + 2, yT + 2, R - 2, yB - 2, i2, isNeg);
-      DCb(rv, 0.35f);
-    }
-    for (auto &pin : g.inPins) {
-      float psx, psy;
-      w2s(pin.cx, pin.cy, psx, psy);
-      float arcOff = (g.type == GateType::XOR || g.type == GateType::XNOR)
-                         ? (R - L) * 0.11f
-                         : 0.f;
-      {
-        std::vector<float> v;
-        pushLine(v, psx, psy, L + arcOff, psy, max(0.8f, z * .7f));
-        DC(v, 0.38f, 0.42f, 0.60f);
-      }
-      {
-        std::vector<float> v;
-        pushCircle(v, psx, psy, max(2.5f, kPinR * z));
-        DC(v, pin.connected ? 1.f : 0.f, pin.connected ? .86f : .31f,
-           pin.connected ? .47f : .51f);
-      }
-    }
-    for (auto &pin : g.outPins) {
-      float psx, psy;
-      w2s(pin.cx, pin.cy, psx, psy);
-      float stubStart = isNeg ? (bubCX + bubR) : R;
-      {
-        std::vector<float> v;
-        pushLine(v, stubStart, psy, psx, psy, max(0.8f, z * .7f));
-        DC(v, 0.38f, 0.42f, 0.60f);
-      }
-      {
-        std::vector<float> v;
-        pushCircle(v, psx, psy, max(2.5f, kPinR * z));
-        DC(v, pin.connected ? 1.f : .86f, pin.connected ? .86f : .51f,
-           pin.connected ? .47f : .16f);
-      }
-    }
+    glGenTextures(1, &editTex_);
+    glBindTexture(GL_TEXTURE_2D, editTex_);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, imgW_, imgH_, 0, GL_RGBA,
+                 GL_UNSIGNED_BYTE, nullptr);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    GL.genFramebuffers(1, &editFBO_);
+    GL.bindFramebuffer(GL_FRAMEBUFFER, editFBO_);
+    GL.framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                            editTex_, 0);
+    GL.bindFramebuffer(GL_FRAMEBUFFER, 0);
   }
 
-  void drawBusGate(const Gate &g, float sx, float sy, float L, float R,
-                   float yT, float yB, float lw, float z, bool sim,
-                   const GateColors &col) {
-    auto DC = [&](const std::vector<float> &v, float r, float gg, float b,
-                  float a = 1.f) { dc(v, r, gg, b, a); };
-    auto DCb = [&](const std::vector<float> &v, float a = 1.f) {
-      DC(v, col.border[0], col.border[1], col.border[2], a);
-    };
-    auto DCbd = [&](const std::vector<float> &v) {
-      DC(v, col.body[0], col.body[1], col.body[2]);
-    };
-    float cr = min(8.f * z, 6.f);
-    bool isIn = isBusIn(g.type);
-    int bits = busWidthBits(busGateWidth(g.type));
-
-    // Shadow
-    {
-      std::vector<float> v;
-      pushRRFill(v, L + 3, yT + 3, R + 3, yB + 3, cr);
-      DC(v, 0, 0, 0, 0.42f);
+  void uploadOriginal() {
+    if (origTex_) {
+      glDeleteTextures(1, &origTex_);
+      origTex_ = 0;
     }
-    // Body
-    {
-      std::vector<float> v;
-      pushRRFill(v, L, yT, R, yB, cr);
-      DCbd(v);
-    }
-    // Selection tint
-    if (g.selected) {
-      std::vector<float> v;
-      pushRRFill(v, L, yT, R, yB, cr);
-      DC(v, 0.80f, 0.65f, 0.97f, 0.18f);
-    }
-    // Outline
-    {
-      std::vector<float> v;
-      pushRR(v, L, yT, R, yB, cr, lw);
-      DCb(v);
-    }
-    if (g.selected) {
-      std::vector<float> v;
-      pushRR(v, L + 2, yT + 2, R - 2, yB - 2, cr - 2, lw * 0.5f);
-      DCb(v, 0.3f);
-    }
-
-    // Arrow stripe in centre showing pack ▲ or unpack ▼ direction
-    {
-      float ax = sx, ay = (yT + yB) * 0.5f, aw = (R - L) * 0.28f,
-            ah = (yB - yT) * 0.22f;
-      std::vector<float> v;
-      if (isIn) {
-        // right-pointing arrow = packing toward output
-        v.insert(v.end(), {ax - aw, ay - ah, ax + aw, ay, ax - aw, ay + ah});
-      } else {
-        // left-pointing arrow = unpacking toward outputs
-        v.insert(v.end(), {ax + aw, ay - ah, ax - aw, ay, ax + aw, ay + ah});
-      }
-      DCb(v, 0.7f);
-    }
-
-    // Bus width label: "2b" / "4b" / "8b" centred in gate
-    // (drawn as tick marks on the bus-side edge)
-    {
-      float edgeX = isIn ? R : L;
-      float tickLen = 5.f * z;
-      float spacing = (yB - yT) / float(bits + 1);
-      std::vector<float> ticks;
-      for (int i = 0; i < bits; i++) {
-        float ty = yT + spacing * float(i + 1);
-        float x0 = isIn ? edgeX - tickLen : edgeX;
-        float x1 = isIn ? edgeX : edgeX + tickLen;
-        pushLine(ticks, x0, ty, x1, ty, max(1.0f, z * 0.8f));
-      }
-      DCb(ticks, 0.55f);
-    }
-
-    // Input pins
-    for (auto &pin : g.inPins) {
-      float psx, psy;
-      w2s(pin.cx, pin.cy, psx, psy);
-      {
-        std::vector<float> v;
-        pushLine(v, psx, psy, L, psy, max(0.8f, z * .7f));
-        DC(v, 0.38f, 0.42f, 0.60f);
-      }
-      {
-        std::vector<float> v;
-        pushCircle(v, psx, psy, max(2.5f, kPinR * z));
-        DC(v, pin.connected ? 1.f : 0.f, pin.connected ? .86f : .31f,
-           pin.connected ? .47f : .51f);
-      }
-    }
-    // Output pins
-    for (auto &pin : g.outPins) {
-      float psx, psy;
-      w2s(pin.cx, pin.cy, psx, psy);
-      {
-        std::vector<float> v;
-        pushLine(v, R, psy, psx, psy, max(0.8f, z * .7f));
-        DC(v, 0.38f, 0.42f, 0.60f);
-      }
-      {
-        std::vector<float> v;
-        pushCircle(v, psx, psy, max(2.5f, kPinR * z));
-        DC(v, pin.connected ? 1.f : .86f, pin.connected ? .86f : .51f,
-           pin.connected ? .47f : .16f);
-      }
-    }
+    glGenTextures(1, &origTex_);
+    glBindTexture(GL_TEXTURE_2D, origTex_);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, imgW_, imgH_, 0, GL_RGBA,
+                 GL_UNSIGNED_BYTE, originalPixels_.data());
+    glBindTexture(GL_TEXTURE_2D, 0);
+    rebuildEditFBOForImage();
+    computeHistogram();
   }
 
-  void drawSequentialGate(const Gate &g, float sx, float sy, float L, float R,
-                          float yT, float yB, float lw, float z, bool sim,
-                          const GateColors &col) {
-    auto DC = [&](const std::vector<float> &v, float r, float gg, float b,
-                  float a = 1.f) { dc(v, r, gg, b, a); };
-    auto DCb = [&](const std::vector<float> &v, float a = 1.f) {
-      DC(v, col.border[0], col.border[1], col.border[2], a);
+  void setUniforms() {
+    auto loc = [&](const char *n) {
+      return GL.getUniformLocation(editProg_, n);
     };
-    auto DCbd = [&](const std::vector<float> &v, float a = 1.f) {
-      DC(v, col.body[0], col.body[1], col.body[2], a);
-    };
-    float cr = min(8.f * z, 6.f);
-    bool Q = g.stateVal;
-    {
-      std::vector<float> v;
-      pushRRFill(v, L + 3, yT + 3, R + 3, yB + 3, cr);
-      DC(v, 0, 0, 0, 0.42f);
-    }
-    {
-      std::vector<float> v;
-      pushRRFill(v, L, yT, R, yB, cr);
-      DCbd(v);
-    }
-    if (g.selected) {
-      std::vector<float> v;
-      pushRRFill(v, L, yT, R, yB, cr);
-      DC(v, 0.80f, 0.65f, 0.97f, 0.16f);
-    }
-    if (sim && Q) {
-      std::vector<float> v;
-      pushRRFill(v, L, yT, R, yB, cr);
-      DC(v, col.border[0], col.border[1], col.border[2], 0.12f);
-    }
-    {
-      std::vector<float> v;
-      pushRR(v, L, yT, R, yB, cr, lw);
-      DCb(v);
-    }
-    if (g.selected) {
-      std::vector<float> v;
-      pushRR(v, L + 2, yT + 2, R - 2, yB - 2, cr - 2, lw * 0.5f);
-      DCb(v, 0.3f);
-    }
-    if (sim && Q) {
-      std::vector<float> v;
-      pushRR(v, L - 1, yT - 1, R + 1, yB + 1, cr + 1, max(1.5f, z));
-      DC(v, col.border[0], col.border[1], col.border[2], 0.50f);
-    }
-    int ni = (int)g.inPins.size();
-    for (int i = 0; i < ni; i++) {
-      const Pin &pin = g.inPins[i];
-      float psx, psy;
-      w2s(pin.cx, pin.cy, psx, psy);
-      const char *lbl = kInPinLabel[(int)g.type][i];
-      bool isClk = (lbl && lbl[0] == 'C');
-      {
-        std::vector<float> v;
-        pushLine(v, psx, psy, L, psy, max(0.8f, z * .7f));
-        DC(v, 0.38f, 0.42f, 0.60f);
-      }
-      {
-        std::vector<float> v;
-        pushCircle(v, psx, psy, max(2.5f, kPinR * z));
-        DC(v, pin.connected ? 1.f : 0.f, pin.connected ? .86f : .31f,
-           pin.connected ? .47f : .51f);
-      }
-      if (isClk) {
-        float tw = 7.f * z, th = 5.f * z;
-        std::vector<float> tv;
-        tv.insert(tv.end(), {L, psy - th, L + tw, psy, L, psy + th});
-        DCb(tv, 0.85f);
-      }
-      if (!isClk && lbl && lbl[0] != 'D' && lbl[0] != 'J') {
-        std::vector<float> v;
-        float markX = L + min(12.f * z, (R - L) * 0.15f);
-        pushLine(v, L, psy, markX, psy, max(1.5f, z));
-        DC(v, col.border[0], col.border[1], col.border[2], 0.45f);
-      }
-    }
-    float bubR2 = min(5.f * z, 4.f);
-    for (int i = 0; i < (int)g.outPins.size(); i++) {
-      const Pin &pin = g.outPins[i];
-      float psx, psy;
-      w2s(pin.cx, pin.cy, psx, psy);
-      bool isQBar = (i == 1);
-      bool val = isQBar ? !Q : Q;
-      float stubStart = isQBar ? (R + bubR2 * 2.f + lw) : R;
-      {
-        std::vector<float> v;
-        pushLine(v, stubStart, psy, psx, psy, max(0.8f, z * .7f));
-        DC(v, 0.38f, 0.42f, 0.60f);
-      }
-      if (isQBar) {
-        {
-          std::vector<float> v;
-          pushCircle(v, R + bubR2 + lw * 0.5f, psy, bubR2, 14);
-          DCbd(v);
-        }
-        {
-          std::vector<float> v;
-          pushRing(v, R + bubR2 + lw * 0.5f, psy, bubR2, lw * 0.85f);
-          DCb(v);
-        }
-      }
-      {
-        std::vector<float> v;
-        pushCircle(v, psx, psy, max(2.5f, kPinR * z));
-        if (sim)
-          DC(v, val ? .28f : .55f, val ? .86f : .25f, val ? .47f : .15f);
-        else
-          DC(v, pin.connected ? 1.f : .86f, pin.connected ? .86f : .51f,
-             pin.connected ? .47f : .16f);
-      }
-    }
-    {
-      float cr2 = max(4.5f, 6.f * z), bcx = R - cr2 - 2.5f * z,
-            bcy = yT + cr2 + 2.5f * z;
-      if (sim) {
-        std::vector<float> gv;
-        pushCircle(gv, bcx, bcy, cr2 * 1.9f, 20);
-        DC(gv, col.border[0], col.border[1], col.border[2], Q ? 0.22f : 0.06f);
-      }
-      {
-        std::vector<float> v;
-        pushCircle(v, bcx, bcy, cr2);
-        DC(v, Q ? col.border[0] : col.body[0] * 2.f,
-           Q ? col.border[1] : col.body[1] * 2.f,
-           Q ? col.border[2] : col.body[2] * 2.f);
-      }
-      {
-        std::vector<float> v;
-        pushCircle(v, bcx, bcy, cr2 * 0.45f);
-        DC(v, 0.85f, 0.95f, 1.f, Q ? 1.f : 0.35f);
-      }
-    }
+    const EditParams &p = params_;
+    GL.uniform1f(loc("uExposure"), p.exposure);
+    GL.uniform1f(loc("uContrast"), p.contrast);
+    GL.uniform1f(loc("uHighlights"), p.highlights);
+    GL.uniform1f(loc("uShadows"), p.shadows);
+    GL.uniform1f(loc("uWhites"), p.whites);
+    GL.uniform1f(loc("uBlacks"), p.blacks);
+    GL.uniform1f(loc("uTemperature"), p.temperature);
+    GL.uniform1f(loc("uTint"), p.tint);
+    GL.uniform1f(loc("uSaturation"), p.saturation);
+    GL.uniform1f(loc("uVibrance"), p.vibrance);
+    GL.uniform1f(loc("uSharpness"), p.sharpness);
+    GL.uniform1f(loc("uNoiseReduce"), p.noiseReduce);
+    GL.uniform1f(loc("uVignette"), p.vignette);
+    GL.uniform1f(loc("uGrain"), p.grain);
+    ie_gl::uniform2f(loc("uTexelSize"), 1.f / float(imgW_), 1.f / float(imgH_));
+
+    // Texture unit assignments
+    GL.uniform1i(loc("uOriginal"), 0);
+    GL.uniform1i(loc("uNoise"), 1);
+    GL.uniform1i(loc("uLutRGB"), 2);
+    GL.uniform1i(loc("uLutR"), 3);
+    GL.uniform1i(loc("uLutG"), 4);
+    GL.uniform1i(loc("uLutB"), 5);
+    GL.uniform1i(loc("uHSLHue"), 6);
+    GL.uniform1i(loc("uHSLSat"), 7);
+    GL.uniform1i(loc("uHSLLum"), 8);
   }
 
-  // ── Internal label dialog helper (called from groupSelected) ──────────
-  static std::string dlgLabelInternal_(const char *title, const char *initial) {
-    struct Ctx {
-      char buf[128];
-    };
-    static Ctx ctx;
-    strncpy_s(ctx.buf, sizeof(ctx.buf), initial, _TRUNCATE);
-    struct P {
-      static INT_PTR CALLBACK Proc(HWND h, UINT m, WPARAM w, LPARAM l) {
-        static Ctx *c = nullptr;
-        if (m == WM_INITDIALOG) {
-          c = (Ctx *)l;
-          HWND ed = GetDlgItem(h, 100);
-          SetWindowTextA(ed, c->buf);
-          SendMessageA(ed, EM_SETSEL, 0, -1);
-          SetFocus(ed);
-          return FALSE;
-        }
-        if (m == WM_COMMAND) {
-          if (LOWORD(w) == IDOK) {
-            GetDlgItemTextA(h, 100, c->buf, sizeof(c->buf));
-            EndDialog(h, IDOK);
-          } else if (LOWORD(w) == IDCANCEL)
-            EndDialog(h, IDCANCEL);
-        }
-        return FALSE;
-      }
-    };
-    std::vector<WORD> d;
-    auto p32 = [&](DWORD v) {
-      d.push_back(v & 0xFFFF);
-      d.push_back(v >> 16);
-    };
-    auto p16 = [&](WORD v) { d.push_back(v); };
-    auto pws = [&](const wchar_t *s) {
-      while (*s)
-        d.push_back((WORD)*s++);
-      d.push_back(0);
-    };
-    auto al4 = [&]() {
-      while (d.size() % 2)
-        d.push_back(0);
-    };
-    p32(DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION |
-        WS_SYSMENU);
-    p32(0);
-    p16(3);
-    p16(0);
-    p16(0);
-    p16(200);
-    p16(64);
-    p16(0);
-    p16(0);
-    pws(L"Subcircuit Name");
-    p16(9);
-    pws(L"Segoe UI");
-    auto ctrl = [&](DWORD style, short x, short y, short cx, short cy, WORD id,
-                    WORD cls, const wchar_t *txt) {
-      al4();
-      p32(WS_CHILD | WS_VISIBLE | style);
-      p32(0);
-      p16(x);
-      p16(y);
-      p16(cx);
-      p16(cy);
-      p16(id);
-      p16(0xFFFF);
-      p16(cls);
-      pws(txt);
-      p16(0);
-    };
-    ctrl(WS_BORDER | ES_AUTOHSCROLL, 7, 7, 186, 14, 100, 0x0081, L"");
-    ctrl(BS_DEFPUSHBUTTON, 60, 44, 36, 14, IDOK, 0x0080, L"OK");
-    ctrl(0, 102, 44, 50, 14, IDCANCEL, 0x0080, L"Cancel");
-    INT_PTR r = DialogBoxIndirectParamA(
-        GetModuleHandleA(nullptr), (LPCDLGTEMPLATE)d.data(),
-        GetForegroundWindow(), P::Proc, (LPARAM)&ctx);
-    return (r == IDOK) ? std::string(ctx.buf) : "__cancelled__";
+  void bindTextureUnit(int unit, GLuint tex) {
+    ie_gl::activeTexture(GL_TEXTURE0 + unit);
+    glBindTexture(GL_TEXTURE_2D, tex);
+  }
+
+void drawEditPass(GLuint fbo, const float* mvp) {
+    GL.bindFramebuffer(GL_FRAMEBUFFER, fbo);
+    // For export FBO: render at full image resolution.
+    // For screen pass (fbo=0): viewport already set by CanvasWidget — don't override.
+    if (fbo)
+      glViewport(0, 0, imgW_, imgH_);
+    GL.useProgram(editProg_);
+
+    // Upload MVP — for the export FBO use a simple identity-style ortho so
+    // the shader samples the full image; for the view pass use the viewport MVP.
+    GLint mvpLoc = GL.getUniformLocation(editProg_, "uMVP");
+    GL.uniformMatrix4fv(mvpLoc, 1, GL_FALSE, mvp);
+
+    setUniforms();
+    bindTextureUnit(0, origTex_);
+    bindTextureUnit(1, noiseTex_);
+    bindTextureUnit(2, lutTexRGB_);
+    bindTextureUnit(3, lutTexR_);
+    bindTextureUnit(4, lutTexG_);
+    bindTextureUnit(5, lutTexB_);
+    bindTextureUnit(6, hslTexHue_);
+    bindTextureUnit(7, hslTexSat_);
+    bindTextureUnit(8, hslTexLum_);
+
+    // Upload the canvas-space quad for the current image size
+    uploadQuadForSize(float(imgW_), float(imgH_));
+
+    GL.bindVertexArray(quadVAO_);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+    GL.bindVertexArray(0);
+    GL.useProgram(0);
+    GL.bindFramebuffer(GL_FRAMEBUFFER, 0);
+  }
+
+  // For export: build an ortho that maps [0..imgW] x [0..imgH] → NDC
+  // (same convention as Viewport::buildMVP but fixed at image size)
+  void buildExportMVP(float out[16]) const {
+    float l=0, r=float(imgW_), b=0, t=float(imgH_);
+    float rml=r-l, tmb=t-b;
+    out[ 0]=2.f/rml; out[ 1]=0;        out[ 2]=0;  out[ 3]=0;
+    out[ 4]=0;       out[ 5]=2.f/tmb;  out[ 6]=0;  out[ 7]=0;
+    out[ 8]=0;       out[ 9]=0;        out[10]=-1; out[11]=0;
+    out[12]=-(r+l)/rml; out[13]=-(t+b)/tmb; out[14]=0; out[15]=1;
+  }
+
+  void renderToExportFBO() {
+    float mvp[16];
+    buildExportMVP(mvp);
+    drawEditPass(editFBO_, mvp);
   }
 };
 
 // =============================================================================
-// §6  WIN32 FILE + LABEL DIALOGS
+// §4  FILE DIALOGS
 // =============================================================================
-static std::string dlgSave(HWND hwnd) {
-  char buf[MAX_PATH] = "circuit.lsim";
-  OPENFILENAMEA ofn = {};
+
+static std::wstring promptOpenImage(HWND owner) {
+  wchar_t buf[MAX_PATH] = {};
+  OPENFILENAMEW ofn{};
   ofn.lStructSize = sizeof(ofn);
-  ofn.hwndOwner = hwnd;
-  ofn.lpstrFilter = "Logic Sim\0*.lsim\0JSON\0*.json\0All Files\0*.*\0\0";
-  ofn.lpstrFile = buf;
-  ofn.nMaxFile = MAX_PATH;
-  ofn.lpstrDefExt = "lsim";
-  ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
-  return GetSaveFileNameA(&ofn) ? std::string(buf) : "";
-}
-static std::string dlgOpen(HWND hwnd) {
-  char buf[MAX_PATH] = "";
-  OPENFILENAMEA ofn = {};
-  ofn.lStructSize = sizeof(ofn);
-  ofn.hwndOwner = hwnd;
-  ofn.lpstrFilter = "Logic Sim\0*.lsim\0JSON\0*.json\0All Files\0*.*\0\0";
+  ofn.hwndOwner = owner;
+  ofn.lpstrFilter = L"Image Files\0*.jpg;*.jpeg;*.png;*.bmp;*.tga\0All\0*.*\0";
   ofn.lpstrFile = buf;
   ofn.nMaxFile = MAX_PATH;
   ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
-  return GetOpenFileNameA(&ofn) ? std::string(buf) : "";
+  ofn.lpstrTitle = L"Open Image";
+  return GetOpenFileNameW(&ofn) ? buf : L"";
 }
-static std::string dlgLabel(HWND hwnd, const std::string &initial) {
-  struct Ctx {
-    char buf[128];
-  };
-  static Ctx ctx;
-  strncpy_s(ctx.buf, sizeof(ctx.buf), initial.c_str(), _TRUNCATE);
-  struct P {
-    static INT_PTR CALLBACK Proc(HWND h, UINT m, WPARAM w, LPARAM l) {
-      static Ctx *c = nullptr;
-      if (m == WM_INITDIALOG) {
-        c = (Ctx *)l;
-        HWND ed = GetDlgItem(h, 100);
-        SetWindowTextA(ed, c->buf);
-        SendMessageA(ed, EM_SETSEL, 0, -1);
-        SetFocus(ed);
-        return FALSE;
-      }
-      if (m == WM_COMMAND) {
-        if (LOWORD(w) == IDOK) {
-          GetDlgItemTextA(h, 100, c->buf, sizeof(c->buf));
-          EndDialog(h, IDOK);
-        } else if (LOWORD(w) == IDCANCEL)
-          EndDialog(h, IDCANCEL);
-      }
-      return FALSE;
-    }
-  };
-  std::vector<WORD> d;
-  auto p32 = [&](DWORD v) {
-    d.push_back(v & 0xFFFF);
-    d.push_back(v >> 16);
-  };
-  auto p16 = [&](WORD v) { d.push_back(v); };
-  auto pws = [&](const wchar_t *s) {
-    while (*s)
-      d.push_back((WORD)*s++);
-    d.push_back(0);
-  };
-  auto al4 = [&]() {
-    while (d.size() % 2)
-      d.push_back(0);
-  };
-  p32(DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION |
-      WS_SYSMENU);
-  p32(0);
-  p16(3);
-  p16(0);
-  p16(0);
-  p16(200);
-  p16(64);
-  p16(0);
-  p16(0);
-  pws(L"Gate Label");
-  p16(9);
-  pws(L"Segoe UI");
-  auto ctrl = [&](DWORD style, short x, short y, short cx, short cy, WORD id,
-                  WORD cls, const wchar_t *txt) {
-    al4();
-    p32(WS_CHILD | WS_VISIBLE | style);
-    p32(0);
-    p16(x);
-    p16(y);
-    p16(cx);
-    p16(cy);
-    p16(id);
-    p16(0xFFFF);
-    p16(cls);
-    pws(txt);
-    p16(0);
-  };
-  ctrl(WS_BORDER | ES_AUTOHSCROLL, 7, 7, 186, 14, 100, 0x0081, L"");
-  ctrl(BS_DEFPUSHBUTTON, 60, 44, 36, 14, IDOK, 0x0080, L"OK");
-  ctrl(0, 102, 44, 50, 14, IDCANCEL, 0x0080, L"Cancel");
-  INT_PTR r = DialogBoxIndirectParamA(GetModuleHandleA(nullptr),
-                                      (LPCDLGTEMPLATE)d.data(), hwnd, P::Proc,
-                                      (LPARAM)&ctx);
-  return (r == IDOK) ? std::string(ctx.buf) : "__cancelled__";
+static std::wstring promptExportImage(HWND owner) {
+  wchar_t buf[MAX_PATH] = L"edited.png";
+  OPENFILENAMEW ofn{};
+  ofn.lStructSize = sizeof(ofn);
+  ofn.hwndOwner = owner;
+  ofn.lpstrFilter = L"PNG\0*.png\0JPEG\0*.jpg\0All\0*.*\0";
+  ofn.lpstrFile = buf;
+  ofn.nMaxFile = MAX_PATH;
+  ofn.lpstrDefExt = L"png";
+  ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
+  ofn.lpstrTitle = L"Export Image";
+  return GetSaveFileNameW(&ofn) ? buf : L"";
 }
 
 // =============================================================================
-// §7  APP
+// §5  IMAGE EDITOR APP
 // =============================================================================
-class LogicSimApp : public Component {
-  State<int> gateCount;
+
+class ImageEditorApp : public Component {
+  // ── UI state ──────────────────────────────────────────────────────────────
   State<std::string> statusMsg;
-  State<double> zoomPct;
-  State<bool> simRunning;
-  State<bool> simActive;
-  State<std::string> ttText;
-  State<bool> snapOn;
-  State<std::string> currentFile;
+  State<bool> hasImage;
+  State<bool> beforeMode;
+  State<double> zoomLevel;
+  State<HistogramData> histState;
+  State<ToneCurveData> curveState;
+  State<HSLData> hslState; // ← new
 
-  std::shared_ptr<CircuitSurface> surface_;
-  CanvasWidget *canvas_ = nullptr;
+  // ── Tone sliders ──────────────────────────────────────────────────────────
+  State<double> sExposure, sContrast, sHighlights, sShadows, sWhites, sBlacks;
+  // ── Color sliders ─────────────────────────────────────────────────────────
+  State<double> sTemperature, sTint, sSaturation, sVibrance;
+  // ── Detail sliders ────────────────────────────────────────────────────────
+  State<double> sSharpness, sNoiseReduce;
+  // ── Effects sliders ───────────────────────────────────────────────────────
+  State<double> sVignette, sGrain;
 
-  static constexpr int kSW = 190, kTH = 88, kHH = 26;
+  std::shared_ptr<ImageEditSurface> surface_;
+  ToneCurveWidget *curveWidgetPtr_ = nullptr;
+  HSLPanelWidget *hslWidgetPtr_ = nullptr; // ← new
+  CanvasWidget *canvasPtr_ = nullptr;
+  HWND mainHwnd_ = nullptr;
 
-  void notifyZoom(float z) {
-    double p = double(z) * 100.0;
-    if (std::abs(p - zoomPct.get()) > 0.4)
-      zoomPct.set(p);
+  static constexpr int kPanelW = 290, kToolbarH = 44, kHintsH = 22;
+
+  template <typename F> void wire(State<double> &st, F EditParams::*field) {
+    st.listen([this, field](double v) {
+      if (!surface_)
+        return;
+      surface_->params().*field = float(v);
+      if (canvasPtr_)
+        canvasPtr_->redraw();
+    });
   }
-  void applyZoom(double p) {
-    if (!surface_)
-      return;
-    surface_->setZoomLevel(float(p / 100.0));
-    if (canvas_)
-      canvas_->redraw();
-  }
-
-  void rebuildTruthTable() {
-    if (!surface_) {
-      ttText.set("No circuit");
-      return;
-    }
-    bool hasSeq = false;
-    for (auto &g : surface_->circuit.gates)
-      if (isSequential(g.type)) {
-        hasSeq = true;
-        break;
-      }
-    bool hasSub = !surface_->circuit.subcircuitInsts.empty();
-    if (hasSeq || hasSub) {
-      std::ostringstream ss;
-      if (hasSub) {
-        ss << "SUBCIRCUITS\n──────────────────\n";
-        for (auto &inst : surface_->circuit.subcircuitInsts) {
-          auto it = surface_->circuit.subcircuitDefs.find(inst.defId);
-          std::string n = it != surface_->circuit.subcircuitDefs.end()
-                              ? it->second.name
-                              : "?";
-          std::string lbl = inst.label.empty() ? n : inst.label;
-          ss << lbl << "  [" << inst.inputPins.size() << "→"
-             << inst.outputPins.size() << "]\n";
-          for (auto &p : inst.outputPins)
-            ss << "  " << p.label << "=" << (p.value ? "1" : "0") << "\n";
-        }
-        ss << "──────────────────\n";
-      }
-      if (hasSeq) {
-        ss << "SEQUENTIAL\n──────────────────\n";
-        for (auto &g : surface_->circuit.gates) {
-          if (!isSequential(g.type))
-            continue;
-          std::string lbl = g.label.empty() ? kGateName[(int)g.type] : g.label;
-          ss << lbl << ": Q=" << (g.stateVal ? "1" : "0")
-             << "  /Q=" << (!g.stateVal ? "1" : "0") << "\n";
-        }
-      }
-      ttText.set(ss.str());
-      return;
-    }
-    std::vector<int> inIds, outIds;
-    auto table = surface_->circuit.buildTruthTable(inIds, outIds);
-    if (table.empty() || inIds.empty() || outIds.empty()) {
-      ttText.set("Connect INPUT → gates → OUTPUT\nto see truth table");
-      return;
-    }
-    std::ostringstream ss;
-    for (int i = 0; i < (int)inIds.size(); i++) {
-      auto *g = surface_->circuit.find(inIds[i]);
-      ss << ((g && !g->label.empty()) ? g->label
-                                      : ("I" + std::to_string(i + 1)))
-         << " ";
-    }
-    ss << "| ";
-    for (int i = 0; i < (int)outIds.size(); i++) {
-      auto *g = surface_->circuit.find(outIds[i]);
-      ss << ((g && !g->label.empty()) ? g->label
-                                      : ("O" + std::to_string(i + 1)))
-         << " ";
-    }
-    ss << "\n";
-    int w = int(inIds.size()) * 3 + 2 + int(outIds.size()) * 3;
-    for (int i = 0; i < w; i++)
-      ss << "-";
-    ss << "\n";
-    for (auto &row : table) {
-      bool isCur = true;
-      for (int i = 0; i < (int)row.inputs.size(); i++) {
-        auto *g = surface_->circuit.find(inIds[i]);
-        if (!g || g->inputVal != row.inputs[i]) {
-          isCur = false;
-          break;
-        }
-      }
-      ss << (isCur ? "►" : " ");
-      for (bool v : row.inputs)
-        ss << " " << (v ? "1" : "0");
-      ss << " |";
-      for (bool v : row.outputs)
-        ss << " " << (v ? "1" : "0");
-      ss << "\n";
-    }
-    ttText.set(ss.str());
-  }
-
-  void doSave() {
-    if (!surface_)
-      return;
-    std::string path = dlgSave(GetForegroundWindow());
-    if (path.empty())
-      return;
-    if (surface_->saveToFile(path)) {
-      currentFile.set(path);
-      statusMsg.set("Saved: " + path);
-    } else
-      statusMsg.set("Save failed.");
-  }
-  void doLoad() {
-    if (!surface_)
-      return;
-    std::string path = dlgOpen(GetForegroundWindow());
-    if (path.empty())
-      return;
-    surface_->simStop();
-    if (surface_->loadFromFile(path)) {
-      currentFile.set(path);
-      gateCount.set(int(surface_->circuit.gates.size()));
-      rebuildTruthTable();
-      surface_->fitToView();
-      statusMsg.set("Loaded: " + path);
-      if (canvas_)
-        canvas_->redraw();
-    } else
-      statusMsg.set("Load failed.");
-  }
-  void doLabelEdit(int gateId, const std::string &current) {
-    std::string r = dlgLabel(GetForegroundWindow(), current);
-    if (r == "__cancelled__")
-      return;
-    surface_->applyLabel(gateId, r);
-    rebuildTruthTable();
-  }
-
-  // =========================================================================
-  // §7a  ARITHMETIC PRESET BUILDERS
-  // =========================================================================
-
-  // Helper: add a gate, wire it, return id
-  // All positions are relative; caller passes an offset.
-  // Returns new gate id.
-
-  void buildHalfAdder() {
-    if (!surface_)
-      return;
-    surface_->simStop();
-    surface_->pushUndo();
-    Circuit &c = surface_->circuit;
-    c.clearAll();
-
-    // Layout (world coords):
-    //  A INPUT  @ (-160, -60)
-    //  B INPUT  @ (-160,  60)
-    //  XOR gate @ (  0, -60)  → SUM output
-    //  AND gate @ (  0,  60)  → CARRY output
-    //  SUM  OUTPUT @ (160, -60)
-    //  CARRY OUTPUT @ (160,  60)
-
-    int iA = c.add(GateType::INPUT, -160, -60, "A");
-    int iB = c.add(GateType::INPUT, -160, 60, "B");
-    int xorG = c.add(GateType::XOR, 0, -60, "SUM");
-    int andG = c.add(GateType::AND, 0, 60, "CARRY");
-    int oS = c.add(GateType::OUTPUT, 160, -60, "S");
-    int oC = c.add(GateType::OUTPUT, 160, 60, "Co");
-
-    c.connect(iA, 0, xorG, 0);
-    c.connect(iB, 0, xorG, 1);
-    c.connect(iA, 0, andG, 0);
-    c.connect(iB, 0, andG, 1);
-    c.connect(xorG, 0, oS, 0);
-    c.connect(andG, 0, oC, 0);
-
-    c.evaluate();
-    gateCount.set(int(c.gates.size()));
-    rebuildTruthTable();
-    surface_->fitToView();
-    statusMsg.set("Half Adder: S = A⊕B   Co = A·B");
-    if (canvas_)
-      canvas_->redraw();
-    if (surface_->onCircuitChanged)
-      surface_->onCircuitChanged();
-  }
-
-  void buildFullAdder() {
-    if (!surface_)
-      return;
-    surface_->simStop();
-    surface_->pushUndo();
-    Circuit &c = surface_->circuit;
-    c.clearAll();
-
-    // Inputs
-    int iA = c.add(GateType::INPUT, -200, -80, "A");
-    int iB = c.add(GateType::INPUT, -200, 0, "B");
-    int iCi = c.add(GateType::INPUT, -200, 80, "Ci");
-
-    // First half-adder level: XOR1, AND1
-    int xor1 = c.add(GateType::XOR, -60, -40, "XOR1");
-    int and1 = c.add(GateType::AND, -60, 60, "AND1");
-
-    // Second half-adder level: XOR2, AND2
-    int xor2 = c.add(GateType::XOR, 80, -40, "XOR2");
-    int and2 = c.add(GateType::AND, 80, 60, "AND2");
-
-    // OR for carry out
-    int orG = c.add(GateType::OR, 200, 60, "OR");
-
-    // Outputs
-    int oS = c.add(GateType::OUTPUT, 320, -40, "S");
-    int oC = c.add(GateType::OUTPUT, 320, 60, "Co");
-
-    // First stage
-    c.connect(iA, 0, xor1, 0);
-    c.connect(iB, 0, xor1, 1);
-    c.connect(iA, 0, and1, 0);
-    c.connect(iB, 0, and1, 1);
-
-    // Second stage
-    c.connect(xor1, 0, xor2, 0);
-    c.connect(iCi, 0, xor2, 1);
-    c.connect(xor1, 0, and2, 0);
-    c.connect(iCi, 0, and2, 1);
-
-    // Carry OR
-    c.connect(and1, 0, orG, 0);
-    c.connect(and2, 0, orG, 1);
-
-    // Outputs
-    c.connect(xor2, 0, oS, 0);
-    c.connect(orG, 0, oC, 0);
-
-    c.evaluate();
-    gateCount.set(int(c.gates.size()));
-    rebuildTruthTable();
-    surface_->fitToView();
-    statusMsg.set("Full Adder: S = A⊕B⊕Ci   Co = AB + BCi + ACi");
-    if (canvas_)
-      canvas_->redraw();
-    if (surface_->onCircuitChanged)
-      surface_->onCircuitChanged();
-  }
-
-  void buildRippleAdder4() {
-    if (!surface_)
-      return;
-    surface_->simStop();
-    surface_->pushUndo();
-    Circuit &c = surface_->circuit;
-    c.clearAll();
-
-    // 4 full adder stages laid out horizontally
-    // Each FA: XOR1, AND1, XOR2, AND2, OR  (5 gates per stage)
-    // Inputs: A0-A3, B0-B3, Cin
-    // Outputs: S0-S3, Cout
-
-    const float stageW = 280.f;
-    const float yBase = 0.f;
-
-    // Ci wire starts from carry-in input
-    int cinGate = c.add(GateType::INPUT, -160, 160, "Cin");
-
-    struct FAIds {
-      int xor1, and1, xor2, and2, orG;
-    };
-    std::vector<FAIds> stages(4);
-
-    std::vector<int> inA(4), inB(4), outS(4);
-    int outCo = -1;
-
-    // Build inputs A0..A3, B0..B3
-    for (int i = 0; i < 4; i++) {
-      float x = i * stageW;
-      inA[i] =
-          c.add(GateType::INPUT, x - 60, yBase - 140, "A" + std::to_string(i));
-      inB[i] =
-          c.add(GateType::INPUT, x - 60, yBase - 80, "B" + std::to_string(i));
-    }
-
-    // Build 4 FA stages
-    int prevCarry = cinGate;
-    for (int i = 0; i < 4; i++) {
-      float ox = i * stageW;
-      FAIds &fa = stages[i];
-      fa.xor1 =
-          c.add(GateType::XOR, ox + 40, yBase - 40, "X1_" + std::to_string(i));
-      fa.and1 =
-          c.add(GateType::AND, ox + 40, yBase + 40, "A1_" + std::to_string(i));
-      fa.xor2 =
-          c.add(GateType::XOR, ox + 160, yBase - 40, "X2_" + std::to_string(i));
-      fa.and2 =
-          c.add(GateType::AND, ox + 160, yBase + 40, "A2_" + std::to_string(i));
-      fa.orG =
-          c.add(GateType::OR, ox + 200, yBase + 120, "OR_" + std::to_string(i));
-
-      // First half-adder
-      c.connect(inA[i], 0, fa.xor1, 0);
-      c.connect(inB[i], 0, fa.xor1, 1);
-      c.connect(inA[i], 0, fa.and1, 0);
-      c.connect(inB[i], 0, fa.and1, 1);
-
-      // Second half-adder (Ci is prevCarry output)
-      c.connect(fa.xor1, 0, fa.xor2, 0);
-      c.connect(prevCarry, 0, fa.xor2, 1);
-      c.connect(fa.xor1, 0, fa.and2, 0);
-      c.connect(prevCarry, 0, fa.and2, 1);
-
-      // Carry OR
-      c.connect(fa.and1, 0, fa.orG, 0);
-      c.connect(fa.and2, 0, fa.orG, 1);
-
-      // Sum output
-      outS[i] = c.add(GateType::OUTPUT, ox + 260, yBase - 40,
-                      "S" + std::to_string(i));
-      c.connect(fa.xor2, 0, outS[i], 0);
-
-      prevCarry = fa.orG;
-    }
-
-    // Final carry out
-    outCo = c.add(GateType::OUTPUT, 4 * stageW - 20, yBase + 120, "Cout");
-    c.connect(stages[3].orG, 0, outCo, 0);
-
-    c.evaluate();
-    gateCount.set(int(c.gates.size()));
-    rebuildTruthTable();
-    surface_->fitToView();
-    statusMsg.set(
-        "4-bit Ripple Carry Adder  |  A[3:0] + B[3:0] + Cin = S[3:0] + Cout");
-    if (canvas_)
-      canvas_->redraw();
-    if (surface_->onCircuitChanged)
-      surface_->onCircuitChanged();
-  }
-
-  void buildSubtractor4() {
-    if (!surface_)
-      return;
-    surface_->simStop();
-    surface_->pushUndo();
-    Circuit &c = surface_->circuit;
-    c.clearAll();
-
-    // 4-bit subtractor = ripple adder with B inputs inverted + Cin=1
-    // A - B = A + (~B) + 1
-    // Each bit: NOT(Bi) feeds into FA instead of Bi directly
-    // Borrow out = ~Cout (we show Cout and label it Bout)
-
-    const float stageW = 320.f;
-    const float yBase = 0.f;
-
-    // Cin = 1 modelled as a fixed INPUT set to true
-    int cinGate = c.add(GateType::INPUT, -160, 200, "Cin=1");
-    // We'll set its inputVal below
-
-    struct FAIds {
-      int xor1, and1, xor2, and2, orG, notB;
-    };
-    std::vector<FAIds> stages(4);
-    std::vector<int> inA(4), inB(4), outS(4);
-
-    for (int i = 0; i < 4; i++) {
-      float x = i * stageW;
-      inA[i] =
-          c.add(GateType::INPUT, x - 60, yBase - 160, "A" + std::to_string(i));
-      inB[i] =
-          c.add(GateType::INPUT, x - 60, yBase - 80, "B" + std::to_string(i));
-    }
-
-    int prevCarry = cinGate;
-    for (int i = 0; i < 4; i++) {
-      float ox = i * stageW;
-      FAIds &fa = stages[i];
-
-      // NOT gate on B input
-      fa.notB = c.add(GateType::NOT, ox - 20, yBase, "~B" + std::to_string(i));
-      fa.xor1 =
-          c.add(GateType::XOR, ox + 60, yBase - 40, "X1_" + std::to_string(i));
-      fa.and1 =
-          c.add(GateType::AND, ox + 60, yBase + 60, "A1_" + std::to_string(i));
-      fa.xor2 =
-          c.add(GateType::XOR, ox + 180, yBase - 40, "X2_" + std::to_string(i));
-      fa.and2 =
-          c.add(GateType::AND, ox + 180, yBase + 60, "A2_" + std::to_string(i));
-      fa.orG =
-          c.add(GateType::OR, ox + 220, yBase + 140, "OR_" + std::to_string(i));
-
-      // NOT(B)
-      c.connect(inB[i], 0, fa.notB, 0);
-
-      // First HA: A XOR ~B,  A AND ~B
-      c.connect(inA[i], 0, fa.xor1, 0);
-      c.connect(fa.notB, 0, fa.xor1, 1);
-      c.connect(inA[i], 0, fa.and1, 0);
-      c.connect(fa.notB, 0, fa.and1, 1);
-
-      // Second HA: (A XOR ~B) XOR Ci
-      c.connect(fa.xor1, 0, fa.xor2, 0);
-      c.connect(prevCarry, 0, fa.xor2, 1);
-      c.connect(fa.xor1, 0, fa.and2, 0);
-      c.connect(prevCarry, 0, fa.and2, 1);
-
-      // Carry
-      c.connect(fa.and1, 0, fa.orG, 0);
-      c.connect(fa.and2, 0, fa.orG, 1);
-
-      // Difference bit output
-      outS[i] = c.add(GateType::OUTPUT, ox + 280, yBase - 40,
-                      "D" + std::to_string(i));
-      c.connect(fa.xor2, 0, outS[i], 0);
-
-      prevCarry = fa.orG;
-    }
-
-    // Cout = borrow indicator (active HIGH means no borrow / result positive)
-    int outCo = c.add(GateType::OUTPUT, 4 * stageW - 40, yBase + 140, "Cout");
-    c.connect(stages[3].orG, 0, outCo, 0);
-
-    // Set Cin=1 so subtractor initialises correctly
-    Gate *cinG = c.find(cinGate);
-    if (cinG)
-      cinG->inputVal = true;
-
-    c.evaluate();
-    gateCount.set(int(c.gates.size()));
-    rebuildTruthTable();
-    surface_->fitToView();
-    statusMsg.set(
-        "4-bit Subtractor  |  D = A - B = A + (~B) + 1  |  Cout=1 → no borrow");
-    if (canvas_)
-      canvas_->redraw();
-    if (surface_->onCircuitChanged)
-      surface_->onCircuitChanged();
-  }
-
-  // =========================================================================
-  // §7b  LOGIC / MUX PRESET BUILDERS
-  // =========================================================================
-
-  void buildMux21() {
-    if (!surface_)
-      return;
-    surface_->simStop();
-    surface_->pushUndo();
-    Circuit &c = surface_->circuit;
-    c.clearAll();
-
-    // 2:1 MUX truth table:
-    //   S=0 → Y = D0
-    //   S=1 → Y = D1
-    // Gate implementation:
-    //   NOT(S)      → notS
-    //   AND(D0,notS)→ and0   (D0 passes when S=0)
-    //   AND(D1, S)  → and1   (D1 passes when S=1)
-    //   OR(and0,and1)→ Y
-
-    // Layout:
-    //  D0 INPUT  @ (-220, -100)
-    //  D1 INPUT  @ (-220,   60)
-    //  S  INPUT  @ (-220,  180)
-    //  NOT(S)    @ ( -60,  180)
-    //  AND0      @ (  80,  -60)
-    //  AND1      @ (  80,   80)
-    //  OR        @ ( 220,   20)
-    //  Y  OUTPUT @ ( 360,   20)
-
-    int iD0 = c.add(GateType::INPUT, -220, -100, "D0");
-    int iD1 = c.add(GateType::INPUT, -220, 60, "D1");
-    int iS = c.add(GateType::INPUT, -220, 180, "S");
-
-    int notS = c.add(GateType::NOT, -60, 180, "~S");
-    int and0 = c.add(GateType::AND, 80, -60, "D0·~S");
-    int and1 = c.add(GateType::AND, 80, 80, "D1·S");
-    int orG = c.add(GateType::OR, 220, 20, "Y");
-    int oY = c.add(GateType::OUTPUT, 360, 20, "Y");
-
-    c.connect(iS, 0, notS, 0);
-    c.connect(iD0, 0, and0, 0);
-    c.connect(notS, 0, and0, 1);
-    c.connect(iD1, 0, and1, 0);
-    c.connect(iS, 0, and1, 1);
-    c.connect(and0, 0, orG, 0);
-    c.connect(and1, 0, orG, 1);
-    c.connect(orG, 0, oY, 0);
-
-    c.evaluate();
-    gateCount.set(int(c.gates.size()));
-    rebuildTruthTable();
-    surface_->fitToView();
-    statusMsg.set(
-        "2:1 MUX  |  S=0→Y=D0   S=1→Y=D1  |  Toggle S to switch input");
-    if (canvas_)
-      canvas_->redraw();
-    if (surface_->onCircuitChanged)
-      surface_->onCircuitChanged();
-  }
-
-  void buildMux41() {
-    if (!surface_)
-      return;
-    surface_->simStop();
-    surface_->pushUndo();
-    Circuit &c = surface_->circuit;
-    c.clearAll();
-
-    // 4:1 MUX  — 2 select lines S1,S0
-    //   S1 S0 | Y
-    //    0  0 | D0
-    //    0  1 | D1
-    //    1  0 | D2
-    //    1  1 | D3
-    //
-    // Implementation:
-    //   ~S0, ~S1
-    //   AND3(D0, ~S1, ~S0)  → g0
-    //   AND3(D1, ~S1,  S0)  → g1
-    //   AND3(D2,  S1, ~S0)  → g2
-    //   AND3(D3,  S1,  S0)  → g3
-    //   4-input OR via two 2-input ORs:
-    //     OR(g0,g1) → or01
-    //     OR(g2,g3) → or23
-    //     OR(or01,or23) → Y
-    //
-    // We only have 2-input AND, so build AND3 as two ANDs in series.
-
-    // Inputs
-    int iD0 = c.add(GateType::INPUT, -300, -200, "D0");
-    int iD1 = c.add(GateType::INPUT, -300, -80, "D1");
-    int iD2 = c.add(GateType::INPUT, -300, 80, "D2");
-    int iD3 = c.add(GateType::INPUT, -300, 200, "D3");
-    int iS0 = c.add(GateType::INPUT, -300, 340, "S0");
-    int iS1 = c.add(GateType::INPUT, -300, 440, "S1");
-
-    // Inverters
-    int nS0 = c.add(GateType::NOT, -140, 340, "~S0");
-    int nS1 = c.add(GateType::NOT, -140, 440, "~S1");
-    c.connect(iS0, 0, nS0, 0);
-    c.connect(iS1, 0, nS1, 0);
-
-    // AND3 for each data line (2 ANDs chained)
-    // g0 = D0 & ~S1 & ~S0
-    int a0a = c.add(GateType::AND, 40, -200, "D0·~S1");
-    int a0b = c.add(GateType::AND, 160, -200, "g0");
-    c.connect(iD0, 0, a0a, 0);
-    c.connect(nS1, 0, a0a, 1);
-    c.connect(a0a, 0, a0b, 0);
-    c.connect(nS0, 0, a0b, 1);
-
-    // g1 = D1 & ~S1 & S0
-    int a1a = c.add(GateType::AND, 40, -80, "D1·~S1");
-    int a1b = c.add(GateType::AND, 160, -80, "g1");
-    c.connect(iD1, 0, a1a, 0);
-    c.connect(nS1, 0, a1a, 1);
-    c.connect(a1a, 0, a1b, 0);
-    c.connect(iS0, 0, a1b, 1);
-
-    // g2 = D2 & S1 & ~S0
-    int a2a = c.add(GateType::AND, 40, 80, "D2·S1");
-    int a2b = c.add(GateType::AND, 160, 80, "g2");
-    c.connect(iD2, 0, a2a, 0);
-    c.connect(iS1, 0, a2a, 1);
-    c.connect(a2a, 0, a2b, 0);
-    c.connect(nS0, 0, a2b, 1);
-
-    // g3 = D3 & S1 & S0
-    int a3a = c.add(GateType::AND, 40, 200, "D3·S1");
-    int a3b = c.add(GateType::AND, 160, 200, "g3");
-    c.connect(iD3, 0, a3a, 0);
-    c.connect(iS1, 0, a3a, 1);
-    c.connect(a3a, 0, a3b, 0);
-    c.connect(iS0, 0, a3b, 1);
-
-    // OR tree
-    int or01 = c.add(GateType::OR, 300, -140, "g0|g1");
-    int or23 = c.add(GateType::OR, 300, 140, "g2|g3");
-    int orY = c.add(GateType::OR, 420, 0, "Y");
-    int oY = c.add(GateType::OUTPUT, 540, 0, "Y");
-
-    c.connect(a0b, 0, or01, 0);
-    c.connect(a1b, 0, or01, 1);
-    c.connect(a2b, 0, or23, 0);
-    c.connect(a3b, 0, or23, 1);
-    c.connect(or01, 0, orY, 0);
-    c.connect(or23, 0, orY, 1);
-    c.connect(orY, 0, oY, 0);
-
-    c.evaluate();
-    gateCount.set(int(c.gates.size()));
-    rebuildTruthTable();
-    surface_->fitToView();
-    statusMsg.set("4:1 MUX  |  S1S0: 00→D0  01→D1  10→D2  11→D3  |  Toggle "
-                  "S0,S1 to select");
-    if (canvas_)
-      canvas_->redraw();
-    if (surface_->onCircuitChanged)
-      surface_->onCircuitChanged();
-  }
-
-  void buildDecoder38() {
-    if (!surface_)
-      return;
-    surface_->simStop();
-    surface_->pushUndo();
-    Circuit &c = surface_->circuit;
-    c.clearAll();
-
-    // 3-to-8 Decoder
-    // Inputs: A2, A1, A0  (3 address bits)
-    // Outputs: Y0..Y7  — exactly one HIGH
-    //
-    // Yi = (A2==bi2) & (A1==bi1) & (A0==bi0)
-    // where b2b1b0 is the binary representation of i
-    //
-    // Each output is a 3-input AND built from two 2-input ANDs.
-    // We need ~A2, ~A1, ~A0 first.
-
-    // Inputs
-    int iA0 = c.add(GateType::INPUT, -300, 0, "A0");
-    int iA1 = c.add(GateType::INPUT, -300, 120, "A1");
-    int iA2 = c.add(GateType::INPUT, -300, 240, "A2");
-
-    // Inverters
-    int nA0 = c.add(GateType::NOT, -140, 0, "~A0");
-    int nA1 = c.add(GateType::NOT, -140, 120, "~A1");
-    int nA2 = c.add(GateType::NOT, -140, 240, "~A2");
-
-    c.connect(iA0, 0, nA0, 0);
-    c.connect(iA1, 0, nA1, 0);
-    c.connect(iA2, 0, nA2, 0);
-
-    // For each output Yi (i = 0..7):
-    //   bit pattern i:  b2 = (i>>2)&1,  b1 = (i>>1)&1,  b0 = i&1
-    //   select true or inverted form of each address bit
-
-    // Intermediary AND(A2sel, A1sel) then AND(result, A0sel)
-    // Outputs spread vertically with 100-unit spacing
-
-    float outX0 = 80.f;  // first AND column x
-    float outX1 = 220.f; // second AND column x
-    float outX2 = 360.f; // OUTPUT x
-    float yStart = -350.f;
-    float yStep = 100.f;
-
-    for (int i = 0; i < 8; i++) {
-      int b0 = (i >> 0) & 1; // selects A0 or ~A0
-      int b1 = (i >> 1) & 1; // selects A1 or ~A1
-      int b2 = (i >> 2) & 1; // selects A2 or ~A2
-
-      int selA0 = b0 ? iA0 : nA0;
-      int selA1 = b1 ? iA1 : nA1;
-      int selA2 = b2 ? iA2 : nA2;
-
-      float gy = yStart + i * yStep;
-
-      // First AND: A2sel & A1sel
-      int andHi = c.add(GateType::AND, outX0, gy,
-                        "A2" + std::string(b2 ? "" : "~") + "·A1" +
-                            std::string(b1 ? "" : "~"));
-      c.connect(selA2, 0, andHi, 0);
-      c.connect(selA1, 0, andHi, 1);
-
-      // Second AND: result & A0sel  →  Yi
-      int andLo = c.add(GateType::AND, outX1, gy, "Y" + std::to_string(i));
-      c.connect(andHi, 0, andLo, 0);
-      c.connect(selA0, 0, andLo, 1);
-
-      // Output
-      int oYi = c.add(GateType::OUTPUT, outX2, gy, "Y" + std::to_string(i));
-      c.connect(andLo, 0, oYi, 0);
-    }
-
-    c.evaluate();
-    gateCount.set(int(c.gates.size()));
-    rebuildTruthTable();
-    surface_->fitToView();
-    statusMsg.set("3-to-8 Decoder  |  A2A1A0 selects exactly one of Y0..Y7 "
-                  "HIGH  |  Toggle inputs to test");
-    if (canvas_)
-      canvas_->redraw();
-    if (surface_->onCircuitChanged)
-      surface_->onCircuitChanged();
-  }
-
-  // =========================================================================
-  // §7c  STORAGE PRESET BUILDERS
-  // =========================================================================
-
-  void buildRegister4() {
-    if (!surface_)
-      return;
-    surface_->simStop();
-    surface_->pushUndo();
-    Circuit &c = surface_->circuit;
-    c.clearAll();
-
-    // 4-bit D Register: 4 DFFs sharing one CLK and one RST line
-    //
-    // Inputs:  D0..D3  (data), CLK (shared clock), RST (shared reset)
-    // Outputs: Q0..Q3, /Q0../Q3
-    //
-    // Layout: DFFs stacked vertically, CLK and RST fan out horizontally
-    //
-    //   D0  INPUT  @ (-240, -180)
-    //   D1  INPUT  @ (-240,  -60)
-    //   D2  INPUT  @ (-240,   60)
-    //   D3  INPUT  @ (-240,  180)
-    //   CLK INPUT  @ (-240,  320)
-    //   RST INPUT  @ (-240,  420)
-    //
-    //   DFF0 @ (0, -180)
-    //   DFF1 @ (0,  -60)
-    //   DFF2 @ (0,   60)
-    //   DFF3 @ (0,  180)
-    //
-    //   Q0..Q3   OUTPUT @ (220, -180..-60..60..180)
-    //   /Q0../Q3 OUTPUT @ (340, -180..-60..60..180)
-
-    int iD[4], dff[4], oQ[4], oQn[4];
-    const float dffY[4] = {-180.f, -60.f, 60.f, 180.f};
-
-    for (int i = 0; i < 4; i++)
-      iD[i] = c.add(GateType::INPUT, -240.f, dffY[i], "D" + std::to_string(i));
-
-    int iCLK = c.add(GateType::INPUT, -240.f, 320.f, "CLK");
-    int iRST = c.add(GateType::INPUT, -240.f, 420.f, "RST");
-
-    for (int i = 0; i < 4; i++) {
-      dff[i] = c.add(GateType::DFF, 0.f, dffY[i], "FF" + std::to_string(i));
-
-      // D input
-      c.connect(iD[i], 0, dff[i], 0); // pin 0 = D
-      // CLK
-      c.connect(iCLK, 0, dff[i], 1); // pin 1 = CLK
-      // RST
-      c.connect(iRST, 0, dff[i], 2); // pin 2 = RST
-
-      // Q output (pin 0 of DFF outPins)
-      oQ[i] = c.add(GateType::OUTPUT, 220.f, dffY[i], "Q" + std::to_string(i));
-      c.connect(dff[i], 0, oQ[i], 0);
-
-      // /Q output (pin 1 of DFF outPins)
-      oQn[i] =
-          c.add(GateType::OUTPUT, 360.f, dffY[i], "/Q" + std::to_string(i));
-      c.connect(dff[i], 1, oQn[i], 0);
-    }
-
-    c.evaluate();
-    gateCount.set(int(c.gates.size()));
-    rebuildTruthTable();
-    surface_->fitToView();
-    statusMsg.set("4-bit D Register  |  Set D0-D3, pulse CLK to latch  |  "
-                  "RST=1 clears all  |  ▶ Play then click CLK");
-    if (canvas_)
-      canvas_->redraw();
-    if (surface_->onCircuitChanged)
-      surface_->onCircuitChanged();
-  }
-
-  void buildShiftReg4() {
-    if (!surface_)
-      return;
-    surface_->simStop();
-    surface_->pushUndo();
-    Circuit &c = surface_->circuit;
-    c.clearAll();
-
-    // 4-bit Serial-In Parallel-Out (SIPO) Shift Register
-    //
-    // Each rising CLK edge shifts data one stage right:
-    //   SIN → FF0 → FF1 → FF2 → FF3
-    //
-    // Inputs:  SIN (serial in), CLK (shared), RST (shared)
-    // Outputs: Q0..Q3 (parallel out), SOUT (= Q3, serial out)
-    //
-    // Layout: DFFs in a horizontal chain
-    //
-    //   SIN INPUT  @ (-300,    0)
-    //   CLK INPUT  @ (   0,  200)
-    //   RST INPUT  @ (   0,  300)
-    //
-    //   DFF0 @ (  0,   0)
-    //   DFF1 @ (180,   0)
-    //   DFF2 @ (360,   0)
-    //   DFF3 @ (540,   0)
-    //
-    //   Q0   OUTPUT @ (  0,  -140)
-    //   Q1   OUTPUT @ (180,  -140)
-    //   Q2   OUTPUT @ (360,  -140)
-    //   Q3   OUTPUT @ (540,  -140)   ← also SOUT
-    //   SOUT OUTPUT @ (680,     0)
-
-    int iSIN = c.add(GateType::INPUT, -300.f, 0.f, "SIN");
-    int iCLK = c.add(GateType::INPUT, 0.f, 200.f, "CLK");
-    int iRST = c.add(GateType::INPUT, 0.f, 300.f, "RST");
-
-    const float dffX[4] = {0.f, 180.f, 360.f, 540.f};
-    int dff[4], oQ[4];
-
-    for (int i = 0; i < 4; i++) {
-      dff[i] = c.add(GateType::DFF, dffX[i], 0.f, "FF" + std::to_string(i));
-
-      // CLK and RST shared to all stages
-      c.connect(iCLK, 0, dff[i], 1);
-      c.connect(iRST, 0, dff[i], 2);
-
-      // Q parallel output (above each DFF)
-      oQ[i] = c.add(GateType::OUTPUT, dffX[i], -140.f, "Q" + std::to_string(i));
-      c.connect(dff[i], 0, oQ[i], 0);
-    }
-
-    // Serial data path: SIN → FF0.D, FF0.Q → FF1.D, ... FF2.Q → FF3.D
-    c.connect(iSIN, 0, dff[0], 0);
-    c.connect(dff[0], 0, dff[1], 0);
-    c.connect(dff[1], 0, dff[2], 0);
-    c.connect(dff[2], 0, dff[3], 0);
-
-    // Serial output
-    int oSOUT = c.add(GateType::OUTPUT, 680.f, 0.f, "SOUT");
-    c.connect(dff[3], 0, oSOUT, 0);
-
-    c.evaluate();
-    gateCount.set(int(c.gates.size()));
-    rebuildTruthTable();
-    surface_->fitToView();
-    statusMsg.set("4-bit Shift Register (SIPO)  |  Set SIN, pulse CLK to shift "
-                  "right  |  RST clears  |  ▶ Play then click CLK");
-    if (canvas_)
-      canvas_->redraw();
-    if (surface_->onCircuitChanged)
-      surface_->onCircuitChanged();
-  }
-
-  // =========================================================================
-// §7d  ALU PRESET BUILDER
-// =========================================================================
-
-void buildALU4() {
-    if (!surface_) return;
-    surface_->simStop();
-    surface_->pushUndo();
-    Circuit &c = surface_->circuit;
-    c.clearAll();
-
-    // 4-bit ALU with 3 operation-select bits (Op2, Op1, Op0)
-    //
-    // Op2 Op1 Op0 | Operation
-    //  0   0   0  | ADD   (A + B)
-    //  0   0   1  | SUB   (A - B  =  A + ~B + 1)
-    //  0   1   0  | AND   (A & B)
-    //  0   1   1  | OR    (A | B)
-    //  1   0   0  | XOR   (A ^ B)
-    //  1   0   1  | (reserved / same as XOR here)
-    //  1   1   0  | (reserved)
-    //  1   1   1  | (reserved)
-    //
-    // Architecture:
-    //   For each bit i (0..3):
-    //     - Compute all five candidate results independently
-    //     - Use a 5-way mux built from AND/OR to select based on Op
-    //
-    //   ADD/SUB share the ripple-carry adder core:
-    //     SUB_SEL  = ~Op2 & ~Op1 & Op0        (select subtract mode)
-    //     Each Bi is XORed with SUB_SEL before the adder
-    //     Carry-in = SUB_SEL
-    //
-    //   Logic ops are purely combinational per-bit:
-    //     AND_i  = Ai & Bi
-    //     OR_i   = Ai | Bi
-    //     XOR_i  = Ai ^ Bi
-    //
-    //   Output mux per bit (one-hot select from op decode):
-    //     sel_add = ~Op2 & ~Op1 & ~Op0
-    //     sel_sub = ~Op2 & ~Op1 &  Op0
-    //     sel_and = ~Op2 &  Op1 & ~Op0
-    //     sel_or  = ~Op2 &  Op1 &  Op0
-    //     sel_xor =  Op2 & ~Op1 & ~Op0
-    //
-    //     Ri = (add_i & sel_add)
-    //        | (sub_i & sel_sub)
-    //        | (and_i & sel_and)
-    //        | (or_i  & sel_or )
-    //        | (xor_i & sel_xor)
-    //
-    // Layout strategy:
-    //   Column A:  A inputs        x = -520
-    //   Column B:  B inputs        x = -520  (offset y)
-    //   Column Op: Op inputs       x = -520  (lower)
-    //   Column 0:  Op decode       x = -300
-    //   Column 1:  B-invert + FA   x = -100 .. 300  (per bit, stacked)
-    //   Column 2:  Logic ops       x = 100
-    //   Column 3:  Output mux      x = 480
-    //   Column 4:  Outputs         x = 640
-
-    // ── Op select inputs ────────────────────────────────────────────────
-    int iOp0 = c.add(GateType::INPUT, -520.f,  420.f, "Op0");
-    int iOp1 = c.add(GateType::INPUT, -520.f,  520.f, "Op1");
-    int iOp2 = c.add(GateType::INPUT, -520.f,  620.f, "Op2");
-
-    // Inverters for op bits
-    int nOp0 = c.add(GateType::NOT, -360.f,  420.f, "~Op0");
-    int nOp1 = c.add(GateType::NOT, -360.f,  520.f, "~Op1");
-    int nOp2 = c.add(GateType::NOT, -360.f,  620.f, "~Op2");
-    c.connect(iOp0, 0, nOp0, 0);
-    c.connect(iOp1, 0, nOp1, 0);
-    c.connect(iOp2, 0, nOp2, 0);
-
-    // ── One-hot op decode (all built from 3-input ANDs via 2×AND) ───────
-    // sel_add = ~Op2 & ~Op1 & ~Op0
-    int saA = c.add(GateType::AND, -200.f, 380.f, "~O2·~O1");
-    int selAdd = c.add(GateType::AND, -80.f, 380.f, "sel_ADD");
-    c.connect(nOp2, 0, saA, 0);
-    c.connect(nOp1, 0, saA, 1);
-    c.connect(saA,  0, selAdd, 0);
-    c.connect(nOp0, 0, selAdd, 1);
-
-    // sel_sub = ~Op2 & ~Op1 & Op0
-    int ssA = c.add(GateType::AND, -200.f, 460.f, "~O2·~O1");
-    int selSub = c.add(GateType::AND, -80.f, 460.f, "sel_SUB");
-    c.connect(nOp2, 0, ssA, 0);
-    c.connect(nOp1, 0, ssA, 1);
-    c.connect(ssA,  0, selSub, 0);
-    c.connect(iOp0, 0, selSub, 1);
-
-    // sel_and = ~Op2 & Op1 & ~Op0
-    int sanA = c.add(GateType::AND, -200.f, 540.f, "~O2·O1");
-    int selAnd = c.add(GateType::AND, -80.f, 540.f, "sel_AND");
-    c.connect(nOp2, 0, sanA, 0);
-    c.connect(iOp1, 0, sanA, 1);
-    c.connect(sanA, 0, selAnd, 0);
-    c.connect(nOp0, 0, selAnd, 1);
-
-    // sel_or  = ~Op2 & Op1 & Op0
-    int sorA = c.add(GateType::AND, -200.f, 620.f, "~O2·O1");
-    int selOr = c.add(GateType::AND, -80.f, 620.f, "sel_OR");
-    c.connect(nOp2, 0, sorA, 0);
-    c.connect(iOp1, 0, sorA, 1);
-    c.connect(sorA, 0, selOr, 0);
-    c.connect(iOp0, 0, selOr, 1);
-
-    // sel_xor = Op2 & ~Op1 & ~Op0
-    int sxA = c.add(GateType::AND, -200.f, 700.f, "O2·~O1");
-    int selXor = c.add(GateType::AND, -80.f, 700.f, "sel_XOR");
-    c.connect(iOp2, 0, sxA, 0);
-    c.connect(nOp1, 0, sxA, 1);
-    c.connect(sxA,  0, selXor, 0);
-    c.connect(nOp0, 0, selXor, 1);
-
-    // ── Data inputs ─────────────────────────────────────────────────────
-    const float bitY[4] = { -300.f, -100.f, 100.f, 300.f };
-    int iA[4], iB[4];
-    for (int i = 0; i < 4; i++) {
-        iA[i] = c.add(GateType::INPUT, -520.f, bitY[i] - 30.f,
-                      "A" + std::to_string(i));
-        iB[i] = c.add(GateType::INPUT, -520.f, bitY[i] + 30.f,
-                      "B" + std::to_string(i));
-    }
-
-    // ── Per-bit logic ────────────────────────────────────────────────────
-    // For the adder/subtractor core we need the ripple carry chain.
-    // SUB_SEL = sel_sub (already decoded above — reuse selSub as Cin
-    // and as the XOR control for B inversion)
-    //
-    // B_i_eff = Bi XOR selSub   (invert B when subtracting)
-    // Then full-adder on (Ai, B_i_eff, carry_i)
-
-    int prevCarry = selSub;  // Cin = 1 when subtracting, 0 when adding
-
-    // Storage for per-bit intermediate nodes
-    int bEff[4];   // B XOR selSub
-    int faXor1[4], faAnd1[4], faXor2[4], faAnd2[4], faOr[4]; // FA internals
-    int logAnd[4], logOr[4], logXor[4];  // logic results
-    int outR[4];   // final result OUTPUT gates
-
-    for (int i = 0; i < 4; i++) {
-        float bx = 80.f + i * 0.f;   // all at same x, different y
-        float by = bitY[i];
-
-        // ── B inversion for subtract ─────────────────────────────────
-        bEff[i] = c.add(GateType::XOR, 60.f, by - 60.f,
-                        "Beff" + std::to_string(i));
-        c.connect(iB[i],  0, bEff[i], 0);
-        c.connect(selSub, 0, bEff[i], 1);
-
-        // ── Full adder ───────────────────────────────────────────────
-        // XOR1 = Ai ^ Beff
-        faXor1[i] = c.add(GateType::XOR,  180.f, by - 80.f,
-                          "X1_" + std::to_string(i));
-        faAnd1[i] = c.add(GateType::AND,  180.f, by - 20.f,
-                          "A1_" + std::to_string(i));
-        c.connect(iA[i],   0, faXor1[i], 0);
-        c.connect(bEff[i], 0, faXor1[i], 1);
-        c.connect(iA[i],   0, faAnd1[i], 0);
-        c.connect(bEff[i], 0, faAnd1[i], 1);
-
-        // XOR2 = XOR1 ^ Cin  (= sum bit)
-        faXor2[i] = c.add(GateType::XOR,  300.f, by - 80.f,
-                          "X2_" + std::to_string(i));
-        faAnd2[i] = c.add(GateType::AND,  300.f, by - 20.f,
-                          "A2_" + std::to_string(i));
-        c.connect(faXor1[i], 0, faXor2[i], 0);
-        c.connect(prevCarry, 0, faXor2[i], 1);
-        c.connect(faXor1[i], 0, faAnd2[i], 0);
-        c.connect(prevCarry, 0, faAnd2[i], 1);
-
-        // Carry out
-        faOr[i] = c.add(GateType::OR, 360.f, by,
-                        "Co_" + std::to_string(i));
-        c.connect(faAnd1[i], 0, faOr[i], 0);
-        c.connect(faAnd2[i], 0, faOr[i], 1);
-        prevCarry = faOr[i];
-
-        // ── Logic operations ─────────────────────────────────────────
-        logAnd[i] = c.add(GateType::AND, 180.f, by + 60.f,
-                          "AND_" + std::to_string(i));
-        logOr[i]  = c.add(GateType::OR,  180.f, by + 120.f,
-                          "OR_"  + std::to_string(i));
-        logXor[i] = c.add(GateType::XOR, 180.f, by + 180.f,
-                          "XOR_" + std::to_string(i));
-        c.connect(iA[i], 0, logAnd[i], 0);
-        c.connect(iB[i], 0, logAnd[i], 1);
-        c.connect(iA[i], 0, logOr[i],  0);
-        c.connect(iB[i], 0, logOr[i],  1);
-        c.connect(iA[i], 0, logXor[i], 0);
-        c.connect(iB[i], 0, logXor[i], 1);
-
-        // ── Output mux (5-way: one AND per candidate, then OR tree) ──
-        // Each candidate: result_gate & sel_X
-        float mx = 480.f;
-
-        int mAdd = c.add(GateType::AND, mx,        by - 160.f,
-                         "mADD" + std::to_string(i));
-        int mSub = c.add(GateType::AND, mx,        by - 100.f,
-                         "mSUB" + std::to_string(i));
-        int mAnd = c.add(GateType::AND, mx,        by -  40.f,
-                         "mAND" + std::to_string(i));
-        int mOr  = c.add(GateType::AND, mx,        by +  20.f,
-                         "mOR"  + std::to_string(i));
-        int mXor = c.add(GateType::AND, mx,        by +  80.f,
-                         "mXOR" + std::to_string(i));
-
-        c.connect(faXor2[i], 0, mAdd, 0);
-        c.connect(selAdd,    0, mAdd, 1);
-
-        c.connect(faXor2[i], 0, mSub, 0);
-        c.connect(selSub,    0, mSub, 1);
-
-        c.connect(logAnd[i], 0, mAnd, 0);
-        c.connect(selAnd,    0, mAnd, 1);
-
-        c.connect(logOr[i],  0, mOr,  0);
-        c.connect(selOr,     0, mOr,  1);
-
-        c.connect(logXor[i], 0, mXor, 0);
-        c.connect(selXor,    0, mXor, 1);
-
-        // OR tree: (mAdd|mSub) | (mAnd|mOr) | mXor
-        int or01 = c.add(GateType::OR, mx + 100.f, by - 130.f,
-                         "o01_" + std::to_string(i));
-        int or23 = c.add(GateType::OR, mx + 100.f, by -  10.f,
-                         "o23_" + std::to_string(i));
-        int or45 = c.add(GateType::OR, mx + 200.f, by -  70.f,
-                         "o45_" + std::to_string(i));
-        int orFin= c.add(GateType::OR, mx + 300.f, by -  70.f,
-                         "Ri_"  + std::to_string(i));
-
-        c.connect(mAdd,  0, or01, 0);
-        c.connect(mSub,  0, or01, 1);
-        c.connect(mAnd,  0, or23, 0);
-        c.connect(mOr,   0, or23, 1);
-        c.connect(or01,  0, or45, 0);
-        c.connect(or23,  0, or45, 1);
-        c.connect(or45,  0, orFin,0);
-        c.connect(mXor,  0, orFin,1);
-
-        // Result output
-        outR[i] = c.add(GateType::OUTPUT, mx + 440.f, by - 70.f,
-                        "R"  + std::to_string(i));
-        c.connect(orFin, 0, outR[i], 0);
-    }
-
-    // ── Carry-out / overflow output ──────────────────────────────────────
-    // Show final carry out (useful for ADD/SUB overflow detection)
-    int oCout = c.add(GateType::OUTPUT, 480.f, 460.f, "Cout");
-    c.connect(faOr[3], 0, oCout, 0);
-
-    // ── Zero flag ────────────────────────────────────────────────────────
-    // Zero = ~R0 & ~R1 & ~R2 & ~R3
-    // Built as NOR tree: NOR(R0,R1) & NOR(R2,R3)  then AND
-    // We use NOR = NOT(OR) but we only have OR+NOT separately,
-    // so: nor01 = NOT(OR(outR[0]fanout, outR[1]fanout))
-    // For simplicity we fan from the orFin nodes directly.
-
-    // Re-collect the final OR nodes for zero flag
-    // We stored them in orFin — but we don't have a reference after the loop.
-    // Instead add NOR gates directly connected to the output gates' input wires.
-    // Simplest correct approach: use XNOR chain isn't right.
-    // Use: zero = NOR(R0,R1) AND NOR(R2,R3) — but we need to tap
-    // before the OUTPUT gates. We'll tap faXor2 / orFin outputs by
-    // reconnecting. Easier: just add OR+NOT pairs.
-
-    // Tap point: we need the result bits BEFORE the OUTPUT gate.
-    // The orFin gate for each bit already drives outR[i].
-    // We'll wire orFin outputs to the zero-flag logic too.
-    // But we lost those gate ids after the loop — fix: store them.
-    // Workaround: add NOR(R0,R1) by connecting to outR inputs.
-    // outR[i] input pin 0 is already connected so we need a different tap.
-    // Best fix: store orFin ids in an array.
-
-    // *** Restructure: we'll redo the zero flag using a stored array.
-    // Add a small NOR tree now using the result OUTPUT gates as proxies.
-    // Since OUTPUT gates pass their input through as simVal, we can wire
-    // from them — but OUTPUT has no output pin.
-    // The cleanest solution without restructuring: add 4 NOT gates on
-    // the result lines, then AND them together.
-
-    // Note: we connect to the same source as outR[i] — which is orFin.
-    // We stored orFin ids implicitly. Let's just add the zero flag
-    // as a separate subchain. We need to find the wire driving outR[i].
-    // Instead, use a simpler approach: wire a fresh set.
-    // Since orFin drove outR[i] and we can also connect orFin to more gates,
-    // we'll find those gates by their label "Ri_X".
-
-    // Find orFin gate ids by label
-    int orFinIds[4] = {-1,-1,-1,-1};
-    for (auto &g : c.gates) {
-        for (int i = 0; i < 4; i++) {
-            std::string lbl = "Ri_" + std::to_string(i);
-            if (g.label == lbl) orFinIds[i] = g.id;
-        }
-    }
-
-    if (orFinIds[0]>=0 && orFinIds[1]>=0 && orFinIds[2]>=0 && orFinIds[3]>=0) {
-        // NOR(R0,R1): OR then NOT
-        int zOr01 = c.add(GateType::OR,  480.f, 560.f, "zOR01");
-        int zOr23 = c.add(GateType::OR,  480.f, 640.f, "zOR23");
-        int zN01  = c.add(GateType::NOT, 600.f, 560.f, "zN01");
-        int zN23  = c.add(GateType::NOT, 600.f, 640.f, "zN23");
-        int zAnd  = c.add(GateType::AND, 720.f, 600.f, "ZERO");
-        int oZero = c.add(GateType::OUTPUT, 840.f, 600.f, "Zero");
-
-        c.connect(orFinIds[0], 0, zOr01, 0);
-        c.connect(orFinIds[1], 0, zOr01, 1);
-        c.connect(orFinIds[2], 0, zOr23, 0);
-        c.connect(orFinIds[3], 0, zOr23, 1);
-        c.connect(zOr01, 0, zN01, 0);
-        c.connect(zOr23, 0, zN23, 0);
-        c.connect(zN01,  0, zAnd, 0);
-        c.connect(zN23,  0, zAnd, 1);
-        c.connect(zAnd,  0, oZero, 0);
-    }
-
-    c.evaluate();
-    gateCount.set(int(c.gates.size()));
-    rebuildTruthTable();
-    surface_->fitToView();
-    statusMsg.set(
-        "4-bit ALU  |  Op: 000=ADD  001=SUB  010=AND  011=OR  100=XOR  "
-        "|  Set A,B inputs + Op bits  |  R=result  Cout=carry  Zero=all-zero flag");
-    if (canvas_) canvas_->redraw();
-    if (surface_->onCircuitChanged) surface_->onCircuitChanged();
-}
 
 public:
-  LogicSimApp()
-      : gateCount(0, context),
-        statusMsg("Place gates · Connect wires · Press ▶ Play", context),
-        zoomPct(100.0, context), simRunning(false, context),
-        simActive(false, context), ttText("No circuit yet", context),
-        snapOn(true, context), currentFile("", context) {}
+  ImageEditorApp()
+      : statusMsg("Open an image to begin.", context), hasImage(false, context),
+        beforeMode(false, context), zoomLevel(100.0, context),
+        histState(HistogramData{}, context),
+        curveState(ToneCurveData{}, context),
+        hslState(HSLData{}, context) // ← new
+        ,
+        sExposure(0.0, context), sContrast(0.0, context),
+        sHighlights(0.0, context), sShadows(0.0, context),
+        sWhites(0.0, context), sBlacks(0.0, context),
+        sTemperature(0.0, context), sTint(0.0, context),
+        sSaturation(0.0, context), sVibrance(0.0, context),
+        sSharpness(0.0, context), sNoiseReduce(0.0, context),
+        sVignette(0.0, context), sGrain(0.0, context) {}
 
   WidgetPtr build() override {
-    int SW = GetSystemMetrics(SM_CXSCREEN), SH = GetSystemMetrics(SM_CYSCREEN);
-    int vW = SW - kSW, vH = SH - kTH - kHH;
-    auto cv = std::make_shared<CanvasWidget>()->setSize(vW, vH);
-    cv->setCanvasSize(vW, vH);
-    cv->setViewportEnabled(false);
-    surface_ = cv->setSurface<CircuitSurface>();
-    canvas_ = cv.get();
+    int screenW = GetSystemMetrics(SM_CXSCREEN);
+    int screenH = GetSystemMetrics(SM_CYSCREEN);
+    int viewW = screenW - kPanelW, viewH = screenH - kToolbarH - kHintsH;
 
-    surface_->onCircuitChanged = [this]() {
-      gateCount.set(int(surface_->circuit.gates.size()) +
-                    int(surface_->circuit.subcircuitInsts.size()));
+    auto canvas = std::make_shared<CanvasWidget>()->setSize(viewW, viewH);
+    canvas->setCanvasSize(1, 1);
+    canvas->setScrollbarsEnabled(false);
+    surface_ = canvas->setSurface<ImageEditSurface>();
+    canvasPtr_ = canvas.get();
+    mainHwnd_ = GetActiveWindow();
+
+    // Keep the zoom% display in sync whenever the viewport changes.
+    // Guard prevents the listener below from firing back into zoomToward.
+    canvas->onViewportChanged = [this](float z) {
+      if (syncingZoom_)
+        return;
+      double pct = double(z) * 100.0;
+      if (std::abs(pct - zoomLevel.get()) > 0.5) {
+        syncingZoom_ = true;
+        zoomLevel.set(pct);
+        syncingZoom_ = false;
+      }
     };
+
+    surface_->onImageLoaded = [this]() {
+      hasImage.set(true);
+      if (canvasPtr_) {
+        canvasPtr_->setCanvasSize(surface_->imageWidth(),
+                                  surface_->imageHeight());
+        canvasPtr_->viewport().fitToView();
+        canvasPtr_->redraw();
+        zoomLevel.set(double(canvasPtr_->viewport().zoom()) * 100.0);
+      }
+    };
+
     surface_->onStatusMessage = [this](const char *m) { statusMsg.set(m); };
-    surface_->onRedrawNeeded = [this]() {
-      if (canvas_)
-        canvas_->redraw();
+    surface_->onHistogramUpdated = [this](const HistogramData &d) {
+      histState.set(d);
+      if (curveWidgetPtr_)
+        curveWidgetPtr_->setHistogram(d.r, d.g, d.b);
     };
-    surface_->onZoomChanged = [this](float z) { notifyZoom(z); };
-    surface_->onSimModeChanged = [this](SimMode m) {
-      simRunning.set(m == SimMode::Running);
-      simActive.set(m != SimMode::Edit);
-    };
-    surface_->onSimUpdated = [this]() { rebuildTruthTable(); };
-    surface_->onLabelEdit = [this](int id, const std::string &cur) {
-      doLabelEdit(id, cur);
-    };
-    surface_->onSaveRequest = [this]() { doSave(); };
-    surface_->onLoadRequest = [this]() { doLoad(); };
 
-    zoomPct.listen([this](double p) { applyZoom(p); });
-    snapOn.listen([this](bool v) {
-      if (surface_)
-        surface_->snapEnabled = v;
-      if (canvas_)
-        canvas_->redraw();
+    wire(sExposure, &EditParams::exposure);
+    wire(sContrast, &EditParams::contrast);
+    wire(sHighlights, &EditParams::highlights);
+    wire(sShadows, &EditParams::shadows);
+    wire(sWhites, &EditParams::whites);
+    wire(sBlacks, &EditParams::blacks);
+    wire(sTemperature, &EditParams::temperature);
+    wire(sTint, &EditParams::tint);
+    wire(sSaturation, &EditParams::saturation);
+    wire(sVibrance, &EditParams::vibrance);
+    wire(sSharpness, &EditParams::sharpness);
+    wire(sNoiseReduce, &EditParams::noiseReduce);
+    wire(sVignette, &EditParams::vignette);
+    wire(sGrain, &EditParams::grain);
+
+    // Zoom slider drives the viewport — skip if viewport already set this.
+    zoomLevel.listen([this](double pct) {
+      if (syncingZoom_ || !canvasPtr_)
+        return;
+      Viewport &vp = canvasPtr_->viewport();
+      float target = float(pct / 100.0);
+      float cur = vp.zoom();
+      if (std::abs(target - cur) < 0.0001f)
+        return;
+      syncingZoom_ = true;
+      vp.zoomToward(vp.viewW() * 0.5f, vp.viewH() * 0.5f, target / cur);
+      canvasPtr_->redraw();
+      syncingZoom_ = false;
     });
+    // ── Colors ────────────────────────────────────────────────────────────
+    COLORREF kBg1 = RGB(17, 17, 27), kBg2 = RGB(24, 24, 37);
+    COLORREF kBorder = RGB(49, 50, 68), kText = RGB(205, 214, 244);
+    COLORREF kDim = RGB(100, 105, 130), kAccent = RGB(174, 129, 255);
+    COLORREF kGreen = RGB(148, 226, 213), kOrange = RGB(250, 179, 135);
 
-    COLORREF kBg = RGB(12, 12, 18), kCard = RGB(18, 18, 28),
-             kBord = RGB(40, 42, 62);
-    COLORREF kAccent = RGB(174, 129, 255), kGreen = RGB(148, 226, 213),
-             kDim = RGB(80, 84, 110), kText = RGB(192, 202, 232);
+    auto sectionLabel = [&](const std::string &t) -> WidgetPtr {
+      return Text(t)
+          ->setFontSize(9)
+          ->setTextColor(RGB(100, 105, 125))
+          ->setFontWeight(FontWeight::Bold);
+    };
+    auto cardWrap = [&](WidgetPtr child) -> WidgetPtr {
+      return Container(child)
+          ->setBackgroundColor(kBg2)
+          ->setBorderRadius(8)
+          ->setBorderWidth(1)
+          ->setBorderColor(kBorder)
+          ->setPaddingAll(10, 10, 10, 10);
+    };
+    auto makeSlider = [&](const std::string &label, double lo, double hi,
+                          double step, State<double> &st,
+                          COLORREF col = RGB(174, 129, 255)) -> WidgetPtr {
+      return Column(Row(Text(label)
+                            ->setFontSize(9)
+                            ->setTextColor(kDim)
+                            ->setMinWidth(80),
+                        SizedBox(4, 0),
+                        Text(st,
+                             [](double v) {
+                               char b[16];
+                               _snprintf_s(b, sizeof(b), _TRUNCATE, "%.2f", v);
+                               return std::string(b);
+                             })
+                            ->setFontSize(9)
+                            ->setTextColor(kText)
+                            ->setMinWidth(36))
+                        ->setSpacing(0)
+                        ->setCrossAxisAlignment(CrossAxisAlignment::Center),
+                    SizedBox(0, 4),
+                    Slider(lo, hi, step)
+                        ->setValue(st)
+                        ->setTrackFillColor(col)
+                        ->setWidth(258))
+          ->setSpacing(0);
+    };
 
-    struct TI {
-      GateType t;
-      COLORREF ac;
-      const char *sub;
-    };
-    const std::vector<TI> tiles = {
-        {GateType::AND, RGB(70, 120, 220), "A & B"},
-        {GateType::OR, RGB(70, 190, 110), "A | B"},
-        {GateType::NOT, RGB(170, 70, 220), "! A"},
-        {GateType::NAND, RGB(220, 70, 70), "!(A&B)"},
-        {GateType::NOR, RGB(200, 70, 170), "!(A|B)"},
-        {GateType::XOR, RGB(70, 170, 220), "A ^ B"},
-        {GateType::XNOR, RGB(110, 110, 220), "!(A^B)"},
-        {GateType::INPUT, RGB(70, 210, 110), "Toggle 0/1"},
-        {GateType::OUTPUT, RGB(220, 130, 40), "LED output"},
-        {GateType::CLOCK, RGB(47, 210, 229), "0.5–8 Hz auto"},
-        {GateType::DFF, RGB(50, 165, 240), "D·CLK·RST → Q"},
-        {GateType::DLATCH, RGB(50, 215, 190), "D·EN → Q (level)"},
-        {GateType::TFLIPFLOP, RGB(240, 185, 50), "T·CLK → Q (toggle)"},
-        {GateType::JKFLIPFLOP, RGB(240, 95, 150), "J·K·CLK → Q"},
-        {GateType::BUS_IN_2, RGB(80, 160, 240), "2×1b → 2b bus"},
-        {GateType::BUS_IN_4, RGB(80, 160, 240), "4×1b → 4b bus"},
-        {GateType::BUS_IN_8, RGB(80, 160, 240), "8×1b → 8b bus"},
-        {GateType::BUS_OUT_2, RGB(240, 160, 80), "2b bus → 2×1b"},
-        {GateType::BUS_OUT_4, RGB(240, 160, 80), "4b bus → 4×1b"},
-        {GateType::BUS_OUT_8, RGB(240, 160, 80), "8b bus → 8×1b"},
-    };
-    auto makeTile = [&](const TI &ti) -> WidgetPtr {
-      GateType t = ti.t;
-      COLORREF ac = ti.ac;
+    // ── §A  HISTOGRAM ─────────────────────────────────────────────────────
+    auto histSection = cardWrap(
+        Column(Row(sectionLabel("HISTOGRAM"), SizedBox(4, 0),
+                   Text(hasImage,
+                        [](bool b) -> std::string {
+                          return b ? "" : " (no image)";
+                        })
+                       ->setFontSize(9)
+                       ->setTextColor(kDim))
+                   ->setSpacing(0)
+                   ->setCrossAxisAlignment(CrossAxisAlignment::Center),
+               SizedBox(0, 6),
+               Histogram(258, 90)
+                   ->setData(histState)
+                   ->setMode(HistogramMode::RGB)
+                   ->setShowGrid(true)
+                   ->setShowClip(true)
+                   ->setShowChannelToggles(true)
+                   ->setLogScale(false)
+                   ->setBgColor(RGB(14, 14, 22))
+                   ->setOnZoneClicked([this](float pos) {
+                     sExposure.set(max(-5.0, min(5.0, (pos - 0.5) * 4.0)));
+                   }))
+            ->setSpacing(0));
+
+    // ── §B  TONE CURVE ────────────────────────────────────────────────────
+    auto curveWidget =
+        ToneCurve(258, 220)
+            ->setShowHistogram(true)
+            ->setShowRegions(true)
+            ->setShowGrid(true)
+            ->setCurveData(curveState)
+            ->setOnCurveChanged([this](const ToneCurveData &d) {
+              curveState.set(d);
+              if (!surface_)
+                return;
+              surface_->uploadCurveLUTs(d.rgb.buildLUT(), d.r.buildLUT(),
+                                        d.g.buildLUT(), d.b.buildLUT());
+              if (canvasPtr_)
+                canvasPtr_->redraw();
+            });
+    curveWidgetPtr_ = curveWidget.get();
+
+    auto modeBtn = [&](const std::string &lbl, COLORREF col,
+                       std::function<void()> fn) -> WidgetPtr {
       return GestureDetector(
-                 Container(
-                     Row(Container(nullptr)
-                             ->setWidth(3)
-                             ->setHeight(32)
-                             ->setBackgroundColor(ac)
-                             ->setBorderRadius(2),
-                         SizedBox(7, 0),
-                         Column(
-                             Text(kGateName[(int)t])
-                                 ->setFontSize(10)
-                                 ->setFontWeight(FontWeight::Bold)
-                                 ->setTextColor(ac),
-                             SizedBox(0, 1),
-                             Text(ti.sub)->setFontSize(8)->setTextColor(kDim))
-                             ->setSpacing(0))
-                         ->setSpacing(0)
-                         ->setCrossAxisAlignment(CrossAxisAlignment::Center))
-                     ->setWidth(kSW - 16)
-                     ->setHeight(38)
-                     ->setBackgroundColor(kCard)
-                     ->setBorderRadius(6)
+                 Container(Text(lbl)->setFontSize(9)->setTextColor(col))
+                     ->setBackgroundColor(RGB(24, 24, 34))
+                     ->setBorderRadius(4)
+                     ->setPaddingAll(6, 3, 6, 3)
                      ->setBorderWidth(1)
-                     ->setBorderColor(kBord)
-                     ->setHoverBackgroundColor(RGB(26, 26, 42)))
-          ->setOnTap([this, t]() {
-            if (!surface_)
-              return;
-            if (surface_->isSimActive()) {
-              statusMsg.set("Stop simulation first");
-              return;
-            }
-            surface_->dropGate(t);
-            std::string extra;
-            if (t == GateType::DFF)
-              extra = "  ·  D·CLK(rising)·RST → Q and /Q";
-            else if (t == GateType::DLATCH)
-              extra = "  ·  Transparent when EN=1";
-            else if (t == GateType::TFLIPFLOP)
-              extra = "  ·  Toggles Q on CLK rising edge when T=1";
-            else if (t == GateType::JKFLIPFLOP)
-              extra = "  ·  Set/Reset/Toggle on CLK rising edge";
-            else if (t == GateType::CLOCK)
-              extra = "  ·  Dbl-click to change Hz";
-            else
-              extra = "  ·  Drag out→in  ·  Dbl-click to label";
-            statusMsg.set(std::string("Placed ") + kGateName[(int)t] + extra);
-          });
-    };
-    auto tileCol = std::make_shared<ColumnWidget>();
-    tileCol->setSpacing(4);
-    for (auto &ti : tiles)
-      tileCol->addChild(makeTile(ti));
-
-    auto ttPanel =
-        Container(Column(Text("TRUTH TABLE / STATE")
-                             ->setFontSize(7)
-                             ->setFontWeight(FontWeight::Bold)
-                             ->setTextColor(kDim),
-                         SizedBox(0, 5),
-                         Text(ttText, [](const std::string &s) { return s; })
-                             ->setFontSize(9)
-                             ->setTextColor(RGB(120, 200, 140)))
-                      ->setSpacing(0))
-            ->setWidth(kSW - 8)
-            ->setBackgroundColor(RGB(10, 14, 10))
-            ->setBorderRadius(6)
-            ->setBorderWidth(1)
-            ->setBorderColor(RGB(30, 60, 35))
-            ->setPaddingAll(7, 7, 7, 7);
-
-    auto sidebar =
-        Container(Column(Text("GATES")
-                             ->setFontSize(7)
-                             ->setFontWeight(FontWeight::Bold)
-                             ->setTextColor(kDim),
-                         SizedBox(0, 6), tileCol, SizedBox(0, 10), ttPanel)
-                      ->setSpacing(0))
-            ->setWidth(kSW)
-            ->setBackgroundColor(kBg)
-            ->setPaddingAll(8, 8, 8, 8);
-
-    auto mkBtn = [&](const std::string &lbl, COLORREF col, COLORREF bg,
-                     COLORREF bord, std::function<void()> fn) -> WidgetPtr {
-      return GestureDetector(Container(Text(lbl)
-                                           ->setFontSize(11)
-                                           ->setFontWeight(FontWeight::Bold)
-                                           ->setTextColor(col))
-                                 ->setHeight(30)
-                                 ->setBorderRadius(6)
-                                 ->setBackgroundColor(bg)
-                                 ->setBorderWidth(1)
-                                 ->setBorderColor(bord)
-                                 ->setPaddingAll(10, 4, 10, 4)
-                                 ->setHoverBackgroundColor(
-                                     RGB(GetRValue(bg) + 8, GetGValue(bg) + 8,
-                                         GetBValue(bg) + 8)))
+                     ->setBorderColor(kBorder))
           ->setOnTap(fn);
     };
+    auto curveModeRow =
+        Row(modeBtn("Point Curve", kAccent,
+                    [cw = curveWidget.get()] { cw->setParametricMode(false); }),
+            SizedBox(5, 0),
+            modeBtn("Parametric", kDim,
+                    [cw = curveWidget.get()] { cw->setParametricMode(true); }),
+            SizedBox(5, 0),
+            modeBtn("Reset", RGB(200, 100, 100),
+                    [this, cw = curveWidget.get()] {
+                      cw->resetCurve();
+                      curveState.set(ToneCurveData{});
+                      if (surface_) {
+                        ToneCurveData id;
+                        surface_->uploadCurveLUTs(
+                            id.rgb.buildLUT(), id.r.buildLUT(), id.g.buildLUT(),
+                            id.b.buildLUT());
+                        if (canvasPtr_)
+                          canvasPtr_->redraw();
+                      }
+                    }))
+            ->setSpacing(0)
+            ->setCrossAxisAlignment(CrossAxisAlignment::Center);
 
-    auto toolbar=Container(Column(
-            Row(
-                Text("⚡ Logic Sim")->setFontSize(13)->setFontWeight(FontWeight::Bold)->setTextColor(kAccent),SizedBox(8,0),
-                mkBtn("💾 Save",kGreen,RGB(10,20,18),RGB(30,80,60),[this](){doSave();}),
-                mkBtn("📂 Open",kGreen,RGB(10,20,18),RGB(30,80,60),[this](){doLoad();}),SizedBox(4,0),
-                mkBtn("↩ Undo",kAccent,RGB(22,20,34),RGB(70,55,100),[this](){if(surface_)surface_->undo();}),
-                mkBtn("↪ Redo",kAccent,RGB(22,20,34),RGB(70,55,100),[this](){if(surface_)surface_->redo();}),SizedBox(4,0),
-                GestureDetector(Container(Text(snapOn,[](bool v){return v?"⊞ Snap":"⊟ Snap";})
-                    ->setFontSize(10)->setFontWeight(FontWeight::Bold)->setTextColor(RGB(174,129,255)))
-                    ->setHeight(28)->setBorderRadius(5)->setBackgroundColor(RGB(22,18,32))
-                    ->setBorderWidth(1)->setBorderColor(RGB(70,55,100))->setPaddingAll(8,3,8,3))
-                ->setOnTap([this](){snapOn.set(!snapOn.get());}),SizedBox(6,0),
-                Text("Zoom")->setFontSize(9)->setTextColor(kDim),
-                Slider(10.0,400.0,1.0)->setValue(zoomPct)->setTrackFillColor(kAccent)->setWidth(80),
-                Text(zoomPct,[](double v){char b[16];_snprintf_s(b,sizeof(b),_TRUNCATE,"%.0f%%",v);return std::string(b);})->setFontSize(10)->setTextColor(kText)->setMinWidth(34),
-                mkBtn("Fit",kAccent,RGB(22,20,34),RGB(70,55,100),[this](){if(surface_){surface_->fitToView();notifyZoom(surface_->getZoom());}}),
-                mkBtn("1:1",kAccent,RGB(22,20,34),RGB(70,55,100),[this](){if(surface_){surface_->resetZoom();notifyZoom(1.f);}}),SizedBox(6,0),
-                mkBtn("🗑 Clear",RGB(243,139,168),RGB(34,14,20),RGB(120,40,60),[this](){if(!surface_)return;surface_->pushUndo();surface_->simStop();surface_->circuit.clearAll();gateCount.set(0);ttText.set("No circuit yet");currentFile.set("");if(canvas_)canvas_->redraw();}),SizedBox(6,0),
-                Text(gateCount,[](int n){return std::to_string(n)+(n==1?" item":" items");})->setFontSize(10)->setTextColor(kDim)
-            )->setSpacing(5)->setCrossAxisAlignment(CrossAxisAlignment::Center),
-            SizedBox(0,4),
-            Row(
-                GestureDetector(Container(Text(simRunning,[](bool r){return r?"⏸ Pause":"▶ Play";})
-                    ->setFontSize(11)->setFontWeight(FontWeight::Bold)->setTextColor(RGB(80,220,120)))
-                    ->setHeight(30)->setBorderRadius(6)->setBackgroundColor(RGB(14,34,18))->setBorderWidth(1)->setBorderColor(RGB(40,120,55))->setPaddingAll(10,4,10,4)->setHoverBackgroundColor(RGB(18,44,22)))
-                ->setOnTap([this](){if(!surface_)return;if(!surface_->isSimActive())surface_->simPlay();else surface_->simPause();}),SizedBox(5,0),
-                mkBtn("■ Stop",RGB(230,80,80),RGB(34,14,14),RGB(120,40,40),[this](){if(surface_)surface_->simStop();}),SizedBox(5,0),
-                mkBtn("⏭ Step",RGB(100,180,255),RGB(14,22,38),RGB(40,80,150),[this](){if(surface_)surface_->simStep();}),SizedBox(8,0),
-                // ── Group button ──────────────────────────────────────────
-                mkBtn("⬡ Group  Ctrl+G",RGB(200,170,255),RGB(20,14,34),RGB(80,55,130),[this](){if(surface_)surface_->groupSelected();}),
-                SizedBox(8,0),
-mkBtn("½ Half Add",   RGB(100,200,255),RGB(10,18,28),RGB(30,80,130),[this](){buildHalfAdder();}),
-mkBtn("Full Add",     RGB(100,200,255),RGB(10,18,28),RGB(30,80,130),[this](){buildFullAdder();}),
-mkBtn("4b Adder",     RGB(130,220,180),RGB(10,22,16),RGB(30,100,60),[this](){buildRippleAdder4();}),
-mkBtn("4b Subtract",  RGB(255,160,100),RGB(28,14, 8),RGB(120,60,20),[this](){buildSubtractor4();}),
-SizedBox(8,0),
-mkBtn("2:1 MUX",     RGB(180,140,255),RGB(18,12,32),RGB(80,50,140),[this](){buildMux21();}),
-mkBtn("4:1 MUX",     RGB(200,150,255),RGB(20,12,34),RGB(90,55,150),[this](){buildMux41();}),
-mkBtn("3→8 Dec",     RGB(255,200,100),RGB(28,20, 8),RGB(120,90,20),[this](){buildDecoder38();}),
-SizedBox(8,0),
-mkBtn("4b Reg",      RGB(100,220,200),RGB( 8,22,20),RGB(25,100,90),[this](){buildRegister4();}),
-mkBtn("4b ShiftReg", RGB(100,200,220),RGB( 8,18,22),RGB(25, 85,110),[this](){buildShiftReg4();}),
-SizedBox(8,0),
-mkBtn("4b ALU",      RGB(255,180,100),RGB(28,16, 4),RGB(130,70,15),[this](){buildALU4();}),
-SizedBox(8,0),
-                SizedBox(12,0),
-                Container(Text(simActive,[](bool a){return a?"● SIM MODE":"○ EDIT MODE";})
-                    ->setFontSize(9)->setFontWeight(FontWeight::Bold)->setTextColor(RGB(220,200,60)))
-                ->setPaddingAll(7,3,7,3)->setBorderRadius(4)->setBackgroundColor(RGB(20,18,8))->setBorderWidth(1)->setBorderColor(RGB(70,62,15)),
-                SizedBox(12,0),
-                Text("Select gates → Ctrl+G to group  |  Right-click subcircuit instance to delete  |  Dbl-click for info  |  Wires cross boundary automatically")
-                    ->setFontSize(9)->setTextColor(kDim)
-            )->setSpacing(0)->setCrossAxisAlignment(CrossAxisAlignment::Center)
-        )->setSpacing(0))
-        ->setBackgroundColor(kBg)->setPaddingAll(10,5,10,5)->setHeight(kTH);
+    auto curveSection = cardWrap(
+        Column(Row(sectionLabel("TONE CURVE"), SizedBox(8, 0), curveModeRow)
+                   ->setSpacing(0)
+                   ->setCrossAxisAlignment(CrossAxisAlignment::Center),
+               SizedBox(0, 8), curveWidget)
+            ->setSpacing(0));
 
-    auto hints =
-        Container(Row(Text(statusMsg, [](const std::string &s) { return s; })
-                          ->setFontSize(10)
-                          ->setTextColor(kGreen),
-                      SizedBox(14, 0),
-                      Text(currentFile,
-                           [](const std::string &s) {
-                             return s.empty() ? "Unsaved" : s;
+    // ── §C  TONE SLIDERS ──────────────────────────────────────────────────
+    auto toneSection = cardWrap(
+        Column(
+            sectionLabel("TONE"), SizedBox(0, 8),
+            makeSlider("Exposure", -5.0, 5.0, 0.05, sExposure,
+                       RGB(250, 220, 100)),
+            SizedBox(0, 6),
+            makeSlider("Contrast", -1.0, 1.0, 0.01, sContrast, kAccent),
+            SizedBox(0, 6),
+            makeSlider("Highlights", -1.0, 1.0, 0.01, sHighlights,
+                       RGB(200, 200, 220)),
+            SizedBox(0, 6),
+            makeSlider("Shadows", -1.0, 1.0, 0.01, sShadows, RGB(80, 100, 160)),
+            SizedBox(0, 6),
+            makeSlider("Whites", -1.0, 1.0, 0.01, sWhites, RGB(230, 230, 230)),
+            SizedBox(0, 6),
+            makeSlider("Blacks", -1.0, 1.0, 0.01, sBlacks, RGB(60, 60, 80)))
+            ->setSpacing(0));
+
+    // ── §D  COLOR ─────────────────────────────────────────────────────────
+    auto colorSection = cardWrap(
+        Column(sectionLabel("COLOR"), SizedBox(0, 8),
+               makeSlider("Temperature", -1.0, 1.0, 0.01, sTemperature,
+                          RGB(100, 180, 250)),
+               SizedBox(0, 6),
+               makeSlider("Tint", -1.0, 1.0, 0.01, sTint, RGB(200, 120, 200)),
+               SizedBox(0, 6),
+               makeSlider("Saturation", -1.0, 1.0, 0.01, sSaturation,
+                          RGB(220, 120, 100)),
+               SizedBox(0, 6),
+               makeSlider("Vibrance", -1.0, 1.0, 0.01, sVibrance,
+                          RGB(170, 220, 120)))
+            ->setSpacing(0));
+
+    // ── §E  HSL / COLOR MIX ───────────────────────────────────────────────
+    // The HSL panel widget handles its own internal layout and scrolling.
+    // We wrap it in a card just like the other sections.
+    auto hslWidget =
+        HSLPanel(258)
+            ->setData(hslState)
+            ->setActiveTab(HSLTab::All)
+            ->setOnHSLChanged([this](const HSLData &d) {
+              hslState.set(d);
+              if (!surface_)
+                return;
+              auto luts = d.buildGPULUTs();
+              surface_->uploadHSLLUTs(luts.hue.data(), luts.sat.data(),
+                                      luts.lum.data());
+              if (canvasPtr_)
+                canvasPtr_->redraw();
+            });
+    hslWidgetPtr_ = hslWidget.get();
+
+    // Reset button for the HSL panel
+    auto hslResetBtn = modeBtn("Reset", RGB(200, 100, 100), [this]() {
+      if (hslWidgetPtr_)
+        hslWidgetPtr_->resetAll();
+      hslState.set(HSLData{});
+      if (surface_) {
+        HSLData id;
+        auto luts = id.buildGPULUTs();
+        surface_->uploadHSLLUTs(luts.hue.data(), luts.sat.data(),
+                                luts.lum.data());
+        if (canvasPtr_)
+          canvasPtr_->redraw();
+      }
+    });
+
+    auto hslSection = cardWrap(
+        Column(Row(sectionLabel("HSL / COLOR MIX"), SizedBox(8, 0), hslResetBtn)
+                   ->setSpacing(0)
+                   ->setCrossAxisAlignment(CrossAxisAlignment::Center),
+               SizedBox(0, 8), hslWidget)
+            ->setSpacing(0));
+
+    // ── §F  DETAIL ────────────────────────────────────────────────────────
+    auto detailSection = cardWrap(
+        Column(sectionLabel("DETAIL"), SizedBox(0, 8),
+               makeSlider("Sharpness", 0.0, 1.0, 0.01, sSharpness, kAccent),
+               SizedBox(0, 6),
+               makeSlider("Noise Reduce", 0.0, 1.0, 0.01, sNoiseReduce, kGreen))
+            ->setSpacing(0));
+
+    // ── §G  EFFECTS ───────────────────────────────────────────────────────
+    auto effectsSection = cardWrap(
+        Column(sectionLabel("EFFECTS"), SizedBox(0, 8),
+               makeSlider("Vignette", -1.0, 1.0, 0.01, sVignette,
+                          RGB(80, 80, 100)),
+               SizedBox(0, 6),
+               makeSlider("Grain", 0.0, 1.0, 0.01, sGrain, RGB(180, 160, 130)))
+            ->setSpacing(0));
+
+    // ── §H  PANEL (scrollable) ────────────────────────────────────────────
+    auto panel =
+        Container(
+            ListView({histSection, SizedBox(0, 6), curveSection, SizedBox(0, 6),
+                      toneSection, SizedBox(0, 6), colorSection, SizedBox(0, 6),
+                      hslSection,
+                      SizedBox(0, 6), // ← inserted between color and detail
+                      detailSection, SizedBox(0, 6), effectsSection})
+                ->setSpacing(0))
+            ->setWidth(kPanelW)
+            ->setBackgroundColor(kBg1)
+            ->setPaddingAll(10, 10, 10, 10);
+
+    // ── §I  TOOLBAR ───────────────────────────────────────────────────────
+    auto mkBtn = [&](const std::string &lbl, COLORREF c,
+                     std::function<void()> fn) -> WidgetPtr {
+      return Button(lbl, fn)
+          ->setBackgroundColor(RGB(30, 30, 46))
+          ->setTextColor(c)
+          ->setBorderRadius(5)
+          ->setHeight(26)
+          ->setPadding(4);
+    };
+    auto toolbar =
+        Container(Row(mkBtn("📂 Open", kGreen,
+                            [this]() {
+                              std::wstring p = promptOpenImage(mainHwnd_);
+                              if (!p.empty() && surface_)
+                                surface_->loadImage(p.c_str());
+                            }),
+                      SizedBox(8, 0),
+                      mkBtn("💾 Export", kAccent,
+                            [this]() {
+                              if (!surface_ || !surface_->hasImage())
+                                return;
+                              std::wstring p = promptExportImage(mainHwnd_);
+                              if (!p.empty())
+                                surface_->exportImage(p.c_str());
+                            }),
+                      SizedBox(8, 0),
+                      mkBtn("↺ Reset All", kOrange,
+                            [this]() {
+                              if (!surface_)
+                                return;
+                              surface_->params().reset();
+
+                              // Reset tone curve
+                              if (curveWidgetPtr_)
+                                curveWidgetPtr_->resetCurve();
+                              curveState.set(ToneCurveData{});
+                              {
+                                ToneCurveData id;
+                                surface_->uploadCurveLUTs(
+                                    id.rgb.buildLUT(), id.r.buildLUT(),
+                                    id.g.buildLUT(), id.b.buildLUT());
+                              }
+
+                              // Reset HSL
+                              if (hslWidgetPtr_)
+                                hslWidgetPtr_->resetAll();
+                              hslState.set(HSLData{});
+                              {
+                                HSLData id;
+                                auto luts = id.buildGPULUTs();
+                                surface_->uploadHSLLUTs(luts.hue.data(),
+                                                        luts.sat.data(),
+                                                        luts.lum.data());
+                              }
+
+                              // Reset all sliders
+                              sExposure.set(0);
+                              sContrast.set(0);
+                              sHighlights.set(0);
+                              sShadows.set(0);
+                              sWhites.set(0);
+                              sBlacks.set(0);
+                              sTemperature.set(0);
+                              sTint.set(0);
+                              sSaturation.set(0);
+                              sVibrance.set(0);
+                              sSharpness.set(0);
+                              sNoiseReduce.set(0);
+                              sVignette.set(0);
+                              sGrain.set(0);
+
+                              if (canvasPtr_)
+                                canvasPtr_->redraw();
+                            }),
+                      SizedBox(8, 0),
+                      GestureDetector(Container(Text(beforeMode,
+                                                     [](const bool &b) {
+                                                       return std::string(
+                                                           b ? "After ▶"
+                                                             : "Before ◀");
+                                                     })
+                                                    ->setFontSize(11)
+                                                    ->setTextColor(kText))
+                                          ->setBackgroundColor(RGB(30, 30, 46))
+                                          ->setBorderRadius(5)
+                                          ->setPaddingAll(6, 3, 6, 3)
+                                          ->setBorderWidth(1)
+                                          ->setBorderColor(kBorder))
+                          ->setOnTap([this]() {
+                            bool b = !beforeMode.get();
+                            beforeMode.set(b);
+                            if (surface_) {
+                              if (b) {
+                                savedParams_ = surface_->params();
+                                surface_->params().reset();
+                              } else {
+                                surface_->params() = savedParams_;
+                              }
+                              if (canvasPtr_)
+                                canvasPtr_->redraw();
+                            }
+                          }),
+
+                      SizedBox(16, 0),
+                      Text("Zoom")->setFontSize(10)->setTextColor(kDim),
+                      Slider(6.25, 200.0, 0.25)
+                          ->setValue(zoomLevel)
+                          ->setTrackFillColor(kAccent)
+                          ->setWidth(110),
+                      Text(zoomLevel,
+                           [](double v) {
+                             char b[16];
+                             _snprintf_s(b, sizeof(b), _TRUNCATE, "%d%%",
+                                         int(std::round(v)));
+                             return std::string(b);
                            })
-                          ->setFontSize(9)
-                          ->setTextColor(RGB(55, 60, 85)))
-                      ->setSpacing(0))
-            ->setBackgroundColor(kBg)
-            ->setPaddingAll(10, 3, 10, 3)
-            ->setHeight(kHH);
+                          ->setFontSize(10)
+                          ->setTextColor(RGB(180, 180, 200))
+                          ->setMinWidth(38),
+                      Button("1:1",
+                             [this]() {
+                               if (canvasPtr_) {
+                                 canvasPtr_->viewport().resetZoom();
+                                 canvasPtr_->redraw();
+                                 zoomLevel.set(100.0);
+                               }
+                             })
+                          ->setBackgroundColor(RGB(24, 24, 37))
+                          ->setTextColor(kAccent)
+                          ->setBorderRadius(5)
+                          ->setWidth(30)
+                          ->setHeight(26)
+                          ->setPadding(4),
+                      Button("Fit",
+                             [this]() {
+                               if (canvasPtr_) {
+                                 canvasPtr_->viewport().fitToView();
+                                 canvasPtr_->redraw();
+                                 zoomLevel.set(
+                                     double(canvasPtr_->viewport().zoom()) *
+                                     100.0);
+                               }
+                             })
+                          ->setBackgroundColor(RGB(24, 24, 37))
+                          ->setTextColor(kAccent)
+                          ->setBorderRadius(5)
+                          ->setWidth(30)
+                          ->setHeight(26)
+                          ->setPadding(4),
+                      SizedBox(16, 0),
+                      Text(statusMsg, [](const std::string &s) { return s; })
+                          ->setFontSize(10)
+                          ->setTextColor(kGreen))
+                      ->setSpacing(4)
+                      ->setCrossAxisAlignment(CrossAxisAlignment::Center))
+            ->setBackgroundColor(kBg1)
+            ->setPaddingAll(10, 7, 10, 7)
+            ->setHeight(kToolbarH);
 
-    return Scaffold(
-        Row(sidebar, Column(toolbar, hints, cv)->setSpacing(0))->setSpacing(0));
+    // ── §J  HINTS ─────────────────────────────────────────────────────────
+    auto hints =
+        Container(Row(Text("MMB/Space: Pan")
+                          ->setFontSize(10)
+                          ->setTextColor(RGB(60, 60, 80)),
+                      SizedBox(10, 0),
+                      Text("Ctrl+Scroll: Zoom")
+                          ->setFontSize(10)
+                          ->setTextColor(RGB(60, 60, 80)),
+                      SizedBox(10, 0),
+                      Text("Curve: click=add  dbl-click=delete  arrow "
+                           "keys=nudge  |  HSL: dbl-click label=reset band")
+                          ->setFontSize(10)
+                          ->setTextColor(RGB(60, 60, 80)))
+                      ->setSpacing(0))
+            ->setBackgroundColor(kBg1)
+            ->setPaddingAll(10, 3, 10, 3)
+            ->setHeight(kHintsH);
+
+    auto canvasCol = Column(toolbar, hints, canvas)->setSpacing(0);
+    return Scaffold(Row(canvasCol, panel)->setSpacing(0));
   }
+
+private:
+  EditParams savedParams_;
+  bool syncingZoom_ = false;
 };
 
 // =============================================================================
-// §8  ENTRY POINT
+// §6  ENTRY POINT
 // =============================================================================
-int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int) {
-  FluxUI app(hInst);
+
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
+  FluxUI app(hInstance);
+
   app.build([&]() {
-    return FluxApp("Logic Sim", BuildComponent<LogicSimApp>(),
-                   AppTheme::dark());
+    return FluxApp("Light Room", BuildComponent<ImageEditorApp>(), AppTheme::dark());
   });
+
   int screenWidth = GetSystemMetrics(SM_CXSCREEN);
   int screenHeight = GetSystemMetrics(SM_CYSCREEN);
 
-  app.createWindow("FluxUI - Logic Sim", screenWidth, screenHeight);
+  app.createWindow("FluxUI - Light Room", screenWidth, screenHeight);
   ShowWindow(GetActiveWindow(), SW_MAXIMIZE);
+
   return app.run();
 }
-
-
-
