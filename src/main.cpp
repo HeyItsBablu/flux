@@ -6296,7 +6296,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int) {
   int screenWidth = GetSystemMetrics(SM_CXSCREEN);
   int screenHeight = GetSystemMetrics(SM_CYSCREEN);
 
-  app.createWindow("FluxUI - Paint", screenWidth, screenHeight);
+  app.createWindow("FluxUI - Logic Sim", screenWidth, screenHeight);
   ShowWindow(GetActiveWindow(), SW_MAXIMIZE);
   return app.run();
 }

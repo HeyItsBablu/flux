@@ -79,6 +79,8 @@ public:
 
     ~LayeredSurface() { destroyLayers(); }
 
+    void markCompositeDirty() { compositeDirty_ = true; }
+
     // =========================================================================
     // §2a  Layer management API
     // =========================================================================

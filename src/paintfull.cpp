@@ -1,4 +1,4 @@
-// paint.cpp
+// main.cpp
 #include "flux.hpp"
 #include "widgets/flux_layers.hpp"   // ← layers support
 #include <commdlg.h>
@@ -511,6 +511,7 @@ private:
     textSession_.active = false;
     textSession_.text.clear();
     scratchClear();
+    markCompositeDirty();
     if(onStateChanged) onStateChanged();
   }
 
@@ -521,12 +522,13 @@ private:
   bool  shapeDrawing_=false;
   float shapeX0_=0,shapeY0_=0;
 
-  void shapeStart(float x,float y){ shapeX0_=x; shapeY0_=y; shapeDrawing_=true; scratchClear(); }
-  void shapePreview(float x,float y){ scratchClear(); drawShapeInto(scratchFBOHandle(),shapeX0_,shapeY0_,x,y); if(onRedrawNeeded) onRedrawNeeded(); }
+  void shapeStart(float x,float y){ shapeX0_=x; shapeY0_=y; shapeDrawing_=true; scratchClear(); markCompositeDirty();}
+  void shapePreview(float x,float y){ scratchClear(); drawShapeInto(scratchFBOHandle(),shapeX0_,shapeY0_,x,y); markCompositeDirty(); if(onRedrawNeeded) onRedrawNeeded(); }
   void shapeCommit(float x,float y){
     shapeDrawing_=false; scratchClear();
     pushUndoSnapshotPublic();
     drawShapeInto(committedFBOHandle(),shapeX0_,shapeY0_,x,y);
+    markCompositeDirty();
     if(onStateChanged) onStateChanged();
     if(onRedrawNeeded) onRedrawNeeded();
   }
@@ -780,6 +782,7 @@ private:
     pushUndoSnapshotPublic();
     floodFill(buf.data(),w,h,px,py,tr,tg,tb,uint8_t(fc.r*255),uint8_t(fc.g*255),uint8_t(fc.b*255));
     uploadToCommitted(buf.data());
+    markCompositeDirty();  
     if(onStateChanged) onStateChanged();
     if(onRedrawNeeded) onRedrawNeeded();
   }
@@ -884,7 +887,6 @@ public:
     surface_->onRedrawNeeded  =[this](){ if(canvasPtr_) canvasPtr_->redraw(); };
     surface_->onCursorChange  =[](HCURSOR c){ SetCursor(c); };
     canvas->onViewportChanged =[this](float z){ syncZoomState(z); };
-   // canvas->setScrollbarsEnabled(false);
 
     // ── Layer change handler (ported from test.cpp) ────────────────────────
     surface_->onLayersChanged = [this](const LayerState& ls) {

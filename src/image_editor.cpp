@@ -1346,13 +1346,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
   FluxUI app(hInstance);
 
   app.build([&]() {
-    return FluxApp("Paint", BuildComponent<ImageEditorApp>(), AppTheme::dark());
+    return FluxApp("Light Room", BuildComponent<ImageEditorApp>(), AppTheme::dark());
   });
 
   int screenWidth = GetSystemMetrics(SM_CXSCREEN);
   int screenHeight = GetSystemMetrics(SM_CYSCREEN);
 
-  app.createWindow("FluxUI - Paint", screenWidth, screenHeight);
+  app.createWindow("FluxUI - Light Room", screenWidth, screenHeight);
   ShowWindow(GetActiveWindow(), SW_MAXIMIZE);
 
   return app.run();
