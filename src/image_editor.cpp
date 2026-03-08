@@ -1019,10 +1019,19 @@ private:
 // §6  ENTRY POINT
 // =============================================================================
 
-int WINAPI WinMain(HINSTANCE hInstance,HINSTANCE,LPSTR,int){
-    FluxUI app(hInstance);
-    app.build([&](){ return FluxApp("Paint",BuildComponent<ImageEditorApp>(),AppTheme::dark()); });
-    RECT wa; SystemParametersInfo(SPI_GETWORKAREA,0,&wa,0);
-    app.createWindow("FluxUI - Paint",wa.right-wa.left,wa.bottom-wa.top);
-    return app.run();
+
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
+  FluxUI app(hInstance);
+
+  app.build([&]() {
+    return FluxApp("Paint", BuildComponent<ImageEditorApp>(), AppTheme::dark());
+  });
+
+  int screenWidth = GetSystemMetrics(SM_CXSCREEN);
+  int screenHeight = GetSystemMetrics(SM_CYSCREEN);
+
+  app.createWindow("FluxUI - Paint", screenWidth, screenHeight);
+  ShowWindow(GetActiveWindow(), SW_MAXIMIZE);
+
+  return app.run();
 }
