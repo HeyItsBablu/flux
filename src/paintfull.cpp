@@ -884,6 +884,7 @@ public:
     surface_->onRedrawNeeded  =[this](){ if(canvasPtr_) canvasPtr_->redraw(); };
     surface_->onCursorChange  =[](HCURSOR c){ SetCursor(c); };
     canvas->onViewportChanged =[this](float z){ syncZoomState(z); };
+   // canvas->setScrollbarsEnabled(false);
 
     // ── Layer change handler (ported from test.cpp) ────────────────────────
     surface_->onLayersChanged = [this](const LayerState& ls) {

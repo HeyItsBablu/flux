@@ -36,7 +36,7 @@
 //   callers.  The VAO only stores the attrib format; actual data is uploaded
 //   fresh every draw call, so this is safe and has negligible overhead.
 //
-// Step 5  (this revision)
+// Step 5  (previous)
 // ───────────────────────
 //   TEXT RENDERING PRIMITIVES added to RasterSurface:
 //
@@ -69,6 +69,16 @@
 //     GDI+ lifetime now owned by RasterSurface.  initialize() starts it,
 //     destroy() shuts it down.  Subclasses must NOT call GdiplusStartup /
 //     GdiplusShutdown themselves.
+//
+// Step 6  (this revision)
+// ───────────────────────
+//   • setScrollbarsEnabled(bool) added to CanvasWidget — hides/shows
+//     scrollbars at any time and resizes the GL child to fill freed space.
+//
+//   • onGLResize callback added to CanvasWidget — fires whenever the GL
+//     child window is resized (distinct from canvas/image resize).
+//     Used by ImageEditSurface to track the GL window size independently
+//     of the canvas/image dimensions that come through resize().
 //
 // ============================================================================
 
@@ -458,15 +468,6 @@ struct Stroke {
 };
 
 // ── TextStyle ────────────────────────────────────────────────────────────────
-// Describes how text should be rendered by RasterSurface::renderTextToScratch
-// and RasterSurface::commitTextToCanvas.
-//
-// Color channels (r, g, b) are in 0–1 float range, matching StrokeStyle.
-// fontSize is in canvas pixels (not points — no DPI scaling applied here;
-// the caller should account for canvas-vs-screen resolution if needed).
-//
-// fontFace must be a font family name recognised by GDI on the host machine.
-// Falls back to "Arial" silently if the face is not found.
 struct TextStyle {
   std::wstring fontFace = L"Arial";
   int fontSize = 20;         // canvas pixels
@@ -919,7 +920,6 @@ protected:
   void pushUndoSnapshotPublic() { pushUndoSnapshot(); }
 
   void scratchClear() { clearFBO(scratchFBO_, w_, h_, 0, 0, 0, 0); }
-  // Used by LayeredSurface to redirect painting to the active layer's FBOs.
   void swapActiveFBOs(GLuint newCFBO, GLuint newCTex, GLuint newSFBO,
                       GLuint newSTex, GLuint &oldCFBO, GLuint &oldCTex,
                       GLuint &oldSFBO, GLuint &oldSTex) {
@@ -998,23 +998,7 @@ protected:
   }
 
   // ── Text rendering primitives ─────────────────────────────────────────────
-  //
-  // Coordinate convention for both functions:
-  //   canvasX, canvasY  — GL canvas space (Y-up, origin at bottom-left).
-  //   This maps directly from Viewport::screenToCanvas() so callers never
-  //   need to flip anything themselves.
-  //
-  // The internal GDI DIB is top-down, so the Y-flip is:
-  //   gdiY = h_ - (int)canvasY - style.fontSize
-  // The resulting pixel rows are flipped back before glTexSubImage2D so the
-  // upload lands in the correct GL Y-up position.
 
-  // renderTextToScratch ───────────────────────────────────────────────────────
-  // Rasterizes `text` into the scratch texture at (canvasX, canvasY).
-  // If showCursor is true a '|' caret is appended — use this during live
-  // preview.  The caller controls scratchClear() timing; this function only
-  // writes the tight bounding box, it does not clear the rest of scratch.
-  // Call scratchClear() before calling this if you want a clean preview.
   void renderTextToScratch(const std::wstring &text, float canvasX,
                            float canvasY, const TextStyle &style,
                            bool showCursor = false) {
@@ -1028,19 +1012,15 @@ protected:
     if (rgba.empty())
       return;
 
-    // rasterizeTextGDI returns rows in GL Y-up order already (bottom row
-    // first). The bounding rect (bx, by) is also in GL canvas space. Clamp to
-    // canvas bounds before upload.
     int uploadX = max(0, bx);
     int uploadY = max(0, by);
-    int cropLeft = uploadX - bx;   // columns to skip from the left
-    int cropBottom = uploadY - by; // rows to skip from the bottom
+    int cropLeft = uploadX - bx;
+    int cropBottom = uploadY - by;
     int uploadW = min(bw - cropLeft, w_ - uploadX);
     int uploadH = min(bh - cropBottom, h_ - uploadY);
     if (uploadW <= 0 || uploadH <= 0)
       return;
 
-    // Build a contiguous sub-buffer if we had to crop, otherwise use as-is.
     const uint8_t *src = rgba.data();
     std::vector<uint8_t> cropped;
     if (cropLeft > 0 || cropBottom > 0) {
@@ -1059,12 +1039,6 @@ protected:
     glBindTexture(GL_TEXTURE_2D, 0);
   }
 
-  // commitTextToCanvas ────────────────────────────────────────────────────────
-  // Pushes an undo snapshot, then permanently composites `text` onto the
-  // committed FBO at (canvasX, canvasY) using CPU SRC_OVER blending.
-  // Transparent (background-white) pixels in the rasterized text are skipped
-  // so existing strokes underneath are not overwritten.
-  // After this call the caller should scratchClear() to remove any preview.
   void commitTextToCanvas(const std::wstring &text, float canvasX,
                           float canvasY, const TextStyle &style) {
     if (text.empty() || w_ <= 0 || h_ <= 0)
@@ -1076,7 +1050,6 @@ protected:
     if (rgba.empty())
       return;
 
-    // Clamp bounding rect to canvas.
     int dstX = max(0, bx);
     int dstY = max(0, by);
     int srcOffX = dstX - bx;
@@ -1086,15 +1059,11 @@ protected:
     if (dstW <= 0 || dstH <= 0)
       return;
 
-    // Push undo before modifying committed.
     pushUndoSnapshot();
 
-    // Read back the committed buffer (GL Y-up, bottom row first).
     std::vector<uint8_t> committed(size_t(w_) * h_ * 4);
     readCommitted(committed.data());
 
-    // SRC_OVER composite: text pixels over committed pixels.
-    // rgba rows are in GL Y-up order (bottom row at index 0).
     for (int row = 0; row < dstH; ++row) {
       for (int col = 0; col < dstW; ++col) {
         const uint8_t *s =
@@ -1103,14 +1072,14 @@ protected:
             committed.data() + ((size_t(dstY + row) * w_) + dstX + col) * 4;
         float sa = s[3] / 255.f;
         if (sa <= 0.f)
-          continue; // fully transparent → skip
+          continue;
 
-        if (sa >= 1.f) { // fully opaque → overwrite
+        if (sa >= 1.f) {
           d[0] = s[0];
           d[1] = s[1];
           d[2] = s[2];
           d[3] = 255;
-        } else { // partial → SRC_OVER
+        } else {
           float da = d[3] / 255.f;
           float oa = sa + da * (1.f - sa);
           if (oa > 0.f) {
@@ -1139,8 +1108,6 @@ private:
   GLuint blitProg_ = 0, quadVAO_ = 0, quadVBO_ = 0;
   GLuint shapeVBO_ = 0;
 
-  // GDI+ lifetime — initialised in initialize(), released in destroy().
-  // Zero means not yet started.
   ULONG_PTR gdiplusToken_ = 0;
 
   struct ULocs {
@@ -1180,25 +1147,7 @@ private:
     cnt = 0;
   }
 
-  // ── rasterizeTextGDI ───────────────────────────────────────────────────────
-  // Core GDI text rasterizer shared by renderTextToScratch and
-  // commitTextToCanvas.
-  //
-  // Renders `text` into a full-canvas top-down 32-bit DIB using ClearType,
-  // then extracts a tight RGBA bounding box around the rendered glyphs.
-  // Background pixels (all RGB channels >= 250) get alpha=0 so they composite
-  // transparently; all other pixels get alpha=255.
-  //
-  // Output rows are flipped to GL Y-up order (bottom row first) before return.
-  // outX, outY are the bounding rect origin in GL canvas space (Y-up).
-  // outW, outH are the bounding rect dimensions.
-  //
-  // Returns an empty vector if text is empty or canvas size is zero.
-  //
-  // Coordinate mapping:
-  //   canvasX  → gdiX  (same, X-axis is identical)
-  //   canvasY  → gdiY = h_ - (int)canvasY - style.fontSize
-  //              (flip Y-up to top-down; place baseline at canvasY)
+  // ── rasterizeTextGDI ──────────────────────────────────────────────────────
   std::vector<uint8_t> rasterizeTextGDI(const std::wstring &text, float canvasX,
                                         float canvasY, const TextStyle &style,
                                         int &outX, int &outY, int &outW,
@@ -1207,11 +1156,10 @@ private:
     if (text.empty() || w_ <= 0 || h_ <= 0)
       return {};
 
-    // ── 1. Create a full-canvas top-down 32-bit DIB ──────────────────────────
     BITMAPINFO bmi = {};
     bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
     bmi.bmiHeader.biWidth = w_;
-    bmi.bmiHeader.biHeight = -h_; // negative = top-down
+    bmi.bmiHeader.biHeight = -h_;
     bmi.bmiHeader.biPlanes = 1;
     bmi.bmiHeader.biBitCount = 32;
     bmi.bmiHeader.biCompression = BI_RGB;
@@ -1226,7 +1174,6 @@ private:
     }
     HGDIOBJ oldBmp = SelectObject(hdcMem, hBmp);
 
-    // Fill with white — our "transparent background" sentinel.
     {
       RECT rc = {0, 0, w_, h_};
       HBRUSH br = CreateSolidBrush(RGB(255, 255, 255));
@@ -1234,48 +1181,30 @@ private:
       DeleteObject(br);
     }
 
-    // ── 2. Create GDI font ───────────────────────────────────────────────────
     int weight = style.bold ? FW_BOLD : FW_NORMAL;
     DWORD italic = style.italic ? TRUE : FALSE;
     DWORD uline = style.underline ? TRUE : FALSE;
     HFONT hFont = CreateFontW(
-        -style.fontSize, // height in logical units (negative = char height)
-        0,               // width (0 = auto)
-        0, 0,            // escapement, orientation
-        weight, italic, uline,
-        FALSE, // strikeout
+        -style.fontSize, 0, 0, 0, weight, italic, uline, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, style.fontFace.c_str());
     HGDIOBJ oldFont = SelectObject(hdcMem, hFont);
 
-    // Text color from 0–1 floats → COLORREF (GDI uses BGR in the DIB but
-    // SetTextColor takes RGB).
     COLORREF cr =
         RGB((int)(style.r * 255.f + 0.5f), (int)(style.g * 255.f + 0.5f),
             (int)(style.b * 255.f + 0.5f));
     SetTextColor(hdcMem, cr);
     SetBkMode(hdcMem, TRANSPARENT);
 
-    // ── 3. Compute GDI draw position ─────────────────────────────────────────
-    // canvasY is Y-up (0 = bottom of canvas).
-    // GDI top-down: row 0 is the top.
-    // We place the TOP of the text box at gdiY.
-    //   gdiY = h_ - (int)canvasY - style.fontSize
-    // This means the baseline sits approximately at canvas Y = canvasY,
-    // which matches what the subclass passed in from a mouse-click position.
     int gdiX = (int)canvasX;
     int gdiY = h_ - (int)canvasY - style.fontSize;
 
-    // Measure text so we can build a tight bounding box.
     SIZE tsz = {};
     GetTextExtentPoint32W(hdcMem, text.c_str(), (int)text.size(), &tsz);
 
-    // ── 4. Render ────────────────────────────────────────────────────────────
     TextOutW(hdcMem, gdiX, gdiY, text.c_str(), (int)text.size());
     GdiFlush();
 
-    // ── 5. Extract tight bounding box ────────────────────────────────────────
-    // Add a small margin so descenders and the cursor bar are not clipped.
     const int kMargin = 2;
     int bboxGdiX0 = max(0, gdiX - kMargin);
     int bboxGdiY0 = max(0, gdiY - kMargin);
@@ -1285,7 +1214,6 @@ private:
     int bboxH = bboxGdiY1 - bboxGdiY0;
 
     if (bboxW <= 0 || bboxH <= 0) {
-      // Nothing visible — clean up and return empty.
       SelectObject(hdcMem, oldFont);
       DeleteObject(hFont);
       SelectObject(hdcMem, oldBmp);
@@ -1294,20 +1222,15 @@ private:
       return {};
     }
 
-    // ── 6. Convert DIB pixels → RGBA, flip to GL Y-up ───────────────────────
-    // DIB bits are BGRA (GDI pads to 32-bit with the 4th byte unused/zero).
-    // We produce RGBA with alpha = 0 for background-white, 255 otherwise.
     const uint8_t *dibBits = reinterpret_cast<const uint8_t *>(bits);
 
     std::vector<uint8_t> rgba(size_t(bboxW) * bboxH * 4);
     for (int row = 0; row < bboxH; ++row) {
-      // Flip: GL row 0 = bottom of bounding box = GDI row (bboxGdiY1 - 1).
-      int gdiRow = bboxGdiY0 + (bboxH - 1 - row); // GL Y-up flip
+      int gdiRow = bboxGdiY0 + (bboxH - 1 - row);
       for (int col = 0; col < bboxW; ++col) {
         const uint8_t *p =
             dibBits + (size_t(gdiRow) * w_ + bboxGdiX0 + col) * 4;
-        uint8_t b8 = p[0], g8 = p[1], r8 = p[2]; // DIB is BGR
-        // Background sentinel: all channels >= 250 → transparent.
+        uint8_t b8 = p[0], g8 = p[1], r8 = p[2];
         bool isBg = (r8 >= 250 && g8 >= 250 && b8 >= 250);
         uint8_t *d = rgba.data() + (size_t(row) * bboxW + col) * 4;
         d[0] = r8;
@@ -1317,21 +1240,14 @@ private:
       }
     }
 
-    // ── 7. Cleanup
-    // ────────────────────────────────────────────────────────────
     SelectObject(hdcMem, oldFont);
     DeleteObject(hFont);
     SelectObject(hdcMem, oldBmp);
     DeleteObject(hBmp);
     DeleteDC(hdcMem);
 
-    // ── 8. Output bounding rect in GL canvas space (Y-up) ────────────────────
-    // bboxGdiX0 maps directly (X is the same axis).
-    // bboxGdiY0 is the top edge in GDI (top-down) space.
-    // In GL canvas space the bottom edge of the bbox is:
-    //   glBottomY = h_ - bboxGdiY1   (= h_ - bboxGdiY0 - bboxH)
     outX = bboxGdiX0;
-    outY = h_ - bboxGdiY1; // GL Y of the bottom edge of the bbox
+    outY = h_ - bboxGdiY1;
     outW = bboxW;
     outH = bboxH;
 
@@ -1655,6 +1571,27 @@ public:
     return ptr();
   }
 
+  // Show or hide the scrollbars independently of the viewport.
+  // When disabled the GL child expands to fill the space the scrollbars
+  // occupied.  Can be toggled at any time, even after the window is created.
+  std::shared_ptr<CanvasWidget> setScrollbarsEnabled(bool enabled) {
+    scrollbarsEnabled_ = enabled;
+    if (frameHwnd_) {
+      if (!enabled)
+        ShowScrollBar(frameHwnd_, SB_BOTH, FALSE);
+      RECT rc;
+      GetClientRect(frameHwnd_, &rc);
+      int gw, gh;
+      glChildSize(rc.right, rc.bottom, gw, gh);
+      SetWindowPos(glHwnd_, nullptr, 0, 0, gw, gh,
+                   SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE);
+      scheduleRepaint();
+    }
+    return ptr();
+  }
+
+  bool scrollbarsEnabled() const { return scrollbarsEnabled_; }
+
   template <typename T, typename... A> std::shared_ptr<T> setSurface(A &&...a) {
     auto s = std::make_shared<T>(std::forward<A>(a)...);
     pendingSurface_ = s;
@@ -1692,7 +1629,14 @@ public:
     return ptr();
   }
 
+  // ── Callbacks ─────────────────────────────────────────────────────────────
+  // onViewportChanged — fires on any zoom/pan change, passes current zoom.
+  // onGLResize        — fires when the GL child window is resized (not the
+  //                     canvas).  Use this to keep ImageEditSurface's internal
+  //                     GL window size tracker in sync without routing it
+  //                     through resize() which carries canvas dimensions.
   std::function<void(float zoom)> onViewportChanged;
+  std::function<void(int w, int h)> onGLResize;
 
   // ── Widget virtuals ───────────────────────────────────────────────────────
 
@@ -1724,6 +1668,7 @@ public:
 
 private:
   bool viewportEnabled_ = true;
+  bool scrollbarsEnabled_ = true;
 
   std::shared_ptr<CanvasWidget> ptr() {
     return std::static_pointer_cast<CanvasWidget>(shared_from_this());
@@ -1778,7 +1723,7 @@ private:
   static int sbH() { return GetSystemMetrics(SM_CYHSCROLL); }
 
   void glChildSize(int fw, int fh, int &ow, int &oh) const {
-    if (!viewportEnabled_) {
+    if (!viewportEnabled_ || !scrollbarsEnabled_) {
       ow = fw;
       oh = fh;
     } else {
@@ -1786,15 +1731,16 @@ private:
       ow = fw - (v.visible ? sbW() : 0);
       oh = fh - (h.visible ? sbH() : 0);
     }
-    if (ow < 1)
-      ow = 1;
-    if (oh < 1)
-      oh = 1;
+    if (ow < 1) ow = 1;
+    if (oh < 1) oh = 1;
   }
 
   void syncScrollbars() {
-    if (!frameHwnd_ || !viewportEnabled_)
+    if (!frameHwnd_ || !viewportEnabled_ || !scrollbarsEnabled_) {
+      if (frameHwnd_ && !scrollbarsEnabled_)
+        ShowScrollBar(frameHwnd_, SB_BOTH, FALSE);
       return;
+    }
     ScrollbarInfo h = vp_.scrollbarH(), v = vp_.scrollbarV();
     ShowScrollBar(frameHwnd_, SB_HORZ, h.visible ? TRUE : FALSE);
     ShowScrollBar(frameHwnd_, SB_VERT, v.visible ? TRUE : FALSE);
@@ -1858,60 +1804,38 @@ private:
       return 0;
     }
     case WM_HSCROLL: {
-      if (!self)
-        return 0;
+      if (!self) return 0;
       SCROLLINFO si{};
       si.cbSize = sizeof(si);
       si.fMask = SIF_ALL;
       GetScrollInfo(hwnd, SB_HORZ, &si);
       int p = si.nPos;
       switch (LOWORD(wp)) {
-      case SB_LINELEFT:
-        p -= kSBRange / 50;
-        break;
-      case SB_LINERIGHT:
-        p += kSBRange / 50;
-        break;
-      case SB_PAGELEFT:
-        p -= si.nPage;
-        break;
-      case SB_PAGERIGHT:
-        p += si.nPage;
-        break;
+      case SB_LINELEFT:   p -= kSBRange / 50; break;
+      case SB_LINERIGHT:  p += kSBRange / 50; break;
+      case SB_PAGELEFT:   p -= si.nPage;      break;
+      case SB_PAGERIGHT:  p += si.nPage;      break;
       case SB_THUMBTRACK:
-      case SB_THUMBPOSITION:
-        p = si.nTrackPos;
-        break;
+      case SB_THUMBPOSITION: p = si.nTrackPos; break;
       }
       p = std::clamp(p, si.nMin, si.nMax - (int)si.nPage);
       self->applyHScroll(p, si.nMax - (int)si.nPage);
       return 0;
     }
     case WM_VSCROLL: {
-      if (!self)
-        return 0;
+      if (!self) return 0;
       SCROLLINFO si{};
       si.cbSize = sizeof(si);
       si.fMask = SIF_ALL;
       GetScrollInfo(hwnd, SB_VERT, &si);
       int p = si.nPos;
       switch (LOWORD(wp)) {
-      case SB_LINEUP:
-        p -= kSBRange / 50;
-        break;
-      case SB_LINEDOWN:
-        p += kSBRange / 50;
-        break;
-      case SB_PAGEUP:
-        p -= si.nPage;
-        break;
-      case SB_PAGEDOWN:
-        p += si.nPage;
-        break;
+      case SB_LINEUP:   p -= kSBRange / 50; break;
+      case SB_LINEDOWN: p += kSBRange / 50; break;
+      case SB_PAGEUP:   p -= si.nPage;      break;
+      case SB_PAGEDOWN: p += si.nPage;      break;
       case SB_THUMBTRACK:
-      case SB_THUMBPOSITION:
-        p = si.nTrackPos;
-        break;
+      case SB_THUMBPOSITION: p = si.nTrackPos; break;
       }
       p = std::clamp(p, si.nMin, si.nMax - (int)si.nPage);
       self->applyVScroll(p, si.nMax - (int)si.nPage);
@@ -1921,7 +1845,6 @@ private:
       if (self && self->viewportEnabled_ && self->glHwnd_)
         PostMessage(self->glHwnd_, msg, wp, lp);
       return 0;
-
     default:
       return DefWindowProc(hwnd, msg, wp, lp);
     }
@@ -1948,27 +1871,24 @@ private:
       return 0;
     }
     case WM_MBUTTONDOWN:
-      if (!self || !self->viewportEnabled_)
-        return 0;
+      if (!self || !self->viewportEnabled_) return 0;
       SetCapture(hwnd);
       self->beginPan(GET_X_LPARAM(lp), GET_Y_LPARAM(lp));
       return 0;
     case WM_MBUTTONUP:
-      if (!self || !self->viewportEnabled_)
-        return 0;
+      if (!self || !self->viewportEnabled_) return 0;
       ReleaseCapture();
       self->panning_ = false;
       return 0;
     case WM_LBUTTONDOWN: {
       SetCapture(hwnd);
       SetFocus(hwnd);
-      if (!self)
-        return 0;
+      if (!self) return 0;
       if (self->viewportEnabled_ && (GetKeyState(VK_SPACE) & 0x8000)) {
         self->beginPan(GET_X_LPARAM(lp), GET_Y_LPARAM(lp));
       } else if (self->activeSurface_) {
         auto [cx, cy] = self->vp_.screenToCanvas(float(GET_X_LPARAM(lp)),
-                                                 float(GET_Y_LPARAM(lp)));
+                                                  float(GET_Y_LPARAM(lp)));
         self->activeSurface_->onMouseDown(cx, cy);
       }
       forwardToParent(hwnd, msg, wp, lp);
@@ -1976,13 +1896,12 @@ private:
     }
     case WM_LBUTTONUP: {
       ReleaseCapture();
-      if (!self)
-        return 0;
+      if (!self) return 0;
       if (self->panning_) {
         self->panning_ = false;
       } else if (self->activeSurface_) {
         auto [cx, cy] = self->vp_.screenToCanvas(float(GET_X_LPARAM(lp)),
-                                                 float(GET_Y_LPARAM(lp)));
+                                                  float(GET_Y_LPARAM(lp)));
         self->activeSurface_->onMouseUp(cx, cy);
       }
       forwardToParent(hwnd, msg, wp, lp);
@@ -1992,7 +1911,7 @@ private:
       SetCapture(hwnd);
       if (self && self->activeSurface_) {
         auto [cx, cy] = self->vp_.screenToCanvas(float(GET_X_LPARAM(lp)),
-                                                 float(GET_Y_LPARAM(lp)));
+                                                  float(GET_Y_LPARAM(lp)));
         self->activeSurface_->onRightMouseDown(cx, cy);
       }
       forwardToParent(hwnd, msg, wp, lp);
@@ -2002,15 +1921,14 @@ private:
       ReleaseCapture();
       if (self && self->activeSurface_) {
         auto [cx, cy] = self->vp_.screenToCanvas(float(GET_X_LPARAM(lp)),
-                                                 float(GET_Y_LPARAM(lp)));
+                                                  float(GET_Y_LPARAM(lp)));
         self->activeSurface_->onMouseUp(cx, cy);
       }
       forwardToParent(hwnd, msg, wp, lp);
       return 0;
     }
     case WM_MOUSEMOVE: {
-      if (!self)
-        return 0;
+      if (!self) return 0;
       int sx = GET_X_LPARAM(lp), sy = GET_Y_LPARAM(lp);
       if (!self->trackingLeave_) {
         TRACKMOUSEEVENT tme{};
@@ -2030,12 +1948,10 @@ private:
       return 0;
     }
     case WM_MOUSELEAVE:
-      if (self)
-        self->trackingLeave_ = false;
+      if (self) self->trackingLeave_ = false;
       return 0;
     case WM_MOUSEWHEEL: {
-      if (!self || !self->viewportEnabled_)
-        return 0;
+      if (!self || !self->viewportEnabled_) return 0;
       int delta = GET_WHEEL_DELTA_WPARAM(wp);
       bool ctrl = (GET_KEYSTATE_WPARAM(wp) & MK_CONTROL) != 0;
       bool shift = (GET_KEYSTATE_WPARAM(wp) & MK_SHIFT) != 0;
@@ -2054,8 +1970,7 @@ private:
       return 0;
     }
     case WM_KEYDOWN: {
-      if (!self)
-        return 0;
+      if (!self) return 0;
       bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
       bool consumed = false;
       if (ctrl && self->viewportEnabled_) {
@@ -2096,8 +2011,7 @@ private:
   static void forwardToParent(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     HWND frame = GetParent(hwnd);
     HWND parent = frame ? GetParent(frame) : nullptr;
-    if (!parent)
-      return;
+    if (!parent) return;
     POINT pt = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
     MapWindowPoints(hwnd, parent, &pt, 1);
     PostMessage(parent, msg, wp, MAKELPARAM(pt.x, pt.y));
@@ -2105,8 +2019,7 @@ private:
 
   static void registerClasses() {
     static bool done = false;
-    if (done)
-      return;
+    if (done) return;
     HINSTANCE hi = GetModuleHandle(nullptr);
     WNDCLASSEXW wf{};
     wf.cbSize = sizeof(wf);
@@ -2127,19 +2040,17 @@ private:
   }
 
   void ensureWindows(HDC parentDC) {
-    if (frameHwnd_)
-      return;
+    if (frameHwnd_) return;
     HWND owner = WindowFromDC(parentDC);
-    if (!owner)
-      owner = GetActiveWindow();
+    if (!owner) owner = GetActiveWindow();
     parentHwnd_ = owner;
     registerClasses();
 
     const DWORD sbStyles = viewportEnabled_ ? (WS_HSCROLL | WS_VSCROLL) : 0;
     frameHwnd_ = CreateWindowExW(
         WS_EX_NOPARENTNOTIFY, L"FluxGLFrame6", nullptr,
-        WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | sbStyles, x,
-        y, width, height, owner, nullptr, GetModuleHandle(nullptr), nullptr);
+        WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | sbStyles,
+        x, y, width, height, owner, nullptr, GetModuleHandle(nullptr), nullptr);
     assert(frameHwnd_);
     SetWindowLongPtrW(frameHwnd_, GWLP_USERDATA,
                       reinterpret_cast<LONG_PTR>(this));
@@ -2148,8 +2059,8 @@ private:
     glChildSize(width, height, gw, gh);
     glHwnd_ = CreateWindowExW(
         WS_EX_NOPARENTNOTIFY, L"FluxGLCanvas6", nullptr,
-        WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN, 0, 0, gw, gh,
-        frameHwnd_, nullptr, GetModuleHandle(nullptr), nullptr);
+        WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
+        0, 0, gw, gh, frameHwnd_, nullptr, GetModuleHandle(nullptr), nullptr);
     assert(glHwnd_);
     SetWindowLongPtrW(glHwnd_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
 
@@ -2160,13 +2071,10 @@ private:
     auto wglCA = reinterpret_cast<PFNWGLCREATECONTEXTATTRIBSARBPROC>(
         wglGetProcAddress("wglCreateContextAttribsARB"));
     if (wglCA) {
-      const int att[] = {WGL_CONTEXT_MAJOR_VERSION_ARB,
-                         3,
-                         WGL_CONTEXT_MINOR_VERSION_ARB,
-                         3,
+      const int att[] = {WGL_CONTEXT_MAJOR_VERSION_ARB, 3,
+                         WGL_CONTEXT_MINOR_VERSION_ARB, 3,
                          WGL_CONTEXT_PROFILE_MASK_ARB,
-                         WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
-                         0};
+                         WGL_CONTEXT_CORE_PROFILE_BIT_ARB, 0};
       HGLRC core = wglCA(glDC_, nullptr, att);
       if (core) {
         wglMakeCurrent(nullptr, nullptr);
@@ -2186,8 +2094,8 @@ private:
     lastGLH_ = gh;
     activatePendingSurface();
     lastTick_ = Clock::now();
-    if (onViewportChanged)
-      onViewportChanged(vp_.zoom());
+    if (onViewportChanged) onViewportChanged(vp_.zoom());
+    if (onGLResize) onGLResize(gw, gh);
   }
 
   void setupPixelFormat(HDC dc) {
@@ -2203,8 +2111,7 @@ private:
   }
 
   void activatePendingSurface() {
-    if (!pendingSurface_)
-      return;
+    if (!pendingSurface_) return;
     if (activeSurface_) {
       activeSurface_->destroy();
       activeSurface_.reset();
@@ -2216,12 +2123,9 @@ private:
   }
 
   void tickAndRender() {
-    if (!glRC_ || !glDC_)
-      return;
-    if (pendingSurface_)
-      activatePendingSurface();
-    if (!activeSurface_)
-      return;
+    if (!glRC_ || !glDC_) return;
+    if (pendingSurface_) activatePendingSurface();
+    if (!activeSurface_) return;
     if (wglGetCurrentContext() != glRC_)
       wglMakeCurrent(glDC_, glRC_);
 
@@ -2244,13 +2148,12 @@ private:
 
     if (activeSurface_->needsContinuousRedraw() && !repaintPending_) {
       repaintPending_ = true;
-      SetTimer(glHwnd_, 1, 500, nullptr); // ~60fps, or use 500ms
+      SetTimer(glHwnd_, 1, 16, nullptr);
     }
   }
 
   void moveWindows() {
-    if (!frameHwnd_)
-      return;
+    if (!frameHwnd_) return;
     SetWindowPos(frameHwnd_, nullptr, x, y, width, height,
                  SWP_NOZORDER | SWP_NOACTIVATE);
     RECT rc;
@@ -2266,6 +2169,11 @@ private:
       glViewport(0, 0, gw, gh);
       lastGLW_ = gw;
       lastGLH_ = gh;
+      // Notify the surface of the GL window size change.
+      // This is intentionally separate from setCanvasSize()/resize() which
+      // carries canvas/image dimensions.  ImageEditSurface uses this to keep
+      // its glViewport size correct without polluting RasterSurface::resize().
+      if (onGLResize) onGLResize(gw, gh);
     }
   }
 
