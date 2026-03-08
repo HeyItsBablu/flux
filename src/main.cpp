@@ -419,6 +419,8 @@ public:
     syncStyle();
     shapeDrawing_ = false;
     scratchClear();
+    markCompositeDirty(); // FIX: tool switch clears scratch; mark dirty so
+                          //      the composite refreshes immediately
   }
 
   void initialize(int w, int h) override {
@@ -484,6 +486,8 @@ public:
       return;
     }
     LayeredSurface::onMouseUp(x, y);
+    markCompositeDirty(); // FIX: brush/eraser stroke just finished; ensure
+                          //      the committed layer is composited
     if (onStateChanged)
       onStateChanged();
     if (onHistoryChanged)
@@ -502,6 +506,7 @@ public:
       hasSelection_ = false;
       selDrawing_ = false;
       scratchClear();
+      markCompositeDirty(); // FIX: scratch was cleared; composite must update
       if (onRedrawNeeded)
         onRedrawNeeded();
       return;
@@ -546,6 +551,8 @@ public:
         grabbed_ = false;
         pixelBuf_.clear();
         scratchClear();
+        markCompositeDirty(); // FIX: scratch cleared on ESC; composite must
+                              //      drop the floating selection ghost
         if (onRedrawNeeded)
           onRedrawNeeded();
       }
@@ -590,6 +597,8 @@ private:
     scratchClear();
     renderTextToScratch(textSession_.text, x, y, textSession_.style,
                         /*showCursor=*/true);
+    markCompositeDirty(); // FIX: new text cursor written to scratch; composite
+                          //      must show it immediately
     if (onRedrawNeeded)
       onRedrawNeeded();
   }
@@ -606,6 +615,8 @@ private:
       renderTextToScratch(textSession_.text, textSession_.x, textSession_.y,
                           textSession_.style,
                           /*showCursor=*/cursorVisible_);
+      markCompositeDirty(); // FIX: blink toggled scratch content; must
+                            //      re-composite to show/hide cursor
       if (onRedrawNeeded)
         onRedrawNeeded();
     }
@@ -623,6 +634,8 @@ private:
       textSession_.active = false;
       textSession_.text.clear();
       scratchClear();
+      markCompositeDirty(); // FIX: text cancelled; scratch cleared, composite
+                            //      must stop showing the abandoned text
       if (onRedrawNeeded)
         onRedrawNeeded();
       return;
@@ -654,6 +667,8 @@ private:
     scratchClear();
     renderTextToScratch(textSession_.text, textSession_.x, textSession_.y,
                         textSession_.style, /*showCursor=*/true);
+    markCompositeDirty(); // FIX: scratch updated with new text; composite must
+                          //      re-render to reflect keystrokes
     if (onRedrawNeeded)
       onRedrawNeeded();
   }
@@ -732,7 +747,7 @@ private:
       if (!grabbed_) {
         pushUndoSnapshotPublic();
         grabPixels();
-        eraseSource();
+        eraseSource(); // uploads to committed → markCompositeDirty inside
         grabbed_ = true;
       }
     } else {
@@ -745,6 +760,8 @@ private:
       selX0_ = selX1_ = x;
       selY0_ = selY1_ = y;
       scratchClear();
+      markCompositeDirty(); // FIX: scratch cleared when starting a new
+                            //      selection drag; composite must update
     }
   }
 
@@ -756,6 +773,8 @@ private:
       scratchClear();
       blitPixelsToScratch(selX0_ + dx, selY0_ + dy);
       drawDots(selX0_ + dx, selY0_ + dy, selX1_ + dx, selY1_ + dy);
+      markCompositeDirty(); // FIX: scratch repainted with moved pixels; must
+                            //      composite to show updated position
       if (onRedrawNeeded)
         onRedrawNeeded();
     } else if (selDrawing_) {
@@ -763,6 +782,8 @@ private:
       selY1_ = y;
       scratchClear();
       drawDots(selX0_, selY0_, selX1_, selY1_);
+      markCompositeDirty(); // FIX: marching-dots rectangle updated in scratch;
+                            //      composite must show the new marquee frame
       if (onRedrawNeeded)
         onRedrawNeeded();
     }
@@ -779,6 +800,8 @@ private:
       scratchClear();
       blitPixelsToScratch(selX0_, selY0_);
       drawDots(selX0_, selY0_, selX1_, selY1_);
+      markCompositeDirty(); // FIX: scratch has final moved position; composite
+                            //      must show it before next redraw
       if (onRedrawNeeded)
         onRedrawNeeded();
     } else if (selDrawing_) {
@@ -794,6 +817,8 @@ private:
       scratchClear();
       if (hasSelection_)
         drawDots(selX0_, selY0_, selX1_, selY1_);
+      markCompositeDirty(); // FIX: final marquee (or cleared scratch if no
+                            //      valid selection); composite must update
       if (onRedrawNeeded)
         onRedrawNeeded();
     }
@@ -810,9 +835,12 @@ private:
       selY1_ += dy;
       moving_ = false;
     }
-    commitPixels(selX0_, selY0_);
+    commitPixels(selX0_, selY0_); // uploads to committed → markCompositeDirty
+                                  //      called inside commitPixels below
     grabbed_ = false;
     scratchClear();
+    markCompositeDirty(); // FIX: scratch cleared after pixel commit; composite
+                          //      must drop the floating ghost and show final
   }
 
   void redrawSelectionOverlay() {
@@ -875,6 +903,8 @@ private:
       }
     }
     uploadToCommitted(full.data());
+    markCompositeDirty(); // FIX: committed layer had its pixels erased (lift);
+                          //      composite must reflect the whitened source
   }
 
   void blitPixelsToScratch(float x0, float y0) {
@@ -903,6 +933,8 @@ private:
     glTexSubImage2D(GL_TEXTURE_2D, 0, dstLX, dstBY, dstW, dstH, GL_RGBA,
                     GL_UNSIGNED_BYTE, sub.data());
     glBindTexture(GL_TEXTURE_2D, 0);
+    markCompositeDirty(); // FIX: scratch texture directly updated via GL;
+                          //      composite must re-blend the floating pixels
   }
 
   void commitPixels(float x0, float y0) {
@@ -950,6 +982,8 @@ private:
         }
       }
     uploadToCommitted(full.data());
+    markCompositeDirty(); // FIX: committed layer updated with dropped pixels;
+                          //      composite must show the permanent result
     pixelBuf_.clear();
   }
 
@@ -1636,8 +1670,6 @@ public:
             ->setCrossAxisAlignment(CrossAxisAlignment::Center)
             ->setSpacing(0));
 
-
-
     auto picker = ColorPicker(hexToRef(activeColor.get()))
                       ->setShowAlpha(false)
                       ->setOnColorChanged(
@@ -1665,8 +1697,6 @@ public:
             ->setScrollbarSize(3)
             ->setScrollbarColor(RGB(60, 62, 80))
             ->setScrollbarHoverColor(RGB(100, 102, 120));
-
-
 
     auto pc1 = std::make_shared<RowWidget>();
     pc1->setSpacing(4);
@@ -1739,9 +1769,9 @@ public:
     // ── §D  Sidebar assembly ───────────────────────────────────────────────
     auto sidebar =
         Container(Column(drawSection, SizedBox(0, 6), shapeSection,
-                         SizedBox(0, 6),
-                         pickerSection, SizedBox(0, 6),  paletteSection, SizedBox(0, 6),
-                         sizeSection, SizedBox(0, 6), opacitySection)
+                         SizedBox(0, 6), pickerSection, SizedBox(0, 6),
+                         paletteSection, SizedBox(0, 6), sizeSection,
+                         SizedBox(0, 6), opacitySection)
                       ->setSpacing(0))
             ->setWidth(kSidebarWidth)
             ->setBackgroundColor(kBg1)
