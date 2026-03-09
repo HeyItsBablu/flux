@@ -1,1359 +1,698 @@
-// =============================================================================
-// image_editor.hpp  —  Lightroom-style non-destructive image editor
-
-#pragma once
-
-#define STB_IMAGE_IMPLEMENTATION
-#include "widgets/stb_image.h"
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "widgets/stb_image_write.h"
-
+// vector_example.cpp  —  Adobe Illustrator-style layout
 #include "flux.hpp"
-#include "widgets/flux_histogram.hpp"
-#include "widgets/flux_hsl_panel.hpp" // ← HSL panel
-#include "widgets/flux_tonecurve.hpp"
+#include "widgets/flux_vector.hpp"
 
-#define NOMINMAX
-#define WIN32_LEAN_AND_MEAN
-#include <commdlg.h>
-#include <windows.h>
-#pragma comment(lib, "comdlg32.lib")
-
-#include <algorithm>
-#include <array>
-#include <cmath>
-#include <functional>
-#include <memory>
-#include <string>
-#include <vector>
-
-#ifndef GL_STATIC_DRAW
-#define GL_STATIC_DRAW 0x88E4
-#endif
-#ifndef GL_TEXTURE0
-#define GL_TEXTURE0 0x84C0
-#endif
-#ifndef GL_TEXTURE1
-#define GL_TEXTURE1 0x84C1
-#endif
-#ifndef GL_TEXTURE2
-#define GL_TEXTURE2 0x84C2
-#endif
-#ifndef GL_CLAMP_TO_EDGE
-#define GL_CLAMP_TO_EDGE 0x812F
-#endif
-#ifndef GL_R8
-#define GL_R8 0x8229
-#endif
-#ifndef GL_RED
-#define GL_RED 0x1903
-#endif
-
-using PFNGLUNIFORM2FPROC = void(APIENTRY *)(GLint, GLfloat, GLfloat);
-using PFNGLACTIVETEXTUREPROC = void(APIENTRY *)(GLenum);
-
-namespace ie_gl {
-inline PFNGLUNIFORM2FPROC uniform2f = nullptr;
-inline PFNGLACTIVETEXTUREPROC activeTexture = nullptr;
-
-inline void init() {
-  if (uniform2f)
-    return;
-  HMODULE gl32 = GetModuleHandleA("opengl32.dll");
-  auto load = [&](const char *name) -> void * {
-    void *p = reinterpret_cast<void *>(wglGetProcAddress(name));
-    if (!p || p == (void *)1 || p == (void *)2 || p == (void *)3 ||
-        p == (void *)-1)
-      p = reinterpret_cast<void *>(GetProcAddress(gl32, name));
-    return p;
-  };
-  uniform2f = reinterpret_cast<PFNGLUNIFORM2FPROC>(load("glUniform2f"));
-  activeTexture =
-      reinterpret_cast<PFNGLACTIVETEXTUREPROC>(load("glActiveTexture"));
-  assert(uniform2f && activeTexture);
-}
-} // namespace ie_gl
-
-// =============================================================================
-// §1  EDIT PARAMETERS
-// =============================================================================
-
-struct EditParams {
-  // ── Tone ─────────────────────────────────────────────────────────────────
-  float exposure = 0.f;
-  float contrast = 0.f;
-  float highlights = 0.f;
-  float shadows = 0.f;
-  float whites = 0.f;
-  float blacks = 0.f;
-  // ── Color ────────────────────────────────────────────────────────────────
-  float temperature = 0.f;
-  float tint = 0.f;
-  float saturation = 0.f;
-  float vibrance = 0.f;
-  // ── Detail ───────────────────────────────────────────────────────────────
-  float sharpness = 0.f;
-  float noiseReduce = 0.f;
-  // ── Effects ──────────────────────────────────────────────────────────────
-  float vignette = 0.f;
-  float grain = 0.f;
-
-  // ── Tone curve LUTs (256-entry) ───────────────────────────────────────────
-  std::array<uint8_t, 256> lutRGB{};
-  std::array<uint8_t, 256> lutR{};
-  std::array<uint8_t, 256> lutG{};
-  std::array<uint8_t, 256> lutB{};
-
-  // ── HSL LUTs (360-entry) ──────────────────────────────────────────────────
-  std::array<uint8_t, 360> hslHue{}; // encoded: 0.5=neutral, shift ±30°
-  std::array<uint8_t, 360> hslSat{}; // encoded: 0.5=1× multiplier
-  std::array<uint8_t, 360> hslLum{}; // encoded: 0.5=neutral, shift ±1
-
-  EditParams() {
-    resetCurves();
-    resetHSL();
-  }
-
-  void resetCurves() {
-    for (int i = 0; i < 256; ++i)
-      lutRGB[i] = lutR[i] = lutG[i] = lutB[i] = uint8_t(i);
-  }
-
-  void resetHSL() {
-    // Identity: hue shift=0 (128), sat scale=1× (128), lum shift=0 (128)
-    for (int i = 0; i < 360; ++i) {
-      hslHue[i] = 128;
-      hslSat[i] = 128;
-      hslLum[i] = 128;
-    }
-  }
-
-  void reset() { *this = EditParams{}; }
-};
-
-// =============================================================================
-// §2  GLSL SHADER
-//     Texture unit layout:
-//       0 = uOriginal   (source image)
-//       1 = uNoise      (grain noise)
-//       2 = uLutRGB     (tone curve composite, 256×1)
-//       3 = uLutR       (tone curve red,       256×1)
-//       4 = uLutG       (tone curve green,     256×1)
-//       5 = uLutB       (tone curve blue,      256×1)
-//       6 = uHSLHue     (HSL hue shift,        360×1)
-//       7 = uHSLSat     (HSL sat scale,        360×1)
-//       8 = uHSLLum     (HSL lum shift,        360×1)
-// =============================================================================
-
-static const char *kEditVert = R"GLSL(
-#version 330 core
-layout(location=0) in vec2 aPos;
-layout(location=1) in vec2 aUV;
-uniform mat4 uMVP;
-out vec2 vUV;
-void main(){ vUV=aUV; gl_Position=uMVP*vec4(aPos,0.0,1.0); }
-)GLSL";
-
-static const char *kEditFrag = R"GLSL(
-#version 330 core
-in  vec2 vUV;
-out vec4 fragColor;
-
-// Source + utility textures
-uniform sampler2D uOriginal;
-uniform sampler2D uNoise;
-
-// Tone curve LUTs (256×1 R8)
-uniform sampler2D uLutRGB;
-uniform sampler2D uLutR;
-uniform sampler2D uLutG;
-uniform sampler2D uLutB;
-
-// HSL LUTs (360×1 R8)
-// Encoding:
-//   uHSLHue : 0=–30°  0.5=0°  1=+30°   → actual shift = (sample–0.5)*60°
-//   uHSLSat : 0=0×    0.5=1×  1=2×     → actual scale = sample * 2.0
-//   uHSLLum : 0=–1    0.5=0   1=+1     → actual shift = (sample–0.5)*2.0
-uniform sampler2D uHSLHue;
-uniform sampler2D uHSLSat;
-uniform sampler2D uHSLLum;
-
-// Scalar uniforms
-uniform float uExposure, uContrast, uHighlights, uShadows, uWhites, uBlacks;
-uniform float uTemperature, uTint, uSaturation, uVibrance;
-uniform float uSharpness, uNoiseReduce;
-uniform vec2  uTexelSize;
-uniform float uVignette, uGrain;
-
-// ── Utility ───────────────────────────────────────────────────────────────────
-vec3 toLinear(vec3 c){ return pow(clamp(c,0.0,1.0),vec3(2.2)); }
-vec3 toSRGB  (vec3 c){ return pow(clamp(c,0.0,1.0),vec3(1.0/2.2)); }
-float luma(vec3 c){ return dot(c,vec3(0.2126,0.7152,0.0722)); }
-
-vec3 rgb2hsl(vec3 c){
-    float mx=max(c.r,max(c.g,c.b)), mn=min(c.r,min(c.g,c.b)), d=mx-mn;
-    float l=(mx+mn)*0.5;
-    if(d<0.0001) return vec3(0,0,l);
-    float s=d/(1.0-abs(2.0*l-1.0)), h;
-    if(mx==c.r)      h=mod((c.g-c.b)/d,6.0)/6.0;
-    else if(mx==c.g) h=((c.b-c.r)/d+2.0)/6.0;
-    else             h=((c.r-c.g)/d+4.0)/6.0;
-    return vec3(h,s,l);
-}
-float hue2rgb(float p,float q,float t){
-    if(t<0.0)t+=1.0; if(t>1.0)t-=1.0;
-    if(t<1.0/6.0) return p+(q-p)*6.0*t;
-    if(t<0.5)     return q;
-    if(t<2.0/3.0) return p+(q-p)*(2.0/3.0-t)*6.0;
-    return p;
-}
-vec3 hsl2rgb(vec3 h){
-    if(h.y<0.0001) return vec3(h.z);
-    float q=h.z<0.5?h.z*(1.0+h.y):h.z+h.y-h.z*h.y, p=2.0*h.z-q;
-    return vec3(hue2rgb(p,q,h.x+1.0/3.0),hue2rgb(p,q,h.x),hue2rgb(p,q,h.x-1.0/3.0));
+// ── Color helpers ────────────────────────────────────────────────────────────
+static COLORREF hexToRef(const std::string &css) {
+  RGBA c = parseHexColor(css);
+  return RGB((BYTE)(c.r * 255), (BYTE)(c.g * 255), (BYTE)(c.b * 255));
 }
 
-float applyLUT256(sampler2D lut, float v){
-    return texture(lut, vec2(clamp(v,0.0,1.0), 0.5)).r;
-}
+// ============================================================================
+// VectorApp  —  Adobe Illustrator-style chrome
+//
+//  ┌──────────────────────────────────────────────────────┐
+//  │  Menu/App bar (32px)                                  │
+//  ├──────────────────────────────────────────────────────┤
+//  │  Control bar — context-sensitive options  (36px)      │
+//  ├────┬─────────────────────────────────────┬───────────┤
+//  │    │                                     │           │
+//  │ T  │   Canvas / Artboard                 │ Properties│
+//  │ o  │   (grey pasteboard + white paper)   │ Panel     │
+//  │ o  │                                     │  (260px)  │
+//  │ l  │                                     │           │
+//  │ b  │                                     │           │
+//  │ a  │                                     │           │
+//  │ r  │                                     │           │
+//  │(48)│                                     │           │
+//  ├────┴─────────────────────────────────────┴───────────┤
+//  │  Status bar (22px)                                    │
+//  └──────────────────────────────────────────────────────┘
+//
+// Palette
+//   kBg      #323232  — outer chrome / status bar
+//   kPanel   #2B2B2B  — panel / toolbar backgrounds
+//   kDark    #252526  — sidebar separator / deeper bg
+//   kBorder  #1A1A1A  — borders between regions
+//   kAccent  #FF6B00  — Illustrator orange accent
+//   kText    #CCCCCC  — normal label text
+//   kDim     #888888  — secondary label text
+// ============================================================================
 
-// Sample a 360-entry HSL LUT using the current hue (0..1)
-float sampleHSLLut(sampler2D lut, float hueNorm){
-    // 360 texels wide — offset by 0.5/360 to hit texel centres
-    float u = clamp(hueNorm, 0.0, 1.0);
-    return texture(lut, vec2(u, 0.5)).r;
-}
+class VectorApp : public Component {
+  // ── State ─────────────────────────────────────────────────────────────────
+  State<VTool>        activeTool;
+  State<std::string>  fillColor;
+  State<std::string>  strokeColor;
+  State<double>       strokeWidth;
+  State<bool>         fillNone;
+  State<bool>         strokeNone;
+  State<double>       zoomLevel;
+  State<bool>         canUndo, canRedo;
 
-float shadowMask   (float l){ return pow(1.0-l,2.0); }
-float highlightMask(float l){ return pow(l,    2.0); }
-
-void main(){
-    // ── 1. Sample + optional sharpen / denoise ────────────────────────────────
-    vec3 c;
-    if(uSharpness>0.001||uNoiseReduce>0.001){
-        vec3 blur=vec3(0);
-        for(int dy=-1;dy<=1;dy++) for(int dx=-1;dx<=1;dx++)
-            blur+=texture(uOriginal,vUV+vec2(dx,dy)*uTexelSize).rgb;
-        blur/=9.0;
-        vec3 orig=texture(uOriginal,vUV).rgb;
-        vec3 blended=mix(orig,blur,clamp(uNoiseReduce,0.0,1.0));
-        c=clamp(blended+uSharpness*0.6*(orig-blur),0.0,1.0);
-    } else {
-        c=texture(uOriginal,vUV).rgb;
-    }
-
-    // ── 2–6. Tone adjustments (linear light) ──────────────────────────────────
-    c=toLinear(c);
-    c*=pow(2.0,uExposure);
-    { float pv=0.18; c=(c-pv)*(1.0+uContrast)+pv; c=clamp(c,0.0,1.0); }
-    { float l=luma(c);
-      c*=1.0+uHighlights*highlightMask(l)*0.7;
-      c*=1.0+uShadows*shadowMask(l)*0.7;
-      c=clamp(c,0.0,1.0); }
-    c=clamp(c*(1.0+uWhites*0.3)-uBlacks*0.15,0.0,1.0);
-
-    // ── 7. Tone curves: composite RGB then per-channel ────────────────────────
-    c.r=applyLUT256(uLutRGB,c.r);
-    c.g=applyLUT256(uLutRGB,c.g);
-    c.b=applyLUT256(uLutRGB,c.b);
-    c.r=applyLUT256(uLutR,  c.r);
-    c.g=applyLUT256(uLutG,  c.g);
-    c.b=applyLUT256(uLutB,  c.b);
-    c=clamp(c,0.0,1.0);
-
-    // ── 8. Temperature / Tint ─────────────────────────────────────────────────
-    { float t=uTemperature*0.15, g=uTint*0.10;
-      c.r=clamp(c.r+t,0.0,1.0);
-      c.b=clamp(c.b-t,0.0,1.0);
-      c.r=clamp(c.r+g,0.0,1.0);
-      c.g=clamp(c.g-g,0.0,1.0);
-      c.b=clamp(c.b+g,0.0,1.0); }
-
-    // ── 9. Global Saturation / Vibrance (sRGB) ────────────────────────────────
-    c=toSRGB(c);
-    { vec3 hsl=rgb2hsl(c);
-      hsl.y=clamp(hsl.y*(1.0+uSaturation),0.0,1.0);
-      c=hsl2rgb(hsl); }
-    { vec3 hsl=rgb2hsl(c);
-      float sat=hsl.y, mask=(1.0-sat)*(1.0-sat);
-      hsl.y=clamp(hsl.y+uVibrance*mask*0.8,0.0,1.0);
-      c=hsl2rgb(hsl); }
-    c=clamp(c,0.0,1.0);
-
-    // ── 10. HSL per-band adjustments ──────────────────────────────────────────
-    {
-        vec3 hsl = rgb2hsl(c);
-        float hueNorm = hsl.x;  // 0..1
-
-        // Hue shift: encoded 0..1 → shift –30°..+30°  (÷360 for normalised hue)
-        float hShift = (sampleHSLLut(uHSLHue, hueNorm) - 0.5) * (60.0/360.0);
-        hsl.x = fract(hsl.x + hShift);
-
-        // Saturation scale: encoded 0..1 → multiplier 0×..2×
-        float sScale = sampleHSLLut(uHSLSat, hueNorm) * 2.0;
-        hsl.y = clamp(hsl.y * sScale, 0.0, 1.0);
-
-        // Luminance shift: encoded 0..1 → shift –1..+1
-        float lShift = (sampleHSLLut(uHSLLum, hueNorm) - 0.5) * 2.0;
-        hsl.z = clamp(hsl.z + lShift * 0.5, 0.0, 1.0);  // ×0.5 = ±50% max
-
-        c = hsl2rgb(hsl);
-        c = clamp(c, 0.0, 1.0);
-    }
-
-    // ── 11. Vignette ──────────────────────────────────────────────────────────
-    { vec2 uv2=vUV*2.0-1.0;
-      float dist=dot(uv2,uv2);
-      float mask=smoothstep(0.5,1.6,dist);
-      c=clamp(c*(1.0-mask*(-uVignette)*0.8),0.0,1.0); }
-
-    // ── 12. Grain ─────────────────────────────────────────────────────────────
-    if(uGrain>0.001){
-        vec3 n=texture(uNoise,vUV*5.0).rgb;
-        c=clamp(c+(n.r-0.5)*uGrain*0.12,0.0,1.0);
-    }
-
-    fragColor=vec4(c,1.0);
-}
-)GLSL";
-
-// =============================================================================
-// §3  IMAGE EDIT SURFACE
-// =============================================================================
-
-class ImageEditSurface : public RenderSurface {
-public:
-  std::function<void()> onImageLoaded;
-  std::function<void(const char *)> onStatusMessage;
-  std::function<void(const HistogramData &)> onHistogramUpdated;
-
-  bool loadImage(const wchar_t *path) {
-    char utf8[MAX_PATH * 3] = {};
-    WideCharToMultiByte(CP_UTF8, 0, path, -1, utf8, sizeof(utf8), nullptr,
-                        nullptr);
-    int w, h, ch;
-    stbi_set_flip_vertically_on_load(1);
-    unsigned char *data = stbi_load(utf8, &w, &h, &ch, 4);
-    if (!data) {
-      if (onStatusMessage)
-        onStatusMessage("Failed to load image.");
-      return false;
-    }
-    imgW_ = w;
-    imgH_ = h;
-    originalPixels_.assign(data, data + size_t(w) * h * 4);
-    stbi_image_free(data);
-    uploadOriginal();
-    params_.reset();
-    buildIdentityLUTs();
-    buildIdentityHSLLUTs();
-    if (onImageLoaded)
-      onImageLoaded();
-    if (onStatusMessage) {
-      char msg[128];
-      _snprintf_s(msg, sizeof(msg), _TRUNCATE, "Loaded %dx%d", w, h);
-      onStatusMessage(msg);
-    }
-    return true;
-  }
-
-  bool exportImage(const wchar_t *path) {
-    if (originalPixels_.empty() || !editFBO_)
-      return false;
-    renderToExportFBO();
-    std::vector<uint8_t> buf(size_t(imgW_) * imgH_ * 4);
-    GL.bindFramebuffer(GL_READ_FRAMEBUFFER, editFBO_);
-    glReadPixels(0, 0, imgW_, imgH_, GL_RGBA, GL_UNSIGNED_BYTE, buf.data());
-    GL.bindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-    std::vector<uint8_t> flipped(buf.size());
-    int stride = imgW_ * 4;
-    for (int r = 0; r < imgH_; r++)
-      memcpy(flipped.data() + r * stride, buf.data() + (imgH_ - 1 - r) * stride,
-             stride);
-    char utf8[MAX_PATH * 3] = {};
-    WideCharToMultiByte(CP_UTF8, 0, path, -1, utf8, sizeof(utf8), nullptr,
-                        nullptr);
-    std::string ps(utf8);
-    bool ok = false;
-    if (ps.size() >= 4 && (ps.substr(ps.size() - 4) == ".jpg" ||
-                           ps.substr(ps.size() - 5) == ".jpeg"))
-      ok = stbi_write_jpg(utf8, imgW_, imgH_, 4, flipped.data(), 95) != 0;
-    else
-      ok = stbi_write_png(utf8, imgW_, imgH_, 4, flipped.data(), stride) != 0;
-    if (onStatusMessage)
-      onStatusMessage(ok ? "Export saved." : "Export failed.");
-    return ok;
-  }
-
-  bool hasImage() const { return !originalPixels_.empty(); }
-  int imageWidth() const { return imgW_; }
-  int imageHeight() const { return imgH_; }
-  EditParams &params() { return params_; }
-  const EditParams &params() const { return params_; }
-
-  // ── Tone curve LUT upload ─────────────────────────────────────────────────
-  void uploadCurveLUTs(const std::array<uint8_t, 256> &rgb,
-                       const std::array<uint8_t, 256> &r,
-                       const std::array<uint8_t, 256> &g,
-                       const std::array<uint8_t, 256> &b) {
-    params_.lutRGB = rgb;
-    params_.lutR = r;
-    params_.lutG = g;
-    params_.lutB = b;
-    uploadOneLUT256(lutTexRGB_, rgb.data());
-    uploadOneLUT256(lutTexR_, r.data());
-    uploadOneLUT256(lutTexG_, g.data());
-    uploadOneLUT256(lutTexB_, b.data());
-  }
-
-  // ── HSL LUT upload ────────────────────────────────────────────────────────
-  // Accepts the raw uint8 arrays from HSLData::buildGPULUTs()
-  void uploadHSLLUTs(const uint8_t *hue360, const uint8_t *sat360,
-                     const uint8_t *lum360) {
-    memcpy(params_.hslHue.data(), hue360, 360);
-    memcpy(params_.hslSat.data(), sat360, 360);
-    memcpy(params_.hslLum.data(), lum360, 360);
-    uploadOneLUT360(hslTexHue_, hue360);
-    uploadOneLUT360(hslTexSat_, sat360);
-    uploadOneLUT360(hslTexLum_, lum360);
-  }
-
-  void computeHistogram() {
-    if (originalPixels_.empty())
-      return;
-    histData_ =
-        HistogramData::fromPixels(originalPixels_.data(), imgW_ * imgH_, 4);
-    if (onHistogramUpdated)
-      onHistogramUpdated(histData_);
-  }
-
-  const HistogramData &histogramData() const { return histData_; }
-
-  // ── RenderSurface ─────────────────────────────────────────────────────────
-  void initialize(int w, int h) override {
-    ie_gl::init();
-    viewW_ = w;
-    viewH_ = h;
-    buildShader();
-    buildQuad();
-    buildNoiseTexture();
-    buildIdentityLUTs();
-    buildIdentityHSLLUTs();
-  }
-
-  // Called by CanvasWidget when the GL child window is resized.
-  // This is distinct from resize() which receives canvas/image dimensions.
-  void setGLSize(int w, int h) {
-    viewW_ = w;
-    viewH_ = h;
-  }
-
-void resize(int w, int h) override {
-    // setCanvasSize calls this with image dimensions — we don't use those
-    // for glViewport. Use setGLSize() for the GL window size instead.
-    (void)w; (void)h;
-  }
-  void update(double) override {}
-
-void render(const float mvp[16]) override {
-    // CanvasWidget::tickAndRender already called glViewport(0,0,glW,glH).
-    // We must NOT override it here with viewW_/viewH_.
-    if (originalPixels_.empty() || !origTex_) {
-      glClearColor(0.12f, 0.12f, 0.14f, 1.f);
-      glClear(GL_COLOR_BUFFER_BIT);
-      return;
-    }
-    glClearColor(0.08f, 0.08f, 0.09f, 1.f);
-    glClear(GL_COLOR_BUFFER_BIT);
-    drawEditPass(0, mvp);
-  }
-
-  void destroy() override {
-    auto del = [](GLuint &t) {
-      if (t) {
-        glDeleteTextures(1, &t);
-        t = 0;
-      }
-    };
-    del(origTex_);
-    del(noiseTex_);
-    del(lutTexRGB_);
-    del(lutTexR_);
-    del(lutTexG_);
-    del(lutTexB_);
-    del(hslTexHue_);
-    del(hslTexSat_);
-    del(hslTexLum_);
-    del(editTex_);
-    if (editProg_) {
-      GL.deleteProgram(editProg_);
-      editProg_ = 0;
-    }
-    if (quadVAO_) {
-      GL.deleteVertexArrays(1, &quadVAO_);
-      quadVAO_ = 0;
-    }
-    if (quadVBO_) {
-      GL.deleteBuffers(1, &quadVBO_);
-      quadVBO_ = 0;
-    }
-    if (editFBO_) {
-      GL.deleteFramebuffers(1, &editFBO_);
-      editFBO_ = 0;
-    }
-  }
-
-private:
-  int viewW_ = 1, viewH_ = 1, imgW_ = 0, imgH_ = 0;
-  EditParams params_;
-  HistogramData histData_;
-  std::vector<uint8_t> originalPixels_;
-
-  GLuint editProg_ = 0, quadVAO_ = 0, quadVBO_ = 0;
-  GLuint origTex_ = 0, noiseTex_ = 0;
-  GLuint editFBO_ = 0, editTex_ = 0;
-
-  // Tone curve LUT textures (256×1 R8)
-  GLuint lutTexRGB_ = 0, lutTexR_ = 0, lutTexG_ = 0, lutTexB_ = 0;
-
-  // HSL LUT textures (360×1 R8)
-  GLuint hslTexHue_ = 0, hslTexSat_ = 0, hslTexLum_ = 0;
-
-  void buildShader() {
-    editProg_ = glutil::linkProgram(kEditVert, kEditFrag);
-    assert(editProg_);
-  }
-
-void buildQuad() {
-    // Allocate VAO/VBO with enough space; data uploaded in uploadQuadForSize()
-    GL.genVertexArrays(1, &quadVAO_);
-    GL.genBuffers(1, &quadVBO_);
-    GL.bindVertexArray(quadVAO_);
-    GL.bindBuffer(GL_ARRAY_BUFFER, quadVBO_);
-    GL.bufferData(GL_ARRAY_BUFFER, sizeof(float) * 6 * 4, nullptr, GL_DYNAMIC_DRAW);
-    GL.enableVertexAttribArray(0);
-    GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
-    GL.enableVertexAttribArray(1);
-    GL.vertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(8));
-    GL.bindVertexArray(0);
-  }
-
-  // Upload a canvas-space quad matching the current image dimensions.
-  // UV (0,0) = bottom-left, (1,1) = top-right  (GL Y-up convention).
-  void uploadQuadForSize(float w, float h) {
-    float v[] = {
-      0.f, 0.f,  0.f, 0.f,
-      w,   0.f,  1.f, 0.f,
-      w,   h,    1.f, 1.f,
-      w,   h,    1.f, 1.f,
-      0.f, h,    0.f, 1.f,
-      0.f, 0.f,  0.f, 0.f,
-    };
-    GL.bindBuffer(GL_ARRAY_BUFFER, quadVBO_);
-    GL.bufferSubData(GL_ARRAY_BUFFER, 0, sizeof(v), v);
-    GL.bindBuffer(GL_ARRAY_BUFFER, 0);
-  }
-
-  void buildNoiseTexture() {
-    const int N = 64;
-    std::vector<uint8_t> noise(N * N * 3);
-    srand(42);
-    for (auto &v : noise)
-      v = uint8_t(rand() & 0xFF);
-    glGenTextures(1, &noiseTex_);
-    glBindTexture(GL_TEXTURE_2D, noiseTex_);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, N, N, 0, GL_RGB, GL_UNSIGNED_BYTE,
-                 noise.data());
-    glBindTexture(GL_TEXTURE_2D, 0);
-  }
-
-  // ── 256×1 R8 LUT (tone curves) ───────────────────────────────────────────
-  void uploadOneLUT256(GLuint &tex, const uint8_t *data) {
-    if (!tex) {
-      glGenTextures(1, &tex);
-      glBindTexture(GL_TEXTURE_2D, tex);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    } else {
-      glBindTexture(GL_TEXTURE_2D, tex);
-    }
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, 256, 1, 0, GL_RED, GL_UNSIGNED_BYTE,
-                 data);
-    glBindTexture(GL_TEXTURE_2D, 0);
-  }
-
-  // ── 360×1 R8 LUT (HSL) ───────────────────────────────────────────────────
-  void uploadOneLUT360(GLuint &tex, const uint8_t *data) {
-    if (!tex) {
-      glGenTextures(1, &tex);
-      glBindTexture(GL_TEXTURE_2D, tex);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    } else {
-      glBindTexture(GL_TEXTURE_2D, tex);
-    }
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, 360, 1, 0, GL_RED, GL_UNSIGNED_BYTE,
-                 data);
-    glBindTexture(GL_TEXTURE_2D, 0);
-  }
-
-  void buildIdentityLUTs() {
-    uint8_t id[256];
-    for (int i = 0; i < 256; ++i)
-      id[i] = uint8_t(i);
-    uploadOneLUT256(lutTexRGB_, id);
-    uploadOneLUT256(lutTexR_, id);
-    uploadOneLUT256(lutTexG_, id);
-    uploadOneLUT256(lutTexB_, id);
-  }
-
-  void buildIdentityHSLLUTs() {
-    // Identity: all neutral (128 = 0 shift, 128 = 1× scale)
-    uint8_t id[360];
-    memset(id, 128, 360);
-    uploadOneLUT360(hslTexHue_, id);
-    uploadOneLUT360(hslTexSat_, id);
-    uploadOneLUT360(hslTexLum_, id);
-  }
-
-  void rebuildEditFBOForImage() {
-    if (editFBO_) {
-      GL.deleteFramebuffers(1, &editFBO_);
-      editFBO_ = 0;
-    }
-    if (editTex_) {
-      glDeleteTextures(1, &editTex_);
-      editTex_ = 0;
-    }
-    glGenTextures(1, &editTex_);
-    glBindTexture(GL_TEXTURE_2D, editTex_);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, imgW_, imgH_, 0, GL_RGBA,
-                 GL_UNSIGNED_BYTE, nullptr);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    GL.genFramebuffers(1, &editFBO_);
-    GL.bindFramebuffer(GL_FRAMEBUFFER, editFBO_);
-    GL.framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-                            editTex_, 0);
-    GL.bindFramebuffer(GL_FRAMEBUFFER, 0);
-  }
-
-  void uploadOriginal() {
-    if (origTex_) {
-      glDeleteTextures(1, &origTex_);
-      origTex_ = 0;
-    }
-    glGenTextures(1, &origTex_);
-    glBindTexture(GL_TEXTURE_2D, origTex_);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, imgW_, imgH_, 0, GL_RGBA,
-                 GL_UNSIGNED_BYTE, originalPixels_.data());
-    glBindTexture(GL_TEXTURE_2D, 0);
-    rebuildEditFBOForImage();
-    computeHistogram();
-  }
-
-  void setUniforms() {
-    auto loc = [&](const char *n) {
-      return GL.getUniformLocation(editProg_, n);
-    };
-    const EditParams &p = params_;
-    GL.uniform1f(loc("uExposure"), p.exposure);
-    GL.uniform1f(loc("uContrast"), p.contrast);
-    GL.uniform1f(loc("uHighlights"), p.highlights);
-    GL.uniform1f(loc("uShadows"), p.shadows);
-    GL.uniform1f(loc("uWhites"), p.whites);
-    GL.uniform1f(loc("uBlacks"), p.blacks);
-    GL.uniform1f(loc("uTemperature"), p.temperature);
-    GL.uniform1f(loc("uTint"), p.tint);
-    GL.uniform1f(loc("uSaturation"), p.saturation);
-    GL.uniform1f(loc("uVibrance"), p.vibrance);
-    GL.uniform1f(loc("uSharpness"), p.sharpness);
-    GL.uniform1f(loc("uNoiseReduce"), p.noiseReduce);
-    GL.uniform1f(loc("uVignette"), p.vignette);
-    GL.uniform1f(loc("uGrain"), p.grain);
-    ie_gl::uniform2f(loc("uTexelSize"), 1.f / float(imgW_), 1.f / float(imgH_));
-
-    // Texture unit assignments
-    GL.uniform1i(loc("uOriginal"), 0);
-    GL.uniform1i(loc("uNoise"), 1);
-    GL.uniform1i(loc("uLutRGB"), 2);
-    GL.uniform1i(loc("uLutR"), 3);
-    GL.uniform1i(loc("uLutG"), 4);
-    GL.uniform1i(loc("uLutB"), 5);
-    GL.uniform1i(loc("uHSLHue"), 6);
-    GL.uniform1i(loc("uHSLSat"), 7);
-    GL.uniform1i(loc("uHSLLum"), 8);
-  }
-
-  void bindTextureUnit(int unit, GLuint tex) {
-    ie_gl::activeTexture(GL_TEXTURE0 + unit);
-    glBindTexture(GL_TEXTURE_2D, tex);
-  }
-
-void drawEditPass(GLuint fbo, const float* mvp) {
-    GL.bindFramebuffer(GL_FRAMEBUFFER, fbo);
-    // For export FBO: render at full image resolution.
-    // For screen pass (fbo=0): viewport already set by CanvasWidget — don't override.
-    if (fbo)
-      glViewport(0, 0, imgW_, imgH_);
-    GL.useProgram(editProg_);
-
-    // Upload MVP — for the export FBO use a simple identity-style ortho so
-    // the shader samples the full image; for the view pass use the viewport MVP.
-    GLint mvpLoc = GL.getUniformLocation(editProg_, "uMVP");
-    GL.uniformMatrix4fv(mvpLoc, 1, GL_FALSE, mvp);
-
-    setUniforms();
-    bindTextureUnit(0, origTex_);
-    bindTextureUnit(1, noiseTex_);
-    bindTextureUnit(2, lutTexRGB_);
-    bindTextureUnit(3, lutTexR_);
-    bindTextureUnit(4, lutTexG_);
-    bindTextureUnit(5, lutTexB_);
-    bindTextureUnit(6, hslTexHue_);
-    bindTextureUnit(7, hslTexSat_);
-    bindTextureUnit(8, hslTexLum_);
-
-    // Upload the canvas-space quad for the current image size
-    uploadQuadForSize(float(imgW_), float(imgH_));
-
-    GL.bindVertexArray(quadVAO_);
-    glDrawArrays(GL_TRIANGLES, 0, 6);
-    GL.bindVertexArray(0);
-    GL.useProgram(0);
-    GL.bindFramebuffer(GL_FRAMEBUFFER, 0);
-  }
-
-  // For export: build an ortho that maps [0..imgW] x [0..imgH] → NDC
-  // (same convention as Viewport::buildMVP but fixed at image size)
-  void buildExportMVP(float out[16]) const {
-    float l=0, r=float(imgW_), b=0, t=float(imgH_);
-    float rml=r-l, tmb=t-b;
-    out[ 0]=2.f/rml; out[ 1]=0;        out[ 2]=0;  out[ 3]=0;
-    out[ 4]=0;       out[ 5]=2.f/tmb;  out[ 6]=0;  out[ 7]=0;
-    out[ 8]=0;       out[ 9]=0;        out[10]=-1; out[11]=0;
-    out[12]=-(r+l)/rml; out[13]=-(t+b)/tmb; out[14]=0; out[15]=1;
-  }
-
-  void renderToExportFBO() {
-    float mvp[16];
-    buildExportMVP(mvp);
-    drawEditPass(editFBO_, mvp);
-  }
-};
-
-// =============================================================================
-// §4  FILE DIALOGS
-// =============================================================================
-
-static std::wstring promptOpenImage(HWND owner) {
-  wchar_t buf[MAX_PATH] = {};
-  OPENFILENAMEW ofn{};
-  ofn.lStructSize = sizeof(ofn);
-  ofn.hwndOwner = owner;
-  ofn.lpstrFilter = L"Image Files\0*.jpg;*.jpeg;*.png;*.bmp;*.tga\0All\0*.*\0";
-  ofn.lpstrFile = buf;
-  ofn.nMaxFile = MAX_PATH;
-  ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
-  ofn.lpstrTitle = L"Open Image";
-  return GetOpenFileNameW(&ofn) ? buf : L"";
-}
-static std::wstring promptExportImage(HWND owner) {
-  wchar_t buf[MAX_PATH] = L"edited.png";
-  OPENFILENAMEW ofn{};
-  ofn.lStructSize = sizeof(ofn);
-  ofn.hwndOwner = owner;
-  ofn.lpstrFilter = L"PNG\0*.png\0JPEG\0*.jpg\0All\0*.*\0";
-  ofn.lpstrFile = buf;
-  ofn.nMaxFile = MAX_PATH;
-  ofn.lpstrDefExt = L"png";
-  ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
-  ofn.lpstrTitle = L"Export Image";
-  return GetSaveFileNameW(&ofn) ? buf : L"";
-}
-
-// =============================================================================
-// §5  IMAGE EDITOR APP
-// =============================================================================
-
-class ImageEditorApp : public Component {
-  // ── UI state ──────────────────────────────────────────────────────────────
-  State<std::string> statusMsg;
-  State<bool> hasImage;
-  State<bool> beforeMode;
-  State<double> zoomLevel;
-  State<HistogramData> histState;
-  State<ToneCurveData> curveState;
-  State<HSLData> hslState; // ← new
-
-  // ── Tone sliders ──────────────────────────────────────────────────────────
-  State<double> sExposure, sContrast, sHighlights, sShadows, sWhites, sBlacks;
-  // ── Color sliders ─────────────────────────────────────────────────────────
-  State<double> sTemperature, sTint, sSaturation, sVibrance;
-  // ── Detail sliders ────────────────────────────────────────────────────────
-  State<double> sSharpness, sNoiseReduce;
-  // ── Effects sliders ───────────────────────────────────────────────────────
-  State<double> sVignette, sGrain;
-
-  std::shared_ptr<ImageEditSurface> surface_;
-  ToneCurveWidget *curveWidgetPtr_ = nullptr;
-  HSLPanelWidget *hslWidgetPtr_ = nullptr; // ← new
+  std::shared_ptr<VectorSurface> surface_;
   CanvasWidget *canvasPtr_ = nullptr;
-  HWND mainHwnd_ = nullptr;
 
-  static constexpr int kPanelW = 290, kToolbarH = 44, kHintsH = 22;
+  static constexpr double kZoomMin = 6.25, kZoomMax = 800.0;
+  static constexpr int kToolbarW   = 52;   // left narrow tool strip
+  static constexpr int kPanelW     = 260;  // right properties panel
+  static constexpr int kAppBarH    = 32;   // top menu/app bar
+  static constexpr int kCtrlBarH   = 36;   // context control bar
+  static constexpr int kStatusH    = 72;   // bottom status bar
 
-  template <typename F> void wire(State<double> &st, F EditParams::*field) {
-    st.listen([this, field](double v) {
-      if (!surface_)
-        return;
-      surface_->params().*field = float(v);
-      if (canvasPtr_)
-        canvasPtr_->redraw();
-    });
+  // ── Illustrator palette ───────────────────────────────────────────────────
+  COLORREF kBg     = RGB(50, 50, 50);
+  COLORREF kPanel  = RGB(43, 43, 43);
+  COLORREF kDark   = RGB(37, 37, 37);
+  COLORREF kBorder = RGB(26, 26, 26);
+  COLORREF kAccent = RGB(255, 107, 0);
+  COLORREF kText   = RGB(204, 204, 204);
+  COLORREF kDim    = RGB(136, 136, 136);
+  COLORREF kWhite  = RGB(255, 255, 255);
+  COLORREF kHigh   = RGB(70, 130, 180); // selection blue
+
+  // ────────────────────────────────────────────────────────────────────────
+
+  void refreshUndoRedo() {
+    if (!surface_) return;
+    canUndo.set(surface_->canUndo());
+    canRedo.set(surface_->canRedo());
+  }
+
+  void syncZoom(float z) {
+    double pct = z * 100.0;
+    if (std::abs(pct - zoomLevel.get()) > 0.5)
+      zoomLevel.set(pct);
+  }
+
+  void applyZoom(double pct) {
+    if (!canvasPtr_) return;
+    Viewport &vp = canvasPtr_->viewport();
+    float t = float(pct / 100.0), cur = vp.zoom();
+    if (std::abs(t - cur) < 0.0001f) return;
+    vp.zoomToward(vp.viewW() * .5f, vp.viewH() * .5f, t / cur);
+    canvasPtr_->redraw();
+  }
+
+  void pushStyleToSurface() {
+    if (!surface_) return;
+    RGBA fc = parseHexColor(fillColor.get());
+    VFill fill;
+    fill.color = fc;
+    fill.none  = fillNone.get();
+    surface_->setActiveFill(fill);
+
+    RGBA sc = parseHexColor(strokeColor.get());
+    VStroke stroke;
+    stroke.color = sc;
+    stroke.width = float(strokeWidth.get());
+    stroke.none  = strokeNone.get();
+    surface_->setActiveStroke(stroke);
   }
 
 public:
-  ImageEditorApp()
-      : statusMsg("Open an image to begin.", context), hasImage(false, context),
-        beforeMode(false, context), zoomLevel(100.0, context),
-        histState(HistogramData{}, context),
-        curveState(ToneCurveData{}, context),
-        hslState(HSLData{}, context) // ← new
-        ,
-        sExposure(0.0, context), sContrast(0.0, context),
-        sHighlights(0.0, context), sShadows(0.0, context),
-        sWhites(0.0, context), sBlacks(0.0, context),
-        sTemperature(0.0, context), sTint(0.0, context),
-        sSaturation(0.0, context), sVibrance(0.0, context),
-        sSharpness(0.0, context), sNoiseReduce(0.0, context),
-        sVignette(0.0, context), sGrain(0.0, context) {}
+  VectorApp()
+      : activeTool  (VTool::Select, context)
+      , fillColor   ("#FFFFFF", context)       // white fill (Illustrator default)
+      , strokeColor ("#000000", context)       // black stroke
+      , strokeWidth (1.0, context)
+      , fillNone    (false, context)
+      , strokeNone  (false, context)
+      , zoomLevel   (100.0, context)
+      , canUndo     (false, context)
+      , canRedo     (false, context)
+  {}
 
   WidgetPtr build() override {
     int screenW = GetSystemMetrics(SM_CXSCREEN);
     int screenH = GetSystemMetrics(SM_CYSCREEN);
-    int viewW = screenW - kPanelW, viewH = screenH - kToolbarH - kHintsH;
 
-    auto canvas = std::make_shared<CanvasWidget>()->setSize(viewW, viewH);
-    canvas->setCanvasSize(1, 1);
-    canvas->setScrollbarsEnabled(false);
-    surface_ = canvas->setSurface<ImageEditSurface>();
-    canvasPtr_ = canvas.get();
-    mainHwnd_ = GetActiveWindow();
+    int canvasAreaW = screenW - kToolbarW - kPanelW;
+    int canvasAreaH = screenH - kAppBarH - kCtrlBarH - kStatusH;
 
-    // Keep the zoom% display in sync whenever the viewport changes.
-    // Guard prevents the listener below from firing back into zoomToward.
-    canvas->onViewportChanged = [this](float z) {
-      if (syncingZoom_)
-        return;
-      double pct = double(z) * 100.0;
-      if (std::abs(pct - zoomLevel.get()) > 0.5) {
-        syncingZoom_ = true;
-        zoomLevel.set(pct);
-        syncingZoom_ = false;
-      }
+    // A3 artboard (297×420mm at 96dpi ≈ 1123×1587px)
+    static constexpr int kPaperW = 1123, kPaperH = 1587;
+
+    auto canvas = VectorCanvas(canvasAreaW, canvasAreaH, kPaperW, kPaperH);
+    surface_    = canvas->setSurface<VectorSurface>();
+    canvasPtr_  = canvas.get();
+
+    canvas->onViewportChanged = [this](float z) { syncZoom(z); };
+
+    // ── Wire state → surface ───────────────────────────────────────────────
+    activeTool .listen([this](VTool t)          { if (surface_) surface_->setTool(t); });
+    fillColor  .listen([this](const std::string&){ pushStyleToSurface(); });
+    strokeColor.listen([this](const std::string&){ pushStyleToSurface(); });
+    strokeWidth.listen([this](double)            { pushStyleToSurface(); });
+    fillNone   .listen([this](bool)              { pushStyleToSurface(); });
+    strokeNone .listen([this](bool)              { pushStyleToSurface(); });
+    zoomLevel  .listen([this](double pct)        { applyZoom(pct); });
+
+    // =========================================================================
+    // §A  APP / MENU BAR
+    // =========================================================================
+    auto menuItem = [&](const std::string &label) -> WidgetPtr {
+      return Container(
+          Text(label)->setFontSize(11)->setTextColor(kText))
+          ->setPaddingAll(12, 0, 12, 0)
+          ->setHeight(kAppBarH);
     };
 
-    surface_->onImageLoaded = [this]() {
-      hasImage.set(true);
-      if (canvasPtr_) {
-        canvasPtr_->setCanvasSize(surface_->imageWidth(),
-                                  surface_->imageHeight());
-        canvasPtr_->viewport().fitToView();
-        canvasPtr_->redraw();
-        zoomLevel.set(double(canvasPtr_->viewport().zoom()) * 100.0);
-      }
-    };
+    auto appBar =
+        Container(
+            Row(
+                // Illustrator-style "Ai" logo mark
+                Container(
+                    Text("Ai")
+                        ->setFontSize(13)
+                        ->setFontWeight(FontWeight::Bold)
+                        ->setTextColor(kAccent))
+                    ->setWidth(52)
+                    ->setPaddingAll(0, 0, 4, 0),
+                menuItem("File"),
+                menuItem("Edit"),
+                menuItem("Object"),
+                menuItem("Type"),
+                menuItem("Select"),
+                menuItem("Effect"),
+                menuItem("View"),
+                menuItem("Window"),
+                menuItem("Help"))
+                ->setSpacing(0)
+                ->setCrossAxisAlignment(CrossAxisAlignment::Center))
+            ->setBackgroundColor(kDark)
+            ->setBorderWidth(1)
+            ->setBorderColor(kBorder)
+            ->setHeight(kAppBarH);
 
-    surface_->onStatusMessage = [this](const char *m) { statusMsg.set(m); };
-    surface_->onHistogramUpdated = [this](const HistogramData &d) {
-      histState.set(d);
-      if (curveWidgetPtr_)
-        curveWidgetPtr_->setHistogram(d.r, d.g, d.b);
-    };
+    // =========================================================================
+    // §B  CONTROL BAR  (context-sensitive, top)
+    // =========================================================================
 
-    wire(sExposure, &EditParams::exposure);
-    wire(sContrast, &EditParams::contrast);
-    wire(sHighlights, &EditParams::highlights);
-    wire(sShadows, &EditParams::shadows);
-    wire(sWhites, &EditParams::whites);
-    wire(sBlacks, &EditParams::blacks);
-    wire(sTemperature, &EditParams::temperature);
-    wire(sTint, &EditParams::tint);
-    wire(sSaturation, &EditParams::saturation);
-    wire(sVibrance, &EditParams::vibrance);
-    wire(sSharpness, &EditParams::sharpness);
-    wire(sNoiseReduce, &EditParams::noiseReduce);
-    wire(sVignette, &EditParams::vignette);
-    wire(sGrain, &EditParams::grain);
-
-    // Zoom slider drives the viewport — skip if viewport already set this.
-    zoomLevel.listen([this](double pct) {
-      if (syncingZoom_ || !canvasPtr_)
-        return;
-      Viewport &vp = canvasPtr_->viewport();
-      float target = float(pct / 100.0);
-      float cur = vp.zoom();
-      if (std::abs(target - cur) < 0.0001f)
-        return;
-      syncingZoom_ = true;
-      vp.zoomToward(vp.viewW() * 0.5f, vp.viewH() * 0.5f, target / cur);
-      canvasPtr_->redraw();
-      syncingZoom_ = false;
-    });
-    // ── Colors ────────────────────────────────────────────────────────────
-    COLORREF kBg1 = RGB(17, 17, 27), kBg2 = RGB(24, 24, 37);
-    COLORREF kBorder = RGB(49, 50, 68), kText = RGB(205, 214, 244);
-    COLORREF kDim = RGB(100, 105, 130), kAccent = RGB(174, 129, 255);
-    COLORREF kGreen = RGB(148, 226, 213), kOrange = RGB(250, 179, 135);
-
-    auto sectionLabel = [&](const std::string &t) -> WidgetPtr {
-      return Text(t)
-          ->setFontSize(9)
-          ->setTextColor(RGB(100, 105, 125))
-          ->setFontWeight(FontWeight::Bold);
-    };
-    auto cardWrap = [&](WidgetPtr child) -> WidgetPtr {
-      return Container(child)
-          ->setBackgroundColor(kBg2)
-          ->setBorderRadius(8)
-          ->setBorderWidth(1)
-          ->setBorderColor(kBorder)
-          ->setPaddingAll(10, 10, 10, 10);
-    };
-    auto makeSlider = [&](const std::string &label, double lo, double hi,
-                          double step, State<double> &st,
-                          COLORREF col = RGB(174, 129, 255)) -> WidgetPtr {
-      return Column(Row(Text(label)
-                            ->setFontSize(9)
-                            ->setTextColor(kDim)
-                            ->setMinWidth(80),
-                        SizedBox(4, 0),
-                        Text(st,
-                             [](double v) {
-                               char b[16];
-                               _snprintf_s(b, sizeof(b), _TRUNCATE, "%.2f", v);
-                               return std::string(b);
-                             })
-                            ->setFontSize(9)
-                            ->setTextColor(kText)
-                            ->setMinWidth(36))
-                        ->setSpacing(0)
-                        ->setCrossAxisAlignment(CrossAxisAlignment::Center),
-                    SizedBox(0, 4),
-                    Slider(lo, hi, step)
-                        ->setValue(st)
-                        ->setTrackFillColor(col)
-                        ->setWidth(258))
-          ->setSpacing(0);
-    };
-
-    // ── §A  HISTOGRAM ─────────────────────────────────────────────────────
-    auto histSection = cardWrap(
-        Column(Row(sectionLabel("HISTOGRAM"), SizedBox(4, 0),
-                   Text(hasImage,
-                        [](bool b) -> std::string {
-                          return b ? "" : " (no image)";
-                        })
-                       ->setFontSize(9)
-                       ->setTextColor(kDim))
-                   ->setSpacing(0)
-                   ->setCrossAxisAlignment(CrossAxisAlignment::Center),
-               SizedBox(0, 6),
-               Histogram(258, 90)
-                   ->setData(histState)
-                   ->setMode(HistogramMode::RGB)
-                   ->setShowGrid(true)
-                   ->setShowClip(true)
-                   ->setShowChannelToggles(true)
-                   ->setLogScale(false)
-                   ->setBgColor(RGB(14, 14, 22))
-                   ->setOnZoneClicked([this](float pos) {
-                     sExposure.set(max(-5.0, min(5.0, (pos - 0.5) * 4.0)));
-                   }))
-            ->setSpacing(0));
-
-    // ── §B  TONE CURVE ────────────────────────────────────────────────────
-    auto curveWidget =
-        ToneCurve(258, 220)
-            ->setShowHistogram(true)
-            ->setShowRegions(true)
-            ->setShowGrid(true)
-            ->setCurveData(curveState)
-            ->setOnCurveChanged([this](const ToneCurveData &d) {
-              curveState.set(d);
-              if (!surface_)
-                return;
-              surface_->uploadCurveLUTs(d.rgb.buildLUT(), d.r.buildLUT(),
-                                        d.g.buildLUT(), d.b.buildLUT());
-              if (canvasPtr_)
-                canvasPtr_->redraw();
-            });
-    curveWidgetPtr_ = curveWidget.get();
-
-    auto modeBtn = [&](const std::string &lbl, COLORREF col,
-                       std::function<void()> fn) -> WidgetPtr {
-      return GestureDetector(
-                 Container(Text(lbl)->setFontSize(9)->setTextColor(col))
-                     ->setBackgroundColor(RGB(24, 24, 34))
-                     ->setBorderRadius(4)
-                     ->setPaddingAll(6, 3, 6, 3)
-                     ->setBorderWidth(1)
-                     ->setBorderColor(kBorder))
-          ->setOnTap(fn);
-    };
-    auto curveModeRow =
-        Row(modeBtn("Point Curve", kAccent,
-                    [cw = curveWidget.get()] { cw->setParametricMode(false); }),
-            SizedBox(5, 0),
-            modeBtn("Parametric", kDim,
-                    [cw = curveWidget.get()] { cw->setParametricMode(true); }),
-            SizedBox(5, 0),
-            modeBtn("Reset", RGB(200, 100, 100),
-                    [this, cw = curveWidget.get()] {
-                      cw->resetCurve();
-                      curveState.set(ToneCurveData{});
-                      if (surface_) {
-                        ToneCurveData id;
-                        surface_->uploadCurveLUTs(
-                            id.rgb.buildLUT(), id.r.buildLUT(), id.g.buildLUT(),
-                            id.b.buildLUT());
-                        if (canvasPtr_)
-                          canvasPtr_->redraw();
-                      }
-                    }))
-            ->setSpacing(0)
+    // Stroke-width quick field
+    auto ctrlStrokeW =
+        Row(Text("W:")
+                ->setFontSize(10)
+                ->setTextColor(kDim),
+            SizedBox(4, 0),
+            Text(strokeWidth,
+                 [](double v) {
+                   return std::to_string(int(std::round(v))) + " pt";
+                 })
+                ->setFontSize(10)
+                ->setTextColor(kText)
+                ->setMinWidth(32),
+            Slider(0.25, 100.0, 0.25)
+                ->setValue(strokeWidth)
+                ->setTrackFillColor(kAccent)
+                ->setWidth(80))
+            ->setSpacing(4)
             ->setCrossAxisAlignment(CrossAxisAlignment::Center);
 
-    auto curveSection = cardWrap(
-        Column(Row(sectionLabel("TONE CURVE"), SizedBox(8, 0), curveModeRow)
-                   ->setSpacing(0)
-                   ->setCrossAxisAlignment(CrossAxisAlignment::Center),
-               SizedBox(0, 8), curveWidget)
-            ->setSpacing(0));
+    // Zoom cluster
+    auto zoomCluster =
+        Row(Text("Zoom:")
+                ->setFontSize(10)
+                ->setTextColor(kDim),
+            SizedBox(4, 0),
+            Slider(kZoomMin, kZoomMax, 0.25)
+                ->setValue(zoomLevel)
+                ->setTrackFillColor(kAccent)
+                ->setWidth(90),
+            SizedBox(4, 0),
+            Text(zoomLevel,
+                 [](double v) {
+                   return std::to_string(int(std::round(v))) + "%";
+                 })
+                ->setFontSize(10)
+                ->setTextColor(kText)
+                ->setMinWidth(42),
+            Button("100%",
+                   [this] {
+                     if (canvasPtr_) {
+                       canvasPtr_->viewport().resetZoom();
+                       canvasPtr_->redraw();
+                       syncZoom(1.f);
+                     }
+                   })
+                ->setBackgroundColor(RGB(60, 60, 60))
+                ->setTextColor(kText)
+                ->setBorderRadius(3)
+                ->setHeight(22)
+                ->setPadding(6),
+            Button("Fit",
+                   [this] {
+                     if (canvasPtr_) {
+                       canvasPtr_->viewport().fitToView();
+                       canvasPtr_->redraw();
+                       syncZoom(canvasPtr_->viewport().zoom());
+                     }
+                   })
+                ->setBackgroundColor(RGB(60, 60, 60))
+                ->setTextColor(kText)
+                ->setBorderRadius(3)
+                ->setHeight(22)
+                ->setPadding(6))
+            ->setSpacing(4)
+            ->setCrossAxisAlignment(CrossAxisAlignment::Center);
 
-    // ── §C  TONE SLIDERS ──────────────────────────────────────────────────
-    auto toneSection = cardWrap(
-        Column(
-            sectionLabel("TONE"), SizedBox(0, 8),
-            makeSlider("Exposure", -5.0, 5.0, 0.05, sExposure,
-                       RGB(250, 220, 100)),
-            SizedBox(0, 6),
-            makeSlider("Contrast", -1.0, 1.0, 0.01, sContrast, kAccent),
-            SizedBox(0, 6),
-            makeSlider("Highlights", -1.0, 1.0, 0.01, sHighlights,
-                       RGB(200, 200, 220)),
-            SizedBox(0, 6),
-            makeSlider("Shadows", -1.0, 1.0, 0.01, sShadows, RGB(80, 100, 160)),
-            SizedBox(0, 6),
-            makeSlider("Whites", -1.0, 1.0, 0.01, sWhites, RGB(230, 230, 230)),
-            SizedBox(0, 6),
-            makeSlider("Blacks", -1.0, 1.0, 0.01, sBlacks, RGB(60, 60, 80)))
-            ->setSpacing(0));
+    // Undo/Redo/Clear
+    auto editCluster =
+        Row(Button("↩",
+                   [this] {
+                     if (surface_) {
+                       surface_->undo();
+                       refreshUndoRedo();
+                       if (canvasPtr_) canvasPtr_->redraw();
+                     }
+                   })
+                ->setBackgroundColor(RGB(60, 60, 60))
+                ->setTextColor(RGB(100, 160, 255))
+                ->setBorderRadius(3)
+                ->setHeight(22)
+                ->setWidth(28)
+                ->setPadding(4),
+            Button("↪",
+                   [this] {
+                     if (surface_) {
+                       surface_->redo();
+                       refreshUndoRedo();
+                       if (canvasPtr_) canvasPtr_->redraw();
+                     }
+                   })
+                ->setBackgroundColor(RGB(60, 60, 60))
+                ->setTextColor(RGB(100, 200, 80))
+                ->setBorderRadius(3)
+                ->setHeight(22)
+                ->setWidth(28)
+                ->setPadding(4),
+            Button("Clear",
+                   [this] {
+                     if (surface_) {
+                       auto ids = surface_->scene();
+                       for (auto &s : ids) surface_->removeShape(s.id);
+                       refreshUndoRedo();
+                       if (canvasPtr_) canvasPtr_->redraw();
+                     }
+                   })
+                ->setBackgroundColor(RGB(60, 60, 60))
+                ->setTextColor(RGB(220, 80, 80))
+                ->setBorderRadius(3)
+                ->setHeight(22)
+                ->setPadding(6))
+            ->setSpacing(4)
+            ->setCrossAxisAlignment(CrossAxisAlignment::Center);
 
-    // ── §D  COLOR ─────────────────────────────────────────────────────────
-    auto colorSection = cardWrap(
-        Column(sectionLabel("COLOR"), SizedBox(0, 8),
-               makeSlider("Temperature", -1.0, 1.0, 0.01, sTemperature,
-                          RGB(100, 180, 250)),
-               SizedBox(0, 6),
-               makeSlider("Tint", -1.0, 1.0, 0.01, sTint, RGB(200, 120, 200)),
-               SizedBox(0, 6),
-               makeSlider("Saturation", -1.0, 1.0, 0.01, sSaturation,
-                          RGB(220, 120, 100)),
-               SizedBox(0, 6),
-               makeSlider("Vibrance", -1.0, 1.0, 0.01, sVibrance,
-                          RGB(170, 220, 120)))
-            ->setSpacing(0));
-
-    // ── §E  HSL / COLOR MIX ───────────────────────────────────────────────
-    // The HSL panel widget handles its own internal layout and scrolling.
-    // We wrap it in a card just like the other sections.
-    auto hslWidget =
-        HSLPanel(258)
-            ->setData(hslState)
-            ->setActiveTab(HSLTab::All)
-            ->setOnHSLChanged([this](const HSLData &d) {
-              hslState.set(d);
-              if (!surface_)
-                return;
-              auto luts = d.buildGPULUTs();
-              surface_->uploadHSLLUTs(luts.hue.data(), luts.sat.data(),
-                                      luts.lum.data());
-              if (canvasPtr_)
-                canvasPtr_->redraw();
-            });
-    hslWidgetPtr_ = hslWidget.get();
-
-    // Reset button for the HSL panel
-    auto hslResetBtn = modeBtn("Reset", RGB(200, 100, 100), [this]() {
-      if (hslWidgetPtr_)
-        hslWidgetPtr_->resetAll();
-      hslState.set(HSLData{});
-      if (surface_) {
-        HSLData id;
-        auto luts = id.buildGPULUTs();
-        surface_->uploadHSLLUTs(luts.hue.data(), luts.sat.data(),
-                                luts.lum.data());
-        if (canvasPtr_)
-          canvasPtr_->redraw();
-      }
-    });
-
-    auto hslSection = cardWrap(
-        Column(Row(sectionLabel("HSL / COLOR MIX"), SizedBox(8, 0), hslResetBtn)
-                   ->setSpacing(0)
-                   ->setCrossAxisAlignment(CrossAxisAlignment::Center),
-               SizedBox(0, 8), hslWidget)
-            ->setSpacing(0));
-
-    // ── §F  DETAIL ────────────────────────────────────────────────────────
-    auto detailSection = cardWrap(
-        Column(sectionLabel("DETAIL"), SizedBox(0, 8),
-               makeSlider("Sharpness", 0.0, 1.0, 0.01, sSharpness, kAccent),
-               SizedBox(0, 6),
-               makeSlider("Noise Reduce", 0.0, 1.0, 0.01, sNoiseReduce, kGreen))
-            ->setSpacing(0));
-
-    // ── §G  EFFECTS ───────────────────────────────────────────────────────
-    auto effectsSection = cardWrap(
-        Column(sectionLabel("EFFECTS"), SizedBox(0, 8),
-               makeSlider("Vignette", -1.0, 1.0, 0.01, sVignette,
-                          RGB(80, 80, 100)),
-               SizedBox(0, 6),
-               makeSlider("Grain", 0.0, 1.0, 0.01, sGrain, RGB(180, 160, 130)))
-            ->setSpacing(0));
-
-    // ── §H  PANEL (scrollable) ────────────────────────────────────────────
-    auto panel =
+    auto controlBar =
         Container(
-            ListView({histSection, SizedBox(0, 6), curveSection, SizedBox(0, 6),
-                      toneSection, SizedBox(0, 6), colorSection, SizedBox(0, 6),
-                      hslSection,
-                      SizedBox(0, 6), // ← inserted between color and detail
-                      detailSection, SizedBox(0, 6), effectsSection})
-                ->setSpacing(0))
-            ->setWidth(kPanelW)
-            ->setBackgroundColor(kBg1)
-            ->setPaddingAll(10, 10, 10, 10);
+            Row(ctrlStrokeW,
+                SizedBox(16, 0),
+                Container(nullptr)->setWidth(1)->setHeight(20)->setBackgroundColor(kBorder),
+                SizedBox(16, 0),
+                zoomCluster,
+                SizedBox(16, 0),
+                Container(nullptr)->setWidth(1)->setHeight(20)->setBackgroundColor(kBorder),
+                SizedBox(16, 0),
+                editCluster)
+                ->setSpacing(0)
+                ->setCrossAxisAlignment(CrossAxisAlignment::Center))
+            ->setBackgroundColor(kPanel)
+            ->setPaddingAll(8, 7, 8, 7)
+            ->setBorderWidth(1)
+            ->setBorderColor(kBorder)
+            ->setHeight(kCtrlBarH);
 
-    // ── §I  TOOLBAR ───────────────────────────────────────────────────────
-    auto mkBtn = [&](const std::string &lbl, COLORREF c,
-                     std::function<void()> fn) -> WidgetPtr {
-      return Button(lbl, fn)
-          ->setBackgroundColor(RGB(30, 30, 46))
-          ->setTextColor(c)
-          ->setBorderRadius(5)
-          ->setHeight(26)
-          ->setPadding(4);
+    // =========================================================================
+    // §C  LEFT TOOL STRIP  (narrow, icon buttons only, like Illustrator)
+    // =========================================================================
+
+    auto makeTool = [&](VTool tv, const std::string &icon,
+                        const std::string &tip) -> WidgetPtr {
+      return Tooltip(
+          GestureDetector(
+              Container(
+                  Center(
+                      Text(icon)
+                          ->setFontSize(15)
+                          ->setTextColor(activeTool, [tv](const VTool &at) {
+                            return at == tv ? RGB(255, 255, 255)
+                                           : RGB(170, 170, 170);
+                          })))
+                  ->setWidth(kToolbarW - 4)
+                  ->setHeight(36)
+                  ->setBorderRadius(4)
+                  ->setBackgroundColor(
+                      activeTool, [tv](const VTool &at) {
+                        return at == tv ? RGB(255, 107, 0) : RGB(43, 43, 43);
+                      }))
+              ->setOnTap([this, tv]() { activeTool.set(tv); }),
+          tip);
     };
-    auto toolbar =
-        Container(Row(mkBtn("📂 Open", kGreen,
-                            [this]() {
-                              std::wstring p = promptOpenImage(mainHwnd_);
-                              if (!p.empty() && surface_)
-                                surface_->loadImage(p.c_str());
-                            }),
-                      SizedBox(8, 0),
-                      mkBtn("💾 Export", kAccent,
-                            [this]() {
-                              if (!surface_ || !surface_->hasImage())
-                                return;
-                              std::wstring p = promptExportImage(mainHwnd_);
-                              if (!p.empty())
-                                surface_->exportImage(p.c_str());
-                            }),
-                      SizedBox(8, 0),
-                      mkBtn("↺ Reset All", kOrange,
-                            [this]() {
-                              if (!surface_)
-                                return;
-                              surface_->params().reset();
 
-                              // Reset tone curve
-                              if (curveWidgetPtr_)
-                                curveWidgetPtr_->resetCurve();
-                              curveState.set(ToneCurveData{});
-                              {
-                                ToneCurveData id;
-                                surface_->uploadCurveLUTs(
-                                    id.rgb.buildLUT(), id.r.buildLUT(),
-                                    id.g.buildLUT(), id.b.buildLUT());
-                              }
+    // Separator line between tool groups
+    auto sep = Container(nullptr)
+                   ->setWidth(kToolbarW - 16)
+                   ->setHeight(1)
+                   ->setBackgroundColor(RGB(60, 60, 60));
 
-                              // Reset HSL
-                              if (hslWidgetPtr_)
-                                hslWidgetPtr_->resetAll();
-                              hslState.set(HSLData{});
-                              {
-                                HSLData id;
-                                auto luts = id.buildGPULUTs();
-                                surface_->uploadHSLLUTs(luts.hue.data(),
-                                                        luts.sat.data(),
-                                                        luts.lum.data());
-                              }
+    auto toolStrip =
+        Container(
+            Column(
+                SizedBox(0, 6),
+                // Selection group
+                makeTool(VTool::Select,  "↖", "Selection (V)"),
+                SizedBox(0, 2),
+                makeTool(VTool::Node,    "◆", "Direct Selection (A)"),
+                SizedBox(0, 8),
+                sep,
+                SizedBox(0, 8),
+                // Drawing group
+                makeTool(VTool::Pen,     "✒", "Pen (P)"),
+                SizedBox(0, 2),
+                makeTool(VTool::Rect,    "▭", "Rectangle (M)"),
+                SizedBox(0, 2),
+                makeTool(VTool::Ellipse, "⬭", "Ellipse (L)"),
+                SizedBox(0, 2),
+                makeTool(VTool::Line,    "╱", "Line Segment (\\)"),
+                SizedBox(0, 8),
+                sep)
+                ->setSpacing(0)
+                ->setCrossAxisAlignment(CrossAxisAlignment::Center))
+            ->setWidth(kToolbarW)
+            ->setBackgroundColor(kPanel)
+            ->setBorderWidth(1)
+            ->setBorderColor(kBorder);
 
-                              // Reset all sliders
-                              sExposure.set(0);
-                              sContrast.set(0);
-                              sHighlights.set(0);
-                              sShadows.set(0);
-                              sWhites.set(0);
-                              sBlacks.set(0);
-                              sTemperature.set(0);
-                              sTint.set(0);
-                              sSaturation.set(0);
-                              sVibrance.set(0);
-                              sSharpness.set(0);
-                              sNoiseReduce.set(0);
-                              sVignette.set(0);
-                              sGrain.set(0);
+    // =========================================================================
+    // §D  CANVAS with context menu (grey pasteboard is drawn by VectorSurface)
+    // =========================================================================
 
-                              if (canvasPtr_)
-                                canvasPtr_->redraw();
-                            }),
-                      SizedBox(8, 0),
-                      GestureDetector(Container(Text(beforeMode,
-                                                     [](const bool &b) {
-                                                       return std::string(
-                                                           b ? "After ▶"
-                                                             : "Before ◀");
-                                                     })
-                                                    ->setFontSize(11)
-                                                    ->setTextColor(kText))
-                                          ->setBackgroundColor(RGB(30, 30, 46))
-                                          ->setBorderRadius(5)
-                                          ->setPaddingAll(6, 3, 6, 3)
-                                          ->setBorderWidth(1)
-                                          ->setBorderColor(kBorder))
-                          ->setOnTap([this]() {
-                            bool b = !beforeMode.get();
-                            beforeMode.set(b);
-                            if (surface_) {
-                              if (b) {
-                                savedParams_ = surface_->params();
-                                surface_->params().reset();
-                              } else {
-                                surface_->params() = savedParams_;
-                              }
-                              if (canvasPtr_)
-                                canvasPtr_->redraw();
-                            }
-                          }),
-
-                      SizedBox(16, 0),
-                      Text("Zoom")->setFontSize(10)->setTextColor(kDim),
-                      Slider(6.25, 200.0, 0.25)
-                          ->setValue(zoomLevel)
-                          ->setTrackFillColor(kAccent)
-                          ->setWidth(110),
-                      Text(zoomLevel,
-                           [](double v) {
-                             char b[16];
-                             _snprintf_s(b, sizeof(b), _TRUNCATE, "%d%%",
-                                         int(std::round(v)));
-                             return std::string(b);
-                           })
-                          ->setFontSize(10)
-                          ->setTextColor(RGB(180, 180, 200))
-                          ->setMinWidth(38),
-                      Button("1:1",
-                             [this]() {
-                               if (canvasPtr_) {
-                                 canvasPtr_->viewport().resetZoom();
+    auto canvasWithMenu = ContextMenu(
+        canvas,
+        {
+            {"Select",    [this] { activeTool.set(VTool::Select); }},
+            {"Rectangle", [this] { activeTool.set(VTool::Rect); }},
+            {"Ellipse",   [this] { activeTool.set(VTool::Ellipse); }},
+            {"Line",      [this] { activeTool.set(VTool::Line); }},
+            {"Pen",       [this] { activeTool.set(VTool::Pen); }},
+            {"Node",      [this] { activeTool.set(VTool::Node); }},
+            ContextMenuItem::Separator(),
+            {"Undo",      [this] {
+               if (surface_) { surface_->undo(); refreshUndoRedo();
+                                if (canvasPtr_) canvasPtr_->redraw(); } }},
+            {"Redo",      [this] {
+               if (surface_) { surface_->redo(); refreshUndoRedo();
+                                if (canvasPtr_) canvasPtr_->redraw(); } }},
+            ContextMenuItem::Separator(),
+            {"Zoom 100%", [this] {
+               if (canvasPtr_) { canvasPtr_->viewport().resetZoom();
+                                 canvasPtr_->redraw(); syncZoom(1.f); } }},
+            {"Fit to Window", [this] {
+               if (canvasPtr_) { canvasPtr_->viewport().fitToView();
                                  canvasPtr_->redraw();
-                                 zoomLevel.set(100.0);
-                               }
-                             })
-                          ->setBackgroundColor(RGB(24, 24, 37))
-                          ->setTextColor(kAccent)
-                          ->setBorderRadius(5)
-                          ->setWidth(30)
-                          ->setHeight(26)
-                          ->setPadding(4),
-                      Button("Fit",
-                             [this]() {
-                               if (canvasPtr_) {
-                                 canvasPtr_->viewport().fitToView();
-                                 canvasPtr_->redraw();
-                                 zoomLevel.set(
-                                     double(canvasPtr_->viewport().zoom()) *
-                                     100.0);
-                               }
-                             })
-                          ->setBackgroundColor(RGB(24, 24, 37))
-                          ->setTextColor(kAccent)
-                          ->setBorderRadius(5)
-                          ->setWidth(30)
-                          ->setHeight(26)
-                          ->setPadding(4),
-                      SizedBox(16, 0),
-                      Text(statusMsg, [](const std::string &s) { return s; })
-                          ->setFontSize(10)
-                          ->setTextColor(kGreen))
-                      ->setSpacing(4)
-                      ->setCrossAxisAlignment(CrossAxisAlignment::Center))
-            ->setBackgroundColor(kBg1)
-            ->setPaddingAll(10, 7, 10, 7)
-            ->setHeight(kToolbarH);
+                                 syncZoom(canvasPtr_->viewport().zoom()); } }},
+        });
 
-    // ── §J  HINTS ─────────────────────────────────────────────────────────
-    auto hints =
-        Container(Row(Text("MMB/Space: Pan")
-                          ->setFontSize(10)
-                          ->setTextColor(RGB(60, 60, 80)),
-                      SizedBox(10, 0),
-                      Text("Ctrl+Scroll: Zoom")
-                          ->setFontSize(10)
-                          ->setTextColor(RGB(60, 60, 80)),
-                      SizedBox(10, 0),
-                      Text("Curve: click=add  dbl-click=delete  arrow "
-                           "keys=nudge  |  HSL: dbl-click label=reset band")
-                          ->setFontSize(10)
-                          ->setTextColor(RGB(60, 60, 80)))
-                      ->setSpacing(0))
-            ->setBackgroundColor(kBg1)
-            ->setPaddingAll(10, 3, 10, 3)
-            ->setHeight(kHintsH);
+    // =========================================================================
+    // §E  RIGHT PROPERTIES PANEL
+    // =========================================================================
 
-    auto canvasCol = Column(toolbar, hints, canvas)->setSpacing(0);
-    return Scaffold(Row(canvasCol, panel)->setSpacing(0));
+    auto sectionHeader = [&](const std::string &t) -> WidgetPtr {
+      return Container(
+                 Row(Text(t)
+                         ->setFontSize(10)
+                         ->setFontWeight(FontWeight::Bold)
+                         ->setTextColor(kText),
+                     SizedBox(6, 0),
+                     // small chevron placeholder
+                     Text("▾")->setFontSize(9)->setTextColor(kDim))
+                     ->setSpacing(0)
+                     ->setCrossAxisAlignment(CrossAxisAlignment::Center))
+                 ->setBackgroundColor(kDark)
+                 ->setPaddingAll(10, 6, 10, 6)
+                 ->setBorderWidth(1)
+                 ->setBorderColor(kBorder);
+    };
+
+    auto propRow = [&](const std::string &label,
+                       WidgetPtr control) -> WidgetPtr {
+      return Container(
+                 Row(Text(label)
+                         ->setFontSize(10)
+                         ->setTextColor(kDim)
+                         ->setMinWidth(70),
+                     SizedBox(6, 0),
+                     control)
+                     ->setSpacing(0)
+                     ->setCrossAxisAlignment(CrossAxisAlignment::Center))
+                 ->setPaddingAll(10, 4, 10, 4);
+    };
+
+    // ── Fill swatch + toggle ──────────────────────────────────────────────
+    auto fillPicker =
+        ColorPicker(hexToRef(fillColor.get()))
+            ->setShowAlpha(false)
+            ->setOnColorChanged([this](COLORREF c) {
+              char buf[8];
+              _snprintf_s(buf, sizeof(buf), _TRUNCATE, "#%02x%02x%02x",
+                          GetRValue(c), GetGValue(c), GetBValue(c));
+              fillColor.set(buf);
+            });
+
+    auto fillNoneBtn =
+        GestureDetector(
+            Container(
+                Row(Container(nullptr)
+                        ->setWidth(12)
+                        ->setHeight(12)
+                        ->setBorderRadius(2)
+                        ->setBackgroundColor(
+                            fillNone, [](const bool &f) {
+                              return f ? RGB(255, 107, 0) : RGB(37, 37, 37);
+                            })
+                        ->setBorderWidth(1)
+                        ->setBorderColor(RGB(100, 100, 100)),
+                    SizedBox(5, 0),
+                    Text("None")
+                        ->setFontSize(10)
+                        ->setTextColor(kDim))
+                    ->setSpacing(0)
+                    ->setCrossAxisAlignment(CrossAxisAlignment::Center))
+                ->setPaddingAll(6, 3, 6, 3)
+                ->setBorderRadius(3)
+                ->setBackgroundColor(RGB(55, 55, 55))
+                ->setBorderWidth(1)
+                ->setBorderColor(kBorder))
+            ->setOnTap([this]() { fillNone.set(!fillNone.get()); });
+
+    // ── Stroke swatch + toggle ────────────────────────────────────────────
+    auto strokePicker =
+        ColorPicker(hexToRef(strokeColor.get()))
+            ->setShowAlpha(false)
+            ->setOnColorChanged([this](COLORREF c) {
+              char buf[8];
+              _snprintf_s(buf, sizeof(buf), _TRUNCATE, "#%02x%02x%02x",
+                          GetRValue(c), GetGValue(c), GetBValue(c));
+              strokeColor.set(buf);
+            });
+
+    auto strokeNoneBtn =
+        GestureDetector(
+            Container(
+                Row(Container(nullptr)
+                        ->setWidth(12)
+                        ->setHeight(12)
+                        ->setBorderRadius(2)
+                        ->setBackgroundColor(
+                            strokeNone, [](const bool &f) {
+                              return f ? RGB(255, 107, 0) : RGB(37, 37, 37);
+                            })
+                        ->setBorderWidth(1)
+                        ->setBorderColor(RGB(100, 100, 100)),
+                    SizedBox(5, 0),
+                    Text("None")
+                        ->setFontSize(10)
+                        ->setTextColor(kDim))
+                    ->setSpacing(0)
+                    ->setCrossAxisAlignment(CrossAxisAlignment::Center))
+                ->setPaddingAll(6, 3, 6, 3)
+                ->setBorderRadius(3)
+                ->setBackgroundColor(RGB(55, 55, 55))
+                ->setBorderWidth(1)
+                ->setBorderColor(kBorder))
+            ->setOnTap([this]() { strokeNone.set(!strokeNone.get()); });
+
+    // ── Stroke weight slider ──────────────────────────────────────────────
+    auto strokeWSlider =
+        Column(
+            Row(Text("Weight")
+                    ->setFontSize(10)
+                    ->setTextColor(kDim)
+                    ->setMinWidth(70),
+                SizedBox(6, 0),
+                Text(strokeWidth,
+                     [](double v) {
+                       char buf[16];
+                       _snprintf_s(buf, sizeof(buf), _TRUNCATE, "%.2f pt", v);
+                       return std::string(buf);
+                     })
+                    ->setFontSize(10)
+                    ->setTextColor(kText))
+                ->setSpacing(0)
+                ->setCrossAxisAlignment(CrossAxisAlignment::Center),
+            SizedBox(0, 6),
+            Slider(0.25, 100.0, 0.25)
+                ->setValue(strokeWidth)
+                ->setTrackFillColor(kAccent)
+                ->setWidth(kPanelW - 24))
+            ->setSpacing(0);
+
+    // ── Full right panel ──────────────────────────────────────────────────
+    auto rightPanel =
+        Container(
+            Column(
+                // — Transform placeholder header
+                sectionHeader("Transform"),
+                Container(
+                    Column(
+                        propRow("X:", Text("—")->setFontSize(10)->setTextColor(kText)),
+                        propRow("Y:", Text("—")->setFontSize(10)->setTextColor(kText)),
+                        propRow("W:", Text("—")->setFontSize(10)->setTextColor(kText)),
+                        propRow("H:", Text("—")->setFontSize(10)->setTextColor(kText)))
+                        ->setSpacing(0))
+                    ->setBackgroundColor(kPanel)
+                    ->setPaddingAll(0, 0, 0, 0),
+
+                // — Appearance section
+                sectionHeader("Appearance"),
+                Container(
+                    Column(
+                        // Fill row
+                        Container(
+                            Column(
+                                Row(Text("Fill")
+                                        ->setFontSize(10)
+                                        ->setFontWeight(FontWeight::Bold)
+                                        ->setTextColor(kText),
+                                    SizedBox(6, 0),
+                                    fillNoneBtn)
+                                    ->setSpacing(0)
+                                    ->setCrossAxisAlignment(CrossAxisAlignment::Center),
+                                SizedBox(0, 6),
+                                fillPicker)
+                                ->setSpacing(0))
+                            ->setPaddingAll(10, 8, 10, 8),
+
+                        Container(nullptr)
+                            ->setHeight(1)
+                            ->setBackgroundColor(kBorder),
+
+                        // Stroke row
+                        Container(
+                            Column(
+                                Row(Text("Stroke")
+                                        ->setFontSize(10)
+                                        ->setFontWeight(FontWeight::Bold)
+                                        ->setTextColor(kText),
+                                    SizedBox(6, 0),
+                                    strokeNoneBtn)
+                                    ->setSpacing(0)
+                                    ->setCrossAxisAlignment(CrossAxisAlignment::Center),
+                                SizedBox(0, 6),
+                                strokePicker,
+                                SizedBox(0, 10),
+                                strokeWSlider)
+                                ->setSpacing(0))
+                            ->setPaddingAll(10, 8, 10, 8))
+                        ->setSpacing(0))
+                    ->setBackgroundColor(kPanel))
+            ->setSpacing(0))
+        ->setWidth(kPanelW)
+        ->setBackgroundColor(kPanel)
+        ->setBorderWidth(1)
+        ->setBorderColor(kBorder);
+
+    // =========================================================================
+    // §F  STATUS BAR
+    // =========================================================================
+
+    auto statusBar =
+        Container(
+            Row(Text("Ready")
+                    ->setFontSize(9)
+                    ->setTextColor(kDim),
+                SizedBox(16, 0),
+                Text("A3 Portrait | 1123 × 1587 px")
+                    ->setFontSize(9)
+                    ->setTextColor(kDim),
+                SizedBox(16, 0),
+                Text(activeTool,
+                     [](const VTool &t) -> std::string {
+                       switch (t) {
+                       case VTool::Select:  return "Tool: Selection";
+                       case VTool::Node:    return "Tool: Direct Selection";
+                       case VTool::Pen:     return "Tool: Pen";
+                       case VTool::Rect:    return "Tool: Rectangle";
+                       case VTool::Ellipse: return "Tool: Ellipse";
+                       case VTool::Line:    return "Tool: Line Segment";
+                       default:             return "";
+                       }
+                     })
+                    ->setFontSize(9)
+                    ->setTextColor(kDim))
+                ->setSpacing(0)
+                ->setCrossAxisAlignment(CrossAxisAlignment::Center))
+            ->setBackgroundColor(kDark)
+            ->setPaddingAll(10, 4, 10, 4)
+            ->setBorderWidth(1)
+            ->setBorderColor(kBorder)
+            ->setHeight(kStatusH);
+
+    // =========================================================================
+    // §G  HINTS BAR  (between control bar and canvas — like Illustrator's
+    //                 "info bar" just above the rulers)
+    // =========================================================================
+    // (omitted for cleaner Illustrator look — hints moved to tooltip + status)
+
+    // =========================================================================
+    // §H  ROOT LAYOUT
+    // =========================================================================
+    //
+    //  appBar
+    //  controlBar
+    //  ┌─ toolStrip ─┬─ canvasWithMenu ─┬─ rightPanel ─┐
+    //  └─────────────┴──────────────────┴──────────────┘
+    //  statusBar
+
+    auto centerRow =
+        Row(toolStrip,
+            Container(canvasWithMenu)
+                ->setBackgroundColor(kBg),  // grey pasteboard bg visible at edges
+            rightPanel)
+            ->setSpacing(0);
+
+    auto root =
+        Column(appBar,
+               controlBar,
+               centerRow,
+               statusBar)
+            ->setSpacing(0);
+
+    return Scaffold(root);
   }
-
-private:
-  EditParams savedParams_;
-  bool syncingZoom_ = false;
 };
 
-// =============================================================================
-// §6  ENTRY POINT
-// =============================================================================
-
+// ── Entry point ───────────────────────────────────────────────────────────────
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
   FluxUI app(hInstance);
-
   app.build([&]() {
-    return FluxApp("Light Room", BuildComponent<ImageEditorApp>(), AppTheme::dark());
+    return FluxApp("Illustrator-Style Vector Draw",
+                   BuildComponent<VectorApp>(),
+                   AppTheme::dark());
   });
-
-  int screenWidth = GetSystemMetrics(SM_CXSCREEN);
-  int screenHeight = GetSystemMetrics(SM_CYSCREEN);
-
-  app.createWindow("FluxUI - Light Room", screenWidth, screenHeight);
+  int W = GetSystemMetrics(SM_CXSCREEN);
+  int H = GetSystemMetrics(SM_CYSCREEN);
+  app.createWindow("FluxUI — Vector", W, H);
   ShowWindow(GetActiveWindow(), SW_MAXIMIZE);
-
   return app.run();
 }
