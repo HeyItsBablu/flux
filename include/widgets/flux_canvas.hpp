@@ -549,40 +549,48 @@ struct ScrollbarInfo {
 class CustomScrollbar {
 public:
   // ── Tuning constants ──────────────────────────────────────────────────────
-  static constexpr float kTrackThick    = 12.f; // px — full track strip width
-  static constexpr float kThumbThin     =  5.f; // px — thumb width at rest
-  static constexpr float kThumbFat      =  8.f; // px — thumb width on hover/drag
-  static constexpr float kArrowSize     = 12.f; // px — square arrow button
-  static constexpr float kThumbMinLen   = 24.f; // px — minimum thumb length
-  static constexpr float kCornerR       =  3.f; // px — thumb cap radius
-  static constexpr int   kCapSegs       = 8;    // semicircle segments per cap
-  static constexpr float kIdleAlpha     = 0.15f;// alpha when content overflows
-  static constexpr float kActiveAlpha   = 0.90f;// alpha when hovered/dragging
-  static constexpr float kIdleDelay     = 1.5f; // seconds before fade starts
-  static constexpr float kFadeSpeed     = 3.5f; // alpha units per second
-  static constexpr float kExpandSpeed   = 10.f; // thickness lerp speed (1/s)
+  static constexpr float kTrackThick = 12.f;   // px — full track strip width
+  static constexpr float kThumbThin = 5.f;     // px — thumb width at rest
+  static constexpr float kThumbFat = 8.f;      // px — thumb width on hover/drag
+  static constexpr float kArrowSize = 12.f;    // px — square arrow button
+  static constexpr float kThumbMinLen = 24.f;  // px — minimum thumb length
+  static constexpr float kCornerR = 3.f;       // px — thumb cap radius
+  static constexpr int kCapSegs = 8;           // semicircle segments per cap
+  static constexpr float kIdleAlpha = 0.15f;   // alpha when content overflows
+  static constexpr float kActiveAlpha = 0.90f; // alpha when hovered/dragging
+  static constexpr float kIdleDelay = 1.5f;    // seconds before fade starts
+  static constexpr float kFadeSpeed = 3.5f;    // alpha units per second
+  static constexpr float kExpandSpeed = 10.f;  // thickness lerp speed (1/s)
 
   enum class Axis { Horizontal, Vertical };
 
   // Hit zones returned by hitTest()
-  enum class Zone { None, ArrowStart, TrackBefore, Thumb, TrackAfter, ArrowEnd };
+  enum class Zone {
+    None,
+    ArrowStart,
+    TrackBefore,
+    Thumb,
+    TrackAfter,
+    ArrowEnd
+  };
 
   explicit CustomScrollbar(Axis axis) : axis_(axis) {}
 
   // Called when GL window resizes.  x0,y0 = top-left of track strip in
   // screen pixels; trackLen = usable length excluding the two arrow buttons.
   void setGeometry(float stripX0, float stripY0, float stripLen) {
-    stripX0_  = stripX0;
-    stripY0_  = stripY0;
+    stripX0_ = stripX0;
+    stripY0_ = stripY0;
     stripLen_ = stripLen;
   }
 
   // thumbMin/Max in [0,1].  visible = whether content overflows.
   void setThumb(float thumbMin, float thumbMax, bool visible) {
-    visible_   = visible;
-    thumbMin_  = std::clamp(thumbMin, 0.f, 1.f);
-    thumbMax_  = std::clamp(thumbMax, 0.f, 1.f);
-    if (thumbMin_ > thumbMax_) std::swap(thumbMin_, thumbMax_);
+    visible_ = visible;
+    thumbMin_ = std::clamp(thumbMin, 0.f, 1.f);
+    thumbMax_ = std::clamp(thumbMax, 0.f, 1.f);
+    if (thumbMin_ > thumbMax_)
+      std::swap(thumbMin_, thumbMax_);
   }
 
   // dt in seconds.  Returns true while animation is still running.
@@ -604,7 +612,7 @@ public:
     float targetAlpha;
     if (hovered_ || dragging_) {
       targetAlpha = kActiveAlpha;
-      idleTimer_  = 0.f;
+      idleTimer_ = 0.f;
     } else {
       idleTimer_ += f;
       if (idleTimer_ < kIdleDelay)
@@ -618,17 +626,17 @@ public:
   }
 
   bool needsRedraw() const { return visible_ && alpha_ > 0.005f; }
-  bool isVisible()   const { return visible_; }
+  bool isVisible() const { return visible_; }
 
   // ── Render ────────────────────────────────────────────────────────────────
   // prog    : the flat-color shader (uMode=1 path of the blit shader)
   // vao/vbo : shared geometry buffers (already large enough)
   // uMVP, uColor : uniform locations in prog
   // glW, glH : current GL window dimensions (screen pixels)
-  void render(GLuint prog, GLuint vao, GLuint vbo,
-              GLint uMVP, GLint uColor,
+  void render(GLuint prog, GLuint vao, GLuint vbo, GLint uMVP, GLint uColor,
               int glW, int glH) const {
-    if (alpha_ < 0.005f) return;
+    if (alpha_ < 0.005f)
+      return;
 
     // Build screen-space ortho: x in [0,glW], y in [0,glH] top-down.
     // We flip Y so that pixel y=0 is the top of the window.
@@ -650,7 +658,7 @@ public:
     {
       float aa = alpha_;
       GL.uniform4f(uColor, 0.75f, 0.75f, 0.75f, aa);
-      drawArrow(vao, vbo, true,  glW, glH, prog, uMVP, uColor);
+      drawArrow(vao, vbo, true, glW, glH, prog, uMVP, uColor);
       drawArrow(vao, vbo, false, glW, glH, prog, uMVP, uColor);
     }
 
@@ -668,15 +676,16 @@ public:
   // Returns true if the event was consumed by the scrollbar.
   bool onMouseDown(int sx, int sy, std::function<void(float)> scrollTo) {
     Zone z = hitTest(sx, sy);
-    if (z == Zone::None) return false;
+    if (z == Zone::None)
+      return false;
 
-    hovered_    = true;
-    idleTimer_  = 0.f;
+    hovered_ = true;
+    idleTimer_ = 0.f;
     scrollToFn_ = scrollTo;
 
     if (z == Zone::Thumb) {
-      dragging_     = true;
-      dragStartPx_  = axis_ == Axis::Horizontal ? float(sx) : float(sy);
+      dragging_ = true;
+      dragStartPx_ = axis_ == Axis::Horizontal ? float(sx) : float(sy);
       dragStartMin_ = thumbMin_;
       return true;
     }
@@ -704,16 +713,18 @@ public:
     Zone z = hitTest(sx, sy);
     bool wasHovered = hovered_;
     hovered_ = (z != Zone::None);
-    if (hovered_ != wasHovered) idleTimer_ = 0.f;
+    if (hovered_ != wasHovered)
+      idleTimer_ = 0.f;
 
     if (dragging_ && scrollToFn_) {
-      float pos  = axis_ == Axis::Horizontal ? float(sx) : float(sy);
+      float pos = axis_ == Axis::Horizontal ? float(sx) : float(sy);
       float delta = pos - dragStartPx_;
       float usable = usableLen();
       float thumbPx = (thumbMax_ - thumbMin_) * usable;
-      float range   = usable - thumbPx;
+      float range = usable - thumbPx;
       if (range > 0.f) {
-        float newMin = std::clamp(dragStartMin_ + delta / range, 0.f, 1.f - (thumbMax_ - thumbMin_));
+        float newMin = std::clamp(dragStartMin_ + delta / range, 0.f,
+                                  1.f - (thumbMax_ - thumbMin_));
         scrollToFn_(newMin);
       }
       return true;
@@ -729,7 +740,7 @@ public:
   }
 
   void onMouseLeave() {
-    hovered_  = false;
+    hovered_ = false;
     dragging_ = false;
   }
 
@@ -737,16 +748,16 @@ public:
   void poke() { idleTimer_ = 0.f; }
 
 private:
-  Axis  axis_;
+  Axis axis_;
   float stripX0_ = 0, stripY0_ = 0, stripLen_ = 100.f;
   float thumbMin_ = 0.f, thumbMax_ = 1.f;
-  bool  visible_  = false;
-  bool  hovered_  = false;
-  bool  dragging_ = false;
-  float alpha_    = kIdleAlpha;
-  float idleTimer_= 0.f;
+  bool visible_ = false;
+  bool hovered_ = false;
+  bool dragging_ = false;
+  float alpha_ = kIdleAlpha;
+  float idleTimer_ = 0.f;
   float currentW_ = kThumbThin;
-  float dragStartPx_  = 0.f;
+  float dragStartPx_ = 0.f;
   float dragStartMin_ = 0.f;
 
   std::function<void(float)> scrollToFn_;
@@ -762,41 +773,49 @@ private:
   // Thumb position along the track axis (pixels from track start, after arrow)
   void thumbPixels(float &pxStart, float &pxLen) const {
     float ul = usableLen();
-    pxLen  = max(kThumbMinLen, (thumbMax_ - thumbMin_) * ul);
-    pxStart = kArrowSize + thumbMin_ * (ul - pxLen + (thumbMax_ - thumbMin_) * ul - pxLen);
+    pxLen = max(kThumbMinLen, (thumbMax_ - thumbMin_) * ul);
+    pxStart = kArrowSize +
+              thumbMin_ * (ul - pxLen + (thumbMax_ - thumbMin_) * ul - pxLen);
     // Simpler: map thumbMin to [0, ul - pxLen]
     float range = ul - pxLen;
     pxStart = kArrowSize + thumbMin_ / (1.f - (thumbMax_ - thumbMin_)) * range;
-    if (!std::isfinite(pxStart)) pxStart = kArrowSize;
+    if (!std::isfinite(pxStart))
+      pxStart = kArrowSize;
     pxStart = std::clamp(pxStart, kArrowSize, kArrowSize + range);
   }
 
   Zone hitTest(int sx, int sy) const {
-    if (!visible_) return Zone::None;
+    if (!visible_)
+      return Zone::None;
     float px = axis_ == Axis::Horizontal ? float(sx) : float(sy);
     float py = axis_ == Axis::Horizontal ? float(sy) : float(sx);
     float trackCross = axis_ == Axis::Horizontal ? stripY0_ : stripX0_;
 
     // Must be within the cross-axis strip
-    if (py < trackCross || py >= trackCross + kTrackThick) return Zone::None;
-    float along = axis_ == Axis::Horizontal
-                  ? px - stripX0_
-                  : px - stripY0_;
-    if (along < 0 || along > stripLen_) return Zone::None;
+    if (py < trackCross || py >= trackCross + kTrackThick)
+      return Zone::None;
+    float along = axis_ == Axis::Horizontal ? px - stripX0_ : px - stripY0_;
+    if (along < 0 || along > stripLen_)
+      return Zone::None;
 
-    if (along < kArrowSize)                   return Zone::ArrowStart;
-    if (along > stripLen_ - kArrowSize)       return Zone::ArrowEnd;
+    if (along < kArrowSize)
+      return Zone::ArrowStart;
+    if (along > stripLen_ - kArrowSize)
+      return Zone::ArrowEnd;
 
     float ts, tl;
     thumbPixels(ts, tl);
-    if (along < ts)         return Zone::TrackBefore;
-    if (along < ts + tl)    return Zone::Thumb;
+    if (along < ts)
+      return Zone::TrackBefore;
+    if (along < ts + tl)
+      return Zone::Thumb;
     return Zone::TrackAfter;
   }
 
   void scrollBy(float delta, std::function<void(float)> fn) {
-    if (!fn) return;
-    float span   = thumbMax_ - thumbMin_;
+    if (!fn)
+      return;
+    float span = thumbMax_ - thumbMin_;
     float newMin = std::clamp(thumbMin_ + delta, 0.f, 1.f - span);
     fn(newMin);
   }
@@ -805,21 +824,17 @@ private:
 
   // Push a screen-space quad [x,y,w,h] using the shared vbo.
   // The quad is axis-aligned in the top-left-origin screen coord system.
-  static void pushRect(GLuint vao, GLuint vbo,
-                       float x, float y, float w, float h) {
+  static void pushRect(GLuint vao, GLuint vbo, float x, float y, float w,
+                       float h) {
     float v[] = {
-      x,     y,
-      x + w, y,
-      x + w, y + h,
-      x + w, y + h,
-      x,     y + h,
-      x,     y,
+        x, y, x + w, y, x + w, y + h, x + w, y + h, x, y + h, x, y,
     };
     GL.bindVertexArray(vao);
     GL.bindBuffer(GL_ARRAY_BUFFER, vbo);
     GL.bufferData(GL_ARRAY_BUFFER, sizeof(v), v, GL_DYNAMIC_DRAW);
     GL.enableVertexAttribArray(0);
-    GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float)*2, nullptr);
+    GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 2,
+                           nullptr);
     GL.disableVertexAttribArray(1);
     glDrawArrays(GL_TRIANGLES, 0, 6);
     GL.bindVertexArray(0);
@@ -833,8 +848,8 @@ private:
     // Thumb rect in track-local coords, then map to screen
     float halfW = currentW_ * 0.5f;
     float crossCenter = (axis_ == Axis::Horizontal)
-                        ? stripY0_ + kTrackThick * 0.5f
-                        : stripX0_ + kTrackThick * 0.5f;
+                            ? stripY0_ + kTrackThick * 0.5f
+                            : stripX0_ + kTrackThick * 0.5f;
 
     // Build rounded rect verts
     // We'll approximate with a central rect + semicircle fans at each end.
@@ -848,38 +863,43 @@ private:
       if (axis_ == Axis::Horizontal) {
         rx = stripX0_ + ts + cr;
         ry = crossCenter - halfW;
-        rw = rLen; rh = currentW_;
+        rw = rLen;
+        rh = currentW_;
       } else {
         rx = crossCenter - halfW;
         ry = stripY0_ + ts + cr;
-        rw = currentW_; rh = rLen;
+        rw = currentW_;
+        rh = rLen;
       }
       pushRect(vao, vbo, rx, ry, rw, rh);
     }
 
     // Two semicircle caps
     for (int cap = 0; cap < 2; ++cap) {
-      float capAlong = (cap == 0) ? (stripX0_ + ts + cr)
-                                  : (stripX0_ + ts + tl - cr);
+      float capAlong =
+          (cap == 0) ? (stripX0_ + ts + cr) : (stripX0_ + ts + tl - cr);
       float capCross = crossCenter;
       if (axis_ == Axis::Vertical) {
-        capAlong = (cap == 0) ? (stripY0_ + ts + cr)
-                              : (stripY0_ + ts + tl - cr);
+        capAlong =
+            (cap == 0) ? (stripY0_ + ts + cr) : (stripY0_ + ts + tl - cr);
         capCross = crossCenter;
       }
 
-      float startAngle = (axis_ == Axis::Horizontal)
-                         ? (cap == 0 ? 3.14159265f * 0.5f  : -3.14159265f * 0.5f)
-                         : (cap == 0 ? 3.14159265f          : 0.f);
+      float startAngle =
+          (axis_ == Axis::Horizontal)
+              ? (cap == 0 ? 3.14159265f * 0.5f : -3.14159265f * 0.5f)
+              : (cap == 0 ? 3.14159265f : 0.f);
       float sweep = 3.14159265f;
 
       // Fan: center + kSegs+1 rim verts
       std::vector<float> fan;
       fan.reserve((kSegs + 2) * 2);
       if (axis_ == Axis::Horizontal) {
-        fan.push_back(capAlong); fan.push_back(capCross);
+        fan.push_back(capAlong);
+        fan.push_back(capCross);
       } else {
-        fan.push_back(capCross); fan.push_back(capAlong);
+        fan.push_back(capCross);
+        fan.push_back(capAlong);
       }
       for (int i = 0; i <= kSegs; ++i) {
         float a = startAngle + sweep * float(i) / kSegs;
@@ -895,11 +915,11 @@ private:
       }
       GL.bindVertexArray(vao);
       GL.bindBuffer(GL_ARRAY_BUFFER, vbo);
-      GL.bufferData(GL_ARRAY_BUFFER,
-                    GLsizeiptr(fan.size() * sizeof(float)),
+      GL.bufferData(GL_ARRAY_BUFFER, GLsizeiptr(fan.size() * sizeof(float)),
                     fan.data(), GL_DYNAMIC_DRAW);
       GL.enableVertexAttribArray(0);
-      GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float)*2, nullptr);
+      GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 2,
+                             nullptr);
       GL.disableVertexAttribArray(1);
       glDrawArrays(GL_TRIANGLE_FAN, 0, int(fan.size() / 2));
       GL.bindVertexArray(0);
@@ -907,8 +927,7 @@ private:
   }
 
   // Arrow button: a small triangle glyph centered in a kArrowSize square.
-  void drawArrow(GLuint vao, GLuint vbo,
-                 bool isStart, int /*glW*/, int /*glH*/,
+  void drawArrow(GLuint vao, GLuint vbo, bool isStart, int /*glW*/, int /*glH*/,
                  GLuint /*prog*/, GLint /*uMVP*/, GLint /*uColor*/) const {
     // Arrow button background (subtle)
     float ax, ay;
@@ -932,30 +951,43 @@ private:
     float v[6];
     if (axis_ == Axis::Horizontal) {
       if (isStart) { // ◀
-        v[0]=cx+hs; v[1]=cy-hs;
-        v[2]=cx-hs; v[3]=cy;
-        v[4]=cx+hs; v[5]=cy+hs;
-      } else {       // ▶
-        v[0]=cx-hs; v[1]=cy-hs;
-        v[2]=cx+hs; v[3]=cy;
-        v[4]=cx-hs; v[5]=cy+hs;
+        v[0] = cx + hs;
+        v[1] = cy - hs;
+        v[2] = cx - hs;
+        v[3] = cy;
+        v[4] = cx + hs;
+        v[5] = cy + hs;
+      } else { // ▶
+        v[0] = cx - hs;
+        v[1] = cy - hs;
+        v[2] = cx + hs;
+        v[3] = cy;
+        v[4] = cx - hs;
+        v[5] = cy + hs;
       }
     } else {
       if (isStart) { // ▲
-        v[0]=cx-hs; v[1]=cy+hs;
-        v[2]=cx;    v[3]=cy-hs;
-        v[4]=cx+hs; v[5]=cy+hs;
-      } else {       // ▼
-        v[0]=cx-hs; v[1]=cy-hs;
-        v[2]=cx;    v[3]=cy+hs;
-        v[4]=cx+hs; v[5]=cy-hs;
+        v[0] = cx - hs;
+        v[1] = cy + hs;
+        v[2] = cx;
+        v[3] = cy - hs;
+        v[4] = cx + hs;
+        v[5] = cy + hs;
+      } else { // ▼
+        v[0] = cx - hs;
+        v[1] = cy - hs;
+        v[2] = cx;
+        v[3] = cy + hs;
+        v[4] = cx + hs;
+        v[5] = cy - hs;
       }
     }
     GL.bindVertexArray(vao);
     GL.bindBuffer(GL_ARRAY_BUFFER, vbo);
     GL.bufferData(GL_ARRAY_BUFFER, sizeof(v), v, GL_DYNAMIC_DRAW);
     GL.enableVertexAttribArray(0);
-    GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float)*2, nullptr);
+    GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 2,
+                           nullptr);
     GL.disableVertexAttribArray(1);
     glDrawArrays(GL_TRIANGLES, 0, 3);
     GL.bindVertexArray(0);
@@ -999,15 +1031,19 @@ public:
     clampOffset();
   }
 
-  void zoomToward(float sx, float sy, float factor) {
+void zoomToward(float sx, float sy, float factor) {
     auto [cpx, cpy] = screenToCanvas(sx, sy);
     float z = std::clamp(zoom_ * factor, kMinZoom, kMaxZoom);
     z = snapZoom(z);
     zoom_ = z;
+    // Raw offset from zoom pivot
     offsetX_ = cpx - sx / z;
     offsetY_ = cpy - (vh_ - sy) / z;
+    // Re-snap to screen pixel grid at new zoom
+    offsetX_ = std::roundf(offsetX_ * zoom_) / zoom_;
+    offsetY_ = std::roundf(offsetY_ * zoom_) / zoom_;
     clampOffset();
-  }
+}
 
   void zoomIn() { zoomToward(vw_ * .5f, vh_ * .5f, 1.25f); }
   void zoomOut() { zoomToward(vw_ * .5f, vh_ * .5f, 0.8f); }
@@ -1021,11 +1057,14 @@ public:
     centerCanvas();
   }
 
-  void panByScreen(float dsx, float dsy) {
-    offsetX_ -= dsx / zoom_;
-    offsetY_ += dsy / zoom_;
+void panByScreen(float dsx, float dsy) {
+    // Work in screen space, snap there, convert back
+    float screenOX = offsetX_ * zoom_ - dsx;
+    float screenOY = offsetY_ * zoom_ + dsy;  // Y-up: pan up = offset increases
+    offsetX_ = std::roundf(screenOX) / zoom_;
+    offsetY_ = std::roundf(screenOY) / zoom_;
     clampOffset();
-  }
+}
 
   void setOffsetX(float cx) {
     offsetX_ = cx;
@@ -1035,11 +1074,12 @@ public:
     offsetY_ = cy;
     clampOffset();
   }
-  void setOffset(float cx, float cy) {
-    offsetX_ = cx;
-    offsetY_ = cy;
+void setOffset(float cx, float cy) {
+    // Snap so that offsetX * zoom lands on a whole screen pixel
+    offsetX_ = std::roundf(cx * zoom_) / zoom_;
+    offsetY_ = std::roundf(cy * zoom_) / zoom_;
     clampOffset();
-  }
+}
 
   std::pair<float, float> screenToCanvas(float sx, float sy) const {
     return {offsetX_ + sx / zoom_, offsetY_ + (vh_ - sy) / zoom_};
@@ -1154,9 +1194,8 @@ public:
   static constexpr float kSBThick = CustomScrollbar::kTrackThick;
 
   explicit CanvasWidget()
-      : hBar_(CustomScrollbar::Axis::Horizontal)
-      , vBar_(CustomScrollbar::Axis::Vertical)
-  {
+      : hBar_(CustomScrollbar::Axis::Horizontal),
+        vBar_(CustomScrollbar::Axis::Vertical) {
     autoWidth = autoHeight = false;
     width = 400;
     height = 300;
@@ -1252,7 +1291,7 @@ public:
   }
 
 private:
-  bool viewportEnabled_   = true;
+  bool viewportEnabled_ = true;
   bool scrollbarsEnabled_ = true;
 
   std::shared_ptr<CanvasWidget> ptr() {
@@ -1264,46 +1303,49 @@ private:
   int canvasW_ = 512, canvasH_ = 512;
 
   // ── Custom scrollbars ─────────────────────────────────────────────────────
-  CustomScrollbar hBar_;  // horizontal
-  CustomScrollbar vBar_;  // vertical
+  CustomScrollbar hBar_; // horizontal
+  CustomScrollbar vBar_; // vertical
 
   // Dedicated VAO/VBO for scrollbar geometry (avoids touching the surface's
   // shared quadVBO_ which has a fixed pre-allocated size for dab/blit quads).
   GLuint sbVAO_ = 0, sbVBO_ = 0;
   GLuint sbProg_ = 0;
-  GLint  sbUMVP_ = -1, sbUColor_ = -1, sbUMode_ = -1;
+  GLint sbUMVP_ = -1, sbUColor_ = -1, sbUMode_ = -1;
 
   using Clock = std::chrono::steady_clock;
   Clock::time_point lastTick_ = Clock::now();
 
   HWND frameHwnd_ = nullptr;
-  HWND glHwnd_    = nullptr;
-  HDC  glDC_      = nullptr;
-  HGLRC glRC_     = nullptr;
+  HWND glHwnd_ = nullptr;
+  HDC glDC_ = nullptr;
+  HGLRC glRC_ = nullptr;
   HWND parentHwnd_ = nullptr;
 
-  bool repaintPending_  = false;
-  bool trackingLeave_   = false;
-  int  lastGLW_ = 0, lastGLH_ = 0;
+  bool repaintPending_ = false;
+  bool trackingLeave_ = false;
+  int lastGLW_ = 0, lastGLH_ = 0;
 
-  bool  panning_     = false;
-  int   panStartSX_  = 0, panStartSY_ = 0;
-  float panStartOX_  = 0, panStartOY_ = 0;
+  bool panning_ = false;
+  int panStartSX_ = 0, panStartSY_ = 0;
+  float panStartOX_ = 0, panStartOY_ = 0;
 
   // ── Viewport helpers ──────────────────────────────────────────────────────
 
   // Compute the effective viewport dimensions accounting for scrollbar strips.
   void viewportDims(int glW, int glH, int &vpW, int &vpH) const {
     if (!viewportEnabled_ || !scrollbarsEnabled_) {
-      vpW = glW; vpH = glH;
+      vpW = glW;
+      vpH = glH;
       return;
     }
     ScrollbarInfo h = vp_.scrollbarH();
     ScrollbarInfo v = vp_.scrollbarV();
     vpW = glW - (v.visible ? (int)kSBThick : 0);
     vpH = glH - (h.visible ? (int)kSBThick : 0);
-    if (vpW < 1) vpW = 1;
-    if (vpH < 1) vpH = 1;
+    if (vpW < 1)
+      vpW = 1;
+    if (vpH < 1)
+      vpH = 1;
   }
 
   void updateViewportSize(int glW, int glH) {
@@ -1319,18 +1361,20 @@ private:
     ScrollbarInfo v = vp_.scrollbarV();
     float hLen = float(glW) - (v.visible ? kSBThick : 0.f);
     hBar_.setGeometry(0.f, float(glH) - kSBThick, hLen);
-    hBar_.setThumb(h.thumbMin, h.thumbMax, h.visible && scrollbarsEnabled_ && viewportEnabled_);
+    hBar_.setThumb(h.thumbMin, h.thumbMax,
+                   h.visible && scrollbarsEnabled_ && viewportEnabled_);
 
     // Vertical bar: right strip, full height minus horizontal bar
     float vLen = float(glH) - (h.visible ? kSBThick : 0.f);
     vBar_.setGeometry(float(glW) - kSBThick, 0.f, vLen);
-    vBar_.setThumb(v.thumbMin, v.thumbMax, v.visible && scrollbarsEnabled_ && viewportEnabled_);
+    vBar_.setThumb(v.thumbMin, v.thumbMax,
+                   v.visible && scrollbarsEnabled_ && viewportEnabled_);
   }
 
   // ── Pan helpers ───────────────────────────────────────────────────────────
 
   void beginPan(int sx, int sy) {
-    panning_    = true;
+    panning_ = true;
     panStartSX_ = sx;
     panStartSY_ = sy;
     panStartOX_ = vp_.offsetX();
@@ -1361,19 +1405,22 @@ private:
   // ── Scrollbar scroll callbacks ────────────────────────────────────────────
 
   void applyHScrollFraction(float thumbMin) {
-    float span  = vp_.scrollbarH().thumbMax - vp_.scrollbarH().thumbMin;
+    float span = vp_.scrollbarH().thumbMax - vp_.scrollbarH().thumbMin;
     float range = vp_.canvasW() - vp_.viewW() / vp_.zoom();
-    if (range <= 0.f) return;
+    if (range <= 0.f)
+      return;
     vp_.setOffsetX(thumbMin / (1.f - span) * range);
     pokeScrollbars();
     scheduleRepaint();
   }
 
   void applyVScrollFraction(float thumbMin) {
-    float span  = vp_.scrollbarV().thumbMax - vp_.scrollbarV().thumbMin;
+    float span = vp_.scrollbarV().thumbMax - vp_.scrollbarV().thumbMin;
     float range = vp_.canvasH() - vp_.viewH() / vp_.zoom();
-    if (range <= 0.f) return;
-    // Vertical scrollbar: thumbMin=0 → top (max offsetY), thumbMin=1-span → bottom (offsetY=0)
+    if (range <= 0.f)
+      return;
+    // Vertical scrollbar: thumbMin=0 → top (max offsetY), thumbMin=1-span →
+    // bottom (offsetY=0)
     float t = 1.f - thumbMin - span;
     vp_.setOffsetY(t / (1.f - span) * range);
     pokeScrollbars();
@@ -1398,11 +1445,11 @@ uniform int  uMode;
 out vec4 fragColor;
 void main(){ fragColor = uColor; }
 )GLSL";
-    sbProg_   = glutil::linkProgram(vert, frag);
+    sbProg_ = glutil::linkProgram(vert, frag);
     assert(sbProg_);
-    sbUMVP_   = GL.getUniformLocation(sbProg_, "uMVP");
+    sbUMVP_ = GL.getUniformLocation(sbProg_, "uMVP");
     sbUColor_ = GL.getUniformLocation(sbProg_, "uColor");
-    sbUMode_  = GL.getUniformLocation(sbProg_, "uMode");
+    sbUMode_ = GL.getUniformLocation(sbProg_, "uMode");
 
     // Large enough for any single draw call the scrollbar emits
     // (fan caps: (kCapSegs+2)*2 floats is the largest single upload)
@@ -1413,14 +1460,24 @@ void main(){ fragColor = uColor; }
     GL.bindBuffer(GL_ARRAY_BUFFER, sbVBO_);
     GL.bufferData(GL_ARRAY_BUFFER, kSBBufSz, nullptr, GL_DYNAMIC_DRAW);
     GL.enableVertexAttribArray(0);
-    GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float)*2, nullptr);
+    GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 2,
+                           nullptr);
     GL.bindVertexArray(0);
   }
 
   void destroySBResources() {
-    if (sbProg_) { GL.deleteProgram(sbProg_); sbProg_ = 0; }
-    if (sbVAO_)  { GL.deleteVertexArrays(1, &sbVAO_); sbVAO_ = 0; }
-    if (sbVBO_)  { GL.deleteBuffers(1, &sbVBO_); sbVBO_ = 0; }
+    if (sbProg_) {
+      GL.deleteProgram(sbProg_);
+      sbProg_ = 0;
+    }
+    if (sbVAO_) {
+      GL.deleteVertexArrays(1, &sbVAO_);
+      sbVAO_ = 0;
+    }
+    if (sbVBO_) {
+      GL.deleteBuffers(1, &sbVBO_);
+      sbVBO_ = 0;
+    }
   }
 
   // ── Frame window proc ────────────────────────────────────────────────────
@@ -1430,7 +1487,8 @@ void main(){ fragColor = uColor; }
     auto *self = reinterpret_cast<CanvasWidget *>(
         GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     switch (msg) {
-    case WM_ERASEBKGND: return 1;
+    case WM_ERASEBKGND:
+      return 1;
     case WM_PAINT: {
       PAINTSTRUCT ps;
       BeginPaint(hwnd, &ps);
@@ -1461,7 +1519,8 @@ void main(){ fragColor = uColor; }
       }
       return 0;
 
-    case WM_ERASEBKGND: return 1;
+    case WM_ERASEBKGND:
+      return 1;
     case WM_PAINT: {
       PAINTSTRUCT ps;
       BeginPaint(hwnd, &ps);
@@ -1471,12 +1530,14 @@ void main(){ fragColor = uColor; }
 
     // ── Middle-button pan ────────────────────────────────────────────────
     case WM_MBUTTONDOWN:
-      if (!self || !self->viewportEnabled_) return 0;
+      if (!self || !self->viewportEnabled_)
+        return 0;
       SetCapture(hwnd);
       self->beginPan(GET_X_LPARAM(lp), GET_Y_LPARAM(lp));
       return 0;
     case WM_MBUTTONUP:
-      if (!self || !self->viewportEnabled_) return 0;
+      if (!self || !self->viewportEnabled_)
+        return 0;
       ReleaseCapture();
       self->panning_ = false;
       return 0;
@@ -1485,14 +1546,17 @@ void main(){ fragColor = uColor; }
     case WM_LBUTTONDOWN: {
       SetCapture(hwnd);
       SetFocus(hwnd);
-      if (!self) return 0;
+      if (!self)
+        return 0;
       int sx = GET_X_LPARAM(lp), sy = GET_Y_LPARAM(lp);
 
       // Offer to scrollbars first
-      bool hConsumed = self->hBar_.onMouseDown(sx, sy,
-          [self](float t){ self->applyHScrollFraction(t); });
-      bool vConsumed = !hConsumed && self->vBar_.onMouseDown(sx, sy,
-          [self](float t){ self->applyVScrollFraction(t); });
+      bool hConsumed = self->hBar_.onMouseDown(
+          sx, sy, [self](float t) { self->applyHScrollFraction(t); });
+      bool vConsumed =
+          !hConsumed && self->vBar_.onMouseDown(sx, sy, [self](float t) {
+            self->applyVScrollFraction(t);
+          });
 
       if (!hConsumed && !vConsumed) {
         if (self->viewportEnabled_ && (GetKeyState(VK_SPACE) & 0x8000)) {
@@ -1508,7 +1572,8 @@ void main(){ fragColor = uColor; }
     }
     case WM_LBUTTONUP: {
       ReleaseCapture();
-      if (!self) return 0;
+      if (!self)
+        return 0;
       int sx = GET_X_LPARAM(lp), sy = GET_Y_LPARAM(lp);
       bool hRel = self->hBar_.onMouseUp(sx, sy);
       bool vRel = self->vBar_.onMouseUp(sx, sy);
@@ -1530,7 +1595,7 @@ void main(){ fragColor = uColor; }
       SetCapture(hwnd);
       if (self && self->activeSurface_) {
         auto [cx, cy] = self->vp_.screenToCanvas(float(GET_X_LPARAM(lp)),
-                                                  float(GET_Y_LPARAM(lp)));
+                                                 float(GET_Y_LPARAM(lp)));
         self->activeSurface_->onRightMouseDown(cx, cy);
       }
       forwardToParent(hwnd, msg, wp, lp);
@@ -1540,7 +1605,7 @@ void main(){ fragColor = uColor; }
       ReleaseCapture();
       if (self && self->activeSurface_) {
         auto [cx, cy] = self->vp_.screenToCanvas(float(GET_X_LPARAM(lp)),
-                                                  float(GET_Y_LPARAM(lp)));
+                                                 float(GET_Y_LPARAM(lp)));
         self->activeSurface_->onMouseUp(cx, cy);
       }
       forwardToParent(hwnd, msg, wp, lp);
@@ -1549,13 +1614,14 @@ void main(){ fragColor = uColor; }
 
     // ── Mouse move ───────────────────────────────────────────────────────
     case WM_MOUSEMOVE: {
-      if (!self) return 0;
+      if (!self)
+        return 0;
       int sx = GET_X_LPARAM(lp), sy = GET_Y_LPARAM(lp);
 
       if (!self->trackingLeave_) {
         TRACKMOUSEEVENT tme{};
-        tme.cbSize    = sizeof(tme);
-        tme.dwFlags   = TME_LEAVE;
+        tme.cbSize = sizeof(tme);
+        tme.dwFlags = TME_LEAVE;
         tme.hwndTrack = hwnd;
         TrackMouseEvent(&tme);
         self->trackingLeave_ = true;
@@ -1566,7 +1632,8 @@ void main(){ fragColor = uColor; }
       bool vDrag = self->vBar_.onMouseMove(sx, sy);
       self->scheduleRepaint(); // re-draw hover highlight
 
-      if (hDrag || vDrag) return 0; // scrollbar drag suppresses canvas
+      if (hDrag || vDrag)
+        return 0; // scrollbar drag suppresses canvas
 
       if (self->panning_) {
         self->continuePan(sx, sy);
@@ -1588,11 +1655,12 @@ void main(){ fragColor = uColor; }
 
     // ── Scroll wheel ─────────────────────────────────────────────────────
     case WM_MOUSEWHEEL: {
-      if (!self || !self->viewportEnabled_) return 0;
-      int   delta = GET_WHEEL_DELTA_WPARAM(wp);
-      bool  ctrl  = (GET_KEYSTATE_WPARAM(wp) & MK_CONTROL) != 0;
-      bool  shift = (GET_KEYSTATE_WPARAM(wp) & MK_SHIFT) != 0;
-      POINT pt    = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+      if (!self || !self->viewportEnabled_)
+        return 0;
+      int delta = GET_WHEEL_DELTA_WPARAM(wp);
+      bool ctrl = (GET_KEYSTATE_WPARAM(wp) & MK_CONTROL) != 0;
+      bool shift = (GET_KEYSTATE_WPARAM(wp) & MK_SHIFT) != 0;
+      POINT pt = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
       ScreenToClient(hwnd, &pt);
       if (ctrl) {
         float f = (delta > 0) ? 1.1f : 1.f / 1.1f;
@@ -1610,18 +1678,25 @@ void main(){ fragColor = uColor; }
 
     // ── Keyboard ─────────────────────────────────────────────────────────
     case WM_KEYDOWN: {
-      if (!self) return 0;
-      bool ctrl     = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+      if (!self)
+        return 0;
+      bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
       bool consumed = false;
       if (ctrl && self->viewportEnabled_) {
         if (wp == VK_OEM_PLUS || wp == VK_ADD) {
-          self->vp_.zoomIn(); self->pokeScrollbars(); self->scheduleRepaint();
+          self->vp_.zoomIn();
+          self->pokeScrollbars();
+          self->scheduleRepaint();
           consumed = true;
         } else if (wp == VK_OEM_MINUS || wp == VK_SUBTRACT) {
-          self->vp_.zoomOut(); self->pokeScrollbars(); self->scheduleRepaint();
+          self->vp_.zoomOut();
+          self->pokeScrollbars();
+          self->scheduleRepaint();
           consumed = true;
         } else if (wp == '0') {
-          self->vp_.resetZoom(); self->pokeScrollbars(); self->scheduleRepaint();
+          self->vp_.resetZoom();
+          self->pokeScrollbars();
+          self->scheduleRepaint();
           consumed = true;
         }
       }
@@ -1648,9 +1723,10 @@ void main(){ fragColor = uColor; }
   }
 
   static void forwardToParent(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
-    HWND frame  = GetParent(hwnd);
+    HWND frame = GetParent(hwnd);
     HWND parent = frame ? GetParent(frame) : nullptr;
-    if (!parent) return;
+    if (!parent)
+      return;
     POINT pt = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
     MapWindowPoints(hwnd, parent, &pt, 1);
     PostMessage(parent, msg, wp, MAKELPARAM(pt.x, pt.y));
@@ -1658,40 +1734,43 @@ void main(){ fragColor = uColor; }
 
   static void registerClasses() {
     static bool done = false;
-    if (done) return;
+    if (done)
+      return;
     HINSTANCE hi = GetModuleHandle(nullptr);
 
     WNDCLASSEXW wf{};
-    wf.cbSize        = sizeof(wf);
-    wf.lpfnWndProc   = FrameProc;
-    wf.hInstance     = hi;
-    wf.lpszClassName = L"FluxGLFrame7";   // bumped class name for Step 7
-    wf.style         = CS_HREDRAW | CS_VREDRAW;
+    wf.cbSize = sizeof(wf);
+    wf.lpfnWndProc = FrameProc;
+    wf.hInstance = hi;
+    wf.lpszClassName = L"FluxGLFrame7"; // bumped class name for Step 7
+    wf.style = CS_HREDRAW | CS_VREDRAW;
     RegisterClassExW(&wf);
 
     WNDCLASSEXW wg{};
-    wg.cbSize        = sizeof(wg);
-    wg.lpfnWndProc   = GLProc;
-    wg.hInstance     = hi;
+    wg.cbSize = sizeof(wg);
+    wg.lpfnWndProc = GLProc;
+    wg.hInstance = hi;
     wg.lpszClassName = L"FluxGLCanvas7";
-    wg.style         = CS_OWNDC | CS_HREDRAW | CS_VREDRAW;
+    wg.style = CS_OWNDC | CS_HREDRAW | CS_VREDRAW;
     RegisterClassExW(&wg);
 
     done = true;
   }
 
   void ensureWindows(HDC parentDC) {
-    if (frameHwnd_) return;
+    if (frameHwnd_)
+      return;
     HWND owner = WindowFromDC(parentDC);
-    if (!owner) owner = GetActiveWindow();
+    if (!owner)
+      owner = GetActiveWindow();
     parentHwnd_ = owner;
     registerClasses();
 
     // Frame window: plain child, no scrollbar styles
     frameHwnd_ = CreateWindowExW(
         WS_EX_NOPARENTNOTIFY, L"FluxGLFrame7", nullptr,
-        WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
-        x, y, width, height, owner, nullptr, GetModuleHandle(nullptr), nullptr);
+        WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN, x, y, width,
+        height, owner, nullptr, GetModuleHandle(nullptr), nullptr);
     assert(frameHwnd_);
     SetWindowLongPtrW(frameHwnd_, GWLP_USERDATA,
                       reinterpret_cast<LONG_PTR>(this));
@@ -1699,8 +1778,8 @@ void main(){ fragColor = uColor; }
     // GL child fills the entire frame (scrollbars are drawn inside it)
     glHwnd_ = CreateWindowExW(
         WS_EX_NOPARENTNOTIFY, L"FluxGLCanvas7", nullptr,
-        WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
-        0, 0, width, height, frameHwnd_, nullptr, GetModuleHandle(nullptr), nullptr);
+        WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN, 0, 0, width,
+        height, frameHwnd_, nullptr, GetModuleHandle(nullptr), nullptr);
     assert(glHwnd_);
     SetWindowLongPtrW(glHwnd_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
 
@@ -1711,10 +1790,13 @@ void main(){ fragColor = uColor; }
     auto wglCA = reinterpret_cast<PFNWGLCREATECONTEXTATTRIBSARBPROC>(
         wglGetProcAddress("wglCreateContextAttribsARB"));
     if (wglCA) {
-      const int att[] = {WGL_CONTEXT_MAJOR_VERSION_ARB, 3,
-                         WGL_CONTEXT_MINOR_VERSION_ARB, 3,
+      const int att[] = {WGL_CONTEXT_MAJOR_VERSION_ARB,
+                         3,
+                         WGL_CONTEXT_MINOR_VERSION_ARB,
+                         3,
                          WGL_CONTEXT_PROFILE_MASK_ARB,
-                         WGL_CONTEXT_CORE_PROFILE_BIT_ARB, 0};
+                         WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
+                         0};
       HGLRC core = wglCA(glDC_, nullptr, att);
       if (core) {
         wglMakeCurrent(nullptr, nullptr);
@@ -1735,28 +1817,32 @@ void main(){ fragColor = uColor; }
     lastGLH_ = height;
     updateViewportSize(width, height);
     updateSBGeometry(width, height);
+    vp_.fitToView();
 
     buildSBResources();
     activatePendingSurface();
     lastTick_ = Clock::now();
-    if (onViewportChanged) onViewportChanged(vp_.zoom());
-    if (onGLResize) onGLResize(width, height);
+    if (onViewportChanged)
+      onViewportChanged(vp_.zoom());
+    if (onGLResize)
+      onGLResize(width, height);
   }
 
   void setupPixelFormat(HDC dc) {
     PIXELFORMATDESCRIPTOR pfd{};
-    pfd.nSize        = sizeof(pfd);
-    pfd.nVersion     = 1;
-    pfd.dwFlags      = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
-    pfd.iPixelType   = PFD_TYPE_RGBA;
-    pfd.cColorBits   = 32;
-    pfd.cDepthBits   = 24;
-    pfd.iLayerType   = PFD_MAIN_PLANE;
+    pfd.nSize = sizeof(pfd);
+    pfd.nVersion = 1;
+    pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
+    pfd.iPixelType = PFD_TYPE_RGBA;
+    pfd.cColorBits = 32;
+    pfd.cDepthBits = 24;
+    pfd.iLayerType = PFD_MAIN_PLANE;
     SetPixelFormat(dc, ChoosePixelFormat(dc, &pfd), &pfd);
   }
 
   void activatePendingSurface() {
-    if (!pendingSurface_) return;
+    if (!pendingSurface_)
+      return;
     if (activeSurface_) {
       activeSurface_->destroy();
       activeSurface_.reset();
@@ -1768,21 +1854,24 @@ void main(){ fragColor = uColor; }
   }
 
   void tickAndRender() {
-    if (!glRC_ || !glDC_) return;
-    if (pendingSurface_) activatePendingSurface();
-    if (!activeSurface_) return;
+    if (!glRC_ || !glDC_)
+      return;
+    if (pendingSurface_)
+      activatePendingSurface();
+    if (!activeSurface_)
+      return;
     if (wglGetCurrentContext() != glRC_)
       wglMakeCurrent(glDC_, glRC_);
 
-    auto   now = Clock::now();
-    double dt  = std::chrono::duration<double>(now - lastTick_).count();
-    lastTick_  = now;
+    auto now = Clock::now();
+    double dt = std::chrono::duration<double>(now - lastTick_).count();
+    lastTick_ = now;
 
     activeSurface_->update(dt);
 
     RECT rc;
     GetClientRect(glHwnd_, &rc);
-    int glW = rc.right  < 1 ? 1 : rc.right;
+    int glW = rc.right < 1 ? 1 : rc.right;
     int glH = rc.bottom < 1 ? 1 : rc.bottom;
     glViewport(0, 0, glW, glH);
 
@@ -1816,18 +1905,25 @@ void main(){ fragColor = uColor; }
         GL.uniform4f(sbUColor_, 0.12f, 0.12f, 0.12f, 0.35f);
         float cx = float(glW) - kSBThick, cy = float(glH) - kSBThick;
         float cv[] = {
-          cx,              cy,
-          cx + kSBThick,   cy,
-          cx + kSBThick,   cy + kSBThick,
-          cx + kSBThick,   cy + kSBThick,
-          cx,              cy + kSBThick,
-          cx,              cy,
+            cx,
+            cy,
+            cx + kSBThick,
+            cy,
+            cx + kSBThick,
+            cy + kSBThick,
+            cx + kSBThick,
+            cy + kSBThick,
+            cx,
+            cy + kSBThick,
+            cx,
+            cy,
         };
         GL.bindVertexArray(sbVAO_);
         GL.bindBuffer(GL_ARRAY_BUFFER, sbVBO_);
         GL.bufferData(GL_ARRAY_BUFFER, sizeof(cv), cv, GL_DYNAMIC_DRAW);
         GL.enableVertexAttribArray(0);
-        GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float)*2, nullptr);
+        GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 2,
+                               nullptr);
         GL.disableVertexAttribArray(1);
         glDrawArrays(GL_TRIANGLES, 0, 6);
         GL.bindVertexArray(0);
@@ -1839,8 +1935,7 @@ void main(){ fragColor = uColor; }
     SwapBuffers(glDC_);
 
     // Keep animating while bars are fading
-    bool needsCont = activeSurface_->needsContinuousRedraw()
-                     || hFade || vFade;
+    bool needsCont = activeSurface_->needsContinuousRedraw() || hFade || vFade;
     if (needsCont && !repaintPending_) {
       repaintPending_ = true;
       SetTimer(glHwnd_, 1, 16, nullptr);
@@ -1848,7 +1943,8 @@ void main(){ fragColor = uColor; }
   }
 
   void moveWindows() {
-    if (!frameHwnd_) return;
+    if (!frameHwnd_)
+      return;
     SetWindowPos(frameHwnd_, nullptr, x, y, width, height,
                  SWP_NOZORDER | SWP_NOACTIVATE);
     // GL child fills the entire frame — scrollbars live inside it
@@ -1862,7 +1958,8 @@ void main(){ fragColor = uColor; }
       lastGLH_ = height;
       updateViewportSize(width, height);
       glViewport(0, 0, width, height);
-      if (onGLResize) onGLResize(width, height);
+      if (onGLResize)
+        onGLResize(width, height);
     }
   }
 
