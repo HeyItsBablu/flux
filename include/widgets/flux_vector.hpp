@@ -122,6 +122,8 @@ struct AABB {
     return x0 <= o.x1 && x1 >= o.x0 && y0 <= o.y1 && y1 >= o.y0;
   }
   Vec2 center() const { return {(x0 + x1) * .5f, (y0 + y1) * .5f}; }
+  float width() const { return x1 - x0; }
+  float height() const { return y1 - y0; }
 };
 
 } // namespace vmath
@@ -130,13 +132,7 @@ struct AABB {
 // §V1  SHAPE DATA MODEL
 // ============================================================================
 
-enum class PathCmdKind : uint8_t {
-  MoveTo,  // pt[0]
-  LineTo,  // pt[0]
-  CubicTo, // pt[0]=cp1, pt[1]=cp2, pt[2]=end
-  QuadTo,  // pt[0]=cp,  pt[1]=end
-  Close
-};
+enum class PathCmdKind : uint8_t { MoveTo, LineTo, CubicTo, QuadTo, Close };
 
 struct PathCmd {
   PathCmdKind kind;
@@ -156,8 +152,6 @@ enum class LineJoinV { Miter, Round, Bevel, Butt };
 
 struct VStroke {
   RGBA color = {0, 0, 0, 1};
-  // ── width is stored in SCREEN / pt units ────────────────────────────────
-  // Divide by currentZoom_ before tessellating to get canvas-space half-width.
   float width = 1.f;
   LineCapV cap = LineCapV::Round;
   LineJoinV join = LineJoinV::Round;
@@ -324,10 +318,8 @@ inline void earClip(const std::vector<Vec2> &pts, std::vector<float> &out) {
   n = (int)poly.size();
   if (n < 3)
     return;
-
   std::vector<int> idx(n);
   std::iota(idx.begin(), idx.end(), 0);
-
   auto isEar = [&](int i) -> bool {
     int a = idx[(i - 1 + idx.size()) % idx.size()];
     int b = idx[i];
@@ -346,7 +338,6 @@ inline void earClip(const std::vector<Vec2> &pts, std::vector<float> &out) {
     }
     return true;
   };
-
   int limit = n * n + 10;
   while (idx.size() >= 3 && limit-- > 0) {
     bool clipped = false;
@@ -398,7 +389,6 @@ inline void expandStroke(const std::vector<Vec2> &pts, bool closed, float hw,
   auto segNormal = [&](Vec2 a, Vec2 b) -> Vec2 { return perp(norm(b - a)); };
 
   static constexpr float kMiterLimit = 4.f;
-
   auto miterOffset = [&](Vec2 nIn, Vec2 nOut, float &outScale) -> Vec2 {
     Vec2 bis = norm(Vec2{nIn.x + nOut.x, nIn.y + nOut.y});
     float denom = dot(bis, nIn);
@@ -424,7 +414,6 @@ inline void expandStroke(const std::vector<Vec2> &pts, bool closed, float hw,
 
   std::vector<Vec2> normals(n);
   std::vector<float> miterScales(n, 1.f);
-
   for (int i = 0; i < n; i++) {
     if (!closed) {
       if (i == 0) {
@@ -438,8 +427,7 @@ inline void expandStroke(const std::vector<Vec2> &pts, bool closed, float hw,
         continue;
       }
     }
-    int prevSeg = (i - 1 + numSegs) % numSegs;
-    int nextSeg = i % numSegs;
+    int prevSeg = (i - 1 + numSegs) % numSegs, nextSeg = i % numSegs;
     float sc = 1.f;
     normals[i] = miterOffset(segN[prevSeg], segN[nextSeg], sc);
     miterScales[i] = sc;
@@ -455,8 +443,7 @@ inline void expandStroke(const std::vector<Vec2> &pts, bool closed, float hw,
       da += 6.2831853f;
     const int segs = kRoundCapSegs;
     for (int k = 0; k < segs; k++) {
-      float t0 = a0 + da * float(k) / segs;
-      float t1 = a0 + da * float(k + 1) / segs;
+      float t0 = a0 + da * float(k) / segs, t1 = a0 + da * float(k + 1) / segs;
       out.push_back(centre.x);
       out.push_back(centre.y);
       out.push_back(centre.x + cosf(t0) * hw);
@@ -471,14 +458,12 @@ inline void expandStroke(const std::vector<Vec2> &pts, bool closed, float hw,
     Vec2 L1 = pts[j] + normals[j] * hw, R1 = pts[j] - normals[j] * hw;
     pushQuad(L0, R0, R1, L1);
   };
-
   auto emitJoinFan = [&](int i) {
     if (join == LineJoinV::Butt)
       return;
     if (miterScales[i] <= kMiterLimit && join == LineJoinV::Miter)
       return;
-    int prevSeg = (i - 1 + numSegs) % numSegs;
-    int nextSeg = i % numSegs;
+    int prevSeg = (i - 1 + numSegs) % numSegs, nextSeg = i % numSegs;
     float cr = cross(segN[prevSeg], segN[nextSeg]);
     if (std::abs(cr) < 1e-6f)
       return;
@@ -495,7 +480,6 @@ inline void expandStroke(const std::vector<Vec2> &pts, bool closed, float hw,
     emitSegQuad(i, i + 1);
   if (closed)
     emitSegQuad(n - 1, 0);
-
   if (closed) {
     for (int i = 0; i < n; i++)
       emitJoinFan(i);
@@ -523,7 +507,6 @@ inline void expandStroke(const std::vector<Vec2> &pts, bool closed, float hw,
       Vec2 a = center + nor, b = center - nor, c = b + ext, d = a + ext;
       pushQuad(a, b, c, d);
     };
-
     Vec2 d0 = norm(pts[1] - pts[0]);
     Vec2 d1 = norm(pts[n - 1] - pts[n - 2]);
     if (cap == LineCapV::Round) {
@@ -537,8 +520,7 @@ inline void expandStroke(const std::vector<Vec2> &pts, bool closed, float hw,
 }
 
 struct ShapeTris {
-  std::vector<float> fill;
-  std::vector<float> stroke;
+  std::vector<float> fill, stroke;
 };
 
 inline ShapeTris tessShape(const VShape &s) {
@@ -563,35 +545,32 @@ inline ShapeTris tessShape(const VShape &s) {
   case VShapeKind::Text:
     return result;
   }
-
-  float hw = s.stroke.width * 0.5f;
+  float hw = s.stroke.width * .5f;
   if (hw < 0.001f)
     hw = 0.001f;
-
   if (!s.fill.none) {
     for (auto &c : contours) {
-      std::vector<float> localFill;
-      earClip(c, localFill);
-      for (int i = 0; i + 1 < (int)localFill.size(); i += 2) {
-        Vec2 p = s.xform.apply({localFill[i], localFill[i + 1]});
+      std::vector<float> lf;
+      earClip(c, lf);
+      for (int i = 0; i + 1 < (int)lf.size(); i += 2) {
+        Vec2 p = s.xform.apply({lf[i], lf[i + 1]});
         result.fill.push_back(p.x);
         result.fill.push_back(p.y);
       }
     }
   }
-
   if (!s.stroke.none && s.stroke.width > 0) {
     for (auto &c : contours) {
       bool closed =
           (s.kind == VShapeKind::Rect || s.kind == VShapeKind::Ellipse ||
            (s.kind == VShapeKind::Poly && s.poly.closed));
-      LineJoinV effectiveJoin = s.stroke.join;
+      LineJoinV ej = s.stroke.join;
       if (s.kind == VShapeKind::Rect)
-        effectiveJoin = LineJoinV::Miter;
-      std::vector<float> localStroke;
-      expandStroke(c, closed, hw, s.stroke.cap, effectiveJoin, localStroke);
-      for (int i = 0; i + 1 < (int)localStroke.size(); i += 2) {
-        Vec2 p = s.xform.apply({localStroke[i], localStroke[i + 1]});
+        ej = LineJoinV::Miter;
+      std::vector<float> ls;
+      expandStroke(c, closed, hw, s.stroke.cap, ej, ls);
+      for (int i = 0; i + 1 < (int)ls.size(); i += 2) {
+        Vec2 p = s.xform.apply({ls[i], ls[i + 1]});
         result.stroke.push_back(p.x);
         result.stroke.push_back(p.y);
       }
@@ -648,7 +627,49 @@ struct VSnapshot {
 };
 
 // ============================================================================
-// §V5  VECTOR SURFACE
+// §V5  TRANSFORM HANDLE SYSTEM
+// ============================================================================
+
+// Handle indices (8 scale + 8 rotate zones = 16 total)
+//
+//  Scale mode:
+//    0=TL  1=TM  2=TR
+//    3=ML        4=MR
+//    5=BL  6=BM  7=BR
+//
+//  Rotate mode (same positions, different cursor/behaviour):
+//    8=TL  9=TM  10=TR
+//    11=ML       12=MR
+//    13=BL 14=BM 15=BR
+//
+//  17 = transform origin (pivot point)
+
+enum class HandleKind { None, Scale, Rotate, Origin };
+
+struct TransformHandle {
+  HandleKind kind = HandleKind::None;
+  int index = -1; // 0-7 for scale, 0-7 for rotate (same layout)
+};
+
+// Which axis each scale handle constrains
+//   lockX=true means the x-anchor is fixed (edge midpoints)
+//   lockY=true means the y-anchor is fixed
+struct ScaleConstraint {
+  bool lockX, lockY;
+};
+static constexpr ScaleConstraint kScaleConstraints[8] = {
+    {false, false}, // TL — free
+    {true, false},  // TM — vertical only
+    {false, false}, // TR — free
+    {false, true},  // ML — horizontal only
+    {false, true},  // MR — horizontal only
+    {false, false}, // BL — free
+    {true, false},  // BM — vertical only
+    {false, false}, // BR — free
+};
+
+// ============================================================================
+// §V6  VECTOR SURFACE
 // ============================================================================
 
 class VectorSurface : public RenderSurface {
@@ -671,7 +692,6 @@ public:
     dirty_ = true;
     return scene_.back().id;
   }
-
   void removeShape(VShapeId id) {
     auto it = std::find_if(scene_.begin(), scene_.end(),
                            [id](auto &s) { return s.id == id; });
@@ -683,7 +703,6 @@ public:
                      selection_.end());
     dirty_ = true;
   }
-
   VShape *beginEdit(VShapeId id) {
     auto it = std::find_if(scene_.begin(), scene_.end(),
                            [id](auto &s) { return s.id == id; });
@@ -693,7 +712,6 @@ public:
 
   // ── Selection ─────────────────────────────────────────────────────────────
   const std::vector<VShapeId> &selection() const { return selection_; }
-
   void select(VShapeId id, bool additive = false) {
     if (!additive)
       selection_.clear();
@@ -710,6 +728,7 @@ public:
   }
   void deselectAll() {
     selection_.clear();
+    transformMode_ = TransformMode::Scale;
     dirty_ = true;
   }
 
@@ -791,19 +810,16 @@ public:
     }
     dirty_ = true;
   }
-
   void resize(int w, int h) override {
     w_ = w;
     h_ = h;
     dirty_ = true;
     textTexCache_.clear();
   }
-
-  void update(double /*dt*/) override {}
+  void update(double) override {}
 
   void render(const float mvp[16]) override {
     glDisable(GL_SCISSOR_TEST);
-
     if (mvp[0] > 1e-9f)
       currentOffsetX_ = (-1.f - mvp[12]) / mvp[0];
     if (mvp[5] > 1e-9f)
@@ -811,7 +827,6 @@ public:
 
     glClearColor(pasteboard_.r, pasteboard_.g, pasteboard_.b, 1.f);
     glClear(GL_COLOR_BUFFER_BIT);
-
     glEnable(GL_LINE_SMOOTH);
     glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);
     glEnable(GL_BLEND);
@@ -828,12 +843,16 @@ public:
           0.f + kShadowOff,       0.f - kShadowOff,
       };
       drawTris(shadowQuad, shadowColor_, mvp);
-
       std::vector<float> artQuad = {
+          0.f,       float(w_), 0.f, 0.f,       float(w_), 0.f,
+          float(w_), float(h_), 0.f, float(h_), 0.f,       0.f,
+      };
+      // rebuild artboard quad correctly
+      std::vector<float> aq = {
           0.f,       0.f,       float(w_), 0.f,       float(w_), float(h_),
           float(w_), float(h_), 0.f,       float(h_), 0.f,       0.f,
       };
-      drawTris(artQuad, artboardColor_, mvp);
+      drawTris(aq, artboardColor_, mvp);
     }
 
     for (auto &shape : scene_)
@@ -846,7 +865,6 @@ public:
     }
 
     renderSelection(mvp);
-
     glDisable(GL_BLEND);
     GL.useProgram(0);
     dirty_ = false;
@@ -920,13 +938,13 @@ public:
     draggingShape_ = false;
     draggingBox_ = false;
     draggingNode_ = false;
+    draggingHandle_ = false;
     dirty_ = true;
   }
 
   void onKeyDown(int key) override {
     bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
     bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
-
     if (ctrl && key == 'Z') {
       if (shift)
         redo();
@@ -937,7 +955,6 @@ public:
       redo();
     if (ctrl && key == 'A')
       selectAll();
-
     if (key == VK_ESCAPE) {
       if (tool_ == VTool::Pen && penInProgress_)
         commitPen();
@@ -950,7 +967,6 @@ public:
       pushUndo();
       selection_.clear();
     }
-
     float nudge = shift ? 10.f : 1.f;
     if (!selection_.empty()) {
       float dx = 0, dy = 0;
@@ -1026,30 +1042,55 @@ private:
 
   float mx_ = 0, my_ = 0, mdownX_ = 0, mdownY_ = 0;
 
-  // Select state
+  // ── Select state ─────────────────────────────────────────────────────────
   bool draggingShape_ = false, draggingBox_ = false;
   float boxX0_ = 0, boxY0_ = 0, boxX1_ = 0, boxY1_ = 0;
   std::vector<std::pair<VShapeId, vmath::Mat3>> dragOrigins_;
 
-  // Pen state
+  // ── Transform handle state ───────────────────────────────────────────────
+
+  // Which mode the selection box is in
+  enum class TransformMode { Scale, Rotate };
+  TransformMode transformMode_ = TransformMode::Scale;
+
+  // The handle currently being dragged
+  bool draggingHandle_ = false;
+  HandleKind dragHandleKind_ = HandleKind::None;
+  int dragHandleIndex_ = -1;
+
+  // Snapshot of selection AABB at drag start (canvas space)
+  vmath::AABB dragStartBB_;
+
+  // Per-shape original transforms at drag start
+  std::vector<std::pair<VShapeId, vmath::Mat3>> handleDragOrigins_;
+
+  // For rotate: start angle relative to bbox center
+  float rotateStartAngle_ = 0.f;
+
+  // Transform origin (pivot) in canvas space, defaults to bbox center
+  vmath::Vec2 transformOrigin_{0, 0};
+  bool originSet_ = false;
+  bool draggingOrigin_ = false;
+
+  // ── Pen state ─────────────────────────────────────────────────────────────
   bool penInProgress_ = false;
   std::vector<vmath::Vec2> penAnchors_, penCPs_;
   vmath::Vec2 penCursor_{};
 
-  // Node state
+  // ── Node state ────────────────────────────────────────────────────────────
   bool draggingNode_ = false;
   int dragNodeIdx_ = -1, dragNodeCPSide_ = 0;
   bool dragNodeIsCP_ = false;
 
-  // Shape drag-create state  — stored in CANVAS SPACE
+  // ── Shape drag-create state ───────────────────────────────────────────────
   bool shapeDragging_ = false;
-  float shapeX0_ = 0, shapeY0_ = 0; // canvas-space start corner
+  float shapeX0_ = 0, shapeY0_ = 0;
   VShapeId ghostId_ = kNoShape;
 
-  // GL
+  // ── GL ────────────────────────────────────────────────────────────────────
   GLuint prog_ = 0, vao_ = 0, vbo_ = 0;
   float currentZoom_ = 1.f;
-  float currentOffsetX_ = 0.f; // canvas-space viewport origin
+  float currentOffsetX_ = 0.f;
   float currentOffsetY_ = 0.f;
   struct ULocs {
     GLint mvp = -1, mode = -1, color = -1, tex = -1, alpha = -1;
@@ -1064,16 +1105,72 @@ private:
   ULONG_PTR gdiplusToken_ = 0;
 
   // =========================================================================
-  // ── Coordinate helpers ────────────────────────────────────────────────────
+  // ── Handle geometry helpers ───────────────────────────────────────────────
+  // Returns the 8 handle positions for the current selection bbox
+  // Index layout:
+  //   0=TL 1=TM 2=TR
+  //   3=ML       4=MR
+  //   5=BL 6=BM 7=BR
 
-  // Convert a screen-space point (as delivered by the canvas widget, which
-  // already calls Viewport::screenToCanvas before dispatching to us) back to
-  // canvas space.  NOTE: by the time mouse events reach VectorSurface the
-  // CanvasWidget has already done screenToCanvas, so mx_/my_ ARE canvas coords.
-  // shapeX0_/shapeY0_ are therefore stored in canvas space — no further
-  // conversion is needed in onShapeUp.  This helper exists for clarity and
-  // defensive use only.
-  vmath::Vec2 canvasPos(float cx, float cy) const { return {cx, cy}; }
+  static void getHandlePositions(const vmath::AABB &bb, float pad,
+                                 vmath::Vec2 out[8]) {
+    float x0 = bb.x0 - pad, y0 = bb.y0 - pad;
+    float x1 = bb.x1 + pad, y1 = bb.y1 + pad;
+    float mx = (x0 + x1) * .5f, my = (y0 + y1) * .5f;
+    out[0] = {x0, y0};
+    out[1] = {mx, y0};
+    out[2] = {x1, y0};
+    out[3] = {x0, my};
+    out[4] = {x1, my};
+    out[5] = {x0, y1};
+    out[6] = {mx, y1};
+    out[7] = {x1, y1};
+  }
+
+  // Compute the combined AABB of the current selection
+  vmath::AABB selectionBB() const {
+    vmath::AABB bb;
+    for (auto id : selection_) {
+      auto it = std::find_if(scene_.begin(), scene_.end(),
+                             [id](auto &s) { return s.id == id; });
+      if (it != scene_.end()) {
+        auto sb = vtess::shapeAABB(*it);
+        if (sb.valid()) {
+          bb.expand({sb.x0, sb.y0});
+          bb.expand({sb.x1, sb.y1});
+        }
+      }
+    }
+    return bb;
+  }
+
+  // Hit-test the 8 scale/rotate handles.
+  // Returns handle index 0-7 or -1.
+  int hitTestHandles(float x, float y, float pad) const {
+    if (selection_.empty())
+      return -1;
+    auto bb = selectionBB();
+    if (!bb.valid())
+      return -1;
+    vmath::Vec2 pts[8];
+    getHandlePositions(bb, pad, pts);
+    float r = 8.f / currentZoom_;
+    for (int i = 0; i < 8; i++) {
+      float dx = pts[i].x - x, dy = pts[i].y - y;
+      if (dx * dx + dy * dy < r * r)
+        return i;
+    }
+    return -1;
+  }
+
+  // Hit-test the transform origin circle
+  bool hitTestOrigin(float x, float y) const {
+    if (!originSet_ || selection_.empty())
+      return false;
+    float r = 7.f / currentZoom_;
+    float dx = transformOrigin_.x - x, dy = transformOrigin_.y - y;
+    return dx * dx + dy * dy < r * r;
+  }
 
   // =========================================================================
   // ── Undo helpers ──────────────────────────────────────────────────────────
@@ -1086,7 +1183,6 @@ private:
     }
     return n + scene_.size() * 256;
   }
-
   void pushUndo() {
     redoStack_.clear();
     size_t est = estimateSceneBytes();
@@ -1098,14 +1194,12 @@ private:
     undoStack_.push_back({scene_, est});
     undoBytes_ += est;
   }
-
   void removeShapeNoUndo(VShapeId id) {
     auto it = std::find_if(scene_.begin(), scene_.end(),
                            [id](auto &s) { return s.id == id; });
     if (it != scene_.end())
       scene_.erase(it);
   }
-
   void translateSelected(float dx, float dy) {
     pushUndo();
     for (auto id : selection_) {
@@ -1119,7 +1213,7 @@ private:
   }
 
   // =========================================================================
-  // ── Hit-test ──────────────────────────────────────────────────────────────
+  // ── Hit-test shapes ───────────────────────────────────────────────────────
 
   VShapeId hitTest(float x, float y) const {
     vmath::Vec2 pt{x, y};
@@ -1138,7 +1232,6 @@ private:
     }
     return kNoShape;
   }
-
   std::vector<VShapeId> hitTestBox(float x0, float y0, float x1,
                                    float y1) const {
     vmath::AABB sel;
@@ -1156,16 +1249,155 @@ private:
   // =========================================================================
   // ── Tool: Select ──────────────────────────────────────────────────────────
 
+  void beginHandleDrag(float x, float y) {
+    dragStartBB_ = selectionBB();
+    // Default origin = bbox center (only reset when not already set by user)
+    if (!originSet_) {
+      transformOrigin_ = dragStartBB_.center();
+    }
+    handleDragOrigins_.clear();
+    for (auto id : selection_) {
+      auto *s = beginEdit(id);
+      if (s)
+        handleDragOrigins_.push_back({id, s->xform});
+    }
+    if (dragHandleKind_ == HandleKind::Rotate) {
+      rotateStartAngle_ =
+          std::atan2(y - transformOrigin_.y, x - transformOrigin_.x);
+    }
+  }
+
+  // Apply scale transform from handle drag
+  void applyScaleHandle(float x, float y, bool shiftConstrain) {
+    if (!dragStartBB_.valid())
+      return;
+    int hi = dragHandleIndex_;
+
+    // Anchor point = opposite handle
+    //   TL(0) anchors BR(7), TR(2) anchors BL(5), etc.
+    static const int kOpposite[8] = {7, 6, 5, 4, 3, 2, 1, 0};
+    vmath::Vec2 pts[8];
+    float pad = 4.f / currentZoom_;
+    getHandlePositions(dragStartBB_, pad, pts);
+    vmath::Vec2 anchor = pts[kOpposite[hi]];
+
+    // The dragged handle's original position
+    vmath::Vec2 origHandle = pts[hi];
+
+    // New size defined by mouse position
+    float newDX = x - anchor.x, newDY = y - anchor.y;
+    float oldDX = origHandle.x - anchor.x, oldDY = origHandle.y - anchor.y;
+
+    auto &c = kScaleConstraints[hi];
+    float sx = c.lockX ? 1.f : (std::abs(oldDX) > 1e-4f ? newDX / oldDX : 1.f);
+    float sy = c.lockY ? 1.f : (std::abs(oldDY) > 1e-4f ? newDY / oldDY : 1.f);
+
+    // Shift = uniform scale (use the larger axis)
+    if (shiftConstrain && !c.lockX && !c.lockY) {
+      float s = std::abs(sx) > std::abs(sy) ? sx : sy;
+      sx = sy = s;
+    }
+
+    // Build transform: translate(anchor) * scale(sx,sy) * translate(-anchor)
+    vmath::Mat3 T = vmath::Mat3::translate(anchor.x, anchor.y);
+    vmath::Mat3 Ti = vmath::Mat3::translate(-anchor.x, -anchor.y);
+    vmath::Mat3 S = vmath::Mat3::scale(sx, sy);
+    vmath::Mat3 xf = T * S * Ti;
+
+    for (auto &[id, orig] : handleDragOrigins_) {
+      auto *s = beginEdit(id);
+      if (!s)
+        continue;
+      s->xform = xf * orig;
+    }
+    endEdit();
+  }
+
+  // Apply rotate transform from handle drag
+  void applyRotateHandle(float x, float y, bool shiftConstrain) {
+    float angle = std::atan2(y - transformOrigin_.y, x - transformOrigin_.x);
+    float dAngle = angle - rotateStartAngle_;
+
+    // Shift = snap to 45° increments
+    if (shiftConstrain) {
+      const float snap = 3.14159265f / 4.f;
+      dAngle = std::round(dAngle / snap) * snap;
+    }
+
+    vmath::Mat3 T =
+        vmath::Mat3::translate(transformOrigin_.x, transformOrigin_.y);
+    vmath::Mat3 Ti =
+        vmath::Mat3::translate(-transformOrigin_.x, -transformOrigin_.y);
+    vmath::Mat3 R = vmath::Mat3::rotate(dAngle);
+    vmath::Mat3 xf = T * R * Ti;
+
+    for (auto &[id, orig] : handleDragOrigins_) {
+      auto *s = beginEdit(id);
+      if (!s)
+        continue;
+      s->xform = xf * orig;
+    }
+    endEdit();
+  }
+
   void onSelectDown(float x, float y) {
     bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+    float pad = 4.f / currentZoom_;
+
+    // 1. Check transform origin drag
+    if (!selection_.empty() && hitTestOrigin(x, y)) {
+      draggingOrigin_ = true;
+      draggingHandle_ = false;
+      draggingShape_ = false;
+      draggingBox_ = false;
+      return;
+    }
+
+    // 2. Check handle hit (only when something is selected)
+    if (!selection_.empty()) {
+      int hi = hitTestHandles(x, y, pad);
+      if (hi >= 0) {
+        draggingHandle_ = true;
+        draggingShape_ = false;
+        draggingBox_ = false;
+        draggingOrigin_ = false;
+        dragHandleIndex_ = hi;
+        dragHandleKind_ = (transformMode_ == TransformMode::Scale)
+                              ? HandleKind::Scale
+                              : HandleKind::Rotate;
+        beginHandleDrag(x, y);
+        return;
+      }
+    }
+
+    // 3. Normal shape click
     VShapeId hit = hitTest(x, y);
     if (hit != kNoShape) {
+      bool alreadySelected = std::find(selection_.begin(), selection_.end(),
+                                       hit) != selection_.end();
+
       if (!shift) {
-        if (std::find(selection_.begin(), selection_.end(), hit) ==
-            selection_.end())
+        if (alreadySelected && selection_.size() == 1) {
+          // Second click on same shape → toggle rotate mode
+          transformMode_ = (transformMode_ == TransformMode::Scale)
+                               ? TransformMode::Rotate
+                               : TransformMode::Scale;
+          // Reset origin to bbox center on mode toggle
+          originSet_ = false;
+          transformOrigin_ = selectionBB().center();
+          dirty_ = true;
+          return; // Don't start a drag
+        }
+        if (!alreadySelected)
           selection_.clear();
       }
       select(hit, shift);
+      // Reset transform mode & origin when selecting a new shape
+      if (!alreadySelected || shift) {
+        transformMode_ = TransformMode::Scale;
+        originSet_ = false;
+        transformOrigin_ = selectionBB().center();
+      }
       dragOrigins_.clear();
       for (auto id : selection_) {
         auto *s = beginEdit(id);
@@ -1174,17 +1406,41 @@ private:
       }
       draggingShape_ = true;
       draggingBox_ = false;
+      draggingHandle_ = false;
+      draggingOrigin_ = false;
     } else {
-      if (!shift)
+      if (!shift) {
         selection_.clear();
+        transformMode_ = TransformMode::Scale;
+        originSet_ = false;
+      }
       draggingBox_ = true;
       draggingShape_ = false;
+      draggingHandle_ = false;
+      draggingOrigin_ = false;
       boxX0_ = boxX1_ = x;
       boxY0_ = boxY1_ = y;
     }
   }
 
   void onSelectMove(float x, float y, float, float) {
+    bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+
+    if (draggingOrigin_) {
+      transformOrigin_ = {x, y};
+      originSet_ = true;
+      dirty_ = true;
+      return;
+    }
+
+    if (draggingHandle_) {
+      if (dragHandleKind_ == HandleKind::Scale)
+        applyScaleHandle(x, y, shift);
+      else
+        applyRotateHandle(x, y, shift);
+      return;
+    }
+
     if (draggingShape_) {
       float totalDX = x - mdownX_, totalDY = y - mdownY_;
       for (auto &[id, orig] : dragOrigins_) {
@@ -1203,6 +1459,24 @@ private:
   }
 
   void onSelectUp(float x, float y) {
+    if (draggingOrigin_) {
+      draggingOrigin_ = false;
+      return;
+    }
+    if (draggingHandle_) {
+      bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+      if (dragHandleKind_ == HandleKind::Scale)
+        applyScaleHandle(x, y, shift);
+      else
+        applyRotateHandle(x, y, shift);
+      pushUndo();
+      draggingHandle_ = false;
+      dragHandleIndex_ = -1;
+      // Sync origin to new bbox center after transform
+      if (!originSet_)
+        transformOrigin_ = selectionBB().center();
+      return;
+    }
     if (draggingShape_ &&
         (std::abs(x - mdownX_) > 1.f || std::abs(y - mdownY_) > 1.f)) {
       pushUndo();
@@ -1223,6 +1497,11 @@ private:
       for (auto id : hits)
         select(id, true);
       draggingBox_ = false;
+      if (!selection_.empty()) {
+        transformMode_ = TransformMode::Scale;
+        originSet_ = false;
+        transformOrigin_ = selectionBB().center();
+      }
     }
     draggingShape_ = false;
     dragOrigins_.clear();
@@ -1248,13 +1527,11 @@ private:
     penCPs_.push_back({x, y});
     penCursor_ = {x, y};
   }
-
   void onPenMove(float x, float y) {
     penCursor_ = {x, y};
     if ((GetKeyState(VK_SHIFT) & 0x8000) && !penAnchors_.empty())
       penCPs_.back() = {x, y};
   }
-
   void commitPen(bool closed = false) {
     if (penAnchors_.size() < 2) {
       penInProgress_ = false;
@@ -1267,12 +1544,10 @@ private:
     s.stroke = activeStroke_;
     s.kind = VShapeKind::Path;
     s.id = nextId_++;
-
     VPath p;
     p.cmds.push_back({PathCmdKind::MoveTo, {penAnchors_[0]}});
     for (int i = 1; i < (int)penAnchors_.size(); i++) {
-      vmath::Vec2 cp1 = penCPs_[i - 1];
-      vmath::Vec2 cp2 = penAnchors_[i];
+      vmath::Vec2 cp1 = penCPs_[i - 1], cp2 = penAnchors_[i];
       bool hasCurve = (vmath::len(cp1 - penAnchors_[i - 1]) > 1e-3f);
       if (hasCurve) {
         PathCmd cmd;
@@ -1288,7 +1563,6 @@ private:
     if (closed)
       p.cmds.push_back({PathCmdKind::Close});
     s.path = std::move(p);
-
     pushUndo();
     scene_.push_back(std::move(s));
     selection_ = {scene_.back().id};
@@ -1297,7 +1571,6 @@ private:
     penCPs_.clear();
     dirty_ = true;
   }
-
   void cancelInProgress() {
     penInProgress_ = false;
     penAnchors_.clear();
@@ -1305,10 +1578,11 @@ private:
     shapeDragging_ = false;
     ghostId_ = kNoShape;
     draggingNode_ = false;
+    draggingHandle_ = false;
   }
 
   // =========================================================================
-  // ── Tool: Node ────────────────────────────────────────────────────────────
+  // ── Tool: Node  (FIXED — uses command index ci, not anchor counter ai) ────
 
   void onNodeDown(float x, float y) {
     dragNodeIdx_ = -1;
@@ -1320,11 +1594,12 @@ private:
     if (!s)
       return;
 
-    auto checkPt = [&](vmath::Vec2 p, int idx, bool isCP, int cpSide) -> bool {
+    auto checkPt = [&](vmath::Vec2 p, int cmdIdx, bool isCP,
+                       int cpSide) -> bool {
       vmath::Vec2 wp = s->xform.apply(p);
       float dx = wp.x - x, dy = wp.y - y;
       if (dx * dx + dy * dy < 64.f) {
-        dragNodeIdx_ = idx;
+        dragNodeIdx_ = cmdIdx;
         dragNodeIsCP_ = isCP;
         dragNodeCPSide_ = cpSide;
         draggingNode_ = true;
@@ -1338,23 +1613,20 @@ private:
         if (checkPt(s->poly.pts[i], i, false, 0))
           return;
     } else if (s->kind == VShapeKind::Path) {
-      int ai = 0;
-      for (auto &cmd : s->path.cmds) {
+      // Use command index (ci) directly — avoids the double-increment bug
+      for (int ci = 0; ci < (int)s->path.cmds.size(); ci++) {
+        auto &cmd = s->path.cmds[ci];
         if (cmd.kind == PathCmdKind::MoveTo ||
             cmd.kind == PathCmdKind::LineTo) {
-          if (checkPt(cmd.pt[0], ai, false, 0))
+          if (checkPt(cmd.pt[0], ci, false, 0))
             return;
-          ai++;
         } else if (cmd.kind == PathCmdKind::CubicTo) {
-          if (checkPt(cmd.pt[0], ai, true, 0))
-            return;
-          if (checkPt(cmd.pt[1], ai, true, 1))
-            return;
-          if (checkPt(cmd.pt[2], ai, false, 0)) {
-            ai++;
-            return;
-          }
-          ai++;
+          if (checkPt(cmd.pt[0], ci, true, 0))
+            return; // cp1
+          if (checkPt(cmd.pt[1], ci, true, 1))
+            return; // cp2
+          if (checkPt(cmd.pt[2], ci, false, 0))
+            return; // endpoint
         }
       }
     }
@@ -1373,25 +1645,23 @@ private:
     if (!s)
       return;
     vmath::Vec2 local{x, y};
+
     if (s->kind == VShapeKind::Poly) {
       if (dragNodeIdx_ < (int)s->poly.pts.size())
         s->poly.pts[dragNodeIdx_] = local;
     } else if (s->kind == VShapeKind::Path) {
-      int ai = 0;
-      for (auto &cmd : s->path.cmds) {
+      // dragNodeIdx_ IS the command index now — direct lookup, no re-counting
+      if (dragNodeIdx_ < (int)s->path.cmds.size()) {
+        auto &cmd = s->path.cmds[dragNodeIdx_];
         if (cmd.kind == PathCmdKind::MoveTo ||
             cmd.kind == PathCmdKind::LineTo) {
-          if (ai == dragNodeIdx_ && !dragNodeIsCP_)
+          if (!dragNodeIsCP_)
             cmd.pt[0] = local;
-          ai++;
         } else if (cmd.kind == PathCmdKind::CubicTo) {
-          if (ai == dragNodeIdx_) {
-            if (dragNodeIsCP_)
-              cmd.pt[dragNodeCPSide_] = local;
-            else
-              cmd.pt[2] = local;
-          }
-          ai++;
+          if (dragNodeIsCP_)
+            cmd.pt[dragNodeCPSide_] = local;
+          else
+            cmd.pt[2] = local;
         }
       }
     }
@@ -1407,31 +1677,19 @@ private:
 
   // =========================================================================
   // ── Tool: Rect / Ellipse / Line ───────────────────────────────────────────
-  //
-  // IMPORTANT: by the time mouse events arrive here, CanvasWidget has already
-  // called Viewport::screenToCanvas(), so x/y are in CANVAS SPACE.
-  // We store shapeX0_/shapeY0_ in canvas space and use them directly.
 
   void onShapeDown(float x, float y) {
     shapeDragging_ = true;
-    shapeX0_ = x; // canvas space
-    shapeY0_ = y; // canvas space
+    shapeX0_ = x;
+    shapeY0_ = y;
   }
-
-  void onShapeMove(float /*x*/, float /*y*/) { /* ghost drawn in renderGhost */
-  }
-
+  void onShapeMove(float, float) {}
   void onShapeUp(float x, float y) {
     if (!shapeDragging_)
       return;
     shapeDragging_ = false;
-
-    // x, y and shapeX0_/shapeY0_ are all in canvas space (CanvasWidget
-    // converts screen→canvas before dispatching to us).
     float x0 = min(shapeX0_, x), y0 = min(shapeY0_, y);
     float x1 = max(shapeX0_, x), y1 = max(shapeY0_, y);
-
-    // Minimum size threshold: 2 canvas units (independent of zoom)
     if (x1 - x0 < 2.f && y1 - y0 < 2.f)
       return;
 
@@ -1439,7 +1697,6 @@ private:
     s.fill = activeFill_;
     s.stroke = activeStroke_;
     s.id = nextId_++;
-
     switch (tool_) {
     case VTool::Rect:
       s.kind = VShapeKind::Rect;
@@ -1452,7 +1709,6 @@ private:
       break;
     case VTool::Line:
       s.kind = VShapeKind::Poly;
-      // Use the original un-clamped endpoints for lines
       s.poly.pts = {{shapeX0_, shapeY0_}, {x, y}};
       s.poly.closed = false;
       s.fill.none = true;
@@ -1460,10 +1716,13 @@ private:
     default:
       return;
     }
-
     pushUndo();
     scene_.push_back(std::move(s));
     selection_ = {scene_.back().id};
+    // Reset transform state for newly created shape
+    transformMode_ = TransformMode::Scale;
+    originSet_ = false;
+    transformOrigin_ = selectionBB().center();
     dirty_ = true;
   }
 
@@ -1545,7 +1804,7 @@ void main(){
     if (closed && clean.size() > 1)
       clean.pop_back();
     std::vector<float> tris;
-    vtess::expandStroke(clean, closed, w * 0.5f, LineCapV::Round,
+    vtess::expandStroke(clean, closed, w * .5f, LineCapV::Round,
                         LineJoinV::Round, tris);
     drawTris(tris, col, mvp);
   }
@@ -1573,13 +1832,21 @@ void main(){
     drawTris(v, col, mvp);
   }
 
+  void drawSquare(float x, float y, float r, const RGBA &col,
+                  const float mvp[16]) {
+    std::vector<float> v = {
+        x - r, y - r, x + r, y - r, x + r, y + r,
+        x - r, y - r, x + r, y + r, x - r, y + r,
+    };
+    drawTris(v, col, mvp);
+  }
+
   void drawCircle(float x, float y, float r, const RGBA &col,
                   const float mvp[16]) {
     const int N = 12;
     std::vector<float> v;
     for (int i = 0; i < N; i++) {
-      float a0 = float(i) / N * 6.2831853f;
-      float a1 = float(i + 1) / N * 6.2831853f;
+      float a0 = float(i) / N * 6.2831853f, a1 = float(i + 1) / N * 6.2831853f;
       v.push_back(x);
       v.push_back(y);
       v.push_back(x + cosf(a0) * r);
@@ -1590,8 +1857,54 @@ void main(){
     drawTris(v, col, mvp);
   }
 
+  // Draw a hollow circle (ring) as thick stroke
+  void drawCircleRing(float x, float y, float r, float lw, const RGBA &col,
+                      const float mvp[16]) {
+    const int N = 32;
+    std::vector<vmath::Vec2> pts;
+    pts.reserve(N + 1);
+    for (int i = 0; i <= N; i++) {
+      float a = float(i) / N * 6.2831853f;
+      pts.push_back({x + cosf(a) * r, y + sinf(a) * r});
+    }
+    std::vector<float> tris;
+    vtess::expandStroke(pts, true, lw * .5f, LineCapV::Butt, LineJoinV::Round,
+                        tris);
+    drawTris(tris, col, mvp);
+  }
+
+  // Draw a curved rotate-arrow arc with arrowhead (indicate rotate mode)
+  void drawRotateArrow(float cx, float cy, float r, float startA, float sweepA,
+                       float lw, const RGBA &col, const float mvp[16]) {
+    const int N = 20;
+    std::vector<vmath::Vec2> pts;
+    for (int i = 0; i <= N; i++) {
+      float a = startA + sweepA * float(i) / N;
+      pts.push_back({cx + cosf(a) * r, cy + sinf(a) * r});
+    }
+    std::vector<float> tris;
+    vtess::expandStroke(pts, false, lw * .5f, LineCapV::Butt, LineJoinV::Round,
+                        tris);
+    drawTris(tris, col, mvp);
+
+    // Arrowhead at end of arc
+    float endA = startA + sweepA;
+    vmath::Vec2 tip = {cx + cosf(endA) * r, cy + sinf(endA) * r};
+    // Direction tangent to circle at tip
+    float tanA = endA + (sweepA > 0 ? 3.14159265f / 2 : -3.14159265f / 2);
+    vmath::Vec2 dir = {cosf(tanA), sinf(tanA)};
+    vmath::Vec2 perp_ = {-dir.y, dir.x};
+    float hs = lw * 2.5f;
+    vmath::Vec2 a = tip + dir * hs * (-1.f);
+    vmath::Vec2 b = a + perp_ * hs;
+    vmath::Vec2 cc = a - perp_ * hs;
+    std::vector<float> arrow = {tip.x, tip.y, b.x, b.y, cc.x, cc.y};
+    drawTris(arrow, col, mvp);
+  }
+
   // =========================================================================
   // ── Text texture ──────────────────────────────────────────────────────────
+  // (unchanged from original)
 
   uint64_t textHash(const VText &t) const {
     uint64_t h = 14695981039346656037ULL;
@@ -1637,7 +1950,6 @@ void main(){
     HBRUSH br = CreateSolidBrush(RGB(0, 0, 0));
     FillRect(hdcMem, &rc, br);
     DeleteObject(br);
-
     auto &ts = s.text.style;
     int weight = ts.bold ? FW_BOLD : FW_NORMAL;
     HFONT hFont =
@@ -1656,7 +1968,6 @@ void main(){
                           &tsz);
     TextOutW(hdcMem, gx, gy, s.text.text.c_str(), (int)s.text.text.size());
     GdiFlush();
-
     int bx0 = max(0, gx - 2), by0 = max(0, gy - 2);
     int bx1 = min(fw, gx + tsz.cx + 2), by1 = min(fh, gy + tsz.cy + 2);
     int bw = bx1 - bx0, bh = by1 - by0;
@@ -1664,7 +1975,6 @@ void main(){
     tt.h = bh;
     tt.ox = (float)bx0;
     tt.oy = (float)(fh - by1);
-
     if (bw > 0 && bh > 0) {
       const uint8_t *dib = reinterpret_cast<const uint8_t *>(bits);
       std::vector<uint8_t> rgba(bw * bh * 4);
@@ -1724,19 +2034,17 @@ void main(){
     glBindTexture(GL_TEXTURE_2D, 0);
   }
 
-  float snapCoord(float canvasCoord, float zoom, float offsetScreen,
+  float snapCoord(float cc, float zoom, float offsetScreen,
                   float frac_hw) const {
-    float screen = canvasCoord * zoom + offsetScreen;
-    float snapped = std::floorf(screen - frac_hw + 0.5f) + frac_hw;
+    float screen = cc * zoom + offsetScreen;
+    float snapped = std::floorf(screen - frac_hw + .5f) + frac_hw;
     return (snapped - offsetScreen) / zoom;
   }
-
   vtess::Contour snapContour(const vtess::Contour &c,
                              float strokeWidthScreen) const {
-    float hw = strokeWidthScreen * 0.5f;
-    float frac_x = hw - std::floorf(hw);
-    float oxs = currentOffsetX_ * currentZoom_;
-    float oys = currentOffsetY_ * currentZoom_;
+    float hw = strokeWidthScreen * .5f, frac_x = hw - std::floorf(hw);
+    float oxs = currentOffsetX_ * currentZoom_,
+          oys = currentOffsetY_ * currentZoom_;
     vtess::Contour out;
     out.reserve(c.size());
     for (auto &p : c)
@@ -1754,26 +2062,20 @@ void main(){
       blitTextTex(tt, mvp);
       return;
     }
-
     VShape adjusted = s;
     if (!adjusted.stroke.none) {
       adjusted.stroke.width = s.stroke.width / currentZoom_;
-      if (adjusted.stroke.width * currentZoom_ < 0.5f)
-        adjusted.stroke.width = 0.5f / currentZoom_;
+      if (adjusted.stroke.width * currentZoom_ < .5f)
+        adjusted.stroke.width = .5f / currentZoom_;
     }
-
-    // ── Adaptive ellipse segment count via Ramanujan perimeter ───────────
-    // Produces ~1 segment per 1.5 screen pixels — smooth at any zoom.
     auto ellipseSegs = [&](float rx, float ry) -> int {
-      float a = rx * currentZoom_;
-      float b = ry * currentZoom_;
+      float a = rx * currentZoom_, b = ry * currentZoom_;
       float hh = (a - b) * (a - b) / ((a + b) * (a + b) + 1e-9f);
       float perim = 3.14159265f * (a + b) *
                     (1.f + 3.f * hh / (10.f + sqrtf(4.f - 3.f * hh)));
       return (int)std::clamp(perim / 1.5f, 32.f, 2048.f);
     };
 
-    // ── Fill ─────────────────────────────────────────────────────────────
     if (!adjusted.fill.none) {
       vtess::Contours fillContours;
       switch (s.kind) {
@@ -1795,11 +2097,9 @@ void main(){
       default:
         break;
       }
-
       std::vector<float> fillTris;
       for (auto &c : fillContours)
         vtess::earClip(c, fillTris);
-
       std::vector<float> fillWorld;
       fillWorld.reserve(fillTris.size());
       for (int i = 0; i + 1 < (int)fillTris.size(); i += 2) {
@@ -1811,13 +2111,10 @@ void main(){
         drawTris(fillWorld, adjusted.fill.color, mvp);
     }
 
-    // ── Stroke ───────────────────────────────────────────────────────────
     if (!adjusted.stroke.none) {
-      float hw = adjusted.stroke.width * 0.5f;
-
+      float hw = adjusted.stroke.width * .5f;
       bool snapApplicable = (s.kind == VShapeKind::Rect ||
                              (s.kind == VShapeKind::Poly && s.poly.closed));
-
       vtess::Contours strokeContours;
       switch (s.kind) {
       case VShapeKind::Rect:
@@ -1838,11 +2135,8 @@ void main(){
       default:
         break;
       }
-
-
       static constexpr float kMaxSegPx = 10.f;
       float maxSegCanvas = kMaxSegPx / currentZoom_;
-
       auto subdivideContour = [&](const vtess::Contour &c,
                                   bool closed) -> vtess::Contour {
         vtess::Contour out;
@@ -1855,35 +2149,28 @@ void main(){
           out.push_back(a);
           float segLen = vmath::len(b - a);
           int steps = (int)std::ceil(segLen / maxSegCanvas);
-          if (steps > 1) {
+          if (steps > 1)
             for (int k = 1; k < steps; k++)
               out.push_back(vmath::lerp(a, b, float(k) / float(steps)));
-          }
         }
         if (!closed)
           out.push_back(c.back());
         return out;
       };
-
       std::vector<float> strokeTris;
       for (auto &c : strokeContours) {
         bool isClosed =
             (s.kind == VShapeKind::Rect || s.kind == VShapeKind::Ellipse ||
              (s.kind == VShapeKind::Poly && s.poly.closed));
-
-        LineJoinV effectiveJoin = adjusted.stroke.join;
+        LineJoinV ej = adjusted.stroke.join;
         if (s.kind == VShapeKind::Rect)
-          effectiveJoin = LineJoinV::Miter;
-
-        // Subdivide first (in canvas space), then snap
+          ej = LineJoinV::Miter;
         vtess::Contour subd = subdivideContour(c, isClosed);
         vtess::Contour snapped =
             snapApplicable ? snapContour(subd, s.stroke.width) : subd;
-
-        vtess::expandStroke(snapped, isClosed, hw, adjusted.stroke.cap,
-                            effectiveJoin, strokeTris);
+        vtess::expandStroke(snapped, isClosed, hw, adjusted.stroke.cap, ej,
+                            strokeTris);
       }
-
       std::vector<float> strokeWorld;
       strokeWorld.reserve(strokeTris.size());
       for (int i = 0; i + 1 < (int)strokeTris.size(); i += 2) {
@@ -1898,13 +2185,10 @@ void main(){
 
   // =========================================================================
   // ── renderGhost ───────────────────────────────────────────────────────────
-  // mx_/my_ and shapeX0_/shapeY0_ are in canvas space (CanvasWidget converts
-  // before dispatching), so we use them directly here.
 
   void renderGhost(const float mvp[16]) {
     RGBA ghostStroke = {0.2f, 0.5f, 0.9f, 1.0f};
 
-    // Pen ghost
     if (tool_ == VTool::Pen && penInProgress_ && !penAnchors_.empty()) {
       std::vector<vmath::Vec2> ghostPts = penAnchors_;
       ghostPts.push_back(penCursor_);
@@ -1913,11 +2197,9 @@ void main(){
       vtess::expandStroke(ghostPts, false, ghostHW, LineCapV::Round,
                           LineJoinV::Round, strokeTris);
       drawTris(strokeTris, ghostStroke, mvp);
-
       float dR = 4.f / currentZoom_;
       for (auto &a : penAnchors_)
         drawDiamond(a.x, a.y, dR, {1, 1, 1, 0.9f}, mvp);
-
       if (vmath::len(penCPs_.back() - penAnchors_.back()) > 2.f) {
         float cpR = 4.f / currentZoom_;
         drawCircle(penCPs_.back().x, penCPs_.back().y, cpR, {1, .8f, .2f, 1.f},
@@ -1930,11 +2212,9 @@ void main(){
       }
     }
 
-    // Shape drag ghost — shapeX0_/shapeY0_ and mx_/my_ are canvas coords
     if (shapeDragging_) {
       float x0 = min(shapeX0_, mx_), y0 = min(shapeY0_, my_);
       float x1 = max(shapeX0_, mx_), y1 = max(shapeY0_, my_);
-
       VShape ghost;
       ghost.fill = activeFill_;
       ghost.fill.color.a *= .5f;
@@ -1963,7 +2243,6 @@ void main(){
         renderShape(ghost, mvp);
     }
 
-    // Box-select rubber-band
     if (draggingBox_) {
       std::vector<vmath::Vec2> box = {{boxX0_, boxY0_},
                                       {boxX1_, boxY0_},
@@ -1973,50 +2252,120 @@ void main(){
       vtess::earClip(box, fill);
       drawTris(fill, {0.3f, 0.5f, 1.f, 0.12f}, mvp);
       box.push_back(box.front());
-      float lw = 1.f / currentZoom_;
-      drawLineLoop(box, {0.4f, 0.6f, 1.f, 0.8f}, lw, mvp);
+      drawLineLoop(box, {0.4f, 0.6f, 1.f, 0.8f}, 1.f / currentZoom_, mvp);
     }
   }
 
   // =========================================================================
-  // ── renderSelection ───────────────────────────────────────────────────────
+  // ── renderSelection  (full transform handles) ─────────────────────────────
 
   void renderSelection(const float mvp[16]) {
     if (selection_.empty())
       return;
+
+    bool rotateMode = (transformMode_ == TransformMode::Rotate);
+    float pad = 4.f / currentZoom_;
+
+    // Gather combined bbox
+    vmath::AABB bb = selectionBB();
+    if (!bb.valid())
+      return;
+
+    // ── Bounding box outline ─────────────────────────────────────────────
+    RGBA boxCol = rotateMode
+                      ? RGBA{0.9f, 0.6f, 0.1f, 0.85f} // orange in rotate mode
+                      : RGBA{0.3f, 0.6f, 1.0f, 0.9f}; // blue in scale mode
+
+    std::vector<vmath::Vec2> box = {{bb.x0 - pad, bb.y0 - pad},
+                                    {bb.x1 + pad, bb.y0 - pad},
+                                    {bb.x1 + pad, bb.y1 + pad},
+                                    {bb.x0 - pad, bb.y1 + pad},
+                                    {bb.x0 - pad, bb.y0 - pad}};
+    float lw = 1.f / currentZoom_;
+    drawLineLoop(box, boxCol, lw, mvp);
+
+    // ── 8 transform handles ───────────────────────────────────────────────
+    vmath::Vec2 hpts[8];
+    getHandlePositions(bb, pad, hpts);
+
+    float hs = 4.5f / currentZoom_; // half-size of handle square
+
+    for (int i = 0; i < 8; i++) {
+      float hx = hpts[i].x, hy = hpts[i].y;
+      if (rotateMode) {
+        // Rotate mode: open circle handles (Illustrator style)
+        drawCircleRing(hx, hy, hs * 1.1f, 1.5f / currentZoom_,
+                       {1.f, 0.8f, 0.2f, 1.f}, mvp);
+      } else {
+        // Scale mode: white square with blue border
+        float b = hs + 1.5f / currentZoom_;
+        // border square
+        drawSquare(hx, hy, b, boxCol, mvp);
+        // white fill
+        drawSquare(hx, hy, hs, {1, 1, 1, 1}, mvp);
+      }
+    }
+
+    // ── Rotate-mode: draw curved arrow indicators at corners ─────────────
+    if (rotateMode) {
+      float arrowR = hs * 3.5f;
+      float arrowLW = 1.8f / currentZoom_;
+      RGBA arrowCol = {1.f, 0.75f, 0.1f, 0.9f};
+      // Draw a small curved arrow arc outside each corner handle
+      const float cornerAngles[4] = {
+          // center angles for each corner
+          3.14159265f * 1.25f, // TL
+          3.14159265f * 1.75f, // TR
+          3.14159265f * 0.75f, // BL
+          3.14159265f * 0.25f, // BR
+      };
+      int cornerIdx[4] = {0, 2, 5, 7};
+      for (int ci = 0; ci < 4; ci++) {
+        float ax = hpts[cornerIdx[ci]].x, ay = hpts[cornerIdx[ci]].y;
+        float startA = cornerAngles[ci];
+        float sweep = 3.14159265f / 3.f; // 60° arc
+        drawRotateArrow(ax, ay, arrowR, startA, sweep, arrowLW, arrowCol, mvp);
+      }
+    }
+
+    // ── Transform origin marker ───────────────────────────────────────────
+    {
+      vmath::Vec2 orig = originSet_ ? transformOrigin_ : bb.center();
+      float or_ = 5.f / currentZoom_;
+      float lw2 = 1.5f / currentZoom_;
+      RGBA origCol = {1.f, 1.f, 1.f, 0.95f};
+      RGBA origBorderCol = {0.2f, 0.2f, 0.2f, 0.8f};
+
+      // Crosshair
+      std::vector<float> hline, vline;
+      vtess::expandStroke(
+          {{orig.x - or_ * 1.8f, orig.y}, {orig.x + or_ * 1.8f, orig.y}}, false,
+          lw2 * .5f, LineCapV::Butt, LineJoinV::Miter, hline);
+      vtess::expandStroke(
+          {{orig.x, orig.y - or_ * 1.8f}, {orig.x, orig.y + or_ * 1.8f}}, false,
+          lw2 * .5f, LineCapV::Butt, LineJoinV::Miter, vline);
+      drawTris(hline, origBorderCol, mvp);
+      drawTris(vline, origBorderCol, mvp);
+
+      // Circle
+      drawCircleRing(orig.x, orig.y, or_, lw2, origBorderCol, mvp);
+      drawCircle(orig.x, orig.y, or_ * .4f, origCol, mvp);
+    }
+
+    // ── Node handles for Node tool ────────────────────────────────────────
+    if (tool_ != VTool::Node)
+      return;
+
+    RGBA anchorCol = {1, 1, 1, 1}, cpCol = {1, .8f, .2f, 1};
+    float aR = 5.f / currentZoom_, cpR = 4.f / currentZoom_;
+    float stemW = 0.8f / currentZoom_;
+
     for (auto id : selection_) {
       auto it = std::find_if(scene_.begin(), scene_.end(),
                              [id](auto &s) { return s.id == id; });
       if (it == scene_.end())
         continue;
       auto &s = *it;
-
-      auto bb = vtess::shapeAABB(s);
-      if (bb.valid()) {
-        float pad = 4.f / currentZoom_;
-        std::vector<vmath::Vec2> box = {{bb.x0 - pad, bb.y0 - pad},
-                                        {bb.x1 + pad, bb.y0 - pad},
-                                        {bb.x1 + pad, bb.y1 + pad},
-                                        {bb.x0 - pad, bb.y1 + pad},
-                                        {bb.x0 - pad, bb.y0 - pad}};
-        float lw = 1.f / currentZoom_;
-        drawLineLoop(box, {0.3f, 0.6f, 1.f, 0.9f}, lw, mvp);
-        float hs = 4.f / currentZoom_;
-        for (auto &c : std::vector<vmath::Vec2>{{bb.x0 - pad, bb.y0 - pad},
-                                                {bb.x1 + pad, bb.y0 - pad},
-                                                {bb.x1 + pad, bb.y1 + pad},
-                                                {bb.x0 - pad, bb.y1 + pad}})
-          drawDiamond(c.x, c.y, hs, {1, 1, 1, 1}, mvp);
-      }
-
-      if (tool_ != VTool::Node)
-        continue;
-
-      RGBA anchorCol = {1, 1, 1, 1}, cpCol = {1, .8f, .2f, 1};
-      float aR = 5.f / currentZoom_;
-      float cpR = 4.f / currentZoom_;
-      float stemW = 0.8f / currentZoom_;
-
       if (s.kind == VShapeKind::Poly) {
         for (auto &p : s.poly.pts) {
           auto wp = s.xform.apply(p);
@@ -2053,7 +2402,7 @@ void main(){
 };
 
 // ============================================================================
-// §V6  FACTORY HELPERS
+// §V7  FACTORY HELPERS
 // ============================================================================
 
 inline std::shared_ptr<CanvasWidget> VectorCanvas(int viewW, int viewH,
@@ -2064,7 +2413,6 @@ inline std::shared_ptr<CanvasWidget> VectorCanvas(int viewW, int viewH,
   c->setSurface<VectorSurface>();
   return c;
 }
-
 inline std::shared_ptr<CanvasWidget> VectorCanvas(int w, int h) {
   return VectorCanvas(w, h, w, h);
 }
