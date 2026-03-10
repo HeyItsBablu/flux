@@ -2,122 +2,7 @@
 #define FLUX_CANVAS_HPP
 
 // ============================================================================
-// flux_canvas.hpp  —  CanvasWidget + pluggable RenderSurface architecture
-// ============================================================================
-//
-// Step 1  (previous)
-// ──────────────────
-//   Single child HWND, zoom/pan wired but no visual context for them:
-//   no deadzone, no scrollbars.  Zoom/pan were intentionally disabled in the
-//   test until the full viewport infrastructure was in place.
-//
-// Step 2  (previous)
-// ───────────────────────
-//   Two-window hierarchy restored.  Zoom, pan, deadzone, and scrollbars are
-//   now all active together.
-//
-// Step 3  (previous)
-// ───────────────────────
-//   • Tool enum (Brush / Eraser) added to RasterSurface.
-//   • Stroke opacity exposed.
-//   • savePNG(path) via GDI+.
-//   • Color history ring.
-//
-// Step 4  (previous)
-// ───────────────────────
-//   BUG FIX: drawVertsToFBO used glBufferData (realloc) which could shrink
-//   the shared quadVBO_ to fewer bytes than blitTexture's quad requires.
-//   blitTexture uses glBufferSubData and assumes the buffer is large enough,
-//   so a shrunken VBO caused a GL error / undefined render (white canvas
-//   disappearing, wrong colors, stale geometry).
-//
-//   Fix: always use glBufferData in BOTH drawVertsToFBO AND blitTexture so
-//   each call owns its allocation and there is no size assumption between
-//   callers.  The VAO only stores the attrib format; actual data is uploaded
-//   fresh every draw call, so this is safe and has negligible overhead.
-//
-// Step 5  (previous)
-// ───────────────────────
-//   TEXT RENDERING PRIMITIVES added to RasterSurface:
-//
-//   • TextStyle struct (§5) — font face, size, color (0–1 floats), bold,
-//     italic, underline.
-//
-//   • rasterizeTextGDI()  [private]
-//     Single GDI offscreen DIB rasterizer shared by both public helpers.
-//     Converts GL canvas-space Y-up coords to GDI top-down, renders with
-//     ClearType into a full-canvas DIB, extracts a tight RGBA bounding box,
-//     and returns the pixel data plus the bounding rect.  White pixels
-//     (all channels >= 250) are made transparent so text composites cleanly
-//     over painted strokes.
-//
-//   • renderTextToScratch()  [protected]
-//     Calls rasterizeTextGDI and uploads the result to the scratch texture
-//     via glTexSubImage2D.  Flips rows for GL Y-up.  Caller manages
-//     scratchClear() timing.  showCursor=true appends a '|' caret for live
-//     preview — this is the only cursor concern inside flux_canvas; blink
-//     timing remains the subclass's responsibility.
-//
-//   • commitTextToCanvas()  [protected]
-//     Pushes an undo snapshot, then calls rasterizeTextGDI (no cursor),
-//     reads the committed buffer, CPU-composites text pixels over it with
-//     SRC_OVER blending, and uploads the result back.  No GL FBO ops are
-//     needed for the composite — the read-modify-write is done in RAM to
-//     avoid any blend-state entanglement.
-//
-//   • gdiplusToken_  [private member]
-//     GDI+ lifetime now owned by RasterSurface.  initialize() starts it,
-//     destroy() shuts it down.  Subclasses must NOT call GdiplusStartup /
-//     GdiplusShutdown themselves.
-//
-// Step 6  (previous)
-// ───────────────────────
-//   • setScrollbarsEnabled(bool) added to CanvasWidget — hides/shows
-//     scrollbars at any time and resizes the GL child to fill freed space.
-//
-//   • onGLResize callback added to CanvasWidget — fires whenever the GL
-//     child window is resized (distinct from canvas/image resize).
-//     Used by ImageEditSurface to track the GL window size independently
-//     of the canvas/image dimensions that come through resize().
-//
-// Step 7  (this revision)
-// ───────────────────────
-//   CUSTOM GL SCROLLBARS replacing Win32 OS scrollbars entirely.
-//
-//   • CustomScrollbar (§6b) — self-contained scrollbar renderer/tracker.
-//     Drawn as OpenGL quads in screen-space NDC inside the GL child window.
-//     Features:
-//       - Thin minimal style (12 px track, 6 px thumb width when idle,
-//         8 px when hovered/dragging).
-//       - Smooth alpha fade: opaque on hover/drag → fades to kIdleAlpha
-//         (0.15) after kIdleDelay (1.5 s) of inactivity.
-//       - Arrow buttons at both ends with triangle glyphs.
-//       - Rounded-rect thumb via GL_TRIANGLE_FAN circle caps.
-//       - Hit-test: arrow, track-before, thumb, track-after zones.
-//       - Drag: captures relative delta from thumb-center on mousedown.
-//
-//   • CanvasWidget changes:
-//       - Frame window no longer has WS_HSCROLL | WS_VSCROLL.
-//       - kSBThick (12 px) reserved on right/bottom edges of GL child.
-//         Viewport view-size = (glW − kSBThick, glH − kSBThick) when
-//         both bars are visible, shrinking accordingly when only one or
-//         neither is shown.
-//       - syncScrollbars() feeds CustomScrollbar::setThumb() instead of
-//         Win32 SetScrollInfo().
-//       - GLProc routes WM_LBUTTONDOWN/MOVE/UP to scrollbar hit-test
-//         before forwarding to the surface.
-//       - tickAndRender() calls CustomScrollbar::tick(dt) and
-//         CustomScrollbar::render() after the surface render.
-//       - needsContinuousRedraw() returns true while any bar is fading.
-//
-// Step 8  (this revision)
-// ───────────────────────
-//   RasterSurface has been moved to its own header:
-//     flux_raster.hpp
-//   Include it after flux_canvas.hpp when RasterSurface is needed.
-//   The factory helpers (RasterCanvas) remain here and still pull in
-//   flux_raster.hpp automatically via the include below.
-//
+// flux_canvas.hpp  —  CanvasWidget
 // ============================================================================
 
 #include "flux_widget.hpp"
@@ -154,6 +39,10 @@ using namespace Gdiplus;
 
 using PFNWGLCREATECONTEXTATTRIBSARBPROC = HGLRC(WINAPI *)(HDC, HGLRC,
                                                           const int *);
+// WGL pixel-format extension — loaded at runtime, no wglext.h needed.
+using PFNWGLCHOOSEPIXELFORMATARBPROC = BOOL(WINAPI *)(HDC, const int *,
+                                                      const FLOAT *, UINT,
+                                                      int *, UINT *);
 
 using PFNGLGENBUFFERSPROC = void(APIENTRY *)(GLsizei, GLuint *);
 using PFNGLDELETEBUFFERSPROC = void(APIENTRY *)(GLsizei, const GLuint *);
@@ -229,6 +118,20 @@ using PFNGLBLENDFUNCSEPARATEPROC = void(APIENTRY *)(GLenum, GLenum, GLenum,
 #define GL_ONE_MINUS_DST_ALPHA 0x0305
 #define GL_ZERO 0x0000
 #define GL_ONE 0x0001
+
+// GL_MULTISAMPLE — standard token, available without extension headers
+#define GL_MULTISAMPLE 0x809D
+
+// WGL pixel-format attribute tokens (wglext.h values, used as literals)
+#define WGL_DRAW_TO_WINDOW_ARB 0x2001
+#define WGL_SUPPORT_OPENGL_ARB 0x2010
+#define WGL_DOUBLE_BUFFER_ARB 0x2011
+#define WGL_PIXEL_TYPE_ARB 0x2013
+#define WGL_TYPE_RGBA_ARB 0x202B
+#define WGL_COLOR_BITS_ARB 0x2014
+#define WGL_DEPTH_BITS_ARB 0x2022
+#define WGL_SAMPLE_BUFFERS_ARB 0x2041
+#define WGL_SAMPLES_ARB 0x2042
 
 // ============================================================================
 // §1b  DEBUG GL ERROR CHECK
@@ -528,43 +431,24 @@ struct ScrollbarInfo {
 // ============================================================================
 // §6b  CUSTOM GL SCROLLBAR
 // ============================================================================
-//
-// Draws a thin macOS/VS-Code-style scrollbar directly in the GL child window
-// using screen-space quads.  No Win32 SCROLLBAR control is involved.
-//
-// Coordinate system: screen pixels, origin top-left (matches WM_MOUSEMOVE).
-// The caller (CanvasWidget) must:
-//   1. Call setGeometry() whenever the GL window is resized.
-//   2. Call setThumb() every frame from Viewport::scrollbarH/V().
-//   3. Call tick(dt) every frame (drives fade animation).
-//   4. Call render(prog, vao, vbo, uMVP, uColor, glW, glH) after the
-//      surface render, with blend already enabled.
-//   5. Forward WM_LBUTTONDOWN/MOVE/UP to onMouseDown/Move/Up.
-//   6. Forward WM_MOUSEMOVE (even without button) to onMouseMove for hover.
-//   7. Forward WM_MOUSELEAVE to onMouseLeave.
-//
-// Returns needsRedraw() == true while alpha is still animating so the caller
-// can schedule a continuous repaint.
 
 class CustomScrollbar {
 public:
-  // ── Tuning constants ──────────────────────────────────────────────────────
-  static constexpr float kTrackThick = 12.f;   // px — full track strip width
-  static constexpr float kThumbThin = 5.f;     // px — thumb width at rest
-  static constexpr float kThumbFat = 8.f;      // px — thumb width on hover/drag
-  static constexpr float kArrowSize = 12.f;    // px — square arrow button
-  static constexpr float kThumbMinLen = 24.f;  // px — minimum thumb length
-  static constexpr float kCornerR = 3.f;       // px — thumb cap radius
-  static constexpr int kCapSegs = 8;           // semicircle segments per cap
-  static constexpr float kIdleAlpha = 0.15f;   // alpha when content overflows
-  static constexpr float kActiveAlpha = 0.90f; // alpha when hovered/dragging
-  static constexpr float kIdleDelay = 1.5f;    // seconds before fade starts
-  static constexpr float kFadeSpeed = 3.5f;    // alpha units per second
-  static constexpr float kExpandSpeed = 10.f;  // thickness lerp speed (1/s)
+  static constexpr float kTrackThick = 12.f;
+  static constexpr float kThumbThin = 5.f;
+  static constexpr float kThumbFat = 8.f;
+  static constexpr float kArrowSize = 12.f;
+  static constexpr float kThumbMinLen = 24.f;
+  static constexpr float kCornerR = 3.f;
+  static constexpr int kCapSegs = 8;
+  static constexpr float kIdleAlpha = 0.15f;
+  static constexpr float kActiveAlpha = 0.90f;
+  static constexpr float kIdleDelay = 1.5f;
+  static constexpr float kFadeSpeed = 3.5f;
+  static constexpr float kExpandSpeed = 10.f;
 
   enum class Axis { Horizontal, Vertical };
 
-  // Hit zones returned by hitTest()
   enum class Zone {
     None,
     ArrowStart,
@@ -576,15 +460,12 @@ public:
 
   explicit CustomScrollbar(Axis axis) : axis_(axis) {}
 
-  // Called when GL window resizes.  x0,y0 = top-left of track strip in
-  // screen pixels; trackLen = usable length excluding the two arrow buttons.
   void setGeometry(float stripX0, float stripY0, float stripLen) {
     stripX0_ = stripX0;
     stripY0_ = stripY0;
     stripLen_ = stripLen;
   }
 
-  // thumbMin/Max in [0,1].  visible = whether content overflows.
   void setThumb(float thumbMin, float thumbMax, bool visible) {
     visible_ = visible;
     thumbMin_ = std::clamp(thumbMin, 0.f, 1.f);
@@ -593,17 +474,12 @@ public:
       std::swap(thumbMin_, thumbMax_);
   }
 
-  // dt in seconds.  Returns true while animation is still running.
   bool tick(double dt) {
     float f = float(dt);
-
-    // ── Thumb width lerp (idle ↔ hovered/dragging) ────────────────────────
     float targetW = (hovered_ || dragging_) ? kThumbFat : kThumbThin;
     currentW_ += (targetW - currentW_) * min(1.f, kExpandSpeed * f);
 
-    // ── Alpha animation ───────────────────────────────────────────────────
     if (!visible_) {
-      // No overflow — hide completely
       alpha_ += (0.f - alpha_) * min(1.f, kFadeSpeed * f);
       idleTimer_ = 0.f;
       return std::abs(alpha_) > 0.005f;
@@ -616,7 +492,7 @@ public:
     } else {
       idleTimer_ += f;
       if (idleTimer_ < kIdleDelay)
-        targetAlpha = kActiveAlpha; // stay bright immediately after activity
+        targetAlpha = kActiveAlpha;
       else
         targetAlpha = kIdleAlpha;
     }
@@ -628,18 +504,11 @@ public:
   bool needsRedraw() const { return visible_ && alpha_ > 0.005f; }
   bool isVisible() const { return visible_; }
 
-  // ── Render ────────────────────────────────────────────────────────────────
-  // prog    : the flat-color shader (uMode=1 path of the blit shader)
-  // vao/vbo : shared geometry buffers (already large enough)
-  // uMVP, uColor : uniform locations in prog
-  // glW, glH : current GL window dimensions (screen pixels)
   void render(GLuint prog, GLuint vao, GLuint vbo, GLint uMVP, GLint uColor,
               int glW, int glH) const {
     if (alpha_ < 0.005f)
       return;
 
-    // Build screen-space ortho: x in [0,glW], y in [0,glH] top-down.
-    // We flip Y so that pixel y=0 is the top of the window.
     float mvp[16];
     glutil::ortho(0.f, float(glW), float(glH), 0.f, mvp);
 
@@ -647,22 +516,16 @@ public:
     GL.uniformMatrix4fv(uMVP, 1, GL_FALSE, mvp);
     GL.uniform1i(GL.getUniformLocation(prog, "uMode"), 1);
 
-    // ── track background ─────────────────────────────────────────────────
     {
       float ta = alpha_ * 0.25f;
       GL.uniform4f(uColor, 0.12f, 0.12f, 0.12f, ta);
       pushRect(vao, vbo, stripX0_, stripY0_, trackStripW(), stripLen_);
     }
-
-    // ── arrow buttons ────────────────────────────────────────────────────
     {
-      float aa = alpha_;
-      GL.uniform4f(uColor, 0.75f, 0.75f, 0.75f, aa);
+      GL.uniform4f(uColor, 0.75f, 0.75f, 0.75f, alpha_);
       drawArrow(vao, vbo, true, glW, glH, prog, uMVP, uColor);
       drawArrow(vao, vbo, false, glW, glH, prog, uMVP, uColor);
     }
-
-    // ── thumb ─────────────────────────────────────────────────────────────
     if (thumbMax_ > thumbMin_) {
       float thumbAlpha = dragging_ ? 1.f : alpha_;
       float tc = dragging_ ? 0.92f : 0.72f;
@@ -671,18 +534,13 @@ public:
     }
   }
 
-  // ── Mouse input ───────────────────────────────────────────────────────────
-
-  // Returns true if the event was consumed by the scrollbar.
   bool onMouseDown(int sx, int sy, std::function<void(float)> scrollTo) {
     Zone z = hitTest(sx, sy);
     if (z == Zone::None)
       return false;
-
     hovered_ = true;
     idleTimer_ = 0.f;
     scrollToFn_ = scrollTo;
-
     if (z == Zone::Thumb) {
       dragging_ = true;
       dragStartPx_ = axis_ == Axis::Horizontal ? float(sx) : float(sy);
@@ -708,14 +566,12 @@ public:
     return false;
   }
 
-  // Returns true if dragging (caller should suppress surface mouse move).
   bool onMouseMove(int sx, int sy) {
     Zone z = hitTest(sx, sy);
     bool wasHovered = hovered_;
     hovered_ = (z != Zone::None);
     if (hovered_ != wasHovered)
       idleTimer_ = 0.f;
-
     if (dragging_ && scrollToFn_) {
       float pos = axis_ == Axis::Horizontal ? float(sx) : float(sy);
       float delta = pos - dragStartPx_;
@@ -732,7 +588,7 @@ public:
     return false;
   }
 
-  bool onMouseUp(int /*sx*/, int /*sy*/) {
+  bool onMouseUp(int, int) {
     bool was = dragging_;
     dragging_ = false;
     idleTimer_ = 0.f;
@@ -743,8 +599,6 @@ public:
     hovered_ = false;
     dragging_ = false;
   }
-
-  // Wakes the bar (resets idle timer) — call on any viewport change.
   void poke() { idleTimer_ = 0.f; }
 
 private:
@@ -759,24 +613,15 @@ private:
   float currentW_ = kThumbThin;
   float dragStartPx_ = 0.f;
   float dragStartMin_ = 0.f;
-
   std::function<void(float)> scrollToFn_;
+  static constexpr float kArrowStep = 0.05f;
 
-  static constexpr float kArrowStep = 0.05f; // fraction per arrow click
-
-  // Total width of the track strip (cross-axis dimension)
   float trackStripW() const { return kTrackThick; }
-
-  // Usable track length (minus two arrow buttons)
   float usableLen() const { return max(1.f, stripLen_ - kArrowSize * 2.f); }
 
-  // Thumb position along the track axis (pixels from track start, after arrow)
   void thumbPixels(float &pxStart, float &pxLen) const {
     float ul = usableLen();
     pxLen = max(kThumbMinLen, (thumbMax_ - thumbMin_) * ul);
-    pxStart = kArrowSize +
-              thumbMin_ * (ul - pxLen + (thumbMax_ - thumbMin_) * ul - pxLen);
-    // Simpler: map thumbMin to [0, ul - pxLen]
     float range = ul - pxLen;
     pxStart = kArrowSize + thumbMin_ / (1.f - (thumbMax_ - thumbMin_)) * range;
     if (!std::isfinite(pxStart))
@@ -790,19 +635,15 @@ private:
     float px = axis_ == Axis::Horizontal ? float(sx) : float(sy);
     float py = axis_ == Axis::Horizontal ? float(sy) : float(sx);
     float trackCross = axis_ == Axis::Horizontal ? stripY0_ : stripX0_;
-
-    // Must be within the cross-axis strip
     if (py < trackCross || py >= trackCross + kTrackThick)
       return Zone::None;
     float along = axis_ == Axis::Horizontal ? px - stripX0_ : px - stripY0_;
     if (along < 0 || along > stripLen_)
       return Zone::None;
-
     if (along < kArrowSize)
       return Zone::ArrowStart;
     if (along > stripLen_ - kArrowSize)
       return Zone::ArrowEnd;
-
     float ts, tl;
     thumbPixels(ts, tl);
     if (along < ts)
@@ -816,19 +657,12 @@ private:
     if (!fn)
       return;
     float span = thumbMax_ - thumbMin_;
-    float newMin = std::clamp(thumbMin_ + delta, 0.f, 1.f - span);
-    fn(newMin);
+    fn(std::clamp(thumbMin_ + delta, 0.f, 1.f - span));
   }
 
-  // ── geometry helpers ──────────────────────────────────────────────────────
-
-  // Push a screen-space quad [x,y,w,h] using the shared vbo.
-  // The quad is axis-aligned in the top-left-origin screen coord system.
   static void pushRect(GLuint vao, GLuint vbo, float x, float y, float w,
                        float h) {
-    float v[] = {
-        x, y, x + w, y, x + w, y + h, x + w, y + h, x, y + h, x, y,
-    };
+    float v[] = {x, y, x + w, y, x + w, y + h, x + w, y + h, x, y + h, x, y};
     GL.bindVertexArray(vao);
     GL.bindBuffer(GL_ARRAY_BUFFER, vbo);
     GL.bufferData(GL_ARRAY_BUFFER, sizeof(v), v, GL_DYNAMIC_DRAW);
@@ -840,23 +674,15 @@ private:
     GL.bindVertexArray(0);
   }
 
-  // Rounded-rectangle thumb drawn as a central rect + two circular caps.
   void drawThumb(GLuint vao, GLuint vbo) const {
     float ts, tl;
     thumbPixels(ts, tl);
-
-    // Thumb rect in track-local coords, then map to screen
     float halfW = currentW_ * 0.5f;
     float crossCenter = (axis_ == Axis::Horizontal)
                             ? stripY0_ + kTrackThick * 0.5f
                             : stripX0_ + kTrackThick * 0.5f;
-
-    // Build rounded rect verts
-    // We'll approximate with a central rect + semicircle fans at each end.
     static const int kSegs = kCapSegs;
-    const float cr = min(kCornerR, halfW); // cap radius = half-thickness
-
-    // Central rect (excluding cap zones)
+    const float cr = min(kCornerR, halfW);
     float rLen = tl - cr * 2.f;
     if (rLen > 0.f) {
       float rx, ry, rw, rh;
@@ -873,25 +699,19 @@ private:
       }
       pushRect(vao, vbo, rx, ry, rw, rh);
     }
-
-    // Two semicircle caps
     for (int cap = 0; cap < 2; ++cap) {
-      float capAlong =
-          (cap == 0) ? (stripX0_ + ts + cr) : (stripX0_ + ts + tl - cr);
-      float capCross = crossCenter;
-      if (axis_ == Axis::Vertical) {
+      float capAlong, capCross = crossCenter;
+      if (axis_ == Axis::Horizontal)
+        capAlong =
+            (cap == 0) ? (stripX0_ + ts + cr) : (stripX0_ + ts + tl - cr);
+      else
         capAlong =
             (cap == 0) ? (stripY0_ + ts + cr) : (stripY0_ + ts + tl - cr);
-        capCross = crossCenter;
-      }
-
       float startAngle =
           (axis_ == Axis::Horizontal)
               ? (cap == 0 ? 3.14159265f * 0.5f : -3.14159265f * 0.5f)
               : (cap == 0 ? 3.14159265f : 0.f);
       float sweep = 3.14159265f;
-
-      // Fan: center + kSegs+1 rim verts
       std::vector<float> fan;
       fan.reserve((kSegs + 2) * 2);
       if (axis_ == Axis::Horizontal) {
@@ -903,8 +723,7 @@ private:
       }
       for (int i = 0; i <= kSegs; ++i) {
         float a = startAngle + sweep * float(i) / kSegs;
-        float dx = cosf(a) * cr;
-        float dy = sinf(a) * cr;
+        float dx = cosf(a) * cr, dy = sinf(a) * cr;
         if (axis_ == Axis::Horizontal) {
           fan.push_back(capAlong + dx);
           fan.push_back(capCross + dy);
@@ -926,10 +745,8 @@ private:
     }
   }
 
-  // Arrow button: a small triangle glyph centered in a kArrowSize square.
-  void drawArrow(GLuint vao, GLuint vbo, bool isStart, int /*glW*/, int /*glH*/,
-                 GLuint /*prog*/, GLint /*uMVP*/, GLint /*uColor*/) const {
-    // Arrow button background (subtle)
+  void drawArrow(GLuint vao, GLuint vbo, bool isStart, int, int, GLuint, GLint,
+                 GLint) const {
     float ax, ay;
     if (axis_ == Axis::Horizontal) {
       ax = isStart ? stripX0_ : stripX0_ + stripLen_ - kArrowSize;
@@ -940,24 +757,20 @@ private:
     }
     pushRect(vao, vbo, ax, ay, kArrowSize,
              axis_ == Axis::Horizontal ? kTrackThick : kArrowSize);
-
-    // Triangle glyph (3 verts)
     float cx = ax + kArrowSize * 0.5f;
-    float cy = ay + kTrackThick * 0.5f;
-    if (axis_ == Axis::Vertical)
-      cy = ay + kArrowSize * 0.5f;
-    float hs = 3.f; // half-size of the triangle
-
+    float cy = (axis_ == Axis::Vertical) ? ay + kArrowSize * 0.5f
+                                         : ay + kTrackThick * 0.5f;
+    float hs = 3.f;
     float v[6];
     if (axis_ == Axis::Horizontal) {
-      if (isStart) { // ◀
+      if (isStart) {
         v[0] = cx + hs;
         v[1] = cy - hs;
         v[2] = cx - hs;
         v[3] = cy;
         v[4] = cx + hs;
         v[5] = cy + hs;
-      } else { // ▶
+      } else {
         v[0] = cx - hs;
         v[1] = cy - hs;
         v[2] = cx + hs;
@@ -966,14 +779,14 @@ private:
         v[5] = cy + hs;
       }
     } else {
-      if (isStart) { // ▲
+      if (isStart) {
         v[0] = cx - hs;
         v[1] = cy + hs;
         v[2] = cx;
         v[3] = cy - hs;
         v[4] = cx + hs;
         v[5] = cy + hs;
-      } else { // ▼
+      } else {
         v[0] = cx - hs;
         v[1] = cy - hs;
         v[2] = cx;
@@ -1024,26 +837,23 @@ public:
     vh_ = float(h);
     clampOffset();
   }
-
   void setCanvasSize(int w, int h) {
     cw_ = float(w);
     ch_ = float(h);
     clampOffset();
   }
 
-void zoomToward(float sx, float sy, float factor) {
+  void zoomToward(float sx, float sy, float factor) {
     auto [cpx, cpy] = screenToCanvas(sx, sy);
     float z = std::clamp(zoom_ * factor, kMinZoom, kMaxZoom);
     z = snapZoom(z);
     zoom_ = z;
-    // Raw offset from zoom pivot
     offsetX_ = cpx - sx / z;
     offsetY_ = cpy - (vh_ - sy) / z;
-    // Re-snap to screen pixel grid at new zoom
     offsetX_ = std::roundf(offsetX_ * zoom_) / zoom_;
     offsetY_ = std::roundf(offsetY_ * zoom_) / zoom_;
     clampOffset();
-}
+  }
 
   void zoomIn() { zoomToward(vw_ * .5f, vh_ * .5f, 1.25f); }
   void zoomOut() { zoomToward(vw_ * .5f, vh_ * .5f, 0.8f); }
@@ -1057,14 +867,13 @@ void zoomToward(float sx, float sy, float factor) {
     centerCanvas();
   }
 
-void panByScreen(float dsx, float dsy) {
-    // Work in screen space, snap there, convert back
+  void panByScreen(float dsx, float dsy) {
     float screenOX = offsetX_ * zoom_ - dsx;
-    float screenOY = offsetY_ * zoom_ + dsy;  // Y-up: pan up = offset increases
+    float screenOY = offsetY_ * zoom_ + dsy;
     offsetX_ = std::roundf(screenOX) / zoom_;
     offsetY_ = std::roundf(screenOY) / zoom_;
     clampOffset();
-}
+  }
 
   void setOffsetX(float cx) {
     offsetX_ = cx;
@@ -1074,12 +883,11 @@ void panByScreen(float dsx, float dsy) {
     offsetY_ = cy;
     clampOffset();
   }
-void setOffset(float cx, float cy) {
-    // Snap so that offsetX * zoom lands on a whole screen pixel
+  void setOffset(float cx, float cy) {
     offsetX_ = std::roundf(cx * zoom_) / zoom_;
     offsetY_ = std::roundf(cy * zoom_) / zoom_;
     clampOffset();
-}
+  }
 
   std::pair<float, float> screenToCanvas(float sx, float sy) const {
     return {offsetX_ + sx / zoom_, offsetY_ + (vh_ - sy) / zoom_};
@@ -1134,24 +942,17 @@ private:
   }
 
   void clampOffset() {
-    float viewW = vw_ / zoom_;
-    float viewH = vh_ / zoom_;
-
+    float viewW = vw_ / zoom_, viewH = vh_ / zoom_;
     constexpr float kPanSlack = 0.5f;
-    float slackX = viewW * kPanSlack;
-    float slackY = viewH * kPanSlack;
-
-    if (viewW >= cw_) {
+    float slackX = viewW * kPanSlack, slackY = viewH * kPanSlack;
+    if (viewW >= cw_)
       offsetX_ = std::clamp(offsetX_, -slackX, cw_ - viewW + slackX);
-    } else {
+    else
       offsetX_ = std::clamp(offsetX_, 0.f, cw_ - viewW);
-    }
-
-    if (viewH >= ch_) {
+    if (viewH >= ch_)
       offsetY_ = std::clamp(offsetY_, -slackY, ch_ - viewH + slackY);
-    } else {
+    else
       offsetY_ = std::clamp(offsetY_, 0.f, ch_ - viewH);
-    }
   }
 };
 
@@ -1183,14 +984,11 @@ public:
 #include "flux_raster.hpp"
 
 // ============================================================================
-// §10  CANVAS WIDGET  (two-window hierarchy + custom GL scrollbars)
+// §10  CANVAS WIDGET  (two-window hierarchy + custom GL scrollbars + MSAA)
 // ============================================================================
 
 class CanvasWidget : public Widget {
 public:
-  // Thickness of the custom scrollbar strip in pixels (screen-space).
-  // The viewport sees (glW - kSBThick) x (glH - kSBThick) as its view area
-  // when both bars are present, adjusted when only one or neither is visible.
   static constexpr float kSBThick = CustomScrollbar::kTrackThick;
 
   explicit CanvasWidget()
@@ -1206,8 +1004,6 @@ public:
     viewportEnabled_ = enabled;
     return ptr();
   }
-
-  // Show or hide the custom scrollbars.  Can be toggled at any time.
   std::shared_ptr<CanvasWidget> setScrollbarsEnabled(bool enabled) {
     scrollbarsEnabled_ = enabled;
     if (glHwnd_) {
@@ -1218,7 +1014,6 @@ public:
     }
     return ptr();
   }
-
   bool scrollbarsEnabled() const { return scrollbarsEnabled_; }
 
   template <typename T, typename... A> std::shared_ptr<T> setSurface(A &&...a) {
@@ -1258,11 +1053,8 @@ public:
     return ptr();
   }
 
-  // ── Callbacks ─────────────────────────────────────────────────────────────
   std::function<void(float zoom)> onViewportChanged;
   std::function<void(int w, int h)> onGLResize;
-
-  // ── Widget virtuals ───────────────────────────────────────────────────────
 
   void computeLayout(HDC, const BoxConstraints &c, FontCache &) override {
     width = c.clampWidth(autoWidth ? c.maxWidth : width);
@@ -1302,14 +1094,8 @@ private:
   Viewport vp_;
   int canvasW_ = 512, canvasH_ = 512;
 
-  // ── Custom scrollbars ─────────────────────────────────────────────────────
-  CustomScrollbar hBar_; // horizontal
-  CustomScrollbar vBar_; // vertical
-
-  // Dedicated VAO/VBO for scrollbar geometry (avoids touching the surface's
-  // shared quadVBO_ which has a fixed pre-allocated size for dab/blit quads).
-  GLuint sbVAO_ = 0, sbVBO_ = 0;
-  GLuint sbProg_ = 0;
+  CustomScrollbar hBar_, vBar_;
+  GLuint sbVAO_ = 0, sbVBO_ = 0, sbProg_ = 0;
   GLint sbUMVP_ = -1, sbUColor_ = -1, sbUMode_ = -1;
 
   using Clock = std::chrono::steady_clock;
@@ -1331,15 +1117,13 @@ private:
 
   // ── Viewport helpers ──────────────────────────────────────────────────────
 
-  // Compute the effective viewport dimensions accounting for scrollbar strips.
   void viewportDims(int glW, int glH, int &vpW, int &vpH) const {
     if (!viewportEnabled_ || !scrollbarsEnabled_) {
       vpW = glW;
       vpH = glH;
       return;
     }
-    ScrollbarInfo h = vp_.scrollbarH();
-    ScrollbarInfo v = vp_.scrollbarV();
+    ScrollbarInfo h = vp_.scrollbarH(), v = vp_.scrollbarV();
     vpW = glW - (v.visible ? (int)kSBThick : 0);
     vpH = glH - (h.visible ? (int)kSBThick : 0);
     if (vpW < 1)
@@ -1354,17 +1138,12 @@ private:
     vp_.setViewSize(vpW, vpH);
   }
 
-  // Recompute and push geometry to both bars based on current glW/glH.
   void updateSBGeometry(int glW, int glH) {
-    // Horizontal bar: bottom strip, full width minus vertical bar
-    ScrollbarInfo h = vp_.scrollbarH();
-    ScrollbarInfo v = vp_.scrollbarV();
+    ScrollbarInfo h = vp_.scrollbarH(), v = vp_.scrollbarV();
     float hLen = float(glW) - (v.visible ? kSBThick : 0.f);
     hBar_.setGeometry(0.f, float(glH) - kSBThick, hLen);
     hBar_.setThumb(h.thumbMin, h.thumbMax,
                    h.visible && scrollbarsEnabled_ && viewportEnabled_);
-
-    // Vertical bar: right strip, full height minus horizontal bar
     float vLen = float(glH) - (h.visible ? kSBThick : 0.f);
     vBar_.setGeometry(float(glW) - kSBThick, 0.f, vLen);
     vBar_.setThumb(v.thumbMin, v.thumbMax,
@@ -1402,7 +1181,7 @@ private:
     }
   }
 
-  // ── Scrollbar scroll callbacks ────────────────────────────────────────────
+  // ── Scrollbar callbacks ───────────────────────────────────────────────────
 
   void applyHScrollFraction(float thumbMin) {
     float span = vp_.scrollbarH().thumbMax - vp_.scrollbarH().thumbMin;
@@ -1419,8 +1198,6 @@ private:
     float range = vp_.canvasH() - vp_.viewH() / vp_.zoom();
     if (range <= 0.f)
       return;
-    // Vertical scrollbar: thumbMin=0 → top (max offsetY), thumbMin=1-span →
-    // bottom (offsetY=0)
     float t = 1.f - thumbMin - span;
     vp_.setOffsetY(t / (1.f - span) * range);
     pokeScrollbars();
@@ -1430,8 +1207,6 @@ private:
   // ── Scrollbar GL resources ────────────────────────────────────────────────
 
   void buildSBResources() {
-    // Reuse the same flat-color shader as RasterSurface but compiled fresh
-    // for this widget so it owns its program handle independently.
     const char *vert = R"GLSL(
 #version 330 core
 layout(location=0) in vec2 aPos;
@@ -1451,8 +1226,6 @@ void main(){ fragColor = uColor; }
     sbUColor_ = GL.getUniformLocation(sbProg_, "uColor");
     sbUMode_ = GL.getUniformLocation(sbProg_, "uMode");
 
-    // Large enough for any single draw call the scrollbar emits
-    // (fan caps: (kCapSegs+2)*2 floats is the largest single upload)
     constexpr GLsizeiptr kSBBufSz = sizeof(float) * 2 * 64;
     GL.genVertexArrays(1, &sbVAO_);
     GL.genBuffers(1, &sbVBO_);
@@ -1480,8 +1253,7 @@ void main(){ fragColor = uColor; }
     }
   }
 
-  // ── Frame window proc ────────────────────────────────────────────────────
-  // Frame window is now a plain clip container — no WS_HSCROLL/WS_VSCROLL.
+  // ── Window procs ──────────────────────────────────────────────────────────
 
   static LRESULT CALLBACK FrameProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     auto *self = reinterpret_cast<CanvasWidget *>(
@@ -1496,7 +1268,6 @@ void main(){ fragColor = uColor; }
       return 0;
     }
     case WM_MOUSEWHEEL:
-      // Forward wheel events to GL child
       if (self && self->viewportEnabled_ && self->glHwnd_)
         PostMessage(self->glHwnd_, msg, wp, lp);
       return 0;
@@ -1504,8 +1275,6 @@ void main(){ fragColor = uColor; }
       return DefWindowProc(hwnd, msg, wp, lp);
     }
   }
-
-  // ── GL child window proc ─────────────────────────────────────────────────
 
   static LRESULT CALLBACK GLProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     auto *self = reinterpret_cast<CanvasWidget *>(
@@ -1528,7 +1297,6 @@ void main(){ fragColor = uColor; }
       return 0;
     }
 
-    // ── Middle-button pan ────────────────────────────────────────────────
     case WM_MBUTTONDOWN:
       if (!self || !self->viewportEnabled_)
         return 0;
@@ -1542,23 +1310,18 @@ void main(){ fragColor = uColor; }
       self->panning_ = false;
       return 0;
 
-    // ── Left button ──────────────────────────────────────────────────────
     case WM_LBUTTONDOWN: {
       SetCapture(hwnd);
       SetFocus(hwnd);
       if (!self)
         return 0;
       int sx = GET_X_LPARAM(lp), sy = GET_Y_LPARAM(lp);
-
-      // Offer to scrollbars first
-      bool hConsumed = self->hBar_.onMouseDown(
+      bool hC = self->hBar_.onMouseDown(
           sx, sy, [self](float t) { self->applyHScrollFraction(t); });
-      bool vConsumed =
-          !hConsumed && self->vBar_.onMouseDown(sx, sy, [self](float t) {
-            self->applyVScrollFraction(t);
-          });
-
-      if (!hConsumed && !vConsumed) {
+      bool vC = !hC && self->vBar_.onMouseDown(sx, sy, [self](float t) {
+        self->applyVScrollFraction(t);
+      });
+      if (!hC && !vC) {
         if (self->viewportEnabled_ && (GetKeyState(VK_SPACE) & 0x8000)) {
           self->beginPan(sx, sy);
         } else if (self->activeSurface_) {
@@ -1575,9 +1338,9 @@ void main(){ fragColor = uColor; }
       if (!self)
         return 0;
       int sx = GET_X_LPARAM(lp), sy = GET_Y_LPARAM(lp);
-      bool hRel = self->hBar_.onMouseUp(sx, sy);
-      bool vRel = self->vBar_.onMouseUp(sx, sy);
-      if (!hRel && !vRel) {
+      bool hR = self->hBar_.onMouseUp(sx, sy);
+      bool vR = self->vBar_.onMouseUp(sx, sy);
+      if (!hR && !vR) {
         if (self->panning_) {
           self->panning_ = false;
         } else if (self->activeSurface_) {
@@ -1590,7 +1353,6 @@ void main(){ fragColor = uColor; }
       return 0;
     }
 
-    // ── Right button ─────────────────────────────────────────────────────
     case WM_RBUTTONDOWN: {
       SetCapture(hwnd);
       if (self && self->activeSurface_) {
@@ -1612,12 +1374,10 @@ void main(){ fragColor = uColor; }
       return 0;
     }
 
-    // ── Mouse move ───────────────────────────────────────────────────────
     case WM_MOUSEMOVE: {
       if (!self)
         return 0;
       int sx = GET_X_LPARAM(lp), sy = GET_Y_LPARAM(lp);
-
       if (!self->trackingLeave_) {
         TRACKMOUSEEVENT tme{};
         tme.cbSize = sizeof(tme);
@@ -1626,15 +1386,11 @@ void main(){ fragColor = uColor; }
         TrackMouseEvent(&tme);
         self->trackingLeave_ = true;
       }
-
-      // Always update hover state on scrollbars (no button required)
       bool hDrag = self->hBar_.onMouseMove(sx, sy);
       bool vDrag = self->vBar_.onMouseMove(sx, sy);
-      self->scheduleRepaint(); // re-draw hover highlight
-
+      self->scheduleRepaint();
       if (hDrag || vDrag)
-        return 0; // scrollbar drag suppresses canvas
-
+        return 0;
       if (self->panning_) {
         self->continuePan(sx, sy);
       } else if (self->activeSurface_) {
@@ -1653,7 +1409,6 @@ void main(){ fragColor = uColor; }
       }
       return 0;
 
-    // ── Scroll wheel ─────────────────────────────────────────────────────
     case WM_MOUSEWHEEL: {
       if (!self || !self->viewportEnabled_)
         return 0;
@@ -1676,7 +1431,6 @@ void main(){ fragColor = uColor; }
       return 0;
     }
 
-    // ── Keyboard ─────────────────────────────────────────────────────────
     case WM_KEYDOWN: {
       if (!self)
         return 0;
@@ -1737,24 +1491,90 @@ void main(){ fragColor = uColor; }
     if (done)
       return;
     HINSTANCE hi = GetModuleHandle(nullptr);
-
     WNDCLASSEXW wf{};
     wf.cbSize = sizeof(wf);
     wf.lpfnWndProc = FrameProc;
     wf.hInstance = hi;
-    wf.lpszClassName = L"FluxGLFrame7"; // bumped class name for Step 7
+    wf.lpszClassName = L"FluxGLFrame9";
     wf.style = CS_HREDRAW | CS_VREDRAW;
     RegisterClassExW(&wf);
-
     WNDCLASSEXW wg{};
     wg.cbSize = sizeof(wg);
     wg.lpfnWndProc = GLProc;
     wg.hInstance = hi;
-    wg.lpszClassName = L"FluxGLCanvas7";
+    wg.lpszClassName = L"FluxGLCanvas9";
     wg.style = CS_OWNDC | CS_HREDRAW | CS_VREDRAW;
     RegisterClassExW(&wg);
-
     done = true;
+  }
+
+  // ── MSAA pixel-format upgrade ─────────────────────────────────────────────
+  // Called after the bootstrap context is current (so wglGetProcAddress works).
+  // If wglChoosePixelFormatARB is available and finds an 8x MSAA format,
+  // destroys and recreates glHwnd_ + glDC_ with that format, returns true.
+  // The caller continues to create the core 3.3 context on whatever DC is live.
+  bool tryUpgradeToMSAA(int winW, int winH, HGLRC bootstrapCtx) {
+    auto wglCPF = reinterpret_cast<PFNWGLCHOOSEPIXELFORMATARBPROC>(
+        wglGetProcAddress("wglChoosePixelFormatARB"));
+    if (!wglCPF)
+      return false;
+
+    // Request 8x MSAA; fall back to 4x, then 2x if not available.
+    for (int samples : {8, 4, 2}) {
+      const int attribs[] = {WGL_DRAW_TO_WINDOW_ARB,
+                             1,
+                             WGL_SUPPORT_OPENGL_ARB,
+                             1,
+                             WGL_DOUBLE_BUFFER_ARB,
+                             1,
+                             WGL_PIXEL_TYPE_ARB,
+                             WGL_TYPE_RGBA_ARB,
+                             WGL_COLOR_BITS_ARB,
+                             32,
+                             WGL_DEPTH_BITS_ARB,
+                             24,
+                             WGL_SAMPLE_BUFFERS_ARB,
+                             1,
+                             WGL_SAMPLES_ARB,
+                             samples,
+                             0};
+      int fmt = 0;
+      UINT numFormats = 0;
+      if (!wglCPF(glDC_, attribs, nullptr, 1, &fmt, &numFormats) || !numFormats)
+        continue;
+
+      // Tear down the bootstrap window/DC/context
+      wglMakeCurrent(nullptr, nullptr);
+      wglDeleteContext(bootstrapCtx);
+      ReleaseDC(glHwnd_, glDC_);
+      DestroyWindow(glHwnd_);
+
+      // Recreate the GL child with the MSAA pixel format
+      glHwnd_ = CreateWindowExW(
+          WS_EX_NOPARENTNOTIFY, L"FluxGLCanvas9", nullptr,
+          WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN, 0, 0, winW,
+          winH, frameHwnd_, nullptr, GetModuleHandle(nullptr), nullptr);
+      assert(glHwnd_);
+      SetWindowLongPtrW(glHwnd_, GWLP_USERDATA,
+                        reinterpret_cast<LONG_PTR>(this));
+
+      glDC_ = GetDC(glHwnd_);
+      PIXELFORMATDESCRIPTOR pfd2{};
+      pfd2.nSize = sizeof(pfd2);
+      pfd2.nVersion = 1;
+      SetPixelFormat(glDC_, fmt, &pfd2);
+
+      // New bootstrap context on the MSAA DC for wglCreateContextAttribsARB
+      HGLRC newBootstrap = wglCreateContext(glDC_);
+      wglMakeCurrent(glDC_, newBootstrap);
+
+      char msg[64];
+      _snprintf_s(msg, sizeof(msg), _TRUNCATE, "FluxCanvas: MSAA %dx enabled\n",
+                  samples);
+      OutputDebugStringA(msg);
+      return true; // caller should now read glDC_ / current context
+    }
+    return false; // no MSAA — carry on with the plain format
   }
 
   void ensureWindows(HDC parentDC) {
@@ -1766,18 +1586,16 @@ void main(){ fragColor = uColor; }
     parentHwnd_ = owner;
     registerClasses();
 
-    // Frame window: plain child, no scrollbar styles
     frameHwnd_ = CreateWindowExW(
-        WS_EX_NOPARENTNOTIFY, L"FluxGLFrame7", nullptr,
+        WS_EX_NOPARENTNOTIFY, L"FluxGLFrame9", nullptr,
         WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN, x, y, width,
         height, owner, nullptr, GetModuleHandle(nullptr), nullptr);
     assert(frameHwnd_);
     SetWindowLongPtrW(frameHwnd_, GWLP_USERDATA,
                       reinterpret_cast<LONG_PTR>(this));
 
-    // GL child fills the entire frame (scrollbars are drawn inside it)
     glHwnd_ = CreateWindowExW(
-        WS_EX_NOPARENTNOTIFY, L"FluxGLCanvas7", nullptr,
+        WS_EX_NOPARENTNOTIFY, L"FluxGLCanvas9", nullptr,
         WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN, 0, 0, width,
         height, frameHwnd_, nullptr, GetModuleHandle(nullptr), nullptr);
     assert(glHwnd_);
@@ -1787,6 +1605,11 @@ void main(){ fragColor = uColor; }
     setupPixelFormat(glDC_);
     HGLRC tmp = wglCreateContext(glDC_);
     wglMakeCurrent(glDC_, tmp);
+
+    tryUpgradeToMSAA(width, height, tmp);
+
+    HGLRC currentBootstrap = wglGetCurrentContext();
+
     auto wglCA = reinterpret_cast<PFNWGLCREATECONTEXTATTRIBSARBPROC>(
         wglGetProcAddress("wglCreateContextAttribsARB"));
     if (wglCA) {
@@ -1800,18 +1623,17 @@ void main(){ fragColor = uColor; }
       HGLRC core = wglCA(glDC_, nullptr, att);
       if (core) {
         wglMakeCurrent(nullptr, nullptr);
-        wglDeleteContext(tmp);
+        wglDeleteContext(currentBootstrap);
         glRC_ = core;
       } else {
-        glRC_ = tmp;
+        glRC_ = currentBootstrap;
       }
     } else {
-      glRC_ = tmp;
+      glRC_ = currentBootstrap;
     }
     wglMakeCurrent(glDC_, glRC_);
     GL.init();
 
-    // Initialise viewport — scrollbars not yet known so use full size
     vp_.init(width, height, canvasW_, canvasH_);
     lastGLW_ = width;
     lastGLH_ = height;
@@ -1828,6 +1650,8 @@ void main(){ fragColor = uColor; }
       onGLResize(width, height);
   }
 
+  // Plain legacy pixel format — only used as a bootstrap to load WGL
+  // extensions.
   void setupPixelFormat(HDC dc) {
     PIXELFORMATDESCRIPTOR pfd{};
     pfd.nSize = sizeof(pfd);
@@ -1875,11 +1699,13 @@ void main(){ fragColor = uColor; }
     int glH = rc.bottom < 1 ? 1 : rc.bottom;
     glViewport(0, 0, glW, glH);
 
+    // ── Enable hardware MSAA — smooths all triangle edges at no CPU cost ──
+    glEnable(GL_MULTISAMPLE);
+
     float mvp[16];
     vp_.buildMVP(mvp);
     activeSurface_->render(mvp);
 
-    // ── Tick and render custom scrollbars ─────────────────────────────────
     updateSBGeometry(glW, glH);
     bool hFade = hBar_.tick(dt);
     bool vFade = vBar_.tick(dt);
@@ -1888,15 +1714,12 @@ void main(){ fragColor = uColor; }
       glEnable(GL_BLEND);
       glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
       glDisable(GL_SCISSOR_TEST);
-
-      // Render directly to the default framebuffer (screen) in screen-space.
       GL.bindFramebuffer(GL_FRAMEBUFFER, 0);
       glViewport(0, 0, glW, glH);
 
       hBar_.render(sbProg_, sbVAO_, sbVBO_, sbUMVP_, sbUColor_, glW, glH);
       vBar_.render(sbProg_, sbVAO_, sbVBO_, sbUMVP_, sbUColor_, glW, glH);
 
-      // Corner square where both bars meet
       if (hBar_.isVisible() && vBar_.isVisible() && scrollbarsEnabled_) {
         float mvpCorner[16];
         glutil::ortho(0.f, float(glW), float(glH), 0.f, mvpCorner);
@@ -1904,20 +1727,18 @@ void main(){ fragColor = uColor; }
         GL.uniformMatrix4fv(sbUMVP_, 1, GL_FALSE, mvpCorner);
         GL.uniform4f(sbUColor_, 0.12f, 0.12f, 0.12f, 0.35f);
         float cx = float(glW) - kSBThick, cy = float(glH) - kSBThick;
-        float cv[] = {
-            cx,
-            cy,
-            cx + kSBThick,
-            cy,
-            cx + kSBThick,
-            cy + kSBThick,
-            cx + kSBThick,
-            cy + kSBThick,
-            cx,
-            cy + kSBThick,
-            cx,
-            cy,
-        };
+        float cv[] = {cx,
+                      cy,
+                      cx + kSBThick,
+                      cy,
+                      cx + kSBThick,
+                      cy + kSBThick,
+                      cx + kSBThick,
+                      cy + kSBThick,
+                      cx,
+                      cy + kSBThick,
+                      cx,
+                      cy};
         GL.bindVertexArray(sbVAO_);
         GL.bindBuffer(GL_ARRAY_BUFFER, sbVBO_);
         GL.bufferData(GL_ARRAY_BUFFER, sizeof(cv), cv, GL_DYNAMIC_DRAW);
@@ -1928,13 +1749,11 @@ void main(){ fragColor = uColor; }
         glDrawArrays(GL_TRIANGLES, 0, 6);
         GL.bindVertexArray(0);
       }
-
       glDisable(GL_BLEND);
     }
 
     SwapBuffers(glDC_);
 
-    // Keep animating while bars are fading
     bool needsCont = activeSurface_->needsContinuousRedraw() || hFade || vFade;
     if (needsCont && !repaintPending_) {
       repaintPending_ = true;
@@ -1947,10 +1766,8 @@ void main(){ fragColor = uColor; }
       return;
     SetWindowPos(frameHwnd_, nullptr, x, y, width, height,
                  SWP_NOZORDER | SWP_NOACTIVATE);
-    // GL child fills the entire frame — scrollbars live inside it
     SetWindowPos(glHwnd_, nullptr, 0, 0, width, height,
                  SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE);
-
     if (width != lastGLW_ || height != lastGLH_) {
       if (wglGetCurrentContext() != glRC_)
         wglMakeCurrent(glDC_, glRC_);

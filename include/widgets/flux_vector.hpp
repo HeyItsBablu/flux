@@ -212,8 +212,8 @@ namespace vtess {
 
 using namespace vmath;
 
-static constexpr int kEllipseSegs = 128;
-static constexpr int kRoundCapSegs = 8;
+static constexpr int kEllipseSegs = 256;
+static constexpr int kRoundCapSegs = 16;
 static constexpr int kCurveSteps = 16;
 
 using Contour = std::vector<Vec2>;
@@ -371,9 +371,6 @@ inline void earClip(const std::vector<Vec2> &pts, std::vector<float> &out) {
   }
 }
 
-// ── FIX 1: degenerate hw guard ───────────────────────────────────────────────
-// hw < 0.0001 produces NaN normals and invisible / zero-area geometry.
-// Clamp early so all subsequent math stays well-conditioned.
 inline void expandStroke(const std::vector<Vec2> &pts, bool closed, float hw,
                          LineCapV cap, LineJoinV join,
                          std::vector<float> &out) {
@@ -381,7 +378,7 @@ inline void expandStroke(const std::vector<Vec2> &pts, bool closed, float hw,
   if (n < 2)
     return;
   if (hw < 0.0001f)
-    hw = 0.0001f; // guard degenerate zero-width geometry
+    hw = 0.0001f;
 
   auto pushQuad = [&](Vec2 a, Vec2 b, Vec2 c, Vec2 d) {
     out.push_back(a.x);
@@ -403,27 +400,21 @@ inline void expandStroke(const std::vector<Vec2> &pts, bool closed, float hw,
   static constexpr float kMiterLimit = 4.f;
 
   auto miterOffset = [&](Vec2 nIn, Vec2 nOut, float &outScale) -> Vec2 {
-    // bisector direction (unit)
     Vec2 bis = norm(Vec2{nIn.x + nOut.x, nIn.y + nOut.y});
-    float denom = dot(bis, nIn); // == cos(half-angle)
+    float denom = dot(bis, nIn);
     if (denom < 1e-4f) {
-      // ~180° turn (anti-parallel normals) — segments going back on themselves
-      // Use the incoming normal directly; scale = 1.
       outScale = 1.f;
       return nIn;
     }
-    float scale = 1.f / denom; // == 1 / cos(half-angle)
+    float scale = 1.f / denom;
     outScale = scale;
     if (scale > kMiterLimit) {
-      // Bevel fallback — use unit bisector * hw (will create a gap, filled
-      // by the bevel/round fan below)
-      outScale = kMiterLimit; // signal to caller that we clipped
+      outScale = kMiterLimit;
       return bis;
     }
     return bis * scale;
   };
 
-  // ── per-segment normals ────────────────────────────────────────────────────
   int numSegs = closed ? n : n - 1;
   std::vector<Vec2> segN(numSegs);
   for (int i = 0; i < numSegs; i++) {
@@ -431,8 +422,6 @@ inline void expandStroke(const std::vector<Vec2> &pts, bool closed, float hw,
     segN[i] = segNormal(pts[i], pts[j]);
   }
 
-  // ── per-vertex offset vectors (length already scaled for join) ────────────
-  // normals[i] * hw gives the actual displacement from the vertex.
   std::vector<Vec2> normals(n);
   std::vector<float> miterScales(n, 1.f);
 
@@ -451,21 +440,14 @@ inline void expandStroke(const std::vector<Vec2> &pts, bool closed, float hw,
     }
     int prevSeg = (i - 1 + numSegs) % numSegs;
     int nextSeg = i % numSegs;
-    Vec2 nIn = segN[prevSeg];
-    Vec2 nOut = segN[nextSeg];
     float sc = 1.f;
-    normals[i] = miterOffset(nIn, nOut, sc);
+    normals[i] = miterOffset(segN[prevSeg], segN[nextSeg], sc);
     miterScales[i] = sc;
   }
 
-  // ── round-join fan helper ──────────────────────────────────────────────────
-  // Fills the gap on the OUTER side of a corner when join==Round or when
-  // the miter was clamped.  centre = vertex, from/to = the two outer rim
-  // points from the adjacent quads.
   auto roundFan = [&](Vec2 centre, Vec2 fromPt, Vec2 toPt) {
     float a0 = std::atan2(fromPt.y - centre.y, fromPt.x - centre.x);
     float a1 = std::atan2(toPt.y - centre.y, toPt.x - centre.x);
-    // Choose the shorter arc direction
     float da = a1 - a0;
     while (da > 3.14159265f)
       da -= 6.2831853f;
@@ -484,58 +466,36 @@ inline void expandStroke(const std::vector<Vec2> &pts, bool closed, float hw,
     }
   };
 
-  // ── emit quads ────────────────────────────────────────────────────────────
-  // We emit a tight quad per segment using the pre-computed offset vectors.
-  // For Round/Bevel joins we then fill the outer-corner gap with a fan.
-  // The inner side overlaps slightly (that's fine — it just over-draws).
-
   auto emitSegQuad = [&](int i, int j) {
-    Vec2 L0 = pts[i] + normals[i] * hw;
-    Vec2 R0 = pts[i] - normals[i] * hw;
-    Vec2 L1 = pts[j] + normals[j] * hw;
-    Vec2 R1 = pts[j] - normals[j] * hw;
+    Vec2 L0 = pts[i] + normals[i] * hw, R0 = pts[i] - normals[i] * hw;
+    Vec2 L1 = pts[j] + normals[j] * hw, R1 = pts[j] - normals[j] * hw;
     pushQuad(L0, R0, R1, L1);
   };
 
   auto emitJoinFan = [&](int i) {
     if (join == LineJoinV::Butt)
-      return; // no fill needed
+      return;
     if (miterScales[i] <= kMiterLimit && join == LineJoinV::Miter)
-      return; // sharp miter, no gap
-
-    // Determine which side is the outer (convex) corner
+      return;
     int prevSeg = (i - 1 + numSegs) % numSegs;
     int nextSeg = i % numSegs;
-    Vec2 nIn = segN[prevSeg];
-    Vec2 nOut = segN[nextSeg];
-    // cross(nIn, nOut) > 0 → left turn → outer is on the LEFT (+normal side)
-    float cr = cross(nIn, nOut);
+    float cr = cross(segN[prevSeg], segN[nextSeg]);
     if (std::abs(cr) < 1e-6f)
-      return; // straight segment, no gap
-
+      return;
     Vec2 centre = pts[i];
-    if (cr > 0.f) {
-      // Left turn: outer rim is on + side.  The two adjacent quad corners are:
-      //   from = pts[i] + segN[prevSeg] * hw   (end of incoming quad L side)
-      //   to   = pts[i] + segN[nextSeg] * hw   (start of outgoing quad L side)
+    if (cr > 0.f)
       roundFan(centre, centre + segN[prevSeg] * hw,
                centre + segN[nextSeg] * hw);
-    } else {
-      // Right turn: outer rim is on - side.
+    else
       roundFan(centre, centre - segN[prevSeg] * hw,
                centre - segN[nextSeg] * hw);
-    }
   };
 
-  // ── Emit all segment quads ────────────────────────────────────────────────
   for (int i = 0; i < n - 1; i++)
     emitSegQuad(i, i + 1);
   if (closed)
     emitSegQuad(n - 1, 0);
 
-  // ── Emit join fans at every interior / wrap-around vertex ─────────────────
-  // Open path:   joints at vertices 1…n-2 only (no fan at open endpoints).
-  // Closed path: joints at every vertex 0…n-1.
   if (closed) {
     for (int i = 0; i < n; i++)
       emitJoinFan(i);
@@ -567,10 +527,10 @@ inline void expandStroke(const std::vector<Vec2> &pts, bool closed, float hw,
     Vec2 d0 = norm(pts[1] - pts[0]);
     Vec2 d1 = norm(pts[n - 1] - pts[n - 2]);
     if (cap == LineCapV::Round) {
-      roundCap(pts[0], Vec2{-d0.x, -d0.y});
+      roundCap(pts[0], {-d0.x, -d0.y});
       roundCap(pts[n - 1], d1);
     } else if (cap == LineCapV::Square) {
-      squareCap(pts[0], Vec2{-d0.x, -d0.y});
+      squareCap(pts[0], {-d0.x, -d0.y});
       squareCap(pts[n - 1], d1);
     }
   }
@@ -581,11 +541,9 @@ struct ShapeTris {
   std::vector<float> stroke;
 };
 
-// NOTE: hw passed in is already converted to canvas space by caller.
 inline ShapeTris tessShape(const VShape &s) {
   ShapeTris result;
   using namespace vmath;
-
   Contours contours;
   switch (s.kind) {
   case VShapeKind::Rect:
@@ -606,7 +564,6 @@ inline ShapeTris tessShape(const VShape &s) {
     return result;
   }
 
-  // s.stroke.width is already in canvas space (divided by zoom before call)
   float hw = s.stroke.width * 0.5f;
   if (hw < 0.001f)
     hw = 0.001f;
@@ -628,11 +585,9 @@ inline ShapeTris tessShape(const VShape &s) {
       bool closed =
           (s.kind == VShapeKind::Rect || s.kind == VShapeKind::Ellipse ||
            (s.kind == VShapeKind::Poly && s.poly.closed));
-
       LineJoinV effectiveJoin = s.stroke.join;
       if (s.kind == VShapeKind::Rect)
         effectiveJoin = LineJoinV::Miter;
-
       std::vector<float> localStroke;
       expandStroke(c, closed, hw, s.stroke.cap, effectiveJoin, localStroke);
       for (int i = 0; i + 1 < (int)localStroke.size(); i += 2) {
@@ -642,7 +597,6 @@ inline ShapeTris tessShape(const VShape &s) {
       }
     }
   }
-
   return result;
 }
 
@@ -682,14 +636,7 @@ inline vmath::AABB shapeAABB(const VShape &s) {
 // §V3  TOOL ENUM
 // ============================================================================
 
-enum class VTool {
-  Select,
-  Pen,
-  Node,
-  Rect,
-  Ellipse,
-  Line,
-};
+enum class VTool { Select, Pen, Node, Rect, Ellipse, Line };
 
 // ============================================================================
 // §V4  UNDO SNAPSHOT
@@ -862,7 +809,6 @@ public:
     if (mvp[5] > 1e-9f)
       currentOffsetY_ = (-1.f - mvp[13]) / mvp[5];
 
-    // ── 1. Pasteboard background ──────────────────────────────────────────
     glClearColor(pasteboard_.r, pasteboard_.g, pasteboard_.b, 1.f);
     glClear(GL_COLOR_BUFFER_BIT);
 
@@ -871,7 +817,6 @@ public:
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    // ── 2. Artboard shadow ────────────────────────────────────────────────
     if (showArtboard_) {
       const float kShadowOff = 6.f;
       std::vector<float> shadowQuad = {
@@ -884,7 +829,6 @@ public:
       };
       drawTris(shadowQuad, shadowColor_, mvp);
 
-      // ── 3. White artboard ─────────────────────────────────────────────
       std::vector<float> artQuad = {
           0.f,       0.f,       float(w_), 0.f,       float(w_), float(h_),
           float(w_), float(h_), 0.f,       float(h_), 0.f,       0.f,
@@ -892,13 +836,10 @@ public:
       drawTris(artQuad, artboardColor_, mvp);
     }
 
-    // ── 4. Shapes ─────────────────────────────────────────────────────────
     for (auto &shape : scene_)
       renderShape(shape, mvp);
-
     renderGhost(mvp);
 
-    // ── 5. Artboard border — zoom-stable 1 screen-pixel line ─────────────
     if (showArtboard_) {
       RGBA borderCol = {0.18f, 0.18f, 0.18f, 1.f};
       drawBorderRect(0.f, 0.f, float(w_), float(h_), 1.f, borderCol, mvp);
@@ -965,7 +906,7 @@ public:
     case VTool::Select:
       onSelectUp(x, y);
       break;
-    case VTool::Pen: /* commits on click */
+    case VTool::Pen:
       break;
     case VTool::Node:
       onNodeUp();
@@ -1067,7 +1008,6 @@ public:
 private:
   int w_ = 512, h_ = 512;
   bool dirty_ = false;
-
   bool showArtboard_ = true;
   RGBA pasteboard_ = {0.314f, 0.314f, 0.314f, 1.f};
   RGBA artboardColor_ = {1.f, 1.f, 1.f, 1.f};
@@ -1075,7 +1015,6 @@ private:
 
   VScene scene_;
   VShapeId nextId_ = 1;
-
   std::vector<VShapeId> selection_;
   VTool tool_ = VTool::Select;
   VFill activeFill_ = {{0.2f, 0.5f, 1.f, 1.f}, FillRule::NonZero, false};
@@ -1088,39 +1027,34 @@ private:
   float mx_ = 0, my_ = 0, mdownX_ = 0, mdownY_ = 0;
 
   // Select state
-  bool draggingShape_ = false;
-  bool draggingBox_ = false;
+  bool draggingShape_ = false, draggingBox_ = false;
   float boxX0_ = 0, boxY0_ = 0, boxX1_ = 0, boxY1_ = 0;
   std::vector<std::pair<VShapeId, vmath::Mat3>> dragOrigins_;
 
   // Pen state
   bool penInProgress_ = false;
-  std::vector<vmath::Vec2> penAnchors_;
-  std::vector<vmath::Vec2> penCPs_;
+  std::vector<vmath::Vec2> penAnchors_, penCPs_;
   vmath::Vec2 penCursor_{};
 
   // Node state
   bool draggingNode_ = false;
-  int dragNodeIdx_ = -1;
+  int dragNodeIdx_ = -1, dragNodeCPSide_ = 0;
   bool dragNodeIsCP_ = false;
-  int dragNodeCPSide_ = 0;
 
-  // Shape drag-create state
+  // Shape drag-create state  — stored in CANVAS SPACE
   bool shapeDragging_ = false;
-  float shapeX0_ = 0, shapeY0_ = 0;
+  float shapeX0_ = 0, shapeY0_ = 0; // canvas-space start corner
   VShapeId ghostId_ = kNoShape;
 
   // GL
   GLuint prog_ = 0, vao_ = 0, vbo_ = 0;
   float currentZoom_ = 1.f;
-  float currentOffsetX_ =
-      0.f; // canvas-space viewport origin (extracted from MVP)
+  float currentOffsetX_ = 0.f; // canvas-space viewport origin
   float currentOffsetY_ = 0.f;
   struct ULocs {
     GLint mvp = -1, mode = -1, color = -1, tex = -1, alpha = -1;
   } u_;
 
-  // Text texture cache
   struct TextTex {
     GLuint tex = 0;
     int w = 0, h = 0;
@@ -1128,6 +1062,18 @@ private:
   };
   std::unordered_map<uint64_t, TextTex> textTexCache_;
   ULONG_PTR gdiplusToken_ = 0;
+
+  // =========================================================================
+  // ── Coordinate helpers ────────────────────────────────────────────────────
+
+  // Convert a screen-space point (as delivered by the canvas widget, which
+  // already calls Viewport::screenToCanvas before dispatching to us) back to
+  // canvas space.  NOTE: by the time mouse events reach VectorSurface the
+  // CanvasWidget has already done screenToCanvas, so mx_/my_ ARE canvas coords.
+  // shapeX0_/shapeY0_ are therefore stored in canvas space — no further
+  // conversion is needed in onShapeUp.  This helper exists for clarity and
+  // defensive use only.
+  vmath::Vec2 canvasPos(float cx, float cy) const { return {cx, cy}; }
 
   // =========================================================================
   // ── Undo helpers ──────────────────────────────────────────────────────────
@@ -1238,7 +1184,7 @@ private:
     }
   }
 
-  void onSelectMove(float x, float y, float /*dx*/, float /*dy*/) {
+  void onSelectMove(float x, float y, float, float) {
     if (draggingShape_) {
       float totalDX = x - mdownX_, totalDY = y - mdownY_;
       for (auto &[id, orig] : dragOrigins_) {
@@ -1346,7 +1292,6 @@ private:
     pushUndo();
     scene_.push_back(std::move(s));
     selection_ = {scene_.back().id};
-
     penInProgress_ = false;
     penAnchors_.clear();
     penCPs_.clear();
@@ -1427,9 +1372,7 @@ private:
     auto *s = beginEdit(id);
     if (!s)
       return;
-
     vmath::Vec2 local{x, y};
-
     if (s->kind == VShapeKind::Poly) {
       if (dragNodeIdx_ < (int)s->poly.pts.size())
         s->poly.pts[dragNodeIdx_] = local;
@@ -1464,12 +1407,17 @@ private:
 
   // =========================================================================
   // ── Tool: Rect / Ellipse / Line ───────────────────────────────────────────
+  //
+  // IMPORTANT: by the time mouse events arrive here, CanvasWidget has already
+  // called Viewport::screenToCanvas(), so x/y are in CANVAS SPACE.
+  // We store shapeX0_/shapeY0_ in canvas space and use them directly.
 
   void onShapeDown(float x, float y) {
     shapeDragging_ = true;
-    shapeX0_ = x;
-    shapeY0_ = y;
+    shapeX0_ = x; // canvas space
+    shapeY0_ = y; // canvas space
   }
+
   void onShapeMove(float /*x*/, float /*y*/) { /* ghost drawn in renderGhost */
   }
 
@@ -1477,8 +1425,13 @@ private:
     if (!shapeDragging_)
       return;
     shapeDragging_ = false;
+
+    // x, y and shapeX0_/shapeY0_ are all in canvas space (CanvasWidget
+    // converts screen→canvas before dispatching to us).
     float x0 = min(shapeX0_, x), y0 = min(shapeY0_, y);
     float x1 = max(shapeX0_, x), y1 = max(shapeY0_, y);
+
+    // Minimum size threshold: 2 canvas units (independent of zoom)
     if (x1 - x0 < 2.f && y1 - y0 < 2.f)
       return;
 
@@ -1499,6 +1452,7 @@ private:
       break;
     case VTool::Line:
       s.kind = VShapeKind::Poly;
+      // Use the original un-clamped endpoints for lines
       s.poly.pts = {{shapeX0_, shapeY0_}, {x, y}};
       s.poly.closed = false;
       s.fill.none = true;
@@ -1585,47 +1539,32 @@ void main(){
                     float w, const float mvp[16]) {
     if (pts.size() < 2)
       return;
-
-    // Detect closed loop: caller appended front() as last element
     bool closed =
         (pts.size() >= 3 && vmath::len(pts.back() - pts.front()) < 1e-4f);
-
-    // For closed loops, remove the duplicate tail before tessellating
     std::vector<vmath::Vec2> clean = pts;
     if (closed && clean.size() > 1)
       clean.pop_back();
-
     std::vector<float> tris;
     vtess::expandStroke(clean, closed, w * 0.5f, LineCapV::Round,
                         LineJoinV::Round, tris);
     drawTris(tris, col, mvp);
   }
 
-  // ── Artboard border as four inset quads ───────────────────────────────────
-  // lineW is in SCREEN pixels; we convert to canvas space via / currentZoom_.
   void drawBorderRect(float x0, float y0, float x1, float y1, float lineWScreen,
                       const RGBA &col, const float mvp[16]) {
     float w = lineWScreen / currentZoom_;
     std::vector<float> tris;
-
     auto addQuad = [&](float ax, float ay, float bx, float by, float cx,
                        float cy, float dx, float dy) {
       tris.insert(tris.end(), {ax, ay, bx, by, cx, cy, cx, cy, dx, dy, ax, ay});
     };
-
-    // Top edge
     addQuad(x0, y1 - w, x1, y1 - w, x1, y1, x0, y1);
-    // Bottom edge
     addQuad(x0, y0, x1, y0, x1, y0 + w, x0, y0 + w);
-    // Left edge (between top/bottom)
     addQuad(x0, y0 + w, x0 + w, y0 + w, x0 + w, y1 - w, x0, y1 - w);
-    // Right edge (between top/bottom)
     addQuad(x1 - w, y0 + w, x1, y0 + w, x1, y1 - w, x1 - w, y1 - w);
-
     drawTris(tris, col, mvp);
   }
 
-  // Small diamond marker (canvas-space radius)
   void drawDiamond(float x, float y, float r, const RGBA &col,
                    const float mvp[16]) {
     std::vector<float> v = {
@@ -1634,7 +1573,6 @@ void main(){
     drawTris(v, col, mvp);
   }
 
-  // Small circle (canvas-space radius)
   void drawCircle(float x, float y, float r, const RGBA &col,
                   const float mvp[16]) {
     const int N = 12;
@@ -1734,12 +1672,11 @@ void main(){
         int gdiRow = by0 + (bh - 1 - row);
         for (int col = 0; col < bw; col++) {
           const uint8_t *p = dib + (size_t(gdiRow) * fw + bx0 + col) * 4;
-          uint8_t b8 = p[0], g8 = p[1], r8 = p[2];
           uint8_t *d = rgba.data() + (size_t(row) * bw + col) * 4;
-          d[0] = r8;
-          d[1] = g8;
-          d[2] = b8;
-          d[3] = (r8 || g8 || b8) ? 255 : 0;
+          d[0] = p[2];
+          d[1] = p[1];
+          d[2] = p[0];
+          d[3] = (p[0] || p[1] || p[2]) ? 255 : 0;
         }
       }
       glGenTextures(1, &tt.tex);
@@ -1757,7 +1694,6 @@ void main(){
     SelectObject(hdcMem, oldBmp);
     DeleteObject(hBmp);
     DeleteDC(hdcMem);
-
     textTexCache_[key] = tt;
     return textTexCache_[key];
   }
@@ -1766,10 +1702,8 @@ void main(){
     if (!tt.tex || tt.w <= 0 || tt.h <= 0)
       return;
     float x0 = tt.ox, y0 = tt.oy, x1 = x0 + tt.w, y1 = y0 + tt.h;
-    float q[] = {
-        x0, y0, 0, 0, x1, y0, 1, 0, x1, y1, 1, 1,
-        x1, y1, 1, 1, x0, y1, 0, 1, x0, y0, 0, 0,
-    };
+    float q[] = {x0, y0, 0, 0, x1, y0, 1, 0, x1, y1, 1, 1,
+                 x1, y1, 1, 1, x0, y1, 0, 1, x0, y0, 0, 0};
     GL.useProgram(prog_);
     GL.uniformMatrix4fv(u_.mvp, 1, GL_FALSE, mvp);
     GL.uniform1i(u_.mode, 0);
@@ -1797,24 +1731,22 @@ void main(){
     return (snapped - offsetScreen) / zoom;
   }
 
-  // Snap every vertex in a contour along both axes for a given stroke width.
   vtess::Contour snapContour(const vtess::Contour &c,
                              float strokeWidthScreen) const {
     float hw = strokeWidthScreen * 0.5f;
-    float frac_x = hw - std::floorf(hw); // 0 if even width, 0.5 if odd
-    float frac_y = frac_x;
-
-    // Viewport offset in screen pixels
+    float frac_x = hw - std::floorf(hw);
     float oxs = currentOffsetX_ * currentZoom_;
     float oys = currentOffsetY_ * currentZoom_;
-
     vtess::Contour out;
     out.reserve(c.size());
     for (auto &p : c)
       out.push_back({snapCoord(p.x, currentZoom_, oxs, frac_x),
-                     snapCoord(p.y, currentZoom_, oys, frac_y)});
+                     snapCoord(p.y, currentZoom_, oys, frac_x)});
     return out;
   }
+
+  // =========================================================================
+  // ── renderShape ───────────────────────────────────────────────────────────
 
   void renderShape(const VShape &s, const float mvp[16]) {
     if (s.kind == VShapeKind::Text) {
@@ -1825,14 +1757,23 @@ void main(){
 
     VShape adjusted = s;
     if (!adjusted.stroke.none) {
-      // Convert screen-pt width → canvas-space width
       adjusted.stroke.width = s.stroke.width / currentZoom_;
-      // Enforce minimum 0.5 screen-pixel visual width
       if (adjusted.stroke.width * currentZoom_ < 0.5f)
         adjusted.stroke.width = 0.5f / currentZoom_;
     }
 
-    // ── Fill tessellation (no snapping needed for fill) ───────────────────
+    // ── Adaptive ellipse segment count via Ramanujan perimeter ───────────
+    // Produces ~1 segment per 1.5 screen pixels — smooth at any zoom.
+    auto ellipseSegs = [&](float rx, float ry) -> int {
+      float a = rx * currentZoom_;
+      float b = ry * currentZoom_;
+      float hh = (a - b) * (a - b) / ((a + b) * (a + b) + 1e-9f);
+      float perim = 3.14159265f * (a + b) *
+                    (1.f + 3.f * hh / (10.f + sqrtf(4.f - 3.f * hh)));
+      return (int)std::clamp(perim / 1.5f, 32.f, 2048.f);
+    };
+
+    // ── Fill ─────────────────────────────────────────────────────────────
     if (!adjusted.fill.none) {
       vtess::Contours fillContours;
       switch (s.kind) {
@@ -1842,7 +1783,8 @@ void main(){
         break;
       case VShapeKind::Ellipse:
         fillContours.push_back(vtess::ellipseContour(
-            s.ellipse.cx, s.ellipse.cy, s.ellipse.rx, s.ellipse.ry));
+            s.ellipse.cx, s.ellipse.cy, s.ellipse.rx, s.ellipse.ry,
+            ellipseSegs(s.ellipse.rx, s.ellipse.ry)));
         break;
       case VShapeKind::Poly:
         fillContours.push_back(s.poly.pts);
@@ -1853,12 +1795,11 @@ void main(){
       default:
         break;
       }
+
       std::vector<float> fillTris;
-      for (auto &c : fillContours) {
-        vtess::earClip(c, fillTris); // earClip appends, so reuse vector
-      }
-      // Re-apply xform (earClip works in local space already via tessShape,
-      // but here we tessellate directly, so apply xform manually)
+      for (auto &c : fillContours)
+        vtess::earClip(c, fillTris);
+
       std::vector<float> fillWorld;
       fillWorld.reserve(fillTris.size());
       for (int i = 0; i + 1 < (int)fillTris.size(); i += 2) {
@@ -1870,16 +1811,9 @@ void main(){
         drawTris(fillWorld, adjusted.fill.color, mvp);
     }
 
+    // ── Stroke ───────────────────────────────────────────────────────────
     if (!adjusted.stroke.none) {
       float hw = adjusted.stroke.width * 0.5f;
-      float frac_x, frac_y;
-
-      {
-        float hw_screen = s.stroke.width * 0.5f;
-        float f = hw_screen - std::floorf(hw_screen);
-        frac_x = f;
-        frac_y = f;
-      }
 
       bool snapApplicable = (s.kind == VShapeKind::Rect ||
                              (s.kind == VShapeKind::Poly && s.poly.closed));
@@ -1892,7 +1826,8 @@ void main(){
         break;
       case VShapeKind::Ellipse:
         strokeContours.push_back(vtess::ellipseContour(
-            s.ellipse.cx, s.ellipse.cy, s.ellipse.rx, s.ellipse.ry));
+            s.ellipse.cx, s.ellipse.cy, s.ellipse.rx, s.ellipse.ry,
+            ellipseSegs(s.ellipse.rx, s.ellipse.ry)));
         break;
       case VShapeKind::Poly:
         strokeContours.push_back(s.poly.pts);
@@ -1904,17 +1839,49 @@ void main(){
         break;
       }
 
+
+      static constexpr float kMaxSegPx = 10.f;
+      float maxSegCanvas = kMaxSegPx / currentZoom_;
+
+      auto subdivideContour = [&](const vtess::Contour &c,
+                                  bool closed) -> vtess::Contour {
+        vtess::Contour out;
+        int n = (int)c.size();
+        if (n == 0)
+          return out;
+        int numSegs = closed ? n : n - 1;
+        for (int i = 0; i < numSegs; i++) {
+          vmath::Vec2 a = c[i], b = c[(i + 1) % n];
+          out.push_back(a);
+          float segLen = vmath::len(b - a);
+          int steps = (int)std::ceil(segLen / maxSegCanvas);
+          if (steps > 1) {
+            for (int k = 1; k < steps; k++)
+              out.push_back(vmath::lerp(a, b, float(k) / float(steps)));
+          }
+        }
+        if (!closed)
+          out.push_back(c.back());
+        return out;
+      };
+
       std::vector<float> strokeTris;
       for (auto &c : strokeContours) {
-
-        vtess::Contour snapped =
-            snapApplicable ? snapContour(c, s.stroke.width) : c;
-
         bool isClosed =
             (s.kind == VShapeKind::Rect || s.kind == VShapeKind::Ellipse ||
              (s.kind == VShapeKind::Poly && s.poly.closed));
+
+        LineJoinV effectiveJoin = adjusted.stroke.join;
+        if (s.kind == VShapeKind::Rect)
+          effectiveJoin = LineJoinV::Miter;
+
+        // Subdivide first (in canvas space), then snap
+        vtess::Contour subd = subdivideContour(c, isClosed);
+        vtess::Contour snapped =
+            snapApplicable ? snapContour(subd, s.stroke.width) : subd;
+
         vtess::expandStroke(snapped, isClosed, hw, adjusted.stroke.cap,
-                            adjusted.stroke.join, strokeTris);
+                            effectiveJoin, strokeTris);
       }
 
       std::vector<float> strokeWorld;
@@ -1929,6 +1896,11 @@ void main(){
     }
   }
 
+  // =========================================================================
+  // ── renderGhost ───────────────────────────────────────────────────────────
+  // mx_/my_ and shapeX0_/shapeY0_ are in canvas space (CanvasWidget converts
+  // before dispatching), so we use them directly here.
+
   void renderGhost(const float mvp[16]) {
     RGBA ghostStroke = {0.2f, 0.5f, 0.9f, 1.0f};
 
@@ -1937,7 +1909,6 @@ void main(){
       std::vector<vmath::Vec2> ghostPts = penAnchors_;
       ghostPts.push_back(penCursor_);
       std::vector<float> strokeTris;
-
       float ghostHW = 1.5f / currentZoom_;
       vtess::expandStroke(ghostPts, false, ghostHW, LineCapV::Round,
                           LineJoinV::Round, strokeTris);
@@ -1959,7 +1930,7 @@ void main(){
       }
     }
 
-    // Shape drag ghost
+    // Shape drag ghost — shapeX0_/shapeY0_ and mx_/my_ are canvas coords
     if (shapeDragging_) {
       float x0 = min(shapeX0_, mx_), y0 = min(shapeY0_, my_);
       float x1 = max(shapeX0_, mx_), y1 = max(shapeY0_, my_);
@@ -2001,17 +1972,18 @@ void main(){
       std::vector<float> fill;
       vtess::earClip(box, fill);
       drawTris(fill, {0.3f, 0.5f, 1.f, 0.12f}, mvp);
-      // Close the loop for drawLineLoop (append front)
       box.push_back(box.front());
       float lw = 1.f / currentZoom_;
       drawLineLoop(box, {0.4f, 0.6f, 1.f, 0.8f}, lw, mvp);
     }
   }
 
+  // =========================================================================
+  // ── renderSelection ───────────────────────────────────────────────────────
+
   void renderSelection(const float mvp[16]) {
     if (selection_.empty())
       return;
-
     for (auto id : selection_) {
       auto it = std::find_if(scene_.begin(), scene_.end(),
                              [id](auto &s) { return s.id == id; });
@@ -2022,7 +1994,6 @@ void main(){
       auto bb = vtess::shapeAABB(s);
       if (bb.valid()) {
         float pad = 4.f / currentZoom_;
-
         std::vector<vmath::Vec2> box = {{bb.x0 - pad, bb.y0 - pad},
                                         {bb.x1 + pad, bb.y0 - pad},
                                         {bb.x1 + pad, bb.y1 + pad},
@@ -2030,7 +2001,6 @@ void main(){
                                         {bb.x0 - pad, bb.y0 - pad}};
         float lw = 1.f / currentZoom_;
         drawLineLoop(box, {0.3f, 0.6f, 1.f, 0.9f}, lw, mvp);
-
         float hs = 4.f / currentZoom_;
         for (auto &c : std::vector<vmath::Vec2>{{bb.x0 - pad, bb.y0 - pad},
                                                 {bb.x1 + pad, bb.y0 - pad},
@@ -2042,8 +2012,7 @@ void main(){
       if (tool_ != VTool::Node)
         continue;
 
-      RGBA anchorCol = {1, 1, 1, 1};
-      RGBA cpCol = {1, .8f, .2f, 1};
+      RGBA anchorCol = {1, 1, 1, 1}, cpCol = {1, .8f, .2f, 1};
       float aR = 5.f / currentZoom_;
       float cpR = 4.f / currentZoom_;
       float stemW = 0.8f / currentZoom_;
