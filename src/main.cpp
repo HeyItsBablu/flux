@@ -157,6 +157,10 @@ public:
     canvasPtr_ = canvas.get();
     canvas->setScrollbarsEnabled(false);
 
+    // ── Push initial style immediately so the surface starts with white fill
+    //    and black stroke rather than whatever the VectorSurface default is.
+    pushStyleToSurface();
+
     canvas->onViewportChanged = [this](float z) {
       syncZoom(z);
       if (surface_)
@@ -210,7 +214,7 @@ public:
     // Zoom cluster
     auto zoomCluster =
         Row(Text("Zoom:")->setFontSize(10)->setTextColor(kDim), SizedBox(4, 0),
-            Slider(kZoomMin, kZoomMax, 1.0)
+            Slider(kZoomMin, kZoomMax, 0.25)
                 ->setValue(zoomLevel)
                 ->setTrackFillColor(kAccent)
                 ->setWidth(90),
