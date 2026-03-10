@@ -1212,6 +1212,34 @@ private:
     endEdit();
   }
 
+  // Clamp a canvas-space point so it stays within [0,w_] × [0,h_].
+  vmath::Vec2 clampToArtboard(float x, float y) const {
+    return {std::clamp(x, 0.f, float(w_)), std::clamp(y, 0.f, float(h_))};
+  }
+
+  // Clamp a translation (dx,dy) so that the shape's current AABB, after the
+  // move, does not escape [0,w_] × [0,h_].
+  vmath::Vec2 clampTranslation(VShapeId id, float dx, float dy) const {
+    auto *s = const_cast<VectorSurface *>(this)->beginEdit(id);
+    if (!s)
+      return {dx, dy};
+    auto bb = vtess::shapeAABB(*s);
+    if (!bb.valid())
+      return {dx, dy};
+    float fw = float(w_), fh = float(h_);
+    // prevent left/top edge going below 0
+    if (bb.x0 + dx < 0.f)
+      dx = -bb.x0;
+    if (bb.y0 + dy < 0.f)
+      dy = -bb.y0;
+    // prevent right/bottom edge going above artboard size
+    if (bb.x1 + dx > fw)
+      dx = fw - bb.x1;
+    if (bb.y1 + dy > fh)
+      dy = fh - bb.y1;
+    return {dx, dy};
+  }
+
   // =========================================================================
   // ── Hit-test shapes ───────────────────────────────────────────────────────
 
@@ -1441,17 +1469,31 @@ private:
       return;
     }
 
-    if (draggingShape_) {
-      float totalDX = x - mdownX_, totalDY = y - mdownY_;
-      for (auto &[id, orig] : dragOrigins_) {
-        auto *s = beginEdit(id);
-        if (!s)
-          continue;
-        s->xform.m[6] = orig.m[6] + totalDX;
-        s->xform.m[7] = orig.m[7] + totalDY;
-      }
-      endEdit();
+  if (draggingShape_) {
+    float totalDX = x - mdownX_, totalDY = y - mdownY_;
+    for (auto &[id, orig] : dragOrigins_) {
+      auto *s = beginEdit(id);
+      if (!s) continue;
+
+      // Temporarily apply the raw translation, then clamp.        <<< NEW
+      s->xform.m[6] = orig.m[6] + totalDX;                        // unchanged
+      s->xform.m[7] = orig.m[7] + totalDY;                        // unchanged
+
+      // Clamp so every corner of this shape stays on the artboard <<< NEW
+      auto bb = vtess::shapeAABB(*s);                              // <<< NEW
+      float fw = float(w_), fh = float(h_);                       // <<< NEW
+      float cx = 0.f, cy = 0.f;                                   // <<< NEW
+      if (bb.valid()) {                                            // <<< NEW
+        if (bb.x0 < 0.f) cx = -bb.x0;                            // <<< NEW
+        if (bb.y0 < 0.f) cy = -bb.y0;                            // <<< NEW
+        if (bb.x1 > fw)  cx = fw - bb.x1;                        // <<< NEW
+        if (bb.y1 > fh)  cy = fh - bb.y1;                        // <<< NEW
+      }                                                            // <<< NEW
+      s->xform.m[6] += cx;                                        // <<< NEW
+      s->xform.m[7] += cy;                                        // <<< NEW
     }
+    endEdit();
+  }
     if (draggingBox_) {
       boxX1_ = x;
       boxY1_ = y;
@@ -1523,9 +1565,10 @@ private:
       penAnchors_.clear();
       penCPs_.clear();
     }
-    penAnchors_.push_back({x, y});
-    penCPs_.push_back({x, y});
-    penCursor_ = {x, y};
+    auto cp = clampToArtboard(x, y);                            // <<< NEW
+    penAnchors_.push_back(cp);                                  // <<< NEW (was {x,y})
+    penCPs_.push_back(cp);                                      // <<< NEW (was {x,y})
+    penCursor_ = cp;    
   }
   void onPenMove(float x, float y) {
     penCursor_ = {x, y};
@@ -1644,7 +1687,7 @@ private:
     auto *s = beginEdit(id);
     if (!s)
       return;
-    vmath::Vec2 local{x, y};
+    vmath::Vec2 local = clampToArtboard(x, y); 
 
     if (s->kind == VShapeKind::Poly) {
       if (dragNodeIdx_ < (int)s->poly.pts.size())
@@ -1680,16 +1723,31 @@ private:
 
   void onShapeDown(float x, float y) {
     shapeDragging_ = true;
-    shapeX0_ = x;
-    shapeY0_ = y;
+    auto c = clampToArtboard(x, y); // <<< NEW
+    shapeX0_ = c.x;                 // <<< NEW
+    shapeY0_ = c.y;                 // <<< NEW
   }
   void onShapeMove(float, float) {}
   void onShapeUp(float x, float y) {
     if (!shapeDragging_)
       return;
     shapeDragging_ = false;
+
+    // Clamp the release point to the artboard               <<< NEW
+    auto cr = clampToArtboard(x, y); // <<< NEW
+    x = cr.x;
+    y = cr.y; // <<< NEW
+
     float x0 = min(shapeX0_, x), y0 = min(shapeY0_, y);
     float x1 = max(shapeX0_, x), y1 = max(shapeY0_, y);
+
+    // Also clamp the whole rect to [0,w_]×[0,h_]           <<< NEW
+    float fw = float(w_), fh = float(h_); // <<< NEW
+    x0 = std::clamp(x0, 0.f, fw);         // <<< NEW
+    y0 = std::clamp(y0, 0.f, fh);         // <<< NEW
+    x1 = std::clamp(x1, 0.f, fw);         // <<< NEW
+    y1 = std::clamp(y1, 0.f, fh);         // <<< NEW
+
     if (x1 - x0 < 2.f && y1 - y0 < 2.f)
       return;
 
@@ -1719,7 +1777,6 @@ private:
     pushUndo();
     scene_.push_back(std::move(s));
     selection_ = {scene_.back().id};
-    // Reset transform state for newly created shape
     transformMode_ = TransformMode::Scale;
     originSet_ = false;
     transformOrigin_ = selectionBB().center();
@@ -2213,8 +2270,11 @@ void main(){
     }
 
     if (shapeDragging_) {
-      float x0 = min(shapeX0_, mx_), y0 = min(shapeY0_, my_);
-      float x1 = max(shapeX0_, mx_), y1 = max(shapeY0_, my_);
+      float fw_ = float(w_), fh_ = float(h_);                    // <<< NEW
+      float gx = std::clamp(mx_, 0.f, fw_);                      // <<< NEW
+      float gy = std::clamp(my_, 0.f, fh_);                      // <<< NEW
+      float x0 = min(shapeX0_, gx), y0 = min(shapeY0_, gy);     // <<< was mx_/my_
+      float x1 = max(shapeX0_, gx), y1 = max(shapeY0_, gy);     // <<< was mx_/my_
       VShape ghost;
       ghost.fill = activeFill_;
       ghost.fill.color.a *= .5f;
