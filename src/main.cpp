@@ -424,13 +424,87 @@ public:
                            ->setSpacing(4)
                            ->setCrossAxisAlignment(CrossAxisAlignment::Center);
 
+                           auto snapCluster =
+        Row(Text("Snap:")->setFontSize(10)->setTextColor(kDim),
+            SizedBox(4, 0),
+            Tooltip(
+                GestureDetector(
+                    Container(Text("⊞")->setFontSize(13)
+                                  ->setTextColor(kText))
+                        ->setWidth(26)->setHeight(22)
+                        ->setBorderRadius(3)
+                        ->setBackgroundColor(RGB(55,55,55))
+                        ->setBorderWidth(1)->setBorderColor(kBorder))
+                    ->setOnTap([this]() {
+                        if (surface_) {
+                            surface_->setSnapEnabled(!surface_->snapEnabled());
+                            if (canvasPtr_) canvasPtr_->redraw();
+                        }
+                    }),
+                "Toggle Snap (S)"),
+            SizedBox(3,0),
+            Tooltip(
+                GestureDetector(
+                    Container(Text("≡")->setFontSize(13)
+                                  ->setTextColor(kText))
+                        ->setWidth(26)->setHeight(22)
+                        ->setBorderRadius(3)
+                        ->setBackgroundColor(RGB(55,55,55))
+                        ->setBorderWidth(1)->setBorderColor(kBorder))
+                    ->setOnTap([this]() {
+                        if (surface_) {
+                            surface_->setShowGuides(!surface_->showGuides());
+                            if (canvasPtr_) canvasPtr_->redraw();
+                        }
+                    }),
+                "Toggle Guides (Ctrl+;)"),
+            SizedBox(3,0),
+            Tooltip(
+                GestureDetector(
+                    Container(Text("⊟")->setFontSize(13)
+                                  ->setTextColor(kText))
+                        ->setWidth(26)->setHeight(22)
+                        ->setBorderRadius(3)
+                        ->setBackgroundColor(RGB(55,55,55))
+                        ->setBorderWidth(1)->setBorderColor(kBorder))
+                    ->setOnTap([this]() {
+                        if (surface_) {
+                            surface_->setSnapToGrid(!surface_->snapToGrid());
+                            if (canvasPtr_) canvasPtr_->redraw();
+                        }
+                    }),
+                "Toggle Grid Snap"),
+            SizedBox(3,0),
+            Tooltip(
+                GestureDetector(
+                    Container(Text("✕")->setFontSize(10)
+                                  ->setTextColor(RGB(200,80,80)))
+                        ->setWidth(26)->setHeight(22)
+                        ->setBorderRadius(3)
+                        ->setBackgroundColor(RGB(55,55,55))
+                        ->setBorderWidth(1)->setBorderColor(kBorder))
+                    ->setOnTap([this]() {
+                        if (surface_) {
+                            surface_->clearGuides();
+                            if (canvasPtr_) canvasPtr_->redraw();
+                        }
+                    }),
+                "Clear All Guides"))
+        ->setSpacing(3)
+        ->setCrossAxisAlignment(CrossAxisAlignment::Center);
+        
+
     auto controlBar =
         Container(Row(zoomCluster, SizedBox(14, 0),
                       Container(nullptr)
                           ->setWidth(1)
                           ->setHeight(20)
                           ->setBackgroundColor(kBorder),
-                      SizedBox(14, 0), editCluster)
+                      SizedBox(14, 0), editCluster,
+                      SizedBox(14, 0),
+                      Container(nullptr)->setWidth(1)->setHeight(20)
+                          ->setBackgroundColor(kBorder),
+                      SizedBox(14, 0), snapCluster)
                       ->setSpacing(0)
                       ->setCrossAxisAlignment(CrossAxisAlignment::Center))
             ->setBackgroundColor(kPanel)

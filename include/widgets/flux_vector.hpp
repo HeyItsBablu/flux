@@ -702,6 +702,17 @@ struct VSnapshot {
 };
 
 // ============================================================================
+// §V4c  GUIDES
+// ============================================================================
+
+struct Guide {
+  enum class Axis { H, V };
+  Axis axis;
+  float position = 0.f; // canvas-space coordinate
+  bool locked = false;
+};
+
+// ============================================================================
 // §V4b  TEXT SESSION
 // ============================================================================
 
@@ -939,9 +950,19 @@ public:
       drawTris(aq, artboardColor_, mvp);
     }
 
+    if (snapToGrid_ && showGuides_)
+      renderGrid(mvp);
+
     for (auto &shape : scene_)
       renderShape(shape, mvp);
     renderGhost(mvp);
+
+    if (showGuides_)
+      renderGuides(mvp);
+    if (showRulers_)
+      renderRulers(mvp);
+
+    renderSnapFeedback(mvp);
 
     // ── Text session live preview ─────────────────────────────────────────
     if (textSession_.active)
@@ -963,6 +984,38 @@ public:
     my_ = y;
     mdownX_ = x;
     mdownY_ = y;
+
+    // ── Ruler drag → create new guide ────────────────────────────────────
+    if (showRulers_) {
+      bool inHRuler = (y >= 0.f && y < kRulerSize && x >= kRulerSize);
+      bool inVRuler = (x >= 0.f && x < kRulerSize && y >= kRulerSize);
+      if (inHRuler) {
+        draggingNewGuide_ = true;
+        newGuideAxis_ = Guide::Axis::H;
+        newGuidePos_ = y;
+        dirty_ = true;
+        return;
+      }
+      if (inVRuler) {
+        draggingNewGuide_ = true;
+        newGuideAxis_ = Guide::Axis::V;
+        newGuidePos_ = x;
+        dirty_ = true;
+        return;
+      }
+    }
+
+    // ── Click existing guide → start moving it ────────────────────────────
+    if (showGuides_) {
+      int gi = hitTestGuide(x, y);
+      if (gi >= 0) {
+        draggingExistGuide_ = true;
+        draggingGuideIdx_ = gi;
+        dirty_ = true;
+        return;
+      }
+    }
+
     switch (tool_) {
     case VTool::Select:
       onSelectDown(x, y);
@@ -989,6 +1042,23 @@ public:
     float dx = x - mx_, dy = y - my_;
     mx_ = x;
     my_ = y;
+
+    // New guide being dragged out of ruler
+    if (draggingNewGuide_) {
+      newGuidePos_ = (newGuideAxis_ == Guide::Axis::H) ? y : x;
+      dirty_ = true;
+      return;
+    }
+    // Existing guide being repositioned
+    if (draggingExistGuide_ && draggingGuideIdx_ >= 0) {
+      auto &g = guides_[draggingGuideIdx_];
+      g.position = (g.axis == Guide::Axis::H) ? y : x;
+      dirty_ = true;
+      return;
+    }
+    // Update hovered guide for cursor feedback
+    hoveredGuide_ = showGuides_ ? hitTestGuide(x, y) : -1;
+
     switch (tool_) {
     case VTool::Select:
       onSelectMove(x, y, dx, dy);
@@ -999,7 +1069,7 @@ public:
     case VTool::Node:
       onNodeMove(x, y, dx, dy);
       break;
-    case VTool::Text: /* no drag behaviour */
+    case VTool::Text:
       break;
     case VTool::Rect:
     case VTool::Ellipse:
@@ -1011,6 +1081,32 @@ public:
   }
 
   void onMouseUp(float x, float y) override {
+    // Commit new guide dragged from ruler
+    if (draggingNewGuide_) {
+      float pos = (newGuideAxis_ == Guide::Axis::H) ? y : x;
+      // Only add if dragged onto the canvas
+      bool onCanvas = (newGuideAxis_ == Guide::Axis::H)
+                          ? (pos > kRulerSize && pos < float(h_))
+                          : (pos > kRulerSize && pos < float(w_));
+      if (onCanvas)
+        guides_.push_back({newGuideAxis_, pos});
+      draggingNewGuide_ = false;
+      dirty_ = true;
+      return;
+    }
+    // Commit moved guide — delete if dragged back into ruler
+    if (draggingExistGuide_ && draggingGuideIdx_ >= 0) {
+      auto &g = guides_[draggingGuideIdx_];
+      bool offCanvas = (g.axis == Guide::Axis::H) ? (g.position < kRulerSize)
+                                                  : (g.position < kRulerSize);
+      if (offCanvas)
+        guides_.erase(guides_.begin() + draggingGuideIdx_);
+      draggingExistGuide_ = false;
+      draggingGuideIdx_ = -1;
+      dirty_ = true;
+      return;
+    }
+
     switch (tool_) {
     case VTool::Select:
       onSelectUp(x, y);
@@ -1123,6 +1219,59 @@ public:
     showArtboard_ = v;
     dirty_ = true;
   }
+
+  // ── Guides public API ─────────────────────────────────────────────────────
+  void addGuide(Guide::Axis axis, float pos) {
+    guides_.push_back({axis, pos});
+    dirty_ = true;
+  }
+  void removeGuide(int idx) {
+    if (idx >= 0 && idx < (int)guides_.size()) {
+      guides_.erase(guides_.begin() + idx);
+      dirty_ = true;
+    }
+  }
+  void clearGuides() {
+    guides_.clear();
+    dirty_ = true;
+  }
+  const std::vector<Guide> &guides() const { return guides_; }
+
+  void setSnapEnabled(bool v) {
+    snapEnabled_ = v;
+    dirty_ = true;
+  }
+  void setSnapToGuides(bool v) {
+    snapToGuides_ = v;
+    dirty_ = true;
+  }
+  void setSnapToObjects(bool v) {
+    snapToObjects_ = v;
+    dirty_ = true;
+  }
+  void setSnapToGrid(bool v) {
+    snapToGrid_ = v;
+    dirty_ = true;
+  }
+  void setGridSize(float v) {
+    gridSize_ = max(4.f, v);
+    dirty_ = true;
+  }
+  void setShowGuides(bool v) {
+    showGuides_ = v;
+    dirty_ = true;
+  }
+  void setShowRulers(bool v) {
+    showRulers_ = v;
+    dirty_ = true;
+  }
+
+  bool snapEnabled() const { return snapEnabled_; }
+  bool showGuides() const { return showGuides_; }
+  bool showRulers() const { return showRulers_; }
+  bool snapToGrid() const { return snapToGrid_; }
+  float gridSize() const { return gridSize_; }
+
   bool showArtboard() const { return showArtboard_; }
   // ── Boolean operations (Clipper2) ─────────────────────────────────────────
   enum class BooleanOp { Unite, Subtract, Intersect, Xor };
@@ -1334,6 +1483,31 @@ private:
   bool blinkVisible_ = true;
   double blinkAccum_ = 0.0;
 
+  // ── Guides & Snap ─────────────────────────────────────────────────────────
+  std::vector<Guide> guides_;
+  bool snapEnabled_ = true;
+  bool snapToGuides_ = true;
+  bool snapToObjects_ = true;
+  bool snapToGrid_ = false;
+  float gridSize_ = 20.f;
+  bool showGuides_ = true;
+  bool showRulers_ = true;
+  static constexpr float kRulerSize = 18.f;
+
+  // Guide drag-create state
+  bool draggingNewGuide_ = false;
+  Guide::Axis newGuideAxis_ = Guide::Axis::V;
+  float newGuidePos_ = 0.f;
+
+  // Guide drag-move state
+  int hoveredGuide_ = -1; // index into guides_, -1 = none
+  int draggingGuideIdx_ = -1;
+  bool draggingExistGuide_ = false;
+
+  // Snap feedback (for rendering the snap highlight this frame)
+  bool snapFiredX_ = false, snapFiredY_ = false;
+  float snapLineX_ = 0.f, snapLineY_ = 0.f;
+
   // ── GL ────────────────────────────────────────────────────────────────────
   GLuint prog_ = 0, vao_ = 0, vbo_ = 0;
   float currentZoom_ = 1.f;
@@ -1356,6 +1530,150 @@ private:
   };
   std::unordered_map<uint64_t, TextTex> textTexCache_;
   ULONG_PTR gdiplusToken_ = 0;
+
+  // =========================================================================
+  // ── renderGrid ────────────────────────────────────────────────────────────
+  void renderGrid(const float mvp[16]) {
+    RGBA col = {0.5f, 0.5f, 0.5f, 0.15f};
+    float lw = 1.f / currentZoom_;
+    std::vector<float> tris;
+    for (float gx = 0.f; gx <= float(w_); gx += gridSize_) {
+      vtess::expandStroke({{gx, 0.f}, {gx, float(h_)}}, false, lw * .5f,
+                          LineCapV::Butt, LineJoinV::Miter, tris);
+    }
+    for (float gy = 0.f; gy <= float(h_); gy += gridSize_) {
+      vtess::expandStroke({{0.f, gy}, {float(w_), gy}}, false, lw * .5f,
+                          LineCapV::Butt, LineJoinV::Miter, tris);
+    }
+    drawTris(tris, col, mvp);
+  }
+
+  // =========================================================================
+  // ── renderGuides ──────────────────────────────────────────────────────────
+  void renderGuides(const float mvp[16]) {
+    float lw = 1.f / currentZoom_;
+    for (int i = 0; i < (int)guides_.size(); i++) {
+      auto &g = guides_[i];
+      bool hovered = (i == hoveredGuide_ || i == draggingGuideIdx_);
+      RGBA col = hovered ? RGBA{0.2f, 0.9f, 1.f, 0.95f}
+                         : RGBA{0.2f, 0.55f, 1.f, 0.55f};
+      std::vector<float> tris;
+      if (g.axis == Guide::Axis::H) {
+        vtess::expandStroke({{0.f, g.position}, {float(w_), g.position}}, false,
+                            lw * .5f, LineCapV::Butt, LineJoinV::Miter, tris);
+      } else {
+        vtess::expandStroke({{g.position, 0.f}, {g.position, float(h_)}}, false,
+                            lw * .5f, LineCapV::Butt, LineJoinV::Miter, tris);
+      }
+      drawTris(tris, col, mvp);
+    }
+
+    // Draw the new guide preview while dragging from ruler
+    if (draggingNewGuide_) {
+      RGBA preCol = {0.4f, 1.f, 0.6f, 0.75f};
+      std::vector<float> tris;
+      if (newGuideAxis_ == Guide::Axis::H) {
+        vtess::expandStroke({{0.f, newGuidePos_}, {float(w_), newGuidePos_}},
+                            false, lw * .5f, LineCapV::Butt, LineJoinV::Miter,
+                            tris);
+      } else {
+        vtess::expandStroke({{newGuidePos_, 0.f}, {newGuidePos_, float(h_)}},
+                            false, lw * .5f, LineCapV::Butt, LineJoinV::Miter,
+                            tris);
+      }
+      drawTris(tris, preCol, mvp);
+    }
+  }
+
+  // =========================================================================
+  // ── renderRulers ──────────────────────────────────────────────────────────
+  void renderRulers(const float mvp[16]) {
+    float rs = kRulerSize / currentZoom_;
+    RGBA rulerBg = {0.18f, 0.18f, 0.18f, 1.f};
+    RGBA rulerTick = {0.55f, 0.55f, 0.55f, 1.f};
+    RGBA corner = {0.14f, 0.14f, 0.14f, 1.f};
+
+    // Horizontal ruler (top)
+    std::vector<float> hRuler = {0.f,       -rs, float(w_), -rs,
+                                 float(w_), 0.f, float(w_), 0.f,
+                                 0.f,       0.f, 0.f,       -rs};
+    drawTris(hRuler, rulerBg, mvp);
+
+    // Vertical ruler (left)
+    std::vector<float> vRuler = {-rs, 0.f,       0.f, 0.f,       0.f, float(h_),
+                                 0.f, float(h_), -rs, float(h_), -rs, 0.f};
+    drawTris(vRuler, rulerBg, mvp);
+
+    // Corner square
+    std::vector<float> cornerQ = {-rs, -rs, 0.f, -rs, 0.f, 0.f,
+                                  0.f, 0.f, -rs, 0.f, -rs, -rs};
+    drawTris(cornerQ, corner, mvp);
+
+    // Tick marks — every gridSize_ canvas units
+    float tickStep = gridSize_;
+    float lw = 0.5f / currentZoom_;
+    std::vector<float> ticks;
+
+    // Horizontal ruler ticks
+    for (float gx = 0.f; gx <= float(w_); gx += tickStep) {
+      bool major = (std::fmod(gx, tickStep * 5) < 0.5f);
+      float th = major ? rs * 0.55f : rs * 0.3f;
+      vtess::expandStroke({{gx, -rs}, {gx, -rs + th}}, false, lw,
+                          LineCapV::Butt, LineJoinV::Miter, ticks);
+    }
+    // Vertical ruler ticks
+    for (float gy = 0.f; gy <= float(h_); gy += tickStep) {
+      bool major = (std::fmod(gy, tickStep * 5) < 0.5f);
+      float th = major ? rs * 0.55f : rs * 0.3f;
+      vtess::expandStroke({{-rs, gy}, {-rs + th, gy}}, false, lw,
+                          LineCapV::Butt, LineJoinV::Miter, ticks);
+    }
+    drawTris(ticks, rulerTick, mvp);
+
+    // Mouse position cursor line on rulers
+    std::vector<float> cursorTris;
+    float lw2 = 1.f / currentZoom_;
+    vtess::expandStroke({{mx_, -rs}, {mx_, 0.f}}, false, lw2, LineCapV::Butt,
+                        LineJoinV::Miter, cursorTris);
+    vtess::expandStroke({{-rs, my_}, {0.f, my_}}, false, lw2, LineCapV::Butt,
+                        LineJoinV::Miter, cursorTris);
+    drawTris(cursorTris, {1.f, 0.4f, 0.1f, 0.85f}, mvp);
+  }
+
+  // =========================================================================
+  // ── renderSnapFeedback ────────────────────────────────────────────────────
+  void renderSnapFeedback(const float mvp[16]) {
+    if (!snapEnabled_)
+      return;
+    float lw = 1.f / currentZoom_;
+    if (snapFiredX_) {
+      std::vector<float> tris;
+      vtess::expandStroke({{snapLineX_, 0.f}, {snapLineX_, float(h_)}}, false,
+                          lw, LineCapV::Butt, LineJoinV::Miter, tris);
+      drawTris(tris, {0.f, 1.f, 0.9f, 0.75f}, mvp);
+    }
+    if (snapFiredY_) {
+      std::vector<float> tris;
+      vtess::expandStroke({{0.f, snapLineY_}, {float(w_), snapLineY_}}, false,
+                          lw, LineCapV::Butt, LineJoinV::Miter, tris);
+      drawTris(tris, {0.f, 1.f, 0.9f, 0.75f}, mvp);
+    }
+  }
+
+  // Returns guide index under screen point, -1 if none
+  int hitTestGuide(float x, float y) const {
+    float thresh = 5.f / currentZoom_;
+    for (int i = (int)guides_.size() - 1; i >= 0; i--) {
+      auto &g = guides_[i];
+      if (g.locked)
+        continue;
+      float d = (g.axis == Guide::Axis::H) ? std::abs(g.position - y)
+                                           : std::abs(g.position - x);
+      if (d < thresh)
+        return i;
+    }
+    return -1;
+  }
 
   // =========================================================================
   // ── Handle geometry helpers ───────────────────────────────────────────────
@@ -1457,6 +1775,140 @@ private:
   vmath::Vec2 clampToArtboard(float x, float y) const {
     return {std::clamp(x, 0.f, float(w_)), std::clamp(y, 0.f, float(h_))};
   }
+
+  // =========================================================================
+  // ── Snap resolver ─────────────────────────────────────────────────────────
+
+  // Returns nearest snapped X, sets snapFiredX_ if a snap occurred
+  float snapX(float cx, VShapeId excludeId = kNoShape) {
+    if (!snapEnabled_)
+      return cx;
+    float thresh = 6.f / currentZoom_;
+    float best = cx, bestD = thresh;
+
+    auto tryX = [&](float candidate) {
+      float d = std::abs(candidate - cx);
+      if (d < bestD) {
+        bestD = d;
+        best = candidate;
+      }
+    };
+
+    // Grid
+    if (snapToGrid_) {
+      float g = std::round(cx / gridSize_) * gridSize_;
+      tryX(g);
+    }
+    // Guides
+    if (snapToGuides_) {
+      for (auto &guide : guides_)
+        if (guide.axis == Guide::Axis::V)
+          tryX(guide.position);
+    }
+    // Object edges
+    if (snapToObjects_) {
+      for (auto &s : scene_) {
+        if (s.id == excludeId)
+          continue;
+        auto bb = vtess::shapeAABB(s);
+        if (!bb.valid())
+          continue;
+        tryX(bb.x0);
+        tryX(bb.x1);
+        tryX(bb.center().x);
+      }
+    }
+
+    snapFiredX_ = (best != cx);
+    snapLineX_ = best;
+    return best;
+  }
+
+  float snapY(float cy, VShapeId excludeId = kNoShape) {
+    if (!snapEnabled_)
+      return cy;
+    float thresh = 6.f / currentZoom_;
+    float best = cy, bestD = thresh;
+
+    auto tryY = [&](float candidate) {
+      float d = std::abs(candidate - cy);
+      if (d < bestD) {
+        bestD = d;
+        best = candidate;
+      }
+    };
+
+    if (snapToGrid_) {
+      float g = std::round(cy / gridSize_) * gridSize_;
+      tryY(g);
+    }
+    if (snapToGuides_) {
+      for (auto &guide : guides_)
+        if (guide.axis == Guide::Axis::H)
+          tryY(guide.position);
+    }
+    if (snapToObjects_) {
+      for (auto &s : scene_) {
+        if (s.id == excludeId)
+          continue;
+        auto bb = vtess::shapeAABB(s);
+        if (!bb.valid())
+          continue;
+        tryY(bb.y0);
+        tryY(bb.y1);
+        tryY(bb.center().y);
+      }
+    }
+
+    snapFiredY_ = (best != cy);
+    snapLineY_ = best;
+    return best;
+  }
+
+  // Snap a full AABB translation — snaps all 5 candidate points
+  // (left, right, top, bottom, center) and picks the closest snap per axis
+  vmath::Vec2 snapTranslation(const vmath::AABB &bb, float dx, float dy,
+                              VShapeId excludeId = kNoShape) {
+    if (!snapEnabled_)
+      return {dx, dy};
+
+    float newX0 = bb.x0 + dx, newX1 = bb.x1 + dx, newCX = bb.center().x + dx;
+    float newY0 = bb.y0 + dy, newY1 = bb.y1 + dy, newCY = bb.center().y + dy;
+
+    float thresh = 6.f / currentZoom_;
+
+    // Try snapping each edge/center, pick whichever fires closest
+    struct Cand {
+      float raw, snapped;
+    };
+    auto bestCandX = [&]() -> float {
+      float bestD = thresh + 1.f, bestShift = 0.f;
+      for (float raw : {newX0, newX1, newCX}) {
+        float sn = snapX(raw, excludeId);
+        float d = std::abs(sn - raw);
+        if (snapFiredX_ && d < bestD) {
+          bestD = d;
+          bestShift = sn - raw;
+        }
+      }
+      return dx + bestShift;
+    };
+    auto bestCandY = [&]() -> float {
+      float bestD = thresh + 1.f, bestShift = 0.f;
+      for (float raw : {newY0, newY1, newCY}) {
+        float sn = snapY(raw, excludeId);
+        float d = std::abs(sn - raw);
+        if (snapFiredY_ && d < bestD) {
+          bestD = d;
+          bestShift = sn - raw;
+        }
+      }
+      return dy + bestShift;
+    };
+
+    return {bestCandX(), bestCandY()};
+  }
+
   vmath::Vec2 clampTranslation(VShapeId id, float dx, float dy) const {
     auto *s = const_cast<VectorSurface *>(this)->beginEdit(id);
     if (!s)
@@ -1669,13 +2121,41 @@ private:
       return;
     }
     if (draggingShape_) {
+      snapFiredX_ = snapFiredY_ = false;
       float totalDX = x - mdownX_, totalDY = y - mdownY_;
+
+      // Build combined AABB of all dragged shapes at their drag-origin position
+      vmath::AABB combinedBB;
       for (auto &[id, orig] : dragOrigins_) {
         auto *s = beginEdit(id);
         if (!s)
           continue;
-        s->xform.m[6] = orig.m[6] + totalDX;
-        s->xform.m[7] = orig.m[7] + totalDY;
+        vmath::Mat3 savedXform = s->xform;
+        s->xform.m[6] = orig.m[6];
+        s->xform.m[7] = orig.m[7];
+        auto bb = vtess::shapeAABB(*s);
+        s->xform = savedXform;
+        if (bb.valid()) {
+          combinedBB.expand({bb.x0, bb.y0});
+          combinedBB.expand({bb.x1, bb.y1});
+        }
+      }
+
+      // Snap the combined translation
+      VShapeId firstId =
+          dragOrigins_.empty() ? kNoShape : dragOrigins_[0].first;
+      auto snapped =
+          snapTranslation({combinedBB.x0 + totalDX, combinedBB.y0 + totalDY,
+                           combinedBB.x1 + totalDX, combinedBB.y1 + totalDY},
+                          totalDX, totalDY, firstId);
+      float sdx = snapped.x, sdy = snapped.y;
+
+      for (auto &[id, orig] : dragOrigins_) {
+        auto *s = beginEdit(id);
+        if (!s)
+          continue;
+        s->xform.m[6] = orig.m[6] + sdx;
+        s->xform.m[7] = orig.m[7] + sdy;
         auto bb = vtess::shapeAABB(*s);
         float fw = float(w_), fh = float(h_);
         float cx = 0.f, cy = 0.f;
@@ -2063,6 +2543,10 @@ private:
     y1 = std::clamp(y1, 0.f, fh);
     if (x1 - x0 < 2.f && y1 - y0 < 2.f)
       return;
+    x0 = snapX(x0);
+    y0 = snapY(y0);
+    x1 = snapX(x1);
+    y1 = snapY(y1);
     VShape s;
     s.fill = activeFill_;
     s.stroke = activeStroke_;
