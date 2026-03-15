@@ -755,6 +755,7 @@ class ContainerWidget : public Widget {
 public:
   void computeLayout(HDC hdc, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
+                      
 
     BoxConstraints self = selfConstraints(constraints);
 
@@ -1069,6 +1070,29 @@ public:
   std::shared_ptr<ContainerWidget> setBorderAlpha(BYTE alpha) {
     borderAlpha = alpha;
     markNeedsPaint();
+    return std::static_pointer_cast<ContainerWidget>(shared_from_this());
+  }
+
+  // ── Visibility ────────────────────────────────────────────────────────────
+  std::shared_ptr<ContainerWidget> setVisible(bool v) {
+    visible = v;
+    markNeedsLayout();
+    return std::static_pointer_cast<ContainerWidget>(shared_from_this());
+  }
+
+  template <typename T, typename F>
+  std::shared_ptr<ContainerWidget> setVisible(State<T> &state, F transform) {
+    std::function<bool(const T &)> fn = transform;
+    visible = fn(state.get());
+    markNeedsLayout();
+    state.bindProperty(
+        shared_from_this(),
+        [fn](Widget *w, const T &val) {
+          auto *self = static_cast<ContainerWidget *>(w);
+          self->visible = fn(val);
+          self->markNeedsLayout();
+        },
+        true);
     return std::static_pointer_cast<ContainerWidget>(shared_from_this());
   }
 };

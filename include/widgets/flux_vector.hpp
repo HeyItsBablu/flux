@@ -143,10 +143,23 @@ struct PathCmd {
 
 enum class VFillRule { NonZero, EvenOdd };
 
+struct GradientStop {
+  RGBA color = {0, 0, 0, 1};
+  float position = 0.f; // 0.0 → 1.0 along the gradient axis
+};
+
+enum class VFillMode { Solid, LinearGradient };
+
 struct VFill {
   RGBA color = {0, 0, 0, 1};
-  VFillRule rule = VFillRule ::NonZero;
+  VFillRule rule = VFillRule::NonZero;
   bool none = false;
+
+  // Gradient fields (only used when mode == LinearGradient)
+  VFillMode mode = VFillMode::Solid;
+  std::vector<GradientStop> stops; // 2–4 stops, sorted by position
+  float gx0 = 0.f, gy0 = 0.f;      // start point (object space 0→1)
+  float gx1 = 1.f, gy1 = 0.f;      // end point   (object space 0→1)
 };
 
 enum class LineCapV { Butt, Round, Square };
@@ -1328,6 +1341,11 @@ private:
   float currentOffsetY_ = 0.f;
   struct ULocs {
     GLint mvp = -1, mode = -1, color = -1, tex = -1, alpha = -1;
+    // Gradient uniforms
+    GLint gStart = -1, gEnd = -1;
+    GLint gColors = -1, gPositions = -1, gStopCount = -1;
+    // Shape AABB for object-space gradient mapping
+    GLint shapeBBMin = -1, shapeBBMax = -1;
   } u_;
 
   struct TextTex {
@@ -2086,21 +2104,61 @@ layout(location=0) in vec2 aPos;
 layout(location=1) in vec2 aUV;
 uniform mat4 uMVP;
 out vec2 vUV;
-void main(){ vUV=aUV; gl_Position=uMVP*vec4(aPos,0,1); }
+out vec2 vWorld;
+void main(){
+  vUV = aUV;
+  vWorld = aPos;
+  gl_Position = uMVP * vec4(aPos, 0, 1);
+}
 )GLSL";
+
     const char *frag = R"GLSL(
 #version 330 core
 in vec2 vUV;
+in vec2 vWorld;
 uniform sampler2D uTex;
-uniform vec4  uColor;
-uniform float uAlpha;
-uniform int   uMode;
+uniform vec4      uColor;
+uniform float     uAlpha;
+uniform int       uMode;
+
+// Gradient uniforms
+uniform vec2  uGStart;       // gradient start in world space
+uniform vec2  uGEnd;         // gradient end in world space
+uniform vec4  uGColors[4];   // stop colors
+uniform float uGPos[4];      // stop positions 0→1
+uniform int   uGStopCount;   // 2–4
+
 out vec4 fragColor;
+
+vec4 evalGradient(float t) {
+  t = clamp(t, 0.0, 1.0);
+  vec4 c = uGColors[0];
+  for (int i = 1; i < uGStopCount; i++) {
+    if (t >= uGPos[i-1] && t <= uGPos[i]) {
+      float f = (t - uGPos[i-1]) / max(uGPos[i] - uGPos[i-1], 0.0001);
+      c = mix(uGColors[i-1], uGColors[i], f);
+    }
+  }
+  if (t > uGPos[uGStopCount-1]) c = uGColors[uGStopCount-1];
+  return c;
+}
+
 void main(){
-  if(uMode==0){ vec4 c=texture(uTex,vUV); fragColor=vec4(c.rgb,c.a*uAlpha); }
-  else         { fragColor=uColor; }
+  if (uMode == 0) {
+    vec4 c = texture(uTex, vUV);
+    fragColor = vec4(c.rgb, c.a * uAlpha);
+  } else if (uMode == 1) {
+    fragColor = uColor;
+  } else {
+    // Linear gradient — project world pos onto gradient axis
+    vec2 axis = uGEnd - uGStart;
+    float len2 = dot(axis, axis);
+    float t = len2 > 0.0001 ? dot(vWorld - uGStart, axis) / len2 : 0.0;
+    fragColor = evalGradient(t);
+  }
 }
 )GLSL";
+
     prog_ = glutil::linkProgram(vert, frag);
     assert(prog_);
     u_.mvp = GL.getUniformLocation(prog_, "uMVP");
@@ -2108,6 +2166,11 @@ void main(){
     u_.color = GL.getUniformLocation(prog_, "uColor");
     u_.tex = GL.getUniformLocation(prog_, "uTex");
     u_.alpha = GL.getUniformLocation(prog_, "uAlpha");
+    u_.gStart = GL.getUniformLocation(prog_, "uGStart");
+    u_.gEnd = GL.getUniformLocation(prog_, "uGEnd");
+    u_.gColors = GL.getUniformLocation(prog_, "uGColors");
+    u_.gPositions = GL.getUniformLocation(prog_, "uGPos");
+    u_.gStopCount = GL.getUniformLocation(prog_, "uGStopCount");
   }
 
   void buildBuffers() {
@@ -2132,6 +2195,50 @@ void main(){
     GL.uniformMatrix4fv(u_.mvp, 1, GL_FALSE, mvp);
     GL.uniform1i(u_.mode, 1);
     GL.uniform4f(u_.color, col.r, col.g, col.b, col.a);
+    GL.bindVertexArray(vao_);
+    GL.bindBuffer(GL_ARRAY_BUFFER, vbo_);
+    GL.bufferData(GL_ARRAY_BUFFER, GLsizeiptr(verts.size() * sizeof(float)),
+                  verts.data(), GL_DYNAMIC_DRAW);
+    GL.enableVertexAttribArray(0);
+    GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 2,
+                           nullptr);
+    GL.disableVertexAttribArray(1);
+    glDrawArrays(GL_TRIANGLES, 0, (int)(verts.size() / 2));
+    GL.bindVertexArray(0);
+  }
+
+  void drawTrisGradient(const std::vector<float> &verts, const VFill &fill,
+                        const vmath::AABB &bb, const float mvp[16]) {
+    if (verts.empty())
+      return;
+
+    // Map object-space gradient coords (0→1) to world space using the AABB
+    float wx0 = bb.x0 + fill.gx0 * bb.width();
+    float wy0 = bb.y0 + fill.gy0 * bb.height();
+    float wx1 = bb.x0 + fill.gx1 * bb.width();
+    float wy1 = bb.y0 + fill.gy1 * bb.height();
+
+    // Upload stop data — pad unused slots to avoid reading garbage
+    float colArr[16] = {}; // 4 stops × 4 floats
+    float posArr[4] = {};
+    int cnt = min((int)fill.stops.size(), 4);
+    for (int i = 0; i < cnt; i++) {
+      colArr[i * 4 + 0] = fill.stops[i].color.r;
+      colArr[i * 4 + 1] = fill.stops[i].color.g;
+      colArr[i * 4 + 2] = fill.stops[i].color.b;
+      colArr[i * 4 + 3] = fill.stops[i].color.a;
+      posArr[i] = fill.stops[i].position;
+    }
+
+    GL.useProgram(prog_);
+    GL.uniformMatrix4fv(u_.mvp, 1, GL_FALSE, mvp);
+    GL.uniform1i(u_.mode, 2);
+    GL.uniform2f(u_.gStart, wx0, wy0);
+    GL.uniform2f(u_.gEnd, wx1, wy1);
+    GL.uniform4fv(u_.gColors, 4, colArr);
+    GL.uniform1fv(u_.gPositions, 4, posArr);
+    GL.uniform1i(u_.gStopCount, cnt);
+
     GL.bindVertexArray(vao_);
     GL.bindBuffer(GL_ARRAY_BUFFER, vbo_);
     GL.bufferData(GL_ARRAY_BUFFER, GLsizeiptr(verts.size() * sizeof(float)),
@@ -2521,7 +2628,7 @@ void main(){
         // Use Clipper2 to clean self-intersections before triangulating
         clipperCleanFill(fillContours,
                          s.fill.rule == VFillRule::EvenOdd ? VFillRule::EvenOdd
-                                                          : VFillRule::NonZero,
+                                                           : VFillRule::NonZero,
                          fillTris);
       } else {
         for (auto &c : fillContours)
@@ -2534,8 +2641,15 @@ void main(){
         fillWorld.push_back(p.x);
         fillWorld.push_back(p.y);
       }
-      if (!fillWorld.empty())
-        drawTris(fillWorld, adjusted.fill.color, mvp);
+      if (!fillWorld.empty()) {
+        if (s.fill.mode == VFillMode::LinearGradient &&
+            s.fill.stops.size() >= 2) {
+          auto bb = vtess::shapeAABB(s);
+          drawTrisGradient(fillWorld, s.fill, bb, mvp);
+        } else {
+          drawTris(fillWorld, adjusted.fill.color, mvp);
+        }
+      }
     }
     if (!adjusted.stroke.none) {
       float hw = adjusted.stroke.width * .5f;

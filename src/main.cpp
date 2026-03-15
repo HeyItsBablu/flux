@@ -20,6 +20,13 @@ class VectorApp : public Component {
   State<double> strokeWidth;
   State<bool> fillNone;
   State<bool> strokeNone;
+  // Gradient state
+  State<bool> useGradient;
+  State<int> selectedStop; // which stop is selected (0–3)
+  State<int> stopCount;    // total stops (2–4)
+  // Per-stop color stored as hex strings
+  State<std::string> stopColor0, stopColor1, stopColor2, stopColor3;
+  State<double> stopPos0, stopPos1, stopPos2, stopPos3;
   State<double> zoomLevel;
   State<bool> canUndo, canRedo;
 
@@ -31,7 +38,8 @@ class VectorApp : public Component {
   State<bool> fontBold;
   State<bool> fontItalic;
   State<bool> fontUnderline;
-  State<std::string> fontFace; // font family name
+  State<std::string> fontFace;  // font family name
+  State<double> currentStopPos; // add to class state declarations
 
   std::shared_ptr<VectorSurface> surface_;
   CanvasWidget *canvasPtr_ = nullptr;
@@ -151,6 +159,69 @@ class VectorApp : public Component {
       canvasPtr_->redraw();
   }
 
+  void pushGradientToSurface() {
+    if (!surface_)
+      return;
+    VFill fill;
+    fill.none = fillNone.get();
+    fill.color = parseHexColor(fillColor.get());
+
+    if (useGradient.get()) {
+      fill.mode = VFillMode::LinearGradient;
+      fill.gx0 = 0.f;
+      fill.gy0 = 0.5f;
+      fill.gx1 = 1.f;
+      fill.gy1 = 0.5f;
+
+      auto makeStop = [](const std::string &hex, double pos) -> GradientStop {
+        return {parseHexColor(hex), float(pos)};
+      };
+      fill.stops.push_back(makeStop(stopColor0.get(), stopPos0.get()));
+      fill.stops.push_back(makeStop(stopColor1.get(), stopPos1.get()));
+      int cnt = stopCount.get();
+      if (cnt >= 3)
+        fill.stops.push_back(makeStop(stopColor2.get(), stopPos2.get()));
+      if (cnt >= 4)
+        fill.stops.push_back(makeStop(stopColor3.get(), stopPos3.get()));
+
+      // Sort stops by position
+      std::sort(fill.stops.begin(), fill.stops.end(),
+                [](const GradientStop &a, const GradientStop &b) {
+                  return a.position < b.position;
+                });
+    }
+    surface_->setActiveFill(fill);
+  }
+
+  void setCurrentStopPos(double v) {
+    switch (selectedStop.get()) {
+    case 0:
+      stopPos0.set(v);
+      break;
+    case 1:
+      stopPos1.set(v);
+      break;
+    case 2:
+      stopPos2.set(v);
+      break;
+    case 3:
+      stopPos3.set(v);
+      break;
+    }
+  }
+  double getCurrentStopPos() const {
+    switch (selectedStop.get()) {
+    case 0:
+      return stopPos0.get();
+    case 1:
+      return stopPos1.get();
+    case 2:
+      return stopPos2.get();
+    default:
+      return stopPos3.get();
+    }
+  }
+
 public:
   VectorApp()
       : activeTool(VTool::Select, context), fillColor("#FFFFFF", context),
@@ -160,7 +231,13 @@ public:
         canRedo(false, context), transformMode("scale", context),
         hasSelection(false, context), fontSize(36, context),
         fontBold(false, context), fontItalic(false, context),
-        fontUnderline(false, context), fontFace("Arial", context) {}
+        fontUnderline(false, context), fontFace("Arial", context),
+        useGradient(false, context), selectedStop(0, context),
+        stopCount(2, context), stopColor0("#FFFFFF", context),
+        stopColor1("#000000", context), stopColor2("#888888", context),
+        stopColor3("#444444", context), stopPos0(0.0, context),
+        stopPos1(1.0, context), stopPos2(0.33, context),
+        stopPos3(0.66, context), currentStopPos(0.0, context) {}
 
   WidgetPtr build() override {
     int screenW = GetSystemMetrics(SM_CXSCREEN);
@@ -197,7 +274,21 @@ public:
     });
     strokeColor.listen([this](const std::string &) { pushStyleToSurface(); });
     strokeWidth.listen([this](double) { pushStyleToSurface(); });
-    fillNone.listen([this](bool) { pushStyleToSurface(); });
+    fillNone.listen([this](bool) {
+      pushGradientToSurface();
+      pushTextStyleToSurface();
+    });
+    useGradient.listen([this](bool) { pushGradientToSurface(); });
+    selectedStop.listen([this](int) { /* just UI update */ });
+    stopCount.listen([this](int) { pushGradientToSurface(); });
+    stopColor0.listen([this](const std::string &) { pushGradientToSurface(); });
+    stopColor1.listen([this](const std::string &) { pushGradientToSurface(); });
+    stopColor2.listen([this](const std::string &) { pushGradientToSurface(); });
+    stopColor3.listen([this](const std::string &) { pushGradientToSurface(); });
+    stopPos0.listen([this](double) { pushGradientToSurface(); });
+    stopPos1.listen([this](double) { pushGradientToSurface(); });
+    stopPos2.listen([this](double) { pushGradientToSurface(); });
+    stopPos3.listen([this](double) { pushGradientToSurface(); });
     strokeNone.listen([this](bool) { pushStyleToSurface(); });
     zoomLevel.listen([this](double pct) { applyZoom(pct); });
     fontSize.listen([this](int) { pushTextStyleToSurface(); });
@@ -205,6 +296,11 @@ public:
     fontItalic.listen([this](bool) { pushTextStyleToSurface(); });
     fontUnderline.listen([this](bool) { pushTextStyleToSurface(); });
     fontFace.listen([this](const std::string &) { pushTextStyleToSurface(); });
+    // When selected stop changes, sync currentStopPos to that stop's value
+    selectedStop.listen(
+        [this](int s) { currentStopPos.set(getCurrentStopPos()); });
+    // When currentStopPos changes, write back to the right stop
+    currentStopPos.listen([this](double v) { setCurrentStopPos(v); });
 
     // =========================================================================
     // §A  APP / MENU BAR
@@ -957,163 +1053,534 @@ public:
     // ──────────────────────────────────────────────────────
     auto rightPanel =
         Container(
-            Column(
-                sectionHeader("Transform"),
-                Container(
-                    Column(
-                        propRow("X:", Text("—")->setFontSize(10)->setTextColor(
-                                          kText)),
-                        propRow("Y:", Text("—")->setFontSize(10)->setTextColor(
-                                          kText)),
-                        propRow("W:", Text("—")->setFontSize(10)->setTextColor(
-                                          kText)),
-                        propRow("H:", Text("—")->setFontSize(10)->setTextColor(
-                                          kText)))
-                        ->setSpacing(0))
-                    ->setBackgroundColor(kPanel),
-                sectionHeader("Pathfinder"),
-                Container(
-                    Column(
-                        Row(Tooltip(
-                                Button("Unite",
-                                       [this] {
-                                         if (surface_) {
-                                           surface_->booleanOp(
-                                               VectorSurface::BooleanOp::Unite);
-                                           refreshUndoRedo();
-                                           refreshTransformState();
-                                           if (canvasPtr_)
-                                             canvasPtr_->redraw();
-                                         }
-                                       })
-                                    ->setBackgroundColor(RGB(55, 55, 55))
-                                    ->setTextColor(kText)
-                                    ->setBorderRadius(3)
-                                    ->setHeight(22)
-                                    ->setPadding(6),
-                                "Unite — merge selected shapes"),
-                            SizedBox(4, 0),
-                            Tooltip(Button("Subtract",
-                                           [this] {
-                                             if (surface_) {
-                                               surface_->booleanOp(
-                                                   VectorSurface::BooleanOp::
-                                                       Subtract);
-                                               refreshUndoRedo();
-                                               refreshTransformState();
-                                               if (canvasPtr_)
-                                                 canvasPtr_->redraw();
-                                             }
-                                           })
-                                        ->setBackgroundColor(RGB(55, 55, 55))
-                                        ->setTextColor(kText)
-                                        ->setBorderRadius(3)
-                                        ->setHeight(22)
-                                        ->setPadding(6),
-                                    "Subtract — cut clip from subject"))
-                            ->setSpacing(0)
-                            ->setCrossAxisAlignment(CrossAxisAlignment::Center),
-                        SizedBox(0, 6),
-                        Row(Tooltip(Button("Intersect",
-                                           [this] {
-                                             if (surface_) {
-                                               surface_->booleanOp(
-                                                   VectorSurface::BooleanOp::
-                                                       Intersect);
-                                               refreshUndoRedo();
-                                               refreshTransformState();
-                                               if (canvasPtr_)
-                                                 canvasPtr_->redraw();
-                                             }
-                                           })
-                                        ->setBackgroundColor(RGB(55, 55, 55))
-                                        ->setTextColor(kText)
-                                        ->setBorderRadius(3)
-                                        ->setHeight(22)
-                                        ->setPadding(6),
-                                    "Intersect — keep overlapping area only"),
-                            SizedBox(4, 0),
-                            Tooltip(
-                                Button("Xor",
-                                       [this] {
-                                         if (surface_) {
-                                           surface_->booleanOp(
-                                               VectorSurface::BooleanOp::Xor);
-                                           refreshUndoRedo();
-                                           refreshTransformState();
-                                           if (canvasPtr_)
-                                             canvasPtr_->redraw();
-                                         }
-                                       })
-                                    ->setBackgroundColor(RGB(55, 55, 55))
-                                    ->setTextColor(kText)
-                                    ->setBorderRadius(3)
-                                    ->setHeight(22)
-                                    ->setPadding(6),
-                                "Xor — exclude overlapping area"))
-                            ->setSpacing(0)
-                            ->setCrossAxisAlignment(CrossAxisAlignment::Center),
-                        SizedBox(0, 6),
-                        Tooltip(
-                            Button("Outline Stroke",
-                                   [this] {
-                                     if (surface_ &&
-                                         !surface_->selection().empty()) {
-                                       surface_->outlineStroke(
-                                           surface_->selection().front());
-                                       refreshUndoRedo();
-                                       refreshTransformState();
-                                       if (canvasPtr_)
-                                         canvasPtr_->redraw();
-                                     }
-                                   })
-                                ->setBackgroundColor(RGB(55, 55, 55))
-                                ->setTextColor(kText)
-                                ->setBorderRadius(3)
-                                ->setHeight(22)
-                                ->setPadding(6),
-                            "Outline Stroke — convert stroke to filled shape"))
-                        ->setSpacing(0))
-                    ->setPaddingAll(10, 8, 10, 8)
-                    ->setBackgroundColor(kPanel),
+            ListView(
+                {sectionHeader("Transform"),
+                 Container(
+                     Column(
+                         propRow("X:", Text("—")->setFontSize(10)->setTextColor(
+                                           kText)),
+                         propRow("Y:", Text("—")->setFontSize(10)->setTextColor(
+                                           kText)),
+                         propRow("W:", Text("—")->setFontSize(10)->setTextColor(
+                                           kText)),
+                         propRow("H:", Text("—")->setFontSize(10)->setTextColor(
+                                           kText)))
+                         ->setSpacing(0))
+                     ->setBackgroundColor(kPanel),
+                 sectionHeader("Pathfinder"),
+                 Container(
+                     Column(
+                         Row(Tooltip(
+                                 Button(
+                                     "Unite",
+                                     [this] {
+                                       if (surface_) {
+                                         surface_->booleanOp(
+                                             VectorSurface::BooleanOp::Unite);
+                                         refreshUndoRedo();
+                                         refreshTransformState();
+                                         if (canvasPtr_)
+                                           canvasPtr_->redraw();
+                                       }
+                                     })
+                                     ->setBackgroundColor(RGB(55, 55, 55))
+                                     ->setTextColor(kText)
+                                     ->setBorderRadius(3)
+                                     ->setHeight(22)
+                                     ->setPadding(6),
+                                 "Unite — merge selected shapes"),
+                             SizedBox(4, 0),
+                             Tooltip(Button("Subtract",
+                                            [this] {
+                                              if (surface_) {
+                                                surface_->booleanOp(
+                                                    VectorSurface::BooleanOp::
+                                                        Subtract);
+                                                refreshUndoRedo();
+                                                refreshTransformState();
+                                                if (canvasPtr_)
+                                                  canvasPtr_->redraw();
+                                              }
+                                            })
+                                         ->setBackgroundColor(RGB(55, 55, 55))
+                                         ->setTextColor(kText)
+                                         ->setBorderRadius(3)
+                                         ->setHeight(22)
+                                         ->setPadding(6),
+                                     "Subtract — cut clip from subject"))
+                             ->setSpacing(0)
+                             ->setCrossAxisAlignment(
+                                 CrossAxisAlignment::Center),
+                         SizedBox(0, 6),
+                         Row(Tooltip(Button("Intersect",
+                                            [this] {
+                                              if (surface_) {
+                                                surface_->booleanOp(
+                                                    VectorSurface::BooleanOp::
+                                                        Intersect);
+                                                refreshUndoRedo();
+                                                refreshTransformState();
+                                                if (canvasPtr_)
+                                                  canvasPtr_->redraw();
+                                              }
+                                            })
+                                         ->setBackgroundColor(RGB(55, 55, 55))
+                                         ->setTextColor(kText)
+                                         ->setBorderRadius(3)
+                                         ->setHeight(22)
+                                         ->setPadding(6),
+                                     "Intersect — keep overlapping area only"),
+                             SizedBox(4, 0),
+                             Tooltip(
+                                 Button("Xor",
+                                        [this] {
+                                          if (surface_) {
+                                            surface_->booleanOp(
+                                                VectorSurface::BooleanOp::Xor);
+                                            refreshUndoRedo();
+                                            refreshTransformState();
+                                            if (canvasPtr_)
+                                              canvasPtr_->redraw();
+                                          }
+                                        })
+                                     ->setBackgroundColor(RGB(55, 55, 55))
+                                     ->setTextColor(kText)
+                                     ->setBorderRadius(3)
+                                     ->setHeight(22)
+                                     ->setPadding(6),
+                                 "Xor — exclude overlapping area"))
+                             ->setSpacing(0)
+                             ->setCrossAxisAlignment(
+                                 CrossAxisAlignment::Center),
+                         SizedBox(0, 6),
+                         Tooltip(
+                             Button("Outline Stroke",
+                                    [this] {
+                                      if (surface_ &&
+                                          !surface_->selection().empty()) {
+                                        surface_->outlineStroke(
+                                            surface_->selection().front());
+                                        refreshUndoRedo();
+                                        refreshTransformState();
+                                        if (canvasPtr_)
+                                          canvasPtr_->redraw();
+                                      }
+                                    })
+                                 ->setBackgroundColor(RGB(55, 55, 55))
+                                 ->setTextColor(kText)
+                                 ->setBorderRadius(3)
+                                 ->setHeight(22)
+                                 ->setPadding(6),
+                             "Outline Stroke — convert stroke to filled shape"))
+                         ->setSpacing(0))
+                     ->setPaddingAll(10, 8, 10, 8)
+                     ->setBackgroundColor(kPanel),
 
-                sectionHeader("Selection & Transform"),
-                Container(transformSection)->setBackgroundColor(kPanel),
+                 sectionHeader("Selection & Transform"),
+                 Container(transformSection)->setBackgroundColor(kPanel),
 
-                sectionHeader("Type"),
-                Container(textPropsSection)->setBackgroundColor(kPanel),
+                 sectionHeader("Type"),
+                 Container(textPropsSection)->setBackgroundColor(kPanel),
 
-                sectionHeader("Appearance"),
-                Container(
-                    Column(Container(
-                               Column(Row(Text("Fill")
-                                              ->setFontSize(10)
-                                              ->setFontWeight(FontWeight::Bold)
-                                              ->setTextColor(kText),
-                                          SizedBox(6, 0), fillNoneBtn)
-                                          ->setSpacing(0)
-                                          ->setCrossAxisAlignment(
-                                              CrossAxisAlignment::Center),
-                                      SizedBox(0, 6), fillPicker)
-                                   ->setSpacing(0))
-                               ->setPaddingAll(10, 8, 10, 8),
-                           Container(nullptr)->setHeight(1)->setBackgroundColor(
-                               kBorder),
-                           Container(
-                               Column(Row(Text("Stroke")
-                                              ->setFontSize(10)
-                                              ->setFontWeight(FontWeight::Bold)
-                                              ->setTextColor(kText),
-                                          SizedBox(6, 0), strokeNoneBtn)
-                                          ->setSpacing(0)
-                                          ->setCrossAxisAlignment(
-                                              CrossAxisAlignment::Center),
-                                      SizedBox(0, 6), strokePicker,
-                                      SizedBox(0, 10), strokeWSlider)
-                                   ->setSpacing(0))
-                               ->setPaddingAll(10, 8, 10, 8))
-                        ->setSpacing(0))
-                    ->setBackgroundColor(kPanel))
+                 sectionHeader("Appearance"),
+                 Container(
+                     Column(
+                         Container(
+                             Column(
+                                 // ── Fill header row
+                                 // ───────────────────────────────────
+                                 Row(Text("Fill")
+                                         ->setFontSize(10)
+                                         ->setFontWeight(FontWeight::Bold)
+                                         ->setTextColor(kText),
+                                     SizedBox(6, 0), fillNoneBtn,
+                                     SizedBox(8, 0),
+                                     // Solid / Gradient toggle
+                                     GestureDetector(
+                                         Container(
+                                             Text(useGradient,
+                                                  [](const bool &g) {
+                                                    return g ? "Gradient"
+                                                             : "Solid";
+                                                  })
+                                                 ->setFontSize(9)
+                                                 ->setTextColor(
+                                                     useGradient,
+                                                     [](const bool &g) {
+                                                       return g ? RGB(255, 200,
+                                                                      60)
+                                                                : RGB(150, 150,
+                                                                      150);
+                                                     }))
+                                             ->setPaddingAll(5, 2, 5, 2)
+                                             ->setBorderRadius(3)
+                                             ->setBackgroundColor(
+                                                 useGradient,
+                                                 [](const bool &g) {
+                                                   return g ? RGB(60, 45, 10)
+                                                            : RGB(50, 50, 50);
+                                                 })
+                                             ->setBorderWidth(1)
+                                             ->setBorderColor(
+                                                 useGradient,
+                                                 [](const bool &g) {
+                                                   return g ? RGB(180, 130, 30)
+                                                            : RGB(70, 70, 70);
+                                                 }))
+                                         ->setOnTap([this]() {
+                                           useGradient.set(!useGradient.get());
+                                         }))
+                                     ->setSpacing(0)
+                                     ->setCrossAxisAlignment(
+                                         CrossAxisAlignment::Center),
+                                 SizedBox(0, 8),
+
+                                 // ── Solid color picker (shown when not
+                                 // gradient) ──────
+                                 Container(fillPicker)
+                                     ->setVisible(
+                                         useGradient,
+                                         [](const bool &g) { return !g; }),
+
+                                 // ── Gradient editor (shown when gradient)
+                                 // ─────────────
+                                 Container(
+                                     Column(
+                                         // Stop selector tabs
+                                         Row(GestureDetector(
+                                                 Container(
+                                                     Text("1")->setFontSize(9)->setTextColor(
+                                                         selectedStop,
+                                                         [](const int &s) {
+                                                           return s == 0
+                                                                      ? RGB(255,
+                                                                            255,
+                                                                            255)
+                                                                      : RGB(150,
+                                                                            150,
+                                                                            150);
+                                                         }))
+                                                     ->setWidth(24)
+                                                     ->setHeight(20)
+                                                     ->setBorderRadius(3)
+                                                     ->setBackgroundColor(
+                                                         selectedStop,
+                                                         [](const int &s) {
+                                                           return s == 0
+                                                                      ? RGB(80,
+                                                                            50,
+                                                                            10)
+                                                                      : RGB(50,
+                                                                            50,
+                                                                            50);
+                                                         })
+                                                     ->setBorderWidth(1)
+                                                     ->setBorderColor(
+                                                         selectedStop,
+                                                         [](const int &s) {
+                                                           return s == 0
+                                                                      ? RGB(255,
+                                                                            150,
+                                                                            30)
+                                                                      : RGB(70,
+                                                                            70,
+                                                                            70);
+                                                         }))
+                                                 ->setOnTap([this]() {
+                                                   selectedStop.set(0);
+                                                 }),
+                                             SizedBox(3, 0),
+                                             GestureDetector(
+                                                 Container(
+                                                     Text("2")->setFontSize(9)->setTextColor(
+                                                         selectedStop,
+                                                         [](const int &s) {
+                                                           return s == 1
+                                                                      ? RGB(255,
+                                                                            255,
+                                                                            255)
+                                                                      : RGB(150,
+                                                                            150,
+                                                                            150);
+                                                         }))
+                                                     ->setWidth(24)
+                                                     ->setHeight(20)
+                                                     ->setBorderRadius(3)
+                                                     ->setBackgroundColor(
+                                                         selectedStop,
+                                                         [](const int &s) {
+                                                           return s == 1
+                                                                      ? RGB(80,
+                                                                            50,
+                                                                            10)
+                                                                      : RGB(50,
+                                                                            50,
+                                                                            50);
+                                                         })
+                                                     ->setBorderWidth(1)
+                                                     ->setBorderColor(
+                                                         selectedStop,
+                                                         [](const int &s) {
+                                                           return s == 1
+                                                                      ? RGB(255,
+                                                                            150,
+                                                                            30)
+                                                                      : RGB(70,
+                                                                            70,
+                                                                            70);
+                                                         }))
+                                                 ->setOnTap([this]() {
+                                                   selectedStop.set(1);
+                                                 }),
+                                             SizedBox(3, 0),
+                                             // Stop 3 — only visible when
+                                             // stopCount >= 3
+                                             Container(
+                                                 GestureDetector(
+                                                     Container(
+                                                         Text("3")
+                                                             ->setFontSize(9)
+                                                             ->setTextColor(
+                                                                 selectedStop,
+                                                                 [](const int
+                                                                        &s) {
+                                                                   return s == 2
+                                                                              ? RGB(255,
+                                                                                    255,
+                                                                                    255)
+                                                                              : RGB(150,
+                                                                                    150,
+                                                                                    150);
+                                                                 }))
+                                                         ->setWidth(24)
+                                                         ->setHeight(20)
+                                                         ->setBorderRadius(3)
+                                                         ->setBackgroundColor(
+                                                             selectedStop,
+                                                             [](const int &s) {
+                                                               return s == 2
+                                                                          ? RGB(80,
+                                                                                50,
+                                                                                10)
+                                                                          : RGB(50,
+                                                                                50,
+                                                                                50);
+                                                             })
+                                                         ->setBorderWidth(1)
+                                                         ->setBorderColor(
+                                                             selectedStop,
+                                                             [](const int &s) {
+                                                               return s == 2
+                                                                          ? RGB(255,
+                                                                                150,
+                                                                                30)
+                                                                          : RGB(70,
+                                                                                70,
+                                                                                70);
+                                                             }))
+                                                     ->setOnTap([this]() {
+                                                       selectedStop.set(2);
+                                                     }))
+                                                 ->setVisible(stopCount,
+                                                              [](const int &n) {
+                                                                return n >= 3;
+                                                              }),
+                                             SizedBox(3, 0),
+                                             // Stop 4
+                                             Container(
+                                                 GestureDetector(
+                                                     Container(
+                                                         Text("4")
+                                                             ->setFontSize(9)
+                                                             ->setTextColor(
+                                                                 selectedStop,
+                                                                 [](const int
+                                                                        &s) {
+                                                                   return s == 3
+                                                                              ? RGB(255,
+                                                                                    255,
+                                                                                    255)
+                                                                              : RGB(150,
+                                                                                    150,
+                                                                                    150);
+                                                                 }))
+                                                         ->setWidth(24)
+                                                         ->setHeight(20)
+                                                         ->setBorderRadius(3)
+                                                         ->setBackgroundColor(
+                                                             selectedStop,
+                                                             [](const int &s) {
+                                                               return s == 3
+                                                                          ? RGB(80,
+                                                                                50,
+                                                                                10)
+                                                                          : RGB(50,
+                                                                                50,
+                                                                                50);
+                                                             })
+                                                         ->setBorderWidth(1)
+                                                         ->setBorderColor(
+                                                             selectedStop,
+                                                             [](const int &s) {
+                                                               return s == 3
+                                                                          ? RGB(255,
+                                                                                150,
+                                                                                30)
+                                                                          : RGB(70,
+                                                                                70,
+                                                                                70);
+                                                             }))
+                                                     ->setOnTap([this]() {
+                                                       selectedStop.set(3);
+                                                     }))
+                                                 ->setVisible(stopCount,
+                                                              [](const int &n) {
+                                                                return n >= 4;
+                                                              }),
+                                             SizedBox(8, 0),
+                                             // Add / Remove stop buttons
+                                             Tooltip(
+                                                 GestureDetector(
+                                                     Container(
+                                                         Text("+")
+                                                             ->setFontSize(11)
+                                                             ->setTextColor(
+                                                                 kText))
+                                                         ->setWidth(20)
+                                                         ->setHeight(20)
+                                                         ->setBorderRadius(3)
+                                                         ->setBackgroundColor(
+                                                             RGB(55, 55, 55))
+                                                         ->setBorderWidth(1)
+                                                         ->setBorderColor(
+                                                             kBorder))
+                                                     ->setOnTap([this]() {
+                                                       if (stopCount.get() <
+                                                           4) {
+                                                         stopCount.set(
+                                                             stopCount.get() +
+                                                             1);
+                                                         selectedStop.set(
+                                                             stopCount.get() -
+                                                             1);
+                                                       }
+                                                     }),
+                                                 "Add stop"),
+                                             SizedBox(3, 0),
+                                             Tooltip(
+                                                 GestureDetector(
+                                                     Container(
+                                                         Text("−")
+                                                             ->setFontSize(11)
+                                                             ->setTextColor(
+                                                                 kText))
+                                                         ->setWidth(20)
+                                                         ->setHeight(20)
+                                                         ->setBorderRadius(3)
+                                                         ->setBackgroundColor(
+                                                             RGB(55, 55, 55))
+                                                         ->setBorderWidth(1)
+                                                         ->setBorderColor(
+                                                             kBorder))
+                                                     ->setOnTap([this]() {
+                                                       if (stopCount.get() >
+                                                           2) {
+                                                         if (selectedStop
+                                                                 .get() >=
+                                                             stopCount.get() -
+                                                                 1)
+                                                           selectedStop.set(
+                                                               stopCount.get() -
+                                                               2);
+                                                         stopCount.set(
+                                                             stopCount.get() -
+                                                             1);
+                                                       }
+                                                     }),
+                                                 "Remove stop"))
+                                             ->setSpacing(0)
+                                             ->setCrossAxisAlignment(
+                                                 CrossAxisAlignment::Center),
+                                         SizedBox(0, 8),
+
+                                         // Color picker for selected stop
+                                         ColorPicker(hexToRef(stopColor0.get()))
+                                             ->setShowAlpha(false)
+                                             ->setOnColorChanged(
+                                                 [this](COLORREF c) {
+                                                   char buf[8];
+                                                   _snprintf_s(buf, sizeof(buf),
+                                                               _TRUNCATE,
+                                                               "#%02x%02x%02x",
+                                                               GetRValue(c),
+                                                               GetGValue(c),
+                                                               GetBValue(c));
+                                                   switch (selectedStop.get()) {
+                                                   case 0:
+                                                     stopColor0.set(buf);
+                                                     break;
+                                                   case 1:
+                                                     stopColor1.set(buf);
+                                                     break;
+                                                   case 2:
+                                                     stopColor2.set(buf);
+                                                     break;
+                                                   case 3:
+                                                     stopColor3.set(buf);
+                                                     break;
+                                                   }
+                                                 }),
+                                         SizedBox(0, 8),
+
+                                         // Position slider for selected stop
+                                         Row(Text("Pos")
+                                                 ->setFontSize(9)
+                                                 ->setTextColor(kDim)
+                                                 ->setMinWidth(26),
+                                             SizedBox(4, 0),
+                                             Slider(0.0, 1.0, 0.01)
+                                                 ->setValue(currentStopPos)
+                                                 ->setTrackFillColor(kAccent)
+                                                 ->setWidth(kPanelW - 80),
+                                             SizedBox(4, 0),
+                                             Text(currentStopPos,
+                                                  [](double v) {
+                                                    char b[8];
+                                                    snprintf(b, 8, "%.2f", v);
+                                                    return std::string(b);
+                                                  })
+
+                                                 ->setTextColor(kText)
+
+                                                 ->setFontSize(9)
+
+                                                 ->setMinWidth(30))
+                                             ->setSpacing(0)
+                                             ->setCrossAxisAlignment(
+                                                 CrossAxisAlignment::Center))
+                                         ->setSpacing(0))
+                                     ->setVisible(
+                                         useGradient,
+                                         [](const bool &g) { return g; }))
+                                 ->setSpacing(0))
+                             ->setPaddingAll(10, 8, 10, 8),
+                         Container(nullptr)->setHeight(1)->setBackgroundColor(
+                             kBorder),
+                         Container(
+                             Column(Row(Text("Stroke")
+                                            ->setFontSize(10)
+                                            ->setFontWeight(FontWeight::Bold)
+                                            ->setTextColor(kText),
+                                        SizedBox(6, 0), strokeNoneBtn)
+                                        ->setSpacing(0)
+                                        ->setCrossAxisAlignment(
+                                            CrossAxisAlignment::Center),
+                                    SizedBox(0, 6), strokePicker,
+                                    SizedBox(0, 10), strokeWSlider)
+                                 ->setSpacing(0))
+                             ->setPaddingAll(10, 8, 10, 8))
+                         ->setSpacing(0))
+                     ->setBackgroundColor(kPanel)})
                 ->setSpacing(0))
             ->setWidth(kPanelW)
             ->setBackgroundColor(kPanel)

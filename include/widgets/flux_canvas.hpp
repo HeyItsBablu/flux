@@ -11,7 +11,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <windowsx.h>
- 
+
 // GDI+ for PNG save + text rasterization
 #include <gdiplus.h>
 #pragma comment(lib, "gdiplus.lib")
@@ -83,8 +83,11 @@ using PFNGLUSEPROGRAMPROC = void(APIENTRY *)(GLuint);
 using PFNGLGETUNIFORMLOCATIONPROC = GLint(APIENTRY *)(GLuint, const GLchar *);
 using PFNGLUNIFORM1IPROC = void(APIENTRY *)(GLint, GLint);
 using PFNGLUNIFORM1FPROC = void(APIENTRY *)(GLint, GLfloat);
+using PFNGLUNIFORM2FPROC = void(APIENTRY *)(GLint, GLfloat, GLfloat);
 using PFNGLUNIFORM4FPROC = void(APIENTRY *)(GLint, GLfloat, GLfloat, GLfloat,
                                             GLfloat);
+using PFNGLUNIFORM4FVPROC = void(APIENTRY *)(GLint, GLsizei, const GLfloat *);
+using PFNGLUNIFORM1FVPROC = void(APIENTRY *)(GLint, GLsizei, const GLfloat *);
 using PFNGLUNIFORMMATRIX4FVPROC = void(APIENTRY *)(GLint, GLsizei, GLboolean,
                                                    const GLfloat *);
 using PFNGLENABLEVERTEXATTRIBARRAYPROC = void(APIENTRY *)(GLuint);
@@ -200,7 +203,10 @@ struct GLProcs {
   PFNGLGETUNIFORMLOCATIONPROC getUniformLocation{};
   PFNGLUNIFORM1IPROC uniform1i{};
   PFNGLUNIFORM1FPROC uniform1f{};
+  PFNGLUNIFORM2FPROC uniform2f{};
   PFNGLUNIFORM4FPROC uniform4f{};
+  PFNGLUNIFORM4FVPROC uniform4fv{};
+  PFNGLUNIFORM1FVPROC uniform1fv{};
   PFNGLUNIFORMMATRIX4FVPROC uniformMatrix4fv{};
   PFNGLENABLEVERTEXATTRIBARRAYPROC enableVertexAttribArray{};
   PFNGLDISABLEVERTEXATTRIBARRAYPROC disableVertexAttribArray{};
@@ -246,7 +252,10 @@ struct GLProcs {
     LOAD(getUniformLocation, "glGetUniformLocation");
     LOAD(uniform1i, "glUniform1i");
     LOAD(uniform1f, "glUniform1f");
+    LOAD(uniform2f, "glUniform2f");
     LOAD(uniform4f, "glUniform4f");
+    LOAD(uniform4fv, "glUniform4fv");
+    LOAD(uniform1fv, "glUniform1fv");
     LOAD(uniformMatrix4fv, "glUniformMatrix4fv");
     LOAD(enableVertexAttribArray, "glEnableVertexAttribArray");
     LOAD(disableVertexAttribArray, "glDisableVertexAttribArray");
@@ -976,7 +985,6 @@ public:
   virtual bool needsContinuousRedraw() const { return false; }
   virtual void destroy() = 0;
 };
-
 
 // ============================================================================
 // §10  CANVAS WIDGET  (two-window hierarchy + custom GL scrollbars + MSAA)
@@ -1796,12 +1804,11 @@ void main(){ fragColor = uColor; }
 // §11  FACTORY HELPERS
 // ============================================================================
 
-
-
-inline std::shared_ptr<CanvasWidget> Canvas() { return std::make_shared<CanvasWidget>(); }
+inline std::shared_ptr<CanvasWidget> Canvas() {
+  return std::make_shared<CanvasWidget>();
+}
 inline std::shared_ptr<CanvasWidget> Canvas(int w, int h) {
   return std::make_shared<CanvasWidget>()->setSize(w, h);
 }
-
 
 #endif // FLUX_CANVAS_HPP

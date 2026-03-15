@@ -141,6 +141,7 @@ public:
   int minWidth = 0, minHeight = 0;
   int maxWidth = 10000, maxHeight = 10000;
   bool autoWidth = true, autoHeight = true;
+  bool visible = true;
 
   // Focus support
   bool isFocusable = false;
@@ -479,6 +480,13 @@ inline void Widget::renderText(HDC hdc, FontCache &fontCache, UINT format) {
 
 inline void Widget::computeLayout(HDC hdc, const BoxConstraints &constraints,
                                   FontCache &fontCache) {
+
+  if (!visible) {
+    width = 0;
+    height = 0;
+    needsLayout = false;
+    return;
+  }
   // Default: clamp to constraints and stop.
   if (!autoWidth)
     width = constraints.clampWidth(width);
@@ -501,6 +509,7 @@ inline void Widget::positionChildren(int contentX, int contentY,
 }
 
 inline void Widget::render(HDC hdc, FontCache &fontCache) {
+  if (!visible) return;
   if (hasBackground)
     drawRoundedRectangle(hdc);
   for (auto &child : children)
@@ -514,7 +523,7 @@ inline void Widget::render(HDC hdc, FontCache &fontCache) {
 // ============================================================================
 
 inline Widget *findWidgetAt(Widget *w, int x, int y) {
-  if (!w)
+  if (!w || !w->visible)
     return nullptr;
   for (auto it = w->children.rbegin(); it != w->children.rend(); ++it) {
     Widget *found = findWidgetAt(it->get(), x, y);
@@ -525,7 +534,6 @@ inline Widget *findWidgetAt(Widget *w, int x, int y) {
     return w;
   return nullptr;
 }
-
 // ============================================================================
 // MOUSE EVENT HELPER FUNCTIONS
 // ============================================================================
@@ -533,7 +541,7 @@ inline Widget *findWidgetAt(Widget *w, int x, int y) {
 template <typename Handler>
 inline bool findAndHandleMouseEvent(Widget *widget, int x, int y,
                                     Handler handler) {
-  if (!widget)
+  if (!widget || !widget->visible)
     return false;
   if (x >= widget->x && x < widget->x + widget->width && y >= widget->y &&
       y < widget->y + widget->height) {
@@ -549,7 +557,7 @@ inline bool findAndHandleMouseEvent(Widget *widget, int x, int y,
 }
 
 inline bool updateHoverStates(Widget *widget, int mouseX, int mouseY) {
-  if (!widget)
+  if (!widget || !widget->visible)
     return false;
   bool changed = false;
   bool isOver = (mouseX >= widget->x && mouseX < widget->x + widget->width &&

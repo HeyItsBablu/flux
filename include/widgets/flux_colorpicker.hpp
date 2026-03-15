@@ -158,6 +158,7 @@ public:
   // -------------------------------------------------------------------------
   void computeLayout(HDC hdc, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
+                       if (!visible) { width = 0; height = 0; needsLayout = false; return; }
     width = constraints.clampWidth(width);
     height = constraints.clampHeight(computeTotalHeight());
     applyConstraints();
@@ -168,6 +169,7 @@ public:
   // Render
   // -------------------------------------------------------------------------
   void render(HDC hdc, FontCache &fontCache) override {
+    if (!visible) return;
     int cx = x + paddingLeft;
     int cy = y + paddingTop;
     int psz = pickerSize;
