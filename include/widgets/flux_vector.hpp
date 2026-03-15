@@ -921,14 +921,17 @@ public:
     dirty_ = true;
   }
   void setTransformMode(const std::string &m) {
-    if (m == "rotate")      transformMode_ = TransformMode::Rotate;
-    else if (m == "move")   transformMode_ = TransformMode::Move;
-    else                    transformMode_ = TransformMode::Scale;
+    if (m == "rotate")
+      transformMode_ = TransformMode::Rotate;
+    else if (m == "move")
+      transformMode_ = TransformMode::Move;
+    else
+      transformMode_ = TransformMode::Scale;
     originSet_ = false;
     if (!selection_.empty())
-        transformOrigin_ = selectionBB().center();
+      transformOrigin_ = selectionBB().center();
     dirty_ = true;
-}
+  }
 
   VTool getTool() const { return tool_; }
 
@@ -3314,10 +3317,18 @@ void main(){
         for (float v : s.stroke.dash)
           scaledPattern.push_back(v / currentZoom_);
 
-        auto dashSegs = vtess::applyDash(snapped, isClosed, scaledPattern,
+        // For closed shapes, explicitly append the first point so the dash
+        // walker covers the closing edge (BL→TL on a rect, etc.).
+        // We then pass closed=false because the polyline is now self-closing.
+        vtess::Contour dashInput = snapped;
+        if (isClosed && !dashInput.empty() &&
+            vmath::len(dashInput.back() - dashInput.front()) > 1e-4f) {
+          dashInput.push_back(dashInput.front());
+        }
+
+        auto dashSegs = vtess::applyDash(dashInput, false, scaledPattern,
                                          s.stroke.dashOffset / currentZoom_);
         for (auto &seg : dashSegs) {
-          // Dashed segments are never treated as closed
           vtess::expandStroke(seg, false, hw, adjusted.stroke.cap, ej,
                               strokeTris);
         }
@@ -3434,7 +3445,7 @@ void main(){
     if (selection_.empty())
       return;
     bool rotateMode = (transformMode_ == TransformMode::Rotate);
-    bool moveMode   = (transformMode_ == TransformMode::Move);
+    bool moveMode = (transformMode_ == TransformMode::Move);
     float pad = 4.f / currentZoom_;
     vmath::AABB bb = selectionBB();
     if (!bb.valid())
