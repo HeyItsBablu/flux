@@ -920,6 +920,16 @@ public:
     cancelInProgress();
     dirty_ = true;
   }
+  void setTransformMode(const std::string &m) {
+    if (m == "rotate")      transformMode_ = TransformMode::Rotate;
+    else if (m == "move")   transformMode_ = TransformMode::Move;
+    else                    transformMode_ = TransformMode::Scale;
+    originSet_ = false;
+    if (!selection_.empty())
+        transformOrigin_ = selectionBB().center();
+    dirty_ = true;
+}
+
   VTool getTool() const { return tool_; }
 
   // ── Active style ──────────────────────────────────────────────────────────
@@ -1560,7 +1570,7 @@ private:
   std::vector<std::pair<VShapeId, vmath::Mat3>> dragOrigins_;
 
   // ── Transform handle state ───────────────────────────────────────────────
-  enum class TransformMode { Scale, Rotate };
+  enum class TransformMode { Scale, Rotate, Move };
   TransformMode transformMode_ = TransformMode::Scale;
   bool draggingHandle_ = false;
   HandleKind dragHandleKind_ = HandleKind::None;
@@ -2154,16 +2164,20 @@ private:
     if (!selection_.empty()) {
       int hi = hitTestHandles(x, y, pad);
       if (hi >= 0) {
-        draggingHandle_ = true;
-        draggingShape_ = false;
-        draggingBox_ = false;
-        draggingOrigin_ = false;
-        dragHandleIndex_ = hi;
-        dragHandleKind_ = (transformMode_ == TransformMode::Scale)
-                              ? HandleKind::Scale
-                              : HandleKind::Rotate;
-        beginHandleDrag(x, y);
-        return;
+        if (transformMode_ == TransformMode::Move) {
+          // Move mode: ignore handles, fall through to shape drag below
+        } else {
+          draggingHandle_ = true;
+          draggingShape_ = false;
+          draggingBox_ = false;
+          draggingOrigin_ = false;
+          dragHandleIndex_ = hi;
+          dragHandleKind_ = (transformMode_ == TransformMode::Scale)
+                                ? HandleKind::Scale
+                                : HandleKind::Rotate;
+          beginHandleDrag(x, y);
+          return;
+        }
       }
     }
     VShapeId hit = hitTest(x, y);
@@ -2171,15 +2185,6 @@ private:
       bool alreadySelected = std::find(selection_.begin(), selection_.end(),
                                        hit) != selection_.end();
       if (!shift) {
-        if (alreadySelected && selection_.size() == 1) {
-          transformMode_ = (transformMode_ == TransformMode::Scale)
-                               ? TransformMode::Rotate
-                               : TransformMode::Scale;
-          originSet_ = false;
-          transformOrigin_ = selectionBB().center();
-          dirty_ = true;
-          return;
-        }
         if (!alreadySelected)
           selection_.clear();
       }
@@ -3429,12 +3434,13 @@ void main(){
     if (selection_.empty())
       return;
     bool rotateMode = (transformMode_ == TransformMode::Rotate);
+    bool moveMode   = (transformMode_ == TransformMode::Move);
     float pad = 4.f / currentZoom_;
     vmath::AABB bb = selectionBB();
     if (!bb.valid())
       return;
-
     RGBA boxCol = rotateMode ? RGBA{0.9f, 0.6f, 0.1f, 0.85f}
+                  : moveMode ? RGBA{0.3f, 0.9f, 0.4f, 0.85f}
                              : RGBA{0.3f, 0.6f, 1.0f, 0.9f};
     std::vector<vmath::Vec2> box = {{bb.x0 - pad, bb.y0 - pad},
                                     {bb.x1 + pad, bb.y0 - pad},
@@ -3457,11 +3463,15 @@ void main(){
     vmath::Vec2 hpts[8];
     getHandlePositions(bb, pad, hpts);
     float hs = 4.5f / currentZoom_;
+
     for (int i = 0; i < 8; i++) {
       float hx = hpts[i].x, hy = hpts[i].y;
       if (rotateMode) {
         drawCircleRing(hx, hy, hs * 1.1f, 1.5f / currentZoom_,
                        {1.f, 0.8f, 0.2f, 1.f}, mvp);
+      } else if (moveMode) {
+        // Draw a simple cross/plus marker for move mode
+        drawCircle(hx, hy, hs * 0.7f, {0.4f, 1.f, 0.6f, 0.9f}, mvp);
       } else {
         float b = hs + 1.5f / currentZoom_;
         drawSquare(hx, hy, b, boxCol, mvp);

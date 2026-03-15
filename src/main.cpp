@@ -169,29 +169,6 @@ class VectorApp : public Component {
     ts.b = fc.b;
     surface_->setTextStyle(ts);
   }
-  void toggleTransformMode() {
-    if (!surface_ || surface_->selection().empty())
-      return;
-    vmath::AABB bb;
-    for (auto id : surface_->selection()) {
-      auto *s = surface_->beginEdit(id);
-      if (s) {
-        auto sb = vtess::shapeAABB(*s);
-        if (sb.valid()) {
-          bb.expand({sb.x0, sb.y0});
-          bb.expand({sb.x1, sb.y1});
-        }
-      }
-    }
-    if (!bb.valid())
-      return;
-    vmath::Vec2 c = bb.center();
-    surface_->onMouseDown(c.x, c.y);
-    surface_->onMouseUp(c.x, c.y);
-    transformMode.set(transformMode.get() == "rotate" ? "scale" : "rotate");
-    if (canvasPtr_)
-      canvasPtr_->redraw();
-  }
 
   void pushGradientToSurface() {
     if (!surface_)
@@ -876,57 +853,69 @@ public:
 
     // ── Selection & Transform
     // ─────────────────────────────────────────────────
-    auto modeBadgeButton = Tooltip(
-        GestureDetector(
-            Container(Row(Text(transformMode,
-                               [](const std::string &m) -> std::string {
-                                 return m == "rotate" ? "⟳" : "⇲";
-                               })
-                              ->setFontSize(18)
-                              ->setTextColor(transformMode,
-                                             [](const std::string &m) {
-                                               return m == "rotate"
-                                                          ? RGB(255, 200, 60)
-                                                          : RGB(100, 160, 255);
-                                             }),
-                          SizedBox(10, 0),
-                          Column(Text(transformMode,
-                                      [](const std::string &m) -> std::string {
-                                        return m == "rotate" ? "Rotate Mode"
-                                                             : "Scale Mode";
-                                      })
-                                     ->setFontSize(11)
-                                     ->setFontWeight(FontWeight::Bold)
-                                     ->setTextColor(transformMode,
-                                                    [](const std::string &m) {
-                                                      return m == "rotate"
-                                                                 ? RGB(255, 200,
-                                                                       60)
-                                                                 : RGB(100, 160,
-                                                                       255);
-                                                    }),
-                                 SizedBox(0, 2),
-                                 Text("Click to switch mode")
-                                     ->setFontSize(9)
-                                     ->setTextColor(RGB(110, 110, 110)))
-                              ->setSpacing(0))
-                          ->setSpacing(0)
-                          ->setCrossAxisAlignment(CrossAxisAlignment::Center))
-                ->setPaddingAll(10, 9, 10, 9)
-                ->setBorderRadius(5)
-                ->setBackgroundColor(transformMode,
-                                     [](const std::string &m) {
-                                       return m == "rotate" ? RGB(58, 42, 14)
-                                                            : RGB(20, 38, 66);
-                                     })
-                ->setBorderWidth(1)
-                ->setBorderColor(transformMode,
-                                 [](const std::string &m) {
-                                   return m == "rotate" ? RGB(155, 108, 22)
-                                                        : RGB(42, 82, 152);
-                                 }))
-            ->setOnTap([this] { toggleTransformMode(); }),
-        "Toggle Scale / Rotate mode");
+    auto makeTransformBtn =
+        [&](const std::string &mode, const std::string &icon,
+            const std::string &label, const std::string &tip) -> WidgetPtr {
+      return Tooltip(
+          GestureDetector(
+              Container(Column(Text(icon)->setFontSize(14)->setTextColor(
+                                   transformMode,
+                                   [mode](const std::string &m) {
+                                     return m == mode ? RGB(255, 255, 255)
+                                                      : RGB(130, 130, 130);
+                                   }),
+                               SizedBox(0, 2),
+                               Text(label)->setFontSize(8)->setTextColor(
+                                   transformMode,
+                                   [mode](const std::string &m) {
+                                     return m == mode ? RGB(255, 255, 255)
+                                                      : RGB(100, 100, 100);
+                                   }))
+                            ->setSpacing(0)
+                            ->setCrossAxisAlignment(CrossAxisAlignment::Center))
+                  ->setWidth(56)
+                  ->setHeight(44)
+                  ->setBorderRadius(4)
+                  ->setBackgroundColor(transformMode,
+                                       [mode](const std::string &m) {
+                                         if (m != mode)
+                                           return RGB(45, 45, 45);
+                                         if (mode == "scale")
+                                           return RGB(20, 38, 66);
+                                         if (mode == "rotate")
+                                           return RGB(58, 42, 14);
+                                         return RGB(18, 58, 30);
+                                       })
+                  ->setBorderWidth(1)
+                  ->setBorderColor(transformMode,
+                                   [mode](const std::string &m) {
+                                     if (m != mode)
+                                       return RGB(65, 65, 65);
+                                     if (mode == "scale")
+                                       return RGB(42, 82, 152);
+                                     if (mode == "rotate")
+                                       return RGB(155, 108, 22);
+                                     return RGB(40, 140, 70);
+                                   }))
+              ->setOnTap([this, mode]() {
+                transformMode.set(mode);
+                if (surface_) {
+                  surface_->setTransformMode(mode);
+                  if (canvasPtr_)
+                    canvasPtr_->redraw();
+                }
+              }),
+          tip);
+    };
+
+    auto modeBadgeButton =
+        Row(makeTransformBtn("scale", "⇲", "Scale", "Scale handles"),
+            SizedBox(3, 0),
+            makeTransformBtn("rotate", "⟳", "Rotate", "Rotate handles"),
+            SizedBox(3, 0),
+            makeTransformBtn("move", "✥", "Move", "Move freely"))
+            ->setSpacing(0)
+            ->setCrossAxisAlignment(CrossAxisAlignment::Center);
 
     auto transformSection =
         Container(
@@ -1909,14 +1898,20 @@ public:
                 SizedBox(16, 0),
                 Text(transformMode,
                      [](const std::string &m) -> std::string {
-                       return m == "rotate" ? "| ⟳ Rotate mode"
-                                            : "| ⇲ Scale mode";
+                       if (m == "rotate")
+                         return "| ⟳ Rotate mode";
+                       if (m == "move")
+                         return "| ✥ Move mode";
+                       return "| ⇲ Scale mode";
                      })
                     ->setFontSize(9)
                     ->setTextColor(transformMode,
                                    [this](const std::string &m) {
-                                     return m == "rotate" ? RGB(255, 200, 60)
-                                                          : kDim;
+                                     if (m == "rotate")
+                                       return RGB(255, 200, 60);
+                                     if (m == "move")
+                                       return RGB(80, 220, 120);
+                                     return kDim;
                                    }),
                 SizedBox(16, 0),
                 Text(hasSelection,
