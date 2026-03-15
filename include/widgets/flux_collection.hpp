@@ -249,6 +249,7 @@ public:
     std::shared_ptr<ListViewStatic> setSpacing(int s)        { itemSpacing = s; return self; }
     std::shared_ptr<ListViewStatic> setHorizontal(bool h)    { sb.horizontal = h; sb.scrollOffset = 0; markNeedsLayout(); return self; }
     std::shared_ptr<ListViewStatic> separator(std::function<WidgetPtr()> fn) { separatorBuilder = fn; applySeparators(); return self; }
+    std::shared_ptr<ListViewStatic> setHeight(int h)         { height = h; autoHeight = false; markNeedsLayout(); return self; }  // ← ADD THIS
     std::shared_ptr<ListViewStatic> setPadding(int p)        { paddingLeft = paddingRight = paddingTop = paddingBottom = p; markNeedsLayout(); return self; }
     std::shared_ptr<ListViewStatic> setBackgroundColor(COLORREF c) { backgroundColor = c; hasBackground = true; markNeedsPaint(); return self; }
     std::shared_ptr<ListViewStatic> setScrollbarSize(int s)        { sb.size = s; return self; }

@@ -168,6 +168,7 @@ enum class LineJoinV { Miter, Round, Bevel, Butt };
 struct VStroke {
   RGBA color = {0, 0, 0, 1};
   float width = 1.f;
+  float dashOffset = 0.f;
   LineCapV cap = LineCapV::Round;
   LineJoinV join = LineJoinV::Round;
   std::vector<float> dash;
@@ -373,6 +374,110 @@ inline void earClip(const std::vector<Vec2> &pts, std::vector<float> &out) {
     if (!clipped)
       break;
   }
+}
+
+// ── Dash pattern subdivider ────────────────────────────────────────────────
+// Takes a polyline and a dash pattern (alternating dash/gap lengths in canvas
+// units) and returns a list of sub-polylines — one per dash segment.
+// Pattern is cycled: [dash0, gap0, dash1, gap1, ...]
+// If pattern is empty the original polyline is returned as-is (solid).
+inline std::vector<Contour> applyDash(const std::vector<Vec2> &pts, bool closed,
+                                      const std::vector<float> &pattern,
+                                      float offset = 0.f) {
+  if (pattern.empty())
+    return {pts};
+  if (pts.size() < 2)
+    return {};
+
+  // Build a flat list of (length, patternIndex) segments walking the polyline
+  // We walk arc-length along the path, switching dash/gap according to pattern
+  std::vector<Contour> result;
+  Contour current;
+
+  // Total pattern length for cycling
+  float patLen = 0.f;
+  for (float v : pattern)
+    patLen += v;
+  if (patLen < 1e-6f)
+    return {pts};
+
+  // Normalize offset into [0, patLen)
+  float pos = std::fmod(offset, patLen);
+  if (pos < 0.f)
+    pos += patLen;
+
+  // Determine starting pattern index and remaining length in first segment
+  int patIdx = 0;
+  float patRemain = 0.f;
+  {
+    float acc = 0.f;
+    for (int i = 0; i < (int)pattern.size(); i++) {
+      if (acc + pattern[i] > pos) {
+        patIdx = i;
+        patRemain = (acc + pattern[i]) - pos;
+        break;
+      }
+      acc += pattern[i];
+    }
+  }
+
+  bool drawing = (patIdx % 2 == 0); // even indices = dash, odd = gap
+
+  // Walk each polyline segment
+  Vec2 prev = pts[0];
+  if (drawing)
+    current.push_back(prev);
+
+  int n = (int)pts.size();
+  int numSegs = closed ? n : n - 1;
+
+  for (int si = 0; si < numSegs; si++) {
+    Vec2 a = pts[si];
+    Vec2 b = pts[(si + 1) % n];
+    float segLen = len(b - a);
+    if (segLen < 1e-9f)
+      continue;
+    Vec2 dir = norm(b - a);
+
+    float walked = 0.f;
+    while (walked < segLen) {
+      float step = min(patRemain, segLen - walked);
+      Vec2 pt = a + dir * (walked + step);
+
+      if (drawing) {
+        if (current.empty())
+          current.push_back(a + dir * walked);
+        current.push_back(pt);
+      } else {
+        // End of a gap — if we were drawing, the contour was already saved
+        if (!current.empty()) {
+          result.push_back(current);
+          current.clear();
+        }
+      }
+
+      walked += step;
+      patRemain -= step;
+
+      if (patRemain < 1e-6f) {
+        // Advance to next pattern slot
+        patIdx = (patIdx + 1) % (int)pattern.size();
+        patRemain = pattern[patIdx];
+        drawing = (patIdx % 2 == 0);
+
+        if (drawing && walked < segLen)
+          current.push_back(a + dir * walked);
+        else if (!drawing && !current.empty()) {
+          result.push_back(current);
+          current.clear();
+        }
+      }
+    }
+  }
+
+  if (!current.empty())
+    result.push_back(current);
+  return result;
 }
 
 inline void expandStroke(const std::vector<Vec2> &pts, bool closed, float hw,
@@ -1440,7 +1545,7 @@ private:
   std::vector<VShapeId> selection_;
   VTool tool_ = VTool::Select;
   VFill activeFill_ = {{0.2f, 0.5f, 1.f, 1.f}, VFillRule ::NonZero, false};
-  VStroke activeStroke_ = {{0.f, 0.f, 0.f, 1.f}, 2.f, LineCapV::Round,
+  VStroke activeStroke_ = {{0.f, 0.f, 0.f, 1.f}, 2.f, 0.f,  LineCapV::Round,
                            LineJoinV::Round,     {},  false};
   TextStyle activeTextStyle_; // text style for the text tool
 
@@ -3193,11 +3298,24 @@ void main(){
         LineJoinV ej = adjusted.stroke.join;
         if (s.kind == VShapeKind::Rect)
           ej = LineJoinV::Miter;
+
         vtess::Contour subd = subdivideContour(c, isClosed);
         vtess::Contour snapped =
             snapApplicable ? snapContour(subd, s.stroke.width) : subd;
-        vtess::expandStroke(snapped, isClosed, hw, adjusted.stroke.cap, ej,
-                            strokeTris);
+
+        // ── Dash pattern ────────────────────────────────────────────────
+        // Scale pattern from screen-pixels to canvas units
+        std::vector<float> scaledPattern;
+        for (float v : s.stroke.dash)
+          scaledPattern.push_back(v / currentZoom_);
+
+        auto dashSegs = vtess::applyDash(snapped, isClosed, scaledPattern,
+                                         s.stroke.dashOffset / currentZoom_);
+        for (auto &seg : dashSegs) {
+          // Dashed segments are never treated as closed
+          vtess::expandStroke(seg, false, hw, adjusted.stroke.cap, ej,
+                              strokeTris);
+        }
       }
       std::vector<float> strokeWorld;
       strokeWorld.reserve(strokeTris.size());
