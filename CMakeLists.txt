@@ -22,6 +22,19 @@ add_compile_options(
     /EHsc               # Standard C++ exceptions
 )
 
+
+# Add Clipper2 library
+add_library(clipper2
+    external/Clipper2/CPP/Clipper2Lib/src/clipper.engine.cpp
+    external/Clipper2/CPP/Clipper2Lib/src/clipper.offset.cpp
+    external/Clipper2/CPP/Clipper2Lib/src/clipper.rectclip.cpp
+)
+
+target_include_directories(clipper2
+    PUBLIC
+        external/Clipper2/CPP/Clipper2Lib/include
+)
+
 add_executable(my_app WIN32
     src/main.cpp
 )
@@ -33,6 +46,7 @@ target_include_directories(my_app
 
 target_link_libraries(my_app
     PRIVATE
+        clipper2
         Msimg32     # AlphaBlend (used in Dialog overlay)
         Gdiplus     # GDI+ (if you use GdiplusInitializer)
         opengl32    # OpenGL
