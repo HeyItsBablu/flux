@@ -914,4 +914,44 @@ void main(){
   }
 };
 
+// ============================================================================
+// §R7  FACTORY HELPERS
+// ============================================================================
+
+// Bare canvas widget with a RasterSurface; viewport and scrollbars disabled
+// (1:1 pixel mapping — ideal for thumbnail pickers, stamps, etc.).
+inline std::shared_ptr<CanvasWidget> RasterCanvas(int w, int h) {
+  auto c = std::make_shared<CanvasWidget>()->setSize(w, h);
+  c->setCanvasSize(w, h);
+  c->setViewportEnabled(false);
+  c->setSurface<RasterSurface>();
+  return c;
+}
+
+// Same but with an explicit undo-budget (bytes).
+inline std::shared_ptr<CanvasWidget> RasterCanvas(int w, int h, size_t undoBudget) {
+  auto c = std::make_shared<CanvasWidget>()->setSize(w, h);
+  c->setCanvasSize(w, h);
+  c->setSurface<RasterSurface>(undoBudget);
+  return c;
+}
+
+// Separate view and canvas dimensions — viewport + scrollbars enabled so the
+// user can pan/zoom a canvas larger (or smaller) than the widget footprint.
+inline std::shared_ptr<CanvasWidget> RasterCanvas(int viewW, int viewH, int canvasW, int canvasH) {
+  auto c = std::make_shared<CanvasWidget>()->setSize(viewW, viewH);
+  c->setCanvasSize(canvasW, canvasH);
+  c->setSurface<RasterSurface>();
+  return c;
+}
+
+// Same with an explicit undo-budget.
+inline std::shared_ptr<CanvasWidget> RasterCanvas(int viewW, int viewH, int canvasW, int canvasH,
+                               size_t undoBudget) {
+  auto c = std::make_shared<CanvasWidget>()->setSize(viewW, viewH);
+  c->setCanvasSize(canvasW, canvasH);
+  c->setSurface<RasterSurface>(undoBudget);
+  return c;
+}
+
 #endif // FLUX_RASTER_HPP

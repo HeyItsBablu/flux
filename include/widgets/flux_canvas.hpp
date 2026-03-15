@@ -977,11 +977,6 @@ public:
   virtual void destroy() = 0;
 };
 
-// ============================================================================
-// §9  RASTER SURFACE  —  see flux_raster.hpp
-// ============================================================================
-
-#include "flux_raster.hpp"
 
 // ============================================================================
 // §10  CANVAS WIDGET  (two-window hierarchy + custom GL scrollbars + MSAA)
@@ -1509,17 +1504,12 @@ void main(){ fragColor = uColor; }
   }
 
   // ── MSAA pixel-format upgrade ─────────────────────────────────────────────
-  // Called after the bootstrap context is current (so wglGetProcAddress works).
-  // If wglChoosePixelFormatARB is available and finds an 8x MSAA format,
-  // destroys and recreates glHwnd_ + glDC_ with that format, returns true.
-  // The caller continues to create the core 3.3 context on whatever DC is live.
   bool tryUpgradeToMSAA(int winW, int winH, HGLRC bootstrapCtx) {
     auto wglCPF = reinterpret_cast<PFNWGLCHOOSEPIXELFORMATARBPROC>(
         wglGetProcAddress("wglChoosePixelFormatARB"));
     if (!wglCPF)
       return false;
 
-    // Request 8x MSAA; fall back to 4x, then 2x if not available.
     for (int samples : {8, 4, 2}) {
       const int attribs[] = {WGL_DRAW_TO_WINDOW_ARB,
                              1,
@@ -1543,13 +1533,11 @@ void main(){ fragColor = uColor; }
       if (!wglCPF(glDC_, attribs, nullptr, 1, &fmt, &numFormats) || !numFormats)
         continue;
 
-      // Tear down the bootstrap window/DC/context
       wglMakeCurrent(nullptr, nullptr);
       wglDeleteContext(bootstrapCtx);
       ReleaseDC(glHwnd_, glDC_);
       DestroyWindow(glHwnd_);
 
-      // Recreate the GL child with the MSAA pixel format
       glHwnd_ = CreateWindowExW(
           WS_EX_NOPARENTNOTIFY, L"FluxGLCanvas9", nullptr,
           WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN, 0, 0, winW,
@@ -1564,7 +1552,6 @@ void main(){ fragColor = uColor; }
       pfd2.nVersion = 1;
       SetPixelFormat(glDC_, fmt, &pfd2);
 
-      // New bootstrap context on the MSAA DC for wglCreateContextAttribsARB
       HGLRC newBootstrap = wglCreateContext(glDC_);
       wglMakeCurrent(glDC_, newBootstrap);
 
@@ -1572,9 +1559,9 @@ void main(){ fragColor = uColor; }
       _snprintf_s(msg, sizeof(msg), _TRUNCATE, "FluxCanvas: MSAA %dx enabled\n",
                   samples);
       OutputDebugStringA(msg);
-      return true; // caller should now read glDC_ / current context
+      return true;
     }
-    return false; // no MSAA — carry on with the plain format
+    return false;
   }
 
   void ensureWindows(HDC parentDC) {
@@ -1650,8 +1637,6 @@ void main(){ fragColor = uColor; }
       onGLResize(width, height);
   }
 
-  // Plain legacy pixel format — only used as a bootstrap to load WGL
-  // extensions.
   void setupPixelFormat(HDC dc) {
     PIXELFORMATDESCRIPTOR pfd{};
     pfd.nSize = sizeof(pfd);
@@ -1699,7 +1684,6 @@ void main(){ fragColor = uColor; }
     int glH = rc.bottom < 1 ? 1 : rc.bottom;
     glViewport(0, 0, glW, glH);
 
-    // ── Enable hardware MSAA — smooths all triangle edges at no CPU cost ──
     glEnable(GL_MULTISAMPLE);
 
     float mvp[16];
@@ -1812,30 +1796,12 @@ void main(){ fragColor = uColor; }
 // §11  FACTORY HELPERS
 // ============================================================================
 
-using CanvasPtr = std::shared_ptr<CanvasWidget>;
 
-inline CanvasPtr Canvas() { return std::make_shared<CanvasWidget>(); }
-inline CanvasPtr Canvas(int w, int h) {
+
+inline std::shared_ptr<CanvasWidget> Canvas() { return std::make_shared<CanvasWidget>(); }
+inline std::shared_ptr<CanvasWidget> Canvas(int w, int h) {
   return std::make_shared<CanvasWidget>()->setSize(w, h);
 }
-inline CanvasPtr RasterCanvas(int w, int h) {
-  auto c = std::make_shared<CanvasWidget>()->setSize(w, h);
-  c->setCanvasSize(w, h);
-  c->setViewportEnabled(false);
-  c->setSurface<RasterSurface>();
-  return c;
-}
-inline CanvasPtr RasterCanvas(int w, int h, size_t undoBudget) {
-  auto c = std::make_shared<CanvasWidget>()->setSize(w, h);
-  c->setCanvasSize(w, h);
-  c->setSurface<RasterSurface>(undoBudget);
-  return c;
-}
-inline CanvasPtr RasterCanvas(int viewW, int viewH, int canvasW, int canvasH) {
-  auto c = std::make_shared<CanvasWidget>()->setSize(viewW, viewH);
-  c->setCanvasSize(canvasW, canvasH);
-  c->setSurface<RasterSurface>();
-  return c;
-}
+
 
 #endif // FLUX_CANVAS_HPP

@@ -42,7 +42,7 @@
 //
 // ============================================================================
 
-#include "flux_canvas.hpp"
+#include "widgets/flux_raster.hpp"
 
 #include <algorithm>
 #include <cassert>
