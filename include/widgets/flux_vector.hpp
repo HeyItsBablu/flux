@@ -1151,6 +1151,10 @@ public:
       redo();
     if (ctrl && key == 'A')
       selectAll();
+    if (ctrl && key == VK_OEM_1) // Ctrl+;
+      setShowGuides(!showGuides_);
+    if (key == 'S' && !ctrl)
+      setSnapEnabled(!snapEnabled_);
     if (key == VK_ESCAPE) {
       if (tool_ == VTool::Pen && penInProgress_)
         commitPen();
