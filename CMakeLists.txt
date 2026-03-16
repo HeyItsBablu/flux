@@ -42,7 +42,8 @@ add_executable(my_app WIN32
 
 target_include_directories(my_app PRIVATE
     ${PROJECT_SOURCE_DIR}/include
-    ${PROJECT_SOURCE_DIR}/external/glad/include   # explicit for IntelliSense
+    ${PROJECT_SOURCE_DIR}/external/glad/include
+    ${PROJECT_SOURCE_DIR}/external/stb
 )
 
 target_link_libraries(my_app PRIVATE

@@ -4,14 +4,11 @@
 #pragma once
 
 #define STB_IMAGE_IMPLEMENTATION
-#include "widgets/stb_image.h"
+#include "stb_image.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "widgets/stb_image_write.h"
+#include "stb_image_write.h"
 
 #include "flux.hpp"
-#include "widgets/flux_histogram.hpp"
-#include "widgets/flux_hsl_panel.hpp" // ← HSL panel
-#include "widgets/flux_tonecurve.hpp"
 
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
@@ -26,53 +23,6 @@
 #include <memory>
 #include <string>
 #include <vector>
-
-#ifndef GL_STATIC_DRAW
-#define GL_STATIC_DRAW 0x88E4
-#endif
-#ifndef GL_TEXTURE0
-#define GL_TEXTURE0 0x84C0
-#endif
-#ifndef GL_TEXTURE1
-#define GL_TEXTURE1 0x84C1
-#endif
-#ifndef GL_TEXTURE2
-#define GL_TEXTURE2 0x84C2
-#endif
-#ifndef GL_CLAMP_TO_EDGE
-#define GL_CLAMP_TO_EDGE 0x812F
-#endif
-#ifndef GL_R8
-#define GL_R8 0x8229
-#endif
-#ifndef GL_RED
-#define GL_RED 0x1903
-#endif
-
-using PFNGLUNIFORM2FPROC = void(APIENTRY *)(GLint, GLfloat, GLfloat);
-using PFNGLACTIVETEXTUREPROC = void(APIENTRY *)(GLenum);
-
-namespace ie_gl {
-inline PFNGLUNIFORM2FPROC uniform2f = nullptr;
-inline PFNGLACTIVETEXTUREPROC activeTexture = nullptr;
-
-inline void init() {
-  if (uniform2f)
-    return;
-  HMODULE gl32 = GetModuleHandleA("opengl32.dll");
-  auto load = [&](const char *name) -> void * {
-    void *p = reinterpret_cast<void *>(wglGetProcAddress(name));
-    if (!p || p == (void *)1 || p == (void *)2 || p == (void *)3 ||
-        p == (void *)-1)
-      p = reinterpret_cast<void *>(GetProcAddress(gl32, name));
-    return p;
-  };
-  uniform2f = reinterpret_cast<PFNGLUNIFORM2FPROC>(load("glUniform2f"));
-  activeTexture =
-      reinterpret_cast<PFNGLACTIVETEXTUREPROC>(load("glActiveTexture"));
-  assert(uniform2f && activeTexture);
-}
-} // namespace ie_gl
 
 // =============================================================================
 // §1  EDIT PARAMETERS
@@ -431,7 +381,6 @@ public:
 
   // ── RenderSurface ─────────────────────────────────────────────────────────
   void initialize(int w, int h) override {
-    ie_gl::init();
     viewW_ = w;
     viewH_ = h;
     buildShader();
@@ -448,14 +397,15 @@ public:
     viewH_ = h;
   }
 
-void resize(int w, int h) override {
+  void resize(int w, int h) override {
     // setCanvasSize calls this with image dimensions — we don't use those
     // for glViewport. Use setGLSize() for the GL window size instead.
-    (void)w; (void)h;
+    (void)w;
+    (void)h;
   }
   void update(double) override {}
 
-void render(const float mvp[16]) override {
+  void render(const float mvp[16]) override {
     // CanvasWidget::tickAndRender already called glViewport(0,0,glW,glH).
     // We must NOT override it here with viewW_/viewH_.
     if (originalPixels_.empty() || !origTex_) {
@@ -524,17 +474,20 @@ private:
     assert(editProg_);
   }
 
-void buildQuad() {
+  void buildQuad() {
     // Allocate VAO/VBO with enough space; data uploaded in uploadQuadForSize()
     glGenVertexArrays(1, &quadVAO_);
     glGenBuffers(1, &quadVBO_);
     glBindVertexArray(quadVAO_);
     glBindBuffer(GL_ARRAY_BUFFER, quadVBO_);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 6 * 4, nullptr, GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 6 * 4, nullptr,
+                 GL_DYNAMIC_DRAW);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
+                          (void *)0);
     glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(8));
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
+                          (void *)(8));
     glBindVertexArray(0);
   }
 
@@ -542,12 +495,8 @@ void buildQuad() {
   // UV (0,0) = bottom-left, (1,1) = top-right  (GL Y-up convention).
   void uploadQuadForSize(float w, float h) {
     float v[] = {
-      0.f, 0.f,  0.f, 0.f,
-      w,   0.f,  1.f, 0.f,
-      w,   h,    1.f, 1.f,
-      w,   h,    1.f, 1.f,
-      0.f, h,    0.f, 1.f,
-      0.f, 0.f,  0.f, 0.f,
+        0.f, 0.f, 0.f, 0.f, w,   0.f, 1.f, 0.f, w,   h,   1.f, 1.f,
+        w,   h,   1.f, 1.f, 0.f, h,   0.f, 1.f, 0.f, 0.f, 0.f, 0.f,
     };
     glBindBuffer(GL_ARRAY_BUFFER, quadVBO_);
     glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(v), v);
@@ -643,7 +592,7 @@ void buildQuad() {
     glGenFramebuffers(1, &editFBO_);
     glBindFramebuffer(GL_FRAMEBUFFER, editFBO_);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-                            editTex_, 0);
+                           editTex_, 0);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
   }
 
@@ -684,7 +633,7 @@ void buildQuad() {
     glUniform1f(loc("uNoiseReduce"), p.noiseReduce);
     glUniform1f(loc("uVignette"), p.vignette);
     glUniform1f(loc("uGrain"), p.grain);
-    ie_gl::uniform2f(loc("uTexelSize"), 1.f / float(imgW_), 1.f / float(imgH_));
+    glUniform2f(loc("uTexelSize"), 1.f / float(imgW_), 1.f / float(imgH_));
 
     // Texture unit assignments
     glUniform1i(loc("uOriginal"), 0);
@@ -699,20 +648,22 @@ void buildQuad() {
   }
 
   void bindTextureUnit(int unit, GLuint tex) {
-    ie_gl::activeTexture(GL_TEXTURE0 + unit);
+    glActiveTexture(GL_TEXTURE0 + unit);
     glBindTexture(GL_TEXTURE_2D, tex);
   }
 
-void drawEditPass(GLuint fbo, const float* mvp) {
+  void drawEditPass(GLuint fbo, const float *mvp) {
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     // For export FBO: render at full image resolution.
-    // For screen pass (fbo=0): viewport already set by CanvasWidget — don't override.
+    // For screen pass (fbo=0): viewport already set by CanvasWidget — don't
+    // override.
     if (fbo)
       glViewport(0, 0, imgW_, imgH_);
     glUseProgram(editProg_);
 
     // Upload MVP — for the export FBO use a simple identity-style ortho so
-    // the shader samples the full image; for the view pass use the viewport MVP.
+    // the shader samples the full image; for the view pass use the viewport
+    // MVP.
     GLint mvpLoc = glGetUniformLocation(editProg_, "uMVP");
     glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, mvp);
 
@@ -740,12 +691,24 @@ void drawEditPass(GLuint fbo, const float* mvp) {
   // For export: build an ortho that maps [0..imgW] x [0..imgH] → NDC
   // (same convention as Viewport::buildMVP but fixed at image size)
   void buildExportMVP(float out[16]) const {
-    float l=0, r=float(imgW_), b=0, t=float(imgH_);
-    float rml=r-l, tmb=t-b;
-    out[ 0]=2.f/rml; out[ 1]=0;        out[ 2]=0;  out[ 3]=0;
-    out[ 4]=0;       out[ 5]=2.f/tmb;  out[ 6]=0;  out[ 7]=0;
-    out[ 8]=0;       out[ 9]=0;        out[10]=-1; out[11]=0;
-    out[12]=-(r+l)/rml; out[13]=-(t+b)/tmb; out[14]=0; out[15]=1;
+    float l = 0, r = float(imgW_), b = 0, t = float(imgH_);
+    float rml = r - l, tmb = t - b;
+    out[0] = 2.f / rml;
+    out[1] = 0;
+    out[2] = 0;
+    out[3] = 0;
+    out[4] = 0;
+    out[5] = 2.f / tmb;
+    out[6] = 0;
+    out[7] = 0;
+    out[8] = 0;
+    out[9] = 0;
+    out[10] = -1;
+    out[11] = 0;
+    out[12] = -(r + l) / rml;
+    out[13] = -(t + b) / tmb;
+    out[14] = 0;
+    out[15] = 1;
   }
 
   void renderToExportFBO() {
@@ -1346,7 +1309,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
   FluxUI app(hInstance);
 
   app.build([&]() {
-    return FluxApp("Light Room", BuildComponent<ImageEditorApp>(), AppTheme::dark());
+    return FluxApp("Light Room", BuildComponent<ImageEditorApp>(),
+                   AppTheme::dark());
   });
 
   int screenWidth = GetSystemMetrics(SM_CXSCREEN);

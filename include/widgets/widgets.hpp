@@ -14,5 +14,8 @@
 #include "flux_canvas.hpp"
 #include "flux_colorpicker.hpp"
 #include "flux_overlays.hpp"
+#include "flux_histogram.hpp"
+#include "flux_hsl_panel.hpp" 
+#include "flux_tonecurve.hpp"
 
 #endif // WIDGETS_HPP
