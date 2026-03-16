@@ -11,11 +11,7 @@
 // CONCRETE WIDGET CLASSES
 // ============================================================================
 
-// --- Stack Widget ---
-// Children are layered on top of one another (last child on top).
-// The stack sizes itself to the largest child unless a fixed size is given.
-// Each child can opt in to Positioned behaviour via positional margin fields
-// (marginLeft/Top as x/y offsets, width/height as explicit size).
+
 
 class StackWidget : public Widget {
 public:
@@ -331,13 +327,7 @@ inline WidgetPtr Positioned(WidgetPtr child, State<TX> &xState, FX xTransform,
   return child;
 }
 
-using StackWidgetPtr = std::shared_ptr<StackWidget>;
 
-template <typename... Widgets> StackWidgetPtr Stack(Widgets... widgets) {
-  auto w = std::make_shared<StackWidget>();
-  (w->addChild(widgets), ...);
-  return w;
-}
 
 // --- Column Widget ---
 class ColumnWidget : public Widget {
@@ -1189,6 +1179,9 @@ public:
 // ============================================================================
 
 using ContainerWidgetPtr = std::shared_ptr<ContainerWidget>;
+using StackWidgetPtr = std::shared_ptr<StackWidget>;
+using RowWidgetPtr = std::shared_ptr<RowWidget>;
+using ColumnWidgetPtr = std::shared_ptr<ColumnWidget>;
 
 inline ContainerWidgetPtr Container(WidgetPtr child = nullptr) {
   auto w = std::make_shared<ContainerWidget>();
@@ -1197,30 +1190,30 @@ inline ContainerWidgetPtr Container(WidgetPtr child = nullptr) {
   return w;
 }
 
-using RowWidgetPtr = std::shared_ptr<RowWidget>;
 
-template <typename... Widgets> RowWidgetPtr Row(Widgets... widgets) {
-  auto w = std::make_shared<RowWidget>();
+
+template <typename... Widgets> StackWidgetPtr Stack(Widgets... widgets) {
+  auto w = std::make_shared<StackWidget>();
   (w->addChild(widgets), ...);
   return w;
 }
 
-inline RowWidgetPtr Row(std::vector<WidgetPtr> children) {
+
+inline StackWidgetPtr Stack(std::initializer_list<WidgetPtr> children) {
+  auto w = std::make_shared<StackWidget>();
+  for (auto &child : children)
+    w->addChild(child);
+  return w;
+}
+
+inline RowWidgetPtr Row(std::initializer_list<WidgetPtr> children) {
   auto w = std::make_shared<RowWidget>();
   for (auto &child : children)
     w->addChild(child);
   return w;
 }
 
-using ColumnWidgetPtr = std::shared_ptr<ColumnWidget>;
-
-template <typename... Widgets> ColumnWidgetPtr Column(Widgets... widgets) {
-  auto w = std::make_shared<ColumnWidget>();
-  (w->addChild(widgets), ...);
-  return w;
-}
-
-inline ColumnWidgetPtr Column(std::vector<WidgetPtr> children) {
+inline ColumnWidgetPtr Column(std::initializer_list<WidgetPtr> children) {
   auto w = std::make_shared<ColumnWidget>();
   for (auto &child : children)
     w->addChild(child);
