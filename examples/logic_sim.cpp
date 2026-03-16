@@ -2425,9 +2425,9 @@ public:
     glClear(GL_COLOR_BUFFER_BIT);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    GL.useProgram(prog_);
+    glUseProgram(prog_);
     ls_gl::uniform2f(uViewSize_, float(viewW_), float(viewH_));
-    GL.bindVertexArray(vao_);
+    glBindVertexArray(vao_);
     drawGrid();
     drawAllWires();
     // Rubber-band selection rectangle
@@ -2458,34 +2458,34 @@ public:
       drawSimBorder();
     if (ctxMenu_.open)
       drawContextMenu();
-    GL.bindVertexArray(0);
-    GL.useProgram(0);
+    glBindVertexArray(0);
+    glUseProgram(0);
     glDisable(GL_BLEND);
   }
   void destroy() override {
     stopClockTimers();
     if (prog_) {
-      GL.deleteProgram(prog_);
+      glDeleteProgram(prog_);
       prog_ = 0;
     }
     if (texProg_) {
-      GL.deleteProgram(texProg_);
+      glDeleteProgram(texProg_);
       texProg_ = 0;
     }
     if (vao_) {
-      GL.deleteVertexArrays(1, &vao_);
+      glDeleteVertexArrays(1, &vao_);
       vao_ = 0;
     }
     if (vbo_) {
-      GL.deleteBuffers(1, &vbo_);
+      glDeleteBuffers(1, &vbo_);
       vbo_ = 0;
     }
     if (texVao_) {
-      GL.deleteVertexArrays(1, &texVao_);
+      glDeleteVertexArrays(1, &texVao_);
       texVao_ = 0;
     }
     if (texVbo_) {
-      GL.deleteBuffers(1, &texVbo_);
+      glDeleteBuffers(1, &texVbo_);
       texVbo_ = 0;
     }
     destroyCtxMenuTex();
@@ -3529,20 +3529,20 @@ private:
           y1 = ctxMenu_.sy + kCMHeight;
     float verts[] = {x0, y0, 0.f, 1.f, x1, y0, 1.f, 1.f, x1, y1, 1.f, 0.f,
                      x1, y1, 1.f, 0.f, x0, y1, 0.f, 0.f, x0, y0, 0.f, 1.f};
-    GL.useProgram(texProg_);
+    glUseProgram(texProg_);
     ls_gl::uniform2f(uTexViewSize_, float(viewW_), float(viewH_));
     ls_gl::uniform1i(uTexSampler_, 0);
     ls_gl::activeTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, ctxMenuTex_);
-    GL.bindVertexArray(texVao_);
-    GL.bindBuffer(GL_ARRAY_BUFFER, texVbo_);
-    GL.bufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_DYNAMIC_DRAW);
+    glBindVertexArray(texVao_);
+    glBindBuffer(GL_ARRAY_BUFFER, texVbo_);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_DYNAMIC_DRAW);
     glDrawArrays(GL_TRIANGLES, 0, 6);
-    GL.bindVertexArray(0);
+    glBindVertexArray(0);
     glBindTexture(GL_TEXTURE_2D, 0);
-    GL.useProgram(prog_);
+    glUseProgram(prog_);
     ls_gl::uniform2f(uViewSize_, float(viewW_), float(viewH_));
-    GL.bindVertexArray(vao_);
+    glBindVertexArray(vao_);
   }
 
   void drawContextMenu() {
@@ -3670,44 +3670,44 @@ private:
   void buildShader() {
     prog_ = glutil::linkProgram(kGVert, kGFrag);
     assert(prog_);
-    uViewSize_ = GL.getUniformLocation(prog_, "uViewSize");
-    uColor_ = GL.getUniformLocation(prog_, "uColor");
+    uViewSize_ = glGetUniformLocation(prog_, "uViewSize");
+    uColor_ = glGetUniformLocation(prog_, "uColor");
   }
   void buildTexShader() {
     texProg_ = glutil::linkProgram(kTexVert, kTexFrag);
     assert(texProg_);
-    uTexViewSize_ = GL.getUniformLocation(texProg_, "uViewSize");
-    uTexSampler_ = GL.getUniformLocation(texProg_, "uTex");
+    uTexViewSize_ = glGetUniformLocation(texProg_, "uViewSize");
+    uTexSampler_ = glGetUniformLocation(texProg_, "uTex");
   }
   void buildVAO() {
-    GL.genVertexArrays(1, &vao_);
-    GL.genBuffers(1, &vbo_);
-    GL.bindVertexArray(vao_);
-    GL.bindBuffer(GL_ARRAY_BUFFER, vbo_);
-    GL.enableVertexAttribArray(0);
-    GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float),
-                           (void *)0);
-    GL.bindVertexArray(0);
+    glGenVertexArrays(1, &vao_);
+    glGenBuffers(1, &vbo_);
+    glBindVertexArray(vao_);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float),
+                          (void *)0);
+    glBindVertexArray(0);
   }
   void buildTexVAO() {
-    GL.genVertexArrays(1, &texVao_);
-    GL.genBuffers(1, &texVbo_);
-    GL.bindVertexArray(texVao_);
-    GL.bindBuffer(GL_ARRAY_BUFFER, texVbo_);
-    GL.enableVertexAttribArray(0);
-    GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
-                           (void *)0);
-    GL.enableVertexAttribArray(1);
-    GL.vertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
-                           (void *)(2 * sizeof(float)));
-    GL.bufferData(GL_ARRAY_BUFFER, 6 * 4 * sizeof(float), nullptr,
-                  GL_DYNAMIC_DRAW);
-    GL.bindVertexArray(0);
+    glGenVertexArrays(1, &texVao_);
+    glGenBuffers(1, &texVbo_);
+    glBindVertexArray(texVao_);
+    glBindBuffer(GL_ARRAY_BUFFER, texVbo_);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
+                          (void *)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
+                          (void *)(2 * sizeof(float)));
+    glBufferData(GL_ARRAY_BUFFER, 6 * 4 * sizeof(float), nullptr,
+                 GL_DYNAMIC_DRAW);
+    glBindVertexArray(0);
   }
   void upload(const std::vector<float> &v) {
-    GL.bindBuffer(GL_ARRAY_BUFFER, vbo_);
-    GL.bufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(v.size() * sizeof(float)),
-                  v.data(), GL_DYNAMIC_DRAW);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(v.size() * sizeof(float)),
+                 v.data(), GL_DYNAMIC_DRAW);
   }
   void dc(const std::vector<float> &v, float r, float g, float b,
           float a = 1.f) {
@@ -5697,11 +5697,12 @@ class LogicSimApp : public Component {
   }
 
   // =========================================================================
-// §7d  ALU PRESET BUILDER
-// =========================================================================
+  // §7d  ALU PRESET BUILDER
+  // =========================================================================
 
-void buildALU4() {
-    if (!surface_) return;
+  void buildALU4() {
+    if (!surface_)
+      return;
     surface_->simStop();
     surface_->pushUndo();
     Circuit &c = surface_->circuit;
@@ -5758,14 +5759,14 @@ void buildALU4() {
     //   Column 4:  Outputs         x = 640
 
     // ── Op select inputs ────────────────────────────────────────────────
-    int iOp0 = c.add(GateType::INPUT, -520.f,  420.f, "Op0");
-    int iOp1 = c.add(GateType::INPUT, -520.f,  520.f, "Op1");
-    int iOp2 = c.add(GateType::INPUT, -520.f,  620.f, "Op2");
+    int iOp0 = c.add(GateType::INPUT, -520.f, 420.f, "Op0");
+    int iOp1 = c.add(GateType::INPUT, -520.f, 520.f, "Op1");
+    int iOp2 = c.add(GateType::INPUT, -520.f, 620.f, "Op2");
 
     // Inverters for op bits
-    int nOp0 = c.add(GateType::NOT, -360.f,  420.f, "~Op0");
-    int nOp1 = c.add(GateType::NOT, -360.f,  520.f, "~Op1");
-    int nOp2 = c.add(GateType::NOT, -360.f,  620.f, "~Op2");
+    int nOp0 = c.add(GateType::NOT, -360.f, 420.f, "~Op0");
+    int nOp1 = c.add(GateType::NOT, -360.f, 520.f, "~Op1");
+    int nOp2 = c.add(GateType::NOT, -360.f, 620.f, "~Op2");
     c.connect(iOp0, 0, nOp0, 0);
     c.connect(iOp1, 0, nOp1, 0);
     c.connect(iOp2, 0, nOp2, 0);
@@ -5776,7 +5777,7 @@ void buildALU4() {
     int selAdd = c.add(GateType::AND, -80.f, 380.f, "sel_ADD");
     c.connect(nOp2, 0, saA, 0);
     c.connect(nOp1, 0, saA, 1);
-    c.connect(saA,  0, selAdd, 0);
+    c.connect(saA, 0, selAdd, 0);
     c.connect(nOp0, 0, selAdd, 1);
 
     // sel_sub = ~Op2 & ~Op1 & Op0
@@ -5784,7 +5785,7 @@ void buildALU4() {
     int selSub = c.add(GateType::AND, -80.f, 460.f, "sel_SUB");
     c.connect(nOp2, 0, ssA, 0);
     c.connect(nOp1, 0, ssA, 1);
-    c.connect(ssA,  0, selSub, 0);
+    c.connect(ssA, 0, selSub, 0);
     c.connect(iOp0, 0, selSub, 1);
 
     // sel_and = ~Op2 & Op1 & ~Op0
@@ -5808,17 +5809,17 @@ void buildALU4() {
     int selXor = c.add(GateType::AND, -80.f, 700.f, "sel_XOR");
     c.connect(iOp2, 0, sxA, 0);
     c.connect(nOp1, 0, sxA, 1);
-    c.connect(sxA,  0, selXor, 0);
+    c.connect(sxA, 0, selXor, 0);
     c.connect(nOp0, 0, selXor, 1);
 
     // ── Data inputs ─────────────────────────────────────────────────────
-    const float bitY[4] = { -300.f, -100.f, 100.f, 300.f };
+    const float bitY[4] = {-300.f, -100.f, 100.f, 300.f};
     int iA[4], iB[4];
     for (int i = 0; i < 4; i++) {
-        iA[i] = c.add(GateType::INPUT, -520.f, bitY[i] - 30.f,
-                      "A" + std::to_string(i));
-        iB[i] = c.add(GateType::INPUT, -520.f, bitY[i] + 30.f,
-                      "B" + std::to_string(i));
+      iA[i] = c.add(GateType::INPUT, -520.f, bitY[i] - 30.f,
+                    "A" + std::to_string(i));
+      iB[i] = c.add(GateType::INPUT, -520.f, bitY[i] + 30.f,
+                    "B" + std::to_string(i));
     }
 
     // ── Per-bit logic ────────────────────────────────────────────────────
@@ -5829,119 +5830,117 @@ void buildALU4() {
     // B_i_eff = Bi XOR selSub   (invert B when subtracting)
     // Then full-adder on (Ai, B_i_eff, carry_i)
 
-    int prevCarry = selSub;  // Cin = 1 when subtracting, 0 when adding
+    int prevCarry = selSub; // Cin = 1 when subtracting, 0 when adding
 
     // Storage for per-bit intermediate nodes
-    int bEff[4];   // B XOR selSub
+    int bEff[4];                                             // B XOR selSub
     int faXor1[4], faAnd1[4], faXor2[4], faAnd2[4], faOr[4]; // FA internals
-    int logAnd[4], logOr[4], logXor[4];  // logic results
-    int outR[4];   // final result OUTPUT gates
+    int logAnd[4], logOr[4], logXor[4];                      // logic results
+    int outR[4]; // final result OUTPUT gates
 
     for (int i = 0; i < 4; i++) {
-        float bx = 80.f + i * 0.f;   // all at same x, different y
-        float by = bitY[i];
+      float bx = 80.f + i * 0.f; // all at same x, different y
+      float by = bitY[i];
 
-        // ── B inversion for subtract ─────────────────────────────────
-        bEff[i] = c.add(GateType::XOR, 60.f, by - 60.f,
-                        "Beff" + std::to_string(i));
-        c.connect(iB[i],  0, bEff[i], 0);
-        c.connect(selSub, 0, bEff[i], 1);
+      // ── B inversion for subtract ─────────────────────────────────
+      bEff[i] =
+          c.add(GateType::XOR, 60.f, by - 60.f, "Beff" + std::to_string(i));
+      c.connect(iB[i], 0, bEff[i], 0);
+      c.connect(selSub, 0, bEff[i], 1);
 
-        // ── Full adder ───────────────────────────────────────────────
-        // XOR1 = Ai ^ Beff
-        faXor1[i] = c.add(GateType::XOR,  180.f, by - 80.f,
-                          "X1_" + std::to_string(i));
-        faAnd1[i] = c.add(GateType::AND,  180.f, by - 20.f,
-                          "A1_" + std::to_string(i));
-        c.connect(iA[i],   0, faXor1[i], 0);
-        c.connect(bEff[i], 0, faXor1[i], 1);
-        c.connect(iA[i],   0, faAnd1[i], 0);
-        c.connect(bEff[i], 0, faAnd1[i], 1);
+      // ── Full adder ───────────────────────────────────────────────
+      // XOR1 = Ai ^ Beff
+      faXor1[i] =
+          c.add(GateType::XOR, 180.f, by - 80.f, "X1_" + std::to_string(i));
+      faAnd1[i] =
+          c.add(GateType::AND, 180.f, by - 20.f, "A1_" + std::to_string(i));
+      c.connect(iA[i], 0, faXor1[i], 0);
+      c.connect(bEff[i], 0, faXor1[i], 1);
+      c.connect(iA[i], 0, faAnd1[i], 0);
+      c.connect(bEff[i], 0, faAnd1[i], 1);
 
-        // XOR2 = XOR1 ^ Cin  (= sum bit)
-        faXor2[i] = c.add(GateType::XOR,  300.f, by - 80.f,
-                          "X2_" + std::to_string(i));
-        faAnd2[i] = c.add(GateType::AND,  300.f, by - 20.f,
-                          "A2_" + std::to_string(i));
-        c.connect(faXor1[i], 0, faXor2[i], 0);
-        c.connect(prevCarry, 0, faXor2[i], 1);
-        c.connect(faXor1[i], 0, faAnd2[i], 0);
-        c.connect(prevCarry, 0, faAnd2[i], 1);
+      // XOR2 = XOR1 ^ Cin  (= sum bit)
+      faXor2[i] =
+          c.add(GateType::XOR, 300.f, by - 80.f, "X2_" + std::to_string(i));
+      faAnd2[i] =
+          c.add(GateType::AND, 300.f, by - 20.f, "A2_" + std::to_string(i));
+      c.connect(faXor1[i], 0, faXor2[i], 0);
+      c.connect(prevCarry, 0, faXor2[i], 1);
+      c.connect(faXor1[i], 0, faAnd2[i], 0);
+      c.connect(prevCarry, 0, faAnd2[i], 1);
 
-        // Carry out
-        faOr[i] = c.add(GateType::OR, 360.f, by,
-                        "Co_" + std::to_string(i));
-        c.connect(faAnd1[i], 0, faOr[i], 0);
-        c.connect(faAnd2[i], 0, faOr[i], 1);
-        prevCarry = faOr[i];
+      // Carry out
+      faOr[i] = c.add(GateType::OR, 360.f, by, "Co_" + std::to_string(i));
+      c.connect(faAnd1[i], 0, faOr[i], 0);
+      c.connect(faAnd2[i], 0, faOr[i], 1);
+      prevCarry = faOr[i];
 
-        // ── Logic operations ─────────────────────────────────────────
-        logAnd[i] = c.add(GateType::AND, 180.f, by + 60.f,
-                          "AND_" + std::to_string(i));
-        logOr[i]  = c.add(GateType::OR,  180.f, by + 120.f,
-                          "OR_"  + std::to_string(i));
-        logXor[i] = c.add(GateType::XOR, 180.f, by + 180.f,
-                          "XOR_" + std::to_string(i));
-        c.connect(iA[i], 0, logAnd[i], 0);
-        c.connect(iB[i], 0, logAnd[i], 1);
-        c.connect(iA[i], 0, logOr[i],  0);
-        c.connect(iB[i], 0, logOr[i],  1);
-        c.connect(iA[i], 0, logXor[i], 0);
-        c.connect(iB[i], 0, logXor[i], 1);
+      // ── Logic operations ─────────────────────────────────────────
+      logAnd[i] =
+          c.add(GateType::AND, 180.f, by + 60.f, "AND_" + std::to_string(i));
+      logOr[i] =
+          c.add(GateType::OR, 180.f, by + 120.f, "OR_" + std::to_string(i));
+      logXor[i] =
+          c.add(GateType::XOR, 180.f, by + 180.f, "XOR_" + std::to_string(i));
+      c.connect(iA[i], 0, logAnd[i], 0);
+      c.connect(iB[i], 0, logAnd[i], 1);
+      c.connect(iA[i], 0, logOr[i], 0);
+      c.connect(iB[i], 0, logOr[i], 1);
+      c.connect(iA[i], 0, logXor[i], 0);
+      c.connect(iB[i], 0, logXor[i], 1);
 
-        // ── Output mux (5-way: one AND per candidate, then OR tree) ──
-        // Each candidate: result_gate & sel_X
-        float mx = 480.f;
+      // ── Output mux (5-way: one AND per candidate, then OR tree) ──
+      // Each candidate: result_gate & sel_X
+      float mx = 480.f;
 
-        int mAdd = c.add(GateType::AND, mx,        by - 160.f,
-                         "mADD" + std::to_string(i));
-        int mSub = c.add(GateType::AND, mx,        by - 100.f,
-                         "mSUB" + std::to_string(i));
-        int mAnd = c.add(GateType::AND, mx,        by -  40.f,
-                         "mAND" + std::to_string(i));
-        int mOr  = c.add(GateType::AND, mx,        by +  20.f,
-                         "mOR"  + std::to_string(i));
-        int mXor = c.add(GateType::AND, mx,        by +  80.f,
-                         "mXOR" + std::to_string(i));
+      int mAdd =
+          c.add(GateType::AND, mx, by - 160.f, "mADD" + std::to_string(i));
+      int mSub =
+          c.add(GateType::AND, mx, by - 100.f, "mSUB" + std::to_string(i));
+      int mAnd =
+          c.add(GateType::AND, mx, by - 40.f, "mAND" + std::to_string(i));
+      int mOr = c.add(GateType::AND, mx, by + 20.f, "mOR" + std::to_string(i));
+      int mXor =
+          c.add(GateType::AND, mx, by + 80.f, "mXOR" + std::to_string(i));
 
-        c.connect(faXor2[i], 0, mAdd, 0);
-        c.connect(selAdd,    0, mAdd, 1);
+      c.connect(faXor2[i], 0, mAdd, 0);
+      c.connect(selAdd, 0, mAdd, 1);
 
-        c.connect(faXor2[i], 0, mSub, 0);
-        c.connect(selSub,    0, mSub, 1);
+      c.connect(faXor2[i], 0, mSub, 0);
+      c.connect(selSub, 0, mSub, 1);
 
-        c.connect(logAnd[i], 0, mAnd, 0);
-        c.connect(selAnd,    0, mAnd, 1);
+      c.connect(logAnd[i], 0, mAnd, 0);
+      c.connect(selAnd, 0, mAnd, 1);
 
-        c.connect(logOr[i],  0, mOr,  0);
-        c.connect(selOr,     0, mOr,  1);
+      c.connect(logOr[i], 0, mOr, 0);
+      c.connect(selOr, 0, mOr, 1);
 
-        c.connect(logXor[i], 0, mXor, 0);
-        c.connect(selXor,    0, mXor, 1);
+      c.connect(logXor[i], 0, mXor, 0);
+      c.connect(selXor, 0, mXor, 1);
 
-        // OR tree: (mAdd|mSub) | (mAnd|mOr) | mXor
-        int or01 = c.add(GateType::OR, mx + 100.f, by - 130.f,
-                         "o01_" + std::to_string(i));
-        int or23 = c.add(GateType::OR, mx + 100.f, by -  10.f,
-                         "o23_" + std::to_string(i));
-        int or45 = c.add(GateType::OR, mx + 200.f, by -  70.f,
-                         "o45_" + std::to_string(i));
-        int orFin= c.add(GateType::OR, mx + 300.f, by -  70.f,
-                         "Ri_"  + std::to_string(i));
+      // OR tree: (mAdd|mSub) | (mAnd|mOr) | mXor
+      int or01 = c.add(GateType::OR, mx + 100.f, by - 130.f,
+                       "o01_" + std::to_string(i));
+      int or23 = c.add(GateType::OR, mx + 100.f, by - 10.f,
+                       "o23_" + std::to_string(i));
+      int or45 = c.add(GateType::OR, mx + 200.f, by - 70.f,
+                       "o45_" + std::to_string(i));
+      int orFin =
+          c.add(GateType::OR, mx + 300.f, by - 70.f, "Ri_" + std::to_string(i));
 
-        c.connect(mAdd,  0, or01, 0);
-        c.connect(mSub,  0, or01, 1);
-        c.connect(mAnd,  0, or23, 0);
-        c.connect(mOr,   0, or23, 1);
-        c.connect(or01,  0, or45, 0);
-        c.connect(or23,  0, or45, 1);
-        c.connect(or45,  0, orFin,0);
-        c.connect(mXor,  0, orFin,1);
+      c.connect(mAdd, 0, or01, 0);
+      c.connect(mSub, 0, or01, 1);
+      c.connect(mAnd, 0, or23, 0);
+      c.connect(mOr, 0, or23, 1);
+      c.connect(or01, 0, or45, 0);
+      c.connect(or23, 0, or45, 1);
+      c.connect(or45, 0, orFin, 0);
+      c.connect(mXor, 0, orFin, 1);
 
-        // Result output
-        outR[i] = c.add(GateType::OUTPUT, mx + 440.f, by - 70.f,
-                        "R"  + std::to_string(i));
-        c.connect(orFin, 0, outR[i], 0);
+      // Result output
+      outR[i] = c.add(GateType::OUTPUT, mx + 440.f, by - 70.f,
+                      "R" + std::to_string(i));
+      c.connect(orFin, 0, outR[i], 0);
     }
 
     // ── Carry-out / overflow output ──────────────────────────────────────
@@ -5958,11 +5957,11 @@ void buildALU4() {
 
     // Re-collect the final OR nodes for zero flag
     // We stored them in orFin — but we don't have a reference after the loop.
-    // Instead add NOR gates directly connected to the output gates' input wires.
-    // Simplest correct approach: use XNOR chain isn't right.
-    // Use: zero = NOR(R0,R1) AND NOR(R2,R3) — but we need to tap
-    // before the OUTPUT gates. We'll tap faXor2 / orFin outputs by
-    // reconnecting. Easier: just add OR+NOT pairs.
+    // Instead add NOR gates directly connected to the output gates' input
+    // wires. Simplest correct approach: use XNOR chain isn't right. Use: zero =
+    // NOR(R0,R1) AND NOR(R2,R3) — but we need to tap before the OUTPUT gates.
+    // We'll tap faXor2 / orFin outputs by reconnecting. Easier: just add OR+NOT
+    // pairs.
 
     // Tap point: we need the result bits BEFORE the OUTPUT gate.
     // The orFin gate for each bit already drives outR[i].
@@ -5987,32 +5986,34 @@ void buildALU4() {
     // we'll find those gates by their label "Ri_X".
 
     // Find orFin gate ids by label
-    int orFinIds[4] = {-1,-1,-1,-1};
+    int orFinIds[4] = {-1, -1, -1, -1};
     for (auto &g : c.gates) {
-        for (int i = 0; i < 4; i++) {
-            std::string lbl = "Ri_" + std::to_string(i);
-            if (g.label == lbl) orFinIds[i] = g.id;
-        }
+      for (int i = 0; i < 4; i++) {
+        std::string lbl = "Ri_" + std::to_string(i);
+        if (g.label == lbl)
+          orFinIds[i] = g.id;
+      }
     }
 
-    if (orFinIds[0]>=0 && orFinIds[1]>=0 && orFinIds[2]>=0 && orFinIds[3]>=0) {
-        // NOR(R0,R1): OR then NOT
-        int zOr01 = c.add(GateType::OR,  480.f, 560.f, "zOR01");
-        int zOr23 = c.add(GateType::OR,  480.f, 640.f, "zOR23");
-        int zN01  = c.add(GateType::NOT, 600.f, 560.f, "zN01");
-        int zN23  = c.add(GateType::NOT, 600.f, 640.f, "zN23");
-        int zAnd  = c.add(GateType::AND, 720.f, 600.f, "ZERO");
-        int oZero = c.add(GateType::OUTPUT, 840.f, 600.f, "Zero");
+    if (orFinIds[0] >= 0 && orFinIds[1] >= 0 && orFinIds[2] >= 0 &&
+        orFinIds[3] >= 0) {
+      // NOR(R0,R1): OR then NOT
+      int zOr01 = c.add(GateType::OR, 480.f, 560.f, "zOR01");
+      int zOr23 = c.add(GateType::OR, 480.f, 640.f, "zOR23");
+      int zN01 = c.add(GateType::NOT, 600.f, 560.f, "zN01");
+      int zN23 = c.add(GateType::NOT, 600.f, 640.f, "zN23");
+      int zAnd = c.add(GateType::AND, 720.f, 600.f, "ZERO");
+      int oZero = c.add(GateType::OUTPUT, 840.f, 600.f, "Zero");
 
-        c.connect(orFinIds[0], 0, zOr01, 0);
-        c.connect(orFinIds[1], 0, zOr01, 1);
-        c.connect(orFinIds[2], 0, zOr23, 0);
-        c.connect(orFinIds[3], 0, zOr23, 1);
-        c.connect(zOr01, 0, zN01, 0);
-        c.connect(zOr23, 0, zN23, 0);
-        c.connect(zN01,  0, zAnd, 0);
-        c.connect(zN23,  0, zAnd, 1);
-        c.connect(zAnd,  0, oZero, 0);
+      c.connect(orFinIds[0], 0, zOr01, 0);
+      c.connect(orFinIds[1], 0, zOr01, 1);
+      c.connect(orFinIds[2], 0, zOr23, 0);
+      c.connect(orFinIds[3], 0, zOr23, 1);
+      c.connect(zOr01, 0, zN01, 0);
+      c.connect(zOr23, 0, zN23, 0);
+      c.connect(zN01, 0, zAnd, 0);
+      c.connect(zN23, 0, zAnd, 1);
+      c.connect(zAnd, 0, oZero, 0);
     }
 
     c.evaluate();
@@ -6021,10 +6022,13 @@ void buildALU4() {
     surface_->fitToView();
     statusMsg.set(
         "4-bit ALU  |  Op: 000=ADD  001=SUB  010=AND  011=OR  100=XOR  "
-        "|  Set A,B inputs + Op bits  |  R=result  Cout=carry  Zero=all-zero flag");
-    if (canvas_) canvas_->redraw();
-    if (surface_->onCircuitChanged) surface_->onCircuitChanged();
-}
+        "|  Set A,B inputs + Op bits  |  R=result  Cout=carry  Zero=all-zero "
+        "flag");
+    if (canvas_)
+      canvas_->redraw();
+    if (surface_->onCircuitChanged)
+      surface_->onCircuitChanged();
+  }
 
 public:
   LogicSimApp()
@@ -6109,20 +6113,20 @@ public:
       COLORREF ac = ti.ac;
       return GestureDetector(
                  Container(
-                     Row(Container(nullptr)
-                             ->setWidth(3)
-                             ->setHeight(32)
-                             ->setBackgroundColor(ac)
-                             ->setBorderRadius(2),
-                         SizedBox(7, 0),
-                         Column(
-                             Text(kGateName[(int)t])
-                                 ->setFontSize(10)
-                                 ->setFontWeight(FontWeight::Bold)
-                                 ->setTextColor(ac),
-                             SizedBox(0, 1),
-                             Text(ti.sub)->setFontSize(8)->setTextColor(kDim))
-                             ->setSpacing(0))
+                     Row({Container(nullptr)
+                              ->setWidth(3)
+                              ->setHeight(32)
+                              ->setBackgroundColor(ac)
+                              ->setBorderRadius(2),
+                          SizedBox(7, 0),
+                          Column({Text(kGateName[(int)t])
+                                      ->setFontSize(10)
+                                      ->setFontWeight(FontWeight::Bold)
+                                      ->setTextColor(ac),
+                                  SizedBox(0, 1),
+                                  Text(ti.sub)->setFontSize(8)->setTextColor(
+                                      kDim)})
+                              ->setSpacing(0)})
                          ->setSpacing(0)
                          ->setCrossAxisAlignment(CrossAxisAlignment::Center))
                      ->setWidth(kSW - 16)
@@ -6162,14 +6166,14 @@ public:
       tileCol->addChild(makeTile(ti));
 
     auto ttPanel =
-        Container(Column(Text("TRUTH TABLE / STATE")
-                             ->setFontSize(7)
-                             ->setFontWeight(FontWeight::Bold)
-                             ->setTextColor(kDim),
-                         SizedBox(0, 5),
-                         Text(ttText, [](const std::string &s) { return s; })
-                             ->setFontSize(9)
-                             ->setTextColor(RGB(120, 200, 140)))
+        Container(Column({Text("TRUTH TABLE / STATE")
+                              ->setFontSize(7)
+                              ->setFontWeight(FontWeight::Bold)
+                              ->setTextColor(kDim),
+                          SizedBox(0, 5),
+                          Text(ttText, [](const std::string &s) { return s; })
+                              ->setFontSize(9)
+                              ->setTextColor(RGB(120, 200, 140))})
                       ->setSpacing(0))
             ->setWidth(kSW - 8)
             ->setBackgroundColor(RGB(10, 14, 10))
@@ -6179,11 +6183,11 @@ public:
             ->setPaddingAll(7, 7, 7, 7);
 
     auto sidebar =
-        Container(Column(Text("GATES")
-                             ->setFontSize(7)
-                             ->setFontWeight(FontWeight::Bold)
-                             ->setTextColor(kDim),
-                         SizedBox(0, 6), tileCol, SizedBox(0, 10), ttPanel)
+        Container(Column({Text("GATES")
+                              ->setFontSize(7)
+                              ->setFontWeight(FontWeight::Bold)
+                              ->setTextColor(kDim),
+                          SizedBox(0, 6), tileCol, SizedBox(0, 10), ttPanel})
                       ->setSpacing(0))
             ->setWidth(kSW)
             ->setBackgroundColor(kBg)
@@ -6207,8 +6211,8 @@ public:
           ->setOnTap(fn);
     };
 
-    auto toolbar=Container(Column(
-            Row(
+    auto toolbar=Container(Column({
+            Row({
                 Text("⚡ Logic Sim")->setFontSize(13)->setFontWeight(FontWeight::Bold)->setTextColor(kAccent),SizedBox(8,0),
                 mkBtn("💾 Save",kGreen,RGB(10,20,18),RGB(30,80,60),[this](){doSave();}),
                 mkBtn("📂 Open",kGreen,RGB(10,20,18),RGB(30,80,60),[this](){doLoad();}),SizedBox(4,0),
@@ -6226,9 +6230,9 @@ public:
                 mkBtn("1:1",kAccent,RGB(22,20,34),RGB(70,55,100),[this](){if(surface_){surface_->resetZoom();notifyZoom(1.f);}}),SizedBox(6,0),
                 mkBtn("🗑 Clear",RGB(243,139,168),RGB(34,14,20),RGB(120,40,60),[this](){if(!surface_)return;surface_->pushUndo();surface_->simStop();surface_->circuit.clearAll();gateCount.set(0);ttText.set("No circuit yet");currentFile.set("");if(canvas_)canvas_->redraw();}),SizedBox(6,0),
                 Text(gateCount,[](int n){return std::to_string(n)+(n==1?" item":" items");})->setFontSize(10)->setTextColor(kDim)
-            )->setSpacing(5)->setCrossAxisAlignment(CrossAxisAlignment::Center),
+    })->setSpacing(5)->setCrossAxisAlignment(CrossAxisAlignment::Center),
             SizedBox(0,4),
-            Row(
+            Row({
                 GestureDetector(Container(Text(simRunning,[](bool r){return r?"⏸ Pause":"▶ Play";})
                     ->setFontSize(11)->setFontWeight(FontWeight::Bold)->setTextColor(RGB(80,220,120)))
                     ->setHeight(30)->setBorderRadius(6)->setBackgroundColor(RGB(14,34,18))->setBorderWidth(1)->setBorderColor(RGB(40,120,55))->setPaddingAll(10,4,10,4)->setHoverBackgroundColor(RGB(18,44,22)))
@@ -6259,28 +6263,28 @@ SizedBox(8,0),
                 SizedBox(12,0),
                 Text("Select gates → Ctrl+G to group  |  Right-click subcircuit instance to delete  |  Dbl-click for info  |  Wires cross boundary automatically")
                     ->setFontSize(9)->setTextColor(kDim)
-            )->setSpacing(0)->setCrossAxisAlignment(CrossAxisAlignment::Center)
-        )->setSpacing(0))
+    })->setSpacing(0)->setCrossAxisAlignment(CrossAxisAlignment::Center)
+  })->setSpacing(0))
         ->setBackgroundColor(kBg)->setPaddingAll(10,5,10,5)->setHeight(kTH);
 
     auto hints =
-        Container(Row(Text(statusMsg, [](const std::string &s) { return s; })
-                          ->setFontSize(10)
-                          ->setTextColor(kGreen),
-                      SizedBox(14, 0),
-                      Text(currentFile,
-                           [](const std::string &s) {
-                             return s.empty() ? "Unsaved" : s;
-                           })
-                          ->setFontSize(9)
-                          ->setTextColor(RGB(55, 60, 85)))
+        Container(Row({Text(statusMsg, [](const std::string &s) { return s; })
+                           ->setFontSize(10)
+                           ->setTextColor(kGreen),
+                       SizedBox(14, 0),
+                       Text(currentFile,
+                            [](const std::string &s) {
+                              return s.empty() ? "Unsaved" : s;
+                            })
+                           ->setFontSize(9)
+                           ->setTextColor(RGB(55, 60, 85))})
                       ->setSpacing(0))
             ->setBackgroundColor(kBg)
             ->setPaddingAll(10, 3, 10, 3)
             ->setHeight(kHH);
 
-    return Scaffold(
-        Row(sidebar, Column(toolbar, hints, cv)->setSpacing(0))->setSpacing(0));
+    return Scaffold(Row({sidebar, Column({toolbar, hints, cv})->setSpacing(0)})
+                        ->setSpacing(0));
   }
 };
 
@@ -6300,6 +6304,3 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int) {
   ShowWindow(GetActiveWindow(), SW_MAXIMIZE);
   return app.run();
 }
-
-
-
