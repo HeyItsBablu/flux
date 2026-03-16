@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(MyCppProject VERSION 1.0 LANGUAGES CXX C)   # <-- add C here
+project(MyCppProject VERSION 1.0 LANGUAGES CXX C)
 
 if (NOT MSVC)
     message(FATAL_ERROR "MyCppProject must be built with MSVC (Visual C++).")
@@ -20,24 +20,33 @@ add_compile_options(
 add_library(glad STATIC
     external/glad/src/glad.c
 )
+
 set_source_files_properties(external/glad/src/glad.c PROPERTIES LANGUAGE C)
+
 target_include_directories(glad PUBLIC
     ${PROJECT_SOURCE_DIR}/external/glad/include
 )
 
-# ── Clipper2 ──────────────────────────────────────────────────────────────────
+# ── Clipper2 ─────────────────────────────────────────────────────────────────
 add_library(clipper2
     external/Clipper2/CPP/Clipper2Lib/src/clipper.engine.cpp
     external/Clipper2/CPP/Clipper2Lib/src/clipper.offset.cpp
     external/Clipper2/CPP/Clipper2Lib/src/clipper.rectclip.cpp
 )
+
 target_include_directories(clipper2 PUBLIC
     ${PROJECT_SOURCE_DIR}/external/Clipper2/CPP/Clipper2Lib/include
 )
 
-# ── App ───────────────────────────────────────────────────────────────────────
+# ── Collect all src files ────────────────────────────────────────────────────
+file(GLOB_RECURSE APP_SOURCES
+    ${PROJECT_SOURCE_DIR}/src/*.cpp
+)
+
+# ── App ─────────────────────────────────────────────────────────────────────
 add_executable(my_app WIN32
-    src/main.cpp
+    examples/main.cpp
+    ${APP_SOURCES}
 )
 
 target_include_directories(my_app PRIVATE
