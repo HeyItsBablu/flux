@@ -362,9 +362,9 @@ public:
       return false;
     renderToExportFBO();
     std::vector<uint8_t> buf(size_t(imgW_) * imgH_ * 4);
-    GL.bindFramebuffer(GL_READ_FRAMEBUFFER, editFBO_);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, editFBO_);
     glReadPixels(0, 0, imgW_, imgH_, GL_RGBA, GL_UNSIGNED_BYTE, buf.data());
-    GL.bindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
     std::vector<uint8_t> flipped(buf.size());
     int stride = imgW_ * 4;
     for (int r = 0; r < imgH_; r++)
@@ -486,19 +486,19 @@ void render(const float mvp[16]) override {
     del(hslTexLum_);
     del(editTex_);
     if (editProg_) {
-      GL.deleteProgram(editProg_);
+      glDeleteProgram(editProg_);
       editProg_ = 0;
     }
     if (quadVAO_) {
-      GL.deleteVertexArrays(1, &quadVAO_);
+      glDeleteVertexArrays(1, &quadVAO_);
       quadVAO_ = 0;
     }
     if (quadVBO_) {
-      GL.deleteBuffers(1, &quadVBO_);
+      glDeleteBuffers(1, &quadVBO_);
       quadVBO_ = 0;
     }
     if (editFBO_) {
-      GL.deleteFramebuffers(1, &editFBO_);
+      glDeleteFramebuffers(1, &editFBO_);
       editFBO_ = 0;
     }
   }
@@ -526,16 +526,16 @@ private:
 
 void buildQuad() {
     // Allocate VAO/VBO with enough space; data uploaded in uploadQuadForSize()
-    GL.genVertexArrays(1, &quadVAO_);
-    GL.genBuffers(1, &quadVBO_);
-    GL.bindVertexArray(quadVAO_);
-    GL.bindBuffer(GL_ARRAY_BUFFER, quadVBO_);
-    GL.bufferData(GL_ARRAY_BUFFER, sizeof(float) * 6 * 4, nullptr, GL_DYNAMIC_DRAW);
-    GL.enableVertexAttribArray(0);
-    GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
-    GL.enableVertexAttribArray(1);
-    GL.vertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(8));
-    GL.bindVertexArray(0);
+    glGenVertexArrays(1, &quadVAO_);
+    glGenBuffers(1, &quadVBO_);
+    glBindVertexArray(quadVAO_);
+    glBindBuffer(GL_ARRAY_BUFFER, quadVBO_);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 6 * 4, nullptr, GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(8));
+    glBindVertexArray(0);
   }
 
   // Upload a canvas-space quad matching the current image dimensions.
@@ -549,9 +549,9 @@ void buildQuad() {
       0.f, h,    0.f, 1.f,
       0.f, 0.f,  0.f, 0.f,
     };
-    GL.bindBuffer(GL_ARRAY_BUFFER, quadVBO_);
-    GL.bufferSubData(GL_ARRAY_BUFFER, 0, sizeof(v), v);
-    GL.bindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindBuffer(GL_ARRAY_BUFFER, quadVBO_);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(v), v);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
   }
 
   void buildNoiseTexture() {
@@ -626,7 +626,7 @@ void buildQuad() {
 
   void rebuildEditFBOForImage() {
     if (editFBO_) {
-      GL.deleteFramebuffers(1, &editFBO_);
+      glDeleteFramebuffers(1, &editFBO_);
       editFBO_ = 0;
     }
     if (editTex_) {
@@ -640,11 +640,11 @@ void buildQuad() {
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, imgW_, imgH_, 0, GL_RGBA,
                  GL_UNSIGNED_BYTE, nullptr);
     glBindTexture(GL_TEXTURE_2D, 0);
-    GL.genFramebuffers(1, &editFBO_);
-    GL.bindFramebuffer(GL_FRAMEBUFFER, editFBO_);
-    GL.framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+    glGenFramebuffers(1, &editFBO_);
+    glBindFramebuffer(GL_FRAMEBUFFER, editFBO_);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
                             editTex_, 0);
-    GL.bindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
   }
 
   void uploadOriginal() {
@@ -667,35 +667,35 @@ void buildQuad() {
 
   void setUniforms() {
     auto loc = [&](const char *n) {
-      return GL.getUniformLocation(editProg_, n);
+      return glGetUniformLocation(editProg_, n);
     };
     const EditParams &p = params_;
-    GL.uniform1f(loc("uExposure"), p.exposure);
-    GL.uniform1f(loc("uContrast"), p.contrast);
-    GL.uniform1f(loc("uHighlights"), p.highlights);
-    GL.uniform1f(loc("uShadows"), p.shadows);
-    GL.uniform1f(loc("uWhites"), p.whites);
-    GL.uniform1f(loc("uBlacks"), p.blacks);
-    GL.uniform1f(loc("uTemperature"), p.temperature);
-    GL.uniform1f(loc("uTint"), p.tint);
-    GL.uniform1f(loc("uSaturation"), p.saturation);
-    GL.uniform1f(loc("uVibrance"), p.vibrance);
-    GL.uniform1f(loc("uSharpness"), p.sharpness);
-    GL.uniform1f(loc("uNoiseReduce"), p.noiseReduce);
-    GL.uniform1f(loc("uVignette"), p.vignette);
-    GL.uniform1f(loc("uGrain"), p.grain);
+    glUniform1f(loc("uExposure"), p.exposure);
+    glUniform1f(loc("uContrast"), p.contrast);
+    glUniform1f(loc("uHighlights"), p.highlights);
+    glUniform1f(loc("uShadows"), p.shadows);
+    glUniform1f(loc("uWhites"), p.whites);
+    glUniform1f(loc("uBlacks"), p.blacks);
+    glUniform1f(loc("uTemperature"), p.temperature);
+    glUniform1f(loc("uTint"), p.tint);
+    glUniform1f(loc("uSaturation"), p.saturation);
+    glUniform1f(loc("uVibrance"), p.vibrance);
+    glUniform1f(loc("uSharpness"), p.sharpness);
+    glUniform1f(loc("uNoiseReduce"), p.noiseReduce);
+    glUniform1f(loc("uVignette"), p.vignette);
+    glUniform1f(loc("uGrain"), p.grain);
     ie_gl::uniform2f(loc("uTexelSize"), 1.f / float(imgW_), 1.f / float(imgH_));
 
     // Texture unit assignments
-    GL.uniform1i(loc("uOriginal"), 0);
-    GL.uniform1i(loc("uNoise"), 1);
-    GL.uniform1i(loc("uLutRGB"), 2);
-    GL.uniform1i(loc("uLutR"), 3);
-    GL.uniform1i(loc("uLutG"), 4);
-    GL.uniform1i(loc("uLutB"), 5);
-    GL.uniform1i(loc("uHSLHue"), 6);
-    GL.uniform1i(loc("uHSLSat"), 7);
-    GL.uniform1i(loc("uHSLLum"), 8);
+    glUniform1i(loc("uOriginal"), 0);
+    glUniform1i(loc("uNoise"), 1);
+    glUniform1i(loc("uLutRGB"), 2);
+    glUniform1i(loc("uLutR"), 3);
+    glUniform1i(loc("uLutG"), 4);
+    glUniform1i(loc("uLutB"), 5);
+    glUniform1i(loc("uHSLHue"), 6);
+    glUniform1i(loc("uHSLSat"), 7);
+    glUniform1i(loc("uHSLLum"), 8);
   }
 
   void bindTextureUnit(int unit, GLuint tex) {
@@ -704,17 +704,17 @@ void buildQuad() {
   }
 
 void drawEditPass(GLuint fbo, const float* mvp) {
-    GL.bindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     // For export FBO: render at full image resolution.
     // For screen pass (fbo=0): viewport already set by CanvasWidget — don't override.
     if (fbo)
       glViewport(0, 0, imgW_, imgH_);
-    GL.useProgram(editProg_);
+    glUseProgram(editProg_);
 
     // Upload MVP — for the export FBO use a simple identity-style ortho so
     // the shader samples the full image; for the view pass use the viewport MVP.
-    GLint mvpLoc = GL.getUniformLocation(editProg_, "uMVP");
-    GL.uniformMatrix4fv(mvpLoc, 1, GL_FALSE, mvp);
+    GLint mvpLoc = glGetUniformLocation(editProg_, "uMVP");
+    glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, mvp);
 
     setUniforms();
     bindTextureUnit(0, origTex_);
@@ -730,11 +730,11 @@ void drawEditPass(GLuint fbo, const float* mvp) {
     // Upload the canvas-space quad for the current image size
     uploadQuadForSize(float(imgW_), float(imgH_));
 
-    GL.bindVertexArray(quadVAO_);
+    glBindVertexArray(quadVAO_);
     glDrawArrays(GL_TRIANGLES, 0, 6);
-    GL.bindVertexArray(0);
-    GL.useProgram(0);
-    GL.bindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindVertexArray(0);
+    glUseProgram(0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
   }
 
   // For export: build an ortho that maps [0..imgW] x [0..imgH] → NDC

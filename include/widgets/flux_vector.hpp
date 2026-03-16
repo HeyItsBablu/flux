@@ -1093,7 +1093,7 @@ public:
 
     renderSelection(mvp);
     glDisable(GL_BLEND);
-    GL.useProgram(0);
+    glUseProgram(0);
     dirty_ = false;
   }
 
@@ -1317,15 +1317,15 @@ public:
 
   void destroy() override {
     if (prog_) {
-      GL.deleteProgram(prog_);
+      glDeleteProgram(prog_);
       prog_ = 0;
     }
     if (vao_) {
-      GL.deleteVertexArrays(1, &vao_);
+      glDeleteVertexArrays(1, &vao_);
       vao_ = 0;
     }
     if (vbo_) {
-      GL.deleteBuffers(1, &vbo_);
+      glDeleteBuffers(1, &vbo_);
       vbo_ = 0;
     }
     for (auto &[k, v] : textTexCache_)
@@ -2700,7 +2700,7 @@ private:
   // ── GL resource helpers ───────────────────────────────────────────────────
   void buildShaders() {
     const char *vert = R"GLSL(
-#version 330 core
+#version 460 core
 layout(location=0) in vec2 aPos;
 layout(location=1) in vec2 aUV;
 uniform mat4 uMVP;
@@ -2714,7 +2714,7 @@ void main(){
 )GLSL";
 
     const char *frag = R"GLSL(
-#version 330 core
+#version 460 core
 in vec2 vUV;
 in vec2 vWorld;
 uniform sampler2D uTex;
@@ -2762,50 +2762,48 @@ void main(){
 
     prog_ = glutil::linkProgram(vert, frag);
     assert(prog_);
-    u_.mvp = GL.getUniformLocation(prog_, "uMVP");
-    u_.mode = GL.getUniformLocation(prog_, "uMode");
-    u_.color = GL.getUniformLocation(prog_, "uColor");
-    u_.tex = GL.getUniformLocation(prog_, "uTex");
-    u_.alpha = GL.getUniformLocation(prog_, "uAlpha");
-    u_.gStart = GL.getUniformLocation(prog_, "uGStart");
-    u_.gEnd = GL.getUniformLocation(prog_, "uGEnd");
-    u_.gColors = GL.getUniformLocation(prog_, "uGColors");
-    u_.gPositions = GL.getUniformLocation(prog_, "uGPos");
-    u_.gStopCount = GL.getUniformLocation(prog_, "uGStopCount");
+    u_.mvp = glGetUniformLocation(prog_, "uMVP");
+    u_.mode = glGetUniformLocation(prog_, "uMode");
+    u_.color = glGetUniformLocation(prog_, "uColor");
+    u_.tex = glGetUniformLocation(prog_, "uTex");
+    u_.alpha = glGetUniformLocation(prog_, "uAlpha");
+    u_.gStart = glGetUniformLocation(prog_, "uGStart");
+    u_.gEnd = glGetUniformLocation(prog_, "uGEnd");
+    u_.gColors = glGetUniformLocation(prog_, "uGColors");
+    u_.gPositions = glGetUniformLocation(prog_, "uGPos");
+    u_.gStopCount = glGetUniformLocation(prog_, "uGStopCount");
   }
 
   void buildBuffers() {
-    GL.genVertexArrays(1, &vao_);
-    GL.genBuffers(1, &vbo_);
-    GL.bindVertexArray(vao_);
-    GL.bindBuffer(GL_ARRAY_BUFFER, vbo_);
-    GL.bufferData(GL_ARRAY_BUFFER, sizeof(float) * 2 * 4096, nullptr,
-                  GL_DYNAMIC_DRAW);
-    GL.enableVertexAttribArray(0);
-    GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 2,
-                           nullptr);
-    GL.disableVertexAttribArray(1);
-    GL.bindVertexArray(0);
+    glGenVertexArrays(1, &vao_);
+    glGenBuffers(1, &vbo_);
+    glBindVertexArray(vao_);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 2 * 4096, nullptr,
+                 GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 2, nullptr);
+    glDisableVertexAttribArray(1);
+    glBindVertexArray(0);
   }
 
   void drawTris(const std::vector<float> &verts, const RGBA &col,
                 const float mvp[16]) {
     if (verts.empty())
       return;
-    GL.useProgram(prog_);
-    GL.uniformMatrix4fv(u_.mvp, 1, GL_FALSE, mvp);
-    GL.uniform1i(u_.mode, 1);
-    GL.uniform4f(u_.color, col.r, col.g, col.b, col.a);
-    GL.bindVertexArray(vao_);
-    GL.bindBuffer(GL_ARRAY_BUFFER, vbo_);
-    GL.bufferData(GL_ARRAY_BUFFER, GLsizeiptr(verts.size() * sizeof(float)),
-                  verts.data(), GL_DYNAMIC_DRAW);
-    GL.enableVertexAttribArray(0);
-    GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 2,
-                           nullptr);
-    GL.disableVertexAttribArray(1);
+    glUseProgram(prog_);
+    glUniformMatrix4fv(u_.mvp, 1, GL_FALSE, mvp);
+    glUniform1i(u_.mode, 1);
+    glUniform4f(u_.color, col.r, col.g, col.b, col.a);
+    glBindVertexArray(vao_);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+    glBufferData(GL_ARRAY_BUFFER, GLsizeiptr(verts.size() * sizeof(float)),
+                 verts.data(), GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 2, nullptr);
+    glDisableVertexAttribArray(1);
     glDrawArrays(GL_TRIANGLES, 0, (int)(verts.size() / 2));
-    GL.bindVertexArray(0);
+    glBindVertexArray(0);
   }
 
   void drawTrisGradient(const std::vector<float> &verts, const VFill &fill,
@@ -2831,25 +2829,24 @@ void main(){
       posArr[i] = fill.stops[i].position;
     }
 
-    GL.useProgram(prog_);
-    GL.uniformMatrix4fv(u_.mvp, 1, GL_FALSE, mvp);
-    GL.uniform1i(u_.mode, 2);
-    GL.uniform2f(u_.gStart, wx0, wy0);
-    GL.uniform2f(u_.gEnd, wx1, wy1);
-    GL.uniform4fv(u_.gColors, 4, colArr);
-    GL.uniform1fv(u_.gPositions, 4, posArr);
-    GL.uniform1i(u_.gStopCount, cnt);
+    glUseProgram(prog_);
+    glUniformMatrix4fv(u_.mvp, 1, GL_FALSE, mvp);
+    glUniform1i(u_.mode, 2);
+    glUniform2f(u_.gStart, wx0, wy0);
+    glUniform2f(u_.gEnd, wx1, wy1);
+    glUniform4fv(u_.gColors, 4, colArr);
+    glUniform1fv(u_.gPositions, 4, posArr);
+    glUniform1i(u_.gStopCount, cnt);
 
-    GL.bindVertexArray(vao_);
-    GL.bindBuffer(GL_ARRAY_BUFFER, vbo_);
-    GL.bufferData(GL_ARRAY_BUFFER, GLsizeiptr(verts.size() * sizeof(float)),
-                  verts.data(), GL_DYNAMIC_DRAW);
-    GL.enableVertexAttribArray(0);
-    GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 2,
-                           nullptr);
-    GL.disableVertexAttribArray(1);
+    glBindVertexArray(vao_);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+    glBufferData(GL_ARRAY_BUFFER, GLsizeiptr(verts.size() * sizeof(float)),
+                 verts.data(), GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 2, nullptr);
+    glDisableVertexAttribArray(1);
     glDrawArrays(GL_TRIANGLES, 0, (int)(verts.size() / 2));
-    GL.bindVertexArray(0);
+    glBindVertexArray(0);
   }
 
   void drawLineLoop(const std::vector<vmath::Vec2> &pts, const RGBA &col,
@@ -3143,23 +3140,23 @@ void main(){
                  ax + qx1, ay + qy1, 1.f, 0.f, ax + qx1, ay + qy1, 1.f, 0.f,
                  ax + qx0, ay + qy1, 0.f, 0.f, ax + qx0, ay + qy0, 0.f, 1.f};
 
-    GL.useProgram(prog_);
-    GL.uniformMatrix4fv(u_.mvp, 1, GL_FALSE, combined);
-    GL.uniform1i(u_.mode, 0);
-    GL.uniform1i(u_.tex, 0);
-    GL.uniform1f(u_.alpha, 1.f);
+    glUseProgram(prog_);
+    glUniformMatrix4fv(u_.mvp, 1, GL_FALSE, combined);
+    glUniform1i(u_.mode, 0);
+    glUniform1i(u_.tex, 0);
+    glUniform1f(u_.alpha, 1.f);
     glBindTexture(GL_TEXTURE_2D, tt.tex);
-    GL.bindVertexArray(vao_);
-    GL.bindBuffer(GL_ARRAY_BUFFER, vbo_);
-    GL.bufferData(GL_ARRAY_BUFFER, sizeof(q), q, GL_DYNAMIC_DRAW);
-    GL.enableVertexAttribArray(0);
-    GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 4,
-                           (void *)0);
-    GL.enableVertexAttribArray(1);
-    GL.vertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 4,
-                           (void *)(sizeof(float) * 2));
+    glBindVertexArray(vao_);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(q), q, GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 4,
+                          (void *)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 4,
+                          (void *)(sizeof(float) * 2));
     glDrawArrays(GL_TRIANGLES, 0, 6);
-    GL.bindVertexArray(0);
+    glBindVertexArray(0);
     glBindTexture(GL_TEXTURE_2D, 0);
   }
 

@@ -2,21 +2,11 @@
 #define FLUX_RASTER_HPP
 
 // ============================================================================
-// flux_raster.hpp  —  RasterSurface  (extracted from flux_canvas.hpp §9)
-// ============================================================================
-//
-// Depends on:  flux_canvas.hpp  (for GLProcs, glutil, RGBA, StrokeStyle,
-//              StrokePoint, TextStyle, ToolId, RenderSurface, and all GL
-//              defines / typedefs declared there).
-//
-// Include order:
-//   #include "flux_canvas.hpp"   // or the shared base header
-//   #include "flux_raster.hpp"
-//
+// flux_raster.hpp  —  RasterSurface  
 // ============================================================================
 
 // ============================================================================
-// §9  RASTER SURFACE
+//   RASTER SURFACE
 // ============================================================================
 
 class RasterSurface : public RenderSurface {
@@ -93,9 +83,9 @@ public:
       return false;
 
     std::vector<uint8_t> buf(size_t(w_) * h_ * 4);
-    GL.bindFramebuffer(GL_READ_FRAMEBUFFER, committedFBO_);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, committedFBO_);
     glReadPixels(0, 0, w_, h_, GL_RGBA, GL_UNSIGNED_BYTE, buf.data());
-    GL.bindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
 
     std::vector<uint8_t> flipped(buf.size());
     const int stride = w_ * 4;
@@ -173,12 +163,12 @@ public:
     clearFBO(nCF, w, h, 255, 255, 255, 255);
     clearFBO(nSF, w, h, 0, 0, 0, 0);
     int cw = min(w_, w), ch = min(h_, h);
-    GL.bindFramebuffer(GL_READ_FRAMEBUFFER, committedFBO_);
-    GL.bindFramebuffer(GL_DRAW_FRAMEBUFFER, nCF);
-    GL.blitFramebuffer(0, 0, cw, ch, 0, 0, cw, ch, GL_COLOR_BUFFER_BIT,
-                       GL_NEAREST);
-    GL.bindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-    GL.bindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, committedFBO_);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, nCF);
+    glBlitFramebuffer(0, 0, cw, ch, 0, 0, cw, ch, GL_COLOR_BUFFER_BIT,
+                      GL_NEAREST);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
     destroyFBOPair(committedFBO_, committedTex_);
     destroyFBOPair(scratchFBO_, scratchTex_);
     committedFBO_ = nCF;
@@ -209,7 +199,7 @@ public:
     glDisable(GL_BLEND);
 
     dirty_ = false;
-    GL.useProgram(0);
+    glUseProgram(0);
     if (blendWas)
       glEnable(GL_BLEND);
   }
@@ -242,19 +232,19 @@ public:
     destroyFBOPair(committedFBO_, committedTex_);
     destroyFBOPair(scratchFBO_, scratchTex_);
     if (blitProg_) {
-      GL.deleteProgram(blitProg_);
+      glDeleteProgram(blitProg_);
       blitProg_ = 0;
     }
     if (quadVAO_) {
-      GL.deleteVertexArrays(1, &quadVAO_);
+      glDeleteVertexArrays(1, &quadVAO_);
       quadVAO_ = 0;
     }
     if (quadVBO_) {
-      GL.deleteBuffers(1, &quadVBO_);
+      glDeleteBuffers(1, &quadVBO_);
       quadVBO_ = 0;
     }
     if (shapeVBO_) {
-      GL.deleteBuffers(1, &shapeVBO_);
+      glDeleteBuffers(1, &shapeVBO_);
       shapeVBO_ = 0;
     }
     flushDeque(undoStack_, undoBytes_);
@@ -317,32 +307,31 @@ protected:
                       float r, float g, float b, float a) {
     float mvp[16];
     canvasOrtho(mvp);
-    GL.bindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     glViewport(0, 0, w_, h_);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    GL.useProgram(blitProg_);
-    GL.uniformMatrix4fv(u_.mvp, 1, GL_FALSE, mvp);
-    GL.uniform1i(u_.mode, 1);
-    GL.uniform4f(u_.color, r, g, b, a);
+    glUseProgram(blitProg_);
+    glUniformMatrix4fv(u_.mvp, 1, GL_FALSE, mvp);
+    glUniform1i(u_.mode, 1);
+    glUniform4f(u_.color, r, g, b, a);
 
     GLsizeiptr needed = GLsizeiptr(sizeof(float)) * 2 * count;
-    GL.bindBuffer(GL_ARRAY_BUFFER, shapeVBO_);
-    GL.bufferData(GL_ARRAY_BUFFER, needed, verts, GL_DYNAMIC_DRAW);
+    glBindBuffer(GL_ARRAY_BUFFER, shapeVBO_);
+    glBufferData(GL_ARRAY_BUFFER, needed, verts, GL_DYNAMIC_DRAW);
 
-    GL.bindVertexArray(quadVAO_);
-    GL.enableVertexAttribArray(0);
-    GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 2,
-                           nullptr);
-    GL.disableVertexAttribArray(1);
+    glBindVertexArray(quadVAO_);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 2, nullptr);
+    glDisableVertexAttribArray(1);
 
     glDrawArrays(mode, 0, count);
 
-    GL.bindVertexArray(0);
-    GL.bindBuffer(GL_ARRAY_BUFFER, 0);
-    GL.useProgram(0);
+    glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glUseProgram(0);
     glDisable(GL_BLEND);
-    GL.bindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
   }
 
   void uploadToCommitted(const uint8_t *pixels) {
@@ -353,9 +342,9 @@ protected:
   }
 
   void readCommitted(uint8_t *pixels) {
-    GL.bindFramebuffer(GL_READ_FRAMEBUFFER, committedFBO_);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, committedFBO_);
     glReadPixels(0, 0, w_, h_, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-    GL.bindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
   }
 
   // ── Text rendering primitives ─────────────────────────────────────────────
@@ -546,9 +535,9 @@ private:
     DWORD italic = style.italic ? TRUE : FALSE;
     DWORD uline = style.underline ? TRUE : FALSE;
     HFONT hFont = CreateFontW(
-        -style.fontSize, 0, 0, 0, weight, italic, uline, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, style.fontFace.c_str());
+        -style.fontSize, 0, 0, 0, weight, italic, uline, FALSE, DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+        DEFAULT_PITCH | FF_DONTCARE, style.fontFace.c_str());
     HGDIOBJ oldFont = SelectObject(hdcMem, hFont);
 
     COLORREF cr =
@@ -678,18 +667,17 @@ private:
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE,
                  nullptr);
     glBindTexture(GL_TEXTURE_2D, 0);
-    GL.genFramebuffers(1, &fbo);
-    GL.bindFramebuffer(GL_FRAMEBUFFER, fbo);
-    GL.framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-                            tex, 0);
-    assert(GL.checkFramebufferStatus(GL_FRAMEBUFFER) ==
-           GL_FRAMEBUFFER_COMPLETE);
-    GL.bindFramebuffer(GL_FRAMEBUFFER, 0);
+    glGenFramebuffers(1, &fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                           tex, 0);
+    assert(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
   }
 
   void destroyFBOPair(GLuint &fbo, GLuint &tex) {
     if (fbo) {
-      GL.deleteFramebuffers(1, &fbo);
+      glDeleteFramebuffers(1, &fbo);
       fbo = 0;
     }
     if (tex) {
@@ -700,11 +688,11 @@ private:
 
   void clearFBO(GLuint fbo, int w, int h, uint8_t r, uint8_t g, uint8_t b,
                 uint8_t a) {
-    GL.bindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     glViewport(0, 0, w, h);
     glClearColor(r / 255.f, g / 255.f, b / 255.f, a / 255.f);
     glClear(GL_COLOR_BUFFER_BIT);
-    GL.bindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
   }
 
   GLuint snapshotCommitted() {
@@ -716,35 +704,35 @@ private:
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w_, h_, 0, GL_RGBA,
                  GL_UNSIGNED_BYTE, nullptr);
     glBindTexture(GL_TEXTURE_2D, 0);
-    GL.genFramebuffers(1, &sf);
-    GL.bindFramebuffer(GL_DRAW_FRAMEBUFFER, sf);
-    GL.framebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-                            GL_TEXTURE_2D, st, 0);
-    assert(GL.checkFramebufferStatus(GL_DRAW_FRAMEBUFFER) ==
+    glGenFramebuffers(1, &sf);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, sf);
+    glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                           GL_TEXTURE_2D, st, 0);
+    assert(glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) ==
            GL_FRAMEBUFFER_COMPLETE);
-    GL.bindFramebuffer(GL_READ_FRAMEBUFFER, committedFBO_);
-    GL.blitFramebuffer(0, 0, w_, h_, 0, 0, w_, h_, GL_COLOR_BUFFER_BIT,
-                       GL_NEAREST);
-    GL.bindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-    GL.bindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-    GL.deleteFramebuffers(1, &sf);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, committedFBO_);
+    glBlitFramebuffer(0, 0, w_, h_, 0, 0, w_, h_, GL_COLOR_BUFFER_BIT,
+                      GL_NEAREST);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    glDeleteFramebuffers(1, &sf);
     return st;
   }
 
   void restoreCommitted(GLuint snapTex) {
     GLuint rf;
-    GL.genFramebuffers(1, &rf);
-    GL.bindFramebuffer(GL_READ_FRAMEBUFFER, rf);
-    GL.framebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-                            GL_TEXTURE_2D, snapTex, 0);
-    assert(GL.checkFramebufferStatus(GL_READ_FRAMEBUFFER) ==
+    glGenFramebuffers(1, &rf);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, rf);
+    glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                           GL_TEXTURE_2D, snapTex, 0);
+    assert(glCheckFramebufferStatus(GL_READ_FRAMEBUFFER) ==
            GL_FRAMEBUFFER_COMPLETE);
-    GL.bindFramebuffer(GL_DRAW_FRAMEBUFFER, committedFBO_);
-    GL.blitFramebuffer(0, 0, w_, h_, 0, 0, w_, h_, GL_COLOR_BUFFER_BIT,
-                       GL_NEAREST);
-    GL.bindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-    GL.bindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-    GL.deleteFramebuffers(1, &rf);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, committedFBO_);
+    glBlitFramebuffer(0, 0, w_, h_, 0, 0, w_, h_, GL_COLOR_BUFFER_BIT,
+                      GL_NEAREST);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    glDeleteFramebuffers(1, &rf);
   }
 
   void pushUndoSnapshot() {
@@ -767,13 +755,13 @@ private:
   void mergeScratchIntoCommitted() {
     float mvp[16];
     canvasOrtho(mvp);
-    GL.bindFramebuffer(GL_FRAMEBUFFER, committedFBO_);
+    glBindFramebuffer(GL_FRAMEBUFFER, committedFBO_);
     glViewport(0, 0, w_, h_);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     blitTexture(scratchTex_, 1.f, mvp);
     glDisable(GL_BLEND);
-    GL.bindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
   }
 
   // ── Dab painting ─────────────────────────────────────────────────────────
@@ -781,74 +769,73 @@ private:
   void paintDabBrush(GLuint fbo, float cx, float cy, const StrokeStyle &s) {
     float mvp[16];
     canvasOrtho(mvp);
-    GL.bindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     glViewport(0, 0, w_, h_);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     paintDabImpl(cx, cy, s.r, s.g, s.b, s.a * s.opacity, s.radius, mvp);
     glDisable(GL_BLEND);
-    GL.bindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
   }
 
   void paintDabEraser(GLuint fbo, float cx, float cy, const StrokeStyle &s) {
     float mvp[16];
     canvasOrtho(mvp);
-    GL.bindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     glViewport(0, 0, w_, h_);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     paintDabImpl(cx, cy, 1.f, 1.f, 1.f, s.opacity, s.radius, mvp);
     glDisable(GL_BLEND);
-    GL.bindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
   }
 
   void paintDabImpl(float cx, float cy, float r, float g, float b, float alpha,
                     float radius, const float mvp[16]) {
-    GL.useProgram(blitProg_);
-    GL.uniformMatrix4fv(u_.mvp, 1, GL_FALSE, mvp);
-    GL.uniform1i(u_.mode, 1);
-    GL.uniform4f(u_.color, r, g, b, alpha);
+    glUseProgram(blitProg_);
+    glUniformMatrix4fv(u_.mvp, 1, GL_FALSE, mvp);
+    glUniform1i(u_.mode, 1);
+    glUniform4f(u_.color, r, g, b, alpha);
 
     float verts[(kDabVerts + 2) * 2];
     for (int i = 0; i < kDabVerts + 2; ++i) {
       verts[i * 2 + 0] = cx + dabVerts[i * 2 + 0] * radius;
       verts[i * 2 + 1] = cy + dabVerts[i * 2 + 1] * radius;
     }
-    GL.bindVertexArray(quadVAO_);
-    GL.bindBuffer(GL_ARRAY_BUFFER, quadVBO_);
-    GL.bufferSubData(GL_ARRAY_BUFFER, 0, sizeof(verts), verts);
-    GL.enableVertexAttribArray(0);
-    GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 2,
-                           nullptr);
-    GL.disableVertexAttribArray(1);
+    glBindVertexArray(quadVAO_);
+    glBindBuffer(GL_ARRAY_BUFFER, quadVBO_);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(verts), verts);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 2, nullptr);
+    glDisableVertexAttribArray(1);
     glDrawArrays(GL_TRIANGLE_FAN, 0, kDabVerts + 2);
-    GL.bindVertexArray(0);
-    GL.useProgram(0);
+    glBindVertexArray(0);
+    glUseProgram(0);
   }
 
   void blitTexture(GLuint tex, float alpha, const float *mvp) {
-    GL.useProgram(blitProg_);
-    GL.uniformMatrix4fv(u_.mvp, 1, GL_FALSE, mvp);
-    GL.uniform1i(u_.mode, 0);
-    GL.uniform1i(u_.tex, 0);
-    GL.uniform1f(u_.alpha, alpha);
+    glUseProgram(blitProg_);
+    glUniformMatrix4fv(u_.mvp, 1, GL_FALSE, mvp);
+    glUniform1i(u_.mode, 0);
+    glUniform1i(u_.tex, 0);
+    glUniform1f(u_.alpha, alpha);
     glBindTexture(GL_TEXTURE_2D, tex);
     float q[] = {
         0.f,       0.f,       0.f, 0.f, float(w_), 0.f,       1.f, 0.f,
         float(w_), float(h_), 1.f, 1.f, float(w_), float(h_), 1.f, 1.f,
         0.f,       float(h_), 0.f, 1.f, 0.f,       0.f,       0.f, 0.f,
     };
-    GL.bindVertexArray(quadVAO_);
-    GL.bindBuffer(GL_ARRAY_BUFFER, quadVBO_);
-    GL.bufferSubData(GL_ARRAY_BUFFER, 0, sizeof(q), q);
-    GL.enableVertexAttribArray(0);
-    GL.vertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 4,
-                           (void *)0);
-    GL.enableVertexAttribArray(1);
-    GL.vertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 4,
-                           (void *)(sizeof(float) * 2));
+    glBindVertexArray(quadVAO_);
+    glBindBuffer(GL_ARRAY_BUFFER, quadVBO_);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(q), q);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 4,
+                          (void *)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 4,
+                          (void *)(sizeof(float) * 2));
     glDrawArrays(GL_TRIANGLES, 0, 6);
-    GL.bindVertexArray(0);
+    glBindVertexArray(0);
     glBindTexture(GL_TEXTURE_2D, 0);
   }
 
@@ -876,11 +863,11 @@ void main(){
 )GLSL";
     blitProg_ = glutil::linkProgram(vert, frag);
     assert(blitProg_);
-    u_.mvp = GL.getUniformLocation(blitProg_, "uMVP");
-    u_.mode = GL.getUniformLocation(blitProg_, "uMode");
-    u_.tex = GL.getUniformLocation(blitProg_, "uTex");
-    u_.alpha = GL.getUniformLocation(blitProg_, "uAlpha");
-    u_.color = GL.getUniformLocation(blitProg_, "uColor");
+    u_.mvp = glGetUniformLocation(blitProg_, "uMVP");
+    u_.mode = glGetUniformLocation(blitProg_, "uMode");
+    u_.tex = glGetUniformLocation(blitProg_, "uTex");
+    u_.alpha = glGetUniformLocation(blitProg_, "uAlpha");
+    u_.color = glGetUniformLocation(blitProg_, "uColor");
   }
 
   void buildQuadVAO() {
@@ -889,18 +876,18 @@ void main(){
     constexpr GLsizeiptr kQuadBufSz =
         kBlitBytes > kDabBytes ? kBlitBytes : kDabBytes;
 
-    GL.genVertexArrays(1, &quadVAO_);
-    GL.genBuffers(1, &quadVBO_);
-    GL.bindVertexArray(quadVAO_);
-    GL.bindBuffer(GL_ARRAY_BUFFER, quadVBO_);
-    GL.bufferData(GL_ARRAY_BUFFER, kQuadBufSz, nullptr, GL_DYNAMIC_DRAW);
-    GL.bindVertexArray(0);
+    glGenVertexArrays(1, &quadVAO_);
+    glGenBuffers(1, &quadVBO_);
+    glBindVertexArray(quadVAO_);
+    glBindBuffer(GL_ARRAY_BUFFER, quadVBO_);
+    glBufferData(GL_ARRAY_BUFFER, kQuadBufSz, nullptr, GL_DYNAMIC_DRAW);
+    glBindVertexArray(0);
 
-    GL.genBuffers(1, &shapeVBO_);
-    GL.bindBuffer(GL_ARRAY_BUFFER, shapeVBO_);
-    GL.bufferData(GL_ARRAY_BUFFER, sizeof(float) * 2 * 12, nullptr,
-                  GL_DYNAMIC_DRAW);
-    GL.bindBuffer(GL_ARRAY_BUFFER, 0);
+    glGenBuffers(1, &shapeVBO_);
+    glBindBuffer(GL_ARRAY_BUFFER, shapeVBO_);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 2 * 12, nullptr,
+                 GL_DYNAMIC_DRAW);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
   }
 
   void buildDabVerts() {
@@ -929,7 +916,8 @@ inline std::shared_ptr<CanvasWidget> RasterCanvas(int w, int h) {
 }
 
 // Same but with an explicit undo-budget (bytes).
-inline std::shared_ptr<CanvasWidget> RasterCanvas(int w, int h, size_t undoBudget) {
+inline std::shared_ptr<CanvasWidget> RasterCanvas(int w, int h,
+                                                  size_t undoBudget) {
   auto c = std::make_shared<CanvasWidget>()->setSize(w, h);
   c->setCanvasSize(w, h);
   c->setSurface<RasterSurface>(undoBudget);
@@ -938,7 +926,8 @@ inline std::shared_ptr<CanvasWidget> RasterCanvas(int w, int h, size_t undoBudge
 
 // Separate view and canvas dimensions — viewport + scrollbars enabled so the
 // user can pan/zoom a canvas larger (or smaller) than the widget footprint.
-inline std::shared_ptr<CanvasWidget> RasterCanvas(int viewW, int viewH, int canvasW, int canvasH) {
+inline std::shared_ptr<CanvasWidget> RasterCanvas(int viewW, int viewH,
+                                                  int canvasW, int canvasH) {
   auto c = std::make_shared<CanvasWidget>()->setSize(viewW, viewH);
   c->setCanvasSize(canvasW, canvasH);
   c->setSurface<RasterSurface>();
@@ -946,8 +935,9 @@ inline std::shared_ptr<CanvasWidget> RasterCanvas(int viewW, int viewH, int canv
 }
 
 // Same with an explicit undo-budget.
-inline std::shared_ptr<CanvasWidget> RasterCanvas(int viewW, int viewH, int canvasW, int canvasH,
-                               size_t undoBudget) {
+inline std::shared_ptr<CanvasWidget> RasterCanvas(int viewW, int viewH,
+                                                  int canvasW, int canvasH,
+                                                  size_t undoBudget) {
   auto c = std::make_shared<CanvasWidget>()->setSize(viewW, viewH);
   c->setCanvasSize(canvasW, canvasH);
   c->setSurface<RasterSurface>(undoBudget);
