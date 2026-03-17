@@ -13,6 +13,16 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# ── FetchContent ─────────────────────────────────────────────────────────────
+include(FetchContent)
+
+FetchContent_Declare(Clipper2
+    GIT_REPOSITORY https://github.com/AngusJohnson/Clipper2.git
+    GIT_TAG        Clipper2_1.4.0
+    SOURCE_SUBDIR  CPP
+)
+FetchContent_MakeAvailable(Clipper2)
+
 # ── GLAD ─────────────────────────────────────────────────────────────────────
 add_library(glad STATIC external/glad/src/glad.c)
 set_source_files_properties(external/glad/src/glad.c PROPERTIES LANGUAGE C)
@@ -21,27 +31,16 @@ target_include_directories(glad PUBLIC
     $<INSTALL_INTERFACE:include>
 )
 
-# ── Clipper2 ─────────────────────────────────────────────────────────────────
-add_library(clipper2 STATIC
-    external/Clipper2/CPP/Clipper2Lib/src/clipper.engine.cpp
-    external/Clipper2/CPP/Clipper2Lib/src/clipper.offset.cpp
-    external/Clipper2/CPP/Clipper2Lib/src/clipper.rectclip.cpp
-)
-target_include_directories(clipper2 PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/Clipper2/CPP/Clipper2Lib/include>
-    $<INSTALL_INTERFACE:include>
-)
-
 # ── FluxUI library ───────────────────────────────────────────────────────────
 file(GLOB_RECURSE FLUX_SOURCES CONFIGURE_DEPENDS src/*.cpp)
 
 add_library(flux STATIC ${FLUX_SOURCES})
-add_library(flux::flux ALIAS flux)          # namespaced alias for consumers
+add_library(flux::flux ALIAS flux)
 
 target_include_directories(flux
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:include>        # consumers get installed headers
+        $<INSTALL_INTERFACE:include>
     PRIVATE
         external/glad/include
         external/stb
@@ -49,7 +48,7 @@ target_include_directories(flux
 
 target_link_libraries(flux PUBLIC
     glad
-    clipper2
+    Clipper2
     Msimg32
     Gdiplus
     opengl32
@@ -73,7 +72,7 @@ endif()
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
-install(TARGETS flux glad clipper2
+install(TARGETS flux glad
     EXPORT  fluxTargets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
