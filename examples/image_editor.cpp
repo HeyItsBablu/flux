@@ -7,10 +7,7 @@
 #include "stb_image.h"  
 #include "stb_image_write.h"    
 
-#define NOMINMAX
-#define WIN32_LEAN_AND_MEAN
 #include <commdlg.h>
-#include <windows.h>
 #pragma comment(lib, "comdlg32.lib")
 
 #include <algorithm>
