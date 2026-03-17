@@ -8,7 +8,6 @@
 #include "flux_image.hpp"
 #include "flux_input.hpp"
 #include "flux_layout.hpp"
-#include "flux_state.hpp"
 #include "flux_structure.hpp"
 #include "fluxicons.hpp"
 #include "flux_canvas.hpp"
@@ -17,5 +16,6 @@
 #include "flux_histogram.hpp"
 #include "flux_hsl_panel.hpp" 
 #include "flux_tonecurve.hpp"
+#include "flux_raster.hpp"
 
 #endif // WIDGETS_HPP

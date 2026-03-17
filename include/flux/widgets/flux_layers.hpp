@@ -42,7 +42,7 @@
 //
 // ============================================================================
 
-#include "widgets/flux_raster.hpp"
+
 
 #include <algorithm>
 #include <cassert>
