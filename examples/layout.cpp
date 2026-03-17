@@ -1,4 +1,4 @@
-#include "flux.hpp"
+#include "flux/flux.hpp"
 #include <numeric>
 
 class LayoutStressTest : public Component {

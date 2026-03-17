@@ -43,7 +43,6 @@ target_include_directories(flux
         $<INSTALL_INTERFACE:include>
     PRIVATE
         external/glad/include
-        external/stb
 )
 
 target_link_libraries(flux PUBLIC
