@@ -1,4 +1,4 @@
-#include "flux_widget.hpp"
+#include "flux/flux_widget.hpp"
 
 // ============================================================================
 // Widget::measureText

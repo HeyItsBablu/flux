@@ -1,6 +1,5 @@
-#include "flux.hpp"
+#include "flux/flux.hpp"
 #include <cmath>
-#include <windows.h>
 
 class SystemMonitorApp : public Component {
 private:
@@ -59,15 +58,15 @@ public:
   WidgetPtr build() override {
     return Scaffold(
         AppBar("System Monitor"),
-        Center(Column(
+        Center(Column({
 
                    // ── Status bar ──────────────────────────────────────
-                   Row(Text("● LIVE")
+                   Row({Text("● LIVE")
                            ->setTextColor(RGB(76, 175, 80))
                            ->setFontSize(12),
                        Text(statusText)
                            ->setTextColor(RGB(150, 150, 150))
-                           ->setFontSize(12))
+                           ->setFontSize(12)})
                        ->setSpacing(12),
 
                    SizedBox(0, 16),
@@ -110,7 +109,7 @@ public:
                        ->setYRange(0.f, 100.f)
                        ->setShowGrid(true)
 
-                       )
+  })
                    ->setSpacing(0)));
   }
 

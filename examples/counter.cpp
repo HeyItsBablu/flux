@@ -1,10 +1,10 @@
-#include "flux.hpp"
+#include "flux/flux.hpp"
 #include <windows.h>
 
 // Custom reusable widget - Stat Card
 WidgetPtr StatCard(const std::string& label, State<int>& value, COLORREF color) {
     return Card(
-        Column(
+        Column({
             Text(label)
                 ->setFontSize(14)
                 ->setTextColor(RGB(120, 120, 120)),
@@ -13,7 +13,7 @@ WidgetPtr StatCard(const std::string& label, State<int>& value, COLORREF color) 
                 ->setFontSize(36)
                 ->setFontWeight(FontWeight::Bold)
                 ->setTextColor(color)
-        )
+})
         ->setSpacing(8)
     )
     ->setMinWidth(150)
@@ -28,23 +28,23 @@ WidgetPtr simpleApp(FluxUI* app) {
     return Scaffold(
 
         Center(
-            Column(
+            Column({
                 // Use custom StatCard widgets
-                Row(
+                Row({
                     StatCard("Likes", likes, RGB(244, 67, 54)),
                     StatCard("Views", views, RGB(33, 150, 243))
-                )
+            })
                 ->setSpacing(20),
                 
                 SizedBox(0, 20),
                 
                 // Control buttons
-                Row(
-                    Button("+ Like", [&]() { likes++; }),
-                    Button("+ View", [&]() { views++; })
-                )
+                Row({
+                    Button("+ Like", [&]() { likes.set(likes.get()+1); }),
+                    Button("+ View", [&]() { views.set(views.get()+1); })
+            })
                 ->setSpacing(10)
-            )
+})
             ->setSpacing(0)
         )
     );

@@ -1,4 +1,4 @@
-#include "flux.hpp"
+#include "flux/flux.hpp"
 
 class DragDemo : public Component {
 

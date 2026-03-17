@@ -1,4 +1,4 @@
-#include "flux.hpp"
+#include "flux/flux.hpp"
 
 // ============================================================================
 // CHILD — TextInput that writes to parent's State<string>
@@ -11,13 +11,13 @@ public:
   explicit ChildTextInput(State<std::string> *text) : text(text) {}
 
   WidgetPtr build() override {
-    return Column(
+    return Column({
         Text("Child TextInput")->setFontSize(14),
         TextInput("Type something...")
             ->setInputValue(deref(text))
             ->setWidth(300),
         Text(deref(text), [](const std::string &v) { return "Value: " + v; })
-    )->setSpacing(8);
+  })->setSpacing(8);
   }
 };
 
@@ -32,14 +32,14 @@ public:
   explicit ChildSlider(State<int> *value) : value(value) {}
 
   WidgetPtr build() override {
-    return Column(
+    return Column({
         Text("Child Slider")->setFontSize(14),
         Slider(0, 100, 1)
             ->setValue(deref(value))
             ->setTrackFillColor(RGB(99, 102, 241))
             ->setWidth(300),
         Text(deref(value), [](int v) { return "Value: " + std::to_string(v); })
-    )->setSpacing(8);
+  })->setSpacing(8);
   }
 };
 
@@ -54,13 +54,13 @@ public:
   explicit ChildToggle(State<bool> *enabled) : enabled(enabled) {}
 
   WidgetPtr build() override {
-    return Column(
+    return Column({
         Text("Child Toggle")->setFontSize(14),
         Toggle("Enable feature")
             ->setValue(deref(enabled))
             ->setTrackOnColor(RGB(76, 175, 80)),
         Text(deref(enabled), [](bool v) { return v ? "ON" : "OFF"; })
-    )->setSpacing(8);
+  })->setSpacing(8);
   }
 };
 
@@ -75,12 +75,12 @@ public:
   explicit ChildCheckBox(State<bool> *checked) : checked(checked) {}
 
   WidgetPtr build() override {
-    return Column(
+    return Column({
         Text("Child CheckBox")->setFontSize(14),
         CheckBox("I agree to terms")
             ->setInputValue(deref(checked)),
         Text(deref(checked), [](bool v) { return v ? "Agreed" : "Not agreed"; })
-    )->setSpacing(8);
+  })->setSpacing(8);
   }
 };
 
@@ -95,7 +95,7 @@ public:
   explicit ChildDropdown(State<std::string> *selected) : selected(selected) {}
 
   WidgetPtr build() override {
-    return Column(
+    return Column({
         Text("Child Dropdown")->setFontSize(14),
         Dropdown({"Nepal", "India", "USA", "UK"})
             ->setPlaceholder("Select country...")
@@ -104,7 +104,7 @@ public:
         Text(deref(selected), [](const std::string &v) {
             return "Selected: " + (v.empty() ? "none" : v);
         })
-    )->setSpacing(8);
+  })->setSpacing(8);
   }
 };
 
@@ -133,7 +133,7 @@ public:
 
         Center(
             Card(
-                Column(
+                Column({
 
                     // Parent reads all state
                     Text("--- Parent View ---")->setFontWeight(FontWeight::Bold),
@@ -152,7 +152,7 @@ public:
                     CHILD(ChildCheckBox,  &checked),
                     CHILD(ChildDropdown,  &country)
 
-                )->setSpacing(16)
+  })->setSpacing(16)
             )
         )
     );

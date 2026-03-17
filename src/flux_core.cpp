@@ -1,6 +1,6 @@
-#include "flux_core.hpp"
-#include "flux_app.hpp"
-#include "flux_overlay_host.hpp"
+#include "flux/flux_core.hpp"
+#include "flux/flux_app.hpp"
+#include "flux/flux_overlay_host.hpp"
 
 // ============================================================================
 // STATIC MEMBER DEFINITION

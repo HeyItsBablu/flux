@@ -9,7 +9,6 @@
 
 #include "flux_app.hpp"
 #include "flux_component.hpp"
-#include "flux_core_impl.hpp"
 #include "flux_state.hpp"
 #include "widgets/widgets.hpp"
 #endif // FLUX_HPP
