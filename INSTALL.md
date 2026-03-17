@@ -15,7 +15,7 @@
 
 ## Option A — Use in your own project (recommended)
 
-This is the fastest way to get started. CMake downloads and builds FluxUI automatically.
+This is the fastest way to get started. CMake downloads and builds FluxUI automatically via FetchContent — no manual cloning or dependency management required.
 
 ### 1. Create your project folder
 
@@ -41,7 +41,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 include(FetchContent)
 FetchContent_Declare(flux
     GIT_REPOSITORY https://github.com/Rosanchaudhary/flux.git
-    GIT_TAG        main
+    GIT_TAG        v0.1.0
 )
 FetchContent_MakeAvailable(flux)
 
@@ -105,7 +105,7 @@ cmake --build build
 
 ## Option B — Clone and build FluxUI directly
 
-Use this if you want to browse or run the built-in examples.
+Use this if you want to browse the source or run the built-in examples.
 
 ### 1. Clone the repo
 
@@ -144,6 +144,7 @@ Other available examples:
 
 ```powershell
 .\build\msvc\examples\counter.exe
+.\build\msvc\examples\component.exe
 .\build\msvc\examples\draggable.exe
 .\build\msvc\examples\layout.exe
 .\build\msvc\examples\listview.exe
@@ -154,6 +155,8 @@ Other available examples:
 .\build\msvc\examples\paintfull.exe
 .\build\msvc\examples\logic_sim.exe
 ```
+
+> **Note:** `image_editor` uses stb which is fetched automatically when building examples. No extra steps needed.
 
 ---
 
@@ -181,20 +184,45 @@ cmake -S . -B build/msvc -G Ninja -DCMAKE_BUILD_TYPE=Debug -DFLUX_BUILD_EXAMPLES
 
 ---
 
+## Using CMakePresets.json
+
+If you cloned the repo and want to use presets instead of typing flags manually:
+
+```powershell
+cmake --preset msvc-debug
+cmake --build build/msvc
+```
+
+Available presets: `msvc-debug`, `msvc-release`
+
+---
+
 ## Troubleshooting
 
 **`cl.exe` not found / `CMAKE_CXX_COMPILER` could not be found`**
 
 You are not in Developer PowerShell. Close your current terminal, search for
 **Developer PowerShell for VS 2022** in the Start menu, and run the cmake
-commands from there.
+commands from there. Regular PowerShell and cmd do not have `cl.exe` on PATH.
 
 ---
 
 **`ninja: error: loading 'build.ninja': The system cannot find the file specified`**
 
-You ran `cmake --build` before `cmake -S . -B ...`. Always run the configure
-step first. If the error persists, delete the build folder and start fresh:
+You ran `cmake --build` before running the configure step. Always configure first.
+If the error persists after configuring, the build folder may be stale — delete it and start fresh:
+
+```powershell
+Remove-Item -Recurse -Force build/msvc
+cmake -S . -B build/msvc -G Ninja -DCMAKE_BUILD_TYPE=Debug -DFLUX_BUILD_EXAMPLES=ON
+cmake --build build/msvc
+```
+
+---
+
+**`ninja: error: build.ninja:35: loading 'CMakeFiles\rules.ninja'`**
+
+Your build folder has a stale cache from a previous CMake configuration. Delete it and reconfigure:
 
 ```powershell
 Remove-Item -Recurse -Force build/msvc
@@ -204,15 +232,23 @@ cmake --build build/msvc
 
 ---
 
-**`Cannot find source file: external/Clipper2/...`**
+**`Generator Ninja does not support toolset specification`**
 
-Your CMakeLists.txt still has the old manual Clipper2 block. Replace it with
-the FetchContent version. See the root `CMakeLists.txt` in the repo for the
-correct setup.
+Remove the `"toolset"` line from your `CMakePresets.json`. The `toolset` field is only
+valid for Visual Studio generators (`"Visual Studio 17 2022"`), not Ninja.
 
 ---
 
-**`Generator Ninja does not support toolset specification`**
+**`Cannot find source file: external/Clipper2/...`**
 
-Remove the `"toolset"` line from your `CMakePresets.json`. Toolset is only
-valid with Visual Studio generators, not Ninja.
+Your `CMakeLists.txt` still has the old manual `add_library(clipper2 ...)` block.
+Replace it with the FetchContent version used in the current root `CMakeLists.txt`.
+Clipper2 and glad are both fetched automatically at configure time — the
+`external/` folder is no longer needed and can be deleted.
+
+---
+
+**First configure takes a long time**
+
+This is normal. CMake is downloading Clipper2 via FetchContent on first run.
+Subsequent configures use the cached download in `build/msvc/_deps/`.
