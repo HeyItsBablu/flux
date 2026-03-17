@@ -2,13 +2,27 @@
   "version": 3,
   "configurePresets": [
     {
-      "name": "msvc",
-      "displayName": "MSVC (default)",
+      "name": "msvc-debug",
+      "displayName": "MSVC Debug",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/msvc",
       "cacheVariables": {
-        "CMAKE_C_COMPILER": "cl",
-        "CMAKE_CXX_COMPILER": "cl"
+        "CMAKE_BUILD_TYPE": "Debug",
+        "FLUX_BUILD_EXAMPLES": "ON",
+        "CMAKE_C_COMPILER": "cl.exe",
+        "CMAKE_CXX_COMPILER": "cl.exe"
+      }
+    },
+    {
+      "name": "msvc-release",
+      "displayName": "MSVC Release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/msvc",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "FLUX_BUILD_EXAMPLES": "ON",
+        "CMAKE_C_COMPILER": "cl.exe",
+        "CMAKE_CXX_COMPILER": "cl.exe"
       }
     }
   ]
