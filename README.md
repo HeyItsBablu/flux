@@ -53,6 +53,31 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
 
 ---
 
+## Screenshots
+
+<p align="center">
+  <img src="screenshots/layout.png" width="45%"/>
+  <img src="screenshots/counter.png" width="45%"/>
+</p>
+<p align="center"><em>Layout system · Reactive counter</em></p>
+
+<p align="center">
+  <img src="screenshots/graph.png" width="45%"/>
+  <img src="screenshots/paint.png" width="45%"/>
+</p>
+<p align="center"><em>Graph widget · Paint canvas</em></p>
+
+<p align="center">
+  <img src="screenshots/photo_editor.png" width="45%"/>
+  <img src="screenshots/logic_sim.png" width="45%"/>
+</p>
+<p align="center"><em>Photo editor · Logic simulator</em></p>
+
+<p align="center">
+  <img src="screenshots/illustrator.png" width="60%"/>
+</p>
+<p align="center"><em>Illustrator-style app</em></p>
+
 ## Table of Contents
 
 - [Components](#components)
