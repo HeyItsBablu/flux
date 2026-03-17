@@ -63,8 +63,8 @@ public:
     needsLayout = false;
   }
 
-  void positionChildren(int contentX, int contentY, int contentWidth,
-                        int contentHeight) override {
+  void positionChildren(int contentX, int contentY, int /*contentWidth*/,
+                        int /*contentHeight*/) override {
     if (!children.empty()) {
       auto &child = children[0];
       child->x = contentX;

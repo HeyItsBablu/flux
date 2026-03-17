@@ -358,15 +358,15 @@ public:
     paddingTop = paddingBottom = 10;
   }
 
-  void computeLayout(HDC hdc, const BoxConstraints &constraints,
-                     FontCache &fontCache) override {
+  void computeLayout(HDC /*hdc*/, const BoxConstraints &constraints,
+                     FontCache &/*fontCache*/) override {
     if (autoWidth)
       width = constraints.maxWidth;
     applyConstraints();
     needsLayout = false;
   }
 
-  void render(HDC hdc, FontCache &fontCache) override {
+  void render(HDC hdc, FontCache &/*fontCache*/) override {
     int trackY = y + height / 2;
     int trackLeft = x + paddingLeft;
     int trackRight = x + width - paddingRight;
@@ -423,7 +423,7 @@ public:
     return false;
   }
 
-  bool handleMouseUp(int mx, int my) override {
+  bool handleMouseUp(int /*mx*/, int /*my*/) override {
     if (isDragging) {
       isDragging = false;
       ReleaseCapture();
@@ -952,8 +952,7 @@ void computeLayout(HDC hdc, const BoxConstraints &constraints,
                    FontCache &fontCache) override {
   int totalWidth  = 0;
   int totalHeight = 0;
-  int maxWidth    = 0;
-  int maxHeight   = 0;
+
 
   for (auto &child : children) {
     child->computeLayout(hdc, constraints, fontCache);
@@ -983,8 +982,8 @@ void computeLayout(HDC hdc, const BoxConstraints &constraints,
   needsLayout = false;
 }
 
-  void positionChildren(int contentX, int contentY, int contentWidth,
-                        int contentHeight) override {
+  void positionChildren(int contentX, int contentY, int /*contentWidth*/,
+                        int /*contentHeight*/) override {
     int currentX = contentX;
     int currentY = contentY;
 
@@ -1231,8 +1230,8 @@ public:
     autoHeight = false;
   }
 
-void computeLayout(HDC hdc, const BoxConstraints &constraints,
-                   FontCache &fontCache) override {
+void computeLayout(HDC /*hdc*/, const BoxConstraints &constraints,
+                   FontCache &/*fontCache*/) override {
   if (autoWidth) width = constraints.maxWidth;
   applyConstraints();
   needsLayout = false;
@@ -1246,9 +1245,7 @@ void computeLayout(HDC hdc, const BoxConstraints &constraints,
     HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
 
     int textX = x + paddingLeft;
-    int textY = y + paddingTop;
-    int textW = width - paddingLeft - paddingRight;
-    int textH = height - paddingTop - paddingBottom;
+
 
     RECT clipRect = {x + paddingLeft, y + paddingTop, x + width - paddingRight,
                      y + height - paddingBottom};

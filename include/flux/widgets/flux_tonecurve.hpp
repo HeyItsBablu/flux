@@ -80,9 +80,9 @@ struct ToneCurveChannel {
         float u2 = u*u, u3 = u2*u;
 
         // Catmull-Rom basis
-        float m1x = (p2.x - p0.x) * 0.5f;
+        
         float m1y = (p2.y - p0.y) * 0.5f;
-        float m2x = (p3.x - p1.x) * 0.5f;
+  
         float m2y = (p3.y - p1.y) * 0.5f;
 
         // We only need Y: hermite interpolation
@@ -314,8 +314,8 @@ public:
 
     // ── Layout ────────────────────────────────────────────────────────────────
 
-    void computeLayout(HDC hdc, const BoxConstraints& constraints,
-                       FontCache& fontCache) override {
+    void computeLayout(HDC /*hdc*/, const BoxConstraints& constraints,
+                       FontCache& /*fontCache*/) override {
         width  = constraints.clampWidth (autoWidth  ? constraints.maxWidth  : width);
         height = constraints.clampHeight(autoHeight ? constraints.maxHeight : height);
         applyConstraints();
@@ -484,7 +484,7 @@ public:
         return true;
     }
 
-    bool handleMouseUp(int mx, int my) override {
+    bool handleMouseUp(int /*mx*/, int /*my*/) override {
         if (dragging) {
             dragging = false;
             markNeedsPaint();

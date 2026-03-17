@@ -633,12 +633,12 @@ public:
   virtual void resize(int w, int h)     = 0;
   virtual void update(double dt)        = 0;
   virtual void render(const float mvp[16]) = 0;
-  virtual void onMouseDown(float x, float y)      {}
-  virtual void onMouseMove(float x, float y)      {}
-  virtual void onMouseUp(float x, float y)        {}
-  virtual void onKeyDown(int key)                 {}
-  virtual void onKeyUp(int key)                   {}
-  virtual void onRightMouseDown(float x, float y) {}
+virtual void onMouseDown(float /*x*/, float /*y*/)      {}
+virtual void onMouseMove(float /*x*/, float /*y*/)      {}
+virtual void onMouseUp(float /*x*/, float /*y*/)        {}
+virtual void onKeyDown(int /*key*/)                     {}
+virtual void onKeyUp(int /*key*/)                       {}
+virtual void onRightMouseDown(float /*x*/, float /*y*/) {}
   virtual bool needsContinuousRedraw() const      { return false; }
   virtual void destroy() = 0;
 };
@@ -1245,23 +1245,23 @@ void main(){ fragColor = uColor; }
 #ifndef NDEBUG
     glEnable(GL_DEBUG_OUTPUT);
     glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-    glDebugMessageCallback(
-        [](GLenum source, GLenum type, GLuint id, GLenum severity,
-           GLsizei /*length*/, const GLchar *message, const void * /*userParam*/)
-        {
-          if (severity == GL_DEBUG_SEVERITY_NOTIFICATION) return;
-          const char *sevStr =
-              severity == GL_DEBUG_SEVERITY_HIGH   ? "HIGH"   :
-              severity == GL_DEBUG_SEVERITY_MEDIUM ? "MEDIUM" :
-              severity == GL_DEBUG_SEVERITY_LOW    ? "LOW"    : "NOTIFY";
-          char buf[512];
-          _snprintf_s(buf, sizeof(buf), _TRUNCATE,
-              "[GL %s] src=0x%04X type=0x%04X id=%u: %s\n",
-              sevStr, source, type, id, message);
-          OutputDebugStringA(buf);
-          if (type == GL_DEBUG_TYPE_ERROR) DebugBreak();
-        },
-        nullptr);
+glDebugMessageCallback(
+    [](GLenum source, GLenum type, GLuint msgId, GLenum severity,
+       GLsizei /*length*/, const GLchar *message, const void * /*userParam*/)
+    {
+      if (severity == GL_DEBUG_SEVERITY_NOTIFICATION) return;
+      const char *sevStr =
+          severity == GL_DEBUG_SEVERITY_HIGH   ? "HIGH"   :
+          severity == GL_DEBUG_SEVERITY_MEDIUM ? "MEDIUM" :
+          severity == GL_DEBUG_SEVERITY_LOW    ? "LOW"    : "NOTIFY";
+      char buf[512];
+      _snprintf_s(buf, sizeof(buf), _TRUNCATE,
+          "[GL %s] src=0x%04X type=0x%04X id=%u: %s\n",
+          sevStr, source, type, msgId, message);
+      OutputDebugStringA(buf);
+      if (type == GL_DEBUG_TYPE_ERROR) DebugBreak();
+    },
+    nullptr);
     // Silence driver spam notifications
     glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE,
                           GL_DEBUG_SEVERITY_NOTIFICATION,

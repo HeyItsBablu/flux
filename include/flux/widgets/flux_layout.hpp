@@ -796,8 +796,8 @@ public:
     needsLayout = false;
   }
 
-  void positionChildren(int contentX, int contentY, int contentWidth,
-                        int contentHeight) override {
+  void positionChildren(int contentX, int contentY, int /*contentWidth*/,
+                        int /*contentHeight*/) override {
     if (!children.empty()) {
       auto &child = children[0];
       child->x = contentX;
@@ -1146,7 +1146,7 @@ class ExpandedWidget : public Widget {
 public:
   bool isExpanded() const override { return true; }
 
-  void computeLayout(HDC hdc, const BoxConstraints &constraints,
+  void computeLayout(HDC hdc, const BoxConstraints &/*constraints*/,
                      FontCache &fontCache) override {
     // Parent (Row/Column) pre-sets width and height to the allocated flex size;
     // pass that down as tight constraints to children.

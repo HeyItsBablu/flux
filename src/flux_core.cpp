@@ -199,7 +199,6 @@ LRESULT CALLBACK FluxUI::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam,
   case WM_PAINT: {
     if (!instance || !instance->root) {
       PAINTSTRUCT ps;
-      HDC hdc = BeginPaint(hwnd, &ps);
       EndPaint(hwnd, &ps);
       return 0;
     }

@@ -188,8 +188,8 @@ public:
 
     // ── Widget overrides ──────────────────────────────────────────────────────
 
-    void computeLayout(HDC hdc, const BoxConstraints& constraints,
-                       FontCache& fontCache) override {
+    void computeLayout(HDC /*hdc*/, const BoxConstraints& constraints,
+                       FontCache& /*fontCache*/) override {
         width  = constraints.clampWidth (autoWidth  ? constraints.maxWidth  : width);
         height = constraints.clampHeight(autoHeight ? constraints.maxHeight : height);
         applyConstraints();

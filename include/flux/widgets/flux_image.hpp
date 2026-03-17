@@ -87,8 +87,8 @@ public:
     return true;
   }
 
-  void computeLayout(HDC hdc, const BoxConstraints &constraints,
-                     FontCache &fontCache) override {
+  void computeLayout(HDC /*hdc*/, const BoxConstraints &constraints,
+                     FontCache &/*fontCache*/) override {
     if (imageLoaded) {
       if (autoWidth && autoHeight) {
         width = imageWidth;
@@ -114,7 +114,7 @@ public:
     needsLayout = false;
   }
 
-  void render(HDC hdc, FontCache &fontCache) override {
+  void render(HDC hdc, FontCache &/*fontCache*/) override {
     // Draw background
     if (hasBackground) {
       drawRoundedRectangle(hdc);

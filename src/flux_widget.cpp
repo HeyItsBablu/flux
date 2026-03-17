@@ -57,8 +57,8 @@ void Widget::renderText(HDC hdc, FontCache &fontCache, UINT format) {
 // Widget::computeLayout
 // ============================================================================
 
-void Widget::computeLayout(HDC hdc, const BoxConstraints &constraints,
-                           FontCache &fontCache) {
+void Widget::computeLayout(HDC /*hdc */, const BoxConstraints &constraints,
+                           FontCache &/*fontCache*/) {
   if (!visible) {
     width = 0;
     height = 0;
@@ -77,8 +77,8 @@ void Widget::computeLayout(HDC hdc, const BoxConstraints &constraints,
 // Widget::positionChildren
 // ============================================================================
 
-void Widget::positionChildren(int contentX, int contentY, int contentWidth,
-                               int contentHeight) {
+void Widget::positionChildren(int contentX, int contentY, 
+                      int /*contentWidth*/, int /*contentHeight*/) {
   for (auto &child : children) {
     child->x = contentX + child->marginLeft;
     child->y = contentY + child->marginTop;

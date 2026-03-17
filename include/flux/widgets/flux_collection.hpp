@@ -215,7 +215,7 @@ private:
     // ── Child positioning ─────────────────────────────────────────────────
 
     void repositionChildren() {
-        int sbSz = sb.isScrollable ? sb.size : 0;
+
         if (sb.horizontal) {
             int curX = x + paddingLeft - sb.scrollOffset;
             for (size_t i = 0; i < children.size(); i++) {
@@ -309,7 +309,7 @@ public:
         repositionChildren(); markNeedsPaint(); return true;
     }
 
-    bool handleMouseUp(int mx, int my) override {
+    bool handleMouseUp(int /*mx*/, int /*my*/) override {
         if (!sb.onMouseUp()) return false;
         markNeedsPaint(); return true;
     }

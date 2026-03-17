@@ -236,10 +236,10 @@ public:
   // Mouse / keyboard event handlers
   // -----------------------------------------------------------------------
 
-  virtual bool handleMouseWheel(int delta) { return false; }
-  virtual bool handleMouseDown(int mx, int my) { return false; }
-  virtual bool handleMouseUp(int mx, int my) { return false; }
-  virtual bool handleMouseMove(int mx, int my) { return false; }
+virtual bool handleMouseWheel(int /*delta*/) { return false; }
+virtual bool handleMouseDown(int /*mx*/, int /*my*/) { return false; }
+virtual bool handleMouseUp(int /*mx*/, int /*my*/) { return false; }
+virtual bool handleMouseMove(int /*mx*/, int /*my*/) { return false; }
   virtual bool handleMouseLeave() { return false; }
 
   virtual bool handleRightClick(int mx, int my) {
@@ -248,14 +248,15 @@ public:
     return false;
   }
 
-  virtual bool handleKeyDown(int keyCode) { return false; }
-  virtual bool handleChar(wchar_t ch) { return false; }
+virtual bool handleKeyDown(int /*keyCode*/) { return false; }
+virtual bool handleChar(wchar_t /*ch*/) { return false; }
+virtual bool handleTimer(UINT /*timerId*/) { return false; }
   virtual bool handleFocus(bool focused) {
     isFocused = focused;
     markNeedsPaint();
     return true;
   }
-  virtual bool handleTimer(UINT timerId) { return false; }
+
 
   // -----------------------------------------------------------------------
   // Hover helpers

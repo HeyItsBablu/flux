@@ -174,8 +174,8 @@ public:
     needsLayout = false;
   }
 
-  void positionChildren(int contentX, int contentY,
-                        int contentWidth, int contentHeight) override {
+  void positionChildren(int /*contentX*/, int /*contentY*/,
+                        int /*contentWidth*/, int /*contentHeight*/) override {
     if (!children.empty()) {
       auto &anchor = children[0];
       anchor->x = x;
@@ -379,7 +379,7 @@ private:
     if (scaffold) {
       scaffold->addOverlay(
           this,
-          [this](HDC hdc, FontCache &fc) { /* visual is in popup */ },
+          [this](HDC /*hdc*/, FontCache &/*fc*/) { /* visual is in popup */ },
           150);
     }
   }

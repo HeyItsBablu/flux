@@ -617,7 +617,6 @@ private:
                 }
                 int slotY = rowY + 14;
                 for (int ci = 0; ci < nCh; ++ci) {
-                    int trackY = slotY + (kSliderH-5)/2;
                     if (my >= slotY && my < slotY+kSliderH &&
                         mx >= trackX && mx < trackX+trackW) {
                         SliderHit h;

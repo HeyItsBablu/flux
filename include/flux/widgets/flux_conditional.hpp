@@ -227,7 +227,7 @@ public:
       : boundState(&state), predicate(pred) {
     lastCondition = predicate(state.get());
 
-    state.listen([this](T newValue) {
+    state.listen([this](T /*newValue*/) {
       rebuildChild();
 
       if (boundState && boundState->hasContext()) {
@@ -289,8 +289,8 @@ public:
     needsLayout = false;
   }
 
-  void positionChildren(int contentX, int contentY, int contentWidth,
-                        int contentHeight) override {
+  void positionChildren(int contentX, int contentY, int /*contentWidth*/,
+                        int /*contentHeight*/) override {
     if (!children.empty()) {
       auto &child = children[0];
       child->x = contentX;

@@ -303,55 +303,38 @@ private:
         popupClass_ = true;
     }
 
-    static LRESULT CALLBACK popupProc_(HWND hwnd, UINT msg,
-                                       WPARAM wp, LPARAM lp)
-    {
-        auto *self = reinterpret_cast<OverlayHost *>(
-            GetWindowLongPtrW(hwnd, GWLP_USERDATA));
-
-        switch (msg) {
-        case WM_CREATE: {
-            auto *cs = reinterpret_cast<CREATESTRUCTW *>(lp);
-            SetWindowLongPtrW(hwnd, GWLP_USERDATA,
-                reinterpret_cast<LONG_PTR>(cs->lpCreateParams));
-            return 0;
-        }
-        case WM_ERASEBKGND:
-            return 1;           // we paint everything ourselves
-        case WM_PAINT: {
-            // The window surface is fully managed by UpdateLayeredWindow;
-            // WM_PAINT should not re-draw anything.
-            PAINTSTRUCT ps;
-            BeginPaint(hwnd, &ps);
-            EndPaint(hwnd, &ps);
-            return 0;
-        }
-
-        // ── Forward mouse events to the owning FluxUI window ──────────────
-        // WS_EX_NOACTIVATE keeps keyboard focus on the main window.
-        // We forward all mouse messages so FluxUI dispatchers receive them
-        // in main-window client coordinates.
-        case WM_LBUTTONDOWN:
-        case WM_LBUTTONUP:
-        case WM_RBUTTONDOWN:
-        case WM_RBUTTONUP:
-        case WM_MOUSEMOVE:
-        case WM_MOUSEWHEEL:
-            forwardMouseEvent(hwnd, msg, wp, lp);
-            return 0;
-
-        case WM_NCHITTEST:
-            // Return HTCLIENT so Windows delivers WM_LBUTTONDOWN etc. to
-            // this proc (where we forward them above).
-            // Do NOT return HTTRANSPARENT — that bypasses our proc entirely
-            // and delivers the click directly to whatever is underneath,
-            // which on a multi-monitor setup may not be our main window.
-            return HTCLIENT;
-
-        default:
-            return DefWindowProcW(hwnd, msg, wp, lp);
-        }
+static LRESULT CALLBACK popupProc_(HWND hwnd, UINT msg,
+                                   WPARAM wp, LPARAM lp)
+{
+    switch (msg) {
+    case WM_CREATE: {
+        auto *cs = reinterpret_cast<CREATESTRUCTW *>(lp);
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA,
+            reinterpret_cast<LONG_PTR>(cs->lpCreateParams));
+        return 0;
     }
+    case WM_ERASEBKGND:
+        return 1;
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        BeginPaint(hwnd, &ps);
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    case WM_LBUTTONDOWN:
+    case WM_LBUTTONUP:
+    case WM_RBUTTONDOWN:
+    case WM_RBUTTONUP:
+    case WM_MOUSEMOVE:
+    case WM_MOUSEWHEEL:
+        forwardMouseEvent(hwnd, msg, wp, lp);
+        return 0;
+    case WM_NCHITTEST:
+        return HTCLIENT;
+    default:
+        return DefWindowProcW(hwnd, msg, wp, lp);
+    }
+}
 
     // ----------------------------------------------------------------
     // destroy helper (called from destructor)

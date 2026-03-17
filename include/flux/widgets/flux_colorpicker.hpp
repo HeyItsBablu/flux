@@ -156,8 +156,8 @@ public:
   // -------------------------------------------------------------------------
   // Layout
   // -------------------------------------------------------------------------
-  void computeLayout(HDC hdc, const BoxConstraints &constraints,
-                     FontCache &fontCache) override {
+  void computeLayout(HDC /*hdc*/, const BoxConstraints &constraints,
+                     FontCache &/*fontCache*/) override {
                        if (!visible) { width = 0; height = 0; needsLayout = false; return; }
     width = constraints.clampWidth(width);
     height = constraints.clampHeight(computeTotalHeight());
@@ -270,7 +270,7 @@ public:
     return false;
   }
 
-  bool handleMouseUp(int mx, int my) override {
+  bool handleMouseUp(int /*mx*/, int /*my*/) override {
     if (draggingSV || draggingHue || draggingAlpha) {
       draggingSV = draggingHue = draggingAlpha = false;
       ReleaseCapture();
@@ -398,7 +398,7 @@ private:
       // For each column, draw a vertical gradient from white→pure hue (top)
       // to black (bottom) — we approximate with two lines per column
       COLORREF topColor = HSVtoRGB({hsv.h, s, 1.0, 1.0});
-      COLORREF bottomColor = RGB(0, 0, 0);
+
 
       for (int py = 0; py < size; py++) {
         double t = (double)py / size; // 0=top(bright), 1=bottom(dark)
@@ -421,9 +421,9 @@ private:
     DeleteObject(borderPen);
   }
 
-  void renderHueBar(HDC hdc, int cx, int cy, int width, int barH) {
-    for (int px = 0; px < width; px++) {
-      double hue = (double)px / width * 360.0;
+void renderHueBar(HDC hdc, int cx, int cy, int barW, int barH) {
+    for (int px = 0; px < barW; px++) {
+      double hue = (double)px / barW * 360.0;
       COLORREF c = HSVtoRGB({hue, 1.0, 1.0, 1.0});
       HPEN pen = CreatePen(PS_SOLID, 1, c);
       HPEN old = (HPEN)SelectObject(hdc, pen);
@@ -432,15 +432,14 @@ private:
       SelectObject(hdc, old);
       DeleteObject(pen);
     }
-    // Border
     HPEN borderPen = CreatePen(PS_SOLID, 1, RGB(180, 180, 180));
     HPEN oldPen = (HPEN)SelectObject(hdc, borderPen);
     HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
-    Rectangle(hdc, cx, cy, cx + width, cy + barH);
+    Rectangle(hdc, cx, cy, cx + barW, cy + barH);
     SelectObject(hdc, oldPen);
     SelectObject(hdc, oldBrush);
     DeleteObject(borderPen);
-  }
+}
 
   void renderAlphaBar(HDC hdc, int cx, int cy, int barW, int barH) {
     // Checkerboard background
