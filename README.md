@@ -1,3 +1,4 @@
+![CI](https://github.com/Rosanchaudhary/flux/actions/workflows/ci.yml/badge.svg)
 # Flux Widget API Reference
 
 > A declarative, Flutter-inspired widget toolkit for building native Windows UIs.  
