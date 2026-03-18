@@ -24,4 +24,5 @@
 #include "flux_treeview.hpp"
 #include "flux_data_table.hpp"
 #include "flux_toast.hpp"
+#include "flux_input_extended.hpp"
 #endif // WIDGETS_HPP
