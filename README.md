@@ -632,7 +632,7 @@ ColorPicker(RGB(255, 0, 0))
 Calendar popup for selecting a date. Includes month/year navigation and a year-range picker.
 
 ```cpp
-#include "flux_date_picker.hpp"
+
 
 DatePicker()
     ->setDate(FluxDate::today())
@@ -807,7 +807,7 @@ GridFromList(4, widgetVector);
 Scrollable hierarchical tree with expand/collapse, single selection, keyboard navigation, and optional indent guide lines.
 
 ```cpp
-#include "flux_tree_view.hpp"
+
 
 TreeNode root("Project");
 auto &src = root.addChild(TreeNode("src"));
@@ -870,7 +870,7 @@ node.isLeaf();   // true if no children
 Virtualised sortable data grid with resizable columns, alternating rows, horizontal/vertical scrollbars, and optional reactive data binding.
 
 ```cpp
-#include "flux_data_table.hpp"
+
 
 std::vector<DataColumn> columns = {
     DataColumn("name",   "Name",   180),
@@ -1302,7 +1302,6 @@ Padding(16, Text("Padded content"));
 Two-pane resizable container with a draggable divider. Supports horizontal (left/right) and vertical (top/bottom) splits.
 
 ```cpp
-#include "flux_split_view.hpp"
 
 // Horizontal split — left pane gets 30%
 SplitView(leftWidget, rightWidget, 0.3f)
@@ -1397,7 +1396,7 @@ Card(
 Tab bar with swappable content panes. Only the active pane is laid out and rendered — inactive panes have zero cost.
 
 ```cpp
-#include "flux_tab_view.hpp"
+
 
 TabView({
     Tab("General",  generalWidget),
@@ -1443,7 +1442,7 @@ activeTab.set(2); // switches tab programmatically
 Horizontal strip of labeled menus that open pulldown lists on left-click. Supports hot-tracking (mouse slides between open menus) and full keyboard navigation.
 
 ```cpp
-#include "flux_menu_bar.hpp"
+
 
 auto menuBar = MenuBar({
     MenuBarItem("File", {

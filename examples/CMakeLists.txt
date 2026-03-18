@@ -27,7 +27,7 @@ endfunction()
 #add_flux_example(logic_sim)
 # add_flux_example(splitview)
 # add_flux_example(menubarexample)
-add_flux_example(treeview)
+add_flux_example(datatable)
 
 
 # ── image_editor needs stb ────────────────────────────────────────────────────
