@@ -90,6 +90,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
 - [Layout](#layout)
 - [Structure](#structure)
 - [Overlay](#overlay)
+- [Navigation](#navigation)
+- [Data](#data)
 
 ---
 
@@ -625,6 +627,52 @@ ColorPicker(RGB(255, 0, 0))
 
 ---
 
+### DatePicker
+
+Calendar popup for selecting a date. Includes month/year navigation and a year-range picker.
+
+```cpp
+#include "flux_date_picker.hpp"
+
+DatePicker()
+    ->setDate(FluxDate::today())
+    ->setPlaceholder("Select a date")
+    ->setOnDateChanged([](FluxDate d) {
+        std::cout << d.toString("%d %b %Y") << std::endl;
+    });
+
+// Reactive binding
+State<FluxDate> selectedDate(FluxDate{}, app);
+DatePicker()->setDate(selectedDate);
+```
+
+**FluxDate struct**
+
+```cpp
+FluxDate d = FluxDate::today();   // today
+FluxDate d{2025, 6, 15};         // June 15, 2025
+d.toString("%d / %m / %Y");       // "15 / 06 / 2025"
+d.isValid();                      // true if year/month/day are set
+```
+
+**Methods**
+
+| Method | Type | Description |
+|---|---|---|
+| `setDate(FluxDate)` | `FluxDate` | Set initial date |
+| `setDate(State<FluxDate>)` | State | Two-way reactive binding |
+| `setPlaceholder(text)` | `string` | Text when no date selected |
+| `setDateFormat(fmt)` | `string` | `strftime`-style format string |
+| `setMinDate(date)` | `FluxDate` | Disable dates before this |
+| `setMaxDate(date)` | `FluxDate` | Disable dates after this |
+| `setOnDateChanged(fn)` | `void(FluxDate)` | Fires when a date is picked |
+| `setAccentColor(color)` | `COLORREF` | Header, selection, and indicator color |
+| `setWidth(w)` | `int` | Fixed width |
+
+> **Navigation:** Click month/year header to open year picker. `◀ ▶` arrows navigate months or year ranges.
+
+---
+
 ## Collection
 
 ### ListView
@@ -754,6 +802,145 @@ GridFromList(4, widgetVector);
 
 ---
 
+### TreeView
+
+Scrollable hierarchical tree with expand/collapse, single selection, keyboard navigation, and optional indent guide lines.
+
+```cpp
+#include "flux_tree_view.hpp"
+
+TreeNode root("Project");
+auto &src = root.addChild(TreeNode("src"));
+src.expanded = true;
+src.addChild(TreeNode("main.cpp"));
+auto &comp = src.addChild(TreeNode("components"));
+comp.addChild(TreeNode("flux_widget.hpp"));
+
+auto tv = TreeView(root)
+    ->setOnSelectionChanged([](const TreeNode *n) {
+        std::cout << n->label << std::endl;
+    })
+    ->setShowGuideLines(true)
+    ->setFlex(1);
+
+// Multiple roots
+auto tv = TreeView({rootA, rootB, rootC});
+```
+
+**TreeNode struct**
+
+```cpp
+TreeNode node("label", "optional-id");
+node.expanded  = true;      // start expanded
+node.disabled  = false;     // grayed out, not selectable
+node.icon      = L"\uE8B7"; // Segoe MDL2 glyph (optional)
+node.userData  = &myObj;    // attach any pointer
+
+node.addChild(TreeNode("child"));
+node.expandAll();
+node.collapseAll();
+node.isLeaf();   // true if no children
+```
+
+**Methods**
+
+| Method | Type | Description |
+|---|---|---|
+| `setOnSelectionChanged(fn)` | `void(const TreeNode*)` | Fires on click |
+| `setOnNodeExpanded(fn)` | `void(const TreeNode*)` | Fires on expand |
+| `setOnNodeCollapsed(fn)` | `void(const TreeNode*)` | Fires on collapse |
+| `setOnNodeDoubleClicked(fn)` | `void(const TreeNode*)` | Fires on double-click |
+| `setRoots(vector<TreeNode>)` | — | Replace the entire tree at runtime |
+| `selectById(id)` | `string` | Select a node by its id field |
+| `expandAll()` / `collapseAll()` | — | Expand or collapse all nodes |
+| `selectedNode()` | `const TreeNode*` | Currently selected node |
+| `setRowHeight(h)` | `int` | Row height in pixels (default 28) |
+| `setIndentWidth(w)` | `int` | Pixels per depth level (default 20) |
+| `setShowGuideLines(v)` | `bool` | Vertical indent guide lines |
+| `setFontSize(s)` | `int` | Label font size |
+| `setAccentColor(c)` | `COLORREF` | Selection highlight color |
+| `setFlex(n)` | `int` | Flex factor in parent |
+
+> **Keyboard:** `↑/↓` move selection · `←` collapse or jump to parent · `→` expand or move to first child · `Home/End` jump to first/last · `Enter/Space` toggle expand.
+
+---
+
+### DataTable
+
+Virtualised sortable data grid with resizable columns, alternating rows, horizontal/vertical scrollbars, and optional reactive data binding.
+
+```cpp
+#include "flux_data_table.hpp"
+
+std::vector<DataColumn> columns = {
+    DataColumn("name",   "Name",   180),
+    DataColumn("role",   "Role",   130),
+    DataColumn("age",    "Age",     60).setAlign(ColumnAlign::Right),
+    DataColumn("salary", "Salary", 110).setAlign(ColumnAlign::Right)
+        .setFormatter([](const std::string &v){ return "$" + v + "k"; }),
+};
+
+std::vector<DataRow> rows = {
+    DataRow("1").set("name","Alice").set("role","Engineer").set("age","29").set("salary","120"),
+    DataRow("2").set("name","Bob")  .set("role","Designer").set("age","34").set("salary","95"),
+};
+
+auto table = DataTable(columns, rows)
+    ->setAlternateRows(true)
+    ->setOnRowSelected([](int idx, const DataRow &row) {
+        std::cout << row.get("name") << std::endl;
+    });
+
+// Reactive rows
+State<std::vector<DataRow>> rowsState(..., app);
+auto table = DataTable(columns, rowsState);
+```
+
+**DataColumn**
+
+```cpp
+DataColumn col("key", "Label", 120);
+col.setAlign(ColumnAlign::Right);   // Left · Center · Right
+col.setSortable(false);
+col.setResizable(false);
+col.setMinWidth(40);
+col.setFormatter([](const std::string &v){ return "$" + v; });
+```
+
+**DataRow**
+
+```cpp
+DataRow row("optional-id");
+row.set("name", "Alice").set("age", "29");  // fluent chain
+row.get("name");                             // "Alice"
+row.disabled = true;                         // grayed out, not selectable
+```
+
+**Methods**
+
+| Method | Type | Description |
+|---|---|---|
+| `setRows(vector<DataRow>)` | — | Replace rows at runtime |
+| `sortBy(key, ascending)` | `string, bool` | Sort programmatically |
+| `clearSort()` | — | Remove sort, restore insertion order |
+| `selectedIndex()` | `int` | Currently selected visual row index |
+| `selectedRow()` | `const DataRow*` | Currently selected row data |
+| `setAlternateRows(v)` | `bool` | Alternating row background (default true) |
+| `setShowColumnDividers(v)` | `bool` | Vertical column divider lines |
+| `setRowHeight(h)` | `int` | Row height in pixels (default 30) |
+| `setHeaderHeight(h)` | `int` | Header row height (default 36) |
+| `setHeaderBackground(c)` | `COLORREF` | Header background color |
+| `setAccentColor(c)` | `COLORREF` | Selection highlight and sort arrow color |
+| `setOnRowSelected(fn)` | `void(int, DataRow)` | Fires on single click |
+| `setOnRowDoubleClicked(fn)` | `void(int, DataRow)` | Fires on double-click |
+| `setOnSortChanged(fn)` | `void(string, bool)` | Fires when sort column changes |
+| `setFlex(n)` | `int` | Flex factor in parent |
+| `setWidth(w)` / `setHeight(h)` | `int` | Fixed dimensions |
+
+> **Sorting:** Click a column header to sort ascending; click again to reverse. Numeric strings sort numerically. **Column resize:** drag the 4px zone at each column edge. **Keyboard:** `↑/↓` navigate rows · `Home/End` jump · `PgUp/PgDn` page.
+
+---
+
 ## Canvas
 
 ### CanvasWidget
@@ -864,10 +1051,10 @@ auto [cx, cy] = vp.screenToCanvas(screenX, screenY);
 | `resetZoom()` | Set zoom = 1 and center canvas |
 | `fitToView()` | Scale and center to fit canvas in viewport |
 | `panByScreen(dx, dy)` | Pan by screen-space pixel deltas |
-| `setOffset(cx, cy)` | Set canvas-space pan origin |
+| `setOffset(cx, cy)` | Set canvas-space pan offset |
 | `screenToCanvas(sx, sy)` | Convert screen coords to canvas coords |
 | `zoom()` | Current zoom factor |
-| `offsetX()` / `offsetY()` | Current pan origin |
+| `offsetX()` / `offsetY()` | Current pan offset |
 
 ---
 
@@ -1110,6 +1297,49 @@ Padding(16, Text("Padded content"));
 
 ---
 
+### SplitView
+
+Two-pane resizable container with a draggable divider. Supports horizontal (left/right) and vertical (top/bottom) splits.
+
+```cpp
+#include "flux_split_view.hpp"
+
+// Horizontal split — left pane gets 30%
+SplitView(leftWidget, rightWidget, 0.3f)
+    ->setMinPaneWidth(120)
+    ->setDividerColor(RGB(210, 210, 210))
+    ->setDividerHoverColor(RGB(33, 150, 243));
+
+// Vertical split
+SplitViewVertical(topWidget, bottomWidget, 0.4f);
+
+// Reactive ratio
+State<float> ratio(0.5f, app);
+SplitView(left, right)->setRatio(ratio);
+```
+
+**Methods**
+
+| Method | Type | Description |
+|---|---|---|
+| `setRatio(r)` | `float` 0–1 | Fraction of space given to pane 0 |
+| `setRatio(State<float>)` | State | Reactive ratio binding |
+| `setMinPaneWidth(px)` | `int` | Minimum size of either pane |
+| `setDividerWidth(px)` | `int` | Divider thickness (default 6px) |
+| `setDividerColor(c)` | `COLORREF` | Default divider color |
+| `setDividerHoverColor(c)` | `COLORREF` | Divider color on hover |
+| `setDividerDragColor(c)` | `COLORREF` | Divider color while dragging |
+| `setVertical(v)` | `bool` | Switch to top/bottom split |
+| `setResizable(v)` | `bool` | Allow drag resize (default true) |
+| `setOnRatioChanged(fn)` | `void(float)` | Fires after drag completes |
+| `getRatio()` | `float` | Current ratio |
+| `swapPanes()` | — | Swap pane 0 and pane 1 |
+| `collapsePane(idx)` | `int` | Collapse pane 0 or 1 fully |
+
+> **Cursor:** Changes to `IDC_SIZEWE` / `IDC_SIZENS` on divider hover automatically.
+
+---
+
 ## Structure
 
 ### Scaffold
@@ -1157,6 +1387,99 @@ Card(
     })->setSpacing(8)
 );
 ```
+
+---
+
+## Navigation
+
+### TabView
+
+Tab bar with swappable content panes. Only the active pane is laid out and rendered — inactive panes have zero cost.
+
+```cpp
+#include "flux_tab_view.hpp"
+
+TabView({
+    Tab("General",  generalWidget),
+    Tab("Display",  displayWidget),
+    Tab("Network",  networkWidget),
+    Tab("Advanced", advancedWidget),
+})
+->setOnTabChanged([](int i) { std::cout << "Tab: " << i << std::endl; });
+
+// Reactive active index
+State<int> activeTab(0, app);
+TabView({...})->setActiveIndex(activeTab);
+activeTab.set(2); // switches tab programmatically
+```
+
+**Methods**
+
+| Method | Type | Description |
+|---|---|---|
+| `setActiveIndex(idx)` | `int` | Switch to tab by index |
+| `setActiveIndex(State<int>)` | State | Two-way reactive binding |
+| `setOnTabChanged(fn)` | `void(int)` | Fires when active tab changes |
+| `setTabBarHeight(h)` | `int` | Height of the tab bar (default 40px) |
+| `setTabMinWidth(w)` | `int` | Minimum tab button width (default 90px) |
+| `setTabFontSize(s)` | `int` | Tab label font size |
+| `setIndicatorColor(c)` | `COLORREF` | Active tab underline color |
+| `setActiveTabText(c)` | `COLORREF` | Active tab label color |
+| `setBarBackground(c)` | `COLORREF` | Tab bar background color |
+| `setContentPadding(p)` | `int` | Padding inside the content area |
+| `setHasContentBorder(v)` | `bool` | Border around content pane |
+| `setAccentColor(c)` | `COLORREF` | Sets indicator, active text, hover together |
+| `setTabContent(idx, widget)` | — | Replace a tab's content at runtime |
+| `setTabLabel(idx, label)` | — | Rename a tab at runtime |
+| `tabCount()` | `int` | Number of tabs |
+| `setFlex(n)` | `int` | Flex factor in parent |
+
+> **Keyboard:** `Ctrl+Tab` / `Ctrl+Shift+Tab` cycle through tabs. All other key events forward to the active pane.
+
+---
+
+### MenuBar
+
+Horizontal strip of labeled menus that open pulldown lists on left-click. Supports hot-tracking (mouse slides between open menus) and full keyboard navigation.
+
+```cpp
+#include "flux_menu_bar.hpp"
+
+auto menuBar = MenuBar({
+    MenuBarItem("File", {
+        ContextMenuItem::Action("New",  [&]{ newFile(); }),
+        ContextMenuItem::Action("Open", [&]{ openFile(); }),
+        ContextMenuItem::Separator(),
+        ContextMenuItem::Action("Exit", []{ PostQuitMessage(0); }),
+    }),
+    MenuBarItem("Edit", {
+        ContextMenuItem::Action("Cut",   [&]{ cut(); }),
+        ContextMenuItem::Action("Copy",  [&]{ copy(); }),
+        ContextMenuItem::Action("Paste", [&]{ paste(); }),
+    }),
+    MenuBarItem("Help", {
+        ContextMenuItem::Action("About", [&]{ showAbout(); }),
+    }),
+});
+
+// Embed below AppBar
+Column({
+    AppBar("My App"),
+    menuBar,
+    Expanded(body),
+})->setSpacing(0);
+```
+
+**Methods**
+
+| Method | Type | Description |
+|---|---|---|
+| `setBarHeight(h)` | `int` | Height of the menu bar strip (default 28px) |
+| `setBarBackground(c)` | `COLORREF` | Bar background color |
+| `setItemHeight(h)` | `int` | Dropdown item row height (default 28px) |
+| `setMinMenuWidth(w)` | `int` | Minimum dropdown width (default 160px) |
+
+> **Keyboard:** `←/→` switch between open menus · `↑/↓` navigate items · `Enter/Space` activate · `Escape` close.
 
 ---
 
