@@ -19,5 +19,6 @@
 #include "flux_raster.hpp"
 #include "flux_splitview.hpp"
 #include "flux_menubar.hpp"
+#include "flux_datepicker.hpp"
 
 #endif // WIDGETS_HPP
