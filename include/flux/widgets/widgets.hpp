@@ -21,4 +21,5 @@
 #include "flux_menubar.hpp"
 #include "flux_datepicker.hpp"
 #include "flux_tabview.hpp"
+#include "flux_treeview.hpp"
 #endif // WIDGETS_HPP
