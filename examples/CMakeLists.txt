@@ -23,8 +23,10 @@ endfunction()
 # add_flux_example(graphtest)
 # add_flux_example(illustrator)
 # add_flux_example(overlaytest)
-add_flux_example(paintfull)
+# add_flux_example(paintfull)
 #add_flux_example(logic_sim)
+add_flux_example(splitview)
+
 
 # ── image_editor needs stb ────────────────────────────────────────────────────
 # add_executable(image_editor WIN32 image_editor.cpp)

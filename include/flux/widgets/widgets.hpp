@@ -17,5 +17,6 @@
 #include "flux_hsl_panel.hpp" 
 #include "flux_tonecurve.hpp"
 #include "flux_raster.hpp"
+#include "flux_splitview.hpp"
 
 #endif // WIDGETS_HPP
