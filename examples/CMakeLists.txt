@@ -25,7 +25,8 @@ endfunction()
 # add_flux_example(overlaytest)
 # add_flux_example(paintfull)
 #add_flux_example(logic_sim)
-add_flux_example(splitview)
+# add_flux_example(splitview)
+add_flux_example(menubarexample)
 
 
 # ── image_editor needs stb ────────────────────────────────────────────────────
