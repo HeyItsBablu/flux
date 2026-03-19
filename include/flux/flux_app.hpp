@@ -178,6 +178,7 @@ private:
   // Overlay stack is kept sorted ascending by zIndex at all times.
   // Render order:  front → back  (lowest zIndex first, highest last = on top)
   // Hit-test order: back → front (highest zIndex first = topmost widget wins)
+  static FluxAppWidget *instance;
 
 public:
   std::string title;
@@ -188,9 +189,26 @@ public:
   FluxAppWidget(const std::string &appTitle, WidgetPtr homeWidget)
       : title(appTitle), home(homeWidget), theme(AppTheme::light()) {
     ThemeProvider::setTheme(theme);
+    instance = this;
     if (home) {
       addChild(home);
     }
+  }
+
+  // Get the global FluxAppWidget instance
+  static FluxAppWidget *getInstance() { return instance; }
+
+  // Set theme and trigger repaint
+  void setTheme(const AppTheme &newTheme) {
+    theme = newTheme;
+    ThemeProvider::setTheme(newTheme);
+    needsPaint = true;
+  }
+
+  // Toggle between light and dark
+  void toggleTheme() {
+    bool isDark = (theme.backgroundColor == AppTheme::dark().backgroundColor);
+    setTheme(isDark ? AppTheme::light() : AppTheme::dark());
   }
 
   // ----------------------------------------------------------------
@@ -273,6 +291,7 @@ private:
     }
   }
 };
+inline FluxAppWidget* FluxAppWidget::instance = nullptr;
 
 // ============================================================================
 // FLUX APP FACTORY

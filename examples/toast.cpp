@@ -1,45 +1,33 @@
 #include "flux/flux.hpp"
 
 class MyApp : public Component {
-    State<int> count;
-    ToastWidgetPtr toast;
+    State<bool> isDark;
 public:
-    MyApp() : count(0, context) {}
+    MyApp() : isDark(false, context) {}
 
     WidgetPtr build() override {
-        toast = Toast()
-            ->setPosition(ToastPosition::BottomRight)
-            ->setMaxVisible(3);
-
         return Scaffold(
-            AppBar("My App"),
+            AppBar("Theme Toggle"),
             Column({
-                Button("Save",    [this]{ toast->show("Saved!",         ToastType::Success); }),
-                Button("Warning", [this]{ toast->show("Low disk space", ToastType::Warning); }),
-                Button("Error",   [this]{
-                    toast->showEntry({
-                        .message     = "Upload failed — check your connection",
-                        .title       = "Network Error",
-                        .type        = ToastType::Error,
-                        .durationMs  = 0,          // sticky
-                        .actionLabel = "Retry",
-                        .onAction    = [this]{ /* retry logic */ },
-                    });
-                }),
-                toast,             // ← zero-size, place anywhere in tree
-            })->setSpacing(8)
+                Toggle("Dark mode")
+                    ->setValue(isDark)
+                    ->setTrackOnColor(RGB(99, 102, 241))
+                    ->setOnToggleChanged([this](bool v){
+                        FluxAppWidget::getInstance()->setTheme(
+                            v ? AppTheme::dark() : AppTheme::light()
+                        );
+                    }),
+            })->setSpacing(8)->setPadding(16)
         );
     }
 };
-
-
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
-  FluxUI app(hInstance);
-  app.build([&]() {
-    return FluxApp("Toast Demo",
-                   BuildComponent<MyApp>(),
-                   AppTheme::light());
-  });
-  app.createWindow("FluxUI - TabView Demo", 800, 520);
-  return app.run();
+    FluxUI app(hInstance);
+    app.build([&]() {
+        return FluxApp("Theme Toggle Demo",
+                       BuildComponent<MyApp>(),
+                       AppTheme::light());
+    });
+    app.createWindow("FluxUI - Theme Toggle", 800, 520);
+    return app.run();
 }
