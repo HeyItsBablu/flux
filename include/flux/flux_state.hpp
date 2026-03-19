@@ -1,9 +1,10 @@
 #ifndef FLUX_STATE_HPP
 #define FLUX_STATE_HPP
 
-
 #include <cassert>
+#include <functional>
 #include <iomanip>
+#include <memory>
 #include <mutex>
 #include <sstream>
 #include <vector>
@@ -23,19 +24,18 @@ private:
 
   struct PropertyBinding {
     std::weak_ptr<Widget> widget;
-    std::function<void(Widget *, const T &)> applier; // applies value to widget
-    bool needsLayout; // true = re-layout, false = repaint only
+    std::function<void(Widget *, const T &)> applier;
+    bool needsLayout;
   };
   std::vector<PropertyBinding> propertyBindings;
 
-  // Thread safety
+
   mutable std::mutex stateMutex;
 
   // ========================================================================
   // PRIVATE HELPERS
   // ========================================================================
 
-  // Helper to convert value to string for display - integers
   template <typename U = T>
   typename std::enable_if<std::is_integral<U>::value &&
                               !std::is_same<U, bool>::value,
@@ -44,7 +44,6 @@ private:
     return std::to_string(val);
   }
 
-  // Helper to convert value to string for display - floats
   template <typename U = T>
   typename std::enable_if<std::is_floating_point<U>::value, std::string>::type
   valueToString(const U &val) const {
@@ -53,14 +52,12 @@ private:
     return oss.str();
   }
 
-  // Helper to convert value to string for display - bool
   template <typename U = T>
   typename std::enable_if<std::is_same<U, bool>::value, std::string>::type
   valueToString(const U &val) const {
     return val ? "true" : "false";
   }
 
-  // Helper to convert value to string for display - string
   template <typename U = T>
   typename std::enable_if<std::is_same<U, std::string>::value,
                           std::string>::type
@@ -68,93 +65,75 @@ private:
     return val;
   }
 
-  // Fallback for other types (including std::vector)
   template <typename U = T>
   typename std::enable_if<
       !std::is_integral<U>::value && !std::is_floating_point<U>::value &&
           !std::is_same<U, bool>::value && !std::is_same<U, std::string>::value,
       std::string>::type
-  valueToString(const U &val) const {
-    // For vectors and other complex types, just show a placeholder
+  valueToString(const U &) const {
     return "[complex type]";
   }
 
-  // Notify all observers (widgets) - MUST be called with lock held
+
   void notifyObserversLocked() {
-    // ================================================================
-    // TEXT OBSERVERS
-    // ================================================================
     std::string newText = valueToString(value);
 
     // Clean up expired text observers
-    observers.erase(std::remove_if(observers.begin(), observers.end(),
-                                   [](const std::weak_ptr<Widget> &w) {
-                                     return w.expired();
-                                   }),
-                    observers.end());
+    observers.erase(
+        std::remove_if(observers.begin(), observers.end(),
+                       [](const std::weak_ptr<Widget> &w) { return w.expired(); }),
+        observers.end());
 
-    // Update all text observer widgets
     for (auto &weakWidget : observers) {
       if (auto widget = weakWidget.lock()) {
         widget->text = newText;
-
-        if (ui) {
+        if (ui)
           ui->updateWidget(widget.get());
-        }
       }
     }
 
-    // ================================================================
-    // PROPERTY BINDINGS
-    // ================================================================
-
     // Clean up expired property bindings
-    propertyBindings.erase(std::remove_if(propertyBindings.begin(),
-                                          propertyBindings.end(),
-                                          [](const PropertyBinding &b) {
-                                            return b.widget.expired();
-                                          }),
-                           propertyBindings.end());
+    propertyBindings.erase(
+        std::remove_if(propertyBindings.begin(), propertyBindings.end(),
+                       [](const PropertyBinding &b) { return b.widget.expired(); }),
+        propertyBindings.end());
 
-    // Fire each binding - surgically mutate only the bound property
     for (auto &binding : propertyBindings) {
       if (auto widget = binding.widget.lock()) {
-        // Mutate ONLY the specific property, nothing else
         binding.applier(widget.get(), value);
-
         if (ui) {
           if (binding.needsLayout)
-            ui->partialRebuild(widget.get()); // font size, padding etc
+            ui->partialRebuild(widget.get());
           else
-            ui->invalidateWidget(widget.get()); // color, border etc
+            ui->invalidateWidget(widget.get());
         }
       }
     }
   }
 
-  // Notify all listeners (callbacks) - MUST be called with lock held
-  void notifyListenersLocked(const T &newValue) {
-    // Make a copy of listeners to avoid issues if a listener modifies the list
-    auto listenersCopy = listeners;
 
-    // Release lock before calling listeners to avoid deadlocks
-    stateMutex.unlock();
+  std::vector<std::function<void(T)>> snapshotListeners() const {
+    return listeners;
+  }
 
-    for (auto &listener : listenersCopy) {
-      if (listener) {
+
+  void dispatchListeners(const std::vector<std::function<void(T)>> &snap,
+                         const T &val) {
+    for (const auto &fn : snap) {
+      if (fn) {
         try {
-          listener(newValue);
+          fn(val);
         } catch (const std::exception &e) {
-// Log error but continue notifying other listeners
 #ifdef FLUX_DEBUG
           std::cerr << "[FluxUI] Listener error: " << e.what() << std::endl;
+#endif
+        } catch (...) {
+#ifdef FLUX_DEBUG
+          std::cerr << "[FluxUI] Listener threw unknown exception" << std::endl;
 #endif
         }
       }
     }
-
-    // Re-acquire lock for caller
-    stateMutex.lock();
   }
 
 public:
@@ -162,221 +141,188 @@ public:
   // CONSTRUCTORS
   // ========================================================================
 
-  // Primary constructor - ALWAYS require explicit FluxUI context
-  State(T initial, FluxUI *app) : value(initial), ui(app) {
+  State(T initial, FluxUI *app) : value(std::move(initial)), ui(app) {
     assert(ui != nullptr && "State requires valid FluxUI context");
   }
 
-  // Constructor for use within Component - gets context from Component
-  State(T initial) : value(initial), ui(nullptr) {
+  State(T initial) : value(std::move(initial)), ui(nullptr) {
     ui = FluxUI::getCurrentInstance();
 #ifdef FLUX_DEBUG
-    if (!ui) {
-      std::cerr << "[FluxUI] Warning: State created without valid context"
-                << std::endl;
-    }
+    if (!ui)
+      std::cerr << "[FluxUI] Warning: State created without valid context" << std::endl;
 #endif
   }
 
-  // Move constructor
+
   State(State &&other) noexcept {
     std::lock_guard<std::mutex> lock(other.stateMutex);
-    value = std::move(other.value);
-    ui = other.ui;
-    observers = std::move(other.observers);
-    listeners = std::move(other.listeners);
-    other.ui = nullptr;
+    value            = std::move(other.value);
+    ui               = other.ui;
+    observers        = std::move(other.observers);
+    listeners        = std::move(other.listeners);
+    propertyBindings = std::move(other.propertyBindings);
+    other.ui         = nullptr;
   }
 
-  // Move assignment
+  // Move assignment — lock both to avoid races on either side.
   State &operator=(State &&other) noexcept {
     if (this != &other) {
       std::lock(stateMutex, other.stateMutex);
-      std::lock_guard<std::mutex> lock1(stateMutex, std::adopt_lock);
-      std::lock_guard<std::mutex> lock2(other.stateMutex, std::adopt_lock);
+      std::lock_guard<std::mutex> l1(stateMutex,       std::adopt_lock);
+      std::lock_guard<std::mutex> l2(other.stateMutex, std::adopt_lock);
 
-      value = std::move(other.value);
-      ui = other.ui;
-      observers = std::move(other.observers);
-      listeners = std::move(other.listeners);
-      other.ui = nullptr;
+      value            = std::move(other.value);
+      ui               = other.ui;
+      observers        = std::move(other.observers);
+      listeners        = std::move(other.listeners);
+      propertyBindings = std::move(other.propertyBindings);
+      other.ui         = nullptr;
     }
     return *this;
   }
 
-  // Disable copy operations to prevent accidental copies
-  State(const State &) = delete;
+
+  State(const State &)            = delete;
   State &operator=(const State &) = delete;
 
   // ========================================================================
-  // CORE API - ONLY FOUR METHODS
+  // CORE API
   // ========================================================================
 
   /**
-   * Get current value (thread-safe)
+   * get() — thread-safe snapshot of the current value.
    *
-   * Usage:
-   *   int currentValue = counter.get();
+   *   int v = counter.get();
    */
   T get() const {
     std::lock_guard<std::mutex> lock(stateMutex);
     return value;
   }
 
-  // Register a property binding (called from widget builder methods)
+  /**
+   * set() — replace value, notify observers + listeners.
+   *   counter.set(42);
+   */
+  void set(T newValue) {
+    std::vector<std::function<void(T)>> snap;
+    T dispatchValue;
+    {
+      std::lock_guard<std::mutex> lock(stateMutex);
+      value         = std::move(newValue);
+      dispatchValue = value;
+      notifyObserversLocked();
+      snap = snapshotListeners();
+    } // lock released here — before any listener fires
+
+    dispatchListeners(snap, dispatchValue);
+  }
+
+  /**
+   * update() — mutate via function, notify only if value changed.
+   *
+   *   counter.update([](int v) { return v + 1; });
+   *   toggle.update([](bool v) { return !v; });
+   */
+  void update(std::function<T(T)> updater) {
+    std::vector<std::function<void(T)>> snap;
+    T dispatchValue;
+    {
+      std::lock_guard<std::mutex> lock(stateMutex);
+      T newValue = updater(value);
+      if (value == newValue)
+        return;
+      value         = std::move(newValue);
+      dispatchValue = value;
+      notifyObserversLocked();
+      snap = snapshotListeners();
+    }
+
+    dispatchListeners(snap, dispatchValue);
+  }
+
+  /**
+   * listen() — register a change callback (thread-safe).
+   *
+   *   counter.listen([](int v) { std::cout << v << "\n"; });
+   */
+  void listen(std::function<void(T)> listener) {
+    if (!listener)
+      return;
+    std::lock_guard<std::mutex> lock(stateMutex);
+    listeners.push_back(std::move(listener));
+  }
+
+
   void bindProperty(std::shared_ptr<Widget> widget,
                     std::function<void(Widget *, const T &)> applier,
                     bool needsLayout = false) {
     if (!widget)
       return;
-
     std::lock_guard<std::mutex> lock(stateMutex);
-
-    propertyBindings.push_back({widget, applier, needsLayout});
-
-    // Apply immediately - widget starts with correct value
-    applier(widget.get(), value);
-  }
-
-  /**
-   * Set new value (thread-safe)
-   * Only triggers update if value actually changes
-   *
-   * Usage:
-   *   counter.set(42);
-   *   counter.set(counter.get() + 1);
-   */
-  void set(T newValue) {
-    std::lock_guard<std::mutex> lock(stateMutex);
-
-    // if (value == newValue)
-    //   return;
-
-    value = newValue;
-
-    notifyObserversLocked();
-    notifyListenersLocked(value);
-  }
-
-  /**
-   * Update with function (Flutter-like setState) - thread-safe
-   * Useful for updates that depend on current value
-   *
-   * Usage:
-   *   counter.update([](int v) { return v + 1; });
-   *   toggle.update([](bool v) { return !v; });
-   *   name.update([](std::string s) { return s + "!"; });
-   */
-  void update(std::function<T(T)> updater) {
-    std::lock_guard<std::mutex> lock(stateMutex);
-
-    T newValue = updater(value);
-
-    if (value == newValue)
-      return;
-
-    value = newValue;
-
-    notifyObserversLocked();
-    notifyListenersLocked(value);
-  }
-
-  /**
-   * Add a change listener (thread-safe)
-   * Callback is invoked whenever the state changes
-   *
-   * Usage:
-   *   counter.listen([](int newValue) {
-   *       std::cout << "Counter changed to: " << newValue << std::endl;
-   *   });
-   */
-  void listen(std::function<void(T)> listener) {
-    if (!listener)
-      return;
-
-    std::lock_guard<std::mutex> lock(stateMutex);
-    listeners.push_back(listener);
+    propertyBindings.push_back({widget, std::move(applier), needsLayout});
+    propertyBindings.back().applier(widget.get(), value);
   }
 
   // ========================================================================
-  // INTERNAL OBSERVER MANAGEMENT (for Widget binding)
+  // OBSERVER MANAGEMENT
   // ========================================================================
 
-  // Add a widget observer (thread-safe)
+
   void addObserver(std::shared_ptr<Widget> widget) {
     if (!widget)
       return;
-
     std::lock_guard<std::mutex> lock(stateMutex);
     observers.push_back(widget);
-    widget->boundState = this;
-
-    // Set initial text
     widget->text = valueToString(value);
   }
 
-  // Remove a widget observer (thread-safe)
   void removeObserver(Widget *widget) {
     if (!widget)
       return;
-
     std::lock_guard<std::mutex> lock(stateMutex);
-    observers.erase(std::remove_if(observers.begin(), observers.end(),
-                                   [widget](const std::weak_ptr<Widget> &w) {
-                                     if (auto locked = w.lock()) {
-                                       return locked.get() == widget;
-                                     }
-                                     return true; // Remove expired pointers too
-                                   }),
-                    observers.end());
+    observers.erase(
+        std::remove_if(observers.begin(), observers.end(),
+                       [widget](const std::weak_ptr<Widget> &w) {
+                         if (auto locked = w.lock())
+                           return locked.get() == widget;
+                         return true;
+                       }),
+        observers.end());
   }
 
-  // Clean up expired observers (thread-safe)
   void cleanupExpiredObservers() {
     std::lock_guard<std::mutex> lock(stateMutex);
-    observers.erase(std::remove_if(observers.begin(), observers.end(),
-                                   [](const std::weak_ptr<Widget> &w) {
-                                     return w.expired();
-                                   }),
-                    observers.end());
+    observers.erase(
+        std::remove_if(observers.begin(), observers.end(),
+                       [](const std::weak_ptr<Widget> &w) { return w.expired(); }),
+        observers.end());
   }
 
   // ========================================================================
-  // UTILITY METHODS
+  // UTILITY
   // ========================================================================
 
-  // Convert to string (thread-safe)
   std::string toString() const {
     std::lock_guard<std::mutex> lock(stateMutex);
     return valueToString(value);
   }
 
-  // Check if state has a valid UI context
-  bool hasContext() const { return ui != nullptr; }
+  bool   hasContext()    const { return ui != nullptr; }
+  FluxUI *getContext()   const { return ui; }
 
-  // Get the UI context
-  FluxUI *getContext() const { return ui; }
-
-  // Get number of observers (thread-safe)
   size_t observerCount() const {
     std::lock_guard<std::mutex> lock(stateMutex);
-
-    // Count only non-expired observers
-    size_t count = 0;
-    for (const auto &weak : observers) {
-      if (!weak.expired())
-        count++;
-    }
-    return count;
+    size_t n = 0;
+    for (const auto &w : observers)
+      if (!w.expired()) ++n;
+    return n;
   }
 
-  // Get number of listeners (thread-safe)
   size_t listenerCount() const {
     std::lock_guard<std::mutex> lock(stateMutex);
     return listeners.size();
   }
 
-  // Clear all listeners (thread-safe)
   void clearListeners() {
     std::lock_guard<std::mutex> lock(stateMutex);
     listeners.clear();
@@ -387,30 +333,39 @@ public:
 // HELPER FUNCTIONS
 // ============================================================================
 
-// ============================================================================
-// DEREF HELPER — allows pointer-to-state to work with all reference-based APIs
-// ============================================================================
-
 template <typename T>
-inline State<T>& deref(State<T> *state) {
-    return *state;
-}
+inline State<T> &deref(State<T> *state) { return *state; }
 
-// Create a computed state that depends on other states
-template <typename R, typename... States> class ComputedState {
+
+
+template <typename R, typename... States>
+class ComputedState {
 private:
   std::function<R(States...)> computer;
   std::tuple<States *...> dependencies;
-  mutable R cachedValue;
-  mutable bool dirty = true;
-  mutable std::mutex mutex;
+
+  mutable R           cachedValue{};
+  mutable bool        dirty = true;
+  mutable std::mutex  mutex;
+
+
+  std::shared_ptr<bool> alive = std::make_shared<bool>(true);
 
 public:
   ComputedState(std::function<R(States...)> comp, States &...deps)
-      : computer(comp), dependencies(&deps...) {
-    // Add listeners to all dependencies
+      : computer(std::move(comp)), dependencies(&deps...) {
     addListenersImpl(std::index_sequence_for<States...>{});
   }
+
+  ~ComputedState() {
+    *alive = false;
+  }
+
+
+  ComputedState(const ComputedState &)            = delete;
+  ComputedState &operator=(const ComputedState &) = delete;
+  ComputedState(ComputedState &&)                 = delete;
+  ComputedState &operator=(ComputedState &&)      = delete;
 
   R get() const {
     std::lock_guard<std::mutex> lock(mutex);
@@ -422,16 +377,25 @@ public:
   }
 
 private:
-  template <size_t... Is> void addListenersImpl(std::index_sequence<Is...>) {
-    auto markDirty = [this](auto) {
-      std::lock_guard<std::mutex> lock(mutex);
-      dirty = true;
+  template <size_t... Is>
+  void addListenersImpl(std::index_sequence<Is...>) {
+    std::weak_ptr<bool> weakAlive = alive;
+    std::mutex *mtx = &mutex;
+    bool       *d   = &dirty;
+
+    auto markDirty = [weakAlive, mtx, d](auto) {
+      if (auto a = weakAlive.lock(); a && *a) {
+        std::lock_guard<std::mutex> lk(*mtx);
+        *d = true;
+      }
     };
+
 
     (std::get<Is>(dependencies)->listen(markDirty), ...);
   }
 
-  template <size_t... Is> R computeImpl(std::index_sequence<Is...>) const {
+  template <size_t... Is>
+  R computeImpl(std::index_sequence<Is...>) const {
     return computer(std::get<Is>(dependencies)->get()...);
   }
 };
