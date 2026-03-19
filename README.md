@@ -502,6 +502,79 @@ TextInput("Enter your name...")
 
 ---
 
+### TextArea
+
+Multiline text input with scrollbars, line numbers, selection, and clipboard support.
+
+```cpp
+TextArea("Type your message...")
+    ->setInputValue(bodyState)
+    ->setWidth(400)
+    ->setHeight(200)
+    ->setLineNumbers(true);
+```
+
+**Methods**
+
+| Method | Type | Description |
+|---|---|---|
+| `setInputValue(State<string>)` | State | Two-way reactive binding |
+| `setPlaceholder(text)` | `string` | Hint shown when empty |
+| `setLineNumbers(v)` | `bool` | Show line number gutter |
+| `setWordWrap(v)` | `bool` | Enable word wrap |
+| `setTabSpaces(n)` | `int` | Spaces per Tab key press |
+| `setMaxLength(n)` | `int` | Max character count (0 = unlimited) |
+| `setFontSize(s)` | `int` | Font size |
+| `setWidth(w)` | `int` | Fixed width |
+| `setHeight(h)` | `int` | Fixed height |
+| `setFlex(n)` | `int` | Flex factor in parent |
+| `setScrollbarSize(s)` | `int` | Scrollbar thickness |
+| `setScrollbarColor(c)` | `COLORREF` | Idle thumb color |
+| `setScrollbarHoverColor(c)` | `COLORREF` | Hover thumb color |
+| `setScrollbarTrackColor(c)` | `COLORREF` | Track background |
+
+> **Keyboard:** `Ctrl+A` select all · `Ctrl+C/X/V` clipboard · `Shift+arrows` extend selection · `PgUp/PgDn` page scroll.
+
+---
+
+### NumberInput / SpinBox
+
+Numeric input with up/down arrow buttons, mouse wheel, and direct keyboard editing.
+
+```cpp
+NumberInput(0.0, 100.0, 1.0)
+    ->setValue(countState)
+    ->setPrefix("$")
+    ->setSuffix(" kg")
+    ->setDecimalPlaces(2)
+    ->setWidth(120);
+
+// Alias
+SpinBox(0, 255, 1)->setValue(brightnessState);
+```
+
+**Factory:** `NumberInput(min, max, step)` · `SpinBox(min, max, step)`
+
+**Methods**
+
+| Method | Type | Description |
+|---|---|---|
+| `setValue(State<double>)` | State | Two-way double binding |
+| `setValue(State<int>)` | State | Two-way int binding |
+| `setMin(v)` | `double` | Minimum value |
+| `setMax(v)` | `double` | Maximum value |
+| `setStep(v)` | `double` | Increment/decrement step |
+| `setDecimalPlaces(n)` | `int` | Decimal digits shown (0 = integer) |
+| `setPrefix(s)` | `string` | Text prepended to display value |
+| `setSuffix(s)` | `string` | Text appended to display value |
+| `setOnValueChanged(fn)` | `void(double)` | Fires on every value change |
+| `setWidth(w)` | `int` | Fixed width |
+| `setFlex(n)` | `int` | Flex factor in parent |
+
+> **Keyboard:** `↑/↓` step · `PgUp/PgDn` step ×10 · `Home/End` jump to min/max · `Enter` commit typed value · `Escape` revert.
+
+---
+
 ### Slider
 
 Horizontal range input with draggable thumb and keyboard support.
@@ -632,8 +705,6 @@ ColorPicker(RGB(255, 0, 0))
 Calendar popup for selecting a date. Includes month/year navigation and a year-range picker.
 
 ```cpp
-
-
 DatePicker()
     ->setDate(FluxDate::today())
     ->setPlaceholder("Select a date")
@@ -802,13 +873,87 @@ GridFromList(4, widgetVector);
 
 ---
 
+### Accordion
+
+Vertical stack of collapsible panels. Each panel has a clickable header that reveals or hides its body content. Ideal for settings pages, property panels, and FAQs.
+
+```cpp
+#include "flux/flux_accordion.hpp"
+
+AccordionPanel p1("Appearance", "Theme & display");
+p1.icon     = L"\uE771";
+p1.expanded = true;
+p1.body = Column({
+    Row({ Text("Dark theme"), Toggle(&darkTheme) })->setSpacing(8),
+    Row({ Text("Font size"),  Text("14 px")      })->setSpacing(8),
+})->setSpacing(12)->setPadding(8);
+
+AccordionPanel p2("Notifications");
+p2.icon = L"\uEA8F";
+p2.body = Column({
+    Row({ Text("Enable alerts"), Toggle(&notifications) })->setSpacing(8),
+})->setSpacing(12)->setPadding(8);
+
+AccordionPanel p3("Advanced");
+p3.icon     = L"\uE8D7";
+p3.disabled = true;   // grayed out, not clickable
+p3.body     = Text("Requires admin access.");
+
+auto acc = Accordion({ p1, p2, p3 })
+               ->setSingleExpand(true)
+               ->setAccentColor(RGB(33, 150, 243))
+               ->setOnChanged([](int idx, bool open) {
+                   // fires whenever a panel expands or collapses
+               });
+
+// Programmatic control
+acc->expand(0);
+acc->collapse(1);
+acc->toggle(2);
+acc->expandAll();
+acc->collapseAll();
+```
+
+**AccordionPanel struct**
+
+```cpp
+AccordionPanel p("Title", "Optional subtitle");
+p.icon     = L"\uE713";   // Segoe MDL2 glyph (optional)
+p.expanded = false;       // start collapsed
+p.disabled = false;       // grayed out, not clickable
+p.body     = myWidget;    // any widget subtree
+```
+
+**Methods**
+
+| Method | Type | Description |
+|---|---|---|
+| `setSingleExpand(v)` | `bool` | At most one panel open at a time (default `false`) |
+| `setOnChanged(fn)` | `void(int, bool)` | Fires on every expand/collapse with panel index and new state |
+| `expand(idx)` | `int` | Expand panel by index |
+| `collapse(idx)` | `int` | Collapse panel by index |
+| `toggle(idx)` | `int` | Toggle panel by index |
+| `expandAll()` | — | Expand all panels (no-op in single-expand mode) |
+| `collapseAll()` | — | Collapse all panels |
+| `panelAt(idx)` | `AccordionPanel*` | Mutable access to a panel for runtime edits |
+| `panelCount()` | `int` | Number of panels |
+| `setPanels(panels)` | `vector<AccordionPanel>` | Replace all panels at runtime |
+| `setHeaderHeight(h)` | `int` | Header row height (default 48px) |
+| `setBodyPadding(p)` | `int` | Padding inside body area (default 12px) |
+| `setShowBorder(v)` | `bool` | Outer rounded border (default `true`) |
+| `setShowSeparators(v)` | `bool` | Dividers between panels (default `true`) |
+| `setAccentColor(c)` | `COLORREF` | Left bar and active header tint |
+| `setTitleFontSize(s)` | `int` | Header title font size |
+| `setWidth(w)` | `int` | Fixed width (default fills parent) |
+| `setFlex(n)` | `int` | Flex factor in parent |
+
+---
+
 ### TreeView
 
 Scrollable hierarchical tree with expand/collapse, single selection, keyboard navigation, and optional indent guide lines.
 
 ```cpp
-
-
 TreeNode root("Project");
 auto &src = root.addChild(TreeNode("src"));
 src.expanded = true;
@@ -870,8 +1015,6 @@ node.isLeaf();   // true if no children
 Virtualised sortable data grid with resizable columns, alternating rows, horizontal/vertical scrollbars, and optional reactive data binding.
 
 ```cpp
-
-
 std::vector<DataColumn> columns = {
     DataColumn("name",   "Name",   180),
     DataColumn("role",   "Role",   130),
@@ -1302,7 +1445,6 @@ Padding(16, Text("Padded content"));
 Two-pane resizable container with a draggable divider. Supports horizontal (left/right) and vertical (top/bottom) splits.
 
 ```cpp
-
 // Horizontal split — left pane gets 30%
 SplitView(leftWidget, rightWidget, 0.3f)
     ->setMinPaneWidth(120)
@@ -1396,8 +1538,6 @@ Card(
 Tab bar with swappable content panes. Only the active pane is laid out and rendered — inactive panes have zero cost.
 
 ```cpp
-
-
 TabView({
     Tab("General",  generalWidget),
     Tab("Display",  displayWidget),
@@ -1442,8 +1582,6 @@ activeTab.set(2); // switches tab programmatically
 Horizontal strip of labeled menus that open pulldown lists on left-click. Supports hot-tracking (mouse slides between open menus) and full keyboard navigation.
 
 ```cpp
-
-
 auto menuBar = MenuBar({
     MenuBarItem("File", {
         ContextMenuItem::Action("New",  [&]{ newFile(); }),
@@ -1513,6 +1651,74 @@ Dropdown({"Nepal", "India", "USA", "UK"})
 | `setWidth(w)` | `int` | Fixed width |
 
 > **Keyboard:** `↑/↓` navigate, `Enter/Space` open/confirm, `Escape` close, `Home/End` jump.
+
+---
+
+### Toast
+
+Zero-size anchor widget that queues and displays floating notification toasts. Place it anywhere in the tree and call `show()` to fire notifications.
+
+```cpp
+auto toast = Toast()
+    ->setPosition(ToastPosition::BottomRight)
+    ->setMaxVisible(3);
+
+toast->show("File saved",          ToastType::Success);
+toast->show("Low disk space",      ToastType::Warning);
+toast->show("Connection lost",     ToastType::Error);
+toast->show("Background sync done",ToastType::Info);
+
+// Full entry with title, sticky duration, and action button
+toast->showEntry({
+    .message     = "Upload failed — check your connection",
+    .title       = "Network Error",
+    .type        = ToastType::Error,
+    .durationMs  = 0,           // sticky — stays until dismissed
+    .actionLabel = "Retry",
+    .onAction    = [&]{ retry(); },
+    .onDismiss   = [&]{ logDismiss(); },
+});
+```
+
+**ToastPosition**
+
+| Value | Description |
+|---|---|
+| `ToastPosition::BottomRight` | Default — stacks upward from bottom-right |
+| `ToastPosition::BottomCenter` | Stacks upward from bottom-center |
+| `ToastPosition::BottomLeft` | Stacks upward from bottom-left |
+| `ToastPosition::TopRight` | Stacks downward from top-right |
+| `ToastPosition::TopCenter` | Stacks downward from top-center |
+| `ToastPosition::TopLeft` | Stacks downward from top-left |
+
+**ToastType**
+
+| Value | Accent color |
+|---|---|
+| `ToastType::Info` | Blue |
+| `ToastType::Success` | Green |
+| `ToastType::Warning` | Orange |
+| `ToastType::Error` | Red |
+
+**Methods**
+
+| Method | Type | Description |
+|---|---|---|
+| `show(message, type, durationMs)` | — | Quick fire with defaults |
+| `showEntry(ToastEntry)` | — | Full control over all fields |
+| `dismissTop()` | — | Dismiss the topmost visible toast |
+| `dismissAll()` | — | Dismiss all toasts and clear the queue |
+| `setPosition(pos)` | `ToastPosition` | Screen corner/edge |
+| `setMaxVisible(n)` | `int` | Max simultaneous toasts (default 3) |
+| `setToastWidth(w)` | `int` | Toast panel width (default 320px) |
+| `setToastHeight(h)` | `int` | Base height per toast (default 64px) |
+| `setMarginEdge(m)` | `int` | Distance from window edge (default 20px) |
+| `setSpacing(s)` | `int` | Gap between stacked toasts (default 8px) |
+| `setFontSize(s)` | `int` | Toast text size |
+| `setBgColor(c)` | `COLORREF` | Toast background |
+| `setColors(info, success, warning, error)` | `COLORREF ×4` | Override all accent colors |
+
+> Toasts auto-dismiss after `durationMs` (default 3000ms). Set `durationMs = 0` for sticky. Hovering a toast pauses its countdown. Clicking anywhere on a toast dismisses it immediately.
 
 ---
 
