@@ -25,4 +25,5 @@
 #include "flux_data_table.hpp"
 #include "flux_toast.hpp"
 #include "flux_input_extended.hpp"
+#include "flux_accordion.hpp"
 #endif // WIDGETS_HPP
