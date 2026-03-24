@@ -1,10 +1,8 @@
 #ifndef FLUX_WIDGET_HPP
 #define FLUX_WIDGET_HPP
 
-
-#include <windows.h>
-#include "flux_overflow.hpp"
 #include "flux_font.hpp"
+#include "flux_overflow.hpp"
 #include <functional>
 #include <gdiplus.h>
 #include <iomanip>
@@ -204,16 +202,15 @@ public:
   std::vector<WidgetPtr> children;
   Widget *parent = nullptr;
 
-  // State binding
-  void *boundState = nullptr;
-
   virtual ~Widget() = default;
 
   virtual bool isExpanded() const { return false; }
 
   virtual void onDetach() {
-    for (auto &child : children)
+    for (auto &child : children) {
+      child->parent = nullptr;
       child->onDetach();
+    }
   }
 
   // -----------------------------------------------------------------------
@@ -236,10 +233,10 @@ public:
   // Mouse / keyboard event handlers
   // -----------------------------------------------------------------------
 
-virtual bool handleMouseWheel(int /*delta*/) { return false; }
-virtual bool handleMouseDown(int /*mx*/, int /*my*/) { return false; }
-virtual bool handleMouseUp(int /*mx*/, int /*my*/) { return false; }
-virtual bool handleMouseMove(int /*mx*/, int /*my*/) { return false; }
+  virtual bool handleMouseWheel(int /*delta*/) { return false; }
+  virtual bool handleMouseDown(int /*mx*/, int /*my*/) { return false; }
+  virtual bool handleMouseUp(int /*mx*/, int /*my*/) { return false; }
+  virtual bool handleMouseMove(int /*mx*/, int /*my*/) { return false; }
   virtual bool handleMouseLeave() { return false; }
 
   virtual bool handleRightClick(int mx, int my) {
@@ -248,15 +245,14 @@ virtual bool handleMouseMove(int /*mx*/, int /*my*/) { return false; }
     return false;
   }
 
-virtual bool handleKeyDown(int /*keyCode*/) { return false; }
-virtual bool handleChar(wchar_t /*ch*/) { return false; }
-virtual bool handleTimer(UINT /*timerId*/) { return false; }
+  virtual bool handleKeyDown(int /*keyCode*/) { return false; }
+  virtual bool handleChar(wchar_t /*ch*/) { return false; }
+  virtual bool handleTimer(UINT /*timerId*/) { return false; }
   virtual bool handleFocus(bool focused) {
     isFocused = focused;
     markNeedsPaint();
     return true;
   }
-
 
   // -----------------------------------------------------------------------
   // Hover helpers
@@ -361,10 +357,14 @@ protected:
   }
 
   void applyConstraints() {
-    if (width < minWidth)   width = minWidth;
-    if (height < minHeight) height = minHeight;
-    if (width > maxWidth)   width = maxWidth;
-    if (height > maxHeight) height = maxHeight;
+    if (width < minWidth)
+      width = minWidth;
+    if (height < minHeight)
+      height = minHeight;
+    if (width > maxWidth)
+      width = maxWidth;
+    if (height > maxHeight)
+      height = maxHeight;
   }
 
   void drawRoundedRectangle(HDC hdc);
