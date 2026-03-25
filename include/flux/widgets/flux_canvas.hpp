@@ -9,12 +9,7 @@
 
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#include <windowsx.h>
-
-// GDI+ for PNG save + text rasterization
-#include <gdiplus.h>
-#pragma comment(lib, "gdiplus.lib")
+#include "flux_platform.hpp"
 
 
 

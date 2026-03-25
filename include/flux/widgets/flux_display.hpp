@@ -12,8 +12,7 @@
 #include <functional>
 #include <string>
 #include <vector>
-#include <windows.h>
-#include <windowsx.h>
+#include "flux_platform.hpp"
 
 // glad must come before any other GL headers
 #include <glad/glad.h>

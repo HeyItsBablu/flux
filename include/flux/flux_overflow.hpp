@@ -18,10 +18,9 @@
 //   Each widget stores an OverflowInfo; renderer checks it after normal paint.
 // ============================================================================
 
-#include <gdiplus.h>
+
 #include <string>
-#include <windows.h>
-#pragma comment(lib, "gdiplus.lib")
+#include "flux_platform.hpp"
 
 // ── Debug gate ───────────────────────────────────────────────────────────────
 // Both the visual stripe renderer AND logWarning are compiled in only when

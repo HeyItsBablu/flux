@@ -11,9 +11,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
-#include <windows.h>
-
-#pragma comment(lib, "gdiplus.lib")
+#include "flux_platform.hpp"
 
 // ============================================================================
 // FORWARD DECLARATIONS

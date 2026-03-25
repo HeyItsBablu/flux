@@ -4,7 +4,7 @@
 #include <map>
 #include <string>
 #include <tuple>
-#include <windows.h>
+#include "flux_platform.hpp"
 
 enum class FontWeight { Light = FW_LIGHT, Normal = FW_NORMAL, Bold = FW_BOLD };
 
