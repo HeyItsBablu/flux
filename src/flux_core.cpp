@@ -14,13 +14,12 @@ FluxUI *FluxUI::currentInstance = nullptr;
 
 FluxUI::FluxUI(AppInstance hInst) : hInstance(hInst) {
   currentInstance = this;
-  Gdiplus::GdiplusStartupInput input;
-  Gdiplus::GdiplusStartup(&gdiplusToken, &input, NULL);
+
 }
 
 FluxUI::~FluxUI() {
   fontCache.clear();
-  Gdiplus::GdiplusShutdown(gdiplusToken);
+
   if (currentInstance == this)
     currentInstance = nullptr;
 }

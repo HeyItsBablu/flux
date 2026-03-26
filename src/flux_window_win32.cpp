@@ -3,12 +3,24 @@
 #ifdef _WIN32
 #include <windowsx.h>
 
+
+void PlatformWindow::startupGdiplus() {
+    Gdiplus::GdiplusStartupInput input;
+    Gdiplus::GdiplusStartup(&gdiplusToken, &input, NULL);
+}
+
+void PlatformWindow::shutdownGdiplus() {
+    Gdiplus::GdiplusShutdown(gdiplusToken);
+    gdiplusToken = 0;
+}
+
 // ============================================================================
 // PlatformWindow::create
 // ============================================================================
 
 bool PlatformWindow::create(const std::string &title, int width, int height,
                              AppInstance hInst, void *userData) {
+                                startupGdiplus();
     hInstance = hInst;
 
     WNDCLASSEX wc   = {};
@@ -48,6 +60,7 @@ void PlatformWindow::destroy() {
         DestroyWindow(hwnd);
         hwnd = nullptr;
     }
+     shutdownGdiplus(); 
 }
 
 // ============================================================================

@@ -64,9 +64,7 @@ private:
 
     void wireCallbacks();
 
-#ifdef _WIN32
-    ULONG_PTR gdiplusToken = 0;   
-#endif
+
 
 public:
     std::map<TimerID, std::function<void()>>            timerCallbacks;
