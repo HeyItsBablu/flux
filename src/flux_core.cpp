@@ -12,14 +12,13 @@ FluxUI *FluxUI::currentInstance = nullptr;
 // CONSTRUCTION / DESTRUCTION
 // ============================================================================
 
-FluxUI::FluxUI(HINSTANCE hInst) : hInstance(hInst) {
+FluxUI::FluxUI(AppInstance hInst) : hInstance(hInst) {
   currentInstance = this;
   Gdiplus::GdiplusStartupInput input;
   Gdiplus::GdiplusStartup(&gdiplusToken, &input, NULL);
 }
 
 FluxUI::~FluxUI() {
-
   fontCache.clear();
   Gdiplus::GdiplusShutdown(gdiplusToken);
   if (currentInstance == this)
@@ -31,8 +30,6 @@ FluxUI::~FluxUI() {
 // ============================================================================
 
 FluxUI *FluxUI::getCurrentInstance() { return currentInstance; }
-
-
 
 // ============================================================================
 // PRIVATE HELPERS
@@ -159,304 +156,123 @@ bool FluxUI::handleOverlayRightClick(int mouseX, int mouseY) {
   return false;
 }
 
-bool FluxUI::checkDropdownOverlays(Widget *, int, int) { return false; }
-bool FluxUI::checkDialogOverlays(Widget *, int, int) { return false; }
-
 // ============================================================================
-// WINDOW PROCEDURE
+// CALLBACK WIRING — connects PlatformWindow events to FluxUI logic
 // ============================================================================
 
-LRESULT CALLBACK FluxUI::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam,
-                                    LPARAM lParam) {
-  FluxUI *instance =
-      reinterpret_cast<FluxUI *>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
+void FluxUI::wireCallbacks() {
+  window.callbacks.onPaint = [this](GraphicsContext &ctx, int w, int h) {
+    if (!root)
+      return;
+    Renderer::renderWidget(ctx, root.get(), fontCache);
+  };
 
-  switch (uMsg) {
+  window.callbacks.onResize = [this](GraphicsContext &ctx, int w, int h) {
+    if (!root)
+      return;
+    LayoutEngine::computeLayout(ctx, root.get(), w, h, fontCache);
+    LayoutEngine::positionWidget(root.get(), 0, 0);
+  };
 
-  // ----------------------------------------------------------------
-  case WM_CREATE: {
-    CREATESTRUCT *pCreate = reinterpret_cast<CREATESTRUCT *>(lParam);
-    instance = reinterpret_cast<FluxUI *>(pCreate->lpCreateParams);
-    SetWindowLongPtr(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(instance));
-    return 0;
-  }
+  window.callbacks.onMouseWheel = [this](int delta) -> bool {
+    if (!root)
+      return false;
+    if (handleOverlayMouseWheel(delta))
+      return true;
+    return findAndHandleMouseEvent(root.get(), 0, 0, [delta](Widget *w) {
+      return w->handleMouseWheel(delta);
+    });
+  };
 
-  // WM_PAINT
-  case WM_PAINT: {
-    PAINTSTRUCT ps;
-    HDC hdc = BeginPaint(hwnd, &ps); // Win32 layer — stays raw
-
-    if (!instance || !instance->root) {
-      EndPaint(hwnd, &ps);
-      return 0;
-    }
-
-    RECT clientRect;
-    GetClientRect(hwnd, &clientRect);
-    int width = clientRect.right - clientRect.left;
-    int height = clientRect.bottom - clientRect.top;
-
-    instance->backBuffer.create(hwnd, width, height);
-
-    if (instance->backBuffer.valid()) {
-      static HBRUSH bgBrush = CreateSolidBrush(RGB(250, 250, 250));
-      FillRect(instance->backBuffer.hdc, &clientRect,
-               bgBrush); // Win32 — raw ok
-
-      GraphicsContext ctx = instance->backBuffer.context(); // wrap here
-      Renderer::renderWidget(ctx, instance->root.get(), instance->fontCache);
-
-      HWND child = GetWindow(hwnd, GW_CHILD);
-      while (child) {
-        RECT cr;
-        GetWindowRect(child, &cr);
-        MapWindowPoints(HWND_DESKTOP, hwnd, (POINT *)&cr, 2);
-        ExcludeClipRect(hdc, cr.left, cr.top, cr.right, cr.bottom);
-        child = GetNextWindow(child, GW_HWNDNEXT);
-      }
-
-      BitBlt(hdc, 0, 0, width, height, instance->backBuffer.hdc, 0, 0,
-             SRCCOPY); // Win32 — raw ok
-    }
-
-    EndPaint(hwnd, &ps);
-    return 0;
-  }
-
-  // WM_SIZE
-  case WM_SIZE: {
-    if (instance && instance->root) {
-      RECT rect;
-      GetClientRect(hwnd, &rect);
-      int width = rect.right - rect.left;
-      int height = rect.bottom - rect.top;
-
-      HDC hdc = GetDC(hwnd);    // Win32 — stays raw
-      GraphicsContext ctx(hdc); // wrap immediately
-      LayoutEngine::computeLayout(ctx, instance->root.get(), width, height,
-                                  instance->fontCache);
-      LayoutEngine::positionWidget(instance->root.get(), 0, 0);
-      ReleaseDC(hwnd, hdc); // Win32 — stays raw
-
-      InvalidateRect(hwnd, NULL, FALSE);
-    }
-    return 0;
-  }
-  // ----------------------------------------------------------------
-  case WM_MOUSEWHEEL: {
-    if (!instance || !instance->root)
-      return 0;
-
-    int delta = GET_WHEEL_DELTA_WPARAM(wParam);
-    int x = GET_X_LPARAM(lParam);
-    int y = GET_Y_LPARAM(lParam);
-
-    POINT pt = {x, y};
-    ScreenToClient(hwnd, &pt);
-
-    if (instance->handleOverlayMouseWheel(delta)) {
-      InvalidateRect(hwnd, NULL, FALSE);
-      return 0;
-    }
-
-    if (findAndHandleMouseEvent(
-            instance->root.get(), pt.x, pt.y,
-            [delta](Widget *w) { return w->handleMouseWheel(delta); })) {
-      InvalidateRect(hwnd, NULL, FALSE);
-    }
-    return 0;
-  }
-
-  // ----------------------------------------------------------------
-  case WM_LBUTTONDOWN: {
-    if (!instance || !instance->root)
-      return 0;
-
-    int mouseX = LOWORD(lParam);
-    int mouseY = HIWORD(lParam);
-
-    if (instance->handleDropdownOverlays(mouseX, mouseY)) {
-      InvalidateRect(hwnd, NULL, FALSE);
-      return 0;
-    }
-
-    if (findAndHandleMouseEvent(instance->root.get(), mouseX, mouseY,
-                                [mouseX, mouseY, instance](Widget *w) {
-                                  bool handled =
-                                      w->handleMouseDown(mouseX, mouseY);
-                                  if (handled && w->isFocusable)
-                                    instance->setFocus(w);
-                                  return handled;
-                                })) {
-      InvalidateRect(hwnd, NULL, FALSE);
-      return 0;
-    }
-
-    instance->setFocus(nullptr);
-
-    Widget *clicked = findWidgetAt(instance->root.get(), mouseX, mouseY);
-    if (clicked && clicked->onClick) {
-      clicked->onClick();
-      InvalidateRect(hwnd, NULL, FALSE);
-    }
-    return 0;
-  }
-
-  // ----------------------------------------------------------------
-  case WM_RBUTTONDOWN: {
-    if (!instance || !instance->root)
-      return 0;
-
-    int mouseX = LOWORD(lParam);
-    int mouseY = HIWORD(lParam);
-
-    if (instance->handleOverlayRightClick(mouseX, mouseY)) {
-      InvalidateRect(hwnd, NULL, FALSE);
-      return 0;
-    }
-
-    if (findAndHandleMouseEvent(instance->root.get(), mouseX, mouseY,
-                                [mouseX, mouseY](Widget *w) {
-                                  return w->handleRightClick(mouseX, mouseY);
-                                })) {
-      InvalidateRect(hwnd, NULL, FALSE);
-    }
-    return 0;
-  }
-
-  // ----------------------------------------------------------------
-  case WM_LBUTTONUP: {
-    if (!instance || !instance->root)
-      return 0;
-
-    int mouseX = LOWORD(lParam);
-    int mouseY = HIWORD(lParam);
-
-    bool hasCapturedMouse = (GetCapture() == hwnd);
-
-    if (hasCapturedMouse) {
-      if (broadcastMouseEvent(instance->root.get(), mouseX, mouseY,
-                              [](Widget *w, int mx, int my) {
-                                return w->handleMouseUp(mx, my);
-                              })) {
-        InvalidateRect(hwnd, NULL, FALSE);
-        return 0;
-      }
-    }
-
-    if (findAndHandleMouseEvent(instance->root.get(), mouseX, mouseY,
-                                [mouseX, mouseY](Widget *w) {
-                                  return w->handleMouseUp(mouseX, mouseY);
-                                })) {
-      InvalidateRect(hwnd, NULL, FALSE);
-    }
-    return 0;
-  }
-
-  // ----------------------------------------------------------------
-  case WM_MOUSEMOVE: {
-    if (!instance || !instance->root)
-      return 0;
-
-    int mouseX = LOWORD(lParam);
-    int mouseY = HIWORD(lParam);
-
-    TRACKMOUSEEVENT tme = {0};
-    tme.cbSize = sizeof(TRACKMOUSEEVENT);
-    tme.dwFlags = TME_LEAVE;
-    tme.hwndTrack = hwnd;
-    TrackMouseEvent(&tme);
-
-    bool hasCapturedMouse = (GetCapture() == hwnd);
-
-    if (hasCapturedMouse) {
-      if (broadcastMouseEvent(instance->root.get(), mouseX, mouseY,
-                              [](Widget *w, int mx, int my) {
-                                return w->handleMouseMove(mx, my);
-                              })) {
-        InvalidateRect(hwnd, NULL, FALSE);
-        return 0;
-      }
-    }
-
-    bool overlayHandled = instance->handleOverlayMouseMove(mouseX, mouseY);
-    bool hoverChanged = updateHoverStates(instance->root.get(), mouseX, mouseY);
-    bool customHandled = findAndHandleMouseEvent(
-        instance->root.get(), mouseX, mouseY, [mouseX, mouseY](Widget *w) {
-          return w->handleMouseMove(mouseX, mouseY);
+  window.callbacks.onMouseDown = [this](int x, int y) -> bool {
+    if (!root)
+      return false;
+    if (handleDropdownOverlays(x, y))
+      return true;
+    bool handled =
+        findAndHandleMouseEvent(root.get(), x, y, [x, y, this](Widget *w) {
+          bool h = w->handleMouseDown(x, y);
+          if (h && w->isFocusable)
+            setFocus(w);
+          return h;
         });
-
-    if (overlayHandled || hoverChanged || customHandled)
-      InvalidateRect(hwnd, NULL, FALSE);
-
-    return 0;
-  }
-
-  // ----------------------------------------------------------------
-  case WM_MOUSELEAVE: {
-    if (!instance || !instance->root)
-      return 0;
-    instance->root->clearHoverState();
-    InvalidateRect(hwnd, NULL, FALSE);
-    return 0;
-  }
-
-  // ----------------------------------------------------------------
-  case WM_CHAR: {
-    if (!instance || !instance->focusedWidget)
-      return 0;
-
-    wchar_t ch = (wchar_t)wParam;
-    if (instance->focusedWidget->handleChar(ch))
-      InvalidateRect(hwnd, NULL, FALSE);
-    return 0;
-  }
-
-  // ----------------------------------------------------------------
-  case WM_KEYDOWN: {
-    if (!instance)
-      return 0;
-
-    int keyCode = (int)wParam;
-
-    if (instance->handleOverlayKeyDown(keyCode)) {
-      InvalidateRect(hwnd, NULL, FALSE);
-      return 0;
+    if (!handled) {
+      setFocus(nullptr);
+      Widget *clicked = findWidgetAt(root.get(), x, y);
+      if (clicked && clicked->onClick) {
+        clicked->onClick();
+        return true;
+      }
     }
+    return handled;
+  };
 
-    if (instance->focusedWidget &&
-        instance->focusedWidget->handleKeyDown(keyCode)) {
-      InvalidateRect(hwnd, NULL, FALSE);
+  window.callbacks.onMouseUp = [this](int x, int y) -> bool {
+    if (!root)
+      return false;
+    bool hasCaptured = (GetCapture() == window.handle());
+    if (hasCaptured) {
+      if (broadcastMouseEvent(root.get(), x, y, [](Widget *w, int mx, int my) {
+            return w->handleMouseUp(mx, my);
+          }))
+        return true;
     }
-    return 0;
-  }
+    return findAndHandleMouseEvent(
+        root.get(), x, y, [x, y](Widget *w) { return w->handleMouseUp(x, y); });
+  };
 
-  // ----------------------------------------------------------------
-  case WM_TIMER: {
-    if (!instance)
-      return 0;
-
-    auto it = instance->timerCallbacks.find((UINT)wParam);
-    if (it != instance->timerCallbacks.end()) {
-      it->second();
-      return 0;
+  window.callbacks.onMouseMove = [this](int x, int y) -> bool {
+    if (!root)
+      return false;
+    bool hasCaptured = (GetCapture() == window.handle());
+    if (hasCaptured) {
+      if (broadcastMouseEvent(root.get(), x, y, [](Widget *w, int mx, int my) {
+            return w->handleMouseMove(mx, my);
+          }))
+        return true;
     }
+    bool overlay = handleOverlayMouseMove(x, y);
+    bool hover = updateHoverStates(root.get(), x, y);
+    bool custom = findAndHandleMouseEvent(root.get(), x, y, [x, y](Widget *w) {
+      return w->handleMouseMove(x, y);
+    });
+    return overlay || hover || custom;
+  };
 
-    if (instance->focusedWidget &&
-        instance->focusedWidget->handleTimer((UINT)wParam)) {
-      instance->invalidateWidget(instance->focusedWidget);
+  window.callbacks.onMouseLeave = [this]() {
+    if (root)
+      root->clearHoverState();
+  };
+
+  window.callbacks.onRightClick = [this](int x, int y) -> bool {
+    if (!root)
+      return false;
+    if (handleOverlayRightClick(x, y))
+      return true;
+    return findAndHandleMouseEvent(root.get(), x, y, [x, y](Widget *w) {
+      return w->handleRightClick(x, y);
+    });
+  };
+
+  window.callbacks.onKeyDown = [this](int keyCode) -> bool {
+    if (handleOverlayKeyDown(keyCode))
+      return true;
+    return focusedWidget && focusedWidget->handleKeyDown(keyCode);
+  };
+
+  window.callbacks.onChar = [this](wchar_t ch) -> bool {
+    return focusedWidget && focusedWidget->handleChar(ch);
+  };
+
+window.callbacks.onTimer = [this](TimerID id) {
+    auto it = timerCallbacks.find(id);
+    if (it != timerCallbacks.end()) {
+        it->second();
+        return;
     }
-    return 0;
-  }
-
-  // ----------------------------------------------------------------
-  case WM_DESTROY:
-
-    PostQuitMessage(0);
-    return 0;
-  }
-
-  return DefWindowProc(hwnd, uMsg, wParam, lParam);
+    if (focusedWidget && focusedWidget->handleTimer(id))
+        invalidateWidget(focusedWidget);
+};
 }
 
 // ============================================================================
@@ -491,34 +307,31 @@ void FluxUI::setFocus(Widget *widget) {
 Widget *FluxUI::getFocusedWidget() const { return focusedWidget; }
 
 // ============================================================================
-// TIMER HELPERS
+// TIMERS
 // ============================================================================
 
-UINT FluxUI::setInterval(int ms, std::function<void()> callback) {
-  static UINT nextId = 100;
-  UINT id = nextId++;
-  timerCallbacks[id] = callback;
+TimerID FluxUI::setInterval(int ms, std::function<void()> callback) {
+    static TimerID nextId = 100;
+    TimerID id = nextId++;
+    timerCallbacks[id] = callback;
 
-  if (hwnd) {
-    SetTimer(hwnd, id, ms, nullptr);
-  } else {
-    pendingTimers.push_back(
-        {id, [this, id, ms]() { SetTimer(hwnd, id, ms, nullptr); }});
-  }
-  return id;
+    if (window.valid())
+        window.setTimer(id, ms);
+    else
+        pendingTimers.push_back({ id, [this, id, ms]() {
+            window.setTimer(id, ms); }});
+
+    return id;
 }
 
-void FluxUI::clearInterval(UINT id) {
-  if (hwnd)
-    KillTimer(hwnd, id);
-  timerCallbacks.erase(id);
-
-  pendingTimers.erase(
-      std::remove_if(pendingTimers.begin(), pendingTimers.end(),
-                     [id](const std::pair<UINT, std::function<void()>> &p) {
-                       return p.first == id;
-                     }),
-      pendingTimers.end());
+void FluxUI::clearInterval(TimerID id) {
+    window.killTimer(id);
+    timerCallbacks.erase(id);
+    pendingTimers.erase(
+        std::remove_if(pendingTimers.begin(), pendingTimers.end(),
+            [id](const std::pair<TimerID, std::function<void()>> &p) {
+                return p.first == id; }),
+        pendingTimers.end());
 }
 
 // ============================================================================
@@ -526,80 +339,77 @@ void FluxUI::clearInterval(UINT id) {
 // ============================================================================
 
 void FluxUI::build(std::function<WidgetPtr()> buildFunc) {
-  builder = buildFunc;
-  rebuild();
+    builder = buildFunc;
+    rebuild();
 }
 
 void FluxUI::rebuild() {
-  if (!builder)
-    return;
+    if (!builder)
+        return;
 
-  if (root) {
-    root->onDetach();
+    if (root) {
+        root->onDetach();
+        if (auto *scaffold = findScaffold(root.get()))
+            scaffold->clearOverlays();
+    }
+
+    root = builder();
+
     if (auto *scaffold = findScaffold(root.get()))
-      scaffold->clearOverlays();
-  }
+        wireScaffoldToWidgets(scaffold, root.get());
 
-  root = builder();
-
-  if (auto *scaffold = findScaffold(root.get()))
-    wireScaffoldToWidgets(scaffold, root.get());
-
-  if (hwnd) {
-    RECT rect;
-    GetClientRect(hwnd, &rect);
-    int w = rect.right - rect.left;
-    int h = rect.bottom - rect.top;
-    HDC hdc = GetDC(hwnd);
-    GraphicsContext ctx(hdc);  
-    LayoutEngine::computeLayout(ctx, root.get(), w, h, fontCache);
-    LayoutEngine::positionWidget(root.get(), 0, 0);
-    ReleaseDC(hwnd, hdc);
-    InvalidateRect(hwnd, NULL, FALSE);
-  }
+    if (window.valid()) {
+        HDC hdc = GetDC(window.handle());
+        GraphicsContext ctx(hdc);
+        LayoutEngine::computeLayout(ctx, root.get(),
+                                    window.clientWidth(),
+                                    window.clientHeight(), fontCache);
+        LayoutEngine::positionWidget(root.get(), 0, 0);
+        ReleaseDC(window.handle(), hdc);
+        window.invalidate();
+    }
 }
-
 // ============================================================================
 // INVALIDATION / PARTIAL LAYOUT
 // ============================================================================
 
 void FluxUI::updateWidget(Widget *widget) {
-  if (!widget || !hwnd)
-    return;
+    if (!widget || !window.valid())
+        return;
 
-  int oldWidth = widget->width;
-  int oldHeight = widget->height;
+    int oldWidth  = widget->width;
+    int oldHeight = widget->height;
 
-  HDC hdc = GetDC(hwnd);
-  GraphicsContext ctx(hdc);  
-  widget->measureText(ctx, fontCache);
-  widget->width += widget->paddingLeft + widget->paddingRight;
-  widget->height += widget->paddingTop + widget->paddingBottom;
-  ReleaseDC(hwnd, hdc);
+    HDC hdc = GetDC(window.handle());
+    GraphicsContext ctx(hdc);
+    widget->measureText(ctx, fontCache);
+    widget->width  += widget->paddingLeft + widget->paddingRight;
+    widget->height += widget->paddingTop  + widget->paddingBottom;
+    ReleaseDC(window.handle(), hdc);
 
-  bool sizeChanged = (oldWidth != widget->width || oldHeight != widget->height);
+    bool sizeChanged = (oldWidth != widget->width || oldHeight != widget->height);
 
-  if (sizeChanged)
-    partialRebuild(widget);
-  else
-    invalidateWidget(widget);
+    if (sizeChanged)
+        partialRebuild(widget);
+    else
+        invalidateWidget(widget);
 }
 
-void FluxUI::invalidateWidget(Widget *widget) {
-  if (!widget || !hwnd)
-    return;
+// ============================================================================
+// INVALIDATION
+// ============================================================================
 
-  RECT rect = {widget->x, widget->y, widget->x + widget->width,
-               widget->y + widget->height};
-  InvalidateRect(hwnd, &rect, FALSE);
+void FluxUI::invalidateWidget(Widget *widget) {
+  if (!widget)
+    return;
+  window.invalidateRect(widget->x, widget->y, widget->width, widget->height);
 }
 
 void FluxUI::partialRebuild(Widget *widget) {
-  if (!widget || !hwnd)
+  if (!widget)
     return;
 
   Widget *boundary = findLayoutBoundary(widget);
-
   Widget *current = widget;
   while (current && current != boundary) {
     current->markNeedsLayout();
@@ -607,15 +417,12 @@ void FluxUI::partialRebuild(Widget *widget) {
   }
   boundary->markNeedsLayout();
 
-  HDC hdc = GetDC(hwnd);
-GraphicsContext ctx(hdc);  
+  HDC hdc = GetDC(window.handle());
+  GraphicsContext ctx(hdc);
+
   if (boundary == root.get()) {
-    RECT rect;
-    GetClientRect(hwnd, &rect);
-    int w = rect.right - rect.left;
-    int h = rect.bottom - rect.top;
-    
-    LayoutEngine::computeLayout(ctx, root.get(), w, h, fontCache);
+    LayoutEngine::computeLayout(ctx, root.get(), window.clientWidth(),
+                                window.clientHeight(), fontCache);
     LayoutEngine::positionWidget(root.get(), 0, 0);
   } else {
     LayoutEngine::computeLayout(ctx, boundary, boundary->width,
@@ -623,76 +430,51 @@ GraphicsContext ctx(hdc);
     LayoutEngine::positionWidget(boundary, boundary->x, boundary->y);
   }
 
-  ReleaseDC(hwnd, hdc);
-
-  RECT dirtyRect = {boundary->x, boundary->y, boundary->x + boundary->width,
-                    boundary->y + boundary->height};
-  InvalidateRect(hwnd, &dirtyRect, FALSE);
+  ReleaseDC(window.handle(), hdc);
+  window.invalidateRect(boundary->x, boundary->y, boundary->width,
+                        boundary->height);
 }
 
+
+
 // ============================================================================
-// WINDOW MANAGEMENT
+// createWindow
 // ============================================================================
 
-HWND FluxUI::createWindow(const std::string &title, int width, int height) {
-  WNDCLASSEX wc = {0};
-  wc.cbSize = sizeof(WNDCLASSEX);
-  wc.lpfnWndProc = WindowProc;
-  wc.hInstance = hInstance;
-  wc.lpszClassName = "FluxUI";
-  wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
-  wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-  wc.style = CS_HREDRAW | CS_VREDRAW;
+NativeWindow FluxUI::createWindow(const std::string &title, int w, int h) {
+  wireCallbacks();
 
-  RegisterClassEx(&wc);
+  // Pass `this` as userData so WindowProc can retrieve FluxUI*
+  // But now WindowProc retrieves PlatformWindow* — FluxUI* is recovered
+  // via the callbacks closure, so userData is the PlatformWindow itself
+  window.create(title, w, h, hInstance, &window);
 
-  RECT windowRect = {0, 0, width, height};
-  AdjustWindowRectEx(&windowRect, WS_OVERLAPPEDWINDOW, FALSE, 0);
-
-  hwnd = CreateWindowEx(
-      0, "FluxUI", title.c_str(), WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-      CW_USEDEFAULT, CW_USEDEFAULT, windowRect.right - windowRect.left,
-      windowRect.bottom - windowRect.top, NULL, NULL, hInstance, this);
-
-  if (hwnd && root) {
-    RECT rect;
-    GetClientRect(hwnd, &rect);
-    int clientWidth = rect.right - rect.left;
-    int clientHeight = rect.bottom - rect.top;
-
-    HDC hdc = GetDC(hwnd);
-    GraphicsContext ctx(hdc);  
-    LayoutEngine::computeLayout(ctx, root.get(), clientWidth, clientHeight,
-                                fontCache);
+  if (root) {
+    HDC hdc = GetDC(window.handle());
+    GraphicsContext ctx(hdc);
+    LayoutEngine::computeLayout(ctx, root.get(), window.clientWidth(),
+                                window.clientHeight(), fontCache);
     LayoutEngine::positionWidget(root.get(), 0, 0);
-    ReleaseDC(hwnd, hdc);
+    ReleaseDC(window.handle(), hdc);
   }
 
   for (auto &[id, fn] : pendingTimers)
     fn();
   pendingTimers.clear();
 
-  return hwnd;
+  return window.handle();
 }
 
-int FluxUI::run() {
-  MSG msg;
-  while (GetMessage(&msg, NULL, 0, 0)) {
-    TranslateMessage(&msg);
-    DispatchMessage(&msg);
-  }
-  return (int)msg.wParam;
-}
+int FluxUI::run() { return window.run(); }
 
 // ============================================================================
 // ACCESSORS
 // ============================================================================
 
-HWND FluxUI::getWindow() const { return hwnd; }
-WidgetPtr FluxUI::getRoot() const { return root; }
+NativeWindow FluxUI::getWindow()    const { return window.handle(); }
+WidgetPtr    FluxUI::getRoot()      const { return root; }
+FontCache   &FluxUI::getFontCache()       { return fontCache; }
 
 WidgetPtr FluxUI::findById(const std::string &id) {
-  return findByIdRecursive(root, id);
+    return findByIdRecursive(root, id);
 }
-
-FontCache &FluxUI::getFontCache() { return fontCache; }

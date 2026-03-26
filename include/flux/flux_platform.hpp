@@ -12,6 +12,7 @@
     using NativeFont    = HFONT;
     using NativeColor   = COLORREF;
     using AppInstance   = HINSTANCE;
+    using TimerID = UINT;
 
     struct GraphicsContext {
         NativeContext hdc;

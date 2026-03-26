@@ -5,10 +5,12 @@
 #include "flux_layoutengine.hpp"
 #include "flux_renderer.hpp"
 #include "flux_widget.hpp"
+#include "flux_window.hpp"
 
+#include <functional>
 #include <map>
-#include <tuple>
-#include <windowsx.h>
+#include <string>
+#include <vector>
 
 // ============================================================================
 // FORWARD DECLARATIONS
@@ -18,24 +20,19 @@ template <typename T> class State;
 class ScaffoldWidget;
 
 // ============================================================================
-// MOUSE EVENT BROADCAST HELPERS (for captured mouse events)
+// MOUSE EVENT BROADCAST HELPERS
 // ============================================================================
 
-inline bool
-broadcastMouseEvent(Widget *widget, int x, int y,
-                    std::function<bool(Widget *, int, int)> handler) {
-  if (!widget)
+inline bool broadcastMouseEvent(Widget *widget, int x, int y,
+                                std::function<bool(Widget *, int, int)> handler) {
+    if (!widget)
+        return false;
+    if (handler(widget, x, y))
+        return true;
+    for (auto &child : widget->children)
+        if (broadcastMouseEvent(child.get(), x, y, handler))
+            return true;
     return false;
-
-  if (handler(widget, x, y))
-    return true;
-
-  for (auto &child : widget->children) {
-    if (broadcastMouseEvent(child.get(), x, y, handler))
-      return true;
-  }
-
-  return false;
 }
 
 // ============================================================================
@@ -44,106 +41,63 @@ broadcastMouseEvent(Widget *widget, int x, int y,
 
 class FluxUI {
 private:
-  WidgetPtr root;
-  std::function<WidgetPtr()> builder;
-  HWND hwnd = nullptr;
-  HINSTANCE hInstance;
-  FontCache fontCache;
+    WidgetPtr                      root;
+    std::function<WidgetPtr()>     builder;
+    FontCache                      fontCache;
+    AppInstance                    hInstance;
+    PlatformWindow                 window;
+    Widget                        *focusedWidget = nullptr;
 
-  ULONG_PTR gdiplusToken = 0;
+    static FluxUI *currentInstance;
 
-  BackBuffer backBuffer;
+    // No Win32 types in any of these signatures
+    void      wireScaffoldToWidgets(ScaffoldWidget *scaffold, Widget *widget);
+    Widget   *findLayoutBoundary(Widget *widget);
+    WidgetPtr findByIdRecursive(WidgetPtr widget, const std::string &id);
 
-  static FluxUI *currentInstance;
+    bool handleDropdownOverlays(int x, int y);
+    bool handleDialogOverlays(int x, int y);
+    bool handleOverlayMouseMove(int x, int y);
+    bool handleOverlayMouseWheel(int delta);
+    bool handleOverlayKeyDown(int keyCode);
+    bool handleOverlayRightClick(int x, int y);
 
-  Widget *focusedWidget = nullptr;
+    void wireCallbacks();
 
-  // ----------------------------------------------------------------
-  // OVERLAY DISPATCHERS
-  // ----------------------------------------------------------------
-  bool handleDropdownOverlays(int mouseX, int mouseY);
-  bool handleDialogOverlays(int mouseX, int mouseY);
-  bool handleOverlayMouseMove(int mouseX, int mouseY);
-  bool handleOverlayMouseWheel(int delta);
-  bool handleOverlayKeyDown(int keyCode);
-  bool handleOverlayRightClick(int mouseX, int mouseY);
-
-  // Legacy tree-walk stubs (no-op)
-  bool checkDropdownOverlays(Widget *widget, int mouseX, int mouseY);
-  bool checkDialogOverlays(Widget *widget, int mouseX, int mouseY);
-
-  void wireScaffoldToWidgets(ScaffoldWidget *scaffold, Widget *widget);
-
-  Widget *findLayoutBoundary(Widget *widget);
-
-  // ----------------------------------------------------------------
-  // WINDOW PROCEDURE
-  // ----------------------------------------------------------------
-  static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam,
-                                     LPARAM lParam);
-
-  // ----------------------------------------------------------------
-  // findByIdRecursive
-  // ----------------------------------------------------------------
-  WidgetPtr findByIdRecursive(WidgetPtr widget, const std::string &id);
+#ifdef _WIN32
+    ULONG_PTR gdiplusToken = 0;   
+#endif
 
 public:
-  // ----------------------------------------------------------------
-  // Public data (timers)
-  // ----------------------------------------------------------------
-  std::map<UINT, std::function<void()>> timerCallbacks;
-  std::vector<std::pair<UINT, std::function<void()>>> pendingTimers;
+    std::map<TimerID, std::function<void()>>            timerCallbacks;
+    std::vector<std::pair<TimerID, std::function<void()>>> pendingTimers;
 
-  // ----------------------------------------------------------------
-  // Construction / destruction
-  // ----------------------------------------------------------------
-  explicit FluxUI(HINSTANCE hInst);
-  ~FluxUI();
+    explicit FluxUI(AppInstance hInst);
+    ~FluxUI();
 
-  // ----------------------------------------------------------------
-  // Timer helpers
-  // ----------------------------------------------------------------
-  UINT setInterval(int ms, std::function<void()> callback);
-  void clearInterval(UINT id);
+    static FluxUI *getCurrentInstance();
 
-  // ----------------------------------------------------------------
-  // State factory
-  // ----------------------------------------------------------------
-  template <typename T> State<T> useState(T initialValue);
+    TimerID setInterval(int ms, std::function<void()> callback);
+    void    clearInterval(TimerID id);
 
-  // ----------------------------------------------------------------
-  // Static accessor
-  // ----------------------------------------------------------------
-  static FluxUI *getCurrentInstance();
+    template <typename T> State<T> useState(T initialValue);
 
-  // ----------------------------------------------------------------
-  // Focus management
-  // ----------------------------------------------------------------
-  void setFocus(Widget *widget);
-  Widget *getFocusedWidget() const;
+    void    setFocus(Widget *widget);
+    Widget *getFocusedWidget() const;
 
-  // ----------------------------------------------------------------
-  // Build / layout / invalidation
-  // ----------------------------------------------------------------
-  void build(std::function<WidgetPtr()> buildFunc);
-  void rebuild();
-  void updateWidget(Widget *widget);
-  void invalidateWidget(Widget *widget);
-  void partialRebuild(Widget *widget);
+    void build(std::function<WidgetPtr()> buildFunc);
+    void rebuild();
+    void updateWidget(Widget *widget);
+    void invalidateWidget(Widget *widget);
+    void partialRebuild(Widget *widget);
 
-  // ----------------------------------------------------------------
-  // Window management
-  // ----------------------------------------------------------------
-  HWND createWindow(const std::string &title, int width, int height);
-  int run();
+    NativeWindow createWindow(const std::string &title, int width, int height);
+    int          run();
 
-  // ----------------------------------------------------------------
-  // Accessors
-  // ----------------------------------------------------------------
-  HWND getWindow() const;
-  WidgetPtr getRoot() const;
-  WidgetPtr findById(const std::string &id);
-  FontCache &getFontCache();
+    NativeWindow  getWindow()    const;
+    WidgetPtr     getRoot()      const;
+    WidgetPtr     findById(const std::string &id);
+    FontCache    &getFontCache();
 };
 
 #endif // FLUX_CORE_HPP
