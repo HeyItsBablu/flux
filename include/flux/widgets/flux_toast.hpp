@@ -172,16 +172,16 @@ public:
     }
 
     // ── Layout / render (anchor is zero-size) ─────────────────────────────────
-    void computeLayout(HDC, const BoxConstraints &, FontCache &) override {
+    void computeLayout(GraphicsContext &/*ctx*/, const BoxConstraints &, FontCache &) override {
         needsLayout = false;
     }
     void positionChildren(int, int, int, int) override {}
-    void render(HDC, FontCache &) override { needsPaint = false; }
+    void render(GraphicsContext &/*ctx*/, FontCache &) override { needsPaint = false; }
 
     // ── renderPopupContent ────────────────────────────────────────────────────
     // The popup covers the whole window so we can composite multiple toasts.
     // hdc is (winW × winH), pre-cleared to transparent.
-    void renderPopupContent(HDC hdc, FontCache &fontCache) override {
+    void renderPopupContent(GraphicsContext &ctx, FontCache &fontCache) override {
         if (active_.empty()) return;
 
         HWND hw = _hwnd();
@@ -205,7 +205,7 @@ public:
             at.lastDrawW = tW;
             at.lastDrawH = tH;
 
-            _renderSingleToast(hdc, fontCache, at, tX, tY, tW, tH);
+            _renderSingleToast(ctx.hdc, fontCache, at, tX, tY, tW, tH);
         }
     }
 

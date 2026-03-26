@@ -49,19 +49,19 @@ public:
     paddingTop = paddingBottom = 4;
   }
 
-  void computeLayout(HDC hdc, const BoxConstraints &constraints,
+  void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     if (!text.empty()) {
       HFONT hFont = fontCache.getFont(fontSize, fontWeight);
-      HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
+      HFONT hOldFont = (HFONT)SelectObject(ctx.hdc, hFont);
 
       SIZE textSize;
-      GetTextExtentPoint32(hdc, text.c_str(), (int)text.length(), &textSize);
+      GetTextExtentPoint32(ctx.hdc, text.c_str(), (int)text.length(), &textSize);
 
       width = toggleWidth + 12 + textSize.cx;
       height = max(toggleHeight, (int)textSize.cy);
 
-      SelectObject(hdc, hOldFont);
+      SelectObject(ctx.hdc, hOldFont);
     } else {
       width = toggleWidth;
       height = toggleHeight;
@@ -74,7 +74,7 @@ public:
     needsLayout = false;
   }
 
-  void render(HDC hdc, FontCache &fontCache) override {
+  void render(GraphicsContext &ctx, FontCache &fontCache) override {
     int toggleX = x + paddingLeft;
     int toggleY = y + paddingTop +
                   (height - paddingTop - paddingBottom - toggleHeight) / 2;
@@ -90,15 +90,15 @@ public:
     HBRUSH trackBrush = CreateSolidBrush(currentTrackColor);
     HPEN trackPen = CreatePen(PS_NULL, 0, 0);
 
-    HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, trackBrush);
-    HPEN oldPen = (HPEN)SelectObject(hdc, trackPen);
+    HBRUSH oldBrush = (HBRUSH)SelectObject(ctx.hdc, trackBrush);
+    HPEN oldPen = (HPEN)SelectObject(ctx.hdc, trackPen);
 
     int trackRadius = toggleHeight / 2;
-    RoundRect(hdc, toggleX, toggleY, toggleX + toggleWidth,
+    RoundRect(ctx.hdc, toggleX, toggleY, toggleX + toggleWidth,
               toggleY + toggleHeight, trackRadius * 2, trackRadius * 2);
 
-    SelectObject(hdc, oldBrush);
-    SelectObject(hdc, oldPen);
+    SelectObject(ctx.hdc, oldBrush);
+    SelectObject(ctx.hdc, oldPen);
     DeleteObject(trackBrush);
     DeleteObject(trackPen);
 
@@ -118,23 +118,23 @@ public:
 
     // Draw thumb shadow (subtle effect)
     HBRUSH shadowBrush = CreateSolidBrush(RGB(0, 0, 0));
-    SetBkMode(hdc, TRANSPARENT);
+    SetBkMode(ctx.hdc, TRANSPARENT);
 
     BLENDFUNCTION blend = {0};
     blend.BlendOp = AC_SRC_OVER;
     blend.SourceConstantAlpha = 40; // ~15% opacity
 
     // Simple shadow by drawing slightly offset circle
-    HBRUSH oldShadowBrush = (HBRUSH)SelectObject(hdc, shadowBrush);
+    HBRUSH oldShadowBrush = (HBRUSH)SelectObject(ctx.hdc, shadowBrush);
     HPEN shadowPen = CreatePen(PS_NULL, 0, 0);
-    HPEN oldShadowPen = (HPEN)SelectObject(hdc, shadowPen);
+    HPEN oldShadowPen = (HPEN)SelectObject(ctx.hdc, shadowPen);
 
     // Draw shadow (slightly below thumb)
-    Ellipse(hdc, thumbX - 1, thumbY + 2, thumbX + thumbSize + 1,
+    Ellipse(ctx.hdc, thumbX - 1, thumbY + 2, thumbX + thumbSize + 1,
             thumbY + thumbSize + 2);
 
-    SelectObject(hdc, oldShadowPen);
-    SelectObject(hdc, oldShadowBrush);
+    SelectObject(ctx.hdc, oldShadowPen);
+    SelectObject(ctx.hdc, oldShadowBrush);
     DeleteObject(shadowPen);
     DeleteObject(shadowBrush);
 
@@ -142,13 +142,13 @@ public:
     HBRUSH thumbBrush = CreateSolidBrush(currentThumbColor);
     HPEN thumbPen = CreatePen(PS_SOLID, 1, RGB(230, 230, 230));
 
-    oldBrush = (HBRUSH)SelectObject(hdc, thumbBrush);
-    oldPen = (HPEN)SelectObject(hdc, thumbPen);
+    oldBrush = (HBRUSH)SelectObject(ctx.hdc, thumbBrush);
+    oldPen = (HPEN)SelectObject(ctx.hdc, thumbPen);
 
-    Ellipse(hdc, thumbX, thumbY, thumbX + thumbSize, thumbY + thumbSize);
+    Ellipse(ctx.hdc, thumbX, thumbY, thumbX + thumbSize, thumbY + thumbSize);
 
-    SelectObject(hdc, oldBrush);
-    SelectObject(hdc, oldPen);
+    SelectObject(ctx.hdc, oldBrush);
+    SelectObject(ctx.hdc, oldPen);
     DeleteObject(thumbBrush);
     DeleteObject(thumbPen);
 
@@ -157,16 +157,16 @@ public:
       RECT textRect = {toggleX + toggleWidth + 12, y + paddingTop,
                        x + width - paddingRight, y + height - paddingBottom};
 
-      SetTextColor(hdc, getCurrentTextColor());
-      SetBkMode(hdc, TRANSPARENT);
+      SetTextColor(ctx.hdc, getCurrentTextColor());
+      SetBkMode(ctx.hdc, TRANSPARENT);
 
       HFONT hFont = fontCache.getFont(fontSize, fontWeight);
-      HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
+      HFONT hOldFont = (HFONT)SelectObject(ctx.hdc, hFont);
 
-      DrawText(hdc, text.c_str(), -1, &textRect,
+      DrawText(ctx.hdc, text.c_str(), -1, &textRect,
                DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-      SelectObject(hdc, hOldFont);
+      SelectObject(ctx.hdc, hOldFont);
     }
 
     needsPaint = false;
@@ -358,7 +358,7 @@ public:
     paddingTop = paddingBottom = 10;
   }
 
-  void computeLayout(HDC /*hdc*/, const BoxConstraints &constraints,
+  void computeLayout(GraphicsContext &/*ctx*/, const BoxConstraints &constraints,
                      FontCache &/*fontCache*/) override {
     if (autoWidth)
       width = constraints.maxWidth;
@@ -366,7 +366,7 @@ public:
     needsLayout = false;
   }
 
-  void render(HDC hdc, FontCache &/*fontCache*/) override {
+  void render(GraphicsContext &ctx, FontCache &/*fontCache*/) override {
     int trackY = y + height / 2;
     int trackLeft = x + paddingLeft;
     int trackRight = x + width - paddingRight;
@@ -378,13 +378,13 @@ public:
     HBRUSH trackBrush = CreateSolidBrush(trackColor);
     RECT trackRect = {trackLeft, trackY - trackHeight / 2, trackRight,
                       trackY + trackHeight / 2};
-    FillRect(hdc, &trackRect, trackBrush);
+    FillRect(ctx.hdc, &trackRect, trackBrush);
     DeleteObject(trackBrush);
 
     HBRUSH fillBrush = CreateSolidBrush(trackFillColor);
     RECT fillRect = {trackLeft, trackY - trackHeight / 2, thumbX,
                      trackY + trackHeight / 2};
-    FillRect(hdc, &fillRect, fillBrush);
+    FillRect(ctx.hdc, &fillRect, fillBrush);
     DeleteObject(fillBrush);
 
     COLORREF currentThumbColor = thumbColor;
@@ -396,14 +396,14 @@ public:
     HBRUSH thumbBrush = CreateSolidBrush(currentThumbColor);
     HPEN thumbPen = CreatePen(PS_SOLID, 1, RGB(255, 255, 255));
 
-    HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, thumbBrush);
-    HPEN oldPen = (HPEN)SelectObject(hdc, thumbPen);
+    HBRUSH oldBrush = (HBRUSH)SelectObject(ctx.hdc, thumbBrush);
+    HPEN oldPen = (HPEN)SelectObject(ctx.hdc, thumbPen);
 
-    Ellipse(hdc, thumbX - thumbRadius, trackY - thumbRadius,
+    Ellipse(ctx.hdc, thumbX - thumbRadius, trackY - thumbRadius,
             thumbX + thumbRadius, trackY + thumbRadius);
 
-    SelectObject(hdc, oldBrush);
-    SelectObject(hdc, oldPen);
+    SelectObject(ctx.hdc, oldBrush);
+    SelectObject(ctx.hdc, oldPen);
     DeleteObject(thumbBrush);
     DeleteObject(thumbPen);
 
@@ -671,10 +671,10 @@ public:
   bool checked = false;
   int boxSize = 16;
 
-  void computeLayout(HDC hdc, const BoxConstraints &constraints,
+  void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     if (!text.empty()) {
-      measureText(hdc, fontCache);
+      measureText(ctx, fontCache);
       width = boxSize + 8 + width;
     } else {
       width = boxSize;
@@ -689,7 +689,7 @@ public:
     needsLayout = false;
   }
 
-  void render(HDC hdc, FontCache &fontCache) override {
+  void render(GraphicsContext &ctx, FontCache &fontCache) override {
     int boxX = x + paddingLeft;
     int boxY =
         y + paddingTop + (height - paddingTop - paddingBottom - boxSize) / 2;
@@ -699,28 +699,28 @@ public:
     HPEN boxPen =
         CreatePen(PS_SOLID, 1, checked ? RGB(56, 155, 60) : RGB(150, 150, 150));
 
-    HPEN oldPen = (HPEN)SelectObject(hdc, boxPen);
-    HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, boxBrush);
+    HPEN oldPen = (HPEN)SelectObject(ctx.hdc, boxPen);
+    HBRUSH oldBrush = (HBRUSH)SelectObject(ctx.hdc, boxBrush);
 
-    Rectangle(hdc, boxX, boxY, boxX + boxSize, boxY + boxSize);
+    Rectangle(ctx.hdc, boxX, boxY, boxX + boxSize, boxY + boxSize);
 
-    SelectObject(hdc, oldBrush);
-    SelectObject(hdc, oldPen);
+    SelectObject(ctx.hdc, oldBrush);
+    SelectObject(ctx.hdc, oldPen);
     DeleteObject(boxBrush);
     DeleteObject(boxPen);
 
     if (checked) {
       HPEN checkPen = CreatePen(PS_SOLID, 2, RGB(255, 255, 255));
-      HPEN oldCheckPen = (HPEN)SelectObject(hdc, checkPen);
+      HPEN oldCheckPen = (HPEN)SelectObject(ctx.hdc, checkPen);
 
       int cx = boxX + 3;
       int cy = boxY + boxSize / 2;
 
-      MoveToEx(hdc, cx, cy, nullptr);
-      LineTo(hdc, cx + 4, cy + 4);
-      LineTo(hdc, cx + 9, cy - 4);
+      MoveToEx(ctx.hdc, cx, cy, nullptr);
+      LineTo(ctx.hdc, cx + 4, cy + 4);
+      LineTo(ctx.hdc, cx + 9, cy - 4);
 
-      SelectObject(hdc, oldCheckPen);
+      SelectObject(ctx.hdc, oldCheckPen);
       DeleteObject(checkPen);
     }
 
@@ -728,16 +728,16 @@ public:
       RECT textRect = {boxX + boxSize + 8, y + paddingTop,
                        x + width - paddingRight, y + height - paddingBottom};
 
-      SetTextColor(hdc, getCurrentTextColor());
-      SetBkMode(hdc, TRANSPARENT);
+      SetTextColor(ctx.hdc, getCurrentTextColor());
+      SetBkMode(ctx.hdc, TRANSPARENT);
 
       HFONT hFont = fontCache.getFont(fontSize, fontWeight);
-      HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
+      HFONT hOldFont = (HFONT)SelectObject(ctx.hdc, hFont);
 
-      DrawText(hdc, text.c_str(), -1, &textRect,
+      DrawText(ctx.hdc, text.c_str(), -1, &textRect,
                DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-      SelectObject(hdc, hOldFont);
+      SelectObject(ctx.hdc, hOldFont);
     }
 
     needsPaint = false;
@@ -810,10 +810,10 @@ public:
     paddingTop = paddingBottom = 4;
   }
 
-  void computeLayout(HDC hdc, const BoxConstraints &constraints,
+  void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     if (!text.empty()) {
-      measureText(hdc, fontCache);
+      measureText(ctx, fontCache);
       width = circleSize + 8 + width;
     } else {
       width = circleSize;
@@ -828,7 +828,7 @@ public:
     needsLayout = false;
   }
 
-  void render(HDC hdc, FontCache &fontCache) override {
+  void render(GraphicsContext &ctx, FontCache &fontCache) override {
     int circleX = x + paddingLeft + circleSize / 2;
     int circleY = y + paddingTop + (height - paddingTop - paddingBottom) / 2;
 
@@ -841,14 +841,14 @@ public:
     HBRUSH circleBrush = CreateSolidBrush(RGB(255, 255, 255));
     HPEN circlePen = CreatePen(PS_SOLID, 2, currentCircleColor);
 
-    HPEN oldPen = (HPEN)SelectObject(hdc, circlePen);
-    HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, circleBrush);
+    HPEN oldPen = (HPEN)SelectObject(ctx.hdc, circlePen);
+    HBRUSH oldBrush = (HBRUSH)SelectObject(ctx.hdc, circleBrush);
 
-    Ellipse(hdc, circleX - circleSize / 2, circleY - circleSize / 2,
+    Ellipse(ctx.hdc, circleX - circleSize / 2, circleY - circleSize / 2,
             circleX + circleSize / 2, circleY + circleSize / 2);
 
-    SelectObject(hdc, oldBrush);
-    SelectObject(hdc, oldPen);
+    SelectObject(ctx.hdc, oldBrush);
+    SelectObject(ctx.hdc, oldPen);
     DeleteObject(circleBrush);
     DeleteObject(circlePen);
 
@@ -857,14 +857,14 @@ public:
       HBRUSH innerBrush = CreateSolidBrush(innerCircleColor);
       HPEN innerPen = CreatePen(PS_NULL, 0, 0);
 
-      oldPen = (HPEN)SelectObject(hdc, innerPen);
-      oldBrush = (HBRUSH)SelectObject(hdc, innerBrush);
+      oldPen = (HPEN)SelectObject(ctx.hdc, innerPen);
+      oldBrush = (HBRUSH)SelectObject(ctx.hdc, innerBrush);
 
-      Ellipse(hdc, circleX - innerCircleSize / 2, circleY - innerCircleSize / 2,
+      Ellipse(ctx.hdc, circleX - innerCircleSize / 2, circleY - innerCircleSize / 2,
               circleX + innerCircleSize / 2, circleY + innerCircleSize / 2);
 
-      SelectObject(hdc, oldBrush);
-      SelectObject(hdc, oldPen);
+      SelectObject(ctx.hdc, oldBrush);
+      SelectObject(ctx.hdc, oldPen);
       DeleteObject(innerBrush);
       DeleteObject(innerPen);
     }
@@ -874,16 +874,16 @@ public:
       RECT textRect = {x + paddingLeft + circleSize + 8, y + paddingTop,
                        x + width - paddingRight, y + height - paddingBottom};
 
-      SetTextColor(hdc, getCurrentTextColor());
-      SetBkMode(hdc, TRANSPARENT);
+      SetTextColor(ctx.hdc, getCurrentTextColor());
+      SetBkMode(ctx.hdc, TRANSPARENT);
 
       HFONT hFont = fontCache.getFont(fontSize, fontWeight);
-      HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
+      HFONT hOldFont = (HFONT)SelectObject(ctx.hdc, hFont);
 
-      DrawText(hdc, text.c_str(), -1, &textRect,
+      DrawText(ctx.hdc, text.c_str(), -1, &textRect,
                DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-      SelectObject(hdc, hOldFont);
+      SelectObject(ctx.hdc, hOldFont);
     }
 
     needsPaint = false;
@@ -948,14 +948,14 @@ public:
 
   RadioGroupWidget() { spacing = 8; }
 
-void computeLayout(HDC hdc, const BoxConstraints &constraints,
+void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                    FontCache &fontCache) override {
   int totalWidth  = 0;
   int totalHeight = 0;
 
 
   for (auto &child : children) {
-    child->computeLayout(hdc, constraints, fontCache);
+    child->computeLayout(ctx, constraints, fontCache);
 
     if (isVertical) {
       totalHeight += child->height + child->marginTop  + child->marginBottom;
@@ -1006,15 +1006,15 @@ void computeLayout(HDC hdc, const BoxConstraints &constraints,
     }
   }
 
-  void render(HDC hdc, FontCache &fontCache) override {
+  void render(GraphicsContext &ctx, FontCache &fontCache) override {
     // Render background if needed
     if (hasBackground) {
-      drawRoundedRectangle(hdc);
+      drawRoundedRectangle(ctx);
     }
 
     // Render all children
     for (auto &child : children) {
-      child->render(hdc, fontCache);
+      child->render(ctx, fontCache);
     }
 
     needsPaint = false;
@@ -1230,19 +1230,19 @@ public:
     autoHeight = false;
   }
 
-void computeLayout(HDC /*hdc*/, const BoxConstraints &constraints,
+void computeLayout(GraphicsContext &/*ctx*/, const BoxConstraints &constraints,
                    FontCache &/*fontCache*/) override {
   if (autoWidth) width = constraints.maxWidth;
   applyConstraints();
   needsLayout = false;
 }
 
-  void render(HDC hdc, FontCache &fontCache) override {
+  void render(GraphicsContext &ctx, FontCache &fontCache) override {
     borderColor = isFocused ? focusedBorderColor : unfocusedBorderColor;
-    drawRoundedRectangle(hdc);
+    drawRoundedRectangle(ctx);
 
     HFONT hFont = fontCache.getFont(fontSize, fontWeight);
-    HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
+    HFONT hOldFont = (HFONT)SelectObject(ctx.hdc, hFont);
 
     int textX = x + paddingLeft;
 
@@ -1252,27 +1252,27 @@ void computeLayout(HDC /*hdc*/, const BoxConstraints &constraints,
 
     HRGN clipRgn = CreateRectRgn(clipRect.left, clipRect.top, clipRect.right,
                                  clipRect.bottom);
-    SelectClipRgn(hdc, clipRgn);
+    SelectClipRgn(ctx.hdc, clipRgn);
 
-    SetBkMode(hdc, TRANSPARENT);
+    SetBkMode(ctx.hdc, TRANSPARENT);
 
     if (inputValue.empty() && !placeholder.empty()) {
-      SetTextColor(hdc, placeholderColor);
+      SetTextColor(ctx.hdc, placeholderColor);
       RECT pr = clipRect;
-      DrawText(hdc, placeholder.c_str(), -1, &pr,
+      DrawText(ctx.hdc, placeholder.c_str(), -1, &pr,
                DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     } else {
-      SetTextColor(hdc, inputTextColor);
+      SetTextColor(ctx.hdc, inputTextColor);
       RECT tr = clipRect;
       tr.left -= scrollOffset;
-      DrawText(hdc, inputValue.c_str(), -1, &tr,
+      DrawText(ctx.hdc, inputValue.c_str(), -1, &tr,
                DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOCLIP);
     }
 
     if (isFocused && cursorVisible) {
       SIZE textSize = {0};
       if (cursorPos > 0) {
-        GetTextExtentPoint32(hdc, inputValue.c_str(), cursorPos, &textSize);
+        GetTextExtentPoint32(ctx.hdc, inputValue.c_str(), cursorPos, &textSize);
       }
 
       int cursorX = textX + textSize.cx - scrollOffset;
@@ -1280,19 +1280,19 @@ void computeLayout(HDC /*hdc*/, const BoxConstraints &constraints,
       int cursorY2 = y + height - paddingBottom - 2;
 
       HPEN cursorPen = CreatePen(PS_SOLID, 1, RGB(30, 30, 30));
-      HPEN oldPen = (HPEN)SelectObject(hdc, cursorPen);
+      HPEN oldPen = (HPEN)SelectObject(ctx.hdc, cursorPen);
 
-      MoveToEx(hdc, cursorX, cursorY1, nullptr);
-      LineTo(hdc, cursorX, cursorY2);
+      MoveToEx(ctx.hdc, cursorX, cursorY1, nullptr);
+      LineTo(ctx.hdc, cursorX, cursorY2);
 
-      SelectObject(hdc, oldPen);
+      SelectObject(ctx.hdc, oldPen);
       DeleteObject(cursorPen);
     }
 
-    SelectClipRgn(hdc, nullptr);
+    SelectClipRgn(ctx.hdc, nullptr);
     DeleteObject(clipRgn);
 
-    SelectObject(hdc, hOldFont);
+    SelectObject(ctx.hdc, hOldFont);
     needsPaint = false;
   }
 

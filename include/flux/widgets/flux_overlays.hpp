@@ -155,7 +155,7 @@ public:
   // ----------------------------------------------------------------
   // Layout
   // ----------------------------------------------------------------
-  void computeLayout(HDC hdc, const BoxConstraints &constraints,
+  void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     windowW = constraints.maxWidth;
     windowH = constraints.maxHeight;
@@ -165,7 +165,7 @@ public:
 
     if (!children.empty()) {
       auto &anchor = children[0];
-      anchor->computeLayout(hdc, constraints, fontCache);
+      anchor->computeLayout(ctx, constraints, fontCache);
       if (autoWidth)  width  = anchor->width;
       if (autoHeight) height = anchor->height;
     }
@@ -187,17 +187,17 @@ public:
     }
   }
 
-  void render(HDC hdc, FontCache &fontCache) override {
-    if (!children.empty()) children[0]->render(hdc, fontCache);
+  void render(GraphicsContext &ctx, FontCache &fontCache) override {
+    if (!children.empty()) children[0]->render(ctx, fontCache);
     needsPaint = false;
   }
 
   // ----------------------------------------------------------------
   // renderPopupContent — called by OverlayHost::paintLayered_
-  // hdc is sized (menuW × menuH), pre-cleared to transparent.
+  // ctx is sized (menuW × menuH), pre-cleared to transparent.
   // Draw relative to (0,0) within the popup.
   // ----------------------------------------------------------------
-  void renderPopupContent(HDC hdc, FontCache &fontCache) override {
+  void renderPopupContent(GraphicsContext &ctx, FontCache &fontCache) override {
     if (!isOpen || items.empty()) return;
 
     // Shadow
@@ -206,24 +206,24 @@ public:
         shadowOffset, shadowOffset,
         menuW + shadowOffset, menuH + shadowOffset,
         menuBorderRadius * 2, menuBorderRadius * 2);
-    FillRgn(hdc, shadowRgn, shadowBrush);
+    FillRgn(ctx.hdc, shadowRgn, shadowBrush);
     DeleteObject(shadowRgn);
     DeleteObject(shadowBrush);
 
     // Background + border
     HPEN   pen      = CreatePen(PS_SOLID, 1, menuBorderColor);
     HBRUSH brush    = CreateSolidBrush(menuBgColor);
-    HPEN   oldPen   = (HPEN)  SelectObject(hdc, pen);
-    HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, brush);
-    RoundRect(hdc, 0, 0, menuW, menuH,
+    HPEN   oldPen   = (HPEN)  SelectObject(ctx.hdc, pen);
+    HBRUSH oldBrush = (HBRUSH)SelectObject(ctx.hdc, brush);
+    RoundRect(ctx.hdc, 0, 0, menuW, menuH,
               menuBorderRadius * 2, menuBorderRadius * 2);
-    SelectObject(hdc, oldBrush); SelectObject(hdc, oldPen);
+    SelectObject(ctx.hdc, oldBrush); SelectObject(ctx.hdc, oldPen);
     DeleteObject(brush); DeleteObject(pen);
 
     // Items
     HFONT  hFont    = fontCache.getFont(menuFontSize, FontWeight::Normal);
-    HFONT  hOldFont = (HFONT)SelectObject(hdc, hFont);
-    SetBkMode(hdc, TRANSPARENT);
+    HFONT  hOldFont = (HFONT)SelectObject(ctx.hdc, hFont);
+    SetBkMode(ctx.hdc, TRANSPARENT);
 
     int currentY = paddingV;
     for (int i = 0; i < (int)items.size(); i++) {
@@ -231,28 +231,28 @@ public:
       if (item.type == ContextMenuItem::Type::Separator) {
         int sepY = currentY + separatorHeight / 2;
         HPEN sepPen    = CreatePen(PS_SOLID, 1, separatorColor);
-        HPEN oldSepPen = (HPEN)SelectObject(hdc, sepPen);
-        MoveToEx(hdc, paddingH,       sepY, nullptr);
-        LineTo  (hdc, menuW - paddingH, sepY);
-        SelectObject(hdc, oldSepPen);
+        HPEN oldSepPen = (HPEN)SelectObject(ctx.hdc, sepPen);
+        MoveToEx(ctx.hdc, paddingH,       sepY, nullptr);
+        LineTo  (ctx.hdc, menuW - paddingH, sepY);
+        SelectObject(ctx.hdc, oldSepPen);
         DeleteObject(sepPen);
         currentY += separatorHeight;
       } else {
         if (i == hoveredIndex && item.enabled) {
           HBRUSH hoverBrush = CreateSolidBrush(itemHoverColor);
           RECT   hoverRect  = {2, currentY, menuW - 2, currentY + itemHeight};
-          FillRect(hdc, &hoverRect, hoverBrush);
+          FillRect(ctx.hdc, &hoverRect, hoverBrush);
           DeleteObject(hoverBrush);
         }
-        SetTextColor(hdc, item.enabled ? itemTextColor : itemDisabledColor);
+        SetTextColor(ctx.hdc, item.enabled ? itemTextColor : itemDisabledColor);
         RECT textRect = {paddingH, currentY,
                          menuW - paddingH, currentY + itemHeight};
-        DrawText(hdc, item.label.c_str(), -1, &textRect,
+        DrawText(ctx.hdc, item.label.c_str(), -1, &textRect,
                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
         currentY += itemHeight;
       }
     }
-    SelectObject(hdc, hOldFont);
+    SelectObject(ctx.hdc, hOldFont);
   }
 
   // ----------------------------------------------------------------
@@ -522,18 +522,18 @@ public:
   // ----------------------------------------------------------------
   // Layout
   // ----------------------------------------------------------------
-  void computeLayout(HDC, const BoxConstraints &, FontCache &) override {
+  void computeLayout(GraphicsContext &/*ctx*/, const BoxConstraints &, FontCache &) override {
     width = 0; height = 0;
     needsLayout = false;
   }
-  void render(HDC, FontCache &) override { needsPaint = false; }
+  void render(GraphicsContext &/*ctx*/, FontCache &) override { needsPaint = false; }
 
   // ----------------------------------------------------------------
   // renderPopupContent
   // The popup covers the entire application window so we can draw the
   // dim overlay AND the dialog box inside it.
   // ----------------------------------------------------------------
-  void renderPopupContent(HDC hdc, FontCache &fontCache) override {
+  void renderPopupContent(GraphicsContext &ctx, FontCache &fontCache) override {
     if (!isOpen) return;
 
     HWND hw   = getFluxTopLevel();
@@ -545,15 +545,15 @@ public:
 
     // Semi-transparent dim overlay
     {
-      HDC     tmpDC  = CreateCompatibleDC(hdc);
-      HBITMAP tmpBmp = CreateCompatibleBitmap(hdc, winW, winH);
+      HDC     tmpDC  = CreateCompatibleDC(ctx.hdc);
+      HBITMAP tmpBmp = CreateCompatibleBitmap(ctx.hdc, winW, winH);
       HBITMAP tmpOld = (HBITMAP)SelectObject(tmpDC, tmpBmp);
       HBRUSH  ovBrush = CreateSolidBrush(overlayColor);
       RECT    all     = {0, 0, winW, winH};
       FillRect(tmpDC, &all, ovBrush);
       DeleteObject(ovBrush);
       BLENDFUNCTION bf = {AC_SRC_OVER, 0, (BYTE)overlayAlpha, 0};
-      AlphaBlend(hdc, 0, 0, winW, winH,
+      AlphaBlend(ctx.hdc, 0, 0, winW, winH,
                  tmpDC, 0, 0, winW, winH, bf);
       SelectObject(tmpDC, tmpOld);
       DeleteObject(tmpBmp);
@@ -566,12 +566,12 @@ public:
     // Dialog box background
     HBRUSH dialogBrush = CreateSolidBrush(dialogBgColor);
     HPEN   dialogPen   = CreatePen(PS_SOLID, 1, dialogBorderColor);
-    HBRUSH oldBrush    = (HBRUSH)SelectObject(hdc, dialogBrush);
-    HPEN   oldPen      = (HPEN)  SelectObject(hdc, dialogPen);
-    RoundRect(hdc, dialogX, dialogY,
+    HBRUSH oldBrush    = (HBRUSH)SelectObject(ctx.hdc, dialogBrush);
+    HPEN   oldPen      = (HPEN)  SelectObject(ctx.hdc, dialogPen);
+    RoundRect(ctx.hdc, dialogX, dialogY,
               dialogX + dialogWidth, dialogY + dialogHeight,
               dialogBorderRadius * 2, dialogBorderRadius * 2);
-    SelectObject(hdc, oldBrush); SelectObject(hdc, oldPen);
+    SelectObject(ctx.hdc, oldBrush); SelectObject(ctx.hdc, oldPen);
     DeleteObject(dialogBrush);   DeleteObject(dialogPen);
 
     // Content
@@ -582,7 +582,7 @@ public:
       int contentH = dialogHeight - dialogPadding * 2;
 
       if (contentLayoutDirty) {
-        content->computeLayout(hdc, BoxConstraints::tight(contentW, contentH),
+        content->computeLayout(ctx, BoxConstraints::tight(contentW, contentH),
                                fontCache);
         content->x = contentX;
         content->y = contentY;
@@ -592,7 +592,7 @@ public:
             content->height - content->paddingTop  - content->paddingBottom);
         contentLayoutDirty = false;
       }
-      content->render(hdc, fontCache);
+      content->render(ctx, fontCache);
     }
   }
 
@@ -661,10 +661,11 @@ public:
     // Layout content before first paint
     if (content && hw) {
       HDC hdc = GetDC(hw);
+      GraphicsContext ctx(hdc);  
       FontCache &fc = FluxUI::getCurrentInstance()->getFontCache();
       int contentW = dialogWidth  - dialogPadding * 2;
       int contentH = dialogHeight - dialogPadding * 2;
-      content->computeLayout(hdc, BoxConstraints::tight(contentW, contentH), fc);
+      content->computeLayout(ctx, BoxConstraints::tight(contentW, contentH), fc);
 
       int dialogX  = (winW - dialogWidth)  / 2;
       int dialogY  = (winH - dialogHeight) / 2;
@@ -828,13 +829,13 @@ public:
   // ----------------------------------------------------------------
   // Layout
   // ----------------------------------------------------------------
-  void computeLayout(HDC hdc, const BoxConstraints &constraints,
+  void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     if (autoWidth)  width  = constraints.maxWidth;
     if (autoHeight) height = constraints.maxHeight;
     if (!children.empty()) {
       auto &anchor = children[0];
-      anchor->computeLayout(hdc, constraints, fontCache);
+      anchor->computeLayout(ctx, constraints, fontCache);
       if (autoWidth)  width  = anchor->width;
       if (autoHeight) height = anchor->height;
     }
@@ -853,43 +854,43 @@ public:
     }
   }
 
-  void render(HDC hdc, FontCache &fontCache) override {
-    if (!children.empty()) children[0]->render(hdc, fontCache);
+  void render(GraphicsContext &ctx, FontCache &fontCache) override {
+    if (!children.empty()) children[0]->render(ctx, fontCache);
     needsPaint = false;
   }
 
   // ----------------------------------------------------------------
   // renderPopupContent — paint bubble into (tipW × tipH) DC
   // ----------------------------------------------------------------
-  void renderPopupContent(HDC hdc, FontCache &fontCache) override {
+  void renderPopupContent(GraphicsContext &ctx, FontCache &fontCache) override {
     if (!isVisible || tipText.empty()) return;
 
     // Shadow
     HBRUSH shadowBrush = CreateSolidBrush(RGB(0, 0, 0));
     HRGN   shadowRgn   = CreateRoundRectRgn(2, 2, tipW + 2, tipH + 2,
                                              tipBorderRadius * 2, tipBorderRadius * 2);
-    FillRgn(hdc, shadowRgn, shadowBrush);
+    FillRgn(ctx.hdc, shadowRgn, shadowBrush);
     DeleteObject(shadowRgn); DeleteObject(shadowBrush);
 
     // Bubble
     HPEN   pen    = CreatePen(PS_SOLID, 1, tipBorderColor);
     HBRUSH brush  = CreateSolidBrush(tipBgColor);
-    HPEN   oldPen = (HPEN)  SelectObject(hdc, pen);
-    HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, brush);
-    RoundRect(hdc, 0, 0, tipW, tipH,
+    HPEN   oldPen = (HPEN)  SelectObject(ctx.hdc, pen);
+    HBRUSH oldBrush = (HBRUSH)SelectObject(ctx.hdc, brush);
+    RoundRect(ctx.hdc, 0, 0, tipW, tipH,
               tipBorderRadius * 2, tipBorderRadius * 2);
-    SelectObject(hdc, oldBrush); SelectObject(hdc, oldPen);
+    SelectObject(ctx.hdc, oldBrush); SelectObject(ctx.hdc, oldPen);
     DeleteObject(brush); DeleteObject(pen);
 
     // Text
     HFONT hFont    = fontCache.getFont(tipFontSize, FontWeight::Normal);
-    HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
-    SetTextColor(hdc, tipTextColor);
-    SetBkMode(hdc, TRANSPARENT);
+    HFONT hOldFont = (HFONT)SelectObject(ctx.hdc, hFont);
+    SetTextColor(ctx.hdc, tipTextColor);
+    SetBkMode(ctx.hdc, TRANSPARENT);
     RECT textRect = {tipPadH, tipPadV, tipW - tipPadH, tipH - tipPadV};
-    DrawText(hdc, tipText.c_str(), -1, &textRect,
+    DrawText(ctx.hdc, tipText.c_str(), -1, &textRect,
              DT_CENTER | DT_VCENTER | DT_WORDBREAK | DT_END_ELLIPSIS);
-    SelectObject(hdc, hOldFont);
+    SelectObject(ctx.hdc, hOldFont);
   }
 
 private:
@@ -1026,7 +1027,7 @@ public:
   // ----------------------------------------------------------------
   // Layout
   // ----------------------------------------------------------------
-  void computeLayout(HDC, const BoxConstraints &constraints,
+  void computeLayout(GraphicsContext &/*ctx*/, const BoxConstraints &constraints,
                      FontCache &) override {
     if (autoWidth) width = constraints.maxWidth;
     applyConstraints();
@@ -1036,24 +1037,24 @@ public:
   // ----------------------------------------------------------------
   // Render main box (the list is in the popup)
   // ----------------------------------------------------------------
-  void render(HDC hdc, FontCache &fontCache) override {
+  void render(GraphicsContext &ctx, FontCache &fontCache) override {
     borderColor = isFocused ? dropdownFocusedBorderColor : dropdownBorderColor;
-    drawRoundedRectangle(hdc);
+    drawRoundedRectangle(ctx);
 
     HFONT  hFont    = fontCache.getFont(fontSize, fontWeight);
-    HFONT  hOldFont = (HFONT)SelectObject(hdc, hFont);
-    SetBkMode(hdc, TRANSPARENT);
+    HFONT  hOldFont = (HFONT)SelectObject(ctx.hdc, hFont);
+    SetBkMode(ctx.hdc, TRANSPARENT);
 
     RECT textRect = {x + paddingLeft, y + paddingTop,
                      x + width - paddingRight, y + height - paddingBottom};
 
     if (selectedIndex >= 0 && selectedIndex < (int)options.size()) {
-      SetTextColor(hdc, getCurrentTextColor());
-      DrawText(hdc, options[selectedIndex].c_str(), -1, &textRect,
+      SetTextColor(ctx.hdc, getCurrentTextColor());
+      DrawText(ctx.hdc, options[selectedIndex].c_str(), -1, &textRect,
                DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
     } else {
-      SetTextColor(hdc, placeholderColor);
-      DrawText(hdc, placeholder.c_str(), -1, &textRect,
+      SetTextColor(ctx.hdc, placeholderColor);
+      DrawText(ctx.hdc, placeholder.c_str(), -1, &textRect,
                DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
     }
 
@@ -1061,26 +1062,26 @@ public:
     int  arrowX = x + width - paddingRight + 10;
     int  arrowY = y + height / 2;
     HPEN arrowPen = CreatePen(PS_SOLID, 2, arrowColor);
-    HPEN oldPen   = (HPEN)SelectObject(hdc, arrowPen);
+    HPEN oldPen   = (HPEN)SelectObject(ctx.hdc, arrowPen);
     if (isOpen) {
-      MoveToEx(hdc, arrowX - arrowSize/2, arrowY + arrowSize/4, nullptr);
-      LineTo  (hdc, arrowX,               arrowY - arrowSize/4);
-      LineTo  (hdc, arrowX + arrowSize/2, arrowY + arrowSize/4);
+      MoveToEx(ctx.hdc, arrowX - arrowSize/2, arrowY + arrowSize/4, nullptr);
+      LineTo  (ctx.hdc, arrowX,               arrowY - arrowSize/4);
+      LineTo  (ctx.hdc, arrowX + arrowSize/2, arrowY + arrowSize/4);
     } else {
-      MoveToEx(hdc, arrowX - arrowSize/2, arrowY - arrowSize/4, nullptr);
-      LineTo  (hdc, arrowX,               arrowY + arrowSize/4);
-      LineTo  (hdc, arrowX + arrowSize/2, arrowY - arrowSize/4);
+      MoveToEx(ctx.hdc, arrowX - arrowSize/2, arrowY - arrowSize/4, nullptr);
+      LineTo  (ctx.hdc, arrowX,               arrowY + arrowSize/4);
+      LineTo  (ctx.hdc, arrowX + arrowSize/2, arrowY - arrowSize/4);
     }
-    SelectObject(hdc, oldPen);
+    SelectObject(ctx.hdc, oldPen);
     DeleteObject(arrowPen);
-    SelectObject(hdc, hOldFont);
+    SelectObject(ctx.hdc, hOldFont);
     needsPaint = false;
   }
 
   // ----------------------------------------------------------------
   // renderPopupContent — list panel, drawn into (listWidth_ × listH) DC
   // ----------------------------------------------------------------
-  void renderPopupContent(HDC hdc, FontCache &fontCache) override {
+  void renderPopupContent(GraphicsContext &ctx, FontCache &fontCache) override {
     if (!isOpen || options.empty()) return;
 
     int visibleCount = min((int)options.size(), maxVisibleItems);
@@ -1089,19 +1090,19 @@ public:
     // Border + background
     HBRUSH listBrush = CreateSolidBrush(listBgColor);
     HPEN   listPen   = CreatePen(PS_SOLID, 1, listBorderColor);
-    HBRUSH oldBrush  = (HBRUSH)SelectObject(hdc, listBrush);
-    HPEN   oldPen    = (HPEN)  SelectObject(hdc, listPen);
-    Rectangle(hdc, 0, 0, listWidth_, listH);
-    SelectObject(hdc, oldBrush); SelectObject(hdc, oldPen);
+    HBRUSH oldBrush  = (HBRUSH)SelectObject(ctx.hdc, listBrush);
+    HPEN   oldPen    = (HPEN)  SelectObject(ctx.hdc, listPen);
+    Rectangle(ctx.hdc, 0, 0, listWidth_, listH);
+    SelectObject(ctx.hdc, oldBrush); SelectObject(ctx.hdc, oldPen);
     DeleteObject(listBrush);     DeleteObject(listPen);
 
     // Clip to list interior
     HRGN clipRgn = CreateRectRgn(1, 1, listWidth_ - 1, listH - 1);
-    SelectClipRgn(hdc, clipRgn);
+    SelectClipRgn(ctx.hdc, clipRgn);
 
     HFONT hFont    = fontCache.getFont(fontSize, fontWeight);
-    HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
-    SetBkMode(hdc, TRANSPARENT);
+    HFONT hOldFont = (HFONT)SelectObject(ctx.hdc, hFont);
+    SetBkMode(ctx.hdc, TRANSPARENT);
 
     int endIndex = min((int)options.size(), scrollOffset + visibleCount);
     for (int i = scrollOffset; i < endIndex; i++) {
@@ -1109,21 +1110,21 @@ public:
       if (i == hoveredItemIndex) {
         HBRUSH hb = CreateSolidBrush(itemHoverColor);
         RECT   ir = {1, itemY, listWidth_ - 1, itemY + itemHeight};
-        FillRect(hdc, &ir, hb);
+        FillRect(ctx.hdc, &ir, hb);
         DeleteObject(hb);
       } else if (i == selectedIndex) {
         HBRUSH sb = CreateSolidBrush(itemSelectedColor);
         RECT   ir = {1, itemY, listWidth_ - 1, itemY + itemHeight};
-        FillRect(hdc, &ir, sb);
+        FillRect(ctx.hdc, &ir, sb);
         DeleteObject(sb);
       }
       RECT textRect = {12, itemY, listWidth_ - 12, itemY + itemHeight};
-      SetTextColor(hdc, RGB(30, 30, 30));
-      DrawText(hdc, options[i].c_str(), -1, &textRect,
+      SetTextColor(ctx.hdc, RGB(30, 30, 30));
+      DrawText(ctx.hdc, options[i].c_str(), -1, &textRect,
                DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
     }
-    SelectObject(hdc, hOldFont);
-    SelectClipRgn(hdc, nullptr);
+    SelectObject(ctx.hdc, hOldFont);
+    SelectClipRgn(ctx.hdc, nullptr);
     DeleteObject(clipRgn);
   }
 

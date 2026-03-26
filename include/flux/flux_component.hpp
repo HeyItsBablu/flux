@@ -85,10 +85,10 @@ public:
     }
   }
 
-  void computeLayout(HDC hdc, const BoxConstraints &constraints,
+  void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     if (!children.empty()) {
-      children[0]->computeLayout(hdc, constraints, fontCache);
+      children[0]->computeLayout(ctx, constraints, fontCache);
       if (autoWidth)
         width = children[0]->width;
       if (autoHeight)
@@ -111,9 +111,9 @@ public:
     }
   }
 
-  void render(HDC hdc, FontCache &fontCache) override {
+  void render(GraphicsContext &ctx, FontCache &fontCache) override {
     if (!children.empty()) {
-      children[0]->render(hdc, fontCache);
+      children[0]->render(ctx, fontCache);
     }
     needsPaint = false;
   }

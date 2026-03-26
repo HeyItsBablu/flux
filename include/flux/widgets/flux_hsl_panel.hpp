@@ -238,7 +238,7 @@ public:
 
     // ── Layout ────────────────────────────────────────────────────────────────
 
-    void computeLayout(HDC, const BoxConstraints& c, FontCache&) override {
+    void computeLayout(GraphicsContext &/*ctx*/, const BoxConstraints& c, FontCache&) override {
         width  = c.clampWidth(autoWidth ? c.maxWidth : width);
         height = computeContentHeight();
         height = c.clampHeight(height);
@@ -247,36 +247,36 @@ public:
 
     // ── Render ────────────────────────────────────────────────────────────────
 
-    void render(HDC hdc, FontCache& fc) override {
+    void render(GraphicsContext &ctx, FontCache& fc) override {
         cacheLayout();
 
         // Background
         {
             HBRUSH br = CreateSolidBrush(bgColor);
             RECT rc = {x, y, x+width, y+height};
-            FillRect(hdc, &rc, br);
+            FillRect(ctx.hdc, &rc, br);
             DeleteObject(br);
         }
 
         // Tab strip
-        drawTabStrip(hdc, fc);
+        drawTabStrip(ctx.hdc, fc);
 
         // Band rows
         int rowY = y + kTabH + kTabPad;
         for (int i = 0; i < kHSLBandCount; ++i) {
             bool tatHighlight = isTATBand(i);
-            drawBandRow(hdc, fc, i, rowY, tatHighlight);
+            drawBandRow(ctx.hdc, fc, i, rowY, tatHighlight);
             rowY += rowHeight(i);
         }
 
         // Border
         {
             HPEN pen = CreatePen(PS_SOLID, 1, borderColor);
-            HPEN op  = (HPEN)SelectObject(hdc, pen);
+            HPEN op  = (HPEN)SelectObject(ctx.hdc, pen);
             HBRUSH nb = (HBRUSH)GetStockObject(NULL_BRUSH);
-            HBRUSH ob = (HBRUSH)SelectObject(hdc, nb);
-            Rectangle(hdc, x, y, x+width, y+height);
-            SelectObject(hdc, op); SelectObject(hdc, ob);
+            HBRUSH ob = (HBRUSH)SelectObject(ctx.hdc, nb);
+            Rectangle(ctx.hdc, x, y, x+width, y+height);
+            SelectObject(ctx.hdc, op); SelectObject(ctx.hdc, ob);
             DeleteObject(pen);
         }
 

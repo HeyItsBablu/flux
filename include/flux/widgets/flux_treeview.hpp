@@ -157,7 +157,7 @@ public:
     const TreeNode *selectedNode() const { return selectedNode_; }
 
     // ── Layout ────────────────────────────────────────────────────────────────
-    void computeLayout(HDC /*hdc*/, const BoxConstraints &constraints,
+    void computeLayout(GraphicsContext &/*ctx*/, const BoxConstraints &constraints,
                        FontCache & /*fc*/) override {
         if (autoWidth)  width  = constraints.maxWidth;
         if (autoHeight) height = constraints.maxHeight;
@@ -170,19 +170,19 @@ public:
     void positionChildren(int, int, int, int) override {}
 
     // ── Render ────────────────────────────────────────────────────────────────
-    void render(HDC hdc, FontCache &fontCache) override {
+    void render(GraphicsContext &ctx, FontCache &fontCache) override {
         if (!visible) return;
 
         // Clip to widget bounds
         HRGN clipRgn = CreateRectRgn(x, y, x + width, y + height);
-        SelectClipRgn(hdc, clipRgn);
+        SelectClipRgn(ctx.hdc, clipRgn);
         DeleteObject(clipRgn);
 
         // Background
         {
             HBRUSH bg = CreateSolidBrush(rowBgColor);
             RECT   r  = {x, y, x + width, y + height};
-            FillRect(hdc, &r, bg);
+            FillRect(ctx.hdc, &r, bg);
             DeleteObject(bg);
         }
 
@@ -194,19 +194,19 @@ public:
 
         HFONT hFont    = fontCache.getFont(fontSize, FontWeight::Normal);
         HFONT hBold    = fontCache.getFont(fontSize, FontWeight::Bold);
-        HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
-        SetBkMode(hdc, TRANSPARENT);
+        HFONT hOldFont = (HFONT)SelectObject(ctx.hdc, hFont);
+        SetBkMode(ctx.hdc, TRANSPARENT);
 
         for (int i = firstVisible; i <= lastVisible; i++) {
-            _renderRow(hdc, fontCache, hFont, hBold, i, contentW);
+            _renderRow(ctx.hdc, fontCache, hFont, hBold, i, contentW);
         }
 
-        SelectObject(hdc, hOldFont);
-        SelectClipRgn(hdc, nullptr);
+        SelectObject(ctx.hdc, hOldFont);
+        SelectClipRgn(ctx.hdc, nullptr);
 
         // Scrollbar
         if (needsScrollbar_())
-            _renderScrollbar(hdc);
+            _renderScrollbar(ctx.hdc);
 
         needsPaint = false;
     }

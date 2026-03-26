@@ -4,43 +4,43 @@
 // Widget::measureText
 // ============================================================================
 
-void Widget::measureText(HDC hdc, FontCache &fontCache) {
+void Widget::measureText(GraphicsContext &ctx, FontCache &fontCache) {
   if (text.empty()) {
     width = 0;
     height = 0;
     return;
   }
   HFONT hFont = fontCache.getFont(fontFamily, fontSize, fontWeight);
-  HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
+  HFONT hOldFont = (HFONT)SelectObject(ctx.hdc, hFont);
 
   int wlen = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
   std::wstring wtext(wlen, L'\0');
   MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, wtext.data(), wlen);
 
   SIZE size;
-  GetTextExtentPoint32W(hdc, wtext.c_str(), (int)wtext.size() - 1, &size);
+  GetTextExtentPoint32W(ctx.hdc, wtext.c_str(), (int)wtext.size() - 1, &size);
 
   if (autoWidth)
     width = size.cx + paddingLeft + paddingRight;
   if (autoHeight)
     height = size.cy + paddingTop + paddingBottom;
 
-  SelectObject(hdc, hOldFont);
+  SelectObject(ctx.hdc, hOldFont);
 }
 
 // ============================================================================
 // Widget::renderText
 // ============================================================================
 
-void Widget::renderText(HDC hdc, FontCache &fontCache, UINT format) {
+void Widget::renderText(GraphicsContext &ctx, FontCache &fontCache, UINT format) {
   if (text.empty())
     return;
 
-  SetTextColor(hdc, getCurrentTextColor());
-  SetBkMode(hdc, TRANSPARENT);
+  SetTextColor(ctx.hdc, getCurrentTextColor());
+  SetBkMode(ctx.hdc, TRANSPARENT);
 
   HFONT hFont = fontCache.getFont(fontFamily, fontSize, fontWeight);
-  HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
+  HFONT hOldFont = (HFONT)SelectObject(ctx.hdc, hFont);
 
   RECT textRect = {x + paddingLeft, y + paddingTop, x + width - paddingRight,
                    y + height - paddingBottom};
@@ -49,15 +49,15 @@ void Widget::renderText(HDC hdc, FontCache &fontCache, UINT format) {
   std::wstring wtext(wlen, L'\0');
   MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, wtext.data(), wlen);
 
-  DrawTextW(hdc, wtext.c_str(), -1, &textRect, format);
-  SelectObject(hdc, hOldFont);
+  DrawTextW(ctx.hdc, wtext.c_str(), -1, &textRect, format);
+  SelectObject(ctx.hdc, hOldFont);
 }
 
 // ============================================================================
 // Widget::computeLayout
 // ============================================================================
 
-void Widget::computeLayout(HDC /*hdc */, const BoxConstraints &constraints,
+void Widget::computeLayout(GraphicsContext &/*ctx*/, const BoxConstraints &constraints,
                            FontCache &/*fontCache*/) {
   if (!visible) {
     width = 0;
@@ -93,14 +93,14 @@ void Widget::positionChildren(int contentX, int contentY,
 // Widget::render
 // ============================================================================
 
-void Widget::render(HDC hdc, FontCache &fontCache) {
+void Widget::render(GraphicsContext &ctx, FontCache &fontCache) {
   if (!visible)
     return;
   if (hasBackground)
-    drawRoundedRectangle(hdc);
+    drawRoundedRectangle(ctx);
   for (auto &child : children)
-    child->render(hdc, fontCache);
-  FluxOverflow::render(hdc, overflow, x, y, width, height);
+    child->render(ctx, fontCache);
+  FluxOverflow::render(ctx.hdc, overflow, x, y, width, height);
   needsPaint = false;
 }
 
@@ -108,11 +108,11 @@ void Widget::render(HDC hdc, FontCache &fontCache) {
 // Widget::drawRoundedRectangle
 // ============================================================================
 
-void Widget::drawRoundedRectangle(HDC hdc) {
+void Widget::drawRoundedRectangle(GraphicsContext &ctx) {
   COLORREF bgColor = getCurrentBackgroundColor();
   COLORREF bdColor = getCurrentBorderColor();
 
-  Gdiplus::Graphics g(hdc);
+  Gdiplus::Graphics g(ctx.hdc);
   g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
 
   auto makeRoundedPath = [&](Gdiplus::GraphicsPath &path, int left, int top,

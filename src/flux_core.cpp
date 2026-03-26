@@ -19,7 +19,7 @@ FluxUI::FluxUI(HINSTANCE hInst) : hInstance(hInst) {
 }
 
 FluxUI::~FluxUI() {
-  destroyBackBuffer();
+
   fontCache.clear();
   Gdiplus::GdiplusShutdown(gdiplusToken);
   if (currentInstance == this)
@@ -32,35 +32,7 @@ FluxUI::~FluxUI() {
 
 FluxUI *FluxUI::getCurrentInstance() { return currentInstance; }
 
-// ============================================================================
-// BACK-BUFFER MANAGEMENT
-// ============================================================================
 
-void FluxUI::createBackBuffer(int width, int height) {
-  if (hdcMem && (width != bufferWidth || height != bufferHeight))
-    destroyBackBuffer();
-
-  if (!hdcMem) {
-    HDC hdc = GetDC(hwnd);
-    hdcMem = CreateCompatibleDC(hdc);
-    hbmMem = CreateCompatibleBitmap(hdc, width, height);
-    hbmOld = (HBITMAP)SelectObject(hdcMem, hbmMem);
-    ReleaseDC(hwnd, hdc);
-    bufferWidth = width;
-    bufferHeight = height;
-  }
-}
-
-void FluxUI::destroyBackBuffer() {
-  if (hdcMem) {
-    SelectObject(hdcMem, hbmOld);
-    DeleteObject(hbmMem);
-    DeleteDC(hdcMem);
-    hdcMem = nullptr;
-    hbmMem = nullptr;
-    hbmOld = nullptr;
-  }
-}
 
 // ============================================================================
 // PRIVATE HELPERS
@@ -209,9 +181,10 @@ LRESULT CALLBACK FluxUI::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam,
     return 0;
   }
 
+  // WM_PAINT
   case WM_PAINT: {
     PAINTSTRUCT ps;
-    HDC hdc = BeginPaint(hwnd, &ps);
+    HDC hdc = BeginPaint(hwnd, &ps); // Win32 layer — stays raw
 
     if (!instance || !instance->root) {
       EndPaint(hwnd, &ps);
@@ -223,14 +196,15 @@ LRESULT CALLBACK FluxUI::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam,
     int width = clientRect.right - clientRect.left;
     int height = clientRect.bottom - clientRect.top;
 
-    instance->createBackBuffer(width, height);
+    instance->backBuffer.create(hwnd, width, height);
 
-    if (instance->hdcMem) {
+    if (instance->backBuffer.valid()) {
       static HBRUSH bgBrush = CreateSolidBrush(RGB(250, 250, 250));
-      FillRect(instance->hdcMem, &clientRect, bgBrush);
+      FillRect(instance->backBuffer.hdc, &clientRect,
+               bgBrush); // Win32 — raw ok
 
-      Renderer::renderWidget(instance->hdcMem, instance->root.get(),
-                             instance->fontCache);
+      GraphicsContext ctx = instance->backBuffer.context(); // wrap here
+      Renderer::renderWidget(ctx, instance->root.get(), instance->fontCache);
 
       HWND child = GetWindow(hwnd, GW_CHILD);
       while (child) {
@@ -241,14 +215,15 @@ LRESULT CALLBACK FluxUI::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam,
         child = GetNextWindow(child, GW_HWNDNEXT);
       }
 
-      BitBlt(hdc, 0, 0, width, height, instance->hdcMem, 0, 0, SRCCOPY);
+      BitBlt(hdc, 0, 0, width, height, instance->backBuffer.hdc, 0, 0,
+             SRCCOPY); // Win32 — raw ok
     }
 
     EndPaint(hwnd, &ps);
     return 0;
   }
 
-  // ----------------------------------------------------------------
+  // WM_SIZE
   case WM_SIZE: {
     if (instance && instance->root) {
       RECT rect;
@@ -256,17 +231,17 @@ LRESULT CALLBACK FluxUI::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam,
       int width = rect.right - rect.left;
       int height = rect.bottom - rect.top;
 
-      HDC hdc = GetDC(hwnd);
-      LayoutEngine::computeLayout(hdc, instance->root.get(), width, height,
+      HDC hdc = GetDC(hwnd);    // Win32 — stays raw
+      GraphicsContext ctx(hdc); // wrap immediately
+      LayoutEngine::computeLayout(ctx, instance->root.get(), width, height,
                                   instance->fontCache);
       LayoutEngine::positionWidget(instance->root.get(), 0, 0);
-      ReleaseDC(hwnd, hdc);
+      ReleaseDC(hwnd, hdc); // Win32 — stays raw
 
       InvalidateRect(hwnd, NULL, FALSE);
     }
     return 0;
   }
-
   // ----------------------------------------------------------------
   case WM_MOUSEWHEEL: {
     if (!instance || !instance->root)
@@ -476,8 +451,7 @@ LRESULT CALLBACK FluxUI::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam,
 
   // ----------------------------------------------------------------
   case WM_DESTROY:
-    if (instance)
-      instance->destroyBackBuffer();
+
     PostQuitMessage(0);
     return 0;
   }
@@ -577,7 +551,8 @@ void FluxUI::rebuild() {
     int w = rect.right - rect.left;
     int h = rect.bottom - rect.top;
     HDC hdc = GetDC(hwnd);
-    LayoutEngine::computeLayout(hdc, root.get(), w, h, fontCache);
+    GraphicsContext ctx(hdc);  
+    LayoutEngine::computeLayout(ctx, root.get(), w, h, fontCache);
     LayoutEngine::positionWidget(root.get(), 0, 0);
     ReleaseDC(hwnd, hdc);
     InvalidateRect(hwnd, NULL, FALSE);
@@ -596,7 +571,8 @@ void FluxUI::updateWidget(Widget *widget) {
   int oldHeight = widget->height;
 
   HDC hdc = GetDC(hwnd);
-  widget->measureText(hdc, fontCache);
+  GraphicsContext ctx(hdc);  
+  widget->measureText(ctx, fontCache);
   widget->width += widget->paddingLeft + widget->paddingRight;
   widget->height += widget->paddingTop + widget->paddingBottom;
   ReleaseDC(hwnd, hdc);
@@ -632,16 +608,17 @@ void FluxUI::partialRebuild(Widget *widget) {
   boundary->markNeedsLayout();
 
   HDC hdc = GetDC(hwnd);
-
+GraphicsContext ctx(hdc);  
   if (boundary == root.get()) {
     RECT rect;
     GetClientRect(hwnd, &rect);
     int w = rect.right - rect.left;
     int h = rect.bottom - rect.top;
-    LayoutEngine::computeLayout(hdc, root.get(), w, h, fontCache);
+    
+    LayoutEngine::computeLayout(ctx, root.get(), w, h, fontCache);
     LayoutEngine::positionWidget(root.get(), 0, 0);
   } else {
-    LayoutEngine::computeLayout(hdc, boundary, boundary->width,
+    LayoutEngine::computeLayout(ctx, boundary, boundary->width,
                                 boundary->height, fontCache);
     LayoutEngine::positionWidget(boundary, boundary->x, boundary->y);
   }
@@ -684,7 +661,8 @@ HWND FluxUI::createWindow(const std::string &title, int width, int height) {
     int clientHeight = rect.bottom - rect.top;
 
     HDC hdc = GetDC(hwnd);
-    LayoutEngine::computeLayout(hdc, root.get(), clientWidth, clientHeight,
+    GraphicsContext ctx(hdc);  
+    LayoutEngine::computeLayout(ctx, root.get(), clientWidth, clientHeight,
                                 fontCache);
     LayoutEngine::positionWidget(root.get(), 0, 0);
     ReleaseDC(hwnd, hdc);

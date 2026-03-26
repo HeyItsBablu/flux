@@ -109,7 +109,7 @@ public:
     return self;
   }
 
-  void computeLayout(HDC hdc, const BoxConstraints &constraints,
+  void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     rebuildChild();
 
@@ -126,7 +126,7 @@ public:
               .deflate(paddingLeft + paddingRight, paddingTop + paddingBottom);
 
 
-      children[0]->computeLayout(hdc, childConstraints, fontCache);
+      children[0]->computeLayout(ctx, childConstraints, fontCache);
 
 
       if (autoWidth) {
@@ -268,13 +268,13 @@ public:
     return self;
   }
 
-  void computeLayout(HDC hdc, const BoxConstraints &constraints,
+  void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     rebuildChild();
 
     if (!children.empty()) {
       children[0]->computeLayout(
-          hdc,
+          ctx,
           constraints.deflate(paddingLeft + paddingRight,
                               paddingTop + paddingBottom),
           fontCache);

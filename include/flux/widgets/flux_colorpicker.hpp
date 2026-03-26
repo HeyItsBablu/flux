@@ -156,7 +156,7 @@ public:
   // -------------------------------------------------------------------------
   // Layout
   // -------------------------------------------------------------------------
-  void computeLayout(HDC /*hdc*/, const BoxConstraints &constraints,
+  void computeLayout(GraphicsContext &/*ctx*/, const BoxConstraints &constraints,
                      FontCache &/*fontCache*/) override {
                        if (!visible) { width = 0; height = 0; needsLayout = false; return; }
     width = constraints.clampWidth(width);
@@ -168,36 +168,36 @@ public:
   // -------------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------------
-  void render(HDC hdc, FontCache &fontCache) override {
+  void render(GraphicsContext &ctx, FontCache &fontCache) override {
     if (!visible) return;
     int cx = x + paddingLeft;
     int cy = y + paddingTop;
     int psz = pickerSize;
 
     // -- 1. SV Square -------------------------------------------------------
-    renderSVSquare(hdc, cx, cy, psz);
+    renderSVSquare(ctx, cx, cy, psz);
 
     // SV thumb
     int thumbX = cx + (int)(hsv.s * psz);
     int thumbY = cy + (int)((1.0 - hsv.v) * psz);
-    drawThumb(hdc, thumbX, thumbY, 6);
+    drawThumb(ctx, thumbX, thumbY, 6);
 
     cy += psz + barSpacing;
 
     // -- 2. Hue Bar ---------------------------------------------------------
-    renderHueBar(hdc, cx, cy, psz, hueBarHeight);
+    renderHueBar(ctx, cx, cy, psz, hueBarHeight);
 
     int hueThumbX = cx + (int)(hsv.h / 360.0 * psz);
-    drawBarThumb(hdc, hueThumbX, cy, hueBarHeight);
+    drawBarThumb(ctx, hueThumbX, cy, hueBarHeight);
 
     cy += hueBarHeight + barSpacing;
 
     // -- 3. Alpha Bar (optional) -------------------------------------------
     if (showAlpha) {
-      renderAlphaBar(hdc, cx, cy, psz, alphaBarHeight);
+      renderAlphaBar(ctx, cx, cy, psz, alphaBarHeight);
 
       int alphaThumbX = cx + (int)(hsv.a * psz);
-      drawBarThumb(hdc, alphaThumbX, cy, alphaBarHeight);
+      drawBarThumb(ctx, alphaThumbX, cy, alphaBarHeight);
 
       cy += alphaBarHeight + barSpacing;
     }
@@ -208,25 +208,25 @@ public:
     // Preview circle/swatch
     HBRUSH previewBrush = CreateSolidBrush(currentColor);
     HPEN previewPen = CreatePen(PS_SOLID, 1, RGB(180, 180, 180));
-    HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, previewBrush);
-    HPEN oldPen = (HPEN)SelectObject(hdc, previewPen);
-    Ellipse(hdc, cx, cy, cx + previewSize, cy + previewSize);
-    SelectObject(hdc, oldBrush);
-    SelectObject(hdc, oldPen);
+    HBRUSH oldBrush = (HBRUSH)SelectObject(ctx.hdc, previewBrush);
+    HPEN oldPen = (HPEN)SelectObject(ctx.hdc, previewPen);
+    Ellipse(ctx.hdc, cx, cy, cx + previewSize, cy + previewSize);
+    SelectObject(ctx.hdc, oldBrush);
+    SelectObject(ctx.hdc, oldPen);
     DeleteObject(previewBrush);
     DeleteObject(previewPen);
 
     // Hex text
     std::string hexStr = ColorToHex(currentColor);
     RECT hexRect = {cx + previewSize + 8, cy, cx + psz, cy + previewSize};
-    SetBkMode(hdc, TRANSPARENT);
-    SetTextColor(hdc, RGB(30, 30, 30));
+    SetBkMode(ctx.hdc, TRANSPARENT);
+    SetTextColor(ctx.hdc, RGB(30, 30, 30));
 
     HFONT hFont = fontCache.getFont(13, FontWeight::Normal);
-    HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
-    DrawText(hdc, hexStr.c_str(), -1, &hexRect,
+    HFONT hOldFont = (HFONT)SelectObject(ctx.hdc, hFont);
+    DrawText(ctx.hdc, hexStr.c_str(), -1, &hexRect,
              DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    SelectObject(hdc, hOldFont);
+    SelectObject(ctx.hdc, hOldFont);
 
     needsPaint = false;
   }
@@ -390,7 +390,7 @@ private:
   }
 
   // Renders the saturation/value gradient square using GDI blending
-  void renderSVSquare(HDC hdc, int cx, int cy, int size) {
+  void renderSVSquare(GraphicsContext &ctx, int cx, int cy, int size) {
     // Draw column by column for a smooth gradient
     for (int px = 0; px < size; px++) {
       double s = (double)px / size;
@@ -407,41 +407,41 @@ private:
         int g = (int)(GetGValue(topColor) * (1.0 - t));
         int b = (int)(GetBValue(topColor) * (1.0 - t));
 
-        SetPixel(hdc, cx + px, cy + py, RGB(r, g, b));
+        SetPixel(ctx.hdc, cx + px, cy + py, RGB(r, g, b));
       }
     }
 
     // Border
     HPEN borderPen = CreatePen(PS_SOLID, 1, RGB(180, 180, 180));
-    HPEN oldPen = (HPEN)SelectObject(hdc, borderPen);
-    HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
-    Rectangle(hdc, cx, cy, cx + size, cy + size);
-    SelectObject(hdc, oldPen);
-    SelectObject(hdc, oldBrush);
+    HPEN oldPen = (HPEN)SelectObject(ctx.hdc, borderPen);
+    HBRUSH oldBrush = (HBRUSH)SelectObject(ctx.hdc, GetStockObject(NULL_BRUSH));
+    Rectangle(ctx.hdc, cx, cy, cx + size, cy + size);
+    SelectObject(ctx.hdc, oldPen);
+    SelectObject(ctx.hdc, oldBrush);
     DeleteObject(borderPen);
   }
 
-void renderHueBar(HDC hdc, int cx, int cy, int barW, int barH) {
+void renderHueBar(GraphicsContext &ctx, int cx, int cy, int barW, int barH) {
     for (int px = 0; px < barW; px++) {
       double hue = (double)px / barW * 360.0;
       COLORREF c = HSVtoRGB({hue, 1.0, 1.0, 1.0});
       HPEN pen = CreatePen(PS_SOLID, 1, c);
-      HPEN old = (HPEN)SelectObject(hdc, pen);
-      MoveToEx(hdc, cx + px, cy, nullptr);
-      LineTo(hdc, cx + px, cy + barH);
-      SelectObject(hdc, old);
+      HPEN old = (HPEN)SelectObject(ctx.hdc, pen);
+      MoveToEx(ctx.hdc, cx + px, cy, nullptr);
+      LineTo(ctx.hdc, cx + px, cy + barH);
+      SelectObject(ctx.hdc, old);
       DeleteObject(pen);
     }
     HPEN borderPen = CreatePen(PS_SOLID, 1, RGB(180, 180, 180));
-    HPEN oldPen = (HPEN)SelectObject(hdc, borderPen);
-    HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
-    Rectangle(hdc, cx, cy, cx + barW, cy + barH);
-    SelectObject(hdc, oldPen);
-    SelectObject(hdc, oldBrush);
+    HPEN oldPen = (HPEN)SelectObject(ctx.hdc, borderPen);
+    HBRUSH oldBrush = (HBRUSH)SelectObject(ctx.hdc, GetStockObject(NULL_BRUSH));
+    Rectangle(ctx.hdc, cx, cy, cx + barW, cy + barH);
+    SelectObject(ctx.hdc, oldPen);
+    SelectObject(ctx.hdc, oldBrush);
     DeleteObject(borderPen);
 }
 
-  void renderAlphaBar(HDC hdc, int cx, int cy, int barW, int barH) {
+  void renderAlphaBar(GraphicsContext &ctx, int cx, int cy, int barW, int barH) {
     // Checkerboard background
     int tileSize = 4;
     for (int px = 0; px < barW; px += tileSize) {
@@ -451,7 +451,7 @@ void renderHueBar(HDC hdc, int cx, int cy, int barW, int barH) {
         RECT tile = {cx + px, cy + py, cx + min(px + tileSize, barW),
                      cy + min(py + tileSize, barH)};
         HBRUSH br = CreateSolidBrush(bg);
-        FillRect(hdc, &tile, br);
+        FillRect(ctx.hdc, &tile, br);
         DeleteObject(br);
       }
     }
@@ -464,46 +464,46 @@ void renderHueBar(HDC hdc, int cx, int cy, int barW, int barH) {
       int g = (int)(GetGValue(baseColor) * a + 200 * (1.0 - a));
       int b = (int)(GetBValue(baseColor) * a + 200 * (1.0 - a));
       HPEN pen = CreatePen(PS_SOLID, 1, RGB(r, g, b));
-      HPEN old = (HPEN)SelectObject(hdc, pen);
-      MoveToEx(hdc, cx + px, cy, nullptr);
-      LineTo(hdc, cx + px, cy + barH);
-      SelectObject(hdc, old);
+      HPEN old = (HPEN)SelectObject(ctx.hdc, pen);
+      MoveToEx(ctx.hdc, cx + px, cy, nullptr);
+      LineTo(ctx.hdc, cx + px, cy + barH);
+      SelectObject(ctx.hdc, old);
       DeleteObject(pen);
     }
 
     // Border
     HPEN borderPen = CreatePen(PS_SOLID, 1, RGB(180, 180, 180));
-    HPEN oldPen = (HPEN)SelectObject(hdc, borderPen);
-    HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
-    Rectangle(hdc, cx, cy, cx + barW, cy + barH);
-    SelectObject(hdc, oldPen);
-    SelectObject(hdc, oldBrush);
+    HPEN oldPen = (HPEN)SelectObject(ctx.hdc, borderPen);
+    HBRUSH oldBrush = (HBRUSH)SelectObject(ctx.hdc, GetStockObject(NULL_BRUSH));
+    Rectangle(ctx.hdc, cx, cy, cx + barW, cy + barH);
+    SelectObject(ctx.hdc, oldPen);
+    SelectObject(ctx.hdc, oldBrush);
     DeleteObject(borderPen);
   }
 
   // Circular thumb for SV square
-  void drawThumb(HDC hdc, int tx, int ty, int radius) {
+  void drawThumb(GraphicsContext &ctx, int tx, int ty, int radius) {
     HBRUSH nullBrush = (HBRUSH)GetStockObject(NULL_BRUSH);
     HPEN whitePen = CreatePen(PS_SOLID, 2, RGB(255, 255, 255));
     HPEN darkPen = CreatePen(PS_SOLID, 1, RGB(80, 80, 80));
 
-    HPEN oldPen = (HPEN)SelectObject(hdc, whitePen);
-    HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, nullBrush);
+    HPEN oldPen = (HPEN)SelectObject(ctx.hdc, whitePen);
+    HBRUSH oldBrush = (HBRUSH)SelectObject(ctx.hdc, nullBrush);
 
-    Ellipse(hdc, tx - radius, ty - radius, tx + radius, ty + radius);
+    Ellipse(ctx.hdc, tx - radius, ty - radius, tx + radius, ty + radius);
 
-    SelectObject(hdc, darkPen);
-    Ellipse(hdc, tx - radius - 1, ty - radius - 1, tx + radius + 1,
+    SelectObject(ctx.hdc, darkPen);
+    Ellipse(ctx.hdc, tx - radius - 1, ty - radius - 1, tx + radius + 1,
             ty + radius + 1);
 
-    SelectObject(hdc, oldPen);
-    SelectObject(hdc, oldBrush);
+    SelectObject(ctx.hdc, oldPen);
+    SelectObject(ctx.hdc, oldBrush);
     DeleteObject(whitePen);
     DeleteObject(darkPen);
   }
 
   // Vertical bar thumb (triangle pointer)
-  void drawBarThumb(HDC hdc, int tx, int barY, int barH) {
+  void drawBarThumb(GraphicsContext &ctx, int tx, int barY, int barH) {
     int py = barY + barH / 2;
 
     HPEN whitePen = CreatePen(PS_SOLID, 2, RGB(255, 255, 255));
@@ -511,13 +511,13 @@ void renderHueBar(HDC hdc, int cx, int cy, int barW, int barH) {
     HBRUSH nullBr = (HBRUSH)GetStockObject(NULL_BRUSH);
 
     // White outline
-    SelectObject(hdc, whitePen);
-    SelectObject(hdc, nullBr);
-    Ellipse(hdc, tx - 5, py - 5, tx + 5, py + 5);
+    SelectObject(ctx.hdc, whitePen);
+    SelectObject(ctx.hdc, nullBr);
+    Ellipse(ctx.hdc, tx - 5, py - 5, tx + 5, py + 5);
 
     // Dark inner ring
-    SelectObject(hdc, darkPen);
-    Ellipse(hdc, tx - 4, py - 4, tx + 4, py + 4);
+    SelectObject(ctx.hdc, darkPen);
+    Ellipse(ctx.hdc, tx - 4, py - 4, tx + 4, py + 4);
 
     DeleteObject(whitePen);
     DeleteObject(darkPen);

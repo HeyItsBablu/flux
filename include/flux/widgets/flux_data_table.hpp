@@ -198,7 +198,7 @@ public:
     }
 
     // ── Layout ────────────────────────────────────────────────────────────────
-    void computeLayout(HDC /*hdc*/, const BoxConstraints &constraints,
+    void computeLayout(GraphicsContext &/*ctx*/, const BoxConstraints &constraints,
                        FontCache & /*fc*/) override {
         if (autoWidth)  width  = constraints.maxWidth;
         if (autoHeight) height = constraints.maxHeight;
@@ -209,31 +209,31 @@ public:
     void positionChildren(int, int, int, int) override {}
 
     // ── Render ────────────────────────────────────────────────────────────────
-    void render(HDC hdc, FontCache &fontCache) override {
+    void render(GraphicsContext &ctx, FontCache &fontCache) override {
         if (!visible) return;
         if (!displayRows_) return;
 
         HRGN clip = CreateRectRgn(x, y, x + width, y + height);
-        SelectClipRgn(hdc, clip);
+        SelectClipRgn(ctx.hdc, clip);
         DeleteObject(clip);
 
-        _renderHeader(hdc, fontCache);
-        _renderRows(hdc, fontCache);
-        _renderScrollbars(hdc);
+        _renderHeader(ctx, fontCache);
+        _renderRows(ctx, fontCache);
+        _renderScrollbars(ctx);
 
         // Outer border
         {
             HPEN   pen = CreatePen(PS_SOLID, 1, borderColor_);
-            HPEN   old = (HPEN)SelectObject(hdc, pen);
+            HPEN   old = (HPEN)SelectObject(ctx.hdc, pen);
             HBRUSH nb  = (HBRUSH)GetStockObject(NULL_BRUSH);
-            HBRUSH ob  = (HBRUSH)SelectObject(hdc, nb);
-            Rectangle(hdc, x, y, x + width, y + height);
-            SelectObject(hdc, ob);
-            SelectObject(hdc, old);
+            HBRUSH ob  = (HBRUSH)SelectObject(ctx.hdc, nb);
+            Rectangle(ctx.hdc, x, y, x + width, y + height);
+            SelectObject(ctx.hdc, ob);
+            SelectObject(ctx.hdc, old);
             DeleteObject(pen);
         }
 
-        SelectClipRgn(hdc, nullptr);
+        SelectClipRgn(ctx.hdc, nullptr);
         needsPaint = false;
     }
 
@@ -704,31 +704,31 @@ private:
 
     // ── Rendering ─────────────────────────────────────────────────────────────
 
-    void _renderHeader(HDC hdc, FontCache &fontCache) const {
+    void _renderHeader(GraphicsContext &ctx, FontCache &fontCache) const {
         int contentW = _contentAreaWidth();
 
         // Header background
         {
             HBRUSH hb = CreateSolidBrush(headerBg);
             RECT   hr = {x, y, x + contentW, y + headerHeight};
-            FillRect(hdc, &hr, hb);
+            FillRect(ctx.hdc, &hr, hb);
             DeleteObject(hb);
         }
 
         // Bottom border under header
         {
             HPEN pen = CreatePen(PS_SOLID, 1, borderColor_);
-            HPEN old = (HPEN)SelectObject(hdc, pen);
-            MoveToEx(hdc, x,           y + headerHeight, nullptr);
-            LineTo  (hdc, x + contentW, y + headerHeight);
-            SelectObject(hdc, old);
+            HPEN old = (HPEN)SelectObject(ctx.hdc, pen);
+            MoveToEx(ctx.hdc, x,           y + headerHeight, nullptr);
+            LineTo  (ctx.hdc, x + contentW, y + headerHeight);
+            SelectObject(ctx.hdc, old);
             DeleteObject(pen);
         }
 
         HFONT hFont    = fontCache.getFont(fontSize_, FontWeight::Bold);
-        HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
-        SetBkMode(hdc, TRANSPARENT);
-        SetTextColor(hdc, headerTextColor);
+        HFONT hOldFont = (HFONT)SelectObject(ctx.hdc, hFont);
+        SetBkMode(ctx.hdc, TRANSPARENT);
+        SetTextColor(ctx.hdc, headerTextColor);
 
         int cx = x - scrollOffsetX_;
 
@@ -740,7 +740,7 @@ private:
             if (cLeft < x + contentW && cRight > x) {
                 // Clip label to visible portion
                 HRGN colClip = CreateRectRgn(cLeft, y, min(cRight, x + contentW), y + headerHeight);
-                SelectClipRgn(hdc, colClip);
+                SelectClipRgn(ctx.hdc, colClip);
                 DeleteObject(colClip);
 
                 // Sort indicator
@@ -762,25 +762,25 @@ private:
                     HBRUSH ab = CreateSolidBrush(accentColor);
                     RECT   ar = {cLeft, y + headerHeight - 2,
                                  min(cRight, x + contentW), y + headerHeight};
-                    FillRect(hdc, &ar, ab);
+                    FillRect(ctx.hdc, &ar, ab);
                     DeleteObject(ab);
-                    SetTextColor(hdc, accentColor);
+                    SetTextColor(ctx.hdc, accentColor);
                 } else {
-                    SetTextColor(hdc, headerTextColor);
+                    SetTextColor(ctx.hdc, headerTextColor);
                 }
 
-                DrawTextA(hdc, label.c_str(), -1, &lr, fmt);
+                DrawTextA(ctx.hdc, label.c_str(), -1, &lr, fmt);
 
-                SelectClipRgn(hdc, nullptr);
+                SelectClipRgn(ctx.hdc, nullptr);
 
                 // Column dividers
                 if (showColumnDividers && i < (int)columns_.size() - 1) {
                     HPEN dp  = CreatePen(PS_SOLID, 1, dividerColor_);
-                    HPEN old = (HPEN)SelectObject(hdc, dp);
+                    HPEN old = (HPEN)SelectObject(ctx.hdc, dp);
                     int  lx  = min(cRight, x + contentW);
-                    MoveToEx(hdc, lx, y + 6,              nullptr);
-                    LineTo  (hdc, lx, y + headerHeight - 6);
-                    SelectObject(hdc, old);
+                    MoveToEx(ctx.hdc, lx, y + 6,              nullptr);
+                    LineTo  (ctx.hdc, lx, y + headerHeight - 6);
+                    SelectObject(ctx.hdc, old);
                     DeleteObject(dp);
                 }
             }
@@ -788,14 +788,14 @@ private:
             cx += cw;
         }
 
-        SelectObject(hdc, hOldFont);
+        SelectObject(ctx.hdc, hOldFont);
         // Restore full clip
         HRGN fullClip = CreateRectRgn(x, y, x + width, y + height);
-        SelectClipRgn(hdc, fullClip);
+        SelectClipRgn(ctx.hdc, fullClip);
         DeleteObject(fullClip);
     }
 
-    void _renderRows(HDC hdc, FontCache &fontCache) const {
+    void _renderRows(GraphicsContext &ctx, FontCache &fontCache) const {
         if (!displayRows_ || displayRows_->empty()) return;
 
         int contentW = _contentAreaWidth();
@@ -804,12 +804,12 @@ private:
 
         // Clip to body
         HRGN bodyClip = CreateRectRgn(x, bodyY, x + contentW, bodyY + contentH);
-        SelectClipRgn(hdc, bodyClip);
+        SelectClipRgn(ctx.hdc, bodyClip);
         DeleteObject(bodyClip);
 
         HFONT hFont    = fontCache.getFont(fontSize_, FontWeight::Normal);
-        HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
-        SetBkMode(hdc, TRANSPARENT);
+        HFONT hOldFont = (HFONT)SelectObject(ctx.hdc, hFont);
+        SetBkMode(ctx.hdc, TRANSPARENT);
 
         int firstRow = scrollOffsetY_ / rowHeight;
         int lastRow  = min((int)displayRows_->size() - 1,
@@ -838,7 +838,7 @@ private:
             {
                 HBRUSH rb = CreateSolidBrush(bg);
                 RECT   rr = {x, rowY, x + contentW, rowY + rowHeight};
-                FillRect(hdc, &rr, rb);
+                FillRect(ctx.hdc, &rr, rb);
                 DeleteObject(rb);
             }
 
@@ -846,7 +846,7 @@ private:
             if (isSel) {
                 HBRUSH ab = CreateSolidBrush(accentColor);
                 RECT   ar = {x, rowY, x + 3, rowY + rowHeight};
-                FillRect(hdc, &ar, ab);
+                FillRect(ctx.hdc, &ar, ab);
                 DeleteObject(ab);
             }
 
@@ -861,12 +861,12 @@ private:
                     HRGN cellClip = CreateRectRgn(cLeft, rowY,
                                                    min(cRight, x + contentW),
                                                    rowY + rowHeight);
-                    SelectClipRgn(hdc, cellClip);
+                    SelectClipRgn(ctx.hdc, cellClip);
                     DeleteObject(cellClip);
 
                     std::string val = columns_[ci].format(row.get(columns_[ci].key));
 
-                    SetTextColor(hdc, row.disabled ? disabledColor_ : textColor_);
+                    SetTextColor(ctx.hdc, row.disabled ? disabledColor_ : textColor_);
 
                     RECT lr = {cLeft + 8, rowY,
                                min(cRight - 8, x + contentW), rowY + rowHeight};
@@ -876,20 +876,20 @@ private:
                     case ColumnAlign::Right:  fmt |= DT_RIGHT;  break;
                     default:                  fmt |= DT_LEFT;   break;
                     }
-                    DrawTextA(hdc, val.c_str(), -1, &lr, fmt);
+                    DrawTextA(ctx.hdc, val.c_str(), -1, &lr, fmt);
 
-                    SelectClipRgn(hdc, bodyClip = CreateRectRgn(
+                    SelectClipRgn(ctx.hdc, bodyClip = CreateRectRgn(
                         x, bodyY, x + contentW, bodyY + contentH));
                     DeleteObject(bodyClip);
 
                     // Column dividers
                     if (showColumnDividers && ci < (int)columns_.size() - 1) {
                         HPEN dp  = CreatePen(PS_SOLID, 1, dividerColor_);
-                        HPEN old = (HPEN)SelectObject(hdc, dp);
+                        HPEN old = (HPEN)SelectObject(ctx.hdc, dp);
                         int  lx  = min(cRight, x + contentW - 1);
-                        MoveToEx(hdc, lx, rowY + 4,              nullptr);
-                        LineTo  (hdc, lx, rowY + rowHeight - 4);
-                        SelectObject(hdc, old);
+                        MoveToEx(ctx.hdc, lx, rowY + 4,              nullptr);
+                        LineTo  (ctx.hdc, lx, rowY + rowHeight - 4);
+                        SelectObject(ctx.hdc, old);
                         DeleteObject(dp);
                     }
                 }
@@ -900,15 +900,15 @@ private:
             // Bottom row separator
             {
                 HPEN sep = CreatePen(PS_SOLID, 1, borderColor_);
-                HPEN old = (HPEN)SelectObject(hdc, sep);
-                MoveToEx(hdc, x,           rowY + rowHeight - 1, nullptr);
-                LineTo  (hdc, x + contentW, rowY + rowHeight - 1);
-                SelectObject(hdc, old);
+                HPEN old = (HPEN)SelectObject(ctx.hdc, sep);
+                MoveToEx(ctx.hdc, x,           rowY + rowHeight - 1, nullptr);
+                LineTo  (ctx.hdc, x + contentW, rowY + rowHeight - 1);
+                SelectObject(ctx.hdc, old);
                 DeleteObject(sep);
             }
         }
 
-        SelectObject(hdc, hOldFont);
+        SelectObject(ctx.hdc, hOldFont);
 
         // Fill empty area below rows
         {
@@ -916,18 +916,18 @@ private:
             if (lastRowBottom < bodyY + contentH) {
                 HBRUSH eb = CreateSolidBrush(rowBgColor);
                 RECT   er = {x, lastRowBottom, x + contentW, bodyY + contentH};
-                FillRect(hdc, &er, eb);
+                FillRect(ctx.hdc, &er, eb);
                 DeleteObject(eb);
             }
         }
 
         // Restore clip to widget bounds
         HRGN fullClip = CreateRectRgn(x, y, x + width, y + height);
-        SelectClipRgn(hdc, fullClip);
+        SelectClipRgn(ctx.hdc, fullClip);
         DeleteObject(fullClip);
     }
 
-    void _renderScrollbars(HDC hdc) const {
+    void _renderScrollbars(GraphicsContext &ctx) const {
         bool needsV = _needsVScrollbar();
         bool needsH = _needsHScrollbar();
 
@@ -941,7 +941,7 @@ private:
             // Track
             HBRUSH tb = CreateSolidBrush(RGB(240, 240, 240));
             RECT   tr = {sbX, sbY, sbX + scrollbarWidth_, sbY + sbH};
-            FillRect(hdc, &tr, tb);
+            FillRect(ctx.hdc, &tr, tb);
             DeleteObject(tb);
 
             float thumbRatio  = (float)sbH / (float)total;
@@ -954,7 +954,7 @@ private:
             HRGN   rg  = CreateRoundRectRgn(sbX + 2, thumbY,
                                              sbX + scrollbarWidth_ - 1,
                                              thumbY + thumbH, 4, 4);
-            FillRgn(hdc, rg, thb);
+            FillRgn(ctx.hdc, rg, thb);
             DeleteObject(rg);
             DeleteObject(thb);
         }
@@ -968,7 +968,7 @@ private:
 
             HBRUSH tb = CreateSolidBrush(RGB(240, 240, 240));
             RECT   tr = {sbX, sbY, sbX + sbW, sbY + scrollbarWidth_};
-            FillRect(hdc, &tr, tb);
+            FillRect(ctx.hdc, &tr, tb);
             DeleteObject(tb);
 
             float thumbRatio  = (float)sbW / (float)total;
@@ -981,7 +981,7 @@ private:
             HRGN   rg  = CreateRoundRectRgn(thumbX, sbY + 2,
                                              thumbX + thumbW,
                                              sbY + scrollbarWidth_ - 1, 4, 4);
-            FillRgn(hdc, rg, thb);
+            FillRgn(ctx.hdc, rg, thb);
             DeleteObject(rg);
             DeleteObject(thb);
         }
@@ -993,7 +993,7 @@ private:
                          y + height - scrollbarWidth_ - 1,
                          x + width,
                          y + height};
-            FillRect(hdc, &cr, cb);
+            FillRect(ctx.hdc, &cr, cb);
             DeleteObject(cb);
         }
     }

@@ -215,7 +215,7 @@ public:
   // LAYOUT
   // ----------------------------------------------------------------
 
-  void computeLayout(HDC hdc, const BoxConstraints &constraints,
+  void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     if (autoWidth)
       width = constraints.maxWidth;
@@ -224,7 +224,7 @@ public:
 
     if (!children.empty()) {
       children[0]->computeLayout(
-          hdc,
+          ctx,
           BoxConstraints::tight(width - paddingLeft - paddingRight,
                                 height - paddingTop - paddingBottom),
           fontCache);
@@ -250,44 +250,44 @@ public:
   // RENDER
   // ----------------------------------------------------------------
 
-  void render(HDC hdc, FontCache &fontCache) override {
+  void render(GraphicsContext &ctx, FontCache &fontCache) override {
     // Background
     HBRUSH bgBrush = CreateSolidBrush(theme.backgroundColor);
     RECT bgRect = {x, y, x + width, y + height};
-    FillRect(hdc, &bgRect, bgBrush);
+    FillRect(ctx.hdc, &bgRect, bgBrush);
     DeleteObject(bgBrush);
 
     // Normal widget tree
     if (!children.empty()) {
-      children[0]->render(hdc, fontCache);
+      children[0]->render(ctx, fontCache);
     }
 
     if (debugShowWidgetBounds) {
-      drawDebugBounds(hdc);
+      drawDebugBounds(ctx);
     }
 
     needsPaint = false;
   }
 
 private:
-  void drawDebugBounds(HDC hdc) { drawWidgetBounds(hdc, this); }
+  void drawDebugBounds(GraphicsContext &ctx) { drawWidgetBounds(ctx, this); }
 
-  void drawWidgetBounds(HDC hdc, Widget *w) {
+  void drawWidgetBounds(GraphicsContext &ctx, Widget *w) {
     if (!w)
       return;
 
     HPEN pen = CreatePen(PS_SOLID, 1, RGB(255, 0, 0));
-    HPEN oldPen = (HPEN)SelectObject(hdc, pen);
-    HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
+    HPEN oldPen = (HPEN)SelectObject(ctx.hdc, pen);
+    HBRUSH oldBrush = (HBRUSH)SelectObject(ctx.hdc, GetStockObject(NULL_BRUSH));
 
-    Rectangle(hdc, w->x, w->y, w->x + w->width, w->y + w->height);
+    Rectangle(ctx.hdc, w->x, w->y, w->x + w->width, w->y + w->height);
 
-    SelectObject(hdc, oldBrush);
-    SelectObject(hdc, oldPen);
+    SelectObject(ctx.hdc, oldBrush);
+    SelectObject(ctx.hdc, oldPen);
     DeleteObject(pen);
 
     for (auto &child : w->children) {
-      drawWidgetBounds(hdc, child.get());
+      drawWidgetBounds(ctx, child.get());
     }
   }
 };

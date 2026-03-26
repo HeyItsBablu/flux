@@ -188,7 +188,7 @@ public:
 
     // ── Widget overrides ──────────────────────────────────────────────────────
 
-    void computeLayout(HDC /*hdc*/, const BoxConstraints& constraints,
+    void computeLayout(GraphicsContext &/*ctx*/, const BoxConstraints& constraints,
                        FontCache& /*fontCache*/) override {
         width  = constraints.clampWidth (autoWidth  ? constraints.maxWidth  : width);
         height = constraints.clampHeight(autoHeight ? constraints.maxHeight : height);
@@ -196,7 +196,7 @@ public:
         needsLayout = false;
     }
 
-    void render(HDC hdc, FontCache& fontCache) override {
+    void render(GraphicsContext &ctx, FontCache& fontCache) override {
         // ── Determine active channels ────────────────────────────────────────
         bool drawR   = false, drawG = false, drawB = false, drawL = false;
         switch (mode) {
@@ -216,26 +216,26 @@ public:
 
         // ── Background ───────────────────────────────────────────────────────
         HBRUSH bgBrush = CreateSolidBrush(bgColor);
-        FillRect(hdc, &plotRect, bgBrush);
+        FillRect(ctx.hdc, &plotRect, bgBrush);
         DeleteObject(bgBrush);
 
         // ── Grid ─────────────────────────────────────────────────────────────
         if (showGrid) {
             HPEN gridPen = CreatePen(PS_SOLID, 1, gridColor);
-            HPEN oldPen  = (HPEN)SelectObject(hdc, gridPen);
+            HPEN oldPen  = (HPEN)SelectObject(ctx.hdc, gridPen);
             // Vertical: shadows / 1/4 / mid / 3/4 / highlights
             for (int i = 1; i <= 3; ++i) {
                 int gx = plotRect.left + pw * i / 4;
-                MoveToEx(hdc, gx, plotRect.top,    nullptr);
-                LineTo  (hdc, gx, plotRect.bottom);
+                MoveToEx(ctx.hdc, gx, plotRect.top,    nullptr);
+                LineTo  (ctx.hdc, gx, plotRect.bottom);
             }
             // Horizontal: 25%, 50%, 75%
             for (int i = 1; i <= 3; ++i) {
                 int gy = plotRect.top + ph * i / 4;
-                MoveToEx(hdc, plotRect.left,  gy, nullptr);
-                LineTo  (hdc, plotRect.right, gy);
+                MoveToEx(ctx.hdc, plotRect.left,  gy, nullptr);
+                LineTo  (ctx.hdc, plotRect.right, gy);
             }
-            SelectObject(hdc, oldPen);
+            SelectObject(ctx.hdc, oldPen);
             DeleteObject(gridPen);
         }
 
@@ -249,21 +249,21 @@ public:
             HBRUSH shadowBrush = CreateSolidBrush(clipShadowColor);
             RECT   shadowRect  = { plotRect.left, plotRect.top,
                                    plotRect.left + clipW, plotRect.bottom };
-            FillRect(hdc, &shadowRect, shadowBrush);
+            FillRect(ctx.hdc, &shadowRect, shadowBrush);
             DeleteObject(shadowBrush);
 
             // Highlight clip tint (right edge)
             HBRUSH highlightBrush = CreateSolidBrush(clipHighColor);
             RECT   hlRect = { plotRect.right - clipW, plotRect.top,
                               plotRect.right,          plotRect.bottom };
-            FillRect(hdc, &hlRect, highlightBrush);
+            FillRect(ctx.hdc, &hlRect, highlightBrush);
             DeleteObject(highlightBrush);
         }
 
         // ── Draw channel bars ─────────────────────────────────────────────────
         // We draw each channel with per-pixel alpha blending via GDI's
         // AlphaBlend so overlapping R/G/B mix naturally (like Lightroom).
-        // Strategy: draw into an off-screen DIB, then AlphaBlend onto hdc.
+        // Strategy: draw into an off-screen DIB, then AlphaBlend onto ctx.hdc.
 
         auto drawChannel = [&](const std::array<uint32_t,256>& bins,
                                 COLORREF col, BYTE alpha) {
@@ -279,10 +279,10 @@ public:
             bmi.bmiHeader.biCompression = BI_RGB;
 
             void* bits = nullptr;
-            HBITMAP hBmp = CreateDIBSection(hdc, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+            HBITMAP hBmp = CreateDIBSection(ctx.hdc, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
             if (!hBmp) return;
 
-            HDC memDC = CreateCompatibleDC(hdc);
+            HDC memDC = CreateCompatibleDC(ctx.hdc);
             SelectObject(memDC, hBmp);
 
             // Clear to transparent
@@ -328,7 +328,7 @@ public:
             bf.SourceConstantAlpha = alpha;
             bf.AlphaFormat         = 0; // no per-pixel alpha
 
-            AlphaBlend(hdc, plotRect.left, plotRect.top, pw, ph,
+            AlphaBlend(ctx.hdc, plotRect.left, plotRect.top, pw, ph,
                        memDC,          0,           0, pw, ph, bf);
 
             DeleteDC(memDC);
@@ -345,12 +345,12 @@ public:
         if (hoverPos >= 0.0f && hoverPos <= 1.0f) {
             int hx = plotRect.left + (int)(hoverPos * (pw - 1));
             HPEN hoverPen = CreatePen(PS_SOLID, 1, RGB(255,255,255));
-            HPEN oldPen   = (HPEN)SelectObject(hdc, hoverPen);
+            HPEN oldPen   = (HPEN)SelectObject(ctx.hdc, hoverPen);
             // Dashed vertical line
-            SetBkMode(hdc, TRANSPARENT);
-            MoveToEx(hdc, hx, plotRect.top,    nullptr);
-            LineTo  (hdc, hx, plotRect.bottom);
-            SelectObject(hdc, oldPen);
+            SetBkMode(ctx.hdc, TRANSPARENT);
+            MoveToEx(ctx.hdc, hx, plotRect.top,    nullptr);
+            LineTo  (ctx.hdc, hx, plotRect.bottom);
+            SelectObject(ctx.hdc, oldPen);
             DeleteObject(hoverPen);
 
             // Bin value tooltip
@@ -367,33 +367,33 @@ public:
 
             // Tiny label above crosshair
             HFONT hFont    = fontCache.getFont(9, FontWeight::Normal);
-            HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
-            SetTextColor(hdc, RGB(220,220,220));
-            SetBkMode(hdc, TRANSPARENT);
+            HFONT hOldFont = (HFONT)SelectObject(ctx.hdc, hFont);
+            SetTextColor(ctx.hdc, RGB(220,220,220));
+            SetBkMode(ctx.hdc, TRANSPARENT);
 
             SIZE  tsz;
-            GetTextExtentPoint32(hdc, buf, (int)strlen(buf), &tsz);
+            GetTextExtentPoint32(ctx.hdc, buf, (int)strlen(buf), &tsz);
             int tx = hx + 4;
             if (tx + tsz.cx > plotRect.right) tx = hx - tsz.cx - 4;
             int ty = plotRect.top + 3;
-            TextOut(hdc, tx, ty, buf, (int)strlen(buf));
-            SelectObject(hdc, hOldFont);
+            TextOut(ctx.hdc, tx, ty, buf, (int)strlen(buf));
+            SelectObject(ctx.hdc, hOldFont);
         }
 
         // ── Border around plot ────────────────────────────────────────────────
         HPEN borderPen = CreatePen(PS_SOLID, 1, borderColor);
-        HPEN oldBPen   = (HPEN)SelectObject(hdc, borderPen);
+        HPEN oldBPen   = (HPEN)SelectObject(ctx.hdc, borderPen);
         HBRUSH nullBrush = (HBRUSH)GetStockObject(NULL_BRUSH);
-        HBRUSH oldBrush  = (HBRUSH)SelectObject(hdc, nullBrush);
-        Rectangle(hdc, plotRect.left, plotRect.top,
+        HBRUSH oldBrush  = (HBRUSH)SelectObject(ctx.hdc, nullBrush);
+        Rectangle(ctx.hdc, plotRect.left, plotRect.top,
                        plotRect.right, plotRect.bottom);
-        SelectObject(hdc, oldBPen);
-        SelectObject(hdc, oldBrush);
+        SelectObject(ctx.hdc, oldBPen);
+        SelectObject(ctx.hdc, oldBrush);
         DeleteObject(borderPen);
 
         // ── Channel toggles (bottom strip) ───────────────────────────────────
         if (showChannelToggles) {
-            renderToggles(hdc, fontCache,
+            renderToggles(ctx, fontCache,
                           x, y + height - toggleH, width, toggleH,
                           drawR, drawG, drawB, drawL);
         }
@@ -483,7 +483,7 @@ private:
         markNeedsPaint();
     }
 
-    void renderToggles(HDC hdc, FontCache& fontCache,
+    void renderToggles(GraphicsContext &ctx, FontCache& fontCache,
                        int tx, int ty, int tw, int th,
                        bool /*drawR*/, bool /*drawG*/,
                        bool /*drawB*/, bool /*drawL*/) {
@@ -498,12 +498,12 @@ private:
         // Background
         HBRUSH stripBrush = CreateSolidBrush(RGB(20,20,20));
         RECT   stripRect  = { tx, ty, tx + tw, ty + th };
-        FillRect(hdc, &stripRect, stripBrush);
+        FillRect(ctx.hdc, &stripRect, stripBrush);
         DeleteObject(stripBrush);
 
         HFONT hFont    = fontCache.getFont(9, FontWeight::Normal);
-        HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
-        SetBkMode(hdc, TRANSPARENT);
+        HFONT hOldFont = (HFONT)SelectObject(ctx.hdc, hFont);
+        SetBkMode(ctx.hdc, TRANSPARENT);
 
         int slotW = tw / 4;
         for (int i = 0; i < 4; ++i) {
@@ -516,21 +516,21 @@ private:
             // Dot
             HBRUSH dotBrush = CreateSolidBrush(dotCol);
             HPEN   nullPen  = CreatePen(PS_NULL,0,0);
-            HBRUSH ob = (HBRUSH)SelectObject(hdc, dotBrush);
-            HPEN   op = (HPEN)  SelectObject(hdc, nullPen);
+            HBRUSH ob = (HBRUSH)SelectObject(ctx.hdc, dotBrush);
+            HPEN   op = (HPEN)  SelectObject(ctx.hdc, nullPen);
             int cy = ty + th / 2;
-            Ellipse(hdc, sx + 3, cy - 3, sx + 9, cy + 3);
-            SelectObject(hdc, ob); SelectObject(hdc, op);
+            Ellipse(ctx.hdc, sx + 3, cy - 3, sx + 9, cy + 3);
+            SelectObject(ctx.hdc, ob); SelectObject(ctx.hdc, op);
             DeleteObject(dotBrush); DeleteObject(nullPen);
 
             // Label
-            SetTextColor(hdc, textCol);
+            SetTextColor(ctx.hdc, textCol);
             RECT labelRect = { sx + 11, ty, sx + slotW - 2, ty + th };
-            DrawText(hdc, channels[i].label, -1, &labelRect,
+            DrawText(ctx.hdc, channels[i].label, -1, &labelRect,
                      DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         }
 
-        SelectObject(hdc, hOldFont);
+        SelectObject(ctx.hdc, hOldFont);
     }
 };
 

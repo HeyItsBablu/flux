@@ -151,7 +151,7 @@ public:
     }
 
     // ── Layout ────────────────────────────────────────────────────────────────
-    void computeLayout(HDC, const BoxConstraints &constraints,
+    void computeLayout(GraphicsContext &/*ctx*/, const BoxConstraints &constraints,
                        FontCache &) override {
         if (autoWidth) width = constraints.maxWidth;
         applyConstraints();
@@ -159,39 +159,39 @@ public:
     }
 
     // ── Render the trigger field ──────────────────────────────────────────────
-    void render(HDC hdc, FontCache &fontCache) override {
+    void render(GraphicsContext &ctx, FontCache &fontCache) override {
         if (!visible) return;
 
         borderColor = isFocused ? fieldFocusBorder : fieldBorderColor;
-        drawRoundedRectangle(hdc);
+        drawRoundedRectangle(ctx);
 
         // Date text or placeholder
         HFONT hFont    = fontCache.getFont(fieldFontSize, FontWeight::Normal);
-        HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
-        SetBkMode(hdc, TRANSPARENT);
+        HFONT hOldFont = (HFONT)SelectObject(ctx.hdc, hFont);
+        SetBkMode(ctx.hdc, TRANSPARENT);
 
         RECT tr = {x + paddingLeft, y, x + width - paddingRight, y + height};
 
         if (selectedDate.isValid()) {
-            SetTextColor(hdc, fieldTextColor);
+            SetTextColor(ctx.hdc, fieldTextColor);
             std::string label = selectedDate.toString(dateFormat);
-            DrawTextA(hdc, label.c_str(), -1, &tr,
+            DrawTextA(ctx.hdc, label.c_str(), -1, &tr,
                       DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         } else {
-            SetTextColor(hdc, placeholderColor);
-            DrawTextA(hdc, placeholder.c_str(), -1, &tr,
+            SetTextColor(ctx.hdc, placeholderColor);
+            DrawTextA(ctx.hdc, placeholder.c_str(), -1, &tr,
                       DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         }
 
         // Calendar icon (simple grid of dots)
-        _drawCalendarIcon(hdc, x + width - 26, y + height / 2 - 8);
+        _drawCalendarIcon(ctx, x + width - 26, y + height / 2 - 8);
 
-        SelectObject(hdc, hOldFont);
+        SelectObject(ctx.hdc, hOldFont);
         needsPaint = false;
     }
 
     // ── renderPopupContent ────────────────────────────────────────────────────
-    void renderPopupContent(HDC hdc, FontCache &fontCache) override {
+    void renderPopupContent(GraphicsContext &ctx, FontCache &fontCache) override {
         if (!isOpen) return;
         _computePopupSize();
 
@@ -202,7 +202,7 @@ public:
                                            popupW_ + shadowOffset,
                                            popupH_ + shadowOffset,
                                            calBorderRadius * 2, calBorderRadius * 2);
-            FillRgn(hdc, sr, sb);
+            FillRgn(ctx.hdc, sr, sb);
             DeleteObject(sr); DeleteObject(sb);
         }
 
@@ -210,18 +210,18 @@ public:
         {
             HPEN   pen   = CreatePen(PS_SOLID, 1, calBorderColor);
             HBRUSH brush = CreateSolidBrush(calBgColor);
-            HPEN   op    = (HPEN)  SelectObject(hdc, pen);
-            HBRUSH ob    = (HBRUSH)SelectObject(hdc, brush);
-            RoundRect(hdc, 0, 0, popupW_, popupH_,
+            HPEN   op    = (HPEN)  SelectObject(ctx.hdc, pen);
+            HBRUSH ob    = (HBRUSH)SelectObject(ctx.hdc, brush);
+            RoundRect(ctx.hdc, 0, 0, popupW_, popupH_,
                       calBorderRadius * 2, calBorderRadius * 2);
-            SelectObject(hdc, ob); SelectObject(hdc, op);
+            SelectObject(ctx.hdc, ob); SelectObject(ctx.hdc, op);
             DeleteObject(brush); DeleteObject(pen);
         }
 
         if (showingYears)
-            _renderYearPicker(hdc, fontCache);
+            _renderYearPicker(ctx, fontCache);
         else
-            _renderCalendarGrid(hdc, fontCache);
+            _renderCalendarGrid(ctx, fontCache);
     }
 
     // ── Mouse events ──────────────────────────────────────────────────────────
@@ -459,7 +459,7 @@ private:
 
     // ── Calendar rendering ────────────────────────────────────────────────────
 
-    void _renderCalendarGrid(HDC hdc, FontCache &fontCache) {
+    void _renderCalendarGrid(GraphicsContext &ctx, FontCache &fontCache) {
         FluxDate today = FluxDate::today();
         int firstWD    = _firstWeekday(viewYear, viewMonth);
         int daysInMon  = _daysInMonth(viewYear, viewMonth);
@@ -468,50 +468,50 @@ private:
         {
             HBRUSH hb = CreateSolidBrush(headerBgColor);
             RECT   hr = {0, 0, popupW_, calHeaderH};
-            FillRect(hdc, &hr, hb);
+            FillRect(ctx.hdc, &hr, hb);
             DeleteObject(hb);
         }
 
         // Left arrow  ◀
-        _drawNavArrow(hdc, calPadH + 8, calHeaderH / 2, false);
+        _drawNavArrow(ctx, calPadH + 8, calHeaderH / 2, false);
         // Right arrow ▶
-        _drawNavArrow(hdc, popupW_ - calPadH - 8, calHeaderH / 2, true);
+        _drawNavArrow(ctx, popupW_ - calPadH - 8, calHeaderH / 2, true);
 
         // Month + Year label (clickable → year picker)
         {
             std::string label = std::string(_monthName(viewMonth)) +
                                 "  " + std::to_string(viewYear);
             HFONT hf  = fontCache.getFont(14, FontWeight::Bold);
-            HFONT old = (HFONT)SelectObject(hdc, hf);
-            SetBkMode(hdc, TRANSPARENT);
-            SetTextColor(hdc, headerTextColor);
+            HFONT old = (HFONT)SelectObject(ctx.hdc, hf);
+            SetBkMode(ctx.hdc, TRANSPARENT);
+            SetTextColor(ctx.hdc, headerTextColor);
             RECT lr = {calPadH + 24, 0, popupW_ - calPadH - 24, calHeaderH};
-            DrawTextA(hdc, label.c_str(), -1, &lr,
+            DrawTextA(ctx.hdc, label.c_str(), -1, &lr,
                       DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-            SelectObject(hdc, old);
+            SelectObject(ctx.hdc, old);
         }
 
         // ── Weekday row ───────────────────────────────────────────────────────
         {
             HFONT hf  = fontCache.getFont(11, FontWeight::Normal);
-            HFONT old = (HFONT)SelectObject(hdc, hf);
-            SetBkMode(hdc, TRANSPARENT);
-            SetTextColor(hdc, weekdayTextColor);
+            HFONT old = (HFONT)SelectObject(ctx.hdc, hf);
+            SetBkMode(ctx.hdc, TRANSPARENT);
+            SetTextColor(ctx.hdc, weekdayTextColor);
             for (int col = 0; col < 7; col++) {
                 int cx = calPadH + col * calCellSize;
                 RECT cr = {cx, calHeaderH + calPadV,
                            cx + calCellSize, calHeaderH + calPadV + calWeekRowH};
-                DrawTextA(hdc, _weekdayShort(col), -1, &cr,
+                DrawTextA(ctx.hdc, _weekdayShort(col), -1, &cr,
                           DT_CENTER | DT_VCENTER | DT_SINGLELINE);
             }
-            SelectObject(hdc, old);
+            SelectObject(ctx.hdc, old);
         }
 
         // ── Day cells ─────────────────────────────────────────────────────────
         int gridTop = calHeaderH + calPadV + calWeekRowH;
         HFONT hf  = fontCache.getFont(12, FontWeight::Normal);
-        HFONT old = (HFONT)SelectObject(hdc, hf);
-        SetBkMode(hdc, TRANSPARENT);
+        HFONT old = (HFONT)SelectObject(ctx.hdc, hf);
+        SetBkMode(ctx.hdc, TRANSPARENT);
 
         // Previous month tail
         int prevDays = _daysInMonth(
@@ -562,25 +562,25 @@ private:
                 HRGN   rg = CreateRoundRectRgn(cx+2, cy+2,
                                                cx+calCellSize-2, cy+calCellSize-2,
                                                8, 8);
-                FillRgn(hdc, rg, sb);
+                FillRgn(ctx.hdc, rg, sb);
                 DeleteObject(rg); DeleteObject(sb);
             } else if (isHovered && !isDisabled) {
                 HBRUSH hb = CreateSolidBrush(dayHoverBg);
                 HRGN   rg = CreateRoundRectRgn(cx+2, cy+2,
                                                cx+calCellSize-2, cy+calCellSize-2,
                                                8, 8);
-                FillRgn(hdc, rg, hb);
+                FillRgn(ctx.hdc, rg, hb);
                 DeleteObject(rg); DeleteObject(hb);
             }
 
             // Today border ring
             if (isToday && !isSelected) {
                 HPEN tp  = CreatePen(PS_SOLID, 1, todayBorderColor);
-                HPEN old2 = (HPEN)SelectObject(hdc, tp);
+                HPEN old2 = (HPEN)SelectObject(ctx.hdc, tp);
                 HBRUSH nb = (HBRUSH)GetStockObject(NULL_BRUSH);
-                HBRUSH ob = (HBRUSH)SelectObject(hdc, nb);
-                RoundRect(hdc, cx+2, cy+2, cx+calCellSize-2, cy+calCellSize-2, 8, 8);
-                SelectObject(hdc, old2); SelectObject(hdc, ob);
+                HBRUSH ob = (HBRUSH)SelectObject(ctx.hdc, nb);
+                RoundRect(ctx.hdc, cx+2, cy+2, cx+calCellSize-2, cy+calCellSize-2, 8, 8);
+                SelectObject(ctx.hdc, old2); SelectObject(ctx.hdc, ob);
                 DeleteObject(tp);
             }
 
@@ -591,44 +591,44 @@ private:
             else if (isDisabled)  textCol = otherMonthText;
             else                  textCol = dayTextColor;
 
-            SetTextColor(hdc, textCol);
+            SetTextColor(ctx.hdc, textCol);
             std::string ds = std::to_string(dayNum);
-            DrawTextA(hdc, ds.c_str(), -1, &cr,
+            DrawTextA(ctx.hdc, ds.c_str(), -1, &cr,
                       DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         }
 
-        SelectObject(hdc, old);
+        SelectObject(ctx.hdc, old);
     }
 
     // ── Year picker ───────────────────────────────────────────────────────────
 
-    void _renderYearPicker(HDC hdc, FontCache &fontCache) {
+    void _renderYearPicker(GraphicsContext &ctx, FontCache &fontCache) {
         // Header
         {
             HBRUSH hb = CreateSolidBrush(headerBgColor);
             RECT   hr = {0, 0, popupW_, calHeaderH};
-            FillRect(hdc, &hr, hb);
+            FillRect(ctx.hdc, &hr, hb);
             DeleteObject(hb);
         }
         // Back arrow
-        _drawNavArrow(hdc, calPadH + 8, calHeaderH / 2, false);
-        _drawNavArrow(hdc, popupW_ - calPadH - 8, calHeaderH / 2, true);
+        _drawNavArrow(ctx, calPadH + 8, calHeaderH / 2, false);
+        _drawNavArrow(ctx, popupW_ - calPadH - 8, calHeaderH / 2, true);
 
         HFONT hf  = fontCache.getFont(14, FontWeight::Bold);
-        HFONT old = (HFONT)SelectObject(hdc, hf);
-        SetBkMode(hdc, TRANSPARENT);
-        SetTextColor(hdc, headerTextColor);
+        HFONT old = (HFONT)SelectObject(ctx.hdc, hf);
+        SetBkMode(ctx.hdc, TRANSPARENT);
+        SetTextColor(ctx.hdc, headerTextColor);
         std::string range = std::to_string(yearRangeStart_) + " – " +
                             std::to_string(yearRangeStart_ + 11);
         RECT lr = {calPadH + 24, 0, popupW_ - calPadH - 24, calHeaderH};
-        DrawTextA(hdc, range.c_str(), -1, &lr,
+        DrawTextA(ctx.hdc, range.c_str(), -1, &lr,
                   DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-        SelectObject(hdc, old);
+        SelectObject(ctx.hdc, old);
 
         // 4×3 year grid
         hf  = fontCache.getFont(12, FontWeight::Normal);
-        old = (HFONT)SelectObject(hdc, hf);
-        SetBkMode(hdc, TRANSPARENT);
+        old = (HFONT)SelectObject(ctx.hdc, hf);
+        SetBkMode(ctx.hdc, TRANSPARENT);
 
         int cellW = popupW_ / 4;
         int cellH = (popupH_ - calHeaderH) / 3;
@@ -647,23 +647,23 @@ private:
                 HBRUSH sb = CreateSolidBrush(yearSelectedBg);
                 HRGN   rg = CreateRoundRectRgn(cx+4, cy+4,
                                                cx+cellW-4, cy+cellH-4, 8, 8);
-                FillRgn(hdc, rg, sb);
+                FillRgn(ctx.hdc, rg, sb);
                 DeleteObject(rg); DeleteObject(sb);
             } else if (isHov) {
                 HBRUSH hb = CreateSolidBrush(yearHoverBg);
                 HRGN   rg = CreateRoundRectRgn(cx+4, cy+4,
                                                cx+cellW-4, cy+cellH-4, 8, 8);
-                FillRgn(hdc, rg, hb);
+                FillRgn(ctx.hdc, rg, hb);
                 DeleteObject(rg); DeleteObject(hb);
             }
 
-            SetTextColor(hdc, isSel ? yearSelectedText : dayTextColor);
+            SetTextColor(ctx.hdc, isSel ? yearSelectedText : dayTextColor);
             RECT cr = {cx, cy, cx + cellW, cy + cellH};
             std::string ys = std::to_string(yr);
-            DrawTextA(hdc, ys.c_str(), -1, &cr,
+            DrawTextA(ctx.hdc, ys.c_str(), -1, &cr,
                       DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         }
-        SelectObject(hdc, old);
+        SelectObject(ctx.hdc, old);
     }
 
     // ── Click handlers ────────────────────────────────────────────────────────
@@ -777,37 +777,37 @@ private:
 
     // ── Drawing helpers ───────────────────────────────────────────────────────
 
-    void _drawNavArrow(HDC hdc, int cx, int cy, bool right) const {
+    void _drawNavArrow(GraphicsContext &ctx, int cx, int cy, bool right) const {
         HPEN pen = CreatePen(PS_SOLID, 2, navArrowColor);
-        HPEN old = (HPEN)SelectObject(hdc, pen);
+        HPEN old = (HPEN)SelectObject(ctx.hdc, pen);
         int  s   = 5;
         if (right) {
-            MoveToEx(hdc, cx - s, cy - s, nullptr);
-            LineTo  (hdc, cx + s, cy);
-            LineTo  (hdc, cx - s, cy + s);
+            MoveToEx(ctx.hdc, cx - s, cy - s, nullptr);
+            LineTo  (ctx.hdc, cx + s, cy);
+            LineTo  (ctx.hdc, cx - s, cy + s);
         } else {
-            MoveToEx(hdc, cx + s, cy - s, nullptr);
-            LineTo  (hdc, cx - s, cy);
-            LineTo  (hdc, cx + s, cy + s);
+            MoveToEx(ctx.hdc, cx + s, cy - s, nullptr);
+            LineTo  (ctx.hdc, cx - s, cy);
+            LineTo  (ctx.hdc, cx + s, cy + s);
         }
-        SelectObject(hdc, old);
+        SelectObject(ctx.hdc, old);
         DeleteObject(pen);
     }
 
-    void _drawCalendarIcon(HDC hdc, int cx, int cy) const {
+    void _drawCalendarIcon(GraphicsContext &ctx, int cx, int cy) const {
         HPEN pen = CreatePen(PS_SOLID, 1, RGB(140, 140, 140));
-        HPEN old = (HPEN)SelectObject(hdc, pen);
+        HPEN old = (HPEN)SelectObject(ctx.hdc, pen);
 
         // Outer rect
         HBRUSH nb  = (HBRUSH)GetStockObject(NULL_BRUSH);
-        HBRUSH ob  = (HBRUSH)SelectObject(hdc, nb);
-        Rectangle(hdc, cx, cy + 2, cx + 16, cy + 16);
+        HBRUSH ob  = (HBRUSH)SelectObject(ctx.hdc, nb);
+        Rectangle(ctx.hdc, cx, cy + 2, cx + 16, cy + 16);
 
         // Top bar
         HBRUSH fb = CreateSolidBrush(RGB(140, 140, 140));
-        SelectObject(hdc, fb);
+        SelectObject(ctx.hdc, fb);
         RECT topBar = {cx, cy + 2, cx + 16, cy + 6};
-        FillRect(hdc, &topBar, fb);
+        FillRect(ctx.hdc, &topBar, fb);
         DeleteObject(fb);
 
         // Grid dots (2×3)
@@ -815,11 +815,11 @@ private:
             for (int c = 0; c < 3; c++) {
                 int dx = cx + 3 + c * 4;
                 int dy = cy + 8 + r * 4;
-                SetPixel(hdc, dx, dy, RGB(140, 140, 140));
+                SetPixel(ctx.hdc, dx, dy, RGB(140, 140, 140));
             }
 
-        SelectObject(hdc, ob);
-        SelectObject(hdc, old);
+        SelectObject(ctx.hdc, ob);
+        SelectObject(ctx.hdc, old);
         DeleteObject(pen);
     }
 

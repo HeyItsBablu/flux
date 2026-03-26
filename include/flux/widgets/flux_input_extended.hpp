@@ -86,7 +86,7 @@ public:
     }
 
     // ── Layout ────────────────────────────────────────────────────────────────
-    void computeLayout(HDC, const BoxConstraints &constraints, FontCache &) override {
+    void computeLayout(GraphicsContext &/*ctx*/, const BoxConstraints &constraints, FontCache &) override {
         autoWidth  = false;
         autoHeight = false;
         width  = max(minWidth,  min(width,  constraints.maxWidth));
@@ -112,19 +112,19 @@ public:
     void markNeedsPaint() override { needsPaint = true; }
 
     // ── Render ────────────────────────────────────────────────────────────────
-    void render(HDC hdc, FontCache &fontCache) override {
+    void render(GraphicsContext &ctx, FontCache &fontCache) override {
         borderColor = isFocused ? focusedBorderColor : unfocusedBorderColor;
-        drawRoundedRectangle(hdc);
+        drawRoundedRectangle(ctx);
 
         HFONT hFont    = fontCache.getFont(fontSize, fontWeight);
-        HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
+        HFONT hOldFont = (HFONT)SelectObject(ctx.hdc, hFont);
 
         // Measure line height
         SIZE charSz;
-        GetTextExtentPoint32(hdc, "Ag", 2, &charSz);
+        GetTextExtentPoint32(ctx.hdc, "Ag", 2, &charSz);
         lineH_ = charSz.cy + lineSpacing;
 
-        int gutterW = _gutterWidth(hdc, fontCache);
+        int gutterW = _gutterWidth(ctx, fontCache);
         int hStrip  = sbH_.isScrollable ? sbH_.size : 0;
         int vStrip  = sbV_.isScrollable ? sbV_.size : 0;
 
@@ -143,30 +143,30 @@ public:
 
         // Outer clip
         HRGN outerClip = CreateRectRgn(x + 1, y + 1, x + width - 1, y + height - 1);
-        SelectClipRgn(hdc, outerClip);
+        SelectClipRgn(ctx.hdc, outerClip);
 
         // Gutter
         if (showLineNumbers && gutterW > 0) {
             HBRUSH gb = CreateSolidBrush(lineNumBgColor);
             RECT   gr = {x + paddingLeft, y, x + paddingLeft + gutterW, y + height};
-            FillRect(hdc, &gr, gb);
+            FillRect(ctx.hdc, &gr, gb);
             DeleteObject(gb);
             HPEN gp  = CreatePen(PS_SOLID, 1, lineNumBorderColor);
-            HPEN old = (HPEN)SelectObject(hdc, gp);
-            MoveToEx(hdc, x + paddingLeft + gutterW - 1, y,          nullptr);
-            LineTo  (hdc, x + paddingLeft + gutterW - 1, y + height);
-            SelectObject(hdc, old);
+            HPEN old = (HPEN)SelectObject(ctx.hdc, gp);
+            MoveToEx(ctx.hdc, x + paddingLeft + gutterW - 1, y,          nullptr);
+            LineTo  (ctx.hdc, x + paddingLeft + gutterW - 1, y + height);
+            SelectObject(ctx.hdc, old);
             DeleteObject(gp);
         }
 
         // Placeholder
         if (lines_.size() == 1 && lines_[0].empty() && !placeholder.empty() && !isFocused) {
-            SetBkMode(hdc, TRANSPARENT);
-            SetTextColor(hdc, placeholderColor);
+            SetBkMode(ctx.hdc, TRANSPARENT);
+            SetTextColor(ctx.hdc, placeholderColor);
             RECT pr = {cLeft, cTop, cRight, cBot};
-            DrawTextA(hdc, placeholder.c_str(), -1, &pr, DT_LEFT | DT_TOP | DT_WORDBREAK);
-            SelectObject(hdc, hOldFont);
-            SelectClipRgn(hdc, nullptr);
+            DrawTextA(ctx.hdc, placeholder.c_str(), -1, &pr, DT_LEFT | DT_TOP | DT_WORDBREAK);
+            SelectObject(ctx.hdc, hOldFont);
+            SelectClipRgn(ctx.hdc, nullptr);
             DeleteObject(outerClip);
             needsPaint = false;
             return;
@@ -174,8 +174,8 @@ public:
 
         // Text clip
         HRGN textClip = CreateRectRgn(cLeft, cTop, cRight, cBot);
-        SelectClipRgn(hdc, textClip);
-        SetBkMode(hdc, TRANSPARENT);
+        SelectClipRgn(ctx.hdc, textClip);
+        SetBkMode(ctx.hdc, TRANSPARENT);
 
         int scrollY = sbV_.scrollOffset;
         int scrollX = sbH_.scrollOffset;
@@ -188,18 +188,18 @@ public:
 
             // Line number
             if (showLineNumbers && gutterW > 0) {
-                SelectClipRgn(hdc, outerClip);
+                SelectClipRgn(ctx.hdc, outerClip);
                 std::string num = std::to_string(li + 1);
                 HFONT nf  = fontCache.getFont(fontSize - 1, FontWeight::Normal);
-                HFONT onf = (HFONT)SelectObject(hdc, nf);
-                SetTextColor(hdc, lineNumTextColor);
+                HFONT onf = (HFONT)SelectObject(ctx.hdc, nf);
+                SetTextColor(ctx.hdc, lineNumTextColor);
                 RECT nr = {x + paddingLeft, lineY,
                            x + paddingLeft + gutterW - 4, lineY + lineH_};
-                DrawTextA(hdc, num.c_str(), -1, &nr,
+                DrawTextA(ctx.hdc, num.c_str(), -1, &nr,
                           DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
-                SelectObject(hdc, onf);
-                SelectClipRgn(hdc, textClip);
-                SelectObject(hdc, hFont);
+                SelectObject(ctx.hdc, onf);
+                SelectClipRgn(ctx.hdc, textClip);
+                SelectObject(ctx.hdc, hFont);
             }
 
             // Selection highlight
@@ -207,47 +207,47 @@ public:
                 auto [selStart, selEnd] = _normalizedSelection();
                 if (li >= selStart.line && li <= selEnd.line) {
                     int hStart = (li == selStart.line)
-                        ? _textWidth(hdc, lines_[li], 0, selStart.col) : 0;
+                        ? _textWidth(ctx, lines_[li], 0, selStart.col) : 0;
                     int hEnd   = (li == selEnd.line)
-                        ? _textWidth(hdc, lines_[li], 0, selEnd.col)
-                        : _textWidth(hdc, lines_[li], 0, (int)lines_[li].size());
+                        ? _textWidth(ctx, lines_[li], 0, selEnd.col)
+                        : _textWidth(ctx, lines_[li], 0, (int)lines_[li].size());
                     HBRUSH sb2 = CreateSolidBrush(selectionColor);
                     RECT   sr  = {cLeft + hStart - scrollX, lineY,
                                   cLeft + hEnd   - scrollX, lineY + lineH_};
-                    FillRect(hdc, &sr, sb2);
+                    FillRect(ctx.hdc, &sr, sb2);
                     DeleteObject(sb2);
                 }
             }
 
             // Text
-            SetTextColor(hdc, inputTextColor);
+            SetTextColor(ctx.hdc, inputTextColor);
             RECT lr = {cLeft - scrollX, lineY, cLeft + 8000, lineY + lineH_};
-            DrawTextA(hdc, lines_[li].c_str(), -1, &lr,
+            DrawTextA(ctx.hdc, lines_[li].c_str(), -1, &lr,
                       DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOCLIP);
         }
 
         // Cursor
         if (isFocused && cursorVisible_) {
-            int curX = cLeft + _textWidth(hdc, lines_[cursorLine_], 0, cursorCol_) - scrollX;
+            int curX = cLeft + _textWidth(ctx, lines_[cursorLine_], 0, cursorCol_) - scrollX;
             int curY = cTop  + cursorLine_ * lineH_ - scrollY;
             HPEN cp  = CreatePen(PS_SOLID, 1, cursorColor);
-            HPEN ocp = (HPEN)SelectObject(hdc, cp);
-            MoveToEx(hdc, curX, curY + 2,            nullptr);
-            LineTo  (hdc, curX, curY + lineH_ - 2);
-            SelectObject(hdc, ocp);
+            HPEN ocp = (HPEN)SelectObject(ctx.hdc, cp);
+            MoveToEx(ctx.hdc, curX, curY + 2,            nullptr);
+            LineTo  (ctx.hdc, curX, curY + lineH_ - 2);
+            SelectObject(ctx.hdc, ocp);
             DeleteObject(cp);
         }
 
         // Restore outer clip, render scrollbars
-        SelectClipRgn(hdc, outerClip);
+        SelectClipRgn(ctx.hdc, outerClip);
         DeleteObject(textClip);
 
-        sbV_.render(hdc, x, y, width, height);
-        sbH_.render(hdc, x, y, width, height);
+        sbV_.render(ctx, x, y, width, height);
+        sbH_.render(ctx, x, y, width, height);
 
-        SelectClipRgn(hdc, nullptr);
+        SelectClipRgn(ctx.hdc, nullptr);
         DeleteObject(outerClip);
-        SelectObject(hdc, hOldFont);
+        SelectObject(ctx.hdc, hOldFont);
         needsPaint = false;
     }
 
@@ -595,14 +595,14 @@ private:
     }
 
     // Compute gutter width and cache it (needs HDC for font measurement)
-    int _gutterWidth(HDC hdc, FontCache &fc) const {
+    int _gutterWidth(GraphicsContext &ctx, FontCache &fc) const {
         if (!showLineNumbers) { gutterW_cached_ = 0; return 0; }
         int digits = (int)std::to_string(lines_.size()).size();
         SIZE sz;
         HFONT nf  = fc.getFont(fontSize - 1, FontWeight::Normal);
-        HFONT onf = (HFONT)SelectObject(hdc, nf);
-        GetTextExtentPoint32(hdc, std::string(digits, '9').c_str(), digits, &sz);
-        SelectObject(hdc, onf);
+        HFONT onf = (HFONT)SelectObject(ctx.hdc, nf);
+        GetTextExtentPoint32(ctx.hdc, std::string(digits, '9').c_str(), digits, &sz);
+        SelectObject(ctx.hdc, onf);
         gutterW_cached_ = sz.cx + 16;
         return gutterW_cached_;
     }
@@ -652,11 +652,11 @@ private:
         sbH_.clamp(); sbH_.updateThumb();
     }
 
-    int _textWidth(HDC hdc, const std::string &s, int from, int to) const {
+    int _textWidth(GraphicsContext &ctx, const std::string &s, int from, int to) const {
         if (from >= to || s.empty()) return 0;
         to = min(to, (int)s.size());
         SIZE sz;
-        GetTextExtentPoint32(hdc, s.c_str() + from, to - from, &sz);
+        GetTextExtentPoint32(ctx.hdc, s.c_str() + from, to - from, &sz);
         return sz.cx;
     }
 
@@ -876,7 +876,7 @@ public:
     }
 
     // ── Layout ────────────────────────────────────────────────────────────────
-    void computeLayout(HDC, const BoxConstraints &constraints,
+    void computeLayout(GraphicsContext &/*ctx*/, const BoxConstraints &constraints,
                        FontCache &) override {
         if (autoWidth) width = constraints.clampWidth(width);
         applyConstraints();
@@ -886,9 +886,9 @@ public:
     }
 
     // ── Render ────────────────────────────────────────────────────────────────
-    void render(HDC hdc, FontCache &fontCache) override {
+    void render(GraphicsContext &ctx, FontCache &fontCache) override {
         borderColor = isFocused ? focusedBorderColor : unfocusedBorderColor;
-        drawRoundedRectangle(hdc);
+        drawRoundedRectangle(ctx);
 
         int btnW = 24;
         int btnX = x + width - btnW - 1;
@@ -897,37 +897,37 @@ public:
         {
             HBRUSH bb  = CreateSolidBrush(buttonBgColor);
             HPEN   np  = CreatePen(PS_NULL, 0, 0);
-            HPEN   op  = (HPEN)SelectObject(hdc, np);
-            HBRUSH ob  = (HBRUSH)SelectObject(hdc, bb);
+            HPEN   op  = (HPEN)SelectObject(ctx.hdc, np);
+            HBRUSH ob  = (HBRUSH)SelectObject(ctx.hdc, bb);
             RECT   br  = {btnX, y + 1, btnX + btnW, y + height - 1};
-            FillRect(hdc, &br, bb);
-            SelectObject(hdc, op); SelectObject(hdc, ob);
+            FillRect(ctx.hdc, &br, bb);
+            SelectObject(ctx.hdc, op); SelectObject(ctx.hdc, ob);
             DeleteObject(bb); DeleteObject(np);
         }
 
         // Divider between input and buttons
         {
             HPEN dp  = CreatePen(PS_SOLID, 1, unfocusedBorderColor);
-            HPEN old = (HPEN)SelectObject(hdc, dp);
-            MoveToEx(hdc, btnX,     y + 1,          nullptr);
-            LineTo  (hdc, btnX,     y + height - 1);
+            HPEN old = (HPEN)SelectObject(ctx.hdc, dp);
+            MoveToEx(ctx.hdc, btnX,     y + 1,          nullptr);
+            LineTo  (ctx.hdc, btnX,     y + height - 1);
             // Mid divider between up/down buttons
             int midY = y + height / 2;
-            MoveToEx(hdc, btnX,     midY,            nullptr);
-            LineTo  (hdc, btnX + btnW - 1, midY);
-            SelectObject(hdc, old);
+            MoveToEx(ctx.hdc, btnX,     midY,            nullptr);
+            LineTo  (ctx.hdc, btnX + btnW - 1, midY);
+            SelectObject(ctx.hdc, old);
             DeleteObject(dp);
         }
 
         // ── Arrow buttons ─────────────────────────────────────────────────────
-        _drawArrow(hdc, btnX, y + 1,          btnW, height / 2 - 1, true,  upHovered_);
-        _drawArrow(hdc, btnX, y + height / 2, btnW, height - height / 2 - 1, false, downHovered_);
+        _drawArrow(ctx, btnX, y + 1,          btnW, height / 2 - 1, true,  upHovered_);
+        _drawArrow(ctx, btnX, y + height / 2, btnW, height - height / 2 - 1, false, downHovered_);
 
         // ── Text ──────────────────────────────────────────────────────────────
         HFONT  hf  = fontCache.getFont(fontSize, fontWeight);
-        HFONT  ohf = (HFONT)SelectObject(hdc, hf);
-        SetBkMode(hdc, TRANSPARENT);
-        SetTextColor(hdc, inputTextColor);
+        HFONT  ohf = (HFONT)SelectObject(ctx.hdc, hf);
+        SetBkMode(ctx.hdc, TRANSPARENT);
+        SetTextColor(ctx.hdc, inputTextColor);
 
         std::string display = editing_ ? editBuffer_ : _formatValue(value);
         if (!prefix.empty()) display = prefix + display;
@@ -935,28 +935,28 @@ public:
 
         // Clip text to input area
         HRGN clip = CreateRectRgn(x + 1, y + 1, btnX - 1, y + height - 1);
-        SelectClipRgn(hdc, clip);
+        SelectClipRgn(ctx.hdc, clip);
 
         RECT tr = {x + paddingLeft, y + paddingTop,
                    btnX - 2,        y + height - paddingBottom};
-        DrawTextA(hdc, display.c_str(), -1, &tr,
+        DrawTextA(ctx.hdc, display.c_str(), -1, &tr,
                   DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
         // Cursor when editing
         if (isFocused && editing_ && cursorVisible_) {
             std::string beforeCursor = display.substr(0, (int)prefix.size() + editCursorPos_);
-            SIZE sz; GetTextExtentPoint32(hdc, beforeCursor.c_str(), (int)beforeCursor.size(), &sz);
+            SIZE sz; GetTextExtentPoint32(ctx.hdc, beforeCursor.c_str(), (int)beforeCursor.size(), &sz);
             int curX = x + paddingLeft + sz.cx;
             HPEN cp  = CreatePen(PS_SOLID, 1, inputTextColor);
-            HPEN ocp = (HPEN)SelectObject(hdc, cp);
-            MoveToEx(hdc, curX, y + paddingTop + 2,            nullptr);
-            LineTo  (hdc, curX, y + height - paddingBottom - 2);
-            SelectObject(hdc, ocp); DeleteObject(cp);
+            HPEN ocp = (HPEN)SelectObject(ctx.hdc, cp);
+            MoveToEx(ctx.hdc, curX, y + paddingTop + 2,            nullptr);
+            LineTo  (ctx.hdc, curX, y + height - paddingBottom - 2);
+            SelectObject(ctx.hdc, ocp); DeleteObject(cp);
         }
 
-        SelectClipRgn(hdc, nullptr);
+        SelectClipRgn(ctx.hdc, nullptr);
         DeleteObject(clip);
-        SelectObject(hdc, ohf);
+        SelectObject(ctx.hdc, ohf);
         needsPaint = false;
     }
 
@@ -1193,29 +1193,29 @@ private:
         if (boundIntState_)    boundIntState_->set((int)std::round(value));
     }
 
-    void _drawArrow(HDC hdc, int bx, int by, int bw, int bh,
+    void _drawArrow(GraphicsContext &ctx, int bx, int by, int bw, int bh,
                     bool up, bool hovered) const {
         if (hovered) {
             HBRUSH hb = CreateSolidBrush(buttonHoverColor);
             RECT   hr = {bx + 1, by + 1, bx + bw - 1, by + bh - 1};
-            FillRect(hdc, &hr, hb);
+            FillRect(ctx.hdc, &hr, hb);
             DeleteObject(hb);
         }
         HPEN   ap  = CreatePen(PS_SOLID, 1, buttonArrowColor);
-        HPEN   oap = (HPEN)SelectObject(hdc, ap);
+        HPEN   oap = (HPEN)SelectObject(ctx.hdc, ap);
         int    cx  = bx + bw / 2;
         int    cy  = by + bh / 2;
         int    hs  = 4;
         if (up) {
-            MoveToEx(hdc, cx - hs, cy + hs/2, nullptr);
-            LineTo  (hdc, cx,      cy - hs/2);
-            LineTo  (hdc, cx + hs, cy + hs/2);
+            MoveToEx(ctx.hdc, cx - hs, cy + hs/2, nullptr);
+            LineTo  (ctx.hdc, cx,      cy - hs/2);
+            LineTo  (ctx.hdc, cx + hs, cy + hs/2);
         } else {
-            MoveToEx(hdc, cx - hs, cy - hs/2, nullptr);
-            LineTo  (hdc, cx,      cy + hs/2);
-            LineTo  (hdc, cx + hs, cy - hs/2);
+            MoveToEx(ctx.hdc, cx - hs, cy - hs/2, nullptr);
+            LineTo  (ctx.hdc, cx,      cy + hs/2);
+            LineTo  (ctx.hdc, cx + hs, cy - hs/2);
         }
-        SelectObject(hdc, oap);
+        SelectObject(ctx.hdc, oap);
         DeleteObject(ap);
     }
 };

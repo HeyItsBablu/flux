@@ -44,7 +44,7 @@ public:
   ScrollHandler onScrollUp;
   ScrollHandler onScrollDown;
 
-  void computeLayout(HDC hdc, const BoxConstraints &constraints,
+  void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     if (autoWidth)
       width = constraints.maxWidth;
@@ -52,7 +52,7 @@ public:
       height = constraints.maxHeight;
 
     if (!children.empty()) {
-      children[0]->computeLayout(hdc, constraints, fontCache);
+      children[0]->computeLayout(ctx, constraints, fontCache);
       if (autoWidth)
         width = children[0]->width;
       if (autoHeight)
@@ -76,9 +76,9 @@ public:
     }
   }
 
-  void render(HDC hdc, FontCache &fontCache) override {
+  void render(GraphicsContext &ctx, FontCache &fontCache) override {
     if (!children.empty())
-      children[0]->render(hdc, fontCache);
+      children[0]->render(ctx, fontCache);
     needsPaint = false;
   }
 
@@ -312,7 +312,7 @@ public:
   }
 
   // Optional: visual press state in render
-  void render(HDC hdc, FontCache &fontCache) override {
+  void render(GraphicsContext &ctx, FontCache &fontCache) override {
     if (hasBackground) {
       // Slightly darken when pressed
       if (_pressed) {
@@ -320,28 +320,28 @@ public:
         backgroundColor =
             RGB(max(0, GetRValue(orig) - 20), max(0, GetGValue(orig) - 20),
                 max(0, GetBValue(orig) - 20));
-        drawRoundedRectangle(hdc);
+        drawRoundedRectangle(ctx);
         backgroundColor = orig;
       } else {
-        drawRoundedRectangle(hdc);
+        drawRoundedRectangle(ctx);
       }
     }
 
     if (!children.empty()) {
-      children[0]->render(hdc, fontCache);
+      children[0]->render(ctx, fontCache);
     } else if (!text.empty()) {
-      renderText(hdc, fontCache, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+      renderText(ctx, fontCache, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }
 
     needsPaint = false;
   }
 
-  void computeLayout(HDC hdc, const BoxConstraints &constraints,
+  void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     if (!children.empty()) {
       auto &child = children[0];
 
-      child->computeLayout(hdc,
+      child->computeLayout(ctx,
                            constraints.deflate(paddingLeft + paddingRight,
                                                paddingTop + paddingBottom),
                            fontCache);
@@ -353,7 +353,7 @@ public:
         height = child->height + child->marginTop + child->marginBottom +
                  paddingTop + paddingBottom;
     } else if (!text.empty()) {
-      measureText(hdc, fontCache);
+      measureText(ctx, fontCache);
 
       if (autoWidth)
         width += paddingLeft + paddingRight;

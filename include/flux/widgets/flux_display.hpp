@@ -167,7 +167,7 @@ public:
 
   // ── Widget overrides ───────────────────────────────────────────────────────
 
-  void computeLayout(HDC /*hdc*/, const BoxConstraints &constraints,
+  void computeLayout(GraphicsContext &/*ctx*/, const BoxConstraints &constraints,
                      FontCache & /*fontCache*/) override {
     width = constraints.clampWidth(autoWidth ? constraints.maxWidth : width);
     height =
@@ -176,8 +176,8 @@ public:
     needsLayout = false;
   }
 
-  void render(HDC hdc, FontCache & /*fontCache*/) override {
-    ensureChildWindow(hdc);
+  void render(GraphicsContext &ctx, FontCache & /*fontCache*/) override {
+    ensureChildWindow(ctx.hdc);
     moveChildWindow();
     renderGL();
     needsPaint = false;
@@ -911,9 +911,9 @@ class TextWidget : public Widget {
 public:
   std::string fontFamily = "Segoe UI";
 
-  void computeLayout(HDC hdc, const BoxConstraints &constraints,
+  void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
-    measureText(hdc, fontCache);
+    measureText(ctx, fontCache);
     if (autoWidth)
       width += paddingLeft + paddingRight;
     if (autoHeight)
@@ -924,10 +924,10 @@ public:
     needsLayout = false;
   }
 
-  void render(HDC hdc, FontCache &fontCache) override {
+  void render(GraphicsContext &ctx, FontCache &fontCache) override {
     if (hasBackground)
-      drawRoundedRectangle(hdc);
-    renderText(hdc, fontCache);
+      drawRoundedRectangle(ctx);
+    renderText(ctx, fontCache);
     needsPaint = false;
   }
 
@@ -1047,7 +1047,7 @@ class IconWidget : public TextWidget {
 public:
   IconWidget() { fontFamily = "Segoe MDL2 Assets"; }
 
-  void computeLayout(HDC /*hdc*/, const BoxConstraints &constraints,
+  void computeLayout(GraphicsContext &/*ctx*/, const BoxConstraints &constraints,
                      FontCache &/*fontCache*/) override {
     if (autoWidth)
       width = fontSize + paddingLeft + paddingRight;
@@ -1059,21 +1059,21 @@ public:
     needsLayout = false;
   }
 
-  void render(HDC hdc, FontCache &fontCache) override {
+  void render(GraphicsContext &ctx, FontCache &fontCache) override {
     if (hasBackground)
-      drawRoundedRectangle(hdc);
+      drawRoundedRectangle(ctx);
     HFONT hFont = fontCache.getFont(fontFamily, fontSize, fontWeight);
-    HFONT hOld = (HFONT)SelectObject(hdc, hFont);
-    SetTextColor(hdc, getCurrentTextColor());
-    SetBkMode(hdc, TRANSPARENT);
+    HFONT hOld = (HFONT)SelectObject(ctx.hdc, hFont);
+    SetTextColor(ctx.hdc, getCurrentTextColor());
+    SetBkMode(ctx.hdc, TRANSPARENT);
     int wlen = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
     std::wstring wtext(wlen, L'\0');
     MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, wtext.data(), wlen);
     SIZE sz = {};
-    GetTextExtentPoint32W(hdc, wtext.c_str(), 1, &sz);
-    TextOutW(hdc, x + (width - sz.cx) / 2, y + (height - sz.cy) / 2,
+    GetTextExtentPoint32W(ctx.hdc, wtext.c_str(), 1, &sz);
+    TextOutW(ctx.hdc, x + (width - sz.cx) / 2, y + (height - sz.cy) / 2,
              wtext.c_str(), 1);
-    SelectObject(hdc, hOld);
+    SelectObject(ctx.hdc, hOld);
     needsPaint = false;
   }
 
@@ -1231,7 +1231,7 @@ public:
     return std::static_pointer_cast<ProgressBarWidget>(shared_from_this());
   }
 
-  void computeLayout(HDC /*hdc*/, const BoxConstraints &constraints,
+  void computeLayout(GraphicsContext &/*ctx*/, const BoxConstraints &constraints,
                      FontCache &/*fontCache*/) override {
     if (autoWidth)
       width = constraints.maxWidth;
@@ -1239,28 +1239,28 @@ public:
     needsLayout = false;
   }
 
-  void render(HDC hdc, FontCache &/*fontCache*/) override {
+  void render(GraphicsContext &ctx, FontCache &/*fontCache*/) override {
     int rx = trackBorderRadius * 2;
     HPEN trackPen =
         hasTrackBorder ? CreatePen(PS_SOLID, trackBorderWidth, trackBorderColor)
                        : CreatePen(PS_NULL, 0, 0);
     HBRUSH trackBrush = CreateSolidBrush(trackColor);
-    HPEN oldPen = (HPEN)SelectObject(hdc, trackPen);
-    HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, trackBrush);
-    RoundRect(hdc, x, y, x + width, y + height, rx, rx);
-    SelectObject(hdc, oldBrush);
-    SelectObject(hdc, oldPen);
+    HPEN oldPen = (HPEN)SelectObject(ctx.hdc, trackPen);
+    HBRUSH oldBrush = (HBRUSH)SelectObject(ctx.hdc, trackBrush);
+    RoundRect(ctx.hdc, x, y, x + width, y + height, rx, rx);
+    SelectObject(ctx.hdc, oldBrush);
+    SelectObject(ctx.hdc, oldPen);
     DeleteObject(trackBrush);
     DeleteObject(trackPen);
 
     int fillWidth = (int)(value * width);
     if (fillWidth > 0) {
       HRGN clipRgn = CreateRoundRectRgn(x, y, x + width, y + height, rx, rx);
-      SelectClipRgn(hdc, clipRgn);
+      SelectClipRgn(ctx.hdc, clipRgn);
       if (progressColors.size() == 1) {
         HBRUSH fb = CreateSolidBrush(progressColors[0]);
         RECT fr = {x, y, x + fillWidth, y + height};
-        FillRect(hdc, &fr, fb);
+        FillRect(ctx.hdc, &fr, fb);
         DeleteObject(fb);
       } else {
         for (int i = 0; i < fillWidth; i++) {
@@ -1276,20 +1276,20 @@ public:
           int b = (int)(GetBValue(c0) + frac * (GetBValue(c1) - GetBValue(c0)));
           HBRUSH band = CreateSolidBrush(RGB(r, g, b));
           RECT bandR = {x + i, y, x + i + 1, y + height};
-          FillRect(hdc, &bandR, band);
+          FillRect(ctx.hdc, &bandR, band);
           DeleteObject(band);
         }
       }
-      SelectClipRgn(hdc, nullptr);
+      SelectClipRgn(ctx.hdc, nullptr);
       DeleteObject(clipRgn);
 
       if (hasTrackBorder) {
         HPEN pp = CreatePen(PS_SOLID, trackBorderWidth, trackBorderColor);
-        HPEN op = (HPEN)SelectObject(hdc, pp);
-        HBRUSH ob = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
-        RoundRect(hdc, x, y, x + fillWidth, y + height, rx, rx);
-        SelectObject(hdc, ob);
-        SelectObject(hdc, op);
+        HPEN op = (HPEN)SelectObject(ctx.hdc, pp);
+        HBRUSH ob = (HBRUSH)SelectObject(ctx.hdc, GetStockObject(NULL_BRUSH));
+        RoundRect(ctx.hdc, x, y, x + fillWidth, y + height, rx, rx);
+        SelectObject(ctx.hdc, ob);
+        SelectObject(ctx.hdc, op);
         DeleteObject(pp);
       }
     }
@@ -1311,16 +1311,16 @@ inline ProgressBarWidgetPtr ProgressBar(double value = 0.0) {
 
 class DividerWidget : public Widget {
 public:
-  void computeLayout(HDC /*hdc*/, const BoxConstraints &constraints,
+  void computeLayout(GraphicsContext &/*ctx*/, const BoxConstraints &constraints,
                      FontCache &/*fontCache*/) override {
     if (autoWidth)
       width = constraints.maxWidth;
     applyConstraints();
     needsLayout = false;
   }
-  void render(HDC hdc, FontCache & /*fontCache*/) override {
+  void render(GraphicsContext &ctx, FontCache & /*fontCache*/) override {
     if (hasBackground)
-      drawRoundedRectangle(hdc);
+      drawRoundedRectangle(ctx);
     needsPaint = false;
   }
 };

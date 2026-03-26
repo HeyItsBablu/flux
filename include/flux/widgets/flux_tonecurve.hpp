@@ -314,7 +314,7 @@ public:
 
     // ── Layout ────────────────────────────────────────────────────────────────
 
-    void computeLayout(HDC /*hdc*/, const BoxConstraints& constraints,
+    void computeLayout(GraphicsContext &/*ctx*/, const BoxConstraints& constraints,
                        FontCache& /*fontCache*/) override {
         width  = constraints.clampWidth (autoWidth  ? constraints.maxWidth  : width);
         height = constraints.clampHeight(autoHeight ? constraints.maxHeight : height);
@@ -324,7 +324,7 @@ public:
 
     // ── Render ────────────────────────────────────────────────────────────────
 
-    void render(HDC hdc, FontCache& fontCache) override {
+    void render(GraphicsContext &ctx, FontCache& fontCache) override {
         // ── Plot area (inset from widget bounds for axis labels) ───────────────
         const int PAD_L = 6, PAD_R = 6, PAD_T = 6, PAD_B = 6;
         plotX = x + PAD_L;
@@ -336,25 +336,25 @@ public:
         // ── Background ────────────────────────────────────────────────────────
         HBRUSH bgBrush = CreateSolidBrush(bgColor);
         RECT   bgRect  = { x, y, x+width, y+height };
-        FillRect(hdc, &bgRect, bgBrush);
+        FillRect(ctx.hdc, &bgRect, bgBrush);
         DeleteObject(bgBrush);
 
         // ── Zone region bands ─────────────────────────────────────────────────
-        if (showRegions) drawRegions(hdc);
+        if (showRegions) drawRegions(ctx.hdc);
 
         // ── Histogram ─────────────────────────────────────────────────────────
-        if (showHistogram && hasHistogram) drawHistogram(hdc);
+        if (showHistogram && hasHistogram) drawHistogram(ctx.hdc);
 
         // ── Grid ──────────────────────────────────────────────────────────────
-        if (showGrid) drawGrid(hdc);
+        if (showGrid) drawGrid(ctx.hdc);
 
         // ── Diagonal identity line ────────────────────────────────────────────
         {
             HPEN idPen = CreatePen(PS_SOLID, 1, RGB(55,55,55));
-            HPEN op    = (HPEN)SelectObject(hdc, idPen);
-            MoveToEx(hdc, plotX,        plotY+plotH, nullptr);
-            LineTo  (hdc, plotX+plotW,  plotY);
-            SelectObject(hdc, op);
+            HPEN op    = (HPEN)SelectObject(ctx.hdc, idPen);
+            MoveToEx(ctx.hdc, plotX,        plotY+plotH, nullptr);
+            LineTo  (ctx.hdc, plotX+plotW,  plotY);
+            SelectObject(ctx.hdc, op);
             DeleteObject(idPen);
         }
 
@@ -362,21 +362,21 @@ public:
         if (tatValue >= 0.f && tatValue <= 1.f) {
             int tx = plotX + (int)(tatValue * plotW);
             HPEN tp = CreatePen(PS_DOT, 1, tatLineColor);
-            HPEN op = (HPEN)SelectObject(hdc, tp);
-            SetBkMode(hdc, TRANSPARENT);
-            MoveToEx(hdc, tx, plotY,        nullptr);
-            LineTo  (hdc, tx, plotY+plotH);
-            SelectObject(hdc, op);
+            HPEN op = (HPEN)SelectObject(ctx.hdc, tp);
+            SetBkMode(ctx.hdc, TRANSPARENT);
+            MoveToEx(ctx.hdc, tx, plotY,        nullptr);
+            LineTo  (ctx.hdc, tx, plotY+plotH);
+            SelectObject(ctx.hdc, op);
             DeleteObject(tp);
         }
 
         // ── Hover vertical scrubber ───────────────────────────────────────────
         if (hoverX >= 0) {
             HPEN hp = CreatePen(PS_SOLID, 1, RGB(90,90,90));
-            HPEN op = (HPEN)SelectObject(hdc, hp);
-            MoveToEx(hdc, hoverX, plotY,        nullptr);
-            LineTo  (hdc, hoverX, plotY+plotH);
-            SelectObject(hdc, op);
+            HPEN op = (HPEN)SelectObject(ctx.hdc, hp);
+            MoveToEx(ctx.hdc, hoverX, plotY,        nullptr);
+            LineTo  (ctx.hdc, hoverX, plotY+plotH);
+            SelectObject(ctx.hdc, op);
             DeleteObject(hp);
         }
 
@@ -384,39 +384,39 @@ public:
         // In RGB mode draw all non-identity channels dimly first, then RGB on top
         if (activeChannel == CurveChannel::RGB) {
             if (!curveData.r.isIdentity())
-                drawCurve(hdc, curveData.r, curveColorR, 1, false);
+                drawCurve(ctx.hdc, curveData.r, curveColorR, 1, false);
             if (!curveData.g.isIdentity())
-                drawCurve(hdc, curveData.g, curveColorG, 1, false);
+                drawCurve(ctx.hdc, curveData.g, curveColorG, 1, false);
             if (!curveData.b.isIdentity())
-                drawCurve(hdc, curveData.b, curveColorB, 1, false);
-            drawCurve(hdc, activeChannelCurve(), curveColorRGB, 2, true);
+                drawCurve(ctx.hdc, curveData.b, curveColorB, 1, false);
+            drawCurve(ctx.hdc, activeChannelCurve(), curveColorRGB, 2, true);
         } else {
-            drawCurve(hdc, activeChannelCurve(), channelColor(), 2, true);
+            drawCurve(ctx.hdc, activeChannelCurve(), channelColor(), 2, true);
         }
 
         // ── Control points ────────────────────────────────────────────────────
         if (!parametricMode)
-            drawPoints(hdc);
+            drawPoints(ctx.hdc);
 
         // ── Border ────────────────────────────────────────────────────────────
         {
             HPEN bp  = CreatePen(PS_SOLID, 1, borderColor);
-            HPEN op  = (HPEN)SelectObject(hdc, bp);
+            HPEN op  = (HPEN)SelectObject(ctx.hdc, bp);
             HBRUSH nb = (HBRUSH)GetStockObject(NULL_BRUSH);
-            HBRUSH ob = (HBRUSH)SelectObject(hdc, nb);
-            Rectangle(hdc, plotX, plotY, plotX+plotW, plotY+plotH);
-            SelectObject(hdc, op); SelectObject(hdc, ob);
+            HBRUSH ob = (HBRUSH)SelectObject(ctx.hdc, nb);
+            Rectangle(ctx.hdc, plotX, plotY, plotX+plotW, plotY+plotH);
+            SelectObject(ctx.hdc, op); SelectObject(ctx.hdc, ob);
             DeleteObject(bp);
         }
 
         // ── Channel tab strip (top) ───────────────────────────────────────────
-        drawChannelTabs(hdc, fontCache);
+        drawChannelTabs(ctx.hdc, fontCache);
 
         // ── Hover tooltip (In / Out) ──────────────────────────────────────────
-        if (showInputOutput && hoverX >= 0) drawTooltip(hdc, fontCache);
+        if (showInputOutput && hoverX >= 0) drawTooltip(ctx.hdc, fontCache);
 
         // ── Parametric sliders (bottom strip) ────────────────────────────────
-        if (parametricMode) drawParametricStrip(hdc, fontCache);
+        if (parametricMode) drawParametricStrip(ctx.hdc, fontCache);
 
         needsPaint = false;
     }

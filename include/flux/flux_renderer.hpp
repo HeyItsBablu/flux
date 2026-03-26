@@ -2,14 +2,15 @@
 #define FLUX_RENDERER_HPP
 
 #include "flux_widget.hpp"
+#include "flux_platform.hpp"
 
 class Renderer {
 public:
-  static void renderWidget(HDC hdc, Widget *w, FontCache &fontCache) {
-    if (!w)
-      return;
-    w->render(hdc, fontCache);
-  }
+    static void renderWidget(GraphicsContext &ctx, Widget *w, FontCache &fontCache) {
+        if (!w)
+            return;
+        w->render(ctx, fontCache);
+    }
 };
 
 #endif // FLUX_RENDERER_HPP

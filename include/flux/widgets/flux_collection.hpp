@@ -97,7 +97,7 @@ struct ScrollbarState {
 
     // ── Rendering ─────────────────────────────────────────────────────────
 
-    void render(HDC hdc, int wx, int wy, int ww, int wh) const {
+    void render(GraphicsContext &ctx, int wx, int wy, int ww, int wh) const {
         if (!isScrollable) return;
         COLORREF thumbColor = isDragging ? colorActive
                             : isHovering ? colorHover
@@ -112,8 +112,8 @@ struct ScrollbarState {
             trackRect = { sbX, wy,              wx + ww, wy + wh               };
             thumbRect = { sbX, wy + thumbOffset, wx + ww, wy + thumbOffset + thumbLength };
         }
-        HBRUSH br = CreateSolidBrush(colorTrack);  FillRect(hdc, &trackRect, br); DeleteObject(br);
-              br = CreateSolidBrush(thumbColor);   FillRect(hdc, &thumbRect, br); DeleteObject(br);
+        HBRUSH br = CreateSolidBrush(colorTrack);  FillRect(ctx.hdc, &trackRect, br); DeleteObject(br);
+              br = CreateSolidBrush(thumbColor);   FillRect(ctx.hdc, &thumbRect, br); DeleteObject(br);
     }
 
     // ── Mouse handlers — return true if the event was consumed ────────────
@@ -260,7 +260,7 @@ public:
 
     // ── Layout ────────────────────────────────────────────────────────────
 
-    void computeLayout(HDC hdc, const BoxConstraints& constraints, FontCache& fontCache) override {
+    void computeLayout(GraphicsContext &ctx, const BoxConstraints& constraints, FontCache& fontCache) override {
         if (autoWidth  || width  > constraints.maxWidth)  width  = constraints.maxWidth;
         if (autoHeight || height > constraints.maxHeight) height = constraints.maxHeight;
 
@@ -271,7 +271,7 @@ public:
             int availH      = height - paddingTop  - paddingBottom - sbSz;
             int total       = 0;
             for (size_t i = 0; i < children.size(); i++) {
-                children[i]->computeLayout(hdc, BoxConstraints::loose(constraints.maxWidth, availH), fontCache);
+                children[i]->computeLayout(ctx, BoxConstraints::loose(constraints.maxWidth, availH), fontCache);
                 total += children[i]->width;
                 if (itemSpacing > 0 && i < children.size() - 1) total += itemSpacing;
             }
@@ -281,7 +281,7 @@ public:
             int availW      = width  - paddingLeft - paddingRight - sbSz;
             int total       = 0;
             for (size_t i = 0; i < children.size(); i++) {
-                children[i]->computeLayout(hdc, BoxConstraints::loose(availW, constraints.maxHeight), fontCache);
+                children[i]->computeLayout(ctx, BoxConstraints::loose(availW, constraints.maxHeight), fontCache);
                 total += children[i]->height;
                 if (itemSpacing > 0 && i < children.size() - 1) total += itemSpacing;
             }
@@ -327,7 +327,7 @@ public:
 
     // ── Render ────────────────────────────────────────────────────────────
 
-    void render(HDC hdc, FontCache& fontCache) override {
+    void render(GraphicsContext &ctx, FontCache& fontCache) override {
         sb.updateThumb();
         int sbSz = sb.isScrollable ? sb.size : 0;
         RECT clipRect;
@@ -337,19 +337,19 @@ public:
             clipRect = { x + paddingLeft, y + paddingTop, x + width - paddingRight - sbSz, y + height - paddingBottom };
 
         HRGN clip = CreateRectRgn(clipRect.left, clipRect.top, clipRect.right, clipRect.bottom);
-        SelectClipRgn(hdc, clip);
+        SelectClipRgn(ctx.hdc, clip);
 
-        if (hasBackground) drawRoundedRectangle(hdc);
+        if (hasBackground) drawRoundedRectangle(ctx);
 
         for (auto& child : children) {
             bool vis = sb.horizontal
                 ? (child->x + child->width  >= clipRect.left && child->x < clipRect.right)
                 : (child->y + child->height >= clipRect.top  && child->y < clipRect.bottom);
-            if (vis) child->render(hdc, fontCache);
+            if (vis) child->render(ctx, fontCache);
         }
 
-        SelectClipRgn(hdc, NULL); DeleteObject(clip);
-        sb.render(hdc, x, y, width, height);
+        SelectClipRgn(ctx.hdc, NULL); DeleteObject(clip);
+        sb.render(ctx, x, y, width, height);
         needsPaint = false;
     }
 };
@@ -706,7 +706,7 @@ public:
 
     // ── Layout ────────────────────────────────────────────────────────────
 
-    void computeLayout(HDC hdc, const BoxConstraints& constraints, FontCache& fontCache) override {
+    void computeLayout(GraphicsContext &ctx, const BoxConstraints& constraints, FontCache& fontCache) override {
         rebuildList();
 
         if (autoWidth  || width  > constraints.maxWidth)  width  = constraints.maxWidth;
@@ -719,7 +719,7 @@ public:
             int availH      = height - paddingTop  - paddingBottom - sbSz;
             int total       = 0;
             for (size_t i = 0; i < children.size(); i++) {
-                children[i]->computeLayout(hdc, BoxConstraints::loose(constraints.maxWidth, availH), fontCache);
+                children[i]->computeLayout(ctx, BoxConstraints::loose(constraints.maxWidth, availH), fontCache);
                 total += children[i]->width;
                 if (itemSpacing > 0 && i < children.size() - 1) total += itemSpacing;
             }
@@ -729,7 +729,7 @@ public:
             int availW      = width  - paddingLeft - paddingRight - sbSz;
             int total       = 0;
             for (size_t i = 0; i < children.size(); i++) {
-                children[i]->computeLayout(hdc, BoxConstraints::loose(availW, constraints.maxHeight), fontCache);
+                children[i]->computeLayout(ctx, BoxConstraints::loose(availW, constraints.maxHeight), fontCache);
                 total += children[i]->height;
                 if (itemSpacing > 0 && i < children.size() - 1) total += itemSpacing;
             }
@@ -778,7 +778,7 @@ public:
 
     // ── Render ────────────────────────────────────────────────────────────
 
-    void render(HDC hdc, FontCache& fontCache) override {
+    void render(GraphicsContext &ctx, FontCache& fontCache) override {
         sb.updateThumb();
         int sbSz = sb.isScrollable ? sb.size : 0;
         RECT clipRect;
@@ -788,19 +788,19 @@ public:
             clipRect = { x + paddingLeft, y + paddingTop, x + width - paddingRight - sbSz, y + height - paddingBottom };
 
         HRGN clip = CreateRectRgn(clipRect.left, clipRect.top, clipRect.right, clipRect.bottom);
-        SelectClipRgn(hdc, clip);
+        SelectClipRgn(ctx.hdc, clip);
 
-        if (hasBackground) drawRoundedRectangle(hdc);
+        if (hasBackground) drawRoundedRectangle(ctx);
 
         for (auto& child : children) {
             bool vis = sb.horizontal
                 ? (child->x + child->width  >= clipRect.left && child->x < clipRect.right)
                 : (child->y + child->height >= clipRect.top  && child->y < clipRect.bottom);
-            if (vis) child->render(hdc, fontCache);
+            if (vis) child->render(ctx, fontCache);
         }
 
-        SelectClipRgn(hdc, NULL); DeleteObject(clip);
-        sb.render(hdc, x, y, width, height);
+        SelectClipRgn(ctx.hdc, NULL); DeleteObject(clip);
+        sb.render(ctx, x, y, width, height);
         needsPaint = false;
     }
 };
@@ -1018,7 +1018,7 @@ public:
 
     // ── Layout ────────────────────────────────────────────────────────────
 
-    void computeLayout(HDC hdc, const BoxConstraints& constraints, FontCache& fontCache) override {
+    void computeLayout(GraphicsContext &ctx, const BoxConstraints& constraints, FontCache& fontCache) override {
         rebuildList();
 
         if (autoHeight || height > constraints.maxHeight) height = constraints.maxHeight;
@@ -1037,7 +1037,7 @@ public:
 
         for (int i = 0; i < (int)children.size(); i++) {
             int row = i / cols;
-            children[i]->computeLayout(hdc, BoxConstraints::loose(cellW, sb.viewportMain), fontCache);
+            children[i]->computeLayout(ctx, BoxConstraints::loose(cellW, sb.viewportMain), fontCache);
             rowHeights[row] = max(rowHeights[row], children[i]->height);
         }
 
@@ -1097,24 +1097,24 @@ public:
 
     // ── Render ────────────────────────────────────────────────────────────
 
-    void render(HDC hdc, FontCache& fontCache) override {
+    void render(GraphicsContext &ctx, FontCache& fontCache) override {
         sb.updateThumb();
         int sbW      = sb.isScrollable ? sb.size : 0;
         int clipRight = x + width - paddingRight - sbW;
 
         HRGN clip = CreateRectRgn(x + paddingLeft, y + paddingTop, clipRight, y + height - paddingBottom);
-        SelectClipRgn(hdc, clip);
+        SelectClipRgn(ctx.hdc, clip);
 
-        if (hasBackground) drawRoundedRectangle(hdc);
+        if (hasBackground) drawRoundedRectangle(ctx);
 
         int viewTop    = y + paddingTop;
         int viewBottom = y + height - paddingBottom;
         for (auto& child : children)
             if (child->y + child->height >= viewTop && child->y < viewBottom)
-                child->render(hdc, fontCache);
+                child->render(ctx, fontCache);
 
-        SelectClipRgn(hdc, NULL); DeleteObject(clip);
-        sb.render(hdc, x, y, width, height);
+        SelectClipRgn(ctx.hdc, NULL); DeleteObject(clip);
+        sb.render(ctx, x, y, width, height);
         needsPaint = false;
     }
 };
@@ -1134,7 +1134,7 @@ public:
     int spacingH      = 0;
     int spacingV      = 0;
 
-    void computeLayout(HDC hdc, const BoxConstraints& constraints, FontCache& fontCache) override {
+    void computeLayout(GraphicsContext &ctx, const BoxConstraints& constraints, FontCache& fontCache) override {
         if (children.empty()) {
             if (autoWidth)  width  = paddingLeft + paddingRight;
             if (autoHeight) height = paddingTop  + paddingBottom;
@@ -1150,7 +1150,7 @@ public:
         for (int i = 0; i < (int)children.size(); i++) {
             int row = i / cols;
             int childW = (crossAxisAlignment == CrossAxisAlignment::Stretch) ? cellW : min(cellW, contentWidth);
-            children[i]->computeLayout(hdc, BoxConstraints::loose(childW, constraints.maxHeight), fontCache);
+            children[i]->computeLayout(ctx, BoxConstraints::loose(childW, constraints.maxHeight), fontCache);
             rowHeights[row] = max(rowHeights[row], children[i]->height);
         }
 
@@ -1197,9 +1197,9 @@ public:
         }
     }
 
-    void render(HDC hdc, FontCache& fontCache) override {
-        if (hasBackground) drawRoundedRectangle(hdc);
-        for (auto& c : children) c->render(hdc, fontCache);
+    void render(GraphicsContext &ctx, FontCache& fontCache) override {
+        if (hasBackground) drawRoundedRectangle(ctx);
+        for (auto& c : children) c->render(ctx, fontCache);
         needsPaint = false;
     }
 

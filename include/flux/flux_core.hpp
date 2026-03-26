@@ -13,7 +13,7 @@
 // ============================================================================
 // FORWARD DECLARATIONS
 // ============================================================================
-
+ 
 template <typename T> class State;
 class ScaffoldWidget;
 
@@ -52,21 +52,13 @@ private:
 
   ULONG_PTR gdiplusToken = 0;
 
-  HDC hdcMem         = nullptr;
-  HBITMAP hbmMem     = nullptr;
-  HBITMAP hbmOld     = nullptr;
-  int bufferWidth    = 0;
-  int bufferHeight   = 0;
+BackBuffer backBuffer;
 
   static FluxUI *currentInstance;
 
   Widget *focusedWidget = nullptr;
 
-  // ----------------------------------------------------------------
-  // Back-buffer management
-  // ----------------------------------------------------------------
-  void createBackBuffer(int width, int height);
-  void destroyBackBuffer();
+
 
   // ----------------------------------------------------------------
   // OVERLAY DISPATCHERS

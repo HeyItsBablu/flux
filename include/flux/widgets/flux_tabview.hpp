@@ -95,7 +95,7 @@ public:
     }
 
     // ── computeLayout ─────────────────────────────────────────────────────────
-    void computeLayout(HDC hdc, const BoxConstraints &constraints,
+    void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                        FontCache &fontCache) override {
         if (autoWidth)  width  = constraints.maxWidth;
         if (autoHeight) height = constraints.maxHeight;
@@ -115,7 +115,7 @@ public:
         tabRects_.resize(tabs_.size());
         int curX = 0;
         for (int i = 0; i < (int)tabs_.size(); i++) {
-            int textW = _measureLabel(hdc, fontCache, tabs_[i].label);
+            int textW = _measureLabel(ctx, fontCache, tabs_[i].label);
             int tabW  = max(tabMinWidth, textW + tabPadH * 2);
             tabRects_[i] = {curX, 0, curX + tabW, tabBarHeight};
             curX += tabW;
@@ -132,7 +132,7 @@ public:
             auto &pane = tabs_[activeIndex].content;
             if (pane) {
                 pane->computeLayout(
-                    hdc, BoxConstraints::tight(innerW, innerH), fontCache);
+                    ctx, BoxConstraints::tight(innerW, innerH), fontCache);
             }
         }
 
@@ -162,11 +162,11 @@ public:
     }
 
     // ── render ────────────────────────────────────────────────────────────────
-    void render(HDC hdc, FontCache &fontCache) override {
+    void render(GraphicsContext &ctx, FontCache &fontCache) override {
         if (!visible) return;
 
-        _renderTabBar(hdc, fontCache);
-        _renderContentArea(hdc, fontCache);
+        _renderTabBar(ctx, fontCache);
+        _renderContentArea(ctx, fontCache);
 
         needsPaint = false;
     }
@@ -388,29 +388,29 @@ private:
 
     // ── Rendering ─────────────────────────────────────────────────────────────
 
-    void _renderTabBar(HDC hdc, FontCache &fontCache) const {
+    void _renderTabBar(GraphicsContext &ctx, FontCache &fontCache) const {
         // Bar background
         {
             HBRUSH hb = CreateSolidBrush(barBgColor);
             RECT   br = {x, y, x + width, y + tabBarHeight};
-            FillRect(hdc, &br, hb);
+            FillRect(ctx.hdc, &br, hb);
             DeleteObject(hb);
         }
 
         // Bottom border of bar
         {
             HPEN pen = CreatePen(PS_SOLID, 1, barBorderColor);
-            HPEN old = (HPEN)SelectObject(hdc, pen);
-            MoveToEx(hdc, x,         y + tabBarHeight, nullptr);
-            LineTo  (hdc, x + width, y + tabBarHeight);
-            SelectObject(hdc, old);
+            HPEN old = (HPEN)SelectObject(ctx.hdc, pen);
+            MoveToEx(ctx.hdc, x,         y + tabBarHeight, nullptr);
+            LineTo  (ctx.hdc, x + width, y + tabBarHeight);
+            SelectObject(ctx.hdc, old);
             DeleteObject(pen);
         }
 
         // Tab buttons
         HFONT hFont    = fontCache.getFont(tabFontSize, FontWeight::Normal);
-        HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
-        SetBkMode(hdc, TRANSPARENT);
+        HFONT hOldFont = (HFONT)SelectObject(ctx.hdc, hFont);
+        SetBkMode(ctx.hdc, TRANSPARENT);
 
         for (int i = 0; i < (int)tabs_.size(); i++) {
             const RECT &r   = tabRects_[i];
@@ -424,26 +424,26 @@ private:
             COLORREF bgCol = isActive  ? activeTabBg :
                              isHovered ? hoverTabBg  : barBgColor;
             HBRUSH hb = CreateSolidBrush(bgCol);
-            FillRect(hdc, &absR, hb);
+            FillRect(ctx.hdc, &absR, hb);
             DeleteObject(hb);
 
             // Right divider between inactive tabs
             if (!isActive && i + 1 < (int)tabs_.size() && (i + 1) != activeIndex) {
                 HPEN dp  = CreatePen(PS_SOLID, 1, barBorderColor);
-                HPEN odp = (HPEN)SelectObject(hdc, dp);
-                MoveToEx(hdc, x + r.right - 1, y + 8,                    nullptr);
-                LineTo  (hdc, x + r.right - 1, y + tabBarHeight - 8);
-                SelectObject(hdc, odp);
+                HPEN odp = (HPEN)SelectObject(ctx.hdc, dp);
+                MoveToEx(ctx.hdc, x + r.right - 1, y + 8,                    nullptr);
+                LineTo  (ctx.hdc, x + r.right - 1, y + tabBarHeight - 8);
+                SelectObject(ctx.hdc, odp);
                 DeleteObject(dp);
             }
 
             // Label
-            SetTextColor(hdc, isActive ? activeTabText : inactiveTabText);
-            DrawTextA(hdc, tabs_[i].label.c_str(), -1, &absR,
+            SetTextColor(ctx.hdc, isActive ? activeTabText : inactiveTabText);
+            DrawTextA(ctx.hdc, tabs_[i].label.c_str(), -1, &absR,
                       DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         }
 
-        SelectObject(hdc, hOldFont);
+        SelectObject(ctx.hdc, hOldFont);
 
         // Active indicator bar
         if (activeIndex >= 0 && activeIndex < (int)tabRects_.size()) {
@@ -453,12 +453,12 @@ private:
                          y + tabBarHeight,
                          x + ar.right,
                          y + tabBarHeight + indicatorHeight};
-            FillRect(hdc, &ir, ib);
+            FillRect(ctx.hdc, &ir, ib);
             DeleteObject(ib);
         }
     }
 
-    void _renderContentArea(HDC hdc, FontCache &fontCache) const {
+    void _renderContentArea(GraphicsContext &ctx, FontCache &fontCache) const {
         int paneTop = y + tabBarHeight + indicatorHeight;
         int paneH   = height - tabBarHeight - indicatorHeight;
 
@@ -466,36 +466,36 @@ private:
         if (hasContentBg) {
             HBRUSH cb = CreateSolidBrush(contentBgColor);
             RECT   cr = {x, paneTop, x + width, y + height};
-            FillRect(hdc, &cr, cb);
+            FillRect(ctx.hdc, &cr, cb);
             DeleteObject(cb);
         }
 
         // Content border
         if (hasContentBorder) {
             HPEN   cp  = CreatePen(PS_SOLID, 1, contentBorderColor);
-            HPEN   old = (HPEN)SelectObject(hdc, cp);
+            HPEN   old = (HPEN)SelectObject(ctx.hdc, cp);
             HBRUSH nb  = (HBRUSH)GetStockObject(NULL_BRUSH);
-            HBRUSH ob  = (HBRUSH)SelectObject(hdc, nb);
-            Rectangle(hdc, x, paneTop, x + width, y + height);
-            SelectObject(hdc, ob);
-            SelectObject(hdc, old);
+            HBRUSH ob  = (HBRUSH)SelectObject(ctx.hdc, nb);
+            Rectangle(ctx.hdc, x, paneTop, x + width, y + height);
+            SelectObject(ctx.hdc, ob);
+            SelectObject(ctx.hdc, old);
             DeleteObject(cp);
         }
 
         // Active pane content
         if (activeIndex >= 0 && activeIndex < (int)tabs_.size()) {
             auto &pane = tabs_[activeIndex].content;
-            if (pane) pane->render(hdc, fontCache);
+            if (pane) pane->render(ctx, fontCache);
         }
     }
 
     // ── Text measurement ──────────────────────────────────────────────────────
-    int _measureLabel(HDC hdc, FontCache &fc, const std::string &label) const {
+    int _measureLabel(GraphicsContext &ctx, FontCache &fc, const std::string &label) const {
         HFONT hFont    = fc.getFont(tabFontSize, FontWeight::Normal);
-        HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
+        HFONT hOldFont = (HFONT)SelectObject(ctx.hdc, hFont);
         SIZE  sz       = {};
-        GetTextExtentPoint32A(hdc, label.c_str(), (int)label.size(), &sz);
-        SelectObject(hdc, hOldFont);
+        GetTextExtentPoint32A(ctx.hdc, label.c_str(), (int)label.size(), &sz);
+        SelectObject(ctx.hdc, hOldFont);
         return sz.cx;
     }
 };

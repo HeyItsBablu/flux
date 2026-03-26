@@ -51,7 +51,7 @@ public:
     std::function<void(float)> onRatioChanged;
 
     // ── computeLayout ────────────────────────────────────────────────────────
-    void computeLayout(HDC hdc, const BoxConstraints &constraints,
+    void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                        FontCache &fontCache) override {
         // Fill available space (like Scaffold/Column/ExpandedWidget)
         if (autoWidth)  width  = constraints.maxWidth;
@@ -80,10 +80,10 @@ public:
             auto &p0 = children[0];
             if (!vertical) {
                 int p0W = _pane0Size();
-                p0->computeLayout(hdc, BoxConstraints::tight(p0W, height), fontCache);
+                p0->computeLayout(ctx, BoxConstraints::tight(p0W, height), fontCache);
             } else {
                 int p0H = _pane0Size();
-                p0->computeLayout(hdc, BoxConstraints::tight(width, p0H), fontCache);
+                p0->computeLayout(ctx, BoxConstraints::tight(width, p0H), fontCache);
             }
         }
 
@@ -92,10 +92,10 @@ public:
             auto &p1 = children[1];
             if (!vertical) {
                 int p1W = _pane1Size();
-                p1->computeLayout(hdc, BoxConstraints::tight(p1W, height), fontCache);
+                p1->computeLayout(ctx, BoxConstraints::tight(p1W, height), fontCache);
             } else {
                 int p1H = _pane1Size();
-                p1->computeLayout(hdc, BoxConstraints::tight(width, p1H), fontCache);
+                p1->computeLayout(ctx, BoxConstraints::tight(width, p1H), fontCache);
             }
         }
 
@@ -152,23 +152,23 @@ public:
     }
 
     // ── render ───────────────────────────────────────────────────────────────
-    void render(HDC hdc, FontCache &fontCache) override {
+    void render(GraphicsContext &ctx, FontCache &fontCache) override {
         if (!visible) return;
 
         // Background (optional)
         if (hasBackground)
-            drawRoundedRectangle(hdc);
+            drawRoundedRectangle(ctx);
 
         // Render pane 0
         if (children.size() >= 1)
-            children[0]->render(hdc, fontCache);
+            children[0]->render(ctx, fontCache);
 
         // Render divider
-        _renderDivider(hdc);
+        _renderDivider(ctx);
 
         // Render pane 1
         if (children.size() >= 2)
-            children[1]->render(hdc, fontCache);
+            children[1]->render(ctx, fontCache);
 
         needsPaint = false;
     }
@@ -430,13 +430,13 @@ private:
     }
 
     // Draw the divider strip with optional grip dots
-    void _renderDivider(HDC hdc) const {
+    void _renderDivider(GraphicsContext &ctx) const {
         COLORREF col;
         if (_dragging)         col = dividerDragColor;
         else if (_dividerHovered) col = dividerHoverColor;
         else                   col = dividerColor;
 
-        Gdiplus::Graphics g(hdc);
+        Gdiplus::Graphics g(ctx.hdc);
         g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
 
         // Divider background

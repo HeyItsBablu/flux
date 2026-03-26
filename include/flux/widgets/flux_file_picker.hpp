@@ -266,7 +266,7 @@ public:
 
     // ── Layout ────────────────────────────────────────────────────────────────
 
-    void computeLayout(HDC /*hdc*/, const BoxConstraints &constraints,
+    void computeLayout(GraphicsContext &/*ctx*/, const BoxConstraints &constraints,
                        FontCache & /*fc*/) override {
         if (autoWidth) width = constraints.maxWidth;
         height = btnHeight;
@@ -282,7 +282,7 @@ public:
 
     // ── Render ────────────────────────────────────────────────────────────────
 
-    void render(HDC hdc, FontCache &fontCache) override {
+    void render(GraphicsContext &ctx, FontCache &fontCache) override {
         if (!visible) return;
 
         // ── Button ────────────────────────────────────────────────────────────
@@ -292,23 +292,23 @@ public:
         HBRUSH   br = CreateSolidBrush(bg);
         HPEN     pn = CreatePen(PS_SOLID, 1,
                                 isFocused ? accentColor : btnBorderColor);
-        HPEN   opn  = (HPEN)  SelectObject(hdc, pn);
-        HBRUSH obr  = (HBRUSH)SelectObject(hdc, br);
-        RoundRect(hdc, x, y, x + btnW_, y + height,
+        HPEN   opn  = (HPEN)  SelectObject(ctx.hdc, pn);
+        HBRUSH obr  = (HBRUSH)SelectObject(ctx.hdc, br);
+        RoundRect(ctx.hdc, x, y, x + btnW_, y + height,
                   borderRadius * 2, borderRadius * 2);
-        SelectObject(hdc, opn); SelectObject(hdc, obr);
+        SelectObject(ctx.hdc, opn); SelectObject(ctx.hdc, obr);
         DeleteObject(br);       DeleteObject(pn);
 
         // Button label
         {
             HFONT  hf  = fontCache.getFont(fontSize, FontWeight::Normal);
-            HFONT  ohf = (HFONT)SelectObject(hdc, hf);
-            SetBkMode(hdc, TRANSPARENT);
-            SetTextColor(hdc, btnTextColor);
+            HFONT  ohf = (HFONT)SelectObject(ctx.hdc, hf);
+            SetBkMode(ctx.hdc, TRANSPARENT);
+            SetTextColor(ctx.hdc, btnTextColor);
             RECT tr = {x + btnPadding, y, x + btnW_ - btnPadding, y + height};
-            DrawTextA(hdc, _label().c_str(), -1, &tr,
+            DrawTextA(ctx.hdc, _label().c_str(), -1, &tr,
                       DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-            SelectObject(hdc, ohf);
+            SelectObject(ctx.hdc, ohf);
         }
 
         // ── Path display ──────────────────────────────────────────────────────
@@ -317,26 +317,26 @@ public:
             int pathRight = x + width - clearW_ - (clearW_ ? 4 : 0);
 
             HFONT  hf  = fontCache.getFont(fontSize - 1, FontWeight::Normal);
-            HFONT  ohf = (HFONT)SelectObject(hdc, hf);
-            SetBkMode(hdc, TRANSPARENT);
+            HFONT  ohf = (HFONT)SelectObject(ctx.hdc, hf);
+            SetBkMode(ctx.hdc, TRANSPARENT);
 
             std::string displayPath = _displayPath();
             bool isPlaceholder = displayPath.empty() || path_.empty();
 
-            SetTextColor(hdc, isPlaceholder ? placeholderColor : pathTextColor);
+            SetTextColor(ctx.hdc, isPlaceholder ? placeholderColor : pathTextColor);
 
             HRGN clip = CreateRectRgn(pathX, y, pathRight, y + height);
-            SelectClipRgn(hdc, clip);
+            SelectClipRgn(ctx.hdc, clip);
             DeleteObject(clip);
 
             RECT pr = {pathX, y, pathRight, y + height};
-            DrawTextA(hdc, isPlaceholder ? _placeholder().c_str()
+            DrawTextA(ctx.hdc, isPlaceholder ? _placeholder().c_str()
                                          : displayPath.c_str(),
                       -1, &pr,
                       DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
-            SelectClipRgn(hdc, nullptr);
-            SelectObject(hdc, ohf);
+            SelectClipRgn(ctx.hdc, nullptr);
+            SelectObject(ctx.hdc, ohf);
         }
 
         // ── Clear (×) button ──────────────────────────────────────────────────
@@ -346,19 +346,19 @@ public:
 
             HBRUSH cb  = CreateSolidBrush(clearHov ? btnHoverColor : btnBgColor);
             HPEN   cp  = CreatePen(PS_SOLID, 1, btnBorderColor);
-            HPEN   ocp = (HPEN)  SelectObject(hdc, cp);
-            HBRUSH ocb = (HBRUSH)SelectObject(hdc, cb);
-            RoundRect(hdc, cx, y, cx + clearW_, y + height,
+            HPEN   ocp = (HPEN)  SelectObject(ctx.hdc, cp);
+            HBRUSH ocb = (HBRUSH)SelectObject(ctx.hdc, cb);
+            RoundRect(ctx.hdc, cx, y, cx + clearW_, y + height,
                       borderRadius * 2, borderRadius * 2);
-            SelectObject(hdc, ocp); SelectObject(hdc, ocb);
+            SelectObject(ctx.hdc, ocp); SelectObject(ctx.hdc, ocb);
             DeleteObject(cb);       DeleteObject(cp);
 
             HFONT  hf  = fontCache.getFont(11, FontWeight::Normal);
-            HFONT  ohf = (HFONT)SelectObject(hdc, hf);
-            SetTextColor(hdc, clearHov ? RGB(200, 60, 60) : RGB(140, 140, 150));
+            HFONT  ohf = (HFONT)SelectObject(ctx.hdc, hf);
+            SetTextColor(ctx.hdc, clearHov ? RGB(200, 60, 60) : RGB(140, 140, 150));
             RECT xr = {cx, y, cx + clearW_, y + height};
-            DrawTextA(hdc, "x", -1, &xr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-            SelectObject(hdc, ohf);
+            DrawTextA(ctx.hdc, "x", -1, &xr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            SelectObject(ctx.hdc, ohf);
         }
 
         needsPaint = false;

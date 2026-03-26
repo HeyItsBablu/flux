@@ -19,7 +19,7 @@ public:
   // shrink-wrapping the largest child.
   bool expand = false;
 
-  void computeLayout(HDC hdc, const BoxConstraints &constraints,
+  void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
 
     BoxConstraints self = selfConstraints(constraints);
@@ -36,7 +36,7 @@ public:
               ? BoxConstraints::loose(content.maxWidth, content.maxHeight)
               : BoxConstraints(0, content.maxWidth, 0, content.maxHeight);
 
-      child->computeLayout(hdc, childConstraints, fontCache);
+      child->computeLayout(ctx, childConstraints, fontCache);
     }
 
     // -----------------------------------------------------------------------
@@ -332,7 +332,7 @@ inline WidgetPtr Positioned(WidgetPtr child, State<TX> &xState, FX xTransform,
 // --- Column Widget ---
 class ColumnWidget : public Widget {
 public:
-  void computeLayout(HDC hdc, const BoxConstraints &constraints,
+  void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
 
     // Intersect incoming constraints with our own min/max, then strip padding.
@@ -353,7 +353,7 @@ public:
       } else {
         BoxConstraints childConstraints(0, content.maxWidth, 0,
                                         content.maxHeight);
-        child->computeLayout(hdc, childConstraints, fontCache);
+        child->computeLayout(ctx, childConstraints, fontCache);
         fixedHeight += child->height + child->marginTop + child->marginBottom;
       }
     }
@@ -382,7 +382,7 @@ public:
           child->height = expandedH;
 
           child->computeLayout(
-              hdc, BoxConstraints::tight(content.maxWidth, expandedH),
+              ctx, BoxConstraints::tight(content.maxWidth, expandedH),
               fontCache);
         }
       }
@@ -546,7 +546,7 @@ public:
 // --- Row Widget ---
 class RowWidget : public Widget {
 public:
-  void computeLayout(HDC hdc, const BoxConstraints &constraints,
+  void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
 
     BoxConstraints self = selfConstraints(constraints);
@@ -564,7 +564,7 @@ public:
       } else {
         BoxConstraints childConstraints(0, content.maxWidth, 0,
                                         content.maxHeight);
-        child->computeLayout(hdc, childConstraints, fontCache);
+        child->computeLayout(ctx, childConstraints, fontCache);
         fixedWidth += child->width + child->marginLeft + child->marginRight;
       }
     }
@@ -593,7 +593,7 @@ public:
           child->height = content.maxHeight;
 
           child->computeLayout(
-              hdc, BoxConstraints::tight(expandedW, content.maxHeight),
+              ctx, BoxConstraints::tight(expandedW, content.maxHeight),
               fontCache);
         }
       }
@@ -743,7 +743,7 @@ public:
 // --- Container Widget ---
 class ContainerWidget : public Widget {
 public:
-  void computeLayout(HDC hdc, const BoxConstraints &constraints,
+  void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
                       
 
@@ -758,7 +758,7 @@ public:
           BoxConstraints(0, maxW, 0, maxH)
               .deflate(paddingLeft + paddingRight, paddingTop + paddingBottom);
 
-      children[0]->computeLayout(hdc, childConstraints, fontCache);
+      children[0]->computeLayout(ctx, childConstraints, fontCache);
 
       if (autoWidth)
         width =
@@ -1090,7 +1090,7 @@ public:
 // --- Center Widget ---
 class CenterWidget : public Widget {
 public:
-  void computeLayout(HDC hdc, const BoxConstraints &constraints,
+  void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     BoxConstraints self = selfConstraints(constraints);
 
@@ -1103,7 +1103,7 @@ public:
     BoxConstraints childConstraints = contentConstraints(self);
 
     if (!children.empty())
-      children[0]->computeLayout(hdc, childConstraints, fontCache);
+      children[0]->computeLayout(ctx, childConstraints, fontCache);
 
     needsLayout = false;
   }
@@ -1125,7 +1125,7 @@ public:
 // --- SizedBox Widget ---
 class SizedBoxWidget : public Widget {
 public:
-  void computeLayout(HDC hdc, const BoxConstraints &constraints,
+  void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     // width/height are pre-set; clamp to constraints but respect fixed size.
     BoxConstraints self = selfConstraints(constraints);
@@ -1135,7 +1135,7 @@ public:
     if (!children.empty()) {
       BoxConstraints childConstraints(0, width - paddingLeft - paddingRight, 0,
                                       height - paddingTop - paddingBottom);
-      children[0]->computeLayout(hdc, childConstraints, fontCache);
+      children[0]->computeLayout(ctx, childConstraints, fontCache);
     }
     needsLayout = false;
   }
@@ -1146,7 +1146,7 @@ class ExpandedWidget : public Widget {
 public:
   bool isExpanded() const override { return true; }
 
-  void computeLayout(HDC hdc, const BoxConstraints &/*constraints*/,
+  void computeLayout(GraphicsContext &ctx, const BoxConstraints &/*constraints*/,
                      FontCache &fontCache) override {
     // Parent (Row/Column) pre-sets width and height to the allocated flex size;
     // pass that down as tight constraints to children.
@@ -1154,7 +1154,7 @@ public:
     int contentH = height - paddingTop - paddingBottom;
 
     if (!children.empty()) {
-      children[0]->computeLayout(hdc, BoxConstraints::loose(contentW, contentH),
+      children[0]->computeLayout(ctx, BoxConstraints::loose(contentW, contentH),
                                  fontCache);
     }
 

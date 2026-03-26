@@ -215,16 +215,16 @@ public:
   // Core layout / render virtuals
   // -----------------------------------------------------------------------
 
-  virtual void computeLayout(HDC hdc, const BoxConstraints &constraints,
+  virtual void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                              FontCache &fontCache);
 
   virtual void positionChildren(int contentX, int contentY, int contentWidth,
                                 int contentHeight);
 
-  virtual void render(HDC hdc, FontCache &fontCache);
+  virtual void render(GraphicsContext &ctx, FontCache &fontCache);
 
-  void measureText(HDC hdc, FontCache &fontCache);
-  void renderText(HDC hdc, FontCache &fontCache,
+  void measureText(GraphicsContext &ctx, FontCache &fontCache);
+  void renderText(GraphicsContext &ctx, FontCache &fontCache,
                   UINT format = DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
   // -----------------------------------------------------------------------
@@ -365,7 +365,7 @@ protected:
       height = maxHeight;
   }
 
-  void drawRoundedRectangle(HDC hdc);
+  void drawRoundedRectangle(GraphicsContext &ctx);
 };
 
 // ============================================================================

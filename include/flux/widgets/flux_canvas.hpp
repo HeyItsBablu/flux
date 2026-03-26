@@ -707,14 +707,14 @@ public:
   std::function<void(float zoom)> onViewportChanged;
   std::function<void(int w, int h)> onGLResize;
 
-  void computeLayout(HDC, const BoxConstraints &c, FontCache &) override {
+  void computeLayout(GraphicsContext &/*ctx*/, const BoxConstraints &c, FontCache &) override {
     width  = c.clampWidth (autoWidth  ? c.maxWidth  : width);
     height = c.clampHeight(autoHeight ? c.maxHeight : height);
     needsLayout = false;
   }
 
-  void render(HDC hdc, FontCache &) override {
-    ensureWindows(hdc);
+  void render(GraphicsContext &ctx, FontCache &) override {
+    ensureWindows(ctx.hdc);
     moveWindows();
     tickAndRender();
     needsPaint = false;

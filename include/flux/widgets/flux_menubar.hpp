@@ -93,7 +93,7 @@ public:
     }
 
     // ── Layout ────────────────────────────────────────────────────────────────
-    void computeLayout(HDC hdc, const BoxConstraints &constraints,
+    void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                        FontCache &fontCache) override {
         if (autoWidth)  width  = constraints.maxWidth;
         height     = barHeight;
@@ -103,7 +103,7 @@ public:
         buttonRects_.resize(entries_.size());
         int curX = 0;
         for (int i = 0; i < (int)entries_.size(); i++) {
-            int textW = _measureLabel(hdc, fontCache, entries_[i].label);
+            int textW = _measureLabel(ctx, fontCache, entries_[i].label);
             int btnW  = textW + buttonPadH * 2;
             buttonRects_[i] = {curX, 0, curX + btnW, barHeight};
             curX += btnW;
@@ -116,7 +116,7 @@ public:
     void positionChildren(int, int, int, int) override {}
 
     // ── Render the bar ────────────────────────────────────────────────────────
-    void render(HDC hdc, FontCache &fontCache) override {
+    void render(GraphicsContext &ctx, FontCache &fontCache) override {
         if (!visible) return;
 
         // Flush any deferred hot-track switch (safe here — not inside event dispatch)
@@ -130,7 +130,7 @@ public:
 
         // Bar background
         {
-            Gdiplus::Graphics g(hdc);
+            Gdiplus::Graphics g(ctx.hdc);
             Gdiplus::Color bg(255, GetRValue(barBgColor),
                               GetGValue(barBgColor), GetBValue(barBgColor));
             Gdiplus::SolidBrush brush(bg);
@@ -145,8 +145,8 @@ public:
 
         // Buttons
         HFONT  hFont    = fontCache.getFont(menuFontSize, FontWeight::Normal);
-        HFONT  hOldFont = (HFONT)SelectObject(hdc, hFont);
-        SetBkMode(hdc, TRANSPARENT);
+        HFONT  hOldFont = (HFONT)SelectObject(ctx.hdc, hFont);
+        SetBkMode(ctx.hdc, TRANSPARENT);
 
         for (int i = 0; i < (int)entries_.size(); i++) {
             RECT &r = buttonRects_[i];
@@ -158,22 +158,22 @@ public:
             if (isOpen || isHover) {
                 COLORREF fill = isOpen ? btnOpenColor : btnHoverColor;
                 HBRUSH hb = CreateSolidBrush(fill);
-                FillRect(hdc, &absR, hb);
+                FillRect(ctx.hdc, &absR, hb);
                 DeleteObject(hb);
             }
 
-            SetTextColor(hdc, btnTextColor);
-            DrawTextA(hdc, entries_[i].label.c_str(), -1, &absR,
+            SetTextColor(ctx.hdc, btnTextColor);
+            DrawTextA(ctx.hdc, entries_[i].label.c_str(), -1, &absR,
                       DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         }
 
-        SelectObject(hdc, hOldFont);
+        SelectObject(ctx.hdc, hOldFont);
         needsPaint = false;
     }
 
     // ── renderPopupContent ────────────────────────────────────────────────────
     // Draws the open drop-down list into the layered popup DC.
-    void renderPopupContent(HDC hdc, FontCache &fontCache) override {
+    void renderPopupContent(GraphicsContext &ctx, FontCache &fontCache) override {
         if (openMenuIndex < 0) return;
         const auto &items = entries_[openMenuIndex].items;
         if (items.empty()) return;
@@ -187,7 +187,7 @@ public:
             HRGN   sr = CreateRoundRectRgn(shadowOffset, shadowOffset,
                                            mW + shadowOffset, mH + shadowOffset,
                                            menuBorderRadius * 2, menuBorderRadius * 2);
-            FillRgn(hdc, sr, sb);
+            FillRgn(ctx.hdc, sr, sb);
             DeleteObject(sr); DeleteObject(sb);
         }
 
@@ -195,18 +195,18 @@ public:
         {
             HPEN   pen   = CreatePen(PS_SOLID, 1, menuBorderColor);
             HBRUSH brush = CreateSolidBrush(menuBgColor);
-            HPEN   op    = (HPEN)  SelectObject(hdc, pen);
-            HBRUSH ob    = (HBRUSH)SelectObject(hdc, brush);
-            RoundRect(hdc, 0, 0, mW, mH,
+            HPEN   op    = (HPEN)  SelectObject(ctx.hdc, pen);
+            HBRUSH ob    = (HBRUSH)SelectObject(ctx.hdc, brush);
+            RoundRect(ctx.hdc, 0, 0, mW, mH,
                       menuBorderRadius * 2, menuBorderRadius * 2);
-            SelectObject(hdc, ob); SelectObject(hdc, op);
+            SelectObject(ctx.hdc, ob); SelectObject(ctx.hdc, op);
             DeleteObject(brush);   DeleteObject(pen);
         }
 
         // Items
         HFONT hFont    = fontCache.getFont(menuFontSize, FontWeight::Normal);
-        HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
-        SetBkMode(hdc, TRANSPARENT);
+        HFONT hOldFont = (HFONT)SelectObject(ctx.hdc, hFont);
+        SetBkMode(ctx.hdc, TRANSPARENT);
 
         int curY = menuPadV;
         for (int i = 0; i < (int)items.size(); i++) {
@@ -214,25 +214,25 @@ public:
             if (item.type == ContextMenuItem::Type::Separator) {
                 int sy = curY + separatorHeight / 2;
                 HPEN sp  = CreatePen(PS_SOLID, 1, separatorColor);
-                HPEN osp = (HPEN)SelectObject(hdc, sp);
-                MoveToEx(hdc, menuPadH,       sy, nullptr);
-                LineTo  (hdc, mW - menuPadH,  sy);
-                SelectObject(hdc, osp); DeleteObject(sp);
+                HPEN osp = (HPEN)SelectObject(ctx.hdc, sp);
+                MoveToEx(ctx.hdc, menuPadH,       sy, nullptr);
+                LineTo  (ctx.hdc, mW - menuPadH,  sy);
+                SelectObject(ctx.hdc, osp); DeleteObject(sp);
                 curY += separatorHeight;
             } else {
                 if (i == hoveredItem && item.enabled) {
                     HBRUSH hb = CreateSolidBrush(itemHoverColor);
                     RECT   ir = {2, curY, mW - 2, curY + itemHeight};
-                    FillRect(hdc, &ir, hb); DeleteObject(hb);
+                    FillRect(ctx.hdc, &ir, hb); DeleteObject(hb);
                 }
-                SetTextColor(hdc, item.enabled ? itemTextColor : itemDisabledColor);
+                SetTextColor(ctx.hdc, item.enabled ? itemTextColor : itemDisabledColor);
                 RECT tr = {menuPadH, curY, mW - menuPadH, curY + itemHeight};
-                DrawTextA(hdc, item.label.c_str(), -1, &tr,
+                DrawTextA(ctx.hdc, item.label.c_str(), -1, &tr,
                           DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
                 curY += itemHeight;
             }
         }
-        SelectObject(hdc, hOldFont);
+        SelectObject(ctx.hdc, hOldFont);
     }
 
     // ── Mouse events ──────────────────────────────────────────────────────────
@@ -505,12 +505,12 @@ private:
 
     // ── Text measurement ──────────────────────────────────────────────────────
 
-    int _measureLabel(HDC hdc, FontCache &fc, const std::string &label) const {
+    int _measureLabel(GraphicsContext &ctx, FontCache &fc, const std::string &label) const {
         HFONT hFont    = fc.getFont(menuFontSize, FontWeight::Normal);
-        HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
+        HFONT hOldFont = (HFONT)SelectObject(ctx.hdc, hFont);
         SIZE  sz       = {};
-        GetTextExtentPoint32A(hdc, label.c_str(), (int)label.size(), &sz);
-        SelectObject(hdc, hOldFont);
+        GetTextExtentPoint32A(ctx.hdc, label.c_str(), (int)label.size(), &sz);
+        SelectObject(ctx.hdc, hOldFont);
         return sz.cx;
     }
 };

@@ -82,7 +82,7 @@ public:
   }
 
   // --- Layout ---
-  void computeLayout(HDC hdc, const BoxConstraints &constraints,
+  void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     if (autoWidth)
       width = constraints.maxWidth;
@@ -91,20 +91,20 @@ public:
 
     BoxConstraints childConstraints = BoxConstraints::tight(width, height);
     for (auto &child : children)
-      child->computeLayout(hdc, childConstraints, fontCache);
+      child->computeLayout(ctx, childConstraints, fontCache);
 
     applyConstraints();
     needsLayout = false;
   }
 
   // --- Render (overlays painted after normal tree) ---
-  void render(HDC hdc, FontCache &fontCache) override {
+  void render(GraphicsContext &ctx, FontCache &fontCache) override {
     for (auto &child : children)
-      child->render(hdc, fontCache);
+      child->render(ctx, fontCache);
 
     for (const auto &entry : overlayStack)
       if (entry.renderer)
-        entry.renderer(hdc, fontCache);
+        entry.renderer(ctx.hdc, fontCache);
 
     needsPaint = false;
   }
@@ -113,14 +113,14 @@ public:
 // --- AppBar Widget ---
 class AppBarWidget : public Widget {
 public:
-  void computeLayout(HDC hdc, const BoxConstraints &constraints,
+  void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     if (autoWidth)
       width = constraints.maxWidth;
 
     if (!children.empty()) {
       children[0]->computeLayout(
-          hdc,
+          ctx,
           BoxConstraints::loose(width - paddingLeft - paddingRight,
                                 height - paddingTop - paddingBottom),
           fontCache);

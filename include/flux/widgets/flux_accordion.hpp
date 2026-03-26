@@ -157,7 +157,7 @@ public:
     int panelCount() const { return (int)panels_.size(); }
 
     // ── Layout ────────────────────────────────────────────────────────────────
-    void computeLayout(HDC hdc, const BoxConstraints &constraints,
+    void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                        FontCache &fontCache) override {
         if (autoWidth) width = constraints.maxWidth;
         applyConstraints();
@@ -169,7 +169,7 @@ public:
             if (p.expanded && p.body) {
                 int innerW = max(0, width - bodyPadding * 2);
                 BoxConstraints bc = BoxConstraints::loose(innerW, constraints.maxHeight);
-                p.body->computeLayout(hdc, bc, fontCache);
+                p.body->computeLayout(ctx, bc, fontCache);
                 panelBodyHeights_[i] = p.body->height + bodyPadding * 2;
             }
         }
@@ -217,41 +217,41 @@ public:
     }
 
     // ── Render ────────────────────────────────────────────────────────────────
-    void render(HDC hdc, FontCache &fontCache) override {
+    void render(GraphicsContext &ctx, FontCache &fontCache) override {
         if (!visible) return;
 
         // Outer border / background
         if (showBorder) {
             HPEN   pen  = CreatePen(PS_SOLID, 1, borderColor);
             HBRUSH fill = (HBRUSH)GetStockObject(NULL_BRUSH);
-            HPEN   old  = (HPEN)SelectObject(hdc, pen);
-            HBRUSH oldb = (HBRUSH)SelectObject(hdc, fill);
-            RoundRect(hdc, x, y, x + width, y + height, borderRadius * 2, borderRadius * 2);
-            SelectObject(hdc, old);
-            SelectObject(hdc, oldb);
+            HPEN   old  = (HPEN)SelectObject(ctx.hdc, pen);
+            HBRUSH oldb = (HBRUSH)SelectObject(ctx.hdc, fill);
+            RoundRect(ctx.hdc, x, y, x + width, y + height, borderRadius * 2, borderRadius * 2);
+            SelectObject(ctx.hdc, old);
+            SelectObject(ctx.hdc, oldb);
             DeleteObject(pen);
         }
 
         // Clip to widget bounds so body content doesn't bleed
         HRGN clip = CreateRoundRectRgn(x, y, x + width, y + height,
                                        borderRadius * 2, borderRadius * 2);
-        SelectClipRgn(hdc, clip);
+        SelectClipRgn(ctx.hdc, clip);
         DeleteObject(clip);
 
         int curY = y + (showBorder ? 1 : 0);
 
         for (int i = 0; i < (int)panels_.size(); i++) {
             auto &p = panels_[i];
-            _renderHeader(hdc, fontCache, i, curY);
+            _renderHeader(ctx, fontCache, i, curY);
             curY += headerHeight;
 
             // Separator between panels (but not after the last one)
             if (i < (int)panels_.size() - 1 && showSeparators) {
                 HPEN sep = CreatePen(PS_SOLID, 1, separatorColor);
-                HPEN old = (HPEN)SelectObject(hdc, sep);
-                MoveToEx(hdc, x + 1,         curY, nullptr);
-                LineTo  (hdc, x + width - 1, curY);
-                SelectObject(hdc, old);
+                HPEN old = (HPEN)SelectObject(ctx.hdc, sep);
+                MoveToEx(ctx.hdc, x + 1,         curY, nullptr);
+                LineTo  (ctx.hdc, x + width - 1, curY);
+                SelectObject(ctx.hdc, old);
                 DeleteObject(sep);
                 curY += separatorHeight;
             }
@@ -261,17 +261,17 @@ public:
             if (bodyH > 0) {
                 HBRUSH bb = CreateSolidBrush(bodyBgColor);
                 RECT   br = {x + 1, curY, x + width - 1, curY + bodyH};
-                FillRect(hdc, &br, bb);
+                FillRect(ctx.hdc, &br, bb);
                 DeleteObject(bb);
 
                 if (p.expanded && p.body) {
-                    p.body->render(hdc, fontCache);
+                    p.body->render(ctx, fontCache);
                 }
             }
             curY += bodyH;
         }
 
-        SelectClipRgn(hdc, nullptr);
+        SelectClipRgn(ctx.hdc, nullptr);
         needsPaint = false;
     }
 
@@ -412,7 +412,7 @@ private:
 
     // ── Header rendering ──────────────────────────────────────────────────────
 
-    void _renderHeader(HDC hdc, FontCache &fontCache, int idx, int topY) const {
+    void _renderHeader(GraphicsContext &ctx, FontCache &fontCache, int idx, int topY) const {
         const auto &p = panels_[idx];
         bool isHov = (hoveredHeader_ == idx && !p.disabled);
         bool isExp = p.expanded;
@@ -424,7 +424,7 @@ private:
         {
             HBRUSH hb = CreateSolidBrush(bg);
             RECT   hr = {x + 1, topY, x + width - 1, topY + headerHeight};
-            FillRect(hdc, &hr, hb);
+            FillRect(ctx.hdc, &hr, hb);
             DeleteObject(hb);
         }
 
@@ -432,7 +432,7 @@ private:
         if (isExp) {
             HBRUSH ab = CreateSolidBrush(accentColor);
             RECT   ar = {x + 1, topY, x + 4, topY + headerHeight};
-            FillRect(hdc, &ar, ab);
+            FillRect(ctx.hdc, &ar, ab);
             DeleteObject(ab);
         }
 
@@ -442,77 +442,77 @@ private:
         if (!p.icon.empty()) {
             HFONT iconFont = fontCache.getFont("Segoe MDL2 Assets",
                                                iconSize, FontWeight::Normal);
-            HFONT old = (HFONT)SelectObject(hdc, iconFont);
-            SetBkMode(hdc, TRANSPARENT);
-            SetTextColor(hdc, p.disabled ? disabledColor : iconColor);
+            HFONT old = (HFONT)SelectObject(ctx.hdc, iconFont);
+            SetBkMode(ctx.hdc, TRANSPARENT);
+            SetTextColor(ctx.hdc, p.disabled ? disabledColor : iconColor);
             RECT ir = {cx, topY, cx + iconSize + 6, topY + headerHeight};
-            DrawTextW(hdc, p.icon.c_str(), 1, &ir,
+            DrawTextW(ctx.hdc, p.icon.c_str(), 1, &ir,
                       DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-            SelectObject(hdc, old);
+            SelectObject(ctx.hdc, old);
             cx += iconSize + 8;
         }
 
         // Title + optional subtitle
-        SetBkMode(hdc, TRANSPARENT);
+        SetBkMode(ctx.hdc, TRANSPARENT);
 
         if (p.subtitle.empty()) {
             // Single centred title
             HFONT titleFont = fontCache.getFont(titleFontSize,
                 isExp ? FontWeight::Light : FontWeight::Normal);
-            HFONT old = (HFONT)SelectObject(hdc, titleFont);
-            SetTextColor(hdc, p.disabled ? disabledColor : titleColor);
+            HFONT old = (HFONT)SelectObject(ctx.hdc, titleFont);
+            SetTextColor(ctx.hdc, p.disabled ? disabledColor : titleColor);
             RECT tr = {cx, topY, x + width - 36, topY + headerHeight};
-            DrawTextA(hdc, p.title.c_str(), -1, &tr,
+            DrawTextA(ctx.hdc, p.title.c_str(), -1, &tr,
                       DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-            SelectObject(hdc, old);
+            SelectObject(ctx.hdc, old);
         } else {
             // Title on top half, subtitle on bottom half
             int halfH = headerHeight / 2;
 
             HFONT titleFont = fontCache.getFont(titleFontSize,
                 isExp ? FontWeight::Light : FontWeight::Normal);
-            HFONT old = (HFONT)SelectObject(hdc, titleFont);
-            SetTextColor(hdc, p.disabled ? disabledColor : titleColor);
+            HFONT old = (HFONT)SelectObject(ctx.hdc, titleFont);
+            SetTextColor(ctx.hdc, p.disabled ? disabledColor : titleColor);
             RECT tr = {cx, topY + 4, x + width - 36, topY + halfH + 2};
-            DrawTextA(hdc, p.title.c_str(), -1, &tr,
+            DrawTextA(ctx.hdc, p.title.c_str(), -1, &tr,
                       DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
             HFONT subFont = fontCache.getFont(subtitleFontSize, FontWeight::Normal);
-            SelectObject(hdc, subFont);
-            SetTextColor(hdc, p.disabled ? disabledColor : subtitleColor);
+            SelectObject(ctx.hdc, subFont);
+            SetTextColor(ctx.hdc, p.disabled ? disabledColor : subtitleColor);
             RECT sr = {cx, topY + halfH - 2, x + width - 36, topY + headerHeight - 4};
-            DrawTextA(hdc, p.subtitle.c_str(), -1, &sr,
+            DrawTextA(ctx.hdc, p.subtitle.c_str(), -1, &sr,
                       DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
-            SelectObject(hdc, old);
+            SelectObject(ctx.hdc, old);
         }
 
         // Chevron arrow (right side, vertically centred)
         int arrowX = x + width - 20;
         int arrowY = topY + headerHeight / 2;
-        _drawChevron(hdc, arrowX, arrowY, isExp,
+        _drawChevron(ctx, arrowX, arrowY, isExp,
                      p.disabled ? disabledColor : arrowColor);
     }
 
-    void _drawChevron(HDC hdc, int cx, int cy, bool pointUp,
+    void _drawChevron(GraphicsContext &ctx, int cx, int cy, bool pointUp,
                       COLORREF color) const {
         HPEN pen = CreatePen(PS_SOLID, 2, color);
-        HPEN old = (HPEN)SelectObject(hdc, pen);
+        HPEN old = (HPEN)SelectObject(ctx.hdc, pen);
         int  s   = arrowSize / 2;
 
         if (pointUp) {
             // ∧ pointing up
-            MoveToEx(hdc, cx - s, cy + s / 2, nullptr);
-            LineTo  (hdc, cx,     cy - s / 2);
-            LineTo  (hdc, cx + s, cy + s / 2);
+            MoveToEx(ctx.hdc, cx - s, cy + s / 2, nullptr);
+            LineTo  (ctx.hdc, cx,     cy - s / 2);
+            LineTo  (ctx.hdc, cx + s, cy + s / 2);
         } else {
             // ∨ pointing down
-            MoveToEx(hdc, cx - s, cy - s / 2, nullptr);
-            LineTo  (hdc, cx,     cy + s / 2);
-            LineTo  (hdc, cx + s, cy - s / 2);
+            MoveToEx(ctx.hdc, cx - s, cy - s / 2, nullptr);
+            LineTo  (ctx.hdc, cx,     cy + s / 2);
+            LineTo  (ctx.hdc, cx + s, cy - s / 2);
         }
 
-        SelectObject(hdc, old);
+        SelectObject(ctx.hdc, old);
         DeleteObject(pen);
     }
 

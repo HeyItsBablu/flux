@@ -87,7 +87,7 @@ public:
     return true;
   }
 
-  void computeLayout(HDC /*hdc*/, const BoxConstraints &constraints,
+  void computeLayout(GraphicsContext &/*ctx*/, const BoxConstraints &constraints,
                      FontCache &/*fontCache*/) override {
     if (imageLoaded) {
       if (autoWidth && autoHeight) {
@@ -114,27 +114,27 @@ public:
     needsLayout = false;
   }
 
-  void render(HDC hdc, FontCache &/*fontCache*/) override {
+  void render(GraphicsContext &ctx, FontCache &/*fontCache*/) override {
     // Draw background
     if (hasBackground) {
-      drawRoundedRectangle(hdc);
+      drawRoundedRectangle(ctx);
     }
 
     // Draw border
     if (hasBorder) {
       HPEN pen = CreatePen(PS_SOLID, borderWidth, borderColor);
-      HPEN oldPen = (HPEN)SelectObject(hdc, pen);
-      HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
+      HPEN oldPen = (HPEN)SelectObject(ctx.hdc, pen);
+      HBRUSH oldBrush = (HBRUSH)SelectObject(ctx.hdc, GetStockObject(NULL_BRUSH));
 
       if (borderRadius > 0) {
-        RoundRect(hdc, x, y, x + width, y + height, borderRadius * 2,
+        RoundRect(ctx.hdc, x, y, x + width, y + height, borderRadius * 2,
                   borderRadius * 2);
       } else {
-        Rectangle(hdc, x, y, x + width, y + height);
+        Rectangle(ctx.hdc, x, y, x + width, y + height);
       }
 
-      SelectObject(hdc, oldBrush);
-      SelectObject(hdc, oldPen);
+      SelectObject(ctx.hdc, oldBrush);
+      SelectObject(ctx.hdc, oldPen);
       DeleteObject(pen);
     }
 
@@ -144,7 +144,7 @@ public:
     int contentHeight = height - paddingTop - paddingBottom;
 
     if (imageLoaded && bitmap) {
-      Gdiplus::Graphics graphics(hdc);
+      Gdiplus::Graphics graphics(ctx.hdc);
       graphics.SetInterpolationMode(
           Gdiplus::InterpolationModeHighQualityBicubic);
       graphics.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
@@ -182,26 +182,26 @@ public:
       HBRUSH errorBrush = CreateSolidBrush(errorColor);
       RECT errorRect = {contentX, contentY, contentX + contentWidth,
                         contentY + contentHeight};
-      FillRect(hdc, &errorRect, errorBrush);
+      FillRect(ctx.hdc, &errorRect, errorBrush);
       DeleteObject(errorBrush);
 
       // Draw error icon/text
-      SetTextColor(hdc, RGB(150, 0, 0));
-      SetBkMode(hdc, TRANSPARENT);
-      DrawText(hdc, "✖", -1, &errorRect,
+      SetTextColor(ctx.hdc, RGB(150, 0, 0));
+      SetBkMode(ctx.hdc, TRANSPARENT);
+      DrawText(ctx.hdc, "✖", -1, &errorRect,
                DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     } else {
       // Draw placeholder
       HBRUSH placeholderBrush = CreateSolidBrush(placeholderColor);
       RECT placeholderRect = {contentX, contentY, contentX + contentWidth,
                               contentY + contentHeight};
-      FillRect(hdc, &placeholderRect, placeholderBrush);
+      FillRect(ctx.hdc, &placeholderRect, placeholderBrush);
       DeleteObject(placeholderBrush);
 
       // Draw placeholder icon
-      SetTextColor(hdc, RGB(180, 180, 180));
-      SetBkMode(hdc, TRANSPARENT);
-      DrawText(hdc, "🖼", -1, &placeholderRect,
+      SetTextColor(ctx.hdc, RGB(180, 180, 180));
+      SetBkMode(ctx.hdc, TRANSPARENT);
+      DrawText(ctx.hdc, "🖼", -1, &placeholderRect,
                DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }
 
