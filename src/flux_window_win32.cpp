@@ -14,6 +14,14 @@ void PlatformWindow::shutdownGdiplus() {
     gdiplusToken = 0;
 }
 
+
+void PlatformWindow::captureMouseInput() {
+    if (hwnd) SetCapture(hwnd);
+}
+void PlatformWindow::releaseMouseInput() {
+    ReleaseCapture();
+}
+
 // ============================================================================
 // PlatformWindow::create
 // ============================================================================

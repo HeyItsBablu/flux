@@ -6,6 +6,17 @@
 #include <functional>
 #include <string>
 
+
+// flux_window.hpp
+struct MeasureContext {
+    GraphicsContext ctx;
+#ifdef _WIN32
+    HWND  hwnd;
+    MeasureContext(HWND h) : hwnd(h), ctx(GetDC(h)) {}
+    ~MeasureContext()      { ReleaseDC(hwnd, ctx.hdc); }
+#endif
+};
+
 // ============================================================================
 // PLATFORM WINDOW — owns the OS window, message loop, and back-buffer
 // ============================================================================
@@ -70,6 +81,9 @@ public:
   int clientWidth() const { return cachedWidth; }
   int clientHeight() const { return cachedHeight; }
   bool valid() const { return hwnd != nullptr; }
+
+  void captureMouseInput();
+  void releaseMouseInput();
 
 private:
 #ifdef _WIN32

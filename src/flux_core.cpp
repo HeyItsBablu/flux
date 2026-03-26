@@ -358,13 +358,11 @@ void FluxUI::rebuild() {
         wireScaffoldToWidgets(scaffold, root.get());
 
     if (window.valid()) {
-        HDC hdc = GetDC(window.handle());
-        GraphicsContext ctx(hdc);
-        LayoutEngine::computeLayout(ctx, root.get(),
+        MeasureContext mc(window.handle());
+        LayoutEngine::computeLayout(mc.ctx, root.get(),
                                     window.clientWidth(),
                                     window.clientHeight(), fontCache);
         LayoutEngine::positionWidget(root.get(), 0, 0);
-        ReleaseDC(window.handle(), hdc);
         window.invalidate();
     }
 }
@@ -476,4 +474,12 @@ FontCache   &FluxUI::getFontCache()       { return fontCache; }
 
 WidgetPtr FluxUI::findById(const std::string &id) {
     return findByIdRecursive(root, id);
+}
+
+
+void FluxUI::captureMouseInput() { window.captureMouseInput(); }
+void FluxUI::releaseMouseInput() { window.releaseMouseInput(); }
+
+MeasureContext FluxUI::getMeasureContext() {
+    return MeasureContext(window.handle());
 }

@@ -56,7 +56,8 @@ public:
       HFONT hOldFont = (HFONT)SelectObject(ctx.hdc, hFont);
 
       SIZE textSize;
-      GetTextExtentPoint32(ctx.hdc, text.c_str(), (int)text.length(), &textSize);
+      GetTextExtentPoint32(ctx.hdc, text.c_str(), (int)text.length(),
+                           &textSize);
 
       width = toggleWidth + 12 + textSize.cx;
       height = max(toggleHeight, (int)textSize.cy);
@@ -358,15 +359,16 @@ public:
     paddingTop = paddingBottom = 10;
   }
 
-  void computeLayout(GraphicsContext &/*ctx*/, const BoxConstraints &constraints,
-                     FontCache &/*fontCache*/) override {
+  void computeLayout(GraphicsContext & /*ctx*/,
+                     const BoxConstraints &constraints,
+                     FontCache & /*fontCache*/) override {
     if (autoWidth)
       width = constraints.maxWidth;
     applyConstraints();
     needsLayout = false;
   }
 
-  void render(GraphicsContext &ctx, FontCache &/*fontCache*/) override {
+  void render(GraphicsContext &ctx, FontCache & /*fontCache*/) override {
     int trackY = y + height / 2;
     int trackLeft = x + paddingLeft;
     int trackRight = x + width - paddingRight;
@@ -413,10 +415,7 @@ public:
   bool handleMouseDown(int mx, int my) override {
     if (mx >= x && mx < x + width && my >= y && my < y + height) {
       isDragging = true;
-
-      HWND hwnd = FluxUI::getCurrentInstance()->getWindow();
-      SetCapture(hwnd);
-
+      FluxUI::getCurrentInstance()->captureMouseInput(); // ← no raw HWND
       updateValueFromMouseX(mx);
       return true;
     }
@@ -426,7 +425,7 @@ public:
   bool handleMouseUp(int /*mx*/, int /*my*/) override {
     if (isDragging) {
       isDragging = false;
-      ReleaseCapture();
+      FluxUI::getCurrentInstance()->releaseMouseInput(); // ← no raw HWND
       markNeedsPaint();
       return true;
     }
@@ -860,8 +859,9 @@ public:
       oldPen = (HPEN)SelectObject(ctx.hdc, innerPen);
       oldBrush = (HBRUSH)SelectObject(ctx.hdc, innerBrush);
 
-      Ellipse(ctx.hdc, circleX - innerCircleSize / 2, circleY - innerCircleSize / 2,
-              circleX + innerCircleSize / 2, circleY + innerCircleSize / 2);
+      Ellipse(ctx.hdc, circleX - innerCircleSize / 2,
+              circleY - innerCircleSize / 2, circleX + innerCircleSize / 2,
+              circleY + innerCircleSize / 2);
 
       SelectObject(ctx.hdc, oldBrush);
       SelectObject(ctx.hdc, oldPen);
@@ -948,39 +948,45 @@ public:
 
   RadioGroupWidget() { spacing = 8; }
 
-void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
-                   FontCache &fontCache) override {
-  int totalWidth  = 0;
-  int totalHeight = 0;
+  void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
+                     FontCache &fontCache) override {
+    int totalWidth = 0;
+    int totalHeight = 0;
 
+    for (auto &child : children) {
+      child->computeLayout(ctx, constraints, fontCache);
 
-  for (auto &child : children) {
-    child->computeLayout(ctx, constraints, fontCache);
+      if (isVertical) {
+        totalHeight += child->height + child->marginTop + child->marginBottom;
+        maxWidth = max(maxWidth,
+                       child->width + child->marginLeft + child->marginRight);
+      } else {
+        totalWidth += child->width + child->marginLeft + child->marginRight;
+        maxHeight = max(maxHeight,
+                        child->height + child->marginTop + child->marginBottom);
+      }
+    }
+
+    int spacingTotal =
+        children.empty() ? 0 : (int)(children.size() - 1) * spacing;
 
     if (isVertical) {
-      totalHeight += child->height + child->marginTop  + child->marginBottom;
-      maxWidth     = max(maxWidth,  child->width  + child->marginLeft + child->marginRight);
+      totalHeight += spacingTotal;
+      width = constraints.clampWidth(
+          autoWidth ? maxWidth + paddingLeft + paddingRight : width);
+      height = constraints.clampHeight(
+          autoHeight ? totalHeight + paddingTop + paddingBottom : height);
     } else {
-      totalWidth  += child->width  + child->marginLeft + child->marginRight;
-      maxHeight    = max(maxHeight, child->height + child->marginTop  + child->marginBottom);
+      totalWidth += spacingTotal;
+      width = constraints.clampWidth(
+          autoWidth ? totalWidth + paddingLeft + paddingRight : width);
+      height = constraints.clampHeight(
+          autoHeight ? maxHeight + paddingTop + paddingBottom : height);
     }
+
+    applyConstraints();
+    needsLayout = false;
   }
-
-  int spacingTotal = children.empty() ? 0 : (int)(children.size() - 1) * spacing;
-
-  if (isVertical) {
-    totalHeight += spacingTotal;
-    width  = constraints.clampWidth(autoWidth   ? maxWidth    + paddingLeft + paddingRight  : width);
-    height = constraints.clampHeight(autoHeight ? totalHeight + paddingTop  + paddingBottom : height);
-  } else {
-    totalWidth += spacingTotal;
-    width  = constraints.clampWidth(autoWidth   ? totalWidth  + paddingLeft + paddingRight  : width);
-    height = constraints.clampHeight(autoHeight ? maxHeight   + paddingTop  + paddingBottom : height);
-  }
-
-  applyConstraints();
-  needsLayout = false;
-}
 
   void positionChildren(int contentX, int contentY, int /*contentWidth*/,
                         int /*contentHeight*/) override {
@@ -1208,7 +1214,7 @@ public:
   std::string placeholder;
   int cursorPos = 0;
   bool cursorVisible = true;
-  UINT cursorTimerId = 1;
+  TimerID cursorTimerId = 0;
   int scrollOffset = 0;
 
   COLORREF focusedBorderColor = RGB(33, 150, 243);
@@ -1230,12 +1236,14 @@ public:
     autoHeight = false;
   }
 
-void computeLayout(GraphicsContext &/*ctx*/, const BoxConstraints &constraints,
-                   FontCache &/*fontCache*/) override {
-  if (autoWidth) width = constraints.maxWidth;
-  applyConstraints();
-  needsLayout = false;
-}
+  void computeLayout(GraphicsContext & /*ctx*/,
+                     const BoxConstraints &constraints,
+                     FontCache & /*fontCache*/) override {
+    if (autoWidth)
+      width = constraints.maxWidth;
+    applyConstraints();
+    needsLayout = false;
+  }
 
   void render(GraphicsContext &ctx, FontCache &fontCache) override {
     borderColor = isFocused ? focusedBorderColor : unfocusedBorderColor;
@@ -1245,7 +1253,6 @@ void computeLayout(GraphicsContext &/*ctx*/, const BoxConstraints &constraints,
     HFONT hOldFont = (HFONT)SelectObject(ctx.hdc, hFont);
 
     int textX = x + paddingLeft;
-
 
     RECT clipRect = {x + paddingLeft, y + paddingTop, x + width - paddingRight,
                      y + height - paddingBottom};
@@ -1299,26 +1306,23 @@ void computeLayout(GraphicsContext &/*ctx*/, const BoxConstraints &constraints,
   bool handleFocus(bool focused) override {
     isFocused = focused;
 
+    auto *ui = FluxUI::getCurrentInstance();
     if (focused) {
-      HWND hwnd = FluxUI::getCurrentInstance()->getWindow();
-      SetTimer(hwnd, cursorTimerId, 530, nullptr);
       cursorVisible = true;
+      cursorTimerId = ui->setInterval(530, [this]() {
+        cursorVisible = !cursorVisible;
+        markNeedsPaint();
+      });
     } else {
-      HWND hwnd = FluxUI::getCurrentInstance()->getWindow();
-      KillTimer(hwnd, cursorTimerId);
+      if (cursorTimerId) {
+        ui->clearInterval(cursorTimerId);
+        cursorTimerId = 0;
+      }
       cursorVisible = false;
     }
 
     markNeedsPaint();
     return true;
-  }
-
-  bool handleTimer(UINT timerId) override {
-    if (timerId == cursorTimerId) {
-      cursorVisible = !cursorVisible;
-      return true;
-    }
-    return false;
   }
 
   bool handleMouseDown(int mx, int my) override {
@@ -1439,19 +1443,19 @@ private:
     if (inputValue.empty())
       return 0;
 
-    HWND hwnd = FluxUI::getCurrentInstance()->getWindow();
-    HDC hdc = GetDC(hwnd);
-    FontCache &fc = FluxUI::getCurrentInstance()->getFontCache();
+    auto *ui = FluxUI::getCurrentInstance();
+    MeasureContext mc = ui->getMeasureContext();
+    FontCache &fc = ui->getFontCache();
 
     HFONT hFont = fc.getFont(fontSize, fontWeight);
-    HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
+    HFONT hOldFont = (HFONT)SelectObject(mc.ctx.hdc, hFont);
 
     int bestPos = 0;
     int bestDist = abs(pixelX);
 
     for (int i = 1; i <= (int)inputValue.size(); i++) {
       SIZE sz;
-      GetTextExtentPoint32(hdc, inputValue.c_str(), i, &sz);
+      GetTextExtentPoint32(mc.ctx.hdc, inputValue.c_str(), i, &sz);
       int dist = abs(sz.cx - pixelX);
       if (dist < bestDist) {
         bestDist = dist;
@@ -1459,9 +1463,8 @@ private:
       }
     }
 
-    SelectObject(hdc, hOldFont);
-    ReleaseDC(hwnd, hdc);
-    return bestPos;
+    SelectObject(mc.ctx.hdc, hOldFont);
+    return bestPos; // MeasureContext destructor releases DC
   }
 
   void updateScroll() {
@@ -1470,19 +1473,19 @@ private:
       return;
     }
 
-    HWND hwnd = FluxUI::getCurrentInstance()->getWindow();
-    HDC hdc = GetDC(hwnd);
-    FontCache &fc = FluxUI::getCurrentInstance()->getFontCache();
+    auto *ui = FluxUI::getCurrentInstance();
+    MeasureContext mc = ui->getMeasureContext();
+    FontCache &fc = ui->getFontCache();
 
     HFONT hFont = fc.getFont(fontSize, fontWeight);
-    HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
+    HFONT hOldFont = (HFONT)SelectObject(mc.ctx.hdc, hFont);
 
-    SIZE sz = {0};
+    SIZE sz = {};
     if (cursorPos > 0)
-      GetTextExtentPoint32(hdc, inputValue.c_str(), cursorPos, &sz);
+      GetTextExtentPoint32(mc.ctx.hdc, inputValue.c_str(), cursorPos, &sz);
 
-    SelectObject(hdc, hOldFont);
-    ReleaseDC(hwnd, hdc);
+    SelectObject(mc.ctx.hdc, hOldFont);
+    // MeasureContext destructor releases DC
 
     int textAreaWidth = width - paddingLeft - paddingRight;
     int cursorX = sz.cx - scrollOffset;
