@@ -33,24 +33,25 @@ void Widget::measureText(GraphicsContext &ctx, FontCache &fontCache) {
 // ============================================================================
 
 void Widget::renderText(GraphicsContext &ctx, FontCache &fontCache, UINT format) {
-  if (text.empty())
-    return;
+    if (text.empty())
+        return;
 
-  SetTextColor(ctx.hdc, getCurrentTextColor());
-  SetBkMode(ctx.hdc, TRANSPARENT);
+    // Convert UTF-8 to wide
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
+    std::wstring wtext(wlen, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, wtext.data(), wlen);
 
-  HFONT hFont = fontCache.getFont(fontFamily, fontSize, fontWeight);
-  HFONT hOldFont = (HFONT)SelectObject(ctx.hdc, hFont);
+    NativeFont font = fontCache.getFont(fontFamily, fontSize, fontWeight);
 
-  RECT textRect = {x + paddingLeft, y + paddingTop, x + width - paddingRight,
-                   y + height - paddingBottom};
-
-  int wlen = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
-  std::wstring wtext(wlen, L'\0');
-  MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, wtext.data(), wlen);
-
-  DrawTextW(ctx.hdc, wtext.c_str(), -1, &textRect, format);
-  SelectObject(ctx.hdc, hOldFont);
+    Painter painter(ctx);
+    painter.drawText(wtext,
+                     x + paddingLeft,
+                     y + paddingTop,
+                     width  - paddingLeft - paddingRight,
+                     height - paddingTop  - paddingBottom,
+                     font,
+                     getCurrentTextColor(),
+                     format);
 }
 
 // ============================================================================
@@ -94,66 +95,40 @@ void Widget::positionChildren(int contentX, int contentY,
 // ============================================================================
 
 void Widget::render(GraphicsContext &ctx, FontCache &fontCache) {
-  if (!visible)
-    return;
-  if (hasBackground)
-    drawRoundedRectangle(ctx);
-  for (auto &child : children)
-    child->render(ctx, fontCache);
-  FluxOverflow::render(ctx.hdc, overflow, x, y, width, height);
-  needsPaint = false;
+    if (!visible)
+        return;
+
+    Painter painter(ctx);
+
+    if (hasBackground)
+        painter.fillRoundedRect(x, y, width, height, borderRadius,
+                                getCurrentBackgroundColor(), backgroundAlpha);
+
+    if (hasBorder)
+        painter.drawBorder(x, y, width, height, borderRadius,
+                           getCurrentBorderColor(), borderWidth, borderAlpha);
+
+    for (auto &child : children)
+        child->render(ctx, fontCache);
+
+    FluxOverflow::render(ctx.hdc, overflow, x, y, width, height);
+    needsPaint = false;
 }
+
 
 // ============================================================================
 // Widget::drawRoundedRectangle
 // ============================================================================
 
 void Widget::drawRoundedRectangle(GraphicsContext &ctx) {
-  COLORREF bgColor = getCurrentBackgroundColor();
-  COLORREF bdColor = getCurrentBorderColor();
+    Painter painter(ctx);
 
-  Gdiplus::Graphics g(ctx.hdc);
-  g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
-
-  auto makeRoundedPath = [&](Gdiplus::GraphicsPath &path, int left, int top,
-                             int w, int h, int r) {
-    int d = r * 2;
-    path.AddArc(left, top, d, d, 180, 90);
-    path.AddArc(left + w - d, top, d, d, 270, 90);
-    path.AddArc(left + w - d, top + h - d, d, d, 0, 90);
-    path.AddArc(left, top + h - d, d, d, 90, 90);
-    path.CloseFigure();
-  };
-
-  if (hasBackground) {
-    Gdiplus::Color fillColor(backgroundAlpha, GetRValue(bgColor),
-                             GetGValue(bgColor), GetBValue(bgColor));
-    Gdiplus::SolidBrush brush(fillColor);
-    if (borderRadius > 0) {
-      Gdiplus::GraphicsPath path;
-      makeRoundedPath(path, x, y, width, height, borderRadius);
-      g.FillPath(&brush, &path);
-    } else {
-      Gdiplus::RectF rect((Gdiplus::REAL)x, (Gdiplus::REAL)y,
-                          (Gdiplus::REAL)width, (Gdiplus::REAL)height);
-      g.FillRectangle(&brush, rect);
-    }
-  }
-
-  if (hasBorder) {
-    Gdiplus::Color strokeColor(borderAlpha, GetRValue(bdColor),
-                               GetGValue(bdColor), GetBValue(bdColor));
-    Gdiplus::Pen pen(strokeColor, (Gdiplus::REAL)borderWidth);
-    if (borderRadius > 0) {
-      Gdiplus::GraphicsPath path;
-      makeRoundedPath(path, x, y, width, height, borderRadius);
-      g.DrawPath(&pen, &path);
-    } else {
-      Gdiplus::RectF rect((Gdiplus::REAL)x, (Gdiplus::REAL)y,
-                          (Gdiplus::REAL)width, (Gdiplus::REAL)height);
-      g.DrawRectangle(&pen, rect);
-    }
-  }
+    if (hasBackground)
+        painter.fillRoundedRect(x, y, width, height, borderRadius,
+                                getCurrentBackgroundColor(), backgroundAlpha);
+    if (hasBorder)
+        painter.drawBorder(x, y, width, height, borderRadius,
+                           getCurrentBorderColor(), borderWidth, borderAlpha);
 }
 
 // ============================================================================

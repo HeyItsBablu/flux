@@ -13,7 +13,7 @@
 // ============================================================================
 // FORWARD DECLARATIONS
 // ============================================================================
- 
+
 template <typename T> class State;
 class ScaffoldWidget;
 
@@ -52,13 +52,11 @@ private:
 
   ULONG_PTR gdiplusToken = 0;
 
-BackBuffer backBuffer;
+  BackBuffer backBuffer;
 
   static FluxUI *currentInstance;
 
   Widget *focusedWidget = nullptr;
-
-
 
   // ----------------------------------------------------------------
   // OVERLAY DISPATCHERS
@@ -121,7 +119,7 @@ public:
   // ----------------------------------------------------------------
   // Focus management
   // ----------------------------------------------------------------
-  void    setFocus(Widget *widget);
+  void setFocus(Widget *widget);
   Widget *getFocusedWidget() const;
 
   // ----------------------------------------------------------------
@@ -137,14 +135,14 @@ public:
   // Window management
   // ----------------------------------------------------------------
   HWND createWindow(const std::string &title, int width, int height);
-  int  run();
+  int run();
 
   // ----------------------------------------------------------------
   // Accessors
   // ----------------------------------------------------------------
-  HWND       getWindow()    const;
-  WidgetPtr  getRoot()      const;
-  WidgetPtr  findById(const std::string &id);
+  HWND getWindow() const;
+  WidgetPtr getRoot() const;
+  WidgetPtr findById(const std::string &id);
   FontCache &getFontCache();
 };
 

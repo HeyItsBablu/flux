@@ -1,8 +1,10 @@
 #ifndef FLUX_WIDGET_HPP
 #define FLUX_WIDGET_HPP
 
+#include "flux_painter.hpp"
 #include "flux_font.hpp"
 #include "flux_overflow.hpp"
+#include "flux_platform.hpp"
 #include <functional>
 #include <gdiplus.h>
 #include <iomanip>
@@ -11,7 +13,6 @@
 #include <sstream>
 #include <string>
 #include <vector>
-#include "flux_platform.hpp"
 
 // ============================================================================
 // FORWARD DECLARATIONS
@@ -215,7 +216,8 @@ public:
   // Core layout / render virtuals
   // -----------------------------------------------------------------------
 
-  virtual void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
+  virtual void computeLayout(GraphicsContext &ctx,
+                             const BoxConstraints &constraints,
                              FontCache &fontCache);
 
   virtual void positionChildren(int contentX, int contentY, int contentWidth,
@@ -226,6 +228,8 @@ public:
   void measureText(GraphicsContext &ctx, FontCache &fontCache);
   void renderText(GraphicsContext &ctx, FontCache &fontCache,
                   UINT format = DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+  void drawRoundedRectangle(GraphicsContext &ctx);
 
   // -----------------------------------------------------------------------
   // Mouse / keyboard event handlers
@@ -364,8 +368,6 @@ protected:
     if (height > maxHeight)
       height = maxHeight;
   }
-
-  void drawRoundedRectangle(GraphicsContext &ctx);
 };
 
 // ============================================================================
