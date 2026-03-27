@@ -477,6 +477,13 @@ WidgetPtr FluxUI::findById(const std::string &id) {
 }
 
 
+void FluxUI::setClipboardText(const std::string &t) { window.setClipboardText(t); }
+std::string FluxUI::getClipboardText()              { return window.getClipboardText(); }
+
+void FluxUI::invalidateWidget(int x, int y, int w, int h) {
+    window.invalidateRect(x, y, w, h);
+}
+
 void FluxUI::captureMouseInput() { window.captureMouseInput(); }
 void FluxUI::releaseMouseInput() { window.releaseMouseInput(); }
 

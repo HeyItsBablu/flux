@@ -6,14 +6,13 @@
 #include <functional>
 #include <string>
 
-
 // flux_window.hpp
 struct MeasureContext {
-    GraphicsContext ctx;
+  GraphicsContext ctx;
 #ifdef _WIN32
-    HWND  hwnd;
-    MeasureContext(HWND h) : hwnd(h), ctx(GetDC(h)) {}
-    ~MeasureContext()      { ReleaseDC(hwnd, ctx.hdc); }
+  HWND hwnd;
+  MeasureContext(HWND h) : hwnd(h), ctx(GetDC(h)) {}
+  ~MeasureContext() { ReleaseDC(hwnd, ctx.hdc); }
 #endif
 };
 
@@ -81,6 +80,9 @@ public:
   int clientWidth() const { return cachedWidth; }
   int clientHeight() const { return cachedHeight; }
   bool valid() const { return hwnd != nullptr; }
+
+  void setClipboardText(const std::string &text);
+  std::string getClipboardText();
 
   void captureMouseInput();
   void releaseMouseInput();

@@ -14,6 +14,28 @@ void PlatformWindow::shutdownGdiplus() {
     gdiplusToken = 0;
 }
 
+void PlatformWindow::setClipboardText(const std::string &text) {
+    if (!hwnd || !OpenClipboard(hwnd)) return;
+    EmptyClipboard();
+    HGLOBAL hg = GlobalAlloc(GMEM_MOVEABLE, text.size() + 1);
+    if (hg) {
+        memcpy(GlobalLock(hg), text.c_str(), text.size() + 1);
+        GlobalUnlock(hg);
+        SetClipboardData(CF_TEXT, hg);
+    }
+    CloseClipboard();
+}
+
+std::string PlatformWindow::getClipboardText() {
+    if (!hwnd || !OpenClipboard(hwnd)) return "";
+    HANDLE hd = GetClipboardData(CF_TEXT);
+    if (!hd) { CloseClipboard(); return ""; }
+    std::string text = static_cast<char *>(GlobalLock(hd));
+    GlobalUnlock(hd);
+    CloseClipboard();
+    return text;
+}
+
 
 void PlatformWindow::captureMouseInput() {
     if (hwnd) SetCapture(hwnd);

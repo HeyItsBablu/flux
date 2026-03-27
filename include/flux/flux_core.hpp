@@ -96,6 +96,10 @@ public:
   WidgetPtr findById(const std::string &id);
   FontCache &getFontCache();
 
+  void setClipboardText(const std::string &text);
+  std::string getClipboardText();
+  void invalidateWidget(int x, int y, int w, int h); // rect overload
+
   void captureMouseInput();
   void releaseMouseInput();
   MeasureContext getMeasureContext();
