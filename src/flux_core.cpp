@@ -490,3 +490,14 @@ void FluxUI::releaseMouseInput() { window.releaseMouseInput(); }
 MeasureContext FluxUI::getMeasureContext() {
     return MeasureContext(window.handle());
 }
+
+
+PlatformWindow::ScreenPoint FluxUI::clientToScreen(int cx, int cy) const {
+    return window.clientToScreen(cx, cy);
+}
+PlatformWindow::ScreenPoint FluxUI::screenToClient(int sx, int sy) const {
+    return window.screenToClient(sx, sy);
+}
+PlatformWindow::ClientSize FluxUI::getClientSize() const {
+    return window.getClientSize();
+}

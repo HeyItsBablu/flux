@@ -103,6 +103,10 @@ public:
   void captureMouseInput();
   void releaseMouseInput();
   MeasureContext getMeasureContext();
+
+  PlatformWindow::ScreenPoint clientToScreen(int cx, int cy) const;
+  PlatformWindow::ScreenPoint screenToClient(int sx, int sy) const;
+  PlatformWindow::ClientSize getClientSize() const;
 };
 
 #endif // FLUX_CORE_HPP

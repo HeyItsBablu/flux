@@ -87,6 +87,17 @@ public:
   void captureMouseInput();
   void releaseMouseInput();
 
+  struct ScreenPoint {
+    int x = 0, y = 0;
+  };
+  struct ClientSize {
+    int width = 0, height = 0;
+  };
+
+  ScreenPoint clientToScreen(int cx, int cy) const;
+  ScreenPoint screenToClient(int sx, int sy) const;
+  ClientSize getClientSize() const;
+
 private:
 #ifdef _WIN32
   NativeWindow hwnd = nullptr;

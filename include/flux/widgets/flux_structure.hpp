@@ -13,11 +13,18 @@
 
 struct OverlayEntry {
   Widget *widget = nullptr;
-  std::function<void(HDC, FontCache &)> renderer;
+  std::function<void(GraphicsContext &, FontCache &)>
+      renderer; // nullptr for popup overlays
   int zIndex = 0;
 
-  OverlayEntry(Widget *w, std::function<void(HDC, FontCache &)> r, int z = 0)
+  // Full entry — widget renders into back-buffer
+  OverlayEntry(Widget *w, std::function<void(GraphicsContext &, FontCache &)> r,
+               int z = 0)
       : widget(w), renderer(r), zIndex(z) {}
+
+  // Hit-target only — visual is in a popup window
+  OverlayEntry(Widget *w, int z = 0)
+      : widget(w), renderer(nullptr), zIndex(z) {}
 };
 
 // --- Scaffold Widget ---
@@ -40,9 +47,22 @@ private:
   }
 
 public:
+  void addOverlayHitTarget(Widget *widget, int zIndex = 0) {
+    for (auto &entry : overlayStack) {
+      if (entry.widget == widget) {
+        entry.zIndex = zIndex;
+        sortOverlayStack();
+        return;
+      }
+    }
+    overlayStack.emplace_back(widget, zIndex);
+    sortOverlayStack();
+    markNeedsPaint();
+  }
+
   // --- Overlay Management (moved from FluxAppWidget) ---
   void addOverlay(Widget *widget,
-                  std::function<void(HDC, FontCache &)> renderer,
+                  std::function<void(GraphicsContext &, FontCache &)> renderer,
                   int zIndex = 0) {
     for (auto &entry : overlayStack) {
       if (entry.widget == widget) {
@@ -102,9 +122,10 @@ public:
     for (auto &child : children)
       child->render(ctx, fontCache);
 
+    // only call renderer if present — popup overlays have nullptr here
     for (const auto &entry : overlayStack)
       if (entry.renderer)
-        entry.renderer(ctx.hdc, fontCache);
+        entry.renderer(ctx, fontCache);
 
     needsPaint = false;
   }

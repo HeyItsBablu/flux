@@ -44,6 +44,22 @@ void PlatformWindow::releaseMouseInput() {
     ReleaseCapture();
 }
 
+PlatformWindow::ScreenPoint PlatformWindow::clientToScreen(int cx, int cy) const {
+    POINT pt = {cx, cy};
+    if (hwnd) ClientToScreen(hwnd, &pt);
+    return {pt.x, pt.y};
+}
+
+PlatformWindow::ScreenPoint PlatformWindow::screenToClient(int sx, int sy) const {
+    POINT pt = {sx, sy};
+    if (hwnd) ScreenToClient(hwnd, &pt);
+    return {pt.x, pt.y};
+}
+
+PlatformWindow::ClientSize PlatformWindow::getClientSize() const {
+    return {cachedWidth, cachedHeight};
+}
+
 // ============================================================================
 // PlatformWindow::create
 // ============================================================================
