@@ -36,8 +36,7 @@
 // OverlayHost::renderPopupContent default is a no-op — override it.
 // ============================================================================
 
-#define NOMINMAX
-#define WIN32_LEAN_AND_MEAN
+
 #include "flux_platform.hpp"
 
 #include <cassert>

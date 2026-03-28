@@ -1,10 +1,11 @@
 #ifndef FLUX_WIDGET_HPP
 #define FLUX_WIDGET_HPP
 
+#include "flux_platform.hpp"
 #include "flux_painter.hpp"
 #include "flux_font.hpp"
 #include "flux_overflow.hpp"
-#include "flux_platform.hpp"
+
 #include <functional>
 #include <gdiplus.h>
 #include <iomanip>

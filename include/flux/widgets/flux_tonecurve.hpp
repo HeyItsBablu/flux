@@ -180,7 +180,7 @@ public:
     bool         parametricMode = false; // show parametric sliders instead
 
     // Histogram backing data (optional — set via setHistogram())
-    std::array<uint32_t, 256> histBins{};
+    std::array<std::uint32_t, 256> histBins{};
     bool hasHistogram = false;
 
     // Colors — Lightroom dark theme defaults
@@ -257,7 +257,7 @@ public:
     }
 
     std::shared_ptr<ToneCurveWidget> setHistogram(
-            const std::array<uint32_t,256>& bins) {
+            const std::array<std::uint32_t,256>& bins) {
         histBins     = bins;
         hasHistogram = true;
         markNeedsPaint();
@@ -266,11 +266,11 @@ public:
 
     // Convenience: feed R+G+B arrays and build a luminosity composite
     std::shared_ptr<ToneCurveWidget> setHistogram(
-            const std::array<uint32_t,256>& r,
-            const std::array<uint32_t,256>& g,
-            const std::array<uint32_t,256>& b) {
+            const std::array<std::uint32_t,256>& r,
+            const std::array<std::uint32_t,256>& g,
+            const std::array<std::uint32_t,256>& b) {
         for (int i = 0; i < 256; ++i)
-            histBins[i] = (uint32_t)(0.2126f*r[i] + 0.7152f*g[i] + 0.0722f*b[i]);
+            histBins[i] = (std::uint32_t)(0.2126f*r[i] + 0.7152f*g[i] + 0.0722f*b[i]);
         hasHistogram = true;
         markNeedsPaint();
         return ptr();
@@ -694,7 +694,7 @@ private:
     }
 
     void drawHistogram(HDC hdc) {
-        uint32_t peak = 1;
+        std::uint32_t peak = 1;
         for (auto v : histBins) peak = max(peak, v);
 
         // Draw as a semi-transparent dark fill

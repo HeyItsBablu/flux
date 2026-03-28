@@ -1,20 +1,14 @@
 #ifndef FLUX_WINDOW_HPP
 #define FLUX_WINDOW_HPP
 
-#include "flux_font.hpp"
 #include "flux_platform.hpp"
+#include "flux_font.hpp"
+
 #include <functional>
 #include <string>
 
 // flux_window.hpp
-struct MeasureContext {
-  GraphicsContext ctx;
-#ifdef _WIN32
-  HWND hwnd;
-  MeasureContext(HWND h) : hwnd(h), ctx(GetDC(h)) {}
-  ~MeasureContext() { ReleaseDC(hwnd, ctx.hdc); }
-#endif
-};
+
 
 // ============================================================================
 // PLATFORM WINDOW — owns the OS window, message loop, and back-buffer

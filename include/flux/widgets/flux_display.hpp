@@ -6,18 +6,17 @@
 #include "flux_widget.hpp"
 
 #include <iostream>
-#define NOMINMAX
 #include <algorithm>
 #include <cmath>
 #include <functional>
 #include <string>
 #include <vector>
-#include "flux_platform.hpp"
+
 
 // glad must come before any other GL headers
 #include <glad/glad.h>
 
-using namespace Gdiplus;
+
 
 // ============================================================================
 // GRAPH SERIES
@@ -177,7 +176,7 @@ public:
   }
 
   void render(GraphicsContext &ctx, FontCache & /*fontCache*/) override {
-    ensureChildWindow(ctx.hdc);
+    ensureChildWindow(ctx);
     moveChildWindow();
     renderGL();
     needsPaint = false;
@@ -556,19 +555,16 @@ TextTexture makeTextTexture(const std::string &str, float size,
     registered = true;
   }
 
-  void ensureChildWindow(HDC parentDC) {
-    if (childHwnd)
-      return;
-    HWND owner = WindowFromDC(parentDC);
-    if (!owner)
-      owner = GetActiveWindow();
-    parentHwnd = owner;
+void ensureChildWindow(GraphicsContext & /*ctx*/) {
+    if (childHwnd) return;
+    parentHwnd = FluxUI::getCurrentInstance()->getWindow();
+    if (!parentHwnd) return;
     registerChildClass();
 
     childHwnd = CreateWindowExW(
         WS_EX_NOPARENTNOTIFY, L"FluxGLGraph", nullptr,
         WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN, x, y, width,
-        height, owner, nullptr, GetModuleHandle(nullptr), nullptr);
+        height, parentHwnd, nullptr, GetModuleHandle(nullptr), nullptr);
     if (!childHwnd)
       return;
 
@@ -579,8 +575,7 @@ TextTexture makeTextTexture(const std::string &str, float size,
     HGLRC tmp = wglCreateContext(glDC);
     wglMakeCurrent(glDC, tmp);
 
-    using PFNWGLCREATECONTEXTATTRIBSARBPROC =
-        HGLRC(WINAPI *)(HDC, HGLRC, const int *);
+
     auto wglCA = reinterpret_cast<PFNWGLCREATECONTEXTATTRIBSARBPROC>(
         wglGetProcAddress("wglCreateContextAttribsARB"));
 

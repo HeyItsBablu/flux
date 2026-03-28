@@ -18,9 +18,9 @@
 //   Each widget stores an OverflowInfo; renderer checks it after normal paint.
 // ============================================================================
 
-
-#include <string>
 #include "flux_platform.hpp"
+#include <string>
+
 
 // ── Debug gate ───────────────────────────────────────────────────────────────
 // Both the visual stripe renderer AND logWarning are compiled in only when

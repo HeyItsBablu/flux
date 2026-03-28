@@ -1,8 +1,8 @@
 #ifndef FLUX_RENDERER_HPP
 #define FLUX_RENDERER_HPP
-
-#include "flux_widget.hpp"
 #include "flux_platform.hpp"
+#include "flux_widget.hpp"
+
 
 class Renderer {
 public:

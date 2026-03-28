@@ -40,9 +40,9 @@ struct HistogramData {
     }
 
     // Peak across all enabled channels (for auto-scaling)
-    uint32_t peak(bool showR, bool showG, bool showB, bool showLum) const {
-        uint32_t m = 1;
-        auto scan = [&](const std::array<uint32_t, 256>& ch) {
+    std::uint32_t peak(bool showR, bool showG, bool showB, bool showLum) const {
+        std::uint32_t m = 1;
+        auto scan = [&](const std::array<std::uint32_t, 256>& ch) {
             for (auto v : ch) m = max(m, v);
         };
         if (showR)   scan(r);
@@ -240,7 +240,7 @@ public:
         }
 
         // ── Peak for normalisation ────────────────────────────────────────────
-        uint32_t peak = histData.peak(drawR, drawG, drawB, drawL);
+        std::uint32_t peak = histData.peak(drawR, drawG, drawB, drawL);
 
         // ── Clip regions (Lightroom-style: tiny tint strips at extremes) ──────
         if (showClip) {
