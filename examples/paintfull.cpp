@@ -1752,7 +1752,7 @@ public:
         })
         ->setSpacing(0);
 
-    return Scaffold(root);
+    return Scaffold(nullptr,root);
   }
 };
 

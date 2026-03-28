@@ -1068,6 +1068,7 @@ public:
         ->setHeight(kHintsH);
 
     return Scaffold(
+      nullptr,
         Row({
             Column({ toolbar, hints, canvas })->setSpacing(0),
             panel,
