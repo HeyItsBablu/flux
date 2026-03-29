@@ -246,25 +246,22 @@ public:
     }
   }
 
+
   // ----------------------------------------------------------------
   // RENDER
   // ----------------------------------------------------------------
 
   void render(GraphicsContext &ctx, FontCache &fontCache) override {
-    // Background
-    HBRUSH bgBrush = CreateSolidBrush(theme.backgroundColor);
-    RECT bgRect = {x, y, x + width, y + height};
-    FillRect(ctx.hdc, &bgRect, bgBrush);
-    DeleteObject(bgBrush);
+    Painter painter(ctx);
 
-    // Normal widget tree
-    if (!children.empty()) {
+    // Background — was CreateSolidBrush / FillRect / DeleteObject
+    painter.fillRect(x, y, width, height, theme.backgroundColor);
+
+    if (!children.empty())
       children[0]->render(ctx, fontCache);
-    }
 
-    if (debugShowWidgetBounds) {
+    if (debugShowWidgetBounds)
       drawDebugBounds(ctx);
-    }
 
     needsPaint = false;
   }
@@ -276,22 +273,19 @@ private:
     if (!w)
       return;
 
-    HPEN pen = CreatePen(PS_SOLID, 1, RGB(255, 0, 0));
-    HPEN oldPen = (HPEN)SelectObject(ctx.hdc, pen);
-    HBRUSH oldBrush = (HBRUSH)SelectObject(ctx.hdc, GetStockObject(NULL_BRUSH));
+    Painter painter(ctx);
 
-    Rectangle(ctx.hdc, w->x, w->y, w->x + w->width, w->y + w->height);
+    // Outline only — no fill.
+    // Was: CreatePen + SelectObject(NULL_BRUSH) + Rectangle + cleanup.
+    // drawEllipse doesn't apply here; we need a rect outline.
+    // Add Painter::drawRectOutline() for this — see note below.
+    painter.drawRectOutline(w->x, w->y, w->width, w->height, RGB(255, 0, 0), 1);
 
-    SelectObject(ctx.hdc, oldBrush);
-    SelectObject(ctx.hdc, oldPen);
-    DeleteObject(pen);
-
-    for (auto &child : w->children) {
+    for (auto &child : w->children)
       drawWidgetBounds(ctx, child.get());
-    }
   }
 };
-inline FluxAppWidget* FluxAppWidget::instance = nullptr;
+inline FluxAppWidget *FluxAppWidget::instance = nullptr;
 
 // ============================================================================
 // FLUX APP FACTORY

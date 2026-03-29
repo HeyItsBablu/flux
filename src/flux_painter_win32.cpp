@@ -3,100 +3,267 @@
 #ifdef _WIN32
 
 // -----------------------------------------------------------------------
-// Internal helper — builds a rounded rect path
+// Internal helper — builds a rounded rect path (GDI+)
 // -----------------------------------------------------------------------
 
-static void makeRoundedPath(Gdiplus::GraphicsPath &path,
-                             int x, int y, int w, int h, int r) {
-    int d = r * 2;
-    path.AddArc(x,         y,         d, d, 180, 90);
-    path.AddArc(x + w - d, y,         d, d, 270, 90);
-    path.AddArc(x + w - d, y + h - d, d, d,   0, 90);
-    path.AddArc(x,         y + h - d, d, d,  90, 90);
-    path.CloseFigure();
+static void makeRoundedPath(Gdiplus::GraphicsPath &path, int x, int y, int w,
+                            int h, int r) {
+  int d = r * 2;
+  path.AddArc(x, y, d, d, 180, 90);
+  path.AddArc(x + w - d, y, d, d, 270, 90);
+  path.AddArc(x + w - d, y + h - d, d, d, 0, 90);
+  path.AddArc(x, y + h - d, d, d, 90, 90);
+  path.CloseFigure();
 }
 
 // -----------------------------------------------------------------------
-// Painter::fillRoundedRect
+// Painter::fillRoundedRect  (GDI+ — unchanged from original)
 // -----------------------------------------------------------------------
 
 void Painter::fillRoundedRect(int x, int y, int w, int h, int radius,
-                               NativeColor color, BYTE alpha) {
-    Gdiplus::Graphics g(ctx.hdc);
-    g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+                              NativeColor color, BYTE alpha) {
+  Gdiplus::Graphics g(ctx.hdc);
+  g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
 
-    Gdiplus::Color fillColor(alpha,
-                             GetRValue(color),
-                             GetGValue(color),
-                             GetBValue(color));
-    Gdiplus::SolidBrush brush(fillColor);
+  Gdiplus::Color fillColor(alpha, GetRValue(color), GetGValue(color),
+                           GetBValue(color));
+  Gdiplus::SolidBrush brush(fillColor);
 
-    if (radius > 0) {
-        Gdiplus::GraphicsPath path;
-        makeRoundedPath(path, x, y, w, h, radius);
-        g.FillPath(&brush, &path);
-    } else {
-        Gdiplus::RectF rect((Gdiplus::REAL)x, (Gdiplus::REAL)y,
-                            (Gdiplus::REAL)w, (Gdiplus::REAL)h);
-        g.FillRectangle(&brush, rect);
-    }
+  if (radius > 0) {
+    Gdiplus::GraphicsPath path;
+    makeRoundedPath(path, x, y, w, h, radius);
+    g.FillPath(&brush, &path);
+  } else {
+    Gdiplus::RectF rect((Gdiplus::REAL)x, (Gdiplus::REAL)y, (Gdiplus::REAL)w,
+                        (Gdiplus::REAL)h);
+    g.FillRectangle(&brush, rect);
+  }
 }
 
 // -----------------------------------------------------------------------
-// Painter::drawBorder
+// Painter::drawBorder  (GDI+ — unchanged from original)
 // -----------------------------------------------------------------------
 
 void Painter::drawBorder(int x, int y, int w, int h, int radius,
-                          NativeColor color, int borderWidth, BYTE alpha) {
-    Gdiplus::Graphics g(ctx.hdc);
-    g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+                         NativeColor color, int borderWidth, BYTE alpha) {
+  Gdiplus::Graphics g(ctx.hdc);
+  g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
 
-    Gdiplus::Color strokeColor(alpha,
-                               GetRValue(color),
-                               GetGValue(color),
-                               GetBValue(color));
-    Gdiplus::Pen pen(strokeColor, (Gdiplus::REAL)borderWidth);
+  Gdiplus::Color strokeColor(alpha, GetRValue(color), GetGValue(color),
+                             GetBValue(color));
+  Gdiplus::Pen pen(strokeColor, (Gdiplus::REAL)borderWidth);
 
-    if (radius > 0) {
-        Gdiplus::GraphicsPath path;
-        makeRoundedPath(path, x, y, w, h, radius);
-        g.DrawPath(&pen, &path);
-    } else {
-        Gdiplus::RectF rect((Gdiplus::REAL)x, (Gdiplus::REAL)y,
-                            (Gdiplus::REAL)w, (Gdiplus::REAL)h);
-        g.DrawRectangle(&pen, rect);
-    }
+  if (radius > 0) {
+    Gdiplus::GraphicsPath path;
+    makeRoundedPath(path, x, y, w, h, radius);
+    g.DrawPath(&pen, &path);
+  } else {
+    Gdiplus::RectF rect((Gdiplus::REAL)x, (Gdiplus::REAL)y, (Gdiplus::REAL)w,
+                        (Gdiplus::REAL)h);
+    g.DrawRectangle(&pen, rect);
+  }
 }
 
 // -----------------------------------------------------------------------
-// Painter::drawText
-// -----------------------------------------------------------------------
-
-void Painter::drawText(const std::wstring &text, int x, int y, int w, int h,
-                        NativeFont font, NativeColor color, UINT format) {
-    if (text.empty())
-        return;
-
-    SetTextColor(ctx.hdc, color);
-    SetBkMode(ctx.hdc, TRANSPARENT);
-
-    HFONT hOldFont = (HFONT)SelectObject(ctx.hdc, font);
-
-    RECT rect = { x, y, x + w, y + h };
-    DrawTextW(ctx.hdc, text.c_str(), -1, &rect, format);
-
-    SelectObject(ctx.hdc, hOldFont);
-}
-
-// -----------------------------------------------------------------------
-// Painter::fillRect
+// Painter::fillRect  (GDI — unchanged from original)
 // -----------------------------------------------------------------------
 
 void Painter::fillRect(int x, int y, int w, int h, NativeColor color) {
-    RECT rect = { x, y, x + w, y + h };
-    HBRUSH brush = CreateSolidBrush(color);
-    ::FillRect(ctx.hdc, &rect, brush);
-    DeleteObject(brush);
+  RECT rect = {x, y, x + w, y + h};
+  HBRUSH brush = CreateSolidBrush(color);
+  ::FillRect(ctx.hdc, &rect, brush);
+  DeleteObject(brush);
+}
+
+// -----------------------------------------------------------------------
+// Painter::fillRoundedRectGDI
+// Wraps Win32 RoundRect — radius is the corner ellipse diameter (nWidth /
+// nHeight in MSDN terms), so a caller that used RoundRect(..., r*2, r*2)
+// should now call fillRoundedRectGDI(..., r*2, ...).
+// -----------------------------------------------------------------------
+
+void Painter::fillRoundedRectGDI(int x, int y, int w, int h, int radius,
+                                 NativeColor fill, NativeColor stroke,
+                                 int strokeWidth) {
+  HBRUSH hBrush = CreateSolidBrush(fill);
+  HPEN hPen = (strokeWidth > 0) ? CreatePen(PS_SOLID, strokeWidth, stroke)
+                                : (HPEN)GetStockObject(NULL_PEN);
+
+  HBRUSH oldBrush = (HBRUSH)SelectObject(ctx.hdc, hBrush);
+  HPEN oldPen = (HPEN)SelectObject(ctx.hdc, hPen);
+
+  RoundRect(ctx.hdc, x, y, x + w, y + h, radius, radius);
+
+  SelectObject(ctx.hdc, oldBrush);
+  SelectObject(ctx.hdc, oldPen);
+  DeleteObject(hBrush);
+  if (strokeWidth > 0)
+    DeleteObject(hPen);
+}
+
+// -----------------------------------------------------------------------
+// Painter::drawEllipse
+// strokeWidth == 0  → PS_NULL pen (fill only, no border).
+// -----------------------------------------------------------------------
+
+void Painter::drawEllipse(int x, int y, int w, int h, NativeColor fill,
+                          NativeColor stroke, int strokeWidth) {
+  HBRUSH hBrush = CreateSolidBrush(fill);
+  HPEN hPen = (strokeWidth > 0) ? CreatePen(PS_SOLID, strokeWidth, stroke)
+                                : (HPEN)GetStockObject(NULL_PEN);
+
+  HBRUSH oldBrush = (HBRUSH)SelectObject(ctx.hdc, hBrush);
+  HPEN oldPen = (HPEN)SelectObject(ctx.hdc, hPen);
+
+  Ellipse(ctx.hdc, x, y, x + w, y + h);
+
+  SelectObject(ctx.hdc, oldBrush);
+  SelectObject(ctx.hdc, oldPen);
+  DeleteObject(hBrush);
+  if (strokeWidth > 0)
+    DeleteObject(hPen);
+}
+
+// -----------------------------------------------------------------------
+// Painter::drawLine
+// -----------------------------------------------------------------------
+
+void Painter::drawLine(int x1, int y1, int x2, int y2, NativeColor color,
+                       int width) {
+  HPEN hPen = CreatePen(PS_SOLID, width, color);
+  HPEN oldPen = (HPEN)SelectObject(ctx.hdc, hPen);
+
+  MoveToEx(ctx.hdc, x1, y1, nullptr);
+  LineTo(ctx.hdc, x2, y2);
+
+  SelectObject(ctx.hdc, oldPen);
+  DeleteObject(hPen);
+}
+
+// -----------------------------------------------------------------------
+// Painter::drawText  (unchanged from original)
+// -----------------------------------------------------------------------
+
+void Painter::drawText(const std::wstring &text, int x, int y, int w, int h,
+                       NativeFont font, NativeColor color, UINT format) {
+  if (text.empty())
+    return;
+
+  SetTextColor(ctx.hdc, color);
+  SetBkMode(ctx.hdc, TRANSPARENT);
+
+  HFONT hOldFont = (HFONT)SelectObject(ctx.hdc, font);
+
+  RECT rect = {x, y, x + w, y + h};
+  DrawTextW(ctx.hdc, text.c_str(), -1, &rect, format);
+
+  SelectObject(ctx.hdc, hOldFont);
+}
+
+// -----------------------------------------------------------------------
+// Painter::measureText
+// Fills outWidth / outHeight with the bounding box of the string.
+// Does not draw anything.
+// -----------------------------------------------------------------------
+
+void Painter::measureText(const std::wstring &text, NativeFont font,
+                          int &outWidth, int &outHeight) {
+  if (text.empty()) {
+    outWidth = outHeight = 0;
+    return;
+  }
+
+  HFONT oldFont = (HFONT)SelectObject(ctx.hdc, font);
+
+  SIZE sz = {};
+  GetTextExtentPoint32W(ctx.hdc, text.c_str(), static_cast<int>(text.size()),
+                        &sz);
+  outWidth = sz.cx;
+  outHeight = sz.cy;
+
+  SelectObject(ctx.hdc, oldFont);
+}
+
+// -----------------------------------------------------------------------
+// Painter::pushClipRect
+// Intersects a rectangular clip region with the current clip.
+// Call popClipRect() once to remove it.
+// -----------------------------------------------------------------------
+
+void Painter::pushClipRect(int x, int y, int w, int h) {
+  HRGN rgn = CreateRectRgn(x, y, x + w, y + h);
+  SelectClipRgn(ctx.hdc, rgn);
+  DeleteObject(rgn); // GDI copies it internally — safe to free immediately
+}
+
+// -----------------------------------------------------------------------
+// Painter::popClipRect
+// Removes all clip regions, restoring unrestricted painting.
+// -----------------------------------------------------------------------
+
+void Painter::popClipRect() { SelectClipRgn(ctx.hdc, nullptr); }
+
+// -----------------------------------------------------------------------
+// Painter::fillGradientRect
+// Single color → plain fillRect.
+// Multiple colors → one vertical band per pixel, interpolating across
+// the color stops linearly.  Same logic as ProgressBarWidget had inline,
+// now centralised here.
+// -----------------------------------------------------------------------
+
+void Painter::fillGradientRect(int x, int y, int w, int h,
+                               const std::vector<NativeColor> &colors) {
+  if (colors.empty() || w <= 0 || h <= 0)
+    return;
+
+  if (colors.size() == 1) {
+    fillRect(x, y, w, h, colors[0]);
+    return;
+  }
+
+  const int stops = static_cast<int>(colors.size());
+
+  for (int i = 0; i < w; ++i) {
+    double t = static_cast<double>(i) / (w - 1); // 0.0 … 1.0
+    double scaled = t * (stops - 1);
+    int idx = static_cast<int>(scaled);
+    double frac = scaled - idx;
+
+    if (idx >= stops - 1) {
+      idx = stops - 2;
+      frac = 1.0;
+    }
+
+    NativeColor c0 = colors[idx];
+    NativeColor c1 = colors[idx + 1];
+
+    int r = static_cast<int>(GetRValue(c0) +
+                             frac * (GetRValue(c1) - GetRValue(c0)));
+    int g = static_cast<int>(GetGValue(c0) +
+                             frac * (GetGValue(c1) - GetGValue(c0)));
+    int b = static_cast<int>(GetBValue(c0) +
+                             frac * (GetBValue(c1) - GetBValue(c0)));
+
+    HBRUSH band = CreateSolidBrush(RGB(r, g, b));
+    RECT col = {x + i, y, x + i + 1, y + h};
+    ::FillRect(ctx.hdc, &col, band);
+    DeleteObject(band);
+  }
+}
+
+// flux_painter_win32.cpp — implementation
+void Painter::drawRectOutline(int x, int y, int w, int h, NativeColor color,
+                              int strokeWidth) {
+  HPEN hPen = CreatePen(PS_SOLID, strokeWidth, color);
+  HPEN oldPen = (HPEN)SelectObject(ctx.hdc, hPen);
+  HBRUSH oldBrush = (HBRUSH)SelectObject(ctx.hdc, GetStockObject(NULL_BRUSH));
+
+  Rectangle(ctx.hdc, x, y, x + w, y + h);
+
+  SelectObject(ctx.hdc, oldBrush);
+  SelectObject(ctx.hdc, oldPen);
+  DeleteObject(hPen);
+  // NULL_BRUSH is a stock object — never DeleteObject it
 }
 
 #endif // _WIN32

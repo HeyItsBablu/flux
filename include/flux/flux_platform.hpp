@@ -7,9 +7,9 @@
 
 
 
-#include <windows.h>    // ← defines INT, BOOL, etc. that gdiplus.h needs
+#include <windows.h>    
 #include <windowsx.h>
-#include <gdiplus.h>    // ← safe now, windows.h already included
+#include <gdiplus.h>    
 #pragma comment(lib, "gdiplus.lib")
 
 using NativeWindow = HWND;
