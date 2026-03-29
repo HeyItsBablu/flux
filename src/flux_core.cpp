@@ -501,3 +501,7 @@ PlatformWindow::ScreenPoint FluxUI::screenToClient(int sx, int sy) const {
 PlatformWindow::ClientSize FluxUI::getClientSize() const {
     return window.getClientSize();
 }
+
+void FluxUI::setResizeCursorH() { window.setResizeCursorH(); }
+void FluxUI::setResizeCursorV() { window.setResizeCursorV(); }
+void FluxUI::setDefaultCursor() { window.setDefaultCursor(); }

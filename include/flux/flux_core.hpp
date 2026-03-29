@@ -107,6 +107,10 @@ public:
   PlatformWindow::ScreenPoint clientToScreen(int cx, int cy) const;
   PlatformWindow::ScreenPoint screenToClient(int sx, int sy) const;
   PlatformWindow::ClientSize getClientSize() const;
+
+  void setResizeCursorH(); // horizontal resize (SIZEWE)
+  void setResizeCursorV(); // vertical resize   (SIZENS)
+  void setDefaultCursor(); // arrow
 };
 
 #endif // FLUX_CORE_HPP

@@ -60,6 +60,18 @@ PlatformWindow::ClientSize PlatformWindow::getClientSize() const {
     return {cachedWidth, cachedHeight};
 }
 
+
+void PlatformWindow::setResizeCursorH() {
+    SetCursor(LoadCursor(nullptr, IDC_SIZEWE));
+}
+void PlatformWindow::setResizeCursorV() {
+    SetCursor(LoadCursor(nullptr, IDC_SIZENS));
+}
+void PlatformWindow::setDefaultCursor() {
+    SetCursor(LoadCursor(nullptr, IDC_ARROW));
+}
+
+
 // ============================================================================
 // PlatformWindow::create
 // ============================================================================

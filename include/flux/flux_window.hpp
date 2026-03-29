@@ -92,6 +92,10 @@ public:
   ScreenPoint screenToClient(int sx, int sy) const;
   ClientSize getClientSize() const;
 
+  void setResizeCursorH();
+void setResizeCursorV();
+void setDefaultCursor();
+
 private:
 #ifdef _WIN32
   NativeWindow hwnd = nullptr;
