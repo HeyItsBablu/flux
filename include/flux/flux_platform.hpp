@@ -4,12 +4,9 @@
 #ifdef _WIN32
 
 
-
-
-
-#include <windows.h>    
+#include <windows.h>
 #include <windowsx.h>
-#include <gdiplus.h>    
+#include <gdiplus.h>
 #pragma comment(lib, "gdiplus.lib")
 
 using NativeWindow = HWND;
@@ -28,9 +25,6 @@ using PFNWGLCREATECONTEXTATTRIBSARBPROC = HGLRC(WINAPI *)(HDC, HGLRC,
 using PFNWGLCHOOSEPIXELFORMATARBPROC = BOOL(WINAPI *)(HDC, const int *,
                                                       const FLOAT *, UINT,
                                                       int *, UINT *);
-
-
-                                                      
 
 struct GraphicsContext {
   NativeContext hdc;
@@ -75,16 +69,30 @@ struct BackBuffer {
 };
 
 struct MeasureContext {
-    GraphicsContext ctx;
-    HWND            hwnd;
+  GraphicsContext ctx;
+  HWND hwnd;
 
-    explicit MeasureContext(HWND h) : hwnd(h), ctx(GetDC(h)) {}
-    ~MeasureContext() { ReleaseDC(hwnd, ctx.hdc); }
+  explicit MeasureContext(HWND h) : hwnd(h), ctx(GetDC(h)) {}
+  ~MeasureContext() { ReleaseDC(hwnd, ctx.hdc); }
 
-    MeasureContext(const MeasureContext &)            = delete;
-    MeasureContext &operator=(const MeasureContext &) = delete;
+  MeasureContext(const MeasureContext &) = delete;
+  MeasureContext &operator=(const MeasureContext &) = delete;
 };
 
+inline NativeColor darkenColor(NativeColor c, int amount) {
+  return RGB(max(0, GetRValue(c) - amount), max(0, GetGValue(c) - amount),
+             max(0, GetBValue(c) - amount));
+}
 
+inline NativeColor colorFromRGB(int r, int g, int b) { return RGB(r, g, b); }
+
+inline int colorRed(NativeColor c) { return GetRValue(c); }
+inline int colorGreen(NativeColor c) { return GetGValue(c); }
+inline int colorBlue(NativeColor c) { return GetBValue(c); }
 
 #endif // _WIN32
+
+// // ── Cross-platform constants ──────────────────────────────────────────────
+#ifndef WHEEL_DELTA
+  static constexpr int WHEEL_DELTA = 120;
+#endif

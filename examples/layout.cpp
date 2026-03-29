@@ -125,8 +125,7 @@ public:
                                             })
                                             ->setSpacing(0),
 
-                                        SizedBox(0, 8),
-                                        Divider(),
+                                        SizedBox(0, 8), Divider(),
                                         SizedBox(0, 8),
 
                                         Text("Active boxes")
@@ -170,6 +169,19 @@ public:
                                                         RGB(76, 175, 80)),
                                             })
                                             ->setSpacing(0),
+                                        GestureDetector(Text("Hello Gesture"))
+                                            ->setOnTap([] {
+                                              std::cout << "Tapped box " << +1
+                                                        << std::endl;
+                                            })
+                                            ->setOnDoubleTap([] {
+                                              std::cout << "Double tapped box "
+                                                        << +1 << std::endl;
+                                            })
+                                            ->setOnSecondaryTap([] {
+                                              std::cout << "Right click box "
+                                                        << +1 << std::endl;
+                                            })
 
                                     })
                                     ->setSpacing(4))
@@ -263,6 +275,9 @@ WidgetPtr createApp(FluxUI *app) {
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
+  AllocConsole();
+  FILE *fp;
+  freopen_s(&fp, "CONOUT$", "w", stdout);
   FluxUI app(hInstance);
   app.build([&]() { return createApp(&app); });
   app.createWindow("FluxUI - Layout Stress Test", 900, 700);

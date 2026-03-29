@@ -4,7 +4,7 @@
 // v3 — hooks into Widget's existing virtual mouse methods.
 // No InputDispatcher, no WndProc edits required.
 #include "flux_core.hpp"
-
+#include <chrono>
 // ============================================================================
 // HANDLER TYPES
 // ============================================================================
@@ -26,8 +26,8 @@ using ScrollHandler = std::function<void(int delta)>;
 
 class GestureDetectorWidget : public Widget {
 public:
-  static constexpr DWORD LONG_PRESS_MS = 500;
-  static constexpr DWORD DOUBLE_TAP_MS = 300;
+  static constexpr uint32_t LONG_PRESS_MS = 500;
+  static constexpr uint32_t DOUBLE_TAP_MS = 300;
   static constexpr int DRAG_THRESHOLD = 5;
 
   // ── Callbacks ─────────────────────────────────────────────────────────────
@@ -84,7 +84,6 @@ public:
 
   // ── Mouse overrides — FluxUI WndProc calls these automatically ────────────
 
-  // Called by WM_LBUTTONDOWN via findAndHandleMouseEvent()
   bool handleMouseDown(int mx, int my) override {
     if (!hitTest(mx, my))
       return false;
@@ -94,24 +93,22 @@ public:
     _pressed = true;
     _dragging = _dragStarted = false;
     _longPressArmed = true;
-    _pressTime = GetTickCount();
+    _pressTime = _getTimeMs();
 
-    // Capture keeps WM_MOUSEMOVE + WM_LBUTTONUP flowing to us
-    // even if the cursor leaves the widget bounds during a drag.
-    if (HWND hwnd = getHWND())
-      SetCapture(hwnd);
+    if (FluxUI *ui = FluxUI::getCurrentInstance())
+      ui->captureMouseInput();
 
     return true;
   }
 
-  // Called by WM_LBUTTONUP via broadcastMouseEvent() (captured) or
-  // findAndHandleMouseEvent()
   bool handleMouseUp(int mx, int my) override {
     if (!_pressed)
       return false;
 
     _longPressArmed = false;
-    ReleaseCapture();
+
+    if (FluxUI *ui = FluxUI::getCurrentInstance())
+      ui->releaseMouseInput();
 
     if (_dragging) {
       _dragging = false;
@@ -123,11 +120,10 @@ public:
 
     _pressed = false;
 
-    // Released outside bounds after a non-drag press — no tap
     if (!hitTest(mx, my))
       return true;
 
-    DWORD now = GetTickCount();
+    uint32_t now = _getTimeMs();
     if (_lastTapTime > 0 && (now - _lastTapTime) <= DOUBLE_TAP_MS) {
       if (onDoubleTap)
         onDoubleTap();
@@ -270,20 +266,26 @@ private:
   bool _longPressArmed = false;
   int _pressX = 0, _pressY = 0;
   int _lastDragX = 0, _lastDragY = 0;
-  DWORD _pressTime = 0, _lastTapTime = 0;
+  uint32_t _pressTime = 0, _lastTapTime = 0;
 
-  std::shared_ptr<GestureDetectorWidget> self() {
-    return std::static_pointer_cast<GestureDetectorWidget>(shared_from_this());
+  static uint32_t _getTimeMs() {
+#ifdef _WIN32
+    return static_cast<uint32_t>(GetTickCount());
+#else
+    // std::chrono fallback for Linux/Mac
+    using namespace std::chrono;
+    return static_cast<uint32_t>(
+        duration_cast<milliseconds>(steady_clock::now().time_since_epoch())
+            .count());
+#endif
   }
 
   bool hitTest(int mx, int my) const {
     return mx >= x && mx < x + width && my >= y && my < y + height;
   }
 
-  HWND getHWND() const {
-    if (FluxUI *ui = FluxUI::getCurrentInstance())
-      return ui->getWindow();
-    return nullptr;
+  std::shared_ptr<GestureDetectorWidget> self() {
+    return std::static_pointer_cast<GestureDetectorWidget>(shared_from_this());
   }
 };
 
@@ -311,31 +313,22 @@ public:
     return true;
   }
 
-  // Optional: visual press state in render
   void render(GraphicsContext &ctx, FontCache &fontCache) override {
     if (hasBackground) {
-      // Slightly darken when pressed
-      if (_pressed) {
-        COLORREF orig = backgroundColor;
-        backgroundColor =
-            RGB(max(0, GetRValue(orig) - 20), max(0, GetGValue(orig) - 20),
-                max(0, GetBValue(orig) - 20));
-        drawRoundedRectangle(ctx);
-        backgroundColor = orig;
-      } else {
-        drawRoundedRectangle(ctx);
-      }
+      COLORREF saved = backgroundColor;
+      if (_pressed)
+        backgroundColor = darkenColor(getCurrentBackgroundColor(), 20);
+      drawRoundedRectangle(ctx);
+      backgroundColor = saved;
     }
 
-    if (!children.empty()) {
+    if (!children.empty())
       children[0]->render(ctx, fontCache);
-    } else if (!text.empty()) {
+    else if (!text.empty())
       renderText(ctx, fontCache, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-    }
 
     needsPaint = false;
   }
-
   void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     if (!children.empty()) {
