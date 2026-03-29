@@ -1,9 +1,9 @@
 namespace FluxIcons {
 
 // ── Actions
-constexpr wchar_t Add        = 0xE710; //  was 0xE109 (wrong – that's legacy range)
-constexpr wchar_t Remove     = 0xE738; //  was 0xE108 (wrong)
-constexpr wchar_t Edit       = 0xE70F; //  was 0xE104 (wrong)
+constexpr wchar_t Add        = 0xE710; // 
+constexpr wchar_t Remove     = 0xE738; // 
+constexpr wchar_t Edit       = 0xE70F; // 
 constexpr wchar_t Delete     = 0xE74D; // 
 constexpr wchar_t Save       = 0xE74E; // 
 constexpr wchar_t Refresh    = 0xE72C; // 
@@ -22,15 +22,15 @@ constexpr wchar_t Up           = 0xE74A; //
 constexpr wchar_t Down         = 0xE74B; // 
 constexpr wchar_t ChevronLeft  = 0xE76B; // 
 constexpr wchar_t ChevronRight = 0xE76C; // 
-// Removed duplicate Left/Right aliases (same codes as ChevronLeft/Right)
+
 
 // ── Status
-constexpr wchar_t Check    = 0xE73E; //  correct (CheckMark)
-constexpr wchar_t Close    = 0xE711; //  correct (Cancel glyph)
-constexpr wchar_t Cancel   = 0xE711; //  correct (same glyph, alias is fine)
-constexpr wchar_t Warning  = 0xE7BA; //  correct
-constexpr wchar_t Error    = 0xE783; //  was 0xEA39 (dot – not a standard icon)
-constexpr wchar_t Info     = 0xE946; //  verify – may show dot on some builds; alt: 0xE9CE
+constexpr wchar_t Check    = 0xE73E; 
+constexpr wchar_t Close    = 0xE711; 
+constexpr wchar_t Cancel   = 0xE711; 
+constexpr wchar_t Warning  = 0xE7BA; 
+constexpr wchar_t Error    = 0xE783; 
+constexpr wchar_t Info     = 0xE946; 
 
 // ── Media
 constexpr wchar_t Play   = 0xE768; // 
@@ -47,8 +47,8 @@ constexpr wchar_t Copy       = 0xE8C8; //
 constexpr wchar_t Paste      = 0xE77F; // 
 
 // ── UI Controls
-constexpr wchar_t Eye      = 0xE890; //  was Eye – it's actually "View" glyph, visually an eye ✔
-constexpr wchar_t EyeOff   = 0xE891; //  was EyeOff – actually "HighlightFill", NOT a hidden-eye; consider 0xED1A instead
+constexpr wchar_t Eye      = 0xE890; //  
+constexpr wchar_t EyeOff   = 0xE891; // 
 constexpr wchar_t Lock     = 0xE72E; // 
 constexpr wchar_t Unlock   = 0xE785; // 
 constexpr wchar_t Calendar = 0xE787; // 
@@ -63,5 +63,9 @@ constexpr wchar_t Minimize    = 0xE921; //
 constexpr wchar_t Maximize    = 0xE922; // 
 constexpr wchar_t Restore     = 0xE923; // 
 constexpr wchar_t CloseWindow = 0xE8BB; // 
+
+constexpr wchar_t Grid        = 0xE80A;
+constexpr wchar_t Dashboard   = 0xF246;
+constexpr wchar_t ChartBar    = 0xE9D2;
 
 } // namespace FluxIcons

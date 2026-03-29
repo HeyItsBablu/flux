@@ -27,4 +27,5 @@
 #include "flux_input_extended.hpp"
 #include "flux_accordion.hpp"
 #include "flux_file_picker.hpp"
+#include "flux_graph.hpp"
 #endif // WIDGETS_HPP

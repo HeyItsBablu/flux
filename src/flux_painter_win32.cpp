@@ -266,4 +266,22 @@ void Painter::drawRectOutline(int x, int y, int w, int h, NativeColor color,
   // NULL_BRUSH is a stock object — never DeleteObject it
 }
 
+void Painter::pushClipRoundedRect(int x, int y, int w, int h, int cornerDiameter) {
+    HRGN rgn = CreateRoundRectRgn(x, y, x + w, y + h,
+                                   cornerDiameter, cornerDiameter);
+    SelectClipRgn(ctx.hdc, rgn);
+    DeleteObject(rgn);
+}
+void Painter::drawRoundedRectOutline(int x, int y, int w, int h,
+                                      int cornerDiameter,
+                                      NativeColor stroke, int strokeWidth) {
+    HPEN   hPen     = CreatePen(PS_SOLID, strokeWidth, stroke);
+    HPEN   oldPen   = (HPEN)  SelectObject(ctx.hdc, hPen);
+    HBRUSH oldBrush = (HBRUSH)SelectObject(ctx.hdc, GetStockObject(NULL_BRUSH));
+    RoundRect(ctx.hdc, x, y, x + w, y + h, cornerDiameter, cornerDiameter);
+    SelectObject(ctx.hdc, oldBrush);
+    SelectObject(ctx.hdc, oldPen);
+    DeleteObject(hPen);
+}
+
 #endif // _WIN32
