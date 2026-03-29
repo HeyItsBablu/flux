@@ -314,6 +314,8 @@ public:
   }
 
   void render(GraphicsContext &ctx, FontCache & /*fontCache*/) override {
+    Painter painter(ctx);
+
     int trackY = y + height / 2;
     int trackLeft = x + paddingLeft;
     int trackRight = x + width - paddingRight;
@@ -322,37 +324,22 @@ public:
     double normalizedValue = (value - minValue) / (maxValue - minValue);
     int thumbX = trackLeft + (int)(normalizedValue * trackWidth);
 
-    HBRUSH trackBrush = CreateSolidBrush(trackColor);
-    RECT trackRect = {trackLeft, trackY - trackHeight / 2, trackRight,
-                      trackY + trackHeight / 2};
-    FillRect(ctx.hdc, &trackRect, trackBrush);
-    DeleteObject(trackBrush);
+    // Track background
+    painter.fillRect(trackLeft, trackY - trackHeight / 2, trackWidth,
+                     trackHeight, trackColor);
 
-    HBRUSH fillBrush = CreateSolidBrush(trackFillColor);
-    RECT fillRect = {trackLeft, trackY - trackHeight / 2, thumbX,
-                     trackY + trackHeight / 2};
-    FillRect(ctx.hdc, &fillRect, fillBrush);
-    DeleteObject(fillBrush);
+    // Track fill (left of thumb)
+    painter.fillRect(trackLeft, trackY - trackHeight / 2, thumbX - trackLeft,
+                     trackHeight, trackFillColor);
 
-    COLORREF currentThumbColor = thumbColor;
-    if (isDragging)
-      currentThumbColor = thumbDragColor;
-    else if (isThumbHovered)
-      currentThumbColor = thumbHoverColor;
+    // Thumb
+    COLORREF currentThumbColor = isDragging       ? thumbDragColor
+                                 : isThumbHovered ? thumbHoverColor
+                                                  : thumbColor;
 
-    HBRUSH thumbBrush = CreateSolidBrush(currentThumbColor);
-    HPEN thumbPen = CreatePen(PS_SOLID, 1, RGB(255, 255, 255));
-
-    HBRUSH oldBrush = (HBRUSH)SelectObject(ctx.hdc, thumbBrush);
-    HPEN oldPen = (HPEN)SelectObject(ctx.hdc, thumbPen);
-
-    Ellipse(ctx.hdc, thumbX - thumbRadius, trackY - thumbRadius,
-            thumbX + thumbRadius, trackY + thumbRadius);
-
-    SelectObject(ctx.hdc, oldBrush);
-    SelectObject(ctx.hdc, oldPen);
-    DeleteObject(thumbBrush);
-    DeleteObject(thumbPen);
+    painter.drawEllipse(thumbX - thumbRadius, trackY - thumbRadius,
+                        thumbRadius * 2, thumbRadius * 2, currentThumbColor,
+                        RGB(255, 255, 255), 1);
 
     needsPaint = false;
   }
@@ -618,13 +605,20 @@ public:
   void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     if (!text.empty()) {
-      measureText(ctx, fontCache);
-      width = boxSize + 8 + width;
+      int wlen = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
+      std::wstring wtext(wlen, L'\0');
+      MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, wtext.data(), wlen);
+
+      NativeFont font = fontCache.getFont(fontSize, fontWeight);
+      int tw = 0, th = 0;
+      Painter(ctx).measureText(wtext, font, tw, th);
+
+      width = boxSize + 8 + tw;
+      height = max(boxSize, th);
     } else {
       width = boxSize;
+      height = boxSize;
     }
-
-    height = max(boxSize, height);
 
     width = constraints.clampWidth(width + paddingLeft + paddingRight);
     height = constraints.clampHeight(height + paddingTop + paddingBottom);
@@ -634,54 +628,38 @@ public:
   }
 
   void render(GraphicsContext &ctx, FontCache &fontCache) override {
+    Painter painter(ctx);
+
     int boxX = x + paddingLeft;
     int boxY =
         y + paddingTop + (height - paddingTop - paddingBottom - boxSize) / 2;
 
-    HBRUSH boxBrush =
-        CreateSolidBrush(checked ? RGB(76, 175, 80) : RGB(255, 255, 255));
-    HPEN boxPen =
-        CreatePen(PS_SOLID, 1, checked ? RGB(56, 155, 60) : RGB(150, 150, 150));
+    // Box fill + border
+    COLORREF fill = checked ? RGB(76, 175, 80) : RGB(255, 255, 255);
+    COLORREF stroke = checked ? RGB(56, 155, 60) : RGB(150, 150, 150);
+    painter.drawRectOutline(boxX, boxY, boxSize, boxSize, stroke, 1);
+    painter.fillRect(boxX + 1, boxY + 1, boxSize - 2, boxSize - 2, fill);
 
-    HPEN oldPen = (HPEN)SelectObject(ctx.hdc, boxPen);
-    HBRUSH oldBrush = (HBRUSH)SelectObject(ctx.hdc, boxBrush);
-
-    Rectangle(ctx.hdc, boxX, boxY, boxX + boxSize, boxY + boxSize);
-
-    SelectObject(ctx.hdc, oldBrush);
-    SelectObject(ctx.hdc, oldPen);
-    DeleteObject(boxBrush);
-    DeleteObject(boxPen);
-
+    // Checkmark (two line segments)
     if (checked) {
-      HPEN checkPen = CreatePen(PS_SOLID, 2, RGB(255, 255, 255));
-      HPEN oldCheckPen = (HPEN)SelectObject(ctx.hdc, checkPen);
-
       int cx = boxX + 3;
       int cy = boxY + boxSize / 2;
-
-      MoveToEx(ctx.hdc, cx, cy, nullptr);
-      LineTo(ctx.hdc, cx + 4, cy + 4);
-      LineTo(ctx.hdc, cx + 9, cy - 4);
-
-      SelectObject(ctx.hdc, oldCheckPen);
-      DeleteObject(checkPen);
+      painter.drawLine(cx, cy, cx + 4, cy + 4, RGB(255, 255, 255), 2);
+      painter.drawLine(cx + 4, cy + 4, cx + 9, cy - 4, RGB(255, 255, 255), 2);
     }
 
+    // Label text
     if (!text.empty()) {
-      RECT textRect = {boxX + boxSize + 8, y + paddingTop,
-                       x + width - paddingRight, y + height - paddingBottom};
+      int wlen = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
+      std::wstring wtext(wlen, L'\0');
+      MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, wtext.data(), wlen);
 
-      SetTextColor(ctx.hdc, getCurrentTextColor());
-      SetBkMode(ctx.hdc, TRANSPARENT);
-
-      HFONT hFont = fontCache.getFont(fontSize, fontWeight);
-      HFONT hOldFont = (HFONT)SelectObject(ctx.hdc, hFont);
-
-      DrawText(ctx.hdc, text.c_str(), -1, &textRect,
-               DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-
-      SelectObject(ctx.hdc, hOldFont);
+      NativeFont font = fontCache.getFont(fontSize, fontWeight);
+      int textX = boxX + boxSize + 8;
+      painter.drawText(
+          wtext, textX, y + paddingTop, (x + width - paddingRight) - textX,
+          height - paddingTop - paddingBottom, font, getCurrentTextColor(),
+          DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     }
 
     needsPaint = false;
@@ -757,13 +735,20 @@ public:
   void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     if (!text.empty()) {
-      measureText(ctx, fontCache);
-      width = circleSize + 8 + width;
+      int wlen = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
+      std::wstring wtext(wlen, L'\0');
+      MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, wtext.data(), wlen);
+
+      NativeFont font = fontCache.getFont(fontSize, fontWeight);
+      int tw = 0, th = 0;
+      Painter(ctx).measureText(wtext, font, tw, th);
+
+      width = circleSize + 8 + tw;
+      height = max(circleSize, th);
     } else {
       width = circleSize;
+      height = circleSize;
     }
-
-    height = max(circleSize, height);
 
     width = constraints.clampWidth(width + paddingLeft + paddingRight);
     height = constraints.clampHeight(height + paddingTop + paddingBottom);
@@ -773,62 +758,39 @@ public:
   }
 
   void render(GraphicsContext &ctx, FontCache &fontCache) override {
+    Painter painter(ctx);
+
     int circleX = x + paddingLeft + circleSize / 2;
     int circleY = y + paddingTop + (height - paddingTop - paddingBottom) / 2;
 
-    // Determine circle color
-    COLORREF currentCircleColor =
-        selected ? selectedCircleColor
-                 : (isHovered ? hoverCircleColor : circleColor);
+    COLORREF currentCircleColor = selected    ? selectedCircleColor
+                                  : isHovered ? hoverCircleColor
+                                              : circleColor;
 
-    // Draw outer circle
-    HBRUSH circleBrush = CreateSolidBrush(RGB(255, 255, 255));
-    HPEN circlePen = CreatePen(PS_SOLID, 2, currentCircleColor);
+    // Outer circle — white fill, colored stroke
+    painter.drawEllipse(circleX - circleSize / 2, circleY - circleSize / 2,
+                        circleSize, circleSize, RGB(255, 255, 255),
+                        currentCircleColor, 2);
 
-    HPEN oldPen = (HPEN)SelectObject(ctx.hdc, circlePen);
-    HBRUSH oldBrush = (HBRUSH)SelectObject(ctx.hdc, circleBrush);
+    // Inner fill dot when selected
+    if (selected)
+      painter.drawEllipse(circleX - innerCircleSize / 2,
+                          circleY - innerCircleSize / 2, innerCircleSize,
+                          innerCircleSize, innerCircleColor, innerCircleColor,
+                          0);
 
-    Ellipse(ctx.hdc, circleX - circleSize / 2, circleY - circleSize / 2,
-            circleX + circleSize / 2, circleY + circleSize / 2);
-
-    SelectObject(ctx.hdc, oldBrush);
-    SelectObject(ctx.hdc, oldPen);
-    DeleteObject(circleBrush);
-    DeleteObject(circlePen);
-
-    // Draw inner circle if selected
-    if (selected) {
-      HBRUSH innerBrush = CreateSolidBrush(innerCircleColor);
-      HPEN innerPen = CreatePen(PS_NULL, 0, 0);
-
-      oldPen = (HPEN)SelectObject(ctx.hdc, innerPen);
-      oldBrush = (HBRUSH)SelectObject(ctx.hdc, innerBrush);
-
-      Ellipse(ctx.hdc, circleX - innerCircleSize / 2,
-              circleY - innerCircleSize / 2, circleX + innerCircleSize / 2,
-              circleY + innerCircleSize / 2);
-
-      SelectObject(ctx.hdc, oldBrush);
-      SelectObject(ctx.hdc, oldPen);
-      DeleteObject(innerBrush);
-      DeleteObject(innerPen);
-    }
-
-    // Draw label text
+    // Label text
     if (!text.empty()) {
-      RECT textRect = {x + paddingLeft + circleSize + 8, y + paddingTop,
-                       x + width - paddingRight, y + height - paddingBottom};
+      int wlen = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
+      std::wstring wtext(wlen, L'\0');
+      MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, wtext.data(), wlen);
 
-      SetTextColor(ctx.hdc, getCurrentTextColor());
-      SetBkMode(ctx.hdc, TRANSPARENT);
-
-      HFONT hFont = fontCache.getFont(fontSize, fontWeight);
-      HFONT hOldFont = (HFONT)SelectObject(ctx.hdc, hFont);
-
-      DrawText(ctx.hdc, text.c_str(), -1, &textRect,
-               DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-
-      SelectObject(ctx.hdc, hOldFont);
+      NativeFont font = fontCache.getFont(fontSize, fontWeight);
+      int textX = x + paddingLeft + circleSize + 8;
+      painter.drawText(
+          wtext, textX, y + paddingTop, (x + width - paddingRight) - textX,
+          height - paddingTop - paddingBottom, font, getCurrentTextColor(),
+          DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     }
 
     needsPaint = false;
@@ -1194,57 +1156,52 @@ public:
     borderColor = isFocused ? focusedBorderColor : unfocusedBorderColor;
     drawRoundedRectangle(ctx);
 
-    HFONT hFont = fontCache.getFont(fontSize, fontWeight);
-    HFONT hOldFont = (HFONT)SelectObject(ctx.hdc, hFont);
+    Painter painter(ctx);
 
     int textX = x + paddingLeft;
+    int clipW = width - paddingLeft - paddingRight;
+    int clipH = height - paddingTop - paddingBottom;
 
-    RECT clipRect = {x + paddingLeft, y + paddingTop, x + width - paddingRight,
-                     y + height - paddingBottom};
+    painter.pushClipRect(x + paddingLeft, y + paddingTop, clipW, clipH);
 
-    HRGN clipRgn = CreateRectRgn(clipRect.left, clipRect.top, clipRect.right,
-                                 clipRect.bottom);
-    SelectClipRgn(ctx.hdc, clipRgn);
-
-    SetBkMode(ctx.hdc, TRANSPARENT);
+    NativeFont font = fontCache.getFont(fontSize, fontWeight);
 
     if (inputValue.empty() && !placeholder.empty()) {
-      SetTextColor(ctx.hdc, placeholderColor);
-      RECT pr = clipRect;
-      DrawText(ctx.hdc, placeholder.c_str(), -1, &pr,
-               DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+      int wlen =
+          MultiByteToWideChar(CP_UTF8, 0, placeholder.c_str(), -1, nullptr, 0);
+      std::wstring wph(wlen, L'\0');
+      MultiByteToWideChar(CP_UTF8, 0, placeholder.c_str(), -1, wph.data(),
+                          wlen);
+      painter.drawText(wph, textX, y + paddingTop, clipW, clipH, font,
+                       placeholderColor, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     } else {
-      SetTextColor(ctx.hdc, inputTextColor);
-      RECT tr = clipRect;
-      tr.left -= scrollOffset;
-      DrawText(ctx.hdc, inputValue.c_str(), -1, &tr,
-               DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOCLIP);
+      int wlen =
+          MultiByteToWideChar(CP_UTF8, 0, inputValue.c_str(), -1, nullptr, 0);
+      std::wstring winput(wlen, L'\0');
+      MultiByteToWideChar(CP_UTF8, 0, inputValue.c_str(), -1, winput.data(),
+                          wlen);
+      painter.drawText(winput, textX - scrollOffset, y + paddingTop,
+                       clipW + scrollOffset, clipH, font, inputTextColor,
+                       DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOCLIP);
     }
 
+    // Cursor
     if (isFocused && cursorVisible) {
-      SIZE textSize = {0};
+      int tw = 0, th = 0;
       if (cursorPos > 0) {
-        GetTextExtentPoint32(ctx.hdc, inputValue.c_str(), cursorPos, &textSize);
+        int wlen = MultiByteToWideChar(CP_UTF8, 0, inputValue.c_str(),
+                                       cursorPos, nullptr, 0);
+        std::wstring wpre(wlen, L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, inputValue.c_str(), cursorPos,
+                            wpre.data(), wlen);
+        painter.measureText(wpre, font, tw, th);
       }
-
-      int cursorX = textX + textSize.cx - scrollOffset;
-      int cursorY1 = y + paddingTop + 2;
-      int cursorY2 = y + height - paddingBottom - 2;
-
-      HPEN cursorPen = CreatePen(PS_SOLID, 1, RGB(30, 30, 30));
-      HPEN oldPen = (HPEN)SelectObject(ctx.hdc, cursorPen);
-
-      MoveToEx(ctx.hdc, cursorX, cursorY1, nullptr);
-      LineTo(ctx.hdc, cursorX, cursorY2);
-
-      SelectObject(ctx.hdc, oldPen);
-      DeleteObject(cursorPen);
+      int cursorX = textX + tw - scrollOffset;
+      painter.drawLine(cursorX, y + paddingTop + 2, cursorX,
+                       y + height - paddingBottom - 2, inputTextColor, 1);
     }
 
-    SelectClipRgn(ctx.hdc, nullptr);
-    DeleteObject(clipRgn);
-
-    SelectObject(ctx.hdc, hOldFont);
+    painter.popClipRect();
     needsPaint = false;
   }
 
@@ -1384,62 +1341,55 @@ private:
       boundStringState->set(inputValue);
   }
 
-  int getCursorPosFromX(int pixelX) {
+int getCursorPosFromX(int pixelX) {
     if (inputValue.empty())
-      return 0;
+        return 0;
 
     auto *ui = FluxUI::getCurrentInstance();
     MeasureContext mc = ui->getMeasureContext();
-    FontCache &fc = ui->getFontCache();
+    NativeFont font = ui->getFontCache().getFont(fontSize, fontWeight);
 
-    HFONT hFont = fc.getFont(fontSize, fontWeight);
-    HFONT hOldFont = (HFONT)SelectObject(mc.ctx.hdc, hFont);
-
-    int bestPos = 0;
-    int bestDist = abs(pixelX);
+    int bestPos = 0, bestDist = abs(pixelX);
 
     for (int i = 1; i <= (int)inputValue.size(); i++) {
-      SIZE sz;
-      GetTextExtentPoint32(mc.ctx.hdc, inputValue.c_str(), i, &sz);
-      int dist = abs(sz.cx - pixelX);
-      if (dist < bestDist) {
-        bestDist = dist;
-        bestPos = i;
-      }
+        int wlen = MultiByteToWideChar(CP_UTF8, 0,
+                       inputValue.c_str(), i, nullptr, 0);
+        std::wstring wpre(wlen, L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, inputValue.c_str(), i,
+                            wpre.data(), wlen);
+        int tw = 0, th = 0;
+        Painter(mc.ctx).measureText(wpre, font, tw, th);
+        int dist = abs(tw - pixelX);
+        if (dist < bestDist) { bestDist = dist; bestPos = i; }
     }
+    return bestPos;
+}
 
-    SelectObject(mc.ctx.hdc, hOldFont);
-    return bestPos; // MeasureContext destructor releases DC
-  }
-
-  void updateScroll() {
-    if (inputValue.empty()) {
-      scrollOffset = 0;
-      return;
-    }
+void updateScroll() {
+    if (inputValue.empty()) { scrollOffset = 0; return; }
 
     auto *ui = FluxUI::getCurrentInstance();
     MeasureContext mc = ui->getMeasureContext();
-    FontCache &fc = ui->getFontCache();
+    NativeFont font = ui->getFontCache().getFont(fontSize, fontWeight);
 
-    HFONT hFont = fc.getFont(fontSize, fontWeight);
-    HFONT hOldFont = (HFONT)SelectObject(mc.ctx.hdc, hFont);
-
-    SIZE sz = {};
-    if (cursorPos > 0)
-      GetTextExtentPoint32(mc.ctx.hdc, inputValue.c_str(), cursorPos, &sz);
-
-    SelectObject(mc.ctx.hdc, hOldFont);
-    // MeasureContext destructor releases DC
+    int tw = 0, th = 0;
+    if (cursorPos > 0) {
+        int wlen = MultiByteToWideChar(CP_UTF8, 0,
+                       inputValue.c_str(), cursorPos, nullptr, 0);
+        std::wstring wpre(wlen, L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, inputValue.c_str(), cursorPos,
+                            wpre.data(), wlen);
+        Painter(mc.ctx).measureText(wpre, font, tw, th);
+    }
 
     int textAreaWidth = width - paddingLeft - paddingRight;
-    int cursorX = sz.cx - scrollOffset;
+    int cursorX = tw - scrollOffset;
 
     if (cursorX < 10)
-      scrollOffset = max(0, sz.cx - 10);
+        scrollOffset = max(0, tw - 10);
     else if (cursorX > textAreaWidth - 10)
-      scrollOffset = sz.cx - textAreaWidth + 10;
-  }
+        scrollOffset = tw - textAreaWidth + 10;
+}
 };
 
 // ----------------------------------------------------------------

@@ -90,6 +90,14 @@ inline int colorRed(NativeColor c) { return GetRValue(c); }
 inline int colorGreen(NativeColor c) { return GetGValue(c); }
 inline int colorBlue(NativeColor c) { return GetBValue(c); }
 
+static COLORREF interpolateColor(COLORREF c1, COLORREF c2, double t) {
+    t = max(0.0, min(1.0, t));
+    int r = colorRed  (c1) + (int)((colorRed  (c2) - colorRed  (c1)) * t);
+    int g = colorGreen(c1) + (int)((colorGreen(c2) - colorGreen(c1)) * t);
+    int b = colorBlue (c1) + (int)((colorBlue (c2) - colorBlue (c1)) * t);
+    return colorFromRGB(r, g, b);
+}
+
 #endif // _WIN32
 
 // // ── Cross-platform constants ──────────────────────────────────────────────
