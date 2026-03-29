@@ -29,6 +29,9 @@ using PFNWGLCHOOSEPIXELFORMATARBPROC = BOOL(WINAPI *)(HDC, const int *,
                                                       const FLOAT *, UINT,
                                                       int *, UINT *);
 
+
+                                                      
+
 struct GraphicsContext {
   NativeContext hdc;
   explicit GraphicsContext(NativeContext h) : hdc(h) {}

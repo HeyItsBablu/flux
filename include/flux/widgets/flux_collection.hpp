@@ -107,27 +107,26 @@ struct ScrollbarState {
   void render(GraphicsContext &ctx, int wx, int wy, int ww, int wh) const {
     if (!isScrollable)
       return;
+
+    Painter painter(ctx);
+
     COLORREF thumbColor = isDragging   ? colorActive
                           : isHovering ? colorHover
                                        : colorNormal;
-    RECT trackRect, thumbRect;
+
     if (horizontal) {
       int sbY = wy + wh - size;
-      trackRect = {wx, sbY, wx + ww, wy + wh};
-      thumbRect = {wx + thumbOffset, sbY, wx + thumbOffset + thumbLength,
-                   wy + wh};
+      // Track
+      painter.fillRect(wx, sbY, ww, size, colorTrack);
+      // Thumb
+      painter.fillRect(wx + thumbOffset, sbY, thumbLength, size, thumbColor);
     } else {
       int sbX = wx + ww - size;
-      trackRect = {sbX, wy, wx + ww, wy + wh};
-      thumbRect = {sbX, wy + thumbOffset, wx + ww,
-                   wy + thumbOffset + thumbLength};
+      // Track
+      painter.fillRect(sbX, wy, size, wh, colorTrack);
+      // Thumb
+      painter.fillRect(sbX, wy + thumbOffset, size, thumbLength, thumbColor);
     }
-    HBRUSH br = CreateSolidBrush(colorTrack);
-    FillRect(ctx.hdc, &trackRect, br);
-    DeleteObject(br);
-    br = CreateSolidBrush(thumbColor);
-    FillRect(ctx.hdc, &thumbRect, br);
-    DeleteObject(br);
   }
 
   // ── Mouse handlers — return true if the event was consumed ────────────
@@ -424,33 +423,38 @@ public:
 
   void render(GraphicsContext &ctx, FontCache &fontCache) override {
     sb.updateThumb();
-    int sbSz = sb.isScrollable ? sb.size : 0;
-    RECT clipRect;
-    if (sb.horizontal)
-      clipRect = {x + paddingLeft, y + paddingTop, x + width - paddingRight,
-                  y + height - paddingBottom - sbSz};
-    else
-      clipRect = {x + paddingLeft, y + paddingTop,
-                  x + width - paddingRight - sbSz, y + height - paddingBottom};
+    Painter painter(ctx);
 
-    HRGN clip = CreateRectRgn(clipRect.left, clipRect.top, clipRect.right,
-                              clipRect.bottom);
-    SelectClipRgn(ctx.hdc, clip);
+    int sbSz = sb.isScrollable ? sb.size : 0;
+    int clipX1, clipY1, clipX2, clipY2;
+
+    if (sb.horizontal) {
+      clipX1 = x + paddingLeft;
+      clipY1 = y + paddingTop;
+      clipX2 = x + width - paddingRight;
+      clipY2 = y + height - paddingBottom - sbSz;
+    } else {
+      clipX1 = x + paddingLeft;
+      clipY1 = y + paddingTop;
+      clipX2 = x + width - paddingRight - sbSz;
+      clipY2 = y + height - paddingBottom;
+    }
+
+    painter.pushClipRect(clipX1, clipY1, clipX2 - clipX1, clipY2 - clipY1);
 
     if (hasBackground)
       drawRoundedRectangle(ctx);
 
     for (auto &child : children) {
-      bool vis = sb.horizontal ? (child->x + child->width >= clipRect.left &&
-                                  child->x < clipRect.right)
-                               : (child->y + child->height >= clipRect.top &&
-                                  child->y < clipRect.bottom);
+      bool vis =
+          sb.horizontal
+              ? (child->x + child->width >= clipX1 && child->x < clipX2)
+              : (child->y + child->height >= clipY1 && child->y < clipY2);
       if (vis)
         child->render(ctx, fontCache);
     }
 
-    SelectClipRgn(ctx.hdc, NULL);
-    DeleteObject(clip);
+    painter.popClipRect();
     sb.render(ctx, x, y, width, height);
     needsPaint = false;
   }
@@ -950,33 +954,38 @@ public:
 
   void render(GraphicsContext &ctx, FontCache &fontCache) override {
     sb.updateThumb();
-    int sbSz = sb.isScrollable ? sb.size : 0;
-    RECT clipRect;
-    if (sb.horizontal)
-      clipRect = {x + paddingLeft, y + paddingTop, x + width - paddingRight,
-                  y + height - paddingBottom - sbSz};
-    else
-      clipRect = {x + paddingLeft, y + paddingTop,
-                  x + width - paddingRight - sbSz, y + height - paddingBottom};
+    Painter painter(ctx);
 
-    HRGN clip = CreateRectRgn(clipRect.left, clipRect.top, clipRect.right,
-                              clipRect.bottom);
-    SelectClipRgn(ctx.hdc, clip);
+    int sbSz = sb.isScrollable ? sb.size : 0;
+    int clipX1, clipY1, clipX2, clipY2;
+
+    if (sb.horizontal) {
+      clipX1 = x + paddingLeft;
+      clipY1 = y + paddingTop;
+      clipX2 = x + width - paddingRight;
+      clipY2 = y + height - paddingBottom - sbSz;
+    } else {
+      clipX1 = x + paddingLeft;
+      clipY1 = y + paddingTop;
+      clipX2 = x + width - paddingRight - sbSz;
+      clipY2 = y + height - paddingBottom;
+    }
+
+    painter.pushClipRect(clipX1, clipY1, clipX2 - clipX1, clipY2 - clipY1);
 
     if (hasBackground)
       drawRoundedRectangle(ctx);
 
     for (auto &child : children) {
-      bool vis = sb.horizontal ? (child->x + child->width >= clipRect.left &&
-                                  child->x < clipRect.right)
-                               : (child->y + child->height >= clipRect.top &&
-                                  child->y < clipRect.bottom);
+      bool vis =
+          sb.horizontal
+              ? (child->x + child->width >= clipX1 && child->x < clipX2)
+              : (child->y + child->height >= clipY1 && child->y < clipY2);
       if (vis)
         child->render(ctx, fontCache);
     }
 
-    SelectClipRgn(ctx.hdc, NULL);
-    DeleteObject(clip);
+    painter.popClipRect();
     sb.render(ctx, x, y, width, height);
     needsPaint = false;
   }
@@ -1174,7 +1183,7 @@ public:
 
   ~GridViewBuilder() override {
     if (sb.isDragging)
-      ReleaseCapture();
+      FluxUI::getCurrentInstance()->releaseMouseInput();
   }
 
   void setSelf(std::shared_ptr<GridViewBuilder<T>> ptr) { self = ptr; }
@@ -1352,24 +1361,24 @@ public:
 
   void render(GraphicsContext &ctx, FontCache &fontCache) override {
     sb.updateThumb();
-    int sbW = sb.isScrollable ? sb.size : 0;
-    int clipRight = x + width - paddingRight - sbW;
+    Painter painter(ctx);
 
-    HRGN clip = CreateRectRgn(x + paddingLeft, y + paddingTop, clipRight,
-                              y + height - paddingBottom);
-    SelectClipRgn(ctx.hdc, clip);
+    int sbW = sb.isScrollable ? sb.size : 0;
+    int clipX1 = x + paddingLeft;
+    int clipY1 = y + paddingTop;
+    int clipX2 = x + width - paddingRight - sbW;
+    int clipY2 = y + height - paddingBottom;
+
+    painter.pushClipRect(clipX1, clipY1, clipX2 - clipX1, clipY2 - clipY1);
 
     if (hasBackground)
       drawRoundedRectangle(ctx);
 
-    int viewTop = y + paddingTop;
-    int viewBottom = y + height - paddingBottom;
     for (auto &child : children)
-      if (child->y + child->height >= viewTop && child->y < viewBottom)
+      if (child->y + child->height >= clipY1 && child->y < clipY2)
         child->render(ctx, fontCache);
 
-    SelectClipRgn(ctx.hdc, NULL);
-    DeleteObject(clip);
+    painter.popClipRect();
     sb.render(ctx, x, y, width, height);
     needsPaint = false;
   }
