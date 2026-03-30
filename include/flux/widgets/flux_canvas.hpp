@@ -1087,7 +1087,7 @@ void main(){ fragColor = uColor; }
         self->applyVScrollFraction(t);
       });
       if (!hC && !vC) {
-        if (self->viewportEnabled_ && (GetKeyState(VK_SPACE) & 0x8000)) {
+        if (self->viewportEnabled_ && (GetKeyState(Key::Space) & 0x8000)) {
           self->beginPan(sx, sy);
         } else if (self->activeSurface_) {
           auto [cx, cy] = self->vp_.screenToCanvas(float(sx), float(sy));
@@ -1199,15 +1199,15 @@ void main(){ fragColor = uColor; }
     case WM_KEYDOWN: {
       if (!self)
         return 0;
-      bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+      bool ctrl = (GetKeyState(Key::Control) & 0x8000) != 0;
       bool consumed = false;
       if (ctrl && self->viewportEnabled_) {
-        if (wp == VK_OEM_PLUS || wp == VK_ADD) {
+        if (wp == Key::OemPlus || wp == Key::NumpadPlus) {
           self->vp_.zoomIn();
           self->pokeScrollbars();
           self->scheduleRepaint();
           consumed = true;
-        } else if (wp == VK_OEM_MINUS || wp == VK_SUBTRACT) {
+        } else if (wp == Key::OemMinus || wp == Key::NumpadMinus) {
           self->vp_.zoomOut();
           self->pokeScrollbars();
           self->scheduleRepaint();

@@ -2,6 +2,7 @@
 #define FLUX_INPUT_HPP
 
 #include "flux_core.hpp"
+
 #include "flux_state.hpp"
 #include <algorithm>
 #include <iostream>
@@ -186,7 +187,7 @@ public:
   }
 
   bool handleKeyDown(int keyCode) override {
-    if (keyCode == VK_SPACE || keyCode == VK_RETURN) {
+    if (keyCode == Key::Space || keyCode == Key::Return) {
       toggled = !toggled;
       notifyToggleChanged();
       markNeedsPaint();
@@ -404,21 +405,18 @@ public:
     double oldValue = value;
 
     switch (keyCode) {
-    case VK_LEFT:
-    case VK_DOWN:
+    case Key::Left:
+    case Key::Down:
       value -= step;
       break;
-
-    case VK_RIGHT:
-    case VK_UP:
+    case Key::Right:
+    case Key::Up:
       value += step;
       break;
-
-    case VK_HOME:
+    case Key::Home:
       value = minValue;
       break;
-
-    case VK_END:
+    case Key::End:
       value = maxValue;
       break;
 
@@ -806,7 +804,7 @@ public:
 
   bool handleKeyDown(int keyCode) override {
     // Space or Enter to select
-    if (keyCode == VK_SPACE || keyCode == VK_RETURN) {
+    if (keyCode == Key::Space || keyCode == Key::Return) {
       selectThis();
       return true;
     }
@@ -1251,7 +1249,7 @@ public:
 
   bool handleKeyDown(int keyCode) override {
     switch (keyCode) {
-    case VK_BACK:
+    case Key::Backspace:
       if (cursorPos > 0) {
         inputValue.erase(cursorPos - 1, 1);
         cursorPos--;
@@ -1262,7 +1260,7 @@ public:
       }
       break;
 
-    case VK_DELETE:
+    case Key::Delete:
       if (cursorPos < (int)inputValue.size()) {
         inputValue.erase(cursorPos, 1);
         cursorVisible = true;
@@ -1272,7 +1270,7 @@ public:
       }
       break;
 
-    case VK_LEFT:
+    case Key::Left:
       if (cursorPos > 0) {
         cursorPos--;
         cursorVisible = true;
@@ -1281,7 +1279,7 @@ public:
       }
       break;
 
-    case VK_RIGHT:
+    case Key::Right:
       if (cursorPos < (int)inputValue.size()) {
         cursorPos++;
         cursorVisible = true;
@@ -1290,12 +1288,12 @@ public:
       }
       break;
 
-    case VK_HOME:
+    case Key::Home:
       cursorPos = 0;
       scrollOffset = 0;
       return true;
 
-    case VK_END:
+    case Key::End:
       cursorPos = (int)inputValue.size();
       updateScroll();
       return true;
@@ -1341,9 +1339,9 @@ private:
       boundStringState->set(inputValue);
   }
 
-int getCursorPosFromX(int pixelX) {
+  int getCursorPosFromX(int pixelX) {
     if (inputValue.empty())
-        return 0;
+      return 0;
 
     auto *ui = FluxUI::getCurrentInstance();
     MeasureContext mc = ui->getMeasureContext();
@@ -1352,21 +1350,26 @@ int getCursorPosFromX(int pixelX) {
     int bestPos = 0, bestDist = abs(pixelX);
 
     for (int i = 1; i <= (int)inputValue.size(); i++) {
-        int wlen = MultiByteToWideChar(CP_UTF8, 0,
-                       inputValue.c_str(), i, nullptr, 0);
-        std::wstring wpre(wlen, L'\0');
-        MultiByteToWideChar(CP_UTF8, 0, inputValue.c_str(), i,
-                            wpre.data(), wlen);
-        int tw = 0, th = 0;
-        Painter(mc.ctx).measureText(wpre, font, tw, th);
-        int dist = abs(tw - pixelX);
-        if (dist < bestDist) { bestDist = dist; bestPos = i; }
+      int wlen =
+          MultiByteToWideChar(CP_UTF8, 0, inputValue.c_str(), i, nullptr, 0);
+      std::wstring wpre(wlen, L'\0');
+      MultiByteToWideChar(CP_UTF8, 0, inputValue.c_str(), i, wpre.data(), wlen);
+      int tw = 0, th = 0;
+      Painter(mc.ctx).measureText(wpre, font, tw, th);
+      int dist = abs(tw - pixelX);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestPos = i;
+      }
     }
     return bestPos;
-}
+  }
 
-void updateScroll() {
-    if (inputValue.empty()) { scrollOffset = 0; return; }
+  void updateScroll() {
+    if (inputValue.empty()) {
+      scrollOffset = 0;
+      return;
+    }
 
     auto *ui = FluxUI::getCurrentInstance();
     MeasureContext mc = ui->getMeasureContext();
@@ -1374,22 +1377,22 @@ void updateScroll() {
 
     int tw = 0, th = 0;
     if (cursorPos > 0) {
-        int wlen = MultiByteToWideChar(CP_UTF8, 0,
-                       inputValue.c_str(), cursorPos, nullptr, 0);
-        std::wstring wpre(wlen, L'\0');
-        MultiByteToWideChar(CP_UTF8, 0, inputValue.c_str(), cursorPos,
-                            wpre.data(), wlen);
-        Painter(mc.ctx).measureText(wpre, font, tw, th);
+      int wlen = MultiByteToWideChar(CP_UTF8, 0, inputValue.c_str(), cursorPos,
+                                     nullptr, 0);
+      std::wstring wpre(wlen, L'\0');
+      MultiByteToWideChar(CP_UTF8, 0, inputValue.c_str(), cursorPos,
+                          wpre.data(), wlen);
+      Painter(mc.ctx).measureText(wpre, font, tw, th);
     }
 
     int textAreaWidth = width - paddingLeft - paddingRight;
     int cursorX = tw - scrollOffset;
 
     if (cursorX < 10)
-        scrollOffset = max(0, tw - 10);
+      scrollOffset = max(0, tw - 10);
     else if (cursorX > textAreaWidth - 10)
-        scrollOffset = tw - textAreaWidth + 10;
-}
+      scrollOffset = tw - textAreaWidth + 10;
+  }
 };
 
 // ----------------------------------------------------------------

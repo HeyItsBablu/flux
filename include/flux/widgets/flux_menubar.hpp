@@ -309,21 +309,21 @@ public:
         const auto &items = entries_[openMenuIndex].items;
 
         switch (keyCode) {
-        case VK_ESCAPE:
+        case Key::Escape:
             closeMenu_();
             return true;
 
-        case VK_LEFT:
+        case Key::Left:
             closeMenu_();
             openMenu_((openMenuIndex - 1 + (int)entries_.size()) % (int)entries_.size());
             return true;
 
-        case VK_RIGHT:
+        case Key::Right:
             closeMenu_();
             openMenu_((openMenuIndex + 1) % (int)entries_.size());
             return true;
 
-        case VK_UP: {
+        case Key::Up: {
             int prev = (hoveredItem <= 0) ? (int)items.size() - 1 : hoveredItem - 1;
             while (prev >= 0 && items[prev].type == ContextMenuItem::Type::Separator)
                 prev--;
@@ -331,7 +331,7 @@ public:
             refresh_();
             return true;
         }
-        case VK_DOWN: {
+        case Key::Down: {
             int next = hoveredItem + 1;
             while (next < (int)items.size() &&
                    items[next].type == ContextMenuItem::Type::Separator)
@@ -340,8 +340,8 @@ public:
             refresh_();
             return true;
         }
-        case VK_RETURN:
-        case VK_SPACE:
+        case Key::Return:
+        case Key::Space:
             if (hoveredItem >= 0 && hoveredItem < (int)items.size()) {
                 const auto &item = items[hoveredItem];
                 if (item.type == ContextMenuItem::Type::Action && item.enabled) {

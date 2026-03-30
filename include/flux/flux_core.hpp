@@ -6,6 +6,7 @@
 #include "flux_renderer.hpp"
 #include "flux_widget.hpp"
 #include "flux_window.hpp"
+#include "flux_keys.hpp"
 
 #include <functional>
 #include <map>

@@ -320,13 +320,13 @@ public:
         int cur = _selectedRowIndex();
 
         switch (keyCode) {
-        case VK_UP:
+        case Key::Up:
             if (cur > 0) { _select(flatList_[cur - 1].node); _ensureVisible(cur - 1); }
             return true;
-        case VK_DOWN:
+        case Key::Down:
             if (cur < (int)flatList_.size() - 1) { _select(flatList_[cur + 1].node); _ensureVisible(cur + 1); }
             return true;
-        case VK_LEFT:
+        case Key::Left:
             if (cur >= 0) {
                 auto *n = flatList_[cur].node;
                 if (!n->isLeaf() && n->expanded) _toggleExpand(n);
@@ -343,7 +343,7 @@ public:
                 }
             }
             return true;
-        case VK_RIGHT:
+        case Key::Right:
             if (cur >= 0) {
                 auto *n = flatList_[cur].node;
                 if (!n->isLeaf() && !n->expanded) _toggleExpand(n);
@@ -353,16 +353,16 @@ public:
                 }
             }
             return true;
-        case VK_HOME:
+        case Key::Home:
             if (!flatList_.empty()) { _select(flatList_[0].node); _ensureVisible(0); }
             return true;
-        case VK_END: {
+        case Key::End: {
             int last = (int)flatList_.size() - 1;
             _select(flatList_[last].node); _ensureVisible(last);
             return true;
         }
-        case VK_RETURN:
-        case VK_SPACE:
+        case Key::Return:
+        case Key::Space:
             if (cur >= 0 && !flatList_[cur].node->isLeaf())
                 _toggleExpand(flatList_[cur].node);
             return true;

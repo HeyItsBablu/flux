@@ -405,7 +405,7 @@ public:
         int count = (int)displayRows_->size();
 
         switch (keyCode) {
-        case VK_UP:
+        case Key::Up:
             if (selectedIndex_ > 0) {
                 selectedIndex_--;
                 _ensureRowVisible(selectedIndex_);
@@ -414,7 +414,7 @@ public:
                     ui->updateWidget(this);
             }
             return true;
-        case VK_DOWN:
+        case Key::Down:
             if (selectedIndex_ < count - 1) {
                 selectedIndex_++;
                 _ensureRowVisible(selectedIndex_);
@@ -423,21 +423,21 @@ public:
                     ui->updateWidget(this);
             }
             return true;
-        case VK_HOME:
+        case Key::Home:
             selectedIndex_ = 0;
             _ensureRowVisible(0);
             _fireSelection();
             if (auto *ui = FluxUI::getCurrentInstance())
                 ui->updateWidget(this);
             return true;
-        case VK_END:
+        case Key::End:
             selectedIndex_ = count - 1;
             _ensureRowVisible(selectedIndex_);
             _fireSelection();
             if (auto *ui = FluxUI::getCurrentInstance())
                 ui->updateWidget(this);
             return true;
-        case VK_PRIOR: { // Page Up
+        case Key::PageUp: { // Page Up
             int page = max(1, _contentAreaHeight() / rowHeight);
             selectedIndex_ = max(0, selectedIndex_ - page);
             _ensureRowVisible(selectedIndex_);
@@ -446,7 +446,7 @@ public:
                 ui->updateWidget(this);
             return true;
         }
-        case VK_NEXT: { // Page Down
+        case Key::PageDown: { // Page Down
             int page = max(1, _contentAreaHeight() / rowHeight);
             selectedIndex_ = min(count - 1, selectedIndex_ + page);
             _ensureRowVisible(selectedIndex_);

@@ -300,7 +300,7 @@ public:
 
     // Text area click
     auto [line, col] = _posFromMouse(mx, my);
-    if (GetKeyState(VK_SHIFT) & 0x8000) {
+    if (GetKeyState(Key::Shift) & 0x8000) {
       selAnchorLine_ = cursorLine_;
       selAnchorCol_ = cursorCol_;
       cursorLine_ = line;
@@ -411,8 +411,8 @@ public:
   }
 
   bool handleKeyDown(int key) override {
-    bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
-    bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+    bool shift = (GetKeyState(Key::Shift) & 0x8000) != 0;
+    bool ctrl = (GetKeyState(Key::Control) & 0x8000) != 0;
 
     if (ctrl) {
       if (key == 'A') {
@@ -444,7 +444,7 @@ public:
     }
 
     switch (key) {
-    case VK_RETURN: {
+    case Key::Return: {
       if (_hasSelection())
         _deleteSelection();
       std::string tail = lines_[cursorLine_].substr(cursorCol_);
@@ -455,7 +455,7 @@ public:
       _clearSelection();
       break;
     }
-    case VK_BACK:
+    case Key::Backspace:
       if (_hasSelection()) {
         _deleteSelection();
         break;
@@ -470,7 +470,7 @@ public:
       }
       _clearSelection();
       break;
-    case VK_DELETE:
+    case Key::Delete:
       if (_hasSelection()) {
         _deleteSelection();
         break;
@@ -483,7 +483,7 @@ public:
       }
       _clearSelection();
       break;
-    case VK_LEFT:
+    case Key::Left:
       if (!shift && _hasSelection()) {
         auto [s, e] = _normalizedSelection();
         cursorLine_ = s.line;
@@ -498,7 +498,7 @@ public:
       if (!shift)
         _clearSelection();
       break;
-    case VK_RIGHT:
+    case Key::Right:
       if (!shift && _hasSelection()) {
         auto [s, e] = _normalizedSelection();
         cursorLine_ = e.line;
@@ -513,7 +513,7 @@ public:
       if (!shift)
         _clearSelection();
       break;
-    case VK_UP:
+    case Key::Up:
       if (cursorLine_ > 0) {
         cursorLine_--;
         cursorCol_ = min(cursorCol_, (int)lines_[cursorLine_].size());
@@ -521,7 +521,7 @@ public:
       if (!shift)
         _clearSelection();
       break;
-    case VK_DOWN:
+    case Key::Down:
       if (cursorLine_ < (int)lines_.size() - 1) {
         cursorLine_++;
         cursorCol_ = min(cursorCol_, (int)lines_[cursorLine_].size());
@@ -529,17 +529,17 @@ public:
       if (!shift)
         _clearSelection();
       break;
-    case VK_HOME:
+    case Key::Home:
       cursorCol_ = 0;
       if (!shift)
         _clearSelection();
       break;
-    case VK_END:
+    case Key::End:
       cursorCol_ = (int)lines_[cursorLine_].size();
       if (!shift)
         _clearSelection();
       break;
-    case VK_PRIOR: {
+    case Key::PageUp: {
       int page = max(1, sbV_.viewportMain / max(1, lineH_));
       cursorLine_ = max(0, cursorLine_ - page);
       cursorCol_ = min(cursorCol_, (int)lines_[cursorLine_].size());
@@ -547,7 +547,7 @@ public:
         _clearSelection();
       break;
     }
-    case VK_NEXT: {
+    case Key::PageDown: {
       int page = max(1, sbV_.viewportMain / max(1, lineH_));
       cursorLine_ = min((int)lines_.size() - 1, cursorLine_ + page);
       cursorCol_ = min(cursorCol_, (int)lines_[cursorLine_].size());
@@ -1201,60 +1201,60 @@ public:
 
   bool handleKeyDown(int key) override {
     switch (key) {
-    case VK_UP:
+    case Key::Up:
       _increment();
       _commitImmediate();
       return true;
-    case VK_DOWN:
+    case Key::Down:
       _decrement();
       _commitImmediate();
       return true;
-    case VK_PRIOR:
+    case Key::PageUp:
       value = min(maxValue, value + step * 10);
       _commitImmediate();
       return true;
-    case VK_NEXT:
+    case Key::PageDown:
       value = max(minValue, value - step * 10);
       _commitImmediate();
       return true;
-    case VK_HOME:
+    case Key::Home:
       value = minValue;
       _commitImmediate();
       return true;
-    case VK_END:
+    case Key::End:
       value = maxValue;
       _commitImmediate();
       return true;
-    case VK_RETURN:
+    case Key::Return:
       _commitEdit();
       return true;
-    case VK_ESCAPE:
+    case Key::Escape:
       editing_ = false;
       editBuffer_ = _formatValue(value);
       markNeedsPaint();
       return true;
-    case VK_BACK:
+    case Key::Backspace:
       if (editing_ && editCursorPos_ > 0) {
         editBuffer_.erase(--editCursorPos_, 1);
         cursorVisible_ = true;
         markNeedsPaint();
       }
       return true;
-    case VK_DELETE:
+    case Key::Delete:
       if (editing_ && editCursorPos_ < (int)editBuffer_.size()) {
         editBuffer_.erase(editCursorPos_, 1);
         cursorVisible_ = true;
         markNeedsPaint();
       }
       return true;
-    case VK_LEFT:
+    case Key::Left:
       if (editCursorPos_ > 0) {
         editCursorPos_--;
         cursorVisible_ = true;
         markNeedsPaint();
       }
       return true;
-    case VK_RIGHT:
+    case Key::Right:
       if (editCursorPos_ < (int)editBuffer_.size()) {
         editCursorPos_++;
         cursorVisible_ = true;

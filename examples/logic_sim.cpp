@@ -2556,7 +2556,7 @@ public:
     lastSY_ = sy;
     float wx, wy;
     s2w(sx, sy, wx, wy);
-    bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+    bool shift = (GetKeyState(Key::Shift) & 0x8000) != 0;
 
     if (isSimActive()) {
       int hit = hitGate(wx, wy);
@@ -3183,12 +3183,12 @@ private:
 
 public:
   void onKeyDown(int key) override {
-    if (key == VK_ESCAPE && ctxMenu_.open) {
+    if (key == Key::Escape && ctxMenu_.open) {
       ctxMenuClose();
       redraw();
       return;
     }
-    bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+    bool ctrl = (GetKeyState(Key::Control) & 0x8000) != 0;
     if (ctrl && key == 'Z') {
       undo();
       return;
@@ -3237,13 +3237,13 @@ public:
       redraw();
       return;
     }
-    if (key == VK_ESCAPE && dragWire_) {
+    if (key == Key::Escape && dragWire_) {
       dragWire_ = false;
       hasDstSnap_ = false;
       redraw();
       return;
     }
-    if (key == VK_SPACE) {
+    if (key == Key::Space) {
       if (isSimActive()) {
         simPause();
         return;
@@ -3257,7 +3257,7 @@ public:
           redraw();
         }
     }
-    if (!isSimActive() && (key == VK_DELETE || key == VK_BACK)) {
+    if (!isSimActive() && (key == Key::Delete || key == Key::Backspace)) {
       bool anyW = false;
       for (int i = int(circuit.wires.size()) - 1; i >= 0; --i)
         if (circuit.wires[i].selected) {

@@ -215,8 +215,8 @@ public:
   }
 
   void onKeyDown(int key) override {
-    bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
-    bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+    bool ctrl = (GetKeyState(Key::Control) & 0x8000) != 0;
+    bool shift = (GetKeyState(Key::Shift) & 0x8000) != 0;
     if (ctrl && key == 'Z') {
       if (shift)
         redo();

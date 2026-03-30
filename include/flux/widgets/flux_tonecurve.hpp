@@ -565,18 +565,18 @@ public:
         auto& p = pts[selectedPoint];
 
         switch (keyCode) {
-            case VK_UP:    p.y = min(1.f, p.y + step); break;
-            case VK_DOWN:  p.y = max(0.f, p.y - step); break;
-            case VK_LEFT:
+            case Key::Up:    p.y = min(1.f, p.y + step); break;
+            case Key::Down:  p.y = max(0.f, p.y - step); break;
+            case Key::Left:
                 if (selectedPoint > 0)
                     p.x = max(pts[selectedPoint-1].x + step, p.x - step);
                 break;
-            case VK_RIGHT:
+            case Key::Right:
                 if (selectedPoint < (int)pts.size()-1)
                     p.x = min(pts[selectedPoint+1].x - step, p.x + step);
                 break;
-            case VK_DELETE:
-            case VK_BACK:
+            case Key::Delete:
+            case Key::Backspace:
                 if (selectedPoint > 0 && selectedPoint < (int)pts.size()-1) {
                     pts.erase(pts.begin() + selectedPoint);
                     selectedPoint = -1;

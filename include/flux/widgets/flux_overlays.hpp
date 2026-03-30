@@ -274,25 +274,25 @@ public:
     if (!isOpen || items.empty())
       return false;
     switch (keyCode) {
-    case VK_ESCAPE:
+    case Key::Escape:
       closeMenu();
       return true;
-    case VK_UP:
+    case Key::Up:
       moveToPrevious();
       return true;
-    case VK_DOWN:
+    case Key::Down:
       moveToNext();
       return true;
-    case VK_HOME:
+    case Key::Home:
       selectedIndex = hoveredIndex = findFirstActionIndex();
       refreshPopupIfOpen_();
       return true;
-    case VK_END:
+    case Key::End:
       selectedIndex = hoveredIndex = findLastActionIndex();
       refreshPopupIfOpen_();
       return true;
-    case VK_RETURN:
-    case VK_SPACE:
+    case Key::Return:
+    case Key::Space:
       if (selectedIndex >= 0 && selectedIndex < (int)items.size()) {
         const auto &item = items[selectedIndex];
         if (item.type == ContextMenuItem::Type::Action && item.enabled) {
@@ -1160,8 +1160,8 @@ public:
     if (options.empty())
       return false;
     switch (keyCode) {
-    case VK_RETURN:
-    case VK_SPACE:
+    case Key::Return:
+    case Key::Space:
       if (isOpen) {
         int idx = (hoveredItemIndex >= 0) ? hoveredItemIndex : selectedIndex;
         if (idx >= 0 && idx < (int)options.size())
@@ -1175,14 +1175,14 @@ public:
       }
       markNeedsPaint();
       return true;
-    case VK_ESCAPE:
+    case Key::Escape:
       if (isOpen) {
         closeDropdown();
         markNeedsPaint();
         return true;
       }
       break;
-    case VK_UP:
+    case Key::Up:
       if (isOpen) {
         if (hoveredItemIndex < 0)
           hoveredItemIndex = max(0, selectedIndex);
@@ -1194,7 +1194,7 @@ public:
         selectItem(selectedIndex - 1);
       }
       return true;
-    case VK_DOWN:
+    case Key::Down:
       if (isOpen) {
         if (hoveredItemIndex < 0)
           hoveredItemIndex = max(0, selectedIndex);
@@ -1206,7 +1206,7 @@ public:
         selectItem(selectedIndex + 1);
       }
       return true;
-    case VK_HOME:
+    case Key::Home:
       if (isOpen) {
         hoveredItemIndex = 0;
         scrollOffset = 0;
@@ -1215,7 +1215,7 @@ public:
         selectItem(0);
       }
       return true;
-    case VK_END:
+    case Key::End:
       if (isOpen) {
         hoveredItemIndex = (int)options.size() - 1;
         scrollOffset = max(0, (int)options.size() - maxVisibleItems);

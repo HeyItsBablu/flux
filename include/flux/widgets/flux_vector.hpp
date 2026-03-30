@@ -1250,8 +1250,8 @@ public:
   }
 
   void onKeyDown(int key) override {
-    bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
-    bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+    bool ctrl = (GetKeyState(Key::Control) & 0x8000) != 0;
+    bool shift = (GetKeyState(Key::Shift) & 0x8000) != 0;
 
     // Text tool key handling takes priority
     if (tool_ == VTool::Text && textSession_.active) {
@@ -1269,11 +1269,11 @@ public:
       redo();
     if (ctrl && key == 'A')
       selectAll();
-    if (ctrl && key == VK_OEM_1) // Ctrl+;
+    if (ctrl && key == Key::Oem1) // Ctrl+;
       setShowGuides(!showGuides_);
     if (key == 'S' && !ctrl)
       setSnapEnabled(!snapEnabled_);
-    if (key == VK_ESCAPE) {
+    if (key == Key::Escape) {
       if (tool_ == VTool::Pen && penInProgress_)
         commitPen();
       else if (tool_ == VTool::Text && textSession_.active)
@@ -1281,7 +1281,7 @@ public:
       else
         deselectAll();
     }
-    if (key == VK_DELETE || key == VK_BACK) {
+    if (key == Key::Delete || key == Key::Backspace) {
       for (auto id : selection_)
         removeShapeNoUndo(id);
       pushUndo();
@@ -1290,13 +1290,13 @@ public:
     float nudge = shift ? 10.f : 1.f;
     if (!selection_.empty()) {
       float dx = 0, dy = 0;
-      if (key == VK_LEFT)
+      if (key == Key::Left)
         dx = -nudge;
-      if (key == VK_RIGHT)
+      if (key == Key::Right)
         dx = nudge;
-      if (key == VK_UP)
+      if (key == Key::Up)
         dy = nudge;
-      if (key == VK_DOWN)
+      if (key == Key::Down)
         dy = -nudge;
       if (dx || dy)
         translateSelected(dx, dy);
@@ -2155,7 +2155,7 @@ private:
   }
 
   void onSelectDown(float x, float y) {
-    bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+    bool shift = (GetKeyState(Key::Shift) & 0x8000) != 0;
     float pad = 4.f / currentZoom_;
     if (!selection_.empty() && hitTestOrigin(x, y)) {
       draggingOrigin_ = true;
@@ -2223,7 +2223,7 @@ private:
   }
 
   void onSelectMove(float x, float y, float, float) {
-    bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+    bool shift = (GetKeyState(Key::Shift) & 0x8000) != 0;
     if (draggingOrigin_) {
       transformOrigin_ = {x, y};
       originSet_ = true;
@@ -2303,7 +2303,7 @@ private:
       return;
     }
     if (draggingHandle_) {
-      bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+      bool shift = (GetKeyState(Key::Shift) & 0x8000) != 0;
       if (dragHandleKind_ == HandleKind::Scale)
         applyScaleHandle(x, y, shift);
       else
@@ -2328,7 +2328,7 @@ private:
       }
     }
     if (draggingBox_) {
-      bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+      bool shift = (GetKeyState(Key::Shift) & 0x8000) != 0;
       auto hits = hitTestBox(boxX0_, boxY0_, boxX1_, boxY1_);
       if (!shift)
         selection_.clear();
@@ -2367,7 +2367,7 @@ private:
   }
   void onPenMove(float x, float y) {
     penCursor_ = {x, y};
-    if ((GetKeyState(VK_SHIFT) & 0x8000) && !penAnchors_.empty())
+    if ((GetKeyState(Key::Shift) & 0x8000) && !penAnchors_.empty())
       penCPs_.back() = {x, y};
   }
   void commitPen(bool closed = false) {
@@ -2441,20 +2441,20 @@ private:
   }
 
   void handleTextKey(int vk) {
-    bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+    bool ctrl = (GetKeyState(Key::Control) & 0x8000) != 0;
 
-    if (vk == VK_RETURN) {
+    if (vk == Key::Return) {
       // Enter commits the text as a VShape
       commitTextSession();
       dirty_ = true;
       return;
     }
-    if (vk == VK_ESCAPE) {
+    if (vk == Key::Escape) {
       cancelTextSession();
       dirty_ = true;
       return;
     }
-    if (vk == VK_BACK) {
+    if (vk == Key::Backspace) {
       if (!textSession_.text.empty())
         textSession_.text.pop_back();
       dirty_ = true;

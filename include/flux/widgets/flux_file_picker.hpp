@@ -401,10 +401,10 @@ public:
     }
 
     bool handleKeyDown(int key) override {
-        if (key == VK_RETURN || key == VK_SPACE) {
+        if (key == Key::Return || key == Key::Space) {
             _openDialog(); return true;
         }
-        if (key == VK_DELETE || key == VK_BACK) {
+        if (key == Key::Delete || key == Key::Backspace) {
             clear(); return true;
         }
         return false;

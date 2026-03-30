@@ -446,7 +446,7 @@ public:
     case 'F': setActiveTool(Tool::Fill);   break;
     case 'S': setActiveTool(Tool::Select); break;
     case 'T': setActiveTool(Tool::Text);   break;
-    case VK_ESCAPE:
+    case Key::Escape:
       if (activeTool == Tool::Select) {
         commitFloatingSelect();
         hasSelection_ = false;
@@ -513,9 +513,9 @@ private:
   }
 
   void handleTextKey(int vk) {
-    const bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
-    if (vk == VK_RETURN) { commitTextSession(); if (onRedrawNeeded) onRedrawNeeded(); return; }
-    if (vk == VK_ESCAPE) {
+    const bool ctrl = (GetKeyState(Key::Control) & 0x8000) != 0;
+    if (vk == Key::Return) { commitTextSession(); if (onRedrawNeeded) onRedrawNeeded(); return; }
+    if (vk == Key::Escape) {
       textSession_.active = false;
       textSession_.text.clear();
       scratchClear();
@@ -523,7 +523,7 @@ private:
       if (onRedrawNeeded) onRedrawNeeded();
       return;
     }
-    if (vk == VK_BACK) {
+    if (vk == Key::Backspace) {
       if (!textSession_.text.empty()) textSession_.text.pop_back();
       refreshTextPreview();
       return;

@@ -228,9 +228,9 @@ public:
 
     bool handleKeyDown(int keyCode) override {
         // Ctrl+Tab / Ctrl+Shift+Tab to cycle tabs
-        if (GetKeyState(VK_CONTROL) & 0x8000) {
-            if (keyCode == VK_TAB) {
-                bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+        if (GetKeyState(Key::Control) & 0x8000) {
+            if (keyCode == Key::Tab) {
+                bool shift = (GetKeyState(Key::Shift) & 0x8000) != 0;
                 int  next  = activeIndex + (shift ? -1 : 1);
                 if (next < 0)                  next = (int)tabs_.size() - 1;
                 if (next >= (int)tabs_.size()) next = 0;
