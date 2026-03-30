@@ -21,7 +21,7 @@
 #include "flux_tabview.hpp"
 #include "flux_treeview.hpp"
 #include "flux_data_table.hpp"
-// #include "flux_toast.hpp"
+#include "flux_toast.hpp"
 #include "flux_input_extended.hpp"
 #include "flux_accordion.hpp"
 #include "flux_file_picker.hpp"

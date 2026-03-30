@@ -18,7 +18,7 @@ endfunction()
 # add_flux_example(counter)
 # add_flux_example(component)
 # add_flux_example(draggable)
-# add_flux_example(layout)
+add_flux_example(layout)
 # add_flux_example(inputtest)
 # add_flux_example(datepicker)
 # add_flux_example(graphtest)
@@ -29,7 +29,7 @@ endfunction()
 # add_flux_example(splitview)
 # add_flux_example(menubarexample)
 # add_flux_example(tabview)
-add_flux_example(toast)
+# add_flux_example(toast)
 
 
 # ── image_editor needs stb ────────────────────────────────────────────────────

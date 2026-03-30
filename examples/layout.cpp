@@ -1,10 +1,14 @@
 #include "flux/flux.hpp"
+
 #include <numeric>
 
 class LayoutStressTest : public Component {
   State<int> boxCount;
   State<double> fillRatio;
   State<std::vector<int>> boxIndices;
+
+  // Toast widget pointer — declared as member so buttons can call it
+  ToastWidgetPtr toast_;
 
   static constexpr int kMax = 30;
 
@@ -23,6 +27,15 @@ public:
   void initState() override { rebuildIndices(boxCount.get()); }
 
   WidgetPtr build() override {
+
+    // ── Create the toast anchor (zero-size, placed inside Scaffold) ─────────
+    toast_ = Toast()
+        ->setPosition(ToastPosition::BottomRight)
+        ->setMaxVisible(3)
+        ->setToastWidth(300)
+        ->setSpacing(8)
+        ->setMarginEdge(16);
+
     return Scaffold(
         AppBar("Layout Stress Test"),
         Column(
@@ -104,6 +117,205 @@ public:
 
                 Divider(),
 
+                // ── Toast Demo Panel ──────────────────────────────────────
+                Container(
+                    Column({
+                        // Header
+                        Row({
+                                Icon(FluxIcons::Check, "Segoe MDL2 Assets", 14)
+                                    ->setColor(RGB(33, 150, 243)),
+                                Text("  Toast Notifications")
+                                    ->setFontWeight(FontWeight::Bold),
+                            })
+                            ->setSpacing(0),
+
+                        SizedBox(0, 10),
+
+                        // Row 1 — four toast types
+                        Row({
+                                // Info
+                                Button(
+                                    Row({
+                                        Icon(FluxIcons::Info, "Segoe MDL2 Assets", 13)
+                                            ->setColor(RGB(255, 255, 255)),
+                                        Text("  Info"),
+                                    })->setSpacing(0),
+                                    [this] {
+                                        toast_->show(
+                                            "Background sync completed successfully.",
+                                            ToastType::Info, 3000);
+                                    })
+                                    ->setBackgroundColor(RGB(33, 150, 243))
+                                    ->setBorderRadius(4)
+                                    ->setPadding(8),
+
+                                // Success
+                                Button(
+                                    Row({
+                                        Icon(FluxIcons::Check, "Segoe MDL2 Assets", 13)
+                                            ->setColor(RGB(255, 255, 255)),
+                                        Text("  Success"),
+                                    })->setSpacing(0),
+                                    [this] {
+                                        toast_->show(
+                                            "File saved successfully.",
+                                            ToastType::Success, 3000);
+                                    })
+                                    ->setBackgroundColor(RGB(76, 175, 80))
+                                    ->setBorderRadius(4)
+                                    ->setPadding(8),
+
+                                // Warning
+                                Button(
+                                    Row({
+                                        Icon(FluxIcons::Warning, "Segoe MDL2 Assets", 13)
+                                            ->setColor(RGB(255, 255, 255)),
+                                        Text("  Warning"),
+                                    })->setSpacing(0),
+                                    [this] {
+                                        toast_->show(
+                                            "Disk space is running low (< 10% free).",
+                                            ToastType::Warning, 4000);
+                                    })
+                                    ->setBackgroundColor(RGB(255, 152, 0))
+                                    ->setBorderRadius(4)
+                                    ->setPadding(8),
+
+                                // Error
+                                Button(
+                                    Row({
+                                        Icon(FluxIcons::Error, "Segoe MDL2 Assets", 13)
+                                            ->setColor(RGB(255, 255, 255)),
+                                        Text("  Error"),
+                                    })->setSpacing(0),
+                                    [this] {
+                                        toast_->show(
+                                            "Failed to connect to the server.",
+                                            ToastType::Error, 4000);
+                                    })
+                                    ->setBackgroundColor(RGB(244, 67, 54))
+                                    ->setBorderRadius(4)
+                                    ->setPadding(8),
+
+                            })
+                            ->setSpacing(8),
+
+                        SizedBox(0, 8),
+
+                        // Row 2 — advanced toast types
+                        Row({
+                                // Toast with title
+                                Button(
+                                    Text("With Title"),
+                                    [this] {
+                                        toast_->showEntry({
+                                            .message    = "Upload failed — check your connection.",
+                                            .title      = "Network Error",
+                                            .type       = ToastType::Error,
+                                            .durationMs = 5000,
+                                        });
+                                    })
+                                    ->setBackgroundColor(RGB(244, 67, 54))
+                                    ->setBorderRadius(4)
+                                    ->setPadding(8),
+
+                                // Sticky toast with action button
+                                Button(
+                                    Text("Sticky + Action"),
+                                    [this] {
+                                        toast_->showEntry({
+                                            .message     = "A new version is available.",
+                                            .title       = "Update Ready",
+                                            .type        = ToastType::Info,
+                                            .durationMs  = 0,        // sticky
+                                            .actionLabel = "Restart",
+                                            .onAction    = [this] {
+                                                toast_->show(
+                                                    "Restarting application…",
+                                                    ToastType::Success, 2500);
+                                            },
+                                        });
+                                    })
+                                    ->setBackgroundColor(RGB(33, 150, 243))
+                                    ->setBorderRadius(4)
+                                    ->setPadding(8),
+
+                                // Queued burst (fires 4 toasts, max 3 visible at once)
+                                Button(
+                                    Text("Queue Burst"),
+                                    [this] {
+                                        toast_->show("Task 1 complete",   ToastType::Success, 2500);
+                                        toast_->show("Task 2 complete",   ToastType::Success, 2500);
+                                        toast_->show("Task 3 complete",   ToastType::Info,    2500);
+                                        toast_->show("All tasks finished",ToastType::Info,    3000);
+                                    })
+                                    ->setBackgroundColor(RGB(102, 187, 106))
+                                    ->setBorderRadius(4)
+                                    ->setPadding(8),
+
+                                // Dismiss all
+                                Button(
+                                    Text("Dismiss All"),
+                                    [this] {
+                                        toast_->dismissAll();
+                                    })
+                                    ->setBackgroundColor(RGB(150, 150, 150))
+                                    ->setBorderRadius(4)
+                                    ->setPadding(8),
+
+                            })
+                            ->setSpacing(8),
+
+                        SizedBox(0, 8),
+
+                        // Row 3 — position switcher
+                        Row({
+                                Text("Position:")
+                                    ->setFontSize(12)
+                                    ->setTextColor(RGB(100, 100, 100)),
+
+                                Button(Text("↙ BL"), [this] {
+                                    toast_->setPosition(ToastPosition::BottomLeft);
+                                    toast_->show("Bottom-left", ToastType::Info, 2000);
+                                })->setBorderRadius(4)->setPadding(6),
+
+                                Button(Text("↓ BC"), [this] {
+                                    toast_->setPosition(ToastPosition::BottomCenter);
+                                    toast_->show("Bottom-center", ToastType::Info, 2000);
+                                })->setBorderRadius(4)->setPadding(6),
+
+                                Button(Text("↘ BR"), [this] {
+                                    toast_->setPosition(ToastPosition::BottomRight);
+                                    toast_->show("Bottom-right", ToastType::Info, 2000);
+                                })->setBorderRadius(4)->setPadding(6),
+
+                                Button(Text("↖ TL"), [this] {
+                                    toast_->setPosition(ToastPosition::TopLeft);
+                                    toast_->show("Top-left", ToastType::Info, 2000);
+                                })->setBorderRadius(4)->setPadding(6),
+
+                                Button(Text("↑ TC"), [this] {
+                                    toast_->setPosition(ToastPosition::TopCenter);
+                                    toast_->show("Top-center", ToastType::Info, 2000);
+                                })->setBorderRadius(4)->setPadding(6),
+
+                                Button(Text("↗ TR"), [this] {
+                                    toast_->setPosition(ToastPosition::TopRight);
+                                    toast_->show("Top-right", ToastType::Info, 2000);
+                                })->setBorderRadius(4)->setPadding(6),
+
+                            })
+                            ->setSpacing(6),
+
+                    })
+                    ->setSpacing(0))
+                    ->setPadding(12)
+                    ->setBackgroundColor(RGB(250, 250, 255))
+                    ->setBorderColor(RGB(220, 220, 230))
+                    ->setBorderWidth(1),
+
+                Divider(),
+
                 // ── Body ────────────────────────────────────────────────
                 Expanded(
                     Row({
@@ -169,18 +381,43 @@ public:
                                                         RGB(76, 175, 80)),
                                             })
                                             ->setSpacing(0),
+
+                                        SizedBox(0, 12),
+
+                                        // ── Toast shortcut inside left panel
+                                        Button(
+                                            Row({
+                                                Icon(FluxIcons::Cancel,
+                                                     "Segoe MDL2 Assets", 12)
+                                                    ->setColor(RGB(255, 255, 255)),
+                                                Text("  Notify")
+                                                    ->setFontSize(12),
+                                            })->setSpacing(0),
+                                            [this] {
+                                                toast_->showEntry({
+                                                    .message     = std::to_string(boxCount.get()) +
+                                                                   " boxes are currently active.",
+                                                    .title       = "Status Update",
+                                                    .type        = ToastType::Success,
+                                                    .durationMs  = 3500,
+                                                });
+                                            })
+                                            ->setBackgroundColor(RGB(33, 150, 243))
+                                            ->setBorderRadius(4)
+                                            ->setPadding(8),
+
                                         GestureDetector(Text("Hello Gesture"))
-                                            ->setOnTap([] {
-                                              std::cout << "Tapped box " << +1
-                                                        << std::endl;
+                                            ->setOnTap([this] {
+                                              toast_->show("Tapped!", ToastType::Info, 2000);
+                                              std::cout << "Tapped box " << +1 << std::endl;
                                             })
-                                            ->setOnDoubleTap([] {
-                                              std::cout << "Double tapped box "
-                                                        << +1 << std::endl;
+                                            ->setOnDoubleTap([this] {
+                                              toast_->show("Double tapped!", ToastType::Warning, 2000);
+                                              std::cout << "Double tapped box " << +1 << std::endl;
                                             })
-                                            ->setOnSecondaryTap([] {
-                                              std::cout << "Right click box "
-                                                        << +1 << std::endl;
+                                            ->setOnSecondaryTap([this] {
+                                              toast_->show("Right clicked!", ToastType::Error, 2000);
+                                              std::cout << "Right click box " << +1 << std::endl;
                                             })
 
                                     })
@@ -221,7 +458,7 @@ public:
                                                  Expanded(
                                                      GridView(boxIndices)
                                                          ->columns(3)
-                                                         ->itemBuilder([](int i,
+                                                         ->itemBuilder([this](int i,
                                                                           const int &idx)
                                                                            -> WidgetPtr {
                                                            static const COLORREF colors[] = {
@@ -232,26 +469,23 @@ public:
                                                                RGB(171, 71, 188),
                                                                RGB(38, 198, 218),
                                                            };
-                                                           COLORREF c =
-                                                               colors[idx % 6];
-                                                           return Container(
-                                                                      Center(
-                                                                          Text(
-                                                                              std::to_string(
-                                                                                  idx +
-                                                                                  1))
-                                                                              ->setTextColor(RGB(
-                                                                                  255,
-                                                                                  255,
-                                                                                  255))
-                                                                              ->setFontWeight(
-                                                                                  FontWeight::
-                                                                                      Bold)))
+                                                           COLORREF c = colors[idx % 6];
+
+                                                           // Tap a grid box to toast its number
+                                                           return GestureDetector(
+                                                               Container(
+                                                                   Center(
+                                                                       Text(std::to_string(idx + 1))
+                                                                           ->setTextColor(RGB(255, 255, 255))
+                                                                           ->setFontWeight(FontWeight::Bold)))
                                                                ->setHeight(80)
-                                                               ->setBackgroundColor(
-                                                                   c)
-                                                               ->setBorderRadius(
-                                                                   6);
+                                                               ->setBackgroundColor(c)
+                                                               ->setBorderRadius(6))
+                                                               ->setOnTap([this, idx] {
+                                                                   toast_->show(
+                                                                       "Box " + std::to_string(idx + 1) + " tapped.",
+                                                                       ToastType::Info, 1500);
+                                                               });
                                                          })
                                                          ->setSpacing(8))})
                                                 ->setSpacing(0)
@@ -263,6 +497,9 @@ public:
 
                         })
                         ->setSpacing(0)),
+
+                // ── Toast anchor (zero-size, must live inside Scaffold) ──────
+                toast_,
 
             })
             ->setSpacing(0));
