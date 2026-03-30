@@ -1,39 +1,19 @@
 #ifndef FLUX_OVERLAY_HOST_HPP
 #define FLUX_OVERLAY_HOST_HPP
 
+
+// // flux_overlay_host.hpp
+// // ── THIS FILE IS PLATFORM-SPECIFIC (Win32) ──────────────────────────────────
+// // All OS popup window management lives here.
+// // When adding Linux/Mac support, create flux_overlay_host_linux.hpp etc.
+// // Nothing in this file should be changed as part of the Painter migration.
+// // ─────────────────────────────────────────────────────────────────────────────
+// #ifdef _WIN32
+// // ... entire file unchanged ...
+// #endif // _WIN32
+
 // ============================================================================
-// OVERLAY HOST MIXIN  —  v2  (popup-window edition)
-//
-// Problem solved
-// ──────────────
-// CanvasWidget creates a WS_CHILD HWND that is always painted *after* the
-// GDI back-buffer BitBlt, so any overlay drawn into hdcMem is invisible
-// whenever a CanvasWidget is present.
-//
-// Solution
-// ────────
-// Every overlay widget owns a floating WS_POPUP | WS_EX_LAYERED |
-// WS_EX_TOPMOST window ("the popup").  It renders its content into a DIB
-// section and blits it through UpdateLayeredWindow, which composites
-// correctly over child HWNDs including OpenGL surfaces.
-//
-// The existing ScaffoldWidget overlay stack is kept for backwards compat
-// (it still drives hit-testing and keyboard routing in FluxUI), but the
-// *visual* output is now the popup window, not a paint into hdcMem.
-//
-// Usage contract for widget authors
-// ──────────────────────────────────
-//   1. Inherit from both Widget and OverlayHost.
-//   2. Call showPopup(parentHwnd, x, y, w, h) to create/show the window.
-//   3. Override renderPopupContent(HDC, FontCache&) to paint into it.
-//      The HDC is already sized to (popupW × popupH), pre-cleared to
-//      transparent (all-zero ARGB), so you draw normally.
-//   4. Call refreshPopup() whenever the visual content changes.
-//   5. Call hidePopup() to remove the window.
-//   6. Implement setScaffold() as before; the base provides a default body
-//      you can delegate to.
-//
-// OverlayHost::renderPopupContent default is a no-op — override it.
+// OVERLAY HOST MIXIN  —  
 // ============================================================================
 
 

@@ -266,22 +266,42 @@ void Painter::drawRectOutline(int x, int y, int w, int h, NativeColor color,
   // NULL_BRUSH is a stock object — never DeleteObject it
 }
 
-void Painter::pushClipRoundedRect(int x, int y, int w, int h, int cornerDiameter) {
-    HRGN rgn = CreateRoundRectRgn(x, y, x + w, y + h,
-                                   cornerDiameter, cornerDiameter);
-    SelectClipRgn(ctx.hdc, rgn);
-    DeleteObject(rgn);
+void Painter::pushClipRoundedRect(int x, int y, int w, int h,
+                                  int cornerDiameter) {
+  HRGN rgn =
+      CreateRoundRectRgn(x, y, x + w, y + h, cornerDiameter, cornerDiameter);
+  SelectClipRgn(ctx.hdc, rgn);
+  DeleteObject(rgn);
 }
 void Painter::drawRoundedRectOutline(int x, int y, int w, int h,
-                                      int cornerDiameter,
-                                      NativeColor stroke, int strokeWidth) {
-    HPEN   hPen     = CreatePen(PS_SOLID, strokeWidth, stroke);
-    HPEN   oldPen   = (HPEN)  SelectObject(ctx.hdc, hPen);
-    HBRUSH oldBrush = (HBRUSH)SelectObject(ctx.hdc, GetStockObject(NULL_BRUSH));
-    RoundRect(ctx.hdc, x, y, x + w, y + h, cornerDiameter, cornerDiameter);
-    SelectObject(ctx.hdc, oldBrush);
-    SelectObject(ctx.hdc, oldPen);
-    DeleteObject(hPen);
+                                     int cornerDiameter, NativeColor stroke,
+                                     int strokeWidth) {
+  HPEN hPen = CreatePen(PS_SOLID, strokeWidth, stroke);
+  HPEN oldPen = (HPEN)SelectObject(ctx.hdc, hPen);
+  HBRUSH oldBrush = (HBRUSH)SelectObject(ctx.hdc, GetStockObject(NULL_BRUSH));
+  RoundRect(ctx.hdc, x, y, x + w, y + h, cornerDiameter, cornerDiameter);
+  SelectObject(ctx.hdc, oldBrush);
+  SelectObject(ctx.hdc, oldPen);
+  DeleteObject(hPen);
+}
+
+void Painter::fillRectAlpha(int x, int y, int w, int h, NativeColor color,
+                            BYTE alpha) {
+  HDC tmpDC = CreateCompatibleDC(ctx.hdc);
+  HBITMAP tmpBmp = CreateCompatibleBitmap(ctx.hdc, w, h);
+  HBITMAP tmpOld = (HBITMAP)SelectObject(tmpDC, tmpBmp);
+
+  HBRUSH br = CreateSolidBrush(color);
+  RECT rc = {0, 0, w, h};
+  FillRect(tmpDC, &rc, br);
+  DeleteObject(br);
+
+  BLENDFUNCTION bf = {AC_SRC_OVER, 0, alpha, 0};
+  AlphaBlend(ctx.hdc, x, y, w, h, tmpDC, 0, 0, w, h, bf);
+
+  SelectObject(tmpDC, tmpOld);
+  DeleteObject(tmpBmp);
+  DeleteDC(tmpDC);
 }
 
 #endif // _WIN32

@@ -65,7 +65,9 @@ struct Painter {
 
   void pushClipRoundedRect(int x, int y, int w, int h, int cornerDiameter);
   void drawRoundedRectOutline(int x, int y, int w, int h, int cornerDiameter,
-                             NativeColor stroke, int strokeWidth);
+                              NativeColor stroke, int strokeWidth);
+
+  void fillRectAlpha(int x, int y, int w, int h, NativeColor color, BYTE alpha);
 };
 
 #endif // FLUX_PAINTER_HPP
