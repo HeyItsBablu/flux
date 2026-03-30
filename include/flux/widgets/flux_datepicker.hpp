@@ -176,18 +176,14 @@ public:
 
     if (selectedDate.isValid()) {
       std::string label = selectedDate.toString(dateFormat);
-      int wlen = MultiByteToWideChar(CP_UTF8, 0, label.c_str(), -1, nullptr, 0);
-      std::wstring wlabel(wlen, L'\0');
-      MultiByteToWideChar(CP_UTF8, 0, label.c_str(), -1, wlabel.data(), wlen);
+
+      std::wstring wlabel = toWideString(label);
       painter.drawText(wlabel, x + paddingLeft, y,
                        width - paddingLeft - paddingRight, height, font,
                        fieldTextColor, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     } else {
-      int wlen =
-          MultiByteToWideChar(CP_UTF8, 0, placeholder.c_str(), -1, nullptr, 0);
-      std::wstring wph(wlen, L'\0');
-      MultiByteToWideChar(CP_UTF8, 0, placeholder.c_str(), -1, wph.data(),
-                          wlen);
+
+                          std::wstring wph = toWideString(placeholder);
       painter.drawText(wph, x + paddingLeft, y,
                        width - paddingLeft - paddingRight, height, font,
                        placeholderColor, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
@@ -498,9 +494,8 @@ void openCalendar_() {
     {
       std::string label =
           std::string(_monthName(viewMonth)) + "  " + std::to_string(viewYear);
-      int wlen = MultiByteToWideChar(CP_UTF8, 0, label.c_str(), -1, nullptr, 0);
-      std::wstring wlabel(wlen, L'\0');
-      MultiByteToWideChar(CP_UTF8, 0, label.c_str(), -1, wlabel.data(), wlen);
+
+      std::wstring wlabel = toWideString(label);
       NativeFont font = fontCache.getFont(14, FontWeight::Bold);
       painter.drawText(wlabel, calPadH + 24, 0, popupW_ - (calPadH + 24) * 2,
                        calHeaderH, font, headerTextColor,
@@ -511,10 +506,8 @@ void openCalendar_() {
     NativeFont wdFont = fontCache.getFont(11, FontWeight::Normal);
     for (int col = 0; col < 7; col++) {
       int cx = calPadH + col * calCellSize;
-      int wlen =
-          MultiByteToWideChar(CP_UTF8, 0, _weekdayShort(col), -1, nullptr, 0);
-      std::wstring wwd(wlen, L'\0');
-      MultiByteToWideChar(CP_UTF8, 0, _weekdayShort(col), -1, wwd.data(), wlen);
+
+      std::wstring wwd = toWideString(_weekdayShort(col));
       painter.drawText(wwd, cx, calHeaderH + calPadV, calCellSize, calWeekRowH,
                        wdFont, weekdayTextColor,
                        DT_CENTER | DT_VCENTER | DT_SINGLELINE);
@@ -580,9 +573,8 @@ void openCalendar_() {
                                       : dayTextColor;
 
       std::string ds = std::to_string(dayNum);
-      int wlen = MultiByteToWideChar(CP_UTF8, 0, ds.c_str(), -1, nullptr, 0);
-      std::wstring wds(wlen, L'\0');
-      MultiByteToWideChar(CP_UTF8, 0, ds.c_str(), -1, wds.data(), wlen);
+
+      std::wstring wds = toWideString(ds);
       painter.drawText(wds, cx + 1, cy + 1, calCellSize - 2, calCellSize - 2,
                        dayFont, textCol,
                        DT_CENTER | DT_VCENTER | DT_SINGLELINE);
@@ -601,9 +593,8 @@ void openCalendar_() {
     {
       std::string range = std::to_string(yearRangeStart_) + " \xe2\x80\x93 " +
                           std::to_string(yearRangeStart_ + 11);
-      int wlen = MultiByteToWideChar(CP_UTF8, 0, range.c_str(), -1, nullptr, 0);
-      std::wstring wrange(wlen, L'\0');
-      MultiByteToWideChar(CP_UTF8, 0, range.c_str(), -1, wrange.data(), wlen);
+
+      std::wstring wrange = toWideString(range);
       NativeFont font = fontCache.getFont(14, FontWeight::Bold);
       painter.drawText(wrange, calPadH + 24, 0, popupW_ - (calPadH + 24) * 2,
                        calHeaderH, font, headerTextColor,
@@ -630,9 +621,8 @@ void openCalendar_() {
 
       COLORREF textCol = (yr == viewYear) ? yearSelectedText : dayTextColor;
       std::string ys = std::to_string(yr);
-      int wlen = MultiByteToWideChar(CP_UTF8, 0, ys.c_str(), -1, nullptr, 0);
-      std::wstring wys(wlen, L'\0');
-      MultiByteToWideChar(CP_UTF8, 0, ys.c_str(), -1, wys.data(), wlen);
+
+      std::wstring wys = toWideString(ys);
       painter.drawText(wys, cx, cy, cellW, cellH, yearFont, textCol,
                        DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }

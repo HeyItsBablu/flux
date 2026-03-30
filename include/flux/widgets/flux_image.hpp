@@ -64,10 +64,7 @@ public:
     imagePath = path;
     hasError = false;
 
-    // Convert string to wstring
-    int size = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
-    std::wstring wpath(size, 0);
-    MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, &wpath[0], size);
+std::wstring wpath = toWideString(path);
 
     // Load bitmap
     bitmap = std::make_unique<Gdiplus::Bitmap>(wpath.c_str());

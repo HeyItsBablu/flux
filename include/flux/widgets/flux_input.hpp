@@ -58,9 +58,7 @@ public:
                      FontCache &fontCache) override {
     if (!text.empty()) {
       // Convert label to wide once
-      int wlen = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
-      std::wstring wtext(wlen, L'\0');
-      MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, wtext.data(), wlen);
+      std::wstring wtext = toWideString(text);
 
       NativeFont font = fontCache.getFont(fontSize, fontWeight);
 
@@ -119,9 +117,8 @@ public:
 
     // ── Label text ─────────────────────────────────────────────────────────
     if (!text.empty()) {
-      int wlen = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
-      std::wstring wtext(wlen, L'\0');
-      MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, wtext.data(), wlen);
+
+      std::wstring wtext = toWideString(text);
 
       NativeFont font = fontCache.getFont(fontSize, fontWeight);
 
@@ -253,15 +250,6 @@ private:
       onToggleChanged(toggled);
     if (boundBoolState)
       boundBoolState->set(toggled);
-  }
-
-  // Stays private — pure color math, no platform types
-  static COLORREF interpolateColor(COLORREF c1, COLORREF c2, double t) {
-    t = max(0.0, min(1.0, t));
-    int r = GetRValue(c1) + (int)((GetRValue(c2) - GetRValue(c1)) * t);
-    int g = GetGValue(c1) + (int)((GetGValue(c2) - GetGValue(c1)) * t);
-    int b = GetBValue(c1) + (int)((GetBValue(c2) - GetBValue(c1)) * t);
-    return RGB(r, g, b);
   }
 };
 
@@ -603,10 +591,8 @@ public:
   void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     if (!text.empty()) {
-      int wlen = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
-      std::wstring wtext(wlen, L'\0');
-      MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, wtext.data(), wlen);
 
+      std::wstring wtext = toWideString(text);
       NativeFont font = fontCache.getFont(fontSize, fontWeight);
       int tw = 0, th = 0;
       Painter(ctx).measureText(wtext, font, tw, th);
@@ -648,9 +634,8 @@ public:
 
     // Label text
     if (!text.empty()) {
-      int wlen = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
-      std::wstring wtext(wlen, L'\0');
-      MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, wtext.data(), wlen);
+
+      std::wstring wtext = toWideString(text);
 
       NativeFont font = fontCache.getFont(fontSize, fontWeight);
       int textX = boxX + boxSize + 8;
@@ -733,9 +718,8 @@ public:
   void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     if (!text.empty()) {
-      int wlen = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
-      std::wstring wtext(wlen, L'\0');
-      MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, wtext.data(), wlen);
+
+      std::wstring wtext = toWideString(text);
 
       NativeFont font = fontCache.getFont(fontSize, fontWeight);
       int tw = 0, th = 0;
@@ -779,9 +763,8 @@ public:
 
     // Label text
     if (!text.empty()) {
-      int wlen = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
-      std::wstring wtext(wlen, L'\0');
-      MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, wtext.data(), wlen);
+
+      std::wstring wtext = toWideString(text);
 
       NativeFont font = fontCache.getFont(fontSize, fontWeight);
       int textX = x + paddingLeft + circleSize + 8;
@@ -1165,19 +1148,13 @@ public:
     NativeFont font = fontCache.getFont(fontSize, fontWeight);
 
     if (inputValue.empty() && !placeholder.empty()) {
-      int wlen =
-          MultiByteToWideChar(CP_UTF8, 0, placeholder.c_str(), -1, nullptr, 0);
-      std::wstring wph(wlen, L'\0');
-      MultiByteToWideChar(CP_UTF8, 0, placeholder.c_str(), -1, wph.data(),
-                          wlen);
+
+      std::wstring wph = toWideString(placeholder);
       painter.drawText(wph, textX, y + paddingTop, clipW, clipH, font,
                        placeholderColor, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     } else {
-      int wlen =
-          MultiByteToWideChar(CP_UTF8, 0, inputValue.c_str(), -1, nullptr, 0);
-      std::wstring winput(wlen, L'\0');
-      MultiByteToWideChar(CP_UTF8, 0, inputValue.c_str(), -1, winput.data(),
-                          wlen);
+
+      std::wstring winput = toWideString(inputValue);
       painter.drawText(winput, textX - scrollOffset, y + paddingTop,
                        clipW + scrollOffset, clipH, font, inputTextColor,
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOCLIP);
@@ -1187,11 +1164,8 @@ public:
     if (isFocused && cursorVisible) {
       int tw = 0, th = 0;
       if (cursorPos > 0) {
-        int wlen = MultiByteToWideChar(CP_UTF8, 0, inputValue.c_str(),
-                                       cursorPos, nullptr, 0);
-        std::wstring wpre(wlen, L'\0');
-        MultiByteToWideChar(CP_UTF8, 0, inputValue.c_str(), cursorPos,
-                            wpre.data(), wlen);
+
+        std::wstring wpre = toWideString(inputValue.c_str(), cursorPos);
         painter.measureText(wpre, font, tw, th);
       }
       int cursorX = textX + tw - scrollOffset;
@@ -1350,10 +1324,8 @@ private:
     int bestPos = 0, bestDist = abs(pixelX);
 
     for (int i = 1; i <= (int)inputValue.size(); i++) {
-      int wlen =
-          MultiByteToWideChar(CP_UTF8, 0, inputValue.c_str(), i, nullptr, 0);
-      std::wstring wpre(wlen, L'\0');
-      MultiByteToWideChar(CP_UTF8, 0, inputValue.c_str(), i, wpre.data(), wlen);
+
+      std::wstring wpre = toWideString(inputValue.c_str(), i);
       int tw = 0, th = 0;
       Painter(mc.ctx).measureText(wpre, font, tw, th);
       int dist = abs(tw - pixelX);
@@ -1377,11 +1349,8 @@ private:
 
     int tw = 0, th = 0;
     if (cursorPos > 0) {
-      int wlen = MultiByteToWideChar(CP_UTF8, 0, inputValue.c_str(), cursorPos,
-                                     nullptr, 0);
-      std::wstring wpre(wlen, L'\0');
-      MultiByteToWideChar(CP_UTF8, 0, inputValue.c_str(), cursorPos,
-                          wpre.data(), wlen);
+
+      std::wstring wpre = toWideString(inputValue.c_str(), cursorPos);
       Painter(mc.ctx).measureText(wpre, font, tw, th);
     }
 

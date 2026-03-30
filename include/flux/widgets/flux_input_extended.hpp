@@ -2,6 +2,7 @@
 #define FLUX_INPUT_EXTENDED_HPP
 
 #include "flux_collection.hpp" // for ScrollbarState
+
 #include "flux_core.hpp"
 #include "flux_state.hpp"
 #include <algorithm>
@@ -157,11 +158,7 @@ public:
     if (lines_.size() == 1 && lines_[0].empty() && !placeholder.empty() &&
         !isFocused) {
 
-      int wlen =
-          MultiByteToWideChar(CP_UTF8, 0, placeholder.c_str(), -1, nullptr, 0);
-      std::wstring wph(wlen, L'\0');
-      MultiByteToWideChar(CP_UTF8, 0, placeholder.c_str(), -1, wph.data(),
-                          wlen);
+      std::wstring wph = toWideString(placeholder);
 
       painter.drawText(wph, cLeft, cTop, cRight - cLeft, cBot - cTop, hFont,
                        placeholderColor, DT_LEFT | DT_TOP | DT_WORDBREAK);
@@ -189,10 +186,7 @@ public:
         painter.popClipRect();
         painter.pushClipRect(x + 1, y + 1, width - 2, height - 2);
 
-        std::string num = std::to_string(li + 1);
-        int wlen = MultiByteToWideChar(CP_UTF8, 0, num.c_str(), -1, nullptr, 0);
-        std::wstring wnum(wlen, L'\0');
-        MultiByteToWideChar(CP_UTF8, 0, num.c_str(), -1, wnum.data(), wlen);
+        std::wstring wnum = toWideString(std::to_string(li + 1));
 
         NativeFont nf = fontCache.getFont(fontSize - 1, FontWeight::Normal);
         painter.drawText(wnum, x + paddingLeft, lineY, gutterW - 4, lineH_, nf,
@@ -221,11 +215,9 @@ public:
 
       // ── Line text ─────────────────────────────────────────────────────
       if (!lines_[li].empty()) {
-        int wlen =
-            MultiByteToWideChar(CP_UTF8, 0, lines_[li].c_str(), -1, nullptr, 0);
-        std::wstring wline(wlen, L'\0');
-        MultiByteToWideChar(CP_UTF8, 0, lines_[li].c_str(), -1, wline.data(),
-                            wlen);
+
+        std::wstring wline = toWideString(lines_[li]);
+
         painter.drawText(wline, cLeft - scrollX, lineY, 8000, lineH_, hFont,
                          inputTextColor,
                          DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOCLIP);
@@ -788,12 +780,7 @@ private:
       return 0;
     to = min(to, (int)s.size());
 
-    int wlen = MultiByteToWideChar(CP_UTF8, 0, s.c_str() + from, to - from,
-                                   nullptr, 0);
-    std::wstring ws(wlen, L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, s.c_str() + from, to - from, ws.data(),
-                        wlen);
-
+    std::wstring ws = toWideString(s.c_str() + from, to - from);
     NativeFont font =
         const_cast<FontCache *>(&FluxUI::getCurrentInstance()->getFontCache())
             ->getFont(fontSize, fontWeight);
@@ -822,11 +809,8 @@ private:
         int best = 0, bestDist = abs(relX);
 
         for (int i = 1; i <= (int)lines_[line].size(); i++) {
-          int wlen = MultiByteToWideChar(CP_UTF8, 0, lines_[line].c_str(), i,
-                                         nullptr, 0);
-          std::wstring ws(wlen, L'\0');
-          MultiByteToWideChar(CP_UTF8, 0, lines_[line].c_str(), i, ws.data(),
-                              wlen);
+
+          std::wstring ws = toWideString(lines_[line].c_str(), i);
           int tw = 0, th = 0;
           Painter(mc.ctx).measureText(ws, hf, tw, th);
           int d = abs(tw - relX);
@@ -1079,9 +1063,7 @@ public:
     if (!suffix.empty() && !editing_)
       display += suffix;
 
-    int wlen = MultiByteToWideChar(CP_UTF8, 0, display.c_str(), -1, nullptr, 0);
-    std::wstring wdisplay(wlen, L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, display.c_str(), -1, wdisplay.data(), wlen);
+    std::wstring wdisplay = toWideString(display);
 
     painter.pushClipRect(x + 1, y + 1, btnX - x - 2, height - 2);
     painter.drawText(wdisplay, x + paddingLeft, y + paddingTop,

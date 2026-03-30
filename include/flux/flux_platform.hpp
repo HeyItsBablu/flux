@@ -12,6 +12,8 @@
 
 #include <windows.h>
 #include <windowsx.h>
+#include <cstdint>
+#include <string> 
 #include <gdiplus.h>
 #pragma comment(lib, "gdiplus.lib")
 
@@ -122,6 +124,25 @@ inline bool platformKeyDown(int keyCode) {
 }
 
 
+
+
+inline std::wstring toWideString(const std::string &utf8) {
+    if (utf8.empty()) return {};
+    int len = MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, nullptr, 0);
+    std::wstring result(len, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, result.data(), len);
+    return result;
+}
+
+inline std::wstring toWideString(const char* data, int byteCount) {
+    if (!data || byteCount <= 0) return {};
+    int len = MultiByteToWideChar(CP_UTF8, 0, data, byteCount, nullptr, 0);
+    std::wstring result(len, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, data, byteCount, result.data(), len);
+    return result;
+}
+
+
 #endif // _WIN32
 
 // ============================================================================
@@ -140,6 +161,11 @@ inline uint32_t platformTickCount() {
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);
   return static_cast<uint32_t>(ts.tv_sec * 1000u + ts.tv_nsec / 1'000'000u);
+}
+
+inline std::wstring toWideString(const std::string &utf8) {
+    // stub — replace with real UTF-8 → wchar_t conversion per platform
+    return std::wstring(utf8.begin(), utf8.end());
 }
 
 #endif // !_WIN32

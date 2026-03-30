@@ -6,17 +6,15 @@
 #include "flux_state.hpp"
 #include "flux_widget.hpp"
 
-#include <iostream>
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <iostream>
 #include <string>
 #include <vector>
 
-
 // glad must come before any other GL headers
 #include <glad/glad.h>
-
 
 // ============================================================================
 // GRAPH SERIES
@@ -166,7 +164,8 @@ public:
 
   // ── Widget overrides ───────────────────────────────────────────────────────
 
-  void computeLayout(GraphicsContext &/*ctx*/, const BoxConstraints &constraints,
+  void computeLayout(GraphicsContext & /*ctx*/,
+                     const BoxConstraints &constraints,
                      FontCache & /*fontCache*/) override {
     width = constraints.clampWidth(autoWidth ? constraints.maxWidth : width);
     height =
@@ -398,14 +397,12 @@ void main(){ fragColor = texture(uTex, vUV); }
 
   // ── GDI+ text texture ─────────────────────────────────────────────────────
 
-TextTexture makeTextTexture(const std::string &str, float size,
-                            COLORREF color, bool bold = false) {
+  TextTexture makeTextTexture(const std::string &str, float size,
+                              COLORREF color, bool bold = false) {
     if (str.empty())
-        return {};
-    int wlen = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, nullptr, 0);
-    std::wstring wtext(wlen, 0);
-    MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, wtext.data(), wlen);
+      return {};
 
+    std::wstring wtext = toWideString(str);
     Gdiplus::Bitmap measure(1, 1, PixelFormat32bppARGB);
     Gdiplus::Graphics gMeasure(&measure);
     int style = bold ? Gdiplus::FontStyleBold : Gdiplus::FontStyleRegular;
@@ -555,10 +552,12 @@ TextTexture makeTextTexture(const std::string &str, float size,
     registered = true;
   }
 
-void ensureChildWindow(GraphicsContext & /*ctx*/) {
-    if (childHwnd) return;
+  void ensureChildWindow(GraphicsContext & /*ctx*/) {
+    if (childHwnd)
+      return;
     parentHwnd = FluxUI::getCurrentInstance()->getWindow();
-    if (!parentHwnd) return;
+    if (!parentHwnd)
+      return;
     registerChildClass();
 
     childHwnd = CreateWindowExW(
@@ -574,7 +573,6 @@ void ensureChildWindow(GraphicsContext & /*ctx*/) {
     // Bootstrap context needed to call wglCreateContextAttribsARB
     HGLRC tmp = wglCreateContext(glDC);
     wglMakeCurrent(glDC, tmp);
-
 
     auto wglCA = reinterpret_cast<PFNWGLCREATECONTEXTATTRIBSARBPROC>(
         wglGetProcAddress("wglCreateContextAttribsARB"));
@@ -804,21 +802,21 @@ void ensureChildWindow(GraphicsContext & /*ctx*/) {
 
   // ── Geometry draw calls ───────────────────────────────────────────────────
 
-void drawGrid(float px0, float px1, float py0, float py1,
-              const float mvp[16]) {
+  void drawGrid(float px0, float px1, float py0, float py1,
+                const float mvp[16]) {
     std::vector<float> lines;
     for (int i = 0; i <= 5; ++i) {
-        float t = float(i) / 5.f;
-        float lineY = py0 + t * (py1 - py0);
-        pushLine(lines, px0, lineY, px1, lineY);
+      float t = float(i) / 5.f;
+      float lineY = py0 + t * (py1 - py0);
+      pushLine(lines, px0, lineY, px1, lineY);
     }
     for (int i = 0; i <= 6; ++i) {
-        float t = float(i) / 6.f;
-        float lineX = px0 + t * (px1 - px0);
-        pushLine(lines, lineX, py0, lineX, py1);
+      float t = float(i) / 6.f;
+      float lineX = px0 + t * (px1 - px0);
+      pushLine(lines, lineX, py0, lineX, py1);
     }
     drawVerts(GL_LINES, lines, 1.f, 1.f, 1.f, 0.08f, mvp);
-}
+  }
 
   void drawAxes(float px0, float px1, float py0, float py1,
                 const float mvp[16]) {
@@ -910,6 +908,5 @@ inline GraphWidgetPtr Graph(int w, int h) {
   g->setSize(w, h);
   return g;
 }
-
 
 #endif // FLUX_GRAPH_HPP

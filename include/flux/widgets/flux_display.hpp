@@ -178,10 +178,7 @@ public:
       return;
     }
 
-    int wlen = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
-    std::wstring wtext(wlen, L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, wtext.data(), wlen);
-
+    std::wstring wtext = toWideString(text);
     NativeFont font = fontCache.getFont(fontFamily, fontSize, fontWeight);
 
     Painter(ctx).drawText(wtext, x, y, width, height, font,

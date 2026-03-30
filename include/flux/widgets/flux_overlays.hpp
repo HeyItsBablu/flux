@@ -200,11 +200,7 @@ public:
         if (i == hoveredIndex && item.enabled)
           painter.fillRect(2, currentY, menuW - 4, itemHeight, itemHoverColor);
 
-        int wlen =
-            MultiByteToWideChar(CP_UTF8, 0, item.label.c_str(), -1, nullptr, 0);
-        std::wstring wlabel(wlen, L'\0');
-        MultiByteToWideChar(CP_UTF8, 0, item.label.c_str(), -1, wlabel.data(),
-                            wlen);
+        std::wstring wlabel = toWideString(item.label);
 
         COLORREF textCol = item.enabled ? itemTextColor : itemDisabledColor;
         painter.drawText(
@@ -855,10 +851,8 @@ public:
                        255);
 
     // Text
-    int wlen = MultiByteToWideChar(CP_UTF8, 0, tipText.c_str(), -1, nullptr, 0);
-    std::wstring wtip(wlen, L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, tipText.c_str(), -1, wtip.data(), wlen);
 
+    std::wstring wtip = toWideString(tipText);
     NativeFont font = fontCache.getFont(tipFontSize, FontWeight::Normal);
     painter.drawText(wtip, tipPadH, tipPadV, tipW - tipPadH * 2,
                      tipH - tipPadV * 2, font, tipTextColor,
@@ -1024,10 +1018,7 @@ public:
             ? options[selectedIndex]
             : placeholder;
 
-    int wlen = MultiByteToWideChar(CP_UTF8, 0, label.c_str(), -1, nullptr, 0);
-    std::wstring wlabel(wlen, L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, label.c_str(), -1, wlabel.data(), wlen);
-
+    std::wstring wlabel = toWideString(label);
     painter.drawText(wlabel, x + paddingLeft, y + paddingTop,
                      width - paddingLeft - paddingRight,
                      height - paddingTop - paddingBottom, font, textCol,
@@ -1083,12 +1074,7 @@ public:
         painter.fillRect(1, itemY, listWidth_ - 2, itemHeight,
                          itemSelectedColor);
 
-      int wlen =
-          MultiByteToWideChar(CP_UTF8, 0, options[i].c_str(), -1, nullptr, 0);
-      std::wstring wopt(wlen, L'\0');
-      MultiByteToWideChar(CP_UTF8, 0, options[i].c_str(), -1, wopt.data(),
-                          wlen);
-
+      std::wstring wopt = toWideString(options[i]);
       painter.drawText(wopt, 12, itemY, listWidth_ - 24, itemHeight, font,
                        RGB(30, 30, 30),
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
