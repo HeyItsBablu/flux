@@ -16,7 +16,7 @@
 #include "flux_hsl_panel.hpp" 
 #include "flux_tonecurve.hpp"
 #include "flux_splitview.hpp"
-// #include "flux_menubar.hpp"
+#include "flux_menubar.hpp"
 #include "flux_datepicker.hpp"
 #include "flux_tabview.hpp"
 #include "flux_treeview.hpp"

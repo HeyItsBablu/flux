@@ -340,4 +340,54 @@ void Painter::fillRectWithLeftAccent(int x, int y, int w, int h, NativeColor bg,
   fillRect(x, y, stripWidth, h, accent);
 }
 
+
+void Painter::fillColumnBars(int x, int y, int w, int h,
+                              const std::vector<int> &barHeights,
+                              NativeColor color, BYTE alpha) {
+    if (w <= 0 || h <= 0 || barHeights.empty()) return;
+
+    BITMAPINFO bmi        = {};
+    bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth       = w;
+    bmi.bmiHeader.biHeight      = -h;   // top-down
+    bmi.bmiHeader.biPlanes      = 1;
+    bmi.bmiHeader.biBitCount    = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    void   *bits = nullptr;
+    HBITMAP hBmp = CreateDIBSection(ctx.hdc, &bmi, DIB_RGB_COLORS,
+                                    &bits, nullptr, 0);
+    if (!hBmp) return;
+
+    HDC memDC = CreateCompatibleDC(ctx.hdc);
+    SelectObject(memDC, hBmp);
+    memset(bits, 0, w * h * 4);
+
+    BYTE cr = GetRValue(color), cg = GetGValue(color), cb = GetBValue(color);
+
+    int cols = min(w, (int)barHeights.size());
+    for (int px = 0; px < cols; ++px) {
+        int barH = max(0, min(h, barHeights[px]));
+        for (int py = h - barH; py < h; ++py) {
+            uint8_t *pixel = (uint8_t *)bits + (py * w + px) * 4;
+            pixel[0] = cb;
+            pixel[1] = cg;
+            pixel[2] = cr;
+            pixel[3] = 255;
+        }
+    }
+
+    BLENDFUNCTION bf    = {};
+    bf.BlendOp          = AC_SRC_OVER;
+    bf.SourceConstantAlpha = alpha;
+    bf.AlphaFormat      = 0;
+    AlphaBlend(ctx.hdc, x, y, w, h, memDC, 0, 0, w, h, bf);
+
+    DeleteDC(memDC);
+    DeleteObject(hBmp);
+}
+
+
+
+
 #endif // _WIN32
