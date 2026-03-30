@@ -24,11 +24,11 @@ endfunction()
 # add_flux_example(graphtest)
 # add_flux_example(illustrator)
 # add_flux_example(overlaytest)
-add_flux_example(paintfull)
+# add_flux_example(paintfull)
 # add_flux_example(logic_sim)
 # add_flux_example(splitview)
 # add_flux_example(menubarexample)
-# add_flux_example(datatable)
+add_flux_example(datatable)
 # add_flux_example(toast)
 
 

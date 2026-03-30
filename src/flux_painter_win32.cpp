@@ -1,3 +1,4 @@
+// flux_painter_win32.cpp
 #include "flux/flux_painter.hpp"
 
 #ifdef _WIN32
@@ -302,6 +303,41 @@ void Painter::fillRectAlpha(int x, int y, int w, int h, NativeColor color,
   SelectObject(tmpDC, tmpOld);
   DeleteObject(tmpBmp);
   DeleteDC(tmpDC);
+}
+
+void Painter::drawTextA(const std::string &text, int x, int y, int w, int h,
+                        NativeFont font, NativeColor color, UINT format) {
+  if (text.empty())
+    return;
+  int wlen = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
+  std::wstring wtext(wlen, L'\0');
+  MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, wtext.data(), wlen);
+  drawText(wtext, x, y, w, h, font, color, format);
+}
+
+void Painter::fillRoundedRegion(int x, int y, int w, int h, int cornerRadius,
+                                NativeColor color) {
+  HBRUSH hb = CreateSolidBrush(color);
+  HRGN rgn = CreateRoundRectRgn(x, y, x + w, y + h, cornerRadius, cornerRadius);
+  FillRgn(ctx.hdc, rgn, hb);
+  DeleteObject(rgn);
+  DeleteObject(hb);
+}
+
+void Painter::drawHLine(int x, int y, int len, NativeColor color,
+                        int strokeWidth) {
+  drawLine(x, y, x + len, y, color, strokeWidth);
+}
+
+void Painter::drawVLine(int x, int y, int len, NativeColor color,
+                        int strokeWidth) {
+  drawLine(x, y, x, y + len, color, strokeWidth);
+}
+
+void Painter::fillRectWithLeftAccent(int x, int y, int w, int h, NativeColor bg,
+                                     NativeColor accent, int stripWidth) {
+  fillRect(x, y, w, h, bg);
+  fillRect(x, y, stripWidth, h, accent);
 }
 
 #endif // _WIN32

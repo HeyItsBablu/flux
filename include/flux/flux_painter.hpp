@@ -14,7 +14,7 @@ struct Painter {
   // ── Filled rounded rect (GDI+ anti-aliased) ───────────────────────────
   void fillRoundedRect(int x, int y, int w, int h, int radius,
                        NativeColor color, BYTE alpha);
-
+ 
   // ── Border only (GDI+ anti-aliased) ──────────────────────────────────
   void drawBorder(int x, int y, int w, int h, int radius, NativeColor color,
                   int borderWidth, BYTE alpha);
@@ -68,6 +68,28 @@ struct Painter {
                               NativeColor stroke, int strokeWidth);
 
   void fillRectAlpha(int x, int y, int w, int h, NativeColor color, BYTE alpha);
+
+  // ── Text (narrow / ANSI) ─────────────────────────────────────────────
+// Convenience overload — converts std::string → std::wstring internally.
+void drawTextA(const std::string &text, int x, int y, int w, int h,
+               NativeFont font, NativeColor color, UINT format);
+
+// ── Filled region via rounded-rect HRGN ──────────────────────────────
+// Used for scrollbar thumbs.
+void fillRoundedRegion(int x, int y, int w, int h,
+                       int cornerRadius, NativeColor color);
+
+// ── Horizontal / vertical line (1px) ─────────────────────────────────
+// Thin convenience wrappers used for separators and borders.
+void drawHLine(int x, int y, int len, NativeColor color, int strokeWidth = 1);
+void drawVLine(int x, int y, int len, NativeColor color, int strokeWidth = 1);
+
+// ── Filled rect with a solid left accent strip ────────────────────────
+// Renders bg across [x,y,w,h] then a stripWidth-wide accent on the left.
+void fillRectWithLeftAccent(int x, int y, int w, int h,
+                            NativeColor bg,
+                            NativeColor accent, int stripWidth);
+                            
 };
 
 #endif // FLUX_PAINTER_HPP
