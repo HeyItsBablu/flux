@@ -388,6 +388,66 @@ void Painter::fillColumnBars(int x, int y, int w, int h,
 }
 
 
+void Painter::drawPolyline(const std::vector<std::pair<int,int>> &points,
+                           NativeColor color, int strokeWidth) {
+    if (points.size() < 2) return;
+    std::vector<POINT> pts(points.size());
+    for (size_t i = 0; i < points.size(); ++i)
+        pts[i] = {points[i].first, points[i].second};
+    HPEN pen = CreatePen(PS_SOLID, strokeWidth, color);
+    HPEN old = (HPEN)SelectObject(ctx.hdc, pen);
+    Polyline(ctx.hdc, pts.data(), (int)pts.size());
+    SelectObject(ctx.hdc, old);
+    DeleteObject(pen);
+}
 
+void Painter::fillPolygonAlpha(const std::vector<std::pair<int,int>> &points,
+                               NativeColor color, BYTE alpha) {
+    if (points.size() < 3) return;
+
+    // Bounding box
+    int x0 = points[0].first,  y0 = points[0].second;
+    int x1 = x0, y1 = y0;
+    for (auto &p : points) {
+        x0 = min(x0, p.first);  y0 = min(y0, p.second);
+        x1 = max(x1, p.first);  y1 = max(y1, p.second);
+    }
+    int w = x1 - x0, h = y1 - y0;
+    if (w <= 0 || h <= 0) return;
+
+    BITMAPINFO bmi        = {};
+    bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth       = w;
+    bmi.bmiHeader.biHeight      = -h;
+    bmi.bmiHeader.biPlanes      = 1;
+    bmi.bmiHeader.biBitCount    = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    void   *bits = nullptr;
+    HBITMAP hBmp = CreateDIBSection(ctx.hdc, &bmi, DIB_RGB_COLORS,
+                                    &bits, nullptr, 0);
+    if (!hBmp) return;
+
+    HDC mdc = CreateCompatibleDC(ctx.hdc);
+    SelectObject(mdc, hBmp);
+    memset(bits, 0, w * h * 4);
+
+    std::vector<POINT> poly(points.size());
+    for (size_t i = 0; i < points.size(); ++i)
+        poly[i] = {points[i].first - x0, points[i].second - y0};
+
+    HPEN   nullPen = CreatePen(PS_NULL, 0, 0);
+    HBRUSH fillBr  = CreateSolidBrush(color);
+    HPEN   op      = (HPEN)  SelectObject(mdc, nullPen);
+    HBRUSH ob      = (HBRUSH)SelectObject(mdc, fillBr);
+    Polygon(mdc, poly.data(), (int)poly.size());
+    SelectObject(mdc, op);  SelectObject(mdc, ob);
+    DeleteObject(nullPen);  DeleteObject(fillBr);
+
+    BLENDFUNCTION bf = {AC_SRC_OVER, 0, alpha, 0};
+    AlphaBlend(ctx.hdc, x0, y0, w, h, mdc, 0, 0, w, h, bf);
+    DeleteDC(mdc);
+    DeleteObject(hBmp);
+}
 
 #endif // _WIN32

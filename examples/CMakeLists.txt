@@ -28,7 +28,7 @@ endfunction()
 # add_flux_example(logic_sim)
 # add_flux_example(splitview)
 # add_flux_example(menubarexample)
-add_flux_example(datatable)
+add_flux_example(tabview)
 # add_flux_example(toast)
 
 

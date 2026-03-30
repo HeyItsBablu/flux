@@ -93,7 +93,16 @@ struct Painter {
                       const std::vector<int> &barHeights, NativeColor color,
                       BYTE alpha);
 
+// ── Polyline ──────────────────────────────────────────────────────────────
+// Draws a connected sequence of line segments in one call.
+void drawPolyline(const std::vector<std::pair<int,int>> &points,
+                  NativeColor color, int strokeWidth);
 
+// ── Alpha-blended polygon fill ────────────────────────────────────────────
+// Fills a polygon and alpha-blends it onto the destination.
+// Used for the tone-curve area fill.
+void fillPolygonAlpha(const std::vector<std::pair<int,int>> &points,
+                      NativeColor color, BYTE alpha);
 };
 
 #endif // FLUX_PAINTER_HPP

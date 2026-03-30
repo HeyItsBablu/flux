@@ -115,6 +115,12 @@ inline uint32_t platformTickCount() {
   return static_cast<uint32_t>(GetTickCount64());
 }
 
+inline bool platformKeyDown(int keyCode) {
+
+    return (GetKeyState(keyCode) & 0x8000) != 0;
+
+}
+
 
 #endif // _WIN32
 
