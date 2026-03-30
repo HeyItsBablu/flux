@@ -11,4 +11,6 @@
 #include "flux_component.hpp"
 #include "flux_state.hpp"
 #include "widgets/widgets.hpp"
+#include "flux_canvas.hpp"
+#include "flux_vector.hpp"
 #endif // FLUX_HPP

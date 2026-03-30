@@ -1,6 +1,6 @@
 // vector_example.cpp  —  Adobe Illustrator-style layout
 #include "flux/flux.hpp"
-#include "flux/widgets/flux_vector.hpp"
+
 
 // ── Color helpers ────────────────────────────────────────────────────────────
 static COLORREF hexToRef(const std::string &css) {

@@ -1,6 +1,6 @@
 // paint.cpp
 #include "flux/flux.hpp"
-#include "flux/widgets/flux_layers.hpp" // ← layers support
+#include "flux/flux_layers.hpp" 
 #include <commdlg.h>
 #include <shlobj.h>
 #include <unordered_map>

@@ -1,48 +1,13 @@
 #ifndef FLUX_LAYERS_HPP
 #define FLUX_LAYERS_HPP
 
-// ============================================================================
-// flux_layers.hpp  —  LayeredSurface  (fixed revision)
-// ============================================================================
-//
-// Bugs fixed vs. original:
-//
-//   FIX-1  restoreDisplayFBOs() no longer discards active-layer FBO handles.
-//          The helper now saves the outgoing handles into activeCFBO_ /
-//          activeSFBO_ so that redirectToActive() can always restore them
-//          from a known-good location instead of re-reading layers_[].
-//
-//   FIX-2  buildComposite() now reads the live scratch via the base-class
-//          scratch handle (scratchFBOHandle()) rather than
-//          layers_[activeIdx_].scratchFBO, which may be stale after a swap.
-//
-//   FIX-3  Undo stack is flushed when the active layer changes (addLayer,
-//          deleteLayer, setActiveLayer) so stale snapshots that belong to
-//          a different layer can never be replayed onto the wrong target.
-//          Also deleteLayer now flushes before freeing GL textures, which
-//          prevents use-after-free in the snapshot pool.
-//
-//   FIX-4  dispSFBO_ / dispSTex_ removed — the display composite only ever
-//          needs a committed texture; allocating a scratch display FBO was
-//          wasted memory and the source of the swapped-in blank scratch.
-//
-//   FIX-5  LayeredSurface::clear() now pushes the undo snapshot BEFORE
-//          destroying the pixel data, making Ctrl+Z actually work for clear.
-//
-//   FIX-6  Dirty flag added to buildComposite(): the composite is only
-//          rebuilt (and glReadPixels only called) when something actually
-//          changed, avoiding a full GPU→CPU stall on every frame.
-//
-// Architecture note
-// -----------------
-//   activeCFBO_ / activeCTex_ / activeSFBO_ / activeSFBO_ mirror the FBO
-//   handles that are currently installed in the base class.  They are updated
-//   in one place (redirectToActive / swapInDisplay / swapInActive) so there
-//   is a single source of truth and no aliasing bugs.
-//
-// ============================================================================
+// flux/platform/win32/flux_layers_win32.hpp
+#pragma once
+#ifndef _WIN32
+#error "flux_layers_win32.hpp must only be compiled on Win32"
+#endif
 
-
+#include "flux/platform/win32/flux_raster_win32.hpp"
 
 #include <algorithm>
 #include <cassert>
@@ -279,7 +244,7 @@ public:
       glGenFramebuffers(1, &rf);
       glBindFramebuffer(GL_READ_FRAMEBUFFER, rf);
       glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-                              GL_TEXTURE_2D, dispCTex_, 0);
+                             GL_TEXTURE_2D, dispCTex_, 0);
       glReadPixels(0, 0, cw, ch, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
       glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
       glDeleteFramebuffers(1, &rf);
@@ -509,9 +474,8 @@ private:
     glGenFramebuffers(1, &fbo);
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-                            tex, 0);
-    assert(glCheckFramebufferStatus(GL_FRAMEBUFFER) ==
-           GL_FRAMEBUFFER_COMPLETE);
+                           tex, 0);
+    assert(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
   }
 

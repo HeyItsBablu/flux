@@ -1,9 +1,17 @@
 #ifndef FLUX_VECTOR_HPP
 #define FLUX_VECTOR_HPP
 
-// ============================================================================
-// flux_vector.hpp  —  VectorSurface
-// ============================================================================
+// flux/platform/win32/flux_vector_win32.hpp
+#pragma once
+#ifndef _WIN32
+#error "flux_vector_win32.hpp must only be compiled on Win32"
+#endif
+
+
+#include <glad/glad.h>
+#include "../../flux_render_surface.hpp"
+#include "../../flux_canvas_types.hpp"
+#include "../../flux_keys.hpp"
 
 #include "clipper2/clipper.h"
 #include <algorithm>
@@ -18,6 +26,11 @@
 #include <unordered_map>
 #include <vector>
 
+
+#include <gdiplus.h>
+
+
+#pragma comment(lib, "gdiplus.lib")
 // ============================================================================
 // §V0  MATH HELPERS
 // ============================================================================

@@ -1,13 +1,15 @@
 #ifndef FLUX_RASTER_HPP
 #define FLUX_RASTER_HPP
 
-// ============================================================================
-// flux_raster.hpp  —  RasterSurface  
-// ============================================================================
 
-// ============================================================================
-//   RASTER SURFACE
-// ============================================================================
+// flux/platform/win32/flux_raster_win32.hpp
+#pragma once
+#ifndef _WIN32
+#error "flux_raster_win32.hpp must only be compiled on Win32"
+#endif
+
+#include "../../flux_render_surface.hpp"
+#include "../../flux_canvas_types.hpp"
 
 class RasterSurface : public RenderSurface {
 public:
