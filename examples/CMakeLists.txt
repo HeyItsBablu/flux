@@ -29,15 +29,15 @@ endfunction()
 # add_flux_example(splitview)
 # add_flux_example(menubarexample)
 # add_flux_example(tabview)
-# add_flux_example(toast)
+add_flux_example(treeview)
 
 
 # ── image_editor needs stb ────────────────────────────────────────────────────
-add_executable(image_editor WIN32 image_editor.cpp)
-target_link_libraries(image_editor PRIVATE flux::flux)
-target_link_options(image_editor PRIVATE /SUBSYSTEM:WINDOWS)
-target_include_directories(image_editor PRIVATE ${stb_SOURCE_DIR})
-target_compile_definitions(image_editor PRIVATE
-    STB_IMAGE_IMPLEMENTATION
-    STB_IMAGE_WRITE_IMPLEMENTATION
-)
+# add_executable(image_editor WIN32 image_editor.cpp)
+# target_link_libraries(image_editor PRIVATE flux::flux)
+# target_link_options(image_editor PRIVATE /SUBSYSTEM:WINDOWS)
+# target_include_directories(image_editor PRIVATE ${stb_SOURCE_DIR})
+# target_compile_definitions(image_editor PRIVATE
+#     STB_IMAGE_IMPLEMENTATION
+#     STB_IMAGE_WRITE_IMPLEMENTATION
+# )
