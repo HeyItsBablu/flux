@@ -29,7 +29,7 @@ endfunction()
 # add_flux_example(splitview)
 # add_flux_example(menubarexample)
 # add_flux_example(tabview)
-add_flux_example(treeview)
+add_flux_example(toast)
 
 
 # ── image_editor needs stb ────────────────────────────────────────────────────
