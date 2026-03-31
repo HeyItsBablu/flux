@@ -5,7 +5,7 @@
 #include "flux_collection.hpp"
 #include "flux_conditional.hpp"
 #include "flux_display.hpp"
-#include "flux_image.hpp"
+// #include "flux_image.hpp"
 #include "flux_input.hpp"
 #include "flux_layout.hpp"
 #include "flux_structure.hpp"
@@ -24,6 +24,6 @@
 #include "flux_toast.hpp"
 #include "flux_input_extended.hpp"
 #include "flux_accordion.hpp"
-#include "flux_file_picker.hpp"
+// #include "flux_file_picker.hpp"
 #include "flux_graph.hpp"
 #endif // WIDGETS_HPP

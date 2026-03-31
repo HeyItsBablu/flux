@@ -1,9 +1,9 @@
 #ifndef FLUX_ACCORDION_HPP
 #define FLUX_ACCORDION_HPP
 
-#include "flux_core.hpp"
+#include "../flux_core.hpp"
 #include "flux_layout.hpp"
-#include "flux_state.hpp"
+#include "../flux_state.hpp"
 #include <functional>
 #include <string>
 #include <vector>
