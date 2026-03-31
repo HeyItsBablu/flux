@@ -186,6 +186,11 @@ public:
   bool debugShowWidgetBounds = false;
   WidgetPtr home;
 
+  int windowWidth = 900;
+  int windowHeight = 700;
+  bool maximize = false;
+  bool fullscreen = true;
+
   FluxAppWidget(const std::string &appTitle, WidgetPtr homeWidget)
       : title(appTitle), home(homeWidget), theme(AppTheme::light()) {
     ThemeProvider::setTheme(theme);
@@ -246,7 +251,6 @@ public:
     }
   }
 
-
   // ----------------------------------------------------------------
   // RENDER
   // ----------------------------------------------------------------
@@ -279,7 +283,8 @@ private:
     // Was: CreatePen + SelectObject(NULL_BRUSH) + Rectangle + cleanup.
     // drawEllipse doesn't apply here; we need a rect outline.
     // Add Painter::drawRectOutline() for this — see note below.
-    painter.drawRectOutline(w->x, w->y, w->width, w->height, Color::fromRGB(255, 0, 0), 1);
+    painter.drawRectOutline(w->x, w->y, w->width, w->height,
+                            Color::fromRGB(255, 0, 0), 1);
 
     for (auto &child : w->children)
       drawWidgetBounds(ctx, child.get());
@@ -291,14 +296,24 @@ inline FluxAppWidget *FluxAppWidget::instance = nullptr;
 // FLUX APP FACTORY
 // ============================================================================
 
-inline WidgetPtr FluxApp(const std::string &title, WidgetPtr home,
-                         const AppTheme &theme = AppTheme::light(),
-                         bool debugShowWidgetBounds = false) {
-  auto app = std::make_shared<FluxAppWidget>(title, home);
-  app->theme = theme;
-  app->debugShowWidgetBounds = debugShowWidgetBounds;
-  ThemeProvider::setTheme(theme);
-  return app;
+inline WidgetPtr FluxApp(const std::string& title,
+                         WidgetPtr           home,
+                         const AppTheme&     theme                = AppTheme::light(),
+                         bool                debugShowWidgetBounds = false,
+                         int                 width                = 900,
+                         int                 height               = 700,
+                         bool                maximize             = false,
+                         bool                fullscreen           = true)
+{
+    auto app = std::make_shared<FluxAppWidget>(title, home);
+    app->theme                = theme;
+    app->debugShowWidgetBounds = debugShowWidgetBounds;
+    app->windowWidth          = width;
+    app->windowHeight         = height;
+    app->maximize             = maximize;
+    app->fullscreen           = fullscreen;
+    ThemeProvider::setTheme(theme);
+    return app;
 }
 
 #endif // FLUX_APP_HPP

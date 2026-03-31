@@ -1,11 +1,11 @@
 // vector_example.cpp  —  Adobe Illustrator-style layout
 #include "flux/flux.hpp"
 
-
 // ── Color helpers ────────────────────────────────────────────────────────────
-static COLORREF hexToRef(const std::string &css) {
-  RGBA c = parseHexColor(css);
-  return RGB((BYTE)(c.r * 255), (BYTE)(c.g * 255), (BYTE)(c.b * 255));
+static Color hexToRef(const std::string &css) {
+    Color out;
+    HexToColor(css, out);  // already cross-platform, in flux_colorpicker.hpp
+    return out;
 }
 
 // ============================================================================
@@ -72,15 +72,15 @@ class VectorApp : public Component {
   static constexpr int kStatusH = 72;
 
   // ── Palette ───────────────────────────────────────────────────────────────
-  COLORREF kBg = RGB(50, 50, 50);
-  COLORREF kPanel = RGB(43, 43, 43);
-  COLORREF kDark = RGB(37, 37, 37);
-  COLORREF kBorder = RGB(26, 26, 26);
-  COLORREF kAccent = RGB(255, 107, 0);
-  COLORREF kText = RGB(204, 204, 204);
-  COLORREF kDim = RGB(136, 136, 136);
-  COLORREF kHigh = RGB(70, 130, 180);
-  COLORREF kOrange = RGB(255, 107, 0);
+  Color kBg = Color::fromRGB(50, 50, 50);
+  Color kPanel = Color::fromRGB(43, 43, 43);
+  Color kDark = Color::fromRGB(37, 37, 37);
+  Color kBorder = Color::fromRGB(26, 26, 26);
+  Color kAccent = Color::fromRGB(255, 107, 0);
+  Color kText = Color::fromRGB(204, 204, 204);
+  Color kDim = Color::fromRGB(136, 136, 136);
+  Color kHigh = Color::fromRGB(70, 130, 180);
+  Color kOrange = Color::fromRGB(255, 107, 0);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   void refreshUndoRedo() {
@@ -367,7 +367,7 @@ public:
                            syncZoom(1.f);
                          }
                        })
-                    ->setBackgroundColor(RGB(60, 60, 60))
+                    ->setBackgroundColor(Color::fromRGB(60, 60, 60))
                     ->setTextColor(kText)
                     ->setBorderRadius(3)
                     ->setHeight(22)
@@ -380,7 +380,7 @@ public:
                            syncZoom(canvasPtr_->viewport().zoom());
                          }
                        })
-                    ->setBackgroundColor(RGB(60, 60, 60))
+                    ->setBackgroundColor(Color::fromRGB(60, 60, 60))
                     ->setTextColor(kText)
                     ->setBorderRadius(3)
                     ->setHeight(22)
@@ -389,58 +389,59 @@ public:
             ->setSpacing(4)
             ->setCrossAxisAlignment(CrossAxisAlignment::Center);
 
-    auto editCluster = Row({
-                               Button("↩",
-                                      [this] {
-                                        if (surface_) {
-                                          surface_->undo();
-                                          refreshUndoRedo();
-                                          refreshTransformState();
-                                          if (canvasPtr_)
-                                            canvasPtr_->redraw();
-                                        }
-                                      })
-                                   ->setBackgroundColor(RGB(60, 60, 60))
-                                   ->setTextColor(RGB(100, 160, 255))
-                                   ->setBorderRadius(3)
-                                   ->setHeight(22)
-                                   ->setWidth(28)
-                                   ->setPadding(4),
-                               Button("↪",
-                                      [this] {
-                                        if (surface_) {
-                                          surface_->redo();
-                                          refreshUndoRedo();
-                                          refreshTransformState();
-                                          if (canvasPtr_)
-                                            canvasPtr_->redraw();
-                                        }
-                                      })
-                                   ->setBackgroundColor(RGB(60, 60, 60))
-                                   ->setTextColor(RGB(100, 200, 80))
-                                   ->setBorderRadius(3)
-                                   ->setHeight(22)
-                                   ->setWidth(28)
-                                   ->setPadding(4),
-                               Button("Clear",
-                                      [this] {
-                                        if (surface_) {
-                                          for (auto &s : surface_->scene())
-                                            surface_->removeShape(s.id);
-                                          refreshUndoRedo();
-                                          refreshTransformState();
-                                          if (canvasPtr_)
-                                            canvasPtr_->redraw();
-                                        }
-                                      })
-                                   ->setBackgroundColor(RGB(60, 60, 60))
-                                   ->setTextColor(RGB(220, 80, 80))
-                                   ->setBorderRadius(3)
-                                   ->setHeight(22)
-                                   ->setPadding(6),
-                           })
-                           ->setSpacing(4)
-                           ->setCrossAxisAlignment(CrossAxisAlignment::Center);
+    auto editCluster =
+        Row({
+                Button("↩",
+                       [this] {
+                         if (surface_) {
+                           surface_->undo();
+                           refreshUndoRedo();
+                           refreshTransformState();
+                           if (canvasPtr_)
+                             canvasPtr_->redraw();
+                         }
+                       })
+                    ->setBackgroundColor(Color::fromRGB(60, 60, 60))
+                    ->setTextColor(Color::fromRGB(100, 160, 255))
+                    ->setBorderRadius(3)
+                    ->setHeight(22)
+                    ->setWidth(28)
+                    ->setPadding(4),
+                Button("↪",
+                       [this] {
+                         if (surface_) {
+                           surface_->redo();
+                           refreshUndoRedo();
+                           refreshTransformState();
+                           if (canvasPtr_)
+                             canvasPtr_->redraw();
+                         }
+                       })
+                    ->setBackgroundColor(Color::fromRGB(60, 60, 60))
+                    ->setTextColor(Color::fromRGB(100, 200, 80))
+                    ->setBorderRadius(3)
+                    ->setHeight(22)
+                    ->setWidth(28)
+                    ->setPadding(4),
+                Button("Clear",
+                       [this] {
+                         if (surface_) {
+                           for (auto &s : surface_->scene())
+                             surface_->removeShape(s.id);
+                           refreshUndoRedo();
+                           refreshTransformState();
+                           if (canvasPtr_)
+                             canvasPtr_->redraw();
+                         }
+                       })
+                    ->setBackgroundColor(Color::fromRGB(60, 60, 60))
+                    ->setTextColor(Color::fromRGB(220, 80, 80))
+                    ->setBorderRadius(3)
+                    ->setHeight(22)
+                    ->setPadding(6),
+            })
+            ->setSpacing(4)
+            ->setCrossAxisAlignment(CrossAxisAlignment::Center);
 
     auto snapCluster =
         Row({
@@ -452,7 +453,7 @@ public:
                                 ->setWidth(26)
                                 ->setHeight(22)
                                 ->setBorderRadius(3)
-                                ->setBackgroundColor(RGB(55, 55, 55))
+                                ->setBackgroundColor(Color::fromRGB(55, 55, 55))
                                 ->setBorderWidth(1)
                                 ->setBorderColor(kBorder))
                             ->setOnTap([this]() {
@@ -471,7 +472,7 @@ public:
                                 ->setWidth(26)
                                 ->setHeight(22)
                                 ->setBorderRadius(3)
-                                ->setBackgroundColor(RGB(55, 55, 55))
+                                ->setBackgroundColor(Color::fromRGB(55, 55, 55))
                                 ->setBorderWidth(1)
                                 ->setBorderColor(kBorder))
                             ->setOnTap([this]() {
@@ -490,7 +491,7 @@ public:
                                 ->setWidth(26)
                                 ->setHeight(22)
                                 ->setBorderRadius(3)
-                                ->setBackgroundColor(RGB(55, 55, 55))
+                                ->setBackgroundColor(Color::fromRGB(55, 55, 55))
                                 ->setBorderWidth(1)
                                 ->setBorderColor(kBorder))
                             ->setOnTap([this]() {
@@ -505,11 +506,11 @@ public:
                 SizedBox(3, 0),
                 Tooltip(GestureDetector(
                             Container(Text("✕")->setFontSize(10)->setTextColor(
-                                          RGB(200, 80, 80)))
+                                          Color::fromRGB(200, 80, 80)))
                                 ->setWidth(26)
                                 ->setHeight(22)
                                 ->setBorderRadius(3)
-                                ->setBackgroundColor(RGB(55, 55, 55))
+                                ->setBackgroundColor(Color::fromRGB(55, 55, 55))
                                 ->setBorderWidth(1)
                                 ->setBorderColor(kBorder))
                             ->setOnTap([this]() {
@@ -560,17 +561,18 @@ public:
               Container(Center(Text(icon)->setFontSize(15)->setTextColor(
                             activeTool,
                             [tv](const VTool &at) {
-                              return at == tv ? RGB(255, 255, 255)
-                                              : RGB(170, 170, 170);
+                              return at == tv ? Color::fromRGB(255, 255, 255)
+                                              : Color::fromRGB(170, 170, 170);
                             })))
                   ->setWidth(kToolbarW - 4)
                   ->setHeight(36)
                   ->setBorderRadius(4)
-                  ->setBackgroundColor(activeTool,
-                                       [tv](const VTool &at) {
-                                         return at == tv ? RGB(255, 107, 0)
-                                                         : RGB(43, 43, 43);
-                                       }))
+                  ->setBackgroundColor(
+                      activeTool,
+                      [tv](const VTool &at) {
+                        return at == tv ? Color::fromRGB(255, 107, 0)
+                                        : Color::fromRGB(43, 43, 43);
+                      }))
               ->setOnTap([this, tv]() {
                 activeTool.set(tv);
                 if (tv != VTool::Select) {
@@ -584,7 +586,7 @@ public:
     auto sep = Container(nullptr)
                    ->setWidth(kToolbarW - 16)
                    ->setHeight(1)
-                   ->setBackgroundColor(RGB(60, 60, 60));
+                   ->setBackgroundColor(Color::fromRGB(60, 60, 60));
 
     auto toolStrip =
         Container(Column({
@@ -797,11 +799,8 @@ public:
     auto fillPicker =
         ColorPicker(hexToRef(fillColor.get()))
             ->setShowAlpha(false)
-            ->setOnColorChanged([this](COLORREF c) {
-              char buf[8];
-              _snprintf_s(buf, sizeof(buf), _TRUNCATE, "#%02x%02x%02x",
-                          GetRValue(c), GetGValue(c), GetBValue(c));
-              fillColor.set(buf);
+            ->setOnColorChanged([this](Color c) {
+fillColor.set(ColorToHex(c));
             });
 
     auto fillNoneBtn =
@@ -814,11 +813,13 @@ public:
                             ->setBorderRadius(2)
                             ->setBackgroundColor(fillNone,
                                                  [](const bool &f) {
-                                                   return f ? RGB(255, 107, 0)
-                                                            : RGB(37, 37, 37);
+                                                   return f ? Color::fromRGB(
+                                                                  255, 107, 0)
+                                                            : Color::fromRGB(
+                                                                  37, 37, 37);
                                                  })
                             ->setBorderWidth(1)
-                            ->setBorderColor(RGB(100, 100, 100)),
+                            ->setBorderColor(Color::fromRGB(100, 100, 100)),
                         SizedBox(5, 0),
                         Text("None")->setFontSize(10)->setTextColor(kDim),
                     })
@@ -826,7 +827,7 @@ public:
                     ->setCrossAxisAlignment(CrossAxisAlignment::Center))
                 ->setPaddingAll(6, 3, 6, 3)
                 ->setBorderRadius(3)
-                ->setBackgroundColor(RGB(55, 55, 55))
+                ->setBackgroundColor(Color::fromRGB(55, 55, 55))
                 ->setBorderWidth(1)
                 ->setBorderColor(kBorder))
             ->setOnTap([this]() { fillNone.set(!fillNone.get()); });
@@ -836,11 +837,8 @@ public:
     auto strokePicker =
         ColorPicker(hexToRef(strokeColor.get()))
             ->setShowAlpha(false)
-            ->setOnColorChanged([this](COLORREF c) {
-              char buf[8];
-              _snprintf_s(buf, sizeof(buf), _TRUNCATE, "#%02x%02x%02x",
-                          GetRValue(c), GetGValue(c), GetBValue(c));
-              strokeColor.set(buf);
+            ->setOnColorChanged([this](Color c) {
+strokeColor.set(ColorToHex(c));  
             });
 
     auto strokeNoneBtn =
@@ -853,11 +851,13 @@ public:
                             ->setBorderRadius(2)
                             ->setBackgroundColor(strokeNone,
                                                  [](const bool &f) {
-                                                   return f ? RGB(255, 107, 0)
-                                                            : RGB(37, 37, 37);
+                                                   return f ? Color::fromRGB(
+                                                                  255, 107, 0)
+                                                            : Color::fromRGB(
+                                                                  37, 37, 37);
                                                  })
                             ->setBorderWidth(1)
-                            ->setBorderColor(RGB(100, 100, 100)),
+                            ->setBorderColor(Color::fromRGB(100, 100, 100)),
                         SizedBox(5, 0),
                         Text("None")->setFontSize(10)->setTextColor(kDim),
                     })
@@ -865,7 +865,7 @@ public:
                     ->setCrossAxisAlignment(CrossAxisAlignment::Center))
                 ->setPaddingAll(6, 3, 6, 3)
                 ->setBorderRadius(3)
-                ->setBackgroundColor(RGB(55, 55, 55))
+                ->setBackgroundColor(Color::fromRGB(55, 55, 55))
                 ->setBorderWidth(1)
                 ->setBorderColor(kBorder))
             ->setOnTap([this]() { strokeNone.set(!strokeNone.get()); });
@@ -903,46 +903,49 @@ public:
             const std::string &label, const std::string &tip) -> WidgetPtr {
       return Tooltip(
           GestureDetector(
-              Container(Column({
-                                   Text(icon)->setFontSize(14)->setTextColor(
-                                       transformMode,
-                                       [mode](const std::string &m) {
-                                         return m == mode ? RGB(255, 255, 255)
-                                                          : RGB(130, 130, 130);
-                                       }),
-                                   SizedBox(0, 2),
-                                   Text(label)->setFontSize(8)->setTextColor(
-                                       transformMode,
-                                       [mode](const std::string &m) {
-                                         return m == mode ? RGB(255, 255, 255)
-                                                          : RGB(100, 100, 100);
-                                       }),
-                               })
-                            ->setSpacing(0)
-                            ->setCrossAxisAlignment(CrossAxisAlignment::Center))
+              Container(
+                  Column({
+                             Text(icon)->setFontSize(14)->setTextColor(
+                                 transformMode,
+                                 [mode](const std::string &m) {
+                                   return m == mode
+                                              ? Color::fromRGB(255, 255, 255)
+                                              : Color::fromRGB(130, 130, 130);
+                                 }),
+                             SizedBox(0, 2),
+                             Text(label)->setFontSize(8)->setTextColor(
+                                 transformMode,
+                                 [mode](const std::string &m) {
+                                   return m == mode
+                                              ? Color::fromRGB(255, 255, 255)
+                                              : Color::fromRGB(100, 100, 100);
+                                 }),
+                         })
+                      ->setSpacing(0)
+                      ->setCrossAxisAlignment(CrossAxisAlignment::Center))
                   ->setWidth(56)
                   ->setHeight(44)
                   ->setBorderRadius(4)
                   ->setBackgroundColor(transformMode,
                                        [mode](const std::string &m) {
                                          if (m != mode)
-                                           return RGB(45, 45, 45);
+                                           return Color::fromRGB(45, 45, 45);
                                          if (mode == "scale")
-                                           return RGB(20, 38, 66);
+                                           return Color::fromRGB(20, 38, 66);
                                          if (mode == "rotate")
-                                           return RGB(58, 42, 14);
-                                         return RGB(18, 58, 30);
+                                           return Color::fromRGB(58, 42, 14);
+                                         return Color::fromRGB(18, 58, 30);
                                        })
                   ->setBorderWidth(1)
                   ->setBorderColor(transformMode,
                                    [mode](const std::string &m) {
                                      if (m != mode)
-                                       return RGB(65, 65, 65);
+                                       return Color::fromRGB(65, 65, 65);
                                      if (mode == "scale")
-                                       return RGB(42, 82, 152);
+                                       return Color::fromRGB(42, 82, 152);
                                      if (mode == "rotate")
-                                       return RGB(155, 108, 22);
-                                     return RGB(40, 140, 70);
+                                       return Color::fromRGB(155, 108, 22);
+                                     return Color::fromRGB(40, 140, 70);
                                    }))
               ->setOnTap([this, mode]() {
                 transformMode.set(mode);
@@ -978,7 +981,7 @@ public:
                         ->setWidth(22)
                         ->setHeight(22)
                         ->setBorderRadius(3)
-                        ->setBackgroundColor(RGB(55, 55, 55))
+                        ->setBackgroundColor(Color::fromRGB(55, 55, 55))
                         ->setBorderWidth(1)
                         ->setBorderColor(kBorder))
                     ->setOnTap(
@@ -992,7 +995,7 @@ public:
                     ->setWidth(52)
                     ->setHeight(22)
                     ->setBorderRadius(3)
-                    ->setBackgroundColor(RGB(37, 37, 37))
+                    ->setBackgroundColor(Color::fromRGB(37, 37, 37))
                     ->setBorderWidth(1)
                     ->setBorderColor(kBorder),
                 SizedBox(3, 0),
@@ -1001,7 +1004,7 @@ public:
                         ->setWidth(22)
                         ->setHeight(22)
                         ->setBorderRadius(3)
-                        ->setBackgroundColor(RGB(55, 55, 55))
+                        ->setBackgroundColor(Color::fromRGB(55, 55, 55))
                         ->setBorderWidth(1)
                         ->setBorderColor(kBorder))
                     ->setOnTap([this]() {
@@ -1020,22 +1023,26 @@ public:
                                           fontSize,
                                           [sz](int cur) {
                                             return cur == sz
-                                                       ? RGB(255, 255, 255)
-                                                       : RGB(170, 170, 170);
+                                                       ? Color::fromRGB(
+                                                             255, 255, 255)
+                                                       : Color::fromRGB(
+                                                             170, 170, 170);
                                           })))
                      ->setWidth(32)
                      ->setHeight(20)
                      ->setBorderRadius(3)
-                     ->setBackgroundColor(fontSize,
-                                          [sz](int cur) {
-                                            return cur == sz ? RGB(80, 50, 20)
-                                                             : RGB(50, 50, 50);
-                                          })
+                     ->setBackgroundColor(
+                         fontSize,
+                         [sz](int cur) {
+                           return cur == sz ? Color::fromRGB(80, 50, 20)
+                                            : Color::fromRGB(50, 50, 50);
+                         })
                      ->setBorderWidth(1)
                      ->setBorderColor(fontSize,
                                       [sz](int cur) {
-                                        return cur == sz ? RGB(255, 107, 0)
-                                                         : RGB(70, 70, 70);
+                                        return cur == sz
+                                                   ? Color::fromRGB(255, 107, 0)
+                                                   : Color::fromRGB(70, 70, 70);
                                       }))
           ->setOnTap([this, sz]() { fontSize.set(sz); });
     };
@@ -1066,9 +1073,11 @@ public:
                                    ->setFontWeight(FontWeight::Bold)
                                    ->setTextColor(state,
                                                   [](const bool &on) {
-                                                    return on ? RGB(255, 255,
+                                                    return on ? Color::fromRGB(
+                                                                    255, 255,
                                                                     255)
-                                                              : RGB(150, 150,
+                                                              : Color::fromRGB(
+                                                                    150, 150,
                                                                     150);
                                                   })))
                   ->setWidth(32)
@@ -1076,14 +1085,14 @@ public:
                   ->setBorderRadius(3)
                   ->setBackgroundColor(state,
                                        [](const bool &on) {
-                                         return on ? RGB(255, 107, 0)
-                                                   : RGB(50, 50, 50);
+                                         return on ? Color::fromRGB(255, 107, 0)
+                                                   : Color::fromRGB(50, 50, 50);
                                        })
                   ->setBorderWidth(1)
                   ->setBorderColor(state,
                                    [](const bool &on) {
-                                     return on ? RGB(255, 150, 50)
-                                               : RGB(70, 70, 70);
+                                     return on ? Color::fromRGB(255, 150, 50)
+                                               : Color::fromRGB(70, 70, 70);
                                    }))
               ->setOnTap([this, &state]() { state.set(!state.get()); }),
           tip);
@@ -1125,25 +1134,29 @@ public:
       return GestureDetector(
                  Container(Text(std::to_string(idx + 1))
                                ->setFontSize(9)
-                               ->setTextColor(selectedStop,
-                                              [idx](const int &s) {
-                                                return s == idx
-                                                           ? RGB(255, 255, 255)
-                                                           : RGB(150, 150, 150);
-                                              }))
+                               ->setTextColor(
+                                   selectedStop,
+                                   [idx](const int &s) {
+                                     return s == idx
+                                                ? Color::fromRGB(255, 255, 255)
+                                                : Color::fromRGB(150, 150, 150);
+                                   }))
                      ->setWidth(24)
                      ->setHeight(20)
                      ->setBorderRadius(3)
-                     ->setBackgroundColor(selectedStop,
-                                          [idx](const int &s) {
-                                            return s == idx ? RGB(80, 50, 10)
-                                                            : RGB(50, 50, 50);
-                                          })
+                     ->setBackgroundColor(
+                         selectedStop,
+                         [idx](const int &s) {
+                           return s == idx ? Color::fromRGB(80, 50, 10)
+                                           : Color::fromRGB(50, 50, 50);
+                         })
                      ->setBorderWidth(1)
                      ->setBorderColor(selectedStop,
                                       [idx](const int &s) {
-                                        return s == idx ? RGB(255, 150, 30)
-                                                        : RGB(70, 70, 70);
+                                        return s == idx
+                                                   ? Color::fromRGB(255, 150,
+                                                                    30)
+                                                   : Color::fromRGB(70, 70, 70);
                                       }))
           ->setOnTap([this, idx]() { selectedStop.set(idx); });
     };
@@ -1172,45 +1185,45 @@ public:
                     sectionHeader("Pathfinder"),
                     Container(
                         Row({
-                                Tooltip(
-                                    Button("Unite",
-                                           [this] {
-                                             if (surface_) {
-                                               surface_->booleanOp(
-                                                   VectorSurface::BooleanOp::
-                                                       Unite);
-                                               refreshUndoRedo();
-                                               refreshTransformState();
-                                               if (canvasPtr_)
-                                                 canvasPtr_->redraw();
-                                             }
-                                           })
-                                        ->setBackgroundColor(RGB(55, 55, 55))
-                                        ->setTextColor(kText)
-                                        ->setBorderRadius(3)
-                                        ->setHeight(22)
-                                        ->setPadding(6),
-                                    "Unite — merge selected shapes"),
+                                Tooltip(Button("Unite",
+                                               [this] {
+                                                 if (surface_) {
+                                                   surface_->booleanOp(
+                                                       VectorSurface::
+                                                           BooleanOp::Unite);
+                                                   refreshUndoRedo();
+                                                   refreshTransformState();
+                                                   if (canvasPtr_)
+                                                     canvasPtr_->redraw();
+                                                 }
+                                               })
+                                            ->setBackgroundColor(
+                                                Color::fromRGB(55, 55, 55))
+                                            ->setTextColor(kText)
+                                            ->setBorderRadius(3)
+                                            ->setHeight(22)
+                                            ->setPadding(6),
+                                        "Unite — merge selected shapes"),
                                 SizedBox(4, 0),
-                                Tooltip(
-                                    Button("Subtract",
-                                           [this] {
-                                             if (surface_) {
-                                               surface_->booleanOp(
-                                                   VectorSurface::BooleanOp::
-                                                       Subtract);
-                                               refreshUndoRedo();
-                                               refreshTransformState();
-                                               if (canvasPtr_)
-                                                 canvasPtr_->redraw();
-                                             }
-                                           })
-                                        ->setBackgroundColor(RGB(55, 55, 55))
-                                        ->setTextColor(kText)
-                                        ->setBorderRadius(3)
-                                        ->setHeight(22)
-                                        ->setPadding(6),
-                                    "Subtract — cut clip from subject"),
+                                Tooltip(Button("Subtract",
+                                               [this] {
+                                                 if (surface_) {
+                                                   surface_->booleanOp(
+                                                       VectorSurface::
+                                                           BooleanOp::Subtract);
+                                                   refreshUndoRedo();
+                                                   refreshTransformState();
+                                                   if (canvasPtr_)
+                                                     canvasPtr_->redraw();
+                                                 }
+                                               })
+                                            ->setBackgroundColor(
+                                                Color::fromRGB(55, 55, 55))
+                                            ->setTextColor(kText)
+                                            ->setBorderRadius(3)
+                                            ->setHeight(22)
+                                            ->setPadding(6),
+                                        "Subtract — cut clip from subject"),
                                 SizedBox(4, 0),
                                 Tooltip(
                                     Button("Intersect",
@@ -1225,7 +1238,8 @@ public:
                                                  canvasPtr_->redraw();
                                              }
                                            })
-                                        ->setBackgroundColor(RGB(55, 55, 55))
+                                        ->setBackgroundColor(
+                                            Color::fromRGB(55, 55, 55))
                                         ->setTextColor(kText)
                                         ->setBorderRadius(3)
                                         ->setHeight(22)
@@ -1245,7 +1259,8 @@ public:
                                               canvasPtr_->redraw();
                                           }
                                         })
-                                        ->setBackgroundColor(RGB(55, 55, 55))
+                                        ->setBackgroundColor(
+                                            Color::fromRGB(55, 55, 55))
                                         ->setTextColor(kText)
                                         ->setBorderRadius(3)
                                         ->setHeight(22)
@@ -1271,7 +1286,7 @@ public:
                                          canvasPtr_->redraw();
                                      }
                                    })
-                                ->setBackgroundColor(RGB(55, 55, 55))
+                                ->setBackgroundColor(Color::fromRGB(55, 55, 55))
                                 ->setTextColor(kText)
                                 ->setBorderRadius(3)
                                 ->setHeight(22)
@@ -1313,41 +1328,41 @@ public:
                                     ->setTextColor(kDim)
                                     ->setMinWidth(50),
                                 SizedBox(6, 0),
-                                Tooltip(
-                                    Button("▲ Front",
-                                           [this] {
-                                             if (!surface_)
-                                               return;
-                                             for (auto id :
-                                                  surface_->selection())
-                                               surface_->bringToFront(id);
-                                             if (canvasPtr_)
-                                               canvasPtr_->redraw();
-                                           })
-                                        ->setBackgroundColor(RGB(55, 55, 55))
-                                        ->setTextColor(kText)
-                                        ->setBorderRadius(3)
-                                        ->setHeight(22)
-                                        ->setPadding(6),
-                                    "Bring to Front"),
+                                Tooltip(Button("▲ Front",
+                                               [this] {
+                                                 if (!surface_)
+                                                   return;
+                                                 for (auto id :
+                                                      surface_->selection())
+                                                   surface_->bringToFront(id);
+                                                 if (canvasPtr_)
+                                                   canvasPtr_->redraw();
+                                               })
+                                            ->setBackgroundColor(
+                                                Color::fromRGB(55, 55, 55))
+                                            ->setTextColor(kText)
+                                            ->setBorderRadius(3)
+                                            ->setHeight(22)
+                                            ->setPadding(6),
+                                        "Bring to Front"),
                                 SizedBox(4, 0),
-                                Tooltip(
-                                    Button("▼ Back",
-                                           [this] {
-                                             if (!surface_)
-                                               return;
-                                             for (auto id :
-                                                  surface_->selection())
-                                               surface_->sendToBack(id);
-                                             if (canvasPtr_)
-                                               canvasPtr_->redraw();
-                                           })
-                                        ->setBackgroundColor(RGB(55, 55, 55))
-                                        ->setTextColor(kText)
-                                        ->setBorderRadius(3)
-                                        ->setHeight(22)
-                                        ->setPadding(6),
-                                    "Send to Back"),
+                                Tooltip(Button("▼ Back",
+                                               [this] {
+                                                 if (!surface_)
+                                                   return;
+                                                 for (auto id :
+                                                      surface_->selection())
+                                                   surface_->sendToBack(id);
+                                                 if (canvasPtr_)
+                                                   canvasPtr_->redraw();
+                                               })
+                                            ->setBackgroundColor(
+                                                Color::fromRGB(55, 55, 55))
+                                            ->setTextColor(kText)
+                                            ->setBorderRadius(3)
+                                            ->setHeight(22)
+                                            ->setPadding(6),
+                                        "Send to Back"),
                             })
                             ->setSpacing(0)
                             ->setCrossAxisAlignment(CrossAxisAlignment::Center))
@@ -1356,42 +1371,42 @@ public:
 
                     Container(
                         Row({
-                                Tooltip(
-                                    Button("Select All",
-                                           [this] {
-                                             if (surface_) {
-                                               surface_->selectAll();
-                                               hasSelection.set(
-                                                   !surface_->selection()
-                                                        .empty());
-                                               if (canvasPtr_)
-                                                 canvasPtr_->redraw();
-                                             }
-                                           })
-                                        ->setBackgroundColor(RGB(55, 55, 55))
-                                        ->setTextColor(kText)
-                                        ->setBorderRadius(3)
-                                        ->setHeight(22)
-                                        ->setPadding(6),
-                                    "Select All  (Ctrl+A)"),
+                                Tooltip(Button("Select All",
+                                               [this] {
+                                                 if (surface_) {
+                                                   surface_->selectAll();
+                                                   hasSelection.set(
+                                                       !surface_->selection()
+                                                            .empty());
+                                                   if (canvasPtr_)
+                                                     canvasPtr_->redraw();
+                                                 }
+                                               })
+                                            ->setBackgroundColor(
+                                                Color::fromRGB(55, 55, 55))
+                                            ->setTextColor(kText)
+                                            ->setBorderRadius(3)
+                                            ->setHeight(22)
+                                            ->setPadding(6),
+                                        "Select All  (Ctrl+A)"),
                                 SizedBox(4, 0),
-                                Tooltip(
-                                    Button("Deselect",
-                                           [this] {
-                                             if (surface_) {
-                                               surface_->deselectAll();
-                                               transformMode.set("scale");
-                                               hasSelection.set(false);
-                                               if (canvasPtr_)
-                                                 canvasPtr_->redraw();
-                                             }
-                                           })
-                                        ->setBackgroundColor(RGB(55, 55, 55))
-                                        ->setTextColor(kDim)
-                                        ->setBorderRadius(3)
-                                        ->setHeight(22)
-                                        ->setPadding(6),
-                                    "Deselect  (Escape)"),
+                                Tooltip(Button("Deselect",
+                                               [this] {
+                                                 if (surface_) {
+                                                   surface_->deselectAll();
+                                                   transformMode.set("scale");
+                                                   hasSelection.set(false);
+                                                   if (canvasPtr_)
+                                                     canvasPtr_->redraw();
+                                                 }
+                                               })
+                                            ->setBackgroundColor(
+                                                Color::fromRGB(55, 55, 55))
+                                            ->setTextColor(kDim)
+                                            ->setBorderRadius(3)
+                                            ->setHeight(22)
+                                            ->setPadding(6),
+                                        "Deselect  (Escape)"),
                             })
                             ->setSpacing(0)
                             ->setCrossAxisAlignment(CrossAxisAlignment::Center))
@@ -1438,10 +1453,12 @@ public:
                                                         ->setTextColor(
                                                             useGradient,
                                                             [](const bool &g) {
-                                                              return g ? RGB(255,
+                                                              return g ? Color::fromRGB(
+                                                                             255,
                                                                              200,
                                                                              60)
-                                                                       : RGB(150,
+                                                                       : Color::fromRGB(
+                                                                             150,
                                                                              150,
                                                                              150);
                                                             }))
@@ -1450,15 +1467,19 @@ public:
                                               ->setBackgroundColor(
                                                   useGradient,
                                                   [](const bool &g) {
-                                                    return g ? RGB(60, 45, 10)
-                                                             : RGB(50, 50, 50);
+                                                    return g ? Color::fromRGB(
+                                                                   60, 45, 10)
+                                                             : Color::fromRGB(
+                                                                   50, 50, 50);
                                                   })
                                               ->setBorderWidth(1)
                                               ->setBorderColor(
                                                   useGradient,
                                                   [](const bool &g) {
-                                                    return g ? RGB(180, 130, 30)
-                                                             : RGB(70, 70, 70);
+                                                    return g ? Color::fromRGB(
+                                                                   180, 130, 30)
+                                                             : Color::fromRGB(
+                                                                   70, 70, 70);
                                                   }))
                                           ->setOnTap([this]() {
                                             useGradient.set(!useGradient.get());
@@ -1503,7 +1524,7 @@ public:
                                             ->setHeight(20)
                                             ->setBorderRadius(3)
                                             ->setBackgroundColor(
-                                                RGB(55, 55, 55))
+                                                Color::fromRGB(55, 55, 55))
                                             ->setBorderWidth(1)
                                             ->setBorderColor(kBorder))
                                         ->setOnTap([this]() {
@@ -1524,7 +1545,7 @@ public:
                                             ->setHeight(20)
                                             ->setBorderRadius(3)
                                             ->setBackgroundColor(
-                                                RGB(55, 55, 55))
+                                                Color::fromRGB(55, 55, 55))
                                             ->setBorderWidth(1)
                                             ->setBorderColor(kBorder))
                                         ->setOnTap([this]() {
@@ -1548,25 +1569,13 @@ public:
                     // Gradient color picker
                     Container(ColorPicker(hexToRef(stopColor0.get()))
                                   ->setShowAlpha(false)
-                                  ->setOnColorChanged([this](COLORREF c) {
-                                    char buf[8];
-                                    _snprintf_s(buf, sizeof(buf), _TRUNCATE,
-                                                "#%02x%02x%02x", GetRValue(c),
-                                                GetGValue(c), GetBValue(c));
-                                    switch (selectedStop.get()) {
-                                    case 0:
-                                      stopColor0.set(buf);
-                                      break;
-                                    case 1:
-                                      stopColor1.set(buf);
-                                      break;
-                                    case 2:
-                                      stopColor2.set(buf);
-                                      break;
-                                    case 3:
-                                      stopColor3.set(buf);
-                                      break;
-                                    }
+                                  ->setOnColorChanged([this](Color c) {
+        switch (selectedStop.get()) {
+        case 0: stopColor0.set(ColorToHex(c)); break;
+        case 1: stopColor1.set(ColorToHex(c)); break;
+        case 2: stopColor2.set(ColorToHex(c)); break;
+        case 3: stopColor3.set(ColorToHex(c)); break;
+        }
                                   }))
                         ->setVisible(useGradient,
                                      [](const bool &g) { return g; })
@@ -1653,10 +1662,12 @@ public:
                                                        dashPresetIdx,
                                                        [idx](const int &cur) {
                                                          return cur == idx
-                                                                    ? RGB(255,
+                                                                    ? Color::fromRGB(
+                                                                          255,
                                                                           107,
                                                                           0)
-                                                                    : RGB(150,
+                                                                    : Color::fromRGB(
+                                                                          150,
                                                                           150,
                                                                           150);
                                                        }),
@@ -1667,10 +1678,12 @@ public:
                                                        dashPresetIdx,
                                                        [idx](const int &cur) {
                                                          return cur == idx
-                                                                    ? RGB(255,
+                                                                    ? Color::fromRGB(
+                                                                          255,
                                                                           255,
                                                                           255)
-                                                                    : RGB(150,
+                                                                    : Color::fromRGB(
+                                                                          150,
                                                                           150,
                                                                           150);
                                                        }),
@@ -1685,16 +1698,20 @@ public:
                                            dashPresetIdx,
                                            [idx](const int &cur) {
                                              return cur == idx
-                                                        ? RGB(80, 50, 10)
-                                                        : RGB(50, 50, 50);
+                                                        ? Color::fromRGB(80, 50,
+                                                                         10)
+                                                        : Color::fromRGB(50, 50,
+                                                                         50);
                                            })
                                        ->setBorderWidth(1)
                                        ->setBorderColor(
                                            dashPresetIdx,
                                            [idx](const int &cur) {
                                              return cur == idx
-                                                        ? RGB(255, 107, 0)
-                                                        : RGB(70, 70, 70);
+                                                        ? Color::fromRGB(255,
+                                                                         107, 0)
+                                                        : Color::fromRGB(70, 70,
+                                                                         70);
                                            }))
                             ->setOnTap(
                                 [this, idx]() { dashPresetIdx.set(idx); });
@@ -1790,8 +1807,10 @@ public:
                         ->setTextColor(activeTool,
                                        [](const VTool &t) {
                                          return t == VTool::Text
-                                                    ? RGB(100, 200, 255)
-                                                    : RGB(136, 136, 136);
+                                                    ? Color::fromRGB(100, 200,
+                                                                     255)
+                                                    : Color::fromRGB(136, 136,
+                                                                     136);
                                        }),
                     SizedBox(16, 0),
                     Text(transformMode,
@@ -1806,9 +1825,9 @@ public:
                         ->setTextColor(transformMode,
                                        [this](const std::string &m) {
                                          if (m == "rotate")
-                                           return RGB(255, 200, 60);
+                                           return Color::fromRGB(255, 200, 60);
                                          if (m == "move")
-                                           return RGB(80, 220, 120);
+                                           return Color::fromRGB(80, 220, 120);
                                          return kDim;
                                        }),
                     SizedBox(16, 0),
@@ -1817,7 +1836,7 @@ public:
                            return sel ? "| Pathfinder: select 2+ shapes" : "";
                          })
                         ->setFontSize(9)
-                        ->setTextColor(RGB(100, 180, 100)),
+                        ->setTextColor(Color::fromRGB(100, 180, 100)),
                 })
                 ->setSpacing(0)
                 ->setCrossAxisAlignment(CrossAxisAlignment::Center))
@@ -1845,21 +1864,17 @@ public:
                        })
                     ->setSpacing(0);
 
-    return Scaffold(nullptr,root);
+    return Scaffold(nullptr, root);
   }
 };
 
-// ── Entry point
-// ───────────────────────────────────────────────────────────────
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
-  FluxUI app(hInstance);
-  app.build([&]() {
-    return FluxApp("Illustrator-Style Vector Draw", BuildComponent<VectorApp>(),
-                   AppTheme::dark());
-  });
-  int W = GetSystemMetrics(SM_CXSCREEN);
-  int H = GetSystemMetrics(SM_CYSCREEN);
-  app.createWindow("FluxUI — Vector", W, H);
-  ShowWindow(GetActiveWindow(), SW_MAXIMIZE);
-  return app.run();
+WidgetPtr createApp(FluxUI *app) {
+  return FluxApp("Illustrator-Style Vector Draw", BuildComponent<VectorApp>(),
+                 AppTheme::dark(),
+                 false, // debugShowWidgetBounds
+                 900,   // width
+                 700,   // height
+                 false, // maximize
+                 true   // fullscreen
+  );
 }

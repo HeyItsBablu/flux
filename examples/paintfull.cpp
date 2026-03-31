@@ -1038,9 +1038,9 @@ private:
 };
 
 // ============================================================================
-// §4  PaintApp
+// §4  MyApp
 // ============================================================================
-class PaintApp : public Component {
+class MyApp : public Component {
   State<std::string>         activeColor;
   State<double>              activeSize;
   State<double>              activeOpacity;
@@ -1094,7 +1094,7 @@ class PaintApp : public Component {
   }
 
 public:
-  PaintApp()
+  MyApp()
       : activeColor("#cba6f7", context),
         activeSize(4.0, context),
         activeOpacity(1.0, context),
@@ -1757,14 +1757,15 @@ public:
 };
 
 // ── Entry point ───────────────────────────────────────────────────────────────
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
-  FluxUI app(hInstance);
-  app.build([&]() {
-    return FluxApp("Paint", BuildComponent<PaintApp>(), AppTheme::dark());
-  });
-  int screenWidth  = GetSystemMetrics(SM_CXSCREEN);
-  int screenHeight = GetSystemMetrics(SM_CYSCREEN);
-  app.createWindow("FluxUI - Paint", screenWidth, screenHeight);
-  ShowWindow(GetActiveWindow(), SW_MAXIMIZE);
-  return app.run();
+WidgetPtr createApp(FluxUI* app) {
+    return FluxApp(
+        "FluxUI - Paint",
+        BuildComponent<MyApp>(),
+        AppTheme::dark(),
+        false,   // debugShowWidgetBounds
+        900,     // width
+        700,     // height
+        false,   // maximize
+        true     // fullscreen
+    );
 }

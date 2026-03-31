@@ -1,10 +1,10 @@
 #include "flux/flux.hpp"
 
-class MenuBarExample : public Component {
+class MyApp : public Component {
   State<std::string> statusText;
 
 public:
-  MenuBarExample() : statusText("Ready.", context) {}
+  MyApp() : statusText("Ready.", context) {}
 
   WidgetPtr build() override {
     auto menuBar = MenuBar({
@@ -74,12 +74,15 @@ public:
   }
 };
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
-  FluxUI app(hInstance);
-  app.build([&]() {
-    return FluxApp("MenuBar Demo", BuildComponent<MenuBarExample>(),
-                   AppTheme::light());
-  });
-  app.createWindow("FluxUI - MenuBar Demo", 800, 500);
-  return app.run();
+WidgetPtr createApp(FluxUI* app) {
+    return FluxApp(
+        "FluxUI - Paint",
+        BuildComponent<MyApp>(),
+        AppTheme::dark(),
+        false,   // debugShowWidgetBounds
+        900,     // width
+        700,     // height
+        false,   // maximize
+        true     // fullscreen
+    );
 }

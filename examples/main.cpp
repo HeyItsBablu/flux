@@ -1,12 +1,12 @@
 #include "flux/flux.hpp"
 #include <numeric>
 
-class LayoutStressTest : public Component {
+class MyApp : public Component {
   State<int> boxCount;
   State<std::vector<int>> boxIndices;
 
 public:
-  LayoutStressTest() : boxCount(9, context), boxIndices({}, context) {}
+  MyApp() : boxCount(9, context), boxIndices({}, context) {}
 
   WidgetPtr build() override {
     return Scaffold(
@@ -164,18 +164,15 @@ public:
   }
 };
 
-WidgetPtr createApp(FluxUI *app) {
-  return FluxApp("Image Examples", BuildComponent<LayoutStressTest>(),
-                 AppTheme::light());
-}
-
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
-    AllocConsole();
-    FILE *f;
-    freopen_s(&f, "CONOUT$", "w", stdout);
-
-    FluxUI app(hInstance);
-    app.createWindow("FluxUI - Image Examples", 900, 800); // window first
-    app.build([&]() { return createApp(&app); });          // build second
-    return app.run();
+WidgetPtr createApp(FluxUI* app) {
+    return FluxApp(
+        "FluxUI - Paint",
+        BuildComponent<MyApp>(),
+        AppTheme::light(),
+        false,   // debugShowWidgetBounds
+        900,     // width
+        700,     // height
+        false,   // maximize
+        true     // fullscreen
+    );
 }

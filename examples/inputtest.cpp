@@ -1,6 +1,6 @@
 #include "flux/flux.hpp"
 
-class InputShowcase : public Component {
+class MyApp : public Component {
     State<bool>        toggleState;
     State<double>      sliderState;
     State<bool>        checkState;
@@ -10,7 +10,7 @@ class InputShowcase : public Component {
     State<double>      numberState;
 
 public:
-    InputShowcase()
+    MyApp()
         : toggleState  (false,    context),
           sliderState  (50.0,     context),
           checkState   (false,    context),
@@ -170,14 +170,15 @@ public:
     }
 };
 
-WidgetPtr createApp(FluxUI *app) {
-    return FluxApp("Input Showcase", BuildComponent<InputShowcase>(),
-                   AppTheme::light());
-}
-
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
-    FluxUI app(hInstance);
-    app.build([&]() { return createApp(&app); });
-    app.createWindow("FluxUI - Input Showcase", 700, 620);
-    return app.run();
+WidgetPtr createApp(FluxUI* app) {
+    return FluxApp(
+        "FluxUI - Paint",
+        BuildComponent<MyApp>(),
+        AppTheme::light(),
+        false,   // debugShowWidgetBounds
+        900,     // width
+        700,     // height
+        false,   // maximize
+        true     // fullscreen
+    );
 }

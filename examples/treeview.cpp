@@ -1,11 +1,11 @@
 #include "flux/flux.hpp"
 
 
-class TreeViewExample : public Component {
+class MyApp : public Component {
   State<std::string> selectedPath;
 
 public:
-  TreeViewExample() : selectedPath("Nothing selected", context) {}
+  MyApp() : selectedPath("Nothing selected", context) {}
 
   WidgetPtr build() override {
 
@@ -90,13 +90,15 @@ public:
   }
 };
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
-  FluxUI app(hInstance);
-  app.build([&]() {
-    return FluxApp("TreeView Demo",
-                   BuildComponent<TreeViewExample>(),
-                   AppTheme::light());
-  });
-  app.createWindow("FluxUI - TreeView Demo", 800, 560);
-  return app.run();
+WidgetPtr createApp(FluxUI* app) {
+    return FluxApp(
+        "FluxUI - Paint",
+        BuildComponent<MyApp>(),
+        AppTheme::dark(),
+        false,   // debugShowWidgetBounds
+        900,     // width
+        700,     // height
+        false,   // maximize
+        true     // fullscreen
+    );
 }

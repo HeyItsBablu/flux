@@ -1,4 +1,5 @@
 #include "flux/flux.hpp"
+
 #include <cmath>
 
 class SystemMonitorApp : public Component {
@@ -58,59 +59,60 @@ public:
   WidgetPtr build() override {
     return Scaffold(
         AppBar("System Monitor"),
-        Center(Column({
+        Center(
+            Column({
 
-                   // ── Status bar ──────────────────────────────────────
-                   Row({Text("● LIVE")
-                           ->setTextColor(Color::fromRGB(76, 175, 80))
-                           ->setFontSize(12),
-                       Text(statusText)
-                           ->setTextColor(Color::fromRGB(150, 150, 150))
-                           ->setFontSize(12)})
-                       ->setSpacing(12),
+                       // ── Status bar ──────────────────────────────────────
+                       Row({Text("● LIVE")
+                                ->setTextColor(Color::fromRGB(76, 175, 80))
+                                ->setFontSize(12),
+                            Text(statusText)
+                                ->setTextColor(Color::fromRGB(150, 150, 150))
+                                ->setFontSize(12)})
+                           ->setSpacing(12),
 
-                   SizedBox(0, 16),
+                       SizedBox(0, 16),
 
-                   // ── CPU graph ───────────────────────────────────────
-                   Text("CPU Usage %")
-                       ->setTextColor(Color::fromRGB(200, 200, 200))
-                       ->setFontSize(13),
-                   SizedBox(0, 6),
-                   Graph(700, 200)
-                       ->addSeries("CPU", cpuData, 1.f, 0.45f, 0.2f)
-                       ->addSeries("Memory", memData, 0.2f, 0.7f, 1.f)
-                       ->setType(GraphType::Area)
-                       ->setYRange(0.f, 100.f)
-                       ->setShowGrid(true),
+                       // ── CPU graph ───────────────────────────────────────
+                       Text("CPU Usage %")
+                           ->setTextColor(Color::fromRGB(200, 200, 200))
+                           ->setFontSize(13),
+                       SizedBox(0, 6),
+                       Graph(700, 200)
+                           ->addSeries("CPU", cpuData, 1.f, 0.45f, 0.2f)
+                           ->addSeries("Memory", memData, 0.2f, 0.7f, 1.f)
+                           ->setType(GraphType::Area)
+                           ->setYRange(0.f, 100.f)
+                           ->setShowGrid(true),
 
-                   SizedBox(0, 20),
+                       SizedBox(0, 20),
 
-                   // ── Memory graph ────────────────────────────────────
-                   Text("Memory Usage %")
-                       ->setTextColor(Color::fromRGB(200, 200, 200))
-                       ->setFontSize(13),
-                   SizedBox(0, 6),
-                   Graph(700, 200)
-                       ->addSeries("Memory", memData, 0.2f, 0.7f, 1.f)
-                       ->setType(GraphType::Area)
-                       ->setYRange(0.f, 100.f)
-                       ->setShowGrid(true),
+                       // ── Memory graph ────────────────────────────────────
+                       Text("Memory Usage %")
+                           ->setTextColor(Color::fromRGB(200, 200, 200))
+                           ->setFontSize(13),
+                       SizedBox(0, 6),
+                       Graph(700, 200)
+                           ->addSeries("Memory", memData, 0.2f, 0.7f, 1.f)
+                           ->setType(GraphType::Area)
+                           ->setYRange(0.f, 100.f)
+                           ->setShowGrid(true),
 
-                   SizedBox(0, 20),
+                       SizedBox(0, 20),
 
-                   // ── Network — multi-series bar chart ────────────────
-                   Text("Network MB/s")
-                       ->setTextColor(Color::fromRGB(200, 200, 200))
-                       ->setFontSize(13),
-                   SizedBox(0, 6),
-                   Graph(700, 200)
-                       ->addSeries("Network",  networkData, 0.4f, 1.f, 0.6f)
-                       ->setType(GraphType::Bar)
-                       ->setYRange(0.f, 100.f)
-                       ->setShowGrid(true)
+                       // ── Network — multi-series bar chart ────────────────
+                       Text("Network MB/s")
+                           ->setTextColor(Color::fromRGB(200, 200, 200))
+                           ->setFontSize(13),
+                       SizedBox(0, 6),
+                       Graph(700, 200)
+                           ->addSeries("Network", networkData, 0.4f, 1.f, 0.6f)
+                           ->setType(GraphType::Bar)
+                           ->setYRange(0.f, 100.f)
+                           ->setShowGrid(true)
 
-  })
-                   ->setSpacing(0)));
+                   })
+                ->setSpacing(0)));
   }
 
 private:
@@ -123,21 +125,17 @@ private:
   }
 };
 
-// ── Entry Point ──────────────────────────────────────────────────────────────
 
-WidgetPtr createApp(FluxUI *app) {
-  return FluxApp("System Monitor", BuildComponent<SystemMonitorApp>(),
-                 AppTheme::materialBlue());
-}
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
-  AllocConsole();
-  FILE *fp;
-  freopen_s(&fp, "CONOUT$", "w", stdout);
-
-  FluxUI app(hInstance);
-  app.build([&]() { return createApp(&app); });
-  app.createWindow("FluxUI - System Monitor", 800, 900);
-
-  return app.run();
+WidgetPtr createApp(FluxUI* app) {
+    return FluxApp(
+        "FluxUI - Paint",
+        BuildComponent<SystemMonitorApp>(),
+        AppTheme::dark(),
+        false,   // debugShowWidgetBounds
+        900,     // width
+        700,     // height
+        false,   // maximize
+        true     // fullscreen
+    );
 }

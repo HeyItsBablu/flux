@@ -37,10 +37,17 @@ WidgetPtr simpleApp(FluxUI *app) {
               ->setSpacing(0)));
 }
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
-                   LPSTR lpCmdLine, int nCmdShow) {
-  FluxUI app(hInstance);
-  app.build([&]() { return simpleApp(&app); });
-  app.createWindow("Custom Widget Demo", 600, 400);
-  return app.run();
+
+
+WidgetPtr createApp(FluxUI* app) {
+    return FluxApp(
+        "FluxUI - Paint",
+        simpleApp,
+        AppTheme::dark(),
+        false,   // debugShowWidgetBounds
+        900,     // width
+        700,     // height
+        false,   // maximize
+        true     // fullscreen
+    );
 }

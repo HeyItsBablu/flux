@@ -142,17 +142,15 @@ public:
     }
 };
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
-    AllocConsole();
-    FILE *f;
-    freopen_s(&f, "CONOUT$", "w", stdout);
-
-    FluxUI app(hInstance);
-    app.build([&]() {
-        return FluxApp("File Picker + Theme Toggle",
-                       BuildComponent<MyApp>(),
-                       AppTheme::light());
-    });
-    app.createWindow("FluxUI - File Picker", 800, 620);
-    return app.run();
+WidgetPtr createApp(FluxUI* app) {
+    return FluxApp(
+        "FluxUI - Paint",
+        BuildComponent<MyApp>(),
+        AppTheme::dark(),
+        false,   // debugShowWidgetBounds
+        900,     // width
+        700,     // height
+        false,   // maximize
+        true     // fullscreen
+    );
 }

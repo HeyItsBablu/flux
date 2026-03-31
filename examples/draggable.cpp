@@ -17,7 +17,7 @@ public:
                     Container()
                         ->setWidth(100)
                         ->setHeight(100)
-                        ->setBackgroundColor(RGB(70, 130, 180))
+                        ->setBackgroundColor(Color::fromRGB(70, 130, 180))
                         ->setBorderRadius(12),
                     [this](int dx, int dy) {
                         posX.set(posX.get() + dx);
@@ -32,14 +32,16 @@ public:
   }
 };
 
-WidgetPtr createApp(FluxUI *app) {
-  return FluxApp("List View Demo", BuildComponent<DragDemo>(),
-                 AppTheme::light());
-}
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
-  FluxUI app(hInstance);
-  app.build([&]() { return createApp(&app); });
-  app.createWindow("FluxUI - List View Demo", 600, 600);
-  return app.run();
+WidgetPtr createApp(FluxUI* app) {
+    return FluxApp(
+        "FluxUI - Draggable",
+        BuildComponent<DragDemo>(),
+        AppTheme::dark(),
+        false,   // debugShowWidgetBounds
+        900,     // width
+        700,     // height
+        false,   // maximize
+        true     // fullscreen
+    );
 }

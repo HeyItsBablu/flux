@@ -36,7 +36,7 @@ public:
         Text("Child Slider")->setFontSize(14),
         Slider(0, 100, 1)
             ->setValue(deref(value))
-            ->setTrackFillColor(RGB(99, 102, 241))
+            ->setTrackFillColor(Color::fromRGB(99, 102, 241))
             ->setWidth(300),
         Text(deref(value), [](int v) { return "Value: " + std::to_string(v); })
   })->setSpacing(8);
@@ -58,7 +58,7 @@ public:
         Text("Child Toggle")->setFontSize(14),
         Toggle("Enable feature")
             ->setValue(deref(enabled))
-            ->setTrackOnColor(RGB(76, 175, 80)),
+            ->setTrackOnColor(Color::fromRGB(76, 175, 80)),
         Text(deref(enabled), [](bool v) { return v ? "ON" : "OFF"; })
   })->setSpacing(8);
   }
@@ -159,17 +159,18 @@ public:
   }
 };
 
-WidgetPtr dashboardApp(FluxUI *app) {
-  return FluxApp("Input Test", BuildComponent<ParentForm>(), AppTheme::light());
+
+
+WidgetPtr createApp(FluxUI* app) {
+    return FluxApp(
+        "FluxUI - Paint",
+        BuildComponent<ParentForm>(),
+        AppTheme::light(),
+        false,   // debugShowWidgetBounds
+        900,     // width
+        700,     // height
+        false,   // maximize
+        true     // fullscreen
+    );
 }
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
-  AllocConsole();
-  FILE *fp;
-  freopen_s(&fp, "CONOUT$", "w", stdout);
-
-  FluxUI app(hInstance);
-  app.build([&]() { return dashboardApp(&app); });
-  app.createWindow("FluxApp Demo", 800, 600);
-  return app.run();
-}

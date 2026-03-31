@@ -2,7 +2,7 @@
 
 #include <numeric>
 
-class LayoutStressTest : public Component {
+class MyApp : public Component {
   State<int> boxCount;
   State<double> fillRatio;
   State<std::vector<int>> boxIndices;
@@ -20,7 +20,7 @@ class LayoutStressTest : public Component {
   }
 
 public:
-  LayoutStressTest()
+  MyApp()
       : boxCount(9, context), fillRatio(9.0 / kMax, context),
         boxIndices({}, context) {}
 
@@ -506,17 +506,15 @@ public:
   }
 };
 
-WidgetPtr createApp(FluxUI *app) {
-  return FluxApp("Layout Stress Test", BuildComponent<LayoutStressTest>(),
-                 AppTheme::light());
-}
-
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
-  AllocConsole();
-  FILE *fp;
-  freopen_s(&fp, "CONOUT$", "w", stdout);
-  FluxUI app(hInstance);
-  app.build([&]() { return createApp(&app); });
-  app.createWindow("FluxUI - Layout Stress Test", 900, 700);
-  return app.run();
+WidgetPtr createApp(FluxUI* app) {
+    return FluxApp(
+        "FluxUI - Paint",
+        BuildComponent<MyApp>(),
+        AppTheme::dark(),
+        false,   // debugShowWidgetBounds
+        900,     // width
+        700,     // height
+        false,   // maximize
+        true     // fullscreen
+    );
 }

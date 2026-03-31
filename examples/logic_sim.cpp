@@ -4846,7 +4846,7 @@ static std::string dlgLabel(HWND hwnd, const std::string &initial) {
 // =============================================================================
 // §7  APP
 // =============================================================================
-class LogicSimApp : public Component {
+class MyApp : public Component {
   State<int> gateCount;
   State<std::string> statusMsg;
   State<double> zoomPct;
@@ -6031,7 +6031,7 @@ class LogicSimApp : public Component {
   }
 
 public:
-  LogicSimApp()
+  MyApp()
       : gateCount(0, context),
         statusMsg("Place gates · Connect wires · Press ▶ Play", context),
         zoomPct(100.0, context), simRunning(false, context),
@@ -6076,41 +6076,41 @@ public:
         canvas_->redraw();
     });
 
-    COLORREF kBg = RGB(12, 12, 18), kCard = RGB(18, 18, 28),
-             kBord = RGB(40, 42, 62);
-    COLORREF kAccent = RGB(174, 129, 255), kGreen = RGB(148, 226, 213),
-             kDim = RGB(80, 84, 110), kText = RGB(192, 202, 232);
+    Color kBg = Color::fromRGB(12, 12, 18), kCard = Color::fromRGB(18, 18, 28),
+             kBord = Color::fromRGB(40, 42, 62);
+    Color kAccent = Color::fromRGB(174, 129, 255), kGreen = Color::fromRGB(148, 226, 213),
+             kDim = Color::fromRGB(80, 84, 110), kText = Color::fromRGB(192, 202, 232);
 
     struct TI {
       GateType t;
-      COLORREF ac;
+      Color ac;
       const char *sub;
     };
     const std::vector<TI> tiles = {
-        {GateType::AND, RGB(70, 120, 220), "A & B"},
-        {GateType::OR, RGB(70, 190, 110), "A | B"},
-        {GateType::NOT, RGB(170, 70, 220), "! A"},
-        {GateType::NAND, RGB(220, 70, 70), "!(A&B)"},
-        {GateType::NOR, RGB(200, 70, 170), "!(A|B)"},
-        {GateType::XOR, RGB(70, 170, 220), "A ^ B"},
-        {GateType::XNOR, RGB(110, 110, 220), "!(A^B)"},
-        {GateType::INPUT, RGB(70, 210, 110), "Toggle 0/1"},
-        {GateType::OUTPUT, RGB(220, 130, 40), "LED output"},
-        {GateType::CLOCK, RGB(47, 210, 229), "0.5–8 Hz auto"},
-        {GateType::DFF, RGB(50, 165, 240), "D·CLK·RST → Q"},
-        {GateType::DLATCH, RGB(50, 215, 190), "D·EN → Q (level)"},
-        {GateType::TFLIPFLOP, RGB(240, 185, 50), "T·CLK → Q (toggle)"},
-        {GateType::JKFLIPFLOP, RGB(240, 95, 150), "J·K·CLK → Q"},
-        {GateType::BUS_IN_2, RGB(80, 160, 240), "2×1b → 2b bus"},
-        {GateType::BUS_IN_4, RGB(80, 160, 240), "4×1b → 4b bus"},
-        {GateType::BUS_IN_8, RGB(80, 160, 240), "8×1b → 8b bus"},
-        {GateType::BUS_OUT_2, RGB(240, 160, 80), "2b bus → 2×1b"},
-        {GateType::BUS_OUT_4, RGB(240, 160, 80), "4b bus → 4×1b"},
-        {GateType::BUS_OUT_8, RGB(240, 160, 80), "8b bus → 8×1b"},
+        {GateType::AND, Color::fromRGB(70, 120, 220), "A & B"},
+        {GateType::OR, Color::fromRGB(70, 190, 110), "A | B"},
+        {GateType::NOT, Color::fromRGB(170, 70, 220), "! A"},
+        {GateType::NAND, Color::fromRGB(220, 70, 70), "!(A&B)"},
+        {GateType::NOR, Color::fromRGB(200, 70, 170), "!(A|B)"},
+        {GateType::XOR, Color::fromRGB(70, 170, 220), "A ^ B"},
+        {GateType::XNOR, Color::fromRGB(110, 110, 220), "!(A^B)"},
+        {GateType::INPUT, Color::fromRGB(70, 210, 110), "Toggle 0/1"},
+        {GateType::OUTPUT, Color::fromRGB(220, 130, 40), "LED output"},
+        {GateType::CLOCK, Color::fromRGB(47, 210, 229), "0.5–8 Hz auto"},
+        {GateType::DFF, Color::fromRGB(50, 165, 240), "D·CLK·RST → Q"},
+        {GateType::DLATCH, Color::fromRGB(50, 215, 190), "D·EN → Q (level)"},
+        {GateType::TFLIPFLOP, Color::fromRGB(240, 185, 50), "T·CLK → Q (toggle)"},
+        {GateType::JKFLIPFLOP, Color::fromRGB(240, 95, 150), "J·K·CLK → Q"},
+        {GateType::BUS_IN_2, Color::fromRGB(80, 160, 240), "2×1b → 2b bus"},
+        {GateType::BUS_IN_4, Color::fromRGB(80, 160, 240), "4×1b → 4b bus"},
+        {GateType::BUS_IN_8, Color::fromRGB(80, 160, 240), "8×1b → 8b bus"},
+        {GateType::BUS_OUT_2, Color::fromRGB(240, 160, 80), "2b bus → 2×1b"},
+        {GateType::BUS_OUT_4, Color::fromRGB(240, 160, 80), "4b bus → 4×1b"},
+        {GateType::BUS_OUT_8, Color::fromRGB(240, 160, 80), "8b bus → 8×1b"},
     };
     auto makeTile = [&](const TI &ti) -> WidgetPtr {
       GateType t = ti.t;
-      COLORREF ac = ti.ac;
+      Color ac = ti.ac;
       return GestureDetector(
                  Container(
                      Row({Container(nullptr)
@@ -6135,7 +6135,7 @@ public:
                      ->setBorderRadius(6)
                      ->setBorderWidth(1)
                      ->setBorderColor(kBord)
-                     ->setHoverBackgroundColor(RGB(26, 26, 42)))
+                     ->setHoverBackgroundColor(Color::fromRGB(26, 26, 42)))
           ->setOnTap([this, t]() {
             if (!surface_)
               return;
@@ -6173,13 +6173,13 @@ public:
                           SizedBox(0, 5),
                           Text(ttText, [](const std::string &s) { return s; })
                               ->setFontSize(9)
-                              ->setTextColor(RGB(120, 200, 140))})
+                              ->setTextColor(Color::fromRGB(120, 200, 140))})
                       ->setSpacing(0))
             ->setWidth(kSW - 8)
-            ->setBackgroundColor(RGB(10, 14, 10))
+            ->setBackgroundColor(Color::fromRGB(10, 14, 10))
             ->setBorderRadius(6)
             ->setBorderWidth(1)
-            ->setBorderColor(RGB(30, 60, 35))
+            ->setBorderColor(Color::fromRGB(30, 60, 35))
             ->setPaddingAll(7, 7, 7, 7);
 
     auto sidebar =
@@ -6193,8 +6193,8 @@ public:
             ->setBackgroundColor(kBg)
             ->setPaddingAll(8, 8, 8, 8);
 
-    auto mkBtn = [&](const std::string &lbl, COLORREF col, COLORREF bg,
-                     COLORREF bord, std::function<void()> fn) -> WidgetPtr {
+    auto mkBtn = [&](const std::string &lbl, Color col, Color bg,
+                     Color bord, std::function<void()> fn) -> WidgetPtr {
       return GestureDetector(Container(Text(lbl)
                                            ->setFontSize(11)
                                            ->setFontWeight(FontWeight::Bold)
@@ -6204,62 +6204,59 @@ public:
                                  ->setBackgroundColor(bg)
                                  ->setBorderWidth(1)
                                  ->setBorderColor(bord)
-                                 ->setPaddingAll(10, 4, 10, 4)
-                                 ->setHoverBackgroundColor(
-                                     RGB(GetRValue(bg) + 8, GetGValue(bg) + 8,
-                                         GetBValue(bg) + 8)))
+                                 ->setPaddingAll(10, 4, 10, 4))
           ->setOnTap(fn);
     };
 
     auto toolbar=Container(Column({
             Row({
                 Text("⚡ Logic Sim")->setFontSize(13)->setFontWeight(FontWeight::Bold)->setTextColor(kAccent),SizedBox(8,0),
-                mkBtn("💾 Save",kGreen,RGB(10,20,18),RGB(30,80,60),[this](){doSave();}),
-                mkBtn("📂 Open",kGreen,RGB(10,20,18),RGB(30,80,60),[this](){doLoad();}),SizedBox(4,0),
-                mkBtn("↩ Undo",kAccent,RGB(22,20,34),RGB(70,55,100),[this](){if(surface_)surface_->undo();}),
-                mkBtn("↪ Redo",kAccent,RGB(22,20,34),RGB(70,55,100),[this](){if(surface_)surface_->redo();}),SizedBox(4,0),
+                mkBtn("💾 Save",kGreen,Color::fromRGB(10,20,18),Color::fromRGB(30,80,60),[this](){doSave();}),
+                mkBtn("📂 Open",kGreen,Color::fromRGB(10,20,18),Color::fromRGB(30,80,60),[this](){doLoad();}),SizedBox(4,0),
+                mkBtn("↩ Undo",kAccent,Color::fromRGB(22,20,34),Color::fromRGB(70,55,100),[this](){if(surface_)surface_->undo();}),
+                mkBtn("↪ Redo",kAccent,Color::fromRGB(22,20,34),Color::fromRGB(70,55,100),[this](){if(surface_)surface_->redo();}),SizedBox(4,0),
                 GestureDetector(Container(Text(snapOn,[](bool v){return v?"⊞ Snap":"⊟ Snap";})
-                    ->setFontSize(10)->setFontWeight(FontWeight::Bold)->setTextColor(RGB(174,129,255)))
-                    ->setHeight(28)->setBorderRadius(5)->setBackgroundColor(RGB(22,18,32))
-                    ->setBorderWidth(1)->setBorderColor(RGB(70,55,100))->setPaddingAll(8,3,8,3))
+                    ->setFontSize(10)->setFontWeight(FontWeight::Bold)->setTextColor(Color::fromRGB(174,129,255)))
+                    ->setHeight(28)->setBorderRadius(5)->setBackgroundColor(Color::fromRGB(22,18,32))
+                    ->setBorderWidth(1)->setBorderColor(Color::fromRGB(70,55,100))->setPaddingAll(8,3,8,3))
                 ->setOnTap([this](){snapOn.set(!snapOn.get());}),SizedBox(6,0),
                 Text("Zoom")->setFontSize(9)->setTextColor(kDim),
                 Slider(10.0,400.0,1.0)->setValue(zoomPct)->setTrackFillColor(kAccent)->setWidth(80),
                 Text(zoomPct,[](double v){char b[16];_snprintf_s(b,sizeof(b),_TRUNCATE,"%.0f%%",v);return std::string(b);})->setFontSize(10)->setTextColor(kText)->setMinWidth(34),
-                mkBtn("Fit",kAccent,RGB(22,20,34),RGB(70,55,100),[this](){if(surface_){surface_->fitToView();notifyZoom(surface_->getZoom());}}),
-                mkBtn("1:1",kAccent,RGB(22,20,34),RGB(70,55,100),[this](){if(surface_){surface_->resetZoom();notifyZoom(1.f);}}),SizedBox(6,0),
-                mkBtn("🗑 Clear",RGB(243,139,168),RGB(34,14,20),RGB(120,40,60),[this](){if(!surface_)return;surface_->pushUndo();surface_->simStop();surface_->circuit.clearAll();gateCount.set(0);ttText.set("No circuit yet");currentFile.set("");if(canvas_)canvas_->redraw();}),SizedBox(6,0),
+                mkBtn("Fit",kAccent,Color::fromRGB(22,20,34),Color::fromRGB(70,55,100),[this](){if(surface_){surface_->fitToView();notifyZoom(surface_->getZoom());}}),
+                mkBtn("1:1",kAccent,Color::fromRGB(22,20,34),Color::fromRGB(70,55,100),[this](){if(surface_){surface_->resetZoom();notifyZoom(1.f);}}),SizedBox(6,0),
+                mkBtn("🗑 Clear",Color::fromRGB(243,139,168),Color::fromRGB(34,14,20),Color::fromRGB(120,40,60),[this](){if(!surface_)return;surface_->pushUndo();surface_->simStop();surface_->circuit.clearAll();gateCount.set(0);ttText.set("No circuit yet");currentFile.set("");if(canvas_)canvas_->redraw();}),SizedBox(6,0),
                 Text(gateCount,[](int n){return std::to_string(n)+(n==1?" item":" items");})->setFontSize(10)->setTextColor(kDim)
     })->setSpacing(5)->setCrossAxisAlignment(CrossAxisAlignment::Center),
             SizedBox(0,4),
             Row({
                 GestureDetector(Container(Text(simRunning,[](bool r){return r?"⏸ Pause":"▶ Play";})
-                    ->setFontSize(11)->setFontWeight(FontWeight::Bold)->setTextColor(RGB(80,220,120)))
-                    ->setHeight(30)->setBorderRadius(6)->setBackgroundColor(RGB(14,34,18))->setBorderWidth(1)->setBorderColor(RGB(40,120,55))->setPaddingAll(10,4,10,4)->setHoverBackgroundColor(RGB(18,44,22)))
+                    ->setFontSize(11)->setFontWeight(FontWeight::Bold)->setTextColor(Color::fromRGB(80,220,120)))
+                    ->setHeight(30)->setBorderRadius(6)->setBackgroundColor(Color::fromRGB(14,34,18))->setBorderWidth(1)->setBorderColor(Color::fromRGB(40,120,55))->setPaddingAll(10,4,10,4)->setHoverBackgroundColor(Color::fromRGB(18,44,22)))
                 ->setOnTap([this](){if(!surface_)return;if(!surface_->isSimActive())surface_->simPlay();else surface_->simPause();}),SizedBox(5,0),
-                mkBtn("■ Stop",RGB(230,80,80),RGB(34,14,14),RGB(120,40,40),[this](){if(surface_)surface_->simStop();}),SizedBox(5,0),
-                mkBtn("⏭ Step",RGB(100,180,255),RGB(14,22,38),RGB(40,80,150),[this](){if(surface_)surface_->simStep();}),SizedBox(8,0),
+                mkBtn("■ Stop",Color::fromRGB(230,80,80),Color::fromRGB(34,14,14),Color::fromRGB(120,40,40),[this](){if(surface_)surface_->simStop();}),SizedBox(5,0),
+                mkBtn("⏭ Step",Color::fromRGB(100,180,255),Color::fromRGB(14,22,38),Color::fromRGB(40,80,150),[this](){if(surface_)surface_->simStep();}),SizedBox(8,0),
                 // ── Group button ──────────────────────────────────────────
-                mkBtn("⬡ Group  Ctrl+G",RGB(200,170,255),RGB(20,14,34),RGB(80,55,130),[this](){if(surface_)surface_->groupSelected();}),
+                mkBtn("⬡ Group  Ctrl+G",Color::fromRGB(200,170,255),Color::fromRGB(20,14,34),Color::fromRGB(80,55,130),[this](){if(surface_)surface_->groupSelected();}),
                 SizedBox(8,0),
-mkBtn("½ Half Add",   RGB(100,200,255),RGB(10,18,28),RGB(30,80,130),[this](){buildHalfAdder();}),
-mkBtn("Full Add",     RGB(100,200,255),RGB(10,18,28),RGB(30,80,130),[this](){buildFullAdder();}),
-mkBtn("4b Adder",     RGB(130,220,180),RGB(10,22,16),RGB(30,100,60),[this](){buildRippleAdder4();}),
-mkBtn("4b Subtract",  RGB(255,160,100),RGB(28,14, 8),RGB(120,60,20),[this](){buildSubtractor4();}),
+mkBtn("½ Half Add",   Color::fromRGB(100,200,255),Color::fromRGB(10,18,28),Color::fromRGB(30,80,130),[this](){buildHalfAdder();}),
+mkBtn("Full Add",     Color::fromRGB(100,200,255),Color::fromRGB(10,18,28),Color::fromRGB(30,80,130),[this](){buildFullAdder();}),
+mkBtn("4b Adder",     Color::fromRGB(130,220,180),Color::fromRGB(10,22,16),Color::fromRGB(30,100,60),[this](){buildRippleAdder4();}),
+mkBtn("4b Subtract",  Color::fromRGB(255,160,100),Color::fromRGB(28,14, 8),Color::fromRGB(120,60,20),[this](){buildSubtractor4();}),
 SizedBox(8,0),
-mkBtn("2:1 MUX",     RGB(180,140,255),RGB(18,12,32),RGB(80,50,140),[this](){buildMux21();}),
-mkBtn("4:1 MUX",     RGB(200,150,255),RGB(20,12,34),RGB(90,55,150),[this](){buildMux41();}),
-mkBtn("3→8 Dec",     RGB(255,200,100),RGB(28,20, 8),RGB(120,90,20),[this](){buildDecoder38();}),
+mkBtn("2:1 MUX",     Color::fromRGB(180,140,255),Color::fromRGB(18,12,32),Color::fromRGB(80,50,140),[this](){buildMux21();}),
+mkBtn("4:1 MUX",     Color::fromRGB(200,150,255),Color::fromRGB(20,12,34),Color::fromRGB(90,55,150),[this](){buildMux41();}),
+mkBtn("3→8 Dec",     Color::fromRGB(255,200,100),Color::fromRGB(28,20, 8),Color::fromRGB(120,90,20),[this](){buildDecoder38();}),
 SizedBox(8,0),
-mkBtn("4b Reg",      RGB(100,220,200),RGB( 8,22,20),RGB(25,100,90),[this](){buildRegister4();}),
-mkBtn("4b ShiftReg", RGB(100,200,220),RGB( 8,18,22),RGB(25, 85,110),[this](){buildShiftReg4();}),
+mkBtn("4b Reg",      Color::fromRGB(100,220,200),Color::fromRGB( 8,22,20),Color::fromRGB(25,100,90),[this](){buildRegister4();}),
+mkBtn("4b ShiftReg", Color::fromRGB(100,200,220),Color::fromRGB( 8,18,22),Color::fromRGB(25, 85,110),[this](){buildShiftReg4();}),
 SizedBox(8,0),
-mkBtn("4b ALU",      RGB(255,180,100),RGB(28,16, 4),RGB(130,70,15),[this](){buildALU4();}),
+mkBtn("4b ALU",      Color::fromRGB(255,180,100),Color::fromRGB(28,16, 4),Color::fromRGB(130,70,15),[this](){buildALU4();}),
 SizedBox(8,0),
                 SizedBox(12,0),
                 Container(Text(simActive,[](bool a){return a?"● SIM MODE":"○ EDIT MODE";})
-                    ->setFontSize(9)->setFontWeight(FontWeight::Bold)->setTextColor(RGB(220,200,60)))
-                ->setPaddingAll(7,3,7,3)->setBorderRadius(4)->setBackgroundColor(RGB(20,18,8))->setBorderWidth(1)->setBorderColor(RGB(70,62,15)),
+                    ->setFontSize(9)->setFontWeight(FontWeight::Bold)->setTextColor(Color::fromRGB(220,200,60)))
+                ->setPaddingAll(7,3,7,3)->setBorderRadius(4)->setBackgroundColor(Color::fromRGB(20,18,8))->setBorderWidth(1)->setBorderColor(Color::fromRGB(70,62,15)),
                 SizedBox(12,0),
                 Text("Select gates → Ctrl+G to group  |  Right-click subcircuit instance to delete  |  Dbl-click for info  |  Wires cross boundary automatically")
                     ->setFontSize(9)->setTextColor(kDim)
@@ -6277,7 +6274,7 @@ SizedBox(8,0),
                               return s.empty() ? "Unsaved" : s;
                             })
                            ->setFontSize(9)
-                           ->setTextColor(RGB(55, 60, 85))})
+                           ->setTextColor(Color::fromRGB(55, 60, 85))})
                       ->setSpacing(0))
             ->setBackgroundColor(kBg)
             ->setPaddingAll(10, 3, 10, 3)
@@ -6291,16 +6288,15 @@ SizedBox(8,0),
 // =============================================================================
 // §8  ENTRY POINT
 // =============================================================================
-int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int) {
-  FluxUI app(hInst);
-  app.build([&]() {
-    return FluxApp("Logic Sim", BuildComponent<LogicSimApp>(),
-                   AppTheme::dark());
-  });
-  int screenWidth = GetSystemMetrics(SM_CXSCREEN);
-  int screenHeight = GetSystemMetrics(SM_CYSCREEN);
-
-  app.createWindow("FluxUI - Paint", screenWidth, screenHeight);
-  ShowWindow(GetActiveWindow(), SW_MAXIMIZE);
-  return app.run();
+WidgetPtr createApp(FluxUI* app) {
+    return FluxApp(
+        "FluxUI - Paint",
+        BuildComponent<MyApp>(),
+        AppTheme::dark(),
+        false,   // debugShowWidgetBounds
+        900,     // width
+        700,     // height
+        false,   // maximize
+        true     // fullscreen
+    );
 }

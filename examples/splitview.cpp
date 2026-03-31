@@ -1,7 +1,7 @@
 #include "flux/flux.hpp"
 
 
-class VerticalSplitExample : public Component {
+class MyApp : public Component {
 public:
   WidgetPtr build() override {
     return Scaffold(
@@ -46,13 +46,15 @@ public:
   }
 };
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
-  FluxUI app(hInstance);
-  app.build([&]() {
-    return FluxApp("Vertical SplitView Demo",
-                   BuildComponent<VerticalSplitExample>(),
-                   AppTheme::light());
-  });
-  app.createWindow("FluxUI - Vertical SplitView Demo", 900, 600);
-  return app.run();
+WidgetPtr createApp(FluxUI* app) {
+    return FluxApp(
+        "FluxUI - Paint",
+        BuildComponent<MyApp>(),
+        AppTheme::dark(),
+        false,   // debugShowWidgetBounds
+        900,     // width
+        700,     // height
+        false,   // maximize
+        true     // fullscreen
+    );
 }

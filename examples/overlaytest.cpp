@@ -5,7 +5,7 @@
 // OVERLAY TEST  —  Tooltip, Dropdown, ContextMenu, Dialog
 // =============================================================================
 
-class OverlayTestApp : public Component {
+class MyApp : public Component {
 
   State<std::string> dropdownVal;
   State<int> dropdownIdx;
@@ -33,7 +33,7 @@ class OverlayTestApp : public Component {
   }
 
 public:
-  OverlayTestApp()
+  MyApp()
       : dropdownVal("", context), dropdownIdx(-1, context),
         log("Interact with the widgets below...", context),
         dialogInput("", context), dialogResult("(none)", context) {}
@@ -551,12 +551,15 @@ public:
 // ENTRY POINT
 // =============================================================================
 
-int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int) {
-  FluxUI app(hInst);
-  app.build([&]() {
-    return FluxApp("Overlay Test", BuildComponent<OverlayTestApp>(),
-                   AppTheme::light());
-  });
-  app.createWindow("Overlay Test", 1000, 820);
-  return app.run();
+WidgetPtr createApp(FluxUI* app) {
+    return FluxApp(
+        "FluxUI - Paint",
+        BuildComponent<MyApp>(),
+        AppTheme::dark(),
+        false,   // debugShowWidgetBounds
+        900,     // width
+        700,     // height
+        false,   // maximize
+        true     // fullscreen
+    );
 }

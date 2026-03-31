@@ -1,11 +1,11 @@
 #include "flux/flux.hpp"
 
 
-class TabViewExample : public Component {
+class MyApp : public Component {
   State<int> activeTab;
 
 public:
-  TabViewExample() : activeTab(0, context) {}
+  MyApp() : activeTab(0, context) {}
 
   WidgetPtr build() override {
     return Scaffold(
@@ -105,13 +105,15 @@ public:
   }
 };
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
-  FluxUI app(hInstance);
-  app.build([&]() {
-    return FluxApp("TabView Demo",
-                   BuildComponent<TabViewExample>(),
-                   AppTheme::light());
-  });
-  app.createWindow("FluxUI - TabView Demo", 800, 520);
-  return app.run();
+WidgetPtr createApp(FluxUI* app) {
+    return FluxApp(
+        "FluxUI - Paint",
+        BuildComponent<MyApp>(),
+        AppTheme::dark(),
+        false,   // debugShowWidgetBounds
+        900,     // width
+        700,     // height
+        false,   // maximize
+        true     // fullscreen
+    );
 }

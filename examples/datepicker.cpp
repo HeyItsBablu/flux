@@ -1,12 +1,12 @@
 #include "flux/flux.hpp"
 
 
-class DatePickerExample : public Component {
+class MyApp : public Component {
   State<FluxDate> checkin;
   State<FluxDate> checkout;
 
 public:
-  DatePickerExample()
+  MyApp()
       : checkin(FluxDate{}, context),
         checkout(FluxDate{}, context) {}
 
@@ -75,13 +75,17 @@ public:
   }
 };
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
-  FluxUI app(hInstance);
-  app.build([&]() {
-    return FluxApp("DatePicker Demo",
-                   BuildComponent<DatePickerExample>(),
-                   AppTheme::light());
-  });
-  app.createWindow("FluxUI - DatePicker Demo", 800, 560);
-  return app.run();
+
+
+WidgetPtr createApp(FluxUI* app) {
+    return FluxApp(
+        "FluxUI - Paint",
+        BuildComponent<MyApp>(),
+        AppTheme::dark(),
+        false,   // debugShowWidgetBounds
+        900,     // width
+        700,     // height
+        false,   // maximize
+        true     // fullscreen
+    );
 }

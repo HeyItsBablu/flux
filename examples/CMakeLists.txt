@@ -7,9 +7,17 @@ FetchContent_MakeAvailable(stb)
 
 # ── Helper function ───────────────────────────────────────────────────────────
 function(add_flux_example NAME)
-    add_executable(${NAME} WIN32 ${NAME}.cpp)
+    add_executable(${NAME} WIN32
+        ${NAME}.cpp
+        ${CMAKE_SOURCE_DIR}/src/main_win32.cpp
+    )
     target_link_libraries(${NAME} PRIVATE flux::flux)
     target_link_options(${NAME} PRIVATE /SUBSYSTEM:WINDOWS)
+
+    # So main_win32.cpp can find main_app.hpp
+    target_include_directories(${NAME} PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+    )
 
     add_custom_command(TARGET ${NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
@@ -18,9 +26,8 @@ function(add_flux_example NAME)
         COMMENT "Copying screenshots -> output dir for ${NAME}"
     )
 endfunction()
-
 # ── Examples ──────────────────────────────────────────────────────────────────
-add_flux_example(graphtest)
+add_flux_example(overlaytest)
 
 
 # ── image_editor needs stb ────────────────────────────────────────────────────

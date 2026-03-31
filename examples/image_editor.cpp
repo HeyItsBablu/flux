@@ -1085,14 +1085,15 @@ private:
 // §6  ENTRY POINT
 // =============================================================================
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
-  FluxUI app(hInstance);
-  app.build([&]() {
-    return FluxApp("Light Room", BuildComponent<ImageEditorApp>(), AppTheme::dark());
-  });
-  int screenWidth  = GetSystemMetrics(SM_CXSCREEN);
-  int screenHeight = GetSystemMetrics(SM_CYSCREEN);
-  app.createWindow("FluxUI - Light Room", screenWidth, screenHeight);
-  ShowWindow(GetActiveWindow(), SW_MAXIMIZE);
-  return app.run();
+WidgetPtr createApp(FluxUI* app) {
+    return FluxApp(
+        "FluxUI - Paint",
+        BuildComponent<ImageEditorApp>(),
+        AppTheme::dark(),
+        false,   // debugShowWidgetBounds
+        900,     // width
+        700,     // height
+        false,   // maximize
+        true     // fullscreen
+    );
 }
