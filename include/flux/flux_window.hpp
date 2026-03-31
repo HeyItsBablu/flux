@@ -6,6 +6,7 @@
 
 #include <functional>
 #include <string>
+#include <unordered_map> // ← MISSING: needed for sdlTimerMap on Linux
 
 struct WindowCallbacks {
   std::function<void(GraphicsContext &ctx, int width, int height)> onPaint;
@@ -21,7 +22,6 @@ struct WindowCallbacks {
   std::function<bool(int keyCode)> onKeyDown;
   std::function<bool(wchar_t ch)> onChar;
 
-  // TimerID is already a cross-platform alias defined in flux_platform.hpp
   std::function<void(TimerID timerId)> onTimer;
 };
 
@@ -42,14 +42,28 @@ public:
 
   void invalidate();
   void invalidateRect(int x, int y, int w, int h);
-  // Use cross-platform TimerID alias instead of UINT
   void setTimer(TimerID id, int ms);
   void killTimer(TimerID id);
 
-  NativeWindow handle() const { return hwnd; }
+  NativeWindow handle() const {
+#ifdef _WIN32
+    return hwnd;
+#else
+    return nativeHandle;
+#endif
+  }
+
   int clientWidth() const { return cachedWidth; }
   int clientHeight() const { return cachedHeight; }
-  bool valid() const { return hwnd != nullptr; }
+
+
+  bool valid() const {
+#ifdef _WIN32
+    return hwnd != nullptr;
+#else
+    return nativeHandle != nullptr;
+#endif
+  }
 
   void setClipboardText(const std::string &text);
   std::string getClipboardText();
@@ -76,33 +90,41 @@ public:
   GraphicsContext getMeasureContext() const;
 
 private:
-  NativeWindow hwnd = nullptr;
+  // ── Shared ───────────────────────────────────────────────────────────────
   AppInstance hInstance = nullptr;
   int cachedWidth = 0;
   int cachedHeight = 0;
 
+  void updateClientSize();
+
 #ifdef _WIN32
+  // ── Win32-only ────────────────────────────────────────────────────────────
+  NativeWindow hwnd = nullptr; // HWND
   BackBuffer backBuffer;
   ULONG_PTR gdiplusToken = 0;
 
   void shutdownGdiplus();
   static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam,
                                      LPARAM lParam);
-#endif
-#ifndef _WIN32
+
+#else
+  // ── Linux-only ────────────────────────────────────────────────────────────
+  // ← FIX: CairoState is defined in flux_window_linux.cpp — forward-declare
+  //   it here so the header compiles without pulling in Cairo headers.
+  struct CairoState;
+
   SDL_Window *nativeHandle = nullptr;
   bool running = false;
   bool mouseCapture = false;
   bool dirty = false;
   CairoState *cairoState = nullptr;
+
   std::unordered_map<TimerID, SDL_TimerID> sdlTimerMap;
 
-  void handleSDLEvent(const SDL_Event &);
-  NativeWindow handle() const;
-
+  void handleSDLEvent(const SDL_Event &e);
+  // ← FIX: removed the duplicate `NativeWindow handle() const` that was
+  //   here — it conflicted with the single public declaration above.
 #endif
-
-  void updateClientSize();
 };
 
 #endif // FLUX_WINDOW_HPP

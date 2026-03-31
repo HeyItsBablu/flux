@@ -432,8 +432,6 @@ GraphicsContext PlatformWindow::getMeasureContext() const {
 // handle() — NativeWindow is SDL_Window* on Linux
 // ============================================================================
 
-NativeWindow PlatformWindow::handle() const {
-    return nativeHandle;
-}
+
 
 #endif // __linux__
