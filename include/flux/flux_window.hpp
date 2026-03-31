@@ -56,7 +56,6 @@ public:
   int clientWidth() const { return cachedWidth; }
   int clientHeight() const { return cachedHeight; }
 
-
   bool valid() const {
 #ifdef _WIN32
     return hwnd != nullptr;
@@ -88,6 +87,14 @@ public:
 
   void startupGdiplus();
   GraphicsContext getMeasureContext() const;
+
+  bool isMouseCaptured() const {
+#ifdef _WIN32
+    return GetCapture() == hwnd;
+#else
+    return mouseCapture;
+#endif
+  }
 
 private:
   // ── Shared ───────────────────────────────────────────────────────────────

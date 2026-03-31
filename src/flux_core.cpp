@@ -206,37 +206,41 @@ void FluxUI::wireCallbacks() {
     return handled;
   };
 
-  window.callbacks.onMouseUp = [this](int x, int y) -> bool {
-    if (!root)
-      return false;
-    bool hasCaptured = (GetCapture() == window.handle());
+window.callbacks.onMouseUp = [this](int x, int y) -> bool {
+    if (!root) return false;
+
+    // ← Replace GetCapture() == window.handle() with the cross-platform flag
+    bool hasCaptured = window.isMouseCaptured();
+
     if (hasCaptured) {
-      if (broadcastMouseEvent(root.get(), x, y, [](Widget *w, int mx, int my) {
-            return w->handleMouseUp(mx, my);
-          }))
-        return true;
+        if (broadcastMouseEvent(root.get(), x, y, [](Widget *w, int mx, int my) {
+                return w->handleMouseUp(mx, my);
+            }))
+            return true;
     }
     return findAndHandleMouseEvent(
         root.get(), x, y, [x, y](Widget *w) { return w->handleMouseUp(x, y); });
-  };
+};
 
-  window.callbacks.onMouseMove = [this](int x, int y) -> bool {
-    if (!root)
-      return false;
-    bool hasCaptured = (GetCapture() == window.handle());
+window.callbacks.onMouseMove = [this](int x, int y) -> bool {
+    if (!root) return false;
+
+    // ← Same fix here
+    bool hasCaptured = window.isMouseCaptured();
+
     if (hasCaptured) {
-      if (broadcastMouseEvent(root.get(), x, y, [](Widget *w, int mx, int my) {
-            return w->handleMouseMove(mx, my);
-          }))
-        return true;
+        if (broadcastMouseEvent(root.get(), x, y, [](Widget *w, int mx, int my) {
+                return w->handleMouseMove(mx, my);
+            }))
+            return true;
     }
     bool overlay = handleOverlayMouseMove(x, y);
-    bool hover = updateHoverStates(root.get(), x, y);
-    bool custom = findAndHandleMouseEvent(root.get(), x, y, [x, y](Widget *w) {
-      return w->handleMouseMove(x, y);
+    bool hover   = updateHoverStates(root.get(), x, y);
+    bool custom  = findAndHandleMouseEvent(root.get(), x, y, [x, y](Widget *w) {
+        return w->handleMouseMove(x, y);
     });
     return overlay || hover || custom;
-  };
+};
 
   window.callbacks.onMouseLeave = [this]() {
     if (root)
@@ -359,7 +363,7 @@ void FluxUI::rebuild() {
         wireScaffoldToWidgets(scaffold, root.get());
 
     if (window.valid()) {
-        MeasureContext mc(window.handle());
+        auto mc = getMeasureContext();
         LayoutEngine::computeLayout(mc.ctx, root.get(),
                                     window.clientWidth(),
                                     window.clientHeight(), fontCache);
@@ -481,9 +485,13 @@ void FluxUI::captureMouseInput() { window.captureMouseInput(); }
 void FluxUI::releaseMouseInput() { window.releaseMouseInput(); }
 
 MeasureContext FluxUI::getMeasureContext() {
+#ifdef _WIN32
     return MeasureContext(window.handle());
+#else
+    GraphicsContext gc = window.getMeasureContext();
+    return MeasureContext(gc.cr, gc.width, gc.height);
+#endif
 }
-
 
 PlatformWindow::ScreenPoint FluxUI::clientToScreen(int cx, int cy) const {
     return window.clientToScreen(cx, cy);
