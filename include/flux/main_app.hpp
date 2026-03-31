@@ -1,13 +1,22 @@
+// app.hpp
 #pragma once
+
 #include "flux/flux.hpp"
 
+
+
 struct AppConfig {
-    const char *title      = "FluxUI App";
+    const char* title      = "FluxUI App";
     int         width      = 900;
     int         height     = 700;
     bool        maximize   = false;
-    bool        fullscreen = true;  // uses screen resolution
+    bool        fullscreen = false;
 };
 
-AppConfig  appConfig();
-WidgetPtr  createApp(FluxUI *app);
+// ── Implement both of these in your app.cpp ───────────────────────────────────
+
+// Returns window configuration read by main() before createWindow() is called.
+AppConfig appConfig();
+
+// Builds and returns the root widget tree.
+WidgetPtr createApp(FluxUI* app);

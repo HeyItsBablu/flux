@@ -510,7 +510,7 @@ WidgetPtr createApp(FluxUI* app) {
     return FluxApp(
         "FluxUI - Paint",
         BuildComponent<MyApp>(),
-        AppTheme::dark(),
+        AppTheme::light(),
         false,   // debugShowWidgetBounds
         900,     // width
         700,     // height

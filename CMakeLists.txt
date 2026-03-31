@@ -1,19 +1,33 @@
 cmake_minimum_required(VERSION 3.21)
 project(flux VERSION 0.1.0 LANGUAGES CXX C)
 
-# ── Options ──────────────────────────────────────────────────────────────────
+# ============================================================================
+# Options
+# ============================================================================
+
 option(FLUX_BUILD_EXAMPLES "Build example applications" OFF)
 option(FLUX_BUILD_TESTS    "Build tests"                OFF)
 
-if(NOT MSVC)
-    message(FATAL_ERROR "FluxUI requires MSVC.")
+# ============================================================================
+# Compiler guard
+# ============================================================================
+
+if(NOT MSVC AND NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    message(FATAL_ERROR "FluxUI requires MSVC (Windows) or GCC/Clang (Linux).")
 endif()
+
+# ============================================================================
+# C++ standard
+# ============================================================================
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# ── FetchContent ─────────────────────────────────────────────────────────────
+# ============================================================================
+# FetchContent dependencies
+# ============================================================================
+
 include(FetchContent)
 
 FetchContent_Declare(Clipper2
@@ -23,42 +37,108 @@ FetchContent_Declare(Clipper2
 )
 FetchContent_MakeAvailable(Clipper2)
 
-# ── GLAD ─────────────────────────────────────────────────────────────────────
-add_library(glad STATIC external/glad/src/glad.c)
-set_source_files_properties(external/glad/src/glad.c PROPERTIES LANGUAGE C)
-target_include_directories(glad PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/glad/include>
-    $<INSTALL_INTERFACE:include>
-)
+# ============================================================================
+# GLAD  (Win32 / OpenGL path only)
+# On Linux we use Cairo/SDL2 — no OpenGL loader needed.
+# ============================================================================
 
-# ── FluxUI library ───────────────────────────────────────────────────────────
+if(WIN32)
+    add_library(glad STATIC external/glad/src/glad.c)
+    set_source_files_properties(external/glad/src/glad.c PROPERTIES LANGUAGE C)
+    target_include_directories(glad PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/glad/include>
+        $<INSTALL_INTERFACE:include>
+    )
+endif()
+
+# ============================================================================
+# Linux platform dependencies  (SDL2 + Cairo + Pango)
+# ============================================================================
+
+if(UNIX AND NOT APPLE)
+    find_package(SDL2 REQUIRED)
+
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(CAIRO      REQUIRED cairo)
+    pkg_check_modules(PANGOCAIRO REQUIRED pangocairo)
+endif()
+
+# ============================================================================
+# FluxUI library sources
+# ============================================================================
+
 file(GLOB_RECURSE FLUX_SOURCES CONFIGURE_DEPENDS src/*.cpp)
 
 add_library(flux STATIC ${FLUX_SOURCES})
 add_library(flux::flux ALIAS flux)
+
+# ── Include directories ───────────────────────────────────────────────────────
 
 target_include_directories(flux
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
     PRIVATE
-        external/glad/include
+        $<$<BOOL:${WIN32}>:${CMAKE_CURRENT_SOURCE_DIR}/external/glad/include>
+        $<$<BOOL:${UNIX}>:${SDL2_INCLUDE_DIRS}>
+        $<$<BOOL:${UNIX}>:${CAIRO_INCLUDE_DIRS}>
+        $<$<BOOL:${UNIX}>:${PANGOCAIRO_INCLUDE_DIRS}>
 )
 
-target_link_libraries(flux PUBLIC
-    glad
-    Clipper2
-    Msimg32
-    Gdiplus
-    opengl32
-    glu32
+# ── Link libraries ────────────────────────────────────────────────────────────
+
+if(WIN32)
+    target_link_libraries(flux PUBLIC
+        glad
+        Clipper2
+        Msimg32
+        Gdiplus
+        opengl32
+        glu32
+    )
+elseif(UNIX AND NOT APPLE)
+    target_link_libraries(flux PUBLIC
+        Clipper2
+        ${SDL2_LIBRARIES}
+        ${CAIRO_LIBRARIES}
+        ${PANGOCAIRO_LIBRARIES}
+    )
+    # Extra compile/link flags from pkg-config (e.g. -pthread)
+    target_compile_options(flux PRIVATE
+        ${CAIRO_CFLAGS_OTHER}
+        ${PANGOCAIRO_CFLAGS_OTHER}
+    )
+endif()
+
+# ── Compiler options ──────────────────────────────────────────────────────────
+
+if(MSVC)
+    target_compile_options(flux PRIVATE
+        /W4
+        /permissive-
+        /Zc:__cplusplus
+        /EHsc
+    )
+else()
+    target_compile_options(flux PRIVATE
+        -Wall
+        -Wextra
+        -Wpedantic
+        -fexceptions
+    )
+endif()
+
+# ── Compile definitions ───────────────────────────────────────────────────────
+
+target_compile_definitions(flux PUBLIC
+    $<$<CONFIG:Debug>:FLUX_DEBUG>
+    $<$<BOOL:${WIN32}>:NOMINMAX>   # guard: only relevant on Win32
 )
 
-target_compile_options(flux PRIVATE /W4 /permissive- /Zc:__cplusplus /EHsc)
-target_compile_definitions(flux PUBLIC $<$<CONFIG:Debug>:FLUX_DEBUG>)
-add_compile_definitions(NOMINMAX)
+# ============================================================================
+# Optional subdirectories
+# ============================================================================
 
-# ── Optional subdirectories ───────────────────────────────────────────────────
 if(FLUX_BUILD_EXAMPLES)
     add_subdirectory(examples)
 endif()
@@ -68,11 +148,20 @@ if(FLUX_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
-# ── Install rules ─────────────────────────────────────────────────────────────
+# ============================================================================
+# Install rules
+# ============================================================================
+
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
-install(TARGETS flux glad
+# Collect installable targets — glad only exists on Win32
+set(FLUX_INSTALL_TARGETS flux)
+if(WIN32)
+    list(APPEND FLUX_INSTALL_TARGETS glad)
+endif()
+
+install(TARGETS ${FLUX_INSTALL_TARGETS}
     EXPORT  fluxTargets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )

@@ -1,5 +1,5 @@
 #include "flux/flux.hpp"
-
+#ifdef _WIN32
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
 #ifdef FLUX_DEBUG
@@ -30,3 +30,5 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
 
     return app.run();
 }
+
+#endif // _WIN32
