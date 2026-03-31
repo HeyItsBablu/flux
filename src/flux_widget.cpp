@@ -10,19 +10,14 @@ void Widget::measureText(GraphicsContext &ctx, FontCache &fontCache) {
         return;
     }
 
-    NativeFont hFont    = fontCache.getFont(fontFamily, fontSize, fontWeight);
-    HFONT      hOldFont = (HFONT)SelectObject(ctx.hdc, hFont);
+    NativeFont font = fontCache.getFont(fontFamily, fontSize, fontWeight);
+    Painter p(ctx);
 
-    std::wstring wtext = toWideString(text);
+    int tw = 0, th = 0;
+    p.measureText(toWideString(text), font, tw, th);
 
-    SIZE size = {};
-    GetTextExtentPoint32W(ctx.hdc, wtext.c_str(),
-                          (int)wtext.size() - 1, &size);
-
-    if (autoWidth)  width  = size.cx + paddingLeft + paddingRight;
-    if (autoHeight) height = size.cy + paddingTop  + paddingBottom;
-
-    SelectObject(ctx.hdc, hOldFont);
+    if (autoWidth)  width  = tw + paddingLeft + paddingRight;
+    if (autoHeight) height = th + paddingTop  + paddingBottom;
 }
 
 // ============================================================================
@@ -101,7 +96,9 @@ void Widget::render(GraphicsContext &ctx, FontCache &fontCache) {
     for (auto &child : children)
         child->render(ctx, fontCache);
 
-    FluxOverflow::render(ctx.hdc, overflow, x, y, width, height);
+    NativeFont font = fontCache.getFont(fontFamily, fontSize, fontWeight);
+    FluxOverflow::render(painter, font, overflow, x, y, width, height);
+
     needsPaint = false;
 }
 
