@@ -3,10 +3,16 @@
 #ifdef _WIN32
 #include <windowsx.h>
 
+GraphicsContext PlatformWindow::getMeasureContext() const {
+    // On Win32, GetDC(nullptr) gives a screen DC — valid before any window exists
+    return GraphicsContext(GetDC(hwnd ? hwnd : nullptr));
+}
 
 void PlatformWindow::startupGdiplus() {
+    if (gdiplusToken != 0)
+        return;   // already initialized, no-op
     Gdiplus::GdiplusStartupInput input;
-    Gdiplus::GdiplusStartup(&gdiplusToken, &input, NULL);
+    Gdiplus::GdiplusStartup(&gdiplusToken, &input, nullptr);
 }
 
 void PlatformWindow::shutdownGdiplus() {

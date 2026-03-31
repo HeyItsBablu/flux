@@ -1,14 +1,13 @@
 #ifndef FLUX_WINDOW_HPP
 #define FLUX_WINDOW_HPP
 
-#include "flux_platform.hpp"
 #include "flux_font.hpp"
+#include "flux_platform.hpp"
 
 #include <functional>
 #include <string>
 
 // flux_window.hpp
-
 
 // ============================================================================
 // PLATFORM WINDOW — owns the OS window, message loop, and back-buffer
@@ -93,8 +92,11 @@ public:
   ClientSize getClientSize() const;
 
   void setResizeCursorH();
-void setResizeCursorV();
-void setDefaultCursor();
+  void setResizeCursorV();
+  void setDefaultCursor();
+
+  void startupGdiplus();
+  GraphicsContext getMeasureContext() const;
 
 private:
 #ifdef _WIN32
@@ -105,7 +107,6 @@ private:
   int cachedHeight = 0;
   ULONG_PTR gdiplusToken = 0;
 
-  void startupGdiplus();
   void shutdownGdiplus();
   static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam,
                                      LPARAM lParam);

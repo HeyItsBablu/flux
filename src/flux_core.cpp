@@ -338,6 +338,7 @@ void FluxUI::clearInterval(TimerID id) {
 // ============================================================================
 
 void FluxUI::build(std::function<WidgetPtr()> buildFunc) {
+  window.startupGdiplus();
     builder = buildFunc;
     rebuild();
 }
@@ -377,16 +378,12 @@ void FluxUI::updateWidget(Widget *widget) {
     int oldWidth  = widget->width;
     int oldHeight = widget->height;
 
-    HDC hdc = GetDC(window.handle());
-    GraphicsContext ctx(hdc);
-    widget->measureText(ctx, fontCache);
-    widget->width  += widget->paddingLeft + widget->paddingRight;
-    widget->height += widget->paddingTop  + widget->paddingBottom;
-    ReleaseDC(window.handle(), hdc);
+    auto mc = getMeasureContext();    // ← already exists on FluxUI
+    widget->measureText(mc.ctx, fontCache);
+    widget->width  += widget->paddingLeft  + widget->paddingRight;
+    widget->height += widget->paddingTop   + widget->paddingBottom;
 
-    bool sizeChanged = (oldWidth != widget->width || oldHeight != widget->height);
-
-    if (sizeChanged)
+    if (oldWidth != widget->width || oldHeight != widget->height)
         partialRebuild(widget);
     else
         invalidateWidget(widget);
@@ -403,33 +400,34 @@ void FluxUI::invalidateWidget(Widget *widget) {
 }
 
 void FluxUI::partialRebuild(Widget *widget) {
-  if (!widget)
-    return;
+    if (!widget || !window.valid())
+        return;
 
-  Widget *boundary = findLayoutBoundary(widget);
-  Widget *current = widget;
-  while (current && current != boundary) {
-    current->markNeedsLayout();
-    current = current->parent;
-  }
-  boundary->markNeedsLayout();
+    Widget *boundary = findLayoutBoundary(widget);
+    Widget *current  = widget;
+    while (current && current != boundary) {
+        current->markNeedsLayout();
+        current = current->parent;
+    }
+    boundary->markNeedsLayout();
 
-  HDC hdc = GetDC(window.handle());
-  GraphicsContext ctx(hdc);
+    auto mc = getMeasureContext();    // ← replaces GetDC/ReleaseDC block
 
-  if (boundary == root.get()) {
-    LayoutEngine::computeLayout(ctx, root.get(), window.clientWidth(),
-                                window.clientHeight(), fontCache);
-    LayoutEngine::positionWidget(root.get(), 0, 0);
-  } else {
-    LayoutEngine::computeLayout(ctx, boundary, boundary->width,
-                                boundary->height, fontCache);
-    LayoutEngine::positionWidget(boundary, boundary->x, boundary->y);
-  }
+    if (boundary == root.get()) {
+        LayoutEngine::computeLayout(mc.ctx, root.get(),
+                                    window.clientWidth(),
+                                    window.clientHeight(), fontCache);
+        LayoutEngine::positionWidget(root.get(), 0, 0);
+    } else {
+        LayoutEngine::computeLayout(mc.ctx, boundary,
+                                    boundary->width, boundary->height,
+                                    fontCache);
+        LayoutEngine::positionWidget(boundary, boundary->x, boundary->y);
+    }
+    // MeasureContext destructor calls ReleaseDC automatically
 
-  ReleaseDC(window.handle(), hdc);
-  window.invalidateRect(boundary->x, boundary->y, boundary->width,
-                        boundary->height);
+    window.invalidateRect(boundary->x, boundary->y,
+                          boundary->width, boundary->height);
 }
 
 
@@ -439,27 +437,22 @@ void FluxUI::partialRebuild(Widget *widget) {
 // ============================================================================
 
 NativeWindow FluxUI::createWindow(const std::string &title, int w, int h) {
-  wireCallbacks();
+    wireCallbacks();
+    window.create(title, w, h, hInstance, &window);
 
-  // Pass `this` as userData so WindowProc can retrieve FluxUI*
-  // But now WindowProc retrieves PlatformWindow* — FluxUI* is recovered
-  // via the callbacks closure, so userData is the PlatformWindow itself
-  window.create(title, w, h, hInstance, &window);
+    if (root) {
+        auto mc = getMeasureContext();    // ← replaces GetDC/ReleaseDC block
+        LayoutEngine::computeLayout(mc.ctx, root.get(),
+                                    window.clientWidth(),
+                                    window.clientHeight(), fontCache);
+        LayoutEngine::positionWidget(root.get(), 0, 0);
+    }
 
-  if (root) {
-    HDC hdc = GetDC(window.handle());
-    GraphicsContext ctx(hdc);
-    LayoutEngine::computeLayout(ctx, root.get(), window.clientWidth(),
-                                window.clientHeight(), fontCache);
-    LayoutEngine::positionWidget(root.get(), 0, 0);
-    ReleaseDC(window.handle(), hdc);
-  }
+    for (auto &[id, fn] : pendingTimers)
+        fn();
+    pendingTimers.clear();
 
-  for (auto &[id, fn] : pendingTimers)
-    fn();
-  pendingTimers.clear();
-
-  return window.handle();
+    return window.handle();
 }
 
 int FluxUI::run() { return window.run(); }

@@ -27,7 +27,7 @@ function(add_flux_example NAME)
     )
 endfunction()
 # ── Examples ──────────────────────────────────────────────────────────────────
-add_flux_example(overlaytest)
+add_flux_example(paintfull)
 
 
 # ── image_editor needs stb ────────────────────────────────────────────────────
