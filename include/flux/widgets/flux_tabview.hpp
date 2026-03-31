@@ -1,9 +1,9 @@
 #ifndef FLUX_TAB_VIEW_HPP
 #define FLUX_TAB_VIEW_HPP
 
-#include "flux_core.hpp"
+#include "../flux_core.hpp"
 #include "flux_layout.hpp"
-#include "flux_state.hpp"
+#include "../flux_state.hpp"
 
 // ============================================================================
 // TAB VIEW WIDGET

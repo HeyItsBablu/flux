@@ -1,7 +1,7 @@
 #ifndef FLUX_MENU_BAR_HPP
 #define FLUX_MENU_BAR_HPP
 
-#include "flux_core.hpp"
+#include "../flux_core.hpp"
 #include "flux_overlays.hpp"
 
 // ============================================================================

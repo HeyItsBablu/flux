@@ -1,9 +1,9 @@
 #ifndef FLUX_COLORPICKER_HPP
 #define FLUX_COLORPICKER_HPP
 
-#include "flux_core.hpp"
+#include "../flux_core.hpp"
 #include "flux_input.hpp"
-#include "flux_state.hpp"
+#include "../flux_state.hpp"
 #include <cmath>
 #include <iomanip>
 #include <sstream>

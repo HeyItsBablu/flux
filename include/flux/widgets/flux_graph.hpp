@@ -2,9 +2,9 @@
 #ifndef FLUX_GRAPH_HPP
 #define FLUX_GRAPH_HPP
 
-#include "flux_core.hpp"
-#include "flux_state.hpp"
-#include "flux_widget.hpp"
+#include "../flux_core.hpp"
+#include "../flux_state.hpp"
+#include "../flux_widget.hpp"
 
 #include <algorithm>
 #include <cmath>

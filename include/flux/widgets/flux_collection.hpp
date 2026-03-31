@@ -1,9 +1,9 @@
 #ifndef FLUX_COLLECTION_HPP
 #define FLUX_COLLECTION_HPP
 
-#include "flux_core.hpp"
+#include "../flux_core.hpp"
 #include "flux_reactive_item.hpp"
-#include "flux_state.hpp"
+#include "../flux_state.hpp"
 
 #include <functional>
 #include <unordered_map>

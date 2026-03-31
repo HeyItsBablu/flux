@@ -1,9 +1,9 @@
 #ifndef FLUX_INPUT_HPP
 #define FLUX_INPUT_HPP
 
-#include "flux_core.hpp"
+#include "../flux_core.hpp"
 
-#include "flux_state.hpp"
+#include "../flux_state.hpp"
 #include <algorithm>
 #include <iostream>
 

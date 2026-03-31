@@ -22,8 +22,8 @@
 //    lShift) ready to be evaluated per-pixel in a shader or CPU path
 // ============================================================================
 
-#include "flux_core.hpp"
-#include "flux_state.hpp"
+#include "../flux_core.hpp"
+#include "../flux_state.hpp"
 #include <algorithm>
 #include <array>
 #include <cassert>

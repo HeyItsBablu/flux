@@ -1,7 +1,7 @@
 #ifndef FLUX_CONDITIONAL_HPP
 #define FLUX_CONDITIONAL_HPP
 
-#include "flux_state.hpp"
+#include "../flux_state.hpp"
 
 #include <functional>
 #include <map>

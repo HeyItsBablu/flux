@@ -1,7 +1,7 @@
 #ifndef FLUX_IMAGE_HPP
 #define FLUX_IMAGE_HPP
 
-#include "flux_core.hpp"
+#include "../flux_core.hpp"
 #include <gdiplus.h>
 #include <memory>
 #include <string>

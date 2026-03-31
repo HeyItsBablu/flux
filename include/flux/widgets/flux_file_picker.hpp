@@ -1,9 +1,9 @@
 #ifndef FLUX_FILE_PICKER_HPP
 #define FLUX_FILE_PICKER_HPP
 
-#include "flux_core.hpp"
+#include "../flux_core.hpp"
 #include "flux_layout.hpp"
-#include "flux_state.hpp"
+#include "../flux_state.hpp"
 
 #include <commdlg.h>
 #include <shlobj.h>

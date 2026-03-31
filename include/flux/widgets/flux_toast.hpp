@@ -1,9 +1,9 @@
 #ifndef FLUX_TOAST_HPP
 #define FLUX_TOAST_HPP
 
-#include "flux_app.hpp"
-#include "flux_core.hpp"
-#include "flux_overlay_host.hpp"
+#include "../flux_app.hpp"
+#include "../flux_core.hpp"
+#include "../flux_overlay_host.hpp"
 
 #include <chrono>
 #include <deque>

@@ -21,8 +21,8 @@
 //  • setOnCurveChanged callback for shader integration
 // ============================================================================
 
-#include "flux_core.hpp"
-#include "flux_state.hpp"
+#include "../flux_core.hpp"
+#include "../flux_state.hpp"
 #include <algorithm>
 #include <array>
 #include <cassert>

@@ -1,9 +1,9 @@
 #ifndef FLUX_LAYOUT_HPP
 #define FLUX_LAYOUT_HPP
 
-#include "flux_core.hpp"
+#include "../flux_core.hpp"
 #include "flux_display.hpp"
-#include "flux_state.hpp"
+#include "../flux_state.hpp"
 
 #include <iostream>
 

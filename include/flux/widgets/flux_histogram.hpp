@@ -1,8 +1,8 @@
 #ifndef FLUX_HISTOGRAM_HPP
 #define FLUX_HISTOGRAM_HPP
 
-#include "flux_core.hpp"
-#include "flux_state.hpp"
+#include "../flux_core.hpp"
+#include "../flux_state.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>

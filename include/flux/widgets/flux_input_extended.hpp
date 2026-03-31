@@ -3,8 +3,8 @@
 
 #include "flux_collection.hpp" // for ScrollbarState
 
-#include "flux_core.hpp"
-#include "flux_state.hpp"
+#include "../flux_core.hpp"
+#include "../flux_state.hpp"
 #include <algorithm>
 #include <cmath>
 #include <iomanip>

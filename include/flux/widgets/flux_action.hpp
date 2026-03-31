@@ -3,7 +3,7 @@
 
 // v3 — hooks into Widget's existing virtual mouse methods.
 // No InputDispatcher, no WndProc edits required.
-#include "flux_core.hpp"
+#include "../flux_core.hpp"
 #include <chrono>
 // ============================================================================
 // HANDLER TYPES
