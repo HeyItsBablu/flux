@@ -84,11 +84,11 @@ public:
   std::string placeholder = "Select a date...";
   std::string dateFormat = "%d / %m / %Y";
 
-  COLORREF fieldBgColor = RGB(255, 255, 255);
-  COLORREF fieldBorderColor = RGB(180, 180, 180);
-  COLORREF fieldFocusBorder = RGB(33, 150, 243);
-  COLORREF fieldTextColor = RGB(30, 30, 30);
-  COLORREF placeholderColor = RGB(160, 160, 160);
+  Color fieldBgColor = Color::fromRGB(255, 255, 255);
+  Color fieldBorderColor = Color::fromRGB(180, 180, 180);
+  Color fieldFocusBorder = Color::fromRGB(33, 150, 243);
+  Color fieldTextColor = Color::fromRGB(30, 30, 30);
+  Color placeholderColor = Color::fromRGB(160, 160, 160);
   int fieldFontSize = 13;
 
   // ── Appearance — calendar popup ───────────────────────────────────────────
@@ -102,21 +102,21 @@ public:
   int calBorderRadius = 8;
   int shadowOffset = 3;
 
-  COLORREF calBgColor = RGB(255, 255, 255);
-  COLORREF calBorderColor = RGB(200, 200, 200);
-  COLORREF headerBgColor = RGB(33, 150, 243);
-  COLORREF headerTextColor = RGB(255, 255, 255);
-  COLORREF weekdayTextColor = RGB(120, 120, 120);
-  COLORREF dayTextColor = RGB(30, 30, 30);
-  COLORREF dayHoverBg = RGB(232, 245, 255);
-  COLORREF daySelectedBg = RGB(33, 150, 243);
-  COLORREF daySelectedText = RGB(255, 255, 255);
-  COLORREF todayBorderColor = RGB(33, 150, 243);
-  COLORREF otherMonthText = RGB(190, 190, 190);
-  COLORREF navArrowColor = RGB(255, 255, 255);
-  COLORREF yearHoverBg = RGB(232, 245, 255);
-  COLORREF yearSelectedBg = RGB(33, 150, 243);
-  COLORREF yearSelectedText = RGB(255, 255, 255);
+  Color calBgColor = Color::fromRGB(255, 255, 255);
+  Color calBorderColor = Color::fromRGB(200, 200, 200);
+  Color headerBgColor = Color::fromRGB(33, 150, 243);
+  Color headerTextColor = Color::fromRGB(255, 255, 255);
+  Color weekdayTextColor = Color::fromRGB(120, 120, 120);
+  Color dayTextColor = Color::fromRGB(30, 30, 30);
+  Color dayHoverBg = Color::fromRGB(232, 245, 255);
+  Color daySelectedBg = Color::fromRGB(33, 150, 243);
+  Color daySelectedText = Color::fromRGB(255, 255, 255);
+  Color todayBorderColor = Color::fromRGB(33, 150, 243);
+  Color otherMonthText = Color::fromRGB(190, 190, 190);
+  Color navArrowColor = Color::fromRGB(255, 255, 255);
+  Color yearHoverBg = Color::fromRGB(232, 245, 255);
+  Color yearSelectedBg = Color::fromRGB(33, 150, 243);
+  Color yearSelectedText = Color::fromRGB(255, 255, 255);
 
   // ── Constraints ───────────────────────────────────────────────────────────
   FluxDate minDate; // invalid = no minimum
@@ -203,14 +203,13 @@ public:
 
     // Shadow — filled rounded rect offset by shadowOffset
     painter.fillRoundedRect(shadowOffset, shadowOffset, popupW_, popupH_,
-                            calBorderRadius, RGB(0, 0, 0),
-                            60); // alpha 60 ≈ 24%
+                            calBorderRadius, Color::fromRGBA(0, 0, 0,
+                            60)); // alpha 60 ≈ 24%
 
     // Background
-    painter.fillRoundedRect(0, 0, popupW_, popupH_, calBorderRadius, calBgColor,
-                            255);
+    painter.fillRoundedRect(0, 0, popupW_, popupH_, calBorderRadius, calBgColor);
     painter.drawBorder(0, 0, popupW_, popupH_, calBorderRadius, calBorderColor,
-                       1, 255);
+                       1);
 
     if (showingYears)
       _renderYearPicker(ctx, fontCache);
@@ -333,7 +332,7 @@ bool handleMouseMove(int mx, int my) override {
     markNeedsLayout();
     return self_();
   }
-  std::shared_ptr<DatePickerWidget> setAccentColor(COLORREF c) {
+  std::shared_ptr<DatePickerWidget> setAccentColor(Color c) {
     headerBgColor = c;
     daySelectedBg = c;
     todayBorderColor = c;
@@ -550,24 +549,24 @@ void openCalendar_() {
                         selectedDate.day == dayNum;
       bool isToday =
           today.year == dYear && today.month == dMonth && today.day == dayNum;
-      bool isHovered = (cell == hoveredCell_) && thisMonth;
+      // bool isHovered = (cell == hoveredCell_) && thisMonth;
       bool isDisabled = _isDisabled(dYear, dMonth, dayNum);
 
       // Cell background
       if (isSelected)
         painter.fillRoundedRect(cx + 2, cy + 2, calCellSize - 4,
-                                calCellSize - 4, 4, daySelectedBg, 255);
+                                calCellSize - 4, 4, daySelectedBg);
       else if (isHovered && !isDisabled)
         painter.fillRoundedRect(cx + 2, cy + 2, calCellSize - 4,
-                                calCellSize - 4, 4, dayHoverBg, 255);
+                                calCellSize - 4, 4, dayHoverBg);
 
       // Today ring
       if (isToday && !isSelected)
         painter.drawBorder(cx + 2, cy + 2, calCellSize - 4, calCellSize - 4, 4,
-                           todayBorderColor, 1, 255);
+                           todayBorderColor, 1);
 
       // Day number text
-      COLORREF textCol = isSelected   ? daySelectedText
+      Color textCol = isSelected   ? daySelectedText
                          : !thisMonth ? otherMonthText
                          : isDisabled ? otherMonthText
                                       : dayTextColor;
@@ -614,12 +613,12 @@ void openCalendar_() {
 
       if (yr == viewYear)
         painter.fillRoundedRect(cx + 4, cy + 4, cellW - 8, cellH - 8, 4,
-                                yearSelectedBg, 255);
+                                yearSelectedBg);
       else if (i == hoveredCell_)
         painter.fillRoundedRect(cx + 4, cy + 4, cellW - 8, cellH - 8, 4,
-                                yearHoverBg, 255);
+                                yearHoverBg);
 
-      COLORREF textCol = (yr == viewYear) ? yearSelectedText : dayTextColor;
+      Color textCol = (yr == viewYear) ? yearSelectedText : dayTextColor;
       std::string ys = std::to_string(yr);
 
       std::wstring wys = toWideString(ys);
@@ -784,7 +783,7 @@ void openCalendar_() {
 
   void _drawCalendarIcon(GraphicsContext &ctx, int cx, int cy) const {
     Painter painter(ctx);
-    COLORREF iconColor = RGB(140, 140, 140);
+    Color iconColor = Color::fromRGB(140, 140, 140);
 
     // Outer rect outline
     painter.drawRectOutline(cx, cy + 2, 16, 14, iconColor, 1);

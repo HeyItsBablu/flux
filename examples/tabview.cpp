@@ -16,7 +16,7 @@ public:
             Row({
                 Text("Jump to:")
                     ->setFontSize(12)
-                    ->setTextColor(RGB(100, 100, 100)),
+                    ->setTextColor(Color::fromRGB(100, 100, 100)),
                 Button("General",  [this]{ activeTab.set(0); }),
                 Button("Display",  [this]{ activeTab.set(1); }),
                 Button("Network",  [this]{ activeTab.set(2); }),
@@ -68,7 +68,7 @@ public:
                             SizedBox(0, 12),
                             Text("Status: Connected")
                                 ->setFontSize(13)
-                                ->setTextColor(RGB(67, 160, 71)),
+                                ->setTextColor(Color::fromRGB(67, 160, 71)),
                             SizedBox(0, 8),
                             Text("IP: 192.168.1.42")->setFontSize(13),
                             SizedBox(0, 8),

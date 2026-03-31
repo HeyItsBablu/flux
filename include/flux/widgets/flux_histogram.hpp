@@ -88,15 +88,15 @@ public:
   bool showChannelToggles = true; // Small R/G/B toggle buttons
 
   // Colors (match Lightroom's dark theme by default)
-  COLORREF bgColor = RGB(28, 28, 28);
-  COLORREF gridColor = RGB(50, 50, 50);
-  COLORREF borderColor = RGB(55, 55, 55);
-  COLORREF rColor = RGB(220, 60, 60);
-  COLORREF gColor = RGB(60, 210, 60);
-  COLORREF bColor = RGB(60, 100, 240);
-  COLORREF lumColor = RGB(190, 190, 190);
-  COLORREF clipHighColor = RGB(255, 60, 60);    // right-clip tint
-  COLORREF clipShadowColor = RGB(60, 120, 255); // left-clip tint
+  Color bgColor = Color::fromRGB(28, 28, 28);
+  Color gridColor = Color::fromRGB(50, 50, 50);
+  Color borderColor = Color::fromRGB(55, 55, 55);
+  Color rColor = Color::fromRGBA(220, 60, 60, 160);
+  Color gColor = Color::fromRGBA(60, 210, 60, 160);
+  Color bColor = Color::fromRGBA(60, 100, 240, 160);
+  Color lumColor = Color::fromRGBA(190, 190, 190, 130);
+  Color clipHighColor = Color::fromRGB(255, 60, 60);    // right-clip tint
+  Color clipShadowColor = Color::fromRGB(60, 120, 255); // left-clip tint
 
   // Per-channel visibility toggles
   bool showR = true;
@@ -169,7 +169,7 @@ public:
     return std::static_pointer_cast<HistogramWidget>(shared_from_this());
   }
 
-  std::shared_ptr<HistogramWidget> setBgColor(COLORREF c) {
+  std::shared_ptr<HistogramWidget> setBgColor(Color c) {
     bgColor = c;
     markNeedsPaint();
     return std::static_pointer_cast<HistogramWidget>(shared_from_this());
@@ -286,21 +286,21 @@ public:
 
     if (drawL)
       painter.fillColumnBars(px, py, pw, ph, buildBarHeights(histData.lum),
-                             lumColor, 130);
+                             lumColor);
     if (drawB)
       painter.fillColumnBars(px, py, pw, ph, buildBarHeights(histData.b),
-                             bColor, 160);
+                             bColor);
     if (drawG)
       painter.fillColumnBars(px, py, pw, ph, buildBarHeights(histData.g),
-                             gColor, 160);
+                             gColor);
     if (drawR)
       painter.fillColumnBars(px, py, pw, ph, buildBarHeights(histData.r),
-                             rColor, 160);
+                             rColor);
 
     // Hover crosshair
     if (hoverPos >= 0.0f && hoverPos <= 1.0f) {
       int hx = px + (int)(hoverPos * (pw - 1));
-      painter.drawVLine(hx, py, ph, RGB(255, 255, 255), 1);
+      painter.drawVLine(hx, py, ph, Color::fromRGB(255, 255, 255), 1);
 
       // Tooltip label
       int binIdx = max(0, min(255, (int)(hoverPos * 255.f + 0.5f)));
@@ -322,7 +322,7 @@ public:
         tx = hx - tw - 4;
 
       painter.drawTextA(std::string(buf), tx, py + 3, tw + 2, th + 2, hFont,
-                        RGB(220, 220, 220), DT_LEFT | DT_TOP | DT_SINGLELINE);
+                        Color::fromRGB(220, 220, 220), DT_LEFT | DT_TOP | DT_SINGLELINE);
     }
 
     // Border
@@ -431,7 +431,7 @@ private:
 void renderToggles(GraphicsContext &ctx, FontCache &fontCache,
                    int tx, int ty, int tw, int th,
                    bool, bool, bool, bool) {
-    struct ChanInfo { const char *label; COLORREF col; bool active; };
+    struct ChanInfo { const char *label; Color col; bool active; };
     ChanInfo channels[4] = {
         {"R", rColor,   showR},
         {"G", gColor,   showG},
@@ -440,7 +440,7 @@ void renderToggles(GraphicsContext &ctx, FontCache &fontCache,
     };
 
     Painter painter(ctx);
-    painter.fillRect(tx, ty, tw, th, RGB(20, 20, 20));
+    painter.fillRect(tx, ty, tw, th, Color::fromRGB(20, 20, 20));
 
     NativeFont hFont = fontCache.getFont(9, FontWeight::Normal);
     int slotW = tw / 4;
@@ -449,8 +449,8 @@ void renderToggles(GraphicsContext &ctx, FontCache &fontCache,
         int sx  = tx + i * slotW;
         int cy  = ty + th / 2;
 
-        COLORREF dotCol  = channels[i].active ? channels[i].col : RGB(55, 55, 55);
-        COLORREF textCol = channels[i].active ? channels[i].col : RGB(70, 70, 70);
+        Color dotCol  = channels[i].active ? channels[i].col : Color::fromRGB(55, 55, 55);
+        Color textCol = channels[i].active ? channels[i].col : Color::fromRGB(70, 70, 70);
 
         // Dot — small filled ellipse (no stroke)
         painter.drawEllipse(sx + 3, cy - 3, 6, 6, dotCol, dotCol, 0);
@@ -541,7 +541,7 @@ Histogram(300, 140)
 
 // ── 5. Embedding in a sidebar panel ──────────────────────────────────────────
 Column(
-    Text("Histogram")->setFontSize(11)->setTextColor(RGB(180,180,180)),
+    Text("Histogram")->setFontSize(11)->setTextColor(Color::fromRGB(180,180,180)),
     Histogram(panelWidth, 120)
         ->setData(currentHistState)
         ->setMode(HistogramMode::RGB)

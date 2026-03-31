@@ -198,17 +198,17 @@ public:
   bool hasHistogram = false;
 
   // Colors — Lightroom dark theme defaults
-  COLORREF bgColor = RGB(28, 28, 28);
-  COLORREF gridColor = RGB(50, 50, 50);
-  COLORREF borderColor = RGB(60, 60, 60);
-  COLORREF curveColorRGB = RGB(210, 210, 210);
-  COLORREF curveColorR = RGB(220, 70, 70);
-  COLORREF curveColorG = RGB(70, 200, 70);
-  COLORREF curveColorB = RGB(70, 120, 240);
-  COLORREF pointFill = RGB(255, 255, 255);
-  COLORREF pointBorder = RGB(120, 120, 120);
-  COLORREF pointSelected = RGB(255, 200, 50);
-  COLORREF tatLineColor = RGB(255, 200, 50);
+  Color bgColor = Color::fromRGB(28, 28, 28);
+  Color gridColor = Color::fromRGB(50, 50, 50);
+  Color borderColor = Color::fromRGB(60, 60, 60);
+  Color curveColorRGB = Color::fromRGB(210, 210, 210);
+  Color curveColorR = Color::fromRGB(220, 70, 70);
+  Color curveColorG = Color::fromRGB(70, 200, 70);
+  Color curveColorB = Color::fromRGB(70, 120, 240);
+  Color pointFill = Color::fromRGB(255, 255, 255);
+  Color pointBorder = Color::fromRGB(120, 120, 120);
+  Color pointSelected = Color::fromRGB(255, 200, 50);
+  Color tatLineColor = Color::fromRGB(255, 200, 50);
 
   // TAT (Targeted Adjustment Tool) — set this to a normalised [0,1] input
   // value coming from the image under the cursor; the widget draws a
@@ -378,7 +378,7 @@ public:
 
     // Identity diagonal
     painter.drawLine(plotX, plotY + plotH, plotX + plotW, plotY,
-                     RGB(55, 55, 55), 1);
+                     Color::fromRGB(55, 55, 55), 1);
 
     // TAT line
     if (tatValue >= 0.f && tatValue <= 1.f) {
@@ -388,7 +388,7 @@ public:
 
     // Hover scrubber
     if (hoverX >= 0)
-      painter.drawVLine(hoverX, plotY, plotH, RGB(90, 90, 90), 1);
+      painter.drawVLine(hoverX, plotY, plotH, Color::fromRGB(90, 90, 90), 1);
 
     // Curves
     if (activeChannel == CurveChannel::RGB) {
@@ -640,7 +640,7 @@ private:
     }
   }
 
-  COLORREF channelColor() const {
+  Color channelColor() const {
     switch (activeChannel) {
     case CurveChannel::Red:
       return curveColorR;
@@ -695,20 +695,20 @@ private:
     Painter painter(ctx);
     struct Band {
       float x0, x1;
-      COLORREF col;
+      Color col;
     };
     Band bands[] = {
-        {0.00f, 0.25f, RGB(30, 30, 40)},
-        {0.25f, 0.50f, RGB(30, 32, 30)},
-        {0.50f, 0.75f, RGB(32, 30, 28)},
-        {0.75f, 1.00f, RGB(36, 30, 26)},
+        {0.00f, 0.25f, Color::fromRGB(30, 30, 40)},
+        {0.25f, 0.50f, Color::fromRGB(30, 32, 30)},
+        {0.50f, 0.75f, Color::fromRGB(32, 30, 28)},
+        {0.75f, 1.00f, Color::fromRGB(36, 30, 26)},
     };
     for (auto &b : bands)
       painter.fillRect(normToScreenX(b.x0), plotY,
                        normToScreenX(b.x1) - normToScreenX(b.x0), plotH, b.col);
 
     for (float fx : {0.25f, 0.50f, 0.75f})
-      painter.drawVLine(normToScreenX(fx), plotY, plotH, RGB(45, 45, 45), 1);
+      painter.drawVLine(normToScreenX(fx), plotY, plotH, Color::fromRGB(45, 45, 45), 1);
   }
 
   void drawHistogram(GraphicsContext &ctx) {
@@ -729,7 +729,7 @@ private:
       px1 = max(px0 + 1, px1);
 
       painter.fillRect(px0, plotY + plotH - barH, px1 - px0, barH,
-                       RGB(60, 60, 65));
+                       Color::fromRGB(60, 60, 65));
     }
   }
 
@@ -742,7 +742,7 @@ private:
   }
 
   // Draw one smooth curve by evaluating 256 points
-  void drawCurve(GraphicsContext &ctx, const ToneCurveChannel &ch, COLORREF col,
+  void drawCurve(GraphicsContext &ctx, const ToneCurveChannel &ch, Color col,
                  int lineWidth, bool drawFill) {
     Painter painter(ctx);
 
@@ -756,7 +756,7 @@ private:
         poly.push_back({plotX + px, normToScreenY(ny)});
       }
       poly.push_back({plotX + plotW, plotY + plotH});
-      painter.fillPolygonAlpha(poly, col, 28);
+painter.fillPolygonAlpha(poly, col.withAlpha(28));
     }
 
     std::vector<std::pair<int, int>> pts;
@@ -780,11 +780,11 @@ private:
 
       // Drop shadow (offset down 2px, black, no border)
       painter.drawEllipse(px - kPointR, py - kPointR + 2, kPointR * 2,
-                          kPointR * 2, RGB(0, 0, 0), RGB(0, 0, 0), 0);
+                          kPointR * 2, Color::fromRGB(0, 0, 0), Color::fromRGB(0, 0, 0), 0);
 
       // Point fill + border
-      COLORREF fill = sel ? pointSelected : pointFill;
-      COLORREF border = sel ? RGB(255, 220, 80) : pointBorder;
+      Color fill = sel ? pointSelected : pointFill;
+      Color border = sel ? Color::fromRGB(255, 220, 80) : pointBorder;
       painter.drawEllipse(px - kPointR, py - kPointR, kPointR * 2, kPointR * 2,
                           fill, border, 1);
     }
@@ -796,7 +796,7 @@ private:
     struct Tab {
       CurveChannel ch;
       const char *label;
-      COLORREF col;
+      Color col;
     };
     Tab tabs[] = {
         {CurveChannel::RGB, "RGB", curveColorRGB},
@@ -813,13 +813,13 @@ private:
       bool active = (tabs[i].ch == activeChannel);
       int sx = tx + i * tabW;
 
-      painter.fillRect(sx, y, tabW, kTabH, active ? RGB(45, 45, 55) : bgColor);
+      painter.fillRect(sx, y, tabW, kTabH, active ? Color::fromRGB(45, 45, 55) : bgColor);
 
       if (active)
         painter.drawHLine(sx + 2, y + kTabH - 2, tabW - 4, tabs[i].col, 2);
 
       painter.drawTextA(tabs[i].label, sx, y, tabW, kTabH, hFont,
-                        active ? tabs[i].col : RGB(80, 80, 90),
+                        active ? tabs[i].col : Color::fromRGB(80, 80, 90),
                         DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }
   }
@@ -847,7 +847,7 @@ private:
       ttx = hoverX - tw - 4;
 
     painter.drawTextA(std::string(buf), ttx, plotY + 4, tw + 2, th + 2, hFont,
-                      RGB(200, 200, 200), DT_LEFT | DT_TOP | DT_SINGLELINE);
+                      Color::fromRGB(200, 200, 200), DT_LEFT | DT_TOP | DT_SINGLELINE);
 
     // Output dot on curve
     int dotY = normToScreenY(ny);
@@ -865,14 +865,14 @@ private:
     struct Slot {
       const char *label;
       float value;
-      COLORREF col;
+      Color col;
     };
     auto &p = curveData.parametric;
     Slot slots[] = {
-        {"Shadows", p.shadows, RGB(80, 100, 160)},
-        {"Darks", p.darks, RGB(120, 120, 140)},
-        {"Lights", p.lights, RGB(180, 160, 110)},
-        {"Highlights", p.highlights, RGB(220, 200, 140)},
+        {"Shadows", p.shadows, Color::fromRGB(80, 100, 160)},
+        {"Darks", p.darks, Color::fromRGB(120, 120, 140)},
+        {"Lights", p.lights, Color::fromRGB(180, 160, 110)},
+        {"Highlights", p.highlights, Color::fromRGB(220, 200, 140)},
     };
 
     NativeFont hFont = fontCache.getFont(8, FontWeight::Normal);
@@ -887,11 +887,11 @@ private:
 
       // Label
       painter.drawTextA(slots[i].label, sx, sy, sw, 14, hFont,
-                        RGB(100, 100, 110),
+                        Color::fromRGB(100, 100, 110),
                         DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
       // Track background
-      painter.drawHLine(trackX0, trackY, trackX1 - trackX0, RGB(50, 50, 55), 2);
+      painter.drawHLine(trackX0, trackY, trackX1 - trackX0, Color::fromRGB(50, 50, 55), 2);
 
       // Filled portion from midpoint
       if (thumbX != trackMid)
@@ -899,14 +899,14 @@ private:
                           slots[i].col, 2);
 
       // Thumb
-      COLORREF thumbC =
-          (draggingParamSlot == i) ? RGB(255, 220, 50) : slots[i].col;
+      Color thumbC =
+          (draggingParamSlot == i) ? Color::fromRGB(255, 220, 50) : slots[i].col;
       painter.drawEllipse(thumbX - 5, trackY - 5, 10, 10, thumbC, thumbC, 0);
 
       // Value label
       char vbuf[8];
       std::snprintf(vbuf, sizeof(vbuf), "%+.0f", slots[i].value * 100.f);
-      painter.drawTextA(vbuf, sx, trackY + 8, sw, 12, hFont, RGB(160, 160, 160),
+      painter.drawTextA(vbuf, sx, trackY + 8, sw, 12, hFont, Color::fromRGB(160, 160, 160),
                         DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }
   }

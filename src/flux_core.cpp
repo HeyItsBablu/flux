@@ -160,7 +160,7 @@ bool FluxUI::handleOverlayRightClick(int mouseX, int mouseY) {
 // ============================================================================
 
 void FluxUI::wireCallbacks() {
-  window.callbacks.onPaint = [this](GraphicsContext &ctx, int w, int h) {
+  window.callbacks.onPaint = [this](GraphicsContext &ctx, int /*w*/, int /*h*/) {
     if (!root)
       return;
     Renderer::renderWidget(ctx, root.get(), fontCache);

@@ -52,7 +52,7 @@ public:
 
   bool showGrid = true;
   bool showLegend = true;
-  COLORREF bgColor = RGB(20, 20, 30);
+  Color bgColor = Color::fromRGB(20, 20, 30);
 
   GraphWidget() {
     autoWidth = false;
@@ -397,8 +397,8 @@ void main(){ fragColor = texture(uTex, vUV); }
 
   // ── GDI+ text texture ─────────────────────────────────────────────────────
 
-  TextTexture makeTextTexture(const std::string &str, float size,
-                              COLORREF color, bool bold = false) {
+  TextTexture makeTextTexture(const std::string &str, float size, Color color,
+                              bool bold = false) {
     if (str.empty())
       return {};
 
@@ -417,8 +417,7 @@ void main(){ fragColor = texture(uTex, vUV); }
     Gdiplus::Graphics g(&bmp);
     g.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAlias);
     g.Clear(Gdiplus::Color(0, 0, 0, 0));
-    Gdiplus::SolidBrush brush(Gdiplus::Color(
-        255, GetRValue(color), GetGValue(color), GetBValue(color)));
+Gdiplus::SolidBrush brush(toGdipColor(color));
     g.DrawString(wtext.c_str(), -1, &font, Gdiplus::PointF(1.f, 1.f), &brush);
 
     Gdiplus::BitmapData bdata;
@@ -655,8 +654,10 @@ void main(){ fragColor = texture(uTex, vUV); }
     identityMVP(mvp); // NDC passthrough
 
     glViewport(0, 0, width, height);
-    float bgR = GetRValue(bgColor) / 255.f, bgG = GetGValue(bgColor) / 255.f,
-          bgB = GetBValue(bgColor) / 255.f;
+    float bgR = bgColor.r / 255.f;
+    float bgG = bgColor.g / 255.f;
+    float bgB = bgColor.b / 255.f;
+
     glClearColor(bgR, bgG, bgB, 1.f);
     glClear(GL_COLOR_BUFFER_BIT);
 
@@ -690,16 +691,19 @@ void main(){ fragColor = texture(uTex, vUV); }
     // ── Text labels ─────────────────────────────────────────────────────────
 
     if (!title.empty()) {
-      auto tt = makeTextTexture(title, 13.f, RGB(220, 220, 220), true);
+      auto tt =
+          makeTextTexture(title, 13.f, Color::fromRGB(220, 220, 220), true);
       drawTextNDC(tt, (px0 + px1) * 0.5f, 1.f - marginT * 0.5f, 0.5f, 0.5f,
                   mvp);
     }
     if (!yAxisTitle.empty()) {
-      auto tt = makeTextTexture(yAxisTitle, 11.f, RGB(180, 180, 180));
+      auto tt =
+          makeTextTexture(yAxisTitle, 11.f, Color::fromRGB(180, 180, 180));
       drawTextNDC_rotated(tt, -1.f + 0.03f, (py0 + py1) * 0.5f, mvp);
     }
     if (!xAxisTitle.empty()) {
-      auto tt = makeTextTexture(xAxisTitle, 11.f, RGB(180, 180, 180));
+      auto tt =
+          makeTextTexture(xAxisTitle, 11.f, Color::fromRGB(180, 180, 180));
       drawTextNDC(tt, (px0 + px1) * 0.5f, -1.f + marginB * 0.3f, 0.5f, 0.5f,
                   mvp);
     }
@@ -716,7 +720,7 @@ void main(){ fragColor = texture(uTex, vUV); }
         std::snprintf(buf, sizeof(buf), "%.1f", val);
       else
         std::snprintf(buf, sizeof(buf), "%.2f", val);
-      auto tt = makeTextTexture(buf, 10.f, RGB(160, 160, 160));
+      auto tt = makeTextTexture(buf, 10.f, Color::fromRGB(160, 160, 160));
       drawTextNDC(tt, px0 - 0.01f, ndcY, 1.f, 0.5f, mvp);
     }
 
@@ -725,7 +729,8 @@ void main(){ fragColor = texture(uTex, vUV); }
       int n = (int)xLabels.size();
       for (int i = 0; i < n; ++i) {
         float ndcX = indexToNDC_X(i, n, px0, px1);
-        auto tt = makeTextTexture(xLabels[i], 10.f, RGB(160, 160, 160));
+        auto tt =
+            makeTextTexture(xLabels[i], 10.f, Color::fromRGB(160, 160, 160));
         drawTextNDC(tt, ndcX, py0 - 0.17f, 0.5f, 1.f, mvp);
       }
     } else if (!series.empty() && !series[0].values.empty()) {
@@ -735,7 +740,7 @@ void main(){ fragColor = texture(uTex, vUV); }
         float ndcX = indexToNDC_X(i, n, px0, px1);
         char buf[16];
         std::snprintf(buf, sizeof(buf), "%d", i);
-        auto tt = makeTextTexture(buf, 10.f, RGB(160, 160, 160));
+        auto tt = makeTextTexture(buf, 10.f, Color::fromRGB(160, 160, 160));
         drawTextNDC(tt, ndcX, py0 - 0.17f, 0.5f, 1.f, mvp);
       }
     }
@@ -754,7 +759,7 @@ void main(){ fragColor = texture(uTex, vUV); }
         pushQuad(sw, lx - swatchW, sy - 0.005f, lx, sy + 0.005f);
         drawVerts(GL_TRIANGLES, sw, s.r, s.g, s.b, 1.f, mvp);
 
-        auto tt = makeTextTexture(s.label, 10.f, RGB(200, 200, 200));
+        auto tt = makeTextTexture(s.label, 10.f, Color::fromRGB(200, 200, 200));
         drawTextNDC(tt, lx - swatchW - 0.01f, sy, 1.f, 0.5f, mvp);
         ly -= lineH;
       }

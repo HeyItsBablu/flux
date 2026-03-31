@@ -109,17 +109,17 @@ public:
   int headerHeight = 36;
   int scrollbarWidth_ = 10;
 
-  COLORREF headerBg = RGB(245, 246, 248);
-  COLORREF headerTextColor = RGB(60, 60, 60);
-  COLORREF rowBgColor = RGB(255, 255, 255);
-  COLORREF rowAltBgColor = RGB(249, 250, 251);
-  COLORREF rowHoverColor = RGB(232, 244, 255);
-  COLORREF rowSelectColor = RGB(210, 235, 255);
-  COLORREF accentColor = RGB(33, 150, 243);
-  COLORREF borderColor_ = RGB(220, 220, 222);
-  COLORREF textColor_ = RGB(30, 30, 30);
-  COLORREF disabledColor_ = RGB(170, 170, 170);
-  COLORREF dividerColor_ = RGB(230, 230, 232);
+  Color headerBg = Color::fromRGB(245, 246, 248);
+  Color headerTextColor = Color::fromRGB(60, 60, 60);
+  Color rowBgColor = Color::fromRGB(255, 255, 255);
+  Color rowAltBgColor = Color::fromRGB(249, 250, 251);
+  Color rowHoverColor = Color::fromRGB(232, 244, 255);
+  Color rowSelectColor = Color::fromRGB(210, 235, 255);
+  Color accentColor = Color::fromRGB(33, 150, 243);
+  Color borderColor_ = Color::fromRGB(220, 220, 222);
+  Color textColor_ = Color::fromRGB(30, 30, 30);
+  Color disabledColor_ = Color::fromRGB(170, 170, 170);
+  Color dividerColor_ = Color::fromRGB(230, 230, 232);
 
   bool alternateRows = true;
   bool showColumnDividers = false;
@@ -485,16 +485,18 @@ public:
     markNeedsLayout();
     return self_();
   }
-  std::shared_ptr<DataTableWidget> setHeaderBackground(COLORREF c) {
+  std::shared_ptr<DataTableWidget> setHeaderBackground(Color c) {
     headerBg = c;
     markNeedsPaint();
     return self_();
   }
-  std::shared_ptr<DataTableWidget> setAccentColor(COLORREF c) {
+  std::shared_ptr<DataTableWidget> setAccentColor(Color c) {
     accentColor = c;
-    rowSelectColor = RGB((int)(GetRValue(c) * 0.82f + 255 * 0.18f),
-                         (int)(GetGValue(c) * 0.82f + 255 * 0.18f),
-                         (int)(GetBValue(c) * 0.82f + 255 * 0.18f));
+    rowSelectColor  = Color::fromRGB(
+        (uint8_t)(c.r / 5 * 4),
+        (uint8_t)(min(255, c.g / 5 * 4 + 20)),
+        (uint8_t)(min(255, c.b / 5 * 4 + 40))
+    );
     markNeedsPaint();
     return self_();
   }
@@ -824,7 +826,7 @@ private:
       bool isSel = (vi == selectedIndex_);
       bool isHov = (vi == hoveredRow_ && !isSel);
 
-      COLORREF bg;
+      Color bg;
       if (isSel)
         bg = rowSelectColor;
       else if (isHov)
@@ -907,7 +909,7 @@ private:
       int sbH = height - headerHeight - (needsH ? scrollbarWidth_ + 1 : 0);
       int total = _totalContentHeight();
 
-      painter.fillRect(sbX, sbY, scrollbarWidth_, sbH, RGB(240, 240, 240));
+      painter.fillRect(sbX, sbY, scrollbarWidth_, sbH, Color::fromRGB(240, 240, 240));
 
       float thumbRatio = (float)sbH / (float)total;
       int thumbH = max(20, (int)(sbH * thumbRatio));
@@ -925,7 +927,7 @@ private:
       int sbW = width - (needsV ? scrollbarWidth_ + 1 : 0);
       int total = _totalColumnsWidth();
 
-      painter.fillRect(sbX, sbY, sbW, scrollbarWidth_, RGB(240, 240, 240));
+      painter.fillRect(sbX, sbY, sbW, scrollbarWidth_, Color::fromRGB(240, 240, 240));
 
       float thumbRatio = (float)sbW / (float)total;
       int thumbW = max(20, (int)(sbW * thumbRatio));
@@ -940,7 +942,7 @@ private:
     if (needsV && needsH)
       painter.fillRect(x + width - scrollbarWidth_ - 1,
                        y + height - scrollbarWidth_ - 1, scrollbarWidth_ + 1,
-                       scrollbarWidth_ + 1, RGB(240, 240, 240));
+                       scrollbarWidth_ + 1, Color::fromRGB(240, 240, 240));
   }
 };
 

@@ -81,17 +81,17 @@ public:
   int shadowOffset_ = 3;
 
   // Per-type accent colours (left bar + icon tint)
-  COLORREF colorInfo_ = RGB(33, 150, 243);
-  COLORREF colorSuccess_ = RGB(76, 175, 80);
-  COLORREF colorWarning_ = RGB(255, 152, 0);
-  COLORREF colorError_ = RGB(244, 67, 54);
+  Color colorInfo_ = Color::fromRGB(33, 150, 243);
+  Color colorSuccess_ = Color::fromRGB(76, 175, 80);
+  Color colorWarning_ = Color::fromRGB(255, 152, 0);
+  Color colorError_ = Color::fromRGB(244, 67, 54);
 
-  COLORREF bgColor_ = RGB(255, 255, 255);
-  COLORREF textColor_ = RGB(30, 30, 30);
-  COLORREF subtextColor_ = RGB(90, 90, 90);
-  COLORREF borderColor_ = RGB(220, 220, 220);
-  COLORREF actionColor_ = RGB(33, 150, 243);
-  COLORREF closeColor_ = RGB(150, 150, 150);
+  Color bgColor_ = Color::fromRGB(255, 255, 255);
+  Color textColor_ = Color::fromRGB(30, 30, 30);
+  Color subtextColor_ = Color::fromRGB(90, 90, 90);
+  Color borderColor_ = Color::fromRGB(220, 220, 220);
+  Color actionColor_ = Color::fromRGB(33, 150, 243);
+  Color closeColor_ = Color::fromRGB(150, 150, 150);
 
   // ── Constructor ───────────────────────────────────────────────────────────
   ToastWidget() {
@@ -168,15 +168,15 @@ public:
     fontSize_ = s;
     return self_();
   }
-  std::shared_ptr<ToastWidget> setColors(COLORREF info, COLORREF success,
-                                         COLORREF warning, COLORREF error) {
+  std::shared_ptr<ToastWidget> setColors(Color info, Color success,
+                                         Color warning, Color error) {
     colorInfo_ = info;
     colorSuccess_ = success;
     colorWarning_ = warning;
     colorError_ = error;
     return self_();
   }
-  std::shared_ptr<ToastWidget> setBgColor(COLORREF c) {
+  std::shared_ptr<ToastWidget> setBgColor(Color c) {
     bgColor_ = c;
     return self_();
   }
@@ -328,7 +328,7 @@ private:
     return h;
   }
 
-  COLORREF _accentColor(ToastType t) const {
+  Color _accentColor(ToastType t) const {
     switch (t) {
     case ToastType::Success:
       return colorSuccess_;
@@ -392,12 +392,12 @@ private:
 void _renderSingleToast(GraphicsContext &ctx, FontCache &fontCache,
                         const ActiveToast &at,
                         int tX, int tY, int tW, int tH) const {
-    COLORREF accent = _accentColor(at.entry.type);
+    Color accent = _accentColor(at.entry.type);
     Painter  painter(ctx);
 
     // ── Shadow ────────────────────────────────────────────────────────────
     painter.fillRectAlpha(tX + shadowOffset_, tY + shadowOffset_,
-                          tW, tH, RGB(0, 0, 0), 40);
+                          tW, tH, Color::fromRGBA(0, 0, 0,40));
 
     // ── Background + border ───────────────────────────────────────────────
     painter.fillRoundedRectGDI(tX, tY, tW, tH,
@@ -449,7 +449,7 @@ void _renderSingleToast(GraphicsContext &ctx, FontCache &fontCache,
     // ── Message ───────────────────────────────────────────────────────────
     {
         NativeFont nf = fontCache.getFont(fontSize_, FontWeight::Normal);
-        COLORREF   mc = at.entry.title.empty() ? textColor_ : subtextColor_;
+        Color   mc = at.entry.title.empty() ? textColor_ : subtextColor_;
 
         int msgH = at.entry.actionLabel.empty()
             ? tY + tH - curY - 10

@@ -26,7 +26,7 @@ public:
                     // ── Check-in ──────────────────────────────────────────
                     Text("Check-in")
                         ->setFontSize(12)
-                        ->setTextColor(RGB(100, 100, 100)),
+                        ->setTextColor(Color::fromRGB(100, 100, 100)),
                     SizedBox(0, 4),
                     DatePicker()
                         ->setDate(checkin)
@@ -40,7 +40,7 @@ public:
                     // ── Check-out ─────────────────────────────────────────
                     Text("Check-out")
                         ->setFontSize(12)
-                        ->setTextColor(RGB(100, 100, 100)),
+                        ->setTextColor(Color::fromRGB(100, 100, 100)),
                     SizedBox(0, 4),
                     DatePicker()
                         ->setDate(checkout)

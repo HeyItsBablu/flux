@@ -80,7 +80,7 @@ public:
     return std::static_pointer_cast<TextWidget>(shared_from_this());
   }
 
-  std::shared_ptr<TextWidget> setTextColor(COLORREF color) {
+  std::shared_ptr<TextWidget> setTextColor(Color color) {
     if (textColor != color) {
       textColor = color;
       markNeedsPaint();
@@ -90,7 +90,7 @@ public:
 
   template <typename T, typename F>
   std::shared_ptr<TextWidget> setTextColor(State<T> &state, F transform) {
-    std::function<COLORREF(const T &)> fn = transform;
+    std::function<Color(const T &)> fn = transform;
     textColor = fn(state.get());
     state.bindProperty(
         shared_from_this(),
@@ -98,7 +98,7 @@ public:
     return std::static_pointer_cast<TextWidget>(shared_from_this());
   }
 
-  std::shared_ptr<TextWidget> setHoverTextColor(COLORREF color) {
+  std::shared_ptr<TextWidget> setHoverTextColor(Color color) {
     hoverTextColor = color;
     hasHoverTextColor = true;
     markNeedsPaint();
@@ -110,7 +110,7 @@ public:
     markNeedsLayout();
     return std::static_pointer_cast<TextWidget>(shared_from_this());
   }
-  std::shared_ptr<TextWidget> setBackgroundColor(COLORREF color) {
+  std::shared_ptr<TextWidget> setBackgroundColor(Color color) {
     backgroundColor = color;
     hasBackground = true;
     markNeedsPaint();
@@ -191,11 +191,11 @@ public:
     setFontSize(size);
     return std::static_pointer_cast<IconWidget>(shared_from_this());
   }
-  std::shared_ptr<IconWidget> setColor(COLORREF color) {
+  std::shared_ptr<IconWidget> setColor(Color color) {
     setTextColor(color);
     return std::static_pointer_cast<IconWidget>(shared_from_this());
   }
-  std::shared_ptr<IconWidget> setHoverColor(COLORREF color) {
+  std::shared_ptr<IconWidget> setHoverColor(Color color) {
     setHoverTextColor(color);
     return std::static_pointer_cast<IconWidget>(shared_from_this());
   }
@@ -259,11 +259,11 @@ class ProgressBarWidget : public Widget {
 public:
   double value = 0.0;
   int trackBorderRadius = 4;
-  COLORREF trackColor = RGB(220, 220, 220);
-  COLORREF trackBorderColor = RGB(0, 0, 0);
+  Color trackColor = Color::fromRGB(220, 220, 220);
+  Color trackBorderColor = Color::fromRGB(0, 0, 0);
   bool hasTrackBorder = false;
   int trackBorderWidth = 1;
-  std::vector<COLORREF> progressColors = {RGB(33, 150, 243)};
+  std::vector<Color> progressColors = {Color::fromRGB(33, 150, 243)};
 
   ProgressBarWidget() {
     height = 12;
@@ -287,19 +287,19 @@ public:
     markNeedsPaint();
     return std::static_pointer_cast<ProgressBarWidget>(shared_from_this());
   }
-  std::shared_ptr<ProgressBarWidget> setBackgroundColor(COLORREF color) {
+  std::shared_ptr<ProgressBarWidget> setBackgroundColor(Color color) {
     trackColor = color;
     markNeedsPaint();
     return std::static_pointer_cast<ProgressBarWidget>(shared_from_this());
   }
   std::shared_ptr<ProgressBarWidget>
-  setProgressColors(std::vector<COLORREF> c) {
+  setProgressColors(std::vector<Color> c) {
     if (!c.empty())
       progressColors = c;
     markNeedsPaint();
     return std::static_pointer_cast<ProgressBarWidget>(shared_from_this());
   }
-  std::shared_ptr<ProgressBarWidget> setBorderColor(COLORREF color) {
+  std::shared_ptr<ProgressBarWidget> setBorderColor(Color color) {
     trackBorderColor = color;
     hasTrackBorder = true;
     markNeedsPaint();
@@ -422,7 +422,7 @@ inline WidgetPtr Divider() {
   w->height = 1;
   w->autoHeight = false;
   w->hasBackground = true;
-  w->backgroundColor = RGB(0, 0, 0);
+  w->backgroundColor = Color::fromRGB(0, 0, 0);
   return w;
 }
 

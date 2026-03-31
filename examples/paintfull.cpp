@@ -41,11 +41,11 @@ static bool isShapeToolEnum(Tool t) {
 static bool isDrawTool(Tool t) { return t == Tool::Brush || t == Tool::Eraser; }
 
 // ── Hex helpers ──────────────────────────────────────────────────────────────
-static COLORREF hexToRef(const std::string &css) {
+static Color hexToRef(const std::string &css) {
   RGBA c = parseHexColor(css);
-  return RGB((BYTE)(c.r * 255), (BYTE)(c.g * 255), (BYTE)(c.b * 255));
+  return Color::fromRGB((BYTE)(c.r * 255), (BYTE)(c.g * 255), (BYTE)(c.b * 255));
 }
-static std::string refToHex(COLORREF c) { return ColorToHex(c); }
+static std::string refToHex(Color c) { return ColorToHex(c); }
 
 // ── Save dialog ──────────────────────────────────────────────────────────────
 static std::wstring promptSavePath(HWND owner) {
@@ -1191,18 +1191,18 @@ public:
     auto sectionLabel = [](const std::string &txt) -> WidgetPtr {
       return Text(txt)
           ->setFontSize(9)
-          ->setTextColor(RGB(100, 105, 125))
+          ->setTextColor(Color::fromRGB(100, 105, 125))
           ->setFontWeight(FontWeight::Bold);
     };
 
-    COLORREF kAccent  = RGB(174, 129, 255);
-    COLORREF kBg1     = RGB(17,  17,  27);
-    COLORREF kBg2     = RGB(24,  24,  37);
-    COLORREF kBorder  = RGB(49,  50,  68);
-    COLORREF kText    = RGB(205, 214, 244);
-    COLORREF kDim     = RGB(100, 105, 130);
-    COLORREF kSubtext = RGB(130, 132, 155);
-    COLORREF kCard    = RGB(30,  30,  46);
+    Color kAccent  = Color::fromRGB(174, 129, 255);
+    Color kBg1     = Color::fromRGB(17,  17,  27);
+    Color kBg2     = Color::fromRGB(24,  24,  37);
+    Color kBorder  = Color::fromRGB(49,  50,  68);
+    Color kText    = Color::fromRGB(205, 214, 244);
+    Color kDim     = Color::fromRGB(100, 105, 130);
+    Color kSubtext = Color::fromRGB(130, 132, 155);
+    Color kCard    = Color::fromRGB(30,  30,  46);
 
     auto cardWrap = [&](WidgetPtr child) -> WidgetPtr {
       return Container(child)
@@ -1223,20 +1223,20 @@ public:
                              Text(icon)
                                  ->setFontSize(16)
                                  ->setTextColor(activeTool, [tv](const Tool &at) {
-                                   return at == tv ? RGB(203, 166, 247) : RGB(140, 140, 160);
+                                   return at == tv ? Color::fromRGB(203, 166, 247) : Color::fromRGB(140, 140, 160);
                                  }),
                          })
                          ->setSpacing(0)
                          ->setCrossAxisAlignment(CrossAxisAlignment::Center)))
                      ->setWidth(44)->setHeight(32)->setBorderRadius(5)
                      ->setBackgroundColor(activeTool, [tv](const Tool &at) {
-                       return at == tv ? RGB(40, 35, 58) : RGB(24, 24, 37);
+                       return at == tv ? Color::fromRGB(40, 35, 58) : Color::fromRGB(24, 24, 37);
                      })
                      ->setBorderWidth(activeTool, [tv](const Tool &at) {
                        return at == tv ? 2 : 1;
                      })
                      ->setBorderColor(activeTool, [tv](const Tool &at) {
-                       return at == tv ? RGB(147, 112, 219) : RGB(49, 50, 68);
+                       return at == tv ? Color::fromRGB(147, 112, 219) : Color::fromRGB(49, 50, 68);
                      }))
           ->setOnTap([this, tv]() { activeTool.set(tv); });
     };
@@ -1266,18 +1266,18 @@ public:
                     Container(nullptr)
                         ->setWidth(14)->setHeight(14)->setBorderRadius(3)
                         ->setBackgroundColor(filledShapes, [](const bool &f) {
-                          return f ? RGB(174, 129, 255) : RGB(17, 17, 27);
+                          return f ? Color::fromRGB(174, 129, 255) : Color::fromRGB(17, 17, 27);
                         })
                         ->setBorderWidth(1)
-                        ->setBorderColor(RGB(147, 112, 219)),
+                        ->setBorderColor(Color::fromRGB(147, 112, 219)),
                     SizedBox(6, 0),
-                    Text("Fill shapes")->setFontSize(10)->setTextColor(RGB(160, 165, 190)),
+                    Text("Fill shapes")->setFontSize(10)->setTextColor(Color::fromRGB(160, 165, 190)),
                 })
                 ->setSpacing(0)
                 ->setCrossAxisAlignment(CrossAxisAlignment::Center))
             ->setPaddingAll(6, 4, 6, 4)
             ->setBorderRadius(5)
-            ->setBackgroundColor(RGB(24, 24, 37))
+            ->setBackgroundColor(Color::fromRGB(24, 24, 37))
             ->setBorderWidth(1)
             ->setBorderColor(kBorder))
         ->setOnTap([this]() { filledShapes.set(!filledShapes.get()); });
@@ -1327,23 +1327,23 @@ public:
             SizedBox(6, 0),
             Row({
                 GestureDetector(
-                    Container(Text("–")->setFontSize(14)->setTextColor(RGB(180, 180, 200)))
+                    Container(Text("–")->setFontSize(14)->setTextColor(Color::fromRGB(180, 180, 200)))
                         ->setWidth(18)->setHeight(18)->setBorderRadius(4)
-                        ->setBackgroundColor(RGB(35, 35, 55))
+                        ->setBackgroundColor(Color::fromRGB(35, 35, 55))
                         ->setBorderWidth(1)->setBorderColor(kBorder))
                     ->setOnTap([this]() { fontSize.set(max(8, fontSize.get() - 2)); }),
                 SizedBox(4, 0),
                 Container(
                     Text(fontSize, [](const int &sz) { return std::to_string(sz); })
-                        ->setFontSize(10)->setTextColor(RGB(200, 200, 220)))
+                        ->setFontSize(10)->setTextColor(Color::fromRGB(200, 200, 220)))
                     ->setWidth(26)->setHeight(18)->setBorderRadius(4)
-                    ->setBackgroundColor(RGB(22, 22, 38))
+                    ->setBackgroundColor(Color::fromRGB(22, 22, 38))
                     ->setBorderWidth(1)->setBorderColor(kBorder),
                 SizedBox(4, 0),
                 GestureDetector(
-                    Container(Text("+")->setFontSize(14)->setTextColor(RGB(180, 180, 200)))
+                    Container(Text("+")->setFontSize(14)->setTextColor(Color::fromRGB(180, 180, 200)))
                         ->setWidth(18)->setHeight(18)->setBorderRadius(4)
-                        ->setBackgroundColor(RGB(35, 35, 55))
+                        ->setBackgroundColor(Color::fromRGB(35, 35, 55))
                         ->setBorderWidth(1)->setBorderColor(kBorder))
                     ->setOnTap([this]() { fontSize.set(min(96, fontSize.get() + 2)); }),
             })
@@ -1356,7 +1356,7 @@ public:
     auto picker =
         ColorPicker(hexToRef(activeColor.get()))
             ->setShowAlpha(false)
-            ->setOnColorChanged([this](COLORREF c) { activeColor.set(refToHex(c)); });
+            ->setOnColorChanged([this](Color c) { activeColor.set(refToHex(c)); });
     auto pickerSection = cardWrap(picker);
 
     // ── Color history ──────────────────────────────────────────────────────
@@ -1371,14 +1371,14 @@ public:
                          Container(nullptr)
                              ->setWidth(20)->setHeight(20)->setBorderRadius(10)
                              ->setBackgroundColor(hexToRef(col))
-                             ->setBorderWidth(1)->setBorderColor(RGB(80, 80, 100)))
+                             ->setBorderWidth(1)->setBorderColor(Color::fromRGB(80, 80, 100)))
                   ->setOnTap([this, col]() { activeColor.set(col); });
             })
             ->setHorizontal(true)
             ->setSpacing(4)
             ->setScrollbarSize(3)
-            ->setScrollbarColor(RGB(60, 62, 80))
-            ->setScrollbarHoverColor(RGB(100, 102, 120));
+            ->setScrollbarColor(Color::fromRGB(60, 62, 80))
+            ->setScrollbarHoverColor(Color::fromRGB(100, 102, 120));
 
     // ── Palette swatches ───────────────────────────────────────────────────
     auto pc1 = std::make_shared<RowWidget>(); pc1->setSpacing(4);
@@ -1394,7 +1394,7 @@ public:
                           return a == c ? 2 : 0;
                         })
                         ->setBorderColor(activeColor, [c](const std::string &a) {
-                          return a == c ? RGB(255, 255, 255) : RGB(0, 0, 0);
+                          return a == c ? Color::fromRGB(255, 255, 255) : Color::fromRGB(0, 0, 0);
                         }))
           ->setOnTap([this, c]() { activeColor.set(c); });
       if (i % 2 == 0) pc1->addChild(sw);
@@ -1417,7 +1417,7 @@ public:
                 Text(activeSize, [](double v) {
                         return std::to_string(int(std::round(v))) + "px";
                     })
-                    ->setFontSize(9)->setTextColor(RGB(160, 160, 180)),
+                    ->setFontSize(9)->setTextColor(Color::fromRGB(160, 160, 180)),
             })
             ->setSpacing(0)
             ->setCrossAxisAlignment(CrossAxisAlignment::Center),
@@ -1437,7 +1437,7 @@ public:
                 Text(activeOpacity, [](double op) {
                         return std::to_string(int(std::round(op * 100))) + "%";
                     })
-                    ->setFontSize(9)->setTextColor(RGB(160, 160, 180)),
+                    ->setFontSize(9)->setTextColor(Color::fromRGB(160, 160, 180)),
             })
             ->setSpacing(0)
             ->setCrossAxisAlignment(CrossAxisAlignment::Center),
@@ -1471,10 +1471,10 @@ public:
         ->setPaddingAll(10, 10, 10, 10);
 
     // ── §E  Toolbar ────────────────────────────────────────────────────────
-    auto makeBtn = [&](const std::string &lbl, COLORREF txt,
+    auto makeBtn = [&](const std::string &lbl, Color txt,
                        std::function<void()> fn) -> WidgetPtr {
       return Button(lbl, fn)
-          ->setBackgroundColor(RGB(30, 30, 46))
+          ->setBackgroundColor(Color::fromRGB(30, 30, 46))
           ->setTextColor(txt)
           ->setBorderRadius(5)
           ->setHeight(26)
@@ -1484,7 +1484,7 @@ public:
     auto toolbar =
         Container(
             Row({
-                Text("Zoom")->setFontSize(11)->setTextColor(RGB(140, 140, 160)),
+                Text("Zoom")->setFontSize(11)->setTextColor(Color::fromRGB(140, 140, 160)),
                 Slider(kZoomMin, kZoomMax, 0.25)
                     ->setValue(zoomLevel)
                     ->setTrackFillColor(kAccent)
@@ -1492,7 +1492,7 @@ public:
                 Text(zoomLevel, [](double v) {
                         return std::to_string(int(std::round(v))) + "%";
                     })
-                    ->setFontSize(11)->setTextColor(RGB(180, 180, 200))->setMinWidth(38),
+                    ->setFontSize(11)->setTextColor(Color::fromRGB(180, 180, 200))->setMinWidth(38),
                 fontSizeSection,
                 Button("1:1", [this] {
                         if (canvasPtr_) {
@@ -1501,7 +1501,7 @@ public:
                           syncZoomState(1.f);
                         }
                     })
-                    ->setBackgroundColor(RGB(24, 24, 37))->setTextColor(kAccent)
+                    ->setBackgroundColor(Color::fromRGB(24, 24, 37))->setTextColor(kAccent)
                     ->setBorderRadius(5)->setWidth(30)->setHeight(26)->setPadding(4),
                 Button("Fit", [this] {
                         if (canvasPtr_) {
@@ -1510,19 +1510,19 @@ public:
                           syncZoomState(canvasPtr_->viewport().zoom());
                         }
                     })
-                    ->setBackgroundColor(RGB(24, 24, 37))->setTextColor(kAccent)
+                    ->setBackgroundColor(Color::fromRGB(24, 24, 37))->setTextColor(kAccent)
                     ->setBorderRadius(5)->setWidth(30)->setHeight(26)->setPadding(4),
                 SizedBox(12, 0),
-                makeBtn("↩ Undo", RGB(137, 180, 250), [this] {
+                makeBtn("↩ Undo", Color::fromRGB(137, 180, 250), [this] {
                     if (surface_) { surface_->undo(); refreshUndoRedo(); if (canvasPtr_) canvasPtr_->redraw(); }
                 }),
-                makeBtn("Redo ↪", RGB(166, 226, 46), [this] {
+                makeBtn("Redo ↪", Color::fromRGB(166, 226, 46), [this] {
                     if (surface_) { surface_->redo(); refreshUndoRedo(); if (canvasPtr_) canvasPtr_->redraw(); }
                 }),
-                makeBtn("✕ Clear", RGB(243, 139, 168), [this] {
+                makeBtn("✕ Clear", Color::fromRGB(243, 139, 168), [this] {
                     if (surface_) { surface_->clear(); refreshUndoRedo(); if (canvasPtr_) canvasPtr_->redraw(); }
                 }),
-                makeBtn("💾 Save", RGB(148, 226, 213), [this] { doSavePNG(); }),
+                makeBtn("💾 Save", Color::fromRGB(148, 226, 213), [this] { doSavePNG(); }),
             })
             ->setSpacing(8)
             ->setCrossAxisAlignment(CrossAxisAlignment::Center))
@@ -1575,18 +1575,18 @@ public:
                 ->Then([&] {
                   return Text(statusMsg, [](const std::string &s) { return s; })
                       ->setFontSize(10)
-                      ->setTextColor(RGB(148, 226, 213));
+                      ->setTextColor(Color::fromRGB(148, 226, 213));
                 })
                 ->Else([&] {
                   return Row({
-                      Text("MMB/Space: Pan")      ->setFontSize(10)->setTextColor(RGB(75, 75, 95)),
+                      Text("MMB/Space: Pan")      ->setFontSize(10)->setTextColor(Color::fromRGB(75, 75, 95)),
                       SizedBox(10, 0),
-                      Text("Ctrl+Scroll: Zoom")   ->setFontSize(10)->setTextColor(RGB(75, 75, 95)),
+                      Text("Ctrl+Scroll: Zoom")   ->setFontSize(10)->setTextColor(Color::fromRGB(75, 75, 95)),
                       SizedBox(10, 0),
-                      Text("Ctrl+Z/Y: Undo/Redo") ->setFontSize(10)->setTextColor(RGB(75, 75, 95)),
+                      Text("Ctrl+Z/Y: Undo/Redo") ->setFontSize(10)->setTextColor(Color::fromRGB(75, 75, 95)),
                       SizedBox(10, 0),
                       Text("B E L R F S T: Tools  |  T=Text, click to place, type, Enter=commit, Esc=cancel")
-                          ->setFontSize(10)->setTextColor(RGB(75, 75, 95)),
+                          ->setFontSize(10)->setTextColor(Color::fromRGB(75, 75, 95)),
                   })
                   ->setSpacing(0);
                 }))
@@ -1601,8 +1601,8 @@ public:
                            kSubtext](int di, const LayerRef &ri) -> WidgetPtr {
               const LayerDesc &ld  = ri->get();
               const bool       act = ld.isActive;
-              const COLORREF rowBg   = act ? RGB(38, 30, 58) : kCard;
-              const COLORREF rowBord = act ? kAccent : kBorder;
+              const Color rowBg   = act ? Color::fromRGB(38, 30, 58) : kCard;
+              const Color rowBord = act ? kAccent : kBorder;
               const int      bw      = act ? 2 : 1;
 
               auto liveStackIndex = [this](int displayIdx) -> int {
@@ -1616,9 +1616,9 @@ public:
                       Container(
                           Text(ld.visible ? "👁" : "🚫")
                               ->setFontSize(11)
-                              ->setTextColor(ld.visible ? RGB(180, 180, 210) : RGB(80, 80, 100)))
+                              ->setTextColor(ld.visible ? Color::fromRGB(180, 180, 210) : Color::fromRGB(80, 80, 100)))
                           ->setWidth(24)->setHeight(24)->setBorderRadius(4)
-                          ->setBackgroundColor(ld.visible ? RGB(30, 30, 48) : RGB(22, 22, 32))
+                          ->setBackgroundColor(ld.visible ? Color::fromRGB(30, 30, 48) : Color::fromRGB(22, 22, 32))
                           ->setBorderWidth(1)->setBorderColor(kBorder))
                       ->setOnTap([this, di, liveStackIndex]() {
                         if (!surface_) return;
@@ -1633,7 +1633,7 @@ public:
                   GestureDetector(
                       Text(ld.name)
                           ->setFontSize(10)
-                          ->setTextColor(act ? RGB(220, 200, 255) : kSubtext)
+                          ->setTextColor(act ? Color::fromRGB(220, 200, 255) : kSubtext)
                           ->setMinWidth(56))
                       ->setOnTap([this, di, liveStackIndex]() {
                         if (!surface_) return;
@@ -1670,9 +1670,9 @@ public:
 
               auto delBtn = Tooltip(
                   GestureDetector(
-                      Container(Text("✕")->setFontSize(9)->setTextColor(RGB(190, 70, 70)))
+                      Container(Text("✕")->setFontSize(9)->setTextColor(Color::fromRGB(190, 70, 70)))
                           ->setWidth(20)->setHeight(20)->setBorderRadius(3)
-                          ->setBackgroundColor(RGB(36, 20, 20))
+                          ->setBackgroundColor(Color::fromRGB(36, 20, 20))
                           ->setBorderWidth(1)->setBorderColor(kBorder))
                       ->setOnTap([this, di, liveStackIndex]() {
                         if (!surface_) return;
@@ -1697,8 +1697,8 @@ public:
                   ->setHeight(34);
             })
             ->setSpacing(4)
-            ->setScrollbarColor(RGB(60, 60, 90))
-            ->setScrollbarHoverColor(RGB(90, 90, 130));
+            ->setScrollbarColor(Color::fromRGB(60, 60, 90))
+            ->setScrollbarHoverColor(Color::fromRGB(90, 90, 130));
 
     auto layerPanel =
         Container(
@@ -1708,11 +1708,11 @@ public:
                         ->setFontSize(8)->setFontWeight(FontWeight::Bold)->setTextColor(kDim),
                     Tooltip(
                         GestureDetector(
-                            Container(Text("+")->setFontSize(16)->setTextColor(RGB(160, 220, 160)))
+                            Container(Text("+")->setFontSize(16)->setTextColor(Color::fromRGB(160, 220, 160)))
                                 ->setWidth(28)->setHeight(28)->setBorderRadius(6)
-                                ->setBackgroundColor(RGB(24, 40, 24))
-                                ->setBorderWidth(1)->setBorderColor(RGB(60, 100, 60))
-                                ->setHoverBackgroundColor(RGB(30, 52, 30)))
+                                ->setBackgroundColor(Color::fromRGB(24, 40, 24))
+                                ->setBorderWidth(1)->setBorderColor(Color::fromRGB(60, 100, 60))
+                                ->setHoverBackgroundColor(Color::fromRGB(30, 52, 30)))
                             ->setOnTap([this]() { if (surface_) surface_->addLayer(); }),
                         "Add layer"),
                 })
@@ -1725,22 +1725,22 @@ public:
                     GestureDetector(
                         Container(
                             Row({
-                                Text("⊞")->setFontSize(12)->setTextColor(RGB(170, 170, 200)),
+                                Text("⊞")->setFontSize(12)->setTextColor(Color::fromRGB(170, 170, 200)),
                                 SizedBox(5, 0),
-                                Text("Flatten All")->setFontSize(10)->setTextColor(RGB(160, 160, 185)),
+                                Text("Flatten All")->setFontSize(10)->setTextColor(Color::fromRGB(160, 160, 185)),
                             })
                             ->setSpacing(0)
                             ->setCrossAxisAlignment(CrossAxisAlignment::Center))
                             ->setBackgroundColor(kCard)
                             ->setBorderRadius(6)->setBorderWidth(1)->setBorderColor(kBorder)
-                            ->setHoverBackgroundColor(RGB(36, 36, 56))
+                            ->setHoverBackgroundColor(Color::fromRGB(36, 36, 56))
                             ->setPaddingAll(8, 6, 8, 6))
                         ->setOnTap([this]() { if (surface_) surface_->flattenToSingle(); }),
                     "Merge all visible layers into one"),
             })
             ->setSpacing(0))
         ->setWidth(kLayerPanelWidth)
-        ->setBackgroundColor(RGB(24, 24, 36))
+        ->setBackgroundColor(Color::fromRGB(24, 24, 36))
         ->setPaddingAll(12, 12, 12, 12);
 
     // ── §I  Root layout ────────────────────────────────────────────────────

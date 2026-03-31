@@ -36,7 +36,7 @@ public:
                         }),
                     Text(toggleState, [](bool v) {
                         return v ? "On" : "Off";
-                    })->setTextColor(RGB(100, 100, 100))
+                    })->setTextColor(Color::fromRGB(100, 100, 100))
                 })->setSpacing(12)->setPadding(16),
 
                 Divider(),
@@ -55,7 +55,7 @@ public:
                     ),
                     Text(sliderState, [](double v) {
                         return std::to_string((int)v);
-                    })->setMinWidth(32)->setTextColor(RGB(100, 100, 100))
+                    })->setMinWidth(32)->setTextColor(Color::fromRGB(100, 100, 100))
                 })->setSpacing(12)->setPadding(16),
 
                 Divider(),
@@ -69,7 +69,7 @@ public:
                         ->setInputValue(checkState),
                     Text(checkState, [](bool v) {
                         return v ? "Checked" : "Unchecked";
-                    })->setTextColor(RGB(100, 100, 100))
+                    })->setTextColor(Color::fromRGB(100, 100, 100))
                 })->setSpacing(12)->setPadding(16),
 
                 Divider(),
@@ -87,7 +87,7 @@ public:
                         }),
                     Text(radioState, [](const std::string &v) {
                         return v;
-                    })->setTextColor(RGB(100, 100, 100))
+                    })->setTextColor(Color::fromRGB(100, 100, 100))
                 })->setSpacing(12)->setPadding(16),
 
                 Divider(),
@@ -103,7 +103,7 @@ public:
                     ),
                     Text(textState, [](const std::string &v) {
                         return std::to_string((int)v.size()) + " chars";
-                    })->setMinWidth(60)->setTextColor(RGB(100, 100, 100))
+                    })->setMinWidth(60)->setTextColor(Color::fromRGB(100, 100, 100))
                 })->setSpacing(12)->setPadding(16),
 
                 Divider(),
@@ -124,7 +124,7 @@ public:
                         for (char c : v)
                             if (c == '\n') lines++;
                         return std::to_string(lines) + " lines";
-                    })->setMinWidth(60)->setTextColor(RGB(100, 100, 100))
+                    })->setMinWidth(60)->setTextColor(Color::fromRGB(100, 100, 100))
                 })->setSpacing(12)->setPadding(16),
 
                 Divider(),
@@ -142,7 +142,7 @@ public:
                         ->setWidth(120),
                     Text(numberState, [](double v) {
                         return "= " + std::to_string((int)v);
-                    })->setTextColor(RGB(100, 100, 100))
+                    })->setTextColor(Color::fromRGB(100, 100, 100))
                 })->setSpacing(12)->setPadding(16),
 
                 Divider(),
@@ -162,7 +162,7 @@ public:
                         std::ostringstream oss;
                         oss << std::fixed << std::setprecision(1) << v << " kg";
                         return oss.str();
-                    })->setTextColor(RGB(100, 100, 100))
+                    })->setTextColor(Color::fromRGB(100, 100, 100))
                 })->setSpacing(12)->setPadding(16),
 
             })->setSpacing(0)

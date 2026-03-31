@@ -30,15 +30,15 @@
 class TextAreaWidget : public Widget {
 public:
   // ── Appearance ────────────────────────────────────────────────────────────
-  COLORREF focusedBorderColor = RGB(33, 150, 243);
-  COLORREF unfocusedBorderColor = RGB(180, 180, 180);
-  COLORREF placeholderColor = RGB(180, 180, 180);
-  COLORREF inputTextColor = RGB(30, 30, 30);
-  COLORREF lineNumBgColor = RGB(245, 246, 248);
-  COLORREF lineNumTextColor = RGB(150, 150, 150);
-  COLORREF lineNumBorderColor = RGB(220, 220, 220);
-  COLORREF selectionColor = RGB(173, 214, 255);
-  COLORREF cursorColor = RGB(30, 30, 30);
+  Color focusedBorderColor = Color::fromRGB(33, 150, 243);
+  Color unfocusedBorderColor = Color::fromRGB(180, 180, 180);
+  Color placeholderColor = Color::fromRGB(180, 180, 180);
+  Color inputTextColor = Color::fromRGB(30, 30, 30);
+  Color lineNumBgColor = Color::fromRGB(245, 246, 248);
+  Color lineNumTextColor = Color::fromRGB(150, 150, 150);
+  Color lineNumBorderColor = Color::fromRGB(220, 220, 220);
+  Color selectionColor = Color::fromRGB(173, 214, 255);
+  Color cursorColor = Color::fromRGB(30, 30, 30);
 
   // ── Config ────────────────────────────────────────────────────────────────
   std::string placeholder;
@@ -53,7 +53,7 @@ public:
     isFocusable = true;
     hasBorder = true;
     hasBackground = true;
-    backgroundColor = RGB(255, 255, 255);
+    backgroundColor = Color::fromRGB(255, 255, 255);
     borderColor = unfocusedBorderColor;
     borderWidth = 1;
     borderRadius = 4;
@@ -70,18 +70,18 @@ public:
     // Vertical scrollbar (right edge)
     sbV_.size = 8;
     sbV_.horizontal = false;
-    sbV_.colorNormal = RGB(180, 180, 180);
-    sbV_.colorHover = RGB(140, 140, 140);
-    sbV_.colorActive = RGB(100, 100, 100);
-    sbV_.colorTrack = RGB(240, 240, 240);
+    sbV_.colorNormal = Color::fromRGB(180, 180, 180);
+    sbV_.colorHover = Color::fromRGB(140, 140, 140);
+    sbV_.colorActive = Color::fromRGB(100, 100, 100);
+    sbV_.colorTrack = Color::fromRGB(240, 240, 240);
 
     // Horizontal scrollbar (bottom edge)
     sbH_.size = 8;
     sbH_.horizontal = true;
-    sbH_.colorNormal = RGB(180, 180, 180);
-    sbH_.colorHover = RGB(140, 140, 140);
-    sbH_.colorActive = RGB(100, 100, 100);
-    sbH_.colorTrack = RGB(240, 240, 240);
+    sbH_.colorNormal = Color::fromRGB(180, 180, 180);
+    sbH_.colorHover = Color::fromRGB(140, 140, 140);
+    sbH_.colorActive = Color::fromRGB(100, 100, 100);
+    sbH_.colorTrack = Color::fromRGB(240, 240, 240);
 
     lines_.push_back("");
   }
@@ -343,7 +343,7 @@ public:
     return false;
   }
 
-  bool handleMouseUp(int mx, int my) override {
+  bool handleMouseUp(int /*mx*/, int /*mx*/) override {
     bool handled = false;
     if (sbV_.onMouseUp())
       handled = true;
@@ -663,15 +663,15 @@ public:
     sbV_.size = sbH_.size = s;
     return self_();
   }
-  std::shared_ptr<TextAreaWidget> setScrollbarColor(COLORREF c) {
+  std::shared_ptr<TextAreaWidget> setScrollbarColor(Color c) {
     sbV_.colorNormal = sbH_.colorNormal = c;
     return self_();
   }
-  std::shared_ptr<TextAreaWidget> setScrollbarHoverColor(COLORREF c) {
+  std::shared_ptr<TextAreaWidget> setScrollbarHoverColor(Color c) {
     sbV_.colorHover = sbH_.colorHover = c;
     return self_();
   }
-  std::shared_ptr<TextAreaWidget> setScrollbarTrackColor(COLORREF c) {
+  std::shared_ptr<TextAreaWidget> setScrollbarTrackColor(Color c) {
     sbV_.colorTrack = sbH_.colorTrack = c;
     return self_();
   }
@@ -993,13 +993,13 @@ public:
   std::string prefix;
   std::string suffix;
 
-  COLORREF focusedBorderColor = RGB(33, 150, 243);
-  COLORREF unfocusedBorderColor = RGB(180, 180, 180);
-  COLORREF buttonBgColor = RGB(245, 246, 248);
-  COLORREF buttonHoverColor = RGB(225, 235, 248);
-  COLORREF buttonArrowColor = RGB(80, 80, 80);
-  COLORREF inputTextColor = RGB(30, 30, 30);
-  COLORREF disabledColor = RGB(180, 180, 180);
+  Color focusedBorderColor = Color::fromRGB(33, 150, 243);
+  Color unfocusedBorderColor = Color::fromRGB(180, 180, 180);
+  Color buttonBgColor = Color::fromRGB(245, 246, 248);
+  Color buttonHoverColor = Color::fromRGB(225, 235, 248);
+  Color buttonArrowColor = Color::fromRGB(80, 80, 80);
+  Color inputTextColor = Color::fromRGB(30, 30, 30);
+  Color disabledColor = Color::fromRGB(180, 180, 180);
 
   std::function<void(double)> onValueChanged;
 
@@ -1007,7 +1007,7 @@ public:
     isFocusable = true;
     hasBorder = true;
     hasBackground = true;
-    backgroundColor = RGB(255, 255, 255);
+    backgroundColor = Color::fromRGB(255, 255, 255);
     borderColor = unfocusedBorderColor;
     borderWidth = 1;
     borderRadius = 4;

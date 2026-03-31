@@ -54,7 +54,7 @@ public:
                     ->setFlex(1)
             )
             ->setWidth(260)
-            ->setBorderColor(RGB(210, 210, 210))
+            ->setBorderColor(Color::fromRGB(210, 210, 210))
             ->setBorderWidth(1),
 
             // ── Detail panel ──────────────────────────────────────────────
@@ -64,21 +64,21 @@ public:
                         Text("File Explorer")
                             ->setFontSize(18)
                             ->setFontWeight(FontWeight::Bold)
-                            ->setTextColor(RGB(80, 80, 80)),
+                            ->setTextColor(Color::fromRGB(80, 80, 80)),
                         SizedBox(0, 16),
                         Text(selectedPath)
                             ->setFontSize(13)
-                            ->setTextColor(RGB(33, 150, 243)),
+                            ->setTextColor(Color::fromRGB(33, 150, 243)),
                         SizedBox(0, 24),
                         Text("Click a node to select")
                             ->setFontSize(12)
-                            ->setTextColor(RGB(160, 160, 160)),
+                            ->setTextColor(Color::fromRGB(160, 160, 160)),
                         Text("Double-click a folder to open")
                             ->setFontSize(12)
-                            ->setTextColor(RGB(160, 160, 160)),
+                            ->setTextColor(Color::fromRGB(160, 160, 160)),
                         Text("Arrow keys to navigate")
                             ->setFontSize(12)
-                            ->setTextColor(RGB(160, 160, 160)),
+                            ->setTextColor(Color::fromRGB(160, 160, 160)),
                     })
                     ->setSpacing(0)
                 )

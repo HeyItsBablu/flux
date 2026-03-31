@@ -19,7 +19,7 @@ struct HSV {
   double a; // 0..1
 };
 
-inline COLORREF HSVtoRGB(const HSV &hsv) {
+inline Color HSVtoRGB(const HSV &hsv) {
   double r = 0, g = 0, b = 0;
   double h = hsv.h, s = hsv.s, v = hsv.v;
 
@@ -66,13 +66,14 @@ inline COLORREF HSVtoRGB(const HSV &hsv) {
     }
   }
 
-  return RGB((int)(r * 255), (int)(g * 255), (int)(b * 255));
+  return Color::fromRGB((uint8_t)(r * 255), (uint8_t)(g * 255),
+                        (uint8_t)(b * 255));
 }
 
-inline HSV RGBtoHSV(COLORREF color) {
-  double r = GetRValue(color) / 255.0;
-  double g = GetGValue(color) / 255.0;
-  double b = GetBValue(color) / 255.0;
+inline HSV RGBtoHSV(Color color) {
+  double r = color.r / 255.0;
+  double g = color.g / 255.0;
+  double b = color.b / 255.0;
 
   double cmax = max(r, max(g, b));
   double cmin = min(r, min(g, b));
@@ -94,15 +95,15 @@ inline HSV RGBtoHSV(COLORREF color) {
   return hsv;
 }
 
-inline std::string ColorToHex(COLORREF color) {
+inline std::string ColorToHex(Color color) {
   std::ostringstream ss;
   ss << "#" << std::uppercase << std::hex << std::setfill('0') << std::setw(2)
-     << (int)GetRValue(color) << std::setw(2) << (int)GetGValue(color)
-     << std::setw(2) << (int)GetBValue(color);
+     << (int)color.r << std::setw(2) << (int)color.g << std::setw(2)
+     << (int)color.b;
   return ss.str();
 }
 
-inline bool HexToColor(const std::string &hex, COLORREF &outColor) {
+inline bool HexToColor(const std::string &hex, Color &outColor) {
   std::string h = hex;
   if (!h.empty() && h[0] == '#')
     h = h.substr(1);
@@ -113,7 +114,7 @@ inline bool HexToColor(const std::string &hex, COLORREF &outColor) {
     int r = std::stoi(h.substr(0, 2), nullptr, 16);
     int g = std::stoi(h.substr(2, 2), nullptr, 16);
     int b = std::stoi(h.substr(4, 2), nullptr, 16);
-    outColor = RGB(r, g, b);
+    outColor = Color::fromRGB((uint8_t)r, (uint8_t)g, (uint8_t)b);
     return true;
   } catch (...) {
     return false;
@@ -143,7 +144,7 @@ public:
   bool draggingAlpha = false;
   bool showAlpha = true;
 
-  std::function<void(COLORREF)> onColorChanged;
+  std::function<void(Color)> onColorChanged;
 
   ColorPickerWidget() {
     autoWidth = false;
@@ -205,14 +206,14 @@ public:
     }
 
     // 4. Preview swatch + hex label
-    COLORREF currentColor = HSVtoRGB(hsv);
+    Color currentColor = HSVtoRGB(hsv);
     painter.drawEllipse(cx, cy, previewSize, previewSize, currentColor,
-                        RGB(180, 180, 180), 1);
+                        Color::fromRGB(180, 180, 180), 1);
 
     std::string hexStr = ColorToHex(currentColor);
     NativeFont hFont = fontCache.getFont(13, FontWeight::Normal);
     painter.drawTextA(hexStr, cx + previewSize + 8, cy, psz - previewSize - 8,
-                      previewSize, hFont, RGB(30, 30, 30),
+                      previewSize, hFont, Color::fromRGB(30, 30, 30),
                       DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     needsPaint = false;
@@ -286,7 +287,7 @@ public:
   // -------------------------------------------------------------------------
   // Builder / Setters
   // -------------------------------------------------------------------------
-  std::shared_ptr<ColorPickerWidget> setColor(COLORREF color) {
+  std::shared_ptr<ColorPickerWidget> setColor(Color color) {
     hsv = RGBtoHSV(color);
     hsv.a = 1.0;
     markNeedsPaint();
@@ -301,18 +302,18 @@ public:
   }
 
   std::shared_ptr<ColorPickerWidget>
-  setOnColorChanged(std::function<void(COLORREF)> cb) {
+  setOnColorChanged(std::function<void(Color)> cb) {
     onColorChanged = cb;
     return std::static_pointer_cast<ColorPickerWidget>(shared_from_this());
   }
 
-  std::shared_ptr<ColorPickerWidget> bindValue(State<COLORREF> &state) {
-    COLORREF init = state.get();
+  std::shared_ptr<ColorPickerWidget> bindValue(State<Color> &state) {
+    Color init = state.get();
     hsv = RGBtoHSV(init);
 
     state.bindProperty(
         shared_from_this(),
-        [](Widget *w, const COLORREF &val) {
+        [](Widget *w, const Color &val) {
           auto *cp = static_cast<ColorPickerWidget *>(w);
           cp->hsv = RGBtoHSV(val);
           cp->hsv.a = 1.0;
@@ -323,10 +324,10 @@ public:
     return std::static_pointer_cast<ColorPickerWidget>(shared_from_this());
   }
 
-  COLORREF getColor() const { return HSVtoRGB(hsv); }
+  Color getColor() const { return HSVtoRGB(hsv); }
 
 private:
-  State<COLORREF> *boundState = nullptr;
+  State<Color> *boundState = nullptr;
 
   // -------------------------------------------------------------------------
   // Internal helpers
@@ -367,7 +368,7 @@ private:
   }
 
   void notifyChanged() {
-    COLORREF c = getColor();
+    Color c = getColor();
     if (onColorChanged)
       onColorChanged(c);
     if (boundState)
@@ -379,26 +380,27 @@ private:
 #ifdef _WIN32
     for (int px = 0; px < size; px++) {
       double s = (double)px / size;
-      COLORREF topColor = HSVtoRGB({hsv.h, s, 1.0, 1.0});
+      Color topColor = HSVtoRGB({hsv.h, s, 1.0, 1.0});
       for (int py = 0; py < size; py++) {
         double t = (double)py / size;
-        int r = (int)(GetRValue(topColor) * (1.0 - t));
-        int g = (int)(GetGValue(topColor) * (1.0 - t));
-        int b = (int)(GetBValue(topColor) * (1.0 - t));
-        SetPixel(ctx.hdc, cx + px, cy + py, RGB(r, g, b));
+        SetPixel(ctx.hdc, cx + px, cy + py,
+                 toColorRef(Color::fromRGB((uint8_t)(topColor.r * (1.0 - t)),
+                                           (uint8_t)(topColor.g * (1.0 - t)),
+                                           (uint8_t)(topColor.b * (1.0 - t)))));
       }
     }
 #endif
-    Painter(ctx).drawRectOutline(cx, cy, size, size, RGB(180, 180, 180), 1);
+    Painter(ctx).drawRectOutline(cx, cy, size, size,
+                                 Color::fromRGB(180, 180, 180), 1);
   }
   void renderHueBar(GraphicsContext &ctx, int cx, int cy, int barW, int barH) {
     Painter painter(ctx);
     for (int px = 0; px < barW; px++) {
       double hue = (double)px / barW * 360.0;
-      COLORREF c = HSVtoRGB({hue, 1.0, 1.0, 1.0});
+      Color c = HSVtoRGB({hue, 1.0, 1.0, 1.0});
       painter.drawVLine(cx + px, cy, barH, c, 1);
     }
-    painter.drawRectOutline(cx, cy, barW, barH, RGB(180, 180, 180), 1);
+    painter.drawRectOutline(cx, cy, barW, barH, Color::fromRGB(180, 180, 180), 1);
   }
 
   void renderAlphaBar(GraphicsContext &ctx, int cx, int cy, int barW,
@@ -410,7 +412,8 @@ private:
     for (int px = 0; px < barW; px += tileSize) {
       for (int py = 0; py < barH; py += tileSize) {
         bool light = ((px / tileSize + py / tileSize) % 2 == 0);
-        NativeColor bg = light ? RGB(200, 200, 200) : RGB(150, 150, 150);
+        Color bg = light ? Color::fromRGB(200, 200, 200)
+                         : Color::fromRGB(150, 150, 150);
         int tw = min(px + tileSize, barW) - px;
         int th = min(py + tileSize, barH) - py;
         painter.fillRect(cx + px, cy + py, tw, th, bg);
@@ -418,36 +421,37 @@ private:
     }
 
     // Alpha gradient overlay
-    NativeColor baseColor = HSVtoRGB(hsv);
+    Color baseColor = HSVtoRGB(hsv);
     for (int px = 0; px < barW; px++) {
       double a = (double)px / barW;
-      int r = (int)(GetRValue(baseColor) * a + 200 * (1.0 - a));
-      int g = (int)(GetGValue(baseColor) * a + 200 * (1.0 - a));
-      int b = (int)(GetBValue(baseColor) * a + 200 * (1.0 - a));
-      painter.drawVLine(cx + px, cy, barH, RGB(r, g, b), 1);
+      painter.drawVLine(
+          cx + px, cy, barH,
+          Color::fromRGB((uint8_t)(baseColor.r * a + 200 * (1.0 - a)),
+                         (uint8_t)(baseColor.g * a + 200 * (1.0 - a)),
+                         (uint8_t)(baseColor.b * a + 200 * (1.0 - a))),
+          1);
     }
-
-    painter.drawRectOutline(cx, cy, barW, barH, RGB(180, 180, 180), 1);
+    painter.drawRectOutline(cx, cy, barW, barH, Color::fromRGB(180, 180, 180),
+                            1);
   }
 
   // Circular thumb for SV square
   void drawThumb(GraphicsContext &ctx, int tx, int ty, int radius) {
     Painter painter(ctx);
     // Dark outer ring
-    painter.drawEllipse(tx - radius - 1, ty - radius - 1, (radius + 1) * 2,
-                        (radius + 1) * 2, RGB(0, 0, 0), RGB(80, 80, 80),
-                        1); // transparent fill via alpha trick
+painter.drawEllipse(tx - radius - 1, ty - radius - 1, (radius+1)*2, (radius+1)*2,
+                    Color::fromRGB(0,0,0), Color::fromRGB(80,80,80), 1);
     // White ring on top
-    painter.drawEllipse(tx - radius, ty - radius, radius * 2, radius * 2,
-                        RGB(0, 0, 0), RGB(255, 255, 255), 2);
+painter.drawEllipse(tx - radius, ty - radius, radius*2, radius*2,
+                    Color::fromRGB(0,0,0), Color::fromRGB(255,255,255), 2);
   }
 
   void drawBarThumb(GraphicsContext &ctx, int tx, int barY, int barH) {
     Painter painter(ctx);
     int py = barY + barH / 2;
-    painter.drawEllipse(tx - 5, py - 5, 10, 10, RGB(0, 0, 0),
-                        RGB(255, 255, 255), 2);
-    painter.drawEllipse(tx - 4, py - 4, 8, 8, RGB(0, 0, 0), RGB(80, 80, 80), 1);
+    painter.drawEllipse(tx - 5, py - 5, 10, 10, Color::fromRGB(0, 0, 0),
+                        Color::fromRGB(255, 255, 255), 2);
+    painter.drawEllipse(tx - 4, py - 4, 8, 8, Color::fromRGB(0, 0, 0), Color::fromRGB(80, 80, 80), 1);
   }
 };
 
@@ -457,8 +461,7 @@ private:
 
 using ColorPickerWidgetPtr = std::shared_ptr<ColorPickerWidget>;
 
-inline ColorPickerWidgetPtr ColorPicker(COLORREF initialColor = RGB(255, 0,
-                                                                    0)) {
+inline ColorPickerWidgetPtr ColorPicker(Color initialColor = Color::fromRGB(255, 0, 0)) {
   auto w = std::make_shared<ColorPickerWidget>();
   w->setColor(initialColor);
   return w;

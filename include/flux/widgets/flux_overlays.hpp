@@ -70,12 +70,13 @@ private:
   int paddingH = 12;
   int paddingV = 4;
 
-  COLORREF menuBgColor = RGB(255, 255, 255);
-  COLORREF menuBorderColor = RGB(180, 180, 180);
-  COLORREF itemHoverColor = RGB(240, 245, 250);
-  COLORREF itemTextColor = RGB(30, 30, 30);
-  COLORREF itemDisabledColor = RGB(160, 160, 160);
-  COLORREF separatorColor = RGB(220, 220, 220);
+  Color menuBgColor = Color::fromRGBA(255, 255, 255, 255);
+  Color menuBorderColor = Color::fromRGBA(180, 180, 180,
+                            255);
+  Color itemHoverColor = Color::fromRGB(240, 245, 250);
+  Color itemTextColor = Color::fromRGB(30, 30, 30);
+  Color itemDisabledColor = Color::fromRGB(160, 160, 160);
+  Color separatorColor = Color::fromRGB(220, 220, 220);
 
   int menuFontSize = 13;
   int menuBorderRadius = 6;
@@ -115,15 +116,15 @@ public:
     minWidth = w;
     return std::static_pointer_cast<ContextMenuWidget>(shared_from_this());
   }
-  std::shared_ptr<ContextMenuWidget> setMenuBackground(COLORREF color) {
+  std::shared_ptr<ContextMenuWidget> setMenuBackground(Color color) {
     menuBgColor = color;
     return std::static_pointer_cast<ContextMenuWidget>(shared_from_this());
   }
-  std::shared_ptr<ContextMenuWidget> setMenuBorder(COLORREF color) {
+  std::shared_ptr<ContextMenuWidget> setMenuBorder(Color color) {
     menuBorderColor = color;
     return std::static_pointer_cast<ContextMenuWidget>(shared_from_this());
   }
-  std::shared_ptr<ContextMenuWidget> setItemHoverColor(COLORREF color) {
+  std::shared_ptr<ContextMenuWidget> setItemHoverColor(Color color) {
     itemHoverColor = color;
     return std::static_pointer_cast<ContextMenuWidget>(shared_from_this());
   }
@@ -176,13 +177,12 @@ public:
 
     // Shadow
     painter.fillRoundedRect(shadowOffset, shadowOffset, menuW, menuH,
-                            menuBorderRadius, RGB(0, 0, 0), 60);
+                            menuBorderRadius, Color::fromRGBA(0, 0, 0, 60));
 
     // Background + border
-    painter.fillRoundedRect(0, 0, menuW, menuH, menuBorderRadius, menuBgColor,
-                            255);
-    painter.drawBorder(0, 0, menuW, menuH, menuBorderRadius, menuBorderColor, 1,
-                       255);
+    painter.fillRoundedRect(0, 0, menuW, menuH, menuBorderRadius, menuBgColor);
+    painter.drawBorder(0, 0, menuW, menuH, menuBorderRadius, menuBorderColor,
+                       1);
 
     // Items
     NativeFont font = fontCache.getFont(menuFontSize, FontWeight::Normal);
@@ -202,7 +202,7 @@ public:
 
         std::wstring wlabel = toWideString(item.label);
 
-        COLORREF textCol = item.enabled ? itemTextColor : itemDisabledColor;
+        Color textCol = item.enabled ? itemTextColor : itemDisabledColor;
         painter.drawText(
             wlabel, paddingH, currentY, menuW - paddingH * 2, itemHeight, font,
             textCol, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
@@ -496,10 +496,10 @@ public:
 
   int dialogWidth = 400;
   int dialogHeight = 300;
-  COLORREF overlayColor = RGB(0, 0, 0);
+  Color overlayColor = Color::fromRGBA(0, 0, 0,128);
   int overlayAlpha = 128;
-  COLORREF dialogBgColor = RGB(255, 255, 255);
-  COLORREF dialogBorderColor = RGB(200, 200, 200);
+  Color dialogBgColor = Color::fromRGBA(255, 255, 255, 255);
+  Color dialogBorderColor = Color::fromRGBA(200, 200, 200, 255);
   int dialogBorderRadius = 8;
   int dialogPadding = 24;
 
@@ -531,16 +531,16 @@ public:
     int winH = sz.height;
 
     // Semi-transparent dim overlay
-    painter.fillRectAlpha(0, 0, winW, winH, overlayColor, (BYTE)overlayAlpha);
+    painter.fillRectAlpha(0, 0, winW, winH, overlayColor);
 
     int dialogX = (winW - dialogWidth) / 2;
     int dialogY = (winH - dialogHeight) / 2;
 
     // Dialog box
     painter.fillRoundedRect(dialogX, dialogY, dialogWidth, dialogHeight,
-                            dialogBorderRadius, dialogBgColor, 255);
+                            dialogBorderRadius, dialogBgColor);
     painter.drawBorder(dialogX, dialogY, dialogWidth, dialogHeight,
-                       dialogBorderRadius, dialogBorderColor, 1, 255);
+                       dialogBorderRadius, dialogBorderColor, 1);
 
     // Content
     if (content) {
@@ -743,9 +743,9 @@ private:
   std::string tipText;
   TooltipPosition preferredPosition = TooltipPosition::Auto;
 
-  COLORREF tipBgColor = RGB(50, 50, 50);
-  COLORREF tipTextColor = RGB(255, 255, 255);
-  COLORREF tipBorderColor = RGB(80, 80, 80);
+  Color tipBgColor = Color::fromRGBA(50, 50, 50, 255);
+  Color tipTextColor = Color::fromRGB(255, 255, 255);
+  Color tipBorderColor = Color::fromRGBA(80, 80, 80, 255);
   int tipFontSize = 12;
   int tipPadH = 10;
   int tipPadV = 6;
@@ -780,11 +780,11 @@ public:
     preferredPosition = pos;
     return std::static_pointer_cast<TooltipWidget>(shared_from_this());
   }
-  std::shared_ptr<TooltipWidget> setTooltipBackground(COLORREF color) {
+  std::shared_ptr<TooltipWidget> setTooltipBackground(Color color) {
     tipBgColor = color;
     return std::static_pointer_cast<TooltipWidget>(shared_from_this());
   }
-  std::shared_ptr<TooltipWidget> setTooltipTextColor(COLORREF color) {
+  std::shared_ptr<TooltipWidget> setTooltipTextColor(Color color) {
     tipTextColor = color;
     return std::static_pointer_cast<TooltipWidget>(shared_from_this());
   }
@@ -842,13 +842,12 @@ public:
     Painter painter(ctx);
 
     // Shadow
-    painter.fillRoundedRect(2, 2, tipW, tipH, tipBorderRadius, RGB(0, 0, 0),
-                            60);
+    painter.fillRoundedRect(2, 2, tipW, tipH, tipBorderRadius,
+                            Color::fromRGBA(0, 0, 0, 60));
 
     // Bubble
-    painter.fillRoundedRect(0, 0, tipW, tipH, tipBorderRadius, tipBgColor, 255);
-    painter.drawBorder(0, 0, tipW, tipH, tipBorderRadius, tipBorderColor, 1,
-                       255);
+    painter.fillRoundedRect(0, 0, tipW, tipH, tipBorderRadius, tipBgColor);
+    painter.drawBorder(0, 0, tipW, tipH, tipBorderRadius, tipBorderColor, 1);
 
     // Text
 
@@ -961,15 +960,15 @@ public:
   int arrowSize = 8;
   int scrollOffset = 0;
 
-  COLORREF dropdownBgColor = RGB(255, 255, 255);
-  COLORREF dropdownBorderColor = RGB(180, 180, 180);
-  COLORREF dropdownFocusedBorderColor = RGB(33, 150, 243);
-  COLORREF placeholderColor = RGB(150, 150, 150);
-  COLORREF itemHoverColor = RGB(240, 240, 240);
-  COLORREF itemSelectedColor = RGB(230, 245, 255);
-  COLORREF listBgColor = RGB(255, 255, 255);
-  COLORREF listBorderColor = RGB(200, 200, 200);
-  COLORREF arrowColor = RGB(100, 100, 100);
+  Color dropdownBgColor = Color::fromRGB(255, 255, 255);
+  Color dropdownBorderColor = Color::fromRGB(180, 180, 180);
+  Color dropdownFocusedBorderColor = Color::fromRGB(33, 150, 243);
+  Color placeholderColor = Color::fromRGB(150, 150, 150);
+  Color itemHoverColor = Color::fromRGB(240, 240, 240);
+  Color itemSelectedColor = Color::fromRGB(230, 245, 255);
+  Color listBgColor = Color::fromRGB(255, 255, 255);
+  Color listBorderColor = Color::fromRGB(200, 200, 200);
+  Color arrowColor = Color::fromRGB(100, 100, 100);
 
   std::string placeholder = "Select an option...";
   std::function<void(int, const std::string &)> onSelectionChanged;
@@ -1009,10 +1008,9 @@ public:
     NativeFont font = fontCache.getFont(fontSize, fontWeight);
 
     // Selected text or placeholder
-    COLORREF textCol =
-        (selectedIndex >= 0 && selectedIndex < (int)options.size())
-            ? getCurrentTextColor()
-            : placeholderColor;
+    Color textCol = (selectedIndex >= 0 && selectedIndex < (int)options.size())
+                        ? getCurrentTextColor()
+                        : placeholderColor;
     const std::string &label =
         (selectedIndex >= 0 && selectedIndex < (int)options.size())
             ? options[selectedIndex]
@@ -1076,7 +1074,7 @@ public:
 
       std::wstring wopt = toWideString(options[i]);
       painter.drawText(wopt, 12, itemY, listWidth_ - 24, itemHeight, font,
-                       RGB(30, 30, 30),
+                       Color::fromRGB(30, 30, 30),
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
     }
 

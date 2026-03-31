@@ -315,9 +315,9 @@ public:
 
   void render(GraphicsContext &ctx, FontCache &fontCache) override {
     if (hasBackground) {
-      COLORREF saved = backgroundColor;
+      Color saved = backgroundColor;
       if (_pressed)
-        backgroundColor = darkenColor(getCurrentBackgroundColor(), 20);
+        backgroundColor = getCurrentBackgroundColor().darken(20);
       drawRoundedRectangle(ctx);
       backgroundColor = saved;
     }
@@ -393,7 +393,7 @@ public:
     return std::static_pointer_cast<ButtonWidget>(shared_from_this());
   }
 
-  std::shared_ptr<ButtonWidget> setBackgroundColor(COLORREF color) {
+  std::shared_ptr<ButtonWidget> setBackgroundColor(Color color) {
     backgroundColor = color;
     hasBackground = true;
     markNeedsPaint();
@@ -402,7 +402,7 @@ public:
   template <typename T, typename F>
   std::shared_ptr<ButtonWidget> setBackgroundColor(State<T> &state,
                                                    F transform) {
-    std::function<COLORREF(const T &)> fn = transform;
+    std::function<Color(const T &)> fn = transform;
     backgroundColor = fn(state.get());
     hasBackground = true;
     state.bindProperty(
@@ -411,7 +411,7 @@ public:
     return std::static_pointer_cast<ButtonWidget>(shared_from_this());
   }
 
-  std::shared_ptr<ButtonWidget> setHoverBackgroundColor(COLORREF color) {
+  std::shared_ptr<ButtonWidget> setHoverBackgroundColor(Color color) {
     hoverBackgroundColor = color;
     hasHoverBackground = true;
     markNeedsPaint();
@@ -439,7 +439,7 @@ public:
     markNeedsLayout();
     return std::static_pointer_cast<ButtonWidget>(shared_from_this());
   }
-  std::shared_ptr<ButtonWidget> setTextColor(COLORREF color) {
+  std::shared_ptr<ButtonWidget> setTextColor(Color color) {
     textColor = color;
     markNeedsPaint();
     return std::static_pointer_cast<ButtonWidget>(shared_from_this());
@@ -492,8 +492,8 @@ inline ButtonWidgetPtr Button(const std::string &text,
   w->onClick = onClick;
 
   w->hasBackground = true;
-  w->backgroundColor = RGB(76, 175, 80);
-  w->textColor = RGB(255, 255, 255);
+  w->backgroundColor = Color::fromRGB(76, 175, 80);
+  w->textColor = Color::fromRGB(255, 255, 255);
   w->paddingLeft = w->paddingRight = 20;
   w->paddingTop = w->paddingBottom = 10;
   w->borderRadius = 4;
@@ -509,7 +509,7 @@ inline ButtonWidgetPtr Button(WidgetPtr child, ClickHandler onClick = nullptr) {
   w->onClick = onClick;
 
   w->hasBackground = true;
-  w->backgroundColor = RGB(76, 175, 80);
+  w->backgroundColor = Color::fromRGB(76, 175, 80);
   w->paddingLeft = w->paddingRight = 20;
   w->paddingTop = w->paddingBottom = 10;
   w->borderRadius = 4;

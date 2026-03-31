@@ -62,10 +62,10 @@ public:
 
                    // ── Status bar ──────────────────────────────────────
                    Row({Text("● LIVE")
-                           ->setTextColor(RGB(76, 175, 80))
+                           ->setTextColor(Color::fromRGB(76, 175, 80))
                            ->setFontSize(12),
                        Text(statusText)
-                           ->setTextColor(RGB(150, 150, 150))
+                           ->setTextColor(Color::fromRGB(150, 150, 150))
                            ->setFontSize(12)})
                        ->setSpacing(12),
 
@@ -73,7 +73,7 @@ public:
 
                    // ── CPU graph ───────────────────────────────────────
                    Text("CPU Usage %")
-                       ->setTextColor(RGB(200, 200, 200))
+                       ->setTextColor(Color::fromRGB(200, 200, 200))
                        ->setFontSize(13),
                    SizedBox(0, 6),
                    Graph(700, 200)
@@ -87,7 +87,7 @@ public:
 
                    // ── Memory graph ────────────────────────────────────
                    Text("Memory Usage %")
-                       ->setTextColor(RGB(200, 200, 200))
+                       ->setTextColor(Color::fromRGB(200, 200, 200))
                        ->setFontSize(13),
                    SizedBox(0, 6),
                    Graph(700, 200)
@@ -100,7 +100,7 @@ public:
 
                    // ── Network — multi-series bar chart ────────────────
                    Text("Network MB/s")
-                       ->setTextColor(RGB(200, 200, 200))
+                       ->setTextColor(Color::fromRGB(200, 200, 200))
                        ->setFontSize(13),
                    SizedBox(0, 6),
                    Graph(700, 200)

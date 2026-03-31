@@ -186,11 +186,11 @@ public:
   float tatHue = -1.f;
 
   // ── Colors ────────────────────────────────────────────────────────────────
-  COLORREF bgColor = RGB(22, 22, 32);
-  COLORREF borderColor = RGB(49, 50, 68);
-  COLORREF textDim = RGB(100, 105, 130);
-  COLORREF textBright = RGB(205, 214, 244);
-  COLORREF tabActive = RGB(174, 129, 255);
+  Color bgColor = Color::fromRGB(22, 22, 32);
+  Color borderColor = Color::fromRGB(49, 50, 68);
+  Color textDim = Color::fromRGB(100, 105, 130);
+  Color textBright = Color::fromRGB(205, 214, 244);
+  Color tabActive = Color::fromRGB(174, 129, 255);
 
   // Callback
   std::function<void(const HSLData &)> onHSLChanged;
@@ -356,19 +356,19 @@ private:
   // ── Band metadata ─────────────────────────────────────────────────────────
   struct BandMeta {
     const char *name;
-    COLORREF trackColor; // saturated band color for track fill
+    Color trackColor; // saturated band color for track fill
     float centerHue;     // degrees (for TAT)
     float halfWidth;
   };
   static constexpr BandMeta kMeta[kHSLBandCount] = {
-      {"Red", RGB(220, 60, 60), 15.f, 30.f},
-      {"Orange", RGB(220, 130, 40), 45.f, 22.f},
-      {"Yellow", RGB(200, 200, 30), 75.f, 22.f},
-      {"Green", RGB(50, 180, 70), 135.f, 37.f},
-      {"Aqua", RGB(50, 190, 190), 195.f, 37.f},
-      {"Blue", RGB(60, 100, 220), 245.f, 30.f},
-      {"Purple", RGB(160, 60, 200), 290.f, 30.f},
-      {"Magenta", RGB(210, 60, 150), 330.f, 22.f},
+      {"Red", Color::fromRGB(220, 60, 60), 15.f, 30.f},
+      {"Orange", Color::fromRGB(220, 130, 40), 45.f, 22.f},
+      {"Yellow", Color::fromRGB(200, 200, 30), 75.f, 22.f},
+      {"Green", Color::fromRGB(50, 180, 70), 135.f, 37.f},
+      {"Aqua", Color::fromRGB(50, 190, 190), 195.f, 37.f},
+      {"Blue", Color::fromRGB(60, 100, 220), 245.f, 30.f},
+      {"Purple", Color::fromRGB(160, 60, 200), 290.f, 30.f},
+      {"Magenta", Color::fromRGB(210, 60, 150), 330.f, 22.f},
   };
 
   // How many slider rows for the active tab?
@@ -430,7 +430,7 @@ private:
       bool active = ((int)activeTab == i);
       int sx = x + i * tw;
 
-      painter.fillRect(sx, y, tw, kTabH, active ? RGB(35, 35, 50) : bgColor);
+      painter.fillRect(sx, y, tw, kTabH, active ? Color::fromRGB(35, 35, 50) : bgColor);
 
       if (active)
         painter.drawHLine(sx + 3, y + kTabH - 1, tw - 6, tabActive, 2);
@@ -457,9 +457,11 @@ private:
 
     // TAT glow strip
     if (tatHL) {
-      COLORREF glow = RGB((colorRed(m.trackColor) * 2 + 28 * 3) / 5,
-                          (colorGreen(m.trackColor) * 2 + 28 * 3) / 5,
-                          (colorBlue(m.trackColor) * 2 + 28 * 3) / 5);
+Color glow = Color::fromRGB(
+    (uint8_t)((m.trackColor.r * 2 + 28 * 3) / 5),
+    (uint8_t)((m.trackColor.g * 2 + 28 * 3) / 5),
+    (uint8_t)((m.trackColor.b * 2 + 28 * 3) / 5));
+
       painter.fillRect(x, rowY, 3, rh, glow);
     }
 
@@ -505,14 +507,14 @@ private:
                       DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
 
     // Row divider
-    painter.drawHLine(x + 4, rowY + rh - 1, width - 8, RGB(38, 38, 52), 1);
+    painter.drawHLine(x + 4, rowY + rh - 1, width - 8, Color::fromRGB(38, 38, 52), 1);
   }
 
   // ── Single slider ─────────────────────────────────────────────────────────
   void drawSlider(GraphicsContext &ctx, FontCache &fc, int bi, int ch,
                   float val, int tx, int ty, int tw) {
     static const char *kChLabel[] = {"H", "S", "L"};
-    COLORREF chCol = channelColor(ch);
+    Color chCol = channelColor(ch);
     Painter painter(ctx);
 
     // Channel letter
@@ -524,7 +526,7 @@ private:
     int trackY = ty + (kSliderH - trackH) / 2;
 
     // Track background
-    painter.fillRect(tx, trackY, tw, trackH, RGB(40, 40, 55));
+    painter.fillRect(tx, trackY, tw, trackH, Color::fromRGB(40, 40, 55));
 
     // Filled portion (centre = zero)
     int mid = tx + tw / 2;
@@ -534,23 +536,23 @@ private:
     if (thumb != mid) {
       int fx0 = min(mid, thumb);
       int fx1 = max(mid, thumb);
-      COLORREF fillCol = blendColor(kMeta[bi].trackColor, chCol);
+      Color fillCol = blendColor(kMeta[bi].trackColor, chCol);
       painter.fillRect(fx0, trackY, fx1 - fx0, trackH, fillCol);
     }
 
     // Centre tick
-    painter.drawVLine(mid, trackY - 1, trackH + 2, RGB(60, 60, 80), 1);
+    painter.drawVLine(mid, trackY - 1, trackH + 2, Color::fromRGB(60, 60, 80), 1);
 
     // Thumb circle
     bool active = dragging_ && drag_.band == bi && drag_.channel == ch;
-    COLORREF thumbC = active ? RGB(255, 220, 80) : RGB(210, 210, 225);
+    Color thumbC = active ? Color::fromRGB(255, 220, 80) : Color::fromRGB(210, 210, 225);
     int r = 5;
     int thumbCY = trackY + trackH / 2;
     painter.drawEllipse(thumb - r, thumbCY - r, r * 2, r * 2, thumbC,
-                        RGB(80, 80, 100), 1);
+                        Color::fromRGB(80, 80, 100), 1);
 
     // Track border
-    painter.drawRectOutline(tx, trackY, tw, trackH, RGB(55, 55, 70), 1);
+    painter.drawRectOutline(tx, trackY, tw, trackH, Color::fromRGB(55, 55, 70), 1);
   }
   // ── Hit testing ───────────────────────────────────────────────────────────
 
@@ -642,18 +644,19 @@ private:
   }
 
   // ── Color helpers ─────────────────────────────────────────────────────────
-  static COLORREF channelColor(int ch) {
+  static Color channelColor(int ch) {
     if (ch == 0)
-      return RGB(200, 170, 80); // hue    — gold
+      return Color::fromRGB(200, 170, 80); // hue    — gold
     if (ch == 1)
-      return RGB(100, 200, 120); // sat    — green
-    return RGB(140, 160, 210);   // lum    — blue-grey
+      return Color::fromRGB(100, 200, 120); // sat    — green
+    return Color::fromRGB(140, 160, 210);   // lum    — blue-grey
   }
-  static COLORREF blendColor(COLORREF a, COLORREF b) {
-    return RGB((GetRValue(a) + GetRValue(b)) / 2,
-               (GetGValue(a) + GetGValue(b)) / 2,
-               (GetBValue(a) + GetBValue(b)) / 2);
-  }
+static Color blendColor(Color a, Color b) {
+    return Color::fromRGB(
+        (uint8_t)((a.r + b.r) / 2),
+        (uint8_t)((a.g + b.g) / 2),
+        (uint8_t)((a.b + b.b) / 2));
+}
 
   void captureMouse() {
     if (auto *ui = FluxUI::getCurrentInstance())

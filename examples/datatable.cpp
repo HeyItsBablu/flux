@@ -47,7 +47,7 @@ public:
                     DataTable(columns, rows)
                         ->setAlternateRows(true)
                         ->setShowColumnDividers(false)
-                        ->setAccentColor(RGB(33, 150, 243))
+                        ->setAccentColor(Color::fromRGB(33, 150, 243))
                         ->setOnRowSelected([this](int idx, const DataRow &row) {
                             statusText.set(
                                 "Selected: " + row.get("name") +
@@ -71,10 +71,10 @@ public:
             Container(
                 Text(statusText)
                     ->setFontSize(12)
-                    ->setTextColor(RGB(80, 80, 80))
+                    ->setTextColor(Color::fromRGB(80, 80, 80))
             )
-            ->setBackgroundColor(RGB(245, 246, 248))
-            ->setBorderColor(RGB(220, 220, 222))
+            ->setBackgroundColor(Color::fromRGB(245, 246, 248))
+            ->setBorderColor(Color::fromRGB(220, 220, 222))
             ->setBorderWidth(1)
             ->setPaddingAll(12, 8, 12, 8),
 

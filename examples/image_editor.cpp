@@ -694,19 +694,19 @@ public:
     });
 
     // ── Colors ────────────────────────────────────────────────────────────────
-    COLORREF kBg1    = RGB(17,  17,  27);
-    COLORREF kBg2    = RGB(24,  24,  37);
-    COLORREF kBorder = RGB(49,  50,  68);
-    COLORREF kText   = RGB(205, 214, 244);
-    COLORREF kDim    = RGB(100, 105, 130);
-    COLORREF kAccent = RGB(174, 129, 255);
-    COLORREF kGreen  = RGB(148, 226, 213);
-    COLORREF kOrange = RGB(250, 179, 135);
+    Color kBg1    = Color::fromRGB(17,  17,  27);
+    Color kBg2    = Color::fromRGB(24,  24,  37);
+    Color kBorder = Color::fromRGB(49,  50,  68);
+    Color kText   = Color::fromRGB(205, 214, 244);
+    Color kDim    = Color::fromRGB(100, 105, 130);
+    Color kAccent = Color::fromRGB(174, 129, 255);
+    Color kGreen  = Color::fromRGB(148, 226, 213);
+    Color kOrange = Color::fromRGB(250, 179, 135);
 
     auto sectionLabel = [&](const std::string &t) -> WidgetPtr {
       return Text(t)
           ->setFontSize(9)
-          ->setTextColor(RGB(100, 105, 125))
+          ->setTextColor(Color::fromRGB(100, 105, 125))
           ->setFontWeight(FontWeight::Bold);
     };
     auto cardWrap = [&](WidgetPtr child) -> WidgetPtr {
@@ -719,7 +719,7 @@ public:
     };
     auto makeSlider = [&](const std::string &label, double lo, double hi,
                           double step, State<double> &st,
-                          COLORREF col = RGB(174, 129, 255)) -> WidgetPtr {
+                          Color col = Color::fromRGB(174, 129, 255)) -> WidgetPtr {
       return Column({
           Row({
               Text(label)->setFontSize(9)->setTextColor(kDim)->setMinWidth(80),
@@ -760,7 +760,7 @@ public:
                 ->setShowClip(true)
                 ->setShowChannelToggles(true)
                 ->setLogScale(false)
-                ->setBgColor(RGB(14, 14, 22))
+                ->setBgColor(Color::fromRGB(14, 14, 22))
                 ->setOnZoneClicked([this](float pos) {
                   sExposure.set(max(-5.0, min(5.0, (pos - 0.5) * 4.0)));
                 }),
@@ -783,11 +783,11 @@ public:
             });
     curveWidgetPtr_ = curveWidget.get();
 
-    auto modeBtn = [&](const std::string &lbl, COLORREF col,
+    auto modeBtn = [&](const std::string &lbl, Color col,
                        std::function<void()> fn) -> WidgetPtr {
       return GestureDetector(
                  Container(Text(lbl)->setFontSize(9)->setTextColor(col))
-                     ->setBackgroundColor(RGB(24, 24, 34))
+                     ->setBackgroundColor(Color::fromRGB(24, 24, 34))
                      ->setBorderRadius(4)
                      ->setPaddingAll(6, 3, 6, 3)
                      ->setBorderWidth(1)
@@ -803,7 +803,7 @@ public:
             modeBtn("Parametric", kDim,
                     [cw = curveWidget.get()] { cw->setParametricMode(true); }),
             SizedBox(5, 0),
-            modeBtn("Reset", RGB(200, 100, 100), [this, cw = curveWidget.get()] {
+            modeBtn("Reset", Color::fromRGB(200, 100, 100), [this, cw = curveWidget.get()] {
                 cw->resetCurve();
                 curveState.set(ToneCurveData{});
                 if (surface_) {
@@ -836,17 +836,17 @@ public:
         Column({
             sectionLabel("TONE"),
             SizedBox(0, 8),
-            makeSlider("Exposure",   -5.0, 5.0, 0.05, sExposure,   RGB(250, 220, 100)),
+            makeSlider("Exposure",   -5.0, 5.0, 0.05, sExposure,   Color::fromRGB(250, 220, 100)),
             SizedBox(0, 6),
             makeSlider("Contrast",   -1.0, 1.0, 0.01, sContrast,   kAccent),
             SizedBox(0, 6),
-            makeSlider("Highlights", -1.0, 1.0, 0.01, sHighlights, RGB(200, 200, 220)),
+            makeSlider("Highlights", -1.0, 1.0, 0.01, sHighlights, Color::fromRGB(200, 200, 220)),
             SizedBox(0, 6),
-            makeSlider("Shadows",    -1.0, 1.0, 0.01, sShadows,    RGB(80, 100, 160)),
+            makeSlider("Shadows",    -1.0, 1.0, 0.01, sShadows,    Color::fromRGB(80, 100, 160)),
             SizedBox(0, 6),
-            makeSlider("Whites",     -1.0, 1.0, 0.01, sWhites,     RGB(230, 230, 230)),
+            makeSlider("Whites",     -1.0, 1.0, 0.01, sWhites,     Color::fromRGB(230, 230, 230)),
             SizedBox(0, 6),
-            makeSlider("Blacks",     -1.0, 1.0, 0.01, sBlacks,     RGB(60, 60, 80)),
+            makeSlider("Blacks",     -1.0, 1.0, 0.01, sBlacks,     Color::fromRGB(60, 60, 80)),
         })
         ->setSpacing(0));
 
@@ -855,13 +855,13 @@ public:
         Column({
             sectionLabel("COLOR"),
             SizedBox(0, 8),
-            makeSlider("Temperature", -1.0, 1.0, 0.01, sTemperature, RGB(100, 180, 250)),
+            makeSlider("Temperature", -1.0, 1.0, 0.01, sTemperature, Color::fromRGB(100, 180, 250)),
             SizedBox(0, 6),
-            makeSlider("Tint",        -1.0, 1.0, 0.01, sTint,        RGB(200, 120, 200)),
+            makeSlider("Tint",        -1.0, 1.0, 0.01, sTint,        Color::fromRGB(200, 120, 200)),
             SizedBox(0, 6),
-            makeSlider("Saturation",  -1.0, 1.0, 0.01, sSaturation,  RGB(220, 120, 100)),
+            makeSlider("Saturation",  -1.0, 1.0, 0.01, sSaturation,  Color::fromRGB(220, 120, 100)),
             SizedBox(0, 6),
-            makeSlider("Vibrance",    -1.0, 1.0, 0.01, sVibrance,    RGB(170, 220, 120)),
+            makeSlider("Vibrance",    -1.0, 1.0, 0.01, sVibrance,    Color::fromRGB(170, 220, 120)),
         })
         ->setSpacing(0));
 
@@ -879,7 +879,7 @@ public:
             });
     hslWidgetPtr_ = hslWidget.get();
 
-    auto hslResetBtn = modeBtn("Reset", RGB(200, 100, 100), [this]() {
+    auto hslResetBtn = modeBtn("Reset", Color::fromRGB(200, 100, 100), [this]() {
       if (hslWidgetPtr_) hslWidgetPtr_->resetAll();
       hslState.set(HSLData{});
       if (surface_) {
@@ -920,9 +920,9 @@ public:
         Column({
             sectionLabel("EFFECTS"),
             SizedBox(0, 8),
-            makeSlider("Vignette", -1.0, 1.0, 0.01, sVignette, RGB(80, 80, 100)),
+            makeSlider("Vignette", -1.0, 1.0, 0.01, sVignette, Color::fromRGB(80, 80, 100)),
             SizedBox(0, 6),
-            makeSlider("Grain",     0.0, 1.0, 0.01, sGrain,    RGB(180, 160, 130)),
+            makeSlider("Grain",     0.0, 1.0, 0.01, sGrain,    Color::fromRGB(180, 160, 130)),
         })
         ->setSpacing(0));
 
@@ -944,10 +944,10 @@ public:
         ->setPaddingAll(10, 10, 10, 10);
 
     // ── §I  TOOLBAR ───────────────────────────────────────────────────────────
-    auto mkBtn = [&](const std::string &lbl, COLORREF c,
+    auto mkBtn = [&](const std::string &lbl, Color c,
                      std::function<void()> fn) -> WidgetPtr {
       return Button(lbl, fn)
-          ->setBackgroundColor(RGB(30, 30, 46))
+          ->setBackgroundColor(Color::fromRGB(30, 30, 46))
           ->setTextColor(c)
           ->setBorderRadius(5)
           ->setHeight(26)
@@ -999,7 +999,7 @@ public:
                                 return b ? "After ▶" : "Before ◀";
                             })
                             ->setFontSize(11)->setTextColor(kText))
-                        ->setBackgroundColor(RGB(30, 30, 46))
+                        ->setBackgroundColor(Color::fromRGB(30, 30, 46))
                         ->setBorderRadius(5)
                         ->setPaddingAll(6, 3, 6, 3)
                         ->setBorderWidth(1)
@@ -1022,7 +1022,7 @@ public:
                         _snprintf_s(b, sizeof(b), _TRUNCATE, "%d%%", int(std::round(v)));
                         return std::string(b);
                     })
-                    ->setFontSize(10)->setTextColor(RGB(180, 180, 200))->setMinWidth(38),
+                    ->setFontSize(10)->setTextColor(Color::fromRGB(180, 180, 200))->setMinWidth(38),
                 Button("1:1", [this]() {
                         if (canvasPtr_) {
                           canvasPtr_->viewport().resetZoom();
@@ -1030,7 +1030,7 @@ public:
                           zoomLevel.set(100.0);
                         }
                     })
-                    ->setBackgroundColor(RGB(24, 24, 37))->setTextColor(kAccent)
+                    ->setBackgroundColor(Color::fromRGB(24, 24, 37))->setTextColor(kAccent)
                     ->setBorderRadius(5)->setWidth(30)->setHeight(26)->setPadding(4),
                 Button("Fit", [this]() {
                         if (canvasPtr_) {
@@ -1039,7 +1039,7 @@ public:
                           zoomLevel.set(double(canvasPtr_->viewport().zoom()) * 100.0);
                         }
                     })
-                    ->setBackgroundColor(RGB(24, 24, 37))->setTextColor(kAccent)
+                    ->setBackgroundColor(Color::fromRGB(24, 24, 37))->setTextColor(kAccent)
                     ->setBorderRadius(5)->setWidth(30)->setHeight(26)->setPadding(4),
                 SizedBox(16, 0),
                 Text(statusMsg, [](const std::string &s) { return s; })
@@ -1055,12 +1055,12 @@ public:
     auto hints =
         Container(
             Row({
-                Text("MMB/Space: Pan")  ->setFontSize(10)->setTextColor(RGB(60, 60, 80)),
+                Text("MMB/Space: Pan")  ->setFontSize(10)->setTextColor(Color::fromRGB(60, 60, 80)),
                 SizedBox(10, 0),
-                Text("Ctrl+Scroll: Zoom")->setFontSize(10)->setTextColor(RGB(60, 60, 80)),
+                Text("Ctrl+Scroll: Zoom")->setFontSize(10)->setTextColor(Color::fromRGB(60, 60, 80)),
                 SizedBox(10, 0),
                 Text("Curve: click=add  dbl-click=delete  arrow keys=nudge  |  HSL: dbl-click label=reset band")
-                    ->setFontSize(10)->setTextColor(RGB(60, 60, 80)),
+                    ->setFontSize(10)->setTextColor(Color::fromRGB(60, 60, 80)),
             })
             ->setSpacing(0))
         ->setBackgroundColor(kBg1)

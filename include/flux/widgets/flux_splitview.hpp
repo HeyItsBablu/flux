@@ -24,7 +24,7 @@
 //                  ->setRatio(0.35f)
 //                  ->setMinPaneWidth(120)
 //                  ->setDividerWidth(6)
-//                  ->setDividerColor(RGB(200, 200, 200));
+//                  ->setDividerColor(Color::fromRGB(200, 200, 200));
 //
 // Reactive ratio — bind to a State<float>:
 //   State<float> ratio(0.4f, app);
@@ -43,9 +43,9 @@ public:
   bool vertical = false; // false = left/right, true = top/bottom
   bool resizable = true; // allow drag-resize
 
-  COLORREF dividerColor = RGB(210, 210, 210);
-  COLORREF dividerHoverColor = RGB(33, 150, 243);
-  COLORREF dividerDragColor = RGB(25, 118, 210);
+  Color dividerColor = Color::fromRGB(210, 210, 210);
+  Color dividerHoverColor = Color::fromRGB(33, 150, 243);
+  Color dividerDragColor = Color::fromRGB(25, 118, 210);
 
   // Callback fired after every ratio change (e.g. to persist user's choice)
   std::function<void(float)> onRatioChanged;
@@ -280,19 +280,19 @@ public:
     return self();
   }
 
-  std::shared_ptr<SplitViewWidget> setDividerColor(COLORREF c) {
+  std::shared_ptr<SplitViewWidget> setDividerColor(Color c) {
     dividerColor = c;
     markNeedsPaint();
     return self();
   }
 
-  std::shared_ptr<SplitViewWidget> setDividerHoverColor(COLORREF c) {
+  std::shared_ptr<SplitViewWidget> setDividerHoverColor(Color c) {
     dividerHoverColor = c;
     markNeedsPaint();
     return self();
   }
 
-  std::shared_ptr<SplitViewWidget> setDividerDragColor(COLORREF c) {
+  std::shared_ptr<SplitViewWidget> setDividerDragColor(Color c) {
     dividerDragColor = c;
     markNeedsPaint();
     return self();
@@ -327,7 +327,7 @@ public:
     markNeedsLayout();
     return self();
   }
-  std::shared_ptr<SplitViewWidget> setBackgroundColor(COLORREF c) {
+  std::shared_ptr<SplitViewWidget> setBackgroundColor(Color c) {
     backgroundColor = c;
     hasBackground = true;
     markNeedsPaint();
@@ -444,7 +444,7 @@ private:
   void _renderDivider(GraphicsContext &ctx) const {
     Painter painter(ctx);
 
-    COLORREF col = _dragging         ? dividerDragColor
+    Color col = _dragging         ? dividerDragColor
                    : _dividerHovered ? dividerHoverColor
                                      : dividerColor;
 
@@ -456,7 +456,7 @@ private:
 
     // Grip dots
     if (resizable && dividerWidth >= 4) {
-      COLORREF gripCol = _dragging ? dividerHoverColor : RGB(150, 150, 150);
+      Color gripCol = _dragging ? dividerHoverColor : Color::fromRGB(150, 150, 150);
 
       const int dotR = 2;
       const int dotGap = 5;

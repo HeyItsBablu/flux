@@ -53,11 +53,11 @@ public:
   // ── Appearance ───────────────────────────────────────────────────────────
   int barHeight = 28;
   int buttonPadH = 12; // horizontal padding inside each button
-  COLORREF barBgColor = RGB(245, 245, 245);
-  COLORREF barBorderColor = RGB(210, 210, 210);
-  COLORREF btnHoverColor = RGB(225, 235, 245);
-  COLORREF btnOpenColor = RGB(210, 228, 248);
-  COLORREF btnTextColor = RGB(30, 30, 30);
+  Color barBgColor = Color::fromRGB(245, 245, 245);
+  Color barBorderColor = Color::fromRGB(210, 210, 210);
+  Color btnHoverColor = Color::fromRGB(225, 235, 245);
+  Color btnOpenColor = Color::fromRGB(210, 228, 248);
+  Color btnTextColor = Color::fromRGB(30, 30, 30);
 
   // Drop-down list appearance (mirrors ContextMenuWidget)
   int itemHeight = 28;
@@ -69,12 +69,12 @@ public:
   int menuFontSize = 13;
   int shadowOffset = 3;
 
-  COLORREF menuBgColor = RGB(255, 255, 255);
-  COLORREF menuBorderColor = RGB(180, 180, 180);
-  COLORREF itemHoverColor = RGB(240, 245, 250);
-  COLORREF itemTextColor = RGB(30, 30, 30);
-  COLORREF itemDisabledColor = RGB(160, 160, 160);
-  COLORREF separatorColor = RGB(220, 220, 220);
+  Color menuBgColor = Color::fromRGB(255, 255, 255);
+  Color menuBorderColor = Color::fromRGB(180, 180, 180);
+  Color itemHoverColor = Color::fromRGB(240, 245, 250);
+  Color itemTextColor = Color::fromRGB(30, 30, 30);
+  Color itemDisabledColor = Color::fromRGB(160, 160, 160);
+  Color separatorColor = Color::fromRGB(220, 220, 220);
 
   // ── State ─────────────────────────────────────────────────────────────────
   int openMenuIndex = -1; // which top-level entry is open (-1 = none)
@@ -168,7 +168,7 @@ public:
 
     // Shadow
     painter.fillRoundedRegion(shadowOffset, shadowOffset, mW, mH,
-                              menuBorderRadius * 2, RGB(0, 0, 0));
+                              menuBorderRadius * 2, Color::fromRGB(0, 0, 0));
 
     // Background + border
     painter.fillRoundedRectGDI(0, 0, mW, mH, menuBorderRadius * 2, menuBgColor,
@@ -330,7 +330,7 @@ public:
     markNeedsLayout();
     return self_();
   }
-  std::shared_ptr<MenuBarWidget> setBarBackground(COLORREF c) {
+  std::shared_ptr<MenuBarWidget> setBarBackground(Color c) {
     barBgColor = c;
     markNeedsPaint();
     return self_();

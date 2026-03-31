@@ -11,13 +11,13 @@
 
 struct AppTheme {
   // Colors
-  COLORREF primaryColor = RGB(33, 150, 243);        // Material Blue
-  COLORREF accentColor = RGB(255, 193, 7);          // Material Amber
-  COLORREF backgroundColor = RGB(250, 250, 250);    // Light Gray
-  COLORREF surfaceColor = RGB(255, 255, 255);       // White
-  COLORREF errorColor = RGB(244, 67, 54);           // Material Red
-  COLORREF textColor = RGB(0, 0, 0);                // Black
-  COLORREF secondaryTextColor = RGB(128, 128, 128); // Gray
+  Color primaryColor = Color::fromRGB(33, 150, 243);        // Material Blue
+  Color accentColor = Color::fromRGB(255, 193, 7);          // Material Amber
+  Color backgroundColor = Color::fromRGB(250, 250, 250);    // Light Gray
+  Color surfaceColor = Color::fromRGB(255, 255, 255);       // White
+  Color errorColor = Color::fromRGB(244, 67, 54);           // Material Red
+  Color textColor = Color::fromRGB(0, 0, 0);                // Black
+  Color secondaryTextColor = Color::fromRGB(128, 128, 128); // Gray
 
   // Typography
   int titleFontSize = 20;
@@ -32,19 +32,19 @@ struct AppTheme {
   int defaultBorderRadius = 8;
 
   // AppBar
-  COLORREF appBarColor = RGB(33, 150, 243);
-  COLORREF appBarTextColor = RGB(255, 255, 255);
+  Color appBarColor = Color::fromRGB(33, 150, 243);
+  Color appBarTextColor = Color::fromRGB(255, 255, 255);
   int appBarHeight = 56;
 
   // Cards
-  COLORREF cardColor = RGB(255, 255, 255);
-  COLORREF cardBorderColor = RGB(224, 224, 224);
+  Color cardColor = Color::fromRGB(255, 255, 255);
+  Color cardBorderColor = Color::fromRGB(224, 224, 224);
   int cardBorderRadius = 8;
   int cardPadding = 16;
 
   // Buttons
-  COLORREF buttonColor = RGB(33, 150, 243);
-  COLORREF buttonTextColor = RGB(255, 255, 255);
+  Color buttonColor = Color::fromRGB(33, 150, 243);
+  Color buttonTextColor = Color::fromRGB(255, 255, 255);
   int buttonBorderRadius = 4;
   int buttonPaddingH = 20;
   int buttonPaddingV = 10;
@@ -54,34 +54,34 @@ struct AppTheme {
 
   static AppTheme dark() {
     AppTheme theme;
-    theme.primaryColor = RGB(33, 150, 243);
-    theme.backgroundColor = RGB(18, 18, 18);
-    theme.surfaceColor = RGB(30, 30, 30);
-    theme.textColor = RGB(255, 255, 255);
-    theme.secondaryTextColor = RGB(180, 180, 180);
-    theme.cardColor = RGB(30, 30, 30);
-    theme.cardBorderColor = RGB(60, 60, 60);
+    theme.primaryColor = Color::fromRGB(33, 150, 243);
+    theme.backgroundColor = Color::fromRGB(18, 18, 18);
+    theme.surfaceColor = Color::fromRGB(30, 30, 30);
+    theme.textColor = Color::fromRGB(255, 255, 255);
+    theme.secondaryTextColor = Color::fromRGB(180, 180, 180);
+    theme.cardColor = Color::fromRGB(30, 30, 30);
+    theme.cardBorderColor = Color::fromRGB(60, 60, 60);
     return theme;
   }
 
   static AppTheme materialBlue() {
     AppTheme theme;
-    theme.primaryColor = RGB(33, 150, 243);
-    theme.accentColor = RGB(255, 193, 7);
+    theme.primaryColor = Color::fromRGB(33, 150, 243);
+    theme.accentColor = Color::fromRGB(255, 193, 7);
     return theme;
   }
 
   static AppTheme materialRed() {
     AppTheme theme;
-    theme.primaryColor = RGB(244, 67, 54);
-    theme.accentColor = RGB(255, 235, 59);
+    theme.primaryColor = Color::fromRGB(244, 67, 54);
+    theme.accentColor = Color::fromRGB(255, 235, 59);
     return theme;
   }
 
   static AppTheme materialGreen() {
     AppTheme theme;
-    theme.primaryColor = RGB(76, 175, 80);
-    theme.accentColor = RGB(255, 193, 7);
+    theme.primaryColor = Color::fromRGB(76, 175, 80);
+    theme.accentColor = Color::fromRGB(255, 193, 7);
     return theme;
   }
 };
@@ -279,7 +279,7 @@ private:
     // Was: CreatePen + SelectObject(NULL_BRUSH) + Rectangle + cleanup.
     // drawEllipse doesn't apply here; we need a rect outline.
     // Add Painter::drawRectOutline() for this — see note below.
-    painter.drawRectOutline(w->x, w->y, w->width, w->height, RGB(255, 0, 0), 1);
+    painter.drawRectOutline(w->x, w->y, w->width, w->height, Color::fromRGB(255, 0, 0), 1);
 
     for (auto &child : w->children)
       drawWidgetBounds(ctx, child.get());

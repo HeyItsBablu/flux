@@ -86,17 +86,17 @@ public:
   int arrowSize = 8;
   int scrollbarWidth = 8;
 
-  COLORREF rowBgColor = RGB(255, 255, 255);
-  COLORREF rowHoverColor = RGB(232, 244, 255);
-  COLORREF rowSelectColor = RGB(210, 235, 255);
-  COLORREF rowSelectBorder = RGB(33, 150, 243);
-  COLORREF textColor = RGB(30, 30, 30);
-  COLORREF disabledColor = RGB(170, 170, 170);
-  COLORREF arrowColor = RGB(100, 100, 100);
-  COLORREF iconColor = RGB(80, 80, 80);
-  COLORREF guideLineColor = RGB(210, 210, 210);
-  COLORREF scrollbarColor = RGB(180, 180, 180);
-  COLORREF scrollbarHover = RGB(140, 140, 140);
+  Color rowBgColor = Color::fromRGB(255, 255, 255);
+  Color rowHoverColor = Color::fromRGB(232, 244, 255);
+  Color rowSelectColor = Color::fromRGB(210, 235, 255);
+  Color rowSelectBorder = Color::fromRGB(33, 150, 243);
+  Color textColor = Color::fromRGB(30, 30, 30);
+  Color disabledColor = Color::fromRGB(170, 170, 170);
+  Color arrowColor = Color::fromRGB(100, 100, 100);
+  Color iconColor = Color::fromRGB(80, 80, 80);
+  Color guideLineColor = Color::fromRGB(210, 210, 210);
+  Color scrollbarColor = Color::fromRGB(180, 180, 180);
+  Color scrollbarHover = Color::fromRGB(140, 140, 140);
 
   bool showGuideLines = true;
   bool showIcons = true;
@@ -425,13 +425,17 @@ public:
     markNeedsLayout();
     return self_();
   }
-  std::shared_ptr<TreeViewWidget> setAccentColor(COLORREF c) {
-    rowSelectColor = RGB(GetRValue(c) / 5 * 4, GetGValue(c) / 5 * 4 + 20,
-                         GetBValue(c) / 5 * 4 + 40);
+std::shared_ptr<TreeViewWidget> setAccentColor(Color c) {
+    // Derive a lighter tint for the selection background
+    rowSelectColor  = Color::fromRGB(
+        (uint8_t)(c.r / 5 * 4),
+        (uint8_t)(min(255, c.g / 5 * 4 + 20)),
+        (uint8_t)(min(255, c.b / 5 * 4 + 40))
+    );
     rowSelectBorder = c;
     markNeedsPaint();
     return self_();
-  }
+}
   std::shared_ptr<TreeViewWidget> setWidth(int w) {
     width = w;
     autoWidth = false;
@@ -635,14 +639,14 @@ private:
     int totalH = (int)flatList_.size() * rowHeight;
     int sbX = x + width - scrollbarWidth - 1;
 
-    painter.fillRect(sbX, y, scrollbarWidth, height, RGB(240, 240, 240));
+    painter.fillRect(sbX, y, scrollbarWidth, height, Color::fromRGB(240, 240, 240));
 
     float thumbRatio = (float)height / (float)totalH;
     int thumbH = max(20, (int)(height * thumbRatio));
     float scrollRatio = (float)scrollOffset_ / (float)(totalH - height);
     int thumbY = y + (int)(scrollRatio * (height - thumbH));
 
-    COLORREF thumbCol = _scrollbarHovered ? scrollbarHover : scrollbarColor;
+    Color thumbCol = _scrollbarHovered ? scrollbarHover : scrollbarColor;
     painter.fillRoundedRegion(sbX + 1, thumbY, scrollbarWidth - 2, thumbH, 4,
                               thumbCol);
   }

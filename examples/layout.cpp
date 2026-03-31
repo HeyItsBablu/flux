@@ -46,36 +46,36 @@ public:
 
                         Row({
                                 Icon(FluxIcons::Remove, "Segoe MDL2 Assets", 14)
-                                    ->setColor(RGB(255, 255, 255)),
+                                    ->setColor(Color::fromRGB(255, 255, 255)),
                                 Text("  -3"),
                             })
                             ->setSpacing(0),
 
                         Button(Icon(FluxIcons::Remove)
-                                   ->setColor(RGB(255, 255, 255)),
+                                   ->setColor(Color::fromRGB(255, 255, 255)),
                                [this] {
                                  int n = max(1, boxCount.get() - 3);
                                  boxCount.set(n);
                                  rebuildIndices(n);
                                })
-                            ->setBackgroundColor(RGB(76, 175, 80)),
+                            ->setBackgroundColor(Color::fromRGB(76, 175, 80)),
 
                         Text(
                             boxCount,
                             [](int v) { return std::to_string(v) + " boxes"; }),
 
                         Button(
-                            Icon(FluxIcons::Add)->setColor(RGB(255, 255, 255)),
+                            Icon(FluxIcons::Add)->setColor(Color::fromRGB(255, 255, 255)),
                             [this] {
                               int n = min(kMax, boxCount.get() + 3);
                               boxCount.set(n);
                               rebuildIndices(n);
                             })
-                            ->setBackgroundColor(RGB(76, 175, 80)),
+                            ->setBackgroundColor(Color::fromRGB(76, 175, 80)),
 
                         Row({
                                 Icon(FluxIcons::Add, "Segoe MDL2 Assets", 14)
-                                    ->setColor(RGB(255, 255, 255)),
+                                    ->setColor(Color::fromRGB(255, 255, 255)),
                                 Text("  +3"),
                             })
                             ->setSpacing(0),
@@ -89,7 +89,7 @@ public:
                            Row({
                                    Icon(FluxIcons::ChartBar,
                                         "Segoe MDL2 Assets", 13)
-                                       ->setColor(RGB(100, 100, 100)),
+                                       ->setColor(Color::fromRGB(100, 100, 100)),
 
                                    Text(boxCount,
                                         [](int v) {
@@ -98,7 +98,7 @@ public:
                                                  " boxes";
                                         })
                                        ->setFontSize(12)
-                                       ->setTextColor(RGB(100, 100, 100)),
+                                       ->setTextColor(Color::fromRGB(100, 100, 100)),
                                })
                                ->setSpacing(0),
 
@@ -108,7 +108,7 @@ public:
                                ->setValue(fillRatio)
                                ->setHeight(8)
                                ->setProgressColors(
-                                   {RGB(66, 165, 245), RGB(102, 187, 106)})
+                                   {Color::fromRGB(66, 165, 245), Color::fromRGB(102, 187, 106)})
                                ->setBorderRadius(4),
 
                        })
@@ -123,7 +123,7 @@ public:
                         // Header
                         Row({
                                 Icon(FluxIcons::Check, "Segoe MDL2 Assets", 14)
-                                    ->setColor(RGB(33, 150, 243)),
+                                    ->setColor(Color::fromRGB(33, 150, 243)),
                                 Text("  Toast Notifications")
                                     ->setFontWeight(FontWeight::Bold),
                             })
@@ -137,7 +137,7 @@ public:
                                 Button(
                                     Row({
                                         Icon(FluxIcons::Info, "Segoe MDL2 Assets", 13)
-                                            ->setColor(RGB(255, 255, 255)),
+                                            ->setColor(Color::fromRGB(255, 255, 255)),
                                         Text("  Info"),
                                     })->setSpacing(0),
                                     [this] {
@@ -145,7 +145,7 @@ public:
                                             "Background sync completed successfully.",
                                             ToastType::Info, 3000);
                                     })
-                                    ->setBackgroundColor(RGB(33, 150, 243))
+                                    ->setBackgroundColor(Color::fromRGB(33, 150, 243))
                                     ->setBorderRadius(4)
                                     ->setPadding(8),
 
@@ -153,7 +153,7 @@ public:
                                 Button(
                                     Row({
                                         Icon(FluxIcons::Check, "Segoe MDL2 Assets", 13)
-                                            ->setColor(RGB(255, 255, 255)),
+                                            ->setColor(Color::fromRGB(255, 255, 255)),
                                         Text("  Success"),
                                     })->setSpacing(0),
                                     [this] {
@@ -161,7 +161,7 @@ public:
                                             "File saved successfully.",
                                             ToastType::Success, 3000);
                                     })
-                                    ->setBackgroundColor(RGB(76, 175, 80))
+                                    ->setBackgroundColor(Color::fromRGB(76, 175, 80))
                                     ->setBorderRadius(4)
                                     ->setPadding(8),
 
@@ -169,7 +169,7 @@ public:
                                 Button(
                                     Row({
                                         Icon(FluxIcons::Warning, "Segoe MDL2 Assets", 13)
-                                            ->setColor(RGB(255, 255, 255)),
+                                            ->setColor(Color::fromRGB(255, 255, 255)),
                                         Text("  Warning"),
                                     })->setSpacing(0),
                                     [this] {
@@ -177,7 +177,7 @@ public:
                                             "Disk space is running low (< 10% free).",
                                             ToastType::Warning, 4000);
                                     })
-                                    ->setBackgroundColor(RGB(255, 152, 0))
+                                    ->setBackgroundColor(Color::fromRGB(255, 152, 0))
                                     ->setBorderRadius(4)
                                     ->setPadding(8),
 
@@ -185,7 +185,7 @@ public:
                                 Button(
                                     Row({
                                         Icon(FluxIcons::Error, "Segoe MDL2 Assets", 13)
-                                            ->setColor(RGB(255, 255, 255)),
+                                            ->setColor(Color::fromRGB(255, 255, 255)),
                                         Text("  Error"),
                                     })->setSpacing(0),
                                     [this] {
@@ -193,7 +193,7 @@ public:
                                             "Failed to connect to the server.",
                                             ToastType::Error, 4000);
                                     })
-                                    ->setBackgroundColor(RGB(244, 67, 54))
+                                    ->setBackgroundColor(Color::fromRGB(244, 67, 54))
                                     ->setBorderRadius(4)
                                     ->setPadding(8),
 
@@ -215,7 +215,7 @@ public:
                                             .durationMs = 5000,
                                         });
                                     })
-                                    ->setBackgroundColor(RGB(244, 67, 54))
+                                    ->setBackgroundColor(Color::fromRGB(244, 67, 54))
                                     ->setBorderRadius(4)
                                     ->setPadding(8),
 
@@ -236,7 +236,7 @@ public:
                                             },
                                         });
                                     })
-                                    ->setBackgroundColor(RGB(33, 150, 243))
+                                    ->setBackgroundColor(Color::fromRGB(33, 150, 243))
                                     ->setBorderRadius(4)
                                     ->setPadding(8),
 
@@ -249,7 +249,7 @@ public:
                                         toast_->show("Task 3 complete",   ToastType::Info,    2500);
                                         toast_->show("All tasks finished",ToastType::Info,    3000);
                                     })
-                                    ->setBackgroundColor(RGB(102, 187, 106))
+                                    ->setBackgroundColor(Color::fromRGB(102, 187, 106))
                                     ->setBorderRadius(4)
                                     ->setPadding(8),
 
@@ -259,7 +259,7 @@ public:
                                     [this] {
                                         toast_->dismissAll();
                                     })
-                                    ->setBackgroundColor(RGB(150, 150, 150))
+                                    ->setBackgroundColor(Color::fromRGB(150, 150, 150))
                                     ->setBorderRadius(4)
                                     ->setPadding(8),
 
@@ -272,7 +272,7 @@ public:
                         Row({
                                 Text("Position:")
                                     ->setFontSize(12)
-                                    ->setTextColor(RGB(100, 100, 100)),
+                                    ->setTextColor(Color::fromRGB(100, 100, 100)),
 
                                 Button(Text("↙ BL"), [this] {
                                     toast_->setPosition(ToastPosition::BottomLeft);
@@ -310,8 +310,8 @@ public:
                     })
                     ->setSpacing(0))
                     ->setPadding(12)
-                    ->setBackgroundColor(RGB(250, 250, 255))
-                    ->setBorderColor(RGB(220, 220, 230))
+                    ->setBackgroundColor(Color::fromRGB(250, 250, 255))
+                    ->setBorderColor(Color::fromRGB(220, 220, 230))
                     ->setBorderWidth(1),
 
                 Divider(),
@@ -329,7 +329,7 @@ public:
                                                 Icon(FluxIcons::Dashboard,
                                                      "Segoe MDL2 Assets", 14)
                                                     ->setColor(
-                                                        RGB(33, 150, 243)),
+                                                        Color::fromRGB(33, 150, 243)),
 
                                                 Text("  Left Panel")
                                                     ->setFontWeight(
@@ -342,7 +342,7 @@ public:
 
                                         Text("Active boxes")
                                             ->setFontSize(11)
-                                            ->setTextColor(RGB(120, 120, 120)),
+                                            ->setTextColor(Color::fromRGB(120, 120, 120)),
 
                                         Text(boxCount,
                                              [](int v) {
@@ -355,7 +355,7 @@ public:
 
                                         Text("Capacity")
                                             ->setFontSize(11)
-                                            ->setTextColor(RGB(120, 120, 120)),
+                                            ->setTextColor(Color::fromRGB(120, 120, 120)),
 
                                         SizedBox(0, 4),
 
@@ -363,8 +363,8 @@ public:
                                             ->setValue(fillRatio)
                                             ->setHeight(6)
                                             ->setProgressColors(
-                                                {RGB(66, 165, 245),
-                                                 RGB(102, 187, 106)})
+                                                {Color::fromRGB(66, 165, 245),
+                                                 Color::fromRGB(102, 187, 106)})
                                             ->setBorderRadius(3),
 
                                         SizedBox(0, 12),
@@ -373,12 +373,12 @@ public:
                                                 Icon(FluxIcons::Check,
                                                      "Segoe MDL2 Assets", 14)
                                                     ->setColor(
-                                                        RGB(76, 175, 80)),
+                                                        Color::fromRGB(76, 175, 80)),
 
                                                 Text("  Running")
                                                     ->setFontSize(12)
                                                     ->setTextColor(
-                                                        RGB(76, 175, 80)),
+                                                        Color::fromRGB(76, 175, 80)),
                                             })
                                             ->setSpacing(0),
 
@@ -389,7 +389,7 @@ public:
                                             Row({
                                                 Icon(FluxIcons::Cancel,
                                                      "Segoe MDL2 Assets", 12)
-                                                    ->setColor(RGB(255, 255, 255)),
+                                                    ->setColor(Color::fromRGB(255, 255, 255)),
                                                 Text("  Notify")
                                                     ->setFontSize(12),
                                             })->setSpacing(0),
@@ -402,7 +402,7 @@ public:
                                                     .durationMs  = 3500,
                                                 });
                                             })
-                                            ->setBackgroundColor(RGB(33, 150, 243))
+                                            ->setBackgroundColor(Color::fromRGB(33, 150, 243))
                                             ->setBorderRadius(4)
                                             ->setPadding(8),
 
@@ -424,8 +424,8 @@ public:
                                     ->setSpacing(4))
                                 ->setWidth(200)
                                 ->setPadding(16)
-                                ->setBackgroundColor(RGB(245, 245, 250))
-                                ->setBorderColor(RGB(220, 220, 230))
+                                ->setBackgroundColor(Color::fromRGB(245, 245, 250))
+                                ->setBorderColor(Color::fromRGB(220, 220, 230))
                                 ->setBorderWidth(1),
 
                             // ── Right Panel
@@ -437,12 +437,12 @@ public:
                                                 Icon(FluxIcons::Grid,
                                                      "Segoe MDL2 Assets", 13)
                                                     ->setColor(
-                                                        RGB(120, 120, 120)),
+                                                        Color::fromRGB(120, 120, 120)),
 
                                                 Text("  GridView (reactive)")
                                                     ->setFontSize(12)
                                                     ->setTextColor(
-                                                        RGB(120, 120, 120)),
+                                                        Color::fromRGB(120, 120, 120)),
                                             })
                                             ->setSpacing(0),
 
@@ -453,7 +453,7 @@ public:
                                                 {Text("GridView (reactive)")
                                                      ->setFontSize(12)
                                                      ->setTextColor(
-                                                         RGB(120, 120, 120)),
+                                                         Color::fromRGB(120, 120, 120)),
                                                  SizedBox(0, 8),
                                                  Expanded(
                                                      GridView(boxIndices)
@@ -461,22 +461,22 @@ public:
                                                          ->itemBuilder([this](int i,
                                                                           const int &idx)
                                                                            -> WidgetPtr {
-                                                           static const COLORREF colors[] = {
-                                                               RGB(239, 83, 80),
-                                                               RGB(66, 165, 245),
-                                                               RGB(102, 187, 106),
-                                                               RGB(255, 167, 38),
-                                                               RGB(171, 71, 188),
-                                                               RGB(38, 198, 218),
+                                                           static const Color colors[] = {
+                                                               Color::fromRGB(239, 83, 80),
+                                                               Color::fromRGB(66, 165, 245),
+                                                               Color::fromRGB(102, 187, 106),
+                                                               Color::fromRGB(255, 167, 38),
+                                                               Color::fromRGB(171, 71, 188),
+                                                               Color::fromRGB(38, 198, 218),
                                                            };
-                                                           COLORREF c = colors[idx % 6];
+                                                           Color c = colors[idx % 6];
 
                                                            // Tap a grid box to toast its number
                                                            return GestureDetector(
                                                                Container(
                                                                    Center(
                                                                        Text(std::to_string(idx + 1))
-                                                                           ->setTextColor(RGB(255, 255, 255))
+                                                                           ->setTextColor(Color::fromRGB(255, 255, 255))
                                                                            ->setFontWeight(FontWeight::Bold)))
                                                                ->setHeight(80)
                                                                ->setBackgroundColor(c)

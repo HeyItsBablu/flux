@@ -1,4 +1,3 @@
-# ── FetchContent for stb ──────────────────────────────────────────────────────
 include(FetchContent)
 FetchContent_Declare(stb
     GIT_REPOSITORY https://github.com/nothings/stb.git
@@ -11,25 +10,17 @@ function(add_flux_example NAME)
     add_executable(${NAME} WIN32 ${NAME}.cpp)
     target_link_libraries(${NAME} PRIVATE flux::flux)
     target_link_options(${NAME} PRIVATE /SUBSYSTEM:WINDOWS)
+
+    add_custom_command(TARGET ${NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/screenshots"
+            "$<TARGET_FILE_DIR:${NAME}>/screenshots"
+        COMMENT "Copying screenshots -> output dir for ${NAME}"
+    )
 endfunction()
 
 # ── Examples ──────────────────────────────────────────────────────────────────
-# add_flux_example(main)
-# add_flux_example(counter)
-# add_flux_example(component)
-# add_flux_example(draggable)
-add_flux_example(layout)
-# add_flux_example(inputtest)
-# add_flux_example(datepicker)
-# add_flux_example(graphtest)
-# add_flux_example(illustrator)
-# add_flux_example(overlaytest)
-# add_flux_example(paintfull)
-# add_flux_example(logic_sim)
-# add_flux_example(splitview)
-# add_flux_example(menubarexample)
-# add_flux_example(tabview)
-# add_flux_example(toast)
+add_flux_example(graphtest)
 
 
 # ── image_editor needs stb ────────────────────────────────────────────────────

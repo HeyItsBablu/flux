@@ -24,10 +24,10 @@ struct ScrollbarState {
   int size = 8;
   bool horizontal = false;
 
-  COLORREF colorNormal = RGB(180, 180, 180);
-  COLORREF colorHover = RGB(140, 140, 140);
-  COLORREF colorActive = RGB(100, 100, 100);
-  COLORREF colorTrack = RGB(245, 245, 245);
+  Color colorNormal = Color::fromRGB(180, 180, 180);
+  Color colorHover = Color::fromRGB(140, 140, 140);
+  Color colorActive = Color::fromRGB(100, 100, 100);
+  Color colorTrack = Color::fromRGB(245, 245, 245);
 
   // ── Computed each layout pass ─────────────────────────────────────────
   int contentMain = 0;  // total length along scroll axis
@@ -110,7 +110,7 @@ struct ScrollbarState {
 
     Painter painter(ctx);
 
-    COLORREF thumbColor = isDragging   ? colorActive
+    Color thumbColor = isDragging   ? colorActive
                           : isHovering ? colorHover
                                        : colorNormal;
 
@@ -300,7 +300,7 @@ public:
     markNeedsLayout();
     return self;
   }
-  std::shared_ptr<ListViewStatic> setBackgroundColor(COLORREF c) {
+  std::shared_ptr<ListViewStatic> setBackgroundColor(Color c) {
     backgroundColor = c;
     hasBackground = true;
     markNeedsPaint();
@@ -310,19 +310,19 @@ public:
     sb.size = s;
     return self;
   }
-  std::shared_ptr<ListViewStatic> setScrollbarColor(COLORREF c) {
+  std::shared_ptr<ListViewStatic> setScrollbarColor(Color c) {
     sb.colorNormal = c;
     return self;
   }
-  std::shared_ptr<ListViewStatic> setScrollbarHoverColor(COLORREF c) {
+  std::shared_ptr<ListViewStatic> setScrollbarHoverColor(Color c) {
     sb.colorHover = c;
     return self;
   }
-  std::shared_ptr<ListViewStatic> setScrollbarActiveColor(COLORREF c) {
+  std::shared_ptr<ListViewStatic> setScrollbarActiveColor(Color c) {
     sb.colorActive = c;
     return self;
   }
-  std::shared_ptr<ListViewStatic> setScrollbarTrackColor(COLORREF c) {
+  std::shared_ptr<ListViewStatic> setScrollbarTrackColor(Color c) {
     sb.colorTrack = c;
     return self;
   }
@@ -835,19 +835,19 @@ public:
     sb.size = s;
     return self;
   }
-  std::shared_ptr<ListViewBuilder<T>> setScrollbarColor(COLORREF c) {
+  std::shared_ptr<ListViewBuilder<T>> setScrollbarColor(Color c) {
     sb.colorNormal = c;
     return self;
   }
-  std::shared_ptr<ListViewBuilder<T>> setScrollbarHoverColor(COLORREF c) {
+  std::shared_ptr<ListViewBuilder<T>> setScrollbarHoverColor(Color c) {
     sb.colorHover = c;
     return self;
   }
-  std::shared_ptr<ListViewBuilder<T>> setScrollbarActiveColor(COLORREF c) {
+  std::shared_ptr<ListViewBuilder<T>> setScrollbarActiveColor(Color c) {
     sb.colorActive = c;
     return self;
   }
-  std::shared_ptr<ListViewBuilder<T>> setScrollbarTrackColor(COLORREF c) {
+  std::shared_ptr<ListViewBuilder<T>> setScrollbarTrackColor(Color c) {
     sb.colorTrack = c;
     return self;
   }
@@ -1233,19 +1233,19 @@ public:
     markNeedsLayout();
     return self;
   }
-  std::shared_ptr<GridViewBuilder<T>> setScrollbarColor(COLORREF c) {
+  std::shared_ptr<GridViewBuilder<T>> setScrollbarColor(Color c) {
     sb.colorNormal = c;
     return self;
   }
-  std::shared_ptr<GridViewBuilder<T>> setScrollbarHoverColor(COLORREF c) {
+  std::shared_ptr<GridViewBuilder<T>> setScrollbarHoverColor(Color c) {
     sb.colorHover = c;
     return self;
   }
-  std::shared_ptr<GridViewBuilder<T>> setScrollbarActiveColor(COLORREF c) {
+  std::shared_ptr<GridViewBuilder<T>> setScrollbarActiveColor(Color c) {
     sb.colorActive = c;
     return self;
   }
-  std::shared_ptr<GridViewBuilder<T>> setScrollbarTrackColor(COLORREF c) {
+  std::shared_ptr<GridViewBuilder<T>> setScrollbarTrackColor(Color c) {
     sb.colorTrack = c;
     return self;
   }
@@ -1557,7 +1557,7 @@ public:
     markNeedsLayout();
     return self();
   }
-  std::shared_ptr<GridWidget> setBackgroundColor(COLORREF c) {
+  std::shared_ptr<GridWidget> setBackgroundColor(Color c) {
     backgroundColor = c;
     hasBackground = true;
     markNeedsPaint();

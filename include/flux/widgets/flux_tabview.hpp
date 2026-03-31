@@ -58,15 +58,15 @@ public:
   int indicatorHeight = 3;
   int tabFontSize = 13;
 
-  COLORREF barBgColor = RGB(245, 245, 245);
-  COLORREF barBorderColor = RGB(210, 210, 210);
-  COLORREF activeTabBg = RGB(255, 255, 255);
-  COLORREF activeTabText = RGB(33, 150, 243);
-  COLORREF inactiveTabText = RGB(80, 80, 80);
-  COLORREF hoverTabBg = RGB(235, 235, 235);
-  COLORREF indicatorColor = RGB(33, 150, 243);
-  COLORREF contentBgColor = RGB(255, 255, 255);
-  COLORREF contentBorderColor = RGB(210, 210, 210);
+  Color barBgColor = Color::fromRGB(245, 245, 245);
+  Color barBorderColor = Color::fromRGB(210, 210, 210);
+  Color activeTabBg = Color::fromRGB(255, 255, 255);
+  Color activeTabText = Color::fromRGB(33, 150, 243);
+  Color inactiveTabText = Color::fromRGB(80, 80, 80);
+  Color hoverTabBg = Color::fromRGB(235, 235, 235);
+  Color indicatorColor = Color::fromRGB(33, 150, 243);
+  Color contentBgColor = Color::fromRGB(255, 255, 255);
+  Color contentBorderColor = Color::fromRGB(210, 210, 210);
 
   bool hasContentBorder = true;
   bool hasContentBg = true;
@@ -300,17 +300,17 @@ public:
     markNeedsLayout();
     return self_();
   }
-  std::shared_ptr<TabViewWidget> setIndicatorColor(COLORREF c) {
+  std::shared_ptr<TabViewWidget> setIndicatorColor(Color c) {
     indicatorColor = c;
     markNeedsPaint();
     return self_();
   }
-  std::shared_ptr<TabViewWidget> setActiveTabText(COLORREF c) {
+  std::shared_ptr<TabViewWidget> setActiveTabText(Color c) {
     activeTabText = c;
     markNeedsPaint();
     return self_();
   }
-  std::shared_ptr<TabViewWidget> setBarBackground(COLORREF c) {
+  std::shared_ptr<TabViewWidget> setBarBackground(Color c) {
     barBgColor = c;
     markNeedsPaint();
     return self_();
@@ -344,7 +344,7 @@ public:
   }
 
   // Accent color shortcut — sets indicator, active text, hover all at once
-  std::shared_ptr<TabViewWidget> setAccentColor(COLORREF c) {
+  std::shared_ptr<TabViewWidget> setAccentColor(Color c) {
     indicatorColor = c;
     activeTabText = c;
     markNeedsPaint();
@@ -443,13 +443,13 @@ private:
     for (int i = 0; i < (int)tabs_.size(); i++) {
       const TabRect &r = tabRects_[i];
       bool isActive = (i == activeIndex);
-      bool isHovered = (i == hoveredIndex && !isActive);
+      // bool isHovered = (i == hoveredIndex && !isActive);
 
       int ax = x + r.left, ay = y + r.top;
       int aw = r.right - r.left, ah = r.bottom - r.top;
 
       // Tab background
-      COLORREF bgCol = isActive    ? activeTabBg
+      Color bgCol = isActive    ? activeTabBg
                        : isHovered ? hoverTabBg
                                    : barBgColor;
       painter.fillRect(ax, ay, aw, ah, bgCol);

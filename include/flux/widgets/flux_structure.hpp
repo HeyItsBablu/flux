@@ -16,7 +16,7 @@ struct OverlayEntry {
   std::function<void(GraphicsContext &, FontCache &)>
       renderer; // nullptr for popup overlays
   int zIndex = 0;
-
+ 
   // Full entry — widget renders into back-buffer
   OverlayEntry(Widget *w, std::function<void(GraphicsContext &, FontCache &)> r,
                int z = 0)
@@ -172,9 +172,9 @@ using ContainerWidgetPtr = std::shared_ptr<ContainerWidget>;
 inline ContainerWidgetPtr Card(WidgetPtr child) {
   auto w = std::make_shared<ContainerWidget>();
   w->hasBackground = true;
-  w->backgroundColor = RGB(255, 255, 255);
+  w->backgroundColor = Color::fromRGB(255, 255, 255);
   w->hasBorder = true;
-  w->borderColor = RGB(224, 224, 224);
+  w->borderColor = Color::fromRGB(224, 224, 224);
   w->borderWidth = 1;
   w->borderRadius = 8;
   w->paddingLeft = w->paddingRight = w->paddingTop = w->paddingBottom = 16;
@@ -187,14 +187,14 @@ inline WidgetPtr AppBar(const std::string &title) {
   auto w = std::make_shared<AppBarWidget>();
 
   w->hasBackground = true;
-  w->backgroundColor = RGB(33, 150, 243);
+  w->backgroundColor = Color::fromRGB(33, 150, 243);
   w->height = 56;
   w->autoHeight = false;
 
   auto titleWidget = Text(title)
                          ->setFontSize(20)
                          ->setFontWeight(FontWeight::Bold)
-                         ->setTextColor(RGB(255, 255, 255))
+                         ->setTextColor(Color::fromRGB(255, 255, 255))
                          ->setPadding(20);
 
   w->addChild(titleWidget);
@@ -207,7 +207,7 @@ inline WidgetPtr Scaffold(WidgetPtr appBar = nullptr,
   auto w = std::make_shared<ScaffoldWidget>();
 
   w->hasBackground = true;
-  w->backgroundColor = RGB(250, 250, 250);
+  w->backgroundColor = Color::fromRGB(250, 250, 250);
 
   auto column = std::make_shared<ColumnWidget>();
   column->setSpacing(0);

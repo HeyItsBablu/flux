@@ -52,18 +52,18 @@ public:
   int borderRadius = 6;
   int animationSteps = 8; // expand/collapse animation frames
 
-  COLORREF headerBgColor = RGB(248, 249, 250);
-  COLORREF headerHoverColor = RGB(237, 242, 247);
-  COLORREF headerActiveColor = RGB(224, 235, 248);
-  COLORREF bodyBgColor = RGB(255, 255, 255);
-  COLORREF titleColor = RGB(30, 30, 30);
-  COLORREF subtitleColor = RGB(110, 110, 120);
-  COLORREF disabledColor = RGB(180, 180, 180);
-  COLORREF arrowColor = RGB(90, 90, 90);
-  COLORREF iconColor = RGB(70, 120, 200);
-  COLORREF separatorColor = RGB(220, 220, 225);
-  COLORREF borderColor = RGB(210, 214, 220);
-  COLORREF accentColor = RGB(33, 150, 243);
+  Color headerBgColor = Color::fromRGB(248, 249, 250);
+  Color headerHoverColor = Color::fromRGB(237, 242, 247);
+  Color headerActiveColor = Color::fromRGB(224, 235, 248);
+  Color bodyBgColor = Color::fromRGB(255, 255, 255);
+  Color titleColor = Color::fromRGB(30, 30, 30);
+  Color subtitleColor = Color::fromRGB(110, 110, 120);
+  Color disabledColor = Color::fromRGB(180, 180, 180);
+  Color arrowColor = Color::fromRGB(90, 90, 90);
+  Color iconColor = Color::fromRGB(70, 120, 200);
+  Color separatorColor = Color::fromRGB(220, 220, 225);
+  Color borderColor = Color::fromRGB(210, 214, 220);
+  Color accentColor = Color::fromRGB(33, 150, 243);
 
   int titleFontSize = 13;
   int subtitleFontSize = 11;
@@ -350,9 +350,9 @@ public:
     markNeedsLayout();
     return self_();
   }
-  std::shared_ptr<AccordionWidget> setAccentColor(COLORREF c) {
+  std::shared_ptr<AccordionWidget> setAccentColor(Color c) {
     accentColor = c;
-    headerActiveColor = _blendColor(c, RGB(255, 255, 255), 0.15f);
+headerActiveColor = c.interpolate(Color::fromRGB(255, 255, 255), 0.15);
     markNeedsPaint();
     return self_();
   }
@@ -438,7 +438,7 @@ private:
     Painter painter(ctx);
 
     // Header background (with optional left accent when expanded)
-    COLORREF bg = isExp   ? headerActiveColor
+    Color bg = isExp   ? headerActiveColor
                   : isHov ? headerHoverColor
                           : headerBgColor;
 
@@ -494,7 +494,7 @@ private:
   }
 
   void _drawChevron(GraphicsContext &ctx, int cx, int cy, bool pointUp,
-                    COLORREF color) const {
+                    Color color) const {
     Painter painter(ctx);
     int s = arrowSize / 2;
     if (pointUp) {
@@ -506,15 +506,7 @@ private:
     }
   }
 
-  // Simple linear blend: t=0 → a, t=1 → b
-  static COLORREF _blendColor(COLORREF a, COLORREF b, float t) {
-    auto lerp = [](BYTE x, BYTE y, float f) -> BYTE {
-      return (BYTE)(x + (y - x) * f);
-    };
-    return RGB(lerp(GetRValue(a), GetRValue(b), t),
-               lerp(GetGValue(a), GetGValue(b), t),
-               lerp(GetBValue(a), GetBValue(b), t));
-  }
+
 };
 
 // ============================================================================

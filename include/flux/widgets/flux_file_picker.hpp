@@ -122,13 +122,13 @@ enum class FilePickerMode {
 class FilePickerWidget : public Widget {
 public:
   // ── Appearance ────────────────────────────────────────────────────────────
-  COLORREF btnBgColor = RGB(245, 247, 250);
-  COLORREF btnHoverColor = RGB(224, 235, 248);
-  COLORREF btnBorderColor = RGB(200, 204, 210);
-  COLORREF btnTextColor = RGB(30, 30, 30);
-  COLORREF pathTextColor = RGB(80, 80, 90);
-  COLORREF placeholderColor = RGB(160, 160, 170);
-  COLORREF accentColor = RGB(33, 150, 243);
+  Color btnBgColor = Color::fromRGB(245, 247, 250);
+  Color btnHoverColor = Color::fromRGB(224, 235, 248);
+  Color btnBorderColor = Color::fromRGB(200, 204, 210);
+  Color btnTextColor = Color::fromRGB(30, 30, 30);
+  Color pathTextColor = Color::fromRGB(80, 80, 90);
+  Color placeholderColor = Color::fromRGB(160, 160, 170);
+  Color accentColor = Color::fromRGB(33, 150, 243);
 
   int btnHeight = 32;
   int btnPadding = 10;
@@ -222,7 +222,7 @@ public:
     markNeedsLayout();
     return self_();
   }
-  std::shared_ptr<FilePickerWidget> setAccentColor(COLORREF c) {
+  std::shared_ptr<FilePickerWidget> setAccentColor(Color c) {
     accentColor = c;
     markNeedsPaint();
     return self_();
@@ -318,90 +318,62 @@ public:
 
   // ── Render ────────────────────────────────────────────────────────────────
 
-  void render(GraphicsContext &ctx, FontCache &fontCache) override {
-    if (!visible)
-      return;
+void render(GraphicsContext &ctx, FontCache &fontCache) override {
+    if (!visible) return;
+
+    Painter painter(ctx);
 
     // ── Button ────────────────────────────────────────────────────────────
     bool hov = isHovered && !_isOverClear(lastMx_, lastMy_);
+    Color bg  = hov ? btnHoverColor : btnBgColor;
+    Color bdr = isFocused ? accentColor : btnBorderColor;
 
-    COLORREF bg = hov ? btnHoverColor : btnBgColor;
-    HBRUSH br = CreateSolidBrush(bg);
-    HPEN pn = CreatePen(PS_SOLID, 1, isFocused ? accentColor : btnBorderColor);
-    HPEN opn = (HPEN)SelectObject(ctx.hdc, pn);
-    HBRUSH obr = (HBRUSH)SelectObject(ctx.hdc, br);
-    RoundRect(ctx.hdc, x, y, x + btnW_, y + height, borderRadius * 2,
-              borderRadius * 2);
-    SelectObject(ctx.hdc, opn);
-    SelectObject(ctx.hdc, obr);
-    DeleteObject(br);
-    DeleteObject(pn);
+    painter.fillRoundedRectGDI(x, y, btnW_, height, borderRadius * 2,
+                               bg, bdr, 1);
 
     // Button label
-    {
-      HFONT hf = fontCache.getFont(fontSize, FontWeight::Normal);
-      HFONT ohf = (HFONT)SelectObject(ctx.hdc, hf);
-      SetBkMode(ctx.hdc, TRANSPARENT);
-      SetTextColor(ctx.hdc, btnTextColor);
-      RECT tr = {x + btnPadding, y, x + btnW_ - btnPadding, y + height};
-      DrawTextA(ctx.hdc, _label().c_str(), -1, &tr,
-                DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-      SelectObject(ctx.hdc, ohf);
-    }
+    painter.drawTextA(_label(), x + btnPadding, y,
+                      btnW_ - btnPadding * 2, height,
+                      fontCache.getFont(fontSize, FontWeight::Normal),
+                      btnTextColor,
+                      DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
     // ── Path display ──────────────────────────────────────────────────────
     if (showPath) {
-      int pathX = x + btnW_ + 8;
-      int pathRight = x + width - clearW_ - (clearW_ ? 4 : 0);
+        int pathX     = x + btnW_ + 8;
+        int pathRight = x + width - clearW_ - (clearW_ ? 4 : 0);
 
-      HFONT hf = fontCache.getFont(fontSize - 1, FontWeight::Normal);
-      HFONT ohf = (HFONT)SelectObject(ctx.hdc, hf);
-      SetBkMode(ctx.hdc, TRANSPARENT);
+        std::string displayPath  = _displayPath();
+        bool        isPlaceholder = displayPath.empty() || path_.empty();
 
-      std::string displayPath = _displayPath();
-      bool isPlaceholder = displayPath.empty() || path_.empty();
-
-      SetTextColor(ctx.hdc, isPlaceholder ? placeholderColor : pathTextColor);
-
-      HRGN clip = CreateRectRgn(pathX, y, pathRight, y + height);
-      SelectClipRgn(ctx.hdc, clip);
-      DeleteObject(clip);
-
-      RECT pr = {pathX, y, pathRight, y + height};
-      DrawTextA(
-          ctx.hdc, isPlaceholder ? _placeholder().c_str() : displayPath.c_str(),
-          -1, &pr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-
-      SelectClipRgn(ctx.hdc, nullptr);
-      SelectObject(ctx.hdc, ohf);
+        painter.pushClipRect(pathX, y, pathRight - pathX, height);
+        painter.drawTextA(
+            isPlaceholder ? _placeholder() : displayPath,
+            pathX, y, pathRight - pathX, height,
+            fontCache.getFont(fontSize - 1, FontWeight::Normal),
+            isPlaceholder ? placeholderColor : pathTextColor,
+            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        painter.popClipRect();
     }
 
-    // ── Clear (×) button ──────────────────────────────────────────────────
+    // ── Clear (×) button ─────────────────────────────────────────────────
     if (showClearBtn && hasSelection() && clearW_ > 0) {
-      int cx = x + width - clearW_;
-      bool clearHov = _isOverClear(lastMx_, lastMy_);
+        int  cx       = x + width - clearW_;
+        bool clearHov = _isOverClear(lastMx_, lastMy_);
 
-      HBRUSH cb = CreateSolidBrush(clearHov ? btnHoverColor : btnBgColor);
-      HPEN cp = CreatePen(PS_SOLID, 1, btnBorderColor);
-      HPEN ocp = (HPEN)SelectObject(ctx.hdc, cp);
-      HBRUSH ocb = (HBRUSH)SelectObject(ctx.hdc, cb);
-      RoundRect(ctx.hdc, cx, y, cx + clearW_, y + height, borderRadius * 2,
-                borderRadius * 2);
-      SelectObject(ctx.hdc, ocp);
-      SelectObject(ctx.hdc, ocb);
-      DeleteObject(cb);
-      DeleteObject(cp);
+        painter.fillRoundedRectGDI(cx, y, clearW_, height, borderRadius * 2,
+                                   clearHov ? btnHoverColor : btnBgColor,
+                                   btnBorderColor, 1);
 
-      HFONT hf = fontCache.getFont(11, FontWeight::Normal);
-      HFONT ohf = (HFONT)SelectObject(ctx.hdc, hf);
-      SetTextColor(ctx.hdc, clearHov ? RGB(200, 60, 60) : RGB(140, 140, 150));
-      RECT xr = {cx, y, cx + clearW_, y + height};
-      DrawTextA(ctx.hdc, "x", -1, &xr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-      SelectObject(ctx.hdc, ohf);
+        painter.drawTextA("x", cx, y, clearW_, height,
+                          fontCache.getFont(11, FontWeight::Normal),
+                          clearHov ? Color::fromRGB(200, 60, 60)
+                                   : Color::fromRGB(140, 140, 150),
+                          DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }
 
     needsPaint = false;
-  }
+}
 
   // ── Mouse events ──────────────────────────────────────────────────────────
 

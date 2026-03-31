@@ -26,14 +26,15 @@ public:
   int thumbSize = 18;
 
   // Colors
-  COLORREF trackOffColor = RGB(200, 200, 200);
-  COLORREF trackOnColor = RGB(76, 175, 80);
-  COLORREF thumbColor = RGB(255, 255, 255);
-  COLORREF thumbHoverColor = RGB(245, 245, 245);
-  COLORREF thumbPressedColor = RGB(235, 235, 235);
-  COLORREF shadowColor =
-      RGB(180, 180,
-          180); // was hardcoded RGB(0,0,0) at ~15% — replaced with a real color
+  Color trackOffColor = Color::fromRGB(200, 200, 200);
+  Color trackOnColor = Color::fromRGB(76, 175, 80);
+  Color thumbColor = Color::fromRGB(255, 255, 255);
+  Color thumbHoverColor = Color::fromRGB(245, 245, 245);
+  Color thumbPressedColor = Color::fromRGB(235, 235, 235);
+  Color shadowColor =
+      Color::fromRGB(180, 180,
+                     180); // was hardcoded Color::fromRGB(0,0,0) at ~15% —
+                           // replaced with a real color
 
   // Interaction states
   bool isThumbHovered = false;
@@ -90,8 +91,8 @@ public:
     animationProgress = toggled ? 1.0 : 0.0;
 
     // ── Track ──────────────────────────────────────────────────────────────
-    COLORREF trackColor =
-        interpolateColor(trackOffColor, trackOnColor, animationProgress);
+    Color trackColor =
+        trackOffColor.interpolate(trackOnColor, animationProgress);
     int trackRadius = toggleHeight; // diameter passed to fillRoundedRectGDI
     painter.fillRoundedRectGDI(toggleX, toggleY, toggleWidth, toggleHeight,
                                trackRadius, trackColor, trackColor, 0);
@@ -108,12 +109,12 @@ public:
                         shadowColor, shadowColor, 0);
 
     // ── Thumb ──────────────────────────────────────────────────────────────
-    COLORREF currentThumbColor = isPressed        ? thumbPressedColor
-                                 : isThumbHovered ? thumbHoverColor
-                                                  : thumbColor;
+    Color currentThumbColor = isPressed        ? thumbPressedColor
+                              : isThumbHovered ? thumbHoverColor
+                                               : thumbColor;
 
     painter.drawEllipse(thumbX, thumbY, thumbSize, thumbSize, currentThumbColor,
-                        RGB(230, 230, 230), 1);
+                        Color::fromRGB(230, 230, 230), 1);
 
     // ── Label text ─────────────────────────────────────────────────────────
     if (!text.empty()) {
@@ -200,22 +201,22 @@ public:
     markNeedsPaint();
     return std::static_pointer_cast<ToggleWidget>(shared_from_this());
   }
-  std::shared_ptr<ToggleWidget> setTrackOffColor(COLORREF color) {
+  std::shared_ptr<ToggleWidget> setTrackOffColor(Color color) {
     trackOffColor = color;
     markNeedsPaint();
     return std::static_pointer_cast<ToggleWidget>(shared_from_this());
   }
-  std::shared_ptr<ToggleWidget> setTrackOnColor(COLORREF color) {
+  std::shared_ptr<ToggleWidget> setTrackOnColor(Color color) {
     trackOnColor = color;
     markNeedsPaint();
     return std::static_pointer_cast<ToggleWidget>(shared_from_this());
   }
-  std::shared_ptr<ToggleWidget> setThumbColor(COLORREF color) {
+  std::shared_ptr<ToggleWidget> setThumbColor(Color color) {
     thumbColor = color;
     markNeedsPaint();
     return std::static_pointer_cast<ToggleWidget>(shared_from_this());
   }
-  std::shared_ptr<ToggleWidget> setShadowColor(COLORREF color) {
+  std::shared_ptr<ToggleWidget> setShadowColor(Color color) {
     shadowColor = color;
     markNeedsPaint();
     return std::static_pointer_cast<ToggleWidget>(shared_from_this());
@@ -275,11 +276,11 @@ public:
   int trackHeight = 4;
   int thumbRadius = 10;
 
-  COLORREF trackColor = RGB(200, 200, 200);
-  COLORREF trackFillColor = RGB(33, 150, 243);
-  COLORREF thumbColor = RGB(33, 150, 243);
-  COLORREF thumbHoverColor = RGB(25, 118, 210);
-  COLORREF thumbDragColor = RGB(13, 71, 161);
+  Color trackColor = Color::fromRGB(200, 200, 200);
+  Color trackFillColor = Color::fromRGB(33, 150, 243);
+  Color thumbColor = Color::fromRGB(33, 150, 243);
+  Color thumbHoverColor = Color::fromRGB(25, 118, 210);
+  Color thumbDragColor = Color::fromRGB(13, 71, 161);
 
   bool isDragging = false;
   bool isThumbHovered = false;
@@ -322,13 +323,13 @@ public:
                      trackHeight, trackFillColor);
 
     // Thumb
-    COLORREF currentThumbColor = isDragging       ? thumbDragColor
-                                 : isThumbHovered ? thumbHoverColor
-                                                  : thumbColor;
+    Color currentThumbColor = isDragging       ? thumbDragColor
+                              : isThumbHovered ? thumbHoverColor
+                                               : thumbColor;
 
     painter.drawEllipse(thumbX - thumbRadius, trackY - thumbRadius,
                         thumbRadius * 2, thumbRadius * 2, currentThumbColor,
-                        RGB(255, 255, 255), 1);
+                        Color::fromRGB(255, 255, 255), 1);
 
     needsPaint = false;
   }
@@ -444,19 +445,19 @@ public:
     return std::static_pointer_cast<SliderWidget>(shared_from_this());
   }
 
-  std::shared_ptr<SliderWidget> setTrackColor(COLORREF color) {
+  std::shared_ptr<SliderWidget> setTrackColor(Color color) {
     trackColor = color;
     markNeedsPaint();
     return std::static_pointer_cast<SliderWidget>(shared_from_this());
   }
 
-  std::shared_ptr<SliderWidget> setTrackFillColor(COLORREF color) {
+  std::shared_ptr<SliderWidget> setTrackFillColor(Color color) {
     trackFillColor = color;
     markNeedsPaint();
     return std::static_pointer_cast<SliderWidget>(shared_from_this());
   }
 
-  std::shared_ptr<SliderWidget> setThumbColor(COLORREF color) {
+  std::shared_ptr<SliderWidget> setThumbColor(Color color) {
     thumbColor = color;
     markNeedsPaint();
     return std::static_pointer_cast<SliderWidget>(shared_from_this());
@@ -619,8 +620,10 @@ public:
         y + paddingTop + (height - paddingTop - paddingBottom - boxSize) / 2;
 
     // Box fill + border
-    COLORREF fill = checked ? RGB(76, 175, 80) : RGB(255, 255, 255);
-    COLORREF stroke = checked ? RGB(56, 155, 60) : RGB(150, 150, 150);
+    Color fill =
+        checked ? Color::fromRGB(76, 175, 80) : Color::fromRGB(255, 255, 255);
+    Color stroke =
+        checked ? Color::fromRGB(56, 155, 60) : Color::fromRGB(150, 150, 150);
     painter.drawRectOutline(boxX, boxY, boxSize, boxSize, stroke, 1);
     painter.fillRect(boxX + 1, boxY + 1, boxSize - 2, boxSize - 2, fill);
 
@@ -628,8 +631,10 @@ public:
     if (checked) {
       int cx = boxX + 3;
       int cy = boxY + boxSize / 2;
-      painter.drawLine(cx, cy, cx + 4, cy + 4, RGB(255, 255, 255), 2);
-      painter.drawLine(cx + 4, cy + 4, cx + 9, cy - 4, RGB(255, 255, 255), 2);
+      painter.drawLine(cx, cy, cx + 4, cy + 4, Color::fromRGB(255, 255, 255),
+                       2);
+      painter.drawLine(cx + 4, cy + 4, cx + 9, cy - 4,
+                       Color::fromRGB(255, 255, 255), 2);
     }
 
     // Label text
@@ -686,7 +691,7 @@ using CheckBoxWidgetPtr = std::shared_ptr<CheckBoxWidget>;
 inline CheckBoxWidgetPtr CheckBox(const std::string &label = "") {
   auto w = std::make_shared<CheckBoxWidget>();
   w->text = label;
-  w->textColor = RGB(30, 30, 30);
+  w->textColor = Color::fromRGB(30, 30, 30);
   w->paddingLeft = w->paddingRight = 4;
   w->paddingTop = w->paddingBottom = 4;
   return w;
@@ -703,10 +708,10 @@ public:
   int innerCircleSize = 8;
   std::string value; // The value this radio represents
 
-  COLORREF circleColor = RGB(150, 150, 150);
-  COLORREF selectedCircleColor = RGB(33, 150, 243);
-  COLORREF innerCircleColor = RGB(33, 150, 243);
-  COLORREF hoverCircleColor = RGB(100, 100, 100);
+  Color circleColor = Color::fromRGB(150, 150, 150);
+  Color selectedCircleColor = Color::fromRGB(33, 150, 243);
+  Color innerCircleColor = Color::fromRGB(33, 150, 243);
+  Color hoverCircleColor = Color::fromRGB(100, 100, 100);
 
   RadioGroupWidget *parentGroup = nullptr;
 
@@ -745,13 +750,13 @@ public:
     int circleX = x + paddingLeft + circleSize / 2;
     int circleY = y + paddingTop + (height - paddingTop - paddingBottom) / 2;
 
-    COLORREF currentCircleColor = selected    ? selectedCircleColor
-                                  : isHovered ? hoverCircleColor
-                                              : circleColor;
+    Color currentCircleColor = selected    ? selectedCircleColor
+                               : isHovered ? hoverCircleColor
+                                           : circleColor;
 
     // Outer circle — white fill, colored stroke
     painter.drawEllipse(circleX - circleSize / 2, circleY - circleSize / 2,
-                        circleSize, circleSize, RGB(255, 255, 255),
+                        circleSize, circleSize, Color::fromRGB(255, 255, 255),
                         currentCircleColor, 2);
 
     // Inner fill dot when selected
@@ -807,13 +812,13 @@ public:
     return std::static_pointer_cast<RadioButtonWidget>(shared_from_this());
   }
 
-  std::shared_ptr<RadioButtonWidget> setCircleColor(COLORREF color) {
+  std::shared_ptr<RadioButtonWidget> setCircleColor(Color color) {
     circleColor = color;
     markNeedsPaint();
     return std::static_pointer_cast<RadioButtonWidget>(shared_from_this());
   }
 
-  std::shared_ptr<RadioButtonWidget> setSelectedCircleColor(COLORREF color) {
+  std::shared_ptr<RadioButtonWidget> setSelectedCircleColor(Color color) {
     selectedCircleColor = color;
     innerCircleColor = color;
     markNeedsPaint();
@@ -1049,7 +1054,7 @@ inline RadioButtonWidgetPtr RadioButton(const std::string &value,
                                         const std::string &label = "") {
   auto w = std::make_shared<RadioButtonWidget>(value);
   w->text = label.empty() ? value : label;
-  w->textColor = RGB(30, 30, 30);
+  w->textColor = Color::fromRGB(30, 30, 30);
   return w;
 }
 
@@ -1105,16 +1110,16 @@ public:
   TimerID cursorTimerId = 0;
   int scrollOffset = 0;
 
-  COLORREF focusedBorderColor = RGB(33, 150, 243);
-  COLORREF unfocusedBorderColor = RGB(180, 180, 180);
-  COLORREF placeholderColor = RGB(180, 180, 180);
-  COLORREF inputTextColor = RGB(30, 30, 30);
+  Color focusedBorderColor = Color::fromRGB(33, 150, 243);
+  Color unfocusedBorderColor = Color::fromRGB(180, 180, 180);
+  Color placeholderColor = Color::fromRGB(180, 180, 180);
+  Color inputTextColor = Color::fromRGB(30, 30, 30);
 
   TextInputWidget() {
     isFocusable = true;
     hasBorder = true;
     hasBackground = true;
-    backgroundColor = RGB(255, 255, 255);
+    backgroundColor = Color::fromRGB(255, 255, 255);
     borderColor = unfocusedBorderColor;
     borderWidth = 1;
     borderRadius = 4;

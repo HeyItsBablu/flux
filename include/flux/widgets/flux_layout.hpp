@@ -170,7 +170,7 @@ public:
     markNeedsLayout();
     return std::static_pointer_cast<StackWidget>(shared_from_this());
   }
-  std::shared_ptr<StackWidget> setBackgroundColor(COLORREF color) {
+  std::shared_ptr<StackWidget> setBackgroundColor(Color color) {
     backgroundColor = color;
     hasBackground = true;
     markNeedsPaint();
@@ -523,7 +523,7 @@ public:
     markNeedsLayout();
     return std::static_pointer_cast<ColumnWidget>(shared_from_this());
   }
-  std::shared_ptr<ColumnWidget> setBackgroundColor(COLORREF color) {
+  std::shared_ptr<ColumnWidget> setBackgroundColor(Color color) {
     backgroundColor = color;
     hasBackground = true;
     markNeedsPaint();
@@ -732,7 +732,7 @@ public:
     markNeedsLayout();
     return std::static_pointer_cast<RowWidget>(shared_from_this());
   }
-  std::shared_ptr<RowWidget> setBackgroundColor(COLORREF color) {
+  std::shared_ptr<RowWidget> setBackgroundColor(Color color) {
     backgroundColor = color;
     hasBackground = true;
     markNeedsPaint();
@@ -854,7 +854,7 @@ public:
   template <typename T, typename F>
   std::shared_ptr<ContainerWidget> setBackgroundColor(State<T> &state,
                                                       F transform) {
-    std::function<COLORREF(const T &)> fn = transform;
+    std::function<Color(const T &)> fn = transform;
     backgroundColor = fn(state.get());
     hasBackground = true;
     markNeedsPaint();
@@ -873,7 +873,7 @@ public:
   template <typename T, typename F>
   std::shared_ptr<ContainerWidget> setBorderColor(State<T> &state,
                                                   F transform) {
-    std::function<COLORREF(const T &)> fn = transform;
+    std::function<Color(const T &)> fn = transform;
     borderColor = fn(state.get());
     hasBorder = true;
     markNeedsPaint();
@@ -925,13 +925,13 @@ public:
     return std::static_pointer_cast<ContainerWidget>(shared_from_this());
   }
 
-  std::shared_ptr<ContainerWidget> setHoverBackgroundColor(COLORREF color) {
+  std::shared_ptr<ContainerWidget> setHoverBackgroundColor(Color color) {
     hoverBackgroundColor = color;
     hasHoverBackground = true;
     markNeedsPaint();
     return std::static_pointer_cast<ContainerWidget>(shared_from_this());
   }
-  std::shared_ptr<ContainerWidget> setHoverBorderColor(COLORREF color) {
+  std::shared_ptr<ContainerWidget> setHoverBorderColor(Color color) {
     hoverBorderColor = color;
     hasHoverBorderColor = true;
     markNeedsPaint();
@@ -952,14 +952,14 @@ public:
     }
     return std::static_pointer_cast<ContainerWidget>(shared_from_this());
   }
-  std::shared_ptr<ContainerWidget> setBackgroundColor(COLORREF color) {
+  std::shared_ptr<ContainerWidget> setBackgroundColor(Color color) {
     backgroundColor = color;
     hasBackground = true;
     markNeedsPaint();
     return std::static_pointer_cast<ContainerWidget>(shared_from_this());
   }
 
-  std::shared_ptr<ContainerWidget> setBorderColor(COLORREF color) {
+  std::shared_ptr<ContainerWidget> setBorderColor(Color color) {
     borderColor = color;
     hasBorder = true;
     markNeedsPaint();
@@ -1052,16 +1052,16 @@ public:
     onHover = handler;
     return std::static_pointer_cast<ContainerWidget>(shared_from_this());
   }
-  std::shared_ptr<ContainerWidget> setBackgroundAlpha(BYTE alpha) {
-    backgroundAlpha = alpha;
-    markNeedsPaint();
-    return std::static_pointer_cast<ContainerWidget>(shared_from_this());
-  }
-  std::shared_ptr<ContainerWidget> setBorderAlpha(BYTE alpha) {
-    borderAlpha = alpha;
-    markNeedsPaint();
-    return std::static_pointer_cast<ContainerWidget>(shared_from_this());
-  }
+  // std::shared_ptr<ContainerWidget> setBackgroundAlpha(BYTE alpha) {
+  //   backgroundAlpha = alpha;
+  //   markNeedsPaint();
+  //   return std::static_pointer_cast<ContainerWidget>(shared_from_this());
+  // }
+  // std::shared_ptr<ContainerWidget> setBorderAlpha(BYTE alpha) {
+  //   borderAlpha = alpha;
+  //   markNeedsPaint();
+  //   return std::static_pointer_cast<ContainerWidget>(shared_from_this());
+  // }
 
   // ── Visibility ────────────────────────────────────────────────────────────
   std::shared_ptr<ContainerWidget> setVisible(bool v) {
@@ -1166,7 +1166,7 @@ public:
     markNeedsLayout();
     return std::static_pointer_cast<ExpandedWidget>(shared_from_this());
   }
-  std::shared_ptr<ExpandedWidget> setBackgroundColor(COLORREF color) {
+  std::shared_ptr<ExpandedWidget> setBackgroundColor(Color color) {
     backgroundColor = color;
     hasBackground = true;
     markNeedsPaint();
