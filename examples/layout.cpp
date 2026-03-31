@@ -54,7 +54,7 @@ public:
                         Button(Icon(FluxIcons::Remove)
                                    ->setColor(Color::fromRGB(255, 255, 255)),
                                [this] {
-                                 int n = max(1, boxCount.get() - 3);
+                                 int n = std::max(1, boxCount.get() - 3);
                                  boxCount.set(n);
                                  rebuildIndices(n);
                                })
@@ -67,7 +67,7 @@ public:
                         Button(
                             Icon(FluxIcons::Add)->setColor(Color::fromRGB(255, 255, 255)),
                             [this] {
-                              int n = min(kMax, boxCount.get() + 3);
+                              int n = std::min(kMax, boxCount.get() + 3);
                               boxCount.set(n);
                               rebuildIndices(n);
                             })

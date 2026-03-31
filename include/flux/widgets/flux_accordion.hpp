@@ -179,7 +179,7 @@ public:
       panelBodyHeights_[i] = 0; // reset unconditionally
       auto &p = panels_[i];
       if (p.expanded && p.body) {
-        int innerW = max(0, width - bodyPadding * 2);
+        int innerW = std::max(0, width - bodyPadding * 2);
         BoxConstraints bc =
             BoxConstraints::loose(innerW, constraints.maxHeight);
         p.body->computeLayout(ctx, bc, fontCache);

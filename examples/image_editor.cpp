@@ -762,7 +762,7 @@ public:
                 ->setLogScale(false)
                 ->setBgColor(Color::fromRGB(14, 14, 22))
                 ->setOnZoneClicked([this](float pos) {
-                  sExposure.set(max(-5.0, min(5.0, (pos - 0.5) * 4.0)));
+                  sExposure.set(std::max(-5.0, std::min(5.0, (pos - 0.5) * 4.0)));
                 }),
         })
         ->setSpacing(0));

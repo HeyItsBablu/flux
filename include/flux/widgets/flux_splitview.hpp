@@ -407,7 +407,7 @@ private:
       // Total space too small — give each pane 50 %
       ratio = 0.5f;
     } else {
-      ratio = max(minR, min(maxR, ratio));
+      ratio = std::max(minR, std::min(maxR, ratio));
     }
   }
 

@@ -153,7 +153,7 @@ public:
   void zoomOut()   { zoomToward(vw_ * .5f, vh_ * .5f, 0.8f);  }
   void resetZoom() { zoom_ = 1.f; centerCanvas(); }
   void fitToView() {
-    float f = min(vw_ / cw_, vh_ / ch_);
+    float f = std::min(vw_ / cw_, vh_ / ch_);
     zoom_ = snapZoom(std::clamp(f, kMinZoom, kMaxZoom));
     centerCanvas();
   }

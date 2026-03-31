@@ -196,7 +196,7 @@ void renderPopupContent(GraphicsContext &ctx, FontCache &fontCache) override {
     if (active_.empty()) return;
 
     int winW = _winW(), winH = _winH();
-    int count = min((int)active_.size(), maxVisible_);
+    int count = std::min((int)active_.size(), maxVisible_);
 
     for (int i = 0; i < count; i++) {
         ActiveToast &at = active_[i];
@@ -219,7 +219,7 @@ void renderPopupContent(GraphicsContext &ctx, FontCache &fontCache) override {
     if (active_.empty())
       return false;
 
-    int count = min((int)active_.size(), maxVisible_);
+    int count = std::min((int)active_.size(), maxVisible_);
     for (int i = 0; i < count; i++) {
       ActiveToast &at = active_[i];
       int tX = at.lastDrawX, tY = at.lastDrawY;
@@ -264,7 +264,7 @@ void renderPopupContent(GraphicsContext &ctx, FontCache &fontCache) override {
       return false;
     // Pause auto-dismiss timer while hovered
     bool overAny = false;
-    int count = min((int)active_.size(), maxVisible_);
+    int count = std::min((int)active_.size(), maxVisible_);
     for (int i = 0; i < count; i++) {
       ActiveToast &at = active_[i];
       if (mx >= at.lastDrawX && mx < at.lastDrawX + at.lastDrawW &&

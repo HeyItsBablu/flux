@@ -192,7 +192,7 @@ public:
     int contentW = width - (needsScrollbar_() ? scrollbarWidth + 2 : 0);
     int firstVisible = scrollOffset_ / rowHeight;
     int lastVisible =
-        min((int)flatList_.size() - 1, (scrollOffset_ + visibleH) / rowHeight);
+        std::min((int)flatList_.size() - 1, (scrollOffset_ + visibleH) / rowHeight);
 
     for (int i = firstVisible; i <= lastVisible; i++)
       _renderRow(ctx, fontCache, i, contentW);
@@ -429,8 +429,8 @@ std::shared_ptr<TreeViewWidget> setAccentColor(Color c) {
     // Derive a lighter tint for the selection background
     rowSelectColor  = Color::fromRGB(
         (uint8_t)(c.r / 5 * 4),
-        (uint8_t)(min(255, c.g / 5 * 4 + 20)),
-        (uint8_t)(min(255, c.b / 5 * 4 + 40))
+        (uint8_t)(std::min(255, c.g / 5 * 4 + 20)),
+        (uint8_t)(std::min(255, c.b / 5 * 4 + 40))
     );
     rowSelectBorder = c;
     markNeedsPaint();
@@ -520,8 +520,8 @@ private:
   }
 
   void _clampScroll(int newOffset) {
-    int maxScroll = max(0, (int)flatList_.size() * rowHeight - height);
-    scrollOffset_ = max(0, min(maxScroll, newOffset));
+    int maxScroll = std::max(0, (int)flatList_.size() * rowHeight - height);
+    scrollOffset_ = std::max(0, std::min(maxScroll, newOffset));
     markNeedsPaint();
   }
 
@@ -642,7 +642,7 @@ private:
     painter.fillRect(sbX, y, scrollbarWidth, height, Color::fromRGB(240, 240, 240));
 
     float thumbRatio = (float)height / (float)totalH;
-    int thumbH = max(20, (int)(height * thumbRatio));
+    int thumbH = std::max(20, (int)(height * thumbRatio));
     float scrollRatio = (float)scrollOffset_ / (float)(totalH - height);
     int thumbY = y + (int)(scrollRatio * (height - thumbH));
 

@@ -1,15 +1,14 @@
 #ifndef FLUX_RASTER_HPP
 #define FLUX_RASTER_HPP
 
-
 // flux/platform/win32/flux_raster_win32.hpp
 #pragma once
 #ifndef _WIN32
 #error "flux_raster_win32.hpp must only be compiled on Win32"
 #endif
 
-#include "../../flux_render_surface.hpp"
 #include "../../flux_canvas_types.hpp"
+#include "../../flux_render_surface.hpp"
 
 class RasterSurface : public RenderSurface {
 public:
@@ -164,7 +163,7 @@ public:
     allocFBOPair(nSF, nST, w, h);
     clearFBO(nCF, w, h, 255, 255, 255, 255);
     clearFBO(nSF, w, h, 0, 0, 0, 0);
-    int cw = min(w_, w), ch = min(h_, h);
+    int cw = std::min(w_, w), ch = std::min(h_, h);
     glBindFramebuffer(GL_READ_FRAMEBUFFER, committedFBO_);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, nCF);
     glBlitFramebuffer(0, 0, cw, ch, 0, 0, cw, ch, GL_COLOR_BUFFER_BIT,
@@ -364,12 +363,12 @@ protected:
     if (rgba.empty())
       return;
 
-    int uploadX = max(0, bx);
-    int uploadY = max(0, by);
+    int uploadX = std::max(0, bx);
+    int uploadY = std::max(0, by);
     int cropLeft = uploadX - bx;
     int cropBottom = uploadY - by;
-    int uploadW = min(bw - cropLeft, w_ - uploadX);
-    int uploadH = min(bh - cropBottom, h_ - uploadY);
+    int uploadW = std::min(bw - cropLeft, w_ - uploadX);
+    int uploadH = std::min(bh - cropBottom, h_ - uploadY);
     if (uploadW <= 0 || uploadH <= 0)
       return;
 
@@ -402,12 +401,12 @@ protected:
     if (rgba.empty())
       return;
 
-    int dstX = max(0, bx);
-    int dstY = max(0, by);
+    int dstX = std::max(0, bx);
+    int dstY = std::max(0, by);
     int srcOffX = dstX - bx;
     int srcOffY = dstY - by;
-    int dstW = min(bw - srcOffX, w_ - dstX);
-    int dstH = min(bh - srcOffY, h_ - dstY);
+    int dstW = std::min(bw - srcOffX, w_ - dstX);
+    int dstH = std::min(bh - srcOffY, h_ - dstY);
     if (dstW <= 0 || dstH <= 0)
       return;
 
@@ -558,10 +557,10 @@ private:
     GdiFlush();
 
     const int kMargin = 2;
-    int bboxGdiX0 = max(0, gdiX - kMargin);
-    int bboxGdiY0 = max(0, gdiY - kMargin);
-    int bboxGdiX1 = min(w_, gdiX + tsz.cx + kMargin);
-    int bboxGdiY1 = min(h_, gdiY + tsz.cy + kMargin);
+    int bboxGdiX0 = std::max(0, gdiX - kMargin);
+    int bboxGdiY0 = std::max(0, gdiY - kMargin);
+    int bboxGdiX1 = std::min(w_, gdiX + (int)tsz.cx + kMargin);
+    int bboxGdiY1 = std::min(h_, gdiY + (int)tsz.cy + kMargin);
     int bboxW = bboxGdiX1 - bboxGdiX0;
     int bboxH = bboxGdiY1 - bboxGdiY0;
 
@@ -631,8 +630,8 @@ private:
     float dist = std::sqrt(dx * dx + dy * dy);
     if (dist < 0.0001f)
       return;
-    float step = max(1.f, style_.radius * .25f);
-    int steps = max(1, (int)(dist / step));
+    float step = std::max(1.f, style_.radius * .25f);
+    int steps = std::max(1, (int)(dist / step));
     for (int i = 1; i <= steps; ++i) {
       float t = float(i) / steps;
       if (tool_ == kToolBrush)

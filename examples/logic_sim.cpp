@@ -559,8 +559,8 @@ static constexpr float kSCPinSpacing = 20.f;
 static constexpr float kSCWidth = 100.f;
 
 static float subcircuitH(int nIn, int nOut) {
-  int m = max(max(nIn, nOut), 1);
-  return max(float(m) * kSCPinSpacing + kSCPinSpacing, kSCMinH);
+  int m = std::max(std::max(nIn, nOut), 1);
+  return std::max(float(m) * kSCPinSpacing + kSCPinSpacing, kSCMinH);
 }
 
 struct SubcircuitPinInfo {
@@ -1185,7 +1185,7 @@ struct Circuit {
     if (!subcircuitInsts.empty())
       return {}; // skip if subcircuits present
 
-    int ni = (int)inIdx.size(), combos = 1 << min(ni, 6);
+    int ni = (int)inIdx.size(), combos = 1 << std::min(ni, 6);
     std::vector<Gate> gs = gates;
     std::vector<Wire> ws = wires;
     auto topo = [&]() -> std::vector<int> {
@@ -1699,7 +1699,7 @@ static void pushCircle(std::vector<float> &v, float cx, float cy, float r,
 }
 static void pushRRFill(std::vector<float> &v, float L, float B, float R2,
                        float T, float cr) {
-  cr = min(cr, min((R2 - L) * .45f, (T - B) * .45f));
+  cr = std::min(cr, std::min((R2 - L) * .45f, (T - B) * .45f));
   pushQuad(v, L + cr, B, R2 - cr, T);
   pushQuad(v, L, B + cr, L + cr, T - cr);
   pushQuad(v, R2 - cr, B + cr, R2, T - cr);
@@ -1717,7 +1717,7 @@ static void pushRRFill(std::vector<float> &v, float L, float B, float R2,
 }
 static void pushRR(std::vector<float> &v, float L, float B, float R2, float T,
                    float cr, float hw, int cs = 6) {
-  cr = min(cr, min((R2 - L) * .4f, (T - B) * .4f));
+  cr = std::min(cr, std::min((R2 - L) * .4f, (T - B) * .4f));
   pushLine(v, L + cr, B, R2 - cr, B, hw);
   pushLine(v, R2, B + cr, R2, T - cr, hw);
   pushLine(v, R2 - cr, T, L + cr, T, hw);
@@ -2142,7 +2142,7 @@ public:
     for (auto &g : circuit.gates)
       if (g.type == GateType::CLOCK) {
         float hz = g.clockHz > 0.f ? g.clockHz : 1.f;
-        UINT ms = max(16u, (UINT)(500.f / hz));
+        UINT ms = std::max(16u, (UINT)(500.f / hz));
         SetTimer(hwnd_, kClockTimerBase + (UINT_PTR)g.id, ms, nullptr);
       }
   }
@@ -2160,7 +2160,7 @@ public:
     KillTimer(hwnd_, kClockTimerBase + (UINT_PTR)gateId);
     if (simMode == SimMode::Running) {
       float hz = g->clockHz > 0.f ? g->clockHz : 1.f;
-      UINT ms = max(16u, (UINT)(500.f / hz));
+      UINT ms = std::max(16u, (UINT)(500.f / hz));
       SetTimer(hwnd_, kClockTimerBase + (UINT_PTR)gateId, ms, nullptr);
     }
   }
@@ -2300,10 +2300,10 @@ public:
     float mnX = 1e9f, mnY = 1e9f, mxX = -1e9f, mxY = -1e9f;
     for (auto &g : circuit.gates) {
       float gh = gateH(g.type);
-      mnX = min(mnX, g.x - kGW);
-      mxX = max(mxX, g.x + kGW);
-      mnY = min(mnY, g.y - gh);
-      mxY = max(mxY, g.y + gh);
+      mnX = std::min(mnX, g.x - kGW);
+      mxX = std::max(mxX, g.x + kGW);
+      mnY = std::min(mnY, g.y - gh);
+      mxY = std::max(mxY, g.y + gh);
     }
     for (auto &inst : circuit.subcircuitInsts) {
       auto it = circuit.subcircuitDefs.find(inst.defId);
@@ -2314,10 +2314,10 @@ public:
                    ? (int)it->second.outputPins.size()
                    : 1;
       float h = subcircuitH(ni, no);
-      mnX = min(mnX, inst.x - kSCWidth);
-      mxX = max(mxX, inst.x + kSCWidth);
-      mnY = min(mnY, inst.y - h);
-      mxY = max(mxY, inst.y + h);
+      mnX = std::min(mnX, inst.x - kSCWidth);
+      mxX = std::max(mxX, inst.x + kSCWidth);
+      mnY = std::min(mnY, inst.y - h);
+      mxY = std::max(mxY, inst.y + h);
     }
     float ww = mxX - mnX, wh = mxY - mnY;
     if (ww < 1 || wh < 1) {
@@ -2326,7 +2326,7 @@ public:
     }
     float pad = 60.f, zx = (viewW_ - pad * 2) / ww,
           zy = (viewH_ - pad * 2) / wh;
-    zoom_ = std::clamp(min(zx, zy), 0.05f, 4.f);
+    zoom_ = std::clamp(std::min(zx, zy), 0.05f, 4.f);
     camX_ = (mnX + mxX) * .5f - viewW_ * .5f / zoom_;
     camY_ = (mnY + mxY) * .5f - viewH_ * .5f / zoom_;
     redraw();
@@ -2435,8 +2435,8 @@ public:
       float sx0, sy0, sx1, sy1;
       w2s(dragSelX0_, dragSelY0_, sx0, sy0);
       w2s(dragSelX1_, dragSelY1_, sx1, sy1);
-      float bx0 = min(sx0, sx1), bx1 = max(sx0, sx1);
-      float by0 = min(sy0, sy1), by1 = max(sy0, sy1);
+      float bx0 = std::min(sx0, sx1), bx1 = std::max(sx0, sx1);
+      float by0 = std::min(sy0, sy1), by1 = std::max(sy0, sy1);
       {
         std::vector<float> v;
         pushQuad(v, bx0, by0, bx1, by1);
@@ -2579,9 +2579,9 @@ public:
     // Wire split drag (unchanged)
     for (auto &w : circuit.wires) {
       auto [wsx0, wsy0, wsx1, wsy1] = wireSC(w);
-      float msx = wireSplitSX(w, wsx0, wsx1), thr = max(6.f, 5.f / zoom_);
-      if (std::abs(sx - msx) <= thr && sy >= min(wsy0, wsy1) - thr &&
-          sy <= max(wsy0, wsy1) + thr) {
+      float msx = wireSplitSX(w, wsx0, wsx1), thr = std::max(6.f, 5.f / zoom_);
+      if (std::abs(sx - msx) <= thr && sy >= std::min(wsy0, wsy1) - thr &&
+          sy <= std::max(wsy0, wsy1) + thr) {
         dragSplit_ = true;
         dragSplitId_ = w.id;
         float worldMX = (w.splitX < 1e29f) ? w.splitX : (camX_ + msx / zoom_);
@@ -2916,10 +2916,10 @@ public:
     // Rubber-band finalise
     if (dragSelect_) {
       dragSelect_ = false;
-      float minX = min(dragSelX0_, dragSelX1_),
-            maxX = max(dragSelX0_, dragSelX1_);
-      float minY = min(dragSelY0_, dragSelY1_),
-            maxY = max(dragSelY0_, dragSelY1_);
+      float minX = std::min(dragSelX0_, dragSelX1_),
+            maxX = std::max(dragSelX0_, dragSelX1_);
+      float minY = std::min(dragSelY0_, dragSelY1_),
+            maxY = std::max(dragSelY0_, dragSelY1_);
       // Only do selection if the band has some area (avoids accidental clear on
       // tiny drags)
       if (maxX - minX > 4.f / zoom_ || maxY - minY > 4.f / zoom_) {
@@ -3740,7 +3740,7 @@ private:
     }
     dc(lines, 0.12f, 0.13f, 0.19f);
     if (snapEnabled && zoom_ > 0.35f) {
-      float gsnap = kGrid, sdot = max(1.f, zoom_ * 1.1f);
+      float gsnap = kGrid, sdot = std::max(1.f, zoom_ * 1.1f);
       std::vector<float> dots;
       for (float wx = std::floor(camX_ / gsnap) * gsnap;
            wx < camX_ + viewW_ / zoom_; wx += gsnap) {
@@ -3764,7 +3764,7 @@ private:
   // ── Wires (unchanged logic, uses updated wireSC) ──────────────────────
   void drawAllWires() {
     bool sim = isSimActive();
-    float hw = max(1.0f, zoom_ * 1.4f), dotr = max(2.2f, hw * 1.0f);
+    float hw = std::max(1.0f, zoom_ * 1.4f), dotr = std::max(2.2f, hw * 1.0f);
     for (auto &w : circuit.wires) {
       auto [sx0, sy0, sx1, sy1] = wireSC(w);
       float msx = wireSplitSX(w, sx0, sx1);
@@ -3797,16 +3797,16 @@ private:
       if (w.isBus()) {
         float bmx = (sx0 + sx1) * 0.5f, bmy = (sy0 + sy1) * 0.5f;
         std::vector<float> badge;
-        pushCircle(badge, bmx, bmy, max(7.f, zoom_ * 5.f), 12);
+        pushCircle(badge, bmx, bmy, std::max(7.f, zoom_ * 5.f), 12);
         dc(badge, 0.12f, 0.16f, 0.32f);
         // Tick marks indicating bus width
         int bits = busWidthBits(w.width);
-        float tr = max(5.f, zoom_ * 3.5f);
+        float tr = std::max(5.f, zoom_ * 3.5f);
         std::vector<float> ticks;
         for (int i = 0; i < bits; i++) {
           float a = float(i) / float(bits) * 6.2831853f;
           pushLine(ticks, bmx, bmy, bmx + cosf(a) * tr, bmy + sinf(a) * tr,
-                   max(0.8f, zoom_ * 0.6f));
+                   std::max(0.8f, zoom_ * 0.6f));
         }
         dc(ticks, 0.62f, 0.72f, 0.98f);
       }
@@ -3855,7 +3855,7 @@ private:
       w2s(dstSnap_.cx, dstSnap_.cy, sx1, sy1);
     else
       w2s(dragCurWX_, dragCurWY_, sx1, sy1);
-    float hw = max(1.f, zoom_ * 1.3f);
+    float hw = std::max(1.f, zoom_ * 1.3f);
     bool sn = hasDstSnap_;
     float msx = (sx0 + sx1) * 0.5f;
     {
@@ -3870,8 +3870,8 @@ private:
     }
     {
       std::vector<float> dots;
-      pushOrthoBends(dots, sx0, sy0, sx1, sy1, msx, max(3.f, hw * 1.2f));
-      pushCircle(dots, sx1, sy1, max(4.f, hw * 2.f));
+      pushOrthoBends(dots, sx0, sy0, sx1, sy1, msx, std::max(3.f, hw * 1.2f));
+      pushCircle(dots, sx1, sy1, std::max(4.f, hw * 2.f));
       dc(dots, sn ? .28f : .52f, sn ? 1.f : .50f, sn ? .52f : .98f);
     }
   }
@@ -3882,14 +3882,14 @@ private:
       float sx, sy;
       w2s(dstSnap_.cx, dstSnap_.cy, sx, sy);
       std::vector<float> r;
-      pushCircle(r, sx, sy, max(6.f, kPinR * zoom_ * 2.f), 24);
+      pushCircle(r, sx, sy, std::max(6.f, kPinR * zoom_ * 2.f), 24);
       dc(r, 0.28f, 1.f, 0.5f, 0.45f);
     }
     if (!dragWire_ && hovPinValid_ && !isSimActive()) {
       float sx, sy;
       w2s(hovPin_.cx, hovPin_.cy, sx, sy);
       std::vector<float> r;
-      pushCircle(r, sx, sy, max(6.f, kPinR * zoom_ * 2.f), 24);
+      pushCircle(r, sx, sy, std::max(6.f, kPinR * zoom_ * 2.f), 24);
       if (hovPin_.isOutput)
         dc(r, 1.f, 0.72f, 0.28f, 0.40f);
       else
@@ -3926,7 +3926,7 @@ private:
     float h = subcircuitH(ni, no) * z;
     float hw = kSCWidth * z * 0.5f, hh = h * 0.5f;
     float L = sx - hw, R = sx + hw, yT = sy - hh, yB = sy + hh;
-    float lw = max(1.0f, z), cr = min(8.f * z, 7.f);
+    float lw = std::max(1.0f, z), cr = std::min(8.f * z, 7.f);
     bool sim = isSimActive();
 
     // Accent colour for subcircuit: violet
@@ -3961,7 +3961,7 @@ private:
         }
       if (anyHigh) {
         std::vector<float> v;
-        pushRR(v, L - 1, yT - 1, R + 1, yB + 1, cr + 1, max(1.5f, z));
+        pushRR(v, L - 1, yT - 1, R + 1, yB + 1, cr + 1, std::max(1.5f, z));
         dc(v, kSCBordR, kSCBordG, kSCBordB, 0.50f);
       }
     }
@@ -3987,7 +3987,7 @@ private:
     {
       float midY = sy;
       std::vector<float> v;
-      pushLine(v, L + cr, midY, R - cr, midY, max(0.5f, lw * 0.4f));
+      pushLine(v, L + cr, midY, R - cr, midY, std::max(0.5f, lw * 0.4f));
       dc(v, kSCBordR, kSCBordG, kSCBordB, 0.25f);
     }
     // Small triangle badge top-right to indicate it's a subcircuit
@@ -4006,12 +4006,12 @@ private:
       bool val = pin.value;
       {
         std::vector<float> v;
-        pushLine(v, psx, psy, L, psy, max(0.8f, z * .7f));
+        pushLine(v, psx, psy, L, psy, std::max(0.8f, z * .7f));
         dc(v, 0.38f, 0.42f, 0.60f);
       }
       {
         std::vector<float> v;
-        pushCircle(v, psx, psy, max(2.5f, kPinR * z));
+        pushCircle(v, psx, psy, std::max(2.5f, kPinR * z));
         if (sim)
           dc(v, val ? .28f : .4f, val ? .86f : .4f, val ? .47f : .65f);
         else
@@ -4028,12 +4028,12 @@ private:
       bool val = pin.value;
       {
         std::vector<float> v;
-        pushLine(v, R, psy, psx, psy, max(0.8f, z * .7f));
+        pushLine(v, R, psy, psx, psy, std::max(0.8f, z * .7f));
         dc(v, 0.38f, 0.42f, 0.60f);
       }
       {
         std::vector<float> v;
-        pushCircle(v, psx, psy, max(2.5f, kPinR * z));
+        pushCircle(v, psx, psy, std::max(2.5f, kPinR * z));
         if (sim)
           dc(v, val ? .28f : .86f, val ? .86f : .51f, val ? .47f : .16f);
         else
@@ -4052,7 +4052,7 @@ private:
     float z = zoom_, gh = gateH(g.type) * z, hw = kGW * z * 0.5f,
           hh = gh * 0.5f;
     float L = sx - hw, R = sx + hw, yT = sy - hh, yB = sy + hh,
-          lw = max(1.0f, z), cr = kCorner * z;
+          lw = std::max(1.0f, z), cr = kCorner * z;
     bool sim = isSimActive();
     GateColors col = gateColors(g.type, g.selected);
     auto DC = [&](const std::vector<float> &v, float r, float gg, float b,
@@ -4095,11 +4095,11 @@ private:
         DCb(v, 0.3f);
       }
       bool on = g.inputVal;
-      float cr2 = max(5.f, 8.f * z), bcx = R - cr2 - 2 * z,
+      float cr2 = std::max(5.f, 8.f * z), bcx = R - cr2 - 2 * z,
             bcy = yT + cr2 + 2 * z;
       if (sim && on) {
         std::vector<float> ring;
-        pushRR(ring, L - 1, yT - 1, R + 1, yB + 1, cr + 1, max(1.5f, z));
+        pushRR(ring, L - 1, yT - 1, R + 1, yB + 1, cr + 1, std::max(1.5f, z));
         DC(ring, 0.28f, 0.86f, 0.47f, 0.55f);
       }
       if (on) {
@@ -4113,7 +4113,7 @@ private:
         DC(v, on ? .28f : .55f, on ? .86f : .18f, on ? .47f : .18f);
       }
       {
-        float lw2 = hw * .3f, lh = max(1.5f, z * 1.5f);
+        float lw2 = hw * .3f, lh = std::max(1.5f, z * 1.5f);
         std::vector<float> v;
         pushQuad(v, sx - lw2, sy - lh * .5f, sx + lw2, sy + lh * .5f);
         DC(v, on ? .28f : .55f, on ? .86f : .18f, on ? .47f : .18f, 0.7f);
@@ -4123,12 +4123,12 @@ private:
         w2s(pin.cx, pin.cy, psx, psy);
         {
           std::vector<float> v;
-          pushLine(v, R, psy, psx, psy, max(0.8f, z * .7f));
+          pushLine(v, R, psy, psx, psy, std::max(0.8f, z * .7f));
           DC(v, 0.38f, 0.42f, 0.60f);
         }
         {
           std::vector<float> v;
-          pushCircle(v, psx, psy, max(2.5f, kPinR * z));
+          pushCircle(v, psx, psy, std::max(2.5f, kPinR * z));
           DC(v, pin.connected ? 1.f : .86f, pin.connected ? .86f : .51f,
              pin.connected ? .47f : .16f);
         }
@@ -4162,11 +4162,11 @@ private:
           live = w.value;
           break;
         }
-      float cr2 = max(4.f, 7.f * z), bcx = R - cr2 - 2 * z,
+      float cr2 = std::max(4.f, 7.f * z), bcx = R - cr2 - 2 * z,
             bcy = yT + cr2 + 2 * z;
       if (live) {
         std::vector<float> ring;
-        pushRR(ring, L - 1, yT - 1, R + 1, yB + 1, cr + 1, max(1.5f, z));
+        pushRR(ring, L - 1, yT - 1, R + 1, yB + 1, cr + 1, std::max(1.5f, z));
         DC(ring, 0.28f, 0.86f, 0.47f, 0.60f);
         std::vector<float> tint;
         pushRRFill(tint, L, yT, R, yB, cr);
@@ -4192,12 +4192,12 @@ private:
         w2s(pin.cx, pin.cy, psx, psy);
         {
           std::vector<float> v;
-          pushLine(v, L, psy, psx, psy, max(0.8f, z * .7f));
+          pushLine(v, L, psy, psx, psy, std::max(0.8f, z * .7f));
           DC(v, 0.38f, 0.42f, 0.60f);
         }
         {
           std::vector<float> v;
-          pushCircle(v, psx, psy, max(2.5f, kPinR * z));
+          pushCircle(v, psx, psy, std::max(2.5f, kPinR * z));
           DC(v, pin.connected ? 1.f : 0.f, pin.connected ? .86f : .31f,
              pin.connected ? .47f : .51f);
         }
@@ -4228,7 +4228,7 @@ private:
       }
       if (sim && on) {
         std::vector<float> ring;
-        pushRR(ring, L - 1, yT - 1, R + 1, yB + 1, cr + 1, max(1.5f, z));
+        pushRR(ring, L - 1, yT - 1, R + 1, yB + 1, cr + 1, std::max(1.5f, z));
         DC(ring, 0.18f, 0.82f, 0.90f, 0.65f);
         std::vector<float> tint;
         pushRRFill(tint, L, yT, R, yB, cr);
@@ -4237,14 +4237,14 @@ private:
       {
         float glyphW = (R - L) * 0.68f, glyphH = (yB - yT) * 0.38f,
               gcx = sx - (R - L) * 0.05f, gcy = (yT + yB) * 0.5f,
-              strokeW = max(1.2f, z * 1.1f);
+              strokeW = std::max(1.2f, z * 1.1f);
         std::vector<float> wv;
         pushSquareWave(wv, gcx, gcy, glyphW, glyphH, strokeW);
         DC(wv, on ? 0.18f : 0.30f, on ? 0.90f : 0.65f, on ? 0.95f : 0.80f,
            on ? 1.f : 0.65f);
       }
       {
-        float cr2 = max(4.5f, 6.5f * z), bcx = R - cr2 - 2 * z,
+        float cr2 = std::max(4.5f, 6.5f * z), bcx = R - cr2 - 2 * z,
               bcy = yT + cr2 + 2 * z;
         if (sim) {
           std::vector<float> gv;
@@ -4267,12 +4267,12 @@ private:
         w2s(pin.cx, pin.cy, psx, psy);
         {
           std::vector<float> v;
-          pushLine(v, R, psy, psx, psy, max(0.8f, z * .7f));
+          pushLine(v, R, psy, psx, psy, std::max(0.8f, z * .7f));
           DC(v, 0.38f, 0.42f, 0.60f);
         }
         {
           std::vector<float> v;
-          pushCircle(v, psx, psy, max(2.5f, kPinR * z));
+          pushCircle(v, psx, psy, std::max(2.5f, kPinR * z));
           DC(v, pin.connected ? 1.f : .86f, pin.connected ? .86f : .51f,
              pin.connected ? .47f : .16f);
         }
@@ -4382,12 +4382,12 @@ private:
                          : 0.f;
       {
         std::vector<float> v;
-        pushLine(v, psx, psy, L + arcOff, psy, max(0.8f, z * .7f));
+        pushLine(v, psx, psy, L + arcOff, psy, std::max(0.8f, z * .7f));
         DC(v, 0.38f, 0.42f, 0.60f);
       }
       {
         std::vector<float> v;
-        pushCircle(v, psx, psy, max(2.5f, kPinR * z));
+        pushCircle(v, psx, psy, std::max(2.5f, kPinR * z));
         DC(v, pin.connected ? 1.f : 0.f, pin.connected ? .86f : .31f,
            pin.connected ? .47f : .51f);
       }
@@ -4398,12 +4398,12 @@ private:
       float stubStart = isNeg ? (bubCX + bubR) : R;
       {
         std::vector<float> v;
-        pushLine(v, stubStart, psy, psx, psy, max(0.8f, z * .7f));
+        pushLine(v, stubStart, psy, psx, psy, std::max(0.8f, z * .7f));
         DC(v, 0.38f, 0.42f, 0.60f);
       }
       {
         std::vector<float> v;
-        pushCircle(v, psx, psy, max(2.5f, kPinR * z));
+        pushCircle(v, psx, psy, std::max(2.5f, kPinR * z));
         DC(v, pin.connected ? 1.f : .86f, pin.connected ? .86f : .51f,
            pin.connected ? .47f : .16f);
       }
@@ -4421,7 +4421,7 @@ private:
     auto DCbd = [&](const std::vector<float> &v) {
       DC(v, col.body[0], col.body[1], col.body[2]);
     };
-    float cr = min(8.f * z, 6.f);
+    float cr = std::min(8.f * z, 6.f);
     bool isIn = isBusIn(g.type);
     int bits = busWidthBits(busGateWidth(g.type));
 
@@ -4481,7 +4481,7 @@ private:
         float ty = yT + spacing * float(i + 1);
         float x0 = isIn ? edgeX - tickLen : edgeX;
         float x1 = isIn ? edgeX : edgeX + tickLen;
-        pushLine(ticks, x0, ty, x1, ty, max(1.0f, z * 0.8f));
+        pushLine(ticks, x0, ty, x1, ty, std::max(1.0f, z * 0.8f));
       }
       DCb(ticks, 0.55f);
     }
@@ -4492,12 +4492,12 @@ private:
       w2s(pin.cx, pin.cy, psx, psy);
       {
         std::vector<float> v;
-        pushLine(v, psx, psy, L, psy, max(0.8f, z * .7f));
+        pushLine(v, psx, psy, L, psy, std::max(0.8f, z * .7f));
         DC(v, 0.38f, 0.42f, 0.60f);
       }
       {
         std::vector<float> v;
-        pushCircle(v, psx, psy, max(2.5f, kPinR * z));
+        pushCircle(v, psx, psy, std::max(2.5f, kPinR * z));
         DC(v, pin.connected ? 1.f : 0.f, pin.connected ? .86f : .31f,
            pin.connected ? .47f : .51f);
       }
@@ -4508,12 +4508,12 @@ private:
       w2s(pin.cx, pin.cy, psx, psy);
       {
         std::vector<float> v;
-        pushLine(v, R, psy, psx, psy, max(0.8f, z * .7f));
+        pushLine(v, R, psy, psx, psy, std::max(0.8f, z * .7f));
         DC(v, 0.38f, 0.42f, 0.60f);
       }
       {
         std::vector<float> v;
-        pushCircle(v, psx, psy, max(2.5f, kPinR * z));
+        pushCircle(v, psx, psy, std::max(2.5f, kPinR * z));
         DC(v, pin.connected ? 1.f : .86f, pin.connected ? .86f : .51f,
            pin.connected ? .47f : .16f);
       }
@@ -4531,7 +4531,7 @@ private:
     auto DCbd = [&](const std::vector<float> &v, float a = 1.f) {
       DC(v, col.body[0], col.body[1], col.body[2], a);
     };
-    float cr = min(8.f * z, 6.f);
+    float cr = std::min(8.f * z, 6.f);
     bool Q = g.stateVal;
     {
       std::vector<float> v;
@@ -4565,7 +4565,7 @@ private:
     }
     if (sim && Q) {
       std::vector<float> v;
-      pushRR(v, L - 1, yT - 1, R + 1, yB + 1, cr + 1, max(1.5f, z));
+      pushRR(v, L - 1, yT - 1, R + 1, yB + 1, cr + 1, std::max(1.5f, z));
       DC(v, col.border[0], col.border[1], col.border[2], 0.50f);
     }
     int ni = (int)g.inPins.size();
@@ -4577,12 +4577,12 @@ private:
       bool isClk = (lbl && lbl[0] == 'C');
       {
         std::vector<float> v;
-        pushLine(v, psx, psy, L, psy, max(0.8f, z * .7f));
+        pushLine(v, psx, psy, L, psy, std::max(0.8f, z * .7f));
         DC(v, 0.38f, 0.42f, 0.60f);
       }
       {
         std::vector<float> v;
-        pushCircle(v, psx, psy, max(2.5f, kPinR * z));
+        pushCircle(v, psx, psy, std::max(2.5f, kPinR * z));
         DC(v, pin.connected ? 1.f : 0.f, pin.connected ? .86f : .31f,
            pin.connected ? .47f : .51f);
       }
@@ -4594,12 +4594,12 @@ private:
       }
       if (!isClk && lbl && lbl[0] != 'D' && lbl[0] != 'J') {
         std::vector<float> v;
-        float markX = L + min(12.f * z, (R - L) * 0.15f);
-        pushLine(v, L, psy, markX, psy, max(1.5f, z));
+        float markX = L + std::min(12.f * z, (R - L) * 0.15f);
+        pushLine(v, L, psy, markX, psy, std::max(1.5f, z));
         DC(v, col.border[0], col.border[1], col.border[2], 0.45f);
       }
     }
-    float bubR2 = min(5.f * z, 4.f);
+    float bubR2 = std::min(5.f * z, 4.f);
     for (int i = 0; i < (int)g.outPins.size(); i++) {
       const Pin &pin = g.outPins[i];
       float psx, psy;
@@ -4609,7 +4609,7 @@ private:
       float stubStart = isQBar ? (R + bubR2 * 2.f + lw) : R;
       {
         std::vector<float> v;
-        pushLine(v, stubStart, psy, psx, psy, max(0.8f, z * .7f));
+        pushLine(v, stubStart, psy, psx, psy, std::max(0.8f, z * .7f));
         DC(v, 0.38f, 0.42f, 0.60f);
       }
       if (isQBar) {
@@ -4626,7 +4626,7 @@ private:
       }
       {
         std::vector<float> v;
-        pushCircle(v, psx, psy, max(2.5f, kPinR * z));
+        pushCircle(v, psx, psy, std::max(2.5f, kPinR * z));
         if (sim)
           DC(v, val ? .28f : .55f, val ? .86f : .25f, val ? .47f : .15f);
         else
@@ -4635,7 +4635,7 @@ private:
       }
     }
     {
-      float cr2 = max(4.5f, 6.f * z), bcx = R - cr2 - 2.5f * z,
+      float cr2 = std::max(4.5f, 6.f * z), bcx = R - cr2 - 2.5f * z,
             bcy = yT + cr2 + 2.5f * z;
       if (sim) {
         std::vector<float> gv;

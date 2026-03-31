@@ -55,7 +55,7 @@ struct ToneCurveChannel {
   float evaluate(float t) const {
     if (points.size() < 2)
       return t;
-    t = max(0.f, min(1.f, t));
+    t = std::max(0.f, std::min(1.f, t));
 
     // Clamp to endpoints outside range
     if (t <= points.front().x)
@@ -74,7 +74,7 @@ struct ToneCurveChannel {
 
     // Catmull-Rom control points (clamped at boundaries)
     auto pt = [&](int i) -> CurvePoint {
-      i = max(0, min((int)points.size() - 1, i));
+      i = std::max(0, std::min((int)points.size() - 1, i));
       return points[i];
     };
     CurvePoint p0 = pt(seg - 1), p1 = pt(seg), p2 = pt(seg + 1),
@@ -100,7 +100,7 @@ struct ToneCurveChannel {
     float h11 = u3 - u2;
 
     float y = h00 * p1.y + h10 * m1y + h01 * p2.y + h11 * m2y;
-    return max(0.f, min(1.f, y));
+    return std::max(0.f, std::min(1.f, y));
   }
 
   // Build a 256-entry LUT for GPU/export use
@@ -146,11 +146,11 @@ struct ParametricCurve {
   ToneCurveChannel bake() const {
     ToneCurveChannel ch;
     ch.points = {
-        {0.00f, max(0.f, min(1.f, 0.00f + shadows * 0.20f))},
-        {0.25f, max(0.f, min(1.f, 0.25f + darks * 0.20f))},
+        {0.00f, std::max(0.f, std::min(1.f, 0.00f + shadows * 0.20f))},
+        {0.25f, std::max(0.f, std::min(1.f, 0.25f + darks * 0.20f))},
         {0.50f, 0.50f},
-        {0.75f, max(0.f, min(1.f, 0.75f + lights * 0.20f))},
-        {1.00f, max(0.f, min(1.f, 1.00f + highlights * 0.20f))},
+        {0.75f, std::max(0.f, std::min(1.f, 0.75f + lights * 0.20f))},
+        {1.00f, std::max(0.f, std::min(1.f, 1.00f + highlights * 0.20f))},
     };
     return ch;
   }
@@ -456,8 +456,8 @@ public:
 
     // Add new point
     auto [nx, ny] = screenToNorm(mx, my);
-    nx = max(0.01f, min(0.99f, nx)); // never override endpoints
-    ny = max(0.f, min(1.f, ny));
+    nx = std::max(0.01f, std::min(0.99f, nx)); // never override endpoints
+    ny = std::max(0.f, std::min(1.f, ny));
 
     auto &pts = activeChannelCurve().points;
 
@@ -506,7 +506,7 @@ public:
     // Parametric drag
     if (draggingParamSlot >= 0) {
       float delta = (mx - dragStartX) / float(plotW) * 2.f; // -1..+1 range
-      float nv = max(-1.f, min(1.f, dragStartVal + delta));
+      float nv = std::max(-1.f, std::min(1.f, dragStartVal + delta));
       setParamValue(draggingParamSlot, nv);
       // Bake to point curve for preview
       activeChannelCurve() = curveData.parametric.bake();
@@ -522,13 +522,13 @@ public:
 
       // Endpoints: only move Y
       if (selectedPoint == 0 || selectedPoint == (int)pts.size() - 1) {
-        pts[selectedPoint].y = max(0.f, min(1.f, ny));
+        pts[selectedPoint].y = std::max(0.f, std::min(1.f, ny));
       } else {
         // Constrain X between neighbours
         float xMin = pts[selectedPoint - 1].x + 0.01f;
         float xMax = pts[selectedPoint + 1].x - 0.01f;
-        pts[selectedPoint].x = max(xMin, min(xMax, nx));
-        pts[selectedPoint].y = max(0.f, min(1.f, ny));
+        pts[selectedPoint].x = std::max(xMin, std::min(xMax, nx));
+        pts[selectedPoint].y = std::max(0.f, std::min(1.f, ny));
       }
       notifyCurveChanged();
       markNeedsPaint();
@@ -577,18 +577,18 @@ public:
 
     switch (keyCode) {
     case Key::Up:
-      p.y = min(1.f, p.y + step);
+      p.y = std::min(1.f, p.y + step);
       break;
     case Key::Down:
-      p.y = max(0.f, p.y - step);
+      p.y = std::max(0.f, p.y - step);
       break;
     case Key::Left:
       if (selectedPoint > 0)
-        p.x = max(pts[selectedPoint - 1].x + step, p.x - step);
+        p.x = std::max(pts[selectedPoint - 1].x + step, p.x - step);
       break;
     case Key::Right:
       if (selectedPoint < (int)pts.size() - 1)
-        p.x = min(pts[selectedPoint + 1].x - step, p.x + step);
+        p.x = std::min(pts[selectedPoint + 1].x - step, p.x + step);
       break;
     case Key::Delete:
     case Key::Backspace:
@@ -661,8 +661,8 @@ private:
 
   // Screen → normalised
   std::pair<float, float> screenToNorm(int sx, int sy) const {
-    float nx = (float)(sx - plotX) / max(1, plotW);
-    float ny = 1.f - (float)(sy - plotY) / max(1, plotH);
+    float nx = (float)(sx - plotX) / std::max(1, plotW);
+    float ny = 1.f - (float)(sy - plotY) / std::max(1, plotH);
     return {nx, ny};
   }
 
@@ -715,7 +715,7 @@ private:
     Painter painter(ctx);
     std::uint32_t peak = 1;
     for (auto v : histBins)
-      peak = max(peak, v);
+      peak = std::max(peak, v);
 
     for (int i = 0; i < 256; ++i) {
       float t = float(histBins[i]) / peak;
@@ -726,7 +726,7 @@ private:
 
       int px0 = plotX + (int)((float)i / 255.f * plotW);
       int px1 = plotX + (int)((float)(i + 1) / 255.f * plotW);
-      px1 = max(px0 + 1, px1);
+      px1 = std::max(px0 + 1, px1);
 
       painter.fillRect(px0, plotY + plotH - barH, px1 - px0, barH,
                        Color::fromRGB(60, 60, 65));
@@ -895,7 +895,7 @@ painter.fillPolygonAlpha(poly, col.withAlpha(28));
 
       // Filled portion from midpoint
       if (thumbX != trackMid)
-        painter.drawHLine(min(trackMid, thumbX), trackY, abs(thumbX - trackMid),
+        painter.drawHLine(std::min(trackMid, thumbX), trackY, abs(thumbX - trackMid),
                           slots[i].col, 2);
 
       // Thumb

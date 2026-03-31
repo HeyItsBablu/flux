@@ -44,7 +44,7 @@ struct HistogramData {
     std::uint32_t m = 1;
     auto scan = [&](const std::array<std::uint32_t, 256> &ch) {
       for (auto v : ch)
-        m = max(m, v);
+        m = std::max(m, v);
     };
     if (showR)
       scan(r);
@@ -268,7 +268,7 @@ public:
       for (int col = 0; col < pw; ++col) {
         float binF = (float)col / (pw - 1) * 255.0f;
         int bin0 = (int)binF;
-        int bin1 = min(255, bin0 + 1);
+        int bin1 = std::min(255, bin0 + 1);
         float t = binF - bin0;
         float raw = (float)bins[bin0] * (1.f - t) + (float)bins[bin1] * t;
 
@@ -303,7 +303,7 @@ public:
       painter.drawVLine(hx, py, ph, Color::fromRGB(255, 255, 255), 1);
 
       // Tooltip label
-      int binIdx = max(0, min(255, (int)(hoverPos * 255.f + 0.5f)));
+      int binIdx = std::max(0, std::min(255, (int)(hoverPos * 255.f + 0.5f)));
       char buf[64];
       if (mode == HistogramMode::Luminosity)
         std::snprintf(buf, sizeof(buf), "L: %u", histData.lum[binIdx]);
@@ -343,8 +343,8 @@ public:
     int ph = height - toggleH;
 
     if (mx >= x && mx < x + width && my >= y && my < y + ph) {
-      float newPos = (float)(mx - x) / max(1, width - 1);
-      newPos = max(0.0f, min(1.0f, newPos));
+      float newPos = (float)(mx - x) / std::max(1, width - 1);
+      newPos = std::max(0.0f, std::min(1.0f, newPos));
       if (std::abs(newPos - hoverPos) > 0.001f) {
         hoverPos = newPos;
         markNeedsPaint();
@@ -374,8 +374,8 @@ public:
     // Click in plot → zone callback
     if (mx >= x && mx < x + width && my >= y && my < y + ph) {
       if (onZoneClicked) {
-        float pos = (float)(mx - x) / max(1, width - 1);
-        onZoneClicked(max(0.0f, min(1.0f, pos)));
+        float pos = (float)(mx - x) / std::max(1, width - 1);
+        onZoneClicked(std::max(0.0f, std::min(1.0f, pos)));
       }
       return true;
     }
@@ -410,7 +410,7 @@ private:
   // Layout: [  R  |  G  |  B  |  L  ]  equal width
   void handleToggleClick(int localX, int totalW) {
     int numChannels = 4;
-    int slot = localX * numChannels / max(1, totalW);
+    int slot = localX * numChannels / std::max(1, totalW);
     switch (slot) {
     case 0:
       showR = !showR;

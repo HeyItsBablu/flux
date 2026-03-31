@@ -50,10 +50,10 @@ public:
   bool tick(double dt) {
     float f = float(dt);
     float targetW = (hovered_ || dragging_) ? kThumbFat : kThumbThin;
-    currentW_ += (targetW - currentW_) * min(1.f, kExpandSpeed * f);
+    currentW_ += (targetW - currentW_) * std::min(1.f, kExpandSpeed * f);
 
     if (!visible_) {
-      alpha_ += (0.f - alpha_) * min(1.f, kFadeSpeed * f);
+      alpha_ += (0.f - alpha_) * std::min(1.f, kFadeSpeed * f);
       idleTimer_ = 0.f;
       return std::abs(alpha_) > 0.005f;
     }
@@ -67,7 +67,7 @@ public:
       targetAlpha = (idleTimer_ < kIdleDelay) ? kActiveAlpha : kIdleAlpha;
     }
     float prev = alpha_;
-    alpha_ += (targetAlpha - alpha_) * min(1.f, kFadeSpeed * f);
+    alpha_ += (targetAlpha - alpha_) * std::min(1.f, kFadeSpeed * f);
     return std::abs(alpha_ - prev) > 0.002f;
   }
 
@@ -187,11 +187,11 @@ private:
   static constexpr float kArrowStep = 0.05f;
 
   float trackStripW() const { return kTrackThick; }
-  float usableLen() const { return max(1.f, stripLen_ - kArrowSize * 2.f); }
+  float usableLen() const { return std::max(1.f, stripLen_ - kArrowSize * 2.f); }
 
   void thumbPixels(float &pxStart, float &pxLen) const {
     float ul = usableLen();
-    pxLen = max(kThumbMinLen, (thumbMax_ - thumbMin_) * ul);
+    pxLen = std::max(kThumbMinLen, (thumbMax_ - thumbMin_) * ul);
     float range = ul - pxLen;
     pxStart = kArrowSize + thumbMin_ / (1.f - (thumbMax_ - thumbMin_)) * range;
     if (!std::isfinite(pxStart))
@@ -250,7 +250,7 @@ private:
     float crossCenter = (axis_ == Axis::Horizontal)
                             ? stripY0_ + kTrackThick * 0.5f
                             : stripX0_ + kTrackThick * 0.5f;
-    const float cr = min(kCornerR, halfW);
+    const float cr = std::min(kCornerR, halfW);
     float rLen = tl - cr * 2.f;
     if (rLen > 0.f) {
       float rx, ry, rw, rh;

@@ -372,9 +372,9 @@ void Painter::fillColumnBars(int x, int y, int w, int h,
     SelectObject(memDC, hBmp);
     memset(bits, 0, w * h * 4);
 
-    int cols = min(w, (int)barHeights.size());
+    int cols = std::min(w, (int)barHeights.size());
     for (int px = 0; px < cols; ++px) {
-        int barH = max(0, min(h, barHeights[px]));
+        int barH = std::max(0, std::min(h, barHeights[px]));
         for (int py = h - barH; py < h; ++py) {
             uint8_t *pixel = (uint8_t *)bits + (py * w + px) * 4;
             pixel[0] = color.b;
@@ -427,8 +427,8 @@ void Painter::fillPolygonAlpha(const std::vector<std::pair<int, int>> &points,
     int x0 = points[0].first,  y0 = points[0].second;
     int x1 = x0,               y1 = y0;
     for (auto &p : points) {
-        x0 = min(x0, p.first);  y0 = min(y0, p.second);
-        x1 = max(x1, p.first);  y1 = max(y1, p.second);
+        x0 = std::min(x0, p.first);  y0 = std::min(y0, p.second);
+        x1 = std::max(x1, p.first);  y1 = std::max(y1, p.second);
     }
     int w = x1 - x0, h = y1 - y0;
     if (w <= 0 || h <= 0)

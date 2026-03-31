@@ -43,27 +43,27 @@ struct BoxConstraints {
     static BoxConstraints infinite()             { return BoxConstraints(0, 10000, 0, 10000); }
 
     void normalize() {
-        minWidth  = max(0, minWidth);
-        minHeight = max(0, minHeight);
+        minWidth  = std::max(0, minWidth);
+        minHeight = std::max(0, minHeight);
         if (maxWidth  < minWidth)  maxWidth  = minWidth;
         if (maxHeight < minHeight) maxHeight = minHeight;
     }
 
-    int clampWidth(int w)  const { return max(minWidth,  min(maxWidth,  w)); }
-    int clampHeight(int h) const { return max(minHeight, min(maxHeight, h)); }
+    int clampWidth(int w)  const { return std::max(minWidth,  std::min(maxWidth,  w)); }
+    int clampHeight(int h) const { return std::max(minHeight, std::min(maxHeight, h)); }
 
     BoxConstraints deflate(int horizontal, int vertical) const {
-        return BoxConstraints(0, max(0, maxWidth - horizontal),
-                              0, max(0, maxHeight - vertical));
+        return BoxConstraints(0, std::max(0, maxWidth - horizontal),
+                              0, std::max(0, maxHeight - vertical));
     }
 
     BoxConstraints intersect(int wMin, int wMax, int hMin, int hMax) const {
-        int newMinW = max(minWidth,  wMin);
-        int newMaxW = min(maxWidth,  wMax);
-        int newMinH = max(minHeight, hMin);
-        int newMaxH = min(maxHeight, hMax);
-        return BoxConstraints(newMinW, max(newMinW, newMaxW),
-                              newMinH, max(newMinH, newMaxH));
+        int newMinW = std::max(minWidth,  wMin);
+        int newMaxW = std::min(maxWidth,  wMax);
+        int newMinH = std::max(minHeight, hMin);
+        int newMaxH = std::min(maxHeight, hMax);
+        return BoxConstraints(newMinW, std::max(newMinW, newMaxW),
+                              newMinH, std::max(newMinH, newMaxH));
     }
 };
 

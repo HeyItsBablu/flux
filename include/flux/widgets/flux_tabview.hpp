@@ -115,15 +115,15 @@ public:
     int curX = 0;
     for (int i = 0; i < (int)tabs_.size(); i++) {
       int textW = _measureLabel(ctx, fontCache, tabs_[i].label);
-      int tabW = max(tabMinWidth, textW + tabPadH * 2);
+      int tabW = std::max(tabMinWidth, textW + tabPadH * 2);
       tabRects_[i] = {curX, 0, curX + tabW, tabBarHeight};
       curX += tabW;
     }
 
     int contentY = tabBarHeight + indicatorHeight;
     int contentH = height - contentY;
-    int innerW = max(1, width - contentPadding * 2);
-    int innerH = max(1, contentH - contentPadding * 2);
+    int innerW = std::max(1, width - contentPadding * 2);
+    int innerH = std::max(1, contentH - contentPadding * 2);
 
     if (contentH > 0 && activeIndex >= 0 && activeIndex < (int)tabs_.size()) {
       auto &pane = tabs_[activeIndex].content;

@@ -176,7 +176,7 @@ static std::vector<float> arrowVerts(float x0, float y0, float x1, float y1,
   float ux = dx / len, uy = dy / len;
   float px = -uy, py = ux;
   float hs      = half * 1.2f;
-  float headLen = min(len * 0.4f, half * 4.f);
+  float headLen = std::min(len * 0.4f, half * 4.f);
   float headW   = half * 2.5f;
   float mx = x1 - ux * headLen, my = y1 - uy * headLen;
   return {x0 + px * hs, y0 + py * hs, x0 - px * hs, y0 - py * hs,
@@ -193,7 +193,7 @@ static std::vector<float> doubleArrowVerts(float x0, float y0, float x1,
   float ux = dx / len, uy = dy / len;
   float px = -uy, py = ux;
   float hs      = half * 1.2f;
-  float headLen = min(len * 0.3f, half * 4.f);
+  float headLen = std::min(len * 0.3f, half * 4.f);
   float headW   = half * 2.5f;
   float m0x = x0 + ux * headLen, m0y = y0 + uy * headLen;
   float m1x = x1 - ux * headLen, m1y = y1 - uy * headLen;
@@ -257,8 +257,8 @@ static std::vector<float> heartFan(float cx, float cy, float rx, float ry) {
 static std::vector<float> parallelogramOutline(float x0, float y0, float x1,
                                                float y1, float shear,
                                                float half) {
-  float lx = min(x0, x1), rx = max(x0, x1);
-  float by = min(y0, y1), ty = max(y0, y1);
+  float lx = std::min(x0, x1), rx = std::max(x0, x1);
+  float by = std::min(y0, y1), ty = std::max(y0, y1);
   float sh = (rx - lx) * shear;
   float ax = lx + sh, bx = rx + sh, cx = rx, dx = lx;
   float ay = by, bby = by, ccy = ty, ddy = ty;
@@ -274,8 +274,8 @@ static std::vector<float> parallelogramOutline(float x0, float y0, float x1,
 
 static std::vector<float> trapezoidOutline(float x0, float y0, float x1,
                                            float y1, float taper, float half) {
-  float lx = min(x0, x1), rx = max(x0, x1);
-  float by = min(y0, y1), ty = max(y0, y1);
+  float lx = std::min(x0, x1), rx = std::max(x0, x1);
+  float by = std::min(y0, y1), ty = std::max(y0, y1);
   float w = rx - lx, t = w * taper;
   float ax = lx, bx = rx, cx = rx - t, dx = lx + t;
   std::vector<float> buf(4 * 6 * 2);
@@ -699,10 +699,10 @@ private:
 
   void grabPixels() {
     int cw = canvasWidth(), ch = canvasHeight();
-    grabLX_ = max(0, min((int)selX0_, cw - 1));
-    grabBY_ = max(0, min((int)selY0_, ch - 1));
-    grabW_  = max(1, min((int)(selX1_ - selX0_), cw - grabLX_));
-    grabH_  = max(1, min((int)(selY1_ - selY0_), ch - grabBY_));
+    grabLX_ = std::max(0, std::min((int)selX0_, cw - 1));
+    grabBY_ = std::max(0, std::min((int)selY0_, ch - 1));
+    grabW_  = std::max(1, std::min((int)(selX1_ - selX0_), cw - grabLX_));
+    grabH_  = std::max(1, std::min((int)(selY1_ - selY0_), ch - grabBY_));
     std::vector<uint8_t> full(size_t(cw) * ch * 4);
     readCommitted(full.data());
     pixelBuf_.resize(size_t(grabW_) * grabH_ * 4);
@@ -736,8 +736,8 @@ private:
     int dstLX = (int)x0, dstBY = (int)y0, srcOffX = 0, srcOffY = 0;
     if (dstLX < 0) { srcOffX = -dstLX; dstLX = 0; }
     if (dstBY < 0) { srcOffY = -dstBY; dstBY = 0; }
-    int dstW = min(grabW_ - srcOffX, cw - dstLX);
-    int dstH = min(grabH_ - srcOffY, ch - dstBY);
+    int dstW = std::min(grabW_ - srcOffX, cw - dstLX);
+    int dstH = std::min(grabH_ - srcOffY, ch - dstBY);
     if (dstW <= 0 || dstH <= 0) return;
     std::vector<uint8_t> sub(size_t(dstW) * dstH * 4);
     for (int r = 0; r < dstH; r++)
@@ -757,8 +757,8 @@ private:
     int dstLX = (int)x0, dstBY = (int)y0, srcOffX = 0, srcOffY = 0;
     if (dstLX < 0) { srcOffX = -dstLX; dstLX = 0; }
     if (dstBY < 0) { srcOffY = -dstBY; dstBY = 0; }
-    int dstW = min(grabW_ - srcOffX, cw - dstLX);
-    int dstH = min(grabH_ - srcOffY, ch - dstBY);
+    int dstW = std::min(grabW_ - srcOffX, cw - dstLX);
+    int dstH = std::min(grabH_ - srcOffY, ch - dstBY);
     if (dstW <= 0 || dstH <= 0) { pixelBuf_.clear(); return; }
     std::vector<uint8_t> full(size_t(cw) * ch * 4);
     readCommitted(full.data());
@@ -785,8 +785,8 @@ private:
   }
 
   void drawDots(float x0, float y0, float x1, float y1) {
-    float lx = min(x0, x1), rx = max(x0, x1);
-    float by = min(y0, y1), ty = max(y0, y1);
+    float lx = std::min(x0, x1), rx = std::max(x0, x1);
+    float by = std::min(y0, y1), ty = std::max(y0, y1);
     const float dotSize = 1.5f, gap = 6.f;
     std::vector<float> buf;
     auto dotEdge = [&](float ax, float ay, float bx, float by2) {
@@ -813,7 +813,7 @@ private:
   void drawShapeInto(GLuint fbo, float x0, float y0, float x1, float y1) {
     RGBA c = parseHexColor(activeColor);
     float r = c.r, g = c.g, b = c.b, a = activeOpacity;
-    float half = max(0.5f, activeSize * 0.5f);
+    float half = std::max(0.5f, activeSize * 0.5f);
     float cx = (x0 + x1) * 0.5f, cy = (y0 + y1) * 0.5f;
     float rx = std::abs(x1 - x0) * 0.5f, ry = std::abs(y1 - y0) * 0.5f;
 
@@ -845,7 +845,7 @@ private:
       break;
     }
     case Tool::Rect: {
-      float lx = min(x0, x1), bby = min(y0, y1), rxx = max(x0, x1), ty = max(y0, y1);
+      float lx = std::min(x0, x1), bby = std::min(y0, y1), rxx = std::max(x0, x1), ty = std::max(y0, y1);
       if (filled) rectFilled(lx, bby, rxx, ty);
       else        rectOutline(lx, bby, rxx, ty);
       break;
@@ -919,7 +919,7 @@ private:
       break;
     }
     case Tool::Star5: {
-      float ro = min(rx, ry), ri = ro * 0.4f;
+      float ro = std::min(rx, ry), ri = ro * 0.4f;
       if (filled) {
         std::vector<std::pair<float, float>> pts;
         float off = -1.5708f;
@@ -937,7 +937,7 @@ private:
       break;
     }
     case Tool::Star6: {
-      float ro = min(rx, ry), ri = ro * 0.5f;
+      float ro = std::min(rx, ry), ri = ro * 0.5f;
       if (filled) {
         std::vector<std::pair<float, float>> pts;
         for (int i = 0; i < 12; i++) {
@@ -967,8 +967,8 @@ private:
     case Tool::Trapezoid:     emitOutline(trapezoidOutline(x0, y0, x1, y1, 0.2f,  half)); break;
     case Tool::RoundRect: {
       const int cornSegs = 8;
-      float lx = min(x0, x1), bby = min(y0, y1), rxx = max(x0, x1), ty = max(y0, y1);
-      float cr = min(min(rx, ry) * 0.3f, 12.f);
+      float lx = std::min(x0, x1), bby = std::min(y0, y1), rxx = std::max(x0, x1), ty = std::max(y0, y1);
+      float cr = std::min(std::min(rx, ry) * 0.3f, 12.f);
       std::vector<std::pair<float, float>> pts;
       auto addCorner = [&](float ox, float oy, float startA) {
         for (int i = 0; i <= cornSegs; i++) {
@@ -996,7 +996,7 @@ private:
       }
       break;
     }
-    case Tool::Cross: emitFan(crossVerts(cx, cy, rx, ry, min(rx, ry) * 0.35f)); break;
+    case Tool::Cross: emitFan(crossVerts(cx, cy, rx, ry, std::min(rx, ry) * 0.35f)); break;
     case Tool::Heart: emitFan(heartFan(cx, cy, rx, ry));                         break;
     default: break;
     }
@@ -1331,7 +1331,7 @@ public:
                         ->setWidth(18)->setHeight(18)->setBorderRadius(4)
                         ->setBackgroundColor(Color::fromRGB(35, 35, 55))
                         ->setBorderWidth(1)->setBorderColor(kBorder))
-                    ->setOnTap([this]() { fontSize.set(max(8, fontSize.get() - 2)); }),
+                    ->setOnTap([this]() { fontSize.set(std::max(8, fontSize.get() - 2)); }),
                 SizedBox(4, 0),
                 Container(
                     Text(fontSize, [](const int &sz) { return std::to_string(sz); })
@@ -1345,7 +1345,7 @@ public:
                         ->setWidth(18)->setHeight(18)->setBorderRadius(4)
                         ->setBackgroundColor(Color::fromRGB(35, 35, 55))
                         ->setBorderWidth(1)->setBorderColor(kBorder))
-                    ->setOnTap([this]() { fontSize.set(min(96, fontSize.get() + 2)); }),
+                    ->setOnTap([this]() { fontSize.set(std::min(96, fontSize.get() + 2)); }),
             })
             ->setSpacing(0),
         })

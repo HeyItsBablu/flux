@@ -534,8 +534,8 @@ Color glow = Color::fromRGB(
     thumb = std::clamp(thumb, tx, tx + tw);
 
     if (thumb != mid) {
-      int fx0 = min(mid, thumb);
-      int fx1 = max(mid, thumb);
+      int fx0 = std::min(mid, thumb);
+      int fx1 = std::max(mid, thumb);
       Color fillCol = blendColor(kMeta[bi].trackColor, chCol);
       painter.fillRect(fx0, trackY, fx1 - fx0, trackH, fillCol);
     }

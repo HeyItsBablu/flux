@@ -96,8 +96,8 @@ class VectorApp : public Component {
   }
   void syncZoom(float z) {
     double pct = z * 100.0;
-    double clamped = max(pct, kZoomMin);
-    clamped = min(clamped, kZoomMax);
+    double clamped = std::max(pct, kZoomMin);
+    clamped = std::min(clamped, kZoomMax);
     if (clamped != pct && canvasPtr_) {
       float target = float(clamped / 100.0);
       Viewport &vp = canvasPtr_->viewport();
@@ -113,8 +113,8 @@ class VectorApp : public Component {
   void applyZoom(double pct) {
     if (!canvasPtr_)
       return;
-    pct = max(pct, kZoomMin);
-    pct = min(pct, kZoomMax);
+    pct = std::max(pct, kZoomMin);
+    pct = std::min(pct, kZoomMax);
     Viewport &vp = canvasPtr_->viewport();
     float t = float(pct / 100.0), cur = vp.zoom();
     if (std::abs(t - cur) < 0.0001f)
@@ -985,7 +985,7 @@ strokeColor.set(ColorToHex(c));
                         ->setBorderWidth(1)
                         ->setBorderColor(kBorder))
                     ->setOnTap(
-                        [this]() { fontSize.set(max(6, fontSize.get() - 2)); }),
+                        [this]() { fontSize.set(std::max(6, fontSize.get() - 2)); }),
                 SizedBox(3, 0),
                 Container(
                     Center(Text(fontSize,
@@ -1008,7 +1008,7 @@ strokeColor.set(ColorToHex(c));
                         ->setBorderWidth(1)
                         ->setBorderColor(kBorder))
                     ->setOnTap([this]() {
-                      fontSize.set(min(288, fontSize.get() + 2));
+                      fontSize.set(std::min(288, fontSize.get() + 2));
                     }),
             })
             ->setSpacing(0)

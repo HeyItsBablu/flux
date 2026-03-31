@@ -191,7 +191,7 @@ public:
     dispCTex_ = committedTexHandle();
 
     // Resize every layer's committed FBO, preserving content.
-    int bw = min(oldW, w), bh = min(oldH, h);
+    int bw = std::min(oldW, w), bh = std::min(oldH, h);
     for (auto &lyr : layers_) {
       GLuint nFBO = 0, nTex = 0;
       allocFBOPair(nFBO, nTex, w, h);

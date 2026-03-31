@@ -322,7 +322,7 @@ public:
 
     if (_resizingCol_ >= 0) {
       int dx = mx - _resizeDragX_;
-      int newW = max(columns_[_resizingCol_].minWidth, _resizeDragWidth_ + dx);
+      int newW = std::max(columns_[_resizingCol_].minWidth, _resizeDragWidth_ + dx);
       colWidths_[_resizingCol_] = newW;
       if (ui)
         ui->updateWidget(this);
@@ -442,8 +442,8 @@ public:
         ui->updateWidget(this);
       return true;
     case Key::PageUp: { // Page Up
-      int page = max(1, _contentAreaHeight() / rowHeight);
-      selectedIndex_ = max(0, selectedIndex_ - page);
+      int page = std::max(1, _contentAreaHeight() / rowHeight);
+      selectedIndex_ = std::max(0, selectedIndex_ - page);
       _ensureRowVisible(selectedIndex_);
       _fireSelection();
       if (auto *ui = FluxUI::getCurrentInstance())
@@ -451,8 +451,8 @@ public:
       return true;
     }
     case Key::PageDown: { // Page Down
-      int page = max(1, _contentAreaHeight() / rowHeight);
-      selectedIndex_ = min(count - 1, selectedIndex_ + page);
+      int page = std::max(1, _contentAreaHeight() / rowHeight);
+      selectedIndex_ = std::min(count - 1, selectedIndex_ + page);
       _ensureRowVisible(selectedIndex_);
       _fireSelection();
       if (auto *ui = FluxUI::getCurrentInstance())
@@ -494,8 +494,8 @@ public:
     accentColor = c;
     rowSelectColor  = Color::fromRGB(
         (uint8_t)(c.r / 5 * 4),
-        (uint8_t)(min(255, c.g / 5 * 4 + 20)),
-        (uint8_t)(min(255, c.b / 5 * 4 + 40))
+        (uint8_t)(std::min(255, c.g / 5 * 4 + 20)),
+        (uint8_t)(std::min(255, c.b / 5 * 4 + 40))
     );
     markNeedsPaint();
     return self_();
@@ -615,13 +615,13 @@ private:
   bool _needsHScrollbar() const { return _totalColumnsWidth() > width; }
 
   void _clampVScroll(int off) {
-    int maxOff = max(0, _totalContentHeight() - _contentAreaHeight());
-    scrollOffsetY_ = max(0, min(maxOff, off));
+    int maxOff = std::max(0, _totalContentHeight() - _contentAreaHeight());
+    scrollOffsetY_ = std::max(0, std::min(maxOff, off));
     markNeedsPaint();
   }
   void _clampHScroll(int off) {
-    int maxOff = max(0, _totalColumnsWidth() - _contentAreaWidth());
-    scrollOffsetX_ = max(0, min(maxOff, off));
+    int maxOff = std::max(0, _totalColumnsWidth() - _contentAreaWidth());
+    scrollOffsetX_ = std::max(0, std::min(maxOff, off));
     markNeedsPaint();
   }
 
@@ -751,10 +751,10 @@ private:
     for (int i = 0; i < (int)columns_.size(); i++) {
       int cw = colWidths_[i];
       int cRight = cx + cw;
-      int cLeft = max(cx, x);
+      int cLeft = std::max(cx, x);
 
       if (cLeft < x + contentW && cRight > x) {
-        painter.pushClipRect(cLeft, y, min(cRight, x + contentW) - cLeft,
+        painter.pushClipRect(cLeft, y, std::min(cRight, x + contentW) - cLeft,
                              headerHeight);
 
         bool isSortCol = (sortKey_ == columns_[i].key);
@@ -764,7 +764,7 @@ private:
 
         if (isSortCol) {
           painter.fillRect(cLeft, y + headerHeight - 2,
-                           min(cRight, x + contentW) - cLeft, 2, accentColor);
+                           std::min(cRight, x + contentW) - cLeft, 2, accentColor);
         }
 
         UINT fmt = DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS;
@@ -781,14 +781,14 @@ private:
         }
 
         painter.drawTextA(label, cLeft + 8, y,
-                          min(cRight - 8, x + contentW) - cLeft - 8,
+                          std::min(cRight - 8, x + contentW) - cLeft - 8,
                           headerHeight, hFont,
                           isSortCol ? accentColor : headerTextColor, fmt);
 
         painter.popClipRect();
 
         if (showColumnDividers && i < (int)columns_.size() - 1) {
-          int lx = min(cRight, x + contentW);
+          int lx = std::min(cRight, x + contentW);
           painter.drawVLine(lx, y + 6, headerHeight - 12, dividerColor_, 1);
         }
       }
@@ -813,7 +813,7 @@ private:
     NativeFont hFont = fontCache.getFont(fontSize_, FontWeight::Normal);
 
     int firstRow = scrollOffsetY_ / rowHeight;
-    int lastRow = min((int)displayRows_->size() - 1,
+    int lastRow = std::min((int)displayRows_->size() - 1,
                       (scrollOffsetY_ + contentH) / rowHeight);
 
     for (int vi = firstRow; vi <= lastRow; vi++) {
@@ -846,10 +846,10 @@ private:
       for (int ci = 0; ci < (int)columns_.size(); ci++) {
         int cw = colWidths_[ci];
         int cRight = cx + cw;
-        int cLeft = max(cx, x);
+        int cLeft = std::max(cx, x);
 
         if (cLeft < x + contentW && cRight > x) {
-          painter.pushClipRect(cLeft, rowY, min(cRight, x + contentW) - cLeft,
+          painter.pushClipRect(cLeft, rowY, std::min(cRight, x + contentW) - cLeft,
                                rowHeight);
 
           std::string val = columns_[ci].format(row.get(columns_[ci].key));
@@ -867,7 +867,7 @@ private:
           }
 
           painter.drawTextA(val, cLeft + 8, rowY,
-                            min(cRight - 8, x + contentW) - cLeft - 8,
+                            std::min(cRight - 8, x + contentW) - cLeft - 8,
                             rowHeight, hFont,
                             row.disabled ? disabledColor_ : textColor_, fmt);
 
@@ -876,7 +876,7 @@ private:
           painter.pushClipRect(x, bodyY, contentW, contentH);
 
           if (showColumnDividers && ci < (int)columns_.size() - 1) {
-            int lx = min(cRight, x + contentW - 1);
+            int lx = std::min(cRight, x + contentW - 1);
             painter.drawVLine(lx, rowY + 4, rowHeight - 8, dividerColor_, 1);
           }
         }
@@ -912,7 +912,7 @@ private:
       painter.fillRect(sbX, sbY, scrollbarWidth_, sbH, Color::fromRGB(240, 240, 240));
 
       float thumbRatio = (float)sbH / (float)total;
-      int thumbH = max(20, (int)(sbH * thumbRatio));
+      int thumbH = std::max(20, (int)(sbH * thumbRatio));
       float scrollRatio =
           (total > sbH) ? (float)scrollOffsetY_ / (float)(total - sbH) : 0.f;
       int thumbY = sbY + (int)(scrollRatio * (sbH - thumbH));
@@ -930,7 +930,7 @@ private:
       painter.fillRect(sbX, sbY, sbW, scrollbarWidth_, Color::fromRGB(240, 240, 240));
 
       float thumbRatio = (float)sbW / (float)total;
-      int thumbW = max(20, (int)(sbW * thumbRatio));
+      int thumbW = std::max(20, (int)(sbW * thumbRatio));
       float scrollRatio =
           (total > sbW) ? (float)scrollOffsetX_ / (float)(total - sbW) : 0.f;
       int thumbX = sbX + (int)(scrollRatio * (sbW - thumbW));

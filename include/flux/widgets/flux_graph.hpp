@@ -410,8 +410,8 @@ void main(){ fragColor = texture(uTex, vUV); }
     Gdiplus::RectF layout(0, 0, 2000, 2000), bounds;
     gMeasure.MeasureString(wtext.c_str(), -1, &font, layout, &bounds);
 
-    int tw = max(1, (int)std::ceil(bounds.Width) + 2);
-    int th = max(1, (int)std::ceil(bounds.Height) + 2);
+    int tw = std::max(1, (int)std::ceil(bounds.Width) + 2);
+    int th = std::max(1, (int)std::ceil(bounds.Height) + 2);
 
     Gdiplus::Bitmap bmp(tw, th, PixelFormat32bppARGB);
     Gdiplus::Graphics g(&bmp);
@@ -735,7 +735,7 @@ Gdiplus::SolidBrush brush(toGdipColor(color));
       }
     } else if (!series.empty() && !series[0].values.empty()) {
       int n = (int)series[0].values.size();
-      int step = max(1, n / 6);
+      int step = std::max(1, n / 6);
       for (int i = 0; i < n; i += step) {
         float ndcX = indexToNDC_X(i, n, px0, px1);
         char buf[16];
@@ -782,8 +782,8 @@ Gdiplus::SolidBrush brush(toGdipColor(color));
           yMin = yMax = v;
           first = false;
         } else {
-          yMin = min(yMin, v);
-          yMax = max(yMax, v);
+          yMin = std::min(yMin, v);
+          yMax = std::max(yMax, v);
         }
       }
     if (yMin == yMax) {
@@ -845,7 +845,7 @@ Gdiplus::SolidBrush brush(toGdipColor(color));
     drawVerts(GL_LINES, strip, s.r, s.g, s.b, 1.f, mvp);
 
     // Point dots — small quads (GL doesn't guarantee point size in core)
-    float dotR = 3.f * 2.f / min(width, height);
+    float dotR = 3.f * 2.f / std::min(width, height);
     std::vector<float> dots;
     for (int i = 0; i < n; ++i) {
       float cx = indexToNDC_X(i, n, px0, px1);
@@ -858,7 +858,7 @@ Gdiplus::SolidBrush brush(toGdipColor(color));
   void drawArea(const GraphSeries &s, float px0, float px1, float py0,
                 float py1, const float mvp[16]) {
     int n = (int)s.values.size();
-    float baseline = dataToNDC_Y(max(0.f, yMin), py0, py1);
+    float baseline = dataToNDC_Y(std::max(0.f, yMin), py0, py1);
 
     // Filled area as triangle strip (emulated with triangles)
     std::vector<float> fill;
@@ -880,7 +880,7 @@ Gdiplus::SolidBrush brush(toGdipColor(color));
     int n = (int)s.values.size();
     if (n == 0)
       return;
-    float baseline = dataToNDC_Y(max(yMin, 0.f), py0, py1);
+    float baseline = dataToNDC_Y(std::max(yMin, 0.f), py0, py1);
     float barW = (px1 - px0) / n * 0.6f;
 
     std::vector<float> fill, outline;
@@ -896,8 +896,8 @@ Gdiplus::SolidBrush brush(toGdipColor(color));
       pushLine(outline, l, top, l, baseline);
     }
     drawVerts(GL_TRIANGLES, fill, s.r, s.g, s.b, 0.85f, mvp);
-    drawVerts(GL_LINES, outline, min(s.r * 1.3f, 1.f), min(s.g * 1.3f, 1.f),
-              min(s.b * 1.3f, 1.f), 1.f, mvp);
+    drawVerts(GL_LINES, outline, std::min(s.r * 1.3f, 1.f), std::min(s.g * 1.3f, 1.f),
+              std::min(s.b * 1.3f, 1.f), 1.f, mvp);
   }
 };
 

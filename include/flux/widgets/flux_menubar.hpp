@@ -418,10 +418,10 @@ private:
     for (const auto &item : items) {
       if (item.type == ContextMenuItem::Type::Action) {
         int lw = (int)item.label.size() * (menuFontSize / 2 + 1);
-        maxLabelW = max(maxLabelW, lw);
+        maxLabelW = std::max(maxLabelW, lw);
       }
     }
-    popupW_ = max(minMenuWidth, maxLabelW + menuPadH * 2);
+    popupW_ = std::max(minMenuWidth, maxLabelW + menuPadH * 2);
 
     int totalH = menuPadV * 2;
     for (const auto &item : items)

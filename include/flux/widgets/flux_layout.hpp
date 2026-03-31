@@ -53,9 +53,9 @@ public:
     } else {
       for (auto &child : children) {
         if (!isPositioned(child)) {
-          intrinsicW = max(intrinsicW, child->width + child->marginLeft +
+          intrinsicW = std::max(intrinsicW, child->width + child->marginLeft +
                                            child->marginRight);
-          intrinsicH = max(intrinsicH, child->height + child->marginTop +
+          intrinsicH = std::max(intrinsicH, child->height + child->marginTop +
                                            child->marginBottom);
         }
       }
@@ -364,7 +364,7 @@ public:
     // -----------------------------------------------------------------------
     // PASS 2: Distribute remaining height to flex children.
     // -----------------------------------------------------------------------
-    int remainingHeight = max(0, content.maxHeight - fixedHeight);
+    int remainingHeight = std::max(0, content.maxHeight - fixedHeight);
 
     if (totalFlex > 0 && remainingHeight > 0) {
       int allocatedHeight = 0;
@@ -402,7 +402,7 @@ public:
     for (size_t i = 0; i < children.size(); ++i) {
       auto &child = children[i];
       totalHeight += child->height + child->marginTop + child->marginBottom;
-      maxChildWidth = max(maxChildWidth, child->width);
+      maxChildWidth = std::max(maxChildWidth, child->width);
       if (i + 1 < children.size())
         totalHeight += spacing;
     }
@@ -575,7 +575,7 @@ public:
     // -----------------------------------------------------------------------
     // PASS 2: Distribute remaining width to flex children.
     // -----------------------------------------------------------------------
-    int remainingWidth = max(0, content.maxWidth - fixedWidth);
+    int remainingWidth = std::max(0, content.maxWidth - fixedWidth);
 
     if (totalFlex > 0 && remainingWidth > 0) {
       int allocated = 0;
@@ -612,7 +612,7 @@ public:
     for (size_t i = 0; i < children.size(); ++i) {
       auto &child = children[i];
       totalWidth += child->width + child->marginLeft + child->marginRight;
-      maxChildHeight = max(maxChildHeight, child->height + child->marginTop +
+      maxChildHeight = std::max(maxChildHeight, child->height + child->marginTop +
                                                child->marginBottom);
       if (i + 1 < children.size())
         totalWidth += spacing;

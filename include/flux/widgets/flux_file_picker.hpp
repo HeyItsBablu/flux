@@ -533,7 +533,7 @@ private:
   int _measureBtnWidth() const {
     // Approximate: label chars × ~7px + padding.  Good enough without HDC.
     int labelW = (int)_label().size() * 7 + btnPadding * 2;
-    return max(80, labelW);
+    return std::max(80, labelW);
   }
 
   // ── Build OPENFILENAME filter string ──────────────────────────────────────
@@ -659,7 +659,7 @@ std::wstring wDefault  = toWideString(defaultFilename_);
 
     std::vector<wchar_t> buf(MAX_PATH, L'\0');
     if (!wDefault.empty()) {
-      size_t copyLen = min(wDefault.size(), size_t(MAX_PATH - 1));
+      size_t copyLen = std::min(wDefault.size(), size_t(MAX_PATH - 1));
       memcpy(buf.data(), wDefault.c_str(), copyLen * sizeof(wchar_t));
     }
 

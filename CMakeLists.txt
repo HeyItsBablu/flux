@@ -56,6 +56,7 @@ target_link_libraries(flux PUBLIC
 
 target_compile_options(flux PRIVATE /W4 /permissive- /Zc:__cplusplus /EHsc)
 target_compile_definitions(flux PUBLIC $<$<CONFIG:Debug>:FLUX_DEBUG>)
+add_compile_definitions(NOMINMAX)
 
 # ── Optional subdirectories ───────────────────────────────────────────────────
 if(FLUX_BUILD_EXAMPLES)

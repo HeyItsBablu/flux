@@ -125,10 +125,10 @@ struct AABB {
   float x0 = 1e30f, y0 = 1e30f, x1 = -1e30f, y1 = -1e30f;
   bool valid() const { return x0 <= x1 && y0 <= y1; }
   void expand(Vec2 p) {
-    x0 = min(x0, p.x);
-    y0 = min(y0, p.y);
-    x1 = max(x1, p.x);
-    y1 = max(y1, p.y);
+    x0 = std::min(x0, p.x);
+    y0 = std::min(y0, p.y);
+    x1 = std::max(x1, p.x);
+    y1 = std::max(y1, p.y);
   }
   bool contains(Vec2 p) const {
     return p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1;
@@ -302,8 +302,8 @@ inline Contour rectContour(float x, float y, float w, float h, float rx,
                            float ry) {
   if (rx <= 0 && ry <= 0)
     return {{x, y}, {x + w, y}, {x + w, y + h}, {x, y + h}};
-  rx = min(rx, w * .5f);
-  ry = min(ry, h * .5f);
+  rx = std::min(rx, w * .5f);
+  ry = std::min(ry, h * .5f);
   const int segs = 8;
   Contour c;
   auto arc = [&](float acx, float acy, float startA, float endA) {
@@ -454,7 +454,7 @@ inline std::vector<Contour> applyDash(const std::vector<Vec2> &pts, bool closed,
 
     float walked = 0.f;
     while (walked < segLen) {
-      float step = min(patRemain, segLen - walked);
+      float step = std::min(patRemain, segLen - walked);
       Vec2 pt = a + dir * (walked + step);
 
       if (drawing) {
@@ -1389,7 +1389,7 @@ public:
     dirty_ = true;
   }
   void setGridSize(float v) {
-    gridSize_ = max(4.f, v);
+    gridSize_ = std::max(4.f, v);
     dirty_ = true;
   }
   void setShowGuides(bool v) {
@@ -2085,10 +2085,10 @@ private:
   std::vector<VShapeId> hitTestBox(float x0, float y0, float x1,
                                    float y1) const {
     vmath::AABB sel;
-    sel.x0 = min(x0, x1);
-    sel.y0 = min(y0, y1);
-    sel.x1 = max(x0, x1);
-    sel.y1 = max(y0, y1);
+    sel.x0 = std::min(x0, x1);
+    sel.y0 = std::min(y0, y1);
+    sel.x1 = std::max(x0, x1);
+    sel.y1 = std::max(y0, y1);
     std::vector<VShapeId> result;
     for (auto &s : scene_)
       if (vtess::shapeAABB(s).intersects(sel))
@@ -2664,8 +2664,8 @@ private:
     auto cr = clampToArtboard(x, y);
     x = cr.x;
     y = cr.y;
-    float x0 = min(shapeX0_, x), y0 = min(shapeY0_, y);
-    float x1 = max(shapeX0_, x), y1 = max(shapeY0_, y);
+    float x0 = std::min(shapeX0_, x), y0 = std::min(shapeY0_, y);
+    float x1 = std::max(shapeX0_, x), y1 = std::max(shapeY0_, y);
     float fw = float(w_), fh = float(h_);
     x0 = std::clamp(x0, 0.f, fw);
     y0 = std::clamp(y0, 0.f, fh);
@@ -2749,7 +2749,7 @@ vec4 evalGradient(float t) {
   vec4 c = uGColors[0];
   for (int i = 1; i < uGStopCount; i++) {
     if (t >= uGPos[i-1] && t <= uGPos[i]) {
-      float f = (t - uGPos[i-1]) / max(uGPos[i] - uGPos[i-1], 0.0001);
+      float f = (t - uGPos[i-1]) / std::max(uGPos[i] - uGPos[i-1], 0.0001);
       c = mix(uGColors[i-1], uGColors[i], f);
     }
   }
@@ -2833,7 +2833,7 @@ void main(){
     // Upload stop data — pad unused slots to avoid reading garbage
     float colArr[16] = {}; // 4 stops × 4 floats
     float posArr[4] = {};
-    int cnt = min((int)fill.stops.size(), 4);
+    int cnt = std::min((int)fill.stops.size(), 4);
     for (int i = 0; i < cnt; i++) {
       colArr[i * 4 + 0] = fill.stops[i].color.r;
       colArr[i * 4 + 1] = fill.stops[i].color.g;
@@ -3384,8 +3384,8 @@ void main(){
     if (shapeDragging_) {
       float fw_ = float(w_), fh_ = float(h_);
       float gx = std::clamp(mx_, 0.f, fw_), gy = std::clamp(my_, 0.f, fh_);
-      float x0 = min(shapeX0_, gx), y0 = min(shapeY0_, gy);
-      float x1 = max(shapeX0_, gx), y1 = max(shapeY0_, gy);
+      float x0 = std::min(shapeX0_, gx), y0 = std::min(shapeY0_, gy);
+      float x1 = std::max(shapeX0_, gx), y1 = std::max(shapeY0_, gy);
       VShape ghost;
       ghost.fill = activeFill_;
       ghost.fill.color.a *= .5f;

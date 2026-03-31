@@ -67,7 +67,7 @@ public:
       Painter(ctx).measureText(wtext, font, tw, th);
 
       width = toggleWidth + 12 + tw;
-      height = max(toggleHeight, th);
+      height = std::max(toggleHeight, th);
     } else {
       width = toggleWidth;
       height = toggleHeight;
@@ -413,7 +413,7 @@ public:
       return false;
     }
 
-    value = max(minValue, min(maxValue, value));
+    value = std::max(minValue, std::min(maxValue, value));
 
     if (value != oldValue) {
       notifyValueChanged();
@@ -471,13 +471,13 @@ public:
 
   std::shared_ptr<SliderWidget> setValue(State<double> &state) {
     value = state.get();
-    value = max(minValue, min(maxValue, value));
+    value = std::max(minValue, std::min(maxValue, value));
 
     state.bindProperty(
         shared_from_this(),
         [](Widget *w, const double &val) {
           auto *slider = static_cast<SliderWidget *>(w);
-          slider->value = max(slider->minValue, min(slider->maxValue, val));
+          slider->value = std::max(slider->minValue, std::min(slider->maxValue, val));
         },
         false);
 
@@ -488,14 +488,14 @@ public:
 
   std::shared_ptr<SliderWidget> setValue(State<int> &state) {
     value = (double)state.get();
-    value = max(minValue, min(maxValue, value));
+    value = std::max(minValue, std::min(maxValue, value));
 
     state.bindProperty(
         shared_from_this(),
         [](Widget *w, const int &val) {
           auto *slider = static_cast<SliderWidget *>(w);
           slider->value =
-              max(slider->minValue, min(slider->maxValue, (double)val));
+              std::max(slider->minValue, std::min(slider->maxValue, (double)val));
         },
         false);
 
@@ -510,7 +510,7 @@ public:
 
     // Initial value
     value = fn(state.get());
-    value = max(minValue, min(maxValue, value));
+    value = std::max(minValue, std::min(maxValue, value));
 
     state.bindProperty(
         shared_from_this(),
@@ -519,7 +519,7 @@ public:
 
           slider->value = fn(val);
           slider->value =
-              max(slider->minValue, min(slider->maxValue, slider->value));
+              std::max(slider->minValue, std::min(slider->maxValue, slider->value));
         },
         false);
 
@@ -542,7 +542,7 @@ private:
     int trackRight = x + width - paddingRight;
     int trackWidth = trackRight - trackLeft;
 
-    int clampedX = max(trackLeft, min(trackRight, mx));
+    int clampedX = std::max(trackLeft, std::min(trackRight, mx));
 
     double normalizedPos = (double)(clampedX - trackLeft) / trackWidth;
 
@@ -552,7 +552,7 @@ private:
       newValue = round(newValue / step) * step;
     }
 
-    newValue = max(minValue, min(maxValue, newValue));
+    newValue = std::max(minValue, std::min(maxValue, newValue));
 
     if (newValue != value) {
       value = newValue;
@@ -599,7 +599,7 @@ public:
       Painter(ctx).measureText(wtext, font, tw, th);
 
       width = boxSize + 8 + tw;
-      height = max(boxSize, th);
+      height = std::max(boxSize, th);
     } else {
       width = boxSize;
       height = boxSize;
@@ -731,7 +731,7 @@ public:
       Painter(ctx).measureText(wtext, font, tw, th);
 
       width = circleSize + 8 + tw;
-      height = max(circleSize, th);
+      height = std::max(circleSize, th);
     } else {
       width = circleSize;
       height = circleSize;
@@ -851,11 +851,11 @@ public:
 
       if (isVertical) {
         totalHeight += child->height + child->marginTop + child->marginBottom;
-        maxWidth = max(maxWidth,
+        maxWidth = std::max(maxWidth,
                        child->width + child->marginLeft + child->marginRight);
       } else {
         totalWidth += child->width + child->marginLeft + child->marginRight;
-        maxHeight = max(maxHeight,
+        maxHeight = std::max(maxHeight,
                         child->height + child->marginTop + child->marginBottom);
       }
     }
@@ -1363,7 +1363,7 @@ private:
     int cursorX = tw - scrollOffset;
 
     if (cursorX < 10)
-      scrollOffset = max(0, tw - 10);
+      scrollOffset = std::max(0, tw - 10);
     else if (cursorX > textAreaWidth - 10)
       scrollOffset = tw - textAreaWidth + 10;
   }

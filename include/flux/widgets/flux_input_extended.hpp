@@ -91,8 +91,8 @@ public:
                      const BoxConstraints &constraints, FontCache &) override {
     autoWidth = false;
     autoHeight = false;
-    width = max(minWidth, min(width, constraints.maxWidth));
-    height = max(minHeight, min(height, constraints.maxHeight));
+    width = std::max(minWidth, std::min(width, constraints.maxWidth));
+    height = std::max(minHeight, std::min(height, constraints.maxHeight));
     applyConstraints();
 
     // Update scrollbar viewports
@@ -174,8 +174,8 @@ public:
 
     int scrollY = sbV_.scrollOffset;
     int scrollX = sbH_.scrollOffset;
-    int firstLine = scrollY / max(1, lineH_);
-    int lastLine = min((int)lines_.size() - 1, firstLine + cH / lineH_ + 1);
+    int firstLine = scrollY / std::max(1, lineH_);
+    int lastLine = std::min((int)lines_.size() - 1, firstLine + cH / lineH_ + 1);
 
     for (int li = firstLine; li <= lastLine; li++) {
       int lineY = cTop + li * lineH_ - scrollY;
@@ -508,7 +508,7 @@ public:
     case Key::Up:
       if (cursorLine_ > 0) {
         cursorLine_--;
-        cursorCol_ = min(cursorCol_, (int)lines_[cursorLine_].size());
+        cursorCol_ = std::min(cursorCol_, (int)lines_[cursorLine_].size());
       }
       if (!shift)
         _clearSelection();
@@ -516,7 +516,7 @@ public:
     case Key::Down:
       if (cursorLine_ < (int)lines_.size() - 1) {
         cursorLine_++;
-        cursorCol_ = min(cursorCol_, (int)lines_[cursorLine_].size());
+        cursorCol_ = std::min(cursorCol_, (int)lines_[cursorLine_].size());
       }
       if (!shift)
         _clearSelection();
@@ -532,17 +532,17 @@ public:
         _clearSelection();
       break;
     case Key::PageUp: {
-      int page = max(1, sbV_.viewportMain / max(1, lineH_));
-      cursorLine_ = max(0, cursorLine_ - page);
-      cursorCol_ = min(cursorCol_, (int)lines_[cursorLine_].size());
+      int page = std::max(1, sbV_.viewportMain / std::max(1, lineH_));
+      cursorLine_ = std::max(0, cursorLine_ - page);
+      cursorCol_ = std::min(cursorCol_, (int)lines_[cursorLine_].size());
       if (!shift)
         _clearSelection();
       break;
     }
     case Key::PageDown: {
-      int page = max(1, sbV_.viewportMain / max(1, lineH_));
-      cursorLine_ = min((int)lines_.size() - 1, cursorLine_ + page);
-      cursorCol_ = min(cursorCol_, (int)lines_[cursorLine_].size());
+      int page = std::max(1, sbV_.viewportMain / std::max(1, lineH_));
+      cursorLine_ = std::min((int)lines_.size() - 1, cursorLine_ + page);
+      cursorCol_ = std::min(cursorCol_, (int)lines_[cursorLine_].size());
       if (!shift)
         _clearSelection();
       break;
@@ -586,8 +586,8 @@ public:
       lines_.push_back("");
 
     // Clamp cursor to valid bounds after external content change.
-    cursorLine_ = min(cursorLine_, (int)lines_.size() - 1);
-    cursorCol_ = min(cursorCol_, (int)lines_[cursorLine_].size());
+    cursorLine_ = std::min(cursorLine_, (int)lines_.size() - 1);
+    cursorCol_ = std::min(cursorCol_, (int)lines_[cursorLine_].size());
 
     // FIX: keep selection anchor in sync with cursor so that no phantom
     // selection is created between the old anchor position and the newly
@@ -737,7 +737,7 @@ private:
     if (!wordWrap) {
       int maxW = 0;
       for (auto &l : lines_)
-        maxW = max(maxW, (int)l.size() * (fontSize / 2 + 1));
+        maxW = std::max(maxW, (int)l.size() * (fontSize / 2 + 1));
       sbH_.contentMain = maxW;
       sbH_.setScrollable(!wordWrap && sbH_.contentMain > sbH_.viewportMain);
     } else {
@@ -767,7 +767,7 @@ private:
     int curX = cursorCol_ * (fontSize / 2 + 1);
     int hp = sbH_.viewportMain;
     if (curX < sbH_.scrollOffset)
-      sbH_.scrollOffset = max(0, curX - 10);
+      sbH_.scrollOffset = std::max(0, curX - 10);
     else if (curX > sbH_.scrollOffset + hp - 10)
       sbH_.scrollOffset = curX - hp + 20;
     sbH_.clamp();
@@ -778,7 +778,7 @@ private:
                  int to) const {
     if (from >= to || s.empty())
       return 0;
-    to = min(to, (int)s.size());
+    to = std::min(to, (int)s.size());
 
     std::wstring ws = toWideString(s.c_str() + from, to - from);
     NativeFont font =
@@ -795,8 +795,8 @@ private:
     int cLeft = x + paddingLeft + gutterW;
     int cTop = y + paddingTop;
 
-    int line = (my - cTop + sbV_.scrollOffset) / max(1, lineH_);
-    line = max(0, min((int)lines_.size() - 1, line));
+    int line = (my - cTop + sbV_.scrollOffset) / std::max(1, lineH_);
+    line = std::max(0, std::min((int)lines_.size() - 1, line));
 
     int relX = mx - cLeft + sbH_.scrollOffset;
     int col = 0;
@@ -1129,8 +1129,8 @@ public:
     }
     // Click in text area — position cursor
     if (editing_) {
-      editCursorPos_ = min((int)editBuffer_.size(),
-                           max(0, mx - x - paddingLeft) / max(1, fontSize / 2));
+      editCursorPos_ = std::min((int)editBuffer_.size(),
+                           std::max(0, mx - x - paddingLeft) / std::max(1, fontSize / 2));
     }
     return true;
   }
@@ -1192,11 +1192,11 @@ public:
       _commitImmediate();
       return true;
     case Key::PageUp:
-      value = min(maxValue, value + step * 10);
+      value = std::min(maxValue, value + step * 10);
       _commitImmediate();
       return true;
     case Key::PageDown:
-      value = max(minValue, value - step * 10);
+      value = std::max(minValue, value - step * 10);
       _commitImmediate();
       return true;
     case Key::Home:
@@ -1350,7 +1350,7 @@ private:
       return v;
     return std::round(v / step) * step;
   }
-  double _clamp(double v) const { return max(minValue, min(maxValue, v)); }
+  double _clamp(double v) const { return std::max(minValue, std::min(maxValue, v)); }
 
   std::string _formatValue(double v) const {
     if (decimalPlaces <= 0)

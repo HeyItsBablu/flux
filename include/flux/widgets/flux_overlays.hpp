@@ -353,10 +353,10 @@ private:
     for (const auto &item : items) {
       if (item.type == ContextMenuItem::Type::Action) {
         int lw = (int)item.label.size() * (menuFontSize / 2);
-        maxLabelWidth = max(maxLabelWidth, lw);
+        maxLabelWidth = std::max(maxLabelWidth, lw);
       }
     }
-    menuW = max(minWidth, maxLabelWidth + paddingH * 2);
+    menuW = std::max(minWidth, maxLabelWidth + paddingH * 2);
 
     int totalH = paddingV * 2;
     for (const auto &item : items)
@@ -901,9 +901,9 @@ private:
     int lineH = tipFontSize + 4;
     int textW = (int)tipText.size() * charW;
     int maxTW = tipMaxWidth - tipPadH * 2;
-    int lines = max(1, (textW + maxTW - 1) / maxTW);
+    int lines = std::max(1, (textW + maxTW - 1) / maxTW);
 
-    tipW = min(textW + tipPadH * 2, tipMaxWidth);
+    tipW = std::min(textW + tipPadH * 2, tipMaxWidth);
     tipH = lines * lineH + tipPadV * 2;
 
     int anchorCX = x + width / 2;
@@ -1050,7 +1050,7 @@ public:
 
     Painter painter(ctx);
 
-    int visibleCount = min((int)options.size(), maxVisibleItems);
+    int visibleCount = std::min((int)options.size(), maxVisibleItems);
     int listH = visibleCount * itemHeight + 2;
 
     // Box outline + fill
@@ -1062,7 +1062,7 @@ public:
 
     NativeFont font = fontCache.getFont(fontSize, fontWeight);
 
-    int endIndex = min((int)options.size(), scrollOffset + visibleCount);
+    int endIndex = std::min((int)options.size(), scrollOffset + visibleCount);
     for (int i = scrollOffset; i < endIndex; i++) {
       int itemY = 1 + (i - scrollOffset) * itemHeight;
 
@@ -1084,7 +1084,7 @@ public:
   // ── Mouse Events ──────────────────────────────────────────────────────
   bool handleMouseDown(int mx, int my) override {
     if (isOpen) {
-      int visibleCount = min((int)options.size(), maxVisibleItems);
+      int visibleCount = std::min((int)options.size(), maxVisibleItems);
       int listH = visibleCount * itemHeight + 2;
 
       if (mx >= listClientX && mx < listClientX + listWidth_ &&
@@ -1110,7 +1110,7 @@ public:
     if (!isOpen)
       return false;
 
-    int visibleCount = min((int)options.size(), maxVisibleItems);
+    int visibleCount = std::min((int)options.size(), maxVisibleItems);
     int listH = visibleCount * itemHeight + 2;
 
     if (mx >= listClientX && mx < listClientX + listWidth_ &&
@@ -1133,9 +1133,9 @@ public:
   bool handleMouseWheel(int delta) override {
     if (!isOpen)
       return false;
-    int maxScroll = max(0, (int)options.size() - maxVisibleItems);
-    scrollOffset = (delta > 0) ? max(0, scrollOffset - 1)
-                               : min(maxScroll, scrollOffset + 1);
+    int maxScroll = std::max(0, (int)options.size() - maxVisibleItems);
+    scrollOffset = (delta > 0) ? std::max(0, scrollOffset - 1)
+                               : std::min(maxScroll, scrollOffset + 1);
     refreshDropdownPopup_();
     return true;
   }
@@ -1169,7 +1169,7 @@ public:
     case Key::Up:
       if (isOpen) {
         if (hoveredItemIndex < 0)
-          hoveredItemIndex = max(0, selectedIndex);
+          hoveredItemIndex = std::max(0, selectedIndex);
         else if (hoveredItemIndex > 0)
           hoveredItemIndex--;
         ensureItemVisible(hoveredItemIndex);
@@ -1181,7 +1181,7 @@ public:
     case Key::Down:
       if (isOpen) {
         if (hoveredItemIndex < 0)
-          hoveredItemIndex = max(0, selectedIndex);
+          hoveredItemIndex = std::max(0, selectedIndex);
         else if (hoveredItemIndex < (int)options.size() - 1)
           hoveredItemIndex++;
         ensureItemVisible(hoveredItemIndex);
@@ -1202,7 +1202,7 @@ public:
     case Key::End:
       if (isOpen) {
         hoveredItemIndex = (int)options.size() - 1;
-        scrollOffset = max(0, (int)options.size() - maxVisibleItems);
+        scrollOffset = std::max(0, (int)options.size() - maxVisibleItems);
         refreshDropdownPopup_();
       } else {
         selectItem((int)options.size() - 1);
@@ -1296,7 +1296,7 @@ private:
     listClientX = x;
     listClientY = y + height + 2;
 
-    int visibleCount = min((int)options.size(), maxVisibleItems);
+    int visibleCount = std::min((int)options.size(), maxVisibleItems);
     int listH = visibleCount * itemHeight + 2;
 
     // Convert to screen for showPopup

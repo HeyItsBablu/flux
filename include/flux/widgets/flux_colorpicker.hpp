@@ -75,8 +75,8 @@ inline HSV RGBtoHSV(Color color) {
   double g = color.g / 255.0;
   double b = color.b / 255.0;
 
-  double cmax = max(r, max(g, b));
-  double cmin = min(r, min(g, b));
+  double cmax = std::max(r, std::max(g, b));
+  double cmin = std::min(r, std::min(g, b));
   double diff = cmax - cmin;
 
   HSV hsv = {0, 0, cmax, 1.0};
@@ -347,22 +347,22 @@ private:
   void updateSV(int mx, int my, int cx, int cy) {
     double s = (double)(mx - cx) / pickerSize;
     double v = 1.0 - (double)(my - cy) / pickerSize;
-    hsv.s = max(0.0, min(1.0, s));
-    hsv.v = max(0.0, min(1.0, v));
+    hsv.s = std::max(0.0, std::min(1.0, s));
+    hsv.v = std::max(0.0, std::min(1.0, v));
     notifyChanged();
     markNeedsPaint();
   }
 
   void updateHue(int mx, int cx) {
     double t = (double)(mx - cx) / pickerSize;
-    hsv.h = max(0.0, min(360.0, t * 360.0));
+    hsv.h = std::max(0.0, std::min(360.0, t * 360.0));
     notifyChanged();
     markNeedsPaint();
   }
 
   void updateAlpha(int mx, int cx) {
     double t = (double)(mx - cx) / pickerSize;
-    hsv.a = max(0.0, min(1.0, t));
+    hsv.a = std::max(0.0, std::min(1.0, t));
     notifyChanged();
     markNeedsPaint();
   }
@@ -414,8 +414,8 @@ private:
         bool light = ((px / tileSize + py / tileSize) % 2 == 0);
         Color bg = light ? Color::fromRGB(200, 200, 200)
                          : Color::fromRGB(150, 150, 150);
-        int tw = min(px + tileSize, barW) - px;
-        int th = min(py + tileSize, barH) - py;
+        int tw = std::min(px + tileSize, barW) - px;
+        int th = std::min(py + tileSize, barH) - py;
         painter.fillRect(cx + px, cy + py, tw, th, bg);
       }
     }

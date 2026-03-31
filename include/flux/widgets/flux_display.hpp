@@ -271,19 +271,19 @@ public:
   }
 
   std::shared_ptr<ProgressBarWidget> setValue(State<double> &state) {
-    value = max(0.0, min(1.0, state.get()));
+    value = std::max(0.0, std::min(1.0, state.get()));
     state.bindProperty(
         shared_from_this(),
         [](Widget *w, const double &val) {
           auto *bar = static_cast<ProgressBarWidget *>(w);
-          bar->value = max(0.0, min(1.0, val));
+          bar->value = std::max(0.0, std::min(1.0, val));
           bar->markNeedsPaint();
         },
         false);
     return std::static_pointer_cast<ProgressBarWidget>(shared_from_this());
   }
   std::shared_ptr<ProgressBarWidget> setValue(double v) {
-    value = max(0.0, min(1.0, v));
+    value = std::max(0.0, std::min(1.0, v));
     markNeedsPaint();
     return std::static_pointer_cast<ProgressBarWidget>(shared_from_this());
   }

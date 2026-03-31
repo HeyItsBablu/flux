@@ -47,8 +47,8 @@ struct ScrollbarState {
   // ── Clamp / update ────────────────────────────────────────────────────
 
   void clamp() {
-    int maxScroll = max(0, contentMain - viewportMain);
-    scrollOffset = max(0, min(scrollOffset, maxScroll));
+    int maxScroll = std::max(0, contentMain - viewportMain);
+    scrollOffset = std::max(0, std::min(scrollOffset, maxScroll));
   }
 
   // Call after contentMain / viewportMain / scrollOffset change
@@ -58,7 +58,7 @@ struct ScrollbarState {
       return;
     }
     float visRatio = (float)viewportMain / (float)contentMain;
-    thumbLength = max(30, (int)(viewportMain * visRatio));
+    thumbLength = std::max(30, (int)(viewportMain * visRatio));
     float scrollRatio =
         (contentMain > viewportMain)
             ? (float)scrollOffset / (float)(contentMain - viewportMain)
@@ -1167,8 +1167,8 @@ private:
 
   int resolvedColumnCount(int contentWidth) const {
     if (fixedCellWidth > 0)
-      return max(1, (contentWidth + spacingH) / (fixedCellWidth + spacingH));
-    return max(1, columnCount);
+      return std::max(1, (contentWidth + spacingH) / (fixedCellWidth + spacingH));
+    return std::max(1, columnCount);
   }
 
 public:
@@ -1280,7 +1280,7 @@ public:
       int row = i / cols;
       children[i]->computeLayout(
           ctx, BoxConstraints::loose(cellW, sb.viewportMain), fontCache);
-      rowHeights[row] = max(rowHeights[row], children[i]->height);
+      rowHeights[row] = std::max(rowHeights[row], children[i]->height);
     }
 
     int total = 0;
@@ -1411,7 +1411,7 @@ public:
     }
 
     int contentWidth = constraints.maxWidth - paddingLeft - paddingRight;
-    int cols = max(1, resolvedColumnCount(contentWidth));
+    int cols = std::max(1, resolvedColumnCount(contentWidth));
     int cellW = (contentWidth - spacingH * (cols - 1)) / cols;
     int rows = ((int)children.size() + cols - 1) / cols;
     std::vector<int> rowHeights(rows, 0);
@@ -1420,10 +1420,10 @@ public:
       int row = i / cols;
       int childW = (crossAxisAlignment == CrossAxisAlignment::Stretch)
                        ? cellW
-                       : min(cellW, contentWidth);
+                       : std::min(cellW, contentWidth);
       children[i]->computeLayout(
           ctx, BoxConstraints::loose(childW, constraints.maxHeight), fontCache);
-      rowHeights[row] = max(rowHeights[row], children[i]->height);
+      rowHeights[row] = std::max(rowHeights[row], children[i]->height);
     }
 
     int totalH = 0;
@@ -1575,7 +1575,7 @@ private:
 
   int resolvedColumnCount(int contentWidth) const {
     if (fixedCellWidth > 0)
-      return max(1, (contentWidth + spacingH) / (fixedCellWidth + spacingH));
+      return std::max(1, (contentWidth + spacingH) / (fixedCellWidth + spacingH));
     return columnCount;
   }
   std::shared_ptr<GridWidget> self() {
