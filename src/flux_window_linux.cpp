@@ -33,13 +33,11 @@
 // Internal Cairo surface state — kept entirely out of the header
 // ============================================================================
 
-struct CairoState {
-    SDL_Surface*     sdlSurface  = nullptr;   // owned by SDL, NOT us
+struct PlatformWindow::CairoState {
+    SDL_Surface*     sdlSurface  = nullptr;
     cairo_surface_t* cairoSurf   = nullptr;
     cairo_t*         cr          = nullptr;
 
-    // Rebuild after window creation or resize.
-    // Returns false if SDL gives us an unusable surface.
     bool rebuild(SDL_Window* win) {
         teardown();
 
@@ -47,22 +45,12 @@ struct CairoState {
         if (!sdlSurface)
             return false;
 
-        // Ensure ARGB8888 — Cairo ARGB32 matches on little-endian x86/ARM.
-        // SDL_GetWindowSurface already returns the native window format;
-        // on most Linux desktops that is ARGB8888, but we guard anyway.
-        if (sdlSurface->format->format != SDL_PIXELFORMAT_ARGB8888) {
-            // We can't convert in-place here because Cairo must draw into
-            // the surface SDL handed us.  Log and fall through — the
-            // colours may be wrong on exotic pixel formats, but it won't
-            // crash.
-        }
-
         cairoSurf = cairo_image_surface_create_for_data(
             static_cast<unsigned char*>(sdlSurface->pixels),
             CAIRO_FORMAT_ARGB32,
             sdlSurface->w,
             sdlSurface->h,
-            sdlSurface->pitch          // ← pitch, never w*4
+            sdlSurface->pitch
         );
 
         if (cairo_surface_status(cairoSurf) != CAIRO_STATUS_SUCCESS) {
@@ -75,9 +63,9 @@ struct CairoState {
     }
 
     void teardown() {
-        if (cr)        { cairo_destroy(cr);              cr        = nullptr; }
+        if (cr)        { cairo_destroy(cr); cr = nullptr; }
         if (cairoSurf) { cairo_surface_destroy(cairoSurf); cairoSurf = nullptr; }
-        sdlSurface = nullptr;   // SDL owns it — do NOT free
+        sdlSurface = nullptr;
     }
 
     ~CairoState() { teardown(); }

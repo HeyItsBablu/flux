@@ -15,8 +15,7 @@ struct AppConfig {
 
 // ── Implement both of these in your app.cpp ───────────────────────────────────
 
-// Returns window configuration read by main() before createWindow() is called.
-AppConfig appConfig();
+
 
 // Builds and returns the root widget tree.
 WidgetPtr createApp(FluxUI* app);
