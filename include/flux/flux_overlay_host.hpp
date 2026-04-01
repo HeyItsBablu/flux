@@ -98,16 +98,25 @@ public:
   // passing a GraphicsContext that is already translated to (originX_,
   // originY_).
 
-  void showPopup(NativeWindow /*parent*/, int screenX, int screenY, int w,
-                 int h, FontCache & /*fontCache*/) {
-    originX_ = screenX;
-    originY_ = screenY;
-    popupW_ = w;
-    popupH_ = h;
+
+void showPopup(NativeWindow /*parent*/,
+               int screenX, int screenY,
+               int w, int h,
+               FontCache & /*fontCache*/) {
+    // Convert screen → client for Cairo rendering
+    auto *ui = FluxUI::getCurrentInstance();
+    if (ui) {
+        auto client = ui->screenToClient(screenX, screenY);
+        originX_ = client.x;
+        originY_ = client.y;
+    } else {
+        originX_ = screenX;
+        originY_ = screenY;
+    }
+    popupW_  = w;
+    popupH_  = h;
     visible_ = true;
-    // The scaffold invalidates the window after addOverlayHitTarget(),
-    // which is called by the derived widget right after showPopup().
-  }
+}
 
   // On Linux, "refresh" just marks the window dirty — the next paint
   // pass will call renderPopupContent() automatically via the scaffold.

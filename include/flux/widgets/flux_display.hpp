@@ -154,7 +154,13 @@ public:
 
 class IconWidget : public TextWidget {
 public:
-  IconWidget() { fontFamily = "Segoe MDL2 Assets"; }
+IconWidget() { 
+#ifdef _WIN32
+    fontFamily = "Segoe MDL2 Assets"; 
+#else
+    fontFamily = "Material Design Icons";
+#endif
+}
 
   void computeLayout(GraphicsContext & /*ctx*/,
                      const BoxConstraints &constraints,
@@ -237,7 +243,12 @@ static std::string wcharToUtf8(wchar_t wc) {
 using IconWidgetPtr = std::shared_ptr<IconWidget>;
 
 inline IconWidgetPtr Icon(wchar_t glyph,
-                          const std::string &fontFamily = "Segoe MDL2 Assets",
+                          const std::string &fontFamily = 
+#ifdef _WIN32
+                              "Segoe MDL2 Assets",
+#else
+                              "Sans",  // fallback — no icon rendering
+#endif
                           int size = 16) {
   auto w = std::make_shared<IconWidget>();
   w->fontFamily = fontFamily;

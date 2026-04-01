@@ -75,13 +75,14 @@ struct PlatformWindow::CairoState {
 // SDL timer callback — fires a SDL_USEREVENT carrying the TimerID
 // ============================================================================
 
-static Uint32 sdlTimerCallback(Uint32 /*interval*/, void* param) {
+
+static Uint32 sdlTimerCallback(Uint32 interval, void* param) {
     SDL_Event e;
     SDL_zero(e);
     e.type      = SDL_USEREVENT;
     e.user.code = static_cast<Sint32>(reinterpret_cast<uintptr_t>(param));
     SDL_PushEvent(&e);
-    return 0;   // one-shot; FluxUI re-registers via setInterval if needed
+    return interval;  // ← return interval to repeat, not 0
 }
 
 // ============================================================================
