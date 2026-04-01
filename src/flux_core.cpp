@@ -61,7 +61,7 @@ WidgetPtr FluxUI::findByIdRecursive(WidgetPtr widget, const std::string &id) {
   }
 
   return nullptr;
-}
+} 
 
 // ============================================================================
 // SCAFFOLD WIRING

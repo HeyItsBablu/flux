@@ -17,7 +17,7 @@ struct OverlayEntry {
       renderer; // nullptr for popup overlays
   int zIndex = 0;
  
-  // Full entry — widget renders into back-buffer
+  // Full entry — widget renders into back-buffer 
   OverlayEntry(Widget *w, std::function<void(GraphicsContext &, FontCache &)> r,
                int z = 0)
       : widget(w), renderer(r), zIndex(z) {}
@@ -118,17 +118,26 @@ public:
   }
 
   // --- Render (overlays painted after normal tree) ---
-  void render(GraphicsContext &ctx, FontCache &fontCache) override {
+void render(GraphicsContext &ctx, FontCache &fontCache) override {
     for (auto &child : children)
-      child->render(ctx, fontCache);
+        child->render(ctx, fontCache);
 
-    // only call renderer if present — popup overlays have nullptr here
-    for (const auto &entry : overlayStack)
-      if (entry.renderer)
-        entry.renderer(ctx, fontCache);
+    for (const auto &entry : overlayStack) {
+        if (entry.renderer) {
+            // Full overlay with custom renderer (both platforms)
+            entry.renderer(ctx, fontCache);
+        }
+#ifndef _WIN32
+        else if (entry.widget) {
+
+            if (auto *host = dynamic_cast<OverlayHost *>(entry.widget))
+                host->renderOverlay(ctx, fontCache);
+        }
+#endif
+    }
 
     needsPaint = false;
-  }
+}
 };
 
 // --- AppBar Widget ---
