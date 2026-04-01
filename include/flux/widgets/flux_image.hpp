@@ -13,17 +13,11 @@
 
 #ifdef __linux__
 #   include <cairo/cairo.h>
-    // stb_image — include once in a .cpp with STB_IMAGE_IMPLEMENTATION defined,
-    // or define it here if this header is the sole includer.
-#   ifndef STB_IMAGE_IMPLEMENTATION_INCLUDED
-#       define STB_IMAGE_NO_STDIO   0
-#       define STBI_ONLY_JPEG
-#       define STBI_ONLY_PNG
-#       define STBI_ONLY_BMP
-#       define STBI_ONLY_TGA
-#       include "stb_image.h"
-#       define STB_IMAGE_IMPLEMENTATION_INCLUDED
-#   endif
+#   define STBI_ONLY_JPEG
+#   define STBI_ONLY_PNG
+#   define STBI_ONLY_BMP
+#   define STBI_ONLY_TGA
+#   include "stb_image.h"   // ← declarations only, no STB_IMAGE_IMPLEMENTATION
 #endif
 
 #include <memory>

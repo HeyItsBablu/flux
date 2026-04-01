@@ -1,9 +1,9 @@
-include(FetchContent)
-FetchContent_Declare(stb
-    GIT_REPOSITORY https://github.com/nothings/stb.git
-    GIT_TAG        master
-)
-FetchContent_MakeAvailable(stb)
+# include(FetchContent)
+# FetchContent_Declare(stb
+#     GIT_REPOSITORY https://github.com/nothings/stb.git
+#     GIT_TAG        master
+# )
+# FetchContent_MakeAvailable(stb)
 
 # ============================================================================
 # add_flux_example(NAME)
