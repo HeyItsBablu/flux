@@ -1,9 +1,11 @@
+
 #ifndef FLUX_OVERLAYS_HPP
 #define FLUX_OVERLAYS_HPP
 
-#include "../flux_app.hpp"
-#include "../flux_core.hpp"
-#include "../flux_overlay_host.hpp"
+#include "flux_structure.hpp"    
+#include "../flux_overlay_host.hpp"  
+#include "../flux_app.hpp"       
+#include "../flux_core.hpp"      
 #include <algorithm>
 
 // ============================================================================

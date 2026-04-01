@@ -5,6 +5,7 @@
 
 #include "flux_layout.hpp"
 #include "../flux_state.hpp"
+#include "../flux_overlay_host.hpp"
 #include <iostream>
 
 // ============================================================================
