@@ -5,7 +5,7 @@
 #include "flux_collection.hpp"
 #include "flux_conditional.hpp"
 #include "flux_display.hpp"
-// #include "flux_image.hpp"
+#include "flux_image.hpp"
 #include "flux_input.hpp"
 #include "flux_layout.hpp"
 #include "flux_structure.hpp"

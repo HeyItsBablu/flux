@@ -1,5 +1,9 @@
 #ifdef __linux__
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
+
 #include <cstdio>          // setvbuf, stdout, stderr
 #include <SDL2/SDL.h>      // SDL_DisplayMode, SDL_Window, SDL_SetWindowFullscreen etc.
 #include "flux/flux.hpp"   // FluxUI, FluxAppWidget, createApp

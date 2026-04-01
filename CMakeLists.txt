@@ -30,6 +30,12 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(FetchContent)
 
+FetchContent_Declare(stb
+    GIT_REPOSITORY https://github.com/nothings/stb.git
+    GIT_TAG        master
+)
+FetchContent_MakeAvailable(stb)
+
 FetchContent_Declare(Clipper2
     GIT_REPOSITORY https://github.com/AngusJohnson/Clipper2.git
     GIT_TAG        Clipper2_1.4.0
@@ -79,6 +85,7 @@ target_include_directories(flux
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
     PRIVATE
+        ${stb_SOURCE_DIR}  
         $<$<BOOL:${WIN32}>:${CMAKE_CURRENT_SOURCE_DIR}/external/glad/include>
         $<$<BOOL:${UNIX}>:${SDL2_INCLUDE_DIRS}>
         $<$<BOOL:${UNIX}>:${CAIRO_INCLUDE_DIRS}>

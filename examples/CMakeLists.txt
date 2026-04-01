@@ -41,6 +41,7 @@ function(add_flux_example NAME)
             ${SDL2_INCLUDE_DIRS}
             ${CAIRO_INCLUDE_DIRS}
             ${PANGOCAIRO_INCLUDE_DIRS}
+            ${stb_SOURCE_DIR}
         )
 
         target_link_libraries(${NAME} PRIVATE
@@ -81,7 +82,7 @@ endfunction()
 # Examples
 # ============================================================================
 
-add_flux_example(layout)
+add_flux_example(main)
 
 # ── image_editor (needs stb) — uncomment to enable ───────────────────────────
 # add_flux_example(image_editor)
