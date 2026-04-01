@@ -13,7 +13,7 @@
 // ============================================================================
 // TOAST TYPE
 // ============================================================================
-
+ 
 enum class ToastType { Info, Success, Warning, Error };
 
 // ============================================================================
@@ -278,7 +278,7 @@ void renderPopupContent(GraphicsContext &ctx, FontCache &fontCache) override {
     return false; // don't consume — let other widgets see moves
   }
 
-  bool handleTimer(UINT timerId) override {
+bool handleTimer(TimerID timerId) override {
     if (timerId != tickTimerId_)
       return false;
     _tick();
@@ -412,8 +412,13 @@ void _renderSingleToast(GraphicsContext &ctx, FontCache &fontCache,
 
     // ── Icon (Segoe MDL2) ─────────────────────────────────────────────────
     {
-        NativeFont iconFont = fontCache.getFont("Segoe MDL2 Assets",
-                                                fontSize_ + 2, FontWeight::Normal);
+NativeFont iconFont = fontCache.getFont(
+#ifdef _WIN32
+    "Segoe MDL2 Assets",
+#else
+    "Sans",   // fallback — icons won't show but won't crash
+#endif
+    fontSize_ + 2, FontWeight::Normal);
         int iconY = tY + (tH / 2) - (fontSize_ + 2) / 2 - 2;
         painter.drawText(std::wstring(_icon(at.entry.type)),
                          tX + 14, iconY,
@@ -503,8 +508,13 @@ void _pump() {
                       ui->getFontCache());
             popupShown_ = true;
 
-            if (scaffold_)
-               scaffold_->addOverlay(this, [](GraphicsContext &, FontCache &) {}, 75);
+if (scaffold_) {
+#ifdef _WIN32
+    scaffold_->addOverlay(this, [](GraphicsContext &, FontCache &) {}, 75);
+#else
+    scaffold_->addOverlayHitTarget(this, 75);  // Linux uses renderOverlay via scaffold
+#endif
+}
         }
     }
 
