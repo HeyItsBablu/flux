@@ -292,7 +292,7 @@ public:
 
     // Text area click
     auto [line, col] = _posFromMouse(mx, my);
-    if (GetKeyState(Key::Shift) & 0x8000) {
+    if (platformShiftDown()) {
       selAnchorLine_ = cursorLine_;
       selAnchorCol_ = cursorCol_;
       cursorLine_ = line;
@@ -403,8 +403,8 @@ public:
   }
 
   bool handleKeyDown(int key) override {
-    bool shift = (GetKeyState(Key::Shift) & 0x8000) != 0;
-    bool ctrl = (GetKeyState(Key::Control) & 0x8000) != 0;
+    bool shift = platformShiftDown();
+    bool ctrl = platformShiftDown();
 
     if (ctrl) {
       if (key == 'A') {

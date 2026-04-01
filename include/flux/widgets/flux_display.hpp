@@ -217,15 +217,21 @@ public:
     return std::static_pointer_cast<IconWidget>(shared_from_this());
   }
 
-  static std::string wcharToUtf8(wchar_t glyph) {
-    wchar_t buf[2] = {glyph, L'\0'};
-    int len =
-        WideCharToMultiByte(CP_UTF8, 0, buf, 1, nullptr, 0, nullptr, nullptr);
-    std::string result(len, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, buf, 1, result.data(), len, nullptr,
-                        nullptr);
-    return result;
-  }
+
+static std::string wcharToUtf8(wchar_t wc) {
+    std::string out;
+    if (wc < 0x80) {
+        out += static_cast<char>(wc);
+    } else if (wc < 0x800) {
+        out += static_cast<char>(0xC0 | (wc >> 6));
+        out += static_cast<char>(0x80 | (wc & 0x3F));
+    } else {
+        out += static_cast<char>(0xE0 | (wc >> 12));
+        out += static_cast<char>(0x80 | ((wc >> 6) & 0x3F));
+        out += static_cast<char>(0x80 | (wc & 0x3F));
+    }
+    return out;
+}
 };
 
 using IconWidgetPtr = std::shared_ptr<IconWidget>;

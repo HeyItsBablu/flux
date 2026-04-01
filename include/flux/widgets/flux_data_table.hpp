@@ -2,8 +2,8 @@
 #define FLUX_DATA_TABLE_HPP
 
 #include "../flux_core.hpp"
-#include "flux_layout.hpp"
 #include "../flux_state.hpp"
+#include "flux_layout.hpp"
 #include <algorithm>
 #include <functional>
 #include <string>
@@ -322,7 +322,8 @@ public:
 
     if (_resizingCol_ >= 0) {
       int dx = mx - _resizeDragX_;
-      int newW = std::max(columns_[_resizingCol_].minWidth, _resizeDragWidth_ + dx);
+      int newW =
+          std::max(columns_[_resizingCol_].minWidth, _resizeDragWidth_ + dx);
       colWidths_[_resizingCol_] = newW;
       if (ui)
         ui->updateWidget(this);
@@ -492,11 +493,9 @@ public:
   }
   std::shared_ptr<DataTableWidget> setAccentColor(Color c) {
     accentColor = c;
-    rowSelectColor  = Color::fromRGB(
-        (uint8_t)(c.r / 5 * 4),
-        (uint8_t)(std::min(255, c.g / 5 * 4 + 20)),
-        (uint8_t)(std::min(255, c.b / 5 * 4 + 40))
-    );
+    rowSelectColor = Color::fromRGB((uint8_t)(c.r / 5 * 4),
+                                    (uint8_t)(std::min(255, c.g / 5 * 4 + 20)),
+                                    (uint8_t)(std::min(255, c.b / 5 * 4 + 40)));
     markNeedsPaint();
     return self_();
   }
@@ -580,11 +579,13 @@ private:
     return std::static_pointer_cast<DataTableWidget>(shared_from_this());
   }
 
+#ifdef _WIN32
   HWND _getHWND() const {
     if (auto *ui = FluxUI::getCurrentInstance())
       return ui->getWindow();
     return nullptr;
   }
+#endif
 
   bool _inBounds(int mx, int my) const {
     return mx >= x && mx < x + width && my >= y && my < y + height;
@@ -764,7 +765,8 @@ private:
 
         if (isSortCol) {
           painter.fillRect(cLeft, y + headerHeight - 2,
-                           std::min(cRight, x + contentW) - cLeft, 2, accentColor);
+                           std::min(cRight, x + contentW) - cLeft, 2,
+                           accentColor);
         }
 
         UINT fmt = DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS;
@@ -814,7 +816,7 @@ private:
 
     int firstRow = scrollOffsetY_ / rowHeight;
     int lastRow = std::min((int)displayRows_->size() - 1,
-                      (scrollOffsetY_ + contentH) / rowHeight);
+                           (scrollOffsetY_ + contentH) / rowHeight);
 
     for (int vi = firstRow; vi <= lastRow; vi++) {
       int real = _realIndex(vi);
@@ -849,8 +851,8 @@ private:
         int cLeft = std::max(cx, x);
 
         if (cLeft < x + contentW && cRight > x) {
-          painter.pushClipRect(cLeft, rowY, std::min(cRight, x + contentW) - cLeft,
-                               rowHeight);
+          painter.pushClipRect(
+              cLeft, rowY, std::min(cRight, x + contentW) - cLeft, rowHeight);
 
           std::string val = columns_[ci].format(row.get(columns_[ci].key));
           UINT fmt = DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS;
@@ -909,7 +911,8 @@ private:
       int sbH = height - headerHeight - (needsH ? scrollbarWidth_ + 1 : 0);
       int total = _totalContentHeight();
 
-      painter.fillRect(sbX, sbY, scrollbarWidth_, sbH, Color::fromRGB(240, 240, 240));
+      painter.fillRect(sbX, sbY, scrollbarWidth_, sbH,
+                       Color::fromRGB(240, 240, 240));
 
       float thumbRatio = (float)sbH / (float)total;
       int thumbH = std::max(20, (int)(sbH * thumbRatio));
@@ -927,7 +930,8 @@ private:
       int sbW = width - (needsV ? scrollbarWidth_ + 1 : 0);
       int total = _totalColumnsWidth();
 
-      painter.fillRect(sbX, sbY, sbW, scrollbarWidth_, Color::fromRGB(240, 240, 240));
+      painter.fillRect(sbX, sbY, sbW, scrollbarWidth_,
+                       Color::fromRGB(240, 240, 240));
 
       float thumbRatio = (float)sbW / (float)total;
       int thumbW = std::max(20, (int)(sbW * thumbRatio));

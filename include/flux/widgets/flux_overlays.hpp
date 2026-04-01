@@ -71,8 +71,7 @@ private:
   int paddingV = 4;
 
   Color menuBgColor = Color::fromRGBA(255, 255, 255, 255);
-  Color menuBorderColor = Color::fromRGBA(180, 180, 180,
-                            255);
+  Color menuBorderColor = Color::fromRGBA(180, 180, 180, 255);
   Color itemHoverColor = Color::fromRGB(240, 245, 250);
   Color itemTextColor = Color::fromRGB(30, 30, 30);
   Color itemDisabledColor = Color::fromRGB(160, 160, 160);
@@ -373,7 +372,7 @@ private:
     auto sc = FluxUI::getCurrentInstance()->clientToScreen(clientX, clientY);
     menuX = sc.x;
     menuY = sc.y;
-
+#ifdef _WIN32
     // Clamp to monitor
     POINT pt = {menuX, menuY};
     HMONITOR mon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
@@ -401,6 +400,8 @@ private:
             FluxUI::getCurrentInstance()->screenToClient(menuX, menuY).y;
       }
     }
+#endif
+
   }
 
   void refreshPopupIfOpen_() {
@@ -496,7 +497,7 @@ public:
 
   int dialogWidth = 400;
   int dialogHeight = 300;
-  Color overlayColor = Color::fromRGBA(0, 0, 0,128);
+  Color overlayColor = Color::fromRGBA(0, 0, 0, 128);
   int overlayAlpha = 128;
   Color dialogBgColor = Color::fromRGBA(255, 255, 255, 255);
   Color dialogBorderColor = Color::fromRGBA(200, 200, 200, 255);
@@ -632,7 +633,7 @@ public:
 
     // Layout content before first paint — use MeasureContext
     if (content) {
-      MeasureContext mc(FluxUI::getCurrentInstance()->getWindow());
+      auto mc = FluxUI::getCurrentInstance()->getMeasureContext();
       FontCache &fc = FluxUI::getCurrentInstance()->getFontCache();
       int contentW = dialogWidth - dialogPadding * 2;
       int contentH = dialogHeight - dialogPadding * 2;
@@ -914,6 +915,7 @@ private:
     tipScreenX = sc.x;
     tipScreenY = sc.y - tipH - 6;
 
+#ifdef _WIN32
     POINT pt = {sc.x, sc.y};
     HMONITOR mon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
     MONITORINFO mi{};
@@ -932,6 +934,7 @@ private:
       if (tipScreenX < mi.rcWork.left)
         tipScreenX = mi.rcWork.left;
     }
+#endif
   }
 };
 
@@ -1305,6 +1308,7 @@ private:
     listScreenX = sc.x;
     listScreenY = sc.y;
 
+    #ifdef _WIN32
     // Clamp to monitor
     POINT pt = {listScreenX, listScreenY};
     HMONITOR mon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
@@ -1321,6 +1325,8 @@ private:
         listClientY = y - listH - 2;
       }
     }
+
+    #endif
 
     NativeWindow hw = FluxUI::getCurrentInstance()->getWindow();
     if (hw) {

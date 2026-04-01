@@ -256,12 +256,16 @@ static constexpr int VK_MENU     = SDL_SCANCODE_LALT;      // Alt
 
 // ── Text format flags — mirrors Win32 DT_* (identical numeric values) ────────
 
-static constexpr UINT DT_LEFT       = 0x0000u;
-static constexpr UINT DT_CENTER     = 0x0001u;
-static constexpr UINT DT_RIGHT      = 0x0002u;
-static constexpr UINT DT_VCENTER    = 0x0004u;
-static constexpr UINT DT_WORDBREAK  = 0x0010u;
-static constexpr UINT DT_SINGLELINE = 0x0020u;
+// ── Text format flags — mirrors Win32 DT_* (identical numeric values) ────────
+static constexpr UINT DT_LEFT         = 0x0000u;
+static constexpr UINT DT_CENTER       = 0x0001u;
+static constexpr UINT DT_RIGHT        = 0x0002u;
+static constexpr UINT DT_VCENTER      = 0x0004u;
+static constexpr UINT DT_TOP          = 0x0000u;  
+static constexpr UINT DT_WORDBREAK    = 0x0010u;
+static constexpr UINT DT_SINGLELINE   = 0x0020u;
+static constexpr UINT DT_NOCLIP       = 0x0100u;  
+static constexpr UINT DT_END_ELLIPSIS = 0x8000u;  
 
 // ── String helpers ────────────────────────────────────────────────────────────
 // toWideString is provided for call-site compatibility with widgets that build
@@ -272,6 +276,16 @@ inline std::wstring toWideString(const std::string& utf8) {
     out.reserve(utf8.size());
     for (unsigned char c : utf8)
         out += static_cast<wchar_t>(c);
+    return out;
+}
+
+// Two-argument overload: converts first `byteCount` bytes of `data`
+inline std::wstring toWideString(const char* data, int byteCount) {
+    if (!data || byteCount <= 0) return {};
+    std::wstring out;
+    out.reserve(byteCount);
+    for (int i = 0; i < byteCount; ++i)
+        out += static_cast<wchar_t>(static_cast<unsigned char>(data[i]));
     return out;
 }
 
