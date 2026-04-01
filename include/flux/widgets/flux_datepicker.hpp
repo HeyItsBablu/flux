@@ -183,7 +183,7 @@ public:
                        fieldTextColor, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     } else {
 
-                          std::wstring wph = toWideString(placeholder);
+      std::wstring wph = toWideString(placeholder);
       painter.drawText(wph, x + paddingLeft, y,
                        width - paddingLeft - paddingRight, height, font,
                        placeholderColor, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
@@ -203,11 +203,13 @@ public:
 
     // Shadow — filled rounded rect offset by shadowOffset
     painter.fillRoundedRect(shadowOffset, shadowOffset, popupW_, popupH_,
-                            calBorderRadius, Color::fromRGBA(0, 0, 0,
-                            60)); // alpha 60 ≈ 24%
+                            calBorderRadius,
+                            Color::fromRGBA(0, 0, 0,
+                                            60)); // alpha 60 ≈ 24%
 
     // Background
-    painter.fillRoundedRect(0, 0, popupW_, popupH_, calBorderRadius, calBgColor);
+    painter.fillRoundedRect(0, 0, popupW_, popupH_, calBorderRadius,
+                            calBgColor);
     painter.drawBorder(0, 0, popupW_, popupH_, calBorderRadius, calBorderColor,
                        1);
 
@@ -219,51 +221,59 @@ public:
 
   // ── Mouse events ──────────────────────────────────────────────────────────
 
-bool handleMouseDown(int mx, int my) override {
+  bool handleMouseDown(int mx, int my) override {
     if (mx >= x && mx < x + width && my >= y && my < y + height) {
-        if (isOpen) closeCalendar_();
-        else        openCalendar_();
-        return true;
+      if (isOpen)
+        closeCalendar_();
+      else
+        openCalendar_();
+      return true;
     }
 
-    if (!isOpen) return false;
+    if (!isOpen)
+      return false;
 
     // Convert stored screen origin to current client coords
-    auto origin = FluxUI::getCurrentInstance()
-                      ->screenToClient(popupScreenX_, popupScreenY_);
+    auto origin = FluxUI::getCurrentInstance()->screenToClient(popupScreenX_,
+                                                               popupScreenY_);
     int rx = mx - origin.x;
     int ry = my - origin.y;
 
     if (rx >= 0 && rx < popupW_ && ry >= 0 && ry < popupH_) {
-        if (showingYears) _handleYearPickerClick(rx, ry);
-        else              _handleCalendarClick(rx, ry);
-        return true;
+      if (showingYears)
+        _handleYearPickerClick(rx, ry);
+      else
+        _handleCalendarClick(rx, ry);
+      return true;
     }
 
     closeCalendar_();
     return true;
-}
+  }
 
-bool handleMouseMove(int mx, int my) override {
-    if (!isOpen) return false;
+  bool handleMouseMove(int mx, int my) override {
+    if (!isOpen)
+      return false;
 
-    auto origin = FluxUI::getCurrentInstance()
-                      ->screenToClient(popupScreenX_, popupScreenY_);
+    auto origin = FluxUI::getCurrentInstance()->screenToClient(popupScreenX_,
+                                                               popupScreenY_);
     int rx = mx - origin.x;
     int ry = my - origin.y;
 
     int newHover = -1;
     if (rx >= 0 && rx < popupW_ && ry >= 0 && ry < popupH_) {
-        if (showingYears) newHover = _yearIndexAt(rx, ry);
-        else              newHover = _dayIndexAt(rx, ry);
+      if (showingYears)
+        newHover = _yearIndexAt(rx, ry);
+      else
+        newHover = _dayIndexAt(rx, ry);
     }
 
     if (newHover != hoveredCell_) {
-        hoveredCell_ = newHover;
-        refresh_();
+      hoveredCell_ = newHover;
+      refresh_();
     }
     return false;
-}
+  }
 
   bool handleFocus(bool focused) override {
     isFocused = focused;
@@ -408,14 +418,15 @@ private:
 
   // ── Popup open/close ──────────────────────────────────────────────────────
 
-void openCalendar_() {
-    if (isOpen) return;
+  void openCalendar_() {
+    if (isOpen)
+      return;
     if (!selectedDate.isValid()) {
-        FluxDate td = FluxDate::today();
-        viewYear  = td.year;
-        viewMonth = td.month;
+      FluxDate td = FluxDate::today();
+      viewYear = td.year;
+      viewMonth = td.month;
     }
-    isOpen       = true;
+    isOpen = true;
     showingYears = false;
     hoveredCell_ = -1;
 
@@ -423,36 +434,39 @@ void openCalendar_() {
 
     NativeWindow hw = FluxUI::getCurrentInstance()->getWindow();
     if (hw) {
-        // Position below the field using FluxUI::clientToScreen
-        auto sc = FluxUI::getCurrentInstance()->clientToScreen(x, y + height + 2);
-        popupScreenX_ = sc.x;
-        popupScreenY_ = sc.y;
+      // Position below the field using FluxUI::clientToScreen
+      auto sc = FluxUI::getCurrentInstance()->clientToScreen(x, y + height + 2);
+      popupScreenX_ = sc.x;
+      popupScreenY_ = sc.y;
 
-        // Clamp to monitor
-        POINT pt = {popupScreenX_, popupScreenY_};
-        HMONITOR    mon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
-        MONITORINFO mi{}; mi.cbSize = sizeof(mi);
-        if (GetMonitorInfoW(mon, &mi)) {
-            if (popupScreenX_ + popupW_ > mi.rcWork.right)
-                popupScreenX_ = mi.rcWork.right - popupW_;
-            if (popupScreenY_ + popupH_ > mi.rcWork.bottom) {
-                auto above = FluxUI::getCurrentInstance()
-                                 ->clientToScreen(x, y - popupH_ - 2);
-                popupScreenY_ = above.y;
-            }
+#ifdef _WIN32
+      // Clamp to monitor
+      POINT pt = {popupScreenX_, popupScreenY_};
+      HMONITOR mon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+      MONITORINFO mi{};
+      mi.cbSize = sizeof(mi);
+      if (GetMonitorInfoW(mon, &mi)) {
+        if (popupScreenX_ + popupW_ > mi.rcWork.right)
+          popupScreenX_ = mi.rcWork.right - popupW_;
+        if (popupScreenY_ + popupH_ > mi.rcWork.bottom) {
+          auto above =
+              FluxUI::getCurrentInstance()->clientToScreen(x, y - popupH_ - 2);
+          popupScreenY_ = above.y;
         }
-
-        FontCache &fc = FluxUI::getCurrentInstance()->getFontCache();
-        showPopup(hw, popupScreenX_, popupScreenY_,
-                  popupW_ + shadowOffset, popupH_ + shadowOffset, fc);
+      }
+#endif
+      FontCache &fc = FluxUI::getCurrentInstance()->getFontCache();
+      showPopup(hw, popupScreenX_, popupScreenY_, popupW_ + shadowOffset,
+                popupH_ + shadowOffset, fc);
     }
 
     if (scaffold_)
-        scaffold_->addOverlay(this,
-            [](GraphicsContext &, FontCache &) {}, 100);  // fix HDC → GraphicsContext
+      scaffold_->addOverlay(
+          this, [](GraphicsContext &, FontCache &) {},
+          100); // fix HDC → GraphicsContext
 
     markNeedsPaint();
-}
+  }
 
   void closeCalendar_() {
     if (!isOpen)
@@ -567,9 +581,9 @@ void openCalendar_() {
 
       // Day number text
       Color textCol = isSelected   ? daySelectedText
-                         : !thisMonth ? otherMonthText
-                         : isDisabled ? otherMonthText
-                                      : dayTextColor;
+                      : !thisMonth ? otherMonthText
+                      : isDisabled ? otherMonthText
+                                   : dayTextColor;
 
       std::string ds = std::to_string(dayNum);
 

@@ -479,13 +479,14 @@ private:
   std::shared_ptr<TreeViewWidget> self_() {
     return std::static_pointer_cast<TreeViewWidget>(shared_from_this());
   }
-
+#ifdef _WIN32
   HWND _getHWND() const {
     if (auto *ui = FluxUI::getCurrentInstance())
       return ui->getWindow();
     return nullptr;
   }
 
+#endif
   bool _inBounds(int mx, int my) const {
     return mx >= x && mx < x + width && my >= y && my < y + height;
   }

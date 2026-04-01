@@ -2,8 +2,8 @@
 #define FLUX_SPLIT_VIEW_HPP
 
 #include "../flux_core.hpp"
-#include "flux_layout.hpp"
 #include "../flux_state.hpp"
+#include "flux_layout.hpp"
 
 // ============================================================================
 // SPLITVIEW WIDGET
@@ -445,8 +445,8 @@ private:
     Painter painter(ctx);
 
     Color col = _dragging         ? dividerDragColor
-                   : _dividerHovered ? dividerHoverColor
-                                     : dividerColor;
+                : _dividerHovered ? dividerHoverColor
+                                  : dividerColor;
 
     int dx = x + _dividerX;
     int dy = y + _dividerY;
@@ -456,7 +456,8 @@ private:
 
     // Grip dots
     if (resizable && dividerWidth >= 4) {
-      Color gripCol = _dragging ? dividerHoverColor : Color::fromRGB(150, 150, 150);
+      Color gripCol =
+          _dragging ? dividerHoverColor : Color::fromRGB(150, 150, 150);
 
       const int dotR = 2;
       const int dotGap = 5;
@@ -489,11 +490,14 @@ private:
       ui->setDefaultCursor();
   }
 
+#ifdef _WIN32
+
   HWND _getHWND() const {
     if (FluxUI *ui = FluxUI::getCurrentInstance())
       return ui->getWindow();
     return nullptr;
   }
+#endif
 };
 
 // ============================================================================
