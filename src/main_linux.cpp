@@ -26,14 +26,15 @@ int main(int /*argc*/, char ** /*argv*/) {
         }
     }
 
-    app.createWindow(cfg->title, w, h);
+app.createWindow(cfg->title, w, h);
 
-    if (cfg->fullscreen) {
-        SDL_SetWindowFullscreen(static_cast<SDL_Window *>(app.getWindow()),
-                                SDL_WINDOW_FULLSCREEN_DESKTOP);
-    } else if (cfg->maximize) {
-        SDL_MaximizeWindow(static_cast<SDL_Window *>(app.getWindow()));
-    }
+if (cfg->fullscreen) {
+    // On Linux, use maximize instead of true fullscreen
+    // to keep the window decorations (title bar, close/min/max buttons)
+    SDL_MaximizeWindow(static_cast<SDL_Window *>(app.getWindow()));
+} else if (cfg->maximize) {
+    SDL_MaximizeWindow(static_cast<SDL_Window *>(app.getWindow()));
+}
 
     return app.run();
 }
