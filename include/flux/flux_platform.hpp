@@ -339,6 +339,9 @@ inline bool platformCtrlDown()  { return false; } // no modifier state yet
 inline bool platformShiftDown() { return false; }
 inline bool platformAltDown()   { return false; }
 
+
+inline bool platformKeyDown(int /*keyCode*/) { return false; }
+
 inline std::wstring toWideString(const std::string& utf8) {
     std::wstring out;
     out.reserve(utf8.size());

@@ -16,7 +16,7 @@ if(NOT ANDROID)
     if(NOT MSVC AND NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         message(FATAL_ERROR "FluxUI requires MSVC (Windows) or GCC/Clang (Linux).")
     endif()
-endif()
+endif() 
 
 # ============================================================================
 # C++ standard
