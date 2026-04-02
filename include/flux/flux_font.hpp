@@ -7,21 +7,18 @@
 
 // ============================================================================
 // FontWeight
-// Win32:  FW_LIGHT=300, FW_NORMAL=400, FW_BOLD=700  (LOGFONT lfWeight)
+// Win32:  FW_LIGHT=300, FW_NORMAL=400, FW_BOLD=700
 // Linux:  PANGO_WEIGHT_LIGHT=300, _NORMAL=400, _BOLD=700
-// The numeric values are identical so we use plain integers internally;
-// each platform .cpp maps them to its own enum.
+// Android: passed to nvgFontSize/nvgFontFace — same numeric values
 // ============================================================================
 
 #ifdef _WIN32
-    // On Win32 we can use FW_* directly — they are just ints.
     enum class FontWeight {
         Light  = FW_LIGHT,   // 300
         Normal = FW_NORMAL,  // 400
         Bold   = FW_BOLD     // 700
     };
 #else
-    // Portable definition — same numeric values, no Win32 headers needed.
     enum class FontWeight {
         Light  = 300,
         Normal = 400,
@@ -31,15 +28,30 @@
 
 // ============================================================================
 // NativeFont
-// Win32 : HFONT   (defined in flux_platform.hpp under _WIN32)
-// Linux : void*   — stores a PangoFontDescription* cast to void*
-//                   cast back in flux_font_linux.cpp and flux_painter_linux.cpp
+// Win32   : HFONT
+// Linux   : void* → PangoFontDescription*
+// Android : void* → FluxAndroidFont*  (defined in flux_font_android.cpp)
 // ============================================================================
 
 #ifndef _WIN32
     using NativeFont = void*;
 #endif
-// (Win32 NativeFont = HFONT is already typedef'd in flux_platform.hpp)
+
+// ============================================================================
+// Android font descriptor — forward declared here, defined in
+// flux_font_android.cpp. NanoVG identifies fonts by integer handle,
+// but we also need to carry size/weight for nvgFontSize() calls since
+// NanoVG font state is set per-frame, not baked into the handle.
+// ============================================================================
+
+#ifdef __ANDROID__
+struct FluxAndroidFont {
+    int   nvgHandle = -1;   // returned by nvgCreateFont / nvgFindFont
+    float size      = 16.f;
+    bool  bold      = false;
+    bool  light     = false;
+};
+#endif
 
 // ============================================================================
 // FontCache
@@ -61,9 +73,6 @@ private:
 
     std::map<FontKey, NativeFont> cache;
 
-    // Platform-specific font creation — implemented in:
-    //   flux_font_win32.cpp   (_WIN32)
-    //   flux_font_linux.cpp   (__linux__)
     static NativeFont createFont(const std::string& family,
                                   int                size,
                                   FontWeight         weight);
@@ -71,12 +80,7 @@ private:
 public:
     ~FontCache() { clear(); }
 
-    // Full overload — explicit family
     NativeFont getFont(const std::string& family, int size, FontWeight weight);
-
-    // Backward-compat — uses platform default:
-    //   Win32 → "Segoe UI"
-    //   Linux → "Sans"
     NativeFont getFont(int size, FontWeight weight);
 
     void clear();

@@ -105,42 +105,42 @@ inline AppTheme ThemeProvider::currentTheme = AppTheme::light();
 // THEMED WIDGET FACTORIES
 // ============================================================================
 
-inline WidgetPtr ThemedAppBar(const std::string &title) {
-  auto theme = ThemeProvider::getTheme();
-  auto w = std::make_shared<AppBarWidget>();
+//inline WidgetPtr ThemedAppBar(const std::string &title) {
+//  auto theme = ThemeProvider::getTheme();
+//  auto w = std::make_shared<AppBarWidget>();
+//
+//  w->hasBackground = true;
+//  w->backgroundColor = theme.appBarColor;
+//  w->height = theme.appBarHeight;
+//  w->autoHeight = false;
+//
+//  auto titleWidget = Text(title)
+//                         ->setFontSize(theme.titleFontSize)
+//                         ->setFontWeight(theme.titleFontWeight)
+//                         ->setTextColor(theme.appBarTextColor)
+//                         ->setPadding(theme.defaultPadding);
+//
+//  w->addChild(titleWidget);
+//  return w;
+//}
 
-  w->hasBackground = true;
-  w->backgroundColor = theme.appBarColor;
-  w->height = theme.appBarHeight;
-  w->autoHeight = false;
-
-  auto titleWidget = Text(title)
-                         ->setFontSize(theme.titleFontSize)
-                         ->setFontWeight(theme.titleFontWeight)
-                         ->setTextColor(theme.appBarTextColor)
-                         ->setPadding(theme.defaultPadding);
-
-  w->addChild(titleWidget);
-  return w;
-}
-
-inline WidgetPtr ThemedButton(const std::string &text,
-                              ClickHandler onClick = nullptr) {
-  auto theme = ThemeProvider::getTheme();
-  auto w = std::make_shared<ButtonWidget>();
-  w->text = text;
-  w->onClick = onClick;
-
-  w->hasBackground = true;
-  w->backgroundColor = theme.buttonColor;
-  w->textColor = theme.buttonTextColor;
-  w->paddingLeft = w->paddingRight = theme.buttonPaddingH;
-  w->paddingTop = w->paddingBottom = theme.buttonPaddingV;
-  w->borderRadius = theme.buttonBorderRadius;
-  w->fontWeight = FontWeight::Bold;
-
-  return w;
-}
+//inline WidgetPtr ThemedButton(const std::string &text,
+//                              ClickHandler onClick = nullptr) {
+//  auto theme = ThemeProvider::getTheme();
+//  auto w = std::make_shared<ButtonWidget>();
+//  w->text = text;
+//  w->onClick = onClick;
+//
+//  w->hasBackground = true;
+//  w->backgroundColor = theme.buttonColor;
+//  w->textColor = theme.buttonTextColor;
+//  w->paddingLeft = w->paddingRight = theme.buttonPaddingH;
+//  w->paddingTop = w->paddingBottom = theme.buttonPaddingV;
+//  w->borderRadius = theme.buttonBorderRadius;
+//  w->fontWeight = FontWeight::Bold;
+//
+//  return w;
+//}
 
 inline WidgetPtr ThemedCard(WidgetPtr child) {
   auto theme = ThemeProvider::getTheme();

@@ -183,119 +183,119 @@ public:
 class IconWidget : public TextWidget
 {
 public:
-  IconWidget()
-  {
-    fontFamily = kIconFont;
-  }
+ IconWidget()
+ {
+   fontFamily = kIconFont;
+ }
 
-  // ── Layout ────────────────────────────────────────────────────────────────
-  void computeLayout(GraphicsContext & /*ctx*/,
-                     const BoxConstraints &constraints,
-                     FontCache & /*fontCache*/) override
-  {
-    if (autoWidth)
-      width = fontSize + paddingLeft + paddingRight;
-    if (autoHeight)
-      height = fontSize + paddingTop + paddingBottom;
+ // ── Layout ────────────────────────────────────────────────────────────────
+ void computeLayout(GraphicsContext & /*ctx*/,
+                    const BoxConstraints &constraints,
+                    FontCache & /*fontCache*/) override
+ {
+   if (autoWidth)
+     width = fontSize + paddingLeft + paddingRight;
+   if (autoHeight)
+     height = fontSize + paddingTop + paddingBottom;
 
-    width = constraints.clampWidth(width);
-    height = constraints.clampHeight(height);
+   width = constraints.clampWidth(width);
+   height = constraints.clampHeight(height);
 
-    applyConstraints();
-    needsLayout = false;
-  }
+   applyConstraints();
+   needsLayout = false;
+ }
 
-  // ── Render ────────────────────────────────────────────────────────────────
-  void render(GraphicsContext &ctx, FontCache &fontCache) override
-  {
-    if (hasBackground)
-      drawRoundedRectangle(ctx);
+ // ── Render ────────────────────────────────────────────────────────────────
+ void render(GraphicsContext &ctx, FontCache &fontCache) override
+ {
+   if (hasBackground)
+     drawRoundedRectangle(ctx);
 
-    if (glyphText.empty())
-    {
-      needsPaint = false;
-      return;
-    }
+   if (glyphText.empty())
+   {
+     needsPaint = false;
+     return;
+   }
 
-    NativeFont font = fontCache.getFont(fontFamily, fontSize, fontWeight);
+   NativeFont font = fontCache.getFont(fontFamily, fontSize, fontWeight);
 
-    Painter(ctx).drawText(glyphText,
-                          x, y, width, height,
-                          font,
-                          getCurrentTextColor(),
-                          DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+   Painter(ctx).drawText(glyphText,
+                         x, y, width, height,
+                         font,
+                         getCurrentTextColor(),
+                         DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
-    needsPaint = false;
-  }
+   needsPaint = false;
+ }
 
-  // ── Fluent setters ────────────────────────────────────────────────────────
-  std::shared_ptr<IconWidget> setSize(int size)
-  {
-    setFontSize(size);
-    return self();
-  }
+ // ── Fluent setters ────────────────────────────────────────────────────────
+ std::shared_ptr<IconWidget> setSize(int size)
+ {
+   setFontSize(size);
+   return self();
+ }
 
-  std::shared_ptr<IconWidget> setColor(Color color)
-  {
-    setTextColor(color);
-    return self();
-  }
+ std::shared_ptr<IconWidget> setColor(Color color)
+ {
+   setTextColor(color);
+   return self();
+ }
 
-  std::shared_ptr<IconWidget> setHoverColor(Color color)
-  {
-    setHoverTextColor(color);
-    return self();
-  }
+ std::shared_ptr<IconWidget> setHoverColor(Color color)
+ {
+   setHoverTextColor(color);
+   return self();
+ }
 
-  std::shared_ptr<IconWidget> setIconFontFamily(const std::string &family)
-  {
-    if (fontFamily != family)
-    {
-      fontFamily = family;
-      markNeedsLayout();
-    }
-    return self();
-  }
+ std::shared_ptr<IconWidget> setIconFontFamily(const std::string &family)
+ {
+   if (fontFamily != family)
+   {
+     fontFamily = family;
+     markNeedsLayout();
+   }
+   return self();
+ }
 
-  // ── Direct glyph setter ───────────────────────────────────────────────────
-  std::shared_ptr<IconWidget>
-  setGlyph(const FluxIcons::IconGlyph &glyph)
-  {
-    glyphText = std::wstring(1, FluxIcons::glyph(glyph));
-    markNeedsPaint();
-    return self();
-  }
+ // ── Direct glyph setter ───────────────────────────────────────────────────
+ std::shared_ptr<IconWidget>
+ setGlyph(const FluxIcons::IconGlyph &glyph)
+ {
+   glyphText = std::wstring(1, FluxIcons::glyph(glyph));
+   markNeedsPaint();
+   return self();
+ }
 
-  // ── State-driven glyph ────────────────────────────────────────────────────
-  template <typename T>
-  std::shared_ptr<IconWidget>
-  setGlyph(State<T> &state,
-           std::function<FluxIcons::IconGlyph(const T &)> transform)
-  {
+ // ── State-driven glyph ────────────────────────────────────────────────────
+ template <typename T>
+ std::shared_ptr<IconWidget>
+ setGlyph(State<T> &state,
+          std::function<FluxIcons::IconGlyph(const T &)> transform)
+ {
 
-    auto weakSelf = std::weak_ptr<IconWidget>(self());
+   auto weakSelf = std::weak_ptr<IconWidget>(self());
 
-    state.subscribe([weakSelf, transform](const T &val)
-                    {
-            if (auto self = weakSelf.lock()) {
-                self->glyphText =
-                    std::wstring(1, FluxIcons::glyph(transform(val)));
-                self->markNeedsPaint();
-            } });
+   state.subscribe([weakSelf, transform](const T &val)
+                   {
+           if (auto self = weakSelf.lock()) {
+               self->glyphText =
+                   std::wstring(1, FluxIcons::glyph(transform(val)));
+               self->markNeedsPaint();
+           } });
 
-    // Initialize immediately
-    glyphText = std::wstring(1, FluxIcons::glyph(transform(state.get())));
+   // Initialize immediately
+   glyphText = std::wstring(1, FluxIcons::glyph(transform(state.get())));
 
-    return self();
-  }
+   return self();
+ }
 
 private:
-  std::wstring glyphText;
+ std::wstring glyphText;
 
-  std::shared_ptr<IconWidget> self()
-  {
-    return std::static_pointer_cast<IconWidget>(shared_from_this());
-  }
+ std::shared_ptr<IconWidget> self()
+ {
+   return std::static_pointer_cast<IconWidget>(shared_from_this());
+ }
 };
 
 using IconWidgetPtr = std::shared_ptr<IconWidget>;
@@ -303,24 +303,24 @@ using IconWidgetPtr = std::shared_ptr<IconWidget>;
 // ── Static glyph ─────────────────────────────────────────────────────────────
 inline IconWidgetPtr Icon(const FluxIcons::IconGlyph &glyph, int size = 16)
 {
-  auto w = std::make_shared<IconWidget>();
-  w->setFontSize(size);
-  w->setGlyph(glyph);
-  return w;
+ auto w = std::make_shared<IconWidget>();
+ w->setFontSize(size);
+ w->setGlyph(glyph);
+ return w;
 }
 
 // ── State-driven glyph ───────────────────────────────────────────────────────
 template <typename T>
 inline IconWidgetPtr
 Icon(State<T> &state,
-     std::function<FluxIcons::IconGlyph(const T &)> transform,
-     int size = 16)
+    std::function<FluxIcons::IconGlyph(const T &)> transform,
+    int size = 16)
 {
 
-  auto w = std::make_shared<IconWidget>();
-  w->setFontSize(size);
-  w->setGlyph(state, transform);
-  return w;
+ auto w = std::make_shared<IconWidget>();
+ w->setFontSize(size);
+ w->setGlyph(state, transform);
+ return w;
 }
 
 // ============================================================================

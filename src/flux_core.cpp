@@ -209,7 +209,6 @@ void FluxUI::wireCallbacks() {
 window.callbacks.onMouseUp = [this](int x, int y) -> bool {
     if (!root) return false;
 
-    // ← Replace GetCapture() == window.handle() with the cross-platform flag
     bool hasCaptured = window.isMouseCaptured();
 
     if (hasCaptured) {
@@ -225,7 +224,6 @@ window.callbacks.onMouseUp = [this](int x, int y) -> bool {
 window.callbacks.onMouseMove = [this](int x, int y) -> bool {
     if (!root) return false;
 
-    // ← Same fix here
     bool hasCaptured = window.isMouseCaptured();
 
     if (hasCaptured) {
@@ -487,9 +485,12 @@ void FluxUI::releaseMouseInput() { window.releaseMouseInput(); }
 MeasureContext FluxUI::getMeasureContext() {
 #ifdef _WIN32
     return MeasureContext(window.handle());
-#else
+#elif defined(__linux__) && !defined(__ANDROID__)
     GraphicsContext gc = window.getMeasureContext();
     return MeasureContext(gc.cr, gc.width, gc.height);
+#elif defined(__ANDROID__)
+    GraphicsContext gc = window.getMeasureContext();
+    return MeasureContext(gc.width, gc.height);
 #endif
 }
 

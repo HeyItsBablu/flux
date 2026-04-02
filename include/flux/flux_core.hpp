@@ -108,6 +108,7 @@ public:
   PlatformWindow::ScreenPoint clientToScreen(int cx, int cy) const;
   PlatformWindow::ScreenPoint screenToClient(int sx, int sy) const;
   PlatformWindow::ClientSize getClientSize() const;
+  PlatformWindow& getPlatformWindow() { return window; }
 
   void setResizeCursorH(); // horizontal resize (SIZEWE)
   void setResizeCursorV(); // vertical resize   (SIZENS)

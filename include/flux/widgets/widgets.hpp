@@ -13,7 +13,7 @@
 #include "flux_colorpicker.hpp"
 #include "flux_overlays.hpp"
 #include "flux_histogram.hpp"
-#include "flux_hsl_panel.hpp" 
+#include "flux_hsl_panel.hpp"
 #include "flux_tonecurve.hpp"
 #include "flux_splitview.hpp"
 #include "flux_menubar.hpp"
@@ -24,6 +24,6 @@
 #include "flux_toast.hpp"
 #include "flux_input_extended.hpp"
 #include "flux_accordion.hpp"
-// #include "flux_file_picker.hpp"
-// #include "flux_graph.hpp"
+#include "flux_file_picker.hpp"
+#include "flux_graph.hpp"
 #endif // WIDGETS_HPP

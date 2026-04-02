@@ -1,5 +1,5 @@
 // flux_window_linux.cpp
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
 
 #include "flux/flux_window.hpp"
 #include <SDL2/SDL.h>

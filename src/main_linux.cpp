@@ -1,4 +1,4 @@
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
 
 // #define STB_IMAGE_IMPLEMENTATION
 // #include "stb_image.h"

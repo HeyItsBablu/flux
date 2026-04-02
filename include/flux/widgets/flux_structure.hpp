@@ -119,26 +119,34 @@ public:
   }
 
   // --- Render (overlays painted after normal tree) ---
-void render(GraphicsContext &ctx, FontCache &fontCache) override {
-    for (auto &child : children)
-        child->render(ctx, fontCache);
+  void render(GraphicsContext &ctx, FontCache &fontCache) override {
+      for (auto &child : children)
+          child->render(ctx, fontCache);
 
-    for (const auto &entry : overlayStack) {
-        if (entry.renderer) {
-            // Full overlay with custom renderer (both platforms)
-            entry.renderer(ctx, fontCache);
-        }
-#ifndef _WIN32
-        else if (entry.widget) {
-
+      for (const auto &entry : overlayStack) {
+          if (entry.renderer) {
+              // Win32: full overlay with custom renderer (DIB popup paints itself,
+              // renderer is a no-op lambda; or inline renderers for dialog overlays)
+              entry.renderer(ctx, fontCache);
+          }
+#if defined(__linux__) && !defined(__ANDROID__)
+              else if (entry.widget) {
+            // Linux: Cairo-based popup — renderOverlay saves/translates/clips
             if (auto *host = dynamic_cast<OverlayHost *>(entry.widget))
                 host->renderOverlay(ctx, fontCache);
         }
+#elif defined(__ANDROID__)
+          else if (entry.widget) {
+              // Android: NanoVG-based popup — renderOverlay offsets into the
+              // current frame. No separate window, no Cairo, same concept as Linux.
+              if (auto *host = dynamic_cast<OverlayHost *>(entry.widget))
+                  host->renderOverlay(ctx, fontCache);
+          }
 #endif
-    }
+      }
 
-    needsPaint = false;
-}
+      needsPaint = false;
+  }
 };
 
 // --- AppBar Widget ---

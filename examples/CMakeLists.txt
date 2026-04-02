@@ -1,9 +1,14 @@
-# include(FetchContent)
-# FetchContent_Declare(stb
-#     GIT_REPOSITORY https://github.com/nothings/stb.git
-#     GIT_TAG        master
-# )
-# FetchContent_MakeAvailable(stb)
+if(ANDROID)
+    return()
+endif()
+
+
+include(FetchContent)
+FetchContent_Declare(stb
+    GIT_REPOSITORY https://github.com/nothings/stb.git
+    GIT_TAG        master
+)
+FetchContent_MakeAvailable(stb)
 
 # ============================================================================
 # add_flux_example(NAME)

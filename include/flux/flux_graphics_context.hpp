@@ -1,4 +1,3 @@
-// flux/flux_graphics_context.hpp
 #pragma once
 
 #include "flux_platform.hpp"
@@ -11,26 +10,29 @@
 //
 // Win32 : wraps HDC  — identical lifetime to the BackBuffer HDC it comes from.
 // Linux : wraps cairo_t* — borrowed from CairoState; never owned here.
+// Android: wraps width/height — NanoVG is stateful; no context pointer needed.
 //
 // Rule: GraphicsContext never owns or frees its underlying handle.
-//       Lifetime is managed by BackBuffer (Win32) or CairoState (Linux).
+//       Lifetime is managed by BackBuffer (Win32), CairoState (Linux),
+//       or the NanoVG frame (Android).
 // ============================================================================
-
-struct GraphicsContext {
 
 #ifdef _WIN32
 
+struct GraphicsContext {
     NativeContext hdc = nullptr;
 
     GraphicsContext() = default;
     explicit GraphicsContext(NativeContext h) : hdc(h) {}
 
     bool valid() const { return hdc != nullptr; }
+};
 
 #endif // _WIN32
 
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
 
+struct GraphicsContext {
     cairo_t* cr     = nullptr;
     int      width  = 0;
     int      height = 0;
@@ -40,25 +42,30 @@ struct GraphicsContext {
         : cr(c), width(w), height(h) {}
 
     bool valid() const { return cr != nullptr; }
+};
 
 #endif // __linux__
 
+#ifdef __ANDROID__
+
+struct GraphicsContext {
+    int width  = 0;
+    int height = 0;
+
+    GraphicsContext() = default;
+    GraphicsContext(int w, int h) : width(w), height(h) {}
+
+    bool valid() const { return width > 0 && height > 0; }
 };
+
+#endif // __ANDROID__
 
 // ============================================================================
 // MeasureContext
 //
-// RAII wrapper that provides a GraphicsContext suitable for text measurement
-// before any painting occurs (e.g. during layout).
-//
-// Win32 : calls GetDC / ReleaseDC around the measurement window.
-// Linux : borrows the permanently-live cairo_t* from CairoState — no
-//         acquire/release needed; destructor is a no-op.
-//
-// Usage (identical on both platforms):
-//
-//   MeasureContext mc = platformWindow.getMeasureContext();
-//   painter.measureText(text, font, w, h);   // uses mc.ctx
+// Wraps a GraphicsContext for text-measurement calls that happen outside of
+// a paint pass.  Non-copyable; movable so PlatformWindow::getMeasureContext()
+// can return by value.
 // ============================================================================
 
 struct MeasureContext {
@@ -69,15 +76,14 @@ struct MeasureContext {
     MeasureContext& operator=(const MeasureContext&) = delete;
 
     // Movable so PlatformWindow::getMeasureContext() can return by value.
-    MeasureContext(MeasureContext&&)            = default;
-    MeasureContext& operator=(MeasureContext&&) = default;
+    MeasureContext(MeasureContext&&)                 = default;
+    MeasureContext& operator=(MeasureContext&&)      = default;
 
 #ifdef _WIN32
 
     HWND hwnd = nullptr;
 
-    explicit MeasureContext(HWND h)
-        : hwnd(h), ctx(GetDC(h)) {}
+    explicit MeasureContext(HWND h) : hwnd(h), ctx(GetDC(h)) {}
 
     ~MeasureContext() {
         if (hwnd && ctx.hdc)
@@ -86,14 +92,21 @@ struct MeasureContext {
 
 #endif // _WIN32
 
-#ifdef __linux__
+#if defined(__linux__) && !defined(__ANDROID__)
 
     // No resources to acquire — Cairo context is owned by CairoState.
     explicit MeasureContext(cairo_t* cr, int w = 0, int h = 0)
         : ctx(cr, w, h) {}
 
-    ~MeasureContext() = default;   // nothing to release
+    ~MeasureContext() = default;
 
 #endif // __linux__
 
+#ifdef __ANDROID__
+
+    explicit MeasureContext(int w, int h) : ctx(w, h) {}
+
+    ~MeasureContext() = default;
+
+#endif // __ANDROID__
 };
