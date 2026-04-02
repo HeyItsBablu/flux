@@ -4,6 +4,7 @@
 #include "../flux_core.hpp"
 #include "../flux_state.hpp"
 #include "../flux_widget.hpp"
+#include "flux_icons.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -16,12 +17,14 @@
 // TEXT WIDGET
 // ============================================================================
 
-class TextWidget : public Widget {
+class TextWidget : public Widget
+{
 public:
   std::string fontFamily = "Segoe UI";
 
   void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
-                     FontCache &fontCache) override {
+                     FontCache &fontCache) override
+  {
     measureText(ctx, fontCache);
     if (autoWidth)
       width += paddingLeft + paddingRight;
@@ -33,29 +36,36 @@ public:
     needsLayout = false;
   }
 
-  void render(GraphicsContext &ctx, FontCache &fontCache) override {
+  void render(GraphicsContext &ctx, FontCache &fontCache) override
+  {
     if (hasBackground)
       drawRoundedRectangle(ctx);
     renderText(ctx, fontCache);
     needsPaint = false;
   }
 
-  std::shared_ptr<TextWidget> setFontSize(int size) {
-    if (fontSize != size) {
+  std::shared_ptr<TextWidget> setFontSize(int size)
+  {
+    if (fontSize != size)
+    {
       fontSize = size;
       markNeedsLayout();
     }
     return std::static_pointer_cast<TextWidget>(shared_from_this());
   }
-  std::shared_ptr<TextWidget> setFontWeight(FontWeight weight) {
-    if (fontWeight != weight) {
+  std::shared_ptr<TextWidget> setFontWeight(FontWeight weight)
+  {
+    if (fontWeight != weight)
+    {
       fontWeight = weight;
       markNeedsLayout();
     }
     return std::static_pointer_cast<TextWidget>(shared_from_this());
   }
-  std::shared_ptr<TextWidget> setText(const std::string &t) {
-    if (text != t) {
+  std::shared_ptr<TextWidget> setText(const std::string &t)
+  {
+    if (text != t)
+    {
       text = t;
       markNeedsLayout();
     }
@@ -63,25 +73,32 @@ public:
   }
 
   template <typename T, typename F>
-  std::shared_ptr<TextWidget> setText(State<T> &state, F transform) {
+  std::shared_ptr<TextWidget> setText(State<T> &state, F transform)
+  {
     std::function<std::string(const T &)> fn = transform;
     text = fn(state.get());
     state.bindProperty(
         shared_from_this(),
-        [fn](Widget *w, const T &val) { w->text = fn(val); }, true);
+        [fn](Widget *w, const T &val)
+        { w->text = fn(val); }, true);
     return std::static_pointer_cast<TextWidget>(shared_from_this());
   }
 
-  template <typename T> std::shared_ptr<TextWidget> setText(State<T> &state) {
+  template <typename T>
+  std::shared_ptr<TextWidget> setText(State<T> &state)
+  {
     text = valueToString(state.get());
     state.bindProperty(
         shared_from_this(),
-        [](Widget *w, const T &val) { w->text = valueToString(val); }, true);
+        [](Widget *w, const T &val)
+        { w->text = valueToString(val); }, true);
     return std::static_pointer_cast<TextWidget>(shared_from_this());
   }
 
-  std::shared_ptr<TextWidget> setTextColor(Color color) {
-    if (textColor != color) {
+  std::shared_ptr<TextWidget> setTextColor(Color color)
+  {
+    if (textColor != color)
+    {
       textColor = color;
       markNeedsPaint();
     }
@@ -89,58 +106,69 @@ public:
   }
 
   template <typename T, typename F>
-  std::shared_ptr<TextWidget> setTextColor(State<T> &state, F transform) {
+  std::shared_ptr<TextWidget> setTextColor(State<T> &state, F transform)
+  {
     std::function<Color(const T &)> fn = transform;
     textColor = fn(state.get());
     state.bindProperty(
         shared_from_this(),
-        [fn](Widget *w, const T &val) { w->textColor = fn(val); }, false);
+        [fn](Widget *w, const T &val)
+        { w->textColor = fn(val); }, false);
     return std::static_pointer_cast<TextWidget>(shared_from_this());
   }
 
-  std::shared_ptr<TextWidget> setHoverTextColor(Color color) {
+  std::shared_ptr<TextWidget> setHoverTextColor(Color color)
+  {
     hoverTextColor = color;
     hasHoverTextColor = true;
     markNeedsPaint();
     return std::static_pointer_cast<TextWidget>(shared_from_this());
   }
-  std::shared_ptr<TextWidget> setPadding(int p) {
+  std::shared_ptr<TextWidget> setPadding(int p)
+  {
     padding = p;
     paddingLeft = paddingRight = paddingTop = paddingBottom = p;
     markNeedsLayout();
     return std::static_pointer_cast<TextWidget>(shared_from_this());
   }
-  std::shared_ptr<TextWidget> setBackgroundColor(Color color) {
+  std::shared_ptr<TextWidget> setBackgroundColor(Color color)
+  {
     backgroundColor = color;
     hasBackground = true;
     markNeedsPaint();
     return std::static_pointer_cast<TextWidget>(shared_from_this());
   }
-  std::shared_ptr<TextWidget> setBorderRadius(int r) {
+  std::shared_ptr<TextWidget> setBorderRadius(int r)
+  {
     borderRadius = r;
     markNeedsPaint();
     return std::static_pointer_cast<TextWidget>(shared_from_this());
   }
-  std::shared_ptr<TextWidget> setMinWidth(int w) {
+  std::shared_ptr<TextWidget> setMinWidth(int w)
+  {
     minWidth = w;
     markNeedsLayout();
     return std::static_pointer_cast<TextWidget>(shared_from_this());
   }
-  std::shared_ptr<TextWidget> setWidth(int w) {
+  std::shared_ptr<TextWidget> setWidth(int w)
+  {
     width = w;
     autoWidth = false;
     markNeedsLayout();
     return std::static_pointer_cast<TextWidget>(shared_from_this());
   }
-  std::shared_ptr<TextWidget> setHeight(int h) {
+  std::shared_ptr<TextWidget> setHeight(int h)
+  {
     height = h;
     autoHeight = false;
     markNeedsLayout();
     return std::static_pointer_cast<TextWidget>(shared_from_this());
   }
 
-  std::shared_ptr<TextWidget> setFontFamily(const std::string &family) {
-    if (fontFamily != family) {
+  std::shared_ptr<TextWidget> setFontFamily(const std::string &family)
+  {
+    if (fontFamily != family)
+    {
       fontFamily = family;
       markNeedsLayout();
     }
@@ -152,117 +180,144 @@ public:
 // ICON WIDGET
 // ============================================================================
 
-class IconWidget : public TextWidget {
+class IconWidget : public TextWidget
+{
 public:
-IconWidget() { 
-#ifdef _WIN32
-    fontFamily = "Segoe MDL2 Assets"; 
-#else
-    fontFamily = "Material Design Icons";
-#endif
-}
+  IconWidget()
+  {
+    fontFamily = kIconFont;
+  }
 
+  // ── Layout ────────────────────────────────────────────────────────────────
   void computeLayout(GraphicsContext & /*ctx*/,
                      const BoxConstraints &constraints,
-                     FontCache & /*fontCache*/) override {
+                     FontCache & /*fontCache*/) override
+  {
     if (autoWidth)
       width = fontSize + paddingLeft + paddingRight;
     if (autoHeight)
       height = fontSize + paddingTop + paddingBottom;
+
     width = constraints.clampWidth(width);
     height = constraints.clampHeight(height);
+
     applyConstraints();
     needsLayout = false;
   }
 
-  void render(GraphicsContext &ctx, FontCache &fontCache) override {
+  // ── Render ────────────────────────────────────────────────────────────────
+  void render(GraphicsContext &ctx, FontCache &fontCache) override
+  {
     if (hasBackground)
       drawRoundedRectangle(ctx);
 
-    if (text.empty()) {
+    if (glyphText.empty())
+    {
       needsPaint = false;
       return;
     }
 
-    std::wstring wtext = toWideString(text);
     NativeFont font = fontCache.getFont(fontFamily, fontSize, fontWeight);
 
-    Painter(ctx).drawText(wtext, x, y, width, height, font,
+    Painter(ctx).drawText(glyphText,
+                          x, y, width, height,
+                          font,
                           getCurrentTextColor(),
                           DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
     needsPaint = false;
   }
 
-  std::shared_ptr<IconWidget> setSize(int size) {
+  // ── Fluent setters ────────────────────────────────────────────────────────
+  std::shared_ptr<IconWidget> setSize(int size)
+  {
     setFontSize(size);
-    return std::static_pointer_cast<IconWidget>(shared_from_this());
+    return self();
   }
-  std::shared_ptr<IconWidget> setColor(Color color) {
+
+  std::shared_ptr<IconWidget> setColor(Color color)
+  {
     setTextColor(color);
-    return std::static_pointer_cast<IconWidget>(shared_from_this());
+    return self();
   }
-  std::shared_ptr<IconWidget> setHoverColor(Color color) {
+
+  std::shared_ptr<IconWidget> setHoverColor(Color color)
+  {
     setHoverTextColor(color);
-    return std::static_pointer_cast<IconWidget>(shared_from_this());
+    return self();
   }
-  std::shared_ptr<IconWidget> setIconFontFamily(const std::string &family) {
-    if (fontFamily != family) {
+
+  std::shared_ptr<IconWidget> setIconFontFamily(const std::string &family)
+  {
+    if (fontFamily != family)
+    {
       fontFamily = family;
       markNeedsLayout();
     }
-    return std::static_pointer_cast<IconWidget>(shared_from_this());
+    return self();
   }
 
+  // ── Direct glyph setter ───────────────────────────────────────────────────
+  std::shared_ptr<IconWidget>
+  setGlyph(const FluxIcons::IconGlyph &glyph)
+  {
+    glyphText = std::wstring(1, FluxIcons::glyph(glyph));
+    markNeedsPaint();
+    return self();
+  }
+
+  // ── State-driven glyph ────────────────────────────────────────────────────
   template <typename T>
   std::shared_ptr<IconWidget>
-  setGlyph(State<T> &state, std::function<wchar_t(const T &)> transform) {
-    auto fn = [transform](const T &val) -> std::string {
-      return wcharToUtf8(transform(val));
-    };
-    setText(state, fn);
-    return std::static_pointer_cast<IconWidget>(shared_from_this());
+  setGlyph(State<T> &state,
+           std::function<FluxIcons::IconGlyph(const T &)> transform)
+  {
+
+    auto weakSelf = std::weak_ptr<IconWidget>(self());
+
+    state.subscribe([weakSelf, transform](const T &val)
+                    {
+            if (auto self = weakSelf.lock()) {
+                self->glyphText =
+                    std::wstring(1, FluxIcons::glyph(transform(val)));
+                self->markNeedsPaint();
+            } });
+
+    // Initialize immediately
+    glyphText = std::wstring(1, FluxIcons::glyph(transform(state.get())));
+
+    return self();
   }
 
+private:
+  std::wstring glyphText;
 
-static std::string wcharToUtf8(wchar_t wc) {
-    std::string out;
-    if (wc < 0x80) {
-        out += static_cast<char>(wc);
-    } else if (wc < 0x800) {
-        out += static_cast<char>(0xC0 | (wc >> 6));
-        out += static_cast<char>(0x80 | (wc & 0x3F));
-    } else {
-        out += static_cast<char>(0xE0 | (wc >> 12));
-        out += static_cast<char>(0x80 | ((wc >> 6) & 0x3F));
-        out += static_cast<char>(0x80 | (wc & 0x3F));
-    }
-    return out;
-}
+  std::shared_ptr<IconWidget> self()
+  {
+    return std::static_pointer_cast<IconWidget>(shared_from_this());
+  }
 };
 
 using IconWidgetPtr = std::shared_ptr<IconWidget>;
 
-inline IconWidgetPtr Icon(wchar_t glyph,
-                          const std::string &fontFamily = 
-#ifdef _WIN32
-                              "Segoe MDL2 Assets",
-#else
-                              "Sans",  // fallback — no icon rendering
-#endif
-                          int size = 16) {
+// ── Static glyph ─────────────────────────────────────────────────────────────
+inline IconWidgetPtr Icon(const FluxIcons::IconGlyph &glyph, int size = 16)
+{
   auto w = std::make_shared<IconWidget>();
-  w->fontFamily = fontFamily;
-  w->fontSize = size;
-  w->text = IconWidget::wcharToUtf8(glyph);
+  w->setFontSize(size);
+  w->setGlyph(glyph);
   return w;
 }
 
+// ── State-driven glyph ───────────────────────────────────────────────────────
 template <typename T>
 inline IconWidgetPtr
-Icon(State<T> &state, std::function<wchar_t(const T &)> transform,
-     const std::string &fontFamily = "Segoe MDL2 Assets", int size = 16) {
+Icon(State<T> &state,
+     std::function<FluxIcons::IconGlyph(const T &)> transform,
+     int size = 16)
+{
+
   auto w = std::make_shared<IconWidget>();
-  w->fontFamily = fontFamily;
   w->setFontSize(size);
   w->setGlyph(state, transform);
   return w;
@@ -272,7 +327,8 @@ Icon(State<T> &state, std::function<wchar_t(const T &)> transform,
 // PROGRESS BAR WIDGET  (GDI only — no GL)
 // ============================================================================
 
-class ProgressBarWidget : public Widget {
+class ProgressBarWidget : public Widget
+{
 public:
   double value = 0.0;
   int trackBorderRadius = 4;
@@ -282,16 +338,19 @@ public:
   int trackBorderWidth = 1;
   std::vector<Color> progressColors = {Color::fromRGB(33, 150, 243)};
 
-  ProgressBarWidget() {
+  ProgressBarWidget()
+  {
     height = 12;
     autoHeight = false;
   }
 
-  std::shared_ptr<ProgressBarWidget> setValue(State<double> &state) {
+  std::shared_ptr<ProgressBarWidget> setValue(State<double> &state)
+  {
     value = std::max(0.0, std::min(1.0, state.get()));
     state.bindProperty(
         shared_from_this(),
-        [](Widget *w, const double &val) {
+        [](Widget *w, const double &val)
+        {
           auto *bar = static_cast<ProgressBarWidget *>(w);
           bar->value = std::max(0.0, std::min(1.0, val));
           bar->markNeedsPaint();
@@ -299,46 +358,54 @@ public:
         false);
     return std::static_pointer_cast<ProgressBarWidget>(shared_from_this());
   }
-  std::shared_ptr<ProgressBarWidget> setValue(double v) {
+  std::shared_ptr<ProgressBarWidget> setValue(double v)
+  {
     value = std::max(0.0, std::min(1.0, v));
     markNeedsPaint();
     return std::static_pointer_cast<ProgressBarWidget>(shared_from_this());
   }
-  std::shared_ptr<ProgressBarWidget> setBackgroundColor(Color color) {
+  std::shared_ptr<ProgressBarWidget> setBackgroundColor(Color color)
+  {
     trackColor = color;
     markNeedsPaint();
     return std::static_pointer_cast<ProgressBarWidget>(shared_from_this());
   }
   std::shared_ptr<ProgressBarWidget>
-  setProgressColors(std::vector<Color> c) {
+  setProgressColors(std::vector<Color> c)
+  {
     if (!c.empty())
       progressColors = c;
     markNeedsPaint();
     return std::static_pointer_cast<ProgressBarWidget>(shared_from_this());
   }
-  std::shared_ptr<ProgressBarWidget> setBorderColor(Color color) {
+  std::shared_ptr<ProgressBarWidget> setBorderColor(Color color)
+  {
     trackBorderColor = color;
     hasTrackBorder = true;
     markNeedsPaint();
     return std::static_pointer_cast<ProgressBarWidget>(shared_from_this());
   }
-  std::shared_ptr<ProgressBarWidget> setBorderWidth(int w) {
+  std::shared_ptr<ProgressBarWidget> setBorderWidth(int w)
+  {
     trackBorderWidth = w;
     markNeedsPaint();
     return std::static_pointer_cast<ProgressBarWidget>(shared_from_this());
   }
-  std::shared_ptr<ProgressBarWidget> setBorderRadius(int r) {
+  std::shared_ptr<ProgressBarWidget> setBorderRadius(int r)
+  {
     trackBorderRadius = r;
     markNeedsPaint();
     return std::static_pointer_cast<ProgressBarWidget>(shared_from_this());
   }
-  std::shared_ptr<ProgressBarWidget> setHeight(int h) {
+  std::shared_ptr<ProgressBarWidget> setHeight(int h)
+  {
     height = h;
     autoHeight = false;
     markNeedsPaint();
     return std::static_pointer_cast<ProgressBarWidget>(shared_from_this());
   }
-  std::shared_ptr<ProgressBarWidget> setWidth(int w) {
+  std::shared_ptr<ProgressBarWidget> setWidth(int w)
+  {
     width = w;
     autoWidth = false;
     markNeedsLayout();
@@ -347,14 +414,16 @@ public:
 
   void computeLayout(GraphicsContext & /*ctx*/,
                      const BoxConstraints &constraints,
-                     FontCache & /*fontCache*/) override {
+                     FontCache & /*fontCache*/) override
+  {
     if (autoWidth)
       width = constraints.maxWidth;
     applyConstraints();
     needsLayout = false;
   }
 
-  void render(GraphicsContext &ctx, FontCache & /*fontCache*/) override {
+  void render(GraphicsContext &ctx, FontCache & /*fontCache*/) override
+  {
     Painter painter(ctx);
     int rx = trackBorderRadius * 2;
 
@@ -365,7 +434,8 @@ public:
 
     // Fill
     int fillWidth = (int)(value * width);
-    if (fillWidth > 0) {
+    if (fillWidth > 0)
+    {
       painter.pushClipRoundedRect(x, y, width, height, rx);
       painter.fillGradientRect(x, y, fillWidth, height, progressColors);
       painter.popClipRect();
@@ -381,7 +451,8 @@ public:
 
 using ProgressBarWidgetPtr = std::shared_ptr<ProgressBarWidget>;
 
-inline ProgressBarWidgetPtr ProgressBar(double value = 0.0) {
+inline ProgressBarWidgetPtr ProgressBar(double value = 0.0)
+{
   auto w = std::make_shared<ProgressBarWidget>();
   w->setValue(value);
   return w;
@@ -391,17 +462,20 @@ inline ProgressBarWidgetPtr ProgressBar(double value = 0.0) {
 // DIVIDER WIDGET
 // ============================================================================
 
-class DividerWidget : public Widget {
+class DividerWidget : public Widget
+{
 public:
   void computeLayout(GraphicsContext & /*ctx*/,
                      const BoxConstraints &constraints,
-                     FontCache & /*fontCache*/) override {
+                     FontCache & /*fontCache*/) override
+  {
     if (autoWidth)
       width = constraints.maxWidth;
     applyConstraints();
     needsLayout = false;
   }
-  void render(GraphicsContext &ctx, FontCache & /*fontCache*/) override {
+  void render(GraphicsContext &ctx, FontCache & /*fontCache*/) override
+  {
     if (hasBackground)
       drawRoundedRectangle(ctx);
     needsPaint = false;
@@ -414,13 +488,16 @@ public:
 
 using TextWidgetPtr = std::shared_ptr<TextWidget>;
 
-inline TextWidgetPtr Text(const std::string &text) {
+inline TextWidgetPtr Text(const std::string &text)
+{
   auto w = std::make_shared<TextWidget>();
   w->text = text;
   return w;
 }
 
-template <typename T> inline TextWidgetPtr Text(State<T> &state) {
+template <typename T>
+inline TextWidgetPtr Text(State<T> &state)
+{
   auto w = std::make_shared<TextWidget>();
   w->text = state.toString();
   state.addObserver(w);
@@ -428,13 +505,15 @@ template <typename T> inline TextWidgetPtr Text(State<T> &state) {
 }
 
 template <typename T, typename F>
-inline TextWidgetPtr Text(State<T> &state, F transform) {
+inline TextWidgetPtr Text(State<T> &state, F transform)
+{
   auto w = std::make_shared<TextWidget>();
   w->setText(state, std::function<std::string(const T &)>(transform));
   return w;
 }
 
-inline WidgetPtr Divider() {
+inline WidgetPtr Divider()
+{
   auto w = std::make_shared<DividerWidget>();
   w->height = 1;
   w->autoHeight = false;

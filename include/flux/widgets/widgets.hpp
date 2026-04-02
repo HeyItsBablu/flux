@@ -9,7 +9,7 @@
 #include "flux_input.hpp"
 #include "flux_layout.hpp"
 #include "flux_structure.hpp"
-#include "fluxicons.hpp"
+#include "flux_icons.hpp"
 #include "flux_colorpicker.hpp"
 #include "flux_overlays.hpp"
 #include "flux_histogram.hpp"

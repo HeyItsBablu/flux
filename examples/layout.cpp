@@ -45,7 +45,7 @@ public:
                 Row({
 
                         Row({
-                                Icon(FluxIcons::Remove, "Segoe MDL2 Assets", 14)
+                                Icon(FluxIcons::Remove,  14)
                                     ->setColor(Color::fromRGB(255, 255, 255)),
                                 Text("  -3"),
                             })
@@ -74,7 +74,7 @@ public:
                             ->setBackgroundColor(Color::fromRGB(76, 175, 80)),
 
                         Row({
-                                Icon(FluxIcons::Add, "Segoe MDL2 Assets", 14)
+                                Icon(FluxIcons::Add,  14)
                                     ->setColor(Color::fromRGB(255, 255, 255)),
                                 Text("  +3"),
                             })
@@ -88,7 +88,7 @@ public:
                 Column({
                            Row({
                                    Icon(FluxIcons::ChartBar,
-                                        "Segoe MDL2 Assets", 13)
+                                         13)
                                        ->setColor(Color::fromRGB(100, 100, 100)),
 
                                    Text(boxCount,
@@ -122,7 +122,7 @@ public:
                     Column({
                         // Header
                         Row({
-                                Icon(FluxIcons::Check, "Segoe MDL2 Assets", 14)
+                                Icon(FluxIcons::Check,  14)
                                     ->setColor(Color::fromRGB(33, 150, 243)),
                                 Text("  Toast Notifications")
                                     ->setFontWeight(FontWeight::Bold),
@@ -136,7 +136,7 @@ public:
                                 // Info
                                 Button(
                                     Row({
-                                        Icon(FluxIcons::Info, "Segoe MDL2 Assets", 13)
+                                        Icon(FluxIcons::Info,  13)
                                             ->setColor(Color::fromRGB(255, 255, 255)),
                                         Text("  Info"),
                                     })->setSpacing(0),
@@ -152,7 +152,7 @@ public:
                                 // Success
                                 Button(
                                     Row({
-                                        Icon(FluxIcons::Check, "Segoe MDL2 Assets", 13)
+                                        Icon(FluxIcons::Check,  13)
                                             ->setColor(Color::fromRGB(255, 255, 255)),
                                         Text("  Success"),
                                     })->setSpacing(0),
@@ -168,7 +168,7 @@ public:
                                 // Warning
                                 Button(
                                     Row({
-                                        Icon(FluxIcons::Warning, "Segoe MDL2 Assets", 13)
+                                        Icon(FluxIcons::Warning,  13)
                                             ->setColor(Color::fromRGB(255, 255, 255)),
                                         Text("  Warning"),
                                     })->setSpacing(0),
@@ -184,7 +184,7 @@ public:
                                 // Error
                                 Button(
                                     Row({
-                                        Icon(FluxIcons::Error, "Segoe MDL2 Assets", 13)
+                                        Icon(FluxIcons::Error,  13)
                                             ->setColor(Color::fromRGB(255, 255, 255)),
                                         Text("  Error"),
                                     })->setSpacing(0),
@@ -279,27 +279,27 @@ public:
                                     toast_->show("Bottom-left", ToastType::Info, 2000);
                                 })->setBorderRadius(4)->setPadding(6),
 
-                                Button(Text("↓ BC"), [this] {
+                                Button(Text("BC"), [this] {
                                     toast_->setPosition(ToastPosition::BottomCenter);
                                     toast_->show("Bottom-center", ToastType::Info, 2000);
                                 })->setBorderRadius(4)->setPadding(6),
 
-                                Button(Text("↘ BR"), [this] {
+                                Button(Text("BR"), [this] {
                                     toast_->setPosition(ToastPosition::BottomRight);
                                     toast_->show("Bottom-right", ToastType::Info, 2000);
                                 })->setBorderRadius(4)->setPadding(6),
 
-                                Button(Text("↖ TL"), [this] {
+                                Button(Text("TL"), [this] {
                                     toast_->setPosition(ToastPosition::TopLeft);
                                     toast_->show("Top-left", ToastType::Info, 2000);
                                 })->setBorderRadius(4)->setPadding(6),
 
-                                Button(Text("↑ TC"), [this] {
+                                Button(Text("TC"), [this] {
                                     toast_->setPosition(ToastPosition::TopCenter);
                                     toast_->show("Top-center", ToastType::Info, 2000);
                                 })->setBorderRadius(4)->setPadding(6),
 
-                                Button(Text("↗ TR"), [this] {
+                                Button(Text("TR"), [this] {
                                     toast_->setPosition(ToastPosition::TopRight);
                                     toast_->show("Top-right", ToastType::Info, 2000);
                                 })->setBorderRadius(4)->setPadding(6),
@@ -327,7 +327,7 @@ public:
 
                                         Row({
                                                 Icon(FluxIcons::Dashboard,
-                                                     "Segoe MDL2 Assets", 14)
+                                                      14)
                                                     ->setColor(
                                                         Color::fromRGB(33, 150, 243)),
 
@@ -371,7 +371,7 @@ public:
 
                                         Row({
                                                 Icon(FluxIcons::Check,
-                                                     "Segoe MDL2 Assets", 14)
+                                                      14)
                                                     ->setColor(
                                                         Color::fromRGB(76, 175, 80)),
 
@@ -388,7 +388,7 @@ public:
                                         Button(
                                             Row({
                                                 Icon(FluxIcons::Cancel,
-                                                     "Segoe MDL2 Assets", 12)
+                                                      12)
                                                     ->setColor(Color::fromRGB(255, 255, 255)),
                                                 Text("  Notify")
                                                     ->setFontSize(12),
@@ -435,7 +435,7 @@ public:
 
                                         Row({
                                                 Icon(FluxIcons::Grid,
-                                                     "Segoe MDL2 Assets", 13)
+                                                      13)
                                                     ->setColor(
                                                         Color::fromRGB(120, 120, 120)),
 
