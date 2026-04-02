@@ -166,7 +166,7 @@ inline bool platformKeyDown(int keyCode) {
 
 inline bool platformCtrlDown()  { return platformKeyDown(VK_CONTROL); }
 inline bool platformShiftDown() { return platformKeyDown(VK_SHIFT);   }
-inline bool platformAltDown()   { return platformKeyDown(VK_MENU);    }
+inline bool platformAltDown()   { return platformKeyDown(VK_MENU);    } 
 
 // ── String helpers ────────────────────────────────────────────────────────────
 
@@ -218,7 +218,7 @@ inline uint32_t platformTickCount() {
 
 // ── Key state ─────────────────────────────────────────────────────────────────
 
-inline bool platformKeyDown(int sdlScancode) {
+inline bool platformKeyDown(int sdlScancode) { 
     const uint8_t* state = SDL_GetKeyboardState(nullptr);
     return state != nullptr && state[sdlScancode];
 }
@@ -338,6 +338,9 @@ inline uint32_t platformTickCount() {
 inline bool platformCtrlDown()  { return false; } // no modifier state yet
 inline bool platformShiftDown() { return false; }
 inline bool platformAltDown()   { return false; }
+
+
+inline bool platformKeyDown(int /*keyCode*/) { return false; }
 
 inline std::wstring toWideString(const std::string& utf8) {
     std::wstring out;
