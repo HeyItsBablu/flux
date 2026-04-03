@@ -214,16 +214,22 @@ public:
     // Unlike Cairo there is no save/translate/restore — derived widgets
     // must offset their draw calls by (originX_, originY_) themselves,
     // or Painter helpers accept absolute coordinates.
-    void renderOverlay(GraphicsContext &ctx, FontCache &fc) {
-        if (!visible_ || popupW_ <= 0 || popupH_ <= 0)
-            return;
+void renderOverlay(GraphicsContext &ctx, FontCache &fc) {
+    if (!visible_ || popupW_ <= 0 || popupH_ <= 0) return;
 
-        // Build a local context sized to the overlay.
-        // originX_/originY_ are available to renderPopupContent via
-        // overlayX()/overlayY() if it needs to offset draw calls.
-        GraphicsContext localCtx(popupW_, popupH_);
-        renderPopupContent(localCtx, fc);
-    }
+    NVGcontext* vg = FluxAndroid_getVG();
+    if (!vg) return;
+
+    nvgSave(vg);
+    nvgTranslate(vg, static_cast<float>(originX_), 
+                     static_cast<float>(originY_));
+
+    GraphicsContext localCtx(popupW_, popupH_);
+    renderPopupContent(localCtx, fc);
+
+    nvgRestore(vg);
+}
+
 
 #endif // platform
 

@@ -351,6 +351,7 @@ private:
     NativeWindow hw = FluxUI::getCurrentInstance()->getWindow();
     if (hw)
       showPopup(hw, origin.x, origin.y, kbW_, keyboardHeight, fc);
+      
 
     if (scaffold)
       scaffold->addOverlayHitTarget(this, 300); // higher z than dialogs
