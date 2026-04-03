@@ -7,6 +7,7 @@
 #include "flux_display.hpp"
 #include "flux_image.hpp"
 #include "flux_input.hpp"
+#include "flux_keyboard.hpp"
 #include "flux_layout.hpp"
 #include "flux_structure.hpp"
 #include "flux_icons.hpp"

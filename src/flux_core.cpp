@@ -12,10 +12,7 @@ FluxUI *FluxUI::currentInstance = nullptr;
 // CONSTRUCTION / DESTRUCTION
 // ============================================================================
 
-FluxUI::FluxUI(AppInstance hInst) : hInstance(hInst) {
-  currentInstance = this;
-
-}
+FluxUI::FluxUI(AppInstance hInst) : hInstance(hInst) { currentInstance = this; }
 
 FluxUI::~FluxUI() {
   fontCache.clear();
@@ -61,7 +58,7 @@ WidgetPtr FluxUI::findByIdRecursive(WidgetPtr widget, const std::string &id) {
   }
 
   return nullptr;
-} 
+}
 
 // ============================================================================
 // SCAFFOLD WIRING
@@ -160,7 +157,8 @@ bool FluxUI::handleOverlayRightClick(int mouseX, int mouseY) {
 // ============================================================================
 
 void FluxUI::wireCallbacks() {
-  window.callbacks.onPaint = [this](GraphicsContext &ctx, int /*w*/, int /*h*/) {
+  window.callbacks.onPaint = [this](GraphicsContext &ctx, int /*w*/,
+                                    int /*h*/) {
     if (!root)
       return;
     Renderer::renderWidget(ctx, root.get(), fontCache);
@@ -206,39 +204,49 @@ void FluxUI::wireCallbacks() {
     return handled;
   };
 
-window.callbacks.onMouseUp = [this](int x, int y) -> bool {
-    if (!root) return false;
+  window.callbacks.onMouseUp = [this](int x, int y) -> bool {
+    if (!root)
+      return false;
+
+    // Dispatch to overlay stack first (keyboard, dropdowns, etc.)
+    auto *scaffold = findScaffold(root.get());
+    if (scaffold && scaffold->hasOverlays()) {
+      const auto &stack = scaffold->getOverlayStack();
+      for (auto it = stack.rbegin(); it != stack.rend(); ++it)
+        if (it->widget && it->widget->handleMouseUp(x, y))
+          return true;
+    }
 
     bool hasCaptured = window.isMouseCaptured();
-
     if (hasCaptured) {
-        if (broadcastMouseEvent(root.get(), x, y, [](Widget *w, int mx, int my) {
-                return w->handleMouseUp(mx, my);
-            }))
-            return true;
+      if (broadcastMouseEvent(root.get(), x, y, [](Widget *w, int mx, int my) {
+            return w->handleMouseUp(mx, my);
+          }))
+        return true;
     }
     return findAndHandleMouseEvent(
         root.get(), x, y, [x, y](Widget *w) { return w->handleMouseUp(x, y); });
-};
+  };
 
-window.callbacks.onMouseMove = [this](int x, int y) -> bool {
-    if (!root) return false;
+  window.callbacks.onMouseMove = [this](int x, int y) -> bool {
+    if (!root)
+      return false;
 
     bool hasCaptured = window.isMouseCaptured();
 
     if (hasCaptured) {
-        if (broadcastMouseEvent(root.get(), x, y, [](Widget *w, int mx, int my) {
-                return w->handleMouseMove(mx, my);
-            }))
-            return true;
+      if (broadcastMouseEvent(root.get(), x, y, [](Widget *w, int mx, int my) {
+            return w->handleMouseMove(mx, my);
+          }))
+        return true;
     }
     bool overlay = handleOverlayMouseMove(x, y);
-    bool hover   = updateHoverStates(root.get(), x, y);
-    bool custom  = findAndHandleMouseEvent(root.get(), x, y, [x, y](Widget *w) {
-        return w->handleMouseMove(x, y);
+    bool hover = updateHoverStates(root.get(), x, y);
+    bool custom = findAndHandleMouseEvent(root.get(), x, y, [x, y](Widget *w) {
+      return w->handleMouseMove(x, y);
     });
     return overlay || hover || custom;
-};
+  };
 
   window.callbacks.onMouseLeave = [this]() {
     if (root)
@@ -265,15 +273,15 @@ window.callbacks.onMouseMove = [this](int x, int y) -> bool {
     return focusedWidget && focusedWidget->handleChar(ch);
   };
 
-window.callbacks.onTimer = [this](TimerID id) {
+  window.callbacks.onTimer = [this](TimerID id) {
     auto it = timerCallbacks.find(id);
     if (it != timerCallbacks.end()) {
-        it->second();
-        return;
+      it->second();
+      return;
     }
     if (focusedWidget && focusedWidget->handleTimer(id))
-        invalidateWidget(focusedWidget);
-};
+      invalidateWidget(focusedWidget);
+  };
 }
 
 // ============================================================================
@@ -312,27 +320,28 @@ Widget *FluxUI::getFocusedWidget() const { return focusedWidget; }
 // ============================================================================
 
 TimerID FluxUI::setInterval(int ms, std::function<void()> callback) {
-    static TimerID nextId = 100;
-    TimerID id = nextId++;
-    timerCallbacks[id] = callback;
+  static TimerID nextId = 100;
+  TimerID id = nextId++;
+  timerCallbacks[id] = callback;
 
-    if (window.valid())
-        window.setTimer(id, ms);
-    else
-        pendingTimers.push_back({ id, [this, id, ms]() {
-            window.setTimer(id, ms); }});
+  if (window.valid())
+    window.setTimer(id, ms);
+  else
+    pendingTimers.push_back(
+        {id, [this, id, ms]() { window.setTimer(id, ms); }});
 
-    return id;
+  return id;
 }
 
 void FluxUI::clearInterval(TimerID id) {
-    window.killTimer(id);
-    timerCallbacks.erase(id);
-    pendingTimers.erase(
-        std::remove_if(pendingTimers.begin(), pendingTimers.end(),
-            [id](const std::pair<TimerID, std::function<void()>> &p) {
-                return p.first == id; }),
-        pendingTimers.end());
+  window.killTimer(id);
+  timerCallbacks.erase(id);
+  pendingTimers.erase(
+      std::remove_if(pendingTimers.begin(), pendingTimers.end(),
+                     [id](const std::pair<TimerID, std::function<void()>> &p) {
+                       return p.first == id;
+                     }),
+      pendingTimers.end());
 }
 
 // ============================================================================
@@ -341,54 +350,53 @@ void FluxUI::clearInterval(TimerID id) {
 
 void FluxUI::build(std::function<WidgetPtr()> buildFunc) {
   window.startupGdiplus();
-    builder = buildFunc;
-    rebuild();
+  builder = buildFunc;
+  rebuild();
 }
 
 void FluxUI::rebuild() {
-    if (!builder)
-        return;
+  if (!builder)
+    return;
 
-    if (root) {
-        root->onDetach();
-        if (auto *scaffold = findScaffold(root.get()))
-            scaffold->clearOverlays();
-    }
-
-    root = builder();
-
+  if (root) {
+    root->onDetach();
     if (auto *scaffold = findScaffold(root.get()))
-        wireScaffoldToWidgets(scaffold, root.get());
+      scaffold->clearOverlays();
+  }
 
-    if (window.valid()) {
-        auto mc = getMeasureContext();
-        LayoutEngine::computeLayout(mc.ctx, root.get(),
-                                    window.clientWidth(),
-                                    window.clientHeight(), fontCache);
-        LayoutEngine::positionWidget(root.get(), 0, 0);
-        window.invalidate();
-    }
+  root = builder();
+
+  if (auto *scaffold = findScaffold(root.get()))
+    wireScaffoldToWidgets(scaffold, root.get());
+
+  if (window.valid()) {
+    auto mc = getMeasureContext();
+    LayoutEngine::computeLayout(mc.ctx, root.get(), window.clientWidth(),
+                                window.clientHeight(), fontCache);
+    LayoutEngine::positionWidget(root.get(), 0, 0);
+    window.invalidate();
+  }
 }
 // ============================================================================
 // INVALIDATION / PARTIAL LAYOUT
 // ============================================================================
 
 void FluxUI::updateWidget(Widget *widget) {
-    if (!widget || !window.valid())
-        return;
+  if (!widget || !window.valid())
+    return;
 
-    int oldWidth  = widget->width;
-    int oldHeight = widget->height;
+  int oldWidth = widget->width;
+  int oldHeight = widget->height;
 
-    auto mc = getMeasureContext();    // ← already exists on FluxUI
-    widget->measureText(mc.ctx, fontCache);
-    widget->width  += widget->paddingLeft  + widget->paddingRight;
-    widget->height += widget->paddingTop   + widget->paddingBottom;
+  auto mc = getMeasureContext(); // ← already exists on FluxUI
+  widget->measureText(mc.ctx, fontCache);
+  widget->width += widget->paddingLeft + widget->paddingRight;
+  widget->height += widget->paddingTop + widget->paddingBottom;
 
-    if (oldWidth != widget->width || oldHeight != widget->height)
-        partialRebuild(widget);
-    else
-        invalidateWidget(widget);
+  if (oldWidth != widget->width || oldHeight != widget->height)
+    partialRebuild(widget);
+  else
+    invalidateWidget(widget);
 }
 
 // ============================================================================
@@ -402,59 +410,54 @@ void FluxUI::invalidateWidget(Widget *widget) {
 }
 
 void FluxUI::partialRebuild(Widget *widget) {
-    if (!widget || !window.valid())
-        return;
+  if (!widget || !window.valid())
+    return;
 
-    Widget *boundary = findLayoutBoundary(widget);
-    Widget *current  = widget;
-    while (current && current != boundary) {
-        current->markNeedsLayout();
-        current = current->parent;
-    }
-    boundary->markNeedsLayout();
+  Widget *boundary = findLayoutBoundary(widget);
+  Widget *current = widget;
+  while (current && current != boundary) {
+    current->markNeedsLayout();
+    current = current->parent;
+  }
+  boundary->markNeedsLayout();
 
-    auto mc = getMeasureContext();    // ← replaces GetDC/ReleaseDC block
+  auto mc = getMeasureContext(); // ← replaces GetDC/ReleaseDC block
 
-    if (boundary == root.get()) {
-        LayoutEngine::computeLayout(mc.ctx, root.get(),
-                                    window.clientWidth(),
-                                    window.clientHeight(), fontCache);
-        LayoutEngine::positionWidget(root.get(), 0, 0);
-    } else {
-        LayoutEngine::computeLayout(mc.ctx, boundary,
-                                    boundary->width, boundary->height,
-                                    fontCache);
-        LayoutEngine::positionWidget(boundary, boundary->x, boundary->y);
-    }
-    // MeasureContext destructor calls ReleaseDC automatically
+  if (boundary == root.get()) {
+    LayoutEngine::computeLayout(mc.ctx, root.get(), window.clientWidth(),
+                                window.clientHeight(), fontCache);
+    LayoutEngine::positionWidget(root.get(), 0, 0);
+  } else {
+    LayoutEngine::computeLayout(mc.ctx, boundary, boundary->width,
+                                boundary->height, fontCache);
+    LayoutEngine::positionWidget(boundary, boundary->x, boundary->y);
+  }
+  // MeasureContext destructor calls ReleaseDC automatically
 
-    window.invalidateRect(boundary->x, boundary->y,
-                          boundary->width, boundary->height);
+  window.invalidateRect(boundary->x, boundary->y, boundary->width,
+                        boundary->height);
 }
-
-
 
 // ============================================================================
 // createWindow
 // ============================================================================
 
 NativeWindow FluxUI::createWindow(const std::string &title, int w, int h) {
-    wireCallbacks();
-    window.create(title, w, h, hInstance, &window);
+  wireCallbacks();
+  window.create(title, w, h, hInstance, &window);
 
-    if (root) {
-        auto mc = getMeasureContext();    // ← replaces GetDC/ReleaseDC block
-        LayoutEngine::computeLayout(mc.ctx, root.get(),
-                                    window.clientWidth(),
-                                    window.clientHeight(), fontCache);
-        LayoutEngine::positionWidget(root.get(), 0, 0);
-    }
+  if (root) {
+    auto mc = getMeasureContext(); // ← replaces GetDC/ReleaseDC block
+    LayoutEngine::computeLayout(mc.ctx, root.get(), window.clientWidth(),
+                                window.clientHeight(), fontCache);
+    LayoutEngine::positionWidget(root.get(), 0, 0);
+  }
 
-    for (auto &[id, fn] : pendingTimers)
-        fn();
-    pendingTimers.clear();
+  for (auto &[id, fn] : pendingTimers)
+    fn();
+  pendingTimers.clear();
 
-    return window.handle();
+  return window.handle();
 }
 
 int FluxUI::run() { return window.run(); }
@@ -463,20 +466,21 @@ int FluxUI::run() { return window.run(); }
 // ACCESSORS
 // ============================================================================
 
-NativeWindow FluxUI::getWindow()    const { return window.handle(); }
-WidgetPtr    FluxUI::getRoot()      const { return root; }
-FontCache   &FluxUI::getFontCache()       { return fontCache; }
+NativeWindow FluxUI::getWindow() const { return window.handle(); }
+WidgetPtr FluxUI::getRoot() const { return root; }
+FontCache &FluxUI::getFontCache() { return fontCache; }
 
 WidgetPtr FluxUI::findById(const std::string &id) {
-    return findByIdRecursive(root, id);
+  return findByIdRecursive(root, id);
 }
 
-
-void FluxUI::setClipboardText(const std::string &t) { window.setClipboardText(t); }
-std::string FluxUI::getClipboardText()              { return window.getClipboardText(); }
+void FluxUI::setClipboardText(const std::string &t) {
+  window.setClipboardText(t);
+}
+std::string FluxUI::getClipboardText() { return window.getClipboardText(); }
 
 void FluxUI::invalidateWidget(int x, int y, int w, int h) {
-    window.invalidateRect(x, y, w, h);
+  window.invalidateRect(x, y, w, h);
 }
 
 void FluxUI::captureMouseInput() { window.captureMouseInput(); }
@@ -484,26 +488,41 @@ void FluxUI::releaseMouseInput() { window.releaseMouseInput(); }
 
 MeasureContext FluxUI::getMeasureContext() {
 #ifdef _WIN32
-    return MeasureContext(window.handle());
+  return MeasureContext(window.handle());
 #elif defined(__linux__) && !defined(__ANDROID__)
-    GraphicsContext gc = window.getMeasureContext();
-    return MeasureContext(gc.cr, gc.width, gc.height);
+  GraphicsContext gc = window.getMeasureContext();
+  return MeasureContext(gc.cr, gc.width, gc.height);
 #elif defined(__ANDROID__)
-    GraphicsContext gc = window.getMeasureContext();
-    return MeasureContext(gc.width, gc.height);
+  GraphicsContext gc = window.getMeasureContext();
+  return MeasureContext(gc.width, gc.height);
 #endif
 }
 
 PlatformWindow::ScreenPoint FluxUI::clientToScreen(int cx, int cy) const {
-    return window.clientToScreen(cx, cy);
+  return window.clientToScreen(cx, cy);
 }
 PlatformWindow::ScreenPoint FluxUI::screenToClient(int sx, int sy) const {
-    return window.screenToClient(sx, sy);
+  return window.screenToClient(sx, sy);
 }
 PlatformWindow::ClientSize FluxUI::getClientSize() const {
-    return window.getClientSize();
+  return window.getClientSize();
 }
 
 void FluxUI::setResizeCursorH() { window.setResizeCursorH(); }
 void FluxUI::setResizeCursorV() { window.setResizeCursorV(); }
 void FluxUI::setDefaultCursor() { window.setDefaultCursor(); }
+
+ScaffoldWidget *FluxUI::findScaffold_(Widget *w) {
+  if (!w)
+    return nullptr;
+  if (auto *s = dynamic_cast<ScaffoldWidget *>(w))
+    return s;
+  for (auto &child : w->children)
+    if (auto *s = findScaffold_(child.get()))
+      return s;
+  return nullptr;
+}
+
+ScaffoldWidget *FluxUI::getRootScaffold() {
+  return findScaffold(root.get()); // calls the file-local free function
+}

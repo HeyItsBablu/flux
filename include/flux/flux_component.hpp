@@ -15,16 +15,13 @@ class Component {
 protected:
   FluxUI *context;
   bool initialized = false;
-  bool disposed = false;
+  bool disposed    = false;
 
 public:
   Component() : context(FluxUI::getCurrentInstance()) {
 #ifdef FLUX_DEBUG
-    if (!context) {
-      std::cerr
-          << "[FluxUI] Warning: Component created without active FluxUI context"
-          << std::endl;
-    }
+    if (!context)
+      std::cerr << "[FluxUI] Warning: Component created without active FluxUI context\n";
 #endif
   }
 
@@ -33,35 +30,37 @@ public:
   }
 
   virtual ~Component() {
-    if (!disposed) {
-      dispose();
-    }
+    if (!disposed) dispose();
   }
 
-  Component(const Component &) = delete;
+  Component(const Component &)            = delete;
   Component &operator=(const Component &) = delete;
-  Component(Component &&) = delete;
-  Component &operator=(Component &&) = delete;
+  Component(Component &&)                 = delete;
+  Component &operator=(Component &&)      = delete;
 
-  virtual WidgetPtr build() = 0;
-  virtual void initState() {}
-  virtual void dispose() { disposed = true; }
+  virtual WidgetPtr build()  = 0;
+  virtual void initState()   {}
 
-  template <typename T> State<T> useState(T initialValue) {
+  // Called once after the first layout pass — FluxUI is fully live here.
+  // Safe to call attachToApp(), setInterval(), getClientSize(), etc.
+  virtual void onMount()     {}
+
+  virtual void dispose()     { disposed = true; }
+
+  template <typename T>
+  State<T> useState(T initialValue) {
     assert(context != nullptr && "Component context is null");
     return State<T>(initialValue, context);
   }
 
   void rebuild() {
-    if (disposed)
-      return;
-    if (context)
-      context->rebuild();
+    if (disposed) return;
+    if (context) context->rebuild();
   }
 
-  bool isInitialized() const { return initialized; }
-  bool isDisposed() const { return disposed; }
-  FluxUI *getContext() const { return context; }
+  bool    isInitialized() const { return initialized; }
+  bool    isDisposed()    const { return disposed;     }
+  FluxUI *getContext()    const { return context;      }
 
 protected:
   void markInitialized() { initialized = true; }
@@ -69,52 +68,58 @@ protected:
 };
 
 // ============================================================================
-// COMPONENT HOLDER WIDGET - PREVENTS CRASHES BY KEEPING COMPONENT ALIVE
+// COMPONENT HOLDER WIDGET
 // ============================================================================
 
 class ComponentHolderWidget : public Widget {
 private:
-  std::shared_ptr<Component> component; // CRITICAL: Keeps component alive
-  WidgetPtr childWidget;
+  std::shared_ptr<Component> component;
+  WidgetPtr                  childWidget;
+  bool                       mounted = false;  // onMount fires exactly once
 
 public:
   ComponentHolderWidget(std::shared_ptr<Component> comp, WidgetPtr child)
       : component(comp), childWidget(child) {
-    if (childWidget) {
+    if (childWidget)
       addChild(childWidget);
-    }
   }
 
-  void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
+  void computeLayout(GraphicsContext &ctx,
+                     const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     if (!children.empty()) {
       children[0]->computeLayout(ctx, constraints, fontCache);
-      if (autoWidth)
-        width = children[0]->width;
-      if (autoHeight)
-        height = children[0]->height;
+      if (autoWidth)  width  = children[0]->width;
+      if (autoHeight) height = children[0]->height;
     }
     applyConstraints();
     needsLayout = false;
+
+    // First layout pass is complete — coordinates are valid, FluxUI is live.
+    // Fire onMount exactly once.
+    if (!mounted && component) {
+      mounted = true;
+      component->onMount();
+    }
   }
 
-  void positionChildren(int contentX, int contentY, int contentWidth,
-                        int contentHeight) override {
+  void positionChildren(int contentX, int contentY,
+                        int /*contentWidth*/, int /*contentHeight*/) override {
     if (!children.empty()) {
       auto &child = children[0];
       child->x = contentX;
       child->y = contentY;
       child->positionChildren(
-          child->x + child->paddingLeft, child->y + child->paddingTop,
-          child->width - child->paddingLeft - child->paddingRight,
-          child->height - child->paddingTop - child->paddingBottom);
+          child->x + child->paddingLeft,
+          child->y + child->paddingTop,
+          child->width  - child->paddingLeft - child->paddingRight,
+          child->height - child->paddingTop  - child->paddingBottom);
     }
   }
 
   void render(GraphicsContext &ctx, FontCache &fontCache) override {
-    if (!children.empty()) {
+    if (!children.empty())
       children[0]->render(ctx, fontCache);
-    }
     needsPaint = false;
   }
 };
@@ -138,8 +143,6 @@ public:
     }
 
     auto childWidget = component->build();
-
-    // Wrap in holder to keep component alive
     return std::make_shared<ComponentHolderWidget>(component, childWidget);
   }
 
@@ -171,22 +174,18 @@ WidgetPtr BuildComponent(Args &&...args) {
 template <typename TComponent, typename... Args>
 std::pair<WidgetPtr, std::shared_ptr<TComponent>>
 ComponentWithRef(Args &&...args) {
-  auto comp = ComponentBuilder::create<TComponent>(std::forward<Args>(args)...);
+  auto comp        = ComponentBuilder::create<TComponent>(std::forward<Args>(args)...);
   auto childWidget = comp->build();
-  auto holderWidget =
-      std::make_shared<ComponentHolderWidget>(comp, childWidget);
-  return {holderWidget, comp};
+  auto holder      = std::make_shared<ComponentHolderWidget>(comp, childWidget);
+  return {holder, comp};
 }
 
 // ============================================================================
 // MACROS
 // ============================================================================
 
-#define COMPONENT(ComponentType, ...) BuildComponent<ComponentType>(__VA_ARGS__)
-
-#define COMPONENT_REF(ComponentType, ...)                                      \
-  ComponentWithRef<ComponentType>(__VA_ARGS__)
-
-#define CHILD(ComponentType, ...) BuildComponent<ComponentType>(__VA_ARGS__)
+#define COMPONENT(ComponentType, ...)     BuildComponent<ComponentType>(__VA_ARGS__)
+#define COMPONENT_REF(ComponentType, ...) ComponentWithRef<ComponentType>(__VA_ARGS__)
+#define CHILD(ComponentType, ...)         BuildComponent<ComponentType>(__VA_ARGS__)
 
 #endif // FLUX_COMPONENTS_HPP

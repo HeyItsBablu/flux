@@ -1,10 +1,10 @@
 #ifndef FLUX_WIDGET_HPP
 #define FLUX_WIDGET_HPP
 
-#include "flux_platform.hpp"
-#include "flux_painter.hpp"
 #include "flux_font.hpp"
 #include "flux_overflow.hpp"
+#include "flux_painter.hpp"
+#include "flux_platform.hpp"
 
 #include <functional>
 #include <iomanip>
@@ -22,7 +22,7 @@ template <typename T> class State;
 
 class Widget;
 
-using WidgetPtr    = std::shared_ptr<Widget>;
+using WidgetPtr = std::shared_ptr<Widget>;
 using ClickHandler = std::function<void()>;
 using HoverHandler = std::function<void(bool)>;
 
@@ -31,40 +31,52 @@ using HoverHandler = std::function<void(bool)>;
 // ============================================================================
 
 struct BoxConstraints {
-    int minWidth, maxWidth, minHeight, maxHeight;
+  int minWidth, maxWidth, minHeight, maxHeight;
 
-    BoxConstraints(int minW, int maxW, int minH, int maxH)
-        : minWidth(minW), maxWidth(maxW), minHeight(minH), maxHeight(maxH) {
-        normalize();
-    }
+  BoxConstraints(int minW, int maxW, int minH, int maxH)
+      : minWidth(minW), maxWidth(maxW), minHeight(minH), maxHeight(maxH) {
+    normalize();
+  }
 
-    static BoxConstraints tight(int w, int h)    { return BoxConstraints(w, w, h, h); }
-    static BoxConstraints loose(int w, int h)    { return BoxConstraints(0, w, 0, h); }
-    static BoxConstraints infinite()             { return BoxConstraints(0, 10000, 0, 10000); }
+  static BoxConstraints tight(int w, int h) {
+    return BoxConstraints(w, w, h, h);
+  }
+  static BoxConstraints loose(int w, int h) {
+    return BoxConstraints(0, w, 0, h);
+  }
+  static BoxConstraints infinite() {
+    return BoxConstraints(0, 10000, 0, 10000);
+  }
 
-    void normalize() {
-        minWidth  = std::max(0, minWidth);
-        minHeight = std::max(0, minHeight);
-        if (maxWidth  < minWidth)  maxWidth  = minWidth;
-        if (maxHeight < minHeight) maxHeight = minHeight;
-    }
+  void normalize() {
+    minWidth = std::max(0, minWidth);
+    minHeight = std::max(0, minHeight);
+    if (maxWidth < minWidth)
+      maxWidth = minWidth;
+    if (maxHeight < minHeight)
+      maxHeight = minHeight;
+  }
 
-    int clampWidth(int w)  const { return std::max(minWidth,  std::min(maxWidth,  w)); }
-    int clampHeight(int h) const { return std::max(minHeight, std::min(maxHeight, h)); }
+  int clampWidth(int w) const {
+    return std::max(minWidth, std::min(maxWidth, w));
+  }
+  int clampHeight(int h) const {
+    return std::max(minHeight, std::min(maxHeight, h));
+  }
 
-    BoxConstraints deflate(int horizontal, int vertical) const {
-        return BoxConstraints(0, std::max(0, maxWidth - horizontal),
-                              0, std::max(0, maxHeight - vertical));
-    }
+  BoxConstraints deflate(int horizontal, int vertical) const {
+    return BoxConstraints(0, std::max(0, maxWidth - horizontal), 0,
+                          std::max(0, maxHeight - vertical));
+  }
 
-    BoxConstraints intersect(int wMin, int wMax, int hMin, int hMax) const {
-        int newMinW = std::max(minWidth,  wMin);
-        int newMaxW = std::min(maxWidth,  wMax);
-        int newMinH = std::max(minHeight, hMin);
-        int newMaxH = std::min(maxHeight, hMax);
-        return BoxConstraints(newMinW, std::max(newMinW, newMaxW),
-                              newMinH, std::max(newMinH, newMaxH));
-    }
+  BoxConstraints intersect(int wMin, int wMax, int hMin, int hMax) const {
+    int newMinW = std::max(minWidth, wMin);
+    int newMaxW = std::min(maxWidth, wMax);
+    int newMinH = std::max(minHeight, hMin);
+    int newMaxH = std::min(maxHeight, hMax);
+    return BoxConstraints(newMinW, std::max(newMinW, newMaxW), newMinH,
+                          std::max(newMinH, newMaxH));
+  }
 };
 
 // ============================================================================
@@ -72,20 +84,37 @@ struct BoxConstraints {
 // ============================================================================
 
 enum class Alignment {
-    Start, Center, End, Stretch,
-    TopCenter, BottomCenter,
-    CenterLeft, CenterRight,
-    TopRight, BottomLeft, BottomRight
+  Start,
+  Center,
+  End,
+  Stretch,
+  TopCenter,
+  BottomCenter,
+  CenterLeft,
+  CenterRight,
+  TopRight,
+  BottomLeft,
+  BottomRight
 };
 
 enum class CrossAxisAlignment {
-    Start, Center, End,
-    SpaceBetween, SpaceAround, SpaceEvenly, Stretch
+  Start,
+  Center,
+  End,
+  SpaceBetween,
+  SpaceAround,
+  SpaceEvenly,
+  Stretch
 };
 
 enum class MainAxisAlignment {
-    Start, Center, End,
-    SpaceBetween, SpaceAround, SpaceEvenly, Stretch
+  Start,
+  Center,
+  End,
+  SpaceBetween,
+  SpaceAround,
+  SpaceEvenly,
+  Stretch
 };
 
 // ============================================================================
@@ -94,238 +123,247 @@ enum class MainAxisAlignment {
 
 class Widget : public std::enable_shared_from_this<Widget> {
 public:
-    std::string id;
-    std::string text;
+  std::string id;
+  std::string text;
 
-    // Layout
-    int  x = 0, y = 0;
-    int  width = 0, height = 0;
-    int  minWidth = 0, minHeight = 0;
-    int  maxWidth = 10000, maxHeight = 10000;
-    bool autoWidth = true, autoHeight = true;
-    bool visible = true;
+  // Layout
+  int x = 0, y = 0;
+  int width = 0, height = 0;
+  int minWidth = 0, minHeight = 0;
+  int maxWidth = 10000, maxHeight = 10000;
+  bool autoWidth = true, autoHeight = true;
+  bool visible = true;
 
-    // Focus
-    bool isFocusable = false;
-    bool isFocused   = false;
+  // Focus
+  bool isFocusable = false;
+  bool isFocused = false;
 
-    // Flex
-    int flex = 1;
+  // Flex
+  int flex = 1;
 
-    // Spacing
-    int padding = 0;
-    int paddingLeft = 0, paddingRight = 0, paddingTop = 0, paddingBottom = 0;
-    int margin = 0;
-    int marginLeft = 0, marginRight = 0, marginTop = 0, marginBottom = 0;
+  // Spacing
+  int padding = 0;
+  int paddingLeft = 0, paddingRight = 0, paddingTop = 0, paddingBottom = 0;
+  int margin = 0;
+  int marginLeft = 0, marginRight = 0, marginTop = 0, marginBottom = 0;
 
-    // Alignment
-    Alignment          alignment          = Alignment::Start;
-    CrossAxisAlignment crossAxisAlignment = CrossAxisAlignment::Start;
-    MainAxisAlignment  mainAxisAlignment  = MainAxisAlignment::Start;
-    int spacing = 0;
+  // Alignment
+  Alignment alignment = Alignment::Start;
+  CrossAxisAlignment crossAxisAlignment = CrossAxisAlignment::Start;
+  MainAxisAlignment mainAxisAlignment = MainAxisAlignment::Start;
+  int spacing = 0;
 
-    OverflowInfo overflow;
+  OverflowInfo overflow;
 
-    // Colors — alpha is carried inside Color::a
-    Color backgroundColor  = Color::fromRGB(255, 255, 255);
-    Color textColor        = Color::fromRGB(0,   0,   0);
-    Color borderColor      = Color::fromRGB(0,   0,   0);
+  // Colors — alpha is carried inside Color::a
+  Color backgroundColor = Color::fromRGB(255, 255, 255);
+  Color textColor = Color::fromRGB(0, 0, 0);
+  Color borderColor = Color::fromRGB(0, 0, 0);
 
-    bool hasBackground = false;
-    bool hasBorder     = false;
+  bool hasBackground = false;
+  bool hasBorder = false;
 
-    // Hover colors
-    Color hoverBackgroundColor = Color::fromRGB(255, 255, 255);
-    Color hoverTextColor       = Color::fromRGB(0,   0,   0);
-    Color hoverBorderColor     = Color::fromRGB(0,   0,   0);
-    bool hasHoverBackground = false;
-    bool hasHoverTextColor  = false;
-    bool hasHoverBorderColor = false;
+  // Hover colors
+  Color hoverBackgroundColor = Color::fromRGB(255, 255, 255);
+  Color hoverTextColor = Color::fromRGB(0, 0, 0);
+  Color hoverBorderColor = Color::fromRGB(0, 0, 0);
+  bool hasHoverBackground = false;
+  bool hasHoverTextColor = false;
+  bool hasHoverBorderColor = false;
 
-    // Border
-    int borderWidth  = 1;
-    int borderRadius = 0;
+  // Border
+  int borderWidth = 1;
+  int borderRadius = 0;
 
-    // Text styling
-    int         fontSize   = 14;
-    FontWeight  fontWeight = FontWeight::Normal;
-    std::string fontFamily = "Segoe UI";
+  // Text styling
+  int fontSize = 14;
+  FontWeight fontWeight = FontWeight::Normal;
+  std::string fontFamily = "Segoe UI";
 
-    // Events
-    ClickHandler onClick;
-    HoverHandler onHover;
-    std::function<bool(int, int)> onRightClick;
+  // Events
+  ClickHandler onClick;
+  HoverHandler onHover;
+  std::function<bool(int, int)> onRightClick;
 
-    // Hover state
-    bool isHovered = false;
+  // Hover state
+  bool isHovered = false;
 
-    // Dirty flags
-    bool needsLayout = true;
-    bool needsPaint  = true;
+  // Dirty flags
+  bool needsLayout = true;
+  bool needsPaint = true;
 
-    // Tree
-    std::vector<WidgetPtr> children;
-    Widget *parent = nullptr;
+  // Tree
+  std::vector<WidgetPtr> children;
+  Widget *parent = nullptr;
 
-    virtual ~Widget() = default;
+  virtual ~Widget() = default;
 
-    virtual bool isExpanded() const { return false; }
+  virtual bool isExpanded() const { return false; }
 
-    virtual void onDetach() {
-        for (auto &child : children) {
-            child->parent = nullptr;
-            child->onDetach();
-        }
+  virtual void onDetach() {
+    for (auto &child : children) {
+      child->parent = nullptr;
+      child->onDetach();
     }
+  }
 
-    // -----------------------------------------------------------------------
-    // Core layout / render virtuals
-    // -----------------------------------------------------------------------
+  // -----------------------------------------------------------------------
+  // Core layout / render virtuals
+  // -----------------------------------------------------------------------
 
-    virtual void computeLayout(GraphicsContext &ctx,
-                               const BoxConstraints &constraints,
-                               FontCache &fontCache);
+  virtual void computeLayout(GraphicsContext &ctx,
+                             const BoxConstraints &constraints,
+                             FontCache &fontCache);
 
-    virtual void positionChildren(int contentX, int contentY,
-                                  int contentWidth, int contentHeight);
+  virtual void positionChildren(int contentX, int contentY, int contentWidth,
+                                int contentHeight);
 
-    virtual void render(GraphicsContext &ctx, FontCache &fontCache);
+  virtual void render(GraphicsContext &ctx, FontCache &fontCache);
 
-    void measureText(GraphicsContext &ctx, FontCache &fontCache);
-    void renderText(GraphicsContext &ctx, FontCache &fontCache,
-                    UINT format = DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+  void measureText(GraphicsContext &ctx, FontCache &fontCache);
+  void renderText(GraphicsContext &ctx, FontCache &fontCache,
+                  UINT format = DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-    void drawRoundedRectangle(GraphicsContext &ctx);
+  void drawRoundedRectangle(GraphicsContext &ctx);
 
-    // -----------------------------------------------------------------------
-    // Mouse / keyboard event handlers
-    // -----------------------------------------------------------------------
+  virtual bool isTextInput() const { return false; }
+  // -----------------------------------------------------------------------
+  // Mouse / keyboard event handlers
+  // -----------------------------------------------------------------------
 
-    virtual bool handleMouseWheel(int /*delta*/)        { return false; }
-    virtual bool handleMouseDown(int /*mx*/, int /*my*/) { return false; }
-    virtual bool handleMouseUp(int /*mx*/, int /*my*/)   { return false; }
-    virtual bool handleMouseMove(int /*mx*/, int /*my*/) { return false; }
-    virtual bool handleMouseLeave()                      { return false; }
+  virtual bool handleMouseWheel(int /*delta*/) { return false; }
+  virtual bool handleMouseDown(int /*mx*/, int /*my*/) { return false; }
+  virtual bool handleMouseUp(int /*mx*/, int /*my*/) { return false; }
+  virtual bool handleMouseMove(int /*mx*/, int /*my*/) { return false; }
+  virtual bool handleMouseLeave() { return false; }
 
-    virtual bool handleRightClick(int mx, int my) {
-        if (onRightClick) return onRightClick(mx, my);
-        return false;
+  virtual bool handleRightClick(int mx, int my) {
+    if (onRightClick)
+      return onRightClick(mx, my);
+    return false;
+  }
+
+  virtual bool handleKeyDown(int /*keyCode*/) { return false; }
+  virtual bool handleChar(wchar_t /*ch*/) { return false; }
+  virtual bool handleTimer(UINT /*timerId*/) { return false; }
+
+  virtual bool handleFocus(bool focused) {
+    isFocused = focused;
+    markNeedsPaint();
+    return true;
+  }
+
+  // -----------------------------------------------------------------------
+  // Hover helpers
+  // -----------------------------------------------------------------------
+
+  bool updateHoverState(int mouseX, int mouseY) {
+    bool nowHovered = (mouseX >= x && mouseX < x + width && mouseY >= y &&
+                       mouseY < y + height);
+    if (nowHovered != isHovered) {
+      isHovered = nowHovered;
+      if (onHover)
+        onHover(isHovered);
+      markNeedsPaint();
+      return true;
     }
+    return false;
+  }
 
-    virtual bool handleKeyDown(int /*keyCode*/) { return false; }
-    virtual bool handleChar(wchar_t /*ch*/)     { return false; }
-    virtual bool handleTimer(UINT /*timerId*/)  { return false; }
-
-    virtual bool handleFocus(bool focused) {
-        isFocused = focused;
-        markNeedsPaint();
-        return true;
+  void clearHoverState() {
+    if (isHovered) {
+      isHovered = false;
+      if (onHover)
+        onHover(false);
+      markNeedsPaint();
     }
+    for (auto &child : children)
+      child->clearHoverState();
+  }
 
-    // -----------------------------------------------------------------------
-    // Hover helpers
-    // -----------------------------------------------------------------------
+  Color getCurrentBackgroundColor() const {
+    return (isHovered && hasHoverBackground) ? hoverBackgroundColor
+                                             : backgroundColor;
+  }
+  Color getCurrentTextColor() const {
+    return (isHovered && hasHoverTextColor) ? hoverTextColor : textColor;
+  }
+  Color getCurrentBorderColor() const {
+    return (isHovered && hasHoverBorderColor) ? hoverBorderColor : borderColor;
+  }
 
-    bool updateHoverState(int mouseX, int mouseY) {
-        bool nowHovered = (mouseX >= x && mouseX < x + width &&
-                           mouseY >= y && mouseY < y + height);
-        if (nowHovered != isHovered) {
-            isHovered = nowHovered;
-            if (onHover) onHover(isHovered);
-            markNeedsPaint();
-            return true;
-        }
-        return false;
-    }
+  // -----------------------------------------------------------------------
+  // Dirty tracking
+  // -----------------------------------------------------------------------
 
-    void clearHoverState() {
-        if (isHovered) {
-            isHovered = false;
-            if (onHover) onHover(false);
-            markNeedsPaint();
-        }
-        for (auto &child : children)
-            child->clearHoverState();
-    }
+  void markNeedsLayout() {
+    needsLayout = true;
+    needsPaint = true;
+    if (parent)
+      parent->markNeedsLayout();
+  }
 
-    Color getCurrentBackgroundColor() const {
-        return (isHovered && hasHoverBackground) ? hoverBackgroundColor
-                                                 : backgroundColor;
-    }
-    Color getCurrentTextColor() const {
-        return (isHovered && hasHoverTextColor) ? hoverTextColor : textColor;
-    }
-    Color getCurrentBorderColor() const {
-        return (isHovered && hasHoverBorderColor) ? hoverBorderColor : borderColor;
-    }
+  virtual void markNeedsPaint() { needsPaint = true; }
 
-    // -----------------------------------------------------------------------
-    // Dirty tracking
-    // -----------------------------------------------------------------------
+  // -----------------------------------------------------------------------
+  // Tree helpers
+  // -----------------------------------------------------------------------
 
-    void markNeedsLayout() {
-        needsLayout = true;
-        needsPaint  = true;
-        if (parent) parent->markNeedsLayout();
-    }
+  WidgetPtr setId(const std::string &i) {
+    id = i;
+    return shared_from_this();
+  }
 
-    virtual void markNeedsPaint() { needsPaint = true; }
+  void addChild(WidgetPtr child) {
+    if (!child)
+      return;
+    children.push_back(child);
+    child->parent = this;
+    markNeedsLayout();
+  }
 
-    // -----------------------------------------------------------------------
-    // Tree helpers
-    // -----------------------------------------------------------------------
+  const std::string &getText() const { return text; }
+  const std::string &getId() const { return id; }
 
-    WidgetPtr setId(const std::string &i) {
-        id = i;
-        return shared_from_this();
-    }
+  // -----------------------------------------------------------------------
+  // Constraint helpers
+  // -----------------------------------------------------------------------
 
-    void addChild(WidgetPtr child) {
-        if (!child) return;
-        children.push_back(child);
-        child->parent = this;
-        markNeedsLayout();
-    }
+  BoxConstraints selfConstraints(const BoxConstraints &incoming) const {
+    return incoming.intersect(minWidth, maxWidth, minHeight, maxHeight);
+  }
 
-    const std::string &getText() const { return text; }
-    const std::string &getId()   const { return id; }
-
-    // -----------------------------------------------------------------------
-    // Constraint helpers
-    // -----------------------------------------------------------------------
-
-    BoxConstraints selfConstraints(const BoxConstraints &incoming) const {
-        return incoming.intersect(minWidth, maxWidth, minHeight, maxHeight);
-    }
-
-    BoxConstraints contentConstraints(const BoxConstraints &incoming) const {
-        return incoming.deflate(paddingLeft + paddingRight,
-                                paddingTop  + paddingBottom);
-    }
+  BoxConstraints contentConstraints(const BoxConstraints &incoming) const {
+    return incoming.deflate(paddingLeft + paddingRight,
+                            paddingTop + paddingBottom);
+  }
 
 protected:
-    template <typename T>
-    static std::string valueToString(const T &val) {
-        if constexpr (std::is_same_v<T, std::string>)
-            return val;
-        else if constexpr (std::is_same_v<T, bool>)
-            return val ? "true" : "false";
-        else if constexpr (std::is_floating_point_v<T>) {
-            std::ostringstream oss;
-            oss << std::fixed << std::setprecision(2) << val;
-            return oss.str();
-        } else if constexpr (std::is_integral_v<T>)
-            return std::to_string(val);
-        else
-            return "[unsupported type]";
-    }
+  template <typename T> static std::string valueToString(const T &val) {
+    if constexpr (std::is_same_v<T, std::string>)
+      return val;
+    else if constexpr (std::is_same_v<T, bool>)
+      return val ? "true" : "false";
+    else if constexpr (std::is_floating_point_v<T>) {
+      std::ostringstream oss;
+      oss << std::fixed << std::setprecision(2) << val;
+      return oss.str();
+    } else if constexpr (std::is_integral_v<T>)
+      return std::to_string(val);
+    else
+      return "[unsupported type]";
+  }
 
-    void applyConstraints() {
-        if (width  < minWidth)  width  = minWidth;
-        if (height < minHeight) height = minHeight;
-        if (width  > maxWidth)  width  = maxWidth;
-        if (height > maxHeight) height = maxHeight;
-    }
+  void applyConstraints() {
+    if (width < minWidth)
+      width = minWidth;
+    if (height < minHeight)
+      height = minHeight;
+    if (width > maxWidth)
+      width = maxWidth;
+    if (height > maxHeight)
+      height = maxHeight;
+  }
 };
 
 // ============================================================================
@@ -341,17 +379,19 @@ Widget *findWidgetAt(Widget *w, int x, int y);
 template <typename Handler>
 inline bool findAndHandleMouseEvent(Widget *widget, int x, int y,
                                     Handler handler) {
-    if (!widget || !widget->visible) return false;
-    if (x >= widget->x && x < widget->x + widget->width &&
-        y >= widget->y && y < widget->y + widget->height) {
-        for (auto it = widget->children.rbegin();
-             it != widget->children.rend(); ++it) {
-            if (findAndHandleMouseEvent(it->get(), x, y, handler))
-                return true;
-        }
-        if (handler(widget)) return true;
-    }
+  if (!widget || !widget->visible)
     return false;
+  if (x >= widget->x && x < widget->x + widget->width && y >= widget->y &&
+      y < widget->y + widget->height) {
+    for (auto it = widget->children.rbegin(); it != widget->children.rend();
+         ++it) {
+      if (findAndHandleMouseEvent(it->get(), x, y, handler))
+        return true;
+    }
+    if (handler(widget))
+      return true;
+  }
+  return false;
 }
 
 bool updateHoverStates(Widget *widget, int mouseX, int mouseY);

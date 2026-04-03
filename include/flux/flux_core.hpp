@@ -2,11 +2,11 @@
 #define FLUX_CORE_HPP
 
 #include "flux_font.hpp"
+#include "flux_keys.hpp"
 #include "flux_layoutengine.hpp"
 #include "flux_renderer.hpp"
 #include "flux_widget.hpp"
 #include "flux_window.hpp"
-#include "flux_keys.hpp"
 
 #include <functional>
 #include <map>
@@ -51,6 +51,7 @@ private:
   Widget *focusedWidget = nullptr;
 
   static FluxUI *currentInstance;
+  std::unordered_map<std::string, std::shared_ptr<void>> appSingletons_;
 
   // No Win32 types in any of these signatures
   void wireScaffoldToWidgets(ScaffoldWidget *scaffold, Widget *widget);
@@ -65,6 +66,8 @@ private:
   bool handleOverlayRightClick(int x, int y);
 
   void wireCallbacks();
+
+    ScaffoldWidget* findScaffold_(Widget* w);
 
 public:
   std::map<TimerID, std::function<void()>> timerCallbacks;
@@ -108,11 +111,26 @@ public:
   PlatformWindow::ScreenPoint clientToScreen(int cx, int cy) const;
   PlatformWindow::ScreenPoint screenToClient(int sx, int sy) const;
   PlatformWindow::ClientSize getClientSize() const;
-  PlatformWindow& getPlatformWindow() { return window; }
+  PlatformWindow &getPlatformWindow() { return window; }
 
   void setResizeCursorH(); // horizontal resize (SIZEWE)
   void setResizeCursorV(); // vertical resize   (SIZENS)
   void setDefaultCursor(); // arrow
+
+  template <typename T>
+  std::shared_ptr<T>
+  getOrCreateSingleton(std::function<std::shared_ptr<T>()> factory) {
+    const std::string key = typeid(T).name();
+    auto it = appSingletons_.find(key);
+    if (it == appSingletons_.end()) {
+      auto inst = factory();
+      appSingletons_[key] = inst;
+      return inst;
+    }
+    return std::static_pointer_cast<T>(it->second);
+  }
+
+ScaffoldWidget* getRootScaffold();  
 };
 
 #endif // FLUX_CORE_HPP

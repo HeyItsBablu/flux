@@ -4,6 +4,7 @@
 #include "../flux_core.hpp"
 
 #include "../flux_state.hpp"
+
 #include <algorithm>
 #include <iostream>
 
@@ -11,6 +12,11 @@ template <typename T> class State;
 
 class Widget;
 class RadioGroupWidget;
+
+namespace VirtualKeyboard {
+    void notifyFocusGained(Widget* target);
+    void notifyFocusLost();
+}
 
 using WidgetPtr = std::shared_ptr<Widget>;
 using ClickHandler = std::function<void()>;
@@ -1129,6 +1135,8 @@ public:
     autoHeight = false;
   }
 
+bool isTextInput() const override { return true; }
+
   void computeLayout(GraphicsContext & /*ctx*/,
                      const BoxConstraints &constraints,
                      FontCache & /*fontCache*/) override {
@@ -1182,27 +1190,29 @@ public:
     needsPaint = false;
   }
 
-  bool handleFocus(bool focused) override {
+bool handleFocus(bool focused) override {
     isFocused = focused;
+    auto* ui = FluxUI::getCurrentInstance();
 
-    auto *ui = FluxUI::getCurrentInstance();
     if (focused) {
-      cursorVisible = true;
-      cursorTimerId = ui->setInterval(530, [this]() {
-        cursorVisible = !cursorVisible;
-        markNeedsPaint();
-      });
+        cursorVisible = true;
+        cursorTimerId = ui->setInterval(530, [this]() {
+            cursorVisible = !cursorVisible;
+            markNeedsPaint();
+        });
+        VirtualKeyboard::notifyFocusGained(this);   // ← replaces attachToApp polling
     } else {
-      if (cursorTimerId) {
-        ui->clearInterval(cursorTimerId);
-        cursorTimerId = 0;
-      }
-      cursorVisible = false;
+        if (cursorTimerId) {
+            ui->clearInterval(cursorTimerId);
+            cursorTimerId = 0;
+        }
+        cursorVisible = false;
+        VirtualKeyboard::notifyFocusLost();          // ← replaces polling
     }
 
     markNeedsPaint();
     return true;
-  }
+}
 
   bool handleMouseDown(int mx, int my) override {
     if (mx >= x && mx < x + width && my >= y && my < y + height) {
