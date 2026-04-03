@@ -141,6 +141,17 @@ bool FluxUI::handleOverlayKeyDown(int keyCode) {
   return top ? top->handleKeyDown(keyCode) : false;
 }
 
+bool FluxUI::handleOverlayMouseUp(int mouseX, int mouseY) {
+  auto *scaffold = findScaffold(root.get());
+  if (!scaffold || !scaffold->hasOverlays())
+    return false;
+  const auto &stack = scaffold->getOverlayStack();
+  for (auto it = stack.rbegin(); it != stack.rend(); ++it)
+    if (it->widget && it->widget->handleMouseUp(mouseX, mouseY))
+      return true;
+  return false;
+}
+
 bool FluxUI::handleOverlayRightClick(int mouseX, int mouseY) {
   auto *scaffold = findScaffold(root.get());
   if (!scaffold || !scaffold->hasOverlays())
@@ -176,7 +187,9 @@ void FluxUI::wireCallbacks() {
       return false;
     if (handleOverlayMouseWheel(delta))
       return true;
-    return findAndHandleMouseEvent(root.get(), 0, 0, [delta](Widget *w) {
+    if (focusedWidget && focusedWidget->handleMouseWheel(delta))
+      return true;
+    return broadcastMouseEvent(root.get(), 0, 0, [delta](Widget *w, int, int) {
       return w->handleMouseWheel(delta);
     });
   };
@@ -207,16 +220,8 @@ void FluxUI::wireCallbacks() {
   window.callbacks.onMouseUp = [this](int x, int y) -> bool {
     if (!root)
       return false;
-
-    // Dispatch to overlay stack first (keyboard, dropdowns, etc.)
-    auto *scaffold = findScaffold(root.get());
-    if (scaffold && scaffold->hasOverlays()) {
-      const auto &stack = scaffold->getOverlayStack();
-      for (auto it = stack.rbegin(); it != stack.rend(); ++it)
-        if (it->widget && it->widget->handleMouseUp(x, y))
-          return true;
-    }
-
+    if (handleOverlayMouseUp(x, y))
+      return true;
     bool hasCaptured = window.isMouseCaptured();
     if (hasCaptured) {
       if (broadcastMouseEvent(root.get(), x, y, [](Widget *w, int mx, int my) {
@@ -282,6 +287,9 @@ void FluxUI::wireCallbacks() {
     if (focusedWidget && focusedWidget->handleTimer(id))
       invalidateWidget(focusedWidget);
   };
+
+  window.callbacks.onNonClientMouseDown = [this]() { setFocus(nullptr); };
+  window.callbacks.onFocusLost = [this]() { setFocus(nullptr); };
 }
 
 // ============================================================================
@@ -511,17 +519,6 @@ PlatformWindow::ClientSize FluxUI::getClientSize() const {
 void FluxUI::setResizeCursorH() { window.setResizeCursorH(); }
 void FluxUI::setResizeCursorV() { window.setResizeCursorV(); }
 void FluxUI::setDefaultCursor() { window.setDefaultCursor(); }
-
-ScaffoldWidget *FluxUI::findScaffold_(Widget *w) {
-  if (!w)
-    return nullptr;
-  if (auto *s = dynamic_cast<ScaffoldWidget *>(w))
-    return s;
-  for (auto &child : w->children)
-    if (auto *s = findScaffold_(child.get()))
-      return s;
-  return nullptr;
-}
 
 ScaffoldWidget *FluxUI::getRootScaffold() {
   return findScaffold(root.get()); // calls the file-local free function

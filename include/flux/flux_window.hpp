@@ -27,6 +27,8 @@ struct WindowCallbacks {
     std::function<bool(wchar_t ch)>   onChar;
 
     std::function<void(TimerID timerId)> onTimer;
+    std::function<void()> onNonClientMouseDown;
+    std::function<void()> onFocusLost;     
 };
 
 // ============================================================================

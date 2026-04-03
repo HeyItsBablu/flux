@@ -22,8 +22,7 @@
 //   FluxUI::setFocus(nullptr)    →  TextInputWidget::handleFocus(false)
 //                                →  keyboard.hide()
 //
-// Integration — call once after building the widget tree:
-//   keyboard->attachToApp();
+
 //
 // That hooks the FluxUI focus-change callback so the keyboard auto-shows
 // and auto-hides whenever a TextInputWidget gains / loses focus.
@@ -223,34 +222,6 @@ public:
   // registers a focus-change observer.  Keyboard shows for TextInputWidget,
   // hides for everything else.
 
-  void attachToApp() {
-    // We poll focus changes via a 32ms timer instead of a dedicated
-    // focus-change callback (which would need a new FluxUI API).
-    // 32ms is imperceptible and avoids touching FluxUI internals.
-    if (auto *ui = FluxUI::getCurrentInstance()) {
-      ui->setInterval(32, [this]() {
-        auto *ui2 = FluxUI::getCurrentInstance();
-        if (!ui2)
-          return;
-
-        if (suppressHide_)
-          return; // ← ADD THIS — skip while tap is in flight
-
-        Widget *focused = ui2->getFocusedWidget();
-        bool wantVisible = focused && focused->isTextInput();
-
-        if (wantVisible && !isVisible_) {
-          targetWidget_ = focused;
-          show_();
-        } else if (!wantVisible && isVisible_) {
-          hide_();
-        } else if (wantVisible && focused != targetWidget_) {
-          targetWidget_ = focused;
-        }
-      });
-    }
-  }
-
   // ── Layout / render (keyboard has zero size in the normal tree) ────────
 
   void computeLayout(GraphicsContext &, const BoxConstraints &,
@@ -344,6 +315,14 @@ public:
   }
   bool handleMouseMove(int /*mx*/, int /*my*/) override { return isVisible_; }
 
+  bool handleMouseLeave() override {
+    if (suppressHide_) {
+      suppressHide_ = false;
+      pressedRow_ = pressedCol_ = -1;
+    }
+    return false;
+  }
+
 private:
   // ── Show / hide ────────────────────────────────────────────────────────
 
@@ -351,11 +330,8 @@ private:
     if (isVisible_)
       return;
 
-    // Find scaffold if not already set
-    if (!scaffold) {
-      if (auto *ui = FluxUI::getCurrentInstance())
-        scaffold = ui->getRootScaffold(); // see Step 3
-    }
+    if (auto *ui = FluxUI::getCurrentInstance())
+      scaffold = ui->getRootScaffold(); // see Step 3
 
     isVisible_ = true;
     shiftActive_ = true; // start capitalised like Android

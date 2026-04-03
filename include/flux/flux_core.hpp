@@ -64,10 +64,11 @@ private:
   bool handleOverlayMouseWheel(int delta);
   bool handleOverlayKeyDown(int keyCode);
   bool handleOverlayRightClick(int x, int y);
+  bool handleOverlayMouseUp(int x, int y);
 
   void wireCallbacks();
 
-    ScaffoldWidget* findScaffold_(Widget* w);
+
 
 public:
   std::map<TimerID, std::function<void()>> timerCallbacks;
