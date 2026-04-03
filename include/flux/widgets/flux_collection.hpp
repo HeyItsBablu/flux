@@ -303,6 +303,7 @@ private:
   }
 
 public:
+  ~ListViewStatic() override { stopFling(); }
   void setSelf(std::shared_ptr<ListViewStatic> ptr) { self = ptr; }
 
   // ── Fluent configuration ──────────────────────────────────────────────
@@ -617,6 +618,9 @@ private:
 
   ScrollbarState sb;
 
+  GestureState gesture;
+  TimerID flingTimer = 0;
+
   // ── Keyed widget cache ────────────────────────────────────────────────
   //
   // Maps item key → built widget for that item (no separator).
@@ -854,6 +858,34 @@ private:
     }
   }
 
+  void stopFling() {
+    if (flingTimer) {
+      if (auto *ui = FluxUI::getCurrentInstance())
+        ui->clearInterval(flingTimer);
+      flingTimer = 0;
+    }
+  }
+
+  void startFling() {
+    stopFling();
+    if (auto *ui = FluxUI::getCurrentInstance()) {
+      flingTimer = ui->setInterval(16, [this]() {
+        int delta = gesture.tickFling();
+        if (delta == 0) {
+          stopFling();
+          return;
+        }
+        sb.scrollOffset += delta;
+        sb.clamp();
+        sb.updateThumb();
+        repositionChildren();
+        markNeedsPaint();
+        if (auto *u = FluxUI::getCurrentInstance())
+          u->invalidateWidget(this);
+      });
+    }
+  }
+
 public:
   explicit ListViewBuilder(State<std::vector<T>> &state) : boundState(&state) {
     state.listen([this](const std::vector<T> &) {
@@ -865,6 +897,7 @@ public:
   }
 
   ~ListViewBuilder() override {
+    stopFling();
     if (sb.isDragging)
       FluxUI::getCurrentInstance()->releaseMouseInput();
   }
@@ -996,33 +1029,70 @@ public:
   }
 
   bool handleMouseDown(int mx, int my) override {
-    if (!sb.onMouseDown(mx, my, x, y, width, height))
-      return false;
-    if (sb.isDragging)
+    stopFling();
+    if (sb.onMouseDown(mx, my, x, y, width, height)) {
+      if (sb.isDragging)
+        FluxUI::getCurrentInstance()->captureMouseInput();
+      repositionChildren();
+      markNeedsPaint();
+      return true;
+    }
+    if (sb.isScrollable && mx >= x && mx < x + width && my >= y &&
+        my < y + height) {
+      gesture.horizontal = sb.horizontal;
+      gesture.onDown(mx, my);
       FluxUI::getCurrentInstance()->captureMouseInput();
-    repositionChildren();
-    markNeedsPaint();
-    return true;
+      return true;
+    }
+    return false;
   }
 
   bool handleMouseUp(int mx, int my) override {
-    if (!sb.onMouseUp())
-      return false;
-    FluxUI::getCurrentInstance()->releaseMouseInput();
-    markNeedsPaint();
-    return true;
+    if (sb.isDragging) {
+      sb.onMouseUp();
+      FluxUI::getCurrentInstance()->releaseMouseInput();
+      markNeedsPaint();
+      return true;
+    }
+    if (gesture.isDragging) {
+      gesture.onUp(mx, my);
+      FluxUI::getCurrentInstance()->releaseMouseInput();
+      if (gesture.isFling())
+        startFling();
+      markNeedsPaint();
+      return true;
+    }
+    return false;
   }
 
   bool handleMouseMove(int mx, int my) override {
-    if (!sb.onMouseMove(mx, my, x, y, width, height))
-      return false;
-    if (sb.isDragging)
+    if (sb.isDragging) {
+      if (!sb.onMouseMove(mx, my, x, y, width, height))
+        return false;
       repositionChildren();
-    markNeedsPaint();
-    return true;
+      markNeedsPaint();
+      return true;
+    }
+    if (gesture.isDragging) {
+      int delta = gesture.onMove(mx, my);
+      if (delta != 0) {
+        sb.scrollOffset += delta;
+        sb.clamp();
+        sb.updateThumb();
+        repositionChildren();
+        markNeedsPaint();
+      }
+      return true;
+    }
+    if (sb.onMouseMove(mx, my, x, y, width, height)) {
+      markNeedsPaint();
+      return true;
+    }
+    return false;
   }
 
   bool handleMouseLeave() override {
+    gesture.cancel();
     if (!sb.onMouseLeave())
       return false;
     markNeedsPaint();
@@ -1097,6 +1167,8 @@ private:
 
   std::shared_ptr<GridViewBuilder<T>> self;
   ScrollbarState sb; // always vertical for GridView
+  GestureState gesture;
+  TimerID flingTimer = 0;
 
   // ── Keyed cache (same design as ListViewBuilder) ──────────────────────
   KeyFn keyFn;
@@ -1251,6 +1323,34 @@ private:
     return std::max(1, columnCount);
   }
 
+  void stopFling() {
+    if (flingTimer) {
+      if (auto *ui = FluxUI::getCurrentInstance())
+        ui->clearInterval(flingTimer);
+      flingTimer = 0;
+    }
+  }
+
+  void startFling() {
+    stopFling();
+    if (auto *ui = FluxUI::getCurrentInstance()) {
+      flingTimer = ui->setInterval(16, [this]() {
+        int delta = gesture.tickFling();
+        if (delta == 0) {
+          stopFling();
+          return;
+        }
+        sb.scrollOffset += delta;
+        sb.clamp();
+        sb.updateThumb();
+        repositionChildren();
+        markNeedsPaint();
+        if (auto *u = FluxUI::getCurrentInstance())
+          u->invalidateWidget(this);
+      });
+    }
+  }
+
 public:
   explicit GridViewBuilder(State<std::vector<T>> &state) : boundState(&state) {
     state.listen([this](const std::vector<T> &) {
@@ -1262,6 +1362,7 @@ public:
   }
 
   ~GridViewBuilder() override {
+    stopFling();
     if (sb.isDragging)
       FluxUI::getCurrentInstance()->releaseMouseInput();
   }
@@ -1404,33 +1505,70 @@ public:
     return true;
   }
   bool handleMouseDown(int mx, int my) override {
-    if (!sb.onMouseDown(mx, my, x, y, width, height))
-      return false;
-    if (sb.isDragging)
+    stopFling();
+    if (sb.onMouseDown(mx, my, x, y, width, height)) {
+      if (sb.isDragging)
+        FluxUI::getCurrentInstance()->captureMouseInput();
+      repositionChildren();
+      markNeedsPaint();
+      return true;
+    }
+    if (sb.isScrollable && mx >= x && mx < x + width && my >= y &&
+        my < y + height) {
+      gesture.horizontal = false; // GridView is always vertical
+      gesture.onDown(mx, my);
       FluxUI::getCurrentInstance()->captureMouseInput();
-    repositionChildren();
-    markNeedsPaint();
-    return true;
+      return true;
+    }
+    return false;
   }
 
   bool handleMouseUp(int mx, int my) override {
-    if (!sb.onMouseUp())
-      return false;
-    FluxUI::getCurrentInstance()->releaseMouseInput();
-    markNeedsPaint();
-    return true;
+    if (sb.isDragging) {
+      sb.onMouseUp();
+      FluxUI::getCurrentInstance()->releaseMouseInput();
+      markNeedsPaint();
+      return true;
+    }
+    if (gesture.isDragging) {
+      gesture.onUp(mx, my);
+      FluxUI::getCurrentInstance()->releaseMouseInput();
+      if (gesture.isFling())
+        startFling();
+      markNeedsPaint();
+      return true;
+    }
+    return false;
   }
 
   bool handleMouseMove(int mx, int my) override {
-    if (!sb.onMouseMove(mx, my, x, y, width, height))
-      return false;
-    if (sb.isDragging)
+    if (sb.isDragging) {
+      if (!sb.onMouseMove(mx, my, x, y, width, height))
+        return false;
       repositionChildren();
-    markNeedsPaint();
-    return true;
+      markNeedsPaint();
+      return true;
+    }
+    if (gesture.isDragging) {
+      int delta = gesture.onMove(mx, my);
+      if (delta != 0) {
+        sb.scrollOffset += delta;
+        sb.clamp();
+        sb.updateThumb();
+        repositionChildren();
+        markNeedsPaint();
+      }
+      return true;
+    }
+    if (sb.onMouseMove(mx, my, x, y, width, height)) {
+      markNeedsPaint();
+      return true;
+    }
+    return false;
   }
 
   bool handleMouseLeave() override {
+    gesture.cancel();
     if (!sb.onMouseLeave())
       return false;
     markNeedsPaint();

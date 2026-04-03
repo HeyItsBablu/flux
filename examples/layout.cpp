@@ -472,7 +472,7 @@ public:
                                                            Color c = colors[idx % 6];
 
                                                            // Tap a grid box to toast its number
-                                                           return GestureDetector(
+                                                           return 
                                                                Container(
                                                                    Center(
                                                                        Text(std::to_string(idx + 1))
@@ -480,12 +480,7 @@ public:
                                                                            ->setFontWeight(FontWeight::Bold)))
                                                                ->setHeight(80)
                                                                ->setBackgroundColor(c)
-                                                               ->setBorderRadius(6))
-                                                               ->setOnTap([this, idx] {
-                                                                   toast_->show(
-                                                                       "Box " + std::to_string(idx + 1) + " tapped.",
-                                                                       ToastType::Info, 1500);
-                                                               });
+                                                               ->setBorderRadius(6);
                                                          })
                                                          ->setSpacing(8))})
                                                 ->setSpacing(0)
