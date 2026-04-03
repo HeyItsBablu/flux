@@ -10,6 +10,9 @@
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  "FluxUI", __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "FluxUI", __VA_ARGS__)
 
+
+extern float FluxAndroid_getDpiScale();
+
 // ── EGL state ─────────────────────────────────────────────────────────────────
 struct PlatformWindow::EGLState {
     EGLDisplay display = EGL_NO_DISPLAY;
@@ -57,12 +60,12 @@ bool PlatformWindow::create(const std::string& /*title*/,
     EGLint w = 0, h = 0;
     eglQuerySurface(dpy, srf, EGL_WIDTH,  &w);
     eglQuerySurface(dpy, srf, EGL_HEIGHT, &h);
-
+    float dpi = FluxAndroid_getDpiScale();
     eglState->display = dpy;
     eglState->surface = srf;
     eglState->context = ctx;
-    cachedWidth  = w;
-    cachedHeight = h;
+    cachedWidth  = static_cast<int>(w / dpi);
+    cachedHeight = static_cast<int>(h / dpi);
 
     glViewport(0, 0, w, h);
     LOGI("EGL ready %dx%d", w, h);
@@ -119,8 +122,10 @@ void PlatformWindow::updateClientSize() {
     EGLint w = 0, h = 0;
     eglQuerySurface(eglState->display, eglState->surface, EGL_WIDTH,  &w);
     eglQuerySurface(eglState->display, eglState->surface, EGL_HEIGHT, &h);
-    cachedWidth  = static_cast<int>(w);
-    cachedHeight = static_cast<int>(h);
+    // Store logical pixels — physical / dpi
+    float dpi = FluxAndroid_getDpiScale();
+    cachedWidth  = static_cast<int>(w / dpi);
+    cachedHeight = static_cast<int>(h / dpi);
 }
 
 GraphicsContext PlatformWindow::getMeasureContext() const {
@@ -134,25 +139,28 @@ void PlatformWindow::handleAndroidEvent(const AInputEvent *event) {
     if (AInputEvent_getType(event) != AINPUT_EVENT_TYPE_MOTION) return;
 
     int32_t action = AMotionEvent_getAction(event) & AMOTION_EVENT_ACTION_MASK;
-    int mx = (int)AMotionEvent_getX(event, 0);
-    int my = (int)AMotionEvent_getY(event, 0);
+
+    // ── Convert physical pixels → logical pixels to match widget layout ──
+    float dpi = FluxAndroid_getDpiScale();
+    int mx = (int)(AMotionEvent_getX(event, 0) / dpi);
+    int my = (int)(AMotionEvent_getY(event, 0) / dpi);
 
     switch (action) {
-    case AMOTION_EVENT_ACTION_DOWN:
-        if (callbacks.onMouseDown && callbacks.onMouseDown(mx, my))
-            dirty = true;
-        break;
-    case AMOTION_EVENT_ACTION_MOVE:
-        if (callbacks.onMouseMove && callbacks.onMouseMove(mx, my))
-            dirty = true;
-        break;
-    case AMOTION_EVENT_ACTION_UP:
-    case AMOTION_EVENT_ACTION_CANCEL:
-        if (callbacks.onMouseUp && callbacks.onMouseUp(mx, my))
-            dirty = true;
-        if (action == AMOTION_EVENT_ACTION_CANCEL)
-            if (callbacks.onMouseLeave) callbacks.onMouseLeave();
-        break;
+        case AMOTION_EVENT_ACTION_DOWN:
+            if (callbacks.onMouseDown && callbacks.onMouseDown(mx, my))
+                dirty = true;
+            break;
+        case AMOTION_EVENT_ACTION_MOVE:
+            if (callbacks.onMouseMove && callbacks.onMouseMove(mx, my))
+                dirty = true;
+            break;
+        case AMOTION_EVENT_ACTION_UP:
+        case AMOTION_EVENT_ACTION_CANCEL:
+            if (callbacks.onMouseUp && callbacks.onMouseUp(mx, my))
+                dirty = true;
+            if (action == AMOTION_EVENT_ACTION_CANCEL)
+                if (callbacks.onMouseLeave) callbacks.onMouseLeave();
+            break;
     }
 }
 

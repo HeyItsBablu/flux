@@ -6,6 +6,12 @@
 #include <cassert>
 #include <functional>
 
+#ifdef __ANDROID__
+#include "nanovg.h"
+extern NVGcontext* FluxAndroid_getVG();
+extern float       FluxAndroid_getDpiScale();
+#endif
+
 class ScaffoldWidget;
 
 // ============================================================================
@@ -214,21 +220,28 @@ public:
     // Unlike Cairo there is no save/translate/restore — derived widgets
     // must offset their draw calls by (originX_, originY_) themselves,
     // or Painter helpers accept absolute coordinates.
-void renderOverlay(GraphicsContext &ctx, FontCache &fc) {
-    if (!visible_ || popupW_ <= 0 || popupH_ <= 0) return;
+    void renderOverlay(GraphicsContext &ctx, FontCache &fc) {
+        if (!visible_ || popupW_ <= 0 || popupH_ <= 0) return;
 
-    NVGcontext* vg = FluxAndroid_getVG();
-    if (!vg) return;
+        NVGcontext* vg = FluxAndroid_getVG();
+        if (!vg) return;
 
-    nvgSave(vg);
-    nvgTranslate(vg, static_cast<float>(originX_), 
+        nvgSave(vg);
+        // originX_/originY_ are logical coords, but the current transform already
+        // has nvgScale(dpi,dpi) applied — so we must NOT pass logical coords
+        // directly to nvgTranslate or they get double-scaled.
+        // Reset to identity first, then translate in physical pixels.
+        float dpi = FluxAndroid_getDpiScale();
+        nvgResetTransform(vg);
+        nvgScale(vg, dpi, dpi);                          // re-apply base scale
+        nvgTranslate(vg, static_cast<float>(originX_),   // now in logical space ✓
                      static_cast<float>(originY_));
 
-    GraphicsContext localCtx(popupW_, popupH_);
-    renderPopupContent(localCtx, fc);
+        GraphicsContext localCtx(popupW_, popupH_);
+        renderPopupContent(localCtx, fc);
 
-    nvgRestore(vg);
-}
+        nvgRestore(vg);
+    }
 
 
 #endif // platform

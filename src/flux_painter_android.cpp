@@ -5,6 +5,8 @@
 #include "nanovg.h"
 #include "nanovg_gl.h"
 
+
+extern float FluxAndroid_getDpiScale();
 // Set once per frame before any Painter calls
 static NVGcontext* s_vg = nullptr;
 void FluxAndroid_setVG(NVGcontext* vg) { s_vg = vg; }

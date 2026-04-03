@@ -71,7 +71,7 @@ NativeFont FontCache::createFont(const std::string& family,
     NVGcontext* vg = FluxAndroid_getVG();
 
     auto* f  = new FluxAndroidFont();
-    f->size  = static_cast<float>(size) * s_dpiScale;  // ← direct, no forward ref
+    f->size = static_cast<float>(size);
     f->bold  = (weight == FontWeight::Bold);
     f->light = (weight == FontWeight::Light);
 
