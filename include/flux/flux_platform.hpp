@@ -296,7 +296,7 @@ inline std::wstring toWideString(const char* data, int byteCount) {
 #ifdef __ANDROID__
 
 #include <android_native_app_glue.h>
-#include <android/log.h>
+#include <android/log.h> 
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
 #include <ctime>

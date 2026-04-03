@@ -128,31 +128,31 @@ GraphicsContext PlatformWindow::getMeasureContext() const {
 }
 
 // ── touch input → FluxUI callbacks ───────────────────────────────────────────
-void PlatformWindow::handleAndroidEvent(const AInputEvent* event) {
+// In flux_window_android.cpp, inside handleAndroidEvent or equivalent:
+
+void PlatformWindow::handleAndroidEvent(const AInputEvent *event) {
     if (AInputEvent_getType(event) != AINPUT_EVENT_TYPE_MOTION) return;
 
-    const int32_t action =
-        AMotionEvent_getAction(event) & AMOTION_EVENT_ACTION_MASK;
-    int x = static_cast<int>(AMotionEvent_getX(event, 0));
-    int y = static_cast<int>(AMotionEvent_getY(event, 0));
+    int32_t action = AMotionEvent_getAction(event) & AMOTION_EVENT_ACTION_MASK;
+    int mx = (int)AMotionEvent_getX(event, 0);
+    int my = (int)AMotionEvent_getY(event, 0);
 
     switch (action) {
-        case AMOTION_EVENT_ACTION_DOWN:
-            if (callbacks.onMouseDown && callbacks.onMouseDown(x, y))
-                dirty = true;
-            break;
-        case AMOTION_EVENT_ACTION_MOVE:
-            if (callbacks.onMouseMove && callbacks.onMouseMove(x, y))
-                dirty = true;
-            break;
-        case AMOTION_EVENT_ACTION_UP:
-            if (callbacks.onMouseUp && callbacks.onMouseUp(x, y))
-                dirty = true;
-            break;
-        case AMOTION_EVENT_ACTION_CANCEL:
-            if (callbacks.onMouseLeave) callbacks.onMouseLeave();
+    case AMOTION_EVENT_ACTION_DOWN:
+        if (callbacks.onMouseDown && callbacks.onMouseDown(mx, my))
             dirty = true;
-            break;
+        break;
+    case AMOTION_EVENT_ACTION_MOVE:
+        if (callbacks.onMouseMove && callbacks.onMouseMove(mx, my))
+            dirty = true;
+        break;
+    case AMOTION_EVENT_ACTION_UP:
+    case AMOTION_EVENT_ACTION_CANCEL:
+        if (callbacks.onMouseUp && callbacks.onMouseUp(mx, my))
+            dirty = true;
+        if (action == AMOTION_EVENT_ACTION_CANCEL)
+            if (callbacks.onMouseLeave) callbacks.onMouseLeave();
+        break;
     }
 }
 

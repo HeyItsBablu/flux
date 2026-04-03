@@ -87,7 +87,7 @@ endfunction()
 # Examples
 # ============================================================================
 
-add_flux_example(helloworld)
+add_flux_example(listview)
 
 # ── image_editor (needs stb) — uncomment to enable ───────────────────────────
 # add_flux_example(image_editor)

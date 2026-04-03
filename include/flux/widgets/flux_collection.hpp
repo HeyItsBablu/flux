@@ -2,8 +2,9 @@
 #define FLUX_COLLECTION_HPP
 
 #include "../flux_core.hpp"
-#include "flux_reactive_item.hpp"
+#include "../flux_gesture.hpp"
 #include "../flux_state.hpp"
+#include "flux_reactive_item.hpp"
 
 #include <functional>
 #include <unordered_map>
@@ -111,8 +112,8 @@ struct ScrollbarState {
     Painter painter(ctx);
 
     Color thumbColor = isDragging   ? colorActive
-                          : isHovering ? colorHover
-                                       : colorNormal;
+                       : isHovering ? colorHover
+                                    : colorNormal;
 
     if (horizontal) {
       int sbY = wy + wh - size;
@@ -214,9 +215,41 @@ struct ScrollbarState {
 class ListViewStatic : public Widget {
 private:
   ScrollbarState sb;
+  GestureState gesture;
+  TimerID flingTimer = 0;
   int itemSpacing = 0;
   std::function<WidgetPtr()> separatorBuilder;
   std::shared_ptr<ListViewStatic> self;
+
+  // ── stop the fling timer safely ────────────────────────────
+  void stopFling() {
+    if (flingTimer) {
+      if (auto *ui = FluxUI::getCurrentInstance())
+        ui->clearInterval(flingTimer);
+      flingTimer = 0;
+    }
+  }
+
+  // ── start fling decay timer ───────────────────────────────
+  void startFling() {
+    stopFling();
+    if (auto *ui = FluxUI::getCurrentInstance()) {
+      flingTimer = ui->setInterval(16, [this]() {
+        int delta = gesture.tickFling();
+        if (delta == 0) {
+          stopFling();
+          return;
+        }
+        sb.scrollOffset += delta;
+        sb.clamp();
+        sb.updateThumb();
+        repositionChildren();
+        markNeedsPaint();
+        if (auto *u = FluxUI::getCurrentInstance())
+          u->invalidateWidget(this);
+      });
+    }
+  }
 
   // ── Separator injection (called once after children are added) ────────
 
@@ -386,33 +419,79 @@ public:
   }
 
   bool handleMouseDown(int mx, int my) override {
-    if (!sb.onMouseDown(mx, my, x, y, width, height))
-      return false;
-    if (sb.isDragging)
-      FluxUI::getCurrentInstance()->captureMouseInput();
-    repositionChildren();
-    markNeedsPaint();
-    return true;
+    stopFling();
+    // Thumb drag — handled by ScrollbarState as before
+    if (sb.onMouseDown(mx, my, x, y, width, height)) {
+      if (sb.isDragging)
+        if (auto *ui = FluxUI::getCurrentInstance())
+          ui->captureMouseInput();
+      repositionChildren();
+      markNeedsPaint();
+      return true;
+    }
+    // Content drag — anywhere else inside the widget
+    if (sb.isScrollable && mx >= x && mx < x + width && my >= y &&
+        my < y + height) {
+      gesture.horizontal = sb.horizontal;
+      gesture.onDown(mx, my);
+      if (auto *ui = FluxUI::getCurrentInstance())
+        ui->captureMouseInput();
+      return true;
+    }
+    return false;
   }
 
-  bool handleMouseUp(int /*mx*/, int /*my*/) override {
-    if (!sb.onMouseUp())
-      return false;
-    FluxUI::getCurrentInstance()->releaseMouseInput();
-    markNeedsPaint();
-    return true;
+  bool handleMouseUp(int mx, int my) override {
+    if (sb.isDragging) {
+      sb.onMouseUp();
+      if (auto *ui = FluxUI::getCurrentInstance())
+        ui->releaseMouseInput();
+      markNeedsPaint();
+      return true;
+    }
+    if (gesture.isDragging) {
+      gesture.onUp(mx, my);
+      if (auto *ui = FluxUI::getCurrentInstance())
+        ui->releaseMouseInput();
+      if (gesture.isFling())
+        startFling();
+      markNeedsPaint();
+      return true;
+    }
+    return false;
   }
 
   bool handleMouseMove(int mx, int my) override {
-    if (!sb.onMouseMove(mx, my, x, y, width, height))
-      return false;
-    if (sb.isDragging)
+    // Thumb drag
+    if (sb.isDragging) {
+      if (!sb.onMouseMove(mx, my, x, y, width, height))
+        return false;
       repositionChildren();
-    markNeedsPaint();
-    return true;
+      markNeedsPaint();
+      return true;
+    }
+    // Content drag
+    if (gesture.isDragging) {
+      int delta = gesture.onMove(mx, my);
+      if (delta != 0) {
+        sb.scrollOffset += delta;
+        sb.clamp();
+        sb.updateThumb();
+        repositionChildren();
+        markNeedsPaint();
+      }
+      return true;
+    }
+    // Scrollbar hover highlight
+    if (sb.onMouseMove(mx, my, x, y, width, height)) {
+      markNeedsPaint();
+      return true;
+    }
+    return false;
   }
 
   bool handleMouseLeave() override {
+    gesture.cancel(); // ← cancel drag, keep any fling already going
     if (!sb.onMouseLeave())
       return false;
     markNeedsPaint();
@@ -1167,7 +1246,8 @@ private:
 
   int resolvedColumnCount(int contentWidth) const {
     if (fixedCellWidth > 0)
-      return std::max(1, (contentWidth + spacingH) / (fixedCellWidth + spacingH));
+      return std::max(1,
+                      (contentWidth + spacingH) / (fixedCellWidth + spacingH));
     return std::max(1, columnCount);
   }
 
@@ -1575,7 +1655,8 @@ private:
 
   int resolvedColumnCount(int contentWidth) const {
     if (fixedCellWidth > 0)
-      return std::max(1, (contentWidth + spacingH) / (fixedCellWidth + spacingH));
+      return std::max(1,
+                      (contentWidth + spacingH) / (fixedCellWidth + spacingH));
     return columnCount;
   }
   std::shared_ptr<GridWidget> self() {
