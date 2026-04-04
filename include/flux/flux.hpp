@@ -16,4 +16,5 @@
 #include "main_app.hpp"
 #include "flux_android_jni.hpp"
 #include "flux_audio.hpp"
+#include "flux_camera.hpp"
 #endif // FLUX_HPP
