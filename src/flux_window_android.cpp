@@ -188,5 +188,8 @@ EGLDisplay PlatformWindow::getEGLDisplay() const {
 EGLSurface PlatformWindow::getEGLSurface() const {
     return eglState ? eglState->surface : EGL_NO_SURFACE;
 }
+EGLContext PlatformWindow::getEGLContext() const {
+    return eglState ? eglState->context : EGL_NO_CONTEXT;
+}
 
 #endif // __ANDROID__

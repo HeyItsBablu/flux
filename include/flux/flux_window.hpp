@@ -109,6 +109,7 @@ public:
 #ifdef __ANDROID__
     EGLDisplay getEGLDisplay() const;
     EGLSurface getEGLSurface() const;
+    EGLContext getEGLContext() const;
 
     void handleAndroidEvent(const AInputEvent* event);
     void pollTimers();
