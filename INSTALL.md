@@ -162,7 +162,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(FLUX_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/flux")
 
-# ── NanoVG — built at top level so both flux and native-lib share it ──────────
 add_library(nanovg STATIC
         ${FLUX_SOURCE_DIR}/external/nanovg/src/nanovg.c
         ${FLUX_SOURCE_DIR}/external/nanovg/src/nanovg_gl_impl.c
@@ -180,6 +179,7 @@ add_subdirectory(${FLUX_SOURCE_DIR} flux_build)
 add_library(native-lib SHARED
         native-lib.cpp
         app.cpp
+#        flux_android_jni.cpp
 )
 
 target_include_directories(native-lib PRIVATE
@@ -195,7 +195,16 @@ target_compile_definitions(native-lib PRIVATE
 target_link_libraries(native-lib PRIVATE
         nanovg
         flux::flux
+        aaudio
+        log
+        android
+        EGL
+        GLESv2
+        mediandk
 )
+
+# mediandk requires API 21+
+#target_compile_definitions(fluxui PRIVATE __ANDROID_MIN_SDK_VERSION__=21)
 
 target_link_options(native-lib PRIVATE
         "-Wl,-u,ANativeActivity_onCreate"
@@ -242,41 +251,127 @@ WidgetPtr createApp(FluxUI* app) {
 
 #### 5. native-lib.cpp
 ```cpp
+// native-lib.cpp
 #include <android_native_app_glue.h>
+#include <android/native_window.h>
+#include <android/native_window_jni.h>
 #include <GLES2/gl2.h>
+#include <EGL/egl.h>
+#include <jni.h>
+
 #include "flux/flux.hpp"
 #include "app.hpp"
 #include "nanovg.h"
 #include "nanovg_gl.h"
 
+// ── Statics ───────────────────────────────────────────────────────────────────
 static FluxUI*        s_app          = nullptr;
 static NVGcontext*    s_vg           = nullptr;
 static AAssetManager* s_assetManager = nullptr;
 
-extern void FluxAndroid_setVG(NVGcontext* vg);
-extern void FluxAndroid_setDpiScale(float scale);
+// ── NEW: JVM + EGL handles needed by FluxVideo ────────────────────────────────
+static JavaVM*    s_jvm        = nullptr;
+static EGLDisplay s_eglDisplay = EGL_NO_DISPLAY;
+static EGLContext s_eglContext = EGL_NO_CONTEXT;
+static EGLSurface s_eglSurface = EGL_NO_SURFACE;   // the window surface
 
-// Exposed so ImageWidget can load from assets/
+// ── Global accessors ──────────────────────────────────────────────────────────
+extern void FluxAndroid_setVG(NVGcontext* vg);
+
 void           FluxAndroid_setAssetManager(AAssetManager* am) { s_assetManager = am; }
 AAssetManager* FluxAndroid_getAssetManager()                  { return s_assetManager; }
 
+// EGL accessors used by FluxVideo decode thread
+EGLDisplay FluxAndroid_getEGLDisplay() { return s_eglDisplay; }
+EGLContext FluxAndroid_getEGLContext() { return s_eglContext;  }
+EGLSurface FluxAndroid_getEGLSurface() { return s_eglSurface; }
+
+extern void  FluxAndroid_setDpiScale(float scale);
+extern float FluxAndroid_getDpiScale();
+
+// ── JNI helper: attach current thread and return a JNIEnv* ───────────────────
+static JNIEnv* getJNIEnv() {
+    if (!s_jvm) return nullptr;
+    JNIEnv* env = nullptr;
+    jint ret = s_jvm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
+    if (ret == JNI_EDETACHED) {
+        s_jvm->AttachCurrentThread(&env, nullptr);
+    }
+    return env;
+}
+
+// ============================================================================
+// FluxVideo JNI shims
+// Declared in flux_video.hpp — implemented here where we have s_jvm.
+// ============================================================================
+
+void* FluxVideo_createSurfaceTexture(GLuint texId) {
+    JNIEnv* env = getJNIEnv();
+    if (!env) return nullptr;
+
+    jclass    cls  = env->FindClass("android/graphics/SurfaceTexture");
+    jmethodID ctor = env->GetMethodID(cls, "<init>", "(I)V");
+    jobject   st   = env->NewObject(cls, ctor, (jint)texId);
+    if (!st) return nullptr;
+
+    // Return a global ref — survives across JNI calls and threads
+    return reinterpret_cast<void*>(env->NewGlobalRef(st));
+}
+
+void FluxVideo_updateTexImage(void* surfaceTexture) {
+    JNIEnv* env = getJNIEnv();
+    if (!env || !surfaceTexture) return;
+
+    jobject   st  = reinterpret_cast<jobject>(surfaceTexture);
+    jclass    cls = env->GetObjectClass(st);
+    jmethodID mid = env->GetMethodID(cls, "updateTexImage", "()V");
+    env->CallVoidMethod(st, mid);
+}
+
+ANativeWindow* FluxVideo_getNativeWindow(void* surfaceTexture) {
+    JNIEnv* env = getJNIEnv();
+    if (!env || !surfaceTexture) return nullptr;
+
+    jobject   st         = reinterpret_cast<jobject>(surfaceTexture);
+    jclass    surfCls    = env->FindClass("android/view/Surface");
+    jmethodID surfCtor   = env->GetMethodID(surfCls, "<init>",
+                                            "(Landroid/graphics/SurfaceTexture;)V");
+    jobject   surface    = env->NewObject(surfCls, surfCtor, st);
+    if (!surface) return nullptr;
+
+    ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
+    env->DeleteLocalRef(surface);
+    return window;
+}
+
+void FluxVideo_destroySurfaceTexture(void* surfaceTexture) {
+    JNIEnv* env = getJNIEnv();
+    if (!env || !surfaceTexture) return;
+    env->DeleteGlobalRef(reinterpret_cast<jobject>(surfaceTexture));
+}
+
+// ── NVG_initOESBlit forward (defined in nanovg_oes_ext.cpp) ──────────────────
+extern void NVG_initOESBlit(int maxW, int maxH);
+
+// ── Input ─────────────────────────────────────────────────────────────────────
 static int32_t handle_input(android_app* app, AInputEvent* event) {
     if (s_app)
         s_app->getPlatformWindow().handleAndroidEvent(event);
     return 1;
 }
 
+// ── Lifecycle ─────────────────────────────────────────────────────────────────
 static void handle_cmd(android_app* app, int32_t cmd) {
     switch (cmd) {
-
         case APP_CMD_INIT_WINDOW: {
             if (!app->window) break;
 
-            // Store asset manager before build() so Image() calls in
-            // createApp() can resolve assets/ paths immediately.
+            // ── Store JVM (needed by FluxVideo JNI shims) ─────────────────────
+            s_jvm = app->activity->vm;
+
+            FluxJNI::init(app);
             FluxAndroid_setAssetManager(app->activity->assetManager);
 
-            // Read display density for DPI-correct font sizes
             AConfiguration* config = AConfiguration_new();
             AConfiguration_fromAssetManager(config, app->activity->assetManager);
             float dpiScale = AConfiguration_getDensity(config) / 160.0f;
@@ -289,21 +384,35 @@ static void handle_cmd(android_app* app, int32_t cmd) {
             auto* cfg = static_cast<FluxAppWidget*>(FluxAppWidget::getInstance());
             s_app->createWindow(cfg->title, cfg->windowWidth, cfg->windowHeight);
 
-            // NanoVG must be created AFTER EGL surface is ready
             s_vg = nvgCreateGLES2(NVG_ANTIALIAS | NVG_STENCIL_STROKES);
             nvgCreateFont(s_vg, "default", "/system/fonts/Roboto-Regular.ttf");
             FluxAndroid_setVG(s_vg);
 
-            // Clear font cache now that NVG is ready, then re-layout so any
-            // fonts created before NVG was available get properly loaded.
+            // ── Grab EGL handles AFTER FluxUI creates the window/surface ──────
+            auto& win      = s_app->getPlatformWindow();
+            s_eglDisplay   = win.getEGLDisplay();
+            s_eglContext   = win.getEGLContext();
+            s_eglSurface   = win.getEGLSurface();
+
+            // ── Init OES→Tex2D blit helper (max resolution you expect) ────────
+            // 1920×1080 covers 1080p; bump to 3840×2160 for 4K assets
+            NVG_initOESBlit(1920, 1080);
+
             s_app->getFontCache().clear();
             s_app->rebuild();
             break;
         }
 
         case APP_CMD_TERM_WINDOW:
-            if (s_vg)  { nvgDeleteGLES2(s_vg);  s_vg  = nullptr; }
-            if (s_app) { delete s_app;           s_app = nullptr; }
+            // Close any open video before destroying GL context
+            FluxVideo::get().close();
+
+            if (s_vg)  { nvgDeleteGLES2(s_vg); s_vg = nullptr; }
+            if (s_app) { delete s_app; s_app = nullptr; }
+
+            s_eglDisplay = EGL_NO_DISPLAY;
+            s_eglContext = EGL_NO_CONTEXT;
+            s_eglSurface = EGL_NO_SURFACE;
             break;
 
         case APP_CMD_WINDOW_RESIZED:
@@ -326,6 +435,7 @@ static void handle_cmd(android_app* app, int32_t cmd) {
     }
 }
 
+// ── Main loop ─────────────────────────────────────────────────────────────────
 void android_main(android_app* app) {
     app->onAppCmd     = handle_cmd;
     app->onInputEvent = handle_input;
@@ -348,8 +458,13 @@ void android_main(android_app* app) {
         glClearColor(0.98f, 0.98f, 0.98f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
-        nvgBeginFrame(s_vg, sz.width, sz.height, 1.0f);
+        float dpi = FluxAndroid_getDpiScale();
+        nvgBeginFrame(s_vg, sz.width * dpi, sz.height * dpi, dpi);
         FluxAndroid_setVG(s_vg);
+        nvgScale(s_vg, dpi, dpi);
+
+        int logicalW = static_cast<int>(sz.width  / dpi);
+        int logicalH = static_cast<int>(sz.height / dpi);
 
         GraphicsContext gc(sz.width, sz.height);
         Renderer::renderWidget(gc, s_app->getRoot().get(),
@@ -369,6 +484,25 @@ Replace the contents of `app/manifests/AndroidManifest.xml` with:
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- ── Network ─────────────────────────────────────────────────────── -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- ── Audio ───────────────────────────────────────────────────────── -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- ── Camera ──────────────────────────────────────────────────────── -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.front" android:required="false" />
+
+    <!-- ── Storage (for saving photos/recordings) ──────────────────────── -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32"/>
+
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
@@ -384,7 +518,6 @@ Replace the contents of `app/manifests/AndroidManifest.xml` with:
             android:configChanges="orientation|keyboardHidden|screenSize|density"
             android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
 
-            <!-- Must match the add_library name in your CMakeLists.txt -->
             <meta-data
                 android:name="android.app.lib_name"
                 android:value="native-lib" />
