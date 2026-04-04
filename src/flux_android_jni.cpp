@@ -1,6 +1,6 @@
 // flux_android_jni.cpp
 #ifdef __ANDROID__
-#include "flux_android_jni.hpp"
+#include "flux/flux_android_jni.hpp"
 
 android_app* FluxJNI::s_app = nullptr;
 JavaVM*      FluxJNI::s_vm  = nullptr;
