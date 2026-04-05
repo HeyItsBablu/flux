@@ -63,7 +63,7 @@ void NVG_updateImageFromOES(NVGcontext* vg, int nvgImage, GLuint /*oesTexId*/) {
 // ── FBO blit (Option B) ───────────────────────────────────────────────────────
 
 static GLuint s_fboBlitFBO     = 0;
-static GLuint s_fboBlitTex     = 0;   // GL_TEXTURE_2D — what NanoVG sees
+static GLuint s_fboBlitTex     = 0;
 static int    s_fboBlitW       = 0;
 static int    s_fboBlitH       = 0;
 static GLuint s_oesBlitProgram = 0;
@@ -136,6 +136,25 @@ void NVG_initOESBlit(int maxW, int maxH) {
 
 
 GLuint NVG_blitOESToTex2D(GLuint oesTexId, int w, int h) {
+
+
+    GLint prevFBO, prevProgram, prevViewport[4];
+    GLint prevArrayBuffer, prevActiveTex, prevTex2D, prevTexOES;
+
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFBO);
+    glGetIntegerv(GL_CURRENT_PROGRAM, &prevProgram);
+    glGetIntegerv(GL_VIEWPORT, prevViewport);
+    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &prevArrayBuffer);
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &prevActiveTex);
+
+    // Save bound textures
+    glActiveTexture(GL_TEXTURE0);
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &prevTex2D);
+#ifdef GL_TEXTURE_EXTERNAL_OES
+    glGetIntegerv(GL_TEXTURE_BINDING_EXTERNAL_OES, &prevTexOES);
+#endif
+
+
     glBindFramebuffer(GL_FRAMEBUFFER, s_fboBlitFBO);
     glViewport(0, 0, w, h);
 
@@ -143,22 +162,44 @@ GLuint NVG_blitOESToTex2D(GLuint oesTexId, int w, int h) {
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_EXTERNAL_OES, oesTexId);
-    glUniform1i(glGetUniformLocation(s_oesBlitProgram, "uTex"), 0);
+
+    GLint loc = glGetUniformLocation(s_oesBlitProgram, "uTex");
+    if (loc >= 0) glUniform1i(loc, 0);
 
     glBindBuffer(GL_ARRAY_BUFFER, s_oesBlitVBO);
+
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), nullptr);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE,
+                          4 * sizeof(float), (void*)0);
+
     glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
-                          (void*)(2 * sizeof(float)));
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE,
+                          4 * sizeof(float), (void*)(2 * sizeof(float)));
 
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
     glDisableVertexAttribArray(0);
     glDisableVertexAttribArray(1);
-    glBindTexture(GL_TEXTURE_EXTERNAL_OES, 0);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-    return s_fboBlitTex;  // GL_TEXTURE_2D, NanoVG-friendly
+
+    // Restore buffers & program
+    glBindBuffer(GL_ARRAY_BUFFER, prevArrayBuffer);
+    glUseProgram(prevProgram);
+
+    // Restore framebuffer + viewport
+    glBindFramebuffer(GL_FRAMEBUFFER, prevFBO);
+    glViewport(prevViewport[0], prevViewport[1],
+               prevViewport[2], prevViewport[3]);
+
+    // Restore textures
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, prevTex2D);
+#ifdef GL_TEXTURE_EXTERNAL_OES
+    glBindTexture(GL_TEXTURE_EXTERNAL_OES, prevTexOES);
+#endif
+
+    // Restore active texture unit
+    glActiveTexture(prevActiveTex);
+
+    return s_fboBlitTex;  // NanoVG-safe texture
 }

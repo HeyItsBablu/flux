@@ -147,16 +147,14 @@ public:
         }
 
 
-// ── Viewfinder ────────────────────────────────────────────────────────────
         if (_nvgImage >= 0 && cam.getPreviewWidth() > 0) {
-            int sensorW = cam.getPreviewWidth();   // e.g. 1920  (landscape sensor)
-            int sensorH = cam.getPreviewHeight();  // e.g. 1080
+            int sensorW = cam.getPreviewWidth();
+            int sensorH = cam.getPreviewHeight();
 
-            // After 90° rotation, portrait AR = sensorH/sensorW
+            // After 90° rotation: portrait AR = sensorH/sensorW
             float rotatedAR = (float)sensorH / (float)sensorW;
             float widgetAR  = (float)width   / (float)viewH;
 
-            // Fit rotated image into widget bounds (cover)
             float drawW, drawH;
             if (rotatedAR > widgetAR) {
                 drawH = (float)viewH;
@@ -166,37 +164,30 @@ public:
                 drawH = drawW / rotatedAR;
             }
 
-            // Widget center in logical coords
             float cx = (float)x + (float)width  * 0.5f;
             float cy = (float)y + (float)viewH  * 0.5f;
 
             nvgSave(vg);
-            // Clip to viewfinder area
-            nvgScissor(vg, (float)x, (float)y, (float)width, (float)viewH);
+            nvgScissor(vg, x, y, width, viewH);
 
-            // Rotate around widget center
+            nvgSave(vg);
             nvgTranslate(vg, cx, cy);
-            nvgRotate(vg, NVG_PI * 0.5f);   // 90° CW; try -0.5f if upside-down
+            nvgRotate(vg, NVG_PI * 0.5f);
             nvgTranslate(vg, -cx, -cy);
 
-            // After 90° CW rotation around center:
-            // The rotated draw region has swapped dimensions (drawH wide, drawW tall)
-            // in the original coordinate space, but we're now in rotated space,
-            // so we place the image pattern centered on (cx, cy) with sensor dimensions.
-            //
-            // In rotated space, image fills sensorW × sensorH,
-            // scaled to drawH × drawW (because axes flipped).
-            float imgX = cx - drawH * 0.5f;
-            float imgY = cy - drawW * 0.5f;
+
+            float patX = cx - drawW * 0.5f;
+            float patY = cy - drawH * 0.5f;
 
             NVGpaint imgPaint = nvgImagePattern(
-                    vg, imgX, imgY, drawH, drawW, 0.f, _nvgImage, 1.f);
+                    vg, patX, patY, drawW, drawH, 0.f, _nvgImage, 1.f);
 
             nvgBeginPath(vg);
-            nvgRect(vg, imgX, imgY, drawH, drawW);
+            nvgRect(vg, patX, patY, drawW, drawH);
             nvgFillPaint(vg, imgPaint);
             nvgFill(vg);
 
+            nvgRestore(vg);
             nvgRestore(vg);
 
         } else {
