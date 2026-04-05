@@ -2,6 +2,7 @@
 #define FLUX_IMAGE_HPP
 
 #include "../flux_core.hpp"
+#include "../flux_http.hpp"
 
 // ============================================================================
 // PLATFORM INCLUDES
@@ -9,6 +10,7 @@
 
 #ifdef _WIN32
 #   include <gdiplus.h>
+#   include <objidl.h>   // IStream
 #endif
 
 #if defined(__linux__) && !defined(__ANDROID__)
@@ -26,8 +28,8 @@
 #   include <android/log.h>
 #   define LOGI_IMG(...) __android_log_print(ANDROID_LOG_INFO,  "FluxImage", __VA_ARGS__)
 #   define LOGW_IMG(...) __android_log_print(ANDROID_LOG_WARN,  "FluxImage", __VA_ARGS__)
-extern NVGcontext* FluxAndroid_getVG();
-extern AAssetManager* FluxAndroid_getAssetManager();  // set once in native-lib.cpp
+extern NVGcontext*    FluxAndroid_getVG();
+extern AAssetManager* FluxAndroid_getAssetManager();
 #endif
 
 #include <memory>
@@ -40,11 +42,22 @@ extern AAssetManager* FluxAndroid_getAssetManager();  // set once in native-lib.
 // ============================================================================
 
 enum class ImageFit {
-    Fill,       // Stretch to fill entire widget (may distort)
-    Contain,    // Scale to fit inside widget (maintains aspect ratio, may letterbox)
-    Cover,      // Scale to cover entire widget (maintains aspect ratio, may crop)
-    None,       // Display at original size, centred
-    ScaleDown   // Like None, but scales down if image is larger than widget
+    Fill,
+    Contain,
+    Cover,
+    None,
+    ScaleDown
+};
+
+// ============================================================================
+// IMAGE LOAD STATE
+// ============================================================================
+
+enum class ImageLoadState {
+    Idle,       // nothing requested yet
+    Loading,    // URL fetch in progress
+    Loaded,     // image decoded and ready
+    Error       // load or decode failed
 };
 
 // ============================================================================
@@ -53,29 +66,26 @@ enum class ImageFit {
 
 class ImageWidget : public Widget {
 public:
-    // ── Public state ─────────────────────────────────────────────────────────
-    std::string imagePath;
-    ImageFit    fit              = ImageFit::Contain;
-    int         imageWidth       = 0;
-    int         imageHeight      = 0;
-    bool        imageLoaded      = false;
-    bool        hasError         = false;
-    Color       placeholderColor = Color::fromRGB(240, 240, 240);
-    Color       errorColor       = Color::fromRGB(255, 200, 200);
+    std::string    imagePath;
+    ImageFit       fit              = ImageFit::Contain;
+    int            imageWidth       = 0;
+    int            imageHeight      = 0;
+    Color          placeholderColor = Color::fromRGB(240, 240, 240);
+    Color          errorColor       = Color::fromRGB(255, 200, 200);
+    ImageLoadState loadState        = ImageLoadState::Idle;
+
+    // Keep these for back-compat but derive from loadState
+    bool imageLoaded = false;
+    bool hasError    = false;
 
     // ── Platform pixel storage ────────────────────────────────────────────────
 #ifdef _WIN32
     std::unique_ptr<Gdiplus::Bitmap> bitmap;
 #endif
-
 #if defined(__linux__) && !defined(__ANDROID__)
-    std::vector<uint8_t> pixels; // BGRA premultiplied, Cairo native
+    std::vector<uint8_t> pixels;
 #endif
-
 #ifdef __ANDROID__
-    // NanoVG image handle — -1 means not loaded.
-    // The handle is tied to the NVGcontext, so it must be recreated
-    // if the context is destroyed and recreated (APP_CMD_TERM_WINDOW).
     int nvgImage = -1;
 #endif
 
@@ -84,212 +94,139 @@ public:
         autoWidth  = true;
         autoHeight = true;
     }
-
-    explicit ImageWidget(const std::string &path) : ImageWidget() {
+    explicit ImageWidget(const std::string& path) : ImageWidget() {
         loadImage(path);
     }
 
-    // ── Destructor ────────────────────────────────────────────────────────────
     ~ImageWidget() override {
 #ifdef __ANDROID__
         _freeNvgImage();
 #endif
     }
 
-    // ── loadImage ─────────────────────────────────────────────────────────────
-    bool loadImage(const std::string &path) {
+    // =========================================================================
+    // loadFromUrl — fetch bytes over HTTP then decode in-memory
+    // =========================================================================
+    void loadFromUrl(const std::string& url, bool postToUI = true) {
+        if (url.empty()) return;
+
+        imagePath = url;
+        _setLoadState(ImageLoadState::Loading);
+        markNeedsPaint();
+
+        auto weak = std::weak_ptr<ImageWidget>(
+            std::static_pointer_cast<ImageWidget>(shared_from_this()));
+
+        FluxHttp::get(url, [weak](HttpResult result) {
+            auto self = weak.lock();
+            if (!self) return;
+
+            if (!result.success || result.body.empty()) {
+                self->_setLoadState(ImageLoadState::Error);
+                self->markNeedsLayout();
+                return;
+            }
+
+            const auto& bytes = result.body;
+            bool ok = self->_decodeFromMemory(
+                reinterpret_cast<const uint8_t*>(bytes.data()),
+                (int)bytes.size());
+
+            self->_setLoadState(ok ? ImageLoadState::Loaded
+                                   : ImageLoadState::Error);
+            if (auto* ui = FluxUI::getCurrentInstance())
+                ui->partialRebuild(self.get());
+            else
+                self->markNeedsLayout();
+
+        }, postToUI);
+    }
+
+    // =========================================================================
+    // loadImage — existing file-based loader (unchanged behaviour)
+    // =========================================================================
+    bool loadImage(const std::string& path) {
         if (path.empty()) {
-            hasError    = false;
-            imageLoaded = false;
+            _setLoadState(ImageLoadState::Idle);
             return false;
         }
 
         imagePath = path;
-        hasError  = false;
 
-        // =====================================================================
-        // Win32 — GDI+
-        // =====================================================================
 #ifdef _WIN32
         wchar_t absPath[MAX_PATH] = {};
         std::wstring wpath = toWideString(path);
         if (!GetFullPathNameW(wpath.c_str(), MAX_PATH, absPath, nullptr)) {
-            hasError    = true;
-            imageLoaded = false;
-            return false;
+            _setLoadState(ImageLoadState::Error); return false;
         }
-
         try {
             bitmap = std::make_unique<Gdiplus::Bitmap>(absPath);
             if (!bitmap || bitmap->GetLastStatus() != Gdiplus::Ok) {
-                hasError    = true;
-                imageLoaded = false;
-                bitmap.reset();
-                return false;
+                bitmap.reset(); _setLoadState(ImageLoadState::Error); return false;
             }
         } catch (...) {
-            hasError    = true;
-            imageLoaded = false;
-            bitmap.reset();
-            return false;
+            bitmap.reset(); _setLoadState(ImageLoadState::Error); return false;
         }
-
         imageWidth  = (int)bitmap->GetWidth();
         imageHeight = (int)bitmap->GetHeight();
-
         if (imageWidth == 0 || imageHeight == 0) {
-            hasError    = true;
-            imageLoaded = false;
-            bitmap.reset();
-            return false;
+            bitmap.reset(); _setLoadState(ImageLoadState::Error); return false;
         }
-#endif // _WIN32
+#endif
 
-        // =====================================================================
-        // Linux — stb_image + Cairo
-        // =====================================================================
 #if defined(__linux__) && !defined(__ANDROID__)
         int w = 0, h = 0, channels = 0;
         stbi_set_flip_vertically_on_load(0);
-        unsigned char *data = stbi_load(path.c_str(), &w, &h, &channels, 4);
-
-        if (!data) {
-            hasError    = true;
-            imageLoaded = false;
-            pixels.clear();
-            return false;
-        }
-
-        imageWidth  = w;
-        imageHeight = h;
-
-        const size_t nPx = size_t(w) * size_t(h);
-        pixels.resize(nPx * 4);
-        for (size_t i = 0; i < nPx; ++i) {
-            uint8_t r = data[i * 4 + 0];
-            uint8_t g = data[i * 4 + 1];
-            uint8_t b = data[i * 4 + 2];
-            uint8_t a = data[i * 4 + 3];
-            uint8_t pr = (uint8_t)((uint32_t)r * a / 255u);
-            uint8_t pg = (uint8_t)((uint32_t)g * a / 255u);
-            uint8_t pb = (uint8_t)((uint32_t)b * a / 255u);
-            pixels[i * 4 + 0] = pb;
-            pixels[i * 4 + 1] = pg;
-            pixels[i * 4 + 2] = pr;
-            pixels[i * 4 + 3] = a;
-        }
+        unsigned char* data = stbi_load(path.c_str(), &w, &h, &channels, 4);
+        if (!data) { pixels.clear(); _setLoadState(ImageLoadState::Error); return false; }
+        _convertStbiToCairo(data, w, h);
         stbi_image_free(data);
-
         if (imageWidth == 0 || imageHeight == 0) {
-            hasError    = true;
-            imageLoaded = false;
-            pixels.clear();
-            return false;
+            pixels.clear(); _setLoadState(ImageLoadState::Error); return false;
         }
-#endif // __linux__
+#endif
 
-        // =====================================================================
-        // Android — NanoVG image
-        //
-        // Two loading strategies:
-        //   1. Path starts with '/' → absolute filesystem path
-        //      (works for /system/... and app-specific dirs like
-        //       getFilesDir(), getExternalFilesDir(), etc.)
-        //   2. Otherwise → treat as Android asset path and load via
-        //      AAssetManager (files packaged in assets/ folder of the APK)
-        // =====================================================================
 #ifdef __ANDROID__
-        _freeNvgImage(); // release any previous handle
-
-        NVGcontext *vg = FluxAndroid_getVG();
-        if (!vg) {
-            // NVG not ready — store the path and defer.
-            // render() will retry when s_vg becomes available.
-            LOGW_IMG("loadImage('%s') before NVG ready — deferred", path.c_str());
-            imageLoaded = false;
-            return false;
-        }
+        _freeNvgImage();
+        NVGcontext* vg = FluxAndroid_getVG();
+        if (!vg) { _setLoadState(ImageLoadState::Idle); return false; }
 
         if (!path.empty() && path[0] == '/') {
-            // ── Absolute path ─────────────────────────────────────────────────
             nvgImage = nvgCreateImage(vg, path.c_str(), 0);
-            if (nvgImage == -1) {
-                LOGW_IMG("nvgCreateImage failed for absolute path: %s", path.c_str());
-                hasError    = true;
-                imageLoaded = false;
-                return false;
-            }
         } else {
-            // ── Asset path ────────────────────────────────────────────────────
-            AAssetManager *am = FluxAndroid_getAssetManager();
-            if (!am) {
-                LOGW_IMG("AAssetManager not set — cannot load asset: %s", path.c_str());
-                hasError    = true;
-                imageLoaded = false;
-                return false;
-            }
-
-            AAsset *asset = AAssetManager_open(am, path.c_str(),
-                                               AASSET_MODE_BUFFER);
-            if (!asset) {
-                LOGW_IMG("AAssetManager_open failed: %s", path.c_str());
-                hasError    = true;
-                imageLoaded = false;
-                return false;
-            }
-
-            const void *buf  = AAsset_getBuffer(asset);
-            size_t       len  = (size_t)AAsset_getLength(asset);
-
+            AAssetManager* am = FluxAndroid_getAssetManager();
+            if (!am) { _setLoadState(ImageLoadState::Error); return false; }
+            AAsset* asset = AAssetManager_open(am, path.c_str(), AASSET_MODE_BUFFER);
+            if (!asset) { _setLoadState(ImageLoadState::Error); return false; }
             nvgImage = nvgCreateImageMem(vg, 0,
-                                         (unsigned char*)AAsset_getBuffer(asset),
-                                         (int)len);
+                (unsigned char*)AAsset_getBuffer(asset), (int)AAsset_getLength(asset));
             AAsset_close(asset);
-
-            if (nvgImage == -1) {
-                LOGW_IMG("nvgCreateImageMem failed for asset: %s", path.c_str());
-                hasError    = true;
-                imageLoaded = false;
-                return false;
-            }
         }
-
-        // Query actual dimensions from NanoVG
+        if (nvgImage == -1) { _setLoadState(ImageLoadState::Error); return false; }
         nvgImageSize(vg, nvgImage, &imageWidth, &imageHeight);
-        LOGI_IMG("Loaded '%s' handle=%d  %dx%d",
-                 path.c_str(), nvgImage, imageWidth, imageHeight);
-
         if (imageWidth == 0 || imageHeight == 0) {
-            LOGW_IMG("Zero dimensions for: %s", path.c_str());
-            hasError    = true;
-            imageLoaded = false;
-            _freeNvgImage();
-            return false;
+            _freeNvgImage(); _setLoadState(ImageLoadState::Error); return false;
         }
-#endif // __ANDROID__
+#endif
 
-        imageLoaded = true;
+        _setLoadState(ImageLoadState::Loaded);
         markNeedsLayout();
         return true;
     }
 
-    // ── reloadIfDeferred — call after NVG context becomes available ───────────
-    // In native-lib.cpp, after nvgCreateGLES2(), call:
-    //   yourImageWidget->reloadIfDeferred();
-    // or simply call rebuild() on FluxUI which re-runs loadImage via
-    // the widget's constructor / setImagePath chain.
     void reloadIfDeferred() {
 #ifdef __ANDROID__
-        if (!imagePath.empty() && !imageLoaded && !hasError)
+        if (!imagePath.empty() && loadState == ImageLoadState::Idle)
             loadImage(imagePath);
 #endif
     }
 
     // ── Layout ────────────────────────────────────────────────────────────────
-    void computeLayout(GraphicsContext & /*ctx*/,
-                       const BoxConstraints &constraints,
-                       FontCache & /*fontCache*/) override {
-        if (imageLoaded) {
+    void computeLayout(GraphicsContext& /*ctx*/,
+                       const BoxConstraints& constraints,
+                       FontCache& /*fontCache*/) override
+    {
+        if (loadState == ImageLoadState::Loaded) {
             if (autoWidth && autoHeight) {
                 width  = imageWidth;
                 height = imageHeight;
@@ -307,22 +244,19 @@ public:
 
         width  = constraints.clampWidth(width   + paddingLeft + paddingRight);
         height = constraints.clampHeight(height + paddingTop  + paddingBottom);
-
         applyConstraints();
         needsLayout = false;
     }
 
     // ── Render ────────────────────────────────────────────────────────────────
-    void render(GraphicsContext &ctx, FontCache &fontCache) override {
+    void render(GraphicsContext& ctx, FontCache& fontCache) override {
         Painter painter(ctx);
 
         if (hasBackground)
             drawRoundedRectangle(ctx);
-
         if (hasBorder)
             painter.drawRoundedRectOutline(x, y, width, height,
-                                           borderRadius * 2,
-                                           getCurrentBorderColor(), borderWidth);
+                borderRadius * 2, getCurrentBorderColor(), borderWidth);
 
         const int cx = x + paddingLeft;
         const int cy = y + paddingTop;
@@ -330,76 +264,152 @@ public:
         const int ch = height - paddingTop  - paddingBottom;
 
 #ifdef __ANDROID__
-        // Retry deferred load now that NVG is certainly available during render
-        if (!imageLoaded && !hasError && !imagePath.empty())
+        if (loadState == ImageLoadState::Idle && !imagePath.empty())
             loadImage(imagePath);
 #endif
 
-        if (imageLoaded) {
+        switch (loadState) {
+            case ImageLoadState::Loaded:
 #ifdef _WIN32
-            _renderGDIPlus(ctx, cx, cy, cw, ch);
+                _renderGDIPlus(ctx, cx, cy, cw, ch);
 #elif defined(__ANDROID__)
-            _renderNanoVG(cx, cy, cw, ch);
+                _renderNanoVG(cx, cy, cw, ch);
 #else
-            _renderCairo(ctx, cx, cy, cw, ch);
+                _renderCairo(ctx, cx, cy, cw, ch);
 #endif
-        } else if (hasError) {
-            painter.fillRect(cx, cy, cw, ch, errorColor);
-            painter.drawTextA("x", cx, cy, cw, ch,
-                              fontCache.getFont(fontSize, fontWeight),
-                              Color::fromRGB(150, 0, 0),
-                              DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-        } else {
-            painter.fillRect(cx, cy, cw, ch, placeholderColor);
-            painter.drawTextA("[ ]", cx, cy, cw, ch,
-                              fontCache.getFont(fontSize, fontWeight),
-                              Color::fromRGB(180, 180, 180),
-                              DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                break;
+
+            case ImageLoadState::Loading:
+                _renderLoading(painter, fontCache, cx, cy, cw, ch);
+                break;
+
+            case ImageLoadState::Error:
+                painter.fillRect(cx, cy, cw, ch, errorColor);
+                painter.drawTextA("✕", cx, cy, cw, ch,
+                    fontCache.getFont(fontSize, fontWeight),
+                    Color::fromRGB(150, 0, 0),
+                    DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                break;
+
+            default:
+                painter.fillRect(cx, cy, cw, ch, placeholderColor);
+                break;
         }
 
         needsPaint = false;
     }
 
     // ── Fluent setters ────────────────────────────────────────────────────────
-
-    std::shared_ptr<ImageWidget> setImagePath(const std::string &path) {
+    std::shared_ptr<ImageWidget> setImagePath(const std::string& path) {
         loadImage(path);
-        return std::static_pointer_cast<ImageWidget>(shared_from_this());
+        return self();
+    }
+    std::shared_ptr<ImageWidget> setUrl(const std::string& url,
+                                        bool postToUI = true) {
+        loadFromUrl(url, postToUI);
+        return self();
     }
     std::shared_ptr<ImageWidget> setFit(ImageFit fitMode) {
-        fit = fitMode;
-        markNeedsPaint();
-        return std::static_pointer_cast<ImageWidget>(shared_from_this());
+        fit = fitMode; markNeedsPaint(); return self();
     }
     std::shared_ptr<ImageWidget> setPlaceholderColor(Color color) {
-        placeholderColor = color;
-        markNeedsPaint();
-        return std::static_pointer_cast<ImageWidget>(shared_from_this());
+        placeholderColor = color; markNeedsPaint(); return self();
     }
     std::shared_ptr<ImageWidget> setErrorColor(Color color) {
-        errorColor = color;
-        markNeedsPaint();
-        return std::static_pointer_cast<ImageWidget>(shared_from_this());
+        errorColor = color; markNeedsPaint(); return self();
     }
     std::shared_ptr<ImageWidget> setWidth(int w) {
-        width = w; autoWidth = false; markNeedsLayout();
-        return std::static_pointer_cast<ImageWidget>(shared_from_this());
+        width = w; autoWidth = false; markNeedsLayout(); return self();
     }
     std::shared_ptr<ImageWidget> setHeight(int h) {
-        height = h; autoHeight = false; markNeedsLayout();
-        return std::static_pointer_cast<ImageWidget>(shared_from_this());
+        height = h; autoHeight = false; markNeedsLayout(); return self();
     }
     std::shared_ptr<ImageWidget> setBorderRadius(int r) {
-        borderRadius = r; markNeedsPaint();
-        return std::static_pointer_cast<ImageWidget>(shared_from_this());
+        borderRadius = r; markNeedsPaint(); return self();
     }
     std::shared_ptr<ImageWidget> setPadding(int p) {
         padding = paddingLeft = paddingRight = paddingTop = paddingBottom = p;
-        markNeedsLayout();
-        return std::static_pointer_cast<ImageWidget>(shared_from_this());
+        markNeedsLayout(); return self();
     }
 
 private:
+    std::shared_ptr<ImageWidget> self() {
+        return std::static_pointer_cast<ImageWidget>(shared_from_this());
+    }
+
+    void _setLoadState(ImageLoadState s) {
+        loadState   = s;
+        imageLoaded = (s == ImageLoadState::Loaded);
+        hasError    = (s == ImageLoadState::Error);
+    }
+
+    // =========================================================================
+    // _decodeFromMemory — shared by loadFromUrl across all platforms
+    // =========================================================================
+    bool _decodeFromMemory(const uint8_t* data, int len) {
+#ifdef _WIN32
+        // GDI+: wrap bytes in an IStream, then create Bitmap from it
+        IStream* stream = nullptr;
+        HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, (SIZE_T)len);
+        if (!hMem) return false;
+        void* ptr = GlobalLock(hMem);
+        if (!ptr) { GlobalFree(hMem); return false; }
+        memcpy(ptr, data, len);
+        GlobalUnlock(hMem);
+        if (CreateStreamOnHGlobal(hMem, TRUE, &stream) != S_OK) {
+            GlobalFree(hMem); return false;
+        }
+        try {
+            bitmap = std::make_unique<Gdiplus::Bitmap>(stream);
+            stream->Release();
+            if (!bitmap || bitmap->GetLastStatus() != Gdiplus::Ok) {
+                bitmap.reset(); return false;
+            }
+        } catch (...) {
+            stream->Release(); bitmap.reset(); return false;
+        }
+        imageWidth  = (int)bitmap->GetWidth();
+        imageHeight = (int)bitmap->GetHeight();
+        return (imageWidth > 0 && imageHeight > 0);
+#endif
+
+#if defined(__linux__) && !defined(__ANDROID__)
+        int w = 0, h = 0, channels = 0;
+        stbi_set_flip_vertically_on_load(0);
+        unsigned char* decoded = stbi_load_from_memory(data, len, &w, &h, &channels, 4);
+        if (!decoded) { pixels.clear(); return false; }
+        _convertStbiToCairo(decoded, w, h);
+        stbi_image_free(decoded);
+        return (imageWidth > 0 && imageHeight > 0);
+#endif
+
+#ifdef __ANDROID__
+        _freeNvgImage();
+        NVGcontext* vg = FluxAndroid_getVG();
+        if (!vg) return false;
+        nvgImage = nvgCreateImageMem(vg, 0, const_cast<uint8_t*>(data), len);
+        if (nvgImage == -1) return false;
+        nvgImageSize(vg, nvgImage, &imageWidth, &imageHeight);
+        return (imageWidth > 0 && imageHeight > 0);
+#endif
+        return false;
+    }
+
+    // ── Loading spinner / shimmer placeholder ─────────────────────────────────
+    void _renderLoading(Painter& painter, FontCache& fontCache,
+                        int cx, int cy, int cw, int ch) const
+    {
+        // Shimmer-style grey placeholder
+        painter.fillRect(cx, cy, cw, ch, placeholderColor);
+
+        // Centred "…" label
+        painter.drawTextA("\xe2\x80\xa6",  // UTF-8 ellipsis
+            cx, cy, cw, ch,
+            fontCache.getFont(fontSize, fontWeight),
+            Color::fromRGB(160, 160, 160),
+            DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    }
+
     // ── Destination rect (shared by all backends) ─────────────────────────────
     struct DestRect { float x, y, w, h; };
 
@@ -412,46 +422,44 @@ private:
                 return { (float)cx, (float)cy, (float)cw, (float)ch };
 
             case ImageFit::Contain: {
-                float scale, dw, dh;
+                float dw, dh;
                 if (imgAspect > containerAspect) {
-                    scale = (float)cw / (float)imageWidth;  dw = (float)cw;
-                    dh    = (float)imageHeight * scale;
+                    dw = (float)cw;
+                    dh = dw / imgAspect;
                 } else {
-                    scale = (float)ch / (float)imageHeight; dh = (float)ch;
-                    dw    = (float)imageWidth * scale;
+                    dh = (float)ch;
+                    dw = dh * imgAspect;
                 }
                 return { cx + (cw - dw) * 0.5f, cy + (ch - dh) * 0.5f, dw, dh };
             }
 
             case ImageFit::Cover: {
-                float scale, dw, dh;
+                float dw, dh;
                 if (imgAspect > containerAspect) {
-                    scale = (float)ch / (float)imageHeight; dw = (float)imageWidth * scale;
-                    dh    = (float)ch;
+                    dh = (float)ch;
+                    dw = dh * imgAspect;
                 } else {
-                    scale = (float)cw / (float)imageWidth;  dw = (float)cw;
-                    dh    = (float)imageHeight * scale;
+                    dw = (float)cw;
+                    dh = dw / imgAspect;
                 }
                 return { cx + (cw - dw) * 0.5f, cy + (ch - dh) * 0.5f, dw, dh };
             }
 
             case ImageFit::None:
-                return { cx + (cw - imageWidth) * 0.5f,
+                return { cx + (cw - imageWidth)  * 0.5f,
                          cy + (ch - imageHeight) * 0.5f,
                          (float)imageWidth, (float)imageHeight };
 
             case ImageFit::ScaleDown: {
                 if (imageWidth <= cw && imageHeight <= ch)
-                    return { cx + (cw - imageWidth) * 0.5f,
+                    return { cx + (cw - imageWidth)  * 0.5f,
                              cy + (ch - imageHeight) * 0.5f,
                              (float)imageWidth, (float)imageHeight };
-                float scale, dw, dh;
+                float dw, dh;
                 if (imgAspect > containerAspect) {
-                    scale = (float)cw / (float)imageWidth;  dw = (float)cw;
-                    dh    = (float)imageHeight * scale;
+                    dw = (float)cw; dh = dw / imgAspect;
                 } else {
-                    scale = (float)ch / (float)imageHeight; dh = (float)ch;
-                    dw    = (float)imageWidth * scale;
+                    dh = (float)ch; dw = dh * imgAspect;
                 }
                 return { cx + (cw - dw) * 0.5f, cy + (ch - dh) * 0.5f, dw, dh };
             }
@@ -465,7 +473,7 @@ private:
     // Win32 — GDI+
     // =========================================================================
 #ifdef _WIN32
-    void _renderGDIPlus(GraphicsContext &ctx,
+    void _renderGDIPlus(GraphicsContext& ctx,
                         int cx, int cy, int cw, int ch) const {
         if (!bitmap) return;
         Gdiplus::Graphics g(ctx.hdc);
@@ -478,10 +486,10 @@ private:
         if (borderRadius > 0) {
             Gdiplus::GraphicsPath path;
             int diam = borderRadius * 2;
-            path.AddArc(Gdiplus::Rect(x, y, diam, diam), 180, 90);
-            path.AddArc(Gdiplus::Rect(x + width - diam, y, diam, diam), 270, 90);
-            path.AddArc(Gdiplus::Rect(x + width - diam, y + height - diam, diam, diam), 0, 90);
-            path.AddArc(Gdiplus::Rect(x, y + height - diam, diam, diam), 90, 90);
+            path.AddArc(Gdiplus::Rect(x,             y,              diam, diam), 180, 90);
+            path.AddArc(Gdiplus::Rect(x + width - diam, y,           diam, diam), 270, 90);
+            path.AddArc(Gdiplus::Rect(x + width - diam, y+height-diam, diam, diam), 0, 90);
+            path.AddArc(Gdiplus::Rect(x,             y + height-diam, diam, diam), 90, 90);
             path.CloseFigure();
             g.SetClip(&path);
         } else {
@@ -489,16 +497,31 @@ private:
         }
         g.DrawImage(bitmap.get(), destRect);
     }
-#endif // _WIN32
+#endif
 
     // =========================================================================
     // Linux — Cairo
     // =========================================================================
 #if defined(__linux__) && !defined(__ANDROID__)
-    void _renderCairo(GraphicsContext &ctx,
+    void _convertStbiToCairo(unsigned char* data, int w, int h) {
+        imageWidth  = w;
+        imageHeight = h;
+        const size_t nPx = (size_t)w * (size_t)h;
+        pixels.resize(nPx * 4);
+        for (size_t i = 0; i < nPx; ++i) {
+            uint8_t r = data[i*4+0], g = data[i*4+1],
+                    b = data[i*4+2], a = data[i*4+3];
+            pixels[i*4+0] = (uint8_t)((uint32_t)b * a / 255u);
+            pixels[i*4+1] = (uint8_t)((uint32_t)g * a / 255u);
+            pixels[i*4+2] = (uint8_t)((uint32_t)r * a / 255u);
+            pixels[i*4+3] = a;
+        }
+    }
+
+    void _renderCairo(GraphicsContext& ctx,
                       int cx, int cy, int cw, int ch) const {
         if (pixels.empty() || !ctx.cr) return;
-        cairo_t *cr = ctx.cr;
+        cairo_t* cr = ctx.cr;
         cairo_save(cr);
 
         if (borderRadius > 0) {
@@ -509,25 +532,24 @@ private:
             cairo_clip(cr);
         }
 
-        cairo_surface_t *surf = cairo_image_surface_create_for_data(
-            const_cast<uint8_t *>(pixels.data()),
+        cairo_surface_t* surf = cairo_image_surface_create_for_data(
+            const_cast<uint8_t*>(pixels.data()),
             CAIRO_FORMAT_ARGB32, imageWidth, imageHeight, imageWidth * 4);
 
         if (cairo_surface_status(surf) == CAIRO_STATUS_SUCCESS) {
             DestRect d = _calculateDestRect(cx, cy, cw, ch);
-            double sx = d.w / (double)imageWidth;
-            double sy = d.h / (double)imageHeight;
             cairo_translate(cr, d.x, d.y);
-            cairo_scale(cr, sx, sy);
+            cairo_scale(cr, d.w / (double)imageWidth,
+                            d.h / (double)imageHeight);
             cairo_set_source_surface(cr, surf, 0.0, 0.0);
-            cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_NEAREST);
+            cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_BILINEAR);
             cairo_paint(cr);
         }
         cairo_surface_destroy(surf);
         cairo_restore(cr);
     }
 
-    static void _cairoRoundedRectPath(cairo_t *cr,
+    static void _cairoRoundedRectPath(cairo_t* cr,
                                       double rx, double ry,
                                       double rw, double rh,
                                       double radius) {
@@ -535,67 +557,48 @@ private:
         if (r > rw * 0.5) r = rw * 0.5;
         if (r > rh * 0.5) r = rh * 0.5;
         cairo_new_path(cr);
-        cairo_arc(cr, rx + rw - r, ry      + r, r, -M_PI * 0.5,  0.0);
-        cairo_arc(cr, rx + rw - r, ry + rh - r, r,  0.0,          M_PI * 0.5);
-        cairo_arc(cr, rx      + r, ry + rh - r, r,  M_PI * 0.5,   M_PI);
-        cairo_arc(cr, rx      + r, ry      + r, r,  M_PI,         -M_PI * 0.5);
+        cairo_arc(cr, rx+rw-r, ry    +r, r, -M_PI*0.5,  0.0      );
+        cairo_arc(cr, rx+rw-r, ry+rh-r, r,  0.0,         M_PI*0.5 );
+        cairo_arc(cr, rx    +r, ry+rh-r, r,  M_PI*0.5,   M_PI     );
+        cairo_arc(cr, rx    +r, ry    +r, r,  M_PI,      -M_PI*0.5 );
         cairo_close_path(cr);
     }
-#endif // __linux__
+#endif
 
     // =========================================================================
     // Android — NanoVG
-    //
-    // NanoVG renders images as paint patterns applied to a path.
-    // nvgImagePattern() maps the image onto a rectangle, then nvgFill()
-    // paints it. This is the standard NanoVG image rendering idiom.
     // =========================================================================
 #ifdef __ANDROID__
     void _renderNanoVG(int cx, int cy, int cw, int ch) const {
         if (nvgImage == -1) return;
-        NVGcontext *vg = FluxAndroid_getVG();
+        NVGcontext* vg = FluxAndroid_getVG();
         if (!vg) return;
 
         DestRect d = _calculateDestRect(cx, cy, cw, ch);
-
-        // nvgImagePattern maps the image so that (ox,oy) is the top-left
-        // corner of the image, (iw,ih) is its rendered size, angle=0, alpha=1.
-        NVGpaint paint = nvgImagePattern(vg,
-                                         d.x, d.y,   // origin
-                                         d.w, d.h,   // rendered size
-                                         0.0f,        // rotation
-                                         nvgImage,
-                                         1.0f);       // alpha
-
+        NVGpaint paint = nvgImagePattern(vg, d.x, d.y, d.w, d.h,
+                                         0.0f, nvgImage, 1.0f);
         nvgSave(vg);
-
-        // Optional rounded-rect clip
         if (borderRadius > 0) {
             nvgBeginPath(vg);
             nvgRoundedRect(vg, (float)x, (float)y,
-                           (float)width, (float)height,
-                           (float)borderRadius);
-            nvgPathWinding(vg, NVG_SOLID);
-            nvgScissor(vg, (float)x, (float)y,
-                       (float)width, (float)height);
+                           (float)width, (float)height, (float)borderRadius);
+            nvgScissor(vg, (float)x, (float)y, (float)width, (float)height);
         }
-
         nvgBeginPath(vg);
         nvgRect(vg, d.x, d.y, d.w, d.h);
         nvgFillPaint(vg, paint);
         nvgFill(vg);
-
         nvgRestore(vg);
     }
 
     void _freeNvgImage() {
         if (nvgImage != -1) {
-            NVGcontext *vg = FluxAndroid_getVG();
+            NVGcontext* vg = FluxAndroid_getVG();
             if (vg) nvgDeleteImage(vg, nvgImage);
             nvgImage = -1;
         }
     }
-#endif // __ANDROID__
+#endif
 };
 
 // ============================================================================
@@ -604,11 +607,19 @@ private:
 
 using ImageWidgetPtr = std::shared_ptr<ImageWidget>;
 
-inline ImageWidgetPtr Image(const std::string &path) {
+inline ImageWidgetPtr Image(const std::string& path) {
     return std::make_shared<ImageWidget>(path);
 }
 inline ImageWidgetPtr Image() {
     return std::make_shared<ImageWidget>();
 }
 
-#endif // FLUX_IMAGE_HPP
+// Url-loaded image — shows placeholder while fetching, then the image
+inline ImageWidgetPtr NetworkImage(const std::string& url,
+                                   bool postToUI = true) {
+    auto w = std::make_shared<ImageWidget>();
+    w->loadFromUrl(url, postToUI);
+    return w;
+}
+
+#endif

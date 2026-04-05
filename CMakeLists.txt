@@ -16,7 +16,7 @@ if(NOT ANDROID)
     if(NOT MSVC AND NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         message(FATAL_ERROR "FluxUI requires MSVC (Windows) or GCC/Clang (Linux).")
     endif()
-endif() 
+endif()
 
 # ============================================================================
 # C++ standard
@@ -34,17 +34,42 @@ if(NOT ANDROID)
     include(FetchContent)
 
     FetchContent_Declare(stb
-            GIT_REPOSITORY https://github.com/nothings/stb.git
-            GIT_TAG        master
+        GIT_REPOSITORY https://github.com/nothings/stb.git
+        GIT_TAG        master
     )
     FetchContent_MakeAvailable(stb)
 
     FetchContent_Declare(Clipper2
-            GIT_REPOSITORY https://github.com/AngusJohnson/Clipper2.git
-            GIT_TAG        Clipper2_1.4.0
-            SOURCE_SUBDIR  CPP
+        GIT_REPOSITORY https://github.com/AngusJohnson/Clipper2.git
+        GIT_TAG        Clipper2_1.4.0
+        SOURCE_SUBDIR  CPP
     )
     FetchContent_MakeAvailable(Clipper2)
+
+    # ── libcurl ───────────────────────────────────────────────────────────────
+    FetchContent_Declare(curl
+        GIT_REPOSITORY https://github.com/curl/curl.git
+        GIT_TAG        curl-8_8_0
+    )
+
+    set(BUILD_CURL_EXE     OFF CACHE BOOL "" FORCE)
+    set(BUILD_TESTING      OFF CACHE BOOL "" FORCE)
+    set(CURL_DISABLE_TESTS ON  CACHE BOOL "" FORCE)
+    set(HTTP_ONLY          ON  CACHE BOOL "" FORCE)
+    set(CURL_USE_LIBSSH2   OFF CACHE BOOL "" FORCE)
+    set(CURL_USE_LIBPSL    OFF CACHE BOOL "" FORCE)
+    set(CURL_USE_LIBRTMP   OFF CACHE BOOL "" FORCE)
+    set(CURL_DISABLE_LDAP  ON  CACHE BOOL "" FORCE)
+
+    if(WIN32)
+        set(CURL_USE_SCHANNEL ON  CACHE BOOL "" FORCE)
+        set(CURL_USE_OPENSSL  OFF CACHE BOOL "" FORCE)
+    elseif(UNIX AND NOT APPLE)
+        set(CURL_USE_OPENSSL  ON  CACHE BOOL "" FORCE)
+        set(CURL_USE_SCHANNEL OFF CACHE BOOL "" FORCE)
+    endif()
+
+    FetchContent_MakeAvailable(curl)
 endif()
 
 # ============================================================================
@@ -55,34 +80,25 @@ if(WIN32)
     add_library(glad STATIC external/glad/src/glad.c)
     set_source_files_properties(external/glad/src/glad.c PROPERTIES LANGUAGE C)
     target_include_directories(glad PUBLIC
-            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/glad/include>
-            $<INSTALL_INTERFACE:include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/glad/include>
+        $<INSTALL_INTERFACE:include>
     )
 endif()
 
 # ============================================================================
 # NanoVG  (Android only — GLES2 2-D painter backend)
-#
-# NANOVG_GLES2_IMPLEMENTATION is PRIVATE so only nanovg.c instantiates the
-# GL functions.  Nothing that links against nanovg (flux, native-lib) will
-# re-instantiate them, preventing duplicate-symbol link errors.
 # ============================================================================
 
-# ── NanoVG  (Android only) ────────────────────────────────────────────────────
 if(ANDROID)
-    # Only create the nanovg target if the parent hasn't already done so.
-    # When flux is built as a subdirectory of the Android app, the app's
-    # CMakeLists.txt creates nanovg at the top level so both flux and
-    # native-lib can link against the same archive.
     if(NOT TARGET nanovg)
         add_library(nanovg STATIC
-                external/nanovg/src/nanovg.c
+            external/nanovg/src/nanovg.c
         )
         set_source_files_properties(
-                external/nanovg/src/nanovg.c PROPERTIES LANGUAGE C
+            external/nanovg/src/nanovg.c PROPERTIES LANGUAGE C
         )
         target_include_directories(nanovg PUBLIC
-                external/nanovg/src
+            external/nanovg/src
         )
         target_compile_definitions(nanovg PRIVATE NANOVG_GLES2_IMPLEMENTATION)
     endif()
@@ -101,16 +117,18 @@ if(UNIX AND NOT APPLE AND NOT ANDROID)
 endif()
 
 # ============================================================================
-# Native App Glue  (Android only)
+# Android platform dependencies
 # ============================================================================
 
 if(ANDROID)
     set(NATIVE_APP_GLUE_DIR ${ANDROID_NDK}/sources/android/native_app_glue)
 
     add_library(app_glue STATIC
-            ${NATIVE_APP_GLUE_DIR}/android_native_app_glue.c
+        ${NATIVE_APP_GLUE_DIR}/android_native_app_glue.c
     )
     target_include_directories(app_glue PUBLIC ${NATIVE_APP_GLUE_DIR})
+
+    find_package(CURL REQUIRED)   # supplied by vcpkg android triplet or prebuilt
 endif()
 
 # ============================================================================
@@ -125,22 +143,15 @@ add_library(flux::flux ALIAS flux)
 # ── Include directories ───────────────────────────────────────────────────────
 
 target_include_directories(flux
-        PUBLIC
+    PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
-        PRIVATE
-        # stb only on desktop
+    PRIVATE
         $<$<NOT:$<BOOL:${ANDROID}>>:${stb_SOURCE_DIR}>
-
-        # Win32 extras
         $<$<BOOL:${WIN32}>:${CMAKE_CURRENT_SOURCE_DIR}/external/glad/include>
-
-        # Linux extras
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${SDL2_INCLUDE_DIRS}>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${CAIRO_INCLUDE_DIRS}>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${PANGOCAIRO_INCLUDE_DIRS}>
-
-        # Android extras
         $<$<BOOL:${ANDROID}>:${NATIVE_APP_GLUE_DIR}>
         $<$<BOOL:${ANDROID}>:${CMAKE_CURRENT_SOURCE_DIR}/external/nanovg/src>
 )
@@ -149,12 +160,13 @@ target_include_directories(flux
 
 if(WIN32)
     target_link_libraries(flux PUBLIC
-            glad
-            Clipper2
-            Msimg32
-            Gdiplus
-            opengl32
-            glu32
+        glad
+        Clipper2
+        CURL::libcurl
+        Msimg32
+        Gdiplus
+        opengl32
+        glu32
     )
 elseif(ANDROID)
     find_library(log-lib     log)
@@ -163,27 +175,29 @@ elseif(ANDROID)
     find_library(gles-lib    GLESv2)
 
     target_link_libraries(flux PRIVATE
-            app_glue
-            nanovg
-            ${log-lib}
-            ${android-lib}
-            ${egl-lib}
-            ${gles-lib}
+        app_glue
+        nanovg
+        CURL::libcurl
+        ${log-lib}
+        ${android-lib}
+        ${egl-lib}
+        ${gles-lib}
     )
 
     target_link_options(flux PUBLIC
-            "-Wl,-u,ANativeActivity_onCreate"
+        "-Wl,-u,ANativeActivity_onCreate"
     )
 elseif(UNIX AND NOT APPLE)
     target_link_libraries(flux PUBLIC
-            Clipper2
-            ${SDL2_LIBRARIES}
-            ${CAIRO_LIBRARIES}
-            ${PANGOCAIRO_LIBRARIES}
+        Clipper2
+        CURL::libcurl
+        ${SDL2_LIBRARIES}
+        ${CAIRO_LIBRARIES}
+        ${PANGOCAIRO_LIBRARIES}
     )
     target_compile_options(flux PRIVATE
-            ${CAIRO_CFLAGS_OTHER}
-            ${PANGOCAIRO_CFLAGS_OTHER}
+        ${CAIRO_CFLAGS_OTHER}
+        ${PANGOCAIRO_CFLAGS_OTHER}
     )
 endif()
 
@@ -191,28 +205,25 @@ endif()
 
 if(MSVC)
     target_compile_options(flux PRIVATE
-            /W4
-            /permissive-
-            /Zc:__cplusplus
-            /EHsc
+        /W4
+        /permissive-
+        /Zc:__cplusplus
+        /EHsc
     )
 else()
     target_compile_options(flux PRIVATE
-            -Wall
-            -Wextra
-            -Wpedantic
-            -fexceptions
+        -Wall
+        -Wextra
+        -Wpedantic
+        -fexceptions
     )
 endif()
 
 # ── Compile definitions ───────────────────────────────────────────────────────
-# NANOVG_GLES2_IMPLEMENTATION is intentionally absent here — it is defined
-# PRIVATELY on the nanovg target only.  Putting it here would cause every TU
-# in flux (and anything linking flux) to re-instantiate the GL functions.
 
 target_compile_definitions(flux PUBLIC
-        $<$<CONFIG:Debug>:FLUX_DEBUG>
-        $<$<BOOL:${WIN32}>:NOMINMAX>
+    $<$<CONFIG:Debug>:FLUX_DEBUG>
+    $<$<BOOL:${WIN32}>:NOMINMAX>
 )
 
 # ============================================================================
@@ -244,33 +255,33 @@ if(NOT ANDROID)
     endif()
 
     install(TARGETS ${FLUX_INSTALL_TARGETS}
-            EXPORT  fluxTargets
-            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        EXPORT  fluxTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     )
 
     install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
     install(EXPORT fluxTargets
-            FILE      fluxTargets.cmake
-            NAMESPACE flux::
-            DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/flux
+        FILE      fluxTargets.cmake
+        NAMESPACE flux::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/flux
     )
 
     configure_package_config_file(
-            cmake/fluxConfig.cmake.in
-            ${CMAKE_CURRENT_BINARY_DIR}/fluxConfig.cmake
-            INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/flux
+        cmake/fluxConfig.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/fluxConfig.cmake
+        INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/flux
     )
 
     write_basic_package_version_file(
-            ${CMAKE_CURRENT_BINARY_DIR}/fluxConfigVersion.cmake
-            VERSION      ${PROJECT_VERSION}
-            COMPATIBILITY SameMajorVersion
+        ${CMAKE_CURRENT_BINARY_DIR}/fluxConfigVersion.cmake
+        VERSION      ${PROJECT_VERSION}
+        COMPATIBILITY SameMajorVersion
     )
 
     install(FILES
-            ${CMAKE_CURRENT_BINARY_DIR}/fluxConfig.cmake
-            ${CMAKE_CURRENT_BINARY_DIR}/fluxConfigVersion.cmake
-            DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/flux
+        ${CMAKE_CURRENT_BINARY_DIR}/fluxConfig.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/fluxConfigVersion.cmake
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/flux
     )
 endif()

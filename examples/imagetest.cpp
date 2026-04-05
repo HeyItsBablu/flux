@@ -14,6 +14,11 @@ public:
         Center(
             Column(
                 {
+                    NetworkImage("https://picsum.photos/400/300")
+                        ->setFit(ImageFit::Cover)
+                        ->setWidth(400)
+                        ->setHeight(300)
+                        ->setBorderRadius(8),
                     // ── Title //──────────────────────────────────────────────
                     Text("Image Widget Examples")
                         ->setFontSize(20)
@@ -71,108 +76,110 @@ public:
                         ->setSpacing(16),
 
                     // ── Avatar / circle
-                    //────────────────────────────────────
+                    // ────────────────────────────────────
                     Text("Circle Avatar")
                         ->setFontSize(14)
                         ->setTextColor(Color::fromHex(0x666666ff)),
 
                     Row({
-                        Image("screenshots/counter.png")
-                            ->setWidth(64)
-                            ->setHeight(64)
-                            ->setFit(ImageFit::Cover)
-                            ->setBorderRadius(32),   // full circle
+                            Image("screenshots/counter.png")
+                                ->setWidth(64)
+                                ->setHeight(64)
+                                ->setFit(ImageFit::Cover)
+                                ->setBorderRadius(32), // full circle
 
-                        Image("screenshots/counter.png")
-                            ->setWidth(96)
-                            ->setHeight(96)
-                            ->setFit(ImageFit::Cover)
-                            ->setBorderRadius(48),
+                            Image("screenshots/counter.png")
+                                ->setWidth(96)
+                                ->setHeight(96)
+                                ->setFit(ImageFit::Cover)
+                                ->setBorderRadius(48),
 
-                        Image("screenshots/counter.png")
-                            ->setWidth(128)
-                            ->setHeight(128)
-                            ->setFit(ImageFit::Cover)
-                            ->setBorderRadius(64),
-                    })->setSpacing(16),
+                            Image("screenshots/counter.png")
+                                ->setWidth(128)
+                                ->setHeight(128)
+                                ->setFit(ImageFit::Cover)
+                                ->setBorderRadius(64),
+                        })
+                        ->setSpacing(16),
 
                     // ── Card with image
-                    //────────────────────────────────────
+                    // ────────────────────────────────────
                     Text("Image Card")
                         ->setFontSize(14)
                         ->setTextColor(Color::fromHex(0x666666ff)),
 
                     Container(
-                        Column({
-                            Image("screenshots/layout.png")
-                                ->setWidth(320)
-                                ->setHeight(180)
-                                ->setFit(ImageFit::Cover)
-                                ->setBorderRadius(8),
+                        Column(
+                            {
+                                Image("screenshots/layout.png")
+                                    ->setWidth(320)
+                                    ->setHeight(180)
+                                    ->setFit(ImageFit::Cover)
+                                    ->setBorderRadius(8),
 
-                            Text("Mountain Landscape")
-                                ->setFontSize(16)
-                                ->setFontWeight(FontWeight::Bold)
-                                ->setTextColor(Color::fromRGB(30, 30, 30)),
+                                Text("Mountain Landscape")
+                                    ->setFontSize(16)
+                                    ->setFontWeight(FontWeight::Bold)
+                                    ->setTextColor(Color::fromRGB(30, 30, 30)),
 
-                            Text("A beautiful view from the summit.")
-                                ->setFontSize(13)
-                                ->setTextColor(Color::fromRGB(100, 100,
-                                100)),
-                        })->setSpacing(8)
-                    )
-                    ->setPadding(12)
-                    ->setBackgroundColor(Color::fromRGB(255, 255, 255))
-                    ->setBorderRadius(12),
+                                Text("A beautiful view from the summit.")
+                                    ->setFontSize(13)
+                                    ->setTextColor(
+                                        Color::fromRGB(100, 100, 100)),
+                            })
+                            ->setSpacing(8))
+                        ->setPadding(12)
+                        ->setBackgroundColor(Color::fromRGB(255, 255, 255))
+                        ->setBorderRadius(12),
 
                     // ── Error / placeholder states
-                    //─────────────────────────
+                    // ─────────────────────────
                     Text("Error & Placeholder States")
                         ->setFontSize(14)
                         ->setTextColor(Color::fromHex(0x666666ff)),
 
                     Row({
-                        // Placeholder — no path set
-                        Column({
-                            Image()
-                                ->setWidth(120)
-                                ->setHeight(90)
-                                ->setBorderRadius(6),
-                            Text("No image")
-                                ->setFontSize(12)
-                                ->setTextColor(Color::fromRGB(100, 100,
-                                100)),
-                        })->setSpacing(4),
+                            // Placeholder — no path set
+                            Column({
+                                       Image()
+                                           ->setWidth(120)
+                                           ->setHeight(90)
+                                           ->setBorderRadius(6),
+                                       Text("No image")
+                                           ->setFontSize(12)
+                                           ->setTextColor(
+                                               Color::fromRGB(100, 100, 100)),
+                                   })
+                                ->setSpacing(4),
 
-                        // Error — bad path
-                        Column({
-                            Image("screenshots/does_not_exist.jpg")
-                                ->setWidth(120)
-                                ->setHeight(90)
-                                ->setErrorColor(Color::fromRGB(255, 220,
-                                220))
-                                ->setBorderRadius(6),
-                            Text("Bad path")
-                                ->setFontSize(12)
-                                ->setTextColor(Color::fromRGB(100, 100,
-                                100)),
-                        })->setSpacing(4),
-                    })->setSpacing(16),
+                            // Error — bad path
+                            Column({
+                                       Image("screenshots/does_not_exist.jpg")
+                                           ->setWidth(120)
+                                           ->setHeight(90)
+                                           ->setErrorColor(
+                                               Color::fromRGB(255, 220, 220))
+                                           ->setBorderRadius(6),
+                                       Text("Bad path")
+                                           ->setFontSize(12)
+                                           ->setTextColor(
+                                               Color::fromRGB(100, 100, 100)),
+                                   })
+                                ->setSpacing(4),
+                        })
+                        ->setSpacing(16),
                 })
                 ->setSpacing(20)
                 ->setPadding(24)));
   }
 };
 
-WidgetPtr createApp(FluxUI* app) {
-    return FluxApp(
-        "FluxUI - Paint",
-        BuildComponent<MyApp>(),
-        AppTheme::light(),
-        false,   // debugShowWidgetBounds
-        900,     // width
-        700,     // height
-        false,   // maximize
-        true     // fullscreen
-    );
+WidgetPtr createApp(FluxUI *app) {
+  return FluxApp("FluxUI - Paint", BuildComponent<MyApp>(), AppTheme::light(),
+                 false, // debugShowWidgetBounds
+                 900,   // width
+                 700,   // height
+                 false, // maximize
+                 true   // fullscreen
+  );
 }
