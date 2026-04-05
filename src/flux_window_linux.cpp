@@ -169,6 +169,8 @@ int PlatformWindow::run() {
     while (SDL_PollEvent(&e))
       handleSDLEvent(e);
 
+       fluxProcessHttpEvents();
+
     // Paint once per batch of events if dirty.
     if (dirty && callbacks.onPaint && cairoState && cairoState->cr) {
       if (SDL_MUSTLOCK(cairoState->sdlSurface))
@@ -197,8 +199,8 @@ int PlatformWindow::run() {
 void PlatformWindow::handleSDLEvent(const SDL_Event &e) {
       // ── Flux HTTP callbacks ───────────────────────────────────────────────
     if (e.type == gFluxHttpEventType) {
-        fluxProcessHttpEvents();
-        continue;
+    
+        return;
     }
 
   switch (e.type) {

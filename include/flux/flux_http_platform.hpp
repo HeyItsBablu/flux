@@ -33,20 +33,21 @@ inline void fluxPostToUIThread(HttpCallback callback, HttpResult result) {
     PostMessage(gFluxUIWindow, WM_FLUX_HTTP_RESULT, 0, (LPARAM)p);
 }
 
+// flux_http_platform.hpp — Linux section
+
 #elif defined(__linux__) && !defined(__ANDROID__)
 #include <SDL2/SDL.h>
 #include <mutex>
-#include <queue>
+#include <vector>
 
 struct FluxHttpPayload {
     HttpCallback callback;
     HttpResult   result;
 };
 
-
-static Uint32            gFluxHttpEventType = (Uint32)-1;
-static std::mutex        gFluxQueueMutex;
-static std::queue<FluxHttpPayload*> gFluxQueue;
+static Uint32             gFluxHttpEventType = (Uint32)-1;
+static std::mutex         gFluxQueueMutex;
+static std::vector<FluxHttpPayload*> gFluxQueue;
 
 inline void fluxInitUIThread() {
     gFluxHttpEventType = SDL_RegisterEvents(1);
@@ -54,36 +55,35 @@ inline void fluxInitUIThread() {
 
 inline void fluxPostToUIThread(HttpCallback callback, HttpResult result) {
     if (gFluxHttpEventType == (Uint32)-1) {
-  
         if (callback) callback(std::move(result));
         return;
     }
-
     auto* p = new FluxHttpPayload{ std::move(callback), std::move(result) };
-
     {
         std::lock_guard<std::mutex> lock(gFluxQueueMutex);
-        gFluxQueue.push(p);
+        gFluxQueue.push_back(p);
     }
-
-
     SDL_Event e{};
     e.type = gFluxHttpEventType;
     SDL_PushEvent(&e);
 }
 
-
+// Drains into a local snapshot so the mutex is not held during callbacks
 inline void fluxProcessHttpEvents() {
-    std::lock_guard<std::mutex> lock(gFluxQueueMutex);
-    while (!gFluxQueue.empty()) {
-        FluxHttpPayload* p = gFluxQueue.front();
-        gFluxQueue.pop();
+    std::vector<FluxHttpPayload*> local;
+    {
+        std::lock_guard<std::mutex> lock(gFluxQueueMutex);
+        local.swap(gFluxQueue);   // move all pending into local, queue is now empty
+    }
+    for (auto* p : local) {
         if (p) {
             if (p->callback) p->callback(std::move(p->result));
             delete p;
         }
     }
 }
+
+
 
 
 
