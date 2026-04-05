@@ -1,5 +1,5 @@
 
-
+#ifdef __ANDROID__
 #include "nanovg.h"
 #include "nanovg_gl.h"
 #include <GLES2/gl2.h>
@@ -203,3 +203,5 @@ GLuint NVG_blitOESToTex2D(GLuint oesTexId, int w, int h) {
 
     return s_fboBlitTex;  // NanoVG-safe texture
 }
+
+#endif
