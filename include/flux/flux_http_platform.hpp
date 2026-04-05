@@ -35,13 +35,18 @@ inline void fluxPostToUIThread(HttpCallback callback, HttpResult result) {
 
 #elif defined(__linux__) && !defined(__ANDROID__)
 #include <SDL2/SDL.h>
+#include <mutex>
+#include <queue>
 
 struct FluxHttpPayload {
     HttpCallback callback;
     HttpResult   result;
 };
 
-static Uint32 gFluxHttpEventType = (Uint32)-1;
+
+static Uint32            gFluxHttpEventType = (Uint32)-1;
+static std::mutex        gFluxQueueMutex;
+static std::queue<FluxHttpPayload*> gFluxQueue;
 
 inline void fluxInitUIThread() {
     gFluxHttpEventType = SDL_RegisterEvents(1);
@@ -49,15 +54,37 @@ inline void fluxInitUIThread() {
 
 inline void fluxPostToUIThread(HttpCallback callback, HttpResult result) {
     if (gFluxHttpEventType == (Uint32)-1) {
-        if (callback) callback(result);
+  
+        if (callback) callback(std::move(result));
         return;
     }
+
     auto* p = new FluxHttpPayload{ std::move(callback), std::move(result) };
+
+    {
+        std::lock_guard<std::mutex> lock(gFluxQueueMutex);
+        gFluxQueue.push(p);
+    }
+
+
     SDL_Event e{};
-    e.type        = gFluxHttpEventType;  // registered type, not SDL_USEREVENT
-    e.user.data1  = p;
+    e.type = gFluxHttpEventType;
     SDL_PushEvent(&e);
 }
+
+
+inline void fluxProcessHttpEvents() {
+    std::lock_guard<std::mutex> lock(gFluxQueueMutex);
+    while (!gFluxQueue.empty()) {
+        FluxHttpPayload* p = gFluxQueue.front();
+        gFluxQueue.pop();
+        if (p) {
+            if (p->callback) p->callback(std::move(p->result));
+            delete p;
+        }
+    }
+}
+
 
 
 #elif defined(__ANDROID__)

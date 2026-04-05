@@ -2,6 +2,7 @@
 #if defined(__linux__) && !defined(__ANDROID__)
 
 #include "flux/flux_window.hpp"
+#include "flux/flux_http_platform.hpp"
 #include <SDL2/SDL.h>
 #include <cairo/cairo.h>
 
@@ -194,6 +195,12 @@ int PlatformWindow::run() {
 // ============================================================================
 
 void PlatformWindow::handleSDLEvent(const SDL_Event &e) {
+      // ── Flux HTTP callbacks ───────────────────────────────────────────────
+    if (e.type == gFluxHttpEventType) {
+        fluxProcessHttpEvents();
+        continue;
+    }
+
   switch (e.type) {
 
   // ── Quit ────────────────────────────────────────────────────────────────
