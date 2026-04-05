@@ -87,7 +87,7 @@ endfunction()
 # Examples
 # ============================================================================
 
-add_flux_example(inputtest)
+add_flux_example(futuretest)
 
 # ── image_editor (needs stb) — uncomment to enable ───────────────────────────
 # add_flux_example(image_editor)

@@ -34,25 +34,31 @@ inline void fluxPostToUIThread(HttpCallback callback, HttpResult result) {
 }
 
 #elif defined(__linux__) && !defined(__ANDROID__)
-
-
-
-#include <glib.h>
+#include <SDL2/SDL.h>
 
 struct FluxHttpPayload {
     HttpCallback callback;
     HttpResult   result;
 };
 
-inline void fluxPostToUIThread(HttpCallback callback, HttpResult result) {
-    auto* p = new FluxHttpPayload{ std::move(callback), std::move(result) };
-    g_idle_add([](gpointer data) -> gboolean {
-        auto* p = static_cast<FluxHttpPayload*>(data);
-        if (p->callback) p->callback(std::move(p->result));
-        delete p;
-        return G_SOURCE_REMOVE;   // run once
-    }, p);
+static Uint32 gFluxHttpEventType = (Uint32)-1;
+
+inline void fluxInitUIThread() {
+    gFluxHttpEventType = SDL_RegisterEvents(1);
 }
+
+inline void fluxPostToUIThread(HttpCallback callback, HttpResult result) {
+    if (gFluxHttpEventType == (Uint32)-1) {
+        if (callback) callback(result);
+        return;
+    }
+    auto* p = new FluxHttpPayload{ std::move(callback), std::move(result) };
+    SDL_Event e{};
+    e.type        = gFluxHttpEventType;  // registered type, not SDL_USEREVENT
+    e.user.data1  = p;
+    SDL_PushEvent(&e);
+}
+
 
 #elif defined(__ANDROID__)
 // ─── Android / ALooper ──────────────────────────────────────────────────────

@@ -63,7 +63,7 @@ public:
         return Scaffold(
             AppBar("FutureBuilder — All Three Types"),
             Container(
-                Column({
+                ListView({
                     // ── 1. FetchBuilder — raw HTTP string ─────────────────────
                     SectionLabel("1 · FetchBuilder — raw response string"),
                     Card(FetchBuilder(
