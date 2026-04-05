@@ -14,6 +14,7 @@
 //       ->setOnPhoto([](const std::string& path) { ... })
 //
 #pragma once
+#ifdef __ANDROID__
 
 // Declare NanoVG GLES2 handle import
 #ifndef NANOVG_GLES2
@@ -29,7 +30,7 @@ static inline int nvgCreateImageGLES2(NVGcontext* vg, GLuint texId,
 #include "flux/flux.hpp"
 #include "flux/flux_camera.hpp"
 
-extern int  NVG_createImageFromOES(NVGcontext* vg, GLuint oesTexId, int w, int h);
+extern int  NVG_createImageFromOES(NVGcontext* vg, GLuint oesTexId, int w, int h); 
 extern void NVG_updateImageFromOES(NVGcontext* vg, int nvgImage, GLuint oesTexId);
 extern GLuint NVG_blitOESToTex2D(GLuint oesTexId, int w, int h);
 extern NVGcontext* FluxAndroid_getVG();
@@ -445,3 +446,5 @@ using CameraWidgetPtr = std::shared_ptr<CameraWidget>;
 inline CameraWidgetPtr CameraView() {
     return std::make_shared<CameraWidget>();
 }
+
+#endif // __ANDROID__

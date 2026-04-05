@@ -10,6 +10,7 @@
 // The widget manages all FluxVideo state internally — app.cpp just instantiates it.
 //
 #pragma once
+#ifdef __ANDROID__
 
 #include "flux/flux.hpp"
 #include "flux/flux_video.hpp"
@@ -463,3 +464,5 @@ inline VideoPlayerWidgetPtr VideoPlayer(const std::string& path = "") {
     if (!path.empty()) w->setPath(path);
     return w;
 }
+
+#endif // __ANDROID__

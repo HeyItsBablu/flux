@@ -642,7 +642,7 @@ private:
             if (!path.empty()) {
                 self->s_lastPhotoPath = path;
                 CAM_LOGI("Photo saved: %s (%d bytes)", buf, length);
-                if (self->s_onPhoto) self->s_onPhoto(path);
+                if (self->s_onPhoto) self->s_onPhoto(path); 
             }
         }
 

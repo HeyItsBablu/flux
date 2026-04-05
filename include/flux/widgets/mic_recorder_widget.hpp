@@ -12,6 +12,7 @@
 //       })
 //
 #pragma once
+#ifdef __ANDROID__
 
 #include "flux/flux.hpp"
 #include "flux/flux_mic.hpp"
@@ -68,8 +69,6 @@ public:
 
     ~MicRecorderWidget() {
         _stopTimer();
-        // Don't stop recording on widget destruction — let app handle lifecycle.
-        // If you want auto-stop: FluxMic::get().stop();
     }
 
     // =========================================================================
@@ -109,7 +108,7 @@ public:
         for (int i = 0; i < waveColumns; i++) {
             float amp = (i < (int)_waveform.size()) ? _waveform[i] : 0.f;
 
-            // Scale amplitude to pixel height — minimum 2px so silent bars show
+
             int barH = std::max(2, (int)(amp * (waveH - 8) * 2.5f));
             barH = std::min(barH, waveH - 4);
 
@@ -279,3 +278,5 @@ using MicRecorderWidgetPtr = std::shared_ptr<MicRecorderWidget>;
 inline MicRecorderWidgetPtr MicRecorder() {
     return std::make_shared<MicRecorderWidget>();
 }
+
+#endif // __ANDROID__
