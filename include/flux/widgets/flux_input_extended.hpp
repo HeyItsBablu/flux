@@ -87,12 +87,20 @@ public:
   }
 
   // ── Layout ────────────────────────────────────────────────────────────────
-  void computeLayout(GraphicsContext & /*ctx*/,
-                     const BoxConstraints &constraints, FontCache &) override {
+void computeLayout(GraphicsContext & /*ctx*/,
+                   const BoxConstraints &constraints, FontCache &) override {
     autoWidth = false;
     autoHeight = false;
-    width = std::max(minWidth, std::min(width, constraints.maxWidth));
-    height = std::max(minHeight, std::min(height, constraints.maxHeight));
+
+
+    if (constraints.maxWidth < width)
+        width = constraints.maxWidth;
+    if (constraints.maxHeight < height)
+        height = constraints.maxHeight;
+
+    width  = std::max(minWidth,  width);
+    height = std::max(minHeight, height);
+
     applyConstraints();
 
     // Update scrollbar viewports

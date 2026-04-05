@@ -847,45 +847,47 @@ public:
 
   RadioGroupWidget() { spacing = 8; }
 
-  void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
-                     FontCache &fontCache) override {
+void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
+                   FontCache &fontCache) override {
     int totalWidth = 0;
     int totalHeight = 0;
+    int localMaxWidth = 0;   // ← local, not the member maxWidth
+    int localMaxHeight = 0;  // ← local, not the member maxHeight
 
     for (auto &child : children) {
-      child->computeLayout(ctx, constraints, fontCache);
+        child->computeLayout(ctx, constraints, fontCache);
 
-      if (isVertical) {
-        totalHeight += child->height + child->marginTop + child->marginBottom;
-        maxWidth = std::max(maxWidth,
-                       child->width + child->marginLeft + child->marginRight);
-      } else {
-        totalWidth += child->width + child->marginLeft + child->marginRight;
-        maxHeight = std::max(maxHeight,
-                        child->height + child->marginTop + child->marginBottom);
-      }
+        if (isVertical) {
+            totalHeight += child->height + child->marginTop + child->marginBottom;
+            localMaxWidth = std::max(localMaxWidth,
+                child->width + child->marginLeft + child->marginRight);
+        } else {
+            totalWidth += child->width + child->marginLeft + child->marginRight;
+            localMaxHeight = std::max(localMaxHeight,
+                child->height + child->marginTop + child->marginBottom);
+        }
     }
 
     int spacingTotal =
         children.empty() ? 0 : (int)(children.size() - 1) * spacing;
 
     if (isVertical) {
-      totalHeight += spacingTotal;
-      width = constraints.clampWidth(
-          autoWidth ? maxWidth + paddingLeft + paddingRight : width);
-      height = constraints.clampHeight(
-          autoHeight ? totalHeight + paddingTop + paddingBottom : height);
+        totalHeight += spacingTotal;
+        width = constraints.clampWidth(
+            autoWidth ? localMaxWidth + paddingLeft + paddingRight : width);
+        height = constraints.clampHeight(
+            autoHeight ? totalHeight + paddingTop + paddingBottom : height);
     } else {
-      totalWidth += spacingTotal;
-      width = constraints.clampWidth(
-          autoWidth ? totalWidth + paddingLeft + paddingRight : width);
-      height = constraints.clampHeight(
-          autoHeight ? maxHeight + paddingTop + paddingBottom : height);
+        totalWidth += spacingTotal;
+        width = constraints.clampWidth(
+            autoWidth ? totalWidth + paddingLeft + paddingRight : width);
+        height = constraints.clampHeight(
+            autoHeight ? localMaxHeight + paddingTop + paddingBottom : height); // ← fixed
     }
 
     applyConstraints();
     needsLayout = false;
-  }
+}
 
   void positionChildren(int contentX, int contentY, int /*contentWidth*/,
                         int /*contentHeight*/) override {
