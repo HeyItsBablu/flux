@@ -30,6 +30,16 @@
 #   define LOGW_IMG(...) __android_log_print(ANDROID_LOG_WARN,  "FluxImage", __VA_ARGS__)
 extern NVGcontext*    FluxAndroid_getVG();
 extern AAssetManager* FluxAndroid_getAssetManager();
+
+// stb_image for Android — decode any compressed format into raw RGBA on the
+// background thread; nvgCreateImageRGBA uploads on the GL thread.
+// No format restrictions: JPEG, PNG, BMP, TGA, GIF all work.
+#   define STBI_ONLY_JPEG
+#   define STBI_ONLY_PNG
+#   define STBI_ONLY_BMP
+#   define STBI_ONLY_TGA
+#   define STBI_ONLY_GIF
+#   include "stb_image.h"
 #endif
 
 #include <memory>
@@ -55,7 +65,7 @@ enum class ImageFit {
 
 enum class ImageLoadState {
     Idle,       // nothing requested yet
-    Loading,    // URL fetch in progress
+    Loading,    // URL fetch / decode in progress
     Loaded,     // image decoded and ready
     Error       // load or decode failed
 };
@@ -86,9 +96,22 @@ public:
     std::vector<uint8_t> pixels;
 #endif
 #ifdef __ANDROID__
-    int                  nvgImage         = -1;
-    // Raw compressed bytes received from network, consumed on the render (GL) thread
-    std::vector<uint8_t> pendingImageBytes;
+    int nvgImage = -1;
+
+    // Decoded RGBA pixels waiting to be uploaded on the GL thread.
+    // Filled by _decodeFromMemory() on the background thread.
+    // Consumed by _renderNanoVG() on the render (GL) thread.
+    struct PendingPixels {
+        std::vector<uint8_t> rgba;  // raw RGBA8888, row-major, no padding
+        int w = 0;
+        int h = 0;
+        bool ready() const { return !rgba.empty() && w > 0 && h > 0; }
+    } pending;
+
+    // Persistent upload buffer — kept alive until NVG is done with the texture
+    std::vector<uint8_t> uploadBuffer;
+    int uploadW = 0;
+    int uploadH = 0;
 #endif
 
     // ── Constructors ──────────────────────────────────────────────────────────
@@ -107,7 +130,8 @@ public:
     }
 
     // =========================================================================
-    // loadFromUrl — fetch bytes over HTTP then decode in-memory
+    // loadFromUrl — fetch bytes over HTTP, decode with stb_image on bg thread,
+    //               then upload RGBA to NVG on the render (GL) thread.
     // =========================================================================
     void loadFromUrl(const std::string& url, bool postToUI = true) {
         if (url.empty()) return;
@@ -137,10 +161,10 @@ public:
             if (!ok) {
                 self->_setLoadState(ImageLoadState::Error);
             }
-            // On Android, _decodeFromMemory stores bytes for GL-thread upload.
-            // State stays Loading — _renderNanoVG will promote to Loaded once
-            // nvgCreateImageMem succeeds on the render thread.
-            // On other platforms ok==true means fully decoded, so set Loaded.
+            // On Android, _decodeFromMemory decoded pixels into pending.rgba on
+            // this background thread. State stays Loading — _renderNanoVG will
+            // upload to GL and promote to Loaded on the render thread.
+            // On other platforms decoding is complete, so set Loaded now.
 #ifndef __ANDROID__
             if (ok) self->_setLoadState(ImageLoadState::Loaded);
 #endif
@@ -153,7 +177,7 @@ public:
     }
 
     // =========================================================================
-    // loadImage — existing file-based loader (unchanged behaviour)
+    // loadImage — file-based loader (asset path or absolute filesystem path)
     // =========================================================================
     bool loadImage(const std::string& path) {
         if (path.empty()) {
@@ -197,21 +221,42 @@ public:
 #endif
 
 #ifdef __ANDROID__
+        // loadImage() is called on the GL/render thread (lazily from render(),
+        // or from the constructor before display). Safe to call NVG directly.
         _freeNvgImage();
         NVGcontext* vg = FluxAndroid_getVG();
         if (!vg) { _setLoadState(ImageLoadState::Idle); return false; }
 
         if (!path.empty() && path[0] == '/') {
+            // Absolute filesystem path — let NVG load it directly
             nvgImage = nvgCreateImage(vg, path.c_str(), 0);
         } else {
+            // Asset path — read via AAssetManager, decode with stb_image,
+            // then upload raw RGBA so every format is supported consistently
             AAssetManager* am = FluxAndroid_getAssetManager();
             if (!am) { _setLoadState(ImageLoadState::Error); return false; }
             AAsset* asset = AAssetManager_open(am, path.c_str(), AASSET_MODE_BUFFER);
             if (!asset) { _setLoadState(ImageLoadState::Error); return false; }
-            nvgImage = nvgCreateImageMem(vg, 0,
-                                         (unsigned char*)AAsset_getBuffer(asset), (int)AAsset_getLength(asset));
+
+            const uint8_t* assetData = (const uint8_t*)AAsset_getBuffer(asset);
+            int assetLen = (int)AAsset_getLength(asset);
+
+            int w = 0, h = 0, ch = 0;
+            stbi_set_flip_vertically_on_load(0);
+            unsigned char* rgba = stbi_load_from_memory(assetData, assetLen,
+                                                        &w, &h, &ch, 4);
             AAsset_close(asset);
+
+            if (!rgba) {
+                LOGW_IMG("stbi_load_from_memory failed for asset '%s': %s",
+                         path.c_str(), stbi_failure_reason());
+                _setLoadState(ImageLoadState::Error); return false;
+            }
+
+            nvgImage = nvgCreateImageRGBA(vg, w, h, NVG_IMAGE_PREMULTIPLIED, rgba);
+            stbi_image_free(rgba);
         }
+
         if (nvgImage == -1) { _setLoadState(ImageLoadState::Error); return false; }
         nvgImageSize(vg, nvgImage, &imageWidth, &imageHeight);
         if (imageWidth == 0 || imageHeight == 0) {
@@ -291,10 +336,8 @@ public:
 
             case ImageLoadState::Loading:
 #ifdef __ANDROID__
-                // May have pending bytes ready to upload on the GL thread.
-                // _renderNanoVG will promote state to Loaded if upload succeeds,
-                // otherwise falls through and shows the loading placeholder.
-                if (!pendingImageBytes.empty()) {
+                // pending.rgba filled on background thread — upload to GL now
+                if (pending.ready()) {
                     _renderNanoVG(cx, cy, cw, ch);
                     if (loadState == ImageLoadState::Loaded) break;
                 }
@@ -304,7 +347,8 @@ public:
 
             case ImageLoadState::Error:
                 painter.fillRect(cx, cy, cw, ch, errorColor);
-                painter.drawTextA("✕", cx, cy, cw, ch,
+                painter.drawTextA("\xe2\x9c\x95",   // UTF-8 ✕
+                                  cx, cy, cw, ch,
                                   fontCache.getFont(fontSize, fontWeight),
                                   Color::fromRGB(150, 0, 0),
                                   DT_CENTER | DT_VCENTER | DT_SINGLELINE);
@@ -320,13 +364,11 @@ public:
 
     // ── Fluent setters ────────────────────────────────────────────────────────
     std::shared_ptr<ImageWidget> setImagePath(const std::string& path) {
-        loadImage(path);
-        return self();
+        loadImage(path); return self();
     }
     std::shared_ptr<ImageWidget> setUrl(const std::string& url,
                                         bool postToUI = true) {
-        loadFromUrl(url, postToUI);
-        return self();
+        loadFromUrl(url, postToUI); return self();
     }
     std::shared_ptr<ImageWidget> setFit(ImageFit fitMode) {
         fit = fitMode; markNeedsPaint(); return self();
@@ -363,11 +405,10 @@ private:
     }
 
     // =========================================================================
-    // _decodeFromMemory — shared by loadFromUrl across all platforms
+    // _decodeFromMemory — called from the HTTP callback (background thread)
     // =========================================================================
     bool _decodeFromMemory(const uint8_t* data, int len) {
 #ifdef _WIN32
-        // GDI+: wrap bytes in an IStream, then create Bitmap from it
         IStream* stream = nullptr;
         HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, (SIZE_T)len);
         if (!hMem) return false;
@@ -403,39 +444,44 @@ private:
 #endif
 
 #ifdef __ANDROID__
-        // ── IMPORTANT ──────────────────────────────────────────────────────────
-        // We are on the HTTP callback (background) thread here.
-        // nvgCreateImageMem() requires the GL/render thread, so we must NOT
-        // call it now. Instead, store the raw compressed bytes and let
-        // _renderNanoVG() upload the texture on the next render pass.
-        _freeNvgImage();
-        pendingImageBytes.assign(data, data + len);
-        // imageWidth/imageHeight are unknown until NVG decodes on render thread;
-        // they will be filled in by _renderNanoVG() when it flushes the pending bytes.
-        imageWidth  = 0;
-        imageHeight = 0;
-        return true;   // optimistically succeed
+        // ── Decode on the background thread with stb_image ────────────────────
+        // Outputs raw RGBA8888 regardless of source format (JPEG, PNG, BMP, etc.)
+        // nvgCreateImageRGBA() on the GL thread is then a plain texture upload.
+        int w = 0, h = 0, ch = 0;
+        stbi_set_flip_vertically_on_load(0);
+        unsigned char* rgba = stbi_load_from_memory(data, len, &w, &h, &ch, 4);
+        if (!rgba) {
+            LOGW_IMG("stbi_load_from_memory failed: %s", stbi_failure_reason());
+            return false;
+        }
+
+        LOGI_IMG("Decoded network image %dx%d (%d ch) — queuing for GL upload", w, h, ch);
+
+        pending.rgba.assign(rgba, rgba + (size_t)w * h * 4);
+        pending.w = w;
+        pending.h = h;
+        stbi_image_free(rgba);
+
+        // imageWidth/imageHeight stay 0 until the GL upload confirms dimensions
+        return true;
 #endif
 
         return false;
     }
 
-    // ── Loading spinner / shimmer placeholder ─────────────────────────────────
+    // ── Loading shimmer placeholder ───────────────────────────────────────────
     void _renderLoading(Painter& painter, FontCache& fontCache,
                         int cx, int cy, int cw, int ch) const
     {
-        // Shimmer-style grey placeholder
         painter.fillRect(cx, cy, cw, ch, placeholderColor);
-
-        // Centred "…" label
-        painter.drawTextA("\xe2\x80\xa6",  // UTF-8 ellipsis
+        painter.drawTextA("\xe2\x80\xa6",   // UTF-8 ellipsis …
                           cx, cy, cw, ch,
                           fontCache.getFont(fontSize, fontWeight),
                           Color::fromRGB(160, 160, 160),
                           DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }
 
-    // ── Destination rect (shared by all backends) ─────────────────────────────
+    // ── Destination rect (all backends) ──────────────────────────────────────
     struct DestRect { float x, y, w, h; };
 
     DestRect _calculateDestRect(int cx, int cy, int cw, int ch) const {
@@ -449,11 +495,9 @@ private:
             case ImageFit::Contain: {
                 float dw, dh;
                 if (imgAspect > containerAspect) {
-                    dw = (float)cw;
-                    dh = dw / imgAspect;
+                    dw = (float)cw; dh = dw / imgAspect;
                 } else {
-                    dh = (float)ch;
-                    dw = dh * imgAspect;
+                    dh = (float)ch; dw = dh * imgAspect;
                 }
                 return { cx + (cw - dw) * 0.5f, cy + (ch - dh) * 0.5f, dw, dh };
             }
@@ -461,11 +505,9 @@ private:
             case ImageFit::Cover: {
                 float dw, dh;
                 if (imgAspect > containerAspect) {
-                    dh = (float)ch;
-                    dw = dh * imgAspect;
+                    dh = (float)ch; dw = dh * imgAspect;
                 } else {
-                    dw = (float)cw;
-                    dh = dw / imgAspect;
+                    dw = (float)cw; dh = dw / imgAspect;
                 }
                 return { cx + (cw - dw) * 0.5f, cy + (ch - dh) * 0.5f, dw, dh };
             }
@@ -511,10 +553,10 @@ private:
         if (borderRadius > 0) {
             Gdiplus::GraphicsPath path;
             int diam = borderRadius * 2;
-            path.AddArc(Gdiplus::Rect(x,             y,              diam, diam), 180, 90);
-            path.AddArc(Gdiplus::Rect(x + width - diam, y,           diam, diam), 270, 90);
-            path.AddArc(Gdiplus::Rect(x + width - diam, y+height-diam, diam, diam), 0, 90);
-            path.AddArc(Gdiplus::Rect(x,             y + height-diam, diam, diam), 90, 90);
+            path.AddArc(Gdiplus::Rect(x,                  y,                 diam, diam), 180, 90);
+            path.AddArc(Gdiplus::Rect(x + width - diam,   y,                 diam, diam), 270, 90);
+            path.AddArc(Gdiplus::Rect(x + width - diam,   y + height - diam, diam, diam), 0,   90);
+            path.AddArc(Gdiplus::Rect(x,                  y + height - diam, diam, diam), 90,  90);
             path.CloseFigure();
             g.SetClip(&path);
         } else {
@@ -582,10 +624,10 @@ private:
         if (r > rw * 0.5) r = rw * 0.5;
         if (r > rh * 0.5) r = rh * 0.5;
         cairo_new_path(cr);
-        cairo_arc(cr, rx+rw-r, ry    +r, r, -M_PI*0.5,  0.0      );
-        cairo_arc(cr, rx+rw-r, ry+rh-r, r,  0.0,         M_PI*0.5 );
-        cairo_arc(cr, rx    +r, ry+rh-r, r,  M_PI*0.5,   M_PI     );
-        cairo_arc(cr, rx    +r, ry    +r, r,  M_PI,      -M_PI*0.5 );
+        cairo_arc(cr, rx+rw-r, ry    +r, r, -M_PI*0.5,  0.0     );
+        cairo_arc(cr, rx+rw-r, ry+rh-r, r,  0.0,        M_PI*0.5);
+        cairo_arc(cr, rx    +r, ry+rh-r, r,  M_PI*0.5,  M_PI    );
+        cairo_arc(cr, rx    +r, ry    +r, r,  M_PI,     -M_PI*0.5);
         cairo_close_path(cr);
     }
 #endif
@@ -595,54 +637,47 @@ private:
     // =========================================================================
 #ifdef __ANDROID__
 
-    // Persistent buffer to ensure memory stays valid for NanoVG
-    std::vector<uint8_t> uploadBuffer;
-
     void _renderNanoVG(int cx, int cy, int cw, int ch) {
         NVGcontext* vg = FluxAndroid_getVG();
         if (!vg) return;
 
-        // ── Upload pending network image on GL thread ───────────────────────
-        if (!pendingImageBytes.empty()) {
-            // Move bytes safely first
-            uploadBuffer = std::move(pendingImageBytes);
-            pendingImageBytes.clear();
-
-            LOGI_IMG("Uploading image, size: %zu bytes", uploadBuffer.size());
-
-            if (uploadBuffer.size() >= 4) {
-                LOGI_IMG("Header: %02X %02X %02X %02X",
-                         uploadBuffer[0], uploadBuffer[1],
-                         uploadBuffer[2], uploadBuffer[3]);
-            }
-
+        // ── Upload decoded RGBA pixels to GL on the render thread ─────────────
+        // stb_image already decoded the image into pending.rgba on the bg thread.
+        // nvgCreateImageRGBA is a plain GL texture upload — no format issues,
+        // works for every format stb_image supports (JPEG, PNG, BMP, TGA, GIF).
+        if (pending.ready()) {
             _deleteNvgTexture();
 
-            // IMPORTANT: use PREMULTIPLIED flag
-            nvgImage = nvgCreateImageMem(
-                    vg,
-                    NVG_IMAGE_PREMULTIPLIED,
-                    uploadBuffer.data(),
-                    (int)uploadBuffer.size()
-            );
+            // Move decoded pixels into the persistent upload buffer.
+            // uploadBuffer must remain valid until we replace or free the texture.
+            uploadBuffer = std::move(pending.rgba);
+            uploadW      = pending.w;
+            uploadH      = pending.h;
+            pending.rgba.clear();
+            pending.w = pending.h = 0;
 
+            LOGI_IMG("Uploading RGBA texture %dx%d (%zu bytes)",
+                     uploadW, uploadH, uploadBuffer.size());
+
+            nvgImage = nvgCreateImageRGBA(vg, uploadW, uploadH,
+                                          NVG_IMAGE_PREMULTIPLIED,
+                                          uploadBuffer.data());
             if (nvgImage == -1) {
-                LOGW_IMG("nvgCreateImageMem FAILED");
+                LOGW_IMG("nvgCreateImageRGBA FAILED");
                 _setLoadState(ImageLoadState::Error);
                 return;
             }
 
+            // Confirm dimensions (should match uploadW/H but be defensive)
             nvgImageSize(vg, nvgImage, &imageWidth, &imageHeight);
-
-            LOGI_IMG("Image uploaded: %d x %d", imageWidth, imageHeight);
-
             if (imageWidth == 0 || imageHeight == 0) {
-                LOGW_IMG("Invalid image size");
+                LOGW_IMG("nvgImageSize returned zero — treating as error");
                 _deleteNvgTexture();
                 _setLoadState(ImageLoadState::Error);
                 return;
             }
 
+            LOGI_IMG("Texture ready: %dx%d handle=%d", imageWidth, imageHeight, nvgImage);
             _setLoadState(ImageLoadState::Loaded);
             markNeedsLayout();
         }
@@ -651,52 +686,39 @@ private:
 
         DestRect d = _calculateDestRect(cx, cy, cw, ch);
 
-        LOGI_IMG("Draw rect: x=%f y=%f w=%f h=%f", d.x, d.y, d.w, d.h);
-
-        NVGpaint paint = nvgImagePattern(
-                vg,
-                d.x, d.y,
-                d.w, d.h,
-                0.0f,
-                nvgImage,
-                1.0f
-        );
-
+        NVGpaint paint = nvgImagePattern(vg, d.x, d.y, d.w, d.h,
+                                         0.0f, nvgImage, 1.0f);
         nvgSave(vg);
-
         nvgBeginPath(vg);
-
-        // ⚠️ Use DEST rect for clipping (important fix)
         if (borderRadius > 0) {
             nvgRoundedRect(vg, d.x, d.y, d.w, d.h, (float)borderRadius);
         } else {
             nvgRect(vg, d.x, d.y, d.w, d.h);
         }
-
         nvgFillPaint(vg, paint);
         nvgFill(vg);
-
         nvgRestore(vg);
     }
 
-    // ── Separate GPU cleanup (DO NOT clear pending bytes here) ───────────────
+    // Frees only the GPU texture handle — does NOT touch pending or uploadBuffer
     void _deleteNvgTexture() {
         if (nvgImage != -1) {
             NVGcontext* vg = FluxAndroid_getVG();
-            if (vg) {
-                nvgDeleteImage(vg, nvgImage);
-            }
+            if (vg) nvgDeleteImage(vg, nvgImage);
             nvgImage = -1;
         }
     }
 
+    // Full cleanup — GPU handle + all CPU buffers
     void _freeNvgImage() {
         _deleteNvgTexture();
-        pendingImageBytes.clear();
+        pending.rgba.clear();
+        pending.w = pending.h = 0;
         uploadBuffer.clear();
+        uploadW = uploadH = 0;
     }
 
-#endif
+#endif  // __ANDROID__
 };
 
 // ============================================================================
@@ -712,7 +734,7 @@ inline ImageWidgetPtr Image() {
     return std::make_shared<ImageWidget>();
 }
 
-// Url-loaded image — shows placeholder while fetching, then the image
+// URL-loaded image — shows placeholder while fetching, then the decoded image
 inline ImageWidgetPtr NetworkImage(const std::string& url,
                                    bool postToUI = true) {
     auto w = std::make_shared<ImageWidget>();
@@ -720,4 +742,4 @@ inline ImageWidgetPtr NetworkImage(const std::string& url,
     return w;
 }
 
-#endif
+#endif // FLUX_IMAGE_HPP
