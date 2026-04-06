@@ -19,10 +19,10 @@ template <typename T> struct AsyncSnapshot {
   T data{};
   std::string error;
 
-  bool hasData() const { return state == ConnectionState::Done; }
-  bool hasError() const { return state == ConnectionState::Error; }
-  bool isLoading() const { return state == ConnectionState::Waiting; }
-  bool isNone() const { return state == ConnectionState::None; }
+  bool hasData()    const { return state == ConnectionState::Done; }
+  bool hasError()   const { return state == ConnectionState::Error; }
+  bool isLoading()  const { return state == ConnectionState::Waiting; }
+  bool isNone()     const { return state == ConnectionState::None; }
 };
 
 // ============================================================================
@@ -34,16 +34,13 @@ template <typename T> class FutureBuilderWidget : public Widget {
 public:
   using Builder = std::function<WidgetPtr(const AsyncSnapshot<T> &)>;
   using Fetcher =
-      std::function<void(std::function<void(T)> /*onSuccess*/,
+      std::function<void(std::function<void(T)>   /*onSuccess*/,
                          std::function<void(std::string)> /*onError*/)>;
 
   Builder builder;
   Fetcher fetcher;
 
-  // -----------------------------------------------------------------------
-  // computeLayout — kick off the fetch on first layout; delegate sizing
-  // to the built child widget.
-  // -----------------------------------------------------------------------
+
   void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     if (snapshot_.state == ConnectionState::None)
@@ -51,31 +48,38 @@ public:
 
     rebuildChild(ctx, fontCache);
 
-    if (child_) {
-      child_->computeLayout(ctx, constraints, fontCache);
-      width = child_->width;
-      height = child_->height;
+
+    auto c = child_;
+    if (c) {
+      c->computeLayout(ctx, constraints, fontCache);
+      width  = c->width;
+      height = c->height;
     } else {
-      width = constraints.clampWidth(0);
+      width  = constraints.clampWidth(0);
       height = constraints.clampHeight(0);
     }
     needsLayout = false;
   }
 
   void positionChildren(int cx, int cy, int cw, int ch) override {
-    if (child_) {
-      child_->x = cx;
-      child_->y = cy;
-      child_->positionChildren(
-          cx + child_->paddingLeft, cy + child_->paddingTop,
-          child_->width - child_->paddingLeft - child_->paddingRight,
-          child_->height - child_->paddingTop - child_->paddingBottom);
-    }
+
+    auto c = child_;
+    if (!c) return;
+
+    c->x = cx;
+    c->y = cy;
+    c->positionChildren(
+        cx + c->paddingLeft,
+        cy + c->paddingTop,
+        c->width  - c->paddingLeft - c->paddingRight,
+        c->height - c->paddingTop  - c->paddingBottom);
   }
 
   void render(GraphicsContext &ctx, FontCache &fontCache) override {
-    if (child_)
-      child_->render(ctx, fontCache);
+    // FIX: same local-snapshot pattern.
+    auto c = child_;
+    if (c)
+      c->render(ctx, fontCache);
     needsPaint = false;
   }
 
@@ -90,58 +94,76 @@ public:
     fetcher = std::move(f);
     return self();
   }
-  // Force a fresh fetch (e.g. pull-to-refresh)
+
+
+
   void refresh() {
-    snapshot_ = {};
+    snapshot_     = {};
+    fetchStarted_ = false;
     markNeedsLayout();
   }
 
 private:
   AsyncSnapshot<T> snapshot_;
-  WidgetPtr child_;
+  WidgetPtr        child_;
+
+  bool fetchStarted_ = false;
+
 
   void startFetch() {
-    snapshot_.state = ConnectionState::Waiting;
+    if (fetchStarted_) return;
+    fetchStarted_    = true;
+    snapshot_.state  = ConnectionState::Waiting;
 
     auto weak = std::weak_ptr<FutureBuilderWidget<T>>(self());
 
     auto onSuccess = [weak](T value) {
-      if (auto self = weak.lock()) {
-        self->snapshot_.state = ConnectionState::Done;
-        self->snapshot_.data = std::move(value);
-        self->triggerRebuild();
-      }
+      // This lambda is always invoked on the UI thread (postToUI=true).
+      auto self = weak.lock();
+      if (!self) return;   // widget was destroyed — safe to bail
+
+      self->snapshot_.state = ConnectionState::Done;
+      self->snapshot_.data  = std::move(value);
+      self->triggerRebuild();
     };
 
     auto onError = [weak](std::string err) {
-      if (auto self = weak.lock()) {
-        self->snapshot_.state = ConnectionState::Error;
-        self->snapshot_.error = std::move(err);
-        self->triggerRebuild();
-      }
+      // Same: always UI thread.
+      auto self = weak.lock();
+      if (!self) return;
+
+      self->snapshot_.state = ConnectionState::Error;
+      self->snapshot_.error = std::move(err);
+      self->triggerRebuild();
     };
 
     if (fetcher)
-      fetcher(onSuccess, onError);
+      fetcher(std::move(onSuccess), std::move(onError));
   }
 
+
   void triggerRebuild() {
-    if (auto *ui = FluxUI::getCurrentInstance()) {
+    // partialRebuild is a UI-thread-only call — safe here.
+    if (auto *ui = FluxUI::getCurrentInstance())
       ui->partialRebuild(this);
-    }
+
+
     markNeedsLayout();
   }
 
+
   void rebuildChild(GraphicsContext &ctx, FontCache &fontCache) {
-    if (!builder)
-      return;
+    if (!builder) return;
+
     child_ = builder(snapshot_);
-    if (child_) {
-      child_->parent = this;
-      // Propagate font defaults from parent
-      if (child_->fontFamily == "Segoe UI" && !fontFamily.empty())
-        child_->fontFamily = fontFamily;
-    }
+    auto c = child_;
+    if (!c) return;
+
+    c->parent = this;
+
+    // Propagate font from parent whenever parent has a non-empty override.
+    if (!fontFamily.empty())
+      c->fontFamily = fontFamily;
   }
 
   std::shared_ptr<FutureBuilderWidget<T>> self() {
@@ -158,21 +180,26 @@ private:
 inline std::shared_ptr<FutureBuilderWidget<std::string>> FetchBuilder(
     const std::string &url,
     std::function<WidgetPtr(const AsyncSnapshot<std::string> &)> builder,
-    bool postToUI = true) {
+    bool postToUI = true)
+{
   auto w = std::make_shared<FutureBuilderWidget<std::string>>();
   w->setBuilder(builder);
   w->setFetcher([url, postToUI](std::function<void(std::string)> onSuccess,
-                                std::function<void(std::string)> onError) {
+                                std::function<void(std::string)> onError)
+  {
+
+    (void)postToUI;
     FluxHttp::get(
         url,
         [onSuccess, onError](HttpResult r) {
           if (r.success)
             onSuccess(r.body);
           else
-            onError(r.error.empty() ? "HTTP " + std::to_string(r.statusCode)
-                                    : r.error);
+            onError(r.error.empty()
+                        ? "HTTP " + std::to_string(r.statusCode)
+                        : r.error);
         },
-        postToUI);
+        /*postToUI=*/true);
   });
   return w;
 }
@@ -182,26 +209,30 @@ inline std::shared_ptr<FutureBuilderWidget<std::string>> FetchBuilder(
 inline std::shared_ptr<FutureBuilderWidget<JsonValue>>
 JsonBuilder(const std::string &url,
             std::function<WidgetPtr(const AsyncSnapshot<JsonValue> &)> builder,
-            bool postToUI = true) {
+            bool postToUI = true)
+{
   auto w = std::make_shared<FutureBuilderWidget<JsonValue>>();
   w->setBuilder(builder);
   w->setFetcher([url, postToUI](std::function<void(JsonValue)> onSuccess,
-                                std::function<void(std::string)> onError) {
+                                std::function<void(std::string)> onError)
+  {
+    (void)postToUI;
     FluxHttp::get(
         url,
         [onSuccess, onError](HttpResult r) {
           if (!r.success) {
-            onError(r.error.empty() ? "HTTP " + std::to_string(r.statusCode)
-                                    : r.error);
+            onError(r.error.empty()
+                        ? "HTTP " + std::to_string(r.statusCode)
+                        : r.error);
             return;
           }
           JsonValue parsed;
           if (JsonParser::tryParse(r.body, parsed))
-            onSuccess(parsed);
+            onSuccess(std::move(parsed));
           else
             onError("JSON parse error");
         },
-        postToUI);
+        /*postToUI=*/true);
   });
   return w;
 }
@@ -213,18 +244,22 @@ std::shared_ptr<FutureBuilderWidget<T>>
 TypedJsonBuilder(const std::string &url,
                  std::function<T(const JsonValue &)> mapper,
                  std::function<WidgetPtr(const AsyncSnapshot<T> &)> builder,
-                 bool postToUI = true) {
+                 bool postToUI = true)
+{
   auto w = std::make_shared<FutureBuilderWidget<T>>();
   w->setBuilder(builder);
   w->setFetcher(
       [url, mapper, postToUI](std::function<void(T)> onSuccess,
-                              std::function<void(std::string)> onError) {
+                              std::function<void(std::string)> onError)
+      {
+        (void)postToUI;
         FluxHttp::get(
             url,
             [onSuccess, onError, mapper](HttpResult r) {
               if (!r.success) {
-                onError(r.error.empty() ? "HTTP " + std::to_string(r.statusCode)
-                                        : r.error);
+                onError(r.error.empty()
+                            ? "HTTP " + std::to_string(r.statusCode)
+                            : r.error);
                 return;
               }
               JsonValue parsed;
@@ -238,7 +273,7 @@ TypedJsonBuilder(const std::string &url,
                 onError(e.what());
               }
             },
-            postToUI);
+            /*postToUI=*/true);
       });
   return w;
 }

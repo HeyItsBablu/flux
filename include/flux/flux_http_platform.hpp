@@ -8,119 +8,184 @@
 #if defined(_WIN32)
 // ─── Win32 ──────────────────────────────────────────────────────────────────
 
-
 #include <windows.h>
 static constexpr UINT WM_FLUX_HTTP_RESULT = WM_USER + 0x200;
 
 struct FluxHttpPayload {
-    HttpCallback callback;
-    HttpResult   result;
+  HttpCallback callback;
+  HttpResult   result;
 };
 
-
+// Call this from WM_FLUX_HTTP_RESULT handler in your WindowProc.
 inline void FluxHttp_Win32_HandleMessage(LPARAM lParam) {
-    auto* p = reinterpret_cast<FluxHttpPayload*>(lParam);
-    if (p && p->callback) p->callback(std::move(p->result));
+  auto *p = reinterpret_cast<FluxHttpPayload *>(lParam);
+  if (p) {
+    if (p->callback) p->callback(std::move(p->result));
     delete p;
+  }
 }
 
 static HWND gFluxUIWindow = nullptr;
 inline void fluxSetUIWindow(HWND hwnd) { gFluxUIWindow = hwnd; }
 
-inline void fluxPostToUIThread(HttpCallback callback, HttpResult result) {
-    if (!gFluxUIWindow) { if (callback) callback(result); return; }
-    auto* p = new FluxHttpPayload{ std::move(callback), std::move(result) };
-    PostMessage(gFluxUIWindow, WM_FLUX_HTTP_RESULT, 0, (LPARAM)p);
+
+inline void fluxDrainPendingMessages(HWND hwnd) {
+  MSG msg;
+  while (PeekMessage(&msg, hwnd, WM_FLUX_HTTP_RESULT, WM_FLUX_HTTP_RESULT, PM_REMOVE)) {
+    auto *p = reinterpret_cast<FluxHttpPayload *>(msg.lParam);
+    delete p;  
+  }
 }
 
-// flux_http_platform.hpp — Linux section
+inline void fluxPostToUIThread(HttpCallback callback, HttpResult result) {
+
+  if (!gFluxUIWindow) {
+    if (callback) callback(std::move(result));
+    return;
+  }
+  auto *p = new FluxHttpPayload{std::move(callback), std::move(result)};
+
+  if (!PostMessage(gFluxUIWindow, WM_FLUX_HTTP_RESULT, 0, reinterpret_cast<LPARAM>(p))) {
+
+    delete p;
+  }
+}
+
+// ─── Linux / SDL2 ───────────────────────────────────────────────────────────
 
 #elif defined(__linux__) && !defined(__ANDROID__)
 #include <SDL2/SDL.h>
+#include <cassert>
 #include <mutex>
 #include <vector>
 
 struct FluxHttpPayload {
-    HttpCallback callback;
-    HttpResult   result;
+  HttpCallback callback;
+  HttpResult   result;
 };
 
-static Uint32             gFluxHttpEventType = (Uint32)-1;
-static std::mutex         gFluxQueueMutex;
-static std::vector<FluxHttpPayload*> gFluxQueue;
+static Uint32 gFluxHttpEventType = static_cast<Uint32>(-1);
+static std::mutex gFluxQueueMutex;
+static std::vector<FluxHttpPayload *> gFluxQueue;
 
+// Call once after SDL_Init — must succeed before any HTTP request is made.
 inline void fluxInitUIThread() {
-    gFluxHttpEventType = SDL_RegisterEvents(1);
+  gFluxHttpEventType = SDL_RegisterEvents(1);
+
+  assert(gFluxHttpEventType != static_cast<Uint32>(-1) &&
+         "fluxInitUIThread: SDL_RegisterEvents failed. "
+         "Make sure SDL_Init() is called before fluxInitUIThread().");
 }
 
 inline void fluxPostToUIThread(HttpCallback callback, HttpResult result) {
-    if (gFluxHttpEventType == (Uint32)-1) {
-        if (callback) callback(std::move(result));
-        return;
-    }
-    auto* p = new FluxHttpPayload{ std::move(callback), std::move(result) };
-    {
-        std::lock_guard<std::mutex> lock(gFluxQueueMutex);
-        gFluxQueue.push_back(p);
-    }
-    SDL_Event e{};
-    e.type = gFluxHttpEventType;
-    SDL_PushEvent(&e);
+  if (gFluxHttpEventType == static_cast<Uint32>(-1)) {
+
+    if (callback) callback(std::move(result));
+    return;
+  }
+
+  auto *p = new FluxHttpPayload{std::move(callback), std::move(result)};
+  {
+    std::lock_guard<std::mutex> lock(gFluxQueueMutex);
+    gFluxQueue.push_back(p);
+  }
+
+  SDL_Event e{};
+  e.type = gFluxHttpEventType;
+  // SDL_PushEvent is thread-safe.
+  if (SDL_PushEvent(&e) < 0) {
+
+    std::lock_guard<std::mutex> lock(gFluxQueueMutex);
+    auto it = std::find(gFluxQueue.begin(), gFluxQueue.end(), p);
+    if (it != gFluxQueue.end()) gFluxQueue.erase(it);
+    delete p;
+  }
 }
 
-// Drains into a local snapshot so the mutex is not held during callbacks
+// Call from your SDL event loop when e.type == gFluxHttpEventType.
+// Drains into a local snapshot so the mutex is not held during callbacks.
 inline void fluxProcessHttpEvents() {
-    std::vector<FluxHttpPayload*> local;
-    {
-        std::lock_guard<std::mutex> lock(gFluxQueueMutex);
-        local.swap(gFluxQueue);   // move all pending into local, queue is now empty
+  std::vector<FluxHttpPayload *> local;
+  {
+    std::lock_guard<std::mutex> lock(gFluxQueueMutex);
+    local.swap(gFluxQueue);
+  }
+  for (auto *p : local) {
+    if (p) {
+      if (p->callback) p->callback(std::move(p->result));
+      delete p;
     }
-    for (auto* p : local) {
-        if (p) {
-            if (p->callback) p->callback(std::move(p->result));
-            delete p;
-        }
-    }
+  }
 }
 
 
+inline void fluxShutdownHttpQueue() {
+  std::lock_guard<std::mutex> lock(gFluxQueueMutex);
+  for (auto *p : gFluxQueue) delete p;
+  gFluxQueue.clear();
+}
 
-
-
-#elif defined(__ANDROID__)
 // ─── Android / ALooper ──────────────────────────────────────────────────────
 
-
+#elif defined(__ANDROID__)
 #include <android/looper.h>
+#include <cassert>
 #include <unistd.h>
 
 struct FluxHttpPayload {
-    HttpCallback callback;
-    HttpResult   result;
+  HttpCallback callback;
+  HttpResult   result;
 };
 
-static int  gPipeFd[2]    = {-1, -1};
-static ALooper* gLooper   = nullptr;
+static int     gPipeFd[2] = {-1, -1};
+static ALooper *gLooper   = nullptr;
 
 inline void fluxAndroidInitLooper() {
-    pipe(gPipeFd);
-    gLooper = ALooper_forThread();
-    ALooper_addFd(gLooper, gPipeFd[0], 0, ALOOPER_EVENT_INPUT,
-        [](int fd, int, void*) -> int {
-            FluxHttpPayload* p = nullptr;
-            read(fd, &p, sizeof(p));
-            if (p) {
-                if (p->callback) p->callback(std::move(p->result));
-                delete p;
-            }
-            return 1;   // keep listening
-        }, nullptr);
+
+  int rc = pipe(gPipeFd);
+  assert(rc == 0 && "fluxAndroidInitLooper: pipe() failed");
+
+  gLooper = ALooper_forThread();
+  assert(gLooper && "fluxAndroidInitLooper: must be called from the UI thread");
+
+  ALooper_addFd(
+      gLooper, gPipeFd[0], 0, ALOOPER_EVENT_INPUT,
+      [](int fd, int, void *) -> int {
+        FluxHttpPayload *p = nullptr;
+
+        while (read(fd, &p, sizeof(p)) == sizeof(p)) {
+          if (p) {
+            if (p->callback) p->callback(std::move(p->result));
+            delete p;
+            p = nullptr;
+          }
+        }
+        return 1; // keep listening
+      },
+      nullptr);
 }
 
 inline void fluxPostToUIThread(HttpCallback callback, HttpResult result) {
-    if (gPipeFd[1] < 0) { if (callback) callback(result); return; }
-    auto* p = new FluxHttpPayload{ std::move(callback), std::move(result) };
-    write(gPipeFd[1], &p, sizeof(p));
+  if (gPipeFd[1] < 0) {
+    // Looper not initialised — run inline as a safe fallback.
+    if (callback) callback(std::move(result));
+    return;
+  }
+  auto *p = new FluxHttpPayload{std::move(callback), std::move(result)};
+  // write() of sizeof(pointer) is atomic on Linux (PIPE_BUF >> sizeof(void*)).
+  if (write(gPipeFd[1], &p, sizeof(p)) != sizeof(p)) {
+
+    delete p;
+  }
+}
+
+
+inline void fluxAndroidShutdownLooper() {
+  if (gLooper && gPipeFd[0] >= 0)
+    ALooper_removeFd(gLooper, gPipeFd[0]);
+  if (gPipeFd[0] >= 0) { close(gPipeFd[0]); gPipeFd[0] = -1; }
+  if (gPipeFd[1] >= 0) { close(gPipeFd[1]); gPipeFd[1] = -1; }
+  gLooper = nullptr;
 }
 
 #endif
