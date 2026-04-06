@@ -16,7 +16,6 @@ struct FluxHttpPayload {
   HttpResult   result;
 };
 
-// Call this from WM_FLUX_HTTP_RESULT handler in your WindowProc.
 inline void FluxHttp_Win32_HandleMessage(LPARAM lParam) {
   auto *p = reinterpret_cast<FluxHttpPayload *>(lParam);
   if (p) {
@@ -28,27 +27,22 @@ inline void FluxHttp_Win32_HandleMessage(LPARAM lParam) {
 static HWND gFluxUIWindow = nullptr;
 inline void fluxSetUIWindow(HWND hwnd) { gFluxUIWindow = hwnd; }
 
-
 inline void fluxDrainPendingMessages(HWND hwnd) {
   MSG msg;
   while (PeekMessage(&msg, hwnd, WM_FLUX_HTTP_RESULT, WM_FLUX_HTTP_RESULT, PM_REMOVE)) {
     auto *p = reinterpret_cast<FluxHttpPayload *>(msg.lParam);
-    delete p;  
+    delete p;
   }
 }
 
 inline void fluxPostToUIThread(HttpCallback callback, HttpResult result) {
-
   if (!gFluxUIWindow) {
     if (callback) callback(std::move(result));
     return;
   }
   auto *p = new FluxHttpPayload{std::move(callback), std::move(result)};
-
-  if (!PostMessage(gFluxUIWindow, WM_FLUX_HTTP_RESULT, 0, reinterpret_cast<LPARAM>(p))) {
-
+  if (!PostMessage(gFluxUIWindow, WM_FLUX_HTTP_RESULT, 0, reinterpret_cast<LPARAM>(p)))
     delete p;
-  }
 }
 
 // ─── Linux / SDL2 ───────────────────────────────────────────────────────────
@@ -68,10 +62,9 @@ static Uint32 gFluxHttpEventType = static_cast<Uint32>(-1);
 static std::mutex gFluxQueueMutex;
 static std::vector<FluxHttpPayload *> gFluxQueue;
 
-// Call once after SDL_Init — must succeed before any HTTP request is made.
+// Call once after SDL_Init.
 inline void fluxInitUIThread() {
   gFluxHttpEventType = SDL_RegisterEvents(1);
-
   assert(gFluxHttpEventType != static_cast<Uint32>(-1) &&
          "fluxInitUIThread: SDL_RegisterEvents failed. "
          "Make sure SDL_Init() is called before fluxInitUIThread().");
@@ -79,20 +72,20 @@ inline void fluxInitUIThread() {
 
 inline void fluxPostToUIThread(HttpCallback callback, HttpResult result) {
   if (gFluxHttpEventType == static_cast<Uint32>(-1)) {
-
     if (callback) callback(std::move(result));
     return;
   }
 
+  // Enqueue the payload under the lock.
   auto *p = new FluxHttpPayload{std::move(callback), std::move(result)};
   {
     std::lock_guard<std::mutex> lock(gFluxQueueMutex);
     gFluxQueue.push_back(p);
   }
 
+
   SDL_Event e{};
   e.type = gFluxHttpEventType;
-  // SDL_PushEvent is thread-safe.
   if (SDL_PushEvent(&e) < 0) {
 
     std::lock_guard<std::mutex> lock(gFluxQueueMutex);
@@ -102,8 +95,7 @@ inline void fluxPostToUIThread(HttpCallback callback, HttpResult result) {
   }
 }
 
-// Call from your SDL event loop when e.type == gFluxHttpEventType.
-// Drains into a local snapshot so the mutex is not held during callbacks.
+
 inline void fluxProcessHttpEvents() {
   std::vector<FluxHttpPayload *> local;
   {
@@ -141,7 +133,6 @@ static int     gPipeFd[2] = {-1, -1};
 static ALooper *gLooper   = nullptr;
 
 inline void fluxAndroidInitLooper() {
-
   int rc = pipe(gPipeFd);
   assert(rc == 0 && "fluxAndroidInitLooper: pipe() failed");
 
@@ -152,7 +143,6 @@ inline void fluxAndroidInitLooper() {
       gLooper, gPipeFd[0], 0, ALOOPER_EVENT_INPUT,
       [](int fd, int, void *) -> int {
         FluxHttpPayload *p = nullptr;
-
         while (read(fd, &p, sizeof(p)) == sizeof(p)) {
           if (p) {
             if (p->callback) p->callback(std::move(p->result));
@@ -160,25 +150,20 @@ inline void fluxAndroidInitLooper() {
             p = nullptr;
           }
         }
-        return 1; // keep listening
+        return 1;
       },
       nullptr);
 }
 
 inline void fluxPostToUIThread(HttpCallback callback, HttpResult result) {
   if (gPipeFd[1] < 0) {
-    // Looper not initialised — run inline as a safe fallback.
     if (callback) callback(std::move(result));
     return;
   }
   auto *p = new FluxHttpPayload{std::move(callback), std::move(result)};
-  // write() of sizeof(pointer) is atomic on Linux (PIPE_BUF >> sizeof(void*)).
-  if (write(gPipeFd[1], &p, sizeof(p)) != sizeof(p)) {
-
+  if (write(gPipeFd[1], &p, sizeof(p)) != sizeof(p))
     delete p;
-  }
 }
-
 
 inline void fluxAndroidShutdownLooper() {
   if (gLooper && gPipeFd[0] >= 0)
