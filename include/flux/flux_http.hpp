@@ -90,8 +90,12 @@ public:
     // ── Global init / cleanup (call once at app start/end) ───────────────────
     static void globalInit()    { curl_global_init(CURL_GLOBAL_DEFAULT); }
     static void globalCleanup() { curl_global_cleanup(); }
+    static void setCABundle(const std::string& path) {
+        s_caBundle_ = path;
+    }
 
 private:
+    static inline std::string s_caBundle_;
     // ── libcurl write callback ────────────────────────────────────────────────
     static size_t writeCallback(char* ptr, size_t size,
                                 size_t nmemb, void* userdata)
@@ -116,6 +120,12 @@ private:
         std::string responseBody;
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeCallback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA,     &responseBody);
+
+        // ── SSL ───────────────────────────────────────────────────────────────────
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, req.verifySsl ? 1L : 0L);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, req.verifySsl ? 2L : 0L);
+        if (!s_caBundle_.empty())
+            curl_easy_setopt(curl, CURLOPT_CAINFO, s_caBundle_.c_str());
 
         // ── URL + method ─────────────────────────────────────────────────────
         curl_easy_setopt(curl, CURLOPT_URL, req.url.c_str());
