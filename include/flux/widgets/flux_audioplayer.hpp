@@ -1,4 +1,4 @@
-// audio_player_widget.hpp
+// flux_audioplayer.hpp
 // Drop-in, self-contained audio player widget that mirrors the browser <audio>
 // control aesthetic. All playback state is internal — app.cpp just instantiates it.
 //

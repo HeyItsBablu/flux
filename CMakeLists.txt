@@ -81,15 +81,7 @@ endif()
 
 FetchContent_MakeAvailable(curl)
 
-message(WARNING  "=== CURL SSL CHECK ===")
-message(WARNING  "CURL_USE_OPENSSL      = ${CURL_USE_OPENSSL}")
-message(WARNING  "CURL_ENABLE_SSL       = ${CURL_ENABLE_SSL}")
-message(WARNING  "HTTP_ONLY             = ${HTTP_ONLY}")
-message(WARNING  "OPENSSL_INCLUDE_DIR   = ${OPENSSL_INCLUDE_DIR}")
-message(WARNING  "OPENSSL_SSL_LIBRARY   = ${OPENSSL_SSL_LIBRARY}")
-message(WARNING  "OPENSSL_CRYPTO_LIBRARY= ${OPENSSL_CRYPTO_LIBRARY}")
-message(WARNING  "OPENSSL_ROOT_DIR      = ${OPENSSL_ROOT_DIR}")
-message(WARNING  "=====================")
+
 
 # ============================================================================
 # GLAD  (Win32 only)

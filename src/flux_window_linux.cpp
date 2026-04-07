@@ -33,7 +33,7 @@ struct PlatformWindow::CairoState {
     teardown();
     sdlSurface = SDL_GetWindowSurface(win);
     if (!sdlSurface) {
-      FLUX_DBG("SDL_GetWindowSurface FAILED: %s", SDL_GetError());
+   
       return false;
     }
     cairoSurf = cairo_image_surface_create_for_data(
@@ -74,16 +74,16 @@ static Uint32 sdlTimerCallback(Uint32 interval, void *param) {
 
 bool PlatformWindow::create(const std::string &title, int width, int height,
                             AppInstance /*instance*/, void * /*userData*/) {
-  FLUX_DBG("SDL_Init start");
+
   if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) {
-    FLUX_DBG("SDL_Init FAILED: %s", SDL_GetError());
+
     return false;
   }
-  FLUX_DBG("SDL_Init OK");
+
 
   // Must be after SDL_Init so SDL_RegisterEvents works.
   fluxInitUIThread();
-  FLUX_DBG("fluxInitUIThread done, gFluxHttpEventType=%u", (unsigned)gFluxHttpEventType);
+
 
   nativeHandle = SDL_CreateWindow(
       title.c_str(),
@@ -92,7 +92,7 @@ bool PlatformWindow::create(const std::string &title, int width, int height,
       SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
 
   if (!nativeHandle) {
-    FLUX_DBG("SDL_CreateWindow FAILED: %s", SDL_GetError());
+
     SDL_Quit(); return false;
   }
 
@@ -102,13 +102,13 @@ bool PlatformWindow::create(const std::string &title, int width, int height,
 
   cairoState = new CairoState();
   if (!cairoState->rebuild(nativeHandle)) {
-    FLUX_DBG("CairoState::rebuild FAILED");
+  
     delete cairoState; cairoState = nullptr;
     SDL_DestroyWindow(nativeHandle); nativeHandle = nullptr;
     SDL_Quit(); return false;
   }
 
-  FLUX_DBG("create() SUCCESS");
+ 
   return true;
 }
 
@@ -117,7 +117,7 @@ bool PlatformWindow::create(const std::string &title, int width, int height,
 // ============================================================================
 
 void PlatformWindow::destroy() {
-  FLUX_DBG("destroy()");
+
   for (auto &[id, sdlId] : sdlTimerMap) SDL_RemoveTimer(sdlId);
   sdlTimerMap.clear();
   fluxShutdownHttpQueue();
@@ -131,26 +131,19 @@ void PlatformWindow::destroy() {
 // ============================================================================
 
 int PlatformWindow::run() {
-  FLUX_DBG("run() entered");
+
   SDL_Event e;
 
   while (running) {
 
     // ── BLOCK until an event arrives ────────────────────────────────────────
-    FLUX_DBG(">>> blocking in SDL_WaitEvent ...");
+
     if (SDL_WaitEvent(&e) == 0) {
-      FLUX_DBG("SDL_WaitEvent ERROR: %s", SDL_GetError());
+
       continue;
     }
-    FLUX_DBG("<<< SDL_WaitEvent woke up: type=0x%08x  (HTTP=0x%08x  USEREVENT=0x%08x)",
-             (unsigned)e.type, (unsigned)gFluxHttpEventType, (unsigned)SDL_USEREVENT);
 
-    // ── Is this our HTTP wake-up event? ────────────────────────────────────
-    if (e.type == gFluxHttpEventType) {
-      FLUX_DBG("    --> it IS the HTTP event type");
-    } else {
-      FLUX_DBG("    --> NOT the HTTP event type");
-    }
+
 
     handleSDLEvent(e);
 
@@ -160,16 +153,16 @@ int PlatformWindow::run() {
       ++extra;
       handleSDLEvent(e);
     }
-    if (extra) FLUX_DBG("    drained %d extra events", extra);
+    
 
     // ── Process HTTP callbacks ──────────────────────────────────────────────
-    FLUX_DBG("    calling fluxProcessHttpEvents()");
+
     fluxProcessHttpEvents();
-    FLUX_DBG("    fluxProcessHttpEvents() done. dirty=%d", (int)dirty);
+
 
     // ── Paint ───────────────────────────────────────────────────────────────
     if (dirty) {
-      FLUX_DBG("    >>> PAINTING (dirty=true)");
+
       if (callbacks.onPaint && cairoState && cairoState->cr) {
         if (SDL_MUSTLOCK(cairoState->sdlSurface))
           SDL_LockSurface(cairoState->sdlSurface);
@@ -184,13 +177,11 @@ int PlatformWindow::run() {
         SDL_UpdateWindowSurface(nativeHandle);
       }
       dirty = false;
-      FLUX_DBG("    <<< paint done, dirty reset to false");
-    } else {
-      FLUX_DBG("    dirty=false, no paint this iteration");
-    }
+    
+    } 
   }
 
-  FLUX_DBG("run() exiting");
+
   return 0;
 }
 
@@ -202,19 +193,19 @@ void PlatformWindow::handleSDLEvent(const SDL_Event &e) {
 
   // HTTP events are processed separately in run() via fluxProcessHttpEvents().
   if (e.type == gFluxHttpEventType) {
-    FLUX_DBG("handleSDLEvent: HTTP event — skipping (handled in run())");
+   
     return;
   }
 
   switch (e.type) {
 
   case SDL_QUIT:
-    FLUX_DBG("SDL_QUIT");
+
     running = false;
     break;
 
   case SDL_MOUSEBUTTONDOWN:
-    FLUX_DBG("SDL_MOUSEBUTTONDOWN btn=%d (%d,%d)", e.button.button, e.button.x, e.button.y);
+
     if (e.button.button == SDL_BUTTON_LEFT && callbacks.onMouseDown)
       if (callbacks.onMouseDown(e.button.x, e.button.y)) dirty = true;
     if (e.button.button == SDL_BUTTON_RIGHT && callbacks.onRightClick)
@@ -230,7 +221,7 @@ void PlatformWindow::handleSDLEvent(const SDL_Event &e) {
     if (callbacks.onMouseMove) {
       bool changed = callbacks.onMouseMove(e.motion.x, e.motion.y);
       if (changed) {
-        FLUX_DBG("SDL_MOUSEMOTION caused dirty=true");
+
         dirty = true;
       }
     }
@@ -243,7 +234,7 @@ void PlatformWindow::handleSDLEvent(const SDL_Event &e) {
   }
 
   case SDL_KEYDOWN:
-    FLUX_DBG("SDL_KEYDOWN sym=0x%x scan=%d", (unsigned)e.key.keysym.sym, (int)e.key.keysym.scancode);
+    
     if (callbacks.onKeyDown && callbacks.onKeyDown(e.key.keysym.sym)) dirty = true;
     break;
 
@@ -266,7 +257,7 @@ void PlatformWindow::handleSDLEvent(const SDL_Event &e) {
     break;
 
   case SDL_WINDOWEVENT:
-    FLUX_DBG("SDL_WINDOWEVENT sub=%d", (int)e.window.event);
+
     switch (e.window.event) {
     case SDL_WINDOWEVENT_RESIZED:
     case SDL_WINDOWEVENT_SIZE_CHANGED:
@@ -287,13 +278,12 @@ void PlatformWindow::handleSDLEvent(const SDL_Event &e) {
     break;
 
   case SDL_USEREVENT:
-    FLUX_DBG("SDL_USEREVENT (timer) code=%d", e.user.code);
+  
     if (callbacks.onTimer) callbacks.onTimer(static_cast<TimerID>(e.user.code));
     dirty = true;
     break;
 
   default:
-    FLUX_DBG("unhandled event type=0x%08x", (unsigned)e.type);
     break;
   }
 }
@@ -303,12 +293,12 @@ void PlatformWindow::handleSDLEvent(const SDL_Event &e) {
 // ============================================================================
 
 void PlatformWindow::invalidate() {
-  FLUX_DBG("invalidate() -> dirty=true");
+  
   dirty = true;
 }
 
 void PlatformWindow::invalidateRect(int x, int y, int w, int h) {
-  FLUX_DBG("invalidateRect(%d,%d,%d,%d) -> dirty=true", x, y, w, h);
+
   dirty = true;
 }
 
@@ -321,7 +311,7 @@ void PlatformWindow::setTimer(TimerID id, int ms) {
   SDL_TimerID sdlId = SDL_AddTimer(static_cast<Uint32>(ms), sdlTimerCallback,
       reinterpret_cast<void *>(static_cast<uintptr_t>(id)));
   if (sdlId != 0) sdlTimerMap[id] = sdlId;
-  FLUX_DBG("setTimer id=%u ms=%d sdlId=%d", (unsigned)id, ms, (int)sdlId);
+  
 }
 
 void PlatformWindow::killTimer(TimerID id) {

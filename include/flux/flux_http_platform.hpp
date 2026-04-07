@@ -65,17 +65,16 @@ inline std::vector<FluxHttpPayload *> gFluxQueue;
 
 inline void fluxInitUIThread() {
   gFluxHttpEventType = SDL_RegisterEvents(1);
-  FLUX_HTTP_DBG("SDL_RegisterEvents -> gFluxHttpEventType=%u", (unsigned)gFluxHttpEventType);
+ 
   assert(gFluxHttpEventType != static_cast<Uint32>(-1) &&
          "fluxInitUIThread: SDL_RegisterEvents failed — call SDL_Init first.");
 }
 
 inline void fluxPostToUIThread(HttpCallback callback, HttpResult result) {
-  FLUX_HTTP_DBG("called from background thread. success=%d statusCode=%d gFluxHttpEventType=%u",
-                (int)result.success, result.statusCode, (unsigned)gFluxHttpEventType);
+  
 
   if (gFluxHttpEventType == static_cast<Uint32>(-1)) {
-    FLUX_HTTP_DBG("WARNING: event type is -1, running callback inline (WRONG THREAD)");
+   
     if (callback) callback(std::move(result));
     return;
   }
@@ -84,21 +83,20 @@ inline void fluxPostToUIThread(HttpCallback callback, HttpResult result) {
   {
     std::lock_guard<std::mutex> lock(gFluxQueueMutex);
     gFluxQueue.push_back(p);
-    FLUX_HTTP_DBG("payload enqueued, queue size now=%zu", gFluxQueue.size());
+    
   }
 
   SDL_Event e{};
   e.type = gFluxHttpEventType;
   int pushResult = SDL_PushEvent(&e);
-  FLUX_HTTP_DBG("SDL_PushEvent returned %d (1=ok 0=filtered -1=error). error='%s'",
-                pushResult, SDL_GetError());
+ 
 
   if (pushResult < 0) {
     std::lock_guard<std::mutex> lock(gFluxQueueMutex);
     auto it = std::find(gFluxQueue.begin(), gFluxQueue.end(), p);
     if (it != gFluxQueue.end()) gFluxQueue.erase(it);
     delete p;
-    FLUX_HTTP_DBG("SDL_PushEvent FAILED — payload rolled back");
+   
   }
 }
 
@@ -108,10 +106,10 @@ inline void fluxProcessHttpEvents() {
     std::lock_guard<std::mutex> lock(gFluxQueueMutex);
     local.swap(gFluxQueue);
   }
-  FLUX_HTTP_DBG("processing %zu payloads", local.size());
+ 
   for (auto *p : local) {
     if (p) {
-      FLUX_HTTP_DBG("invoking callback, success=%d", (int)p->result.success);
+     
       if (p->callback) p->callback(std::move(p->result));
       delete p;
     }
@@ -120,7 +118,7 @@ inline void fluxProcessHttpEvents() {
 
 inline void fluxShutdownHttpQueue() {
   std::lock_guard<std::mutex> lock(gFluxQueueMutex);
-  FLUX_HTTP_DBG("dropping %zu payloads", gFluxQueue.size());
+
   for (auto *p : gFluxQueue) delete p;
   gFluxQueue.clear();
 }

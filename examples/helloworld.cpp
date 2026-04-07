@@ -5,7 +5,7 @@ class MyApp : public Component {
 public:
   WidgetPtr build() override {
     return Scaffold(AppBar("Flux App"),
-                    Center(AudioPlayer("C:/Users/user/Music/Tum Mile Tum Mile Original Motion Picturetrack 128 Kbps.mp3")->setWidth(380)));
+                    Center(AudioPlayer("/home/roshan/Downloads/Tum Mile Tum Mile Original Motion Picturetrack 320 Kbps.mp3")->setWidth(380)));
   }
 };
 

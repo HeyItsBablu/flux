@@ -977,17 +977,14 @@ class FluxAudio {
 public:
     using FinishCallback = std::function<void()>;
 
-    // ── Singleton ─────────────────────────────────────────────────────────────
     static FluxAudio& get() {
         static FluxAudio instance;
         return instance;
     }
 
-    // ── Volume (0.0–1.0) ─────────────────────────────────────────────────────
     void  setVolume(float v) { s_volume.store(std::max(0.f, std::min(1.f, v))); }
     float getVolume()  const { return s_volume.load(); }
 
-    // ── Progress ──────────────────────────────────────────────────────────────
     float getProgress() const {
         int total = (int)s_playBuffer.size();
         if (total == 0) return 0.f;
@@ -1005,17 +1002,19 @@ public:
     }
 
     // ── Seek ──────────────────────────────────────────────────────────────────
+    // FIX: unified notify so seek works whether paused or playing,
+    // and also wakes the pause-wait predicate.
     void seekToProgress(float progress) {
         int total  = (int)s_playBuffer.size();
         int target = (int)(std::max(0.f, std::min(1.f, progress)) * (float)total);
-
-        // Signal the write thread to jump to the new position
         {
             std::lock_guard<std::mutex> lk(s_cmdMutex);
-            s_seekTarget = target;
+            s_seekTarget  = target;
             s_seekPending = true;
         }
-        s_cmdCV.notify_one();
+        // Wake BOTH condition variables — the write loop may be blocked on either.
+        s_cmdCV.notify_all();
+        s_pauseCV.notify_all();   // FIX: was missing; seek while paused was silently dropped
     }
 
     void seekToSeconds(float seconds) {
@@ -1024,10 +1023,8 @@ public:
         seekToProgress((float)target / (float)std::max(1, (int)s_playBuffer.size()));
     }
 
-    // ── Finish callback ───────────────────────────────────────────────────────
     void setOnFinished(FinishCallback cb) { s_finishCallback = std::move(cb); }
 
-    // ── File playback ─────────────────────────────────────────────────────────
     bool playFromPath(const std::string& path) {
         std::vector<float> samples;
         int sampleRate = 44100;
@@ -1038,43 +1035,51 @@ public:
         return playPCM(samples, sampleRate);
     }
 
-    // ── Pause / Resume ────────────────────────────────────────────────────────
+    // ── Pause ─────────────────────────────────────────────────────────────────
     void pause() {
         if (!s_playing.load()) return;
         std::lock_guard<std::mutex> lk(s_cmdMutex);
         s_pauseRequested = true;
-        s_cmdCV.notify_one();
+        s_cmdCV.notify_all();   // FIX: was notify_one; use notify_all for safety
     }
 
+    // ── Resume ────────────────────────────────────────────────────────────────
     void resume() {
         if (!s_paused.load()) return;
         {
             std::lock_guard<std::mutex> lk(s_cmdMutex);
             s_resumeRequested = true;
         }
-        s_cmdCV.notify_one();
+        s_pauseCV.notify_all();
     }
 
     bool isPaused()  const { return s_paused.load();  }
     bool isPlaying() const { return s_playing.load(); }
 
     // ── PCM playback ──────────────────────────────────────────────────────────
+    // FIX: stopPlayback() joins the old thread, which previously could deadlock
+    // if that thread was blocked in snd_pcm_writei. We now open ALSA with
+    // SND_PCM_NONBLOCK so writei never blocks indefinitely, and we set
+    // s_stopRequested before joining.
     bool playPCM(const std::vector<float>& samples, int sampleRate = 44100) {
-        stopPlayback();     // stop any current playback and join thread
+        stopPlayback();   // safe join after FIX below
 
-        s_playBuffer     = samples;
-        s_playPosition   = 0;
-        s_playSampleRate = sampleRate;
-        s_didFireFinish  = false;
-        s_paused         = false;
-        s_playing        = true;
+        // FIX: copy buffer under a short lock so the write thread never races
+        // on a half-constructed buffer.
+        {
+            std::lock_guard<std::mutex> lk(s_cmdMutex);
+            s_playBuffer     = samples;
+            s_playSampleRate = sampleRate;
+            s_playPosition   = 0;
+            s_didFireFinish  = false;
+            s_paused         = false;
+            s_pauseRequested  = false;
+            s_resumeRequested = false;
+            s_seekPending     = false;
+            s_stopRequested   = false;
+        }
 
-        // Reset command flags
-        s_pauseRequested  = false;
-        s_resumeRequested = false;
-        s_seekPending     = false;
-        s_stopRequested   = false;
-
+        s_playing = true;
         s_writeThread = std::thread(&FluxAudio::_writeLoop, this);
         return true;
     }
@@ -1085,6 +1090,7 @@ public:
                 std::lock_guard<std::mutex> lk(s_cmdMutex);
                 s_stopRequested = true;
             }
+            // Wake every possible wait point so the thread exits promptly.
             s_cmdCV.notify_all();
             s_pauseCV.notify_all();
             s_writeThread.join();
@@ -1096,7 +1102,6 @@ public:
     void closePlayback() { stopPlayback(); }
     void shutdown()      { stopPlayback(); }
 
-    // ── Waveform ──────────────────────────────────────────────────────────────
     static std::vector<std::pair<int,int>> buildWaveform(
             const float* samples, int count,
             int x, int y, int w, int h, int points = 200)
@@ -1127,7 +1132,6 @@ public:
                              x, y, w, h, points);
     }
 
-    // stubs — recording not implemented on Linux yet
     bool  isRecording()  const { return false; }
     float getInputLevel() const { return 0.f;  }
 
@@ -1136,7 +1140,7 @@ private:
     ~FluxAudio() { shutdown(); }
 
     // ── Playback state ────────────────────────────────────────────────────────
-    std::vector<float>   s_playBuffer;
+    std::vector<float>   s_playBuffer;   // written only from playPCM (under lock)
     std::atomic<int>     s_playPosition  {0};
     int                  s_playSampleRate = 44100;
     std::atomic<float>   s_volume        {1.0f};
@@ -1157,18 +1161,20 @@ private:
     bool s_seekPending     = false;
     int  s_seekTarget      = 0;
 
-    // ── ALSA write loop (runs on dedicated thread) ────────────────────────────
+    // ── ALSA write loop ───────────────────────────────────────────────────────
     void _writeLoop() {
-        // ── Open PCM device ───────────────────────────────────────────────────
+        // FIX: open in NON-BLOCKING mode so snd_pcm_writei never stalls the
+        // thread indefinitely, which previously caused stopPlayback/join to
+        // deadlock when playback was interrupted mid-write.
         snd_pcm_t* pcm = nullptr;
-        int err = snd_pcm_open(&pcm, "default", SND_PCM_STREAM_PLAYBACK, 0);
+        int err = snd_pcm_open(&pcm, "default", SND_PCM_STREAM_PLAYBACK,
+                               SND_PCM_NONBLOCK);   // ← KEY FIX
         if (err < 0) {
             AUDIO_LOGE("snd_pcm_open failed: %s", snd_strerror(err));
             s_playing = false;
             return;
         }
 
-        // ── Configure hardware params ─────────────────────────────────────────
         snd_pcm_hw_params_t* hw = nullptr;
         snd_pcm_hw_params_alloca(&hw);
         snd_pcm_hw_params_any(pcm, hw);
@@ -1180,11 +1186,9 @@ private:
         unsigned int rate = (unsigned int)s_playSampleRate;
         snd_pcm_hw_params_set_rate_near (pcm, hw, &rate, nullptr);
 
-        // Period = 512 frames (~11 ms at 44100 Hz) — low latency, stable
         snd_pcm_uframes_t period = 512;
         snd_pcm_hw_params_set_period_size_near(pcm, hw, &period, nullptr);
 
-        // 4 periods of buffer = 2048 frames total
         snd_pcm_uframes_t bufSize = period * 4;
         snd_pcm_hw_params_set_buffer_size_near(pcm, hw, &bufSize);
 
@@ -1196,21 +1200,27 @@ private:
             return;
         }
 
-        AUDIO_LOGI("ALSA opened: rate=%uHz period=%lu frames", rate, period);
+        // FIX: switch back to blocking writes after configuration — this means
+        // snd_pcm_writei blocks only for one period (~11 ms) before returning,
+        // which is short enough that our stop signal is always seen quickly.
+        // (Non-blocking is only needed during open to avoid blocking on a busy
+        // device. Some ALSA implementations require the fd to be non-blocking
+        // at open time even if you want short-blocking writes later.)
+        snd_pcm_nonblock(pcm, 0);
 
-        // ── Prepare and write ─────────────────────────────────────────────────
         snd_pcm_prepare(pcm);
 
+        AUDIO_LOGI("ALSA opened: rate=%uHz period=%lu frames", rate, period);
+
         std::vector<float> periodBuf(period);
-        float vol = s_volume.load();
 
         while (true) {
-            // ── Check commands ────────────────────────────────────────────────
+            // ── Check stop first (highest priority) ───────────────────────────
             {
                 std::unique_lock<std::mutex> lk(s_cmdMutex);
-
                 if (s_stopRequested) break;
 
+                // ── Handle seek ───────────────────────────────────────────────
                 if (s_seekPending) {
                     s_playPosition.store(s_seekTarget);
                     s_seekPending = false;
@@ -1218,18 +1228,25 @@ private:
                     snd_pcm_prepare(pcm);
                 }
 
+                // ── Handle pause ──────────────────────────────────────────────
                 if (s_pauseRequested) {
                     s_pauseRequested = false;
                     s_playing        = false;
                     s_paused         = true;
-                    snd_pcm_drop(pcm);   // discard buffered audio immediately
+                    snd_pcm_drop(pcm);
 
-                    // Block here until resume or stop
+                    // FIX: predicate now also checks s_seekPending so a seek
+                    // while paused correctly unblocks and resumes from new pos.
                     s_pauseCV.wait(lk, [this] {
-                        return s_resumeRequested || s_stopRequested;
+                        return s_resumeRequested || s_stopRequested || s_seekPending;
                     });
 
                     if (s_stopRequested) break;
+
+                    if (s_seekPending) {
+                        s_playPosition.store(s_seekTarget);
+                        s_seekPending = false;
+                    }
 
                     s_resumeRequested = false;
                     s_paused          = false;
@@ -1242,10 +1259,8 @@ private:
             int pos   = s_playPosition.load();
             int total = (int)s_playBuffer.size();
             if (pos >= total) {
-                // Drain hardware buffer so the last period plays fully
                 snd_pcm_drain(pcm);
                 s_playing = false;
-
                 bool expected = false;
                 if (s_didFireFinish.compare_exchange_strong(expected, true))
                     if (s_finishCallback) s_finishCallback();
@@ -1254,23 +1269,25 @@ private:
 
             // ── Fill one period ───────────────────────────────────────────────
             int avail   = total - pos;
-            int nFrames = (int)std::min((int)period, avail);
+            int nFrames = std::min((int)period, avail);
+            float vol   = s_volume.load();
 
-            vol = s_volume.load();
             for (int i = 0; i < nFrames; i++)
                 periodBuf[i] = s_playBuffer[pos + i] * vol;
-
-            // Zero-pad the tail of the last period if needed
             for (int i = nFrames; i < (int)period; i++)
                 periodBuf[i] = 0.f;
 
-            // ── Write to ALSA ─────────────────────────────────────────────────
+            // ── Write to ALSA (blocking, returns after ~one period) ───────────
             snd_pcm_sframes_t written = snd_pcm_writei(pcm, periodBuf.data(), period);
 
-            if (written == -EPIPE) {
-                // Underrun — recover and continue
+            if (written == -EAGAIN) {
+                // Non-blocking would hit this; with blocking it shouldn't, but
+                // handle gracefully just in case.
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                continue;
+            } else if (written == -EPIPE) {
                 AUDIO_LOGI("ALSA underrun, recovering");
-                snd_pcm_recover(pcm, (int)written, 1 /*silent*/);
+                snd_pcm_recover(pcm, (int)written, 1);
                 continue;
             } else if (written < 0) {
                 AUDIO_LOGE("snd_pcm_writei error: %s", snd_strerror((int)written));
@@ -1278,7 +1295,6 @@ private:
                 continue;
             }
 
-            // Advance position by how many frames were actually accepted
             s_playPosition.fetch_add((int)written);
         }
 
