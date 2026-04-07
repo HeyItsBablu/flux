@@ -7,7 +7,7 @@
 //       ->setWidth(380)
 //
 #pragma once
-#ifdef __ANDROID__
+
 
 #include "flux/flux.hpp"
 #include "flux/flux_audio.hpp"
@@ -401,4 +401,3 @@ inline AudioPlayerWidgetPtr AudioPlayer(const std::string& path = "") {
     return w;
 }
 
-#endif // __ANDROID__

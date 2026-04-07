@@ -7,7 +7,7 @@
 #include <android/log.h>
 #include <functional>
 #include <vector>
-#include <atomic>
+#include <atomic> 
 #include <cstring>
 #include <string>
 #include <cmath>
@@ -66,10 +66,6 @@ public:
         return (float)s_playBuffer.size() / (float)s_playSampleRate;
     }
 
-    // =========================================================================
-    // SEEK  — progress in 0.0–1.0 range
-    // Call from UI thread; the callback thread reads s_playPosition atomically.
-    // =========================================================================
 
     void seekToProgress(float progress) {
         int total  = (int)s_playBuffer.size();
@@ -83,10 +79,6 @@ public:
         s_playPosition.store(target);
     }
 
-    // =========================================================================
-    // FINISH CALLBACK — fired once when playback ends naturally
-    // Set before calling playFromPath / playPCM.
-    // =========================================================================
 
     void setOnFinished(FinishCallback cb) { s_finishCallback = std::move(cb); }
 
@@ -525,3 +517,432 @@ private:
 };
 
 #endif // __ANDROID__
+
+// ============================================================================
+// FluxAudio — XAudio2-based backend  (Windows)
+// ============================================================================
+#ifdef _WIN32
+
+#include <xaudio2.h>
+#include <wrl/client.h>          // Microsoft::WRL::ComPtr
+
+#include <functional>
+#include <vector>
+#include <atomic>
+#include <cstring>
+#include <string>
+#include <cmath>
+#include <algorithm>
+
+#include "dr_mp3.h"
+#include "dr_wav.h"
+
+#undef  AUDIO_LOGI
+#undef  AUDIO_LOGE
+#define AUDIO_LOGI(fmt, ...) do { char _b[256]; snprintf(_b,256,"[FluxAudio] " fmt "\n",##__VA_ARGS__); OutputDebugStringA(_b); } while(0)
+#define AUDIO_LOGE(fmt, ...) AUDIO_LOGI(fmt, ##__VA_ARGS__)
+
+// ── VoiceCallback — fires OnStreamEnd when the source voice drains ───────────
+class FLXVoiceCallback : public IXAudio2VoiceCallback {
+public:
+    std::function<void()> onStreamEnd;
+
+    void STDMETHODCALLTYPE OnStreamEnd() noexcept override {
+        if (onStreamEnd) onStreamEnd();
+    }
+    // Required no-ops
+    void STDMETHODCALLTYPE OnVoiceProcessingPassStart(UINT32) noexcept override {}
+    void STDMETHODCALLTYPE OnVoiceProcessingPassEnd()         noexcept override {}
+    void STDMETHODCALLTYPE OnBufferStart(void*)               noexcept override {}
+    void STDMETHODCALLTYPE OnBufferEnd(void*)                 noexcept override {}
+    void STDMETHODCALLTYPE OnLoopEnd(void*)                   noexcept override {}
+    void STDMETHODCALLTYPE OnVoiceError(void*, HRESULT)       noexcept override {}
+};
+
+class FluxAudio {
+public:
+    using FinishCallback = std::function<void()>;
+
+    // ── Singleton ─────────────────────────────────────────────────────────────
+    static FluxAudio& get() {
+        static FluxAudio instance;
+        return instance;
+    }
+
+    // ── Volume (0.0–1.0) ─────────────────────────────────────────────────────
+    void  setVolume(float v) {
+        s_volume.store(std::max(0.f, std::min(1.f, v)));
+        if (s_sourceVoice) s_sourceVoice->SetVolume(s_volume.load());
+    }
+    float getVolume() const { return s_volume.load(); }
+
+    // ── Progress ──────────────────────────────────────────────────────────────
+    float getProgress() const {
+        int total = (int)s_playBuffer.size();
+        if (total == 0) return 0.f;
+  
+        return std::min(1.f, (float)s_playPosition.load() / (float)total);
+    }
+
+    float getPositionSeconds() const {
+        if (s_playSampleRate == 0) return 0.f;
+        return (float)s_playPosition.load() / (float)s_playSampleRate;
+    }
+
+    float getDurationSeconds() const {
+        if (s_playSampleRate == 0) return 0.f;
+        return (float)s_playBuffer.size() / (float)s_playSampleRate;
+    }
+
+    // ── Seek ──────────────────────────────────────────────────────────────────
+    void seekToProgress(float progress) {
+        int total  = (int)s_playBuffer.size();
+        int target = (int)(std::max(0.f, std::min(1.f, progress)) * total);
+        bool wasPlaying = s_playing.load();
+
+        _stopVoice();
+
+        s_playPosition.store(target);
+
+        if (wasPlaying || s_paused.load()) {
+            s_paused = false;
+            _submitAndStart();
+            s_playing = true;
+        }
+    }
+
+    void seekToSeconds(float seconds) {
+        int target = (int)(seconds * s_playSampleRate);
+        target = std::max(0, std::min((int)s_playBuffer.size(), target));
+        seekToProgress((float)target / (float)std::max(1, (int)s_playBuffer.size()));
+    }
+
+    // ── Finish callback ───────────────────────────────────────────────────────
+    void setOnFinished(FinishCallback cb) { s_finishCallback = std::move(cb); }
+
+    // ── File playback ─────────────────────────────────────────────────────────
+    bool playFromPath(const std::string& path) {
+        std::vector<float> samples;
+        int sampleRate = 44100;
+        if (!_decodeFile(path, samples, sampleRate)) {
+            AUDIO_LOGE("playFromPath: failed to decode '%s'", path.c_str());
+            return false;
+        }
+        return playPCM(samples, sampleRate);
+    }
+
+    // ── Pause / Resume ────────────────────────────────────────────────────────
+    void pause() {
+        if (!s_playing.load()) return;
+        if (s_sourceVoice) {
+            // Capture position before stopping
+            XAUDIO2_VOICE_STATE vs{};
+            s_sourceVoice->GetState(&vs);
+            // samplesPlayed is from the start of the last SubmitSourceBuffer
+            int consumed = (int)vs.SamplesPlayed;
+            int newPos = std::min(s_submitOffset + consumed,
+                                  (int)s_playBuffer.size());
+            s_playPosition.store(newPos);
+            s_sourceVoice->Stop();
+        }
+        s_playing = false;
+        s_paused  = true;
+    }
+
+    void resume() {
+        if (!s_paused.load()) return;
+        s_paused = false;
+        _submitAndStart();
+        s_playing = true;
+    }
+
+    bool isPaused() const { return s_paused.load(); }
+    bool isPlaying() const { return s_playing.load(); }
+
+    // ── PCM playback ──────────────────────────────────────────────────────────
+    bool playPCM(const std::vector<float>& samples, int sampleRate = 44100) {
+        closePlayback();
+        s_playBuffer    = samples;
+        s_playPosition  = 0;
+        s_submitOffset  = 0;
+        s_playSampleRate = sampleRate;
+        s_didFireFinish = false;
+        s_paused        = false;
+
+        if (!_ensureEngine()) return false;
+        if (!_createSourceVoice(sampleRate)) return false;
+        _submitAndStart();
+        s_playing = true;
+        return true;
+    }
+
+    void stopPlayback() {
+        _stopVoice();
+        s_playing = false;
+        s_paused  = false;
+    }
+
+    void closePlayback() {
+        stopPlayback();
+        if (s_sourceVoice) {
+            s_sourceVoice->DestroyVoice();
+            s_sourceVoice = nullptr;
+        }
+    }
+
+    void shutdown() { closePlayback(); }
+
+    // ── Waveform (shared utility) ─────────────────────────────────────────────
+    static std::vector<std::pair<int,int>> buildWaveform(
+            const float* samples, int count,
+            int x, int y, int w, int h, int points = 200)
+    {
+        std::vector<std::pair<int,int>> result;
+        if (count == 0 || points <= 0) return result;
+        result.reserve(points);
+        float step  = (float)count / points;
+        int   halfH = h / 2;
+        int   midY  = y + halfH;
+        for (int i = 0; i < points; i++) {
+            int start = (int)(i * step);
+            int end   = std::min((int)((i+1)*step), count);
+            float peak = 0.f;
+            for (int j = start; j < end; j++)
+                peak = std::max(peak, std::abs(samples[j]));
+            result.emplace_back(x + (i * w / points),
+                                midY - (int)(peak * halfH));
+        }
+        return result;
+    }
+
+    static std::vector<std::pair<int,int>> buildWaveform(
+            const std::vector<float>& samples,
+            int x, int y, int w, int h, int points = 200)
+    {
+        return buildWaveform(samples.data(), (int)samples.size(),
+                             x, y, w, h, points);
+    }
+
+    // stubs so AudioPlayerWidget compiles (recording not implemented on Win32 yet)
+    bool isRecording()                        const { return false; }
+    float getInputLevel()                     const { return 0.f; }
+
+private:
+    FluxAudio() = default;
+    ~FluxAudio() { shutdown(); }
+
+    // ── State ─────────────────────────────────────────────────────────────────
+    Microsoft::WRL::ComPtr<IXAudio2>        s_xaudio2;
+    IXAudio2MasteringVoice*                 s_masterVoice  = nullptr;
+    IXAudio2SourceVoice*                    s_sourceVoice  = nullptr;
+    FLXVoiceCallback                        s_voiceCB;
+
+    std::vector<float>   s_playBuffer;
+    std::atomic<int>     s_playPosition  {0};
+    int                  s_submitOffset  = 0;   // buffer offset of last SubmitSourceBuffer
+    int                  s_playSampleRate = 44100;
+
+    std::atomic<bool>    s_playing       {false};
+    std::atomic<bool>    s_paused        {false};
+    std::atomic<bool>    s_didFireFinish {false};
+    std::atomic<float>   s_volume        {1.0f};
+
+    FinishCallback       s_finishCallback;
+
+    // ── XAudio2 init ──────────────────────────────────────────────────────────
+    bool _ensureEngine() {
+        if (s_xaudio2) return true;
+
+        CoInitializeEx(nullptr, COINIT_MULTITHREADED);   // safe to call multiple times
+
+        UINT32 flags = 0;
+        HRESULT hr = XAudio2Create(s_xaudio2.GetAddressOf(), flags);
+        if (FAILED(hr)) { AUDIO_LOGE("XAudio2Create failed: 0x%08X", hr); return false; }
+
+        hr = s_xaudio2->CreateMasteringVoice(&s_masterVoice);
+        if (FAILED(hr)) { AUDIO_LOGE("CreateMasteringVoice failed: 0x%08X", hr); return false; }
+
+        return true;
+    }
+
+    bool _createSourceVoice(int sampleRate) {
+        if (s_sourceVoice) {
+            s_sourceVoice->DestroyVoice();
+            s_sourceVoice = nullptr;
+        }
+
+        WAVEFORMATEX wfx{};
+        wfx.wFormatTag      = WAVE_FORMAT_IEEE_FLOAT;
+        wfx.nChannels       = 1;
+        wfx.nSamplesPerSec  = (DWORD)sampleRate;
+        wfx.wBitsPerSample  = 32;
+        wfx.nBlockAlign     = (wfx.nChannels * wfx.wBitsPerSample) / 8;
+        wfx.nAvgBytesPerSec = wfx.nSamplesPerSec * wfx.nBlockAlign;
+        wfx.cbSize          = 0;
+
+        // Wire up the finish callback via the voice callback object
+        s_voiceCB.onStreamEnd = [this]() {
+            s_playing = false;
+            s_playPosition.store((int)s_playBuffer.size());  // mark fully played
+            bool expected = false;
+            if (s_didFireFinish.compare_exchange_strong(expected, true))
+                if (s_finishCallback) s_finishCallback();
+        };
+
+        HRESULT hr = s_xaudio2->CreateSourceVoice(
+            &s_sourceVoice, &wfx,
+            0, XAUDIO2_DEFAULT_FREQ_RATIO,
+            &s_voiceCB);
+        if (FAILED(hr)) {
+            AUDIO_LOGE("CreateSourceVoice failed: 0x%08X", hr);
+            s_sourceVoice = nullptr;
+            return false;
+        }
+
+        s_sourceVoice->SetVolume(s_volume.load());
+        return true;
+    }
+
+    // Submit from s_playPosition to end of buffer, then start the voice
+    void _submitAndStart() {
+        if (!s_sourceVoice) return;
+
+        s_sourceVoice->FlushSourceBuffers();
+
+        int start = s_playPosition.load();
+        int total = (int)s_playBuffer.size();
+        if (start >= total) return;
+
+        s_submitOffset = start;
+
+        XAUDIO2_BUFFER buf{};
+        buf.AudioBytes = (UINT32)((total - start) * sizeof(float));
+        buf.pAudioData = reinterpret_cast<const BYTE*>(s_playBuffer.data() + start);
+        buf.Flags      = XAUDIO2_END_OF_STREAM;
+        // We drive s_playPosition ourselves via a periodic query in getProgress(),
+        // so no pContext tricks needed.
+
+        s_sourceVoice->SubmitSourceBuffer(&buf);
+        s_sourceVoice->Start();
+
+        // Kick off a background thread to update s_playPosition at ~30 Hz
+        // so that AudioPlayerWidget::render() sees smooth progress.
+        _startProgressThread();
+    }
+
+    void _stopVoice() {
+        if (!s_sourceVoice) return;
+        // Snapshot position before stopping
+        XAUDIO2_VOICE_STATE vs{};
+        s_sourceVoice->GetState(&vs);
+        int newPos = std::min(s_submitOffset + (int)vs.SamplesPlayed,
+                              (int)s_playBuffer.size());
+        s_playPosition.store(newPos);
+        s_sourceVoice->Stop();
+        s_sourceVoice->FlushSourceBuffers();
+    }
+
+    // ── Progress polling thread ───────────────────────────────────────────────
+    // XAudio2 doesn't have a per-frame callback like AAudio, so we poll.
+    std::thread           s_progressThread;
+    std::atomic<bool>     s_progressRunning {false};
+
+    void _startProgressThread() {
+        if (s_progressRunning.load()) return;
+        s_progressRunning = true;
+
+        s_progressThread = std::thread([this]() {
+            while (s_progressRunning.load()) {
+                if (s_sourceVoice && s_playing.load()) {
+                    XAUDIO2_VOICE_STATE vs{};
+                    s_sourceVoice->GetState(&vs);
+                    int newPos = std::min(s_submitOffset + (int)vs.SamplesPlayed,
+                                         (int)s_playBuffer.size());
+                    s_playPosition.store(newPos);
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(33));  // ~30 Hz
+            }
+        });
+        s_progressThread.detach();
+    }
+
+    void _stopProgressThread() {
+        s_progressRunning = false;
+        // thread is detached — it will exit on its own within 33 ms
+    }
+
+    // ── File decode (identical logic to Android) ──────────────────────────────
+    static bool _isMp3(const std::string& p) {
+        if (p.size() < 4) return false;
+        std::string e = p.substr(p.size()-4);
+        for (auto& c : e) c=(char)tolower(c);
+        return e == ".mp3";
+    }
+    static bool _isWav(const std::string& p) {
+        if (p.size() < 4) return false;
+        std::string e = p.substr(p.size()-4);
+        for (auto& c : e) c=(char)tolower(c);
+        return e == ".wav";
+    }
+
+    static std::vector<uint8_t> _loadBytes(const std::string& path) {
+        FILE* f = fopen(path.c_str(), "rb");
+        if (!f) return {};
+        fseek(f, 0, SEEK_END);
+        size_t len = (size_t)ftell(f);
+        fseek(f, 0, SEEK_SET);
+        std::vector<uint8_t> buf(len);
+        fread(buf.data(), 1, len, f);
+        fclose(f);
+        return buf;
+    }
+
+    bool _decodeFile(const std::string& path,
+                     std::vector<float>& out, int& outSR)
+    {
+        auto raw = _loadBytes(path);
+        if (raw.empty()) return false;
+
+        if (_isMp3(path)) {
+            drmp3_config cfg{};
+            drmp3_uint64 frames = 0;
+            float* pcm = drmp3_open_memory_and_read_pcm_frames_f32(
+                raw.data(), raw.size(), &cfg, &frames, nullptr);
+            if (!pcm) return false;
+            outSR = (int)cfg.sampleRate;
+            _mixdownToMono(pcm, (int)frames, (int)cfg.channels, out);
+            drmp3_free(pcm, nullptr);
+            return true;
+        }
+        if (_isWav(path)) {
+            drwav_uint64 frames = 0;
+            unsigned ch = 0, sr = 0;
+            float* pcm = drwav_open_memory_and_read_pcm_frames_f32(
+                raw.data(), raw.size(), &ch, &sr, &frames, nullptr);
+            if (!pcm) return false;
+            outSR = (int)sr;
+            _mixdownToMono(pcm, (int)frames, (int)ch, out);
+            drwav_free(pcm, nullptr);
+            return true;
+        }
+        return false;
+    }
+
+    static void _mixdownToMono(const float* src, int frames, int channels,
+                               std::vector<float>& out)
+    {
+        out.resize(frames);
+        if (channels == 1) {
+            memcpy(out.data(), src, frames * sizeof(float));
+        } else {
+            float inv = 1.f / channels;
+            for (int i = 0; i < frames; i++) {
+                float sum = 0.f;
+                for (int c = 0; c < channels; c++) sum += src[i*channels+c];
+                out[i] = sum * inv;
+            }
+        }
+    }
+};
+
+#endif // _WIN32

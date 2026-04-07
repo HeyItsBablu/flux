@@ -25,7 +25,7 @@
 #include "flux_toast.hpp"
 #include "flux_input_extended.hpp"
 #include "flux_accordion.hpp"
-#include "flux_audio_widget.hpp"
+#include "flux_audioplayer.hpp"
 #include "flux_videoplayer.hpp"
 #include "mic_recorder_widget.hpp"
 #include "camera_widget.hpp"
