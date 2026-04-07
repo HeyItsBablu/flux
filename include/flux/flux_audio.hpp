@@ -946,3 +946,418 @@ private:
 };
 
 #endif // _WIN32
+
+
+// ============================================================================
+// FluxAudio — ALSA-based backend  (Linux desktop)
+// ============================================================================
+#if defined(__linux__) && !defined(__ANDROID__)
+
+#include <alsa/asoundlib.h>
+#include <functional>
+#include <vector>
+#include <atomic>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <chrono>
+#include <cstring>
+#include <string>
+#include <cmath>
+#include <algorithm>
+#include <cstdio>
+
+#include "dr_mp3.h"
+#include "dr_wav.h"
+
+#define AUDIO_LOGI(fmt, ...) do { fprintf(stderr, "[FluxAudio] " fmt "\n", ##__VA_ARGS__); } while(0)
+#define AUDIO_LOGE(fmt, ...) AUDIO_LOGI(fmt, ##__VA_ARGS__)
+
+class FluxAudio {
+public:
+    using FinishCallback = std::function<void()>;
+
+    // ── Singleton ─────────────────────────────────────────────────────────────
+    static FluxAudio& get() {
+        static FluxAudio instance;
+        return instance;
+    }
+
+    // ── Volume (0.0–1.0) ─────────────────────────────────────────────────────
+    void  setVolume(float v) { s_volume.store(std::max(0.f, std::min(1.f, v))); }
+    float getVolume()  const { return s_volume.load(); }
+
+    // ── Progress ──────────────────────────────────────────────────────────────
+    float getProgress() const {
+        int total = (int)s_playBuffer.size();
+        if (total == 0) return 0.f;
+        return std::min(1.f, (float)s_playPosition.load() / (float)total);
+    }
+
+    float getPositionSeconds() const {
+        if (s_playSampleRate == 0) return 0.f;
+        return (float)s_playPosition.load() / (float)s_playSampleRate;
+    }
+
+    float getDurationSeconds() const {
+        if (s_playSampleRate == 0) return 0.f;
+        return (float)s_playBuffer.size() / (float)s_playSampleRate;
+    }
+
+    // ── Seek ──────────────────────────────────────────────────────────────────
+    void seekToProgress(float progress) {
+        int total  = (int)s_playBuffer.size();
+        int target = (int)(std::max(0.f, std::min(1.f, progress)) * (float)total);
+
+        // Signal the write thread to jump to the new position
+        {
+            std::lock_guard<std::mutex> lk(s_cmdMutex);
+            s_seekTarget = target;
+            s_seekPending = true;
+        }
+        s_cmdCV.notify_one();
+    }
+
+    void seekToSeconds(float seconds) {
+        int target = (int)(seconds * (float)s_playSampleRate);
+        target = std::max(0, std::min((int)s_playBuffer.size(), target));
+        seekToProgress((float)target / (float)std::max(1, (int)s_playBuffer.size()));
+    }
+
+    // ── Finish callback ───────────────────────────────────────────────────────
+    void setOnFinished(FinishCallback cb) { s_finishCallback = std::move(cb); }
+
+    // ── File playback ─────────────────────────────────────────────────────────
+    bool playFromPath(const std::string& path) {
+        std::vector<float> samples;
+        int sampleRate = 44100;
+        if (!_decodeFile(path, samples, sampleRate)) {
+            AUDIO_LOGE("playFromPath: failed to decode '%s'", path.c_str());
+            return false;
+        }
+        return playPCM(samples, sampleRate);
+    }
+
+    // ── Pause / Resume ────────────────────────────────────────────────────────
+    void pause() {
+        if (!s_playing.load()) return;
+        std::lock_guard<std::mutex> lk(s_cmdMutex);
+        s_pauseRequested = true;
+        s_cmdCV.notify_one();
+    }
+
+    void resume() {
+        if (!s_paused.load()) return;
+        {
+            std::lock_guard<std::mutex> lk(s_cmdMutex);
+            s_resumeRequested = true;
+        }
+        s_cmdCV.notify_one();
+    }
+
+    bool isPaused()  const { return s_paused.load();  }
+    bool isPlaying() const { return s_playing.load(); }
+
+    // ── PCM playback ──────────────────────────────────────────────────────────
+    bool playPCM(const std::vector<float>& samples, int sampleRate = 44100) {
+        stopPlayback();     // stop any current playback and join thread
+
+        s_playBuffer     = samples;
+        s_playPosition   = 0;
+        s_playSampleRate = sampleRate;
+        s_didFireFinish  = false;
+        s_paused         = false;
+        s_playing        = true;
+
+        // Reset command flags
+        s_pauseRequested  = false;
+        s_resumeRequested = false;
+        s_seekPending     = false;
+        s_stopRequested   = false;
+
+        s_writeThread = std::thread(&FluxAudio::_writeLoop, this);
+        return true;
+    }
+
+    void stopPlayback() {
+        if (s_writeThread.joinable()) {
+            {
+                std::lock_guard<std::mutex> lk(s_cmdMutex);
+                s_stopRequested = true;
+            }
+            s_cmdCV.notify_all();
+            s_pauseCV.notify_all();
+            s_writeThread.join();
+        }
+        s_playing = false;
+        s_paused  = false;
+    }
+
+    void closePlayback() { stopPlayback(); }
+    void shutdown()      { stopPlayback(); }
+
+    // ── Waveform ──────────────────────────────────────────────────────────────
+    static std::vector<std::pair<int,int>> buildWaveform(
+            const float* samples, int count,
+            int x, int y, int w, int h, int points = 200)
+    {
+        std::vector<std::pair<int,int>> result;
+        if (count == 0 || points <= 0) return result;
+        result.reserve(points);
+        float step  = (float)count / points;
+        int   halfH = h / 2;
+        int   midY  = y + halfH;
+        for (int i = 0; i < points; i++) {
+            int   start = (int)(i * step);
+            int   end   = std::min((int)((i+1)*step), count);
+            float peak  = 0.f;
+            for (int j = start; j < end; j++)
+                peak = std::max(peak, std::abs(samples[j]));
+            result.emplace_back(x + (i * w / points),
+                                midY - (int)(peak * halfH));
+        }
+        return result;
+    }
+
+    static std::vector<std::pair<int,int>> buildWaveform(
+            const std::vector<float>& samples,
+            int x, int y, int w, int h, int points = 200)
+    {
+        return buildWaveform(samples.data(), (int)samples.size(),
+                             x, y, w, h, points);
+    }
+
+    // stubs — recording not implemented on Linux yet
+    bool  isRecording()  const { return false; }
+    float getInputLevel() const { return 0.f;  }
+
+private:
+    FluxAudio()  = default;
+    ~FluxAudio() { shutdown(); }
+
+    // ── Playback state ────────────────────────────────────────────────────────
+    std::vector<float>   s_playBuffer;
+    std::atomic<int>     s_playPosition  {0};
+    int                  s_playSampleRate = 44100;
+    std::atomic<float>   s_volume        {1.0f};
+    std::atomic<bool>    s_playing       {false};
+    std::atomic<bool>    s_paused        {false};
+    std::atomic<bool>    s_didFireFinish {false};
+    FinishCallback       s_finishCallback;
+
+    // ── Write thread + command channel ────────────────────────────────────────
+    std::thread              s_writeThread;
+    std::mutex               s_cmdMutex;
+    std::condition_variable  s_cmdCV;
+    std::condition_variable  s_pauseCV;
+
+    bool s_pauseRequested  = false;
+    bool s_resumeRequested = false;
+    bool s_stopRequested   = false;
+    bool s_seekPending     = false;
+    int  s_seekTarget      = 0;
+
+    // ── ALSA write loop (runs on dedicated thread) ────────────────────────────
+    void _writeLoop() {
+        // ── Open PCM device ───────────────────────────────────────────────────
+        snd_pcm_t* pcm = nullptr;
+        int err = snd_pcm_open(&pcm, "default", SND_PCM_STREAM_PLAYBACK, 0);
+        if (err < 0) {
+            AUDIO_LOGE("snd_pcm_open failed: %s", snd_strerror(err));
+            s_playing = false;
+            return;
+        }
+
+        // ── Configure hardware params ─────────────────────────────────────────
+        snd_pcm_hw_params_t* hw = nullptr;
+        snd_pcm_hw_params_alloca(&hw);
+        snd_pcm_hw_params_any(pcm, hw);
+
+        snd_pcm_hw_params_set_access    (pcm, hw, SND_PCM_ACCESS_RW_INTERLEAVED);
+        snd_pcm_hw_params_set_format    (pcm, hw, SND_PCM_FORMAT_FLOAT_LE);
+        snd_pcm_hw_params_set_channels  (pcm, hw, 1);
+
+        unsigned int rate = (unsigned int)s_playSampleRate;
+        snd_pcm_hw_params_set_rate_near (pcm, hw, &rate, nullptr);
+
+        // Period = 512 frames (~11 ms at 44100 Hz) — low latency, stable
+        snd_pcm_uframes_t period = 512;
+        snd_pcm_hw_params_set_period_size_near(pcm, hw, &period, nullptr);
+
+        // 4 periods of buffer = 2048 frames total
+        snd_pcm_uframes_t bufSize = period * 4;
+        snd_pcm_hw_params_set_buffer_size_near(pcm, hw, &bufSize);
+
+        err = snd_pcm_hw_params(pcm, hw);
+        if (err < 0) {
+            AUDIO_LOGE("snd_pcm_hw_params failed: %s", snd_strerror(err));
+            snd_pcm_close(pcm);
+            s_playing = false;
+            return;
+        }
+
+        AUDIO_LOGI("ALSA opened: rate=%uHz period=%lu frames", rate, period);
+
+        // ── Prepare and write ─────────────────────────────────────────────────
+        snd_pcm_prepare(pcm);
+
+        std::vector<float> periodBuf(period);
+        float vol = s_volume.load();
+
+        while (true) {
+            // ── Check commands ────────────────────────────────────────────────
+            {
+                std::unique_lock<std::mutex> lk(s_cmdMutex);
+
+                if (s_stopRequested) break;
+
+                if (s_seekPending) {
+                    s_playPosition.store(s_seekTarget);
+                    s_seekPending = false;
+                    snd_pcm_drop(pcm);
+                    snd_pcm_prepare(pcm);
+                }
+
+                if (s_pauseRequested) {
+                    s_pauseRequested = false;
+                    s_playing        = false;
+                    s_paused         = true;
+                    snd_pcm_drop(pcm);   // discard buffered audio immediately
+
+                    // Block here until resume or stop
+                    s_pauseCV.wait(lk, [this] {
+                        return s_resumeRequested || s_stopRequested;
+                    });
+
+                    if (s_stopRequested) break;
+
+                    s_resumeRequested = false;
+                    s_paused          = false;
+                    s_playing         = true;
+                    snd_pcm_prepare(pcm);
+                }
+            }
+
+            // ── End of buffer? ────────────────────────────────────────────────
+            int pos   = s_playPosition.load();
+            int total = (int)s_playBuffer.size();
+            if (pos >= total) {
+                // Drain hardware buffer so the last period plays fully
+                snd_pcm_drain(pcm);
+                s_playing = false;
+
+                bool expected = false;
+                if (s_didFireFinish.compare_exchange_strong(expected, true))
+                    if (s_finishCallback) s_finishCallback();
+                break;
+            }
+
+            // ── Fill one period ───────────────────────────────────────────────
+            int avail   = total - pos;
+            int nFrames = (int)std::min((int)period, avail);
+
+            vol = s_volume.load();
+            for (int i = 0; i < nFrames; i++)
+                periodBuf[i] = s_playBuffer[pos + i] * vol;
+
+            // Zero-pad the tail of the last period if needed
+            for (int i = nFrames; i < (int)period; i++)
+                periodBuf[i] = 0.f;
+
+            // ── Write to ALSA ─────────────────────────────────────────────────
+            snd_pcm_sframes_t written = snd_pcm_writei(pcm, periodBuf.data(), period);
+
+            if (written == -EPIPE) {
+                // Underrun — recover and continue
+                AUDIO_LOGI("ALSA underrun, recovering");
+                snd_pcm_recover(pcm, (int)written, 1 /*silent*/);
+                continue;
+            } else if (written < 0) {
+                AUDIO_LOGE("snd_pcm_writei error: %s", snd_strerror((int)written));
+                snd_pcm_recover(pcm, (int)written, 1);
+                continue;
+            }
+
+            // Advance position by how many frames were actually accepted
+            s_playPosition.fetch_add((int)written);
+        }
+
+        snd_pcm_close(pcm);
+        s_playing = false;
+    }
+
+    // ── File decode ───────────────────────────────────────────────────────────
+    static bool _isMp3(const std::string& p) {
+        if (p.size() < 4) return false;
+        std::string e = p.substr(p.size()-4);
+        for (auto& c : e) c = (char)tolower(c);
+        return e == ".mp3";
+    }
+    static bool _isWav(const std::string& p) {
+        if (p.size() < 4) return false;
+        std::string e = p.substr(p.size()-4);
+        for (auto& c : e) c = (char)tolower(c);
+        return e == ".wav";
+    }
+
+    static std::vector<uint8_t> _loadBytes(const std::string& path) {
+        FILE* f = fopen(path.c_str(), "rb");
+        if (!f) return {};
+        fseek(f, 0, SEEK_END);
+        size_t len = (size_t)ftell(f);
+        rewind(f);
+        std::vector<uint8_t> buf(len);
+        fread(buf.data(), 1, len, f);
+        fclose(f);
+        return buf;
+    }
+
+    bool _decodeFile(const std::string& path,
+                     std::vector<float>& out, int& outSR)
+    {
+        auto raw = _loadBytes(path);
+        if (raw.empty()) return false;
+
+        if (_isMp3(path)) {
+            drmp3_config cfg{};
+            drmp3_uint64 frames = 0;
+            float* pcm = drmp3_open_memory_and_read_pcm_frames_f32(
+                raw.data(), raw.size(), &cfg, &frames, nullptr);
+            if (!pcm) return false;
+            outSR = (int)cfg.sampleRate;
+            _mixdownToMono(pcm, (int)frames, (int)cfg.channels, out);
+            drmp3_free(pcm, nullptr);
+            return true;
+        }
+        if (_isWav(path)) {
+            drwav_uint64 frames = 0;
+            unsigned ch = 0, sr = 0;
+            float* pcm = drwav_open_memory_and_read_pcm_frames_f32(
+                raw.data(), raw.size(), &ch, &sr, &frames, nullptr);
+            if (!pcm) return false;
+            outSR = (int)sr;
+            _mixdownToMono(pcm, (int)frames, (int)ch, out);
+            drwav_free(pcm, nullptr);
+            return true;
+        }
+        return false;
+    }
+
+    static void _mixdownToMono(const float* src, int frames, int channels,
+                               std::vector<float>& out)
+    {
+        out.resize(frames);
+        if (channels == 1) {
+            memcpy(out.data(), src, frames * sizeof(float));
+        } else {
+            float inv = 1.f / (float)channels;
+            for (int i = 0; i < frames; i++) {
+                float sum = 0.f;
+                for (int c = 0; c < channels; c++) sum += src[i*channels+c];
+                out[i] = sum * inv;
+            }
+        }
+    }
+};
+
+#endif // __linux__ && !__ANDROID__

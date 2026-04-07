@@ -186,6 +186,8 @@ if(WIN32)
             Gdiplus
             opengl32
             glu32
+            xaudio2       
+            ole32         
     )
 elseif(ANDROID)
     find_library(log-lib     log)
