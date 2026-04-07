@@ -133,6 +133,7 @@ if(UNIX AND NOT APPLE AND NOT ANDROID)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(CAIRO      REQUIRED cairo)
     pkg_check_modules(PANGOCAIRO REQUIRED pangocairo)
+    pkg_check_modules(ALSA       REQUIRED alsa)
 endif()
 
 # ============================================================================
@@ -215,10 +216,15 @@ elseif(UNIX AND NOT APPLE)
             ${SDL2_LIBRARIES}
             ${CAIRO_LIBRARIES}
             ${PANGOCAIRO_LIBRARIES}
+            ${ALSA_LIBRARIES}
     )
     target_compile_options(flux PRIVATE
             ${CAIRO_CFLAGS_OTHER}
             ${PANGOCAIRO_CFLAGS_OTHER}
+            ${ALSA_CFLAGS_OTHER}
+    )
+    target_include_directories(flux PRIVATE
+            ${ALSA_INCLUDE_DIRS}      
     )
 endif()
 
