@@ -278,15 +278,13 @@ void FluxUI::wireCallbacks() {
     return focusedWidget && focusedWidget->handleChar(ch);
   };
 
-  window.callbacks.onTimer = [this](TimerID id) {
+window.callbacks.onTimer = [this](TimerID id) {
     auto it = timerCallbacks.find(id);
-    if (it != timerCallbacks.end()) {
-      it->second();
-      return;
-    }
-    if (focusedWidget && focusedWidget->handleTimer(id))
-      invalidateWidget(focusedWidget);
-  };
+    if (it == timerCallbacks.end())
+        return;
+    auto cb = it->second;
+    cb();
+};
 
   window.callbacks.onNonClientMouseDown = [this]() { setFocus(nullptr); };
   window.callbacks.onFocusLost = [this]() { setFocus(nullptr); };
