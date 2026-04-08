@@ -180,7 +180,8 @@ if(WIN32)
             opengl32
             glu32
             xaudio2       
-            ole32         
+            ole32        
+            mfplat mfreadwrite mfuuid ole32 propsys 
     )
 elseif(ANDROID)
     find_library(log-lib     log)

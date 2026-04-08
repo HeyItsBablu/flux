@@ -341,12 +341,13 @@ LRESULT CALLBACK PlatformWindow::WindowProc(HWND hwnd, UINT uMsg,
   }
 
   // ----------------------------------------------------------------
-  case WM_TIMER: {
+case WM_TIMER: {
     if (!self) return 0;
     if (self->callbacks.onTimer)
-      self->callbacks.onTimer((UINT)wParam);
+        self->callbacks.onTimer((UINT)wParam);
+    self->invalidate();  
     return 0;
-  }
+}
 
   // ----------------------------------------------------------------
   case WM_NCLBUTTONDOWN: {
