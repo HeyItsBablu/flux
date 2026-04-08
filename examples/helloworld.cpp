@@ -5,7 +5,7 @@ class MyApp : public Component {
 public:
   WidgetPtr build() override {
     return Scaffold(AppBar("Flux App"),
-                    Center(VideoPlayer("C:/Upwork/c_projects/flux/screenshots/sample.mp4")
+                    Center(VideoPlayer("C:/Users/user/Videos/valorent/2026-01-25 14-23-57.mkv")
             ->setWidth(380)
             ->setHeight(270)    // 16:9
             ->setAutoPlay(false)));

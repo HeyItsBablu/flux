@@ -1475,43 +1475,37 @@ private:
   // VIDEO SAMPLE → frame buffer
   // =========================================================================
 
-  void _processVideoSample(IMFSample *sample, LONGLONG timestamp) {
+void _processVideoSample(IMFSample *sample, LONGLONG timestamp) {
     _syncToPresentation(timestamp);
     s_positionHns = timestamp;
 
     IMFMediaBuffer *buf = nullptr;
     if (FAILED(sample->ConvertToContiguousBuffer(&buf)))
-      return;
+        return;
 
     BYTE *data = nullptr;
     DWORD maxLen = 0, curLen = 0;
     if (SUCCEEDED(buf->Lock(&data, &maxLen, &curLen))) {
-      int w = s_frameWidth, h = s_frameHeight;
-      int expected = w * h * 3;
+        int w = s_frameWidth, h = s_frameHeight;
+        int expected = w * h * 3;
 
-      if ((int)curLen >= expected && expected > 0) {
-        // ── Flip into a LOCAL buffer — no mutex held yet ──────────────
-        std::vector<uint8_t> local(expected);
-        for (int row = 0; row < h; row++) {
-          const BYTE *src = data + (size_t)(h - 1 - row) * w * 3;
-          uint8_t *dst = local.data() + (size_t)row * w * 3;
-          memcpy(dst, src, (size_t)(w * 3));
+        if ((int)curLen >= expected && expected > 0) {
+            std::vector<uint8_t> local(expected);
+            memcpy(local.data(), data, expected); 
+            buf->Unlock();
+            buf->Release();
+
+            {
+                std::lock_guard<std::mutex> lk(s_frameMutex);
+                s_frameData = std::move(local);
+                s_newFrame  = true;
+            }
+            return;
         }
         buf->Unlock();
-        buf->Release();
-
-        // ── Lock only to swap the pointer — microseconds ──────────────
-        {
-          std::lock_guard<std::mutex> lk(s_frameMutex);
-          s_frameData = std::move(local); // O(1) swap
-          s_newFrame = true;
-        }
-        return; // buf already released above
-      }
-      buf->Unlock();
     }
     buf->Release();
-  }
+}
 
   // =========================================================================
   // AUDIO SAMPLE → ring buffer
