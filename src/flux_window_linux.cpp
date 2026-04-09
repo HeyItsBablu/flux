@@ -23,6 +23,7 @@
 // ============================================================================
 // CairoState
 // ============================================================================
+static Uint32 gFluxTimerEventType = 0;
 
 struct PlatformWindow::CairoState {
   SDL_Surface     *sdlSurface  = nullptr;
@@ -59,13 +60,13 @@ struct PlatformWindow::CairoState {
 // SDL timer callback
 // ============================================================================
 
-static Uint32 sdlTimerCallback(Uint32 interval, void *param) {
-  SDL_Event e;
-  SDL_zero(e);
-  e.type      = SDL_USEREVENT;
-  e.user.code = static_cast<Sint32>(reinterpret_cast<uintptr_t>(param));
-  SDL_PushEvent(&e);
-  return interval;
+static Uint32 sdlTimerCallback(Uint32 interval, void* param) {
+    SDL_Event e;
+    SDL_zero(e);
+    e.type      = gFluxTimerEventType;  // use registered type
+    e.user.code = static_cast<Sint32>(reinterpret_cast<uintptr_t>(param));
+    SDL_PushEvent(&e);
+    return interval;
 }
 
 // ============================================================================
@@ -76,7 +77,7 @@ bool PlatformWindow::create(const std::string &title, int width, int height,
                             AppInstance /*instance*/, void * /*userData*/) {
 
   if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) {
-
+gFluxTimerEventType = SDL_RegisterEvents(1);
     return false;
   }
 
@@ -277,13 +278,11 @@ void PlatformWindow::handleSDLEvent(const SDL_Event &e) {
     }
     break;
 
-  case SDL_USEREVENT:
-  
-    if (callbacks.onTimer) callbacks.onTimer(static_cast<TimerID>(e.user.code));
-    dirty = true;
-    break;
-
-  default:
+default:
+    if (e.type == gFluxTimerEventType) {
+        if (callbacks.onTimer) callbacks.onTimer(static_cast<TimerID>(e.user.code));
+        dirty = true;
+    }
     break;
   }
 }
