@@ -116,7 +116,7 @@ if(ANDROID)
 endif()
 
 # ============================================================================
-# Linux platform dependencies  (SDL2 + Cairo + Pango)
+# Linux platform dependencies  (SDL2 + Cairo + Pango + ALSA + FFmpeg)
 # ============================================================================
 
 if(UNIX AND NOT APPLE AND NOT ANDROID)
@@ -126,6 +126,16 @@ if(UNIX AND NOT APPLE AND NOT ANDROID)
     pkg_check_modules(CAIRO      REQUIRED cairo)
     pkg_check_modules(PANGOCAIRO REQUIRED pangocairo)
     pkg_check_modules(ALSA       REQUIRED alsa)
+
+    # ── FFmpeg ────────────────────────────────────────────────────────────────
+    pkg_check_modules(AVFORMAT  REQUIRED libavformat)
+    pkg_check_modules(AVCODEC   REQUIRED libavcodec)
+    pkg_check_modules(AVUTIL    REQUIRED libavutil)
+    pkg_check_modules(SWSCALE   REQUIRED libswscale)
+
+    message(STATUS "FFmpeg avformat : ${AVFORMAT_VERSION}")
+    message(STATUS "FFmpeg avcodec  : ${AVCODEC_VERSION}")
+    message(STATUS "FFmpeg swscale  : ${SWSCALE_VERSION}")
 endif()
 
 # ============================================================================
@@ -164,6 +174,10 @@ target_include_directories(flux
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${SDL2_INCLUDE_DIRS}>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${CAIRO_INCLUDE_DIRS}>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${PANGOCAIRO_INCLUDE_DIRS}>
+        $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${AVFORMAT_INCLUDE_DIRS}>
+        $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${AVCODEC_INCLUDE_DIRS}>
+        $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${AVUTIL_INCLUDE_DIRS}>
+        $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${SWSCALE_INCLUDE_DIRS}>
         $<$<BOOL:${ANDROID}>:${NATIVE_APP_GLUE_DIR}>
         $<$<BOOL:${ANDROID}>:${CMAKE_CURRENT_SOURCE_DIR}/external/nanovg/src>
 )
@@ -179,9 +193,9 @@ if(WIN32)
             Gdiplus
             opengl32
             glu32
-            xaudio2       
-            ole32        
-            mfplat mfreadwrite mfuuid ole32 propsys 
+            xaudio2
+            ole32
+            mfplat mfreadwrite mfuuid ole32 propsys
     )
 elseif(ANDROID)
     find_library(log-lib     log)
@@ -210,14 +224,22 @@ elseif(UNIX AND NOT APPLE)
             ${CAIRO_LIBRARIES}
             ${PANGOCAIRO_LIBRARIES}
             ${ALSA_LIBRARIES}
+            ${AVFORMAT_LIBRARIES}
+            ${AVCODEC_LIBRARIES}
+            ${AVUTIL_LIBRARIES}
+            ${SWSCALE_LIBRARIES}
     )
     target_compile_options(flux PRIVATE
             ${CAIRO_CFLAGS_OTHER}
             ${PANGOCAIRO_CFLAGS_OTHER}
             ${ALSA_CFLAGS_OTHER}
+            ${AVFORMAT_CFLAGS_OTHER}
+            ${AVCODEC_CFLAGS_OTHER}
+            ${AVUTIL_CFLAGS_OTHER}
+            ${SWSCALE_CFLAGS_OTHER}
     )
     target_include_directories(flux PRIVATE
-            ${ALSA_INCLUDE_DIRS}      
+            ${ALSA_INCLUDE_DIRS}
     )
 endif()
 

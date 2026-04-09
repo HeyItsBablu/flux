@@ -15,6 +15,7 @@ FetchContent_MakeAvailable(stb)
 #
 # Win32 : WIN32 executable, links against flux::flux, /SUBSYSTEM:WINDOWS
 # Linux : console executable, links against flux::flux + SDL2 + Cairo + Pango
+#         + FFmpeg (libavformat / libavcodec / libswscale / libavutil)
 # ============================================================================
 
 function(add_flux_example NAME)
@@ -42,10 +43,20 @@ function(add_flux_example NAME)
         pkg_check_modules(CAIRO      REQUIRED cairo)
         pkg_check_modules(PANGOCAIRO REQUIRED pangocairo)
 
+        # ── FFmpeg ────────────────────────────────────────────────────────────
+        pkg_check_modules(AVFORMAT  REQUIRED libavformat)
+        pkg_check_modules(AVCODEC   REQUIRED libavcodec)
+        pkg_check_modules(AVUTIL    REQUIRED libavutil)
+        pkg_check_modules(SWSCALE   REQUIRED libswscale)
+
         target_include_directories(${NAME} PRIVATE
             ${SDL2_INCLUDE_DIRS}
             ${CAIRO_INCLUDE_DIRS}
             ${PANGOCAIRO_INCLUDE_DIRS}
+            ${AVFORMAT_INCLUDE_DIRS}
+            ${AVCODEC_INCLUDE_DIRS}
+            ${AVUTIL_INCLUDE_DIRS}
+            ${SWSCALE_INCLUDE_DIRS}
             ${stb_SOURCE_DIR}
         )
 
@@ -53,12 +64,20 @@ function(add_flux_example NAME)
             ${SDL2_LIBRARIES}
             ${CAIRO_LIBRARIES}
             ${PANGOCAIRO_LIBRARIES}
+            ${AVFORMAT_LIBRARIES}
+            ${AVCODEC_LIBRARIES}
+            ${AVUTIL_LIBRARIES}
+            ${SWSCALE_LIBRARIES}
         )
 
         # Link flags from pkg-config (e.g. -pthread, rpath entries)
         target_compile_options(${NAME} PRIVATE
             ${CAIRO_CFLAGS_OTHER}
             ${PANGOCAIRO_CFLAGS_OTHER}
+            ${AVFORMAT_CFLAGS_OTHER}
+            ${AVCODEC_CFLAGS_OTHER}
+            ${AVUTIL_CFLAGS_OTHER}
+            ${SWSCALE_CFLAGS_OTHER}
         )
 
     endif()
