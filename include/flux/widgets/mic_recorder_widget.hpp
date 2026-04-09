@@ -1,8 +1,10 @@
 // mic_recorder_widget.hpp
-// Microphone recorder widget for FluxUI on Android.
+// Microphone recorder widget for FluxUI.
 //
 // Shows a scrolling waveform while recording, plus a record/stop button.
 // On stop, saves a timestamped WAV file via FluxMic and fires onSaved.
+//
+// Supported platforms: Android, Windows, Linux desktop
 //
 // Usage:
 //   MicRecorder()
@@ -12,10 +14,32 @@
 //       })
 //
 #pragma once
-#ifdef __ANDROID__
+
+// Compile on Android, Windows, and Linux desktop — everywhere FluxMic runs.
+#if defined(__ANDROID__) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
 
 #include "flux/flux.hpp"
 #include "flux/flux_mic.hpp"
+
+// ============================================================================
+// Platform helpers
+// ============================================================================
+
+// UI font — each platform ships different system fonts.
+#if defined(_WIN32)
+    static constexpr const char* kMicUIFont = "Segoe UI";
+#elif defined(__ANDROID__)
+    static constexpr const char* kMicUIFont = "Roboto";
+#else  // Linux
+    static constexpr const char* kMicUIFont = "DejaVu Sans";
+#endif
+
+// Extract filename from a full path on any platform.
+// Handles both '/' (POSIX) and '\\' (Windows) separators.
+static inline std::string _micBasename(const std::string& path) {
+    size_t slash = path.find_last_of("/\\");
+    return (slash != std::string::npos) ? path.substr(slash + 1) : path;
+}
 
 // ============================================================================
 // MicRecorderWidget
@@ -24,8 +48,8 @@
 class MicRecorderWidget : public Widget {
 public:
     // ── Config ────────────────────────────────────────────────────────────────
-    int  barHeight   = 48;    // bottom control bar height
-    int  waveColumns = 80;    // number of waveform bars drawn
+    int  barHeight   = 48;  // bottom control bar height
+    int  waveColumns = 80;  // number of waveform bars drawn
 
     // ── Colors ────────────────────────────────────────────────────────────────
     Color colBackground  = Color::fromRGB( 18,  18,  18);
@@ -37,7 +61,7 @@ public:
     Color colTimecode    = Color::fromRGB(160, 160, 160);
 
     // Record button states
-    Color colBtnRecord   = Color::fromRGB(220,  60,  60);  // red circle = record
+    Color colBtnRecord   = Color::fromRGB(220,  60,  60);  // red circle  = record
     Color colBtnStop     = Color::fromRGB(220, 100,  60);  // orange square = stop
     Color colBtnHover    = Color::fromRGB(255, 255, 255);
 
@@ -98,7 +122,6 @@ public:
         // ── Waveform area ─────────────────────────────────────────────────────
         int waveH = height - barHeight;
 
-        // Fetch waveform data from mic ring buffer
         mic.getWaveform(_waveform, (size_t)waveColumns);
 
         bool recording = mic.isRecording();
@@ -108,7 +131,6 @@ public:
         for (int i = 0; i < waveColumns; i++) {
             float amp = (i < (int)_waveform.size()) ? _waveform[i] : 0.f;
 
-
             int barH = std::max(2, (int)(amp * (waveH - 8) * 2.5f));
             barH = std::min(barH, waveH - 4);
 
@@ -116,9 +138,8 @@ public:
             int by = y + waveH / 2 - barH / 2;
 
             Color col = colWaveIdle;
-            if (recording) {
+            if (recording)
                 col = (amp > 0.8f) ? colWavePeak : colWaveActive;
-            }
 
             p.fillRect(bx, by, colW, barH, col);
         }
@@ -129,7 +150,7 @@ public:
 
         int midY = barY + barHeight / 2;
 
-        // ── Record / Stop button (left) ───────────────────────────────────────
+        // ── Record / Stop button ──────────────────────────────────────────────
         int btnR  = 14;
         int btnCx = x + 20;
         int btnCy = midY;
@@ -146,31 +167,32 @@ public:
                           btnR * 2, btnR * 2, bc, bc, 0);
         }
 
-        // ── Timecode (right of button) ─────────────────────────────────────────
+        // ── Timecode ──────────────────────────────────────────────────────────
         float elapsed = mic.getElapsedSeconds();
         std::string timeStr = _fmtTime(elapsed);
 
-        NativeFont tf = fontCache.getFont("Roboto", 13, FontWeight::Normal);
+        NativeFont tf = fontCache.getFont(kMicUIFont, 13, FontWeight::Normal);
         p.drawText(toWideString(timeStr),
                    x + 48, barY, 80, barHeight,
                    tf, colTimecode,
                    DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
         // ── Status label ──────────────────────────────────────────────────────
+        // _micBasename handles both '/' and '\\' so the filename displays
+        // correctly whether we're on Windows, Linux, or Android.
         std::string status;
         if (recording) {
             status = "Recording...";
         } else if (!_lastPath.empty()) {
-            // Show just the filename, not the full path
-            size_t slash = _lastPath.rfind('/');
-            status = (slash != std::string::npos)
-                     ? _lastPath.substr(slash + 1)
-                     : _lastPath;
+            status = _micBasename(_lastPath);
         } else {
+#if defined(__ANDROID__)
             status = "Tap to record";
+#else
+            status = "Click to record";
+#endif
         }
 
-        // Right-align status text
         int statusX = x + 136;
         int statusW = width - statusX - 8;
         p.drawText(toWideString(status),
@@ -178,7 +200,7 @@ public:
                    tf, colText,
                    DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-        // ── Progress line (top of bar) — shows 5-min cap ──────────────────────
+        // ── Progress line (top of bar) — shows 5-min cap consumption ──────────
         if (recording && mic.getProgress() > 0.f) {
             int progW = (int)(mic.getProgress() * width);
             p.fillRect(x, barY, progW, 2, colWaveActive);
@@ -188,7 +210,7 @@ public:
     }
 
     // =========================================================================
-    // Mouse events
+    // Mouse / touch events
     // =========================================================================
 
     bool handleMouseDown(int mx, int my) override {
@@ -215,17 +237,17 @@ public:
 
 private:
     // ── State ─────────────────────────────────────────────────────────────────
-    std::vector<float>                   _waveform;
-    std::string                          _lastPath;
+    std::vector<float>                      _waveform;
+    std::string                             _lastPath;
     std::function<void(const std::string&)> _onSaved;
-    bool                                 _hovBtn = false;
+    bool                                    _hovBtn = false;
 
     // ── Hit rects ─────────────────────────────────────────────────────────────
     struct Rect { int x, y, w, h; };
     Rect _btnRect {};
 
-    // ── Timers ────────────────────────────────────────────────────────────────
-    TimerID _refreshTimer = 0;   // 33ms repaint while recording
+    // ── Refresh timer (33ms repaint while recording) ──────────────────────────
+    TimerID _refreshTimer = 0;
 
     void _startTimer() {
         if (_refreshTimer) return;
@@ -246,11 +268,10 @@ private:
         auto& mic = FluxMic::get();
         if (mic.isRecording()) {
             _stopTimer();
-            mic.stop();          // saves WAV, fires onSaved callback
+            mic.stop();       // saves WAV, fires onSaved callback
         } else {
-            if (mic.start()) {
+            if (mic.start())
                 _startTimer();
-            }
         }
     }
 
@@ -259,10 +280,10 @@ private:
         return std::static_pointer_cast<MicRecorderWidget>(shared_from_this());
     }
     bool _inWidget(int mx, int my) const {
-        return mx >= x && mx < x+width && my >= y && my < y+height;
+        return mx >= x && mx < x + width && my >= y && my < y + height;
     }
     static bool _inRect(int mx, int my, const Rect& r) {
-        return mx >= r.x && mx < r.x+r.w && my >= r.y && my < r.y+r.h;
+        return mx >= r.x && mx < r.x + r.w && my >= r.y && my < r.y + r.h;
     }
     static std::string _fmtTime(float secs) {
         int s = (int)secs;
@@ -279,4 +300,4 @@ inline MicRecorderWidgetPtr MicRecorder() {
     return std::make_shared<MicRecorderWidget>();
 }
 
-#endif // __ANDROID__
+#endif // Android || Windows || Linux
