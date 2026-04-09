@@ -5,6 +5,26 @@
 #include "nanovg.h"
 #include "nanovg_gl.h"
 
+static std::string wstringToUtf8(const std::wstring& text) {
+    std::string utf8;
+    utf8.reserve(text.size() * 3);
+    for (wchar_t wc : text) {
+        uint32_t cp = static_cast<uint32_t>(wc);
+        if (cp < 0x80) {
+            utf8 += static_cast<char>(cp);
+        } else if (cp < 0x800) {
+            utf8 += static_cast<char>(0xC0 | (cp >> 6));
+            utf8 += static_cast<char>(0x80 | (cp & 0x3F));
+        } else {
+            utf8 += static_cast<char>(0xE0 | (cp >> 12));
+            utf8 += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+            utf8 += static_cast<char>(0x80 | (cp & 0x3F));
+        }
+    }
+    return utf8;
+}
+
+
 
 extern float FluxAndroid_getDpiScale();
 // Set once per frame before any Painter calls
@@ -96,20 +116,7 @@ void Painter::drawText(const std::wstring& text, int x, int y, int w, int h,
     }
 
     // ── wstring → UTF-8 ───────────────────────────────────────────────────────
-    std::string utf8;
-    utf8.reserve(text.size() * 2);
-    for (wchar_t wc : text) {
-        if (wc < 0x80) {
-            utf8 += static_cast<char>(wc);
-        } else if (wc < 0x800) {
-            utf8 += static_cast<char>(0xC0 | (wc >> 6));
-            utf8 += static_cast<char>(0x80 | (wc & 0x3F));
-        } else {
-            utf8 += static_cast<char>(0xE0 | (wc >> 12));
-            utf8 += static_cast<char>(0x80 | ((wc >> 6) & 0x3F));
-            utf8 += static_cast<char>(0x80 | (wc & 0x3F));
-        }
-    }
+    std::string utf8 = wstringToUtf8(text);
 
     // ── Alignment ─────────────────────────────────────────────────────────────
     int hAlign = (format & DT_CENTER) ? NVG_ALIGN_CENTER
@@ -134,10 +141,9 @@ void Painter::drawTextA(const std::string& text, int x, int y, int w, int h,
 }
 
 void Painter::measureText(const std::wstring& text, NativeFont fontHandle,
-                           int& outW, int& outH) {
+                          int& outW, int& outH) {
     if (!s_vg || text.empty()) { outW = outH = 0; return; }
 
-    // ── Apply font state ──────────────────────────────────────────────────────
     auto* f = reinterpret_cast<FluxAndroidFont*>(fontHandle);
     if (f && f->nvgHandle != -1) {
         nvgFontFaceId(s_vg, f->nvgHandle);
@@ -146,11 +152,8 @@ void Painter::measureText(const std::wstring& text, NativeFont fontHandle,
         nvgFontSize(s_vg, 16.f);
     }
 
-    // ── wstring → UTF-8 ───────────────────────────────────────────────────────
-    std::string utf8;
-    for (wchar_t wc : text) utf8 += static_cast<char>(wc);
+    std::string utf8 = wstringToUtf8(text);  // ← was broken before
 
-    // ── Measure ───────────────────────────────────────────────────────────────
     float bounds[4] = {};
     nvgTextBounds(s_vg, 0, 0, utf8.c_str(), nullptr, bounds);
     outW = static_cast<int>(bounds[2] - bounds[0]);
