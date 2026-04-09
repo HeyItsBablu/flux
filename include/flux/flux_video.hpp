@@ -1614,3 +1614,1078 @@ void _processVideoSample(IMFSample *sample, LONGLONG timestamp) {
 };
 
 #endif // _WIN32
+
+
+#pragma once
+#if defined(__linux__) && !defined(__ANDROID__)
+
+extern "C" {
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
+#include <libavutil/imgutils.h>
+#include <libavutil/opt.h>
+#include <libswscale/swscale.h>
+}
+
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <cstring>
+#include <functional>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include "flux_audio.hpp"
+
+#define VIDEO_LOGI(fmt, ...)                                                   \
+    do { fprintf(stderr, "[FluxVideo] INFO  " fmt "\n", ##__VA_ARGS__); } while(0)
+#define VIDEO_LOGE(fmt, ...)                                                   \
+    do { fprintf(stderr, "[FluxVideo] ERROR " fmt "\n", ##__VA_ARGS__); } while(0)
+
+// ============================================================================
+// FluxVideo
+// ============================================================================
+
+class FluxVideo {
+public:
+    using FinishCallback = std::function<void()>;
+
+    enum class State { Idle, Loading, Playing, Paused, Finished, Error };
+
+    static FluxVideo& get() {
+        static FluxVideo instance;
+        return instance;
+    }
+
+    // ── Accessors ─────────────────────────────────────────────────────────────
+    State  getState()           const { return s_state.load(); }
+    bool   isPlaying()          const { return s_state == State::Playing; }
+    bool   isPaused()           const { return s_state == State::Paused;  }
+    bool   isFinished()         const { return s_state == State::Finished; }
+    float  getDurationSeconds() const { return s_durationUs.load() / 1e6f; }
+    float  getPositionSeconds() const { return s_positionUs.load() / 1e6f; }
+    float  getProgress()        const {
+        int64_t dur = s_durationUs.load();
+        return dur > 0 ? std::min(1.f, (float)s_positionUs.load() / (float)dur) : 0.f;
+    }
+    int  getVideoWidth()  const { return s_videoWidth.load();  }
+    int  getVideoHeight() const { return s_videoHeight.load(); }
+    bool hasNewFrame()    const { return s_newFrame.load();    }
+
+    // ── Frame access (main / paint thread) ────────────────────────────────────
+    struct FrameLock {
+        std::unique_lock<std::mutex> lock;
+        const uint8_t* data   = nullptr;
+        int            width  = 0;
+        int            height = 0;
+        int            stride = 0;
+    };
+
+    FrameLock lockFrame() {
+        FrameLock fl;
+        fl.lock   = std::unique_lock<std::mutex>(s_frameMutex);
+        fl.data   = s_frameData.data();
+        fl.width  = s_frameWidth;
+        fl.height = s_frameHeight;
+        fl.stride = s_frameStride;
+        s_newFrame = false;
+        return fl;
+    }
+
+    // ── Callbacks ─────────────────────────────────────────────────────────────
+    void setOnFinished(FinishCallback cb)                       { s_finishCallback = std::move(cb); }
+    void setOnReady(std::function<void(int w, int h)> cb)       { s_readyCallback  = std::move(cb); }
+
+    // ── Volume ────────────────────────────────────────────────────────────────
+    void  setVolume(float v) { FluxAudio::get().setVolume(v); }
+    float getVolume()  const { return FluxAudio::get().getVolume(); }
+
+    // =========================================================================
+    // OPEN
+    // =========================================================================
+
+    bool open(const std::string& path) {
+        close();
+        s_state      = State::Loading;
+        s_stopDecode = false;
+        s_seekPending      = false;
+        s_didFireFinish    = false;
+        s_pauseRequested   = false;
+        s_resumeRequested  = false;
+
+        s_decodeThread = std::thread(&FluxVideo::_decodeLoop, this, path);
+        return true;
+    }
+
+    // =========================================================================
+    // PLAYBACK CONTROL
+    // =========================================================================
+
+    void play() {
+        if (s_state == State::Paused || s_state == State::Loading) {
+            {
+                std::lock_guard<std::mutex> lk(s_cmdMutex);
+                s_resumeRequested = true;
+            }
+            s_pauseCV.notify_all();
+        }
+    }
+
+    void pause() {
+        if (s_state == State::Playing) {
+            std::lock_guard<std::mutex> lk(s_cmdMutex);
+            s_pauseRequested = true;
+        }
+    }
+
+    void seekToProgress(float p) {
+        int64_t us = (int64_t)(std::max(0.f, std::min(1.f, p)) * s_durationUs.load());
+        _queueSeek(us);
+    }
+
+    void seekToSeconds(float secs) {
+        int64_t us = (int64_t)(secs * 1e6f);
+        us = std::max<int64_t>(0, std::min(us, s_durationUs.load()));
+        _queueSeek(us);
+    }
+
+    // =========================================================================
+    // CLOSE
+    // =========================================================================
+
+    void close() {
+        {
+            std::lock_guard<std::mutex> lk(s_cmdMutex);
+            s_stopDecode      = true;
+            s_resumeRequested = true; // unblock any pause-wait
+        }
+        s_pauseCV.notify_all();
+
+        if (s_decodeThread.joinable())
+            s_decodeThread.join();
+
+        FluxAudio::get().stopPlayback();
+
+        s_state       = State::Idle;
+        s_positionUs  = 0;
+        s_durationUs  = 0;
+        s_newFrame    = false;
+        s_videoWidth  = 0;
+        s_videoHeight = 0;
+        s_stopDecode  = false;
+    }
+
+    void shutdown() { close(); }
+
+private:
+    FluxVideo()  = default;
+    ~FluxVideo() { close(); }
+
+    // ── State ─────────────────────────────────────────────────────────────────
+    std::atomic<State>   s_state      {State::Idle};
+    std::atomic<int64_t> s_positionUs {0};
+    std::atomic<int64_t> s_durationUs {0};
+    std::atomic<int>     s_videoWidth {0};
+    std::atomic<int>     s_videoHeight{0};
+    std::atomic<bool>    s_newFrame   {false};
+
+    // ── Frame double-buffer ───────────────────────────────────────────────────
+    std::mutex           s_frameMutex;
+    std::vector<uint8_t> s_frameData;
+    int                  s_frameWidth  = 0;
+    int                  s_frameHeight = 0;
+    int                  s_frameStride = 0;
+
+    // ── Audio ring buffer ─────────────────────────────────────────────────────
+    // ~4 s at 48 kHz stereo (stored as interleaved float pairs → mixed to mono
+    // by _pullAudio).  We allocate per-open in _decodeLoop.
+    static constexpr int kAudioRing = 48000 * 4 * 2; // 2 channels worst case
+    std::vector<float>   s_audioBuf;
+    int                  s_audioWrite    = 0;
+    int                  s_audioRead     = 0;
+    std::mutex           s_audioMutex;
+    int                  s_audioChannels  = 1;
+    int                  s_audioSampleRate = 44100;
+
+    // ── Command channel ───────────────────────────────────────────────────────
+    std::mutex              s_cmdMutex;
+    std::condition_variable s_pauseCV;
+    bool s_pauseRequested  = false;
+    bool s_resumeRequested = false;
+    bool s_stopDecode      = false;
+    bool s_seekPending     = false;
+    int64_t s_seekTargetUs = 0;
+
+    // ── Thread ────────────────────────────────────────────────────────────────
+    std::thread         s_decodeThread;
+    std::atomic<bool>   s_didFireFinish{false};
+
+    // ── Callbacks ─────────────────────────────────────────────────────────────
+    FinishCallback                      s_finishCallback;
+    std::function<void(int w, int h)>   s_readyCallback;
+
+    // ── Clock ─────────────────────────────────────────────────────────────────
+    std::chrono::steady_clock::time_point s_clockBase;
+    int64_t                               s_clockBaseUs = 0;
+
+    void _queueSeek(int64_t us) {
+        std::lock_guard<std::mutex> lk(s_cmdMutex);
+        s_seekTargetUs = us;
+        s_seekPending  = true;
+        s_pauseCV.notify_all();
+    }
+
+    // =========================================================================
+    // DECODE LOOP
+    // =========================================================================
+
+    void _decodeLoop(std::string path) {
+
+        // ── Open container ────────────────────────────────────────────────────
+        AVFormatContext* fmtCtx = nullptr;
+        if (avformat_open_input(&fmtCtx, path.c_str(), nullptr, nullptr) < 0) {
+            VIDEO_LOGE("avformat_open_input failed: %s", path.c_str());
+            s_state = State::Error;
+            return;
+        }
+        if (avformat_find_stream_info(fmtCtx, nullptr) < 0) {
+            VIDEO_LOGE("avformat_find_stream_info failed");
+            avformat_close_input(&fmtCtx);
+            s_state = State::Error;
+            return;
+        }
+
+        // ── Find streams ──────────────────────────────────────────────────────
+        int videoStreamIdx = -1, audioStreamIdx = -1;
+        for (unsigned i = 0; i < fmtCtx->nb_streams; i++) {
+            AVMediaType type = fmtCtx->streams[i]->codecpar->codec_type;
+            if (type == AVMEDIA_TYPE_VIDEO && videoStreamIdx < 0) videoStreamIdx = (int)i;
+            if (type == AVMEDIA_TYPE_AUDIO && audioStreamIdx < 0) audioStreamIdx = (int)i;
+        }
+        if (videoStreamIdx < 0) {
+            VIDEO_LOGE("No video stream found");
+            avformat_close_input(&fmtCtx);
+            s_state = State::Error;
+            return;
+        }
+
+        // Duration (microseconds)
+        if (fmtCtx->duration != AV_NOPTS_VALUE)
+            s_durationUs = fmtCtx->duration; // AV_TIME_BASE = 1 000 000 = µs
+
+        // ── Open video codec ──────────────────────────────────────────────────
+        AVStream*          vStream = fmtCtx->streams[videoStreamIdx];
+        const AVCodec*     vCodec  = avcodec_find_decoder(vStream->codecpar->codec_id);
+        AVCodecContext*    vCtx    = avcodec_alloc_context3(vCodec);
+        avcodec_parameters_to_context(vCtx, vStream->codecpar);
+        if (avcodec_open2(vCtx, vCodec, nullptr) < 0) {
+            VIDEO_LOGE("avcodec_open2 (video) failed");
+            avcodec_free_context(&vCtx);
+            avformat_close_input(&fmtCtx);
+            s_state = State::Error;
+            return;
+        }
+
+        int vidW = vCtx->width, vidH = vCtx->height;
+        s_videoWidth  = vidW;
+        s_videoHeight = vidH;
+        VIDEO_LOGI("Video: %dx%d codec=%s", vidW, vidH, vCodec->name);
+
+        // ── SwsContext: YUV → RGB24 ───────────────────────────────────────────
+        SwsContext* swsCtx = sws_getContext(
+            vidW, vidH, vCtx->pix_fmt,
+            vidW, vidH, AV_PIX_FMT_RGB24,
+            SWS_BILINEAR, nullptr, nullptr, nullptr);
+        if (!swsCtx) {
+            VIDEO_LOGE("sws_getContext failed");
+            avcodec_free_context(&vCtx);
+            avformat_close_input(&fmtCtx);
+            s_state = State::Error;
+            return;
+        }
+
+        // ── Open audio codec (optional) ───────────────────────────────────────
+        AVCodecContext* aCtx = nullptr;
+        bool hasAudio = false;
+        if (audioStreamIdx >= 0) {
+            AVStream*      aStream = fmtCtx->streams[audioStreamIdx];
+            const AVCodec* aCodec  = avcodec_find_decoder(aStream->codecpar->codec_id);
+            aCtx = avcodec_alloc_context3(aCodec);
+            avcodec_parameters_to_context(aCtx, aStream->codecpar);
+            if (avcodec_open2(aCtx, aCodec, nullptr) == 0) {
+                s_audioSampleRate = aCtx->sample_rate;
+                s_audioChannels   = aCtx->ch_layout.nb_channels;
+                hasAudio = true;
+                VIDEO_LOGI("Audio: %dHz %dch codec=%s",
+                    s_audioSampleRate, s_audioChannels, aCodec->name);
+            } else {
+                avcodec_free_context(&aCtx);
+                aCtx = nullptr;
+            }
+        }
+
+        // ── Allocate frame buffer ─────────────────────────────────────────────
+        {
+            std::lock_guard<std::mutex> lk(s_frameMutex);
+            s_frameWidth  = vidW;
+            s_frameHeight = vidH;
+            s_frameStride = vidW * 3; // RGB24
+            s_frameData.assign((size_t)(vidW * vidH * 3), 0);
+        }
+
+        // ── Allocate audio ring ───────────────────────────────────────────────
+        if (hasAudio) {
+            std::lock_guard<std::mutex> lk(s_audioMutex);
+            s_audioBuf.assign(kAudioRing, 0.f);
+            s_audioWrite = 0;
+            s_audioRead  = 0;
+        }
+
+        // ── Reusable AVFrames & packet ────────────────────────────────────────
+        AVFrame*  vFrame  = av_frame_alloc();
+        AVFrame*  aFrame  = av_frame_alloc();
+        AVPacket* pkt     = av_packet_alloc();
+
+        // RGB destination for sws_scale
+        std::vector<uint8_t> rgbBuf((size_t)(vidW * vidH * 3));
+        uint8_t*  rgbData[1]     = { rgbBuf.data() };
+        int       rgbLinesize[1] = { vidW * 3 };
+
+        // ── Start audio stream ────────────────────────────────────────────────
+        if (hasAudio) {
+            FluxAudio::get().playStream(
+                [this](float* buf, int frames) -> int {
+                    return _pullAudio(buf, frames);
+                },
+                s_audioSampleRate);
+        }
+
+        // ── Signal ready ──────────────────────────────────────────────────────
+        if (s_readyCallback)
+            s_readyCallback(vidW, vidH);
+
+        // ── Wait for first play() call ────────────────────────────────────────
+        s_state = State::Paused;
+        FluxAudio::get().pause();
+        {
+            std::unique_lock<std::mutex> lk(s_cmdMutex);
+            s_pauseCV.wait(lk, [this] { return s_resumeRequested || s_stopDecode; });
+            if (s_stopDecode) goto cleanup;
+            s_resumeRequested = false;
+            s_state = State::Playing;
+            FluxAudio::get().resume();
+        }
+
+        // Reset clock
+        s_clockBase   = std::chrono::steady_clock::now();
+        s_clockBaseUs = 0;
+
+        VIDEO_LOGI("=== Entering main decode loop ===");
+
+        // ── Main decode loop ──────────────────────────────────────────────────
+        while (true) {
+
+            // ── Command processing ────────────────────────────────────────────
+            {
+                std::unique_lock<std::mutex> lk(s_cmdMutex);
+
+                if (s_stopDecode) break;
+
+                if (s_seekPending) {
+                    int64_t target = s_seekTargetUs;
+                    s_seekPending  = false;
+                    lk.unlock();
+                    _doSeek(fmtCtx, vCtx, aCtx, videoStreamIdx, audioStreamIdx, target);
+                    continue;
+                }
+
+                if (s_pauseRequested) {
+                    s_pauseRequested = false;
+                    s_state = State::Paused;
+                    FluxAudio::get().pause();
+
+                    s_pauseCV.wait(lk, [this] {
+                        return s_resumeRequested || s_stopDecode || s_seekPending;
+                    });
+
+                    if (s_stopDecode) break;
+
+                    if (s_seekPending) {
+                        int64_t target = s_seekTargetUs;
+                        s_seekPending  = false;
+                        lk.unlock();
+                        _doSeek(fmtCtx, vCtx, aCtx, videoStreamIdx, audioStreamIdx, target);
+                        continue;
+                    }
+
+                    s_resumeRequested = false;
+                    s_state = State::Playing;
+                    FluxAudio::get().resume();
+                    s_clockBase   = std::chrono::steady_clock::now();
+                    s_clockBaseUs = s_positionUs.load();
+                }
+            }
+
+            // ── Read one packet ───────────────────────────────────────────────
+            int ret = av_read_frame(fmtCtx, pkt);
+            if (ret == AVERROR_EOF) {
+                // Flush video decoder
+                avcodec_send_packet(vCtx, nullptr);
+                while (avcodec_receive_frame(vCtx, vFrame) == 0)
+                    _processVideoFrame(vFrame, vCtx, swsCtx, rgbData, rgbLinesize, vStream);
+                // EOS
+                s_state = State::Finished;
+                VIDEO_LOGI("EOS reached");
+                {
+                    bool expected = false;
+                    if (s_didFireFinish.compare_exchange_strong(expected, true))
+                        if (s_finishCallback)
+                            s_finishCallback();
+                }
+                break;
+            }
+            if (ret < 0) {
+                VIDEO_LOGE("av_read_frame error: %d", ret);
+                break;
+            }
+
+            // ── Route by stream ───────────────────────────────────────────────
+            if (pkt->stream_index == videoStreamIdx) {
+                avcodec_send_packet(vCtx, pkt);
+                while (avcodec_receive_frame(vCtx, vFrame) == 0)
+                    _processVideoFrame(vFrame, vCtx, swsCtx, rgbData, rgbLinesize, vStream);
+            } else if (pkt->stream_index == audioStreamIdx && hasAudio) {
+                avcodec_send_packet(aCtx, pkt);
+                while (avcodec_receive_frame(aCtx, aFrame) == 0)
+                    _processAudioFrame(aFrame);
+            }
+
+            av_packet_unref(pkt);
+        }
+
+    cleanup:
+        av_packet_free(&pkt);
+        av_frame_free(&vFrame);
+        av_frame_free(&aFrame);
+        sws_freeContext(swsCtx);
+        avcodec_free_context(&vCtx);
+        if (aCtx) avcodec_free_context(&aCtx);
+        avformat_close_input(&fmtCtx);
+        VIDEO_LOGI("Decode loop exited");
+    }
+
+    // =========================================================================
+    // VIDEO FRAME PROCESSING
+    // =========================================================================
+
+    void _processVideoFrame(AVFrame*     frame,
+                            AVCodecContext* vCtx,
+                            SwsContext*  swsCtx,
+                            uint8_t**    rgbData,
+                            int*         rgbLinesize,
+                            AVStream*    vStream)
+    {
+        // Convert PTS to microseconds
+        int64_t pts = frame->best_effort_timestamp;
+        if (pts == AV_NOPTS_VALUE) pts = frame->pts;
+        int64_t ptsUs = av_rescale_q(pts, vStream->time_base, {1, 1000000});
+
+        // A/V sync sleep
+        _syncToPresentation(ptsUs);
+        s_positionUs = ptsUs;
+
+        // YUV → RGB24
+        sws_scale(swsCtx,
+                  frame->data,    frame->linesize, 0, vCtx->height,
+                  rgbData,        rgbLinesize);
+
+        // Copy into double-buffer
+        int w = s_frameWidth, h = s_frameHeight;
+        int expected = w * h * 3;
+        if (expected > 0) {
+            std::vector<uint8_t> local(rgbData[0], rgbData[0] + expected);
+            std::lock_guard<std::mutex> lk(s_frameMutex);
+            s_frameData = std::move(local);
+            s_newFrame  = true;
+        }
+    }
+
+    // =========================================================================
+    // AUDIO FRAME PROCESSING
+    // =========================================================================
+
+    void _processAudioFrame(AVFrame* frame) {
+        // FFmpeg may give us planar (FLTP) or packed (FLT/S16 etc.) audio.
+        // We resample everything to float mono manually.
+        int   ch     = s_audioChannels;
+        int   frames = frame->nb_samples;
+        bool  isPlanar = av_sample_fmt_is_planar(
+                            (AVSampleFormat)frame->format) != 0;
+        bool  isFloat  = (frame->format == AV_SAMPLE_FMT_FLTP ||
+                          frame->format == AV_SAMPLE_FMT_FLT);
+        bool  isS16    = (frame->format == AV_SAMPLE_FMT_S16P ||
+                          frame->format == AV_SAMPLE_FMT_S16);
+
+        std::lock_guard<std::mutex> lk(s_audioMutex);
+        int wr = s_audioWrite;
+        int rd = s_audioRead;
+        int space = kAudioRing - (wr - rd);
+        frames = std::min(frames, space); // drop if ring is full
+
+        for (int i = 0; i < frames; i++) {
+            float sum = 0.f;
+            for (int c = 0; c < ch; c++) {
+                if (isFloat) {
+                    if (isPlanar) {
+                        const float* plane = (const float*)frame->data[c];
+                        sum += plane[i];
+                    } else {
+                        const float* packed = (const float*)frame->data[0];
+                        sum += packed[i * ch + c];
+                    }
+                } else if (isS16) {
+                    if (isPlanar) {
+                        const int16_t* plane = (const int16_t*)frame->data[c];
+                        sum += plane[i] / 32768.f;
+                    } else {
+                        const int16_t* packed = (const int16_t*)frame->data[0];
+                        sum += packed[i * ch + c] / 32768.f;
+                    }
+                }
+                // Other formats: silence (extend as needed)
+            }
+            float mono = sum / (float)ch;
+            if (mono >  1.f) mono =  1.f;
+            if (mono < -1.f) mono = -1.f;
+            s_audioBuf[wr % kAudioRing] = mono;
+            wr++;
+        }
+        s_audioWrite = wr;
+    }
+
+    // =========================================================================
+    // AUDIO PULL (FluxAudio stream callback — audio thread)
+    // =========================================================================
+
+    int _pullAudio(float* buf, int frames) {
+        std::lock_guard<std::mutex> lk(s_audioMutex);
+        int rd    = s_audioRead;
+        int wr    = s_audioWrite;
+        int avail = wr - rd;
+        int toCopy = std::min(frames, avail);
+
+        for (int i = 0; i < toCopy; i++)
+            buf[i] = s_audioBuf[(size_t)((rd + i) % kAudioRing)];
+        for (int i = toCopy; i < frames; i++)
+            buf[i] = 0.f; // underrun: silence
+
+        s_audioRead = rd + toCopy;
+        // Keep stream alive even on underrun (return `frames` not `toCopy`)
+        return frames;
+    }
+
+    // =========================================================================
+    // SEEK
+    // =========================================================================
+
+    void _doSeek(AVFormatContext* fmtCtx,
+                 AVCodecContext*  vCtx,
+                 AVCodecContext*  aCtx,
+                 int              videoStreamIdx,
+                 int              audioStreamIdx,
+                 int64_t          targetUs)
+    {
+        // av_seek_frame wants PTS in stream time base
+        int64_t ts = av_rescale_q(targetUs, {1, 1000000},
+                                  fmtCtx->streams[videoStreamIdx]->time_base);
+        av_seek_frame(fmtCtx, videoStreamIdx, ts, AVSEEK_FLAG_BACKWARD);
+
+        avcodec_flush_buffers(vCtx);
+        if (aCtx) avcodec_flush_buffers(aCtx);
+
+        // Flush audio ring
+        {
+            std::lock_guard<std::mutex> lk(s_audioMutex);
+            s_audioWrite = 0;
+            s_audioRead  = 0;
+        }
+        FluxAudio::get().seekToSeconds((float)targetUs / 1e6f);
+
+        // Re-sync clock
+        s_clockBase   = std::chrono::steady_clock::now();
+        s_clockBaseUs = targetUs;
+        s_positionUs  = targetUs;
+        s_didFireFinish = false;
+
+        VIDEO_LOGI("Seeked to %.2fs", (float)targetUs / 1e6f);
+    }
+
+    // =========================================================================
+    // A/V SYNC — interruptible sleep in 5 ms chunks
+    // =========================================================================
+
+    void _syncToPresentation(int64_t framePtsUs) {
+        auto now = std::chrono::steady_clock::now();
+        int64_t wallUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                             now - s_clockBase).count();
+        int64_t targetUs = framePtsUs - s_clockBaseUs;
+        int64_t sleepUs  = targetUs - wallUs;
+
+        while (sleepUs > 2000 && !s_stopDecode) {
+            int64_t chunk = std::min(sleepUs, (int64_t)5000); // 5 ms max
+            std::this_thread::sleep_for(std::chrono::microseconds(chunk));
+
+            now     = std::chrono::steady_clock::now();
+            wallUs  = std::chrono::duration_cast<std::chrono::microseconds>(
+                          now - s_clockBase).count();
+            sleepUs = targetUs - wallUs;
+        }
+        // Behind schedule → present immediately (natural frame drop)
+    }
+};
+
+
+// ============================================================================
+// VideoPlayerWidget — Linux / Cairo / SDL backend
+// Mirrors the Windows GDI VideoPlayerWidget exactly (same API, same controls).
+// ============================================================================
+
+#include "flux/flux.hpp"
+
+class VideoPlayerWidget : public Widget {
+public:
+    std::string videoPath;
+    int  barHeight = 40;
+    bool autoPlay  = false;
+
+    // Same color palette as Windows widget
+    Color colBar      = Color::fromRGBA( 20,  20,  20, 220);
+    Color colTrackBg  = Color::fromRGB (100, 100, 100);
+    Color colTrackFill= Color::fromRGB (220, 220, 220);
+    Color colThumb    = Color::fromRGB (255, 255, 255);
+    Color colText     = Color::fromRGB (230, 230, 230);
+    Color colIcon     = Color::fromRGB (220, 220, 220);
+    Color colIconHov  = Color::fromRGB (255, 255, 255);
+    Color colBg       = Color::fromRGB (  0,   0,   0);
+
+    std::shared_ptr<VideoPlayerWidget> setPath(const std::string& p) { videoPath = p; return self(); }
+    std::shared_ptr<VideoPlayerWidget> setWidth(int w)  { Widget::width  = w; autoWidth  = false; return self(); }
+    std::shared_ptr<VideoPlayerWidget> setHeight(int h) { Widget::height = h; autoHeight = false; return self(); }
+    std::shared_ptr<VideoPlayerWidget> setAutoPlay(bool b) { autoPlay = b; return self(); }
+
+    VideoPlayerWidget() {
+        autoWidth  = false;
+        autoHeight = false;
+        width  = 320;
+        height = 180;
+
+        FluxVideo::get().setOnFinished([this]() {
+            _finishedPending = true;
+            if (auto* ui = FluxUI::getCurrentInstance())
+                ui->invalidateWidget(x, y, width, height);
+        });
+
+        FluxVideo::get().setOnReady([this](int /*w*/, int /*h*/) {
+            markNeedsPaint();
+        });
+    }
+
+    ~VideoPlayerWidget() {
+        _destroyed = true;
+        _stopTimers();
+        FluxVideo::get().close();
+        FluxVideo::get().setOnFinished(nullptr);
+        FluxVideo::get().setOnReady(nullptr);
+        _freeCairoSurface();
+    }
+
+    // ── Layout ────────────────────────────────────────────────────────────────
+    void computeLayout(GraphicsContext& /*ctx*/,
+                       const BoxConstraints& constraints,
+                       FontCache& /*fontCache*/) override
+    {
+        if (autoWidth)  width  = constraints.maxWidth;
+        if (autoHeight) height = constraints.maxHeight;
+        applyConstraints();
+        needsLayout = false;
+
+        if (!_opened && !videoPath.empty()) {
+            _opened = true;
+            FluxVideo::get().open(videoPath);
+            if (autoPlay) {
+                FluxVideo::get().play();
+                _playing = true;
+                _startProgressTimer();
+            }
+        }
+    }
+
+    // ── Render ────────────────────────────────────────────────────────────────
+    void render(GraphicsContext& ctx, FontCache& fontCache) override {
+        if (_finishedPending.exchange(false)) {
+            _playing  = false;
+            _finished = true;
+            _progress = 1.f;
+        }
+
+        Painter p(ctx);
+
+        // Black letterbox background
+        p.fillRect(x, y, width, height, colBg);
+
+        // ── Blit new frame if available ────────────────────────────────────
+        if (FluxVideo::get().hasNewFrame()) {
+            auto frame = FluxVideo::get().lockFrame();
+
+            if (frame.data && frame.width > 0 && frame.height > 0) {
+                int byteCount = frame.stride * frame.height;
+                _frameCache.assign(frame.data, frame.data + byteCount);
+                _cachedSrcW = frame.width;
+                _cachedSrcH = frame.height;
+
+                // Rebuild Cairo surface if dimensions changed
+                if (_cachedSrcW != _cairoSurfW || _cachedSrcH != _cairoSurfH)
+                    _rebuildCairoSurface();
+            }
+            _progress = FluxVideo::get().getProgress();
+        }
+
+        // ── Cairo blit ────────────────────────────────────────────────────
+        if (_cairoSurf && !_frameCache.empty() && _cachedSrcW > 0 && ctx.cr) {
+            // Convert RGB24 → CAIRO_FORMAT_RGB24 (BGRX 4bpp) then mark dirty
+            _updateCairoPixels();
+            cairo_surface_mark_dirty(_cairoSurf);
+
+            // Compute letterbox destination rect
+            float vidAR = (float)_cachedSrcW / (float)_cachedSrcH;
+            float widAR = (float)width / (float)(height - barHeight);
+            int dstX, dstY, dstW, dstH;
+
+            if (vidAR > widAR) {
+                dstW = width;
+                dstH = (int)((float)dstW / vidAR);
+                dstX = x;
+                dstY = y + (height - barHeight - dstH) / 2;
+            } else {
+                dstH = height - barHeight;
+                dstW = (int)((float)dstH * vidAR);
+                dstX = x + (width - dstW) / 2;
+                dstY = y;
+            }
+
+            cairo_save(ctx.cr);
+
+            // Scale-blit via pattern transform
+            double scaleX = (double)dstW / (double)_cachedSrcW;
+            double scaleY = (double)dstH / (double)_cachedSrcH;
+
+            cairo_translate(ctx.cr, dstX, dstY);
+            cairo_scale(ctx.cr, scaleX, scaleY);
+            cairo_set_source_surface(ctx.cr, _cairoSurf, 0, 0);
+            cairo_pattern_set_filter(cairo_get_source(ctx.cr), CAIRO_FILTER_BILINEAR);
+            cairo_rectangle(ctx.cr, 0, 0, _cachedSrcW, _cachedSrcH);
+            cairo_fill(ctx.cr);
+
+            cairo_restore(ctx.cr);
+        }
+
+        if (_barVisible)
+            _renderBar(ctx, fontCache, p);
+        if (!_playing && _barVisible)
+            _renderCenterPlay(p);
+
+        needsPaint = false;
+    }
+
+    // ── Mouse events — identical logic to Windows widget ─────────────────────
+    bool handleMouseDown(int mx, int my) override {
+        if (!_inWidget(mx, my)) return false;
+        if (!_inRect(mx, my, _barRect)) {
+            _barVisible = true;
+            _resetBarTimer();
+            _togglePlayPause();
+            markNeedsPaint();
+            return true;
+        }
+        if (_inRect(mx, my, _playBtnRect)) {
+            _togglePlayPause();
+            markNeedsPaint();
+            return true;
+        }
+        if (_inRect(mx, my, _trackRect)) {
+            _dragging = true;
+            FluxUI::getCurrentInstance()->captureMouseInput();
+            _seekFromMouse(mx);
+            markNeedsPaint();
+            return true;
+        }
+        return true;
+    }
+
+    bool handleMouseUp(int /*mx*/, int /*my*/) override {
+        if (_dragging) {
+            _dragging = false;
+            FluxUI::getCurrentInstance()->releaseMouseInput();
+        }
+        return false;
+    }
+
+    bool handleMouseMove(int mx, int my) override {
+        if (_dragging) { _seekFromMouse(mx); return true; }
+        bool inW = _inWidget(mx, my);
+        if (inW != _barVisible) { _barVisible = inW; markNeedsPaint(); }
+        if (inW) _resetBarTimer();
+        bool hp = _inRect(mx, my, _playBtnRect);
+        if (hp != _hovPlay) { _hovPlay = hp; markNeedsPaint(); }
+        return false;
+    }
+
+    bool handleMouseLeave() override {
+        _barVisible = false;
+        _hovPlay    = false;
+        markNeedsPaint();
+        return true;
+    }
+
+private:
+    // ── State ─────────────────────────────────────────────────────────────────
+    bool  _opened   = false;
+    bool  _playing  = false;
+    bool  _finished = false;
+    float _progress = 0.f;
+    bool  _dragging   = false;
+    bool  _barVisible = true;
+    bool  _hovPlay    = false;
+
+    // ── Frame cache ───────────────────────────────────────────────────────────
+    // RGB24 pixel buffer.  Cairo surface points INTO this buffer — no extra copy.
+    std::vector<uint8_t> _frameCache;
+    int  _cachedSrcW = 0;
+    int  _cachedSrcH = 0;
+
+    // Cairo image surface (created once per video size)
+    cairo_surface_t* _cairoSurf  = nullptr;
+    int              _cairoSurfW = 0;
+    int              _cairoSurfH = 0;
+
+    // ── Hit rects ─────────────────────────────────────────────────────────────
+    struct Rect { int x, y, w, h; };
+    Rect _barRect{}, _playBtnRect{}, _trackRect{};
+
+    // ── Timers ────────────────────────────────────────────────────────────────
+    TimerID _progressTimer = 0;
+    TimerID _barHideTimer  = 0;
+
+    std::atomic<bool> _destroyed       {false};
+    std::atomic<bool> _finishedPending {false};
+
+    // ── Cairo surface management ──────────────────────────────────────────────
+
+    void _rebuildCairoSurface() {
+        _freeCairoSurface();
+        if (_cachedSrcW <= 0 || _cachedSrcH <= 0) return;
+
+        // Ensure buffer is large enough (RGB24 = 3 bytes/pixel)
+        _frameCache.resize((size_t)(_cachedSrcW * _cachedSrcH * 3));
+
+
+        _cairoPixels.resize((size_t)(_cachedSrcW * _cachedSrcH * 4));
+
+        _cairoSurf = cairo_image_surface_create_for_data(
+            _cairoPixels.data(),
+            CAIRO_FORMAT_RGB24,      // 0xffRRGGBB (little-endian: B G R X)
+            _cachedSrcW, _cachedSrcH,
+            _cachedSrcW * 4);        // stride = 4 bytes/pixel
+
+        _cairoSurfW = _cachedSrcW;
+        _cairoSurfH = _cachedSrcH;
+    }
+
+    void _freeCairoSurface() {
+        if (_cairoSurf) {
+            cairo_surface_destroy(_cairoSurf);
+            _cairoSurf  = nullptr;
+            _cairoSurfW = 0;
+            _cairoSurfH = 0;
+        }
+    }
+
+    // Convert the latest RGB24 frame into the 4bpp Cairo buffer.
+    // Called every render() when a new frame is available.
+    void _updateCairoPixels() {
+        if (_frameCache.empty() || _cairoPixels.empty()) return;
+        int n = _cachedSrcW * _cachedSrcH;
+        const uint8_t* src = _frameCache.data();
+        uint8_t*       dst = _cairoPixels.data();
+        for (int i = 0; i < n; i++) {
+            uint8_t r = src[0], g = src[1], b = src[2];
+            src += 3;
+            // CAIRO_FORMAT_RGB24 in memory (little-endian): B G R X
+            dst[0] = b;
+            dst[1] = g;
+            dst[2] = r;
+            dst[3] = 0xFF; // X (ignored alpha)
+            dst += 4;
+        }
+    }
+
+    // 4bpp pixel store for Cairo (RGB24 means 4 bytes/pixel with padding)
+    std::vector<uint8_t> _cairoPixels;
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+    std::shared_ptr<VideoPlayerWidget> self() {
+        return std::static_pointer_cast<VideoPlayerWidget>(shared_from_this());
+    }
+    bool _inWidget(int mx, int my) const {
+        return mx >= x && mx < x + width && my >= y && my < y + height;
+    }
+    static bool _inRect(int mx, int my, const Rect& r) {
+        return mx >= r.x && mx < r.x + r.w && my >= r.y && my < r.y + r.h;
+    }
+
+    void _startProgressTimer() {
+        if (_progressTimer) return;
+        _progressTimer = FluxUI::getCurrentInstance()->setInterval(33, [this]() {
+            if (_destroyed) return;
+            if (_playing) {
+                _progress = FluxVideo::get().getProgress();
+                markNeedsPaint();
+            }
+        });
+    }
+
+    void _resetBarTimer() {
+        auto* ui = FluxUI::getCurrentInstance();
+        if (!ui) return;
+        if (_barHideTimer) { ui->clearInterval(_barHideTimer); _barHideTimer = 0; }
+        _barHideTimer = ui->setInterval(3000, [this]() {
+            if (_destroyed) return;
+            auto* u = FluxUI::getCurrentInstance();
+            if (u && _barHideTimer) { u->clearInterval(_barHideTimer); _barHideTimer = 0; }
+            if (_playing) { _barVisible = false; markNeedsPaint(); }
+        });
+    }
+
+    void _stopTimers() {
+        auto* ui = FluxUI::getCurrentInstance();
+        if (!ui) return;
+        if (_progressTimer) { ui->clearInterval(_progressTimer); _progressTimer = 0; }
+        if (_barHideTimer)  { ui->clearInterval(_barHideTimer);  _barHideTimer  = 0; }
+    }
+
+    void _togglePlayPause() {
+        auto& vid = FluxVideo::get();
+        if (_finished) {
+            _finished = false;
+            _progress = 0.f;
+            vid.seekToProgress(0.f);
+            vid.play();
+            _playing = true;
+            _startProgressTimer();
+            return;
+        }
+        if (_playing) {
+            vid.pause();
+            _playing = false;
+        } else {
+            vid.play();
+            _playing = true;
+            _startProgressTimer();
+        }
+    }
+
+    void _seekFromMouse(int mx) {
+        if (_trackRect.w <= 0) return;
+        float t = std::max(0.f, std::min(1.f,
+            (float)(mx - _trackRect.x) / (float)_trackRect.w));
+        _progress = t;
+        FluxVideo::get().seekToProgress(t);
+        if (_finished && t < 0.999f) {
+            _finished = false;
+            FluxVideo::get().play();
+            _playing = true;
+            _startProgressTimer();
+        }
+        markNeedsPaint();
+    }
+
+    static std::string _fmtTime(float s) {
+        int si = (int)s;
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%d:%02d", si / 60, si % 60);
+        return buf;
+    }
+
+    // ── Render control bar (Cairo/Pango via Painter) ───────────────────────
+    void _renderBar(GraphicsContext& ctx, FontCache& fontCache, Painter& p) {
+        int barY = y + height - barHeight;
+        _barRect = {x, barY, width, barHeight};
+        p.fillRect(x, barY, width, barHeight, colBar);
+
+        int midY = barY + barHeight / 2;
+        int cx   = x + 6;
+        int btnSz = 28;
+        _playBtnRect = {cx, barY + (barHeight - btnSz) / 2, btnSz, btnSz};
+        Color iconCol = _hovPlay ? colIconHov : colIcon;
+
+        if (_playing) {
+            int bw = 3, bh = 10, gap = 3;
+            int bx = _playBtnRect.x + (btnSz - bw * 2 - gap) / 2;
+            int by = _playBtnRect.y + (btnSz - bh) / 2;
+            p.fillRect(bx,          by, bw, bh, iconCol);
+            p.fillRect(bx + bw + gap, by, bw, bh, iconCol);
+        } else {
+            int tx = _playBtnRect.x + (btnSz - 10) / 2 + 1;
+            int ty = _playBtnRect.y + (btnSz - 14) / 2;
+            for (int row = 0; row < 14; row++) {
+                int half = row < 7 ? row : 13 - row;
+                p.fillRect(tx + row, ty + 7 - half, 1, half * 2 + 1, iconCol);
+            }
+        }
+        cx += btnSz + 6;
+
+        float dur = FluxVideo::get().getDurationSeconds();
+        std::string timeStr = _fmtTime(_progress * dur) + " / " + _fmtTime(dur);
+        NativeFont tf = fontCache.getFont("Sans", 12, FontWeight::Normal);
+        int tw = 0, th = 0;
+        p.measureText(toWideString(timeStr), tf, tw, th);
+        p.drawText(toWideString(timeStr), cx, barY, tw + 4, barHeight, tf, colText,
+                   DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        cx += tw + 8;
+
+        int trackW = std::max(20, x + width - 12 - cx);
+        _trackRect  = {cx, midY - 8, trackW, 16};
+        p.fillRoundedRectGDI(cx, midY - 1, trackW, 3, 3, colTrackBg, colTrackBg, 0);
+        int fillW = (int)(_progress * trackW);
+        if (fillW > 0)
+            p.fillRoundedRectGDI(cx, midY - 1, fillW, 3, 3, colTrackFill, colTrackFill, 0);
+        p.drawEllipse(cx + fillW - 6, midY - 6, 12, 12, colThumb, colThumb, 0);
+    }
+
+    void _renderCenterPlay(Painter& p) {
+        int cx = x + width  / 2;
+        int cy = y + (height - barHeight) / 2;
+        p.drawEllipse(cx - 28, cy - 28, 56, 56,
+                      Color::fromRGBA(0, 0, 0, 160),
+                      Color::fromRGBA(0, 0, 0,   0), 0);
+        int tx = cx - 5, ty = cy - 10;
+        for (int row = 0; row < 20; row++) {
+            int half = row < 10 ? row : 19 - row;
+            p.fillRect(tx + row, ty + 10 - half, 1, half * 2 + 1,
+                       Color::fromRGB(255, 255, 255));
+        }
+    }
+
+};
+
+using VideoPlayerWidgetPtr = std::shared_ptr<VideoPlayerWidget>;
+
+inline VideoPlayerWidgetPtr VideoPlayer(const std::string& path = "") {
+    auto w = std::make_shared<VideoPlayerWidget>();
+    if (!path.empty()) w->setPath(path);
+    return w;
+}
+
+#endif // __linux__ && !__ANDROID__
