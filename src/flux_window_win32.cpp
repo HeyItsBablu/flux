@@ -345,7 +345,7 @@ case WM_TIMER: {
     if (!self) return 0;
     if (self->callbacks.onTimer)
         self->callbacks.onTimer((UINT)wParam);
-    self->invalidate();  
+    self->invalidate();   
     return 0;
 }
 

@@ -5,7 +5,7 @@ class MyApp : public Component {
 public:
   WidgetPtr build() override {
     return Scaffold(AppBar("Flux App"),
-                    Center(VideoPlayer("C:/Users/user/Videos/valorent/2026-01-25 14-23-57.mkv")
+                    Center(VideoPlayer("/home/roshan/Downloads/Maamla.Legal.Hai.S02E08.720p.Hindi.WEB-DL.5.1.ESub.x264-.mkv")
             ->setWidth(380)
             ->setHeight(270)    // 16:9
             ->setAutoPlay(false)));

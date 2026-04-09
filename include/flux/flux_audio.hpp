@@ -1240,19 +1240,44 @@ public:
     return true;
   }
 
-  void stopPlayback() {
+  // ── Stream playback (used by FluxVideo) ───────────────────────────────────
+  using StreamCallback = std::function<int(float *buf, int frames)>;
+
+  bool playStream(StreamCallback cb, int sampleRate = 44100) {
+    stopPlayback();
+
+    {
+      std::lock_guard<std::mutex> lk(s_cmdMutex);
+      s_streamCallback    = std::move(cb);
+      s_playSampleRate    = sampleRate;
+      s_playBuffer.clear();
+      s_playPosition      = 0;
+      s_didFireFinish     = false;
+      s_paused            = false;
+      s_pauseRequested    = false;
+      s_resumeRequested   = false;
+      s_seekPending       = false;
+      s_stopRequested     = false;
+    }
+
+    s_playing    = true;
+    s_writeThread = std::thread(&FluxAudio::_writeLoop, this);
+    return true;
+  }
+
+void stopPlayback() {
     if (s_writeThread.joinable()) {
       {
         std::lock_guard<std::mutex> lk(s_cmdMutex);
         s_stopRequested = true;
       }
-      // Wake every possible wait point so the thread exits promptly.
       s_cmdCV.notify_all();
       s_pauseCV.notify_all();
       s_writeThread.join();
     }
+    s_streamCallback = nullptr;  
     s_playing = false;
-    s_paused = false;
+    s_paused  = false;
   }
 
   void closePlayback() { stopPlayback(); }
@@ -1315,6 +1340,8 @@ private:
   bool s_stopRequested = false;
   bool s_seekPending = false;
   int s_seekTarget = 0;
+
+    StreamCallback s_streamCallback;
 
   // ── ALSA write loop ───────────────────────────────────────────────────────
   void _writeLoop() {
@@ -1404,28 +1431,45 @@ private:
         }
       }
 
-      // ── End of buffer? ────────────────────────────────────────────────
-      int pos = s_playPosition.load();
-      int total = (int)s_playBuffer.size();
-      if (pos >= total) {
-        snd_pcm_drain(pcm);
-        s_playing = false;
-        bool expected = false;
-        if (s_didFireFinish.compare_exchange_strong(expected, true))
-          if (s_finishCallback)
-            s_finishCallback();
-        break;
-      }
-
-      // ── Fill one period ───────────────────────────────────────────────
-      int avail = total - pos;
-      int nFrames = std::min((int)period, avail);
+// ── Fill one period (stream mode or buffer mode) ───────────────────────
       float vol = s_volume.load();
+      int nFrames = (int)period;
 
-      for (int i = 0; i < nFrames; i++)
-        periodBuf[i] = s_playBuffer[pos + i] * vol;
-      for (int i = nFrames; i < (int)period; i++)
-        periodBuf[i] = 0.f;
+      if (s_streamCallback) {
+        // Stream mode: pull from callback
+        int got = s_streamCallback(periodBuf.data(), nFrames);
+        if (got == 0) {
+          // Callback signalled end-of-stream
+          snd_pcm_drain(pcm);
+          s_playing = false;
+          bool expected = false;
+          if (s_didFireFinish.compare_exchange_strong(expected, true))
+            if (s_finishCallback)
+              s_finishCallback();
+          break;
+        }
+        for (int i = 0; i < nFrames; i++)
+          periodBuf[i] *= vol;
+      } else {
+        // Buffer mode: play from s_playBuffer
+        int pos = s_playPosition.load();
+        int total = (int)s_playBuffer.size();
+        if (pos >= total) {
+          snd_pcm_drain(pcm);
+          s_playing = false;
+          bool expected = false;
+          if (s_didFireFinish.compare_exchange_strong(expected, true))
+            if (s_finishCallback)
+              s_finishCallback();
+          break;
+        }
+        int avail = total - pos;
+        nFrames = std::min((int)period, avail);
+        for (int i = 0; i < nFrames; i++)
+          periodBuf[i] = s_playBuffer[pos + i] * vol;
+        for (int i = nFrames; i < (int)period; i++)
+          periodBuf[i] = 0.f;
+      }
 
 
       snd_pcm_sframes_t written = snd_pcm_writei(pcm, periodBuf.data(), period);

@@ -293,13 +293,26 @@ void PlatformWindow::handleSDLEvent(const SDL_Event &e) {
 // ============================================================================
 
 void PlatformWindow::invalidate() {
-  
   dirty = true;
+  
+  SDL_Event e;
+  SDL_zero(e);
+  e.type = SDL_WINDOWEVENT;
+  e.window.event = SDL_WINDOWEVENT_EXPOSED;
+  SDL_PushEvent(&e);
 }
 
 void PlatformWindow::invalidateRect(int x, int y, int w, int h) {
-
-  dirty = true;
+  if (!dirty) {          
+    dirty = true;
+    SDL_Event e;
+    SDL_zero(e);
+    e.type = SDL_WINDOWEVENT;
+    e.window.event = SDL_WINDOWEVENT_EXPOSED;
+    SDL_PushEvent(&e);
+  } else {
+    dirty = true;        
+  }
 }
 
 // ============================================================================
