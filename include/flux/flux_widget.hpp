@@ -122,6 +122,9 @@ enum class MainAxisAlignment {
 // ============================================================================
 
 class Widget : public std::enable_shared_from_this<Widget> {
+private:
+  bool mounted = false;
+
 public:
   std::string id;
   std::string text;
@@ -206,6 +209,11 @@ public:
       child->onDetach();
     }
   }
+
+  virtual WidgetPtr build() {
+    return nullptr;
+  }                         // Override to declare widget tree
+  virtual void onMount() {} // Called once after first layout
 
   // -----------------------------------------------------------------------
   // Core layout / render virtuals

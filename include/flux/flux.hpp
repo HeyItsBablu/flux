@@ -8,7 +8,6 @@
 
 
 #include "flux_app.hpp"
-#include "flux_component.hpp"
 #include "flux_state.hpp"
 #include "widgets/widgets.hpp"
 #include "flux_canvas.hpp"

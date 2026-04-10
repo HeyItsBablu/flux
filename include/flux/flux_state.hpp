@@ -29,7 +29,6 @@ private:
   };
   std::vector<PropertyBinding> propertyBindings;
 
-
   mutable std::mutex stateMutex;
 
   // ========================================================================
@@ -74,15 +73,15 @@ private:
     return "[complex type]";
   }
 
-
   void notifyObserversLocked() {
     std::string newText = valueToString(value);
 
     // Clean up expired text observers
-    observers.erase(
-        std::remove_if(observers.begin(), observers.end(),
-                       [](const std::weak_ptr<Widget> &w) { return w.expired(); }),
-        observers.end());
+    observers.erase(std::remove_if(observers.begin(), observers.end(),
+                                   [](const std::weak_ptr<Widget> &w) {
+                                     return w.expired();
+                                   }),
+                    observers.end());
 
     for (auto &weakWidget : observers) {
       if (auto widget = weakWidget.lock()) {
@@ -93,10 +92,12 @@ private:
     }
 
     // Clean up expired property bindings
-    propertyBindings.erase(
-        std::remove_if(propertyBindings.begin(), propertyBindings.end(),
-                       [](const PropertyBinding &b) { return b.widget.expired(); }),
-        propertyBindings.end());
+    propertyBindings.erase(std::remove_if(propertyBindings.begin(),
+                                          propertyBindings.end(),
+                                          [](const PropertyBinding &b) {
+                                            return b.widget.expired();
+                                          }),
+                           propertyBindings.end());
 
     for (auto &binding : propertyBindings) {
       if (auto widget = binding.widget.lock()) {
@@ -111,11 +112,9 @@ private:
     }
   }
 
-
   std::vector<std::function<void(T)>> snapshotListeners() const {
     return listeners;
   }
-
 
   void dispatchListeners(const std::vector<std::function<void(T)>> &snap,
                          const T &val) {
@@ -149,40 +148,39 @@ public:
     ui = FluxUI::getCurrentInstance();
 #ifdef FLUX_DEBUG
     if (!ui)
-      std::cerr << "[FluxUI] Warning: State created without valid context" << std::endl;
+      std::cerr << "[FluxUI] Warning: State created without valid context"
+                << std::endl;
 #endif
   }
 
-
   State(State &&other) noexcept {
     std::lock_guard<std::mutex> lock(other.stateMutex);
-    value            = std::move(other.value);
-    ui               = other.ui;
-    observers        = std::move(other.observers);
-    listeners        = std::move(other.listeners);
+    value = std::move(other.value);
+    ui = other.ui;
+    observers = std::move(other.observers);
+    listeners = std::move(other.listeners);
     propertyBindings = std::move(other.propertyBindings);
-    other.ui         = nullptr;
+    other.ui = nullptr;
   }
 
   // Move assignment — lock both to avoid races on either side.
   State &operator=(State &&other) noexcept {
     if (this != &other) {
       std::lock(stateMutex, other.stateMutex);
-      std::lock_guard<std::mutex> l1(stateMutex,       std::adopt_lock);
+      std::lock_guard<std::mutex> l1(stateMutex, std::adopt_lock);
       std::lock_guard<std::mutex> l2(other.stateMutex, std::adopt_lock);
 
-      value            = std::move(other.value);
-      ui               = other.ui;
-      observers        = std::move(other.observers);
-      listeners        = std::move(other.listeners);
+      value = std::move(other.value);
+      ui = other.ui;
+      observers = std::move(other.observers);
+      listeners = std::move(other.listeners);
       propertyBindings = std::move(other.propertyBindings);
-      other.ui         = nullptr;
+      other.ui = nullptr;
     }
     return *this;
   }
 
-
-  State(const State &)            = delete;
+  State(const State &) = delete;
   State &operator=(const State &) = delete;
 
   // ========================================================================
@@ -208,7 +206,7 @@ public:
     T dispatchValue;
     {
       std::lock_guard<std::mutex> lock(stateMutex);
-      value         = std::move(newValue);
+      value = std::move(newValue);
       dispatchValue = value;
       notifyObserversLocked();
       snap = snapshotListeners();
@@ -231,7 +229,7 @@ public:
       T newValue = updater(value);
       if (value == newValue)
         return;
-      value         = std::move(newValue);
+      value = std::move(newValue);
       dispatchValue = value;
       notifyObserversLocked();
       snap = snapshotListeners();
@@ -252,7 +250,6 @@ public:
     listeners.push_back(std::move(listener));
   }
 
-
   void bindProperty(std::shared_ptr<Widget> widget,
                     std::function<void(Widget *, const T &)> applier,
                     bool needsLayout = false) {
@@ -267,7 +264,6 @@ public:
   // OBSERVER MANAGEMENT
   // ========================================================================
 
-
   void addObserver(std::shared_ptr<Widget> widget) {
     if (!widget)
       return;
@@ -280,22 +276,22 @@ public:
     if (!widget)
       return;
     std::lock_guard<std::mutex> lock(stateMutex);
-    observers.erase(
-        std::remove_if(observers.begin(), observers.end(),
-                       [widget](const std::weak_ptr<Widget> &w) {
-                         if (auto locked = w.lock())
-                           return locked.get() == widget;
-                         return true;
-                       }),
-        observers.end());
+    observers.erase(std::remove_if(observers.begin(), observers.end(),
+                                   [widget](const std::weak_ptr<Widget> &w) {
+                                     if (auto locked = w.lock())
+                                       return locked.get() == widget;
+                                     return true;
+                                   }),
+                    observers.end());
   }
 
   void cleanupExpiredObservers() {
     std::lock_guard<std::mutex> lock(stateMutex);
-    observers.erase(
-        std::remove_if(observers.begin(), observers.end(),
-                       [](const std::weak_ptr<Widget> &w) { return w.expired(); }),
-        observers.end());
+    observers.erase(std::remove_if(observers.begin(), observers.end(),
+                                   [](const std::weak_ptr<Widget> &w) {
+                                     return w.expired();
+                                   }),
+                    observers.end());
   }
 
   // ========================================================================
@@ -307,14 +303,15 @@ public:
     return valueToString(value);
   }
 
-  bool   hasContext()    const { return ui != nullptr; }
-  FluxUI *getContext()   const { return ui; }
+  bool hasContext() const { return ui != nullptr; }
+  FluxUI *getContext() const { return ui; }
 
   size_t observerCount() const {
     std::lock_guard<std::mutex> lock(stateMutex);
     size_t n = 0;
     for (const auto &w : observers)
-      if (!w.expired()) ++n;
+      if (!w.expired())
+        ++n;
     return n;
   }
 
@@ -333,21 +330,16 @@ public:
 // HELPER FUNCTIONS
 // ============================================================================
 
-template <typename T>
-inline State<T> &deref(State<T> *state) { return *state; }
+template <typename T> inline State<T> &deref(State<T> *state) { return *state; }
 
-
-
-template <typename R, typename... States>
-class ComputedState {
+template <typename R, typename... States> class ComputedState {
 private:
   std::function<R(States...)> computer;
   std::tuple<States *...> dependencies;
 
-  mutable R           cachedValue{};
-  mutable bool        dirty = true;
-  mutable std::mutex  mutex;
-
+  mutable R cachedValue{};
+  mutable bool dirty = true;
+  mutable std::mutex mutex;
 
   std::shared_ptr<bool> alive = std::make_shared<bool>(true);
 
@@ -357,15 +349,12 @@ public:
     addListenersImpl(std::index_sequence_for<States...>{});
   }
 
-  ~ComputedState() {
-    *alive = false;
-  }
+  ~ComputedState() { *alive = false; }
 
-
-  ComputedState(const ComputedState &)            = delete;
+  ComputedState(const ComputedState &) = delete;
   ComputedState &operator=(const ComputedState &) = delete;
-  ComputedState(ComputedState &&)                 = delete;
-  ComputedState &operator=(ComputedState &&)      = delete;
+  ComputedState(ComputedState &&) = delete;
+  ComputedState &operator=(ComputedState &&) = delete;
 
   R get() const {
     std::lock_guard<std::mutex> lock(mutex);
@@ -377,11 +366,10 @@ public:
   }
 
 private:
-  template <size_t... Is>
-  void addListenersImpl(std::index_sequence<Is...>) {
+  template <size_t... Is> void addListenersImpl(std::index_sequence<Is...>) {
     std::weak_ptr<bool> weakAlive = alive;
     std::mutex *mtx = &mutex;
-    bool       *d   = &dirty;
+    bool *d = &dirty;
 
     auto markDirty = [weakAlive, mtx, d](auto) {
       if (auto a = weakAlive.lock(); a && *a) {
@@ -390,12 +378,10 @@ private:
       }
     };
 
-
     (std::get<Is>(dependencies)->listen(markDirty), ...);
   }
 
-  template <size_t... Is>
-  R computeImpl(std::index_sequence<Is...>) const {
+  template <size_t... Is> R computeImpl(std::index_sequence<Is...>) const {
     return computer(std::get<Is>(dependencies)->get()...);
   }
 };

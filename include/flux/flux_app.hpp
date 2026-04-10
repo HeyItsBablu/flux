@@ -105,42 +105,42 @@ inline AppTheme ThemeProvider::currentTheme = AppTheme::light();
 // THEMED WIDGET FACTORIES
 // ============================================================================
 
-//inline WidgetPtr ThemedAppBar(const std::string &title) {
-//  auto theme = ThemeProvider::getTheme();
-//  auto w = std::make_shared<AppBarWidget>();
+// inline WidgetPtr ThemedAppBar(const std::string &title) {
+//   auto theme = ThemeProvider::getTheme();
+//   auto w = std::make_shared<AppBarWidget>();
 //
-//  w->hasBackground = true;
-//  w->backgroundColor = theme.appBarColor;
-//  w->height = theme.appBarHeight;
-//  w->autoHeight = false;
+//   w->hasBackground = true;
+//   w->backgroundColor = theme.appBarColor;
+//   w->height = theme.appBarHeight;
+//   w->autoHeight = false;
 //
-//  auto titleWidget = Text(title)
-//                         ->setFontSize(theme.titleFontSize)
-//                         ->setFontWeight(theme.titleFontWeight)
-//                         ->setTextColor(theme.appBarTextColor)
-//                         ->setPadding(theme.defaultPadding);
+//   auto titleWidget = Text(title)
+//                          ->setFontSize(theme.titleFontSize)
+//                          ->setFontWeight(theme.titleFontWeight)
+//                          ->setTextColor(theme.appBarTextColor)
+//                          ->setPadding(theme.defaultPadding);
 //
-//  w->addChild(titleWidget);
-//  return w;
-//}
+//   w->addChild(titleWidget);
+//   return w;
+// }
 
-//inline WidgetPtr ThemedButton(const std::string &text,
-//                              ClickHandler onClick = nullptr) {
-//  auto theme = ThemeProvider::getTheme();
-//  auto w = std::make_shared<ButtonWidget>();
-//  w->text = text;
-//  w->onClick = onClick;
+// inline WidgetPtr ThemedButton(const std::string &text,
+//                               ClickHandler onClick = nullptr) {
+//   auto theme = ThemeProvider::getTheme();
+//   auto w = std::make_shared<ButtonWidget>();
+//   w->text = text;
+//   w->onClick = onClick;
 //
-//  w->hasBackground = true;
-//  w->backgroundColor = theme.buttonColor;
-//  w->textColor = theme.buttonTextColor;
-//  w->paddingLeft = w->paddingRight = theme.buttonPaddingH;
-//  w->paddingTop = w->paddingBottom = theme.buttonPaddingV;
-//  w->borderRadius = theme.buttonBorderRadius;
-//  w->fontWeight = FontWeight::Bold;
+//   w->hasBackground = true;
+//   w->backgroundColor = theme.buttonColor;
+//   w->textColor = theme.buttonTextColor;
+//   w->paddingLeft = w->paddingRight = theme.buttonPaddingH;
+//   w->paddingTop = w->paddingBottom = theme.buttonPaddingV;
+//   w->borderRadius = theme.buttonBorderRadius;
+//   w->fontWeight = FontWeight::Bold;
 //
-//  return w;
-//}
+//   return w;
+// }
 
 inline WidgetPtr ThemedCard(WidgetPtr child) {
   auto theme = ThemeProvider::getTheme();
@@ -296,24 +296,20 @@ inline FluxAppWidget *FluxAppWidget::instance = nullptr;
 // FLUX APP FACTORY
 // ============================================================================
 
-inline WidgetPtr FluxApp(const std::string& title,
-                         WidgetPtr           home,
-                         const AppTheme&     theme                = AppTheme::light(),
-                         bool                debugShowWidgetBounds = false,
-                         int                 width                = 900,
-                         int                 height               = 700,
-                         bool                maximize             = false,
-                         bool                fullscreen           = true)
-{
-    auto app = std::make_shared<FluxAppWidget>(title, home);
-    app->theme                = theme;
-    app->debugShowWidgetBounds = debugShowWidgetBounds;
-    app->windowWidth          = width;
-    app->windowHeight         = height;
-    app->maximize             = maximize;
-    app->fullscreen           = fullscreen;
-    ThemeProvider::setTheme(theme);
-    return app;
+inline WidgetPtr FluxApp(const std::string &title, WidgetPtr home,
+                         const AppTheme &theme = AppTheme::light(),
+                         bool debugShowWidgetBounds = false, int width = 900,
+                         int height = 700, bool maximize = false,
+                         bool fullscreen = true) {
+  auto app = std::make_shared<FluxAppWidget>(title, home);
+  app->theme = theme;
+  app->debugShowWidgetBounds = debugShowWidgetBounds;
+  app->windowWidth = width;
+  app->windowHeight = height;
+  app->maximize = maximize;
+  app->fullscreen = fullscreen;
+  ThemeProvider::setTheme(theme);
+  return app;
 }
 
 #endif // FLUX_APP_HPP

@@ -57,7 +57,7 @@ static WidgetPtr ErrorWidget(const std::string& err) {
 // App component
 // ============================================================================
 
-class MyApp : public Component {
+class MyApp : public Widget {
 public:
     WidgetPtr build() override {
         return Scaffold(
@@ -194,15 +194,9 @@ public:
 
 // ============================================================================
 
-WidgetPtr createApp(FluxUI* app) {
-    return FluxApp(
-        "FluxUI - Fetch Examples",
-        BuildComponent<MyApp>(),
-        AppTheme::light(),
-        false,  // debugShowWidgetBounds
-        700,    // width
-        800,    // height
-        false,  // maximize
-        false   // fullscreen
-    );
+WidgetPtr createApp(FluxUI *app) {
+    return FluxApp("FluxUI - App",
+                   std::make_shared<MyApp>(),
+                   AppTheme::light(), false,
+                   900, 700, false, false);
 }
