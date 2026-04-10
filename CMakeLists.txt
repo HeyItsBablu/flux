@@ -47,6 +47,17 @@ if(NOT ANDROID)
     FetchContent_MakeAvailable(Clipper2)
 endif()
 
+# ── mbedTLS (Android only) ────────────────────────────────────────────────────
+if(ANDROID)
+    FetchContent_Declare(mbedtls
+            GIT_REPOSITORY https://github.com/Mbed-TLS/mbedtls.git
+            GIT_TAG        v3.6.2
+    )
+    set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
+    set(ENABLE_TESTING  OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(mbedtls)
+endif()
+
 
 
 # ── libcurl ───────────────────────────────────────────────────────────────────
@@ -67,10 +78,10 @@ set(CURL_USE_LIBRTMP   OFF CACHE BOOL "" FORCE)
 set(CURL_DISABLE_LDAP  ON  CACHE BOOL "" FORCE)
 
 if(ANDROID)
-#    set(CURL_USE_OPENSSL  OFF CACHE BOOL "" FORCE)
+    set(CURL_USE_OPENSSL  OFF CACHE BOOL "" FORCE)
     set(CURL_USE_SCHANNEL OFF CACHE BOOL "" FORCE)
-    set(CURL_USE_MBEDTLS  OFF CACHE BOOL "" FORCE)
-#    set(CURL_ENABLE_SSL   OFF CACHE BOOL "" FORCE)
+    set(CURL_USE_MBEDTLS  ON  CACHE BOOL "" FORCE)  
+    set(CURL_ENABLE_SSL   ON  CACHE BOOL "" FORCE)
 elseif(WIN32)
     set(CURL_USE_SCHANNEL ON  CACHE BOOL "" FORCE)
     set(CURL_USE_OPENSSL  OFF CACHE BOOL "" FORCE)
@@ -78,7 +89,6 @@ elseif(UNIX AND NOT APPLE)
     set(CURL_USE_OPENSSL  ON  CACHE BOOL "" FORCE)
     set(CURL_USE_SCHANNEL OFF CACHE BOOL "" FORCE)
 endif()
-
 FetchContent_MakeAvailable(curl)
 
 
