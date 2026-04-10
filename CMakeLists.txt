@@ -47,7 +47,7 @@ if(NOT ANDROID)
     FetchContent_MakeAvailable(Clipper2)
 endif()
 
-# ── mbedTLS (Android only) ────────────────────────────────────────────────────
+
 if(ANDROID)
     FetchContent_Declare(mbedtls
             GIT_REPOSITORY https://github.com/Mbed-TLS/mbedtls.git
@@ -56,6 +56,17 @@ if(ANDROID)
     set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
     set(ENABLE_TESTING  OFF CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(mbedtls)
+
+    # Override curl's FindMbedTLS search paths
+    set(MBEDTLS_INCLUDE_DIRS
+            "${mbedtls_SOURCE_DIR}/include"
+            CACHE PATH "" FORCE)
+    set(MBEDTLS_LIBRARY     mbedtls   CACHE STRING "" FORCE)
+    set(MBEDX509_LIBRARY    mbedx509  CACHE STRING "" FORCE)
+    set(MBEDCRYPTO_LIBRARY  mbedcrypto CACHE STRING "" FORCE)
+
+    # Also set the root so find_package can locate headers
+    set(MBEDTLS_ROOT_DIR "${mbedtls_SOURCE_DIR}" CACHE PATH "" FORCE)
 endif()
 
 
@@ -114,14 +125,19 @@ if(ANDROID)
     if(NOT TARGET nanovg)
         add_library(nanovg STATIC
                 external/nanovg/src/nanovg.c
+                external/nanovg/src/nanovg_gl_impl.c    # ← new file
         )
         set_source_files_properties(
-                external/nanovg/src/nanovg.c PROPERTIES LANGUAGE C
+                external/nanovg/src/nanovg.c
+                external/nanovg/src/nanovg_gl_impl.c
+                PROPERTIES LANGUAGE C
         )
         target_include_directories(nanovg PUBLIC
                 external/nanovg/src
         )
-        target_compile_definitions(nanovg PRIVATE NANOVG_GLES2_IMPLEMENTATION)
+        target_compile_definitions(nanovg PRIVATE
+                STB_IMAGE_STATIC
+        )
     endif()
 endif()
 
