@@ -26,10 +26,10 @@ public:
     WidgetPtr build() override {
         return Row({
             Button("Increment", [this]() {
-                counter.set(counter.get() + 1);
+                counter++;
             }),
             Button("Decrement", [this]() {
-                counter.set(counter.get() - 1);
+                counter--;
             }),
             Button("Reset", [this]() {
                 counter.set(0);
