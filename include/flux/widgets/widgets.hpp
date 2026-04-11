@@ -30,6 +30,6 @@
 #include "mic_recorder_widget.hpp"
 #include "camera_widget.hpp"
 #include "flux_future_builder.hpp"
-//#include "flux_file_picker.hpp"
+#include "flux_file_picker.hpp"
 //#include "flux_graph.hpp"
 #endif // WIDGETS_HPP
