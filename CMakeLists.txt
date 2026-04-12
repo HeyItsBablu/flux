@@ -250,6 +250,7 @@ elseif(ANDROID)
             "-Wl,-u,ANativeActivity_onCreate"
     )
 elseif(UNIX AND NOT APPLE)
+find_package(JPEG REQUIRED)  
     target_link_libraries(flux PUBLIC
             Clipper2
             CURL::libcurl
@@ -261,6 +262,7 @@ elseif(UNIX AND NOT APPLE)
             ${AVCODEC_LIBRARIES}
             ${AVUTIL_LIBRARIES}
             ${SWSCALE_LIBRARIES}
+               ${JPEG_LIBRARIES} 
     )
     target_compile_options(flux PRIVATE
             ${CAIRO_CFLAGS_OTHER}
@@ -273,6 +275,7 @@ elseif(UNIX AND NOT APPLE)
     )
     target_include_directories(flux PRIVATE
             ${ALSA_INCLUDE_DIRS}
+            ${JPEG_INCLUDE_DIRS}
     )
 endif()
 

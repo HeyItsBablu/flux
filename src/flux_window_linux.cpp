@@ -22,10 +22,22 @@
     fflush(stderr);                                                               \
   } while (0)
 
+
+  void FluxWin_markNeedsPaint() {
+    // SDL_PushEvent is documented thread-safe — safe to call from the V4L2 capture thread.
+    SDL_Event e;
+    SDL_zero(e);
+    e.type         = SDL_WINDOWEVENT;
+    e.window.event = SDL_WINDOWEVENT_EXPOSED;
+    SDL_PushEvent(&e);
+}
+
 // ============================================================================
 // CairoState
 // ============================================================================
 static Uint32 gFluxTimerEventType = 0;
+
+
 
 struct PlatformWindow::CairoState
 {
