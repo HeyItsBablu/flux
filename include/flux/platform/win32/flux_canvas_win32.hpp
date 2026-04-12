@@ -4,10 +4,10 @@
   #error "flux_canvas_win32.hpp must only be compiled on Win32"
 #endif
 
-#include "flux_platform.hpp"
-#include "flux_widget.hpp"
-#include "flux_keys.hpp"
-#include "flux_core.hpp"
+#include "../../flux_platform.hpp"
+#include "../../flux_widget.hpp"
+#include "../../flux_keys.hpp"
+#include "../../flux_core.hpp"
 
 #include <glad/glad.h>         
 
