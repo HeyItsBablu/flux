@@ -22,6 +22,18 @@ inline void FluxHttp_Win32_HandleMessage(LPARAM lParam) {
 static HWND gFluxUIWindow = nullptr;
 inline void fluxSetUIWindow(HWND hwnd) { gFluxUIWindow = hwnd; }
 
+
+
+inline HWND fluxGetUIWindow() {
+    return gFluxUIWindow;
+}
+
+
+inline void FluxWin_markNeedsPaint() {
+    if (gFluxUIWindow)
+        ::InvalidateRect(gFluxUIWindow, nullptr, FALSE);
+}
+
 inline void fluxDrainPendingMessages(HWND hwnd) {
   MSG msg;
   while (PeekMessage(&msg, hwnd, WM_FLUX_HTTP_RESULT, WM_FLUX_HTTP_RESULT, PM_REMOVE)) {

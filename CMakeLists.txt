@@ -222,8 +222,14 @@ if(WIN32)
             glu32
             xaudio2
             ole32
-            mfplat mfreadwrite mfuuid ole32 propsys
+            mf              
+            mfplat
+            mfreadwrite
+            mfuuid
+            propsys
+            windowscodecs   
     )
+
 elseif(ANDROID)
     find_library(log-lib     log)
     find_library(android-lib android)

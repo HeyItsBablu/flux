@@ -76,6 +76,7 @@ void PlatformWindow::setDefaultCursor() { SetCursor(LoadCursor(nullptr, IDC_ARRO
 // PlatformWindow::create
 // ============================================================================
 
+
 bool PlatformWindow::create(const std::string &title, int width, int height,
                             AppInstance hInst, void *userData) {
   startupGdiplus();
@@ -104,6 +105,8 @@ bool PlatformWindow::create(const std::string &title, int width, int height,
 
 
   fluxSetUIWindow(hwnd);
+
+  
 
   updateClientSize();
   return true;
