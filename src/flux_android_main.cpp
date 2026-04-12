@@ -29,6 +29,7 @@ static std::string  s_cacertPath;
 
 // ── Global accessors ──────────────────────────────────────────────────────────
 extern void FluxAndroid_setVG(NVGcontext* vg);
+extern void FluxFile_setAndroidApp(android_app* app);
 
 void           FluxAndroid_setAssetManager(AAssetManager* am) { s_assetManager = am; }
 AAssetManager* FluxAndroid_getAssetManager()                  { return s_assetManager; }
@@ -364,6 +365,7 @@ static void handle_cmd(android_app* app, int32_t cmd) {
 
             FluxJNI::init(app);
             FluxAndroid_setAssetManager(app->activity->assetManager);
+            FluxFile_setAndroidApp(app);
 
             // ── Extract CA cert and tell curl about it ─────────────────────
             extractCACert(app);
