@@ -1,12 +1,10 @@
 // FluxBridge.java
 // Place at: app/src/main/java/com/flux/FluxBridge.java
 //
-// This class:
-//   1. Receives onActivityResult() from your Activity
-//   2. Unpacks single or multiple URIs from the Intent
-//   3. Calls nativeOnFilePickerResult() to deliver paths back to C++
+// Receives onActivityResult() from your Activity, unpacks the URI(s) from
+// the Intent, and delivers them to C++ via nativeOnFilePickerResult().
 //
-// Setup in your Activity (or GameActivity wrapper):
+// Setup — add to your Activity (or GameActivity wrapper):
 //
 //   import com.flux.FluxBridge;
 //
@@ -29,24 +27,25 @@ import android.net.Uri;
 public class FluxBridge {
 
     // ── Load native library ──────────────────────────────────────────────────
-    // The native lib name should match what your CMakeLists.txt produces.
-    // Typically this is called once from Application.onCreate() or Activity.onCreate().
+    // Change "flux_app" to match the actual library name in your CMakeLists.txt.
+    // Call System.loadLibrary() once — typically from Application.onCreate()
+    // or Activity.onCreate() — before any FilePicker is used.
     static {
-        System.loadLibrary("flux_app"); // change to your actual library name
+        System.loadLibrary("flux_app");
     }
 
-    // ── Native callback (implemented in flux_file_picker_android.hpp) ────────
+    // ── JNI declaration — implemented in flux_file_picker_android.cpp ────────
     private static native void nativeOnFilePickerResult(
-            int      requestCode,
-            int      resultCode,
-            String[] uris,
+            int             requestCode,
+            int             resultCode,
+            String[]        uris,
             ContentResolver resolver);
 
     // ── Called from Activity.onActivityResult() ──────────────────────────────
-    public static void onFilePickerResult(Activity    activity,
-                                          int         requestCode,
-                                          int         resultCode,
-                                          Intent      data) {
+    public static void onFilePickerResult(Activity activity,
+                                          int      requestCode,
+                                          int      resultCode,
+                                          Intent   data) {
 
         ContentResolver resolver = activity.getContentResolver();
 
@@ -56,14 +55,14 @@ public class FluxBridge {
             return;
         }
 
-        String[] uriStrings = collectUris(data);
-        nativeOnFilePickerResult(requestCode, resultCode, uriStrings, resolver);
+        String[] uris = collectUris(data);
+        nativeOnFilePickerResult(requestCode, resultCode, uris, resolver);
     }
 
     // ── Collect all URIs from an Intent ──────────────────────────────────────
-    // Handles both single-select (getData()) and multi-select (getClipData()).
+    // Multi-select results are stored in ClipData; single-select uses getData().
     private static String[] collectUris(Intent data) {
-        // Multi-select: ClipData holds all selected URIs
+        // Multi-select path
         ClipData clip = data.getClipData();
         if (clip != null && clip.getItemCount() > 0) {
             String[] uris = new String[clip.getItemCount()];
@@ -74,7 +73,7 @@ public class FluxBridge {
             return uris;
         }
 
-        // Single-select: just getData()
+        // Single-select path
         Uri single = data.getData();
         if (single != null) {
             return new String[]{ single.toString() };

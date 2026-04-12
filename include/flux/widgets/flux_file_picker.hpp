@@ -113,6 +113,42 @@ void *getOwnerHwnd();
 #endif // _WIN32
 
 // ============================================================================
+// ANDROID BACKEND — forward declarations
+// ============================================================================
+
+#ifdef __ANDROID__
+#include <jni.h>
+
+namespace FluxFilePickerAndroid {
+
+// Must be set once at startup (e.g. in android_main or JNI_OnLoad).
+extern JNIEnv        *g_env;
+extern ANativeActivity *g_activity;
+
+void pickFileAsync(const std::string &title,
+                   const std::vector<FileFilter> &filters,
+                   std::function<void(std::string)> callback);
+
+void pickFilesAsync(const std::string &title,
+                    const std::vector<FileFilter> &filters,
+                    std::function<void(std::vector<std::string>)> callback);
+
+void saveFileAsync(const std::string &title,
+                   const std::string &defaultFilename,
+                   const std::vector<FileFilter> &filters,
+                   std::function<void(std::string)> callback);
+
+void pickFolderAsync(const std::string &title,
+                     std::function<void(std::string)> callback);
+
+// Called by the JNI bridge (Java_com_flux_FluxBridge_nativeOnFilePickerResult)
+// to deliver results back to the C++ callback registry.
+void dispatchResult(int requestCode, std::vector<std::string> paths);
+
+} // namespace FluxFilePickerAndroid
+#endif // __ANDROID__
+
+// ============================================================================
 // FILE PICKER WIDGET
 // ============================================================================
 //
@@ -122,6 +158,8 @@ void *getOwnerHwnd();
 // Cross-platform:
 //   Windows  — GetOpenFileNameW / GetSaveFileNameW / SHBrowseForFolderW
 //   Linux    — zenity (GNOME) or kdialog (KDE), async via background thread
+//   Android  — ACTION_OPEN_DOCUMENT / CREATE_DOCUMENT / OPEN_DOCUMENT_TREE
+//              via startActivityForResult, bridged through FluxBridge.java
 //
 // ── Single file open ──────────────────────────────────────────────────────
 //
@@ -286,7 +324,7 @@ private:
   int lastMy_ = -9999;
 
   // ── Shared helpers ────────────────────────────────────────────────────────
-  // Defined in both platform .cpp files (identical implementations).
+  // Defined in all platform .cpp files (identical implementations).
   std::shared_ptr<FilePickerWidget> self_();
   bool        _inBounds(int mx, int my) const;
   bool        _isOverClear(int mx, int my) const;
