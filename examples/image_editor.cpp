@@ -576,24 +576,24 @@ static std::wstring promptExportImage(HWND owner) {
 // §5  IMAGE EDITOR APP
 // =============================================================================
 
-class ImageEditorApp : public Component {
+class ImageEditorApp : public Widget {
   // ── UI state ──────────────────────────────────────────────────────────────
-  State<std::string>    statusMsg;
-  State<bool>           hasImage;
-  State<bool>           beforeMode;
-  State<double>         zoomLevel;
-  State<HistogramData>  histState;
-  State<ToneCurveData>  curveState;
-  State<HSLData>        hslState;
+  State<std::string>    statusMsg{"Open an image to begin."};
+  State<bool>           hasImage{false};
+  State<bool>           beforeMode{false};
+  State<double>         zoomLevel{100.0};
+  State<HistogramData>  histState{HistogramData{}};
+  State<ToneCurveData>  curveState{ToneCurveData{}};
+  State<HSLData>        hslState{HSLData{}};
 
   // ── Tone ──────────────────────────────────────────────────────────────────
-  State<double> sExposure, sContrast, sHighlights, sShadows, sWhites, sBlacks;
+  State<double> sExposure{0.0}, sContrast{0.0}, sHighlights{0.0}, sShadows{0.0}, sWhites{0.0}, sBlacks{0.0};
   // ── Color ─────────────────────────────────────────────────────────────────
-  State<double> sTemperature, sTint, sSaturation, sVibrance;
+  State<double> sTemperature{0.0}, sTint{0.0}, sSaturation{0.0}, sVibrance{0.0};
   // ── Detail ────────────────────────────────────────────────────────────────
-  State<double> sSharpness, sNoiseReduce;
+  State<double> sSharpness{0.0}, sNoiseReduce{0.0};
   // ── Effects ───────────────────────────────────────────────────────────────
-  State<double> sVignette, sGrain;
+  State<double> sVignette{0.0}, sGrain{0.0};
 
   std::shared_ptr<ImageEditSurface> surface_;
   ToneCurveWidget *curveWidgetPtr_ = nullptr;
@@ -612,21 +612,7 @@ class ImageEditorApp : public Component {
   }
 
 public:
-  ImageEditorApp()
-      : statusMsg("Open an image to begin.", context),
-        hasImage(false, context),
-        beforeMode(false, context),
-        zoomLevel(100.0, context),
-        histState(HistogramData{}, context),
-        curveState(ToneCurveData{}, context),
-        hslState(HSLData{}, context),
-        sExposure(0.0, context),    sContrast(0.0, context),
-        sHighlights(0.0, context),  sShadows(0.0, context),
-        sWhites(0.0, context),      sBlacks(0.0, context),
-        sTemperature(0.0, context), sTint(0.0, context),
-        sSaturation(0.0, context),  sVibrance(0.0, context),
-        sSharpness(0.0, context),   sNoiseReduce(0.0, context),
-        sVignette(0.0, context),    sGrain(0.0, context) {}
+
 
   WidgetPtr build() override {
     int screenW = GetSystemMetrics(SM_CXSCREEN);
@@ -1088,7 +1074,7 @@ private:
 WidgetPtr createApp(FluxUI* app) {
     return FluxApp(
         "FluxUI - Paint",
-        BuildComponent<ImageEditorApp>(),
+        std::make_shared<ImageEditorApp>(),
         AppTheme::dark(),
         false,   // debugShowWidgetBounds
         900,     // width
