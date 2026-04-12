@@ -91,7 +91,7 @@ set(CURL_DISABLE_LDAP  ON  CACHE BOOL "" FORCE)
 if(ANDROID)
     set(CURL_USE_OPENSSL  OFF CACHE BOOL "" FORCE)
     set(CURL_USE_SCHANNEL OFF CACHE BOOL "" FORCE)
-    set(CURL_USE_MBEDTLS  ON  CACHE BOOL "" FORCE)  
+    set(CURL_USE_MBEDTLS  ON  CACHE BOOL "" FORCE)
     set(CURL_ENABLE_SSL   ON  CACHE BOOL "" FORCE)
 elseif(WIN32)
     set(CURL_USE_SCHANNEL ON  CACHE BOOL "" FORCE)
@@ -105,10 +105,10 @@ FetchContent_MakeAvailable(curl)
 
 
 # ============================================================================
-# GLAD  (Win32 only)
+# GLAD  (Windows + Linux desktop — not Android, which uses NanoVG/GLES2)
 # ============================================================================
 
-if(WIN32)
+if(WIN32 OR (UNIX AND NOT APPLE AND NOT ANDROID))
     add_library(glad STATIC external/glad/src/glad.c)
     set_source_files_properties(external/glad/src/glad.c PROPERTIES LANGUAGE C)
     target_include_directories(glad PUBLIC
@@ -125,7 +125,7 @@ if(ANDROID)
     if(NOT TARGET nanovg)
         add_library(nanovg STATIC
                 external/nanovg/src/nanovg.c
-                external/nanovg/src/nanovg_gl_impl.c    # ← new file
+                external/nanovg/src/nanovg_gl_impl.c
         )
         set_source_files_properties(
                 external/nanovg/src/nanovg.c
@@ -142,11 +142,13 @@ if(ANDROID)
 endif()
 
 # ============================================================================
-# Linux platform dependencies  (SDL2 + Cairo + Pango + ALSA + FFmpeg)
+# Linux platform dependencies  (SDL2 + Cairo + Pango + ALSA + FFmpeg + OpenGL)
 # ============================================================================
 
 if(UNIX AND NOT APPLE AND NOT ANDROID)
-    find_package(SDL2 REQUIRED)
+    find_package(SDL2    REQUIRED)
+    find_package(OpenGL  REQUIRED)   # needed by GLAD on Linux
+    find_package(JPEG    REQUIRED)
 
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(CAIRO      REQUIRED cairo)
@@ -200,13 +202,16 @@ target_include_directories(flux
         $<$<NOT:$<BOOL:${ANDROID}>>:${stb_SOURCE_DIR}>
         PRIVATE
         $<$<NOT:$<BOOL:${ANDROID}>>:${stb_SOURCE_DIR}>
-        $<$<BOOL:${WIN32}>:${CMAKE_CURRENT_SOURCE_DIR}/external/glad/include>
+        # GLAD include: Windows and Linux desktop (not Android)
+        $<$<OR:$<BOOL:${WIN32}>,$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>>:${CMAKE_CURRENT_SOURCE_DIR}/external/glad/include>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${AVFORMAT_INCLUDE_DIRS}>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${AVCODEC_INCLUDE_DIRS}>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${AVUTIL_INCLUDE_DIRS}>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${SWSCALE_INCLUDE_DIRS}>
         $<$<BOOL:${ANDROID}>:${NATIVE_APP_GLUE_DIR}>
         $<$<BOOL:${ANDROID}>:${CMAKE_CURRENT_SOURCE_DIR}/external/nanovg/src>
+        $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${ALSA_INCLUDE_DIRS}>
+        $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${JPEG_INCLUDE_DIRS}>
 )
 
 # ── Link libraries ────────────────────────────────────────────────────────────
@@ -222,12 +227,12 @@ if(WIN32)
             glu32
             xaudio2
             ole32
-            mf              
+            mf
             mfplat
             mfreadwrite
             mfuuid
             propsys
-            windowscodecs   
+            windowscodecs
     )
 
 elseif(ANDROID)
@@ -249,9 +254,11 @@ elseif(ANDROID)
     target_link_options(flux PUBLIC
             "-Wl,-u,ANativeActivity_onCreate"
     )
+
 elseif(UNIX AND NOT APPLE)
-find_package(JPEG REQUIRED)  
     target_link_libraries(flux PUBLIC
+            glad
+            OpenGL::GL
             Clipper2
             CURL::libcurl
             ${SDL2_LIBRARIES}
@@ -262,7 +269,7 @@ find_package(JPEG REQUIRED)
             ${AVCODEC_LIBRARIES}
             ${AVUTIL_LIBRARIES}
             ${SWSCALE_LIBRARIES}
-               ${JPEG_LIBRARIES} 
+            ${JPEG_LIBRARIES}
     )
     target_compile_options(flux PRIVATE
             ${CAIRO_CFLAGS_OTHER}
@@ -272,10 +279,6 @@ find_package(JPEG REQUIRED)
             ${AVCODEC_CFLAGS_OTHER}
             ${AVUTIL_CFLAGS_OTHER}
             ${SWSCALE_CFLAGS_OTHER}
-    )
-    target_include_directories(flux PRIVATE
-            ${ALSA_INCLUDE_DIRS}
-            ${JPEG_INCLUDE_DIRS}
     )
 endif()
 
@@ -328,7 +331,8 @@ if(NOT ANDROID)
     include(CMakePackageConfigHelpers)
 
     set(FLUX_INSTALL_TARGETS flux)
-    if(WIN32)
+    # Install GLAD on both Windows and Linux desktop
+    if(WIN32 OR (UNIX AND NOT APPLE AND NOT ANDROID))
         list(APPEND FLUX_INSTALL_TARGETS glad)
     endif()
 

@@ -38,10 +38,10 @@
 // input wiring differ.
 // ============================================================================
 
-#include "flux_platform.hpp"
-#include "flux_widget.hpp"
-#include "flux_keys.hpp"
-#include "flux_core.hpp"
+#include "../../flux_platform.hpp"
+#include "../../flux_widget.hpp"
+#include "../../flux_keys.hpp"
+#include "../../flux_core.hpp"
 
 #include <glad/glad.h>
 #include "../../flux_glutil.hpp"
@@ -114,19 +114,26 @@ struct GLContext {
                 glGetString(GL_RENDERER));
 
 #ifndef NDEBUG
-        if (GLAD_GL_ARB_debug_output || GLAD_GL_KHR_debug) {
-            glEnable(GL_DEBUG_OUTPUT);
-            glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-            glDebugMessageCallback(
-                [](GLenum /*src*/, GLenum type, GLuint id, GLenum severity,
-                   GLsizei /*len*/, const GLchar* msg, const void*) {
-                    if (severity == GL_DEBUG_SEVERITY_NOTIFICATION) return;
-                    fprintf(stderr, "[GL] type=0x%x id=%u: %s\n", type, id, msg);
-                }, nullptr);
-            glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE,
-                                  GL_DEBUG_SEVERITY_NOTIFICATION,
-                                  0, nullptr, GL_FALSE);
-        }
+            GLint glMajor = 0, glMinor = 0;
+            glGetIntegerv(GL_MAJOR_VERSION, &glMajor);
+            glGetIntegerv(GL_MINOR_VERSION, &glMinor);
+            if (glMajor > 4 || (glMajor == 4 && glMinor >= 3))
+            {
+                glEnable(GL_DEBUG_OUTPUT);
+                glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+                glDebugMessageCallback(
+                    [](GLenum /*src*/, GLenum type, GLuint id, GLenum severity,
+                       GLsizei /*len*/, const GLchar *msg, const void *)
+                    {
+                        if (severity == GL_DEBUG_SEVERITY_NOTIFICATION)
+                            return;
+                        fprintf(stderr, "[GL] type=0x%x id=%u: %s\n", type, id, msg);
+                    },
+                    nullptr);
+                glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE,
+                                      GL_DEBUG_SEVERITY_NOTIFICATION,
+                                      0, nullptr, GL_FALSE);
+            }
 #endif
         return true;
     }
