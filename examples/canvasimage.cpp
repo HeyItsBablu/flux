@@ -58,7 +58,7 @@ public:
     bool exportImage(const std::string& path)
     {
         if (!tex_) return false;
-        FluxGLLinux::GLContext::instance().makeCurrent();
+        //FluxGLLinux::GLContext::instance().makeCurrent();
 
         // 1. Build an ortho MVP that maps [0,imgW_]x[0,imgH_] → NDC
         float mvp[16];

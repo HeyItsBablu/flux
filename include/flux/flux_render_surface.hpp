@@ -10,6 +10,12 @@ class RenderSurface {
 public:
   virtual ~RenderSurface() = default;
 
+      static bool mvpValid(const float mvp[16])
+    {
+        return std::isfinite(mvp[0]) && std::isfinite(mvp[5])
+            && mvp[0] != 0.f && mvp[5] != 0.f;
+    }
+
   // ── Lifecycle ─────────────────────────────────────────────────────────────
   // initialize() is called once after the GL context is ready.
   // destroy()    is called before the GL context is torn down.
