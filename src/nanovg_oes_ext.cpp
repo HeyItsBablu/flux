@@ -1,41 +1,42 @@
+// nanovg_oes_ext.cpp
+// Android-only: OES external texture helpers + FBO blit for NanoVG
+#ifdef ANDROID
+#include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>   // GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_BINDING_EXTERNAL_OES
 
-#ifdef __ANDROID__
 #include "nanovg.h"
 #include "nanovg_gl.h"
-#include <GLES2/gl2.h>
-#include <GLES2/gl2ext.h>
 
+// ── Internal NanoVG structs (mirrored for texture handle access) ──────────────
 
 struct GLNVGtexture {
-    int  id;
+    int    id;
     GLuint tex;
-    int  width, height;
-    int  type;
-    int  flags;
+    int    width, height;
+    int    type;
+    int    flags;
 };
 
 struct GLNVGcontext {
-
     GLNVGtexture* textures;
     int           ntextures;
     int           ctextures;
-
 };
 
+// ── NanoVG GLES2 handle functions (defined in nanovg_gl_impl.c) ──────────────
 
 extern "C" {
-int  nvglCreateImageFromHandleGLES2(NVGcontext* ctx, GLuint textureId,
-                                    int w, int h, int flags);
+int    nvglCreateImageFromHandleGLES2(NVGcontext* ctx, GLuint textureId,
+                                      int w, int h, int flags);
 GLuint nvglImageHandleGLES2(NVGcontext* ctx, int image);
 }
 
+// ── Public API ────────────────────────────────────────────────────────────────
 
 int NVG_createImageFromOES(NVGcontext* vg, GLuint oesTexId, int w, int h) {
-
     int img = nvglCreateImageFromHandleGLES2(vg, oesTexId, w, h,
                                              NVG_IMAGE_NEAREST);
     if (img <= 0) return -1;
-
 
     glBindTexture(GL_TEXTURE_EXTERNAL_OES, oesTexId);
     glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -47,20 +48,13 @@ int NVG_createImageFromOES(NVGcontext* vg, GLuint oesTexId, int w, int h) {
     return img;
 }
 
-
 void NVG_updateImageFromOES(NVGcontext* vg, int nvgImage, GLuint /*oesTexId*/) {
-
     (void)vg;
     (void)nvgImage;
-
 }
 
-
-
-#include <GLES2/gl2.h>
-#include <GLES2/gl2ext.h>
-
-// ── FBO blit (Option B) ───────────────────────────────────────────────────────
+// ── FBO blit: copies an OES external texture into a regular GL_TEXTURE_2D ────
+// This is needed because NanoVG can't sample GL_TEXTURE_EXTERNAL_OES directly.
 
 static GLuint s_fboBlitFBO     = 0;
 static GLuint s_fboBlitTex     = 0;
@@ -89,7 +83,7 @@ static GLuint _compileShader(GLenum type, const char* src) {
     return s;
 }
 
-// Call once after GL context is ready, before any video is opened.
+// Call once after the GL context is ready, before any video is opened.
 void NVG_initOESBlit(int maxW, int maxH) {
     s_fboBlitW = maxW;
     s_fboBlitH = maxH;
@@ -120,8 +114,13 @@ void NVG_initOESBlit(int maxW, int maxH) {
     glBindAttribLocation(s_oesBlitProgram, 0, "aPos");
     glBindAttribLocation(s_oesBlitProgram, 1, "aUV");
     glLinkProgram(s_oesBlitProgram);
+    // Shaders can be detached after linking
+    glDetachShader(s_oesBlitProgram, vs);
+    glDetachShader(s_oesBlitProgram, fs);
+    glDeleteShader(vs);
+    glDeleteShader(fs);
 
-    // Full-screen quad
+    // Full-screen quad (triangle strip)
     float quad[] = {
             -1.f, -1.f,  0.f, 0.f,
             1.f, -1.f,  1.f, 0.f,
@@ -134,44 +133,37 @@ void NVG_initOESBlit(int maxW, int maxH) {
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
-
+// Returns the regular GL_TEXTURE_2D handle that NanoVG can use.
+// Call every frame before nvgBeginFrame if the OES texture has updated.
 GLuint NVG_blitOESToTex2D(GLuint oesTexId, int w, int h) {
-
-
+    // Save GL state
     GLint prevFBO, prevProgram, prevViewport[4];
     GLint prevArrayBuffer, prevActiveTex, prevTex2D, prevTexOES;
 
-    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFBO);
-    glGetIntegerv(GL_CURRENT_PROGRAM, &prevProgram);
-    glGetIntegerv(GL_VIEWPORT, prevViewport);
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING,  &prevFBO);
+    glGetIntegerv(GL_CURRENT_PROGRAM,      &prevProgram);
+    glGetIntegerv(GL_VIEWPORT,              prevViewport);
     glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &prevArrayBuffer);
-    glGetIntegerv(GL_ACTIVE_TEXTURE, &prevActiveTex);
+    glGetIntegerv(GL_ACTIVE_TEXTURE,       &prevActiveTex);
 
-    // Save bound textures
     glActiveTexture(GL_TEXTURE0);
-    glGetIntegerv(GL_TEXTURE_BINDING_2D, &prevTex2D);
-#ifdef GL_TEXTURE_EXTERNAL_OES
-    glGetIntegerv(GL_TEXTURE_BINDING_EXTERNAL_OES, &prevTexOES);
-#endif
+    glGetIntegerv(GL_TEXTURE_BINDING_2D,            &prevTex2D);
+    glGetIntegerv(GL_TEXTURE_BINDING_EXTERNAL_OES,  &prevTexOES);
 
-
+    // Blit OES → FBO
     glBindFramebuffer(GL_FRAMEBUFFER, s_fboBlitFBO);
     glViewport(0, 0, w, h);
-
     glUseProgram(s_oesBlitProgram);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_EXTERNAL_OES, oesTexId);
-
     GLint loc = glGetUniformLocation(s_oesBlitProgram, "uTex");
     if (loc >= 0) glUniform1i(loc, 0);
 
     glBindBuffer(GL_ARRAY_BUFFER, s_oesBlitVBO);
-
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE,
                           4 * sizeof(float), (void*)0);
-
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE,
                           4 * sizeof(float), (void*)(2 * sizeof(float)));
@@ -181,27 +173,19 @@ GLuint NVG_blitOESToTex2D(GLuint oesTexId, int w, int h) {
     glDisableVertexAttribArray(0);
     glDisableVertexAttribArray(1);
 
-
-    // Restore buffers & program
+    // Restore GL state
     glBindBuffer(GL_ARRAY_BUFFER, prevArrayBuffer);
     glUseProgram(prevProgram);
-
-    // Restore framebuffer + viewport
     glBindFramebuffer(GL_FRAMEBUFFER, prevFBO);
     glViewport(prevViewport[0], prevViewport[1],
                prevViewport[2], prevViewport[3]);
 
-    // Restore textures
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, prevTex2D);
-#ifdef GL_TEXTURE_EXTERNAL_OES
+    glBindTexture(GL_TEXTURE_2D,           prevTex2D);
     glBindTexture(GL_TEXTURE_EXTERNAL_OES, prevTexOES);
-#endif
-
-    // Restore active texture unit
     glActiveTexture(prevActiveTex);
 
-    return s_fboBlitTex;  // NanoVG-safe texture
+    return s_fboBlitTex;
 }
 
 #endif
