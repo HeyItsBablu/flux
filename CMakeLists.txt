@@ -93,6 +93,7 @@ elseif(UNIX AND NOT APPLE)
     set(CURL_USE_OPENSSL  ON  CACHE BOOL "" FORCE)
     set(CURL_USE_SCHANNEL OFF CACHE BOOL "" FORCE)
 endif()
+
 FetchContent_MakeAvailable(curl)
 
 # ============================================================================
@@ -109,41 +110,35 @@ if(WIN32 OR (UNIX AND NOT APPLE AND NOT ANDROID))
 endif()
 
 # ============================================================================
-# NanoVG  (Windows + Android)
+# NanoVG  (all platforms)
 # ============================================================================
 
-if(ANDROID OR WIN32)
-    if(NOT TARGET nanovg)
-        add_library(nanovg STATIC
-                external/nanovg/src/nanovg.c
-                external/nanovg/src/nanovg_gl_impl.c
-        )
-        set_source_files_properties(
-                external/nanovg/src/nanovg.c
-                external/nanovg/src/nanovg_gl_impl.c
-                PROPERTIES LANGUAGE C
-        )
-        target_include_directories(nanovg PUBLIC
-                $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/nanovg/src>
-                $<INSTALL_INTERFACE:include>
-        )
-        target_compile_definitions(nanovg PRIVATE
-                STB_IMAGE_STATIC
-        )
+if(NOT TARGET nanovg)
+    add_library(nanovg STATIC
+            external/nanovg/src/nanovg.c
+            external/nanovg/src/nanovg_gl_impl.c
+    )
+    set_source_files_properties(
+            external/nanovg/src/nanovg.c
+            external/nanovg/src/nanovg_gl_impl.c
+            PROPERTIES LANGUAGE C
+    )
+    target_include_directories(nanovg PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/nanovg/src>
+            $<INSTALL_INTERFACE:include>
+    )
+    target_compile_definitions(nanovg PRIVATE STB_IMAGE_STATIC)
 
-        # Platform-specific GL backend — PRIVATE so the define does not
-        # leak into consumers of nanovg (they include nanovg_gl.h in
-        # header-only mode, without pulling in the implementation).
-        if(WIN32)
-            target_compile_definitions(nanovg PRIVATE NANOVG_GL3_IMPLEMENTATION)
-            # nanovg_gl_impl.c includes glad/glad.h, so nanovg needs glad's headers.
-            target_include_directories(nanovg PRIVATE
-                    ${CMAKE_CURRENT_SOURCE_DIR}/external/glad/include
-            )
-            target_link_libraries(nanovg PUBLIC glad)
-        elseif(ANDROID)
-            target_compile_definitions(nanovg PRIVATE NANOVG_GLES2_IMPLEMENTATION)
-        endif()
+    if(ANDROID)
+        # GLES 2 backend
+        target_compile_definitions(nanovg PRIVATE NANOVG_GLES2_IMPLEMENTATION)
+    else()
+        # GL3 backend — Windows and Linux both use OpenGL 3
+        target_compile_definitions(nanovg PRIVATE NANOVG_GL3_IMPLEMENTATION)
+        target_include_directories(nanovg PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/external/glad/include
+        )
+        target_link_libraries(nanovg PUBLIC glad)
     endif()
 endif()
 
@@ -207,6 +202,7 @@ target_include_directories(flux
         PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/nanovg/src>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${SDL2_INCLUDE_DIRS}>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${CAIRO_INCLUDE_DIRS}>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${PANGOCAIRO_INCLUDE_DIRS}>
@@ -219,7 +215,6 @@ target_include_directories(flux
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${AVUTIL_INCLUDE_DIRS}>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${SWSCALE_INCLUDE_DIRS}>
         $<$<BOOL:${ANDROID}>:${NATIVE_APP_GLUE_DIR}>
-        $<$<OR:$<BOOL:${ANDROID}>,$<BOOL:${WIN32}>>:${CMAKE_CURRENT_SOURCE_DIR}/external/nanovg/src>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${ALSA_INCLUDE_DIRS}>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${JPEG_INCLUDE_DIRS}>
 )
@@ -231,12 +226,12 @@ target_compile_definitions(flux PUBLIC
         $<$<BOOL:${WIN32}>:NOMINMAX>
 )
 
-# flux_canvas_win32.hpp includes nanovg_gl.h in header-only mode (no
-# NANOVG_GL3_IMPLEMENTATION), which means it only sees declarations —
-# nvgCreateGL3 / nvgDeleteGL3 are declared under #if defined NANOVG_GL3,
-# which is set by NANOVG_GL3_IMPLEMENTATION. We need to define NANOVG_GL3
-# directly so the declarations are visible without pulling in the implementation.
-if(WIN32)
+# nanovg_gl.h is included in header-only mode (no *_IMPLEMENTATION define),
+# so consumers only see declarations. We need to expose the correct GL
+# backend define so the right declarations are visible.
+if(ANDROID)
+    target_compile_definitions(flux PUBLIC NANOVG_GLES2)
+else()
     target_compile_definitions(flux PUBLIC NANOVG_GL3)
 endif()
 
@@ -285,6 +280,7 @@ elseif(ANDROID)
 elseif(UNIX AND NOT APPLE)
     target_link_libraries(flux PUBLIC
             glad
+            nanovg
             OpenGL::GL
             Clipper2
             CURL::libcurl
@@ -350,14 +346,10 @@ if(NOT ANDROID)
     include(GNUInstallDirs)
     include(CMakePackageConfigHelpers)
 
-    set(FLUX_INSTALL_TARGETS flux)
+    set(FLUX_INSTALL_TARGETS flux nanovg)
 
     if(WIN32 OR (UNIX AND NOT APPLE AND NOT ANDROID))
         list(APPEND FLUX_INSTALL_TARGETS glad)
-    endif()
-
-    if(WIN32)
-        list(APPEND FLUX_INSTALL_TARGETS nanovg)
     endif()
 
     install(TARGETS ${FLUX_INSTALL_TARGETS}
