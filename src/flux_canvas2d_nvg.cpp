@@ -14,13 +14,14 @@
 // ── Pull in NanoVG GL3 implementation (one-time, this TU only) ───────────────
 // flux_canvas2d_nvg.cpp  — top of file, replacing the existing block
 #if defined(__ANDROID__)
-  #define NANOVG_GLES3_IMPLEMENTATION
-  #include "nanovg.h"        // ← before nanovg_gl.h
-  #include <nanovg_gl.h>
+#define NANOVG_GLES2_IMPLEMENTATION
+#include <GLES2/gl2.h>       // ← must come first so GLuint is defined
+#include "nanovg.h"
+#include <nanovg_gl.h>
 #else
-  #define NANOVG_GL3_IMPLEMENTATION
+#define NANOVG_GL3_IMPLEMENTATION
   #include <glad/glad.h>
-  #include "nanovg.h"        // ← before nanovg_gl.h
+  #include "nanovg.h"
   #include <nanovg_gl.h>
 #endif
 

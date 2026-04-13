@@ -4,24 +4,6 @@
 #  error "flux_canvas_android.hpp must only be compiled on Android"
 #endif
 
-// ============================================================================
-// CanvasWidget — Android / GLES2 / NanoVG
-//
-// Android has a single EGL surface owned by the app. The global NanoVG
-// context (s_vg, GLES2 backend) is created in main_android.cpp and shared
-// across all widgets. CanvasWidget draws into the active NanoVG frame that
-// android_main opens each tick — no separate window or EGL context needed.
-//
-// Lifecycle:
-//   android_main loop:
-//     nvgBeginFrame(s_vg, ...)
-//       Renderer::renderWidget(...)         ← walks widget tree
-//         CanvasWidget::render(ctx, fc)     ← called here
-//           tickAndRender()                 ← draws surface + scrollbars
-//     nvgEndFrame(s_vg)
-//     eglSwapBuffers(...)
-// ============================================================================
-
 #include "../../flux_platform.hpp"
 #include "../../flux_widget.hpp"
 #include "../../flux_keys.hpp"
@@ -33,8 +15,13 @@
 
 #include <GLES2/gl2.h>
 #include <EGL/egl.h>
-#include <nanovg.h>
-#include <nanovg_gl.h>
+#include <android/log.h>
+
+// Only include nanovg.h for NVGcontext* — never nanovg_gl.h here.
+// nanovg_gl.h is included exactly once in flux_canvas2d_nvg.cpp with
+// NANOVG_GLES2_IMPLEMENTATION defined. Including it here would fire the
+// include guard and poison every other TU that needs nanovg_gl.h.
+#include "nanovg.h"
 #include <android/log.h>
 
 #include <algorithm>
@@ -133,7 +120,7 @@ public:
 
     void markNeedsPaint() override {
         Widget::markNeedsPaint();
-        scheduleRepaint();
+        //scheduleRepaint();
     }
 
     // ── Touch / input ─────────────────────────────────────────────────────
@@ -271,7 +258,8 @@ private:
     void scheduleRepaint() {
         if (onViewportChanged) onViewportChanged(vp_.zoom());
         // On Android the render loop runs every frame — just mark dirty.
-        markNeedsPaint();
+        //markNeedsPaint();
+        needsPaint = true;
     }
 
     // ── Scrollbar callbacks ───────────────────────────────────────────────

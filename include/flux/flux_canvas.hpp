@@ -16,10 +16,10 @@
 
 #ifdef _WIN32
   #include "platform/win32/flux_canvas_win32.hpp"
-#elif defined(__linux__)
+#elif defined(__linux__) && !defined(__ANDROID__)
   #include "platform/linux/flux_canvas_linux.hpp"
-#elif defined(__APPLE__)
-  #include "platform/macos/flux_canvas_macos.hpp"
+ #elif defined(__ANDROID__)
+   #include "platform/android/flux_canvas_android.hpp"
 #else
   #error "flux_canvas.hpp: unsupported platform"
 #endif

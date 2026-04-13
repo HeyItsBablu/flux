@@ -9,14 +9,12 @@
 #include <functional>
 #include <vector>
 
-// GL/NanoVG headers are only pulled in when actually needed.
-#ifdef _WIN32
+#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
 #  include <glad/glad.h>
 #  include "flux_glutil.hpp"
 #  include <nanovg.h>
-#elif defined(__linux__) && !defined(__ANDROID__)
-#  include <glad/glad.h>
-#  include "flux_glutil.hpp"
+#elif defined(__ANDROID__)
+#  include <GLES2/gl2.h>
 #  include <nanovg.h>
 #endif
 
@@ -41,7 +39,7 @@ public:
     explicit CustomScrollbar(Axis axis) : axis_(axis) {}
 
     // ── NanoVG render (Windows + Linux CanvasWidget) ──────────────────────
-#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
+#if defined(_WIN32) || defined(__linux__) || defined(__ANDROID__)
     void renderNVG(NVGcontext* nvg, int viewW, int viewH) {
         if (!visible_) return;
 
@@ -89,7 +87,10 @@ public:
         nvgFill(nvg);
     }
 
+#endif
+
     // ── Raw GL render (legacy path — kept for any non-NanoVG callers) ─────
+#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
     void render(GLuint prog, GLuint vao, GLuint vbo,
                 GLint uMVP, GLint uColor, int glW, int glH) const {
         if (alpha_ < 0.005f) return;

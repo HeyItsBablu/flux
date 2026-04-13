@@ -1,6 +1,6 @@
 // flux/platform/linux/flux_canvas_linux.hpp
 #pragma once
-#if !defined(__linux__) || defined(__ANDROID__)
+#if defined(__linux__) && !defined(__ANDROID__)
 #  error "flux_canvas_linux.hpp must only be compiled on Linux desktop"
 #endif
 
