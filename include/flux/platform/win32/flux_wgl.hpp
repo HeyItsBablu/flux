@@ -20,3 +20,7 @@
 #define WGL_DEPTH_BITS_ARB      0x2022
 #define WGL_SAMPLE_BUFFERS_ARB  0x2041
 #define WGL_SAMPLES_ARB         0x2042
+
+#ifndef WGL_STENCIL_BITS_ARB
+#define WGL_STENCIL_BITS_ARB  0x2023
+#endif

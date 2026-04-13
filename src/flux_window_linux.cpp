@@ -1,8 +1,8 @@
 // flux_window_linux.cpp
 #if defined(__linux__) && !defined(__ANDROID__)
 
-#include "flux/flux_window.hpp"
 #include "flux/flux_http_platform.hpp"
+#include "flux/flux_window.hpp"
 #include "flux/widgets/flux_file_picker.hpp"
 #include <SDL2/SDL.h>
 #include <cairo/cairo.h>
@@ -15,21 +15,21 @@
 // DEBUG MACRO — prints function name, line, and message to stderr instantly.
 // Remove after diagnosis.
 // ============================================================================
-#define FLUX_DBG(fmt, ...)                                                        \
-  do                                                                              \
-  {                                                                               \
-    fprintf(stderr, "[FLUX %s:%d] " fmt "\n", __func__, __LINE__, ##__VA_ARGS__); \
-    fflush(stderr);                                                               \
+#define FLUX_DBG(fmt, ...)                                                     \
+  do {                                                                         \
+    fprintf(stderr, "[FLUX %s:%d] " fmt "\n", __func__, __LINE__,              \
+            ##__VA_ARGS__);                                                    \
+    fflush(stderr);                                                            \
   } while (0)
 
-
-  void FluxWin_markNeedsPaint() {
-    // SDL_PushEvent is documented thread-safe — safe to call from the V4L2 capture thread.
-    SDL_Event e;
-    SDL_zero(e);
-    e.type         = SDL_WINDOWEVENT;
-    e.window.event = SDL_WINDOWEVENT_EXPOSED;
-    SDL_PushEvent(&e);
+void FluxWin_markNeedsPaint() {
+  // SDL_PushEvent is documented thread-safe — safe to call from the V4L2
+  // capture thread.
+  SDL_Event e;
+  SDL_zero(e);
+  e.type = SDL_WINDOWEVENT;
+  e.window.event = SDL_WINDOWEVENT_EXPOSED;
+  SDL_PushEvent(&e);
 }
 
 // ============================================================================
@@ -37,29 +37,22 @@
 // ============================================================================
 static Uint32 gFluxTimerEventType = 0;
 
-
-
-struct PlatformWindow::CairoState
-{
+struct PlatformWindow::CairoState {
   SDL_Surface *sdlSurface = nullptr;
   cairo_surface_t *cairoSurf = nullptr;
   cairo_t *cr = nullptr;
 
-  bool rebuild(SDL_Window *win)
-  {
+  bool rebuild(SDL_Window *win) {
     teardown();
     sdlSurface = SDL_GetWindowSurface(win);
-    if (!sdlSurface)
-    {
+    if (!sdlSurface) {
 
       return false;
     }
     cairoSurf = cairo_image_surface_create_for_data(
-        static_cast<unsigned char *>(sdlSurface->pixels),
-        CAIRO_FORMAT_ARGB32,
+        static_cast<unsigned char *>(sdlSurface->pixels), CAIRO_FORMAT_ARGB32,
         sdlSurface->w, sdlSurface->h, sdlSurface->pitch);
-    if (cairo_surface_status(cairoSurf) != CAIRO_STATUS_SUCCESS)
-    {
+    if (cairo_surface_status(cairoSurf) != CAIRO_STATUS_SUCCESS) {
       teardown();
       return false;
     }
@@ -67,15 +60,12 @@ struct PlatformWindow::CairoState
     return cairo_status(cr) == CAIRO_STATUS_SUCCESS;
   }
 
-  void teardown()
-  {
-    if (cr)
-    {
+  void teardown() {
+    if (cr) {
       cairo_destroy(cr);
       cr = nullptr;
     }
-    if (cairoSurf)
-    {
+    if (cairoSurf) {
       cairo_surface_destroy(cairoSurf);
       cairoSurf = nullptr;
     }
@@ -88,8 +78,7 @@ struct PlatformWindow::CairoState
 // SDL timer callback
 // ============================================================================
 
-static Uint32 sdlTimerCallback(Uint32 interval, void *param)
-{
+static Uint32 sdlTimerCallback(Uint32 interval, void *param) {
   SDL_Event e;
   SDL_zero(e);
   e.type = gFluxTimerEventType; // use registered type
@@ -103,11 +92,9 @@ static Uint32 sdlTimerCallback(Uint32 interval, void *param)
 // ============================================================================
 
 bool PlatformWindow::create(const std::string &title, int width, int height,
-                            AppInstance /*instance*/, void * /*userData*/)
-{
+                            AppInstance /*instance*/, void * /*userData*/) {
 
-  if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0)
-  {
+  if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) {
 
     return false;
   }
@@ -115,14 +102,11 @@ bool PlatformWindow::create(const std::string &title, int width, int height,
   gFluxTimerEventType = SDL_RegisterEvents(1); // ← after successful init
   fluxInitUIThread();
 
-  nativeHandle = SDL_CreateWindow(
-      title.c_str(),
-      SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-      width, height,
-      SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+  nativeHandle = SDL_CreateWindow(title.c_str(), SDL_WINDOWPOS_CENTERED,
+                                  SDL_WINDOWPOS_CENTERED, width, height,
+                                  SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
 
-  if (!nativeHandle)
-  {
+  if (!nativeHandle) {
 
     SDL_Quit();
     return false;
@@ -133,8 +117,7 @@ bool PlatformWindow::create(const std::string &title, int width, int height,
   running = true;
 
   cairoState = new CairoState();
-  if (!cairoState->rebuild(nativeHandle))
-  {
+  if (!cairoState->rebuild(nativeHandle)) {
 
     delete cairoState;
     cairoState = nullptr;
@@ -151,8 +134,7 @@ bool PlatformWindow::create(const std::string &title, int width, int height,
 // destroy
 // ============================================================================
 
-void PlatformWindow::destroy()
-{
+void PlatformWindow::destroy() {
 
   for (auto &[id, sdlId] : sdlTimerMap)
     SDL_RemoveTimer(sdlId);
@@ -160,8 +142,7 @@ void PlatformWindow::destroy()
   fluxShutdownHttpQueue();
   delete cairoState;
   cairoState = nullptr;
-  if (nativeHandle)
-  {
+  if (nativeHandle) {
     SDL_DestroyWindow(nativeHandle);
     nativeHandle = nullptr;
   }
@@ -172,18 +153,15 @@ void PlatformWindow::destroy()
 // run — THE KEY LOOP. Every line here is traced.
 // ============================================================================
 
-int PlatformWindow::run()
-{
+int PlatformWindow::run() {
 
   SDL_Event e;
 
-  while (running)
-  {
+  while (running) {
 
     // ── BLOCK until an event arrives ────────────────────────────────────────
 
-    if (SDL_WaitEvent(&e) == 0)
-    {
+    if (SDL_WaitEvent(&e) == 0) {
 
       continue;
     }
@@ -192,8 +170,7 @@ int PlatformWindow::run()
 
     // ── Drain any additional queued events ──────────────────────────────────
     int extra = 0;
-    while (SDL_PollEvent(&e))
-    {
+    while (SDL_PollEvent(&e)) {
       ++extra;
       handleSDLEvent(e);
     }
@@ -203,11 +180,9 @@ int PlatformWindow::run()
     fluxProcessHttpEvents();
 
     // ── Paint ───────────────────────────────────────────────────────────────
-    if (dirty)
-    {
+    if (dirty) {
 
-      if (callbacks.onPaint && cairoState && cairoState->cr)
-      {
+      if (callbacks.onPaint && cairoState && cairoState->cr) {
         if (SDL_MUSTLOCK(cairoState->sdlSurface))
           SDL_LockSurface(cairoState->sdlSurface);
 
@@ -231,18 +206,19 @@ int PlatformWindow::run()
 // handleSDLEvent
 // ============================================================================
 
-void PlatformWindow::handleSDLEvent(const SDL_Event &e)
-{
+void PlatformWindow::handleSDLEvent(const SDL_Event &e) {
 
   // HTTP events are processed separately in run() via fluxProcessHttpEvents().
-  if (e.type == gFluxHttpEventType)
-  {
+  if (e.type == gFluxHttpEventType) {
 
     return;
   }
 
-  switch (e.type)
-  {
+  if (FluxUI::getCurrentInstance()) {
+    auto *root = FluxUI::getCurrentInstance()->getRoot().get();
+  }
+
+  switch (e.type) {
 
   case SDL_QUIT:
 
@@ -266,19 +242,16 @@ void PlatformWindow::handleSDLEvent(const SDL_Event &e)
     break;
 
   case SDL_MOUSEMOTION:
-    if (callbacks.onMouseMove)
-    {
+    if (callbacks.onMouseMove) {
       bool changed = callbacks.onMouseMove(e.motion.x, e.motion.y);
-      if (changed)
-      {
+      if (changed) {
 
         dirty = true;
       }
     }
     break;
 
-  case SDL_MOUSEWHEEL:
-  {
+  case SDL_MOUSEWHEEL: {
     int delta = e.wheel.y * WHEEL_DELTA;
     if (callbacks.onMouseWheel && callbacks.onMouseWheel(delta))
       dirty = true;
@@ -292,24 +265,20 @@ void PlatformWindow::handleSDLEvent(const SDL_Event &e)
     break;
 
   case SDL_TEXTINPUT:
-    if (callbacks.onChar && e.text.text[0] != '\0')
-    {
+    if (callbacks.onChar && e.text.text[0] != '\0') {
       unsigned char b0 = static_cast<unsigned char>(e.text.text[0]);
       wchar_t ch = 0;
-      if (b0 < 0x80)
-      {
+      if (b0 < 0x80) {
         ch = static_cast<wchar_t>(b0);
-      }
-      else if ((b0 & 0xE0) == 0xC0 && e.text.text[1])
-      {
-        ch = static_cast<wchar_t>(((b0 & 0x1F) << 6) |
-                                  (static_cast<unsigned char>(e.text.text[1]) & 0x3F));
-      }
-      else if ((b0 & 0xF0) == 0xE0 && e.text.text[1] && e.text.text[2])
-      {
-        ch = static_cast<wchar_t>(((b0 & 0x0F) << 12) |
-                                  ((static_cast<unsigned char>(e.text.text[1]) & 0x3F) << 6) |
-                                  (static_cast<unsigned char>(e.text.text[2]) & 0x3F));
+      } else if ((b0 & 0xE0) == 0xC0 && e.text.text[1]) {
+        ch = static_cast<wchar_t>(
+            ((b0 & 0x1F) << 6) |
+            (static_cast<unsigned char>(e.text.text[1]) & 0x3F));
+      } else if ((b0 & 0xF0) == 0xE0 && e.text.text[1] && e.text.text[2]) {
+        ch = static_cast<wchar_t>(
+            ((b0 & 0x0F) << 12) |
+            ((static_cast<unsigned char>(e.text.text[1]) & 0x3F) << 6) |
+            (static_cast<unsigned char>(e.text.text[2]) & 0x3F));
       }
       if (ch && callbacks.onChar(ch))
         dirty = true;
@@ -323,19 +292,16 @@ void PlatformWindow::handleSDLEvent(const SDL_Event &e)
 
   case SDL_WINDOWEVENT:
 
-    switch (e.window.event)
-    {
+    switch (e.window.event) {
     case SDL_WINDOWEVENT_RESIZED:
     case SDL_WINDOWEVENT_SIZE_CHANGED:
       cachedWidth = e.window.data1;
       cachedHeight = e.window.data2;
-      if (cairoState && !cairoState->rebuild(nativeHandle))
-      {
+      if (cairoState && !cairoState->rebuild(nativeHandle)) {
         dirty = true;
         break;
       }
-      if (callbacks.onResize && cairoState && cairoState->cr)
-      {
+      if (callbacks.onResize && cairoState && cairoState->cr) {
         GraphicsContext ctx(cairoState->cr, cachedWidth, cachedHeight);
         callbacks.onResize(ctx, cachedWidth, cachedHeight);
       }
@@ -360,15 +326,11 @@ void PlatformWindow::handleSDLEvent(const SDL_Event &e)
     break;
 
   default:
-    if (e.type == gFluxTimerEventType)
-    {
-      if (e.user.code == kFluxFilePickerEvent)
-      {
+    if (e.type == gFluxTimerEventType) {
+      if (e.user.code == kFluxFilePickerEvent) {
         fluxFilePickerDispatchSDLEvent(e);
         dirty = true;
-      }
-      else
-      {
+      } else {
         if (callbacks.onTimer)
           callbacks.onTimer(static_cast<TimerID>(e.user.code));
         dirty = true;
@@ -382,8 +344,7 @@ void PlatformWindow::handleSDLEvent(const SDL_Event &e)
 // invalidate / invalidateRect
 // ============================================================================
 
-void PlatformWindow::invalidate()
-{
+void PlatformWindow::invalidate() {
   dirty = true;
 
   SDL_Event e;
@@ -393,19 +354,15 @@ void PlatformWindow::invalidate()
   SDL_PushEvent(&e);
 }
 
-void PlatformWindow::invalidateRect(int x, int y, int w, int h)
-{
-  if (!dirty)
-  {
+void PlatformWindow::invalidateRect(int x, int y, int w, int h) {
+  if (!dirty) {
     dirty = true;
     SDL_Event e;
     SDL_zero(e);
     e.type = SDL_WINDOWEVENT;
     e.window.event = SDL_WINDOWEVENT_EXPOSED;
     SDL_PushEvent(&e);
-  }
-  else
-  {
+  } else {
     dirty = true;
   }
 }
@@ -414,20 +371,18 @@ void PlatformWindow::invalidateRect(int x, int y, int w, int h)
 // setTimer / killTimer
 // ============================================================================
 
-void PlatformWindow::setTimer(TimerID id, int ms)
-{
+void PlatformWindow::setTimer(TimerID id, int ms) {
   killTimer(id);
-  SDL_TimerID sdlId = SDL_AddTimer(static_cast<Uint32>(ms), sdlTimerCallback,
-                                   reinterpret_cast<void *>(static_cast<uintptr_t>(id)));
+  SDL_TimerID sdlId =
+      SDL_AddTimer(static_cast<Uint32>(ms), sdlTimerCallback,
+                   reinterpret_cast<void *>(static_cast<uintptr_t>(id)));
   if (sdlId != 0)
     sdlTimerMap[id] = sdlId;
 }
 
-void PlatformWindow::killTimer(TimerID id)
-{
+void PlatformWindow::killTimer(TimerID id) {
   auto it = sdlTimerMap.find(id);
-  if (it != sdlTimerMap.end())
-  {
+  if (it != sdlTimerMap.end()) {
     SDL_RemoveTimer(it->second);
     sdlTimerMap.erase(it);
   }
@@ -437,56 +392,54 @@ void PlatformWindow::killTimer(TimerID id)
 // Clipboard / mouse capture / coords / cursors / GDI stub
 // ============================================================================
 
-void PlatformWindow::setClipboardText(const std::string &text) { SDL_SetClipboardText(text.c_str()); }
-std::string PlatformWindow::getClipboardText()
-{
+void PlatformWindow::setClipboardText(const std::string &text) {
+  SDL_SetClipboardText(text.c_str());
+}
+std::string PlatformWindow::getClipboardText() {
   char *raw = SDL_GetClipboardText();
   std::string s = raw ? raw : "";
   SDL_free(raw);
   return s;
 }
 
-void PlatformWindow::captureMouseInput()
-{
+void PlatformWindow::captureMouseInput() {
   SDL_CaptureMouse(SDL_TRUE);
   mouseCapture = true;
 }
-void PlatformWindow::releaseMouseInput()
-{
+void PlatformWindow::releaseMouseInput() {
   SDL_CaptureMouse(SDL_FALSE);
   mouseCapture = false;
 }
 
-PlatformWindow::ScreenPoint PlatformWindow::clientToScreen(int cx, int cy) const
-{
+PlatformWindow::ScreenPoint PlatformWindow::clientToScreen(int cx,
+                                                           int cy) const {
   int wx = 0, wy = 0;
   if (nativeHandle)
     SDL_GetWindowPosition(nativeHandle, &wx, &wy);
   return {wx + cx, wy + cy};
 }
-PlatformWindow::ScreenPoint PlatformWindow::screenToClient(int sx, int sy) const
-{
+PlatformWindow::ScreenPoint PlatformWindow::screenToClient(int sx,
+                                                           int sy) const {
   int wx = 0, wy = 0;
   if (nativeHandle)
     SDL_GetWindowPosition(nativeHandle, &wx, &wy);
   return {sx - wx, sy - wy};
 }
-PlatformWindow::ClientSize PlatformWindow::getClientSize() const { return {cachedWidth, cachedHeight}; }
+PlatformWindow::ClientSize PlatformWindow::getClientSize() const {
+  return {cachedWidth, cachedHeight};
+}
 
-void PlatformWindow::setResizeCursorH()
-{
+void PlatformWindow::setResizeCursorH() {
   static SDL_Cursor *c = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZEWE);
   if (c)
     SDL_SetCursor(c);
 }
-void PlatformWindow::setResizeCursorV()
-{
+void PlatformWindow::setResizeCursorV() {
   static SDL_Cursor *c = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZENS);
   if (c)
     SDL_SetCursor(c);
 }
-void PlatformWindow::setDefaultCursor()
-{
+void PlatformWindow::setDefaultCursor() {
   static SDL_Cursor *c = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW);
   if (c)
     SDL_SetCursor(c);
@@ -494,8 +447,7 @@ void PlatformWindow::setDefaultCursor()
 
 void PlatformWindow::startupGdiplus() {}
 
-GraphicsContext PlatformWindow::getMeasureContext() const
-{
+GraphicsContext PlatformWindow::getMeasureContext() const {
   if (cairoState && cairoState->cr)
     return GraphicsContext(cairoState->cr, cachedWidth, cachedHeight);
   return GraphicsContext();

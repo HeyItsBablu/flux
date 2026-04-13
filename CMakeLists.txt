@@ -47,7 +47,6 @@ if(NOT ANDROID)
     FetchContent_MakeAvailable(Clipper2)
 endif()
 
-
 if(ANDROID)
     FetchContent_Declare(mbedtls
             GIT_REPOSITORY https://github.com/Mbed-TLS/mbedtls.git
@@ -57,22 +56,16 @@ if(ANDROID)
     set(ENABLE_TESTING  OFF CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(mbedtls)
 
-    # Override curl's FindMbedTLS search paths
     set(MBEDTLS_INCLUDE_DIRS
             "${mbedtls_SOURCE_DIR}/include"
             CACHE PATH "" FORCE)
-    set(MBEDTLS_LIBRARY     mbedtls   CACHE STRING "" FORCE)
-    set(MBEDX509_LIBRARY    mbedx509  CACHE STRING "" FORCE)
+    set(MBEDTLS_LIBRARY     mbedtls    CACHE STRING "" FORCE)
+    set(MBEDX509_LIBRARY    mbedx509   CACHE STRING "" FORCE)
     set(MBEDCRYPTO_LIBRARY  mbedcrypto CACHE STRING "" FORCE)
-
-    # Also set the root so find_package can locate headers
     set(MBEDTLS_ROOT_DIR "${mbedtls_SOURCE_DIR}" CACHE PATH "" FORCE)
 endif()
 
-
-
 # ── libcurl ───────────────────────────────────────────────────────────────────
-# Built from source on all platforms (desktop and Android)
 
 FetchContent_Declare(curl
         GIT_REPOSITORY https://github.com/curl/curl.git
@@ -102,10 +95,8 @@ elseif(UNIX AND NOT APPLE)
 endif()
 FetchContent_MakeAvailable(curl)
 
-
-
 # ============================================================================
-# GLAD  (Windows + Linux desktop — not Android, which uses NanoVG/GLES2)
+# GLAD  (Windows + Linux desktop)
 # ============================================================================
 
 if(WIN32 OR (UNIX AND NOT APPLE AND NOT ANDROID))
@@ -118,10 +109,10 @@ if(WIN32 OR (UNIX AND NOT APPLE AND NOT ANDROID))
 endif()
 
 # ============================================================================
-# NanoVG  (Android only — GLES2 2-D painter backend)
+# NanoVG  (Windows + Android)
 # ============================================================================
 
-if(ANDROID)
+if(ANDROID OR WIN32)
     if(NOT TARGET nanovg)
         add_library(nanovg STATIC
                 external/nanovg/src/nanovg.c
@@ -133,21 +124,36 @@ if(ANDROID)
                 PROPERTIES LANGUAGE C
         )
         target_include_directories(nanovg PUBLIC
-                external/nanovg/src
+                $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/nanovg/src>
+                $<INSTALL_INTERFACE:include>
         )
         target_compile_definitions(nanovg PRIVATE
                 STB_IMAGE_STATIC
         )
+
+        # Platform-specific GL backend — PRIVATE so the define does not
+        # leak into consumers of nanovg (they include nanovg_gl.h in
+        # header-only mode, without pulling in the implementation).
+        if(WIN32)
+            target_compile_definitions(nanovg PRIVATE NANOVG_GL3_IMPLEMENTATION)
+            # nanovg_gl_impl.c includes glad/glad.h, so nanovg needs glad's headers.
+            target_include_directories(nanovg PRIVATE
+                    ${CMAKE_CURRENT_SOURCE_DIR}/external/glad/include
+            )
+            target_link_libraries(nanovg PUBLIC glad)
+        elseif(ANDROID)
+            target_compile_definitions(nanovg PRIVATE NANOVG_GLES2_IMPLEMENTATION)
+        endif()
     endif()
 endif()
 
 # ============================================================================
-# Linux platform dependencies  (SDL2 + Cairo + Pango + ALSA + FFmpeg + OpenGL)
+# Linux platform dependencies
 # ============================================================================
 
 if(UNIX AND NOT APPLE AND NOT ANDROID)
     find_package(SDL2    REQUIRED)
-    find_package(OpenGL  REQUIRED)   # needed by GLAD on Linux
+    find_package(OpenGL  REQUIRED)
     find_package(JPEG    REQUIRED)
 
     find_package(PkgConfig REQUIRED)
@@ -155,7 +161,6 @@ if(UNIX AND NOT APPLE AND NOT ANDROID)
     pkg_check_modules(PANGOCAIRO REQUIRED pangocairo)
     pkg_check_modules(ALSA       REQUIRED alsa)
 
-    # ── FFmpeg ────────────────────────────────────────────────────────────────
     pkg_check_modules(AVFORMAT  REQUIRED libavformat)
     pkg_check_modules(AVCODEC   REQUIRED libavcodec)
     pkg_check_modules(AVUTIL    REQUIRED libavutil)
@@ -187,6 +192,12 @@ endif()
 
 file(GLOB_RECURSE FLUX_SOURCES CONFIGURE_DEPENDS src/*.cpp)
 
+# flux_canvas2d_win32.cpp is the legacy GDI+ Canvas2D backend.
+# On Windows we now use flux_canvas2d_nvg.cpp (NanoVG/GL3), so exclude it.
+if(WIN32)
+    list(FILTER FLUX_SOURCES EXCLUDE REGEX ".*flux_canvas2d_win32\\.cpp$")
+endif()
+
 add_library(flux STATIC ${FLUX_SOURCES})
 add_library(flux::flux ALIAS flux)
 
@@ -202,23 +213,39 @@ target_include_directories(flux
         $<$<NOT:$<BOOL:${ANDROID}>>:${stb_SOURCE_DIR}>
         PRIVATE
         $<$<NOT:$<BOOL:${ANDROID}>>:${stb_SOURCE_DIR}>
-        # GLAD include: Windows and Linux desktop (not Android)
         $<$<OR:$<BOOL:${WIN32}>,$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>>:${CMAKE_CURRENT_SOURCE_DIR}/external/glad/include>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${AVFORMAT_INCLUDE_DIRS}>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${AVCODEC_INCLUDE_DIRS}>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${AVUTIL_INCLUDE_DIRS}>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${SWSCALE_INCLUDE_DIRS}>
         $<$<BOOL:${ANDROID}>:${NATIVE_APP_GLUE_DIR}>
-        $<$<BOOL:${ANDROID}>:${CMAKE_CURRENT_SOURCE_DIR}/external/nanovg/src>
+        $<$<OR:$<BOOL:${ANDROID}>,$<BOOL:${WIN32}>>:${CMAKE_CURRENT_SOURCE_DIR}/external/nanovg/src>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${ALSA_INCLUDE_DIRS}>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${JPEG_INCLUDE_DIRS}>
 )
+
+# ── Compile definitions ───────────────────────────────────────────────────────
+
+target_compile_definitions(flux PUBLIC
+        $<$<CONFIG:Debug>:FLUX_DEBUG>
+        $<$<BOOL:${WIN32}>:NOMINMAX>
+)
+
+# flux_canvas_win32.hpp includes nanovg_gl.h in header-only mode (no
+# NANOVG_GL3_IMPLEMENTATION), which means it only sees declarations —
+# nvgCreateGL3 / nvgDeleteGL3 are declared under #if defined NANOVG_GL3,
+# which is set by NANOVG_GL3_IMPLEMENTATION. We need to define NANOVG_GL3
+# directly so the declarations are visible without pulling in the implementation.
+if(WIN32)
+    target_compile_definitions(flux PUBLIC NANOVG_GL3)
+endif()
 
 # ── Link libraries ────────────────────────────────────────────────────────────
 
 if(WIN32)
     target_link_libraries(flux PUBLIC
             glad
+            nanovg
             Clipper2
             CURL::libcurl
             Msimg32
@@ -300,13 +327,6 @@ else()
     )
 endif()
 
-# ── Compile definitions ───────────────────────────────────────────────────────
-
-target_compile_definitions(flux PUBLIC
-        $<$<CONFIG:Debug>:FLUX_DEBUG>
-        $<$<BOOL:${WIN32}>:NOMINMAX>
-)
-
 # ============================================================================
 # Optional subdirectories  (desktop only)
 # ============================================================================
@@ -323,7 +343,7 @@ if(NOT ANDROID)
 endif()
 
 # ============================================================================
-# Install rules  (desktop only — Android ships the .so inside the APK)
+# Install rules  (desktop only)
 # ============================================================================
 
 if(NOT ANDROID)
@@ -331,9 +351,13 @@ if(NOT ANDROID)
     include(CMakePackageConfigHelpers)
 
     set(FLUX_INSTALL_TARGETS flux)
-    # Install GLAD on both Windows and Linux desktop
+
     if(WIN32 OR (UNIX AND NOT APPLE AND NOT ANDROID))
         list(APPEND FLUX_INSTALL_TARGETS glad)
+    endif()
+
+    if(WIN32)
+        list(APPEND FLUX_INSTALL_TARGETS nanovg)
     endif()
 
     install(TARGETS ${FLUX_INSTALL_TARGETS}

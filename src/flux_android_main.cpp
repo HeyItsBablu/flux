@@ -29,6 +29,7 @@ static std::string  s_cacertPath;
 
 // ── Global accessors ──────────────────────────────────────────────────────────
 extern void FluxAndroid_setVG(NVGcontext* vg);
+NVGcontext* FluxAndroid_getVG() { return s_vg; }
 extern void FluxFile_setAndroidApp(android_app* app);
 
 void           FluxAndroid_setAssetManager(AAssetManager* am) { s_assetManager = am; }
