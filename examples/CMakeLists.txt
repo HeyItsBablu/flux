@@ -37,4 +37,4 @@ function(add_flux_example NAME)
 
 endfunction()
 
-add_flux_example(twocanvas)
+add_flux_example(image_editor)
