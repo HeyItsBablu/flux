@@ -791,10 +791,18 @@ private:
         nvgBeginFrame(nvg_, float(glW), float(glH), pixelRatio);
 
         // ── Surface render ────────────────────────────────────────────────────
-        {
-            Canvas2D ctx(nvg_, canvasW_, canvasH_);
-            activeSurface_->render(ctx);
-        }
+{
+
+    float z  = vp_.zoom();
+    float ox = -vp_.offsetX() * z;
+    float oy =  vp_.offsetY() * z;   
+    nvgSave(nvg_);
+    nvgTranslate(nvg_, ox, oy);
+    nvgScale(nvg_, z, z);
+    Canvas2D ctx(nvg_, canvasW_, canvasH_);
+    activeSurface_->render(ctx);
+    nvgRestore(nvg_);
+}
 
         // ── Scrollbars (rendered inside same NVG frame) ───────────────────────
         updateSBGeometry(glW, glH);
