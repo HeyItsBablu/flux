@@ -1,25 +1,22 @@
 #include "flux/flux.hpp"
 
-class MyApp : public Component {
-  State<bool> toggleState;
-  State<double> sliderState;
-  State<bool> checkState;
-  State<std::string> radioState;
-  State<std::string> textState;
-  State<std::string> textAreaState;
-  State<double> numberState;
+class MyApp : public Widget {
+  State<bool> toggleState{false};
+  State<double> sliderState{50.0};
+  State<bool> checkState{false};
+  State<std::string> radioState{"Option A"};
+  State<std::string> textState{""};
+  State<std::string> textAreaState{""};
+  State<double> numberState{42.0};
 
 public:
-  MyApp()
-      : toggleState(false, context), sliderState(50.0, context),
-        checkState(false, context), radioState("Option A", context),
-        textState("", context), textAreaState("", context),
-        numberState(42.0, context) {}
+
 
   WidgetPtr build() override {
     return Scaffold(
         AppBar("Input Showcase"),
-        Column(
+        Container(
+            Column(
             {
 
                 // ── Toggle ────────────────────────────────────────────────
@@ -164,14 +161,15 @@ public:
                     ->setSpacing(12)
                     ->setPadding(16),
 
-            })
+            })->setSpacing(0)
+        )->setWidth(400)
 
-            ->setSpacing(0));
+            );
   }
 };
 
 WidgetPtr createApp(FluxUI *app) {
-  return FluxApp("FluxUI - Paint", BuildComponent<MyApp>(), AppTheme::light(),
+  return FluxApp("FluxUI - Paint", std::make_shared<MyApp>(), AppTheme::light(),
                  false, // debugShowWidgetBounds
                  900,   // width
                  700,   // height
