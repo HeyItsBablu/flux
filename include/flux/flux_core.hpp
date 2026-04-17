@@ -17,7 +17,8 @@
 // FORWARD DECLARATIONS
 // ============================================================================
 
-template <typename T> class State;
+template <typename T>
+class State;
 class ScaffoldWidget;
 
 // ============================================================================
@@ -26,7 +27,8 @@ class ScaffoldWidget;
 
 inline bool
 broadcastMouseEvent(Widget *widget, int x, int y,
-                    std::function<bool(Widget *, int, int)> handler) {
+                    std::function<bool(Widget *, int, int)> handler)
+{
   if (!widget)
     return false;
   if (handler(widget, x, y))
@@ -41,7 +43,8 @@ broadcastMouseEvent(Widget *widget, int x, int y,
 // FLUXUI CLASS
 // ============================================================================
 
-class FluxUI {
+class FluxUI
+{
 private:
   WidgetPtr root;
   std::function<WidgetPtr()> builder;
@@ -68,8 +71,6 @@ private:
 
   void wireCallbacks();
 
-
-
 public:
   std::map<TimerID, std::function<void()>> timerCallbacks;
   std::vector<std::pair<TimerID, std::function<void()>>> pendingTimers;
@@ -82,7 +83,8 @@ public:
   TimerID setInterval(int ms, std::function<void()> callback);
   void clearInterval(TimerID id);
 
-  template <typename T> State<T> useState(T initialValue);
+  template <typename T>
+  State<T> useState(T initialValue);
 
   void setFocus(Widget *widget);
   Widget *getFocusedWidget() const;
@@ -114,16 +116,23 @@ public:
   PlatformWindow::ClientSize getClientSize() const;
   PlatformWindow &getPlatformWindow() { return window; }
 
+  PlatformWindow *getPlatformWindowPtr()
+  {
+    return &window;
+  }
+
   void setResizeCursorH(); // horizontal resize (SIZEWE)
   void setResizeCursorV(); // vertical resize   (SIZENS)
   void setDefaultCursor(); // arrow
 
   template <typename T>
   std::shared_ptr<T>
-  getOrCreateSingleton(std::function<std::shared_ptr<T>()> factory) {
+  getOrCreateSingleton(std::function<std::shared_ptr<T>()> factory)
+  {
     const std::string key = typeid(T).name();
     auto it = appSingletons_.find(key);
-    if (it == appSingletons_.end()) {
+    if (it == appSingletons_.end())
+    {
       auto inst = factory();
       appSingletons_[key] = inst;
       return inst;
@@ -131,7 +140,7 @@ public:
     return std::static_pointer_cast<T>(it->second);
   }
 
-ScaffoldWidget* getRootScaffold();  
+  ScaffoldWidget *getRootScaffold();
 };
 
 #endif // FLUX_CORE_HPP

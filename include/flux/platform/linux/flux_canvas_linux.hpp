@@ -5,22 +5,20 @@
 #endif
 
 // ============================================================================
-// CanvasWidget — Linux / SDL2 / WGL / NanoVG
+// CanvasWidget — Linux / Single-window / NanoVG
 //
-// Owns:
-//   • A separate SDL_Window with SDL_WINDOW_OPENGL
-//   • An SDL_GLContext (OpenGL 3.3+ core)
-//   • A NanoVG context (GL3 backend)
-//   • CustomScrollbar widgets rendered via NanoVG
-//   • Viewport pan / zoom
+// Phase 2 redesign: CanvasWidget no longer owns any OS window, GL context,
+// or NVG context. PlatformWindow owns all three and shares the NVGcontext*
+// via setNVGContext(). The widget registers itself with PlatformWindow on
+// construction and unregisters on detach.
 //
-// The parent window uses Cairo/SDL software rendering. CanvasWidget creates
-// its own SDL GL window positioned to overlap the parent at the correct
-// screen coordinates — same visual result as Win32 child HWNDs.
+// Rendering happens inside PlatformWindow::run()'s compositor — the platform
+// calls tickAndRender() for each registered canvas between nvgBeginFrame and
+// nvgEndFrame. The widget scissors to its own rect and renders into the
+// shared frame.
 //
-// Repaints are triggered by pushing SDL_WINDOWEVENT_EXPOSED to the parent
-// event queue, which causes the main loop to call FluxUI callbacks, which
-// call Widget::render(), which calls tickAndRender() here.
+// Everything that was in ensureWindow / moveWindow / destroyGL is gone.
+// Viewport, scrollbars, pan/zoom, RenderSurface, Canvas2D — all unchanged.
 // ============================================================================
 
 #include "../../flux_platform.hpp"
@@ -33,7 +31,6 @@
 #include "../../flux_canvas_types.hpp"
 
 #include <SDL2/SDL.h>
-#include <glad/glad.h>
 #include <nanovg.h>
 #include <nanovg_gl.h>
 
@@ -46,6 +43,10 @@
 #include <string>
 #include <vector>
 
+// Forward declaration — PlatformWindow is defined in flux_window.hpp which
+// is included after this header at the application level.
+class PlatformWindow;
+
 class CanvasWidget : public Widget {
 public:
     static constexpr float kSBThick = CustomScrollbar::kTrackThick;
@@ -57,9 +58,22 @@ public:
         autoWidth = autoHeight = false;
         width  = 400;
         height = 300;
+
+        // Self-register with PlatformWindow so the compositor and event
+        // router can find us. setNVGContext() will be called back from
+        // registerCanvas() if GL is already initialised.
+        registerWithPlatform();
     }
 
-    ~CanvasWidget() { destroyGL(); }
+    ~CanvasWidget() {
+        // onDetach() handles unregistration during normal widget tree
+        // teardown. The destructor handles the case where the widget is
+        // destroyed without ever being attached (e.g. early error paths).
+        if (nvg_) {
+            unregisterWithPlatform();
+            nvg_ = nullptr;
+        }
+    }
 
     // ── Configuration ─────────────────────────────────────────────────────
 
@@ -69,7 +83,10 @@ public:
     }
     std::shared_ptr<CanvasWidget> setScrollbarsEnabled(bool e) {
         scrollbarsEnabled_ = e;
-        if (glWindow_) { updateViewportSize(lastGLW_, lastGLH_); scheduleRepaint(); }
+        if (initialized_) {
+            updateViewportSize(lastGLW_, lastGLH_);
+            scheduleRepaint();
+        }
         return ptr();
     }
     bool scrollbarsEnabled() const { return scrollbarsEnabled_; }
@@ -91,21 +108,24 @@ public:
         markNeedsLayout();
         return ptr();
     }
+
     std::shared_ptr<CanvasWidget> setCanvasSize(int w, int h) {
         canvasW_ = w; canvasH_ = h;
-        if (glWindow_) {
+        if (initialized_) {
             vp_.setCanvasSize(w, h);
-            if (activeSurface_) {
-                makeCurrent();
+            if (activeSurface_)
                 activeSurface_->resize(w, h);
-            }
         }
         return ptr();
     }
-    std::shared_ptr<CanvasWidget> redraw() { markNeedsPaint(); return ptr(); }
+
+    std::shared_ptr<CanvasWidget> redraw() {
+        markNeedsPaint();
+        return ptr();
+    }
 
     // ── Callbacks ─────────────────────────────────────────────────────────
-    std::function<void(float zoom)>  onViewportChanged;
+    std::function<void(float zoom)>   onViewportChanged;
     std::function<void(int w, int h)> onGLResize;
 
     // ── Widget overrides ──────────────────────────────────────────────────
@@ -117,15 +137,29 @@ public:
         needsLayout = false;
     }
 
-    void render(GraphicsContext& ctx, FontCache&) override {
-        ensureWindow(ctx);
-        moveWindow();
-        tickAndRender();
+    // render() is called by the Cairo widget pass. In the single-window model
+    // the actual GL rendering is driven by the compositor in PlatformWindow::run(),
+    // not from here. We just record our position and mark layout done.
+    void render(GraphicsContext& /*ctx*/, FontCache&) override {
+        // Our x/y/width/height are now valid — the compositor uses them
+        // to scissor and to do hit-testing. Just ensure the canvas has the
+        // NVG context in case it was set before layout was known.
+        if (!initialized_ && nvg_)
+            initCanvas();
         needsPaint = false;
     }
 
     void onDetach() override {
-        destroyGL();
+        unregisterWithPlatform();
+
+        if (activeSurface_) {
+            activeSurface_->destroy();
+            activeSurface_.reset();
+        }
+        pendingSurface_.reset();
+        nvg_         = nullptr;
+        initialized_ = false;
+
         Widget::onDetach();
     }
 
@@ -134,9 +168,88 @@ public:
         scheduleRepaint();
     }
 
-    // ── SDL event forwarding ──────────────────────────────────────────────
-    // Called by the platform layer when an SDL event arrives for our window ID.
+    // ── Called by PlatformWindow after GL + NVG are ready ─────────────────
+    // Also called when a canvas is registered after GL is already up.
+    void setNVGContext(NVGcontext* nvg) {
+        nvg_ = nvg;
+        // Defer full init until layout has run (width/height must be valid).
+        // If layout is already done, init immediately.
+        if (nvg_ && width > 0 && height > 0 && !initialized_)
+            initCanvas();
+    }
 
+    // ── Called by PlatformWindow on window resize ──────────────────────────
+    void onWindowResize(int newW, int newH) {
+        // Canvas occupies a sub-rect of the window, not the full window.
+        // The widget layout system will update x/y/width/height via
+        // computeLayout(). We only need to refresh viewport here if the
+        // canvas fills the window (autoWidth/autoHeight case).
+        if (autoWidth)  width  = newW;
+        if (autoHeight) height = newH;
+        if (initialized_) {
+            lastGLW_ = width;
+            lastGLH_ = height;
+            updateViewportSize(width, height);
+            updateSBGeometry (width, height);
+            if (onGLResize) onGLResize(width, height);
+            scheduleRepaint();
+        }
+    }
+
+    // ── Called by the compositor in PlatformWindow::run() ─────────────────
+    // Executes inside an active nvgBeginFrame / nvgEndFrame block.
+    // Do NOT call nvgBeginFrame or nvgEndFrame here.
+    void tickAndRender() {
+        if (!nvg_ || !initialized_) return;
+        if (pendingSurface_) activatePendingSurface();
+        if (!activeSurface_) return;
+
+        repaintPending_ = false;
+
+        auto   now = Clock::now();
+        double dt  = std::chrono::duration<double>(now - lastTick_).count();
+        lastTick_  = now;
+
+        activeSurface_->update(dt);
+
+        int glW = lastGLW_ < 1 ? 1 : lastGLW_;
+        int glH = lastGLH_ < 1 ? 1 : lastGLH_;
+
+        // Save NVG state so our scissor / transform don't leak
+        nvgSave(nvg_);
+
+        // Scissor to this widget's screen rect
+        nvgScissor(nvg_, float(x), float(y), float(glW), float(glH));
+
+        // Fill background (avoids Cairo bleeding through)
+        nvgBeginPath(nvg_);
+        nvgRect(nvg_, float(x), float(y), float(glW), float(glH));
+        nvgFillColor(nvg_, nvgRGBA(0, 0, 0, 255));
+        nvgFill(nvg_);
+
+        // Translate so surface draws in its own local coordinate space
+        nvgTranslate(nvg_, float(x), float(y));
+
+        {
+            Canvas2D ctx(nvg_, canvasW_, canvasH_);
+            activeSurface_->render(ctx);
+        }
+
+        updateSBGeometry(glW, glH);
+        renderScrollbarsNVG(glW, glH, dt);
+
+        nvgRestore(nvg_);
+
+        if (activeSurface_->needsContinuousRedraw())
+            scheduleRepaint();
+    }
+
+    // ── State queries ──────────────────────────────────────────────────────
+    bool isInitialized() const { return initialized_; }
+
+    // ── SDL event forwarding ───────────────────────────────────────────────
+    // Called by PlatformWindow::handleSDLEvent with coords already
+    // translated to canvas-local space (except wheel which has no position).
     void handleSDLEvent(const SDL_Event& e) {
         switch (e.type) {
         case SDL_MOUSEBUTTONDOWN: onMouseButtonDown(e.button); break;
@@ -145,22 +258,23 @@ public:
         case SDL_MOUSEWHEEL:      onMouseWheel     (e.wheel);  break;
         case SDL_KEYDOWN:         onKeyDown        (e.key);    break;
         case SDL_KEYUP:           onKeyUp          (e.key);    break;
-        case SDL_WINDOWEVENT:
-            if (e.window.event == SDL_WINDOWEVENT_LEAVE)
-                onMouseLeave();
-            break;
         default: break;
         }
     }
 
-    Uint32 sdlWindowID() const {
-        return glWindow_ ? SDL_GetWindowID(glWindow_) : 0;
+    // onMouseLeave is called by PlatformWindow on SDL_WINDOWEVENT_LEAVE
+    void onMouseLeave() {
+        hBar_.onMouseLeave();
+        vBar_.onMouseLeave();
+        scheduleRepaint();
     }
 
 private:
     // ── State ─────────────────────────────────────────────────────────────
     bool viewportEnabled_   = true;
     bool scrollbarsEnabled_ = true;
+    bool initialized_       = false;
+    bool repaintPending_    = false;
 
     std::shared_ptr<CanvasWidget> ptr() {
         return std::static_pointer_cast<CanvasWidget>(shared_from_this());
@@ -175,30 +289,60 @@ private:
     using Clock = std::chrono::steady_clock;
     Clock::time_point lastTick_ = Clock::now();
 
-    SDL_Window*   glWindow_  = nullptr;
-    SDL_GLContext glContext_  = nullptr;
-    NVGcontext*   nvg_        = nullptr;
-
-    bool repaintPending_ = false;
-    int  lastGLW_ = 0, lastGLH_ = 0;
+    // Non-owning pointer — lifetime managed by PlatformWindow
+    NVGcontext* nvg_     = nullptr;
+    int lastGLW_         = 0;
+    int lastGLH_         = 0;
 
     bool  panning_    = false;
     int   panStartSX_ = 0, panStartSY_ = 0;
     float panStartOX_ = 0, panStartOY_ = 0;
 
-    bool trackingLeave_ = false;
+    // ── Platform registration ─────────────────────────────────────────────
 
-    // ── GL helpers ────────────────────────────────────────────────────────
+    void registerWithPlatform() {
+        auto* inst = FluxUI::getCurrentInstance();
+        if (!inst) return;
+        auto* pw = inst->getPlatformWindowPtr();
+        if (pw) pw->registerCanvas_public(this);
+    }
 
-    void makeCurrent() {
-        if (glWindow_ && glContext_)
-            SDL_GL_MakeCurrent(glWindow_, glContext_);
+    void unregisterWithPlatform() {
+        auto* inst = FluxUI::getCurrentInstance();
+        if (!inst) return;
+        auto* pw = inst->getPlatformWindowPtr();
+        if (pw) pw->unregisterCanvas_public(this);
+    }
+
+    // ── One-time canvas initialisation (runs after layout + NVG ready) ────
+
+    void initCanvas() {
+        assert(nvg_ && "initCanvas called without NVG context");
+        assert(!initialized_);
+
+        lastGLW_ = width;
+        lastGLH_ = height;
+
+        vp_.init(width, height, canvasW_, canvasH_);
+        updateViewportSize(width, height);
+        updateSBGeometry (width, height);
+        vp_.fitToView();
+
+        activatePendingSurface();
+        lastTick_ = Clock::now();
+
+        initialized_ = true;
+
+        if (onViewportChanged) onViewportChanged(vp_.zoom());
+        if (onGLResize)        onGLResize(width, height);
     }
 
     // ── Viewport / scrollbar geometry ─────────────────────────────────────
 
     void viewportDims(int glW, int glH, int& vpW, int& vpH) const {
-        if (!viewportEnabled_ || !scrollbarsEnabled_) { vpW=glW; vpH=glH; return; }
+        if (!viewportEnabled_ || !scrollbarsEnabled_) {
+            vpW = glW; vpH = glH; return;
+        }
         ScrollbarInfo h = vp_.scrollbarH(), v = vp_.scrollbarV();
         vpW = glW - (v.visible ? (int)kSBThick : 0);
         vpH = glH - (h.visible ? (int)kSBThick : 0);
@@ -232,7 +376,8 @@ private:
         panStartOX_ = vp_.offsetX(); panStartOY_ = vp_.offsetY();
     }
     void continuePan(int sx, int sy) {
-        float dx = float(sx - panStartSX_), dy = float(sy - panStartSY_);
+        float dx = float(sx - panStartSX_);
+        float dy = float(sy - panStartSY_);
         vp_.setOffset(panStartOX_ - dx / vp_.zoom(),
                       panStartOY_ + dy / vp_.zoom());
         pokeScrollbars();
@@ -242,8 +387,6 @@ private:
 
     void scheduleRepaint() {
         if (onViewportChanged) onViewportChanged(vp_.zoom());
-        // Push an EXPOSED event to the parent SDL window to wake the main loop.
-        // FluxWin_markNeedsPaint() does exactly this — reuse the same mechanism.
         if (!repaintPending_) {
             repaintPending_ = true;
             SDL_Event e;
@@ -287,7 +430,7 @@ private:
         hBar_.renderNVG(nvg_, glW, glH);
         vBar_.renderNVG(nvg_, glW, glH);
 
-        // Corner fill when both scrollbars visible
+        // Corner fill when both scrollbars are visible
         if (hBar_.isVisible() && vBar_.isVisible() && scrollbarsEnabled_) {
             float cx = float(glW) - kSBThick;
             float cy = float(glH) - kSBThick;
@@ -299,219 +442,6 @@ private:
 
         if ((hFade || vFade) && !repaintPending_)
             scheduleRepaint();
-    }
-
-    // ── SDL event handlers ────────────────────────────────────────────────
-
-    void onMouseButtonDown(const SDL_MouseButtonEvent& e) {
-        SDL_CaptureMouse(SDL_TRUE);
-        int sx = e.x, sy = e.y;
-        if (e.button == SDL_BUTTON_MIDDLE && viewportEnabled_) {
-            beginPan(sx, sy);
-            return;
-        }
-        if (e.button == SDL_BUTTON_LEFT) {
-            bool hC = hBar_.onMouseDown(sx, sy,
-                [this](float t){ applyHScrollFraction(t); });
-            bool vC = !hC && vBar_.onMouseDown(sx, sy,
-                [this](float t){ applyVScrollFraction(t); });
-            if (!hC && !vC) {
-                bool spaceDown = (SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_SPACE] != 0);
-                if (viewportEnabled_ && spaceDown) {
-                    beginPan(sx, sy);
-                } else if (activeSurface_) {
-                    auto [cx,cy] = vp_.screenToCanvas(float(sx), float(sy));
-                    activeSurface_->onMouseDown(cx, cy);
-                }
-            }
-            scheduleRepaint();
-        }
-        if (e.button == SDL_BUTTON_RIGHT && activeSurface_) {
-            auto [cx,cy] = vp_.screenToCanvas(float(sx), float(sy));
-            activeSurface_->onRightMouseDown(cx, cy);
-        }
-    }
-
-    void onMouseButtonUp(const SDL_MouseButtonEvent& e) {
-        SDL_CaptureMouse(SDL_FALSE);
-        int sx = e.x, sy = e.y;
-        if (e.button == SDL_BUTTON_MIDDLE) {
-            panning_ = false;
-            return;
-        }
-        if (e.button == SDL_BUTTON_LEFT) {
-            bool hR = hBar_.onMouseUp(sx, sy);
-            bool vR = vBar_.onMouseUp(sx, sy);
-            if (!hR && !vR) {
-                if (panning_) {
-                    panning_ = false;
-                } else if (activeSurface_) {
-                    auto [cx,cy] = vp_.screenToCanvas(float(sx), float(sy));
-                    activeSurface_->onMouseUp(cx, cy);
-                }
-            }
-            scheduleRepaint();
-        }
-        if (e.button == SDL_BUTTON_RIGHT && activeSurface_) {
-            auto [cx,cy] = vp_.screenToCanvas(float(e.x), float(e.y));
-            activeSurface_->onMouseUp(cx, cy);
-        }
-    }
-
-    void onMouseMotion(const SDL_MouseMotionEvent& e) {
-        int sx = e.x, sy = e.y;
-        bool hDrag = hBar_.onMouseMove(sx, sy);
-        bool vDrag = vBar_.onMouseMove(sx, sy);
-        scheduleRepaint();
-        if (hDrag || vDrag) return;
-        if (panning_) {
-            continuePan(sx, sy);
-        } else if (activeSurface_) {
-            auto [cx,cy] = vp_.screenToCanvas(float(sx), float(sy));
-            activeSurface_->onMouseMove(cx, cy);
-        }
-    }
-
-    void onMouseWheel(const SDL_MouseWheelEvent& e) {
-        if (!viewportEnabled_) return;
-        int   delta = e.y * WHEEL_DELTA;
-        bool  ctrl  = platformCtrlDown();
-        bool  shift = platformShiftDown();
-        int   mx, my;
-        SDL_GetMouseState(&mx, &my);
-        if (ctrl) {
-            float f = (delta > 0) ? 1.1f : 1.f / 1.1f;
-            vp_.zoomToward(float(mx), float(my), f);
-        } else if (shift) {
-            vp_.panByScreen(float(delta) * .5f, 0.f);
-        } else {
-            vp_.panByScreen(0.f, -(float(delta) / WHEEL_DELTA) * 40.f);
-        }
-        pokeScrollbars();
-        scheduleRepaint();
-    }
-
-    void onKeyDown(const SDL_KeyboardEvent& e) {
-        if (!activeSurface_) return;
-        bool ctrl = platformCtrlDown();
-        bool consumed = false;
-        if (ctrl && viewportEnabled_) {
-            SDL_Keycode k = e.keysym.sym;
-            if (k == SDLK_EQUALS || k == SDLK_PLUS || k == SDLK_KP_PLUS) {
-                vp_.zoomIn(); pokeScrollbars(); scheduleRepaint(); consumed = true;
-            } else if (k == SDLK_MINUS || k == SDLK_KP_MINUS) {
-                vp_.zoomOut(); pokeScrollbars(); scheduleRepaint(); consumed = true;
-            } else if (k == SDLK_0 || k == SDLK_KP_0) {
-                vp_.resetZoom(); pokeScrollbars(); scheduleRepaint(); consumed = true;
-            }
-        }
-        if (!consumed)
-            activeSurface_->onKeyDown(e.keysym.scancode);
-    }
-
-    void onKeyUp(const SDL_KeyboardEvent& e) {
-        if (activeSurface_)
-            activeSurface_->onKeyUp(e.keysym.scancode);
-    }
-
-    void onMouseLeave() {
-        hBar_.onMouseLeave();
-        vBar_.onMouseLeave();
-        scheduleRepaint();
-    }
-
-    // ── Window creation ───────────────────────────────────────────────────
-
-    void ensureWindow(GraphicsContext& /*ctx*/) {
-        if (glWindow_) return;
-
-        // Compute absolute screen position of this widget inside the parent.
-        SDL_Window* parentWin =
-            static_cast<SDL_Window*>(
-                FluxUI::getCurrentInstance()->getPlatformWindow().handle());
-
-        int parentX = 0, parentY = 0;
-        if (parentWin)
-            SDL_GetWindowPosition(parentWin, &parentX, &parentY);
-
-        // Request GL attributes before creating the window.
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,
-                            SDL_GL_CONTEXT_PROFILE_CORE);
-        SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER,  1);
-        SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE,   24);
-        SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE,  8);  // NanoVG requires stencil
-        SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
-        SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 4);
-
-        glWindow_ = SDL_CreateWindow(
-            "",                                          // no title bar
-            parentX + x, parentY + y,                   // absolute screen pos
-            width, height,
-            SDL_WINDOW_OPENGL | SDL_WINDOW_BORDERLESS |
-            SDL_WINDOW_SHOWN  | SDL_WINDOW_SKIP_TASKBAR);
-
-        if (!glWindow_) {
-            // MSAA might not be supported — retry without it.
-            SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 0);
-            SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 0);
-            glWindow_ = SDL_CreateWindow(
-                "",
-                parentX + x, parentY + y,
-                width, height,
-                SDL_WINDOW_OPENGL | SDL_WINDOW_BORDERLESS |
-                SDL_WINDOW_SHOWN  | SDL_WINDOW_SKIP_TASKBAR);
-        }
-
-        assert(glWindow_ && "CanvasWidget: SDL_CreateWindow failed");
-
-        glContext_ = SDL_GL_CreateContext(glWindow_);
-        assert(glContext_ && "CanvasWidget: SDL_GL_CreateContext failed");
-        SDL_GL_MakeCurrent(glWindow_, glContext_);
-        SDL_GL_SetSwapInterval(0);  // no vsync — we drive repaints manually
-
-        // Load GL via GLAD.
-        if (!gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress)) {
-            fprintf(stderr, "CanvasWidget: gladLoadGLLoader failed\n");
-            assert(false);
-        }
-
-        fprintf(stderr, "CanvasWidget GL: %s | GLSL: %s | %s\n",
-                (const char*)glGetString(GL_VERSION),
-                (const char*)glGetString(GL_SHADING_LANGUAGE_VERSION),
-                (const char*)glGetString(GL_RENDERER));
-
-        // NanoVG context.
-        nvg_ = nvgCreateGL3(NVG_ANTIALIAS | NVG_STENCIL_STROKES);
-        assert(nvg_ && "CanvasWidget: nvgCreateGL3 failed");
-
-        // Register fonts from system paths.
-        auto regFont = [this](const char* name, const char* path) {
-            if (nvgCreateFont(nvg_, name, path) < 0)
-                fprintf(stderr, "CanvasWidget: font '%s' not found at '%s'\n",
-                        name, path);
-        };
-        regFont("sans",             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
-        regFont("sans-bold",        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf");
-        regFont("sans-italic",      "/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf");
-        regFont("sans-bold-italic", "/usr/share/fonts/truetype/dejavu/DejaVuSans-BoldOblique.ttf");
-        regFont("mono",             "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf");
-        regFont("mono-bold",        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf");
-
-        // Viewport init.
-        vp_.init(width, height, canvasW_, canvasH_);
-        lastGLW_ = width;
-        lastGLH_ = height;
-        updateViewportSize(width, height);
-        updateSBGeometry(width, height);
-        vp_.fitToView();
-
-        activatePendingSurface();
-        lastTick_ = Clock::now();
-
-        if (onViewportChanged) onViewportChanged(vp_.zoom());
-        if (onGLResize)        onGLResize(width, height);
     }
 
     // ── Surface management ────────────────────────────────────────────────
@@ -528,98 +458,134 @@ private:
         vp_.setCanvasSize(canvasW_, canvasH_);
     }
 
-    // ── Main render ───────────────────────────────────────────────────────
+    // ── SDL event handlers (coords already in canvas-local space) ─────────
 
-    void tickAndRender() {
-        if (!glContext_ || !nvg_) return;
-        if (pendingSurface_) activatePendingSurface();
-        if (!activeSurface_) return;
+    void onMouseButtonDown(const SDL_MouseButtonEvent& e) {
+        SDL_CaptureMouse(SDL_TRUE);
+        int sx = e.x, sy = e.y;
 
-        makeCurrent();
-        repaintPending_ = false;
-
-        auto   now = Clock::now();
-        double dt  = std::chrono::duration<double>(now - lastTick_).count();
-        lastTick_  = now;
-
-        activeSurface_->update(dt);
-
-        int glW = lastGLW_ < 1 ? 1 : lastGLW_;
-        int glH = lastGLH_ < 1 ? 1 : lastGLH_;
-
-        glViewport(0, 0, glW, glH);
-        glClearColor(0.f, 0.f, 0.f, 1.f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
-        glEnable(GL_MULTISAMPLE);
-
-        nvgBeginFrame(nvg_, float(glW), float(glH), 1.f);
-
-        {
-            Canvas2D ctx(nvg_, canvasW_, canvasH_);
-            activeSurface_->render(ctx);
+        if (e.button == SDL_BUTTON_MIDDLE && viewportEnabled_) {
+            beginPan(sx, sy);
+            return;
         }
 
-        updateSBGeometry(glW, glH);
-        renderScrollbarsNVG(glW, glH, dt);
+        if (e.button == SDL_BUTTON_LEFT) {
+            bool hC = hBar_.onMouseDown(sx, sy,
+                [this](float t){ applyHScrollFraction(t); });
+            bool vC = !hC && vBar_.onMouseDown(sx, sy,
+                [this](float t){ applyVScrollFraction(t); });
 
-        nvgEndFrame(nvg_);
-        SDL_GL_SwapWindow(glWindow_);
-
-        if (activeSurface_->needsContinuousRedraw())
+            if (!hC && !vC) {
+                bool spaceDown =
+                    (SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_SPACE] != 0);
+                if (viewportEnabled_ && spaceDown) {
+                    beginPan(sx, sy);
+                } else if (activeSurface_) {
+                    auto [cx, cy] =
+                        vp_.screenToCanvas(float(sx), float(sy));
+                    activeSurface_->onMouseDown(cx, cy);
+                }
+            }
             scheduleRepaint();
-    }
+        }
 
-    // ── Window repositioning ──────────────────────────────────────────────
-    // Called every render() to keep the GL window aligned with the widget's
-    // position inside the parent SDL window.
-
-    void moveWindow() {
-        if (!glWindow_) return;
-
-        SDL_Window* parentWin =
-            static_cast<SDL_Window*>(
-                FluxUI::getCurrentInstance()->getPlatformWindow().handle());
-
-        int parentX = 0, parentY = 0;
-        if (parentWin)
-            SDL_GetWindowPosition(parentWin, &parentX, &parentY);
-
-        SDL_SetWindowPosition(glWindow_, parentX + x, parentY + y);
-        SDL_SetWindowSize(glWindow_, width, height);
-
-        if (width != lastGLW_ || height != lastGLH_) {
-            makeCurrent();
-            lastGLW_ = width;
-            lastGLH_ = height;
-            updateViewportSize(width, height);
-            glViewport(0, 0, width, height);
-            if (onGLResize) onGLResize(width, height);
+        if (e.button == SDL_BUTTON_RIGHT && activeSurface_) {
+            auto [cx, cy] = vp_.screenToCanvas(float(sx), float(sy));
+            activeSurface_->onRightMouseDown(cx, cy);
         }
     }
 
-    // ── Teardown ──────────────────────────────────────────────────────────
+    void onMouseButtonUp(const SDL_MouseButtonEvent& e) {
+        SDL_CaptureMouse(SDL_FALSE);
+        int sx = e.x, sy = e.y;
 
-    void destroyGL() {
-        if (glContext_) {
-            makeCurrent();
-
-            if (nvg_) {
-                nvgDeleteGL3(nvg_);
-                nvg_ = nullptr;
-            }
-            if (activeSurface_) {
-                activeSurface_->destroy();
-                activeSurface_.reset();
-            }
-            pendingSurface_.reset();
-
-            SDL_GL_DeleteContext(glContext_);
-            glContext_ = nullptr;
+        if (e.button == SDL_BUTTON_MIDDLE) {
+            panning_ = false;
+            return;
         }
-        if (glWindow_) {
-            SDL_DestroyWindow(glWindow_);
-            glWindow_ = nullptr;
+
+        if (e.button == SDL_BUTTON_LEFT) {
+            bool hR = hBar_.onMouseUp(sx, sy);
+            bool vR = vBar_.onMouseUp(sx, sy);
+            if (!hR && !vR) {
+                if (panning_) {
+                    panning_ = false;
+                } else if (activeSurface_) {
+                    auto [cx, cy] =
+                        vp_.screenToCanvas(float(sx), float(sy));
+                    activeSurface_->onMouseUp(cx, cy);
+                }
+            }
+            scheduleRepaint();
         }
+
+        if (e.button == SDL_BUTTON_RIGHT && activeSurface_) {
+            auto [cx, cy] =
+                vp_.screenToCanvas(float(e.x), float(e.y));
+            activeSurface_->onMouseUp(cx, cy);
+        }
+    }
+
+    void onMouseMotion(const SDL_MouseMotionEvent& e) {
+        int sx = e.x, sy = e.y;
+        bool hDrag = hBar_.onMouseMove(sx, sy);
+        bool vDrag = vBar_.onMouseMove(sx, sy);
+        scheduleRepaint();
+        if (hDrag || vDrag) return;
+        if (panning_) {
+            continuePan(sx, sy);
+        } else if (activeSurface_) {
+            auto [cx, cy] = vp_.screenToCanvas(float(sx), float(sy));
+            activeSurface_->onMouseMove(cx, cy);
+        }
+    }
+
+    void onMouseWheel(const SDL_MouseWheelEvent& e) {
+        if (!viewportEnabled_) return;
+        int  delta = e.y * WHEEL_DELTA;
+        bool ctrl  = platformCtrlDown();
+        bool shift = platformShiftDown();
+        int  mx, my;
+        SDL_GetMouseState(&mx, &my);
+        // Translate to canvas-local
+        mx -= x;
+        my -= y;
+        if (ctrl) {
+            float f = (delta > 0) ? 1.1f : 1.f / 1.1f;
+            vp_.zoomToward(float(mx), float(my), f);
+        } else if (shift) {
+            vp_.panByScreen(float(delta) * .5f, 0.f);
+        } else {
+            vp_.panByScreen(0.f, -(float(delta) / WHEEL_DELTA) * 40.f);
+        }
+        pokeScrollbars();
+        scheduleRepaint();
+    }
+
+    void onKeyDown(const SDL_KeyboardEvent& e) {
+        if (!activeSurface_) return;
+        bool ctrl     = platformCtrlDown();
+        bool consumed = false;
+        if (ctrl && viewportEnabled_) {
+            SDL_Keycode k = e.keysym.sym;
+            if (k == SDLK_EQUALS || k == SDLK_PLUS || k == SDLK_KP_PLUS) {
+                vp_.zoomIn();  pokeScrollbars(); scheduleRepaint();
+                consumed = true;
+            } else if (k == SDLK_MINUS || k == SDLK_KP_MINUS) {
+                vp_.zoomOut(); pokeScrollbars(); scheduleRepaint();
+                consumed = true;
+            } else if (k == SDLK_0 || k == SDLK_KP_0) {
+                vp_.resetZoom(); pokeScrollbars(); scheduleRepaint();
+                consumed = true;
+            }
+        }
+        if (!consumed)
+            activeSurface_->onKeyDown(e.keysym.scancode);
+    }
+
+    void onKeyUp(const SDL_KeyboardEvent& e) {
+        if (activeSurface_)
+            activeSurface_->onKeyUp(e.keysym.scancode);
     }
 };
 
@@ -631,12 +597,3 @@ inline std::shared_ptr<CanvasWidget> Canvas() {
 inline std::shared_ptr<CanvasWidget> Canvas(int w, int h) {
     return std::make_shared<CanvasWidget>()->setSize(w, h);
 }
-
-
-
-// // Route events belonging to a CanvasWidget's GL window
-// if (FluxUI::getCurrentInstance()) {
-//     auto* root = FluxUI::getCurrentInstance()->getRoot().get();
-//     // walk widgets, find CanvasWidget whose sdlWindowID() == e.window.windowID
-//     // call canvasWidget->handleSDLEvent(e)
-// }

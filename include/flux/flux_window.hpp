@@ -7,6 +7,18 @@
 #include <functional>
 #include <string>
 #include <unordered_map>
+#include <vector>
+
+
+
+#if defined(__linux__) && !defined(__ANDROID__)
+class CanvasWidget;
+
+#  include <glad/glad.h>
+#  include <SDL2/SDL.h>
+#  include <nanovg.h>
+
+#endif
 
 // ============================================================================
 // WindowCallbacks
@@ -28,7 +40,7 @@ struct WindowCallbacks {
 
     std::function<void(TimerID timerId)> onTimer;
     std::function<void()> onNonClientMouseDown;
-    std::function<void()> onFocusLost;     
+    std::function<void()> onFocusLost;
 };
 
 // ============================================================================
@@ -122,8 +134,6 @@ private:
     int         cachedWidth  = 0;
     int         cachedHeight = 0;
 
-
-
     // =========================================================================
     // Win32
     // =========================================================================
@@ -144,17 +154,38 @@ private:
     // =========================================================================
 #if defined(__linux__) && !defined(__ANDROID__)
 
-    // CairoState is defined in flux_window_linux.cpp — forward-declared here
-    // so the header compiles without pulling in Cairo / Pango headers.
     struct CairoState;
 
-    SDL_Window* nativeHandle = nullptr;
+    SDL_Window*   nativeHandle  = nullptr;
+    SDL_GLContext glContext_     = nullptr;
+    NVGcontext*   nvg_          = nullptr;
+
+    // Cairo-to-texture compositing state
+    int                  cairoTexture_   = -1;   // NVG image handle for Cairo layer
+    std::vector<uint8_t> cairoPixelBuf_;          // persistent BGRA→RGBA conversion buffer
+
     bool        running      = false;
     bool        mouseCapture = false;
     bool        dirty        = false;
     CairoState* cairoState   = nullptr;
 
     std::unordered_map<TimerID, SDL_TimerID> sdlTimerMap;
+
+    // ── Canvas widget registry ────────────────────────────────────────────
+    // All live CanvasWidgets register here so the compositor and event
+    // router can reach them without walking the full widget tree.
+    std::vector<CanvasWidget*> canvasWidgets_;
+
+    void registerCanvas  (CanvasWidget* c);
+    void unregisterCanvas(CanvasWidget* c);
+    CanvasWidget* hitTestCanvas(int sx, int sy);
+
+    // ── GL/NVG accessors (for CanvasWidget) ──────────────────────────────
+public:
+    NVGcontext* getNVGContext() const { return nvg_; }
+    void registerCanvas_public  (CanvasWidget* c) { registerCanvas(c);   }
+    void unregisterCanvas_public(CanvasWidget* c) { unregisterCanvas(c); }
+private:
 
     void handleSDLEvent(const SDL_Event& e);
 
@@ -165,11 +196,8 @@ private:
     // =========================================================================
 #ifdef __ANDROID__
 
-    // EGLState is defined in flux_window_android.cpp — forward-declared here
-    // so the header compiles without pulling in EGL headers.
     struct EGLState;
 
-    // Software timer entry — no SDL_AddTimer on Android.
     struct TimerEntry {
         int      intervalMs;
         uint32_t nextFireMs;
@@ -183,9 +211,6 @@ private:
     EGLState*      eglState     = nullptr;
 
     std::unordered_map<TimerID, TimerEntry> androidTimers;
-
-
-
 
 #endif // __ANDROID__
 };
