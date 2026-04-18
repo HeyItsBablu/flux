@@ -72,6 +72,64 @@ bool PlatformWindow::create(const std::string& /*title*/,
     return true;
 }
 
+void PlatformWindow::reinitSurface(ANativeWindow* window) {
+    if (!eglState) return;
+    auto& s = *eglState;
+
+    // Destroy old surface only — keep display and context alive
+    if (s.surface != EGL_NO_SURFACE) {
+        eglMakeCurrent(s.display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        eglDestroySurface(s.display, s.surface);
+        s.surface = EGL_NO_SURFACE;
+    }
+
+    // Get the config again to create the new surface
+    const EGLint attribs[] = {
+        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+        EGL_RED_SIZE,   8, EGL_GREEN_SIZE, 8,
+        EGL_BLUE_SIZE,  8, EGL_ALPHA_SIZE, 8,
+        EGL_NONE
+    };
+    EGLConfig cfg; EGLint nCfg = 0;
+    eglChooseConfig(s.display, attribs, &cfg, 1, &nCfg);
+
+    EGLint fmt = 0;
+    eglGetConfigAttrib(s.display, cfg, EGL_NATIVE_VISUAL_ID, &fmt);
+    ANativeWindow_setBuffersGeometry(window, 0, 0, fmt);
+
+    s.surface = eglCreateWindowSurface(s.display, cfg, window, nullptr);
+    if (s.surface == EGL_NO_SURFACE) {
+        LOGE("reinitSurface: eglCreateWindowSurface failed");
+        return;
+    }
+
+    if (!eglMakeCurrent(s.display, s.surface, s.surface, s.context)) {
+        LOGE("reinitSurface: eglMakeCurrent failed");
+        return;
+    }
+
+    EGLint w = 0, h = 0;
+    eglQuerySurface(s.display, s.surface, EGL_WIDTH,  &w);
+    eglQuerySurface(s.display, s.surface, EGL_HEIGHT, &h);
+    float dpi = FluxAndroid_getDpiScale();
+    cachedWidth  = static_cast<int>(w / dpi);
+    cachedHeight = static_cast<int>(h / dpi);
+    nativeHandle = window;
+
+    glViewport(0, 0, w, h);
+    LOGI("reinitSurface: %dx%d", w, h);
+}
+
+
+void PlatformWindow::destroySurface() {
+    if (!eglState || eglState->surface == EGL_NO_SURFACE) return;
+    eglMakeCurrent(eglState->display,
+                   EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+    eglDestroySurface(eglState->display, eglState->surface);
+    eglState->surface = EGL_NO_SURFACE;
+}
+
+
 // ── destroy ───────────────────────────────────────────────────────────────────
 void PlatformWindow::destroy() {
     if (!eglState) return;

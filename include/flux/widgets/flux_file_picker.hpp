@@ -125,6 +125,8 @@ namespace FluxFilePickerAndroid {
 extern JNIEnv        *g_env;
 extern ANativeActivity *g_activity;
 
+void init(JNIEnv *env, ANativeActivity *activity);
+
 void pickFileAsync(const std::string &title,
                    const std::vector<FileFilter> &filters,
                    std::function<void(std::string)> callback);
@@ -144,6 +146,8 @@ void pickFolderAsync(const std::string &title,
 // Called by the JNI bridge (Java_com_flux_FluxBridge_nativeOnFilePickerResult)
 // to deliver results back to the C++ callback registry.
 void dispatchResult(int requestCode, std::vector<std::string> paths);
+void drainPendingCallbacks();
+
 
 } // namespace FluxFilePickerAndroid
 #endif // __ANDROID__

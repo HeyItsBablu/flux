@@ -125,6 +125,8 @@ public:
 
     void handleAndroidEvent(const AInputEvent* event);
     void pollTimers();
+        void reinitSurface(ANativeWindow* window);
+    void destroySurface();
 #endif
     void updateClientSize();
 
