@@ -763,64 +763,64 @@ private:
 
     // ── Main render loop ──────────────────────────────────────────────────────
 
-    void tickAndRender() {
-        if (!glRC_ || !glDC_ || !nvg_) return;
-        if (pendingSurface_) activatePendingSurface();
-        if (!activeSurface_) return;
+void tickAndRender() {
+    if (!glRC_ || !glDC_ || !nvg_) return;
+    if (pendingSurface_) activatePendingSurface();
+    if (!activeSurface_) return;
 
-        makeCurrent();
+    makeCurrent();
 
-        auto   now = Clock::now();
-        double dt  = std::chrono::duration<double>(now - lastTick_).count();
-        lastTick_  = now;
+    auto   now = Clock::now();
+    double dt  = std::chrono::duration<double>(now - lastTick_).count();
+    lastTick_  = now;
 
-        activeSurface_->update(dt);
+    activeSurface_->update(dt);
 
-        int glW = lastGLW_ < 1 ? 1 : lastGLW_;
-        int glH = lastGLH_ < 1 ? 1 : lastGLH_;
+    int glW = lastGLW_ < 1 ? 1 : lastGLW_;
+    int glH = lastGLH_ < 1 ? 1 : lastGLH_;
 
-        // ── Clear ─────────────────────────────────────────────────────────────
-        glViewport(0, 0, glW, glH);
-        glClearColor(0.f, 0.f, 0.f, 1.f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
-        glEnable(GL_MULTISAMPLE);
+    // ── Clear ─────────────────────────────────────────────────────────────
+    glViewport(0, 0, glW, glH);
+    glClearColor(0.f, 0.f, 0.f, 1.f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+    glEnable(GL_MULTISAMPLE);
 
-        // ── NanoVG frame begin ────────────────────────────────────────────────
-        // pixelRatio = 1.0 on standard displays; query DPI for HiDPI support.
-        float pixelRatio = 1.f;
-        nvgBeginFrame(nvg_, float(glW), float(glH), pixelRatio);
+    // ── Pre-render (raw GL, before NanoVG) ────────────────────────────────
+    activeSurface_->preRender();
 
-        // ── Surface render ────────────────────────────────────────────────────
-{
+    // ── Restore viewport after preRender (surface may have changed it) ────
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glViewport(0, 0, glW, glH);
 
-    float z  = vp_.zoom();
-    float ox = -vp_.offsetX() * z;
-    float oy =  vp_.offsetY() * z;   
-    nvgSave(nvg_);
-    nvgTranslate(nvg_, ox, oy);
-    nvgScale(nvg_, z, z);
-    Canvas2D ctx(nvg_, canvasW_, canvasH_);
-    activeSurface_->render(ctx);
-    nvgRestore(nvg_);
-}
+    // ── NanoVG frame ──────────────────────────────────────────────────────
+    float pixelRatio = 1.f;
+    nvgBeginFrame(nvg_, float(glW), float(glH), pixelRatio);
 
-        // ── Scrollbars (rendered inside same NVG frame) ───────────────────────
-        updateSBGeometry(glW, glH);
-        renderScrollbarsNVG(glW, glH, dt);
-
-        // ── NanoVG frame end ──────────────────────────────────────────────────
-        nvgEndFrame(nvg_);
-
-        // ── Present — one SwapBuffers, no flicker ─────────────────────────────
-        SwapBuffers(glDC_);
-
-        // ── Schedule next frame if surface needs continuous redraw ────────────
-        bool needsCont = activeSurface_->needsContinuousRedraw();
-        if (needsCont && !repaintPending_) {
-            repaintPending_ = true;
-            SetTimer(glHwnd_, 1, 16, nullptr);
-        }
+    {
+        float z  = vp_.zoom();
+        float ox = -vp_.offsetX() * z;
+        float oy =  vp_.offsetY() * z;
+        nvgSave(nvg_);
+        nvgTranslate(nvg_, ox, oy);
+        nvgScale(nvg_, z, z);
+        Canvas2D ctx(nvg_, canvasW_, canvasH_);
+        activeSurface_->render(ctx);
+        nvgRestore(nvg_);
     }
+
+    updateSBGeometry(glW, glH);
+    renderScrollbarsNVG(glW, glH, dt);
+
+    nvgEndFrame(nvg_);
+
+    SwapBuffers(glDC_);
+
+    bool needsCont = activeSurface_->needsContinuousRedraw();
+    if (needsCont && !repaintPending_) {
+        repaintPending_ = true;
+        SetTimer(glHwnd_, 1, 16, nullptr);
+    }
+}
 
     // ── Window resize ─────────────────────────────────────────────────────────
 
