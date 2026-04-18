@@ -1045,8 +1045,8 @@ class ImageEditorApp : public Widget {
 
 public:
   WidgetPtr build() override {
-    int screenW = GetSystemMetrics(SM_CXSCREEN);
-    int screenH = GetSystemMetrics(SM_CYSCREEN);
+    int screenW = 1920;
+    int screenH = 1080;
     int viewW = screenW - kPanelW;
     int viewH = screenH - kToolbarH - kHintsH;
 

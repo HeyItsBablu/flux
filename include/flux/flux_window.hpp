@@ -164,6 +164,10 @@ private:
     int                  cairoTexture_   = -1;   // NVG image handle for Cairo layer
     std::vector<uint8_t> cairoPixelBuf_;          // persistent BGRA→RGBA conversion buffer
 
+    int logicalWidth_= 0;
+    int logicalHeight_ = 0;
+    CanvasWidget* capturedCanvas_ = nullptr;
+    CanvasWidget* focusedCanvas_ = nullptr;
     bool        running      = false;
     bool        mouseCapture = false;
     bool        dirty        = false;
