@@ -1,39 +1,41 @@
 #pragma once
 // ============================================================================
-// flux_canvas2d.hpp
-// HTML5-style 2D drawing API for RenderSurface::render().
+// flux_canvas2d.hpp  —  HTML5-style 2-D drawing API  (pure GL, no NanoVG)
 //
-// Backend  : NanoVG
-// Platforms: Windows  (GL3, GLAD, WGL)
-//            Linux    (GL3, GLAD, GLX/EGL)
-//            Android  (GLES2/3, EGL)   — swap NANOVG_GL3 → NANOVG_GLES2/3
-//            macOS    (GL3 or Metal)   — future
+// Drop-in replacement for the NanoVG-backed version.
+// Public API is identical; internals use raw GL 3.3 core + stb_truetype.
 //
-// Callers only need this header + flux_core.hpp.
-// The NanoVG implementation lives entirely in flux_canvas2d_nvg.cpp.
+// One Canvas2D is stack-allocated by CanvasWidget each frame and passed to
+// RenderSurface::render().  Do NOT construct one yourself.
+//
+// Thread-safety: must be called on the GL thread only.
 // ============================================================================
 
-#include "flux_core.hpp"   // Color  { uint8_t r,g,b,a; }
+#include "flux_core.hpp"   // Color { uint8_t r,g,b,a }
 #include <string>
 #include <vector>
+#include <memory>
 
-// Forward-declare NVGcontext so callers never need to include nanovg.h.
-struct NVGcontext;
+// ── GL (glad included by CanvasWidget before us) ─────────────────────────────
+#if defined(_WIN32) || defined(__linux__)
+#  include <glad/glad.h>
+#elif defined(__ANDROID__)
+#  include <GLES3/gl3.h>
+#elif defined(__APPLE__)
+#  include <OpenGL/gl3.h>
+#endif
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Canvas2DImage
-// Returned by Canvas2D::loadImage().
-// Lifetime is tied to the NVGcontext that created it.
-// Free before destroying the GL context — CanvasWidget::destroyGL() does this.
+// Canvas2DImage — returned by Canvas2D::loadImage()
 // ─────────────────────────────────────────────────────────────────────────────
 struct Canvas2DImage {
-    int nvgHandle = -1;   // NanoVG image id  (-1 = invalid)
-    int width     = 0;
-    int height    = 0;
+    GLuint texId  = 0;   // GL texture id  (0 = invalid)
+    int    width  = 0;
+    int    height = 0;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Enums
+// Enums  (identical to the NanoVG version)
 // ─────────────────────────────────────────────────────────────────────────────
 enum class TextAlign    { Left, Right, Center };
 enum class TextBaseline { Top, Middle, Bottom, Alphabetic };
@@ -43,63 +45,116 @@ enum class CompositeOp  { SourceOver, Copy, Xor, Multiply, Screen };
 enum class FillRule     { NonZero, EvenOdd };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Canvas2D
-//
-// One instance is stack-allocated by CanvasWidget each frame, between
-// nvgBeginFrame / nvgEndFrame, then passed to RenderSurface::render().
-// Do NOT construct one yourself.
+// Canvas2DGL — internal shared GL resources (one per GL context)
+// Created by CanvasWidget::ensureWindows, destroyed by CanvasWidget::destroyGL.
+// ─────────────────────────────────────────────────────────────────────────────
+struct Canvas2DGL {
+    // ── Flat-colour shader ────────────────────────────────────────────────
+    GLuint flatProg  = 0;
+    GLint  flatMVP   = -1;
+    GLint  flatColor = -1;
+    GLint  flatMode  = -1;   // 0=solid, 1=texture
+
+    // ── Textured-quad shader ──────────────────────────────────────────────
+    GLuint texProg   = 0;
+    GLint  texMVP    = -1;
+    GLint  texSampler= -1;
+    GLint  texAlpha  = -1;
+
+    // ── Dynamic geometry ──────────────────────────────────────────────────
+    GLuint vao = 0, vbo = 0;
+
+    // ── stb_truetype font atlas ───────────────────────────────────────────
+    GLuint fontTex = 0;
+    int    atlasW  = 1024;
+    int    atlasH  = 1024;
+
+    struct FontFace {
+        std::string name;
+        std::vector<unsigned char> ttfData;    // kept alive for stbtt
+        void*  stbFont = nullptr;              // stbtt_fontinfo* (opaque)
+        // baked bitmap glyph cache lives in the shared atlas
+    };
+    std::vector<FontFace> fonts;
+    std::vector<unsigned char> atlasPixels;    // single-channel, atlasW*atlasH
+
+    // atlas packing cursor (very simple shelf packer)
+    int shelfX = 0, shelfY = 0, shelfH = 0;
+
+    struct GlyphKey {
+        int fontIdx;
+        int codepoint;
+        int pixelSize;
+        bool operator==(const GlyphKey& o) const {
+            return fontIdx==o.fontIdx && codepoint==o.codepoint && pixelSize==o.pixelSize;
+        }
+    };
+    struct GlyphEntry {
+        GlyphKey key;
+        int atlasX, atlasY, glyphW, glyphH;
+        int xoff, yoff;   // stbtt bearing
+        int advance;
+    };
+    std::vector<GlyphEntry> glyphs;
+
+    bool init();
+    void destroy();
+    int  findFont(const std::string& name) const;
+    int  addFont(const std::string& name, const std::string& path);
+    const GlyphEntry* getGlyph(int fontIdx, int codepoint, int pixelSize);
+
+private:
+    void uploadAtlas();
+    bool bakeGlyph(int fontIdx, int codepoint, int pixelSize, GlyphEntry& out);
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Canvas2D — main drawing API
 // ─────────────────────────────────────────────────────────────────────────────
 struct Canvas2D {
 
     // Constructed by CanvasWidget only.
-    explicit Canvas2D(NVGcontext* nvg, int canvasW, int canvasH);
+    explicit Canvas2D(Canvas2DGL* gl, int canvasW, int canvasH,
+                      const float mvp[16]);
     ~Canvas2D() = default;
 
     Canvas2D(const Canvas2D&)            = delete;
     Canvas2D& operator=(const Canvas2D&) = delete;
 
-    // ── Dimensions ────────────────────────────────────────────────────────────
+    // ── Dimensions ────────────────────────────────────────────────────────
     int width()  const { return canvasW_; }
     int height() const { return canvasH_; }
 
-    // Escape hatch — raw NanoVG access if you need something not exposed here.
-    NVGcontext* nvg() const { return nvg_; }
-
-    // ── State stack (save / restore) ──────────────────────────────────────────
+    // ── State stack ───────────────────────────────────────────────────────
     void save();
     void restore();
 
-    // ── Transform ─────────────────────────────────────────────────────────────
+    // ── Transform ─────────────────────────────────────────────────────────
     void translate(float dx, float dy);
     void scale(float sx, float sy);
-    void rotate(float radians);       // clockwise, matches HTML canvas
+    void rotate(float radians);
     void resetTransform();
 
-    // ── Style ─────────────────────────────────────────────────────────────────
+    // ── Style ─────────────────────────────────────────────────────────────
     void setFillColor(Color c);
     void setStrokeColor(Color c);
     void setLineWidth(float w);
     void setLineCap(LineCap cap);
     void setLineJoin(LineJoin join);
     void setMiterLimit(float limit);
-    void setGlobalAlpha(float a);     // 0..1, multiplied into all subsequent draws
+    void setGlobalAlpha(float a);
     void setCompositeOp(CompositeOp op);
     void setFillRule(FillRule rule);
 
-    // ── Linear gradient ───────────────────────────────────────────────────────
-    // 1.  beginLinearGradient(x0,y0, x1,y1);
-    // 2.  addColorStop(t, color);     // t in [0,1], add as many as needed
-    // 3.  setFillGradient();          // activates gradient as fill paint
-    // 4.  fillRect() / fill() / etc.
+    // ── Linear gradient ───────────────────────────────────────────────────
     void beginLinearGradient(float x0, float y0, float x1, float y1);
     void addColorStop(float t, Color c);
     void setFillGradient();
 
-    // ── Radial gradient ───────────────────────────────────────────────────────
-    // Same workflow — call beginRadialGradient instead of beginLinearGradient.
+    // ── Radial gradient ───────────────────────────────────────────────────
     void beginRadialGradient(float cx, float cy, float innerR, float outerR);
 
-    // ── Primitive drawing ─────────────────────────────────────────────────────
+    // ── Primitive drawing ─────────────────────────────────────────────────
     void clearRect(float x, float y, float w, float h);
     void fillRect(float x, float y, float w, float h);
     void strokeRect(float x, float y, float w, float h);
@@ -108,7 +163,7 @@ struct Canvas2D {
     void fillCircle(float cx, float cy, float r);
     void strokeCircle(float cx, float cy, float r);
 
-    // ── Path API ──────────────────────────────────────────────────────────────
+    // ── Path API ──────────────────────────────────────────────────────────
     void beginPath();
     void closePath();
     void moveTo(float x, float y);
@@ -129,29 +184,26 @@ struct Canvas2D {
 
     void fill();
     void stroke();
-    void clip();   // clip subsequent draws to current path (intersects existing clip)
+    void clip();
 
-    // ── Image drawing ─────────────────────────────────────────────────────────
-    // loadImage / freeImage: call from initialize() or update(), NOT from render().
+    // ── Image drawing ─────────────────────────────────────────────────────
+    // Call loadImage / freeImage from initialize() or update(), NOT render().
     Canvas2DImage* loadImage(const std::string& path);
     Canvas2DImage* loadImageFromMemory(const unsigned char* data, int byteLen);
+    Canvas2DImage* wrapTexture(GLuint texId, int w, int h);  // NEW: wrap existing GL tex
+    void           updateTexture(Canvas2DImage* img,          // NEW: pixel upload
+                                 const unsigned char* rgba, int w, int h);
     void           freeImage(Canvas2DImage* img);
 
-    // drawImage variants (mirrors HTML canvas API)
     void drawImage(const Canvas2DImage* img, float dx, float dy);
     void drawImage(const Canvas2DImage* img,
                    float dx, float dy, float dw, float dh);
     void drawImage(const Canvas2DImage* img,
-                   float sx, float sy, float sw, float sh,    // source (pixels)
-                   float dx, float dy, float dw, float dh);   // dest (canvas units)
+                   float sx, float sy, float sw, float sh,
+                   float dx, float dy, float dw, float dh);
 
-    // ── Text ──────────────────────────────────────────────────────────────────
-    // fontDesc examples:
-    //   "14px sans"        "bold 18px Segoe UI"      "italic 12px Consolas"
-    //
-    // Font faces must be registered once via Canvas2D::registerFont() before use.
-    // CanvasWidget registers "sans", "sans-bold", "mono" from system paths on init.
-    static bool registerFont(NVGcontext* nvg,
+    // ── Text ──────────────────────────────────────────────────────────────
+    static bool registerFont(Canvas2DGL* gl,
                              const std::string& name,
                              const std::string& ttfPath);
 
@@ -164,54 +216,99 @@ struct Canvas2D {
                      float maxWidth = -1.f);
     float measureText(const std::string& text);
 
-    // ── Clip rect helpers ─────────────────────────────────────────────────────
-    // Simple scissor-style clip. Pairs must match.
+    // ── Clip rect ─────────────────────────────────────────────────────────
     void pushClipRect(float x, float y, float w, float h);
     void popClipRect();
 
-    // ── Pixel access ──────────────────────────────────────────────────────────
-    // Both are GPU-stalling. Use sparingly.
+    // ── Pixel access ──────────────────────────────────────────────────────
     void getImageData(float x, float y, float w, float h,
-                      std::vector<uint8_t>& out);   // RGBA, row-major
+                      std::vector<uint8_t>& out);
     void putImageData(const std::vector<uint8_t>& data,
                       int srcW, int srcH,
                       float dx, float dy);
 
-    // ── Internal (CanvasWidget use only) ──────────────────────────────────────
-    NVGcontext* nvg_     = nullptr;
-    int         canvasW_ = 0;
-    int         canvasH_ = 0;
+    // ── Internal state ────────────────────────────────────────────────────
+    Canvas2DGL* gl_     = nullptr;
+    int         canvasW_= 0;
+    int         canvasH_= 0;
 
 private:
-    // ── Gradient build state ──────────────────────────────────────────────────
+    // ── MVP / transform stack ─────────────────────────────────────────────
+    struct Mat3 {
+        float m[9] = {1,0,0, 0,1,0, 0,0,1};
+        static Mat3 identity();
+        Mat3 multiply(const Mat3& b) const;
+        Mat3 translated(float dx, float dy) const;
+        Mat3 scaled(float sx, float sy) const;
+        Mat3 rotated(float r) const;
+        void apply(float& x, float& y) const;
+    };
+
+    float       baseMVP_[16];   // ortho from CanvasWidget
+    Mat3        ctm_;           // current transform (canvas-space)
+    struct SaveState {
+        Mat3   ctm;
+        Color  fillColor, strokeColor;
+        float  lineWidth, globalAlpha;
+        bool   fillIsGrad;
+        int    clipDepth;
+        float  gx0,gy0,gx1,gy1,gcx,gcy,gInR,gOutR;
+        enum class GradType { None, Linear, Radial } gradType;
+        std::vector<std::pair<float,Color>> stops;
+        std::string fontFace;
+        float fontSize;
+        bool fontBold, fontItalic;
+        TextAlign textAlign;
+        TextBaseline textBaseline;
+    };
+    std::vector<SaveState> stateStack_;
+
+    // ── Path buffer ───────────────────────────────────────────────────────
+    struct PathPt { float x, y; bool move; };
+    std::vector<PathPt> path_;
+    float pathStartX_ = 0, pathStartY_ = 0;
+    float curX_       = 0, curY_       = 0;
+
+    // ── Gradient state ────────────────────────────────────────────────────
     enum class GradType { None, Linear, Radial };
-    struct GStop { float t; Color c; };
+    GradType gradType_ = GradType::None;
+    float gx0_=0,gy0_=0,gx1_=0,gy1_=0;
+    float gcx_=0,gcy_=0,gInR_=0,gOutR_=0;
+    std::vector<std::pair<float,Color>> gStops_;
+    bool fillIsGrad_ = false;
 
-    GradType           gradType_ = GradType::None;
-    float              gx0_=0,gy0_=0, gx1_=0,gy1_=0;    // linear
-    float              gcx_=0,gcy_=0, gInR_=0,gOutR_=0;  // radial
-    std::vector<GStop> gStops_;
-    bool               fillIsGrad_ = false;
+    // ── Draw state ────────────────────────────────────────────────────────
+    Color  fillColor_   = {0,0,0,255};
+    Color  strokeColor_ = {0,0,0,255};
+    float  lineWidth_   = 1.f;
+    float  globalAlpha_ = 1.f;
+    FillRule fillRule_  = FillRule::NonZero;
+    int    clipDepth_   = 0;
+    CompositeOp compositeOp_ = CompositeOp::SourceOver;
 
-    // ── Text state ────────────────────────────────────────────────────────────
+    // ── Text state ────────────────────────────────────────────────────────
     std::string  fontFace_     = "sans";
     float        fontSize_     = 14.f;
-    bool         fontBold_     = false; 
+    bool         fontBold_     = false;
     bool         fontItalic_   = false;
     TextAlign    textAlign_    = TextAlign::Left;
     TextBaseline textBaseline_ = TextBaseline::Alphabetic;
 
-    // ── Draw state ────────────────────────────────────────────────────────────
-    float    lineWidth_   = 1.f;
-    float    globalAlpha_ = 1.f;
-    Color    fillColor_   = {0,0,0,255};
-    Color    strokeColor_ = {0,0,0,255};
-    FillRule fillRule_    = FillRule::NonZero;
-    int      clipDepth_   = 0;
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
-    void        applyFill();
-    void        applyStroke();
-    void        parseFontDesc(const std::string& desc);
-    std::string resolveFontFace() const;
+    // ── Helpers ───────────────────────────────────────────────────────────
+    void buildMVP(float out[16]) const;
+    void uploadAndDraw(const float* verts, int count, GLenum mode,
+                       Color col, float alpha = 1.f);
+    void drawTexturedQuad(GLuint tex,
+                          float sx, float sy, float sw, float sh,
+                          float dx, float dy, float dw, float dh,
+                          int texW, int texH, float alpha = 1.f);
+    void tessellateArc(float cx, float cy, float r,
+                       float a0, float a1, bool ccw, bool move);
+    void tessellateEllipse(float cx, float cy, float rx, float ry,
+                           float rot, float a0, float a1, bool ccw);
+    void strokePath();
+    void fillPath();
+    Color blendAlpha(Color c) const;
+    void  parseFontDesc(const std::string& desc);
+    int   resolveFont() const;
 };

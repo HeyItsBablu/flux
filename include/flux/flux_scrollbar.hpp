@@ -1,7 +1,9 @@
-// ============================================================================
-// flux_scrollbar.hpp — cross-platform
-// ============================================================================
 #pragma once
+// ============================================================================
+// flux_scrollbar.hpp — cross-platform, NanoVG-free
+// Rendering is done via raw GL quads (simple shader).
+// CanvasWidget owns the shader program; it passes prog/vao/vbo in.
+// ============================================================================
 
 #include "flux_canvas_types.hpp"
 #include <algorithm>
@@ -12,10 +14,12 @@
 #if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
 #  include <glad/glad.h>
 #  include "flux_glutil.hpp"
-#  include <nanovg.h>
 #elif defined(__ANDROID__)
-#  include <GLES2/gl2.h>
-#  include <nanovg.h>
+#  include <GLES3/gl3.h>
+#endif
+
+#ifndef M_PI
+#  define M_PI 3.14159265358979323846
 #endif
 
 class CustomScrollbar {
@@ -38,91 +42,46 @@ public:
 
     explicit CustomScrollbar(Axis axis) : axis_(axis) {}
 
-    // ── NanoVG render (Windows + Linux CanvasWidget) ──────────────────────
-#if defined(_WIN32) || defined(__linux__) || defined(__ANDROID__)
-    void renderNVG(NVGcontext* nvg, int viewW, int viewH) {
-        if (!visible_) return;
-
-        float tx, ty, tw, th;
-        if (axis_ == Axis::Horizontal) {
-            tx = stripX0_;
-            ty = float(viewH) - kTrackThick;
-            tw = stripLen_;
-            th = kTrackThick;
-        } else {
-            tx = float(viewW) - kTrackThick;
-            ty = stripY0_;
-            tw = kTrackThick;
-            th = stripLen_;
-        }
-
-        // Track background
-        nvgBeginPath(nvg);
-        nvgRect(nvg, tx, ty, tw, th);
-        nvgFillColor(nvg, nvgRGBA(20, 20, 20, 180));
-        nvgFill(nvg);
-
-        // Thumb
-        float ts, tl;
-        thumbPixels(ts, tl);
-
-        float thumbX, thumbY, thumbW, thumbH;
-        if (axis_ == Axis::Horizontal) {
-            thumbX = stripX0_ + ts;
-            thumbY = ty + 2.f;
-            thumbW = tl;
-            thumbH = th - 4.f;
-        } else {
-            thumbX = tx + 2.f;
-            thumbY = stripY0_ + ts;
-            thumbW = tw - 4.f;
-            thumbH = tl;
-        }
-
-        auto a = static_cast<unsigned char>(
-            std::clamp(alpha_ * 255.f, 0.f, 255.f));
-        nvgBeginPath(nvg);
-        nvgRoundedRect(nvg, thumbX, thumbY, thumbW, thumbH, kCornerR);
-        nvgFillColor(nvg, nvgRGBA(180, 180, 180, a));
-        nvgFill(nvg);
-    }
-
-#endif
-
-    // ── Raw GL render (legacy path — kept for any non-NanoVG callers) ─────
+    // ── GL render — called by CanvasWidget::renderScrollbarsGL() ─────────
+    // prog must be the flat-colour 2D program (see flux_scrollbar_gl.hpp).
+    // uMVP / uColor are uniform locations within prog.
 #if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
     void render(GLuint prog, GLuint vao, GLuint vbo,
                 GLint uMVP, GLint uColor, int glW, int glH) const {
-        if (alpha_ < 0.005f) return;
+        if (!visible_ || alpha_ < 0.005f) return;
 
         float mvp[16];
         glutil::ortho(0.f, float(glW), float(glH), 0.f, mvp);
-
         glUseProgram(prog);
         glUniformMatrix4fv(uMVP, 1, GL_FALSE, mvp);
-        glUniform1i(glGetUniformLocation(prog, "uMode"), 1);
 
+        // ── Track background ─────────────────────────────────────────────
         {
-            float ta = alpha_ * 0.25f;
-            glUniform4f(uColor, 0.12f, 0.12f, 0.12f, ta);
-            pushRect(vao, vbo, stripX0_, stripY0_, trackStripW(), stripLen_);
+            float ta = alpha_ * 0.30f;
+            float tx = (axis_==Axis::Horizontal) ? stripX0_ : float(glW)-kTrackThick;
+            float ty = (axis_==Axis::Horizontal) ? float(glH)-kTrackThick : stripY0_;
+            float tw = (axis_==Axis::Horizontal) ? stripLen_ : kTrackThick;
+            float th = (axis_==Axis::Horizontal) ? kTrackThick : stripLen_;
+            glUniform4f(uColor, 0.08f, 0.08f, 0.08f, ta);
+            pushRect(prog, vao, vbo, tx, ty, tw, th);
         }
-        {
-            glUniform4f(uColor, 0.75f, 0.75f, 0.75f, alpha_);
-            drawArrow(vao, vbo, true,  glW, glH, prog, uMVP, uColor);
-            drawArrow(vao, vbo, false, glW, glH, prog, uMVP, uColor);
-        }
+
+        // ── Arrow buttons ────────────────────────────────────────────────
+        glUniform4f(uColor, 0.70f, 0.70f, 0.70f, alpha_);
+        drawArrow(prog, vao, vbo, true,  glW, glH);
+        drawArrow(prog, vao, vbo, false, glW, glH);
+
+        // ── Thumb ────────────────────────────────────────────────────────
         if (thumbMax_ > thumbMin_) {
             float thumbAlpha = dragging_ ? 1.f : alpha_;
-            float tc         = dragging_ ? 0.92f : 0.72f;
+            float tc         = dragging_ ? 0.92f : 0.76f;
             glUniform4f(uColor, tc, tc, tc, thumbAlpha);
-            drawThumb(vao, vbo);
+            drawThumb(prog, vao, vbo);
         }
     }
-#endif // _WIN32 || Linux desktop
+#endif // desktop GL
 
-    // ── Geometry / thumb ──────────────────────────────────────────────────
-
+    // ── Geometry ──────────────────────────────────────────────────────────
     void setGeometry(float stripX0, float stripY0, float stripLen) {
         stripX0_  = stripX0;
         stripY0_  = stripY0;
@@ -137,8 +96,6 @@ public:
     }
 
     // ── Animation tick ────────────────────────────────────────────────────
-    // Returns true if alpha is still animating (caller should schedule repaint)
-
     bool tick(double dt) {
         float f = float(dt);
         float targetW = (hovered_ || dragging_) ? kThumbFat : kThumbThin;
@@ -168,7 +125,6 @@ public:
     void poke()              { idleTimer_ = 0.f; }
 
     // ── Mouse events ──────────────────────────────────────────────────────
-
     bool onMouseDown(int sx, int sy, std::function<void(float)> scrollTo) {
         Zone z = hitTest(sx, sy);
         if (z == Zone::None) return false;
@@ -183,8 +139,8 @@ public:
         }
         if (z == Zone::ArrowStart)  { scrollBy(-kArrowStep, scrollTo); return true; }
         if (z == Zone::ArrowEnd)    { scrollBy(+kArrowStep, scrollTo); return true; }
-        if (z == Zone::TrackBefore) { scrollBy(-(thumbMax_ - thumbMin_), scrollTo); return true; }
-        if (z == Zone::TrackAfter)  { scrollBy(+(thumbMax_ - thumbMin_), scrollTo); return true; }
+        if (z == Zone::TrackBefore) { scrollBy(-(thumbMax_-thumbMin_), scrollTo); return true; }
+        if (z == Zone::TrackAfter)  { scrollBy(+(thumbMax_-thumbMin_), scrollTo); return true; }
         return false;
     }
 
@@ -237,165 +193,152 @@ private:
     std::function<void(float)> scrollToFn_;
     static constexpr float kArrowStep = 0.05f;
 
-    float trackStripW() const { return kTrackThick; }
-    float usableLen()   const { return std::max(1.f, stripLen_ - kArrowSize * 2.f); }
+    float usableLen() const { return std::max(1.f, stripLen_ - kArrowSize*2.f); }
 
     void thumbPixels(float& pxStart, float& pxLen) const {
         float ul  = usableLen();
-        pxLen     = std::max(kThumbMinLen, (thumbMax_ - thumbMin_) * ul);
+        pxLen     = std::max(kThumbMinLen, (thumbMax_-thumbMin_)*ul);
         float range = ul - pxLen;
-        pxStart   = kArrowSize
-                  + thumbMin_ / (1.f - (thumbMax_ - thumbMin_)) * range;
+        pxStart   = kArrowSize + thumbMin_ / (1.f-(thumbMax_-thumbMin_)) * range;
         if (!std::isfinite(pxStart)) pxStart = kArrowSize;
-        pxStart = std::clamp(pxStart, kArrowSize, kArrowSize + range);
+        pxStart = std::clamp(pxStart, kArrowSize, kArrowSize+range);
     }
 
     Zone hitTest(int sx, int sy) const {
         if (!visible_) return Zone::None;
-        float px = axis_ == Axis::Horizontal ? float(sx) : float(sy);
-        float py = axis_ == Axis::Horizontal ? float(sy) : float(sx);
-        float trackCross = axis_ == Axis::Horizontal ? stripY0_ : stripX0_;
-        if (py < trackCross || py >= trackCross + kTrackThick) return Zone::None;
-        float along = axis_ == Axis::Horizontal ? px - stripX0_ : px - stripY0_;
-        if (along < 0 || along > stripLen_) return Zone::None;
-        if (along < kArrowSize)               return Zone::ArrowStart;
-        if (along > stripLen_ - kArrowSize)   return Zone::ArrowEnd;
+        float px = axis_==Axis::Horizontal ? float(sx) : float(sy);
+        float py = axis_==Axis::Horizontal ? float(sy) : float(sx);
+        float trackCross = axis_==Axis::Horizontal ? stripY0_ : stripX0_;
+        if (py < trackCross || py >= trackCross+kTrackThick) return Zone::None;
+        float along = axis_==Axis::Horizontal ? px-stripX0_ : px-stripY0_;
+        if (along<0 || along>stripLen_) return Zone::None;
+        if (along < kArrowSize)              return Zone::ArrowStart;
+        if (along > stripLen_-kArrowSize)    return Zone::ArrowEnd;
         float ts, tl;
-        thumbPixels(ts, tl);
+        thumbPixels(ts,tl);
         if (along < ts)      return Zone::TrackBefore;
-        if (along < ts + tl) return Zone::Thumb;
+        if (along < ts+tl)   return Zone::Thumb;
         return Zone::TrackAfter;
     }
 
     void scrollBy(float delta, std::function<void(float)> fn) {
         if (!fn) return;
-        float span = thumbMax_ - thumbMin_;
-        fn(std::clamp(thumbMin_ + delta, 0.f, 1.f - span));
+        float span = thumbMax_-thumbMin_;
+        fn(std::clamp(thumbMin_+delta, 0.f, 1.f-span));
     }
 
-    // ── GL helpers (desktop only) ─────────────────────────────────────────
+    // ── Low-level GL helpers ──────────────────────────────────────────────
 #if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
-    static void pushRect(GLuint vao, GLuint vbo,
+
+    static void pushRect(GLuint /*prog*/, GLuint vao, GLuint vbo,
                          float x, float y, float w, float h) {
-        float v[] = { x,   y,   x+w, y,   x+w, y+h,
-                      x+w, y+h, x,   y+h, x,   y   };
+        float v[] = {
+            x,   y,   x+w, y,   x+w, y+h,
+            x+w, y+h, x,   y+h, x,   y
+        };
         glBindVertexArray(vao);
         glBindBuffer(GL_ARRAY_BUFFER, vbo);
         glBufferData(GL_ARRAY_BUFFER, sizeof(v), v, GL_DYNAMIC_DRAW);
         glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE,
-                              sizeof(float) * 2, nullptr);
+        glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,sizeof(float)*2,nullptr);
         glDisableVertexAttribArray(1);
         glDrawArrays(GL_TRIANGLES, 0, 6);
         glBindVertexArray(0);
     }
 
-    void drawThumb(GLuint vao, GLuint vbo) const {
+    void drawThumb(GLuint prog, GLuint vao, GLuint vbo) const {
         float ts, tl;
         thumbPixels(ts, tl);
-        float halfW = currentW_ * 0.5f;
-        float crossCenter = (axis_ == Axis::Horizontal)
-            ? stripY0_ + kTrackThick * 0.5f
-            : stripX0_ + kTrackThick * 0.5f;
-        const float cr = std::min(kCornerR, halfW);
-        float rLen = tl - cr * 2.f;
+        float halfW = currentW_*0.5f;
+        float crossCenter = (axis_==Axis::Horizontal)
+            ? stripY0_ + kTrackThick*0.5f
+            : stripX0_ + kTrackThick*0.5f;
+        float cr = std::min(kCornerR, halfW);
+
+        // Central body rectangle
+        float rLen = tl - cr*2.f;
         if (rLen > 0.f) {
             float rx, ry, rw, rh;
-            if (axis_ == Axis::Horizontal) {
-                rx = stripX0_ + ts + cr; ry = crossCenter - halfW;
-                rw = rLen;               rh = currentW_;
+            if (axis_==Axis::Horizontal) {
+                rx = stripX0_+ts+cr; ry = crossCenter-halfW;
+                rw = rLen;           rh = currentW_;
             } else {
-                rx = crossCenter - halfW; ry = stripY0_ + ts + cr;
-                rw = currentW_;           rh = rLen;
+                rx = crossCenter-halfW; ry = stripY0_+ts+cr;
+                rw = currentW_;         rh = rLen;
             }
-            pushRect(vao, vbo, rx, ry, rw, rh);
+            pushRect(prog, vao, vbo, rx, ry, rw, rh);
         }
-        for (int cap = 0; cap < 2; ++cap) {
-            float capAlong, capCross = crossCenter;
-            if (axis_ == Axis::Horizontal)
-                capAlong = (cap == 0) ? (stripX0_ + ts + cr)
-                                      : (stripX0_ + ts + tl - cr);
+
+        // Rounded caps (triangle fan)
+        for (int cap=0;cap<2;++cap) {
+            float capAlong;
+            float capCross = crossCenter;
+            if (axis_==Axis::Horizontal)
+                capAlong = cap==0 ? (stripX0_+ts+cr) : (stripX0_+ts+tl-cr);
             else
-                capAlong = (cap == 0) ? (stripY0_ + ts + cr)
-                                      : (stripY0_ + ts + tl - cr);
-            float startAngle = (axis_ == Axis::Horizontal)
-                ? (cap == 0 ?  3.14159265f * 0.5f : -3.14159265f * 0.5f)
-                : (cap == 0 ?  3.14159265f         :  0.f);
-            float sweep = 3.14159265f;
+                capAlong = cap==0 ? (stripY0_+ts+cr) : (stripY0_+ts+tl-cr);
+            float startA = (axis_==Axis::Horizontal)
+                ? (cap==0 ? float(M_PI)*0.5f : -float(M_PI)*0.5f)
+                : (cap==0 ? float(M_PI)      :  0.f);
+            float sweep = float(M_PI);
             std::vector<float> fan;
-            fan.reserve((kCapSegs + 2) * 2);
-            if (axis_ == Axis::Horizontal) {
-                fan.push_back(capAlong); fan.push_back(capCross);
-            } else {
-                fan.push_back(capCross); fan.push_back(capAlong);
-            }
-            for (int i = 0; i <= kCapSegs; ++i) {
-                float a  = startAngle + sweep * float(i) / kCapSegs;
-                float dx = cosf(a) * cr, dy = sinf(a) * cr;
-                if (axis_ == Axis::Horizontal) {
-                    fan.push_back(capAlong + dx); fan.push_back(capCross + dy);
-                } else {
-                    fan.push_back(capCross + dx); fan.push_back(capAlong + dy);
-                }
+            fan.reserve((kCapSegs+2)*2);
+            if (axis_==Axis::Horizontal) { fan.push_back(capAlong); fan.push_back(capCross); }
+            else                         { fan.push_back(capCross);  fan.push_back(capAlong); }
+            for (int i=0;i<=kCapSegs;++i) {
+                float a = startA + sweep*float(i)/float(kCapSegs);
+                float dx=cosf(a)*cr, dy=sinf(a)*cr;
+                if (axis_==Axis::Horizontal) { fan.push_back(capAlong+dx); fan.push_back(capCross+dy); }
+                else                         { fan.push_back(capCross+dx); fan.push_back(capAlong+dy); }
             }
             glBindVertexArray(vao);
             glBindBuffer(GL_ARRAY_BUFFER, vbo);
             glBufferData(GL_ARRAY_BUFFER,
-                         GLsizeiptr(fan.size() * sizeof(float)),
+                         GLsizeiptr(fan.size()*sizeof(float)),
                          fan.data(), GL_DYNAMIC_DRAW);
             glEnableVertexAttribArray(0);
-            glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE,
-                                  sizeof(float) * 2, nullptr);
+            glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,sizeof(float)*2,nullptr);
             glDisableVertexAttribArray(1);
-            glDrawArrays(GL_TRIANGLE_FAN, 0, int(fan.size() / 2));
+            glDrawArrays(GL_TRIANGLE_FAN, 0, int(fan.size()/2));
             glBindVertexArray(0);
         }
     }
 
-    void drawArrow(GLuint vao, GLuint vbo, bool isStart,
-                   int, int, GLuint, GLint, GLint) const {
+    void drawArrow(GLuint prog, GLuint vao, GLuint vbo,
+                   bool isStart, int glW, int glH) const {
         float ax, ay;
-        if (axis_ == Axis::Horizontal) {
-            ax = isStart ? stripX0_ : stripX0_ + stripLen_ - kArrowSize;
-            ay = stripY0_;
+        if (axis_==Axis::Horizontal) {
+            ax = isStart ? stripX0_ : stripX0_+stripLen_-kArrowSize;
+            ay = float(glH)-kTrackThick;
         } else {
-            ax = stripX0_;
-            ay = isStart ? stripY0_ : stripY0_ + stripLen_ - kArrowSize;
+            ax = float(glW)-kTrackThick;
+            ay = isStart ? stripY0_ : stripY0_+stripLen_-kArrowSize;
         }
-        pushRect(vao, vbo, ax, ay, kArrowSize,
-                 axis_ == Axis::Horizontal ? kTrackThick : kArrowSize);
-        float cx = ax + kArrowSize * 0.5f;
-        float cy = (axis_ == Axis::Vertical)
-                 ? ay + kArrowSize  * 0.5f
-                 : ay + kTrackThick * 0.5f;
-        float hs = 3.f;
+        pushRect(prog, vao, vbo, ax, ay, kArrowSize,
+                 axis_==Axis::Horizontal ? kTrackThick : kArrowSize);
+        // Arrow triangle
+        float cx_ = ax+kArrowSize*0.5f;
+        float cy_ = (axis_==Axis::Vertical)
+                  ? ay+kArrowSize*0.5f
+                  : ay+kTrackThick*0.5f;
+        float hs=3.f;
         float v[6];
-        if (axis_ == Axis::Horizontal) {
-            if (isStart) {
-                v[0]=cx+hs; v[1]=cy-hs; v[2]=cx-hs;
-                v[3]=cy;    v[4]=cx+hs; v[5]=cy+hs;
-            } else {
-                v[0]=cx-hs; v[1]=cy-hs; v[2]=cx+hs;
-                v[3]=cy;    v[4]=cx-hs; v[5]=cy+hs;
-            }
+        if (axis_==Axis::Horizontal) {
+            if (isStart) { v[0]=cx_+hs;v[1]=cy_-hs; v[2]=cx_-hs;v[3]=cy_; v[4]=cx_+hs;v[5]=cy_+hs; }
+            else         { v[0]=cx_-hs;v[1]=cy_-hs; v[2]=cx_+hs;v[3]=cy_; v[4]=cx_-hs;v[5]=cy_+hs; }
         } else {
-            if (isStart) {
-                v[0]=cx-hs; v[1]=cy+hs; v[2]=cx;
-                v[3]=cy-hs; v[4]=cx+hs; v[5]=cy+hs;
-            } else {
-                v[0]=cx-hs; v[1]=cy-hs; v[2]=cx;
-                v[3]=cy+hs; v[4]=cx+hs; v[5]=cy-hs;
-            }
+            if (isStart) { v[0]=cx_-hs;v[1]=cy_+hs; v[2]=cx_;   v[3]=cy_-hs; v[4]=cx_+hs;v[5]=cy_+hs; }
+            else         { v[0]=cx_-hs;v[1]=cy_-hs; v[2]=cx_;   v[3]=cy_+hs; v[4]=cx_+hs;v[5]=cy_-hs; }
         }
         glBindVertexArray(vao);
         glBindBuffer(GL_ARRAY_BUFFER, vbo);
         glBufferData(GL_ARRAY_BUFFER, sizeof(v), v, GL_DYNAMIC_DRAW);
         glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE,
-                              sizeof(float) * 2, nullptr);
+        glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,sizeof(float)*2,nullptr);
         glDisableVertexAttribArray(1);
         glDrawArrays(GL_TRIANGLES, 0, 3);
         glBindVertexArray(0);
     }
+
 #endif // desktop GL
 };

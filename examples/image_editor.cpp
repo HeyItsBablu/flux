@@ -1,6 +1,7 @@
 #pragma once
 
 #include "flux/flux.hpp"
+#include "flux/flux_glutil.hpp"
 #include "stb_image.h"
 #include "stb_image_write.h"
 
@@ -12,8 +13,6 @@
 #include <functional>
 #include <glad/glad.h>
 #include <memory>
-#include <nanovg.h>
-#include <nanovg_gl.h>
 #include <string>
 #include <vector>
 
@@ -44,9 +43,9 @@ struct EditParams {
   std::array<uint8_t, 256> lutB{};
 
   // ── HSL LUTs (360-entry) ──────────────────────────────────────────────────
-  std::array<uint8_t, 360> hslHue{}; // encoded: 0.5=neutral, shift ±30°
-  std::array<uint8_t, 360> hslSat{}; // encoded: 0.5=1× multiplier
-  std::array<uint8_t, 360> hslLum{}; // encoded: 0.5=neutral, shift ±1
+  std::array<uint8_t, 360> hslHue{};
+  std::array<uint8_t, 360> hslSat{};
+  std::array<uint8_t, 360> hslLum{};
 
   EditParams() {
     resetCurves();
@@ -69,13 +68,9 @@ struct EditParams {
 
 namespace cpu_edit {
 
-// ── Scalar helpers
-// ────────────────────────────────────────────────────────────
-
 static inline float clamp01(float v) {
   return v < 0.f ? 0.f : v > 1.f ? 1.f : v;
 }
-
 static inline float toLinear(float c) {
   c = clamp01(c);
   return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
@@ -88,9 +83,6 @@ static inline float toSRGB(float c) {
 static inline float luma(float r, float g, float b) {
   return 0.2126f * r + 0.7152f * g + 0.0722f * b;
 }
-
-// ── HSL conversion
-// ────────────────────────────────────────────────────────────
 
 struct HSL {
   float h, s, l;
@@ -113,7 +105,6 @@ static HSL rgb2hsl(float r, float g, float b) {
     h += 1.f;
   return {h, s, l};
 }
-
 static inline float hue2rgb(float p, float q, float t) {
   if (t < 0.f)
     t += 1.f;
@@ -127,7 +118,6 @@ static inline float hue2rgb(float p, float q, float t) {
     return p + (q - p) * (2.f / 3.f - t) * 6.f;
   return p;
 }
-
 static void hsl2rgb(HSL hsl, float &r, float &g, float &b) {
   if (hsl.s < 1e-5f) {
     r = g = b = hsl.l;
@@ -141,30 +131,19 @@ static void hsl2rgb(HSL hsl, float &r, float &g, float &b) {
   b = hue2rgb(p, q, hsl.h - 1.f / 3.f);
 }
 
-// ── Apply one LUT256 sample ────────────────────────────────────────────────
-
 static inline float applyLUT256(const uint8_t *lut, float v) {
   int idx = std::max(0, std::min(255, int(v * 255.f + 0.5f)));
   return lut[idx] / 255.f;
 }
-
-// ── Apply one HSL LUT360 sample ───────────────────────────────────────────
-
 static inline float sampleHSL360(const uint8_t *lut, float hueNorm) {
   int idx = std::max(0, std::min(359, int(hueNorm * 360.f)));
   return lut[idx] / 255.f;
 }
-
-// ── Shadow / highlight masks ───────────────────────────────────────────────
-
 static inline float shadowMask(float l) { return (1.f - l) * (1.f - l); }
 static inline float highlightMask(float l) { return l * l; }
 
-// ── Simple 3×3 blur (for sharpness / noise-reduce) ────────────────────────
-
 static void blurRow(const uint8_t *src, uint8_t *dst, int w, int ch, int y,
-                    int h) {
-  // Horizontal pass (clamp borders)
+                    int /*h*/) {
   for (int x = 0; x < w; ++x) {
     for (int c = 0; c < ch; ++c) {
       int x0 = std::max(0, x - 1), x1 = x, x2 = std::min(w - 1, x + 1);
@@ -178,11 +157,9 @@ static void blurRow(const uint8_t *src, uint8_t *dst, int w, int ch, int y,
 }
 
 static std::vector<uint8_t> boxBlur3(const uint8_t *src, int w, int h) {
-  // Horizontal pass
   std::vector<uint8_t> tmp(size_t(w) * h * 4);
   for (int y = 0; y < h; ++y)
     blurRow(src, tmp.data(), w, 4, y, h);
-  // Vertical pass
   std::vector<uint8_t> out(size_t(w) * h * 4);
   for (int x = 0; x < w; ++x) {
     for (int y = 0; y < h; ++y) {
@@ -194,19 +171,15 @@ static std::vector<uint8_t> boxBlur3(const uint8_t *src, int w, int h) {
             3;
         out[(y * w + x) * 4 + c] = uint8_t(v);
       }
-      out[(y * w + x) * 4 + 3] = src[(y * w + x) * 4 + 3]; // preserve alpha
+      out[(y * w + x) * 4 + 3] = src[(y * w + x) * 4 + 3];
     }
   }
   return out;
 }
 
-// ── Main per-pixel pipeline ────────────────────────────────────────────────
-
 static void processPixels(const uint8_t *orig, uint8_t *out, int w, int h,
                           const EditParams &p, unsigned noiseSeed = 42) {
   const int N = w * h;
-
-  // Pre-compute blurred version if sharpness or noise-reduce is active
   std::vector<uint8_t> blurred;
   bool needBlur = (p.sharpness > 0.001f || p.noiseReduce > 0.001f);
   if (needBlur)
@@ -229,16 +202,13 @@ static void processPixels(const uint8_t *orig, uint8_t *out, int w, int h,
   for (int i = 0; i < N; ++i) {
     int x = i % w, y = i / w;
     float r, g, b;
-
     if (needBlur) {
-      float blurR = blurred[i * 4 + 0] / 255.f;
-      float blurG = blurred[i * 4 + 1] / 255.f;
-      float blurB = blurred[i * 4 + 2] / 255.f;
-      float origR = orig[i * 4 + 0] / 255.f;
-      float origG = orig[i * 4 + 1] / 255.f;
-      float origB = orig[i * 4 + 2] / 255.f;
+      float blurR = blurred[i * 4 + 0] / 255.f,
+            blurG = blurred[i * 4 + 1] / 255.f,
+            blurB = blurred[i * 4 + 2] / 255.f;
+      float origR = orig[i * 4 + 0] / 255.f, origG = orig[i * 4 + 1] / 255.f,
+            origB = orig[i * 4 + 2] / 255.f;
       float nr = clamp01(p.noiseReduce);
-      // Blend toward blur then add unsharp mask
       r = clamp01((origR * (1.f - nr) + blurR * nr) +
                   p.sharpness * 0.6f * (origR - blurR));
       g = clamp01((origG * (1.f - nr) + blurG * nr) +
@@ -250,40 +220,27 @@ static void processPixels(const uint8_t *orig, uint8_t *out, int w, int h,
       g = orig[i * 4 + 1] / 255.f;
       b = orig[i * 4 + 2] / 255.f;
     }
-
-    // ── Linear space ──────────────────────────────────────────────────────
     r = toLinear(r);
     g = toLinear(g);
     b = toLinear(b);
-
-    // Exposure
     float expMul = std::pow(2.f, p.exposure);
     r *= expMul;
     g *= expMul;
     b *= expMul;
-
-    // Contrast (pivot at 0.18 grey)
     constexpr float pv = 0.18f;
     r = clamp01((r - pv) * (1.f + p.contrast) + pv);
     g = clamp01((g - pv) * (1.f + p.contrast) + pv);
     b = clamp01((b - pv) * (1.f + p.contrast) + pv);
-
-    // Highlights / Shadows
     {
       float l = luma(r, g, b);
-      float hm = highlightMask(l) * 0.7f;
-      float sm = shadowMask(l) * 0.7f;
+      float hm = highlightMask(l) * 0.7f, sm = shadowMask(l) * 0.7f;
       r = clamp01(r * (1.f + p.highlights * hm) * (1.f + p.shadows * sm));
       g = clamp01(g * (1.f + p.highlights * hm) * (1.f + p.shadows * sm));
       b = clamp01(b * (1.f + p.highlights * hm) * (1.f + p.shadows * sm));
     }
-
-    // Whites / Blacks
     r = clamp01(r * (1.f + p.whites * 0.3f) - p.blacks * 0.15f);
     g = clamp01(g * (1.f + p.whites * 0.3f) - p.blacks * 0.15f);
     b = clamp01(b * (1.f + p.whites * 0.3f) - p.blacks * 0.15f);
-
-    // RGB curve LUT
     r = applyLUT256(p.lutRGB.data(), r);
     g = applyLUT256(p.lutRGB.data(), g);
     b = applyLUT256(p.lutRGB.data(), b);
@@ -293,28 +250,20 @@ static void processPixels(const uint8_t *orig, uint8_t *out, int w, int h,
     r = clamp01(r);
     g = clamp01(g);
     b = clamp01(b);
-
-    // Temperature / Tint
     {
       float t = p.temperature * 0.15f, gt = p.tint * 0.10f;
       r = clamp01(r + t + gt);
       g = clamp01(g - gt);
       b = clamp01(b - t + gt);
     }
-
-    // Back to sRGB for saturation / HSL operations
     r = toSRGB(r);
     g = toSRGB(g);
     b = toSRGB(b);
-
-    // Saturation
     {
       HSL hsl = rgb2hsl(r, g, b);
       hsl.s = clamp01(hsl.s * (1.f + p.saturation));
       hsl2rgb(hsl, r, g, b);
     }
-
-    // Vibrance (targets unsaturated pixels more)
     {
       HSL hsl = rgb2hsl(r, g, b);
       float mask = (1.f - hsl.s) * (1.f - hsl.s);
@@ -324,54 +273,41 @@ static void processPixels(const uint8_t *orig, uint8_t *out, int w, int h,
     r = clamp01(r);
     g = clamp01(g);
     b = clamp01(b);
-
-    // HSL panel (per-hue adjustments)
     {
       HSL hsl = rgb2hsl(r, g, b);
-      float hueNorm = hsl.h; // 0..1
-
+      float hueNorm = hsl.h;
       float hShift =
           (sampleHSL360(p.hslHue.data(), hueNorm) - 0.5f) * (60.f / 360.f);
       hsl.h = std::fmod(hsl.h + hShift + 1.f, 1.f);
-
-      float sScale = sampleHSL360(p.hslSat.data(), hueNorm) * 2.f;
-      hsl.s = clamp01(hsl.s * sScale);
-
-      float lShift = (sampleHSL360(p.hslLum.data(), hueNorm) - 0.5f) * 2.f;
-      hsl.l = clamp01(hsl.l + lShift * 0.5f);
-
+      hsl.s = clamp01(hsl.s * sampleHSL360(p.hslSat.data(), hueNorm) * 2.f);
+      hsl.l = clamp01(hsl.l + (sampleHSL360(p.hslLum.data(), hueNorm) - 0.5f) *
+                                  2.f * 0.5f);
       hsl2rgb(hsl, r, g, b);
       r = clamp01(r);
       g = clamp01(g);
       b = clamp01(b);
     }
-
-    // Vignette
     {
-      float uvx = float(x) / float(w) * 2.f - 1.f;
-      float uvy = float(y) / float(h) * 2.f - 1.f;
+      float uvx = float(x) / float(w) * 2.f - 1.f,
+            uvy = float(y) / float(h) * 2.f - 1.f;
       float dist = uvx * uvx + uvy * uvy;
       float mask = std::min(1.f, std::max(0.f, (dist - 0.5f) / (1.6f - 0.5f)));
-      // smooth step approximation
       mask = mask * mask * (3.f - 2.f * mask);
       float vig = 1.f - mask * (-p.vignette) * 0.8f;
       r = clamp01(r * vig);
       g = clamp01(g * vig);
       b = clamp01(b * vig);
     }
-
-    // Grain
     if (p.grain > 0.001f) {
       float n = noiseAt(x * 5, y * 5);
       r = clamp01(r + n * p.grain * 0.12f);
       g = clamp01(g + n * p.grain * 0.12f);
       b = clamp01(b + n * p.grain * 0.12f);
     }
-
     out[i * 4 + 0] = uint8_t(r * 255.f + 0.5f);
     out[i * 4 + 1] = uint8_t(g * 255.f + 0.5f);
     out[i * 4 + 2] = uint8_t(b * 255.f + 0.5f);
-    out[i * 4 + 3] = orig[i * 4 + 3]; // preserve alpha
+    out[i * 4 + 3] = orig[i * 4 + 3];
   }
 }
 
@@ -498,6 +434,8 @@ public:
   std::function<void(const char *)> onStatusMessage;
   std::function<void(const HistogramData &)> onHistogramUpdated;
 
+  // ── Public API ────────────────────────────────────────────────────────────
+
   bool loadImage(const std::string &path) {
     FILE *f = FluxFile::open(path, "rb");
     if (!f) {
@@ -512,18 +450,15 @@ public:
       status("Failed to decode image.");
       return false;
     }
-
     imgW_ = w;
     imgH_ = h;
     originalPixels_.assign(data, data + size_t(w) * h * 4);
     stbi_image_free(data);
-
     uploadOriginal();
     params_.reset();
     buildIdentityLUTs();
     buildIdentityHSLLUTs();
     dirty_ = true;
-
     computeHistogram();
     if (onImageLoaded)
       onImageLoaded();
@@ -537,18 +472,15 @@ public:
     if (originalPixels_.empty() || !editFBO_)
       return false;
     renderEditPass(editFBO_);
-
     std::vector<uint8_t> buf(size_t(imgW_) * imgH_ * 4);
     glBindFramebuffer(GL_READ_FRAMEBUFFER, editFBO_);
     glReadPixels(0, 0, imgW_, imgH_, GL_RGBA, GL_UNSIGNED_BYTE, buf.data());
     glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-
     std::vector<uint8_t> flipped(buf.size());
     int stride = imgW_ * 4;
     for (int r = 0; r < imgH_; ++r)
       memcpy(flipped.data() + r * stride, buf.data() + (imgH_ - 1 - r) * stride,
              stride);
-
     bool ok = false;
     std::string ext = FluxFile::extension(path);
     if (ext == ".jpg" || ext == ".jpeg") {
@@ -575,10 +507,8 @@ public:
   bool hasImage() const { return !originalPixels_.empty(); }
   int imageWidth() const { return imgW_; }
   int imageHeight() const { return imgH_; }
-
   EditParams &params() { return params_; }
   const EditParams &params() const { return params_; }
-
   void markDirty() { dirty_ = true; }
 
   void uploadCurveLUTs(const std::array<uint8_t, 256> &rgb,
@@ -615,7 +545,6 @@ public:
     if (onHistogramUpdated)
       onHistogramUpdated(histData_);
   }
-
   const HistogramData &histogramData() const { return histData_; }
 
   // ── RenderSurface ─────────────────────────────────────────────────────────
@@ -639,54 +568,34 @@ public:
   void preRender() override {
     if (originalPixels_.empty() || !origTex_ || !editFBO_)
       return;
-
     if (!dirty_)
       return;
     dirty_ = false;
-
     renderEditPass(editFBO_);
-    nvgImageDirty_ = true;
   }
 
+  // render() — pure Canvas2D, zero NanoVG
   void render(Canvas2D &ctx) override {
     ctx.setFillColor(Color::fromRGB(20, 20, 22));
     ctx.fillRect(0.f, 0.f, float(ctx.width()), float(ctx.height()));
-    if (originalPixels_.empty())
+
+    if (originalPixels_.empty() || !editTex_)
       return;
 
-    NVGcontext *nvg = ctx.nvg();
-
-    if (!nvgCtx_ && nvg) {
-      nvgCtx_ = nvg;
-
-      nvgImageHandle_ =
-          nvgCreateImageRGBA(nvg, imgW_, imgH_, NVG_IMAGE_FLIPY, nullptr);
-      nvgImageDirty_ = true;
+    if (!editImage_) {
+      editImage_ = ctx.wrapTexture(editTex_, imgW_, imgH_);
     }
 
-    if (nvgImageHandle_ < 0)
-      return;
-
-    if (nvgImageDirty_ && nvgCtx_) {
-      nvgImageDirty_ = false;
-      pullFBOIntoNVGImage();
-    }
-
-    NVGpaint paint = nvgImagePattern(nvg, 0.f, 0.f, float(imgW_), float(imgH_),
-                                     0.f, nvgImageHandle_, 1.f);
-    nvgBeginPath(nvg);
-    nvgRect(nvg, 0.f, 0.f, float(imgW_), float(imgH_));
-    nvgFillPaint(nvg, paint);
-    nvgFill(nvg);
+    ctx.drawImage(editImage_, 0.f, 0.f, float(imgW_), float(imgH_));
   }
 
   void destroy() override {
 
-    if (nvgImageHandle_ >= 0 && nvgCtx_) {
-      nvgDeleteImage(nvgCtx_, nvgImageHandle_);
-      nvgImageHandle_ = -1;
+    if (editImage_) {
+      editImage_->texId = 0;
+      delete editImage_;
+      editImage_ = nullptr;
     }
-    nvgCtx_ = nullptr;
 
     auto del = [](GLuint &t) {
       if (t) {
@@ -726,15 +635,14 @@ public:
   bool needsContinuousRedraw() const override { return false; }
 
 private:
-  // ── State ─────────────────────────────────────────────────────────────────
   int viewW_ = 1, viewH_ = 1, imgW_ = 0, imgH_ = 0;
   EditParams params_;
   HistogramData histData_;
   std::vector<uint8_t> originalPixels_;
   bool dirty_ = false;
 
-  bool nvgImageDirty_ = false;
-  std::vector<uint8_t> fboReadback_;
+  // Canvas2DImage wrapper around editTex_ — no NVG handle needed
+  Canvas2DImage *editImage_ = nullptr;
 
   GLuint editProg_ = 0, quadVAO_ = 0, quadVBO_ = 0;
   GLuint origTex_ = 0, noiseTex_ = 0;
@@ -742,30 +650,11 @@ private:
   GLuint lutTexRGB_ = 0, lutTexR_ = 0, lutTexG_ = 0, lutTexB_ = 0;
   GLuint hslTexHue_ = 0, hslTexSat_ = 0, hslTexLum_ = 0;
 
-  // NanoVG wrapper around editTex_
-  NVGcontext *nvgCtx_ = nullptr;
-  int nvgImageHandle_ = -1;
-
-  void pullFBOIntoNVGImage() {
-    if (!editTex_ || nvgImageHandle_ < 0 || !nvgCtx_)
-      return;
-
-    size_t bytes = size_t(imgW_) * imgH_ * 4;
-    if (fboReadback_.size() != bytes)
-      fboReadback_.resize(bytes);
-
-    // Read the rendered pixels back from the GPU texture.
-    glBindTexture(GL_TEXTURE_2D, editTex_);
-    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE,
-                  fboReadback_.data());
-    glBindTexture(GL_TEXTURE_2D, 0);
-
-    nvgUpdateImage(nvgCtx_, nvgImageHandle_, fboReadback_.data());
-  }
+  // ── Private helpers ───────────────────────────────────────────────────────
 
   void buildShader() {
     editProg_ = glutil::linkProgram(kEditVert, kEditFrag);
-    assert(editProg_);
+    assert(editProg_ && "ImageEditSurface: shader link failed");
   }
 
   void buildQuad() {
@@ -785,10 +674,8 @@ private:
   }
 
   void uploadQuadForSize(float w, float h) {
-    float v[] = {
-        0.f, 0.f, 0.f, 0.f, w,   0.f, 1.f, 0.f, w,   h,   1.f, 1.f,
-        w,   h,   1.f, 1.f, 0.f, h,   0.f, 1.f, 0.f, 0.f, 0.f, 0.f,
-    };
+    float v[] = {0.f, 0.f, 0.f, 0.f, w,   0.f, 1.f, 0.f, w,   h,   1.f, 1.f,
+                 w,   h,   1.f, 1.f, 0.f, h,   0.f, 1.f, 0.f, 0.f, 0.f, 0.f};
     glBindBuffer(GL_ARRAY_BUFFER, quadVBO_);
     glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(v), v);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -880,13 +767,12 @@ private:
   }
 
   void rebuildEditFBO() {
-    // Invalidate NVG image — wrong size now
-    if (nvgImageHandle_ >= 0 && nvgCtx_) {
-      nvgDeleteImage(nvgCtx_, nvgImageHandle_);
-      nvgImageHandle_ = -1;
+    // Invalidate wrapper — texture id is about to change.
+    if (editImage_) {
+      editImage_->texId = 0;
+      delete editImage_;
+      editImage_ = nullptr;
     }
-    nvgImageDirty_ = false;
-
     if (editFBO_) {
       glDeleteFramebuffers(1, &editFBO_);
       editFBO_ = 0;
@@ -909,7 +795,9 @@ private:
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
                            editTex_, 0);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    // editImage_ recreated lazily in next render()
   }
+
   void setUniforms() {
     auto loc = [&](const char *n) {
       return glGetUniformLocation(editProg_, n);
@@ -965,15 +853,12 @@ private:
   void renderEditPass(GLuint fbo) {
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     glViewport(0, 0, imgW_, imgH_);
-
     float mvp[16];
     buildImageMVP(mvp);
-
     glUseProgram(editProg_);
     glUniformMatrix4fv(glGetUniformLocation(editProg_, "uMVP"), 1, GL_FALSE,
                        mvp);
     setUniforms();
-
     auto bind = [](int unit, GLuint tex) {
       glActiveTexture(GL_TEXTURE0 + unit);
       glBindTexture(GL_TEXTURE_2D, tex);
@@ -987,7 +872,6 @@ private:
     bind(6, hslTexHue_);
     bind(7, hslTexSat_);
     bind(8, hslTexLum_);
-
     uploadQuadForSize(float(imgW_), float(imgH_));
     glBindVertexArray(quadVAO_);
     glDrawArrays(GL_TRIANGLES, 0, 6);
@@ -1003,7 +887,6 @@ private:
 };
 
 class ImageEditorApp : public Widget {
-  // ── UI state ──────────────────────────────────────────────────────────────
   State<std::string> statusMsg{"Open an image to begin."};
   State<bool> hasImage{false};
   State<bool> beforeMode{false};
@@ -1012,14 +895,10 @@ class ImageEditorApp : public Widget {
   State<ToneCurveData> curveState{ToneCurveData{}};
   State<HSLData> hslState{HSLData{}};
 
-  // ── Tone ──────────────────────────────────────────────────────────────────
   State<double> sExposure{0.0}, sContrast{0.0}, sHighlights{0.0}, sShadows{0.0},
       sWhites{0.0}, sBlacks{0.0};
-  // ── Color ─────────────────────────────────────────────────────────────────
   State<double> sTemperature{0.0}, sTint{0.0}, sSaturation{0.0}, sVibrance{0.0};
-  // ── Detail ────────────────────────────────────────────────────────────────
   State<double> sSharpness{0.0}, sNoiseReduce{0.0};
-  // ── Effects ───────────────────────────────────────────────────────────────
   State<double> sVignette{0.0}, sGrain{0.0};
 
   std::shared_ptr<ImageEditSurface> surface_;
@@ -1036,7 +915,6 @@ class ImageEditorApp : public Widget {
       if (!surface_)
         return;
       surface_->params().*field = float(v);
-
       surface_->markDirty();
       if (canvasPtr_)
         canvasPtr_->redraw();
@@ -1045,8 +923,7 @@ class ImageEditorApp : public Widget {
 
 public:
   WidgetPtr build() override {
-    int screenW = 1920;
-    int screenH = 1080;
+    int screenW = 1920, screenH = 1080;
     int viewW = screenW - kPanelW;
     int viewH = screenH - kToolbarH - kHintsH;
 
@@ -1113,8 +990,7 @@ public:
       syncingZoom_ = false;
     });
 
-    // ── Colors
-    // ────────────────────────────────────────────────────────────────
+    // ── Theme colours ─────────────────────────────────────────────────────
     Color kBg1 = Color::fromRGB(17, 17, 27);
     Color kBg2 = Color::fromRGB(24, 24, 37);
     Color kBorder = Color::fromRGB(49, 50, 68);
@@ -1169,9 +1045,19 @@ public:
                     })
           ->setSpacing(0);
     };
+    auto modeBtn = [&](const std::string &lbl, Color col,
+                       std::function<void()> fn) -> WidgetPtr {
+      return GestureDetector(
+                 Container(Text(lbl)->setFontSize(9)->setTextColor(col))
+                     ->setBackgroundColor(Color::fromRGB(24, 24, 34))
+                     ->setBorderRadius(4)
+                     ->setPaddingAll(6, 3, 6, 3)
+                     ->setBorderWidth(1)
+                     ->setBorderColor(kBorder))
+          ->setOnTap(fn);
+    };
 
-    // ──   HISTOGRAM
-    // ─────────────────────────────────────────────────────────
+    // ── Histogram ─────────────────────────────────────────────────────────
     auto histSection = cardWrap(
         Column({
                    Row({
@@ -1202,8 +1088,7 @@ public:
                })
             ->setSpacing(0));
 
-    // ──   TONE CURVE
-    // ────────────────────────────────────────────────────────
+    // ── Tone curve ────────────────────────────────────────────────────────
     auto curveWidget =
         ToneCurve(258, 220)
             ->setShowHistogram(true)
@@ -1220,18 +1105,6 @@ public:
                 canvasPtr_->redraw();
             });
     curveWidgetPtr_ = curveWidget.get();
-
-    auto modeBtn = [&](const std::string &lbl, Color col,
-                       std::function<void()> fn) -> WidgetPtr {
-      return GestureDetector(
-                 Container(Text(lbl)->setFontSize(9)->setTextColor(col))
-                     ->setBackgroundColor(Color::fromRGB(24, 24, 34))
-                     ->setBorderRadius(4)
-                     ->setPaddingAll(6, 3, 6, 3)
-                     ->setBorderWidth(1)
-                     ->setBorderColor(kBorder))
-          ->setOnTap(fn);
-    };
 
     auto curveModeRow =
         Row({
@@ -1271,8 +1144,7 @@ public:
             })
             ->setSpacing(0));
 
-    // ──   TONE SLIDERS
-    // ──────────────────────────────────────────────────────
+    // ── Tone sliders ──────────────────────────────────────────────────────
     auto toneSection = cardWrap(
         Column({
                    sectionLabel("TONE"),
@@ -1296,8 +1168,7 @@ public:
                })
             ->setSpacing(0));
 
-    // ──   COLOR
-    // ─────────────────────────────────────────────────────────────
+    // ── Color sliders ─────────────────────────────────────────────────────
     auto colorSection = cardWrap(
         Column({
                    sectionLabel("COLOR"),
@@ -1316,8 +1187,7 @@ public:
                })
             ->setSpacing(0));
 
-    // ──   HSL / COLOR MIX
-    // ───────────────────────────────────────────────────
+    // ── HSL panel ─────────────────────────────────────────────────────────
     auto hslWidget =
         HSLPanel(258)
             ->setData(hslState)
@@ -1360,8 +1230,7 @@ public:
                })
             ->setSpacing(0));
 
-    // ──   DETAIL
-    // ────────────────────────────────────────────────────────────
+    // ── Detail ────────────────────────────────────────────────────────────
     auto detailSection = cardWrap(
         Column({
                    sectionLabel("DETAIL"),
@@ -1373,8 +1242,7 @@ public:
                })
             ->setSpacing(0));
 
-    // ──   EFFECTS
-    // ───────────────────────────────────────────────────────────
+    // ── Effects ───────────────────────────────────────────────────────────
     auto effectsSection =
         cardWrap(Column({
                             sectionLabel("EFFECTS"),
@@ -1387,8 +1255,7 @@ public:
                         })
                      ->setSpacing(0));
 
-    // ──   PANEL
-    // ─────────────────────────────────────────────────────────────
+    // ── Right panel ───────────────────────────────────────────────────────
     auto panel = Container(ListView({
                                         histSection,
                                         SizedBox(0, 6),
@@ -1409,8 +1276,7 @@ public:
                      ->setBackgroundColor(kBg1)
                      ->setPaddingAll(10, 10, 10, 10);
 
-    // ──   TOOLBAR
-    // ───────────────────────────────────────────────────────────
+    // ── Toolbar ───────────────────────────────────────────────────────────
     auto mkBtn = [&](const std::string &lbl, Color c,
                      std::function<void()> fn) -> WidgetPtr {
       return Button(lbl, fn)
@@ -1578,8 +1444,7 @@ public:
             ->setPaddingAll(10, 7, 10, 7)
             ->setHeight(kToolbarH);
 
-    // ──   HINTS
-    // ─────────────────────────────────────────────────────────────
+    // ── Hints bar ─────────────────────────────────────────────────────────
     auto hints =
         Container(Row({
                           Text("MMB/Space: Pan")
