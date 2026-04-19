@@ -9,15 +9,13 @@
 #include <unordered_map>
 #include <vector>
 
-
-
 #if defined(__linux__) && !defined(__ANDROID__)
 class CanvasWidget;
+class CairoCompositor;   
 
 #  include <glad/glad.h>
 #  include <SDL2/SDL.h>
-#  include <nanovg.h>
-
+#  include "flux_canvas2d.hpp"  
 #endif
 
 // ============================================================================
@@ -125,22 +123,21 @@ public:
 
     void handleAndroidEvent(const AInputEvent* event);
     void pollTimers();
-        void reinitSurface(ANativeWindow* window);
+    void reinitSurface(ANativeWindow* window);
     void destroySurface();
 #endif
     void updateClientSize();
 
 private:
     // ── Shared ───────────────────────────────────────────────────────────────
-    AppInstance hInstance    = nullptr;
-    int         cachedWidth  = 0;
-    int         cachedHeight = 0;
+    AppInstance hInstance   = nullptr;
+    int cachedWidth         = 0;
+    int cachedHeight        = 0;
 
     // =========================================================================
     // Win32
     // =========================================================================
 #ifdef _WIN32
-
     NativeWindow hwnd        = nullptr;
     BackBuffer   backBuffer;
     ULONG_PTR    gdiplusToken = 0;
@@ -148,7 +145,6 @@ private:
     void shutdownGdiplus();
     static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg,
                                        WPARAM wParam, LPARAM lParam);
-
 #endif // _WIN32
 
     // =========================================================================
@@ -160,16 +156,18 @@ private:
 
     SDL_Window*   nativeHandle  = nullptr;
     SDL_GLContext glContext_     = nullptr;
-    NVGcontext*   nvg_          = nullptr;
 
-    // Cairo-to-texture compositing state
-    int                  cairoTexture_   = -1;   // NVG image handle for Cairo layer
-    std::vector<uint8_t> cairoPixelBuf_;          // persistent BGRA→RGBA conversion buffer
 
-    int logicalWidth_= 0;
-    int logicalHeight_ = 0;
-    CanvasWidget* capturedCanvas_ = nullptr;
-    CanvasWidget* focusedCanvas_ = nullptr;
+    Canvas2DGL*     canvasGL_        = nullptr;
+
+    CairoCompositor* cairoCompositor_ = nullptr;
+
+
+    int                  logicalWidth_  = 0;
+    int                  logicalHeight_ = 0;
+    std::vector<uint8_t> cairoPixelBuf_;   // kept for API compat (unused in new path)
+    CanvasWidget*        capturedCanvas_ = nullptr;
+    CanvasWidget*        focusedCanvas_  = nullptr;
     bool        running      = false;
     bool        mouseCapture = false;
     bool        dirty        = false;
@@ -177,22 +175,19 @@ private:
 
     std::unordered_map<TimerID, SDL_TimerID> sdlTimerMap;
 
-    // ── Canvas widget registry ────────────────────────────────────────────
-    // All live CanvasWidgets register here so the compositor and event
-    // router can reach them without walking the full widget tree.
+    // ── Canvas widget registry ────────────────────────────────────────────────
     std::vector<CanvasWidget*> canvasWidgets_;
 
     void registerCanvas  (CanvasWidget* c);
     void unregisterCanvas(CanvasWidget* c);
     CanvasWidget* hitTestCanvas(int sx, int sy);
 
-    // ── GL/NVG accessors (for CanvasWidget) ──────────────────────────────
 public:
-    NVGcontext* getNVGContext() const { return nvg_; }
+
     void registerCanvas_public  (CanvasWidget* c) { registerCanvas(c);   }
     void unregisterCanvas_public(CanvasWidget* c) { unregisterCanvas(c); }
-private:
 
+private:
     void handleSDLEvent(const SDL_Event& e);
 
 #endif // __linux__
@@ -201,7 +196,6 @@ private:
     // Android
     // =========================================================================
 #ifdef __ANDROID__
-
     struct EGLState;
 
     struct TimerEntry {
@@ -217,7 +211,6 @@ private:
     EGLState*      eglState     = nullptr;
 
     std::unordered_map<TimerID, TimerEntry> androidTimers;
-
 #endif // __ANDROID__
 };
 
