@@ -12,10 +12,11 @@
 #if defined(__linux__) && !defined(__ANDROID__)
 class CanvasWidget;
 class CairoCompositor;   
+class Canvas2DGL; 
 
 #  include <glad/glad.h>
 #  include <SDL2/SDL.h>
-#  include "flux_canvas2d.hpp"  
+ 
 #endif
 
 // ============================================================================

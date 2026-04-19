@@ -11,7 +11,7 @@
 // Thread-safety: must be called on the GL thread only.
 // ============================================================================
 
-#include "flux_core.hpp"   // Color { uint8_t r,g,b,a }
+#include "flux_platform.hpp"
 #include <string>
 #include <vector>
 #include <memory>

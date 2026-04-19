@@ -136,10 +136,17 @@ public:
         needsLayout = false;
     }
 
-    void render(GraphicsContext& /*ctx*/, FontCache&) override {
-   
-        needsPaint = false;
+void render(GraphicsContext& ctx, FontCache&) override {
+    if (ctx.cr) {
+        cairo_save(ctx.cr);
+        cairo_set_operator(ctx.cr, CAIRO_OPERATOR_CLEAR);
+        cairo_rectangle(ctx.cr, double(x), double(y),
+                        double(width), double(height));
+        cairo_fill(ctx.cr);
+        cairo_restore(ctx.cr);
     }
+    needsPaint = false;
+}
 
     void onDetach() override {
         destroyGLResources();
