@@ -1,25 +1,182 @@
-// flux/flux_canvas.hpp
 #pragma once
 
 // ============================================================================
-// flux_canvas.hpp
-// Platform-dispatch header for CanvasWidget and RenderSurface.
-// Always include this — never include platform files directly.
+// flux_canvas.hpp  —  CanvasWidget shared declaration
+//
+// Platform implementations live in:
+//   flux_canvas_win32.cpp   (_WIN32)
+//   flux_canvas_linux.cpp   (__linux__ && !__ANDROID__)
+//   flux_canvas_android.cpp (__ANDROID__)
 // ============================================================================
 
-// These two have zero GL and zero platform dependencies — safe here.
+#include "flux_platform.hpp"
+#include "flux_widget.hpp"
+#include "flux_keys.hpp"
+#include "flux_core.hpp"
+#include "flux_canvas2d.hpp"
+#include "flux_scrollbar.hpp"
 #include "flux_render_surface.hpp"
 #include "flux_canvas_types.hpp"
+#include "flux_glutil.hpp"
 
-// flux_glutil.hpp and flux_scrollbar.hpp need GLAD which is platform-specific.
-// They are included inside each platform file AFTER glad is included there.
+#include <chrono>
+#include <functional>
+#include <memory>
 
-#ifdef _WIN32
-  #include "platform/win32/flux_canvas_win32.hpp"
-#elif defined(__linux__) && !defined(__ANDROID__)
-  #include "platform/linux/flux_canvas_linux.hpp"
- #elif defined(__ANDROID__)
-   #include "platform/android/flux_canvas_android.hpp"
-#else
-  #error "flux_canvas.hpp: unsupported platform"
+// ── Platform-specific GL / windowing headers included by each .cpp ────────────
+// (not included here so this header stays platform-neutral)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CanvasWidget
+//
+// A Widget that hosts a RenderSurface rendered via OpenGL.
+// Supports pan/zoom viewport, fade-in/out scrollbars, and optional
+// continuous-redraw mode.
+//
+// Usage (same API on all platforms):
+//
+//   auto canvas = Canvas(800, 600);
+//   canvas->setSurface<MyRenderSurface>(...);
+//   canvas->setViewportEnabled(true);
+//   canvas->setScrollbarsEnabled(true);
+// ─────────────────────────────────────────────────────────────────────────────
+
+class CanvasWidget : public Widget {
+public:
+    static constexpr float kSBThick = CustomScrollbar::kTrackThick;
+
+    // ── Construction / destruction ────────────────────────────────────────────
+    explicit CanvasWidget();
+    ~CanvasWidget();
+
+    // ── Configuration ─────────────────────────────────────────────────────────
+
+    std::shared_ptr<CanvasWidget> setViewportEnabled(bool e);
+    std::shared_ptr<CanvasWidget> setScrollbarsEnabled(bool e);
+    bool                          scrollbarsEnabled() const;
+
+    template<typename T, typename... A>
+    std::shared_ptr<T> setSurface(A&&... a) {
+        auto s = std::make_shared<T>(std::forward<A>(a)...);
+        pendingSurface_ = s;
+        return s;
+    }
+
+    RenderSurface*  getSurface() const;
+    const Viewport& viewport()   const;
+    Viewport&       viewport();
+
+    std::shared_ptr<CanvasWidget> setSize(int w, int h);
+    std::shared_ptr<CanvasWidget> setCanvasSize(int w, int h);
+    std::shared_ptr<CanvasWidget> redraw();
+
+    // ── Callbacks ─────────────────────────────────────────────────────────────
+    std::function<void(float zoom)>   onViewportChanged;
+    std::function<void(int w, int h)> onGLResize;
+
+    // ── Widget overrides ──────────────────────────────────────────────────────
+    void computeLayout(GraphicsContext& ctx,
+                       const BoxConstraints& c, FontCache&) override;
+    void render(GraphicsContext& ctx, FontCache&) override;
+    void onDetach() override;
+    void markNeedsPaint() override;
+
+    // ── Shared state (all platforms) ──────────────────────────────────────────
+    // Note: public so platform .cpp free functions (GLProc, tickAndRender, etc.)
+    // can access them directly, matching the original single-file design.
+
+    bool viewportEnabled_   = true;
+    bool scrollbarsEnabled_ = true;
+
+    std::shared_ptr<RenderSurface> activeSurface_;
+    std::shared_ptr<RenderSurface> pendingSurface_;
+
+    Viewport vp_;
+    int canvasW_ = 512;
+    int canvasH_ = 512;
+
+    CustomScrollbar hBar_;
+    CustomScrollbar vBar_;
+
+    using Clock = std::chrono::steady_clock;
+    Clock::time_point lastTick_ = Clock::now();
+    double frameDt_ = 0.0;
+
+    Canvas2DGL* canvasGL_ = nullptr;
+
+    // ── Shared helpers ────────────────────────────────────────────────────────
+
+    std::shared_ptr<CanvasWidget> ptr() {
+        return std::static_pointer_cast<CanvasWidget>(shared_from_this());
+    }
+
+    void viewportDims(int glW, int glH, int& vpW, int& vpH) const;
+    void updateViewportSize(int glW, int glH);
+    void updateSBGeometry(int glW, int glH);
+
+    void beginPan(int sx, int sy);
+    void continuePan(int sx, int sy);
+    void pokeScrollbars();
+
+    void applyHScrollFraction(float thumbMin);
+    void applyVScrollFraction(float thumbMin);
+
+    void activatePendingSurface();
+
+    // ── Pan state ─────────────────────────────────────────────────────────────
+    bool  panning_    = false;
+    int   panStartSX_ = 0, panStartSY_ = 0;
+    float panStartOX_ = 0, panStartOY_ = 0;
+
+    // ── Scrollbar GL program (shared structure, created per platform) ─────────
+    GLuint sbProg_  = 0;
+    GLint  sbMVP_   = -1;
+    GLint  sbColor_ = -1;
+    GLuint sbVAO_   = 0;
+    GLuint sbVBO_   = 0;
+
+    void ensureSBProgram(const char* vert, const char* frag);
+    void renderScrollbarsGL(int glW, int glH, double dt);
+    void renderSBCorner(int glW, int glH);
+
+    // ── Android-only ──────────────────────────────────────────────────────────
+#ifdef __ANDROID__
+    static void tickAllGL(Widget* root, int windowW, int windowH, float dpi);
+    bool handleMouseDown(int mx, int my);
+    bool handleMouseMove(int mx, int my);
+    bool handleMouseUp  (int mx, int my);
+    bool hitTest(int mx, int my) const;
 #endif
+
+    // ── Linux-only ────────────────────────────────────────────────────────────
+#if defined(__linux__) && !defined(__ANDROID__)
+#include <SDL2/SDL.h>
+    void setCanvasGL(Canvas2DGL* gl);
+    void onWindowResize(int newW, int newH);
+    void preRenderPass();
+    void glRenderPass();
+
+    bool isInitialized() const;
+    bool needsRepaint()  const;
+    bool containsPoint(int wx, int wy) const;
+
+    void onMouseLeave();
+    void handleSDLEvent(const SDL_Event& e);
+
+    void onMouseButtonDown(const SDL_MouseButtonEvent& e);
+    void onMouseButtonUp  (const SDL_MouseButtonEvent& e);
+    void onMouseMotion    (const SDL_MouseMotionEvent& e);
+    void onMouseWheel     (const SDL_MouseWheelEvent&  e);
+    void onKeyDownEvent   (const SDL_KeyboardEvent&    e);
+    void onKeyUpEvent     (const SDL_KeyboardEvent&    e);
+#endif
+};
+
+// ── Factory helpers ───────────────────────────────────────────────────────────
+
+inline std::shared_ptr<CanvasWidget> Canvas() {
+    return std::make_shared<CanvasWidget>();
+}
+inline std::shared_ptr<CanvasWidget> Canvas(int w, int h) {
+    return std::make_shared<CanvasWidget>()->setSize(w, h);
+}
