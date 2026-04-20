@@ -18,8 +18,8 @@ extern NVGcontext* FluxAndroid_getVG();
 
 static float s_dpiScale = 1.0f;
 
-void  FluxAndroid_setDpiScale(float scale) { s_dpiScale = scale; }
-float FluxAndroid_getDpiScale()            { return s_dpiScale; }
+extern void  FluxAndroid_setDpiScale(float scale);
+extern float FluxAndroid_getDpiScale();
 
 // ============================================================================
 // Font file resolution

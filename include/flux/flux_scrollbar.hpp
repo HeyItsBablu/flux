@@ -13,10 +13,10 @@
 
 #if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
 #  include <glad/glad.h>
-#  include "flux_glutil.hpp"
 #elif defined(__ANDROID__)
 #  include <GLES3/gl3.h>
 #endif
+#include "flux_glutil.hpp"
 
 #ifndef M_PI
 #  define M_PI 3.14159265358979323846
@@ -45,7 +45,7 @@ public:
     // ── GL render — called by CanvasWidget::renderScrollbarsGL() ─────────
     // prog must be the flat-colour 2D program (see flux_scrollbar_gl.hpp).
     // uMVP / uColor are uniform locations within prog.
-#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
+#if defined(_WIN32) || defined(__linux__)
     void render(GLuint prog, GLuint vao, GLuint vbo,
                 GLint uMVP, GLint uColor, int glW, int glH) const {
         if (!visible_ || alpha_ < 0.005f) return;
@@ -228,7 +228,7 @@ private:
     }
 
     // ── Low-level GL helpers ──────────────────────────────────────────────
-#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
+#if defined(_WIN32) || defined(__linux__)
 
     static void pushRect(GLuint /*prog*/, GLuint vao, GLuint vbo,
                          float x, float y, float w, float h) {

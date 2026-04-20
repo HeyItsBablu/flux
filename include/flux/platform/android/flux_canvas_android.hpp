@@ -12,17 +12,13 @@
 #include "../../flux_scrollbar.hpp"
 #include "../../flux_render_surface.hpp"
 #include "../../flux_canvas_types.hpp"
+#include "../../flux_glutil.hpp"
 
-#include <GLES2/gl2.h>
+#include <GLES3/gl3.h>
 #include <EGL/egl.h>
 #include <android/log.h>
-
-// Only include nanovg.h for NVGcontext* — never nanovg_gl.h here.
-// nanovg_gl.h is included exactly once in flux_canvas2d_nvg.cpp with
-// NANOVG_GLES2_IMPLEMENTATION defined. Including it here would fire the
-// include guard and poison every other TU that needs nanovg_gl.h.
 #include "nanovg.h"
-#include <android/log.h>
+#include "nanovg_gl.h"
 
 #include <algorithm>
 #include <cassert>
@@ -36,35 +32,42 @@
 #define CANVAS_LOGI(...) __android_log_print(ANDROID_LOG_INFO,  "CanvasWidget", __VA_ARGS__)
 #define CANVAS_LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "CanvasWidget", __VA_ARGS__)
 
-// ── Global NanoVG accessor (defined in main_android.cpp) ─────────────────────
-extern NVGcontext* FluxAndroid_getVG();
-extern float       FluxAndroid_getDpiScale();
+extern float        FluxAndroid_getDpiScale();
+extern Canvas2DGL*  FluxAndroid_getCanvasGL();
+extern NVGcontext*  FluxAndroid_getVG();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CanvasWidget
+//
+// Architecture:
+//   Pass 1 (tickAllGL)  – RenderSurface renders into a per-widget RGBA FBO.
+//   Pass 2 (NanoVG)     – render() blits the FBO texture via nvgImagePattern,
+//                         so NanoVG composites it naturally with the rest of UI.
+//
+// No stencil tricks, no shared framebuffer fighting.
+// ─────────────────────────────────────────────────────────────────────────────
 
 class CanvasWidget : public Widget {
 public:
-    static constexpr float kSBThick = CustomScrollbar::kTrackThick;
-
+    // ── Construction / destruction ────────────────────────────────────────
     explicit CanvasWidget()
-        : hBar_(CustomScrollbar::Axis::Horizontal),
-          vBar_(CustomScrollbar::Axis::Vertical)
+            : hBar_(CustomScrollbar::Axis::Horizontal)
+            , vBar_(CustomScrollbar::Axis::Vertical)
     {
         autoWidth = autoHeight = false;
         width  = 400;
         height = 300;
     }
 
-    ~CanvasWidget() { destroySurface(); }
+    ~CanvasWidget() { destroyGL(); }
 
     // ── Configuration ─────────────────────────────────────────────────────
 
     std::shared_ptr<CanvasWidget> setViewportEnabled(bool e) {
-        viewportEnabled_ = e;
-        return ptr();
+        viewportEnabled_ = e; return ptr();
     }
     std::shared_ptr<CanvasWidget> setScrollbarsEnabled(bool e) {
-        scrollbarsEnabled_ = e;
-        scheduleRepaint();
-        return ptr();
+        scrollbarsEnabled_ = e; return ptr();
     }
     bool scrollbarsEnabled() const { return scrollbarsEnabled_; }
 
@@ -93,7 +96,6 @@ public:
     }
     std::shared_ptr<CanvasWidget> redraw() { markNeedsPaint(); return ptr(); }
 
-    // ── Callbacks ─────────────────────────────────────────────────────────
     std::function<void(float zoom)>   onViewportChanged;
     std::function<void(int w, int h)> onGLResize;
 
@@ -106,60 +108,73 @@ public:
         needsLayout = false;
     }
 
+    // Called during the NanoVG pass — blits the FBO texture into the UI.
     void render(GraphicsContext& /*ctx*/, FontCache&) override {
-        // Ensure surface is initialized before first draw.
-        ensureSurface();
-        tickAndRender();
+        NVGcontext* vg = FluxAndroid_getVG();
+        if (!vg || nvgImage_ == -1) { needsPaint = false; return; }
+
+        // nvgImagePattern works in logical pixels (NanoVG is scaled by dpi).
+        NVGpaint paint = nvgImagePattern(vg,
+                                         float(x), float(y),
+                                         float(width), float(height),
+                                         0.f, nvgImage_, 1.f);
+
+        nvgBeginPath(vg);
+        nvgRect(vg, float(x), float(y), float(width), float(height));
+        nvgFillPaint(vg, paint);
+        nvgFill(vg);
+
         needsPaint = false;
     }
 
     void onDetach() override {
-        destroySurface();
+        destroyGL();
         Widget::onDetach();
     }
 
     void markNeedsPaint() override {
         Widget::markNeedsPaint();
-        //scheduleRepaint();
+        needsPaint = true;
     }
 
-    // ── Touch / input ─────────────────────────────────────────────────────
-    // Android input comes through FluxUI callbacks → widget handleMouse* chain.
-    // We convert logical coords to canvas coords and forward to the surface.
+    // ── Pass 1: called from android_main before NanoVG ────────────────────
+
+    static void tickAllGL(Widget* root, int windowW, int windowH, float dpi) {
+        if (!root) return;
+        if (auto* cw = dynamic_cast<CanvasWidget*>(root))
+            cw->glRenderPass(windowW, windowH, dpi);
+        for (auto& child : root->children)
+            tickAllGL(child.get(), windowW, windowH, dpi);
+    }
+
+    // ── Touch input ───────────────────────────────────────────────────────
 
     bool handleMouseDown(int mx, int my) override {
         if (!hitTest(mx, my)) return false;
-        int lx = mx - x, ly = my - y;   // widget-local coords
-
-        bool hC = hBar_.onMouseDown(lx, ly, [this](float t){ applyHScrollFraction(t); });
-        bool vC = !hC && vBar_.onMouseDown(lx, ly, [this](float t){ applyVScrollFraction(t); });
-
+        int lx = mx - x, ly = my - y;
+        bool hC = hBar_.onMouseDown(lx, ly,
+                                    [this](float t){ applyHScrollFraction(t); });
+        bool vC = !hC && vBar_.onMouseDown(lx, ly,
+                                           [this](float t){ applyVScrollFraction(t); });
         if (!hC && !vC) {
-            if (viewportEnabled_) {
-                beginPan(lx, ly);
-            } else if (activeSurface_) {
-                auto [cx,cy] = vp_.screenToCanvas(float(lx), float(ly));
+            if (viewportEnabled_) beginPan(lx, ly);
+            else if (activeSurface_) {
+                auto [cx, cy] = vp_.screenToCanvas(float(lx), float(ly));
                 activeSurface_->onMouseDown(cx, cy);
             }
         }
-        scheduleRepaint();
         return true;
     }
 
     bool handleMouseMove(int mx, int my) override {
         if (!hitTest(mx, my) && !panning_) return false;
         int lx = mx - x, ly = my - y;
-
         bool hDrag = hBar_.onMouseMove(lx, ly);
         bool vDrag = vBar_.onMouseMove(lx, ly);
-        scheduleRepaint();
-
         if (hDrag || vDrag) return true;
-
-        if (panning_) {
-            continuePan(lx, ly);
-        } else if (activeSurface_) {
-            auto [cx,cy] = vp_.screenToCanvas(float(lx), float(ly));
+        if (panning_) continuePan(lx, ly);
+        else if (activeSurface_) {
+            auto [cx, cy] = vp_.screenToCanvas(float(lx), float(ly));
             activeSurface_->onMouseMove(cx, cy);
         }
         return true;
@@ -167,35 +182,24 @@ public:
 
     bool handleMouseUp(int mx, int my) override {
         int lx = mx - x, ly = my - y;
-
         bool hR = hBar_.onMouseUp(lx, ly);
         bool vR = vBar_.onMouseUp(lx, ly);
-
         if (!hR && !vR) {
-            if (panning_) {
-                panning_ = false;
-            } else if (activeSurface_) {
-                auto [cx,cy] = vp_.screenToCanvas(float(lx), float(ly));
+            if (panning_) panning_ = false;
+            else if (activeSurface_) {
+                auto [cx, cy] = vp_.screenToCanvas(float(lx), float(ly));
                 activeSurface_->onMouseUp(cx, cy);
             }
         }
-        scheduleRepaint();
         return true;
     }
 
 private:
     // ── State ─────────────────────────────────────────────────────────────
+
     bool viewportEnabled_   = true;
     bool scrollbarsEnabled_ = true;
-    bool initialized_       = false;
-
-    std::shared_ptr<CanvasWidget> ptr() {
-        return std::static_pointer_cast<CanvasWidget>(shared_from_this());
-    }
-
-    bool hitTest(int mx, int my) const {
-        return mx >= x && mx < x + width && my >= y && my < y + height;
-    }
+    bool glInitialized_     = false;
 
     std::shared_ptr<RenderSurface> activeSurface_, pendingSurface_;
     Viewport vp_;
@@ -205,10 +209,265 @@ private:
 
     using Clock = std::chrono::steady_clock;
     Clock::time_point lastTick_ = Clock::now();
+    double frameDt_ = 0.0;
 
+    Canvas2DGL* canvasGL_ = nullptr;
+
+    // ── FBO ───────────────────────────────────────────────────────────────
+    GLuint fboId_    = 0;
+    GLuint fboTex_   = 0;
+    GLuint fboDepth_ = 0;
+    int    fboW_     = 0;
+    int    fboH_     = 0;
+    int    nvgImage_ = -1;   // NanoVG handle wrapping fboTex_
+
+    // ── Scrollbar GL program (drawn into FBO) ─────────────────────────────
+    static const char* kSBVert() {
+        return
+                "#version 300 es\n"
+                "precision mediump float;\n"
+                "layout(location=0) in vec2 aPos;\n"
+                "uniform mat4 uMVP;\n"
+                "void main(){ gl_Position = uMVP * vec4(aPos, 0.0, 1.0); }\n";
+    }
+    static const char* kSBFrag() {
+        return
+                "#version 300 es\n"
+                "precision mediump float;\n"
+                "out vec4 fragColor;\n"
+                "uniform vec4 uColor;\n"
+                "void main(){ fragColor = uColor; }\n";
+    }
+
+    GLuint sbProg_  = 0;
+    GLint  sbMVP_   = -1;
+    GLint  sbColor_ = -1;
+    GLuint sbVAO_   = 0;
+    GLuint sbVBO_   = 0;
+
+    static constexpr float kSBThick = CustomScrollbar::kTrackThick;
+
+    // ── Pan ───────────────────────────────────────────────────────────────
     bool  panning_    = false;
     int   panStartSX_ = 0, panStartSY_ = 0;
     float panStartOX_ = 0, panStartOY_ = 0;
+
+    // ── Helpers ───────────────────────────────────────────────────────────
+
+    std::shared_ptr<CanvasWidget> ptr() {
+        return std::static_pointer_cast<CanvasWidget>(shared_from_this());
+    }
+    bool hitTest(int mx, int my) const {
+        return mx >= x && mx < x + width && my >= y && my < y + height;
+    }
+
+    // ── FBO management ────────────────────────────────────────────────────
+
+    void ensureFBO(int physW, int physH) {
+        if (fboId_ && fboW_ == physW && fboH_ == physH) return;
+        deleteFBO();
+
+        fboW_ = physW; fboH_ = physH;
+
+        glGenTextures(1, &fboTex_);
+        glBindTexture(GL_TEXTURE_2D, fboTex_);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, physW, physH, 0,
+                     GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glBindTexture(GL_TEXTURE_2D, 0);
+
+        glGenRenderbuffers(1, &fboDepth_);
+        glBindRenderbuffer(GL_RENDERBUFFER, fboDepth_);
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, physW, physH);
+        glBindRenderbuffer(GL_RENDERBUFFER, 0);
+
+        glGenFramebuffers(1, &fboId_);
+        glBindFramebuffer(GL_FRAMEBUFFER, fboId_);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                               GL_TEXTURE_2D, fboTex_, 0);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                                  GL_RENDERBUFFER, fboDepth_);
+
+        GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+        if (status != GL_FRAMEBUFFER_COMPLETE)
+            CANVAS_LOGE("FBO incomplete: 0x%x", status);
+
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+        // Register with NanoVG so render() can blit it.
+        // The function name is backend-specific: nvglCreateImageFromHandleGLES2
+        // when built with NANOVG_GLES2, nvglCreateImageFromHandleGL3 otherwise.
+        NVGcontext* vg = FluxAndroid_getVG();
+        if (vg) {
+            if (nvgImage_ != -1) nvgDeleteImage(vg, nvgImage_);
+            // NVG_IMAGE_FLIPY because FBO Y=0 is bottom, NanoVG expects top-left
+#if defined(NANOVG_GLES2)
+            nvgImage_ = nvglCreateImageFromHandleGLES2(vg, fboTex_, physW, physH,
+                                                       NVG_IMAGE_FLIPY);
+#elif defined(NANOVG_GLES3)
+            nvgImage_ = nvglCreateImageFromHandleGLES3(vg, fboTex_, physW, physH,
+                                                       NVG_IMAGE_FLIPY);
+#else
+            nvgImage_ = nvglCreateImageFromHandleGL3(vg, fboTex_, physW, physH,
+                                                     NVG_IMAGE_FLIPY);
+#endif
+        }
+    }
+
+    void deleteFBO() {
+        NVGcontext* vg = FluxAndroid_getVG();
+        if (nvgImage_ != -1 && vg) { nvgDeleteImage(vg, nvgImage_); nvgImage_ = -1; }
+        if (fboId_)    { glDeleteFramebuffers(1,  &fboId_);    fboId_    = 0; }
+        if (fboTex_)   { glDeleteTextures(1,       &fboTex_);  fboTex_   = 0; }
+        if (fboDepth_) { glDeleteRenderbuffers(1,  &fboDepth_);fboDepth_ = 0; }
+        fboW_ = fboH_ = 0;
+    }
+
+    // ── GL init (lazy, first tickAllGL) ───────────────────────────────────
+
+    void ensureGL(int windowW, int windowH, float dpi) {
+        if (glInitialized_) return;
+        glInitialized_ = true;
+
+        canvasGL_ = FluxAndroid_getCanvasGL();
+
+        // Scrollbar shader
+        sbProg_  = glutil::linkProgram(kSBVert(), kSBFrag());
+        sbMVP_   = glGetUniformLocation(sbProg_, "uMVP");
+        sbColor_ = glGetUniformLocation(sbProg_, "uColor");
+        glGenVertexArrays(1, &sbVAO_);
+        glGenBuffers(1, &sbVBO_);
+
+        vp_.init(width, height, canvasW_, canvasH_);
+        updateViewportSize(width, height);
+        vp_.fitToView();
+
+        activatePendingSurface();
+        lastTick_ = Clock::now();
+
+        if (onViewportChanged) onViewportChanged(vp_.zoom());
+        if (onGLResize)        onGLResize(width, height);
+    }
+
+    // ── Pass 1: render surface into FBO ──────────────────────────────────
+
+    void glRenderPass(int windowW, int windowH, float dpi) {
+        ensureGL(windowW, windowH, dpi);
+        if (!canvasGL_) return;
+        if (pendingSurface_) activatePendingSurface();
+        if (!activeSurface_) return;
+
+        auto now = Clock::now();
+        frameDt_ = std::chrono::duration<double>(now - lastTick_).count();
+        lastTick_ = now;
+
+        activeSurface_->update(frameDt_);
+        activeSurface_->preRender();
+
+        // Physical pixel size of this widget
+        int physW = int(width  * dpi);
+        int physH = int(height * dpi);
+        ensureFBO(physW, physH);
+
+        // ── Render surface into FBO ───────────────────────────────────────
+        glBindFramebuffer(GL_FRAMEBUFFER, fboId_);
+        glViewport(0, 0, physW, physH);
+        glClearColor(0.f, 0.f, 0.f, 0.f);   // transparent
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        // Build MVP: ortho mapping canvas coords → clip space.
+        // Viewport pan/zoom is baked in so the user's pan/zoom works.
+        float z   = vp_.zoom();
+        float ox  = -vp_.offsetX() * z;
+        float oy  =  vp_.offsetY() * z;
+
+        float orthoM[16];
+        // Y-down ortho (top=0, bottom=physH in canvas-scaled units)
+        glutil::ortho(0.f, float(physW), float(physH), 0.f, orthoM);
+
+        float vpM[16] = {
+                z,  0,  0, 0,
+                0,  z,  0, 0,
+                0,  0,  1, 0,
+                ox, oy,  0, 1
+        };
+        float mvp[16] = {};
+        for (int col = 0; col < 4; ++col)
+            for (int row = 0; row < 4; ++row)
+                for (int k = 0; k < 4; ++k)
+                    mvp[col*4+row] += orthoM[k*4+row] * vpM[col*4+k];
+
+        {
+            Canvas2D ctx(canvasGL_, canvasW_, canvasH_, mvp);
+            activeSurface_->render(ctx);
+        }
+
+        // ── Scrollbars (also into FBO, in widget-local coords) ────────────
+        renderScrollbarsGL(physW, physH, frameDt_);
+
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+        // Mark NanoVG pass dirty so render() gets called this frame
+        needsPaint = true;
+
+        if (activeSurface_->needsContinuousRedraw())
+            Widget::markNeedsPaint();
+    }
+
+    // ── Scrollbar rendering (into current FBO) ────────────────────────────
+
+    void ensureSBProgram() {
+        if (sbProg_) return;
+        sbProg_  = glutil::linkProgram(kSBVert(), kSBFrag());
+        sbMVP_   = glGetUniformLocation(sbProg_, "uMVP");
+        sbColor_ = glGetUniformLocation(sbProg_, "uColor");
+        if (!sbVAO_) glGenVertexArrays(1, &sbVAO_);
+        if (!sbVBO_) glGenBuffers(1, &sbVBO_);
+    }
+
+    void renderScrollbarsGL(int glW, int glH, double dt) {
+        ensureSBProgram();
+        updateSBGeometry(glW, glH);
+
+        bool hFade = hBar_.tick(dt);
+        bool vFade = vBar_.tick(dt);
+        if (!hBar_.needsRedraw() && !vBar_.needsRedraw()) return;
+
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        hBar_.render(sbProg_, sbVAO_, sbVBO_, sbMVP_, sbColor_, glW, glH);
+        vBar_.render(sbProg_, sbVAO_, sbVBO_, sbMVP_, sbColor_, glW, glH);
+
+        // Corner square where both scrollbars meet
+        if (hBar_.isVisible() && vBar_.isVisible() && scrollbarsEnabled_) {
+            float cx = float(glW) - kSBThick;
+            float cy = float(glH) - kSBThick;
+            float mvp[16];
+            glutil::ortho(0.f, float(glW), float(glH), 0.f, mvp);
+            glUseProgram(sbProg_);
+            glUniformMatrix4fv(sbMVP_, 1, GL_FALSE, mvp);
+            glUniform4f(sbColor_, 0.12f, 0.12f, 0.12f, 0.35f);
+            float v[] = {
+                    cx,          cy,           cx+kSBThick, cy,
+                    cx+kSBThick, cy+kSBThick,  cx+kSBThick, cy+kSBThick,
+                    cx,          cy+kSBThick,  cx,          cy
+            };
+            glBindVertexArray(sbVAO_);
+            glBindBuffer(GL_ARRAY_BUFFER, sbVBO_);
+            glBufferData(GL_ARRAY_BUFFER, sizeof(v), v, GL_DYNAMIC_DRAW);
+            glEnableVertexAttribArray(0);
+            glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE,
+                                  2*sizeof(float), nullptr);
+            glDrawArrays(GL_TRIANGLES, 0, 6);
+            glBindVertexArray(0);
+        }
+    }
 
     // ── Viewport / scrollbar geometry ─────────────────────────────────────
 
@@ -220,13 +479,10 @@ private:
         if (vpW < 1) vpW = 1;
         if (vpH < 1) vpH = 1;
     }
-
     void updateViewportSize(int w, int h) {
-        int vpW, vpH;
-        viewportDims(w, h, vpW, vpH);
+        int vpW, vpH; viewportDims(w, h, vpW, vpH);
         vp_.setViewSize(vpW, vpH);
     }
-
     void updateSBGeometry(int glW, int glH) {
         ScrollbarInfo h = vp_.scrollbarH(), v = vp_.scrollbarV();
         float hLen = float(glW) - (v.visible ? kSBThick : 0.f);
@@ -242,34 +498,26 @@ private:
     // ── Pan ───────────────────────────────────────────────────────────────
 
     void beginPan(int sx, int sy) {
-        panning_    = true;
-        panStartSX_ = sx; panStartSY_ = sy;
+        panning_ = true; panStartSX_ = sx; panStartSY_ = sy;
         panStartOX_ = vp_.offsetX(); panStartOY_ = vp_.offsetY();
     }
     void continuePan(int sx, int sy) {
         float dx = float(sx - panStartSX_), dy = float(sy - panStartSY_);
-        vp_.setOffset(panStartOX_ - dx / vp_.zoom(),
-                      panStartOY_ + dy / vp_.zoom());
+        vp_.setOffset(panStartOX_ - dx/vp_.zoom(),
+                      panStartOY_ + dy/vp_.zoom());
         pokeScrollbars();
-        scheduleRepaint();
     }
-    void pokeScrollbars() { hBar_.poke(); vBar_.poke(); }
-
-    void scheduleRepaint() {
+    void pokeScrollbars() {
+        hBar_.poke(); vBar_.poke();
         if (onViewportChanged) onViewportChanged(vp_.zoom());
-        // On Android the render loop runs every frame — just mark dirty.
-        //markNeedsPaint();
-        needsPaint = true;
     }
-
-    // ── Scrollbar callbacks ───────────────────────────────────────────────
 
     void applyHScrollFraction(float thumbMin) {
         float span  = vp_.scrollbarH().thumbMax - vp_.scrollbarH().thumbMin;
         float range = vp_.canvasW() - vp_.viewW() / vp_.zoom();
         if (range <= 0.f) return;
         vp_.setOffsetX(thumbMin / (1.f - span) * range);
-        pokeScrollbars(); scheduleRepaint();
+        pokeScrollbars();
     }
     void applyVScrollFraction(float thumbMin) {
         float span  = vp_.scrollbarV().thumbMax - vp_.scrollbarV().thumbMin;
@@ -277,123 +525,29 @@ private:
         if (range <= 0.f) return;
         float t = 1.f - thumbMin - span;
         vp_.setOffsetY(t / (1.f - span) * range);
-        pokeScrollbars(); scheduleRepaint();
+        pokeScrollbars();
     }
 
-    // ── NanoVG scrollbar rendering ────────────────────────────────────────
-
-    void renderScrollbarsNVG(NVGcontext* nvg, int glW, int glH, double dt) {
-        bool hFade = hBar_.tick(dt);
-        bool vFade = vBar_.tick(dt);
-
-        if (!hBar_.needsRedraw() && !vBar_.needsRedraw()) {
-            if (hFade || vFade) scheduleRepaint();
-            return;
-        }
-
-        hBar_.renderNVG(nvg, glW, glH);
-        vBar_.renderNVG(nvg, glW, glH);
-
-        if (hBar_.isVisible() && vBar_.isVisible() && scrollbarsEnabled_) {
-            float cx = float(glW) - kSBThick;
-            float cy = float(glH) - kSBThick;
-            nvgBeginPath(nvg);
-            nvgRect(nvg, cx, cy, kSBThick, kSBThick);
-            nvgFillColor(nvg, nvgRGBA(30, 30, 30, 90));
-            nvgFill(nvg);
-        }
-
-        if (hFade || vFade) scheduleRepaint();
-    }
-
-    // ── Surface init ──────────────────────────────────────────────────────
-
-    void ensureSurface() {
-        if (initialized_) return;
-        initialized_ = true;
-
-        vp_.init(width, height, canvasW_, canvasH_);
-        updateViewportSize(width, height);
-        updateSBGeometry(width, height);
-        vp_.fitToView();
-
-        activatePendingSurface();
-        lastTick_ = Clock::now();
-
-        if (onViewportChanged) onViewportChanged(vp_.zoom());
-        if (onGLResize)        onGLResize(width, height);
-    }
+    // ── Surface lifecycle ─────────────────────────────────────────────────
 
     void activatePendingSurface() {
         if (!pendingSurface_) return;
-        if (activeSurface_) {
-            activeSurface_->destroy();
-            activeSurface_.reset();
-        }
+        if (activeSurface_) { activeSurface_->destroy(); activeSurface_.reset(); }
         activeSurface_ = pendingSurface_;
         pendingSurface_.reset();
         activeSurface_->initialize(canvasW_, canvasH_);
         vp_.setCanvasSize(canvasW_, canvasH_);
     }
 
-    // ── Main render ───────────────────────────────────────────────────────
-    // Called from render() which is called from Renderer::renderWidget()
-    // which is called from android_main INSIDE an active nvgBeginFrame.
-    // We must NOT call nvgBeginFrame/nvgEndFrame ourselves.
-
-    void tickAndRender() {
-        NVGcontext* nvg = FluxAndroid_getVG();
-        if (!nvg) return;
-        if (pendingSurface_) activatePendingSurface();
-        if (!activeSurface_) return;
-
-        auto   now = Clock::now();
-        double dt  = std::chrono::duration<double>(now - lastTick_).count();
-        lastTick_  = now;
-
-        activeSurface_->update(dt);
-
-        float dpi = FluxAndroid_getDpiScale();
-        int   glW = width;
-        int   glH = height;
-
-        // ── Save NVG state and set up a local transform for this widget ───
-        // The parent frame renders at logical coords scaled by DPI.
-        // We translate to widget position so Canvas2D coords start at (0,0).
-        nvgSave(nvg);
-        nvgTranslate(nvg, float(x), float(y));
-
-        // ── Clip to widget bounds ─────────────────────────────────────────
-        nvgScissor(nvg, 0.f, 0.f, float(glW), float(glH));
-
-        // ── Surface render ────────────────────────────────────────────────
-        {
-            Canvas2D ctx(nvg, canvasW_, canvasH_);
-            activeSurface_->render(ctx);
-        }
-
-        // ── Scrollbars ────────────────────────────────────────────────────
-        updateSBGeometry(glW, glH);
-        renderScrollbarsNVG(nvg, glW, glH, dt);
-
-        // ── Restore NVG state ─────────────────────────────────────────────
-        nvgResetScissor(nvg);
-        nvgRestore(nvg);
-
-        // Schedule continuous redraw if surface needs it.
-        if (activeSurface_->needsContinuousRedraw())
-            scheduleRepaint();
-    }
-
-    // ── Teardown ──────────────────────────────────────────────────────────
-
-    void destroySurface() {
-        if (activeSurface_) {
-            activeSurface_->destroy();
-            activeSurface_.reset();
-        }
+    void destroyGL() {
+        if (activeSurface_) { activeSurface_->destroy(); activeSurface_.reset(); }
         pendingSurface_.reset();
-        initialized_ = false;
+        deleteFBO();
+        if (sbProg_) { glDeleteProgram(sbProg_);          sbProg_ = 0; }
+        if (sbVAO_)  { glDeleteVertexArrays(1, &sbVAO_);  sbVAO_  = 0; }
+        if (sbVBO_)  { glDeleteBuffers(1,      &sbVBO_);  sbVBO_  = 0; }
+        canvasGL_      = nullptr;
+        glInitialized_ = false;
     }
 };
 

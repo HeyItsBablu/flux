@@ -140,6 +140,8 @@ if(NOT TARGET nanovg)
     if(ANDROID)
         # Compile the GLES2 implementation into this translation unit
         target_compile_definitions(nanovg PRIVATE NANOVG_GLES2_IMPLEMENTATION)
+        find_library(gles-lib GLESv3)
+        target_link_libraries(nanovg PUBLIC ${gles-lib})
     else()
         # Compile the GL3 implementation into this translation unit
         target_compile_definitions(nanovg PRIVATE NANOVG_GL3_IMPLEMENTATION)
@@ -273,7 +275,7 @@ elseif(ANDROID)
     find_library(log-lib     log)
     find_library(android-lib android)
     find_library(egl-lib     EGL)
-    find_library(gles-lib    GLESv2)
+    find_library(gles-lib    GLESv3)
 
     target_link_libraries(flux PUBLIC
             app_glue

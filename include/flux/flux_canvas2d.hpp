@@ -17,7 +17,7 @@
 #include <memory>
 
 // ── GL (glad included by CanvasWidget before us) ─────────────────────────────
-#if defined(_WIN32) || defined(__linux__)
+#if defined(_WIN32) || defined(__linux__) && !defined(__ANDROID__)
 #  include <glad/glad.h>
 #elif defined(__ANDROID__)
 #  include <GLES3/gl3.h>

@@ -13,7 +13,7 @@
 #include <fstream>
 #include <vector>
 
-#define STB_TRUETYPE_IMPLEMENTATION
+//#define STB_TRUETYPE_IMPLEMENTATION
 #include <stb_truetype.h>
 
 
@@ -33,6 +33,36 @@
 // GLSL shaders
 // ─────────────────────────────────────────────────────────────────────────────
 
+#ifdef __ANDROID__
+static const char* kFlatVert =
+        "#version 300 es\n"
+        "precision mediump float;\n"
+        "layout(location=0) in vec2 aPos;\n"
+        "layout(location=1) in vec2 aUV;\n"
+        "uniform mat4 uMVP;\n"
+        "out vec2 vUV;\n"
+        "void main(){ vUV=aUV; gl_Position=uMVP*vec4(aPos,0.0,1.0); }\n";
+
+static const char* kFlatFrag =
+        "#version 300 es\n"
+        "precision mediump float;\n"
+        "in  vec2 vUV;\n"
+        "out vec4 fragColor;\n"
+        "uniform vec4      uColor;\n"
+        "uniform int       uMode;\n"
+        "uniform sampler2D uTex;\n"
+        "void main(){\n"
+        "    if(uMode==0){\n"
+        "        fragColor = uColor;\n"
+        "    } else if(uMode==1){\n"
+        "        float a = texture(uTex, vUV).r;\n"
+        "        fragColor = vec4(uColor.rgb, uColor.a * a);\n"
+        "    } else {\n"
+        "        vec4 t = texture(uTex, vUV);\n"
+        "        fragColor = t * uColor.a;\n"
+        "    }\n"
+        "}\n";
+#else
 static const char* kFlatVert = R"GLSL(
 #version 330 core
 layout(location=0) in vec2 aPos;
@@ -63,13 +93,57 @@ void main(){
 }
 )GLSL";
 
+#endif
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Canvas2DGL
 // ─────────────────────────────────────────────────────────────────────────────
 
 bool Canvas2DGL::init() {
+    // ── Diagnose shader compile directly so we see the actual error ──────
+#ifdef __ANDROID__
+    {
+        const char* src = kFlatVert;
+        GLuint s = glCreateShader(GL_VERTEX_SHADER);
+        glShaderSource(s, 1, &src, nullptr);
+        glCompileShader(s);
+        GLint ok = 0;
+        glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
+        if (!ok) {
+            char buf[2048]; GLsizei len = 0;
+            glGetShaderInfoLog(s, sizeof(buf), &len, buf);
+            __android_log_print(ANDROID_LOG_ERROR, "Canvas2DGL",
+                                "kFlatVert compile FAILED:\n%s", buf);
+        } else {
+            __android_log_print(ANDROID_LOG_INFO, "Canvas2DGL",
+                                "kFlatVert compile OK");
+        }
+        glDeleteShader(s);
+
+        src = kFlatFrag;
+        s = glCreateShader(GL_FRAGMENT_SHADER);
+        glShaderSource(s, 1, &src, nullptr);
+        glCompileShader(s);
+        ok = 0;
+        glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
+        if (!ok) {
+            char buf[2048]; GLsizei len = 0;
+            glGetShaderInfoLog(s, sizeof(buf), &len, buf);
+            __android_log_print(ANDROID_LOG_ERROR, "Canvas2DGL",
+                                "kFlatFrag compile FAILED:\n%s", buf);
+        } else {
+            __android_log_print(ANDROID_LOG_INFO, "Canvas2DGL",
+                                "kFlatFrag compile OK");
+        }
+        glDeleteShader(s);
+    }
+#endif
+
     flatProg = glutil::linkProgram(kFlatVert, kFlatFrag);
-    if (!flatProg) return false;
+    if (!flatProg) {
+
+        return false;
+    }
 
     flatMVP   = glGetUniformLocation(flatProg, "uMVP");
     flatColor = glGetUniformLocation(flatProg, "uColor");
@@ -392,6 +466,8 @@ Color Canvas2D::blendAlpha(Color c) const {
 
 void Canvas2D::uploadAndDraw(const float* verts, int count, GLenum mode,
                               Color col, float alpha) {
+
+    if (!gl_->flatProg || !gl_->vbo) return;
     float mvp[16]; buildMVP(mvp);
 
     glBindVertexArray(gl_->vao);
@@ -404,6 +480,10 @@ void Canvas2D::uploadAndDraw(const float* verts, int count, GLenum mode,
     float a = col.a / 255.f * globalAlpha_ * alpha;
     glUniform4f(gl_->flatColor, col.r/255.f, col.g/255.f, col.b/255.f, a);
     glUniform1i(gl_->flatMode, 0);
+
+
+
+
     glDrawArrays(mode, 0, count);
     glBindVertexArray(0);
 }

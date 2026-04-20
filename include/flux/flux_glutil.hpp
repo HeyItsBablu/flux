@@ -8,7 +8,7 @@
 // ============================================================================
 
 // ── glad (Win32 + Linux only; Android/iOS use their own GL headers) ───────────
-#if defined(_WIN32) || defined(__linux__)
+#if defined(_WIN32) || defined(__linux__) && !defined(__ANDROID__)
   #include <glad/glad.h>
 #elif defined(__ANDROID__)
   #include <GLES3/gl3.h>
@@ -17,8 +17,14 @@
 #endif
 
 // ── Platform debug log ────────────────────────────────────────────────────────
-#ifdef _WIN32
-  #include "platform/win32/flux_debug_win32.hpp"
+// flux_glutil.hpp — replace the platform debug log section:
+#ifdef __ANDROID__
+#include <android/log.h>
+inline void FluxDebugLog(const char* msg) {
+    __android_log_print(ANDROID_LOG_ERROR, "FluxGL", "%s", msg);
+}
+#elif defined(_WIN32)
+#include "platform/win32/flux_debug_win32.hpp"
 #elif defined(__linux__)
   #include "platform/linux/flux_debug_linux.hpp"
 #elif defined(__APPLE__)

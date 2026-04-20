@@ -27,10 +27,8 @@ static std::string wstringToUtf8(const std::wstring& text) {
 
 
 extern float FluxAndroid_getDpiScale();
-// Set once per frame before any Painter calls
-static NVGcontext* s_vg = nullptr;
-void FluxAndroid_setVG(NVGcontext* vg) { s_vg = vg; }
-NVGcontext* FluxAndroid_getVG()        { return s_vg; }
+extern NVGcontext* FluxAndroid_getVG();
+#define s_vg (FluxAndroid_getVG())
 
 static NVGcolor toNVG(Color c) {
     return nvgRGBA(c.r, c.g, c.b, c.a);

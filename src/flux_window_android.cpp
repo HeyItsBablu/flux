@@ -29,10 +29,14 @@ bool PlatformWindow::create(const std::string& /*title*/,
     eglState     = new EGLState();
 
     const EGLint attribs[] = {
-        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
-        EGL_RED_SIZE,   8, EGL_GREEN_SIZE, 8,
-        EGL_BLUE_SIZE,  8, EGL_ALPHA_SIZE, 8,
-        EGL_NONE
+            EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
+            EGL_RED_SIZE,     8,
+            EGL_GREEN_SIZE,   8,
+            EGL_BLUE_SIZE,    8,
+            EGL_ALPHA_SIZE,   8,
+            EGL_DEPTH_SIZE,   16,
+            EGL_STENCIL_SIZE, 8,
+            EGL_NONE
     };
 
     EGLDisplay dpy = eglGetDisplay(EGL_DEFAULT_DISPLAY);
@@ -42,7 +46,20 @@ bool PlatformWindow::create(const std::string& /*title*/,
 
     EGLConfig cfg; EGLint nCfg = 0;
     if (!eglChooseConfig(dpy, attribs, &cfg, 1, &nCfg) || nCfg == 0) {
-        LOGE("eglChooseConfig failed"); return false;
+        // Retry with ES2 bit
+        const EGLint attribs2[] = {
+                EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+                EGL_RED_SIZE,     8,
+                EGL_GREEN_SIZE,   8,
+                EGL_BLUE_SIZE,    8,
+                EGL_ALPHA_SIZE,   8,
+                EGL_DEPTH_SIZE,   16,
+                EGL_STENCIL_SIZE, 8,
+                EGL_NONE
+        };
+        if (!eglChooseConfig(dpy, attribs2, &cfg, 1, &nCfg) || nCfg == 0) {
+            LOGE("eglChooseConfig failed"); return false;
+        }
     }
 
     EGLint fmt = 0;
@@ -50,9 +67,14 @@ bool PlatformWindow::create(const std::string& /*title*/,
     ANativeWindow_setBuffersGeometry(app->window, 0, 0, fmt);
 
     EGLSurface srf = eglCreateWindowSurface(dpy, cfg, app->window, nullptr);
-    const EGLint ctxA[] = { EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE };
-    EGLContext   ctx = eglCreateContext(dpy, cfg, EGL_NO_CONTEXT, ctxA);
-
+// Try ES3 first, fall back to ES2
+    const EGLint ctxA3[] = { EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE };
+    const EGLint ctxA2[] = { EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE };
+    EGLContext ctx = eglCreateContext(dpy, cfg, EGL_NO_CONTEXT, ctxA3);
+    if (ctx == EGL_NO_CONTEXT) {
+        LOGI("ES3 context failed, falling back to ES2");
+        ctx = eglCreateContext(dpy, cfg, EGL_NO_CONTEXT, ctxA2);
+    }
     if (!eglMakeCurrent(dpy, srf, srf, ctx)) {
         LOGE("eglMakeCurrent failed"); return false;
     }
@@ -85,10 +107,14 @@ void PlatformWindow::reinitSurface(ANativeWindow* window) {
 
     // Get the config again to create the new surface
     const EGLint attribs[] = {
-        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
-        EGL_RED_SIZE,   8, EGL_GREEN_SIZE, 8,
-        EGL_BLUE_SIZE,  8, EGL_ALPHA_SIZE, 8,
-        EGL_NONE
+            EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
+            EGL_RED_SIZE,     8,
+            EGL_GREEN_SIZE,   8,
+            EGL_BLUE_SIZE,    8,
+            EGL_ALPHA_SIZE,   8,
+            EGL_DEPTH_SIZE,   16,
+            EGL_STENCIL_SIZE, 8,
+            EGL_NONE
     };
     EGLConfig cfg; EGLint nCfg = 0;
     eglChooseConfig(s.display, attribs, &cfg, 1, &nCfg);
