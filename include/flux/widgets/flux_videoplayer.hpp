@@ -862,7 +862,7 @@ private:
     return buf;
   }
 
-  void _renderBar(GraphicsContext &ctx, FontCache &fontCache, Painter &p) {
+  void _renderBar(GraphicsContext &/*ctx*/, FontCache &fontCache, Painter &p) {
     int barY = y + height - barHeight;
     _barRect = {x, barY, width, barHeight};
     p.fillRect(x, barY, width, barHeight, colBar);

@@ -3,7 +3,7 @@
 #ifdef _WIN32
 
 #include "flux/flux_canvas.hpp"
-#include "flux/platform/win32/flux_wgl.hpp"
+#include "flux/flux_wgl.hpp"
 
 #include <glad/glad.h>
 #include <cassert>

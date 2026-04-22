@@ -12,27 +12,9 @@
   #include <glad/glad.h>
 #elif defined(__ANDROID__)
   #include <GLES3/gl3.h>
-#elif defined(__APPLE__)
-  #include <OpenGL/gl3.h>
 #endif
 
-// ── Platform debug log ────────────────────────────────────────────────────────
-// flux_glutil.hpp — replace the platform debug log section:
-#ifdef __ANDROID__
-#include <android/log.h>
-inline void FluxDebugLog(const char* msg) {
-    __android_log_print(ANDROID_LOG_ERROR, "FluxGL", "%s", msg);
-}
-#elif defined(_WIN32)
-#include "platform/win32/flux_debug_win32.hpp"
-#elif defined(__linux__)
-  #include "platform/linux/flux_debug_linux.hpp"
-#elif defined(__APPLE__)
-  #include "platform/macos/flux_debug_macos.hpp"
-#else
-  #include <cstdio>
-  inline void FluxDebugLog(const char* msg) { fprintf(stderr, "%s", msg); }
-#endif
+
 
 namespace glutil {
 
@@ -48,9 +30,6 @@ inline GLuint compileShader(GLenum type, const char* src) {
         char buf[1024];
         GLsizei len = 0;
         glGetShaderInfoLog(s, 1024, &len, buf);
-        FluxDebugLog("[FluxGL] Shader compile error: ");
-        FluxDebugLog(buf);
-        FluxDebugLog("\n");
         glDeleteShader(s);
         return 0;
     }
@@ -80,9 +59,6 @@ inline GLuint linkProgram(const char* vert, const char* frag) {
         char buf[1024];
         GLsizei len = 0;
         glGetProgramInfoLog(p, 1024, &len, buf);
-        FluxDebugLog("[FluxGL] Program link error: ");
-        FluxDebugLog(buf);
-        FluxDebugLog("\n");
         glDeleteProgram(p);
         return 0;
     }

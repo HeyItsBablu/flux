@@ -135,7 +135,7 @@ public:
                              playBtnSize, btnBg, btnBg, 0);
 
         // Draw triangle (play) or two bars (pause)
-        NativeFont iconFont = fontCache.getFont("Segoe UI", iconFontSize, FontWeight::Normal);
+        // NativeFont iconFont = fontCache.getFont("Segoe UI", iconFontSize, FontWeight::Normal);
         Color iconCol = _hovPlay ? colIconHover : colIconNormal;
 
         if (_playing) {
@@ -259,7 +259,7 @@ public:
         return false;
     }
 
-    bool handleMouseUp(int mx, int my) override {
+    bool handleMouseUp(int /*mx*/, int /*my*/) override {
         if (_dragging) {
             _dragging = false;
             FluxUI::getCurrentInstance()->releaseMouseInput();

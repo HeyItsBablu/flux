@@ -40,7 +40,7 @@ public:
     // Win32   : ctx wraps a DIB DC sized to (popupW x popupH), origin = (0,0).
     // Linux   : ctx wraps the main cairo_t*, origin = client coords of popup.
     // Android : ctx carries (popupW x popupH); NVG context is global to frame.
-    virtual void renderPopupContent(GraphicsContext &ctx, FontCache &fc) {}
+    virtual void renderPopupContent(GraphicsContext &/*ctx*/, FontCache &/*fc*/) {}
 
     // ── Popup lifecycle (called by derived open/close methods) ────────────
 

@@ -11,7 +11,6 @@
 #include "flux_state.hpp"
 #include "widgets/widgets.hpp"
 #include "flux_canvas.hpp"
-#include "flux_vector.hpp"
 #include "main_app.hpp"
 #include "flux_android_jni.hpp"
 #include "flux_audio.hpp"

@@ -61,7 +61,7 @@ public:
     needsLayout = false;
   }
 
-  void positionChildren(int cx, int cy, int cw, int ch) override {
+  void positionChildren(int cx, int cy, int /*cw*/, int /*ch*/) override {
 
     auto c = child_;
     if (!c) return;
@@ -152,7 +152,7 @@ private:
   }
 
 
-  void rebuildChild(GraphicsContext &ctx, FontCache &fontCache) {
+  void rebuildChild(GraphicsContext &/*ctx*/, FontCache &/*fontCache*/) {
     if (!builder) return;
 
     child_ = builder(snapshot_);
