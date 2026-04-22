@@ -4,7 +4,7 @@
 #include "flux/flux_http_platform.hpp"
 #include "flux/flux_window.hpp"
 #include "flux/widgets/flux_file_picker.hpp"
-#include "flux/platform/linux/flux_canvas_linux.hpp"
+#include "flux/flux_canvas.hpp"
 
 #include <SDL2/SDL.h>
 #include <cairo/cairo.h>

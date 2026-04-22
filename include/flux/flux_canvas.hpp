@@ -151,6 +151,10 @@ public:
     // ── Linux-only ────────────────────────────────────────────────────────────
 #if defined(__linux__) && !defined(__ANDROID__)
 #include <SDL2/SDL.h>
+    static void   initEventType();
+    static Uint32 repaintEventType();
+
+ 
     void setCanvasGL(Canvas2DGL* gl);
     void onWindowResize(int newW, int newH);
     void preRenderPass();

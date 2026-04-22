@@ -50,6 +50,16 @@ static LinuxCanvasState& linuxState(CanvasWidget* w) {
 
 static Uint32 s_repaintEventType_ = 0;
 
+void CanvasWidget::initEventType() {
+    if (s_repaintEventType_ == 0) {
+        Uint32 t = SDL_RegisterEvents(1);
+        s_repaintEventType_ = (t != (Uint32)-1) ? t : SDL_USEREVENT;
+    }
+}
+Uint32 CanvasWidget::repaintEventType() { return s_repaintEventType_; }
+
+
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Window dimension helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -144,10 +154,7 @@ CanvasWidget::CanvasWidget()
     height = 300;
     registerWithPlatform(this);
 
-    if (s_repaintEventType_ == 0) {
-        Uint32 t = SDL_RegisterEvents(1);
-        s_repaintEventType_ = (t != (Uint32)-1) ? t : SDL_USEREVENT;
-    }
+
 }
 
 CanvasWidget::~CanvasWidget() {
