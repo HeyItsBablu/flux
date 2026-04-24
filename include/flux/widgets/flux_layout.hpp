@@ -809,6 +809,31 @@ public:
     }
   }
 
+  void render(GraphicsContext &ctx, FontCache &fontCache) override {
+    if (!visible) return;
+
+    Painter painter(ctx);
+
+    // Draw background and border (same as Widget::render)
+    if (hasBackground)
+        painter.fillRoundedRect(x, y, width, height, borderRadius,
+                                getCurrentBackgroundColor());
+    if (hasBorder)
+        painter.drawBorder(x, y, width, height, borderRadius,
+                           getCurrentBorderColor(), borderWidth);
+
+    // Render children
+    for (auto &child : children)
+        child->render(ctx, fontCache);
+
+    // ── Overflow indicator (debug builds, or when FLUX_DEBUG_OVERFLOW=1) ──
+    if (overflow.hasOverflow()) {
+FluxOverflow::render(painter, fontCache, overflow, x, y, width, height);
+    }
+
+    needsPaint = false;
+}
+
   // ------------------------------------------------------------------
   // Fluent setters (unchanged from original)
   // ------------------------------------------------------------------

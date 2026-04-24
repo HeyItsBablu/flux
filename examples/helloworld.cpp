@@ -4,8 +4,17 @@ class MyApp : public Widget {
 
 public:
   WidgetPtr build() override {
-    return Scaffold(AppBar("Flux App"),
-                    Center(AudioPlayer("C:/Users/user/Music/Tum Mile Tum Mile Original Motion Picturetrack 128 Kbps.mp3")->setWidth(380)));
+    return Scaffold(
+        AppBar("Flux App"),
+        Center(Container(Center(Container(Center(Text("Hello world")))
+                                    ->setBorderRadius(10)
+                                    ->setWidth(100)
+                                    ->setHeight(100)
+                                    ->setBackgroundColor(
+                                        Color::fromRGB(20, 20, 100))))
+                   ->setWidth(300)
+                   ->setHeight(200)
+                   ->setBackgroundColor(Color::fromRGB(10, 10, 200))->setBorderRadius(10)));
   }
 };
 

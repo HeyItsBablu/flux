@@ -239,6 +239,8 @@ target_compile_definitions(flux PUBLIC
         $<$<CONFIG:Debug>:FLUX_DEBUG>
         $<$<BOOL:${WIN32}>:NOMINMAX>
 )
+# In CMakeLists.txt, add to your target_compile_definitions:
+target_compile_definitions(flux PUBLIC FLUX_DEBUG_OVERFLOW=1)
 
 # Expose the correct NanoVG backend declaration guard to all consumers.
 # The *_IMPLEMENTATION variant is only defined in the nanovg target itself
