@@ -561,8 +561,8 @@ private:
 #include <string>
 #include <vector>
 
-#include "dr_mp3.h"
-#include "dr_wav.h"
+#include "../../external/dr/dr_mp3.h"
+#include "../../external/dr/dr_wav.h"
 
 #undef AUDIO_LOGI
 #undef AUDIO_LOGE
