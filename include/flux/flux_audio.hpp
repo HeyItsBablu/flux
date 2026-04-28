@@ -12,8 +12,8 @@
 #include <string>
 #include <vector>
 
-#include "dr_mp3.h"
-#include "dr_wav.h"
+#include "../../external/dr/dr_mp3.h"
+#include "../../external/dr/dr_wav.h"
 
 #define AUDIO_LOGI(...)                                                        \
   __android_log_print(ANDROID_LOG_INFO, "FluxAudio", __VA_ARGS__)
