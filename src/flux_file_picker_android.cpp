@@ -66,18 +66,40 @@ namespace FluxFilePickerAndroid {
 
 
 // ── init — called from APP_CMD_INIT_WINDOW on the game thread ────────────
-    void init(JNIEnv *env, ANativeActivity *activity) {
-        g_env      = env;
-        g_activity = activity;
+void init(JNIEnv *env, ANativeActivity *activity) {
+    g_env      = env;
+    g_activity = activity;
 
-        if (s_bridgeClass) {
-            FLUX_FP_LOG("init: OK — g_env=%p g_activity=%p bridgeClass cached by JNI_OnLoad",
-                        (void*)env, (void*)activity);
-        } else {
-            FLUX_FP_ERR("init: s_bridgeClass is null — JNI_OnLoad failed, "
-                        "file picker will not work");
-        }
+    // Use the Activity's ClassLoader — the only loader that knows app classes
+    jobject   activityObj    = activity->clazz;
+    jclass    activityCls    = env->GetObjectClass(activityObj);
+    jmethodID getClassLoader = env->GetMethodID(activityCls, "getClassLoader",
+                                                "()Ljava/lang/ClassLoader;");
+    jobject   classLoader    = env->CallObjectMethod(activityObj, getClassLoader);
+
+    jclass    clsLoaderCls = env->GetObjectClass(classLoader);
+    jmethodID loadClass    = env->GetMethodID(clsLoaderCls, "loadClass",
+                                              "(Ljava/lang/String;)Ljava/lang/Class;");
+
+    jstring className   = env->NewStringUTF("com.flux.FluxBridge");
+    jclass  bridgeLocal = (jclass)env->CallObjectMethod(classLoader, loadClass, className);
+
+    env->DeleteLocalRef(className);
+    env->DeleteLocalRef(classLoader);
+    env->DeleteLocalRef(clsLoaderCls);
+    env->DeleteLocalRef(activityCls);
+
+    if (!bridgeLocal || env->ExceptionCheck()) {
+        FLUX_FP_ERR("init: FluxBridge not found via ClassLoader — "
+                    "check package name and file location");
+        env->ExceptionClear();
+        return;
     }
+
+    s_bridgeClass = (jclass)env->NewGlobalRef(bridgeLocal);
+    env->DeleteLocalRef(bridgeLocal);
+    FLUX_FP_LOG("init: FluxBridge cached OK");
+}
 
 // ── dispatchResult — called from JNI callback (main thread) ──────────────
     void dispatchResult(int requestCode, std::vector<std::string> paths) {
@@ -360,23 +382,11 @@ namespace FluxFilePickerAndroid {
     static void launchIntent(jobject intentGlobalRef, ResultCallback cb) {
         int code = registerCallback(std::move(cb));
 
+        JNIEnv *env = g_env;  // ← move this ABOVE the null check
+
         if (!s_bridgeClass) {
-            FLUX_FP_ERR("launchIntent: s_bridgeClass is null — JNI_OnLoad failed");
-            dispatchResult(code, {});
-            return;
-        }
-
-        // Attach the game thread to the JVM so we can make JNI calls
-        JNIEnv *env     = nullptr;
-        bool didAttach  = false;
-        jint ret = s_javaVM->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6);
-        if (ret == JNI_EDETACHED) {
-            s_javaVM->AttachCurrentThread(&env, nullptr);
-            didAttach = true;
-        }
-
-        if (!env) {
-            FLUX_FP_ERR("launchIntent: could not get JNIEnv");
+            FLUX_FP_ERR("launchIntent: s_bridgeClass is null — was init() called?");
+            env->DeleteGlobalRef(intentGlobalRef);
             dispatchResult(code, {});
             return;
         }
@@ -387,7 +397,6 @@ namespace FluxFilePickerAndroid {
             FLUX_FP_ERR("launchIntent: launchFilePicker method not found");
             env->ExceptionClear();
             env->DeleteGlobalRef(intentGlobalRef);
-            if (didAttach) s_javaVM->DetachCurrentThread();
             dispatchResult(code, {});
             return;
         }
@@ -395,9 +404,6 @@ namespace FluxFilePickerAndroid {
         env->CallStaticVoidMethod(s_bridgeClass, launch,
                                   g_activity->clazz, intentGlobalRef, (jint)code);
         env->DeleteGlobalRef(intentGlobalRef);
-
-        if (didAttach) s_javaVM->DetachCurrentThread();
-
         FLUX_FP_LOG("launchIntent: requestCode=%d", code);
     }
 
@@ -490,28 +496,7 @@ namespace FluxFilePickerAndroid {
 // This is the only safe place to cache app classes for use on native threads.
 // ============================================================================
 
-JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void * /*reserved*/) {
-    s_javaVM = vm;
 
-    JNIEnv *env = nullptr;
-    vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6);
-
-    jclass local = env->FindClass("com/flux/FluxBridge");
-    if (!local || env->ExceptionCheck()) {
-        env->ExceptionClear();
-        __android_log_print(ANDROID_LOG_ERROR, "FluxFilePicker",
-                            "JNI_OnLoad: com/flux/FluxBridge NOT FOUND — "
-                            "check FluxBridge.java is at app/src/main/java/com/flux/FluxBridge.java");
-        return JNI_VERSION_1_6;
-    }
-
-    FluxFilePickerAndroid::s_bridgeClass = (jclass)env->NewGlobalRef(local);
-    env->DeleteLocalRef(local);
-
-    __android_log_print(ANDROID_LOG_DEBUG, "FluxFilePicker",
-                        "JNI_OnLoad: FluxBridge cached OK");
-    return JNI_VERSION_1_6;
-}
 
 // ============================================================================
 // JNI entry point — called from FluxBridge.java → nativeOnFilePickerResult()
