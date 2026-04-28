@@ -17,8 +17,7 @@
 #include <stb_truetype.h>
 
 
-#define NANOVG_STBI_ALREADY_INCLUDED
-#define STB_IMAGE_IMPLEMENTATION
+
 #include <stb_image.h>
 
 #include "flux/flux_canvas2d.hpp"

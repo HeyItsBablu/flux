@@ -33,12 +33,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 include(FetchContent)
 
 if(NOT ANDROID)
-    FetchContent_Declare(stb
-            GIT_REPOSITORY https://github.com/nothings/stb.git
-            GIT_TAG        master
-    )
-    FetchContent_MakeAvailable(stb)
-
     FetchContent_Declare(Clipper2
             GIT_REPOSITORY https://github.com/AngusJohnson/Clipper2.git
             GIT_TAG        Clipper2_1.4.0
@@ -97,6 +91,16 @@ endif()
 FetchContent_MakeAvailable(curl)
 
 # ============================================================================
+# stb  (local — header-only + single implementation file)
+# ============================================================================
+
+add_library(stb STATIC src/stb_impl.cpp)
+target_include_directories(stb PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/stb>
+        $<INSTALL_INTERFACE:include>
+)
+
+# ============================================================================
 # GLAD  (Windows + Linux desktop only — Android uses EGL/GLES directly)
 # ============================================================================
 
@@ -117,16 +121,10 @@ endif()
 # ============================================================================
 
 if(NOT TARGET nanovg)
-    # Core source is always compiled
-    set(NANOVG_SOURCES external/nanovg/src/nanovg.c)
-
-    if(ANDROID)
-        # Android ships its own GL implementation file (GLES2 variant)
-        list(APPEND NANOVG_SOURCES external/nanovg/src/nanovg_gl_impl.c)
-    else()
-        # Desktop shares the same nanovg_gl_impl.c compiled for GL3
-        list(APPEND NANOVG_SOURCES external/nanovg/src/nanovg_gl_impl.c)
-    endif()
+    set(NANOVG_SOURCES
+            external/nanovg/src/nanovg.c
+            external/nanovg/src/nanovg_gl_impl.c
+    )
 
     add_library(nanovg STATIC ${NANOVG_SOURCES})
     set_source_files_properties(${NANOVG_SOURCES} PROPERTIES LANGUAGE C)
@@ -135,17 +133,17 @@ if(NOT TARGET nanovg)
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/nanovg/src>
             $<INSTALL_INTERFACE:include>
     )
+
+
     target_compile_definitions(nanovg PRIVATE STB_IMAGE_STATIC)
+    target_link_libraries(nanovg PUBLIC stb)
 
     if(ANDROID)
-        # Compile the GLES2 implementation into this translation unit
         target_compile_definitions(nanovg PRIVATE NANOVG_GLES2_IMPLEMENTATION)
         find_library(gles-lib GLESv3)
         target_link_libraries(nanovg PUBLIC ${gles-lib})
     else()
-        # Compile the GL3 implementation into this translation unit
         target_compile_definitions(nanovg PRIVATE NANOVG_GL3_IMPLEMENTATION)
-        # glad must be loaded before any GL call — link it so consumers get it too
         target_include_directories(nanovg PRIVATE
                 ${CMAKE_CURRENT_SOURCE_DIR}/external/glad/include
         )
@@ -198,11 +196,13 @@ endif()
 
 file(GLOB_RECURSE FLUX_SOURCES CONFIGURE_DEPENDS src/*.cpp)
 
-# flux_canvas2d_win32.cpp is the legacy GDI+ backend.
-# On Windows we now use the NanoVG/GL3 backend, so exclude it.
+
 if(WIN32)
     list(FILTER FLUX_SOURCES EXCLUDE REGEX ".*flux_canvas2d_win32\\.cpp$")
 endif()
+
+
+list(FILTER FLUX_SOURCES EXCLUDE REGEX ".*stb_impl\\.cpp$")
 
 add_library(flux STATIC ${FLUX_SOURCES})
 add_library(flux::flux ALIAS flux)
@@ -213,16 +213,12 @@ target_include_directories(flux
         PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
-        # nanovg headers are already exposed via the nanovg target but we also
-        # expose them directly so platform headers that #include <nanovg.h>
-        # without going through the target still resolve correctly.
+
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/nanovg/src>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${SDL2_INCLUDE_DIRS}>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${CAIRO_INCLUDE_DIRS}>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${PANGOCAIRO_INCLUDE_DIRS}>
-        $<$<NOT:$<BOOL:${ANDROID}>>:${stb_SOURCE_DIR}>
         PRIVATE
-        $<$<NOT:$<BOOL:${ANDROID}>>:${stb_SOURCE_DIR}>
         $<$<OR:$<BOOL:${WIN32}>,$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>>:${CMAKE_CURRENT_SOURCE_DIR}/external/glad/include>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${AVFORMAT_INCLUDE_DIRS}>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${AVCODEC_INCLUDE_DIRS}>
@@ -238,13 +234,10 @@ target_include_directories(flux
 target_compile_definitions(flux PUBLIC
         $<$<CONFIG:Debug>:FLUX_DEBUG>
         $<$<BOOL:${WIN32}>:NOMINMAX>
+        FLUX_DEBUG_OVERFLOW=1
 )
-# In CMakeLists.txt, add to your target_compile_definitions:
-target_compile_definitions(flux PUBLIC FLUX_DEBUG_OVERFLOW=1)
 
-# Expose the correct NanoVG backend declaration guard to all consumers.
-# The *_IMPLEMENTATION variant is only defined in the nanovg target itself
-# (the translation unit that actually compiles the GL code).
+
 if(ANDROID)
     target_compile_definitions(flux PUBLIC NANOVG_GLES2)
 else()
@@ -255,6 +248,7 @@ endif()
 
 if(WIN32)
     target_link_libraries(flux PUBLIC
+            stb
             glad
             nanovg
             Clipper2
@@ -280,6 +274,7 @@ elseif(ANDROID)
     find_library(gles-lib    GLESv3)
 
     target_link_libraries(flux PUBLIC
+            stb
             app_glue
             nanovg
             CURL::libcurl
@@ -295,6 +290,7 @@ elseif(ANDROID)
 
 elseif(UNIX AND NOT APPLE)
     target_link_libraries(flux PUBLIC
+            stb
             glad
             nanovg
             OpenGL::GL
@@ -362,7 +358,7 @@ if(NOT ANDROID)
     include(GNUInstallDirs)
     include(CMakePackageConfigHelpers)
 
-    set(FLUX_INSTALL_TARGETS flux nanovg)
+    set(FLUX_INSTALL_TARGETS flux nanovg stb)
 
     if(WIN32 OR (UNIX AND NOT APPLE AND NOT ANDROID))
         list(APPEND FLUX_INSTALL_TARGETS glad)
@@ -377,6 +373,12 @@ if(NOT ANDROID)
 
     # Install nanovg public headers so the INSTALL_INTERFACE path resolves
     install(DIRECTORY external/nanovg/src/
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+            FILES_MATCHING PATTERN "*.h"
+    )
+
+    # Install stb public headers
+    install(DIRECTORY external/stb/
             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
             FILES_MATCHING PATTERN "*.h"
     )
