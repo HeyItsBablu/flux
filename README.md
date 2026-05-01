@@ -1,20 +1,44 @@
-![CI](https://github.com/HeyItsBablu/flux/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/Rosanchaudhary/flux/actions/workflows/ci.yml/badge.svg)
 
 # FluxUI
 
-A declarative, Flutter-inspired widget toolkit for building native Windows UIs in C++.  
-Chain methods, compose layouts, bind reactive state — no XAML, no bloat, no WndProc editing.
+A declarative, Flutter-inspired widget toolkit for building native UIs in C++.  
+Chain methods, compose layouts, bind reactive state — write once, run on Windows, Linux, and Android.
 
-**Platform:** Windows 10+ · **Compiler:** MSVC 2022 · **Standard:** C++20 · **Renderer:** GDI+ / OpenGL
+**Platforms:** Windows 10+ · Linux · Android · **Compiler:** MSVC 2022 / GCC / Clang · **Standard:** C++20 · **Renderer:** GDI+ / OpenGL / Cairo / NanoVG
 
 ---
 
 ## Quick start
 
+The fastest way to get going is with the **Flux CLI** — it scaffolds a new project and handles all CMake / build wiring automatically.
+
+### With the CLI (recommended)
+
+**Install on Linux:**
+```bash
+curl -LO https://github.com/HeyItsBablu/flux-cli/releases/latest/download/flux
+chmod +x flux
+sudo mv flux /usr/local/bin/
+```
+
+**Install on Windows:** download `flux.exe` from [Releases](https://github.com/HeyItsBablu/flux-cli/releases/latest), place it anywhere, and add that folder to your system `PATH`.
+
+**Create and run your app:**
+```bash
+flux create my_app
+cd my_app
+flux run windows   # or: flux run linux
+```
+
+See the [CLI section](#cli) below for the full command reference.
+
+### Manually with CMake
+
 ```cmake
 include(FetchContent)
 FetchContent_Declare(flux
-    GIT_REPOSITORY https://github.com/HeyItsBablu/flux.git
+    GIT_REPOSITORY https://github.com/Rosanchaudhary/flux.git
     GIT_TAG        v0.1.0
 )
 FetchContent_MakeAvailable(flux)
@@ -85,6 +109,7 @@ WidgetPtr createApp(FluxUI *app) {
 - [Data](#data)
 - [Media](#media)
 - [Network](#network)
+- [CLI](#cli)
 
 ---
 
@@ -2083,3 +2108,97 @@ TypedJsonBuilder<User>(
 | `setBuilder(fn)` | Set the builder callback |
 | `setFetcher(fn)` | Set a custom async fetcher instead of HTTP |
 | `refresh()` | Reset state and re-run the fetch |
+
+---
+
+## CLI
+
+The **Flux CLI** (`flux`) scaffolds new projects and builds / runs them on each target platform with a single command. Source and releases live at [github.com/HeyItsBablu/flux-cli](https://github.com/HeyItsBablu/flux-cli).
+
+### Prerequisites
+
+| Platform | Requirements |
+|---|---|
+| All | CMake 3.22+, Git, curl |
+| Windows | Visual Studio 2019+ with **Desktop development with C++** workload |
+| Linux | `sudo apt install build-essential cmake git curl` |
+
+### Installation
+
+**Linux / macOS**
+```bash
+curl -LO https://github.com/HeyItsBablu/flux-cli/releases/latest/download/flux
+chmod +x flux
+sudo mv flux /usr/local/bin/
+```
+
+**Windows**
+
+1. Download `flux.exe` from [Releases](https://github.com/HeyItsBablu/flux-cli/releases/latest)
+2. Move it to a folder, e.g. `C:\tools\flux\flux.exe`
+3. Add that folder to your system `PATH` (Start → Environment Variables → System variables → Path → Edit → New)
+4. Open a new terminal and run `flux` to verify
+
+### Commands
+
+#### `flux create <name>`
+
+Scaffolds a new app in a folder called `<name>`.
+
+```bash
+flux create my_app
+cd my_app
+```
+
+Generated structure:
+
+```
+my_app/
+├── main.cpp          ← your entire app lives here
+├── flux.json         ← app config (do not edit manually)
+├── windows/          ← platform build files (do not edit)
+└── linux/            ← platform build files (do not edit)
+```
+
+#### `flux run <platform>`
+
+Builds and launches the app for the given platform. Must be run from the app root (where `flux.json` lives).
+
+```bash
+flux run windows
+flux run linux
+```
+
+| Platform | What it does |
+|---|---|
+| `windows` | Locates Visual Studio, runs CMake + MSVC build, launches `build/Release/app.exe` |
+| `linux` | Runs CMake + GCC/Clang build, launches `build/app` |
+| `android` | *(coming soon)* |
+
+### App config — flux.json
+
+Generated automatically by `flux create`. Do not edit manually.
+
+```json
+{
+    "name": "my_app",
+    "package": "com.example.my_app"
+}
+```
+
+| Field | Description |
+|---|---|
+| `name` | App name used in build output |
+| `package` | Android package identifier |
+
+### Building the CLI from source
+
+```bash
+git clone https://github.com/HeyItsBablu/flux-cli
+cd flux-cli
+cmake -B build -S .
+cmake --build build --config Release
+```
+
+Output: `build/Release/flux.exe` (Windows) or `build/flux` (Linux).
+
