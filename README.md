@@ -1,4 +1,4 @@
-![CI](https://github.com/Rosanchaudhary/flux/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/HeyItsBablu/flux/actions/workflows/ci.yml/badge.svg)
 
 # FluxUI
 
@@ -14,7 +14,7 @@ Chain methods, compose layouts, bind reactive state — no XAML, no bloat, no Wn
 ```cmake
 include(FetchContent)
 FetchContent_Declare(flux
-    GIT_REPOSITORY https://github.com/Rosanchaudhary/flux.git
+    GIT_REPOSITORY https://github.com/HeyItsBablu/flux.git
     GIT_TAG        v0.1.0
 )
 FetchContent_MakeAvailable(flux)
@@ -22,32 +22,23 @@ target_link_libraries(my_app PRIVATE flux::flux)
 ```
 
 ```cpp
-#include "flux/flux.hpp"
+#include <flux/flux.hpp>
 
-class MyApp : public Component {
-  State<int> count;
+class MyApp : public Widget {
 public:
-  MyApp() : count(0, context) {}
-
-  WidgetPtr build() override {
-    return Scaffold(
-      AppBar("My App"),
-      Center(
-        Column({
-          Text(count, [](int v){ return "Count: " + std::to_string(v); })
-              ->setFontSize(28),
-          Button("Increment", [this]{ count.set(count.get() + 1); })
-        })->setSpacing(16)
-      )
-    );
-  }
+    WidgetPtr build() override {
+        return Scaffold(
+            AppBar("My App"),
+            Center(Text("Hello World")));
+    }
 };
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
-  FluxUI app(hInstance);
-  app.build([&]{ return FluxApp("My App", BuildComponent<MyApp>(), AppTheme::light()); });
-  app.createWindow("My App", 900, 700);
-  return app.run();
+WidgetPtr createApp(FluxUI *app) {
+    return FluxApp(
+        "My App",
+        std::make_shared<MyApp>(),
+        AppTheme::light(),
+        false, 900, 700, false, false);
 }
 ```
 
@@ -92,28 +83,34 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
 - [Overlay](#overlay)
 - [Navigation](#navigation)
 - [Data](#data)
+- [Media](#media)
+- [Network](#network)
 
 ---
 
 ## Components
 
-### Component
+### Widget
 
-Base class for stateful UI logic. Override `build()` to return your widget tree.
+Base class for all UI components. Override `build()` to return your widget tree.
 
 ```cpp
-class MyComponent : public Component {
-  State<int> count;
+class MyApp : public Widget {
 public:
-  MyComponent() : count(0, context) {}
-
-  WidgetPtr build() override {
-    return Column({
-      Text(count)->setFontSize(32),
-      Button("Increment", [this]{ count.set(count.get() + 1); })
-    })->setSpacing(10);
-  }
+    WidgetPtr build() override {
+        return Scaffold(
+            AppBar("My App"),
+            Center(Text("Hello World")));
+    }
 };
+
+WidgetPtr createApp(FluxUI *app) {
+    return FluxApp(
+        "My App",
+        std::make_shared<MyApp>(),
+        AppTheme::light(),
+        false, 900, 700, false, false);
+}
 ```
 
 | Method | Description |
@@ -126,69 +123,55 @@ public:
 
 ---
 
-### CHILD macro
-
-Instantiates a child component inline inside a parent's `build()`.
-
-```cpp
-// No args
-CHILD(MyComponent)
-
-// With parent state pointer
-CHILD(ChildCounter, &count)
-
-// With multiple args
-CHILD(ChildForm, &name, &age, &email)
-```
-
----
-
-### BuildComponent
-
-Alternative to `CHILD` for top-level component instantiation.
-
-```cpp
-app.build([&]{
-  return FluxApp("My App", BuildComponent<MyComponent>(), AppTheme::light());
-});
-```
-
----
-
 ### Passing state to children
 
-Parent owns the state and passes a raw pointer to the child.
+The parent owns the state and passes a reference to child widgets.
 
 ```cpp
-class ParentCounter : public Component {
-  State<int> count;
+class CounterDisplay : public Widget {
+    State<int>& counter;
 public:
-  ParentCounter() : count(0, context) {}
+    CounterDisplay(State<int>& counter) : counter(counter) {}
 
-  WidgetPtr build() override {
-    return Column({
-      Text(count)->setFontSize(32),
-      Button("Increment", [this]{ count.set(count.get() + 1); }),
-      CHILD(ChildCounter, &count)
-    })->setSpacing(10);
-  }
+    WidgetPtr build() override {
+        return Column({
+            Text("Current count:"),
+            Text(counter),
+            Text(counter, [](int v) {
+                return v % 2 == 0 ? "Even" : "Odd";
+            })
+        });
+    }
 };
 
-class ChildCounter : public Component {
-  State<int> *count;
-  State<int> childCount;
+class CounterControls : public Widget {
+    State<int>& counter;
 public:
-  explicit ChildCounter(State<int> *count)
-      : count(count), childCount(0, context) {}
+    CounterControls(State<int>& counter) : counter(counter) {}
 
-  WidgetPtr build() override {
-    return Column({
-      Text(deref(count))->setFontSize(32),
-      Button("Decrement", [this]{ count->set(count->get() - 1); }),
-      Text(childCount)->setFontSize(32),
-      Button("Child --", [this]{ childCount.set(childCount.get() - 1); })
-    })->setSpacing(10);
-  }
+    WidgetPtr build() override {
+        return Row({
+            Button("Increment", [this]{ counter++; }),
+            Button("Decrement", [this]{ counter--; }),
+            Button("Reset",     [this]{ counter.set(0); })
+        });
+    }
+};
+
+class MyApp : public Widget {
+    State<int> counter{0};
+public:
+    WidgetPtr build() override {
+        return Scaffold(
+            AppBar("Flux App"),
+            Center(
+                Column({
+                    std::make_shared<CounterDisplay>(counter),
+                    std::make_shared<CounterControls>(counter)
+                })
+            )
+        );
+    }
 };
 ```
 
@@ -741,6 +724,89 @@ d.isValid();                      // true if year/month/day are set
 | `setWidth(w)` | `int` | Fixed width |
 
 > **Navigation:** Click month/year header to open year picker. `◀ ▶` arrows navigate months or year ranges.
+
+---
+
+### FilePicker
+
+Button-like widget that opens the native OS file dialog on click. Cross-platform: Windows (IFileDialog), Linux (zenity/kdialog, async), Android (ACTION_OPEN_DOCUMENT).
+
+```cpp
+// Single file open
+FilePicker()
+    ->setMode(FilePickerMode::Open)
+    ->addFilter("Images", {"*.png","*.jpg","*.jpeg","*.bmp"})
+    ->addFilter("All files", {"*.*"})
+    ->setDefaultExtension("png")
+    ->bindPath(filePath)
+    ->setOnChanged([](const std::string& path) {
+        std::cout << "Picked: " << path << "\n";
+    });
+
+// Save dialog
+FilePicker()
+    ->setMode(FilePickerMode::Save)
+    ->setTitle("Export Image")
+    ->setDefaultFilename("output.png")
+    ->addFilter("PNG",  {"*.png"})
+    ->addFilter("JPEG", {"*.jpg","*.jpeg"})
+    ->setDefaultExtension("png")
+    ->bindPath(exportPath)
+    ->setOnChanged([&](const std::string& p){ surface->exportImage(p); });
+
+// Multiple files
+FilePicker()
+    ->setMode(FilePickerMode::OpenMultiple)
+    ->addFilter("Images", {"*.png","*.jpg"})
+    ->bindPaths(paths)
+    ->setOnMultiChanged([](const std::vector<std::string>& ps){ ... });
+
+// Folder picker
+FilePicker()
+    ->setMode(FilePickerMode::Folder)
+    ->setTitle("Select output folder")
+    ->bindPath(folderPath);
+```
+
+**FilePickerMode**
+
+| Value | Description |
+|---|---|
+| `FilePickerMode::Open` | Single file open dialog |
+| `FilePickerMode::OpenMultiple` | Multi-file open dialog |
+| `FilePickerMode::Save` | Save / export dialog |
+| `FilePickerMode::Folder` | Directory picker |
+
+**Methods**
+
+| Method | Type | Description |
+|---|---|---|
+| `setMode(m)` | `FilePickerMode` | Dialog type |
+| `setTitle(t)` | `string` | Dialog window title |
+| `setDefaultFilename(f)` | `string` | Pre-filled filename for Save mode |
+| `setDefaultExtension(e)` | `string` | Default file extension |
+| `setInitialDir(d)` | `string` | Starting directory |
+| `addFilter(label, exts)` | `string, vector<string>` | Add a file type filter |
+| `setFilters(fs)` | `vector<FileFilter>` | Replace all filters at once |
+| `bindPath(State<string>)` | State | Two-way binding for single path |
+| `bindPaths(State<vector<string>>)` | State | Two-way binding for multi-path |
+| `setOnChanged(fn)` | `void(string)` | Fires on single-file selection |
+| `setOnMultiChanged(fn)` | `void(vector<string>)` | Fires on multi-file selection |
+| `setOnCancelled(fn)` | `void()` | Fires when dialog is cancelled |
+| `setShowPath(v)` | `bool` | Show selected path beside button |
+| `setShowClearBtn(v)` | `bool` | Show × button to clear selection |
+| `setPathMaxWidth(w)` | `int` | Max width of the path display |
+| `setAccentColor(c)` | `COLORREF` | Accent color for focus ring |
+| `setWidth(w)` | `int` | Fixed width |
+| `setHeight(h)` | `int` | Fixed height |
+| `setFlex(n)` | `int` | Flex factor in parent |
+| `open()` | — | Open the dialog programmatically |
+| `clear()` | — | Clear the current selection |
+| `path()` | `string` | Currently selected single path |
+| `paths()` | `vector<string>` | Currently selected paths (multi mode) |
+| `hasSelection()` | `bool` | True if a path is selected |
+
+> **Linux async:** On Linux the dialog runs on a background thread via zenity or kdialog. Dispatch results back to the UI by calling `fluxFilePickerDispatchSDLEvent(e)` inside your `SDL_USEREVENT` handler.
 
 ---
 
@@ -1820,3 +1886,200 @@ ContextMenu(
 | `setItemHoverColor(color)` | `COLORREF` | Row highlight on hover |
 
 > **Keyboard:** `↑/↓` navigate, `Enter/Space` activate, `Escape` close, `Home/End` jump.
+
+---
+
+## Media
+
+### AudioPlayer
+
+Drop-in audio player widget with a browser-style control bar — play/pause, seek track, time display, and volume icon. All playback state is managed internally via `FluxAudio`.
+
+```cpp
+#include "flux/flux_audioplayer.hpp"
+
+AudioPlayer("audio/sample.mp3")
+    ->setWidth(380);
+```
+
+**Factory:** `AudioPlayer(path = "")` · `AudioPlayer()->setPath("audio/sample.mp3")`
+
+**Methods**
+
+| Method | Type | Description |
+|---|---|---|
+| `setPath(p)` | `string` | Audio file to load |
+| `setWidth(w)` | `int` | Fixed width |
+
+> Controls: click play/pause button or click the seek track to jump. Dragging the thumb scrubs through the file. Playback resumes from the beginning after the track finishes.
+
+---
+
+### VideoPlayer
+
+Self-contained video player widget. Blits decoded frames each render tick and overlays a translucent browser-style control bar on hover. Manages all `FluxVideo` state internally.
+
+**Platform support:** Android (NanoVG/OES), Windows (GDI StretchDIBits), Linux (Cairo/SDL2).
+
+```cpp
+#include "flux/flux_videoplayer.hpp"
+
+VideoPlayer("video/sample.mp4")
+    ->setWidth(480)
+    ->setHeight(270)   // 16:9 recommended
+    ->setAutoPlay(true);
+```
+
+**Factory:** `VideoPlayer(path = "")`
+
+**Methods**
+
+| Method | Type | Description |
+|---|---|---|
+| `setPath(p)` | `string` | Video file to load |
+| `setWidth(w)` | `int` | Fixed width |
+| `setHeight(h)` | `int` | Fixed height |
+| `setAutoPlay(b)` | `bool` | Start playing immediately on open |
+
+> **Controls:** Click anywhere on the video area to toggle play/pause and show the control bar. The bar auto-hides after 3 seconds of inactivity. Drag the seek thumb to scrub. The bar reappears on mouse move.
+
+---
+
+### CameraView
+
+Fixed-size camera viewfinder with shutter, flash toggle, and camera flip controls. Captured photos fire a callback and display as a thumbnail.
+
+**Platform support:** Android (NanoVG/GLES2 OES), Windows (GDI StretchDIBits + WIC), Linux (Cairo + libjpeg + V4L2).
+
+```cpp
+#include "flux/flux_camera_widget.hpp"
+
+CameraView()
+    ->setWidth(380)
+    ->setHeight(270)
+    ->setOnPhoto([](const std::string& path) {
+        std::cout << "Saved: " << path << std::endl;
+    });
+```
+
+**Factory:** `CameraView()`
+
+**Methods**
+
+| Method | Type | Description |
+|---|---|---|
+| `setWidth(w)` | `int` | Fixed width (default 380) |
+| `setHeight(h)` | `int` | Fixed height (default 270) |
+| `setOnPhoto(fn)` | `void(string)` | Fires with the saved file path after each capture |
+| `setStartFront(f)` | `bool` | Start with the front-facing camera (Android only) |
+
+> **Controls:** Tap/click the center shutter button to capture. Left button toggles flash. Right button flips between cameras. The last captured photo appears as a thumbnail in the bottom-left corner of the viewfinder.
+
+> **Android permission:** The widget polls for `CAMERA` permission every 500ms and opens the camera automatically once granted — no manual permission handling needed.
+
+> **Link (Windows):** `gdi32 msimg32 windowscodecs mf mfplat mfreadwrite mfuuid ole32 oleaut32`  
+> **Link (Linux):** `libjpeg libv4l2 SDL2 cairo pangocairo`
+
+---
+
+### MicRecorder
+
+Microphone recorder widget with a scrolling live waveform, record/stop button, elapsed timecode, and WAV file output via `FluxMic`.
+
+**Platform support:** Android, Windows, Linux desktop.
+
+```cpp
+#include "flux/mic_recorder_widget.hpp"
+
+MicRecorder()
+    ->setWidth(320)
+    ->setHeight(120)
+    ->setOnSaved([](const std::string& path) {
+        std::cout << "Saved to: " << path << std::endl;
+    });
+```
+
+**Factory:** `MicRecorder()`
+
+**Methods**
+
+| Method | Type | Description |
+|---|---|---|
+| `setWidth(w)` | `int` | Fixed width (default 320) |
+| `setHeight(h)` | `int` | Fixed height (default 120) |
+| `setOnSaved(fn)` | `void(string)` | Fires with the WAV file path on stop |
+
+> **Controls:** Click/tap the red circle to start recording. Click/tap the orange square to stop and save. The waveform scrolls in real time while recording. A green progress bar at the top of the control bar shows consumption of the 5-minute recording cap.
+
+---
+
+## Network
+
+### FutureBuilder / FetchBuilder / JsonBuilder
+
+Flutter-inspired async widget that manages loading, error, and data states for HTTP requests. The builder callback is called each time the connection state changes.
+
+```cpp
+#include "flux/flux_future_builder.hpp"
+
+// Raw string response
+FetchBuilder(
+    "https://api.example.com/status",
+    [](const AsyncSnapshot<std::string>& snap) -> WidgetPtr {
+        if (snap.isLoading()) return Text("Loading...");
+        if (snap.hasError())  return Text("Error: " + snap.error);
+        return Text(snap.data);
+    }
+);
+
+// Parsed JSON
+JsonBuilder(
+    "https://api.example.com/user/1",
+    [](const AsyncSnapshot<JsonValue>& snap) -> WidgetPtr {
+        if (snap.isLoading()) return Text("Loading...");
+        if (snap.hasError())  return Text("Error: " + snap.error);
+        return Text(snap.data["name"].getString());
+    }
+);
+
+// Typed — deserialize into your own struct
+TypedJsonBuilder<User>(
+    "https://api.example.com/user/1",
+    [](const JsonValue& j) -> User {
+        return { j["name"].getString(), j["age"].getInt() };
+    },
+    [](const AsyncSnapshot<User>& snap) -> WidgetPtr {
+        if (snap.isLoading()) return Text("Loading...");
+        if (snap.hasError())  return Text("Error: " + snap.error);
+        return Text(snap.data.name);
+    }
+);
+```
+
+**AsyncSnapshot\<T\>**
+
+| Field / Method | Description |
+|---|---|
+| `state` | `ConnectionState::None · Waiting · Done · Error` |
+| `data` | Result value — valid only when `hasData()` is true |
+| `error` | Error message — valid only when `hasError()` is true |
+| `isNone()` | True before the fetch starts |
+| `isLoading()` | True while the request is in flight |
+| `hasData()` | True when the request completed successfully |
+| `hasError()` | True when the request failed |
+
+**Factory helpers**
+
+| Factory | Response type | Description |
+|---|---|---|
+| `FetchBuilder(url, builder)` | `string` | Raw HTTP response body |
+| `JsonBuilder(url, builder)` | `JsonValue` | Parsed JSON value |
+| `TypedJsonBuilder<T>(url, mapper, builder)` | `T` | Deserialized struct via a mapper function |
+
+**FutureBuilderWidget methods**
+
+| Method | Description |
+|---|---|
+| `setBuilder(fn)` | Set the builder callback |
+| `setFetcher(fn)` | Set a custom async fetcher instead of HTTP |
+| `refresh()` | Reset state and re-run the fetch |
