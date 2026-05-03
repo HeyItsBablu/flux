@@ -92,24 +92,7 @@ void Widget::positionChildren(int contentX, int contentY, int contentWidth,
   }
 }
 
-// ============================================================================
-// Widget::render
-//
-// Fix: clip children to the widget's own bounds when hasBorder is true.
-//
-// Previously the base render() never clipped its children, so a child widget
-// that overflowed its parent could paint over the border or bleed outside it.
-// ContainerWidget already did this correctly (it has an explicit clip pass).
-// The base Widget::render() now mirrors that behaviour:
-//
-//   • No border  → no clip (unchanged, zero-cost path for the common case)
-//   • Has border → push clip, render children, pop clip, then draw the border
-//                  on top so it is never painted over by children
-//
-// Drawing the border AFTER the clip-pop ensures the border stroke is always
-// fully visible on top of any child content that reaches the edge, which
-// matches browser/Flutter behaviour.
-// ============================================================================
+
 
 void Widget::render(GraphicsContext &ctx, FontCache &fontCache) {
   if (!visible)

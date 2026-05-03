@@ -6,7 +6,7 @@ public:
         return Scaffold(
             AppBar("Centered Title"),
             Column({
-                // Issue 11 — stretch forces Container to fill Column's width
+
                 Container(
                     Text("Column fills full width")
                         ->setFontSize(16)
@@ -17,7 +17,7 @@ public:
 
                 Expanded(
                     Row({
-                        // Issue 12 — Expanded inside Row drives flex width
+
                         Expanded(
                             Container(
                                 Text("Red")
@@ -49,7 +49,7 @@ public:
                     ->setCrossAxisAlignment(CrossAxisAlignment::Stretch)
                 ),
             })
-            ->setCrossAxisAlignment(CrossAxisAlignment::Stretch)  // Issue 11
+            ->setCrossAxisAlignment(CrossAxisAlignment::Stretch)  
         );
     }
 };

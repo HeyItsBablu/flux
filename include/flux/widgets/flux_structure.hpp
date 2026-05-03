@@ -139,17 +139,7 @@ public:
 // --- AppBar Widget ---
 class AppBarWidget : public Widget {
 public:
-  // ── Fix 14 ─────────────────────────────────────────────────────────────────
-  // The old class had no declared height default, so if autoHeight were ever
-  // true (e.g. someone constructed an AppBarWidget directly without calling
-  // the AppBar() factory) height would be 0 and the title child would be given
-  // a zero-height constraint, producing an invisible bar.
-  //
-  // Fix: store the canonical AppBar height as a named constant and initialise
-  // height in the constructor so the widget is well-defined regardless of how
-  // it is constructed.  The factory AppBar() still overrides this, but now
-  // it is redundant-safe rather than the sole source of correctness.
-  // ───────────────────────────────────────────────────────────────────────────
+
   static constexpr int kDefaultHeight = 56;
 
   AppBarWidget() {
@@ -162,8 +152,6 @@ public:
     if (autoWidth)
       width = constraints.maxWidth;
 
-    // autoHeight is always false (set in constructor), so height is the fixed
-    // value.  We only need to lay out the title child if one exists.
     if (!children.empty()) {
       children[0]->computeLayout(
           ctx,
@@ -176,18 +164,7 @@ public:
     needsLayout = false;
   }
 
-  // ── Fix 13 ─────────────────────────────────────────────────────────────────
-  // The old positionChildren placed the title at contentX (left edge), so it
-  // was always left-aligned regardless of the title widget's own alignment
-  // or the AppBar's crossAxisAlignment.
-  //
-  // Flutter's AppBar centers the title horizontally and vertically within the
-  // bar.  We replicate that here: the title child is centered on both axes
-  // within the content area (the area inside the AppBar's padding).
-  //
-  // If the title widget is wider than the content area it falls back to
-  // left-aligned (same as Flutter's centerTitle overflow behaviour).
-  // ───────────────────────────────────────────────────────────────────────────
+
   void positionChildren(int contentX, int contentY,
                         int contentWidth, int contentHeight) override {
     if (!children.empty()) {
@@ -234,12 +211,7 @@ inline WidgetPtr AppBar(const std::string &title) {
 
   w->hasBackground = true;
   w->backgroundColor = Color::fromRGB(33, 150, 243);
-  // height and autoHeight are already set correctly by the AppBarWidget
-  // constructor — no need to repeat them here.
 
-  // The title widget has no padding of its own; centering is handled by
-  // AppBarWidget::positionChildren so the padding on the Text just adds
-  // visual breathing room around the glyph, not an offset from the left edge.
   auto titleWidget = Text(title)
                          ->setFontSize(20)
                          ->setFontWeight(FontWeight::Bold)

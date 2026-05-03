@@ -77,23 +77,6 @@ struct AppTheme {
   }
 };
 
-// ============================================================================
-// THEME PROVIDER
-//
-// Fix (ThemeProvider global static):
-//   The old design stored the active theme in a global inline static
-//   (ThemeProvider::currentTheme).  That means every FluxAppWidget in the
-//   process shares one theme — last-writer-wins — which is wrong for any
-//   multi-window app and a data-race if threading is introduced.
-//
-//   Fix: ThemeProvider is now a thin non-owning pointer to the AppTheme that
-//   lives inside the active FluxAppWidget.  There is no heap allocation and no
-//   value copy; ThemeProvider::getTheme() simply dereferences the pointer.
-//   When a FluxAppWidget is constructed it calls ThemeProvider::bind(&theme);
-//   when it is destroyed it calls ThemeProvider::unbind(&theme).  A static
-//   fallback default is returned when nothing is bound (e.g. during early
-//   static initialisation of factory helpers).
-// ============================================================================
 
 class ThemeProvider {
 public:
@@ -102,17 +85,17 @@ public:
 
   static AppTheme &getTheme() {
     if (current_) return *current_;
-    static AppTheme sDefault;   // fallback — used before any window is created
+    static AppTheme sDefault;   
     return sDefault;
   }
 
-  // Backwards-compatible setter — forwards into the bound instance.
+
   static void setTheme(const AppTheme &t) {
     if (current_) *current_ = t;
   }
 
 private:
-  static AppTheme *current_;    // non-owning, nullptr when no window is live
+  static AppTheme *current_;    
 };
 
 inline AppTheme *ThemeProvider::current_ = nullptr;
@@ -143,7 +126,7 @@ inline WidgetPtr ThemedCard(WidgetPtr child) {
 class FluxAppWidget : public Widget {
 public:
   std::string title;
-  AppTheme    theme;                      // owns the theme for this window
+  AppTheme    theme;                      
   bool        debugShowWidgetBounds = false;
   WidgetPtr   home;
   int  windowWidth  = 900;
@@ -151,21 +134,7 @@ public:
   bool maximize     = false;
   bool fullscreen   = true;
 
-  // ── Fix: weak_ptr singleton ─────────────────────────────────────────────
-  // The old design stored a raw FluxAppWidget* in a static field.
-  // Problems:
-  //   1. A second FluxAppWidget silently overwrote the pointer, leaving
-  //      the first window's callers with a dangling raw pointer.
-  //   2. Callers had no way to detect that the instance had been destroyed.
-  //
-  // Fix: the static field is now a weak_ptr<FluxAppWidget>.
-  //   • getInstance() returns a shared_ptr — empty if the widget is gone.
-  //     Every call site can test validity before use.
-  //   • The weak_ptr does not extend the widget's lifetime, so destruction
-  //     ordering is unchanged.
-  //   • A debug assert fires if a live second instance is constructed,
-  //     making the programming error visible immediately.
-  // ──────────────────────────────────────────────────────────────────────────
+
 
   static std::shared_ptr<FluxAppWidget> getInstance() {
     return instance_.lock();
@@ -178,26 +147,24 @@ public:
            "FluxAppWidget: second instance created while first is still alive. "
            "Only one FluxAppWidget per process is supported.");
 
-    // Bind this window's theme storage to ThemeProvider so themed factories
-    // (ThemedCard etc.) automatically see the right theme.
+
     ThemeProvider::bind(&theme);
 
     if (home) addChild(home);
   }
 
   ~FluxAppWidget() {
-    // Unbind so ThemeProvider doesn't dangle after this window closes.
+   
     ThemeProvider::unbind(&theme);
   }
 
-  // Called by FluxApp() after make_shared completes so the shared_ptr exists.
+
   void registerInstance(std::shared_ptr<FluxAppWidget> self) {
-    instance_ = self;   // weak — does not extend lifetime
+    instance_ = self;   
   }
 
   void setTheme(const AppTheme &newTheme) {
-    // ThemeProvider::current_ already points to &theme, so updating the
-    // field is sufficient — no additional ThemeProvider call needed.
+
     theme = newTheme;
     needsPaint = true;
   }
@@ -207,7 +174,7 @@ public:
     setTheme(isDark ? AppTheme::light() : AppTheme::dark());
   }
 
-  // ── Layout (Fix 21 carried forward) ──────────────────────────────────────
+
 
   void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
@@ -279,10 +246,10 @@ inline WidgetPtr FluxApp(const std::string &title, WidgetPtr home,
 {
   auto app = std::make_shared<FluxAppWidget>(title, home);
 
-  // Register after make_shared so the weak_ptr is seeded correctly.
+
   app->registerInstance(app);
 
-  // Apply the caller-supplied theme (ThemeProvider is already bound via ctor).
+
   app->setTheme(theme);
   app->debugShowWidgetBounds = debugShowWidgetBounds;
   app->windowWidth  = width;

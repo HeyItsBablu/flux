@@ -25,23 +25,9 @@ public:
   void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override
   {
-    // ── Fix 4 ────────────────────────────────────────────────────────────────
-    // measureText() calls Widget::measureText(), which already adds
-    // paddingLeft+paddingRight to width and paddingTop+paddingBottom to height
-    // when autoWidth/autoHeight are true (see flux_widget.cpp).  The old code
-    // then added them a second time here, making every Text widget 2× padded.
-    //
-    // Fix: call measureText() for its side-effect of setting the raw text
-    // extent on width/height, but let it own the padding addition completely.
-    // We never touch width/height here for the auto axes — measureText already
-    // left them in the right state.  We only clamp to incoming constraints and
-    // apply the widget's own min/max, which is always correct.
-    // ─────────────────────────────────────────────────────────────────────────
     measureText(ctx, fontCache);
 
-    // measureText sets width/height including padding for auto axes.
-    // For fixed axes (autoWidth==false / autoHeight==false) the caller set
-    // width/height explicitly before computeLayout — don't override them.
+
     width  = constraints.clampWidth(width);
     height = constraints.clampHeight(height);
     applyConstraints();
