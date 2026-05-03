@@ -108,32 +108,64 @@ public:
         BoxConstraints content = contentConstraints(self);
 
 
-
-        int totalFlex  = 0;
-        int fixedWidth = 0;
-
+        int totalFlex    = 0;
+        int fixedWidth   = 0;   // sum of widths of shrink-wrap non-flex children
+        int shrinkWidth  = 0;   // same, computed in sub-pass 1a for use in 1b
 
         int visibleCount = 0;
         for (auto &child : children)
             if (child->visible) visibleCount++;
         int spacingTotal = visibleCount > 1 ? spacing * (visibleCount - 1) : 0;
 
+
         for (auto &child : children) {
             if (!child->visible) continue;
-
             if (child->isExpanded()) {
                 totalFlex += child->flex;
-            } else {
-
-                BoxConstraints childC(
-                    0, kUnbounded,       // main axis : truly unbounded
-                    0, content.maxHeight // cross axis : bounded by parent
-                );
-                child->computeLayout(ctx, childC, fontCache);
-                fixedWidth += child->width
-                            + child->marginLeft
-                            + child->marginRight;
+                continue;
             }
+            BoxConstraints childC(
+                0, kUnbounded,       // main axis : truly unbounded
+                0, content.maxHeight // cross axis : bounded by parent
+            );
+            child->computeLayout(ctx, childC, fontCache);
+
+            if (child->width < kUnbounded) {
+                // Shrink-wrap child — count it now.
+                shrinkWidth += child->width
+                             + child->marginLeft
+                             + child->marginRight;
+            }
+
+        }
+
+
+        int fillCount = 0;
+        for (auto &child : children) {
+            if (!child->visible || child->isExpanded()) continue;
+            if (child->width >= kUnbounded) fillCount++;
+        }
+        if (fillCount > 0) {
+            int remaining = std::max(0,
+                content.maxWidth - shrinkWidth - spacingTotal);
+            int sliceW = remaining / fillCount;
+            for (auto &child : children) {
+                if (!child->visible || child->isExpanded()) continue;
+                if (child->width >= kUnbounded) {
+                    child->computeLayout(
+                        ctx,
+                        BoxConstraints(0, sliceW, 0, content.maxHeight),
+                        fontCache);
+                }
+            }
+        }
+
+        // ── Accumulate fixedWidth from all non-flex children ──────────────────
+        for (auto &child : children) {
+            if (!child->visible || child->isExpanded()) continue;
+            fixedWidth += child->width
+                        + child->marginLeft
+                        + child->marginRight;
         }
 
         // ── PASS 2 : flex children — divide remaining width ──────────────────
@@ -160,7 +192,8 @@ public:
                 child->computeLayout(ctx, childC, fontCache);
             }
 
-
+            // Rounding remainder → last flex child gets any leftover pixels.
+            // Again: only the constraints carry the size, no field pre-write.
             if (lastFlex) {
                 int leftover = remainingWidth - allocated;
                 if (leftover > 0) {
@@ -204,10 +237,10 @@ public:
         int naturalH = maxChildHeight + paddingTop + paddingBottom;
         int finalH;
         if (self.maxHeight >= kUnbounded) {
-
+            // Unbounded parent — shrink-wrap
             finalH = self.clampHeight(naturalH);
         } else {
-
+            // Finite parent — fill available height (Flutter default)
             finalH = self.clampHeight(self.maxHeight);
         }
 
@@ -365,6 +398,7 @@ private:
 };
 
 
+
 class ColumnWidget : public Widget {
 public:
     MainAxisSize mainAxisSize = MainAxisSize::Max;
@@ -419,7 +453,6 @@ public:
                 int sliceH = (remainingHeight * child->flex) / totalFlex;
                 allocated += sliceH;
 
-
                 BoxConstraints childC(
                     0,      content.maxWidth, // loose width
                     sliceH, sliceH            // tight height
@@ -465,14 +498,14 @@ public:
         int naturalW = maxChildWidth + paddingLeft + paddingRight;
         int finalW;
         if (self.maxWidth >= kUnbounded) {
-
+            // Unbounded parent — shrink-wrap, same as before
             finalW = self.clampWidth(naturalW);
         } else {
-
+            // Finite parent — fill available width (Flutter default)
             finalW = self.clampWidth(self.maxWidth);
         }
 
-
+        // Main axis sizing
         int finalH = (mainAxisSize == MainAxisSize::Max)
                    ? self.clampHeight(content.maxHeight + paddingTop + paddingBottom)
                    : self.clampHeight(naturalH);
@@ -833,7 +866,6 @@ private:
 };
 
 
-
 class ContainerWidget : public Widget {
 public:
     void computeLayout(GraphicsContext &ctx,
@@ -911,13 +943,13 @@ public:
             painter.drawBorder(x, y, width, height, borderRadius,
                                getCurrentBorderColor(), borderWidth);
 
-        // ── Clip children so overflow stripes are always visible on top ───────
+    
         painter.pushClipRect(x, y, width, height);
         for (auto &child : children)
             child->render(ctx, fontCache);
         painter.popClipRect();
 
-        // Rendered after pop so stripe is never painted over by children
+
         if (overflow.hasOverflow())
             FluxOverflow::render(painter, fontCache, overflow, x, y, width, height);
 
@@ -1123,18 +1155,7 @@ public:
     }
 };
 
-// ============================================================================
-// SizedBoxWidget
-//
-// Forces its child into an exact size.  If only width OR height is given,
-// the other axis is left auto (pass 0 to mean "auto" for that axis).
-//
-// Usage:
-//   SizedBox(800, 0,  child)  → width=800, height=auto (shrinks to child)
-//   SizedBox(0,  400, child)  → width=auto, height=400
-//   SizedBox(800, 400, child) → both fixed
-//   SizedBox(800, 0)          → spacer with fixed width, no child needed
-// ============================================================================
+
 
 class SizedBoxWidget : public Widget {
 public:
