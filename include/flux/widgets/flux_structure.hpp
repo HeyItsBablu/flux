@@ -17,8 +17,8 @@ struct OverlayEntry {
   std::function<void(GraphicsContext &, FontCache &)>
       renderer; // nullptr for popup overlays
   int zIndex = 0;
- 
-  // Full entry — widget renders into back-buffer 
+
+  // Full entry — widget renders into back-buffer
   OverlayEntry(Widget *w, std::function<void(GraphicsContext &, FontCache &)> r,
                int z = 0)
       : widget(w), renderer(r), zIndex(z) {}
@@ -32,13 +32,6 @@ struct OverlayEntry {
 class ScaffoldWidget : public Widget {
 private:
   std::vector<OverlayEntry> overlayStack;
-
-  //   // Overlays in ascending zIndex order (lowest first, highest last = on
-  //   top)
-  // for (const auto &entry : overlayStack) {
-  //   if (entry.renderer)
-  //     entry.renderer(hdc, fontCache);
-  // }
 
   void sortOverlayStack() {
     std::stable_sort(overlayStack.begin(), overlayStack.end(),
@@ -61,7 +54,6 @@ public:
     markNeedsPaint();
   }
 
-  // --- Overlay Management (moved from FluxAppWidget) ---
   void addOverlay(Widget *widget,
                   std::function<void(GraphicsContext &, FontCache &)> renderer,
                   int zIndex = 0) {
@@ -120,48 +112,63 @@ public:
 
   // --- Render (overlays painted after normal tree) ---
   void render(GraphicsContext &ctx, FontCache &fontCache) override {
-      for (auto &child : children)
-          child->render(ctx, fontCache);
+    for (auto &child : children)
+      child->render(ctx, fontCache);
 
-      for (const auto &entry : overlayStack) {
-          if (entry.renderer) {
-              // Win32: full overlay with custom renderer (DIB popup paints itself,
-              // renderer is a no-op lambda; or inline renderers for dialog overlays)
-              entry.renderer(ctx, fontCache);
-          }
-#if defined(__linux__) && !defined(__ANDROID__)
-              else if (entry.widget) {
-            // Linux: Cairo-based popup — renderOverlay saves/translates/clips
-            if (auto *host = dynamic_cast<OverlayHost *>(entry.widget))
-                host->renderOverlay(ctx, fontCache);
-        }
-#elif defined(__ANDROID__)
-          else if (entry.widget) {
-              // Android: NanoVG-based popup — renderOverlay offsets into the
-              // current frame. No separate window, no Cairo, same concept as Linux.
-              if (auto *host = dynamic_cast<OverlayHost *>(entry.widget))
-                  host->renderOverlay(ctx, fontCache);
-          }
-#endif
+    for (const auto &entry : overlayStack) {
+      if (entry.renderer) {
+        entry.renderer(ctx, fontCache);
       }
+#if defined(__linux__) && !defined(__ANDROID__)
+      else if (entry.widget) {
+        if (auto *host = dynamic_cast<OverlayHost *>(entry.widget))
+          host->renderOverlay(ctx, fontCache);
+      }
+#elif defined(__ANDROID__)
+      else if (entry.widget) {
+        if (auto *host = dynamic_cast<OverlayHost *>(entry.widget))
+          host->renderOverlay(ctx, fontCache);
+      }
+#endif
+    }
 
-      needsPaint = false;
+    needsPaint = false;
   }
 };
 
 // --- AppBar Widget ---
 class AppBarWidget : public Widget {
 public:
+  // ── Fix 14 ─────────────────────────────────────────────────────────────────
+  // The old class had no declared height default, so if autoHeight were ever
+  // true (e.g. someone constructed an AppBarWidget directly without calling
+  // the AppBar() factory) height would be 0 and the title child would be given
+  // a zero-height constraint, producing an invisible bar.
+  //
+  // Fix: store the canonical AppBar height as a named constant and initialise
+  // height in the constructor so the widget is well-defined regardless of how
+  // it is constructed.  The factory AppBar() still overrides this, but now
+  // it is redundant-safe rather than the sole source of correctness.
+  // ───────────────────────────────────────────────────────────────────────────
+  static constexpr int kDefaultHeight = 56;
+
+  AppBarWidget() {
+    height     = kDefaultHeight;
+    autoHeight = false;   // AppBar height is always fixed — never shrink-wrap
+  }
+
   void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     if (autoWidth)
       width = constraints.maxWidth;
 
+    // autoHeight is always false (set in constructor), so height is the fixed
+    // value.  We only need to lay out the title child if one exists.
     if (!children.empty()) {
       children[0]->computeLayout(
           ctx,
-          BoxConstraints::loose(width - paddingLeft - paddingRight,
-                                height - paddingTop - paddingBottom),
+          BoxConstraints::loose(width  - paddingLeft - paddingRight,
+                                height - paddingTop  - paddingBottom),
           fontCache);
     }
 
@@ -169,18 +176,39 @@ public:
     needsLayout = false;
   }
 
-  void positionChildren(int contentX, int contentY, int /*contentWidth*/,
-                        int /*contentHeight*/) override {
+  // ── Fix 13 ─────────────────────────────────────────────────────────────────
+  // The old positionChildren placed the title at contentX (left edge), so it
+  // was always left-aligned regardless of the title widget's own alignment
+  // or the AppBar's crossAxisAlignment.
+  //
+  // Flutter's AppBar centers the title horizontally and vertically within the
+  // bar.  We replicate that here: the title child is centered on both axes
+  // within the content area (the area inside the AppBar's padding).
+  //
+  // If the title widget is wider than the content area it falls back to
+  // left-aligned (same as Flutter's centerTitle overflow behaviour).
+  // ───────────────────────────────────────────────────────────────────────────
+  void positionChildren(int contentX, int contentY,
+                        int contentWidth, int contentHeight) override {
     if (!children.empty()) {
       auto &child = children[0];
 
-      child->x = contentX;
-      child->y = contentY;
+      // Center horizontally; fall back to left if title is too wide.
+      int cx = (child->width <= contentWidth)
+             ? contentX + (contentWidth - child->width) / 2
+             : contentX;
+
+      // Center vertically.
+      int cy = contentY + (contentHeight - child->height) / 2;
+
+      child->x = cx;
+      child->y = cy;
 
       child->positionChildren(
-          child->x + child->paddingLeft, child->y + child->paddingTop,
-          child->width - child->paddingLeft - child->paddingRight,
-          child->height - child->paddingTop - child->paddingBottom);
+          child->x + child->paddingLeft,
+          child->y + child->paddingTop,
+          child->width  - child->paddingLeft - child->paddingRight,
+          child->height - child->paddingTop  - child->paddingBottom);
     }
   }
 };
@@ -206,22 +234,23 @@ inline WidgetPtr AppBar(const std::string &title) {
 
   w->hasBackground = true;
   w->backgroundColor = Color::fromRGB(33, 150, 243);
-  w->height = 56;
-  w->autoHeight = false;
+  // height and autoHeight are already set correctly by the AppBarWidget
+  // constructor — no need to repeat them here.
 
+  // The title widget has no padding of its own; centering is handled by
+  // AppBarWidget::positionChildren so the padding on the Text just adds
+  // visual breathing room around the glyph, not an offset from the left edge.
   auto titleWidget = Text(title)
                          ->setFontSize(20)
                          ->setFontWeight(FontWeight::Bold)
-                         ->setTextColor(Color::fromRGB(255, 255, 255))
-                         ->setPadding(20);
+                         ->setTextColor(Color::fromRGB(255, 255, 255));
 
   w->addChild(titleWidget);
-
   return w;
 }
 
 inline WidgetPtr Scaffold(WidgetPtr appBar = nullptr,
-                          WidgetPtr body = nullptr) {
+                          WidgetPtr body   = nullptr) {
   auto w = std::make_shared<ScaffoldWidget>();
 
   w->hasBackground = true;
@@ -230,16 +259,13 @@ inline WidgetPtr Scaffold(WidgetPtr appBar = nullptr,
   auto column = std::make_shared<ColumnWidget>();
   column->setSpacing(0);
 
-  if (appBar) {
+  if (appBar)
     column->addChild(appBar);
-  }
 
-  if (body) {
+  if (body)
     column->addChild(Expanded(body));
-  }
 
   w->addChild(column);
-
   return w;
 }
 

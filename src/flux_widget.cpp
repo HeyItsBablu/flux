@@ -55,7 +55,6 @@ void Widget::computeLayout(GraphicsContext &ctx,
     if (!visible) { width = height = 0; needsLayout = false; return; }
 
     if (!children.empty()) {
-        // loose: child can be anywhere from 0 up to available space
         children[0]->computeLayout(ctx,
             BoxConstraints::loose(
                 constraints.maxWidth  - paddingLeft - paddingRight,
@@ -75,6 +74,7 @@ void Widget::computeLayout(GraphicsContext &ctx,
         onMount();
     }
 }
+
 // ============================================================================
 // Widget::positionChildren
 // ============================================================================
@@ -92,20 +92,54 @@ void Widget::positionChildren(int contentX, int contentY, int contentWidth,
   }
 }
 
+// ============================================================================
+// Widget::render
+//
+// Fix: clip children to the widget's own bounds when hasBorder is true.
+//
+// Previously the base render() never clipped its children, so a child widget
+// that overflowed its parent could paint over the border or bleed outside it.
+// ContainerWidget already did this correctly (it has an explicit clip pass).
+// The base Widget::render() now mirrors that behaviour:
+//
+//   • No border  → no clip (unchanged, zero-cost path for the common case)
+//   • Has border → push clip, render children, pop clip, then draw the border
+//                  on top so it is never painted over by children
+//
+// Drawing the border AFTER the clip-pop ensures the border stroke is always
+// fully visible on top of any child content that reaches the edge, which
+// matches browser/Flutter behaviour.
+// ============================================================================
+
 void Widget::render(GraphicsContext &ctx, FontCache &fontCache) {
   if (!visible)
     return;
+
   Painter painter(ctx);
+
   if (hasBackground)
     painter.fillRoundedRect(x, y, width, height, borderRadius,
                             getCurrentBackgroundColor());
-  if (hasBorder)
+
+  if (hasBorder) {
+    // Clip children to our bounds so they cannot bleed over the border.
+    painter.pushClipRect(x, y, width, height);
+    for (auto &child : children)
+      child->render(ctx, fontCache);
+    painter.popClipRect();
+
+    // Draw border after children so the stroke is always on top.
     painter.drawBorder(x, y, width, height, borderRadius,
                        getCurrentBorderColor(), borderWidth);
-  for (auto &child : children)
-    child->render(ctx, fontCache);
+  } else {
+    // No border — no clip needed, render children directly.
+    for (auto &child : children)
+      child->render(ctx, fontCache);
+  }
+
   needsPaint = false;
 }
+
 // ============================================================================
 // Widget::drawRoundedRectangle
 // ============================================================================

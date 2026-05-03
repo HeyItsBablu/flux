@@ -54,7 +54,16 @@ private:
   Widget *focusedWidget = nullptr;
 
   static FluxUI *currentInstance;
-  std::unordered_map<std::string, std::shared_ptr<void>> appSingletons_;
+
+  // ── Fix: getOrCreateSingleton type-safe key ────────────────────────────
+  // The map value is void* to the type-erased singleton, keyed by a stable
+  // per-type pointer.  We use the address of a function-local static — one
+  // unique static exists per instantiation of the function template, giving
+  // us a zero-cost, ABI-stable, collision-free key that works correctly
+  // across DLL boundaries (unlike typeid(T).name() which is
+  // implementation-defined and can collide or vary between translation units).
+  // ──────────────────────────────────────────────────────────────────────────
+  std::unordered_map<const void *, std::shared_ptr<void>> appSingletons_;
 
   // No Win32 types in any of these signatures
   void wireScaffoldToWidgets(ScaffoldWidget *scaffold, Widget *widget);
@@ -121,15 +130,27 @@ public:
     return &window;
   }
 
-  void setResizeCursorH(); // horizontal resize (SIZEWE)
-  void setResizeCursorV(); // vertical resize   (SIZENS)
-  void setDefaultCursor(); // arrow
+  void setResizeCursorH();
+  void setResizeCursorV();
+  void setDefaultCursor();
 
   template <typename T>
   std::shared_ptr<T>
   getOrCreateSingleton(std::function<std::shared_ptr<T>()> factory)
   {
-    const std::string key = typeid(T).name();
+    // ── Fix: type-safe singleton key ────────────────────────────────────────
+    // A function-template static local has exactly one address per type T
+    // across the entire program (the linker folds identical instantiations).
+    // Using that address as the map key gives us:
+    //   • No string allocation or hashing of implementation-defined names
+    //   • Correct behaviour across DLL boundaries (typeid(T).name() is not
+    //     guaranteed unique there)
+    //   • Zero risk of accidental collision between two types whose
+    //     typeid().name() strings happen to be the same
+    // ────────────────────────────────────────────────────────────────────────
+    static const int typeTag = 0;           // one per T, address is the key
+    const void *key = static_cast<const void *>(&typeTag);
+
     auto it = appSingletons_.find(key);
     if (it == appSingletons_.end())
     {

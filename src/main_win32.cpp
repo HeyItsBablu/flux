@@ -13,8 +13,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     // Build widget first — it carries all config now
     app.build([&]() { return createApp(&app); });
 
-    auto* cfg = static_cast<FluxAppWidget*>(
-        FluxAppWidget::getInstance());
+    // getInstance() now returns shared_ptr<FluxAppWidget>, not a raw pointer.
+    // Keep the shared_ptr alive for the duration of the config reads so the
+    // widget cannot be destroyed between getInstance() and the first use.
+    auto cfg = FluxAppWidget::getInstance();
 
     int w = cfg->windowWidth;
     int h = cfg->windowHeight;

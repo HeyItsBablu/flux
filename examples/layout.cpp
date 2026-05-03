@@ -2,7 +2,7 @@
 
 #include <numeric>
 
-class MyApp : public Component {
+class MyApp : public Widget {
   State<int> boxCount;
   State<double> fillRatio;
   State<std::vector<int>> boxIndices;

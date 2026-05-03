@@ -49,11 +49,14 @@ public:
                        const BoxConstraints &constraints,
                        FontCache &fontCache) override {
 
-        // Parent already set width/height to the allocated flex size via
-        // tight constraints.  Strip our padding and pass down.
+        // The parent (Row/Column) passes a TIGHT main-axis constraint and a
+        // LOOSE cross-axis constraint.  This widget derives its entire size
+        // from those constraints — it never reads its own width/height fields
+        // as inputs.  The parent must NOT pre-set width/height before calling
+        // computeLayout; the constraints are the single source of truth.
         //
-        // Main axis  : tight  (min == max  for that axis)
-        // Cross axis : loose  (min == 0,   max == allocated cross extent)
+        // Main axis  : tight  (constraints.min == constraints.max)
+        // Cross axis : loose  (constraints.min == 0)
 
         int contentW = std::max(0, constraints.maxWidth  - paddingLeft - paddingRight);
         int contentH = std::max(0, constraints.maxHeight - paddingTop  - paddingBottom);
@@ -131,7 +134,7 @@ public:
 // RenderFlex (Axis.horizontal):
 //
 //   PASS 1 — non-flex children  (isExpanded() == false)
-//     Constraints: width=UNBOUNDED(0..10000), height=loose(0..maxHeight)
+//     Constraints: width=UNBOUNDED(0..kUnbounded), height=loose(0..maxHeight)
 //     Each child reports its natural size.
 //     fixedWidth accumulates their widths + spacing.
 //
@@ -176,10 +179,11 @@ public:
             if (child->isExpanded()) {
                 totalFlex += child->flex;
             } else {
-                // Unbounded width → child takes exactly what it needs.
-                // Loose height   → child picks its natural height.
+                // Fix 3 (Row): use kUnbounded instead of the magic number 10000
+                // for the unbounded main axis, so very wide children are not
+                // artificially clamped before they report their natural size.
                 BoxConstraints childC(
-                    0, 10000,            // main axis : unbounded
+                    0, kUnbounded,       // main axis : truly unbounded
                     0, content.maxHeight // cross axis : bounded by parent
                 );
                 child->computeLayout(ctx, childC, fontCache);
@@ -201,18 +205,21 @@ public:
             for (auto &child : children) {
                 if (!child->visible || !child->isExpanded()) continue;
 
-                lastFlex      = child.get();
-                int sliceW    = totalFlex > 0
-                              ? (remainingWidth * child->flex) / totalFlex
-                              : 0;
-                allocated    += sliceW;
+                lastFlex   = child.get();
+                int sliceW = (remainingWidth * child->flex) / totalFlex;
+                allocated += sliceW;
 
-                // Main axis  → TIGHT  (must fill its slice)
-                // Cross axis → LOOSE  (can be as short as it wants)
-                child->autoWidth  = false;
-                child->autoHeight = true;
-                child->width      = sliceW;
-
+                // Single source of truth: the BoxConstraints alone carry the
+                // allocated size.  The old code also wrote child->width =
+                // sliceW and toggled child->autoWidth before calling
+                // computeLayout, but ExpandedWidget::computeLayout derives
+                // its size entirely from constraints.min/maxWidth — the field
+                // write was redundant and created two sources of truth that
+                // could silently diverge (e.g. after a hot-reload or if
+                // ExpandedWidget is subclassed).
+                //
+                // Main axis  → TIGHT  (min == max == sliceW)
+                // Cross axis → LOOSE  (0 .. content.maxHeight)
                 BoxConstraints childC(
                     sliceW, sliceW,          // tight width
                     0,      content.maxHeight // loose height
@@ -220,15 +227,15 @@ public:
                 child->computeLayout(ctx, childC, fontCache);
             }
 
-            // Rounding remainder → last flex child
+            // Rounding remainder → last flex child gets any leftover pixels.
+            // Again: only the constraints carry the size, no field pre-write.
             if (lastFlex) {
                 int leftover = remainingWidth - allocated;
                 if (leftover > 0) {
-                    lastFlex->width += leftover;
-                    // Re-layout with corrected width so child internals are right
+                    int correctedW = lastFlex->width + leftover;
                     lastFlex->computeLayout(
                         ctx,
-                        BoxConstraints(lastFlex->width, lastFlex->width,
+                        BoxConstraints(correctedW, correctedW,
                                        0, content.maxHeight),
                         fontCache);
                 }
@@ -261,10 +268,51 @@ public:
                    ? self.clampWidth(content.maxWidth + paddingLeft + paddingRight)
                    : self.clampWidth(naturalW);
 
-        // Cross axis always shrinks to tallest child
-        int finalH = self.clampHeight(
-            maxChildHeight + paddingTop + paddingBottom
-        );
+        // ── Fix 12 : Row cross-axis (height) ─────────────────────────────────
+        // Flutter's Row fills the parent's height on the cross axis by default.
+        // The old code always shrink-wrapped to the tallest child, which broke
+        // CrossAxisAlignment::Center/End because the Row had no spare height.
+        //
+        // Rule (mirrors Flutter RenderFlex):
+        //   • If the parent offers a finite height → fill it  (Max behaviour)
+        //   • If the parent offers infinite height → shrink-wrap to tallest child
+        // ─────────────────────────────────────────────────────────────────────
+        int naturalH = maxChildHeight + paddingTop + paddingBottom;
+        int finalH;
+        if (self.maxHeight >= kUnbounded) {
+            // Unbounded parent — shrink-wrap
+            finalH = self.clampHeight(naturalH);
+        } else {
+            // Finite parent — fill available height (Flutter default)
+            finalH = self.clampHeight(self.maxHeight);
+        }
+
+        // ── PASS 3b : Stretch re-layout ───────────────────────────────────────
+        // CrossAxisAlignment::Stretch must give each child a TIGHT cross-axis
+        // constraint equal to the Row's own content height, then re-run
+        // computeLayout so the child's internal subtree (its own children,
+        // backgrounds, padding) re-flows to the new size.
+        //
+        // This cannot be done in positionChildren because ctx/fontCache are
+        // unavailable there.  Doing it here, while we still have them, is the
+        // correct fix — Flutter's RenderFlex also stretches during the layout
+        // phase, not the positioning phase.
+        // ─────────────────────────────────────────────────────────────────────
+        if (crossAxisAlignment == CrossAxisAlignment::Stretch) {
+            int stretchH = finalH - paddingTop - paddingBottom;
+            for (auto &child : children) {
+                if (!child->visible) continue;
+                int childStretchH = stretchH - child->marginTop - child->marginBottom;
+                if (childStretchH > 0 && child->height != childStretchH) {
+                    child->autoHeight = false;
+                    child->computeLayout(
+                        ctx,
+                        BoxConstraints(child->width, child->width,
+                                       childStretchH, childStretchH),
+                        fontCache);
+                }
+            }
+        }
 
         // ── Overflow detection ────────────────────────────────────────────────
         overflow.reset();
@@ -363,7 +411,6 @@ public:
 
     // ── Fluent setters ────────────────────────────────────────────────────────
 
-
     std::shared_ptr<RowWidget> setMainAxisSize(MainAxisSize s) {
         mainAxisSize = s; markNeedsLayout();
         return std::static_pointer_cast<RowWidget>(shared_from_this());
@@ -409,7 +456,7 @@ private:
 // Lays out children vertically.  Mirror of RowWidget for the vertical axis.
 //
 //   PASS 1 — non-flex children
-//     Constraints: width=loose(0..maxWidth), height=UNBOUNDED(0..10000)
+//     Constraints: width=loose(0..maxWidth), height=UNBOUNDED(0..kUnbounded)
 //
 //   PASS 2 — flex children
 //     remainingHeight = maxHeight - fixedHeight
@@ -449,11 +496,12 @@ public:
             if (child->isExpanded()) {
                 totalFlex += child->flex;
             } else {
-                // Loose width  → child takes natural width up to maxWidth
-                // Unbounded height → child takes natural height
+                // Fix 3 (Column): use kUnbounded instead of the magic number
+                // 10000 for the unbounded main axis, so very tall children
+                // are not artificially clamped before reporting natural size.
                 BoxConstraints childC(
                     0, content.maxWidth, // cross axis : bounded
-                    0, 10000             // main axis  : unbounded
+                    0, kUnbounded        // main axis  : truly unbounded
                 );
                 child->computeLayout(ctx, childC, fontCache);
                 fixedHeight += child->height
@@ -474,18 +522,17 @@ public:
             for (auto &child : children) {
                 if (!child->visible || !child->isExpanded()) continue;
 
-                lastFlex      = child.get();
-                int sliceH    = totalFlex > 0
-                              ? (remainingHeight * child->flex) / totalFlex
-                              : 0;
-                allocated    += sliceH;
+                lastFlex   = child.get();
+                int sliceH = (remainingHeight * child->flex) / totalFlex;
+                allocated += sliceH;
 
-                // Main axis  → TIGHT height
-                // Cross axis → LOOSE width
-                child->autoWidth  = true;
-                child->autoHeight = false;
-                child->height     = sliceH;
-
+                // Single source of truth: BoxConstraints alone carry the
+                // allocated size.  Removed child->height = sliceH and the
+                // autoWidth/autoHeight toggles — ExpandedWidget derives its
+                // size entirely from constraints.min/maxHeight.
+                //
+                // Main axis  → TIGHT height  (min == max == sliceH)
+                // Cross axis → LOOSE width   (0 .. content.maxWidth)
                 BoxConstraints childC(
                     0,      content.maxWidth, // loose width
                     sliceH, sliceH            // tight height
@@ -493,14 +540,15 @@ public:
                 child->computeLayout(ctx, childC, fontCache);
             }
 
+            // Rounding remainder → last flex child.
             if (lastFlex) {
                 int leftover = remainingHeight - allocated;
                 if (leftover > 0) {
-                    lastFlex->height += leftover;
+                    int correctedH = lastFlex->height + leftover;
                     lastFlex->computeLayout(
                         ctx,
                         BoxConstraints(0, content.maxWidth,
-                                       lastFlex->height, lastFlex->height),
+                                       correctedH, correctedH),
                         fontCache);
                 }
             }
@@ -527,15 +575,58 @@ public:
 
         int naturalH = totalChildHeight + paddingTop + paddingBottom;
 
-        // Cross axis always shrinks to widest child
-        int finalW = self.clampWidth(
-            maxChildWidth + paddingLeft + paddingRight
-        );
+        // ── Fix 11 : Column cross-axis (width) ───────────────────────────────
+        // Flutter's Column fills the parent's width on the cross axis by
+        // default (equivalent to CrossAxisAlignment != Stretch still expands
+        // the Column itself to the full available width, children are then
+        // positioned within that space according to crossAxisAlignment).
+        // The old code always shrink-wrapped to the widest child, which broke
+        // Center/End/SpaceBetween cross-axis alignment because the Column had
+        // no extra width to align within.
+        //
+        // Rule (mirrors Flutter RenderFlex):
+        //   • If the parent offers a finite width  → fill it  (Max behaviour)
+        //   • If the parent offers infinite width  → shrink-wrap to widest child
+        //
+        // "Infinite" here means the incoming maxWidth is kUnbounded, which is
+        // the sentinel we set in fix 1/3.  Any real pixel value is finite.
+        // ─────────────────────────────────────────────────────────────────────
+        int naturalW = maxChildWidth + paddingLeft + paddingRight;
+        int finalW;
+        if (self.maxWidth >= kUnbounded) {
+            // Unbounded parent — shrink-wrap, same as before
+            finalW = self.clampWidth(naturalW);
+        } else {
+            // Finite parent — fill available width (Flutter default)
+            finalW = self.clampWidth(self.maxWidth);
+        }
 
         // Main axis sizing
         int finalH = (mainAxisSize == MainAxisSize::Max)
                    ? self.clampHeight(content.maxHeight + paddingTop + paddingBottom)
                    : self.clampHeight(naturalH);
+
+        // ── PASS 3b : Stretch re-layout ───────────────────────────────────────
+        // CrossAxisAlignment::Stretch must give each child a TIGHT cross-axis
+        // width equal to the Column's own content width, then re-run
+        // computeLayout so the child's internal subtree re-flows.
+        // Same reasoning as the Row stretch pass above.
+        // ─────────────────────────────────────────────────────────────────────
+        if (crossAxisAlignment == CrossAxisAlignment::Stretch) {
+            int stretchW = finalW - paddingLeft - paddingRight;
+            for (auto &child : children) {
+                if (!child->visible) continue;
+                int childStretchW = stretchW - child->marginLeft - child->marginRight;
+                if (childStretchW > 0 && child->width != childStretchW) {
+                    child->autoWidth = false;
+                    child->computeLayout(
+                        ctx,
+                        BoxConstraints(childStretchW, childStretchW,
+                                       child->height, child->height),
+                        fontCache);
+                }
+            }
+        }
 
         // ── Overflow detection ────────────────────────────────────────────────
         overflow.reset();
