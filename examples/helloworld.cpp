@@ -15,7 +15,15 @@ public:
                 ->setWidth(300)
                 ->setHeight(200)
 
-                ->setBorderRadius(10)));
+                ->setBorderRadius(10)),
+        FAB("+",
+            [this] {
+              std::cout << "FAB pressed!" << std::endl;
+              counter++;
+            })
+            ->setPosition(FABPosition::BottomRight)
+            ->setColor(Color::fromRGB(33, 150, 243))
+            ->setLabel("Add Item"));
   }
 };
 

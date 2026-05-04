@@ -465,8 +465,312 @@ private:
 };
 
 // ============================================================================
+// FLOATING ACTION BUTTON WIDGET
+// ============================================================================
+
+enum class FABPosition {
+  BottomRight,
+  BottomLeft,
+  BottomCenter,
+  TopRight,
+  TopLeft,
+  TopCenter,
+};
+
+enum class FABSize {
+  Small,
+  Regular,
+  Large,
+};
+
+class FABWidget : public Widget {
+public:
+  FABSize fabSize = FABSize::Regular;
+
+  // Positioning
+  FABPosition position = FABPosition::BottomRight;
+  int marginX = 24;
+  int marginY = 24;
+
+  // Extended label (empty = icon-only)
+  std::string label;
+
+  // Icon (simple text glyph — swap for your icon system if you have one)
+  std::string icon = "+";
+
+  // Colors
+  Color fabColor = Color::fromRGB(33, 150, 243);
+  Color fabHoverColor = Color::fromRGB(25, 118, 210);
+  Color fabPressColor = Color::fromRGB(13, 71, 161);
+  Color iconColor = Color::fromRGB(255, 255, 255);
+  Color labelColor = Color::fromRGB(255, 255, 255);
+  Color shadowColor = Color::fromRGBA(0, 0, 0, 80);
+
+  int iconFontSize = 22;
+  int labelFontSize = 14;
+  int shadowOffset = 4;
+  int shadowBlur = 0; // GDI has no blur — we stack offset rects
+
+  std::function<void()> onPressed;
+
+  FABWidget() {
+    isFocusable = true;
+    hasBackground = true;
+    autoWidth = true;
+    autoHeight = true;
+  }
+
+  // ── Layout ────────────────────────────────────────────────────────────
+  void computeLayout(GraphicsContext &ctx, const BoxConstraints &,
+                     FontCache &fontCache) override {
+    _computeSize(ctx, fontCache);
+    needsLayout = false;
+  }
+
+  void positionChildren(int, int, int, int) override {}
+
+  // Called by ScaffoldWidget after normal layout to pin FAB to scaffold bounds
+  void positionInScaffold(int scaffoldX, int scaffoldY, int scaffoldW,
+                          int scaffoldH) {
+    switch (position) {
+    case FABPosition::BottomRight:
+      x = scaffoldX + scaffoldW - width - marginX;
+      y = scaffoldY + scaffoldH - height - marginY;
+      break;
+    case FABPosition::BottomLeft:
+      x = scaffoldX + marginX;
+      y = scaffoldY + scaffoldH - height - marginY;
+      break;
+    case FABPosition::BottomCenter:
+      x = scaffoldX + (scaffoldW - width) / 2;
+      y = scaffoldY + scaffoldH - height - marginY;
+      break;
+    case FABPosition::TopRight:
+      x = scaffoldX + scaffoldW - width - marginX;
+      y = scaffoldY + marginY;
+      break;
+    case FABPosition::TopLeft:
+      x = scaffoldX + marginX;
+      y = scaffoldY + marginY;
+      break;
+    case FABPosition::TopCenter:
+      x = scaffoldX + (scaffoldW - width) / 2;
+      y = scaffoldY + marginY;
+      break;
+    }
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────
+  void render(GraphicsContext &ctx, FontCache &fontCache) override {
+    Painter painter(ctx);
+
+    // Shadow — stacked offset fills for a soft drop shadow effect
+    for (int i = shadowOffset; i >= 1; i--) {
+      uint8_t alpha = static_cast<uint8_t>(shadowColor.a * i / shadowOffset);
+      Color sc =
+          Color::fromRGBA(shadowColor.r, shadowColor.g, shadowColor.b, alpha);
+      painter.fillRoundedRect(x + i, y + i, width, height, _radius(), sc);
+    }
+
+    // Body
+    Color bodyColor = _pressed    ? fabPressColor
+                      : isHovered ? fabHoverColor
+                                  : fabColor;
+    painter.fillRoundedRect(x, y, width, height, _radius(), bodyColor);
+
+    // Icon
+    NativeFont iconFont = fontCache.getFont(iconFontSize, FontWeight::Bold);
+    std::wstring wicon = toWideString(icon);
+
+    if (label.empty()) {
+      // Icon centered
+      painter.drawText(wicon, x, y, width, height, iconFont, iconColor,
+                       DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    } else {
+      // Icon left, label right — extended FAB
+      int iconArea = height; // square left section
+      painter.drawText(wicon, x + _paddingH(), y, iconArea - _paddingH(),
+                       height, iconFont, iconColor,
+                       DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+      NativeFont lblFont = fontCache.getFont(labelFontSize, FontWeight::Bold);
+      std::wstring wlabel = toWideString(label);
+      painter.drawText(wlabel, x + iconArea, y, width - iconArea - _paddingH(),
+                       height, lblFont, labelColor,
+                       DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    }
+
+    needsPaint = false;
+  }
+
+  // ── Mouse Events ──────────────────────────────────────────────────────
+  bool handleMouseDown(int mx, int my) override {
+    if (!_hit(mx, my))
+      return false;
+    _pressed = true;
+    markNeedsPaint();
+    if (auto *ui = FluxUI::getCurrentInstance())
+      ui->captureMouseInput();
+    return true;
+  }
+
+  bool handleMouseUp(int mx, int my) override {
+    if (!_pressed)
+      return false;
+    _pressed = false;
+    markNeedsPaint();
+    if (auto *ui = FluxUI::getCurrentInstance())
+      ui->releaseMouseInput();
+    if (_hit(mx, my) && onPressed)
+      onPressed();
+    return true;
+  }
+
+  bool handleMouseMove(int mx, int my) override {
+    bool wasHovered = isHovered;
+    isHovered = _hit(mx, my);
+    if (isHovered != wasHovered) {
+      if (onHover)
+        onHover(isHovered);
+      markNeedsPaint();
+    }
+    return _pressed;
+  }
+
+  bool handleFocus(bool focused) override {
+    isFocused = focused;
+    markNeedsPaint();
+    return true;
+  }
+
+  bool handleKeyDown(int keyCode) override {
+    if (keyCode == Key::Return || keyCode == Key::Space) {
+      if (onPressed)
+        onPressed();
+      return true;
+    }
+    return false;
+  }
+
+  // ── Builder API ───────────────────────────────────────────────────────
+  std::shared_ptr<FABWidget> setOnPressed(std::function<void()> cb) {
+    onPressed = cb;
+    return self();
+  }
+  std::shared_ptr<FABWidget> setIcon(const std::string &i) {
+    icon = i;
+    markNeedsLayout();
+    return self();
+  }
+  std::shared_ptr<FABWidget> setLabel(const std::string &l) {
+    label = l;
+    markNeedsLayout();
+    return self();
+  }
+  std::shared_ptr<FABWidget> setPosition(FABPosition pos) {
+    position = pos;
+    return self();
+  }
+  std::shared_ptr<FABWidget> setMargin(int mx, int my) {
+    marginX = mx;
+    marginY = my;
+    return self();
+  }
+  std::shared_ptr<FABWidget> setColor(Color c) {
+    fabColor = c;
+    markNeedsPaint();
+    return self();
+  }
+  std::shared_ptr<FABWidget> setHoverColor(Color c) {
+    fabHoverColor = c;
+    markNeedsPaint();
+    return self();
+  }
+  std::shared_ptr<FABWidget> setPressColor(Color c) {
+    fabPressColor = c;
+    markNeedsPaint();
+    return self();
+  }
+  std::shared_ptr<FABWidget> setIconColor(Color c) {
+    iconColor = c;
+    markNeedsPaint();
+    return self();
+  }
+  std::shared_ptr<FABWidget> setShadowColor(Color c) {
+    shadowColor = c;
+    markNeedsPaint();
+    return self();
+  }
+  std::shared_ptr<FABWidget> setSize(FABSize s) {
+    fabSize = s;
+    markNeedsLayout();
+    return self();
+  }
+
+private:
+  bool _pressed = false;
+
+  int _diameter() const {
+    switch (fabSize) {
+    case FABSize::Small:
+      return 40;
+    case FABSize::Large:
+      return 96;
+    default:
+      return 56;
+    }
+  }
+  int _radius() const { return _diameter() / 2; }
+  int _paddingH() const { return _diameter() / 4; }
+
+  void _computeSize(GraphicsContext &ctx, FontCache &fontCache) {
+    int d = _diameter();
+    if (label.empty()) {
+      width = d;
+      height = d;
+    } else {
+      // Measure label text width
+      Painter p(ctx);
+      NativeFont f = fontCache.getFont(labelFontSize, FontWeight::Bold);
+      int tw = 0, th = 0;
+      p.measureText(toWideString(label), f, tw, th);
+      width = d + tw + _paddingH() * 2; // icon area + label + right pad
+      height = d;
+    }
+  }
+
+  bool _hit(int mx, int my) const {
+    return mx >= x && mx < x + width && my >= y && my < y + height;
+  }
+
+  std::shared_ptr<FABWidget> self() {
+    return std::static_pointer_cast<FABWidget>(shared_from_this());
+  }
+};
+
+// ============================================================================
 // FACTORY
 // ============================================================================
+
+using FABWidgetPtr = std::shared_ptr<FABWidget>;
+
+inline FABWidgetPtr FAB(const std::string &icon = "+",
+                        std::function<void()> onPressed = nullptr) {
+  auto w = std::make_shared<FABWidget>();
+  w->icon = icon;
+  w->onPressed = onPressed;
+  return w;
+}
+
+inline FABWidgetPtr ExtendedFAB(const std::string &icon,
+                                const std::string &label,
+                                std::function<void()> onPressed = nullptr) {
+  auto w = std::make_shared<FABWidget>();
+  w->icon = icon;
+  w->label = label;
+  w->onPressed = onPressed;
+  return w;
+}
 
 using GestureDetectorPtr = std::shared_ptr<GestureDetectorWidget>;
 
