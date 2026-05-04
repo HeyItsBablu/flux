@@ -2,7 +2,7 @@
 
 #ifdef _WIN32
 #include <windowsx.h>
-#include "flux/flux_http_platform.hpp"   
+#include "flux/flux_http_platform.hpp"
 
 GraphicsContext PlatformWindow::getMeasureContext() const {
   return GraphicsContext(GetDC(hwnd ? hwnd : nullptr));
@@ -76,7 +76,6 @@ void PlatformWindow::setDefaultCursor() { SetCursor(LoadCursor(nullptr, IDC_ARRO
 // PlatformWindow::create
 // ============================================================================
 
-
 bool PlatformWindow::create(const std::string &title, int width, int height,
                             AppInstance hInst, void *userData) {
   startupGdiplus();
@@ -103,10 +102,7 @@ bool PlatformWindow::create(const std::string &title, int width, int height,
   if (!hwnd)
     return false;
 
-
   fluxSetUIWindow(hwnd);
-
-  
 
   updateClientSize();
   return true;
@@ -196,7 +192,6 @@ LRESULT CALLBACK PlatformWindow::WindowProc(HWND hwnd, UINT uMsg,
   }
 
   // ----------------------------------------------------------------
-
   case WM_FLUX_HTTP_RESULT: {
     FluxHttp_Win32_HandleMessage(lParam);
     return 0;
@@ -264,19 +259,19 @@ LRESULT CALLBACK PlatformWindow::WindowProc(HWND hwnd, UINT uMsg,
   case WM_MOUSEWHEEL: {
     if (!self) return 0;
     int delta = GET_WHEEL_DELTA_WPARAM(wParam);
-    int x = GET_X_LPARAM(lParam);
-    int y = GET_Y_LPARAM(lParam);
-    POINT pt = {x, y};
-    ScreenToClient(hwnd, &pt);
+    // Note: WM_MOUSEWHEEL lParam coords are in screen space; we convert
+    // them but the onMouseWheel callback only uses delta, not position.
     if (self->callbacks.onMouseWheel && self->callbacks.onMouseWheel(delta))
       self->invalidate();
     return 0;
   }
 
-  // ----------------------------------------------------------------
+
+
   case WM_LBUTTONDOWN: {
     if (!self) return 0;
-    int x = LOWORD(lParam), y = HIWORD(lParam);
+    int x = GET_X_LPARAM(lParam);
+    int y = GET_Y_LPARAM(lParam);
     if (self->callbacks.onMouseDown && self->callbacks.onMouseDown(x, y))
       self->invalidate();
     return 0;
@@ -285,7 +280,8 @@ LRESULT CALLBACK PlatformWindow::WindowProc(HWND hwnd, UINT uMsg,
   // ----------------------------------------------------------------
   case WM_RBUTTONDOWN: {
     if (!self) return 0;
-    int x = LOWORD(lParam), y = HIWORD(lParam);
+    int x = GET_X_LPARAM(lParam);
+    int y = GET_Y_LPARAM(lParam);
     if (self->callbacks.onRightClick && self->callbacks.onRightClick(x, y))
       self->invalidate();
     return 0;
@@ -294,7 +290,8 @@ LRESULT CALLBACK PlatformWindow::WindowProc(HWND hwnd, UINT uMsg,
   // ----------------------------------------------------------------
   case WM_LBUTTONUP: {
     if (!self) return 0;
-    int x = LOWORD(lParam), y = HIWORD(lParam);
+    int x = GET_X_LPARAM(lParam);
+    int y = GET_Y_LPARAM(lParam);
     if (self->callbacks.onMouseUp && self->callbacks.onMouseUp(x, y))
       self->invalidate();
     return 0;
@@ -310,7 +307,8 @@ LRESULT CALLBACK PlatformWindow::WindowProc(HWND hwnd, UINT uMsg,
     tme.hwndTrack = hwnd;
     TrackMouseEvent(&tme);
 
-    int x = LOWORD(lParam), y = HIWORD(lParam);
+    int x = GET_X_LPARAM(lParam);
+    int y = GET_Y_LPARAM(lParam);
     if (self->callbacks.onMouseMove && self->callbacks.onMouseMove(x, y))
       self->invalidate();
     return 0;
@@ -344,13 +342,13 @@ LRESULT CALLBACK PlatformWindow::WindowProc(HWND hwnd, UINT uMsg,
   }
 
   // ----------------------------------------------------------------
-case WM_TIMER: {
+  case WM_TIMER: {
     if (!self) return 0;
     if (self->callbacks.onTimer)
-        self->callbacks.onTimer((UINT)wParam);
-    self->invalidate();   
+      self->callbacks.onTimer((UINT)wParam);
+    self->invalidate();
     return 0;
-}
+  }
 
   // ----------------------------------------------------------------
   case WM_NCLBUTTONDOWN: {
@@ -362,7 +360,6 @@ case WM_TIMER: {
 
   // ----------------------------------------------------------------
   case WM_DESTROY: {
-
     fluxDrainPendingMessages(hwnd);
 
     if (self)

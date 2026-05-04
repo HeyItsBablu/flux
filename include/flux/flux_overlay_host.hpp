@@ -14,20 +14,7 @@ extern float       FluxAndroid_getDpiScale();
 
 class ScaffoldWidget;
 
-// ============================================================================
-// OverlayHost
-//
-// Win32   : renders into a layered HWND popup (per-pixel alpha via DIB).
-// Linux   : renders directly into the main Cairo surface via the scaffold's
-//           overlay stack — no separate window needed.
-// Android : renders directly into the current NanoVG frame via the scaffold's
-//           overlay stack — no separate window needed.
-//
-// Derived classes implement renderPopupContent() identically on all
-// platforms. The open/close/refresh plumbing differs per platform but
-// the interface seen by ContextMenuWidget, DropdownWidget, ToastWidget,
-// etc. is the same.
-// ============================================================================
+
 
 class OverlayHost {
 public:
@@ -96,29 +83,28 @@ public:
         return pt;
     }
 
+
     static void forwardMouseEvent(HWND popupHwnd, UINT msg, WPARAM wp, LPARAM lp) {
         HWND owner = GetWindow(popupHwnd, GW_OWNER);
         if (!owner) return;
         POINT pt = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
         MapWindowPoints(popupHwnd, owner, &pt, 1);
-        PostMessageW(owner, msg, wp, MAKELPARAM(pt.x, pt.y));
+        SendMessageW(owner, msg, wp, MAKELPARAM(pt.x, pt.y));
     }
 
     // =========================================================================
-    // Linux (Cairo)
+    // Linux (Cairo) and Android (NanoVG) — shared non-Win32 interface
     // =========================================================================
-#elif defined(__linux__) && !defined(__ANDROID__)
+#else // !_WIN32
 
-    // On Linux there is no separate popup window.
-    // showPopup() records where the overlay should be drawn; the scaffold
-    // calls renderOverlay() during the normal paint pass, passing a
-    // GraphicsContext already translated to (originX_, originY_).
+
 
     void showPopup(NativeWindow /*parent*/,
                    int screenX, int screenY,
                    int w, int h,
                    FontCache & /*fontCache*/) {
-        // Convert screen → client for Cairo rendering
+#if defined(__linux__) && !defined(__ANDROID__)
+        // Convert screen → client for Cairo rendering.
         auto *ui = FluxUI::getCurrentInstance();
         if (ui) {
             auto client = ui->screenToClient(screenX, screenY);
@@ -128,6 +114,20 @@ public:
             originX_ = screenX;
             originY_ = screenY;
         }
+#else
+
+        auto *ui = FluxUI::getCurrentInstance();
+        if (ui) {
+            auto sz = ui->getClientSize();
+            (void)sz; // used only in the asserts below
+            assert(screenX <= sz.width  &&
+                   "showPopup: screenX looks like physical px — pass logical px");
+            assert(screenY <= sz.height &&
+                   "showPopup: screenY looks like physical px — pass logical px");
+        }
+        originX_ = screenX;
+        originY_ = screenY;
+#endif
         popupW_  = w;
         popupH_  = h;
         visible_ = true;
@@ -137,10 +137,14 @@ public:
         markDirty_();
     }
 
+
     void hidePopup() {
+        int w = popupW_;
+        int h = popupH_;
         visible_ = false;
-        popupW_ = popupH_ = 0;
-        markDirty_();
+        popupW_  = 0;
+        popupH_  = 0;
+        markDirty_(w, h);
     }
 
     bool popupVisible() const { return visible_; }
@@ -151,98 +155,43 @@ public:
     int overlayH() const { return popupH_; }
 
     // Called by the scaffold's render pass for each overlay in the stack.
-    // ctx is the main cairo_t* — we save/translate/clip/restore around the
-    // derived widget's paint so it sees a local (0,0) origin, matching Win32.
     void renderOverlay(GraphicsContext &ctx, FontCache &fc) {
         if (!visible_ || popupW_ <= 0 || popupH_ <= 0)
             return;
 
+#if defined(__linux__) && !defined(__ANDROID__)
+        // Cairo: save/translate/clip/restore so renderPopupContent sees a
+        // local (0,0) origin matching the Win32 DIB coordinate system.
         cairo_t *cr = ctx.cr;
         cairo_save(cr);
 
-        // Clip to popup bounds so nothing bleeds outside.
         cairo_rectangle(cr, originX_, originY_, popupW_, popupH_);
         cairo_clip(cr);
-
-        // Translate so renderPopupContent sees (0,0) at the popup's origin,
-        // matching the Win32 DIB coordinate system.
         cairo_translate(cr, originX_, originY_);
 
         GraphicsContext localCtx(cr, popupW_, popupH_);
         renderPopupContent(localCtx, fc);
 
         cairo_restore(cr);
-    }
 
-    // =========================================================================
-    // Android (NanoVG)
-    // =========================================================================
-#elif defined(__ANDROID__)
-
-    // On Android there is no separate popup window.
-    // showPopup() records position; the scaffold calls renderOverlay() during
-    // the NanoVG frame. Coordinates are already in client (window) space since
-    // Android has no screen/client distinction for a full-screen activity.
-
-    void showPopup(NativeWindow /*parent*/,
-                   int screenX, int screenY,
-                   int w, int h,
-                   FontCache & /*fontCache*/) {
-        originX_ = screenX;
-        originY_ = screenY;
-        popupW_  = w;
-        popupH_  = h;
-        visible_ = true;
-    }
-
-    void refreshPopup(FontCache & /*fontCache*/) {
-        markDirty_();
-    }
-
-    void hidePopup() {
-        visible_ = false;
-        popupW_ = popupH_ = 0;
-        markDirty_();
-    }
-
-    bool popupVisible() const { return visible_; }
-
-    int overlayX() const { return originX_; }
-    int overlayY() const { return originY_; }
-    int overlayW() const { return popupW_; }
-    int overlayH() const { return popupH_; }
-
-    // Called by the scaffold's render pass.
-    // The NanoVG context is global to the frame (accessed via
-    // FluxAndroid_getVG() inside Painter). We pass a sized GraphicsContext
-    // so renderPopupContent knows its canvas dimensions; the Painter
-    // implementation handles the NVG state internally.
-    // Unlike Cairo there is no save/translate/restore — derived widgets
-    // must offset their draw calls by (originX_, originY_) themselves,
-    // or Painter helpers accept absolute coordinates.
-    void renderOverlay(GraphicsContext &ctx, FontCache &fc) {
-        if (!visible_ || popupW_ <= 0 || popupH_ <= 0) return;
-
+#else // Android / NanoVG
         NVGcontext* vg = FluxAndroid_getVG();
         if (!vg) return;
 
+
         nvgSave(vg);
-        // originX_/originY_ are logical coords, but the current transform already
-        // has nvgScale(dpi,dpi) applied — so we must NOT pass logical coords
-        // directly to nvgTranslate or they get double-scaled.
-        // Reset to identity first, then translate in physical pixels.
+
         float dpi = FluxAndroid_getDpiScale();
-        nvgResetTransform(vg);
-        nvgScale(vg, dpi, dpi);                          // re-apply base scale
-        nvgTranslate(vg, static_cast<float>(originX_),   // now in logical space ✓
-                     static_cast<float>(originY_));
+        nvgTranslate(vg,
+                     static_cast<float>(originX_) * dpi,
+                     static_cast<float>(originY_) * dpi);
 
         GraphicsContext localCtx(popupW_, popupH_);
         renderPopupContent(localCtx, fc);
 
         nvgRestore(vg);
+#endif
     }
-
 
 #endif // platform
 
@@ -329,15 +278,24 @@ private:
                             dibDC_, &srcPt, 0, &bf, ULW_ALPHA);
     }
 
+
     void fixupAlpha_() {
         if (!dibBits_) return;
         auto *px = static_cast<BYTE *>(dibBits_);
-        int n = popupW_ * popupH_;
+        const int n = popupW_ * popupH_;
         for (int i = 0; i < n; ++i, px += 4) {
-            if (px[0] == 1 && px[1] == 2 && px[2] == 3)
-                px[0] = px[1] = px[2] = px[3] = 0;
-            else
-                px[3] = 255;
+            // px layout: [0]=B [1]=G [2]=R [3]=A
+            if (px[3] == 0) {
+                if (px[0] == 1 && px[1] == 2 && px[2] == 3) {
+                    // Sentinel clear-color → fully transparent (click-through).
+                    px[0] = px[1] = px[2] = px[3] = 0;
+                } else {
+                    // GDI-drawn pixel — alpha was never written. Force opaque
+                    // so it is both visible and receives mouse hit-testing.
+                    px[3] = 255;
+                }
+            }
+            // alpha > 0: renderer wrote a real alpha value — leave it alone.
         }
     }
 
@@ -378,6 +336,7 @@ private:
         case WM_RBUTTONUP:
         case WM_MOUSEMOVE:
         case WM_MOUSEWHEEL:
+
             forwardMouseEvent(hwnd, msg, wp, lp);
             return 0;
         case WM_NCHITTEST:
@@ -390,16 +349,19 @@ private:
     // =========================================================================
     // Linux + Android shared private internals
     // =========================================================================
-#else
+#else // !_WIN32
 
     int  originX_ = 0;
     int  originY_ = 0;
     bool visible_ = false;
 
-    void markDirty_() {
+
+    void markDirty_(int w = -1, int h = -1) {
         auto *ui = FluxUI::getCurrentInstance();
         if (ui)
-            ui->invalidateWidget(originX_, originY_, popupW_, popupH_);
+            ui->invalidateWidget(originX_, originY_,
+                                 w >= 0 ? w : popupW_,
+                                 h >= 0 ? h : popupH_);
     }
 
 #endif // private internals

@@ -94,20 +94,44 @@ ScaffoldWidget *findScaffold(Widget *widget) {
 }
 } // namespace
 
+
+
+bool FluxUI::handleDialogOverlays(int mouseX, int mouseY) {
+  auto *scaffold = findScaffold(root.get());
+  if (!scaffold || !scaffold->hasOverlays())
+    return false;
+
+  const auto &stack = scaffold->getOverlayStack();
+
+  // Collect all dialog-layer entries (ascending sort → walk forward).
+  std::vector<Widget *> dialogWidgets;
+  for (const auto &entry : stack) {
+    if (entry.zIndex >= kDialogZIndex && entry.widget)
+      dialogWidgets.push_back(entry.widget);
+  }
+
+  // Dispatch highest-zIndex first (reverse of forward-collected order).
+  for (auto it = dialogWidgets.rbegin(); it != dialogWidgets.rend(); ++it) {
+    if ((*it)->handleMouseDown(mouseX, mouseY))
+      return true;
+  }
+  return false;
+}
+
+
 bool FluxUI::handleDropdownOverlays(int mouseX, int mouseY) {
   auto *scaffold = findScaffold(root.get());
   if (!scaffold || !scaffold->hasOverlays())
     return false;
+
   const auto &stack = scaffold->getOverlayStack();
-  for (auto it = stack.rbegin(); it != stack.rend(); ++it)
+  for (auto it = stack.rbegin(); it != stack.rend(); ++it) {
+
+    if (it->zIndex >= kDialogZIndex)
+      continue;
     if (it->widget && it->widget->handleMouseDown(mouseX, mouseY))
       return true;
-  return false;
-}
-
-bool FluxUI::handleDialogOverlays(int mouseX, int mouseY) {
-  (void)mouseX;
-  (void)mouseY;
+  }
   return false;
 }
 
@@ -133,12 +157,30 @@ bool FluxUI::handleOverlayMouseWheel(int delta) {
   return false;
 }
 
+
 bool FluxUI::handleOverlayKeyDown(int keyCode) {
   auto *scaffold = findScaffold(root.get());
   if (!scaffold || !scaffold->hasOverlays())
     return false;
-  Widget *top = scaffold->getTopmostOverlay();
-  return top ? top->handleKeyDown(keyCode) : false;
+
+  const auto &stack = scaffold->getOverlayStack();
+
+
+  Widget *bestDialog    = nullptr;
+  Widget *bestNonDialog = nullptr;
+
+  for (auto it = stack.rbegin(); it != stack.rend(); ++it) {
+    if (!it->widget) continue;
+    if (it->zIndex >= kDialogZIndex) {
+      if (!bestDialog)    bestDialog    = it->widget;
+    } else {
+      if (!bestNonDialog) bestNonDialog = it->widget;
+    }
+    if (bestDialog && bestNonDialog) break;
+  }
+
+  Widget *target = bestDialog ? bestDialog : bestNonDialog;
+  return target ? target->handleKeyDown(keyCode) : false;
 }
 
 bool FluxUI::handleOverlayMouseUp(int mouseX, int mouseY) {
@@ -197,8 +239,16 @@ void FluxUI::wireCallbacks() {
   window.callbacks.onMouseDown = [this](int x, int y) -> bool {
     if (!root)
       return false;
+
+    // 1. Dialog layer — highest priority; blocks everything underneath.
+    if (handleDialogOverlays(x, y))
+      return true;
+
+    // 2. Generic overlay stack (dropdowns, context menus, tooltips).
     if (handleDropdownOverlays(x, y))
       return true;
+
+    // 3. Normal widget tree.
     bool handled =
         findAndHandleMouseEvent(root.get(), x, y, [x, y, this](Widget *w) {
           bool h = w->handleMouseDown(x, y);
@@ -206,15 +256,22 @@ void FluxUI::wireCallbacks() {
             setFocus(w);
           return h;
         });
-    if (!handled) {
-      setFocus(nullptr);
-      Widget *clicked = findWidgetAt(root.get(), x, y);
-      if (clicked && clicked->onClick) {
-        clicked->onClick();
-        return true;
-      }
+
+    if (handled)
+      return true;
+
+
+    Widget *clicked = findWidgetAt(root.get(), x, y);
+    if (clicked && clicked->onClick) {
+      if (clicked->isFocusable)
+        setFocus(clicked);
+      clicked->onClick();
+      return true;
     }
-    return handled;
+
+    // Nothing actionable at this point — clear focus.
+    setFocus(nullptr);
+    return false;
   };
 
   window.callbacks.onMouseUp = [this](int x, int y) -> bool {
@@ -278,13 +335,13 @@ void FluxUI::wireCallbacks() {
     return focusedWidget && focusedWidget->handleChar(ch);
   };
 
-window.callbacks.onTimer = [this](TimerID id) {
+  window.callbacks.onTimer = [this](TimerID id) {
     auto it = timerCallbacks.find(id);
     if (it == timerCallbacks.end())
-        return;
+      return;
     auto cb = it->second;
     cb();
-};
+  };
 
   window.callbacks.onNonClientMouseDown = [this]() { setFocus(nullptr); };
   window.callbacks.onFocusLost = [this]() { setFocus(nullptr); };
@@ -364,16 +421,26 @@ void FluxUI::rebuild() {
   if (!builder)
     return;
 
-  if (root) {
+
+  focusedWidget = nullptr;
+
+
+  if (root)
     root->onDetach();
+
+
+  if (root) {
     if (auto *scaffold = findScaffold(root.get()))
       scaffold->clearOverlays();
   }
 
+
   root = builder();
+
 
   if (auto *scaffold = findScaffold(root.get()))
     wireScaffoldToWidgets(scaffold, root.get());
+
 
   if (window.valid()) {
     auto mc = getMeasureContext();
@@ -383,6 +450,7 @@ void FluxUI::rebuild() {
     window.invalidate();
   }
 }
+
 // ============================================================================
 // INVALIDATION / PARTIAL LAYOUT
 // ============================================================================
@@ -394,7 +462,7 @@ void FluxUI::updateWidget(Widget *widget) {
   int oldWidth = widget->width;
   int oldHeight = widget->height;
 
-  auto mc = getMeasureContext(); // ← already exists on FluxUI
+  auto mc = getMeasureContext();
   widget->measureText(mc.ctx, fontCache);
   widget->width += widget->paddingLeft + widget->paddingRight;
   widget->height += widget->paddingTop + widget->paddingBottom;
@@ -427,7 +495,7 @@ void FluxUI::partialRebuild(Widget *widget) {
   }
   boundary->markNeedsLayout();
 
-  auto mc = getMeasureContext(); // ← replaces GetDC/ReleaseDC block
+  auto mc = getMeasureContext();
 
   if (boundary == root.get()) {
     LayoutEngine::computeLayout(mc.ctx, root.get(), window.clientWidth(),
@@ -438,7 +506,6 @@ void FluxUI::partialRebuild(Widget *widget) {
                                 boundary->height, fontCache);
     LayoutEngine::positionWidget(boundary, boundary->x, boundary->y);
   }
-  // MeasureContext destructor calls ReleaseDC automatically
 
   window.invalidateRect(boundary->x, boundary->y, boundary->width,
                         boundary->height);
@@ -453,7 +520,7 @@ NativeWindow FluxUI::createWindow(const std::string &title, int w, int h) {
   window.create(title, w, h, hInstance, &window);
 
   if (root) {
-    auto mc = getMeasureContext(); // ← replaces GetDC/ReleaseDC block
+    auto mc = getMeasureContext();
     LayoutEngine::computeLayout(mc.ctx, root.get(), window.clientWidth(),
                                 window.clientHeight(), fontCache);
     LayoutEngine::positionWidget(root.get(), 0, 0);
@@ -519,5 +586,5 @@ void FluxUI::setResizeCursorV() { window.setResizeCursorV(); }
 void FluxUI::setDefaultCursor() { window.setDefaultCursor(); }
 
 ScaffoldWidget *FluxUI::getRootScaffold() {
-  return findScaffold(root.get()); // calls the file-local free function
+  return findScaffold(root.get());
 }

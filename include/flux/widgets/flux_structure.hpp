@@ -90,6 +90,7 @@ public:
     return overlayStack;
   }
 
+
   Widget *getTopmostOverlay() const {
     return overlayStack.empty() ? nullptr : overlayStack.back().widget;
   }
@@ -119,12 +120,8 @@ public:
       if (entry.renderer) {
         entry.renderer(ctx, fontCache);
       }
-#if defined(__linux__) && !defined(__ANDROID__)
-      else if (entry.widget) {
-        if (auto *host = dynamic_cast<OverlayHost *>(entry.widget))
-          host->renderOverlay(ctx, fontCache);
-      }
-#elif defined(__ANDROID__)
+#if !defined(_WIN32)
+
       else if (entry.widget) {
         if (auto *host = dynamic_cast<OverlayHost *>(entry.widget))
           host->renderOverlay(ctx, fontCache);
@@ -163,7 +160,6 @@ public:
     applyConstraints();
     needsLayout = false;
   }
-
 
   void positionChildren(int contentX, int contentY,
                         int contentWidth, int contentHeight) override {

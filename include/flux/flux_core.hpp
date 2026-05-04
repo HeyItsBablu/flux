@@ -55,8 +55,10 @@ private:
 
   static FluxUI *currentInstance;
 
-
   std::unordered_map<const void *, std::shared_ptr<void>> appSingletons_;
+
+
+  static constexpr int kDialogZIndex = 200;
 
   // No Win32 types in any of these signatures
   void wireScaffoldToWidgets(ScaffoldWidget *scaffold, Widget *widget);
@@ -131,8 +133,8 @@ public:
   std::shared_ptr<T>
   getOrCreateSingleton(std::function<std::shared_ptr<T>()> factory)
   {
-
-    static const int typeTag = 0;          
+    // One static per T instantiation → unique address per type.
+    static const char typeTag = 0;
     const void *key = static_cast<const void *>(&typeTag);
 
     auto it = appSingletons_.find(key);

@@ -2,19 +2,20 @@
 
 class MyApp : public Widget {
 
+  State<int> counter{0};
+
 public:
   WidgetPtr build() override {
     return Scaffold(
         AppBar("Flux App"),
-        Center(Container(Center(Container(Center(Text("Hello world")))
-                                    ->setBorderRadius(10)
-                                    ->setWidth(100)
-                                    ->setHeight(100)
-                                    ->setBackgroundColor(
-                                        Color::fromRGB(20, 20, 100))))
-                   ->setWidth(300)
-                   ->setHeight(200)
-                   ->setBackgroundColor(Color::fromRGB(10, 10, 200))->setBorderRadius(10)));
+        Center(
+            Container(
+                Column({Text(counter), Button("Click", [this] { counter++; })})
+                    ->setCrossAxisAlignment(CrossAxisAlignment::Center))
+                ->setWidth(300)
+                ->setHeight(200)
+
+                ->setBorderRadius(10)));
   }
 };
 
