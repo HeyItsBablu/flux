@@ -11,7 +11,7 @@
 // ============================================================================
 // CONCRETE WIDGET CLASSES
 // ============================================================================
-
+class ToastWidget;
 struct OverlayEntry {
   Widget *widget = nullptr;
   std::function<void(GraphicsContext &, FontCache &)>
@@ -244,6 +244,26 @@ inline WidgetPtr AppBar(const std::string &title) {
 
   w->addChild(titleWidget);
   return w;
+}
+
+inline WidgetPtr Scaffold(WidgetPtr appBar  = nullptr,
+                          WidgetPtr body    = nullptr,
+                          std::shared_ptr<FABWidget>   fab   = nullptr,
+                          std::shared_ptr<ToastWidget> toast = nullptr) {
+    auto w = std::make_shared<ScaffoldWidget>();
+    w->hasBackground   = true;
+    w->backgroundColor = Color::fromRGB(250, 250, 250);
+
+    auto column = std::make_shared<ColumnWidget>();
+    column->setSpacing(0);
+    if (appBar) column->addChild(appBar);
+    if (body)   column->addChild(Expanded(body));
+    w->addChild(column);
+
+    if (fab)   w->setFAB(fab);
+    if (toast) w->addChild(std::static_pointer_cast<Widget>(toast));
+
+    return w;
 }
 
 inline WidgetPtr Scaffold(WidgetPtr appBar = nullptr,

@@ -1,156 +1,114 @@
 #include "flux/flux.hpp"
-#include "flux/widgets/flux_file_picker.hpp"
 
-class MyApp : public Component {
-    State<bool>        isDark;
-    State<std::string> singleFile;
-    State<std::string> saveFile;
-    State<std::string> folderPath;
-    State<std::vector<std::string>> multiFiles;
+class ToastTestApp : public Widget {
+    std::shared_ptr<ToastWidget> toast;
 
 public:
-    MyApp()
-        : isDark(false, context),
-          singleFile("", context),
-          saveFile("", context),
-          folderPath("", context),
-          multiFiles({}, context) {}
-
     WidgetPtr build() override {
+
+        toast = Toast()
+            ->setPosition(ToastPosition::BottomRight)
+            ->setMaxVisible(4)
+            ->setToastWidth(340);
+
         return Scaffold(
-            AppBar("File Picker + Theme Toggle"),
-            Column({
-
-                // ── Theme toggle ──────────────────────────────────────────
+            AppBar("Toast Test"),
+            Center(
                 Container(
-                    Row({
-                        Text("Dark mode")
-                            ->setFontSize(14)
-                            ->setTextColor(Color::fromRGB(60, 60, 60)),
-                        Toggle()
-                            ->setValue(isDark)
-                            ->setTrackOnColor(Color::fromRGB(99, 102, 241))
-                            ->setOnToggleChanged([this](bool v) {
-                                FluxAppWidget::getInstance()->setTheme(
-                                    v ? AppTheme::dark() : AppTheme::light());
+                    Column({
+
+                        Text("Basic Toasts")
+                            ->setFontSize(15)
+                            ->setFontWeight(FontWeight::Bold),
+
+                        Row({
+                            Button("Info", [this]{
+                                toast->show("This is an info message.",
+                                            ToastType::Info, 3000);
                             }),
-                    })->setSpacing(12)
-                     ->setCrossAxisAlignment(CrossAxisAlignment::Center)
+                            Button("Success", [this]{
+                                toast->show("File saved successfully!",
+                                            ToastType::Success, 3000);
+                            })->setBackgroundColor(Color::fromRGB(76, 175, 80)),
+                            Button("Warning", [this]{
+                                toast->show("Disk space is low.",
+                                            ToastType::Warning, 4000);
+                            })->setBackgroundColor(Color::fromRGB(255, 152, 0)),
+                            Button("Error", [this]{
+                                toast->show("Upload failed.",
+                                            ToastType::Error, 5000);
+                            })->setBackgroundColor(Color::fromRGB(244, 67, 54)),
+                        })
+                        ->setSpacing(8)
+                        ->setCrossAxisAlignment(CrossAxisAlignment::Center),
+
+                        Text("With Title")
+                            ->setFontSize(15)
+                            ->setFontWeight(FontWeight::Bold),
+
+                        Button("Show titled toast", [this]{
+                            ToastEntry e;
+                            e.title      = "Connection lost";
+                            e.message    = "Unable to reach the server. "
+                                           "Check your network.";
+                            e.type       = ToastType::Error;
+                            e.durationMs = 5000;
+                            toast->showEntry(e);
+                        }),
+
+                        Text("With Action Button")
+                            ->setFontSize(15)
+                            ->setFontWeight(FontWeight::Bold),
+
+                        Button("Show action toast", [this]{
+                            ToastEntry e;
+                            e.message     = "Message sent to trash.";
+                            e.type        = ToastType::Info;
+                            e.durationMs  = 5000;
+                            e.actionLabel = "Undo";
+                            e.onAction    = []{
+                                std::cout << "Undo clicked!" << std::endl;
+                            };
+                            toast->showEntry(e);
+                        }),
+
+                        Text("Sticky (no auto-dismiss)")
+                            ->setFontSize(15)
+                            ->setFontWeight(FontWeight::Bold),
+
+                        Button("Show sticky toast", [this]{
+                            ToastEntry e;
+                            e.title      = "Update available";
+                            e.message    = "Click × to dismiss manually.";
+                            e.type       = ToastType::Warning;
+                            e.durationMs = 0;  // sticky
+                            toast->showEntry(e);
+                        }),
+
+                        Button("Dismiss all", [this]{
+                            toast->dismissAll();
+                        })->setBackgroundColor(Color::fromRGB(120, 120, 120)),
+
+                    })
+                    ->setSpacing(14)
+                    ->setCrossAxisAlignment(CrossAxisAlignment::Start)
                 )
-                ->setPadding(12)
-                ->setBackgroundColor(Color::fromRGB(248, 249, 250))
-                ->setBorderRadius(8),
-
-                // ── Section: Open single file ─────────────────────────────
-                Text("Open Single File")
-                    ->setFontSize(13)
-                    ->setFontWeight(FontWeight::Bold)
-                    ->setTextColor(Color::fromRGB(40, 40, 40)),
-
-                FilePicker()
-                    ->setMode(FilePickerMode::Open)
-                    ->addFilter("Images",    {"*.png", "*.jpg", "*.jpeg", "*.bmp"})
-                    ->addFilter("PNG",       {"*.png"})
-                    ->addFilter("JPEG",      {"*.jpg", "*.jpeg"})
-                    ->addFilter("All files", {"*.*"})
-                    ->setDefaultExtension("png")
-                    ->bindPath(singleFile)
-                    ->setOnChanged([this](const std::string &path) {
-                        std::cout << "[FilePicker] opened: " << path << "\n";
-                    }),
-
-                // Show selected path in a text widget too
-                Text(singleFile, [](const std::string &p) {
-                    return p.empty() ? "No file selected" : p;
-                })
-                ->setFontSize(11)
-                ->setTextColor(Color::fromRGB(120, 120, 130)),
-
-                // ── Section: Open multiple files ──────────────────────────
-                Text("Open Multiple Files")
-                    ->setFontSize(13)
-                    ->setFontWeight(FontWeight::Bold)
-                    ->setTextColor(Color::fromRGB(40, 40, 40)),
-
-                FilePicker("Browse multiple...")
-                    ->setMode(FilePickerMode::OpenMultiple)
-                    ->addFilter("Images", {"*.png", "*.jpg", "*.jpeg"})
-                    ->addFilter("All files", {"*.*"})
-                    ->bindPaths(multiFiles)
-                    ->setOnMultiChanged([](const std::vector<std::string> &paths) {
-                        std::cout << "[FilePicker] " << paths.size() << " files:\n";
-                        for (auto &p : paths)
-                            std::cout << "  " << p << "\n";
-                    }),
-
-                Text(multiFiles, [](const std::vector<std::string> &ps) {
-                    if (ps.empty()) return std::string("No files selected");
-                    return std::to_string(ps.size()) + " file(s) selected";
-                })
-                ->setFontSize(11)
-                ->setTextColor(Color::fromRGB(120, 120, 130)),
-
-                // ── Section: Save dialog ──────────────────────────────────
-                Text("Save / Export")
-                    ->setFontSize(13)
-                    ->setFontWeight(FontWeight::Bold)
-                    ->setTextColor(Color::fromRGB(40, 40, 40)),
-
-                FilePicker("Save As...")
-                    ->setMode(FilePickerMode::Save)
-                    ->setTitle("Export File")
-                    ->setDefaultFilename("output.png")
-                    ->addFilter("PNG",       {"*.png"})
-                    ->addFilter("JPEG",      {"*.jpg", "*.jpeg"})
-                    ->addFilter("All files", {"*.*"})
-                    ->setDefaultExtension("png")
-                    ->bindPath(saveFile)
-                    ->setOnChanged([](const std::string &path) {
-                        std::cout << "[FilePicker] save to: " << path << "\n";
-                    }),
-
-                Text(saveFile, [](const std::string &p) {
-                    return p.empty() ? "No destination chosen" : p;
-                })
-                ->setFontSize(11)
-                ->setTextColor(Color::fromRGB(120, 120, 130)),
-
-                // ── Section: Folder picker ────────────────────────────────
-                Text("Choose Folder")
-                    ->setFontSize(13)
-                    ->setFontWeight(FontWeight::Bold)
-                    ->setTextColor(Color::fromRGB(40, 40, 40)),
-
-                FilePicker()
-                    ->setMode(FilePickerMode::Folder)
-                    ->setTitle("Select output folder")
-                    ->bindPath(folderPath)
-                    ->setOnChanged([](const std::string &path) {
-                        std::cout << "[FilePicker] folder: " << path << "\n";
-                    }),
-
-                Text(folderPath, [](const std::string &p) {
-                    return p.empty() ? "No folder selected" : p;
-                })
-                ->setFontSize(11)
-                ->setTextColor(Color::fromRGB(120, 120, 130)),
-
-            })
-            ->setSpacing(10)
-            ->setPadding(20)
+                ->setWidth(500)
+                ->setPadding(28)
+                ->setBorderRadius(10)
+                ->setBackgroundColor(Color::fromRGB(255, 255, 255))
+            ),
+            nullptr, // no FAB
+            toast    // pass toast as overlay anchor to scaffold
         );
     }
 };
 
-WidgetPtr createApp(FluxUI* app) {
+WidgetPtr createApp(FluxUI *app) {
     return FluxApp(
-        "FluxUI - Paint",
-        BuildComponent<MyApp>(),
-        AppTheme::dark(),
-        false,   // debugShowWidgetBounds
-        900,     // width
-        700,     // height
-        false,   // maximize
-        true     // fullscreen
+        "Toast Test",
+        std::make_shared<ToastTestApp>(),
+        AppTheme::light(),
+        false, 680, 560, true, false
     );
 }
