@@ -80,7 +80,6 @@ void FluxUI::wireScaffoldToWidgets(ScaffoldWidget *scaffold, Widget *widget) {
 // ============================================================================
 
 namespace {
-// File-local helper: depth-first search for a ScaffoldWidget.
 ScaffoldWidget *findScaffold(Widget *widget) {
   if (!widget)
     return nullptr;
@@ -94,8 +93,6 @@ ScaffoldWidget *findScaffold(Widget *widget) {
 }
 } // namespace
 
-
-
 bool FluxUI::handleDialogOverlays(int mouseX, int mouseY) {
   auto *scaffold = findScaffold(root.get());
   if (!scaffold || !scaffold->hasOverlays())
@@ -103,21 +100,18 @@ bool FluxUI::handleDialogOverlays(int mouseX, int mouseY) {
 
   const auto &stack = scaffold->getOverlayStack();
 
-  // Collect all dialog-layer entries (ascending sort → walk forward).
   std::vector<Widget *> dialogWidgets;
   for (const auto &entry : stack) {
     if (entry.zIndex >= kDialogZIndex && entry.widget)
       dialogWidgets.push_back(entry.widget);
   }
 
-  // Dispatch highest-zIndex first (reverse of forward-collected order).
   for (auto it = dialogWidgets.rbegin(); it != dialogWidgets.rend(); ++it) {
     if ((*it)->handleMouseDown(mouseX, mouseY))
       return true;
   }
   return false;
 }
-
 
 bool FluxUI::handleDropdownOverlays(int mouseX, int mouseY) {
   auto *scaffold = findScaffold(root.get());
@@ -126,7 +120,6 @@ bool FluxUI::handleDropdownOverlays(int mouseX, int mouseY) {
 
   const auto &stack = scaffold->getOverlayStack();
   for (auto it = stack.rbegin(); it != stack.rend(); ++it) {
-
     if (it->zIndex >= kDialogZIndex)
       continue;
     if (it->widget && it->widget->handleMouseDown(mouseX, mouseY))
@@ -157,14 +150,12 @@ bool FluxUI::handleOverlayMouseWheel(int delta) {
   return false;
 }
 
-
 bool FluxUI::handleOverlayKeyDown(int keyCode) {
   auto *scaffold = findScaffold(root.get());
   if (!scaffold || !scaffold->hasOverlays())
     return false;
 
   const auto &stack = scaffold->getOverlayStack();
-
 
   Widget *bestDialog    = nullptr;
   Widget *bestNonDialog = nullptr;
@@ -206,7 +197,7 @@ bool FluxUI::handleOverlayRightClick(int mouseX, int mouseY) {
 }
 
 // ============================================================================
-// CALLBACK WIRING — connects PlatformWindow events to FluxUI logic
+// CALLBACK WIRING
 // ============================================================================
 
 void FluxUI::wireCallbacks() {
@@ -260,7 +251,6 @@ void FluxUI::wireCallbacks() {
     if (handled)
       return true;
 
-
     Widget *clicked = findWidgetAt(root.get(), x, y);
     if (clicked && clicked->onClick) {
       if (clicked->isFocusable)
@@ -269,7 +259,6 @@ void FluxUI::wireCallbacks() {
       return true;
     }
 
-    // Nothing actionable at this point — clear focus.
     setFocus(nullptr);
     return false;
   };
@@ -421,14 +410,12 @@ void FluxUI::rebuild() {
   if (!builder)
     return;
 
-
   focusedWidget = nullptr;
-
 
   if (root)
     root->onDetach();
 
-
+  // Clear overlays from the old tree before replacing root.
   if (root) {
     if (auto *scaffold = findScaffold(root.get()))
       scaffold->clearOverlays();
@@ -437,17 +424,21 @@ void FluxUI::rebuild() {
 
   root = builder();
 
-
-  if (auto *scaffold = findScaffold(root.get()))
-    wireScaffoldToWidgets(scaffold, root.get());
-
-
   if (window.valid()) {
     auto mc = getMeasureContext();
+
     LayoutEngine::computeLayout(mc.ctx, root.get(), window.clientWidth(),
                                 window.clientHeight(), fontCache);
     LayoutEngine::positionWidget(root.get(), 0, 0);
+
+
+    if (auto *scaffold = findScaffold(root.get()))
+      wireScaffoldToWidgets(scaffold, root.get());
+
     window.invalidate();
+  } else {
+    if (auto *scaffold = findScaffold(root.get()))
+      wireScaffoldToWidgets(scaffold, root.get());
   }
 }
 
@@ -521,9 +512,17 @@ NativeWindow FluxUI::createWindow(const std::string &title, int w, int h) {
 
   if (root) {
     auto mc = getMeasureContext();
+
+    // Run layout first so all component build() methods have fired and the
+    // full widget tree exists.
     LayoutEngine::computeLayout(mc.ctx, root.get(), window.clientWidth(),
                                 window.clientHeight(), fontCache);
     LayoutEngine::positionWidget(root.get(), 0, 0);
+
+    // Wire scaffold after layout for the same reason as in rebuild(): widgets
+    // created by lazy build() only exist after computeLayout runs.
+    if (auto *scaffold = findScaffold(root.get()))
+      wireScaffoldToWidgets(scaffold, root.get());
   }
 
   for (auto &[id, fn] : pendingTimers)

@@ -26,6 +26,7 @@ public:
         Text("Click Confirm / Cancel, or press Escape."),
         Row({
           Button("Confirm", [this] {
+            std::cout<<"Confirm clicked" << std::endl;
             lastAction.set("Dialog: Confirmed");
             dialogOpen.set(false);
             confirmDialog->close();
