@@ -149,12 +149,11 @@ CanvasWidget::CanvasWidget()
     : hBar_(CustomScrollbar::Axis::Horizontal)
     , vBar_(CustomScrollbar::Axis::Vertical)
 {
-    autoWidth = autoHeight = false;
-    width  = 400;
+    autoWidth  = true;   // fill available space by default
+    autoHeight = true;
+    width  = 400;        // fallback if parent is unbounded
     height = 300;
     registerWithPlatform(this);
-
-
 }
 
 CanvasWidget::~CanvasWidget() {
@@ -186,8 +185,10 @@ const Viewport& CanvasWidget::viewport()   const { return vp_; }
 Viewport&       CanvasWidget::viewport()         { return vp_; }
 
 std::shared_ptr<CanvasWidget> CanvasWidget::setSize(int w, int h) {
-    width = w; height = h;
-    autoWidth = autoHeight = false;
+    width  = w;
+    height = h;
+    autoWidth  = false;
+    autoHeight = false;
     markNeedsLayout();
     return ptr();
 }
@@ -204,8 +205,14 @@ std::shared_ptr<CanvasWidget> CanvasWidget::redraw() { markNeedsPaint(); return 
 
 void CanvasWidget::computeLayout(GraphicsContext& /*ctx*/,
                                  const BoxConstraints& c, FontCache&) {
-    width  = c.clampWidth (autoWidth  ? c.maxWidth  : width);
-    height = c.clampHeight(autoHeight ? c.maxHeight : height);
+    if (autoWidth) {
+        width   = (c.maxWidth  < kUnbounded) ? c.maxWidth  : width;
+        canvasW_ = width;
+    }
+    if (autoHeight) {
+        height  = (c.maxHeight < kUnbounded) ? c.maxHeight : height;
+        canvasH_ = height;
+    }
     needsLayout = false;
 }
 
