@@ -692,8 +692,9 @@ static LRESULT CALLBACK GLProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 CanvasWidget::CanvasWidget()
     : hBar_(CustomScrollbar::Axis::Horizontal),
       vBar_(CustomScrollbar::Axis::Vertical) {
-  autoWidth = autoHeight = false;
-  width = 400;
+  autoWidth = true; // fill available space by default
+  autoHeight = true;
+  width = 400; // fallback if parent is unbounded
   height = 300;
 }
 
@@ -719,11 +720,12 @@ const Viewport &CanvasWidget::viewport() const { return vp_; }
 Viewport &CanvasWidget::viewport() { return vp_; }
 
 std::shared_ptr<CanvasWidget> CanvasWidget::setSize(int w, int h) {
-  width = w;
-  height = h;
-  autoWidth = autoHeight = false;
-  markNeedsLayout();
-  return ptr();
+    width  = w;
+    height = h;
+    autoWidth  = false;  // fixed size — stop auto-expanding
+    autoHeight = false;
+    markNeedsLayout();
+    return ptr();
 }
 std::shared_ptr<CanvasWidget> CanvasWidget::setCanvasSize(int w, int h) {
   canvasW_ = w;
@@ -745,17 +747,14 @@ std::shared_ptr<CanvasWidget> CanvasWidget::redraw() {
 
 void CanvasWidget::computeLayout(GraphicsContext & /*ctx*/,
                                  const BoxConstraints &c, FontCache &) {
-
-  if (autoWidth)
-    width = c.clampWidth(c.maxWidth < kUnbounded ? c.maxWidth : width);
-  else
-    width = width;
-
-  if (autoHeight)
-    height = c.clampHeight(c.maxHeight < kUnbounded ? c.maxHeight : height);
-  else
-    height = height;
-
+  if (autoWidth) {
+    width = (c.maxWidth < kUnbounded) ? c.maxWidth : width;
+    canvasW_ = width;
+  }
+  if (autoHeight) {
+    height = (c.maxHeight < kUnbounded) ? c.maxHeight : height;
+    canvasH_ = height;
+  }
   needsLayout = false;
 }
 

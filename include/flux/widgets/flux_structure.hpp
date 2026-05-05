@@ -257,7 +257,7 @@ inline WidgetPtr Scaffold(WidgetPtr appBar  = nullptr,
     auto column = std::make_shared<ColumnWidget>();
     column->setSpacing(0);
     if (appBar) column->addChild(appBar);
-    if (body)   column->addChild(Expanded(body));
+    if (body)   column->addChild(body);
     w->addChild(column);
 
     if (fab)   w->setFAB(fab);
@@ -276,7 +276,7 @@ inline WidgetPtr Scaffold(WidgetPtr appBar = nullptr,
     auto column = std::make_shared<ColumnWidget>();
     column->setSpacing(0);
     if (appBar) column->addChild(appBar);
-    if (body)   column->addChild(Expanded(body));
+    if (body)   column->addChild(body);
     w->addChild(column);
 
     if (fab) w->setFAB(fab);  // ADD THIS
@@ -298,7 +298,7 @@ inline WidgetPtr Scaffold(WidgetPtr appBar = nullptr,
     column->addChild(appBar);
 
   if (body)
-    column->addChild(Expanded(body));
+    column->addChild(body);
 
   w->addChild(column);
   return w;

@@ -45,12 +45,11 @@ class TriangleApp : public Widget {
 public:
   WidgetPtr build() override {
     auto canvas = std::make_shared<CanvasWidget>();
-    canvas->setSize(kCanvasW, kCanvasH);
-    canvas->setCanvasSize(kCanvasW, kCanvasH);
+
     canvas->setScrollbarsEnabled(false);
     canvas->setSurface<TriangleSurface>();
 
-   return Scaffold(AppBar("Trianlge App"), canvas,nullptr,nullptr);
+   return Scaffold(AppBar("Trianlge App"), Expanded(canvas),nullptr,nullptr);
   }
 };
 
