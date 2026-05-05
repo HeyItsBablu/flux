@@ -1,5 +1,5 @@
 // flux_canvas_linux.cpp
-// Compiled only on Linux desktop (not Android).
+
 #if defined(__linux__) && !defined(__ANDROID__)
 
 #include "flux/flux_canvas.hpp"
@@ -27,14 +27,18 @@ void main(){ fragColor = uColor; }
 )GLSL";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Linux-only state
+// Linux-only per-widget state
 // ─────────────────────────────────────────────────────────────────────────────
 
 struct LinuxCanvasState {
     bool   initialized    = false;
     bool   repaintPending = false;
+    // Physical (drawable) pixel dimensions — updated every preRenderPass.
     int    lastW          = 0;
     int    lastH          = 0;
+    // Physical pixel position of this widget's top-left corner.
+    int    physX          = 0;
+    int    physY          = 0;
 };
 
 #include <unordered_map>
@@ -58,24 +62,42 @@ void CanvasWidget::initEventType() {
 }
 Uint32 CanvasWidget::repaintEventType() { return s_repaintEventType_; }
 
-
-
 // ─────────────────────────────────────────────────────────────────────────────
-// Window dimension helpers
+// DPI helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-static int getWindowLogicalWidth() {
+static float getDpiScaleX() {
+    auto* inst = FluxUI::getCurrentInstance();
+    if (!inst) return 1.f;
+    auto* pw = inst->getPlatformWindowPtr();
+    return pw ? pw->dpiScaleX() : 1.f;
+}
+static float getDpiScaleY() {
+    auto* inst = FluxUI::getCurrentInstance();
+    if (!inst) return 1.f;
+    auto* pw = inst->getPlatformWindowPtr();
+    return pw ? pw->dpiScaleY() : 1.f;
+}
+
+// Physical drawable dimensions of the whole window.
+static int getWindowPhysW() {
     auto* inst = FluxUI::getCurrentInstance();
     if (!inst) return 1;
     auto* pw = inst->getPlatformWindowPtr();
     return pw ? pw->clientWidth() : 1;
 }
-static int getWindowLogicalHeight() {
+static int getWindowPhysH() {
     auto* inst = FluxUI::getCurrentInstance();
     if (!inst) return 1;
     auto* pw = inst->getPlatformWindowPtr();
     return pw ? pw->clientHeight() : 1;
 }
+
+// Logical → physical conversion.
+static int toPhysX(int lx) { return int(float(lx) * getDpiScaleX()); }
+static int toPhysY(int ly) { return int(float(ly) * getDpiScaleY()); }
+static int toPhysW(int lw) { return int(float(lw) * getDpiScaleX()); }
+static int toPhysH(int lh) { return int(float(lh) * getDpiScaleY()); }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Platform registration helpers
@@ -87,7 +109,6 @@ static void registerWithPlatform(CanvasWidget* w) {
     auto* pw = inst->getPlatformWindowPtr();
     if (pw) pw->registerCanvas_public(w);
 }
-
 static void unregisterWithPlatform(CanvasWidget* w) {
     auto* inst = FluxUI::getCurrentInstance();
     if (!inst) return;
@@ -106,25 +127,57 @@ static void scheduleRepaint(CanvasWidget* w) {
         s.repaintPending = true;
         SDL_Event e;
         SDL_zero(e);
-        e.type       = (s_repaintEventType_ != 0)
-                       ? s_repaintEventType_ : SDL_USEREVENT;
+        e.type       = (s_repaintEventType_ != 0) ? s_repaintEventType_ : SDL_USEREVENT;
         e.user.code  = 0;
         e.user.data1 = w;
         SDL_PushEvent(&e);
     }
 }
 
+
+static void syncPhysicalGeometry(CanvasWidget* w) {
+    auto& s = linuxState(w);
+
+    int newW = toPhysW(w->width);
+    int newH = toPhysH(w->height);
+    int newX = toPhysX(w->x);
+    int newY = toPhysY(w->y);
+
+    // Always update position (widget may have moved without a resize).
+    s.physX = newX;
+    s.physY = newY;
+
+    bool sizeChanged = (newW != s.lastW || newH != s.lastH);
+    if (!sizeChanged || newW <= 0 || newH <= 0) return;
+
+    s.lastW = newW;
+    s.lastH = newH;
+
+    w->updateViewportSize(s.lastW, s.lastH);
+    w->updateSBGeometry(s.lastW, s.lastH);
+    if (w->onGLResize) w->onGLResize(s.lastW, s.lastH);
+
+    // Tell the surface its new pixel dimensions.
+    if (w->activeSurface_) w->activeSurface_->resize(newW, newH);
+
+    // Re-fit the viewport to the new size so the content isn't clipped.
+    w->vp_.fitToView();
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// One-time initialisation
+// initCanvas  (one-time GL setup — size may still be default here)
 // ─────────────────────────────────────────────────────────────────────────────
 
 static void initCanvas(CanvasWidget* w) {
     auto& s = linuxState(w);
     assert(w->canvasGL_ && !s.initialized);
-    assert(w->width > 0 && w->height > 0);
 
-    s.lastW = w->width;
-    s.lastH = w->height;
+    // Use whatever size is available now.  syncPhysicalGeometry() will
+    // correct it on the first preRenderPass after computeLayout() runs.
+    s.lastW = (w->width  > 0) ? toPhysW(w->width)  : 1;
+    s.lastH = (w->height > 0) ? toPhysH(w->height) : 1;
+    s.physX = toPhysX(w->x);
+    s.physY = toPhysY(w->y);
 
     w->vp_.init(s.lastW, s.lastH, w->canvasW_, w->canvasH_);
     w->updateViewportSize(s.lastW, s.lastH);
@@ -149,15 +202,14 @@ CanvasWidget::CanvasWidget()
     : hBar_(CustomScrollbar::Axis::Horizontal)
     , vBar_(CustomScrollbar::Axis::Vertical)
 {
-    autoWidth  = true;   // fill available space by default
+    autoWidth  = true;
     autoHeight = true;
-    width  = 400;        // fallback if parent is unbounded
+    width  = 400;
     height = 300;
     registerWithPlatform(this);
 }
 
 CanvasWidget::~CanvasWidget() {
-    // destroyGLResources
     if (activeSurface_) { activeSurface_->destroy(); activeSurface_.reset(); }
     pendingSurface_.reset();
     if (sbProg_) { glDeleteProgram(sbProg_);         sbProg_ = 0; }
@@ -214,9 +266,13 @@ void CanvasWidget::computeLayout(GraphicsContext& /*ctx*/,
         canvasH_ = height;
     }
     needsLayout = false;
+    // Kick a repaint so preRenderPass runs and calls syncPhysicalGeometry
+    // with the freshly-set width/height.
+    scheduleRepaint(this);
 }
 
 void CanvasWidget::render(GraphicsContext& ctx, FontCache&) {
+    // Punch a transparent hole in the Cairo overlay so GL shows through.
     if (ctx.cr) {
         cairo_save(ctx.cr);
         cairo_set_operator(ctx.cr, CAIRO_OPERATOR_CLEAR);
@@ -245,29 +301,30 @@ void CanvasWidget::markNeedsPaint() {
     scheduleRepaint(this);
 }
 
-// ── Called by PlatformWindow after GLAD is loaded ─────────────────────────────
 void CanvasWidget::setCanvasGL(Canvas2DGL* gl) {
     canvasGL_ = gl;
     auto& s = linuxState(this);
-    if (canvasGL_ && width > 0 && height > 0 && !s.initialized)
+    if (canvasGL_ && !s.initialized)
         initCanvas(this);
 }
 
-// ── Called by PlatformWindow on window resize ─────────────────────────────────
+// Called by PlatformWindow on resize.  Zero out lastW/lastH so
+// syncPhysicalGeometry will recalculate everything on the next frame.
 void CanvasWidget::onWindowResize(int /*newW*/, int /*newH*/) {
     auto& s = linuxState(this);
     if (!s.initialized) return;
-    s.lastW = width;
-    s.lastH = height;
-    updateViewportSize(s.lastW, s.lastH);
-    updateSBGeometry(s.lastW, s.lastH);
-    if (onGLResize) onGLResize(s.lastW, s.lastH);
+    s.lastW = 0;
+    s.lastH = 0;
     scheduleRepaint(this);
 }
 
 void CanvasWidget::preRenderPass() {
     auto& s = linuxState(this);
     if (!canvasGL_ || !s.initialized) return;
+
+    // Sync layout → physical geometry EVERY frame.
+    syncPhysicalGeometry(this);
+
     if (pendingSurface_) activatePendingSurface();
     if (!activeSurface_) return;
 
@@ -291,20 +348,27 @@ void CanvasWidget::glRenderPass() {
     int glW = s.lastW < 1 ? 1 : s.lastW;
     int glH = s.lastH < 1 ? 1 : s.lastH;
 
+    // s.physX / physY set by syncPhysicalGeometry in preRenderPass.
+    int physX = s.physX;
+    int physY = s.physY;
+
+    // glScissor: clip to this widget's physical rect.
+    // Y is measured from the framebuffer bottom.
+    int windowPhysH = getWindowPhysH();
     glEnable(GL_SCISSOR_TEST);
-    int windowH = getWindowLogicalHeight();
-    glScissor(x, windowH - y - glH, glW, glH);
+    glScissor(physX, windowPhysH - physY - glH, glW, glH);
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
+    // MVP = ortho(physical window) * translate(physX, physY) * zoom
     float z  = vp_.zoom();
-    float ox = -vp_.offsetX() * z + float(x);
-    float oy =  vp_.offsetY() * z + float(y);
+    float ox = -vp_.offsetX() * z + float(physX);
+    float oy =  vp_.offsetY() * z + float(physY);
 
     float ortho[16];
-    glutil::ortho(0.f, float(getWindowLogicalWidth()),
-                  float(getWindowLogicalHeight()), 0.f, ortho);
+    glutil::ortho(0.f, float(getWindowPhysW()),
+                       float(getWindowPhysH()), 0.f, ortho);
 
     float vp[16] = {
         z,  0,  0, 0,
@@ -337,6 +401,7 @@ bool CanvasWidget::isInitialized() const { return linuxState(const_cast<CanvasWi
 bool CanvasWidget::needsRepaint()  const { return linuxState(const_cast<CanvasWidget*>(this)).repaintPending; }
 
 bool CanvasWidget::containsPoint(int wx, int wy) const {
+    // SDL events and widget coords are both logical pixels.
     return wx >= x && wx < (x + width) &&
            wy >= y && wy < (y + height);
 }
@@ -363,7 +428,6 @@ void CanvasWidget::handleSDLEvent(const SDL_Event& e) {
 void CanvasWidget::onMouseButtonDown(const SDL_MouseButtonEvent& e) {
     SDL_CaptureMouse(SDL_TRUE);
     int sx = e.x, sy = e.y;
-
     if (e.button == SDL_BUTTON_MIDDLE && viewportEnabled_) {
         beginPan(sx, sy); return;
     }
@@ -466,14 +530,16 @@ void CanvasWidget::onKeyUpEvent(const SDL_KeyboardEvent& e) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Shared helper implementations
+// Shared helpers  (glW / glH are always PHYSICAL pixels)
 // ─────────────────────────────────────────────────────────────────────────────
 
 void CanvasWidget::viewportDims(int glW, int glH, int& vpW, int& vpH) const {
     if (!viewportEnabled_ || !scrollbarsEnabled_) { vpW=glW; vpH=glH; return; }
     ScrollbarInfo h = vp_.scrollbarH(), v = vp_.scrollbarV();
-    vpW = glW - (v.visible ? (int)kSBThick : 0);
-    vpH = glH - (h.visible ? (int)kSBThick : 0);
+    int sbThickX = int(kSBThick * getDpiScaleX());
+    int sbThickY = int(kSBThick * getDpiScaleY());
+    vpW = glW - (v.visible ? sbThickX : 0);
+    vpH = glH - (h.visible ? sbThickY : 0);
     if (vpW < 1) vpW = 1;
     if (vpH < 1) vpH = 1;
 }
@@ -482,13 +548,15 @@ void CanvasWidget::updateViewportSize(int glW, int glH) {
     vp_.setViewSize(vpW, vpH);
 }
 void CanvasWidget::updateSBGeometry(int glW, int glH) {
+    float sbThickX = kSBThick * getDpiScaleX();
+    float sbThickY = kSBThick * getDpiScaleY();
     ScrollbarInfo h = vp_.scrollbarH(), v = vp_.scrollbarV();
-    float hLen = float(glW) - (v.visible ? kSBThick : 0.f);
-    hBar_.setGeometry(0.f, float(glH)-kSBThick, hLen);
+    float hLen = float(glW) - (v.visible ? sbThickX : 0.f);
+    hBar_.setGeometry(0.f, float(glH) - sbThickY, hLen);
     hBar_.setThumb(h.thumbMin, h.thumbMax,
                    h.visible && scrollbarsEnabled_ && viewportEnabled_);
-    float vLen = float(glH) - (h.visible ? kSBThick : 0.f);
-    vBar_.setGeometry(float(glW)-kSBThick, 0.f, vLen);
+    float vLen = float(glH) - (h.visible ? sbThickY : 0.f);
+    vBar_.setGeometry(float(glW) - sbThickX, 0.f, vLen);
     vBar_.setThumb(v.thumbMin, v.thumbMax,
                    v.visible && scrollbarsEnabled_ && viewportEnabled_);
 }
@@ -536,20 +604,22 @@ void CanvasWidget::ensureSBProgram(const char* vert, const char* frag) {
 }
 void CanvasWidget::renderSBCorner(int glW, int glH) {
     if (!hBar_.isVisible() || !vBar_.isVisible() || !scrollbarsEnabled_) return;
-    float cx = float(glW) - kSBThick;
-    float cy = float(glH) - kSBThick;
+    float sbThickX = kSBThick * getDpiScaleX();
+    float sbThickY = kSBThick * getDpiScaleY();
+    float cx = float(glW) - sbThickX;
+    float cy = float(glH) - sbThickY;
     float mvp[16];
     glutil::ortho(0.f, float(glW), float(glH), 0.f, mvp);
     glUseProgram(sbProg_);
     glUniformMatrix4fv(sbMVP_, 1, GL_FALSE, mvp);
     glUniform4f(sbColor_, 0.12f, 0.12f, 0.12f, 0.35f);
     float v[] = {
-        cx,          cy,
-        cx+kSBThick, cy,
-        cx+kSBThick, cy+kSBThick,
-        cx+kSBThick, cy+kSBThick,
-        cx,          cy+kSBThick,
-        cx,          cy
+        cx,            cy,
+        cx + sbThickX, cy,
+        cx + sbThickX, cy + sbThickY,
+        cx + sbThickX, cy + sbThickY,
+        cx,            cy + sbThickY,
+        cx,            cy
     };
     glBindVertexArray(sbVAO_);
     glBindBuffer(GL_ARRAY_BUFFER, sbVBO_);
@@ -563,19 +633,15 @@ void CanvasWidget::renderSBCorner(int glW, int glH) {
 void CanvasWidget::renderScrollbarsGL(int glW, int glH, double dt) {
     bool hFade = hBar_.tick(dt);
     bool vFade = vBar_.tick(dt);
-
     if (!hBar_.needsRedraw() && !vBar_.needsRedraw()) {
         if ((hFade || vFade) && !linuxState(this).repaintPending) scheduleRepaint(this);
         return;
     }
-
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
     hBar_.render(sbProg_, sbVAO_, sbVBO_, sbMVP_, sbColor_, glW, glH);
     vBar_.render(sbProg_, sbVAO_, sbVBO_, sbMVP_, sbColor_, glW, glH);
     renderSBCorner(glW, glH);
-
     if ((hFade || vFade) && !linuxState(this).repaintPending) scheduleRepaint(this);
 }
 

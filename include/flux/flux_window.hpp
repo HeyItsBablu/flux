@@ -11,12 +11,12 @@
 
 #if defined(__linux__) && !defined(__ANDROID__)
 class CanvasWidget;
-class CairoCompositor;   
-class Canvas2DGL; 
+class CairoCompositor;
+class Canvas2DGL;
 
 #  include <glad/glad.h>
 #  include <SDL2/SDL.h>
- 
+
 #endif
 
 // ============================================================================
@@ -117,6 +117,22 @@ public:
     void           startupGdiplus();
     GraphicsContext getMeasureContext() const;
 
+    // ── DPI helpers (Linux HiDPI: drawable pixels / logical pixels) ───────────
+#if defined(__linux__) && !defined(__ANDROID__)
+    float dpiScaleX() const {
+        return (logicalWidth_  > 0)
+            ? float(cachedWidth)  / float(logicalWidth_)
+            : 1.f;
+    }
+    float dpiScaleY() const {
+        return (logicalHeight_ > 0)
+            ? float(cachedHeight) / float(logicalHeight_)
+            : 1.f;
+    }
+    int logicalWidth()  const { return logicalWidth_;  }
+    int logicalHeight() const { return logicalHeight_; }
+#endif
+
 #ifdef __ANDROID__
     EGLDisplay getEGLDisplay() const;
     EGLSurface getEGLSurface() const;
@@ -158,15 +174,12 @@ private:
     SDL_Window*   nativeHandle  = nullptr;
     SDL_GLContext glContext_     = nullptr;
 
-
-    Canvas2DGL*     canvasGL_        = nullptr;
-
+    Canvas2DGL*      canvasGL_        = nullptr;
     CairoCompositor* cairoCompositor_ = nullptr;
-
 
     int                  logicalWidth_  = 0;
     int                  logicalHeight_ = 0;
-    std::vector<uint8_t> cairoPixelBuf_;   // kept for API compat (unused in new path)
+    std::vector<uint8_t> cairoPixelBuf_;
     CanvasWidget*        capturedCanvas_ = nullptr;
     CanvasWidget*        focusedCanvas_  = nullptr;
     bool        running      = false;
@@ -184,7 +197,6 @@ private:
     CanvasWidget* hitTestCanvas(int sx, int sy);
 
 public:
-
     void registerCanvas_public  (CanvasWidget* c) { registerCanvas(c);   }
     void unregisterCanvas_public(CanvasWidget* c) { unregisterCanvas(c); }
 
@@ -215,4 +227,4 @@ private:
 #endif // __ANDROID__
 };
 
-#endif // FLUX_WINDOW_HPP
+#endif // FLUX_WINDOW_HPP 

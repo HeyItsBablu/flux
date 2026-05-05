@@ -72,7 +72,7 @@ struct PlatformWindow::CairoState {
 
 // ============================================================================
 // Cairo UI — flat-colour fullscreen quad shader
-// Replaces the NVG texture-blit path for compositing Cairo over GL.
+// Composites the Cairo UI overlay (logical-pixel texture) over the GL scene.
 // ============================================================================
 
 static const char* kCairoVert = R"GLSL(
@@ -91,17 +91,15 @@ uniform sampler2D uTex;
 void main(){ fragColor = texture(uTex, vUV); }
 )GLSL";
 
-// ── Cairo compositor state (owned by PlatformWindow on Linux) ─────────────────
 struct CairoCompositor {
     GLuint prog   = 0;
     GLuint vao    = 0;
     GLuint vbo    = 0;
-    GLuint tex    = 0;   // RGBA texture updated from Cairo pixels each frame
+    GLuint tex    = 0;
     int    texW   = 0;
     int    texH   = 0;
 
     bool init() {
-        // Full-screen quad (NDC, covering [-1,1]x[-1,1])
         static const float verts[] = {
             -1.f, -1.f,  0.f, 1.f,
              1.f, -1.f,  1.f, 1.f,
@@ -111,7 +109,6 @@ struct CairoCompositor {
             -1.f, -1.f,  0.f, 1.f
         };
 
-        // Build shader
         auto compile = [](GLenum t, const char* src) -> GLuint {
             GLuint s = glCreateShader(t);
             glShaderSource(s, 1, &src, nullptr);
@@ -151,10 +148,11 @@ struct CairoCompositor {
     }
 
     // Upload Cairo BGRA→RGBA and draw over the GL scene.
+    // cairoBGRA / w / h are in LOGICAL pixels — the texture is stretched over
+    // the full NDC quad so it naturally fills the physical viewport.
     void draw(const uint8_t* cairoBGRA, int w, int h) {
         if (!prog || !w || !h || !cairoBGRA) return;
 
-        // Convert BGRA→RGBA into a reusable buffer.
         static std::vector<uint8_t> rgba;
         int n = w * h;
         rgba.resize(size_t(n) * 4);
@@ -176,7 +174,6 @@ struct CairoCompositor {
         }
         glBindTexture(GL_TEXTURE_2D, 0);
 
-        // Draw over everything with premultiplied alpha blend.
         glEnable(GL_BLEND);
         glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 
@@ -240,7 +237,8 @@ bool PlatformWindow::create(const std::string& title, int width, int height,
     nativeHandle = SDL_CreateWindow(title.c_str(),
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         width, height,
-        SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+        SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE
+        | SDL_WINDOW_ALLOW_HIGHDPI);  // <-- enable HiDPI drawable size
 
     if (!nativeHandle) {
         SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 0);
@@ -248,16 +246,23 @@ bool PlatformWindow::create(const std::string& title, int width, int height,
         nativeHandle = SDL_CreateWindow(title.c_str(),
             SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
             width, height,
-            SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+            SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE
+            | SDL_WINDOW_ALLOW_HIGHDPI);
     }
     if (!nativeHandle) {
         fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
         SDL_Quit(); return false;
     }
 
+    // Physical drawable size (may differ from logical on HiDPI displays).
     SDL_GL_GetDrawableSize(nativeHandle, &cachedWidth, &cachedHeight);
-    logicalWidth_  = width;
-    logicalHeight_ = height;
+    // Logical window size (what the OS / SDL reports for event coordinates).
+    SDL_GetWindowSize(nativeHandle, &logicalWidth_, &logicalHeight_);
+
+    fprintf(stderr, "PlatformWindow: logical=%dx%d  physical=%dx%d  scale=%.2fx%.2f\n",
+            logicalWidth_, logicalHeight_,
+            cachedWidth,   cachedHeight,
+            dpiScaleX(),   dpiScaleY());
 
     glContext_ = SDL_GL_CreateContext(nativeHandle);
     if (!glContext_) {
@@ -290,7 +295,6 @@ bool PlatformWindow::create(const std::string& title, int width, int height,
         SDL_Quit(); return false;
     }
 
-    // Register fonts for stb_truetype
     auto regFont = [this](const char* name, const char* path) {
         if (!Canvas2D::registerFont(canvasGL_, name, path))
             fprintf(stderr, "PlatformWindow: font '%s' not found at '%s'\n", name, path);
@@ -310,7 +314,9 @@ bool PlatformWindow::create(const std::string& title, int width, int height,
     if (!cairoCompositor_->init())
         fprintf(stderr, "PlatformWindow: CairoCompositor init failed\n");
 
-    // ── Cairo CPU surface ─────────────────────────────────────────────────────
+    // ── Cairo CPU surface — allocated at LOGICAL size.
+    // The compositor stretches it over the full NDC quad so it fills the
+    // physical viewport correctly without any extra scaling code.
     cairoState = new CairoState();
     if (!cairoState->rebuild(logicalWidth_, logicalHeight_))
         fprintf(stderr, "PlatformWindow: CairoState::rebuild failed\n");
@@ -332,9 +338,6 @@ void PlatformWindow::destroy() {
     sdlTimerMap.clear();
 
     fluxShutdownHttpQueue();
-
-    // Canvas widgets must be destroyed before Canvas2DGL.
-    // They clean up their own GL resources in destroyGLResources().
 
     if (cairoCompositor_) {
         cairoCompositor_->destroy();
@@ -368,7 +371,6 @@ int PlatformWindow::run() {
         if (hasEvent) handleSDLEvent(e);
         while (SDL_PollEvent(&e)) handleSDLEvent(e);
 
-        // Check if any canvas needs continuous repaint.
         if (!dirty) {
             for (CanvasWidget* cw : canvasWidgets_) {
                 if (cw && cw->isInitialized() && cw->needsRepaint()) {
@@ -388,7 +390,7 @@ int PlatformWindow::run() {
         for (CanvasWidget* cw : canvasWidgets_)
             if (cw && cw->isInitialized()) cw->preRenderPass();
 
-        // ── Clear window ──────────────────────────────────────────────────────
+        // ── Clear window using the PHYSICAL drawable size ─────────────────────
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glViewport(0, 0, cachedWidth, cachedHeight);
         glClearColor(0.f, 0.f, 0.f, 1.f);
@@ -400,9 +402,9 @@ int PlatformWindow::run() {
             if (cw && cw->isInitialized()) cw->glRenderPass();
 
         // ── Pass 3: Cairo UI overlay ──────────────────────────────────────────
-        // Paint all UI widgets into Cairo, then composite over GL.
+        // Paint all UI widgets into Cairo at LOGICAL resolution, then
+        // composite the texture over the full physical viewport via NDC quad.
         if (cairoState && cairoState->cr) {
-            // Clear Cairo surface.
             cairo_save(cairoState->cr);
             cairo_set_operator(cairoState->cr, CAIRO_OPERATOR_CLEAR);
             cairo_paint(cairoState->cr);
@@ -415,7 +417,7 @@ int PlatformWindow::run() {
             cairo_surface_flush(cairoState->cairoSurf);
 
             if (cairoCompositor_) {
-                // Restore full-window viewport for the composite blit.
+                // Restore full physical viewport for the composite blit.
                 glViewport(0, 0, cachedWidth, cachedHeight);
                 cairoCompositor_->draw(
                     cairoState->pixels.data(),
@@ -447,6 +449,8 @@ void PlatformWindow::unregisterCanvas(CanvasWidget* c) {
 }
 
 CanvasWidget* PlatformWindow::hitTestCanvas(int sx, int sy) {
+    // sx/sy are LOGICAL pixel coordinates from SDL events.
+    // CanvasWidget::containsPoint also works in logical pixels — correct.
     for (auto it = canvasWidgets_.rbegin(); it != canvasWidgets_.rend(); ++it) {
         CanvasWidget* cw = *it;
         if (cw && cw->isInitialized() && cw->containsPoint(sx, sy)) return cw;
@@ -455,7 +459,8 @@ CanvasWidget* PlatformWindow::hitTestCanvas(int sx, int sy) {
 }
 
 // ============================================================================
-// handleSDLEvent — identical logic to the NVG version, NVG refs removed
+// handleSDLEvent
+// All SDL mouse/key event coordinates are in LOGICAL pixels.
 // ============================================================================
 void PlatformWindow::handleSDLEvent(const SDL_Event& e) {
 
@@ -477,6 +482,7 @@ void PlatformWindow::handleSDLEvent(const SDL_Event& e) {
             capturedCanvas_ = cw;
             focusedCanvas_  = cw;
             SDL_Event local = e;
+            // Deliver event in widget-local logical coordinates.
             local.button.x -= cw->x;
             local.button.y -= cw->y;
             cw->handleSDLEvent(local);
@@ -571,12 +577,17 @@ void PlatformWindow::handleSDLEvent(const SDL_Event& e) {
 
         case SDL_WINDOWEVENT_RESIZED:
         case SDL_WINDOWEVENT_SIZE_CHANGED: {
+            // Always re-query both physical and logical sizes on resize.
             SDL_GL_GetDrawableSize(nativeHandle, &cachedWidth, &cachedHeight);
             SDL_GetWindowSize(nativeHandle, &logicalWidth_, &logicalHeight_);
 
+            fprintf(stderr, "PlatformWindow resize: logical=%dx%d  physical=%dx%d\n",
+                    logicalWidth_, logicalHeight_, cachedWidth, cachedHeight);
+
+            // Rebuild Cairo surface at the new LOGICAL size.
             if (cairoState) cairoState->rebuild(logicalWidth_, logicalHeight_);
 
-            // Invalidate Cairo compositor texture size.
+            // Invalidate cached texture size in compositor.
             if (cairoCompositor_) {
                 cairoCompositor_->texW = 0;
                 cairoCompositor_->texH = 0;
@@ -586,6 +597,9 @@ void PlatformWindow::handleSDLEvent(const SDL_Event& e) {
                 GraphicsContext ctx(cairoState->cr, logicalWidth_, logicalHeight_);
                 callbacks.onResize(ctx, logicalWidth_, logicalHeight_);
             }
+
+            // Notify canvas widgets — they will recompute their physical size
+            // from their logical width/height + the new DPI scale internally.
             for (CanvasWidget* cw : canvasWidgets_)
                 if (cw) cw->onWindowResize(cachedWidth, cachedHeight);
 
