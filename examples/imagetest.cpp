@@ -33,7 +33,7 @@ public:
                     ->setCrossAxisAlignment(CrossAxisAlignment::Center),
 
                 Row({
-                        Container(Image("screenshots/682809.jpg")
+                        Container(Image("screenshots/counter.png")
                                       ->setFit(ImageFit::Cover))
                             ->setWidth(80)
                             ->setHeight(80)
@@ -56,7 +56,7 @@ public:
                     ->setSpacing(12)
                     ->setCrossAxisAlignment(CrossAxisAlignment::Center),
                 Row({
-                        Container(Image("screenshots/682809.jpg")
+                        Container(Image("screenshots/batman.jpg")
                                       ->setFit(ImageFit::Cover))
                             ->setWidth(80)
                             ->setHeight(80)
@@ -79,7 +79,7 @@ public:
                     ->setSpacing(12)
                     ->setCrossAxisAlignment(CrossAxisAlignment::Center),
                 Row({
-                        Container(Image("screenshots/682809.jpg")
+                        Container(Image("screenshots/layout.png")
                                       ->setFit(ImageFit::Cover))
                             ->setWidth(80)
                             ->setHeight(80)
@@ -102,7 +102,7 @@ public:
                     ->setSpacing(12)
                     ->setCrossAxisAlignment(CrossAxisAlignment::Center),
                 Row({
-                        Container(Image("screenshots/682809.jpg")
+                        Container(Image("screenshots/illustrator.png")
                                       ->setFit(ImageFit::Cover))
                             ->setWidth(80)
                             ->setHeight(80)
@@ -125,7 +125,7 @@ public:
                     ->setSpacing(12)
                     ->setCrossAxisAlignment(CrossAxisAlignment::Center),
                 Row({
-                        Container(Image("screenshots/682809.jpg")
+                        Container(Image("screenshots/logic_sim.png")
                                       ->setFit(ImageFit::Cover))
                             ->setWidth(80)
                             ->setHeight(80)
@@ -148,7 +148,7 @@ public:
                     ->setSpacing(12)
                     ->setCrossAxisAlignment(CrossAxisAlignment::Center),
                 Row({
-                        Container(Image("screenshots/682809.jpg")
+                        Container(Image("screenshots/graph.png")
                                       ->setFit(ImageFit::Cover))
                             ->setWidth(80)
                             ->setHeight(80)

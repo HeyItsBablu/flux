@@ -86,10 +86,24 @@ public:
     // ── Platform pixel storage ────────────────────────────────────────────────
 #ifdef _WIN32
     std::unique_ptr<Gdiplus::Bitmap> bitmap;
+
+    // Pre-scaled bitmap cache — rebuilt only when display size or fit changes.
+    mutable std::unique_ptr<Gdiplus::Bitmap> _scaledBitmap;
+    mutable int  _scaledW   = 0;
+    mutable int  _scaledH   = 0;
+    mutable int  _scaledFit = -1;
 #endif
+
 #if defined(__linux__) && !defined(__ANDROID__)
     std::vector<uint8_t> pixels;
+
+    // Pre-scaled Cairo surface cache — rebuilt only when display size or fit changes.
+    mutable cairo_surface_t* _scaledSurface = nullptr;
+    mutable int  _scaledW   = 0;
+    mutable int  _scaledH   = 0;
+    mutable int  _scaledFit = -1;
 #endif
+
 #ifdef __ANDROID__
     int nvgImage = -1;
 
@@ -115,6 +129,12 @@ public:
     }
 
     ~ImageWidget() override {
+#if defined(__linux__) && !defined(__ANDROID__)
+        _invalidateScaledCache();
+#endif
+#ifdef _WIN32
+        _invalidateScaledCache();
+#endif
 #ifdef __ANDROID__
         _freeNvgImage();
 #endif
@@ -152,7 +172,10 @@ public:
                 self->_setLoadState(ImageLoadState::Error);
             }
 #ifndef __ANDROID__
-            if (ok) self->_setLoadState(ImageLoadState::Loaded);
+            if (ok) {
+                self->_invalidateScaledCache();
+                self->_setLoadState(ImageLoadState::Loaded);
+            }
 #endif
             if (auto* ui = FluxUI::getCurrentInstance())
                 ui->partialRebuild(self.get());
@@ -245,8 +268,18 @@ public:
         }
 #endif
 
+        // Invalidate any stale pre-scaled cache from a previous image.
+        _invalidateScaledCache();
+
         _setLoadState(ImageLoadState::Loaded);
-        markNeedsLayout();
+
+        // If the widget already has an explicit size, a repaint is enough —
+        // no need to re-measure the whole tree.
+        if (!autoWidth && !autoHeight)
+            markNeedsPaint();
+        else
+            markNeedsLayout();
+
         return true;
     }
 
@@ -257,21 +290,7 @@ public:
 #endif
     }
 
-    // ── Layout ────────────────────────────────────────────────────────────────
-    //
-    // Size resolution rules (same as Flutter's Image widget):
-    //
-    //   autoWidth && autoHeight  →  use intrinsic image size (or 100×100 fallback)
-    //                               and add padding around it.
-    //   autoWidth only           →  derive width from the explicit height and the
-    //                               image aspect ratio; add padding.
-    //   autoHeight only          →  derive height from the explicit width and the
-    //                               image aspect ratio; add padding.
-    //   neither auto             →  explicit size already includes space for
-    //                               content + padding (user controls it fully).
-    //
-    // In all cases the result is clamped to the incoming BoxConstraints.
-    // Padding is NEVER added a second time to an already-explicit dimension.
+
 
     void computeLayout(GraphicsContext& /*ctx*/,
                        const BoxConstraints& constraints,
@@ -390,7 +409,12 @@ public:
         loadFromUrl(url, postToUI); return self();
     }
     std::shared_ptr<ImageWidget> setFit(ImageFit fitMode) {
-        fit = fitMode; markNeedsPaint(); return self();
+        if (fit != fitMode) {
+            fit = fitMode;
+            _invalidateScaledCache();
+            markNeedsPaint();
+        }
+        return self();
     }
     std::shared_ptr<ImageWidget> setPlaceholderColor(Color color) {
         placeholderColor = color; markNeedsPaint(); return self();
@@ -423,6 +447,26 @@ private:
         hasError    = (s == ImageLoadState::Error);
     }
 
+
+
+    void _invalidateScaledCache() {
+#if defined(__linux__) && !defined(__ANDROID__)
+        if (_scaledSurface) {
+            cairo_surface_destroy(_scaledSurface);
+            _scaledSurface = nullptr;
+        }
+        _scaledW = _scaledH = 0;
+        _scaledFit = -1;
+#endif
+#ifdef _WIN32
+        _scaledBitmap.reset();
+        _scaledW = _scaledH = 0;
+        _scaledFit = -1;
+#endif
+        // Android uses NanoVG textures that are already GPU-resident;
+        // no separate pre-scale cache is needed there.
+    }
+
     // =========================================================================
     // _decodeFromMemory — called from the HTTP callback (background thread)
     // =========================================================================
@@ -449,6 +493,8 @@ private:
         }
         imageWidth  = (int)bitmap->GetWidth();
         imageHeight = (int)bitmap->GetHeight();
+        // Invalidate stale cache — new source pixels arrived.
+        _invalidateScaledCache();
         return (imageWidth > 0 && imageHeight > 0);
 #endif
 
@@ -459,6 +505,8 @@ private:
         if (!decoded) { pixels.clear(); return false; }
         _convertStbiToCairo(decoded, w, h);
         stbi_image_free(decoded);
+        // Invalidate stale cache — new source pixels arrived.
+        _invalidateScaledCache();
         return (imageWidth > 0 && imageHeight > 0);
 #endif
 
@@ -550,19 +598,57 @@ private:
         }
     }
 
-    // =========================================================================
-    // Win32 — GDI+
-    // =========================================================================
+
 #ifdef _WIN32
     void _renderGDIPlus(GraphicsContext& ctx,
                         int cx, int cy, int cw, int ch) const {
         if (!bitmap) return;
-        Gdiplus::Graphics g(ctx.hdc);
-        g.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
-        g.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
 
-        DestRect d = _calculateDestRect(cx, cy, cw, ch);
-        Gdiplus::RectF destRect(d.x, d.y, d.w, d.h);
+        DestRect d  = _calculateDestRect(cx, cy, cw, ch);
+        int dw = std::max(1, (int)d.w);
+        int dh = std::max(1, (int)d.h);
+
+        // Rebuild the pre-scaled bitmap when the display size or fit mode changes.
+        if (!_scaledBitmap || _scaledW != dw || _scaledH != dh
+                            || _scaledFit != (int)fit) {
+            _scaledBitmap = std::make_unique<Gdiplus::Bitmap>(dw, dh,
+                PixelFormat32bppPARGB);
+
+            if (_scaledBitmap && _scaledBitmap->GetLastStatus() == Gdiplus::Ok) {
+                Gdiplus::Graphics sg(_scaledBitmap.get());
+                sg.SetInterpolationMode(
+                    Gdiplus::InterpolationModeHighQualityBicubic);
+                sg.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
+                sg.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
+                sg.DrawImage(bitmap.get(),
+                    Gdiplus::RectF(0.f, 0.f, (float)dw, (float)dh));
+
+                _scaledW   = dw;
+                _scaledH   = dh;
+                _scaledFit = (int)fit;
+            } else {
+                // Fallback: clear cache so we try again next frame rather than
+                // using a corrupt bitmap.
+                _scaledBitmap.reset();
+                _scaledW = _scaledH = 0;
+                _scaledFit = -1;
+            }
+        }
+
+
+        Gdiplus::Bitmap* src = _scaledBitmap ? _scaledBitmap.get() : bitmap.get();
+        Gdiplus::RectF   destRect = _scaledBitmap
+            ? Gdiplus::RectF(d.x, d.y, (float)dw, (float)dh)
+            : Gdiplus::RectF(d.x, d.y, d.w, d.h);
+
+        Gdiplus::Graphics g(ctx.hdc);
+        // Nearest-neighbour: the source is already at display resolution.
+        g.SetInterpolationMode(_scaledBitmap
+            ? Gdiplus::InterpolationModeNearestNeighbor
+            : Gdiplus::InterpolationModeHighQualityBicubic);
+        g.SetSmoothingMode(_scaledBitmap
+            ? Gdiplus::SmoothingModeNone
+            : Gdiplus::SmoothingModeHighQuality);
 
         if (borderRadius > 0) {
             Gdiplus::GraphicsPath path;
@@ -576,13 +662,11 @@ private:
         } else {
             g.SetClip(Gdiplus::Rect(cx, cy, cw, ch));
         }
-        g.DrawImage(bitmap.get(), destRect);
+
+        g.DrawImage(src, destRect);
     }
 #endif
 
-    // =========================================================================
-    // Linux — Cairo
-    // =========================================================================
 #if defined(__linux__) && !defined(__ANDROID__)
     void _convertStbiToCairo(unsigned char* data, int w, int h) {
         imageWidth  = w;
@@ -602,6 +686,57 @@ private:
     void _renderCairo(GraphicsContext& ctx,
                       int cx, int cy, int cw, int ch) const {
         if (pixels.empty() || !ctx.cr) return;
+
+        DestRect d  = _calculateDestRect(cx, cy, cw, ch);
+        int dw = std::max(1, (int)d.w);
+        int dh = std::max(1, (int)d.h);
+
+        // Rebuild the pre-scaled surface when display size or fit mode changes.
+        if (!_scaledSurface || _scaledW != dw || _scaledH != dh
+                             || _scaledFit != (int)fit) {
+
+            // Free any existing cached surface.
+            if (_scaledSurface) {
+                cairo_surface_destroy(_scaledSurface);
+                _scaledSurface = nullptr;
+            }
+
+            cairo_surface_t* scaledSurf =
+                cairo_image_surface_create(CAIRO_FORMAT_ARGB32, dw, dh);
+
+            if (cairo_surface_status(scaledSurf) == CAIRO_STATUS_SUCCESS) {
+                cairo_t* scr = cairo_create(scaledSurf);
+
+                // Temporary view of the source pixels — no copy.
+                cairo_surface_t* srcSurf = cairo_image_surface_create_for_data(
+                    const_cast<uint8_t*>(pixels.data()),
+                    CAIRO_FORMAT_ARGB32,
+                    imageWidth, imageHeight, imageWidth * 4);
+
+                if (cairo_surface_status(srcSurf) == CAIRO_STATUS_SUCCESS) {
+                    cairo_scale(scr,
+                        (double)dw / imageWidth,
+                        (double)dh / imageHeight);
+                    cairo_set_source_surface(scr, srcSurf, 0.0, 0.0);
+                    cairo_pattern_set_filter(cairo_get_source(scr),
+                        CAIRO_FILTER_BILINEAR);
+                    cairo_paint(scr);
+                }
+
+                cairo_surface_destroy(srcSurf);
+                cairo_destroy(scr);
+
+                _scaledSurface = scaledSurf;
+                _scaledW       = dw;
+                _scaledH       = dh;
+                _scaledFit     = (int)fit;
+            } else {
+                // Surface creation failed — release and leave cache empty so
+                // we fall back to the original slow path below.
+                cairo_surface_destroy(scaledSurf);
+            }
+        }
+
         cairo_t* cr = ctx.cr;
         cairo_save(cr);
 
@@ -613,20 +748,31 @@ private:
             cairo_clip(cr);
         }
 
-        cairo_surface_t* surf = cairo_image_surface_create_for_data(
-            const_cast<uint8_t*>(pixels.data()),
-            CAIRO_FORMAT_ARGB32, imageWidth, imageHeight, imageWidth * 4);
-
-        if (cairo_surface_status(surf) == CAIRO_STATUS_SUCCESS) {
-            DestRect d = _calculateDestRect(cx, cy, cw, ch);
-            cairo_translate(cr, d.x, d.y);
-            cairo_scale(cr, d.w / (double)imageWidth,
-                            d.h / (double)imageHeight);
-            cairo_set_source_surface(cr, surf, 0.0, 0.0);
-            cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_BILINEAR);
+        if (_scaledSurface) {
+            // Fast path: blit the pre-scaled surface with no scaling (nearest).
+            cairo_set_source_surface(cr, _scaledSurface, d.x, d.y);
+            cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_NEAREST);
             cairo_paint(cr);
+        } else {
+            // Slow fallback: scale from source on every frame.
+            cairo_surface_t* srcSurf = cairo_image_surface_create_for_data(
+                const_cast<uint8_t*>(pixels.data()),
+                CAIRO_FORMAT_ARGB32,
+                imageWidth, imageHeight, imageWidth * 4);
+
+            if (cairo_surface_status(srcSurf) == CAIRO_STATUS_SUCCESS) {
+                cairo_translate(cr, d.x, d.y);
+                cairo_scale(cr,
+                    (double)d.w / imageWidth,
+                    (double)d.h / imageHeight);
+                cairo_set_source_surface(cr, srcSurf, 0.0, 0.0);
+                cairo_pattern_set_filter(cairo_get_source(cr),
+                    CAIRO_FILTER_BILINEAR);
+                cairo_paint(cr);
+            }
+            cairo_surface_destroy(srcSurf);
         }
-        cairo_surface_destroy(surf);
+
         cairo_restore(cr);
     }
 
