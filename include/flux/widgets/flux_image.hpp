@@ -30,10 +30,6 @@
 #   define LOGW_IMG(...) __android_log_print(ANDROID_LOG_WARN,  "FluxImage", __VA_ARGS__)
 extern NVGcontext*    FluxAndroid_getVG();
 extern AAssetManager* FluxAndroid_getAssetManager();
-
-// stb_image for Android — decode any compressed format into raw RGBA on the
-// background thread; nvgCreateImageRGBA uploads on the GL thread.
-// No format restrictions: JPEG, PNG, BMP, TGA, GIF all work.
 #   define STBI_ONLY_JPEG
 #   define STBI_ONLY_PNG
 #   define STBI_ONLY_BMP
@@ -78,13 +74,12 @@ class ImageWidget : public Widget {
 public:
     std::string    imagePath;
     ImageFit       fit              = ImageFit::Contain;
-    int            imageWidth       = 0;
-    int            imageHeight      = 0;
+    int            imageWidth       = 0;   // intrinsic pixel width of the decoded image
+    int            imageHeight      = 0;   // intrinsic pixel height of the decoded image
     Color          placeholderColor = Color::fromRGB(240, 240, 240);
     Color          errorColor       = Color::fromRGB(255, 200, 200);
     ImageLoadState loadState        = ImageLoadState::Idle;
 
-    // Keep these for back-compat but derive from loadState
     bool imageLoaded = false;
     bool hasError    = false;
 
@@ -98,17 +93,13 @@ public:
 #ifdef __ANDROID__
     int nvgImage = -1;
 
-    // Decoded RGBA pixels waiting to be uploaded on the GL thread.
-    // Filled by _decodeFromMemory() on the background thread.
-    // Consumed by _renderNanoVG() on the render (GL) thread.
     struct PendingPixels {
-        std::vector<uint8_t> rgba;  // raw RGBA8888, row-major, no padding
+        std::vector<uint8_t> rgba;
         int w = 0;
         int h = 0;
         bool ready() const { return !rgba.empty() && w > 0 && h > 0; }
     } pending;
 
-    // Persistent upload buffer — kept alive until NVG is done with the texture
     std::vector<uint8_t> uploadBuffer;
     int uploadW = 0;
     int uploadH = 0;
@@ -130,8 +121,7 @@ public:
     }
 
     // =========================================================================
-    // loadFromUrl — fetch bytes over HTTP, decode with stb_image on bg thread,
-    //               then upload RGBA to NVG on the render (GL) thread.
+    // loadFromUrl
     // =========================================================================
     void loadFromUrl(const std::string& url, bool postToUI = true) {
         if (url.empty()) return;
@@ -161,10 +151,6 @@ public:
             if (!ok) {
                 self->_setLoadState(ImageLoadState::Error);
             }
-            // On Android, _decodeFromMemory decoded pixels into pending.rgba on
-            // this background thread. State stays Loading — _renderNanoVG will
-            // upload to GL and promote to Loaded on the render thread.
-            // On other platforms decoding is complete, so set Loaded now.
 #ifndef __ANDROID__
             if (ok) self->_setLoadState(ImageLoadState::Loaded);
 #endif
@@ -177,7 +163,7 @@ public:
     }
 
     // =========================================================================
-    // loadImage — file-based loader (asset path or absolute filesystem path)
+    // loadImage — file-based loader
     // =========================================================================
     bool loadImage(const std::string& path) {
         if (path.empty()) {
@@ -221,18 +207,13 @@ public:
 #endif
 
 #ifdef __ANDROID__
-        // loadImage() is called on the GL/render thread (lazily from render(),
-        // or from the constructor before display). Safe to call NVG directly.
         _freeNvgImage();
         NVGcontext* vg = FluxAndroid_getVG();
         if (!vg) { _setLoadState(ImageLoadState::Idle); return false; }
 
         if (!path.empty() && path[0] == '/') {
-            // Absolute filesystem path — let NVG load it directly
             nvgImage = nvgCreateImage(vg, path.c_str(), 0);
         } else {
-            // Asset path — read via AAssetManager, decode with stb_image,
-            // then upload raw RGBA so every format is supported consistently
             AAssetManager* am = FluxAndroid_getAssetManager();
             if (!am) { _setLoadState(ImageLoadState::Error); return false; }
             AAsset* asset = AAssetManager_open(am, path.c_str(), AASSET_MODE_BUFFER);
@@ -277,28 +258,66 @@ public:
     }
 
     // ── Layout ────────────────────────────────────────────────────────────────
+    //
+    // Size resolution rules (same as Flutter's Image widget):
+    //
+    //   autoWidth && autoHeight  →  use intrinsic image size (or 100×100 fallback)
+    //                               and add padding around it.
+    //   autoWidth only           →  derive width from the explicit height and the
+    //                               image aspect ratio; add padding.
+    //   autoHeight only          →  derive height from the explicit width and the
+    //                               image aspect ratio; add padding.
+    //   neither auto             →  explicit size already includes space for
+    //                               content + padding (user controls it fully).
+    //
+    // In all cases the result is clamped to the incoming BoxConstraints.
+    // Padding is NEVER added a second time to an already-explicit dimension.
+
     void computeLayout(GraphicsContext& /*ctx*/,
                        const BoxConstraints& constraints,
                        FontCache& /*fontCache*/) override
     {
+        const int padW = paddingLeft + paddingRight;
+        const int padH = paddingTop  + paddingBottom;
+
         if (loadState == ImageLoadState::Loaded && imageWidth > 0 && imageHeight > 0) {
+
             if (autoWidth && autoHeight) {
-                width  = imageWidth;
-                height = imageHeight;
+                // Both axes auto → wrap intrinsic size + padding
+                width  = constraints.clampWidth (imageWidth  + padW);
+                height = constraints.clampHeight(imageHeight + padH);
+
             } else if (autoWidth) {
+                // Height is explicit (already the full widget height including padding)
+                int contentH = std::max(1, height - padH);
                 float aspect = (float)imageWidth / (float)imageHeight;
-                width = (int)((float)height * aspect);
+                int inferredContentW = (int)((float)contentH * aspect);
+                width = constraints.clampWidth(inferredContentW + padW);
+
             } else if (autoHeight) {
+                // Width is explicit (already the full widget width including padding)
+                int contentW = std::max(1, width - padW);
                 float aspect = (float)imageHeight / (float)imageWidth;
-                height = (int)((float)width * aspect);
+                int inferredContentH = (int)((float)contentW * aspect);
+                height = constraints.clampHeight(inferredContentH + padH);
+
+            } else {
+                // Both explicit — just clamp to constraints; don't touch the values.
+                width  = constraints.clampWidth (width);
+                height = constraints.clampHeight(height);
             }
+
         } else {
-            if (autoWidth)  width  = 100;
-            if (autoHeight) height = 100;
+            // Image not loaded yet (Loading, Error, Idle) — use explicit sizes or
+            // a sensible fallback so the placeholder occupies real space.
+
+            if (autoWidth)  width  = constraints.clampWidth (100 + padW);
+            else            width  = constraints.clampWidth (width);
+
+            if (autoHeight) height = constraints.clampHeight(100 + padH);
+            else            height = constraints.clampHeight(height);
         }
 
-        width  = constraints.clampWidth(width   + paddingLeft + paddingRight);
-        height = constraints.clampHeight(height + paddingTop  + paddingBottom);
         applyConstraints();
         needsLayout = false;
     }
@@ -311,7 +330,8 @@ public:
             drawRoundedRectangle(ctx);
         if (hasBorder)
             painter.drawRoundedRectOutline(x, y, width, height,
-                                           borderRadius * 2, getCurrentBorderColor(), borderWidth);
+                                           borderRadius * 2,
+                                           getCurrentBorderColor(), borderWidth);
 
         const int cx = x + paddingLeft;
         const int cy = y + paddingTop;
@@ -336,7 +356,6 @@ public:
 
             case ImageLoadState::Loading:
 #ifdef __ANDROID__
-                // pending.rgba filled on background thread — upload to GL now
                 if (pending.ready()) {
                     _renderNanoVG(cx, cy, cw, ch);
                     if (loadState == ImageLoadState::Loaded) break;
@@ -347,7 +366,7 @@ public:
 
             case ImageLoadState::Error:
                 painter.fillRect(cx, cy, cw, ch, errorColor);
-                painter.drawTextA("\xe2\x9c\x95",   // UTF-8 ✕
+                painter.drawTextA("\xe2\x9c\x95",
                                   cx, cy, cw, ch,
                                   fontCache.getFont(fontSize, fontWeight),
                                   Color::fromRGB(150, 0, 0),
@@ -444,9 +463,6 @@ private:
 #endif
 
 #ifdef __ANDROID__
-        // ── Decode on the background thread with stb_image ────────────────────
-        // Outputs raw RGBA8888 regardless of source format (JPEG, PNG, BMP, etc.)
-        // nvgCreateImageRGBA() on the GL thread is then a plain texture upload.
         int w = 0, h = 0, ch = 0;
         stbi_set_flip_vertically_on_load(0);
         unsigned char* rgba = stbi_load_from_memory(data, len, &w, &h, &ch, 4);
@@ -461,8 +477,6 @@ private:
         pending.w = w;
         pending.h = h;
         stbi_image_free(rgba);
-
-        // imageWidth/imageHeight stay 0 until the GL upload confirms dimensions
         return true;
 #endif
 
@@ -474,7 +488,7 @@ private:
                         int cx, int cy, int cw, int ch) const
     {
         painter.fillRect(cx, cy, cw, ch, placeholderColor);
-        painter.drawTextA("\xe2\x80\xa6",   // UTF-8 ellipsis …
+        painter.drawTextA("\xe2\x80\xa6",
                           cx, cy, cw, ch,
                           fontCache.getFont(fontSize, fontWeight),
                           Color::fromRGB(160, 160, 160),
@@ -641,15 +655,9 @@ private:
         NVGcontext* vg = FluxAndroid_getVG();
         if (!vg) return;
 
-        // ── Upload decoded RGBA pixels to GL on the render thread ─────────────
-        // stb_image already decoded the image into pending.rgba on the bg thread.
-        // nvgCreateImageRGBA is a plain GL texture upload — no format issues,
-        // works for every format stb_image supports (JPEG, PNG, BMP, TGA, GIF).
         if (pending.ready()) {
             _deleteNvgTexture();
 
-            // Move decoded pixels into the persistent upload buffer.
-            // uploadBuffer must remain valid until we replace or free the texture.
             uploadBuffer = std::move(pending.rgba);
             uploadW      = pending.w;
             uploadH      = pending.h;
@@ -668,7 +676,6 @@ private:
                 return;
             }
 
-            // Confirm dimensions (should match uploadW/H but be defensive)
             nvgImageSize(vg, nvgImage, &imageWidth, &imageHeight);
             if (imageWidth == 0 || imageHeight == 0) {
                 LOGW_IMG("nvgImageSize returned zero — treating as error");
@@ -700,7 +707,6 @@ private:
         nvgRestore(vg);
     }
 
-    // Frees only the GPU texture handle — does NOT touch pending or uploadBuffer
     void _deleteNvgTexture() {
         if (nvgImage != -1) {
             NVGcontext* vg = FluxAndroid_getVG();
@@ -709,7 +715,6 @@ private:
         }
     }
 
-    // Full cleanup — GPU handle + all CPU buffers
     void _freeNvgImage() {
         _deleteNvgTexture();
         pending.rgba.clear();
@@ -734,7 +739,6 @@ inline ImageWidgetPtr Image() {
     return std::make_shared<ImageWidget>();
 }
 
-// URL-loaded image — shows placeholder while fetching, then the decoded image
 inline ImageWidgetPtr NetworkImage(const std::string& url,
                                    bool postToUI = true) {
     auto w = std::make_shared<ImageWidget>();

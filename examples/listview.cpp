@@ -1,15 +1,11 @@
 #include "flux/flux.hpp"
 
-class MyApp : public Component {
-  State<bool> showBadge;
-  State<int> notifCount;
+class MyApp : public Widget {
 
 public:
-  MyApp() : showBadge(true, context), notifCount(0, context) {}
-
   WidgetPtr build() override {
     return Scaffold(
-        AppBar("Stack Demo"),
+        AppBar("List view Demo"),
         ListView({Text("Item 1"),
                   Text("Item 2"),
                   Text("Item 3"),
@@ -45,14 +41,15 @@ public:
                   Button("Click",
                          []() { std::cout << "Button clicked" << std::endl; })})
             ->setSpacing(8)
-            ->setPadding(12)
+            ->setPadding(12),
+        nullptr, nullptr
 
     );
   }
 };
 
 WidgetPtr createApp(FluxUI *app) {
-  return FluxApp("FluxUI - Paint", BuildComponent<MyApp>(), AppTheme::light(),
+  return FluxApp("FluxUI - List", std::make_shared<MyApp>(), AppTheme::light(),
                  false, // debugShowWidgetBounds
                  900,   // width
                  700,   // height
