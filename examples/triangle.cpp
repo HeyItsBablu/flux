@@ -50,7 +50,7 @@ public:
     canvas->setScrollbarsEnabled(false);
     canvas->setSurface<TriangleSurface>();
 
-   return Scaffold(AppBar("Trianlge App"), Center(canvas));
+   return Scaffold(AppBar("Trianlge App"), canvas,nullptr,nullptr);
   }
 };
 
