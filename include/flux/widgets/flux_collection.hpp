@@ -447,6 +447,7 @@ public:
   // ── Render ────────────────────────────────────────────────────────────
 
   void render(GraphicsContext &ctx, FontCache &fontCache) override {
+
     sb.updateThumb();
     Painter painter(ctx);
 
