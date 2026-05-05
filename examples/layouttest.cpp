@@ -49,7 +49,7 @@ public:
                     ->setCrossAxisAlignment(CrossAxisAlignment::Stretch)
                 ),
             })
-            ->setCrossAxisAlignment(CrossAxisAlignment::Stretch)  
+            ->setCrossAxisAlignment(CrossAxisAlignment::Stretch),nullptr,nullptr
         );
     }
 };
