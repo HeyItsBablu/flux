@@ -722,7 +722,7 @@ Viewport &CanvasWidget::viewport() { return vp_; }
 std::shared_ptr<CanvasWidget> CanvasWidget::setSize(int w, int h) {
     width  = w;
     height = h;
-    autoWidth  = false;  // fixed size — stop auto-expanding
+    autoWidth  = false;  
     autoHeight = false;
     markNeedsLayout();
     return ptr();
