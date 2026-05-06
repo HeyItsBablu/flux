@@ -1,5 +1,4 @@
 // flux_canvas_linux.cpp
-
 #if defined(__linux__) && !defined(__ANDROID__)
 
 #include "flux/flux_canvas.hpp"
@@ -33,23 +32,18 @@ void main(){ fragColor = uColor; }
 struct LinuxCanvasState {
     bool   initialized    = false;
     bool   repaintPending = false;
-    // Physical (drawable) pixel dimensions — updated every preRenderPass.
-    int    lastW          = 0;
+    int    lastW          = 0;   // physical pixels
     int    lastH          = 0;
-    // Physical pixel position of this widget's top-left corner.
     int    physX          = 0;
     int    physY          = 0;
 };
 
 #include <unordered_map>
 static std::unordered_map<CanvasWidget*, LinuxCanvasState> s_linuxState;
-
-static LinuxCanvasState& linuxState(CanvasWidget* w) {
-    return s_linuxState[w];
-}
+static LinuxCanvasState& linuxState(CanvasWidget* w) { return s_linuxState[w]; }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SDL repaint event type (registered once)
+// SDL repaint event type
 // ─────────────────────────────────────────────────────────────────────────────
 
 static Uint32 s_repaintEventType_ = 0;
@@ -78,8 +72,6 @@ static float getDpiScaleY() {
     auto* pw = inst->getPlatformWindowPtr();
     return pw ? pw->dpiScaleY() : 1.f;
 }
-
-// Physical drawable dimensions of the whole window.
 static int getWindowPhysW() {
     auto* inst = FluxUI::getCurrentInstance();
     if (!inst) return 1;
@@ -93,7 +85,6 @@ static int getWindowPhysH() {
     return pw ? pw->clientHeight() : 1;
 }
 
-// Logical → physical conversion.
 static int toPhysX(int lx) { return int(float(lx) * getDpiScaleX()); }
 static int toPhysY(int ly) { return int(float(ly) * getDpiScaleY()); }
 static int toPhysW(int lw) { return int(float(lw) * getDpiScaleX()); }
@@ -138,46 +129,53 @@ static void scheduleRepaint(CanvasWidget* w) {
 static void syncPhysicalGeometry(CanvasWidget* w) {
     auto& s = linuxState(w);
 
-    int newW = toPhysW(w->width);
-    int newH = toPhysH(w->height);
-    int newX = toPhysX(w->x);
-    int newY = toPhysY(w->y);
+    const int newPhysW = toPhysW(w->width);
+    const int newPhysH = toPhysH(w->height);
+    const int newPhysX = toPhysX(w->x);
+    const int newPhysY = toPhysY(w->y);
 
-    // Always update position (widget may have moved without a resize).
-    s.physX = newX;
-    s.physY = newY;
+    // Always update position — widget may move without resizing.
+    s.physX = newPhysX;
+    s.physY = newPhysY;
 
-    bool sizeChanged = (newW != s.lastW || newH != s.lastH);
-    if (!sizeChanged || newW <= 0 || newH <= 0) return;
+    const bool sizeChanged = (newPhysW != s.lastW || newPhysH != s.lastH);
+    if (!sizeChanged || newPhysW <= 0 || newPhysH <= 0) return;
 
-    s.lastW = newW;
-    s.lastH = newH;
+    s.lastW = newPhysW;
+    s.lastH = newPhysH;
+
+
+    w->canvasW_ = newPhysW;
+    w->canvasH_ = newPhysH;
+    w->vp_.setCanvasSize(newPhysW, newPhysH);
 
     w->updateViewportSize(s.lastW, s.lastH);
     w->updateSBGeometry(s.lastW, s.lastH);
-    if (w->onGLResize) w->onGLResize(s.lastW, s.lastH);
 
-    // Tell the surface its new pixel dimensions.
-    if (w->activeSurface_) w->activeSurface_->resize(newW, newH);
+    if (w->activeSurface_) w->activeSurface_->resize(newPhysW, newPhysH);
+    if (w->onGLResize)     w->onGLResize(s.lastW, s.lastH);
 
-    // Re-fit the viewport to the new size so the content isn't clipped.
+    // Fit content to new size.
     w->vp_.fitToView();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// initCanvas  (one-time GL setup — size may still be default here)
+// initCanvas  — one-time GL setup; size may still be default here
 // ─────────────────────────────────────────────────────────────────────────────
 
 static void initCanvas(CanvasWidget* w) {
     auto& s = linuxState(w);
     assert(w->canvasGL_ && !s.initialized);
 
-    // Use whatever size is available now.  syncPhysicalGeometry() will
-    // correct it on the first preRenderPass after computeLayout() runs.
+
     s.lastW = (w->width  > 0) ? toPhysW(w->width)  : 1;
     s.lastH = (w->height > 0) ? toPhysH(w->height) : 1;
     s.physX = toPhysX(w->x);
     s.physY = toPhysY(w->y);
+
+    // Initialise canvasW_/canvasH_ to physical size right away.
+    w->canvasW_ = s.lastW;
+    w->canvasH_ = s.lastH;
 
     w->vp_.init(s.lastW, s.lastH, w->canvasW_, w->canvasH_);
     w->updateViewportSize(s.lastW, s.lastH);
@@ -244,30 +242,31 @@ std::shared_ptr<CanvasWidget> CanvasWidget::setSize(int w, int h) {
     markNeedsLayout();
     return ptr();
 }
+
 std::shared_ptr<CanvasWidget> CanvasWidget::setCanvasSize(int w, int h) {
-    canvasW_ = w; canvasH_ = h;
+
+    canvasW_ = toPhysW(w);
+    canvasH_ = toPhysH(h);
     auto& s = linuxState(this);
     if (s.initialized) {
-        vp_.setCanvasSize(w, h);
-        if (activeSurface_) activeSurface_->resize(w, h);
+        vp_.setCanvasSize(canvasW_, canvasH_);
+        if (activeSurface_) activeSurface_->resize(canvasW_, canvasH_);
     }
     return ptr();
 }
+
 std::shared_ptr<CanvasWidget> CanvasWidget::redraw() { markNeedsPaint(); return ptr(); }
+
 
 void CanvasWidget::computeLayout(GraphicsContext& /*ctx*/,
                                  const BoxConstraints& c, FontCache&) {
-    if (autoWidth) {
-        width   = (c.maxWidth  < kUnbounded) ? c.maxWidth  : width;
-        canvasW_ = width;
-    }
-    if (autoHeight) {
-        height  = (c.maxHeight < kUnbounded) ? c.maxHeight : height;
-        canvasH_ = height;
-    }
+    if (autoWidth)
+        width  = (c.maxWidth  < kUnbounded) ? c.maxWidth  : width;
+    if (autoHeight)
+        height = (c.maxHeight < kUnbounded) ? c.maxHeight : height;
+
     needsLayout = false;
-    // Kick a repaint so preRenderPass runs and calls syncPhysicalGeometry
-    // with the freshly-set width/height.
+    // Trigger a preRenderPass so syncPhysicalGeometry picks up the new size.
     scheduleRepaint(this);
 }
 
@@ -308,11 +307,10 @@ void CanvasWidget::setCanvasGL(Canvas2DGL* gl) {
         initCanvas(this);
 }
 
-// Called by PlatformWindow on resize.  Zero out lastW/lastH so
-// syncPhysicalGeometry will recalculate everything on the next frame.
 void CanvasWidget::onWindowResize(int /*newW*/, int /*newH*/) {
     auto& s = linuxState(this);
     if (!s.initialized) return;
+    // Force full recalc on the next preRenderPass.
     s.lastW = 0;
     s.lastH = 0;
     scheduleRepaint(this);
@@ -322,7 +320,7 @@ void CanvasWidget::preRenderPass() {
     auto& s = linuxState(this);
     if (!canvasGL_ || !s.initialized) return;
 
-    // Sync layout → physical geometry EVERY frame.
+    // Sync logical layout → physical GL dims every frame.
     syncPhysicalGeometry(this);
 
     if (pendingSurface_) activatePendingSurface();
@@ -347,21 +345,19 @@ void CanvasWidget::glRenderPass() {
 
     int glW = s.lastW < 1 ? 1 : s.lastW;
     int glH = s.lastH < 1 ? 1 : s.lastH;
-
-    // s.physX / physY set by syncPhysicalGeometry in preRenderPass.
     int physX = s.physX;
     int physY = s.physY;
 
-    // glScissor: clip to this widget's physical rect.
-    // Y is measured from the framebuffer bottom.
-    int windowPhysH = getWindowPhysH();
+    // Scissor to this widget's physical rect.
+    // glScissor Y is from the framebuffer bottom.
+    int winH = getWindowPhysH();
     glEnable(GL_SCISSOR_TEST);
-    glScissor(physX, windowPhysH - physY - glH, glW, glH);
+    glScissor(physX, winH - physY - glH, glW, glH);
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    // MVP = ortho(physical window) * translate(physX, physY) * zoom
+    // Ortho over full physical window, translated to widget physical origin.
     float z  = vp_.zoom();
     float ox = -vp_.offsetX() * z + float(physX);
     float oy =  vp_.offsetY() * z + float(physY);
@@ -401,7 +397,6 @@ bool CanvasWidget::isInitialized() const { return linuxState(const_cast<CanvasWi
 bool CanvasWidget::needsRepaint()  const { return linuxState(const_cast<CanvasWidget*>(this)).repaintPending; }
 
 bool CanvasWidget::containsPoint(int wx, int wy) const {
-    // SDL events and widget coords are both logical pixels.
     return wx >= x && wx < (x + width) &&
            wy >= y && wy < (y + height);
 }
@@ -530,7 +525,7 @@ void CanvasWidget::onKeyUpEvent(const SDL_KeyboardEvent& e) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Shared helpers  (glW / glH are always PHYSICAL pixels)
+// Shared helpers  (glW / glH are PHYSICAL pixels)
 // ─────────────────────────────────────────────────────────────────────────────
 
 void CanvasWidget::viewportDims(int glW, int glH, int& vpW, int& vpH) const {
