@@ -35,13 +35,7 @@ static const char* kSBFrag_Android =
     "uniform vec4 uColor;\n"
     "void main(){ fragColor = uColor; }\n";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Android-only state appended to CanvasWidget via a companion struct.
-//
-// Because flux_canvas.hpp declares CanvasWidget as a single class, Android-
-// specific members that don't exist on other platforms (FBO, NVG image handle,
-// glInitialized flag) are stored here and accessed via a free helper.
-// ─────────────────────────────────────────────────────────────────────────────
+
 
 struct AndroidCanvasState {
     bool   glInitialized = false;
@@ -134,24 +128,27 @@ static void ensureFBO(CanvasWidget* w, int physW, int physH) {
 // GL init (lazy, first tickAllGL)
 // ─────────────────────────────────────────────────────────────────────────────
 
-static void ensureGL(CanvasWidget* w, int /*windowW*/, int /*windowH*/, float /*dpi*/) {
+static void ensureGL(CanvasWidget* w, int windowW, int windowH, float dpi) {
     auto& s = androidState(w);
     if (s.glInitialized) return;
     s.glInitialized = true;
 
     w->canvasGL_ = FluxAndroid_getCanvasGL();
-
     w->ensureSBProgram(kSBVert_Android, kSBFrag_Android);
 
-    w->vp_.init(w->width, w->height, w->canvasW_, w->canvasH_);
-    w->updateViewportSize(w->width, w->height);
+    // canvasW_/canvasH_ are now physical pixels set by computeLayout
+    int physW = w->canvasW_ > 0 ? w->canvasW_ : windowW;
+    int physH = w->canvasH_ > 0 ? w->canvasH_ : windowH;
+
+    w->vp_.init(physW, physH, physW, physH);
+    w->updateViewportSize(physW, physH);
     w->vp_.fitToView();
 
     w->activatePendingSurface();
     w->lastTick_ = CanvasWidget::Clock::now();
 
     if (w->onViewportChanged) w->onViewportChanged(w->vp_.zoom());
-    if (w->onGLResize)        w->onGLResize(w->width, w->height);
+    if (w->onGLResize)        w->onGLResize(physW, physH);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -226,11 +223,13 @@ static void glRenderPass(CanvasWidget* w, int windowW, int windowH, float dpi) {
 // CanvasWidget member implementations (Android)
 // ─────────────────────────────────────────────────────────────────────────────
 
+
 CanvasWidget::CanvasWidget()
     : hBar_(CustomScrollbar::Axis::Horizontal)
     , vBar_(CustomScrollbar::Axis::Vertical)
 {
-    autoWidth = autoHeight = false;
+    autoWidth  = true;   // was false — must match Win32/Linux
+    autoHeight = true;   // was false
     width  = 400;
     height = 300;
 }
@@ -275,8 +274,22 @@ std::shared_ptr<CanvasWidget> CanvasWidget::redraw() { markNeedsPaint(); return 
 
 void CanvasWidget::computeLayout(GraphicsContext& /*ctx*/,
                                  const BoxConstraints& c, FontCache&) {
-    width  = c.clampWidth (autoWidth  ? c.maxWidth  : width);
-    height = c.clampHeight(autoHeight ? c.maxHeight : height);
+    if (autoWidth)
+        width  = (c.maxWidth  < kUnbounded) ? c.maxWidth  : width;
+    if (autoHeight)
+        height = (c.maxHeight < kUnbounded) ? c.maxHeight : height;
+
+    float dpi = FluxAndroid_getDpiScale();
+    int newPhysW = int(width  * dpi);
+    int newPhysH = int(height * dpi);
+
+    if (newPhysW != canvasW_ || newPhysH != canvasH_) {
+        canvasW_ = newPhysW;
+        canvasH_ = newPhysH;
+        // Force ensureGL to reinitialise with correct dims
+        androidState(this).glInitialized = false;
+    }
+
     needsLayout = false;
 }
 
