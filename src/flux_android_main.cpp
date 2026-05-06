@@ -346,8 +346,8 @@ static void handle_cmd(android_app* app, int32_t cmd) {
                 // ── First launch ──────────────────────────────────────────────
                 s_app = new FluxUI(app);
                 s_app->build([&]() { return createApp(s_app); });
-                auto* fcfg = static_cast<FluxAppWidget*>(
-                        FluxAppWidget::getInstance());
+                auto fcfg =
+                        FluxAppWidget::getInstance();
                 s_app->createWindow(fcfg->title,
                                     fcfg->windowWidth,
                                     fcfg->windowHeight);
@@ -368,7 +368,7 @@ static void handle_cmd(android_app* app, int32_t cmd) {
 
                 NVG_initOESBlit(1920, 1080);
                 s_app->getFontCache().clear();
-                s_app->rebuild();
+
 
             } else {
                 // ── Surface reconnect ─────────────────────────────────────────
