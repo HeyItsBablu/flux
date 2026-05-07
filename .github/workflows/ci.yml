@@ -19,16 +19,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: Configure CMake
         run: |
           cmake -S . -B build `
-            -G "Visual Studio 17 2022" `
-            -A x64 `
+            -G "Ninja" `
             -DCMAKE_BUILD_TYPE=${{ matrix.config }} `
+            -DCMAKE_C_COMPILER=cl `
+            -DCMAKE_CXX_COMPILER=cl `
             -DFLUX_BUILD_EXAMPLES=ON
 
       - name: Build
-        run: cmake --build build --config ${{ matrix.config }} --parallel
+        run: cmake --build build --parallel
 
       - name: Upload build artifacts
         if: matrix.config == 'Release'
@@ -36,5 +42,5 @@ jobs:
         with:
           name: flux-lib-release
           path: |
-            build/Release/flux.lib
+            build/flux.lib
             build/include/
