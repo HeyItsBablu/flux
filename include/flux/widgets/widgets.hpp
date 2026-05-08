@@ -32,4 +32,5 @@
 #include "flux_future_builder.hpp"
 #include "flux_file_picker.hpp"
 #include "flux_graph.hpp"
+#include "flux_padding.hpp"
 #endif // WIDGETS_HPP

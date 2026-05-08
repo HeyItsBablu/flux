@@ -1336,14 +1336,7 @@ inline std::shared_ptr<SizedBoxWidget> SizedBox(int w, int h,
   return box;
 }
 
-// Padding — shorthand for a Container with only padding set
-inline ContainerWidgetPtr Padding(int p, WidgetPtr child = nullptr) {
-  auto w = std::make_shared<ContainerWidget>();
-  w->paddingLeft = w->paddingRight = w->paddingTop = w->paddingBottom = p;
-  if (child)
-    w->addChild(child);
-  return w;
-}
+
 
 // Center — centers its child within available space
 inline std::shared_ptr<CenterWidget> Center(WidgetPtr child = nullptr) {

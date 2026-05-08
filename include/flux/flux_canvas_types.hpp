@@ -137,17 +137,15 @@ public:
   void setViewSize(int w, int h)   { vw_ = float(w); vh_ = float(h); clampOffset(); }
   void setCanvasSize(int w, int h) { cw_ = float(w); ch_ = float(h); clampOffset(); }
 
-  void zoomToward(float sx, float sy, float factor) {
+void zoomToward(float sx, float sy, float factor) {
+    float newZoom = snapZoom(std::clamp(zoom_ * factor, kMinZoom, kMaxZoom));
+    if (newZoom == zoom_) return;
     auto [cpx, cpy] = screenToCanvas(sx, sy);
-    float z = std::clamp(zoom_ * factor, kMinZoom, kMaxZoom);
-    z = snapZoom(z);
-    zoom_    = z;
-    offsetX_ = cpx - sx / z;
-    offsetY_ = cpy - (vh_ - sy) / z;
-    offsetX_ = std::roundf(offsetX_ * zoom_) / zoom_;
-    offsetY_ = std::roundf(offsetY_ * zoom_) / zoom_;
+    zoom_    = newZoom;
+    offsetX_ = cpx - sx / zoom_;
+    offsetY_ = cpy - (vh_ - sy) / zoom_;
     clampOffset();
-  }
+}
 
   void zoomIn()    { zoomToward(vw_ * .5f, vh_ * .5f, 1.25f); }
   void zoomOut()   { zoomToward(vw_ * .5f, vh_ * .5f, 0.8f);  }
