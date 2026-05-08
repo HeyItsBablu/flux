@@ -244,8 +244,6 @@ if(WIN32)
             glad
             nanovg
             CURL::libcurl
-            mbedtls
-            mbedcrypto
             Msimg32
             Gdiplus
             opengl32
@@ -271,6 +269,8 @@ elseif(ANDROID)
             app_glue
             nanovg
             CURL::libcurl
+            mbedtls
+            mbedcrypto
             ${log-lib}
             ${android-lib}
             ${egl-lib}
