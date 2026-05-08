@@ -216,6 +216,7 @@ target_include_directories(flux
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${AVUTIL_INCLUDE_DIRS}>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${SWSCALE_INCLUDE_DIRS}>
         $<$<BOOL:${ANDROID}>:${NATIVE_APP_GLUE_DIR}>
+        $<$<BOOL:${ANDROID}>:${MBEDTLS_INCLUDE_DIRS}>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${ALSA_INCLUDE_DIRS}>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${JPEG_INCLUDE_DIRS}>
 )
@@ -243,6 +244,8 @@ if(WIN32)
             glad
             nanovg
             CURL::libcurl
+            mbedtls
+            mbedcrypto
             Msimg32
             Gdiplus
             opengl32

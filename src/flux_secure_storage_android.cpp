@@ -1,265 +1,262 @@
 // flux_secure_storage_android.cpp
-// Android backend: Android Keystore System + AES-256-GCM via JNI
+// Android backend — pure C++, no Java required.
 //
-// Key material never leaves the Keystore hardware (TEE/StrongBox on API 28+).
-// Encrypted blobs are stored in the app's internal files directory as
-//   <filesDir>/flux_secure/<serviceName>/<base64(key)>.enc
-// This matches how flutter_secure_storage works under the hood.
+// Uses AES-256-GCM (same as Linux fallback) with a key derived from the
+// app's internal data path + package-unique salt via PBKDF2-SHA256.
+//
+// Storage: <internalDataPath>/flux_secure/<serviceName>/<b64url(key)>.enc
+// Each key is a separate file — owner-only (0600), sandboxed by Android.
+// No permissions required. Works from API 21+.
+//
+// Depends on: mbedTLS (already in your CMake via FetchContent for Android)
 
 #ifdef __ANDROID__
 
 #include "flux/flux_secure_storage.hpp"
 
 #include <android/log.h>
-#include <jni.h>
+#include <android_native_app_glue.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <dirent.h>
 
-#include <algorithm>
 #include <cstring>
 #include <fstream>
 #include <functional>
 #include <mutex>
-#include <optional>
-#include <sstream>
 #include <thread>
 #include <vector>
+
+// mbedTLS headers (available via FetchContent in your CMakeLists.txt)
+#include <mbedtls/gcm.h>
+#include <mbedtls/pkcs5.h>
+#include <mbedtls/md.h>
+#include <mbedtls/entropy.h>
+#include <mbedtls/ctr_drbg.h>
 
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  "FluxSecStorage", __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "FluxSecStorage", __VA_ARGS__)
 
-// External — provided by flux_window_android.cpp / flux_app_android.cpp
-extern JNIEnv*        getJNIEnv();
+// External — already defined in flux_app_android.cpp
 extern ANativeActivity* s_activity;
 
 // ============================================================================
-// Base64 (no OpenSSL on Android client side — use simple impl)
+// AES-256-GCM via mbedTLS
 // ============================================================================
 
-namespace {
+static constexpr int kKeyLen = 32; // 256-bit
+static constexpr int kIVLen  = 12; // 96-bit GCM IV
+static constexpr int kTagLen = 16; // 128-bit GCM tag
 
-static const char kB64Chars[] =
+// Derive a 256-bit key from a secret + salt using PBKDF2-SHA256
+static std::vector<uint8_t> deriveKey(const std::string& secret,
+                                      const std::string& salt) {
+    std::vector<uint8_t> key(kKeyLen);
+    mbedtls_md_context_t ctx;
+    mbedtls_md_init(&ctx);
+    mbedtls_md_setup(&ctx, mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), 1);
+    mbedtls_pkcs5_pbkdf2_hmac(
+        &ctx,
+        reinterpret_cast<const unsigned char*>(secret.data()), secret.size(),
+        reinterpret_cast<const unsigned char*>(salt.data()),   salt.size(),
+        100000,   // iterations
+        kKeyLen, key.data());
+    mbedtls_md_free(&ctx);
+    return key;
+}
+
+// Encrypt — returns [IV(12)][ciphertext][tag(16)] or empty on failure
+static std::vector<uint8_t> aesGcmEncrypt(const std::vector<uint8_t>& key,
+                                          const std::string& plaintext) {
+    // Generate random IV
+    std::vector<uint8_t> iv(kIVLen);
+    mbedtls_entropy_context  entropy;
+    mbedtls_ctr_drbg_context ctr_drbg;
+    mbedtls_entropy_init(&entropy);
+    mbedtls_ctr_drbg_init(&ctr_drbg);
+    const char* pers = "flux_secure_storage";
+    int ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,
+                                     reinterpret_cast<const unsigned char*>(pers),
+                                     strlen(pers));
+    if (ret != 0) {
+        mbedtls_entropy_free(&entropy);
+        mbedtls_ctr_drbg_free(&ctr_drbg);
+        return {};
+    }
+    mbedtls_ctr_drbg_random(&ctr_drbg, iv.data(), kIVLen);
+    mbedtls_entropy_free(&entropy);
+    mbedtls_ctr_drbg_free(&ctr_drbg);
+
+    std::vector<uint8_t> ciphertext(plaintext.size());
+    std::vector<uint8_t> tag(kTagLen);
+
+    mbedtls_gcm_context gcm;
+    mbedtls_gcm_init(&gcm);
+    ret = mbedtls_gcm_setkey(&gcm, MBEDTLS_CIPHER_ID_AES, key.data(), 256);
+    if (ret != 0) { mbedtls_gcm_free(&gcm); return {}; }
+
+    ret = mbedtls_gcm_crypt_and_tag(
+        &gcm, MBEDTLS_GCM_ENCRYPT,
+        plaintext.size(),
+        iv.data(), kIVLen,
+        nullptr, 0,
+        reinterpret_cast<const unsigned char*>(plaintext.data()),
+        ciphertext.data(),
+        kTagLen, tag.data());
+    mbedtls_gcm_free(&gcm);
+    if (ret != 0) return {};
+
+    // Pack: IV || ciphertext || tag
+    std::vector<uint8_t> out;
+    out.reserve(kIVLen + ciphertext.size() + kTagLen);
+    out.insert(out.end(), iv.begin(),         iv.end());
+    out.insert(out.end(), ciphertext.begin(), ciphertext.end());
+    out.insert(out.end(), tag.begin(),        tag.end());
+    return out;
+}
+
+// Decrypt — input is [IV(12)][ciphertext][tag(16)]
+static std::string aesGcmDecrypt(const std::vector<uint8_t>& key,
+                                 const std::vector<uint8_t>& blob) {
+    if (blob.size() < (size_t)(kIVLen + kTagLen)) return {};
+
+    const uint8_t* iv         = blob.data();
+    const uint8_t* ciphertext = blob.data() + kIVLen;
+    size_t         cipherLen  = blob.size() - kIVLen - kTagLen;
+    const uint8_t* tag        = blob.data() + kIVLen + cipherLen;
+
+    std::vector<uint8_t> plain(cipherLen);
+
+    mbedtls_gcm_context gcm;
+    mbedtls_gcm_init(&gcm);
+    int ret = mbedtls_gcm_setkey(&gcm, MBEDTLS_CIPHER_ID_AES, key.data(), 256);
+    if (ret != 0) { mbedtls_gcm_free(&gcm); return {}; }
+
+    ret = mbedtls_gcm_auth_decrypt(
+        &gcm, cipherLen,
+        iv, kIVLen,
+        nullptr, 0,
+        tag, kTagLen,
+        ciphertext,
+        plain.data());
+    mbedtls_gcm_free(&gcm);
+
+    if (ret != 0) {
+        LOGE("aesGcmDecrypt: auth failed ret=%d", ret);
+        return {};
+    }
+    return std::string(reinterpret_cast<char*>(plain.data()), plain.size());
+}
+
+// ============================================================================
+// Base64 URL-safe (for file names)
+// ============================================================================
+
+static const char kB64[] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-std::string b64Encode(const uint8_t* data, size_t len) {
+static std::string b64Encode(const uint8_t* data, size_t len) {
     std::string out;
-    out.reserve(((len + 2) / 3) * 4);
     for (size_t i = 0; i < len; i += 3) {
-        uint32_t val = (uint32_t)data[i] << 16;
-        if (i+1 < len) val |= (uint32_t)data[i+1] << 8;
-        if (i+2 < len) val |= (uint32_t)data[i+2];
-        out += kB64Chars[(val >> 18) & 63];
-        out += kB64Chars[(val >> 12) & 63];
-        out += (i+1 < len) ? kB64Chars[(val >> 6) & 63] : '=';
-        out += (i+2 < len) ? kB64Chars[val & 63]        : '=';
+        uint32_t v = (uint32_t)data[i] << 16;
+        if (i+1 < len) v |= (uint32_t)data[i+1] << 8;
+        if (i+2 < len) v |= (uint32_t)data[i+2];
+        out += kB64[(v>>18)&63];
+        out += kB64[(v>>12)&63];
+        out += (i+1<len) ? kB64[(v>>6)&63]  : '=';
+        out += (i+2<len) ? kB64[v&63]        : '=';
     }
-    return out;
-}
-
-std::vector<uint8_t> b64Decode(const std::string& enc) {
-    auto lup = [](char c) -> int {
-        if (c >= 'A' && c <= 'Z') return c - 'A';
-        if (c >= 'a' && c <= 'z') return c - 'a' + 26;
-        if (c >= '0' && c <= '9') return c - '0' + 52;
-        if (c == '+') return 62; if (c == '/') return 63; return -1;
-    };
-    std::vector<uint8_t> out;
-    for (size_t i = 0; i + 3 < enc.size(); i += 4) {
-        int v0 = lup(enc[i]), v1 = lup(enc[i+1]);
-        int v2 = lup(enc[i+2]), v3 = lup(enc[i+3]);
-        if (v0 < 0 || v1 < 0) break;
-        out.push_back((uint8_t)((v0 << 2) | (v1 >> 4)));
-        if (v2 >= 0) out.push_back((uint8_t)((v1 << 4) | (v2 >> 2)));
-        if (v3 >= 0) out.push_back((uint8_t)((v2 << 6) | v3));
-    }
-    return out;
-}
-
-// URL-safe base64 for file names (replace +/ with -_)
-std::string b64UrlEncode(const std::string& s) {
-    std::string out = b64Encode(
-        reinterpret_cast<const uint8_t*>(s.data()), s.size());
+    // make URL-safe for filenames
     for (char& c : out) {
         if (c == '+') c = '-';
         if (c == '/') c = '_';
-        if (c == '=') c = '.'; // padding
+        if (c == '=') c = '.';
     }
     return out;
 }
 
-std::string b64UrlDecode(const std::string& enc) {
-    std::string s = enc;
+static std::vector<uint8_t> b64Decode(std::string s) {
     for (char& c : s) {
         if (c == '-') c = '+';
         if (c == '_') c = '/';
         if (c == '.') c = '=';
     }
-    auto v = b64Decode(s);
-    return std::string(v.begin(), v.end());
+    auto lup = [](char c) -> int {
+        if (c>='A'&&c<='Z') return c-'A';
+        if (c>='a'&&c<='z') return c-'a'+26;
+        if (c>='0'&&c<='9') return c-'0'+52;
+        if (c=='+') return 62; if (c=='/') return 63; return -1;
+    };
+    std::vector<uint8_t> out;
+    for (size_t i = 0; i+3 < s.size(); i += 4) {
+        int v0=lup(s[i]),v1=lup(s[i+1]),v2=lup(s[i+2]),v3=lup(s[i+3]);
+        if (v0<0||v1<0) break;
+        out.push_back((uint8_t)((v0<<2)|(v1>>4)));
+        if (v2>=0) out.push_back((uint8_t)((v1<<4)|(v2>>2)));
+        if (v3>=0) out.push_back((uint8_t)((v2<<6)|v3));
+    }
+    return out;
 }
 
-} // anon
-
 // ============================================================================
-// Android Keystore JNI wrapper
-// Manages one AES-256-GCM key per serviceName stored in the Android Keystore.
-// ============================================================================
-
-class AndroidKeystore {
-public:
-    explicit AndroidKeystore(const std::string& serviceName,
-                             bool requireAuth)
-        : alias_("flux_" + serviceName), requireAuth_(requireAuth) {}
-
-    // ── Encrypt plaintext, returns base64(IV||ciphertext||tag) ───────────────
-    std::string encrypt(const std::string& plaintext,
-                        flux::SecureStorageError* err) {
-        JNIEnv* env = getJNIEnv();
-        if (!env) { setErr(err, -1, "No JNI env"); return {}; }
-
-        ensureKey_(env);
-
-        // Build Java call: FluxKeystore.encrypt(alias, plaintext)
-        jclass  cls = getKeystoreClass_(env);
-        if (!cls) { setErr(err, -1, "FluxKeystore class not found"); return {}; }
-
-        jmethodID mid = env->GetStaticMethodID(cls, "encrypt",
-            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
-        if (!mid) { setErr(err, -1, "encrypt method not found"); return {}; }
-
-        jstring jAlias = env->NewStringUTF(alias_.c_str());
-        jstring jPlain = env->NewStringUTF(plaintext.c_str());
-        auto    jResult= (jstring)env->CallStaticObjectMethod(cls, mid, jAlias, jPlain);
-        env->DeleteLocalRef(jAlias); env->DeleteLocalRef(jPlain);
-
-        if (env->ExceptionCheck()) {
-            env->ExceptionClear();
-            setErr(err, -1, "encrypt threw exception");
-            return {};
-        }
-        if (!jResult) { setErr(err, -1, "encrypt returned null"); return {}; }
-
-        const char* chars = env->GetStringUTFChars(jResult, nullptr);
-        std::string result(chars);
-        env->ReleaseStringUTFChars(jResult, chars);
-        env->DeleteLocalRef(jResult);
-        return result;
-    }
-
-    // ── Decrypt base64 blob, returns plaintext ────────────────────────────────
-    std::optional<std::string> decrypt(const std::string& blob,
-                                       flux::SecureStorageError* err) {
-        JNIEnv* env = getJNIEnv();
-        if (!env) { setErr(err, -1, "No JNI env"); return std::nullopt; }
-
-        jclass  cls = getKeystoreClass_(env);
-        if (!cls) { setErr(err, -1, "FluxKeystore class not found"); return std::nullopt; }
-
-        jmethodID mid = env->GetStaticMethodID(cls, "decrypt",
-            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
-        if (!mid) { setErr(err, -1, "decrypt method not found"); return std::nullopt; }
-
-        jstring jAlias = env->NewStringUTF(alias_.c_str());
-        jstring jBlob  = env->NewStringUTF(blob.c_str());
-        auto    jResult= (jstring)env->CallStaticObjectMethod(cls, mid, jAlias, jBlob);
-        env->DeleteLocalRef(jAlias); env->DeleteLocalRef(jBlob);
-
-        if (env->ExceptionCheck()) {
-            env->ExceptionClear();
-            setErr(err, -1, "decrypt threw exception");
-            return std::nullopt;
-        }
-        if (!jResult) return std::nullopt;
-
-        const char* chars = env->GetStringUTFChars(jResult, nullptr);
-        std::string result(chars);
-        env->ReleaseStringUTFChars(jResult, chars);
-        env->DeleteLocalRef(jResult);
-        return result;
-    }
-
-    void deleteKey(JNIEnv* env) {
-        jclass cls = getKeystoreClass_(env);
-        if (!cls) return;
-        jmethodID mid = env->GetStaticMethodID(cls, "deleteKey",
-            "(Ljava/lang/String;)V");
-        if (!mid) return;
-        jstring jAlias = env->NewStringUTF(alias_.c_str());
-        env->CallStaticVoidMethod(cls, mid, jAlias);
-        env->DeleteLocalRef(jAlias);
-        env->ExceptionClear();
-    }
-
-private:
-    std::string alias_;
-    bool        requireAuth_;
-    bool        keyEnsured_ = false;
-
-    void ensureKey_(JNIEnv* env) {
-        if (keyEnsured_) return;
-        jclass cls = getKeystoreClass_(env);
-        if (!cls) return;
-        jmethodID mid = env->GetStaticMethodID(cls, "ensureKey",
-            "(Ljava/lang/String;Z)V");
-        if (!mid) return;
-        jstring jAlias = env->NewStringUTF(alias_.c_str());
-        env->CallStaticVoidMethod(cls, mid, jAlias, (jboolean)requireAuth_);
-        env->DeleteLocalRef(jAlias);
-        if (env->ExceptionCheck()) env->ExceptionClear();
-        else keyEnsured_ = true;
-    }
-
-    static jclass getKeystoreClass_(JNIEnv* env) {
-        return env->FindClass("com/flux/security/FluxKeystore");
-    }
-
-    static void setErr(flux::SecureStorageError* e, int c, const char* m) {
-        if (e) { e->code = c; e->message = m; }
-    }
-};
-
-// ============================================================================
-// File store — one file per key under filesDir/flux_secure/<service>/
+// File store — one .enc file per key
 // ============================================================================
 
 class AndroidFileStore {
 public:
-    explicit AndroidFileStore(const std::string& serviceName)
-        : serviceName_(serviceName) {
-        dir_ = getFilesDir_() + "/flux_secure/" + serviceName + "/";
-        mkdir((getFilesDir_() + "/flux_secure").c_str(), 0700);
+    explicit AndroidFileStore(const std::string& serviceName) {
+        // Use internalDataPath if available, fallback to /data/local/tmp
+        std::string base = s_activity && s_activity->internalDataPath
+                           ? s_activity->internalDataPath
+                           : "/data/local/tmp";
+
+        dir_ = base + "/flux_secure/" + serviceName + "/";
+
+        mkdir((base + "/flux_secure").c_str(), 0700);
         mkdir(dir_.c_str(), 0700);
+
+        LOGI("FileStore dir: %s", dir_.c_str());
     }
 
-    bool write(const std::string& key, const std::string& encBlob,
+    bool write(const std::string& key, const std::vector<uint8_t>& blob,
                flux::SecureStorageError* err) {
-        std::string path = pathFor_(key);
+        std::string path = pathFor(key);
         std::ofstream f(path, std::ios::binary | std::ios::trunc);
         if (!f.is_open()) {
-            if (err) { err->code = -1; err->message = "Cannot write " + path; }
+            LOGE("write: cannot open %s", path.c_str());
+            if (err) { err->code = -1; err->message = "Cannot write file: " + path; }
             return false;
         }
-        f.write(encBlob.data(), (std::streamsize)encBlob.size());
+        f.write(reinterpret_cast<const char*>(blob.data()), (std::streamsize)blob.size());
         chmod(path.c_str(), 0600);
+        LOGI("write: OK key=%s bytes=%zu", key.c_str(), blob.size());
         return true;
     }
 
-    std::optional<std::string> read(const std::string& key) {
-        std::ifstream f(pathFor_(key), std::ios::binary);
-        if (!f.is_open()) return std::nullopt;
-        return std::string(std::istreambuf_iterator<char>(f), {});
+    std::optional<std::vector<uint8_t>> read(const std::string& key) {
+        std::string path = pathFor(key);
+        std::ifstream f(path, std::ios::binary);
+        if (!f.is_open()) {
+            LOGI("read: key not found: %s", key.c_str());
+            return std::nullopt;
+        }
+        std::vector<uint8_t> data(
+            (std::istreambuf_iterator<char>(f)),
+            std::istreambuf_iterator<char>());
+        LOGI("read: key=%s bytes=%zu", key.c_str(), data.size());
+        return data;
     }
 
-    bool del(const std::string& key, flux::SecureStorageError*) {
-        return remove(pathFor_(key).c_str()) == 0;
+    bool del(const std::string& key) {
+        return remove(pathFor(key).c_str()) == 0;
     }
 
     void delAll() {
-        for (auto& k : allKeys()) del(k, nullptr);
+        for (auto& k : allKeys()) del(k);
     }
 
     bool contains(const std::string& key) {
-        return access(pathFor_(key).c_str(), F_OK) == 0;
+        return access(pathFor(key).c_str(), F_OK) == 0;
     }
 
     std::vector<std::string> allKeys() {
@@ -270,90 +267,102 @@ public:
         while ((ent = readdir(d)) != nullptr) {
             std::string name = ent->d_name;
             if (name == "." || name == "..") continue;
-            if (name.size() > 4 && name.substr(name.size() - 4) == ".enc")
-                keys.push_back(b64UrlDecode(name.substr(0, name.size() - 4)));
+            if (name.size() > 4 && name.substr(name.size()-4) == ".enc") {
+                auto raw = b64Decode(name.substr(0, name.size()-4));
+                keys.push_back(std::string(raw.begin(), raw.end()));
+            }
         }
         closedir(d);
         return keys;
     }
 
+    std::string pathFor(const std::string& key) const {
+        return dir_ + b64Encode(reinterpret_cast<const uint8_t*>(key.data()),
+                                key.size()) + ".enc";
+    }
+
 private:
-    std::string serviceName_;
     std::string dir_;
-
-    std::string pathFor_(const std::string& key) const {
-        return dir_ + b64UrlEncode(key) + ".enc";
-    }
-
-    static std::string getFilesDir_() {
-        JNIEnv* env = getJNIEnv();
-        if (!env || !s_activity) return "/data/local/tmp";
-        return s_activity->internalDataPath
-               ? std::string(s_activity->internalDataPath)
-               : "/data/local/tmp";
-    }
 };
 
 // ============================================================================
-// Android Impl
+// Impl
 // ============================================================================
 
 namespace flux {
 
 struct FluxSecureStorage::Impl {
-    SecureStorageOptions opts;
-    mutable std::mutex   mtx;
-    AndroidKeystore      keystore;
-    AndroidFileStore     fileStore;
+    SecureStorageOptions     opts;
+    mutable std::mutex       mtx;
+    std::vector<uint8_t>     key_;
+    AndroidFileStore         store_;
 
     explicit Impl(SecureStorageOptions o)
-        : opts(o),
-          keystore(o.serviceName, o.androidRequireAuthentication),
-          fileStore(o.serviceName) {}
-
-    bool writeSync(const std::string& k, const std::string& v,
-                   SecureStorageError* err) {
-        std::lock_guard<std::mutex> lk(mtx);
-        std::string blob = keystore.encrypt(v, err);
-        if (blob.empty()) return false;
-        return fileStore.write(k, blob, err);
+        : opts(o), store_(o.serviceName) {
+        // Derive key from internalDataPath — stable per app install
+        std::string secret = s_activity && s_activity->internalDataPath
+                             ? std::string(s_activity->internalDataPath)
+                             : "flux_android_fallback";
+        std::string salt = "flux_secure_storage_v1_" + o.serviceName;
+        key_ = deriveKey(secret, salt);
+        LOGI("Impl: key derived for service=%s", o.serviceName.c_str());
     }
 
-    std::optional<std::string> readSync(const std::string& k,
+    bool writeSync(const std::string& key, const std::string& value,
+                   SecureStorageError* err) {
+        std::lock_guard<std::mutex> lk(mtx);
+        auto blob = aesGcmEncrypt(key_, value);
+        if (blob.empty()) {
+            LOGE("writeSync: encrypt failed for key=%s", key.c_str());
+            if (err) { err->code = -1; err->message = "Encrypt failed"; }
+            return false;
+        }
+        return store_.write(key, blob, err);
+    }
+
+    std::optional<std::string> readSync(const std::string& key,
                                         SecureStorageError* err) {
         std::lock_guard<std::mutex> lk(mtx);
-        auto blob = fileStore.read(k);
+        auto blob = store_.read(key);
         if (!blob) return std::nullopt;
-        return keystore.decrypt(*blob, err);
+        std::string plain = aesGcmDecrypt(key_, *blob);
+        if (plain.empty() && !blob->empty()) {
+            LOGE("readSync: decrypt failed for key=%s", key.c_str());
+            if (err) { err->code = -1; err->message = "Decrypt failed"; }
+            return std::nullopt;
+        }
+        return plain;
     }
 
     std::map<std::string,std::string> readAllSync(SecureStorageError* err) {
         std::lock_guard<std::mutex> lk(mtx);
         std::map<std::string,std::string> result;
-        for (auto& k : fileStore.allKeys()) {
-            auto v = readSync(k, err);
-            if (v) result[k] = *v;
+        for (auto& k : store_.allKeys()) {
+            auto blob = store_.read(k);
+            if (!blob) continue;
+            std::string plain = aesGcmDecrypt(key_, *blob);
+            if (!plain.empty() || blob->size() == (size_t)(kIVLen + kTagLen))
+                result[k] = plain;
         }
         return result;
     }
 
-    bool deleteKeySync(const std::string& k, SecureStorageError* err) {
+    bool deleteKeySync(const std::string& key, SecureStorageError* err) {
         std::lock_guard<std::mutex> lk(mtx);
-        return fileStore.del(k, err);
+        bool ok = store_.del(key);
+        if (!ok && err) { err->code = -1; err->message = "Delete failed"; }
+        return ok;
     }
 
-    bool deleteAllSync(SecureStorageError* err) {
+    bool deleteAllSync(SecureStorageError*) {
         std::lock_guard<std::mutex> lk(mtx);
-        fileStore.delAll();
-        JNIEnv* env = getJNIEnv();
-        if (env) keystore.deleteKey(env);
-        (void)err;
+        store_.delAll();
         return true;
     }
 
-    bool containsKeySync(const std::string& k, SecureStorageError*) {
+    bool containsKeySync(const std::string& key, SecureStorageError*) {
         std::lock_guard<std::mutex> lk(mtx);
-        return fileStore.contains(k);
+        return store_.contains(key);
     }
 };
 
@@ -365,83 +374,33 @@ FluxSecureStorage::FluxSecureStorage(SecureStorageOptions opts)
 FluxSecureStorage::~FluxSecureStorage() { delete impl_; }
 
 bool FluxSecureStorage::writeSync(const std::string& k, const std::string& v,
-                                  SecureStorageError* err) {
-    return impl_->writeSync(k, v, err);
-}
+                                  SecureStorageError* e) { return impl_->writeSync(k,v,e); }
 std::optional<std::string> FluxSecureStorage::readSync(const std::string& k,
-                                                       SecureStorageError* err) {
-    return impl_->readSync(k, err);
-}
-std::map<std::string,std::string>
-FluxSecureStorage::readAllSync(SecureStorageError* err) {
-    return impl_->readAllSync(err);
-}
-bool FluxSecureStorage::deleteKeySync(const std::string& k,
-                                      SecureStorageError* err) {
-    return impl_->deleteKeySync(k, err);
-}
-bool FluxSecureStorage::deleteAllSync(SecureStorageError* err) {
-    return impl_->deleteAllSync(err);
-}
-bool FluxSecureStorage::containsKeySync(const std::string& k,
-                                        SecureStorageError* err) {
-    return impl_->containsKeySync(k, err);
-}
+                                                       SecureStorageError* e) { return impl_->readSync(k,e); }
+std::map<std::string,std::string> FluxSecureStorage::readAllSync(SecureStorageError* e) { return impl_->readAllSync(e); }
+bool FluxSecureStorage::deleteKeySync(const std::string& k, SecureStorageError* e) { return impl_->deleteKeySync(k,e); }
+bool FluxSecureStorage::deleteAllSync(SecureStorageError* e) { return impl_->deleteAllSync(e); }
+bool FluxSecureStorage::containsKeySync(const std::string& k, SecureStorageError* e) { return impl_->containsKeySync(k,e); }
 
-namespace {
-void runAsync(std::function<void()> work) {
-    std::thread([w = std::move(work)]() mutable { w(); }).detach();
-}
-} // anon
+namespace { void runAsync(std::function<void()> w) { std::thread(std::move(w)).detach(); } }
 
-void FluxSecureStorage::write(const std::string& k, const std::string& v,
-                              WriteCallback cb) {
-    auto* impl = impl_;
-    runAsync([impl, k, v, cb]() {
-        SecureStorageError err;
-        bool ok = impl->writeSync(k, v, &err);
-        if (cb) cb(ok, err);
-    });
+void FluxSecureStorage::write(const std::string& k, const std::string& v, WriteCallback cb) {
+    auto* i=impl_; runAsync([i,k,v,cb](){ SecureStorageError e; bool ok=i->writeSync(k,v,&e); if(cb)cb(ok,e); });
 }
 void FluxSecureStorage::read(const std::string& k, ReadCallback cb) {
-    auto* impl = impl_;
-    runAsync([impl, k, cb]() {
-        SecureStorageError err;
-        auto val = impl->readSync(k, &err);
-        if (cb) cb(val, err);
-    });
+    auto* i=impl_; runAsync([i,k,cb](){ SecureStorageError e; auto v=i->readSync(k,&e); if(cb)cb(v,e); });
 }
 void FluxSecureStorage::readAll(ReadAllCallback cb) {
-    auto* impl = impl_;
-    runAsync([impl, cb]() {
-        SecureStorageError err;
-        auto all = impl->readAllSync(&err);
-        if (cb) cb(all, err);
-    });
+    auto* i=impl_; runAsync([i,cb](){ SecureStorageError e; auto a=i->readAllSync(&e); if(cb)cb(a,e); });
 }
 void FluxSecureStorage::deleteKey(const std::string& k, DeleteCallback cb) {
-    auto* impl = impl_;
-    runAsync([impl, k, cb]() {
-        SecureStorageError err;
-        bool ok = impl->deleteKeySync(k, &err);
-        if (cb) cb(ok, err);
-    });
+    auto* i=impl_; runAsync([i,k,cb](){ SecureStorageError e; bool ok=i->deleteKeySync(k,&e); if(cb)cb(ok,e); });
 }
 void FluxSecureStorage::deleteAll(DeleteCallback cb) {
-    auto* impl = impl_;
-    runAsync([impl, cb]() {
-        SecureStorageError err;
-        bool ok = impl->deleteAllSync(&err);
-        if (cb) cb(ok, err);
-    });
+    auto* i=impl_; runAsync([i,cb](){ SecureStorageError e; bool ok=i->deleteAllSync(&e); if(cb)cb(ok,e); });
 }
 void FluxSecureStorage::containsKey(const std::string& k, ContainsCallback cb) {
-    auto* impl = impl_;
-    runAsync([impl, k, cb]() {
-        SecureStorageError err;
-        bool has = impl->containsKeySync(k, &err);
-        if (cb) cb(has, err);
-    });
+    auto* i=impl_; runAsync([i,k,cb](){ SecureStorageError e; bool h=i->containsKeySync(k,&e); if(cb)cb(h,e); });
 }
 
 } // namespace flux
