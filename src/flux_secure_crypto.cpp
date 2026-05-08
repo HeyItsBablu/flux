@@ -15,6 +15,7 @@
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
+#include <unistd.h>
 
 namespace flux::crypto {
 
