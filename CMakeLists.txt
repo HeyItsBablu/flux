@@ -32,15 +32,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(FetchContent)
 
-if(NOT ANDROID)
-    FetchContent_Declare(Clipper2
-            GIT_REPOSITORY https://github.com/AngusJohnson/Clipper2.git
-            GIT_TAG        Clipper2_1.4.0
-            SOURCE_SUBDIR  CPP
-    )
-    FetchContent_MakeAvailable(Clipper2)
-endif()
-
 if(ANDROID)
     FetchContent_Declare(mbedtls
             GIT_REPOSITORY https://github.com/Mbed-TLS/mbedtls.git
@@ -251,7 +242,6 @@ if(WIN32)
             stb
             glad
             nanovg
-            Clipper2
             CURL::libcurl
             Msimg32
             Gdiplus
@@ -294,7 +284,6 @@ elseif(UNIX AND NOT APPLE)
             glad
             nanovg
             OpenGL::GL
-            Clipper2
             CURL::libcurl
             ${SDL2_LIBRARIES}
             ${CAIRO_LIBRARIES}
