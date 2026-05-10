@@ -329,12 +329,17 @@ static int measureLineNVG(NVGcontext* vg, const std::string& utf8,
     return static_cast<int>(bounds[2] - bounds[0]);
 }
 
+// ── Internal line span for Android/NVG wrapping ───────────────────────────────
+struct LineSpanNVG { int start; int length; };
+
+
+
 // ── Internal: wrap UTF-8 string into line spans ───────────────────────────────
-static std::vector<LinePango> wrapTextNVG(NVGcontext* vg,
-                                           const std::string& utf8,
-                                           int maxWidth, bool softWrap,
-                                           float letterSpacing) {
-    std::vector<LinePango> lines;
+static std::vector<LineSpanNVG> wrapTextNVG(NVGcontext* vg,
+                                             const std::string& utf8,
+                                             int maxWidth, bool softWrap,
+                                             float letterSpacing) {
+    std::vector<LineSpanNVG> lines;
     const int n = static_cast<int>(utf8.size());
     if (n == 0) return lines;
 
@@ -395,13 +400,16 @@ void Painter::measureRichText(const std::wstring& text,
     nvgFontSize(s_vg, f ? f->size : style.scaledFontSize());
 
     std::string utf8 = wstringToUtf8(text);
-    auto lines = wrapTextNVG(s_vg, utf8, maxWidth, softWrap,
-                              style.letterSpacing);
+    auto lines = wrapTextNVG(s_vg, utf8, maxWidth, softWrap, style.letterSpacing);
 
-    int dummy, lineH = 0;
-    measureLineNVG(s_vg, utf8, 0,
-                   lines.empty() ? 0 : lines[0].length,
-                   style.letterSpacing, lineH);
+    int lineH = 0;
+    {
+        int lineHDummy = 0;
+        measureLineNVG(s_vg, utf8, 0,
+                       lines.empty() ? 0 : lines[0].length,
+                       style.letterSpacing, lineHDummy);
+        lineH = lineHDummy;
+    }
     if (lineH == 0) lineH = style.scaledFontSize();
     int lineHeightPx = static_cast<int>(lineH * style.height);
 
@@ -410,6 +418,7 @@ void Painter::measureRichText(const std::wstring& text,
         : (int)lines.size();
 
     for (int i = 0; i < totalLines; ++i) {
+        int dummy;
         int w = measureLineNVG(s_vg, utf8,
                                 lines[i].start, lines[i].length,
                                 style.letterSpacing, dummy);
