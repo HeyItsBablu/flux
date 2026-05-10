@@ -3,6 +3,7 @@
 
 #include "flux_font.hpp"
 #include "flux_platform.hpp"
+#include "flux_text_style.hpp"
 #include <string>
 #include <vector>
 
@@ -22,42 +23,34 @@ struct Painter {
     void fillRect(int x, int y, int w, int h, Color color);
 
     // ── Filled rounded rect via GDI RoundRect (for non-GDI+ paths) ───────
-    // radius is the corner diameter, matching RoundRect's nWidth/nHeight.
     void fillRoundedRectGDI(int x, int y, int w, int h, int radius,
                             Color fill, Color stroke, int strokeWidth);
 
     // ── Ellipse (filled + optional stroke) ────────────────────────────────
-    // Pass strokeWidth = 0 to suppress the border (uses PS_NULL pen).
     void drawEllipse(int x, int y, int w, int h,
                      Color fill, Color stroke, int strokeWidth);
 
     // ── Line segment ──────────────────────────────────────────────────────
     void drawLine(int x1, int y1, int x2, int y2, Color color, int width);
 
-    // ── Text (wide) ───────────────────────────────────────────────────────
+    // ── Text (wide) — low-level, no style object ──────────────────────────
     void drawText(const std::wstring &text, int x, int y, int w, int h,
                   NativeFont font, Color color, UINT format);
 
-    // ── Text (narrow / UTF-8) ─────────────────────────────────────────────
-    // Convenience overload — converts std::string → std::wstring internally.
+    // ── Text (narrow / UTF-8) — low-level ────────────────────────────────
     void drawTextA(const std::string &text, int x, int y, int w, int h,
                    NativeFont font, Color color, UINT format);
 
     // ── Text measurement (no drawing) ─────────────────────────────────────
-    // Returns pixel width and height of the string rendered with the given font.
     void measureText(const std::wstring &text, NativeFont font,
                      int &outWidth, int &outHeight);
 
     // ── Clip region management ────────────────────────────────────────────
-    // pushClipRect intersects a new rect clip with whatever is already active.
-    // popClipRect restores to no clipping (call once per push).
     void pushClipRect(int x, int y, int w, int h);
     void popClipRect();
     void pushClipRoundedRect(int x, int y, int w, int h, int cornerDiameter);
 
     // ── Gradient filled rect ──────────────────────────────────────────────
-    // Fills [x, y, w, h] with a horizontal gradient interpolated across
-    // `colors`. Single-color case is just fillRect — handled internally.
     void fillGradientRect(int x, int y, int w, int h,
                           const std::vector<Color> &colors);
 
@@ -68,11 +61,9 @@ struct Painter {
                                 Color stroke, int strokeWidth);
 
     // ── Alpha-blended solid rect ──────────────────────────────────────────
-    // Alpha is taken from color.a.
     void fillRectAlpha(int x, int y, int w, int h, Color color);
 
     // ── Filled region via rounded-rect HRGN ──────────────────────────────
-    // Used for scrollbar thumbs.
     void fillRoundedRegion(int x, int y, int w, int h,
                            int cornerRadius, Color color);
 
@@ -81,25 +72,80 @@ struct Painter {
     void drawVLine(int x, int y, int len, Color color, int strokeWidth = 1);
 
     // ── Filled rect with a solid left accent strip ────────────────────────
-    // Renders bg across [x,y,w,h] then a stripWidth-wide accent on the left.
     void fillRectWithLeftAccent(int x, int y, int w, int h,
                                 Color bg, Color accent, int stripWidth);
 
     // ── Column bar chart fill ─────────────────────────────────────────────
-    // Alpha is taken from color.a.
     void fillColumnBars(int x, int y, int w, int h,
                         const std::vector<int> &barHeights, Color color);
 
     // ── Polyline ──────────────────────────────────────────────────────────
-    // Draws a connected sequence of line segments in one call.
     void drawPolyline(const std::vector<std::pair<int, int>> &points,
                       Color color, int strokeWidth);
 
     // ── Alpha-blended polygon fill ────────────────────────────────────────
-    // Fills a polygon and alpha-blends it onto the destination.
-    // Alpha is taken from color.a.
     void fillPolygonAlpha(const std::vector<std::pair<int, int>> &points,
                           Color color);
+
+    // =========================================================================
+    // RICH TEXT DRAWING — Flutter-like, uses TextStyle
+    // =========================================================================
+
+    // ── Parameters shared by all rich-text drawing calls ─────────────────────
+    struct RichTextParams {
+        int              x             = 0;
+        int              y             = 0;
+        int              w             = 0;
+        int              h             = 0;
+
+        TextAlign        textAlign         = TextAlign::Left;
+        TextAlignVertical textAlignVertical = TextAlignVertical::Top;
+        TextOverflow     overflow           = TextOverflow::Clip;
+        TextDirection    direction          = TextDirection::LTR;
+
+        bool             softWrap       = true;   // wrap at word boundaries
+        int              maxLines       = 0;       // 0 = unlimited
+
+        // The style carries font, color, spacing, decoration, shadows, etc.
+        TextStyle        style;
+    };
+
+    // ── Main rich-text draw call (wide string) ────────────────────────────────
+    // This is the single function that TextWidget ultimately calls.
+    void drawRichText(const std::wstring &text,
+                      const RichTextParams &params,
+                      FontCache &fontCache);
+
+    // ── Convenience overload for narrow UTF-8 strings ─────────────────────────
+    void drawRichTextA(const std::string &text,
+                       const RichTextParams &params,
+                       FontCache &fontCache);
+
+    // ── Rich text measurement (no drawing) ───────────────────────────────────
+    // Returns the bounding box the text would occupy with the given params.
+    // maxWidth limits line wrapping; use kUnbounded for single-line measure.
+    void measureRichText(const std::wstring &text,
+                         const TextStyle &style,
+                         FontCache &fontCache,
+                         int maxWidth,
+                         bool softWrap,
+                         int maxLines,
+                         int &outWidth, int &outHeight);
+
+    // ── Fade overlay helper (used internally for TextOverflow::Fade) ──────────
+    // Draws a horizontal gradient from transparent to `bg` over the last
+    // `fadeWidth` pixels of [x, y, w, h].
+    void drawFadeOverlay(int x, int y, int w, int h, int fadeWidth, Color bg);
+
+    // ── Decoration line drawing helpers ──────────────────────────────────────
+    // Called internally after text is drawn to render underline / overline /
+    // line-through at the correct baseline position.
+    void drawTextDecorationLine(int lineX, int lineY, int lineW,
+                                const TextStyle &style,
+                                TextDecoration which);
+
+    // ── Wavy line helper (TextDecorationStyle::Wavy approximation) ───────────
+    void drawWavyLine(int x, int y, int len, Color color, int amplitude = 2);
 };
 
 #endif // FLUX_PAINTER_HPP

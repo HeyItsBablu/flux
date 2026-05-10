@@ -938,7 +938,7 @@ void Canvas2D::parseFontDesc(const std::string& desc) {
 }
 
 void Canvas2D::setFont(const std::string& desc) { parseFontDesc(desc); }
-void Canvas2D::setTextAlign(TextAlign a)         { textAlign_=a;     }
+void Canvas2D::setTextAlign(CanvasTextAlign a)         { textAlign_=a;     }
 void Canvas2D::setTextBaseline(TextBaseline b)   { textBaseline_=b;  }
 
 int Canvas2D::resolveFont() const {
@@ -970,8 +970,8 @@ void Canvas2D::fillText(const std::string& text,float x,float y,float /*maxW*/) 
         if (g) totalW+=float(g->advance);
     }
     float px=x;
-    if (textAlign_==TextAlign::Center) px=x-totalW*0.5f;
-    else if (textAlign_==TextAlign::Right) px=x-totalW;
+    if (textAlign_==CanvasTextAlign::Center) px=x-totalW*0.5f;
+    else if (textAlign_==CanvasTextAlign::Right) px=x-totalW;
 
     // Baseline adjustment
     float py=y;

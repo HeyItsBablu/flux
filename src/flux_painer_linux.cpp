@@ -57,7 +57,7 @@ struct CairoSave {
 //   DT_RIGHT  = 0x0002
 //   DT_VCENTER= 0x0004
 //   DT_SINGLELINE = 0x0020
-// (Only the subset used by FluxUI widgets.)
+
 
 // ============================================================================
 // Painter::fillRoundedRect
@@ -116,10 +116,6 @@ void Painter::fillRect(int x, int y, int w, int h, Color color) {
 
 // ============================================================================
 // Painter::fillRoundedRectGDI
-// On Linux there is no separate "GDI" path — same Cairo rounded rect,
-// with an optional stroke painted on top.
-// radius here is the corner *diameter* (matching Win32 RoundRect nWidth),
-// so we halve it before passing to makeRoundedPath.
 // ============================================================================
 
 void Painter::fillRoundedRectGDI(int x, int y, int w, int h, int radius,
@@ -196,13 +192,6 @@ void Painter::drawLine(int x1, int y1, int x2, int y2,
 
 // ============================================================================
 // Painter::drawText  (wide string)
-//
-// Win32 uses std::wstring + DT_* flags.
-// On Linux we convert to UTF-8 and use Pango layouts with equivalent
-// alignment derived from the DT_* flags.
-//
-// Supported flags (same values as in flux_platform.hpp Linux block):
-//   DT_LEFT=0x00, DT_CENTER=0x01, DT_RIGHT=0x02, DT_VCENTER=0x04
 // ============================================================================
 
 void Painter::drawText(const std::wstring& text,
@@ -547,6 +536,451 @@ void Painter::fillPolygonAlpha(const std::vector<std::pair<int,int>>& points,
     cairo_close_path(cr);
 
     cairo_fill(cr);
+}
+
+
+// =============================================================================
+// RICH TEXT IMPLEMENTATION  (Linux / Cairo+Pango)
+// =============================================================================
+
+// -----------------------------------------------------------------------
+// Internal helpers
+// -----------------------------------------------------------------------
+
+static std::string wstringToUtf8Linux(const std::wstring& text) {
+    std::string utf8;
+    utf8.reserve(text.size() * 3);
+    for (wchar_t wc : text) {
+        uint32_t cp = static_cast<uint32_t>(wc);
+        if (cp < 0x80) {
+            utf8 += static_cast<char>(cp);
+        } else if (cp < 0x800) {
+            utf8 += static_cast<char>(0xC0 | (cp >> 6));
+            utf8 += static_cast<char>(0x80 | (cp & 0x3F));
+        } else {
+            utf8 += static_cast<char>(0xE0 | (cp >> 12));
+            utf8 += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+            utf8 += static_cast<char>(0x80 | (cp & 0x3F));
+        }
+    }
+    return utf8;
+}
+
+// Measure a single UTF-8 line via Pango, returning pixel width.
+// outLineH receives the natural line height.
+static int measureLinePango(cairo_t* cr,
+                             PangoFontDescription* desc,
+                             const std::string& utf8,
+                             int start, int len,
+                             float letterSpacing,
+                             int& outLineH) {
+    if (len <= 0) {
+        outLineH = 16; // fallback
+        return 0;
+    }
+
+    PangoLayout* layout = pango_cairo_create_layout(cr);
+    pango_layout_set_font_description(layout, desc);
+    pango_layout_set_text(layout, utf8.c_str() + start, len);
+
+    if (letterSpacing != 0.f) {
+        PangoAttrList* attrs = pango_attr_list_new();
+        // Pango letter-spacing is in Pango units (1/1024 pt); we have pixels.
+        // Approximate: 1 px ≈ 1024 Pango units at 96 dpi.
+        PangoAttribute* attr = pango_attr_letter_spacing_new(
+            static_cast<int>(letterSpacing * PANGO_SCALE));
+        pango_attr_list_insert(attrs, attr);
+        pango_layout_set_attributes(layout, attrs);
+        pango_attr_list_unref(attrs);
+    }
+
+    int w = 0, h = 0;
+    pango_layout_get_pixel_size(layout, &w, &h);
+    outLineH = h;
+    g_object_unref(layout);
+    return w;
+}
+
+// Split a UTF-8 string (converted from wstring) into wrapped line spans.
+// Each span is {byte_start, byte_len} into the utf8 string.
+struct LinePango { int start; int length; };
+
+static std::vector<LinePango> wrapTextPango(cairo_t* cr,
+                                             PangoFontDescription* desc,
+                                             const std::string& utf8,
+                                             int maxWidth,
+                                             bool softWrap,
+                                             float letterSpacing) {
+    std::vector<LinePango> lines;
+    const int n = static_cast<int>(utf8.size());
+    if (n == 0) return lines;
+
+    int pos = 0;
+    while (pos < n) {
+        int nlPos = pos;
+        while (nlPos < n && utf8[nlPos] != '\n') ++nlPos;
+
+        if (!softWrap || maxWidth <= 0) {
+            lines.push_back({pos, nlPos - pos});
+        } else {
+            int lineStart = pos;
+            while (lineStart < nlPos) {
+                int lo = 0, hi = nlPos - lineStart, fit = 0;
+                while (lo <= hi) {
+                    int mid = (lo + hi) / 2;
+                    int dummy;
+                    int w = measureLinePango(cr, desc, utf8,
+                                             lineStart, mid,
+                                             letterSpacing, dummy);
+                    if (w <= maxWidth) { fit = mid; lo = mid + 1; }
+                    else               { hi = mid - 1; }
+                }
+                if (fit == 0) fit = 1;
+
+                int breakAt = fit;
+                if (lineStart + fit < nlPos) {
+                    int wb = fit;
+                    while (wb > 1 && utf8[lineStart + wb - 1] != ' ') --wb;
+                    if (wb > 1) breakAt = wb;
+                }
+
+                lines.push_back({lineStart, breakAt});
+                lineStart += breakAt;
+                while (lineStart < nlPos && utf8[lineStart] == ' ') ++lineStart;
+            }
+        }
+
+        pos = nlPos + 1;
+        if (nlPos == n) break;
+    }
+    return lines;
+}
+
+// -----------------------------------------------------------------------
+// Painter::drawWavyLine  (already declared in header)
+// -----------------------------------------------------------------------
+
+void Painter::drawWavyLine(int x, int y, int len, Color color, int amplitude) {
+    if (len <= 0) return;
+    const int step = amplitude * 2;
+    std::vector<std::pair<int,int>> pts;
+    pts.reserve(len / step + 2);
+    int px = x;
+    bool up = true;
+    while (px < x + len) {
+        pts.push_back({px, up ? y - amplitude : y + amplitude});
+        px += step;
+        up = !up;
+    }
+    pts.push_back({x + len, y});
+    if (pts.size() >= 2) drawPolyline(pts, color, 1);
+}
+
+// -----------------------------------------------------------------------
+// Painter::drawFadeOverlay
+// -----------------------------------------------------------------------
+
+void Painter::drawFadeOverlay(int x, int y, int w, int h,
+                               int fadeWidth, Color bg) {
+    if (fadeWidth <= 0 || w <= 0 || h <= 0) return;
+    int startX = x + w - fadeWidth;
+    if (startX < x) startX = x;
+    std::vector<Color> stops = { bg.withAlpha(0), bg.withAlpha(255) };
+    fillGradientRect(startX, y, fadeWidth, h, stops);
+}
+
+// -----------------------------------------------------------------------
+// Painter::drawTextDecorationLine
+// -----------------------------------------------------------------------
+
+void Painter::drawTextDecorationLine(int lineX, int lineY, int lineW,
+                                      const TextStyle& style,
+                                      TextDecoration which) {
+    if (lineW <= 0) return;
+
+    // Approximate ascent from a Pango layout for the current font
+    PangoFontDescription* desc =
+        reinterpret_cast<PangoFontDescription*>(
+            // We don't have fontCache here, so derive geometry from font size.
+            nullptr);
+
+    // Use font size as a proxy for ascent (≈ 75% of total height)
+    int fontSize  = style.scaledFontSize();
+    int ascent    = static_cast<int>(fontSize * 0.75);
+    int thickness = style.decorationThickness;
+    Color dc      = style.decorationColor;
+
+    int decorY = lineY;
+    if      (which == TextDecoration::Underline)   decorY = lineY + ascent + 1;
+    else if (which == TextDecoration::Overline)    decorY = lineY;
+    else if (which == TextDecoration::LineThrough) decorY = lineY + ascent - ascent / 3;
+
+    switch (style.decorationStyle) {
+    case TextDecorationStyle::Solid:
+        drawHLine(lineX, decorY, lineW, dc, thickness);
+        break;
+    case TextDecorationStyle::Double:
+        drawHLine(lineX, decorY,     lineW, dc, thickness);
+        drawHLine(lineX, decorY + 2, lineW, dc, thickness);
+        break;
+    case TextDecorationStyle::Dotted:
+        for (int px = lineX; px < lineX + lineW; px += 4)
+            drawHLine(px, decorY, std::min(2, lineX + lineW - px), dc, thickness);
+        break;
+    case TextDecorationStyle::Dashed:
+        for (int px = lineX; px < lineX + lineW; px += 8)
+            drawHLine(px, decorY, std::min(5, lineX + lineW - px), dc, thickness);
+        break;
+    case TextDecorationStyle::Wavy:
+        drawWavyLine(lineX, decorY, lineW, dc, 2);
+        break;
+    }
+}
+
+// -----------------------------------------------------------------------
+// Painter::measureRichText
+// -----------------------------------------------------------------------
+
+void Painter::measureRichText(const std::wstring& text,
+                               const TextStyle& style,
+                               FontCache& fontCache,
+                               int maxWidth, bool softWrap, int maxLines,
+                               int& outWidth, int& outHeight) {
+    outWidth = outHeight = 0;
+    if (text.empty()) return;
+
+    cairo_t* cr = ctx.cr;
+    NativeFont font = fontCache.getFont(style.fontFamily,
+                                        style.scaledFontSize(),
+                                        style.fontWeight);
+    PangoFontDescription* desc =
+        reinterpret_cast<PangoFontDescription*>(font);
+
+    std::string utf8 = wstringToUtf8Linux(text);
+    auto lines = wrapTextPango(cr, desc, utf8, maxWidth, softWrap,
+                                style.letterSpacing);
+
+    int dummy;
+    int lineH = 0;
+    measureLinePango(cr, desc, utf8, 0,
+                     lines.empty() ? 0 : lines[0].length,
+                     style.letterSpacing, lineH);
+    if (lineH == 0) lineH = style.scaledFontSize();
+    int lineHeightPx = static_cast<int>(lineH * style.height);
+
+    int totalLines = (maxLines > 0)
+        ? std::min((int)lines.size(), maxLines)
+        : (int)lines.size();
+
+    for (int i = 0; i < totalLines; ++i) {
+        int w = measureLinePango(cr, desc, utf8,
+                                  lines[i].start, lines[i].length,
+                                  style.letterSpacing, dummy);
+        outWidth = std::max(outWidth, w);
+    }
+    outHeight = totalLines * lineHeightPx;
+}
+
+// -----------------------------------------------------------------------
+// Painter::drawRichText
+// -----------------------------------------------------------------------
+
+void Painter::drawRichText(const std::wstring& text,
+                            const RichTextParams& params,
+                            FontCache& fontCache) {
+    if (text.empty() || params.w <= 0 || params.h <= 0) return;
+
+    cairo_t* cr = ctx.cr;
+    const TextStyle& style = params.style;
+
+    NativeFont font = fontCache.getFont(style.fontFamily,
+                                        style.scaledFontSize(),
+                                        style.fontWeight);
+    PangoFontDescription* desc =
+        reinterpret_cast<PangoFontDescription*>(font);
+
+    std::string utf8 = wstringToUtf8Linux(text);
+
+    int wrapWidth = params.softWrap ? params.w : 0;
+    auto lines = wrapTextPango(cr, desc, utf8, wrapWidth,
+                                params.softWrap, style.letterSpacing);
+
+    // Natural line height from a sample measure
+    int lineH = 0;
+    {
+        int dummy;
+        measureLinePango(cr, desc, utf8, 0,
+                         lines.empty() ? 0 : lines[0].length,
+                         style.letterSpacing, lineH);
+        if (lineH == 0) lineH = style.scaledFontSize();
+    }
+    int lineHeightPx = static_cast<int>(lineH * style.height);
+
+    int totalLines = (params.maxLines > 0)
+        ? std::min((int)lines.size(), params.maxLines)
+        : (int)lines.size();
+
+    int blockH = totalLines * lineHeightPx;
+    int startY = params.y;
+    switch (params.textAlignVertical) {
+    case TextAlignVertical::Center:
+        startY = params.y + (params.h - blockH) / 2; break;
+    case TextAlignVertical::Bottom:
+        startY = params.y + params.h - blockH; break;
+    default: break;
+    }
+
+    // Clipping
+    bool needClip = (params.overflow != TextOverflow::Visible);
+    if (needClip) pushClipRect(params.x, params.y, params.w, params.h);
+
+    for (int i = 0; i < totalLines; ++i) {
+        const auto& span = lines[i];
+        int lineY = startY + i * lineHeightPx;
+
+        if (lineY + lineHeightPx < params.y) continue;
+        if (lineY > params.y + params.h)     break;
+
+        int dummy;
+        int lineW = measureLinePango(cr, desc, utf8,
+                                      span.start, span.length,
+                                      style.letterSpacing, dummy);
+
+        // X alignment
+        int lineX = params.x;
+        bool isRTL = (params.direction == TextDirection::RTL);
+        switch (params.textAlign) {
+        case TextAlign::Right:
+        case TextAlign::End:
+            lineX = isRTL ? params.x : (params.x + params.w - lineW); break;
+        case TextAlign::Center:
+            lineX = params.x + (params.w - lineW) / 2; break;
+        case TextAlign::Left:
+        case TextAlign::Start:
+            lineX = isRTL ? (params.x + params.w - lineW) : params.x; break;
+        default:
+            lineX = params.x; break;
+        }
+
+        bool isLastVisible = (i == totalLines - 1);
+        bool hasMoreLines  = ((int)lines.size() > totalLines) ||
+                             (totalLines == 1 && lineW > params.w);
+
+        // Per-run background
+        if (style.backgroundColor.has_value()) {
+            CairoSave save(cr);
+            setSourceColor(cr, *style.backgroundColor);
+            cairo_rectangle(cr, lineX, lineY, lineW, lineHeightPx);
+            cairo_fill(cr);
+        }
+
+        // Shadows
+        for (const auto& sh : style.shadows) {
+            CairoSave save(cr);
+            PangoLayout* layout = pango_cairo_create_layout(cr);
+            pango_layout_set_font_description(layout, desc);
+            pango_layout_set_text(layout, utf8.c_str() + span.start, span.length);
+            setSourceColor(cr, sh.color);
+            cairo_move_to(cr, lineX + sh.offsetX, lineY + sh.offsetY);
+            pango_cairo_show_layout(cr, layout);
+            g_object_unref(layout);
+        }
+
+        // Ellipsis on last visible line
+        if (isLastVisible && hasMoreLines &&
+            params.overflow == TextOverflow::Ellipsis) {
+            CairoSave save(cr);
+            PangoLayout* layout = pango_cairo_create_layout(cr);
+            pango_layout_set_font_description(layout, desc);
+            pango_layout_set_text(layout, utf8.c_str() + span.start, span.length);
+            pango_layout_set_width(layout, params.w * PANGO_SCALE);
+            pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
+            setSourceColor(cr, style.color);
+            cairo_move_to(cr, lineX, lineY);
+            pango_cairo_show_layout(cr, layout);
+            g_object_unref(layout);
+
+            if (style.hasOverline())
+                drawTextDecorationLine(lineX, lineY, lineW, style,
+                                        TextDecoration::Overline);
+            if (style.hasUnderline())
+                drawTextDecorationLine(lineX, lineY, lineW, style,
+                                        TextDecoration::Underline);
+            if (style.hasLineThrough())
+                drawTextDecorationLine(lineX, lineY, lineW, style,
+                                        TextDecoration::LineThrough);
+
+            if (isLastVisible && hasMoreLines &&
+                params.overflow == TextOverflow::Fade) {
+                Color fadeBg = Color::fromRGB(255, 255, 255);
+                int fadeW = std::min(60, params.w / 3);
+                drawFadeOverlay(params.x, lineY, params.w,
+                                lineHeightPx, fadeW, fadeBg);
+            }
+            continue;
+        }
+
+        // Normal draw
+        {
+            CairoSave save(cr);
+            PangoLayout* layout = pango_cairo_create_layout(cr);
+            pango_layout_set_font_description(layout, desc);
+            pango_layout_set_text(layout, utf8.c_str() + span.start, span.length);
+
+            if (style.letterSpacing != 0.f) {
+                PangoAttrList* attrs = pango_attr_list_new();
+                PangoAttribute* attr = pango_attr_letter_spacing_new(
+                    static_cast<int>(style.letterSpacing * PANGO_SCALE));
+                pango_attr_list_insert(attrs, attr);
+                pango_layout_set_attributes(layout, attrs);
+                pango_attr_list_unref(attrs);
+            }
+
+            setSourceColor(cr, style.color);
+            cairo_move_to(cr, lineX, lineY);
+            pango_cairo_show_layout(cr, layout);
+            g_object_unref(layout);
+        }
+
+        // Decorations
+        if (style.hasOverline())
+            drawTextDecorationLine(lineX, lineY, lineW, style,
+                                    TextDecoration::Overline);
+        if (style.hasUnderline())
+            drawTextDecorationLine(lineX, lineY, lineW, style,
+                                    TextDecoration::Underline);
+        if (style.hasLineThrough())
+            drawTextDecorationLine(lineX, lineY, lineW, style,
+                                    TextDecoration::LineThrough);
+
+        // Fade overlay
+        if (isLastVisible && hasMoreLines &&
+            params.overflow == TextOverflow::Fade) {
+            Color fadeBg = Color::fromRGB(255, 255, 255);
+            int fadeW = std::min(60, params.w / 3);
+            drawFadeOverlay(params.x, lineY, params.w,
+                            lineHeightPx, fadeW, fadeBg);
+        }
+    }
+
+    if (needClip) popClipRect();
+}
+
+// -----------------------------------------------------------------------
+// Painter::drawRichTextA
+// -----------------------------------------------------------------------
+
+void Painter::drawRichTextA(const std::string& text,
+                             const RichTextParams& params,
+                             FontCache& fontCache) {
+    if (text.empty()) return;
+    // Convert UTF-8 → wstring → back through drawRichText
+    // (keeps a single code path; overhead is negligible for UI text)
+    std::wstring wide;
+    wide.reserve(text.size());
+    for (unsigned char c : text)
+        wide += static_cast<wchar_t>(c);   // ASCII-safe; full UTF-8 handled by Pango
+    drawRichText(wide, params, fontCache);
 }
 
 #endif // __linux__

@@ -11,19 +11,9 @@
 
 extern NVGcontext* FluxAndroid_getVG();
 
-// ============================================================================
-// DPI scale — set once from native-lib.cpp after AConfiguration is read.
-// Default 1.0 so fonts are usable even if setDpiScale is never called.
-// ============================================================================
-
 static float s_dpiScale = 1.0f;
-
 extern void  FluxAndroid_setDpiScale(float scale);
 extern float FluxAndroid_getDpiScale();
-
-// ============================================================================
-// Font file resolution
-// ============================================================================
 
 static std::string resolveFontPath(const std::string& family, FontWeight weight) {
     if (family == "Roboto" || family == "Segoe UI" ||
@@ -47,10 +37,6 @@ static std::string resolveFontPath(const std::string& family, FontWeight weight)
     return "/system/fonts/Roboto-Regular.ttf";
 }
 
-// ============================================================================
-// NVG font name
-// ============================================================================
-
 static std::string nvgFontName(const std::string& family, FontWeight weight) {
     std::string name = family;
     switch (weight) {
@@ -61,30 +47,24 @@ static std::string nvgFontName(const std::string& family, FontWeight weight) {
     return name;
 }
 
-// ============================================================================
-// FontCache::createFont
-// ============================================================================
-
-NativeFont FontCache::createFont(const std::string& family,
-                                 int                size,
-                                 FontWeight         weight) {
+NativeFont FontCache::createFont(const FontKey& key) {
     NVGcontext* vg = FluxAndroid_getVG();
 
     auto* f  = new FluxAndroidFont();
-    f->size = static_cast<float>(size);
-    f->bold  = (weight == FontWeight::Bold);
-    f->light = (weight == FontWeight::Light);
+    f->size  = static_cast<float>(key.size);
+    f->bold  = (key.weight == FontWeight::Bold);
+    f->light = (key.weight == FontWeight::Light);
 
     if (!vg) {
-        LOGW("createFont('%s', %d) before NVG ready", family.c_str(), size);
+        LOGW("createFont('%s', %d) before NVG ready", key.family.c_str(), key.size);
         return reinterpret_cast<NativeFont>(f);
     }
 
-    std::string name   = nvgFontName(family, weight);
+    std::string name   = nvgFontName(key.family, key.weight);
     int         handle = nvgFindFont(vg, name.c_str());
 
     if (handle == -1) {
-        std::string path = resolveFontPath(family, weight);
+        std::string path = resolveFontPath(key.family, key.weight);
         handle = nvgCreateFont(vg, name.c_str(), path.c_str());
         if (handle == -1) {
             LOGW("Failed '%s' from '%s', trying Roboto-Regular",
@@ -102,33 +82,27 @@ NativeFont FontCache::createFont(const std::string& family,
     return reinterpret_cast<NativeFont>(f);
 }
 
-// ============================================================================
-// FontCache::getFont  (family overload)
-// ============================================================================
+NativeFont FontCache::getFont(const std::string& family, int size,
+                               FontWeight weight) {
+    return getFont(family, size, weight, false, false);
+}
 
-NativeFont FontCache::getFont(const std::string& family,
-                              int                size,
-                              FontWeight         weight) {
-    FontKey key{ family, size, weight };
+NativeFont FontCache::getFont(int size, FontWeight weight) {
+    return getFont("Segoe UI", size, weight, false, false);
+}
+
+
+NativeFont FontCache::getFont(const std::string& family, int size,
+                               FontWeight weight,
+                               bool underline, bool strikeOut) {
+    FontKey key{ family, size, weight, underline, strikeOut };
     auto it = cache.find(key);
     if (it != cache.end())
         return it->second;
-    NativeFont font = createFont(family, size, weight);
-    cache[key]      = font;
+    NativeFont font = createFont(key);
+    cache[key] = font;
     return font;
 }
-
-// ============================================================================
-// FontCache::getFont  (default family)
-// ============================================================================
-
-NativeFont FontCache::getFont(int size, FontWeight weight) {
-    return getFont("Segoe UI", size, weight);
-}
-
-// ============================================================================
-// FontCache::clear
-// ============================================================================
 
 void FontCache::clear() {
     for (auto& pair : cache) {

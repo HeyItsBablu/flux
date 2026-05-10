@@ -87,7 +87,7 @@ struct Stroke {
 // TEXT
 // ============================================================================
 
-struct TextStyle {
+struct CanvasTextStyle {
   std::wstring fontFace  = L"Arial";
   int          fontSize  = 20;
   float        r = 0, g = 0, b = 0;

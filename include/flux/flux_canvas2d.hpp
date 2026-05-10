@@ -37,7 +37,7 @@ struct Canvas2DImage {
 // ─────────────────────────────────────────────────────────────────────────────
 // Enums  (identical to the NanoVG version)
 // ─────────────────────────────────────────────────────────────────────────────
-enum class TextAlign    { Left, Right, Center };
+enum class CanvasTextAlign    { Left, Right, Center };
 enum class TextBaseline { Top, Middle, Bottom, Alphabetic };
 enum class LineCap      { Butt, Round, Square };
 enum class LineJoin     { Miter, Round, Bevel };
@@ -208,7 +208,7 @@ struct Canvas2D {
                              const std::string& ttfPath);
 
     void  setFont(const std::string& fontDesc);
-    void  setTextAlign(TextAlign align);
+    void  setTextAlign(CanvasTextAlign align);
     void  setTextBaseline(TextBaseline baseline);
     void  fillText(const std::string& text, float x, float y,
                    float maxWidth = -1.f);
@@ -258,7 +258,7 @@ private:
         std::string fontFace;
         float fontSize;
         bool fontBold, fontItalic;
-        TextAlign textAlign;
+        CanvasTextAlign textAlign;
         TextBaseline textBaseline;
     };
     std::vector<SaveState> stateStack_;
@@ -291,7 +291,7 @@ private:
     float        fontSize_     = 14.f;
     bool         fontBold_     = false;
     bool         fontItalic_   = false;
-    TextAlign    textAlign_    = TextAlign::Left;
+    CanvasTextAlign    textAlign_    = CanvasTextAlign::Left;
     TextBaseline textBaseline_ = TextBaseline::Alphabetic;
 
     // ── Helpers ───────────────────────────────────────────────────────────

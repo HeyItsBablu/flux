@@ -873,8 +873,15 @@ public:
     if (!children.empty()) {
       int maxW = autoWidth ? self.maxWidth : width;
       int maxH = autoHeight ? self.maxHeight : height;
+      // If a maxWidth/maxHeight cap was set by the user, enforce it
+      if (autoWidth && maxWidth > 0)
+        maxW = std::min(maxW, maxWidth);
+      if (autoHeight && maxHeight > 0)
+        maxH = std::min(maxH, maxHeight);
+      int minW = autoWidth ? 0 : maxW;
+      int minH = autoHeight ? 0 : maxH;
       BoxConstraints childC =
-          BoxConstraints(0, maxW, 0, maxH)
+          BoxConstraints(minW, maxW, minH, maxH)
               .deflate(paddingLeft + paddingRight, paddingTop + paddingBottom);
 
       children[0]->computeLayout(ctx, childC, fontCache);
@@ -882,6 +889,9 @@ public:
       if (autoWidth)
         width =
             self.clampWidth(children[0]->width + paddingLeft + paddingRight);
+
+      if (autoWidth && maxWidth > 0 && width > maxWidth)
+        width = maxWidth;
       if (autoHeight)
         height =
             self.clampHeight(children[0]->height + paddingTop + paddingBottom);
@@ -1335,8 +1345,6 @@ inline std::shared_ptr<SizedBoxWidget> SizedBox(int w, int h,
     box->addChild(child);
   return box;
 }
-
-
 
 // Center — centers its child within available space
 inline std::shared_ptr<CenterWidget> Center(WidgetPtr child = nullptr) {

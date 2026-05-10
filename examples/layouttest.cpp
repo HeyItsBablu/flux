@@ -5,7 +5,7 @@ public:
     WidgetPtr build() override {
         return Scaffold(
             AppBar("Centered Title"),
-            Column({
+Expanded(            Column({
 
                 Container(
                     Text("Column fills full width")
@@ -49,7 +49,7 @@ public:
                     ->setCrossAxisAlignment(CrossAxisAlignment::Stretch)
                 ),
             })
-            ->setCrossAxisAlignment(CrossAxisAlignment::Stretch),nullptr,nullptr
+            ->setCrossAxisAlignment(CrossAxisAlignment::Stretch)),nullptr,nullptr
         );
     }
 };
