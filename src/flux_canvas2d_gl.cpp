@@ -13,7 +13,7 @@
 #include <fstream>
 #include <vector>
 
-//#define STB_TRUETYPE_IMPLEMENTATION
+#define STB_TRUETYPE_IMPLEMENTATION
 #include <stb_truetype.h>
 
 
