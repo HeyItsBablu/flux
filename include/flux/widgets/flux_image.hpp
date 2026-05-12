@@ -9,61 +9,101 @@
 // ============================================================================
 
 #ifdef _WIN32
-#   include <gdiplus.h>
-#   include <objidl.h>   // IStream
+#include <gdiplus.h>
+#include <mutex>
+#include <objidl.h>
 #endif
 
 #if defined(__linux__) && !defined(__ANDROID__)
-#   include <cairo/cairo.h>
-#   define STBI_ONLY_JPEG
-#   define STBI_ONLY_PNG
-#   define STBI_ONLY_BMP
-#   define STBI_ONLY_TGA
-#   include "stb_image.h"
+#include <cairo/cairo.h>
+#include <mutex>
+#define STBI_ONLY_JPEG
+#define STBI_ONLY_PNG
+#define STBI_ONLY_BMP
+#define STBI_ONLY_TGA
+#include "stb_image.h"
 #endif
 
 #ifdef __ANDROID__
-#   include "nanovg.h"
-#   include <android/asset_manager.h>
-#   include <android/log.h>
-#   define LOGI_IMG(...) __android_log_print(ANDROID_LOG_INFO,  "FluxImage", __VA_ARGS__)
-#   define LOGW_IMG(...) __android_log_print(ANDROID_LOG_WARN,  "FluxImage", __VA_ARGS__)
-extern NVGcontext*    FluxAndroid_getVG();
-extern AAssetManager* FluxAndroid_getAssetManager();
-#   define STBI_ONLY_JPEG
-#   define STBI_ONLY_PNG
-#   define STBI_ONLY_BMP
-#   define STBI_ONLY_TGA
-#   define STBI_ONLY_GIF
-#   include "stb_image.h"
+#include "nanovg.h"
+#include <android/asset_manager.h>
+#include <android/log.h>
+#define LOGI_IMG(...)                                                          \
+  __android_log_print(ANDROID_LOG_INFO, "FluxImage", __VA_ARGS__)
+#define LOGW_IMG(...)                                                          \
+  __android_log_print(ANDROID_LOG_WARN, "FluxImage", __VA_ARGS__)
+extern NVGcontext *FluxAndroid_getVG();
+extern AAssetManager *FluxAndroid_getAssetManager();
+#define STBI_ONLY_JPEG
+#define STBI_ONLY_PNG
+#define STBI_ONLY_BMP
+#define STBI_ONLY_TGA
+#define STBI_ONLY_GIF
+#include "stb_image.h"
 #endif
 
+#include <atomic>
+#include <functional>
+#include <iostream>
 #include <memory>
 #include <string>
-#include <iostream>
+#include <thread>
 #include <vector>
 
 // ============================================================================
-// IMAGE FIT MODES
+// IMAGE FIT  (mirrors Flutter BoxFit)
 // ============================================================================
 
 enum class ImageFit {
-    Fill,
-    Contain,
-    Cover,
-    None,
-    ScaleDown
+  Fill,     // stretch to fill — no aspect ratio preservation
+  Contain,  // scale up/down to fit inside box, letterbox if needed
+  Cover,    // scale up/down to fill box, clip overflow
+  None,     // draw at intrinsic size, centred (or per imageAlignment)
+  ScaleDown // like Contain but never scale up
+};
+
+// ============================================================================
+// IMAGE REPEAT  (mirrors Flutter ImageRepeat)
+// ============================================================================
+
+enum class ImageRepeat {
+  NoRepeat, // default — draw once
+  Repeat,   // tile in both axes
+  RepeatX,  // tile horizontally only
+  RepeatY   // tile vertically only
+};
+
+// ============================================================================
+// FILTER QUALITY  (mirrors Flutter FilterQuality)
+// ============================================================================
+
+enum class FilterQuality {
+  None,   // nearest-neighbour
+  Low,    // bilinear
+  Medium, // bilinear + mipmaps (treated as High on most backends)
+  High    // bicubic
 };
 
 // ============================================================================
 // IMAGE LOAD STATE
 // ============================================================================
 
-enum class ImageLoadState {
-    Idle,       // nothing requested yet
-    Loading,    // URL fetch / decode in progress
-    Loaded,     // image decoded and ready
-    Error       // load or decode failed
+enum class ImageLoadState { Idle, Loading, Loaded, Error };
+
+// ============================================================================
+// DECODED PIXELS  — thread-safe staging buffer shared across platforms
+// ============================================================================
+
+struct DecodedImage {
+  std::vector<uint8_t>
+      pixels; // ARGB premultiplied (Cairo/GDI+) or RGBA (Android)
+  int width = 0;
+  int height = 0;
+  bool ready() const { return !pixels.empty() && width > 0 && height > 0; }
+  void clear() {
+    pixels.clear();
+    width = height = 0;
+  }
 };
 
 // ============================================================================
@@ -72,804 +112,1205 @@ enum class ImageLoadState {
 
 class ImageWidget : public Widget {
 public:
-    std::string    imagePath;
-    ImageFit       fit              = ImageFit::Contain;
-    int            imageWidth       = 0;   // intrinsic pixel width of the decoded image
-    int            imageHeight      = 0;   // intrinsic pixel height of the decoded image
-    Color          placeholderColor = Color::fromRGB(240, 240, 240);
-    Color          errorColor       = Color::fromRGB(255, 200, 200);
-    ImageLoadState loadState        = ImageLoadState::Idle;
+  // ── Public configuration ──────────────────────────────────────────────
+  ImageFit fit = ImageFit::Contain;
+  ImageRepeat repeat = ImageRepeat::NoRepeat;
+  FilterQuality filterQuality = FilterQuality::Low;
+  Alignment imageAlignment = Alignment::Center; // within the widget box
 
-    bool imageLoaded = false;
-    bool hasError    = false;
+  // Tint / blend (colour overlay; only applied when tintColor.a > 0)
+  Color tintColor = Color::fromRGBA(0, 0, 0, 0);
 
-    // ── Platform pixel storage ────────────────────────────────────────────────
+  Color placeholderColor = Color::fromRGB(240, 240, 240);
+  Color errorColor = Color::fromRGB(255, 200, 200);
+
+  // Optional builder callbacks (mirror Flutter's loadingBuilder / errorBuilder)
+  std::function<WidgetPtr()> loadingBuilder;
+  std::function<WidgetPtr()> errorBuilder;
+
+  // Read-only state
+  std::string imagePath;
+  int imageWidth = 0;
+  int imageHeight = 0;
+  ImageLoadState loadState = ImageLoadState::Idle;
+  bool imageLoaded = false;
+  bool hasError = false;
+
+  // ── Platform pixel storage ────────────────────────────────────────────
 #ifdef _WIN32
-    std::unique_ptr<Gdiplus::Bitmap> bitmap;
+  // Decoded source (written on decode thread, read on render thread — see
+  // mutex)
+  std::unique_ptr<Gdiplus::Bitmap> bitmap;
+  mutable std::mutex _decodeMutex;
 
-    // Pre-scaled bitmap cache — rebuilt only when display size or fit changes.
-    mutable std::unique_ptr<Gdiplus::Bitmap> _scaledBitmap;
-    mutable int  _scaledW   = 0;
-    mutable int  _scaledH   = 0;
-    mutable int  _scaledFit = -1;
+  mutable std::unique_ptr<Gdiplus::Bitmap> _scaledBitmap;
+  mutable int _scaledW = 0;
+  mutable int _scaledH = 0;
+  mutable int _scaledFit = -1;
+  mutable int _scaledQuality = -1;
 #endif
 
 #if defined(__linux__) && !defined(__ANDROID__)
-    std::vector<uint8_t> pixels;
+  // Staging: decode thread writes here; render thread promotes on next frame.
+  mutable std::mutex _decodeMutex;
+  DecodedImage _pending;       // written by decode thread
+  std::vector<uint8_t> pixels; // owned by render thread only
 
-    // Pre-scaled Cairo surface cache — rebuilt only when display size or fit changes.
-    mutable cairo_surface_t* _scaledSurface = nullptr;
-    mutable int  _scaledW   = 0;
-    mutable int  _scaledH   = 0;
-    mutable int  _scaledFit = -1;
+  mutable cairo_surface_t *_scaledSurface = nullptr;
+  mutable int _scaledW = 0;
+  mutable int _scaledH = 0;
+  mutable int _scaledFit = -1;
+  mutable int _scaledQuality = -1;
 #endif
 
 #ifdef __ANDROID__
-    int nvgImage = -1;
+  int nvgImage = -1;
 
-    struct PendingPixels {
-        std::vector<uint8_t> rgba;
-        int w = 0;
-        int h = 0;
-        bool ready() const { return !rgba.empty() && w > 0 && h > 0; }
-    } pending;
+  struct PendingPixels {
+    std::vector<uint8_t> rgba;
+    int w = 0, h = 0;
+    bool ready() const { return !rgba.empty() && w > 0 && h > 0; }
+  } pending;
 
-    std::vector<uint8_t> uploadBuffer;
-    int uploadW = 0;
-    int uploadH = 0;
+  std::vector<uint8_t> uploadBuffer;
+  int uploadW = 0, uploadH = 0;
 #endif
 
-    // ── Constructors ──────────────────────────────────────────────────────────
-    ImageWidget() {
-        autoWidth  = true;
-        autoHeight = true;
-    }
-    explicit ImageWidget(const std::string& path) : ImageWidget() {
-        loadImage(path);
-    }
+  // ── Constructors ──────────────────────────────────────────────────────
+  ImageWidget() {
+    autoWidth = true;
+    autoHeight = true;
+  }
 
-    ~ImageWidget() override {
+  ~ImageWidget() override {
 #if defined(__linux__) && !defined(__ANDROID__)
-        _invalidateScaledCache();
+    _invalidateScaledCache();
 #endif
 #ifdef _WIN32
-        _invalidateScaledCache();
+    _invalidateScaledCache();
 #endif
 #ifdef __ANDROID__
-        _freeNvgImage();
+    _freeNvgImage();
 #endif
+  }
+
+  // =========================================================================
+  // Named constructors (Flutter-style)
+  // =========================================================================
+
+  // Image::asset — loads a local file asynchronously
+  static std::shared_ptr<ImageWidget> asset(const std::string &path) {
+    auto w = std::make_shared<ImageWidget>();
+    w->_loadAssetAsync(path);
+    return w;
+  }
+
+  // Image::network — loads from URL asynchronously
+  static std::shared_ptr<ImageWidget> network(const std::string &url,
+                                              bool postToUI = true) {
+    auto w = std::make_shared<ImageWidget>();
+    w->loadFromUrl(url, postToUI);
+    return w;
+  }
+
+  // Image::memory — decode from an in-memory byte buffer
+  static std::shared_ptr<ImageWidget>
+  memory(const std::vector<uint8_t> &bytes) {
+    auto w = std::make_shared<ImageWidget>();
+    w->_loadFromMemorySync(bytes.data(), (int)bytes.size());
+    return w;
+  }
+
+  // =========================================================================
+  // loadFromUrl  (async, safe)
+  // =========================================================================
+  void loadFromUrl(const std::string &url, bool postToUI = true) {
+    if (url.empty())
+      return;
+    imagePath = url;
+    _setLoadState(ImageLoadState::Loading);
+    markNeedsPaint();
+
+    std::weak_ptr<ImageWidget> weak =
+        std::static_pointer_cast<ImageWidget>(shared_from_this());
+
+    FluxHttp::get(
+        url,
+        [weak](HttpResult result) {
+          auto self = weak.lock();
+          if (!self)
+            return;
+
+          if (!result.success || result.body.empty()) {
+            self->_setLoadState(ImageLoadState::Error);
+            self->_scheduleRebuild();
+            return;
+          }
+
+          const auto *data =
+              reinterpret_cast<const uint8_t *>(result.body.data());
+          bool ok = self->_decodeIntoStaging(data, (int)result.body.size());
+          if (!ok) {
+            self->_setLoadState(ImageLoadState::Error);
+          }
+          self->_scheduleRebuild();
+        },
+        postToUI);
+  }
+
+  // =========================================================================
+  // loadImage — kept for backward-compat; prefer Image::asset()
+  // =========================================================================
+  bool loadImage(const std::string &path) {
+    _loadAssetAsync(path);
+    return true; // actual result delivered asynchronously
+  }
+
+  // =========================================================================
+  // computeLayout
+  // =========================================================================
+  void computeLayout(GraphicsContext & /*ctx*/,
+                     const BoxConstraints &constraints,
+                     FontCache & /*fontCache*/) override {
+    _promoteStaging(); // safe: runs on UI thread
+
+    const int padW = paddingLeft + paddingRight;
+    const int padH = paddingTop + paddingBottom;
+
+    if (loadState == ImageLoadState::Loaded && imageWidth > 0 &&
+        imageHeight > 0) {
+      //
+      // sizing rules:
+      //   bounded axis  → fill available space
+      //   unbounded axis → use intrinsic image size
+      //
+      // These two rules apply independently per axis.
+      //
+      if (autoWidth) {
+        width = (constraints.maxWidth < kUnbounded)
+                    ? constraints.clampWidth(constraints.maxWidth)
+                    : constraints.clampWidth(imageWidth + padW);
+      } else {
+        width = constraints.clampWidth(width);
+      }
+
+      if (autoHeight) {
+        height = (constraints.maxHeight < kUnbounded)
+                     ? constraints.clampHeight(constraints.maxHeight)
+                     : constraints.clampHeight(imageHeight + padH);
+      } else {
+        height = constraints.clampHeight(height);
+      }
+    } else {
+      // Placeholder / loading / error — fill if bounded, else 100×100
+      if (autoWidth)
+        width = (constraints.maxWidth < kUnbounded)
+                    ? constraints.clampWidth(constraints.maxWidth)
+                    : constraints.clampWidth(100 + padW);
+      else
+        width = constraints.clampWidth(width);
+
+      if (autoHeight)
+        height = (constraints.maxHeight < kUnbounded)
+                     ? constraints.clampHeight(constraints.maxHeight)
+                     : constraints.clampHeight(100 + padH);
+      else
+        height = constraints.clampHeight(height);
     }
 
-    // =========================================================================
-    // loadFromUrl
-    // =========================================================================
-    void loadFromUrl(const std::string& url, bool postToUI = true) {
-        if (url.empty()) return;
+    applyConstraints();
+    needsLayout = false;
+  }
 
-        imagePath = url;
-        _setLoadState(ImageLoadState::Loading);
-        markNeedsPaint();
+  // =========================================================================
+  // render
+  // =========================================================================
+  void render(GraphicsContext &ctx, FontCache &fontCache) override {
+    Painter painter(ctx);
 
-        auto weak = std::weak_ptr<ImageWidget>(
-                std::static_pointer_cast<ImageWidget>(shared_from_this()));
+    if (hasBackground)
+      drawRoundedRectangle(ctx);
+    if (hasBorder)
+      painter.drawRoundedRectOutline(x, y, width, height, borderRadius * 2,
+                                     getCurrentBorderColor(), borderWidth);
 
-        FluxHttp::get(url, [weak](HttpResult result) {
-            auto self = weak.lock();
-            if (!self) return;
+    const int cx = x + paddingLeft;
+    const int cy = y + paddingTop;
+    const int cw = width - paddingLeft - paddingRight;
+    const int ch = height - paddingTop - paddingBottom;
 
-            if (!result.success || result.body.empty()) {
-                self->_setLoadState(ImageLoadState::Error);
-                self->markNeedsLayout();
-                return;
-            }
-
-            const auto& bytes = result.body;
-            bool ok = self->_decodeFromMemory(
-                    reinterpret_cast<const uint8_t*>(bytes.data()),
-                    (int)bytes.size());
-
-            if (!ok) {
-                self->_setLoadState(ImageLoadState::Error);
-            }
-#ifndef __ANDROID__
-            if (ok) {
-                self->_invalidateScaledCache();
-                self->_setLoadState(ImageLoadState::Loaded);
-            }
+#ifdef __ANDROID__
+    // Deferred load — NanoVG context required
+    if (loadState == ImageLoadState::Idle && !imagePath.empty())
+      _loadAssetAsync(imagePath);
 #endif
-            if (auto* ui = FluxUI::getCurrentInstance())
-                ui->partialRebuild(self.get());
-            else
-                self->markNeedsLayout();
 
-        }, postToUI);
-    }
+    _promoteStaging();
 
-    // =========================================================================
-    // loadImage — file-based loader
-    // =========================================================================
-    bool loadImage(const std::string& path) {
-        if (path.empty()) {
-            _setLoadState(ImageLoadState::Idle);
-            return false;
-        }
-
-        imagePath = path;
-
+    switch (loadState) {
+    case ImageLoadState::Loaded:
 #ifdef _WIN32
-        wchar_t absPath[MAX_PATH] = {};
-        std::wstring wpath = toWideString(path);
-        if (!GetFullPathNameW(wpath.c_str(), MAX_PATH, absPath, nullptr)) {
-            _setLoadState(ImageLoadState::Error); return false;
-        }
-        try {
-            bitmap = std::make_unique<Gdiplus::Bitmap>(absPath);
-            if (!bitmap || bitmap->GetLastStatus() != Gdiplus::Ok) {
-                bitmap.reset(); _setLoadState(ImageLoadState::Error); return false;
-            }
-        } catch (...) {
-            bitmap.reset(); _setLoadState(ImageLoadState::Error); return false;
-        }
-        imageWidth  = (int)bitmap->GetWidth();
-        imageHeight = (int)bitmap->GetHeight();
-        if (imageWidth == 0 || imageHeight == 0) {
-            bitmap.reset(); _setLoadState(ImageLoadState::Error); return false;
-        }
-#endif
-
-#if defined(__linux__) && !defined(__ANDROID__)
-        int w = 0, h = 0, channels = 0;
-        stbi_set_flip_vertically_on_load(0);
-        unsigned char* data = stbi_load(path.c_str(), &w, &h, &channels, 4);
-        if (!data) { pixels.clear(); _setLoadState(ImageLoadState::Error); return false; }
-        _convertStbiToCairo(data, w, h);
-        stbi_image_free(data);
-        if (imageWidth == 0 || imageHeight == 0) {
-            pixels.clear(); _setLoadState(ImageLoadState::Error); return false;
-        }
-#endif
-
-#ifdef __ANDROID__
-        _freeNvgImage();
-        NVGcontext* vg = FluxAndroid_getVG();
-        if (!vg) { _setLoadState(ImageLoadState::Idle); return false; }
-
-        if (!path.empty() && path[0] == '/') {
-            nvgImage = nvgCreateImage(vg, path.c_str(), 0);
-        } else {
-            AAssetManager* am = FluxAndroid_getAssetManager();
-            if (!am) { _setLoadState(ImageLoadState::Error); return false; }
-            AAsset* asset = AAssetManager_open(am, path.c_str(), AASSET_MODE_BUFFER);
-            if (!asset) { _setLoadState(ImageLoadState::Error); return false; }
-
-            const uint8_t* assetData = (const uint8_t*)AAsset_getBuffer(asset);
-            int assetLen = (int)AAsset_getLength(asset);
-
-            int w = 0, h = 0, ch = 0;
-            stbi_set_flip_vertically_on_load(0);
-            unsigned char* rgba = stbi_load_from_memory(assetData, assetLen,
-                                                        &w, &h, &ch, 4);
-            AAsset_close(asset);
-
-            if (!rgba) {
-                LOGW_IMG("stbi_load_from_memory failed for asset '%s': %s",
-                         path.c_str(), stbi_failure_reason());
-                _setLoadState(ImageLoadState::Error); return false;
-            }
-
-            nvgImage = nvgCreateImageRGBA(vg, w, h, NVG_IMAGE_PREMULTIPLIED, rgba);
-            stbi_image_free(rgba);
-        }
-
-        if (nvgImage == -1) { _setLoadState(ImageLoadState::Error); return false; }
-        nvgImageSize(vg, nvgImage, &imageWidth, &imageHeight);
-        if (imageWidth == 0 || imageHeight == 0) {
-            _freeNvgImage(); _setLoadState(ImageLoadState::Error); return false;
-        }
-#endif
-
-        // Invalidate any stale pre-scaled cache from a previous image.
-        _invalidateScaledCache();
-
-        _setLoadState(ImageLoadState::Loaded);
-
-        // If the widget already has an explicit size, a repaint is enough —
-        // no need to re-measure the whole tree.
-        if (!autoWidth && !autoHeight)
-            markNeedsPaint();
-        else
-            markNeedsLayout();
-
-        return true;
-    }
-
-    void reloadIfDeferred() {
-#ifdef __ANDROID__
-        if (!imagePath.empty() && loadState == ImageLoadState::Idle)
-            loadImage(imagePath);
-#endif
-    }
-
-
-
-    void computeLayout(GraphicsContext& /*ctx*/,
-                       const BoxConstraints& constraints,
-                       FontCache& /*fontCache*/) override
-    {
-        const int padW = paddingLeft + paddingRight;
-        const int padH = paddingTop  + paddingBottom;
-
-        if (loadState == ImageLoadState::Loaded && imageWidth > 0 && imageHeight > 0) {
-
-            if (autoWidth && autoHeight) {
-                // Both axes auto → wrap intrinsic size + padding
-                width  = constraints.clampWidth (imageWidth  + padW);
-                height = constraints.clampHeight(imageHeight + padH);
-
-            } else if (autoWidth) {
-                // Height is explicit (already the full widget height including padding)
-                int contentH = std::max(1, height - padH);
-                float aspect = (float)imageWidth / (float)imageHeight;
-                int inferredContentW = (int)((float)contentH * aspect);
-                width = constraints.clampWidth(inferredContentW + padW);
-
-            } else if (autoHeight) {
-                // Width is explicit (already the full widget width including padding)
-                int contentW = std::max(1, width - padW);
-                float aspect = (float)imageHeight / (float)imageWidth;
-                int inferredContentH = (int)((float)contentW * aspect);
-                height = constraints.clampHeight(inferredContentH + padH);
-
-            } else {
-                // Both explicit — just clamp to constraints; don't touch the values.
-                width  = constraints.clampWidth (width);
-                height = constraints.clampHeight(height);
-            }
-
-        } else {
-            // Image not loaded yet (Loading, Error, Idle) — use explicit sizes or
-            // a sensible fallback so the placeholder occupies real space.
-
-            if (autoWidth)  width  = constraints.clampWidth (100 + padW);
-            else            width  = constraints.clampWidth (width);
-
-            if (autoHeight) height = constraints.clampHeight(100 + padH);
-            else            height = constraints.clampHeight(height);
-        }
-
-        applyConstraints();
-        needsLayout = false;
-    }
-
-    // ── Render ────────────────────────────────────────────────────────────────
-    void render(GraphicsContext& ctx, FontCache& fontCache) override {
-        Painter painter(ctx);
-
-        if (hasBackground)
-            drawRoundedRectangle(ctx);
-        if (hasBorder)
-            painter.drawRoundedRectOutline(x, y, width, height,
-                                           borderRadius * 2,
-                                           getCurrentBorderColor(), borderWidth);
-
-        const int cx = x + paddingLeft;
-        const int cy = y + paddingTop;
-        const int cw = width  - paddingLeft - paddingRight;
-        const int ch = height - paddingTop  - paddingBottom;
-
-#ifdef __ANDROID__
-        if (loadState == ImageLoadState::Idle && !imagePath.empty())
-            loadImage(imagePath);
-#endif
-
-        switch (loadState) {
-            case ImageLoadState::Loaded:
-#ifdef _WIN32
-                _renderGDIPlus(ctx, cx, cy, cw, ch);
+      _renderGDIPlus(ctx, cx, cy, cw, ch);
 #elif defined(__ANDROID__)
-                _renderNanoVG(cx, cy, cw, ch);
+      _renderNanoVG(cx, cy, cw, ch);
 #else
-                _renderCairo(ctx, cx, cy, cw, ch);
+      _renderCairo(ctx, cx, cy, cw, ch);
 #endif
-                break;
+      _applyTint(painter, cx, cy, cw, ch);
+      break;
 
-            case ImageLoadState::Loading:
+    case ImageLoadState::Loading:
 #ifdef __ANDROID__
-                if (pending.ready()) {
-                    _renderNanoVG(cx, cy, cw, ch);
-                    if (loadState == ImageLoadState::Loaded) break;
-                }
+      if (pending.ready()) {
+        _renderNanoVG(cx, cy, cw, ch);
+        _applyTint(painter, cx, cy, cw, ch);
+        if (loadState == ImageLoadState::Loaded)
+          break;
+      }
 #endif
-                _renderLoading(painter, fontCache, cx, cy, cw, ch);
-                break;
+      _renderLoadingWidget(ctx, fontCache, painter, cx, cy, cw, ch);
+      break;
 
-            case ImageLoadState::Error:
-                painter.fillRect(cx, cy, cw, ch, errorColor);
-                painter.drawTextA("\xe2\x9c\x95",
-                                  cx, cy, cw, ch,
-                                  fontCache.getFont(fontSize, fontWeight),
-                                  Color::fromRGB(150, 0, 0),
-                                  DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-                break;
+    case ImageLoadState::Error:
+      _renderErrorWidget(ctx, fontCache, painter, cx, cy, cw, ch);
+      break;
 
-            default:
-                painter.fillRect(cx, cy, cw, ch, placeholderColor);
-                break;
-        }
-
-        needsPaint = false;
+    default:
+      painter.fillRect(cx, cy, cw, ch, placeholderColor);
+      break;
     }
 
-    // ── Fluent setters ────────────────────────────────────────────────────────
-    std::shared_ptr<ImageWidget> setImagePath(const std::string& path) {
-        loadImage(path); return self();
+    needsPaint = false;
+  }
+
+  // =========================================================================
+  // Fluent setters
+  // =========================================================================
+  std::shared_ptr<ImageWidget> setFit(ImageFit f) {
+    if (fit != f) {
+      fit = f;
+      _invalidateScaledCache();
+      markNeedsPaint();
     }
-    std::shared_ptr<ImageWidget> setUrl(const std::string& url,
-                                        bool postToUI = true) {
-        loadFromUrl(url, postToUI); return self();
+    return self();
+  }
+  std::shared_ptr<ImageWidget> setRepeat(ImageRepeat r) {
+    repeat = r;
+    markNeedsPaint();
+    return self();
+  }
+  std::shared_ptr<ImageWidget> setFilterQuality(FilterQuality q) {
+    if (filterQuality != q) {
+      filterQuality = q;
+      _invalidateScaledCache();
+      markNeedsPaint();
     }
-    std::shared_ptr<ImageWidget> setFit(ImageFit fitMode) {
-        if (fit != fitMode) {
-            fit = fitMode;
-            _invalidateScaledCache();
-            markNeedsPaint();
-        }
-        return self();
-    }
-    std::shared_ptr<ImageWidget> setPlaceholderColor(Color color) {
-        placeholderColor = color; markNeedsPaint(); return self();
-    }
-    std::shared_ptr<ImageWidget> setErrorColor(Color color) {
-        errorColor = color; markNeedsPaint(); return self();
-    }
-    std::shared_ptr<ImageWidget> setWidth(int w) {
-        width = w; autoWidth = false; markNeedsLayout(); return self();
-    }
-    std::shared_ptr<ImageWidget> setHeight(int h) {
-        height = h; autoHeight = false; markNeedsLayout(); return self();
-    }
-    std::shared_ptr<ImageWidget> setBorderRadius(int r) {
-        borderRadius = r; markNeedsPaint(); return self();
-    }
-    std::shared_ptr<ImageWidget> setPadding(int p) {
-        padding = paddingLeft = paddingRight = paddingTop = paddingBottom = p;
-        markNeedsLayout(); return self();
-    }
+    return self();
+  }
+  std::shared_ptr<ImageWidget> setImageAlignment(Alignment a) {
+    imageAlignment = a;
+    markNeedsPaint();
+    return self();
+  }
+  std::shared_ptr<ImageWidget> setTintColor(Color c) {
+    tintColor = c;
+    markNeedsPaint();
+    return self();
+  }
+  std::shared_ptr<ImageWidget> setPlaceholderColor(Color c) {
+    placeholderColor = c;
+    markNeedsPaint();
+    return self();
+  }
+  std::shared_ptr<ImageWidget> setErrorColor(Color c) {
+    errorColor = c;
+    markNeedsPaint();
+    return self();
+  }
+  std::shared_ptr<ImageWidget>
+  setLoadingBuilder(std::function<WidgetPtr()> fn) {
+    loadingBuilder = std::move(fn);
+    return self();
+  }
+  std::shared_ptr<ImageWidget> setErrorBuilder(std::function<WidgetPtr()> fn) {
+    errorBuilder = std::move(fn);
+    return self();
+  }
+  std::shared_ptr<ImageWidget> setWidth(int w) {
+    width = w;
+    autoWidth = false;
+    markNeedsLayout();
+    return self();
+  }
+  std::shared_ptr<ImageWidget> setHeight(int h) {
+    height = h;
+    autoHeight = false;
+    markNeedsLayout();
+    return self();
+  }
+  std::shared_ptr<ImageWidget> setBorderRadius(int r) {
+    borderRadius = r;
+    markNeedsPaint();
+    return self();
+  }
+  std::shared_ptr<ImageWidget> setPadding(int p) {
+    paddingLeft = paddingRight = paddingTop = paddingBottom = p;
+    markNeedsLayout();
+    return self();
+  }
+
+  // Backward-compat aliases
+  std::shared_ptr<ImageWidget> setImagePath(const std::string &path) {
+    _loadAssetAsync(path);
+    return self();
+  }
+  std::shared_ptr<ImageWidget> setUrl(const std::string &url,
+                                      bool postToUI = true) {
+    loadFromUrl(url, postToUI);
+    return self();
+  }
+
+  // =========================================================================
+  // Android deferred reload
+  // =========================================================================
+  void reloadIfDeferred() {
+    if (!imagePath.empty() && loadState == ImageLoadState::Idle)
+      _loadAssetAsync(imagePath);
+  }
 
 private:
-    std::shared_ptr<ImageWidget> self() {
-        return std::static_pointer_cast<ImageWidget>(shared_from_this());
+  std::shared_ptr<ImageWidget> self() {
+    return std::static_pointer_cast<ImageWidget>(shared_from_this());
+  }
+
+  void _setLoadState(ImageLoadState s) {
+    loadState = s;
+    imageLoaded = (s == ImageLoadState::Loaded);
+    hasError = (s == ImageLoadState::Error);
+  }
+
+  void _scheduleRebuild() {
+    if (auto *ui = FluxUI::getCurrentInstance())
+      ui->partialRebuild(this);
+    else
+      markNeedsLayout();
+  }
+
+  // =========================================================================
+  // _loadAssetAsync  — reads file on a detached background thread, decodes,
+  // and stages the result for promotion on the next UI-thread frame.
+  // Uses std::thread::detach, the same pattern as FluxHttp::send.
+  // =========================================================================
+  void _loadAssetAsync(const std::string &path) {
+    if (path.empty()) {
+      _setLoadState(ImageLoadState::Idle);
+      return;
     }
+    imagePath = path;
+    _setLoadState(ImageLoadState::Loading);
+    markNeedsPaint();
 
-    void _setLoadState(ImageLoadState s) {
-        loadState   = s;
-        imageLoaded = (s == ImageLoadState::Loaded);
-        hasError    = (s == ImageLoadState::Error);
+    std::weak_ptr<ImageWidget> weak =
+        std::static_pointer_cast<ImageWidget>(shared_from_this());
+
+    std::thread([weak, path]() {
+      auto self = weak.lock();
+      if (!self)
+        return;
+
+#ifdef __ANDROID__
+      // Android: NanoVG texture upload must happen on the GL/render thread.
+      // Set state back to Idle so render() picks it up as a deferred load.
+      self->_setLoadState(ImageLoadState::Idle);
+      self->_scheduleRebuild();
+      return;
+#endif
+      // ── Read the file into memory ─────────────────────────────────────
+#ifdef _WIN32
+      FILE *f = nullptr;
+      fopen_s(&f, path.c_str(), "rb");
+#else
+      FILE *f = fopen(path.c_str(), "rb");
+#endif
+      if (!f) {
+        self->_setLoadState(ImageLoadState::Error);
+        self->_scheduleRebuild();
+        return;
+      }
+      fseek(f, 0, SEEK_END);
+      long sz = ftell(f);
+      fseek(f, 0, SEEK_SET);
+      if (sz <= 0) {
+        fclose(f);
+        self->_setLoadState(ImageLoadState::Error);
+        self->_scheduleRebuild();
+        return;
+      }
+      std::vector<uint8_t> buf((size_t)sz);
+      size_t nread = fread(buf.data(), 1, (size_t)sz, f);
+      fclose(f);
+      if ((long)nread != sz) {
+        self->_setLoadState(ImageLoadState::Error);
+        self->_scheduleRebuild();
+        return;
+      }
+
+      // ── Decode into staging buffer ────────────────────────────────────
+      bool ok = self->_decodeIntoStaging(buf.data(), (int)buf.size());
+      if (!ok)
+        self->_setLoadState(ImageLoadState::Error);
+      self->_scheduleRebuild();
+    }).detach();
+  }
+
+  // =========================================================================
+  // _loadFromMemorySync  — decode synchronously (Image::memory)
+  // Caller is responsible for calling from the UI thread.
+  // =========================================================================
+  void _loadFromMemorySync(const uint8_t *data, int len) {
+    _setLoadState(ImageLoadState::Loading);
+    bool ok = _decodeIntoStaging(data, len);
+    _promoteStaging();
+    if (!ok) {
+      _setLoadState(ImageLoadState::Error);
+      return;
     }
+    _setLoadState(ImageLoadState::Loaded);
+    markNeedsLayout();
+  }
 
+  // =========================================================================
+  // _decodeIntoStaging
+  // Called from a background thread. Writes to _pending / bitmap under mutex.
+  // Returns true on success.
+  // =========================================================================
+  bool _decodeIntoStaging(const uint8_t *data, int len) {
+#ifdef _WIN32
+    IStream *stream = nullptr;
+    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, (SIZE_T)len);
+    if (!hMem)
+      return false;
+    void *ptr = GlobalLock(hMem);
+    if (!ptr) {
+      GlobalFree(hMem);
+      return false;
+    }
+    memcpy(ptr, data, len);
+    GlobalUnlock(hMem);
+    if (CreateStreamOnHGlobal(hMem, TRUE, &stream) != S_OK) {
+      GlobalFree(hMem);
+      return false;
+    }
+    std::unique_ptr<Gdiplus::Bitmap> decoded;
+    try {
+      decoded = std::make_unique<Gdiplus::Bitmap>(stream);
+      stream->Release();
+      if (!decoded || decoded->GetLastStatus() != Gdiplus::Ok)
+        return false;
+    } catch (...) {
+      stream->Release();
+      return false;
+    }
+    int w = (int)decoded->GetWidth();
+    int h = (int)decoded->GetHeight();
+    if (w == 0 || h == 0)
+      return false;
 
+    {
+      std::lock_guard<std::mutex> lock(_decodeMutex);
+      bitmap = std::move(decoded);
+      imageWidth = w;
+      imageHeight = h;
+      // Signal UI thread to flush the scaled cache (_scaledW == -1 is the dirty
+      // flag).
+      _scaledW = -1;
+    }
+    _setLoadState(ImageLoadState::Loaded);
+    return true;
+#endif
 
-    void _invalidateScaledCache() {
 #if defined(__linux__) && !defined(__ANDROID__)
-        if (_scaledSurface) {
-            cairo_surface_destroy(_scaledSurface);
-            _scaledSurface = nullptr;
-        }
-        _scaledW = _scaledH = 0;
-        _scaledFit = -1;
+    int w = 0, h = 0, channels = 0;
+    stbi_set_flip_vertically_on_load(0);
+    unsigned char *raw = stbi_load_from_memory(data, len, &w, &h, &channels, 4);
+    if (!raw)
+      return false;
+
+    DecodedImage img;
+    img.width = w;
+    img.height = h;
+    _convertStbiToCairoPremul(raw, w, h, img.pixels);
+    stbi_image_free(raw);
+
+    {
+      std::lock_guard<std::mutex> lock(_decodeMutex);
+      _pending = std::move(img);
+    }
+    return true;
+#endif
+
+#ifdef __ANDROID__
+    int w = 0, h = 0, ch = 0;
+    stbi_set_flip_vertically_on_load(0);
+    unsigned char *rgba = stbi_load_from_memory(data, len, &w, &h, &ch, 4);
+    if (!rgba) {
+      LOGW_IMG("stbi decode failed: %s", stbi_failure_reason());
+      return false;
+    }
+    pending.rgba.assign(rgba, rgba + (size_t)w * h * 4);
+    pending.w = w;
+    pending.h = h;
+    stbi_image_free(rgba);
+    return true;
+#endif
+
+    return false;
+  }
+
+  // =========================================================================
+  // _promoteStaging  — UI-thread only.
+  // Moves pending decoded data into the render-ready store and invalidates
+  // the scaled cache so it rebuilds at the new source.
+  // =========================================================================
+  void _promoteStaging() {
+#if defined(__linux__) && !defined(__ANDROID__)
+    DecodedImage staged;
+    {
+      std::lock_guard<std::mutex> lock(_decodeMutex);
+      if (!_pending.ready())
+        return;
+      staged = std::move(_pending);
+      _pending.clear();
+    }
+    // Now we are on the UI thread — safe to touch pixels and cache.
+    pixels = std::move(staged.pixels);
+    imageWidth = staged.width;
+    imageHeight = staged.height;
+    _invalidateScaledCache();
+    _setLoadState(ImageLoadState::Loaded);
+    markNeedsLayout();
 #endif
 #ifdef _WIN32
+    // GDI+ decode writes to `bitmap` under mutex and sets loadState = Loaded
+    // on the decode thread. We only need to flush the scaled cache on the
+    // UI thread if the decode thread flagged it as dirty (_scaledW reset to
+    // -1).
+    {
+      std::lock_guard<std::mutex> lock(_decodeMutex);
+      if (_scaledW == -1) {
+        // Decode thread signalled a new bitmap arrived — reset properly.
+        _scaledW = _scaledH = 0;
+        _scaledFit = _scaledQuality = -1;
+        _scaledBitmap.reset();
+      }
+    }
+#endif
+    // Android: promotion handled inside _renderNanoVG (GL thread required)
+  }
+
+  // =========================================================================
+  // _invalidateScaledCache
+  // =========================================================================
+  void _invalidateScaledCache() {
+#if defined(__linux__) && !defined(__ANDROID__)
+    if (_scaledSurface) {
+      cairo_surface_destroy(_scaledSurface);
+      _scaledSurface = nullptr;
+    }
+    _scaledW = _scaledH = 0;
+    _scaledFit = _scaledQuality = -1;
+#endif
+#ifdef _WIN32
+    _invalidateScaledCacheNoLock();
+#endif
+  }
+
+#ifdef _WIN32
+  void _invalidateScaledCacheNoLock() {
+    _scaledBitmap.reset();
+    _scaledW = _scaledH = 0;
+    _scaledFit = _scaledQuality = -1;
+  }
+#endif
+
+  // =========================================================================
+  // Destination-rect calculation (respects imageAlignment)
+  // =========================================================================
+  struct DestRect {
+    float x, y, w, h;
+  };
+
+  DestRect _calculateDestRect(int cx, int cy, int cw, int ch) const {
+    const float imgAspect = (float)imageWidth / (float)imageHeight;
+    const float ctnAspect = (float)cw / (float)ch;
+
+    float dw, dh;
+    switch (fit) {
+    case ImageFit::Fill:
+      return {(float)cx, (float)cy, (float)cw, (float)ch};
+
+    case ImageFit::Contain:
+      if (imgAspect > ctnAspect) {
+        dw = (float)cw;
+        dh = dw / imgAspect;
+      } else {
+        dh = (float)ch;
+        dw = dh * imgAspect;
+      }
+      break;
+
+    case ImageFit::Cover:
+      if (imgAspect > ctnAspect) {
+        dh = (float)ch;
+        dw = dh * imgAspect;
+      } else {
+        dw = (float)cw;
+        dh = dw / imgAspect;
+      }
+      break;
+
+    case ImageFit::None:
+      dw = (float)imageWidth;
+      dh = (float)imageHeight;
+      break;
+
+    case ImageFit::ScaleDown:
+      if (imageWidth <= cw && imageHeight <= ch) {
+        dw = (float)imageWidth;
+        dh = (float)imageHeight;
+      } else if (imgAspect > ctnAspect) {
+        dw = (float)cw;
+        dh = dw / imgAspect;
+      } else {
+        dh = (float)ch;
+        dw = dh * imgAspect;
+      }
+      break;
+
+    default:
+      return {(float)cx, (float)cy, (float)cw, (float)ch};
+    }
+
+    // Apply imageAlignment for offset within container
+    float ox = 0, oy = 0;
+    float freeX = (float)cw - dw;
+    float freeY = (float)ch - dh;
+
+    switch (imageAlignment) {
+    case Alignment::Center:
+      ox = freeX * 0.5f;
+      oy = freeY * 0.5f;
+      break;
+    case Alignment::TopCenter:
+      ox = freeX * 0.5f;
+      oy = 0.f;
+      break;
+    case Alignment::BottomCenter:
+      ox = freeX * 0.5f;
+      oy = freeY;
+      break;
+    case Alignment::CenterLeft:
+      ox = 0.f;
+      oy = freeY * 0.5f;
+      break;
+    case Alignment::CenterRight:
+      ox = freeX;
+      oy = freeY * 0.5f;
+      break;
+    case Alignment::Start: // TopLeft
+      ox = 0.f;
+      oy = 0.f;
+      break;
+    case Alignment::End: // BottomRight
+      ox = freeX;
+      oy = freeY;
+      break;
+    case Alignment::TopRight:
+      ox = freeX;
+      oy = 0.f;
+      break;
+    case Alignment::BottomLeft:
+      ox = 0.f;
+      oy = freeY;
+      break;
+    case Alignment::BottomRight:
+      ox = freeX;
+      oy = freeY;
+      break;
+    default:
+      ox = freeX * 0.5f;
+      oy = freeY * 0.5f;
+      break;
+    }
+
+    return {(float)cx + ox, (float)cy + oy, dw, dh};
+  }
+
+  // =========================================================================
+  // Tint overlay (all platforms)
+  // =========================================================================
+  void _applyTint(Painter &painter, int cx, int cy, int cw, int ch) const {
+    if (tintColor.a == 0)
+      return;
+    painter.fillRect(cx, cy, cw, ch, tintColor);
+  }
+
+  // =========================================================================
+  // Loading / error widget rendering
+  // =========================================================================
+  void _renderLoadingWidget(GraphicsContext &ctx, FontCache &fontCache,
+                            Painter &painter, int cx, int cy, int cw, int ch) {
+    if (loadingBuilder) {
+      WidgetPtr w = loadingBuilder();
+      if (w) {
+        BoxConstraints c = BoxConstraints::tight(cw, ch);
+        w->computeLayout(ctx, c, fontCache);
+        w->x = cx;
+        w->y = cy;
+        w->positionChildren(cx + w->paddingLeft, cy + w->paddingTop,
+                            cw - w->paddingLeft - w->paddingRight,
+                            ch - w->paddingTop - w->paddingBottom);
+        w->render(ctx, fontCache);
+        return;
+      }
+    }
+    // Default shimmer placeholder
+    painter.fillRect(cx, cy, cw, ch, placeholderColor);
+    painter.drawTextA(
+        "\xe2\x80\xa6", cx, cy, cw, ch, fontCache.getFont(fontSize, fontWeight),
+        Color::fromRGB(160, 160, 160), DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+  }
+
+  void _renderErrorWidget(GraphicsContext &ctx, FontCache &fontCache,
+                          Painter &painter, int cx, int cy, int cw, int ch) {
+    if (errorBuilder) {
+      WidgetPtr w = errorBuilder();
+      if (w) {
+        BoxConstraints c = BoxConstraints::tight(cw, ch);
+        w->computeLayout(ctx, c, fontCache);
+        w->x = cx;
+        w->y = cy;
+        w->positionChildren(cx + w->paddingLeft, cy + w->paddingTop,
+                            cw - w->paddingLeft - w->paddingRight,
+                            ch - w->paddingTop - w->paddingBottom);
+        w->render(ctx, fontCache);
+        return;
+      }
+    }
+    painter.fillRect(cx, cy, cw, ch, errorColor);
+    painter.drawTextA(
+        "\xe2\x9c\x95", cx, cy, cw, ch, fontCache.getFont(fontSize, fontWeight),
+        Color::fromRGB(150, 0, 0), DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+  }
+
+  // =========================================================================
+  // GDI+ rendering (Windows)
+  // =========================================================================
+#ifdef _WIN32
+  // Map FilterQuality → GDI+ InterpolationMode
+  Gdiplus::InterpolationMode _gdiInterpolation() const {
+    switch (filterQuality) {
+    case FilterQuality::None:
+      return Gdiplus::InterpolationModeNearestNeighbor;
+    case FilterQuality::Low:
+      return Gdiplus::InterpolationModeBilinear;
+    case FilterQuality::Medium:
+      return Gdiplus::InterpolationModeHighQualityBilinear;
+    case FilterQuality::High:
+      return Gdiplus::InterpolationModeHighQualityBicubic;
+    }
+    return Gdiplus::InterpolationModeBilinear;
+  }
+
+  void _renderGDIPlus(GraphicsContext &ctx, int cx, int cy, int cw,
+                      int ch) const {
+    std::lock_guard<std::mutex> lock(_decodeMutex);
+    if (!bitmap)
+      return;
+
+    DestRect d = _calculateDestRect(cx, cy, cw, ch);
+    int dw = std::max(1, (int)d.w);
+    int dh = std::max(1, (int)d.h);
+
+    // ── 1. Build / reuse scaled source bitmap ────────────────────────────
+    bool cacheStale = !_scaledBitmap || _scaledW != dw || _scaledH != dh ||
+                      _scaledFit != (int)fit ||
+                      _scaledQuality != (int)filterQuality;
+
+    if (cacheStale) {
+      _scaledBitmap =
+          std::make_unique<Gdiplus::Bitmap>(dw, dh, PixelFormat32bppPARGB);
+      if (_scaledBitmap && _scaledBitmap->GetLastStatus() == Gdiplus::Ok) {
+        Gdiplus::Graphics sg(_scaledBitmap.get());
+        sg.SetInterpolationMode(_gdiInterpolation());
+        sg.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
+        sg.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
+        sg.DrawImage(bitmap.get(),
+                     Gdiplus::RectF(0.f, 0.f, (float)dw, (float)dh));
+        _scaledW = dw;
+        _scaledH = dh;
+        _scaledFit = (int)fit;
+        _scaledQuality = (int)filterQuality;
+      } else {
         _scaledBitmap.reset();
         _scaledW = _scaledH = 0;
-        _scaledFit = -1;
-#endif
-        // Android uses NanoVG textures that are already GPU-resident;
-        // no separate pre-scale cache is needed there.
+        _scaledFit = _scaledQuality = -1;
+      }
     }
 
-    // =========================================================================
-    // _decodeFromMemory — called from the HTTP callback (background thread)
-    // =========================================================================
-    bool _decodeFromMemory(const uint8_t* data, int len) {
-#ifdef _WIN32
-        IStream* stream = nullptr;
-        HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, (SIZE_T)len);
-        if (!hMem) return false;
-        void* ptr = GlobalLock(hMem);
-        if (!ptr) { GlobalFree(hMem); return false; }
-        memcpy(ptr, data, len);
-        GlobalUnlock(hMem);
-        if (CreateStreamOnHGlobal(hMem, TRUE, &stream) != S_OK) {
-            GlobalFree(hMem); return false;
-        }
-        try {
-            bitmap = std::make_unique<Gdiplus::Bitmap>(stream);
-            stream->Release();
-            if (!bitmap || bitmap->GetLastStatus() != Gdiplus::Ok) {
-                bitmap.reset(); return false;
-            }
-        } catch (...) {
-            stream->Release(); bitmap.reset(); return false;
-        }
-        imageWidth  = (int)bitmap->GetWidth();
-        imageHeight = (int)bitmap->GetHeight();
-        // Invalidate stale cache — new source pixels arrived.
-        _invalidateScaledCache();
-        return (imageWidth > 0 && imageHeight > 0);
-#endif
+    Gdiplus::Bitmap *src = _scaledBitmap ? _scaledBitmap.get() : bitmap.get();
 
-#if defined(__linux__) && !defined(__ANDROID__)
-        int w = 0, h = 0, channels = 0;
-        stbi_set_flip_vertically_on_load(0);
-        unsigned char* decoded = stbi_load_from_memory(data, len, &w, &h, &channels, 4);
-        if (!decoded) { pixels.clear(); return false; }
-        _convertStbiToCairo(decoded, w, h);
-        stbi_image_free(decoded);
-        // Invalidate stale cache — new source pixels arrived.
-        _invalidateScaledCache();
-        return (imageWidth > 0 && imageHeight > 0);
-#endif
+    // ── 2. If no border radius, draw directly to HDC (fast path) ────────
+    if (borderRadius <= 0) {
+      Gdiplus::Graphics g(ctx.hdc);
+      g.SetInterpolationMode(_scaledBitmap
+                                 ? Gdiplus::InterpolationModeNearestNeighbor
+                                 : _gdiInterpolation());
+      g.SetClip(Gdiplus::Rect(cx, cy, cw, ch));
 
-#ifdef __ANDROID__
-        int w = 0, h = 0, ch = 0;
-        stbi_set_flip_vertically_on_load(0);
-        unsigned char* rgba = stbi_load_from_memory(data, len, &w, &h, &ch, 4);
-        if (!rgba) {
-            LOGW_IMG("stbi_load_from_memory failed: %s", stbi_failure_reason());
-            return false;
-        }
-
-        LOGI_IMG("Decoded network image %dx%d (%d ch) — queuing for GL upload", w, h, ch);
-
-        pending.rgba.assign(rgba, rgba + (size_t)w * h * 4);
-        pending.w = w;
-        pending.h = h;
-        stbi_image_free(rgba);
-        return true;
-#endif
-
-        return false;
+      if (repeat != ImageRepeat::NoRepeat && _scaledBitmap)
+        _renderGDIPlusRepeat(g, src, d, cx, cy, cw, ch);
+      else
+        g.DrawImage(src, Gdiplus::RectF(d.x, d.y, (float)dw, (float)dh));
+      return;
     }
 
-    // ── Loading shimmer placeholder ───────────────────────────────────────────
-    void _renderLoading(Painter& painter, FontCache& fontCache,
-                        int cx, int cy, int cw, int ch) const
+    // ── 3. Rounded path — render to offscreen ARGB bitmap, then alpha-blit
+    //       This sidesteps HDC/GDI clip conflicts entirely.
+    // Offscreen canvas covers the full widget bounds (x,y,width,height).
+    int ow = width;
+    int oh = height;
+
+    Gdiplus::Bitmap offscreen(ow, oh, PixelFormat32bppPARGB);
+    if (offscreen.GetLastStatus() != Gdiplus::Ok)
+      return;
+
     {
-        painter.fillRect(cx, cy, cw, ch, placeholderColor);
-        painter.drawTextA("\xe2\x80\xa6",
-                          cx, cy, cw, ch,
-                          fontCache.getFont(fontSize, fontWeight),
-                          Color::fromRGB(160, 160, 160),
-                          DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+      Gdiplus::Graphics og(&offscreen);
+      og.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+      og.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
+      og.SetInterpolationMode(_scaledBitmap
+                                  ? Gdiplus::InterpolationModeNearestNeighbor
+                                  : _gdiInterpolation());
+
+      // 3a. Clear to transparent
+      og.Clear(Gdiplus::Color(0, 0, 0, 0));
+
+      // 3b. Build rounded-rect clip path in offscreen-local coords
+      //     (offscreen origin = widget origin x,y  →  offset by -x, -y)
+      float r = (float)borderRadius;
+      float diam = r * 2.0f;
+      float fx = 0.f; // local origin
+      float fy = 0.f;
+      float fw = (float)ow;
+      float fh = (float)oh;
+
+      Gdiplus::GraphicsPath path;
+      path.AddArc(fx, fy, diam, diam, 180.0f, 90.0f);
+      path.AddArc(fx + fw - diam, fy, diam, diam, 270.0f, 90.0f);
+      path.AddArc(fx + fw - diam, fy + fh - diam, diam, diam, 0.0f, 90.0f);
+      path.AddArc(fx, fy + fh - diam, diam, diam, 90.0f, 90.0f);
+      path.CloseFigure();
+
+      Gdiplus::Region region(&path);
+      og.SetClip(&region);
+
+      // 3c. Draw image at offscreen-local position (subtract widget origin)
+      float lx = d.x - (float)x;
+      float ly = d.y - (float)y;
+
+      if (repeat != ImageRepeat::NoRepeat && _scaledBitmap) {
+        // Repeat tiles — adjust coords to local space
+        float tileW = d.w, tileH = d.h;
+        float startX = (repeat == ImageRepeat::RepeatY) ? lx : 0.f;
+        float startY = (repeat == ImageRepeat::RepeatX) ? ly : 0.f;
+        float endX = (repeat == ImageRepeat::RepeatY) ? lx + tileW : (float)ow;
+        float endY = (repeat == ImageRepeat::RepeatX) ? ly + tileH : (float)oh;
+        for (float ty = startY; ty < endY; ty += tileH)
+          for (float tx = startX; tx < endX; tx += tileW)
+            og.DrawImage(src, Gdiplus::RectF(tx, ty, tileW, tileH));
+      } else {
+        og.DrawImage(src, Gdiplus::RectF(lx, ly, (float)dw, (float)dh));
+      }
     }
 
-    // ── Destination rect (all backends) ──────────────────────────────────────
-    struct DestRect { float x, y, w, h; };
+    // ── 4. Alpha-blit offscreen → HDC at widget position ─────────────────
+    Gdiplus::Graphics g(ctx.hdc);
+    g.SetInterpolationMode(Gdiplus::InterpolationModeNearestNeighbor);
+    g.DrawImage(&offscreen,
+                Gdiplus::RectF((float)x, (float)y, (float)ow, (float)oh));
+  }
+  void _renderGDIPlusRepeat(Gdiplus::Graphics &g, Gdiplus::Bitmap *src,
+                            const DestRect &d, int cx, int cy, int cw,
+                            int ch) const {
+    float tileW = d.w, tileH = d.h;
+    float startX = (repeat == ImageRepeat::RepeatY) ? d.x : (float)cx;
+    float startY = (repeat == ImageRepeat::RepeatX) ? d.y : (float)cy;
+    float endX =
+        (repeat == ImageRepeat::RepeatY) ? d.x + tileW : (float)(cx + cw);
+    float endY =
+        (repeat == ImageRepeat::RepeatX) ? d.y + tileH : (float)(cy + ch);
 
-    DestRect _calculateDestRect(int cx, int cy, int cw, int ch) const {
-        const float imgAspect       = (float)imageWidth  / (float)imageHeight;
-        const float containerAspect = (float)cw          / (float)ch;
-
-        switch (fit) {
-            case ImageFit::Fill:
-                return { (float)cx, (float)cy, (float)cw, (float)ch };
-
-            case ImageFit::Contain: {
-                float dw, dh;
-                if (imgAspect > containerAspect) {
-                    dw = (float)cw; dh = dw / imgAspect;
-                } else {
-                    dh = (float)ch; dw = dh * imgAspect;
-                }
-                return { cx + (cw - dw) * 0.5f, cy + (ch - dh) * 0.5f, dw, dh };
-            }
-
-            case ImageFit::Cover: {
-                float dw, dh;
-                if (imgAspect > containerAspect) {
-                    dh = (float)ch; dw = dh * imgAspect;
-                } else {
-                    dw = (float)cw; dh = dw / imgAspect;
-                }
-                return { cx + (cw - dw) * 0.5f, cy + (ch - dh) * 0.5f, dw, dh };
-            }
-
-            case ImageFit::None:
-                return { cx + (cw - imageWidth)  * 0.5f,
-                         cy + (ch - imageHeight) * 0.5f,
-                         (float)imageWidth, (float)imageHeight };
-
-            case ImageFit::ScaleDown: {
-                if (imageWidth <= cw && imageHeight <= ch)
-                    return { cx + (cw - imageWidth)  * 0.5f,
-                             cy + (ch - imageHeight) * 0.5f,
-                             (float)imageWidth, (float)imageHeight };
-                float dw, dh;
-                if (imgAspect > containerAspect) {
-                    dw = (float)cw; dh = dw / imgAspect;
-                } else {
-                    dh = (float)ch; dw = dh * imgAspect;
-                }
-                return { cx + (cw - dw) * 0.5f, cy + (ch - dh) * 0.5f, dw, dh };
-            }
-
-            default:
-                return { (float)cx, (float)cy, (float)cw, (float)ch };
-        }
-    }
-
-
-#ifdef _WIN32
-    void _renderGDIPlus(GraphicsContext& ctx,
-                        int cx, int cy, int cw, int ch) const {
-        if (!bitmap) return;
-
-        DestRect d  = _calculateDestRect(cx, cy, cw, ch);
-        int dw = std::max(1, (int)d.w);
-        int dh = std::max(1, (int)d.h);
-
-        // Rebuild the pre-scaled bitmap when the display size or fit mode changes.
-        if (!_scaledBitmap || _scaledW != dw || _scaledH != dh
-                            || _scaledFit != (int)fit) {
-            _scaledBitmap = std::make_unique<Gdiplus::Bitmap>(dw, dh,
-                PixelFormat32bppPARGB);
-
-            if (_scaledBitmap && _scaledBitmap->GetLastStatus() == Gdiplus::Ok) {
-                Gdiplus::Graphics sg(_scaledBitmap.get());
-                sg.SetInterpolationMode(
-                    Gdiplus::InterpolationModeHighQualityBicubic);
-                sg.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
-                sg.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
-                sg.DrawImage(bitmap.get(),
-                    Gdiplus::RectF(0.f, 0.f, (float)dw, (float)dh));
-
-                _scaledW   = dw;
-                _scaledH   = dh;
-                _scaledFit = (int)fit;
-            } else {
-                // Fallback: clear cache so we try again next frame rather than
-                // using a corrupt bitmap.
-                _scaledBitmap.reset();
-                _scaledW = _scaledH = 0;
-                _scaledFit = -1;
-            }
-        }
-
-
-        Gdiplus::Bitmap* src = _scaledBitmap ? _scaledBitmap.get() : bitmap.get();
-        Gdiplus::RectF   destRect = _scaledBitmap
-            ? Gdiplus::RectF(d.x, d.y, (float)dw, (float)dh)
-            : Gdiplus::RectF(d.x, d.y, d.w, d.h);
-
-        Gdiplus::Graphics g(ctx.hdc);
-        // Nearest-neighbour: the source is already at display resolution.
-        g.SetInterpolationMode(_scaledBitmap
-            ? Gdiplus::InterpolationModeNearestNeighbor
-            : Gdiplus::InterpolationModeHighQualityBicubic);
-        g.SetSmoothingMode(_scaledBitmap
-            ? Gdiplus::SmoothingModeNone
-            : Gdiplus::SmoothingModeHighQuality);
-
-        if (borderRadius > 0) {
-            Gdiplus::GraphicsPath path;
-            int diam = borderRadius * 2;
-            path.AddArc(Gdiplus::Rect(x,                  y,                 diam, diam), 180, 90);
-            path.AddArc(Gdiplus::Rect(x + width - diam,   y,                 diam, diam), 270, 90);
-            path.AddArc(Gdiplus::Rect(x + width - diam,   y + height - diam, diam, diam), 0,   90);
-            path.AddArc(Gdiplus::Rect(x,                  y + height - diam, diam, diam), 90,  90);
-            path.CloseFigure();
-            g.SetClip(&path);
-        } else {
-            g.SetClip(Gdiplus::Rect(cx, cy, cw, ch));
-        }
-
-        g.DrawImage(src, destRect);
-    }
+    for (float ty = startY; ty < endY; ty += tileH)
+      for (float tx = startX; tx < endX; tx += tileW)
+        g.DrawImage(src, Gdiplus::RectF(tx, ty, tileW, tileH));
+  }
 #endif
 
+  // =========================================================================
+  // Cairo rendering (Linux)
+  // =========================================================================
 #if defined(__linux__) && !defined(__ANDROID__)
-    void _convertStbiToCairo(unsigned char* data, int w, int h) {
-        imageWidth  = w;
-        imageHeight = h;
-        const size_t nPx = (size_t)w * (size_t)h;
-        pixels.resize(nPx * 4);
-        for (size_t i = 0; i < nPx; ++i) {
-            uint8_t r = data[i*4+0], g = data[i*4+1],
-                    b = data[i*4+2], a = data[i*4+3];
-            pixels[i*4+0] = (uint8_t)((uint32_t)b * a / 255u);
-            pixels[i*4+1] = (uint8_t)((uint32_t)g * a / 255u);
-            pixels[i*4+2] = (uint8_t)((uint32_t)r * a / 255u);
-            pixels[i*4+3] = a;
+  static void _convertStbiToCairoPremul(unsigned char *data, int w, int h,
+                                        std::vector<uint8_t> &out) {
+    const size_t nPx = (size_t)w * (size_t)h;
+    out.resize(nPx * 4);
+    for (size_t i = 0; i < nPx; ++i) {
+      uint8_t r = data[i * 4 + 0], g = data[i * 4 + 1], b = data[i * 4 + 2],
+              a = data[i * 4 + 3];
+      out[i * 4 + 0] = (uint8_t)((uint32_t)b * a / 255u);
+      out[i * 4 + 1] = (uint8_t)((uint32_t)g * a / 255u);
+      out[i * 4 + 2] = (uint8_t)((uint32_t)r * a / 255u);
+      out[i * 4 + 3] = a;
+    }
+  }
+
+  cairo_filter_t _cairoFilter() const {
+    switch (filterQuality) {
+    case FilterQuality::None:
+      return CAIRO_FILTER_NEAREST;
+    case FilterQuality::Low:
+      return CAIRO_FILTER_BILINEAR;
+    case FilterQuality::Medium:
+      return CAIRO_FILTER_BILINEAR;
+    case FilterQuality::High:
+      return CAIRO_FILTER_BEST;
+    }
+    return CAIRO_FILTER_BILINEAR;
+  }
+
+  void _renderCairo(GraphicsContext &ctx, int cx, int cy, int cw,
+                    int ch) const {
+    if (pixels.empty() || !ctx.cr)
+      return;
+
+    DestRect d = _calculateDestRect(cx, cy, cw, ch);
+    int dw = std::max(1, (int)d.w);
+    int dh = std::max(1, (int)d.h);
+
+    bool cacheStale = !_scaledSurface || _scaledW != dw || _scaledH != dh ||
+                      _scaledFit != (int)fit ||
+                      _scaledQuality != (int)filterQuality;
+
+    if (cacheStale) {
+      if (_scaledSurface) {
+        cairo_surface_destroy(_scaledSurface);
+        _scaledSurface = nullptr;
+      }
+
+      cairo_surface_t *surf =
+          cairo_image_surface_create(CAIRO_FORMAT_ARGB32, dw, dh);
+
+      if (cairo_surface_status(surf) == CAIRO_STATUS_SUCCESS) {
+        cairo_t *scr = cairo_create(surf);
+        cairo_surface_t *src = cairo_image_surface_create_for_data(
+            const_cast<uint8_t *>(pixels.data()), CAIRO_FORMAT_ARGB32,
+            imageWidth, imageHeight, imageWidth * 4);
+
+        if (cairo_surface_status(src) == CAIRO_STATUS_SUCCESS) {
+          cairo_scale(scr, (double)dw / imageWidth, (double)dh / imageHeight);
+          cairo_set_source_surface(scr, src, 0.0, 0.0);
+          cairo_pattern_set_filter(cairo_get_source(scr), _cairoFilter());
+          cairo_paint(scr);
         }
+        cairo_surface_destroy(src);
+        cairo_destroy(scr);
+
+        _scaledSurface = surf;
+        _scaledW = dw;
+        _scaledH = dh;
+        _scaledFit = (int)fit;
+        _scaledQuality = (int)filterQuality;
+      } else {
+        cairo_surface_destroy(surf);
+      }
     }
 
-    void _renderCairo(GraphicsContext& ctx,
-                      int cx, int cy, int cw, int ch) const {
-        if (pixels.empty() || !ctx.cr) return;
+    cairo_t *cr = ctx.cr;
+    cairo_save(cr);
 
-        DestRect d  = _calculateDestRect(cx, cy, cw, ch);
-        int dw = std::max(1, (int)d.w);
-        int dh = std::max(1, (int)d.h);
-
-        // Rebuild the pre-scaled surface when display size or fit mode changes.
-        if (!_scaledSurface || _scaledW != dw || _scaledH != dh
-                             || _scaledFit != (int)fit) {
-
-            // Free any existing cached surface.
-            if (_scaledSurface) {
-                cairo_surface_destroy(_scaledSurface);
-                _scaledSurface = nullptr;
-            }
-
-            cairo_surface_t* scaledSurf =
-                cairo_image_surface_create(CAIRO_FORMAT_ARGB32, dw, dh);
-
-            if (cairo_surface_status(scaledSurf) == CAIRO_STATUS_SUCCESS) {
-                cairo_t* scr = cairo_create(scaledSurf);
-
-                // Temporary view of the source pixels — no copy.
-                cairo_surface_t* srcSurf = cairo_image_surface_create_for_data(
-                    const_cast<uint8_t*>(pixels.data()),
-                    CAIRO_FORMAT_ARGB32,
-                    imageWidth, imageHeight, imageWidth * 4);
-
-                if (cairo_surface_status(srcSurf) == CAIRO_STATUS_SUCCESS) {
-                    cairo_scale(scr,
-                        (double)dw / imageWidth,
-                        (double)dh / imageHeight);
-                    cairo_set_source_surface(scr, srcSurf, 0.0, 0.0);
-                    cairo_pattern_set_filter(cairo_get_source(scr),
-                        CAIRO_FILTER_BILINEAR);
-                    cairo_paint(scr);
-                }
-
-                cairo_surface_destroy(srcSurf);
-                cairo_destroy(scr);
-
-                _scaledSurface = scaledSurf;
-                _scaledW       = dw;
-                _scaledH       = dh;
-                _scaledFit     = (int)fit;
-            } else {
-                // Surface creation failed — release and leave cache empty so
-                // we fall back to the original slow path below.
-                cairo_surface_destroy(scaledSurf);
-            }
-        }
-
-        cairo_t* cr = ctx.cr;
-        cairo_save(cr);
-
-        if (borderRadius > 0) {
-            _cairoRoundedRectPath(cr, x, y, width, height, borderRadius);
-            cairo_clip(cr);
-        } else {
-            cairo_rectangle(cr, cx, cy, cw, ch);
-            cairo_clip(cr);
-        }
-
-        if (_scaledSurface) {
-            // Fast path: blit the pre-scaled surface with no scaling (nearest).
-            cairo_set_source_surface(cr, _scaledSurface, d.x, d.y);
-            cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_NEAREST);
-            cairo_paint(cr);
-        } else {
-            // Slow fallback: scale from source on every frame.
-            cairo_surface_t* srcSurf = cairo_image_surface_create_for_data(
-                const_cast<uint8_t*>(pixels.data()),
-                CAIRO_FORMAT_ARGB32,
-                imageWidth, imageHeight, imageWidth * 4);
-
-            if (cairo_surface_status(srcSurf) == CAIRO_STATUS_SUCCESS) {
-                cairo_translate(cr, d.x, d.y);
-                cairo_scale(cr,
-                    (double)d.w / imageWidth,
-                    (double)d.h / imageHeight);
-                cairo_set_source_surface(cr, srcSurf, 0.0, 0.0);
-                cairo_pattern_set_filter(cairo_get_source(cr),
-                    CAIRO_FILTER_BILINEAR);
-                cairo_paint(cr);
-            }
-            cairo_surface_destroy(srcSurf);
-        }
-
-        cairo_restore(cr);
+    if (borderRadius > 0) {
+      _cairoRoundedRectPath(cr, x, y, width, height, borderRadius);
+      cairo_clip(cr);
+    } else {
+      cairo_rectangle(cr, cx, cy, cw, ch);
+      cairo_clip(cr);
     }
 
-    static void _cairoRoundedRectPath(cairo_t* cr,
-                                      double rx, double ry,
-                                      double rw, double rh,
-                                      double radius) {
-        double r = radius;
-        if (r > rw * 0.5) r = rw * 0.5;
-        if (r > rh * 0.5) r = rh * 0.5;
-        cairo_new_path(cr);
-        cairo_arc(cr, rx+rw-r, ry    +r, r, -M_PI*0.5,  0.0     );
-        cairo_arc(cr, rx+rw-r, ry+rh-r, r,  0.0,        M_PI*0.5);
-        cairo_arc(cr, rx    +r, ry+rh-r, r,  M_PI*0.5,  M_PI    );
-        cairo_arc(cr, rx    +r, ry    +r, r,  M_PI,     -M_PI*0.5);
-        cairo_close_path(cr);
+    if (_scaledSurface) {
+      if (repeat != ImageRepeat::NoRepeat) {
+        _renderCairoRepeat(cr, d, cx, cy, cw, ch);
+      } else {
+        cairo_set_source_surface(cr, _scaledSurface, d.x, d.y);
+        cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_NEAREST);
+        cairo_paint(cr);
+      }
+    } else {
+      // Slow fallback (no pre-scaled cache)
+      cairo_surface_t *src = cairo_image_surface_create_for_data(
+          const_cast<uint8_t *>(pixels.data()), CAIRO_FORMAT_ARGB32, imageWidth,
+          imageHeight, imageWidth * 4);
+      if (cairo_surface_status(src) == CAIRO_STATUS_SUCCESS) {
+        cairo_translate(cr, d.x, d.y);
+        cairo_scale(cr, d.w / imageWidth, d.h / imageHeight);
+        cairo_set_source_surface(cr, src, 0.0, 0.0);
+        cairo_pattern_set_filter(cairo_get_source(cr), _cairoFilter());
+        cairo_paint(cr);
+      }
+      cairo_surface_destroy(src);
     }
+
+    cairo_restore(cr);
+  }
+
+  void _renderCairoRepeat(cairo_t *cr, const DestRect &d, int cx, int cy,
+                          int cw, int ch) const {
+    float tileW = d.w, tileH = d.h;
+    float startX = (repeat == ImageRepeat::RepeatY) ? d.x : (float)cx;
+    float startY = (repeat == ImageRepeat::RepeatX) ? d.y : (float)cy;
+    float endX =
+        (repeat == ImageRepeat::RepeatY) ? d.x + tileW : (float)(cx + cw);
+    float endY =
+        (repeat == ImageRepeat::RepeatX) ? d.y + tileH : (float)(cy + ch);
+
+    for (float ty = startY; ty < endY; ty += tileH) {
+      for (float tx = startX; tx < endX; tx += tileW) {
+        cairo_set_source_surface(cr, _scaledSurface, tx, ty);
+        cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_NEAREST);
+        cairo_rectangle(cr, tx, ty, tileW, tileH);
+        cairo_fill(cr);
+      }
+    }
+  }
+
+  static void _cairoRoundedRectPath(cairo_t *cr, double rx, double ry,
+                                    double rw, double rh, double radius) {
+    double r = radius;
+    if (r > rw * 0.5)
+      r = rw * 0.5;
+    if (r > rh * 0.5)
+      r = rh * 0.5;
+    cairo_new_path(cr);
+    cairo_arc(cr, rx + rw - r, ry + r, r, -M_PI * 0.5, 0.0);
+    cairo_arc(cr, rx + rw - r, ry + rh - r, r, 0.0, M_PI * 0.5);
+    cairo_arc(cr, rx + r, ry + rh - r, r, M_PI * 0.5, M_PI);
+    cairo_arc(cr, rx + r, ry + r, r, M_PI, -M_PI * 0.5);
+    cairo_close_path(cr);
+  }
 #endif
 
-    // =========================================================================
-    // Android — NanoVG
-    // =========================================================================
+  // =========================================================================
+  // NanoVG rendering (Android)
+  // =========================================================================
 #ifdef __ANDROID__
+  void _renderNanoVG(int cx, int cy, int cw, int ch) {
+    NVGcontext *vg = FluxAndroid_getVG();
+    if (!vg)
+      return;
 
-    void _renderNanoVG(int cx, int cy, int cw, int ch) {
-        NVGcontext* vg = FluxAndroid_getVG();
-        if (!vg) return;
+    // Promote pending pixels → GPU texture (must run on GL thread)
+    if (pending.ready()) {
+      _deleteNvgTexture();
+      uploadBuffer = std::move(pending.rgba);
+      uploadW = pending.w;
+      uploadH = pending.h;
+      pending.rgba.clear();
+      pending.w = pending.h = 0;
 
-        if (pending.ready()) {
-            _deleteNvgTexture();
-
-            uploadBuffer = std::move(pending.rgba);
-            uploadW      = pending.w;
-            uploadH      = pending.h;
-            pending.rgba.clear();
-            pending.w = pending.h = 0;
-
-            LOGI_IMG("Uploading RGBA texture %dx%d (%zu bytes)",
-                     uploadW, uploadH, uploadBuffer.size());
-
-            nvgImage = nvgCreateImageRGBA(vg, uploadW, uploadH,
-                                          NVG_IMAGE_PREMULTIPLIED,
-                                          uploadBuffer.data());
-            if (nvgImage == -1) {
-                LOGW_IMG("nvgCreateImageRGBA FAILED");
-                _setLoadState(ImageLoadState::Error);
-                return;
-            }
-
-            nvgImageSize(vg, nvgImage, &imageWidth, &imageHeight);
-            if (imageWidth == 0 || imageHeight == 0) {
-                LOGW_IMG("nvgImageSize returned zero — treating as error");
-                _deleteNvgTexture();
-                _setLoadState(ImageLoadState::Error);
-                return;
-            }
-
-            LOGI_IMG("Texture ready: %dx%d handle=%d", imageWidth, imageHeight, nvgImage);
-            _setLoadState(ImageLoadState::Loaded);
-            markNeedsLayout();
-        }
-
-        if (nvgImage == -1) return;
-
-        DestRect d = _calculateDestRect(cx, cy, cw, ch);
-
-        NVGpaint paint = nvgImagePattern(vg, d.x, d.y, d.w, d.h,
-                                         0.0f, nvgImage, 1.0f);
-        nvgSave(vg);
-        nvgBeginPath(vg);
-        if (borderRadius > 0) {
-            nvgRoundedRect(vg, d.x, d.y, d.w, d.h, (float)borderRadius);
-        } else {
-            nvgRect(vg, d.x, d.y, d.w, d.h);
-        }
-        nvgFillPaint(vg, paint);
-        nvgFill(vg);
-        nvgRestore(vg);
-    }
-
-    void _deleteNvgTexture() {
-        if (nvgImage != -1) {
-            NVGcontext* vg = FluxAndroid_getVG();
-            if (vg) nvgDeleteImage(vg, nvgImage);
-            nvgImage = -1;
-        }
-    }
-
-    void _freeNvgImage() {
+      nvgImage = nvgCreateImageRGBA(
+          vg, uploadW, uploadH, NVG_IMAGE_PREMULTIPLIED, uploadBuffer.data());
+      if (nvgImage == -1) {
+        LOGW_IMG("nvgCreateImageRGBA FAILED");
+        _setLoadState(ImageLoadState::Error);
+        return;
+      }
+      nvgImageSize(vg, nvgImage, &imageWidth, &imageHeight);
+      if (imageWidth == 0 || imageHeight == 0) {
         _deleteNvgTexture();
-        pending.rgba.clear();
-        pending.w = pending.h = 0;
-        uploadBuffer.clear();
-        uploadW = uploadH = 0;
+        _setLoadState(ImageLoadState::Error);
+        return;
+      }
+      _setLoadState(ImageLoadState::Loaded);
+      markNeedsLayout();
     }
 
-#endif  // __ANDROID__
+    if (nvgImage == -1)
+      return;
+
+    DestRect d = _calculateDestRect(cx, cy, cw, ch);
+
+    nvgSave(vg);
+    nvgBeginPath(vg);
+    if (borderRadius > 0)
+      nvgRoundedRect(vg, (float)cx, (float)cy, (float)cw, (float)ch,
+                     (float)borderRadius);
+    else
+      nvgRect(vg, (float)cx, (float)cy, (float)cw, (float)ch);
+    nvgClip(vg); // requires NanoVG fork with clip support, else skip
+
+    if (repeat != ImageRepeat::NoRepeat) {
+      _renderNanoVGRepeat(vg, d, cx, cy, cw, ch);
+    } else {
+      NVGpaint paint =
+          nvgImagePattern(vg, d.x, d.y, d.w, d.h, 0.0f, nvgImage, 1.0f);
+      nvgBeginPath(vg);
+      nvgRect(vg, d.x, d.y, d.w, d.h);
+      nvgFillPaint(vg, paint);
+      nvgFill(vg);
+    }
+
+    nvgRestore(vg);
+  }
+
+  void _renderNanoVGRepeat(NVGcontext *vg, const DestRect &d, int cx, int cy,
+                           int cw, int ch) {
+    float tileW = d.w, tileH = d.h;
+    float startX = (repeat == ImageRepeat::RepeatY) ? d.x : (float)cx;
+    float startY = (repeat == ImageRepeat::RepeatX) ? d.y : (float)cy;
+    float endX =
+        (repeat == ImageRepeat::RepeatY) ? d.x + tileW : (float)(cx + cw);
+    float endY =
+        (repeat == ImageRepeat::RepeatX) ? d.y + tileH : (float)(cy + ch);
+
+    for (float ty = startY; ty < endY; ty += tileH) {
+      for (float tx = startX; tx < endX; tx += tileW) {
+        NVGpaint p =
+            nvgImagePattern(vg, tx, ty, tileW, tileH, 0.0f, nvgImage, 1.0f);
+        nvgBeginPath(vg);
+        nvgRect(vg, tx, ty, tileW, tileH);
+        nvgFillPaint(vg, p);
+        nvgFill(vg);
+      }
+    }
+  }
+
+  void _deleteNvgTexture() {
+    if (nvgImage != -1) {
+      NVGcontext *vg = FluxAndroid_getVG();
+      if (vg)
+        nvgDeleteImage(vg, nvgImage);
+      nvgImage = -1;
+    }
+  }
+
+  void _freeNvgImage() {
+    _deleteNvgTexture();
+    pending.rgba.clear();
+    pending.w = pending.h = 0;
+    uploadBuffer.clear();
+    uploadW = uploadH = 0;
+  }
+#endif // __ANDROID__
 };
 
 // ============================================================================
@@ -878,18 +1319,26 @@ private:
 
 using ImageWidgetPtr = std::shared_ptr<ImageWidget>;
 
-inline ImageWidgetPtr Image(const std::string& path) {
-    return std::make_shared<ImageWidget>(path);
-}
-inline ImageWidgetPtr Image() {
-    return std::make_shared<ImageWidget>();
+// Named constructors
+// Image::asset("path/to/file.png")
+// Image::network("https://...")
+// Image::memory(bytes)
+// — these are static methods on ImageWidget above —
+
+
+inline ImageWidgetPtr AssetImage(const std::string &path) {
+  return ImageWidget::asset(path);
 }
 
-inline ImageWidgetPtr NetworkImage(const std::string& url,
+inline ImageWidgetPtr Image() { return std::make_shared<ImageWidget>(); }
+
+inline ImageWidgetPtr NetworkImage(const std::string &url,
                                    bool postToUI = true) {
-    auto w = std::make_shared<ImageWidget>();
-    w->loadFromUrl(url, postToUI);
-    return w;
+  return ImageWidget::network(url, postToUI);
+}
+
+inline ImageWidgetPtr MemoryImage(const std::vector<uint8_t> &bytes) {
+  return ImageWidget::memory(bytes);
 }
 
 #endif // FLUX_IMAGE_HPP

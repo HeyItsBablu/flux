@@ -7,383 +7,318 @@
 #include <map>
 
 // ============================================================================
-// SWITCH-CASE WIDGET - C++ STYLE
+// SWITCH-CASE WIDGET
+// ============================================================================
+//
+// Renders the child matching the current state value.
+// The active branch is always rebuilt on every state change — so data-driven
+// builders (e.g. a MemoryImage fed by the same state) always reflect the
+// latest value, even if the matched case key is unchanged.
+//
+// Usage:
+//   State<int> page(0, &app);
+//
+//   Switch(page)
+//       ->Case(0, []() { return Text("Home"); })
+//       ->Case(1, []() { return Text("Profile"); })
+//       ->Case(2, []() { return Text("Settings"); })
+//       ->Default([]() { return Text("Unknown Page"); })
+//
 // ============================================================================
 
-/**
- * SwitchWidget: C++-style switch-case conditional rendering
- *
- * Usage:
- *   State<int> page(0, &app);
- *
- *   Switch(page)
- *       ->Case(0, []() { return Text("Home"); })
- *       ->Case(1, []() { return Text("Profile"); })
- *       ->Case(2, []() { return Text("Settings"); })
- *       ->Default([]() { return Text("Unknown Page"); })
- */
-template <typename T> class SwitchWidget : public Widget {
+template <typename T>
+class SwitchWidget : public Widget {
 private:
-  State<T> *boundState = nullptr;
-  std::map<T, std::function<WidgetPtr()>> cases;
-  std::function<WidgetPtr()> defaultCase;
-  WidgetPtr currentChild = nullptr;
-  T lastValue;
-  std::shared_ptr<SwitchWidget<T>> self; // Store self reference
+    State<T>* boundState = nullptr;
 
-  void rebuildChild() {
-    if (!boundState)
-      return;
+    std::map<T, std::function<WidgetPtr()>> cases;
+    std::function<WidgetPtr()>              defaultCase;
 
-    T currentValue = boundState->get();
+    WidgetPtr currentChild = nullptr;
 
-    // Only rebuild if value changed
-    if (currentChild && currentValue == lastValue)
-      return;
+    // ── Change tracking ───────────────────────────────────────────────────
+    // lastKey tracks which case branch is active.
+    // forceRebuild is set by the state listener so that even when the key
+    // does not change (same branch, different data) the child is rebuilt.
+    T    lastKey;
+    bool forceRebuild = true;   // true on first layout pass
 
-    lastValue = currentValue;
+    std::shared_ptr<SwitchWidget<T>> self;
 
-    // Clear old child
-    children.clear();
-    currentChild = nullptr;
+    // ── rebuildChild ──────────────────────────────────────────────────────
+    // Always called from the UI thread (computeLayout or state listener).
+    void rebuildChild() {
+        if (!boundState) return;
 
-    // Find matching case
-    auto it = cases.find(currentValue);
-    if (it != cases.end() && it->second) {
-      currentChild = it->second();
-    } else if (defaultCase) {
-      currentChild = defaultCase();
+        T currentKey = boundState->get();
+        bool keyChanged = !(currentKey == lastKey);
+
+        // Rebuild if:
+        //   • this is the first build (forceRebuild)
+        //   • the active branch switched (keyChanged)
+        //   • the state value changed even though the branch is the same
+        //     (forceRebuild set by the listener, covers the MemoryImage case)
+        if (!forceRebuild && !keyChanged && currentChild)
+            return;
+
+        lastKey      = currentKey;
+        forceRebuild = false;
+
+        children.clear();
+        currentChild = nullptr;
+
+        auto it = cases.find(currentKey);
+        if (it != cases.end() && it->second)
+            currentChild = it->second();
+        else if (defaultCase)
+            currentChild = defaultCase();
+
+        if (currentChild)
+            addChild(currentChild);
+
+        markNeedsLayout();
     }
-
-    if (currentChild) {
-      addChild(currentChild);
-    }
-
-    markNeedsLayout();
-  }
 
 public:
-  SwitchWidget(State<T> &state) : boundState(&state) {
-    lastValue = state.get();
+    explicit SwitchWidget(State<T>& state) : boundState(&state) {
+        lastKey = state.get();
 
-    // Listen for state changes
-    state.listen([this](T newValue) {
-      rebuildChild();
+        // Listen: set forceRebuild so the active branch is always re-run,
+        // then ask the framework to re-layout this subtree.
+        state.listen([this](const T&) {
+            forceRebuild = true;
+            rebuildChild();
 
-      if (boundState && boundState->hasContext()) {
-        auto *ui = boundState->getContext();
-        if (ui) {
-          ui->partialRebuild(this);
+            if (boundState && boundState->hasContext())
+                if (auto* ui = boundState->getContext())
+                    ui->partialRebuild(this);
+        });
+    }
+
+    void setSelf(std::shared_ptr<SwitchWidget<T>> ptr) { self = ptr; }
+
+    std::shared_ptr<SwitchWidget<T>> Case(T value,
+                                          std::function<WidgetPtr()> builder) {
+        cases[value] = std::move(builder);
+        return self;
+    }
+
+    std::shared_ptr<SwitchWidget<T>> Default(std::function<WidgetPtr()> builder) {
+        defaultCase = std::move(builder);
+        return self;
+    }
+
+    // ── Layout ────────────────────────────────────────────────────────────
+    void computeLayout(GraphicsContext& ctx, const BoxConstraints& constraints,
+                       FontCache& fontCache) override {
+        rebuildChild();
+
+        BoxConstraints self = selfConstraints(constraints);
+
+        if (!children.empty()) {
+            int maxW = autoWidth  ? self.maxWidth  : width;
+            int maxH = autoHeight ? self.maxHeight : height;
+
+            BoxConstraints childC =
+                BoxConstraints(0, maxW, 0, maxH)
+                    .deflate(paddingLeft + paddingRight,
+                             paddingTop  + paddingBottom);
+
+            children[0]->computeLayout(ctx, childC, fontCache);
+
+            if (autoWidth)
+                width  = self.clampWidth(children[0]->width  + paddingLeft + paddingRight);
+            if (autoHeight)
+                height = self.clampHeight(children[0]->height + paddingTop  + paddingBottom);
+        } else {
+            width  = autoWidth  ? self.clampWidth(0)  : self.clampWidth(width);
+            height = autoHeight ? self.clampHeight(0) : self.clampHeight(height);
         }
-      }
-    });
-  }
 
-  // Store the shared_ptr to self for chaining
-  void setSelf(std::shared_ptr<SwitchWidget<T>> ptr) { self = ptr; }
-
-  /**
-   * Add a case
-   *
-   * @example
-   * Switch(state)
-   *   ->Case(0, []() { return Text("Zero"); })
-   *   ->Case(1, []() { return Text("One"); })
-   */
-  std::shared_ptr<SwitchWidget<T>> Case(T value,
-                                        std::function<WidgetPtr()> builder) {
-    cases[value] = builder;
-    return self;
-  }
-
-  /**
-   * Add default case (like default: in C++)
-   *
-   * @example
-   * Switch(state)
-   *   ->Case(0, builder0)
-   *   ->Default([]() { return Text("Unknown"); })
-   */
-  std::shared_ptr<SwitchWidget<T>> Default(std::function<WidgetPtr()> builder) {
-    defaultCase = builder;
-    return self;
-  }
-
-  void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
-                     FontCache &fontCache) override {
-    rebuildChild();
-
-
-    BoxConstraints self = selfConstraints(constraints);
-
-    if (!children.empty()) {
-
-      int maxW = autoWidth ? self.maxWidth : width;
-      int maxH = autoHeight ? self.maxHeight : height;
-
-      BoxConstraints childConstraints =
-          BoxConstraints(0, maxW, 0, maxH)
-              .deflate(paddingLeft + paddingRight, paddingTop + paddingBottom);
-
-
-      children[0]->computeLayout(ctx, childConstraints, fontCache);
-
-
-      if (autoWidth) {
-        width =
-            self.clampWidth(children[0]->width + paddingLeft + paddingRight);
-      }
-      if (autoHeight) {
-        height =
-            self.clampHeight(children[0]->height + paddingTop + paddingBottom);
-      }
-    } else {
-
-      width = autoWidth ? self.clampWidth(0) : self.clampWidth(width);
-      height = autoHeight ? self.clampHeight(0) : self.clampHeight(height);
+        needsLayout = false;
     }
 
-    needsLayout = false;
-  }
-
-  void positionChildren(int contentX, int contentY, int contentWidth,
-                        int contentHeight) override {
-    if (!children.empty()) {
-      auto &child = children[0];
-      child->x = contentX;
-      child->y = contentY;
-
-      child->positionChildren(
-          child->x + child->paddingLeft, child->y + child->paddingTop,
-          child->width - child->paddingLeft - child->paddingRight,
-          child->height - child->paddingTop - child->paddingBottom);
+    void positionChildren(int contentX, int contentY,
+                          int /*contentWidth*/, int /*contentHeight*/) override {
+        if (!children.empty()) {
+            auto& child = children[0];
+            child->x = contentX;
+            child->y = contentY;
+            child->positionChildren(
+                child->x + child->paddingLeft,
+                child->y + child->paddingTop,
+                child->width  - child->paddingLeft - child->paddingRight,
+                child->height - child->paddingTop  - child->paddingBottom);
+        }
     }
-  }
 };
 
 // ============================================================================
-// CONDITIONAL WIDGET - TERNARY STYLE
+// CONDITIONAL WIDGET  (ternary style)
+// ============================================================================
+//
+// Evaluates a predicate against a State<T> and renders the Then or Else branch.
+// The active branch is always rebuilt on every state change — so builders that
+// read the same (or any other) state always produce fresh widgets.
+//
+// Usage:
+//   State<bool> isLoggedIn(false, &app);
+//
+//   Conditional(isLoggedIn)
+//       ->Then([]() { return Text("Welcome back!"); })
+//       ->Else([]() { return Text("Please log in."); })
+//
+//   // With a custom predicate:
+//   State<std::vector<uint8_t>> bytes({}, &app);
+//
+//   Conditional(bytes, [](const auto& v) { return !v.empty(); })
+//       ->Then([&]() { return MemoryImage(bytes.get())->setFit(...); })
+//       ->Else([]()  { return Placeholder(); })
+//
 // ============================================================================
 
-/**
- * ConditionalWidget: Ternary-style conditional rendering
- *
- * Usage:
- *   State<bool> isLoggedIn(false, &app);
- *
- *   Conditional(isLoggedIn)
- *       ->Then([]() { return Text("Welcome back!"); })
- *       ->Else([]() { return Text("Please log in."); })
- *
- * Also works with any State<T> and a custom predicate:
- *
- *   State<int> count(0, &app);
- *
- *   Conditional(count, [](int v) { return v > 0; })
- *       ->Then([]() { return Text("Has items"); })
- *       ->Else([]() { return Text("Empty"); })
- */
-template <typename T> class ConditionalWidget : public Widget {
+template <typename T>
+class ConditionalWidget : public Widget {
 private:
-  State<T> *boundState = nullptr;
-  std::function<bool(T)> predicate;
-  std::function<WidgetPtr()> thenBuilder;
-  std::function<WidgetPtr()> elseBuilder;
-  WidgetPtr currentChild = nullptr;
-  bool lastCondition;
-  std::shared_ptr<ConditionalWidget<T>> self;
+    State<T>*               boundState = nullptr;
+    std::function<bool(const T&)> predicate;
 
-  void rebuildChild() {
-    if (!boundState)
-      return;
+    std::function<WidgetPtr()> thenBuilder;
+    std::function<WidgetPtr()> elseBuilder;
 
-    bool condition = predicate(boundState->get());
+    WidgetPtr currentChild = nullptr;
 
-    // Only rebuild if condition changed
-    if (currentChild && condition == lastCondition)
-      return;
+    // ── Change tracking ───────────────────────────────────────────────────
+    bool lastCondition = false;
+    bool forceRebuild  = true;  // true on first layout pass
 
-    lastCondition = condition;
+    std::shared_ptr<ConditionalWidget<T>> self;
 
-    // Clear old child
-    children.clear();
-    currentChild = nullptr;
+    // ── rebuildChild ──────────────────────────────────────────────────────
+    void rebuildChild() {
+        if (!boundState) return;
 
-    // Pick the appropriate branch
-    auto &builder = condition ? thenBuilder : elseBuilder;
-    if (builder) {
-      currentChild = builder();
+        bool condition    = predicate(boundState->get());
+        bool branchChanged = (condition != lastCondition);
+
+        // Rebuild if:
+        //   • first build
+        //   • active branch switched (Then ↔ Else)
+        //   • forceRebuild set by listener (same branch, new data)
+        if (!forceRebuild && !branchChanged && currentChild)
+            return;
+
+        lastCondition = condition;
+        forceRebuild  = false;
+
+        children.clear();
+        currentChild = nullptr;
+
+        auto& builder = condition ? thenBuilder : elseBuilder;
+        if (builder)
+            currentChild = builder();
+
+        if (currentChild)
+            addChild(currentChild);
+
+        markNeedsLayout();
     }
-
-    if (currentChild) {
-      addChild(currentChild);
-    }
-
-    markNeedsLayout();
-  }
 
 public:
-  ConditionalWidget(State<T> &state, std::function<bool(T)> pred)
-      : boundState(&state), predicate(pred) {
-    lastCondition = predicate(state.get());
+    ConditionalWidget(State<T>& state, std::function<bool(const T&)> pred)
+        : boundState(&state), predicate(std::move(pred)) {
+        lastCondition = predicate(state.get());
 
-    state.listen([this](T /*newValue*/) {
-      rebuildChild();
+        // Listen: always force a rebuild of the active branch.
+        state.listen([this](const T&) {
+            forceRebuild = true;
+            rebuildChild();
 
-      if (boundState && boundState->hasContext()) {
-        auto *ui = boundState->getContext();
-        if (ui) {
-          ui->partialRebuild(this);
+            if (boundState && boundState->hasContext())
+                if (auto* ui = boundState->getContext())
+                    ui->partialRebuild(this);
+        });
+    }
+
+    void setSelf(std::shared_ptr<ConditionalWidget<T>> ptr) { self = ptr; }
+
+    std::shared_ptr<ConditionalWidget<T>> Then(std::function<WidgetPtr()> builder) {
+        thenBuilder = std::move(builder);
+        return self;
+    }
+
+    std::shared_ptr<ConditionalWidget<T>> Else(std::function<WidgetPtr()> builder) {
+        elseBuilder = std::move(builder);
+        return self;
+    }
+
+    // ── Layout ────────────────────────────────────────────────────────────
+    void computeLayout(GraphicsContext& ctx, const BoxConstraints& constraints,
+                       FontCache& fontCache) override {
+        rebuildChild();
+
+        if (!children.empty()) {
+            children[0]->computeLayout(
+                ctx,
+                constraints.deflate(paddingLeft + paddingRight,
+                                    paddingTop  + paddingBottom),
+                fontCache);
+
+            if (autoWidth)
+                width  = children[0]->width  + paddingLeft + paddingRight;
+            if (autoHeight)
+                height = children[0]->height + paddingTop  + paddingBottom;
         }
-      }
-    });
-  }
 
-  void setSelf(std::shared_ptr<ConditionalWidget<T>> ptr) { self = ptr; }
-
-  /**
-   * Builder to render when the condition is true
-   *
-   * @example
-   * Conditional(isLoggedIn)
-   *   ->Then([]() { return Dashboard(); })
-   */
-  std::shared_ptr<ConditionalWidget<T>>
-  Then(std::function<WidgetPtr()> builder) {
-    thenBuilder = builder;
-    return self;
-  }
-
-  /**
-   * Builder to render when the condition is false
-   *
-   * @example
-   * Conditional(isLoggedIn)
-   *   ->Then([]() { return Dashboard(); })
-   *   ->Else([]() { return LoginPage(); })
-   */
-  std::shared_ptr<ConditionalWidget<T>>
-  Else(std::function<WidgetPtr()> builder) {
-    elseBuilder = builder;
-    return self;
-  }
-
-  void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
-                     FontCache &fontCache) override {
-    rebuildChild();
-
-    if (!children.empty()) {
-      children[0]->computeLayout(
-          ctx,
-          constraints.deflate(paddingLeft + paddingRight,
-                              paddingTop + paddingBottom),
-          fontCache);
-
-      if (autoWidth)
-        width = children[0]->width + paddingLeft + paddingRight;
-      if (autoHeight)
-        height = children[0]->height + paddingTop + paddingBottom;
+        applyConstraints();
+        needsLayout = false;
     }
 
-    applyConstraints();
-    needsLayout = false;
-  }
-
-  void positionChildren(int contentX, int contentY, int /*contentWidth*/,
-                        int /*contentHeight*/) override {
-    if (!children.empty()) {
-      auto &child = children[0];
-      child->x = contentX;
-      child->y = contentY;
-
-      child->positionChildren(
-          child->x + child->paddingLeft, child->y + child->paddingTop,
-          child->width - child->paddingLeft - child->paddingRight,
-          child->height - child->paddingTop - child->paddingBottom);
+    void positionChildren(int contentX, int contentY,
+                          int /*contentWidth*/, int /*contentHeight*/) override {
+        if (!children.empty()) {
+            auto& child = children[0];
+            child->x = contentX;
+            child->y = contentY;
+            child->positionChildren(
+                child->x + child->paddingLeft,
+                child->y + child->paddingTop,
+                child->width  - child->paddingLeft - child->paddingRight,
+                child->height - child->paddingTop  - child->paddingBottom);
+        }
     }
-  }
 };
 
 // ============================================================================
 // FACTORY FUNCTIONS
 // ============================================================================
 
-/**
- * Create a conditional widget from a bool state (no predicate needed)
- *
- * @param state State<bool> to evaluate directly
- * @return std::shared_ptr<ConditionalWidget<bool>> Chainable widget pointer
- *
- * @example
- * State<bool> isVisible(true, &app);
- *
- * Conditional(isVisible)
- *   ->Then([]() { return Text("Visible!"); })
- *   ->Else([]() { return Text("Hidden!"); })
- */
+// Bool state — no predicate needed
 inline std::shared_ptr<ConditionalWidget<bool>>
-Conditional(State<bool> &state) {
-  auto widget = std::make_shared<ConditionalWidget<bool>>(
-      state, [](bool v) { return v; });
-  widget->setSelf(widget);
-  return widget;
+Conditional(State<bool>& state) {
+    auto w = std::make_shared<ConditionalWidget<bool>>(
+        state, [](const bool& v) { return v; });
+    w->setSelf(w);
+    return w;
 }
 
-/**
- * Create a conditional widget from any State<T> with a custom predicate
- *
- * @param state State to observe
- * @param predicate Function mapping T -> bool
- * @return std::shared_ptr<ConditionalWidget<T>> Chainable widget pointer
- *
- * @example
- * State<int> itemCount(0, &app);
- *
- * Conditional(itemCount, [](int v) { return v > 0; })
- *   ->Then([]() { return ItemList(); })
- *   ->Else([]() { return EmptyState(); })
- */
-inline std::shared_ptr<ConditionalWidget<std::string>>
-Conditional(State<std::string> &state,
-            std::function<bool(const std::string &)> predicate) {
-  auto widget =
-      std::make_shared<ConditionalWidget<std::string>>(state, predicate);
-  widget->setSelf(widget);
-  return widget;
-}
-
+// Any State<T> with a custom predicate (const T& overload — preferred)
 template <typename T, typename Pred>
-inline std::shared_ptr<ConditionalWidget<T>> Conditional(State<T> &state,
-                                                         Pred predicate) {
-  auto widget = std::make_shared<ConditionalWidget<T>>(
-      state, std::function<bool(T)>(predicate));
-  widget->setSelf(widget);
-  return widget;
+inline std::shared_ptr<ConditionalWidget<T>>
+Conditional(State<T>& state, Pred predicate) {
+    auto w = std::make_shared<ConditionalWidget<T>>(
+        state, std::function<bool(const T&)>(predicate));
+    w->setSelf(w);
+    return w;
 }
-// ============================================================================
-// FACTORY FUNCTION
-// ============================================================================
 
-/**
- * Create a switch-case widget (C++ style)
- *
- * @param state State to switch on
- * @return std::shared_ptr<SwitchWidget<T>> Chainable widget pointer
- *
- * @example
- * State<int> tabIndex(0, &app);
- *
- * Switch(tabIndex)
- *   ->Case(0, []() { return HomePage(); })
- *   ->Case(1, []() { return ProfilePage(); })
- *   ->Case(2, []() { return SettingsPage(); })
- *   ->Default([]() { return ErrorPage(); })
- */
+// Switch factory
 template <typename T>
-inline std::shared_ptr<SwitchWidget<T>> Switch(State<T> &state) {
-  auto widget = std::make_shared<SwitchWidget<T>>(state);
-  widget->setSelf(widget); // Store self reference for chaining
-  return widget;
+inline std::shared_ptr<SwitchWidget<T>>
+Switch(State<T>& state) {
+    auto w = std::make_shared<SwitchWidget<T>>(state);
+    w->setSelf(w);
+    return w;
 }
 
-#endif // FLUX_SWITCH_HPP
+#endif // FLUX_CONDITIONAL_HPP
