@@ -51,14 +51,18 @@ public:
                 Conditional(imageBytes,
                             [](std::vector<uint8_t> v) { return v.empty(); })
                     ->Then([]() {
-                      return Container()
+                      return Container(Text("Select Image")
+                                           ->setTextAlign(TextAlign::Center)
+                                           ->setTextAlignVertical(
+                                               TextAlignVertical::Center))
                           ->setWidth(400)
                           ->setHeight(300)
-                          ->setBackgroundColor(Color::fromRGB(240, 240, 240));
+                          ->setBackgroundColor(Color::fromRGB(200, 200, 200))
+                          ->setBorderRadius(8);
                     })
                     ->Else([this]() {
                       return MemoryImage(imageBytes.get())
-                          ->setFit(ImageFit::Contain)
+                          ->setFit(ImageFit::Cover)
                           ->setWidth(400)
                           ->setHeight(300)
                           ->setBorderRadius(8);
