@@ -7,11 +7,23 @@
 //   AudioPlayer("audio/sample.mp3")
 //       ->setWidth(380)
 //
+//   AudioPlayer()
+//       ->setUrl("https://example.com/audio.mp3")
+//       ->setArtwork(ImageWidget::network("https://example.com/cover.jpg"))
+//       ->setWidth(380)
+//
+//   AudioPlayer()
+//       ->setMemory(bytes)               // play from std::vector<uint8_t>
+//       ->setMemory(ptr, len)            // play from raw pointer + length
+//       ->setWidth(380)
+//
 #pragma once
 
 #include "flux/flux.hpp"
 #include "flux/flux_audio.hpp"
+#include "../flux_http.hpp"
 #include "flux_icons.hpp"
+#include "flux_image.hpp"
 
 // ============================================================================
 // Helpers
@@ -25,6 +37,12 @@ static std::string AP_formatTime(float secs) {
   snprintf(buf, sizeof(buf), "%d:%02d", s / 60, s % 60);
   return buf;
 }
+
+// ============================================================================
+// AudioSource — describes where audio comes from
+// ============================================================================
+
+enum class AudioSourceType { None, Path, Url, Memory };
 
 // ============================================================================
 // AudioPlayerWidget
@@ -42,6 +60,8 @@ public:
   Color colIconNormal = Color::fromRGB(60,  60,  60);
   Color colIconHover  = Color::fromRGB(20,  20,  20);
   Color colBorder     = Color::fromRGB(210, 210, 210);
+  Color colLoadingText= Color::fromRGB(140, 140, 140);
+  Color colErrorText  = Color::fromRGB(180, 60,  60);
 
   // ── Config ────────────────────────────────────────────────────────────────
   std::string audioPath;
@@ -54,15 +74,82 @@ public:
   int timeFontSize  = 12;
   int volSliderW    = 0;  // 0 = hidden; set >0 to show inline volume
 
+  // ── Artwork ───────────────────────────────────────────────────────────────
+  // When set, a square thumbnail is drawn on the left side of the player.
+  // The widget expands its height to accommodate the art (playerArtSize).
+  int artworkSize   = 0;   // 0 = no artwork; set via setArtwork() / setArtworkSize()
+
   // ── Public fluent setters ─────────────────────────────────────────────────
+
+  /// Play a local file path (same as passing path to AudioPlayer())
   std::shared_ptr<AudioPlayerWidget> setPath(const std::string &p) {
-    audioPath = p;
+    audioPath   = p;
+    _sourceType = AudioSourceType::Path;
+    _sourceUrl.clear();
+    _sourceMemory.clear();
+    return self();
+  }
+
+  /// Stream audio from an HTTP/HTTPS URL.
+  /// The bytes are downloaded on a background thread, then handed to FluxAudio.
+  std::shared_ptr<AudioPlayerWidget> setUrl(const std::string &url) {
+    _sourceUrl  = url;
+    _sourceType = AudioSourceType::Url;
+    audioPath.clear();
+    _sourceMemory.clear();
+    return self();
+  }
+
+  /// Play audio from an in-memory byte buffer (copy overload).
+  std::shared_ptr<AudioPlayerWidget>
+  setMemory(const std::vector<uint8_t> &bytes) {
+    _sourceMemory = bytes;
+    _sourceType   = AudioSourceType::Memory;
+    audioPath.clear();
+    _sourceUrl.clear();
+    return self();
+  }
+
+  /// Play audio from a raw pointer + length (copies into internal buffer).
+  std::shared_ptr<AudioPlayerWidget> setMemory(const uint8_t *data,
+                                               size_t len) {
+    _sourceMemory.assign(data, data + len);
+    _sourceType = AudioSourceType::Memory;
+    audioPath.clear();
+    _sourceUrl.clear();
     return self();
   }
 
   std::shared_ptr<AudioPlayerWidget> setWidth(int w) {
     _requestedWidth = w;
     autoWidth = false;
+    markNeedsLayout();
+    return self();
+  }
+
+  /// Attach an artwork image widget.
+  /// Pass any ImageWidgetPtr (asset, network, memory).
+  /// setArtworkSize() controls the rendered square size (default 40px = full
+  /// player height; call after setArtworkSize() for larger art).
+  std::shared_ptr<AudioPlayerWidget>
+  setArtwork(ImageWidgetPtr img, int size = 0) {
+    _artWidget = std::move(img);
+    if (size > 0)
+      artworkSize = size;
+    else if (artworkSize == 0)
+      artworkSize = playerHeight; // square thumbnail flush with player height
+    _artWidget->setWidth(artworkSize)->setHeight(artworkSize);
+    _artWidget->setFit(ImageFit::Cover);
+    markNeedsLayout();
+    return self();
+  }
+
+  /// Resize the artwork column (can be called before or after setArtwork).
+  std::shared_ptr<AudioPlayerWidget> setArtworkSize(int px) {
+    artworkSize = px;
+    if (_artWidget) {
+      _artWidget->setWidth(px)->setHeight(px);
+    }
     markNeedsLayout();
     return self();
   }
@@ -99,8 +186,16 @@ public:
       width = std::min(_requestedWidth, constraints.maxWidth);
     }
 
-    height = playerHeight;
+    // Height grows when artwork is taller than the bar
+    height = std::max(playerHeight, artworkSize);
     applyConstraints();
+
+    // Layout child artwork widget
+    if (_artWidget && artworkSize > 0) {
+      BoxConstraints artC = BoxConstraints::tight(artworkSize, artworkSize);
+      _artWidget->computeLayout(ctx, artC, fontCache);
+    }
+
     needsLayout = false;
   }
 
@@ -128,6 +223,29 @@ public:
     int cx   = x;
     int midY = y + height / 2;
 
+    // ── Artwork thumbnail ────────────────────────────────────────────────
+    if (_artWidget && artworkSize > 0) {
+      int artY = y + (height - artworkSize) / 2;
+      _artWidget->x = cx;
+      _artWidget->y = artY;
+      _artWidget->setBorderRadius(pillarRadius); // match pill left edge
+      _artWidget->render(ctx, fontCache);
+      cx += artworkSize + 4;
+    }
+
+    // ── Loading / error overlay ──────────────────────────────────────────
+    if (_netState == NetState::Loading) {
+      _renderStatusText(p, fontCache, cx, "\xe2\x80\xa6 Loading\xe2\x80\xa6",
+                        colLoadingText);
+      needsPaint = false;
+      return;
+    }
+    if (_netState == NetState::Error) {
+      _renderStatusText(p, fontCache, cx, "Error loading audio", colErrorText);
+      needsPaint = false;
+      return;
+    }
+
     // ── Play / Pause button (font icon) ──────────────────────────────────
     cx += 6;
     int btnX = cx;
@@ -143,7 +261,6 @@ public:
       NativeFont iconFont =
           fontCache.getFont(kIconFont, iconFontSize, FontWeight::Normal);
 
-      // Pick the glyph for the current state
       wchar_t glyph = FluxIcons::glyph(_playing ? FluxIcons::Pause
                                                  : FluxIcons::Play);
       std::wstring glyphStr(1, glyph);
@@ -201,7 +318,6 @@ public:
       NativeFont iconFont =
           fontCache.getFont(kIconFont, iconFontSize, FontWeight::Normal);
 
-      // Show Mute icon when muted, Volume icon otherwise
       wchar_t glyph = FluxIcons::glyph(_muted ? FluxIcons::Mute
                                                : FluxIcons::Volume);
       std::wstring glyphStr(1, glyph);
@@ -301,12 +417,24 @@ public:
 private:
   int _requestedWidth = 0;
 
+  // ── Source ────────────────────────────────────────────────────────────────
+  AudioSourceType        _sourceType   = AudioSourceType::None;
+  std::string            _sourceUrl;
+  std::vector<uint8_t>   _sourceMemory;
+
+  // ── Artwork ───────────────────────────────────────────────────────────────
+  ImageWidgetPtr _artWidget;
+
+  // ── Network loading state ─────────────────────────────────────────────────
+  enum class NetState { Idle, Loading, Error };
+  NetState _netState = NetState::Idle;
+
   // ── Playback state ────────────────────────────────────────────────────────
   std::atomic<bool>  _playing{false};
   std::atomic<bool>  _finished{false};
   std::atomic<float> _progress{0.f};
-  bool               _muted    = false;  // mute state (volume icon toggle)
-  float              _premuteVolume = 1.f; // volume saved before muting
+  bool               _muted    = false;
+  float              _premuteVolume = 1.f;
 
   // ── Interaction state ─────────────────────────────────────────────────────
   bool _dragging = false;
@@ -341,8 +469,30 @@ private:
     return mx >= r.x && mx < r.x + r.w && my >= r.y && my < r.y + r.h;
   }
 
+  // Draw a centred status string (loading / error) inside the bar area
+  void _renderStatusText(Painter &p, FontCache &fontCache,
+                         int barStartX, const std::string &msg, Color col) {
+    NativeFont font = fontCache.getFont("Segoe UI", timeFontSize, FontWeight::Normal);
+    int avail = (x + width) - barStartX - 8;
+    p.drawTextA(msg, barStartX + 4, y, avail, height, font, col,
+                DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+  }
+
+  // ── Play / Pause toggle ────────────────────────────────────────────────────
   void _togglePlayPause() {
     auto &audio = FluxAudio::get();
+
+    // If a URL or memory source hasn't been loaded yet, kick off loading first
+    if (!_playing.load() && !audio.isPaused() && !_finished.load()) {
+      if (_sourceType == AudioSourceType::Url && !_sourceUrl.empty()) {
+        _loadFromUrl();
+        return;
+      }
+      if (_sourceType == AudioSourceType::Memory && !_sourceMemory.empty()) {
+        _playFromMemory();
+        return;
+      }
+    }
 
     if (_finished.load()) {
       _finished = false;
@@ -371,6 +521,130 @@ private:
     }
   }
 
+  // ── URL loading ────────────────────────────────────────────────────────────
+  // Downloads the audio bytes on a background thread (via FluxHttp),
+  // then hands the raw PCM to FluxAudio on the UI thread.
+  void _loadFromUrl() {
+    _netState = NetState::Loading;
+    markNeedsPaint();
+
+    std::weak_ptr<AudioPlayerWidget> weak = self();
+    std::string url = _sourceUrl;
+
+    FluxHttp::get(url, [weak](HttpResult result) {
+      auto self = weak.lock();
+      if (!self) return;
+
+      if (!result.success || result.body.empty()) {
+        self->_netState = NetState::Error;
+        self->markNeedsPaint();
+        return;
+      }
+
+      // Copy downloaded bytes into memory source and play
+      const auto *data = reinterpret_cast<const uint8_t *>(result.body.data());
+      self->_sourceMemory.assign(data, data + result.body.size());
+      self->_netState = NetState::Idle;
+      self->_playFromMemory();
+    });
+  }
+
+  // ── Memory playback ────────────────────────────────────────────────────────
+  // Decodes and plays audio from _sourceMemory.
+  // FluxAudio::playFromPath only accepts file paths, so we write the bytes to
+  // a temporary file and let the existing decode pipeline handle it.
+  // An alternative (when FluxAudio exposes playFromMemory) would call that
+  // directly — the #ifdef block below shows both approaches.
+  void _playFromMemory() {
+    if (_sourceMemory.empty()) return;
+
+    auto &audio = FluxAudio::get();
+
+#if defined(FLUXAUDIO_HAS_PLAY_FROM_MEMORY)
+    // Future API — if FluxAudio gains a playFromMemory overload, use it here:
+    // audio.playFromMemory(_sourceMemory.data(), _sourceMemory.size());
+#else
+    // Current approach: write to a temp file with an extension hint so the
+    // dr_mp3 / dr_wav decoder inside FluxAudio can pick the right codec.
+    // We detect the format from the magic bytes to choose the right extension.
+    std::string ext = _detectAudioExtension(_sourceMemory);
+    std::string tmpPath = _writeTempFile(_sourceMemory, ext);
+    if (tmpPath.empty()) {
+      _netState = NetState::Error;
+      markNeedsPaint();
+      return;
+    }
+    audioPath = tmpPath;
+    audio.playFromPath(audioPath);
+#endif
+
+    _playing  = true;
+    _finished = false;
+    _progress = 0.f;
+    _startTimer();
+    markNeedsPaint();
+  }
+
+  // ── Format detection from magic bytes ─────────────────────────────────────
+  static std::string _detectAudioExtension(const std::vector<uint8_t> &bytes) {
+    if (bytes.size() >= 3) {
+      // MP3: ID3 tag or sync word
+      if (bytes[0] == 0x49 && bytes[1] == 0x44 && bytes[2] == 0x33)
+        return ".mp3"; // "ID3"
+      if ((bytes[0] == 0xFF) && (bytes[1] & 0xE0) == 0xE0)
+        return ".mp3"; // MPEG sync
+    }
+    if (bytes.size() >= 4) {
+      // WAV: "RIFF"
+      if (bytes[0] == 0x52 && bytes[1] == 0x49 &&
+          bytes[2] == 0x46 && bytes[3] == 0x46)
+        return ".wav";
+      // OGG
+      if (bytes[0] == 0x4F && bytes[1] == 0x67 &&
+          bytes[2] == 0x67 && bytes[3] == 0x53)
+        return ".ogg";
+      // FLAC
+      if (bytes[0] == 0x66 && bytes[1] == 0x4C &&
+          bytes[2] == 0x61 && bytes[3] == 0x43)
+        return ".flac";
+    }
+    return ".mp3"; // best-guess fallback
+  }
+
+  // ── Temp file writer ───────────────────────────────────────────────────────
+
+  static std::string _writeTempFile(const std::vector<uint8_t> &bytes,
+                                    const std::string &ext) {
+#ifdef _WIN32
+    char tmpDir[MAX_PATH];
+    if (GetTempPathA(MAX_PATH, tmpDir) == 0) return {};
+    char tmpFile[MAX_PATH];
+    if (GetTempFileNameA(tmpDir, "flx", 0, tmpFile) == 0) return {};
+    // GetTempFileName creates a .tmp file; rename to our extension
+    std::string outPath = std::string(tmpFile) + ext;
+    // Write directly (overwrite if exists)
+    FILE *f = nullptr;
+    fopen_s(&f, outPath.c_str(), "wb");
+#else
+    // POSIX
+    std::string tmpl = std::string(P_tmpdir) + "/flxaudioXXXXXX";
+    // mkstemp requires a writable char[]
+    std::vector<char> tmplBuf(tmpl.begin(), tmpl.end());
+    tmplBuf.push_back('\0');
+    int fd = mkstemp(tmplBuf.data());
+    if (fd < 0) return {};
+    close(fd);
+    std::string outPath = std::string(tmplBuf.data()) + ext;
+    // Rename the placeholder to include the extension
+    ::rename(tmplBuf.data(), outPath.c_str());
+    FILE *f = fopen(outPath.c_str(), "wb");
+#endif
+    if (!f) return {};
+    fwrite(bytes.data(), 1, bytes.size(), f);
+    fclose(f);
+    return outPath;
+  }
+
   void _seekFromMouse(int mx) {
     if (_trackRect.w <= 0) return;
     float t = (float)(mx - _trackRect.x) / (float)_trackRect.w;
@@ -379,20 +653,9 @@ private:
 
     auto &audio = FluxAudio::get();
     bool wasPaused = audio.isPaused();
-
     audio.seekToProgress(t);
-
-    if (wasPaused) {
-
-      audio.pause();
-
-    }
-
-
-    if (_finished.load() && t < 0.999f) {
-      _finished = false;
-    }
-
+    if (wasPaused) audio.pause();
+    if (_finished.load() && t < 0.999f) _finished = false;
     markNeedsPaint();
   }
 
@@ -400,7 +663,6 @@ private:
   void _toggleMute() {
     auto &audio = FluxAudio::get();
     if (_muted) {
-      // Restore saved volume
       audio.setVolume(_premuteVolume);
       _muted = false;
     } else {
@@ -414,13 +676,11 @@ private:
   std::function<void()> _dotsCallback;
 
   void _onDotsClicked() {
-    if (_dotsCallback)
-      _dotsCallback();
-
+    if (_dotsCallback) _dotsCallback();
   }
 
 public:
-  // Fluent setter so callers can attach a context-menu handler:
+
   //   AudioPlayer("a.mp3")->setOnDotsClicked([]{ /* show menu */ });
   std::shared_ptr<AudioPlayerWidget> setOnDotsClicked(std::function<void()> cb) {
     _dotsCallback = std::move(cb);
@@ -430,9 +690,38 @@ public:
 
 using AudioPlayerWidgetPtr = std::shared_ptr<AudioPlayerWidget>;
 
+// ============================================================================
+// Factory functions
+// ============================================================================
+
+/// Create a player for a local file path.
 inline AudioPlayerWidgetPtr AudioPlayer(const std::string &path = "") {
   auto w = std::make_shared<AudioPlayerWidget>();
   if (!path.empty())
     w->setPath(path);
   return w;
+}
+
+/// Create a player that streams from an HTTP/HTTPS URL.
+///
+///   AudioPlayerFromUrl("https://example.com/music.mp3")
+///       ->setWidth(400)
+///
+inline AudioPlayerWidgetPtr AudioPlayerFromUrl(const std::string &url) {
+  return std::make_shared<AudioPlayerWidget>()->setUrl(url);
+}
+
+/// Create a player backed by an in-memory byte buffer.
+///
+///   AudioPlayerFromMemory(myBytes)
+///       ->setWidth(400)
+///
+inline AudioPlayerWidgetPtr
+AudioPlayerFromMemory(const std::vector<uint8_t> &bytes) {
+  return std::make_shared<AudioPlayerWidget>()->setMemory(bytes);
+}
+
+inline AudioPlayerWidgetPtr AudioPlayerFromMemory(const uint8_t *data,
+                                                  size_t len) {
+  return std::make_shared<AudioPlayerWidget>()->setMemory(data, len);
 }

@@ -4,9 +4,13 @@ class MyApp : public Widget {
 public:
   WidgetPtr build() override {
 
-    return Scaffold(AppBar("Flux App"),
-                    Expanded(Center(AudioPlayer("screenshots/TumMile.mp3"))),
-                    nullptr, nullptr);
+    return Scaffold(
+        AppBar("Flux App"),
+        Expanded(
+            Center(AudioPlayerFromUrl("https://www.learningcontainer.com/"
+                                      "wp-content/uploads/2020/02/Kalimba.mp3")
+                       ->setWidth(280))),
+        nullptr, nullptr);
   }
 };
 
