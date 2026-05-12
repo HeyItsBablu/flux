@@ -11,6 +11,7 @@
 
 #include "flux/flux.hpp"
 #include "flux/flux_audio.hpp"
+#include "flux_icons.hpp"
 
 // ============================================================================
 // Helpers
@@ -49,9 +50,9 @@ public:
   int trackHeight   = 3;
   int thumbRadius   = 6;
   int playBtnSize   = 28;
-  int iconFontSize  = 13;
+  int iconFontSize  = 14; // font icon size for play/pause/vol/dots
   int timeFontSize  = 12;
-  int volSliderW    = 0; // 0 = hidden; set >0 to show inline volume
+  int volSliderW    = 0;  // 0 = hidden; set >0 to show inline volume
 
   // ── Public fluent setters ─────────────────────────────────────────────────
   std::shared_ptr<AudioPlayerWidget> setPath(const std::string &p) {
@@ -60,7 +61,7 @@ public:
   }
 
   std::shared_ptr<AudioPlayerWidget> setWidth(int w) {
-    _requestedWidth = w;   
+    _requestedWidth = w;
     autoWidth = false;
     markNeedsLayout();
     return self();
@@ -93,10 +94,8 @@ public:
   void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override {
     if (autoWidth) {
-      // Fill parent — use whatever we're given
       width = constraints.maxWidth;
     } else {
-      // Use _requestedWidth (never clobbered by layout), clamp to parent max
       width = std::min(_requestedWidth, constraints.maxWidth);
     }
 
@@ -106,11 +105,11 @@ public:
   }
 
   // =========================================================================
-  // Render — entirely custom, no children
+  // Render
   // =========================================================================
 
   void render(GraphicsContext &ctx, FontCache &fontCache) override {
-    // Sync progress from audio engine every frame (cheap atomic)
+
     auto &audio = FluxAudio::get();
     if (_playing) {
       _progress = audio.getProgress();
@@ -126,10 +125,10 @@ public:
     p.fillRoundedRectGDI(x, y, width, height, pillarRadius * 2, colBackground,
                          colBorder, 1);
 
-    int cx  = x;
+    int cx   = x;
     int midY = y + height / 2;
 
-    // ── Play / Pause button ──────────────────────────────────────────────
+    // ── Play / Pause button (font icon) ──────────────────────────────────
     cx += 6;
     int btnX = cx;
     int btnY = y + (height - playBtnSize) / 2;
@@ -139,28 +138,25 @@ public:
     p.fillRoundedRectGDI(btnX, btnY, playBtnSize, playBtnSize, playBtnSize,
                          btnBg, btnBg, 0);
 
-    Color iconCol = _hovPlay ? colIconHover : colIconNormal;
+    {
+      Color iconCol = _hovPlay ? colIconHover : colIconNormal;
+      NativeFont iconFont =
+          fontCache.getFont(kIconFont, iconFontSize, FontWeight::Normal);
 
-    if (_playing) {
-      int bw = 3, bh = 10, gap = 3;
-      int bx = btnX + (playBtnSize - bw * 2 - gap) / 2;
-      int by = btnY + (playBtnSize - bh) / 2;
-      p.fillRect(bx,          by, bw, bh, iconCol);
-      p.fillRect(bx + bw + gap, by, bw, bh, iconCol);
-    } else {
-      int tx = btnX + (playBtnSize - 10) / 2 + 1;
-      int ty = btnY + (playBtnSize - 14) / 2;
-      for (int row = 0; row < 14; row++) {
-        int half = row < 7 ? row : 13 - row;
-        p.fillRect(tx + row, ty + 7 - half, 1, half * 2 + 1, iconCol);
-      }
+      // Pick the glyph for the current state
+      wchar_t glyph = FluxIcons::glyph(_playing ? FluxIcons::Pause
+                                                 : FluxIcons::Play);
+      std::wstring glyphStr(1, glyph);
+
+      p.drawText(glyphStr, btnX, btnY, playBtnSize, playBtnSize,
+                 iconFont, iconCol, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }
 
     cx += playBtnSize + 6;
 
-    // ── Time: current ────────────────────────────────────────────────────
-    float dur    = audio.getDurationSeconds();
-    float pos    = _progress * dur;
+    // ── Time display ─────────────────────────────────────────────────────
+    float dur   = audio.getDurationSeconds();
+    float pos   = _progress * dur;
     std::string timeStr = AP_formatTime(pos) + " / " + AP_formatTime(dur);
 
     NativeFont timeFont =
@@ -189,44 +185,56 @@ public:
                            trackHeight, trackHeight, colTrackFill, colTrackFill, 0);
     }
 
-    int thumbX    = trackLeft + fillW;
+    int thumbX     = trackLeft + fillW;
     Color thumbCol = _hovTrack ? colThumbHover : colThumb;
     p.drawEllipse(thumbX - thumbRadius, midY - thumbRadius,
                   thumbRadius * 2, thumbRadius * 2, thumbCol, thumbCol, 0);
 
     cx = trackRight + 4;
 
-    // ── Volume icon ───────────────────────────────────────────────────────
-    _volIconRect = {cx, y + (height - 20) / 2, 20, 20};
-    Color volCol = _hovVol ? colIconHover : colIconNormal;
-
+    // ── Volume icon (font icon) ───────────────────────────────────────────
     {
-      int sx = cx + 3, sy = midY - 5;
-      p.fillRect(sx, sy, 4, 10, volCol);
-      p.fillRect(sx + 4, sy - 2, 1, 2, volCol);
-      p.fillRect(sx + 5, sy - 4, 1, 2, volCol);
-      p.fillRect(sx + 6, sy - 6, 1, 2, volCol);
-      p.fillRect(sx + 4, sy + 10, 1, 2, volCol);
-      p.fillRect(sx + 5, sy + 12, 1, 2, volCol);
-      p.fillRect(sx + 6, sy + 14, 1, 2, volCol);
-      p.fillRect(sx + 4, sy, 3, 10, volCol);
+      int iconW = 20, iconH = 20;
+      _volIconRect = {cx, y + (height - iconH) / 2, iconW, iconH};
+
+      Color volCol = _hovVol ? colIconHover : colIconNormal;
+      NativeFont iconFont =
+          fontCache.getFont(kIconFont, iconFontSize, FontWeight::Normal);
+
+      // Show Mute icon when muted, Volume icon otherwise
+      wchar_t glyph = FluxIcons::glyph(_muted ? FluxIcons::Mute
+                                               : FluxIcons::Volume);
+      std::wstring glyphStr(1, glyph);
+
+      p.drawText(glyphStr, _volIconRect.x, _volIconRect.y,
+                 _volIconRect.w, _volIconRect.h,
+                 iconFont, volCol, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+      cx += iconW + 4;
     }
 
-    cx += 24;
+    // ── More / dots icon (font icon) ─────────────────────────────────────
+    {
+      int iconW = 18, iconH = 20;
+      _dotsIconRect = {cx, y + (height - iconH) / 2, iconW, iconH};
 
-    // ── ⋮ dots icon ───────────────────────────────────────────────────────
-    _dotsIconRect = {cx, y + (height - 20) / 2, 18, 20};
-    Color dotsCol = _hovDots ? colIconHover : colIconNormal;
-    for (int i = 0; i < 3; i++) {
-      p.fillRoundedRectGDI(cx + 7, midY - 6 + i * 6, 3, 3, 3,
-                           dotsCol, dotsCol, 0);
+      Color dotsCol = _hovDots ? colIconHover : colIconNormal;
+      NativeFont iconFont =
+          fontCache.getFont(kIconFont, iconFontSize, FontWeight::Normal);
+
+      wchar_t glyph = FluxIcons::glyph(FluxIcons::More);
+      std::wstring glyphStr(1, glyph);
+
+      p.drawText(glyphStr, _dotsIconRect.x, _dotsIconRect.y,
+                 _dotsIconRect.w, _dotsIconRect.h,
+                 iconFont, dotsCol, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }
 
     needsPaint = false;
   }
 
   // =========================================================================
-  // Mouse events  (unchanged)
+  // Mouse events
   // =========================================================================
 
   bool handleMouseDown(int mx, int my) override {
@@ -239,6 +247,18 @@ public:
       _dragging = true;
       FluxUI::getCurrentInstance()->captureMouseInput();
       _seekFromMouse(mx);
+      markNeedsPaint();
+      return true;
+    }
+
+    if (_inRect(mx, my, _volIconRect)) {
+      _toggleMute();
+      markNeedsPaint();
+      return true;
+    }
+
+    if (_inRect(mx, my, _dotsIconRect)) {
+      _onDotsClicked();
       markNeedsPaint();
       return true;
     }
@@ -279,13 +299,14 @@ public:
   }
 
 private:
-  // ── Separate field so layout passes never clobber the user's request ──────
   int _requestedWidth = 0;
 
   // ── Playback state ────────────────────────────────────────────────────────
   std::atomic<bool>  _playing{false};
   std::atomic<bool>  _finished{false};
   std::atomic<float> _progress{0.f};
+  bool               _muted    = false;  // mute state (volume icon toggle)
+  float              _premuteVolume = 1.f; // volume saved before muting
 
   // ── Interaction state ─────────────────────────────────────────────────────
   bool _dragging = false;
@@ -355,15 +376,55 @@ private:
     float t = (float)(mx - _trackRect.x) / (float)_trackRect.w;
     t = std::max(0.f, std::min(1.f, t));
     _progress = t;
-    FluxAudio::get().seekToProgress(t);
+
+    auto &audio = FluxAudio::get();
+    bool wasPaused = audio.isPaused();
+
+    audio.seekToProgress(t);
+
+    if (wasPaused) {
+
+      audio.pause();
+
+    }
+
 
     if (_finished.load() && t < 0.999f) {
       _finished = false;
-      FluxAudio::get().resume();
-      _playing = true;
-      _startTimer();
     }
+
     markNeedsPaint();
+  }
+
+  // ── Mute / unmute ─────────────────────────────────────────────────────────
+  void _toggleMute() {
+    auto &audio = FluxAudio::get();
+    if (_muted) {
+      // Restore saved volume
+      audio.setVolume(_premuteVolume);
+      _muted = false;
+    } else {
+      _premuteVolume = audio.getVolume();
+      audio.setVolume(0.f);
+      _muted = true;
+    }
+  }
+
+  // ── Three-dot menu ────────────────────────────────────────────────────────
+  std::function<void()> _dotsCallback;
+
+  void _onDotsClicked() {
+    if (_dotsCallback)
+      _dotsCallback();
+
+  }
+
+public:
+  // Fluent setter so callers can attach a context-menu handler:
+  //   AudioPlayer("a.mp3")->setOnDotsClicked([]{ /* show menu */ });
+  std::shared_ptr<AudioPlayerWidget> setOnDotsClicked(std::function<void()> cb) {
+    _dotsCallback = std::move(cb);
+    return self();
   }
 };
 
