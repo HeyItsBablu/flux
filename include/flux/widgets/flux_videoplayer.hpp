@@ -16,12 +16,13 @@
 
 #include "flux/flux.hpp"
 #include "flux/flux_video.hpp"
+#include "flux_icons.hpp"
 
 // ── nanovg OES extension
 // ────────────────────────────────────────────────────── NanoVG does not
 // natively support GL_TEXTURE_EXTERNAL_OES. We supply a thin helper that wraps
 // the OES texture as an NVGimage handle so nvgImagePattern() / nvgFillPaint()
-// can blit it. The implementation lives in nanovg_oes_ext.cpp (see below).
+// can blit it. The implementation lives in nanovg_oes_ext.cpp.
 extern int NVG_createImageFromOES(NVGcontext *vg, GLuint oesTexId, int w,
                                   int h);
 extern void NVG_updateImageFromOES(NVGcontext *vg, int nvgImage,
@@ -178,7 +179,7 @@ public:
 
     // ── Center play button overlay (large, shown when paused/not started) ──
     if (!_playing && _barVisible) {
-      _renderCenterPlay(p);
+      _renderCenterPlay(p, fontCache);
     }
 
     needsPaint = false;
@@ -424,24 +425,20 @@ private:
     int midY = barY + barHeight / 2;
     int cx = x + 6;
 
-    // ── Play / Pause button ───────────────────────────────────────────────
+    // ── Play / Pause icon button ──────────────────────────────────────────
     int btnSz = 28;
     _playBtnRect = {cx, barY + (barHeight - btnSz) / 2, btnSz, btnSz};
     Color iconCol = _hovPlay ? colIconHov : colIcon;
 
-    if (_playing) {
-      int bw = 3, bh = 10, gap = 3;
-      int bx = _playBtnRect.x + (btnSz - bw * 2 - gap) / 2;
-      int by = _playBtnRect.y + (btnSz - bh) / 2;
-      p.fillRect(bx, by, bw, bh, iconCol);
-      p.fillRect(bx + bw + gap, by, bw, bh, iconCol);
-    } else {
-      int tx = _playBtnRect.x + (btnSz - 10) / 2 + 1;
-      int ty = _playBtnRect.y + (btnSz - 14) / 2;
-      for (int row = 0; row < 14; row++) {
-        int half = row < 7 ? row : 13 - row;
-        p.fillRect(tx + row, ty + 7 - half, 1, half * 2 + 1, iconCol);
-      }
+    {
+      NativeFont iconFont = fontCache.getFont(kIconFont, 18, FontWeight::Normal);
+      std::wstring iconGlyph(1, FluxIcons::glyph(_playing ? FluxIcons::Pause
+                                                           : FluxIcons::Play));
+      p.drawText(iconGlyph,
+                 _playBtnRect.x, _playBtnRect.y,
+                 _playBtnRect.w, _playBtnRect.h,
+                 iconFont, iconCol,
+                 DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }
     cx += btnSz + 6;
 
@@ -481,7 +478,7 @@ private:
   }
 
   // ── Center play icon overlay ───────────────────────────────────────────────
-  void _renderCenterPlay(Painter &p) {
+  void _renderCenterPlay(Painter &p, FontCache &fontCache) {
     int cx = x + width / 2;
     int cy = y + (height - barHeight) / 2;
     int r = 28;
@@ -490,14 +487,13 @@ private:
     p.drawEllipse(cx - r, cy - r, r * 2, r * 2, Color::fromRGBA(0, 0, 0, 160),
                   Color::fromRGBA(0, 0, 0, 0), 0);
 
-    // Play triangle
-    Color white = Color::fromRGB(255, 255, 255);
-    int tx = cx - 7 + 2;
-    int ty = cy - 10;
-    for (int row = 0; row < 20; row++) {
-      int half = row < 10 ? row : 19 - row;
-      p.fillRect(tx + row, ty + 10 - half, 1, half * 2 + 1, white);
-    }
+    // Play icon via font glyph
+    NativeFont iconFont = fontCache.getFont(kIconFont, 32, FontWeight::Normal);
+    std::wstring playGlyph(1, FluxIcons::glyph(FluxIcons::Play));
+    p.drawText(playGlyph,
+               cx - r, cy - r, r * 2, r * 2,
+               iconFont, Color::fromRGB(255, 255, 255),
+               DT_CENTER | DT_VCENTER | DT_SINGLELINE);
   }
 };
 
@@ -521,6 +517,7 @@ inline VideoPlayerWidgetPtr VideoPlayer(const std::string &path = "") {
 
 #include "flux/flux.hpp"
 #include "flux/flux_video.hpp"
+#include "flux_icons.hpp"
 
 class VideoPlayerWidget : public Widget {
 public:
@@ -668,35 +665,44 @@ public:
     if (_barVisible)
       _renderBar(ctx, fontCache, p);
     if (!_playing && _barVisible)
-      _renderCenterPlay(p);
+      _renderCenterPlay(p, fontCache);
     needsPaint = false;
   }
 
   // ── Mouse events — identical logic to Android widget ─────────────────────
-  bool handleMouseDown(int mx, int my) override {
+bool handleMouseDown(int mx, int my) override {
     if (!_inWidget(mx, my))
-      return false;
-    if (!_inRect(mx, my, _barRect)) {
-      _barVisible = true;
-      _resetBarTimer();
-      _togglePlayPause();
-      markNeedsPaint();
-      return true;
+        return false;
+
+    // Always show bar on any tap
+    _barVisible = true;
+    _resetBarTimer();
+    markNeedsPaint();
+
+    // Only act on bar controls if we can hit-test them properly.
+    // Use computed positions directly rather than stale cached rects.
+    int barY   = y + height - barHeight;
+    int btnSz  = 28;
+    Rect playBtn = {x + 6, barY + (barHeight - btnSz) / 2, btnSz, btnSz};
+
+    if (_inRect(mx, my, playBtn)) {
+        _togglePlayPause();
+        return true;
     }
-    if (_inRect(mx, my, _playBtnRect)) {
-      _togglePlayPause();
-      markNeedsPaint();
-      return true;
-    }
+
+    // Seek track: recompute its x-range
+    // (exact bounds depend on time string width, so use the cached rect
+    //  but only if the bar was already visible last frame)
     if (_inRect(mx, my, _trackRect)) {
-      _dragging = true;
-      FluxUI::getCurrentInstance()->captureMouseInput();
-      _seekFromMouse(mx);
-      markNeedsPaint();
-      return true;
+        _dragging = true;
+        FluxUI::getCurrentInstance()->captureMouseInput();
+        _seekFromMouse(mx);
+        return true;
     }
+
+    // Tap outside controls: just show the bar (already done above)
     return true;
-  }
+}
 
   bool handleMouseUp(int /*mx*/, int /*my*/) override {
     if (_dragging) {
@@ -862,7 +868,7 @@ private:
     return buf;
   }
 
-  void _renderBar(GraphicsContext &/*ctx*/, FontCache &fontCache, Painter &p) {
+  void _renderBar(GraphicsContext & /*ctx*/, FontCache &fontCache, Painter &p) {
     int barY = y + height - barHeight;
     _barRect = {x, barY, width, barHeight};
     p.fillRect(x, barY, width, barHeight, colBar);
@@ -873,22 +879,20 @@ private:
     _playBtnRect = {cx, barY + (barHeight - btnSz) / 2, btnSz, btnSz};
     Color iconCol = _hovPlay ? colIconHov : colIcon;
 
-    if (_playing) {
-      int bw = 3, bh = 10, gap = 3;
-      int bx = _playBtnRect.x + (btnSz - bw * 2 - gap) / 2;
-      int by = _playBtnRect.y + (btnSz - bh) / 2;
-      p.fillRect(bx, by, bw, bh, iconCol);
-      p.fillRect(bx + bw + gap, by, bw, bh, iconCol);
-    } else {
-      int tx = _playBtnRect.x + (btnSz - 10) / 2 + 1;
-      int ty = _playBtnRect.y + (btnSz - 14) / 2;
-      for (int row = 0; row < 14; row++) {
-        int half = row < 7 ? row : 13 - row;
-        p.fillRect(tx + row, ty + 7 - half, 1, half * 2 + 1, iconCol);
-      }
+    // ── Play / Pause icon via font glyph ─────────────────────────────────
+    {
+      NativeFont iconFont = fontCache.getFont(kIconFont, 18, FontWeight::Normal);
+      std::wstring iconGlyph(1, FluxIcons::glyph(_playing ? FluxIcons::Pause
+                                                           : FluxIcons::Play));
+      p.drawText(iconGlyph,
+                 _playBtnRect.x, _playBtnRect.y,
+                 _playBtnRect.w, _playBtnRect.h,
+                 iconFont, iconCol,
+                 DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }
     cx += btnSz + 6;
 
+    // ── Time display ──────────────────────────────────────────────────────
     float dur = FluxVideo::get().getDurationSeconds();
     std::string timeStr = _fmtTime(_progress * dur) + " / " + _fmtTime(dur);
     NativeFont tf = fontCache.getFont("Segoe UI", 12, FontWeight::Normal);
@@ -898,6 +902,7 @@ private:
                DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     cx += tw + 8;
 
+    // ── Seek track ────────────────────────────────────────────────────────
     int trackW = std::max(20, x + width - 12 - cx);
     _trackRect = {cx, midY - 8, trackW, 16};
     p.fillRoundedRectGDI(cx, midY - 1, trackW, 3, 3, colTrackBg, colTrackBg, 0);
@@ -908,17 +913,22 @@ private:
     p.drawEllipse(cx + fillW - 6, midY - 6, 12, 12, colThumb, colThumb, 0);
   }
 
-  void _renderCenterPlay(Painter &p) {
+  void _renderCenterPlay(Painter &p, FontCache &fontCache) {
     int cx = x + width / 2;
     int cy = y + (height - barHeight) / 2;
-    p.drawEllipse(cx - 28, cy - 28, 56, 56, Color::fromRGBA(0, 0, 0, 160),
+    int r = 28;
+
+    // Circle background
+    p.drawEllipse(cx - r, cy - r, r * 2, r * 2, Color::fromRGBA(0, 0, 0, 160),
                   Color::fromRGBA(0, 0, 0, 0), 0);
-    int tx = cx - 5, ty = cy - 10;
-    for (int row = 0; row < 20; row++) {
-      int half = row < 10 ? row : 19 - row;
-      p.fillRect(tx + row, ty + 10 - half, 1, half * 2 + 1,
-                 Color::fromRGB(255, 255, 255));
-    }
+
+    // Play icon via font glyph
+    NativeFont iconFont = fontCache.getFont(kIconFont, 32, FontWeight::Normal);
+    std::wstring playGlyph(1, FluxIcons::glyph(FluxIcons::Play));
+    p.drawText(playGlyph,
+               cx - r, cy - r, r * 2, r * 2,
+               iconFont, Color::fromRGB(255, 255, 255),
+               DT_CENTER | DT_VCENTER | DT_SINGLELINE);
   }
 };
 
@@ -937,18 +947,19 @@ inline VideoPlayerWidgetPtr VideoPlayer(const std::string &path = "") {
 // VideoPlayerWidget — Linux (Cairo / SDL backend)
 // ============================================================================
 #if defined(__linux__) && !defined(__ANDROID__)
- 
+
 #include "flux/flux.hpp"
 #include "flux/flux_video.hpp"
- 
+#include "flux_icons.hpp"
+
 #include <cairo/cairo.h>
- 
+
 class VideoPlayerWidget : public Widget {
 public:
   std::string videoPath;
   int  barHeight = 40;
   bool autoPlay  = false;
- 
+
   // Same color palette as Windows / Android widgets
   Color colBar       = Color::fromRGBA( 20,  20,  20, 220);
   Color colTrackBg   = Color::fromRGB (100, 100, 100);
@@ -958,7 +969,7 @@ public:
   Color colIcon      = Color::fromRGB (220, 220, 220);
   Color colIconHov   = Color::fromRGB (255, 255, 255);
   Color colBg        = Color::fromRGB (  0,   0,   0);
- 
+
   std::shared_ptr<VideoPlayerWidget> setPath(const std::string &p) {
     videoPath = p;
     return self();
@@ -977,24 +988,24 @@ public:
     autoPlay = b;
     return self();
   }
- 
+
   VideoPlayerWidget() {
     autoWidth  = false;
     autoHeight = false;
     width  = 320;
     height = 180;
- 
+
     FluxVideo::get().setOnFinished([this]() {
       _finishedPending = true;
       if (auto *ui = FluxUI::getCurrentInstance())
         ui->invalidateWidget(x, y, width, height);
     });
- 
+
     FluxVideo::get().setOnReady([this](int /*w*/, int /*h*/) {
       markNeedsPaint();
     });
   }
- 
+
   ~VideoPlayerWidget() {
     _destroyed = true;
     _stopTimers();
@@ -1003,7 +1014,7 @@ public:
     FluxVideo::get().setOnReady(nullptr);
     _freeCairoSurface();
   }
- 
+
   // ── Layout ────────────────────────────────────────────────────────────────
   void computeLayout(GraphicsContext & /*ctx*/,
                      const BoxConstraints &constraints,
@@ -1012,7 +1023,7 @@ public:
     if (autoHeight) height = constraints.maxHeight;
     applyConstraints();
     needsLayout = false;
- 
+
     if (!_opened && !videoPath.empty()) {
       _opened = true;
       FluxVideo::get().open(videoPath);
@@ -1023,7 +1034,7 @@ public:
       }
     }
   }
- 
+
   // ── Render ────────────────────────────────────────────────────────────────
   void render(GraphicsContext &ctx, FontCache &fontCache) override {
     if (_finishedPending.exchange(false)) {
@@ -1031,41 +1042,41 @@ public:
       _finished = true;
       _progress = 1.f;
     }
- 
+
     Painter p(ctx);
- 
+
     // Black letterbox background
     p.fillRect(x, y, width, height, colBg);
- 
+
     // ── Consume new frame ─────────────────────────────────────────────────
     if (FluxVideo::get().hasNewFrame()) {
       auto frame = FluxVideo::get().lockFrame();
- 
+
       if (frame.data && frame.width > 0 && frame.height > 0) {
         int byteCount = frame.stride * frame.height;
         _frameCache.assign(frame.data, frame.data + byteCount);
         _cachedSrcW = frame.width;
         _cachedSrcH = frame.height;
- 
+
         // Rebuild Cairo surface whenever video dimensions change
         if (_cachedSrcW != _cairoSurfW || _cachedSrcH != _cairoSurfH)
           _rebuildCairoSurface();
       }
       _progress = FluxVideo::get().getProgress();
     }
- 
+
     // ── Cairo blit ────────────────────────────────────────────────────────
     // FFmpeg delivers packed RGB24 (3 bpp); CAIRO_FORMAT_RGB24 is BGRX (4 bpp).
     // _updateCairoPixels() converts between the two formats in-place.
     if (_cairoSurf && !_frameCache.empty() && _cachedSrcW > 0 && ctx.cr) {
       _updateCairoPixels();
       cairo_surface_mark_dirty(_cairoSurf);
- 
+
       // Compute letterbox destination rect
       float vidAR = (float)_cachedSrcW / (float)_cachedSrcH;
       float widAR = (float)width / (float)(height - barHeight);
       int dstX, dstY, dstW, dstH;
- 
+
       if (vidAR > widAR) {
         dstW = width;
         dstH = (int)((float)dstW / vidAR);
@@ -1077,7 +1088,7 @@ public:
         dstX = x + (width - dstW) / 2;
         dstY = y;
       }
- 
+
       cairo_save(ctx.cr);
       cairo_translate(ctx.cr, dstX, dstY);
       cairo_scale(ctx.cr,
@@ -1089,15 +1100,15 @@ public:
       cairo_fill(ctx.cr);
       cairo_restore(ctx.cr);
     }
- 
+
     if (_barVisible)
       _renderBar(ctx, fontCache, p);
     if (!_playing && _barVisible)
-      _renderCenterPlay(p);
- 
+      _renderCenterPlay(p, fontCache);
+
     needsPaint = false;
   }
- 
+
   // ── Mouse events — identical logic to Windows widget ─────────────────────
   bool handleMouseDown(int mx, int my) override {
     if (!_inWidget(mx, my))
@@ -1123,7 +1134,7 @@ public:
     }
     return true;
   }
- 
+
   bool handleMouseUp(int /*mx*/, int /*my*/) override {
     if (_dragging) {
       _dragging = false;
@@ -1131,7 +1142,7 @@ public:
     }
     return false;
   }
- 
+
   bool handleMouseMove(int mx, int my) override {
     if (_dragging) {
       _seekFromMouse(mx);
@@ -1151,14 +1162,14 @@ public:
     }
     return false;
   }
- 
+
   bool handleMouseLeave() override {
     _barVisible = false;
     _hovPlay    = false;
     markNeedsPaint();
     return true;
   }
- 
+
 private:
   bool  _opened    = false;
   bool  _playing   = false;
@@ -1167,38 +1178,36 @@ private:
   bool  _dragging  = false;
   bool  _barVisible = true;
   bool  _hovPlay   = false;
- 
+
   // ── Frame cache ───────────────────────────────────────────────────────────
   // Packed RGB24 from FFmpeg (3 bpp × w × h)
   std::vector<uint8_t> _frameCache;
   int _cachedSrcW = 0;
   int _cachedSrcH = 0;
- 
+
   // BGRX pixel store for Cairo (CAIRO_FORMAT_RGB24 = 4 bpp)
   std::vector<uint8_t> _cairoPixels;
   cairo_surface_t     *_cairoSurf  = nullptr;
   int                  _cairoSurfW = 0;
   int                  _cairoSurfH = 0;
- 
+
   struct Rect { int x, y, w, h; };
   Rect _barRect{}, _playBtnRect{}, _trackRect{};
- 
+
   TimerID _progressTimer = 0;
   TimerID _barHideTimer  = 0;
- 
+
   std::atomic<bool> _destroyed      {false};
   std::atomic<bool> _finishedPending{false};
- 
+
   // ── Cairo surface helpers ─────────────────────────────────────────────────
- 
-  // Build a Cairo image surface backed by _cairoPixels.
-  // Called once per video (or on resolution change).
+
   void _rebuildCairoSurface() {
     _freeCairoSurface();
     if (_cachedSrcW <= 0 || _cachedSrcH <= 0) return;
- 
+
     _cairoPixels.resize((size_t)(_cachedSrcW * _cachedSrcH * 4));
- 
+
     // cairo_image_surface_create_for_data does NOT copy — it references the
     // buffer directly, so _cairoPixels must stay alive for the surface's life.
     _cairoSurf = cairo_image_surface_create_for_data(
@@ -1206,11 +1215,11 @@ private:
         CAIRO_FORMAT_RGB24,     // 0xffRRGGBB stored as B G R X (little-endian)
         _cachedSrcW, _cachedSrcH,
         _cachedSrcW * 4);       // stride
- 
+
     _cairoSurfW = _cachedSrcW;
     _cairoSurfH = _cachedSrcH;
   }
- 
+
   void _freeCairoSurface() {
     if (_cairoSurf) {
       cairo_surface_destroy(_cairoSurf);
@@ -1219,9 +1228,8 @@ private:
       _cairoSurfH = 0;
     }
   }
- 
+
   // Convert packed RGB24 (_frameCache) → BGRX (_cairoPixels).
-  // Must be called every time a new frame lands, before cairo_surface_mark_dirty.
   void _updateCairoPixels() {
     int n = _cachedSrcW * _cachedSrcH;
     const uint8_t *src = _frameCache.data();
@@ -1237,7 +1245,7 @@ private:
       dst += 4;
     }
   }
- 
+
   // ── Shared helpers ────────────────────────────────────────────────────────
   std::shared_ptr<VideoPlayerWidget> self() {
     return std::static_pointer_cast<VideoPlayerWidget>(shared_from_this());
@@ -1248,7 +1256,7 @@ private:
   static bool _inRect(int mx, int my, const Rect &r) {
     return mx >= r.x && mx < r.x + r.w && my >= r.y && my < r.y + r.h;
   }
- 
+
   void _startProgressTimer() {
     if (_progressTimer) return;
     _progressTimer = FluxUI::getCurrentInstance()->setInterval(33, [this]() {
@@ -1259,7 +1267,7 @@ private:
       }
     });
   }
- 
+
   void _resetBarTimer() {
     auto *ui = FluxUI::getCurrentInstance();
     if (!ui) return;
@@ -1271,14 +1279,14 @@ private:
       if (_playing) { _barVisible = false; markNeedsPaint(); }
     });
   }
- 
+
   void _stopTimers() {
     auto *ui = FluxUI::getCurrentInstance();
     if (!ui) return;
     if (_progressTimer) { ui->clearInterval(_progressTimer); _progressTimer = 0; }
     if (_barHideTimer)  { ui->clearInterval(_barHideTimer);  _barHideTimer  = 0; }
   }
- 
+
   void _togglePlayPause() {
     auto &vid = FluxVideo::get();
     if (_finished) {
@@ -1299,7 +1307,7 @@ private:
       _startProgressTimer();
     }
   }
- 
+
   void _seekFromMouse(int mx) {
     if (_trackRect.w <= 0) return;
     float t = std::max(0.f, std::min(1.f,
@@ -1314,51 +1322,51 @@ private:
     }
     markNeedsPaint();
   }
- 
+
   static std::string _fmtTime(float s) {
     int si = (int)s;
     char buf[16];
     snprintf(buf, sizeof(buf), "%d:%02d", si / 60, si % 60);
     return buf;
   }
- 
+
   // ── Control bar ───────────────────────────────────────────────────────────
   void _renderBar(GraphicsContext &ctx, FontCache &fontCache, Painter &p) {
     int barY = y + height - barHeight;
     _barRect = {x, barY, width, barHeight};
     p.fillRect(x, barY, width, barHeight, colBar);
- 
+
     int midY = barY + barHeight / 2;
     int cx   = x + 6;
     int btnSz = 28;
     _playBtnRect = {cx, barY + (barHeight - btnSz) / 2, btnSz, btnSz};
     Color iconCol = _hovPlay ? colIconHov : colIcon;
- 
-    if (_playing) {
-      int bw = 3, bh = 10, gap = 3;
-      int bx = _playBtnRect.x + (btnSz - bw * 2 - gap) / 2;
-      int by = _playBtnRect.y + (btnSz - bh) / 2;
-      p.fillRect(bx,           by, bw, bh, iconCol);
-      p.fillRect(bx + bw + gap, by, bw, bh, iconCol);
-    } else {
-      int tx = _playBtnRect.x + (btnSz - 10) / 2 + 1;
-      int ty = _playBtnRect.y + (btnSz - 14) / 2;
-      for (int row = 0; row < 14; row++) {
-        int half = row < 7 ? row : 13 - row;
-        p.fillRect(tx + row, ty + 7 - half, 1, half * 2 + 1, iconCol);
-      }
+
+    // ── Play / Pause icon via font glyph ─────────────────────────────────
+    {
+      NativeFont iconFont = fontCache.getFont(kIconFont, 18, FontWeight::Normal);
+      std::wstring iconGlyph(1, FluxIcons::glyph(_playing ? FluxIcons::Pause
+                                                           : FluxIcons::Play));
+      p.drawText(iconGlyph,
+                 _playBtnRect.x, _playBtnRect.y,
+                 _playBtnRect.w, _playBtnRect.h,
+                 iconFont, iconCol,
+                 DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }
     cx += btnSz + 6;
- 
+
+    // ── Time display ──────────────────────────────────────────────────────
     float dur = FluxVideo::get().getDurationSeconds();
     std::string timeStr = _fmtTime(_progress * dur) + " / " + _fmtTime(dur);
+    // Linux uses "Sans" for body text (no Segoe UI)
     NativeFont tf = fontCache.getFont("Sans", 12, FontWeight::Normal);
     int tw = 0, th = 0;
     p.measureText(toWideString(timeStr), tf, tw, th);
     p.drawText(toWideString(timeStr), cx, barY, tw + 4, barHeight, tf, colText,
                DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     cx += tw + 8;
- 
+
+    // ── Seek track ────────────────────────────────────────────────────────
     int trackW = std::max(20, x + width - 12 - cx);
     _trackRect = {cx, midY - 8, trackW, 16};
     p.fillRoundedRectGDI(cx, midY - 1, trackW, 3, 3, colTrackBg,   colTrackBg,   0);
@@ -1367,30 +1375,35 @@ private:
       p.fillRoundedRectGDI(cx, midY - 1, fillW, 3, 3, colTrackFill, colTrackFill, 0);
     p.drawEllipse(cx + fillW - 6, midY - 6, 12, 12, colThumb, colThumb, 0);
   }
- 
+
   // ── Center play overlay ───────────────────────────────────────────────────
-  void _renderCenterPlay(Painter &p) {
+  void _renderCenterPlay(Painter &p, FontCache &fontCache) {
     int cx = x + width  / 2;
     int cy = y + (height - barHeight) / 2;
-    p.drawEllipse(cx - 28, cy - 28, 56, 56,
+    int r  = 28;
+
+    // Circle background
+    p.drawEllipse(cx - r, cy - r, r * 2, r * 2,
                   Color::fromRGBA(0, 0, 0, 160),
                   Color::fromRGBA(0, 0, 0,   0), 0);
-    int tx = cx - 5, ty = cy - 10;
-    for (int row = 0; row < 20; row++) {
-      int half = row < 10 ? row : 19 - row;
-      p.fillRect(tx + row, ty + 10 - half, 1, half * 2 + 1,
-                 Color::fromRGB(255, 255, 255));
-    }
+
+    // Play icon via font glyph
+    NativeFont iconFont = fontCache.getFont(kIconFont, 32, FontWeight::Normal);
+    std::wstring playGlyph(1, FluxIcons::glyph(FluxIcons::Play));
+    p.drawText(playGlyph,
+               cx - r, cy - r, r * 2, r * 2,
+               iconFont, Color::fromRGB(255, 255, 255),
+               DT_CENTER | DT_VCENTER | DT_SINGLELINE);
   }
 };
- 
+
 using VideoPlayerWidgetPtr = std::shared_ptr<VideoPlayerWidget>;
- 
+
 inline VideoPlayerWidgetPtr VideoPlayer(const std::string &path = "") {
   auto w = std::make_shared<VideoPlayerWidget>();
   if (!path.empty())
     w->setPath(path);
   return w;
 }
- 
+
 #endif // __linux__ && !__ANDROID__

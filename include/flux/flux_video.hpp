@@ -40,12 +40,7 @@
 #include <thread>
 #include <vector>
 
-#include "flux_audio.hpp" // PCM playback + FluxAndroid_getAssetManager
-
-#define VIDEO_LOGI(...)                                                        \
-  __android_log_print(ANDROID_LOG_INFO, "FluxVideo", __VA_ARGS__)
-#define VIDEO_LOGE(...)                                                        \
-  __android_log_print(ANDROID_LOG_ERROR, "FluxVideo", __VA_ARGS__)
+#include "flux_audio.hpp" /
 
 // ── External helpers provided by native-lib.cpp
 // ───────────────────────────────
@@ -293,7 +288,7 @@ private:
   bool _createOESTexture() {
     glGenTextures(1, &s_oesTexture);
     if (!s_oesTexture) {
-      VIDEO_LOGE("glGenTextures failed");
+
       return false;
     }
     glBindTexture(GL_TEXTURE_EXTERNAL_OES, s_oesTexture);
@@ -308,10 +303,10 @@ private:
     // Create Android SurfaceTexture wrapping this OES texture via JNI shim
     s_surfaceTexture = FluxVideo_createSurfaceTexture(s_oesTexture);
     if (!s_surfaceTexture) {
-      VIDEO_LOGE("FluxVideo_createSurfaceTexture failed");
+
       return false;
     }
-    VIDEO_LOGI("OES texture %u + SurfaceTexture created", s_oesTexture);
+
     return true;
   }
 
@@ -331,8 +326,7 @@ private:
                          attribs);
 
     if (s_decodeEGLContext == EGL_NO_CONTEXT) {
-      VIDEO_LOGE("eglCreateContext for decode thread failed: %d",
-                 eglGetError());
+
       return false;
     }
 
@@ -375,7 +369,7 @@ private:
       s_extractor = AMediaExtractor_new();
       if (AMediaExtractor_setDataSource(s_extractor, s_path.c_str()) !=
           AMEDIA_OK) {
-        VIDEO_LOGE("setDataSource failed for %s", s_path.c_str());
+
         return -1;
       }
     } else {
@@ -385,7 +379,7 @@ private:
       AAsset *asset =
           AAssetManager_open(am, s_path.c_str(), AASSET_MODE_STREAMING);
       if (!asset) {
-        VIDEO_LOGE("asset not found: %s", s_path.c_str());
+
         return -1;
       }
 
@@ -424,7 +418,7 @@ private:
     }
 
     if (s_videoTrackIdx < 0) {
-      VIDEO_LOGE("no video track");
+
       return -1;
     }
     return 0;
@@ -446,11 +440,10 @@ private:
     AMediaFormat_getInt32(fmt, AMEDIAFORMAT_KEY_HEIGHT, &h);
     s_videoWidth = w;
     s_videoHeight = h;
-    VIDEO_LOGI("Video: %s %dx%d", mime ? mime : "?", w, h);
 
     s_videoCodec = AMediaCodec_createDecoderByType(mime);
     if (!s_videoCodec) {
-      VIDEO_LOGE("Cannot create video codec for %s", mime);
+
       AMediaFormat_delete(fmt);
       return false;
     }
@@ -463,7 +456,7 @@ private:
     AMediaFormat_delete(fmt);
 
     if (status != AMEDIA_OK) {
-      VIDEO_LOGE("Video codec configure failed: %d", status);
+
       return false;
     }
 
@@ -486,7 +479,6 @@ private:
     AMediaFormat_getInt32(fmt, AMEDIAFORMAT_KEY_CHANNEL_COUNT, &ch);
     outSampleRate = sr;
     outChannels = ch;
-    VIDEO_LOGI("Audio: %s %dHz %dch", mime ? mime : "?", sr, ch);
 
     s_audioCodec = AMediaCodec_createDecoderByType(mime);
     if (!s_audioCodec) {
@@ -556,7 +548,6 @@ private:
     FluxAudio::get().seekToSeconds(targetUs / 1e6f);
 
     s_seekPending = false;
-    VIDEO_LOGI("Seeked to %.2f s", targetUs / 1e6f);
   }
 
   // =========================================================================
@@ -710,7 +701,6 @@ private:
 
     eglMakeCurrent(s_decodeEGLDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE,
                    EGL_NO_CONTEXT);
-    VIDEO_LOGI("Decode loop exited");
   }
 
   // =========================================================================
@@ -822,16 +812,6 @@ private:
 // ============================================================================
 #ifdef _WIN32
 
-#define VIDEO_HR(expr)                                                         \
-  do {                                                                         \
-    HRESULT _hr = (expr);                                                      \
-    if (FAILED(_hr)) {                                                         \
-      VIDEO_LOGE("FAILED %s  ->  0x%08X", #expr, (unsigned)_hr);               \
-    } else {                                                                   \
-      VIDEO_LOGI("OK    %s", #expr);                                           \
-    }                                                                          \
-  } while (0)
-
 #include <mfapi.h>
 #include <mferror.h>
 #include <mfidl.h>
@@ -857,18 +837,6 @@ private:
 #include <vector>
 
 #include "flux_audio.hpp"
-
-#define VIDEO_LOGI(...)                                                        \
-  do {                                                                         \
-    fprintf(stdout, "[FluxVideo] INFO  " __VA_ARGS__);                         \
-    fprintf(stdout, "\n");                                                     \
-  } while (0)
-#define VIDEO_LOGE(...)                                                        \
-  do {                                                                         \
-    fprintf(stderr, "[FluxVideo] ERROR " __VA_ARGS__);                         \
-    fprintf(stderr, "\n");                                                     \
-  } while (0)
-
 
 struct FluxMFInit {
   FluxMFInit() {
@@ -956,11 +924,10 @@ public:
   void setVolume(float v) { FluxAudio::get().setVolume(v); }
   float getVolume() const { return FluxAudio::get().getVolume(); }
 
-
   bool open(const std::string &path) {
     s_videoEOS = false;
     s_audioEOS = false;
-    close(); 
+    close();
 
     s_state = State::Loading;
     s_stopDecode = false;
@@ -978,19 +945,20 @@ public:
   // =========================================================================
 
   void play() {
-    if (s_state == State::Paused || s_state == State::Loading) {
-      {
-        std::lock_guard<std::mutex> lk(s_cmdMutex);
-        s_resumeRequested = true;
-      }
-      s_cmdCV.notify_one();
-      s_pauseCV.notify_one(); 
+    std::lock_guard<std::mutex> lk(s_cmdMutex);
+
+    if (s_state == State::Paused || s_state == State::Loading ||
+        (s_state == State::Playing && s_pauseRequested)) {
+      s_pauseRequested = false;
+      s_resumeRequested = true;
+      s_pauseCV.notify_all();
     }
   }
 
   void pause() {
-    if (s_state == State::Playing) {
-      std::lock_guard<std::mutex> lk(s_cmdMutex);
+    std::lock_guard<std::mutex> lk(s_cmdMutex);
+
+    if (s_state == State::Playing && !s_pauseRequested) {
       s_pauseRequested = true;
     }
   }
@@ -1006,7 +974,6 @@ public:
     hns = std::max<int64_t>(0, std::min(hns, s_durationHns.load()));
     _queueSeek(hns);
   }
-
 
   void close() {
     {
@@ -1115,15 +1082,10 @@ private:
     attrs->Release();
 
     if (FAILED(hr)) {
-      VIDEO_LOGE("MFCreateSourceReaderFromURL failed: 0x%08X", (unsigned)hr);
+
       s_state = State::Error;
       return;
     }
-
-    VIDEO_LOGI("FIRST_VIDEO_STREAM sentinel = 0x%X",
-               (DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM);
-    VIDEO_LOGI("FIRST_AUDIO_STREAM sentinel = 0x%X",
-               (DWORD)MF_SOURCE_READER_FIRST_AUDIO_STREAM);
 
     // ── Configure video output: RGB24, native size ─────────────────────
     IMFMediaType *videoType = nullptr;
@@ -1156,9 +1118,6 @@ private:
       PropVariantClear(&pv);
     }
 
-    VIDEO_LOGI("Video: %dx%d, duration=%.2fs", s_videoWidth.load(),
-               s_videoHeight.load(), getDurationSeconds());
-
     // ── Configure audio ───────────────────────────────────────────────────
     bool hasAudio = _configureAudio(reader);
 
@@ -1173,17 +1132,14 @@ private:
           mt->GetMajorType(&major);
           if (major == MFMediaType_Video && videoStreamIdx == 0xFFFFFFFF) {
             videoStreamIdx = i;
-            VIDEO_LOGI("Video stream actual index = %u", i);
+
           } else if (major == MFMediaType_Audio &&
                      audioStreamIdx == 0xFFFFFFFF) {
             audioStreamIdx = i;
-            VIDEO_LOGI("Audio stream actual index = %u", i);
           }
           mt->Release();
         }
       }
-      VIDEO_LOGI("Using videoIdx=%u audioIdx=%u", videoStreamIdx,
-                 audioStreamIdx);
     }
 
     // ── Allocate frame buffer ─────────────────────────────────────────────
@@ -1215,7 +1171,6 @@ private:
     if (s_readyCallback)
       s_readyCallback(s_videoWidth.load(), s_videoHeight.load());
 
-
     s_state = State::Paused;
     FluxAudio::get().pause();
 
@@ -1223,7 +1178,7 @@ private:
       std::unique_lock<std::mutex> lk(s_cmdMutex);
       s_pauseCV.wait(lk, [this] { return s_resumeRequested || s_stopDecode; });
       if (s_stopDecode) {
-        VIDEO_LOGI("Stopped before first play, exiting decode loop");
+
         reader->Release();
         return;
       }
@@ -1243,8 +1198,6 @@ private:
     bool videoEOS = false;
     bool audioEOS = false;
 
-    VIDEO_LOGI("=== Entering main read loop ===");
-
     while (true) {
       loopIter++;
 
@@ -1253,7 +1206,7 @@ private:
         std::unique_lock<std::mutex> lk(s_cmdMutex);
 
         if (s_stopDecode) {
-          VIDEO_LOGI("Loop[%d]: s_stopDecode=true, breaking", loopIter);
+
           break;
         }
 
@@ -1261,7 +1214,7 @@ private:
           int64_t targetHns = s_seekTargetHns;
           s_seekPending = false;
           lk.unlock();
-          VIDEO_LOGI("Loop[%d]: seek to %.2fs", loopIter, targetHns / 1e7f);
+
           _doSeek(reader, targetHns);
           videoEOS = false;
           audioEOS = false;
@@ -1269,28 +1222,25 @@ private:
         }
 
         if (s_pauseRequested) {
-          VIDEO_LOGI("Loop[%d]: pause requested", loopIter);
+
           s_pauseRequested = false;
           s_state = State::Paused;
           FluxAudio::get().pause();
 
-          s_pauseCV.wait_for(lk, std::chrono::milliseconds(100), [this] {
-            return s_resumeRequested || s_stopDecode;
-          });
+          // wait — not wait_for — so we block until play() or close() actually
+          // arrives
+          s_pauseCV.wait(lk,
+                         [this] { return s_resumeRequested || s_stopDecode; });
 
           if (s_stopDecode) {
-            VIDEO_LOGI("Loop[%d]: stop during pause, breaking", loopIter);
             break;
           }
 
-          if (s_resumeRequested) {
-            s_resumeRequested = false;
-            s_state = State::Playing;
-            FluxAudio::get().resume();
-            s_clockBase = std::chrono::steady_clock::now();
-            s_clockBaseHns = s_positionHns.load();
-            VIDEO_LOGI("Loop[%d]: resumed", loopIter);
-          }
+          s_resumeRequested = false;
+          s_state = State::Playing;
+          FluxAudio::get().resume();
+          s_clockBase = std::chrono::steady_clock::now();
+          s_clockBaseHns = s_positionHns.load();
         }
       }
 
@@ -1303,15 +1253,8 @@ private:
                               &streamIndex, &flags, &timestamp, &sample);
 
       if (FAILED(hr)) {
-        VIDEO_LOGE("Loop[%d]: ReadSample FAILED hr=0x%08X, breaking", loopIter,
-                   (unsigned)hr);
-        break;
-      }
 
-      if (flags != 0) {
-        VIDEO_LOGI("Loop[%d]: stream=%u flags=0x%X pts=%.3fs sample=%s",
-                   loopIter, streamIndex, flags, timestamp / 1e7f,
-                   sample ? "yes" : "null");
+        break;
       }
 
       // ── EOS handling ──────────────────────────────────────────────────
@@ -1321,14 +1264,9 @@ private:
           sample = nullptr;
         }
 
-        VIDEO_LOGI("EOS on stream=%u (videoIdx=%u audioIdx=%u) videoEOS=%d "
-                   "audioEOS=%d",
-                   streamIndex, videoStreamIdx, audioStreamIdx, (int)videoEOS,
-                   (int)audioEOS);
-
         if (streamIndex == videoStreamIdx) {
           videoEOS = true;
-          VIDEO_LOGI("Video stream EOS — finishing. frames=%d", frameCount);
+
           s_state = State::Finished;
           bool expected = false;
           if (s_didFireFinish.compare_exchange_strong(expected, true))
@@ -1338,17 +1276,14 @@ private:
         } else {
 
           audioEOS = true;
-          VIDEO_LOGI("Audio stream EOS — deselecting stream %u, continuing "
-                     "video. audioSamples=%d",
-                     streamIndex, audioSampleCount);
+
           reader->SetStreamSelection(streamIndex, FALSE);
           continue;
         }
       }
 
       if (flags & MF_SOURCE_READERF_STREAMTICK) {
-        VIDEO_LOGI("Loop[%d]: stream tick on stream=%u (gap in data)", loopIter,
-                   streamIndex);
+
         if (sample) {
           sample->Release();
           sample = nullptr;
@@ -1357,8 +1292,7 @@ private:
       }
 
       if (!sample) {
-        VIDEO_LOGI("Loop[%d]: null sample stream=%u flags=0x%X, skipping",
-                   loopIter, streamIndex, flags);
+
         continue;
       }
 
@@ -1366,15 +1300,11 @@ private:
       if (streamIndex == videoStreamIdx) {
         frameCount++;
         if (frameCount <= 5 || frameCount % 60 == 0) {
-          VIDEO_LOGI("Loop[%d]: VIDEO frame #%d pts=%.3fs", loopIter,
-                     frameCount, timestamp / 1e7f);
         }
         _processVideoSample(sample, timestamp);
       } else if (streamIndex == audioStreamIdx && hasAudio && !audioEOS) {
         audioSampleCount++;
         if (audioSampleCount <= 3 || audioSampleCount % 200 == 0) {
-          VIDEO_LOGI("Loop[%d]: AUDIO sample #%d pts=%.3fs", loopIter,
-                     audioSampleCount, timestamp / 1e7f);
         }
         _processAudioSample(sample);
       }
@@ -1382,13 +1312,7 @@ private:
       sample->Release();
     }
 
-    VIDEO_LOGI("=== Read loop exited: iter=%d frames=%d audioSamples=%d "
-               "videoEOS=%d audioEOS=%d state=%d ===",
-               loopIter, frameCount, audioSampleCount, (int)videoEOS,
-               (int)audioEOS, (int)s_state.load());
-
     reader->Release();
-    VIDEO_LOGI("Decode loop exited");
   }
 
   // =========================================================================
@@ -1416,8 +1340,7 @@ private:
     audioType->Release();
 
     if (FAILED(hr)) {
-      VIDEO_LOGI("Audio config failed (0x%08X) — continuing without audio",
-                 (unsigned)hr);
+
       reader->SetStreamSelection((DWORD)MF_SOURCE_READER_FIRST_AUDIO_STREAM,
                                  FALSE);
       return false;
@@ -1433,7 +1356,7 @@ private:
       actual->GetUINT32(MF_MT_AUDIO_NUM_CHANNELS, &ch);
       s_audioSampleRate = (int)sr;
       s_audioChannels = (int)ch;
-      VIDEO_LOGI("Audio configured: %uHz %uch float32", sr, ch);
+
       actual->Release();
     }
     return true;
@@ -1467,45 +1390,43 @@ private:
     s_audioEOS = false;
 
     s_didFireFinish = false;
-
-    VIDEO_LOGI("Seeked to %.2fs", (float)targetHns / 1e7f);
   }
 
   // =========================================================================
   // VIDEO SAMPLE → frame buffer
   // =========================================================================
 
-void _processVideoSample(IMFSample *sample, LONGLONG timestamp) {
+  void _processVideoSample(IMFSample *sample, LONGLONG timestamp) {
     _syncToPresentation(timestamp);
     s_positionHns = timestamp;
 
     IMFMediaBuffer *buf = nullptr;
     if (FAILED(sample->ConvertToContiguousBuffer(&buf)))
-        return;
+      return;
 
     BYTE *data = nullptr;
     DWORD maxLen = 0, curLen = 0;
     if (SUCCEEDED(buf->Lock(&data, &maxLen, &curLen))) {
-        int w = s_frameWidth, h = s_frameHeight;
-        int expected = w * h * 3;
+      int w = s_frameWidth, h = s_frameHeight;
+      int expected = w * h * 3;
 
-        if ((int)curLen >= expected && expected > 0) {
-            std::vector<uint8_t> local(expected);
-            memcpy(local.data(), data, expected); 
-            buf->Unlock();
-            buf->Release();
-
-            {
-                std::lock_guard<std::mutex> lk(s_frameMutex);
-                s_frameData = std::move(local);
-                s_newFrame  = true;
-            }
-            return;
-        }
+      if ((int)curLen >= expected && expected > 0) {
+        std::vector<uint8_t> local(expected);
+        memcpy(local.data(), data, expected);
         buf->Unlock();
+        buf->Release();
+
+        {
+          std::lock_guard<std::mutex> lk(s_frameMutex);
+          s_frameData = std::move(local);
+          s_newFrame = true;
+        }
+        return;
+      }
+      buf->Unlock();
     }
     buf->Release();
-}
+  }
 
   // =========================================================================
   // AUDIO SAMPLE → ring buffer
@@ -1567,7 +1488,7 @@ void _processVideoSample(IMFSample *sample, LONGLONG timestamp) {
 
     // Sleep in 5ms chunks so stop/seek can interrupt promptly.
     // 1 HNS = 100 ns, so 5ms = 50,000 HNS.
-    while (sleepHns > 20000 && !s_stopDecode) {
+    while (sleepHns > 20000 && !s_stopDecode && !s_pauseRequested) {
       int64_t chunk = std::min(sleepHns, (int64_t)50000); // 5ms max per chunk
       std::this_thread::sleep_for(std::chrono::nanoseconds(chunk * 100));
 
@@ -1581,10 +1502,6 @@ void _processVideoSample(IMFSample *sample, LONGLONG timestamp) {
       // Log first few frames and any huge sleeps
       static int syncCount = 0;
       syncCount++;
-      if (syncCount <= 3 || sleepHns > 5000000 || sleepHns < -5000000) {
-        VIDEO_LOGI("Sync #%d: pts=%.3fs wall=%.3fs sleep=%.3fs", syncCount,
-                   framePtsHns / 1e7f, wallHns / 1e7f, sleepHns / 1e7f);
-      }
     }
     // If we're behind, present immediately (frames will be dropped naturally)
   }
@@ -1615,7 +1532,6 @@ void _processVideoSample(IMFSample *sample, LONGLONG timestamp) {
 
 #endif // _WIN32
 
-
 #pragma once
 #if defined(__linux__) && !defined(__ANDROID__)
 
@@ -1639,614 +1555,606 @@ extern "C" {
 
 #include "flux_audio.hpp"
 
-#define VIDEO_LOGI(fmt, ...)                                                   \
-    do { fprintf(stderr, "[FluxVideo] INFO  " fmt "\n", ##__VA_ARGS__); } while(0)
-#define VIDEO_LOGE(fmt, ...)                                                   \
-    do { fprintf(stderr, "[FluxVideo] ERROR " fmt "\n", ##__VA_ARGS__); } while(0)
-
 // ============================================================================
 // FluxVideo
 // ============================================================================
 
 class FluxVideo {
 public:
-    using FinishCallback = std::function<void()>;
+  using FinishCallback = std::function<void()>;
 
-    enum class State { Idle, Loading, Playing, Paused, Finished, Error };
+  enum class State { Idle, Loading, Playing, Paused, Finished, Error };
 
-    static FluxVideo& get() {
-        static FluxVideo instance;
-        return instance;
+  static FluxVideo &get() {
+    static FluxVideo instance;
+    return instance;
+  }
+
+  // ── Accessors ─────────────────────────────────────────────────────────────
+  State getState() const { return s_state.load(); }
+  bool isPlaying() const { return s_state == State::Playing; }
+  bool isPaused() const { return s_state == State::Paused; }
+  bool isFinished() const { return s_state == State::Finished; }
+  float getDurationSeconds() const { return s_durationUs.load() / 1e6f; }
+  float getPositionSeconds() const { return s_positionUs.load() / 1e6f; }
+  float getProgress() const {
+    int64_t dur = s_durationUs.load();
+    return dur > 0 ? std::min(1.f, (float)s_positionUs.load() / (float)dur)
+                   : 0.f;
+  }
+  int getVideoWidth() const { return s_videoWidth.load(); }
+  int getVideoHeight() const { return s_videoHeight.load(); }
+  bool hasNewFrame() const { return s_newFrame.load(); }
+
+  // ── Frame access (main / paint thread) ────────────────────────────────────
+  struct FrameLock {
+    std::unique_lock<std::mutex> lock;
+    const uint8_t *data = nullptr;
+    int width = 0;
+    int height = 0;
+    int stride = 0;
+  };
+
+  FrameLock lockFrame() {
+    FrameLock fl;
+    fl.lock = std::unique_lock<std::mutex>(s_frameMutex);
+    fl.data = s_frameData.data();
+    fl.width = s_frameWidth;
+    fl.height = s_frameHeight;
+    fl.stride = s_frameStride;
+    s_newFrame = false;
+    return fl;
+  }
+
+  // ── Callbacks ─────────────────────────────────────────────────────────────
+  void setOnFinished(FinishCallback cb) { s_finishCallback = std::move(cb); }
+  void setOnReady(std::function<void(int w, int h)> cb) {
+    s_readyCallback = std::move(cb);
+  }
+
+  // ── Volume ────────────────────────────────────────────────────────────────
+  void setVolume(float v) { FluxAudio::get().setVolume(v); }
+  float getVolume() const { return FluxAudio::get().getVolume(); }
+
+  // =========================================================================
+  // OPEN
+  // =========================================================================
+
+  bool open(const std::string &path) {
+    close();
+    s_state = State::Loading;
+    s_stopDecode = false;
+    s_seekPending = false;
+    s_didFireFinish = false;
+    s_pauseRequested = false;
+    s_resumeRequested = false;
+
+    s_decodeThread = std::thread(&FluxVideo::_decodeLoop, this, path);
+    return true;
+  }
+
+  // =========================================================================
+  // PLAYBACK CONTROL
+  // =========================================================================
+
+  void play() {
+    if (s_state == State::Paused || s_state == State::Loading) {
+      {
+        std::lock_guard<std::mutex> lk(s_cmdMutex);
+        s_resumeRequested = true;
+      }
+      s_pauseCV.notify_all();
     }
+  }
 
-    // ── Accessors ─────────────────────────────────────────────────────────────
-    State  getState()           const { return s_state.load(); }
-    bool   isPlaying()          const { return s_state == State::Playing; }
-    bool   isPaused()           const { return s_state == State::Paused;  }
-    bool   isFinished()         const { return s_state == State::Finished; }
-    float  getDurationSeconds() const { return s_durationUs.load() / 1e6f; }
-    float  getPositionSeconds() const { return s_positionUs.load() / 1e6f; }
-    float  getProgress()        const {
-        int64_t dur = s_durationUs.load();
-        return dur > 0 ? std::min(1.f, (float)s_positionUs.load() / (float)dur) : 0.f;
+  void pause() {
+    if (s_state == State::Playing) {
+      std::lock_guard<std::mutex> lk(s_cmdMutex);
+      s_pauseRequested = true;
     }
-    int  getVideoWidth()  const { return s_videoWidth.load();  }
-    int  getVideoHeight() const { return s_videoHeight.load(); }
-    bool hasNewFrame()    const { return s_newFrame.load();    }
+  }
 
-    // ── Frame access (main / paint thread) ────────────────────────────────────
-    struct FrameLock {
-        std::unique_lock<std::mutex> lock;
-        const uint8_t* data   = nullptr;
-        int            width  = 0;
-        int            height = 0;
-        int            stride = 0;
-    };
+  void seekToProgress(float p) {
+    int64_t us =
+        (int64_t)(std::max(0.f, std::min(1.f, p)) * s_durationUs.load());
+    _queueSeek(us);
+  }
 
-    FrameLock lockFrame() {
-        FrameLock fl;
-        fl.lock   = std::unique_lock<std::mutex>(s_frameMutex);
-        fl.data   = s_frameData.data();
-        fl.width  = s_frameWidth;
-        fl.height = s_frameHeight;
-        fl.stride = s_frameStride;
-        s_newFrame = false;
-        return fl;
+  void seekToSeconds(float secs) {
+    int64_t us = (int64_t)(secs * 1e6f);
+    us = std::max<int64_t>(0, std::min(us, s_durationUs.load()));
+    _queueSeek(us);
+  }
+
+  // =========================================================================
+  // CLOSE
+  // =========================================================================
+
+  void close() {
+    {
+      std::lock_guard<std::mutex> lk(s_cmdMutex);
+      s_stopDecode = true;
+      s_resumeRequested = true; // unblock any pause-wait
     }
+    s_pauseCV.notify_all();
 
-    // ── Callbacks ─────────────────────────────────────────────────────────────
-    void setOnFinished(FinishCallback cb)                       { s_finishCallback = std::move(cb); }
-    void setOnReady(std::function<void(int w, int h)> cb)       { s_readyCallback  = std::move(cb); }
+    if (s_decodeThread.joinable())
+      s_decodeThread.join();
 
-    // ── Volume ────────────────────────────────────────────────────────────────
-    void  setVolume(float v) { FluxAudio::get().setVolume(v); }
-    float getVolume()  const { return FluxAudio::get().getVolume(); }
+    FluxAudio::get().stopPlayback();
 
-    // =========================================================================
-    // OPEN
-    // =========================================================================
+    s_state = State::Idle;
+    s_positionUs = 0;
+    s_durationUs = 0;
+    s_newFrame = false;
+    s_videoWidth = 0;
+    s_videoHeight = 0;
+    s_stopDecode = false;
+  }
 
-    bool open(const std::string& path) {
-        close();
-        s_state      = State::Loading;
-        s_stopDecode = false;
-        s_seekPending      = false;
-        s_didFireFinish    = false;
-        s_pauseRequested   = false;
-        s_resumeRequested  = false;
-
-        s_decodeThread = std::thread(&FluxVideo::_decodeLoop, this, path);
-        return true;
-    }
-
-    // =========================================================================
-    // PLAYBACK CONTROL
-    // =========================================================================
-
-    void play() {
-        if (s_state == State::Paused || s_state == State::Loading) {
-            {
-                std::lock_guard<std::mutex> lk(s_cmdMutex);
-                s_resumeRequested = true;
-            }
-            s_pauseCV.notify_all();
-        }
-    }
-
-    void pause() {
-        if (s_state == State::Playing) {
-            std::lock_guard<std::mutex> lk(s_cmdMutex);
-            s_pauseRequested = true;
-        }
-    }
-
-    void seekToProgress(float p) {
-        int64_t us = (int64_t)(std::max(0.f, std::min(1.f, p)) * s_durationUs.load());
-        _queueSeek(us);
-    }
-
-    void seekToSeconds(float secs) {
-        int64_t us = (int64_t)(secs * 1e6f);
-        us = std::max<int64_t>(0, std::min(us, s_durationUs.load()));
-        _queueSeek(us);
-    }
-
-    // =========================================================================
-    // CLOSE
-    // =========================================================================
-
-    void close() {
-        {
-            std::lock_guard<std::mutex> lk(s_cmdMutex);
-            s_stopDecode      = true;
-            s_resumeRequested = true; // unblock any pause-wait
-        }
-        s_pauseCV.notify_all();
-
-        if (s_decodeThread.joinable())
-            s_decodeThread.join();
-
-        FluxAudio::get().stopPlayback();
-
-        s_state       = State::Idle;
-        s_positionUs  = 0;
-        s_durationUs  = 0;
-        s_newFrame    = false;
-        s_videoWidth  = 0;
-        s_videoHeight = 0;
-        s_stopDecode  = false;
-    }
-
-    void shutdown() { close(); }
+  void shutdown() { close(); }
 
 private:
-    FluxVideo()  = default;
-    ~FluxVideo() { close(); }
+  FluxVideo() = default;
+  ~FluxVideo() { close(); }
 
-    // ── State ─────────────────────────────────────────────────────────────────
-    std::atomic<State>   s_state      {State::Idle};
-    std::atomic<int64_t> s_positionUs {0};
-    std::atomic<int64_t> s_durationUs {0};
-    std::atomic<int>     s_videoWidth {0};
-    std::atomic<int>     s_videoHeight{0};
-    std::atomic<bool>    s_newFrame   {false};
+  // ── State ─────────────────────────────────────────────────────────────────
+  std::atomic<State> s_state{State::Idle};
+  std::atomic<int64_t> s_positionUs{0};
+  std::atomic<int64_t> s_durationUs{0};
+  std::atomic<int> s_videoWidth{0};
+  std::atomic<int> s_videoHeight{0};
+  std::atomic<bool> s_newFrame{false};
 
-    // ── Frame double-buffer ───────────────────────────────────────────────────
-    std::mutex           s_frameMutex;
-    std::vector<uint8_t> s_frameData;
-    int                  s_frameWidth  = 0;
-    int                  s_frameHeight = 0;
-    int                  s_frameStride = 0;
+  // ── Frame double-buffer ───────────────────────────────────────────────────
+  std::mutex s_frameMutex;
+  std::vector<uint8_t> s_frameData;
+  int s_frameWidth = 0;
+  int s_frameHeight = 0;
+  int s_frameStride = 0;
 
-    // ── Audio ring buffer ─────────────────────────────────────────────────────
-    // ~4 s at 48 kHz stereo (stored as interleaved float pairs → mixed to mono
-    // by _pullAudio).  We allocate per-open in _decodeLoop.
-    static constexpr int kAudioRing = 48000 * 4 * 2; // 2 channels worst case
-    std::vector<float>   s_audioBuf;
-    int                  s_audioWrite    = 0;
-    int                  s_audioRead     = 0;
-    std::mutex           s_audioMutex;
-    int                  s_audioChannels  = 1;
-    int                  s_audioSampleRate = 44100;
+  // ── Audio ring buffer ─────────────────────────────────────────────────────
+  // ~4 s at 48 kHz stereo (stored as interleaved float pairs → mixed to mono
+  // by _pullAudio).  We allocate per-open in _decodeLoop.
+  static constexpr int kAudioRing = 48000 * 4 * 2; // 2 channels worst case
+  std::vector<float> s_audioBuf;
+  int s_audioWrite = 0;
+  int s_audioRead = 0;
+  std::mutex s_audioMutex;
+  int s_audioChannels = 1;
+  int s_audioSampleRate = 44100;
 
-    // ── Command channel ───────────────────────────────────────────────────────
-    std::mutex              s_cmdMutex;
-    std::condition_variable s_pauseCV;
-    bool s_pauseRequested  = false;
-    bool s_resumeRequested = false;
-    bool s_stopDecode      = false;
-    bool s_seekPending     = false;
-    int64_t s_seekTargetUs = 0;
+  // ── Command channel ───────────────────────────────────────────────────────
+  std::mutex s_cmdMutex;
+  std::condition_variable s_pauseCV;
+  bool s_pauseRequested = false;
+  bool s_resumeRequested = false;
+  bool s_stopDecode = false;
+  bool s_seekPending = false;
+  int64_t s_seekTargetUs = 0;
 
-    // ── Thread ────────────────────────────────────────────────────────────────
-    std::thread         s_decodeThread;
-    std::atomic<bool>   s_didFireFinish{false};
+  // ── Thread ────────────────────────────────────────────────────────────────
+  std::thread s_decodeThread;
+  std::atomic<bool> s_didFireFinish{false};
 
-    // ── Callbacks ─────────────────────────────────────────────────────────────
-    FinishCallback                      s_finishCallback;
-    std::function<void(int w, int h)>   s_readyCallback;
+  // ── Callbacks ─────────────────────────────────────────────────────────────
+  FinishCallback s_finishCallback;
+  std::function<void(int w, int h)> s_readyCallback;
 
-    // ── Clock ─────────────────────────────────────────────────────────────────
-    std::chrono::steady_clock::time_point s_clockBase;
-    int64_t                               s_clockBaseUs = 0;
+  // ── Clock ─────────────────────────────────────────────────────────────────
+  std::chrono::steady_clock::time_point s_clockBase;
+  int64_t s_clockBaseUs = 0;
 
-    void _queueSeek(int64_t us) {
-        std::lock_guard<std::mutex> lk(s_cmdMutex);
-        s_seekTargetUs = us;
-        s_seekPending  = true;
-        s_pauseCV.notify_all();
+  void _queueSeek(int64_t us) {
+    std::lock_guard<std::mutex> lk(s_cmdMutex);
+    s_seekTargetUs = us;
+    s_seekPending = true;
+    s_pauseCV.notify_all();
+  }
+
+  // =========================================================================
+  // DECODE LOOP
+  // =========================================================================
+
+  void _decodeLoop(std::string path) {
+
+    // ── Open container ────────────────────────────────────────────────────
+    AVFormatContext *fmtCtx = nullptr;
+    if (avformat_open_input(&fmtCtx, path.c_str(), nullptr, nullptr) < 0) {
+
+      s_state = State::Error;
+      return;
+    }
+    if (avformat_find_stream_info(fmtCtx, nullptr) < 0) {
+
+      avformat_close_input(&fmtCtx);
+      s_state = State::Error;
+      return;
     }
 
-    // =========================================================================
-    // DECODE LOOP
-    // =========================================================================
+    // ── Find streams ──────────────────────────────────────────────────────
+    int videoStreamIdx = -1, audioStreamIdx = -1;
+    for (unsigned i = 0; i < fmtCtx->nb_streams; i++) {
+      AVMediaType type = fmtCtx->streams[i]->codecpar->codec_type;
+      if (type == AVMEDIA_TYPE_VIDEO && videoStreamIdx < 0)
+        videoStreamIdx = (int)i;
+      if (type == AVMEDIA_TYPE_AUDIO && audioStreamIdx < 0)
+        audioStreamIdx = (int)i;
+    }
+    if (videoStreamIdx < 0) {
 
-    void _decodeLoop(std::string path) {
-
-        // ── Open container ────────────────────────────────────────────────────
-        AVFormatContext* fmtCtx = nullptr;
-        if (avformat_open_input(&fmtCtx, path.c_str(), nullptr, nullptr) < 0) {
-            VIDEO_LOGE("avformat_open_input failed: %s", path.c_str());
-            s_state = State::Error;
-            return;
-        }
-        if (avformat_find_stream_info(fmtCtx, nullptr) < 0) {
-            VIDEO_LOGE("avformat_find_stream_info failed");
-            avformat_close_input(&fmtCtx);
-            s_state = State::Error;
-            return;
-        }
-
-        // ── Find streams ──────────────────────────────────────────────────────
-        int videoStreamIdx = -1, audioStreamIdx = -1;
-        for (unsigned i = 0; i < fmtCtx->nb_streams; i++) {
-            AVMediaType type = fmtCtx->streams[i]->codecpar->codec_type;
-            if (type == AVMEDIA_TYPE_VIDEO && videoStreamIdx < 0) videoStreamIdx = (int)i;
-            if (type == AVMEDIA_TYPE_AUDIO && audioStreamIdx < 0) audioStreamIdx = (int)i;
-        }
-        if (videoStreamIdx < 0) {
-            VIDEO_LOGE("No video stream found");
-            avformat_close_input(&fmtCtx);
-            s_state = State::Error;
-            return;
-        }
-
-        // Duration (microseconds)
-        if (fmtCtx->duration != AV_NOPTS_VALUE)
-            s_durationUs = fmtCtx->duration; // AV_TIME_BASE = 1 000 000 = µs
-
-        // ── Open video codec ──────────────────────────────────────────────────
-        AVStream*          vStream = fmtCtx->streams[videoStreamIdx];
-        const AVCodec*     vCodec  = avcodec_find_decoder(vStream->codecpar->codec_id);
-        AVCodecContext*    vCtx    = avcodec_alloc_context3(vCodec);
-        avcodec_parameters_to_context(vCtx, vStream->codecpar);
-        if (avcodec_open2(vCtx, vCodec, nullptr) < 0) {
-            VIDEO_LOGE("avcodec_open2 (video) failed");
-            avcodec_free_context(&vCtx);
-            avformat_close_input(&fmtCtx);
-            s_state = State::Error;
-            return;
-        }
-
-        int vidW = vCtx->width, vidH = vCtx->height;
-        s_videoWidth  = vidW;
-        s_videoHeight = vidH;
-        VIDEO_LOGI("Video: %dx%d codec=%s", vidW, vidH, vCodec->name);
-
-        // ── SwsContext: YUV → RGB24 ───────────────────────────────────────────
-        SwsContext* swsCtx = sws_getContext(
-            vidW, vidH, vCtx->pix_fmt,
-            vidW, vidH, AV_PIX_FMT_RGB24,
-            SWS_BILINEAR, nullptr, nullptr, nullptr);
-        if (!swsCtx) {
-            VIDEO_LOGE("sws_getContext failed");
-            avcodec_free_context(&vCtx);
-            avformat_close_input(&fmtCtx);
-            s_state = State::Error;
-            return;
-        }
-
-        // ── Open audio codec (optional) ───────────────────────────────────────
-        AVCodecContext* aCtx = nullptr;
-        bool hasAudio = false;
-        if (audioStreamIdx >= 0) {
-            AVStream*      aStream = fmtCtx->streams[audioStreamIdx];
-            const AVCodec* aCodec  = avcodec_find_decoder(aStream->codecpar->codec_id);
-            aCtx = avcodec_alloc_context3(aCodec);
-            avcodec_parameters_to_context(aCtx, aStream->codecpar);
-            if (avcodec_open2(aCtx, aCodec, nullptr) == 0) {
-                s_audioSampleRate = aCtx->sample_rate;
-                s_audioChannels   = aCtx->ch_layout.nb_channels;
-                hasAudio = true;
-                VIDEO_LOGI("Audio: %dHz %dch codec=%s",
-                    s_audioSampleRate, s_audioChannels, aCodec->name);
-            } else {
-                avcodec_free_context(&aCtx);
-                aCtx = nullptr;
-            }
-        }
-
-        // ── Allocate frame buffer ─────────────────────────────────────────────
-        {
-            std::lock_guard<std::mutex> lk(s_frameMutex);
-            s_frameWidth  = vidW;
-            s_frameHeight = vidH;
-            s_frameStride = vidW * 3; // RGB24
-            s_frameData.assign((size_t)(vidW * vidH * 3), 0);
-        }
-
-        // ── Allocate audio ring ───────────────────────────────────────────────
-        if (hasAudio) {
-            std::lock_guard<std::mutex> lk(s_audioMutex);
-            s_audioBuf.assign(kAudioRing, 0.f);
-            s_audioWrite = 0;
-            s_audioRead  = 0;
-        }
-
-        // ── Reusable AVFrames & packet ────────────────────────────────────────
-        AVFrame*  vFrame  = av_frame_alloc();
-        AVFrame*  aFrame  = av_frame_alloc();
-        AVPacket* pkt     = av_packet_alloc();
-
-        // RGB destination for sws_scale
-        std::vector<uint8_t> rgbBuf((size_t)(vidW * vidH * 3));
-        uint8_t*  rgbData[1]     = { rgbBuf.data() };
-        int       rgbLinesize[1] = { vidW * 3 };
-
-        // ── Start audio stream ────────────────────────────────────────────────
-        if (hasAudio) {
-            FluxAudio::get().playStream(
-                [this](float* buf, int frames) -> int {
-                    return _pullAudio(buf, frames);
-                },
-                s_audioSampleRate);
-        }
-
-        // ── Signal ready ──────────────────────────────────────────────────────
-        if (s_readyCallback)
-            s_readyCallback(vidW, vidH);
-
-        // ── Wait for first play() call ────────────────────────────────────────
-        s_state = State::Paused;
-        FluxAudio::get().pause();
-        {
-            std::unique_lock<std::mutex> lk(s_cmdMutex);
-            s_pauseCV.wait(lk, [this] { return s_resumeRequested || s_stopDecode; });
-            if (s_stopDecode) goto cleanup;
-            s_resumeRequested = false;
-            s_state = State::Playing;
-            FluxAudio::get().resume();
-        }
-
-        // Reset clock
-        s_clockBase   = std::chrono::steady_clock::now();
-        s_clockBaseUs = 0;
-
-        VIDEO_LOGI("=== Entering main decode loop ===");
-
-        // ── Main decode loop ──────────────────────────────────────────────────
-        while (true) {
-
-            // ── Command processing ────────────────────────────────────────────
-            {
-                std::unique_lock<std::mutex> lk(s_cmdMutex);
-
-                if (s_stopDecode) break;
-
-                if (s_seekPending) {
-                    int64_t target = s_seekTargetUs;
-                    s_seekPending  = false;
-                    lk.unlock();
-                    _doSeek(fmtCtx, vCtx, aCtx, videoStreamIdx, audioStreamIdx, target);
-                    continue;
-                }
-
-                if (s_pauseRequested) {
-                    s_pauseRequested = false;
-                    s_state = State::Paused;
-                    FluxAudio::get().pause();
-
-                    s_pauseCV.wait(lk, [this] {
-                        return s_resumeRequested || s_stopDecode || s_seekPending;
-                    });
-
-                    if (s_stopDecode) break;
-
-                    if (s_seekPending) {
-                        int64_t target = s_seekTargetUs;
-                        s_seekPending  = false;
-                        lk.unlock();
-                        _doSeek(fmtCtx, vCtx, aCtx, videoStreamIdx, audioStreamIdx, target);
-                        continue;
-                    }
-
-                    s_resumeRequested = false;
-                    s_state = State::Playing;
-                    FluxAudio::get().resume();
-                    s_clockBase   = std::chrono::steady_clock::now();
-                    s_clockBaseUs = s_positionUs.load();
-                }
-            }
-
-            // ── Read one packet ───────────────────────────────────────────────
-            int ret = av_read_frame(fmtCtx, pkt);
-            if (ret == AVERROR_EOF) {
-                // Flush video decoder
-                avcodec_send_packet(vCtx, nullptr);
-                while (avcodec_receive_frame(vCtx, vFrame) == 0)
-                    _processVideoFrame(vFrame, vCtx, swsCtx, rgbData, rgbLinesize, vStream);
-                // EOS
-                s_state = State::Finished;
-                VIDEO_LOGI("EOS reached");
-                {
-                    bool expected = false;
-                    if (s_didFireFinish.compare_exchange_strong(expected, true))
-                        if (s_finishCallback)
-                            s_finishCallback();
-                }
-                break;
-            }
-            if (ret < 0) {
-                VIDEO_LOGE("av_read_frame error: %d", ret);
-                break;
-            }
-
-            // ── Route by stream ───────────────────────────────────────────────
-            if (pkt->stream_index == videoStreamIdx) {
-                avcodec_send_packet(vCtx, pkt);
-                while (avcodec_receive_frame(vCtx, vFrame) == 0)
-                    _processVideoFrame(vFrame, vCtx, swsCtx, rgbData, rgbLinesize, vStream);
-            } else if (pkt->stream_index == audioStreamIdx && hasAudio) {
-                avcodec_send_packet(aCtx, pkt);
-                while (avcodec_receive_frame(aCtx, aFrame) == 0)
-                    _processAudioFrame(aFrame);
-            }
-
-            av_packet_unref(pkt);
-        }
-
-    cleanup:
-        av_packet_free(&pkt);
-        av_frame_free(&vFrame);
-        av_frame_free(&aFrame);
-        sws_freeContext(swsCtx);
-        avcodec_free_context(&vCtx);
-        if (aCtx) avcodec_free_context(&aCtx);
-        avformat_close_input(&fmtCtx);
-        VIDEO_LOGI("Decode loop exited");
+      avformat_close_input(&fmtCtx);
+      s_state = State::Error;
+      return;
     }
 
-    // =========================================================================
-    // VIDEO FRAME PROCESSING
-    // =========================================================================
+    // Duration (microseconds)
+    if (fmtCtx->duration != AV_NOPTS_VALUE)
+      s_durationUs = fmtCtx->duration; // AV_TIME_BASE = 1 000 000 = µs
 
-    void _processVideoFrame(AVFrame*     frame,
-                            AVCodecContext* vCtx,
-                            SwsContext*  swsCtx,
-                            uint8_t**    rgbData,
-                            int*         rgbLinesize,
-                            AVStream*    vStream)
+    // ── Open video codec ──────────────────────────────────────────────────
+    AVStream *vStream = fmtCtx->streams[videoStreamIdx];
+    const AVCodec *vCodec = avcodec_find_decoder(vStream->codecpar->codec_id);
+    AVCodecContext *vCtx = avcodec_alloc_context3(vCodec);
+    avcodec_parameters_to_context(vCtx, vStream->codecpar);
+    if (avcodec_open2(vCtx, vCodec, nullptr) < 0) {
+
+      avcodec_free_context(&vCtx);
+      avformat_close_input(&fmtCtx);
+      s_state = State::Error;
+      return;
+    }
+
+    int vidW = vCtx->width, vidH = vCtx->height;
+    s_videoWidth = vidW;
+    s_videoHeight = vidH;
+
+    // ── SwsContext: YUV → RGB24 ───────────────────────────────────────────
+    SwsContext *swsCtx =
+        sws_getContext(vidW, vidH, vCtx->pix_fmt, vidW, vidH, AV_PIX_FMT_RGB24,
+                       SWS_BILINEAR, nullptr, nullptr, nullptr);
+    if (!swsCtx) {
+
+      avcodec_free_context(&vCtx);
+      avformat_close_input(&fmtCtx);
+      s_state = State::Error;
+      return;
+    }
+
+    // ── Open audio codec (optional) ───────────────────────────────────────
+    AVCodecContext *aCtx = nullptr;
+    bool hasAudio = false;
+    if (audioStreamIdx >= 0) {
+      AVStream *aStream = fmtCtx->streams[audioStreamIdx];
+      const AVCodec *aCodec = avcodec_find_decoder(aStream->codecpar->codec_id);
+      aCtx = avcodec_alloc_context3(aCodec);
+      avcodec_parameters_to_context(aCtx, aStream->codecpar);
+      if (avcodec_open2(aCtx, aCodec, nullptr) == 0) {
+        s_audioSampleRate = aCtx->sample_rate;
+        s_audioChannels = aCtx->ch_layout.nb_channels;
+        hasAudio = true;
+
+      } else {
+        avcodec_free_context(&aCtx);
+        aCtx = nullptr;
+      }
+    }
+
+    // ── Allocate frame buffer ─────────────────────────────────────────────
     {
-        // Convert PTS to microseconds
-        int64_t pts = frame->best_effort_timestamp;
-        if (pts == AV_NOPTS_VALUE) pts = frame->pts;
-        int64_t ptsUs = av_rescale_q(pts, vStream->time_base, {1, 1000000});
-
-        // A/V sync sleep
-        _syncToPresentation(ptsUs);
-        s_positionUs = ptsUs;
-
-        // YUV → RGB24
-        sws_scale(swsCtx,
-                  frame->data,    frame->linesize, 0, vCtx->height,
-                  rgbData,        rgbLinesize);
-
-        // Copy into double-buffer
-        int w = s_frameWidth, h = s_frameHeight;
-        int expected = w * h * 3;
-        if (expected > 0) {
-            std::vector<uint8_t> local(rgbData[0], rgbData[0] + expected);
-            std::lock_guard<std::mutex> lk(s_frameMutex);
-            s_frameData = std::move(local);
-            s_newFrame  = true;
-        }
+      std::lock_guard<std::mutex> lk(s_frameMutex);
+      s_frameWidth = vidW;
+      s_frameHeight = vidH;
+      s_frameStride = vidW * 3; // RGB24
+      s_frameData.assign((size_t)(vidW * vidH * 3), 0);
     }
 
-    // =========================================================================
-    // AUDIO FRAME PROCESSING
-    // =========================================================================
-
-    void _processAudioFrame(AVFrame* frame) {
-        // FFmpeg may give us planar (FLTP) or packed (FLT/S16 etc.) audio.
-        // We resample everything to float mono manually.
-        int   ch     = s_audioChannels;
-        int   frames = frame->nb_samples;
-        bool  isPlanar = av_sample_fmt_is_planar(
-                            (AVSampleFormat)frame->format) != 0;
-        bool  isFloat  = (frame->format == AV_SAMPLE_FMT_FLTP ||
-                          frame->format == AV_SAMPLE_FMT_FLT);
-        bool  isS16    = (frame->format == AV_SAMPLE_FMT_S16P ||
-                          frame->format == AV_SAMPLE_FMT_S16);
-
-        std::lock_guard<std::mutex> lk(s_audioMutex);
-        int wr = s_audioWrite;
-        int rd = s_audioRead;
-        int space = kAudioRing - (wr - rd);
-        frames = std::min(frames, space); // drop if ring is full
-
-        for (int i = 0; i < frames; i++) {
-            float sum = 0.f;
-            for (int c = 0; c < ch; c++) {
-                if (isFloat) {
-                    if (isPlanar) {
-                        const float* plane = (const float*)frame->data[c];
-                        sum += plane[i];
-                    } else {
-                        const float* packed = (const float*)frame->data[0];
-                        sum += packed[i * ch + c];
-                    }
-                } else if (isS16) {
-                    if (isPlanar) {
-                        const int16_t* plane = (const int16_t*)frame->data[c];
-                        sum += plane[i] / 32768.f;
-                    } else {
-                        const int16_t* packed = (const int16_t*)frame->data[0];
-                        sum += packed[i * ch + c] / 32768.f;
-                    }
-                }
-                // Other formats: silence (extend as needed)
-            }
-            float mono = sum / (float)ch;
-            if (mono >  1.f) mono =  1.f;
-            if (mono < -1.f) mono = -1.f;
-            s_audioBuf[wr % kAudioRing] = mono;
-            wr++;
-        }
-        s_audioWrite = wr;
+    // ── Allocate audio ring ───────────────────────────────────────────────
+    if (hasAudio) {
+      std::lock_guard<std::mutex> lk(s_audioMutex);
+      s_audioBuf.assign(kAudioRing, 0.f);
+      s_audioWrite = 0;
+      s_audioRead = 0;
     }
 
-    // =========================================================================
-    // AUDIO PULL (FluxAudio stream callback — audio thread)
-    // =========================================================================
+    // ── Reusable AVFrames & packet ────────────────────────────────────────
+    AVFrame *vFrame = av_frame_alloc();
+    AVFrame *aFrame = av_frame_alloc();
+    AVPacket *pkt = av_packet_alloc();
 
-    int _pullAudio(float* buf, int frames) {
-        std::lock_guard<std::mutex> lk(s_audioMutex);
-        int rd    = s_audioRead;
-        int wr    = s_audioWrite;
-        int avail = wr - rd;
-        int toCopy = std::min(frames, avail);
+    // RGB destination for sws_scale
+    std::vector<uint8_t> rgbBuf((size_t)(vidW * vidH * 3));
+    uint8_t *rgbData[1] = {rgbBuf.data()};
+    int rgbLinesize[1] = {vidW * 3};
 
-        for (int i = 0; i < toCopy; i++)
-            buf[i] = s_audioBuf[(size_t)((rd + i) % kAudioRing)];
-        for (int i = toCopy; i < frames; i++)
-            buf[i] = 0.f; // underrun: silence
-
-        s_audioRead = rd + toCopy;
-        // Keep stream alive even on underrun (return `frames` not `toCopy`)
-        return frames;
+    // ── Start audio stream ────────────────────────────────────────────────
+    if (hasAudio) {
+      FluxAudio::get().playStream(
+          [this](float *buf, int frames) -> int {
+            return _pullAudio(buf, frames);
+          },
+          s_audioSampleRate);
     }
 
-    // =========================================================================
-    // SEEK
-    // =========================================================================
+    // ── Signal ready ──────────────────────────────────────────────────────
+    if (s_readyCallback)
+      s_readyCallback(vidW, vidH);
 
-    void _doSeek(AVFormatContext* fmtCtx,
-                 AVCodecContext*  vCtx,
-                 AVCodecContext*  aCtx,
-                 int              videoStreamIdx,
-                 int              audioStreamIdx,
-                 int64_t          targetUs)
+    // ── Wait for first play() call ────────────────────────────────────────
+    s_state = State::Paused;
+    FluxAudio::get().pause();
     {
-        // av_seek_frame wants PTS in stream time base
-        int64_t ts = av_rescale_q(targetUs, {1, 1000000},
-                                  fmtCtx->streams[videoStreamIdx]->time_base);
-        av_seek_frame(fmtCtx, videoStreamIdx, ts, AVSEEK_FLAG_BACKWARD);
+      std::unique_lock<std::mutex> lk(s_cmdMutex);
+      s_pauseCV.wait(lk, [this] { return s_resumeRequested || s_stopDecode; });
+      if (s_stopDecode)
+        goto cleanup;
+      s_resumeRequested = false;
+      s_state = State::Playing;
+      FluxAudio::get().resume();
+    }
 
-        avcodec_flush_buffers(vCtx);
-        if (aCtx) avcodec_flush_buffers(aCtx);
+    // Reset clock
+    s_clockBase = std::chrono::steady_clock::now();
+    s_clockBaseUs = 0;
 
-        // Flush audio ring
+    // ── Main decode loop ──────────────────────────────────────────────────
+    while (true) {
+
+      // ── Command processing ────────────────────────────────────────────
+      {
+        std::unique_lock<std::mutex> lk(s_cmdMutex);
+
+        if (s_stopDecode)
+          break;
+
+        if (s_seekPending) {
+          int64_t target = s_seekTargetUs;
+          s_seekPending = false;
+          lk.unlock();
+          _doSeek(fmtCtx, vCtx, aCtx, videoStreamIdx, audioStreamIdx, target);
+          continue;
+        }
+
+        if (s_pauseRequested) {
+          s_pauseRequested = false;
+          s_state = State::Paused;
+          FluxAudio::get().pause();
+
+          s_pauseCV.wait(lk, [this] {
+            return s_resumeRequested || s_stopDecode || s_seekPending;
+          });
+
+          if (s_stopDecode)
+            break;
+
+          if (s_seekPending) {
+            int64_t target = s_seekTargetUs;
+            s_seekPending = false;
+            lk.unlock();
+            _doSeek(fmtCtx, vCtx, aCtx, videoStreamIdx, audioStreamIdx, target);
+            continue;
+          }
+
+          s_resumeRequested = false;
+          s_state = State::Playing;
+          FluxAudio::get().resume();
+          s_clockBase = std::chrono::steady_clock::now();
+          s_clockBaseUs = s_positionUs.load();
+        }
+      }
+
+      // ── Read one packet ───────────────────────────────────────────────
+      int ret = av_read_frame(fmtCtx, pkt);
+      if (ret == AVERROR_EOF) {
+        // Flush video decoder
+        avcodec_send_packet(vCtx, nullptr);
+        while (avcodec_receive_frame(vCtx, vFrame) == 0)
+          _processVideoFrame(vFrame, vCtx, swsCtx, rgbData, rgbLinesize,
+                             vStream);
+        // EOS
+        s_state = State::Finished;
+
         {
-            std::lock_guard<std::mutex> lk(s_audioMutex);
-            s_audioWrite = 0;
-            s_audioRead  = 0;
+          bool expected = false;
+          if (s_didFireFinish.compare_exchange_strong(expected, true))
+            if (s_finishCallback)
+              s_finishCallback();
         }
-        FluxAudio::get().seekToSeconds((float)targetUs / 1e6f);
+        break;
+      }
+      if (ret < 0) {
 
-        // Re-sync clock
-        s_clockBase   = std::chrono::steady_clock::now();
-        s_clockBaseUs = targetUs;
-        s_positionUs  = targetUs;
-        s_didFireFinish = false;
+        break;
+      }
 
-        VIDEO_LOGI("Seeked to %.2fs", (float)targetUs / 1e6f);
+      // ── Route by stream ───────────────────────────────────────────────
+      if (pkt->stream_index == videoStreamIdx) {
+        avcodec_send_packet(vCtx, pkt);
+        while (avcodec_receive_frame(vCtx, vFrame) == 0)
+          _processVideoFrame(vFrame, vCtx, swsCtx, rgbData, rgbLinesize,
+                             vStream);
+      } else if (pkt->stream_index == audioStreamIdx && hasAudio) {
+        avcodec_send_packet(aCtx, pkt);
+        while (avcodec_receive_frame(aCtx, aFrame) == 0)
+          _processAudioFrame(aFrame);
+      }
+
+      av_packet_unref(pkt);
     }
 
-    // =========================================================================
-    // A/V SYNC — interruptible sleep in 5 ms chunks
-    // =========================================================================
+  cleanup:
+    av_packet_free(&pkt);
+    av_frame_free(&vFrame);
+    av_frame_free(&aFrame);
+    sws_freeContext(swsCtx);
+    avcodec_free_context(&vCtx);
+    if (aCtx)
+      avcodec_free_context(&aCtx);
+    avformat_close_input(&fmtCtx);
+  }
 
-    void _syncToPresentation(int64_t framePtsUs) {
-        auto now = std::chrono::steady_clock::now();
-        int64_t wallUs = std::chrono::duration_cast<std::chrono::microseconds>(
-                             now - s_clockBase).count();
-        int64_t targetUs = framePtsUs - s_clockBaseUs;
-        int64_t sleepUs  = targetUs - wallUs;
+  // =========================================================================
+  // VIDEO FRAME PROCESSING
+  // =========================================================================
 
-        while (sleepUs > 2000 && !s_stopDecode) {
-            int64_t chunk = std::min(sleepUs, (int64_t)5000); // 5 ms max
-            std::this_thread::sleep_for(std::chrono::microseconds(chunk));
+  void _processVideoFrame(AVFrame *frame, AVCodecContext *vCtx,
+                          SwsContext *swsCtx, uint8_t **rgbData,
+                          int *rgbLinesize, AVStream *vStream) {
+    // Convert PTS to microseconds
+    int64_t pts = frame->best_effort_timestamp;
+    if (pts == AV_NOPTS_VALUE)
+      pts = frame->pts;
+    int64_t ptsUs = av_rescale_q(pts, vStream->time_base, {1, 1000000});
 
-            now     = std::chrono::steady_clock::now();
-            wallUs  = std::chrono::duration_cast<std::chrono::microseconds>(
-                          now - s_clockBase).count();
-            sleepUs = targetUs - wallUs;
-        }
-        // Behind schedule → present immediately (natural frame drop)
+    // A/V sync sleep
+    _syncToPresentation(ptsUs);
+    s_positionUs = ptsUs;
+
+    // YUV → RGB24
+    sws_scale(swsCtx, frame->data, frame->linesize, 0, vCtx->height, rgbData,
+              rgbLinesize);
+
+    // Copy into double-buffer
+    int w = s_frameWidth, h = s_frameHeight;
+    int expected = w * h * 3;
+    if (expected > 0) {
+      std::vector<uint8_t> local(rgbData[0], rgbData[0] + expected);
+      std::lock_guard<std::mutex> lk(s_frameMutex);
+      s_frameData = std::move(local);
+      s_newFrame = true;
     }
+  }
+
+  // =========================================================================
+  // AUDIO FRAME PROCESSING
+  // =========================================================================
+
+  void _processAudioFrame(AVFrame *frame) {
+    // FFmpeg may give us planar (FLTP) or packed (FLT/S16 etc.) audio.
+    // We resample everything to float mono manually.
+    int ch = s_audioChannels;
+    int frames = frame->nb_samples;
+    bool isPlanar = av_sample_fmt_is_planar((AVSampleFormat)frame->format) != 0;
+    bool isFloat = (frame->format == AV_SAMPLE_FMT_FLTP ||
+                    frame->format == AV_SAMPLE_FMT_FLT);
+    bool isS16 = (frame->format == AV_SAMPLE_FMT_S16P ||
+                  frame->format == AV_SAMPLE_FMT_S16);
+
+    std::lock_guard<std::mutex> lk(s_audioMutex);
+    int wr = s_audioWrite;
+    int rd = s_audioRead;
+    int space = kAudioRing - (wr - rd);
+    frames = std::min(frames, space); // drop if ring is full
+
+    for (int i = 0; i < frames; i++) {
+      float sum = 0.f;
+      for (int c = 0; c < ch; c++) {
+        if (isFloat) {
+          if (isPlanar) {
+            const float *plane = (const float *)frame->data[c];
+            sum += plane[i];
+          } else {
+            const float *packed = (const float *)frame->data[0];
+            sum += packed[i * ch + c];
+          }
+        } else if (isS16) {
+          if (isPlanar) {
+            const int16_t *plane = (const int16_t *)frame->data[c];
+            sum += plane[i] / 32768.f;
+          } else {
+            const int16_t *packed = (const int16_t *)frame->data[0];
+            sum += packed[i * ch + c] / 32768.f;
+          }
+        }
+        // Other formats: silence (extend as needed)
+      }
+      float mono = sum / (float)ch;
+      if (mono > 1.f)
+        mono = 1.f;
+      if (mono < -1.f)
+        mono = -1.f;
+      s_audioBuf[wr % kAudioRing] = mono;
+      wr++;
+    }
+    s_audioWrite = wr;
+  }
+
+  // =========================================================================
+  // AUDIO PULL (FluxAudio stream callback — audio thread)
+  // =========================================================================
+
+  int _pullAudio(float *buf, int frames) {
+    std::lock_guard<std::mutex> lk(s_audioMutex);
+    int rd = s_audioRead;
+    int wr = s_audioWrite;
+    int avail = wr - rd;
+    int toCopy = std::min(frames, avail);
+
+    for (int i = 0; i < toCopy; i++)
+      buf[i] = s_audioBuf[(size_t)((rd + i) % kAudioRing)];
+    for (int i = toCopy; i < frames; i++)
+      buf[i] = 0.f; // underrun: silence
+
+    s_audioRead = rd + toCopy;
+    // Keep stream alive even on underrun (return `frames` not `toCopy`)
+    return frames;
+  }
+
+  // =========================================================================
+  // SEEK
+  // =========================================================================
+
+  void _doSeek(AVFormatContext *fmtCtx, AVCodecContext *vCtx,
+               AVCodecContext *aCtx, int videoStreamIdx, int audioStreamIdx,
+               int64_t targetUs) {
+    // av_seek_frame wants PTS in stream time base
+    int64_t ts = av_rescale_q(targetUs, {1, 1000000},
+                              fmtCtx->streams[videoStreamIdx]->time_base);
+    av_seek_frame(fmtCtx, videoStreamIdx, ts, AVSEEK_FLAG_BACKWARD);
+
+    avcodec_flush_buffers(vCtx);
+    if (aCtx)
+      avcodec_flush_buffers(aCtx);
+
+    // Flush audio ring
+    {
+      std::lock_guard<std::mutex> lk(s_audioMutex);
+      s_audioWrite = 0;
+      s_audioRead = 0;
+    }
+    FluxAudio::get().seekToSeconds((float)targetUs / 1e6f);
+
+    // Re-sync clock
+    s_clockBase = std::chrono::steady_clock::now();
+    s_clockBaseUs = targetUs;
+    s_positionUs = targetUs;
+    s_didFireFinish = false;
+  }
+
+  // =========================================================================
+  // A/V SYNC — interruptible sleep in 5 ms chunks
+  // =========================================================================
+
+  void _syncToPresentation(int64_t framePtsUs) {
+    auto now = std::chrono::steady_clock::now();
+    int64_t wallUs =
+        std::chrono::duration_cast<std::chrono::microseconds>(now - s_clockBase)
+            .count();
+    int64_t targetUs = framePtsUs - s_clockBaseUs;
+    int64_t sleepUs = targetUs - wallUs;
+
+    while (sleepUs > 2000 && !s_stopDecode) {
+      int64_t chunk = std::min(sleepUs, (int64_t)5000); // 5 ms max
+      std::this_thread::sleep_for(std::chrono::microseconds(chunk));
+
+      now = std::chrono::steady_clock::now();
+      wallUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                   now - s_clockBase)
+                   .count();
+      sleepUs = targetUs - wallUs;
+    }
+    // Behind schedule → present immediately (natural frame drop)
+  }
 };
-
-
-
 
 #endif // __linux__ && !__ANDROID__

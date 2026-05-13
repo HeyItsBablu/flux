@@ -1,19 +1,22 @@
 
-#include "app.hpp"
 #include "flux/flux.hpp"
 
+class MyApp : public Widget {
+public:
+  WidgetPtr build() override {
 
-WidgetPtr createApp(FluxUI* app) {
-    auto player = VideoPlayer("videos/sample.mp4")
+    return Scaffold(
+        AppBar("Flux App"),
+        Expanded(
+            Center(VideoPlayer("screenshots/sample.mp4")
             ->setWidth(380)
             ->setHeight(270)    // 16:9
-            ->setAutoPlay(false);
+            ->setAutoPlay(false))),
+        nullptr, nullptr);
+  }
+};
 
-    return FluxApp(
-            "FluxUI – Audio",
-            Center(player),
-            AppTheme::light(),
-            false, 420, 200,
-            false, false
-    );
+WidgetPtr createApp(FluxUI *app) {
+  return FluxApp("FluxUI - App", std::make_shared<MyApp>(), AppTheme::light(),
+                 false, 900, 700, false, false);
 }
