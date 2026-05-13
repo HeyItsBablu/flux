@@ -8,7 +8,7 @@ public:
     return Scaffold(
         AppBar("Flux App"),
         Expanded(
-            Center(VideoPlayer("screenshots/sample.mp4")
+            Center(VideoPlayerFromUrl("https://avtshare01.rz.tu-ilmenau.de/avt-vqdb-uhd-1/test_1/segments/water_netflix_750kbps_360p_59.94fps_hevc.mp4")
             ->setWidth(380)
             ->setHeight(270)    // 16:9
             ->setAutoPlay(false))),
