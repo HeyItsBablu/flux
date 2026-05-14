@@ -17,13 +17,32 @@
 //   - GLES 3.0+ for GL_TEXTURE_EXTERNAL_OES (or GLES 2 + OES extension)
 //
 #pragma once
+// flux_video.hpp  —  Android backend only
+// MediaCodec + SurfaceTexture + AAudio A/V sync engine for FluxUI on Android.
+//
+// Pipeline:
+//   MediaExtractor  →  MediaCodec (video) → SurfaceTexture →
+//   GL_TEXTURE_EXTERNAL_OES
+//                  └→  MediaCodec (audio) → PCM float → AAudio (via FluxAudio)
+//
+// All decoding runs on a single background thread (s_decodeThread).
+// The main (GL) thread calls updateFrame() once per vsync to latch a new
+// texture and retrieve the current A/V-synced position.
+//
+// Dependencies:
+//   - flux_audio.hpp  (AAudio playback — audio path reuses it fully)
+//   - libmediandk, libOpenSLES, libEGL, libGLESv2  (add to CMakeLists)
+//   - GLES 3.0+ for GL_TEXTURE_EXTERNAL_OES (or GLES 2 + OES extension)
+//
+
+//
+#pragma once
 #ifdef __ANDROID__
 
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
-#include <GLES2/gl2ext.h> // GL_TEXTURE_EXTERNAL_OES
+#include <GLES2/gl2ext.h>          // GL_TEXTURE_EXTERNAL_OES
 
-#include <media/NdkImage.h> // not used directly but useful for reference
 #include <media/NdkMediaCodec.h>
 #include <media/NdkMediaExtractor.h>
 #include <media/NdkMediaFormat.h>
@@ -33,6 +52,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstring>
 #include <functional>
 #include <mutex>
@@ -40,19 +60,19 @@
 #include <thread>
 #include <vector>
 
-#include "flux_audio.hpp" /
+#include "flux_audio.hpp"
 
-// ── External helpers provided by native-lib.cpp
-// ───────────────────────────────
-extern EGLDisplay FluxAndroid_getEGLDisplay();
-extern EGLContext FluxAndroid_getEGLContext();
-extern EGLSurface FluxAndroid_getEGLSurface();
+// ── External helpers provided by native-lib.cpp ───────────────────────────────
+extern EGLDisplay      FluxAndroid_getEGLDisplay();
+extern EGLContext      FluxAndroid_getEGLContext();
+extern EGLSurface      FluxAndroid_getEGLSurface();
+extern AAssetManager*  FluxAndroid_getAssetManager();  
 
-// JNI shims -- forward-declared here so the FluxVideo class body can call them
-extern void *FluxVideo_createSurfaceTexture(GLuint texId);
-extern void FluxVideo_updateTexImage(void *surfaceTexture);
-extern ANativeWindow *FluxVideo_getNativeWindow(void *surfaceTexture);
-extern void FluxVideo_destroySurfaceTexture(void *surfaceTexture);
+// JNI shims implemented in native-lib.cpp
+extern void*           FluxVideo_createSurfaceTexture(GLuint texId);
+extern void            FluxVideo_updateTexImage(void* surfaceTexture);
+extern ANativeWindow*  FluxVideo_getNativeWindow(void* surfaceTexture);
+extern void            FluxVideo_destroySurfaceTexture(void* surfaceTexture);
 
 // ============================================================================
 // FluxVideo
@@ -60,750 +80,776 @@ extern void FluxVideo_destroySurfaceTexture(void *surfaceTexture);
 
 class FluxVideo {
 public:
-  using FinishCallback = std::function<void()>;
+    using FinishCallback = std::function<void()>;
 
-  // ── Singleton ─────────────────────────────────────────────────────────────
-  static FluxVideo &get() {
-    static FluxVideo instance;
-    return instance;
-  }
-
-  // ── State ─────────────────────────────────────────────────────────────────
-  enum class State { Idle, Loading, Playing, Paused, Finished, Error };
-
-  State getState() const { return s_state.load(); }
-  bool isPlaying() const { return s_state == State::Playing; }
-  bool isPaused() const { return s_state == State::Paused; }
-  bool isFinished() const { return s_state == State::Finished; }
-  float getDurationSeconds() const { return s_durationUs.load() / 1e6f; }
-  float getPositionSeconds() const { return s_positionUs.load() / 1e6f; }
-  float getProgress() const {
-    int64_t dur = s_durationUs.load();
-    return (dur > 0) ? std::min(1.f, (float)s_positionUs.load() / dur) : 0.f;
-  }
-  int getVideoWidth() const { return s_videoWidth.load(); }
-  int getVideoHeight() const { return s_videoHeight.load(); }
-
-  // ── GL texture (OES) — read on the main thread after updateFrame() ────────
-  GLuint getTextureId() const { return s_oesTexture; }
-  // True after updateFrame() latched a new frame this vsync
-  bool hasNewFrame() const { return s_newFrame.load(); }
-
-  // ── Callbacks ─────────────────────────────────────────────────────────────
-  void setOnFinished(FinishCallback cb) { s_finishCallback = std::move(cb); }
-  void setOnReady(std::function<void(int w, int h)> cb) {
-    s_readyCallback = std::move(cb);
-  }
-
-  // =========================================================================
-  // OPEN — loads file, creates codec + OES texture, starts decode thread
-  // "video/sample.mp4" → asset; "/sdcard/..." → filesystem
-  // =========================================================================
-
-  bool open(const std::string &path) {
-    close();
-
-    s_state = State::Loading;
-    s_path = path;
-
-    // ── Create OES texture on the GL thread (caller must be on GL thread) ─
-    if (!_createOESTexture())
-      return false;
-
-    // ── Create offscreen EGL context for the decode thread ────────────────
-    if (!_createDecodeEGLContext())
-      return false;
-
-    // ── Spin up decode thread ─────────────────────────────────────────────
-    s_stopDecode = false;
-    s_decodeThread = std::thread(&FluxVideo::_decodeLoop, this);
-
-    return true;
-  }
-
-  // =========================================================================
-  // PLAYBACK CONTROL
-  // =========================================================================
-
-  void play() {
-    if (s_state == State::Paused || s_state == State::Loading) {
-      s_state = State::Playing;
-      FluxAudio::get().resume();
-    }
-  }
-
-  void pause() {
-    if (s_state == State::Playing) {
-      s_state = State::Paused;
-      FluxAudio::get().pause();
-    }
-  }
-
-  // Seek to progress 0.0–1.0.  Queues a seek; decode thread picks it up.
-  void seekToProgress(float p) {
-    int64_t us =
-        (int64_t)(std::max(0.f, std::min(1.f, p)) * s_durationUs.load());
-    _queueSeek(us);
-  }
-
-  void seekToSeconds(float secs) {
-    int64_t us = (int64_t)(secs * 1e6f);
-    us = std::max<int64_t>(0, std::min(us, s_durationUs.load()));
-    _queueSeek(us);
-  }
-
-  // Volume (passed to FluxAudio)
-  void setVolume(float v) { FluxAudio::get().setVolume(v); }
-  float getVolume() const { return FluxAudio::get().getVolume(); }
-
-  // =========================================================================
-  // updateFrame() — call once per vsync on the GL thread.
-  // Latches the newest video frame into the OES texture via
-  // SurfaceTexture::updateTexImage (called through JNI shim below).
-  // Returns true if the texture changed.
-  // =========================================================================
-
-  bool updateFrame() {
-    if (!s_surfaceTexture) {
-      s_newFrame = false;
-      return false;
-    }
-    if (!s_pendingFrame.load()) {
-      s_newFrame = false;
-      return false;
+    // ── Singleton ─────────────────────────────────────────────────────────────
+    static FluxVideo& get() {
+        static FluxVideo instance;
+        return instance;
     }
 
-    // updateTexImage must be called on a thread that holds the EGL context
-    // bound to the surface — that is the main/GL thread here.
-    //
-    // We call the JNI shim FluxVideo_updateTexImage() which is implemented
-    // in native-lib.cpp and simply calls:
-    //   surfaceTextureObj.updateTexImage();
-    //
-    // Alternatively on API 28+ you can use AHardwareBuffer +
-    // glEGLImageTargetTexture2DOES but the JNI shim is simpler and covers API
-    // 21+.
-    FluxVideo_updateTexImage(s_surfaceTexture);
+    // ── State ─────────────────────────────────────────────────────────────────
+    enum class State { Idle, Loading, Playing, Paused, Finished, Error };
 
-    s_pendingFrame = false;
-    s_newFrame = true;
-    return true;
-  }
+    State getState()          const { return s_state.load(); }
+    bool  isPlaying()         const { return s_state == State::Playing;  }
+    bool  isPaused()          const { return s_state == State::Paused;   }
+    bool  isFinished()        const { return s_state == State::Finished; }
+    float getDurationSeconds()const { return s_durationUs.load() / 1e6f; }
+    float getPositionSeconds()const { return s_positionUs.load() / 1e6f; }
+    float getProgress() const {
+        int64_t dur = s_durationUs.load();
+        return (dur > 0) ? std::min(1.f, (float)s_positionUs.load() / dur) : 0.f;
+    }
+    int getVideoWidth()  const { return s_videoWidth.load();  }
+    int getVideoHeight() const { return s_videoHeight.load(); }
 
-  // =========================================================================
-  // CLOSE
-  // =========================================================================
+    // ── GL texture (OES) — read on the main thread after updateFrame() ────────
+    GLuint getTextureId()  const { return s_oesTexture; }
+    bool   hasNewFrame()   const { return s_newFrame.load(); }
 
-  void close() {
-    s_stopDecode = true;
-    if (s_decodeThread.joinable())
-      s_decodeThread.join();
+    // ── Callbacks ─────────────────────────────────────────────────────────────
+    void setOnFinished(FinishCallback cb)                      { s_finishCallback = std::move(cb); }
+    void setOnReady(std::function<void(int w, int h)> cb)      { s_readyCallback  = std::move(cb); }
 
-    _destroyAudioCodec();
-    _destroyVideoCodec();
+    // =========================================================================
+    // OPEN — loads file, creates codec + OES texture, starts decode thread.
+    // Pass an asset-relative path ("videos/sample.mp4") or an absolute
+    // filesystem path ("/sdcard/...").
+    // Must be called on the GL thread (creates OES texture + EGL context).
+    // =========================================================================
 
-    if (s_extractor) {
-      AMediaExtractor_delete(s_extractor);
-      s_extractor = nullptr;
+    bool open(const std::string& path) {
+        close();   // resets everything, joins any old thread
+
+        s_state = State::Loading;
+        s_path  = path;
+
+        // Create OES texture on the GL thread
+        if (!_createOESTexture())
+            return false;
+
+        // Create offscreen EGL context for the decode thread
+        if (!_createDecodeEGLContext())
+            return false;
+
+        // Spin up decode thread
+        s_stopDecode = false;
+        s_decodeThread = std::thread(&FluxVideo::_decodeLoop, this);
+        return true;
     }
 
-    if (s_oesTexture) {
-      glDeleteTextures(1, &s_oesTexture);
-      s_oesTexture = 0;
+    // =========================================================================
+    // PLAYBACK CONTROL
+    // =========================================================================
+
+    void play() {
+        if (s_state == State::Paused || s_state == State::Loading) {
+            {
+                std::lock_guard<std::mutex> lk(s_pauseMutex);
+                s_resumeRequested = true;
+            }
+            s_state = State::Playing;
+            s_pauseCV.notify_all();
+            FluxAudio::get().resume();
+        }
     }
 
-    _destroyDecodeEGLContext();
+    void pause() {
+        if (s_state == State::Playing) {
+            s_state = State::Paused;
+            FluxAudio::get().pause();
+        }
+    }
 
-    s_state = State::Idle;
-    s_positionUs = 0;
-    s_durationUs = 0;
-    s_pendingFrame = false;
-    s_newFrame = false;
-    s_seekPending = false;
-    s_videoWidth = 0;
-    s_videoHeight = 0;
-    s_surfaceTexture = nullptr;
-  }
+    void seekToProgress(float p) {
+        int64_t us = (int64_t)(std::max(0.f, std::min(1.f, p)) * s_durationUs.load());
+        _queueSeek(us);
+    }
+
+    void seekToSeconds(float secs) {
+        int64_t us = (int64_t)(secs * 1e6f);
+        us = std::max<int64_t>(0, std::min(us, s_durationUs.load()));
+        _queueSeek(us);
+    }
+
+    void setVolume(float v) { FluxAudio::get().setVolume(v); }
+    float getVolume() const { return FluxAudio::get().getVolume(); }
+
+    // =========================================================================
+    // updateFrame() — call once per vsync on the GL thread.
+    // Latches the newest video frame into the OES texture via
+    // SurfaceTexture::updateTexImage (called through JNI shim).
+    // Returns true if the texture changed this vsync.
+    // =========================================================================
+
+    bool updateFrame() {
+        if (!s_surfaceTexture || !s_pendingFrame.load()) {
+            s_newFrame = false;
+            return false;
+        }
+        FluxVideo_updateTexImage(s_surfaceTexture);
+        s_pendingFrame = false;
+        s_newFrame     = true;
+        return true;
+    }
+
+    // =========================================================================
+    // CLOSE
+    // =========================================================================
+
+    void close() {
+      
+        {
+            std::lock_guard<std::mutex> lk(s_pauseMutex);
+            s_resumeRequested = true;
+        }
+        s_stopDecode = true;
+        s_pauseCV.notify_all();
+
+        if (s_decodeThread.joinable())
+            s_decodeThread.join();
+
+        _destroyAudioCodec();
+        _destroyVideoCodec();
+
+        if (s_extractor) {
+            AMediaExtractor_delete(s_extractor);
+            s_extractor = nullptr;
+        }
+
+        if (s_oesTexture) {
+            glDeleteTextures(1, &s_oesTexture);
+            s_oesTexture = 0;
+        }
+
+        if (s_surfaceTexture) {
+            FluxVideo_destroySurfaceTexture(s_surfaceTexture);
+            s_surfaceTexture = nullptr;
+        }
+
+        _destroyDecodeEGLContext();
+
+
+        s_state           = State::Idle;
+        s_positionUs      = 0;
+        s_durationUs      = 0;
+        s_pendingFrame    = false;
+        s_newFrame        = false;
+        s_seekPending     = false;
+        s_videoWidth      = 0;
+        s_videoHeight     = 0;
+        s_stopDecode      = false;
+        s_resumeRequested = false;
+        s_videoTrackIdx   = -1;
+        s_audioTrackIdx   = -1;
+    }
 
 private:
-  FluxVideo() = default;
-  ~FluxVideo() { close(); }
+    FluxVideo()  = default;
+    ~FluxVideo() { close(); }
 
-  // ── Path ──────────────────────────────────────────────────────────────────
-  std::string s_path;
+    // ── Path ──────────────────────────────────────────────────────────────────
+    std::string s_path;
 
-  // ── State ─────────────────────────────────────────────────────────────────
-  std::atomic<State> s_state{State::Idle};
-  std::atomic<int64_t> s_positionUs{0};
-  std::atomic<int64_t> s_durationUs{0};
-  std::atomic<int> s_videoWidth{0};
-  std::atomic<int> s_videoHeight{0};
+    // ── State ─────────────────────────────────────────────────────────────────
+    std::atomic<State>   s_state{State::Idle};
+    std::atomic<int64_t> s_positionUs{0};
+    std::atomic<int64_t> s_durationUs{0};
+    std::atomic<int>     s_videoWidth{0};
+    std::atomic<int>     s_videoHeight{0};
 
-  // ── Frame sync ────────────────────────────────────────────────────────────
-  std::atomic<bool> s_pendingFrame{false}; // decode thread → GL thread
-  std::atomic<bool> s_newFrame{false};     // set by updateFrame()
+    // ── Frame sync ────────────────────────────────────────────────────────────
+    std::atomic<bool> s_pendingFrame{false};   // decode thread → GL thread
+    std::atomic<bool> s_newFrame{false};       // set by updateFrame()
 
-  // ── Seek ──────────────────────────────────────────────────────────────────
-  std::atomic<bool> s_seekPending{false};
-  std::atomic<int64_t> s_seekTargetUs{0};
+    // ── Seek ──────────────────────────────────────────────────────────────────
+    std::atomic<bool>    s_seekPending{false};
+    std::atomic<int64_t> s_seekTargetUs{0};
 
-  // ── Decode thread ─────────────────────────────────────────────────────────
-  std::thread s_decodeThread;
-  std::atomic<bool> s_stopDecode{false};
+    // ── Decode thread ─────────────────────────────────────────────────────────
+    std::thread       s_decodeThread;
+    std::atomic<bool> s_stopDecode{false};
 
-  // ── MediaCodec objects ────────────────────────────────────────────────────
-  AMediaExtractor *s_extractor = nullptr;
-  AMediaCodec *s_videoCodec = nullptr;
-  AMediaCodec *s_audioCodec = nullptr;
-  int s_videoTrackIdx = -1;
-  int s_audioTrackIdx = -1;
+    // ── Pause / resume  ───────────────────────────────────────────────
+    std::mutex              s_pauseMutex;
+    std::condition_variable s_pauseCV;
+    std::atomic<bool>       s_resumeRequested{false};
 
-  // ── GL / EGL ──────────────────────────────────────────────────────────────
-  GLuint s_oesTexture = 0;
-  void *s_surfaceTexture = nullptr; // jobject (global ref)
-  EGLDisplay s_decodeEGLDisplay = EGL_NO_DISPLAY;
-  EGLContext s_decodeEGLContext = EGL_NO_CONTEXT;
-  EGLSurface s_decodeEGLSurface = EGL_NO_SURFACE;
+    // ── MediaCodec objects ────────────────────────────────────────────────────
+    AMediaExtractor* s_extractor    = nullptr;
+    AMediaCodec*     s_videoCodec   = nullptr;
+    AMediaCodec*     s_audioCodec   = nullptr;
+    int              s_videoTrackIdx = -1;
+    int              s_audioTrackIdx = -1;
 
-  // ── Callbacks ─────────────────────────────────────────────────────────────
-  FinishCallback s_finishCallback;
-  std::function<void(int w, int h)> s_readyCallback;
+    // ── GL / EGL ──────────────────────────────────────────────────────────────
+    GLuint     s_oesTexture        = 0;
+    void*      s_surfaceTexture    = nullptr;
+    EGLDisplay s_decodeEGLDisplay  = EGL_NO_DISPLAY;
+    EGLContext s_decodeEGLContext  = EGL_NO_CONTEXT;
+    EGLSurface s_decodeEGLSurface  = EGL_NO_SURFACE;
 
-  // ── PCM ring buffer for audio ──────────────────────────────────────────────
-  static constexpr int kAudioRingSize = 48000 * 2; // ~2 s at 48kHz
-  std::vector<float> s_audioBuf;
-  std::atomic<int> s_audioWrite{0};
-  std::atomic<int> s_audioRead{0};
-  std::mutex s_audioMutex;
+    // ── Callbacks ─────────────────────────────────────────────────────────────
+    FinishCallback                      s_finishCallback;
+    std::function<void(int w, int h)>   s_readyCallback;
 
-  // ── Clock ─────────────────────────────────────────────────────────────────
-  // Driven by audio position (most accurate) or wall clock fallback
-  std::chrono::steady_clock::time_point s_clockBase;
-  int64_t s_clockBaseUs = 0;
+    // ── PCM ring buffer for audio ─────────────────────────────────────────────
+    static constexpr int kAudioRingSize = 48000 * 2; // ~2 s at 48 kHz
+    std::vector<float>   s_audioBuf;
+    std::atomic<int>     s_audioWrite{0};
+    std::atomic<int>     s_audioRead{0};
+    std::mutex           s_audioMutex;
 
-  // =========================================================================
-  // OES TEXTURE — created on GL thread before decode thread starts
-  // =========================================================================
+    // ── Clock ─────────────────────────────────────────────────────────────────
+    std::chrono::steady_clock::time_point s_clockBase;
+    int64_t s_clockBaseUs = 0;
 
-  bool _createOESTexture() {
-    glGenTextures(1, &s_oesTexture);
-    if (!s_oesTexture) {
+    // =========================================================================
+    // OES TEXTURE — created on GL thread before decode thread starts
+    // =========================================================================
 
-      return false;
-    }
-    glBindTexture(GL_TEXTURE_EXTERNAL_OES, s_oesTexture);
-    glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_S,
-                    GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_T,
-                    GL_CLAMP_TO_EDGE);
-    glBindTexture(GL_TEXTURE_EXTERNAL_OES, 0);
+    bool _createOESTexture() {
+        glGenTextures(1, &s_oesTexture);
+        if (!s_oesTexture) {
+            __android_log_print(ANDROID_LOG_ERROR, "FluxVideo", "glGenTextures failed");
+            return false;
+        }
+        glBindTexture(GL_TEXTURE_EXTERNAL_OES, s_oesTexture);
+        glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glBindTexture(GL_TEXTURE_EXTERNAL_OES, 0);
 
-    // Create Android SurfaceTexture wrapping this OES texture via JNI shim
-    s_surfaceTexture = FluxVideo_createSurfaceTexture(s_oesTexture);
-    if (!s_surfaceTexture) {
-
-      return false;
-    }
-
-    return true;
-  }
-
-  // =========================================================================
-  // EGL CONTEXT — decode thread needs its own context sharing with main
-  // =========================================================================
-
-  bool _createDecodeEGLContext() {
-    s_decodeEGLDisplay = FluxAndroid_getEGLDisplay();
-    if (s_decodeEGLDisplay == EGL_NO_DISPLAY)
-      return false;
-
-    EGLint attribs[] = {EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE};
-    s_decodeEGLContext =
-        eglCreateContext(s_decodeEGLDisplay, _getEGLConfig(),
-                         FluxAndroid_getEGLContext(), // share with main context
-                         attribs);
-
-    if (s_decodeEGLContext == EGL_NO_CONTEXT) {
-
-      return false;
+        s_surfaceTexture = FluxVideo_createSurfaceTexture(s_oesTexture);
+        if (!s_surfaceTexture) {
+            __android_log_print(ANDROID_LOG_ERROR, "FluxVideo", "createSurfaceTexture failed");
+            return false;
+        }
+        return true;
     }
 
-    // Pbuffer surface (1×1) — decode thread only signals the SurfaceTexture,
-    // actual rendering happens on the main thread
-    EGLint pbAttribs[] = {EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE};
-    s_decodeEGLSurface =
-        eglCreatePbufferSurface(s_decodeEGLDisplay, _getEGLConfig(), pbAttribs);
+    // =========================================================================
+    // EGL CONTEXT — decode thread needs its own context sharing with main
+    // =========================================================================
 
-    return true;
-  }
+bool _createDecodeEGLContext() {
+    return true;  // Not needed — MediaCodec renders via ANativeWindow directly
+}
 
-  void _destroyDecodeEGLContext() {
-    if (s_decodeEGLDisplay != EGL_NO_DISPLAY) {
-      if (s_decodeEGLContext != EGL_NO_CONTEXT)
-        eglDestroyContext(s_decodeEGLDisplay, s_decodeEGLContext);
-      if (s_decodeEGLSurface != EGL_NO_SURFACE)
-        eglDestroySurface(s_decodeEGLDisplay, s_decodeEGLSurface);
-    }
-    s_decodeEGLContext = EGL_NO_CONTEXT;
-    s_decodeEGLSurface = EGL_NO_SURFACE;
-  }
+void _destroyDecodeEGLContext() {
+    // Nothing to do
+}
 
-  EGLConfig _getEGLConfig() {
-    EGLint attribs[] = {EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
-                        EGL_SURFACE_TYPE, EGL_PBUFFER_BIT, EGL_NONE};
-    EGLConfig config;
-    EGLint numConfigs;
-    eglChooseConfig(s_decodeEGLDisplay, attribs, &config, 1, &numConfigs);
-    return config;
-  }
+EGLConfig _getEGLConfig() {
+    return nullptr;
+}
 
-  // =========================================================================
-  // FILE LOADING — supports assets and absolute paths
-  // =========================================================================
+    // =========================================================================
+    // FILE LOADING — supports assets and absolute paths
+    // =========================================================================
 
-  int _openExtractor() {
-    // Open via asset or file
-    if (!s_path.empty() && s_path[0] == '/') {
-      s_extractor = AMediaExtractor_new();
-      if (AMediaExtractor_setDataSource(s_extractor, s_path.c_str()) !=
-          AMEDIA_OK) {
-
-        return -1;
-      }
-    } else {
-      AAssetManager *am = FluxAndroid_getAssetManager();
-      if (!am)
-        return -1;
-      AAsset *asset =
-          AAssetManager_open(am, s_path.c_str(), AASSET_MODE_STREAMING);
-      if (!asset) {
-
-        return -1;
-      }
-
-      // AMediaExtractor can consume an AAsset directly via its file descriptor
-      off_t start, len;
-      int fd = AAsset_openFileDescriptor(asset, &start, &len);
-      AAsset_close(asset);
-      if (fd < 0)
-        return -1;
-
-      s_extractor = AMediaExtractor_new();
-      AMediaExtractor_setDataSourceFd(s_extractor, fd, start, len);
-      ::close(fd);
-    }
-
-    // Find video and audio tracks
-    int trackCount = (int)AMediaExtractor_getTrackCount(s_extractor);
-    for (int i = 0; i < trackCount; i++) {
-      AMediaFormat *fmt = AMediaExtractor_getTrackFormat(s_extractor, i);
-      const char *mime = nullptr;
-      AMediaFormat_getString(fmt, AMEDIAFORMAT_KEY_MIME, &mime);
-      if (mime) {
-        if (strncmp(mime, "video/", 6) == 0 && s_videoTrackIdx < 0)
-          s_videoTrackIdx = i;
-        if (strncmp(mime, "audio/", 6) == 0 && s_audioTrackIdx < 0)
-          s_audioTrackIdx = i;
-      }
-
-      // Get duration from the first track that has it
-      int64_t dur = 0;
-      if (AMediaFormat_getInt64(fmt, AMEDIAFORMAT_KEY_DURATION, &dur) &&
-          dur > 0)
-        s_durationUs.store(dur);
-
-      AMediaFormat_delete(fmt);
-    }
-
-    if (s_videoTrackIdx < 0) {
-
-      return -1;
-    }
-    return 0;
-  }
-
-  // =========================================================================
-  // CODEC SETUP
-  // =========================================================================
-
-  bool _openVideoCodec() {
-    AMediaFormat *fmt =
-        AMediaExtractor_getTrackFormat(s_extractor, s_videoTrackIdx);
-
-    const char *mime = nullptr;
-    AMediaFormat_getString(fmt, AMEDIAFORMAT_KEY_MIME, &mime);
-
-    int32_t w = 0, h = 0;
-    AMediaFormat_getInt32(fmt, AMEDIAFORMAT_KEY_WIDTH, &w);
-    AMediaFormat_getInt32(fmt, AMEDIAFORMAT_KEY_HEIGHT, &h);
-    s_videoWidth = w;
-    s_videoHeight = h;
-
-    s_videoCodec = AMediaCodec_createDecoderByType(mime);
-    if (!s_videoCodec) {
-
-      AMediaFormat_delete(fmt);
-      return false;
-    }
-
-    // Configure codec to output to our SurfaceTexture's Surface
-    ANativeWindow *window = FluxVideo_getNativeWindow(s_surfaceTexture);
-    media_status_t status =
-        AMediaCodec_configure(s_videoCodec, fmt, window, nullptr, 0);
-
-    AMediaFormat_delete(fmt);
-
-    if (status != AMEDIA_OK) {
-
-      return false;
-    }
-
-    AMediaExtractor_selectTrack(s_extractor, s_videoTrackIdx);
-    AMediaCodec_start(s_videoCodec);
-    return true;
-  }
-
-  bool _openAudioCodec(int &outSampleRate, int &outChannels) {
-    if (s_audioTrackIdx < 0)
-      return false;
-
-    AMediaFormat *fmt =
-        AMediaExtractor_getTrackFormat(s_extractor, s_audioTrackIdx);
-    const char *mime = nullptr;
-    AMediaFormat_getString(fmt, AMEDIAFORMAT_KEY_MIME, &mime);
-
-    int32_t sr = 44100, ch = 1;
-    AMediaFormat_getInt32(fmt, AMEDIAFORMAT_KEY_SAMPLE_RATE, &sr);
-    AMediaFormat_getInt32(fmt, AMEDIAFORMAT_KEY_CHANNEL_COUNT, &ch);
-    outSampleRate = sr;
-    outChannels = ch;
-
-    s_audioCodec = AMediaCodec_createDecoderByType(mime);
-    if (!s_audioCodec) {
-      AMediaFormat_delete(fmt);
-      return false;
-    }
-
-    AMediaCodec_configure(s_audioCodec, fmt, nullptr, nullptr, 0);
-    AMediaFormat_delete(fmt);
-
-    AMediaExtractor_selectTrack(s_extractor, s_audioTrackIdx);
-    AMediaCodec_start(s_audioCodec);
-
-    s_audioBuf.assign(kAudioRingSize, 0.f);
-    s_audioWrite = 0;
-    s_audioRead = 0;
-    return true;
-  }
-
-  void _destroyVideoCodec() {
-    if (s_videoCodec) {
-      AMediaCodec_stop(s_videoCodec);
-      AMediaCodec_delete(s_videoCodec);
-      s_videoCodec = nullptr;
-    }
-  }
-  void _destroyAudioCodec() {
-    if (s_audioCodec) {
-      AMediaCodec_stop(s_audioCodec);
-      AMediaCodec_delete(s_audioCodec);
-      s_audioCodec = nullptr;
-    }
-  }
-
-  // =========================================================================
-  // SEEK helper
-  // =========================================================================
-
-  void _queueSeek(int64_t us) {
-    s_seekTargetUs = us;
-    s_seekPending = true;
-  }
-
-  void _doSeek(int64_t targetUs) {
-    // Flush both codecs
-    AMediaCodec_flush(s_videoCodec);
-    if (s_audioCodec)
-      AMediaCodec_flush(s_audioCodec);
-
-    // Seek extractor — SEEK_TO_PREVIOUS_SYNC to avoid green frames
-    AMediaExtractor_seekTo(s_extractor, targetUs,
-                           AMEDIAEXTRACTOR_SEEK_PREVIOUS_SYNC);
-
-    // Reset audio ring buffer
-    {
-      std::lock_guard<std::mutex> lk(s_audioMutex);
-      s_audioWrite = 0;
-      s_audioRead = 0;
-    }
-
-    // Reset clock
-    s_clockBaseUs = targetUs;
-    s_clockBase = std::chrono::steady_clock::now();
-    s_positionUs = targetUs;
-
-    // Resume audio at new position
-    FluxAudio::get().seekToSeconds(targetUs / 1e6f);
-
-    s_seekPending = false;
-  }
-
-  // =========================================================================
-  // DECODE LOOP — runs on s_decodeThread
-  // =========================================================================
-
-  void _decodeLoop() {
-    // Bind decode EGL context (needed for SurfaceTexture::releaseTexImage)
-    eglMakeCurrent(s_decodeEGLDisplay, s_decodeEGLSurface, s_decodeEGLSurface,
-                   s_decodeEGLContext);
-
-    // Open extractor
-    if (_openExtractor() < 0) {
-      s_state = State::Error;
-      return;
-    }
-
-    // Open codecs
-    if (!_openVideoCodec()) {
-      s_state = State::Error;
-      return;
-    }
-
-    int audioSR = 44100, audioCh = 1;
-    bool hasAudio = _openAudioCodec(audioSR, audioCh);
-
-    // Start audio playback through FluxAudio stream callback
-    if (hasAudio) {
-      FluxAudio::get().playStream(
-          [this, audioCh](float *buf, int frames) -> int {
-            return _pullAudio(buf, frames, audioCh);
-          },
-          audioSR);
-    }
-
-    // Signal ready
-    if (s_readyCallback)
-      s_readyCallback(s_videoWidth.load(), s_videoHeight.load());
-
-    s_state = State::Playing;
-
-    // Reset clock
-    s_clockBase = std::chrono::steady_clock::now();
-    s_clockBaseUs = 0;
-
-    bool inputEOS = false;
-    bool outputEOS = false;
-
-    static constexpr int64_t kTimeoutUs = 5000;
-
-    while (!s_stopDecode && !outputEOS) {
-
-      // ── Handle seek ──────────────────────────────────────────────────
-      if (s_seekPending.load()) {
-        _doSeek(s_seekTargetUs.load());
-        inputEOS = false;
-        outputEOS = false;
-      }
-
-      // ── Wait while paused ────────────────────────────────────────────
-      if (s_state == State::Paused) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(16));
-        // Advance clock when we resume
-        s_clockBase = std::chrono::steady_clock::now();
-        s_clockBaseUs = s_positionUs.load();
-        continue;
-      }
-
-      // ── Feed input to video codec ─────────────────────────────────────
-      if (!inputEOS) {
-        ssize_t inBuf =
-            AMediaCodec_dequeueInputBuffer(s_videoCodec, kTimeoutUs);
-        if (inBuf >= 0) {
-          size_t bufSize = 0;
-          uint8_t *data =
-              AMediaCodec_getInputBuffer(s_videoCodec, (size_t)inBuf, &bufSize);
-
-          // Read from the extractor — select correct track
-          int trackIdx = (int)AMediaExtractor_getSampleTrackIndex(s_extractor);
-
-          if (trackIdx == s_videoTrackIdx) {
-            ssize_t sampleSize =
-                AMediaExtractor_readSampleData(s_extractor, data, bufSize);
-            int64_t pts = AMediaExtractor_getSampleTime(s_extractor);
-
-            if (sampleSize > 0) {
-              AMediaCodec_queueInputBuffer(s_videoCodec, (size_t)inBuf, 0,
-                                           (size_t)sampleSize, pts, 0);
-              AMediaExtractor_advance(s_extractor);
-            } else {
-              AMediaCodec_queueInputBuffer(
-                  s_videoCodec, (size_t)inBuf, 0, 0, 0,
-                  AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM);
-              inputEOS = true;
+    int _openExtractor() {
+        if (!s_path.empty() && s_path[0] == '/') {
+            // Absolute filesystem path
+            s_extractor = AMediaExtractor_new();
+            if (AMediaExtractor_setDataSource(s_extractor, s_path.c_str()) != AMEDIA_OK) {
+                __android_log_print(ANDROID_LOG_ERROR, "FluxVideo",
+                                    "setDataSource failed: %s", s_path.c_str());
+                AMediaExtractor_delete(s_extractor);
+                s_extractor = nullptr;
+                return -1;
             }
-          } else if (trackIdx == s_audioTrackIdx && hasAudio) {
-            // Push audio data to audio codec inline
-            _feedAudioCodec();
-            // Return video input buffer unused (will retry next loop)
-            AMediaCodec_queueInputBuffer(s_videoCodec, (size_t)inBuf, 0, 0, 0,
-                                         0);
-          } else {
-            AMediaExtractor_advance(s_extractor);
-            AMediaCodec_queueInputBuffer(s_videoCodec, (size_t)inBuf, 0, 0, 0,
-                                         0);
-          }
-        }
-      }
-
-      // ── Drain video output ────────────────────────────────────────────
-      AMediaCodecBufferInfo info{};
-      ssize_t outBuf =
-          AMediaCodec_dequeueOutputBuffer(s_videoCodec, &info, kTimeoutUs);
-      if (outBuf >= 0) {
-        bool isEOS = (info.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) != 0;
-
-        if (info.size > 0) {
-          int64_t framePts = info.presentationTimeUs;
-
-          // A/V sync: sleep until it's time to present this frame
-          _syncToPresentation(framePts);
-          s_positionUs = framePts;
-
-          // Release to Surface (renders into SurfaceTexture)
-          AMediaCodec_releaseOutputBuffer(s_videoCodec, (size_t)outBuf, true);
-          s_pendingFrame = true; // main thread will call updateTexImage
         } else {
-          AMediaCodec_releaseOutputBuffer(s_videoCodec, (size_t)outBuf, false);
+            // Asset path (relative, e.g. "videos/sample.mp4")
+            AAssetManager* am = FluxAndroid_getAssetManager();
+            if (!am) {
+                __android_log_print(ANDROID_LOG_ERROR, "FluxVideo", "AAssetManager is null");
+                return -1;
+            }
+            AAsset* asset = AAssetManager_open(am, s_path.c_str(), AASSET_MODE_STREAMING);
+            if (!asset) {
+                __android_log_print(ANDROID_LOG_ERROR, "FluxVideo",
+                                    "AAssetManager_open failed: %s", s_path.c_str());
+                return -1;
+            }
+
+            off_t start = 0, len = 0;
+            int fd = AAsset_openFileDescriptor(asset, &start, &len);
+            AAsset_close(asset);
+            if (fd < 0) {
+                __android_log_print(ANDROID_LOG_ERROR, "FluxVideo",
+                                    "AAsset_openFileDescriptor failed");
+                return -1;
+            }
+
+            s_extractor = AMediaExtractor_new();
+            media_status_t st = AMediaExtractor_setDataSourceFd(s_extractor, fd, start, len);
+            ::close(fd);
+            if (st != AMEDIA_OK) {
+                __android_log_print(ANDROID_LOG_ERROR, "FluxVideo",
+                                    "setDataSourceFd failed: %d", (int)st);
+                AMediaExtractor_delete(s_extractor);
+                s_extractor = nullptr;
+                return -1;
+            }
         }
 
-        if (isEOS) {
-          outputEOS = true;
-          s_state = State::Finished;
-          if (s_finishCallback)
-            s_finishCallback();
+        // Enumerate tracks
+        int trackCount = (int)AMediaExtractor_getTrackCount(s_extractor);
+        __android_log_print(ANDROID_LOG_DEBUG, "FluxVideo",
+                            "Track count: %d", trackCount);
+
+        for (int i = 0; i < trackCount; i++) {
+            AMediaFormat* fmt = AMediaExtractor_getTrackFormat(s_extractor, i);
+            const char*   mime = nullptr;
+            AMediaFormat_getString(fmt, AMEDIAFORMAT_KEY_MIME, &mime);
+
+            if (mime) {
+                __android_log_print(ANDROID_LOG_DEBUG, "FluxVideo",
+                                    "Track %d: %s", i, mime);
+                if (strncmp(mime, "video/", 6) == 0 && s_videoTrackIdx < 0)
+                    s_videoTrackIdx = i;
+                if (strncmp(mime, "audio/", 6) == 0 && s_audioTrackIdx < 0)
+                    s_audioTrackIdx = i;
+            }
+
+            int64_t dur = 0;
+            if (AMediaFormat_getInt64(fmt, AMEDIAFORMAT_KEY_DURATION, &dur) && dur > 0)
+                s_durationUs.store(dur);
+
+            AMediaFormat_delete(fmt);
         }
-      } else if (outBuf == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED) {
-        AMediaFormat *fmt = AMediaCodec_getOutputFormat(s_videoCodec);
+
+        if (s_videoTrackIdx < 0) {
+            __android_log_print(ANDROID_LOG_ERROR, "FluxVideo", "No video track found");
+            return -1;
+        }
+
+        __android_log_print(ANDROID_LOG_DEBUG, "FluxVideo",
+                            "Video track: %d, Audio track: %d, Duration: %.2fs",
+                            s_videoTrackIdx, s_audioTrackIdx,
+                            s_durationUs.load() / 1e6f);
+        return 0;
+    }
+
+    // =========================================================================
+    // CODEC SETUP
+    // =========================================================================
+
+    bool _openVideoCodec() {
+        AMediaFormat* fmt = AMediaExtractor_getTrackFormat(s_extractor, s_videoTrackIdx);
+
+        const char* mime = nullptr;
+        AMediaFormat_getString(fmt, AMEDIAFORMAT_KEY_MIME, &mime);
+
         int32_t w = 0, h = 0;
         AMediaFormat_getInt32(fmt, AMEDIAFORMAT_KEY_WIDTH, &w);
         AMediaFormat_getInt32(fmt, AMEDIAFORMAT_KEY_HEIGHT, &h);
-        s_videoWidth = w;
+        s_videoWidth  = w;
         s_videoHeight = h;
+        __android_log_print(ANDROID_LOG_DEBUG, "FluxVideo",
+                            "Video codec: %s, %dx%d", mime ? mime : "?", w, h);
+
+        s_videoCodec = AMediaCodec_createDecoderByType(mime);
+        if (!s_videoCodec) {
+            __android_log_print(ANDROID_LOG_ERROR, "FluxVideo",
+                                "AMediaCodec_createDecoderByType failed: %s", mime);
+            AMediaFormat_delete(fmt);
+            return false;
+        }
+
+        ANativeWindow* window = FluxVideo_getNativeWindow(s_surfaceTexture);
+        if (!window) {
+            __android_log_print(ANDROID_LOG_ERROR, "FluxVideo",
+                                "FluxVideo_getNativeWindow returned null");
+            AMediaFormat_delete(fmt);
+            return false;
+        }
+
+        media_status_t status = AMediaCodec_configure(s_videoCodec, fmt, window, nullptr, 0);
         AMediaFormat_delete(fmt);
-      }
 
-      // ── Drain audio codec → ring buffer ───────────────────────────────
-      if (hasAudio)
-        _drainAudioCodec(audioCh);
+        if (status != AMEDIA_OK) {
+            __android_log_print(ANDROID_LOG_ERROR, "FluxVideo",
+                                "AMediaCodec_configure failed: %d", (int)status);
+            return false;
+        }
+
+        AMediaExtractor_selectTrack(s_extractor, s_videoTrackIdx);
+        AMediaCodec_start(s_videoCodec);
+        return true;
     }
 
-    eglMakeCurrent(s_decodeEGLDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE,
-                   EGL_NO_CONTEXT);
-  }
+    bool _openAudioCodec(int& outSampleRate, int& outChannels) {
+        if (s_audioTrackIdx < 0)
+            return false;
 
-  // =========================================================================
-  // A/V SYNC — sleep until presentation time
-  // =========================================================================
+        AMediaFormat* fmt = AMediaExtractor_getTrackFormat(s_extractor, s_audioTrackIdx);
+        const char*   mime = nullptr;
+        AMediaFormat_getString(fmt, AMEDIAFORMAT_KEY_MIME, &mime);
 
-  void _syncToPresentation(int64_t framePtsUs) {
-    auto now = std::chrono::steady_clock::now();
-    int64_t wallUs =
-        std::chrono::duration_cast<std::chrono::microseconds>(now - s_clockBase)
-            .count();
-    int64_t targetUs = framePtsUs - s_clockBaseUs;
-    int64_t sleepUs = targetUs - wallUs;
+        int32_t sr = 44100, ch = 1;
+        AMediaFormat_getInt32(fmt, AMEDIAFORMAT_KEY_SAMPLE_RATE, &sr);
+        AMediaFormat_getInt32(fmt, AMEDIAFORMAT_KEY_CHANNEL_COUNT, &ch);
+        outSampleRate = sr;
+        outChannels   = ch;
 
-    if (sleepUs > 2000) {
-      // Don't sleep longer than ~100ms — allows seek/stop to interrupt
-      sleepUs = std::min(sleepUs, (int64_t)100000);
-      std::this_thread::sleep_for(std::chrono::microseconds(sleepUs));
-    }
-    // If we're behind, just render immediately (drop tolerance)
-  }
+        s_audioCodec = AMediaCodec_createDecoderByType(mime);
+        if (!s_audioCodec) {
+            AMediaFormat_delete(fmt);
+            return false;
+        }
 
-  // =========================================================================
-  // AUDIO CODEC — feed extractor samples → decode → ring buffer
-  // =========================================================================
+        AMediaCodec_configure(s_audioCodec, fmt, nullptr, nullptr, 0);
+        AMediaFormat_delete(fmt);
 
-  void _feedAudioCodec() {
-    if (!s_audioCodec)
-      return;
-    ssize_t inBuf = AMediaCodec_dequeueInputBuffer(s_audioCodec, 1000);
-    if (inBuf < 0)
-      return;
+        AMediaExtractor_selectTrack(s_extractor, s_audioTrackIdx);
+        AMediaCodec_start(s_audioCodec);
 
-    size_t bufSize = 0;
-    uint8_t *data =
-        AMediaCodec_getInputBuffer(s_audioCodec, (size_t)inBuf, &bufSize);
-
-    // We only call this when the extractor is on the audio track
-    ssize_t sampleSize =
-        AMediaExtractor_readSampleData(s_extractor, data, bufSize);
-    int64_t pts = AMediaExtractor_getSampleTime(s_extractor);
-
-    if (sampleSize > 0) {
-      AMediaCodec_queueInputBuffer(s_audioCodec, (size_t)inBuf, 0,
-                                   (size_t)sampleSize, pts, 0);
-      AMediaExtractor_advance(s_extractor);
-    } else {
-      AMediaCodec_queueInputBuffer(s_audioCodec, (size_t)inBuf, 0, 0, 0,
-                                   AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM);
-    }
-  }
-
-  void _drainAudioCodec(int channels) {
-    if (!s_audioCodec)
-      return;
-
-    AMediaCodecBufferInfo info{};
-    ssize_t outBuf = AMediaCodec_dequeueOutputBuffer(s_audioCodec, &info, 0);
-    if (outBuf < 0)
-      return;
-
-    if (info.size > 0) {
-      size_t sz = 0;
-      uint8_t *data =
-          AMediaCodec_getOutputBuffer(s_audioCodec, (size_t)outBuf, &sz);
-
-      // Audio output from MediaCodec is PCM_16 interleaved
-      int frameCount = info.size / (2 * channels);
-      const int16_t *pcm16 =
-          reinterpret_cast<const int16_t *>(data + info.offset);
-
-      std::lock_guard<std::mutex> lk(s_audioMutex);
-      int wr = s_audioWrite.load();
-      for (int i = 0; i < frameCount; i++) {
-        // Mix channels down to mono for ring buffer (FluxAudio is mono)
-        float sum = 0.f;
-        for (int c = 0; c < channels; c++)
-          sum += pcm16[i * channels + c] / 32768.f;
-        s_audioBuf[wr % kAudioRingSize] = sum / channels;
-        wr++;
-      }
-      s_audioWrite = wr;
+        s_audioBuf.assign(kAudioRingSize, 0.f);
+        s_audioWrite = 0;
+        s_audioRead  = 0;
+        return true;
     }
 
-    AMediaCodec_releaseOutputBuffer(s_audioCodec, (size_t)outBuf, false);
-  }
+    void _destroyVideoCodec() {
+        if (s_videoCodec) {
+            AMediaCodec_stop(s_videoCodec);
+            AMediaCodec_delete(s_videoCodec);
+            s_videoCodec = nullptr;
+        }
+    }
 
-  // Pull audio samples from ring buffer — called by FluxAudio stream callback
-  int _pullAudio(float *buf, int frames, int /*channels*/) {
-    std::lock_guard<std::mutex> lk(s_audioMutex);
-    int rd = s_audioRead.load();
-    int wr = s_audioWrite.load();
-    int avail = wr - rd;
-    int toCopy = std::min(frames, avail);
+    void _destroyAudioCodec() {
+        if (s_audioCodec) {
+            AMediaCodec_stop(s_audioCodec);
+            AMediaCodec_delete(s_audioCodec);
+            s_audioCodec = nullptr;
+        }
+    }
 
-    for (int i = 0; i < toCopy; i++)
-      buf[i] = s_audioBuf[(rd + i) % kAudioRingSize];
-    for (int i = toCopy; i < frames; i++)
-      buf[i] = 0.f; // underrun: silence
+    // =========================================================================
+    // SEEK
+    // =========================================================================
 
-    s_audioRead = rd + toCopy;
-    return toCopy > 0 ? frames : 0; // returning 0 stops the stream
-  }
+    void _queueSeek(int64_t us) {
+        s_seekTargetUs = us;
+        s_seekPending  = true;
+        // Also wake the pause CV in case we're paused — seek should still work
+        s_pauseCV.notify_all();
+    }
+
+    void _doSeek(int64_t targetUs) {
+        AMediaCodec_flush(s_videoCodec);
+        if (s_audioCodec)
+            AMediaCodec_flush(s_audioCodec);
+
+        AMediaExtractor_seekTo(s_extractor, targetUs,
+                               AMEDIAEXTRACTOR_SEEK_PREVIOUS_SYNC);
+
+        {
+            std::lock_guard<std::mutex> lk(s_audioMutex);
+            s_audioWrite = 0;
+            s_audioRead  = 0;
+        }
+
+        s_clockBaseUs = targetUs;
+        s_clockBase   = std::chrono::steady_clock::now();
+        s_positionUs  = targetUs;
+
+        FluxAudio::get().seekToSeconds(targetUs / 1e6f);
+        s_seekPending = false;
+    }
+
+    // =========================================================================
+    // DECODE LOOP — runs on s_decodeThread
+    // =========================================================================
+
+    void _decodeLoop() {
+
+
+        // Open extractor
+        if (_openExtractor() < 0) {
+            s_state = State::Error;
+            return;
+        }
+
+        // Open video codec
+        if (!_openVideoCodec()) {
+            s_state = State::Error;
+            return;
+        }
+
+        // Open audio codec (optional)
+        int  audioSR = 44100, audioCh = 1;
+        bool hasAudio = _openAudioCodec(audioSR, audioCh);
+
+        // Start audio playback
+        if (hasAudio) {
+            FluxAudio::get().playStream(
+                [this, audioCh](float* buf, int frames) -> int {
+                    return _pullAudio(buf, frames, audioCh);
+                },
+                audioSR);
+        }
+
+        // Signal ready 
+        if (s_readyCallback)
+            s_readyCallback(s_videoWidth.load(), s_videoHeight.load());
+
+        // Transition to Paused and wait for play()
+        s_state = State::Paused;
+
+        s_clockBase   = std::chrono::steady_clock::now();
+        s_clockBaseUs = 0;
+
+        {
+            std::unique_lock<std::mutex> lk(s_pauseMutex);
+            s_pauseCV.wait(lk, [this] {
+                return s_resumeRequested.load() || s_stopDecode.load();
+            });
+            if (s_stopDecode) {
+                _cleanupEGL();
+                return;
+            }
+            s_resumeRequested = false;
+        }
+
+        // Re-stamp clock at actual play start
+        s_clockBase   = std::chrono::steady_clock::now();
+        s_clockBaseUs = 0;
+
+        bool inputEOS  = false;
+        bool outputEOS = false;
+
+        static constexpr int64_t kTimeoutUs = 5000;
+
+        while (!s_stopDecode && !outputEOS) {
+
+            // ── Handle seek ──────────────────────────────────────────────
+            if (s_seekPending.load()) {
+                _doSeek(s_seekTargetUs.load());
+                inputEOS  = false;
+                outputEOS = false;
+            }
+
+            // ── Wait while paused ──────────────
+            if (s_state == State::Paused) {
+                std::unique_lock<std::mutex> lk(s_pauseMutex);
+                s_pauseCV.wait(lk, [this] {
+                    return s_resumeRequested.load() ||
+                           s_stopDecode.load()      ||
+                           s_seekPending.load();
+                });
+                if (s_stopDecode) break;
+                // If woken by seek, loop back to top to handle it
+                if (s_seekPending.load()) continue;
+                s_resumeRequested = false;
+                s_clockBase   = std::chrono::steady_clock::now();
+                s_clockBaseUs = s_positionUs.load();
+                continue;
+            }
+
+            // ── Feed input to video codec ─────────────────────────────────
+            if (!inputEOS) {
+                ssize_t inBuf = AMediaCodec_dequeueInputBuffer(s_videoCodec, kTimeoutUs);
+                if (inBuf >= 0) {
+                    size_t   bufSize = 0;
+                    uint8_t* data    = AMediaCodec_getInputBuffer(
+                                           s_videoCodec, (size_t)inBuf, &bufSize);
+
+                    int trackIdx = (int)AMediaExtractor_getSampleTrackIndex(s_extractor);
+
+                    if (trackIdx == s_videoTrackIdx) {
+                        ssize_t sampleSize = AMediaExtractor_readSampleData(
+                                                 s_extractor, data, bufSize);
+                        int64_t pts = AMediaExtractor_getSampleTime(s_extractor);
+
+                        if (sampleSize > 0) {
+                            AMediaCodec_queueInputBuffer(s_videoCodec, (size_t)inBuf,
+                                                         0, (size_t)sampleSize, pts, 0);
+                            AMediaExtractor_advance(s_extractor);
+                        } else {
+                            AMediaCodec_queueInputBuffer(s_videoCodec, (size_t)inBuf,
+                                                         0, 0, 0,
+                                                         AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM);
+                            inputEOS = true;
+                        }
+                    } else if (trackIdx == s_audioTrackIdx && hasAudio) {
+                        _feedAudioCodec();
+                        // Return video input buffer unused — will retry next iteration
+                        AMediaCodec_queueInputBuffer(s_videoCodec, (size_t)inBuf, 0, 0, 0, 0);
+                    } else {
+                        // Unknown or EOS track index (-1) — advance and return buffer
+                        if (trackIdx >= 0)
+                            AMediaExtractor_advance(s_extractor);
+                        AMediaCodec_queueInputBuffer(s_videoCodec, (size_t)inBuf, 0, 0, 0, 0);
+                    }
+                }
+            }
+
+            // ── Drain video output ────────────────────────────────────────
+            AMediaCodecBufferInfo info{};
+            ssize_t outBuf = AMediaCodec_dequeueOutputBuffer(
+                                 s_videoCodec, &info, kTimeoutUs);
+
+            if (outBuf >= 0) {
+                bool isEOS = (info.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) != 0;
+
+                if (info.size > 0) {
+                    int64_t framePts = info.presentationTimeUs;
+                    _syncToPresentation(framePts);
+                    s_positionUs = framePts;
+
+                    // Release to Surface → renders into SurfaceTexture
+                    AMediaCodec_releaseOutputBuffer(s_videoCodec, (size_t)outBuf, true);
+                    s_pendingFrame = true;
+                } else {
+                    AMediaCodec_releaseOutputBuffer(s_videoCodec, (size_t)outBuf, false);
+                }
+
+                if (isEOS) {
+                    outputEOS = true;
+                    s_state   = State::Finished;
+                    if (s_finishCallback)
+                        s_finishCallback();
+                }
+            } else if (outBuf == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED) {
+                AMediaFormat* fmt = AMediaCodec_getOutputFormat(s_videoCodec);
+                int32_t w = 0, h = 0;
+                AMediaFormat_getInt32(fmt, AMEDIAFORMAT_KEY_WIDTH,  &w);
+                AMediaFormat_getInt32(fmt, AMEDIAFORMAT_KEY_HEIGHT, &h);
+                if (w > 0 && h > 0) {
+                    s_videoWidth  = w;
+                    s_videoHeight = h;
+                }
+                AMediaFormat_delete(fmt);
+            }
+
+            // ── Drain audio codec → ring buffer ───────────────────────────
+            if (hasAudio)
+                _drainAudioCodec(audioCh);
+        }
+
+        _cleanupEGL();
+    }
+
+void _cleanupEGL() {
+    // Nothing to do
+}
+
+    // =========================================================================
+    // A/V SYNC — interruptible sleep
+    // =========================================================================
+
+    void _syncToPresentation(int64_t framePtsUs) {
+        auto    now     = std::chrono::steady_clock::now();
+        int64_t wallUs  = std::chrono::duration_cast<std::chrono::microseconds>(
+                              now - s_clockBase).count();
+        int64_t targetUs = framePtsUs - s_clockBaseUs;
+        int64_t sleepUs  = targetUs - wallUs;
+
+        // Sleep in 5 ms chunks so stop/seek/pause can interrupt promptly
+        while (sleepUs > 2000 && !s_stopDecode &&
+               s_state != State::Paused) {
+            int64_t chunk = std::min(sleepUs, (int64_t)5000);
+            std::this_thread::sleep_for(std::chrono::microseconds(chunk));
+            now     = std::chrono::steady_clock::now();
+            wallUs  = std::chrono::duration_cast<std::chrono::microseconds>(
+                          now - s_clockBase).count();
+            sleepUs = targetUs - wallUs;
+        }
+        // If behind, present immediately (natural frame drop)
+    }
+
+    // =========================================================================
+    // AUDIO CODEC — feed extractor samples → decode → ring buffer
+    // =========================================================================
+
+    void _feedAudioCodec() {
+        if (!s_audioCodec) return;
+
+        ssize_t inBuf = AMediaCodec_dequeueInputBuffer(s_audioCodec, 1000);
+        if (inBuf < 0) return;
+
+        size_t   bufSize = 0;
+        uint8_t* data    = AMediaCodec_getInputBuffer(
+                               s_audioCodec, (size_t)inBuf, &bufSize);
+
+        ssize_t sampleSize = AMediaExtractor_readSampleData(
+                                 s_extractor, data, bufSize);
+        int64_t pts = AMediaExtractor_getSampleTime(s_extractor);
+
+        if (sampleSize > 0) {
+            AMediaCodec_queueInputBuffer(s_audioCodec, (size_t)inBuf,
+                                         0, (size_t)sampleSize, pts, 0);
+            AMediaExtractor_advance(s_extractor);
+        } else {
+            AMediaCodec_queueInputBuffer(s_audioCodec, (size_t)inBuf, 0, 0, 0,
+                                         AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM);
+        }
+    }
+
+    void _drainAudioCodec(int channels) {
+        if (!s_audioCodec) return;
+
+        AMediaCodecBufferInfo info{};
+        ssize_t outBuf = AMediaCodec_dequeueOutputBuffer(s_audioCodec, &info, 0);
+        if (outBuf < 0) return;
+
+        if (info.size > 0) {
+            size_t   sz   = 0;
+            uint8_t* data = AMediaCodec_getOutputBuffer(
+                                s_audioCodec, (size_t)outBuf, &sz);
+
+            // MediaCodec PCM output is PCM_16 interleaved
+            int            frameCount = info.size / (2 * channels);
+            const int16_t* pcm16      = reinterpret_cast<const int16_t*>(
+                                            data + info.offset);
+
+            std::lock_guard<std::mutex> lk(s_audioMutex);
+            int wr = s_audioWrite.load();
+            int rd = s_audioRead.load();
+
+            // Drop if ring is full
+            int space = kAudioRingSize - (wr - rd);
+            frameCount = std::min(frameCount, space);
+
+            for (int i = 0; i < frameCount; i++) {
+                float sum = 0.f;
+                for (int c = 0; c < channels; c++)
+                    sum += pcm16[i * channels + c] / 32768.f;
+                float mono = sum / channels;
+                if (mono >  1.f) mono =  1.f;
+                if (mono < -1.f) mono = -1.f;
+                s_audioBuf[wr % kAudioRingSize] = mono;
+                wr++;
+            }
+            s_audioWrite = wr;
+        }
+
+        AMediaCodec_releaseOutputBuffer(s_audioCodec, (size_t)outBuf, false);
+    }
+
+    // Pull audio samples — called by FluxAudio stream callback (audio thread)
+    int _pullAudio(float* buf, int frames, int /*channels*/) {
+        std::lock_guard<std::mutex> lk(s_audioMutex);
+        int rd    = s_audioRead.load();
+        int wr    = s_audioWrite.load();
+        int avail = wr - rd;
+        int toCopy = std::min(frames, avail);
+
+        for (int i = 0; i < toCopy; i++)
+            buf[i] = s_audioBuf[(rd + i) % kAudioRingSize];
+        for (int i = toCopy; i < frames; i++)
+            buf[i] = 0.f;  // underrun → silence
+
+        s_audioRead = rd + toCopy;
+        // Return frames (not toCopy) to keep stream alive on underrun
+        return frames;
+    }
 };
 
 #endif // __ANDROID__

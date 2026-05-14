@@ -21,6 +21,9 @@ static Canvas2DGL    *s_canvasGL     = nullptr;
 static AAssetManager *s_assetManager = nullptr;
 ANativeActivity      *s_activity     = nullptr;
 
+static jobject s_videoSurface = nullptr;
+
+
 // ── JVM + EGL handles ────────────────────────────────────────────────────────
 static JavaVM    *s_jvm        = nullptr;
 static EGLDisplay s_eglDisplay = EGL_NO_DISPLAY;
@@ -255,23 +258,39 @@ void FluxVideo_updateTexImage(void* surfaceTexture) {
     env->CallVoidMethod(st, mid);
 }
 
+
 ANativeWindow* FluxVideo_getNativeWindow(void* surfaceTexture) {
     JNIEnv* env = getJNIEnv();
     if (!env || !surfaceTexture) return nullptr;
-    jobject   st       = reinterpret_cast<jobject>(surfaceTexture);
-    jclass    surfCls  = env->FindClass("android/view/Surface");
-    jmethodID surfCtor = env->GetMethodID(surfCls, "<init>",
-                                          "(Landroid/graphics/SurfaceTexture;)V");
-    jobject        surface = env->NewObject(surfCls, surfCtor, st);
-    ANativeWindow* window  = surface
-                             ? ANativeWindow_fromSurface(env, surface) : nullptr;
-    if (surface) env->DeleteLocalRef(surface);
-    return window;
+
+    if (s_videoSurface) {
+        env->DeleteGlobalRef(s_videoSurface);
+        s_videoSurface = nullptr;
+    }
+
+    jobject st       = reinterpret_cast<jobject>(surfaceTexture);
+    jclass  surfCls  = env->FindClass("android/view/Surface");
+    jmethodID ctor   = env->GetMethodID(surfCls, "<init>",
+                                        "(Landroid/graphics/SurfaceTexture;)V");
+    jobject local    = env->NewObject(surfCls, ctor, st);
+    if (!local) return nullptr;
+
+    s_videoSurface = env->NewGlobalRef(local);
+    env->DeleteLocalRef(local);
+
+    return ANativeWindow_fromSurface(env, s_videoSurface);
 }
+
 
 void FluxVideo_destroySurfaceTexture(void* surfaceTexture) {
     JNIEnv* env = getJNIEnv();
     if (!env || !surfaceTexture) return;
+
+    if (s_videoSurface) {
+        env->DeleteGlobalRef(s_videoSurface);
+        s_videoSurface = nullptr;
+    }
+
     env->DeleteGlobalRef(reinterpret_cast<jobject>(surfaceTexture));
 }
 
