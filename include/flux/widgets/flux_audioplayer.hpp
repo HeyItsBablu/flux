@@ -25,6 +25,10 @@
 #include "flux_icons.hpp"
 #include "flux_image.hpp"
 
+#ifdef __ANDROID__
+std::string FluxAndroid_getFilesDir();
+#endif
+
 // ============================================================================
 // Helpers
 // ============================================================================
@@ -613,37 +617,50 @@ private:
 
   // ── Temp file writer ───────────────────────────────────────────────────────
 
-  static std::string _writeTempFile(const std::vector<uint8_t> &bytes,
-                                    const std::string &ext) {
+    static std::string _writeTempFile(const std::vector<uint8_t> &bytes,
+                                      const std::string &ext) {
 #ifdef _WIN32
-    char tmpDir[MAX_PATH];
+        char tmpDir[MAX_PATH];
     if (GetTempPathA(MAX_PATH, tmpDir) == 0) return {};
     char tmpFile[MAX_PATH];
     if (GetTempFileNameA(tmpDir, "flx", 0, tmpFile) == 0) return {};
-    // GetTempFileName creates a .tmp file; rename to our extension
     std::string outPath = std::string(tmpFile) + ext;
-    // Write directly (overwrite if exists)
     FILE *f = nullptr;
     fopen_s(&f, outPath.c_str(), "wb");
-#else
-    // POSIX
-    std::string tmpl = std::string(P_tmpdir) + "/flxaudioXXXXXX";
-    // mkstemp requires a writable char[]
-    std::vector<char> tmplBuf(tmpl.begin(), tmpl.end());
-    tmplBuf.push_back('\0');
-    int fd = mkstemp(tmplBuf.data());
+
+#elif defined(__ANDROID__)
+      
+    std::string dir = FluxAndroid_getFilesDir(); 
+    if (dir.empty()) return {};
+    std::string outPath = dir + "/flxaudio_XXXXXX" + ext;
+
+    // mkstemps needs a writable char buffer
+    std::vector<char> tmpl(outPath.begin(), outPath.end());
+    tmpl.push_back('\0');
+    int fd = mkstemps(tmpl.data(), (int)ext.size());
     if (fd < 0) return {};
     close(fd);
-    std::string outPath = std::string(tmplBuf.data()) + ext;
-    // Rename the placeholder to include the extension
-    ::rename(tmplBuf.data(), outPath.c_str());
+    outPath = std::string(tmpl.data());
     FILE *f = fopen(outPath.c_str(), "wb");
+
+#else
+        // Linux desktop
+        std::string tmpl = std::string(P_tmpdir) + "/flxaudioXXXXXX";
+        std::vector<char> tmplBuf(tmpl.begin(), tmpl.end());
+        tmplBuf.push_back('\0');
+        int fd = mkstemp(tmplBuf.data());
+        if (fd < 0) return {};
+        close(fd);
+        std::string outPath = std::string(tmplBuf.data()) + ext;
+        ::rename(tmplBuf.data(), outPath.c_str());
+        FILE *f = fopen(outPath.c_str(), "wb");
 #endif
-    if (!f) return {};
-    fwrite(bytes.data(), 1, bytes.size(), f);
-    fclose(f);
-    return outPath;
-  }
+
+        if (!f) return {};
+        fwrite(bytes.data(), 1, bytes.size(), f);
+        fclose(f);
+        return outPath;
+    }
 
   void _seekFromMouse(int mx) {
     if (_trackRect.w <= 0) return;
