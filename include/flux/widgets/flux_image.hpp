@@ -339,11 +339,7 @@ public:
     const int cw = width - paddingLeft - paddingRight;
     const int ch = height - paddingTop - paddingBottom;
 
-#ifdef __ANDROID__
-    // Deferred load — NanoVG context required
-    if (loadState == ImageLoadState::Idle && !imagePath.empty())
-      _loadAssetAsync(imagePath);
-#endif
+
 
     _promoteStaging();
 
@@ -502,65 +498,77 @@ private:
   // Uses std::thread::detach, the same pattern as FluxHttp::send.
   // =========================================================================
   void _loadAssetAsync(const std::string &path) {
-    if (path.empty()) {
-      _setLoadState(ImageLoadState::Idle);
-      return;
-    }
-    imagePath = path;
-    _setLoadState(ImageLoadState::Loading);
-    markNeedsPaint();
+      if (path.empty()) { _setLoadState(ImageLoadState::Idle); return; }
+      imagePath = path;
+      _setLoadState(ImageLoadState::Loading);
+      markNeedsPaint();
 
-    std::weak_ptr<ImageWidget> weak =
-        std::static_pointer_cast<ImageWidget>(shared_from_this());
+      std::weak_ptr<ImageWidget> weak =
+              std::static_pointer_cast<ImageWidget>(shared_from_this());
 
-    std::thread([weak, path]() {
-      auto self = weak.lock();
-      if (!self)
-        return;
+      std::thread([weak, path]() {
+          auto self = weak.lock();
+          if (!self) return;
 
 #ifdef __ANDROID__
-      // Android: NanoVG texture upload must happen on the GL/render thread.
-      // Set state back to Idle so render() picks it up as a deferred load.
-      self->_setLoadState(ImageLoadState::Idle);
-      self->_scheduleRebuild();
-      return;
-#endif
-      // ── Read the file into memory ─────────────────────────────────────
-#ifdef _WIN32
-      FILE *f = nullptr;
-      fopen_s(&f, path.c_str(), "rb");
-#else
-      FILE *f = fopen(path.c_str(), "rb");
-#endif
-      if (!f) {
-        self->_setLoadState(ImageLoadState::Error);
-        self->_scheduleRebuild();
-        return;
-      }
-      fseek(f, 0, SEEK_END);
-      long sz = ftell(f);
-      fseek(f, 0, SEEK_SET);
-      if (sz <= 0) {
-        fclose(f);
-        self->_setLoadState(ImageLoadState::Error);
-        self->_scheduleRebuild();
-        return;
-      }
-      std::vector<uint8_t> buf((size_t)sz);
-      size_t nread = fread(buf.data(), 1, (size_t)sz, f);
-      fclose(f);
-      if ((long)nread != sz) {
-        self->_setLoadState(ImageLoadState::Error);
-        self->_scheduleRebuild();
-        return;
-      }
+          AAssetManager* am = FluxAndroid_getAssetManager();
+          if (!am) {
+              self->_setLoadState(ImageLoadState::Error);
+              self->_scheduleRebuild();
+              return;
+          }
+          AAsset* asset = AAssetManager_open(am, path.c_str(), AASSET_MODE_BUFFER);
+          if (!asset) {
+              LOGW_IMG("Asset not found: %s", path.c_str());
+              self->_setLoadState(ImageLoadState::Error);
+              self->_scheduleRebuild();
+              return;
+          }
+          const void* buf = AAsset_getBuffer(asset);
+          int len = (int)AAsset_getLength(asset);
+          bool ok = self->_decodeIntoStaging(
+                  reinterpret_cast<const uint8_t*>(buf), len);
+          AAsset_close(asset);
+          if (!ok) self->_setLoadState(ImageLoadState::Error);
+          self->_scheduleRebuild();
 
-      // ── Decode into staging buffer ────────────────────────────────────
-      bool ok = self->_decodeIntoStaging(buf.data(), (int)buf.size());
-      if (!ok)
-        self->_setLoadState(ImageLoadState::Error);
-      self->_scheduleRebuild();
-    }).detach();
+#else
+          // ── Read the file into memory ─────────────────────────────────────
+#ifdef _WIN32
+        FILE *f = nullptr;
+        fopen_s(&f, path.c_str(), "rb");
+#else
+        FILE *f = fopen(path.c_str(), "rb");
+#endif
+        if (!f) {
+            self->_setLoadState(ImageLoadState::Error);
+            self->_scheduleRebuild();
+            return;
+        }
+        fseek(f, 0, SEEK_END);
+        long sz = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        if (sz <= 0) {
+            fclose(f);
+            self->_setLoadState(ImageLoadState::Error);
+            self->_scheduleRebuild();
+            return;
+        }
+        std::vector<uint8_t> buf((size_t)sz);
+        size_t nread = fread(buf.data(), 1, (size_t)sz, f);
+        fclose(f);
+        if ((long)nread != sz) {
+            self->_setLoadState(ImageLoadState::Error);
+            self->_scheduleRebuild();
+            return;
+        }
+
+        bool ok = self->_decodeIntoStaging(buf.data(), (int)buf.size());
+        if (!ok)
+            self->_setLoadState(ImageLoadState::Error);
+        self->_scheduleRebuild();
+#endif
+      }).detach();
   }
 
   // =========================================================================
@@ -1249,27 +1257,25 @@ private:
 
     DestRect d = _calculateDestRect(cx, cy, cw, ch);
 
-    nvgSave(vg);
+nvgSave(vg);
+nvgScissor(vg, (float)cx, (float)cy, (float)cw, (float)ch);
+
+if (repeat != ImageRepeat::NoRepeat) {
+    _renderNanoVGRepeat(vg, d, cx, cy, cw, ch);
+} else {
+    NVGpaint paint =
+        nvgImagePattern(vg, d.x, d.y, d.w, d.h, 0.0f, nvgImage, 1.0f);
     nvgBeginPath(vg);
     if (borderRadius > 0)
-      nvgRoundedRect(vg, (float)cx, (float)cy, (float)cw, (float)ch,
-                     (float)borderRadius);
+        nvgRoundedRect(vg, (float)cx, (float)cy, (float)cw, (float)ch,
+                       (float)borderRadius);
     else
-      nvgRect(vg, (float)cx, (float)cy, (float)cw, (float)ch);
-    nvgClip(vg); // requires NanoVG fork with clip support, else skip
+        nvgRect(vg, (float)cx, (float)cy, (float)cw, (float)ch);
+    nvgFillPaint(vg, paint);
+    nvgFill(vg);
+}
 
-    if (repeat != ImageRepeat::NoRepeat) {
-      _renderNanoVGRepeat(vg, d, cx, cy, cw, ch);
-    } else {
-      NVGpaint paint =
-          nvgImagePattern(vg, d.x, d.y, d.w, d.h, 0.0f, nvgImage, 1.0f);
-      nvgBeginPath(vg);
-      nvgRect(vg, d.x, d.y, d.w, d.h);
-      nvgFillPaint(vg, paint);
-      nvgFill(vg);
-    }
-
-    nvgRestore(vg);
+nvgRestore(vg);
   }
 
   void _renderNanoVGRepeat(NVGcontext *vg, const DestRect &d, int cx, int cy,

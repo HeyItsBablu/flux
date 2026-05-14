@@ -65,7 +65,9 @@ set(CURL_USE_LIBSSH2   OFF CACHE BOOL "" FORCE)
 set(CURL_USE_LIBPSL    OFF CACHE BOOL "" FORCE)
 set(CURL_USE_LIBRTMP   OFF CACHE BOOL "" FORCE)
 set(CURL_DISABLE_LDAP  ON  CACHE BOOL "" FORCE)
-set(BUILD_SHARED_LIBS  OFF CACHE BOOL "" FORCE)
+if(NOT ANDROID)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+endif()
 
 if(ANDROID)
     set(CURL_USE_OPENSSL  OFF CACHE BOOL "" FORCE)
@@ -227,7 +229,7 @@ target_include_directories(flux
 target_compile_definitions(flux PUBLIC
         $<$<CONFIG:Debug>:FLUX_DEBUG>
         $<$<BOOL:${WIN32}>:NOMINMAX>
-        $<$<BOOL:${WIN32}>:CURL_STATICLIB>
+        $<$<OR:$<BOOL:${WIN32}>,$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>>:CURL_STATICLIB>
         FLUX_DEBUG_OVERFLOW=1
 )
 

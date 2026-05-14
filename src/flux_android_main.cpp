@@ -317,6 +317,29 @@ static int32_t handle_input(android_app* app, AInputEvent* event) {
     return 1;
 }
 
+// ── Asset debug ───────────────────────────────────────────────────────────────
+static void debugListAssets(AAssetManager* am, const char* path = "") {
+    AAssetDir* dir = AAssetManager_openDir(am, path);
+    if (!dir) {
+        __android_log_print(ANDROID_LOG_DEBUG, "FluxAssets",
+                            "openDir failed for: '%s'", path);
+        return;
+    }
+    const char* name;
+    bool found = false;
+    while ((name = AAssetDir_getNextFileName(dir)) != nullptr) {
+        found = true;
+        std::string fullPath = std::string(path).empty()
+                               ? name
+                               : std::string(path) + "/" + name;
+        __android_log_print(ANDROID_LOG_DEBUG, "FluxAssets", "  [FILE] %s", fullPath.c_str());
+    }
+    if (!found)
+        __android_log_print(ANDROID_LOG_DEBUG, "FluxAssets",
+                            "  (empty or no files in '%s')", path);
+    AAssetDir_close(dir);
+}
+
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 static void handle_cmd(android_app* app, int32_t cmd) {
     switch (cmd) {
@@ -331,6 +354,13 @@ static void handle_cmd(android_app* app, int32_t cmd) {
             requestPermissionsFromNative();
             FluxJNI::init(app);
             FluxAndroid_setAssetManager(app->activity->assetManager);
+
+            // ── Debug: list all assets ────────────────────────────────────────────────
+            __android_log_print(ANDROID_LOG_DEBUG, "FluxAssets", "=== Asset listing ===");
+            debugListAssets(app->activity->assetManager, "");        // root
+            debugListAssets(app->activity->assetManager, "images");  // images/
+            debugListAssets(app->activity->assetManager, "videos");  // videos/
+            __android_log_print(ANDROID_LOG_DEBUG, "FluxAssets", "=====================");
 
             extractCACert(app);
             if (!s_cacertPath.empty())
