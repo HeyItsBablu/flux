@@ -5,9 +5,10 @@
 #include "nanovg.h"
 #include "nanovg_gl.h"
 
+
 static std::string wstringToUtf8(const std::wstring& text) {
     std::string utf8;
-    utf8.reserve(text.size() * 3);
+    utf8.reserve(text.size() * 4);
     for (wchar_t wc : text) {
         uint32_t cp = static_cast<uint32_t>(wc);
         if (cp < 0x80) {
@@ -15,10 +16,16 @@ static std::string wstringToUtf8(const std::wstring& text) {
         } else if (cp < 0x800) {
             utf8 += static_cast<char>(0xC0 | (cp >> 6));
             utf8 += static_cast<char>(0x80 | (cp & 0x3F));
-        } else {
+        } else if (cp < 0x10000) {
             utf8 += static_cast<char>(0xE0 | (cp >> 12));
             utf8 += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
             utf8 += static_cast<char>(0x80 | (cp & 0x3F));
+        } else {
+            // 4-byte UTF-8 — needed for MDI v5+ codepoints (U+F0001 range)
+            utf8 += static_cast<char>(0xF0 | (cp >> 18));
+            utf8 += static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
+            utf8 += static_cast<char>(0x80 | ((cp >> 6)  & 0x3F));
+            utf8 += static_cast<char>(0x80 | (cp         & 0x3F));
         }
     }
     return utf8;
@@ -115,6 +122,8 @@ void Painter::drawText(const std::wstring& text, int x, int y, int w, int h,
 
     // ── wstring → UTF-8 ───────────────────────────────────────────────────────
     std::string utf8 = wstringToUtf8(text);
+
+
 
     // ── Alignment ─────────────────────────────────────────────────────────────
     int hAlign = (format & DT_CENTER) ? NVG_ALIGN_CENTER

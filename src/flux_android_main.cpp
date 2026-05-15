@@ -33,6 +33,11 @@ static EGLSurface s_eglSurface = EGL_NO_SURFACE;
 // ── Misc ─────────────────────────────────────────────────────────────────────
 static std::string s_cacertPath;
 
+// ── MDI font path (extracted from assets to internal storage) ─────────────────
+static std::string s_mdiFontPath;
+
+const std::string& FluxAndroid_getMDIFontPath() { return s_mdiFontPath; }
+
 // ── DPI scale ─────────────────────────────────────────────────────────────────
 static float s_dpiScale = 1.f;
 void  FluxAndroid_setDpiScale(float scale) { s_dpiScale = scale; }
@@ -112,6 +117,83 @@ static void extractCACert(android_app* app) {
         s_cacertPath.clear();
     }
     AAsset_close(asset);
+}
+
+// ── MDI font extraction ───────────────────────────────────────────────────────
+// Copies materialdesignicons-webfont.ttf from assets/ to internal storage
+// so NanoVG (which needs a file path) can load it.
+// Only writes the file if it doesn't already exist to avoid redundant I/O.
+static void extractMDIFont(android_app* app) {
+    AAssetManager* am = app->activity->assetManager;
+    if (!am) return;
+
+    s_mdiFontPath = std::string(app->activity->internalDataPath)
+                  + "/materialdesignicons-webfont.ttf";
+
+    // Skip extraction if already on disk
+    FILE* check = fopen(s_mdiFontPath.c_str(), "rb");
+    if (check) {
+        fclose(check);
+        __android_log_print(ANDROID_LOG_INFO, "FluxUI",
+            "MDI font already extracted at %s", s_mdiFontPath.c_str());
+        return;
+    }
+
+    AAsset* asset = AAssetManager_open(am,
+        "materialdesignicons-webfont.ttf", AASSET_MODE_BUFFER);
+    if (!asset) {
+        __android_log_print(ANDROID_LOG_ERROR, "FluxUI",
+            "MDI font asset not found! "
+            "Add materialdesignicons-webfont.ttf to your assets/ folder.");
+        s_mdiFontPath.clear();
+        return;
+    }
+
+    FILE* f = fopen(s_mdiFontPath.c_str(), "wb");
+    if (f) {
+        fwrite(AAsset_getBuffer(asset), 1, AAsset_getLength(asset), f);
+        fclose(f);
+        __android_log_print(ANDROID_LOG_INFO, "FluxUI",
+            "MDI font extracted to %s", s_mdiFontPath.c_str());
+    } else {
+        __android_log_print(ANDROID_LOG_ERROR, "FluxUI",
+            "Failed to write MDI font to %s", s_mdiFontPath.c_str());
+        s_mdiFontPath.clear();
+    }
+    AAsset_close(asset);
+}
+
+// ── NVG font registration (called after every nvgCreateGLES2) ─────────────────
+// Registers all fonts that the FontCache may request by name.
+// Must be called with a live NVGcontext each time the context is recreated.
+static void nvg_registerFonts(NVGcontext* vg) {
+    if (!vg) return;
+
+    // Default / UI fonts
+    nvgCreateFont(vg, "default",         "/system/fonts/Roboto-Regular.ttf");
+    nvgCreateFont(vg, "Roboto_regular",  "/system/fonts/Roboto-Regular.ttf");
+    nvgCreateFont(vg, "Roboto_bold",     "/system/fonts/Roboto-Bold.ttf");
+    nvgCreateFont(vg, "Roboto_light",    "/system/fonts/Roboto-Light.ttf");
+    nvgCreateFont(vg, "Segoe UI_regular","/system/fonts/Roboto-Regular.ttf");
+    nvgCreateFont(vg, "Segoe UI_bold",   "/system/fonts/Roboto-Bold.ttf");
+    nvgCreateFont(vg, "Segoe UI_light",  "/system/fonts/Roboto-Light.ttf");
+
+    // MDI icon font — only if successfully extracted
+    if (!s_mdiFontPath.empty()) {
+        int handle = nvgCreateFont(vg, "Material Design Icons_regular",
+                                   s_mdiFontPath.c_str());
+        if (handle != -1) {
+            __android_log_print(ANDROID_LOG_INFO, "FluxUI",
+                "NVG: MDI font registered, handle=%d", handle);
+        } else {
+            __android_log_print(ANDROID_LOG_ERROR, "FluxUI",
+                "NVG: Failed to register MDI font from %s",
+                s_mdiFontPath.c_str());
+        }
+    } else {
+        __android_log_print(ANDROID_LOG_WARN, "FluxUI",
+            "NVG: MDI font path empty — icons will not render");
+    }
 }
 
 // ── JNI / platform helpers ────────────────────────────────────────────────────
@@ -311,7 +393,7 @@ static void requestPermissionsFromNative() {
 
     std::vector<std::string> needed;
     auto check = [&](const char* perm) {
-        jstring jp = env->NewStringUTF(perm);
+        jstring jp = env->NewStringUTF(perm); 
         if (env->CallIntMethod(activityObj, checkPerm, jp) != 0)
             needed.push_back(perm);
         env->DeleteLocalRef(jp);
@@ -385,6 +467,12 @@ static void handle_cmd(android_app* app, int32_t cmd) {
             if (!s_cacertPath.empty())
                 FluxHttp::setCABundle(s_cacertPath);
 
+            // ── Extract MDI icon font from assets to internal storage ──────────────────
+            // Must happen before nvgCreateGLES2 so s_mdiFontPath is ready for
+            // nvg_registerFonts(). The path is also used by flux_font_android.cpp
+            // via FluxAndroid_getMDIFontPath() when the FontCache creates a font entry.
+            extractMDIFont(app);
+
             // DPI
             AConfiguration* cfg = AConfiguration_new();
             AConfiguration_fromAssetManager(cfg, app->activity->assetManager);
@@ -395,16 +483,14 @@ static void handle_cmd(android_app* app, int32_t cmd) {
                 // ── First launch ──────────────────────────────────────────────
                 s_app = new FluxUI(app);
                 s_app->build([&]() { return createApp(s_app); });
-                auto fcfg =
-                        FluxAppWidget::getInstance();
+                auto fcfg = FluxAppWidget::getInstance();
                 s_app->createWindow(fcfg->title,
                                     fcfg->windowWidth,
                                     fcfg->windowHeight);
 
-
                 if (s_vg) { nvgDeleteGLES2(s_vg); s_vg = nullptr; }
                 s_vg = nvgCreateGLES2(NVG_ANTIALIAS);
-                nvgCreateFont(s_vg, "default", "/system/fonts/Roboto-Regular.ttf");
+                nvg_registerFonts(s_vg); // registers default + MDI
                 FluxAndroid_setVG(s_vg);
 
                 // Canvas2DGL
@@ -418,14 +504,15 @@ static void handle_cmd(android_app* app, int32_t cmd) {
                 NVG_initOESBlit(1920, 1080);
                 s_app->getFontCache().clear();
 
-
             } else {
                 // ── Surface reconnect ─────────────────────────────────────────
+                // NVGcontext is destroyed with the GL context, so we must
+                // recreate it and re-register ALL fonts again.
                 s_app->getPlatformWindow().reinitSurface(app->window);
 
                 if (s_vg) { nvgDeleteGLES2(s_vg); s_vg = nullptr; }
                 s_vg = nvgCreateGLES2(NVG_ANTIALIAS);
-                nvgCreateFont(s_vg, "default", "/system/fonts/Roboto-Regular.ttf");
+                nvg_registerFonts(s_vg); // registers default + MDI
                 FluxAndroid_setVG(s_vg);
 
                 canvasGL_reinit();
@@ -436,6 +523,9 @@ static void handle_cmd(android_app* app, int32_t cmd) {
                 s_eglSurface = win.getEGLSurface();
 
                 NVG_initOESBlit(1920, 1080);
+                // Clear the FontCache so stale nvgHandle values (from the
+                // previous context) are not reused — createFont() will
+                // re-register each font with the new NVGcontext on demand.
                 s_app->getFontCache().clear();
                 s_app->getRoot()->markNeedsLayout();
             }
