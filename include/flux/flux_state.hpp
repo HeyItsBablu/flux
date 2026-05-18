@@ -15,13 +15,7 @@
 // ============================================================================
 // SFINAE TYPE-TRAIT DETECTORS
 // ============================================================================
-//
-// MSVC is stricter than GCC/Clang: it will hard-error on T::value_type or
-// T::mapped_type inside an enable_if condition when T does not have those
-// members, even if the condition is ultimately false.
-//
-// The fix is void_t detectors: substitution failure happens at the *outer*
-// level (has_value_type<T>) before the inner type name is ever evaluated.
+
 
 namespace flux_detail {
 
