@@ -1,4 +1,5 @@
 #pragma once
+
 #include "flux_http_platform.hpp" // fluxPostToUIThread
 
 #include <atomic>
@@ -78,20 +79,26 @@ private:
     std::atomic<bool> connected_{false};
 
     // ── libcurl WebSocket receive loop (background thread) ───────────────────
-    void receiveLoop(const std::string &url) {
-        curl_ = curl_easy_init();
-        if (!curl_) {
-            postError("curl_easy_init failed");
-            return;
-        }
+void receiveLoop(const std::string &url) {
+    curl_ = curl_easy_init();
+    if (!curl_) {
+        postError("curl_easy_init failed");
+        return;
+    }
 
-        curl_easy_setopt(curl_, CURLOPT_URL,            url.c_str());
-        curl_easy_setopt(curl_, CURLOPT_CONNECT_ONLY,   2L); // WebSocket mode
-        curl_easy_setopt(curl_, CURLOPT_SSL_VERIFYPEER, 1L);
-        curl_easy_setopt(curl_, CURLOPT_SSL_VERIFYHOST, 2L);
-        curl_easy_setopt(curl_, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl_, CURLOPT_URL,            url.c_str());
+    curl_easy_setopt(curl_, CURLOPT_CONNECT_ONLY,   2L);
+    curl_easy_setopt(curl_, CURLOPT_SSL_VERIFYPEER, 1L);
+    curl_easy_setopt(curl_, CURLOPT_SSL_VERIFYHOST, 2L);
+    curl_easy_setopt(curl_, CURLOPT_FOLLOWLOCATION, 1L);
 
-        CURLcode cc = curl_easy_perform(curl_);
+    // ── Add this: use the same CA bundle FluxHttp uses ──────────────────
+    const std::string& caBundle = FluxHttp::getCABundle(); // expose via getter
+    if (!caBundle.empty())
+        curl_easy_setopt(curl_, CURLOPT_CAINFO, caBundle.c_str());
+    // ────────────────────────────────────────────────────────────────────
+
+    CURLcode cc = curl_easy_perform(curl_);
         if (cc != CURLE_OK) {
             postError(curl_easy_strerror(cc));
             cleanupCurl();

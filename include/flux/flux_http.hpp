@@ -93,6 +93,7 @@ public:
     static void setCABundle(const std::string& path) {
         s_caBundle_ = path;
     }
+    static const std::string& getCABundle()           { return s_caBundle_; }
 
 private:
     static inline std::string s_caBundle_;

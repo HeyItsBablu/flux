@@ -1,36 +1,12 @@
 #include "flux/flux.hpp"
 
-#include <curl/curl.h>
 #include <iostream>
 
 class EchoTestApp : public Widget {
 public:
     WidgetPtr build() override {
 
-        // ── Print curl version info at startup ─────────────────────────────
-        curl_version_info_data* info = curl_version_info(CURLVERSION_NOW);
-        std::cout << "=== CURL VERSION INFO ===" << std::endl;
-        std::cout << "curl version : " << info->version << std::endl;
-        std::cout << "ssl version  : " << (info->ssl_version ? info->ssl_version : "none") << std::endl;
 
-        // Check WebSocket feature flag
-        bool hasWS = (info->features & CURL_VERSION_HTTP2) != 0;
-        std::cout << "features     : 0x" << std::hex << info->features << std::dec << std::endl;
-
-        // CURL_VERSION_WEBSOCKETS was added in 7.86.0
-        #ifdef CURL_VERSION_WEBSOCKETS
-            bool wsFlag = (info->features & CURL_VERSION_WEBSOCKETS) != 0;
-            std::cout << "WebSocket    : " << (wsFlag ? "YES" : "NO") << std::endl;
-        #else
-            std::cout << "WebSocket    : CURL_VERSION_WEBSOCKETS not defined — curl too old or not rebuilt" << std::endl;
-        #endif
-
-        // Print supported protocols
-        std::cout << "protocols    : ";
-        for (int i = 0; info->protocols[i]; ++i)
-            std::cout << info->protocols[i] << " ";
-        std::cout << std::endl;
-        std::cout << "=========================" << std::endl;
 
         return Scaffold(
             AppBar("WebSocket Echo Test"),
