@@ -54,17 +54,18 @@ endif()
 
 FetchContent_Declare(curl
         GIT_REPOSITORY https://github.com/curl/curl.git
-        GIT_TAG        curl-8_8_0
+        GIT_TAG        curl-8_20_0
 )
 
 set(BUILD_CURL_EXE     OFF CACHE BOOL "" FORCE)
 set(BUILD_TESTING      OFF CACHE BOOL "" FORCE)
 set(CURL_DISABLE_TESTS ON  CACHE BOOL "" FORCE)
-set(HTTP_ONLY          ON  CACHE BOOL "" FORCE)
+# set(HTTP_ONLY          ON  CACHE BOOL "" FORCE)
 set(CURL_USE_LIBSSH2   OFF CACHE BOOL "" FORCE)
 set(CURL_USE_LIBPSL    OFF CACHE BOOL "" FORCE)
 set(CURL_USE_LIBRTMP   OFF CACHE BOOL "" FORCE)
 set(CURL_DISABLE_LDAP  ON  CACHE BOOL "" FORCE)
+set(CURL_ENABLE_WEBSOCKETS ON CACHE BOOL "" FORCE)
 if(NOT ANDROID)
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 endif()
@@ -231,6 +232,7 @@ target_compile_definitions(flux PUBLIC
         $<$<BOOL:${WIN32}>:NOMINMAX>
         $<$<OR:$<BOOL:${WIN32}>,$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>>:CURL_STATICLIB>
         FLUX_DEBUG_OVERFLOW=1
+        CURL_ENABLE_WEBSOCKETS
 )
 
 

@@ -107,6 +107,7 @@ using NativeColor = Color;
 
 #include <windows.h>
 #include <windowsx.h>
+#include <objidl.h>
 #include <gdiplus.h>
 #pragma comment(lib, "gdiplus.lib")
 
