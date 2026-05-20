@@ -223,17 +223,17 @@ public:
 
   // ── Spacing ───────────────────────────────────────────────────────────────
 
-  std::shared_ptr<TextWidget> setLetterSpacing(float spacing) {
-    if (style.letterSpacing != spacing) {
-      style.letterSpacing = spacing;
+  std::shared_ptr<TextWidget> setLetterSpacing(float lineSpacing) {
+    if (style.letterSpacing != lineSpacing) {
+      style.letterSpacing = lineSpacing;
       markNeedsLayout();
     }
     return self();
   }
 
-  std::shared_ptr<TextWidget> setWordSpacing(float spacing) {
-    if (style.wordSpacing != spacing) {
-      style.wordSpacing = spacing;
+  std::shared_ptr<TextWidget> setWordSpacing(float wordSpacing) {
+    if (style.wordSpacing != wordSpacing) {
+      style.wordSpacing = wordSpacing;
       markNeedsLayout();
     }
     return self();
@@ -273,9 +273,9 @@ public:
   // ── Overflow ──────────────────────────────────────────────────────────────
 
   /// How text overflow is handled (Clip, Ellipsis, Fade, Visible)
-  std::shared_ptr<TextWidget> setOverflow(TextOverflow overflow) {
-    if (textOverflow != overflow) {
-      textOverflow = overflow;
+  std::shared_ptr<TextWidget> setOverflow(TextOverflow newOverflow) {
+    if (textOverflow != newOverflow) {
+      textOverflow = newOverflow;
       markNeedsPaint();
     }
     return self();

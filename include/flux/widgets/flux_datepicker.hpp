@@ -44,11 +44,17 @@ struct FluxDate {
     return oss.str();
   }
 
-  static FluxDate today() {
+static FluxDate today() {
     std::time_t now = std::time(nullptr);
+#ifdef _WIN32
+    std::tm lt{};
+    localtime_s(&lt, &now);
+    return {lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday};
+#else
     std::tm *lt = std::localtime(&now);
     return {lt->tm_year + 1900, lt->tm_mon + 1, lt->tm_mday};
-  }
+#endif
+}
 };
 
 // ============================================================================

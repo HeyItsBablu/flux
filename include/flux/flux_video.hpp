@@ -286,9 +286,9 @@ private:
     // ── GL / EGL ──────────────────────────────────────────────────────────────
     GLuint     s_oesTexture        = 0;
     void*      s_surfaceTexture    = nullptr;
-    EGLDisplay s_decodeEGLDisplay  = EGL_NO_DISPLAY;
-    EGLContext s_decodeEGLContext  = EGL_NO_CONTEXT;
-    EGLSurface s_decodeEGLSurface  = EGL_NO_SURFACE;
+
+
+
 
     // ── Callbacks ─────────────────────────────────────────────────────────────
     FinishCallback                      s_finishCallback;

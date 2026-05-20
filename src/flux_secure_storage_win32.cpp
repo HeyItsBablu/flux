@@ -6,7 +6,9 @@
 #include "flux/flux_secure_storage.hpp"
 
 #define WIN32_LEAN_AND_MEAN
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <windows.h>
 #include <wincrypt.h>
 #pragma comment(lib, "Crypt32.lib")

@@ -413,7 +413,7 @@ static void requestPermissionsFromNative() {
 }
 
 // ── Input ─────────────────────────────────────────────────────────────────────
-static int32_t handle_input(android_app* app, AInputEvent* event) {
+static int32_t handle_input(android_app* /*app*/, AInputEvent* event) {
     if (s_app) s_app->getPlatformWindow().handleAndroidEvent(event);
     return 1;
 }

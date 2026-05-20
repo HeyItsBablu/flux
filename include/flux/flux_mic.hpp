@@ -66,8 +66,13 @@ inline std::string write(const std::string& path,
                          uint32_t           sampleRate  = 48000,
                          uint16_t           numChannels = 1)
 {
+#ifdef _WIN32
+    FILE* f = nullptr;
+    if (fopen_s(&f, path.c_str(), "wb") != 0 || !f) return "";
+#else
     FILE* f = fopen(path.c_str(), "wb");
     if (!f) return "";
+#endif
 
     Header hdr;
     hdr.numChannels  = numChannels;
@@ -91,12 +96,18 @@ inline std::string write(const std::string& path,
     return path;
 }
 
-// Platform-correct path separator
+
 inline std::string makeTimestampedPath(const std::string& dir) {
     std::time_t t  = std::time(nullptr);
-    std::tm*    tm = std::localtime(&t);
-    char buf[64];
+char buf[64];
+#ifdef _WIN32
+    std::tm tm{};
+    localtime_s(&tm, &t);
+    std::strftime(buf, sizeof(buf), "rec_%Y%m%d_%H%M%S.wav", &tm);
+#else
+    std::tm* tm = std::localtime(&t);
     std::strftime(buf, sizeof(buf), "rec_%Y%m%d_%H%M%S.wav", tm);
+#endif
 #ifdef _WIN32
     return dir + "\\" + buf;
 #else

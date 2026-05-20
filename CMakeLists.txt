@@ -318,6 +318,9 @@ endif()
 # ── Compiler options ──────────────────────────────────────────────────────────
 
 if(MSVC)
+    target_compile_options(flux PUBLIC  
+            /utf-8
+    )
     target_compile_options(flux PRIVATE
             /W4
             /permissive-

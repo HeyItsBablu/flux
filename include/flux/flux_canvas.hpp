@@ -142,9 +142,9 @@ public:
     // ── Android-only ──────────────────────────────────────────────────────────
 #ifdef __ANDROID__
     static void tickAllGL(Widget* root, int windowW, int windowH, float dpi);
-    bool handleMouseDown(int mx, int my);
-    bool handleMouseMove(int mx, int my);
-    bool handleMouseUp  (int mx, int my);
+    bool handleMouseDown(int mx, int my) override;
+    bool handleMouseMove(int mx, int my) override;
+    bool handleMouseUp  (int mx, int my) override;
     bool hitTest(int mx, int my) const;
 #endif
 

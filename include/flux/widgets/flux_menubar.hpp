@@ -386,7 +386,7 @@ private:
                 popupH_ + shadowOffset, fc);
 
     if (scaffold_)
-      scaffold_->addOverlay(this, [this](GraphicsContext, FontCache &) {}, 150);
+      scaffold_->addOverlay(this, [](GraphicsContext, FontCache &) {}, 150);
 
     markNeedsPaint();
   }

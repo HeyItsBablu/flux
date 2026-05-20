@@ -659,7 +659,7 @@ private:
         static_cast<FluxCamera*>(ctx)->s_state = State::Error;
     }
 
-    static void _onSessionReady(void* ctx, ACameraCaptureSession* /*session*/) {
+    static void _onSessionReady(void* /*ctx*/, ACameraCaptureSession* /*session*/) {
         CAM_LOGI("Session ready");
     }
 
@@ -669,7 +669,7 @@ private:
         static_cast<FluxCamera*>(ctx)->s_pendingFrame = true;
     }
 
-    static void _onSessionClosed(void* ctx, ACameraCaptureSession* /*session*/) {
+    static void _onSessionClosed(void* /*ctx*/, ACameraCaptureSession* /*session*/) {
         CAM_LOGI("Session closed");
     }
 
@@ -683,7 +683,7 @@ private:
     }
 
     // Fires only for one-shot still captures triggered by capturePhoto()
-    static void _onCaptureCompleted(void* ctx,
+    static void _onCaptureCompleted(void* /*ctx*/,
                                     ACameraCaptureSession* /*session*/,
                                     ACaptureRequest* /*request*/,
                                     const ACameraMetadata* /*result*/) {

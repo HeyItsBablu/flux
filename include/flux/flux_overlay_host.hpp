@@ -155,7 +155,7 @@ public:
     int overlayH() const { return popupH_; }
 
     // Called by the scaffold's render pass for each overlay in the stack.
-    void renderOverlay(GraphicsContext &ctx, FontCache &fc) {
+    void renderOverlay(GraphicsContext &/*ctx*/, FontCache &fc) {
         if (!visible_ || popupW_ <= 0 || popupH_ <= 0)
             return;
 

@@ -477,28 +477,28 @@ void Painter::fillPolygonAlpha(const std::vector<std::pair<int, int>> &points,
 // Internal: translate TextAlign → Win32 DT_* flags (horizontal part only)
 // -----------------------------------------------------------------------
 
-static UINT textAlignFlags(TextAlign align, TextDirection dir) {
-  // RTL: flip Left/Right/Start/End
-  bool rtl = (dir == TextDirection::RTL);
+// static UINT textAlignFlags(TextAlign align, TextDirection dir) {
+//   // RTL: flip Left/Right/Start/End
+//   bool rtl = (dir == TextDirection::RTL);
 
-  switch (align) {
-  case TextAlign::Left:
-  case TextAlign::Start:
-    return rtl ? DT_RIGHT : DT_LEFT;
+//   switch (align) {
+//   case TextAlign::Left:
+//   case TextAlign::Start:
+//     return rtl ? DT_RIGHT : DT_LEFT;
 
-  case TextAlign::Right:
-  case TextAlign::End:
-    return rtl ? DT_LEFT : DT_RIGHT;
+//   case TextAlign::Right:
+//   case TextAlign::End:
+//     return rtl ? DT_LEFT : DT_RIGHT;
 
-  case TextAlign::Center:
-    return DT_CENTER;
+//   case TextAlign::Center:
+//     return DT_CENTER;
 
-  case TextAlign::Justify:
+//   case TextAlign::Justify:
 
-    return rtl ? DT_RIGHT : DT_LEFT;
-  }
-  return DT_LEFT;
-}
+//     return rtl ? DT_RIGHT : DT_LEFT;
+//   }
+//   return DT_LEFT;
+// }
 
 // -----------------------------------------------------------------------
 // Internal: get the native HFONT from a TextStyle

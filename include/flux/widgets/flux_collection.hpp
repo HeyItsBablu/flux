@@ -530,7 +530,7 @@ private:
   }
 
   template <typename U = T>
-  static uintptr_t defaultKey(const U &item, int index,
+  static uintptr_t defaultKey(const U &item, int /*index*/,
       std::enable_if_t<std::is_pointer_v<U>> * = nullptr) {
     return reinterpret_cast<uintptr_t>(item);
   }

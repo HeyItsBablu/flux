@@ -727,12 +727,15 @@ private:
       _clearSelection();
     }
   }
-  void _pasteFromClipboard() {
+
+  
+void _pasteFromClipboard() {
     auto *ui = FluxUI::getCurrentInstance();
     if (!ui) return;
-    std::string text = ui->getClipboardText();
+    std::string clipText = ui->getClipboardText();
     if (_hasSelection()) _deleteSelection();
-    for (char ch : text) {
+    for (char ch : clipText) {
+
       if (ch == '\r') continue;
       if (ch == '\n') {
         std::string tail = lines_[cursorLine_].substr(cursorCol_);

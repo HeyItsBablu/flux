@@ -1034,10 +1034,14 @@ private:
     return e == ".wav";
   }
 
-  static std::vector<uint8_t> _loadBytes(const std::string &path) {
+static std::vector<uint8_t> _loadBytes(const std::string &path) {
+#ifdef _WIN32
+    FILE *f = nullptr;
+    if (fopen_s(&f, path.c_str(), "rb") != 0 || !f) return {};
+#else
     FILE *f = fopen(path.c_str(), "rb");
-    if (!f)
-      return {};
+    if (!f) return {};
+#endif
     fseek(f, 0, SEEK_END);
     size_t len = (size_t)ftell(f);
     fseek(f, 0, SEEK_SET);

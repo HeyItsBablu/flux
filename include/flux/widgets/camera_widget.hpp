@@ -411,11 +411,6 @@ private:
 
     // ── Icon drawing ──────────────────────────────────────────────────────────
     static void _drawFlashIcon(Painter& p, int cx, int cy, int sz, Color col) {
-        // Simple lightning bolt: two triangles
-        int x1 = cx - sz/2,  y1 = cy - sz;
-        int x2 = cx + sz/4,  y2 = cy - 2;
-        int x3 = cx - sz/4,  y3 = cy + 2;
-        int x4 = cx + sz/2,  y4 = cy + sz;
         // Vertical bar approximation using fillRect strips
         p.fillRect(cx - 2, cy - sz,     4, sz*2, col);
         p.fillRect(cx - sz/2, cy - 2,   sz, 4,   col);

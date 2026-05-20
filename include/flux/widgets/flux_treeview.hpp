@@ -131,9 +131,9 @@ public:
   }
 
   // Select a node by id
-  void selectById(const std::string &id) {
+  void selectById(const std::string &newId) {
     for (auto &row : flatList_) {
-      if (row.node->id == id) {
+      if (row.node->id == newId) {
         selectedNode_ = row.node;
         markNeedsPaint();
         return;

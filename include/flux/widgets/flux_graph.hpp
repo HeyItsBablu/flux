@@ -505,7 +505,7 @@ private:
   }
 
   // ── Draw: axis labels + titles ─────────────────────────────────────────────
-  void drawAxisLabels(Painter &p, GraphicsContext &ctx, const PlotArea &pa,
+  void drawAxisLabels(Painter &p, GraphicsContext &/*ctx*/, const PlotArea &pa,
                       FontCache &fc) const {
     NativeFont font = fc.getFont(kAxisFontSize, FontWeight::Normal);
 
@@ -580,7 +580,7 @@ private:
     }
   }
 
-  void drawTitle(Painter &p, GraphicsContext &ctx, FontCache &fc) const {
+  void drawTitle(Painter &p, GraphicsContext &/*ctx*/, FontCache &fc) const {
     if (title.empty())
       return;
     NativeFont tf = fc.getFont(kTitleFontSize, FontWeight::Bold);

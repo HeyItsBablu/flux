@@ -34,13 +34,15 @@ struct IconGlyph {
 };
 
 // ── Helper: returns the platform codepoint as uint32_t ───────────────────────
-inline uint32_t glyph(const IconGlyph& g) {
 #ifdef _WIN32
-    return static_cast<uint32_t>(g.win);
-#else
-    return g.linux_;
-#endif
+inline wchar_t glyph(const IconGlyph& g) {
+    return g.win;
 }
+#else
+inline uint32_t glyph(const IconGlyph& g) {
+    return g.linux_;
+}
+#endif
 
 // ── Actions ───────────────────────────────────────────────────────────────────
 //                               Segoe          MDI v5+ webfont

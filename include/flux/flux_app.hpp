@@ -140,8 +140,8 @@ public:
     return instance_.lock();
   }
 
-  FluxAppWidget(const std::string &appTitle, WidgetPtr homeWidget)
-      : title(appTitle), home(homeWidget), theme(AppTheme::light())
+    FluxAppWidget(const std::string &appTitle, WidgetPtr homeWidget)
+            : title(appTitle), theme(AppTheme::light()), home(homeWidget)
   {
     assert(instance_.expired() &&
            "FluxAppWidget: second instance created while first is still alive. "

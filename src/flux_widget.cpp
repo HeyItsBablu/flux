@@ -79,8 +79,8 @@ void Widget::computeLayout(GraphicsContext &ctx,
 // Widget::positionChildren
 // ============================================================================
 
-void Widget::positionChildren(int contentX, int contentY, int contentWidth,
-                              int contentHeight) {
+void Widget::positionChildren(int contentX, int contentY, int /*contentWidth*/,
+                              int /*contentHeight*/) {
   if (!children.empty()) {
     auto &child = children[0];
     child->x = contentX + child->marginLeft;
