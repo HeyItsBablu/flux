@@ -38,6 +38,8 @@
       .lang-tag { display: inline-block; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--cyan); background: rgba(56,189,248,0.1); border: 1px solid rgba(56,189,248,0.25); padding: 3px 10px; border-radius: 4px; margin-bottom: 18px; }
       .hero h1 { font-family: "Syne", sans-serif; font-size: 44px; font-weight: 800; color: #fff; letter-spacing: -1.5px; line-height: 1.1; margin-bottom: 16px; }
       .hero p { font-size: 16px; color: var(--text-muted); max-width: 520px; line-height: 1.7; }
+      .hero-platforms { margin-top: 20px; display: flex; flex-wrap: wrap; gap: 8px; }
+      .hero-pill { font-family: "JetBrains Mono", monospace; font-size: 11px; padding: 3px 10px; border-radius: 4px; border: 1px solid var(--border2); color: var(--text-muted); background: var(--surface); }
       .section { margin-bottom: 64px; scroll-margin-top: 80px; }
       .section-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
       .section-head h2 { font-family: "Syne", sans-serif; font-size: 26px; font-weight: 700; color: #fff; letter-spacing: -0.5px; }
@@ -49,6 +51,10 @@
       .badge-state { background: rgba(245,158,66,0.15); color: var(--orange); border: 1px solid rgba(245,158,66,0.3); }
       .badge-collection { background: rgba(101,116,248,0.15); color: var(--accent2); border: 1px solid rgba(101,116,248,0.3); }
       .badge-component { background: rgba(192,132,252,0.15); color: var(--purple); border: 1px solid rgba(192,132,252,0.3); }
+      .badge-canvas { background: rgba(248,113,113,0.15); color: var(--red); border: 1px solid rgba(248,113,113,0.3); }
+      .badge-media { background: rgba(56,189,248,0.15); color: var(--cyan); border: 1px solid rgba(56,189,248,0.3); }
+      .badge-network { background: rgba(62,207,142,0.15); color: var(--green); border: 1px solid rgba(62,207,142,0.3); }
+      .badge-cli { background: rgba(245,158,66,0.15); color: var(--orange); border: 1px solid rgba(245,158,66,0.3); }
       .section-desc { color: var(--text-muted); font-size: 14.5px; margin-bottom: 20px; }
       .code-block { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 20px 22px; margin-bottom: 24px; overflow-x: auto; }
       .code-block pre { font-family: "JetBrains Mono", monospace; font-size: 12.5px; line-height: 1.75; color: var(--text); }
@@ -76,32 +82,32 @@
       .note strong { color: var(--accent2); }
       .note-purple { background: rgba(192,132,252,0.07); border-left: 3px solid var(--purple); border-radius: 0 6px 6px 0; padding: 12px 16px; font-size: 13.5px; color: var(--text-muted); margin-bottom: 20px; }
       .note-purple strong { color: var(--purple); }
+      .note-green { background: rgba(62,207,142,0.07); border-left: 3px solid var(--green); border-radius: 0 6px 6px 0; padding: 12px 16px; font-size: 13.5px; color: var(--text-muted); margin-bottom: 20px; }
+      .note-green strong { color: var(--green); }
       code { font-family: "JetBrains Mono", monospace; font-size: 12px; background: var(--surface); border: 1px solid var(--border); padding: 1px 6px; border-radius: 3px; color: var(--accent2); }
       @media (max-width: 900px) { .sidebar { display: none; } .main { margin-left: 0; padding: 32px 24px 80px; } }
     </style>
   </head>
   <body>
     <header class="topbar">
-      <span class="topbar-logo">Flux</span>
+      <span class="topbar-logo">FluxUI</span>
       <span class="topbar-sep"></span>
       <span class="topbar-sub">Widget API Reference</span>
-      <span class="topbar-badge">C++ / WIN32</span>
+      <span class="topbar-badge">C++20 · Windows · Linux · Android</span>
     </header>
 
     <div class="layout">
       <nav class="sidebar">
         <div class="nav-section">
           <div class="nav-label">Components</div>
-          <a class="nav-link" href="#component">Component</a>
-          <a class="nav-link" href="#child-macro">CHILD macro</a>
+          <a class="nav-link" href="#widget">Widget</a>
           <a class="nav-link" href="#state-sharing">State Sharing</a>
-          <a class="nav-link" href="#deref">deref helper</a>
+
         </div>
         <div class="nav-section">
           <div class="nav-label">Display</div>
           <a class="nav-link" href="#text">Text</a>
           <a class="nav-link" href="#icon">Icon</a>
-          <a class="nav-link" href="#fluxicons">FluxIcons</a>
           <a class="nav-link" href="#divider">Divider</a>
           <a class="nav-link" href="#progressbar">ProgressBar</a>
           <a class="nav-link" href="#graph">Graph</a>
@@ -115,17 +121,24 @@
         <div class="nav-section">
           <div class="nav-label">Input</div>
           <a class="nav-link" href="#textinput">TextInput</a>
+          <a class="nav-link" href="#textarea">TextArea</a>
+          <a class="nav-link" href="#numberinput">NumberInput / SpinBox</a>
           <a class="nav-link" href="#slider">Slider</a>
           <a class="nav-link" href="#toggle">Toggle</a>
           <a class="nav-link" href="#checkbox">CheckBox</a>
           <a class="nav-link" href="#radiogroup">RadioGroup</a>
           <a class="nav-link" href="#colorpicker">ColorPicker</a>
+          <a class="nav-link" href="#datepicker">DatePicker</a>
+          <a class="nav-link" href="#filepicker">FilePicker</a>
         </div>
         <div class="nav-section">
           <div class="nav-label">Collection</div>
           <a class="nav-link" href="#listview">ListView</a>
           <a class="nav-link" href="#gridview">GridView</a>
           <a class="nav-link" href="#grid">Grid</a>
+          <a class="nav-link" href="#accordion">Accordion</a>
+          <a class="nav-link" href="#treeview">TreeView</a>
+          <a class="nav-link" href="#datatable">DataTable</a>
         </div>
         <div class="nav-section">
           <div class="nav-label">Canvas</div>
@@ -143,12 +156,12 @@
           <a class="nav-link" href="#row">Row</a>
           <a class="nav-link" href="#column">Column</a>
           <a class="nav-link" href="#stack">Stack</a>
-          <a class="nav-link" href="#positioned">Positioned</a>
           <a class="nav-link" href="#container">Container</a>
           <a class="nav-link" href="#center">Center</a>
           <a class="nav-link" href="#expanded">Expanded</a>
           <a class="nav-link" href="#sizedbox">SizedBox</a>
           <a class="nav-link" href="#padding">Padding</a>
+          <a class="nav-link" href="#splitview">SplitView</a>
         </div>
         <div class="nav-section">
           <div class="nav-label">Structure</div>
@@ -157,40 +170,70 @@
           <a class="nav-link" href="#card">Card</a>
         </div>
         <div class="nav-section">
+          <div class="nav-label">Navigation</div>
+          <a class="nav-link" href="#tabview">TabView</a>
+          <a class="nav-link" href="#menubar">MenuBar</a>
+        </div>
+        <div class="nav-section">
           <div class="nav-label">Overlay</div>
           <a class="nav-link" href="#dropdown">Dropdown</a>
+          <a class="nav-link" href="#toast">Toast</a>
           <a class="nav-link" href="#tooltip">Tooltip</a>
           <a class="nav-link" href="#dialog">Dialog</a>
           <a class="nav-link" href="#contextmenu">ContextMenu</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-label">Media</div>
+          <a class="nav-link" href="#audioplayer">AudioPlayer</a>
+          <a class="nav-link" href="#videoplayer">VideoPlayer</a>
+          <a class="nav-link" href="#cameraview">CameraView</a>
+          <a class="nav-link" href="#micrecorder">MicRecorder</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-label">Network</div>
+          <a class="nav-link" href="#futurebuilder">FutureBuilder</a>
+          <a class="nav-link" href="#streambuilder">StreamBuilder</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-label">CLI</div>
+          <a class="nav-link" href="#cli">Flux CLI</a>
         </div>
       </nav>
 
       <main class="main">
         <div class="hero">
-          <div class="lang-tag">C++ / WIN32</div>
-          <h1>Flux Widgets</h1>
-          <p>A declarative, Flutter-inspired widget toolkit for building native Windows UIs. Chain methods, compose layouts, and bind reactive state — no XAML, no WndProc editing.</p>
+          <div class="lang-tag">C++20</div>
+          <h1>FluxUI Widgets</h1>
+          <p>A declarative, Flutter-inspired widget toolkit for building native UIs in C++. Chain methods, compose layouts, bind reactive state — write once, run on Windows, Linux, and Android.</p>
+          <div class="hero-platforms">
+            <span class="hero-pill">Windows 10+</span>
+            <span class="hero-pill">Linux</span>
+            <span class="hero-pill">Android</span>
+            <span class="hero-pill">MSVC 2022 / GCC / Clang</span>
+            <span class="hero-pill">GDI+ / OpenGL / Cairo / NanoVG</span>
+          </div>
         </div>
 
-        <!-- COMPONENT -->
-        <div class="section" id="component">
-          <div class="section-head"><h2>Component</h2><span class="badge badge-component">Components</span></div>
-          <p class="section-desc">Base class for encapsulating stateful UI logic. Override <code>build()</code> to return your widget tree.</p>
+        <!-- WIDGET -->
+        <div class="section" id="widget">
+          <div class="section-head"><h2>Widget</h2><span class="badge badge-component">Components</span></div>
+          <p class="section-desc">Base class for all UI components. Override <code>build()</code> to return your widget tree.</p>
           <div class="code-block"><pre>
-<span class="kw">class</span> <span class="type">MyComponent</span> : <span class="kw">public</span> <span class="type">Component</span> {
-  <span class="type">State</span>&lt;<span class="kw">int</span>&gt; count;
+<span class="kw">class</span> <span class="type">MyApp</span> : <span class="kw">public</span> <span class="type">Widget</span> {
 <span class="kw">public</span>:
-  MyComponent() : count(<span class="num">0</span>, context) {}
   <span class="type">WidgetPtr</span> <span class="fn">build</span>() <span class="kw">override</span> {
-    <span class="kw">return</span> <span class="fn">Column</span>({
-      <span class="fn">Text</span>(count)<span class="arrow">-></span><span class="method">setFontSize</span>(<span class="num">32</span>),
-      <span class="fn">Button</span>(<span class="str">"Increment"</span>, [<span class="kw">this</span>]{ count.<span class="method">set</span>(count.<span class="method">get</span>() + <span class="num">1</span>); })
-    })<span class="arrow">-></span><span class="method">setSpacing</span>(<span class="num">10</span>);
+    <span class="kw">return</span> <span class="fn">Scaffold</span>(
+      <span class="fn">AppBar</span>(<span class="str">"My App"</span>),
+      <span class="fn">Center</span>(<span class="fn">Text</span>(<span class="str">"Hello World"</span>)));
   }
-};</pre></div>
-          <div class="sub-head">Lifecycle</div>
+};
+
+<span class="type">WidgetPtr</span> <span class="fn">createApp</span>(<span class="type">FluxUI</span> *app) {
+  <span class="kw">return</span> <span class="fn">FluxApp</span>(<span class="str">"My App"</span>, std::make_shared&lt;<span class="type">MyApp</span>&gt;(),
+    <span class="type">AppTheme</span>::<span class="fn">light</span>(), <span class="kw">false</span>, <span class="num">900</span>, <span class="num">700</span>, <span class="kw">false</span>, <span class="kw">false</span>);
+}</pre></div>
           <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Description</th></tr></thead><tbody>
-            <tr><td>build()</td><td>Returns the widget tree. Called <strong>once</strong> at startup — never on state change</td></tr>
+            <tr><td>build()</td><td>Returns the widget tree. Called <strong>once</strong> at startup — never again on state change</td></tr>
             <tr><td>initState()</td><td>Optional setup hook, called once after construction</td></tr>
             <tr><td>dispose()</td><td>Optional cleanup hook, called on destruction</td></tr>
           </tbody></table></div>
@@ -199,92 +242,99 @@
 
         <hr class="section-divider" />
 
-        <!-- CHILD MACRO -->
-        <div class="section" id="child-macro">
-          <div class="section-head"><h2>CHILD macro</h2><span class="badge badge-component">Components</span></div>
-          <p class="section-desc">Instantiates a child component inline inside a parent's <code>build()</code>. The component is created once and survives for the lifetime of the app.</p>
-          <div class="code-block"><pre>
-<span class="type">CHILD</span>(<span class="type">MyComponent</span>)
-<span class="type">CHILD</span>(<span class="type">ChildCounter</span>, &amp;count)
-<span class="type">CHILD</span>(<span class="type">ChildForm</span>, &amp;name, &amp;age, &amp;email)</pre></div>
-          <div class="tbl-wrap"><table><thead><tr><th>Macro</th><th>Typical usage</th><th>Behavior</th></tr></thead><tbody>
-            <tr><td>CHILD(Type, args...)</td><td>Inside <code>build()</code></td><td>Creates once, same as BuildComponent</td></tr>
-            <tr><td>BuildComponent&lt;Type&gt;(args...)</td><td>Inside <code>app.build()</code></td><td>Creates once, same as CHILD</td></tr>
-          </tbody></table></div>
-        </div>
-
-        <hr class="section-divider" />
-
         <!-- STATE SHARING -->
         <div class="section" id="state-sharing">
           <div class="section-head"><h2>Passing State to Children</h2><span class="badge badge-component">Components</span></div>
-          <p class="section-desc">Parent owns the state and passes a raw pointer to the child. Both can read and write via <code>.get()</code> and <code>.set()</code>.</p>
+          <p class="section-desc">The parent owns the state and passes a reference to child widgets. Both can read and write it.</p>
           <div class="code-block"><pre>
-<span class="kw">class</span> <span class="type">ParentCounter</span> : <span class="kw">public</span> <span class="type">Component</span> {
-  <span class="type">State</span>&lt;<span class="kw">int</span>&gt; count;
+<span class="kw">class</span> <span class="type">CounterDisplay</span> : <span class="kw">public</span> <span class="type">Widget</span> {
+  <span class="type">State</span>&lt;<span class="kw">int</span>&gt;&amp; counter;
 <span class="kw">public</span>:
-  ParentCounter() : count(<span class="num">0</span>, context) {}
+  <span class="fn">CounterDisplay</span>(<span class="type">State</span>&lt;<span class="kw">int</span>&gt;&amp; counter) : counter(counter) {}
   <span class="type">WidgetPtr</span> <span class="fn">build</span>() <span class="kw">override</span> {
     <span class="kw">return</span> <span class="fn">Column</span>({
-      <span class="fn">Text</span>(count)<span class="arrow">-></span><span class="method">setFontSize</span>(<span class="num">32</span>),
-      <span class="fn">Button</span>(<span class="str">"Increment"</span>, [<span class="kw">this</span>]{ count.<span class="method">set</span>(count.<span class="method">get</span>() + <span class="num">1</span>); }),
-      <span class="type">CHILD</span>(<span class="type">ChildCounter</span>, &amp;count)
-    })<span class="arrow">-></span><span class="method">setSpacing</span>(<span class="num">10</span>);
+      <span class="fn">Text</span>(<span class="str">"Current count:"</span>),
+      <span class="fn">Text</span>(counter),
+      <span class="fn">Text</span>(counter, [](<span class="kw">int</span> v){ <span class="kw">return</span> v % <span class="num">2</span> == <span class="num">0</span> ? <span class="str">"Even"</span> : <span class="str">"Odd"</span>; })
+    });
+  }
+};
+
+<span class="kw">class</span> <span class="type">MyApp</span> : <span class="kw">public</span> <span class="type">Widget</span> {
+  <span class="type">State</span>&lt;<span class="kw">int</span>&gt; counter{<span class="num">0</span>};
+<span class="kw">public</span>:
+  <span class="type">WidgetPtr</span> <span class="fn">build</span>() <span class="kw">override</span> {
+    <span class="kw">return</span> <span class="fn">Scaffold</span>(
+      <span class="fn">AppBar</span>(<span class="str">"Flux App"</span>),
+      <span class="fn">Center</span>(<span class="fn">Column</span>({
+        std::make_shared&lt;<span class="type">CounterDisplay</span>&gt;(counter),
+        <span class="fn">Button</span>(<span class="str">"Increment"</span>, [<span class="kw">this</span>]{ counter++; }),
+        <span class="fn">Button</span>(<span class="str">"Reset"</span>, [<span class="kw">this</span>]{ counter.<span class="method">set</span>(<span class="num">0</span>); })
+      }))
+    );
   }
 };</pre></div>
-          <div class="tbl-wrap"><table><thead><tr><th>Variable</th><th>Parent</th><th>Child</th></tr></thead><tbody>
-            <tr><td>State&lt;int&gt; count</td><td>Owns, reads, writes</td><td>—</td></tr>
-            <tr><td>State&lt;int&gt; *count</td><td>Cannot see</td><td>Reads and writes via pointer</td></tr>
-            <tr><td>State&lt;int&gt; childCount</td><td>Cannot see</td><td>Owns, reads, writes</td></tr>
-          </tbody></table></div>
         </div>
 
         <hr class="section-divider" />
 
-        <!-- DEREF -->
-        <div class="section" id="deref">
-          <div class="section-head"><h2>deref helper</h2><span class="badge badge-component">Components</span></div>
-          <p class="section-desc">Converts a <code>State&lt;T&gt;*</code> pointer to a <code>State&lt;T&gt;&amp;</code> reference so it works with all widget APIs without extra overloads.</p>
-          <div class="code-block"><pre>
-<span class="fn">Text</span>(<span class="fn">deref</span>(count))
-<span class="fn">TextInput</span>(<span class="str">"..."</span>)<span class="arrow">-></span><span class="method">setInputValue</span>(<span class="fn">deref</span>(text))
-<span class="fn">Slider</span>(<span class="num">0</span>, <span class="num">100</span>, <span class="num">1</span>)<span class="arrow">-></span><span class="method">setValue</span>(<span class="fn">deref</span>(value))
-<span class="fn">Toggle</span>(<span class="str">"..."</span>)<span class="arrow">-></span><span class="method">setValue</span>(<span class="fn">deref</span>(enabled))
-<span class="fn">ProgressBar</span>()<span class="arrow">-></span><span class="method">setValue</span>(<span class="fn">deref</span>(progress))</pre></div>
-          <div class="note-purple">Defined in <code>flux_state.hpp</code>. Available everywhere via <code>#include "flux.hpp"</code>.</div>
-        </div>
 
-        <hr class="section-divider" />
 
         <!-- TEXT -->
         <div class="section" id="text">
           <div class="section-head"><h2>Text</h2><span class="badge badge-display">Display</span></div>
           <p class="section-desc">Renders a string of text. Auto-sizes to its content by default.</p>
           <div class="code-block"><pre>
-<span class="fn">Text</span>(<span class="str">"Hello, world!"</span>)<span class="arrow">-></span><span class="method">setFontSize</span>(<span class="num">18</span>)<span class="arrow">-></span><span class="method">setFontWeight</span>(<span class="type">FontWeight</span>::Bold);
+<span class="fn">Text</span>(<span class="str">"Hello, world!"</span>)<span class="arrow">-></span><span class="method">setFontSize</span>(<span class="num">18</span>)<span class="arrow">-></span><span class="method">setFontWeight</span>(<span class="type">FontWeight</span>::Bold)<span class="arrow">-></span><span class="method">setTextColor</span>(<span class="fn">RGB</span>(<span class="num">30</span>,<span class="num">30</span>,<span class="num">30</span>));
 <span class="fn">Text</span>(myState);
-<span class="fn">Text</span>(count, [](<span class="kw">int</span> v){ <span class="kw">return</span> <span class="str">"Count: "</span> + std::to_string(v); });</pre></div>
+<span class="fn">Text</span>(count, [](<span class="kw">int</span> v){ <span class="kw">return</span> <span class="str">"Count: "</span> + std::to_string(v); });
+<span class="fn">StyledText</span>(<span class="str">"Hello"</span>, <span class="type">TextStyle</span>{}.<span class="method">setFontSize</span>(<span class="num">20</span>).<span class="method">setBold</span>(<span class="kw">true</span>));</pre></div>
           <div class="sub-head">Factory</div>
           <div class="tbl-wrap"><table><thead><tr><th>Signature</th><th>Description</th></tr></thead><tbody>
             <tr><td>Text(string)</td><td>Static text</td></tr>
             <tr><td>Text(State&lt;T&gt;)</td><td>Reactive — auto-updates when state changes</td></tr>
             <tr><td>Text(State&lt;T&gt;, transform)</td><td>Reactive with a custom format function</td></tr>
+            <tr><td>StyledText(string, TextStyle)</td><td>Static text with a full TextStyle applied upfront</td></tr>
           </tbody></table></div>
           <div class="sub-head">Methods</div>
           <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead><tbody>
             <tr><td>setText(string)</td><td>string</td><td>Set or change displayed text</td></tr>
+            <tr><td>setText(State&lt;T&gt;)</td><td>State</td><td>Reactive text binding</td></tr>
+            <tr><td>setText(State&lt;T&gt;, transform)</td><td>State + fn</td><td>Reactive text with transform</td></tr>
             <tr><td>setFontSize(size)</td><td>int</td><td>Font size in points</td></tr>
             <tr><td>setFontWeight(weight)</td><td>FontWeight</td><td>Normal or Bold</td></tr>
-            <tr><td>setFontFamily(family)</td><td>string</td><td>Override typeface (default "Segoe UI")</td></tr>
-            <tr><td>setTextColor(color)</td><td>COLORREF</td><td>Text color</td></tr>
-            <tr><td>setTextColor(State&lt;T&gt;, trueColor, falseColor)</td><td>State + COLORREF ×2</td><td>Reactive color — switches on bool state</td></tr>
-            <tr><td>setTextColor(State&lt;T&gt;, transform)</td><td>State + T→COLORREF</td><td>Reactive color via custom transform</td></tr>
-            <tr><td>setHoverTextColor(color)</td><td>COLORREF</td><td>Text color on hover</td></tr>
+            <tr><td>setFontFamily(family)</td><td>string</td><td>Font family name</td></tr>
+            <tr><td>setTextScaleFactor(factor)</td><td>float</td><td>Scales font size (1.0 = normal)</td></tr>
+            <tr><td>setTextColor(color)</td><td>Color</td><td>Text color</td></tr>
+            <tr><td>setTextColor(State&lt;T&gt;, transform)</td><td>State</td><td>Reactive text color</td></tr>
+            <tr><td>setHoverTextColor(color)</td><td>Color</td><td>Text color on hover</td></tr>
+            <tr><td>setLetterSpacing(spacing)</td><td>float</td><td>Extra space between characters</td></tr>
+            <tr><td>setWordSpacing(spacing)</td><td>float</td><td>Extra space between words</td></tr>
+            <tr><td>setHeight(h)</td><td>float</td><td>Line height multiplier (1.0 = natural)</td></tr>
+            <tr><td>setTextAlign(align)</td><td>TextAlign</td><td>Left · Center · Right · Justify · Start · End</td></tr>
+            <tr><td>setTextAlignVertical(align)</td><td>TextAlignVertical</td><td>Top · Center · Bottom</td></tr>
+            <tr><td>setOverflow(overflow)</td><td>TextOverflow</td><td>Clip · Ellipsis · Fade · Visible</td></tr>
+            <tr><td>setSoftWrap(wrap)</td><td>bool</td><td>Word-wrap at boundaries (default true)</td></tr>
+            <tr><td>setMaxLines(lines)</td><td>int</td><td>Max visible lines; 0 = unlimited</td></tr>
+            <tr><td>setTextDirection(dir)</td><td>TextDirection</td><td>LTR or RTL</td></tr>
+            <tr><td>setDecoration(decoration)</td><td>TextDecoration</td><td>Underline, strikethrough, overline</td></tr>
+            <tr><td>setDecorationColor(color)</td><td>Color</td><td>Decoration line color</td></tr>
+            <tr><td>setDecorationStyle(style)</td><td>TextDecorationStyle</td><td>Solid, dashed, dotted, double, wavy</td></tr>
+            <tr><td>setDecorationThickness(t)</td><td>int</td><td>Decoration line thickness</td></tr>
+            <tr><td>setShadow(shadow)</td><td>TextShadow</td><td>Single text shadow</td></tr>
+            <tr><td>setShadows(shadows)</td><td>vector&lt;TextShadow&gt;</td><td>Multiple text shadows</td></tr>
+            <tr><td>clearShadows()</td><td>—</td><td>Remove all shadows</td></tr>
+            <tr><td>setTextBackground(color)</td><td>Color</td><td>Background painted behind each text line</td></tr>
+            <tr><td>clearTextBackground()</td><td>—</td><td>Remove per-line background</td></tr>
+            <tr><td>setTextStyle(style)</td><td>TextStyle</td><td>Apply a full TextStyle at once</td></tr>
             <tr><td>setPadding(p)</td><td>int</td><td>Uniform padding</td></tr>
-            <tr><td>setBackgroundColor(color)</td><td>COLORREF</td><td>Fill behind text</td></tr>
+            <tr><td>setPaddingH(p)</td><td>int</td><td>Horizontal padding (left + right)</td></tr>
+            <tr><td>setPaddingV(p)</td><td>int</td><td>Vertical padding (top + bottom)</td></tr>
+            <tr><td>setPaddingLRTB(l,r,t,b)</td><td>int ×4</td><td>Per-side padding</td></tr>
+            <tr><td>setBackgroundColor(color)</td><td>Color</td><td>Widget background fill</td></tr>
             <tr><td>setBorderRadius(r)</td><td>int</td><td>Corner rounding for background</td></tr>
-            <tr><td>setWidth(w)</td><td>int</td><td>Fixed width</td></tr>
-            <tr><td>setHeight(h)</td><td>int</td><td>Fixed height</td></tr>
+            <tr><td>setWidth(w)</td><td>int</td><td>Fixed widget width</td></tr>
+            <tr><td>setWidgetHeight(h)</td><td>int</td><td>Fixed widget height</td></tr>
             <tr><td>setMinWidth(w)</td><td>int</td><td>Minimum width constraint</td></tr>
           </tbody></table></div>
         </div>
@@ -294,104 +344,28 @@
         <!-- ICON -->
         <div class="section" id="icon">
           <div class="section-head"><h2>Icon</h2><span class="badge badge-display">Display</span></div>
-          <p class="section-desc">Renders a single icon glyph from a symbol font. Uses <code>Segoe MDL2 Assets</code> by default. Auto-sizes to <code>fontSize + padding</code>.</p>
+          <p class="section-desc">Renders a glyph from the <code>FluxIcons</code> icon set.</p>
           <div class="code-block"><pre>
-<span class="fn">Icon</span>(<span class="type">FluxIcons</span>::Search)<span class="arrow">-></span><span class="method">setSize</span>(<span class="num">20</span>)<span class="arrow">-></span><span class="method">setColor</span>(<span class="fn">RGB</span>(<span class="num">60</span>,<span class="num">60</span>,<span class="num">60</span>));
-
-<span class="comment">// Reactive glyph</span>
-<span class="fn">Icon</span>(mutedState, [](<span class="kw">bool</span> v) -&gt; <span class="kw">wchar_t</span> {
-    <span class="kw">return</span> v ? <span class="type">FluxIcons</span>::Mute : <span class="type">FluxIcons</span>::Volume;
-})<span class="arrow">-></span><span class="method">setSize</span>(<span class="num">20</span>);</pre></div>
+<span class="fn">Icon</span>(<span class="type">FluxIcons</span>::Settings)
+<span class="fn">Icon</span>(<span class="type">FluxIcons</span>::Menu, <span class="num">20</span>)
+<span class="fn">Icon</span>(state, [](<span class="kw">bool</span> v) -&gt; <span class="type">FluxIcons</span>::<span class="type">IconGlyph</span> {
+    <span class="kw">return</span> v ? <span class="type">FluxIcons</span>::Check : <span class="type">FluxIcons</span>::Close;
+})</pre></div>
           <div class="sub-head">Factory</div>
           <div class="tbl-wrap"><table><thead><tr><th>Signature</th><th>Description</th></tr></thead><tbody>
-            <tr><td>Icon(glyph, fontFamily, size)</td><td>Static icon at given wchar_t codepoint</td></tr>
-            <tr><td>Icon(State&lt;T&gt;, transform, fontFamily, size)</td><td>Reactive — glyph changes when state changes</td></tr>
+            <tr><td>Icon(glyph)</td><td>Static glyph at default size (16px)</td></tr>
+            <tr><td>Icon(glyph, size)</td><td>Static glyph at explicit size</td></tr>
+            <tr><td>Icon(State&lt;T&gt;, transform)</td><td>Reactive glyph — transform maps T to IconGlyph</td></tr>
+            <tr><td>Icon(State&lt;T&gt;, transform, size)</td><td>Reactive glyph at explicit size</td></tr>
           </tbody></table></div>
           <div class="sub-head">Methods</div>
-          <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead><tbody>
-            <tr><td>setSize(size)</td><td>int</td><td>Icon size in pixels</td></tr>
-            <tr><td>setColor(color)</td><td>COLORREF</td><td>Glyph color</td></tr>
-            <tr><td>setHoverColor(color)</td><td>COLORREF</td><td>Glyph color on hover</td></tr>
-            <tr><td>setIconFontFamily(family)</td><td>string</td><td>Override icon font</td></tr>
-            <tr><td>setGlyph(State&lt;T&gt;, transform)</td><td>State</td><td>Reactive glyph binding</td></tr>
-          </tbody></table></div>
-        </div>
-
-        <hr class="section-divider" />
-
-        <!-- FLUXICONS -->
-        <div class="section" id="fluxicons">
-          <div class="section-head"><h2>FluxIcons</h2><span class="badge badge-display">Display</span></div>
-          <p class="section-desc">A namespace of predefined <code>wchar_t</code> constants for <code>Segoe MDL2 Assets</code> glyphs.</p>
-          <div class="code-block"><pre>
-<span class="fn">Icon</span>(<span class="type">FluxIcons</span>::Add, <span class="str">"Segoe MDL2 Assets"</span>, <span class="num">18</span>);
-<span class="fn">Icon</span>(playState, [](<span class="kw">bool</span> p) -&gt; <span class="kw">wchar_t</span> { <span class="kw">return</span> p ? <span class="type">FluxIcons</span>::Pause : <span class="type">FluxIcons</span>::Play; });</pre></div>
-          <div class="sub-head">Actions</div>
-          <div class="tbl-wrap"><table><thead><tr><th>Constant</th><th>Codepoint</th><th>Description</th></tr></thead><tbody>
-            <tr><td>FluxIcons::Add</td><td>0xE710</td><td>Add / plus</td></tr>
-            <tr><td>FluxIcons::Remove</td><td>0xE738</td><td>Remove / minus</td></tr>
-            <tr><td>FluxIcons::Edit</td><td>0xE70F</td><td>Edit / pencil</td></tr>
-            <tr><td>FluxIcons::Delete</td><td>0xE74D</td><td>Delete / trash</td></tr>
-            <tr><td>FluxIcons::Save</td><td>0xE74E</td><td>Save / floppy</td></tr>
-            <tr><td>FluxIcons::Refresh</td><td>0xE72C</td><td>Refresh / reload</td></tr>
-            <tr><td>FluxIcons::Download</td><td>0xE896</td><td>Download</td></tr>
-            <tr><td>FluxIcons::Upload</td><td>0xE898</td><td>Upload</td></tr>
-            <tr><td>FluxIcons::Search</td><td>0xE721</td><td>Search / magnifier</td></tr>
-            <tr><td>FluxIcons::Filter</td><td>0xE71C</td><td>Filter / funnel</td></tr>
-            <tr><td>FluxIcons::Settings</td><td>0xE713</td><td>Settings / gear</td></tr>
-            <tr><td>FluxIcons::More</td><td>0xE712</td><td>More / ellipsis</td></tr>
-          </tbody></table></div>
-          <div class="sub-head">Navigation</div>
-          <div class="tbl-wrap"><table><thead><tr><th>Constant</th><th>Codepoint</th><th>Description</th></tr></thead><tbody>
-            <tr><td>FluxIcons::Menu</td><td>0xE700</td><td>Hamburger menu</td></tr>
-            <tr><td>FluxIcons::Back</td><td>0xE72B</td><td>Back arrow</td></tr>
-            <tr><td>FluxIcons::Forward</td><td>0xE72A</td><td>Forward arrow</td></tr>
-            <tr><td>FluxIcons::ChevronLeft</td><td>0xE76B</td><td>Chevron left</td></tr>
-            <tr><td>FluxIcons::ChevronRight</td><td>0xE76C</td><td>Chevron right</td></tr>
-          </tbody></table></div>
-          <div class="sub-head">Status</div>
-          <div class="tbl-wrap"><table><thead><tr><th>Constant</th><th>Codepoint</th><th>Description</th></tr></thead><tbody>
-            <tr><td>FluxIcons::Check</td><td>0xE73E</td><td>Checkmark</td></tr>
-            <tr><td>FluxIcons::Close</td><td>0xE711</td><td>Close / cancel</td></tr>
-            <tr><td>FluxIcons::Warning</td><td>0xE7BA</td><td>Warning / caution</td></tr>
-            <tr><td>FluxIcons::Error</td><td>0xE783</td><td>Error</td></tr>
-            <tr><td>FluxIcons::Info</td><td>0xE946</td><td>Information</td></tr>
-          </tbody></table></div>
-          <div class="sub-head">Media</div>
-          <div class="tbl-wrap"><table><thead><tr><th>Constant</th><th>Codepoint</th><th>Description</th></tr></thead><tbody>
-            <tr><td>FluxIcons::Play</td><td>0xE768</td><td>Play</td></tr>
-            <tr><td>FluxIcons::Pause</td><td>0xE769</td><td>Pause</td></tr>
-            <tr><td>FluxIcons::Stop</td><td>0xE71A</td><td>Stop</td></tr>
-            <tr><td>FluxIcons::Volume</td><td>0xE767</td><td>Volume / speaker</td></tr>
-            <tr><td>FluxIcons::Mute</td><td>0xE74F</td><td>Mute</td></tr>
-          </tbody></table></div>
-          <div class="sub-head">File / Folder</div>
-          <div class="tbl-wrap"><table><thead><tr><th>Constant</th><th>Codepoint</th><th>Description</th></tr></thead><tbody>
-            <tr><td>FluxIcons::Folder</td><td>0xE8B7</td><td>Folder (closed)</td></tr>
-            <tr><td>FluxIcons::FolderOpen</td><td>0xE838</td><td>Folder (open)</td></tr>
-            <tr><td>FluxIcons::Document</td><td>0xE8A5</td><td>Document / file</td></tr>
-            <tr><td>FluxIcons::Copy</td><td>0xE8C8</td><td>Copy</td></tr>
-            <tr><td>FluxIcons::Paste</td><td>0xE77F</td><td>Paste</td></tr>
-          </tbody></table></div>
-          <div class="sub-head">UI Controls</div>
-          <div class="tbl-wrap"><table><thead><tr><th>Constant</th><th>Codepoint</th><th>Description</th></tr></thead><tbody>
-            <tr><td>FluxIcons::Eye</td><td>0xE890</td><td>View / visible</td></tr>
-            <tr><td>FluxIcons::EyeOff</td><td>0xE891</td><td>Hidden</td></tr>
-            <tr><td>FluxIcons::Lock</td><td>0xE72E</td><td>Lock</td></tr>
-            <tr><td>FluxIcons::Unlock</td><td>0xE785</td><td>Unlock</td></tr>
-            <tr><td>FluxIcons::Calendar</td><td>0xE787</td><td>Calendar</td></tr>
-            <tr><td>FluxIcons::Clock</td><td>0xE823</td><td>Clock / recent</td></tr>
-            <tr><td>FluxIcons::User</td><td>0xE77B</td><td>User / contact</td></tr>
-            <tr><td>FluxIcons::Home</td><td>0xE80F</td><td>Home</td></tr>
-            <tr><td>FluxIcons::Star</td><td>0xE734</td><td>Star (empty)</td></tr>
-            <tr><td>FluxIcons::StarFilled</td><td>0xE735</td><td>Star (filled)</td></tr>
-          </tbody></table></div>
-          <div class="sub-head">Window Controls</div>
-          <div class="tbl-wrap"><table><thead><tr><th>Constant</th><th>Codepoint</th><th>Description</th></tr></thead><tbody>
-            <tr><td>FluxIcons::Minimize</td><td>0xE921</td><td>Minimize window</td></tr>
-            <tr><td>FluxIcons::Maximize</td><td>0xE922</td><td>Maximize window</td></tr>
-            <tr><td>FluxIcons::Restore</td><td>0xE923</td><td>Restore window</td></tr>
-            <tr><td>FluxIcons::CloseWindow</td><td>0xE8BB</td><td>Close window (×)</td></tr>
+          <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Description</th></tr></thead><tbody>
+            <tr><td>setSize(size)</td><td>Icon size in points</td></tr>
+            <tr><td>setColor(color)</td><td>Icon color</td></tr>
+            <tr><td>setHoverColor(color)</td><td>Icon color on hover</td></tr>
+            <tr><td>setIconFontFamily(family)</td><td>Override icon font</td></tr>
+            <tr><td>setGlyph(glyph)</td><td>Set or change glyph (FluxIcons::IconGlyph)</td></tr>
+            <tr><td>setGlyph(State&lt;T&gt;, transform)</td><td>Reactive glyph binding</td></tr>
           </tbody></table></div>
         </div>
 
@@ -400,8 +374,8 @@
         <!-- DIVIDER -->
         <div class="section" id="divider">
           <div class="section-head"><h2>Divider</h2><span class="badge badge-display">Display</span></div>
-          <p class="section-desc">A 1px horizontal rule that fills available width automatically.</p>
-          <div class="code-block"><pre><span class="fn">Divider</span>();  <span class="comment">// 1px, RGB(224,224,224), full width</span></pre></div>
+          <p class="section-desc">A 1px horizontal rule that fills available width.</p>
+          <div class="code-block"><pre><span class="fn">Divider</span>()</pre></div>
         </div>
 
         <hr class="section-divider" />
@@ -409,7 +383,7 @@
         <!-- PROGRESSBAR -->
         <div class="section" id="progressbar">
           <div class="section-head"><h2>ProgressBar</h2><span class="badge badge-display">Display</span></div>
-          <p class="section-desc">Horizontal progress indicator with solid or gradient fill and reactive state binding.</p>
+          <p class="section-desc">Horizontal progress indicator with solid or gradient fill.</p>
           <div class="code-block"><pre>
 <span class="fn">ProgressBar</span>(<span class="num">0.65</span>)
     <span class="arrow">-></span><span class="method">setProgressColors</span>({ <span class="fn">RGB</span>(<span class="num">33</span>,<span class="num">150</span>,<span class="num">243</span>), <span class="fn">RGB</span>(<span class="num">0</span>,<span class="num">200</span>,<span class="num">150</span>) })
@@ -418,9 +392,9 @@
           <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead><tbody>
             <tr><td>setValue(v)</td><td>double 0–1</td><td>Static fill level</td></tr>
             <tr><td>setValue(State&lt;double&gt;)</td><td>State</td><td>Reactive fill level</td></tr>
-            <tr><td>setProgressColors(colors)</td><td>vector&lt;COLORREF&gt;</td><td>Solid (1) or gradient (2+) fill</td></tr>
-            <tr><td>setBackgroundColor(color)</td><td>COLORREF</td><td>Track background</td></tr>
-            <tr><td>setBorderColor(color)</td><td>COLORREF</td><td>Track border</td></tr>
+            <tr><td>setProgressColors(colors)</td><td>vector&lt;Color&gt;</td><td>Solid or gradient fill</td></tr>
+            <tr><td>setBackgroundColor(color)</td><td>Color</td><td>Track background</td></tr>
+            <tr><td>setBorderColor(color)</td><td>Color</td><td>Track border</td></tr>
             <tr><td>setBorderWidth(w)</td><td>int</td><td>Border thickness</td></tr>
             <tr><td>setBorderRadius(r)</td><td>int</td><td>Corner rounding</td></tr>
             <tr><td>setHeight(h)</td><td>int</td><td>Bar height (default 12px)</td></tr>
@@ -433,13 +407,18 @@
         <!-- GRAPH -->
         <div class="section" id="graph">
           <div class="section-head"><h2>Graph</h2><span class="badge badge-display">Display</span></div>
-          <p class="section-desc">OpenGL-rendered chart with Line, Bar, and Area types, axis titles, grid, and reactive data binding.</p>
+          <p class="section-desc">OpenGL-rendered chart widget supporting Line, Bar, and Area types.</p>
           <div class="code-block"><pre>
 <span class="fn">Graph</span>(<span class="num">500</span>, <span class="num">300</span>)
-    <span class="arrow">-></span><span class="method">addSeries</span>(<span class="str">"Temp"</span>, {<span class="num">22</span>,<span class="num">24</span>,<span class="num">27</span>,<span class="num">23</span>}, <span class="num">1.0f</span>, <span class="num">0.4f</span>, <span class="num">0.2f</span>)
+    <span class="arrow">-></span><span class="method">addSeries</span>(<span class="str">"Temperature"</span>, {<span class="num">22</span>,<span class="num">24</span>,<span class="num">27</span>,<span class="num">23</span>,<span class="num">19</span>}, <span class="num">1.0f</span>, <span class="num">0.4f</span>, <span class="num">0.2f</span>)
     <span class="arrow">-></span><span class="method">setTitle</span>(<span class="str">"Daily Temps"</span>)
-    <span class="arrow">-></span><span class="method">setXLabels</span>({<span class="str">"Mon"</span>,<span class="str">"Tue"</span>,<span class="str">"Wed"</span>,<span class="str">"Thu"</span>})
-    <span class="arrow">-></span><span class="method">setXAxisTitle</span>(<span class="str">"Day"</span>)<span class="arrow">-></span><span class="method">setYAxisTitle</span>(<span class="str">"°C"</span>);</pre></div>
+    <span class="arrow">-></span><span class="method">setXLabels</span>({<span class="str">"Mon"</span>,<span class="str">"Tue"</span>,<span class="str">"Wed"</span>,<span class="str">"Thu"</span>,<span class="str">"Fri"</span>})
+    <span class="arrow">-></span><span class="method">setXAxisTitle</span>(<span class="str">"Day"</span>)<span class="arrow">-></span><span class="method">setYAxisTitle</span>(<span class="str">"°C"</span>);
+
+<span class="comment">// Reactive</span>
+<span class="fn">Graph</span>(<span class="num">600</span>, <span class="num">300</span>)
+    <span class="arrow">-></span><span class="method">addSeries</span>(<span class="str">"CPU"</span>, cpuDataState, <span class="num">0.0f</span>, <span class="num">1.0f</span>, <span class="num">0.4f</span>)
+    <span class="arrow">-></span><span class="method">setType</span>(<span class="type">GraphType</span>::Area);</pre></div>
           <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead><tbody>
             <tr><td>addSeries(label, values, r, g, b)</td><td>string, vector&lt;float&gt;</td><td>Add static data series</td></tr>
             <tr><td>addSeries(label, State&lt;...&gt;, r,g,b)</td><td>State</td><td>Reactive series</td></tr>
@@ -452,9 +431,9 @@
             <tr><td>setYRange(min, max)</td><td>float, float</td><td>Manual Y-axis range</td></tr>
             <tr><td>setShowGrid(v)</td><td>bool</td><td>Toggle grid lines</td></tr>
             <tr><td>setShowLegend(v)</td><td>bool</td><td>Show/hide legend</td></tr>
-            <tr><td>setBackgroundColor(c)</td><td>COLORREF</td><td>Chart background</td></tr>
+            <tr><td>setBackgroundColor(c)</td><td>Color</td><td>Chart background</td></tr>
             <tr><td>clearSeries()</td><td>—</td><td>Remove all series</td></tr>
-            <tr><td>setSize(w, h)</td><td>int, int</td><td>Resize widget</td></tr>
+            <tr><td>setSize(w, h)</td><td>int, int</td><td>Resize the widget</td></tr>
           </tbody></table></div>
         </div>
 
@@ -463,26 +442,46 @@
         <!-- IMAGE -->
         <div class="section" id="image">
           <div class="section-head"><h2>Image</h2><span class="badge badge-display">Display</span></div>
-          <p class="section-desc">Renders an image file via GDI+ with five fit modes and rounded corners.</p>
+          <p class="section-desc">Renders an image with five fit modes. Supports local assets, network URLs, and in-memory buffers. All loading is asynchronous.</p>
           <div class="code-block"><pre>
-<span class="fn">Image</span>(<span class="str">"photo.jpg"</span>)<span class="arrow">-></span><span class="method">setWidth</span>(<span class="num">300</span>)<span class="arrow">-></span><span class="method">setHeight</span>(<span class="num">200</span>)<span class="arrow">-></span><span class="method">setFit</span>(<span class="type">ImageFit</span>::Cover);
-<span class="fn">Image</span>(<span class="str">"avatar.png"</span>)<span class="arrow">-></span><span class="method">setWidth</span>(<span class="num">64</span>)<span class="arrow">-></span><span class="method">setHeight</span>(<span class="num">64</span>)<span class="arrow">-></span><span class="method">setBorderRadius</span>(<span class="num">32</span>);</pre></div>
-          <div class="tbl-wrap"><table><thead><tr><th>ImageFit</th><th>Description</th></tr></thead><tbody>
-            <tr><td>Fill</td><td>Stretch to fill — may distort</td></tr>
-            <tr><td>Contain</td><td>Fit inside bounds, letterbox (default)</td></tr>
-            <tr><td>Cover</td><td>Fill bounds, crop edges</td></tr>
-            <tr><td>None</td><td>Original size, centered</td></tr>
-            <tr><td>ScaleDown</td><td>Like None but scales down if larger</td></tr>
+<span class="fn">AssetImage</span>(<span class="str">"photo.jpg"</span>)<span class="arrow">-></span><span class="method">setWidth</span>(<span class="num">300</span>)<span class="arrow">-></span><span class="method">setHeight</span>(<span class="num">200</span>)<span class="arrow">-></span><span class="method">setFit</span>(<span class="type">ImageFit</span>::Cover);
+<span class="fn">NetworkImage</span>(<span class="str">"https://example.com/photo.jpg"</span>)<span class="arrow">-></span><span class="method">setWidth</span>(<span class="num">300</span>)<span class="arrow">-></span><span class="method">setHeight</span>(<span class="num">200</span>);
+<span class="fn">MemoryImage</span>(myBytes)<span class="arrow">-></span><span class="method">setWidth</span>(<span class="num">300</span>);
+<span class="comment">// Circle avatar</span>
+<span class="fn">AssetImage</span>(<span class="str">"avatar.png"</span>)<span class="arrow">-></span><span class="method">setWidth</span>(<span class="num">64</span>)<span class="arrow">-></span><span class="method">setHeight</span>(<span class="num">64</span>)<span class="arrow">-></span><span class="method">setBorderRadius</span>(<span class="num">32</span>);</pre></div>
+          <div class="sub-head">Factory</div>
+          <div class="tbl-wrap"><table><thead><tr><th>Signature</th><th>Description</th></tr></thead><tbody>
+            <tr><td>Image()</td><td>Empty — call setImagePath() or setUrl() to load</td></tr>
+            <tr><td>AssetImage(path)</td><td>Load a local file asynchronously</td></tr>
+            <tr><td>NetworkImage(url)</td><td>Load from an HTTP/HTTPS URL asynchronously</td></tr>
+            <tr><td>NetworkImage(url, postToUI)</td><td>As above; postToUI controls UI-thread dispatch</td></tr>
+            <tr><td>MemoryImage(bytes)</td><td>Decode from a vector&lt;uint8_t&gt; synchronously</td></tr>
           </tbody></table></div>
+          <div class="sub-head">ImageFit modes</div>
+          <div class="tbl-wrap"><table><thead><tr><th>Value</th><th>Description</th></tr></thead><tbody>
+            <tr><td>ImageFit::Fill</td><td>Stretch to fill — may distort</td></tr>
+            <tr><td>ImageFit::Contain</td><td>Fit inside bounds, letterbox (default)</td></tr>
+            <tr><td>ImageFit::Cover</td><td>Fill bounds, crop edges</td></tr>
+            <tr><td>ImageFit::None</td><td>Original size, positioned by imageAlignment</td></tr>
+            <tr><td>ImageFit::ScaleDown</td><td>Like None but scales down if larger than container</td></tr>
+          </tbody></table></div>
+          <div class="sub-head">Methods</div>
           <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead><tbody>
-            <tr><td>setImagePath(path)</td><td>string</td><td>Load or swap image at runtime</td></tr>
+            <tr><td>setImagePath(path)</td><td>string</td><td>Load or swap a local file at runtime</td></tr>
+            <tr><td>setUrl(url, postToUI)</td><td>string, bool</td><td>Load or swap a network URL at runtime</td></tr>
             <tr><td>setFit(mode)</td><td>ImageFit</td><td>Sizing/cropping mode</td></tr>
+            <tr><td>setRepeat(repeat)</td><td>ImageRepeat</td><td>NoRepeat · Repeat · RepeatX · RepeatY</td></tr>
+            <tr><td>setFilterQuality(quality)</td><td>FilterQuality</td><td>None · Low · Medium · High</td></tr>
+            <tr><td>setImageAlignment(alignment)</td><td>Alignment</td><td>Positioning of image within box</td></tr>
+            <tr><td>setTintColor(color)</td><td>Color</td><td>Color overlay blended over the image</td></tr>
             <tr><td>setWidth(w)</td><td>int</td><td>Fixed width</td></tr>
             <tr><td>setHeight(h)</td><td>int</td><td>Fixed height</td></tr>
             <tr><td>setBorderRadius(r)</td><td>int</td><td>Corner rounding</td></tr>
             <tr><td>setPadding(p)</td><td>int</td><td>Inner padding</td></tr>
-            <tr><td>setPlaceholderColor(c)</td><td>COLORREF</td><td>Fill before image loads</td></tr>
-            <tr><td>setErrorColor(c)</td><td>COLORREF</td><td>Fill on load error</td></tr>
+            <tr><td>setPlaceholderColor(c)</td><td>Color</td><td>Fill shown while loading</td></tr>
+            <tr><td>setErrorColor(c)</td><td>Color</td><td>Fill shown on load error</td></tr>
+            <tr><td>setLoadingBuilder(fn)</td><td>() → WidgetPtr</td><td>Custom widget shown while loading</td></tr>
+            <tr><td>setErrorBuilder(fn)</td><td>() → WidgetPtr</td><td>Custom widget shown on error</td></tr>
           </tbody></table></div>
         </div>
 
@@ -491,16 +490,16 @@
         <!-- BUTTON -->
         <div class="section" id="button">
           <div class="section-head"><h2>Button</h2><span class="badge badge-interaction">Interaction</span></div>
-          <p class="section-desc">Clickable widget with a background. Accepts a text label or a child widget. Darkens slightly on press.</p>
+          <p class="section-desc">Clickable widget with a background. Accepts a text label or a child widget.</p>
           <div class="code-block"><pre>
-<span class="fn">Button</span>(<span class="str">"Save"</span>, [&]{ save(); })<span class="arrow">-></span><span class="method">setBackgroundColor</span>(<span class="fn">RGB</span>(<span class="num">76</span>,<span class="num">175</span>,<span class="num">80</span>))<span class="arrow">-></span><span class="method">setBorderRadius</span>(<span class="num">6</span>);
+<span class="fn">Button</span>(<span class="str">"Save"</span>, [&]{ save(); })<span class="arrow">-></span><span class="method">setBackgroundColor</span>(<span class="fn">RGB</span>(<span class="num">76</span>,<span class="num">175</span>,<span class="num">80</span>))<span class="arrow">-></span><span class="method">setBorderRadius</span>(<span class="num">6</span>)<span class="arrow">-></span><span class="method">setPadding</span>(<span class="num">12</span>);
 <span class="fn">Button</span>(<span class="fn">Row</span>({<span class="fn">Icon</span>(<span class="type">FluxIcons</span>::Upload), <span class="fn">Text</span>(<span class="str">"Upload"</span>)}), [&]{ upload(); });</pre></div>
           <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead><tbody>
             <tr><td>setOnClick(handler)</td><td>ClickHandler</td><td>Click callback</td></tr>
             <tr><td>setChild(widget)</td><td>WidgetPtr</td><td>Replace content widget</td></tr>
-            <tr><td>setBackgroundColor(color)</td><td>COLORREF</td><td>Button background</td></tr>
-            <tr><td>setHoverBackgroundColor(color)</td><td>COLORREF</td><td>Background on hover</td></tr>
-            <tr><td>setTextColor(color)</td><td>COLORREF</td><td>Label text color</td></tr>
+            <tr><td>setBackgroundColor(color)</td><td>Color</td><td>Button background</td></tr>
+            <tr><td>setHoverBackgroundColor(color)</td><td>Color</td><td>Background on hover</td></tr>
+            <tr><td>setTextColor(color)</td><td>Color</td><td>Label text color</td></tr>
             <tr><td>setBorderRadius(r)</td><td>int</td><td>Corner rounding</td></tr>
             <tr><td>setPadding(p)</td><td>int</td><td>Uniform padding</td></tr>
             <tr><td>setPaddingAll(l,t,r,b)</td><td>int ×4</td><td>Per-side padding</td></tr>
@@ -514,13 +513,15 @@
         <!-- GESTURE -->
         <div class="section" id="gesture">
           <div class="section-head"><h2>GestureDetector</h2><span class="badge badge-interaction">Interaction</span></div>
-          <p class="section-desc">Wraps any widget and attaches pointer/gesture callbacks without any WndProc edits.</p>
+          <p class="section-desc">Wraps any widget and attaches pointer/gesture callbacks.</p>
           <div class="code-block"><pre>
-<span class="fn">GestureDetector</span>(<span class="fn">Card</span>(<span class="fn">Text</span>(<span class="str">"Drag me"</span>)))
+<span class="fn">GestureDetector</span>(<span class="fn">Card</span>(<span class="fn">Text</span>(<span class="str">"Click me"</span>)))
     <span class="arrow">-></span><span class="method">setOnTap</span>([&]{ handleTap(); })
-    <span class="arrow">-></span><span class="method">setOnDragUpdate</span>([&](<span class="kw">int</span> dx, <span class="kw">int</span> dy){ pan(dx, dy); });
-<span class="fn">GestureDetector</span>(myWidget, [&](<span class="kw">int</span> dx, <span class="kw">int</span> dy){ scroll(dx, dy); });</pre></div>
-          <div class="note"><strong>Thresholds:</strong> Long press 500ms · Double-tap window 300ms · Drag after 5px movement.</div>
+    <span class="arrow">-></span><span class="method">setOnDoubleTap</span>([&]{ handleDouble(); })
+    <span class="arrow">-></span><span class="method">setOnLongPress</span>([&]{ showMenu(); })
+    <span class="arrow">-></span><span class="method">setOnDragUpdate</span>([&](<span class="kw">int</span> dx, <span class="kw">int</span> dy){ pan(dx, dy); })
+    <span class="arrow">-></span><span class="method">setOnScrollUp</span>([&](<span class="kw">int</span> delta){ zoom(delta); });</pre></div>
+          <div class="note"><strong>Thresholds:</strong> Long press fires after 500ms · Double-tap window is 300ms · Drag starts after 5px of movement.</div>
           <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Signature</th><th>Description</th></tr></thead><tbody>
             <tr><td>setOnTap</td><td>void()</td><td>Single click</td></tr>
             <tr><td>setOnDoubleTap</td><td>void()</td><td>Two taps within 300ms</td></tr>
@@ -550,7 +551,68 @@
             <tr><td>setPlaceholder(text)</td><td>string</td><td>Hint shown when empty</td></tr>
             <tr><td>setWidth(w)</td><td>int</td><td>Fixed width</td></tr>
           </tbody></table></div>
-          <div class="note"><strong>Keyboard:</strong> ←/→ move cursor · Home/End jump · Backspace/Delete delete · blinking cursor via WM_TIMER.</div>
+        </div>
+
+        <hr class="section-divider" />
+
+        <!-- TEXTAREA -->
+        <div class="section" id="textarea">
+          <div class="section-head"><h2>TextArea</h2><span class="badge badge-input">Input</span></div>
+          <p class="section-desc">Multiline text input with scrollbars, line numbers, selection, and clipboard support.</p>
+          <div class="code-block"><pre>
+<span class="fn">TextArea</span>(<span class="str">"Type your message..."</span>)
+    <span class="arrow">-></span><span class="method">setInputValue</span>(bodyState)
+    <span class="arrow">-></span><span class="method">setWidth</span>(<span class="num">400</span>)
+    <span class="arrow">-></span><span class="method">setHeight</span>(<span class="num">200</span>)
+    <span class="arrow">-></span><span class="method">setLineNumbers</span>(<span class="kw">true</span>);</pre></div>
+          <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead><tbody>
+            <tr><td>setInputValue(State&lt;string&gt;)</td><td>State</td><td>Two-way reactive binding</td></tr>
+            <tr><td>setPlaceholder(text)</td><td>string</td><td>Hint shown when empty</td></tr>
+            <tr><td>setLineNumbers(v)</td><td>bool</td><td>Show line number gutter</td></tr>
+            <tr><td>setWordWrap(v)</td><td>bool</td><td>Enable word wrap</td></tr>
+            <tr><td>setTabSpaces(n)</td><td>int</td><td>Spaces per Tab key press</td></tr>
+            <tr><td>setMaxLength(n)</td><td>int</td><td>Max character count (0 = unlimited)</td></tr>
+            <tr><td>setFontSize(s)</td><td>int</td><td>Font size</td></tr>
+            <tr><td>setWidth(w)</td><td>int</td><td>Fixed width</td></tr>
+            <tr><td>setHeight(h)</td><td>int</td><td>Fixed height</td></tr>
+            <tr><td>setFlex(n)</td><td>int</td><td>Flex factor in parent</td></tr>
+            <tr><td>setScrollbarSize(s)</td><td>int</td><td>Scrollbar thickness</td></tr>
+            <tr><td>setScrollbarColor(c)</td><td>Color</td><td>Idle thumb color</td></tr>
+            <tr><td>setScrollbarHoverColor(c)</td><td>Color</td><td>Hover thumb color</td></tr>
+            <tr><td>setScrollbarTrackColor(c)</td><td>Color</td><td>Track background</td></tr>
+          </tbody></table></div>
+          <div class="note"><strong>Keyboard:</strong> Ctrl+A select all · Ctrl+C/X/V clipboard · Shift+arrows extend selection · PgUp/PgDn page scroll.</div>
+        </div>
+
+        <hr class="section-divider" />
+
+        <!-- NUMBERINPUT -->
+        <div class="section" id="numberinput">
+          <div class="section-head"><h2>NumberInput / SpinBox</h2><span class="badge badge-input">Input</span></div>
+          <p class="section-desc">Numeric input with up/down arrow buttons, mouse wheel, and direct keyboard editing.</p>
+          <div class="code-block"><pre>
+<span class="fn">NumberInput</span>(<span class="num">0.0</span>, <span class="num">100.0</span>, <span class="num">1.0</span>)
+    <span class="arrow">-></span><span class="method">setValue</span>(countState)
+    <span class="arrow">-></span><span class="method">setPrefix</span>(<span class="str">"$"</span>)
+    <span class="arrow">-></span><span class="method">setSuffix</span>(<span class="str">" kg"</span>)
+    <span class="arrow">-></span><span class="method">setDecimalPlaces</span>(<span class="num">2</span>)
+    <span class="arrow">-></span><span class="method">setWidth</span>(<span class="num">120</span>);
+<span class="comment">// Alias</span>
+<span class="fn">SpinBox</span>(<span class="num">0</span>, <span class="num">255</span>, <span class="num">1</span>)<span class="arrow">-></span><span class="method">setValue</span>(brightnessState);</pre></div>
+          <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead><tbody>
+            <tr><td>setValue(State&lt;double&gt;)</td><td>State</td><td>Two-way double binding</td></tr>
+            <tr><td>setValue(State&lt;int&gt;)</td><td>State</td><td>Two-way int binding</td></tr>
+            <tr><td>setMin(v)</td><td>double</td><td>Minimum value</td></tr>
+            <tr><td>setMax(v)</td><td>double</td><td>Maximum value</td></tr>
+            <tr><td>setStep(v)</td><td>double</td><td>Increment/decrement step</td></tr>
+            <tr><td>setDecimalPlaces(n)</td><td>int</td><td>Decimal digits shown (0 = integer)</td></tr>
+            <tr><td>setPrefix(s)</td><td>string</td><td>Text prepended to display value</td></tr>
+            <tr><td>setSuffix(s)</td><td>string</td><td>Text appended to display value</td></tr>
+            <tr><td>setOnValueChanged(fn)</td><td>void(double)</td><td>Fires on every value change</td></tr>
+            <tr><td>setWidth(w)</td><td>int</td><td>Fixed width</td></tr>
+            <tr><td>setFlex(n)</td><td>int</td><td>Flex factor in parent</td></tr>
+          </tbody></table></div>
+          <div class="note"><strong>Keyboard:</strong> ↑/↓ step · PgUp/PgDn step ×10 · Home/End jump to min/max · Enter commit typed value · Escape revert.</div>
         </div>
 
         <hr class="section-divider" />
@@ -558,7 +620,7 @@
         <!-- SLIDER -->
         <div class="section" id="slider">
           <div class="section-head"><h2>Slider</h2><span class="badge badge-input">Input</span></div>
-          <p class="section-desc">Horizontal range input with draggable thumb, keyboard support, and two-way state binding.</p>
+          <p class="section-desc">Horizontal range input with draggable thumb and keyboard support.</p>
           <div class="code-block"><pre>
 <span class="fn">Slider</span>(<span class="num">0.0</span>, <span class="num">100.0</span>, <span class="num">1.0</span>)
     <span class="arrow">-></span><span class="method">setValue</span>(volumeState)
@@ -567,14 +629,14 @@
           <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead><tbody>
             <tr><td>setValue(State&lt;double&gt;)</td><td>State</td><td>Two-way double binding</td></tr>
             <tr><td>setValue(State&lt;int&gt;)</td><td>State</td><td>Two-way int binding</td></tr>
-            <tr><td>setValue(State&lt;T&gt;, transform)</td><td>State + T→double</td><td>Reactive with custom transform</td></tr>
             <tr><td>setMinValue(v)</td><td>double</td><td>Range minimum</td></tr>
             <tr><td>setMaxValue(v)</td><td>double</td><td>Range maximum</td></tr>
             <tr><td>setStep(v)</td><td>double</td><td>Snap step size</td></tr>
-            <tr><td>setTrackColor(c)</td><td>COLORREF</td><td>Unfilled track</td></tr>
-            <tr><td>setTrackFillColor(c)</td><td>COLORREF</td><td>Filled track</td></tr>
-            <tr><td>setThumbColor(c)</td><td>COLORREF</td><td>Thumb color</td></tr>
+            <tr><td>setTrackColor(c)</td><td>Color</td><td>Unfilled track color</td></tr>
+            <tr><td>setTrackFillColor(c)</td><td>Color</td><td>Filled track color</td></tr>
+            <tr><td>setThumbColor(c)</td><td>Color</td><td>Thumb color</td></tr>
             <tr><td>setOnValueChanged(fn)</td><td>void(double)</td><td>Change callback</td></tr>
+            <tr><td>setWidth(w)</td><td>int</td><td>Fixed width</td></tr>
           </tbody></table></div>
         </div>
 
@@ -593,9 +655,9 @@
             <tr><td>setValue(State&lt;bool&gt;)</td><td>State</td><td>Two-way binding</td></tr>
             <tr><td>setToggled(bool)</td><td>bool</td><td>Set initial state</td></tr>
             <tr><td>setLabel(text)</td><td>string</td><td>Text beside the toggle</td></tr>
-            <tr><td>setTrackOnColor(c)</td><td>COLORREF</td><td>Track when on</td></tr>
-            <tr><td>setTrackOffColor(c)</td><td>COLORREF</td><td>Track when off</td></tr>
-            <tr><td>setThumbColor(c)</td><td>COLORREF</td><td>Thumb color</td></tr>
+            <tr><td>setTrackOnColor(c)</td><td>Color</td><td>Track color when on</td></tr>
+            <tr><td>setTrackOffColor(c)</td><td>Color</td><td>Track color when off</td></tr>
+            <tr><td>setThumbColor(c)</td><td>Color</td><td>Thumb color</td></tr>
             <tr><td>setOnToggleChanged(fn)</td><td>void(bool)</td><td>Change callback</td></tr>
           </tbody></table></div>
         </div>
@@ -606,8 +668,7 @@
         <div class="section" id="checkbox">
           <div class="section-head"><h2>CheckBox</h2><span class="badge badge-input">Input</span></div>
           <p class="section-desc">Standard checkbox with optional label. Binds to <code>State&lt;bool&gt;</code>.</p>
-          <div class="code-block"><pre>
-<span class="fn">CheckBox</span>(<span class="str">"I agree to the terms"</span>)<span class="arrow">-></span><span class="method">setInputValue</span>(agreedState);</pre></div>
+          <div class="code-block"><pre><span class="fn">CheckBox</span>(<span class="str">"I agree to the terms"</span>)<span class="arrow">-></span><span class="method">setInputValue</span>(agreedState);</pre></div>
           <div class="tbl-wrap"><table><thead><tr><th>Signature</th><th>Description</th></tr></thead><tbody>
             <tr><td>CheckBox(label)</td><td>Checkbox with optional text label</td></tr>
             <tr><td>setInputValue(State&lt;bool&gt;)</td><td>Two-way bool binding</td></tr>
@@ -622,7 +683,9 @@
           <p class="section-desc">Mutually-exclusive radio buttons bound to <code>State&lt;string&gt;</code>.</p>
           <div class="code-block"><pre>
 <span class="fn">RadioGroupWithOptions</span>({
-    {<span class="str">"free"</span>, <span class="str">"Free tier"</span>}, {<span class="str">"pro"</span>, <span class="str">"Pro"</span>}, {<span class="str">"team"</span>, <span class="str">"Team"</span>}
+    {<span class="str">"free"</span>,  <span class="str">"Free tier"</span>},
+    {<span class="str">"pro"</span>,   <span class="str">"Pro — $9/mo"</span>},
+    {<span class="str">"team"</span>,  <span class="str">"Team — $29/mo"</span>},
 })<span class="arrow">-></span><span class="method">bindValue</span>(planState)
   <span class="arrow">-></span><span class="method">setOnSelectionChanged</span>([&](<span class="kw">const</span> std::string&amp; v){ changePlan(v); });</pre></div>
           <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Description</th></tr></thead><tbody>
@@ -650,9 +713,104 @@
             <tr><td>setColor(color)</td><td>COLORREF</td><td>Set color imperatively</td></tr>
             <tr><td>getColor()</td><td>COLORREF</td><td>Read current color</td></tr>
             <tr><td>setShowAlpha(show)</td><td>bool</td><td>Show/hide alpha bar (default true)</td></tr>
-            <tr><td>setOnColorChanged(fn)</td><td>void(COLORREF)</td><td>Fired on every change</td></tr>
+            <tr><td>setOnColorChanged(fn)</td><td>void(COLORREF)</td><td>Fired on every color change</td></tr>
             <tr><td>bindValue(State&lt;COLORREF&gt;)</td><td>State</td><td>Two-way reactive binding</td></tr>
           </tbody></table></div>
+        </div>
+
+        <hr class="section-divider" />
+
+        <!-- DATEPICKER -->
+        <div class="section" id="datepicker">
+          <div class="section-head"><h2>DatePicker</h2><span class="badge badge-input">Input</span></div>
+          <p class="section-desc">Calendar popup for selecting a date. Includes month/year navigation and a year-range picker.</p>
+          <div class="code-block"><pre>
+<span class="fn">DatePicker</span>()
+    <span class="arrow">-></span><span class="method">setDate</span>(<span class="type">FluxDate</span>::<span class="fn">today</span>())
+    <span class="arrow">-></span><span class="method">setPlaceholder</span>(<span class="str">"Select a date"</span>)
+    <span class="arrow">-></span><span class="method">setOnDateChanged</span>([](<span class="type">FluxDate</span> d) {
+        std::cout &lt;&lt; d.<span class="method">toString</span>(<span class="str">"%d %b %Y"</span>) &lt;&lt; std::endl;
+    });
+
+<span class="comment">// Reactive binding</span>
+<span class="type">State</span>&lt;<span class="type">FluxDate</span>&gt; selectedDate(<span class="type">FluxDate</span>{}, app);
+<span class="fn">DatePicker</span>()<span class="arrow">-></span><span class="method">setDate</span>(selectedDate);</pre></div>
+          <div class="sub-head">FluxDate struct</div>
+          <div class="code-block"><pre>
+<span class="type">FluxDate</span> d = <span class="type">FluxDate</span>::<span class="fn">today</span>();
+<span class="type">FluxDate</span> d{<span class="num">2025</span>, <span class="num">6</span>, <span class="num">15</span>};         <span class="comment">// June 15, 2025</span>
+d.<span class="method">toString</span>(<span class="str">"%d / %m / %Y"</span>);       <span class="comment">// "15 / 06 / 2025"</span>
+d.<span class="method">isValid</span>();                       <span class="comment">// true if year/month/day are set</span></pre></div>
+          <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead><tbody>
+            <tr><td>setDate(FluxDate)</td><td>FluxDate</td><td>Set initial date</td></tr>
+            <tr><td>setDate(State&lt;FluxDate&gt;)</td><td>State</td><td>Two-way reactive binding</td></tr>
+            <tr><td>setPlaceholder(text)</td><td>string</td><td>Text when no date selected</td></tr>
+            <tr><td>setDateFormat(fmt)</td><td>string</td><td>strftime-style format string</td></tr>
+            <tr><td>setMinDate(date)</td><td>FluxDate</td><td>Disable dates before this</td></tr>
+            <tr><td>setMaxDate(date)</td><td>FluxDate</td><td>Disable dates after this</td></tr>
+            <tr><td>setOnDateChanged(fn)</td><td>void(FluxDate)</td><td>Fires when a date is picked</td></tr>
+            <tr><td>setAccentColor(color)</td><td>Color</td><td>Header, selection, and indicator color</td></tr>
+            <tr><td>setWidth(w)</td><td>int</td><td>Fixed width</td></tr>
+          </tbody></table></div>
+          <div class="note"><strong>Navigation:</strong> Click month/year header to open year picker. ◀ ▶ arrows navigate months or year ranges.</div>
+        </div>
+
+        <hr class="section-divider" />
+
+        <!-- FILEPICKER -->
+        <div class="section" id="filepicker">
+          <div class="section-head"><h2>FilePicker</h2><span class="badge badge-input">Input</span></div>
+          <p class="section-desc">Button-like widget that opens the native OS file dialog on click.</p>
+          <div class="code-block"><pre>
+<span class="comment">// Single file open</span>
+<span class="fn">FilePicker</span>()
+    <span class="arrow">-></span><span class="method">setMode</span>(<span class="type">FilePickerMode</span>::Open)
+    <span class="arrow">-></span><span class="method">addFilter</span>(<span class="str">"Images"</span>, {<span class="str">"*.png"</span>,<span class="str">"*.jpg"</span>,<span class="str">"*.jpeg"</span>})
+    <span class="arrow">-></span><span class="method">setDefaultExtension</span>(<span class="str">"png"</span>)
+    <span class="arrow">-></span><span class="method">bindPath</span>(filePath)
+    <span class="arrow">-></span><span class="method">setOnChanged</span>([](<span class="kw">const</span> std::string&amp; path) { std::cout &lt;&lt; path; });
+
+<span class="comment">// Save dialog</span>
+<span class="fn">FilePicker</span>()
+    <span class="arrow">-></span><span class="method">setMode</span>(<span class="type">FilePickerMode</span>::Save)
+    <span class="arrow">-></span><span class="method">setDefaultFilename</span>(<span class="str">"output.png"</span>)
+    <span class="arrow">-></span><span class="method">bindPath</span>(exportPath);
+
+<span class="comment">// Folder picker</span>
+<span class="fn">FilePicker</span>()<span class="arrow">-></span><span class="method">setMode</span>(<span class="type">FilePickerMode</span>::Folder)<span class="arrow">-></span><span class="method">bindPath</span>(folderPath);</pre></div>
+          <div class="sub-head">FilePickerMode</div>
+          <div class="tbl-wrap"><table><thead><tr><th>Value</th><th>Description</th></tr></thead><tbody>
+            <tr><td>FilePickerMode::Open</td><td>Single file open dialog</td></tr>
+            <tr><td>FilePickerMode::OpenMultiple</td><td>Multi-file open dialog</td></tr>
+            <tr><td>FilePickerMode::Save</td><td>Save / export dialog</td></tr>
+            <tr><td>FilePickerMode::Folder</td><td>Directory picker</td></tr>
+          </tbody></table></div>
+          <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead><tbody>
+            <tr><td>setMode(m)</td><td>FilePickerMode</td><td>Dialog type</td></tr>
+            <tr><td>setTitle(t)</td><td>string</td><td>Dialog window title</td></tr>
+            <tr><td>setDefaultFilename(f)</td><td>string</td><td>Pre-filled filename for Save mode</td></tr>
+            <tr><td>setDefaultExtension(e)</td><td>string</td><td>Default file extension</td></tr>
+            <tr><td>setInitialDir(d)</td><td>string</td><td>Starting directory</td></tr>
+            <tr><td>addFilter(label, exts)</td><td>string, vector&lt;string&gt;</td><td>Add a file type filter</td></tr>
+            <tr><td>setFilters(fs)</td><td>vector&lt;FileFilter&gt;</td><td>Replace all filters at once</td></tr>
+            <tr><td>bindPath(State&lt;string&gt;)</td><td>State</td><td>Two-way binding for single path</td></tr>
+            <tr><td>bindPaths(State&lt;vector&lt;string&gt;&gt;)</td><td>State</td><td>Two-way binding for multi-path</td></tr>
+            <tr><td>setOnChanged(fn)</td><td>void(string)</td><td>Fires on single-file selection</td></tr>
+            <tr><td>setOnMultiChanged(fn)</td><td>void(vector&lt;string&gt;)</td><td>Fires on multi-file selection</td></tr>
+            <tr><td>setOnCancelled(fn)</td><td>void()</td><td>Fires when dialog is cancelled</td></tr>
+            <tr><td>setShowPath(v)</td><td>bool</td><td>Show selected path beside button</td></tr>
+            <tr><td>setShowClearBtn(v)</td><td>bool</td><td>Show × button to clear selection</td></tr>
+            <tr><td>setPathMaxWidth(w)</td><td>int</td><td>Max width of the path display</td></tr>
+            <tr><td>setAccentColor(c)</td><td>Color</td><td>Accent color for focus ring</td></tr>
+            <tr><td>setWidth(w) / setHeight(h)</td><td>int</td><td>Fixed dimensions</td></tr>
+            <tr><td>setFlex(n)</td><td>int</td><td>Flex factor in parent</td></tr>
+            <tr><td>open()</td><td>—</td><td>Open the dialog programmatically</td></tr>
+            <tr><td>clear()</td><td>—</td><td>Clear the current selection</td></tr>
+            <tr><td>path()</td><td>string</td><td>Currently selected single path</td></tr>
+            <tr><td>paths()</td><td>vector&lt;string&gt;</td><td>Currently selected paths (multi mode)</td></tr>
+            <tr><td>hasSelection()</td><td>bool</td><td>True if a path is selected</td></tr>
+          </tbody></table></div>
+          <div class="note"><strong>Linux async:</strong> On Linux the dialog runs on a background thread via zenity or kdialog. Dispatch results back by calling <code>fluxFilePickerDispatchSDLEvent(e)</code> inside your <code>SDL_USEREVENT</code> handler.</div>
         </div>
 
         <hr class="section-divider" />
@@ -660,29 +818,31 @@
         <!-- LISTVIEW -->
         <div class="section" id="listview">
           <div class="section-head"><h2>ListView</h2><span class="badge badge-collection">Collection</span></div>
-          <p class="section-desc">Scrollable list. Reactive builder form or static initializer-list form.</p>
+          <p class="section-desc">Scrollable list. Static initializer-list form or reactive <code>State&lt;vector&lt;T&gt;&gt;</code> builder form.</p>
           <div class="code-block"><pre>
+<span class="comment">// Static</span>
+<span class="fn">ListView</span>({ <span class="fn">Card</span>(<span class="fn">Text</span>(<span class="str">"Item A"</span>)), <span class="fn">Card</span>(<span class="fn">Text</span>(<span class="str">"Item B"</span>)) })<span class="arrow">-></span><span class="method">setSpacing</span>(<span class="num">8</span>);
+
+<span class="comment">// Reactive builder</span>
 <span class="fn">ListView</span>(contactsState)
     <span class="arrow">-></span><span class="method">itemBuilder</span>([](<span class="kw">int</span> i, <span class="kw">const</span> <span class="type">Contact</span>&amp; c) -&gt; <span class="type">WidgetPtr</span> {
         <span class="kw">return</span> <span class="fn">Card</span>(<span class="fn">Text</span>(c.name));
     })
     <span class="arrow">-></span><span class="method">separator</span>([]{ <span class="kw">return</span> <span class="fn">Divider</span>(); })
-    <span class="arrow">-></span><span class="method">setSpacing</span>(<span class="num">8</span>);
-
-<span class="fn">ListView</span>({ <span class="fn">Text</span>(<span class="str">"A"</span>), <span class="fn">Text</span>(<span class="str">"B"</span>) })<span class="arrow">-></span><span class="method">setSpacing</span>(<span class="num">4</span>);</pre></div>
+    <span class="arrow">-></span><span class="method">setSpacing</span>(<span class="num">8</span>);</pre></div>
           <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Description</th></tr></thead><tbody>
-            <tr><td>itemBuilder(fn)</td><td>Builder (int, const T&amp;) → WidgetPtr — reactive form</td></tr>
+            <tr><td>itemBuilder(fn)</td><td>Builder (int, const T&amp;) → WidgetPtr — reactive form only</td></tr>
             <tr><td>separator(fn)</td><td>Widget inserted between items</td></tr>
-            <tr><td>setKeyFn(fn)</td><td>Custom key function for keyed diffing</td></tr>
+            <tr><td>setKeyFn(fn)</td><td>Custom key function for diffing</td></tr>
             <tr><td>setSpacing(px)</td><td>Gap between items</td></tr>
             <tr><td>setHorizontal(bool)</td><td>Switch to horizontal scroll</td></tr>
-            <tr><td>setPadding(px)</td><td>Inner padding (static form)</td></tr>
-            <tr><td>setHeight(h)</td><td>Fixed height (static form)</td></tr>
-            <tr><td>setBackgroundColor(c)</td><td>Background fill (static form)</td></tr>
+            <tr><td>setPadding(px)</td><td>Inner padding (static mode)</td></tr>
+            <tr><td>setHeight(h)</td><td>Fixed height (static mode)</td></tr>
+            <tr><td>setBackgroundColor(c)</td><td>Background fill (static mode)</td></tr>
             <tr><td>setScrollbarSize(px)</td><td>Scrollbar thickness</td></tr>
-            <tr><td>setScrollbarColor(c)</td><td>Idle thumb</td></tr>
-            <tr><td>setScrollbarHoverColor(c)</td><td>Hover thumb</td></tr>
-            <tr><td>setScrollbarActiveColor(c)</td><td>Drag thumb</td></tr>
+            <tr><td>setScrollbarColor(c)</td><td>Idle thumb color</td></tr>
+            <tr><td>setScrollbarHoverColor(c)</td><td>Hover thumb color</td></tr>
+            <tr><td>setScrollbarActiveColor(c)</td><td>Drag thumb color</td></tr>
             <tr><td>setScrollbarTrackColor(c)</td><td>Track background</td></tr>
           </tbody></table></div>
         </div>
@@ -692,24 +852,26 @@
         <!-- GRIDVIEW -->
         <div class="section" id="gridview">
           <div class="section-head"><h2>GridView</h2><span class="badge badge-collection">Collection</span></div>
-          <p class="section-desc">Scrollable grid driven by <code>State&lt;vector&lt;T&gt;&gt;</code> with fixed or responsive column count.</p>
+          <p class="section-desc">Scrollable grid driven by <code>State&lt;vector&lt;T&gt;&gt;</code>.</p>
           <div class="code-block"><pre>
-<span class="fn">GridView</span>(photosState)<span class="arrow">-></span><span class="method">columns</span>(<span class="num">3</span>)
+<span class="fn">GridView</span>(photosState)
+    <span class="arrow">-></span><span class="method">columns</span>(<span class="num">3</span>)
     <span class="arrow">-></span><span class="method">itemBuilder</span>([](<span class="kw">int</span> i, <span class="kw">const</span> <span class="type">Photo</span>&amp; p) -&gt; <span class="type">WidgetPtr</span> { <span class="kw">return</span> <span class="fn">Thumbnail</span>(p); })
     <span class="arrow">-></span><span class="method">setSpacing</span>(<span class="num">12</span>);
-<span class="fn">GridView</span>(items)<span class="arrow">-></span><span class="method">columnWidth</span>(<span class="num">200</span>)<span class="arrow">-></span><span class="method">itemBuilder</span>(...);</pre></div>
+<span class="comment">// Responsive</span>
+<span class="fn">GridView</span>(itemsState)<span class="arrow">-></span><span class="method">columnWidth</span>(<span class="num">200</span>)<span class="arrow">-></span><span class="method">itemBuilder</span>(...);</pre></div>
           <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Description</th></tr></thead><tbody>
             <tr><td>itemBuilder(fn)</td><td>Builder (int, const T&amp;) → WidgetPtr</td></tr>
             <tr><td>columns(n)</td><td>Fixed column count</td></tr>
-            <tr><td>columnWidth(px)</td><td>Responsive — derive from width</td></tr>
-            <tr><td>setSpacing(px)</td><td>H and V gap</td></tr>
+            <tr><td>columnWidth(px)</td><td>Responsive — derive column count from width</td></tr>
+            <tr><td>setSpacing(px)</td><td>Set H and V spacing</td></tr>
             <tr><td>setSpacingH(px) / setSpacingV(px)</td><td>Per-axis gap</td></tr>
-            <tr><td>setKeyFn(fn)</td><td>Custom key function for diffing</td></tr>
             <tr><td>setScrollbarWidth(px)</td><td>Scrollbar thickness</td></tr>
-            <tr><td>setScrollbarColor(c)</td><td>Idle thumb</td></tr>
-            <tr><td>setScrollbarHoverColor(c)</td><td>Hover thumb</td></tr>
-            <tr><td>setScrollbarActiveColor(c)</td><td>Drag thumb</td></tr>
+            <tr><td>setScrollbarColor(c)</td><td>Idle thumb color</td></tr>
+            <tr><td>setScrollbarHoverColor(c)</td><td>Hover thumb color</td></tr>
+            <tr><td>setScrollbarActiveColor(c)</td><td>Drag thumb color</td></tr>
             <tr><td>setScrollbarTrackColor(c)</td><td>Track background</td></tr>
+            <tr><td>setKeyFn(fn)</td><td>Custom key function for diffing</td></tr>
           </tbody></table></div>
         </div>
 
@@ -721,6 +883,7 @@
           <p class="section-desc">Static fixed-column grid for a known set of children. Non-scrolling.</p>
           <div class="code-block"><pre>
 <span class="fn">Grid</span>(<span class="num">3</span>, <span class="fn">Card</span>(<span class="fn">Text</span>(<span class="str">"A"</span>)), <span class="fn">Card</span>(<span class="fn">Text</span>(<span class="str">"B"</span>)), <span class="fn">Card</span>(<span class="fn">Text</span>(<span class="str">"C"</span>)))<span class="arrow">-></span><span class="method">setSpacing</span>(<span class="num">16</span>);
+<span class="fn">GridFixedWidth</span>(<span class="num">200</span>, items...);
 <span class="fn">GridFromList</span>(<span class="num">4</span>, widgetVector);</pre></div>
           <div class="tbl-wrap"><table><thead><tr><th>Factory</th><th>Description</th></tr></thead><tbody>
             <tr><td>Grid(columns, widgets...)</td><td>Fixed columns, variadic children</td></tr>
@@ -737,7 +900,149 @@
             <tr><td>setMainAxisAlignment(a)</td><td>Start · Center · End</td></tr>
             <tr><td>setPadding(px) / setPaddingAll(l,t,r,b)</td><td>Padding</td></tr>
             <tr><td>setBackgroundColor(c)</td><td>Grid background</td></tr>
+            <tr><td>setWidth(w) / setHeight(h)</td><td>Fixed dimensions</td></tr>
             <tr><td>setFlex(n)</td><td>Flex factor in parent</td></tr>
+          </tbody></table></div>
+        </div>
+
+        <hr class="section-divider" />
+
+        <!-- ACCORDION -->
+        <div class="section" id="accordion">
+          <div class="section-head"><h2>Accordion</h2><span class="badge badge-collection">Collection</span></div>
+          <p class="section-desc">Vertical stack of collapsible panels.</p>
+          <div class="code-block"><pre>
+<span class="kw">#include</span> <span class="str">"flux/flux_accordion.hpp"</span>
+
+<span class="type">AccordionPanel</span> p1(<span class="str">"Appearance"</span>, <span class="str">"Theme &amp; display"</span>);
+p1.icon     = L<span class="str">"\uE771"</span>;
+p1.expanded = <span class="kw">true</span>;
+p1.body = <span class="fn">Column</span>({
+    <span class="fn">Row</span>({ <span class="fn">Text</span>(<span class="str">"Dark theme"</span>), <span class="fn">Toggle</span>(&amp;darkTheme) })<span class="arrow">-></span><span class="method">setSpacing</span>(<span class="num">8</span>),
+})<span class="arrow">-></span><span class="method">setSpacing</span>(<span class="num">12</span>)<span class="arrow">-></span><span class="method">setPadding</span>(<span class="num">8</span>);
+
+<span class="kw">auto</span> acc = <span class="fn">Accordion</span>({ p1, p2, p3 })
+               <span class="arrow">-></span><span class="method">setSingleExpand</span>(<span class="kw">true</span>)
+               <span class="arrow">-></span><span class="method">setAccentColor</span>(<span class="fn">RGB</span>(<span class="num">33</span>, <span class="num">150</span>, <span class="num">243</span>))
+               <span class="arrow">-></span><span class="method">setOnChanged</span>([](<span class="kw">int</span> idx, <span class="kw">bool</span> open) { });</pre></div>
+          <div class="sub-head">AccordionPanel struct</div>
+          <div class="code-block"><pre>
+<span class="type">AccordionPanel</span> p(<span class="str">"Title"</span>, <span class="str">"Optional subtitle"</span>);
+p.icon     = L<span class="str">"\uE713"</span>;
+p.expanded = <span class="kw">false</span>;
+p.disabled = <span class="kw">false</span>;
+p.body     = myWidget;</pre></div>
+          <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead><tbody>
+            <tr><td>setSingleExpand(v)</td><td>bool</td><td>At most one panel open at a time (default false)</td></tr>
+            <tr><td>setOnChanged(fn)</td><td>void(int, bool)</td><td>Fires on every expand/collapse</td></tr>
+            <tr><td>expand(idx)</td><td>int</td><td>Expand panel by index</td></tr>
+            <tr><td>collapse(idx)</td><td>int</td><td>Collapse panel by index</td></tr>
+            <tr><td>toggle(idx)</td><td>int</td><td>Toggle panel by index</td></tr>
+            <tr><td>expandAll() / collapseAll()</td><td>—</td><td>Expand or collapse all panels</td></tr>
+            <tr><td>panelAt(idx)</td><td>AccordionPanel*</td><td>Mutable access to a panel</td></tr>
+            <tr><td>panelCount()</td><td>int</td><td>Number of panels</td></tr>
+            <tr><td>setPanels(panels)</td><td>vector&lt;AccordionPanel&gt;</td><td>Replace all panels at runtime</td></tr>
+            <tr><td>setHeaderHeight(h)</td><td>int</td><td>Header row height (default 48px)</td></tr>
+            <tr><td>setBodyPadding(p)</td><td>int</td><td>Padding inside body area (default 12px)</td></tr>
+            <tr><td>setShowBorder(v)</td><td>bool</td><td>Outer rounded border (default true)</td></tr>
+            <tr><td>setShowSeparators(v)</td><td>bool</td><td>Dividers between panels (default true)</td></tr>
+            <tr><td>setAccentColor(c)</td><td>Color</td><td>Left bar and active header tint</td></tr>
+            <tr><td>setTitleFontSize(s)</td><td>int</td><td>Header title font size</td></tr>
+            <tr><td>setWidth(w)</td><td>int</td><td>Fixed width</td></tr>
+            <tr><td>setFlex(n)</td><td>int</td><td>Flex factor in parent</td></tr>
+          </tbody></table></div>
+        </div>
+
+        <hr class="section-divider" />
+
+        <!-- TREEVIEW -->
+        <div class="section" id="treeview">
+          <div class="section-head"><h2>TreeView</h2><span class="badge badge-collection">Collection</span></div>
+          <p class="section-desc">Scrollable hierarchical tree with expand/collapse, single selection, keyboard navigation, and optional indent guide lines.</p>
+          <div class="code-block"><pre>
+<span class="type">TreeNode</span> root(<span class="str">"Project"</span>);
+<span class="kw">auto</span> &amp;src = root.<span class="method">addChild</span>(<span class="type">TreeNode</span>(<span class="str">"src"</span>));
+src.expanded = <span class="kw">true</span>;
+src.<span class="method">addChild</span>(<span class="type">TreeNode</span>(<span class="str">"main.cpp"</span>));
+
+<span class="kw">auto</span> tv = <span class="fn">TreeView</span>(root)
+    <span class="arrow">-></span><span class="method">setOnSelectionChanged</span>([](<span class="kw">const</span> <span class="type">TreeNode</span> *n) { std::cout &lt;&lt; n<span class="arrow">-></span>label; })
+    <span class="arrow">-></span><span class="method">setShowGuideLines</span>(<span class="kw">true</span>)
+    <span class="arrow">-></span><span class="method">setFlex</span>(<span class="num">1</span>);
+
+<span class="comment">// Multiple roots</span>
+<span class="kw">auto</span> tv = <span class="fn">TreeView</span>({rootA, rootB, rootC});</pre></div>
+          <div class="sub-head">TreeNode struct</div>
+          <div class="code-block"><pre>
+<span class="type">TreeNode</span> node(<span class="str">"label"</span>, <span class="str">"optional-id"</span>);
+node.expanded  = <span class="kw">true</span>;
+node.disabled  = <span class="kw">false</span>;
+node.icon      = L<span class="str">"\uE8B7"</span>;
+node.userData  = &amp;myObj;
+
+node.<span class="method">addChild</span>(<span class="type">TreeNode</span>(<span class="str">"child"</span>));
+node.<span class="method">expandAll</span>();
+node.<span class="method">isLeaf</span>();</pre></div>
+          <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead><tbody>
+            <tr><td>setOnSelectionChanged(fn)</td><td>void(const TreeNode*)</td><td>Fires on click</td></tr>
+            <tr><td>setOnNodeExpanded(fn)</td><td>void(const TreeNode*)</td><td>Fires on expand</td></tr>
+            <tr><td>setOnNodeCollapsed(fn)</td><td>void(const TreeNode*)</td><td>Fires on collapse</td></tr>
+            <tr><td>setOnNodeDoubleClicked(fn)</td><td>void(const TreeNode*)</td><td>Fires on double-click</td></tr>
+            <tr><td>setRoots(vector&lt;TreeNode&gt;)</td><td>—</td><td>Replace the entire tree at runtime</td></tr>
+            <tr><td>selectById(id)</td><td>string</td><td>Select a node by its id field</td></tr>
+            <tr><td>expandAll() / collapseAll()</td><td>—</td><td>Expand or collapse all nodes</td></tr>
+            <tr><td>selectedNode()</td><td>const TreeNode*</td><td>Currently selected node</td></tr>
+            <tr><td>setRowHeight(h)</td><td>int</td><td>Row height in pixels (default 28)</td></tr>
+            <tr><td>setIndentWidth(w)</td><td>int</td><td>Pixels per depth level (default 20)</td></tr>
+            <tr><td>setShowGuideLines(v)</td><td>bool</td><td>Vertical indent guide lines</td></tr>
+            <tr><td>setFontSize(s)</td><td>int</td><td>Label font size</td></tr>
+            <tr><td>setAccentColor(c)</td><td>Color</td><td>Selection highlight color</td></tr>
+            <tr><td>setFlex(n)</td><td>int</td><td>Flex factor in parent</td></tr>
+          </tbody></table></div>
+          <div class="note"><strong>Keyboard:</strong> ↑/↓ move selection · ← collapse or jump to parent · → expand or move to first child · Home/End jump to first/last · Enter/Space toggle expand.</div>
+        </div>
+
+        <hr class="section-divider" />
+
+        <!-- DATATABLE -->
+        <div class="section" id="datatable">
+          <div class="section-head"><h2>DataTable</h2><span class="badge badge-collection">Collection</span></div>
+          <p class="section-desc">Virtualised sortable data grid with resizable columns, alternating rows, scrollbars, and optional reactive data binding.</p>
+          <div class="code-block"><pre>
+std::vector&lt;<span class="type">DataColumn</span>&gt; columns = {
+    <span class="type">DataColumn</span>(<span class="str">"name"</span>, <span class="str">"Name"</span>, <span class="num">180</span>),
+    <span class="type">DataColumn</span>(<span class="str">"age"</span>,  <span class="str">"Age"</span>,  <span class="num">60</span>).<span class="method">setAlign</span>(<span class="type">ColumnAlign</span>::Right),
+    <span class="type">DataColumn</span>(<span class="str">"salary"</span>, <span class="str">"Salary"</span>, <span class="num">110</span>)
+        .<span class="method">setFormatter</span>([](<span class="kw">const</span> std::string &amp;v){ <span class="kw">return</span> <span class="str">"$"</span> + v + <span class="str">"k"</span>; }),
+};
+std::vector&lt;<span class="type">DataRow</span>&gt; rows = {
+    <span class="type">DataRow</span>(<span class="str">"1"</span>).<span class="method">set</span>(<span class="str">"name"</span>,<span class="str">"Alice"</span>).<span class="method">set</span>(<span class="str">"age"</span>,<span class="str">"29"</span>).<span class="method">set</span>(<span class="str">"salary"</span>,<span class="str">"120"</span>),
+};
+<span class="kw">auto</span> table = <span class="fn">DataTable</span>(columns, rows)
+    <span class="arrow">-></span><span class="method">setAlternateRows</span>(<span class="kw">true</span>)
+    <span class="arrow">-></span><span class="method">setOnRowSelected</span>([](<span class="kw">int</span> idx, <span class="kw">const</span> <span class="type">DataRow</span> &amp;row) {
+        std::cout &lt;&lt; row.<span class="method">get</span>(<span class="str">"name"</span>);
+    });
+
+<span class="comment">// Reactive rows</span>
+<span class="fn">DataTable</span>(columns, rowsState);</pre></div>
+          <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead><tbody>
+            <tr><td>setRows(vector&lt;DataRow&gt;)</td><td>—</td><td>Replace rows at runtime</td></tr>
+            <tr><td>sortBy(key, ascending)</td><td>string, bool</td><td>Sort programmatically</td></tr>
+            <tr><td>clearSort()</td><td>—</td><td>Remove sort, restore insertion order</td></tr>
+            <tr><td>selectedIndex()</td><td>int</td><td>Currently selected visual row index</td></tr>
+            <tr><td>selectedRow()</td><td>const DataRow*</td><td>Currently selected row data</td></tr>
+            <tr><td>setAlternateRows(v)</td><td>bool</td><td>Alternating row background (default true)</td></tr>
+            <tr><td>setShowColumnDividers(v)</td><td>bool</td><td>Vertical column divider lines</td></tr>
+            <tr><td>setRowHeight(h)</td><td>int</td><td>Row height in pixels (default 30)</td></tr>
+            <tr><td>setHeaderHeight(h)</td><td>int</td><td>Header row height (default 36)</td></tr>
+            <tr><td>setHeaderBackground(c)</td><td>Color</td><td>Header background color</td></tr>
+            <tr><td>setAccentColor(c)</td><td>Color</td><td>Selection highlight and sort arrow color</td></tr>
+            <tr><td>setOnRowSelected(fn)</td><td>void(int, DataRow)</td><td>Fires on single click</td></tr>
+            <tr><td>setOnRowDoubleClicked(fn)</td><td>void(int, DataRow)</td><td>Fires on double-click</td></tr>
+            <tr><td>setOnSortChanged(fn)</td><td>void(string, bool)</td><td>Fires when sort column changes</td></tr>
+            <tr><td>setFlex(n)</td><td>int</td><td>Flex factor in parent</td></tr>
+            <tr><td>setWidth(w) / setHeight(h)</td><td>int</td><td>Fixed dimensions</td></tr>
           </tbody></table></div>
         </div>
 
@@ -745,17 +1050,20 @@
 
         <!-- CANVAS -->
         <div class="section" id="canvas">
-          <div class="section-head"><h2>CanvasWidget</h2><span class="badge badge-display">Canvas</span></div>
-          <p class="section-desc">OpenGL-powered drawing surface with optional pan/zoom viewport, MSAA, and pluggable surface implementations.</p>
+          <div class="section-head"><h2>CanvasWidget</h2><span class="badge badge-canvas">Canvas</span></div>
+          <p class="section-desc">OpenGL-powered drawing surface embedded in the widget tree.</p>
           <div class="code-block"><pre>
-<span class="fn">RasterCanvas</span>(<span class="num">800</span>, <span class="num">600</span>);
-<span class="fn">RasterCanvas</span>(<span class="num">800</span>, <span class="num">600</span>, <span class="num">2048</span>, <span class="num">2048</span>);  <span class="comment">// viewport enabled</span>
-canvas<span class="arrow">-></span><span class="method">onViewportChanged</span> = [&](<span class="kw">float</span> zoom){ updateZoomLabel(zoom); };</pre></div>
+<span class="comment">// Raster canvas — same view and canvas size</span>
+<span class="kw">auto</span> canvas = <span class="fn">RasterCanvas</span>(<span class="num">800</span>, <span class="num">600</span>);
+<span class="comment">// With pan/zoom viewport</span>
+<span class="kw">auto</span> canvas = <span class="fn">RasterCanvas</span>(<span class="num">800</span>, <span class="num">600</span>, <span class="num">2048</span>, <span class="num">2048</span>);
+
+canvas<span class="arrow">-></span>onViewportChanged = [&](<span class="kw">float</span> zoom){ updateZoomLabel(zoom); };</pre></div>
           <div class="tbl-wrap"><table><thead><tr><th>Factory</th><th>Description</th></tr></thead><tbody>
             <tr><td>Canvas()</td><td>Bare canvas, 400×300, no surface</td></tr>
             <tr><td>Canvas(w, h)</td><td>Bare canvas at given size</td></tr>
             <tr><td>RasterCanvas(w, h)</td><td>Canvas + RasterSurface, viewport disabled</td></tr>
-            <tr><td>RasterCanvas(w, h, undoBudget)</td><td>As above with custom undo memory (bytes)</td></tr>
+            <tr><td>RasterCanvas(w, h, undoBudget)</td><td>As above with custom undo memory in bytes</td></tr>
             <tr><td>RasterCanvas(viewW, viewH, canvasW, canvasH)</td><td>Canvas + RasterSurface, viewport enabled</td></tr>
           </tbody></table></div>
           <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead><tbody>
@@ -763,64 +1071,69 @@ canvas<span class="arrow">-></span><span class="method">onViewportChanged</span>
             <tr><td>setCanvasSize(w, h)</td><td>int, int</td><td>Drawing surface dimensions</td></tr>
             <tr><td>setViewportEnabled(bool)</td><td>bool</td><td>Enable/disable pan/zoom</td></tr>
             <tr><td>setScrollbarsEnabled(bool)</td><td>bool</td><td>Show/hide scrollbars</td></tr>
-            <tr><td>setSurface&lt;T&gt;(args...)</td><td>template</td><td>Attach a RenderSurface subclass</td></tr>
+            <tr><td>setSurface&lt;T&gt;(args...)</td><td>Template</td><td>Attach a RenderSurface subclass</td></tr>
             <tr><td>getSurface()</td><td>RenderSurface*</td><td>Access active surface</td></tr>
-            <tr><td>viewport()</td><td>Viewport&amp;</td><td>Access viewport controller</td></tr>
+            <tr><td>viewport()</td><td>Viewport&amp;</td><td>Access viewport for zoom/pan control</td></tr>
             <tr><td>redraw()</td><td>—</td><td>Schedule a repaint</td></tr>
-            <tr><td>onViewportChanged</td><td>function&lt;void(float)&gt;</td><td>Fires on pan or zoom</td></tr>
+            <tr><td>onViewportChanged</td><td>function&lt;void(float)&gt;</td><td>Fires when zoom or pan changes</td></tr>
             <tr><td>onGLResize</td><td>function&lt;void(int, int)&gt;</td><td>Fires when GL surface is resized</td></tr>
           </tbody></table></div>
-          <div class="note"><strong>Navigation:</strong> Middle-mouse or Space+drag to pan · Ctrl+scroll to zoom · Ctrl+0 reset · Ctrl++/− zoom in/out.</div>
         </div>
 
         <hr class="section-divider" />
 
         <!-- RASTERSURFACE -->
         <div class="section" id="rastersurface">
-          <div class="section-head"><h2>RasterSurface</h2><span class="badge badge-display">Canvas</span></div>
-          <p class="section-desc">GDI+-backed OpenGL raster painting with dual FBO layers, brush/eraser tools, and undo/redo.</p>
+          <div class="section-head"><h2>RasterSurface</h2><span class="badge badge-canvas">Canvas</span></div>
+          <p class="section-desc">GDI+-backed OpenGL raster painting surface with brush engine and undo/redo.</p>
           <div class="code-block"><pre>
 <span class="kw">auto</span> surface = canvas<span class="arrow">-></span><span class="method">setSurface</span>&lt;<span class="type">RasterSurface</span>&gt;();
 surface<span class="arrow">-></span><span class="method">setTool</span>(kToolBrush);
-surface<span class="arrow">-></span><span class="method">setStrokeStyle</span>({ .<span class="method">r</span>=<span class="num">0.2f</span>, .<span class="method">g</span>=<span class="num">0.4f</span>, .<span class="method">b</span>=<span class="num">1.0f</span>, .<span class="method">radius</span>=<span class="num">8.f</span>, .<span class="method">hardness</span>=<span class="num">0.9f</span> });
+<span class="type">StrokeStyle</span> style;
+style.r = <span class="num">0.2f</span>; style.g = <span class="num">0.4f</span>; style.b = <span class="num">1.0f</span>;
+style.radius = <span class="num">8.f</span>; style.hardness = <span class="num">0.9f</span>; style.opacity = <span class="num">0.8f</span>;
+surface<span class="arrow">-></span><span class="method">setStrokeStyle</span>(style);
 surface<span class="arrow">-></span><span class="method">undo</span>();
 surface<span class="arrow">-></span><span class="method">savePNG</span>(L<span class="str">"output.png"</span>);</pre></div>
+          <div class="sub-head">Tool IDs</div>
           <div class="tbl-wrap"><table><thead><tr><th>Constant</th><th>Description</th></tr></thead><tbody>
-            <tr><td>kToolBrush</td><td>Paint to scratch FBO, merge on mouse up</td></tr>
-            <tr><td>kToolEraser</td><td>Paint white to committed FBO</td></tr>
+            <tr><td>kToolBrush</td><td>Paints onto scratch FBO, merges on mouse up</td></tr>
+            <tr><td>kToolEraser</td><td>Paints white directly onto committed FBO</td></tr>
           </tbody></table></div>
           <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead><tbody>
             <tr><td>setTool(id)</td><td>ToolId</td><td>Switch active tool</td></tr>
             <tr><td>setStrokeStyle(style)</td><td>StrokeStyle</td><td>Set color, radius, hardness, opacity</td></tr>
+            <tr><td>getStrokeStyle()</td><td>const StrokeStyle&amp;</td><td>Current stroke style</td></tr>
             <tr><td>setOpacity(op)</td><td>float 0–1</td><td>Stroke opacity shortcut</td></tr>
             <tr><td>undo() / redo()</td><td>—</td><td>Undo/redo last stroke</td></tr>
             <tr><td>canUndo() / canRedo()</td><td>bool</td><td>History availability</td></tr>
             <tr><td>clear()</td><td>—</td><td>Push undo snapshot then fill white</td></tr>
             <tr><td>savePNG(path)</td><td>wstring</td><td>Export committed layer to PNG</td></tr>
-            <tr><td>colorHistory()</td><td>vector&lt;RGBA&gt;&amp;</td><td>Recently used colors (up to 16)</td></tr>
+            <tr><td>colorHistory()</td><td>const vector&lt;RGBA&gt;&amp;</td><td>Recently used colors (up to 16)</td></tr>
           </tbody></table></div>
-          <div class="note"><strong>Keyboard:</strong> Ctrl+Z undo · Ctrl+Shift+Z / Ctrl+Y redo.</div>
         </div>
 
         <hr class="section-divider" />
 
         <!-- VIEWPORT -->
         <div class="section" id="viewport">
-          <div class="section-head"><h2>Viewport</h2><span class="badge badge-display">Canvas</span></div>
-          <p class="section-desc">Pan/zoom controller for CanvasWidget. Provides snap zoom levels and coordinate conversion.</p>
+          <div class="section-head"><h2>Viewport</h2><span class="badge badge-canvas">Canvas</span></div>
+          <p class="section-desc">Controls zoom and pan. Accessible via <code>canvas->viewport()</code>.</p>
           <div class="code-block"><pre>
 <span class="kw">auto</span>&amp; vp = canvas<span class="arrow">-></span><span class="method">viewport</span>();
 vp.<span class="method">zoomIn</span>(); vp.<span class="method">fitToView</span>(); vp.<span class="method">resetZoom</span>();
-<span class="kw">auto</span> [cx, cy] = vp.<span class="method">screenToCanvas</span>(mouseX, mouseY);</pre></div>
+<span class="kw">auto</span> [cx, cy] = vp.<span class="method">screenToCanvas</span>(screenX, screenY);</pre></div>
           <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Description</th></tr></thead><tbody>
-            <tr><td>zoomIn() / zoomOut()</td><td>Zoom to next/previous snap level</td></tr>
-            <tr><td>resetZoom()</td><td>Reset to 1:1</td></tr>
-            <tr><td>fitToView()</td><td>Scale to fit canvas in viewport</td></tr>
-            <tr><td>panByScreen(dx, dy)</td><td>Pan by screen-space pixels</td></tr>
-            <tr><td>setOffset(x, y)</td><td>Set pan offset directly</td></tr>
-            <tr><td>screenToCanvas(x, y)</td><td>Convert screen → canvas coords</td></tr>
+            <tr><td>zoomIn()</td><td>Zoom in 1.25× toward view center</td></tr>
+            <tr><td>zoomOut()</td><td>Zoom out 0.8× toward view center</td></tr>
+            <tr><td>zoomToward(sx, sy, factor)</td><td>Zoom toward a screen-space point</td></tr>
+            <tr><td>resetZoom()</td><td>Set zoom = 1 and center canvas</td></tr>
+            <tr><td>fitToView()</td><td>Scale and center to fit canvas in viewport</td></tr>
+            <tr><td>panByScreen(dx, dy)</td><td>Pan by screen-space pixel deltas</td></tr>
+            <tr><td>setOffset(cx, cy)</td><td>Set canvas-space pan offset</td></tr>
+            <tr><td>screenToCanvas(sx, sy)</td><td>Convert screen coords to canvas coords</td></tr>
             <tr><td>zoom()</td><td>Current zoom factor</td></tr>
-            <tr><td>offsetX() / offsetY()</td><td>Current pan origin</td></tr>
+            <tr><td>offsetX() / offsetY()</td><td>Current pan offset</td></tr>
           </tbody></table></div>
         </div>
 
@@ -829,7 +1142,7 @@ vp.<span class="method">zoomIn</span>(); vp.<span class="method">fitToView</span
         <!-- CONDITIONAL -->
         <div class="section" id="conditional">
           <div class="section-head"><h2>Conditional</h2><span class="badge badge-state">State</span></div>
-          <p class="section-desc">Ternary-style conditional rendering. Rebuilds its child when the predicate changes.</p>
+          <p class="section-desc">Ternary-style conditional rendering.</p>
           <div class="code-block"><pre>
 <span class="fn">Conditional</span>(isLoggedIn)
     <span class="arrow">-></span><span class="method">Then</span>([]{ <span class="kw">return</span> <span class="fn">Dashboard</span>(); })
@@ -868,16 +1181,19 @@ vp.<span class="method">zoomIn</span>(); vp.<span class="method">fitToView</span
           <div class="section-head"><h2>Row</h2><span class="badge badge-layout">Layout</span></div>
           <p class="section-desc">Lays children out horizontally with flex expansion support.</p>
           <div class="code-block"><pre>
-<span class="fn">Row</span>({ <span class="fn">Text</span>(<span class="str">"Label"</span>), <span class="fn">Expanded</span>(<span class="fn">TextInput</span>()), <span class="fn">Button</span>(<span class="str">"Send"</span>) })
-    <span class="arrow">-></span><span class="method">setSpacing</span>(<span class="num">8</span>)<span class="arrow">-></span><span class="method">setCrossAxisAlignment</span>(<span class="type">CrossAxisAlignment</span>::Center);</pre></div>
+<span class="fn">Row</span>({
+    <span class="fn">Text</span>(<span class="str">"Label"</span>),
+    <span class="fn">Expanded</span>(<span class="fn">TextInput</span>()),
+    <span class="fn">Button</span>(<span class="str">"Send"</span>)
+})<span class="arrow">-></span><span class="method">setSpacing</span>(<span class="num">8</span>)<span class="arrow">-></span><span class="method">setCrossAxisAlignment</span>(<span class="type">CrossAxisAlignment</span>::Center);</pre></div>
           <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead><tbody>
             <tr><td>setSpacing(px)</td><td>int</td><td>Gap between children</td></tr>
-            <tr><td>setCrossAxisAlignment(a)</td><td>CrossAxisAlignment</td><td>Vertical: Start · Center · End · Stretch</td></tr>
-            <tr><td>setMainAxisAlignment(a)</td><td>MainAxisAlignment</td><td>Horizontal: Start · Center · End</td></tr>
+            <tr><td>setCrossAxisAlignment(a)</td><td>CrossAxisAlignment</td><td>Vertical alignment</td></tr>
+            <tr><td>setMainAxisAlignment(a)</td><td>MainAxisAlignment</td><td>Horizontal distribution</td></tr>
+            <tr><td>setMainAxisSize(s)</td><td>MainAxisSize</td><td>Max (fill) or Min (shrink-wrap)</td></tr>
             <tr><td>setWidth(w) / setHeight(h)</td><td>int</td><td>Fixed dimensions</td></tr>
             <tr><td>setPadding(p)</td><td>int</td><td>Uniform padding</td></tr>
-            <tr><td>setBackgroundColor(c)</td><td>COLORREF</td><td>Row background</td></tr>
-            <tr><td>setBorderRadius(r)</td><td>int</td><td>Corner rounding</td></tr>
+            <tr><td>setBackgroundColor(c)</td><td>Color</td><td>Row background</td></tr>
             <tr><td>setFlex(n)</td><td>int</td><td>Flex factor in parent</td></tr>
           </tbody></table></div>
         </div>
@@ -889,14 +1205,18 @@ vp.<span class="method">zoomIn</span>(); vp.<span class="method">fitToView</span
           <div class="section-head"><h2>Column</h2><span class="badge badge-layout">Layout</span></div>
           <p class="section-desc">Lays children out vertically with flex expansion support.</p>
           <div class="code-block"><pre>
-<span class="fn">Column</span>({ <span class="fn">AppBar</span>(<span class="str">"Title"</span>), <span class="fn">Expanded</span>(<span class="fn">ListView</span>(items)...) })<span class="arrow">-></span><span class="method">setSpacing</span>(<span class="num">0</span>);</pre></div>
+<span class="fn">Column</span>({
+    <span class="fn">AppBar</span>(<span class="str">"Title"</span>),
+    <span class="fn">Expanded</span>(<span class="fn">ListView</span>(itemsState)<span class="arrow">-></span><span class="method">itemBuilder</span>(...)),
+})<span class="arrow">-></span><span class="method">setSpacing</span>(<span class="num">0</span>);</pre></div>
           <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead><tbody>
             <tr><td>setSpacing(px)</td><td>int</td><td>Gap between children</td></tr>
-            <tr><td>setCrossAxisAlignment(a)</td><td>CrossAxisAlignment</td><td>Horizontal: Start · Center · End · Stretch</td></tr>
-            <tr><td>setMainAxisAlignment(a)</td><td>MainAxisAlignment</td><td>Vertical: Start · Center · End</td></tr>
+            <tr><td>setCrossAxisAlignment(a)</td><td>CrossAxisAlignment</td><td>Horizontal alignment</td></tr>
+            <tr><td>setMainAxisAlignment(a)</td><td>MainAxisAlignment</td><td>Vertical distribution</td></tr>
+            <tr><td>setMainAxisSize(s)</td><td>MainAxisSize</td><td>Max (fill) or Min (shrink-wrap)</td></tr>
             <tr><td>setWidth(w) / setHeight(h)</td><td>int</td><td>Fixed dimensions</td></tr>
             <tr><td>setPadding(p)</td><td>int</td><td>Uniform padding</td></tr>
-            <tr><td>setBackgroundColor(c)</td><td>COLORREF</td><td>Column background</td></tr>
+            <tr><td>setBackgroundColor(c)</td><td>Color</td><td>Column background</td></tr>
             <tr><td>setBorderRadius(r)</td><td>int</td><td>Corner rounding</td></tr>
             <tr><td>setMinWidth(w)</td><td>int</td><td>Minimum width</td></tr>
             <tr><td>setFlex(n)</td><td>int</td><td>Flex factor in parent</td></tr>
@@ -908,44 +1228,26 @@ vp.<span class="method">zoomIn</span>(); vp.<span class="method">fitToView</span
         <!-- STACK -->
         <div class="section" id="stack">
           <div class="section-head"><h2>Stack</h2><span class="badge badge-layout">Layout</span></div>
-          <p class="section-desc">Layers children on top of one another. Last child renders on top. Use <code>Positioned()</code> for absolute offsets.</p>
+          <p class="section-desc">Layers children on top of each other. Supports absolute positioning via <code>Positioned</code>.</p>
           <div class="code-block"><pre>
 <span class="fn">Stack</span>(
-    <span class="fn">Image</span>(<span class="str">"bg.jpg"</span>)<span class="arrow">-></span><span class="method">setWidth</span>(<span class="num">400</span>)<span class="arrow">-></span><span class="method">setHeight</span>(<span class="num">300</span>),
-    <span class="fn">Positioned</span>(<span class="fn">Icon</span>(<span class="type">FluxIcons</span>::Star), <span class="num">350</span>, <span class="num">10</span>)
+    <span class="fn">AssetImage</span>(<span class="str">"bg.jpg"</span>)<span class="arrow">-></span><span class="method">setWidth</span>(<span class="num">400</span>)<span class="arrow">-></span><span class="method">setHeight</span>(<span class="num">300</span>),
+    <span class="fn">Positioned</span>(<span class="fn">Text</span>(<span class="str">"Overlay"</span>), <span class="num">10</span>, <span class="num">10</span>)
 )<span class="arrow">-></span><span class="method">setExpand</span>(<span class="kw">true</span>);</pre></div>
-          <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead><tbody>
-            <tr><td>setExpand(bool)</td><td>bool</td><td>Fill available space instead of shrink-wrapping</td></tr>
-            <tr><td>setAlignment(a)</td><td>Alignment</td><td>Alignment of unpositioned children</td></tr>
-            <tr><td>setWidth(w) / setHeight(h)</td><td>int</td><td>Fixed dimensions</td></tr>
-            <tr><td>setPadding(p)</td><td>int</td><td>Uniform padding</td></tr>
-            <tr><td>setBackgroundColor(c)</td><td>COLORREF</td><td>Background fill</td></tr>
-            <tr><td>setBorderRadius(r)</td><td>int</td><td>Corner rounding</td></tr>
-            <tr><td>setFlex(n)</td><td>int</td><td>Flex factor in parent</td></tr>
-          </tbody></table></div>
-        </div>
-
-        <hr class="section-divider" />
-
-        <!-- POSITIONED -->
-        <div class="section" id="positioned">
-          <div class="section-head"><h2>Positioned</h2><span class="badge badge-layout">Layout</span></div>
-          <p class="section-desc">Stamps absolute-position offsets onto a child so <code>Stack</code> treats it as absolutely positioned.</p>
+          <div class="sub-head">Positioned helper</div>
           <div class="code-block"><pre>
-<span class="fn">Positioned</span>(child, <span class="num">10</span>, <span class="num">10</span>);                       <span class="comment">// left=10, top=10</span>
-<span class="fn">Positioned</span>(child, <span class="num">0</span>, <span class="num">0</span>, <span class="num">16</span>, <span class="num">16</span>);             <span class="comment">// all four edges</span>
-
-<span class="comment">// Reactive — single state</span>
-<span class="fn">Positioned</span>(dot, posState, [](<span class="kw">float</span> p){ <span class="kw">return</span> (<span class="kw">int</span>)p; }, [](<span class="kw">float</span> p){ <span class="kw">return</span> (<span class="kw">int</span>)p; });
-
-<span class="comment">// Reactive — two independent states</span>
-<span class="fn">Positioned</span>(thumb, xState, [](<span class="kw">int</span> v){ <span class="kw">return</span> v; }, yState, [](<span class="kw">int</span> v){ <span class="kw">return</span> v; });</pre></div>
-          <div class="tbl-wrap"><table><thead><tr><th>Signature</th><th>Description</th></tr></thead><tbody>
-            <tr><td>Positioned(child, left, top, right, bottom)</td><td>Static absolute offsets</td></tr>
-            <tr><td>Positioned(child, State&lt;T&gt;, xFn, yFn)</td><td>Reactive x/y from single state</td></tr>
-            <tr><td>Positioned(child, State&lt;TX&gt;, xFn, State&lt;TY&gt;, yFn)</td><td>Reactive x/y from two states</td></tr>
+<span class="fn">Positioned</span>(child, left, top, right, bottom)
+<span class="fn">Positioned</span>(child, state, xTransform, yTransform)
+<span class="fn">Positioned</span>(child, xState, xTransform, yState, yTransform)</pre></div>
+          <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Description</th></tr></thead><tbody>
+            <tr><td>setAlignment(a)</td><td>Default alignment for unpositioned children</td></tr>
+            <tr><td>setExpand(bool)</td><td>Fill available space instead of shrink-wrapping</td></tr>
+            <tr><td>setWidth(w) / setHeight(h)</td><td>Fixed dimensions</td></tr>
+            <tr><td>setPadding(p)</td><td>Uniform padding</td></tr>
+            <tr><td>setBackgroundColor(c)</td><td>Background fill</td></tr>
+            <tr><td>setBorderRadius(r)</td><td>Corner rounding</td></tr>
+            <tr><td>setFlex(n)</td><td>Flex factor in parent</td></tr>
           </tbody></table></div>
-          <div class="note">Reactive margin methods are also available directly on StackWidget children: <code>setMarginLeft</code>, <code>setMarginTop</code>, <code>setMarginRight</code>, <code>setMarginBottom</code> — each accepts a <code>State&lt;T&gt;</code> + transform.</div>
         </div>
 
         <hr class="section-divider" />
@@ -953,41 +1255,39 @@ vp.<span class="method">zoomIn</span>(); vp.<span class="method">fitToView</span
         <!-- CONTAINER -->
         <div class="section" id="container">
           <div class="section-head"><h2>Container</h2><span class="badge badge-layout">Layout</span></div>
-          <p class="section-desc">Single-child box with full styling — background, border, radius, padding, margin, constraints, hover, visibility.</p>
+          <p class="section-desc">Single-child box with full styling — background, border, radius, padding, margin, size constraints, hover effects.</p>
           <div class="code-block"><pre>
 <span class="fn">Container</span>(<span class="fn">Text</span>(<span class="str">"Hello"</span>))
     <span class="arrow">-></span><span class="method">setBackgroundColor</span>(<span class="fn">RGB</span>(<span class="num">240</span>,<span class="num">248</span>,<span class="num">255</span>))
-    <span class="arrow">-></span><span class="method">setBorderRadius</span>(<span class="num">8</span>)<span class="arrow">-></span><span class="method">setPadding</span>(<span class="num">16</span>);
+    <span class="arrow">-></span><span class="method">setBorderColor</span>(<span class="fn">RGB</span>(<span class="num">33</span>,<span class="num">150</span>,<span class="num">243</span>))
+    <span class="arrow">-></span><span class="method">setBorderWidth</span>(<span class="num">1</span>)
+    <span class="arrow">-></span><span class="method">setBorderRadius</span>(<span class="num">8</span>)
+    <span class="arrow">-></span><span class="method">setPadding</span>(<span class="num">16</span>)
+    <span class="arrow">-></span><span class="method">setHoverBackgroundColor</span>(<span class="fn">RGB</span>(<span class="num">220</span>,<span class="num">240</span>,<span class="num">255</span>));
 
-<span class="comment">// Reactive background from bool state</span>
-<span class="fn">Container</span>(child)<span class="arrow">-></span><span class="method">setBackgroundColor</span>(isSelected, <span class="fn">RGB</span>(<span class="num">230</span>,<span class="num">245</span>,<span class="num">255</span>), <span class="fn">RGB</span>(<span class="num">255</span>,<span class="num">255</span>,<span class="num">255</span>));
-
-<span class="comment">// Reactive width</span>
-<span class="fn">Container</span>(<span class="kw">nullptr</span>)<span class="arrow">-></span><span class="method">setWidth</span>(progress, [](<span class="kw">double</span> v){ <span class="kw">return</span> (<span class="kw">int</span>)(v * <span class="num">400</span>); });
+<span class="comment">// Reactive background</span>
+<span class="fn">Container</span>(child)<span class="arrow">-></span><span class="method">setBackgroundColor</span>(selectedState,
+    [](<span class="kw">bool</span> v){ <span class="kw">return</span> v ? <span class="fn">RGB</span>(<span class="num">230</span>,<span class="num">245</span>,<span class="num">255</span>) : <span class="fn">RGB</span>(<span class="num">255</span>,<span class="num">255</span>,<span class="num">255</span>); });
 
 <span class="comment">// Reactive visibility</span>
 <span class="fn">Container</span>(child)<span class="arrow">-></span><span class="method">setVisible</span>(visibleState, [](<span class="kw">bool</span> v){ <span class="kw">return</span> v; });</pre></div>
           <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead><tbody>
-            <tr><td>setBackgroundColor(color)</td><td>COLORREF</td><td>Fill color</td></tr>
-            <tr><td>setBackgroundColor(State, true, false)</td><td>State + COLORREF ×2</td><td>Reactive on bool state</td></tr>
-            <tr><td>setBackgroundColor(State&lt;T&gt;, transform)</td><td>State + T→COLORREF</td><td>Reactive via transform</td></tr>
-            <tr><td>setHoverBackgroundColor(color)</td><td>COLORREF</td><td>Fill on hover</td></tr>
-            <tr><td>setBorderColor(color / State)</td><td>COLORREF or State</td><td>Border stroke</td></tr>
-            <tr><td>setHoverBorderColor(color)</td><td>COLORREF</td><td>Border on hover</td></tr>
-            <tr><td>setBorderWidth(w / State)</td><td>int or State</td><td>Border thickness</td></tr>
-            <tr><td>setBorderRadius(r / State)</td><td>int or State</td><td>Corner rounding</td></tr>
+            <tr><td>setBackgroundColor(color)</td><td>Color</td><td>Fill color</td></tr>
+            <tr><td>setBackgroundColor(State, transform)</td><td>State</td><td>Reactive background</td></tr>
+            <tr><td>setHoverBackgroundColor(color)</td><td>Color</td><td>Fill on hover</td></tr>
+            <tr><td>setBorderColor(color / State)</td><td>Color or State</td><td>Border stroke</td></tr>
+            <tr><td>setHoverBorderColor(color)</td><td>Color</td><td>Border on hover</td></tr>
+            <tr><td>setBorderWidth(w)</td><td>int or State</td><td>Border thickness</td></tr>
+            <tr><td>setBorderRadius(r)</td><td>int or State</td><td>Corner rounding</td></tr>
             <tr><td>setPadding(p)</td><td>int</td><td>Uniform inner padding</td></tr>
             <tr><td>setPaddingAll(l,t,r,b)</td><td>int ×4</td><td>Per-side inner padding</td></tr>
             <tr><td>setMargin(m)</td><td>int</td><td>Uniform outer margin</td></tr>
             <tr><td>setMarginAll(l,t,r,b)</td><td>int ×4</td><td>Per-side outer margin</td></tr>
-            <tr><td>setWidth(w / State)</td><td>int or State</td><td>Fixed or reactive width</td></tr>
-            <tr><td>setHeight(h / State)</td><td>int or State</td><td>Fixed or reactive height</td></tr>
-            <tr><td>setMinWidth(w) / setMinHeight(h)</td><td>int</td><td>Size constraints</td></tr>
-            <tr><td>setMaxWidth(w) / setMaxHeight(h)</td><td>int</td><td>Size constraints</td></tr>
+            <tr><td>setWidth(w) / setHeight(h)</td><td>int or State</td><td>Fixed or reactive dimensions</td></tr>
+            <tr><td>setMinWidth(w) / setMinHeight(h)</td><td>int</td><td>Minimum size constraints</td></tr>
+            <tr><td>setMaxWidth(w) / setMaxHeight(h)</td><td>int</td><td>Maximum size constraints</td></tr>
             <tr><td>setFlex(n)</td><td>int</td><td>Flex factor in parent</td></tr>
             <tr><td>setOnHover(fn)</td><td>void(bool)</td><td>Hover enter/leave callback</td></tr>
-            <tr><td>setBackgroundAlpha(a)</td><td>BYTE</td><td>Background opacity (0–255)</td></tr>
-            <tr><td>setBorderAlpha(a)</td><td>BYTE</td><td>Border opacity (0–255)</td></tr>
             <tr><td>setVisible(v / State)</td><td>bool or State</td><td>Show/hide</td></tr>
           </tbody></table></div>
         </div>
@@ -998,7 +1298,7 @@ vp.<span class="method">zoomIn</span>(); vp.<span class="method">fitToView</span
         <div class="section" id="center">
           <div class="section-head"><h2>Center</h2><span class="badge badge-layout">Layout</span></div>
           <p class="section-desc">Centers its single child both horizontally and vertically.</p>
-          <div class="code-block"><pre><span class="fn">Center</span>(<span class="fn">Text</span>(<span class="str">"No items found"</span>));</pre></div>
+          <div class="code-block"><pre><span class="fn">Center</span>(<span class="fn">Text</span>(<span class="str">"No items found"</span>)<span class="arrow">-></span><span class="method">setTextColor</span>(<span class="fn">RGB</span>(<span class="num">150</span>,<span class="num">150</span>,<span class="num">150</span>)));</pre></div>
         </div>
 
         <hr class="section-divider" />
@@ -1006,12 +1306,15 @@ vp.<span class="method">zoomIn</span>(); vp.<span class="method">fitToView</span
         <!-- EXPANDED -->
         <div class="section" id="expanded">
           <div class="section-head"><h2>Expanded</h2><span class="badge badge-layout">Layout</span></div>
-          <p class="section-desc">Fills remaining space along the main axis of a parent Row or Column.</p>
+          <p class="section-desc">Causes its child to fill remaining space along the parent Row or Column's main axis.</p>
           <div class="code-block"><pre>
 <span class="fn">Row</span>({ <span class="fn">Text</span>(<span class="str">"Label"</span>), <span class="fn">Expanded</span>(<span class="fn">TextInput</span>()), <span class="fn">Button</span>(<span class="str">"Go"</span>) });
-<span class="fn">Row</span>({ <span class="fn">Expanded</span>(<span class="fn">Column</span>(...), <span class="num">2</span>), <span class="fn">Expanded</span>(<span class="fn">Column</span>(...), <span class="num">1</span>) });  <span class="comment">// 2:1</span></pre></div>
-          <div class="tbl-wrap"><table><thead><tr><th>Signature</th><th>Description</th></tr></thead><tbody>
-            <tr><td>Expanded(child, flex = 1)</td><td>Flex-expand child with optional weight</td></tr>
+<span class="comment">// Proportional — 2:1 split</span>
+<span class="fn">Row</span>({ <span class="fn">Expanded</span>(<span class="fn">Column</span>(...), <span class="num">2</span>), <span class="fn">Expanded</span>(<span class="fn">Column</span>(...), <span class="num">1</span>) });</pre></div>
+          <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Description</th></tr></thead><tbody>
+            <tr><td>setFlex(n)</td><td>Override flex factor</td></tr>
+            <tr><td>setPadding(p)</td><td>Uniform inner padding</td></tr>
+            <tr><td>setBackgroundColor(c)</td><td>Background fill</td></tr>
           </tbody></table></div>
         </div>
 
@@ -1020,10 +1323,11 @@ vp.<span class="method">zoomIn</span>(); vp.<span class="method">fitToView</span
         <!-- SIZEDBOX -->
         <div class="section" id="sizedbox">
           <div class="section-head"><h2>SizedBox</h2><span class="badge badge-layout">Layout</span></div>
-          <p class="section-desc">Fixed-size box. Used as spacer or to constrain a child.</p>
+          <p class="section-desc">Fixed-size box. Used as a spacer or to constrain a child to an exact size.</p>
           <div class="code-block"><pre>
-<span class="fn">SizedBox</span>(<span class="num">0</span>, <span class="num">24</span>);                     <span class="comment">// 24px vertical gap</span>
-<span class="fn">SizedBox</span>(<span class="num">200</span>, <span class="num">48</span>, <span class="fn">Button</span>(<span class="str">"Submit"</span>)); <span class="comment">// constrained child</span></pre></div>
+<span class="fn">SizedBox</span>(<span class="num">0</span>, <span class="num">24</span>);                        <span class="comment">// 24px vertical gap</span>
+<span class="fn">SizedBox</span>(<span class="num">16</span>, <span class="num">0</span>);                        <span class="comment">// 16px horizontal gap</span>
+<span class="fn">SizedBox</span>(<span class="num">200</span>, <span class="num">48</span>, <span class="fn">Button</span>(<span class="str">"Submit"</span>));   <span class="comment">// constrained child</span></pre></div>
         </div>
 
         <hr class="section-divider" />
@@ -1037,13 +1341,48 @@ vp.<span class="method">zoomIn</span>(); vp.<span class="method">fitToView</span
 
         <hr class="section-divider" />
 
+        <!-- SPLITVIEW -->
+        <div class="section" id="splitview">
+          <div class="section-head"><h2>SplitView</h2><span class="badge badge-layout">Layout</span></div>
+          <p class="section-desc">Two-pane resizable container with a draggable divider.</p>
+          <div class="code-block"><pre>
+<span class="fn">SplitView</span>(leftWidget, rightWidget, <span class="num">0.3f</span>)
+    <span class="arrow">-></span><span class="method">setMinPaneWidth</span>(<span class="num">120</span>)
+    <span class="arrow">-></span><span class="method">setDividerColor</span>(<span class="fn">RGB</span>(<span class="num">210</span>, <span class="num">210</span>, <span class="num">210</span>));
+
+<span class="fn">SplitViewVertical</span>(topWidget, bottomWidget, <span class="num">0.4f</span>);
+
+<span class="type">State</span>&lt;<span class="kw">float</span>&gt; ratio(<span class="num">0.5f</span>, app);
+<span class="fn">SplitView</span>(left, right)<span class="arrow">-></span><span class="method">setRatio</span>(ratio);</pre></div>
+          <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead><tbody>
+            <tr><td>setRatio(r)</td><td>float 0–1</td><td>Fraction of space given to pane 0</td></tr>
+            <tr><td>setRatio(State&lt;float&gt;)</td><td>State</td><td>Reactive ratio binding</td></tr>
+            <tr><td>setMinPaneWidth(px)</td><td>int</td><td>Minimum size of either pane</td></tr>
+            <tr><td>setDividerWidth(px)</td><td>int</td><td>Divider thickness (default 6px)</td></tr>
+            <tr><td>setDividerColor(c)</td><td>Color</td><td>Default divider color</td></tr>
+            <tr><td>setDividerHoverColor(c)</td><td>Color</td><td>Divider color on hover</td></tr>
+            <tr><td>setDividerDragColor(c)</td><td>Color</td><td>Divider color while dragging</td></tr>
+            <tr><td>setVertical(v)</td><td>bool</td><td>Switch to top/bottom split</td></tr>
+            <tr><td>setResizable(v)</td><td>bool</td><td>Allow drag resize (default true)</td></tr>
+            <tr><td>setOnRatioChanged(fn)</td><td>void(float)</td><td>Fires after drag completes</td></tr>
+            <tr><td>getRatio()</td><td>float</td><td>Current ratio</td></tr>
+            <tr><td>swapPanes()</td><td>—</td><td>Swap pane 0 and pane 1</td></tr>
+            <tr><td>collapsePane(idx)</td><td>int</td><td>Collapse pane 0 or 1 fully</td></tr>
+          </tbody></table></div>
+        </div>
+
+        <hr class="section-divider" />
+
         <!-- SCAFFOLD -->
         <div class="section" id="scaffold">
           <div class="section-head"><h2>Scaffold</h2><span class="badge badge-layout">Structure</span></div>
           <p class="section-desc">Root structure widget. Manages the overlay stack used by Dropdown, Tooltip, Dialog, and ContextMenu.</p>
           <div class="code-block"><pre>
-<span class="fn">Scaffold</span>(<span class="fn">AppBar</span>(<span class="str">"My App"</span>), <span class="fn">Column</span>({ <span class="fn">Text</span>(<span class="str">"Content"</span>) }));</pre></div>
-          <div class="note"><strong>Overlay zIndex:</strong> Tooltip=50 · Dropdown=100 · ContextMenu=150 · Dialog=200. Higher renders on top.</div>
+<span class="fn">Scaffold</span>(
+    <span class="fn">AppBar</span>(<span class="str">"My App"</span>),
+    <span class="fn">Column</span>({ <span class="fn">Text</span>(<span class="str">"Content"</span>) })
+);</pre></div>
+          <div class="note"><strong>Overlay zIndex order:</strong> Tooltip = 50 · Dropdown = 100 · ContextMenu = 150 · Dialog = 200.</div>
           <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Description</th></tr></thead><tbody>
             <tr><td>addOverlay(widget, renderer, zIndex)</td><td>Register a floating overlay</td></tr>
             <tr><td>removeOverlay(widget)</td><td>Unregister a floating overlay</td></tr>
@@ -1069,10 +1408,74 @@ vp.<span class="method">zoomIn</span>(); vp.<span class="method">fitToView</span
           <div class="section-head"><h2>Card</h2><span class="badge badge-layout">Structure</span></div>
           <p class="section-desc">White rounded-corner box with light border and 16px padding.</p>
           <div class="code-block"><pre>
-<span class="fn">Card</span>(<span class="fn">Column</span>({
-    <span class="fn">Text</span>(<span class="str">"Title"</span>)<span class="arrow">-></span><span class="method">setFontWeight</span>(<span class="type">FontWeight</span>::Bold),
-    <span class="fn">Text</span>(<span class="str">"Description"</span>)
-})<span class="arrow">-></span><span class="method">setSpacing</span>(<span class="num">8</span>));</pre></div>
+<span class="fn">Card</span>(
+    <span class="fn">Column</span>({
+        <span class="fn">Text</span>(<span class="str">"Title"</span>)<span class="arrow">-></span><span class="method">setFontWeight</span>(<span class="type">FontWeight</span>::Bold),
+        <span class="fn">Text</span>(<span class="str">"Description"</span>)
+    })<span class="arrow">-></span><span class="method">setSpacing</span>(<span class="num">8</span>)
+);</pre></div>
+        </div>
+
+        <hr class="section-divider" />
+
+        <!-- TABVIEW -->
+        <div class="section" id="tabview">
+          <div class="section-head"><h2>TabView</h2><span class="badge badge-layout">Navigation</span></div>
+          <p class="section-desc">Tab bar with swappable content panes.</p>
+          <div class="code-block"><pre>
+<span class="fn">TabView</span>({
+    <span class="fn">Tab</span>(<span class="str">"General"</span>,  generalWidget),
+    <span class="fn">Tab</span>(<span class="str">"Display"</span>,  displayWidget),
+    <span class="fn">Tab</span>(<span class="str">"Network"</span>,  networkWidget),
+})
+<span class="arrow">-></span><span class="method">setOnTabChanged</span>([](<span class="kw">int</span> i) { std::cout &lt;&lt; <span class="str">"Tab: "</span> &lt;&lt; i; });
+
+<span class="type">State</span>&lt;<span class="kw">int</span>&gt; activeTab(<span class="num">0</span>, app);
+<span class="fn">TabView</span>({...})<span class="arrow">-></span><span class="method">setActiveIndex</span>(activeTab);</pre></div>
+          <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead><tbody>
+            <tr><td>setActiveIndex(idx)</td><td>int</td><td>Switch to tab by index</td></tr>
+            <tr><td>setActiveIndex(State&lt;int&gt;)</td><td>State</td><td>Two-way reactive binding</td></tr>
+            <tr><td>setOnTabChanged(fn)</td><td>void(int)</td><td>Fires when active tab changes</td></tr>
+            <tr><td>setTabBarHeight(h)</td><td>int</td><td>Height of the tab bar (default 40px)</td></tr>
+            <tr><td>setTabMinWidth(w)</td><td>int</td><td>Minimum tab button width (default 90px)</td></tr>
+            <tr><td>setTabFontSize(s)</td><td>int</td><td>Tab label font size</td></tr>
+            <tr><td>setIndicatorColor(c)</td><td>Color</td><td>Active tab underline color</td></tr>
+            <tr><td>setActiveTabText(c)</td><td>Color</td><td>Active tab label color</td></tr>
+            <tr><td>setBarBackground(c)</td><td>Color</td><td>Tab bar background color</td></tr>
+            <tr><td>setContentPadding(p)</td><td>int</td><td>Padding inside the content area</td></tr>
+            <tr><td>setHasContentBorder(v)</td><td>bool</td><td>Border around content pane</td></tr>
+            <tr><td>setAccentColor(c)</td><td>Color</td><td>Sets indicator, active text, hover together</td></tr>
+            <tr><td>setTabContent(idx, widget)</td><td>—</td><td>Replace a tab's content at runtime</td></tr>
+            <tr><td>setTabLabel(idx, label)</td><td>—</td><td>Rename a tab at runtime</td></tr>
+            <tr><td>tabCount()</td><td>int</td><td>Number of tabs</td></tr>
+            <tr><td>setFlex(n)</td><td>int</td><td>Flex factor in parent</td></tr>
+          </tbody></table></div>
+        </div>
+
+        <hr class="section-divider" />
+
+        <!-- MENUBAR -->
+        <div class="section" id="menubar">
+          <div class="section-head"><h2>MenuBar</h2><span class="badge badge-layout">Navigation</span></div>
+          <p class="section-desc">Horizontal strip of labeled menus with pulldown lists.</p>
+          <div class="code-block"><pre>
+<span class="kw">auto</span> menuBar = <span class="fn">MenuBar</span>({
+    <span class="fn">MenuBarItem</span>(<span class="str">"File"</span>, {
+        <span class="type">ContextMenuItem</span>::<span class="fn">Action</span>(<span class="str">"New"</span>,  [&]{ newFile(); }),
+        <span class="type">ContextMenuItem</span>::<span class="fn">Separator</span>(),
+        <span class="type">ContextMenuItem</span>::<span class="fn">Action</span>(<span class="str">"Exit"</span>, []{ PostQuitMessage(<span class="num">0</span>); }),
+    }),
+    <span class="fn">MenuBarItem</span>(<span class="str">"Edit"</span>, {
+        <span class="type">ContextMenuItem</span>::<span class="fn">Action</span>(<span class="str">"Cut"</span>,  [&]{ cut(); }),
+        <span class="type">ContextMenuItem</span>::<span class="fn">Action</span>(<span class="str">"Copy"</span>, [&]{ copy(); }),
+    }),
+});</pre></div>
+          <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead><tbody>
+            <tr><td>setBarHeight(h)</td><td>int</td><td>Height of the menu bar strip (default 28px)</td></tr>
+            <tr><td>setBarBackground(c)</td><td>Color</td><td>Bar background color</td></tr>
+            <tr><td>setItemHeight(h)</td><td>int</td><td>Dropdown item row height (default 28px)</td></tr>
+            <tr><td>setMinMenuWidth(w)</td><td>int</td><td>Minimum dropdown width (default 160px)</td></tr>
+          </tbody></table></div>
         </div>
 
         <hr class="section-divider" />
@@ -1080,9 +1483,9 @@ vp.<span class="method">zoomIn</span>(); vp.<span class="method">fitToView</span
         <!-- DROPDOWN -->
         <div class="section" id="dropdown">
           <div class="section-head"><h2>Dropdown</h2><span class="badge badge-state">Overlay</span></div>
-          <p class="section-desc">Select input that opens a scrollable overlay list. Keyboard navigation and two-way state binding.</p>
+          <p class="section-desc">Select input that opens a scrollable overlay list.</p>
           <div class="code-block"><pre>
-<span class="fn">Dropdown</span>({<span class="str">"Nepal"</span>, <span class="str">"India"</span>, <span class="str">"USA"</span>})
+<span class="fn">Dropdown</span>({<span class="str">"Nepal"</span>, <span class="str">"India"</span>, <span class="str">"USA"</span>, <span class="str">"UK"</span>})
     <span class="arrow">-></span><span class="method">setPlaceholder</span>(<span class="str">"Select a country"</span>)
     <span class="arrow">-></span><span class="method">setSelectedValue</span>(countryState)
     <span class="arrow">-></span><span class="method">setOnSelectionChanged</span>([&](<span class="kw">int</span> i, <span class="kw">const</span> std::string&amp; v){ handleSelect(v); });</pre></div>
@@ -1094,8 +1497,48 @@ vp.<span class="method">zoomIn</span>(); vp.<span class="method">fitToView</span
             <tr><td>setOnSelectionChanged(fn)</td><td>void(int, string)</td><td>Change callback</td></tr>
             <tr><td>setItemHeight(h)</td><td>int</td><td>Row height (default 32px)</td></tr>
             <tr><td>setMaxVisibleItems(n)</td><td>int</td><td>Max rows before scroll (default 6)</td></tr>
+            <tr><td>setWidth(w)</td><td>int</td><td>Fixed width</td></tr>
           </tbody></table></div>
           <div class="note"><strong>Keyboard:</strong> ↑/↓ navigate · Enter/Space open/confirm · Escape close · Home/End jump.</div>
+        </div>
+
+        <hr class="section-divider" />
+
+        <!-- TOAST -->
+        <div class="section" id="toast">
+          <div class="section-head"><h2>Toast</h2><span class="badge badge-state">Overlay</span></div>
+          <p class="section-desc">Floating notification toasts anchored to any point in the tree.</p>
+          <div class="code-block"><pre>
+<span class="kw">auto</span> toast = <span class="fn">Toast</span>()
+    <span class="arrow">-></span><span class="method">setPosition</span>(<span class="type">ToastPosition</span>::BottomRight)
+    <span class="arrow">-></span><span class="method">setMaxVisible</span>(<span class="num">3</span>);
+
+toast<span class="arrow">-></span><span class="method">show</span>(<span class="str">"File saved"</span>,      <span class="type">ToastType</span>::Success);
+toast<span class="arrow">-></span><span class="method">show</span>(<span class="str">"Connection lost"</span>, <span class="type">ToastType</span>::Error);
+
+toast<span class="arrow">-></span><span class="method">showEntry</span>({
+    .message     = <span class="str">"Upload failed"</span>,
+    .title       = <span class="str">"Network Error"</span>,
+    .type        = <span class="type">ToastType</span>::Error,
+    .durationMs  = <span class="num">0</span>,
+    .actionLabel = <span class="str">"Retry"</span>,
+    .onAction    = [&]{ retry(); },
+});</pre></div>
+          <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead><tbody>
+            <tr><td>show(message, type, durationMs)</td><td>—</td><td>Quick fire with defaults</td></tr>
+            <tr><td>showEntry(ToastEntry)</td><td>—</td><td>Full control over all fields</td></tr>
+            <tr><td>dismissTop()</td><td>—</td><td>Dismiss the topmost visible toast</td></tr>
+            <tr><td>dismissAll()</td><td>—</td><td>Dismiss all toasts</td></tr>
+            <tr><td>setPosition(pos)</td><td>ToastPosition</td><td>BottomRight/Left/Center · TopRight/Left/Center</td></tr>
+            <tr><td>setMaxVisible(n)</td><td>int</td><td>Max simultaneous toasts (default 3)</td></tr>
+            <tr><td>setToastWidth(w)</td><td>int</td><td>Toast panel width</td></tr>
+            <tr><td>setToastHeight(h)</td><td>int</td><td>Base height per toast</td></tr>
+            <tr><td>setMarginEdge(m)</td><td>int</td><td>Distance from window edge</td></tr>
+            <tr><td>setSpacing(s)</td><td>int</td><td>Gap between stacked toasts</td></tr>
+            <tr><td>setFontSize(s)</td><td>int</td><td>Toast text size</td></tr>
+            <tr><td>setBgColor(c)</td><td>Color</td><td>Toast background</td></tr>
+            <tr><td>setColors(info, success, warning, error)</td><td>Color ×4</td><td>Override all accent colors</td></tr>
+          </tbody></table></div>
         </div>
 
         <hr class="section-divider" />
@@ -1103,18 +1546,19 @@ vp.<span class="method">zoomIn</span>(); vp.<span class="method">fitToView</span
         <!-- TOOLTIP -->
         <div class="section" id="tooltip">
           <div class="section-head"><h2>Tooltip</h2><span class="badge badge-state">Overlay</span></div>
-          <p class="section-desc">Shows a floating text bubble on hover with auto edge clamping.</p>
+          <p class="section-desc">Shows a floating text bubble on hover.</p>
           <div class="code-block"><pre>
-<span class="fn">Tooltip</span>(<span class="fn">Button</span>(<span class="str">"Delete"</span>, [&]{ deleteItem(); }), <span class="str">"Permanently removes the item"</span>)
-    <span class="arrow">-></span><span class="method">setPosition</span>(<span class="type">TooltipPosition</span>::Above)
-    <span class="arrow">-></span><span class="method">setTooltipMaxWidth</span>(<span class="num">200</span>);</pre></div>
+<span class="fn">Tooltip</span>(
+    <span class="fn">Button</span>(<span class="str">"Delete"</span>, [&]{ deleteItem(); }),
+    <span class="str">"Permanently removes the item"</span>
+)<span class="arrow">-></span><span class="method">setPosition</span>(<span class="type">TooltipPosition</span>::Above);</pre></div>
           <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead><tbody>
             <tr><td>setTooltipText(text)</td><td>string</td><td>Update tooltip content</td></tr>
             <tr><td>setPosition(pos)</td><td>TooltipPosition</td><td>Above · Below · Auto</td></tr>
-            <tr><td>setTooltipBackground(color)</td><td>COLORREF</td><td>Bubble background</td></tr>
-            <tr><td>setTooltipTextColor(color)</td><td>COLORREF</td><td>Bubble text color</td></tr>
+            <tr><td>setTooltipBackground(color)</td><td>Color</td><td>Bubble background</td></tr>
+            <tr><td>setTooltipTextColor(color)</td><td>Color</td><td>Bubble text color</td></tr>
             <tr><td>setTooltipFontSize(size)</td><td>int</td><td>Font size inside bubble</td></tr>
-            <tr><td>setTooltipMaxWidth(w)</td><td>int</td><td>Max width before word-wrap (default 240px)</td></tr>
+            <tr><td>setTooltipMaxWidth(w)</td><td>int</td><td>Max bubble width (default 240px)</td></tr>
           </tbody></table></div>
         </div>
 
@@ -1128,9 +1572,13 @@ vp.<span class="method">zoomIn</span>(); vp.<span class="method">fitToView</span
 <span class="kw">auto</span> dlg = <span class="fn">Dialog</span>(
     <span class="fn">Column</span>({
         <span class="fn">Text</span>(<span class="str">"Confirm delete?"</span>)<span class="arrow">-></span><span class="method">setFontSize</span>(<span class="num">16</span>),
-        <span class="fn">Row</span>({ <span class="fn">Button</span>(<span class="str">"Cancel"</span>, [&]{ dlg<span class="arrow">-></span><span class="method">close</span>(); }), <span class="fn">Button</span>(<span class="str">"Delete"</span>, [&]{ dlg<span class="arrow">-></span><span class="method">close</span>(); }) })<span class="arrow">-></span><span class="method">setSpacing</span>(<span class="num">8</span>)
+        <span class="fn">Row</span>({
+            <span class="fn">Button</span>(<span class="str">"Cancel"</span>, [&]{ dlg<span class="arrow">-></span><span class="method">close</span>(); }),
+            <span class="fn">Button</span>(<span class="str">"Delete"</span>, [&]{ deleteItem(); dlg<span class="arrow">-></span><span class="method">close</span>(); })
+        })<span class="arrow">-></span><span class="method">setSpacing</span>(<span class="num">8</span>)
     })
-)<span class="arrow">-></span><span class="method">setSize</span>(<span class="num">360</span>, <span class="num">160</span>);
+)<span class="arrow">-></span><span class="method">setSize</span>(<span class="num">360</span>, <span class="num">160</span>)
+ <span class="arrow">-></span><span class="method">setCloseOnClickOutside</span>(<span class="kw">true</span>);
 dlg<span class="arrow">-></span><span class="method">open</span>();</pre></div>
           <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead><tbody>
             <tr><td>open()</td><td>—</td><td>Show the dialog</td></tr>
@@ -1148,17 +1596,19 @@ dlg<span class="arrow">-></span><span class="method">open</span>();</pre></div>
         <!-- CONTEXTMENU -->
         <div class="section" id="contextmenu">
           <div class="section-head"><h2>ContextMenu</h2><span class="badge badge-state">Overlay</span></div>
-          <p class="section-desc">Right-click context menu attached to any anchor widget.</p>
+          <p class="section-desc">Attaches a right-click context menu to any anchor widget.</p>
           <div class="code-block"><pre>
 <span class="fn">ContextMenu</span>(
     <span class="fn">Text</span>(<span class="str">"Right click me"</span>),
     {
-        {<span class="str">"Cut"</span>, [&]{ cut(); }}, {<span class="str">"Copy"</span>, [&]{ copy(); }},
+        {<span class="str">"Cut"</span>,   [&]{ cut(); }},
+        {<span class="str">"Copy"</span>,  [&]{ copy(); }},
         <span class="type">ContextMenuItem</span>::<span class="fn">Separator</span>(),
-        {<span class="str">"Paste"</span>, [&]{ paste(); }, <span class="kw">false</span>}  <span class="comment">// disabled</span>
+        {<span class="str">"Paste"</span>, [&]{ paste(); }, <span class="kw">false</span>}
     }
 );</pre></div>
-          <div class="tbl-wrap"><table><thead><tr><th>ContextMenuItem factory</th><th>Description</th></tr></thead><tbody>
+          <div class="sub-head">ContextMenuItem</div>
+          <div class="tbl-wrap"><table><thead><tr><th>Factory</th><th>Description</th></tr></thead><tbody>
             <tr><td>ContextMenuItem(label, action, enabled)</td><td>Action item</td></tr>
             <tr><td>ContextMenuItem::Action(label, action, enabled)</td><td>Explicit action factory</td></tr>
             <tr><td>ContextMenuItem::Separator()</td><td>Visual divider</td></tr>
@@ -1167,11 +1617,318 @@ dlg<span class="arrow">-></span><span class="method">open</span>();</pre></div>
             <tr><td>setMenuItems(items)</td><td>vector&lt;ContextMenuItem&gt;</td><td>Replace all items</td></tr>
             <tr><td>setItemHeight(h)</td><td>int</td><td>Row height (default 28px)</td></tr>
             <tr><td>setMinWidth(w)</td><td>int</td><td>Minimum menu width (default 160px)</td></tr>
-            <tr><td>setMenuBackground(color)</td><td>COLORREF</td><td>Menu background</td></tr>
-            <tr><td>setMenuBorder(color)</td><td>COLORREF</td><td>Menu border</td></tr>
-            <tr><td>setItemHoverColor(color)</td><td>COLORREF</td><td>Row highlight on hover</td></tr>
+            <tr><td>setMenuBackground(color)</td><td>Color</td><td>Menu background</td></tr>
+            <tr><td>setMenuBorder(color)</td><td>Color</td><td>Menu border color</td></tr>
+            <tr><td>setItemHoverColor(color)</td><td>Color</td><td>Row highlight on hover</td></tr>
           </tbody></table></div>
           <div class="note"><strong>Keyboard:</strong> ↑/↓ navigate · Enter/Space activate · Escape close · Home/End jump.</div>
+        </div>
+
+        <hr class="section-divider" />
+
+        <!-- AUDIOPLAYER -->
+        <div class="section" id="audioplayer">
+          <div class="section-head"><h2>AudioPlayer</h2><span class="badge badge-media">Media</span></div>
+          <p class="section-desc">Drop-in audio player widget. Supports local files, HTTP/HTTPS URLs, and in-memory buffers.</p>
+          <div class="code-block"><pre>
+<span class="fn">AudioPlayer</span>(<span class="str">"audio/sample.mp3"</span>)<span class="arrow">-></span><span class="method">setWidth</span>(<span class="num">380</span>);
+<span class="fn">AudioPlayerFromUrl</span>(<span class="str">"https://example.com/music.mp3"</span>)<span class="arrow">-></span><span class="method">setWidth</span>(<span class="num">400</span>);
+<span class="fn">AudioPlayerFromMemory</span>(myBytes)<span class="arrow">-></span><span class="method">setWidth</span>(<span class="num">400</span>);
+
+<span class="comment">// With artwork</span>
+<span class="fn">AudioPlayer</span>(<span class="str">"audio/track.mp3"</span>)
+    <span class="arrow">-></span><span class="method">setArtwork</span>(<span class="fn">AssetImage</span>(<span class="str">"covers/album.jpg"</span>), <span class="num">60</span>)
+    <span class="arrow">-></span><span class="method">setWidth</span>(<span class="num">420</span>);</pre></div>
+          <div class="sub-head">Factory</div>
+          <div class="tbl-wrap"><table><thead><tr><th>Signature</th><th>Description</th></tr></thead><tbody>
+            <tr><td>AudioPlayer(path = "")</td><td>Player for a local file path</td></tr>
+            <tr><td>AudioPlayerFromUrl(url)</td><td>Player that streams from an HTTP/HTTPS URL</td></tr>
+            <tr><td>AudioPlayerFromMemory(bytes)</td><td>Player backed by a vector&lt;uint8_t&gt; buffer</td></tr>
+            <tr><td>AudioPlayerFromMemory(ptr, len)</td><td>Player backed by a raw pointer + length</td></tr>
+          </tbody></table></div>
+          <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead><tbody>
+            <tr><td>setPath(p)</td><td>string</td><td>Load a local file path</td></tr>
+            <tr><td>setUrl(url)</td><td>string</td><td>Stream from HTTP/HTTPS URL</td></tr>
+            <tr><td>setMemory(bytes)</td><td>vector&lt;uint8_t&gt;</td><td>Play from in-memory buffer</td></tr>
+            <tr><td>setMemory(ptr, len)</td><td>uint8_t*, size_t</td><td>Play from raw pointer + length</td></tr>
+            <tr><td>setArtwork(img, size)</td><td>ImageWidgetPtr, int</td><td>Attach an artwork thumbnail</td></tr>
+            <tr><td>setArtworkSize(px)</td><td>int</td><td>Resize the artwork column</td></tr>
+            <tr><td>setOnDotsClicked(fn)</td><td>void()</td><td>Callback for the three-dot menu button</td></tr>
+            <tr><td>setWidth(w)</td><td>int</td><td>Fixed width</td></tr>
+          </tbody></table></div>
+        </div>
+
+        <hr class="section-divider" />
+
+        <!-- VIDEOPLAYER -->
+        <div class="section" id="videoplayer">
+          <div class="section-head"><h2>VideoPlayer</h2><span class="badge badge-media">Media</span></div>
+          <p class="section-desc">Self-contained video player widget. Blits decoded frames each render tick and overlays a control bar on hover. Supports local files, HTTP/HTTPS URLs, and in-memory buffers.</p>
+          <div class="code-block"><pre>
+<span class="fn">VideoPlayer</span>(<span class="str">"video/sample.mp4"</span>)
+    <span class="arrow">-></span><span class="method">setWidth</span>(<span class="num">480</span>)
+    <span class="arrow">-></span><span class="method">setHeight</span>(<span class="num">270</span>)
+    <span class="arrow">-></span><span class="method">setAutoPlay</span>(<span class="kw">true</span>);
+
+<span class="fn">VideoPlayerFromUrl</span>(<span class="str">"https://example.com/video.mp4"</span>)<span class="arrow">-></span><span class="method">setWidth</span>(<span class="num">480</span>)<span class="arrow">-></span><span class="method">setHeight</span>(<span class="num">270</span>);
+<span class="fn">VideoPlayerFromMemory</span>(bytes)<span class="arrow">-></span><span class="method">setWidth</span>(<span class="num">480</span>)<span class="arrow">-></span><span class="method">setHeight</span>(<span class="num">270</span>);</pre></div>
+          <div class="note-green"><strong>Platform support:</strong> Android (NanoVG/OES) · Windows (GDI StretchDIBits) · Linux (Cairo/SDL2)</div>
+          <div class="sub-head">Factory</div>
+          <div class="tbl-wrap"><table><thead><tr><th>Signature</th><th>Description</th></tr></thead><tbody>
+            <tr><td>VideoPlayer(path = "")</td><td>Player for a local file path</td></tr>
+            <tr><td>VideoPlayerFromUrl(url)</td><td>Player that streams from an HTTP/HTTPS URL</td></tr>
+            <tr><td>VideoPlayerFromMemory(bytes)</td><td>Player backed by a vector&lt;uint8_t&gt; buffer</td></tr>
+            <tr><td>VideoPlayerFromMemory(ptr, len)</td><td>Player backed by a raw pointer + length</td></tr>
+          </tbody></table></div>
+          <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead><tbody>
+            <tr><td>setPath(p)</td><td>string</td><td>Load a local video file</td></tr>
+            <tr><td>setUrl(url)</td><td>string</td><td>Stream from HTTP/HTTPS URL</td></tr>
+            <tr><td>setMemory(bytes)</td><td>vector&lt;uint8_t&gt;</td><td>Play from in-memory buffer</td></tr>
+            <tr><td>setMemory(ptr, len)</td><td>uint8_t*, size_t</td><td>Play from raw pointer + length</td></tr>
+            <tr><td>setWidth(w)</td><td>int</td><td>Fixed width</td></tr>
+            <tr><td>setHeight(h)</td><td>int</td><td>Fixed height</td></tr>
+            <tr><td>setAutoPlay(b)</td><td>bool</td><td>Start playing immediately on open</td></tr>
+          </tbody></table></div>
+          <div class="note"><strong>Controls:</strong> Click video area to toggle play/pause. Control bar auto-hides after 3 seconds of inactivity. Drag the seek thumb to scrub.</div>
+        </div>
+
+        <hr class="section-divider" />
+
+        <!-- CAMERAVIEW -->
+        <div class="section" id="cameraview">
+          <div class="section-head"><h2>CameraView</h2><span class="badge badge-media">Media</span></div>
+          <p class="section-desc">Fixed-size camera viewfinder with shutter, flash toggle, and camera flip controls.</p>
+          <div class="code-block"><pre>
+<span class="kw">#include</span> <span class="str">"flux/flux_camera_widget.hpp"</span>
+
+<span class="fn">CameraView</span>()
+    <span class="arrow">-></span><span class="method">setWidth</span>(<span class="num">380</span>)
+    <span class="arrow">-></span><span class="method">setHeight</span>(<span class="num">270</span>)
+    <span class="arrow">-></span><span class="method">setOnPhoto</span>([](<span class="kw">const</span> std::string&amp; path) {
+        std::cout &lt;&lt; <span class="str">"Saved: "</span> &lt;&lt; path;
+    });</pre></div>
+          <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead><tbody>
+            <tr><td>setWidth(w)</td><td>int</td><td>Fixed width (default 380)</td></tr>
+            <tr><td>setHeight(h)</td><td>int</td><td>Fixed height (default 270)</td></tr>
+            <tr><td>setOnPhoto(fn)</td><td>void(string)</td><td>Fires with the saved file path after each capture</td></tr>
+            <tr><td>setStartFront(f)</td><td>bool</td><td>Start with the front-facing camera (Android only)</td></tr>
+          </tbody></table></div>
+        </div>
+
+        <hr class="section-divider" />
+
+        <!-- MICRECORDER -->
+        <div class="section" id="micrecorder">
+          <div class="section-head"><h2>MicRecorder</h2><span class="badge badge-media">Media</span></div>
+          <p class="section-desc">Microphone recorder widget with a scrolling live waveform and WAV file output.</p>
+          <div class="code-block"><pre>
+<span class="kw">#include</span> <span class="str">"flux/mic_recorder_widget.hpp"</span>
+
+<span class="fn">MicRecorder</span>()
+    <span class="arrow">-></span><span class="method">setWidth</span>(<span class="num">320</span>)
+    <span class="arrow">-></span><span class="method">setHeight</span>(<span class="num">120</span>)
+    <span class="arrow">-></span><span class="method">setOnSaved</span>([](<span class="kw">const</span> std::string&amp; path) {
+        std::cout &lt;&lt; <span class="str">"Saved to: "</span> &lt;&lt; path;
+    });</pre></div>
+          <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Type</th><th>Description</th></tr></thead><tbody>
+            <tr><td>setWidth(w)</td><td>int</td><td>Fixed width (default 320)</td></tr>
+            <tr><td>setHeight(h)</td><td>int</td><td>Fixed height (default 120)</td></tr>
+            <tr><td>setOnSaved(fn)</td><td>void(string)</td><td>Fires with the WAV file path on stop</td></tr>
+          </tbody></table></div>
+        </div>
+
+        <hr class="section-divider" />
+
+        <!-- FUTUREBUILDER -->
+        <div class="section" id="futurebuilder">
+          <div class="section-head"><h2>FutureBuilder / FetchBuilder / JsonBuilder</h2><span class="badge badge-network">Network</span></div>
+          <p class="section-desc">Flutter-inspired async widget that manages loading, error, and data states for HTTP requests.</p>
+          <div class="code-block"><pre>
+<span class="kw">#include</span> <span class="str">"flux/flux_future_builder.hpp"</span>
+
+<span class="comment">// Raw string response</span>
+<span class="fn">FetchBuilder</span>(
+    <span class="str">"https://api.example.com/status"</span>,
+    [](<span class="kw">const</span> <span class="type">AsyncSnapshot</span>&lt;std::string&gt;&amp; snap) -&gt; <span class="type">WidgetPtr</span> {
+        <span class="kw">if</span> (snap.<span class="method">isLoading</span>()) <span class="kw">return</span> <span class="fn">Text</span>(<span class="str">"Loading..."</span>);
+        <span class="kw">if</span> (snap.<span class="method">hasError</span>())  <span class="kw">return</span> <span class="fn">Text</span>(<span class="str">"Error: "</span> + snap.error);
+        <span class="kw">return</span> <span class="fn">Text</span>(snap.data);
+    }
+);
+
+<span class="comment">// Parsed JSON</span>
+<span class="fn">JsonBuilder</span>(
+    <span class="str">"https://api.example.com/user/1"</span>,
+    [](<span class="kw">const</span> <span class="type">AsyncSnapshot</span>&lt;<span class="type">JsonValue</span>&gt;&amp; snap) -&gt; <span class="type">WidgetPtr</span> {
+        <span class="kw">if</span> (snap.<span class="method">isLoading</span>()) <span class="kw">return</span> <span class="fn">Text</span>(<span class="str">"Loading..."</span>);
+        <span class="kw">if</span> (snap.<span class="method">hasError</span>())  <span class="kw">return</span> <span class="fn">Text</span>(<span class="str">"Error: "</span> + snap.error);
+        <span class="kw">return</span> <span class="fn">Text</span>(snap.data[<span class="str">"name"</span>].<span class="method">getString</span>());
+    }
+);
+
+<span class="comment">// Typed</span>
+<span class="fn">TypedJsonBuilder</span>&lt;<span class="type">User</span>&gt;(
+    <span class="str">"https://api.example.com/user/1"</span>,
+    [](<span class="kw">const</span> <span class="type">JsonValue</span>&amp; j) -&gt; <span class="type">User</span> {
+        <span class="kw">return</span> { j[<span class="str">"name"</span>].<span class="method">getString</span>(), j[<span class="str">"age"</span>].<span class="method">getInt</span>() };
+    },
+    [](<span class="kw">const</span> <span class="type">AsyncSnapshot</span>&lt;<span class="type">User</span>&gt;&amp; snap) -&gt; <span class="type">WidgetPtr</span> {
+        <span class="kw">if</span> (snap.<span class="method">isLoading</span>()) <span class="kw">return</span> <span class="fn">Text</span>(<span class="str">"Loading..."</span>);
+        <span class="kw">return</span> <span class="fn">Text</span>(snap.data.name);
+    }
+);</pre></div>
+          <div class="sub-head">AsyncSnapshot&lt;T&gt;</div>
+          <div class="tbl-wrap"><table><thead><tr><th>Field / Method</th><th>Description</th></tr></thead><tbody>
+            <tr><td>state</td><td>ConnectionState::None · Waiting · Done · Error</td></tr>
+            <tr><td>data</td><td>Result value — valid only when hasData() is true</td></tr>
+            <tr><td>error</td><td>Error message — valid only when hasError() is true</td></tr>
+            <tr><td>isNone()</td><td>True before the fetch starts</td></tr>
+            <tr><td>isLoading()</td><td>True while the request is in flight</td></tr>
+            <tr><td>hasData()</td><td>True when the request completed successfully</td></tr>
+            <tr><td>hasError()</td><td>True when the request failed</td></tr>
+          </tbody></table></div>
+          <div class="sub-head">Factory helpers</div>
+          <div class="tbl-wrap"><table><thead><tr><th>Factory</th><th>Response type</th><th>Description</th></tr></thead><tbody>
+            <tr><td>FetchBuilder(url, builder)</td><td>string</td><td>Raw HTTP response body</td></tr>
+            <tr><td>JsonBuilder(url, builder)</td><td>JsonValue</td><td>Parsed JSON value</td></tr>
+            <tr><td>TypedJsonBuilder&lt;T&gt;(url, mapper, builder)</td><td>T</td><td>Deserialized struct via a mapper function</td></tr>
+          </tbody></table></div>
+          <div class="sub-head">FutureBuilderWidget methods</div>
+          <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Description</th></tr></thead><tbody>
+            <tr><td>setBuilder(fn)</td><td>Set the builder callback</td></tr>
+            <tr><td>setFetcher(fn)</td><td>Set a custom async fetcher instead of HTTP</td></tr>
+            <tr><td>refresh()</td><td>Reset state and re-run the fetch</td></tr>
+          </tbody></table></div>
+        </div>
+
+        <hr class="section-divider" />
+
+        <!-- STREAMBUILDER -->
+        <div class="section" id="streambuilder">
+          <div class="section-head"><h2>StreamBuilder / JsonStreamBuilder / TypedStreamBuilder</h2><span class="badge badge-network">Network</span></div>
+          <p class="section-desc">WebSocket-powered async widget. Opens a persistent connection and calls <code>builder()</code> on every incoming frame.</p>
+          <div class="code-block"><pre>
+<span class="kw">#include</span> <span class="str">"flux/flux_stream_builder.hpp"</span>
+
+<span class="comment">// Raw text frames</span>
+<span class="fn">StreamBuilder</span>(
+    <span class="str">"wss://example.com/feed"</span>,
+    [](<span class="kw">const</span> <span class="type">StreamSnapshot</span>&lt;std::string&gt;&amp; snap) -&gt; <span class="type">WidgetPtr</span> {
+        <span class="kw">if</span> (snap.<span class="method">isConnecting</span>()) <span class="kw">return</span> <span class="fn">Text</span>(<span class="str">"Connecting..."</span>);
+        <span class="kw">if</span> (snap.<span class="method">hasError</span>())     <span class="kw">return</span> <span class="fn">Text</span>(<span class="str">"Error: "</span> + snap.error);
+        <span class="kw">if</span> (!snap.<span class="method">hasData</span>())    <span class="kw">return</span> <span class="fn">Text</span>(<span class="str">"Waiting..."</span>);
+        <span class="kw">return</span> <span class="fn">Text</span>(snap.data);
+    }
+);
+
+<span class="comment">// Typed with mapper</span>
+<span class="fn">TypedStreamBuilder</span>&lt;<span class="type">TickerData</span>&gt;(
+    <span class="str">"wss://example.com/ticker"</span>,
+    [](<span class="kw">const</span> <span class="type">JsonValue</span>&amp; j) -&gt; <span class="type">TickerData</span> {
+        <span class="kw">return</span> { j[<span class="str">"symbol"</span>].<span class="method">getString</span>(), j[<span class="str">"price"</span>].<span class="method">getFloat</span>() };
+    },
+    [](<span class="kw">const</span> <span class="type">StreamSnapshot</span>&lt;<span class="type">TickerData</span>&gt;&amp; snap) -&gt; <span class="type">WidgetPtr</span> {
+        <span class="kw">if</span> (!snap.<span class="method">hasData</span>()) <span class="kw">return</span> <span class="fn">Text</span>(<span class="str">"–"</span>);
+        <span class="kw">return</span> <span class="fn">Text</span>(snap.data.symbol + <span class="str">": "</span> + std::to_string(snap.data.price));
+    }
+);</pre></div>
+          <div class="sub-head">StreamSnapshot&lt;T&gt;</div>
+          <div class="tbl-wrap"><table><thead><tr><th>Field / Method</th><th>Description</th></tr></thead><tbody>
+            <tr><td>state</td><td>StreamState::None · Connecting · Active · Done · Error</td></tr>
+            <tr><td>data</td><td>Latest decoded value — valid only when hasData() is true</td></tr>
+            <tr><td>error</td><td>Error message — valid only when hasError() is true</td></tr>
+            <tr><td>isConnecting()</td><td>True during WebSocket handshake</td></tr>
+            <tr><td>isActive()</td><td>True while connection is open</td></tr>
+            <tr><td>hasData()</td><td>True once at least one frame has been decoded successfully</td></tr>
+            <tr><td>isDone()</td><td>True after server closed the connection cleanly</td></tr>
+            <tr><td>hasError()</td><td>True on connection failure or server error</td></tr>
+          </tbody></table></div>
+          <div class="sub-head">Factory helpers</div>
+          <div class="tbl-wrap"><table><thead><tr><th>Factory</th><th>Frame type</th><th>Description</th></tr></thead><tbody>
+            <tr><td>StreamBuilder(url, builder)</td><td>string</td><td>Raw text frames</td></tr>
+            <tr><td>JsonStreamBuilder(url, builder)</td><td>JsonValue</td><td>Auto-parsed JSON on every frame</td></tr>
+            <tr><td>TypedStreamBuilder&lt;T&gt;(url, mapper, builder)</td><td>T</td><td>Deserialized struct via a mapper function</td></tr>
+          </tbody></table></div>
+          <div class="sub-head">StreamBuilderWidget methods</div>
+          <div class="tbl-wrap"><table><thead><tr><th>Method</th><th>Description</th></tr></thead><tbody>
+            <tr><td>setBuilder(fn)</td><td>Set or replace the builder callback</td></tr>
+            <tr><td>setDecoder(fn)</td><td>Set a custom frame decoder (string, T&amp;) → bool</td></tr>
+            <tr><td>setUrl(url)</td><td>Set the WebSocket URL</td></tr>
+            <tr><td>sendMessage(msg)</td><td>Send a text frame to the server</td></tr>
+            <tr><td>reconnect()</td><td>Close and re-open the connection</td></tr>
+            <tr><td>snapshot()</td><td>Read the current StreamSnapshot&lt;T&gt;</td></tr>
+          </tbody></table></div>
+        </div>
+
+        <hr class="section-divider" />
+
+        <!-- CLI -->
+        <div class="section" id="cli">
+          <div class="section-head"><h2>Flux CLI</h2><span class="badge badge-cli">CLI</span></div>
+          <p class="section-desc">The <strong>Flux CLI</strong> (<code>flux</code>) scaffolds new projects and builds / runs them on each target platform with a single command.</p>
+
+          <div class="sub-head">Prerequisites</div>
+          <div class="tbl-wrap"><table><thead><tr><th>Platform</th><th>Requirements</th></tr></thead><tbody>
+            <tr><td>All</td><td>CMake 3.22+, Git, curl</td></tr>
+            <tr><td>Windows</td><td>Visual Studio 2019+ with Desktop development with C++ workload</td></tr>
+            <tr><td>Linux</td><td><code>sudo apt install build-essential cmake git curl</code></td></tr>
+          </tbody></table></div>
+
+          <div class="sub-head">Installation</div>
+          <div class="code-block"><pre>
+<span class="comment"># Linux / macOS</span>
+curl -LO https://github.com/HeyItsBablu/flux-cli/releases/latest/download/flux
+chmod +x flux
+sudo mv flux /usr/local/bin/</pre></div>
+          <p class="section-desc" style="margin-bottom: 12px;">On <strong>Windows</strong>: download <code>flux.exe</code> from the Releases page, place it in a folder (e.g. <code>C:\tools\flux\</code>), and add that folder to your system <code>PATH</code>.</p>
+
+          <div class="sub-head">Commands</div>
+          <div class="code-block"><pre>
+<span class="comment"># Scaffold a new project</span>
+flux create my_app
+cd my_app
+
+<span class="comment"># Build and run</span>
+flux run windows   <span class="comment"># or: flux run linux</span></pre></div>
+
+          <div class="sub-head">Generated project structure</div>
+          <div class="code-block"><pre>
+my_app/
+├── main.cpp          <span class="comment">← your entire app lives here</span>
+├── flux.json         <span class="comment">← app config (do not edit manually)</span>
+├── windows/          <span class="comment">← platform build files (do not edit)</span>
+└── linux/            <span class="comment">← platform build files (do not edit)</span></pre></div>
+
+          <div class="sub-head">flux run &lt;platform&gt;</div>
+          <div class="tbl-wrap"><table><thead><tr><th>Platform</th><th>What it does</th></tr></thead><tbody>
+            <tr><td>windows</td><td>Locates Visual Studio, runs CMake + MSVC build, launches build/Release/app.exe</td></tr>
+            <tr><td>linux</td><td>Runs CMake + GCC/Clang build, launches build/app</td></tr>
+            <tr><td>android</td><td>Coming soon</td></tr>
+          </tbody></table></div>
+
+          <div class="sub-head">App config — flux.json</div>
+          <div class="code-block"><pre>
+{
+    <span class="str">"name"</span>: <span class="str">"my_app"</span>,
+    <span class="str">"package"</span>: <span class="str">"com.example.my_app"</span>
+}</pre></div>
+
+          <div class="sub-head">Building the CLI from source</div>
+          <div class="code-block"><pre>
+git clone https://github.com/HeyItsBablu/flux-cli
+cd flux-cli
+cmake -B build -S .
+cmake --build build --config Release</pre></div>
+
+          <div class="sub-head">Manual CMake integration</div>
+          <div class="code-block"><pre>
+include(FetchContent)
+FetchContent_Declare(flux
+    GIT_REPOSITORY https://github.com/Rosanchaudhary/flux.git
+    GIT_TAG        v0.1.0
+)
+FetchContent_MakeAvailable(flux)
+target_link_libraries(my_app PRIVATE flux::flux)</pre></div>
         </div>
 
       </main>

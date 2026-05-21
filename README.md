@@ -230,6 +230,9 @@ Text("Hello, world!")
 // Reactive
 Text(myState);
 Text(count, [](int v){ return "Count: " + std::to_string(v); });
+
+// Full TextStyle
+StyledText("Hello", TextStyle{}.setFontSize(20).setBold(true));
 ```
 
 **Factory**
@@ -239,34 +242,63 @@ Text(count, [](int v){ return "Count: " + std::to_string(v); });
 | `Text(string)` | Static text |
 | `Text(State<T>)` | Reactive — auto-updates when state changes |
 | `Text(State<T>, transform)` | Reactive with a custom format function |
+| `StyledText(string, TextStyle)` | Static text with a full `TextStyle` applied upfront |
 
 **Methods**
 
 | Method | Type | Description |
 |---|---|---|
 | `setText(string)` | `string` | Set or change displayed text |
+| `setText(State<T>)` | State | Reactive text binding |
+| `setText(State<T>, transform)` | State + fn | Reactive text with transform |
 | `setFontSize(size)` | `int` | Font size in points |
 | `setFontWeight(weight)` | `FontWeight` | `Normal` or `Bold` |
 | `setFontFamily(family)` | `string` | Font family name |
-| `setTextColor(color)` | `COLORREF` | Text color |
-| `setHoverTextColor(color)` | `COLORREF` | Text color on hover |
+| `setTextScaleFactor(factor)` | `float` | Scales font size (1.0 = normal) |
+| `setTextColor(color)` | `Color` | Text color |
+| `setTextColor(State<T>, transform)` | State | Reactive text color |
+| `setHoverTextColor(color)` | `Color` | Text color on hover |
+| `setLetterSpacing(spacing)` | `float` | Extra space between characters |
+| `setWordSpacing(spacing)` | `float` | Extra space between words |
+| `setHeight(h)` | `float` | Line height multiplier (1.0 = natural; 1.5 = 50% extra leading) |
+| `setTextAlign(align)` | `TextAlign` | `Left · Center · Right · Justify · Start · End` |
+| `setTextAlignVertical(align)` | `TextAlignVertical` | `Top · Center · Bottom` |
+| `setOverflow(overflow)` | `TextOverflow` | `Clip · Ellipsis · Fade · Visible` |
+| `setSoftWrap(wrap)` | `bool` | Word-wrap at boundaries (default `true`) |
+| `setMaxLines(lines)` | `int` | Max visible lines; 0 = unlimited |
+| `setTextDirection(dir)` | `TextDirection` | `LTR` or `RTL` |
+| `setDecoration(decoration)` | `TextDecoration` | Underline, strikethrough, overline |
+| `setDecorationColor(color)` | `Color` | Decoration line color |
+| `setDecorationStyle(style)` | `TextDecorationStyle` | Solid, dashed, dotted, double, wavy |
+| `setDecorationThickness(t)` | `int` | Decoration line thickness |
+| `setShadow(shadow)` | `TextShadow` | Single text shadow |
+| `setShadows(shadows)` | `vector<TextShadow>` | Multiple text shadows |
+| `clearShadows()` | — | Remove all shadows |
+| `setTextBackground(color)` | `Color` | Background painted behind each text line |
+| `clearTextBackground()` | — | Remove per-line background |
+| `setTextStyle(style)` | `TextStyle` | Apply a full `TextStyle` at once |
 | `setPadding(p)` | `int` | Uniform padding |
-| `setBackgroundColor(color)` | `COLORREF` | Fill behind text |
+| `setPaddingH(p)` | `int` | Horizontal padding (left + right) |
+| `setPaddingV(p)` | `int` | Vertical padding (top + bottom) |
+| `setPaddingLRTB(l, r, t, b)` | `int ×4` | Per-side padding |
+| `setBackgroundColor(color)` | `Color` | Widget background fill |
 | `setBorderRadius(r)` | `int` | Corner rounding for background |
-| `setWidth(w)` | `int` | Fixed width |
-| `setHeight(h)` | `int` | Fixed height |
+| `setWidth(w)` | `int` | Fixed widget width |
+| `setWidgetHeight(h)` | `int` | Fixed widget height |
 | `setMinWidth(w)` | `int` | Minimum width constraint |
 
 ---
 
 ### Icon
 
-Renders a glyph from an icon font (default: Segoe MDL2 Assets).
+Renders a glyph from the `FluxIcons` icon set.
 
 ```cpp
-Icon(L'\uE700')                    // static glyph
-Icon(L'\uE700', "Segoe MDL2 Assets", 20)
-Icon(state, [](bool v) -> wchar_t { return v ? L'\uE73E' : L'\uE711'; })
+Icon(FluxIcons::Settings)
+Icon(FluxIcons::Menu, 20)
+Icon(state, [](bool v) -> FluxIcons::IconGlyph {
+    return v ? FluxIcons::Check : FluxIcons::Close;
+})
 ```
 
 **Factory**
@@ -274,8 +306,9 @@ Icon(state, [](bool v) -> wchar_t { return v ? L'\uE73E' : L'\uE711'; })
 | Signature | Description |
 |---|---|
 | `Icon(glyph)` | Static glyph at default size (16px) |
-| `Icon(glyph, fontFamily, size)` | Static glyph with explicit font and size |
-| `Icon(State<T>, transform)` | Reactive glyph — transform maps T to `wchar_t` |
+| `Icon(glyph, size)` | Static glyph at explicit size |
+| `Icon(State<T>, transform)` | Reactive glyph — transform maps `T` to `FluxIcons::IconGlyph` |
+| `Icon(State<T>, transform, size)` | Reactive glyph at explicit size |
 
 **Methods**
 
@@ -285,6 +318,8 @@ Icon(state, [](bool v) -> wchar_t { return v ? L'\uE73E' : L'\uE711'; })
 | `setColor(color)` | Icon color |
 | `setHoverColor(color)` | Icon color on hover |
 | `setIconFontFamily(family)` | Override icon font |
+| `setGlyph(glyph)` | Set or change glyph (`FluxIcons::IconGlyph`) |
+| `setGlyph(State<T>, transform)` | Reactive glyph binding |
 
 ---
 
@@ -311,15 +346,22 @@ ProgressBar(0.65)
 ProgressBar()->setValue(progressState);
 ```
 
+**Factory**
+
+| Signature | Description |
+|---|---|
+| `ProgressBar()` | Progress bar starting at 0.0 |
+| `ProgressBar(value)` | Progress bar with initial fill level (0.0–1.0) |
+
 **Methods**
 
 | Method | Type | Description |
 |---|---|---|
 | `setValue(v)` | `double` 0–1 | Static fill level |
 | `setValue(State<double>)` | State | Reactive fill level |
-| `setProgressColors(colors)` | `vector<COLORREF>` | Solid or gradient fill |
-| `setBackgroundColor(color)` | `COLORREF` | Track background |
-| `setBorderColor(color)` | `COLORREF` | Track border |
+| `setProgressColors(colors)` | `vector<Color>` | Solid or gradient fill |
+| `setBackgroundColor(color)` | `Color` | Track background |
+| `setBorderColor(color)` | `Color` | Track border |
 | `setBorderWidth(w)` | `int` | Border thickness |
 | `setBorderRadius(r)` | `int` | Corner rounding |
 | `setHeight(h)` | `int` | Bar height (default 12px) |
@@ -369,17 +411,45 @@ Graph(600, 300)
 
 ### Image
 
-Renders an image file via GDI+ with five fit modes.
+Renders an image file with five fit modes. Supports local assets, network URLs, and in-memory buffers. All loading is asynchronous.
 
 ```cpp
-Image("photo.jpg")
+// Local asset (async)
+AssetImage("photo.jpg")
     ->setWidth(300)
     ->setHeight(200)
     ->setFit(ImageFit::Cover);
 
+// Network image
+NetworkImage("https://example.com/photo.jpg")
+    ->setWidth(300)
+    ->setHeight(200);
+
+// In-memory buffer
+MemoryImage(myBytes)
+    ->setWidth(300);
+
+// Empty widget — load later
+Image()
+    ->setImagePath("photo.jpg")
+    ->setWidth(300);
+
 // Circle avatar
-Image("avatar.png")->setWidth(64)->setHeight(64)->setBorderRadius(32);
+AssetImage("avatar.png")->setWidth(64)->setHeight(64)->setBorderRadius(32);
 ```
+
+**Factory**
+
+| Signature | Description |
+|---|---|
+| `Image()` | Empty image widget — call `setImagePath()` or `setUrl()` to load |
+| `AssetImage(path)` | Load a local file asynchronously |
+| `NetworkImage(url)` | Load from an HTTP/HTTPS URL asynchronously |
+| `NetworkImage(url, postToUI)` | As above; `postToUI` controls UI-thread dispatch (default `true`) |
+| `MemoryImage(bytes)` | Decode from a `vector<uint8_t>` synchronously |
+| `ImageWidget::asset(path)` | Static named constructor — same as `AssetImage` |
+| `ImageWidget::network(url, postToUI)` | Static named constructor — same as `NetworkImage` |
+| `ImageWidget::memory(bytes)` | Static named constructor — same as `MemoryImage` |
 
 **ImageFit modes**
 
@@ -388,21 +458,29 @@ Image("avatar.png")->setWidth(64)->setHeight(64)->setBorderRadius(32);
 | `ImageFit::Fill` | Stretch to fill — may distort |
 | `ImageFit::Contain` | Fit inside bounds, letterbox (default) |
 | `ImageFit::Cover` | Fill bounds, crop edges |
-| `ImageFit::None` | Original size, centered |
+| `ImageFit::None` | Original size, positioned by `imageAlignment` |
 | `ImageFit::ScaleDown` | Like None but scales down if larger than container |
 
 **Methods**
 
 | Method | Type | Description |
 |---|---|---|
-| `setImagePath(path)` | `string` | Load or swap image at runtime |
+| `setImagePath(path)` | `string` | Load or swap a local file at runtime |
+| `setUrl(url, postToUI)` | `string, bool` | Load or swap a network URL at runtime |
+| `loadFromUrl(url, postToUI)` | `string, bool` | Explicit async network load |
 | `setFit(mode)` | `ImageFit` | Sizing/cropping mode |
+| `setRepeat(repeat)` | `ImageRepeat` | `NoRepeat · Repeat · RepeatX · RepeatY` |
+| `setFilterQuality(quality)` | `FilterQuality` | `None · Low · Medium · High` |
+| `setImageAlignment(alignment)` | `Alignment` | Positioning of image within the box (used by `None`/`ScaleDown`) |
+| `setTintColor(color)` | `Color` | Color overlay blended over the image |
 | `setWidth(w)` | `int` | Fixed width |
 | `setHeight(h)` | `int` | Fixed height |
 | `setBorderRadius(r)` | `int` | Corner rounding |
 | `setPadding(p)` | `int` | Inner padding |
-| `setPlaceholderColor(c)` | `COLORREF` | Fill before image loads |
-| `setErrorColor(c)` | `COLORREF` | Fill on load error |
+| `setPlaceholderColor(c)` | `Color` | Fill shown while loading |
+| `setErrorColor(c)` | `Color` | Fill shown on load error |
+| `setLoadingBuilder(fn)` | `() -> WidgetPtr` | Custom widget shown while loading |
+| `setErrorBuilder(fn)` | `() -> WidgetPtr` | Custom widget shown on error |
 
 ---
 
@@ -419,7 +497,7 @@ Button("Save", [&]{ save(); })
     ->setPadding(12);
 
 // Widget child
-Button(Row({Icon(L'\uE74E'), Text("Upload")}), [&]{ upload(); });
+Button(Row({Icon(FluxIcons::Upload), Text("Upload")}), [&]{ upload(); });
 ```
 
 **Factory**
@@ -435,9 +513,9 @@ Button(Row({Icon(L'\uE74E'), Text("Upload")}), [&]{ upload(); });
 |---|---|---|
 | `setOnClick(handler)` | `ClickHandler` | Click callback |
 | `setChild(widget)` | `WidgetPtr` | Replace content widget |
-| `setBackgroundColor(color)` | `COLORREF` | Button background |
-| `setHoverBackgroundColor(color)` | `COLORREF` | Background on hover |
-| `setTextColor(color)` | `COLORREF` | Label text color |
+| `setBackgroundColor(color)` | `Color` | Button background |
+| `setHoverBackgroundColor(color)` | `Color` | Background on hover |
+| `setTextColor(color)` | `Color` | Label text color |
 | `setBorderRadius(r)` | `int` | Corner rounding |
 | `setPadding(p)` | `int` | Uniform padding |
 | `setPaddingAll(l, t, r, b)` | `int ×4` | Per-side padding |
@@ -537,9 +615,9 @@ TextArea("Type your message...")
 | `setHeight(h)` | `int` | Fixed height |
 | `setFlex(n)` | `int` | Flex factor in parent |
 | `setScrollbarSize(s)` | `int` | Scrollbar thickness |
-| `setScrollbarColor(c)` | `COLORREF` | Idle thumb color |
-| `setScrollbarHoverColor(c)` | `COLORREF` | Hover thumb color |
-| `setScrollbarTrackColor(c)` | `COLORREF` | Track background |
+| `setScrollbarColor(c)` | `Color` | Idle thumb color |
+| `setScrollbarHoverColor(c)` | `Color` | Hover thumb color |
+| `setScrollbarTrackColor(c)` | `Color` | Track background |
 
 > **Keyboard:** `Ctrl+A` select all · `Ctrl+C/X/V` clipboard · `Shift+arrows` extend selection · `PgUp/PgDn` page scroll.
 
@@ -605,9 +683,9 @@ Slider(0.0, 100.0, 1.0)
 | `setMinValue(v)` | `double` | Range minimum |
 | `setMaxValue(v)` | `double` | Range maximum |
 | `setStep(v)` | `double` | Snap step size |
-| `setTrackColor(c)` | `COLORREF` | Unfilled track color |
-| `setTrackFillColor(c)` | `COLORREF` | Filled track color |
-| `setThumbColor(c)` | `COLORREF` | Thumb color |
+| `setTrackColor(c)` | `Color` | Unfilled track color |
+| `setTrackFillColor(c)` | `Color` | Filled track color |
+| `setThumbColor(c)` | `Color` | Thumb color |
 | `setOnValueChanged(fn)` | `void(double)` | Change callback |
 | `setWidth(w)` | `int` | Fixed width |
 
@@ -629,9 +707,9 @@ Toggle("Dark mode")
 | `setValue(State<bool>)` | State | Two-way binding |
 | `setToggled(bool)` | `bool` | Set initial state |
 | `setLabel(text)` | `string` | Text beside the toggle |
-| `setTrackOnColor(c)` | `COLORREF` | Track color when on |
-| `setTrackOffColor(c)` | `COLORREF` | Track color when off |
-| `setThumbColor(c)` | `COLORREF` | Thumb color |
+| `setTrackOnColor(c)` | `Color` | Track color when on |
+| `setTrackOffColor(c)` | `Color` | Track color when off |
+| `setThumbColor(c)` | `Color` | Thumb color |
 | `setOnToggleChanged(fn)` | `void(bool)` | Change callback |
 
 ---
@@ -745,7 +823,7 @@ d.isValid();                      // true if year/month/day are set
 | `setMinDate(date)` | `FluxDate` | Disable dates before this |
 | `setMaxDate(date)` | `FluxDate` | Disable dates after this |
 | `setOnDateChanged(fn)` | `void(FluxDate)` | Fires when a date is picked |
-| `setAccentColor(color)` | `COLORREF` | Header, selection, and indicator color |
+| `setAccentColor(color)` | `Color` | Header, selection, and indicator color |
 | `setWidth(w)` | `int` | Fixed width |
 
 > **Navigation:** Click month/year header to open year picker. `◀ ▶` arrows navigate months or year ranges.
@@ -754,7 +832,7 @@ d.isValid();                      // true if year/month/day are set
 
 ### FilePicker
 
-Button-like widget that opens the native OS file dialog on click. Cross-platform: Windows (IFileDialog), Linux (zenity/kdialog, async), Android (ACTION_OPEN_DOCUMENT).
+Button-like widget that opens the native OS file dialog on click.
 
 ```cpp
 // Single file open
@@ -774,8 +852,6 @@ FilePicker()
     ->setTitle("Export Image")
     ->setDefaultFilename("output.png")
     ->addFilter("PNG",  {"*.png"})
-    ->addFilter("JPEG", {"*.jpg","*.jpeg"})
-    ->setDefaultExtension("png")
     ->bindPath(exportPath)
     ->setOnChanged([&](const std::string& p){ surface->exportImage(p); });
 
@@ -821,7 +897,7 @@ FilePicker()
 | `setShowPath(v)` | `bool` | Show selected path beside button |
 | `setShowClearBtn(v)` | `bool` | Show × button to clear selection |
 | `setPathMaxWidth(w)` | `int` | Max width of the path display |
-| `setAccentColor(c)` | `COLORREF` | Accent color for focus ring |
+| `setAccentColor(c)` | `Color` | Accent color for focus ring |
 | `setWidth(w)` | `int` | Fixed width |
 | `setHeight(h)` | `int` | Fixed height |
 | `setFlex(n)` | `int` | Flex factor in parent |
@@ -966,7 +1042,7 @@ GridFromList(4, widgetVector);
 
 ### Accordion
 
-Vertical stack of collapsible panels. Each panel has a clickable header that reveals or hides its body content. Ideal for settings pages, property panels, and FAQs.
+Vertical stack of collapsible panels.
 
 ```cpp
 #include "flux/flux_accordion.hpp"
@@ -976,43 +1052,22 @@ p1.icon     = L"\uE771";
 p1.expanded = true;
 p1.body = Column({
     Row({ Text("Dark theme"), Toggle(&darkTheme) })->setSpacing(8),
-    Row({ Text("Font size"),  Text("14 px")      })->setSpacing(8),
 })->setSpacing(12)->setPadding(8);
-
-AccordionPanel p2("Notifications");
-p2.icon = L"\uEA8F";
-p2.body = Column({
-    Row({ Text("Enable alerts"), Toggle(&notifications) })->setSpacing(8),
-})->setSpacing(12)->setPadding(8);
-
-AccordionPanel p3("Advanced");
-p3.icon     = L"\uE8D7";
-p3.disabled = true;   // grayed out, not clickable
-p3.body     = Text("Requires admin access.");
 
 auto acc = Accordion({ p1, p2, p3 })
                ->setSingleExpand(true)
                ->setAccentColor(RGB(33, 150, 243))
-               ->setOnChanged([](int idx, bool open) {
-                   // fires whenever a panel expands or collapses
-               });
-
-// Programmatic control
-acc->expand(0);
-acc->collapse(1);
-acc->toggle(2);
-acc->expandAll();
-acc->collapseAll();
+               ->setOnChanged([](int idx, bool open) { });
 ```
 
 **AccordionPanel struct**
 
 ```cpp
 AccordionPanel p("Title", "Optional subtitle");
-p.icon     = L"\uE713";   // Segoe MDL2 glyph (optional)
-p.expanded = false;       // start collapsed
-p.disabled = false;       // grayed out, not clickable
-p.body     = myWidget;    // any widget subtree
+p.icon     = L"\uE713";
+p.expanded = false;
+p.disabled = false;
+p.body     = myWidget;
 ```
 
 **Methods**
@@ -1020,22 +1075,22 @@ p.body     = myWidget;    // any widget subtree
 | Method | Type | Description |
 |---|---|---|
 | `setSingleExpand(v)` | `bool` | At most one panel open at a time (default `false`) |
-| `setOnChanged(fn)` | `void(int, bool)` | Fires on every expand/collapse with panel index and new state |
+| `setOnChanged(fn)` | `void(int, bool)` | Fires on every expand/collapse |
 | `expand(idx)` | `int` | Expand panel by index |
 | `collapse(idx)` | `int` | Collapse panel by index |
 | `toggle(idx)` | `int` | Toggle panel by index |
-| `expandAll()` | — | Expand all panels (no-op in single-expand mode) |
+| `expandAll()` | — | Expand all panels |
 | `collapseAll()` | — | Collapse all panels |
-| `panelAt(idx)` | `AccordionPanel*` | Mutable access to a panel for runtime edits |
+| `panelAt(idx)` | `AccordionPanel*` | Mutable access to a panel |
 | `panelCount()` | `int` | Number of panels |
 | `setPanels(panels)` | `vector<AccordionPanel>` | Replace all panels at runtime |
 | `setHeaderHeight(h)` | `int` | Header row height (default 48px) |
 | `setBodyPadding(p)` | `int` | Padding inside body area (default 12px) |
 | `setShowBorder(v)` | `bool` | Outer rounded border (default `true`) |
 | `setShowSeparators(v)` | `bool` | Dividers between panels (default `true`) |
-| `setAccentColor(c)` | `COLORREF` | Left bar and active header tint |
+| `setAccentColor(c)` | `Color` | Left bar and active header tint |
 | `setTitleFontSize(s)` | `int` | Header title font size |
-| `setWidth(w)` | `int` | Fixed width (default fills parent) |
+| `setWidth(w)` | `int` | Fixed width |
 | `setFlex(n)` | `int` | Flex factor in parent |
 
 ---
@@ -1049,8 +1104,6 @@ TreeNode root("Project");
 auto &src = root.addChild(TreeNode("src"));
 src.expanded = true;
 src.addChild(TreeNode("main.cpp"));
-auto &comp = src.addChild(TreeNode("components"));
-comp.addChild(TreeNode("flux_widget.hpp"));
 
 auto tv = TreeView(root)
     ->setOnSelectionChanged([](const TreeNode *n) {
@@ -1067,15 +1120,15 @@ auto tv = TreeView({rootA, rootB, rootC});
 
 ```cpp
 TreeNode node("label", "optional-id");
-node.expanded  = true;      // start expanded
-node.disabled  = false;     // grayed out, not selectable
-node.icon      = L"\uE8B7"; // Segoe MDL2 glyph (optional)
-node.userData  = &myObj;    // attach any pointer
+node.expanded  = true;
+node.disabled  = false;
+node.icon      = L"\uE8B7";
+node.userData  = &myObj;
 
 node.addChild(TreeNode("child"));
 node.expandAll();
 node.collapseAll();
-node.isLeaf();   // true if no children
+node.isLeaf();
 ```
 
 **Methods**
@@ -1094,7 +1147,7 @@ node.isLeaf();   // true if no children
 | `setIndentWidth(w)` | `int` | Pixels per depth level (default 20) |
 | `setShowGuideLines(v)` | `bool` | Vertical indent guide lines |
 | `setFontSize(s)` | `int` | Label font size |
-| `setAccentColor(c)` | `COLORREF` | Selection highlight color |
+| `setAccentColor(c)` | `Color` | Selection highlight color |
 | `setFlex(n)` | `int` | Flex factor in parent |
 
 > **Keyboard:** `↑/↓` move selection · `←` collapse or jump to parent · `→` expand or move to first child · `Home/End` jump to first/last · `Enter/Space` toggle expand.
@@ -1103,7 +1156,7 @@ node.isLeaf();   // true if no children
 
 ### DataTable
 
-Virtualised sortable data grid with resizable columns, alternating rows, horizontal/vertical scrollbars, and optional reactive data binding.
+Virtualised sortable data grid with resizable columns, alternating rows, scrollbars, and optional reactive data binding.
 
 ```cpp
 std::vector<DataColumn> columns = {
@@ -1116,7 +1169,6 @@ std::vector<DataColumn> columns = {
 
 std::vector<DataRow> rows = {
     DataRow("1").set("name","Alice").set("role","Engineer").set("age","29").set("salary","120"),
-    DataRow("2").set("name","Bob")  .set("role","Designer").set("age","34").set("salary","95"),
 };
 
 auto table = DataTable(columns, rows)
@@ -1134,7 +1186,7 @@ auto table = DataTable(columns, rowsState);
 
 ```cpp
 DataColumn col("key", "Label", 120);
-col.setAlign(ColumnAlign::Right);   // Left · Center · Right
+col.setAlign(ColumnAlign::Right);
 col.setSortable(false);
 col.setResizable(false);
 col.setMinWidth(40);
@@ -1145,9 +1197,9 @@ col.setFormatter([](const std::string &v){ return "$" + v; });
 
 ```cpp
 DataRow row("optional-id");
-row.set("name", "Alice").set("age", "29");  // fluent chain
-row.get("name");                             // "Alice"
-row.disabled = true;                         // grayed out, not selectable
+row.set("name", "Alice").set("age", "29");
+row.get("name");
+row.disabled = true;
 ```
 
 **Methods**
@@ -1163,15 +1215,13 @@ row.disabled = true;                         // grayed out, not selectable
 | `setShowColumnDividers(v)` | `bool` | Vertical column divider lines |
 | `setRowHeight(h)` | `int` | Row height in pixels (default 30) |
 | `setHeaderHeight(h)` | `int` | Header row height (default 36) |
-| `setHeaderBackground(c)` | `COLORREF` | Header background color |
-| `setAccentColor(c)` | `COLORREF` | Selection highlight and sort arrow color |
+| `setHeaderBackground(c)` | `Color` | Header background color |
+| `setAccentColor(c)` | `Color` | Selection highlight and sort arrow color |
 | `setOnRowSelected(fn)` | `void(int, DataRow)` | Fires on single click |
 | `setOnRowDoubleClicked(fn)` | `void(int, DataRow)` | Fires on double-click |
 | `setOnSortChanged(fn)` | `void(string, bool)` | Fires when sort column changes |
 | `setFlex(n)` | `int` | Flex factor in parent |
 | `setWidth(w)` / `setHeight(h)` | `int` | Fixed dimensions |
-
-> **Sorting:** Click a column header to sort ascending; click again to reverse. Numeric strings sort numerically. **Column resize:** drag the 4px zone at each column edge. **Keyboard:** `↑/↓` navigate rows · `Home/End` jump · `PgUp/PgDn` page.
 
 ---
 
@@ -1179,7 +1229,7 @@ row.disabled = true;                         // grayed out, not selectable
 
 ### CanvasWidget
 
-OpenGL-powered drawing surface embedded in the widget tree. Manages its own GL context, pan/zoom viewport, and scrollbars.
+OpenGL-powered drawing surface embedded in the widget tree.
 
 ```cpp
 // Raster canvas — same view and canvas size
@@ -1187,9 +1237,6 @@ auto canvas = RasterCanvas(800, 600);
 
 // With pan/zoom viewport
 auto canvas = RasterCanvas(800, 600, 2048, 2048);
-
-// Custom undo budget
-auto canvas = RasterCanvas(800, 600, 64ULL * 1024 * 1024);
 
 canvas->onViewportChanged = [&](float zoom){ updateZoomLabel(zoom); };
 ```
@@ -1218,8 +1265,6 @@ canvas->onViewportChanged = [&](float zoom){ updateZoomLabel(zoom); };
 | `redraw()` | — | Schedule a repaint |
 | `onViewportChanged` | `function<void(float)>` | Fires when zoom or pan changes |
 | `onGLResize` | `function<void(int, int)>` | Fires when GL surface is resized |
-
-> **Navigation:** Middle-mouse or `Space + Left-drag` to pan. `Ctrl + Scroll` to zoom. `Ctrl++/-/0` for keyboard zoom.
 
 ---
 
@@ -1261,8 +1306,6 @@ surface->savePNG(L"output.png");
 | `savePNG(path)` | `wstring` | Export committed layer to PNG |
 | `colorHistory()` | `const vector<RGBA>&` | Recently used colors (up to 16) |
 
-> **Keyboard:** `Ctrl+Z` undo, `Ctrl+Shift+Z` / `Ctrl+Y` redo.
-
 ---
 
 ### Viewport
@@ -1296,15 +1339,13 @@ auto [cx, cy] = vp.screenToCanvas(screenX, screenY);
 
 ### Conditional
 
-Ternary-style conditional rendering. Rebuilds its child when the observed state's predicate changes.
+Ternary-style conditional rendering.
 
 ```cpp
-// Bool state
 Conditional(isLoggedIn)
     ->Then([]{ return Dashboard(); })
     ->Else([]{ return LoginPage(); });
 
-// Custom predicate on any State<T>
 Conditional(itemCount, [](int v){ return v > 0; })
     ->Then([]{ return ItemList(); })
     ->Else([]{ return EmptyState(); });
@@ -1325,7 +1366,6 @@ C++-style switch-case conditional rendering.
 Switch(tabIndex)
     ->Case(0, []{ return HomePage(); })
     ->Case(1, []{ return ProfilePage(); })
-    ->Case(2, []{ return SettingsPage(); })
     ->Default([]{ return ErrorPage(); });
 ```
 
@@ -1355,10 +1395,11 @@ Row({
 | `setSpacing(px)` | `int` | Gap between children |
 | `setCrossAxisAlignment(a)` | `CrossAxisAlignment` | Vertical alignment |
 | `setMainAxisAlignment(a)` | `MainAxisAlignment` | Horizontal distribution |
+| `setMainAxisSize(s)` | `MainAxisSize` | `Max` (fill) or `Min` (shrink-wrap) |
 | `setWidth(w)` | `int` | Fixed width |
 | `setHeight(h)` | `int` | Fixed height |
 | `setPadding(p)` | `int` | Uniform padding |
-| `setBackgroundColor(c)` | `COLORREF` | Row background |
+| `setBackgroundColor(c)` | `Color` | Row background |
 | `setFlex(n)` | `int` | Flex factor in parent |
 
 ---
@@ -1379,10 +1420,11 @@ Column({
 | `setSpacing(px)` | `int` | Gap between children |
 | `setCrossAxisAlignment(a)` | `CrossAxisAlignment` | Horizontal alignment |
 | `setMainAxisAlignment(a)` | `MainAxisAlignment` | Vertical distribution |
+| `setMainAxisSize(s)` | `MainAxisSize` | `Max` (fill) or `Min` (shrink-wrap) |
 | `setWidth(w)` | `int` | Fixed width |
 | `setHeight(h)` | `int` | Fixed height |
 | `setPadding(p)` | `int` | Uniform padding |
-| `setBackgroundColor(c)` | `COLORREF` | Column background |
+| `setBackgroundColor(c)` | `Color` | Column background |
 | `setBorderRadius(r)` | `int` | Corner rounding |
 | `setMinWidth(w)` | `int` | Minimum width |
 | `setFlex(n)` | `int` | Flex factor in parent |
@@ -1395,7 +1437,7 @@ Layers children on top of each other. Supports absolute positioning via margins.
 
 ```cpp
 Stack(
-    Image("bg.jpg")->setWidth(400)->setHeight(300),
+    AssetImage("bg.jpg")->setWidth(400)->setHeight(300),
     Positioned(Text("Overlay"), 10, 10)
 )->setExpand(true);
 ```
@@ -1405,13 +1447,8 @@ Stack(
 **Positioned helper**
 
 ```cpp
-// Absolute position by pixel offset
 Positioned(child, left, top, right, bottom)
-
-// Reactive — single state, separate x/y transforms
 Positioned(child, state, xTransform, yTransform)
-
-// Reactive — two independent states
 Positioned(child, xState, xTransform, yState, yTransform)
 ```
 
@@ -1452,11 +1489,12 @@ Container(child)->setVisible(visibleState, [](bool v){ return v; });
 
 | Method | Type | Description |
 |---|---|---|
-| `setBackgroundColor(color)` | `COLORREF` | Fill color |
+| `setBackgroundColor(color)` | `Color` | Fill color |
 | `setBackgroundColor(State, transform)` | State | Reactive background |
-| `setHoverBackgroundColor(color)` | `COLORREF` | Fill on hover |
-| `setBorderColor(color)` | `COLORREF` | Border stroke |
-| `setHoverBorderColor(color)` | `COLORREF` | Border on hover |
+| `setHoverBackgroundColor(color)` | `Color` | Fill on hover |
+| `setBorderColor(color)` | `Color` | Border stroke |
+| `setBorderColor(State, transform)` | State | Reactive border color |
+| `setHoverBorderColor(color)` | `Color` | Border on hover |
 | `setBorderWidth(w)` | `int` or State | Border thickness |
 | `setBorderRadius(r)` | `int` or State | Corner rounding |
 | `setPadding(p)` | `int` | Uniform inner padding |
@@ -1471,8 +1509,6 @@ Container(child)->setVisible(visibleState, [](bool v){ return v; });
 | `setMaxHeight(h)` | `int` | Maximum height |
 | `setFlex(n)` | `int` | Flex factor |
 | `setOnHover(fn)` | `void(bool)` | Hover enter/leave callback |
-| `setBackgroundAlpha(a)` | `BYTE` | Background opacity (0–255) |
-| `setBorderAlpha(a)` | `BYTE` | Border opacity (0–255) |
 | `setVisible(v)` | `bool` or State | Show/hide |
 
 ---
@@ -1494,7 +1530,7 @@ Causes its child to fill remaining space along the parent Row or Column's main a
 ```cpp
 Row({
     Text("Label"),
-    Expanded(TextInput()),   // takes all remaining width
+    Expanded(TextInput()),
     Button("Go")
 });
 
@@ -1506,6 +1542,14 @@ Row({
 ```
 
 **Factory:** `Expanded(child, flex = 1)`
+
+**Methods**
+
+| Method | Description |
+|---|---|
+| `setFlex(n)` | Override flex factor |
+| `setPadding(p)` | Uniform inner padding |
+| `setBackgroundColor(c)` | Background fill |
 
 ---
 
@@ -1533,19 +1577,15 @@ Padding(16, Text("Padded content"));
 
 ### SplitView
 
-Two-pane resizable container with a draggable divider. Supports horizontal (left/right) and vertical (top/bottom) splits.
+Two-pane resizable container with a draggable divider.
 
 ```cpp
-// Horizontal split — left pane gets 30%
 SplitView(leftWidget, rightWidget, 0.3f)
     ->setMinPaneWidth(120)
-    ->setDividerColor(RGB(210, 210, 210))
-    ->setDividerHoverColor(RGB(33, 150, 243));
+    ->setDividerColor(RGB(210, 210, 210));
 
-// Vertical split
 SplitViewVertical(topWidget, bottomWidget, 0.4f);
 
-// Reactive ratio
 State<float> ratio(0.5f, app);
 SplitView(left, right)->setRatio(ratio);
 ```
@@ -1558,17 +1598,15 @@ SplitView(left, right)->setRatio(ratio);
 | `setRatio(State<float>)` | State | Reactive ratio binding |
 | `setMinPaneWidth(px)` | `int` | Minimum size of either pane |
 | `setDividerWidth(px)` | `int` | Divider thickness (default 6px) |
-| `setDividerColor(c)` | `COLORREF` | Default divider color |
-| `setDividerHoverColor(c)` | `COLORREF` | Divider color on hover |
-| `setDividerDragColor(c)` | `COLORREF` | Divider color while dragging |
+| `setDividerColor(c)` | `Color` | Default divider color |
+| `setDividerHoverColor(c)` | `Color` | Divider color on hover |
+| `setDividerDragColor(c)` | `Color` | Divider color while dragging |
 | `setVertical(v)` | `bool` | Switch to top/bottom split |
 | `setResizable(v)` | `bool` | Allow drag resize (default true) |
 | `setOnRatioChanged(fn)` | `void(float)` | Fires after drag completes |
 | `getRatio()` | `float` | Current ratio |
 | `swapPanes()` | — | Swap pane 0 and pane 1 |
 | `collapsePane(idx)` | `int` | Collapse pane 0 or 1 fully |
-
-> **Cursor:** Changes to `IDC_SIZEWE` / `IDC_SIZENS` on divider hover automatically.
 
 ---
 
@@ -1626,21 +1664,18 @@ Card(
 
 ### TabView
 
-Tab bar with swappable content panes. Only the active pane is laid out and rendered — inactive panes have zero cost.
+Tab bar with swappable content panes.
 
 ```cpp
 TabView({
     Tab("General",  generalWidget),
     Tab("Display",  displayWidget),
     Tab("Network",  networkWidget),
-    Tab("Advanced", advancedWidget),
 })
 ->setOnTabChanged([](int i) { std::cout << "Tab: " << i << std::endl; });
 
-// Reactive active index
 State<int> activeTab(0, app);
 TabView({...})->setActiveIndex(activeTab);
-activeTab.set(2); // switches tab programmatically
 ```
 
 **Methods**
@@ -1653,49 +1688,35 @@ activeTab.set(2); // switches tab programmatically
 | `setTabBarHeight(h)` | `int` | Height of the tab bar (default 40px) |
 | `setTabMinWidth(w)` | `int` | Minimum tab button width (default 90px) |
 | `setTabFontSize(s)` | `int` | Tab label font size |
-| `setIndicatorColor(c)` | `COLORREF` | Active tab underline color |
-| `setActiveTabText(c)` | `COLORREF` | Active tab label color |
-| `setBarBackground(c)` | `COLORREF` | Tab bar background color |
+| `setIndicatorColor(c)` | `Color` | Active tab underline color |
+| `setActiveTabText(c)` | `Color` | Active tab label color |
+| `setBarBackground(c)` | `Color` | Tab bar background color |
 | `setContentPadding(p)` | `int` | Padding inside the content area |
 | `setHasContentBorder(v)` | `bool` | Border around content pane |
-| `setAccentColor(c)` | `COLORREF` | Sets indicator, active text, hover together |
+| `setAccentColor(c)` | `Color` | Sets indicator, active text, hover together |
 | `setTabContent(idx, widget)` | — | Replace a tab's content at runtime |
 | `setTabLabel(idx, label)` | — | Rename a tab at runtime |
 | `tabCount()` | `int` | Number of tabs |
 | `setFlex(n)` | `int` | Flex factor in parent |
 
-> **Keyboard:** `Ctrl+Tab` / `Ctrl+Shift+Tab` cycle through tabs. All other key events forward to the active pane.
-
 ---
 
 ### MenuBar
 
-Horizontal strip of labeled menus that open pulldown lists on left-click. Supports hot-tracking (mouse slides between open menus) and full keyboard navigation.
+Horizontal strip of labeled menus with pulldown lists.
 
 ```cpp
 auto menuBar = MenuBar({
     MenuBarItem("File", {
         ContextMenuItem::Action("New",  [&]{ newFile(); }),
-        ContextMenuItem::Action("Open", [&]{ openFile(); }),
         ContextMenuItem::Separator(),
         ContextMenuItem::Action("Exit", []{ PostQuitMessage(0); }),
     }),
     MenuBarItem("Edit", {
         ContextMenuItem::Action("Cut",   [&]{ cut(); }),
         ContextMenuItem::Action("Copy",  [&]{ copy(); }),
-        ContextMenuItem::Action("Paste", [&]{ paste(); }),
-    }),
-    MenuBarItem("Help", {
-        ContextMenuItem::Action("About", [&]{ showAbout(); }),
     }),
 });
-
-// Embed below AppBar
-Column({
-    AppBar("My App"),
-    menuBar,
-    Expanded(body),
-})->setSpacing(0);
 ```
 
 **Methods**
@@ -1703,11 +1724,9 @@ Column({
 | Method | Type | Description |
 |---|---|---|
 | `setBarHeight(h)` | `int` | Height of the menu bar strip (default 28px) |
-| `setBarBackground(c)` | `COLORREF` | Bar background color |
+| `setBarBackground(c)` | `Color` | Bar background color |
 | `setItemHeight(h)` | `int` | Dropdown item row height (default 28px) |
 | `setMinMenuWidth(w)` | `int` | Minimum dropdown width (default 160px) |
-
-> **Keyboard:** `←/→` switch between open menus · `↑/↓` navigate items · `Enter/Space` activate · `Escape` close.
 
 ---
 
@@ -1741,55 +1760,31 @@ Dropdown({"Nepal", "India", "USA", "UK"})
 | `setMaxVisibleItems(n)` | `int` | Max rows before scroll (default 6) |
 | `setWidth(w)` | `int` | Fixed width |
 
-> **Keyboard:** `↑/↓` navigate, `Enter/Space` open/confirm, `Escape` close, `Home/End` jump.
-
 ---
 
 ### Toast
 
-Zero-size anchor widget that queues and displays floating notification toasts. Place it anywhere in the tree and call `show()` to fire notifications.
+Floating notification toasts anchored to any point in the tree.
 
 ```cpp
 auto toast = Toast()
     ->setPosition(ToastPosition::BottomRight)
     ->setMaxVisible(3);
 
-toast->show("File saved",          ToastType::Success);
-toast->show("Low disk space",      ToastType::Warning);
-toast->show("Connection lost",     ToastType::Error);
-toast->show("Background sync done",ToastType::Info);
+toast->show("File saved",      ToastType::Success);
+toast->show("Connection lost", ToastType::Error);
 
-// Full entry with title, sticky duration, and action button
 toast->showEntry({
-    .message     = "Upload failed — check your connection",
+    .message     = "Upload failed",
     .title       = "Network Error",
     .type        = ToastType::Error,
-    .durationMs  = 0,           // sticky — stays until dismissed
+    .durationMs  = 0,
     .actionLabel = "Retry",
     .onAction    = [&]{ retry(); },
-    .onDismiss   = [&]{ logDismiss(); },
 });
 ```
 
-**ToastPosition**
-
-| Value | Description |
-|---|---|
-| `ToastPosition::BottomRight` | Default — stacks upward from bottom-right |
-| `ToastPosition::BottomCenter` | Stacks upward from bottom-center |
-| `ToastPosition::BottomLeft` | Stacks upward from bottom-left |
-| `ToastPosition::TopRight` | Stacks downward from top-right |
-| `ToastPosition::TopCenter` | Stacks downward from top-center |
-| `ToastPosition::TopLeft` | Stacks downward from top-left |
-
-**ToastType**
-
-| Value | Accent color |
-|---|---|
-| `ToastType::Info` | Blue |
-| `ToastType::Success` | Green |
-| `ToastType::Warning` | Orange |
-| `ToastType::Error` | Red |
+**ToastPosition / ToastType** — same as before (BottomRight/Left/Center, TopRight/Left/Center; Info/Success/Warning/Error).
 
 **Methods**
 
@@ -1798,18 +1793,16 @@ toast->showEntry({
 | `show(message, type, durationMs)` | — | Quick fire with defaults |
 | `showEntry(ToastEntry)` | — | Full control over all fields |
 | `dismissTop()` | — | Dismiss the topmost visible toast |
-| `dismissAll()` | — | Dismiss all toasts and clear the queue |
+| `dismissAll()` | — | Dismiss all toasts |
 | `setPosition(pos)` | `ToastPosition` | Screen corner/edge |
 | `setMaxVisible(n)` | `int` | Max simultaneous toasts (default 3) |
-| `setToastWidth(w)` | `int` | Toast panel width (default 320px) |
-| `setToastHeight(h)` | `int` | Base height per toast (default 64px) |
-| `setMarginEdge(m)` | `int` | Distance from window edge (default 20px) |
-| `setSpacing(s)` | `int` | Gap between stacked toasts (default 8px) |
+| `setToastWidth(w)` | `int` | Toast panel width |
+| `setToastHeight(h)` | `int` | Base height per toast |
+| `setMarginEdge(m)` | `int` | Distance from window edge |
+| `setSpacing(s)` | `int` | Gap between stacked toasts |
 | `setFontSize(s)` | `int` | Toast text size |
-| `setBgColor(c)` | `COLORREF` | Toast background |
-| `setColors(info, success, warning, error)` | `COLORREF ×4` | Override all accent colors |
-
-> Toasts auto-dismiss after `durationMs` (default 3000ms). Set `durationMs = 0` for sticky. Hovering a toast pauses its countdown. Clicking anywhere on a toast dismisses it immediately.
+| `setBgColor(c)` | `Color` | Toast background |
+| `setColors(info, success, warning, error)` | `Color ×4` | Override all accent colors |
 
 ---
 
@@ -1821,8 +1814,7 @@ Shows a floating text bubble on hover.
 Tooltip(
     Button("Delete", [&]{ deleteItem(); }),
     "Permanently removes the item"
-)->setPosition(TooltipPosition::Above)
- ->setTooltipMaxWidth(200);
+)->setPosition(TooltipPosition::Above);
 ```
 
 **Factory:** `Tooltip(anchor, text)`
@@ -1833,8 +1825,8 @@ Tooltip(
 |---|---|---|
 | `setTooltipText(text)` | `string` | Update tooltip content |
 | `setPosition(pos)` | `TooltipPosition` | `Above · Below · Auto` |
-| `setTooltipBackground(color)` | `COLORREF` | Bubble background |
-| `setTooltipTextColor(color)` | `COLORREF` | Bubble text color |
+| `setTooltipBackground(color)` | `Color` | Bubble background |
+| `setTooltipTextColor(color)` | `Color` | Bubble text color |
 | `setTooltipFontSize(size)` | `int` | Font size inside bubble |
 | `setTooltipMaxWidth(w)` | `int` | Max bubble width (default 240px) |
 
@@ -1858,8 +1850,6 @@ auto dlg = Dialog(
 
 dlg->open();
 ```
-
-**Factory:** `Dialog(content)`
 
 **Methods**
 
@@ -1886,7 +1876,7 @@ ContextMenu(
         {"Cut",   [&]{ cut(); }},
         {"Copy",  [&]{ copy(); }},
         ContextMenuItem::Separator(),
-        {"Paste", [&]{ paste(); }, false}  // disabled
+        {"Paste", [&]{ paste(); }, false}
     }
 );
 ```
@@ -1899,18 +1889,16 @@ ContextMenu(
 | `ContextMenuItem::Action(label, action, enabled)` | Explicit action factory |
 | `ContextMenuItem::Separator()` | Visual divider |
 
-**ContextMenuWidget methods**
+**Methods**
 
 | Method | Type | Description |
 |---|---|---|
 | `setMenuItems(items)` | `vector<ContextMenuItem>` | Replace all items |
 | `setItemHeight(h)` | `int` | Row height (default 28px) |
 | `setMinWidth(w)` | `int` | Minimum menu width (default 160px) |
-| `setMenuBackground(color)` | `COLORREF` | Menu background |
-| `setMenuBorder(color)` | `COLORREF` | Menu border color |
-| `setItemHoverColor(color)` | `COLORREF` | Row highlight on hover |
-
-> **Keyboard:** `↑/↓` navigate, `Enter/Space` activate, `Escape` close, `Home/End` jump.
+| `setMenuBackground(color)` | `Color` | Menu background |
+| `setMenuBorder(color)` | `Color` | Menu border color |
+| `setItemHoverColor(color)` | `Color` | Row highlight on hover |
 
 ---
 
@@ -1918,63 +1906,100 @@ ContextMenu(
 
 ### AudioPlayer
 
-Drop-in audio player widget with a browser-style control bar — play/pause, seek track, time display, and volume icon. All playback state is managed internally via `FluxAudio`.
+Drop-in audio player widget. Supports local files, HTTP/HTTPS URLs, and in-memory buffers.
 
 ```cpp
-#include "flux/flux_audioplayer.hpp"
+// Local file
+AudioPlayer("audio/sample.mp3")->setWidth(380);
 
-AudioPlayer("audio/sample.mp3")
-    ->setWidth(380);
+// Explicit path setter
+AudioPlayer()->setPath("audio/sample.mp3")->setWidth(380);
+
+// Stream from URL
+AudioPlayerFromUrl("https://example.com/music.mp3")->setWidth(400);
+
+// In-memory buffer
+AudioPlayerFromMemory(myBytes)->setWidth(400);
+
+// With artwork
+AudioPlayer("audio/track.mp3")
+    ->setArtwork(AssetImage("covers/album.jpg"), 60)
+    ->setWidth(420);
 ```
 
-**Factory:** `AudioPlayer(path = "")` · `AudioPlayer()->setPath("audio/sample.mp3")`
+**Factory**
+
+| Signature | Description |
+|---|---|
+| `AudioPlayer(path = "")` | Player for a local file path |
+| `AudioPlayerFromUrl(url)` | Player that streams from an HTTP/HTTPS URL |
+| `AudioPlayerFromMemory(bytes)` | Player backed by a `vector<uint8_t>` buffer |
+| `AudioPlayerFromMemory(ptr, len)` | Player backed by a raw pointer + length |
 
 **Methods**
 
 | Method | Type | Description |
 |---|---|---|
-| `setPath(p)` | `string` | Audio file to load |
+| `setPath(p)` | `string` | Load a local file path |
+| `setUrl(url)` | `string` | Stream from HTTP/HTTPS URL (downloaded on background thread) |
+| `setMemory(bytes)` | `vector<uint8_t>` | Play from in-memory buffer (copy overload) |
+| `setMemory(ptr, len)` | `uint8_t*, size_t` | Play from raw pointer + length |
+| `setArtwork(img, size)` | `ImageWidgetPtr, int` | Attach an artwork thumbnail; `size` defaults to player height |
+| `setArtworkSize(px)` | `int` | Resize the artwork column |
+| `setOnDotsClicked(fn)` | `void()` | Callback for the three-dot menu button |
 | `setWidth(w)` | `int` | Fixed width |
-
-> Controls: click play/pause button or click the seek track to jump. Dragging the thumb scrubs through the file. Playback resumes from the beginning after the track finishes.
 
 ---
 
 ### VideoPlayer
 
-Self-contained video player widget. Blits decoded frames each render tick and overlays a translucent browser-style control bar on hover. Manages all `FluxVideo` state internally.
+Self-contained video player widget. Blits decoded frames each render tick and overlays a control bar on hover. Supports local files, HTTP/HTTPS URLs, and in-memory buffers.
 
 **Platform support:** Android (NanoVG/OES), Windows (GDI StretchDIBits), Linux (Cairo/SDL2).
 
 ```cpp
-#include "flux/flux_videoplayer.hpp"
-
+// Local file
 VideoPlayer("video/sample.mp4")
     ->setWidth(480)
-    ->setHeight(270)   // 16:9 recommended
+    ->setHeight(270)
     ->setAutoPlay(true);
+
+// Stream from URL
+VideoPlayerFromUrl("https://example.com/video.mp4")
+    ->setWidth(480)->setHeight(270);
+
+// In-memory buffer
+VideoPlayerFromMemory(bytes)->setWidth(480)->setHeight(270);
 ```
 
-**Factory:** `VideoPlayer(path = "")`
+**Factory**
+
+| Signature | Description |
+|---|---|
+| `VideoPlayer(path = "")` | Player for a local file path |
+| `VideoPlayerFromUrl(url)` | Player that streams from an HTTP/HTTPS URL |
+| `VideoPlayerFromMemory(bytes)` | Player backed by a `vector<uint8_t>` buffer |
+| `VideoPlayerFromMemory(ptr, len)` | Player backed by a raw pointer + length |
 
 **Methods**
 
 | Method | Type | Description |
 |---|---|---|
-| `setPath(p)` | `string` | Video file to load |
+| `setPath(p)` | `string` | Load a local video file |
+| `setUrl(url)` | `string` | Stream from HTTP/HTTPS URL |
+| `setMemory(bytes)` | `vector<uint8_t>` | Play from in-memory buffer (copy overload) |
+| `setMemory(ptr, len)` | `uint8_t*, size_t` | Play from raw pointer + length |
 | `setWidth(w)` | `int` | Fixed width |
 | `setHeight(h)` | `int` | Fixed height |
 | `setAutoPlay(b)` | `bool` | Start playing immediately on open |
 
-> **Controls:** Click anywhere on the video area to toggle play/pause and show the control bar. The bar auto-hides after 3 seconds of inactivity. Drag the seek thumb to scrub. The bar reappears on mouse move.
+> **Controls:** Click anywhere on the video area to toggle play/pause and show the control bar. The bar auto-hides after 3 seconds of inactivity. Drag the seek thumb to scrub.
 
 ---
 
 ### CameraView
 
-Fixed-size camera viewfinder with shutter, flash toggle, and camera flip controls. Captured photos fire a callback and display as a thumbnail.
-
-**Platform support:** Android (NanoVG/GLES2 OES), Windows (GDI StretchDIBits + WIC), Linux (Cairo + libjpeg + V4L2).
+Fixed-size camera viewfinder with shutter, flash toggle, and camera flip controls.
 
 ```cpp
 #include "flux/flux_camera_widget.hpp"
@@ -1987,8 +2012,6 @@ CameraView()
     });
 ```
 
-**Factory:** `CameraView()`
-
 **Methods**
 
 | Method | Type | Description |
@@ -1998,20 +2021,11 @@ CameraView()
 | `setOnPhoto(fn)` | `void(string)` | Fires with the saved file path after each capture |
 | `setStartFront(f)` | `bool` | Start with the front-facing camera (Android only) |
 
-> **Controls:** Tap/click the center shutter button to capture. Left button toggles flash. Right button flips between cameras. The last captured photo appears as a thumbnail in the bottom-left corner of the viewfinder.
-
-> **Android permission:** The widget polls for `CAMERA` permission every 500ms and opens the camera automatically once granted — no manual permission handling needed.
-
-> **Link (Windows):** `gdi32 msimg32 windowscodecs mf mfplat mfreadwrite mfuuid ole32 oleaut32`  
-> **Link (Linux):** `libjpeg libv4l2 SDL2 cairo pangocairo`
-
 ---
 
 ### MicRecorder
 
-Microphone recorder widget with a scrolling live waveform, record/stop button, elapsed timecode, and WAV file output via `FluxMic`.
-
-**Platform support:** Android, Windows, Linux desktop.
+Microphone recorder widget with a scrolling live waveform and WAV file output.
 
 ```cpp
 #include "flux/mic_recorder_widget.hpp"
@@ -2024,8 +2038,6 @@ MicRecorder()
     });
 ```
 
-**Factory:** `MicRecorder()`
-
 **Methods**
 
 | Method | Type | Description |
@@ -2034,15 +2046,13 @@ MicRecorder()
 | `setHeight(h)` | `int` | Fixed height (default 120) |
 | `setOnSaved(fn)` | `void(string)` | Fires with the WAV file path on stop |
 
-> **Controls:** Click/tap the red circle to start recording. Click/tap the orange square to stop and save. The waveform scrolls in real time while recording. A green progress bar at the top of the control bar shows consumption of the 5-minute recording cap.
-
 ---
 
 ## Network
 
 ### FutureBuilder / FetchBuilder / JsonBuilder
 
-Flutter-inspired async widget that manages loading, error, and data states for HTTP requests. The builder callback is called each time the connection state changes.
+Flutter-inspired async widget that manages loading, error, and data states for HTTP requests.
 
 ```cpp
 #include "flux/flux_future_builder.hpp"
@@ -2067,7 +2077,7 @@ JsonBuilder(
     }
 );
 
-// Typed — deserialize into your own struct
+// Typed
 TypedJsonBuilder<User>(
     "https://api.example.com/user/1",
     [](const JsonValue& j) -> User {
@@ -2111,6 +2121,92 @@ TypedJsonBuilder<User>(
 
 ---
 
+### StreamBuilder / JsonStreamBuilder / TypedStreamBuilder
+
+WebSocket-powered async widget. Opens a persistent connection and calls `builder()` on every incoming frame so the UI always reflects the latest server push.
+
+```cpp
+#include "flux/flux_stream_builder.hpp"
+
+// Raw text frames
+StreamBuilder(
+    "wss://example.com/feed",
+    [](const StreamSnapshot<std::string>& snap) -> WidgetPtr {
+        if (snap.isConnecting()) return Text("Connecting...");
+        if (snap.hasError())     return Text("Error: " + snap.error);
+        if (!snap.hasData())     return Text("Waiting for data...");
+        return Text(snap.data);
+    }
+);
+
+// Auto-parsed JSON
+JsonStreamBuilder(
+    "wss://example.com/prices",
+    [](const StreamSnapshot<JsonValue>& snap) -> WidgetPtr {
+        if (snap.isConnecting()) return Text("...");
+        if (snap.hasError())     return Text("Error: " + snap.error);
+        if (!snap.hasData())     return Text("–");
+        return Text(snap.data["price"].getString());
+    }
+);
+
+// Typed — user-supplied mapper
+TypedStreamBuilder<TickerData>(
+    "wss://example.com/ticker",
+    [](const JsonValue& j) -> TickerData {
+        return { j["symbol"].getString(), j["price"].getFloat() };
+    },
+    [](const StreamSnapshot<TickerData>& snap) -> WidgetPtr {
+        if (!snap.hasData()) return Text("–");
+        return Text(snap.data.symbol + ": " + std::to_string(snap.data.price));
+    }
+);
+```
+
+**StreamSnapshot\<T\>**
+
+| Field / Method | Description |
+|---|---|
+| `state` | `StreamState::None · Connecting · Active · Done · Error` |
+| `data` | Latest decoded value — valid only when `hasData()` is true |
+| `error` | Error message — valid only when `hasError()` is true |
+| `isConnecting()` | True during WebSocket handshake |
+| `isActive()` | True while connection is open |
+| `hasData()` | True once at least one frame has been decoded successfully |
+| `isDone()` | True after server closed the connection cleanly |
+| `hasError()` | True on connection failure or server error |
+
+**StreamState enum**
+
+| Value | Description |
+|---|---|
+| `StreamState::None` | Not yet started |
+| `StreamState::Connecting` | Socket handshake in progress |
+| `StreamState::Active` | Connection open, data may have arrived |
+| `StreamState::Done` | Server closed cleanly |
+| `StreamState::Error` | Connection failed or server error |
+
+**Factory helpers**
+
+| Factory | Frame type | Description |
+|---|---|---|
+| `StreamBuilder(url, builder)` | `string` | Raw text frames |
+| `JsonStreamBuilder(url, builder)` | `JsonValue` | Auto-parsed JSON on every frame |
+| `TypedStreamBuilder<T>(url, mapper, builder)` | `T` | Deserialized struct via a mapper function |
+
+**StreamBuilderWidget methods**
+
+| Method | Description |
+|---|---|
+| `setBuilder(fn)` | Set or replace the builder callback |
+| `setDecoder(fn)` | Set a custom frame decoder `(string, T&) -> bool` |
+| `setUrl(url)` | Set the WebSocket URL |
+| `sendMessage(msg)` | Send a text frame to the server |
+| `reconnect()` | Close and re-open the connection |
+| `snapshot()` | Read the current `StreamSnapshot<T>` |
+
+---
+
 ## CLI
 
 The **Flux CLI** (`flux`) scaffolds new projects and builds / runs them on each target platform with a single command. Source and releases live at [github.com/HeyItsBablu/flux-cli](https://github.com/HeyItsBablu/flux-cli).
@@ -2136,7 +2232,7 @@ sudo mv flux /usr/local/bin/
 
 1. Download `flux.exe` from [Releases](https://github.com/HeyItsBablu/flux-cli/releases/latest)
 2. Move it to a folder, e.g. `C:\tools\flux\flux.exe`
-3. Add that folder to your system `PATH` (Start → Environment Variables → System variables → Path → Edit → New)
+3. Add that folder to your system `PATH`
 4. Open a new terminal and run `flux` to verify
 
 ### Commands
@@ -2162,7 +2258,7 @@ my_app/
 
 #### `flux run <platform>`
 
-Builds and launches the app for the given platform. Must be run from the app root (where `flux.json` lives).
+Builds and launches the app for the given platform.
 
 ```bash
 flux run windows
@@ -2176,8 +2272,6 @@ flux run linux
 | `android` | *(coming soon)* |
 
 ### App config — flux.json
-
-Generated automatically by `flux create`. Do not edit manually.
 
 ```json
 {
@@ -2199,6 +2293,3 @@ cd flux-cli
 cmake -B build -S .
 cmake --build build --config Release
 ```
-
-Output: `build/Release/flux.exe` (Windows) or `build/flux` (Linux).
-
