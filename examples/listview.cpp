@@ -6,7 +6,7 @@ public:
   WidgetPtr build() override {
     return Scaffold(
         AppBar("List view Demo"),
-        ListView(
+        Expanded(ListView(
             {Row({
                  Text("Item 1"),
                  Text("Item 2"),
@@ -67,7 +67,7 @@ public:
              Button("Click",
                     []() { std::cout << "Button clicked" << std::endl; })})
             ->setSpacing(8)
-            ->setPadding(12),
+            ->setPadding(12)),
         nullptr, nullptr
 
     );

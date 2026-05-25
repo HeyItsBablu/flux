@@ -895,10 +895,10 @@ public:
       if (autoHeight)
         height =
             self.clampHeight(children[0]->height + paddingTop + paddingBottom);
-    } else {
-      width = autoWidth ? self.clampWidth(0) : self.clampWidth(width);
-      height = autoHeight ? self.clampHeight(0) : self.clampHeight(height);
-    }
+} else {
+    width  = autoWidth  ? self.clampWidth(0)  : width;   // explicit size wins
+    height = autoHeight ? self.clampHeight(0) : height;  // explicit size wins
+}
 
     // ── Overflow detection ────────────────────────────────────────────────
     overflow.reset();
@@ -1296,7 +1296,7 @@ inline StackWidgetPtr Stack(std::initializer_list<WidgetPtr> children) {
   auto w = std::make_shared<StackWidget>();
   for (auto &child : children)
     w->addChild(child);
-  return w;
+  return w; 
 }
 template <typename... Widgets> StackWidgetPtr Stack(Widgets... widgets) {
   auto w = std::make_shared<StackWidget>();

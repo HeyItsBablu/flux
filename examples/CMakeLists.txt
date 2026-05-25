@@ -37,4 +37,4 @@ function(add_flux_example NAME)
 
 endfunction()
 
-add_flux_example(menubarexample)
+add_flux_example(treeview)

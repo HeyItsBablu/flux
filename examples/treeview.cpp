@@ -1,11 +1,11 @@
 #include "flux/flux.hpp"
 
 
-class MyApp : public Component {
-  State<std::string> selectedPath;
+class MyApp : public Widget {
+  State<std::string> selectedPath{"Nothing selected"};
 
 public:
-  MyApp() : selectedPath("Nothing selected", context) {}
+
 
   WidgetPtr build() override {
 
@@ -85,7 +85,7 @@ public:
             )
 
         })
-        ->setSpacing(0)
+        ->setSpacing(0),nullptr,nullptr
     );
   }
 };
@@ -93,8 +93,8 @@ public:
 WidgetPtr createApp(FluxUI* app) {
     return FluxApp(
         "FluxUI - Paint",
-        BuildComponent<MyApp>(),
-        AppTheme::dark(),
+        std::make_shared<MyApp>(),
+        AppTheme::light(),
         false,   // debugShowWidgetBounds
         900,     // width
         700,     // height

@@ -77,29 +77,29 @@ public:
       _dividerH = dividerWidth;
     }
 
-    // Layout pane 0 (left or top)
-    if (children.size() >= 1) {
-      auto &p0 = children[0];
-      if (!vertical) {
-        int p0W = _pane0Size();
+// Layout pane 0 (left or top)
+if (children.size() >= 1) {
+    auto &p0 = children[0];
+    if (!vertical) {
+        int p0W = std::max(0, _pane0Size());
         p0->computeLayout(ctx, BoxConstraints::tight(p0W, height), fontCache);
-      } else {
-        int p0H = _pane0Size();
+    } else {
+        int p0H = std::max(0, _pane0Size());
         p0->computeLayout(ctx, BoxConstraints::tight(width, p0H), fontCache);
-      }
     }
+}
 
-    // Layout pane 1 (right or bottom)
-    if (children.size() >= 2) {
-      auto &p1 = children[1];
-      if (!vertical) {
-        int p1W = _pane1Size();
+// Layout pane 1 (right or bottom)
+if (children.size() >= 2) {
+    auto &p1 = children[1];
+    if (!vertical) {
+        int p1W = std::max(0, _pane1Size());
         p1->computeLayout(ctx, BoxConstraints::tight(p1W, height), fontCache);
-      } else {
-        int p1H = _pane1Size();
+    } else {
+        int p1H = std::max(0, _pane1Size());
         p1->computeLayout(ctx, BoxConstraints::tight(width, p1H), fontCache);
-      }
     }
+}
 
     applyConstraints();
     needsLayout = false;

@@ -13,7 +13,7 @@ public:
 
         return Scaffold(
             AppBar("Toast Test"),
-            Center(
+            Expanded(
                 Container(
                     Column({
 

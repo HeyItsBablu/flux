@@ -1,11 +1,11 @@
 #include "flux/flux.hpp"
 
 
-class MyApp : public Component {
-  State<int> activeTab;
+class MyApp : public Widget {
+  State<int> activeTab{0};
 
 public:
-  MyApp() : activeTab(0, context) {}
+
 
   WidgetPtr build() override {
     return Scaffold(
@@ -100,7 +100,7 @@ public:
             )
 
         })
-        ->setSpacing(0)
+        ->setSpacing(0),nullptr,nullptr
     );
   }
 };
@@ -108,7 +108,7 @@ public:
 WidgetPtr createApp(FluxUI* app) {
     return FluxApp(
         "FluxUI - Paint",
-        BuildComponent<MyApp>(),
+        std::make_shared<MyApp>(),
         AppTheme::dark(),
         false,   // debugShowWidgetBounds
         900,     // width

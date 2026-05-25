@@ -1,19 +1,17 @@
 #include "flux/flux.hpp"
 
 
-class MyApp : public Component {
-  State<FluxDate> checkin;
-  State<FluxDate> checkout;
+class MyApp : public Widget {
+  State<FluxDate> checkin{FluxDate{}};
+  State<FluxDate> checkout{FluxDate{}};
 
 public:
-  MyApp()
-      : checkin(FluxDate{}, context),
-        checkout(FluxDate{}, context) {}
+
 
   WidgetPtr build() override {
     return Scaffold(
         AppBar("DatePicker Demo"),
-        Center(
+        Expanded(Center(
             Card(
                 Column({
 
@@ -70,7 +68,7 @@ public:
                 ->setSpacing(0)
             )
             ->setWidth(340)
-        )
+        )),nullptr,nullptr
     );
   }
 };
@@ -80,8 +78,8 @@ public:
 WidgetPtr createApp(FluxUI* app) {
     return FluxApp(
         "FluxUI - Paint",
-        BuildComponent<MyApp>(),
-        AppTheme::dark(),
+        std::make_shared<MyApp>(),
+        AppTheme::light(),
         false,   // debugShowWidgetBounds
         900,     // width
         700,     // height

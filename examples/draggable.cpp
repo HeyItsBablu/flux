@@ -1,47 +1,48 @@
 #include "flux/flux.hpp"
 
-class DragDemo : public Component {
+class DragDemo : public Widget
+{
 
-  State<int> posX;
-  State<int> posY;
+    State<int> posX{50};
+    State<int> posY{50};
 
 public:
-  DragDemo() : posX(50, context), posY(50, context) {}
-
-  WidgetPtr build() override {
-    return Scaffold(
-        AppBar("Drag Demo"),
-        Stack(
-            Positioned(
-                GestureDetector(
-                    Container()
-                        ->setWidth(100)
-                        ->setHeight(100)
-                        ->setBackgroundColor(Color::fromRGB(70, 130, 180))
-                        ->setBorderRadius(12),
-                    [this](int dx, int dy) {
-                        posX.set(posX.get() + dx);
-                        posY.set(posY.get() + dy);
-                    }
-                ),
-                posX, [](int x) { return x; },
-                posY, [](int y) { return y; }
-            )
-        )->setExpand(true)
-    );
-  }
+    WidgetPtr build() override
+    {
+        return Scaffold(
+            AppBar("Drag Demo"),
+            Expanded(Stack(
+                         Positioned(
+                             GestureDetector(
+                                 Container()
+                                     ->setWidth(100)
+                                     ->setHeight(100)
+                                     ->setBackgroundColor(Color::fromRGB(70, 130, 180))
+                                     ->setBorderRadius(12),
+                                 [this](int dx, int dy)
+                                 {
+                                     posX.set(posX.get() + dx);
+                                     posY.set(posY.get() + dy);
+                                 }),
+                             posX, [](int x)
+                             { return x; },
+                             posY, [](int y)
+                             { return y; }))
+                         ->setExpand(true)),
+            nullptr, nullptr);
+    }
 };
 
-
-WidgetPtr createApp(FluxUI* app) {
+WidgetPtr createApp(FluxUI *app)
+{
     return FluxApp(
         "FluxUI - Draggable",
-        BuildComponent<DragDemo>(),
-        AppTheme::dark(),
-        false,   // debugShowWidgetBounds
-        900,     // width
-        700,     // height
-        false,   // maximize
-        true     // fullscreen
+        std::make_shared<DragDemo>(),
+        AppTheme::light(),
+        false, // debugShowWidgetBounds
+        900,   // width
+        700,   // height
+        false, // maximize
+        true   // fullscreen
     );
 }
