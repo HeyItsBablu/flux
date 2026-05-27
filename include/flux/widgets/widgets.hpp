@@ -34,4 +34,5 @@
 #include "flux_graph.hpp"
 #include "flux_padding.hpp"
 #include "flux_stream_builder.hpp"
+#include "flux_circular_progress.hpp"
 #endif // WIDGETS_HPP

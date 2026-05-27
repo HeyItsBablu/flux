@@ -1023,4 +1023,28 @@ void Painter::drawRichTextA(const std::string &text,
   drawRichText(wtext, params, fontCache);
 }
 
+void Painter::drawArc(float cx, float cy, float radius,
+                      int strokeWidth,
+                      float startAngle, float sweepAngle,
+                      Color color, bool roundedCaps)
+{
+    Gdiplus::Graphics g(ctx.hdc);
+    g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+
+    Gdiplus::Pen pen(
+        Gdiplus::Color(color.a, color.r, color.g, color.b),
+        static_cast<Gdiplus::REAL>(strokeWidth));
+    pen.SetLineCap(
+        roundedCaps ? Gdiplus::LineCapRound : Gdiplus::LineCapFlat,
+        roundedCaps ? Gdiplus::LineCapRound : Gdiplus::LineCapFlat,
+        Gdiplus::DashCapRound);
+
+    constexpr float kRad2Deg = 180.0f / 3.14159265f;
+    float d = radius * 2.0f;
+    g.DrawArc(&pen,
+              cx - radius, cy - radius, d, d,
+              startAngle * kRad2Deg,
+              sweepAngle * kRad2Deg);
+}
+
 #endif // _WIN32

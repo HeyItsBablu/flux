@@ -1109,4 +1109,31 @@ void Painter::drawRichTextA(const std::string &text,
     drawRichText(wide, params, fontCache);
 }
 
+void Painter::drawArc(float cx, float cy, float radius,
+                      int strokeWidth,
+                      float startAngle, float sweepAngle,
+                      Color color, bool roundedCaps)
+{
+    cairo_t* cr = ctx.cr;
+    CairoSave save(cr);
+
+    cairo_set_antialias(cr, CAIRO_ANTIALIAS_BEST);
+    cairo_set_line_width(cr, static_cast<double>(strokeWidth));
+    cairo_set_line_cap(cr, roundedCaps ? CAIRO_LINE_CAP_ROUND
+                                       : CAIRO_LINE_CAP_BUTT);
+    setSourceColor(cr, color);
+
+    // cairo_arc always draws clockwise; sweepAngle is always positive here
+    // because the widget clamps value to [0,1] and the full-circle track
+    // uses kTwoPi directly.
+    cairo_arc(cr,
+              static_cast<double>(cx),
+              static_cast<double>(cy),
+              static_cast<double>(radius),
+              static_cast<double>(startAngle),
+              static_cast<double>(startAngle + sweepAngle));
+
+    cairo_stroke(cr);
+}
+
 #endif // __linux__

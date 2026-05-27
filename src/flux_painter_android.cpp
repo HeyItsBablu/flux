@@ -603,4 +603,25 @@ void Painter::drawRichTextA(const std::string& text,
     drawRichText(wide, params, fontCache);
 }
 
+
+void Painter::drawArc(float cx, float cy, float radius,
+                      int strokeWidth,
+                      float startAngle, float sweepAngle,
+                      Color color, bool roundedCaps)
+{
+    if (!s_vg) return;
+
+    // NanoVG has no native arc-stroke primitive, so we build the path
+    // manually and stroke it.
+    nvgBeginPath(s_vg);
+    nvgArc(s_vg, cx, cy, radius,
+           startAngle, startAngle + sweepAngle,
+           NVG_CW);
+
+    nvgStrokeColor(s_vg, toNVG(color));
+    nvgStrokeWidth(s_vg, static_cast<float>(strokeWidth));
+    nvgLineCap(s_vg, roundedCaps ? NVG_ROUND : NVG_BUTT);
+    nvgStroke(s_vg);
+}
+
 #endif // __ANDROID__

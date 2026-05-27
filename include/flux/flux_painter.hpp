@@ -146,6 +146,13 @@ struct Painter {
 
     // ── Wavy line helper (TextDecorationStyle::Wavy approximation) ───────────
     void drawWavyLine(int x, int y, int len, Color color, int amplitude = 2);
+
+    // ── Arc stroke (used by CircularProgressIndicatorWidget) ──────────────────
+// startAngle and sweepAngle are in radians. 0 = 3 o'clock, clockwise.
+void drawArc(float cx, float cy, float radius,
+             int strokeWidth,
+             float startAngle, float sweepAngle,
+             Color color, bool roundedCaps);
 };
 
 #endif // FLUX_PAINTER_HPP

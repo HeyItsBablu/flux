@@ -1,16 +1,20 @@
 #include "flux/flux.hpp"
 
-class MyApp : public Widget {
+class MyApp : public Widget
+{
 
   State<int> counter{0};
 
 public:
-  WidgetPtr build() override {
+  WidgetPtr build() override
+  {
     return Scaffold(
         AppBar("Flux App"),
         Expanded(Center(
             Container(
-                Column({Text(counter), Button("Click", [this] { counter++; })})
+                Column({Text(counter), CircularProgress()->setSize(32)->setColor(Color::fromRGB(99, 102, 241)),
+                        Button("Click", [this]
+                               { counter++; })})
                     ->setCrossAxisAlignment(CrossAxisAlignment::Center))
                 ->setWidth(300)
                 ->setHeight(200)
@@ -18,7 +22,8 @@ public:
                 ->setBorderRadius(10))),
 
         FAB("+",
-            [this] {
+            [this]
+            {
               std::cout << "FAB pressed!" << std::endl;
               counter++;
             })
@@ -29,7 +34,8 @@ public:
   }
 };
 
-WidgetPtr createApp(FluxUI *app) {
+WidgetPtr createApp(FluxUI *app)
+{
   return FluxApp("FluxUI - App", std::make_shared<MyApp>(), AppTheme::light(),
                  false, 900, 700, false, false);
 }
