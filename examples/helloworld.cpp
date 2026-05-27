@@ -12,7 +12,8 @@ public:
         AppBar("Flux App"),
         Expanded(Center(
             Container(
-                Column({Text(counter), CircularProgress()->setSize(32)->setColor(Color::fromRGB(99, 102, 241)),
+                Column({Text(counter), IconButton(FluxIcons::Delete, [this]
+                                                  { std::cout << "Icon button clicked" << std::endl; }),
                         Button("Click", [this]
                                { counter++; })})
                     ->setCrossAxisAlignment(CrossAxisAlignment::Center))
