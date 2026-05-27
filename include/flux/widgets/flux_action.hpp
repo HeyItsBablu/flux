@@ -534,11 +534,16 @@ public:
     }
     else if (!text.empty())
     {
-      measureText(ctx, fontCache);
+
+      NativeFont font = fontCache.getFont(fontFamily, fontSize, fontWeight);
+      Painter p(ctx);
+      int tw = 0, th = 0;
+      p.measureText(toWideString(text), font, tw, th);
+
       if (autoWidth)
-        width += paddingLeft + paddingRight;
+        width = tw + paddingLeft + paddingRight;
       if (autoHeight)
-        height += paddingTop + paddingBottom;
+        height = std::max(32, th + paddingTop + paddingBottom);
     }
     else
     {
@@ -1046,7 +1051,7 @@ public:
   // Disabled icon tint
   Color disabledColor = Color::fromRGB(160, 160, 160);
 
-  std::string tooltip; 
+  std::string tooltip;
 
   std::function<void()> onPressed;
 
@@ -1522,12 +1527,12 @@ inline ButtonWidgetPtr Button(const std::string &text,
   w->text = text;
   w->onClick = onClick;
   w->hasBackground = true;
-  w->backgroundColor = Color::fromRGB(76, 175, 80);
-  w->textColor = Color::fromRGB(255, 255, 255);
-  w->paddingLeft = w->paddingRight = 20;
-  w->paddingTop = w->paddingBottom = 10;
-  w->borderRadius = 4;
-  w->fontWeight = FontWeight::Bold;
+  w->backgroundColor = Color::fromRGB(55, 55, 65);
+  w->textColor = Color::fromRGB(220, 220, 220);
+  w->paddingLeft = w->paddingRight = 12;
+  w->paddingTop = w->paddingBottom = 0;
+  w->borderRadius = 6;
+  w->fontWeight = FontWeight::Normal;
   return w;
 }
 

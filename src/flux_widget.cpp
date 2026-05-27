@@ -5,21 +5,15 @@
 // ============================================================================
 
 void Widget::measureText(GraphicsContext &ctx, FontCache &fontCache) {
-  if (text.empty()) {
-    width = height = 0;
-    return;
-  }
+    if (text.empty()) { width = height = 0; return; }
 
-  NativeFont font = fontCache.getFont(fontFamily, fontSize, fontWeight);
-  Painter p(ctx);
+    NativeFont font = fontCache.getFont(fontFamily, fontSize, fontWeight);
+    Painter p(ctx);
+    int tw = 0, th = 0;
+    p.measureText(toWideString(text), font, tw, th);
 
-  int tw = 0, th = 0;
-  p.measureText(toWideString(text), font, tw, th);
-
-  if (autoWidth)
-    width = tw + paddingLeft + paddingRight;
-  if (autoHeight)
-    height = th + paddingTop + paddingBottom;
+    if (autoWidth)  width  = tw;   
+    if (autoHeight) height = th;
 }
 
 // ============================================================================
