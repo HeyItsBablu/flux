@@ -32,6 +32,7 @@ enum class ShapeType
     Star,
     Arrow,
     DoubleArrow,
+    Select,
     Eyedropper,
     FillBucket,
     Text,
@@ -75,6 +76,19 @@ public:
     std::string textBuffer_;
     double textCursorTimer_ = 0.0;
     bool textCursorVis_ = true;
+
+    // ── Selection tool state ───────────────────────────────────────────────
+    bool hasSelection_ = false;
+    float selX_ = 0, selY_ = 0;                   // top-left in canvas coords
+    float selW_ = 0, selH_ = 0;                   // width / height
+    bool selDragging_ = false;                    // currently drawing the rect
+    bool selMoving_ = false;                      // dragging the contents
+    float selMoveStartX_ = 0, selMoveStartY_ = 0; // mouse anchor
+    float selMoveOrigX_ = 0, selMoveOrigY_ = 0;   // sel origin at drag start
+    std::vector<uint8_t> selPixels_;              // lifted RGBA pixels
+    int selPixW_ = 0, selPixH_ = 0;
+    double selMarchTimer_ = 0.0;
+    float selMarchOffset_ = 0.f;
 
     // Mouse position in canvas coords (for status bar)
     float mouseCanvasX_ = 0.f;
@@ -139,6 +153,60 @@ public:
                 onStrokeCommitted();
         }
         textBuffer_.clear();
+    }
+
+    // ── Commit a moved selection back onto the canvas ─────────────────────
+    void commitSelection()
+    {
+        if (!hasSelection_ || selPixels_.empty())
+        {
+            hasSelection_ = false;
+            return;
+        }
+
+        // Flatten the lifted pixels back into a rasterized canvas image.
+        // First rasterize everything except the hole (already punched when
+        // we lifted), then blit the floating pixels at their new position.
+        std::vector<uint8_t> base = rasterize(w_, h_);
+
+        int dx = int(selX_), dy = int(selY_);
+        for (int py = 0; py < selPixH_; ++py)
+        {
+            for (int px = 0; px < selPixW_; ++px)
+            {
+                int cx = dx + px, cy = dy + py;
+                if (cx < 0 || cy < 0 || cx >= w_ || cy >= h_)
+                    continue;
+                const uint8_t *src = selPixels_.data() + (py * selPixW_ + px) * 4;
+                uint8_t *dst = base.data() + (cy * w_ + cx) * 4;
+                float a = src[3] / 255.f;
+                dst[0] = uint8_t(dst[0] * (1 - a) + src[0] * a);
+                dst[1] = uint8_t(dst[1] * (1 - a) + src[1] * a);
+                dst[2] = uint8_t(dst[2] * (1 - a) + src[2] * a);
+                dst[3] = 255;
+            }
+        }
+
+        pushUndo();
+        freeAllGLImages();
+        strokes_.clear();
+
+        Stroke s;
+        s.shape = ShapeType::Brush;
+        s.color = Color::fromRGB(0, 0, 0);
+        s.radius = 0.f;
+        s.eraser = false;
+        s.imageW = w_;
+        s.imageH = h_;
+        s.imageData = std::move(base);
+        strokes_.push_back(std::move(s));
+
+        selPixels_.clear();
+        hasSelection_ = false;
+        selMoving_ = false;
+        selDragging_ = false;
+        if (onStrokeCommitted)
+            onStrokeCommitted();
     }
 
     // ── Save ──────────────────────────────────────────────────────────────
@@ -519,8 +587,22 @@ public:
                 textCursorVis_ = !textCursorVis_;
             }
         }
+        if (hasSelection_ || selDragging_)
+        {
+            selMarchTimer_ += dt;
+            if (selMarchTimer_ >= 0.05)
+            {
+                selMarchTimer_ = 0.0;
+                selMarchOffset_ += 1.f;
+                if (selMarchOffset_ >= 8.f)
+                    selMarchOffset_ = 0.f;
+            }
+        }
     }
-    bool needsContinuousRedraw() const override { return textEditing_; }
+    bool needsContinuousRedraw() const override
+    {
+        return textEditing_ || hasSelection_ || selDragging_;
+    }
 
     void onMouseDown(float x, float y) override
     {
@@ -542,7 +624,6 @@ public:
 
         if (activeShape_ == ShapeType::Text)
         {
-            // Commit any existing text, then start new at click position
             commitText();
             textEditing_ = true;
             textX_ = x;
@@ -553,8 +634,39 @@ public:
             return;
         }
 
-        // Clicking with another tool commits in-progress text
+        if (activeShape_ == ShapeType::Select)
+        {
+            // If we already have a selection and the click is inside it → move
+            if (hasSelection_ && !selPixels_.empty() &&
+                x >= selX_ && x < selX_ + selW_ &&
+                y >= selY_ && y < selY_ + selH_)
+            {
+                selMoving_ = true;
+                selMoveStartX_ = x;
+                selMoveStartY_ = y;
+                selMoveOrigX_ = selX_;
+                selMoveOrigY_ = selY_;
+            }
+            else
+            {
+                // Commit any existing floating selection first
+                if (hasSelection_)
+                    commitSelection();
+                // Start drawing a new selection rect
+                selDragging_ = true;
+                selMoving_ = false;
+                hasSelection_ = false;
+                selX_ = x;
+                selY_ = y;
+                selW_ = 0;
+                selH_ = 0;
+            }
+            return;
+        }
+
         commitText();
+        if (hasSelection_)
+            commitSelection();
 
         pushUndo();
         drawing_ = true;
@@ -569,10 +681,28 @@ public:
         mouseCanvasY_ = y;
         if (onMousePosChanged)
             onMousePosChanged(x, y);
+
         if (activeShape_ == ShapeType::Eyedropper ||
             activeShape_ == ShapeType::FillBucket ||
             activeShape_ == ShapeType::Text)
             return;
+
+        // ── Selection drag / move ─────────────────────────────────────────
+        if (activeShape_ == ShapeType::Select)
+        {
+            if (selDragging_)
+            {
+                selW_ = x - selX_;
+                selH_ = y - selY_;
+            }
+            else if (selMoving_)
+            {
+                selX_ = selMoveOrigX_ + (x - selMoveStartX_);
+                selY_ = selMoveOrigY_ + (y - selMoveStartY_);
+            }
+            return;
+        }
+
         if (!drawing_ || !current_)
             return;
         if (activeShape_ == ShapeType::Brush || activeShape_ == ShapeType::Line)
@@ -592,6 +722,95 @@ public:
             activeShape_ == ShapeType::FillBucket ||
             activeShape_ == ShapeType::Text)
             return;
+
+        if (activeShape_ == ShapeType::Select)
+        {
+            if (selDragging_)
+            {
+                selDragging_ = false;
+                // Normalise rect so W/H are always positive
+                if (selW_ < 0)
+                {
+                    selX_ += selW_;
+                    selW_ = -selW_;
+                }
+                if (selH_ < 0)
+                {
+                    selY_ += selH_;
+                    selH_ = -selH_;
+                }
+
+                if (selW_ >= 2 && selH_ >= 2)
+                {
+                    // Lift the pixels out of the canvas
+                    std::vector<uint8_t> base = rasterize(w_, h_);
+                    int ix = int(selX_), iy = int(selY_);
+                    int iw = int(selW_), ih = int(selH_);
+                    iw = std::min(iw, w_ - ix);
+                    ih = std::min(ih, h_ - iy);
+                    if (ix < 0)
+                    {
+                        iw += ix;
+                        ix = 0;
+                    }
+                    if (iy < 0)
+                    {
+                        ih += iy;
+                        iy = 0;
+                    }
+
+                    selPixW_ = iw;
+                    selPixH_ = ih;
+                    selPixels_.resize(size_t(iw) * ih * 4);
+                    for (int py = 0; py < ih; ++py)
+                        for (int px = 0; px < iw; ++px)
+                        {
+                            const uint8_t *src = base.data() + ((iy + py) * w_ + (ix + px)) * 4;
+                            uint8_t *dst = selPixels_.data() + (py * iw + px) * 4;
+                            dst[0] = src[0];
+                            dst[1] = src[1];
+                            dst[2] = src[2];
+                            dst[3] = src[3];
+                            // Punch a white hole where we lifted
+                            uint8_t *hole = base.data() + ((iy + py) * w_ + (ix + px)) * 4;
+                            hole[0] = 255;
+                            hole[1] = 255;
+                            hole[2] = 255;
+                            hole[3] = 255;
+                        }
+
+                    // Store punched canvas as the new single stroke
+                    pushUndo();
+                    freeAllGLImages();
+                    strokes_.clear();
+                    Stroke s;
+                    s.shape = ShapeType::Brush;
+                    s.color = Color::fromRGB(0, 0, 0);
+                    s.radius = 0.f;
+                    s.eraser = false;
+                    s.imageW = w_;
+                    s.imageH = h_;
+                    s.imageData = std::move(base);
+                    strokes_.push_back(std::move(s));
+
+                    selX_ = float(ix);
+                    selY_ = float(iy);
+                    selW_ = float(iw);
+                    selH_ = float(ih);
+                    hasSelection_ = true;
+                }
+                else
+                {
+                    hasSelection_ = false;
+                }
+            }
+            else if (selMoving_)
+            {
+                selMoving_ = false;
+            }
+            return;
+        }
+
         if (current_)
         {
             if (activeShape_ != ShapeType::Brush)
@@ -611,6 +830,26 @@ public:
             handleTextKey(key);
             return;
         }
+
+        // Selection: Escape deselects, Delete clears the lifted pixels
+#ifdef _WIN32
+        if (activeShape_ == ShapeType::Select)
+        {
+            if (key == VK_ESCAPE && hasSelection_)
+            {
+                commitSelection();
+                return;
+            }
+            if (key == VK_DELETE && hasSelection_)
+            {
+                selPixels_.clear();
+                hasSelection_ = false;
+                if (onStrokeCommitted)
+                    onStrokeCommitted();
+                return;
+            }
+        }
+#endif
         if (onKeyDownCallback)
             onKeyDownCallback(key);
     }
@@ -646,6 +885,81 @@ public:
             ctx.setFillColor(Color{activeColor_.r, activeColor_.g, activeColor_.b, 120});
             ctx.fillRect(textX_, textY_ + fontSize_ + 2.f, tw + 2.f, 1.5f);
         }
+
+        // ── Selection overlay ─────────────────────────────────────────────
+        if (activeShape_ == ShapeType::Select)
+        {
+            // Draw floating selection pixels
+            if (hasSelection_ && !selPixels_.empty())
+            {
+                // Upload as a temporary GL texture each frame
+                // (cheap for selection-size tiles; could cache)
+                GLuint tmpTex = 0;
+                glGenTextures(1, &tmpTex);
+                glBindTexture(GL_TEXTURE_2D, tmpTex);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, selPixW_, selPixH_, 0,
+                             GL_RGBA, GL_UNSIGNED_BYTE, selPixels_.data());
+                glBindTexture(GL_TEXTURE_2D, 0);
+                Canvas2DImage *tmp = ctx.wrapTexture(tmpTex, selPixW_, selPixH_);
+                ctx.drawImage(tmp, selX_, selY_, selW_, selH_);
+                delete tmp;
+                glDeleteTextures(1, &tmpTex);
+            }
+
+            // Marching-ants dashed border
+            float rx = hasSelection_ ? selX_ : selX_;
+            float ry = hasSelection_ ? selY_ : selY_;
+            float rw2 = (selDragging_ && selW_ < 0) ? -selW_ : std::abs(selW_);
+            float rh2 = (selDragging_ && selH_ < 0) ? -selH_ : std::abs(selH_);
+            float rx0 = selDragging_ && selW_ < 0 ? selX_ + selW_ : selX_;
+            float ry0 = selDragging_ && selH_ < 0 ? selY_ + selH_ : selY_;
+
+            if (rw2 > 0 && rh2 > 0)
+            {
+                // White base line
+                ctx.setStrokeColor(Color::fromRGB(255, 255, 255));
+                ctx.setLineWidth(1.f);
+                ctx.strokeRect(rx0, ry0, rw2, rh2);
+
+                // Black dashes offset by march timer
+                ctx.setStrokeColor(Color::fromRGB(0, 0, 0));
+                float dash = 6.f;
+                float off = selMarchOffset_;
+                // Draw dashes along each edge — declared as std::function
+                // so MSVC doesn't complain about self-capture in auto lambda
+                std::function<void(float, float, float, float)> drawDashedLine =
+                    [&](float ax2, float ay2, float bx2, float by2)
+                {
+                    float edx = bx2 - ax2, edy = by2 - ay2;
+                    float elen = std::sqrtf(edx * edx + edy * edy);
+                    if (elen < 0.5f)
+                        return;
+                    float ux2 = edx / elen, uy2 = edy / elen;
+                    float t = -std::fmod(off, dash * 2.f);
+                    while (t < elen)
+                    {
+                        float segStart = std::max(t, 0.f);
+                        float segEnd = std::min(t + dash, elen);
+                        if (segStart < segEnd)
+                        {
+                            ctx.beginPath();
+                            ctx.moveTo(ax2 + ux2 * segStart, ay2 + uy2 * segStart);
+                            ctx.lineTo(ax2 + ux2 * segEnd, ay2 + uy2 * segEnd);
+                            ctx.stroke();
+                        }
+                        t += dash * 2.f;
+                    }
+                };
+                drawDashedLine(rx0, ry0, rx0 + rw2, ry0);
+                drawDashedLine(rx0 + rw2, ry0, rx0 + rw2, ry0 + rh2);
+                drawDashedLine(rx0 + rw2, ry0 + rh2, rx0, ry0 + rh2);
+                drawDashedLine(rx0, ry0 + rh2, rx0, ry0);
+            }
+        }
     }
 
     int canvasW() const { return w_; }
@@ -655,38 +969,40 @@ private:
     static constexpr int kMaxUndo = 50;
 
     // ── Text key handler ──────────────────────────────────────────────────
-void handleTextKey(int key)
-{
+    void handleTextKey(int key)
+    {
 #ifdef _WIN32
-    if (key < 0)
-    {
-        char ch = char(-key);
-        if (ch >= 32 && ch < 127)   // already guarded, but be explicit
-            textBuffer_ += ch;
-        return;
-    }
-    switch (key)
-    {
-    case VK_RETURN:  commitText();          break;
-    case VK_ESCAPE:
-        textEditing_ = false;
-        textBuffer_.clear();
-        break;
-    case VK_BACK:
-        if (!textBuffer_.empty())
-            textBuffer_.pop_back();
-        break;
-    // DO NOT fall through to default for printable chars —
-    // they arrive via WM_CHAR as negative values above.
-    default:
-        break;   // ← remove the old "if (key >= 32)" branch entirely
-    }
+        if (key < 0)
+        {
+            char ch = char(-key);
+            if (ch >= 32 && ch < 127) // already guarded, but be explicit
+                textBuffer_ += ch;
+            return;
+        }
+        switch (key)
+        {
+        case VK_RETURN:
+            commitText();
+            break;
+        case VK_ESCAPE:
+            textEditing_ = false;
+            textBuffer_.clear();
+            break;
+        case VK_BACK:
+            if (!textBuffer_.empty())
+                textBuffer_.pop_back();
+            break;
+        // DO NOT fall through to default for printable chars —
+        // they arrive via WM_CHAR as negative values above.
+        default:
+            break; // ← remove the old "if (key >= 32)" branch entirely
+        }
 #else
-    // Linux/SDL path unchanged
+        // Linux/SDL path unchanged
 #endif
-    textCursorTimer_ = 0.0;
-    textCursorVis_ = true;
-}
+        textCursorTimer_ = 0.0;
+        textCursorVis_ = true;
+    }
 
     void pushUndo()
     {
@@ -1072,6 +1388,7 @@ class PaintApp : public Widget
         {"★", "Star", ShapeType::Star},
         {"→", "Arrow", ShapeType::Arrow},
         {"↔", "Double Arrow", ShapeType::DoubleArrow},
+        {"⬚", "Select & Move", ShapeType::Select},
         {"✦", "Eyedropper", ShapeType::Eyedropper},
         {"🪣", "Fill Bucket", ShapeType::FillBucket},
         {"T", "Text", ShapeType::Text},
