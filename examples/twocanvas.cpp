@@ -17,7 +17,7 @@ void render(Canvas2D& ctx) override {
     ctx.setFillColor(Color::fromRGB(20, 20, 30));
     ctx.fillRect(0, 0, w, h);
 
-    // Make sure this is NOT commented out
+   
     ctx.setFont("18px sans");
     ctx.setTextAlign(CanvasTextAlign::Left);
     ctx.setTextBaseline(TextBaseline::Top);
