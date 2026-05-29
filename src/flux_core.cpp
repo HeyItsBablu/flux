@@ -215,17 +215,12 @@ void FluxUI::wireCallbacks() {
     LayoutEngine::positionWidget(root.get(), 0, 0);
   };
 
-  window.callbacks.onMouseWheel = [this](int delta) -> bool {
-    if (!root)
-      return false;
-    if (handleOverlayMouseWheel(delta))
-      return true;
-    if (focusedWidget && focusedWidget->handleMouseWheel(delta))
-      return true;
-    return broadcastMouseEvent(root.get(), 0, 0, [delta](Widget *w, int, int) {
-      return w->handleMouseWheel(delta);
-    });
-  };
+window.callbacks.onMouseWheel = [this](int delta) -> bool {
+    if (!root) return false;
+    if (handleOverlayMouseWheel(delta)) return true;
+    if (focusedWidget && focusedWidget->handleMouseWheel(delta)) return true;
+    return false;
+};
 
   window.callbacks.onMouseDown = [this](int x, int y) -> bool {
     if (!root)

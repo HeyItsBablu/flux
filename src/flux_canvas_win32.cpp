@@ -213,7 +213,7 @@ static void tickAndRender(CanvasWidget *w)
   int glH = s.lastGLH < 1 ? 1 : s.lastGLH;
 
   glViewport(0, 0, glW, glH);
-  glClearColor(0.f, 0.f, 0.f, 1.f);
+  glClearColor(0.18f, 0.18f, 0.18f, 1.f);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
   glEnable(GL_MULTISAMPLE);
   glEnable(GL_BLEND);
@@ -226,7 +226,7 @@ static void tickAndRender(CanvasWidget *w)
 
   float z = w->vp_.zoom();
   float ox = -w->vp_.offsetX() * z;
-  float oy = w->vp_.offsetY() * z;
+  float oy = -w->vp_.offsetY() * z;
 
   float ortho[16];
   glutil::ortho(0.f, float(glW), float(glH), 0.f, ortho);
@@ -238,8 +238,61 @@ static void tickAndRender(CanvasWidget *w)
       for (int k = 0; k < 4; ++k)
         mvp[col * 4 + row] += ortho[k * 4 + row] * vp[col * 4 + k];
 
+  // ── Drop shadow (drawn before canvas, in screen-space) ─────────────────
   {
-    Canvas2D ctx(w->canvasGL_, w->canvasW_, w->canvasH_, mvp);
+    // Shadow parameters
+    const float shadowOffsetX = 6.f;
+    const float shadowOffsetY = 6.f;
+    const float shadowBlurLayers = 4; // number of translucent quads for soft falloff
+    const float shadowBaseAlpha = 0.18f;
+
+    // Canvas rect in screen space
+    float ox = -w->vp_.offsetX() * w->vp_.zoom();
+    float oy = -w->vp_.offsetY() * w->vp_.zoom();
+    float cw = float(w->docW()) * w->vp_.zoom();
+    float ch = float(w->docH()) * w->vp_.zoom();
+
+    glUseProgram(w->sbProg_);
+    float screenMVP[16];
+    glutil::ortho(0.f, float(glW), float(glH), 0.f, screenMVP);
+    glUniformMatrix4fv(w->sbMVP_, 1, GL_FALSE, screenMVP);
+
+    glBindVertexArray(w->sbVAO_);
+    glBindBuffer(GL_ARRAY_BUFFER, w->sbVBO_);
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    for (int i = shadowBlurLayers; i >= 1; --i)
+    {
+      float spread = float(i) * 2.f;
+      float alpha = shadowBaseAlpha * (1.f - float(i - 1) / float(shadowBlurLayers));
+
+      float sx = ox + shadowOffsetX - spread;
+      float sy = oy + shadowOffsetY - spread;
+      float sw = cw + spread * 2.f;
+      float sh = ch + spread * 2.f;
+
+      glUniform4f(w->sbColor_, 0.f, 0.f, 0.f, alpha);
+
+      float v[] = {
+          sx, sy,
+          sx + sw, sy,
+          sx + sw, sy + sh,
+          sx + sw, sy + sh,
+          sx, sy + sh,
+          sx, sy};
+      glBufferData(GL_ARRAY_BUFFER, sizeof(v), v, GL_DYNAMIC_DRAW);
+      glEnableVertexAttribArray(0);
+      glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
+      glDisableVertexAttribArray(1);
+      glDrawArrays(GL_TRIANGLES, 0, 6);
+    }
+    glBindVertexArray(0);
+  }
+
+  {
+    Canvas2D ctx(w->canvasGL_, w->docW(), w->docH(), mvp);
     w->activeSurface_->render(ctx);
   }
 
@@ -396,14 +449,14 @@ static void ensureWindows(CanvasWidget *w, GraphicsContext &ctx)
   w->ensureSBProgram(kSBVert, kSBFrag);
 
   // Viewport / surface init
-  w->vp_.init(w->width, w->height, w->canvasW_, w->canvasH_);
+  w->vp_.init(w->width, w->height, w->docW(), w->docH());
   s.lastGLW = w->width;
   s.lastGLH = w->height;
+  w->activatePendingSurface();
   w->updateViewportSize(w->width, w->height);
   w->updateSBGeometry(w->width, w->height);
-  w->vp_.fitToView();
+  w->vp_.fitToView(); // center + fit, works correctly now
 
-  w->activatePendingSurface();
   w->lastTick_ = CanvasWidget::Clock::now();
 
   if (w->onViewportChanged)
@@ -823,8 +876,8 @@ std::shared_ptr<CanvasWidget> CanvasWidget::setSize(int w, int h)
 }
 std::shared_ptr<CanvasWidget> CanvasWidget::setCanvasSize(int w, int h)
 {
-  canvasW_ = w;
-  canvasH_ = h;
+  docW_ = w;
+  docH_ = h;
   auto &s = win32State(this);
   if (s.glHwnd)
   {
@@ -834,6 +887,7 @@ std::shared_ptr<CanvasWidget> CanvasWidget::setCanvasSize(int w, int h)
       makeCurrent(this);
       activeSurface_->resize(w, h);
     }
+    scheduleRepaint(this);
   }
   return ptr();
 }
@@ -847,15 +901,13 @@ void CanvasWidget::computeLayout(GraphicsContext & /*ctx*/,
                                  const BoxConstraints &c, FontCache &)
 {
   if (autoWidth)
-  {
     width = (c.maxWidth < kUnbounded) ? c.maxWidth : width;
-    canvasW_ = width;
-  }
   if (autoHeight)
-  {
     height = (c.maxHeight < kUnbounded) ? c.maxHeight : height;
-    canvasH_ = height;
-  }
+
+  canvasW_ = width;
+  canvasH_ = height;
+
   needsLayout = false;
 }
 
@@ -974,8 +1026,8 @@ void CanvasWidget::activatePendingSurface()
   }
   activeSurface_ = pendingSurface_;
   pendingSurface_.reset();
-  activeSurface_->initialize(canvasW_, canvasH_);
-  vp_.setCanvasSize(canvasW_, canvasH_);
+  activeSurface_->initialize(docW(), docH());
+  vp_.setCanvasSize(docW(), docH());
 }
 void CanvasWidget::ensureSBProgram(const char *vert, const char *frag)
 {

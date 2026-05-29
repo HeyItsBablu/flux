@@ -41,7 +41,8 @@
 //   canvas->setScrollbarsEnabled(true);
 // ─────────────────────────────────────────────────────────────────────────────
 
-class CanvasWidget : public Widget {
+class CanvasWidget : public Widget
+{
 public:
     static constexpr float kSBThick = CustomScrollbar::kTrackThick;
 
@@ -53,39 +54,42 @@ public:
 
     std::shared_ptr<CanvasWidget> setViewportEnabled(bool e);
     std::shared_ptr<CanvasWidget> setScrollbarsEnabled(bool e);
-    bool                          scrollbarsEnabled() const;
+    bool scrollbarsEnabled() const;
 
-    template<typename T, typename... A>
-    std::shared_ptr<T> setSurface(A&&... a) {
+    template <typename T, typename... A>
+    std::shared_ptr<T> setSurface(A &&...a)
+    {
         auto s = std::make_shared<T>(std::forward<A>(a)...);
         pendingSurface_ = s;
         return s;
     }
 
-    RenderSurface*  getSurface() const;
-    const Viewport& viewport()   const;
-    Viewport&       viewport();
+    RenderSurface *getSurface() const;
+    const Viewport &viewport() const;
+    Viewport &viewport();
 
     std::shared_ptr<CanvasWidget> setSize(int w, int h);
     std::shared_ptr<CanvasWidget> setCanvasSize(int w, int h);
     std::shared_ptr<CanvasWidget> redraw();
 
+    int docW() const { return docW_ ? docW_ : canvasW_; }
+    int docH() const { return docH_ ? docH_ : canvasH_; }
+
     // ── Callbacks ─────────────────────────────────────────────────────────────
-    std::function<void(float zoom)>   onViewportChanged;
+    std::function<void(float zoom)> onViewportChanged;
     std::function<void(int w, int h)> onGLResize;
 
     // ── Widget overrides ──────────────────────────────────────────────────────
-    void computeLayout(GraphicsContext& ctx,
-                       const BoxConstraints& c, FontCache&) override;
-    void render(GraphicsContext& ctx, FontCache&) override;
+    void computeLayout(GraphicsContext &ctx,
+                       const BoxConstraints &c, FontCache &) override;
+    void render(GraphicsContext &ctx, FontCache &) override;
     void onDetach() override;
     void markNeedsPaint() override;
 
     // ── Shared state (all platforms) ──────────────────────────────────────────
-    // Note: public so platform .cpp free functions (GLProc, tickAndRender, etc.)
-    // can access them directly, matching the original single-file design.
 
-    bool viewportEnabled_   = true;
+
+    bool viewportEnabled_ = true;
     bool scrollbarsEnabled_ = true;
 
     std::shared_ptr<RenderSurface> activeSurface_;
@@ -95,6 +99,9 @@ public:
     int canvasW_ = 512;
     int canvasH_ = 512;
 
+    int docW_ = 0;
+    int docH_ = 0;
+
     CustomScrollbar hBar_;
     CustomScrollbar vBar_;
 
@@ -102,15 +109,16 @@ public:
     Clock::time_point lastTick_ = Clock::now();
     double frameDt_ = 0.0;
 
-    Canvas2DGL* canvasGL_ = nullptr;
+    Canvas2DGL *canvasGL_ = nullptr;
 
     // ── Shared helpers ────────────────────────────────────────────────────────
 
-    std::shared_ptr<CanvasWidget> ptr() {
+    std::shared_ptr<CanvasWidget> ptr()
+    {
         return std::static_pointer_cast<CanvasWidget>(shared_from_this());
     }
 
-    void viewportDims(int glW, int glH, int& vpW, int& vpH) const;
+    void viewportDims(int glW, int glH, int &vpW, int &vpH) const;
     void updateViewportSize(int glW, int glH);
     void updateSBGeometry(int glW, int glH);
 
@@ -124,63 +132,64 @@ public:
     void activatePendingSurface();
 
     // ── Pan state ─────────────────────────────────────────────────────────────
-    bool  panning_    = false;
-    int   panStartSX_ = 0, panStartSY_ = 0;
+    bool panning_ = false;
+    int panStartSX_ = 0, panStartSY_ = 0;
     float panStartOX_ = 0, panStartOY_ = 0;
 
     // ── Scrollbar GL program (shared structure, created per platform) ─────────
-    GLuint sbProg_  = 0;
-    GLint  sbMVP_   = -1;
-    GLint  sbColor_ = -1;
-    GLuint sbVAO_   = 0;
-    GLuint sbVBO_   = 0;
+    GLuint sbProg_ = 0;
+    GLint sbMVP_ = -1;
+    GLint sbColor_ = -1;
+    GLuint sbVAO_ = 0;
+    GLuint sbVBO_ = 0;
 
-    void ensureSBProgram(const char* vert, const char* frag);
+    void ensureSBProgram(const char *vert, const char *frag);
     void renderScrollbarsGL(int glW, int glH, double dt);
     void renderSBCorner(int glW, int glH);
 
     // ── Android-only ──────────────────────────────────────────────────────────
 #ifdef __ANDROID__
-    static void tickAllGL(Widget* root, int windowW, int windowH, float dpi);
+    static void tickAllGL(Widget *root, int windowW, int windowH, float dpi);
     bool handleMouseDown(int mx, int my) override;
     bool handleMouseMove(int mx, int my) override;
-    bool handleMouseUp  (int mx, int my) override;
+    bool handleMouseUp(int mx, int my) override;
     bool hitTest(int mx, int my) const;
 #endif
 
     // ── Linux-only ────────────────────────────────────────────────────────────
 #if defined(__linux__) && !defined(__ANDROID__)
 #include <SDL2/SDL.h>
-    static void   initEventType();
+    static void initEventType();
     static Uint32 repaintEventType();
 
- 
-    void setCanvasGL(Canvas2DGL* gl);
+    void setCanvasGL(Canvas2DGL *gl);
     void onWindowResize(int newW, int newH);
     void preRenderPass();
     void glRenderPass();
 
     bool isInitialized() const;
-    bool needsRepaint()  const;
+    bool needsRepaint() const;
     bool containsPoint(int wx, int wy) const;
 
     void onMouseLeave();
-    void handleSDLEvent(const SDL_Event& e);
+    void handleSDLEvent(const SDL_Event &e);
 
-    void onMouseButtonDown(const SDL_MouseButtonEvent& e);
-    void onMouseButtonUp  (const SDL_MouseButtonEvent& e);
-    void onMouseMotion    (const SDL_MouseMotionEvent& e);
-    void onMouseWheel     (const SDL_MouseWheelEvent&  e);
-    void onKeyDownEvent   (const SDL_KeyboardEvent&    e);
-    void onKeyUpEvent     (const SDL_KeyboardEvent&    e);
+    void onMouseButtonDown(const SDL_MouseButtonEvent &e);
+    void onMouseButtonUp(const SDL_MouseButtonEvent &e);
+    void onMouseMotion(const SDL_MouseMotionEvent &e);
+    void onMouseWheel(const SDL_MouseWheelEvent &e);
+    void onKeyDownEvent(const SDL_KeyboardEvent &e);
+    void onKeyUpEvent(const SDL_KeyboardEvent &e);
 #endif
 };
 
 // ── Factory helpers ───────────────────────────────────────────────────────────
 
-inline std::shared_ptr<CanvasWidget> Canvas() {
+inline std::shared_ptr<CanvasWidget> Canvas()
+{
     return std::make_shared<CanvasWidget>();
 }
-inline std::shared_ptr<CanvasWidget> Canvas(int w, int h) {
+inline std::shared_ptr<CanvasWidget> Canvas(int w, int h)
+{
     return std::make_shared<CanvasWidget>()->setSize(w, h);
 }

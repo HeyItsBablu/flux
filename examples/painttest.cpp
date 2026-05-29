@@ -32,6 +32,8 @@ enum class ShapeType
     Star,
     Arrow,
     DoubleArrow,
+    Pencil,
+    Spray,
     Select,
     Eyedropper,
     FillBucket,
@@ -253,9 +255,6 @@ public:
     }
 
     // ── Rasterise ─────────────────────────────────────────────────────────
-    // Note: text strokes are skipped in CPU rasterise (they rely on GPU text
-    // rendering). For save/eyedropper the text won't be pixel-perfect on CPU,
-    // but the GPU render always shows it correctly.
     std::vector<uint8_t> rasterize(int w, int h) const
     {
         std::vector<uint8_t> pixels(size_t(w) * h * 4, 255);
@@ -598,10 +597,20 @@ public:
                     selMarchOffset_ = 0.f;
             }
         }
+        // ── Spray: emit dots while mouse is held ──────────────────────────
+        if (sprayActive_ && activeShape_ == ShapeType::Spray)
+        {
+            sprayTimer_ += dt;
+            while (sprayTimer_ >= kSprayInterval)
+            {
+                sprayTimer_ -= kSprayInterval;
+                sprayDot(sprayMouseX_, sprayMouseY_);
+            }
+        }
     }
     bool needsContinuousRedraw() const override
     {
-        return textEditing_ || hasSelection_ || selDragging_;
+        return textEditing_ || hasSelection_ || selDragging_ || sprayActive_;
     }
 
     void onMouseDown(float x, float y) override
@@ -636,7 +645,6 @@ public:
 
         if (activeShape_ == ShapeType::Select)
         {
-            // If we already have a selection and the click is inside it → move
             if (hasSelection_ && !selPixels_.empty() &&
                 x >= selX_ && x < selX_ + selW_ &&
                 y >= selY_ && y < selY_ + selH_)
@@ -649,10 +657,8 @@ public:
             }
             else
             {
-                // Commit any existing floating selection first
                 if (hasSelection_)
                     commitSelection();
-                // Start drawing a new selection rect
                 selDragging_ = true;
                 selMoving_ = false;
                 hasSelection_ = false;
@@ -670,9 +676,29 @@ public:
 
         pushUndo();
         drawing_ = true;
-        strokes_.push_back({{}, activeColor_, brushRadius_, eraserMode_, activeShape_});
-        current_ = &strokes_.back();
-        current_->pts.push_back({x, y});
+
+        if (activeShape_ == ShapeType::Pencil)
+        {
+            // Pencil: store as Brush stroke but radius=0.5 (1px)
+            strokes_.push_back({{}, activeColor_, 0.5f, false, ShapeType::Brush});
+            current_ = &strokes_.back();
+            current_->pts.push_back({x, y});
+        }
+        else if (activeShape_ == ShapeType::Spray)
+        {
+            strokes_.push_back({{}, activeColor_, 0.f, false, ShapeType::Brush});
+            current_ = &strokes_.back();
+            sprayActive_ = true;
+            sprayMouseX_ = x;
+            sprayMouseY_ = y;
+            sprayTimer_ = kSprayInterval; // emit first dot immediately
+        }
+        else
+        {
+            strokes_.push_back({{}, activeColor_, brushRadius_, eraserMode_, activeShape_});
+            current_ = &strokes_.back();
+            current_->pts.push_back({x, y});
+        }
     }
 
     void onMouseMove(float x, float y) override
@@ -687,7 +713,6 @@ public:
             activeShape_ == ShapeType::Text)
             return;
 
-        // ── Selection drag / move ─────────────────────────────────────────
         if (activeShape_ == ShapeType::Select)
         {
             if (selDragging_)
@@ -703,9 +728,18 @@ public:
             return;
         }
 
+        if (activeShape_ == ShapeType::Spray)
+        {
+            sprayMouseX_ = x;
+            sprayMouseY_ = y;
+            return;
+        }
+
         if (!drawing_ || !current_)
             return;
-        if (activeShape_ == ShapeType::Brush || activeShape_ == ShapeType::Line)
+        if (activeShape_ == ShapeType::Brush ||
+            activeShape_ == ShapeType::Pencil ||
+            activeShape_ == ShapeType::Line)
             current_->pts.push_back({x, y});
         else
         {
@@ -728,7 +762,6 @@ public:
             if (selDragging_)
             {
                 selDragging_ = false;
-                // Normalise rect so W/H are always positive
                 if (selW_ < 0)
                 {
                     selX_ += selW_;
@@ -739,10 +772,8 @@ public:
                     selY_ += selH_;
                     selH_ = -selH_;
                 }
-
                 if (selW_ >= 2 && selH_ >= 2)
                 {
-                    // Lift the pixels out of the canvas
                     std::vector<uint8_t> base = rasterize(w_, h_);
                     int ix = int(selX_), iy = int(selY_);
                     int iw = int(selW_), ih = int(selH_);
@@ -758,7 +789,6 @@ public:
                         ih += iy;
                         iy = 0;
                     }
-
                     selPixW_ = iw;
                     selPixH_ = ih;
                     selPixels_.resize(size_t(iw) * ih * 4);
@@ -771,15 +801,12 @@ public:
                             dst[1] = src[1];
                             dst[2] = src[2];
                             dst[3] = src[3];
-                            // Punch a white hole where we lifted
                             uint8_t *hole = base.data() + ((iy + py) * w_ + (ix + px)) * 4;
                             hole[0] = 255;
                             hole[1] = 255;
                             hole[2] = 255;
                             hole[3] = 255;
                         }
-
-                    // Store punched canvas as the new single stroke
                     pushUndo();
                     freeAllGLImages();
                     strokes_.clear();
@@ -792,7 +819,6 @@ public:
                     s.imageH = h_;
                     s.imageData = std::move(base);
                     strokes_.push_back(std::move(s));
-
                     selX_ = float(ix);
                     selY_ = float(iy);
                     selW_ = float(iw);
@@ -811,9 +837,22 @@ public:
             return;
         }
 
+        // Stop spray
+        if (activeShape_ == ShapeType::Spray)
+        {
+            sprayActive_ = false;
+            sprayTimer_ = 0.0;
+            drawing_ = false;
+            current_ = nullptr;
+            redoStack_.clear();
+            if (onStrokeCommitted)
+                onStrokeCommitted();
+            return;
+        }
+
         if (current_)
         {
-            if (activeShape_ != ShapeType::Brush)
+            if (activeShape_ != ShapeType::Brush && activeShape_ != ShapeType::Pencil)
                 current_->pts.push_back({x, y});
         }
         drawing_ = false;
@@ -965,8 +1004,44 @@ public:
     int canvasW() const { return w_; }
     int canvasH() const { return h_; }
 
+    // ── Public helpers for resize dialog ──────────────────────────────────
+    void pushUndo_public() { pushUndo(); }
+    void freeAllGLImages_public() { freeAllGLImages(); }
+    std::vector<Stroke> &strokes_public() { return strokes_; }
+    void resize_public(int w, int h)
+    {
+        w_ = w;
+        h_ = h;
+    }
+
 private:
     static constexpr int kMaxUndo = 50;
+
+    // ── Spray dot emitter ─────────────────────────────────────────────────
+    void sprayDot(float cx, float cy)
+    {
+        if (!current_)
+            return;
+        // Use brushRadius_ as spray radius; density ~ radius/2 dots per tick
+        float r = brushRadius_ * 3.f;
+        int n = std::max(3, int(brushRadius_));
+        // Simple LCG-style cheap random — no stdlib random needed
+        static uint32_t seed = 12345;
+        auto rnd = [&]() -> float
+        {
+            seed = seed * 1664525u + 1013904223u;
+            return float(seed & 0xFFFF) / 65535.f; // [0,1]
+        };
+        for (int i = 0; i < n; ++i)
+        {
+            // Uniform disc sample
+            float angle = rnd() * 2.f * float(M_PI);
+            float dist = rnd() * r;
+            float px = cx + cosf(angle) * dist;
+            float py = cy + sinf(angle) * dist;
+            current_->pts.push_back({px, py});
+        }
+    }
 
     // ── Text key handler ──────────────────────────────────────────────────
     void handleTextKey(int key)
@@ -1315,6 +1390,13 @@ private:
             drawHead(x0, y0, -ux, -uy);
     }
 
+    // ── Spray tool state ──────────────────────────────────────────────────
+    double sprayTimer_ = 0.0;
+    float sprayMouseX_ = 0.f;
+    float sprayMouseY_ = 0.f;
+    bool sprayActive_ = false;
+    static constexpr double kSprayInterval = 0.025;
+
     std::vector<Stroke> strokes_;
     std::vector<std::vector<Stroke>> undoStack_;
     std::vector<std::vector<Stroke>> redoStack_;
@@ -1337,6 +1419,9 @@ class PaintApp : public Widget
     std::vector<std::shared_ptr<ButtonWidget>> shapeButtons_;
     std::vector<std::shared_ptr<ButtonWidget>> sizeButtons_;
     std::shared_ptr<ButtonWidget> eraserBtn_;
+
+    State<int> resizeW_{512};
+    State<int> resizeH_{512};
 
     State<int> selectedColor_{0};
     State<int> brushSize_{1};
@@ -1388,6 +1473,9 @@ class PaintApp : public Widget
         {"★", "Star", ShapeType::Star},
         {"→", "Arrow", ShapeType::Arrow},
         {"↔", "Double Arrow", ShapeType::DoubleArrow},
+
+        {"✏", "Pencil (1px)", ShapeType::Pencil},
+        {"💨", "Spray / Airbrush", ShapeType::Spray},
         {"⬚", "Select & Move", ShapeType::Select},
         {"✦", "Eyedropper", ShapeType::Eyedropper},
         {"🪣", "Fill Bucket", ShapeType::FillBucket},
@@ -1445,6 +1533,47 @@ class PaintApp : public Widget
         canvasSizeLabel_.set(buf);
     }
 
+void applyResize()
+    {
+        if (!surface_ || !canvas_) return;
+        int nw = std::max(1, resizeW_.get());
+        int nh = std::max(1, resizeH_.get());
+
+        std::vector<uint8_t> oldPx = surface_->rasterize(surface_->canvasW(), surface_->canvasH());
+        int oldW = surface_->canvasW(), oldH = surface_->canvasH();
+        std::vector<uint8_t> newPx(size_t(nw) * nh * 4, 255);
+        int cpW = std::min(oldW, nw), cpH = std::min(oldH, nh);
+        for (int py = 0; py < cpH; ++py)
+            for (int px = 0; px < cpW; ++px)
+            {
+                const uint8_t* src = oldPx.data() + (py * oldW + px) * 4;
+                uint8_t*       dst = newPx.data() + (py * nw  + px) * 4;
+                dst[0]=src[0]; dst[1]=src[1]; dst[2]=src[2]; dst[3]=src[3];
+            }
+
+        surface_->pushUndo_public();
+        surface_->freeAllGLImages_public();
+        surface_->strokes_public().clear();
+
+        PaintSurface::Stroke st;
+        st.shape     = ShapeType::Brush;
+        st.color     = Color::fromRGB(0, 0, 0);
+        st.radius    = 0.f;
+        st.eraser    = false;
+        st.imageW    = nw;
+        st.imageH    = nh;
+        st.imageData = std::move(newPx);
+        surface_->strokes_public().push_back(std::move(st));
+        surface_->resize_public(nw, nh);
+
+        // setCanvasSize updates vp_ canvas dims, then fitToView uses them
+        canvas_->setCanvasSize(nw, nh);
+        canvas_->viewport().setCanvasSize(nw, nh);  // ← ensure vp_ is in sync
+        canvas_->viewport().fitToView();
+        canvas_->redraw();
+        updateCanvasSizeLabel();
+        refreshUndoState();
+    }
 public:
     WidgetPtr build() override
     {
@@ -1456,6 +1585,11 @@ public:
         surface_->activeColor_ = palette_[0].color;
         surface_->brushRadius_ = kBrushSizes[1];
         surface_->activeShape_ = shapeTools_[0].type;
+
+        resizeW_.set(surface_->canvasW());
+        resizeH_.set(surface_->canvasH());
+
+        canvas_->viewport().fitToView();
 
         surface_->onStrokeCommitted = [this]()
         { refreshUndoState(); };
@@ -1751,6 +1885,30 @@ public:
                        });
                 picker->open(); });
 
+        // ── RESIZE ────────────────────────────────────────────────────────
+        auto resizeLabel = Text("RESIZE")
+                               ->setFontSize(9)
+                               ->setTextColor(Color::fromRGB(140, 140, 160))
+                               ->setPaddingLRTB(8, 8, 6, 2);
+
+        auto wInput = NumberInput(1, 8192, 1)
+                          ->setValue(resizeW_)
+                          ->setWidth(104);
+        wInput->setOnValueChanged([this](double v)
+                                  { resizeW_.set(int(v)); });
+
+        auto hInput = NumberInput(1, 8192, 1)
+                          ->setValue(resizeH_)
+                          ->setWidth(104);
+        hInput->setOnValueChanged([this](double v)
+                                  { resizeH_.set(int(v)); });
+
+        auto applyResizeBtn = Button("Apply")
+                                  ->setHeight(26)
+                                  ->setWidth(104)
+                                  ->setOnClick([this]()
+                                               { applyResize(); });
+
         // ── Save / Export ──────────────────────────────────────────────────
         auto saveLabel = Text("EXPORT")
                              ->setFontSize(9)
@@ -1840,7 +1998,7 @@ public:
                 ->setFontSize(9)
                 ->setTextColor(Color::fromRGB(140, 140, 160))
                 ->setPaddingLRTB(8, 8, 8, 4),
-            Container(shapeGrid)->setHeight(230),
+            Container(shapeGrid)->setHeight(258),
             SizedBox(0, 4),
             colorLabel,
             colorPicker_,
@@ -1853,8 +2011,16 @@ public:
             fontSizeRow,
             SizedBox(0, 6),
             openLabel,
-            fileRow,
+            openBtn,
             SizedBox(0, 4),
+            resizeLabel,
+            Text("W")->setFontSize(9)->setTextColor(Color::fromRGB(140, 140, 160))->setPaddingLRTB(8, 8, 2, 1),
+            wInput,
+            Text("H")->setFontSize(9)->setTextColor(Color::fromRGB(140, 140, 160))->setPaddingLRTB(8, 8, 2, 1),
+            hInput,
+            SizedBox(0, 2),
+            applyResizeBtn,
+            SizedBox(0, 6),
             saveLabel,
             saveRow,
             SizedBox(0, 4),
