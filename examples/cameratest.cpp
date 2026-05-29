@@ -6,8 +6,8 @@ public:
   WidgetPtr build() override {
     return Scaffold(
         AppBar("Flux App"),
-        Center(CameraView()->setWidth(380)->setHeight(270)->setOnPhoto(
-            [](const std::string &path) { std::cout << path << std::endl; })));
+        Expanded(Center(CameraView()->setWidth(380)->setHeight(270)->setOnPhoto(
+            [](const std::string &path) { std::cout << path << std::endl; }))),nullptr,nullptr);
   }
 };
 
