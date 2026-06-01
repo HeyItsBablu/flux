@@ -1,6 +1,14 @@
 #pragma once
 #include "flux_canvas2d.hpp"
 
+struct KeyEvent {
+    int   codepoint;   // printable char (Unicode), 0 if non-printable
+    int   virtualKey;  // platform-normalized key (use your Key:: enum)
+    bool  ctrl;
+    bool  shift;
+    bool  alt;
+};
+
 class RenderSurface {
 public:
   virtual ~RenderSurface() = default;
