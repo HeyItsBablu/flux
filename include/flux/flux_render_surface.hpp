@@ -35,8 +35,8 @@ public:
   virtual void onMouseMove(float, float)      {}
   virtual void onMouseUp(float, float)        {}
   virtual void onRightMouseDown(float, float) {}
-  virtual void onKeyDown(int) {}
-  virtual void onKeyUp(int)   {}
+virtual void onKeyDown(const KeyEvent&) {}
+virtual void onKeyUp(const KeyEvent&)   {}
 
   virtual bool needsContinuousRedraw() const { return false; }
 };

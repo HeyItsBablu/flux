@@ -766,6 +766,8 @@ static LRESULT CALLBACK GLProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     if (!w)
       return 0;
     bool ctrl = (GetKeyState(Key::Control) & 0x8000) != 0;
+    bool shift = (GetKeyState(Key::Shift) & 0x8000) != 0;
+    bool alt = (GetKeyState(Key::Alt) & 0x8000) != 0;
     bool consumed = false;
     if (ctrl && w->viewportEnabled_)
     {
@@ -792,23 +794,33 @@ static LRESULT CALLBACK GLProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
       }
     }
     if (!consumed && w->activeSurface_)
-      w->activeSurface_->onKeyDown(int(wp));
+    {
+      KeyEvent ke{0, int(wp), ctrl, shift, alt};
+      w->activeSurface_->onKeyDown(ke);
+    }
+    return 0;
     return 0;
   }
   case WM_KEYUP:
     if (w && w->activeSurface_)
-      w->activeSurface_->onKeyUp(int(wp));
+    {
+      KeyEvent ke{0, int(wp), false, false, false};
+      w->activeSurface_->onKeyUp(ke);
+    }
     return 0;
 
   case WM_CHAR:
   {
     if (!w || !w->activeSurface_)
       return 0;
-
     wchar_t wch = (wchar_t)wp;
     if (wch >= 32 && wch != 127)
     {
-      w->activeSurface_->onKeyDown(-(int)(unsigned char)wch);
+      bool ctrl = (GetKeyState(Key::Control) & 0x8000) != 0;
+      bool shift = (GetKeyState(Key::Shift) & 0x8000) != 0;
+      bool alt = (GetKeyState(Key::Alt) & 0x8000) != 0;
+      KeyEvent ke{int(wch), 0, ctrl, shift, alt};
+      w->activeSurface_->onKeyDown(ke);
     }
     return 0;
   }

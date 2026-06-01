@@ -776,52 +776,45 @@ public:
   }
 
   // ── Keyboard ──────────────────────────────────────────────────────────────
-  void onKeyDown(int key) override
+  void onKeyDown(const KeyEvent &e) override
   {
     if (textEditing_)
     {
-      if (key < 0)
+      if (e.codepoint >= 32 && e.codepoint != 127)
       {
-        // Printable character from WM_CHAR (Win32 sends negative = -(unsigned char))
-        char ch = char(-(key));
-        if (ch >= 32 && ch != 127)
-        {
-          textEdit_.text += ch;
-          textEdit_.cursorVisible = true;
-          textEdit_.cursorBlinkTimer = 0.0;
-        }
+        textEdit_.text += char(e.codepoint);
+        textEdit_.cursorVisible = true;
+        textEdit_.cursorBlinkTimer = 0.0;
       }
       else
       {
-        switch (key)
+        switch (e.virtualKey)
         {
-        case 0x08: // VK_BACK — backspace
+        case Key::Backspace:
           if (!textEdit_.text.empty())
             textEdit_.text.pop_back();
           textEdit_.cursorVisible = true;
           textEdit_.cursorBlinkTimer = 0.0;
           break;
-
-        case 0x0D: // VK_RETURN — commit text
+        case Key::Return:
           commitTextEdit();
           break;
-
-        case 0x1B: // VK_ESCAPE — discard without committing
+        case Key::Escape:
           textEditing_ = false;
           textEdit_.text.clear();
           break;
-
         default:
           break;
         }
       }
-      return; // consume all keys while editing
+      return;
     }
 
-    // Pass through to app-level handler when not editing text
     if (onKeyDownCallback)
-      onKeyDownCallback(key);
+      onKeyDownCallback(e.virtualKey);
   }
+
+  void onKeyUp(const KeyEvent &) override {}
 
   // ── Render ────────────────────────────────────────────────────────────────
   void render(Canvas2D &ctx) override
@@ -974,8 +967,6 @@ public:
   {
     return textEditing_ || hasSelection_ || selDragging_ || selMoving_;
   }
-
-  void onKeyUp(int) override {}
 
   // ── Public helpers (used by PaintApp) ─────────────────────────────────────
   void pushUndo_public() { pushUndo(); }
