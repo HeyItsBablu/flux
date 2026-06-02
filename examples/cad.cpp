@@ -1,6 +1,6 @@
 #pragma once
 // ============================================================================
-// flux_cad_surface.hpp  — 
+// flux_cad_surface.hpp  —
 // ============================================================================
 
 #include "flux/flux.hpp"
@@ -1263,5 +1263,3 @@ WidgetPtr createApp(FluxUI *app)
         1280, 800,
         false, true);
 }
-
-

@@ -12,6 +12,8 @@
 #include <functional>
 #include <string>
 #include <vector>
+#include <fstream>
+#include <sstream>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -51,6 +53,8 @@ struct CircuitNode
 
   // per-input driven values (size == inputCount())
   std::vector<bool> inputVals;
+
+  std::string label;
 
   // drag helpers
   float dragOX = 0, dragOY = 0;
@@ -144,6 +148,197 @@ public:
   // ── Node / wire access ────────────────────────────────────────────────
   std::vector<CircuitNode> &nodes() { return nodes_; }
   std::vector<CircuitWire> &wires() { return wires_; }
+
+  // ── JSON serialization ────────────────────────────────────────────────
+  // Serialize the current circuit to a JSON string.
+  std::string toJson() const
+  {
+    // Build node type => string map
+    auto typeStr = [](CircuitNodeType t) -> const char *
+    {
+      switch (t)
+      {
+      case CircuitNodeType::AND:
+        return "AND";
+      case CircuitNodeType::OR:
+        return "OR";
+      case CircuitNodeType::NOT:
+        return "NOT";
+      case CircuitNodeType::NAND:
+        return "NAND";
+      case CircuitNodeType::NOR:
+        return "NOR";
+      case CircuitNodeType::XOR:
+        return "XOR";
+      case CircuitNodeType::XNOR:
+        return "XNOR";
+      case CircuitNodeType::Input:
+        return "Input";
+      case CircuitNodeType::Output:
+        return "Output";
+      }
+      return "AND";
+    };
+
+    std::ostringstream o;
+    o << "{\n  \"nextId\": " << nextId_ << ",\n";
+
+    // nodes array
+    o << "  \"nodes\": [\n";
+    for (int i = 0; i < (int)nodes_.size(); ++i)
+    {
+      const auto &n = nodes_[i];
+      o << "    {"
+        << "\"id\": " << n.id << ", "
+        << "\"type\": \"" << typeStr(n.type) << "\", "
+        << "\"x\": " << n.x << ", "
+        << "\"y\": " << n.y << ", "
+        << "\"value\": " << (n.value ? "true" : "false") << ", "
+        << "\"label\": \"" << n.label << "\""
+        << "}";
+      if (i + 1 < (int)nodes_.size())
+        o << ",";
+      o << "\n";
+    }
+    o << "  ],\n";
+
+    // wires array
+    o << "  \"wires\": [\n";
+    for (int i = 0; i < (int)wires_.size(); ++i)
+    {
+      const auto &w = wires_[i];
+      o << "    {"
+        << "\"from\": " << w.fromNodeId << ", "
+        << "\"to\": " << w.toNodeId << ", "
+        << "\"port\": " << w.toPortIndex
+        << "}";
+      if (i + 1 < (int)wires_.size())
+        o << ",";
+      o << "\n";
+    }
+    o << "  ]\n}\n";
+    return o.str();
+  }
+
+  // Load a circuit from a JSON string. Returns false and leaves state
+  // unchanged on parse error.
+  bool loadFromJson(const std::string &json)
+  {
+    auto strToType = [](const std::string &s) -> CircuitNodeType
+    {
+      if (s == "OR")
+        return CircuitNodeType::OR;
+      if (s == "NOT")
+        return CircuitNodeType::NOT;
+      if (s == "NAND")
+        return CircuitNodeType::NAND;
+      if (s == "NOR")
+        return CircuitNodeType::NOR;
+      if (s == "XOR")
+        return CircuitNodeType::XOR;
+      if (s == "XNOR")
+        return CircuitNodeType::XNOR;
+      if (s == "Input")
+        return CircuitNodeType::Input;
+      if (s == "Output")
+        return CircuitNodeType::Output;
+      return CircuitNodeType::AND;
+    };
+
+    JsonValue root;
+    if (!JsonParser::tryParse(json, root) || !root.isObject())
+      return false;
+
+    std::vector<CircuitNode> newNodes;
+    std::vector<CircuitWire> newWires;
+    int newNextId = 1;
+
+    // nextId
+    if (auto *v = root.get("nextId"))
+      newNextId = v->getInt(1);
+
+    // nodes
+    if (auto *arr = root.get("nodes"))
+    {
+      if (!arr->isArray())
+        return false;
+      for (size_t i = 0; i < arr->size(); ++i)
+      {
+        const JsonValue &jn = (*arr)[i];
+        if (!jn.isObject())
+          return false;
+
+        CircuitNode n;
+        if (auto *v = jn.get("id"))
+          n.id = v->getInt();
+        if (auto *v = jn.get("type"))
+          n.type = strToType(v->getString());
+        if (auto *v = jn.get("x"))
+          n.x = (float)v->getNumber();
+        if (auto *v = jn.get("y"))
+          n.y = (float)v->getNumber();
+        if (auto *v = jn.get("value"))
+          n.value = v->getBool();
+        if (auto *v = jn.get("label"))
+          n.label = v->getString();
+
+        nodeDims(n.type, n.w, n.h);
+        n.inputVals.assign(n.inputCount(), false);
+        newNodes.push_back(std::move(n));
+      }
+    }
+
+    // wires
+    if (auto *arr = root.get("wires"))
+    {
+      if (!arr->isArray())
+        return false;
+      for (size_t i = 0; i < arr->size(); ++i)
+      {
+        const JsonValue &jw = (*arr)[i];
+        if (!jw.isObject())
+          return false;
+
+        CircuitWire w;
+        if (auto *v = jw.get("from"))
+          w.fromNodeId = v->getInt();
+        if (auto *v = jw.get("to"))
+          w.toNodeId = v->getInt();
+        if (auto *v = jw.get("port"))
+          w.toPortIndex = v->getInt();
+        newWires.push_back(w);
+      }
+    }
+
+    // Commit — only if parsing fully succeeded
+    pushUndo();
+    nodes_ = std::move(newNodes);
+    wires_ = std::move(newWires);
+    nextId_ = newNextId;
+    evaluate();
+    notify();
+    return true;
+  }
+
+  // ── File I/O ──────────────────────────────────────────────────────────
+  bool saveToFile(const std::string &path) const
+  {
+    std::ofstream f(path, std::ios::out | std::ios::trunc);
+    if (!f)
+      return false;
+    f << toJson();
+    return f.good();
+  }
+
+  bool loadFromFile(const std::string &path)
+  {
+    std::ifstream f(path);
+    if (!f)
+      return false;
+    std::ostringstream ss;
+    ss << f.rdbuf();
+    return loadFromJson(ss.str());
+  }
 
   void clear()
   {
@@ -252,6 +447,59 @@ public:
     notify();
   }
 
+  void commitTextEdit()
+  {
+    if (!textEditing_)
+      return;
+    textEditing_ = false;
+    CircuitNode *n = findNode(textEdit_.nodeId);
+    if (n)
+    {
+      pushUndo();
+      n->label = textEdit_.text; // empty string = revert to default gate name
+    }
+    textEdit_ = {};
+    notify();
+  }
+
+  void startTextEdit(CircuitNode *n)
+  {
+    if (textEditing_)
+      commitTextEdit();
+    textEditing_ = true;
+    textEdit_.nodeId = n->id;
+    // pre-populate with existing label (or default name if none set)
+    textEdit_.text = n->label.empty() ? defaultName(n->type) : n->label;
+    textEdit_.cursorVisible = true;
+    textEdit_.blinkTimer = 0.0;
+  }
+
+  static const char *defaultName(CircuitNodeType t)
+  {
+    switch (t)
+    {
+    case CircuitNodeType::AND:
+      return "AND";
+    case CircuitNodeType::OR:
+      return "OR";
+    case CircuitNodeType::NOT:
+      return "NOT";
+    case CircuitNodeType::NAND:
+      return "NAND";
+    case CircuitNodeType::NOR:
+      return "NOR";
+    case CircuitNodeType::XOR:
+      return "XOR";
+    case CircuitNodeType::XNOR:
+      return "XNOR";
+    case CircuitNodeType::Input:
+      return "IN";
+    case CircuitNodeType::Output:
+      return "OUT";
+    }
+    return "";
+  }
+
   // ── RenderSurface ─────────────────────────────────────────────────────
   void initialize(int w, int h) override
   {
@@ -270,12 +518,26 @@ public:
     undoNodes_.clear();
     redoNodes_.clear();
   }
-  void update(double) override {}
-  bool needsContinuousRedraw() const override { return false; }
+  void update(double dt) override
+  {
+    if (!textEditing_)
+      return;
+    textEdit_.blinkTimer += dt;
+    if (textEdit_.blinkTimer >= 0.53)
+    {
+      textEdit_.blinkTimer = 0.0;
+      textEdit_.cursorVisible = !textEdit_.cursorVisible;
+    }
+  }
+  bool needsContinuousRedraw() const override { return textEditing_; }
 
   // ── Mouse ─────────────────────────────────────────────────────────────
   void onMouseDown(float x, float y) override
   {
+
+    if (textEditing_)
+      commitTextEdit();
+
     mouseDownX_ = x;
     mouseDownY_ = y;
     curX_ = x;
@@ -440,16 +702,44 @@ public:
       if (std::abs(dx) < 4.f && std::abs(dy) < 4.f)
       {
         CircuitNode *n = hitNode(x, y);
-        if (n && n->type == CircuitNodeType::Input)
+        if (n)
         {
-          pushUndo();
-          n->value = !n->value;
-          evaluate();
-          notify();
+          uint32_t now = platformTickCount();
+          bool isDoubleClick = (now - lastClickTime_ < 350 &&
+                                lastClickNodeId_ == n->id);
+          lastClickTime_ = now;
+          lastClickNodeId_ = n->id;
+
+          if (isDoubleClick)
+          {
+            // Double-click on ANY node => rename
+            startTextEdit(n);
+          }
+          else
+          {
+            // Single click on Input => toggle value
+            if (n->type == CircuitNodeType::Input)
+            {
+              pushUndo();
+              n->value = !n->value;
+              evaluate();
+              notify();
+            }
+            // Single click on any other node => no action (just select)
+          }
+        }
+        else
+        {
+          // Clicked empty space — reset double-click tracking
+          lastClickTime_ = 0;
+          lastClickNodeId_ = -1;
         }
       }
       else
       {
+        // Was a drag, not a click — reset double-click tracking
+        lastClickTime_ = 0;
+        lastClickNodeId_ = -1;
         notify();
       }
     }
@@ -465,7 +755,7 @@ public:
         if (n.x >= rx0 && n.y >= ry0 && n.x + n.w <= rx1 && n.y + n.h <= ry1)
           n.selected = true;
       }
-      // Also select wires whose both endpoints fall within the rubber band
+
       for (auto &w : wires_)
       {
         const CircuitNode *src = findNodeConst(w.fromNodeId);
@@ -484,6 +774,40 @@ public:
 
   void onKeyDown(const KeyEvent &e) override
   {
+
+    if (textEditing_)
+    {
+      if (e.codepoint >= 32 && e.codepoint != 127)
+      {
+        textEdit_.text += char(e.codepoint);
+        textEdit_.cursorVisible = true;
+        textEdit_.blinkTimer = 0.0;
+        notify();
+      }
+      else
+        switch (e.virtualKey)
+        {
+        case Key::Backspace:
+          if (!textEdit_.text.empty())
+            textEdit_.text.pop_back();
+          textEdit_.cursorVisible = true;
+          textEdit_.blinkTimer = 0.0;
+          notify();
+          break;
+        case Key::Return:
+          commitTextEdit();
+          break;
+        case Key::Escape:
+          textEditing_ = false;
+          textEdit_ = {};
+          notify();
+          break;
+        default:
+          break;
+        }
+      return; // swallow all keys while editing
+    }
+
     if (e.virtualKey == Key::Delete || e.virtualKey == Key::Backspace)
     {
       pushUndo();
@@ -527,11 +851,22 @@ public:
 
     if (rubberBand_)
       drawRubberBand(ctx);
-
-    drawCrosshair(ctx);
   }
 
 private:
+  struct TextEditState
+  {
+    int nodeId = -1;  // which node is being renamed
+    std::string text; // current edit buffer
+    double blinkTimer = 0.0;
+    bool cursorVisible = true;
+  };
+  bool textEditing_ = false;
+  TextEditState textEdit_;
+
+  uint32_t lastClickTime_ = 0;
+  int lastClickNodeId_ = -1;
+
   // ── Node dimensions ───────────────────────────────────────────────────
   static void nodeDims(CircuitNodeType type, float &w, float &h)
   {
@@ -803,24 +1138,6 @@ private:
     }
   }
 
-  void drawCrosshair(Canvas2D &ctx) const
-  {
-    float cx = curX_, cy = curY_;
-    float lw = 1.f / currentZoom_;
-    float arm = 12.f / currentZoom_;
-    float gap = 4.f / currentZoom_;
-    ctx.setStrokeColor(Color::fromRGBA(255, 255, 255, 140));
-    ctx.setLineWidth(lw);
-    auto seg = [&](float ax, float ay, float bx, float by)
-    { ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(bx,by); ctx.stroke(); };
-    seg(cx - arm, cy, cx - gap, cy);
-    seg(cx + gap, cy, cx + arm, cy);
-    seg(cx, cy - arm, cx, cy - gap);
-    seg(cx, cy + gap, cx, cy + arm);
-    ctx.setFillColor(Color::fromRGBA(255, 255, 255, 180));
-    ctx.fillCircle(cx, cy, lw * 1.5f);
-  }
-
   void drawRubberBand(Canvas2D &ctx) const
   {
     float rx0 = rubberW_ < 0 ? rubberX_ + rubberW_ : rubberX_;
@@ -834,6 +1151,48 @@ private:
     ctx.strokeRect(rx0, ry0, rw, rh);
   }
 
+  void drawNodeTextEdit(Canvas2D &ctx, const CircuitNode &n) const
+  {
+    float fs = 11.f / currentZoom_;
+    char font[32];
+    snprintf(font, sizeof(font), "%.0fpx sans", fs);
+    ctx.setFont(font);
+    ctx.setTextBaseline(TextBaseline::Top);
+
+    float ty = n.y + n.h + 3.f / currentZoom_;
+    float tw = ctx.measureText(textEdit_.text.c_str());
+
+    // background pill
+    float pad = 3.f / currentZoom_;
+    ctx.setFillColor(Color::fromRGBA(20, 30, 55, 220));
+    ctx.fillRect(n.x + n.w * 0.5f - tw * 0.5f - pad,
+                 ty - pad,
+                 tw + pad * 2.f + fs,
+                 fs + pad * 2.f);
+
+    // text
+    ctx.setFillColor(Color::fromRGB(180, 210, 255));
+    ctx.fillText(textEdit_.text.c_str(),
+                 n.x + n.w * 0.5f - tw * 0.5f, ty);
+
+    // blinking cursor
+    if (textEdit_.cursorVisible)
+    {
+      ctx.setFillColor(Color::fromRGB(100, 180, 255));
+      ctx.fillRect(n.x + n.w * 0.5f - tw * 0.5f + tw + 1.f / currentZoom_,
+                   ty,
+                   1.5f / currentZoom_,
+                   fs);
+    }
+
+    // underline
+    ctx.setFillColor(Color::fromRGBA(80, 160, 255, 120));
+    ctx.fillRect(n.x + n.w * 0.5f - tw * 0.5f - pad,
+                 ty + fs + 1.f / currentZoom_,
+                 tw + pad * 2.f + fs,
+                 1.f / currentZoom_);
+  }
+
   // ── Gate color helpers ────────────────────────────────────────────────
   static Color gateBodyColor() { return Color::fromRGB(22, 22, 30); }
   static Color gateStrokeColor() { return Color::fromRGB(160, 160, 180); }
@@ -843,7 +1202,7 @@ private:
   static Color portHoverColor() { return Color::fromRGB(240, 160, 40); }
   static Color wireColor() { return Color::fromRGBA(100, 100, 120, 200); }
   static Color wireActiveColor() { return Color::fromRGB(60, 200, 120); }
-  static Color wireSelColor() { return Color::fromRGB(80, 160, 255); } // selected wire
+  static Color wireSelColor() { return Color::fromRGB(80, 160, 255); }
   static Color labelColor() { return Color::fromRGBA(140, 140, 160, 200); }
 
   void drawNode(Canvas2D &ctx, const CircuitNode &n) const
@@ -889,44 +1248,35 @@ private:
 
     // Gate label (below body)
     {
-      const char *gateLabel = nullptr;
-      switch (n.type)
-      {
-      case CircuitNodeType::AND:
-        gateLabel = "AND";
-        break;
-      case CircuitNodeType::OR:
-        gateLabel = "OR";
-        break;
-      case CircuitNodeType::NOT:
-        gateLabel = "NOT";
-        break;
-      case CircuitNodeType::NAND:
-        gateLabel = "NAND";
-        break;
-      case CircuitNodeType::NOR:
-        gateLabel = "NOR";
-        break;
-      case CircuitNodeType::XOR:
-        gateLabel = "XOR";
-        break;
-      case CircuitNodeType::XNOR:
-        gateLabel = "XNOR";
-        break;
-      default:
-        break;
-      }
-      if (gateLabel)
+      const char *gateName = defaultName(n.type);
+      // show custom label if set, otherwise the gate type name
+      const std::string &displayLabel = n.label.empty()
+                                            ? std::string(gateName ? gateName : "")
+                                            : n.label;
+
+      // skip for Input/Output (they have their own "IN"/"OUT" rendering)
+      bool hasBuiltinLabel = (n.type == CircuitNodeType::Input ||
+                              n.type == CircuitNodeType::Output);
+      if (!displayLabel.empty() && !hasBuiltinLabel)
       {
         char font[32];
         snprintf(font, sizeof(font), "%.0fpx sans", fs);
         ctx.setFont(font);
         ctx.setTextBaseline(TextBaseline::Top);
-        ctx.setFillColor(labelColor());
-        ctx.fillText(gateLabel,
-                     n.x + n.w * 0.5f - ctx.measureText(gateLabel) * 0.5f,
+        // highlight label area if this node is being edited
+        bool editing = textEditing_ && textEdit_.nodeId == n.id;
+        ctx.setFillColor(editing
+                             ? Color::fromRGBA(80, 160, 255, 220)
+                             : labelColor());
+        float tw = ctx.measureText(displayLabel.c_str());
+        ctx.fillText(displayLabel.c_str(),
+                     n.x + n.w * 0.5f - tw * 0.5f,
                      n.y + n.h + 3.f / currentZoom_);
       }
+
+      // draw live text edit cursor + text when editing
+      if (textEditing_ && textEdit_.nodeId == n.id)
+        drawNodeTextEdit(ctx, n);
     }
 
     // Input stubs + ports
@@ -1346,6 +1696,8 @@ public:
 
     std::weak_ptr<CircuitSurface> ws = surface_;
     std::weak_ptr<CanvasWidget> wc = canvas_;
+    std::weak_ptr<CircuitSurface> wsSave = surface_;
+    std::weak_ptr<CircuitSurface> wsOpen = surface_;
 
     surface_->onChanged = [this]
     { canvas_->redraw(); };
@@ -1384,7 +1736,7 @@ public:
     {
       if (gd.divider)
       {
-        sideCol->addChild(Container(SizedBox(42, 1))->setBackgroundColor(Color::fromRGBA(60, 60, 75, 255)));
+        sideCol->addChild(Container()->setWidth(86)->setHeight(1)->setBackgroundColor(Color::fromRGBA(60, 60, 75, 255)));
         sideCol->addChild(SizedBox(0, 3));
         continue;
       }
@@ -1394,7 +1746,7 @@ public:
 
       auto btn = Button(lb)
                      ->setHeight(34)
-                     ->setWidth(58)
+                     ->setWidth(68)
                      ->setBackgroundColor(kInactiveBg)
                      ->setOnClick([this, ws, wc, t]()
                                   {
@@ -1411,7 +1763,38 @@ public:
       sideCol->addChild(btn);
     }
 
-    auto sidebar = Container(Column({Container(sideCol)->setHeight(420)}))->setWidth(76)->setBackgroundColor(kSidebarBg);
+    auto sidebar = Container(Column({Container(sideCol)->setHeight(420)}))->setWidth(86)->setBackgroundColor(kSidebarBg);
+
+    // Save button — opens native "Save As" dialog
+    auto savePicker = FilePicker("Save")
+                          ->setMode(FilePickerMode::Save)
+                          ->setTitle("Save Circuit")
+                          ->setDefaultFilename("circuit.json")
+                          ->setDefaultExtension("json")
+                          ->addFilter("Circuit JSON", {"*.json"})
+                          ->addFilter("All Files", {"*.*"})
+                          ->setShowPath(false)
+                          ->setHeight(26)
+                          ->setOnChanged([wsSave](const std::string &path)
+                                         {
+        if (auto s = wsSave.lock())
+            s->saveToFile(path); });
+
+    // Open button — opens native "Open" dialog
+    auto openPicker = FilePicker("Open")
+                          ->setMode(FilePickerMode::Open)
+                          ->setTitle("Open Circuit")
+                          ->setDefaultExtension("json")
+                          ->addFilter("Circuit JSON", {"*.json"})
+                          ->addFilter("All Files", {"*.*"})
+                          ->setShowPath(false)
+                          ->setHeight(26)
+                          ->setOnChanged([wsOpen, wc](const std::string &path)
+                                         {
+        if (auto s = wsOpen.lock())
+            s->loadFromFile(path);
+        if (auto c = wc.lock())
+            c->redraw(); });
 
     // ── Mode buttons ──────────────────────────────────────────────────
     struct ModeInfo
@@ -1454,6 +1837,10 @@ public:
     auto toolbar = Container(
                        Row({
                                Text("Circuit")->setFontSize(12)->setTextColor(Color::fromRGB(160, 160, 180)),
+                               SizedBox(8, 0),
+                               savePicker,
+                               SizedBox(2, 0),
+                               openPicker,
                                SizedBox(10, 0),
                                undoBtn,
                                SizedBox(2, 0),
