@@ -14,6 +14,8 @@
 #include <vector>
 #include <fstream>
 #include <sstream>
+#include <unordered_map>
+#include <unordered_set>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -283,6 +285,8 @@ public:
           n.label = v->getString();
 
         nodeDims(n.type, n.w, n.h);
+        n.x = snapX(n.x, n.w); //  snap legacy positions
+        n.y = snapY(n.y, n.h); //  snap legacy positions
         n.inputVals.assign(n.inputCount(), false);
         newNodes.push_back(std::move(n));
       }
@@ -338,6 +342,127 @@ public:
     std::ostringstream ss;
     ss << f.rdbuf();
     return loadFromJson(ss.str());
+  }
+
+  // ── Copy / Paste ──────────────────────────────────────────────────────
+  bool hasClipboard() const { return !clipboard_.empty(); }
+
+  void copySelected()
+  {
+    // Collect selected nodes
+    std::vector<const CircuitNode *> sel;
+    for (auto &n : nodes_)
+      if (n.selected)
+        sel.push_back(&n);
+    if (sel.empty())
+      return;
+
+    // Compute centroid so paste lands near the same area
+    float cx = 0, cy = 0;
+    for (auto *n : sel)
+    {
+      cx += n->x + n->w * 0.5f;
+      cy += n->y + n->h * 0.5f;
+    }
+    cx /= float(sel.size());
+    cy /= float(sel.size());
+
+    // Build a set of selected IDs for wire filtering
+    std::unordered_set<int> selIds;
+    for (auto *n : sel)
+      selIds.insert(n->id);
+
+    // Assign stable clip-IDs (1-based, independent of nextId_)
+    // Map: real node id -> clipId
+    std::unordered_map<int, int> idMap;
+    int clipCounter = 1;
+    for (auto *n : sel)
+      idMap[n->id] = clipCounter++;
+
+    clipboard_.clear();
+    clipboardWires_.clear();
+    pasteOffsetAccum_ = 0.f; // reset stagger on fresh copy
+
+    for (auto *n : sel)
+    {
+      ClipboardEntry e;
+      e.type = n->type;
+      e.x = (n->x + n->w * 0.5f) - cx; // offset from centroid
+      e.y = (n->y + n->h * 0.5f) - cy;
+      e.value = n->value;
+      e.label = n->label;
+      e.clipId = idMap[n->id];
+      clipboard_.push_back(e);
+    }
+
+    // Only keep wires entirely within the selection
+    for (auto &w : wires_)
+    {
+      if (selIds.count(w.fromNodeId) && selIds.count(w.toNodeId))
+      {
+        ClipboardWire cw;
+        cw.fromClipId = idMap[w.fromNodeId];
+        cw.toClipId = idMap[w.toNodeId];
+        cw.toPortIndex = w.toPortIndex;
+        clipboardWires_.push_back(cw);
+      }
+    }
+  }
+
+  void pasteClipboard()
+  {
+    if (clipboard_.empty())
+      return;
+    pushUndo();
+
+    // Each successive paste of the same copy shifts by another 40 units
+    pasteOffsetAccum_ += 40.f;
+    float ox = viewOffsetX_ + viewW_ / (currentZoom_ * 2.f) + pasteOffsetAccum_;
+    float oy = viewOffsetY_ + viewH_ / (currentZoom_ * 2.f) + pasteOffsetAccum_;
+
+    // Map clipId -> newly allocated real node id
+    std::unordered_map<int, int> clipToReal;
+
+    // Deselect everything first
+    deselectAll();
+
+    // Create new nodes
+    for (auto &e : clipboard_)
+    {
+      CircuitNode n;
+      n.id = nextId_++;
+      n.type = e.type;
+      float nw, nh;
+      nodeDims(e.type, nw, nh);
+      n.w = nw;
+      n.h = nh;
+
+      n.x = snapX(ox + e.x - nw * 0.5f, nw); //  snap
+      n.y = snapY(oy + e.y - nh * 0.5f, nh); //  snap
+      n.value = e.value;
+      n.label = e.label;
+      n.inputVals.assign(n.inputCount(), false);
+      n.selected = true; // paste selects the new nodes
+      clipToReal[e.clipId] = n.id;
+      nodes_.push_back(std::move(n));
+    }
+
+    // Recreate internal wires with new IDs
+    for (auto &cw : clipboardWires_)
+    {
+      auto itF = clipToReal.find(cw.fromClipId);
+      auto itT = clipToReal.find(cw.toClipId);
+      if (itF == clipToReal.end() || itT == clipToReal.end())
+        continue;
+      CircuitWire w;
+      w.fromNodeId = itF->second;
+      w.toNodeId = itT->second;
+      w.toPortIndex = cw.toPortIndex;
+      wires_.push_back(w);
+    }
+
+    evaluate();
+    notify();
   }
 
   void clear()
@@ -411,6 +536,8 @@ public:
     n.x = wx;
     n.y = wy;
     nodeDims(type, n.w, n.h);
+    n.x = snapX(wx, n.w);
+    n.y = snapY(wy, n.h);
     n.inputVals.assign(n.inputCount(), false);
     nodes_.push_back(std::move(n));
     evaluate();
@@ -680,11 +807,14 @@ public:
     {
       float dx = x - dragStartX_, dy = y - dragStartY_;
       for (auto &n : nodes_)
-        if (n.selected)
-        {
-          n.x = n.dragOX + dx;
-          n.y = n.dragOY + dy;
-        }
+      {
+        if (!n.selected)
+          continue;
+        float rawX = n.dragOX + dx;
+        float rawY = n.dragOY + dy;
+        n.x = snapX(rawX, n.w);
+        n.y = snapY(rawY, n.h);
+      }
     }
     else if (rubberBand_)
     {
@@ -825,6 +955,17 @@ public:
       e.shift ? redo() : undo();
       return;
     }
+
+    if (e.ctrl && e.virtualKey == 'C')
+    {
+      copySelected();
+      return;
+    }
+    if (e.ctrl && e.virtualKey == 'V')
+    {
+      pasteClipboard();
+      return;
+    }
   }
   void onKeyUp(const KeyEvent &) override {}
 
@@ -866,6 +1007,23 @@ private:
 
   uint32_t lastClickTime_ = 0;
   int lastClickNodeId_ = -1;
+
+  // ── Grid snapping ─────────────────────────────────────────────────────
+  static constexpr float kSnapGrid = 64.f;
+
+  static float snap(float v)
+  {
+    return std::round(v / kSnapGrid) * kSnapGrid;
+  }
+  static float snapX(float x, float w)
+  {
+    // Snap the left edge so the centre lands on a grid crossing
+    return snap(x + w * 0.5f) - w * 0.5f;
+  }
+  static float snapY(float y, float h)
+  {
+    return snap(y + h * 0.5f) - h * 0.5f;
+  }
 
   // ── Node dimensions ───────────────────────────────────────────────────
   static void nodeDims(CircuitNodeType type, float &w, float &h)
@@ -924,7 +1082,9 @@ private:
   // ── Wire hit testing (sample bezier) ──────────────────────────────────
   int hitWire(float mx, float my) const
   {
-    const float thresh = 8.f / currentZoom_;
+    const float thresh = 6.f / currentZoom_;
+    const float stub = 24.f / currentZoom_;
+
     for (int i = int(wires_.size()) - 1; i >= 0; --i)
     {
       const CircuitWire &w = wires_[i];
@@ -935,23 +1095,50 @@ private:
 
       Pt p0 = outputPortPos(*src);
       Pt p1 = inputPortPos(*dst, w.toPortIndex);
-      float cx = (p0.x + p1.x) * 0.5f;
 
-      // Sample along the cubic bezier: P(t) with control pts (cx,p0.y) and (cx,p1.y)
-      const int steps = 40;
-      for (int s = 0; s <= steps; ++s)
+      float x0 = p0.x, y0 = p0.y;
+      float x1 = p1.x, y1 = p1.y;
+      float ax = x0 + stub;
+      float bx = x1 - stub;
+
+      // Build the polyline segments and test each one
+      // segTest: returns true if point (mx,my) is within thresh of segment (sx0,sy0)-(sx1,sy1)
+      auto segTest = [&](float sx0, float sy0, float sx1, float sy1) -> bool
       {
-        float t = float(s) / float(steps);
-        float u = 1.f - t;
-        float bx = u * u * u * p0.x + 3 * u * u * t * cx + 3 * u * t * t * cx + t * t * t * p1.x;
-        float by = u * u * u * p0.y + 3 * u * u * t * p0.y + 3 * u * t * t * p1.y + t * t * t * p1.y;
-        if (std::hypot(mx - bx, my - by) < thresh)
-          return i;
+        float dx = sx1 - sx0, dy = sy1 - sy0;
+        float len2 = dx * dx + dy * dy;
+        if (len2 < 1e-6f)
+          return std::hypot(mx - sx0, my - sy0) < thresh;
+        float t = ((mx - sx0) * dx + (my - sy0) * dy) / len2;
+        t = std::max(0.f, std::min(1.f, t));
+        float px = sx0 + t * dx, py = sy0 + t * dy;
+        return std::hypot(mx - px, my - py) < thresh;
+      };
+
+      bool hit = false;
+      if (ax <= bx)
+      {
+        float midX = (ax + bx) * 0.5f;
+        hit = segTest(x0, y0, ax, y0) ||
+              segTest(ax, y0, midX, y0) ||
+              segTest(midX, y0, midX, y1) ||
+              segTest(midX, y1, bx, y1) ||
+              segTest(bx, y1, x1, y1);
       }
+      else
+      {
+        float midY = (y0 + y1) * 0.5f;
+        hit = segTest(x0, y0, ax, y0) ||
+              segTest(ax, y0, ax, midY) ||
+              segTest(ax, midY, bx, midY) ||
+              segTest(bx, midY, bx, y1) ||
+              segTest(bx, y1, x1, y1);
+      }
+      if (hit)
+        return i;
     }
     return -1;
   }
-
   // ── Logic evaluation ──────────────────────────────────────────────────
   void evaluate()
   {
@@ -1510,7 +1697,7 @@ private:
 
     Pt p0 = outputPortPos(*src);
     Pt p1 = inputPortPos(*dst, w.toPortIndex);
-    drawBezierWire(ctx, p0.x, p0.y, p1.x, p1.y, src->value, false, w.selected);
+    drawOrthogonalWire(ctx, p0.x, p0.y, p1.x, p1.y, src->value, false, w.selected);
   }
 
   void drawWirePreview(Canvas2D &ctx) const
@@ -1538,13 +1725,14 @@ private:
       x0 = p.x;
       y0 = p.y;
     }
-    drawBezierWire(ctx, x0, y0, curX_, curY_, false, true, false);
+    drawOrthogonalWire(ctx, x0, y0, curX_, curY_, false, true, false);
   }
 
-  void drawBezierWire(Canvas2D &ctx,
-                      float x0, float y0, float x1, float y1,
-                      bool active, bool preview, bool selected) const
+  void drawOrthogonalWire(Canvas2D &ctx,
+                          float x0, float y0, float x1, float y1,
+                          bool active, bool preview, bool selected) const
   {
+    // ── Visual style ──────────────────────────────────────────────────
     float lw;
     Color c;
     if (selected)
@@ -1569,24 +1757,77 @@ private:
     }
     ctx.setStrokeColor(c);
     ctx.setLineWidth(lw);
-    float cx = (x0 + x1) * 0.5f;
+
+    // ── Orthogonal routing ────────────────────────────────────────────
+
+    const float stub = 24.f / currentZoom_;
+
+    float ax = x0 + stub; // end of output stub
+    float bx = x1 - stub; // end of input stub
+
     ctx.beginPath();
     ctx.moveTo(x0, y0);
-    ctx.bezierCurveTo(cx, y0, cx, y1, x1, y1);
+
+    if (ax <= bx)
+    {
+      // Normal case: destination is comfortably to the right.
+      float midX = (ax + bx) * 0.5f;
+      ctx.lineTo(ax, y0);
+      ctx.lineTo(midX, y0);
+      ctx.lineTo(midX, y1);
+      ctx.lineTo(bx, y1);
+      ctx.lineTo(x1, y1);
+    }
+    else
+    {
+      // Back-routing case: destination is to the left or very close.
+      // Dog-leg around using the vertical midpoint between y0 and y1.
+
+      float midY = (y0 + y1) * 0.5f;
+      ctx.lineTo(ax, y0);
+      ctx.lineTo(ax, midY);
+      ctx.lineTo(bx, midY);
+      ctx.lineTo(bx, y1);
+      ctx.lineTo(x1, y1);
+    }
+
     ctx.stroke();
 
-    // Draw a small selection halo underneath when selected
+    // ── Selection halo ────────────────────────────────────────────────
     if (selected)
     {
       ctx.setStrokeColor(Color::fromRGBA(80, 160, 255, 40));
       ctx.setLineWidth(8.f / currentZoom_);
+
       ctx.beginPath();
       ctx.moveTo(x0, y0);
-      ctx.bezierCurveTo(cx, y0, cx, y1, x1, y1);
+
+      if (x0 + stub <= x1 - stub)
+      {
+        float ax2 = x0 + stub;
+        float bx2 = x1 - stub;
+        float midX = (ax2 + bx2) * 0.5f;
+        ctx.lineTo(ax2, y0);
+        ctx.lineTo(midX, y0);
+        ctx.lineTo(midX, y1);
+        ctx.lineTo(bx2, y1);
+        ctx.lineTo(x1, y1);
+      }
+      else
+      {
+        float ax2 = x0 + stub;
+        float bx2 = x1 - stub;
+        float midY = (y0 + y1) * 0.5f;
+        ctx.lineTo(ax2, y0);
+        ctx.lineTo(ax2, midY);
+        ctx.lineTo(bx2, midY);
+        ctx.lineTo(bx2, y1);
+        ctx.lineTo(x1, y1);
+      }
+
       ctx.stroke();
     }
   }
-
   // ── Undo helpers ──────────────────────────────────────────────────────
   void pushUndo()
   {
@@ -1608,6 +1849,26 @@ private:
 
   using Snapshot = std::pair<std::vector<CircuitNode>, std::vector<CircuitWire>>;
   std::vector<Snapshot> undoNodes_, redoNodes_;
+
+  struct ClipboardEntry
+  {
+    CircuitNodeType type;
+    float x, y; // relative to clipboard centroid
+    bool value;
+    std::string label;
+    int clipId; // stable ID used only inside the clipboard
+                // to match wire endpoints
+  };
+  struct ClipboardWire
+  {
+    int fromClipId;
+    int toClipId;
+    int toPortIndex;
+  };
+
+  std::vector<ClipboardEntry> clipboard_;
+  std::vector<ClipboardWire> clipboardWires_;
+  float pasteOffsetAccum_ = 0.f; // grows by 40 each paste, resets on new copy
 
   float mouseDownX_ = 0, mouseDownY_ = 0;
   float curX_ = 0, curY_ = 0;
@@ -1796,6 +2057,19 @@ public:
         if (auto c = wc.lock())
             c->redraw(); });
 
+    auto copyBtn = Button("Copy")
+                       ->setHeight(26)
+                       ->setOnClick([ws, wc]
+                                    {
+        if (auto s = ws.lock()) s->copySelected(); });
+
+    auto pasteBtn = Button("Paste")
+                        ->setHeight(26)
+                        ->setOnClick([ws, wc]
+                                     {
+        if (auto s = ws.lock()) s->pasteClipboard();
+        if (auto c = wc.lock()) c->redraw(); });
+
     // ── Mode buttons ──────────────────────────────────────────────────
     struct ModeInfo
     {
@@ -1846,6 +2120,10 @@ public:
                                SizedBox(2, 0),
                                redoBtn,
                                SizedBox(8, 0),
+                               copyBtn,
+                               SizedBox(2, 0),
+                               pasteBtn,
+                               SizedBox(2, 0),
                                clrBtn,
                                SizedBox(8, 0),
                                fitBtn,
