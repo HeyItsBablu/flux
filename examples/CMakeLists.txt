@@ -37,4 +37,4 @@ function(add_flux_example NAME)
 
 endfunction()
 
-add_flux_example(vector)
+add_flux_example(logic_sim)
