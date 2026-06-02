@@ -344,6 +344,70 @@ public:
     return loadFromJson(ss.str());
   }
 
+  // ── Duplicate (Ctrl+D) ────────────────────────────────────────────────
+  void duplicateSelected()
+  {
+    // ── Snapshot selected nodes BY VALUE before any mutation ─────────
+    std::vector<CircuitNode> sel;
+    for (auto &n : nodes_)
+      if (n.selected)
+        sel.push_back(n); // full value copy
+    if (sel.empty())
+      return;
+
+    pushUndo();
+
+    std::unordered_map<int, int> idMap;
+    std::unordered_set<int> selIds;
+    int clipCounter = 1;
+    for (auto &n : sel)
+    {
+      idMap[n.id] = clipCounter++;
+      selIds.insert(n.id);
+    }
+
+    const float offset = kSnapGrid * 2.f;
+    deselectAll();
+
+    std::unordered_map<int, int> clipToReal;
+
+    // Create duplicates — nodes_ may reallocate here, but sel is a
+    // separate vector so its contents are never invalidated
+    for (auto &src : sel)
+    {
+      CircuitNode n;
+      n.id = nextId_++;
+      n.type = src.type;
+      n.w = src.w;
+      n.h = src.h;
+      n.x = snapX(src.x + offset, n.w);
+      n.y = snapY(src.y + offset, n.h);
+      n.value = src.value;
+      n.label = src.label;
+      n.inputVals.assign(n.inputCount(), false);
+      n.selected = true;
+      clipToReal[idMap[src.id]] = n.id;
+      nodes_.push_back(std::move(n));
+    }
+
+    // ── Snapshot wire count so we never iterate our own appended wires
+    const int wireCountSnapshot = (int)wires_.size();
+    for (int i = 0; i < wireCountSnapshot; ++i)
+    {
+      const CircuitWire &w = wires_[i];
+      if (!selIds.count(w.fromNodeId) || !selIds.count(w.toNodeId))
+        continue;
+      CircuitWire nw;
+      nw.fromNodeId = clipToReal[idMap[w.fromNodeId]];
+      nw.toNodeId = clipToReal[idMap[w.toNodeId]];
+      nw.toPortIndex = w.toPortIndex;
+      wires_.push_back(nw);
+    }
+
+    evaluate();
+    notify();
+  }
+
   // ── Copy / Paste ──────────────────────────────────────────────────────
   bool hasClipboard() const { return !clipboard_.empty(); }
 
@@ -964,6 +1028,11 @@ public:
     if (e.ctrl && e.virtualKey == 'V')
     {
       pasteClipboard();
+      return;
+    }
+    if (e.ctrl && e.virtualKey == 'D')
+    {
+      duplicateSelected();
       return;
     }
   }
@@ -2057,6 +2126,13 @@ public:
         if (auto c = wc.lock())
             c->redraw(); });
 
+    auto dupBtn = Button("Duplicate")
+                      ->setHeight(26)
+                      ->setOnClick([ws, wc]
+                                   {
+        if (auto s = ws.lock()) s->duplicateSelected();
+        if (auto c = wc.lock()) c->redraw(); });
+
     auto copyBtn = Button("Copy")
                        ->setHeight(26)
                        ->setOnClick([ws, wc]
@@ -2123,6 +2199,8 @@ public:
                                copyBtn,
                                SizedBox(2, 0),
                                pasteBtn,
+                               SizedBox(2, 0),
+                               dupBtn,
                                SizedBox(2, 0),
                                clrBtn,
                                SizedBox(8, 0),
