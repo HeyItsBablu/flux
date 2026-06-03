@@ -17,6 +17,8 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include <stb_image_write.h>
+
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
@@ -219,6 +221,9 @@ public:
     return res;
   }
 
+  // Make it accessible
+  void setCanvasGL(Canvas2DGL *gl) { canvasGL_ = gl; }
+
   // ── JSON serialization ────────────────────────────────────────────────
   // Serialize the current circuit to a JSON string.
   std::string toJson() const
@@ -288,6 +293,507 @@ public:
     }
     o << "  ]\n}\n";
     return o.str();
+  }
+
+  std::string toVerilog() const
+  {
+    // Collect inputs/outputs
+    std::vector<const CircuitNode *> inputs, outputs, gates;
+    for (auto &n : nodes_)
+    {
+      if (n.type == CircuitNodeType::Input)
+        inputs.push_back(&n);
+      else if (n.type == CircuitNodeType::Output)
+        outputs.push_back(&n);
+      else
+        gates.push_back(&n);
+    }
+
+    auto nodeName = [&](const CircuitNode *n) -> std::string
+    {
+      if (!n->label.empty())
+        return n->label;
+      std::string base = std::string(defaultName(n->type));
+      // lowercase
+      for (auto &c : base)
+        c = tolower(c);
+      return base + "_" + std::to_string(n->id);
+    };
+
+    std::ostringstream o;
+    o << "module circuit(\n";
+
+    // ports
+    for (int i = 0; i < (int)inputs.size(); ++i)
+      o << "    input  wire " << nodeName(inputs[i])
+        << (i + 1 < (int)inputs.size() || !outputs.empty() ? "," : "") << "\n";
+    for (int i = 0; i < (int)outputs.size(); ++i)
+      o << "    output wire " << nodeName(outputs[i])
+        << (i + 1 < (int)outputs.size() ? "," : "") << "\n";
+    o << ");\n\n";
+
+    // internal wires for gate outputs
+    for (auto *g : gates)
+      o << "wire " << nodeName(g) << ";\n";
+    if (!gates.empty())
+      o << "\n";
+
+    // build input-map: toNodeId+port -> driving signal name
+    auto driverOf = [&](int nodeId, int port) -> std::string
+    {
+      for (auto &w : wires_)
+      {
+        if (w.toNodeId == nodeId && w.toPortIndex == port)
+        {
+          const CircuitNode *src = findNodeConst(w.fromNodeId);
+          if (src)
+            return nodeName(src);
+        }
+      }
+      return "1'b0";
+    };
+
+    // gate assignments
+    for (auto *g : gates)
+    {
+      std::string a = driverOf(g->id, 0);
+      std::string b = driverOf(g->id, 1);
+      std::string out = nodeName(g);
+      switch (g->type)
+      {
+      case CircuitNodeType::AND:
+        o << "assign " << out << " = " << a << " & " << b << ";\n";
+        break;
+      case CircuitNodeType::OR:
+        o << "assign " << out << " = " << a << " | " << b << ";\n";
+        break;
+      case CircuitNodeType::NOT:
+        o << "assign " << out << " = ~" << a << ";\n";
+        break;
+      case CircuitNodeType::NAND:
+        o << "assign " << out << " = ~(" << a << " & " << b << ");\n";
+        break;
+      case CircuitNodeType::NOR:
+        o << "assign " << out << " = ~(" << a << " | " << b << ");\n";
+        break;
+      case CircuitNodeType::XOR:
+        o << "assign " << out << " = " << a << " ^ " << b << ";\n";
+        break;
+      case CircuitNodeType::XNOR:
+        o << "assign " << out << " = ~(" << a << " ^ " << b << ");\n";
+        break;
+      default:
+        break;
+      }
+    }
+    if (!gates.empty())
+      o << "\n";
+
+    // output assignments
+    for (auto *out : outputs)
+      o << "assign " << nodeName(out) << " = " << driverOf(out->id, 0) << ";\n";
+
+    o << "\nendmodule\n";
+    return o.str();
+  }
+
+  std::string toVHDL() const
+  {
+    std::vector<const CircuitNode *> inputs, outputs, gates;
+    for (auto &n : nodes_)
+    {
+      if (n.type == CircuitNodeType::Input)
+        inputs.push_back(&n);
+      else if (n.type == CircuitNodeType::Output)
+        outputs.push_back(&n);
+      else
+        gates.push_back(&n);
+    }
+
+    auto nodeName = [&](const CircuitNode *n) -> std::string
+    {
+      if (!n->label.empty())
+        return n->label;
+      std::string base = std::string(defaultName(n->type));
+      for (auto &c : base)
+        c = tolower(c);
+      return base + "_" + std::to_string(n->id);
+    };
+
+    auto driverOf = [&](int nodeId, int port) -> std::string
+    {
+      for (auto &w : wires_)
+      {
+        if (w.toNodeId == nodeId && w.toPortIndex == port)
+        {
+          const CircuitNode *src = findNodeConst(w.fromNodeId);
+          if (src)
+            return nodeName(src);
+        }
+      }
+      return "'0'";
+    };
+
+    std::ostringstream o;
+    o << "library IEEE;\nuse IEEE.STD_LOGIC_1164.ALL;\n\n";
+    o << "entity circuit is\n  port(\n";
+    for (int i = 0; i < (int)inputs.size(); ++i)
+      o << "    " << nodeName(inputs[i]) << " : in  std_logic"
+        << (i + 1 < (int)inputs.size() || !outputs.empty() ? ";" : "") << "\n";
+    for (int i = 0; i < (int)outputs.size(); ++i)
+      o << "    " << nodeName(outputs[i]) << " : out std_logic"
+        << (i + 1 < (int)outputs.size() ? ";" : "") << "\n";
+    o << "  );\nend circuit;\n\n";
+
+    o << "architecture Behavioral of circuit is\n";
+    for (auto *g : gates)
+      o << "  signal " << nodeName(g) << " : std_logic;\n";
+    o << "begin\n";
+
+    for (auto *g : gates)
+    {
+      std::string a = driverOf(g->id, 0);
+      std::string b = driverOf(g->id, 1);
+      std::string sig = nodeName(g);
+      switch (g->type)
+      {
+      case CircuitNodeType::AND:
+        o << "  " << sig << " <= " << a << " and " << b << ";\n";
+        break;
+      case CircuitNodeType::OR:
+        o << "  " << sig << " <= " << a << " or " << b << ";\n";
+        break;
+      case CircuitNodeType::NOT:
+        o << "  " << sig << " <= not " << a << ";\n";
+        break;
+      case CircuitNodeType::NAND:
+        o << "  " << sig << " <= not (" << a << " and " << b << ");\n";
+        break;
+      case CircuitNodeType::NOR:
+        o << "  " << sig << " <= not (" << a << " or " << b << ");\n";
+        break;
+      case CircuitNodeType::XOR:
+        o << "  " << sig << " <= " << a << " xor " << b << ";\n";
+        break;
+      case CircuitNodeType::XNOR:
+        o << "  " << sig << " <= not (" << a << " xor " << b << ");\n";
+        break;
+      default:
+        break;
+      }
+    }
+    for (auto *out : outputs)
+      o << "  " << nodeName(out) << " <= " << driverOf(out->id, 0) << ";\n";
+
+    o << "end Behavioral;\n";
+    return o.str();
+  }
+
+  // Renders the entire circuit bounding box to an RGBA pixel buffer.
+  // Returns false if there are no nodes.
+  bool renderToPixels(std::vector<uint8_t> &outPixels,
+                      int &outW, int &outH,
+                      float padding = 80.f) const
+  {
+    if (nodes_.empty())
+      return false;
+
+    // Compute bounding box
+    float x0 = nodes_[0].x, y0 = nodes_[0].y;
+    float x1 = x0 + nodes_[0].w, y1 = y0 + nodes_[0].h;
+    for (auto &n : nodes_)
+    {
+      x0 = std::min(x0, n.x);
+      y0 = std::min(y0, n.y);
+      x1 = std::max(x1, n.x + n.w);
+      y1 = std::max(y1, n.y + n.h);
+    }
+    x0 -= padding;
+    y0 -= padding;
+    x1 += padding;
+    y1 += padding;
+
+    outW = int(x1 - x0);
+    outH = int(y1 - y0);
+    if (outW < 1 || outH < 1)
+      return false;
+
+    // Read current framebuffer pixels that correspond to this region,
+    // translated by the current viewport transform.
+    // We'll use glReadPixels after rendering into an FBO at fixed scale.
+    outPixels.resize(size_t(outW) * outH * 4);
+
+    // Build ortho MVP for the bounding box region
+    float mvp[16];
+    // Column-major ortho: maps [x0,x1] -> [-1,1], [y0,y1] -> [1,-1]
+    float rw = 1.f / (x1 - x0);
+    float rh = 1.f / (y1 - y0);
+    memset(mvp, 0, sizeof(mvp));
+    mvp[0] = 2.f * rw;
+    mvp[5] = -2.f * rh;
+    mvp[10] = 1.f;
+    mvp[12] = -1.f - 2.f * x0 * rw;
+    mvp[13] = 1.f + 2.f * y0 * rh;
+    mvp[15] = 1.f;
+
+    // Create FBO
+    GLuint fbo = 0, tex = 0, rbo = 0;
+    glGenFramebuffers(1, &fbo);
+    glGenTextures(1, &tex);
+    glGenRenderbuffers(1, &rbo);
+
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, outW, outH,
+                 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    glBindRenderbuffer(GL_RENDERBUFFER, rbo);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, outW, outH);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                           GL_TEXTURE_2D, tex, 0);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                              GL_RENDERBUFFER, rbo);
+
+    glViewport(0, 0, outW, outH);
+    glClearColor(15.f / 255.f, 15.f / 255.f, 20.f / 255.f, 1.f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    // Re-render into FBO
+    if (canvasGL_)
+    {
+      Canvas2D ctx(canvasGL_, outW, outH, mvp);
+      // Draw grid + nodes + wires  (reuse existing render logic)
+      const_cast<CircuitSurface *>(this)->render(ctx);
+    }
+
+    // Read pixels (FBO origin is bottom-left, flip vertically)
+    glReadPixels(0, 0, outW, outH, GL_RGBA, GL_UNSIGNED_BYTE,
+                 outPixels.data());
+
+    // Flip Y
+    std::vector<uint8_t> row(size_t(outW) * 4);
+    for (int y = 0; y < outH / 2; ++y)
+    {
+      uint8_t *a = outPixels.data() + size_t(y) * outW * 4;
+      uint8_t *b = outPixels.data() + size_t(outH - 1 - y) * outW * 4;
+      memcpy(row.data(), a, outW * 4);
+      memcpy(a, b, outW * 4);
+      memcpy(b, row.data(), outW * 4);
+    }
+
+    // Cleanup FBO (texture ownership stays until we're done)
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glDeleteFramebuffers(1, &fbo);
+    glDeleteTextures(1, &tex);
+    glDeleteRenderbuffers(1, &rbo);
+
+    return true;
+  }
+
+  bool exportPNG(const std::string &path) const
+  {
+    std::vector<uint8_t> pixels;
+    int w = 0, h = 0;
+    if (!renderToPixels(pixels, w, h))
+      return false;
+
+    // stb_image_write is already available via flux_canvas2d_gl.cpp
+    return stbi_write_png(path.c_str(), w, h, 4,
+                          pixels.data(), w * 4) != 0;
+  }
+
+  std::string toSVG() const
+  {
+    if (nodes_.empty())
+      return "";
+
+    float pad = 80.f;
+    float x0 = nodes_[0].x, y0 = nodes_[0].y;
+    float x1 = x0 + nodes_[0].w, y1 = y0 + nodes_[0].h;
+    for (auto &n : nodes_)
+    {
+      x0 = std::min(x0, n.x);
+      y0 = std::min(y0, n.y);
+      x1 = std::max(x1, n.x + n.w);
+      y1 = std::max(y1, n.y + n.h);
+    }
+    x0 -= pad;
+    y0 -= pad;
+    x1 += pad;
+    y1 += pad;
+    float W = x1 - x0, H = y1 - y0;
+
+    // Coordinate helper: shift world -> SVG origin
+    auto sx = [&](float x)
+    { return x - x0; };
+    auto sy = [&](float y)
+    { return y - y0; };
+
+    std::ostringstream o;
+    o << "<svg xmlns='http://www.w3.org/2000/svg' "
+      << "width='" << int(W) << "' height='" << int(H) << "' "
+      << "style='background:#0f0f14'>\n";
+
+    // ── Wires ─────────────────────────────────────────────────────────
+    for (auto &w : wires_)
+    {
+      const CircuitNode *src = findNodeConst(w.fromNodeId);
+      const CircuitNode *dst = findNodeConst(w.toNodeId);
+      if (!src || !dst)
+        continue;
+
+      Pt p0 = outputPortPos(*src);
+      Pt p1 = inputPortPos(*dst, w.toPortIndex);
+      float stub = 24.f;
+      float ax = p0.x + stub, bx = p1.x - stub;
+
+      std::string color = src->value ? "#3cc878" : "#646478";
+      o << "  <path d='M" << sx(p0.x) << "," << sy(p0.y);
+
+      if (ax <= bx)
+      {
+        float mx = (ax + bx) * 0.5f;
+        o << " L" << sx(ax) << "," << sy(p0.y)
+          << " L" << sx(mx) << "," << sy(p0.y)
+          << " L" << sx(mx) << "," << sy(p1.y)
+          << " L" << sx(bx) << "," << sy(p1.y);
+      }
+      else
+      {
+        float my = (p0.y + p1.y) * 0.5f;
+        o << " L" << sx(ax) << "," << sy(p0.y)
+          << " L" << sx(ax) << "," << sy(my)
+          << " L" << sx(bx) << "," << sy(my)
+          << " L" << sx(bx) << "," << sy(p1.y);
+      }
+      o << " L" << sx(p1.x) << "," << sy(p1.y) << "'"
+        << " stroke='" << color << "' stroke-width='2'"
+        << " fill='none' stroke-linecap='round'/>\n";
+    }
+
+    // ── Nodes ─────────────────────────────────────────────────────────
+    for (auto &n : nodes_)
+    {
+      float nx = sx(n.x), ny = sy(n.y);
+      std::string stroke = n.selected ? "#50a0ff" : "#a0a0b4";
+      std::string fill = "#16161e";
+
+      // Body shape
+      if (n.type == CircuitNodeType::AND || n.type == CircuitNodeType::NAND)
+      {
+        float cx = nx + n.w * 0.48f;
+        o << "  <path d='M" << nx << "," << ny
+          << " L" << cx << "," << ny
+          << " C" << (nx + n.w) << "," << ny << " "
+          << (nx + n.w) << "," << (ny + n.h) << " "
+          << cx << "," << (ny + n.h)
+          << " L" << nx << "," << (ny + n.h) << " Z'"
+          << " fill='" << fill << "' stroke='" << stroke << "' stroke-width='1.5'/>\n";
+        if (n.type == CircuitNodeType::NAND)
+        {
+          float bx = nx + n.w + 5.f, by = ny + n.h * 0.5f;
+          o << "  <circle cx='" << bx << "' cy='" << by
+            << "' r='5' fill='" << fill
+            << "' stroke='" << stroke << "' stroke-width='1.5'/>\n";
+        }
+      }
+      else if (n.type == CircuitNodeType::OR || n.type == CircuitNodeType::NOR ||
+               n.type == CircuitNodeType::XOR || n.type == CircuitNodeType::XNOR)
+      {
+        float mx = nx + n.w * 0.5f, my = ny + n.h * 0.5f;
+        o << "  <path d='M" << nx << "," << ny
+          << " Q" << mx << "," << ny << " " << (nx + n.w) << "," << my
+          << " Q" << mx << "," << (ny + n.h) << " " << nx << "," << (ny + n.h)
+          << " Q" << (nx + n.w * 0.22f) << "," << my << " " << nx << "," << ny << " Z'"
+          << " fill='" << fill << "' stroke='" << stroke << "' stroke-width='1.5'/>\n";
+        if (n.type == CircuitNodeType::XOR || n.type == CircuitNodeType::XNOR)
+        {
+          o << "  <path d='M" << (nx - 8) << "," << ny
+            << " Q" << (nx - 8 + n.w * 0.22f) << "," << (ny + n.h * 0.5f)
+            << " " << (nx - 8) << "," << (ny + n.h) << "'"
+            << " fill='none' stroke='" << stroke << "' stroke-width='1.5'/>\n";
+        }
+        if (n.type == CircuitNodeType::NOR || n.type == CircuitNodeType::XNOR)
+        {
+          float bx = nx + n.w + 5.f, by = ny + n.h * 0.5f;
+          o << "  <circle cx='" << bx << "' cy='" << by
+            << "' r='5' fill='" << fill
+            << "' stroke='" << stroke << "' stroke-width='1.5'/>\n";
+        }
+      }
+      else if (n.type == CircuitNodeType::NOT)
+      {
+        float tipX = nx + n.w - 8.f;
+        o << "  <path d='M" << nx << "," << ny
+          << " L" << tipX << "," << (ny + n.h * 0.5f)
+          << " L" << nx << "," << (ny + n.h) << " Z'"
+          << " fill='" << fill << "' stroke='" << stroke << "' stroke-width='1.5'/>\n";
+        o << "  <circle cx='" << (tipX + 5) << "' cy='" << (ny + n.h * 0.5f)
+          << "' r='5' fill='" << fill
+          << "' stroke='" << stroke << "' stroke-width='1.5'/>\n";
+      }
+      else
+      { // Input / Output
+        std::string boxFill = n.value ? "#141c1c" : "#121218";
+        std::string boxStroke = n.value ? "#28c864" : "#505060";
+        o << "  <rect x='" << nx << "' y='" << ny
+          << "' width='" << n.w << "' height='" << n.h
+          << "' rx='4' fill='" << boxFill
+          << "' stroke='" << boxStroke << "' stroke-width='1.5'/>\n";
+        // LED dot
+        std::string dotFill = n.value ? "#28d26e" : "#2d2d37";
+        o << "  <circle cx='" << (nx + n.w * 0.5f)
+          << "' cy='" << (ny + n.h * 0.5f)
+          << "' r='" << (n.h * 0.22f)
+          << "' fill='" << dotFill << "'/>\n";
+      }
+
+      // Port dots
+      for (int i = 0; i < n.inputCount(); ++i)
+      {
+        Pt p = inputPortPos(n, i);
+        o << "  <circle cx='" << sx(p.x) << "' cy='" << sy(p.y)
+          << "' r='4' fill='#328cdc'/>\n";
+      }
+      if (n.outputCount() > 0)
+      {
+        Pt p = outputPortPos(n);
+        o << "  <circle cx='" << sx(p.x) << "' cy='" << sy(p.y)
+          << "' r='4' fill='#1eb478'/>\n";
+      }
+
+      // Label
+      const std::string &lbl = n.label.empty()
+                                   ? std::string(defaultName(n.type))
+                                   : n.label;
+      bool isIO = (n.type == CircuitNodeType::Input ||
+                   n.type == CircuitNodeType::Output);
+      o << "  <text x='" << (nx + n.w * 0.5f)
+        << "' y='" << (isIO ? (ny + n.h + 14.f) : (ny + n.h + 16.f))
+        << "' text-anchor='middle'"
+        << " font-family='sans-serif' font-size='14'"
+        << " fill='#8c8ca0'>" << lbl << "</text>\n";
+    }
+
+    o << "</svg>\n";
+    return o.str();
+  }
+
+  bool exportSVG(const std::string &path) const
+  {
+    std::string svg = toSVG();
+    if (svg.empty())
+      return false;
+    std::ofstream f(path, std::ios::out | std::ios::trunc);
+    if (!f)
+      return false;
+    f << svg;
+    return f.good();
   }
 
   // Load a circuit from a JSON string. Returns false and leaves state
@@ -1234,6 +1740,9 @@ public:
   }
 
 private:
+  // Set by CircuitApp after surface creation
+  Canvas2DGL *canvasGL_ = nullptr;
+
   // ── Context menu ──────────────────────────────────────────────────────
   struct ContextMenuItem
   {
@@ -1336,7 +1845,7 @@ private:
     float itemH = kMenuItemH / currentZoom_;
     float pad = kMenuPadding / currentZoom_;
     float sepH = 4.f / currentZoom_;
-    float fs = 11.f / currentZoom_;
+    float fs = 14.f / currentZoom_;
     float radius = 4.f / currentZoom_;
 
     // Total height
@@ -1889,7 +2398,7 @@ private:
 
   void drawNodeTextEdit(Canvas2D &ctx, const CircuitNode &n) const
   {
-    float fs = 11.f / currentZoom_;
+    float fs = 14.f / currentZoom_;
     char font[32];
     snprintf(font, sizeof(font), "%.0fpx sans", fs);
     ctx.setFont(font);
@@ -1945,7 +2454,7 @@ private:
   {
     float lw = (n.selected ? 2.f : 1.2f) / currentZoom_;
     Color sc = n.selected ? selStrokeColor() : gateStrokeColor();
-    float fs = 11.f / currentZoom_;
+    float fs = 16.f / currentZoom_;
 
     ctx.setFillColor(gateBodyColor());
     ctx.setStrokeColor(sc);
@@ -2202,7 +2711,7 @@ private:
     float dotR = h * 0.22f;
     ctx.setFillColor(n.value ? Color::fromRGB(40, 210, 110) : Color::fromRGB(45, 45, 55));
     ctx.fillCircle(x + w * 0.5f, y + h * 0.5f, dotR);
-    float fs = 9.f / currentZoom_;
+    float fs = 12.f / currentZoom_;
     char font[32];
     snprintf(font, sizeof(font), "bold %.0fpx sans", fs);
     ctx.setFont(font);
@@ -2226,7 +2735,7 @@ private:
     float dotR = h * 0.22f;
     ctx.setFillColor(n.value ? Color::fromRGB(40, 210, 110) : Color::fromRGB(45, 45, 55));
     ctx.fillCircle(x + w * 0.5f, y + h * 0.5f, dotR);
-    float fs = 9.f / currentZoom_;
+    float fs = 12.f / currentZoom_;
     char font[32];
     snprintf(font, sizeof(font), "bold %.0fpx sans", fs);
     ctx.setFont(font);
@@ -2524,6 +3033,9 @@ public:
       {
         surface_->viewW_ = float(w);
         surface_->viewH_ = float(h);
+        // Pass GL context to surface for export
+        if (canvas_->canvasGL_)
+          surface_->setCanvasGL(canvas_->canvasGL_);
       }
     };
     canvas_->onViewportChanged = [this](float zoom)
@@ -2546,6 +3058,12 @@ public:
     std::weak_ptr<CanvasWidget> wc = canvas_;
     std::weak_ptr<CircuitSurface> wsSave = surface_;
     std::weak_ptr<CircuitSurface> wsOpen = surface_;
+
+    std::weak_ptr<CircuitSurface> wsVerilog = surface_;
+    std::weak_ptr<CircuitSurface> wsVHDL = surface_;
+
+    std::weak_ptr<CircuitSurface> wsPNG = surface_;
+    std::weak_ptr<CircuitSurface> wsSVG = surface_;
 
     surface_->onChanged = [this]
     {
@@ -2620,6 +3138,36 @@ public:
 
     auto sidebar = Container(Column({Container(sideCol)->setHeight(420)}))->setWidth(86)->setBackgroundColor(kSidebarBg);
 
+    auto verilogPicker = FilePicker("Verilog")
+                             ->setMode(FilePickerMode::Save)
+                             ->setTitle("Export Verilog")
+                             ->setDefaultFilename("circuit.v")
+                             ->setDefaultExtension("v")
+                             ->addFilter("Verilog", {"*.v"})
+                             ->setShowPath(false)
+                             ->setHeight(26)
+                             ->setOnChanged([wsVerilog](const std::string &path)
+                                            {
+        if (auto s = wsVerilog.lock()) {
+            std::ofstream f(path, std::ios::out | std::ios::trunc);
+            if (f) f << s->toVerilog();
+        } });
+
+    auto vhdlPicker = FilePicker("VHDL")
+                          ->setMode(FilePickerMode::Save)
+                          ->setTitle("Export VHDL")
+                          ->setDefaultFilename("circuit.vhd")
+                          ->setDefaultExtension("vhd")
+                          ->addFilter("VHDL", {"*.vhd", "*.vhdl"})
+                          ->setShowPath(false)
+                          ->setHeight(26)
+                          ->setOnChanged([wsVHDL](const std::string &path)
+                                         {
+        if (auto s = wsVHDL.lock()) {
+            std::ofstream f(path, std::ios::out | std::ios::trunc);
+            if (f) f << s->toVHDL();
+        } });
+
     // Save button — opens native "Save As" dialog
     auto savePicker = FilePicker("Save")
                           ->setMode(FilePickerMode::Save)
@@ -2650,6 +3198,30 @@ public:
             s->loadFromFile(path);
         if (auto c = wc.lock())
             c->redraw(); });
+
+    auto pngPicker = FilePicker("PNG")
+                         ->setMode(FilePickerMode::Save)
+                         ->setTitle("Export PNG")
+                         ->setDefaultFilename("circuit.png")
+                         ->setDefaultExtension("png")
+                         ->addFilter("PNG Image", {"*.png"})
+                         ->setShowPath(false)
+                         ->setHeight(26)
+                         ->setOnChanged([wsPNG](const std::string &path)
+                                        {
+        if (auto s = wsPNG.lock()) s->exportPNG(path); });
+
+    auto svgPicker = FilePicker("SVG")
+                         ->setMode(FilePickerMode::Save)
+                         ->setTitle("Export SVG")
+                         ->setDefaultFilename("circuit.svg")
+                         ->setDefaultExtension("svg")
+                         ->addFilter("SVG Vector", {"*.svg"})
+                         ->setShowPath(false)
+                         ->setHeight(26)
+                         ->setOnChanged([wsSVG](const std::string &path)
+                                        {
+        if (auto s = wsSVG.lock()) s->exportSVG(path); });
 
     auto dupBtn = Button("Duplicate")
                       ->setHeight(26)
@@ -2720,11 +3292,19 @@ public:
 
     auto toolbar = Container(
                        Row({
-                               Text("Circuit")->setFontSize(12)->setTextColor(Color::fromRGB(160, 160, 180)),
+                               Text("Circuit")->setFontSize(14)->setTextColor(Color::fromRGB(160, 160, 180)),
                                SizedBox(8, 0),
                                savePicker,
                                SizedBox(2, 0),
                                openPicker,
+                               SizedBox(2, 0),
+                               verilogPicker,
+                               SizedBox(2, 0),
+                               vhdlPicker,
+                               SizedBox(2, 0),
+                               pngPicker,
+                               SizedBox(2, 0),
+                               svgPicker,
                                SizedBox(10, 0),
                                undoBtn,
                                SizedBox(2, 0),
