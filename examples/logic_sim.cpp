@@ -151,6 +151,74 @@ public:
   std::vector<CircuitNode> &nodes() { return nodes_; }
   std::vector<CircuitWire> &wires() { return wires_; }
 
+  // ── Truth table ───────────────────────────────────────────────────────
+  struct TruthTableResult
+  {
+    std::vector<std::string> inputLabels;
+    std::vector<std::string> outputLabels;
+    std::vector<std::vector<bool>> rows; // each row: inputs then outputs
+  };
+
+  TruthTableResult computeTruthTable()
+  {
+    TruthTableResult res;
+
+    std::vector<CircuitNode *> inputs, outputs;
+    for (auto &n : nodes_)
+    {
+      if (n.type == CircuitNodeType::Input)
+        inputs.push_back(&n);
+      if (n.type == CircuitNodeType::Output)
+        outputs.push_back(&n);
+    }
+    std::sort(inputs.begin(), inputs.end(), [](auto *a, auto *b)
+              { return a->id < b->id; });
+    std::sort(outputs.begin(), outputs.end(), [](auto *a, auto *b)
+              { return a->id < b->id; });
+
+    if (inputs.empty() || outputs.empty())
+      return res;
+    if ((int)inputs.size() > 8)
+      inputs.resize(8); // cap at 256 rows
+
+    for (int i = 0; i < (int)inputs.size(); ++i)
+      res.inputLabels.push_back(inputs[i]->label.empty()
+                                    ? "I" + std::to_string(i)
+                                    : inputs[i]->label);
+    for (int i = 0; i < (int)outputs.size(); ++i)
+      res.outputLabels.push_back(outputs[i]->label.empty()
+                                     ? "O" + std::to_string(i)
+                                     : outputs[i]->label);
+
+    // Save current input values
+    std::vector<bool> saved;
+    for (auto *n : inputs)
+      saved.push_back(n->value);
+
+    int ni = (int)inputs.size();
+    int no = (int)outputs.size();
+    int numRows = 1 << ni;
+    res.rows.resize(numRows, std::vector<bool>(ni + no));
+
+    for (int row = 0; row < numRows; ++row)
+    {
+      for (int i = 0; i < ni; ++i)
+        inputs[i]->value = (row >> (ni - 1 - i)) & 1;
+      evaluate();
+      for (int i = 0; i < ni; ++i)
+        res.rows[row][i] = inputs[i]->value;
+      for (int i = 0; i < no; ++i)
+        res.rows[row][ni + i] = outputs[i]->value;
+    }
+
+    // Restore
+    for (int i = 0; i < ni; ++i)
+      inputs[i]->value = saved[i];
+    evaluate();
+
+    return res;
+  }
+
   // ── JSON serialization ────────────────────────────────────────────────
   // Serialize the current circuit to a JSON string.
   std::string toJson() const
@@ -1077,6 +1145,60 @@ private:
   uint32_t lastClickTime_ = 0;
   int lastClickNodeId_ = -1;
 
+  // ── Rounded-corner polyline helper ────────────────────────────────────
+
+  void roundedPolyline(Canvas2D &ctx,
+                       const std::vector<std::pair<float, float>> &pts,
+                       float r) const
+  {
+    // pts[0] is already the moveTo point — start from index 1
+    for (int i = 1; i < (int)pts.size(); ++i)
+    {
+      float x = pts[i].first, y = pts[i].second;
+      float px = pts[i - 1].first, py = pts[i - 1].second;
+
+      bool isLast = (i == (int)pts.size() - 1);
+
+      if (isLast)
+      {
+        // Last point: just line to it — no rounding needed at endpoint
+        ctx.lineTo(x, y);
+      }
+      else
+      {
+        float nx = pts[i + 1].first, ny = pts[i + 1].second;
+
+        // Incoming direction (from prev to current)
+        float idx = x - px, idy = y - py;
+        float ilen = std::hypot(idx, idy);
+
+        // Outgoing direction (from current to next)
+        float odx = nx - x, ody = ny - y;
+        float olen = std::hypot(odx, ody);
+
+        if (ilen < 1e-4f || olen < 1e-4f)
+        {
+          ctx.lineTo(x, y);
+          continue;
+        }
+
+        // Clamp radius so it never exceeds half a segment
+        float cr = std::min(r, std::min(ilen, olen) * 0.5f);
+
+        // Point just before the corner (on the incoming segment)
+        float bx = x - (idx / ilen) * cr;
+        float by = y - (idy / ilen) * cr;
+
+        // Point just after the corner (on the outgoing segment)
+        float ax = x + (odx / olen) * cr;
+        float ay = y + (ody / olen) * cr;
+
+        ctx.lineTo(bx, by);
+        ctx.quadraticCurveTo(x, y, ax, ay);
+      }
+    }
+  }
+
   // ── Grid snapping ─────────────────────────────────────────────────────
   static constexpr float kSnapGrid = 64.f;
 
@@ -1801,7 +1923,6 @@ private:
                           float x0, float y0, float x1, float y1,
                           bool active, bool preview, bool selected) const
   {
-    // ── Visual style ──────────────────────────────────────────────────
     float lw;
     Color c;
     if (selected)
@@ -1824,76 +1945,44 @@ private:
       lw = 1.5f / currentZoom_;
       c = wireColor();
     }
+
     ctx.setStrokeColor(c);
     ctx.setLineWidth(lw);
 
-    // ── Orthogonal routing ────────────────────────────────────────────
-
     const float stub = 24.f / currentZoom_;
+    const float cr = 6.f / currentZoom_; // bend radius — feels right at all zooms
 
-    float ax = x0 + stub; // end of output stub
-    float bx = x1 - stub; // end of input stub
+    float ax = x0 + stub;
+    float bx = x1 - stub;
 
-    ctx.beginPath();
-    ctx.moveTo(x0, y0);
+    // Build the polyline points
+    std::vector<std::pair<float, float>> pts;
+    pts.reserve(6);
 
     if (ax <= bx)
     {
-      // Normal case: destination is comfortably to the right.
       float midX = (ax + bx) * 0.5f;
-      ctx.lineTo(ax, y0);
-      ctx.lineTo(midX, y0);
-      ctx.lineTo(midX, y1);
-      ctx.lineTo(bx, y1);
-      ctx.lineTo(x1, y1);
+      pts = {{x0, y0}, {ax, y0}, {midX, y0}, {midX, y1}, {bx, y1}, {x1, y1}};
     }
     else
     {
-      // Back-routing case: destination is to the left or very close.
-      // Dog-leg around using the vertical midpoint between y0 and y1.
-
       float midY = (y0 + y1) * 0.5f;
-      ctx.lineTo(ax, y0);
-      ctx.lineTo(ax, midY);
-      ctx.lineTo(bx, midY);
-      ctx.lineTo(bx, y1);
-      ctx.lineTo(x1, y1);
+      pts = {{x0, y0}, {ax, y0}, {ax, midY}, {bx, midY}, {bx, y1}, {x1, y1}};
     }
 
+    ctx.beginPath();
+    ctx.moveTo(pts[0].first, pts[0].second);
+    roundedPolyline(ctx, pts, cr);
     ctx.stroke();
 
-    // ── Selection halo ────────────────────────────────────────────────
+    // Selection halo — same path, thicker + translucent
     if (selected)
     {
       ctx.setStrokeColor(Color::fromRGBA(80, 160, 255, 40));
       ctx.setLineWidth(8.f / currentZoom_);
-
       ctx.beginPath();
-      ctx.moveTo(x0, y0);
-
-      if (x0 + stub <= x1 - stub)
-      {
-        float ax2 = x0 + stub;
-        float bx2 = x1 - stub;
-        float midX = (ax2 + bx2) * 0.5f;
-        ctx.lineTo(ax2, y0);
-        ctx.lineTo(midX, y0);
-        ctx.lineTo(midX, y1);
-        ctx.lineTo(bx2, y1);
-        ctx.lineTo(x1, y1);
-      }
-      else
-      {
-        float ax2 = x0 + stub;
-        float bx2 = x1 - stub;
-        float midY = (y0 + y1) * 0.5f;
-        ctx.lineTo(ax2, y0);
-        ctx.lineTo(ax2, midY);
-        ctx.lineTo(bx2, midY);
-        ctx.lineTo(bx2, y1);
-        ctx.lineTo(x1, y1);
-      }
-
+      ctx.moveTo(pts[0].first, pts[0].second);
+      roundedPolyline(ctx, pts, cr);
       ctx.stroke();
     }
   }
@@ -1964,12 +2053,83 @@ class CircuitApp : public Widget
   State<std::string> cursorLabel_{"0.0,  0.0"};
   State<std::string> modeLabel_{"Select"};
 
+  State<std::string> selLabel_{""};
+
+  State<bool> ttVisible_{false};
+  State<std::string> ttContent_{""};
+
   std::vector<std::shared_ptr<ButtonWidget>> modeBtns_;
 
   static constexpr Color kActiveBg = {40, 100, 220, 255};
   static constexpr Color kInactiveBg = {30, 30, 38, 255};
   static constexpr Color kSidebarBg = {18, 18, 24, 255};
   static constexpr Color kToolbarBg = {14, 14, 20, 255};
+
+  void rebuildTruthTable()
+  {
+    if (!surface_)
+      return;
+    auto tt = surface_->computeTruthTable();
+
+    if (tt.inputLabels.empty() || tt.outputLabels.empty())
+    {
+      ttContent_.set("Add IN and OUT\nnodes to generate\na truth table.");
+      return;
+    }
+
+    std::ostringstream o;
+
+    // Column widths — at least 2 chars, padded to label width
+    auto colW = [](const std::string &lbl)
+    {
+      return std::max(2, (int)lbl.size());
+    };
+
+    // Header
+    for (auto &lbl : tt.inputLabels)
+    {
+      int w = colW(lbl);
+      o << std::left << std::setw(w) << lbl << " ";
+    }
+    o << "| ";
+    for (auto &lbl : tt.outputLabels)
+    {
+      int w = colW(lbl);
+      o << std::left << std::setw(w) << lbl << " ";
+    }
+    o << "\n";
+
+    // Separator
+    for (auto &lbl : tt.inputLabels)
+      for (int i = 0; i <= colW(lbl); ++i)
+        o << "-";
+    o << "+-";
+    for (auto &lbl : tt.outputLabels)
+      for (int i = 0; i <= colW(lbl); ++i)
+        o << "-";
+    o << "\n";
+
+    // Rows
+    int ni = (int)tt.inputLabels.size();
+    for (auto &row : tt.rows)
+    {
+      for (int i = 0; i < ni; ++i)
+      {
+        int w = colW(tt.inputLabels[i]);
+        o << std::left << std::setw(w) << (row[i] ? "1" : "0") << " ";
+      }
+      o << "| ";
+      for (int i = 0; i < (int)tt.outputLabels.size(); ++i)
+      {
+        int w = colW(tt.outputLabels[i]);
+        o << std::left << std::setw(w)
+          << (row[ni + i] ? "1" : "0") << " ";
+      }
+      o << "\n";
+    }
+
+    ttContent_.set(o.str());
+  }
 
   void setMode(CircuitMode m, int btnIdx)
   {
@@ -2030,7 +2190,14 @@ public:
     std::weak_ptr<CircuitSurface> wsOpen = surface_;
 
     surface_->onChanged = [this]
-    { canvas_->redraw(); };
+    {
+      canvas_->redraw();
+      // Update selection count label
+      int cnt = surface_->selectedCount();
+      selLabel_.set(cnt > 0 ? std::to_string(cnt) + " selected" : "");
+      if (ttVisible_.get())
+        rebuildTruthTable();
+    };
     surface_->onCursorMoved = [this](float wx, float wy)
     {
       if (surface_)
@@ -2182,7 +2349,16 @@ public:
     auto fitBtn = Button("Fit")->setHeight(26)->setOnClick([wc]
                                                            { if (auto c = wc.lock()) { c->viewport().fitToView(); c->redraw(); } });
     auto rstBtn = Button("1:1")->setHeight(26)->setOnClick([wc]
+
                                                            { if (auto c = wc.lock()) { c->viewport().resetZoom(); c->redraw(); } });
+
+    auto ttBtn = Button("Truth Table")
+                     ->setHeight(26)
+                     ->setOnClick([this]
+                                  {
+        bool show = !ttVisible_.get();
+        ttVisible_.set(show);
+        if (show) rebuildTruthTable(); });
 
     auto toolbar = Container(
                        Row({
@@ -2207,6 +2383,8 @@ public:
                                fitBtn,
                                SizedBox(2, 0),
                                rstBtn,
+                               SizedBox(8, 0),
+                               ttBtn,
                                SizedBox(12, 0),
                                Container(modeRow)->setHeight(30),
                            })
@@ -2216,6 +2394,56 @@ public:
                        ->setHeight(40)
                        ->setBackgroundColor(kToolbarBg);
 
+    // ── Truth table panel (shown/hidden with Conditional) ─────────────────
+    auto ttRefreshBtn = Button("Refresh")
+                            ->setHeight(22)
+                            ->setOnClick([this]
+                                         { rebuildTruthTable(); });
+
+    auto ttPanel =
+        Container(
+            Column({
+                // Header bar
+                Container(
+                    Row({
+                            Text("Truth Table")
+                                ->setFontSize(11)
+                                ->setTextColor(Color::fromRGB(160, 160, 180)),
+                            SizedBox(6, 0),
+                            ttRefreshBtn,
+                        })
+                        ->setPadding(6)
+                        ->setSpacing(2)
+                        ->setCrossAxisAlignment(CrossAxisAlignment::Center))
+                    ->setHeight(32)
+                    ->setBackgroundColor(Color::fromRGB(14, 14, 20)),
+
+                // Divider
+                Container()
+                    ->setHeight(1)
+                    ->setBackgroundColor(Color::fromRGBA(60, 60, 75, 255)),
+
+                // Content — monospaced text, scrollable
+                Expanded(
+                    ListView({Text(ttContent_, [](const std::string &s)
+                                   { return s; })
+                                  ->setFontSize(11)
+                                  ->setFontFamily("Consolas")
+                                  ->setTextColor(Color::fromRGB(160, 210, 160))
+                                  ->setPadding(8)})),
+            }))
+            ->setWidth(210)
+            ->setBackgroundColor(Color::fromRGB(13, 13, 18))
+            ->setBorderColor(Color::fromRGBA(60, 60, 75, 255))
+            ->setBorderWidth(1);
+
+    // Conditional wraps the panel — collapses to zero width when hidden
+    auto ttConditional = Conditional(ttVisible_)
+                             ->Then([ttPanel]()
+                                    { return ttPanel; })
+                             ->Else([]()
+                                    { return Container()->setHeight(0)->setWidth(0); });
+
     // ── Status bar ────────────────────────────────────────────────────
     auto statusBar = Container(
                          Row({
@@ -2224,6 +2452,12 @@ public:
                                      ->setFontSize(11)
                                      ->setTextColor(Color::fromRGB(120, 120, 140))
                                      ->setMinWidth(90),
+                                 SizedBox(14, 0),
+                                 Text(selLabel_, [](const std::string &s)
+                                      { return s; })
+                                     ->setFontSize(11)
+                                     ->setTextColor(Color::fromRGB(80, 160, 255))
+                                     ->setMinWidth(80),
                                  SizedBox(14, 0),
                                  Text(cursorLabel_, [](const std::string &s)
                                       { return "XY " + s; })
@@ -2248,7 +2482,7 @@ public:
     return Scaffold(nullptr,
                     Expanded(Column({
                         toolbar,
-                        Expanded(Row({sidebar, Expanded(canvas_)})),
+                        Expanded(Row({sidebar, Expanded(canvas_), ttConditional})),
                         statusBar,
                     })),
                     nullptr, nullptr);
