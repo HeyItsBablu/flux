@@ -163,6 +163,7 @@ struct SubCircuitPort
   int internalNodeId = -1; // Input/Output node inside the def
   bool isOutput = false;   // false = input port, true = output port
   int portIndex = 0;       // ordering index on the black-box face
+  int internalPortIdx = 0;
 };
 
 // ============================================================================
@@ -3732,7 +3733,7 @@ private:
       // Hover highlight
       if (i == ctxMenu_.hoveredItem)
       {
-        ctx.setFillColor(Color::fromRGBA(50, 100, 200, 160));
+        ctx.setFillColor(Color::fromRGBA(255, 255, 255, 18));
         ctx.fillRoundedRect(mx + 2.f / currentZoom_,
                             cy + 1.f / currentZoom_,
                             mw - 4.f / currentZoom_,
@@ -3742,8 +3743,8 @@ private:
 
       // Label
       ctx.setFillColor(i == ctxMenu_.hoveredItem
-                           ? Color::fromRGB(220, 230, 255)
-                           : Color::fromRGB(180, 180, 200));
+                           ? Color::fromRGB(220, 225, 235)
+                           : Color::fromRGB(170, 170, 188));
       ctx.fillText(it.label.c_str(),
                    mx + pad * 2.f,
                    cy + itemH * 0.5f);
@@ -4349,36 +4350,54 @@ private:
   // Runs the internal logic of one sub-circuit instance given its
   // current inputVals, and writes results into outputVals.
   // Returns true if any output value changed.
-  bool evaluateInstance(SubCircuitInstance &inst,
-                        const SubCircuitDef &def)
+  bool evaluateInstance(SubCircuitInstance &inst, const SubCircuitDef &def)
   {
-    // Local working copies
     std::vector<CircuitNode> local = def.nodes;
     const std::vector<CircuitWire> &localWires = def.wires;
 
-    // Initialise inputVals for every node
+    // Initialise all inputVals to false
     for (auto &n : local)
       n.inputVals.assign(n.inputCount(), false);
 
-    // Bind instance inputs => internal Input nodes
     for (auto &port : def.ports)
     {
       if (port.isOutput)
         continue;
-      for (auto &n : local)
-      {
-        if (n.id == port.internalNodeId &&
-            n.type == CircuitNodeType::Input)
-        {
-          n.value = (port.portIndex < (int)inst.inputVals.size())
+      bool driven = (port.portIndex < (int)inst.inputVals.size())
                         ? inst.inputVals[port.portIndex]
                         : false;
-          break;
+
+      for (auto &n : local)
+      {
+        if (n.id != port.internalNodeId)
+          continue;
+
+        if (n.type == CircuitNodeType::Input)
+        {
+          // Dedicated Input node — value flows out through wires
+          n.value = driven;
         }
+        else
+        {
+
+          int gatePin = 0;
+          int sameNodeInputCount = 0;
+          for (auto &p2 : def.ports)
+          {
+            if (!p2.isOutput && p2.internalNodeId == port.internalNodeId)
+            {
+              if (p2.portIndex == port.portIndex)
+                gatePin = sameNodeInputCount;
+              ++sameNodeInputCount;
+            }
+          }
+          if (gatePin < (int)n.inputVals.size())
+            n.inputVals[gatePin] = driven;
+        }
+        break;
       }
     }
 
-    // Helper: build a compact value snapshot for cycle detection
     auto snapshot = [&]() -> std::vector<bool>
     {
       std::vector<bool> s;
@@ -4390,35 +4409,20 @@ private:
 
     std::vector<std::vector<bool>> history;
     history.reserve(64);
-
-    static constexpr int kMaxIter = 64; // generous but bounded
+    static constexpr int kMaxIter = 64;
 
     for (int iter = 0; iter < kMaxIter; ++iter)
     {
-      // ── Propagate wires ──────────────────────────────────────────
-      for (auto &w : localWires)
-      {
-        CircuitNode *src = nullptr, *dst = nullptr;
-        for (auto &n : local)
-        {
-          if (n.id == w.fromNodeId)
-            src = &n;
-          if (n.id == w.toNodeId)
-            dst = &n;
-        }
-        if (!src || !dst)
-          continue;
-        if (w.toPortIndex < (int)dst->inputVals.size())
-          dst->inputVals[w.toPortIndex] = src->value;
-      }
-
-      // ── Evaluate nodes ───────────────────────────────────────────
       bool changed = false;
+
+      // Evaluate all nodes
       for (auto &n : local)
       {
         bool prev = n.value;
         switch (n.type)
         {
+        case CircuitNodeType::Input:
+          break; // value already seeded
         case CircuitNodeType::AND:
         {
           bool v = !n.inputVals.empty();
@@ -4455,7 +4459,7 @@ private:
         {
           int ones = 0;
           for (auto b : n.inputVals)
-            ones += b ? 1 : 0;
+            ones += b;
           n.value = (ones % 2) != 0;
           break;
         }
@@ -4463,21 +4467,16 @@ private:
         {
           int ones = 0;
           for (auto b : n.inputVals)
-            ones += b ? 1 : 0;
+            ones += b;
           n.value = (ones % 2) == 0;
           break;
         }
         case CircuitNodeType::NOT:
           n.value = !n.inputVals.empty() && !n.inputVals[0];
           break;
-
         case CircuitNodeType::Output:
           n.value = !n.inputVals.empty() && n.inputVals[0];
           break;
-
-        case CircuitNodeType::Input:
-          break;
-
         default:
           break;
         }
@@ -4485,21 +4484,35 @@ private:
           changed = true;
       }
 
-      if (!changed)
-        break; // combinational convergence – done
+      // Propagate wires
+      for (auto &w : localWires)
+      {
+        CircuitNode *src = nullptr, *dst = nullptr;
+        for (auto &n : local)
+        {
+          if (n.id == w.fromNodeId)
+            src = &n;
+          if (n.id == w.toNodeId)
+            dst = &n;
+        }
+        if (!src || !dst)
+          continue;
+        if (w.toPortIndex < (int)dst->inputVals.size())
+          dst->inputVals[w.toPortIndex] = src->value;
+      }
 
-      // ── Cycle detection
+      if (!changed)
+        break;
+
       auto snap = snapshot();
       for (auto &prev : history)
-      {
         if (prev == snap)
-          goto done; // repeated state => oscillation detected, stop here
-      }
+          goto done;
       history.push_back(std::move(snap));
     }
   done:
 
-    // ── Read output ports back into inst.outputVals ───────────────────
+    // ── Read outputs ──────────────────────────────────────────────────
     bool anyChanged = false;
     for (auto &port : def.ports)
     {
@@ -4527,11 +4540,8 @@ private:
   // ── Logic evaluation ──────────────────────────────────────────────────
   void evaluate()
   {
-    // ── Reset all regular node inputs ─────────────────────────────────
     for (auto &n : nodes_)
       std::fill(n.inputVals.begin(), n.inputVals.end(), false);
-
-    // ── Reset all instance inputs ─────────────────────────────────────
     for (auto &inst : instances_)
       std::fill(inst.inputVals.begin(), inst.inputVals.end(), false);
 
@@ -4539,10 +4549,19 @@ private:
     {
       bool changed = false;
 
-      // ── Propagate all wires (including instance endpoints) ────────
+      // ── 1. Evaluate instances first (they read inputVals, write outputVals) ──
+      for (auto &inst : instances_)
+      {
+        const SubCircuitDef *def = findDefConst(inst.defId);
+        if (!def)
+          continue;
+        if (evaluateInstance(inst, *def))
+          changed = true;
+      }
+
+      // ── 2. Propagate ALL wires (instance outputs now up-to-date) ──────────
       for (auto &w : wires_)
       {
-        // ── Resolve driven value from source ──────────────────────
         bool srcVal = false;
         if (w.fromInstanceId >= 0)
         {
@@ -4561,7 +4580,6 @@ private:
           srcVal = src->value;
         }
 
-        // ── Drive the destination ─────────────────────────────────
         if (w.toInstanceId >= 0)
         {
           SubCircuitInstance *di = findInstance(w.toInstanceId);
@@ -4587,17 +4605,6 @@ private:
             changed = true;
           }
         }
-      }
-
-      // ── Evaluate all sub-circuit instances ────────────────────────
-      for (auto &inst : instances_)
-      {
-        const SubCircuitDef *def = findDefConst(inst.defId);
-        if (!def)
-          continue;
-
-        if (evaluateInstance(inst, *def))
-          changed = true;
       }
 
       // ── Evaluate all regular nodes ────────────────────────────────
@@ -6397,23 +6404,18 @@ public:
     auto toolbar = Container(
                        Row({
                                Text("Circuit")->setFontSize(14)->setTextColor(Color::fromRGB(160, 160, 180)),
-                               SizedBox(8, 0),
+                               SizedBox(2, 0),
                                savePicker,
-                               SizedBox(2, 0),
                                openPicker,
-                               SizedBox(2, 0),
                                verilogPicker,
-                               SizedBox(2, 0),
                                vhdlPicker,
-                               SizedBox(2, 0),
                                pngPicker,
-                               SizedBox(2, 0),
                                svgPicker,
-                               SizedBox(10, 0),
+                               SizedBox(2, 0),
                                undoBtn,
                                SizedBox(2, 0),
                                redoBtn,
-                               SizedBox(8, 0),
+                               SizedBox(2, 0),
                                copyBtn,
                                SizedBox(2, 0),
                                pasteBtn,
@@ -6421,17 +6423,17 @@ public:
                                dupBtn,
                                SizedBox(2, 0),
                                clrBtn,
-                               SizedBox(8, 0),
+                               SizedBox(2, 0),
                                fitBtn,
                                SizedBox(2, 0),
                                rstBtn,
-                               SizedBox(8, 0),
+                               SizedBox(2, 0),
                                ttBtn,
-                               SizedBox(12, 0),
+                               SizedBox(2, 0),
                                Container(modeRow)->setHeight(30),
                            })
-                           ->setPadding(7)
-                           ->setSpacing(3)
+                           ->setPadding(1)
+                           ->setSpacing(1)
                            ->setCrossAxisAlignment(CrossAxisAlignment::Center))
                        ->setHeight(40)
                        ->setBackgroundColor(kToolbarBg);
