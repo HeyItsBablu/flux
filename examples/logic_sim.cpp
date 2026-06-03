@@ -115,6 +115,13 @@ struct CircuitWire
   int fromNodeId = 0;  // source node  (output port)
   int toNodeId = 0;    // destination node (input port)
   int toPortIndex = 0; // which input on the destination
+
+  // Sub-circuit instance endpoints (used when fromNodeId / toNodeId == -1)
+  int fromInstanceId = -1; // source instance
+  int fromPortIdx = 0;     // which output port of that instance
+
+  int toInstanceId = -1;  // dest instance
+  int toInstancePort = 0; // which input port of that instance
   bool selected = false;
 };
 
@@ -139,6 +146,75 @@ struct PortRef
   bool isOutput = false;
   int portIdx = 0;
   bool valid() const { return nodeId >= 0; }
+};
+
+// ============================================================================
+// Sub-circuit port mapping
+// ============================================================================
+
+struct SubCircuitPort
+{
+  std::string name;        // user-visible port name
+  int internalNodeId = -1; // Input/Output node inside the def
+  bool isOutput = false;   // false = input port, true = output port
+  int portIndex = 0;       // ordering index on the black-box face
+};
+
+// ============================================================================
+// SubCircuitDef  —  the reusable definition (stored once, shared by instances)
+// ============================================================================
+
+struct SubCircuitDef
+{
+  int defId = 0;
+  std::string name; // e.g. "Half Adder"
+
+  std::vector<CircuitNode> nodes;    // internal node copies
+  std::vector<CircuitWire> wires;    // internal wire copies
+  std::vector<SubCircuitPort> ports; // ordered: inputs first, then outputs
+
+  // Convenience helpers
+  int inputPortCount() const
+  {
+    int n = 0;
+    for (auto &p : ports)
+      if (!p.isOutput)
+        ++n;
+    return n;
+  }
+  int outputPortCount() const
+  {
+    int n = 0;
+    for (auto &p : ports)
+      if (p.isOutput)
+        ++n;
+    return n;
+  }
+};
+
+// ============================================================================
+// SubCircuitInstance  —  one placed copy on the canvas
+// ============================================================================
+
+struct SubCircuitInstance
+{
+  int instanceId = 0;
+  int defId = 0; // which SubCircuitDef this refers to
+
+  float x = 0, y = 0;
+  float w = 0, h = 0;
+
+  bool selected = false;
+  std::string label; // defaults to def.name
+
+  // Runtime values — sized to match def.ports
+  std::vector<bool> inputVals;  // driven by incoming wires
+  std::vector<bool> outputVals; // computed by internal eval
+
+  float dragOX = 0, dragOY = 0;
+
+  int inputCount() const { return (int)inputVals.size(); }
+  int outputCount() const { return (int)outputVals.size(); }
 };
 
 // ============================================================================
@@ -251,7 +327,6 @@ public:
   // Serialize the current circuit to a JSON string.
   std::string toJson() const
   {
-    // Build node type => string map
     auto typeStr = [](CircuitNodeType t) -> const char *
     {
       switch (t)
@@ -276,60 +351,82 @@ public:
         return "Output";
       case CircuitNodeType::SevenSegment:
         return "7SEG";
+      case CircuitNodeType::Clock:
+        return "Clock";
       }
       return "AND";
     };
 
-    std::ostringstream o;
-    o << "{\n  \"nextId\": " << nextId_ << ",\n";
+    auto writeNode = [&](std::ostringstream &o, const CircuitNode &n)
+    {
+      o << "{"
+        << "\"id\":" << n.id << ","
+        << "\"type\":\"" << typeStr(n.type) << "\","
+        << "\"x\":" << n.x << ","
+        << "\"y\":" << n.y << ","
+        << "\"value\":" << (n.value ? "true" : "false") << ","
+        << "\"label\":\"" << n.label << "\","
+        << "\"inputs\":" << n.inputCount_ << ","
+        << "\"clockHz\":" << n.clockHz_ << ","
+        << "\"clockRunning\":" << (n.clockRunning_ ? "true" : "false")
+        << "}";
+    };
 
-    // nodes array
-    o << "  \"nodes\": [\n";
+    auto writeWire = [](std::ostringstream &o, const CircuitWire &w)
+    {
+      o << "{"
+        << "\"id\":" << w.id << ","
+        << "\"from\":" << w.fromNodeId << ","
+        << "\"to\":" << w.toNodeId << ","
+        << "\"port\":" << w.toPortIndex << ","
+        << "\"fromInst\":" << w.fromInstanceId << ","
+        << "\"fromPort\":" << w.fromPortIdx << ","
+        << "\"toInst\":" << w.toInstanceId << ","
+        << "\"toInstPort\":" << w.toInstancePort
+        << "}";
+    };
+
+    std::ostringstream o;
+    o << "{\n"
+      << "\"nextId\":" << nextId_ << ","
+      << "\"nextDefId\":" << nextDefId_ << ","
+      << "\"nextInstId\":" << nextInstanceId_ << ","
+      << "\"nextBusId\":" << nextBusId_ << ",\n";
+
+    // ── nodes ─────────────────────────────────────────────────────────
+    o << "\"nodes\":[\n";
     for (int i = 0; i < (int)nodes_.size(); ++i)
     {
-      const auto &n = nodes_[i];
-      o << "    {"
-        << "\"id\": " << n.id << ", "
-        << "\"type\": \"" << typeStr(n.type) << "\", "
-        << "\"x\": " << n.x << ", "
-        << "\"y\": " << n.y << ", "
-        << "\"value\": " << (n.value ? "true" : "false") << ", "
-        << "\"label\": \"" << n.label << "\""
-        << "\"inputs\": " << n.inputCount_
-        << ", \"clockHz\": " << n.clockHz_
-        << ", \"clockRunning\": " << (n.clockRunning_ ? "true" : "false")
-        << "}";
+      o << "  ";
+      writeNode(o, nodes_[i]);
       if (i + 1 < (int)nodes_.size())
         o << ",";
       o << "\n";
     }
-    o << "  ],\n";
+    o << "],\n";
 
-    // wires array
-    o << "  \"wires\": [\n";
+    // ── wires ─────────────────────────────────────────────────────────
+    o << "\"wires\":[\n";
     for (int i = 0; i < (int)wires_.size(); ++i)
     {
-      const auto &w = wires_[i];
-      o << "    {"
-        << "\"from\": " << w.fromNodeId << ", "
-        << "\"to\": " << w.toNodeId << ", "
-        << "\"port\": " << w.toPortIndex
-        << "}";
+      o << "  ";
+      writeWire(o, wires_[i]);
       if (i + 1 < (int)wires_.size())
         o << ",";
       o << "\n";
     }
-    o << "  ]\n}\n";
-    // buses array
-    o << "  \"buses\": [\n";
+    o << "],\n";
+
+    // ── buses ─────────────────────────────────────────────────────────
+    o << "\"buses\":[\n";
     for (int i = 0; i < (int)buses_.size(); ++i)
     {
       const auto &b = buses_[i];
-      o << "    {\"id\": " << b.id
-        << ", \"bits\": " << b.bitWidth
-        << ", \"from\": " << b.fromNodeId
-        << ", \"to\": " << b.toNodeId
-        << ", \"wires\": [";
+      o << "  {\"id\":" << b.id
+        << ",\"bits\":" << b.bitWidth
+        << ",\"from\":" << b.fromNodeId
+        << ",\"to\":" << b.toNodeId
+        << ",\"wires\":[";
       for (int j = 0; j < (int)b.wireIds.size(); ++j)
         o << b.wireIds[j] << (j + 1 < (int)b.wireIds.size() ? "," : "");
       o << "]}";
@@ -337,7 +434,72 @@ public:
         o << ",";
       o << "\n";
     }
-    o << "  ]\n}\n";
+    o << "],\n";
+
+    // ── defs ──────────────────────────────────────────────────────────
+    o << "\"defs\":[\n";
+    for (int di = 0; di < (int)defs_.size(); ++di)
+    {
+      const auto &def = defs_[di];
+      o << "  {\"defId\":" << def.defId
+        << ",\"name\":\"" << def.name << "\","
+        << "\"nodes\":[\n";
+      for (int i = 0; i < (int)def.nodes.size(); ++i)
+      {
+        o << "    ";
+        writeNode(o, def.nodes[i]);
+        if (i + 1 < (int)def.nodes.size())
+          o << ",";
+        o << "\n";
+      }
+      o << "  ],\"wires\":[\n";
+      for (int i = 0; i < (int)def.wires.size(); ++i)
+      {
+        o << "    ";
+        writeWire(o, def.wires[i]);
+        if (i + 1 < (int)def.wires.size())
+          o << ",";
+        o << "\n";
+      }
+      o << "  ],\"ports\":[\n";
+      for (int i = 0; i < (int)def.ports.size(); ++i)
+      {
+        const auto &p = def.ports[i];
+        o << "    {"
+          << "\"name\":\"" << p.name << "\","
+          << "\"internalNodeId\":" << p.internalNodeId << ","
+          << "\"isOutput\":" << (p.isOutput ? "true" : "false") << ","
+          << "\"portIndex\":" << p.portIndex
+          << "}";
+        if (i + 1 < (int)def.ports.size())
+          o << ",";
+        o << "\n";
+      }
+      o << "  ]}";
+      if (di + 1 < (int)defs_.size())
+        o << ",";
+      o << "\n";
+    }
+    o << "],\n";
+
+    // ── instances ─────────────────────────────────────────────────────
+    o << "\"instances\":[\n";
+    for (int i = 0; i < (int)instances_.size(); ++i)
+    {
+      const auto &inst = instances_[i];
+      o << "  {"
+        << "\"instanceId\":" << inst.instanceId << ","
+        << "\"defId\":" << inst.defId << ","
+        << "\"x\":" << inst.x << ","
+        << "\"y\":" << inst.y << ","
+        << "\"label\":\"" << inst.label << "\""
+        << "}";
+      if (i + 1 < (int)instances_.size())
+        o << ",";
+      o << "\n";
+    }
+    o << "]\n}\n";
+
     return o.str();
   }
 
@@ -1126,6 +1288,8 @@ public:
         return CircuitNodeType::Output;
       if (s == "7SEG")
         return CircuitNodeType::SevenSegment;
+      if (s == "Clock")
+        return CircuitNodeType::Clock;
       return CircuitNodeType::AND;
     };
 
@@ -1133,78 +1297,89 @@ public:
     if (!JsonParser::tryParse(json, root) || !root.isObject())
       return false;
 
+    // ── helpers ───────────────────────────────────────────────────────
+    auto readNode = [&](const JsonValue &jn) -> CircuitNode
+    {
+      CircuitNode n;
+      if (auto *v = jn.get("id"))
+        n.id = v->getInt();
+      if (auto *v = jn.get("type"))
+        n.type = strToType(v->getString());
+      if (auto *v = jn.get("x"))
+        n.x = (float)v->getNumber();
+      if (auto *v = jn.get("y"))
+        n.y = (float)v->getNumber();
+      if (auto *v = jn.get("value"))
+        n.value = v->getBool();
+      if (auto *v = jn.get("label"))
+        n.label = v->getString();
+      if (auto *v = jn.get("inputs"))
+        n.inputCount_ = std::max(1, v->getInt(2));
+      if (auto *v = jn.get("clockHz"))
+        n.clockHz_ = std::max(0.1f, (float)v->getNumber());
+      if (auto *v = jn.get("clockRunning"))
+        n.clockRunning_ = v->getBool();
+      nodeDims(n.type, n.w, n.h, n.inputCount_);
+      n.x = snapX(n.x, n.w);
+      n.y = snapY(n.y, n.h);
+      n.inputVals.assign(n.inputCount(), false);
+      return n;
+    };
+
+    auto readWire = [](const JsonValue &jw) -> CircuitWire
+    {
+      CircuitWire w;
+      if (auto *v = jw.get("id"))
+        w.id = v->getInt();
+      if (auto *v = jw.get("from"))
+        w.fromNodeId = v->getInt();
+      if (auto *v = jw.get("to"))
+        w.toNodeId = v->getInt();
+      if (auto *v = jw.get("port"))
+        w.toPortIndex = v->getInt();
+      if (auto *v = jw.get("fromInst"))
+        w.fromInstanceId = v->getInt();
+      if (auto *v = jw.get("fromPort"))
+        w.fromPortIdx = v->getInt();
+      if (auto *v = jw.get("toInst"))
+        w.toInstanceId = v->getInt();
+      if (auto *v = jw.get("toInstPort"))
+        w.toInstancePort = v->getInt();
+      return w;
+    };
+
+    // ── parse into temporaries ────────────────────────────────────────
     std::vector<CircuitNode> newNodes;
     std::vector<CircuitWire> newWires;
-    int newNextId = 1;
+    std::vector<BusWire> newBuses;
+    std::vector<SubCircuitDef> newDefs;
+    std::vector<SubCircuitInstance> newInsts;
 
-    // nextId
+    int newNextId = 1;
+    int newNextDefId = 1;
+    int newNextInstId = 1;
+    int newNextBusId = 1;
+
     if (auto *v = root.get("nextId"))
       newNextId = v->getInt(1);
+    if (auto *v = root.get("nextDefId"))
+      newNextDefId = v->getInt(1);
+    if (auto *v = root.get("nextInstId"))
+      newNextInstId = v->getInt(1);
+    if (auto *v = root.get("nextBusId"))
+      newNextBusId = v->getInt(1);
 
     // nodes
     if (auto *arr = root.get("nodes"))
-    {
-      if (!arr->isArray())
-        return false;
       for (size_t i = 0; i < arr->size(); ++i)
-      {
-        const JsonValue &jn = (*arr)[i];
-        if (!jn.isObject())
-          return false;
-
-        CircuitNode n;
-        if (auto *v = jn.get("id"))
-          n.id = v->getInt();
-        if (auto *v = jn.get("type"))
-          n.type = strToType(v->getString());
-        if (auto *v = jn.get("x"))
-          n.x = (float)v->getNumber();
-        if (auto *v = jn.get("y"))
-          n.y = (float)v->getNumber();
-        if (auto *v = jn.get("value"))
-          n.value = v->getBool();
-        if (auto *v = jn.get("label"))
-          n.label = v->getString();
-        if (auto *v = jn.get("inputs"))
-          n.inputCount_ = std::max(1, v->getInt(2));
-
-        if (auto *v = jn.get("clockHz"))
-          n.clockHz_ = std::max(0.1f, (float)v->getNumber());
-        if (auto *v = jn.get("clockRunning"))
-          n.clockRunning_ = v->getBool();
-
-        nodeDims(n.type, n.w, n.h, n.inputCount_);
-        n.x = snapX(n.x, n.w); //  snap legacy positions
-        n.y = snapY(n.y, n.h); //  snap legacy positions
-        n.inputVals.assign(n.inputCount(), false);
-        newNodes.push_back(std::move(n));
-      }
-    }
+        newNodes.push_back(readNode((*arr)[i]));
 
     // wires
     if (auto *arr = root.get("wires"))
-    {
-      if (!arr->isArray())
-        return false;
       for (size_t i = 0; i < arr->size(); ++i)
-      {
-        const JsonValue &jw = (*arr)[i];
-        if (!jw.isObject())
-          return false;
+        newWires.push_back(readWire((*arr)[i]));
 
-        CircuitWire w;
-        if (auto *v = jw.get("from"))
-          w.fromNodeId = v->getInt();
-        if (auto *v = jw.get("to"))
-          w.toNodeId = v->getInt();
-        if (auto *v = jw.get("port"))
-          w.toPortIndex = v->getInt();
-        newWires.push_back(w);
-      }
-    }
-
-    std::vector<BusWire> newBuses;
-    int newNextBusId = 1;
+    // buses
     if (auto *arr = root.get("buses"))
     {
       for (size_t i = 0; i < arr->size(); ++i)
@@ -1227,13 +1402,96 @@ public:
       }
     }
 
-    // Commit — only if parsing fully succeeded
+    // defs
+    if (auto *arr = root.get("defs"))
+    {
+      for (size_t i = 0; i < arr->size(); ++i)
+      {
+        const JsonValue &jd = (*arr)[i];
+        SubCircuitDef def;
+        if (auto *v = jd.get("defId"))
+          def.defId = v->getInt();
+        if (auto *v = jd.get("name"))
+          def.name = v->getString();
+
+        if (auto *na = jd.get("nodes"))
+          for (size_t j = 0; j < na->size(); ++j)
+            def.nodes.push_back(readNode((*na)[j]));
+
+        if (auto *wa = jd.get("wires"))
+          for (size_t j = 0; j < wa->size(); ++j)
+            def.wires.push_back(readWire((*wa)[j]));
+
+        if (auto *pa = jd.get("ports"))
+        {
+          for (size_t j = 0; j < pa->size(); ++j)
+          {
+            const JsonValue &jp = (*pa)[j];
+            SubCircuitPort p;
+            if (auto *v = jp.get("name"))
+              p.name = v->getString();
+            if (auto *v = jp.get("internalNodeId"))
+              p.internalNodeId = v->getInt();
+            if (auto *v = jp.get("isOutput"))
+              p.isOutput = v->getBool();
+            if (auto *v = jp.get("portIndex"))
+              p.portIndex = v->getInt();
+            def.ports.push_back(p);
+          }
+        }
+        newNextDefId = std::max(newNextDefId, def.defId + 1);
+        newDefs.push_back(def);
+      }
+    }
+
+    // instances
+    if (auto *arr = root.get("instances"))
+    {
+      for (size_t i = 0; i < arr->size(); ++i)
+      {
+        const JsonValue &ji = (*arr)[i];
+        SubCircuitInstance inst;
+        if (auto *v = ji.get("instanceId"))
+          inst.instanceId = v->getInt();
+        if (auto *v = ji.get("defId"))
+          inst.defId = v->getInt();
+        if (auto *v = ji.get("x"))
+          inst.x = (float)v->getNumber();
+        if (auto *v = ji.get("y"))
+          inst.y = (float)v->getNumber();
+        if (auto *v = ji.get("label"))
+          inst.label = v->getString();
+
+        // Restore dimensions and runtime arrays from the def
+        for (auto &def : newDefs)
+        {
+          if (def.defId == inst.defId)
+          {
+            instanceDims(def, inst.w, inst.h);
+            inst.x = snapX(inst.x, inst.w);
+            inst.y = snapY(inst.y, inst.h);
+            inst.inputVals.assign(def.inputPortCount(), false);
+            inst.outputVals.assign(def.outputPortCount(), false);
+            break;
+          }
+        }
+        newNextInstId = std::max(newNextInstId, inst.instanceId + 1);
+        newInsts.push_back(inst);
+      }
+    }
+
+    // ── Commit ────────────────────────────────────────────────────────
     pushUndo();
     nodes_ = std::move(newNodes);
     wires_ = std::move(newWires);
-    nextId_ = newNextId;
     buses_ = std::move(newBuses);
+    defs_ = std::move(newDefs);
+    instances_ = std::move(newInsts);
+    nextId_ = newNextId;
+    nextDefId_ = newNextDefId;
+    nextInstanceId_ = newNextInstId;
     nextBusId_ = newNextBusId;
+
     evaluate();
     notify();
     return true;
@@ -1451,8 +1709,12 @@ public:
     nodes_.clear();
     wires_.clear();
     buses_.clear();
+    defs_.clear();
+    instances_.clear();
     nextBusId_ = 1;
     nextId_ = 1;
+    nextDefId_ = 1;
+    nextInstanceId_ = 1;
     wireStart_ = {};
     dragging_ = false;
     notify();
@@ -1483,6 +1745,29 @@ public:
                                 [](const CircuitWire &w)
                                 { return w.selected; }),
                  wires_.end());
+
+    std::vector<int> deadInst;
+    for (auto &inst : instances_)
+      if (inst.selected)
+        deadInst.push_back(inst.instanceId);
+
+    for (int iid : deadInst)
+    {
+      wires_.erase(
+          std::remove_if(wires_.begin(), wires_.end(),
+                         [iid](const CircuitWire &w)
+                         {
+                           return w.fromInstanceId == iid || w.toInstanceId == iid;
+                         }),
+          wires_.end());
+      instances_.erase(
+          std::remove_if(instances_.begin(), instances_.end(),
+                         [iid](const SubCircuitInstance &i)
+                         {
+                           return i.instanceId == iid;
+                         }),
+          instances_.end());
+    }
 
     evaluate();
     notify();
@@ -1521,6 +1806,443 @@ public:
     return true;
   }
 
+  // ============================================================================
+  // Sub-circuit grouping
+  // ============================================================================
+
+  bool groupSelectionIntoSubCircuit(const std::string &name = "")
+  {
+    // ── 1. Collect selected nodes ─────────────────────────────────────
+    std::vector<int> selIds;
+    for (auto &n : nodes_)
+      if (n.selected)
+        selIds.push_back(n.id);
+
+    if (selIds.size() < 1)
+      return false;
+
+    std::unordered_set<int> selSet(selIds.begin(), selIds.end());
+
+    // ── 2. Detect boundary wires ──────────────────────────────────────
+    // A wire crossing INTO  the selection  → becomes an INPUT  port
+    // A wire crossing OUT OF the selection → becomes an OUTPUT port
+    // A wire fully inside the selection    → stays internal
+
+    struct BoundaryWire
+    {
+      int wireIdx;
+      bool isInput;        // true = enters selection, false = exits
+      int externalNodeId;  // the node OUTSIDE the selection
+      int externalPortIdx; // port index on that external node
+      int internalNodeId;  // the node INSIDE the selection
+      int internalPortIdx; // port index on the internal node
+    };
+
+    std::vector<BoundaryWire> boundaries;
+
+    for (int i = 0; i < (int)wires_.size(); ++i)
+    {
+      auto &w = wires_[i];
+      bool srcIn = selSet.count(w.fromNodeId) > 0;
+      bool dstIn = selSet.count(w.toNodeId) > 0;
+
+      if (srcIn && dstIn)
+        continue; // purely internal — keep as-is
+      if (!srcIn && !dstIn)
+        continue; // purely external — not our concern
+
+      BoundaryWire bw;
+      bw.wireIdx = i;
+
+      if (!srcIn && dstIn)
+      {
+        // Wire enters selection → INPUT port on the black box
+        bw.isInput = true;
+        bw.externalNodeId = w.fromNodeId;
+        bw.externalPortIdx = 0; // output port (single output per node)
+        bw.internalNodeId = w.toNodeId;
+        bw.internalPortIdx = w.toPortIndex;
+      }
+      else // srcIn && !dstIn
+      {
+        // Wire exits selection → OUTPUT port on the black box
+        bw.isInput = false;
+        bw.externalNodeId = w.toNodeId;
+        bw.externalPortIdx = w.toPortIndex;
+        bw.internalNodeId = w.fromNodeId;
+        bw.internalPortIdx = 0;
+      }
+      boundaries.push_back(bw);
+    }
+
+    // ── 3. Build the SubCircuitDef ────────────────────────────────────
+    pushUndo();
+
+    SubCircuitDef def;
+    def.defId = nextDefId_++;
+    def.name = name.empty() ? ("Module_" + std::to_string(def.defId)) : name;
+
+    // Copy internal nodes into the def (remap IDs to be self-contained)
+    // We keep the original IDs inside the def for simplicity — they only
+    // need to be unique within the def, which they already are.
+    std::unordered_map<int, int> oldToDefId; // original canvas ID → def-local ID
+    int defLocalId = 1;
+    for (int id : selIds)
+    {
+      const CircuitNode *n = findNodeConst(id);
+      if (!n)
+        continue;
+      CircuitNode copy = *n;
+      copy.selected = false;
+      oldToDefId[id] = defLocalId;
+      copy.id = defLocalId++;
+      def.nodes.push_back(copy);
+    }
+
+    // Copy internal wires (remap node IDs)
+    for (auto &w : wires_)
+    {
+      if (selSet.count(w.fromNodeId) && selSet.count(w.toNodeId))
+      {
+        CircuitWire cw = w;
+        cw.fromNodeId = oldToDefId[w.fromNodeId];
+        cw.toNodeId = oldToDefId[w.toNodeId];
+        def.wires.push_back(cw);
+      }
+    }
+
+    // ── 4. Build ports from boundary wires ───────────────────────────
+    // Deduplicate: multiple wires entering the same internal node+port
+    // should still produce only one port entry.
+    // Use an ordered list: inputs first (sorted by internalNodeId),
+    // then outputs.
+
+    // Track which (internalNode, portIdx) pairs we've already added
+    std::unordered_map<int, int> inPortKey; // encodes nodeId*100+portIdx → port index
+    std::unordered_map<int, int> outPortKey;
+
+    int inputIdx = 0;
+    int outputIdx = 0;
+
+    for (auto &bw : boundaries)
+    {
+      if (bw.isInput)
+      {
+        int key = bw.internalNodeId * 1000 + bw.internalPortIdx;
+        if (inPortKey.count(key))
+          continue; // already registered
+
+        SubCircuitPort p;
+        // Name from the internal node's label, or "in_N"
+        const CircuitNode *n = findNodeConst(bw.internalNodeId);
+        p.name = (n && !n->label.empty())
+                     ? n->label
+                     : ("in_" + std::to_string(inputIdx));
+        p.internalNodeId = oldToDefId[bw.internalNodeId];
+        p.isOutput = false;
+        p.portIndex = inputIdx++;
+        inPortKey[key] = p.portIndex;
+        def.ports.push_back(p);
+      }
+      else
+      {
+        int key = bw.internalNodeId * 1000;
+        if (outPortKey.count(key))
+          continue;
+
+        SubCircuitPort p;
+        const CircuitNode *n = findNodeConst(bw.internalNodeId);
+        p.name = (n && !n->label.empty())
+                     ? n->label
+                     : ("out_" + std::to_string(outputIdx));
+        p.internalNodeId = oldToDefId[bw.internalNodeId];
+        p.isOutput = true;
+        p.portIndex = outputIdx++;
+        outPortKey[key] = p.portIndex;
+        def.ports.push_back(p);
+      }
+    }
+
+    // Also promote any Input/Output nodes inside the selection that
+    // weren't caught by boundary wires (e.g. disconnected stubs).
+    for (int id : selIds)
+    {
+      const CircuitNode *n = findNodeConst(id);
+      if (!n)
+        continue;
+
+      if (n->type == CircuitNodeType::Input)
+      {
+        int key = id * 1000 + 0;
+        if (!inPortKey.count(key))
+        {
+          SubCircuitPort p;
+          p.name = n->label.empty()
+                       ? ("in_" + std::to_string(inputIdx))
+                       : n->label;
+          p.internalNodeId = oldToDefId[id];
+          p.isOutput = false;
+          p.portIndex = inputIdx++;
+          inPortKey[key] = p.portIndex;
+          def.ports.push_back(p);
+        }
+      }
+      else if (n->type == CircuitNodeType::Output)
+      {
+        int key = id * 1000;
+        if (!outPortKey.count(key))
+        {
+          SubCircuitPort p;
+          p.name = n->label.empty()
+                       ? ("out_" + std::to_string(outputIdx))
+                       : n->label;
+          p.internalNodeId = oldToDefId[id];
+          p.isOutput = true;
+          p.portIndex = outputIdx++;
+          outPortKey[key] = p.portIndex;
+          def.ports.push_back(p);
+        }
+      }
+    }
+
+    // Sort ports: all inputs first, then outputs, each group by portIndex
+    std::sort(def.ports.begin(), def.ports.end(),
+              [](const SubCircuitPort &a, const SubCircuitPort &b)
+              {
+                if (a.isOutput != b.isOutput)
+                  return !a.isOutput; // inputs first
+                return a.portIndex < b.portIndex;
+              });
+
+    // Re-assign portIndex sequentially after sort
+    int inC = 0, outC = 0;
+    for (auto &p : def.ports)
+      p.portIndex = p.isOutput ? outC++ : inC++;
+
+    defs_.push_back(def);
+
+    // ── 5. Place the instance ─────────────────────────────────────────
+    // Position at the centroid of the selected nodes
+    float cx = 0, cy = 0;
+    for (int id : selIds)
+    {
+      const CircuitNode *n = findNodeConst(id);
+      if (n)
+      {
+        cx += n->x + n->w * 0.5f;
+        cy += n->y + n->h * 0.5f;
+      }
+    }
+    cx /= float(selIds.size());
+    cy /= float(selIds.size());
+
+    SubCircuitInstance inst;
+    inst.instanceId = nextInstanceId_++;
+    inst.defId = def.defId;
+    inst.label = def.name;
+    inst.inputVals.assign(def.inputPortCount(), false);
+    inst.outputVals.assign(def.outputPortCount(), false);
+    instanceDims(def, inst.w, inst.h);
+    inst.x = snapX(cx - inst.w * 0.5f, inst.w);
+    inst.y = snapY(cy - inst.h * 0.5f, inst.h);
+    inst.selected = true;
+
+    instances_.push_back(inst);
+
+    // ── 6. Reconnect external wires to the new instance ───────────────
+    // Collect wire indices to delete AFTER we've read all boundary info
+    std::vector<int> wiresToDelete;
+
+    for (auto &bw : boundaries)
+    {
+      wiresToDelete.push_back(bw.wireIdx);
+
+      if (bw.isInput)
+      {
+        // Was:  externalNode ──wire──> internalNode
+        // Now:  externalNode ──wire──> instance (input port)
+        int key = bw.internalNodeId * 1000 + bw.internalPortIdx;
+        int portIdx = inPortKey[key];
+
+        CircuitWire nw;
+        nw.id = nextId_++;
+        nw.fromNodeId = bw.externalNodeId; // regular node output
+        nw.toNodeId = -1;                  // signals "goes to instance"
+        nw.toPortIndex = portIdx;
+        nw.toInstanceId = inst.instanceId;
+        nw.toInstancePort = portIdx;
+        wires_.push_back(nw);
+      }
+      else
+      {
+        // Was:  internalNode ──wire──> externalNode
+        // Now:  instance (output port) ──wire──> externalNode
+        int key = bw.internalNodeId * 1000;
+        int portIdx = outPortKey[key];
+
+        CircuitWire nw;
+        nw.id = nextId_++;
+        nw.fromNodeId = -1; // signals "comes from instance"
+        nw.fromInstanceId = inst.instanceId;
+        nw.fromPortIdx = portIdx;
+        nw.toNodeId = bw.externalNodeId;
+        nw.toPortIndex = bw.externalPortIdx;
+        wires_.push_back(nw);
+      }
+    }
+
+    // Delete old boundary wires (reverse order to keep indices stable)
+    std::sort(wiresToDelete.begin(), wiresToDelete.end(), std::greater<int>());
+    wiresToDelete.erase(
+        std::unique(wiresToDelete.begin(), wiresToDelete.end()),
+        wiresToDelete.end());
+    for (int idx : wiresToDelete)
+      wires_.erase(wires_.begin() + idx);
+
+    // ── 7. Remove the now-grouped nodes from the canvas ───────────────
+    // Also remove any internal wires that are now inside the def
+    wires_.erase(
+        std::remove_if(wires_.begin(), wires_.end(),
+                       [&selSet](const CircuitWire &w)
+                       {
+                         return selSet.count(w.fromNodeId) || selSet.count(w.toNodeId);
+                       }),
+        wires_.end());
+
+    nodes_.erase(
+        std::remove_if(nodes_.begin(), nodes_.end(),
+                       [&selSet](const CircuitNode &n)
+                       {
+                         return selSet.count(n.id);
+                       }),
+        nodes_.end());
+
+    evaluate();
+    notify();
+    return true;
+  }
+
+  // ── Instantiate a def by defId (e.g. from a "place again" action) ─────
+  SubCircuitInstance *placeInstance(int defId, float wx, float wy)
+  {
+    const SubCircuitDef *def = findDef(defId);
+    if (!def)
+      return nullptr;
+
+    SubCircuitInstance inst;
+    inst.instanceId = nextInstanceId_++;
+    inst.defId = defId;
+    inst.label = def->name;
+    inst.inputVals.assign(def->inputPortCount(), false);
+    inst.outputVals.assign(def->outputPortCount(), false);
+    instanceDims(*def, inst.w, inst.h);
+    inst.x = snapX(wx - inst.w * 0.5f, inst.w);
+    inst.y = snapY(wy - inst.h * 0.5f, inst.h);
+    inst.selected = true;
+    instances_.push_back(inst);
+
+    evaluate();
+    notify();
+    return &instances_.back();
+  }
+
+  // ── Explode an instance back into its constituent nodes ───────────────
+  bool explodeInstance(int instanceId)
+  {
+    auto it = std::find_if(instances_.begin(), instances_.end(),
+                           [instanceId](const SubCircuitInstance &i)
+                           {
+                             return i.instanceId == instanceId;
+                           });
+    if (it == instances_.end())
+      return false;
+
+    const SubCircuitDef *def = findDef(it->defId);
+    if (!def)
+      return false;
+
+    pushUndo();
+
+    // Remap def-local IDs to fresh canvas IDs
+    std::unordered_map<int, int> defToCanvas;
+    float ox = it->x, oy = it->y; // place restored nodes near instance position
+
+    for (auto &dn : def->nodes)
+    {
+      CircuitNode n = dn;
+      n.id = nextId_++;
+      defToCanvas[dn.id] = n.id;
+      // Offset relative to instance top-left
+      n.x = snapX(ox + dn.x, n.w);
+      n.y = snapY(oy + dn.y, n.h);
+      n.selected = true;
+      nodes_.push_back(n);
+    }
+
+    // Restore internal wires
+    for (auto &dw : def->wires)
+    {
+      CircuitWire w = dw;
+      w.id = nextId_++;
+      w.fromNodeId = defToCanvas[dw.fromNodeId];
+      w.toNodeId = defToCanvas[dw.toNodeId];
+      w.fromInstanceId = -1;
+      w.toInstanceId = -1;
+      wires_.push_back(w);
+    }
+
+    // Re-attach external wires that were going to/from this instance
+    int iid = it->instanceId;
+    for (auto &w : wires_)
+    {
+      if (w.fromInstanceId == iid)
+      {
+        // Find the internal output node for this port
+        const SubCircuitPort *p = findOutputPort(*def, w.fromPortIdx);
+        if (p)
+        {
+          w.fromNodeId = defToCanvas[p->internalNodeId];
+          w.fromInstanceId = -1;
+        }
+      }
+      if (w.toInstanceId == iid)
+      {
+        const SubCircuitPort *p = findInputPort(*def, w.toInstancePort);
+        if (p)
+        {
+          w.toNodeId = defToCanvas[p->internalNodeId];
+          w.toInstanceId = -1;
+        }
+      }
+    }
+
+    // Remove wires that still reference this instance (unconnected ports)
+    wires_.erase(
+        std::remove_if(wires_.begin(), wires_.end(),
+                       [iid](const CircuitWire &w)
+                       {
+                         return w.fromInstanceId == iid || w.toInstanceId == iid;
+                       }),
+        wires_.end());
+
+    instances_.erase(it);
+    evaluate();
+    notify();
+    return true;
+  }
+
+  // ── Dimension helper ──────────────────────────────────────────────────
+  static void instanceDims(const SubCircuitDef &def, float &w, float &h)
+  {
+    int ports = (int)def.ports.size();
+    int inPorts = def.inputPortCount();
+    int outPorts = def.outputPortCount();
+    int tallSide = std::max(inPorts, outPorts);
+    // Each port row needs ~580 units; minimum 2 rows, plus header
+    h = float(std::max(2, tallSide)) * 580.f + 400.f;
+    w = 1400.f; // fixed width for the black box
+  }
+
   void ungroupBus(int busId)
   {
     pushUndo();
@@ -1537,6 +2259,8 @@ public:
       n.selected = true;
     for (auto &w : wires_)
       w.selected = true;
+    for (auto &i : instances_)
+      i.selected = true;
   }
   void deselectAll()
   {
@@ -1544,13 +2268,25 @@ public:
       n.selected = false;
     for (auto &w : wires_)
       w.selected = false;
+    for (auto &i : instances_)
+      i.selected = false;
+  }
+
+  void deselectAllInstances()
+  {
+    for (auto &i : instances_)
+      i.selected = false;
   }
 
   int selectedCount() const
   {
-    return int(std::count_if(nodes_.begin(), nodes_.end(),
-                             [](const CircuitNode &n)
-                             { return n.selected; }));
+    int n = int(std::count_if(nodes_.begin(), nodes_.end(),
+                              [](const CircuitNode &n)
+                              { return n.selected; }));
+    int i = int(std::count_if(instances_.begin(), instances_.end(),
+                              [](const SubCircuitInstance &i)
+                              { return i.selected; }));
+    return n + i;
   }
 
   // ── Place a new node at world position ────────────────────────────────
@@ -1579,10 +2315,11 @@ public:
   {
     if (undoNodes_.empty())
       return;
-    redoNodes_.push_back({nodes_, wires_});
+    redoNodes_.push_back({nodes_, wires_, instances_});
     auto &s = undoNodes_.back();
-    nodes_ = s.first;
-    wires_ = s.second;
+    nodes_ = s.nodes;
+    wires_ = s.wires;
+    instances_ = s.instances;
     undoNodes_.pop_back();
     evaluate();
     notify();
@@ -1591,10 +2328,11 @@ public:
   {
     if (redoNodes_.empty())
       return;
-    undoNodes_.push_back({nodes_, wires_});
+    undoNodes_.push_back({nodes_, wires_, instances_});
     auto &s = redoNodes_.back();
-    nodes_ = s.first;
-    wires_ = s.second;
+    nodes_ = s.nodes;
+    wires_ = s.wires;
+    instances_ = s.instances;
     redoNodes_.pop_back();
     evaluate();
     notify();
@@ -1605,11 +2343,30 @@ public:
     if (!textEditing_)
       return;
     textEditing_ = false;
-    CircuitNode *n = findNode(textEdit_.nodeId);
-    if (n)
+
+    if (textEdit_.nodeId < 0)
     {
-      pushUndo();
-      n->label = textEdit_.text; // empty string = revert to default gate name
+      // Instance rename
+      int iid = -(textEdit_.nodeId);
+      SubCircuitInstance *inst = findInstance(iid);
+      if (inst)
+      {
+        pushUndo();
+        inst->label = textEdit_.text;
+        // Also update the def name if this is the only instance
+        SubCircuitDef *def = findDef(inst->defId);
+        if (def)
+          def->name = textEdit_.text;
+      }
+    }
+    else
+    {
+      CircuitNode *n = findNode(textEdit_.nodeId);
+      if (n)
+      {
+        pushUndo();
+        n->label = textEdit_.text;
+      }
     }
     textEdit_ = {};
     notify();
@@ -1677,6 +2434,24 @@ public:
   }
   void update(double dt) override
   {
+
+    // Flush any pending instance rename (set by context menu)
+    if (pendingInstanceRename_ >= 0)
+    {
+      SubCircuitInstance *inst = findInstance(pendingInstanceRename_);
+      if (inst)
+      {
+        // Borrow the text-edit system using a fake node id trick:
+        // we use nodeId = -(instanceId) to distinguish from real nodes
+        textEditing_ = true;
+        textEdit_.nodeId = -(inst->instanceId);
+        textEdit_.text = inst->label;
+        textEdit_.cursorVisible = true;
+        textEdit_.blinkTimer = 0.0;
+      }
+      pendingInstanceRename_ = -1;
+    }
+
     // Blink cursor
     if (textEditing_)
     {
@@ -1896,9 +2671,50 @@ public:
 
         CircuitWire w;
         w.id = nextId_++;
-        w.fromNodeId = from.nodeId;
-        w.toNodeId = to.nodeId;
-        w.toPortIndex = to.portIdx;
+
+        // Source
+        if (from.nodeId < 0)
+        {
+          int iid, pidx;
+          decodeInstancePortRef(from, iid, pidx);
+          w.fromNodeId = -1;
+          w.fromInstanceId = iid;
+          w.fromPortIdx = pidx;
+        }
+        else
+        {
+          w.fromNodeId = from.nodeId;
+        }
+
+        // Destination
+        if (to.nodeId < 0)
+        {
+          int iid, pidx;
+          decodeInstancePortRef(to, iid, pidx);
+          w.toNodeId = -1;
+          w.toInstanceId = iid;
+          w.toInstancePort = pidx;
+          w.toPortIndex = pidx;
+        }
+        else
+        {
+          w.toNodeId = to.nodeId;
+          w.toPortIndex = to.portIdx;
+        }
+
+        // Remove any existing wire to the same destination port
+        wires_.erase(
+            std::remove_if(wires_.begin(), wires_.end(),
+                           [&w](const CircuitWire &ew)
+                           {
+                             if (w.toInstanceId >= 0)
+                               return ew.toInstanceId == w.toInstanceId &&
+                                      ew.toInstancePort == w.toInstancePort;
+                             return ew.toNodeId == w.toNodeId &&
+                                    ew.toPortIndex == w.toPortIndex;
+                           }),
+            wires_.end());
+
         wires_.push_back(w);
 
         wireStart_ = {};
@@ -1911,6 +2727,32 @@ public:
     // ── Select mode ───────────────────────────────────────────────────
     bool shift = Key::isShiftDown();
     CircuitNode *n = hitNode(x, y);
+
+    // ── Instance hit ──────────────────────────────────────────────────
+    SubCircuitInstance *inst = hitInstance(x, y);
+    if (inst)
+    {
+      if (!shift && !inst->selected)
+      {
+        deselectAll();
+        deselectAllInstances();
+      }
+      inst->selected = true;
+      dragging_ = true;
+      dragStartX_ = x;
+      dragStartY_ = y;
+      for (auto &nn : nodes_)
+      {
+        nn.dragOX = nn.x;
+        nn.dragOY = nn.y;
+      }
+      for (auto &ii : instances_)
+      {
+        ii.dragOX = ii.x;
+        ii.dragOY = ii.y;
+      }
+      return;
+    }
 
     if (n)
     {
@@ -1999,6 +2841,14 @@ public:
         float rawY = n.dragOY + dy;
         n.x = snapX(rawX, n.w);
         n.y = snapY(rawY, n.h);
+      }
+
+      for (auto &inst : instances_)
+      {
+        if (!inst.selected)
+          continue;
+        inst.x = snapX(inst.dragOX + dx, inst.w);
+        inst.y = snapY(inst.dragOY + dy, inst.h);
       }
     }
     else if (rubberBand_)
@@ -2089,7 +2939,6 @@ public:
       }
     }
   }
-
   void onRightMouseDown(float x, float y) override
   {
     if (textEditing_)
@@ -2103,24 +2952,95 @@ public:
     }
 
     CircuitNode *n = hitNode(x, y);
+    SubCircuitInstance *instHit = hitInstance(x, y);
     int wireIdx = hitWire(x, y);
     int busIdx = hitBus(x, y);
 
     std::vector<ContextMenuItem> items;
 
-    if (n)
+    // ── Instance hit ──────────────────────────────────────────────────
+    if (instHit && !n)
+    {
+      SubCircuitInstance *target = instHit;
+      items.push_back({"Sub-circuit: " + target->label, {}, false});
+      items.push_back({"", {}, true});
+
+      items.push_back({"Rename", [this, target]
+                       {
+                         pendingInstanceRename_ = target->instanceId;
+                         notify();
+                       }});
+
+      items.push_back({"Explode", [this, target]
+                       {
+                         explodeInstance(target->instanceId);
+                       }});
+
+      items.push_back({"Place another copy", [this, target]
+                       {
+                         const SubCircuitDef *def = findDefConst(target->defId);
+                         if (def)
+                           placeInstance(def->defId,
+                                         target->x + target->w + 200.f,
+                                         target->y);
+                       }});
+
+      items.push_back({"", {}, true});
+
+      items.push_back({"Delete", [this, target]
+                       {
+                         pushUndo();
+                         int iid = target->instanceId;
+                         wires_.erase(
+                             std::remove_if(wires_.begin(), wires_.end(),
+                                            [iid](const CircuitWire &w)
+                                            {
+                                              return w.fromInstanceId == iid ||
+                                                     w.toInstanceId == iid;
+                                            }),
+                             wires_.end());
+                         instances_.erase(
+                             std::remove_if(instances_.begin(), instances_.end(),
+                                            [iid](const SubCircuitInstance &i)
+                                            {
+                                              return i.instanceId == iid;
+                                            }),
+                             instances_.end());
+                         evaluate();
+                         notify();
+                       }});
+    }
+    // ── Regular node hit ──────────────────────────────────────────────
+    else if (n)
     {
       CircuitNode *target = n;
+
+      // Ensure the right-clicked node is part of the selection
+      if (!target->selected)
+      {
+        deselectAll();
+        target->selected = true;
+      }
+      // If multiple nodes are selected, offer grouping at the top
+      if (selectedCount() >= 2)
+      {
+        items.push_back({"Group as Sub-circuit",
+                         [this]()
+                         { groupSelectionIntoSubCircuit(""); }});
+        items.push_back({"", {}, true});
+      }
       items.push_back({"Rename", [this, target]
                        { startTextEdit(target); notify(); }});
       items.push_back({"", {}, true});
 
       if (target->type == CircuitNodeType::Input)
         items.push_back({"Toggle", [this, target]
-                         { pushUndo(); target->value = !target->value; evaluate(); notify(); }});
+                         { pushUndo(); target->value = !target->value;
+                               evaluate(); notify(); }});
 
       items.push_back({"Duplicate", [this, target]
-                       { deselectAll(); target->selected = true; duplicateSelected(); }});
+                       { deselectAll(); target->selected = true;
+                           duplicateSelected(); }});
 
       bool isMultiInput = (target->type == CircuitNodeType::AND ||
                            target->type == CircuitNodeType::OR ||
@@ -2132,15 +3052,16 @@ public:
       if (target->type == CircuitNodeType::Clock)
       {
         items.push_back({"", {}, true});
-        // Play/pause toggle
-        items.push_back({target->clockRunning_ ? "Pause clock" : "Resume clock",
+        items.push_back({target->clockRunning_
+                             ? "Pause clock"
+                             : "Resume clock",
                          [this, target]
                          {
                            pushUndo();
                            target->clockRunning_ = !target->clockRunning_;
                            notify();
                          }});
-        // Preset frequencies
+
         const float presets[] = {0.5f, 1.f, 2.f, 5.f, 10.f, 20.f, 50.f, 100.f};
         for (float hz : presets)
         {
@@ -2157,7 +3078,6 @@ public:
                              notify();
                            }});
         }
-        // Faster / slower
         items.push_back({"", {}, true});
         items.push_back({"Speed x2", [this, target]
                          {
@@ -2172,6 +3092,7 @@ public:
                            notify();
                          }});
       }
+
       if (isMultiInput)
       {
         items.push_back({"", {}, true});
@@ -2180,7 +3101,8 @@ public:
                            pushUndo();
                            target->inputCount_ = std::min(target->inputCount_ + 1, 8);
                            target->inputVals.assign(target->inputCount(), false);
-                           nodeDims(target->type, target->w, target->h, target->inputCount_);
+                           nodeDims(target->type, target->w, target->h,
+                                    target->inputCount_);
                            evaluate();
                            notify();
                          }});
@@ -2192,7 +3114,8 @@ public:
                            int oldCount = target->inputCount_;
                            target->inputCount_ = oldCount - 1;
                            target->inputVals.assign(target->inputCount(), false);
-                           nodeDims(target->type, target->w, target->h, target->inputCount_);
+                           nodeDims(target->type, target->w, target->h,
+                                    target->inputCount_);
                            int removedPort = oldCount - 1;
                            wires_.erase(
                                std::remove_if(wires_.begin(), wires_.end(),
@@ -2220,80 +3143,83 @@ public:
                        {
                          pushUndo();
                          int id = target->id;
-                         // Remove any buses whose fromNode or toNode is this node
-                         buses_.erase(std::remove_if(buses_.begin(), buses_.end(),
-                                                     [id](const BusWire &b)
-                                                     {
-                                                       return b.fromNodeId == id || b.toNodeId == id;
-                                                     }),
-                                      buses_.end());
-                         nodes_.erase(std::remove_if(nodes_.begin(), nodes_.end(),
-                                                     [id](const CircuitNode &nn)
-                                                     { return nn.id == id; }),
-                                      nodes_.end());
-                         wires_.erase(std::remove_if(wires_.begin(), wires_.end(),
-                                                     [id](const CircuitWire &w)
-                                                     {
-                                                       return w.fromNodeId == id || w.toNodeId == id;
-                                                     }),
-                                      wires_.end());
+                         buses_.erase(
+                             std::remove_if(buses_.begin(), buses_.end(),
+                                            [id](const BusWire &b)
+                                            {
+                                              return b.fromNodeId == id || b.toNodeId == id;
+                                            }),
+                             buses_.end());
+                         nodes_.erase(
+                             std::remove_if(nodes_.begin(), nodes_.end(),
+                                            [id](const CircuitNode &nn)
+                                            {
+                                              return nn.id == id;
+                                            }),
+                             nodes_.end());
+                         wires_.erase(
+                             std::remove_if(wires_.begin(), wires_.end(),
+                                            [id](const CircuitWire &w)
+                                            {
+                                              return w.fromNodeId == id || w.toNodeId == id;
+                                            }),
+                             wires_.end());
                          evaluate();
                          notify();
                        }});
     }
+    // ── Bus hit ───────────────────────────────────────────────────────
     else if (busIdx >= 0 && wireIdx < 0)
     {
-      // Bus context menu
       int bid = buses_[busIdx].id;
       int bwidth = buses_[busIdx].bitWidth;
 
-      items.push_back({"Bus (" + std::to_string(bwidth) + "-bit)", {}, false});
+      items.push_back({"Bus (" + std::to_string(bwidth) + "-bit)",
+                       {},
+                       false});
       items.push_back({"", {}, true});
       items.push_back({"Ungroup Bus", [this, bid]
-                       {
-                         ungroupBus(bid);
-                       }});
+                       { ungroupBus(bid); }});
       items.push_back({"", {}, true});
       items.push_back({"Add bit (+)", [this, bid]
                        {
                          pushUndo();
                          for (auto &b : buses_)
-                         {
                            if (b.id == bid)
                            {
                              b.bitWidth = std::min(b.bitWidth + 1, 32);
                              break;
                            }
-                         }
                          notify();
                        }});
       items.push_back({"Remove bit (-)", [this, bid]
                        {
                          pushUndo();
                          for (auto &b : buses_)
-                         {
                            if (b.id == bid)
                            {
                              b.bitWidth = std::max(b.bitWidth - 1, 2);
                              break;
                            }
-                         }
                          notify();
                        }});
     }
+    // ── Wire hit ──────────────────────────────────────────────────────
     else if (wireIdx >= 0)
     {
       int idx = wireIdx;
       items.push_back({"Delete wire", [this, idx]
-                       { pushUndo(); wires_.erase(wires_.begin() + idx); evaluate(); notify(); }});
+                       { pushUndo();
+                           wires_.erase(wires_.begin() + idx);
+                           evaluate(); notify(); }});
       items.push_back({"", {}, true});
 
-      // Count how many wires are selected (including this one)
       if (!wires_[idx].selected)
       {
         deselectAll();
         wires_[idx].selected = true;
       }
+
       int selCount = 0;
       int srcId = wires_[idx].fromNodeId;
       bool allSameSrc = true;
@@ -2310,9 +3236,7 @@ public:
       if (selCount >= 2 && allSameSrc)
       {
         items.push_back({"Group as Bus", [this]
-                         {
-                           groupSelectedIntoBus();
-                         }});
+                         { groupSelectedIntoBus(); }});
       }
       else
       {
@@ -2321,9 +3245,35 @@ public:
                          false});
       }
     }
+    // ── Canvas (empty space) ──────────────────────────────────────────
     else
     {
-      // Canvas context menu
+      // Group selection into sub-circuit if anything is selected
+      if (selectedCount() >= 1)
+      {
+        items.push_back({"Group as Sub-circuit",
+                         [this]()
+                         {
+                           groupSelectionIntoSubCircuit("");
+                         }});
+        items.push_back({"", {}, true});
+      }
+
+      // List available defs for re-placement
+      if (!defs_.empty())
+      {
+        items.push_back({"Place module...", {}, false});
+        for (auto &def : defs_)
+        {
+          items.push_back({def.name,
+                           [this, &def, x, y]()
+                           {
+                             placeInstance(def.defId, x, y);
+                           }});
+        }
+        items.push_back({"", {}, true});
+      }
+
       items.push_back({"Select all", [this]
                        { selectAll();   notify(); }});
       items.push_back({"Deselect all", [this]
@@ -2441,6 +3391,9 @@ public:
     for (auto &n : nodes_)
       drawNode(ctx, n);
 
+    for (auto &inst : instances_)
+      drawSubCircuitInstance(ctx, inst);
+
     if (rubberBand_)
       drawRubberBand(ctx);
 
@@ -2469,6 +3422,8 @@ private:
   static constexpr float kRowH = 28.f;    // screen px per signal row
   static constexpr float kLabelW = 64.f;  // screen px for label column
   static constexpr float kCycleW = 18.f;  // screen px per cycle column (at zoom=1)
+
+  int pendingInstanceRename_ = -1;
 
   std::vector<ProbedSignal> probes_;
   uint64_t tickCount_ = 0;    // incremented each recordSample call
@@ -3058,6 +4013,19 @@ private:
       ctx.fillRect(nx, ny, nw, nh);
     }
 
+    // Sub-circuit instances on minimap
+    for (auto &inst : instances_)
+    {
+      float nx = toMiniX(inst.x);
+      float ny = toMiniY(inst.y);
+      float nw = std::max(2.f / currentZoom_, inst.w * scaleX);
+      float nh = std::max(2.f / currentZoom_, inst.h * scaleY);
+      ctx.setFillColor(inst.selected
+                           ? Color::fromRGB(120, 80, 220)
+                           : Color::fromRGB(80, 60, 160));
+      ctx.fillRect(nx, ny, nw, nh);
+    }
+
     // ── Viewport rect ─────────────────────────────────────────────────
     float vpX = toMiniX(viewOffsetX_);
     float vpY = toMiniY(viewOffsetY_);
@@ -3223,22 +4191,53 @@ private:
     for (int i = int(wires_.size()) - 1; i >= 0; --i)
     {
       const CircuitWire &w = wires_[i];
-      const CircuitNode *src = findNodeConst(w.fromNodeId);
-      const CircuitNode *dst = findNodeConst(w.toNodeId);
-      if (!src || !dst)
-        continue;
 
-      Pt p0 = outputPortPos(*src);
-      Pt p1 = inputPortPos(*dst, w.toPortIndex);
+      float x0, y0, x1, y1;
 
-      float x0 = p0.x, y0 = p0.y;
-      float x1 = p1.x, y1 = p1.y;
-      float ax = x0 + stub;
-      float bx = x1 - stub;
+      // Resolve source
+      if (w.fromInstanceId >= 0)
+      {
+        const SubCircuitInstance *si = findInstanceConst(w.fromInstanceId);
+        if (!si)
+          continue;
+        Pt p = instanceOutputPortPos(*si, w.fromPortIdx);
+        x0 = p.x;
+        y0 = p.y;
+      }
+      else
+      {
+        const CircuitNode *src = findNodeConst(w.fromNodeId);
+        if (!src)
+          continue;
+        Pt p = outputPortPos(*src);
+        x0 = p.x;
+        y0 = p.y;
+      }
 
-      // Build the polyline segments and test each one
-      // segTest: returns true if point (mx,my) is within thresh of segment (sx0,sy0)-(sx1,sy1)
-      auto segTest = [&](float sx0, float sy0, float sx1, float sy1) -> bool
+      // Resolve destination
+      if (w.toInstanceId >= 0)
+      {
+        const SubCircuitInstance *di = findInstanceConst(w.toInstanceId);
+        if (!di)
+          continue;
+        Pt p = instanceInputPortPos(*di, w.toInstancePort);
+        x1 = p.x;
+        y1 = p.y;
+      }
+      else
+      {
+        const CircuitNode *dst = findNodeConst(w.toNodeId);
+        if (!dst)
+          continue;
+        Pt p = inputPortPos(*dst, w.toPortIndex);
+        x1 = p.x;
+        y1 = p.y;
+      }
+
+      float ax = x0 + stub, bx = x1 - stub;
+
+      auto segTest = [&](float sx0, float sy0,
+                         float sx1, float sy1) -> bool
       {
         float dx = sx1 - sx0, dy = sy1 - sy0;
         float len2 = dx * dx + dy * dy;
@@ -3254,19 +4253,15 @@ private:
       if (ax <= bx)
       {
         float midX = (ax + bx) * 0.5f;
-        hit = segTest(x0, y0, ax, y0) ||
-              segTest(ax, y0, midX, y0) ||
-              segTest(midX, y0, midX, y1) ||
-              segTest(midX, y1, bx, y1) ||
+        hit = segTest(x0, y0, ax, y0) || segTest(ax, y0, midX, y0) ||
+              segTest(midX, y0, midX, y1) || segTest(midX, y1, bx, y1) ||
               segTest(bx, y1, x1, y1);
       }
       else
       {
         float midY = (y0 + y1) * 0.5f;
-        hit = segTest(x0, y0, ax, y0) ||
-              segTest(ax, y0, ax, midY) ||
-              segTest(ax, midY, bx, midY) ||
-              segTest(bx, midY, bx, y1) ||
+        hit = segTest(x0, y0, ax, y0) || segTest(ax, y0, ax, midY) ||
+              segTest(ax, midY, bx, midY) || segTest(bx, midY, bx, y1) ||
               segTest(bx, y1, x1, y1);
       }
       if (hit)
@@ -3295,22 +4290,63 @@ private:
     }
     return -1;
   }
-  // ── Logic evaluation ──────────────────────────────────────────────────
-  void evaluate()
-  {
-    for (auto &n : nodes_)
-      std::fill(n.inputVals.begin(), n.inputVals.end(), false);
 
+  // Runs the internal logic of one sub-circuit instance given its
+  // current inputVals, and writes results into outputVals.
+  // Returns true if any output value changed.
+  bool evaluateInstance(SubCircuitInstance &inst,
+                        const SubCircuitDef &def)
+  {
+    // Build a local copy of the def's nodes so we can simulate
+    // without touching the canvas
+    std::vector<CircuitNode> localNodes = def.nodes;
+    std::vector<CircuitWire> localWires = def.wires;
+
+    // Initialise all local node inputVals
+    for (auto &n : localNodes)
+      n.inputVals.assign(n.inputCount(), false);
+
+    // Bind instance inputVals → internal Input nodes
+    // The port table tells us which internal node id maps to which port
+    for (auto &port : def.ports)
+    {
+      if (port.isOutput)
+        continue;
+      // Find the local node with this def-local id
+      for (auto &n : localNodes)
+      {
+        if (n.id == port.internalNodeId &&
+            n.type == CircuitNodeType::Input)
+        {
+          bool v = (port.portIndex < (int)inst.inputVals.size())
+                       ? inst.inputVals[port.portIndex]
+                       : false;
+          n.value = v;
+          break;
+        }
+      }
+    }
+
+    // Simulate up to 30 passes (handles gate chains, not feedback loops)
     for (int iter = 0; iter < 30; ++iter)
     {
       bool changed = false;
-      for (auto &w : wires_)
+
+      // Propagate wires
+      for (auto &w : localWires)
       {
-        CircuitNode *src = findNode(w.fromNodeId);
-        CircuitNode *dst = findNode(w.toNodeId);
+        CircuitNode *src = nullptr;
+        CircuitNode *dst = nullptr;
+        for (auto &n : localNodes)
+        {
+          if (n.id == w.fromNodeId)
+            src = &n;
+          if (n.id == w.toNodeId)
+            dst = &n;
+        }
         if (!src || !dst)
           continue;
-        if (w.toPortIndex < int(dst->inputVals.size()))
+        if (w.toPortIndex < (int)dst->inputVals.size())
         {
           bool v = src->value;
           if (dst->inputVals[w.toPortIndex] != v)
@@ -3320,6 +4356,184 @@ private:
           }
         }
       }
+
+      // Evaluate nodes
+      for (auto &n : localNodes)
+      {
+        bool prev = n.value;
+        switch (n.type)
+        {
+        case CircuitNodeType::AND:
+        {
+          bool v = !n.inputVals.empty();
+          for (auto b : n.inputVals)
+            v = v && b;
+          n.value = v;
+          break;
+        }
+        case CircuitNodeType::OR:
+        {
+          bool v = false;
+          for (auto b : n.inputVals)
+            v = v || b;
+          n.value = v;
+          break;
+        }
+        case CircuitNodeType::NAND:
+        {
+          bool v = !n.inputVals.empty();
+          for (auto b : n.inputVals)
+            v = v && b;
+          n.value = !v;
+          break;
+        }
+        case CircuitNodeType::NOR:
+        {
+          bool v = false;
+          for (auto b : n.inputVals)
+            v = v || b;
+          n.value = !v;
+          break;
+        }
+        case CircuitNodeType::XOR:
+        {
+          int ones = 0;
+          for (auto b : n.inputVals)
+            ones += b ? 1 : 0;
+          n.value = (ones % 2) != 0;
+          break;
+        }
+        case CircuitNodeType::XNOR:
+        {
+          int ones = 0;
+          for (auto b : n.inputVals)
+            ones += b ? 1 : 0;
+          n.value = (ones % 2) == 0;
+          break;
+        }
+        case CircuitNodeType::Input:
+          break; // already bound above
+        case CircuitNodeType::Output:
+          n.value = !n.inputVals.empty() && n.inputVals[0];
+          break;
+        case CircuitNodeType::NOT:
+          n.value = !n.inputVals.empty() && !n.inputVals[0];
+          break;
+        default:
+          break;
+        }
+        if (prev != n.value)
+          changed = true;
+      }
+      if (!changed)
+        break;
+    }
+
+    // Read output ports back into inst.outputVals
+    bool anyChanged = false;
+    for (auto &port : def.ports)
+    {
+      if (!port.isOutput)
+        continue;
+      bool v = false;
+      for (auto &n : localNodes)
+      {
+        if (n.id == port.internalNodeId)
+        {
+          // Output nodes mirror their input
+          v = !n.inputVals.empty() && n.inputVals[0];
+          // For non-Output typed nodes used as outputs, use value
+          if (n.type != CircuitNodeType::Output)
+            v = n.value;
+          break;
+        }
+      }
+      if (port.portIndex < (int)inst.outputVals.size() &&
+          inst.outputVals[port.portIndex] != v)
+      {
+        inst.outputVals[port.portIndex] = v;
+        anyChanged = true;
+      }
+    }
+    return anyChanged;
+  }
+  // ── Logic evaluation ──────────────────────────────────────────────────
+  void evaluate()
+  {
+    // ── Reset all regular node inputs ─────────────────────────────────
+    for (auto &n : nodes_)
+      std::fill(n.inputVals.begin(), n.inputVals.end(), false);
+
+    // ── Reset all instance inputs ─────────────────────────────────────
+    for (auto &inst : instances_)
+      std::fill(inst.inputVals.begin(), inst.inputVals.end(), false);
+
+    for (int iter = 0; iter < 30; ++iter)
+    {
+      bool changed = false;
+
+      // ── Propagate all wires (including instance endpoints) ────────
+      for (auto &w : wires_)
+      {
+        // ── Resolve driven value from source ──────────────────────
+        bool srcVal = false;
+        if (w.fromInstanceId >= 0)
+        {
+          const SubCircuitInstance *si = findInstanceConst(w.fromInstanceId);
+          if (!si)
+            continue;
+          srcVal = (w.fromPortIdx < (int)si->outputVals.size())
+                       ? si->outputVals[w.fromPortIdx]
+                       : false;
+        }
+        else
+        {
+          const CircuitNode *src = findNodeConst(w.fromNodeId);
+          if (!src)
+            continue;
+          srcVal = src->value;
+        }
+
+        // ── Drive the destination ─────────────────────────────────
+        if (w.toInstanceId >= 0)
+        {
+          SubCircuitInstance *di = findInstance(w.toInstanceId);
+          if (!di)
+            continue;
+          int port = w.toInstancePort;
+          if (port < (int)di->inputVals.size() &&
+              di->inputVals[port] != srcVal)
+          {
+            di->inputVals[port] = srcVal;
+            changed = true;
+          }
+        }
+        else
+        {
+          CircuitNode *dst = findNode(w.toNodeId);
+          if (!dst)
+            continue;
+          if (w.toPortIndex < (int)dst->inputVals.size() &&
+              dst->inputVals[w.toPortIndex] != srcVal)
+          {
+            dst->inputVals[w.toPortIndex] = srcVal;
+            changed = true;
+          }
+        }
+      }
+
+      // ── Evaluate all sub-circuit instances ────────────────────────
+      for (auto &inst : instances_)
+      {
+        const SubCircuitDef *def = findDefConst(inst.defId);
+        if (!def)
+          continue;
+
+        if (evaluateInstance(inst, *def))
+          changed = true;
+      }
+
+      // ── Evaluate all regular nodes ────────────────────────────────
       for (auto &n : nodes_)
       {
         bool prev = n.value;
@@ -3359,7 +4573,6 @@ private:
         }
         case CircuitNodeType::XOR:
         {
-          // XOR with N inputs = odd parity
           int ones = 0;
           for (auto b : n.inputVals)
             ones += b ? 1 : 0;
@@ -3377,21 +4590,23 @@ private:
         case CircuitNodeType::Input:
           break;
         case CircuitNodeType::Output:
-          n.value = n.inputVals.size() >= 1 && n.inputVals[0];
+          n.value = !n.inputVals.empty() && n.inputVals[0];
           break;
         case CircuitNodeType::SevenSegment:
         {
-          // value = true if any segment is active (for minimap coloring)
           bool any = false;
           for (auto b : n.inputVals)
             any = any || b;
           n.value = any;
           break;
         }
+        case CircuitNodeType::Clock:
+          break;
         }
         if (prev != n.value)
           changed = true;
       }
+
       if (!changed)
         break;
     }
@@ -3427,6 +4642,140 @@ private:
     return nullptr;
   }
 
+  // ── Sub-circuit lookup helpers ────────────────────────────────────────
+
+  // Returns pointer to the instance under (x,y), or nullptr
+  SubCircuitInstance *hitInstance(float x, float y)
+  {
+    for (int i = int(instances_.size()) - 1; i >= 0; --i)
+    {
+      auto &inst = instances_[i];
+      if (x >= inst.x && x <= inst.x + inst.w &&
+          y >= inst.y && y <= inst.y + inst.h)
+        return &inst;
+    }
+    return nullptr;
+  }
+
+  // Returns a PortRef for instance ports, encoding instanceId in nodeId
+  // with a flag bit so the wire-mode handler can distinguish them.
+  // We use nodeId = -(instanceId*100 + portIdx) for input ports,
+  // and a separate isOutput flag. A cleaner approach is to extend
+  // PortRef — do that here:
+  PortRef hitInstancePort(float x, float y)
+  {
+    const float R = 10.f / currentZoom_;
+    for (auto &inst : instances_)
+    {
+      const SubCircuitDef *def = findDefConst(inst.defId);
+      if (!def)
+        continue;
+
+      // Input ports (left side)
+      int inCount = def->inputPortCount();
+      for (int i = 0; i < inCount; ++i)
+      {
+        Pt p = instanceInputPortPos(inst, i);
+        if (std::hypot(x - p.x, y - p.y) < R)
+        {
+          PortRef ref;
+          ref.nodeId = -(inst.instanceId * 100 + i); // negative = instance
+          ref.isOutput = false;
+          ref.portIdx = i;
+          return ref;
+        }
+      }
+      // Output ports (right side)
+      int outCount = def->outputPortCount();
+      for (int i = 0; i < outCount; ++i)
+      {
+        Pt p = instanceOutputPortPos(inst, i);
+        if (std::hypot(x - p.x, y - p.y) < R)
+        {
+          PortRef ref;
+          ref.nodeId = -(inst.instanceId * 100 + i);
+          ref.isOutput = true;
+          ref.portIdx = i;
+          return ref;
+        }
+      }
+    }
+    return {};
+  }
+
+  // Decode a negative nodeId back to instanceId and portIdx
+  static void decodeInstancePortRef(const PortRef &ref,
+                                    int &outInstanceId, int &outPortIdx)
+  {
+    int encoded = -ref.nodeId;
+    outInstanceId = encoded / 100;
+    outPortIdx = encoded % 100;
+  }
+
+  SubCircuitDef *findDef(int defId)
+  {
+    for (auto &d : defs_)
+      if (d.defId == defId)
+        return &d;
+    return nullptr;
+  }
+  const SubCircuitDef *findDefConst(int defId) const
+  {
+    for (auto &d : defs_)
+      if (d.defId == defId)
+        return &d;
+    return nullptr;
+  }
+
+  SubCircuitInstance *findInstance(int instanceId)
+  {
+    for (auto &i : instances_)
+      if (i.instanceId == instanceId)
+        return &i;
+    return nullptr;
+  }
+  const SubCircuitInstance *findInstanceConst(int instanceId) const
+  {
+    for (auto &i : instances_)
+      if (i.instanceId == instanceId)
+        return &i;
+    return nullptr;
+  }
+
+  static const SubCircuitPort *findInputPort(const SubCircuitDef &def, int portIdx)
+  {
+    for (auto &p : def.ports)
+      if (!p.isOutput && p.portIndex == portIdx)
+        return &p;
+    return nullptr;
+  }
+  static const SubCircuitPort *findOutputPort(const SubCircuitDef &def, int portIdx)
+  {
+    for (auto &p : def.ports)
+      if (p.isOutput && p.portIndex == portIdx)
+        return &p;
+    return nullptr;
+  }
+
+  // Port world positions for instances
+  static float instanceInputPortY(const SubCircuitInstance &inst, int idx)
+  {
+    // Header is ~400 units tall; then each port spaced evenly
+    return inst.y + 400.f + idx * 580.f + 290.f;
+  }
+  static float instanceOutputPortY(const SubCircuitInstance &inst, int idx)
+  {
+    return inst.y + 400.f + idx * 580.f + 290.f;
+  }
+  static Pt instanceInputPortPos(const SubCircuitInstance &inst, int idx)
+  {
+    return {inst.x, instanceInputPortY(inst, idx)};
+  }
+  static Pt instanceOutputPortPos(const SubCircuitInstance &inst, int idx)
+  {
+    return {inst.x + inst.w, instanceOutputPortY(inst, idx)};
+  }
+
   PortRef hitPort(float x, float y)
   {
     const float R = 10.f / currentZoom_;
@@ -3445,6 +4794,9 @@ private:
           return {n.id, false, i};
       }
     }
+    PortRef instRef = hitInstancePort(x, y);
+    if (instRef.valid())
+      return instRef;
     return {};
   }
 
@@ -4105,18 +5457,229 @@ private:
   // ── Wire drawing ──────────────────────────────────────────────────────
   void drawWire(Canvas2D &ctx, const CircuitWire &w) const
   {
-    // Don't draw individually — rendered as part of its bus
     if (findBusForWire(w.id))
       return;
 
-    const CircuitNode *src = findNodeConst(w.fromNodeId);
-    const CircuitNode *dst = findNodeConst(w.toNodeId);
-    if (!src || !dst)
+    float x0, y0, x1, y1;
+    bool active = false;
+
+    // ── Resolve source ────────────────────────────────────────────────
+    if (w.fromInstanceId >= 0)
+    {
+      const SubCircuitInstance *si = findInstanceConst(w.fromInstanceId);
+      if (!si)
+        return;
+      Pt p = instanceOutputPortPos(*si, w.fromPortIdx);
+      x0 = p.x;
+      y0 = p.y;
+      active = (w.fromPortIdx < (int)si->outputVals.size())
+                   ? si->outputVals[w.fromPortIdx]
+                   : false;
+    }
+    else
+    {
+      const CircuitNode *src = findNodeConst(w.fromNodeId);
+      if (!src)
+        return;
+      Pt p = outputPortPos(*src);
+      x0 = p.x;
+      y0 = p.y;
+      active = src->value;
+    }
+
+    // ── Resolve destination ───────────────────────────────────────────
+    if (w.toInstanceId >= 0)
+    {
+      const SubCircuitInstance *di = findInstanceConst(w.toInstanceId);
+      if (!di)
+        return;
+      Pt p = instanceInputPortPos(*di, w.toInstancePort);
+      x1 = p.x;
+      y1 = p.y;
+    }
+    else
+    {
+      const CircuitNode *dst = findNodeConst(w.toNodeId);
+      if (!dst)
+        return;
+      Pt p = inputPortPos(*dst, w.toPortIndex);
+      x1 = p.x;
+      y1 = p.y;
+    }
+
+    drawOrthogonalWire(ctx, x0, y0, x1, y1, active, false, w.selected);
+  }
+
+  void drawSubCircuitInstance(Canvas2D &ctx,
+                              const SubCircuitInstance &inst) const
+  {
+    const SubCircuitDef *def = findDefConst(inst.defId);
+    if (!def)
       return;
 
-    Pt p0 = outputPortPos(*src);
-    Pt p1 = inputPortPos(*dst, w.toPortIndex);
-    drawOrthogonalWire(ctx, p0.x, p0.y, p1.x, p1.y, src->value, false, w.selected);
+    float x = inst.x, y = inst.y, w = inst.w, h = inst.h;
+    float Z = currentZoom_;
+
+    // ── Outer box ─────────────────────────────────────────────────────
+    Color bodyFill = Color::fromRGB(16, 18, 28);
+    Color bodyStroke = inst.selected
+                           ? Color::fromRGB(80, 160, 255)
+                           : Color::fromRGB(120, 100, 200);
+    float lw = (inst.selected ? 2.f : 1.5f) / Z;
+
+    ctx.setFillColor(bodyFill);
+    ctx.setStrokeColor(bodyStroke);
+    ctx.setLineWidth(lw);
+    ctx.fillRoundedRect(x, y, w, h, 6.f / Z);
+    ctx.strokeRoundedRect(x, y, w, h, 6.f / Z);
+
+    // ── Header band ───────────────────────────────────────────────────
+    float headerH = 320.f;
+    ctx.setFillColor(Color::fromRGB(28, 22, 48));
+    ctx.fillRoundedRect(x, y, w, headerH, 6.f / Z);
+    // Flat bottom on header
+    ctx.setFillColor(Color::fromRGB(28, 22, 48));
+    ctx.fillRect(x, y + headerH * 0.5f, w, headerH * 0.5f);
+
+    // ── Module name ───────────────────────────────────────────────────
+    float fs = 18.f / Z;
+    char font[32];
+    snprintf(font, sizeof(font), "bold %.0fpx sans", fs);
+    ctx.setFont(font);
+    ctx.setTextBaseline(TextBaseline::Middle);
+    ctx.setFillColor(Color::fromRGB(180, 160, 255));
+    const std::string &lbl = inst.label.empty() ? def->name : inst.label;
+    float tw = ctx.measureText(lbl.c_str());
+    ctx.fillText(lbl.c_str(), x + w * 0.5f - tw * 0.5f, y + headerH * 0.5f);
+
+    // "<<module>>" stereotype label
+    float sfs = 11.f / Z;
+    char sfont[32];
+    snprintf(sfont, sizeof(sfont), "%.0fpx sans", sfs);
+    ctx.setFont(sfont);
+    ctx.setFillColor(Color::fromRGBA(140, 120, 200, 180));
+    float stw = ctx.measureText("<<module>>");
+    ctx.fillText("<<module>>",
+                 x + w * 0.5f - stw * 0.5f,
+                 y + headerH * 0.5f - fs * 1.2f);
+
+    // ── Divider line under header ─────────────────────────────────────
+    ctx.setStrokeColor(Color::fromRGBA(120, 100, 200, 120));
+    ctx.setLineWidth(0.8f / Z);
+    ctx.beginPath();
+    ctx.moveTo(x, y + headerH);
+    ctx.lineTo(x + w, y + headerH);
+    ctx.stroke();
+
+    // ── Input ports (left side) ───────────────────────────────────────
+    float pfs = 12.f / Z;
+    char pfont[32];
+    snprintf(pfont, sizeof(pfont), "%.0fpx sans", pfs);
+    ctx.setFont(pfont);
+    ctx.setTextBaseline(TextBaseline::Middle);
+
+    int inCount = def->inputPortCount();
+    for (int i = 0; i < inCount; ++i)
+    {
+      Pt p = instanceInputPortPos(inst, i);
+
+      // Find port name
+      const SubCircuitPort *port = findInputPort(*def, i);
+      std::string portName = port ? port->name : ("in_" + std::to_string(i));
+
+      // Driven value
+      bool driven = (i < (int)inst.inputVals.size()) && inst.inputVals[i];
+
+      // Stub line
+      ctx.setStrokeColor(Color::fromRGBA(120, 100, 200, 180));
+      ctx.setLineWidth(1.f / Z);
+      ctx.beginPath();
+      ctx.moveTo(p.x - 8.f / Z, p.y);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+
+      // Port dot
+      ctx.setFillColor(driven ? Color::fromRGB(60, 200, 120)
+                              : portInColor());
+      ctx.fillCircle(p.x, p.y, 4.f / Z);
+
+      // Port label (inside box, to the right of the dot)
+      ctx.setFillColor(driven
+                           ? Color::fromRGBA(60, 200, 120, 200)
+                           : Color::fromRGBA(160, 140, 220, 200));
+      ctx.fillText(portName.c_str(), p.x + 10.f / Z, p.y);
+    }
+
+    // ── Output ports (right side) ─────────────────────────────────────
+    int outCount = def->outputPortCount();
+    for (int i = 0; i < outCount; ++i)
+    {
+      Pt p = instanceOutputPortPos(inst, i);
+
+      const SubCircuitPort *port = findOutputPort(*def, i);
+      std::string portName = port ? port->name : ("out_" + std::to_string(i));
+
+      bool active = (i < (int)inst.outputVals.size()) && inst.outputVals[i];
+
+      // Stub line
+      ctx.setStrokeColor(Color::fromRGBA(120, 100, 200, 180));
+      ctx.setLineWidth(1.f / Z);
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(p.x + 8.f / Z, p.y);
+      ctx.stroke();
+
+      // Port dot
+      ctx.setFillColor(active ? wireActiveColor() : portOutColor());
+      ctx.fillCircle(p.x, p.y, 4.f / Z);
+
+      // Port label (right-aligned, inside box to the left of the dot)
+      ctx.setFillColor(active
+                           ? Color::fromRGBA(60, 200, 120, 200)
+                           : Color::fromRGBA(160, 140, 220, 200));
+      float ptw = ctx.measureText(portName.c_str());
+      ctx.fillText(portName.c_str(),
+                   p.x - 10.f / Z - ptw, p.y);
+    }
+
+    // ── Inline text edit overlay (rename) ────────────────────────────
+    if (textEditing_ && textEdit_.nodeId == -(inst.instanceId))
+      drawInstanceTextEdit(ctx, inst);
+  }
+
+  void drawInstanceTextEdit(Canvas2D &ctx,
+                            const SubCircuitInstance &inst) const
+  {
+    float fs = 18.f / currentZoom_;
+    char font[32];
+    snprintf(font, sizeof(font), "%.0fpx sans", fs);
+    ctx.setFont(font);
+    ctx.setTextBaseline(TextBaseline::Middle);
+
+    float cy = inst.y + 160.f; // vertically centred in header
+    float tw = ctx.measureText(textEdit_.text.c_str());
+    float pad = 4.f / currentZoom_;
+
+    // Background pill
+    ctx.setFillColor(Color::fromRGBA(20, 15, 40, 230));
+    ctx.fillRect(inst.x + inst.w * 0.5f - tw * 0.5f - pad,
+                 cy - fs * 0.5f - pad,
+                 tw + pad * 2.f + fs,
+                 fs + pad * 2.f);
+
+    // Text
+    ctx.setFillColor(Color::fromRGB(200, 180, 255));
+    ctx.fillText(textEdit_.text.c_str(),
+                 inst.x + inst.w * 0.5f - tw * 0.5f, cy);
+
+    // Cursor
+    if (textEdit_.cursorVisible)
+    {
+      ctx.setFillColor(Color::fromRGB(160, 120, 255));
+      ctx.fillRect(inst.x + inst.w * 0.5f - tw * 0.5f + tw + 1.f / currentZoom_,
+                   cy - fs * 0.5f,
+                   1.5f / currentZoom_, fs);
+    }
   }
 
   void drawBusWire(Canvas2D &ctx, const BusWire &b) const
@@ -4212,29 +5775,34 @@ private:
 
   void drawWirePreview(Canvas2D &ctx) const
   {
-    const CircuitNode *sn = nullptr;
-    for (auto &n : nodes_)
-      if (n.id == wireStart_.nodeId)
-      {
-        sn = &n;
-        break;
-      }
-    if (!sn)
-      return;
-
     float x0, y0;
-    if (wireStart_.isOutput)
+
+    if (wireStart_.nodeId < 0)
     {
-      Pt p = outputPortPos(*sn);
+      // Started from an instance port
+      int iid, pidx;
+      decodeInstancePortRef(wireStart_, iid, pidx);
+      const SubCircuitInstance *si = findInstanceConst(iid);
+      if (!si)
+        return;
+      Pt p = wireStart_.isOutput
+                 ? instanceOutputPortPos(*si, pidx)
+                 : instanceInputPortPos(*si, pidx);
       x0 = p.x;
       y0 = p.y;
     }
     else
     {
-      Pt p = inputPortPos(*sn, wireStart_.portIdx);
+      const CircuitNode *sn = findNodeConst(wireStart_.nodeId);
+      if (!sn)
+        return;
+      Pt p = wireStart_.isOutput
+                 ? outputPortPos(*sn)
+                 : inputPortPos(*sn, wireStart_.portIdx);
       x0 = p.x;
       y0 = p.y;
     }
+
     drawOrthogonalWire(ctx, x0, y0, curX_, curY_, false, true, false);
   }
 
@@ -4308,7 +5876,7 @@ private:
   // ── Undo helpers ──────────────────────────────────────────────────────
   void pushUndo()
   {
-    undoNodes_.push_back({nodes_, wires_});
+    undoNodes_.push_back({nodes_, wires_, instances_});
     if (undoNodes_.size() > 50)
       undoNodes_.erase(undoNodes_.begin());
     redoNodes_.clear();
@@ -4326,7 +5894,18 @@ private:
   int nextBusId_ = 1;
   int nextId_ = 1;
 
-  using Snapshot = std::pair<std::vector<CircuitNode>, std::vector<CircuitWire>>;
+  // ── Sub-circuit defs + placed instances ───────────────────────────────
+  std::vector<SubCircuitDef> defs_;
+  std::vector<SubCircuitInstance> instances_;
+  int nextDefId_ = 1;
+  int nextInstanceId_ = 1;
+
+  struct Snapshot
+  {
+    std::vector<CircuitNode> nodes;
+    std::vector<CircuitWire> wires;
+    std::vector<SubCircuitInstance> instances;
+  };
   std::vector<Snapshot> undoNodes_, redoNodes_;
 
   struct ClipboardEntry
