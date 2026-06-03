@@ -1129,9 +1129,16 @@ public:
 
     if (rubberBand_)
       drawRubberBand(ctx);
+
+    drawMinimap(ctx);
   }
 
 private:
+  // ── Minimap ───────────────────────────────────────────────────────────
+  static constexpr float kMiniW = 160.f; // screen pixels
+  static constexpr float kMiniH = 100.f;
+  static constexpr float kMiniMargin = 12.f;
+
   struct TextEditState
   {
     int nodeId = -1;  // which node is being renamed
@@ -1144,6 +1151,101 @@ private:
 
   uint32_t lastClickTime_ = 0;
   int lastClickNodeId_ = -1;
+
+  void drawMinimap(Canvas2D &ctx) const
+  {
+    if (nodes_.empty())
+      return;
+
+    // ── World bounds of all nodes ─────────────────────────────────────
+    float wxMin = nodes_[0].x, wxMax = nodes_[0].x + nodes_[0].w;
+    float wyMin = nodes_[0].y, wyMax = nodes_[0].y + nodes_[0].h;
+    for (auto &n : nodes_)
+    {
+      wxMin = std::min(wxMin, n.x);
+      wxMax = std::max(wxMax, n.x + n.w);
+      wyMin = std::min(wyMin, n.y);
+      wyMax = std::max(wyMax, n.y + n.h);
+    }
+
+    // Add padding around content
+    float pad = 500.f;
+    wxMin -= pad;
+    wxMax += pad;
+    wyMin -= pad;
+    wyMax += pad;
+    float worldW = wxMax - wxMin;
+    float worldH = wyMax - wyMin;
+    if (worldW < 1.f || worldH < 1.f)
+      return;
+
+    // ── Minimap screen rect (bottom-right corner, in world-space coords)
+    float sx = viewOffsetX_ + viewW_ / currentZoom_ - kMiniW / currentZoom_ - kMiniMargin / currentZoom_;
+    float sy = viewOffsetY_ + viewH_ / currentZoom_ - kMiniH / currentZoom_ - kMiniMargin / currentZoom_;
+    float sw = kMiniW / currentZoom_;
+    float sh = kMiniH / currentZoom_;
+
+    // Scale factors: world → minimap
+    float scaleX = sw / worldW;
+    float scaleY = sh / worldH;
+
+    auto toMiniX = [&](float wx)
+    { return sx + (wx - wxMin) * scaleX; };
+    auto toMiniY = [&](float wy)
+    { return sy + (wy - wyMin) * scaleY; };
+
+    // ── Background ────────────────────────────────────────────────────
+    ctx.setFillColor(Color::fromRGBA(12, 12, 18, 210));
+    ctx.fillRoundedRect(sx, sy, sw, sh, 3.f / currentZoom_);
+
+    // ── Border ────────────────────────────────────────────────────────
+    ctx.setStrokeColor(Color::fromRGBA(60, 60, 80, 255));
+    ctx.setLineWidth(1.f / currentZoom_);
+    ctx.beginPath();
+    ctx.rect(sx, sy, sw, sh);
+    ctx.stroke();
+
+    // ── Nodes as tiny colored rects ───────────────────────────────────
+    for (auto &n : nodes_)
+    {
+      float nx = toMiniX(n.x);
+      float ny = toMiniY(n.y);
+      float nw = std::max(1.5f / currentZoom_, n.w * scaleX);
+      float nh = std::max(1.5f / currentZoom_, n.h * scaleY);
+
+      Color fill;
+      if (n.type == CircuitNodeType::Input)
+        fill = n.value ? Color::fromRGB(30, 160, 80) : Color::fromRGB(50, 50, 70);
+      else if (n.type == CircuitNodeType::Output)
+        fill = n.value ? Color::fromRGB(30, 180, 90) : Color::fromRGB(60, 60, 80);
+      else
+        fill = n.selected ? Color::fromRGB(60, 120, 200) : Color::fromRGB(100, 100, 120);
+
+      ctx.setFillColor(fill);
+      ctx.fillRect(nx, ny, nw, nh);
+    }
+
+    // ── Viewport rect ─────────────────────────────────────────────────
+    float vpX = toMiniX(viewOffsetX_);
+    float vpY = toMiniY(viewOffsetY_);
+    float vpW = (viewW_ / currentZoom_) * scaleX;
+    float vpH = (viewH_ / currentZoom_) * scaleY;
+
+    // Clamp to minimap bounds
+    vpX = std::max(sx, std::min(vpX, sx + sw));
+    vpY = std::max(sy, std::min(vpY, sy + sh));
+    vpW = std::min(vpW, sw - (vpX - sx));
+    vpH = std::min(vpH, sh - (vpY - sy));
+
+    ctx.setFillColor(Color::fromRGBA(80, 160, 255, 25));
+    ctx.fillRect(vpX, vpY, vpW, vpH);
+
+    ctx.setStrokeColor(Color::fromRGBA(80, 160, 255, 180));
+    ctx.setLineWidth(1.f / currentZoom_);
+    ctx.beginPath();
+    ctx.rect(vpX, vpY, vpW, vpH);
+    ctx.stroke();
+  }
 
   // ── Rounded-corner polyline helper ────────────────────────────────────
 
