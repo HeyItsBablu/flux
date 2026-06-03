@@ -1812,60 +1812,65 @@ public:
 
   bool groupSelectionIntoSubCircuit(const std::string &name = "")
   {
-    // ── 1. Collect selected nodes ─────────────────────────────────────
+    // ── Collect selected nodes ─────────────────────────────────────
     std::vector<int> selIds;
     for (auto &n : nodes_)
       if (n.selected)
         selIds.push_back(n.id);
 
-    if (selIds.size() < 1)
+    if (selIds.empty())
       return false;
 
     std::unordered_set<int> selSet(selIds.begin(), selIds.end());
 
-    // ── 2. Detect boundary wires ──────────────────────────────────────
-    // A wire crossing INTO  the selection  → becomes an INPUT  port
-    // A wire crossing OUT OF the selection → becomes an OUTPUT port
-    // A wire fully inside the selection    → stays internal
+    // ──Compute centroid
+    float cx = 0.f, cy = 0.f;
+    for (int id : selIds)
+    {
+      const CircuitNode *n = findNodeConst(id);
+      if (n)
+      {
+        cx += n->x + n->w * 0.5f;
+        cy += n->y + n->h * 0.5f;
+      }
+    }
+    cx /= float(selIds.size());
+    cy /= float(selIds.size());
 
+    // ──Detect boundary wires ──────────────────────────────────────
     struct BoundaryWire
     {
       int wireIdx;
-      bool isInput;        // true = enters selection, false = exits
-      int externalNodeId;  // the node OUTSIDE the selection
-      int externalPortIdx; // port index on that external node
-      int internalNodeId;  // the node INSIDE the selection
-      int internalPortIdx; // port index on the internal node
+      bool isInput;
+      int externalNodeId;
+      int externalPortIdx;
+      int internalNodeId;
+      int internalPortIdx;
     };
-
     std::vector<BoundaryWire> boundaries;
 
     for (int i = 0; i < (int)wires_.size(); ++i)
     {
-      auto &w = wires_[i];
+      const CircuitWire &w = wires_[i];
       bool srcIn = selSet.count(w.fromNodeId) > 0;
       bool dstIn = selSet.count(w.toNodeId) > 0;
 
-      if (srcIn && dstIn)
-        continue; // purely internal — keep as-is
-      if (!srcIn && !dstIn)
-        continue; // purely external — not our concern
+      if (srcIn == dstIn) // both-in or both-out: skip
+        continue;
 
       BoundaryWire bw;
       bw.wireIdx = i;
 
       if (!srcIn && dstIn)
       {
-        // Wire enters selection → INPUT port on the black box
         bw.isInput = true;
         bw.externalNodeId = w.fromNodeId;
-        bw.externalPortIdx = 0; // output port (single output per node)
+        bw.externalPortIdx = 0;
         bw.internalNodeId = w.toNodeId;
         bw.internalPortIdx = w.toPortIndex;
       }
       else // srcIn && !dstIn
       {
-        // Wire exits selection → OUTPUT port on the black box
         bw.isInput = false;
         bw.externalNodeId = w.toNodeId;
         bw.externalPortIdx = w.toPortIndex;
@@ -1875,31 +1880,36 @@ public:
       boundaries.push_back(bw);
     }
 
-    // ── 3. Build the SubCircuitDef ────────────────────────────────────
+    // ── Build SubCircuitDef ────────────────────────────────────────
     pushUndo();
 
     SubCircuitDef def;
     def.defId = nextDefId_++;
-    def.name = name.empty() ? ("Module_" + std::to_string(def.defId)) : name;
+    def.name = name.empty()
+                   ? ("Module_" + std::to_string(def.defId))
+                   : name;
 
-    // Copy internal nodes into the def (remap IDs to be self-contained)
-    // We keep the original IDs inside the def for simplicity — they only
-    // need to be unique within the def, which they already are.
-    std::unordered_map<int, int> oldToDefId; // original canvas ID → def-local ID
+    // Remap IDs; store positions RELATIVE to centroid
+    std::unordered_map<int, int> oldToDefId;
     int defLocalId = 1;
     for (int id : selIds)
     {
       const CircuitNode *n = findNodeConst(id);
       if (!n)
         continue;
+
       CircuitNode copy = *n;
       copy.selected = false;
-      oldToDefId[id] = defLocalId;
-      copy.id = defLocalId++;
+      copy.id = defLocalId;
+      // Store centroid-relative world position
+      copy.x = n->x - (cx - n->w * 0.5f); // offset from centroid-left
+      copy.y = n->y - (cy - n->h * 0.5f); // offset from centroid-top
+
+      oldToDefId[id] = defLocalId++;
       def.nodes.push_back(copy);
     }
 
-    // Copy internal wires (remap node IDs)
+    // Copy internal wires
     for (auto &w : wires_)
     {
       if (selSet.count(w.fromNodeId) && selSet.count(w.toNodeId))
@@ -1911,15 +1921,11 @@ public:
       }
     }
 
-    // ── 4. Build ports from boundary wires ───────────────────────────
-    // Deduplicate: multiple wires entering the same internal node+port
-    // should still produce only one port entry.
-    // Use an ordered list: inputs first (sorted by internalNodeId),
-    // then outputs.
+    // Build ports (FIX A: pair<int,int> keys, no int overflow) ───
+    using PortKey = std::pair<int, int>;
 
-    // Track which (internalNode, portIdx) pairs we've already added
-    std::unordered_map<int, int> inPortKey; // encodes nodeId*100+portIdx → port index
-    std::unordered_map<int, int> outPortKey;
+    std::map<PortKey, int> inPortKey;  // {internalNodeId, portIdx} => portIndex
+    std::map<PortKey, int> outPortKey; // {internalNodeId, 0}       => portIndex
 
     int inputIdx = 0;
     int outputIdx = 0;
@@ -1928,12 +1934,11 @@ public:
     {
       if (bw.isInput)
       {
-        int key = bw.internalNodeId * 1000 + bw.internalPortIdx;
+        PortKey key{bw.internalNodeId, bw.internalPortIdx};
         if (inPortKey.count(key))
-          continue; // already registered
+          continue;
 
         SubCircuitPort p;
-        // Name from the internal node's label, or "in_N"
         const CircuitNode *n = findNodeConst(bw.internalNodeId);
         p.name = (n && !n->label.empty())
                      ? n->label
@@ -1946,7 +1951,7 @@ public:
       }
       else
       {
-        int key = bw.internalNodeId * 1000;
+        PortKey key{bw.internalNodeId, 0};
         if (outPortKey.count(key))
           continue;
 
@@ -1963,8 +1968,7 @@ public:
       }
     }
 
-    // Also promote any Input/Output nodes inside the selection that
-    // weren't caught by boundary wires (e.g. disconnected stubs).
+    // Promote disconnected Input/Output nodes
     for (int id : selIds)
     {
       const CircuitNode *n = findNodeConst(id);
@@ -1973,7 +1977,7 @@ public:
 
       if (n->type == CircuitNodeType::Input)
       {
-        int key = id * 1000 + 0;
+        PortKey key{id, 0};
         if (!inPortKey.count(key))
         {
           SubCircuitPort p;
@@ -1989,7 +1993,7 @@ public:
       }
       else if (n->type == CircuitNodeType::Output)
       {
-        int key = id * 1000;
+        PortKey key{id, 0};
         if (!outPortKey.count(key))
         {
           SubCircuitPort p;
@@ -2005,37 +2009,25 @@ public:
       }
     }
 
-    // Sort ports: all inputs first, then outputs, each group by portIndex
+    // Sort: inputs first, then outputs, each group by portIndex
     std::sort(def.ports.begin(), def.ports.end(),
               [](const SubCircuitPort &a, const SubCircuitPort &b)
               {
                 if (a.isOutput != b.isOutput)
-                  return !a.isOutput; // inputs first
+                  return !a.isOutput;
                 return a.portIndex < b.portIndex;
               });
 
-    // Re-assign portIndex sequentially after sort
-    int inC = 0, outC = 0;
-    for (auto &p : def.ports)
-      p.portIndex = p.isOutput ? outC++ : inC++;
+    // Re-assign sequential portIndex after sort
+    {
+      int inC = 0, outC = 0;
+      for (auto &p : def.ports)
+        p.portIndex = p.isOutput ? outC++ : inC++;
+    }
 
     defs_.push_back(def);
 
-    // ── 5. Place the instance ─────────────────────────────────────────
-    // Position at the centroid of the selected nodes
-    float cx = 0, cy = 0;
-    for (int id : selIds)
-    {
-      const CircuitNode *n = findNodeConst(id);
-      if (n)
-      {
-        cx += n->x + n->w * 0.5f;
-        cy += n->y + n->h * 0.5f;
-      }
-    }
-    cx /= float(selIds.size());
-    cy /= float(selIds.size());
-
+    // Place instance at centroid ─────────────────────────────────
     SubCircuitInstance inst;
     inst.instanceId = nextInstanceId_++;
     inst.defId = def.defId;
@@ -2046,11 +2038,12 @@ public:
     inst.x = snapX(cx - inst.w * 0.5f, inst.w);
     inst.y = snapY(cy - inst.h * 0.5f, inst.h);
     inst.selected = true;
-
     instances_.push_back(inst);
 
-    // ── 6. Reconnect external wires to the new instance ───────────────
-    // Collect wire indices to delete AFTER we've read all boundary info
+    // Reconnect external wires
+    // Stage new wires; do NOT push_back into wires_ yet (would invalidate
+    // the wiresToDelete indices we collected above).
+    std::vector<CircuitWire> newWires;
     std::vector<int> wiresToDelete;
 
     for (auto &bw : boundaries)
@@ -2059,62 +2052,56 @@ public:
 
       if (bw.isInput)
       {
-        // Was:  externalNode ──wire──> internalNode
-        // Now:  externalNode ──wire──> instance (input port)
-        int key = bw.internalNodeId * 1000 + bw.internalPortIdx;
+        PortKey key{bw.internalNodeId, bw.internalPortIdx};
         int portIdx = inPortKey[key];
 
         CircuitWire nw;
         nw.id = nextId_++;
-        nw.fromNodeId = bw.externalNodeId; // regular node output
-        nw.toNodeId = -1;                  // signals "goes to instance"
+        nw.fromNodeId = bw.externalNodeId;
+        nw.toNodeId = -1;
         nw.toPortIndex = portIdx;
         nw.toInstanceId = inst.instanceId;
         nw.toInstancePort = portIdx;
-        wires_.push_back(nw);
+        newWires.push_back(nw);
       }
       else
       {
-        // Was:  internalNode ──wire──> externalNode
-        // Now:  instance (output port) ──wire──> externalNode
-        int key = bw.internalNodeId * 1000;
+        PortKey key{bw.internalNodeId, 0};
         int portIdx = outPortKey[key];
 
         CircuitWire nw;
         nw.id = nextId_++;
-        nw.fromNodeId = -1; // signals "comes from instance"
+        nw.fromNodeId = -1;
         nw.fromInstanceId = inst.instanceId;
         nw.fromPortIdx = portIdx;
         nw.toNodeId = bw.externalNodeId;
         nw.toPortIndex = bw.externalPortIdx;
-        wires_.push_back(nw);
+        newWires.push_back(nw);
       }
     }
 
-    // Delete old boundary wires (reverse order to keep indices stable)
+    // Delete old boundary wires in reverse order (stable indices)
     std::sort(wiresToDelete.begin(), wiresToDelete.end(), std::greater<int>());
-    wiresToDelete.erase(
-        std::unique(wiresToDelete.begin(), wiresToDelete.end()),
-        wiresToDelete.end());
+    wiresToDelete.erase(std::unique(wiresToDelete.begin(), wiresToDelete.end()),
+                        wiresToDelete.end());
     for (int idx : wiresToDelete)
       wires_.erase(wires_.begin() + idx);
 
-    // ── 7. Remove the now-grouped nodes from the canvas ───────────────
-    // Also remove any internal wires that are now inside the def
+    // Now it is safe to append the staged wires
+    for (auto &nw : newWires)
+      wires_.push_back(nw);
+
+    // Remove grouped nodes and their internal wires ─────────────
     wires_.erase(
         std::remove_if(wires_.begin(), wires_.end(),
                        [&selSet](const CircuitWire &w)
-                       {
-                         return selSet.count(w.fromNodeId) || selSet.count(w.toNodeId);
-                       }),
+                       { return selSet.count(w.fromNodeId) || selSet.count(w.toNodeId); }),
         wires_.end());
 
     nodes_.erase(
         std::remove_if(nodes_.begin(), nodes_.end(),
                        [&selSet](const CircuitNode &n)
-                       {
-                         return selSet.count(n.id);
-                       }),
+                       { return selSet.count(n.id); }),
         nodes_.end());
 
     evaluate();
@@ -2151,9 +2138,7 @@ public:
   {
     auto it = std::find_if(instances_.begin(), instances_.end(),
                            [instanceId](const SubCircuitInstance &i)
-                           {
-                             return i.instanceId == instanceId;
-                           });
+                           { return i.instanceId == instanceId; });
     if (it == instances_.end())
       return false;
 
@@ -2163,23 +2148,26 @@ public:
 
     pushUndo();
 
-    // Remap def-local IDs to fresh canvas IDs
+    float instCX = it->x + it->w * 0.5f;
+    float instCY = it->y + it->h * 0.5f;
+
+    // Remap def-local IDs => fresh canvas IDs
     std::unordered_map<int, int> defToCanvas;
-    float ox = it->x, oy = it->y; // place restored nodes near instance position
 
     for (auto &dn : def->nodes)
     {
       CircuitNode n = dn;
       n.id = nextId_++;
       defToCanvas[dn.id] = n.id;
-      // Offset relative to instance top-left
-      n.x = snapX(ox + dn.x, n.w);
-      n.y = snapY(oy + dn.y, n.h);
+
+      n.x = snapX(instCX + dn.x - n.w * 0.5f, n.w);
+      n.y = snapY(instCY + dn.y - n.h * 0.5f, n.h);
+
       n.selected = true;
       nodes_.push_back(n);
     }
 
-    // Restore internal wires
+    // Restore internal wires with fresh IDs
     for (auto &dw : def->wires)
     {
       CircuitWire w = dw;
@@ -2197,32 +2185,29 @@ public:
     {
       if (w.fromInstanceId == iid)
       {
-        // Find the internal output node for this port
         const SubCircuitPort *p = findOutputPort(*def, w.fromPortIdx);
-        if (p)
+        if (p && defToCanvas.count(p->internalNodeId))
         {
-          w.fromNodeId = defToCanvas[p->internalNodeId];
+          w.fromNodeId = defToCanvas.at(p->internalNodeId);
           w.fromInstanceId = -1;
         }
       }
       if (w.toInstanceId == iid)
       {
         const SubCircuitPort *p = findInputPort(*def, w.toInstancePort);
-        if (p)
+        if (p && defToCanvas.count(p->internalNodeId))
         {
-          w.toNodeId = defToCanvas[p->internalNodeId];
+          w.toNodeId = defToCanvas.at(p->internalNodeId);
           w.toInstanceId = -1;
         }
       }
     }
 
-    // Remove wires that still reference this instance (unconnected ports)
+    // Clean up any wires that still reference this instance (unconnected ports)
     wires_.erase(
         std::remove_if(wires_.begin(), wires_.end(),
                        [iid](const CircuitWire &w)
-                       {
-                         return w.fromInstanceId == iid || w.toInstanceId == iid;
-                       }),
+                       { return w.fromInstanceId == iid || w.toInstanceId == iid; }),
         wires_.end());
 
     instances_.erase(it);
@@ -3969,7 +3954,7 @@ private:
     float sw = kMiniW / currentZoom_;
     float sh = kMiniH / currentZoom_;
 
-    // Scale factors: world → minimap
+    // Scale factors: world => minimap
     float scaleX = sw / worldW;
     float scaleY = sh / worldH;
 
@@ -4297,47 +4282,54 @@ private:
   bool evaluateInstance(SubCircuitInstance &inst,
                         const SubCircuitDef &def)
   {
-    // Build a local copy of the def's nodes so we can simulate
-    // without touching the canvas
-    std::vector<CircuitNode> localNodes = def.nodes;
-    std::vector<CircuitWire> localWires = def.wires;
+    // Local working copies
+    std::vector<CircuitNode> local = def.nodes;
+    const std::vector<CircuitWire> &localWires = def.wires;
 
-    // Initialise all local node inputVals
-    for (auto &n : localNodes)
+    // Initialise inputVals for every node
+    for (auto &n : local)
       n.inputVals.assign(n.inputCount(), false);
 
-    // Bind instance inputVals → internal Input nodes
-    // The port table tells us which internal node id maps to which port
+    // Bind instance inputs => internal Input nodes
     for (auto &port : def.ports)
     {
       if (port.isOutput)
         continue;
-      // Find the local node with this def-local id
-      for (auto &n : localNodes)
+      for (auto &n : local)
       {
         if (n.id == port.internalNodeId &&
             n.type == CircuitNodeType::Input)
         {
-          bool v = (port.portIndex < (int)inst.inputVals.size())
-                       ? inst.inputVals[port.portIndex]
-                       : false;
-          n.value = v;
+          n.value = (port.portIndex < (int)inst.inputVals.size())
+                        ? inst.inputVals[port.portIndex]
+                        : false;
           break;
         }
       }
     }
 
-    // Simulate up to 30 passes (handles gate chains, not feedback loops)
-    for (int iter = 0; iter < 30; ++iter)
+    // Helper: build a compact value snapshot for cycle detection
+    auto snapshot = [&]() -> std::vector<bool>
     {
-      bool changed = false;
+      std::vector<bool> s;
+      s.reserve(local.size());
+      for (auto &n : local)
+        s.push_back(n.value);
+      return s;
+    };
 
-      // Propagate wires
+    std::vector<std::vector<bool>> history;
+    history.reserve(64);
+
+    static constexpr int kMaxIter = 64; // generous but bounded
+
+    for (int iter = 0; iter < kMaxIter; ++iter)
+    {
+      // ── Propagate wires ──────────────────────────────────────────
       for (auto &w : localWires)
       {
-        CircuitNode *src = nullptr;
-        CircuitNode *dst = nullptr;
-        for (auto &n : localNodes)
+        CircuitNode *src = nullptr, *dst = nullptr;
+        for (auto &n : local)
         {
           if (n.id == w.fromNodeId)
             src = &n;
@@ -4347,18 +4339,12 @@ private:
         if (!src || !dst)
           continue;
         if (w.toPortIndex < (int)dst->inputVals.size())
-        {
-          bool v = src->value;
-          if (dst->inputVals[w.toPortIndex] != v)
-          {
-            dst->inputVals[w.toPortIndex] = v;
-            changed = true;
-          }
-        }
+          dst->inputVals[w.toPortIndex] = src->value;
       }
 
-      // Evaluate nodes
-      for (auto &n : localNodes)
+      // ── Evaluate nodes ───────────────────────────────────────────
+      bool changed = false;
+      for (auto &n : local)
       {
         bool prev = n.value;
         switch (n.type)
@@ -4411,40 +4397,51 @@ private:
           n.value = (ones % 2) == 0;
           break;
         }
-        case CircuitNodeType::Input:
-          break; // already bound above
-        case CircuitNodeType::Output:
-          n.value = !n.inputVals.empty() && n.inputVals[0];
-          break;
         case CircuitNodeType::NOT:
           n.value = !n.inputVals.empty() && !n.inputVals[0];
           break;
+
+        case CircuitNodeType::Output:
+          n.value = !n.inputVals.empty() && n.inputVals[0];
+          break;
+
+        case CircuitNodeType::Input:
+          break;
+
         default:
           break;
         }
         if (prev != n.value)
           changed = true;
       }
-      if (!changed)
-        break;
-    }
 
-    // Read output ports back into inst.outputVals
+      if (!changed)
+        break; // combinational convergence – done
+
+      // ── Cycle detection
+      auto snap = snapshot();
+      for (auto &prev : history)
+      {
+        if (prev == snap)
+          goto done; // repeated state => oscillation detected, stop here
+      }
+      history.push_back(std::move(snap));
+    }
+  done:
+
+    // ── Read output ports back into inst.outputVals ───────────────────
     bool anyChanged = false;
     for (auto &port : def.ports)
     {
       if (!port.isOutput)
         continue;
       bool v = false;
-      for (auto &n : localNodes)
+      for (auto &n : local)
       {
         if (n.id == port.internalNodeId)
         {
-          // Output nodes mirror their input
-          v = !n.inputVals.empty() && n.inputVals[0];
-          // For non-Output typed nodes used as outputs, use value
-          if (n.type != CircuitNodeType::Output)
-            v = n.value;
+
+          v = n.value;
           break;
         }
       }
@@ -4671,7 +4668,6 @@ private:
       if (!def)
         continue;
 
-      // Input ports (left side)
       int inCount = def->inputPortCount();
       for (int i = 0; i < inCount; ++i)
       {
@@ -4679,13 +4675,15 @@ private:
         if (std::hypot(x - p.x, y - p.y) < R)
         {
           PortRef ref;
-          ref.nodeId = -(inst.instanceId * 100 + i); // negative = instance
+          // Encode: negative instanceId in nodeId, portIdx separate.
+          // Supports any instanceId and any portIdx value.
+          ref.nodeId = -(inst.instanceId + 1); // +1 so instanceId=0 gives -1 (always negative)
           ref.isOutput = false;
           ref.portIdx = i;
           return ref;
         }
       }
-      // Output ports (right side)
+
       int outCount = def->outputPortCount();
       for (int i = 0; i < outCount; ++i)
       {
@@ -4693,7 +4691,7 @@ private:
         if (std::hypot(x - p.x, y - p.y) < R)
         {
           PortRef ref;
-          ref.nodeId = -(inst.instanceId * 100 + i);
+          ref.nodeId = -(inst.instanceId + 1);
           ref.isOutput = true;
           ref.portIdx = i;
           return ref;
@@ -4707,9 +4705,9 @@ private:
   static void decodeInstancePortRef(const PortRef &ref,
                                     int &outInstanceId, int &outPortIdx)
   {
-    int encoded = -ref.nodeId;
-    outInstanceId = encoded / 100;
-    outPortIdx = encoded % 100;
+    // nodeId = -(instanceId + 1)  =>  instanceId = (-nodeId) - 1
+    outInstanceId = (-ref.nodeId) - 1;
+    outPortIdx = ref.portIdx;
   }
 
   SubCircuitDef *findDef(int defId)
