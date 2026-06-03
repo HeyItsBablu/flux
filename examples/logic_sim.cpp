@@ -1626,6 +1626,77 @@ public:
     if (textEditing_)
       commitTextEdit();
 
+    if (!probes_.empty())
+    {
+      float Z = currentZoom_;
+      float panelTopWorld = viewOffsetY_ + (viewH_ - oscHeight_) / Z;
+
+      // Resize handle (6px above panel top)
+      if (std::abs(y - panelTopWorld) < 8.f / Z)
+      {
+        oscResizing_ = true;
+        oscResizeStartY_ = y;
+        oscResizeStartH_ = oscHeight_;
+        return;
+      }
+
+      // Inside panel?
+      if (y > panelTopWorld && y < viewOffsetY_ + viewH_ / Z)
+      {
+        float labelW = kLabelW / Z;
+        float headerH = 20.f / Z;
+        float panelX = viewOffsetX_;
+
+        // ── Header button hit tests ───────────────────────────────
+        float hdrBottom = panelTopWorld + headerH;
+        if (y < hdrBottom)
+        {
+          float btnW = 20.f / Z, btnH = 14.f / Z;
+          float btnY0 = panelTopWorld + (headerH - btnH) * 0.5f;
+          float rightX = viewOffsetX_ + viewW_ / Z;
+          float bx0 = rightX - 3.f * (btnW + 3.f / Z);
+          if (y >= btnY0 && y <= btnY0 + btnH)
+          {
+            if (x >= bx0 && x < bx0 + btnW) // "–" zoom out
+              oscCycleZoom_ = std::max(1, oscCycleZoom_ - 1);
+            else if (x >= bx0 + btnW + 3.f / Z && x < bx0 + 2 * (btnW + 3.f / Z)) // "+" zoom in
+              oscCycleZoom_ = std::min(8, oscCycleZoom_ + 1);
+            else // "×" clear
+              clearProbes();
+            notify();
+          }
+          return;
+        }
+
+        // ── Row close buttons ─────────────────────────────────────
+        float rowH = kRowH / Z;
+        float rowTop = panelTopWorld + headerH;
+        for (int ri = 0; ri < (int)probes_.size(); ++ri)
+        {
+          float ry = rowTop + ri * rowH;
+          float xBtnX = panelX + labelW - 14.f / Z;
+          float xBtnY = ry + (rowH - 10.f / Z) * 0.5f;
+          if (x >= xBtnX && x <= xBtnX + 10.f / Z &&
+              y >= xBtnY && y <= xBtnY + 10.f / Z)
+          {
+            removeProbe(probes_[ri].nodeId);
+            return;
+          }
+        }
+
+        // ── Cursor drag ───────────────────────────────────────────
+        float sigX = panelX + labelW;
+        if (x >= sigX)
+        {
+          float cycleW = kCycleW * oscCycleZoom_ / Z;
+          oscCursorCycle_ = oscScrollX_ + (x - sigX) / cycleW;
+          oscDraggingCursor_ = true;
+          notify();
+        }
+        return; // swallow – don't interact with canvas while in panel
+      }
+    }
+
     // ── Context menu intercept ─────────────────────────────────────────
     if (ctxMenu_.open)
     {
@@ -1782,6 +1853,27 @@ public:
     if (onCursorMoved)
       onCursorMoved(x, y);
 
+    if (oscResizing_)
+    {
+      float dy = (y - oscResizeStartY_) * currentZoom_;
+      oscHeight_ = std::max(60.f, std::min(400.f, oscResizeStartH_ - dy));
+      notify();
+      return;
+    }
+    if (oscDraggingCursor_)
+    {
+      if (!probes_.empty())
+      {
+        float Z = currentZoom_;
+        float sigX = viewOffsetX_ + kLabelW / Z;
+        float cycleW = kCycleW * oscCycleZoom_ / Z;
+        oscCursorCycle_ = oscScrollX_ + (x - sigX) / cycleW;
+        oscCursorCycle_ = std::max(0.f, oscCursorCycle_);
+        notify();
+      }
+      return;
+    }
+
     if (ctxMenu_.open)
     {
       int item = -1;
@@ -1815,6 +1907,9 @@ public:
 
   void onMouseUp(float x, float y) override
   {
+
+    oscResizing_ = false;
+    oscDraggingCursor_ = false;
     if (dragging_)
     {
       dragging_ = false;
@@ -2010,6 +2105,14 @@ public:
       }
 
       items.push_back({"", {}, true});
+      if (isProbed(target->id))
+        items.push_back({"Remove probe", [this, target]
+                         { removeProbe(target->id); }});
+      else
+        items.push_back({"Add probe", [this, target]
+                         { addProbe(target->id); }});
+
+      items.push_back({"", {}, true});
       items.push_back({"Delete", [this, target]
                        {
                          pushUndo();
@@ -2201,6 +2304,13 @@ public:
       duplicateSelected();
       return;
     }
+    if (e.ctrl && e.virtualKey == 'P')
+    {
+      for (auto &n : nodes_)
+        if (n.selected)
+          isProbed(n.id) ? removeProbe(n.id) : addProbe(n.id);
+      return;
+    }
   }
   void onKeyUp(const KeyEvent &) override {}
 
@@ -2234,11 +2344,116 @@ public:
     if (ctxMenu_.open)
       drawContextMenu(ctx);
     drawMinimap(ctx);
+    if (!probes_.empty())
+      drawOscilloscope(ctx);
   }
 
 private:
   // Set by CircuitApp after surface creation
   Canvas2DGL *canvasGL_ = nullptr;
+
+  // ── Oscilloscope / probe ──────────────────────────────────────────
+  struct ProbedSignal
+  {
+    int nodeId = -1;
+    std::string label;         // cached at probe-time
+    Color color;               // assigned round-robin
+    std::vector<bool> samples; // ring: [0..maxSamples)
+  };
+
+  static constexpr int kMaxSamples = 256;
+  static constexpr float kProbeH = 160.f; // default panel height (screen px)
+  static constexpr float kRowH = 28.f;    // screen px per signal row
+  static constexpr float kLabelW = 64.f;  // screen px for label column
+  static constexpr float kCycleW = 18.f;  // screen px per cycle column (at zoom=1)
+
+  std::vector<ProbedSignal> probes_;
+  uint64_t tickCount_ = 0;    // incremented each recordSample call
+  int oscCycleZoom_ = 1;      // 1 = kCycleW px/cycle, 2 = 2× wider etc.
+  float oscScrollX_ = 0.f;    // horizontal scroll offset in cycles
+  float oscHeight_ = kProbeH; // panel height in screen px – drag to resize
+  bool oscResizing_ = false;
+  float oscResizeStartY_ = 0.f, oscResizeStartH_ = 0.f;
+  float oscCursorCycle_ = -1.f; // -1 = hidden
+  bool oscDraggingCursor_ = false;
+
+  // Colour palette for probed signals
+  static Color probeColor(int idx)
+  {
+    static const Color kPalette[] = {
+        Color::fromRGB(140, 100, 240), // purple  – CLK
+        Color::fromRGB(60, 200, 120),  // green   – logic high/IN
+        Color::fromRGB(90, 168, 224),  // blue    – output
+        Color::fromRGB(240, 160, 40),  // amber
+        Color::fromRGB(224, 80, 80),   // red
+        Color::fromRGB(80, 200, 200),  // teal
+        Color::fromRGB(200, 200, 80),  // yellow
+    };
+    constexpr int N = sizeof(kPalette) / sizeof(kPalette[0]);
+    return kPalette[idx % N];
+  }
+
+  // ── probe management ──────────────────────────────────────────────
+  bool isProbed(int nodeId) const
+  {
+    for (auto &p : probes_)
+      if (p.nodeId == nodeId)
+        return true;
+    return false;
+  }
+
+  void addProbe(int nodeId)
+  {
+    if (isProbed(nodeId))
+      return;
+    const CircuitNode *n = findNodeConst(nodeId);
+    if (!n)
+      return;
+
+    ProbedSignal ps;
+    ps.nodeId = nodeId;
+    ps.label = n->label.empty() ? std::string(defaultName(n->type)) : n->label;
+    ps.color = probeColor((int)probes_.size());
+    ps.samples.reserve(kMaxSamples);
+    probes_.push_back(std::move(ps));
+    notify();
+  }
+
+  void removeProbe(int nodeId)
+  {
+    probes_.erase(
+        std::remove_if(probes_.begin(), probes_.end(),
+                       [nodeId](const ProbedSignal &p)
+                       { return p.nodeId == nodeId; }),
+        probes_.end());
+    notify();
+  }
+
+  void clearProbes()
+  {
+    probes_.clear();
+    tickCount_ = 0;
+    notify();
+  }
+
+  // Called after every evaluate() – snapshots current node values
+  void recordSample()
+  {
+    if (probes_.empty())
+      return;
+    ++tickCount_;
+    for (auto &ps : probes_)
+    {
+      const CircuitNode *n = findNodeConst(ps.nodeId);
+      bool v = n ? n->value : false;
+      if ((int)ps.samples.size() >= kMaxSamples)
+        ps.samples.erase(ps.samples.begin());
+      ps.samples.push_back(v);
+    }
+    // Auto-scroll to keep newest sample visible
+    int totalCycles = (int)(probes_.empty() ? 0 : probes_[0].samples.size());
+    // (scroll handled in drawOscilloscope)
+  }
 
   // ── Context menu ──────────────────────────────────────────────────────
   struct ContextMenuItem
@@ -2422,6 +2637,245 @@ private:
 
       cy += itemH;
     }
+  }
+
+  void drawOscilloscope(Canvas2D &ctx)
+  {
+    if (probes_.empty())
+      return;
+
+    const float Z = currentZoom_;
+    const float SX = viewW_;      // screen width  (px)
+    const float SH = oscHeight_;  // panel height  (px)
+    const float SY = viewH_ - SH; // panel top     (px)
+
+    // Convert screen-space panel rect to world coordinates
+    float wx = viewOffsetX_;
+    float wy = viewOffsetY_ + SY / Z;
+    float ww = SX / Z;
+    float wh = SH / Z;
+
+    // ── Background + border ───────────────────────────────────────
+    ctx.setFillColor(Color::fromRGBA(10, 10, 15, 230));
+    ctx.fillRect(wx, wy, ww, wh);
+    ctx.setStrokeColor(Color::fromRGBA(60, 60, 80, 255));
+    ctx.setLineWidth(1.f / Z);
+    ctx.strokeRect(wx, wy, ww, wh);
+
+    // ── Header bar (title + controls) ────────────────────────────
+    float headerH = 20.f / Z;
+    ctx.setFillColor(Color::fromRGBA(20, 20, 30, 255));
+    ctx.fillRect(wx, wy, ww, headerH);
+
+    float fs = 11.f / Z;
+    char font[32];
+    snprintf(font, sizeof(font), "bold %.0fpx sans", fs);
+    ctx.setFont(font);
+    ctx.setTextBaseline(TextBaseline::Middle);
+    ctx.setFillColor(Color::fromRGBA(140, 140, 160, 255));
+    ctx.fillText("Oscilloscope", wx + 6.f / Z, wy + headerH * 0.5f);
+
+    // Zoom buttons  (drawn as tiny labelled rects in world space)
+    float btnW = 20.f / Z, btnH = 14.f / Z;
+    float btnY = wy + (headerH - btnH) * 0.5f;
+    float btnX0 = wx + ww - 3.f * (btnW + 3.f / Z);
+
+    auto drawBtn = [&](float bx, const char *lbl)
+    {
+      ctx.setFillColor(Color::fromRGBA(40, 40, 55, 255));
+      ctx.fillRoundedRect(bx, btnY, btnW, btnH, 2.f / Z);
+      ctx.setStrokeColor(Color::fromRGBA(70, 70, 90, 255));
+      ctx.setLineWidth(0.5f / Z);
+      ctx.strokeRoundedRect(bx, btnY, btnW, btnH, 2.f / Z);
+      ctx.setFillColor(Color::fromRGBA(180, 180, 200, 255));
+      float tw = ctx.measureText(lbl);
+      ctx.fillText(lbl, bx + (btnW - tw) * 0.5f, btnY + btnH * 0.5f);
+    };
+    drawBtn(btnX0, "–");
+    drawBtn(btnX0 + btnW + 3.f / Z, "+");
+    drawBtn(btnX0 + 2.f * (btnW + 3.f / Z), "×");
+
+    // ── Signal rows ───────────────────────────────────────────────
+    float labelW = kLabelW / Z;
+    float rowH = kRowH / Z;
+    float cycleW = kCycleW * oscCycleZoom_ / Z;
+    float contentW = ww - labelW;
+
+    int numSamples = probes_.empty() ? 0 : (int)probes_[0].samples.size();
+    // Clamp scroll
+    float maxScroll = std::max(0.f, float(numSamples) - contentW / cycleW);
+    oscScrollX_ = std::max(0.f, std::min(oscScrollX_, maxScroll));
+
+    int firstSample = (int)oscScrollX_;
+
+    float rowTop = wy + headerH;
+
+    for (int ri = 0; ri < (int)probes_.size(); ++ri)
+    {
+      auto &ps = probes_[ri];
+      float ry = rowTop + ri * rowH;
+      if (ry + rowH > wy + wh)
+        break; // panel full
+
+      // Row divider
+      ctx.setStrokeColor(Color::fromRGBA(40, 40, 55, 255));
+      ctx.setLineWidth(0.5f / Z);
+      ctx.beginPath();
+      ctx.moveTo(wx, ry + rowH);
+      ctx.lineTo(wx + ww, ry + rowH);
+      ctx.stroke();
+
+      // Label background
+      ctx.setFillColor(Color::fromRGBA(18, 18, 26, 255));
+      ctx.fillRect(wx, ry, labelW, rowH);
+
+      // Colour strip
+      ctx.setFillColor(ps.color);
+      ctx.fillRect(wx, ry, 3.f / Z, rowH);
+
+      // Signal label
+      snprintf(font, sizeof(font), "bold %.0fpx sans", 10.f / Z);
+      ctx.setFont(font);
+      ctx.setFillColor(ps.color);
+      ctx.fillText(ps.label.c_str(), wx + 6.f / Z, ry + rowH * 0.5f);
+
+      // × close button (small, right side of label)
+      float xBtnX = wx + labelW - 14.f / Z;
+      float xBtnY = ry + (rowH - 10.f / Z) * 0.5f;
+      ctx.setFillColor(Color::fromRGBA(80, 60, 60, 200));
+      ctx.fillRoundedRect(xBtnX, xBtnY, 10.f / Z, 10.f / Z, 2.f / Z);
+      ctx.setFillColor(Color::fromRGBA(200, 120, 120, 255));
+      float xFs = 9.f / Z;
+      char xFont[32];
+      snprintf(xFont, sizeof(xFont), "bold %.0fpx sans", xFs);
+      ctx.setFont(xFont);
+      ctx.fillText("×", xBtnX + 1.5f / Z, xBtnY + 5.f / Z);
+
+      // ── Waveform ─────────────────────────────────────────────
+      // Clip drawing to content area
+      float midY = ry + rowH * 0.5f;
+      float hiY = ry + rowH * 0.18f;
+      float loY = ry + rowH * 0.82f;
+      float sigX = wx + labelW;
+
+      // Vertical grid lines every 8 cycles
+      ctx.setStrokeColor(Color::fromRGBA(35, 35, 50, 255));
+      ctx.setLineWidth(0.5f / Z);
+      for (int c = firstSample; c < numSamples; ++c)
+      {
+        if ((c % 8) == 0)
+        {
+          float gx = sigX + (c - firstSample) * cycleW;
+          if (gx > wx + ww)
+            break;
+          ctx.beginPath();
+          ctx.moveTo(gx, ry);
+          ctx.lineTo(gx, ry + rowH);
+          ctx.stroke();
+        }
+      }
+
+      // Signal trace
+      ctx.setStrokeColor(ps.color);
+      ctx.setLineWidth(1.5f / Z);
+      ctx.beginPath();
+
+      bool started = false;
+      bool lastVal = false;
+      for (int ci = firstSample; ci < numSamples; ++ci)
+      {
+        float sx = sigX + (ci - firstSample) * cycleW;
+        if (sx > wx + ww)
+          break;
+        bool v = ps.samples[ci];
+        float sy = v ? hiY : loY;
+        if (!started)
+        {
+          ctx.moveTo(sx, sy);
+          started = true;
+          lastVal = v;
+        }
+        else
+        {
+          if (v != lastVal)
+          {
+            float ex = sx;
+            ctx.lineTo(ex, lastVal ? hiY : loY); // horizontal
+            ctx.lineTo(ex, v ? hiY : loY);       // vertical edge
+            lastVal = v;
+          }
+          ctx.lineTo(sx + cycleW, sy);
+        }
+      }
+      ctx.stroke();
+
+      // Current value dot (rightmost sample)
+      if (numSamples > 0)
+      {
+        bool cur = ps.samples.back();
+        float dotX = sigX + (numSamples - firstSample) * cycleW;
+        if (dotX <= wx + ww)
+        {
+          ctx.setFillColor(ps.color);
+          ctx.fillCircle(dotX, cur ? hiY : loY, 3.f / Z);
+        }
+      }
+    }
+
+    // ── Cycle-number axis ─────────────────────────────────────────
+    float axisY = rowTop + (int)probes_.size() * rowH;
+    if (axisY + 14.f / Z <= wy + wh)
+    {
+      ctx.setFillColor(Color::fromRGBA(12, 12, 20, 255));
+      ctx.fillRect(wx, axisY, ww, 14.f / Z);
+      snprintf(font, sizeof(font), "%.0fpx sans", 9.f / Z);
+      ctx.setFont(font);
+      ctx.setFillColor(Color::fromRGBA(80, 80, 100, 255));
+
+      float sigX = wx + labelW;
+      for (int c = firstSample; c < numSamples; c += std::max(1, 4 / oscCycleZoom_))
+      {
+        float gx = sigX + (c - firstSample) * cycleW;
+        if (gx > wx + ww)
+          break;
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%d", c);
+        ctx.fillText(buf, gx + 1.f / Z, axisY + 9.f / Z);
+      }
+    }
+
+    // ── Cursor line ───────────────────────────────────────────────
+    if (oscCursorCycle_ >= 0.f)
+    {
+      float sigX = wx + labelW;
+      float cx = sigX + (oscCursorCycle_ - oscScrollX_) * cycleW;
+      if (cx >= sigX && cx <= wx + ww)
+      {
+        ctx.setStrokeColor(Color::fromRGBA(240, 160, 40, 200));
+        ctx.setLineWidth(1.f / Z);
+        ctx.beginPath();
+        ctx.moveTo(cx, wy + headerH);
+        ctx.lineTo(cx, wy + wh);
+        ctx.stroke();
+
+        // Cursor label
+        ctx.setFillColor(Color::fromRGBA(240, 160, 40, 220));
+        ctx.fillRoundedRect(cx - 12.f / Z, wy + headerH, 24.f / Z, 10.f / Z, 2.f / Z);
+        snprintf(font, sizeof(font), "%.0fpx sans", 8.f / Z);
+        ctx.setFont(font);
+        ctx.setFillColor(Color::fromRGBA(20, 15, 5, 255));
+        char tbuf[16];
+        snprintf(tbuf, sizeof(tbuf), "t=%d", (int)oscCursorCycle_);
+        float tw = ctx.measureText(tbuf);
+        ctx.fillText(tbuf, cx - tw * 0.5f, wy + headerH + 7.f / Z);
+      }
+    }
+
+    // ── Resize handle ─────────────────────────────────────────────
+    float rhy = wy - 3.f / Z;
+    float rhh = 6.f / Z;
+    ctx.setFillColor(Color::fromRGBA(60, 60, 80, 200));
+    ctx.fillRoundedRect(wx + ww * 0.4f, rhy, ww * 0.2f, rhh, 3.f / Z);
   }
 
   void drawMinimap(Canvas2D &ctx) const
@@ -2821,6 +3275,8 @@ private:
       if (!changed)
         break;
     }
+
+    recordSample();
   }
 
   // ── Hit testing ───────────────────────────────────────────────────────
