@@ -797,6 +797,23 @@ public:
     if (textEditing_)
       commitTextEdit();
 
+    // ── Context menu intercept ─────────────────────────────────────────
+    if (ctxMenu_.open)
+    {
+      int item = -1;
+      bool inMenu = menuHitTest(x, y, item);
+      if (inMenu)
+      {
+        if (item >= 0 && !ctxMenu_.items[item].separator && ctxMenu_.items[item].action)
+          ctxMenu_.items[item].action();
+        closeContextMenu();
+        notify();
+        return;
+      }
+      closeContextMenu();
+      notify();
+    }
+
     mouseDownX_ = x;
     mouseDownY_ = y;
     curX_ = x;
@@ -935,6 +952,17 @@ public:
     if (onCursorMoved)
       onCursorMoved(x, y);
 
+    if (ctxMenu_.open)
+    {
+      int item = -1;
+      menuHitTest(x, y, item);
+      if (item != ctxMenu_.hoveredItem)
+      {
+        ctxMenu_.hoveredItem = item;
+        notify();
+      }
+    }
+
     if (dragging_)
     {
       float dx = x - dragStartX_, dy = y - dragStartY_;
@@ -1034,6 +1062,76 @@ public:
     }
   }
 
+  void onRightMouseDown(float x, float y) override
+  {
+    if (textEditing_)
+      commitTextEdit();
+
+    // If a menu is already open, close it
+    if (ctxMenu_.open)
+    {
+      closeContextMenu();
+      notify();
+      return;
+    }
+
+    CircuitNode *n = hitNode(x, y);
+    int wireIdx = hitWire(x, y);
+
+    std::vector<ContextMenuItem> items;
+
+    if (n)
+    {
+      // Node context menu
+      CircuitNode *target = n;
+      items.push_back({"Rename", [this, target]
+                       { startTextEdit(target); notify(); }});
+      items.push_back({"", {}, true}); // separator
+      if (target->type == CircuitNodeType::Input)
+        items.push_back({"Toggle", [this, target]
+                         { pushUndo(); target->value = !target->value; evaluate(); notify(); }});
+      items.push_back({"Duplicate", [this, target]
+                       { deselectAll(); target->selected = true; duplicateSelected(); }});
+      items.push_back({"", {}, true});
+      items.push_back({"Delete", [this, target]
+                       {
+                         pushUndo();
+                         int id = target->id;
+                         nodes_.erase(std::remove_if(nodes_.begin(), nodes_.end(), [id](const CircuitNode &n)
+                                                     { return n.id == id; }),
+                                      nodes_.end());
+                         wires_.erase(std::remove_if(wires_.begin(), wires_.end(), [id](const CircuitWire &w)
+                                                     { return w.fromNodeId == id || w.toNodeId == id; }),
+                                      wires_.end());
+                         evaluate();
+                         notify();
+                       }});
+    }
+    else if (wireIdx >= 0)
+    {
+      // Wire context menu
+      int idx = wireIdx;
+      items.push_back({"Delete wire", [this, idx]
+                       { pushUndo(); wires_.erase(wires_.begin() + idx); evaluate(); notify(); }});
+    }
+    else
+    {
+      // Canvas context menu
+      float cx = x, cy = y;
+      items.push_back({"Select all", [this]
+                       { selectAll(); notify(); }});
+      items.push_back({"Deselect all", [this]
+                       { deselectAll(); notify(); }});
+      items.push_back({"", {}, true});
+      items.push_back({"Clear canvas", [this]
+                       { pushUndo(); clear(); }});
+    }
+
+    if (!items.empty())
+      openContextMenu(x, y, std::move(items));
+    notify();
+  }
+
   void onKeyDown(const KeyEvent &e) override
   {
 
@@ -1130,10 +1228,32 @@ public:
     if (rubberBand_)
       drawRubberBand(ctx);
 
+    if (ctxMenu_.open)
+      drawContextMenu(ctx);
     drawMinimap(ctx);
   }
 
 private:
+  // ── Context menu ──────────────────────────────────────────────────────
+  struct ContextMenuItem
+  {
+    std::string label;
+    std::function<void()> action;
+    bool separator = false; // if true, draw a divider line instead
+  };
+  struct ContextMenu
+  {
+    float x = 0, y = 0; // world-space position
+    std::vector<ContextMenuItem> items;
+    int hoveredItem = -1;
+    bool open = false;
+  };
+  ContextMenu ctxMenu_;
+
+  static constexpr float kMenuItemH = 22.f; // screen pixels
+  static constexpr float kMenuW = 140.f;
+  static constexpr float kMenuPadding = 6.f;
+
   // ── Minimap ───────────────────────────────────────────────────────────
   static constexpr float kMiniW = 160.f; // screen pixels
   static constexpr float kMiniH = 100.f;
@@ -1151,6 +1271,142 @@ private:
 
   uint32_t lastClickTime_ = 0;
   int lastClickNodeId_ = -1;
+
+  void openContextMenu(float wx, float wy, std::vector<ContextMenuItem> items)
+  {
+    ctxMenu_.x = wx;
+    ctxMenu_.y = wy;
+    ctxMenu_.items = std::move(items);
+    ctxMenu_.hoveredItem = -1;
+    ctxMenu_.open = true;
+  }
+
+  void closeContextMenu()
+  {
+    ctxMenu_.open = false;
+    ctxMenu_.items.clear();
+  }
+
+  // Returns true if (wx,wy) is inside the menu, and fills outItem with the
+  // item index under the cursor (-1 if on separator/outside).
+  bool menuHitTest(float wx, float wy, int &outItem) const
+  {
+    if (!ctxMenu_.open)
+      return false;
+    float mw = kMenuW / currentZoom_;
+    float itemH = kMenuItemH / currentZoom_;
+    float pad = kMenuPadding / currentZoom_;
+
+    // Compute total height
+    float totalH = pad;
+    for (auto &it : ctxMenu_.items)
+      totalH += it.separator ? (4.f / currentZoom_) : itemH;
+    totalH += pad;
+
+    float mx = ctxMenu_.x, my = ctxMenu_.y;
+    if (wx < mx || wx > mx + mw || wy < my || wy > my + totalH)
+    {
+      outItem = -1;
+      return false;
+    }
+
+    float cy = my + pad;
+    for (int i = 0; i < (int)ctxMenu_.items.size(); ++i)
+    {
+      auto &it = ctxMenu_.items[i];
+      if (it.separator)
+      {
+        cy += 4.f / currentZoom_;
+        continue;
+      }
+      if (wy >= cy && wy < cy + itemH)
+      {
+        outItem = i;
+        return true;
+      }
+      cy += itemH;
+    }
+    outItem = -1;
+    return true; // inside menu but on separator
+  }
+
+  void drawContextMenu(Canvas2D &ctx) const
+  {
+    float mw = kMenuW / currentZoom_;
+    float itemH = kMenuItemH / currentZoom_;
+    float pad = kMenuPadding / currentZoom_;
+    float sepH = 4.f / currentZoom_;
+    float fs = 11.f / currentZoom_;
+    float radius = 4.f / currentZoom_;
+
+    // Total height
+    float totalH = pad * 2.f;
+    for (auto &it : ctxMenu_.items)
+      totalH += it.separator ? sepH : itemH;
+
+    float mx = ctxMenu_.x, my = ctxMenu_.y;
+
+    // Shadow
+    ctx.setFillColor(Color::fromRGBA(0, 0, 0, 60));
+    ctx.fillRoundedRect(mx + 2.f / currentZoom_, my + 2.f / currentZoom_,
+                        mw, totalH, radius);
+
+    // Background
+    ctx.setFillColor(Color::fromRGB(24, 24, 32));
+    ctx.fillRoundedRect(mx, my, mw, totalH, radius);
+
+    // Border
+    ctx.setStrokeColor(Color::fromRGBA(70, 70, 90, 255));
+    ctx.setLineWidth(1.f / currentZoom_);
+    ctx.beginPath();
+    ctx.rect(mx, my, mw, totalH);
+    ctx.stroke();
+
+    // Items
+    char font[32];
+    snprintf(font, sizeof(font), "%.0fpx sans", fs);
+    ctx.setFont(font);
+    ctx.setTextBaseline(TextBaseline::Middle);
+
+    float cy = my + pad;
+    for (int i = 0; i < (int)ctxMenu_.items.size(); ++i)
+    {
+      auto &it = ctxMenu_.items[i];
+      if (it.separator)
+      {
+        float sy = cy + sepH * 0.5f;
+        ctx.setStrokeColor(Color::fromRGBA(60, 60, 80, 200));
+        ctx.setLineWidth(0.5f / currentZoom_);
+        ctx.beginPath();
+        ctx.moveTo(mx + pad, sy);
+        ctx.lineTo(mx + mw - pad, sy);
+        ctx.stroke();
+        cy += sepH;
+        continue;
+      }
+
+      // Hover highlight
+      if (i == ctxMenu_.hoveredItem)
+      {
+        ctx.setFillColor(Color::fromRGBA(50, 100, 200, 160));
+        ctx.fillRoundedRect(mx + 2.f / currentZoom_,
+                            cy + 1.f / currentZoom_,
+                            mw - 4.f / currentZoom_,
+                            itemH - 2.f / currentZoom_,
+                            2.f / currentZoom_);
+      }
+
+      // Label
+      ctx.setFillColor(i == ctxMenu_.hoveredItem
+                           ? Color::fromRGB(220, 230, 255)
+                           : Color::fromRGB(180, 180, 200));
+      ctx.fillText(it.label.c_str(),
+                   mx + pad * 2.f,
+                   cy + itemH * 0.5f);
+
+      cy += itemH;
+    }
+  }
 
   void drawMinimap(Canvas2D &ctx) const
   {
