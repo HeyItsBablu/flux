@@ -38,7 +38,8 @@ enum class CircuitNodeType
   XNOR,
   Input,
   Output,
-  Clock
+  Clock,
+  SevenSegment
 };
 
 // ============================================================================
@@ -81,6 +82,8 @@ struct CircuitNode
       return 1;
     case CircuitNodeType::Clock:
       return 0;
+    case CircuitNodeType::SevenSegment:
+      return 8;
     // Multi-input capable gates:
     case CircuitNodeType::AND:
     case CircuitNodeType::OR:
@@ -94,7 +97,11 @@ struct CircuitNode
   }
   int outputCount() const
   {
-    return (type == CircuitNodeType::Output) ? 0 : 1;
+    // Output and SevenSegment are pure sinks
+    return (type == CircuitNodeType::Output ||
+            type == CircuitNodeType::SevenSegment)
+               ? 0
+               : 1;
   }
 };
 
@@ -267,6 +274,8 @@ public:
         return "Input";
       case CircuitNodeType::Output:
         return "Output";
+      case CircuitNodeType::SevenSegment:
+        return "7SEG";
       }
       return "AND";
     };
@@ -340,7 +349,8 @@ public:
       if (n.type == CircuitNodeType::Input ||
           n.type == CircuitNodeType::Clock)
         inputs.push_back(&n);
-      else if (n.type == CircuitNodeType::Output)
+      else if (n.type == CircuitNodeType::Output ||
+               n.type == CircuitNodeType::SevenSegment)
         outputs.push_back(&n);
       else
         gates.push_back(&n);
@@ -507,8 +517,23 @@ public:
 
     // Output assignments
     for (auto *out : outputs)
-      o << "assign " << nodeName(out)
-        << " = " << driverOf(out->id, 0) << ";\n";
+    {
+      if (out->type == CircuitNodeType::SevenSegment)
+      {
+        // Emit one wire per segment
+        static const char *segNames[] = {"a", "b", "c", "d", "e", "f", "g", "dp"};
+        std::string base = nodeName(out);
+        o << "// 7-segment display: " << base << "\n";
+        for (int i = 0; i < 8; ++i)
+          o << "assign " << base << "_seg_" << segNames[i]
+            << " = " << driverOf(out->id, i) << ";\n";
+      }
+      else
+      {
+        o << "assign " << nodeName(out)
+          << " = " << driverOf(out->id, 0) << ";\n";
+      }
+    }
 
     o << "\nendmodule\n";
     return o.str();
@@ -944,6 +969,80 @@ public:
           << "' r='5' fill='" << fill
           << "' stroke='" << stroke << "' stroke-width='1.5'/>\n";
       }
+      else if (n.type == CircuitNodeType::SevenSegment)
+      {
+        // Bezel
+        o << "  <rect x='" << nx << "' y='" << ny
+          << "' width='" << n.w << "' height='" << n.h
+          << "' rx='6' fill='#0c0e0a' stroke='#3c4637' stroke-width='1.5'/>\n";
+
+        float faceL = nx + n.w * 0.42f;
+        float faceR = nx + n.w * 0.92f;
+        float faceT = ny + n.h * 0.08f;
+        float faceB = ny + n.h * 0.88f;
+        float faceW = faceR - faceL;
+        float faceH = faceB - faceT;
+        float thick = faceW * 0.13f;
+        float gap = thick * 0.18f;
+
+        bool segs[8] = {};
+        for (int i = 0; i < 8 && i < (int)n.inputVals.size(); ++i)
+          segs[i] = n.inputVals[i];
+
+        auto litCol = [](bool on) -> const char *
+        {
+          return on ? "#32e650" : "#1e321c";
+        };
+
+        float digitCX = (faceL + faceR) * 0.5f;
+        float yTop = faceT, yMid = faceT + faceH * 0.5f, yBot = faceB;
+        float halfH = faceH * 0.5f;
+
+        // Horizontal segment helper (outputs SVG polygon)
+        auto svgH = [&](float cx, float cy, bool on)
+        {
+          float hw = faceW * 0.5f - thick * 0.5f - gap;
+          float hh = thick * 0.5f;
+          float cap = hh * 0.7f;
+          o << "  <polygon points='"
+            << (cx - hw + cap) << "," << (cy - hh) << " "
+            << (cx + hw - cap) << "," << (cy - hh) << " "
+            << (cx + hw) << "," << cy << " "
+            << (cx + hw - cap) << "," << (cy + hh) << " "
+            << (cx - hw + cap) << "," << (cy + hh) << " "
+            << (cx - hw) << "," << cy
+            << "' fill='" << litCol(on) << "'/>\n";
+        };
+        auto svgV = [&](float cx, float cy, float segH, bool on)
+        {
+          float hw = thick * 0.5f;
+          float hh = segH * 0.5f - thick * 0.5f - gap;
+          float cap = hw * 0.7f;
+          o << "  <polygon points='"
+            << (cx - hw) << "," << (cy - hh + cap) << " "
+            << cx << "," << (cy - hh) << " "
+            << (cx + hw) << "," << (cy - hh + cap) << " "
+            << (cx + hw) << "," << (cy + hh - cap) << " "
+            << cx << "," << (cy + hh) << " "
+            << (cx - hw) << "," << (cy + hh - cap)
+            << "' fill='" << litCol(on) << "'/>\n";
+        };
+
+        svgH(digitCX, yTop + thick * 0.5f, segs[0]);                     // a
+        svgH(digitCX, yBot - thick * 0.5f, segs[3]);                     // d
+        svgH(digitCX, yMid, segs[6]);                                    // g
+        svgV(faceL + thick * 0.5f, yTop + halfH * 0.5f, halfH, segs[5]); // f
+        svgV(faceR - thick * 0.5f, yTop + halfH * 0.5f, halfH, segs[1]); // b
+        svgV(faceL + thick * 0.5f, yBot - halfH * 0.5f, halfH, segs[4]); // e
+        svgV(faceR - thick * 0.5f, yBot - halfH * 0.5f, halfH, segs[2]); // c
+
+        // dp
+        float dpCX = faceR + thick * 1.1f;
+        float dpCY = yBot - thick * 0.5f;
+        float dpR = thick * 0.45f;
+        o << "  <circle cx='" << dpCX << "' cy='" << dpCY
+          << "' r='" << dpR << "' fill='" << litCol(segs[7]) << "'/>\n";
+      }
       else
       { // Input / Output
         std::string boxFill = n.value ? "#141c1c" : "#121218";
@@ -1025,6 +1124,8 @@ public:
         return CircuitNodeType::Input;
       if (s == "Output")
         return CircuitNodeType::Output;
+      if (s == "7SEG")
+        return CircuitNodeType::SevenSegment;
       return CircuitNodeType::AND;
     };
 
@@ -1550,6 +1651,8 @@ public:
       return "OUT";
     case CircuitNodeType::Clock:
       return "CLK";
+    case CircuitNodeType::SevenSegment:
+      return "7SEG";
     }
     return "";
   }
@@ -2944,6 +3047,10 @@ private:
         fill = n.value ? Color::fromRGB(30, 160, 80) : Color::fromRGB(50, 50, 70);
       else if (n.type == CircuitNodeType::Output)
         fill = n.value ? Color::fromRGB(30, 180, 90) : Color::fromRGB(60, 60, 80);
+      else if (n.type == CircuitNodeType::SevenSegment)
+        fill = n.value
+                   ? Color::fromRGB(50, 180, 60)
+                   : Color::fromRGB(40, 60, 40);
       else
         fill = n.selected ? Color::fromRGB(60, 120, 200) : Color::fromRGB(100, 100, 120);
 
@@ -3074,6 +3181,10 @@ private:
     case CircuitNodeType::Clock:
       w = 1100;
       h = 1160;
+      break;
+    case CircuitNodeType::SevenSegment:
+      w = 1600.f;
+      h = 2600.f;
       break;
     }
   }
@@ -3268,6 +3379,15 @@ private:
         case CircuitNodeType::Output:
           n.value = n.inputVals.size() >= 1 && n.inputVals[0];
           break;
+        case CircuitNodeType::SevenSegment:
+        {
+          // value = true if any segment is active (for minimap coloring)
+          bool any = false;
+          for (auto b : n.inputVals)
+            any = any || b;
+          n.value = any;
+          break;
+        }
         }
         if (prev != n.value)
           changed = true;
@@ -3413,6 +3533,155 @@ private:
     ctx.strokeRect(rx0, ry0, rw, rh);
   }
 
+  void drawSevenSegmentShape(Canvas2D &ctx, const CircuitNode &n) const
+  {
+    float x = n.x, y = n.y, w = n.w, h = n.h;
+    float Z = currentZoom_;
+
+    // ── Bezel background ──────────────────────────────────────────────
+    Color bezelFill = Color::fromRGB(12, 14, 10);
+    Color bezelStroke = n.selected
+                            ? selStrokeColor()
+                            : Color::fromRGBA(60, 70, 55, 255);
+    ctx.setFillColor(bezelFill);
+    ctx.setStrokeColor(bezelStroke);
+    ctx.setLineWidth((n.selected ? 2.f : 1.2f) / Z);
+    ctx.fillRoundedRect(x, y, w, h, 6.f / Z);
+    ctx.strokeRoundedRect(x, y, w, h, 6.f / Z);
+
+    // ── Segment geometry ──────────────────────────────────────────────
+    // Digit face sits in the right ~60% of the node width,
+    // leaving the left side for input port stubs.
+    float faceL = x + w * 0.42f; // left edge of digit face
+    float faceR = x + w * 0.92f; // right edge
+    float faceT = y + h * 0.08f; // top
+    float faceB = y + h * 0.88f; // bottom (dp sits below this)
+    float faceW = faceR - faceL;
+    float faceH = faceB - faceT;
+
+    // Thickness of each segment bar
+    float thick = faceW * 0.13f;
+    // Gap between segments (so they don't touch)
+    float gap = thick * 0.18f;
+
+    // Horizontal segment: a rect centered on a horizontal line
+    // Vertical segment:   a rect centered on a vertical line
+
+    // Segment lit / unlit colors
+    auto segColor = [&](bool on) -> Color
+    {
+      return on ? Color::fromRGB(50, 230, 80)
+                : Color::fromRGBA(30, 50, 28, 255);
+    };
+
+    bool a = n.inputVals.size() > 0 && n.inputVals[0];  // top horiz
+    bool b = n.inputVals.size() > 1 && n.inputVals[1];  // top-right vert
+    bool c = n.inputVals.size() > 2 && n.inputVals[2];  // bot-right vert
+    bool d = n.inputVals.size() > 3 && n.inputVals[3];  // bot horiz
+    bool e = n.inputVals.size() > 4 && n.inputVals[4];  // bot-left vert
+    bool f = n.inputVals.size() > 5 && n.inputVals[5];  // top-left vert
+    bool g = n.inputVals.size() > 6 && n.inputVals[6];  // mid horiz
+    bool dp = n.inputVals.size() > 7 && n.inputVals[7]; // decimal point
+
+    // Precomputed key Y coordinates
+    float yTop = faceT;
+    float yMid = faceT + faceH * 0.5f;
+    float yBot = faceB;
+
+    // Helper — draw a horizontal segment bar
+    auto drawH = [&](float cx, float cy, bool on)
+    {
+      float hw = faceW * 0.5f - thick * 0.5f - gap;
+      float hh = thick * 0.5f;
+      // Hexagonal end-caps via a simple inset
+      float cap = hh * 0.7f;
+      ctx.setFillColor(segColor(on));
+      ctx.beginPath();
+      ctx.moveTo(cx - hw + cap, cy - hh);
+      ctx.lineTo(cx + hw - cap, cy - hh);
+      ctx.lineTo(cx + hw, cy);
+      ctx.lineTo(cx + hw - cap, cy + hh);
+      ctx.lineTo(cx - hw + cap, cy + hh);
+      ctx.lineTo(cx - hw, cy);
+      ctx.closePath();
+      ctx.fill();
+    };
+
+    // Helper — draw a vertical segment bar
+    auto drawV = [&](float cx, float cy, float segH, bool on)
+    {
+      float hw = thick * 0.5f;
+      float hh = segH * 0.5f - thick * 0.5f - gap;
+      float cap = hw * 0.7f;
+      ctx.setFillColor(segColor(on));
+      ctx.beginPath();
+      ctx.moveTo(cx - hw, cy - hh + cap);
+      ctx.lineTo(cx, cy - hh);
+      ctx.lineTo(cx + hw, cy - hh + cap);
+      ctx.lineTo(cx + hw, cy + hh - cap);
+      ctx.lineTo(cx, cy + hh);
+      ctx.lineTo(cx - hw, cy + hh - cap);
+      ctx.closePath();
+      ctx.fill();
+    };
+
+    float digitCX = (faceL + faceR) * 0.5f;
+    float halfH = faceH * 0.5f;
+
+    // ── Draw the 7 segments ───────────────────────────────────────────
+    // a — top horizontal
+    drawH(digitCX, yTop + thick * 0.5f, a);
+    // d — bottom horizontal
+    drawH(digitCX, yBot - thick * 0.5f, d);
+    // g — middle horizontal
+    drawH(digitCX, yMid, g);
+
+    // f — top-left vertical
+    drawV(faceL + thick * 0.5f, yTop + halfH * 0.5f, halfH, f);
+    // b — top-right vertical
+    drawV(faceR - thick * 0.5f, yTop + halfH * 0.5f, halfH, b);
+    // e — bottom-left vertical
+    drawV(faceL + thick * 0.5f, yBot - halfH * 0.5f, halfH, e);
+    // c — bottom-right vertical
+    drawV(faceR - thick * 0.5f, yBot - halfH * 0.5f, halfH, c);
+
+    // ── Decimal point ─────────────────────────────────────────────────
+    float dpCX = faceR + thick * 1.1f;
+    float dpCY = yBot - thick * 0.5f;
+    float dpR = thick * 0.45f;
+    ctx.setFillColor(segColor(dp));
+    ctx.fillCircle(dpCX, dpCY, dpR);
+
+    // ── Segment labels (a–g, dp) on input stubs ───────────────────────
+    static const char *segLabels[] = {"a", "b", "c", "d", "e", "f", "g", "dp"};
+    float fs = 9.f / Z;
+    char font[32];
+    snprintf(font, sizeof(font), "%.0fpx sans", fs);
+    ctx.setFont(font);
+    ctx.setTextBaseline(TextBaseline::Middle);
+
+    for (int i = 0; i < 8; ++i)
+    {
+      Pt p = inputPortPos(n, i);
+      // Stub line
+      ctx.setStrokeColor(gateStrokeColor());
+      ctx.setLineWidth(1.f / Z);
+      ctx.beginPath();
+      ctx.moveTo(p.x - 6.f / Z, p.y);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+      // Port dot
+      bool lit = (int)n.inputVals.size() > i && n.inputVals[i];
+      ctx.setFillColor(lit ? Color::fromRGB(50, 230, 80) : portInColor());
+      ctx.fillCircle(p.x, p.y, 4.f / Z);
+      // Label to the right of the stub
+      ctx.setFillColor(lit
+                           ? Color::fromRGBA(50, 230, 80, 200)
+                           : Color::fromRGBA(120, 140, 120, 180));
+      ctx.fillText(segLabels[i], p.x + 8.f / Z, p.y);
+    }
+  }
+
   void drawNodeTextEdit(Canvas2D &ctx, const CircuitNode &n) const
   {
     float fs = 14.f / currentZoom_;
@@ -3509,6 +3778,9 @@ private:
     case CircuitNodeType::Clock:
       drawClockShape(ctx, n);
       break;
+    case CircuitNodeType::SevenSegment:
+      drawSevenSegmentShape(ctx, n);
+      return;
     }
 
     // Gate label (below body)
@@ -4284,6 +4556,8 @@ public:
         {"OUT", CircuitNodeType::Output},
         {"", CircuitNodeType::AND, true}, // divider
         {"CLK", CircuitNodeType::Clock},
+        {"", CircuitNodeType::AND, true}, // divider
+        {"7SEG", CircuitNodeType::SevenSegment},
     };
 
     auto sideCol = Column({});
