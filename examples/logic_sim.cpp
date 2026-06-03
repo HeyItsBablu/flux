@@ -37,7 +37,8 @@ enum class CircuitNodeType
   XOR,
   XNOR,
   Input,
-  Output
+  Output,
+  Clock
 };
 
 // ============================================================================
@@ -55,7 +56,10 @@ struct CircuitNode
   bool selected = false;
   bool value = false; // current logic level
 
-  int inputCount_ = 2; // user-configurable, default 2
+  int inputCount_ = 2;       // user-configurable, default 2
+  float clockHz_ = 1.f;      // toggle frequency in Hz
+  double clockAccum_ = 0.0;  // accumulated time since last toggle
+  bool clockRunning_ = true; // can be paused per-node
 
   // per-input driven values (size == inputCount())
   std::vector<bool> inputVals;
@@ -75,6 +79,8 @@ struct CircuitNode
       return 0;
     case CircuitNodeType::Output:
       return 1;
+    case CircuitNodeType::Clock:
+      return 0;
     // Multi-input capable gates:
     case CircuitNodeType::AND:
     case CircuitNodeType::OR:
@@ -281,6 +287,8 @@ public:
         << "\"value\": " << (n.value ? "true" : "false") << ", "
         << "\"label\": \"" << n.label << "\""
         << "\"inputs\": " << n.inputCount_
+        << ", \"clockHz\": " << n.clockHz_
+        << ", \"clockRunning\": " << (n.clockRunning_ ? "true" : "false")
         << "}";
       if (i + 1 < (int)nodes_.size())
         o << ",";
@@ -329,7 +337,8 @@ public:
     std::vector<const CircuitNode *> inputs, outputs, gates;
     for (auto &n : nodes_)
     {
-      if (n.type == CircuitNodeType::Input)
+      if (n.type == CircuitNodeType::Input ||
+          n.type == CircuitNodeType::Clock)
         inputs.push_back(&n);
       else if (n.type == CircuitNodeType::Output)
         outputs.push_back(&n);
@@ -366,8 +375,12 @@ public:
     o << "module circuit(\n";
 
     for (int i = 0; i < (int)inputs.size(); ++i)
-      o << "    input  wire " << nodeName(inputs[i])
+    {
+      bool isClock = (inputs[i]->type == CircuitNodeType::Clock);
+      o << "    input  wire " << (isClock ? "/* clock */ " : "")
+        << nodeName(inputs[i])
         << (i + 1 < (int)inputs.size() || !outputs.empty() ? "," : "") << "\n";
+    }
     for (int i = 0; i < (int)outputs.size(); ++i)
       o << "    output wire " << nodeName(outputs[i])
         << (i + 1 < (int)outputs.size() ? "," : "") << "\n";
@@ -506,7 +519,8 @@ public:
     std::vector<const CircuitNode *> inputs, outputs, gates;
     for (auto &n : nodes_)
     {
-      if (n.type == CircuitNodeType::Input)
+      if (n.type == CircuitNodeType::Input ||
+          n.type == CircuitNodeType::Clock)
         inputs.push_back(&n);
       else if (n.type == CircuitNodeType::Output)
         outputs.push_back(&n);
@@ -545,8 +559,13 @@ public:
 
     o << "entity circuit is\n  port(\n";
     for (int i = 0; i < (int)inputs.size(); ++i)
-      o << "    " << nodeName(inputs[i]) << " : in  std_logic"
+    {
+      bool isClock = (inputs[i]->type == CircuitNodeType::Clock);
+      o << "    " << nodeName(inputs[i])
+        << " : in  " << (isClock ? "std_logic" : "std_logic")
+        << (isClock ? ";  -- clock" : "")
         << (i + 1 < (int)inputs.size() || !outputs.empty() ? ";" : "") << "\n";
+    }
     for (int i = 0; i < (int)outputs.size(); ++i)
       o << "    " << nodeName(outputs[i]) << " : out std_logic"
         << (i + 1 < (int)outputs.size() ? ";" : "") << "\n";
@@ -1048,6 +1067,11 @@ public:
         if (auto *v = jn.get("inputs"))
           n.inputCount_ = std::max(1, v->getInt(2));
 
+        if (auto *v = jn.get("clockHz"))
+          n.clockHz_ = std::max(0.1f, (float)v->getNumber());
+        if (auto *v = jn.get("clockRunning"))
+          n.clockRunning_ = v->getBool();
+
         nodeDims(n.type, n.w, n.h, n.inputCount_);
         n.x = snapX(n.x, n.w); //  snap legacy positions
         n.y = snapY(n.y, n.h); //  snap legacy positions
@@ -1524,6 +1548,8 @@ public:
       return "IN";
     case CircuitNodeType::Output:
       return "OUT";
+    case CircuitNodeType::Clock:
+      return "CLK";
     }
     return "";
   }
@@ -1548,16 +1574,50 @@ public:
   }
   void update(double dt) override
   {
-    if (!textEditing_)
-      return;
-    textEdit_.blinkTimer += dt;
-    if (textEdit_.blinkTimer >= 0.53)
+    // Blink cursor
+    if (textEditing_)
     {
-      textEdit_.blinkTimer = 0.0;
-      textEdit_.cursorVisible = !textEdit_.cursorVisible;
+      textEdit_.blinkTimer += dt;
+      if (textEdit_.blinkTimer >= 0.53)
+      {
+        textEdit_.blinkTimer = 0.0;
+        textEdit_.cursorVisible = !textEdit_.cursorVisible;
+      }
+    }
+
+    // Tick all clock nodes
+    bool anyToggled = false;
+    for (auto &n : nodes_)
+    {
+      if (n.type != CircuitNodeType::Clock)
+        continue;
+      if (!n.clockRunning_)
+        continue;
+
+      n.clockAccum_ += dt;
+      double period = 1.0 / double(n.clockHz_);
+      while (n.clockAccum_ >= period)
+      {
+        n.clockAccum_ -= period;
+        n.value = !n.value;
+        anyToggled = true;
+      }
+    }
+    if (anyToggled)
+    {
+      evaluate();
+      notify();
     }
   }
-  bool needsContinuousRedraw() const override { return textEditing_; }
+  bool needsContinuousRedraw() const override
+  {
+    if (textEditing_)
+      return true;
+    for (auto &n : nodes_)
+      if (n.type == CircuitNodeType::Clock && n.clockRunning_)
+        return true;
+    return false;
+  }
 
   // ── Mouse ─────────────────────────────────────────────────────────────
   void onMouseDown(float x, float y) override
@@ -1870,6 +1930,50 @@ public:
                            target->type == CircuitNodeType::NOR ||
                            target->type == CircuitNodeType::XOR ||
                            target->type == CircuitNodeType::XNOR);
+
+      if (target->type == CircuitNodeType::Clock)
+      {
+        items.push_back({"", {}, true});
+        // Play/pause toggle
+        items.push_back({target->clockRunning_ ? "Pause clock" : "Resume clock",
+                         [this, target]
+                         {
+                           pushUndo();
+                           target->clockRunning_ = !target->clockRunning_;
+                           notify();
+                         }});
+        // Preset frequencies
+        const float presets[] = {0.5f, 1.f, 2.f, 5.f, 10.f, 20.f, 50.f, 100.f};
+        for (float hz : presets)
+        {
+          char buf[32];
+          if (hz < 1.f)
+            snprintf(buf, sizeof(buf), "Set %.1f Hz", hz);
+          else
+            snprintf(buf, sizeof(buf), "Set %.0f Hz", hz);
+          items.push_back({buf, [this, target, hz]
+                           {
+                             pushUndo();
+                             target->clockHz_ = hz;
+                             target->clockAccum_ = 0.0;
+                             notify();
+                           }});
+        }
+        // Faster / slower
+        items.push_back({"", {}, true});
+        items.push_back({"Speed x2", [this, target]
+                         {
+                           pushUndo();
+                           target->clockHz_ = std::min(target->clockHz_ * 2.f, 1000.f);
+                           notify();
+                         }});
+        items.push_back({"Speed /2", [this, target]
+                         {
+                           pushUndo();
+                           target->clockHz_ = std::max(target->clockHz_ * 0.5f, 0.1f);
+                           notify();
+                         }});
+      }
       if (isMultiInput)
       {
         items.push_back({"", {}, true});
@@ -2513,6 +2617,10 @@ private:
       w = 1100;
       h = 1160;
       break;
+    case CircuitNodeType::Clock:
+      w = 1100;
+      h = 1160;
+      break;
     }
   }
 
@@ -2942,6 +3050,9 @@ private:
     case CircuitNodeType::Output:
       drawOutputShape(ctx, n);
       break;
+    case CircuitNodeType::Clock:
+      drawClockShape(ctx, n);
+      break;
     }
 
     // Gate label (below body)
@@ -2954,7 +3065,8 @@ private:
 
       // skip for Input/Output (they have their own "IN"/"OUT" rendering)
       bool hasBuiltinLabel = (n.type == CircuitNodeType::Input ||
-                              n.type == CircuitNodeType::Output);
+                              n.type == CircuitNodeType::Output ||
+                              n.type == CircuitNodeType::Clock);
       if (!displayLabel.empty() && !hasBuiltinLabel)
       {
         char font[32];
@@ -3148,6 +3260,70 @@ private:
     ctx.arc(x + bodyW + bubR, y + h * 0.5f, bubR, 0.f, float(M_PI * 2));
     ctx.fill();
     ctx.stroke();
+  }
+  void drawClockShape(Canvas2D &ctx, const CircuitNode &n) const
+  {
+    float x = n.x, y = n.y, w = n.w, h = n.h;
+    float r = 4.f / currentZoom_;
+
+    // Box — purple tint when running, dimmed when paused
+    Color boxFill = n.clockRunning_
+                        ? Color::fromRGBA(20, 15, 35, 255)
+                        : Color::fromRGBA(18, 18, 24, 255);
+    Color boxStroke = n.selected ? selStrokeColor()
+                      : n.clockRunning_
+                          ? (n.value ? Color::fromRGB(160, 80, 255) : Color::fromRGB(90, 50, 160))
+                          : Color::fromRGBA(60, 60, 75, 255);
+
+    ctx.setFillColor(boxFill);
+    ctx.setStrokeColor(boxStroke);
+    ctx.setLineWidth((n.selected ? 2.f : 1.5f) / currentZoom_);
+    ctx.fillRoundedRect(x, y, w, h, r);
+    ctx.strokeRoundedRect(x, y, w, h, r);
+
+    // Draw a tiny square-wave symbol inside the box
+    float margin = w * 0.18f;
+    float waveX = x + margin;
+    float waveW = w - margin * 2.f;
+    float midY = y + h * 0.5f;
+    float amp = h * 0.22f;
+    float seg = waveW / 4.f;
+
+    Color waveCol = n.clockRunning_
+                        ? (n.value ? Color::fromRGB(180, 100, 255) : Color::fromRGB(100, 60, 180))
+                        : Color::fromRGBA(70, 70, 85, 255);
+
+    ctx.setStrokeColor(waveCol);
+    ctx.setLineWidth(2.f / currentZoom_);
+    ctx.beginPath();
+    ctx.moveTo(waveX, midY + amp);             // low
+    ctx.lineTo(waveX + seg, midY + amp);       // low flat
+    ctx.lineTo(waveX + seg, midY - amp);       // rising edge
+    ctx.lineTo(waveX + seg * 2.f, midY - amp); // high flat
+    ctx.lineTo(waveX + seg * 2.f, midY + amp); // falling edge
+    ctx.lineTo(waveX + seg * 3.f, midY + amp); // low flat
+    ctx.lineTo(waveX + seg * 3.f, midY - amp); // rising edge
+    ctx.lineTo(waveX + seg * 4.f, midY - amp); // high flat
+    ctx.stroke();
+
+    // Hz label below the box
+    float fs = 10.f / currentZoom_;
+    char font[32];
+    snprintf(font, sizeof(font), "bold %.0fpx sans", fs);
+    ctx.setFont(font);
+    ctx.setTextBaseline(TextBaseline::Top);
+
+    char hzBuf[32];
+    if (n.clockHz_ >= 1.f)
+      snprintf(hzBuf, sizeof(hzBuf), "%.0f Hz", n.clockHz_);
+    else
+      snprintf(hzBuf, sizeof(hzBuf), "%.2f Hz", n.clockHz_);
+
+    ctx.setFillColor(n.clockRunning_
+                         ? Color::fromRGBA(160, 100, 255, 200)
+                         : Color::fromRGBA(80, 80, 95, 200));
+    float tw = ctx.measureText(hzBuf);
+    ctx.fillText(hzBuf, x + w * 0.5f - tw * 0.5f, y + h + 2.f / currentZoom_);
   }
 
   void drawInputShape(Canvas2D &ctx, const CircuitNode &n) const
@@ -3650,6 +3826,8 @@ public:
         {"", CircuitNodeType::AND, true}, // divider
         {"IN", CircuitNodeType::Input},
         {"OUT", CircuitNodeType::Output},
+        {"", CircuitNodeType::AND, true}, // divider
+        {"CLK", CircuitNodeType::Clock},
     };
 
     auto sideCol = Column({});
