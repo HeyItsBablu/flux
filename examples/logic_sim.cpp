@@ -55,6 +55,8 @@ struct CircuitNode
   bool selected = false;
   bool value = false; // current logic level
 
+  int inputCount_ = 2; // user-configurable, default 2
+
   // per-input driven values (size == inputCount())
   std::vector<bool> inputVals;
 
@@ -67,26 +69,22 @@ struct CircuitNode
   {
     switch (type)
     {
-    case CircuitNodeType::AND:
-      return 2;
-    case CircuitNodeType::OR:
-      return 2;
     case CircuitNodeType::NOT:
       return 1;
-    case CircuitNodeType::NAND:
-      return 2;
-    case CircuitNodeType::NOR:
-      return 2;
-    case CircuitNodeType::XOR:
-      return 2;
-    case CircuitNodeType::XNOR:
-      return 2;
     case CircuitNodeType::Input:
       return 0;
     case CircuitNodeType::Output:
       return 1;
+    // Multi-input capable gates:
+    case CircuitNodeType::AND:
+    case CircuitNodeType::OR:
+    case CircuitNodeType::NAND:
+    case CircuitNodeType::NOR:
+    case CircuitNodeType::XOR:
+    case CircuitNodeType::XNOR:
+      return inputCount_;
     }
-    return 0;
+    return 2;
   }
   int outputCount() const
   {
@@ -270,6 +268,7 @@ public:
         << "\"y\": " << n.y << ", "
         << "\"value\": " << (n.value ? "true" : "false") << ", "
         << "\"label\": \"" << n.label << "\""
+        << "\"inputs\": " << n.inputCount_
         << "}";
       if (i + 1 < (int)nodes_.size())
         o << ",";
@@ -356,31 +355,44 @@ public:
     // gate assignments
     for (auto *g : gates)
     {
-      std::string a = driverOf(g->id, 0);
-      std::string b = driverOf(g->id, 1);
       std::string out = nodeName(g);
+      int nc = g->inputCount();
+
+      // Collect all drivers
+      std::vector<std::string> drivers;
+      for (int i = 0; i < nc; ++i)
+        drivers.push_back(driverOf(g->id, i));
+
+      auto joinWith = [&](const std::string &op)
+      {
+        std::string r = drivers[0];
+        for (int i = 1; i < (int)drivers.size(); ++i)
+          r += " " + op + " " + drivers[i];
+        return r;
+      };
+
       switch (g->type)
       {
       case CircuitNodeType::AND:
-        o << "assign " << out << " = " << a << " & " << b << ";\n";
+        o << "assign " << out << " = " << joinWith("&") << ";\n";
         break;
       case CircuitNodeType::OR:
-        o << "assign " << out << " = " << a << " | " << b << ";\n";
+        o << "assign " << out << " = " << joinWith("|") << ";\n";
         break;
       case CircuitNodeType::NOT:
-        o << "assign " << out << " = ~" << a << ";\n";
+        o << "assign " << out << " = ~" << drivers[0] << ";\n";
         break;
       case CircuitNodeType::NAND:
-        o << "assign " << out << " = ~(" << a << " & " << b << ");\n";
+        o << "assign " << out << " = ~(" << joinWith("&") << ");\n";
         break;
       case CircuitNodeType::NOR:
-        o << "assign " << out << " = ~(" << a << " | " << b << ");\n";
+        o << "assign " << out << " = ~(" << joinWith("|") << ");\n";
         break;
       case CircuitNodeType::XOR:
-        o << "assign " << out << " = " << a << " ^ " << b << ";\n";
+        o << "assign " << out << " = " << joinWith("^") << ";\n";
         break;
       case CircuitNodeType::XNOR:
-        o << "assign " << out << " = ~(" << a << " ^ " << b << ");\n";
+        o << "assign " << out << " = ~(" << joinWith("^") << ");\n";
         break;
       default:
         break;
@@ -857,8 +869,10 @@ public:
           n.value = v->getBool();
         if (auto *v = jn.get("label"))
           n.label = v->getString();
+        if (auto *v = jn.get("inputs"))
+          n.inputCount_ = std::max(1, v->getInt(2));
 
-        nodeDims(n.type, n.w, n.h);
+        nodeDims(n.type, n.w, n.h, n.inputCount_);
         n.x = snapX(n.x, n.w); //  snap legacy positions
         n.y = snapY(n.y, n.h); //  snap legacy positions
         n.inputVals.assign(n.inputCount(), false);
@@ -1029,6 +1043,7 @@ public:
       e.y = (n->y + n->h * 0.5f) - cy;
       e.value = n->value;
       e.label = n->label;
+      e.inputCount_ = n->inputCount_;
       e.clipId = idMap[n->id];
       clipboard_.push_back(e);
     }
@@ -1071,7 +1086,7 @@ public:
       n.id = nextId_++;
       n.type = e.type;
       float nw, nh;
-      nodeDims(e.type, nw, nh);
+      nodeDims(e.type, nw, nh, e.inputCount_);
       n.w = nw;
       n.h = nh;
 
@@ -1079,6 +1094,7 @@ public:
       n.y = snapY(oy + e.y - nh * 0.5f, nh); //  snap
       n.value = e.value;
       n.label = e.label;
+      n.inputCount_ = e.inputCount_;
       n.inputVals.assign(n.inputCount(), false);
       n.selected = true; // paste selects the new nodes
       clipToReal[e.clipId] = n.id;
@@ -1173,7 +1189,7 @@ public:
     n.type = type;
     n.x = wx;
     n.y = wy;
-    nodeDims(type, n.w, n.h);
+    nodeDims(type, n.w, n.h, n.inputCount_);
     n.x = snapX(wx, n.w);
     n.y = snapY(wy, n.h);
     n.inputVals.assign(n.inputCount(), false);
@@ -1598,6 +1614,49 @@ public:
                          { pushUndo(); target->value = !target->value; evaluate(); notify(); }});
       items.push_back({"Duplicate", [this, target]
                        { deselectAll(); target->selected = true; duplicateSelected(); }});
+      // Only show for multi-input capable gates
+      bool isMultiInput = (target->type == CircuitNodeType::AND ||
+                           target->type == CircuitNodeType::OR ||
+                           target->type == CircuitNodeType::NAND ||
+                           target->type == CircuitNodeType::NOR ||
+                           target->type == CircuitNodeType::XOR ||
+                           target->type == CircuitNodeType::XNOR);
+      if (isMultiInput)
+      {
+        items.push_back({"", {}, true}); // separator
+        items.push_back({"Add input (+)", [this, target]
+                         {
+                           pushUndo();
+                           target->inputCount_ = std::min(target->inputCount_ + 1, 8);
+                           target->inputVals.assign(target->inputCount(), false);
+                           nodeDims(target->type, target->w, target->h, target->inputCount_);
+                           // Remove wires to ports that no longer exist (none removed on add)
+                           evaluate();
+                           notify();
+                         }});
+        items.push_back({"Remove input (-)", [this, target]
+                         {
+                           if (target->inputCount_ <= 2)
+                             return;
+                           pushUndo();
+                           int oldCount = target->inputCount_;
+                           target->inputCount_ = oldCount - 1;
+                           target->inputVals.assign(target->inputCount(), false);
+                           nodeDims(target->type, target->w, target->h, target->inputCount_);
+                           // Remove any wire connected to the removed port
+                           int removedPort = oldCount - 1;
+                           wires_.erase(
+                               std::remove_if(wires_.begin(), wires_.end(),
+                                              [&](const CircuitWire &w)
+                                              {
+                                                return w.toNodeId == target->id &&
+                                                       w.toPortIndex == removedPort;
+                                              }),
+                               wires_.end());
+                           evaluate();
+                           notify();
+                         }});
+      }
       items.push_back({"", {}, true});
       items.push_back({"Delete", [this, target]
                        {
@@ -2084,21 +2143,22 @@ private:
   }
 
   // ── Node dimensions ───────────────────────────────────────────────────
-  static void nodeDims(CircuitNodeType type, float &w, float &h)
+  static void nodeDims(CircuitNodeType type, float &w, float &h,
+                       int inputCount = 2)
   {
     switch (type)
     {
     case CircuitNodeType::AND:
     case CircuitNodeType::NAND:
       w = 1120;
-      h = 1180;
+      h = float(std::max(2, inputCount)) * 590.f;
       break;
     case CircuitNodeType::OR:
     case CircuitNodeType::NOR:
     case CircuitNodeType::XOR:
     case CircuitNodeType::XNOR:
       w = 1220;
-      h = 1180;
+      h = float(std::max(2, inputCount)) * 590.f;
       break;
     case CircuitNodeType::NOT:
       w = 1196;
@@ -2228,26 +2288,54 @@ private:
         switch (n.type)
         {
         case CircuitNodeType::AND:
-          n.value = n.inputVals.size() >= 2 && n.inputVals[0] && n.inputVals[1];
+        {
+          bool v = !n.inputVals.empty();
+          for (auto b : n.inputVals)
+            v = v && b;
+          n.value = v;
           break;
+        }
         case CircuitNodeType::OR:
-          n.value = n.inputVals.size() >= 2 && (n.inputVals[0] || n.inputVals[1]);
+        {
+          bool v = false;
+          for (auto b : n.inputVals)
+            v = v || b;
+          n.value = v;
           break;
-        case CircuitNodeType::NOT:
-          n.value = n.inputVals.size() >= 1 && !n.inputVals[0];
-          break;
+        }
         case CircuitNodeType::NAND:
-          n.value = !(n.inputVals.size() >= 2 && n.inputVals[0] && n.inputVals[1]);
+        {
+          bool v = !n.inputVals.empty();
+          for (auto b : n.inputVals)
+            v = v && b;
+          n.value = !v;
           break;
+        }
         case CircuitNodeType::NOR:
-          n.value = !(n.inputVals.size() >= 2 && (n.inputVals[0] || n.inputVals[1]));
+        {
+          bool v = false;
+          for (auto b : n.inputVals)
+            v = v || b;
+          n.value = !v;
           break;
+        }
         case CircuitNodeType::XOR:
-          n.value = n.inputVals.size() >= 2 && (n.inputVals[0] != n.inputVals[1]);
+        {
+          // XOR with N inputs = odd parity
+          int ones = 0;
+          for (auto b : n.inputVals)
+            ones += b ? 1 : 0;
+          n.value = (ones % 2) != 0;
           break;
+        }
         case CircuitNodeType::XNOR:
-          n.value = n.inputVals.size() >= 2 && (n.inputVals[0] == n.inputVals[1]);
+        {
+          int ones = 0;
+          for (auto b : n.inputVals)
+            ones += b ? 1 : 0;
+          n.value = (ones % 2) == 0;
           break;
+        }
         case CircuitNodeType::Input:
           break;
         case CircuitNodeType::Output:
@@ -2881,8 +2969,8 @@ private:
     float x, y; // relative to clipboard centroid
     bool value;
     std::string label;
-    int clipId; // stable ID used only inside the clipboard
-                // to match wire endpoints
+    int clipId; // stable ID used only inside the clipboard to match wire endpoints
+    int inputCount_ = 2;
   };
   struct ClipboardWire
   {
