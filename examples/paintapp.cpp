@@ -254,10 +254,10 @@ public:
     if (current_)
       renderBrushStroke(ctx, *current_);
   }
-  void onKeyDown(int key) override
+  void onKeyDown(const KeyEvent &e) override
   {
     if (onKeyDownCallback)
-      onKeyDownCallback(key);
+      onKeyDownCallback(e.virtualKey);
   }
 
   // public helpers for resize
