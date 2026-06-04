@@ -1,4 +1,4 @@
-![CI](https://github.com/Rosanchaudhary/flux/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/HeyItsBablu/flux/actions/workflows/ci.yml/badge.svg)
 
 # FluxUI
 
@@ -38,7 +38,7 @@ See the [CLI section](#cli) below for the full command reference.
 ```cmake
 include(FetchContent)
 FetchContent_Declare(flux
-    GIT_REPOSITORY https://github.com/Rosanchaudhary/flux.git
+    GIT_REPOSITORY https://github.com/HeyItsBablu/flux.git
     GIT_TAG        v0.1.0
 )
 FetchContent_MakeAvailable(flux)
