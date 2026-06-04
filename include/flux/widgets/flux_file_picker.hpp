@@ -13,7 +13,8 @@
 // FILE FILTER
 // ============================================================================
 
-struct FileFilter {
+struct FileFilter
+{
   std::string label;
   std::vector<std::string> extensions;
   bool showExtsInLabel = true;
@@ -26,7 +27,8 @@ struct FileFilter {
 // FILE PICKER MODE
 // ============================================================================
 
-enum class FilePickerMode {
+enum class FilePickerMode
+{
   Open,
   OpenMultiple,
   Save,
@@ -45,7 +47,8 @@ static constexpr Sint32 kFluxFilePickerEvent = 0xF11E;
 
 // Payload heap-allocated by the background dialog thread.
 // fluxFilePickerDispatchSDLEvent deletes it after the callback fires.
-struct FilePickerPayload {
+struct FilePickerPayload
+{
   std::function<void(std::vector<std::string>)> callback;
   std::vector<std::string> paths;
 };
@@ -82,32 +85,34 @@ void linuxPickFolderAsync(const std::string &title, const std::string &initialDi
 // ============================================================================
 
 #ifdef _WIN32
-namespace FluxFilePickerWin32 {
+namespace FluxFilePickerWin32
+{
 
-struct PickResult {
-  std::vector<std::string> paths;
-  bool cancelled() const { return paths.empty(); }
-};
+  struct PickResult
+  {
+    std::vector<std::string> paths;
+    bool cancelled() const { return paths.empty(); }
+  };
 
-PickResult openFile(void *owner, const std::string &title,
-                    const std::string &initialDir,
-                    const std::string &defaultExt,
-                    const std::vector<FileFilter> &filters);
+  PickResult openFile(void *owner, const std::string &title,
+                      const std::string &initialDir,
+                      const std::string &defaultExt,
+                      const std::vector<FileFilter> &filters);
 
-PickResult openFiles(void *owner, const std::string &title,
-                     const std::string &initialDir,
-                     const std::string &defaultExt,
-                     const std::vector<FileFilter> &filters);
+  PickResult openFiles(void *owner, const std::string &title,
+                       const std::string &initialDir,
+                       const std::string &defaultExt,
+                       const std::vector<FileFilter> &filters);
 
-PickResult saveFile(void *owner, const std::string &title,
-                    const std::string &initialDir,
-                    const std::string &defaultFilename,
-                    const std::string &defaultExt,
-                    const std::vector<FileFilter> &filters);
+  PickResult saveFile(void *owner, const std::string &title,
+                      const std::string &initialDir,
+                      const std::string &defaultFilename,
+                      const std::string &defaultExt,
+                      const std::vector<FileFilter> &filters);
 
-PickResult pickFolder(void *owner, const std::string &title);
+  PickResult pickFolder(void *owner, const std::string &title);
 
-void *getOwnerHwnd();
+  void *getOwnerHwnd();
 
 } // namespace FluxFilePickerWin32
 #endif // _WIN32
@@ -119,35 +124,35 @@ void *getOwnerHwnd();
 #ifdef __ANDROID__
 #include <jni.h>
 
-namespace FluxFilePickerAndroid {
+namespace FluxFilePickerAndroid
+{
 
-// Must be set once at startup (e.g. in android_main or JNI_OnLoad).
-extern JNIEnv        *g_env;
-extern ANativeActivity *g_activity;
+  // Must be set once at startup (e.g. in android_main or JNI_OnLoad).
+  extern JNIEnv *g_env;
+  extern ANativeActivity *g_activity;
 
-void init(JNIEnv *env, ANativeActivity *activity);
+  void init(JNIEnv *env, ANativeActivity *activity);
 
-void pickFileAsync(const std::string &title,
-                   const std::vector<FileFilter> &filters,
-                   std::function<void(std::string)> callback);
-
-void pickFilesAsync(const std::string &title,
-                    const std::vector<FileFilter> &filters,
-                    std::function<void(std::vector<std::string>)> callback);
-
-void saveFileAsync(const std::string &title,
-                   const std::string &defaultFilename,
-                   const std::vector<FileFilter> &filters,
-                   std::function<void(std::string)> callback);
-
-void pickFolderAsync(const std::string &title,
+  void pickFileAsync(const std::string &title,
+                     const std::vector<FileFilter> &filters,
                      std::function<void(std::string)> callback);
 
-// Called by the JNI bridge (Java_com_flux_FluxBridge_nativeOnFilePickerResult)
-// to deliver results back to the C++ callback registry.
-void dispatchResult(int requestCode, std::vector<std::string> paths);
-void drainPendingCallbacks();
+  void pickFilesAsync(const std::string &title,
+                      const std::vector<FileFilter> &filters,
+                      std::function<void(std::vector<std::string>)> callback);
 
+  void saveFileAsync(const std::string &title,
+                     const std::string &defaultFilename,
+                     const std::vector<FileFilter> &filters,
+                     std::function<void(std::string)> callback);
+
+  void pickFolderAsync(const std::string &title,
+                       std::function<void(std::string)> callback);
+
+  // Called by the JNI bridge (Java_com_flux_FluxBridge_nativeOnFilePickerResult)
+  // to deliver results back to the C++ callback registry.
+  void dispatchResult(int requestCode, std::vector<std::string> paths);
+  void drainPendingCallbacks();
 
 } // namespace FluxFilePickerAndroid
 #endif // __ANDROID__
@@ -156,8 +161,20 @@ void drainPendingCallbacks();
 // FILE PICKER WIDGET
 // ============================================================================
 //
-// A button-like widget that opens the native OS file dialog when clicked.
+// A widget that opens the native OS file dialog when its trigger is clicked.
 // Selected paths flow into bound State<> variables and fire callbacks.
+//
+// The trigger area is determined by the label mode:
+//
+//   Label mode  — string passed to FilePicker("...") or FilePicker()
+//   ─────────────────────────────────────────────────────────────────
+//   The label is drawn as plain unstyled text (no button border, no
+//   background).  If you want custom typography, pass a TextWidget instead.
+//
+//   Widget mode — arbitrary WidgetPtr passed to FilePicker(widget)
+//   ─────────────────────────────────────────────────────────────────
+//   The supplied widget is laid out and painted as-is; clicks anywhere
+//   inside its bounds open the dialog.  The widget owns its own styling.
 //
 // Cross-platform:
 //   Windows  — GetOpenFileNameW / GetSaveFileNameW / SHBrowseForFolderW
@@ -165,76 +182,85 @@ void drainPendingCallbacks();
 //   Android  — ACTION_OPEN_DOCUMENT / CREATE_DOCUMENT / OPEN_DOCUMENT_TREE
 //              via startActivityForResult, bridged through FluxBridge.java
 //
-// ── Single file open ──────────────────────────────────────────────────────
+// ── String label (plain text trigger) ─────────────────────────────────────
 //
-//   State<std::string> filePath("", context);
-//
-//   FilePicker()
+//   FilePicker("Browse")
 //       ->setMode(FilePickerMode::Open)
-//       ->addFilter("Images", {"*.png","*.jpg","*.jpeg","*.bmp"})
-//       ->addFilter("All files", {"*.*"})
-//       ->setDefaultExtension("png")
-//       ->bindPath(filePath)
-//       ->setOnChanged([](const std::string &path) {
-//           std::cout << "Picked: " << path << "\n";
-//       });
+//       ->addFilter("Images", {"*.png","*.jpg"})
+//       ->setOnChanged([](const std::string &p) { ... });
 //
-// ── Save dialog ───────────────────────────────────────────────────────────
+// ── Widget trigger ─────────────────────────────────────────────────────────
 //
-//   FilePicker()
+//   FilePicker(
+//       Container(Text("Export SVG")->setTextColor(...))
+//           ->setBackgroundColor(...)
+//           ->setPadding(8)
+//           ->setBorderRadius(4)
+//   )
+//   ->setMode(FilePickerMode::Save)
+//   ->setDefaultFilename("circuit.svg")
+//   ->setDefaultExtension("svg")
+//   ->addFilter("SVG Vector", {"*.svg"})
+//   ->setOnChanged([](const std::string &p) { ... });
+//
+// ── Save dialog ────────────────────────────────────────────────────────────
+//
+//   FilePicker("Save As")
 //       ->setMode(FilePickerMode::Save)
 //       ->setTitle("Export Image")
 //       ->setDefaultFilename("output.png")
 //       ->addFilter("PNG",  {"*.png"})
-//       ->addFilter("JPEG", {"*.jpg","*.jpeg"})
 //       ->setDefaultExtension("png")
 //       ->bindPath(exportPath)
 //       ->setOnChanged([&](const std::string &p) { surface->exportImage(p); });
 //
-// ── Multiple files ────────────────────────────────────────────────────────
+// ── Multiple files ─────────────────────────────────────────────────────────
 //
 //   State<std::vector<std::string>> paths({}, context);
 //
-//   FilePicker()
+//   FilePicker("Open Files")
 //       ->setMode(FilePickerMode::OpenMultiple)
 //       ->addFilter("Images", {"*.png","*.jpg"})
 //       ->bindPaths(paths)
 //       ->setOnMultiChanged([](const std::vector<std::string> &ps) { ... });
 //
-// ── Folder picker ─────────────────────────────────────────────────────────
+// ── Folder picker ──────────────────────────────────────────────────────────
 //
-//   FilePicker()
+//   FilePicker("Choose Folder")
 //       ->setMode(FilePickerMode::Folder)
 //       ->setTitle("Select output folder")
 //       ->bindPath(folderPath);
 //
 // ============================================================================
 
-class FilePickerWidget : public Widget {
+class FilePickerWidget : public Widget
+{
 public:
-  // ── Appearance ────────────────────────────────────────────────────────────
-  Color btnBgColor      = Color::fromRGB(245, 247, 250);
-  Color btnHoverColor   = Color::fromRGB(224, 235, 248);
-  Color btnBorderColor  = Color::fromRGB(200, 204, 210);
-  Color btnTextColor    = Color::fromRGB( 30,  30,  30);
-  Color pathTextColor   = Color::fromRGB( 80,  80,  90);
-  Color placeholderColor= Color::fromRGB(160, 160, 170);
-  Color accentColor     = Color::fromRGB( 33, 150, 243);
+  // ── Label-mode typography (used only when no custom widget is supplied) ──
+  //   Override these to change the plain-text label appearance.
+  Color labelTextColor = Color::fromRGB(30, 30, 30);
+  Color labelHoverColor = Color::fromRGB(33, 150, 243); // tint on hover
+  int labelFontSize = 14;                               // inherits Widget::fontSize default
+  FontWeight labelFontWeight = FontWeight::Normal;
 
-  int  btnHeight    = 32;
-  int  btnPadding   = 10;
-  int  borderRadius = 5;
-  int  pathMaxWidth = 300;
-  bool showPath     = true;
-  bool showClearBtn = true;
-
-  // ── Constructor ───────────────────────────────────────────────────────────
+  // ── Constructor ──────────────────────────────────────────────────────────
+  //   Do not call directly — use the FilePicker() factory functions below.
   explicit FilePickerWidget(const std::string &label = "")
-      : customLabel_(label) {
-    autoHeight  = false;
-    autoWidth   = true;
-    height      = btnHeight;
+      : customLabel_(label), labelWidget_(nullptr)
+  {
+    autoHeight = true;
+    autoWidth = true;
     isFocusable = true;
+  }
+
+  explicit FilePickerWidget(std::shared_ptr<Widget> labelWidget)
+      : customLabel_(""), labelWidget_(std::move(labelWidget))
+  {
+    autoHeight = true;
+    autoWidth = true;
+    isFocusable = true;
+    if (labelWidget_)
+      labelWidget_->parent = this;
   }
 
   // ── Public API ────────────────────────────────────────────────────────────
@@ -242,9 +268,9 @@ public:
   void open();
   void clear();
 
-  const std::string              &path()         const { return path_;  }
-  const std::vector<std::string> &paths()        const { return paths_; }
-  bool                            hasSelection() const { return !path_.empty(); }
+  const std::string &path() const { return path_; }
+  const std::vector<std::string> &paths() const { return paths_; }
+  bool hasSelection() const { return !path_.empty(); }
 
   // ── Fluent configuration ──────────────────────────────────────────────────
 
@@ -257,13 +283,15 @@ public:
                                               std::vector<std::string> exts);
   std::shared_ptr<FilePickerWidget> addFilter(FileFilter f);
   std::shared_ptr<FilePickerWidget> setFilters(std::vector<FileFilter> fs);
-  std::shared_ptr<FilePickerWidget> setShowPath(bool v);
-  std::shared_ptr<FilePickerWidget> setShowClearBtn(bool v);
-  std::shared_ptr<FilePickerWidget> setPathMaxWidth(int w);
-  std::shared_ptr<FilePickerWidget> setAccentColor(Color c);
   std::shared_ptr<FilePickerWidget> setHeight(int h);
   std::shared_ptr<FilePickerWidget> setWidth(int w);
   std::shared_ptr<FilePickerWidget> setFlex(int f);
+
+  // ── Label-mode styling (no-op when a widget trigger is used) ─────────────
+  std::shared_ptr<FilePickerWidget> setLabelTextColor(Color c);
+  std::shared_ptr<FilePickerWidget> setLabelHoverColor(Color c);
+  std::shared_ptr<FilePickerWidget> setLabelFontSize(int s);
+  std::shared_ptr<FilePickerWidget> setLabelFontWeight(FontWeight w);
 
   // ── State bindings ────────────────────────────────────────────────────────
 
@@ -300,61 +328,76 @@ public:
 
 private:
   // ── Config ────────────────────────────────────────────────────────────────
-  FilePickerMode           mode_            = FilePickerMode::Open;
-  std::string              title_;
-  std::string              customLabel_;
-  std::string              defaultFilename_;
-  std::string              defaultExt_;
-  std::string              initialDir_;
-  std::vector<FileFilter>  filters_;
+  FilePickerMode mode_ = FilePickerMode::Open;
+  std::string title_;
+  std::string customLabel_;
+  std::string defaultFilename_;
+  std::string defaultExt_;
+  std::string initialDir_;
+  std::vector<FileFilter> filters_;
+
+  // ── Trigger widget (widget mode) ──────────────────────────────────────────
+  // When non-null the widget is laid out and painted instead of the plain text.
+  std::shared_ptr<Widget> labelWidget_;
 
   // ── Selection ─────────────────────────────────────────────────────────────
-  std::string              path_;
+  std::string path_;
   std::vector<std::string> paths_;
 
   // ── Bindings ──────────────────────────────────────────────────────────────
-  State<std::string>              *boundPath_  = nullptr;
+  State<std::string> *boundPath_ = nullptr;
   State<std::vector<std::string>> *boundPaths_ = nullptr;
 
   // ── Callbacks ─────────────────────────────────────────────────────────────
-  std::function<void(const std::string &)>              onChanged_;
+  std::function<void(const std::string &)> onChanged_;
   std::function<void(const std::vector<std::string> &)> onMultiChanged_;
-  std::function<void()>                                  onCancelled_;
+  std::function<void()> onCancelled_;
 
   // ── Layout cache ──────────────────────────────────────────────────────────
-  int btnW_   = 120;
-  int clearW_ = 0;
   int lastMx_ = -9999;
   int lastMy_ = -9999;
 
   // ── Shared helpers ────────────────────────────────────────────────────────
-  // Defined in all platform .cpp files (identical implementations).
   std::shared_ptr<FilePickerWidget> self_();
-  bool        _inBounds(int mx, int my) const;
-  bool        _isOverClear(int mx, int my) const;
-  std::string _label() const;
-  std::string _placeholder() const;
-  std::string _displayPath() const;
-  int         _measureBtnWidth() const;
+  bool _inBounds(int mx, int my) const;
+  std::string _label() const; // resolved display string
   std::string _defaultTitle() const;
-  void        _setSinglePath(const std::string &p);
-  void        _setMultiPaths(const std::vector<std::string> &ps);
-  void        _commitPaths();
+
+  // ── Label-mode helpers ────────────────────────────────────────────────────
+  // Measure the plain-text label so computeLayout can set width/height.
+  void _measureLabel(GraphicsContext &ctx, FontCache &fc);
+
+  void _setSinglePath(const std::string &p);
+  void _setMultiPaths(const std::vector<std::string> &ps);
+  void _commitPaths();
 
   // ── Platform-specific ─────────────────────────────────────────────────────
-  // Each platform .cpp provides its own definition of these two functions.
-  void _openDialog();  // open the native file dialog
-  void _repaint();     // trigger a platform repaint after selection
+  void _openDialog();
+  void _repaint();
 };
 
 // ============================================================================
-// FACTORY
+// FACTORY FUNCTIONS
+// ============================================================================
+//
+// FilePicker()           — plain-text label using the default mode string
+// FilePicker("Browse")   — plain-text label with custom string
+// FilePicker(myWidget)   — arbitrary widget as the clickable trigger
+//
 // ============================================================================
 
 using FilePickerWidgetPtr = std::shared_ptr<FilePickerWidget>;
 
-inline FilePickerWidgetPtr FilePicker(const std::string &label = "") {
+// Plain-text label overloads
+inline FilePickerWidgetPtr FilePicker(const std::string &label = "")
+{
   return std::make_shared<FilePickerWidget>(label);
+}
+
+// Widget-trigger overload
+inline FilePickerWidgetPtr FilePicker(std::shared_ptr<Widget> triggerWidget)
+{
+  return std::make_shared<FilePickerWidget>(std::move(triggerWidget));
 }
 
 #endif // FLUX_FILE_PICKER_HPP

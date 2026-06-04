@@ -6188,7 +6188,7 @@ public:
                              ->setDefaultFilename("circuit.v")
                              ->setDefaultExtension("v")
                              ->addFilter("Verilog", {"*.v"})
-                             ->setShowPath(false)
+                             
                              ->setHeight(26)
                              ->setOnChanged([wsVerilog](const std::string &path)
                                             {
@@ -6203,7 +6203,7 @@ public:
                           ->setDefaultFilename("circuit.vhd")
                           ->setDefaultExtension("vhd")
                           ->addFilter("VHDL", {"*.vhd", "*.vhdl"})
-                          ->setShowPath(false)
+                          
                           ->setHeight(26)
                           ->setOnChanged([wsVHDL](const std::string &path)
                                          {
@@ -6220,7 +6220,7 @@ public:
                           ->setDefaultExtension("json")
                           ->addFilter("Circuit JSON", {"*.json"})
                           ->addFilter("All Files", {"*.*"})
-                          ->setShowPath(false)
+                          
                           ->setHeight(26)
                           ->setOnChanged([wsSave](const std::string &path)
                                          {
@@ -6234,7 +6234,7 @@ public:
                           ->setDefaultExtension("json")
                           ->addFilter("Circuit JSON", {"*.json"})
                           ->addFilter("All Files", {"*.*"})
-                          ->setShowPath(false)
+                          
                           ->setHeight(26)
                           ->setOnChanged([wsOpen, wc](const std::string &path)
                                          {
@@ -6249,7 +6249,7 @@ public:
                          ->setDefaultFilename("circuit.png")
                          ->setDefaultExtension("png")
                          ->addFilter("PNG Image", {"*.png"})
-                         ->setShowPath(false)
+                         
                          ->setHeight(26)
                          ->setOnChanged([wsPNG](const std::string &path)
                                         {
@@ -6261,7 +6261,7 @@ public:
                          ->setDefaultFilename("circuit.svg")
                          ->setDefaultExtension("svg")
                          ->addFilter("SVG Vector", {"*.svg"})
-                         ->setShowPath(false)
+                         
                          ->setHeight(26)
                          ->setOnChanged([wsSVG](const std::string &path)
                                         {
@@ -6314,10 +6314,29 @@ public:
         ttVisible_.set(show);
         if (show) rebuildTruthTable(); });
 
+    auto menuBar = MenuBar({
+
+        MenuBarItem(
+            "File",
+            {
+                ContextMenuItem::Action(
+                    "New", [this] {}),
+                ContextMenuItem::Action(
+                    "Open", [this] {}),
+                ContextMenuItem::Action("Save",
+                                        [this] {}),
+                ContextMenuItem::Separator(),
+                ContextMenuItem::Action("Exit", []
+                                        { PostQuitMessage(0); }),
+            }),
+
+    });
+
     auto toolbar = Container(
                        Row({
                                Text("Circuit")->setFontSize(14)->setTextColor(Color::fromRGB(160, 160, 180)),
                                SizedBox(2, 0),
+                               menuBar,
                                savePicker,
                                openPicker,
                                verilogPicker,
@@ -6338,10 +6357,10 @@ public:
                                delBtn,
                                SizedBox(2, 0),
                                clrBtn,
-                               SizedBox(2, 0),
-                               fitBtn,
-                               SizedBox(2, 0),
-                               rstBtn,
+                               //  SizedBox(2, 0),
+                               //  fitBtn,
+                               //  SizedBox(2, 0),
+                               //  rstBtn,
                                SizedBox(2, 0),
                                ttBtn,
 
