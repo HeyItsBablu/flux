@@ -6313,8 +6313,7 @@ public:
         } })),
                 ContextMenuItem::Separator(),
                 ContextMenuItem::Action(
-                    "Open", [this]
-                    {}),
+                    "Open", [this] {}),
                 ContextMenuItem::Action("Exit", []
                                         { PostQuitMessage(0); }),
             }),
@@ -6323,10 +6322,10 @@ public:
 
     auto toolbar = Container(
                        Row({
-                               Text("Circuit")->setFontSize(14)->setTextColor(Color::fromRGB(160, 160, 180)),
-                               SizedBox(2, 0),
+
                                menuBar,
-                               SizedBox(2, 0),
+                               SizedBox(8, 0),
+                               Container()->setWidth(8),
                                undoBtn,
                                SizedBox(2, 0),
                                redoBtn,

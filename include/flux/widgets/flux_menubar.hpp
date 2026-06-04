@@ -67,11 +67,11 @@ public:
   // ── Appearance ───────────────────────────────────────────────────────────
   int barHeight = 28;
   int buttonPadH = 12; // horizontal padding inside each button
-  Color barBgColor = Color::fromRGB(245, 245, 245);
-  Color barBorderColor = Color::fromRGB(210, 210, 210);
+  Color barBgColor = Color::fromRGBA(0, 0, 0, 255);
+  Color barBorderColor = Color::fromRGBA(0, 0, 0, 0);
   Color btnHoverColor = Color::fromRGB(225, 235, 245);
   Color btnOpenColor = Color::fromRGB(210, 228, 248);
-  Color btnTextColor = Color::fromRGB(30, 30, 30);
+  Color btnTextColor = Color::fromRGB(200, 200, 210);
 
   // Drop-down list appearance (mirrors ContextMenuWidget)
   int itemHeight = 28;
@@ -109,15 +109,10 @@ public:
   }
 
   // ── Layout ────────────────────────────────────────────────────────────────
-  void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
+  void computeLayout(GraphicsContext &ctx, const BoxConstraints &/*constraints*/,
                      FontCache &fontCache) override
   {
-    if (autoWidth)
-      width = constraints.maxWidth;
-    height = barHeight;
-    autoHeight = false;
-
-    // Measure button widths
+    // Measure button widths first
     buttonRects_.resize(entries_.size());
     int curX = 0;
     for (int i = 0; i < (int)entries_.size(); i++)
@@ -127,6 +122,12 @@ public:
       buttonRects_[i] = {curX, 0, curX + btnW, barHeight};
       curX += btnW;
     }
+
+    // Fit to content width instead of expanding to max
+    if (autoWidth)
+      width = curX;
+    height = barHeight;
+    autoHeight = false;
 
     applyConstraints();
     needsLayout = false;
