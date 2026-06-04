@@ -6231,101 +6231,101 @@ public:
 
     auto menuBar = MenuBar({
 
-        MenuBarItem(
-            "File",
-            {
-                ContextMenuItem::Widget(FilePicker("Save")
-                                            ->setMode(FilePickerMode::Save)
-                                            ->setTitle("Save Circuit")
-                                            ->setDefaultFilename("circuit.json")
-                                            ->setDefaultExtension("json")
-                                            ->addFilter("Circuit JSON", {"*.json"})
-                                            ->addFilter("All Files", {"*.*"})
-                                            ->setHeight(26)
-                                            ->setOnChanged([wsSave](const std::string &path)
-                                                           {
+                               MenuBarItem(
+                                   "File",
+                                   {
+                                       ContextMenuItem::Widget(FilePicker("Save")
+                                                                   ->setMode(FilePickerMode::Save)
+                                                                   ->setTitle("Save Circuit")
+                                                                   ->setDefaultFilename("circuit.json")
+                                                                   ->setDefaultExtension("json")
+                                                                   ->addFilter("Circuit JSON", {"*.json"})
+                                                                   ->addFilter("All Files", {"*.*"})
+                                                                   ->setHeight(26)
+                                                                   ->setOnChanged([wsSave](const std::string &path)
+                                                                                  {
         if (auto s = wsSave.lock())
             s->saveToFile(path); })),
 
-                ContextMenuItem::Widget(FilePicker("Open")
-                                            ->setMode(FilePickerMode::Open)
-                                            ->setTitle("Open Circuit")
-                                            ->setDefaultExtension("json")
-                                            ->addFilter("Circuit JSON", {"*.json"})
-                                            ->addFilter("All Files", {"*.*"})
+                                       ContextMenuItem::Widget(FilePicker("Open")
+                                                                   ->setMode(FilePickerMode::Open)
+                                                                   ->setTitle("Open Circuit")
+                                                                   ->setDefaultExtension("json")
+                                                                   ->addFilter("Circuit JSON", {"*.json"})
+                                                                   ->addFilter("All Files", {"*.*"})
 
-                                            ->setHeight(26)
-                                            ->setOnChanged([wsOpen, wc](const std::string &path)
-                                                           {
+                                                                   ->setHeight(26)
+                                                                   ->setOnChanged([wsOpen, wc](const std::string &path)
+                                                                                  {
         if (auto s = wsOpen.lock())
             s->loadFromFile(path);
         if (auto c = wc.lock())
             c->redraw(); })),
-                ContextMenuItem::Widget(FilePicker("PNG")
-                                            ->setMode(FilePickerMode::Save)
-                                            ->setTitle("Export PNG")
-                                            ->setDefaultFilename("circuit.png")
-                                            ->setDefaultExtension("png")
-                                            ->addFilter("PNG Image", {"*.png"})
+                                       ContextMenuItem::Widget(FilePicker("PNG")
+                                                                   ->setMode(FilePickerMode::Save)
+                                                                   ->setTitle("Export PNG")
+                                                                   ->setDefaultFilename("circuit.png")
+                                                                   ->setDefaultExtension("png")
+                                                                   ->addFilter("PNG Image", {"*.png"})
 
-                                            ->setHeight(26)
-                                            ->setOnChanged([wsPNG](const std::string &path)
-                                                           {
+                                                                   ->setHeight(26)
+                                                                   ->setOnChanged([wsPNG](const std::string &path)
+                                                                                  {
         if (auto s = wsPNG.lock()) s->exportPNG(path); })),
-                ContextMenuItem::Widget(FilePicker("SVG")
-                                            ->setMode(FilePickerMode::Save)
-                                            ->setTitle("Export SVG")
-                                            ->setDefaultFilename("circuit.svg")
-                                            ->setDefaultExtension("svg")
-                                            ->addFilter("SVG Vector", {"*.svg"})
+                                       ContextMenuItem::Widget(FilePicker("SVG")
+                                                                   ->setMode(FilePickerMode::Save)
+                                                                   ->setTitle("Export SVG")
+                                                                   ->setDefaultFilename("circuit.svg")
+                                                                   ->setDefaultExtension("svg")
+                                                                   ->addFilter("SVG Vector", {"*.svg"})
 
-                                            ->setHeight(26)
-                                            ->setOnChanged([wsSVG](const std::string &path)
-                                                           {
+                                                                   ->setHeight(26)
+                                                                   ->setOnChanged([wsSVG](const std::string &path)
+                                                                                  {
         if (auto s = wsSVG.lock()) s->exportSVG(path); })),
-                ContextMenuItem::Widget(FilePicker("Verilog")
-                                            ->setMode(FilePickerMode::Save)
-                                            ->setTitle("Export Verilog")
-                                            ->setDefaultFilename("circuit.v")
-                                            ->setDefaultExtension("v")
-                                            ->addFilter("Verilog", {"*.v"})
+                                       ContextMenuItem::Widget(FilePicker("Verilog")
+                                                                   ->setMode(FilePickerMode::Save)
+                                                                   ->setTitle("Export Verilog")
+                                                                   ->setDefaultFilename("circuit.v")
+                                                                   ->setDefaultExtension("v")
+                                                                   ->addFilter("Verilog", {"*.v"})
 
-                                            ->setHeight(26)
-                                            ->setOnChanged([wsVerilog](const std::string &path)
-                                                           {
+                                                                   ->setHeight(26)
+                                                                   ->setOnChanged([wsVerilog](const std::string &path)
+                                                                                  {
         if (auto s = wsVerilog.lock()) {
             std::ofstream f(path, std::ios::out | std::ios::trunc);
             if (f) f << s->toVerilog();
         } })),
-                ContextMenuItem::Widget(FilePicker("VHDL")
-                                            ->setMode(FilePickerMode::Save)
-                                            ->setTitle("Export VHDL")
-                                            ->setDefaultFilename("circuit.vhd")
-                                            ->setDefaultExtension("vhd")
-                                            ->addFilter("VHDL", {"*.vhd", "*.vhdl"})
+                                       ContextMenuItem::Widget(FilePicker("VHDL")
+                                                                   ->setMode(FilePickerMode::Save)
+                                                                   ->setTitle("Export VHDL")
+                                                                   ->setDefaultFilename("circuit.vhd")
+                                                                   ->setDefaultExtension("vhd")
+                                                                   ->addFilter("VHDL", {"*.vhd", "*.vhdl"})
 
-                                            ->setHeight(26)
-                                            ->setOnChanged([wsVHDL](const std::string &path)
-                                                           {
+                                                                   ->setHeight(26)
+                                                                   ->setOnChanged([wsVHDL](const std::string &path)
+                                                                                  {
         if (auto s = wsVHDL.lock()) {
             std::ofstream f(path, std::ios::out | std::ios::trunc);
             if (f) f << s->toVHDL();
         } })),
-                ContextMenuItem::Separator(),
-                ContextMenuItem::Action(
-                    "Open", [this] {}),
-                ContextMenuItem::Action("Exit", []
-                                        { PostQuitMessage(0); }),
-            }),
+                                       ContextMenuItem::Separator(),
+                                       ContextMenuItem::Action(
+                                           "Open", [this] {}),
+                                       ContextMenuItem::Action("Exit", []
+                                                               { PostQuitMessage(0); }),
+                                   }),
 
-    });
+                           })
+                       ->setBtnTextColor(Color::fromRGB(255, 255, 255));
 
     auto toolbar = Container(
                        Row({
 
                                menuBar,
-                               SizedBox(8, 0),
-                               Container()->setWidth(8),
+                               SizedBox(200, 0),
                                undoBtn,
                                SizedBox(2, 0),
                                redoBtn,

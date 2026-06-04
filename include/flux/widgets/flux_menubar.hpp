@@ -67,11 +67,11 @@ public:
   // ── Appearance ───────────────────────────────────────────────────────────
   int barHeight = 28;
   int buttonPadH = 12; // horizontal padding inside each button
-  Color barBgColor = Color::fromRGBA(0, 0, 0, 255);
+  Color barBgColor = Color::fromRGBA(0, 0, 0, 0);
   Color barBorderColor = Color::fromRGBA(0, 0, 0, 0);
   Color btnHoverColor = Color::fromRGB(225, 235, 245);
   Color btnOpenColor = Color::fromRGB(210, 228, 248);
-  Color btnTextColor = Color::fromRGB(200, 200, 210);
+  Color btnTextColor = Color::fromRGB(0, 0, 0);
 
   // Drop-down list appearance (mirrors ContextMenuWidget)
   int itemHeight = 28;
@@ -109,7 +109,7 @@ public:
   }
 
   // ── Layout ────────────────────────────────────────────────────────────────
-  void computeLayout(GraphicsContext &ctx, const BoxConstraints &/*constraints*/,
+  void computeLayout(GraphicsContext &ctx, const BoxConstraints & /*constraints*/,
                      FontCache &fontCache) override
   {
     // Measure button widths first
@@ -151,7 +151,8 @@ public:
     }
 
     // Bar background + bottom border
-    painter.fillRect(x, y, width, barHeight, barBgColor);
+    if (barBgColor.a > 0)
+      painter.fillRect(x, y, width, barHeight, barBgColor);
     painter.drawHLine(x, y + barHeight - 1, width, barBorderColor, 1);
 
     // Buttons
@@ -463,6 +464,12 @@ public:
   std::shared_ptr<MenuBarWidget> setScaffoldPtr(ScaffoldWidget *s)
   {
     scaffold_ = s;
+    return self_();
+  }
+  std::shared_ptr<MenuBarWidget> setBtnTextColor(Color c)
+  {
+    btnTextColor = c;
+    markNeedsPaint();
     return self_();
   }
 
