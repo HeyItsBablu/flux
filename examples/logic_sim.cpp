@@ -224,17 +224,6 @@ struct SubCircuitInstance
 };
 
 // ============================================================================
-// CircuitMode
-// ============================================================================
-
-enum class CircuitMode
-{
-  Select = 0,
-  Wire,
-  Delete
-};
-
-// ============================================================================
 // CircuitSurface
 // ============================================================================
 
@@ -247,8 +236,6 @@ public:
   float viewOffsetY_ = 0.f;
   float viewW_ = 1280.f;
   float viewH_ = 800.f;
-
-  CircuitMode mode_ = CircuitMode::Select;
 
   // ── Callbacks ─────────────────────────────────────────────────────────
   std::function<void()> onChanged;
@@ -2362,6 +2349,14 @@ public:
   bool canUndo() const { return !undoNodes_.empty(); }
   bool canRedo() const { return !redoNodes_.empty(); }
 
+  void pushUndo()
+  {
+    undoNodes_.push_back({nodes_, wires_, instances_});
+    if (undoNodes_.size() > 50)
+      undoNodes_.erase(undoNodes_.begin());
+    redoNodes_.clear();
+  }
+
   void undo()
   {
     if (undoNodes_.empty())
@@ -2551,7 +2546,6 @@ public:
   // ── Mouse ─────────────────────────────────────────────────────────────
   void onMouseDown(float x, float y) override
   {
-
     if (textEditing_)
       commitTextEdit();
 
@@ -2560,7 +2554,6 @@ public:
       float Z = currentZoom_;
       float panelTopWorld = viewOffsetY_ + (viewH_ - oscHeight_) / Z;
 
-      // Resize handle (6px above panel top)
       if (std::abs(y - panelTopWorld) < 8.f / Z)
       {
         oscResizing_ = true;
@@ -2569,14 +2562,12 @@ public:
         return;
       }
 
-      // Inside panel?
       if (y > panelTopWorld && y < viewOffsetY_ + viewH_ / Z)
       {
         float labelW = kLabelW / Z;
         float headerH = 20.f / Z;
         float panelX = viewOffsetX_;
 
-        // ── Header button hit tests ───────────────────────────────
         float hdrBottom = panelTopWorld + headerH;
         if (y < hdrBottom)
         {
@@ -2586,18 +2577,17 @@ public:
           float bx0 = rightX - 3.f * (btnW + 3.f / Z);
           if (y >= btnY0 && y <= btnY0 + btnH)
           {
-            if (x >= bx0 && x < bx0 + btnW) // "–" zoom out
+            if (x >= bx0 && x < bx0 + btnW)
               oscCycleZoom_ = std::max(1, oscCycleZoom_ - 1);
-            else if (x >= bx0 + btnW + 3.f / Z && x < bx0 + 2 * (btnW + 3.f / Z)) // "+" zoom in
+            else if (x >= bx0 + btnW + 3.f / Z && x < bx0 + 2 * (btnW + 3.f / Z))
               oscCycleZoom_ = std::min(8, oscCycleZoom_ + 1);
-            else // "×" clear
+            else
               clearProbes();
             notify();
           }
           return;
         }
 
-        // ── Row close buttons ─────────────────────────────────────
         float rowH = kRowH / Z;
         float rowTop = panelTopWorld + headerH;
         for (int ri = 0; ri < (int)probes_.size(); ++ri)
@@ -2613,7 +2603,6 @@ public:
           }
         }
 
-        // ── Cursor drag ───────────────────────────────────────────
         float sigX = panelX + labelW;
         if (x >= sigX)
         {
@@ -2622,7 +2611,7 @@ public:
           oscDraggingCursor_ = true;
           notify();
         }
-        return; // swallow – don't interact with canvas while in panel
+        return;
       }
     }
 
@@ -2648,43 +2637,10 @@ public:
     curX_ = x;
     curY_ = y;
 
-    if (mode_ == CircuitMode::Delete)
+    // ── Port hit → wire mode ───────────────────────────────────────────
+    PortRef port = hitPort(x, y);
+    if (port.valid())
     {
-      pushUndo();
-      // Try to delete a node first
-      CircuitNode *n = hitNode(x, y);
-      if (n)
-      {
-        int id = n->id;
-        nodes_.erase(std::remove_if(nodes_.begin(), nodes_.end(),
-                                    [id](const CircuitNode &nn)
-                                    { return nn.id == id; }),
-                     nodes_.end());
-        wires_.erase(std::remove_if(wires_.begin(), wires_.end(),
-                                    [id](const CircuitWire &w)
-                                    { return w.fromNodeId == id || w.toNodeId == id; }),
-                     wires_.end());
-        evaluate();
-        notify();
-        return;
-      }
-      // Try to delete a wire
-      int wireIdx = hitWire(x, y);
-      if (wireIdx >= 0)
-      {
-        wires_.erase(wires_.begin() + wireIdx);
-        evaluate();
-        notify();
-      }
-      return;
-    }
-
-    if (mode_ == CircuitMode::Wire)
-    {
-      PortRef port = hitPort(x, y);
-      if (!port.valid())
-        return;
-
       if (!wireStart_.valid())
       {
         wireStart_ = port;
@@ -2704,19 +2660,15 @@ public:
         }
         else
         {
-          wireStart_ = port;
+          wireStart_ = port; // replace with new start
           return;
         }
 
-        // Two refs point to the "same thing" if:
-        //   - both are regular nodes with equal nodeId, OR
-        //   - both are instance ports with equal encoded nodeId AND portIdx
         bool sameEndpoint = false;
         if (!from.instancePort && !to.instancePort)
           sameEndpoint = (from.nodeId == to.nodeId);
         else if (from.instancePort && to.instancePort)
           sameEndpoint = (from.nodeId == to.nodeId && from.portIdx == to.portIdx);
-        // from.instancePort XOR to.instancePort → never the same thing
 
         if (sameEndpoint)
         {
@@ -2729,7 +2681,6 @@ public:
         CircuitWire w;
         w.id = nextId_++;
 
-        // Source
         if (from.instancePort)
         {
           int iid, pidx;
@@ -2743,7 +2694,6 @@ public:
           w.fromNodeId = from.nodeId;
         }
 
-        // Destination
         if (to.instancePort)
         {
           int iid, pidx;
@@ -2759,7 +2709,6 @@ public:
           w.toPortIndex = to.portIdx;
         }
 
-        // Remove any existing wire to the same destination port
         wires_.erase(
             std::remove_if(wires_.begin(), wires_.end(),
                            [&w](const CircuitWire &ew)
@@ -2780,11 +2729,17 @@ public:
       return;
     }
 
-    // ── Select mode ───────────────────────────────────────────────────
-    bool shift = Key::isShiftDown();
-    CircuitNode *n = hitNode(x, y);
+    // ── Escape a pending wire start if clicking empty space ────────────
+    if (wireStart_.valid())
+    {
+      wireStart_ = {};
+      notify();
+      return;
+    }
 
-    // ── Instance hit ──────────────────────────────────────────────────
+    // ── Select mode ────────────────────────────────────────────────────
+    bool shift = Key::isShiftDown();
+
     SubCircuitInstance *inst = hitInstance(x, y);
     if (inst)
     {
@@ -2810,6 +2765,7 @@ public:
       return;
     }
 
+    CircuitNode *n = hitNode(x, y);
     if (n)
     {
       if (!shift && !n->selected)
@@ -2826,7 +2782,6 @@ public:
       return;
     }
 
-    // Try to select a wire
     int wireIdx = hitWire(x, y);
     if (wireIdx >= 0)
     {
@@ -2916,9 +2871,9 @@ public:
 
   void onMouseUp(float x, float y) override
   {
-
     oscResizing_ = false;
     oscDraggingCursor_ = false;
+
     if (dragging_)
     {
       dragging_ = false;
@@ -2936,12 +2891,10 @@ public:
 
           if (isDoubleClick)
           {
-            // Double-click on ANY node => rename
             startTextEdit(n);
           }
           else
           {
-            // Single click on Input => toggle value
             if (n->type == CircuitNodeType::Input)
             {
               pushUndo();
@@ -2949,19 +2902,16 @@ public:
               evaluate();
               notify();
             }
-            // Single click on any other node => no action (just select)
           }
         }
         else
         {
-          // Clicked empty space — reset double-click tracking
           lastClickTime_ = 0;
           lastClickNodeId_ = -1;
         }
       }
       else
       {
-        // Was a drag, not a click — reset double-click tracking
         lastClickTime_ = 0;
         lastClickNodeId_ = -1;
         notify();
@@ -2979,7 +2929,6 @@ public:
         if (n.x >= rx0 && n.y >= ry0 && n.x + n.w <= rx1 && n.y + n.h <= ry1)
           n.selected = true;
       }
-
       for (auto &w : wires_)
       {
         const CircuitNode *src = findNodeConst(w.fromNodeId);
@@ -3386,6 +3335,12 @@ public:
       deleteSelected();
       return;
     }
+    if (e.virtualKey == Key::Escape)
+    {
+      wireStart_ = {}; // cancel in-progress wire
+      notify();
+      return;
+    }
     if (e.ctrl && e.virtualKey == 'A')
     {
       selectAll();
@@ -3441,7 +3396,7 @@ public:
     for (auto &b : buses_)
       drawBusWire(ctx, b);
 
-    if (wireStart_.valid() && mode_ == CircuitMode::Wire)
+    if (wireStart_.valid())
       drawWirePreview(ctx);
 
     for (auto &n : nodes_)
@@ -5254,7 +5209,7 @@ private:
       ctx.lineTo(p.x, p.y);
       ctx.stroke();
       float pr = 4.f / currentZoom_;
-      bool hov = (mode_ == CircuitMode::Wire &&
+      bool hov = (wireStart_.valid() &&
                   std::hypot(curX_ - p.x, curY_ - p.y) < 10.f / currentZoom_);
       ctx.setFillColor(hov ? portHoverColor() : portInColor());
       ctx.fillCircle(p.x, p.y, pr);
@@ -5270,7 +5225,7 @@ private:
       ctx.lineTo(p.x + 6.f / currentZoom_, p.y);
       ctx.stroke();
       float pr = 4.f / currentZoom_;
-      bool hov = (mode_ == CircuitMode::Wire &&
+      bool hov = (wireStart_.valid() &&
                   std::hypot(curX_ - p.x, curY_ - p.y) < 10.f / currentZoom_);
       ctx.setFillColor(hov ? portHoverColor() : portOutColor());
       ctx.fillCircle(p.x, p.y, pr);
@@ -5948,13 +5903,7 @@ private:
     }
   }
   // ── Undo helpers ──────────────────────────────────────────────────────
-  void pushUndo()
-  {
-    undoNodes_.push_back({nodes_, wires_, instances_});
-    if (undoNodes_.size() > 50)
-      undoNodes_.erase(undoNodes_.begin());
-    redoNodes_.clear();
-  }
+
   void notify()
   {
     if (onChanged)
@@ -6025,14 +5974,11 @@ class CircuitApp : public Widget
 
   State<std::string> zoomLabel_{"100%"};
   State<std::string> cursorLabel_{"0.0,  0.0"};
-  State<std::string> modeLabel_{"Select"};
 
   State<std::string> selLabel_{""};
 
   State<bool> ttVisible_{false};
   State<std::string> ttContent_{""};
-
-  std::vector<std::shared_ptr<ButtonWidget>> modeBtns_;
 
   static constexpr Color kActiveBg = {40, 100, 220, 255};
   static constexpr Color kInactiveBg = {30, 30, 38, 255};
@@ -6103,19 +6049,6 @@ class CircuitApp : public Widget
     }
 
     ttContent_.set(o.str());
-  }
-
-  void setMode(CircuitMode m, int btnIdx)
-  {
-    if (surface_)
-      surface_->mode_ = m;
-    for (int i = 0; i < int(modeBtns_.size()); i++)
-      if (modeBtns_[i])
-        modeBtns_[i]->setBackgroundColor(i == btnIdx ? kActiveBg : kInactiveBg);
-    const char *labels[] = {"Select", "Wire", "Delete"};
-    modeLabel_.set(labels[btnIdx]);
-    if (canvas_)
-      canvas_->redraw();
   }
 
   struct GateDef
@@ -6340,6 +6273,12 @@ public:
                                    {
         if (auto s = ws.lock()) s->duplicateSelected();
         if (auto c = wc.lock()) c->redraw(); });
+    auto delBtn = Button("Delete")
+                      ->setHeight(26)
+                      ->setOnClick([ws, wc]
+                                   {
+        if (auto s = ws.lock()) { s->pushUndo(); s->deleteSelected(); }
+        if (auto c = wc.lock()) c->redraw(); });
 
     auto copyBtn = Button("Copy")
                        ->setHeight(26)
@@ -6353,32 +6292,6 @@ public:
                                      {
         if (auto s = ws.lock()) s->pasteClipboard();
         if (auto c = wc.lock()) c->redraw(); });
-
-    // ── Mode buttons ──────────────────────────────────────────────────
-    struct ModeInfo
-    {
-      const char *lbl;
-      CircuitMode m;
-    };
-    const std::vector<ModeInfo> modes = {
-        {"Select", CircuitMode::Select},
-        {"Wire", CircuitMode::Wire},
-        {"Delete", CircuitMode::Delete},
-    };
-    modeBtns_.resize(modes.size());
-    auto modeRow = Row({});
-    modeRow->setSpacing(2)->setCrossAxisAlignment(CrossAxisAlignment::Center);
-    for (int i = 0; i < int(modes.size()); i++)
-    {
-      auto &mi = modes[i];
-      auto btn = Button(mi.lbl)
-                     ->setHeight(26)
-                     ->setBackgroundColor(i == 0 ? kActiveBg : kInactiveBg)
-                     ->setOnClick([this, i, m = mi.m]
-                                  { setMode(m, i); });
-      modeBtns_[i] = btn;
-      modeRow->addChild(btn);
-    }
 
     // ── Toolbar ───────────────────────────────────────────────────────
     auto undoBtn = Button("↩")->setHeight(26)->setOnClick([this, ws, wc]
@@ -6422,6 +6335,8 @@ public:
                                SizedBox(2, 0),
                                dupBtn,
                                SizedBox(2, 0),
+                               delBtn,
+                               SizedBox(2, 0),
                                clrBtn,
                                SizedBox(2, 0),
                                fitBtn,
@@ -6429,8 +6344,7 @@ public:
                                rstBtn,
                                SizedBox(2, 0),
                                ttBtn,
-                               SizedBox(2, 0),
-                               Container(modeRow)->setHeight(30),
+
                            })
                            ->setPadding(1)
                            ->setSpacing(1)
@@ -6491,12 +6405,7 @@ public:
     // ── Status bar ────────────────────────────────────────────────────
     auto statusBar = Container(
                          Row({
-                                 Text(modeLabel_, [](const std::string &s)
-                                      { return "Mode: " + s; })
-                                     ->setFontSize(11)
-                                     ->setTextColor(Color::fromRGB(120, 120, 140))
-                                     ->setMinWidth(90),
-                                 SizedBox(14, 0),
+
                                  Text(selLabel_, [](const std::string &s)
                                       { return s; })
                                      ->setFontSize(11)
