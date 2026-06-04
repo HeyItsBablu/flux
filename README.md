@@ -1225,114 +1225,635 @@ row.disabled = true;
 
 ---
 
-## Canvas
+# Canvas
 
-### CanvasWidget
+The Canvas system gives you a full OpenGL-backed 2D drawing surface embedded anywhere in your widget tree. You subclass `RenderSurface`, draw with the `Canvas2D` API (a familiar HTML5-style interface), and plug it into a `CanvasWidget`. Pan, zoom, scrollbars, mouse/keyboard input, and continuous animation are all built in.
 
-OpenGL-powered drawing surface embedded in the widget tree.
+---
+
+## Table of Contents
+
+- [CanvasWidget](#canvaswidget)
+- [RenderSurface](#rendersurface)
+- [Canvas2D — Drawing API](#canvas2d--drawing-api)
+  - [Dimensions](#dimensions)
+  - [State Stack](#state-stack)
+  - [Transform](#transform)
+  - [Fill & Stroke Style](#fill--stroke-style)
+  - [Gradients](#gradients)
+  - [Solid Primitives](#solid-primitives)
+  - [Path API](#path-api)
+  - [Clip Rect](#clip-rect)
+  - [Images](#images)
+  - [Text](#text)
+  - [Pixel Access](#pixel-access)
+- [Viewport](#viewport)
+- [KeyEvent](#keyevent)
+- [Example — Animated Triangle](#example--animated-triangle)
+
+---
+
+## CanvasWidget
+
+`CanvasWidget` is the widget you place in your layout. It owns an OpenGL context, manages the viewport, and drives your `RenderSurface` every frame.
+
+### Creating a canvas
 
 ```cpp
-// Raster canvas — same view and canvas size
-auto canvas = RasterCanvas(800, 600);
+// Bare canvas — no surface yet, fills available space
+auto canvas = Canvas();
 
-// With pan/zoom viewport
-auto canvas = RasterCanvas(800, 600, 2048, 2048);
-
-canvas->onViewportChanged = [&](float zoom){ updateZoomLabel(zoom); };
+// Fixed size
+auto canvas = Canvas(800, 600);
 ```
 
-**Factory**
+### Attaching a surface
+
+```cpp
+auto surface = canvas->setSurface<MySurface>();
+// Returns shared_ptr<MySurface> so you can keep a handle to it
+```
+
+### Factory
 
 | Signature | Description |
 |---|---|
-| `Canvas()` | Bare canvas, 400×300, no surface |
-| `Canvas(w, h)` | Bare canvas at given size |
-| `RasterCanvas(w, h)` | Canvas + RasterSurface, viewport disabled |
-| `RasterCanvas(w, h, undoBudget)` | As above with custom undo memory in bytes |
-| `RasterCanvas(viewW, viewH, canvasW, canvasH)` | Canvas + RasterSurface, viewport enabled |
+| `Canvas()` | Bare canvas, defaults to 400 × 300, expands to fill parent |
+| `Canvas(w, h)` | Fixed-size canvas |
 
-**Methods**
+### Methods
 
-| Method | Type | Description |
+| Method | Returns | Description |
 |---|---|---|
-| `setSize(w, h)` | `int, int` | View (widget) dimensions |
-| `setCanvasSize(w, h)` | `int, int` | Drawing surface dimensions |
-| `setViewportEnabled(bool)` | `bool` | Enable/disable pan/zoom |
-| `setScrollbarsEnabled(bool)` | `bool` | Show/hide scrollbars |
-| `setSurface<T>(args...)` | Template | Attach a `RenderSurface` subclass |
-| `getSurface()` | `RenderSurface*` | Access active surface |
-| `viewport()` | `Viewport&` | Access viewport for zoom/pan control |
-| `redraw()` | — | Schedule a repaint |
-| `onViewportChanged` | `function<void(float)>` | Fires when zoom or pan changes |
-| `onGLResize` | `function<void(int, int)>` | Fires when GL surface is resized |
+| `setSurface<T>(args...)` | `shared_ptr<T>` | Construct and attach a `RenderSurface` subclass. Any constructor arguments for `T` are forwarded. Replaces any previously attached surface. |
+| `getSurface()` | `RenderSurface*` | Pointer to the currently active surface, or `nullptr` if none. |
+| `setSize(w, h)` | `shared_ptr<CanvasWidget>` | Fix the widget dimensions and disable auto-sizing. |
+| `setCanvasSize(w, h)` | `shared_ptr<CanvasWidget>` | Set the logical drawing surface size (used for pan/zoom extents). Defaults to the same as the view size. |
+| `setViewportEnabled(bool)` | `shared_ptr<CanvasWidget>` | Enable or disable pan/zoom. Default: `true`. |
+| `setScrollbarsEnabled(bool)` | `shared_ptr<CanvasWidget>` | Show fade-in scrollbars when panning. Default: `true`. |
+| `viewport()` | `Viewport&` | Direct access to the viewport for programmatic zoom and pan. |
+| `redraw()` | `shared_ptr<CanvasWidget>` | Request a repaint on the next frame. |
+| `onViewportChanged` | callback | `std::function<void(float zoom)>` — fires whenever zoom or pan changes. |
+| `onGLResize` | callback | `std::function<void(int w, int h)>` — fires when the GL surface is resized. |
+
+### Built-in input controls
+
+| Input | Action |
+|---|---|
+| Middle mouse button drag | Pan |
+| Space + left mouse drag | Pan |
+| Ctrl + scroll wheel | Zoom toward cursor |
+| Shift + scroll wheel | Pan horizontally |
+| Scroll wheel | Pan vertically |
+| Ctrl + `+` or numpad `+` | Zoom in |
+| Ctrl + `-` or numpad `-` | Zoom out |
+| Ctrl + `0` | Reset zoom to 1× and center |
+
+Mouse and keyboard events are forwarded to your `RenderSurface` in canvas-space coordinates (after viewport transform).
 
 ---
 
-### RasterSurface
+## RenderSurface
 
-GDI+-backed OpenGL raster painting surface with brush engine and undo/redo.
+Subclass `RenderSurface` to implement your drawing logic. Attach it to a `CanvasWidget` with `setSurface<T>()`.
 
 ```cpp
-auto surface = canvas->setSurface<RasterSurface>();
+class RenderSurface {
+public:
+    virtual ~RenderSurface() = default;
 
-surface->setTool(kToolBrush);
-StrokeStyle style;
-style.r = 0.2f; style.g = 0.4f; style.b = 1.0f;
-style.radius = 8.f; style.hardness = 0.9f; style.opacity = 0.8f;
-surface->setStrokeStyle(style);
+    // Called once when the GL context is ready. Set up textures, images, etc.
+    virtual void initialize(int canvasWidth, int canvasHeight) = 0;
 
-surface->undo();
-surface->savePNG(L"output.png");
+    // Called when the canvas is resized. Update any size-dependent resources.
+    virtual void resize(int newWidth, int newHeight) = 0;
+
+    // Called before the GL context is destroyed. Release all GL resources.
+    virtual void destroy() = 0;
+
+    // Called every frame before rendering. Use for animation state, physics, etc.
+    // dt is elapsed time in seconds since the last frame.
+    virtual void update(double dt) = 0;
+
+    // Optional raw GL pass that runs before Canvas2D begins.
+    // Use for FBO rendering, custom shaders, or anything that can't go through Canvas2D.
+    virtual void preRender() {}
+
+    // Main drawing entry point. Called every frame inside the GL render pass.
+    // ctx is your Canvas2D drawing context for this frame.
+    virtual void render(Canvas2D& ctx) = 0;
+
+    // Mouse input — coordinates are in canvas space (accounting for pan/zoom).
+    virtual void onMouseDown(float x, float y)       {}
+    virtual void onMouseMove(float x, float y)       {}
+    virtual void onMouseUp(float x, float y)         {}
+    virtual void onRightMouseDown(float x, float y)  {}
+
+    // Keyboard input.
+    virtual void onKeyDown(const KeyEvent& e) {}
+    virtual void onKeyUp(const KeyEvent& e)   {}
+
+    // Return true to request a new frame every tick (for animations).
+    // Return false to only repaint on user input or explicit redraw() calls.
+    virtual bool needsContinuousRedraw() const { return false; }
+};
 ```
 
-**Tool IDs**
+### Lifecycle order
 
-| Constant | Description |
-|---|---|
-| `kToolBrush` | Paints onto scratch FBO, merges on mouse up |
-| `kToolEraser` | Paints white directly onto committed FBO |
+```
+GL context ready → initialize()
+                         ↓
+           every frame → update(dt)
+                       → preRender()    ← raw GL, optional
+                       → render(ctx)    ← Canvas2D drawing
+                         ↓
+GL context going away → destroy()
+```
 
-**Methods**
+### Minimal example
 
-| Method | Type | Description |
-|---|---|---|
-| `setTool(id)` | `ToolId` | Switch active tool |
-| `setStrokeStyle(style)` | `StrokeStyle` | Set color, radius, hardness, opacity |
-| `getStrokeStyle()` | `const StrokeStyle&` | Current stroke style |
-| `setOpacity(op)` | `float` 0–1 | Stroke opacity shortcut |
-| `undo()` / `redo()` | — | Undo/redo last stroke |
-| `canUndo()` / `canRedo()` | `bool` | History availability |
-| `clear()` | — | Push undo snapshot then fill white |
-| `savePNG(path)` | `wstring` | Export committed layer to PNG |
-| `colorHistory()` | `const vector<RGBA>&` | Recently used colors (up to 16) |
+```cpp
+class MyPainter : public RenderSurface {
+public:
+    void initialize(int w, int h) override {}
+    void resize(int w, int h)     override {}
+    void destroy()                override {}
+    void update(double dt)        override {}
+
+    void render(Canvas2D& ctx) override {
+        ctx.setFillColor({30, 30, 30, 255});
+        ctx.fillRect(0, 0, ctx.width(), ctx.height());
+
+        ctx.setFillColor({255, 128, 0, 255});
+        ctx.fillCircle(ctx.width() / 2.f, ctx.height() / 2.f, 80.f);
+    }
+};
+```
 
 ---
 
-### Viewport
+## Canvas2D — Drawing API
 
-Controls zoom and pan. Accessible via `canvas->viewport()`.
+A `Canvas2D` instance is handed to you inside `render()` every frame. It is modelled closely after the HTML5 Canvas 2D API, so if you know that, you already know most of this.
+
+> **Important:** Do not construct `Canvas2D` yourself. Only use the instance passed to `render()`.
+
+---
+
+### Dimensions
 
 ```cpp
-auto& vp = canvas->viewport();
-vp.zoomIn(); vp.fitToView(); vp.resetZoom();
-auto [cx, cy] = vp.screenToCanvas(screenX, screenY);
+int ctx.width()    // current canvas width in pixels
+int ctx.height()   // current canvas height in pixels
 ```
 
-**Methods**
+---
 
-| Method | Description |
+### State Stack
+
+Saves and restores the complete drawing state: transform, fill color, stroke color, line width, global alpha, gradient state, clip depth, and text settings.
+
+```cpp
+ctx.save();     // push state
+ctx.restore();  // pop state
+```
+
+---
+
+### Transform
+
+Transforms stack on top of each other and apply to all subsequent drawing. Use `save()`/`restore()` to limit their scope.
+
+```cpp
+ctx.translate(dx, dy);          // move origin
+ctx.scale(sx, sy);              // scale from origin
+ctx.rotate(angleInRadians);     // rotate clockwise
+ctx.resetTransform();           // clear all transforms
+```
+
+---
+
+### Fill & Stroke Style
+
+```cpp
+ctx.setFillColor(color);        // color used by fill operations
+ctx.setStrokeColor(color);      // color used by stroke operations
+ctx.setLineWidth(pixels);       // stroke line thickness
+ctx.setGlobalAlpha(alpha);      // 0.0 = invisible, 1.0 = fully opaque
+ctx.setLineCap(cap);            // LineCap::Butt | Round | Square
+ctx.setLineJoin(join);          // LineJoin::Miter | Round | Bevel
+ctx.setMiterLimit(limit);       // miter join limit
+ctx.setFillRule(rule);          // FillRule::NonZero | EvenOdd
+ctx.setCompositeOp(op);         // CompositeOp::SourceOver | Copy | Xor | Multiply | Screen
+```
+
+---
+
+### Gradients
+
+Gradients replace the fill color. Call `beginLinearGradient()` or `beginRadialGradient()`, add color stops, then call `setFillGradient()` before any fill operation.
+
+#### Linear gradient
+
+```cpp
+ctx.beginLinearGradient(x0, y0, x1, y1);   // start point → end point
+ctx.addColorStop(0.0f, colorA);
+ctx.addColorStop(0.5f, colorB);
+ctx.addColorStop(1.0f, colorC);
+ctx.setFillGradient();
+
+ctx.fillRect(x, y, w, h);   // drawn with the gradient
+```
+
+#### Radial gradient
+
+```cpp
+ctx.beginRadialGradient(cx, cy, innerRadius, outerRadius);
+ctx.addColorStop(0.0f, innerColor);
+ctx.addColorStop(1.0f, outerColor);
+ctx.setFillGradient();
+
+ctx.fillCircle(cx, cy, outerRadius);
+```
+
+A gradient is active until you call `setFillColor()` again, which cancels it.
+
+---
+
+### Solid Primitives
+
+These do not require a path — they draw immediately.
+
+```cpp
+// Rectangle — clear to transparent
+ctx.clearRect(x, y, width, height);
+
+// Rectangle — filled
+ctx.fillRect(x, y, width, height);
+
+// Rectangle — stroked outline only
+ctx.strokeRect(x, y, width, height);
+
+// Rounded rectangle — filled
+ctx.fillRoundedRect(x, y, width, height, cornerRadius);
+
+// Rounded rectangle — stroked outline only
+ctx.strokeRoundedRect(x, y, width, height, cornerRadius);
+
+// Circle — filled
+ctx.fillCircle(centerX, centerY, radius);
+
+// Circle — stroked outline only
+ctx.strokeCircle(centerX, centerY, radius);
+```
+
+---
+
+### Path API
+
+Paths let you describe arbitrary shapes before filling or stroking them. A path accumulates points until you call `fill()` or `stroke()`.
+
+```cpp
+ctx.beginPath();                          // start a new path (clears previous)
+
+ctx.moveTo(x, y);                         // lift pen and move to point
+ctx.lineTo(x, y);                         // draw line from current point
+ctx.arc(cx, cy, r, startAngle, endAngle, anticlockwise);  // arc / full circle
+ctx.arcTo(x1, y1, x2, y2, radius);       // arc tangent to two lines
+ctx.quadraticCurveTo(cpx, cpy, x, y);    // quadratic Bézier
+ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, x, y);  // cubic Bézier
+ctx.rect(x, y, width, height);           // add rectangle sub-path
+ctx.ellipse(cx, cy, rx, ry, rotation, startAngle, endAngle, anticlockwise);
+ctx.closePath();                          // line back to the start of this sub-path
+
+ctx.fill();     // fill the accumulated path using the current fill color / gradient
+ctx.stroke();   // stroke the accumulated path using the current stroke color
+ctx.clip();     // use pushClipRect/popClipRect for scissor clipping instead
+```
+
+**Angle convention:** `0` radians = 3 o'clock, angles increase clockwise. Same as HTML5 Canvas.
+
+---
+
+### Clip Rect
+
+Restricts all drawing to a rectangular region using the GPU scissor test. Clips nest correctly with `save()`/`restore()`.
+
+```cpp
+ctx.pushClipRect(x, y, width, height);
+
+// Everything drawn here is clipped to that rectangle
+ctx.fillRect(...);
+ctx.fillText(...);
+
+ctx.popClipRect();   // restore previous clip
+```
+
+---
+
+### Images
+
+Load images inside `initialize()` or `update()`, never inside `render()`.
+
+#### Loading
+
+```cpp
+// From a file path
+Canvas2DImage* img = ctx.loadImage("assets/photo.png");
+
+// From a byte buffer in memory (PNG, JPG, etc.)
+Canvas2DImage* img = ctx.loadImageFromMemory(dataPtr, byteLength);
+
+// Wrap an existing GL texture you already own
+// FluxUI will not delete this texture when you call freeImage()
+Canvas2DImage* img = ctx.wrapTexture(glTexId, width, height);
+```
+
+#### Updating pixels
+
+```cpp
+// Replace the pixel data of an existing image in-place.
+// rgba must be width * height * 4 bytes (RGBA, 8 bits per channel).
+ctx.updateTexture(img, rgbaPtr, newWidth, newHeight);
+```
+
+#### Drawing
+
+```cpp
+// Draw at natural size at (dx, dy)
+ctx.drawImage(img, dx, dy);
+
+// Draw scaled to fill (dx, dy, dw, dh)
+ctx.drawImage(img, dx, dy, destWidth, destHeight);
+
+// Source crop + destination rect
+ctx.drawImage(img, srcX, srcY, srcWidth, srcHeight,
+                   destX, destY, destWidth, destHeight);
+```
+
+#### Freeing
+
+```cpp
+ctx.freeImage(img);   // releases the GL texture and deletes the object
+img = nullptr;        // pointer is now dangling
+```
+
+---
+
+### Text
+
+#### Registering fonts
+
+Fonts must be registered once before use, typically at the top of `initialize()`:
+
+```cpp
+// Windows
+Canvas2D::registerFont(canvasGL, "sans",             "C:/Windows/Fonts/segoeui.ttf");
+Canvas2D::registerFont(canvasGL, "sans-bold",        "C:/Windows/Fonts/segoeuib.ttf");
+Canvas2D::registerFont(canvasGL, "sans-italic",      "C:/Windows/Fonts/segoeuii.ttf");
+Canvas2D::registerFont(canvasGL, "sans-bold-italic", "C:/Windows/Fonts/segoeuiz.ttf");
+Canvas2D::registerFont(canvasGL, "mono",             "C:/Windows/Fonts/consola.ttf");
+
+// Linux / Android — provide your own TTF paths
+Canvas2D::registerFont(canvasGL, "sans", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
+```
+
+`canvasGL` is the `Canvas2DGL*` pointer. You can access it via `canvas->canvasGL_` after `initialize()` is called.
+
+#### Font descriptor format
+
+```
+[bold] [italic] <size>px <family>
+
+Examples:
+  "16px sans"
+  "bold 24px sans"
+  "italic 14px mono"
+  "bold italic 20px sans"
+```
+
+#### Drawing text
+
+```cpp
+ctx.setFont("bold 18px sans");
+
+ctx.setTextAlign(CanvasTextAlign::Left);    // Left · Center · Right
+ctx.setTextBaseline(TextBaseline::Top);     // Top · Middle · Bottom · Alphabetic
+
+ctx.setFillColor({255, 255, 255, 255});
+ctx.fillText("Hello, world!", x, y);
+
+ctx.setStrokeColor({0, 0, 0, 255});
+ctx.strokeText("Outlined", x, y);          // draws text with a 1px outline effect
+
+float textWidth = ctx.measureText("Hello, world!");
+```
+
+**Baseline reference:**
+
+| Value | Y origin |
 |---|---|
-| `zoomIn()` | Zoom in 1.25× toward view center |
-| `zoomOut()` | Zoom out 0.8× toward view center |
-| `zoomToward(sx, sy, factor)` | Zoom toward a screen-space point |
-| `resetZoom()` | Set zoom = 1 and center canvas |
-| `fitToView()` | Scale and center to fit canvas in viewport |
-| `panByScreen(dx, dy)` | Pan by screen-space pixel deltas |
-| `setOffset(cx, cy)` | Set canvas-space pan offset |
-| `screenToCanvas(sx, sy)` | Convert screen coords to canvas coords |
-| `zoom()` | Current zoom factor |
-| `offsetX()` / `offsetY()` | Current pan offset |
+| `Alphabetic` | Baseline of lowercase letters (default, matches CSS) |
+| `Top` | Top of the em box |
+| `Middle` | Middle of the em box |
+| `Bottom` | Bottom of the descender |
 
+---
+
+### Pixel Access
+
+Read pixels from the framebuffer or write raw RGBA data to the canvas.
+
+```cpp
+// Read — fills `out` with w*h*4 bytes (RGBA). Y=0 is the top of the region.
+std::vector<uint8_t> pixels;
+ctx.getImageData(x, y, width, height, pixels);
+
+// Write — blits a raw RGBA buffer at (dx, dy) at the source dimensions.
+ctx.putImageData(pixels, sourceWidth, sourceHeight, destX, destY);
+```
+
+---
+
+## Viewport
+
+Accessed via `canvas->viewport()`. You can read or write zoom and pan state at any time, including from inside `update()` or event callbacks.
+
+```cpp
+Viewport& vp = canvas->viewport();
+```
+
+| Method | Returns | Description |
+|---|---|---|
+| `zoomIn()` | — | Zoom in 1.25× toward view center |
+| `zoomOut()` | — | Zoom out 0.8× toward view center |
+| `zoomToward(screenX, screenY, factor)` | — | Zoom by `factor` toward a screen-space point |
+| `resetZoom()` | — | Set zoom to 1× and center the canvas |
+| `fitToView()` | — | Scale and center so the full canvas is visible |
+| `panByScreen(dx, dy)` | — | Pan by pixel deltas in screen space |
+| `setOffset(canvasX, canvasY)` | — | Set the pan offset directly in canvas space |
+| `screenToCanvas(sx, sy)` | `pair<float, float>` | Convert a screen coordinate to canvas space |
+| `zoom()` | `float` | Current zoom factor |
+| `offsetX()` | `float` | Current horizontal pan offset (canvas space) |
+| `offsetY()` | `float` | Current vertical pan offset (canvas space) |
+| `viewW()` / `viewH()` | `float` | Viewport dimensions in pixels |
+| `canvasW()` / `canvasH()` | `float` | Canvas dimensions in pixels |
+
+**Zoom range:** 1/16× minimum to 32× maximum, with snapping at common levels (0.25×, 0.5×, 1×, 2×, 4×, 8× …).
+
+---
+
+## KeyEvent
+
+Passed to `onKeyDown()` and `onKeyUp()`.
+
+```cpp
+struct KeyEvent {
+    int  codepoint;    // Unicode character (printable chars), or 0
+    int  virtualKey;   // Platform-normalized virtual key code
+    bool ctrl;
+    bool shift;
+    bool alt;
+};
+```
+
+---
+
+## Example — Animated Triangle
+
+A complete, runnable app showing a gradient triangle that rotates its hue over time.
+
+```cpp
+#include "flux/flux.hpp"
+#include <cmath>
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Surface
+// ─────────────────────────────────────────────────────────────────────────────
+
+class TriangleSurface : public RenderSurface {
+    float time_ = 0.f;
+
+public:
+    void initialize(int, int) override {}
+    void resize(int, int)     override {}
+    void destroy()            override {}
+
+    void update(double dt) override {
+        time_ += float(dt);
+    }
+
+    void render(Canvas2D& ctx) override {
+        float w  = float(ctx.width());
+        float h  = float(ctx.height());
+        float cx = w * 0.5f;
+        float cy = h * 0.5f;
+        float r  = std::min(w, h) * 0.4f;
+
+        // Dark background
+        ctx.setFillColor({15, 15, 20, 255});
+        ctx.fillRect(0, 0, w, h);
+
+        // Animated gradient — hue shifts over time
+        float hue = std::fmod(time_ * 30.f, 360.f);
+        ctx.beginLinearGradient(cx, cy - r, cx, cy + r);
+        ctx.addColorStop(0.f, Color::fromHSV(hue,         0.8f, 1.0f));
+        ctx.addColorStop(1.f, Color::fromHSV(hue + 120.f, 0.8f, 0.6f));
+        ctx.setFillGradient();
+
+        // Equilateral triangle
+        ctx.beginPath();
+        ctx.moveTo(cx,               cy - r);
+        ctx.lineTo(cx - r * 0.866f,  cy + r * 0.5f);
+        ctx.lineTo(cx + r * 0.866f,  cy + r * 0.5f);
+        ctx.closePath();
+        ctx.fill();
+
+        // White label
+        ctx.setFillColor({255, 255, 255, 200});
+        ctx.setFont("bold 16px sans");
+        ctx.setTextAlign(CanvasTextAlign::Center);
+        ctx.setTextBaseline(TextBaseline::Top);
+        ctx.fillText("FluxUI Canvas", cx, cy + r + 16.f);
+    }
+
+    // Return true → repaint every frame (drives the animation)
+    bool needsContinuousRedraw() const override { return true; }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// App widget
+// ─────────────────────────────────────────────────────────────────────────────
+
+class MyApp : public Widget {
+public:
+    WidgetPtr build() override {
+        auto canvas = Canvas(512, 512);
+        canvas->setScrollbarsEnabled(false);
+        canvas->setViewportEnabled(false);
+        canvas->setSurface<TriangleSurface>();
+
+        return Scaffold(
+            AppBar("Animated Triangle"),
+            Center(canvas)
+        );
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Entry point
+// ─────────────────────────────────────────────────────────────────────────────
+
+WidgetPtr createApp(FluxUI* app) {
+    return FluxApp(
+        "Triangle",
+        std::make_shared<MyApp>(),
+        AppTheme::dark(),
+        false,   // debugShowWidgetBounds
+        560,     // window width
+        620,     // window height
+        false,   // maximize
+        false    // fullscreen
+    );
+}
+```
+
+---
+
+## Quick Reference
+
+```
+CanvasWidget
+├── setSurface<T>()            attach your RenderSurface
+├── setViewportEnabled()       pan & zoom via mouse/keyboard
+├── setScrollbarsEnabled()     fade-in scrollbars
+├── viewport()                 programmatic zoom/pan
+└── redraw()                   request a repaint
+
+RenderSurface  (your subclass)
+├── initialize(w, h)           GL ready — load textures here
+├── update(dt)                 per-frame logic
+├── preRender()                raw GL pass (optional)
+├── render(ctx)                Canvas2D drawing
+├── resize(w, h)               canvas resized
+├── destroy()                  cleanup before GL teardown
+├── onMouseDown/Move/Up(x, y)  canvas-space mouse input
+├── onKeyDown/Up(event)        keyboard input
+└── needsContinuousRedraw()    return true for animation
+
+Canvas2D  (inside render())
+├── save() / restore()
+├── translate / scale / rotate / resetTransform
+├── setFillColor / setStrokeColor / setLineWidth / setGlobalAlpha
+├── beginLinearGradient / beginRadialGradient / addColorStop / setFillGradient
+├── fillRect / strokeRect / fillRoundedRect / fillCircle …
+├── beginPath / moveTo / lineTo / arc / bezierCurveTo / fill / stroke …
+├── pushClipRect / popClipRect
+├── loadImage / drawImage / updateTexture / freeImage
+├── registerFont / setFont / fillText / measureText
+└── getImageData / putImageData
+```
 ---
 
 ## State
