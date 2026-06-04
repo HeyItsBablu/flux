@@ -28,12 +28,25 @@
 //       }),
 //   });
 //
+//   // Widget items are supported too:
+//   MenuBarItem("File", {
+//       ContextMenuItem::Widget(
+//           FilePicker("Open file…")
+//               ->setMode(FilePickerMode::Open)
+//               ->addFilter("All files", {"*.*"})
+//               ->setOnChanged([](const std::string &p){ ... })
+//       ),
+//       ContextMenuItem::Separator(),
+//       ContextMenuItem::Action("Exit", []{...}),
+//   })
+//
 //   // Plug into Scaffold's appBar slot alongside (or instead of) AppBar:
 //   Scaffold(menuBar, body)
 // ============================================================================
 
 // ── One top-level menu entry (label + its drop-down items) ──────────────────
-struct MenuBarItem {
+struct MenuBarItem
+{
   std::string label;
   std::vector<ContextMenuItem> items;
 
@@ -48,7 +61,8 @@ struct MenuBarItem {
 // same rounded rect, same item/separator geometry.  Only the open trigger
 // differs (left-click on the bar button vs right-click on an anchor).
 
-class MenuBarWidget : public Widget, public OverlayHost {
+class MenuBarWidget : public Widget, public OverlayHost
+{
 public:
   // ── Appearance ───────────────────────────────────────────────────────────
   int barHeight = 28;
@@ -87,7 +101,8 @@ public:
   // OverlayHost
   void setScaffold(ScaffoldWidget *s) override { scaffold_ = s; }
 
-  void onDetach() override {
+  void onDetach() override
+  {
     if (openMenuIndex >= 0)
       closeMenu_();
     Widget::onDetach();
@@ -95,7 +110,8 @@ public:
 
   // ── Layout ────────────────────────────────────────────────────────────────
   void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
-                     FontCache &fontCache) override {
+                     FontCache &fontCache) override
+  {
     if (autoWidth)
       width = constraints.maxWidth;
     height = barHeight;
@@ -104,7 +120,8 @@ public:
     // Measure button widths
     buttonRects_.resize(entries_.size());
     int curX = 0;
-    for (int i = 0; i < (int)entries_.size(); i++) {
+    for (int i = 0; i < (int)entries_.size(); i++)
+    {
       int textW = _measureLabel(ctx, fontCache, entries_[i].label);
       int btnW = textW + buttonPadH * 2;
       buttonRects_[i] = {curX, 0, curX + btnW, barHeight};
@@ -118,12 +135,14 @@ public:
   void positionChildren(int, int, int, int) override {}
 
   // ── Render the bar ────────────────────────────────────────────────────────
-  void render(GraphicsContext &ctx, FontCache &fontCache) override {
+  void render(GraphicsContext &ctx, FontCache &fontCache) override
+  {
     if (!visible)
       return;
     Painter painter(ctx);
 
-    if (pendingSwitch_ >= 0) {
+    if (pendingSwitch_ >= 0)
+    {
       int target = pendingSwitch_;
       pendingSwitch_ = -1;
       closeMenu_();
@@ -137,7 +156,8 @@ public:
     // Buttons
     NativeFont hFont = fontCache.getFont(menuFontSize, FontWeight::Normal);
 
-    for (int i = 0; i < (int)entries_.size(); i++) {
+    for (int i = 0; i < (int)entries_.size(); i++)
+    {
       auto &r = buttonRects_[i];
       int ax = x + r.left, ay = y + r.top;
       int aw = r.right - r.left, ah = r.bottom - r.top;
@@ -156,7 +176,8 @@ public:
 
   // ── renderPopupContent ────────────────────────────────────────────────────
   // Draws the open drop-down list into the layered popup DC.
-  void renderPopupContent(GraphicsContext &ctx, FontCache &fontCache) override {
+  void renderPopupContent(GraphicsContext &ctx, FontCache &fontCache) override
+  {
     if (openMenuIndex < 0)
       return;
     const auto &items = entries_[openMenuIndex].items;
@@ -178,14 +199,49 @@ public:
     NativeFont hFont = fontCache.getFont(menuFontSize, FontWeight::Normal);
     int curY = menuPadV;
 
-    for (int i = 0; i < (int)items.size(); i++) {
+    for (int i = 0; i < (int)items.size(); i++)
+    {
       const auto &item = items[i];
 
-      if (item.type == ContextMenuItem::Type::Separator) {
+      if (item.type == ContextMenuItem::Type::Separator)
+      {
         int sy = curY + separatorHeight / 2;
         painter.drawHLine(menuPadH, sy, mW - menuPadH * 2, separatorColor, 1);
         curY += separatorHeight;
-      } else {
+      }
+      else if (item.type == ContextMenuItem::Type::Widget && item.widget)
+      {
+        int rowH = _widgetItemHeight(item);
+
+        if (i == hoveredItem)
+          painter.fillRect(2, curY, mW - 4, rowH, itemHoverColor);
+
+        // Layout the embedded widget into the available row width, then paint.
+        auto *ui = FluxUI::getCurrentInstance();
+        if (ui)
+        {
+          if (item.widget->needsLayout)
+          {
+            item.widget->computeLayout(
+                ctx,
+                BoxConstraints::tight(mW - menuPadH * 2, rowH),
+                fontCache);
+          }
+          item.widget->x = menuPadH;
+          item.widget->y = curY;
+          item.widget->positionChildren(
+              item.widget->x + item.widget->paddingLeft,
+              item.widget->y + item.widget->paddingTop,
+              item.widget->width - item.widget->paddingLeft - item.widget->paddingRight,
+              item.widget->height - item.widget->paddingTop - item.widget->paddingBottom);
+          item.widget->render(ctx, fontCache);
+        }
+
+        curY += rowH;
+      }
+      else
+      {
+        // Action row
         if (i == hoveredItem && item.enabled)
           painter.fillRect(2, curY, mW - 4, itemHeight, itemHoverColor);
 
@@ -200,13 +256,18 @@ public:
 
   // ── Mouse events ──────────────────────────────────────────────────────────
 
-  bool handleMouseDown(int mx, int my) override {
+  bool handleMouseDown(int mx, int my) override
+  {
     // Click on a bar button
     int btnIdx = hitTestBar_(mx, my);
-    if (btnIdx >= 0) {
-      if (openMenuIndex == btnIdx) {
+    if (btnIdx >= 0)
+    {
+      if (openMenuIndex == btnIdx)
+      {
         closeMenu_(); // toggle closed
-      } else {
+      }
+      else
+      {
         if (openMenuIndex >= 0)
           closeMenu_();
         openMenu_(btnIdx);
@@ -215,11 +276,28 @@ public:
     }
 
     // Click inside the open drop-down
-    if (openMenuIndex >= 0) {
+    if (openMenuIndex >= 0)
+    {
       int itemIdx = hitTestPopup_(mx, my);
-      if (itemIdx >= 0) {
+      if (itemIdx >= 0)
+      {
         const auto &item = entries_[openMenuIndex].items[itemIdx];
-        if (item.type == ContextMenuItem::Type::Action && item.enabled) {
+
+        if (item.type == ContextMenuItem::Type::Widget && item.widget)
+        {
+          // Forward click into the embedded widget (popup-local coords).
+          // Do NOT auto-close — let the widget handle its own lifecycle.
+          auto origin = FluxUI::getCurrentInstance()->screenToClient(
+              popupScreenX_, popupScreenY_);
+          int localX = mx - origin.x;
+          int localY = my - origin.y;
+          closeMenu_();
+          item.widget->handleMouseDown(localX, localY);
+
+          return true;
+        }
+        if (item.type == ContextMenuItem::Type::Action && item.enabled)
+        {
           if (item.action)
             item.action();
           closeMenu_();
@@ -227,16 +305,18 @@ public:
         }
         return true; // absorb click on separator / disabled
       }
-      closeMenu_(); // click outside → close
+      closeMenu_(); // click outside -> close
       return true;
     }
     return false;
   }
 
-  bool handleMouseMove(int mx, int my) override {
+  bool handleMouseMove(int mx, int my) override
+  {
     // Hover over bar buttons
     int btnIdx = hitTestBar_(mx, my);
-    if (btnIdx != hoveredBtn) {
+    if (btnIdx != hoveredBtn)
+    {
       hoveredBtn = btnIdx;
       if (auto *ui = FluxUI::getCurrentInstance())
         ui->updateWidget(this); // force immediate redraw so highlight moves
@@ -246,16 +326,32 @@ public:
     // different button, schedule the switch AFTER this event returns so
     // we never invalidate iterators while the caller is still walking the
     // widget tree.
-    if (openMenuIndex >= 0 && btnIdx >= 0 && btnIdx != openMenuIndex) {
+    if (openMenuIndex >= 0 && btnIdx >= 0 && btnIdx != openMenuIndex)
+    {
       pendingSwitch_ = btnIdx;
       if (auto *ui = FluxUI::getCurrentInstance())
         ui->updateWidget(this);
     }
 
     // Hover over drop-down items
-    if (openMenuIndex >= 0) {
+    if (openMenuIndex >= 0)
+    {
       int itemIdx = hitTestPopup_(mx, my);
-      if (itemIdx != hoveredItem) {
+
+      // Forward move into widget items so their internal hover states update.
+      if (itemIdx >= 0 && itemIdx < (int)entries_[openMenuIndex].items.size())
+      {
+        const auto &item = entries_[openMenuIndex].items[itemIdx];
+        if (item.type == ContextMenuItem::Type::Widget && item.widget)
+        {
+          auto origin = FluxUI::getCurrentInstance()->screenToClient(
+              popupScreenX_, popupScreenY_);
+          item.widget->handleMouseMove(mx - origin.x, my - origin.y);
+        }
+      }
+
+      if (itemIdx != hoveredItem)
+      {
         hoveredItem = itemIdx;
         refresh_();
       }
@@ -263,18 +359,21 @@ public:
     return false;
   }
 
-  bool handleMouseLeave() override {
+  bool handleMouseLeave() override
+  {
     hoveredBtn = -1;
     markNeedsPaint();
     return false;
   }
 
-  bool handleKeyDown(int keyCode) override {
+  bool handleKeyDown(int keyCode) override
+  {
     if (openMenuIndex < 0)
       return false;
     const auto &items = entries_[openMenuIndex].items;
 
-    switch (keyCode) {
+    switch (keyCode)
+    {
     case Key::Escape:
       closeMenu_();
       return true;
@@ -290,7 +389,8 @@ public:
       openMenu_((openMenuIndex + 1) % (int)entries_.size());
       return true;
 
-    case Key::Up: {
+    case Key::Up:
+    {
       int prev = (hoveredItem <= 0) ? (int)items.size() - 1 : hoveredItem - 1;
       while (prev >= 0 && items[prev].type == ContextMenuItem::Type::Separator)
         prev--;
@@ -298,7 +398,8 @@ public:
       refresh_();
       return true;
     }
-    case Key::Down: {
+    case Key::Down:
+    {
       int next = hoveredItem + 1;
       while (next < (int)items.size() &&
              items[next].type == ContextMenuItem::Type::Separator)
@@ -309,9 +410,20 @@ public:
     }
     case Key::Return:
     case Key::Space:
-      if (hoveredItem >= 0 && hoveredItem < (int)items.size()) {
+      if (hoveredItem >= 0 && hoveredItem < (int)items.size())
+      {
         const auto &item = items[hoveredItem];
-        if (item.type == ContextMenuItem::Type::Action && item.enabled) {
+
+        if (item.type == ContextMenuItem::Type::Widget && item.widget)
+        {
+          // Synthesise a click at the widget's centre.
+          int cx = item.widget->x + item.widget->width / 2;
+          int cy = item.widget->y + item.widget->height / 2;
+          item.widget->handleMouseDown(cx, cy);
+          return true;
+        }
+        if (item.type == ContextMenuItem::Type::Action && item.enabled)
+        {
           if (item.action)
             item.action();
           closeMenu_();
@@ -325,32 +437,38 @@ public:
 
   // ── Fluent setters ────────────────────────────────────────────────────────
 
-  std::shared_ptr<MenuBarWidget> setBarHeight(int h) {
+  std::shared_ptr<MenuBarWidget> setBarHeight(int h)
+  {
     barHeight = h;
     markNeedsLayout();
     return self_();
   }
-  std::shared_ptr<MenuBarWidget> setBarBackground(Color c) {
+  std::shared_ptr<MenuBarWidget> setBarBackground(Color c)
+  {
     barBgColor = c;
     markNeedsPaint();
     return self_();
   }
-  std::shared_ptr<MenuBarWidget> setItemHeight(int h) {
+  std::shared_ptr<MenuBarWidget> setItemHeight(int h)
+  {
     itemHeight = h;
     return self_();
   }
-  std::shared_ptr<MenuBarWidget> setMinMenuWidth(int w) {
+  std::shared_ptr<MenuBarWidget> setMinMenuWidth(int w)
+  {
     minMenuWidth = w;
     return self_();
   }
-  std::shared_ptr<MenuBarWidget> setScaffoldPtr(ScaffoldWidget *s) {
+  std::shared_ptr<MenuBarWidget> setScaffoldPtr(ScaffoldWidget *s)
+  {
     scaffold_ = s;
     return self_();
   }
 
 private:
   std::vector<MenuBarItem> entries_;
-  struct BtnRect {
+  struct BtnRect
+  {
     int left, top, right, bottom;
   };
   std::vector<BtnRect> buttonRects_;
@@ -361,29 +479,54 @@ private:
   int popupScreenX_ = 0, popupScreenY_ = 0;
   int popupW_ = 0, popupH_ = 0;
 
-  std::shared_ptr<MenuBarWidget> self_() {
+  std::shared_ptr<MenuBarWidget> self_()
+  {
     return std::static_pointer_cast<MenuBarWidget>(shared_from_this());
+  }
+
+  // ── Height helpers ────────────────────────────────────────────────────────
+
+  // Returns the rendered height for a single item.
+  int _itemHeight(const ContextMenuItem &item) const
+  {
+    if (item.type == ContextMenuItem::Type::Separator)
+      return separatorHeight;
+    if (item.type == ContextMenuItem::Type::Widget && item.widget)
+      return _widgetItemHeight(item);
+    return itemHeight;
+  }
+
+  int _widgetItemHeight(const ContextMenuItem &item) const
+  {
+    if (!item.widget)
+      return itemHeight;
+    int h = item.widget->height > 0 ? item.widget->height : item.widget->minHeight;
+    return h > 0 ? h : itemHeight;
   }
 
   // ── Open / close ──────────────────────────────────────────────────────────
 
-  void openMenu_(int idx) {
+  void openMenu_(int idx)
+  {
     if (idx < 0 || idx >= (int)entries_.size())
       return;
     openMenuIndex = idx;
     hoveredItem = -1;
 
-    _computePopupGeometry(idx); // now uses FluxUI::clientToScreen internally
-
     auto *ui = FluxUI::getCurrentInstance();
     if (!ui)
       return;
 
+    // Pre-layout all widget items so their heights are known before geometry.
+    _layoutWidgetItems(idx, ui);
+
+    _computePopupGeometry(idx);
+
     FontCache &fc = ui->getFontCache();
     NativeWindow hw = ui->getWindow();
     if (hw)
-      showPopup(hw, popupScreenX_, popupScreenY_, popupW_ + shadowOffset,
-                popupH_ + shadowOffset, fc);
+      showPopup(hw, popupScreenX_, popupScreenY_,
+                popupW_ + shadowOffset, popupH_ + shadowOffset, fc);
 
     if (scaffold_)
       scaffold_->addOverlay(this, [](GraphicsContext, FontCache &) {}, 150);
@@ -391,7 +534,8 @@ private:
     markNeedsPaint();
   }
 
-  void closeMenu_() {
+  void closeMenu_()
+  {
     if (openMenuIndex < 0)
       return;
     openMenuIndex = -1;
@@ -402,38 +546,71 @@ private:
     markNeedsPaint();
   }
 
-  void refresh_() {
+  void refresh_()
+  {
     if (!popupVisible())
       return;
     if (auto *ui = FluxUI::getCurrentInstance())
       refreshPopup(ui->getFontCache());
   }
 
+  // ── Widget pre-layout ─────────────────────────────────────────────────────
+
+  // Run computeLayout on every Widget item in the given menu entry so their
+  // heights are valid before popup geometry is calculated.
+  void _layoutWidgetItems(int idx, FluxUI *ui)
+  {
+    auto mc = ui->getMeasureContext();
+    FontCache &fc = ui->getFontCache();
+
+    for (auto &item : entries_[idx].items)
+    {
+      if (item.type == ContextMenuItem::Type::Widget && item.widget)
+      {
+        if (item.widget->needsLayout || item.widget->height == 0)
+        {
+          item.widget->computeLayout(
+              mc.ctx,
+              BoxConstraints::loose(minMenuWidth - menuPadH * 2, kUnbounded),
+              fc);
+        }
+      }
+    }
+  }
+
   // ── Geometry ──────────────────────────────────────────────────────────────
 
-  void _computePopupGeometry(int idx) {
+  void _computePopupGeometry(int idx)
+  {
     const auto &items = entries_[idx].items;
 
+    // Determine required width: longest action label OR widest widget.
     int maxLabelW = 0;
-    for (const auto &item : items) {
-      if (item.type == ContextMenuItem::Type::Action) {
+    for (const auto &item : items)
+    {
+      if (item.type == ContextMenuItem::Type::Action)
+      {
         int lw = (int)item.label.size() * (menuFontSize / 2 + 1);
+        maxLabelW = std::max(maxLabelW, lw);
+      }
+      else if (item.type == ContextMenuItem::Type::Widget && item.widget)
+      {
+        int lw = item.widget->width > 0 ? item.widget->width : item.widget->minWidth;
         maxLabelW = std::max(maxLabelW, lw);
       }
     }
     popupW_ = std::max(minMenuWidth, maxLabelW + menuPadH * 2);
 
+    // Determine required height: sum of all item heights.
     int totalH = menuPadV * 2;
     for (const auto &item : items)
-      totalH += (item.type == ContextMenuItem::Type::Separator)
-                    ? separatorHeight
-                    : itemHeight;
+      totalH += _itemHeight(item);
     popupH_ = totalH;
 
     // Position below the button
     auto &br = buttonRects_[idx];
-    auto sc = FluxUI::getCurrentInstance()->clientToScreen(x + br.left,
-                                                           y + barHeight);
+    auto sc = FluxUI::getCurrentInstance()->clientToScreen(
+        x + br.left, y + barHeight);
     popupScreenX_ = sc.x;
     popupScreenY_ = sc.y;
 
@@ -443,7 +620,8 @@ private:
     HMONITOR mon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
     MONITORINFO mi{};
     mi.cbSize = sizeof(mi);
-    if (GetMonitorInfoW(mon, &mi)) {
+    if (GetMonitorInfoW(mon, &mi))
+    {
       if (popupScreenX_ + popupW_ > mi.rcWork.right)
         popupScreenX_ = mi.rcWork.right - popupW_;
       if (popupScreenY_ + popupH_ > mi.rcWork.bottom)
@@ -454,39 +632,42 @@ private:
 
   // ── Hit testing ───────────────────────────────────────────────────────────
 
-  // Returns button index if (mx,my) is inside the bar, else -1
-int hitTestBar_(int mx, int my) const {
+  // Returns button index if (mx,my) is inside the bar, else -1.
+  int hitTestBar_(int mx, int my) const
+  {
     if (my < y || my >= y + barHeight)
-        return -1;
-    for (int i = 0; i < (int)buttonRects_.size(); i++) {
-        const BtnRect &r = buttonRects_[i];
-        if (mx >= x + r.left && mx < x + r.right)
-            return i;
+      return -1;
+    for (int i = 0; i < (int)buttonRects_.size(); i++)
+    {
+      const BtnRect &r = buttonRects_[i];
+      if (mx >= x + r.left && mx < x + r.right)
+        return i;
     }
     return -1;
-}
+  }
 
-  // Returns item index inside the open popup, else -1
-  int hitTestPopup_(int mx, int my) const {
+  // Returns item index inside the open popup, else -1.
+  int hitTestPopup_(int mx, int my) const
+  {
     if (openMenuIndex < 0)
       return -1;
 
     auto origin = FluxUI::getCurrentInstance()->screenToClient(popupScreenX_,
                                                                popupScreenY_);
 
-    if (mx < origin.x || mx >= origin.x + popupW_ || my < origin.y ||
-        my >= origin.y + popupH_)
+    if (mx < origin.x || mx >= origin.x + popupW_ ||
+        my < origin.y || my >= origin.y + popupH_)
       return -1;
 
     const auto &items = entries_[openMenuIndex].items;
     int relY = my - origin.y - menuPadV;
     int curY = 0;
 
-    for (int i = 0; i < (int)items.size(); i++) {
-      int h = (items[i].type == ContextMenuItem::Type::Separator)
-                  ? separatorHeight
-                  : itemHeight;
-      if (relY >= curY && relY < curY + h) {
+    for (int i = 0; i < (int)items.size(); i++)
+    {
+      int h = _itemHeight(items[i]);
+      if (relY >= curY && relY < curY + h)
+      {
         if (items[i].type == ContextMenuItem::Type::Separator)
           return -1;
         return i;
@@ -499,7 +680,8 @@ int hitTestBar_(int mx, int my) const {
   // ── Text measurement ──────────────────────────────────────────────────────
 
   int _measureLabel(GraphicsContext &ctx, FontCache &fc,
-                    const std::string &label) const {
+                    const std::string &label) const
+  {
     NativeFont hFont = fc.getFont(menuFontSize, FontWeight::Normal);
     std::wstring wlabel(label.begin(), label.end());
     int w = 0, h = 0;
@@ -514,7 +696,8 @@ int hitTestBar_(int mx, int my) const {
 
 using MenuBarWidgetPtr = std::shared_ptr<MenuBarWidget>;
 
-inline MenuBarWidgetPtr MenuBar(std::vector<MenuBarItem> items) {
+inline MenuBarWidgetPtr MenuBar(std::vector<MenuBarItem> items)
+{
   return std::make_shared<MenuBarWidget>(std::move(items));
 }
 

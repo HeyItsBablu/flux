@@ -6182,91 +6182,6 @@ public:
 
     auto sidebar = Container(Column({Container(sideCol)->setHeight(420)}))->setWidth(86)->setBackgroundColor(kSidebarBg);
 
-    auto verilogPicker = FilePicker("Verilog")
-                             ->setMode(FilePickerMode::Save)
-                             ->setTitle("Export Verilog")
-                             ->setDefaultFilename("circuit.v")
-                             ->setDefaultExtension("v")
-                             ->addFilter("Verilog", {"*.v"})
-                             
-                             ->setHeight(26)
-                             ->setOnChanged([wsVerilog](const std::string &path)
-                                            {
-        if (auto s = wsVerilog.lock()) {
-            std::ofstream f(path, std::ios::out | std::ios::trunc);
-            if (f) f << s->toVerilog();
-        } });
-
-    auto vhdlPicker = FilePicker("VHDL")
-                          ->setMode(FilePickerMode::Save)
-                          ->setTitle("Export VHDL")
-                          ->setDefaultFilename("circuit.vhd")
-                          ->setDefaultExtension("vhd")
-                          ->addFilter("VHDL", {"*.vhd", "*.vhdl"})
-                          
-                          ->setHeight(26)
-                          ->setOnChanged([wsVHDL](const std::string &path)
-                                         {
-        if (auto s = wsVHDL.lock()) {
-            std::ofstream f(path, std::ios::out | std::ios::trunc);
-            if (f) f << s->toVHDL();
-        } });
-
-    // Save button — opens native "Save As" dialog
-    auto savePicker = FilePicker("Save")
-                          ->setMode(FilePickerMode::Save)
-                          ->setTitle("Save Circuit")
-                          ->setDefaultFilename("circuit.json")
-                          ->setDefaultExtension("json")
-                          ->addFilter("Circuit JSON", {"*.json"})
-                          ->addFilter("All Files", {"*.*"})
-                          
-                          ->setHeight(26)
-                          ->setOnChanged([wsSave](const std::string &path)
-                                         {
-        if (auto s = wsSave.lock())
-            s->saveToFile(path); });
-
-    // Open button — opens native "Open" dialog
-    auto openPicker = FilePicker("Open")
-                          ->setMode(FilePickerMode::Open)
-                          ->setTitle("Open Circuit")
-                          ->setDefaultExtension("json")
-                          ->addFilter("Circuit JSON", {"*.json"})
-                          ->addFilter("All Files", {"*.*"})
-                          
-                          ->setHeight(26)
-                          ->setOnChanged([wsOpen, wc](const std::string &path)
-                                         {
-        if (auto s = wsOpen.lock())
-            s->loadFromFile(path);
-        if (auto c = wc.lock())
-            c->redraw(); });
-
-    auto pngPicker = FilePicker("PNG")
-                         ->setMode(FilePickerMode::Save)
-                         ->setTitle("Export PNG")
-                         ->setDefaultFilename("circuit.png")
-                         ->setDefaultExtension("png")
-                         ->addFilter("PNG Image", {"*.png"})
-                         
-                         ->setHeight(26)
-                         ->setOnChanged([wsPNG](const std::string &path)
-                                        {
-        if (auto s = wsPNG.lock()) s->exportPNG(path); });
-
-    auto svgPicker = FilePicker("SVG")
-                         ->setMode(FilePickerMode::Save)
-                         ->setTitle("Export SVG")
-                         ->setDefaultFilename("circuit.svg")
-                         ->setDefaultExtension("svg")
-                         ->addFilter("SVG Vector", {"*.svg"})
-                         
-                         ->setHeight(26)
-                         ->setOnChanged([wsSVG](const std::string &path)
-                                        {
-        if (auto s = wsSVG.lock()) s->exportSVG(path); });
-
     auto dupBtn = Button("Duplicate")
                       ->setHeight(26)
                       ->setOnClick([ws, wc]
@@ -6319,13 +6234,87 @@ public:
         MenuBarItem(
             "File",
             {
-                ContextMenuItem::Action(
-                    "New", [this] {}),
-                ContextMenuItem::Action(
-                    "Open", [this] {}),
-                ContextMenuItem::Action("Save",
-                                        [this] {}),
+                ContextMenuItem::Widget(FilePicker("Save")
+                                            ->setMode(FilePickerMode::Save)
+                                            ->setTitle("Save Circuit")
+                                            ->setDefaultFilename("circuit.json")
+                                            ->setDefaultExtension("json")
+                                            ->addFilter("Circuit JSON", {"*.json"})
+                                            ->addFilter("All Files", {"*.*"})
+                                            ->setHeight(26)
+                                            ->setOnChanged([wsSave](const std::string &path)
+                                                           {
+        if (auto s = wsSave.lock())
+            s->saveToFile(path); })),
+
+                ContextMenuItem::Widget(FilePicker("Open")
+                                            ->setMode(FilePickerMode::Open)
+                                            ->setTitle("Open Circuit")
+                                            ->setDefaultExtension("json")
+                                            ->addFilter("Circuit JSON", {"*.json"})
+                                            ->addFilter("All Files", {"*.*"})
+
+                                            ->setHeight(26)
+                                            ->setOnChanged([wsOpen, wc](const std::string &path)
+                                                           {
+        if (auto s = wsOpen.lock())
+            s->loadFromFile(path);
+        if (auto c = wc.lock())
+            c->redraw(); })),
+                ContextMenuItem::Widget(FilePicker("PNG")
+                                            ->setMode(FilePickerMode::Save)
+                                            ->setTitle("Export PNG")
+                                            ->setDefaultFilename("circuit.png")
+                                            ->setDefaultExtension("png")
+                                            ->addFilter("PNG Image", {"*.png"})
+
+                                            ->setHeight(26)
+                                            ->setOnChanged([wsPNG](const std::string &path)
+                                                           {
+        if (auto s = wsPNG.lock()) s->exportPNG(path); })),
+                ContextMenuItem::Widget(FilePicker("SVG")
+                                            ->setMode(FilePickerMode::Save)
+                                            ->setTitle("Export SVG")
+                                            ->setDefaultFilename("circuit.svg")
+                                            ->setDefaultExtension("svg")
+                                            ->addFilter("SVG Vector", {"*.svg"})
+
+                                            ->setHeight(26)
+                                            ->setOnChanged([wsSVG](const std::string &path)
+                                                           {
+        if (auto s = wsSVG.lock()) s->exportSVG(path); })),
+                ContextMenuItem::Widget(FilePicker("Verilog")
+                                            ->setMode(FilePickerMode::Save)
+                                            ->setTitle("Export Verilog")
+                                            ->setDefaultFilename("circuit.v")
+                                            ->setDefaultExtension("v")
+                                            ->addFilter("Verilog", {"*.v"})
+
+                                            ->setHeight(26)
+                                            ->setOnChanged([wsVerilog](const std::string &path)
+                                                           {
+        if (auto s = wsVerilog.lock()) {
+            std::ofstream f(path, std::ios::out | std::ios::trunc);
+            if (f) f << s->toVerilog();
+        } })),
+                ContextMenuItem::Widget(FilePicker("VHDL")
+                                            ->setMode(FilePickerMode::Save)
+                                            ->setTitle("Export VHDL")
+                                            ->setDefaultFilename("circuit.vhd")
+                                            ->setDefaultExtension("vhd")
+                                            ->addFilter("VHDL", {"*.vhd", "*.vhdl"})
+
+                                            ->setHeight(26)
+                                            ->setOnChanged([wsVHDL](const std::string &path)
+                                                           {
+        if (auto s = wsVHDL.lock()) {
+            std::ofstream f(path, std::ios::out | std::ios::trunc);
+            if (f) f << s->toVHDL();
+        } })),
                 ContextMenuItem::Separator(),
+                ContextMenuItem::Action(
+                    "Open", [this]
+                    {}),
                 ContextMenuItem::Action("Exit", []
                                         { PostQuitMessage(0); }),
             }),
@@ -6337,12 +6326,6 @@ public:
                                Text("Circuit")->setFontSize(14)->setTextColor(Color::fromRGB(160, 160, 180)),
                                SizedBox(2, 0),
                                menuBar,
-                               savePicker,
-                               openPicker,
-                               verilogPicker,
-                               vhdlPicker,
-                               pngPicker,
-                               svgPicker,
                                SizedBox(2, 0),
                                undoBtn,
                                SizedBox(2, 0),
