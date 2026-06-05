@@ -25,7 +25,7 @@ struct TextBlock
     bool italic = false;
     Color color = Color::fromRGB(20, 20, 20);
     float wrapWidth = 0.f;
-    
+    float lineHeight = 1.3f;
 };
 
 // ============================================================
@@ -53,6 +53,7 @@ public:
     Color activeColor_ = Color::fromRGB(20, 20, 20);
     float currentZoom_ = 1.f;
     CanvasTool activeTool_ = CanvasTool::Select;
+    float activeLineHeight_ = 1.3f;
 
     // Callbacks
     std::function<void()> onCommitted;
@@ -249,6 +250,7 @@ public:
             activeBold_ = b.bold;
             activeItalic_ = b.italic;
             activeColor_ = b.color;
+            activeLineHeight_ = b.lineHeight;
             // Place cursor at click position
             selStart_ = selEnd_ = cursorIndexAt(x, b);
             resetBlink();
@@ -460,7 +462,7 @@ public:
                 ctx.setTextBaseline(TextBaseline::Bottom);
                 {
                     auto lines = getVisualLines(b.text, b.wrapWidth, b.fontSize);
-                    float lineH = b.fontSize * 1.3f;
+                    float lineH = b.fontSize * b.lineHeight;
                     for (int li = 0; li < int(lines.size()); ++li)
                         ctx.fillText(lines[li], b.x, b.y + 2.f + li * lineH);
                 }
@@ -641,6 +643,7 @@ private:
         b.bold = activeBold_;
         b.italic = activeItalic_;
         b.color = activeColor_;
+        b.lineHeight = activeLineHeight_;
         if (!editingExisting_)
         {
             b.x = editX_;
@@ -702,7 +705,7 @@ private:
         ctx.setFont(fontBuf);
         ctx.setTextBaseline(TextBaseline::Bottom);
 
-        float lineH = fs * 1.3f;
+        float lineH = fs * activeLineHeight_;
 
         float wrapW = (editingExisting_ && selectedIdx_ >= 0 &&
                        selectedIdx_ < int(blocks_.size()))
@@ -789,7 +792,7 @@ private:
 
         auto vlines = getVisualLines(b.text, b.wrapWidth, b.fontSize);
         int nLines = std::max(1, int(vlines.size()));
-        float lineH = b.fontSize * 1.3f;
+        float lineH = b.fontSize * b.lineHeight;
 
         float tw = b.wrapWidth > 0.f ? b.wrapWidth : 0.f;
         if (tw == 0.f)
@@ -851,7 +854,7 @@ private:
             auto lines = splitLines(b.text);
             int numLines = std::max(1, int(lines.size()));
             float approxW = b.wrapWidth > 0.f ? b.wrapWidth : approxTextWidth(b.text, b.fontSize);
-            float lineH = b.fontSize * 1.3f;
+            float lineH = b.fontSize * b.lineHeight;
             float boxX0 = b.x - 4.f;
             float boxY0 = b.y - b.fontSize - 4.f;
             float boxX1 = b.x + approxW + 4.f;
@@ -937,6 +940,9 @@ class TextApp : public Widget
     State<std::string> fontSizeState_{"18"};         // backing state for fontSizeInput_
     std::shared_ptr<ButtonWidget> boldBtn_;
     std::shared_ptr<ButtonWidget> italicBtn_;
+
+    std::shared_ptr<SliderWidget> lineHeightSlider_;
+    State<double> lineHeightState_{1.3};
 
     // Reactive state
     State<bool> canUndo_{false};
@@ -1060,6 +1066,14 @@ class TextApp : public Widget
         }
     }
 
+    void syncLineHeightSlider()
+    {
+        if (!lineHeightSlider_ || !surface_)
+            return;
+        lineHeightSlider_->value = double(surface_->activeLineHeight_);
+        lineHeightSlider_->markNeedsPaint();
+    }
+
     // Called when a selected block changes — reflect its style in the sidebar
     void onBlockSelected()
     {
@@ -1074,7 +1088,9 @@ class TextApp : public Widget
         surface_->activeBold_ = b->bold;
         surface_->activeItalic_ = b->italic;
         surface_->activeColor_ = b->color;
+        surface_->activeLineHeight_ = b->lineHeight;
 
+        syncLineHeightSlider();
         syncFontFamilyDropdown();
         syncFontSizeControls();
         updateStyleButtons();
@@ -1130,6 +1146,20 @@ public:
                            ->setBackgroundColor(kToolInactiveBg)
                            ->setOnClick([this]()
                                         { setActiveTool(CanvasTool::Text); });
+
+        // ── Line Height slider ────────────────────────────────────────
+        lineHeightSlider_ = Slider(0.8, 3.0, 0.05);
+        lineHeightSlider_->value = 1.3;
+        lineHeightSlider_->setOnValueChanged([ws, wc](double val)
+                                             {
+    if (auto s = ws.lock()) {
+        s->activeLineHeight_ = float(val);
+        // If editing an existing block, update it live
+        if (s->isEditing() && s->selectedBlockIndex() >= 0) {
+            // will apply on commit; redraw for preview
+        }
+    }
+    if (auto c = wc.lock()) c->redraw(); });
 
         // ── Font family dropdown ───────────────────────────────
         std::vector<std::string> familyLabels;
@@ -1378,7 +1408,9 @@ public:
                                Container(swatchRow)->setPadding(6)->setHeight(20),
 
                                SizedBox(0, 4),
-
+                               sideLabel("LINE HEIGHT"),
+                               Container(lineHeightSlider_)->setPadding(6)->setHeight(55),
+                               SizedBox(0, 4),
                                // ACTIONS
                                sideLabel("ACTIONS"),
                                Container(
