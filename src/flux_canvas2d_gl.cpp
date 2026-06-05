@@ -331,6 +331,15 @@ const Canvas2DGL::GlyphEntry *Canvas2DGL::getGlyph(int fontIdx, int codepoint,
     glyphs.push_back(e);
     return &glyphs.back();
 }
+float Canvas2DGL::getKernAdvance(int fontIdx, int cp1, int cp2, int pixelSize) const
+{
+    if (fontIdx < 0 || fontIdx >= int(fonts.size()))
+        return 0.f;
+    auto *info = reinterpret_cast<stbtt_fontinfo *>(fonts[fontIdx].stbFont);
+    float scale = stbtt_ScaleForPixelHeight(info, float(pixelSize));
+    int kern = stbtt_GetCodepointKernAdvance(info, cp1, cp2);
+    return float(kern) * scale;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Mat3
@@ -1382,3 +1391,4 @@ void Canvas2D::putImageData(const std::vector<uint8_t> &data,
     drawTexturedQuad(tex, 0, 0, float(srcW), float(srcH), dx, dy, float(srcW), float(srcH), srcW, srcH);
     glDeleteTextures(1, &tex);
 }
+

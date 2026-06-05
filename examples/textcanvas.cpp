@@ -27,6 +27,7 @@ struct TextBlock
     float wrapWidth = 0.f;
     float lineHeight = 1.3f;
     float letterSpacing = 0.f;
+    bool kerning = true;
 };
 
 // ============================================================
@@ -56,6 +57,7 @@ public:
     CanvasTool activeTool_ = CanvasTool::Select;
     float activeLineHeight_ = 1.3f;
     float activeLetterSpacing_ = 0.f;
+    bool activeKerning_ = true;
 
     // Callbacks
     std::function<void()> onCommitted;
@@ -254,6 +256,7 @@ public:
             activeColor_ = b.color;
             activeLineHeight_ = b.lineHeight;
             activeLetterSpacing_ = b.letterSpacing;
+            activeKerning_ = b.kerning;
             // Place cursor at click position
             selStart_ = selEnd_ = cursorIndexAt(x, b);
             resetBlink();
@@ -467,7 +470,7 @@ public:
                     auto lines = getVisualLines(b.text, b.wrapWidth, b.fontSize);
                     float lineH = b.fontSize * b.lineHeight;
                     for (int li = 0; li < int(lines.size()); ++li)
-                        fillTextSpaced(ctx, lines[li], b.x, b.y + 2.f + li * lineH, b.letterSpacing);
+                        fillTextSpaced(ctx, lines[li], b.x, b.y + 2.f + li * lineH, b.letterSpacing, b.kerning);
                 }
 
                 if (isSelected)
@@ -504,35 +507,70 @@ public:
 private:
     // ── Helpers ───────────────────────────────────────────────
     // Measures text width respecting letterSpacing
-    float measureTextSpaced(Canvas2D &ctx, const std::string &text, float letterSpacing) const
+    float measureTextSpaced(Canvas2D &ctx,
+                            const std::string &text,
+                            float letterSpacing,
+                            bool kerning) const
     {
-        if (letterSpacing == 0.f)
-            return ctx.measureText(text);
+        if (text.empty())
+            return 0.f;
+
+        int fontIdx = ctx.currentFontIdx();
+        int ps = std::max(4, int(ctx.currentFontSize() + 0.5f));
+
         float total = 0.f;
         for (int i = 0; i < int(text.size()); ++i)
         {
             total += ctx.measureText(text.substr(i, 1));
             if (i < int(text.size()) - 1)
+            {
                 total += letterSpacing;
+                if (kerning && fontIdx >= 0 && ctx.gl_)
+                    total += ctx.gl_->getKernAdvance(fontIdx,
+                                                     (unsigned char)text[i],
+                                                     (unsigned char)text[i + 1],
+                                                     ps);
+            }
         }
         return total;
     }
 
     // Draws text char-by-char respecting letterSpacing
-    void fillTextSpaced(Canvas2D &ctx, const std::string &text,
-                        float x, float y, float letterSpacing) const
+    void fillTextSpaced(Canvas2D &ctx,
+                        const std::string &text,
+                        float x, float y,
+                        float letterSpacing,
+                        bool kerning) const
     {
-        if (letterSpacing == 0.f)
+        if (text.empty())
+            return;
+
+        if (letterSpacing == 0.f && !kerning)
         {
             ctx.fillText(text, x, y);
             return;
         }
+
+        int fontIdx = ctx.currentFontIdx();
+        int ps = std::max(4, int(ctx.currentFontSize() + 0.5f));
+
         float cx = x;
         for (int i = 0; i < int(text.size()); ++i)
         {
             std::string ch = text.substr(i, 1);
             ctx.fillText(ch, cx, y);
-            cx += ctx.measureText(ch) + letterSpacing;
+            float advance = ctx.measureText(ch);
+
+            if (i < int(text.size()) - 1)
+            {
+                advance += letterSpacing;
+                if (kerning && fontIdx >= 0 && ctx.gl_)
+                    advance += ctx.gl_->getKernAdvance(fontIdx,
+                                                       (unsigned char)text[i],
+                                                       (unsigned char)text[i + 1],
+                                                       ps);
+            }
+            cx += advance;
         }
     }
     // Wraps a single line of text into visual lines given a max pixel width.
@@ -679,6 +717,7 @@ private:
         b.color = activeColor_;
         b.lineHeight = activeLineHeight_;
         b.letterSpacing = activeLetterSpacing_;
+        b.kerning = activeKerning_;
         if (!editingExisting_)
         {
             b.x = editX_;
@@ -757,6 +796,10 @@ private:
                     selectedIdx_ < int(blocks_.size()))
                        ? blocks_[selectedIdx_].letterSpacing
                        : activeLetterSpacing_;
+        bool kr = (editingExisting_ && selectedIdx_ >= 0 &&
+                   selectedIdx_ < int(blocks_.size()))
+                      ? blocks_[selectedIdx_].kerning
+                      : activeKerning_;
         auto lines = getVisualLines(text, wrapW, fs);
         int nLines = int(lines.size());
 
@@ -765,7 +808,7 @@ private:
         {
             float maxW = fs * 4.f;
             for (auto &l : lines)
-                maxW = std::max(maxW, measureTextSpaced(ctx, l.empty() ? "M" : l, ls) + fs * 1.2f);
+                maxW = std::max(maxW, measureTextSpaced(ctx, l.empty() ? "M" : l, ls, kr) + fs * 1.2f);
             float totalH = nLines * lineH + 10.f;
 
             ctx.setFillColor(Color::fromRGBA(30, 120, 255, 15));
@@ -802,8 +845,8 @@ private:
             {
                 int colStart = (li == loLine) ? loCol : 0;
                 int colEnd = (li == hiLine) ? hiCol : int(lines[li].size());
-                float selX = tx + measureTextSpaced(ctx, lines[li].substr(0, colStart), ls);
-                float selW = measureTextSpaced(ctx, lines[li].substr(colStart, colEnd - colStart), ls);
+                float selX = tx + measureTextSpaced(ctx, lines[li].substr(0, colStart), ls, kr);
+                float selW = measureTextSpaced(ctx, lines[li].substr(colStart, colEnd - colStart), ls, kr);
                 if (selW < 2.f)
                     selW = 2.f;
                 ctx.setFillColor(Color::fromRGBA(30, 120, 255, 80));
@@ -814,13 +857,13 @@ private:
         // Draw each line of text
         ctx.setFillColor(color);
         for (int li = 0; li < nLines; ++li)
-            fillTextSpaced(ctx, lines[li], tx, ty + 2.f + li * lineH, ls);
+            fillTextSpaced(ctx, lines[li], tx, ty + 2.f + li * lineH, ls,kr);
 
         // Blinking cursor
         if (cursorVisible_)
         {
             auto [curLine, curCol] = posToLineCol(selEnd_);
-            float cursorX = tx + measureTextSpaced(ctx, lines[curLine].substr(0, curCol), ls);
+            float cursorX = tx + measureTextSpaced(ctx, lines[curLine].substr(0, curCol), ls, kr);
             float cursorY = ty - fs - 1.f + curLine * lineH;
             ctx.setFillColor(color);
             ctx.fillRect(cursorX + 1.f, cursorY, 1.5f, fs + 4.f);
@@ -843,7 +886,7 @@ private:
         float tw = b.wrapWidth > 0.f ? b.wrapWidth : 0.f;
         if (tw == 0.f)
             for (auto &l : vlines)
-                tw = std::max(tw, measureTextSpaced(ctx, l, b.letterSpacing));
+                tw = std::max(tw, measureTextSpaced(ctx, l, b.letterSpacing, b.kerning));
 
         float totalH = b.fontSize + 10.f + (nLines - 1) * lineH;
 
@@ -990,6 +1033,7 @@ class TextApp : public Widget
     std::shared_ptr<SliderWidget> lineHeightSlider_;
     State<double> lineHeightState_{1.3};
     std::shared_ptr<SliderWidget> letterSpacingSlider_;
+    std::shared_ptr<ButtonWidget> kerningBtn_;
 
     // Reactive state
     State<bool> canUndo_{false};
@@ -1068,6 +1112,14 @@ class TextApp : public Widget
             italicBtn_->setBackgroundColor(surface_->activeItalic_ ? kStyleActiveBg : kStyleInactiveBg);
     }
 
+    void syncKerningButton()
+    {
+        if (!kerningBtn_ || !surface_)
+            return;
+        kerningBtn_->setBackgroundColor(
+            surface_->activeKerning_ ? kStyleActiveBg : kStyleInactiveBg);
+    }
+
     // Sync font family dropdown to current surface state
     void syncFontFamilyDropdown()
     {
@@ -1144,7 +1196,9 @@ class TextApp : public Widget
         surface_->activeItalic_ = b->italic;
         surface_->activeColor_ = b->color;
         surface_->activeLineHeight_ = b->lineHeight;
+        surface_->activeKerning_ = b->kerning;
 
+        syncKerningButton();
         syncLetterSpacingSlider();
         syncLineHeightSlider();
         syncFontFamilyDropdown();
@@ -1356,6 +1410,20 @@ public:
             swatchRow->addChild(btn);
         }
 
+        kerningBtn_ = Button("Kern")
+                          ->setHeight(28)
+                          ->setWidth(48)
+                          ->setBackgroundColor(kStyleActiveBg) // on by default
+                          ->setOnClick([this, ws, wc]()
+                                       {
+        if (auto s = ws.lock()) {
+            s->activeKerning_ = !s->activeKerning_;
+            // update button color
+            kerningBtn_->setBackgroundColor(
+                s->activeKerning_ ? kStyleActiveBg : kStyleInactiveBg);
+        }
+        if (auto c = wc.lock()) c->redraw(); });
+
         // ── Undo / Redo / Clear ───────────────────────────────
         auto undoBtn = Button("↩")
                            ->setHeight(26)
@@ -1455,12 +1523,7 @@ public:
                                    ->setHeight(50),
                                sideLabel("STYLE"),
                                Container(
-                                   Row({
-
-                                       boldBtn_,
-                                       SizedBox(2, 0),
-                                       italicBtn_,
-                                   }))
+                                   Row({boldBtn_, SizedBox(2, 0), italicBtn_, SizedBox(2, 0), kerningBtn_}))
                                    ->setPadding(6)
                                    ->setHeight(30),
 
