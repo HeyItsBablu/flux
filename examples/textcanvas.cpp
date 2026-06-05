@@ -51,7 +51,8 @@ enum class CanvasTool
     Text,
     Move,
     Scale,
-    Rotate
+    Rotate,
+    MultiSelect
 };
 
 // ============================================================
@@ -74,11 +75,56 @@ public:
     bool activeKerning_ = true;
     TextAlign activeTextAlign_ = TextAlign::Left;
     float activeBaselineShift_ = 0.f;
+    bool shiftHeld_ = false;
 
     // Callbacks
     std::function<void()> onCommitted;
     std::function<void(float, float)> onMousePos;
     std::function<void()> onSelectionChanged; // block selection changed
+
+    // Returns true if more than one block is selected
+    bool hasMultiSelection() const { return selectedIndices_.size() > 1; }
+
+    const std::vector<int> &selectedIndices() const { return selectedIndices_; }
+
+    void clearMultiSelection()
+    {
+        selectedIndices_.clear();
+        selectedIdx_ = -1;
+    }
+
+    // Apply a style lambda to every selected block
+    // Usage: applyToSelected([](TextBlock& b){ b.fontSize = 24; });
+    template <typename Fn>
+    void applyToSelected(Fn fn)
+    {
+        if (selectedIndices_.empty())
+            return;
+        pushUndo();
+        for (int idx : selectedIndices_)
+        {
+            if (idx >= 0 && idx < int(blocks_.size()))
+                fn(blocks_[idx]);
+        }
+        if (onCommitted)
+            onCommitted();
+    }
+
+    void deleteAllSelected()
+    {
+        if (selectedIndices_.empty())
+            return;
+        pushUndo();
+        // Sort descending so erasing by index doesn't shift remaining
+        auto sorted = selectedIndices_;
+        std::sort(sorted.begin(), sorted.end(), std::greater<int>());
+        for (int idx : sorted)
+            blocks_.erase(blocks_.begin() + idx);
+        selectedIndices_.clear();
+        selectedIdx_ = -1;
+        if (onCommitted)
+            onCommitted();
+    }
 
     void resetSelectedRotation()
     {
@@ -348,6 +394,65 @@ public:
             return;
         }
 
+        if (activeTool_ == CanvasTool::MultiSelect)
+        {
+            int hit = hitTestBlock(x, y);
+
+            if (hit >= 0)
+            {
+                // Shift-click: toggle this block in/out of selection
+                if (shiftHeld_)
+                {
+                    auto it = std::find(selectedIndices_.begin(),
+                                        selectedIndices_.end(), hit);
+                    if (it != selectedIndices_.end())
+                        selectedIndices_.erase(it);
+                    else
+                        selectedIndices_.push_back(hit);
+                }
+                else
+                {
+                    // If clicking an already-selected block, start multi-drag
+                    bool alreadySelected = std::find(selectedIndices_.begin(),
+                                                     selectedIndices_.end(), hit) != selectedIndices_.end();
+
+                    if (!alreadySelected)
+                    {
+                        selectedIndices_.clear();
+                        selectedIndices_.push_back(hit);
+                    }
+
+                    // Start drag for all selected
+                    draggingMulti_ = true;
+                    multiDragStartX_ = x;
+                    multiDragStartY_ = y;
+                    multiDragOrigins_.clear();
+                    for (int idx : selectedIndices_)
+                    {
+                        multiDragOrigins_.push_back({blocks_[idx].x,
+                                                     blocks_[idx].y});
+                    }
+                    pushUndo();
+                }
+
+                selectedIdx_ = hit; // keep single-select in sync for sidebar
+                if (onSelectionChanged)
+                    onSelectionChanged();
+            }
+            else
+            {
+                // Start rubber band
+                selectedIndices_.clear();
+                selectedIdx_ = -1;
+                rubberBanding_ = true;
+                rubberX0_ = rubberX1_ = x;
+                rubberY0_ = rubberY1_ = y;
+                if (onSelectionChanged)
+                    onSelectionChanged();
+            }
+            return;
+        }
+
         // Text tool
         int hit = hitTestBlock(x, y);
         if (hit >= 0)
@@ -468,6 +573,56 @@ public:
             return;
         }
 
+        // Multi-block drag
+        if (draggingMulti_ && activeTool_ == CanvasTool::MultiSelect)
+        {
+            float dx = x - multiDragStartX_;
+            float dy = y - multiDragStartY_;
+            for (int i = 0; i < int(selectedIndices_.size()); ++i)
+            {
+                int idx = selectedIndices_[i];
+                if (idx >= 0 && idx < int(blocks_.size()))
+                {
+                    blocks_[idx].x = multiDragOrigins_[i].first + dx;
+                    blocks_[idx].y = multiDragOrigins_[i].second + dy;
+                }
+            }
+            if (onCommitted)
+                onCommitted();
+            return;
+        }
+
+        // Rubber band update
+        if (rubberBanding_ && activeTool_ == CanvasTool::MultiSelect)
+        {
+            rubberX1_ = x;
+            rubberY1_ = y;
+
+            // Live-update selection as band grows
+            float rx0 = std::min(rubberX0_, rubberX1_);
+            float ry0 = std::min(rubberY0_, rubberY1_);
+            float rx1 = std::max(rubberX0_, rubberX1_);
+            float ry1 = std::max(rubberY0_, rubberY1_);
+
+            selectedIndices_.clear();
+            for (int i = 0; i < int(blocks_.size()); ++i)
+            {
+                const auto &b = blocks_[i];
+                float cx, cy;
+                blockCenter(b, cx, cy);
+                if (cx >= rx0 && cx <= rx1 && cy >= ry0 && cy <= ry1)
+                    selectedIndices_.push_back(i);
+            }
+            if (!selectedIndices_.empty())
+                selectedIdx_ = selectedIndices_.back();
+            else
+                selectedIdx_ = -1;
+
+            if (onSelectionChanged)
+                onSelectionChanged();
+            return;
+        }
+
         // Drag-select within text
         if (mouseDown_ && editing_ && editingExisting_ &&
             selectedIdx_ >= 0 && selectedIdx_ < int(blocks_.size()))
@@ -499,6 +654,18 @@ public:
             draggingRotate_ = false;
             return;
         }
+
+        if (rubberBanding_)
+        {
+            rubberBanding_ = false;
+            return;
+        }
+        if (draggingMulti_)
+        {
+            draggingMulti_ = false;
+            multiDragOrigins_.clear();
+            return;
+        }
         if (draggingWrapHandle_)
         {
             draggingWrapHandle_ = false;
@@ -513,11 +680,18 @@ public:
     // ── Keyboard ──────────────────────────────────────────────
     void onKeyDown(const KeyEvent &e) override
     {
-        // ── Select tool: only Delete/Backspace deletes the block ──
-        if (activeTool_ == CanvasTool::Select)
+        shiftHeld_ = e.shift;
+
+        if (activeTool_ == CanvasTool::Select ||
+            activeTool_ == CanvasTool::MultiSelect)
         {
             if (e.virtualKey == Key::Delete || e.virtualKey == Key::Backspace)
-                deleteSelected();
+            {
+                if (hasMultiSelection())
+                    deleteAllSelected();
+                else
+                    deleteSelected();
+            }
             return;
         }
 
@@ -673,7 +847,7 @@ public:
         }
     }
 
-    void onKeyUp(const KeyEvent &) override {}
+    void onKeyUp(const KeyEvent &e) override { shiftHeld_ = e.shift; }
 
     // ── Render ────────────────────────────────────────────────
     void render(Canvas2D &ctx) override
@@ -741,7 +915,11 @@ public:
                 }
                 ctx.restore(); // end rotation
 
-                if (isSelected)
+                // Single select highlight
+                bool isMultiSelected = std::find(selectedIndices_.begin(),
+                                                 selectedIndices_.end(), i) != selectedIndices_.end();
+
+                if (isSelected || isMultiSelected)
                     drawBlockOutline(ctx, b, false);
             }
         }
@@ -766,11 +944,32 @@ public:
             ctx.setFont("12px sans");
             ctx.setTextBaseline(TextBaseline::Top);
             const char *hint = (activeTool_ == CanvasTool::Select)
-                                   ? "Select tool: click a text block to select it"
+                                   ? "Select tool: click to select"
                                : (activeTool_ == CanvasTool::Move)
-                                   ? "Move tool: drag a block to reposition it"
+                                   ? "Move tool: drag a block"
+                               : (activeTool_ == CanvasTool::Scale)
+                                   ? "Scale tool: select then drag green handle"
+                               : (activeTool_ == CanvasTool::Rotate)
+                                   ? "Rotate tool: select then drag pink handle"
+                               : (activeTool_ == CanvasTool::MultiSelect)
+                                   ? "Multi-select: drag to band-select, shift+click to toggle"
                                    : "Text tool: click anywhere to place text";
             ctx.fillText(hint, 16.f, 14.f);
+        }
+
+        // Rubber band rect
+        if (rubberBanding_)
+        {
+            float rx = std::min(rubberX0_, rubberX1_);
+            float ry = std::min(rubberY0_, rubberY1_);
+            float rw = std::abs(rubberX1_ - rubberX0_);
+            float rh = std::abs(rubberY1_ - rubberY0_);
+
+            ctx.setFillColor(Color::fromRGBA(30, 120, 255, 25));
+            ctx.fillRect(rx, ry, rw, rh);
+            ctx.setStrokeColor(Color::fromRGBA(30, 120, 255, 180));
+            ctx.setLineWidth(1.f);
+            ctx.strokeRect(rx, ry, rw, rh);
         }
     }
 
@@ -1652,6 +1851,17 @@ private:
     float rotateCenterX_ = 0.f, rotateCenterY_ = 0.f; // block center in canvas space
     float rotateStartAngle_ = 0.f;                    // block rotation at drag start
     float rotateMouseStartAngle_ = 0.f;               // atan2 of mouse at drag start
+
+    // Multi-select state
+    std::vector<int> selectedIndices_;      // all selected block indices
+    bool rubberBanding_ = false;            // currently drawing selection rect
+    float rubberX0_ = 0.f, rubberY0_ = 0.f; // rubber band origin
+    float rubberX1_ = 0.f, rubberY1_ = 0.f; // rubber band current corner
+
+    // Multi-block drag
+    bool draggingMulti_ = false;
+    float multiDragStartX_ = 0.f, multiDragStartY_ = 0.f;
+    std::vector<std::pair<float, float>> multiDragOrigins_; // per-block {x,y} at drag start
 };
 
 // ============================================================
@@ -1696,6 +1906,12 @@ class TextApp : public Widget
     std::shared_ptr<ButtonWidget> rotateToolBtn_;
     std::shared_ptr<ButtonWidget> rotateResetBtn_;
 
+    std::shared_ptr<ButtonWidget> multiSelectBtn_;
+    std::shared_ptr<ButtonWidget> deleteAllBtn_;
+    std::shared_ptr<ButtonWidget> bulkBoldBtn_;
+    std::shared_ptr<ButtonWidget> bulkSizeUpBtn_;
+    std::shared_ptr<ButtonWidget> bulkSizeDownBtn_;
+
     // Reactive state
     State<bool> canUndo_{false};
     State<bool> canRedo_{false};
@@ -1734,11 +1950,17 @@ class TextApp : public Widget
             return;
         auto t = surface_->activeTool_;
         if (moveToolBtn_)
-            moveToolBtn_->setBackgroundColor(t == CanvasTool::Move ? hi : lo);
+            moveToolBtn_->setBackgroundColor(
+                t == CanvasTool::Move ? hi : lo);
         if (scaleToolBtn_)
-            scaleToolBtn_->setBackgroundColor(t == CanvasTool::Scale ? hi : lo);
+            scaleToolBtn_->setBackgroundColor(
+                t == CanvasTool::Scale ? hi : lo);
         if (rotateToolBtn_)
-            rotateToolBtn_->setBackgroundColor(t == CanvasTool::Rotate ? hi : lo);
+            rotateToolBtn_->setBackgroundColor(
+                t == CanvasTool::Rotate ? hi : lo);
+        if (multiSelectBtn_)
+            multiSelectBtn_->setBackgroundColor(
+                t == CanvasTool::MultiSelect ? hi : lo);
     }
 
     void refreshState()
@@ -1774,8 +1996,21 @@ class TextApp : public Widget
         if (selectToolBtn_)
             selectToolBtn_->setBackgroundColor(isSel ? kToolActiveBg : kToolInactiveBg);
         if (textToolBtn_)
-            textToolBtn_->setBackgroundColor(!isSel ? kToolActiveBg : kToolInactiveBg);
-        toolLabel_.set(isSel ? "Select" : "Text");
+            textToolBtn_->setBackgroundColor(
+                t == CanvasTool::Text ? kToolActiveBg : kToolInactiveBg);
+        updateTransformButtons();
+        std::string label = "Select";
+        if (t == CanvasTool::Text)
+            label = "Text";
+        else if (t == CanvasTool::Move)
+            label = "Move";
+        else if (t == CanvasTool::Scale)
+            label = "Scale";
+        else if (t == CanvasTool::Rotate)
+            label = "Rotate";
+        else if (t == CanvasTool::MultiSelect)
+            label = "Multi-Select";
+        toolLabel_.set(label);
     }
 
     void updateStyleButtons()
@@ -2391,14 +2626,73 @@ public:
         }
         if (auto c = wc.lock()) c->redraw(); });
 
+        multiSelectBtn_ = Button("Multi")
+                              ->setHeight(30)
+                              ->setWidth(100)
+                              ->setBackgroundColor(kToolInactiveBg)
+                              ->setOnClick([this]
+                                           { setActiveTool(CanvasTool::MultiSelect); });
+
+        deleteAllBtn_ = Button("Del All")
+                            ->setHeight(26)
+                            ->setWidth(100)
+                            ->setBackgroundColor(Color::fromRGB(160, 40, 40))
+                            ->setOnClick([this, ws, wc]()
+                                         {
+        if (auto s = ws.lock()) s->deleteAllSelected();
+        refreshState();
+        if (auto c = wc.lock()) c->redraw(); });
+
+        bulkBoldBtn_ = Button("Bold All")
+                           ->setHeight(26)
+                           ->setWidth(100)
+                           ->setBackgroundColor(kStyleInactiveBg)
+                           ->setOnClick([this, ws, wc]()
+                                        {
+        if (auto s = ws.lock())
+            s->applyToSelected([](TextBlock &b){ b.bold = !b.bold; });
+        if (auto c = wc.lock()) c->redraw(); });
+
+        bulkSizeUpBtn_ = Button("Size +4")
+                             ->setHeight(26)
+                             ->setWidth(100)
+                             ->setBackgroundColor(kStyleInactiveBg)
+                             ->setOnClick([this, ws, wc]()
+                                          {
+        if (auto s = ws.lock())
+            s->applyToSelected([](TextBlock &b){
+                b.fontSize = std::clamp(b.fontSize + 4.f, 6.f, 200.f);
+            });
+        if (auto c = wc.lock()) c->redraw(); });
+
+        bulkSizeDownBtn_ = Button("Size -4")
+                               ->setHeight(26)
+                               ->setWidth(100)
+                               ->setBackgroundColor(kStyleInactiveBg)
+                               ->setOnClick([this, ws, wc]()
+                                            {
+        if (auto s = ws.lock())
+            s->applyToSelected([](TextBlock &b){
+                b.fontSize = std::clamp(b.fontSize - 4.f, 6.f, 200.f);
+            });
+        if (auto c = wc.lock()) c->redraw(); });
+
         auto rightSidebar = Container(
                                 ListView({
                                     sideLabel("TRANSFORM"),
                                     Container(moveToolBtn_)->setPadding(6)->setHeight(50),
                                     Container(scaleToolBtn_)->setPadding(6)->setHeight(50),
                                     Container(rotateToolBtn_)->setPadding(6)->setHeight(50),
+                                    Container(multiSelectBtn_)->setPadding(6)->setHeight(50),
+
                                     sideLabel("ROTATION"),
                                     Container(rotateResetBtn_)->setPadding(6)->setHeight(40),
+
+                                    sideLabel("MULTI-EDIT"),
+                                    Container(bulkBoldBtn_)->setPadding(6)->setHeight(38),
+                                    Container(bulkSizeUpBtn_)->setPadding(6)->setHeight(38),
+                                    Container(bulkSizeDownBtn_)->setPadding(6)->setHeight(38),
+                                    Container(deleteAllBtn_)->setPadding(6)->setHeight(38),
                                 }))
                                 ->setWidth(140)
                                 ->setBackgroundColor(Color::fromRGB(28, 28, 30));
