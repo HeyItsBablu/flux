@@ -37,6 +37,7 @@ struct TextBlock
     float letterSpacing = 0.f;
     bool kerning = true;
     TextAlign textAlign = TextAlign::Left;
+    float baselineShift = 0.f;
 };
 
 // ============================================================
@@ -68,6 +69,7 @@ public:
     float activeLetterSpacing_ = 0.f;
     bool activeKerning_ = true;
     TextAlign activeTextAlign_ = TextAlign::Left;
+    float activeBaselineShift_ = 0.f;
 
     // Callbacks
     std::function<void()> onCommitted;
@@ -203,6 +205,7 @@ public:
                 cursorVisible_ = !cursorVisible_;
             }
         }
+        wallTime_ += dt;
     }
 
     bool needsContinuousRedraw() const override { return editing_; }
@@ -268,8 +271,27 @@ public:
             activeLetterSpacing_ = b.letterSpacing;
             activeKerning_ = b.kerning;
             activeTextAlign_ = b.textAlign;
-            // Place cursor at click position
-            selStart_ = selEnd_ = cursorIndexAt(x, b);
+            activeBaselineShift_ = b.baselineShift;
+
+            int clickIdx = cursorIndexAt(x, b);
+            selStart_ = selEnd_ = clickIdx;
+
+            double now = wallTime_;
+            float ddx = x - lastClickX_;
+            float ddy = y - lastClickY_;
+            bool sameSpot = (ddx * ddx + ddy * ddy) < 16.f;
+            bool doubleClick = sameSpot && (now - lastClickTime_) < 0.4;
+
+            lastClickTime_ = now;
+            lastClickX_ = x;
+            lastClickY_ = y;
+
+            if (doubleClick)
+            {
+                auto [lo, hi] = wordBoundsAt(clickIdx);
+                selStart_ = lo;
+                selEnd_ = hi;
+            }
             resetBlink();
         }
         else
@@ -329,6 +351,7 @@ public:
     // ── Keyboard ──────────────────────────────────────────────
     void onKeyDown(const KeyEvent &e) override
     {
+        // ── Select tool: only Delete/Backspace deletes the block ──
         if (activeTool_ == CanvasTool::Select)
         {
             if (e.virtualKey == Key::Delete || e.virtualKey == Key::Backspace)
@@ -336,11 +359,61 @@ public:
             return;
         }
 
+        // ── Everything below requires an active edit session ──────
         if (!editing_)
             return;
 
-        bool shift = e.shift;
+        // ── Ctrl shortcuts ────────────────────────────────────────
+        if (e.ctrl)
+        {
+            switch (e.virtualKey)
+            {
+            case 'A':
+                selStart_ = 0;
+                selEnd_ = int(editBuf_.size());
+                resetBlink();
+                return;
 
+            case 'C':
+                if (hasSelection())
+                {
+                    int lo = std::min(selStart_, selEnd_);
+                    int hi = std::max(selStart_, selEnd_);
+                    copyToClipboard(editBuf_.substr(lo, hi - lo));
+                }
+                return;
+
+            case 'X':
+                if (hasSelection())
+                {
+                    int lo = std::min(selStart_, selEnd_);
+                    int hi = std::max(selStart_, selEnd_);
+                    copyToClipboard(editBuf_.substr(lo, hi - lo));
+                    deleteSelection();
+                    resetBlink();
+                }
+                return;
+
+            case 'V':
+            {
+                std::string clip = pasteFromClipboard();
+                if (!clip.empty())
+                {
+                    deleteSelection();
+                    int ins = selStart_;
+                    editBuf_.insert(ins, clip);
+                    selStart_ = selEnd_ = ins + int(clip.size());
+                    resetBlink();
+                }
+                return;
+            }
+
+            default:
+                return;
+            }
+        }
+
+        // ── Printable character input ──────────────────────────────
         if (e.codepoint >= 32 && e.codepoint != 127)
         {
             deleteSelection();
@@ -351,13 +424,14 @@ public:
             return;
         }
 
+        // ── Navigation and editing keys ───────────────────────────
+        bool shift = e.shift;
+
         switch (e.virtualKey)
         {
         case Key::Backspace:
             if (hasSelection())
-            {
                 deleteSelection();
-            }
             else if (!editBuf_.empty() && selStart_ > 0)
             {
                 editBuf_.erase(editBuf_.begin() + selStart_ - 1);
@@ -368,21 +442,15 @@ public:
 
         case Key::Delete:
             if (hasSelection())
-            {
                 deleteSelection();
-            }
             else if (selStart_ < int(editBuf_.size()))
-            {
                 editBuf_.erase(editBuf_.begin() + selStart_);
-            }
             resetBlink();
             break;
 
         case Key::Left:
             if (!shift && hasSelection())
-            {
                 selStart_ = selEnd_ = std::min(selStart_, selEnd_);
-            }
             else
             {
                 int newPos = std::max(0, selEnd_ - 1);
@@ -396,9 +464,7 @@ public:
 
         case Key::Right:
             if (!shift && hasSelection())
-            {
                 selStart_ = selEnd_ = std::max(selStart_, selEnd_);
-            }
             else
             {
                 int newPos = std::min(int(editBuf_.size()), selEnd_ + 1);
@@ -486,11 +552,12 @@ public:
                     {
                         float drawX = b.x;
                         bool isLast = (li == int(lines.size()) - 1);
+                        float drawY = b.y + 2.f + li * lineH - b.baselineShift;
 
                         if (b.textAlign == TextAlign::Justify)
                         {
                             fillTextJustified(ctx, lines[li], drawX,
-                                              b.y + 2.f + li * lineH,
+                                              drawY,
                                               containerW,
                                               b.letterSpacing, b.kerning, isLast);
                         }
@@ -500,7 +567,7 @@ public:
                                                             b.letterSpacing, b.kerning);
                             drawX += alignOffset(lineW, containerW, b.textAlign);
                             fillTextSpaced(ctx, lines[li], drawX,
-                                           b.y + 2.f + li * lineH,
+                                           drawY,
                                            b.letterSpacing, b.kerning);
                         }
                     }
@@ -539,6 +606,103 @@ public:
 
 private:
     // ── Helpers ───────────────────────────────────────────────
+
+    void copyToClipboard(const std::string &text) const
+    {
+#ifdef _WIN32
+        if (text.empty())
+            return;
+        if (!OpenClipboard(nullptr))
+            return;
+        EmptyClipboard();
+
+        // Convert to wide string for CF_UNICODETEXT
+        int wlen = MultiByteToWideChar(CP_UTF8, 0,
+                                       text.c_str(), int(text.size()),
+                                       nullptr, 0);
+        HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE,
+                                   (wlen + 1) * sizeof(wchar_t));
+        if (hMem)
+        {
+            wchar_t *dst = reinterpret_cast<wchar_t *>(GlobalLock(hMem));
+            MultiByteToWideChar(CP_UTF8, 0,
+                                text.c_str(), int(text.size()),
+                                dst, wlen);
+            dst[wlen] = L'\0';
+            GlobalUnlock(hMem);
+            SetClipboardData(CF_UNICODETEXT, hMem);
+        }
+        CloseClipboard();
+#endif
+    }
+
+    std::string pasteFromClipboard() const
+    {
+#ifdef _WIN32
+        if (!OpenClipboard(nullptr))
+            return {};
+        HANDLE hData = GetClipboardData(CF_UNICODETEXT);
+        if (!hData)
+        {
+            CloseClipboard();
+            return {};
+        }
+
+        wchar_t *wstr = reinterpret_cast<wchar_t *>(GlobalLock(hData));
+        if (!wstr)
+        {
+            CloseClipboard();
+            return {};
+        }
+
+        int len = WideCharToMultiByte(CP_UTF8, 0,
+                                      wstr, -1,
+                                      nullptr, 0, nullptr, nullptr);
+        std::string result(len - 1, '\0');
+        WideCharToMultiByte(CP_UTF8, 0,
+                            wstr, -1,
+                            result.data(), len, nullptr, nullptr);
+
+        GlobalUnlock(hData);
+        CloseClipboard();
+
+        // Strip \r, keep \n
+        result.erase(std::remove(result.begin(), result.end(), '\r'),
+                     result.end());
+        return result;
+#else
+        return {};
+#endif
+    }
+
+    // Returns {wordStart, wordEnd} for the word containing buffer position pos.
+    // Word characters: alphanumeric + underscore. Everything else is a boundary.
+    std::pair<int, int> wordBoundsAt(int pos) const
+    {
+        int n = int(editBuf_.size());
+        if (n == 0)
+            return {0, 0};
+        pos = std::clamp(pos, 0, n - 1);
+
+        auto isWord = [](char c)
+        {
+            return std::isalnum((unsigned char)c) || c == '_';
+        };
+
+        // If we're sitting on a non-word char, select just that char
+        if (!isWord(editBuf_[pos]))
+            return {pos, pos + 1};
+
+        int lo = pos;
+        while (lo > 0 && isWord(editBuf_[lo - 1]))
+            --lo;
+
+        int hi = pos;
+        while (hi < n && isWord(editBuf_[hi]))
+            ++hi;
+
+        return {lo, hi};
+    }
     // Computes the reference container width for alignment.
     // Uses wrapWidth if set; otherwise measures the widest visual line.
     float blockContainerWidth(Canvas2D &ctx,
@@ -843,6 +1007,7 @@ private:
         b.letterSpacing = activeLetterSpacing_;
         b.kerning = activeKerning_;
         b.textAlign = activeTextAlign_;
+        b.baselineShift = activeBaselineShift_;
         if (!editingExisting_)
         {
             b.x = editX_;
@@ -934,6 +1099,11 @@ private:
                            ? blocks_[selectedIdx_].textAlign
                            : activeTextAlign_;
 
+        float bs = (editingExisting_ && selectedIdx_ >= 0 &&
+                    selectedIdx_ < int(blocks_.size()))
+                       ? blocks_[selectedIdx_].baselineShift
+                       : activeBaselineShift_;
+
         // Background highlight box
         if (highlight)
         {
@@ -943,9 +1113,9 @@ private:
             float totalH = nLines * lineH + 10.f;
 
             ctx.setFillColor(Color::fromRGBA(30, 120, 255, 15));
-            ctx.fillRoundedRect(tx - 4.f, ty - fs - 6.f, maxW, totalH, 3.f);
+            ctx.fillRoundedRect(tx - 4.f, ty - fs - 6.f - bs, maxW, totalH, 3.f);
             ctx.setFillColor(Color::fromRGBA(30, 120, 255, 50));
-            ctx.fillRect(tx - 2.f, ty + 3.f + (nLines - 1) * lineH, maxW, 1.f);
+            ctx.fillRect(tx - 2.f, ty + 3.f + (nLines - 1) * lineH - bs, maxW, 1.f);
         }
 
         // Figure out which line/col the cursor and selection endpoints are on
@@ -990,7 +1160,7 @@ private:
                 if (selW < 2.f)
                     selW = 2.f;
                 ctx.setFillColor(Color::fromRGBA(30, 120, 255, 80));
-                ctx.fillRect(selX, ty - fs - 1.f + li * lineH, selW, fs + 4.f);
+                ctx.fillRect(selX, ty - fs - 1.f + li * lineH - bs, selW, fs + 4.f);
             }
         }
 
@@ -1004,7 +1174,7 @@ private:
             if (ta == TextAlign::Justify)
             {
                 fillTextJustified(ctx, lines[li], drawX,
-                                  ty + 2.f + li * lineH,
+                                  ty + 2.f + li * lineH - bs,
                                   containerW, ls, kr, isLast);
             }
             else
@@ -1012,7 +1182,7 @@ private:
                 float lineW = measureTextSpaced(ctx, lines[li], ls, kr);
                 drawX += alignOffset(lineW, containerW, ta);
                 fillTextSpaced(ctx, lines[li], drawX,
-                               ty + 2.f + li * lineH, ls, kr);
+                               ty + 2.f + li * lineH - bs, ls, kr);
             }
         }
 
@@ -1027,7 +1197,7 @@ private:
             float cursorX = tx + lineOX +
                             measureTextSpaced(ctx,
                                               lines[curLine].substr(0, curCol), ls, kr);
-            float cursorY = ty - fs - 1.f + curLine * lineH;
+            float cursorY = ty - fs - 1.f + curLine * lineH - bs;
             ctx.setFillColor(color);
             ctx.fillRect(cursorX + 1.f, cursorY, 1.5f, fs + 4.f);
         }
@@ -1059,15 +1229,16 @@ private:
         else
             ctx.setStrokeColor(Color::fromRGBA(30, 120, 255, 160));
         ctx.setLineWidth(1.f);
-        ctx.strokeRoundedRect(b.x - 4.f, b.y - b.fontSize - 4.f,
+        float shiftedY = b.y - b.baselineShift;
+        ctx.strokeRoundedRect(b.x - 4.f, shiftedY - b.fontSize - 4.f,
                               tw + 8.f, totalH, 2.f);
 
         // ── Corner handles (selected only) ────────────────────
         if (!hover)
         {
             float hx[] = {b.x - 4.f, b.x + tw + 4.f};
-            float hy[] = {b.y - b.fontSize - 4.f,
-                          b.y - b.fontSize - 4.f + totalH};
+            float hy[] = {shiftedY - b.fontSize - 4.f,
+                          shiftedY - b.fontSize - 4.f + totalH};
             ctx.setFillColor(Color::fromRGBA(30, 120, 255, 200));
             for (float hxx : hx)
                 for (float hyy : hy)
@@ -1080,7 +1251,7 @@ private:
                              : tw;
 
         float rx = b.x + displayW + 4.f;
-        float outlineTop = b.y - b.fontSize - 4.f;
+        float outlineTop = shiftedY - b.fontSize - 4.f;
 
         // Dashed right-edge line
         ctx.setStrokeColor(Color::fromRGBA(30, 120, 255, 100));
@@ -1095,7 +1266,7 @@ private:
 
         // Orange wrap handle square
         ctx.setFillColor(Color::fromRGBA(255, 160, 30, 220));
-        ctx.fillRoundedRect(rx - 4.f, b.y - b.fontSize * 0.5f - 4.f, 8.f, 8.f, 2.f);
+        ctx.fillRoundedRect(rx - 4.f, shiftedY - b.fontSize * 0.5f - 4.f, 8.f, 8.f, 2.f);
     }
 
     int hitTestBlock(float x, float y) const
@@ -1105,12 +1276,16 @@ private:
             const auto &b = blocks_[i];
             auto lines = splitLines(b.text);
             int numLines = std::max(1, int(lines.size()));
-            float approxW = b.wrapWidth > 0.f ? b.wrapWidth : approxTextWidth(b.text, b.fontSize);
+            float approxW = b.wrapWidth > 0.f
+                                ? b.wrapWidth
+                                : approxTextWidth(b.text, b.fontSize);
             float lineH = b.fontSize * b.lineHeight;
+            float shiftedY = b.y - b.baselineShift;
+
             float boxX0 = b.x - 4.f;
-            float boxY0 = b.y - b.fontSize - 4.f;
+            float boxY0 = shiftedY - b.fontSize - 4.f;
             float boxX1 = b.x + approxW + 4.f;
-            float boxY1 = b.y + (numLines - 1) * lineH + 6.f; // <-- multi-line
+            float boxY1 = shiftedY + (numLines - 1) * lineH + 6.f;
             if (x >= boxX0 && x <= boxX1 && y >= boxY0 && y <= boxY1)
                 return i;
         }
@@ -1156,6 +1331,10 @@ private:
     float editX_ = 0, editY_ = 0;
     std::string editBuf_;
 
+    double lastClickTime_ = 0.0;
+    float lastClickX_ = 0.f;
+    float lastClickY_ = 0.f;
+
     // Text selection within edit buffer
     int selStart_ = 0, selEnd_ = 0;
 
@@ -1169,6 +1348,8 @@ private:
     bool cursorVisible_ = true;
 
     int w_ = 850, h_ = 1100;
+
+    double wallTime_ = 0.0;
 };
 
 // ============================================================
@@ -1192,6 +1373,11 @@ class TextApp : public Widget
     State<std::string> fontSizeState_{"18"};         // backing state for fontSizeInput_
     std::shared_ptr<ButtonWidget> boldBtn_;
     std::shared_ptr<ButtonWidget> italicBtn_;
+
+    std::shared_ptr<SliderWidget> baselineShiftSlider_;
+    std::shared_ptr<ButtonWidget> superscriptBtn_;
+    std::shared_ptr<ButtonWidget> subscriptBtn_;
+    std::shared_ptr<ButtonWidget> baselineResetBtn_;
 
     std::shared_ptr<SliderWidget> lineHeightSlider_;
     State<double> lineHeightState_{1.3};
@@ -1278,6 +1464,14 @@ class TextApp : public Widget
             boldBtn_->setBackgroundColor(surface_->activeBold_ ? kStyleActiveBg : kStyleInactiveBg);
         if (italicBtn_)
             italicBtn_->setBackgroundColor(surface_->activeItalic_ ? kStyleActiveBg : kStyleInactiveBg);
+    }
+
+    void syncBaselineShiftSlider()
+    {
+        if (!baselineShiftSlider_ || !surface_)
+            return;
+        baselineShiftSlider_->value = double(surface_->activeBaselineShift_);
+        baselineShiftSlider_->markNeedsPaint();
     }
 
     void syncAlignButtons()
@@ -1383,7 +1577,9 @@ class TextApp : public Widget
         surface_->activeLineHeight_ = b->lineHeight;
         surface_->activeKerning_ = b->kerning;
         surface_->activeTextAlign_ = b->textAlign;
+        surface_->activeBaselineShift_ = b->baselineShift;
 
+        syncBaselineShiftSlider();
         syncAlignButtons();
         syncKerningButton();
         syncLetterSpacingSlider();
@@ -1521,6 +1717,53 @@ public:
 
         fontSizeInput_->setWidth(52);
         fontSizeInput_->setInputValue(fontSizeState_);
+
+        baselineShiftSlider_ = Slider(-60.0, 60.0, 0.5);
+        baselineShiftSlider_->value = 0.0;
+        baselineShiftSlider_->setOnValueChanged([ws, wc](double val)
+                                                {
+    if (auto s = ws.lock())
+        s->activeBaselineShift_ = float(val);
+    if (auto c = wc.lock()) c->redraw(); });
+
+        // Preset: superscript — raise by ~40% of current font size
+        superscriptBtn_ = Button("Sup")
+                              ->setHeight(26)
+
+                              ->setBackgroundColor(kStyleInactiveBg)
+                              ->setOnClick([this, ws, wc]()
+                                           {
+        if (auto s = ws.lock()) {
+            s->activeBaselineShift_ = s->activeFontSize_ * 0.4f;
+            syncBaselineShiftSlider();
+        }
+        if (auto c = wc.lock()) c->redraw(); });
+
+        // Preset: subscript — lower by ~25% of current font size
+        subscriptBtn_ = Button("Sub")
+                            ->setHeight(26)
+
+                            ->setBackgroundColor(kStyleInactiveBg)
+                            ->setOnClick([this, ws, wc]()
+                                         {
+        if (auto s = ws.lock()) {
+            s->activeBaselineShift_ = -s->activeFontSize_ * 0.25f;
+            syncBaselineShiftSlider();
+        }
+        if (auto c = wc.lock()) c->redraw(); });
+
+        // Reset to zero
+        baselineResetBtn_ = Button("0")
+                                ->setHeight(26)
+
+                                ->setBackgroundColor(kStyleInactiveBg)
+                                ->setOnClick([this, ws, wc]()
+                                             {
+        if (auto s = ws.lock()) {
+            s->activeBaselineShift_ = 0.f;
+            syncBaselineShiftSlider();
+        }
+        if (auto c = wc.lock()) c->redraw(); });
 
         // ── Bold / Italic ─────────────────────────────────────
         boldBtn_ = Button("B")
@@ -1742,6 +1985,15 @@ public:
                                    ->setHeight(42),
 
                                SizedBox(0, 4),
+
+                               sideLabel("BASELINE SHIFT"),
+                               Container(baselineShiftSlider_)->setPadding(6)->setHeight(52),
+                               Container(
+                                   Row({superscriptBtn_,
+                                        SizedBox(3, 0), subscriptBtn_,
+                                        SizedBox(3, 0), baselineResetBtn_}))
+                                   ->setPadding(6)
+                                   ->setHeight(48),
 
                                // COLOR
                                sideLabel("COLOR"),
