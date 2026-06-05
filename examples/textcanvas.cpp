@@ -337,7 +337,7 @@ public:
             // Check scale handle first (only if a block is already selected)
             if (selectedIdx_ >= 0 && selectedIdx_ < int(blocks_.size()))
             {
-                if (hitScaleHandle(x, y, blocks_[selectedIdx_]))
+                if (hitScaleHandle(x, y, blocks_[selectedIdx_], selectedIdx_))
                 {
                     draggingScale_ = true;
                     scaleMouseStartX_ = x;
@@ -861,6 +861,9 @@ public:
         ctx.fillRect(float(w_) - 4.f, 0, 4.f, float(h_));
         ctx.fillRect(0, float(h_) - 4.f, float(w_), 4.f);
 
+        if (int(blockMeasuredWidths_.size()) != int(blocks_.size()))
+            blockMeasuredWidths_.assign(blocks_.size(), 0.f);
+
         // ── Draw committed blocks ─────────────────────────────
         for (int i = 0; i < int(blocks_.size()); ++i)
         {
@@ -921,6 +924,21 @@ public:
 
                 if (isSelected || isMultiSelected)
                     drawBlockOutline(ctx, b, false);
+            }
+
+            if (!b.text.empty())
+            {
+                char fontBuf[64];
+                std::snprintf(fontBuf, sizeof(fontBuf), "%.0fpx %s",
+                              b.fontSize, resolveFont(b).c_str());
+                ctx.setFont(fontBuf);
+                auto vlines = getVisualLines(b.text, b.wrapWidth, b.fontSize);
+                float mw = b.wrapWidth > 0.f ? b.wrapWidth : 0.f;
+                if (mw == 0.f)
+                    for (auto &l : vlines)
+                        mw = std::max(mw, measureTextSpaced(ctx, l,
+                                                            b.letterSpacing, b.kerning));
+                blockMeasuredWidths_[i] = mw;
             }
         }
 
@@ -1766,23 +1784,42 @@ private:
         return dx * dx + dy * dy <= 8.f * 8.f; // circle hit, 8px radius
     }
     // Bottom-right corner of the block bounding box
-    void scaleHandlePos(const TextBlock &b, float &hx, float &hy) const
+    void scaleHandlePos(const TextBlock &b, float &hx, float &hy,
+                        int blockIdx = -1) const
     {
-        float w = b.wrapWidth > 0.f ? b.wrapWidth : approxTextWidth(b.text, b.fontSize);
-        auto lines = splitLines(b.text);
+        auto lines = getVisualLines(b.text, b.wrapWidth, b.fontSize);
         int numLines = std::max(1, int(lines.size()));
         float lineH = b.fontSize * b.lineHeight;
         float totalH = b.fontSize + 10.f + (numLines - 1) * lineH;
-        hx = b.x + w + 4.f;
-        hy = b.y - b.baselineShift - b.fontSize - 4.f + totalH;
+
+        float w;
+        if (b.wrapWidth > 0.f)
+            w = b.wrapWidth;
+        else if (blockIdx >= 0 && blockIdx < int(blockMeasuredWidths_.size()) && blockMeasuredWidths_[blockIdx] > 0.f)
+            w = blockMeasuredWidths_[blockIdx];
+        else
+            w = approxTextWidth(b.text, b.fontSize);
+
+        float boxX = b.x - 4.f;
+        float boxY = b.y - b.baselineShift - b.fontSize - 4.f;
+        hx = boxX + w + 8.f;
+        hy = boxY + totalH;
     }
 
-    bool hitScaleHandle(float x, float y, const TextBlock &b) const
+    bool hitScaleHandle(float x, float y, const TextBlock &b,
+                        int blockIdx = -1) const
     {
+        float cx, cy;
+        blockCenter(b, cx, cy);
+        float dx = x - cx, dy = y - cy;
+        float cos_r = cosf(-b.rotation), sin_r = sinf(-b.rotation);
+        float lx = cx + dx * cos_r - dy * sin_r;
+        float ly = cy + dx * sin_r + dy * cos_r;
+
         float hx, hy;
-        scaleHandlePos(b, hx, hy);
-        return x >= hx - 7.f && x <= hx + 7.f &&
-               y >= hy - 7.f && y <= hy + 7.f;
+        scaleHandlePos(b, hx, hy, blockIdx);
+        return lx >= hx - 7.f && lx <= hx + 7.f &&
+               ly >= hy - 7.f && ly <= hy + 7.f;
     }
     // Returns the x position of the right-edge wrap handle for a selected block.
     // The handle is a small square on the right edge of the wrap box.
@@ -1793,15 +1830,24 @@ private:
 
     bool hitWrapHandle(float x, float y, const TextBlock &b) const
     {
+        // Inverse-rotate mouse into local space
+        float cx, cy;
+        blockCenter(b, cx, cy);
+        float dx = x - cx, dy = y - cy;
+        float cos_r = cosf(-b.rotation), sin_r = sinf(-b.rotation);
+        float lx = cx + dx * cos_r - dy * sin_r;
+        float ly = cy + dx * sin_r + dy * cos_r;
+
         float hx = wrapHandleX(b);
         float hy = b.y - b.fontSize * 0.5f;
-        return x >= hx - 6.f && x <= hx + 6.f &&
-               y >= hy - 6.f && y <= hy + 6.f;
+        return lx >= hx - 6.f && lx <= hx + 6.f &&
+               ly >= hy - 6.f && ly <= hy + 6.f;
     }
 
     // ── State ─────────────────────────────────────────────────
     std::vector<TextBlock> blocks_;
     std::vector<std::vector<TextBlock>> undoStack_, redoStack_;
+    std::vector<float> blockMeasuredWidths_;
 
     bool draggingWrapHandle_ = false;
     int wrapHandleIdx_ = -1;
@@ -2768,9 +2814,9 @@ WidgetPtr createApp(FluxUI *app)
         "TextCanvas",
         std::make_shared<TextApp>(),
         AppTheme::dark(),
-        false, // debugShowWidgetBounds
-        1180,  // window width (wider to accommodate bigger sidebar)
-        720,   // window height
-        false, // maximize
-        true); // fullscreen
+        false,  // debugShowWidgetBounds
+        1180,   // window width (wider to accommodate bigger sidebar)
+        720,    // window height
+        false,  // maximize
+        false); // fullscreen
 }
