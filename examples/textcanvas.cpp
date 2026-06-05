@@ -15,6 +15,14 @@
 //  TextBlock
 // ============================================================
 
+// enum class TextAlign
+// {
+//     Left,
+//     Center,
+//     Right,
+//     Justify
+// };
+
 struct TextBlock
 {
     float x = 0, y = 0; // baseline-left in canvas coords
@@ -28,6 +36,7 @@ struct TextBlock
     float lineHeight = 1.3f;
     float letterSpacing = 0.f;
     bool kerning = true;
+    TextAlign textAlign = TextAlign::Left;
 };
 
 // ============================================================
@@ -58,6 +67,7 @@ public:
     float activeLineHeight_ = 1.3f;
     float activeLetterSpacing_ = 0.f;
     bool activeKerning_ = true;
+    TextAlign activeTextAlign_ = TextAlign::Left;
 
     // Callbacks
     std::function<void()> onCommitted;
@@ -257,6 +267,7 @@ public:
             activeLineHeight_ = b.lineHeight;
             activeLetterSpacing_ = b.letterSpacing;
             activeKerning_ = b.kerning;
+            activeTextAlign_ = b.textAlign;
             // Place cursor at click position
             selStart_ = selEnd_ = cursorIndexAt(x, b);
             resetBlink();
@@ -469,8 +480,30 @@ public:
                 {
                     auto lines = getVisualLines(b.text, b.wrapWidth, b.fontSize);
                     float lineH = b.fontSize * b.lineHeight;
+                    float containerW = blockContainerWidth(ctx, lines, b.wrapWidth,
+                                                           b.letterSpacing, b.kerning);
                     for (int li = 0; li < int(lines.size()); ++li)
-                        fillTextSpaced(ctx, lines[li], b.x, b.y + 2.f + li * lineH, b.letterSpacing, b.kerning);
+                    {
+                        float drawX = b.x;
+                        bool isLast = (li == int(lines.size()) - 1);
+
+                        if (b.textAlign == TextAlign::Justify)
+                        {
+                            fillTextJustified(ctx, lines[li], drawX,
+                                              b.y + 2.f + li * lineH,
+                                              containerW,
+                                              b.letterSpacing, b.kerning, isLast);
+                        }
+                        else
+                        {
+                            float lineW = measureTextSpaced(ctx, lines[li],
+                                                            b.letterSpacing, b.kerning);
+                            drawX += alignOffset(lineW, containerW, b.textAlign);
+                            fillTextSpaced(ctx, lines[li], drawX,
+                                           b.y + 2.f + li * lineH,
+                                           b.letterSpacing, b.kerning);
+                        }
+                    }
                 }
 
                 if (isSelected)
@@ -506,6 +539,97 @@ public:
 
 private:
     // ── Helpers ───────────────────────────────────────────────
+    // Computes the reference container width for alignment.
+    // Uses wrapWidth if set; otherwise measures the widest visual line.
+    float blockContainerWidth(Canvas2D &ctx,
+                              const std::vector<std::string> &lines,
+                              float wrapWidth,
+                              float letterSpacing,
+                              bool kerning) const
+    {
+        if (wrapWidth > 0.f)
+            return wrapWidth;
+        float maxW = 0.f;
+        for (auto &l : lines)
+            maxW = std::max(maxW, measureTextSpaced(ctx, l, letterSpacing, kerning));
+        return maxW;
+    }
+    // Draws one visual line with justify spacing.
+    // isLastLine: if true, falls back to left (normal spacing).
+    void fillTextJustified(Canvas2D &ctx,
+                           const std::string &line,
+                           float x, float y,
+                           float containerW,
+                           float letterSpacing,
+                           bool kerning,
+                           bool isLastLine) const
+    {
+        // Last line or no spaces → draw normally
+        auto spacePos = line.find(' ');
+        if (isLastLine || spacePos == std::string::npos)
+        {
+            fillTextSpaced(ctx, line, x, y, letterSpacing, kerning);
+            return;
+        }
+
+        // Split into words
+        std::vector<std::string> words;
+        std::string cur;
+        for (char c : line)
+        {
+            if (c == ' ')
+            {
+                if (!cur.empty())
+                {
+                    words.push_back(cur);
+                    cur.clear();
+                }
+            }
+            else
+                cur += c;
+        }
+        if (!cur.empty())
+            words.push_back(cur);
+        if (words.size() < 2)
+        {
+            fillTextSpaced(ctx, line, x, y, letterSpacing, kerning);
+            return;
+        }
+
+        // Measure total word widths
+        float totalWordW = 0.f;
+        for (auto &w : words)
+            totalWordW += measureTextSpaced(ctx, w, letterSpacing, kerning);
+
+        // Distribute remaining space evenly between gaps
+        float totalGap = containerW - totalWordW;
+        float gapPerWord = totalGap / float(int(words.size()) - 1);
+
+        float cx = x;
+        for (int i = 0; i < int(words.size()); ++i)
+        {
+            fillTextSpaced(ctx, words[i], cx, y, letterSpacing, kerning);
+            if (i < int(words.size()) - 1)
+                cx += measureTextSpaced(ctx, words[i], letterSpacing, kerning) + gapPerWord;
+        }
+    }
+    // Returns the x offset to apply before drawing a line, given alignment.
+    // containerW is the reference width (wrapWidth if set, else max line width).
+    // lineW is the measured width of this specific line.
+    float alignOffset(float lineW, float containerW, TextAlign align) const
+    {
+        switch (align)
+        {
+        case TextAlign::Center:
+            return (containerW - lineW) * 0.5f;
+        case TextAlign::Right:
+            return containerW - lineW;
+        case TextAlign::Left:
+        default:
+            return 0.f;
+        }
+    }
+
     // Measures text width respecting letterSpacing
     float measureTextSpaced(Canvas2D &ctx,
                             const std::string &text,
@@ -718,6 +842,7 @@ private:
         b.lineHeight = activeLineHeight_;
         b.letterSpacing = activeLetterSpacing_;
         b.kerning = activeKerning_;
+        b.textAlign = activeTextAlign_;
         if (!editingExisting_)
         {
             b.x = editX_;
@@ -802,6 +927,12 @@ private:
                       : activeKerning_;
         auto lines = getVisualLines(text, wrapW, fs);
         int nLines = int(lines.size());
+        float containerW = blockContainerWidth(ctx, lines, wrapW, ls, kr);
+
+        TextAlign ta = (editingExisting_ && selectedIdx_ >= 0 &&
+                        selectedIdx_ < int(blocks_.size()))
+                           ? blocks_[selectedIdx_].textAlign
+                           : activeTextAlign_;
 
         // Background highlight box
         if (highlight)
@@ -845,8 +976,17 @@ private:
             {
                 int colStart = (li == loLine) ? loCol : 0;
                 int colEnd = (li == hiLine) ? hiCol : int(lines[li].size());
-                float selX = tx + measureTextSpaced(ctx, lines[li].substr(0, colStart), ls, kr);
-                float selW = measureTextSpaced(ctx, lines[li].substr(colStart, colEnd - colStart), ls, kr);
+
+                // Compute this line's draw offset
+                float lineW = measureTextSpaced(ctx, lines[li], ls, kr);
+                float lineOX = (ta == TextAlign::Justify)
+                                   ? 0.f
+                                   : alignOffset(lineW, containerW, ta);
+
+                float selX = tx + lineOX +
+                             measureTextSpaced(ctx, lines[li].substr(0, colStart), ls, kr);
+                float selW = measureTextSpaced(ctx,
+                                               lines[li].substr(colStart, colEnd - colStart), ls, kr);
                 if (selW < 2.f)
                     selW = 2.f;
                 ctx.setFillColor(Color::fromRGBA(30, 120, 255, 80));
@@ -857,13 +997,36 @@ private:
         // Draw each line of text
         ctx.setFillColor(color);
         for (int li = 0; li < nLines; ++li)
-            fillTextSpaced(ctx, lines[li], tx, ty + 2.f + li * lineH, ls,kr);
+        {
+            bool isLast = (li == nLines - 1);
+            float drawX = tx;
+
+            if (ta == TextAlign::Justify)
+            {
+                fillTextJustified(ctx, lines[li], drawX,
+                                  ty + 2.f + li * lineH,
+                                  containerW, ls, kr, isLast);
+            }
+            else
+            {
+                float lineW = measureTextSpaced(ctx, lines[li], ls, kr);
+                drawX += alignOffset(lineW, containerW, ta);
+                fillTextSpaced(ctx, lines[li], drawX,
+                               ty + 2.f + li * lineH, ls, kr);
+            }
+        }
 
         // Blinking cursor
         if (cursorVisible_)
         {
             auto [curLine, curCol] = posToLineCol(selEnd_);
-            float cursorX = tx + measureTextSpaced(ctx, lines[curLine].substr(0, curCol), ls, kr);
+            float lineW = measureTextSpaced(ctx, lines[curLine], ls, kr);
+            float lineOX = (ta == TextAlign::Justify)
+                               ? 0.f
+                               : alignOffset(lineW, containerW, ta);
+            float cursorX = tx + lineOX +
+                            measureTextSpaced(ctx,
+                                              lines[curLine].substr(0, curCol), ls, kr);
             float cursorY = ty - fs - 1.f + curLine * lineH;
             ctx.setFillColor(color);
             ctx.fillRect(cursorX + 1.f, cursorY, 1.5f, fs + 4.f);
@@ -1035,6 +1198,11 @@ class TextApp : public Widget
     std::shared_ptr<SliderWidget> letterSpacingSlider_;
     std::shared_ptr<ButtonWidget> kerningBtn_;
 
+    std::shared_ptr<ButtonWidget> alignLeftBtn_;
+    std::shared_ptr<ButtonWidget> alignCenterBtn_;
+    std::shared_ptr<ButtonWidget> alignRightBtn_;
+    std::shared_ptr<ButtonWidget> alignJustifyBtn_;
+
     // Reactive state
     State<bool> canUndo_{false};
     State<bool> canRedo_{false};
@@ -1110,6 +1278,23 @@ class TextApp : public Widget
             boldBtn_->setBackgroundColor(surface_->activeBold_ ? kStyleActiveBg : kStyleInactiveBg);
         if (italicBtn_)
             italicBtn_->setBackgroundColor(surface_->activeItalic_ ? kStyleActiveBg : kStyleInactiveBg);
+    }
+
+    void syncAlignButtons()
+    {
+        if (!surface_)
+            return;
+        auto hi = kStyleActiveBg;
+        auto lo = kStyleInactiveBg;
+        TextAlign ta = surface_->activeTextAlign_;
+        if (alignLeftBtn_)
+            alignLeftBtn_->setBackgroundColor(ta == TextAlign::Left ? hi : lo);
+        if (alignCenterBtn_)
+            alignCenterBtn_->setBackgroundColor(ta == TextAlign::Center ? hi : lo);
+        if (alignRightBtn_)
+            alignRightBtn_->setBackgroundColor(ta == TextAlign::Right ? hi : lo);
+        if (alignJustifyBtn_)
+            alignJustifyBtn_->setBackgroundColor(ta == TextAlign::Justify ? hi : lo);
     }
 
     void syncKerningButton()
@@ -1197,7 +1382,9 @@ class TextApp : public Widget
         surface_->activeColor_ = b->color;
         surface_->activeLineHeight_ = b->lineHeight;
         surface_->activeKerning_ = b->kerning;
+        surface_->activeTextAlign_ = b->textAlign;
 
+        syncAlignButtons();
         syncKerningButton();
         syncLetterSpacingSlider();
         syncLineHeightSlider();
@@ -1361,6 +1548,24 @@ public:
                     updateStyleButtons();
                 }
                 if (auto c = wc.lock()) c->redraw(); });
+
+        auto makeAlignBtn = [&](const char *label, TextAlign ta)
+        {
+            return Button(label)
+                ->setHeight(28)
+                ->setWidth(40)
+                ->setBackgroundColor(ta == TextAlign::Left ? kStyleActiveBg : kStyleInactiveBg)
+                ->setOnClick([this, ws, wc, ta]()
+                             {
+            if (auto s = ws.lock()) s->activeTextAlign_ = ta;
+            syncAlignButtons();
+            if (auto c = wc.lock()) c->redraw(); });
+        };
+
+        alignLeftBtn_ = makeAlignBtn("L", TextAlign::Left);
+        alignCenterBtn_ = makeAlignBtn("C", TextAlign::Center);
+        alignRightBtn_ = makeAlignBtn("R", TextAlign::Right);
+        alignJustifyBtn_ = makeAlignBtn("J", TextAlign::Justify);
 
         // ── Color picker ──────────────────────────────────────
         colorPicker_ = ColorPicker(Color::fromRGB(20, 20, 20));
@@ -1526,6 +1731,15 @@ public:
                                    Row({boldBtn_, SizedBox(2, 0), italicBtn_, SizedBox(2, 0), kerningBtn_}))
                                    ->setPadding(6)
                                    ->setHeight(30),
+
+                               sideLabel("ALIGNMENT"),
+                               Container(
+                                   Row({alignLeftBtn_,
+                                        SizedBox(2, 0), alignCenterBtn_,
+                                        SizedBox(2, 0), alignRightBtn_,
+                                        SizedBox(2, 0), alignJustifyBtn_}))
+                                   ->setPadding(6)
+                                   ->setHeight(42),
 
                                SizedBox(0, 4),
 
