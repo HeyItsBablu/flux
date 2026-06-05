@@ -26,6 +26,7 @@
 struct TextBlock
 {
     float x = 0, y = 0; // baseline-left in canvas coords
+    float rotation = 0.f;
     std::string text;
     float fontSize = 18.f;
     std::string fontFamily = "sans"; // "sans" | "sans-bold" | "sans-italic" | "sans-bold-italic" | "mono" | "mono-bold"
@@ -47,7 +48,10 @@ struct TextBlock
 enum class CanvasTool
 {
     Select,
-    Text
+    Text,
+    Move,
+    Scale,
+    Rotate
 };
 
 // ============================================================
@@ -75,6 +79,16 @@ public:
     std::function<void()> onCommitted;
     std::function<void(float, float)> onMousePos;
     std::function<void()> onSelectionChanged; // block selection changed
+
+    void resetSelectedRotation()
+    {
+        if (selectedIdx_ < 0 || selectedIdx_ >= int(blocks_.size()))
+            return;
+        pushUndo();
+        blocks_[selectedIdx_].rotation = 0.f;
+        if (onCommitted)
+            onCommitted();
+    }
 
     bool hasEditContent() const { return !editBuf_.empty(); }
     void cancelEdit()
@@ -248,6 +262,92 @@ public:
             return;
         }
 
+        if (activeTool_ == CanvasTool::Move)
+        {
+            int hit = hitTestBlock(x, y);
+            if (hit >= 0)
+            {
+                selectedIdx_ = hit;
+                draggingBlock_ = true;
+                dragMouseStartX_ = x;
+                dragMouseStartY_ = y;
+                dragBlockStartX_ = blocks_[hit].x;
+                dragBlockStartY_ = blocks_[hit].y;
+                pushUndo();
+                if (onSelectionChanged)
+                    onSelectionChanged();
+            }
+            else
+            {
+                selectedIdx_ = -1;
+                if (onSelectionChanged)
+                    onSelectionChanged();
+            }
+            return;
+        }
+
+        if (activeTool_ == CanvasTool::Scale)
+        {
+            // Check scale handle first (only if a block is already selected)
+            if (selectedIdx_ >= 0 && selectedIdx_ < int(blocks_.size()))
+            {
+                if (hitScaleHandle(x, y, blocks_[selectedIdx_]))
+                {
+                    draggingScale_ = true;
+                    scaleMouseStartX_ = x;
+                    scaleMouseStartY_ = y;
+                    scaleStartWrapW_ = blocks_[selectedIdx_].wrapWidth > 0.f
+                                           ? blocks_[selectedIdx_].wrapWidth
+                                           : approxTextWidth(blocks_[selectedIdx_].text,
+                                                             blocks_[selectedIdx_].fontSize);
+                    scaleStartFontSize_ = blocks_[selectedIdx_].fontSize;
+                    pushUndo();
+                    return;
+                }
+            }
+
+            // Otherwise select a block
+            int hit = hitTestBlock(x, y);
+            if (hit != selectedIdx_)
+            {
+                selectedIdx_ = hit;
+                if (onSelectionChanged)
+                    onSelectionChanged();
+            }
+            return;
+        }
+
+        if (activeTool_ == CanvasTool::Rotate)
+        {
+            // Check rotate handle first
+            if (selectedIdx_ >= 0 && selectedIdx_ < int(blocks_.size()))
+            {
+                if (hitRotateHandle(x, y, blocks_[selectedIdx_]))
+                {
+                    auto &b = blocks_[selectedIdx_];
+                    float cx, cy;
+                    blockCenter(b, cx, cy);
+                    rotateCenterX_ = cx;
+                    rotateCenterY_ = cy;
+                    rotateStartAngle_ = b.rotation;
+                    rotateMouseStartAngle_ = atan2f(y - cy, x - cx);
+                    draggingRotate_ = true;
+                    pushUndo();
+                    return;
+                }
+            }
+
+            // Otherwise select a block
+            int hit = hitTestBlock(x, y);
+            if (hit != selectedIdx_)
+            {
+                selectedIdx_ = hit;
+                if (onSelectionChanged)
+                    onSelectionChanged();
+            }
+            return;
+        }
+
         // Text tool
         int hit = hitTestBlock(x, y);
         if (hit >= 0)
@@ -325,6 +425,49 @@ public:
             return;
         }
 
+        if (draggingBlock_ && activeTool_ == CanvasTool::Move &&
+            selectedIdx_ >= 0 && selectedIdx_ < int(blocks_.size()))
+        {
+            blocks_[selectedIdx_].x = dragBlockStartX_ + (x - dragMouseStartX_);
+            blocks_[selectedIdx_].y = dragBlockStartY_ + (y - dragMouseStartY_);
+            if (onCommitted)
+                onCommitted();
+            return;
+        }
+
+        if (draggingScale_ && selectedIdx_ >= 0 &&
+            selectedIdx_ < int(blocks_.size()))
+        {
+            auto &b = blocks_[selectedIdx_];
+            float dx = x - scaleMouseStartX_;
+            float dy = y - scaleMouseStartY_;
+
+            // Horizontal drag -> wrapWidth
+            float newW = std::max(scaleStartWrapW_ + dx, b.fontSize * 2.f);
+            b.wrapWidth = newW;
+
+            // Vertical drag -> fontSize (drag down = bigger, up = smaller)
+            float newFs = std::clamp(scaleStartFontSize_ + dy * 0.3f, 6.f, 200.f);
+            b.fontSize = newFs;
+
+            // Keep surface active style in sync so sidebar reflects live values
+            activeFontSize_ = newFs;
+            if (onCommitted)
+                onCommitted();
+            return;
+        }
+
+        if (draggingRotate_ && selectedIdx_ >= 0 &&
+            selectedIdx_ < int(blocks_.size()))
+        {
+            float currentAngle = atan2f(y - rotateCenterY_, x - rotateCenterX_);
+            float delta = currentAngle - rotateMouseStartAngle_;
+            blocks_[selectedIdx_].rotation = rotateStartAngle_ + delta;
+            if (onCommitted)
+                onCommitted();
+            return;
+        }
+
         // Drag-select within text
         if (mouseDown_ && editing_ && editingExisting_ &&
             selectedIdx_ >= 0 && selectedIdx_ < int(blocks_.size()))
@@ -337,6 +480,25 @@ public:
 
     void onMouseUp(float x, float y) override
     {
+        if (draggingBlock_)
+        {
+            draggingBlock_ = false;
+            return;
+        }
+        if (draggingScale_)
+        {
+            draggingScale_ = false;
+            // Sync sidebar font size display
+            if (onSelectionChanged)
+                onSelectionChanged();
+            return;
+        }
+
+        if (draggingRotate_)
+        {
+            draggingRotate_ = false;
+            return;
+        }
         if (draggingWrapHandle_)
         {
             draggingWrapHandle_ = false;
@@ -540,6 +702,14 @@ public:
             }
             else
             {
+                // Save and apply rotation around block center
+                float cx, cy;
+                blockCenter(b, cx, cy);
+                ctx.save();
+                ctx.translate(cx, cy);
+                ctx.rotate(b.rotation);
+                ctx.translate(-cx, -cy);
+
                 setFont(ctx, b.fontSize, b.fontFamily);
                 ctx.setFillColor(b.color);
                 ctx.setTextBaseline(TextBaseline::Bottom);
@@ -556,25 +726,23 @@ public:
 
                         if (b.textAlign == TextAlign::Justify)
                         {
-                            fillTextJustified(ctx, lines[li], drawX,
-                                              drawY,
-                                              containerW,
-                                              b.letterSpacing, b.kerning, isLast);
+                            fillTextJustified(ctx, lines[li], drawX, drawY,
+                                              containerW, b.letterSpacing, b.kerning, isLast);
                         }
                         else
                         {
                             float lineW = measureTextSpaced(ctx, lines[li],
                                                             b.letterSpacing, b.kerning);
                             drawX += alignOffset(lineW, containerW, b.textAlign);
-                            fillTextSpaced(ctx, lines[li], drawX,
-                                           drawY,
+                            fillTextSpaced(ctx, lines[li], drawX, drawY,
                                            b.letterSpacing, b.kerning);
                         }
                     }
                 }
+                ctx.restore(); // end rotation
 
                 if (isSelected)
-                    drawBlockOutline(ctx, b, /*active=*/false);
+                    drawBlockOutline(ctx, b, false);
             }
         }
 
@@ -599,6 +767,8 @@ public:
             ctx.setTextBaseline(TextBaseline::Top);
             const char *hint = (activeTool_ == CanvasTool::Select)
                                    ? "Select tool: click a text block to select it"
+                               : (activeTool_ == CanvasTool::Move)
+                                   ? "Move tool: drag a block to reposition it"
                                    : "Text tool: click anywhere to place text";
             ctx.fillText(hint, 16.f, 14.f);
         }
@@ -728,7 +898,7 @@ private:
                            bool kerning,
                            bool isLastLine) const
     {
-        // Last line or no spaces → draw normally
+        // Last line or no spaces -> draw normally
         auto spacePos = line.find(' ');
         if (isLastLine || spacePos == std::string::npos)
         {
@@ -1223,50 +1393,94 @@ private:
 
         float totalH = b.fontSize + 10.f + (nLines - 1) * lineH;
 
-        // ── Outline rect ──────────────────────────────────────
+        // Block bounding box top-left in local space
+        float boxX = b.x - 4.f;
+        float boxY = b.y - b.baselineShift - b.fontSize - 4.f;
+
+        // Block center (pivot for rotation)
+        float cx, cy;
+        blockCenter(b, cx, cy);
+
+        // ── Apply rotation around block center ────────────────────
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(b.rotation);
+        ctx.translate(-cx, -cy);
+
+        // Outline rect
         if (hover)
             ctx.setStrokeColor(Color::fromRGBA(30, 120, 255, 60));
         else
             ctx.setStrokeColor(Color::fromRGBA(30, 120, 255, 160));
         ctx.setLineWidth(1.f);
-        float shiftedY = b.y - b.baselineShift;
-        ctx.strokeRoundedRect(b.x - 4.f, shiftedY - b.fontSize - 4.f,
-                              tw + 8.f, totalH, 2.f);
+        ctx.strokeRoundedRect(boxX, boxY, tw + 8.f, totalH, 2.f);
 
-        // ── Corner handles (selected only) ────────────────────
+        // Corner handles (selected only)
         if (!hover)
         {
-            float hx[] = {b.x - 4.f, b.x + tw + 4.f};
-            float hy[] = {shiftedY - b.fontSize - 4.f,
-                          shiftedY - b.fontSize - 4.f + totalH};
+            float hx[] = {boxX, boxX + tw + 8.f};
+            float hy[] = {boxY, boxY + totalH};
             ctx.setFillColor(Color::fromRGBA(30, 120, 255, 200));
             for (float hxx : hx)
                 for (float hyy : hy)
                     ctx.fillRoundedRect(hxx - 3.f, hyy - 3.f, 6.f, 6.f, 2.f);
         }
 
-        // ── Wrap boundary + drag handle ───────────────────────
-        float displayW = (b.wrapWidth > 0.f)
-                             ? b.wrapWidth
-                             : tw;
-
-        float rx = b.x + displayW + 4.f;
-        float outlineTop = shiftedY - b.fontSize - 4.f;
-
-        // Dashed right-edge line
+        // Wrap handle (orange, right edge mid)
+        float rx = boxX + tw + 8.f;
         ctx.setStrokeColor(Color::fromRGBA(30, 120, 255, 100));
         ctx.setLineWidth(1.f);
         ctx.beginPath();
         for (float dy2 = 0.f; dy2 < totalH; dy2 += 8.f)
         {
-            ctx.moveTo(rx, outlineTop + dy2);
-            ctx.lineTo(rx, outlineTop + std::min(dy2 + 4.f, totalH));
+            ctx.moveTo(rx, boxY + dy2);
+            ctx.lineTo(rx, boxY + std::min(dy2 + 4.f, totalH));
         }
         ctx.stroke();
-
-        // Orange wrap handle square
         ctx.setFillColor(Color::fromRGBA(255, 160, 30, 220));
-        ctx.fillRoundedRect(rx - 4.f, shiftedY - b.fontSize * 0.5f - 4.f, 8.f, 8.f, 2.f);
+        ctx.fillRoundedRect(rx - 4.f, cy - 4.f, 8.f, 8.f, 2.f);
+
+        // Scale handle (green, bottom-right) — Scale tool only
+        if (activeTool_ == CanvasTool::Scale)
+        {
+            ctx.setFillColor(Color::fromRGBA(50, 210, 100, 220));
+            ctx.fillRoundedRect(rx - 5.f, boxY + totalH - 5.f, 10.f, 10.f, 2.f);
+            ctx.setStrokeColor(Color::fromRGBA(255, 255, 255, 180));
+            ctx.setLineWidth(1.f);
+            ctx.strokeRoundedRect(rx - 5.f, boxY + totalH - 5.f, 10.f, 10.f, 2.f);
+        }
+
+        ctx.restore(); // end rotation transform
+
+        // ── Rotate handle — drawn in screen space (no rotation applied) ──
+        if (activeTool_ == CanvasTool::Rotate && !hover)
+        {
+            float hx, hy;
+            rotateHandlePos(b, hx, hy);
+
+            // Stem line from top-center of box to handle
+            float topCX = cx;
+            float topCY = b.y - b.baselineShift - b.fontSize - 4.f;
+            // Rotate the top-center point
+            float cos_r = cosf(b.rotation), sin_r = sinf(b.rotation);
+            float dx = topCX - cx, dy2 = topCY - cy;
+            float rotTopX = cx + dx * cos_r - dy2 * sin_r;
+            float rotTopY = cy + dx * sin_r + dy2 * cos_r;
+
+            ctx.setStrokeColor(Color::fromRGBA(30, 120, 255, 120));
+            ctx.setLineWidth(1.f);
+            ctx.beginPath();
+            ctx.moveTo(rotTopX, rotTopY);
+            ctx.lineTo(hx, hy);
+            ctx.stroke();
+
+            // Circle handle
+            ctx.setFillColor(Color::fromRGBA(255, 80, 180, 220));
+            ctx.fillCircle(hx, hy, 7.f);
+            ctx.setStrokeColor(Color::fromRGBA(255, 255, 255, 200));
+            ctx.setLineWidth(1.5f);
+            ctx.strokeCircle(hx, hy, 7.f);
+        }
     }
 
     int hitTestBlock(float x, float y) const
@@ -1274,11 +1488,20 @@ private:
         for (int i = int(blocks_.size()) - 1; i >= 0; --i)
         {
             const auto &b = blocks_[i];
-            auto lines = splitLines(b.text);
-            int numLines = std::max(1, int(lines.size()));
+            float cx, cy;
+            blockCenter(b, cx, cy);
+
+            // Transform mouse point into block's local (unrotated) space
+            float dx = x - cx, dy = y - cy;
+            float cos_r = cosf(-b.rotation), sin_r = sinf(-b.rotation);
+            float lx = cx + dx * cos_r - dy * sin_r;
+            float ly = cy + dx * sin_r + dy * cos_r;
+
             float approxW = b.wrapWidth > 0.f
                                 ? b.wrapWidth
                                 : approxTextWidth(b.text, b.fontSize);
+            auto lines = splitLines(b.text);
+            int numLines = std::max(1, int(lines.size()));
             float lineH = b.fontSize * b.lineHeight;
             float shiftedY = b.y - b.baselineShift;
 
@@ -1286,7 +1509,8 @@ private:
             float boxY0 = shiftedY - b.fontSize - 4.f;
             float boxX1 = b.x + approxW + 4.f;
             float boxY1 = shiftedY + (numLines - 1) * lineH + 6.f;
-            if (x >= boxX0 && x <= boxX1 && y >= boxY0 && y <= boxY1)
+
+            if (lx >= boxX0 && lx <= boxX1 && ly >= boxY0 && ly <= boxY1)
                 return i;
         }
         return -1;
@@ -1300,6 +1524,67 @@ private:
         redoStack_.clear();
     }
 
+    // The rotate handle floats above the block center
+    void rotateHandlePos(const TextBlock &b, float &hx, float &hy) const
+    {
+        float w = b.wrapWidth > 0.f
+                      ? b.wrapWidth
+                      : approxTextWidth(b.text, b.fontSize);
+        auto lines = splitLines(b.text);
+        int numLines = std::max(1, int(lines.size()));
+        float lineH = b.fontSize * b.lineHeight;
+        float totalH = b.fontSize + 10.f + (numLines - 1) * lineH;
+
+        // Center of bounding box (unrotated local space)
+        float localCX = b.x + w * 0.5f;
+        float localCY = b.y - b.baselineShift - b.fontSize - 4.f + totalH * 0.5f;
+
+        // Handle sits 28px above center, then rotated around center
+        float handleOffsetY = -totalH * 0.5f - 28.f;
+        float cos_r = cosf(b.rotation), sin_r = sinf(b.rotation);
+        hx = localCX + sin_r * (-handleOffsetY); // rotate offset vector
+        hy = localCY + cos_r * handleOffsetY;
+    }
+
+    void blockCenter(const TextBlock &b, float &cx, float &cy) const
+    {
+        float w = b.wrapWidth > 0.f
+                      ? b.wrapWidth
+                      : approxTextWidth(b.text, b.fontSize);
+        auto lines = splitLines(b.text);
+        int numLines = std::max(1, int(lines.size()));
+        float lineH = b.fontSize * b.lineHeight;
+        float totalH = b.fontSize + 10.f + (numLines - 1) * lineH;
+        cx = b.x + w * 0.5f;
+        cy = b.y - b.baselineShift - b.fontSize - 4.f + totalH * 0.5f;
+    }
+
+    bool hitRotateHandle(float x, float y, const TextBlock &b) const
+    {
+        float hx, hy;
+        rotateHandlePos(b, hx, hy);
+        float dx = x - hx, dy = y - hy;
+        return dx * dx + dy * dy <= 8.f * 8.f; // circle hit, 8px radius
+    }
+    // Bottom-right corner of the block bounding box
+    void scaleHandlePos(const TextBlock &b, float &hx, float &hy) const
+    {
+        float w = b.wrapWidth > 0.f ? b.wrapWidth : approxTextWidth(b.text, b.fontSize);
+        auto lines = splitLines(b.text);
+        int numLines = std::max(1, int(lines.size()));
+        float lineH = b.fontSize * b.lineHeight;
+        float totalH = b.fontSize + 10.f + (numLines - 1) * lineH;
+        hx = b.x + w + 4.f;
+        hy = b.y - b.baselineShift - b.fontSize - 4.f + totalH;
+    }
+
+    bool hitScaleHandle(float x, float y, const TextBlock &b) const
+    {
+        float hx, hy;
+        scaleHandlePos(b, hx, hy);
+        return x >= hx - 7.f && x <= hx + 7.f &&
+               y >= hy - 7.f && y <= hy + 7.f;
+    }
     // Returns the x position of the right-edge wrap handle for a selected block.
     // The handle is a small square on the right edge of the wrap box.
     float wrapHandleX(const TextBlock &b) const
@@ -1350,6 +1635,23 @@ private:
     int w_ = 850, h_ = 1100;
 
     double wallTime_ = 0.0;
+
+    // Move-drag state
+    bool draggingBlock_ = false;
+    float dragBlockStartX_ = 0.f, dragBlockStartY_ = 0.f; // block origin at drag start
+    float dragMouseStartX_ = 0.f, dragMouseStartY_ = 0.f; // mouse pos at drag start
+
+    // Scale-drag state
+    bool draggingScale_ = false;
+    float scaleMouseStartX_ = 0.f, scaleMouseStartY_ = 0.f;
+    float scaleStartWrapW_ = 0.f;
+    float scaleStartFontSize_ = 0.f;
+
+    // Rotate-drag state
+    bool draggingRotate_ = false;
+    float rotateCenterX_ = 0.f, rotateCenterY_ = 0.f; // block center in canvas space
+    float rotateStartAngle_ = 0.f;                    // block rotation at drag start
+    float rotateMouseStartAngle_ = 0.f;               // atan2 of mouse at drag start
 };
 
 // ============================================================
@@ -1389,6 +1691,11 @@ class TextApp : public Widget
     std::shared_ptr<ButtonWidget> alignRightBtn_;
     std::shared_ptr<ButtonWidget> alignJustifyBtn_;
 
+    std::shared_ptr<ButtonWidget> moveToolBtn_;
+    std::shared_ptr<ButtonWidget> scaleToolBtn_;
+    std::shared_ptr<ButtonWidget> rotateToolBtn_;
+    std::shared_ptr<ButtonWidget> rotateResetBtn_;
+
     // Reactive state
     State<bool> canUndo_{false};
     State<bool> canRedo_{false};
@@ -1401,7 +1708,7 @@ class TextApp : public Widget
     static constexpr float kFontSizes[] = {10, 12, 14, 16, 18, 20, 24, 28, 32, 40, 48, 64, 72, 96};
     static constexpr int kNumSizes = int(std::size(kFontSizes));
 
-    // Font families: display label → font key used in TextBlock
+    // Font families: display label -> font key used in TextBlock
     struct FontEntry
     {
         std::string label;
@@ -1418,6 +1725,21 @@ class TextApp : public Widget
     static constexpr Color kStyleInactiveBg = {50, 50, 54, 255};
 
     // ── Helpers ───────────────────────────────────────────────
+
+    void updateTransformButtons()
+    {
+        auto lo = kToolInactiveBg;
+        auto hi = kToolActiveBg;
+        if (!surface_)
+            return;
+        auto t = surface_->activeTool_;
+        if (moveToolBtn_)
+            moveToolBtn_->setBackgroundColor(t == CanvasTool::Move ? hi : lo);
+        if (scaleToolBtn_)
+            scaleToolBtn_->setBackgroundColor(t == CanvasTool::Scale ? hi : lo);
+        if (rotateToolBtn_)
+            rotateToolBtn_->setBackgroundColor(t == CanvasTool::Rotate ? hi : lo);
+    }
 
     void refreshState()
     {
@@ -2032,6 +2354,55 @@ public:
                            ->setWidth(220)
                            ->setBackgroundColor(Color::fromRGB(28, 28, 30));
 
+        moveToolBtn_ = Button("Move")
+                           ->setHeight(30)
+                           ->setWidth(100)
+                           ->setBackgroundColor(kToolInactiveBg)
+                           ->setOnClick([this]
+                                        { setActiveTool(CanvasTool::Move); });
+
+        scaleToolBtn_ = Button("Scale")
+                            ->setHeight(30)
+                            ->setWidth(100)
+                            ->setBackgroundColor(kToolInactiveBg)
+                            ->setOnClick([this]
+                                         { setActiveTool(CanvasTool::Scale); });
+
+        rotateToolBtn_ = Button("Rotate")
+                             ->setHeight(30)
+                             ->setWidth(100)
+                             ->setBackgroundColor(kToolInactiveBg)
+                             ->setOnClick([this]
+                                          { setActiveTool(CanvasTool::Rotate); });
+
+        rotateResetBtn_ = Button("Reset")
+                              ->setHeight(26)
+                              ->setWidth(100)
+                              ->setBackgroundColor(kStyleInactiveBg)
+                              ->setOnClick([this, ws, wc]()
+                                           {
+        if (auto s = ws.lock()) {
+            if (s->selectedBlockIndex() >= 0 &&
+                s->selectedBlockIndex() < s->blockCount())
+            {
+                // Access via public method — add one (see below)
+                s->resetSelectedRotation();
+            }
+        }
+        if (auto c = wc.lock()) c->redraw(); });
+
+        auto rightSidebar = Container(
+                                ListView({
+                                    sideLabel("TRANSFORM"),
+                                    Container(moveToolBtn_)->setPadding(6)->setHeight(50),
+                                    Container(scaleToolBtn_)->setPadding(6)->setHeight(50),
+                                    Container(rotateToolBtn_)->setPadding(6)->setHeight(50),
+                                    sideLabel("ROTATION"),
+                                    Container(rotateResetBtn_)->setPadding(6)->setHeight(40),
+                                }))
+                                ->setWidth(140)
+                                ->setBackgroundColor(Color::fromRGB(28, 28, 30));
+
         // ── Toolbar ───────────────────────────────────────────
         auto toolbar = Container(
                            Row({
@@ -2069,7 +2440,7 @@ public:
                                          ->setTextColor(Color::fromRGB(150, 150, 160))
                                          ->setMinWidth(110),
                                      SizedBox(16, 0),
-                                     Text("Enter = commit  •  Esc = cancel  •  Shift+← → = select  •  Ctrl+scroll = zoom")
+                                     Text("Enter = commit  •  Esc = cancel  •  Shift+← -> = select  •  Ctrl+scroll = zoom")
                                          ->setFontSize(10)
                                          ->setTextColor(Color::fromRGB(110, 110, 120)),
                                  })
@@ -2084,10 +2455,9 @@ public:
             nullptr,
             Expanded(Column({
                 toolbar,
-                Expanded(Row({
-                    sidebar,
-                    Expanded(canvas_),
-                })),
+                Expanded(Row({sidebar,
+                              Expanded(canvas_),
+                              rightSidebar})),
                 statusBar,
             })),
             nullptr, nullptr);
