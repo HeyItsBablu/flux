@@ -64,6 +64,26 @@ struct TextBlock
     TextAlign textAlign = TextAlign::Left;
     float baselineShift = 0.f;
     std::vector<TextSpan> spans;
+
+    // ── Appearance ────────────────────────────────────────────
+    float opacity = 1.f; // 0.0 – 1.0
+
+    // Background box
+    bool bgEnabled = false;
+    Color bgColor = Color::fromRGBA(255, 255, 255, 0);
+    float bgPadding = 4.f; // extra space around text box
+
+    // Stroke (outlined text)
+    bool strokeEnabled = false;
+    Color strokeColor = Color::fromRGB(0, 0, 0);
+    float strokeWidth = 1.5f;
+
+    // Drop shadow
+    bool shadowEnabled = false;
+    Color shadowColor = Color::fromRGBA(0, 0, 0, 120);
+    float shadowOffsetX = 2.f;
+    float shadowOffsetY = 2.f;
+    float shadowBlur = 0.f; // reserved — soft shadow needs offscreen RT
 };
 
 struct ResolvedStyle
@@ -80,6 +100,10 @@ struct ResolvedStyle
     bool strikethrough = false;
     bool allCaps = false;
     bool smallCaps = false;
+
+    bool strokeEnabled = false;
+    Color strokeColor = Color::fromRGB(0, 0, 0);
+    float strokeWidth = 1.5f;
 };
 
 // A cubic bezier segment: start, cp1, cp2, end
@@ -105,6 +129,16 @@ struct TextOnPath
     std::vector<TextSpan> spans;
     // bounding / selection
     float x = 0, y = 0; // used only for initial placement
+
+    float opacity = 1.f;
+    bool strokeEnabled = false;
+    Color strokeColor = Color::fromRGB(0, 0, 0);
+    float strokeWidth = 1.5f;
+    bool shadowEnabled = false;
+    Color shadowColor = Color::fromRGBA(0, 0, 0, 120);
+    float shadowOffsetX = 2.f;
+    float shadowOffsetY = 2.f;
+    // no bgEnabled — skipped for PathText
 };
 
 // ============================================================
@@ -219,6 +253,17 @@ public:
             sp.smallCaps = rs.smallCaps;
             b.spans.push_back(sp);
         }
+    }
+
+    template <typename Fn>
+    void applyToSelectedBlock(Fn fn)
+    {
+        if (selectedIdx_ < 0 || selectedIdx_ >= int(blocks_.size()))
+            return;
+        pushUndo();
+        fn(blocks_[selectedIdx_]);
+        if (onCommitted)
+            onCommitted();
     }
 
     template <typename Fn>
@@ -1286,7 +1331,7 @@ public:
     // ── Render ────────────────────────────────────────────────
     void render(Canvas2D &ctx) override
     {
-        // White page
+        // ── White page ────────────────────────────────────────────
         ctx.setFillColor(Color::fromRGB(255, 255, 255));
         ctx.fillRect(0, 0, float(w_), float(h_));
 
@@ -1298,7 +1343,7 @@ public:
         if (int(blockMeasuredWidths_.size()) != int(blocks_.size()))
             blockMeasuredWidths_.assign(blocks_.size(), 0.f);
 
-        // ── Draw committed blocks ─────────────────────────────
+        // ── Draw committed TextBlock blocks ───────────────────────
         for (int i = 0; i < int(blocks_.size()); ++i)
         {
             const auto &b = blocks_[i];
@@ -1307,22 +1352,97 @@ public:
 
             if (isActiveEdit)
             {
+                // Active edit — draw the edit preview instead of committed text
                 renderEditPreview(ctx, editX_, editY_, editBuf_,
-                                  activeFontSize_, resolveFont(), activeColor_,
-                                  true);
+                                  activeFontSize_, resolveFont(), activeColor_, true);
             }
             else
             {
-                float cx, cy;
-                blockCenter(b, cx, cy);
-                ctx.save();
-                ctx.translate(cx, cy);
-                ctx.rotate(b.rotation);
-                ctx.translate(-cx, -cy);
+                // ── Compute block center for rotation pivot ───────
+                float bcx, bcy;
+                blockCenter(b, bcx, bcy);
 
-                setFont(ctx, b.fontSize, b.fontFamily);
-                ctx.setFillColor(b.color);
-                ctx.setTextBaseline(TextBaseline::Bottom);
+                // ── Background fill (drawn in rotated block space) ─
+                if (b.bgEnabled && b.bgColor.a > 0)
+                {
+                    auto vlinesBg = getVisualLines(b.text, b.wrapWidth, b.fontSize);
+                    int nLinesBg = std::max(1, int(vlinesBg.size()));
+                    float lineHBg = b.fontSize * b.lineHeight;
+
+                    float bw = b.wrapWidth > 0.f ? b.wrapWidth : 0.f;
+                    if (bw == 0.f && i < int(blockMeasuredWidths_.size()) && blockMeasuredWidths_[i] > 0.f)
+                        bw = blockMeasuredWidths_[i];
+                    if (bw == 0.f)
+                        bw = approxTextWidth(b.text, b.fontSize);
+
+                    float totalHBg = b.fontSize + 10.f + (nLinesBg - 1) * lineHBg;
+                    float pad = b.bgPadding;
+
+                    float bgX = b.x - pad;
+                    float bgY = b.y - b.baselineShift - b.fontSize - pad;
+                    float bgW = bw + pad * 2.f;
+                    float bgH = totalHBg + pad * 2.f - 10.f;
+
+                    ctx.save();
+                    ctx.translate(bcx, bcy);
+                    ctx.rotate(b.rotation);
+                    ctx.translate(-bcx, -bcy);
+                    ctx.setGlobalAlpha(b.opacity);
+                    ctx.setFillColor(b.bgColor);
+                    ctx.fillRoundedRect(bgX, bgY, bgW, bgH, 3.f);
+                    ctx.setGlobalAlpha(1.f);
+                    ctx.restore();
+                }
+
+                // ── Shadow pass (flat single-color, offset) ───────
+                if (b.shadowEnabled)
+                {
+                    ctx.save();
+                    ctx.translate(bcx, bcy);
+                    ctx.rotate(b.rotation);
+                    ctx.translate(-bcx, -bcy);
+                    ctx.setGlobalAlpha(b.opacity * (b.shadowColor.a / 255.f));
+
+                    auto shadowLines = getVisualLines(b.text, b.wrapWidth, b.fontSize);
+                    float lineHSh = b.fontSize * b.lineHeight;
+
+                    char shFontBuf[64];
+                    std::snprintf(shFontBuf, sizeof(shFontBuf), "%.0fpx %s",
+                                  b.fontSize, resolveFont(b).c_str());
+                    ctx.setFont(shFontBuf);
+                    ctx.setTextBaseline(TextBaseline::Bottom);
+
+                    // Build container width for alignment
+                    float contWSh = blockContainerWidth(ctx, shadowLines,
+                                                        b.wrapWidth,
+                                                        b.letterSpacing,
+                                                        b.kerning);
+
+                    Color flatShadow = b.shadowColor;
+                    flatShadow.a = 255; // alpha handled by globalAlpha above
+                    ctx.setFillColor(flatShadow);
+
+                    for (int li = 0; li < int(shadowLines.size()); ++li)
+                    {
+                        float drawYSh = b.y + b.shadowOffsetY + 2.f + li * lineHSh - b.baselineShift;
+                        float lineWSh = ctx.measureText(shadowLines[li]);
+                        float lineOXSh = alignOffset(lineWSh, contWSh, b.textAlign);
+                        ctx.fillText(shadowLines[li],
+                                     b.x + b.shadowOffsetX + lineOXSh,
+                                     drawYSh);
+                    }
+
+                    ctx.setGlobalAlpha(1.f);
+                    ctx.restore();
+                }
+
+                // ── Main text pass (rotation + opacity + spans) ───
+                ctx.save();
+                ctx.translate(bcx, bcy);
+                ctx.rotate(b.rotation);
+                ctx.translate(-bcx, -bcy);
+                ctx.setGlobalAlpha(b.opacity);
+
                 {
                     auto lines = getVisualLines(b.text, b.wrapWidth, b.fontSize);
                     float lineH = b.fontSize * b.lineHeight;
@@ -1331,9 +1451,10 @@ public:
                     std::snprintf(blockFontBuf, sizeof(blockFontBuf), "%.0fpx %s",
                                   b.fontSize, resolveFont(b).c_str());
                     ctx.setFont(blockFontBuf);
+                    ctx.setTextBaseline(TextBaseline::Bottom);
+
                     float containerW = blockContainerWidth(ctx, lines, b.wrapWidth,
                                                            b.letterSpacing, b.kerning);
-
                     auto runs = normalizeSpans(b);
 
                     for (int li = 0; li < int(lines.size()); ++li)
@@ -1347,14 +1468,18 @@ public:
                                      containerW, isLast);
                     }
                 }
+
+                ctx.setGlobalAlpha(1.f);
                 ctx.restore();
 
+                // ── Selection / hover outline ─────────────────────
                 bool isMultiSelected = std::find(selectedIndices_.begin(),
                                                  selectedIndices_.end(), i) != selectedIndices_.end();
                 if (isSelected || isMultiSelected)
                     drawBlockOutline(ctx, b, false);
             }
 
+            // ── Update measured width cache ───────────────────────
             if (!b.text.empty())
             {
                 char fontBuf[64];
@@ -1378,13 +1503,12 @@ public:
             renderTextOnPath(ctx, pathBlocks_[i], sel);
         }
 
-        // ── Draw in-progress path ─────────────────────────────────
+        // ── Draw in-progress PathText ─────────────────────────────
         if (drawingPath_)
         {
             if (!pendingPath_.segments.empty())
             {
-                // Draw the path curve skeleton so anchors are visible
-                // immediately on first click, before any text is typed
+                // Path skeleton — always visible from first click
                 ctx.setStrokeColor(Color::fromRGBA(30, 120, 255, 120));
                 ctx.setLineWidth(1.f);
                 ctx.beginPath();
@@ -1397,7 +1521,7 @@ public:
                 }
                 ctx.stroke();
 
-                // Anchor dots on every segment endpoint
+                // Anchor dots
                 ctx.setFillColor(Color::fromRGBA(30, 120, 255, 220));
                 for (auto &seg : pendingPath_.segments)
                 {
@@ -1405,7 +1529,7 @@ public:
                     ctx.fillCircle(seg.x1, seg.y1, 5.f);
                 }
 
-                // Rubber-band preview line from last anchor to mouse cursor
+                // Rubber-band line from last anchor to mouse
                 auto &last = pendingPath_.segments.back();
                 ctx.setStrokeColor(Color::fromRGBA(100, 180, 255, 140));
                 ctx.setLineWidth(1.f);
@@ -1414,12 +1538,12 @@ public:
                 ctx.lineTo(hoverX_, hoverY_);
                 ctx.stroke();
 
-                // Draw text along the path only once the user has typed something
+                // Live text preview — only once text has been typed
                 if (!pendingPath_.text.empty())
                     renderTextOnPath(ctx, pendingPath_, false);
             }
 
-            // Status hint pinned to bottom of canvas
+            // Status hint at canvas bottom
             ctx.setFont("12px sans");
             ctx.setFillColor(Color::fromRGBA(30, 120, 255, 200));
             ctx.setTextBaseline(TextBaseline::Bottom);
@@ -1429,20 +1553,20 @@ public:
             ctx.fillText(hint, 16.f, float(h_) - 8.f);
         }
 
-        // ── New-block text edit (Text tool, no existing block) ────
+        // ── New-block text edit (Text tool, blank canvas click) ───
         if (editing_ && !editingExisting_)
             renderEditPreview(ctx, editX_, editY_, editBuf_,
                               activeFontSize_, resolveFont(), activeColor_, true);
 
-        // ── Hover highlight (Select tool only) ────────────────────
+        // ── Hover highlight (Select tool) ─────────────────────────
         if (activeTool_ == CanvasTool::Select && !editing_)
         {
             int hover = hitTestBlock(hoverX_, hoverY_);
             if (hover >= 0 && hover != selectedIdx_)
-                drawBlockOutline(ctx, blocks_[hover], /*active=*/false, /*hover=*/true);
+                drawBlockOutline(ctx, blocks_[hover], false, /*hover=*/true);
         }
 
-        // ── Placeholder hint (top-left, shown when not editing) ───
+        // ── Placeholder hint (top-left corner) ───────────────────
         if (!editing_ && !drawingPath_)
         {
             ctx.setFillColor(Color::fromRGBA(150, 150, 160, 60));
@@ -1495,8 +1619,7 @@ private:
         return table;
     }
 
-    void renderTextOnPath(Canvas2D &ctx, const TextOnPath &tp,
-                          bool selected = false)
+    void renderTextOnPath(Canvas2D &ctx, const TextOnPath &tp, bool selected = false)
     {
         if (tp.segments.empty() || tp.text.empty())
             return;
@@ -1504,7 +1627,7 @@ private:
         auto arcTable = buildArcTable(tp.segments);
         float totalLen = arcTable.empty() ? 0.f : arcTable.back();
 
-        // Optionally draw the path curve itself when selected
+        // ── Draw path skeleton + handles when selected ────────────
         if (selected)
         {
             ctx.setStrokeColor(Color::fromRGBA(30, 120, 255, 120));
@@ -1519,7 +1642,6 @@ private:
             }
             ctx.stroke();
 
-            // Draw control point handles
             for (auto &seg : tp.segments)
             {
                 ctx.setStrokeColor(Color::fromRGBA(180, 80, 220, 120));
@@ -1533,18 +1655,16 @@ private:
                 ctx.lineTo(seg.cx1, seg.cy1);
                 ctx.stroke();
 
-                // cp dots
                 ctx.setFillColor(Color::fromRGBA(180, 80, 220, 200));
                 ctx.fillCircle(seg.cx0, seg.cy0, 4.f);
                 ctx.fillCircle(seg.cx1, seg.cy1, 4.f);
-                // anchor dots
                 ctx.setFillColor(Color::fromRGBA(30, 120, 255, 220));
                 ctx.fillCircle(seg.x0, seg.y0, 5.f);
                 ctx.fillCircle(seg.x1, seg.y1, 5.f);
             }
         }
 
-        // Resolve font
+        // ── Resolve font string ───────────────────────────────────
         std::string fontKey = tp.fontFamily;
         if (tp.bold && tp.italic)
             fontKey += "-bold-italic";
@@ -1555,11 +1675,52 @@ private:
 
         char fontBuf[64];
         std::snprintf(fontBuf, sizeof(fontBuf), "%.0fpx %s", tp.fontSize, fontKey.c_str());
+
+        // ── Apply block opacity ───────────────────────────────────
+        ctx.setGlobalAlpha(tp.opacity);
+
+        // ── Shadow pass ───────────────────────────────────────────
+        if (tp.shadowEnabled)
+        {
+            ctx.setFont(fontBuf);
+            ctx.setTextBaseline(TextBaseline::Bottom);
+
+            float shadowCursor = tp.startOffset;
+            for (int ci = 0; ci < int(tp.text.size()); ++ci)
+            {
+                std::string ch = tp.text.substr(ci, 1);
+                if (ch == "\n")
+                    continue;
+
+                float charW = ctx.measureText(ch);
+                float placeDist = shadowCursor + charW * 0.5f;
+                if (placeDist > totalLen)
+                    break;
+
+                float px, py, tx2, ty2;
+                if (!pathPointAtDist(tp.segments, arcTable, placeDist,
+                                     px, py, tx2, ty2))
+                    break;
+
+                float angle = atan2f(ty2, tx2);
+
+                ctx.save();
+                ctx.translate(px + tp.shadowOffsetX, py + tp.shadowOffsetY);
+                ctx.rotate(angle);
+                ctx.translate(0.f, -tp.baselineOffset);
+                ctx.setFillColor(tp.shadowColor);
+                ctx.fillText(ch, -charW * 0.5f, 0.f);
+                ctx.restore();
+
+                shadowCursor += charW;
+            }
+        }
+
+        // ── Main character pass ───────────────────────────────────
         ctx.setFont(fontBuf);
         ctx.setTextBaseline(TextBaseline::Bottom);
 
         float cursor = tp.startOffset;
-
         for (int ci = 0; ci < int(tp.text.size()); ++ci)
         {
             std::string ch = tp.text.substr(ci, 1);
@@ -1567,10 +1728,9 @@ private:
                 continue;
 
             float charW = ctx.measureText(ch);
-            float placeDist = cursor + charW * 0.5f; // center of glyph
-
+            float placeDist = cursor + charW * 0.5f;
             if (placeDist > totalLen)
-                break; // off the end of path
+                break;
 
             float px, py, tx2, ty2;
             if (!pathPointAtDist(tp.segments, arcTable, placeDist,
@@ -1582,18 +1742,29 @@ private:
             ctx.save();
             ctx.translate(px, py);
             ctx.rotate(angle);
-            // baseline offset: positive = above path
             ctx.translate(0.f, -tp.baselineOffset);
 
+            // Stroke pass first (renders behind fill)
+            if (tp.strokeEnabled)
+            {
+                ctx.setStrokeColor(tp.strokeColor);
+                ctx.setLineWidth(tp.strokeWidth);
+                ctx.strokeText(ch, -charW * 0.5f, 0.f);
+            }
+
+            // Fill pass
             ctx.setFillColor(tp.color);
-            // Draw with baseline at origin
             ctx.fillText(ch, -charW * 0.5f, 0.f);
 
             ctx.restore();
 
             cursor += charW;
         }
+
+        // ── Reset opacity ─────────────────────────────────────────
+        ctx.setGlobalAlpha(1.f);
     }
+
     // Evaluate cubic bezier position at t in [0,1]
     inline void cubicBezierPoint(const PathSegment &seg, float t,
                                  float &outX, float &outY) const
@@ -2530,6 +2701,24 @@ private:
                               rs.fontSize, resolveRunFont(rs).c_str());
                 ctx.setFont(fontBuf);
                 ctx.setFillColor(rs.color);
+                if (rs.strokeEnabled)
+                {
+                    char fontBufSt[64];
+                    std::snprintf(fontBufSt, sizeof(fontBufSt), "%.0fpx %s",
+                                  rs.fontSize, resolveRunFont(rs).c_str());
+                    ctx.setFont(fontBufSt);
+                    ctx.setStrokeColor(rs.strokeColor);
+                    ctx.setLineWidth(rs.strokeWidth);
+                    // strokeText draws outline only
+                    // draw char by char to match fillTextSpaced positioning
+                    float cxSt = seg.x;
+                    for (int si = 0; si < int(seg.text.size()); ++si)
+                    {
+                        std::string ch = seg.text.substr(si, 1);
+                        ctx.strokeText(ch, cxSt, seg.baselineY);
+                        cxSt += ctx.measureText(ch) + b.letterSpacing;
+                    }
+                }
                 fillTextSpaced(ctx, seg.text, seg.x, seg.baselineY,
                                b.letterSpacing, b.kerning);
 
@@ -2855,6 +3044,9 @@ private:
             rs.color = b.color;
             rs.baselineShift = b.baselineShift;
             rs.fontFamily = b.fontFamily;
+            rs.strokeEnabled = b.strokeEnabled;
+            rs.strokeColor = b.strokeColor;
+            rs.strokeWidth = b.strokeWidth;
 
             // Apply every span that covers this interval (last writer wins)
             for (auto &sp : b.spans)
@@ -3023,6 +3215,16 @@ class TextApp : public Widget
     std::shared_ptr<ButtonWidget> bulkBoldBtn_;
     std::shared_ptr<ButtonWidget> bulkSizeUpBtn_;
     std::shared_ptr<ButtonWidget> bulkSizeDownBtn_;
+
+    std::shared_ptr<SliderWidget> opacitySlider_;
+    std::shared_ptr<ButtonWidget> bgToggleBtn_;
+    std::shared_ptr<ColorPickerWidget> bgColorPicker_;
+    std::shared_ptr<ButtonWidget> strokeToggleBtn_;
+    std::shared_ptr<ColorPickerWidget> strokeColorPicker_;
+    std::shared_ptr<SliderWidget> strokeWidthSlider_;
+    std::shared_ptr<ButtonWidget> shadowToggleBtn_;
+    std::shared_ptr<SliderWidget> shadowXSlider_;
+    std::shared_ptr<SliderWidget> shadowYSlider_;
 
     // Reactive state
     State<bool> canUndo_{false};
@@ -3287,6 +3489,40 @@ class TextApp : public Widget
         updateStyleButtons();
         if (colorPicker_)
             colorPicker_->setColor(b->color);
+
+        // ── Sync appearance controls ──────────────────────────────
+        if (opacitySlider_)
+        {
+            opacitySlider_->value = double(b->opacity);
+            opacitySlider_->markNeedsPaint();
+        }
+        if (bgToggleBtn_)
+            bgToggleBtn_->setBackgroundColor(b->bgEnabled ? kStyleActiveBg : kStyleInactiveBg);
+        if (bgColorPicker_)
+            bgColorPicker_->setColor(b->bgColor);
+
+        if (strokeToggleBtn_)
+            strokeToggleBtn_->setBackgroundColor(b->strokeEnabled ? kStyleActiveBg : kStyleInactiveBg);
+        if (strokeWidthSlider_)
+        {
+            strokeWidthSlider_->value = double(b->strokeWidth);
+            strokeWidthSlider_->markNeedsPaint();
+        }
+        if (strokeColorPicker_)
+            strokeColorPicker_->setColor(b->strokeColor);
+
+        if (shadowToggleBtn_)
+            shadowToggleBtn_->setBackgroundColor(b->shadowEnabled ? kStyleActiveBg : kStyleInactiveBg);
+        if (shadowXSlider_)
+        {
+            shadowXSlider_->value = double(b->shadowOffsetX);
+            shadowXSlider_->markNeedsPaint();
+        }
+        if (shadowYSlider_)
+        {
+            shadowYSlider_->value = double(b->shadowOffsetY);
+            shadowYSlider_->markNeedsPaint();
+        }
     }
 
 public:
@@ -3955,6 +4191,161 @@ public:
             });
         if (auto c = wc.lock()) c->redraw(); });
 
+        opacitySlider_ = Slider(0.0, 1.0, 0.01);
+        opacitySlider_->value = 1.0;
+        opacitySlider_->setOnValueChanged([ws, wc](double val)
+                                          {
+    if (auto s = ws.lock()) {
+        if (s->selectedBlock()) {
+            // apply to selected block directly
+            s->applyToSelectedBlock([val](TextBlock& b){ b.opacity = float(val); });
+        }
+    }
+    if (auto c = wc.lock()) c->redraw(); });
+
+        // ── Background toggle + color picker ─────────────────────
+        bgToggleBtn_ = Button("BG")
+                           ->setHeight(28)
+                           ->setWidth(40)
+                           ->setBackgroundColor(kStyleInactiveBg)
+                           ->setOnClick([this, ws, wc]()
+                                        {
+        if (auto s = ws.lock()) {
+            s->applyToSelectedBlock([](TextBlock &b) {
+                b.bgEnabled = !b.bgEnabled;
+            });
+        }
+        // Sync button color
+        if (auto s = ws.lock()) {
+            const TextBlock *b = s->selectedBlock();
+            if (bgToggleBtn_)
+                bgToggleBtn_->setBackgroundColor(
+                    (b && b->bgEnabled) ? kStyleActiveBg : kStyleInactiveBg);
+        }
+        if (auto c = wc.lock()) c->redraw(); });
+
+        bgColorPicker_ = ColorPicker(Color::fromRGBA(255, 255, 255, 180));
+        bgColorPicker_->pickerSize = 90;
+        bgColorPicker_->hueBarHeight = 10;
+        bgColorPicker_->alphaBarHeight = 10;
+        bgColorPicker_->barSpacing = 4;
+        bgColorPicker_->previewSize = 16;
+        bgColorPicker_->hexInputHeight = 18;
+        bgColorPicker_->paddingLeft = 4;
+        bgColorPicker_->paddingRight = 4;
+        bgColorPicker_->paddingTop = 3;
+        bgColorPicker_->paddingBottom = 3;
+        bgColorPicker_->showAlpha = true; // background alpha matters
+        bgColorPicker_->width = bgColorPicker_->pickerSize + bgColorPicker_->paddingLeft + bgColorPicker_->paddingRight;
+        bgColorPicker_->setOnColorChanged([ws, wc](Color c)
+                                          {
+    if (auto s = ws.lock()) {
+        s->applyToSelectedBlock([c](TextBlock &b) {
+            b.bgColor = c;
+            // Auto-enable bg when color is picked with visible alpha
+            if (c.a > 0) b.bgEnabled = true;
+        });
+    }
+    if (auto cv = wc.lock()) cv->redraw(); });
+
+        // ── Stroke toggle + width slider ─────────────────────────
+        strokeToggleBtn_ = Button("Stroke")
+                               ->setHeight(28)
+                               ->setWidth(54)
+                               ->setBackgroundColor(kStyleInactiveBg)
+                               ->setOnClick([this, ws, wc]()
+                                            {
+        if (auto s = ws.lock()) {
+            s->applyToSelectedBlock([](TextBlock &b) {
+                b.strokeEnabled = !b.strokeEnabled;
+            });
+        }
+        if (auto s = ws.lock()) {
+            const TextBlock *b = s->selectedBlock();
+            if (strokeToggleBtn_)
+                strokeToggleBtn_->setBackgroundColor(
+                    (b && b->strokeEnabled) ? kStyleActiveBg : kStyleInactiveBg);
+        }
+        if (auto c = wc.lock()) c->redraw(); });
+
+        strokeWidthSlider_ = Slider(0.5, 12.0, 0.25);
+        strokeWidthSlider_->value = 1.5;
+        strokeWidthSlider_->setOnValueChanged([ws, wc](double val)
+                                              {
+    if (auto s = ws.lock()) {
+        s->applyToSelectedBlock([val](TextBlock &b) {
+            b.strokeWidth = float(val);
+        });
+    }
+    if (auto c = wc.lock()) c->redraw(); });
+
+        // ── Stroke color picker ───────────────────────────────────
+        strokeColorPicker_ = ColorPicker(Color::fromRGB(0, 0, 0));
+        strokeColorPicker_->pickerSize = 90;
+        strokeColorPicker_->hueBarHeight = 10;
+        strokeColorPicker_->alphaBarHeight = 10;
+        strokeColorPicker_->barSpacing = 4;
+        strokeColorPicker_->previewSize = 16;
+        strokeColorPicker_->hexInputHeight = 18;
+        strokeColorPicker_->paddingLeft = 4;
+        strokeColorPicker_->paddingRight = 4;
+        strokeColorPicker_->paddingTop = 3;
+        strokeColorPicker_->paddingBottom = 3;
+        strokeColorPicker_->showAlpha = false;
+        strokeColorPicker_->width = strokeColorPicker_->pickerSize + strokeColorPicker_->paddingLeft + strokeColorPicker_->paddingRight;
+        strokeColorPicker_->setOnColorChanged([ws, wc](Color c)
+                                              {
+    if (auto s = ws.lock()) {
+        s->applyToSelectedBlock([c](TextBlock &b) {
+            b.strokeColor = c;
+        });
+    }
+    if (auto cv = wc.lock()) cv->redraw(); });
+
+        // ── Shadow toggle ─────────────────────────────────────────
+        shadowToggleBtn_ = Button("Shadow")
+                               ->setHeight(28)
+                               ->setWidth(68)
+                               ->setBackgroundColor(kStyleInactiveBg)
+                               ->setOnClick([this, ws, wc]()
+                                            {
+        if (auto s = ws.lock()) {
+            s->applyToSelectedBlock([](TextBlock &b) {
+                b.shadowEnabled = !b.shadowEnabled;
+            });
+        }
+        if (auto s = ws.lock()) {
+            const TextBlock *b = s->selectedBlock();
+            if (shadowToggleBtn_)
+                shadowToggleBtn_->setBackgroundColor(
+                    (b && b->shadowEnabled) ? kStyleActiveBg : kStyleInactiveBg);
+        }
+        if (auto c = wc.lock()) c->redraw(); });
+
+        // ── Shadow X offset slider ────────────────────────────────
+        shadowXSlider_ = Slider(-20.0, 20.0, 0.5);
+        shadowXSlider_->value = 2.0;
+        shadowXSlider_->setOnValueChanged([ws, wc](double val)
+                                          {
+    if (auto s = ws.lock()) {
+        s->applyToSelectedBlock([val](TextBlock &b) {
+            b.shadowOffsetX = float(val);
+        });
+    }
+    if (auto c = wc.lock()) c->redraw(); });
+
+        // ── Shadow Y offset slider ────────────────────────────────
+        shadowYSlider_ = Slider(-20.0, 20.0, 0.5);
+        shadowYSlider_->value = 2.0;
+        shadowYSlider_->setOnValueChanged([ws, wc](double val)
+                                          {
+    if (auto s = ws.lock()) {
+        s->applyToSelectedBlock([val](TextBlock &b) {
+            b.shadowOffsetY = float(val);
+        });
+    }
+    if (auto c = wc.lock()) c->redraw(); });
+
         auto rightSidebar = Container(
                                 ListView({
                                     sideLabel("TRANSFORM"),
@@ -3971,8 +4362,23 @@ public:
                                     Container(bulkSizeUpBtn_)->setPadding(6)->setHeight(38),
                                     Container(bulkSizeDownBtn_)->setPadding(6)->setHeight(38),
                                     Container(deleteAllBtn_)->setPadding(6)->setHeight(38),
+
+                                    sideLabel("OPACITY"),
+                                    Container(opacitySlider_)->setPadding(6)->setHeight(52),
+
+                                    sideLabel("BACKGROUND"),
+                                    Container(Row({bgToggleBtn_, SizedBox(4, 0), bgColorPicker_}))->setPadding(6)->setHeight(170),
+
+                                    sideLabel("STROKE"),
+                                    Container(Row({strokeToggleBtn_, SizedBox(4, 0), strokeWidthSlider_}))->setPadding(6)->setHeight(50),
+                                    strokeColorPicker_,
+
+                                    sideLabel("SHADOW"),
+                                    Container(Row({shadowToggleBtn_}))->setPadding(6)->setHeight(36),
+                                    Container(Row({Text("X")->setFontSize(9)->setWidth(10), shadowXSlider_}))->setPadding(6)->setHeight(48),
+                                    Container(Row({Text("Y")->setFontSize(9)->setWidth(10), shadowYSlider_}))->setPadding(6)->setHeight(48),
                                 }))
-                                ->setWidth(140)
+                                ->setWidth(160)
                                 ->setBackgroundColor(Color::fromRGB(28, 28, 30));
 
         // ── Toolbar ───────────────────────────────────────────
