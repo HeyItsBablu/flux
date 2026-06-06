@@ -16,7 +16,7 @@ public:
             Expanded(ListView(
                          {
 
-                             Padding(EdgeInsets::all(6), lineHeightSlider_),
+                             Padding(EdgeInsets::all(76), lineHeightSlider_),
                              Row({
                                  Text("Item 1"),
                                  Text("Item 2"),
