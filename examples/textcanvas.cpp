@@ -23,6 +23,30 @@
 //     Justify
 // };
 
+// ============================================================
+//  TextSpan  — character-range style override
+// ============================================================
+
+struct TextSpan
+{
+    int start = 0; // byte index into TextBlock::text (inclusive)
+    int end = 0;   // byte index (exclusive)
+
+    // std::nullopt = inherit from TextBlock
+    std::optional<bool> bold;
+    std::optional<bool> italic;
+    std::optional<float> fontSize;
+    std::optional<Color> color;
+    std::optional<float> baselineShift;
+    std::optional<std::string> fontFamily;
+
+    // Decorations (false = inherit off)
+    bool underline = false;
+    bool strikethrough = false;
+    bool allCaps = false;
+    bool smallCaps = false;
+};
+
 struct TextBlock
 {
     float x = 0, y = 0; // baseline-left in canvas coords
@@ -39,6 +63,23 @@ struct TextBlock
     bool kerning = true;
     TextAlign textAlign = TextAlign::Left;
     float baselineShift = 0.f;
+    std::vector<TextSpan> spans;
+};
+
+struct ResolvedStyle
+{
+    int start = 0, end = 0;
+
+    bool bold = false;
+    bool italic = false;
+    float fontSize = 18.f;
+    Color color = {20, 20, 20, 255};
+    float baselineShift = 0.f;
+    std::string fontFamily = "sans";
+    bool underline = false;
+    bool strikethrough = false;
+    bool allCaps = false;
+    bool smallCaps = false;
 };
 
 // ============================================================
@@ -81,6 +122,268 @@ public:
     std::function<void()> onCommitted;
     std::function<void(float, float)> onMousePos;
     std::function<void()> onSelectionChanged; // block selection changed
+
+    // ── Span editing ──────────────────────────────────────────
+    bool hasSelection() const { return selStart_ != selEnd_; }
+    // Returns font size of the first run overlapping the selection,
+    // or 0 if no selection / not editing
+    float selectionFontSize() const
+    {
+        if (!editing_ || !hasSelection())
+            return 0.f;
+        int lo = std::min(selStart_, selEnd_);
+        int hi = std::max(selStart_, selEnd_);
+        TextBlock tmp = makeEditTmp();
+        auto runs = normalizeSpans(tmp);
+        for (auto &rs : runs)
+        {
+            if (rs.end <= lo || rs.start >= hi)
+                continue;
+            return rs.fontSize;
+        }
+        return activeFontSize_;
+    }
+
+    // Normalize b.spans in-place — call after any span mutation
+    void normalizeBlockSpans(TextBlock &b) const
+    {
+        int n = int(b.text.size());
+        if (n == 0)
+        {
+            b.spans.clear();
+            return;
+        }
+
+        // Get the resolved runs
+        auto runs = normalizeSpans(b);
+
+        // Convert back to minimal span list —
+        // merge adjacent runs that are identical to block defaults
+        b.spans.clear();
+        for (auto &rs : runs)
+        {
+            bool matchesBlock =
+                rs.bold == b.bold &&
+                rs.italic == b.italic &&
+                std::abs(rs.fontSize - b.fontSize) < 0.5f &&
+                rs.color.r == b.color.r &&
+                rs.color.g == b.color.g &&
+                rs.color.b == b.color.b &&
+                rs.color.a == b.color.a &&
+                std::abs(rs.baselineShift - b.baselineShift) < 0.5f &&
+                rs.fontFamily == b.fontFamily &&
+                !rs.underline && !rs.strikethrough &&
+                !rs.allCaps && !rs.smallCaps;
+
+            if (matchesBlock)
+                continue; // no span needed
+
+            TextSpan sp;
+            sp.start = rs.start;
+            sp.end = rs.end;
+            sp.bold = rs.bold;
+            sp.italic = rs.italic;
+            sp.fontSize = rs.fontSize;
+            sp.color = rs.color;
+            sp.baselineShift = rs.baselineShift;
+            sp.fontFamily = rs.fontFamily;
+            sp.underline = rs.underline;
+            sp.strikethrough = rs.strikethrough;
+            sp.allCaps = rs.allCaps;
+            sp.smallCaps = rs.smallCaps;
+            b.spans.push_back(sp);
+        }
+    }
+
+    template <typename Fn>
+    bool selectionBoolQueryPublic(Fn fn) const
+    {
+        return selectionBoolQuery(fn);
+    }
+
+    // Apply a style mutation to the current text selection.
+    // fn receives a ResolvedStyle& and modifies it.
+    // Works on the edit buffer (editingExisting_ or new block preview).
+    template <typename Fn>
+    void applyStyleToSelection(Fn fn)
+    {
+        if (!editing_ || !hasSelection())
+            return;
+
+        if (editingExisting_ && selectedIdx_ >= 0 &&
+            selectedIdx_ < int(blocks_.size()))
+        {
+            auto &src = blocks_[selectedIdx_];
+            if (src.spans.empty() && (src.bold || src.italic))
+            {
+                // Bake block-level style into a full-coverage span,
+                // then reset block base to defaults
+                TextSpan full;
+                full.start = 0;
+                full.end = int(src.text.size());
+                full.bold = src.bold;
+                full.italic = src.italic;
+                full.color = src.color;
+                full.fontSize = src.fontSize;
+                full.baselineShift = src.baselineShift;
+                full.fontFamily = src.fontFamily;
+                src.spans.push_back(full);
+
+                // Reset block base to neutral defaults
+                src.bold = false;
+                src.italic = false;
+            }
+        }
+        // Also handle new blocks with pendingSpans empty but activeBold set
+        else if (!editingExisting_ && pendingSpans_.empty() && activeBold_)
+        {
+            int n = int(editBuf_.size());
+            TextSpan full;
+            full.start = 0;
+            full.end = n;
+            full.bold = true;
+            full.italic = activeItalic_;
+            full.color = activeColor_;
+            full.fontSize = activeFontSize_;
+            full.baselineShift = activeBaselineShift_;
+            full.fontFamily = activeFontFamily_;
+            pendingSpans_.push_back(full);
+            activeBold_ = false; // reset base
+            activeItalic_ = false;
+        }
+        // ── End bootstrap ────────────────────────────────────────
+
+        int lo = std::min(selStart_, selEnd_);
+        int hi = std::max(selStart_, selEnd_);
+
+        // After the bootstrap block, before makeEditTmp()
+        if (editingExisting_ && selectedIdx_ >= 0 && selectedIdx_ < int(blocks_.size()))
+        {
+            auto &src = blocks_[selectedIdx_];
+        }
+
+        TextBlock tmp = makeEditTmp();
+
+        auto runs = normalizeSpans(tmp);
+
+        // Apply fn to every run that overlaps [lo, hi)
+        // Split runs at selection boundaries before applying fn
+        std::vector<ResolvedStyle> splitRuns;
+        for (auto &rs : runs)
+        {
+            if (rs.end <= lo || rs.start >= hi)
+            {
+                // Outside selection — keep as-is
+                splitRuns.push_back(rs);
+                continue;
+            }
+
+            // Split into up to 3 parts: before, inside, after selection
+            if (rs.start < lo)
+            {
+                ResolvedStyle pre = rs;
+                pre.end = lo;
+                splitRuns.push_back(pre);
+            }
+
+            // Inside selection — apply fn to this portion
+            ResolvedStyle mid = rs;
+            mid.start = std::max(rs.start, lo);
+            mid.end = std::min(rs.end, hi);
+            fn(mid);
+            splitRuns.push_back(mid);
+
+            if (rs.end > hi)
+            {
+                ResolvedStyle post = rs;
+                post.start = hi;
+                splitRuns.push_back(post);
+            }
+        }
+        runs = splitRuns;
+
+        // Write runs back as spans
+        tmp.spans.clear();
+
+        for (auto &rs : runs)
+        {
+
+            TextSpan sp;
+            sp.start = rs.start;
+            sp.end = rs.end;
+            sp.bold = rs.bold;
+            sp.italic = rs.italic;
+            sp.fontSize = rs.fontSize;
+            sp.color = rs.color;
+            sp.baselineShift = rs.baselineShift;
+            sp.fontFamily = rs.fontFamily;
+            sp.underline = rs.underline;
+            sp.strikethrough = rs.strikethrough;
+            sp.allCaps = rs.allCaps;
+            sp.smallCaps = rs.smallCaps;
+            tmp.spans.push_back(sp);
+        }
+
+        normalizeBlockSpans(tmp);
+
+        if (editingExisting_ && selectedIdx_ >= 0 &&
+            selectedIdx_ < int(blocks_.size()))
+            blocks_[selectedIdx_].spans = tmp.spans;
+
+        pendingSpans_ = tmp.spans;
+
+        if (onCommitted)
+            onCommitted();
+    }
+
+    // Query: what is the state of a bool property across the selection?
+    // Returns true only if ALL runs in selection have the property set.
+    bool selectionAllBold() const
+    {
+        return selectionBoolQuery([](const ResolvedStyle &rs)
+                                  { return rs.bold; });
+    }
+    bool selectionAllItalic() const
+    {
+        return selectionBoolQuery([](const ResolvedStyle &rs)
+                                  { return rs.italic; });
+    }
+    bool selectionAllUnderline() const
+    {
+        return selectionBoolQuery([](const ResolvedStyle &rs)
+                                  { return rs.underline; });
+    }
+    bool selectionAllStrikethrough() const
+    {
+        return selectionBoolQuery([](const ResolvedStyle &rs)
+                                  { return rs.strikethrough; });
+    }
+
+    // Returns the color if uniform across selection, nullopt if mixed
+    std::optional<Color> selectionColor() const
+    {
+        if (!editing_ || !hasSelection())
+            return std::nullopt;
+        int lo = std::min(selStart_, selEnd_);
+        int hi = std::max(selStart_, selEnd_);
+        TextBlock tmp = makeEditTmp();
+        auto runs = normalizeSpans(tmp);
+        std::optional<Color> result;
+        for (auto &rs : runs)
+        {
+            if (rs.end <= lo || rs.start >= hi)
+                continue;
+            if (!result)
+            {
+                result = rs.color;
+                continue;
+            }
+            if (rs.color.r != result->r || rs.color.g != result->g ||
+                rs.color.b != result->b)
+                return std::nullopt;
+        }
+        return result;
+    }
 
     // Returns true if more than one block is selected
     bool hasMultiSelection() const { return selectedIndices_.size() > 1; }
@@ -143,6 +446,7 @@ public:
         editingExisting_ = false;
         editBuf_.clear();
         selStart_ = selEnd_ = 0;
+        pendingSpans_.clear();
     }
 
     // ── Undo / redo ───────────────────────────────────────────
@@ -210,6 +514,8 @@ public:
                 b.x = editX_;
                 b.y = editY_;
                 applyEditToBlock(b);
+                b.spans = pendingSpans_;
+                pendingSpans_.clear();
                 blocks_.push_back(b);
                 selectedIdx_ = int(blocks_.size()) - 1;
             }
@@ -891,29 +1197,31 @@ public:
                 ctx.setFillColor(b.color);
                 ctx.setTextBaseline(TextBaseline::Bottom);
                 {
+                    // span-aware per-line draw
                     auto lines = getVisualLines(b.text, b.wrapWidth, b.fontSize);
                     float lineH = b.fontSize * b.lineHeight;
+
+                    // Measure containerW using block font (for layout)
+                    char blockFontBuf[64];
+                    std::snprintf(blockFontBuf, sizeof(blockFontBuf), "%.0fpx %s",
+                                  b.fontSize, resolveFont(b).c_str());
+                    ctx.setFont(blockFontBuf);
                     float containerW = blockContainerWidth(ctx, lines, b.wrapWidth,
                                                            b.letterSpacing, b.kerning);
+
+                    auto runs = normalizeSpans(b);
+
                     for (int li = 0; li < int(lines.size()); ++li)
                     {
-                        float drawX = b.x;
                         bool isLast = (li == int(lines.size()) - 1);
                         float drawY = b.y + 2.f + li * lineH - b.baselineShift;
 
-                        if (b.textAlign == TextAlign::Justify)
-                        {
-                            fillTextJustified(ctx, lines[li], drawX, drawY,
-                                              containerW, b.letterSpacing, b.kerning, isLast);
-                        }
-                        else
-                        {
-                            float lineW = measureTextSpaced(ctx, lines[li],
-                                                            b.letterSpacing, b.kerning);
-                            drawX += alignOffset(lineW, containerW, b.textAlign);
-                            fillTextSpaced(ctx, lines[li], drawX, drawY,
-                                           b.letterSpacing, b.kerning);
-                        }
+                        auto [byteS, byteE] = visualLineByteRange(b.text, lines, li);
+
+                        drawSpanLine(ctx, b, runs,
+                                     byteS, byteE,
+                                     b.x, drawY,
+                                     containerW, isLast);
                     }
                 }
                 ctx.restore(); // end rotation
@@ -993,6 +1301,60 @@ public:
 
 private:
     // ── Helpers ───────────────────────────────────────────────
+
+    // Build a temporary TextBlock from the current edit state
+    TextBlock makeEditTmp() const
+    {
+        TextBlock tmp;
+        tmp.text = editBuf_;
+        tmp.lineHeight = activeLineHeight_;
+        tmp.letterSpacing = activeLetterSpacing_;
+        tmp.kerning = activeKerning_;
+        tmp.textAlign = activeTextAlign_;
+
+        // Always use committed block as style base when editing existing
+        if (editingExisting_ && selectedIdx_ >= 0 &&
+            selectedIdx_ < int(blocks_.size()))
+        {
+            const auto &src = blocks_[selectedIdx_];
+            tmp.fontSize = src.fontSize;
+            tmp.fontFamily = src.fontFamily;
+            tmp.bold = src.bold;
+            tmp.italic = src.italic;
+            tmp.color = src.color;
+            tmp.baselineShift = src.baselineShift;
+            tmp.spans = src.spans;
+        }
+        else
+        {
+            tmp.fontSize = activeFontSize_;
+            tmp.fontFamily = activeFontFamily_;
+            tmp.bold = activeBold_;
+            tmp.italic = activeItalic_;
+            tmp.color = activeColor_;
+            tmp.baselineShift = activeBaselineShift_;
+        }
+        return tmp;
+    }
+
+    template <typename Fn>
+    bool selectionBoolQuery(Fn fn) const
+    {
+        if (!editing_ || !hasSelection())
+            return false;
+        int lo = std::min(selStart_, selEnd_);
+        int hi = std::max(selStart_, selEnd_);
+        TextBlock tmp = makeEditTmp();
+        auto runs = normalizeSpans(tmp);
+        for (auto &rs : runs)
+        {
+            if (rs.end <= lo || rs.start >= hi)
+                continue;
+            if (!fn(rs))
+                return false;
+        }
+        return true;
+    }
 
     void copyToClipboard(const std::string &text) const
     {
@@ -1310,6 +1672,24 @@ private:
         return result;
     }
 
+    std::pair<int, int> visualLineByteRange(
+        const std::string &text,
+        const std::vector<std::string> &visualLines,
+        int li) const
+    {
+        int pos = 0;
+        for (int i = 0; i < li; ++i)
+        {
+            pos += int(visualLines[i].size());
+            // Account for the '\n' or space that was consumed
+            if (pos < int(text.size()) &&
+                (text[pos] == '\n' || text[pos] == ' '))
+                ++pos;
+        }
+        int lineEnd = pos + int(visualLines[li].size());
+        return {pos, lineEnd};
+    }
+
     std::vector<std::string> splitLines(const std::string &text) const
     {
         std::vector<std::string> lines;
@@ -1376,6 +1756,35 @@ private:
         ctx.setFont(buf);
     }
 
+    std::string resolveRunFont(const ResolvedStyle &rs) const
+    {
+        std::string base = rs.fontFamily;
+        if (rs.bold && rs.italic)
+            return base + "-bold-italic";
+        if (rs.bold)
+            return base + "-bold";
+        if (rs.italic)
+            return base + "-italic";
+        return base;
+    }
+
+    // Returns the string to actually render for a run.
+    // smallCaps: lowercase chars rendered as uppercase at reduced fontSize.
+    // We handle smallCaps by splitting into sub-runs at render time (Step D).
+    // For now just allCaps.
+    std::string displayText(const std::string &text,
+                            int start, int end,
+                            const ResolvedStyle &rs) const
+    {
+        std::string s = text.substr(start, end - start);
+        if (rs.allCaps || rs.smallCaps)
+        {
+            for (auto &c : s)
+                c = char(std::toupper((unsigned char)c));
+        }
+        return s;
+    }
+
     void resetBlink()
     {
         blinkTimer_ = 0.0;
@@ -1401,8 +1810,6 @@ private:
             b.y = editY_;
         }
     }
-
-    bool hasSelection() const { return selStart_ != selEnd_; }
 
     void deleteSelection()
     {
@@ -1551,25 +1958,25 @@ private:
             }
         }
 
-        // Draw each line of text
-        ctx.setFillColor(color);
-        for (int li = 0; li < nLines; ++li)
+        // Draw each line with span awareness
         {
-            bool isLast = (li == nLines - 1);
-            float drawX = tx;
+            // Build a tmp block for span resolution
+            TextBlock tmp = makeEditTmp();
+            tmp.text = text; // may be editBuf_ or passed-in text
+            auto runs = normalizeSpans(tmp);
 
-            if (ta == TextAlign::Justify)
+            for (int li = 0; li < nLines; ++li)
             {
-                fillTextJustified(ctx, lines[li], drawX,
-                                  ty + 2.f + li * lineH - bs,
-                                  containerW, ls, kr, isLast);
-            }
-            else
-            {
-                float lineW = measureTextSpaced(ctx, lines[li], ls, kr);
-                drawX += alignOffset(lineW, containerW, ta);
-                fillTextSpaced(ctx, lines[li], drawX,
-                               ty + 2.f + li * lineH - bs, ls, kr);
+                bool isLast = (li == nLines - 1);
+                float drawY2 = tx > 0 ? ty + 2.f + li * lineH - bs : ty;
+                // Reuse drawY from outer scope
+                float drawY_line = ty + 2.f + li * lineH - bs;
+
+                auto [byteS, byteE] = visualLineByteRange(text, lines, li);
+                drawSpanLine(ctx, tmp, runs,
+                             byteS, byteE,
+                             tx, drawY_line,
+                             containerW, isLast);
             }
         }
 
@@ -1590,6 +1997,190 @@ private:
         }
     }
 
+    // Draw one visual line using span runs.
+    // lineStart/lineEnd are byte offsets into b.text for this visual line.
+    // drawX/drawY are the baseline position.
+    // containerW used for justify.
+    void drawSpanLine(Canvas2D &ctx,
+                      const TextBlock &b,
+                      const std::vector<ResolvedStyle> &runs,
+                      int lineStart, int lineEnd,
+                      float drawX, float drawY,
+                      float containerW,
+                      bool isLastLine)
+    {
+        // ── Collect per-character x positions for decorations ────
+        // We'll build a list of {runIdx, subText, x, width, rs}
+        struct RunSegment
+        {
+            const ResolvedStyle *rs;
+            std::string text;
+            float x = 0, width = 0;
+            float baselineY = 0;
+            float fontSize = 0;
+        };
+        std::vector<RunSegment> segs;
+
+        // ── Pre-pass: measure each run segment on this line ──────
+        float totalW = 0.f;
+        for (auto &rs : runs)
+        {
+            int s = std::max(rs.start, lineStart);
+            int e = std::min(rs.end, lineEnd);
+            if (s >= e)
+                continue;
+
+            std::string txt = displayText(b.text, s, e, rs);
+
+            // Set font for measurement
+            char fontBuf[64];
+            std::snprintf(fontBuf, sizeof(fontBuf), "%.0fpx %s",
+                          rs.fontSize, resolveRunFont(rs).c_str());
+            ctx.setFont(fontBuf);
+
+            float w = measureTextSpaced(ctx, txt, b.letterSpacing, b.kerning);
+            segs.push_back({&rs, txt, 0.f, w,
+                            drawY - rs.baselineShift,
+                            rs.fontSize});
+            totalW += w;
+        }
+        if (segs.empty())
+            return;
+
+        // ── Compute starting x based on alignment ────────────────
+        float startX = drawX;
+        if (b.textAlign == TextAlign::Center)
+            startX = drawX + (containerW - totalW) * 0.5f;
+        else if (b.textAlign == TextAlign::Right)
+            startX = drawX + containerW - totalW;
+        else if (b.textAlign == TextAlign::Justify && !isLastLine)
+        {
+            // justify: handled per-word below — use left for now
+            // full justify with mixed runs is complex; use left align fallback
+            startX = drawX;
+        }
+
+        // ── Assign x positions ───────────────────────────────────
+        float cx = startX;
+        for (auto &seg : segs)
+        {
+            seg.x = cx;
+            cx += seg.width;
+        }
+
+        // ── Draw each segment ────────────────────────────────────────
+        ctx.setTextBaseline(TextBaseline::Bottom);
+        for (auto &seg : segs)
+        {
+            const ResolvedStyle &rs = *seg.rs;
+
+            if (rs.smallCaps)
+            {
+                // Split into sub-runs: uppercase chars at full size,
+                // lowercase chars at 70% size (rendered as uppercase)
+                float cx2 = seg.x;
+                float fullSize = rs.fontSize;
+                float smallSize = rs.fontSize * 0.7f;
+
+                // Re-fetch original (non-transformed) text for this segment
+                // seg.text is already all-caps via displayText; we need original
+                int segStart = -1, segEnd = -1;
+                // Find which run this seg belongs to by matching pointer
+                for (auto &r : runs)
+                {
+                    if (&r == seg.rs)
+                    {
+                        // runs is local — find start/end from lineStart context
+                        break;
+                    }
+                }
+                // Simpler: walk the original b.text for this seg range
+                // We stored start/end in the run — access via seg.rs
+                int rStart = std::max(seg.rs->start, lineStart);
+                int rEnd = std::min(seg.rs->end, lineEnd);
+                const std::string &origText = b.text;
+
+                for (int ci = rStart; ci < rEnd;)
+                {
+                    char ch = origText[ci];
+                    bool isLower = (ch >= 'a' && ch <= 'z');
+                    // Find run of same case
+                    int runEnd = ci;
+                    while (runEnd < rEnd)
+                    {
+                        bool nextLower = (origText[runEnd] >= 'a' && origText[runEnd] <= 'z');
+                        if (nextLower != isLower)
+                            break;
+                        ++runEnd;
+                    }
+
+                    std::string sub = origText.substr(ci, runEnd - ci);
+                    float subSize = isLower ? smallSize : fullSize;
+
+                    // Uppercase the lowercase portion
+                    if (isLower)
+                        for (auto &c2 : sub)
+                            c2 = char(std::toupper((unsigned char)c2));
+
+                    char fontBuf2[64];
+                    std::snprintf(fontBuf2, sizeof(fontBuf2), "%.0fpx %s",
+                                  subSize, resolveRunFont(rs).c_str());
+                    ctx.setFont(fontBuf2);
+                    ctx.setFillColor(rs.color);
+
+                    // Align lowercase to baseline bottom of full-size chars
+                    float subY = isLower
+                                     ? seg.baselineY + (fullSize - smallSize) * 0.0f
+                                     : seg.baselineY;
+
+                    fillTextSpaced(ctx, sub, cx2, subY, b.letterSpacing, b.kerning);
+
+                    ctx.setFont(fontBuf2); // keep set for measurement
+                    cx2 += measureTextSpaced(ctx, sub, b.letterSpacing, b.kerning);
+                    ci = runEnd;
+                }
+
+                // Underline / strikethrough on full seg width
+                if (rs.underline)
+                {
+                    float uy = seg.baselineY + rs.fontSize * 0.1f;
+                    ctx.setFillColor(rs.color);
+                    ctx.fillRect(seg.x, uy, seg.width, std::max(1.f, rs.fontSize * 0.07f));
+                }
+                if (rs.strikethrough)
+                {
+                    float sy = seg.baselineY - rs.fontSize * 0.35f;
+                    ctx.setFillColor(rs.color);
+                    ctx.fillRect(seg.x, sy, seg.width, std::max(1.f, rs.fontSize * 0.07f));
+                }
+            }
+            else
+            {
+                // Normal draw
+                char fontBuf[64];
+                std::snprintf(fontBuf, sizeof(fontBuf), "%.0fpx %s",
+                              rs.fontSize, resolveRunFont(rs).c_str());
+                ctx.setFont(fontBuf);
+                ctx.setFillColor(rs.color);
+                fillTextSpaced(ctx, seg.text, seg.x, seg.baselineY,
+                               b.letterSpacing, b.kerning);
+
+                if (rs.underline)
+                {
+                    float uy = seg.baselineY + rs.fontSize * 0.1f;
+                    ctx.setFillColor(rs.color);
+                    ctx.fillRect(seg.x, uy, seg.width, std::max(1.f, rs.fontSize * 0.07f));
+                }
+                if (rs.strikethrough)
+                {
+                    float sy = seg.baselineY - rs.fontSize * 0.35f;
+                    ctx.setFillColor(rs.color);
+                    ctx.fillRect(seg.x, sy, seg.width, std::max(1.f, rs.fontSize * 0.07f));
+                }
+            }
+        }
+    }
+
     void drawBlockOutline(Canvas2D &ctx, const TextBlock &b,
                           bool /*active*/, bool hover = false)
     {
@@ -1605,8 +2196,16 @@ private:
 
         float tw = b.wrapWidth > 0.f ? b.wrapWidth : 0.f;
         if (tw == 0.f)
-            for (auto &l : vlines)
-                tw = std::max(tw, measureTextSpaced(ctx, l, b.letterSpacing, b.kerning));
+        {
+            // Try cache first
+            int bidx = int(&b - blocks_.data()); // pointer arithmetic to get index
+            if (bidx >= 0 && bidx < int(blockMeasuredWidths_.size()) && blockMeasuredWidths_[bidx] > 0.f)
+                tw = blockMeasuredWidths_[bidx];
+            else
+                for (auto &l : vlines)
+                    tw = std::max(tw, measureTextSpaced(ctx, l,
+                                                        b.letterSpacing, b.kerning));
+        }
 
         float totalH = b.fontSize + 10.f + (nLines - 1) * lineH;
 
@@ -1844,10 +2443,86 @@ private:
                ly >= hy - 6.f && ly <= hy + 6.f;
     }
 
+    // Produce a normalized, non-overlapping, fully-resolved run list
+    // covering [0, textLen).  Runs are sorted by start, no gaps.
+    std::vector<ResolvedStyle> normalizeSpans(const TextBlock &b) const
+    {
+        int n = int(b.text.size());
+        if (n == 0)
+            return {};
+
+        // ── 1. Collect all split points ──────────────────────────
+        std::vector<int> pts = {0, n};
+        for (auto &sp : b.spans)
+        {
+            int s = std::clamp(sp.start, 0, n);
+            int e = std::clamp(sp.end, 0, n);
+            if (s < e)
+            {
+                pts.push_back(s);
+                pts.push_back(e);
+            }
+        }
+        std::sort(pts.begin(), pts.end());
+        pts.erase(std::unique(pts.begin(), pts.end()), pts.end());
+
+        // ── For each interval resolve style ───────────────────
+        std::vector<ResolvedStyle> runs;
+        for (int pi = 0; pi + 1 < int(pts.size()); ++pi)
+        {
+            int s = pts[pi], e = pts[pi + 1];
+
+            ResolvedStyle rs;
+            rs.start = s;
+            rs.end = e;
+            // Defaults from block
+            rs.bold = b.bold;
+            rs.italic = b.italic;
+            rs.fontSize = b.fontSize;
+            rs.color = b.color;
+            rs.baselineShift = b.baselineShift;
+            rs.fontFamily = b.fontFamily;
+
+            // Apply every span that covers this interval (last writer wins)
+            for (auto &sp : b.spans)
+            {
+                int ss = std::clamp(sp.start, 0, n);
+                int se = std::clamp(sp.end, 0, n);
+                if (ss > s || se < e)
+                    continue; // doesn't fully cover
+
+                if (sp.bold)
+                    rs.bold = *sp.bold;
+                if (sp.italic)
+                    rs.italic = *sp.italic;
+                if (sp.fontSize)
+                    rs.fontSize = *sp.fontSize;
+                if (sp.color)
+                    rs.color = *sp.color;
+                if (sp.baselineShift)
+                    rs.baselineShift = *sp.baselineShift;
+                if (sp.fontFamily)
+                    rs.fontFamily = *sp.fontFamily;
+                if (sp.underline)
+                    rs.underline = true;
+                if (sp.strikethrough)
+                    rs.strikethrough = true;
+                if (sp.allCaps)
+                    rs.allCaps = true;
+                if (sp.smallCaps)
+                    rs.smallCaps = true;
+            }
+            runs.push_back(rs);
+        }
+        return runs;
+    }
+
     // ── State ─────────────────────────────────────────────────
     std::vector<TextBlock> blocks_;
     std::vector<std::vector<TextBlock>> undoStack_, redoStack_;
     std::vector<float> blockMeasuredWidths_;
+
+    std::vector<TextSpan> pendingSpans_;
 
     bool draggingWrapHandle_ = false;
     int wrapHandleIdx_ = -1;
@@ -1931,6 +2606,12 @@ class TextApp : public Widget
     State<std::string> fontSizeState_{"18"};         // backing state for fontSizeInput_
     std::shared_ptr<ButtonWidget> boldBtn_;
     std::shared_ptr<ButtonWidget> italicBtn_;
+
+    std::shared_ptr<ButtonWidget> underlineBtn_;
+    std::shared_ptr<ButtonWidget> strikethroughBtn_;
+
+    std::shared_ptr<ButtonWidget> allCapsBtn_;
+    std::shared_ptr<ButtonWidget> smallCapsBtn_;
 
     std::shared_ptr<SliderWidget> baselineShiftSlider_;
     std::shared_ptr<ButtonWidget> superscriptBtn_;
@@ -2063,10 +2744,37 @@ class TextApp : public Widget
     {
         if (!surface_)
             return;
+
+        bool bold = surface_->isEditing() && surface_->hasSelection()
+                        ? surface_->selectionAllBold()
+                        : surface_->activeBold_;
+        bool italic = surface_->isEditing() && surface_->hasSelection()
+                          ? surface_->selectionAllItalic()
+                          : surface_->activeItalic_;
+        bool ul = surface_->isEditing() && surface_->hasSelection() && surface_->selectionAllUnderline();
+        bool st = surface_->isEditing() && surface_->hasSelection() && surface_->selectionAllStrikethrough();
+
         if (boldBtn_)
-            boldBtn_->setBackgroundColor(surface_->activeBold_ ? kStyleActiveBg : kStyleInactiveBg);
+            boldBtn_->setBackgroundColor(bold ? kStyleActiveBg : kStyleInactiveBg);
         if (italicBtn_)
-            italicBtn_->setBackgroundColor(surface_->activeItalic_ ? kStyleActiveBg : kStyleInactiveBg);
+            italicBtn_->setBackgroundColor(italic ? kStyleActiveBg : kStyleInactiveBg);
+        if (underlineBtn_)
+            underlineBtn_->setBackgroundColor(ul ? kStyleActiveBg : kStyleInactiveBg);
+        if (strikethroughBtn_)
+            strikethroughBtn_->setBackgroundColor(st ? kStyleActiveBg : kStyleInactiveBg);
+
+        // Sync font size display to selection's font size
+        if (surface_ && surface_->isEditing() && surface_->hasSelection())
+        {
+            // Get font size of the first run in selection
+            float selFs = surface_->selectionFontSize();
+            if (selFs > 0.f)
+            {
+                char buf[16];
+                std::snprintf(buf, sizeof(buf), "%.0f", selFs);
+                fontSizeState_.set(buf);
+            }
+        }
     }
 
     void syncBaselineShiftSlider()
@@ -2223,7 +2931,7 @@ public:
         surface_->onCommitted = [this]()
         { refreshState(); canvas_->redraw(); };
         surface_->onSelectionChanged = [this]()
-        { onBlockSelected(); canvas_->redraw(); };
+        { onBlockSelected(); updateStyleButtons(); canvas_->redraw(); };
 
         std::weak_ptr<TextSurface> ws = surface_;
         std::weak_ptr<CanvasWidget> wc = canvas_;
@@ -2294,27 +3002,46 @@ public:
         fontSizeDropdown_->selectedIndex = 4; // 18px default
         fontSizeDropdown_->setOnSelectionChanged([this, ws, wc](int idx, const std::string &)
                                                  {
-            if (idx < 0 || idx >= kNumSizes) return;
-            float fs = kFontSizes[idx];
-            if (auto s = ws.lock())
-            {
-                s->activeFontSize_ = fs;
-                syncFontSizeControls();
-            }
-            if (auto c = wc.lock()) c->redraw(); });
+    if (idx < 0 || idx >= kNumSizes) return;
+    float fs = kFontSizes[idx];
+    if (auto s = ws.lock())
+    {
+        if (s->isEditing() && s->hasSelection())
+        {
+            s->applyStyleToSelection([fs](ResolvedStyle &rs){
+                rs.fontSize = fs;
+            });
+        }
+        else
+        {
+            s->activeFontSize_ = fs;
+            syncFontSizeControls();
+        }
+    }
+    if (auto c = wc.lock()) c->redraw(); });
 
-        // fontSizeState_ is declared as a member ("18" initial value).
-        // Observe it to update activeFontSize_ whenever the user types.
         fontSizeState_.listen([this, ws, wc](const std::string &t)
                               {
-            try
+    try
+    {
+        float fs = std::stof(t);
+        fs = std::clamp(fs, 6.f, 200.f);
+        if (auto s = ws.lock())
+        {
+            if (s->isEditing() && s->hasSelection())
             {
-                float fs = std::stof(t);
-                fs = std::clamp(fs, 6.f, 200.f);
-                if (auto s = ws.lock()) s->activeFontSize_ = fs;
-                if (auto c = wc.lock()) c->redraw();
+                s->applyStyleToSelection([fs](ResolvedStyle &rs){
+                    rs.fontSize = fs;
+                });
             }
-            catch(...) {} });
+            else
+            {
+                s->activeFontSize_ = fs;
+            }
+        }
+        if (auto c = wc.lock()) c->redraw();
+    }
+    catch(...) {} });
 
         fontSizeInput_ = TextInput(); // no placeholder — shows the live value
 
@@ -2368,6 +3095,40 @@ public:
         }
         if (auto c = wc.lock()) c->redraw(); });
 
+        underlineBtn_ = Button("U")
+                            ->setHeight(28)
+                            ->setWidth(34)
+                            ->setBackgroundColor(kStyleInactiveBg)
+                            ->setOnClick([this, ws, wc]()
+                                         {
+        if (auto s = ws.lock()) {
+            if (s->isEditing() && s->hasSelection())
+            {
+                bool turnOn = !s->selectionAllUnderline();
+                s->applyStyleToSelection([turnOn](ResolvedStyle &rs){
+                    rs.underline = turnOn;
+                });
+            }
+        }
+        if (auto c = wc.lock()) c->redraw(); });
+
+        strikethroughBtn_ = Button("S")
+                                ->setHeight(28)
+                                ->setWidth(34)
+                                ->setBackgroundColor(kStyleInactiveBg)
+                                ->setOnClick([this, ws, wc]()
+                                             {
+        if (auto s = ws.lock()) {
+            if (s->isEditing() && s->hasSelection())
+            {
+                bool turnOn = !s->selectionAllStrikethrough();
+                s->applyStyleToSelection([turnOn](ResolvedStyle &rs){
+                    rs.strikethrough = turnOn;
+                });
+            }
+        }
+        if (auto c = wc.lock()) c->redraw(); });
+
         // ── Bold / Italic ─────────────────────────────────────
         boldBtn_ = Button("B")
                        ->setHeight(28)
@@ -2375,12 +3136,58 @@ public:
                        ->setBackgroundColor(kStyleInactiveBg)
                        ->setOnClick([this, ws, wc]()
                                     {
-                if (auto s = ws.lock())
-                {
-                    s->activeBold_ = !s->activeBold_;
-                    updateStyleButtons();
-                }
-                if (auto c = wc.lock()) c->redraw(); });
+        if (auto s = ws.lock()) {
+            if (s->isEditing() && s->hasSelection())
+            {
+                // Determine toggle state — if all bold, turn off; else turn on
+                bool turnOn = !s->selectionAllBold();
+                s->applyStyleToSelection([turnOn](ResolvedStyle &rs){
+                    rs.bold = turnOn;
+                });
+            }
+            else
+            {
+                s->activeBold_ = !s->activeBold_;
+            }
+            updateStyleButtons();
+        }
+        if (auto c = wc.lock()) c->redraw(); });
+
+        allCapsBtn_ = Button("AC")
+                          ->setHeight(28)
+                          ->setWidth(34)
+                          ->setBackgroundColor(kStyleInactiveBg)
+                          ->setOnClick([this, ws, wc]()
+                                       {
+        if (auto s = ws.lock()) {
+            if (s->isEditing() && s->hasSelection()) {
+                bool turnOn = !s->selectionBoolQueryPublic(
+                    [](const ResolvedStyle &rs){ return rs.allCaps; });
+                s->applyStyleToSelection([turnOn](ResolvedStyle &rs){
+                    rs.allCaps = turnOn;
+                    if (turnOn) rs.smallCaps = false;
+                });
+            }
+        }
+        if (auto c = wc.lock()) c->redraw(); });
+
+        smallCapsBtn_ = Button("SC")
+                            ->setHeight(28)
+                            ->setWidth(34)
+                            ->setBackgroundColor(kStyleInactiveBg)
+                            ->setOnClick([this, ws, wc]()
+                                         {
+        if (auto s = ws.lock()) {
+            if (s->isEditing() && s->hasSelection()) {
+                bool turnOn = !s->selectionBoolQueryPublic(
+                    [](const ResolvedStyle &rs){ return rs.smallCaps; });
+                s->applyStyleToSelection([turnOn](ResolvedStyle &rs){
+                    rs.smallCaps = turnOn;
+                    if (turnOn) rs.allCaps = false;
+                });
+            }
+        }
+        if (auto c = wc.lock()) c->redraw(); });
 
         italicBtn_ = Button("I")
                          ->setHeight(28)
@@ -2388,12 +3195,21 @@ public:
                          ->setBackgroundColor(kStyleInactiveBg)
                          ->setOnClick([this, ws, wc]()
                                       {
-                if (auto s = ws.lock())
-                {
-                    s->activeItalic_ = !s->activeItalic_;
-                    updateStyleButtons();
-                }
-                if (auto c = wc.lock()) c->redraw(); });
+        if (auto s = ws.lock()) {
+            if (s->isEditing() && s->hasSelection())
+            {
+                bool turnOn = !s->selectionAllItalic();
+                s->applyStyleToSelection([turnOn](ResolvedStyle &rs){
+                    rs.italic = turnOn;
+                });
+            }
+            else
+            {
+                s->activeItalic_ = !s->activeItalic_;
+            }
+            updateStyleButtons();
+        }
+        if (auto c = wc.lock()) c->redraw(); });
 
         auto makeAlignBtn = [&](const char *label, TextAlign ta)
         {
@@ -2429,9 +3245,18 @@ public:
         colorPicker_->width = colorPicker_->pickerSize +
                               colorPicker_->paddingLeft +
                               colorPicker_->paddingRight;
-        colorPicker_->setOnColorChanged([ws](Color c)
+        colorPicker_->setOnColorChanged([ws, wc](Color c)
                                         {
-            if (auto s = ws.lock()) s->activeColor_ = c; });
+    if (auto s = ws.lock()) {
+        s->activeColor_ = c;
+        if (s->isEditing() && s->hasSelection())
+        {
+            s->applyStyleToSelection([c](ResolvedStyle &rs){
+                rs.color = c;
+            });
+        }
+    }
+    if (auto c2 = wc.lock()) c2->redraw(); });
 
         // ── Quick swatches ────────────────────────────────────
         const std::vector<Color> swatches = {
@@ -2454,10 +3279,19 @@ public:
                            ->setWidth(20)
                            ->setBackgroundColor(c)
                            ->setBorderRadius(10)
-                           ->setOnClick([this, ws, c]()
+                           ->setOnClick([this, ws, wc, c]()
                                         {
-                    if (auto s = ws.lock()) s->activeColor_ = c;
-                    if (colorPicker_) colorPicker_->setColor(c); });
+    if (auto s = ws.lock()) {
+        s->activeColor_ = c;
+        if (s->isEditing() && s->hasSelection())
+        {
+            s->applyStyleToSelection([c](ResolvedStyle &rs){
+                rs.color = c;
+            });
+        }
+    }
+    if (colorPicker_) colorPicker_->setColor(c);
+    if (auto cv = wc.lock()) cv->redraw(); });
             swatchRow->addChild(btn);
         }
 
@@ -2574,7 +3408,10 @@ public:
                                    ->setHeight(50),
                                sideLabel("STYLE"),
                                Container(
-                                   Row({boldBtn_, SizedBox(2, 0), italicBtn_, SizedBox(2, 0), kerningBtn_}))
+                                   Row({boldBtn_, SizedBox(2, 0), italicBtn_, SizedBox(2, 0),
+                                        underlineBtn_, SizedBox(2, 0), strikethroughBtn_,
+                                        SizedBox(2, 0), allCapsBtn_, SizedBox(2, 0), smallCapsBtn_,
+                                        SizedBox(2, 0), kerningBtn_}))
                                    ->setPadding(6)
                                    ->setHeight(30),
 
@@ -2780,7 +3617,7 @@ public:
                                          ->setTextColor(Color::fromRGB(150, 150, 160))
                                          ->setMinWidth(110),
                                      SizedBox(16, 0),
-                                     Text("Enter = commit  •  Esc = cancel  •  Shift+← -> = select  •  Ctrl+scroll = zoom")
+                                     Text("Enter = commit  •  Esc = cancel  •  Shift+ -> = select  •  Ctrl+scroll = zoom")
                                          ->setFontSize(10)
                                          ->setTextColor(Color::fromRGB(110, 110, 120)),
                                  })
@@ -2814,9 +3651,9 @@ WidgetPtr createApp(FluxUI *app)
         "TextCanvas",
         std::make_shared<TextApp>(),
         AppTheme::dark(),
-        false,  // debugShowWidgetBounds
-        1180,   // window width (wider to accommodate bigger sidebar)
-        720,    // window height
-        false,  // maximize
-        false); // fullscreen
+        false, // debugShowWidgetBounds
+        1180,  // window width (wider to accommodate bigger sidebar)
+        720,   // window height
+        false, // maximize
+        true); // fullscreen
 }
