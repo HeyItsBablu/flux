@@ -82,6 +82,31 @@ struct ResolvedStyle
     bool smallCaps = false;
 };
 
+// A cubic bezier segment: start, cp1, cp2, end
+struct PathSegment
+{
+    float x0, y0;   // start (shared with prev segment's end)
+    float cx0, cy0; // control point 1
+    float cx1, cy1; // control point 2
+    float x1, y1;   // end
+};
+
+struct TextOnPath
+{
+    std::vector<PathSegment> segments; // the curve
+    std::string text;
+    float fontSize = 18.f;
+    std::string fontFamily = "sans";
+    bool bold = false;
+    bool italic = false;
+    Color color = Color::fromRGB(20, 20, 20);
+    float startOffset = 0.f;    // offset in px along path where text begins
+    float baselineOffset = 0.f; // lift/lower from path line
+    std::vector<TextSpan> spans;
+    // bounding / selection
+    float x = 0, y = 0; // used only for initial placement
+};
+
 // ============================================================
 //  Tool enum
 // ============================================================
@@ -93,7 +118,8 @@ enum class CanvasTool
     Move,
     Scale,
     Rotate,
-    MultiSelect
+    MultiSelect,
+    PathText
 };
 
 // ============================================================
@@ -460,6 +486,8 @@ public:
         redoStack_.push_back(blocks_);
         blocks_ = undoStack_.back();
         undoStack_.pop_back();
+        pathBlocks_ = undoStackPath_.back();
+        undoStackPath_.pop_back();
         cancelEdit();
     }
     void redo()
@@ -467,8 +495,11 @@ public:
         if (redoStack_.empty())
             return;
         undoStack_.push_back(blocks_);
+        undoStackPath_.push_back(pathBlocks_);
         blocks_ = redoStack_.back();
         redoStack_.pop_back();
+        pathBlocks_ = redoStackPath_.back();
+        redoStackPath_.pop_back();
         cancelEdit();
     }
     void clearAll()
@@ -759,6 +790,49 @@ public:
             return;
         }
 
+        if (activeTool_ == CanvasTool::PathText)
+        {
+            if (!drawingPath_)
+            {
+                // Start a new path
+                drawingPath_ = true;
+                pendingPath_ = TextOnPath{};
+                pendingPath_.color = activeColor_;
+                pendingPath_.fontSize = activeFontSize_;
+                pendingPath_.fontFamily = activeFontFamily_;
+                pendingPath_.bold = activeBold_;
+                pendingPath_.italic = activeItalic_;
+                // Place first anchor; real segment added on second click
+                pendingPath_.x = x;
+                pendingPath_.y = y;
+                // Stash first anchor temporarily in a dummy segment
+                PathSegment s{};
+                s.x0 = s.cx0 = s.cx1 = s.x1 = x;
+                s.y0 = s.cy0 = s.cy1 = s.y1 = y;
+                pendingPath_.segments.push_back(s);
+            }
+            else
+            {
+                // Extend the path: convert last dummy to real segment
+                auto &last = pendingPath_.segments.back();
+                // Use ctrl-point heuristic: cp1 = 1/3, cp2 = 2/3 along straight line
+                float prevX = last.x0, prevY = last.y0;
+                last.cx0 = prevX + (x - prevX) * 0.33f;
+                last.cy0 = prevY + (y - prevY) * 0.33f;
+                last.cx1 = prevX + (x - prevX) * 0.67f;
+                last.cy1 = prevY + (y - prevY) * 0.67f;
+                last.x1 = x;
+                last.y1 = y;
+
+                // Push next dummy segment starting here
+                PathSegment next{};
+                next.x0 = next.cx0 = next.cx1 = next.x1 = x;
+                next.y0 = next.cy0 = next.cy1 = next.y1 = y;
+                pendingPath_.segments.push_back(next);
+            }
+            return;
+        }
+
         // Text tool
         int hit = hitTestBlock(x, y);
         if (hit >= 0)
@@ -988,6 +1062,60 @@ public:
     {
         shiftHeld_ = e.shift;
 
+        // ── PathText tool — fully self-contained input ────────────
+        if (activeTool_ == CanvasTool::PathText && drawingPath_)
+        {
+            if (e.virtualKey == Key::Return)
+            {
+                if (!pendingPath_.segments.empty())
+                    pendingPath_.segments.pop_back();
+                if (!pendingPath_.segments.empty() && !editBuf_.empty())
+                {
+                    pendingPath_.text = editBuf_;
+                    pushUndo();
+                    pathBlocks_.push_back(pendingPath_);
+                }
+                drawingPath_ = false;
+                pendingPath_ = {};
+                editBuf_.clear();
+                if (onCommitted)
+                    onCommitted();
+                return;
+            }
+
+            if (e.virtualKey == Key::Escape)
+            {
+                drawingPath_ = false;
+                pendingPath_ = {};
+                editBuf_.clear();
+                if (onCommitted)
+                    onCommitted();
+                return;
+            }
+
+            if (e.virtualKey == Key::Backspace)
+            {
+                if (!editBuf_.empty())
+                    editBuf_.pop_back();
+                pendingPath_.text = editBuf_;
+                if (onCommitted)
+                    onCommitted();
+                return;
+            }
+
+            if (e.codepoint >= 32 && e.codepoint != 127)
+            {
+                editBuf_ += char(e.codepoint);
+                pendingPath_.text = editBuf_;
+                if (onCommitted)
+                    onCommitted();
+                return;
+            }
+
+            return; // swallow all other keys during path drawing
+        }
+
+        // ── Select / MultiSelect — delete key only ────────────────
         if (activeTool_ == CanvasTool::Select ||
             activeTool_ == CanvasTool::MultiSelect)
         {
@@ -1185,7 +1313,6 @@ public:
             }
             else
             {
-                // Save and apply rotation around block center
                 float cx, cy;
                 blockCenter(b, cx, cy);
                 ctx.save();
@@ -1197,11 +1324,9 @@ public:
                 ctx.setFillColor(b.color);
                 ctx.setTextBaseline(TextBaseline::Bottom);
                 {
-                    // span-aware per-line draw
                     auto lines = getVisualLines(b.text, b.wrapWidth, b.fontSize);
                     float lineH = b.fontSize * b.lineHeight;
 
-                    // Measure containerW using block font (for layout)
                     char blockFontBuf[64];
                     std::snprintf(blockFontBuf, sizeof(blockFontBuf), "%.0fpx %s",
                                   b.fontSize, resolveFont(b).c_str());
@@ -1215,21 +1340,17 @@ public:
                     {
                         bool isLast = (li == int(lines.size()) - 1);
                         float drawY = b.y + 2.f + li * lineH - b.baselineShift;
-
                         auto [byteS, byteE] = visualLineByteRange(b.text, lines, li);
-
                         drawSpanLine(ctx, b, runs,
                                      byteS, byteE,
                                      b.x, drawY,
                                      containerW, isLast);
                     }
                 }
-                ctx.restore(); // end rotation
+                ctx.restore();
 
-                // Single select highlight
                 bool isMultiSelected = std::find(selectedIndices_.begin(),
                                                  selectedIndices_.end(), i) != selectedIndices_.end();
-
                 if (isSelected || isMultiSelected)
                     drawBlockOutline(ctx, b, false);
             }
@@ -1250,12 +1371,70 @@ public:
             }
         }
 
-        // ── New-block text edit ───────────────────────────────
+        // ── Draw committed TextOnPath blocks ──────────────────────
+        for (int i = 0; i < int(pathBlocks_.size()); ++i)
+        {
+            bool sel = (pathEditIdx_ == i && activeTool_ == CanvasTool::PathText);
+            renderTextOnPath(ctx, pathBlocks_[i], sel);
+        }
+
+        // ── Draw in-progress path ─────────────────────────────────
+        if (drawingPath_)
+        {
+            if (!pendingPath_.segments.empty())
+            {
+                // Draw the path curve skeleton so anchors are visible
+                // immediately on first click, before any text is typed
+                ctx.setStrokeColor(Color::fromRGBA(30, 120, 255, 120));
+                ctx.setLineWidth(1.f);
+                ctx.beginPath();
+                for (auto &seg : pendingPath_.segments)
+                {
+                    ctx.moveTo(seg.x0, seg.y0);
+                    ctx.bezierCurveTo(seg.cx0, seg.cy0,
+                                      seg.cx1, seg.cy1,
+                                      seg.x1, seg.y1);
+                }
+                ctx.stroke();
+
+                // Anchor dots on every segment endpoint
+                ctx.setFillColor(Color::fromRGBA(30, 120, 255, 220));
+                for (auto &seg : pendingPath_.segments)
+                {
+                    ctx.fillCircle(seg.x0, seg.y0, 5.f);
+                    ctx.fillCircle(seg.x1, seg.y1, 5.f);
+                }
+
+                // Rubber-band preview line from last anchor to mouse cursor
+                auto &last = pendingPath_.segments.back();
+                ctx.setStrokeColor(Color::fromRGBA(100, 180, 255, 140));
+                ctx.setLineWidth(1.f);
+                ctx.beginPath();
+                ctx.moveTo(last.x1, last.y1);
+                ctx.lineTo(hoverX_, hoverY_);
+                ctx.stroke();
+
+                // Draw text along the path only once the user has typed something
+                if (!pendingPath_.text.empty())
+                    renderTextOnPath(ctx, pendingPath_, false);
+            }
+
+            // Status hint pinned to bottom of canvas
+            ctx.setFont("12px sans");
+            ctx.setFillColor(Color::fromRGBA(30, 120, 255, 200));
+            ctx.setTextBaseline(TextBaseline::Bottom);
+            std::string hint = editBuf_.empty()
+                                   ? "Click to place points  \xC2\xB7  Type text  \xC2\xB7  Enter to finish  \xC2\xB7  Esc to cancel"
+                                   : "\"" + editBuf_ + "\"  \xC2\xB7  Click to add points  \xC2\xB7  Enter to finish";
+            ctx.fillText(hint, 16.f, float(h_) - 8.f);
+        }
+
+        // ── New-block text edit (Text tool, no existing block) ────
         if (editing_ && !editingExisting_)
             renderEditPreview(ctx, editX_, editY_, editBuf_,
                               activeFontSize_, resolveFont(), activeColor_, true);
 
-        // ── Hover highlight (Select tool) ─────────────────────
+        // ── Hover highlight (Select tool only) ────────────────────
         if (activeTool_ == CanvasTool::Select && !editing_)
         {
             int hover = hitTestBlock(hoverX_, hoverY_);
@@ -1263,27 +1442,30 @@ public:
                 drawBlockOutline(ctx, blocks_[hover], /*active=*/false, /*hover=*/true);
         }
 
-        // ── Placeholder hint ──────────────────────────────────
-        if (!editing_)
+        // ── Placeholder hint (top-left, shown when not editing) ───
+        if (!editing_ && !drawingPath_)
         {
             ctx.setFillColor(Color::fromRGBA(150, 150, 160, 60));
             ctx.setFont("12px sans");
             ctx.setTextBaseline(TextBaseline::Top);
-            const char *hint = (activeTool_ == CanvasTool::Select)
-                                   ? "Select tool: click to select"
-                               : (activeTool_ == CanvasTool::Move)
-                                   ? "Move tool: drag a block"
-                               : (activeTool_ == CanvasTool::Scale)
-                                   ? "Scale tool: select then drag green handle"
-                               : (activeTool_ == CanvasTool::Rotate)
-                                   ? "Rotate tool: select then drag pink handle"
-                               : (activeTool_ == CanvasTool::MultiSelect)
-                                   ? "Multi-select: drag to band-select, shift+click to toggle"
-                                   : "Text tool: click anywhere to place text";
+            const char *hint =
+                (activeTool_ == CanvasTool::Select)
+                    ? "Select tool: click to select"
+                : (activeTool_ == CanvasTool::Move)
+                    ? "Move tool: drag a block"
+                : (activeTool_ == CanvasTool::Scale)
+                    ? "Scale tool: select then drag green handle"
+                : (activeTool_ == CanvasTool::Rotate)
+                    ? "Rotate tool: select then drag pink handle"
+                : (activeTool_ == CanvasTool::MultiSelect)
+                    ? "Multi-select: drag to band-select, shift+click to toggle"
+                : (activeTool_ == CanvasTool::PathText)
+                    ? "Path Text: click to place points, type text, Enter to finish"
+                    : "Text tool: click anywhere to place text";
             ctx.fillText(hint, 16.f, 14.f);
         }
 
-        // Rubber band rect
+        // ── Rubber band selection rect ────────────────────────────
         if (rubberBanding_)
         {
             float rx = std::min(rubberX0_, rubberX1_);
@@ -1301,6 +1483,192 @@ public:
 
 private:
     // ── Helpers ───────────────────────────────────────────────
+    std::vector<float> buildArcTable(const std::vector<PathSegment> &segs) const
+    {
+        std::vector<float> table;
+        float cumulative = 0.f;
+        for (auto &seg : segs)
+        {
+            cumulative += segmentLength(seg);
+            table.push_back(cumulative);
+        }
+        return table;
+    }
+
+    void renderTextOnPath(Canvas2D &ctx, const TextOnPath &tp,
+                          bool selected = false)
+    {
+        if (tp.segments.empty() || tp.text.empty())
+            return;
+
+        auto arcTable = buildArcTable(tp.segments);
+        float totalLen = arcTable.empty() ? 0.f : arcTable.back();
+
+        // Optionally draw the path curve itself when selected
+        if (selected)
+        {
+            ctx.setStrokeColor(Color::fromRGBA(30, 120, 255, 120));
+            ctx.setLineWidth(1.f);
+            ctx.beginPath();
+            for (auto &seg : tp.segments)
+            {
+                ctx.moveTo(seg.x0, seg.y0);
+                ctx.bezierCurveTo(seg.cx0, seg.cy0,
+                                  seg.cx1, seg.cy1,
+                                  seg.x1, seg.y1);
+            }
+            ctx.stroke();
+
+            // Draw control point handles
+            for (auto &seg : tp.segments)
+            {
+                ctx.setStrokeColor(Color::fromRGBA(180, 80, 220, 120));
+                ctx.setLineWidth(0.8f);
+                ctx.beginPath();
+                ctx.moveTo(seg.x0, seg.y0);
+                ctx.lineTo(seg.cx0, seg.cy0);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(seg.x1, seg.y1);
+                ctx.lineTo(seg.cx1, seg.cy1);
+                ctx.stroke();
+
+                // cp dots
+                ctx.setFillColor(Color::fromRGBA(180, 80, 220, 200));
+                ctx.fillCircle(seg.cx0, seg.cy0, 4.f);
+                ctx.fillCircle(seg.cx1, seg.cy1, 4.f);
+                // anchor dots
+                ctx.setFillColor(Color::fromRGBA(30, 120, 255, 220));
+                ctx.fillCircle(seg.x0, seg.y0, 5.f);
+                ctx.fillCircle(seg.x1, seg.y1, 5.f);
+            }
+        }
+
+        // Resolve font
+        std::string fontKey = tp.fontFamily;
+        if (tp.bold && tp.italic)
+            fontKey += "-bold-italic";
+        else if (tp.bold)
+            fontKey += "-bold";
+        else if (tp.italic)
+            fontKey += "-italic";
+
+        char fontBuf[64];
+        std::snprintf(fontBuf, sizeof(fontBuf), "%.0fpx %s", tp.fontSize, fontKey.c_str());
+        ctx.setFont(fontBuf);
+        ctx.setTextBaseline(TextBaseline::Bottom);
+
+        float cursor = tp.startOffset;
+
+        for (int ci = 0; ci < int(tp.text.size()); ++ci)
+        {
+            std::string ch = tp.text.substr(ci, 1);
+            if (ch == "\n")
+                continue;
+
+            float charW = ctx.measureText(ch);
+            float placeDist = cursor + charW * 0.5f; // center of glyph
+
+            if (placeDist > totalLen)
+                break; // off the end of path
+
+            float px, py, tx2, ty2;
+            if (!pathPointAtDist(tp.segments, arcTable, placeDist,
+                                 px, py, tx2, ty2))
+                break;
+
+            float angle = atan2f(ty2, tx2);
+
+            ctx.save();
+            ctx.translate(px, py);
+            ctx.rotate(angle);
+            // baseline offset: positive = above path
+            ctx.translate(0.f, -tp.baselineOffset);
+
+            ctx.setFillColor(tp.color);
+            // Draw with baseline at origin
+            ctx.fillText(ch, -charW * 0.5f, 0.f);
+
+            ctx.restore();
+
+            cursor += charW;
+        }
+    }
+    // Evaluate cubic bezier position at t in [0,1]
+    inline void cubicBezierPoint(const PathSegment &seg, float t,
+                                 float &outX, float &outY) const
+    {
+        float mt = 1.f - t;
+        outX = mt * mt * mt * seg.x0 + 3 * mt * mt * t * seg.cx0 + 3 * mt * t * t * seg.cx1 + t * t * t * seg.x1;
+        outY = mt * mt * mt * seg.y0 + 3 * mt * mt * t * seg.cy0 + 3 * mt * t * t * seg.cy1 + t * t * t * seg.y1;
+    }
+
+    // Evaluate tangent direction (normalized) at t
+    inline void cubicBezierTangent(const PathSegment &seg, float t,
+                                   float &tx, float &ty) const
+    {
+        float mt = 1.f - t;
+        float dx = 3 * (mt * mt * (seg.cx0 - seg.x0) + 2 * mt * t * (seg.cx1 - seg.cx0) + t * t * (seg.x1 - seg.cx1));
+        float dy = 3 * (mt * mt * (seg.cy0 - seg.y0) + 2 * mt * t * (seg.cy1 - seg.cy0) + t * t * (seg.y1 - seg.cy1));
+        float len = sqrtf(dx * dx + dy * dy);
+        if (len < 1e-5f)
+        {
+            tx = 1;
+            ty = 0;
+            return;
+        }
+        tx = dx / len;
+        ty = dy / len;
+    }
+
+    // Approximate arc length of one segment using fixed subdivisions
+    inline float segmentLength(const PathSegment &seg, int steps = 64) const
+    {
+        float len = 0.f, px, py, qx, qy;
+        cubicBezierPoint(seg, 0.f, px, py);
+        for (int i = 1; i <= steps; ++i)
+        {
+            cubicBezierPoint(seg, float(i) / steps, qx, qy);
+            float dx = qx - px, dy = qy - py;
+            len += sqrtf(dx * dx + dy * dy);
+            px = qx;
+            py = qy;
+        }
+        return len;
+    }
+
+    // Given a distance along the full multi-segment path, return
+    // which segment + t value corresponds to that distance.
+    // arcTable must be pre-built: arcTable[i] = cumulative length at end of segment i
+    inline bool pathPointAtDist(const std::vector<PathSegment> &segs,
+                                const std::vector<float> &arcTable,
+                                float dist,
+                                float &outX, float &outY,
+                                float &outTx, float &outTy) const
+    {
+        if (segs.empty())
+            return false;
+        float totalLen = arcTable.back();
+        dist = std::clamp(dist, 0.f, totalLen);
+
+        int si = 0;
+        float segStart = 0.f;
+        for (int i = 0; i < int(arcTable.size()); ++i)
+        {
+            if (dist <= arcTable[i] || i == int(arcTable.size()) - 1)
+            {
+                si = i;
+                segStart = (i == 0) ? 0.f : arcTable[i - 1];
+                break;
+            }
+        }
+        float segLen = arcTable[si] - segStart;
+        float t = (segLen < 1e-5f) ? 0.f : (dist - segStart) / segLen;
+        t = std::clamp(t, 0.f, 1.f);
+        cubicBezierPoint(segs[si], t, outX, outY);
+        cubicBezierTangent(segs[si], t, outTx, outTy);
+        return true;
+    }
 
     // Build a temporary TextBlock from the current edit state
     TextBlock makeEditTmp() const
@@ -2334,10 +2702,15 @@ private:
 
     void pushUndo()
     {
-        undoStack_.push_back(blocks_);
+        undoStack_.push_back(blocks_);         // vector<TextBlock>
+        undoStackPath_.push_back(pathBlocks_); // vector<TextOnPath>
         if (undoStack_.size() > 50)
+        {
             undoStack_.erase(undoStack_.begin());
+            undoStackPath_.erase(undoStackPath_.begin());
+        }
         redoStack_.clear();
+        redoStackPath_.clear(); // ADD if missing
     }
 
     // The rotate handle floats above the block center
@@ -2583,6 +2956,18 @@ private:
     bool draggingMulti_ = false;
     float multiDragStartX_ = 0.f, multiDragStartY_ = 0.f;
     std::vector<std::pair<float, float>> multiDragOrigins_; // per-block {x,y} at drag start
+
+    // ── TextOnPath blocks ──────────────────────────────────────
+    std::vector<TextOnPath> pathBlocks_;
+    std::vector<std::vector<TextOnPath>> undoStackPath_;
+    std::vector<std::vector<TextOnPath>> redoStackPath_;
+
+    // Active path-drawing state
+    bool drawingPath_ = false; // user is placing control points
+    TextOnPath pendingPath_;   // being constructed
+    int pathEditIdx_ = -1;     // which pathBlock is selected for editing
+    int pathDragPt_ = -1;      // which control point handle is being dragged
+    //  0 = anchor, 1 = cp1, 2 = cp2 per segment encoded as segIdx*3 + 0/1/2
 };
 
 // ============================================================
@@ -2737,6 +3122,8 @@ class TextApp : public Widget
             label = "Rotate";
         else if (t == CanvasTool::MultiSelect)
             label = "Multi-Select";
+        else if (t == CanvasTool::PathText)
+            label = "Path Text";
         toolLabel_.set(label);
     }
 
@@ -2950,6 +3337,13 @@ public:
                            ->setBackgroundColor(kToolInactiveBg)
                            ->setOnClick([this]()
                                         { setActiveTool(CanvasTool::Text); });
+
+        auto pathTextBtn_ = Button("PathText")
+                                ->setHeight(30)
+                                ->setWidth(100)
+                                ->setBackgroundColor(kToolInactiveBg)
+                                ->setOnClick([this]
+                                             { setActiveTool(CanvasTool::PathText); });
 
         letterSpacingSlider_ = Slider(-5.0, 20.0, 0.5);
         letterSpacingSlider_->value = 0.0;
@@ -3389,6 +3783,7 @@ public:
                                    Row({selectToolBtn_, SizedBox(4, 0), textToolBtn_}))
                                    ->setPadding(6)
                                    ->setHeight(50),
+                               pathTextBtn_,
 
                                SizedBox(0, 4),
 
