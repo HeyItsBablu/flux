@@ -3785,7 +3785,7 @@ public:
 
         allCapsBtn_ = Button("AC")
                           ->setHeight(28)
-                          ->setWidth(34)
+
                           ->setBackgroundColor(kStyleInactiveBg)
                           ->setOnClick([this, ws, wc]()
                                        {
@@ -3803,7 +3803,7 @@ public:
 
         smallCapsBtn_ = Button("SC")
                             ->setHeight(28)
-                            ->setWidth(34)
+
                             ->setBackgroundColor(kStyleInactiveBg)
                             ->setOnClick([this, ws, wc]()
                                          {
@@ -4305,8 +4305,13 @@ public:
                                     sideLabel("STYLE"),
                                     Container(
                                         Row({boldBtn_, SizedBox(2, 0), italicBtn_, SizedBox(2, 0),
-                                             underlineBtn_, SizedBox(2, 0), strikethroughBtn_,
-                                             SizedBox(2, 0), allCapsBtn_, SizedBox(2, 0), smallCapsBtn_,
+                                             underlineBtn_, SizedBox(2, 0), strikethroughBtn_}))
+                                        ->setPadding(6)
+                                        ->setHeight(30),
+
+                                    Container(
+
+                                        Row({allCapsBtn_, SizedBox(2, 0), smallCapsBtn_,
                                              SizedBox(2, 0), kerningBtn_}))
                                         ->setPadding(6)
                                         ->setHeight(30),
@@ -4355,8 +4360,8 @@ public:
 
                                     sideLabel("SHADOW"),
                                     Container(Row({shadowToggleBtn_}))->setPadding(6)->setHeight(36),
-                                    Container(Row({Text("X")->setFontSize(9)->setWidth(10), shadowXSlider_}))->setPadding(6)->setHeight(48),
-                                    Container(Row({Text("Y")->setFontSize(9)->setWidth(10), shadowYSlider_}))->setPadding(6)->setHeight(48),
+                                    Container(Row({Text("X")->setFontSize(9), shadowXSlider_}))->setPadding(6)->setHeight(48),
+                                    Container(Row({Text("Y")->setFontSize(9), shadowYSlider_}))->setPadding(6)->setHeight(48),
                                 }))
                                 ->setWidth(280)
                                 ->setBackgroundColor(Color::fromRGB(28, 28, 30));
@@ -4381,7 +4386,7 @@ public:
                                    Text(zoomLabel_, [](const std::string &s)
                                         { return "Zoom: " + s; })
                                        ->setFontSize(11)
-                                       ->setTextColor(Color::fromRGB(140, 140, 160))->setWidth(65),
+                                       ->setTextColor(Color::fromRGB(140, 140, 160)),
                                    Container(
                                        Row({
                                                undoBtn,
@@ -4397,7 +4402,7 @@ public:
                                            ->setSpacing(0))
                                        ->setPadding(6)
                                        ->setHeight(40),
-      
+
                                })
                                ->setPadding(10)
                                ->setSpacing(0)
