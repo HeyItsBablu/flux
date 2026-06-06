@@ -4010,99 +4010,6 @@ public:
                 ->setPadding(8);
         };
 
-        // ── Sidebar ───────────────────────────────────────────
-        auto sidebar = Container(
-                           ListView({
-                               // TOOLS
-                               sideLabel("TOOLS"),
-                               Container(
-                                   Row({selectToolBtn_, SizedBox(4, 0), textToolBtn_}))
-                                   ->setPadding(6)
-                                   ->setHeight(50),
-                               pathTextBtn_,
-
-                               SizedBox(0, 4),
-
-                               // FONT
-                               sideLabel("FONT FAMILY"),
-                               Container(fontFamilyDropdown_)->setPadding(6)->setHeight(50),
-
-                               sideLabel("SIZE"),
-                               Container(
-                                   Row({
-                                       Container(fontSizeDropdown_)->setWidth(80),
-                                       SizedBox(4, 0),
-                                       fontSizeInput_,
-
-                                   }))
-                                   ->setPadding(6)
-                                   ->setHeight(50),
-                               sideLabel("STYLE"),
-                               Container(
-                                   Row({boldBtn_, SizedBox(2, 0), italicBtn_, SizedBox(2, 0),
-                                        underlineBtn_, SizedBox(2, 0), strikethroughBtn_,
-                                        SizedBox(2, 0), allCapsBtn_, SizedBox(2, 0), smallCapsBtn_,
-                                        SizedBox(2, 0), kerningBtn_}))
-                                   ->setPadding(6)
-                                   ->setHeight(30),
-
-                               sideLabel("ALIGNMENT"),
-                               Container(
-                                   Row({alignLeftBtn_,
-                                        SizedBox(2, 0), alignCenterBtn_,
-                                        SizedBox(2, 0), alignRightBtn_,
-                                        SizedBox(2, 0), alignJustifyBtn_}))
-                                   ->setPadding(6)
-                                   ->setHeight(42),
-
-                               SizedBox(0, 4),
-
-                               sideLabel("BASELINE SHIFT"),
-                               Container(baselineShiftSlider_)->setPadding(6)->setHeight(52),
-                               Container(
-                                   Row({superscriptBtn_,
-                                        SizedBox(3, 0), subscriptBtn_,
-                                        SizedBox(3, 0), baselineResetBtn_}))
-                                   ->setPadding(6)
-                                   ->setHeight(48),
-
-                               // COLOR
-                               sideLabel("COLOR"),
-                               colorPicker_,
-                               Container(swatchRow)->setPadding(6)->setHeight(20),
-
-                               SizedBox(0, 4),
-                               sideLabel("LINE HEIGHT"),
-                               Container(lineHeightSlider_)->setPadding(6)->setHeight(55),
-                               SizedBox(0, 4),
-                               sideLabel("LETTER SPACING"),
-                               Container(letterSpacingSlider_)->setPadding(6)->setHeight(55),
-                               // ACTIONS
-                               sideLabel("ACTIONS"),
-                               Container(
-                                   Column({
-                                       Row({undoBtn, SizedBox(4, 0), redoBtn})->setSpacing(0),
-
-                                   }))
-                                   ->setPadding(6)
-                                   ->setHeight(40),
-
-                               Container(
-                                   Column({
-
-                                       commitBtn,
-                                       SizedBox(0, 4),
-                                       deleteBtn,
-                                       SizedBox(0, 4),
-                                       clearBtn,
-                                   }))
-                                   ->setPadding(6)
-                                   ->setHeight(40),
-
-                           }))
-                           ->setWidth(220)
-                           ->setBackgroundColor(Color::fromRGB(28, 28, 30));
-
         moveToolBtn_ = Button("Move")
                            ->setHeight(30)
                            ->setWidth(100)
@@ -4203,10 +4110,42 @@ public:
     }
     if (auto c = wc.lock()) c->redraw(); });
 
+        // ── Sidebar ───────────────────────────────────────────
+        auto sidebar = Container(
+                           ListView({
+                               // TOOLS
+                               sideLabel("TOOLS"),
+                               Container(
+                                   Row({selectToolBtn_, SizedBox(4, 0), textToolBtn_}))
+                                   ->setPadding(6)
+                                   ->setHeight(50),
+                               pathTextBtn_,
+
+                               SizedBox(0, 4),
+
+                               sideLabel("TRANSFORM"),
+                               Container(moveToolBtn_)->setPadding(6)->setHeight(50),
+                               Container(scaleToolBtn_)->setPadding(6)->setHeight(50),
+                               Container(rotateToolBtn_)->setPadding(6)->setHeight(50),
+                               Container(multiSelectBtn_)->setPadding(6)->setHeight(50),
+
+                               sideLabel("ROTATION"),
+                               Container(rotateResetBtn_)->setPadding(6)->setHeight(40),
+
+                               sideLabel("MULTI-EDIT"),
+                               Container(bulkBoldBtn_)->setPadding(6)->setHeight(38),
+                               Container(bulkSizeUpBtn_)->setPadding(6)->setHeight(38),
+                               Container(bulkSizeDownBtn_)->setPadding(6)->setHeight(38),
+                               Container(deleteAllBtn_)->setPadding(6)->setHeight(38),
+
+                           }))
+                           ->setWidth(220)
+                           ->setBackgroundColor(Color::fromRGB(28, 28, 30));
+
         // ── Background toggle + color picker ─────────────────────
         bgToggleBtn_ = Button("BG")
                            ->setHeight(28)
-                           ->setWidth(40)
+
                            ->setBackgroundColor(kStyleInactiveBg)
                            ->setOnClick([this, ws, wc]()
                                         {
@@ -4251,7 +4190,7 @@ public:
         // ── Stroke toggle + width slider ─────────────────────────
         strokeToggleBtn_ = Button("Stroke")
                                ->setHeight(28)
-                               ->setWidth(54)
+
                                ->setBackgroundColor(kStyleInactiveBg)
                                ->setOnClick([this, ws, wc]()
                                             {
@@ -4305,7 +4244,7 @@ public:
         // ── Shadow toggle ─────────────────────────────────────────
         shadowToggleBtn_ = Button("Shadow")
                                ->setHeight(28)
-                               ->setWidth(68)
+
                                ->setBackgroundColor(kStyleInactiveBg)
                                ->setOnClick([this, ws, wc]()
                                             {
@@ -4348,20 +4287,61 @@ public:
 
         auto rightSidebar = Container(
                                 ListView({
-                                    sideLabel("TRANSFORM"),
-                                    Container(moveToolBtn_)->setPadding(6)->setHeight(50),
-                                    Container(scaleToolBtn_)->setPadding(6)->setHeight(50),
-                                    Container(rotateToolBtn_)->setPadding(6)->setHeight(50),
-                                    Container(multiSelectBtn_)->setPadding(6)->setHeight(50),
 
-                                    sideLabel("ROTATION"),
-                                    Container(rotateResetBtn_)->setPadding(6)->setHeight(40),
+                                    // FONT
+                                    sideLabel("FONT FAMILY"),
+                                    Container(fontFamilyDropdown_)->setPadding(6)->setHeight(50),
 
-                                    sideLabel("MULTI-EDIT"),
-                                    Container(bulkBoldBtn_)->setPadding(6)->setHeight(38),
-                                    Container(bulkSizeUpBtn_)->setPadding(6)->setHeight(38),
-                                    Container(bulkSizeDownBtn_)->setPadding(6)->setHeight(38),
-                                    Container(deleteAllBtn_)->setPadding(6)->setHeight(38),
+                                    sideLabel("SIZE"),
+                                    Container(
+                                        Row({
+                                            Container(fontSizeDropdown_)->setWidth(80),
+                                            SizedBox(4, 0),
+                                            fontSizeInput_,
+
+                                        }))
+                                        ->setPadding(6)
+                                        ->setHeight(50),
+                                    sideLabel("STYLE"),
+                                    Container(
+                                        Row({boldBtn_, SizedBox(2, 0), italicBtn_, SizedBox(2, 0),
+                                             underlineBtn_, SizedBox(2, 0), strikethroughBtn_,
+                                             SizedBox(2, 0), allCapsBtn_, SizedBox(2, 0), smallCapsBtn_,
+                                             SizedBox(2, 0), kerningBtn_}))
+                                        ->setPadding(6)
+                                        ->setHeight(30),
+
+                                    sideLabel("ALIGNMENT"),
+                                    Container(
+                                        Row({alignLeftBtn_,
+                                             SizedBox(2, 0), alignCenterBtn_,
+                                             SizedBox(2, 0), alignRightBtn_,
+                                             SizedBox(2, 0), alignJustifyBtn_}))
+                                        ->setPadding(6)
+                                        ->setHeight(42),
+
+                                    SizedBox(0, 4),
+
+                                    sideLabel("BASELINE SHIFT"),
+                                    Container(baselineShiftSlider_)->setPadding(6)->setHeight(52),
+                                    Container(
+                                        Row({superscriptBtn_,
+                                             SizedBox(3, 0), subscriptBtn_,
+                                             SizedBox(3, 0), baselineResetBtn_}))
+                                        ->setPadding(6)
+                                        ->setHeight(48),
+
+                                    // COLOR
+                                    sideLabel("COLOR"),
+                                    colorPicker_,
+                                    Container(swatchRow)->setPadding(6)->setHeight(20),
+
+                                    SizedBox(0, 4),
+                                    sideLabel("LINE HEIGHT"),
+                                    Container(lineHeightSlider_)->setPadding(6)->setHeight(55),
+                                    SizedBox(0, 4),
+                                    sideLabel("LETTER SPACING"),
+                                    Container(letterSpacingSlider_)->setPadding(6)->setHeight(55),
 
                                     sideLabel("OPACITY"),
                                     Container(opacitySlider_)->setPadding(6)->setHeight(52),
@@ -4378,7 +4358,7 @@ public:
                                     Container(Row({Text("X")->setFontSize(9)->setWidth(10), shadowXSlider_}))->setPadding(6)->setHeight(48),
                                     Container(Row({Text("Y")->setFontSize(9)->setWidth(10), shadowYSlider_}))->setPadding(6)->setHeight(48),
                                 }))
-                                ->setWidth(160)
+                                ->setWidth(280)
                                 ->setBackgroundColor(Color::fromRGB(28, 28, 30));
 
         // ── Toolbar ───────────────────────────────────────────
@@ -4401,7 +4381,23 @@ public:
                                    Text(zoomLabel_, [](const std::string &s)
                                         { return "Zoom: " + s; })
                                        ->setFontSize(11)
-                                       ->setTextColor(Color::fromRGB(140, 140, 160)),
+                                       ->setTextColor(Color::fromRGB(140, 140, 160))->setWidth(65),
+                                   Container(
+                                       Row({
+                                               undoBtn,
+                                               SizedBox(4, 0),
+                                               redoBtn,
+                                               SizedBox(8, 0),
+                                               commitBtn,
+                                               SizedBox(4, 0),
+                                               deleteBtn,
+                                               SizedBox(4, 0),
+                                               clearBtn,
+                                           })
+                                           ->setSpacing(0))
+                                       ->setPadding(6)
+                                       ->setHeight(40),
+      
                                })
                                ->setPadding(10)
                                ->setSpacing(0)
