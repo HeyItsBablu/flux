@@ -19,7 +19,8 @@
 
 #ifdef _WIN32
 
-struct GraphicsContext {
+struct GraphicsContext
+{
     NativeContext hdc = nullptr;
 
     GraphicsContext() = default;
@@ -32,13 +33,14 @@ struct GraphicsContext {
 
 #if defined(__linux__) && !defined(__ANDROID__)
 
-struct GraphicsContext {
-    cairo_t* cr     = nullptr;
-    int      width  = 0;
-    int      height = 0;
+struct GraphicsContext
+{
+    cairo_t *cr = nullptr;
+    int width = 0;
+    int height = 0;
 
     GraphicsContext() = default;
-    explicit GraphicsContext(cairo_t* c, int w = 0, int h = 0)
+    explicit GraphicsContext(cairo_t *c, int w = 0, int h = 0)
         : cr(c), width(w), height(h) {}
 
     bool valid() const { return cr != nullptr; }
@@ -48,8 +50,9 @@ struct GraphicsContext {
 
 #ifdef __ANDROID__
 
-struct GraphicsContext {
-    int width  = 0;
+struct GraphicsContext
+{
+    int width = 0;
     int height = 0;
 
     GraphicsContext() = default;
@@ -60,6 +63,28 @@ struct GraphicsContext {
 
 #endif // __ANDROID__
 
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#if TARGET_OS_OSX
+
+#include <CoreGraphics/CoreGraphics.h>
+
+struct GraphicsContext
+{
+    CGContextRef cgContext = nullptr;
+    int width = 0;
+    int height = 0;
+
+    GraphicsContext() = default;
+    explicit GraphicsContext(CGContextRef cg, int w = 0, int h = 0)
+        : cgContext(cg), width(w), height(h) {}
+
+    bool valid() const { return cgContext != nullptr; }
+};
+
+#endif // TARGET_OS_OSX
+#endif // __APPLE__
+
 // ============================================================================
 // MeasureContext
 //
@@ -68,16 +93,17 @@ struct GraphicsContext {
 // can return by value.
 // ============================================================================
 
-struct MeasureContext {
+struct MeasureContext
+{
     GraphicsContext ctx;
 
     // Non-copyable — the Win32 variant holds a DC that must not be duplicated.
-    MeasureContext(const MeasureContext&)            = delete;
-    MeasureContext& operator=(const MeasureContext&) = delete;
+    MeasureContext(const MeasureContext &) = delete;
+    MeasureContext &operator=(const MeasureContext &) = delete;
 
     // Movable so PlatformWindow::getMeasureContext() can return by value.
-    MeasureContext(MeasureContext&&)                 = default;
-    MeasureContext& operator=(MeasureContext&&)      = default;
+    MeasureContext(MeasureContext &&) = default;
+    MeasureContext &operator=(MeasureContext &&) = default;
 
 #ifdef _WIN32
 
@@ -85,7 +111,8 @@ struct MeasureContext {
 
     explicit MeasureContext(HWND h) : hwnd(h), ctx(GetDC(h)) {}
 
-    ~MeasureContext() {
+    ~MeasureContext()
+    {
         if (hwnd && ctx.hdc)
             ReleaseDC(hwnd, ctx.hdc);
     }
@@ -95,7 +122,7 @@ struct MeasureContext {
 #if defined(__linux__) && !defined(__ANDROID__)
 
     // No resources to acquire — Cairo context is owned by CairoState.
-    explicit MeasureContext(cairo_t* cr, int w = 0, int h = 0)
+    explicit MeasureContext(cairo_t *cr, int w = 0, int h = 0)
         : ctx(cr, w, h) {}
 
     ~MeasureContext() = default;
@@ -109,4 +136,17 @@ struct MeasureContext {
     ~MeasureContext() = default;
 
 #endif // __ANDROID__
+
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#if TARGET_OS_OSX
+
+    // CoreGraphics context is owned by the window/view — never by MeasureContext.
+    explicit MeasureContext(CGContextRef cg, int w = 0, int h = 0)
+        : ctx(cg, w, h) {}
+
+    ~MeasureContext() = default;
+
+#endif // TARGET_OS_OSX
+#endif // __APPLE__
 };

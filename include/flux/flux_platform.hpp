@@ -384,6 +384,91 @@ inline std::wstring toWideString(const char* data, int byteCount) {
 
 #endif // __ANDROID__
 
+
+// ============================================================================
+// APPLE PLATFORM (macOS)
+// ============================================================================
+
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+
+#if TARGET_OS_OSX
+
+#include <CoreGraphics/CoreGraphics.h>
+#include <CoreText/CoreText.h>
+#include <ctime>
+
+using NativeWindow  = void*;        // NSWindow* — forward declared, cast at use site
+using NativeFont    = void*;        // CTFontRef — cast in font/painter
+using AppInstance   = void*;        // unused on macOS; kept for API symmetry
+using TimerID       = uint32_t;
+using UINT          = unsigned int;
+
+// ── Text format flags — same values as Win32/Linux ───────────────────────────
+static constexpr UINT DT_LEFT         = 0x0000u;
+static constexpr UINT DT_CENTER       = 0x0001u;
+static constexpr UINT DT_RIGHT        = 0x0002u;
+static constexpr UINT DT_VCENTER      = 0x0004u;
+static constexpr UINT DT_TOP          = 0x0000u;
+static constexpr UINT DT_WORDBREAK    = 0x0010u;
+static constexpr UINT DT_SINGLELINE   = 0x0020u;
+static constexpr UINT DT_NOCLIP       = 0x0100u;
+static constexpr UINT DT_END_ELLIPSIS = 0x8000u;
+
+// ── VK_* aliases — macOS uses NSEvent key codes ───────────────────────────────
+static constexpr int VK_BACK     = 51;   // kVK_Delete
+static constexpr int VK_DELETE   = 117;  // kVK_ForwardDelete
+static constexpr int VK_LEFT     = 123;  // kVK_LeftArrow
+static constexpr int VK_RIGHT    = 124;  // kVK_RightArrow
+static constexpr int VK_UP       = 126;  // kVK_UpArrow
+static constexpr int VK_DOWN     = 125;  // kVK_DownArrow
+static constexpr int VK_HOME     = 115;  // kVK_Home
+static constexpr int VK_END      = 119;  // kVK_End
+static constexpr int VK_RETURN   = 36;   // kVK_Return
+static constexpr int VK_ESCAPE   = 53;   // kVK_Escape
+static constexpr int VK_TAB      = 48;   // kVK_Tab
+static constexpr int VK_PRIOR    = 116;  // kVK_PageUp
+static constexpr int VK_NEXT     = 121;  // kVK_PageDown
+static constexpr int VK_CONTROL  = 59;   // kVK_Control
+static constexpr int VK_SHIFT    = 56;   // kVK_Shift
+static constexpr int VK_MENU     = 58;   // kVK_Option (Alt equivalent)
+
+// ── Tick helper ───────────────────────────────────────────────────────────────
+inline uint32_t platformTickCount() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return static_cast<uint32_t>(ts.tv_sec * 1000u + ts.tv_nsec / 1'000'000u);
+}
+
+// ── Key/modifier state ────────────────────────────────────────────────────────
+// Full implementation lives in the .mm windowing file where NSEvent is available.
+// These stubs satisfy the linker for non-windowing translation units.
+inline bool platformKeyDown(int /*keyCode*/)  { return false; }
+inline bool platformCtrlDown()                { return false; }
+inline bool platformShiftDown()               { return false; }
+inline bool platformAltDown()                 { return false; }
+
+// ── String helpers ────────────────────────────────────────────────────────────
+inline std::wstring toWideString(const std::string& utf8) {
+    std::wstring out;
+    out.reserve(utf8.size());
+    for (unsigned char c : utf8)
+        out += static_cast<wchar_t>(c);
+    return out;
+}
+
+inline std::wstring toWideString(const char* data, int byteCount) {
+    if (!data || byteCount <= 0) return {};
+    std::wstring out;
+    out.reserve(byteCount);
+    for (int i = 0; i < byteCount; ++i)
+        out += static_cast<wchar_t>(static_cast<unsigned char>(data[i]));
+    return out;
+}
+
+#endif // TARGET_OS_OSX
+#endif // __APPLE__
+
 // ============================================================================
 // CROSS-PLATFORM CONSTANTS
 // ============================================================================
