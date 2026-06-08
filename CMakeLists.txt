@@ -57,6 +57,8 @@ FetchContent_Declare(curl
         GIT_TAG        curl-8_20_0
 )
 
+
+set(BUILD_EXAMPLES     OFF CACHE BOOL "" FORCE)
 set(BUILD_CURL_EXE     OFF CACHE BOOL "" FORCE)
 set(BUILD_TESTING      OFF CACHE BOOL "" FORCE)
 set(CURL_DISABLE_TESTS ON  CACHE BOOL "" FORCE)

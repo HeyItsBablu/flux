@@ -4284,7 +4284,7 @@ public:
 
                                     // FONT
                                     sideLabel("FONT FAMILY"),
-                                    Padding(EdgeInsets::all(6),fontFamilyDropdown_),
+                                    Padding(EdgeInsets::all(6), fontFamilyDropdown_),
 
                                     sideLabel("SIZE"),
                                     Row({
@@ -4313,7 +4313,7 @@ public:
                                     SizedBox(0, 4),
 
                                     sideLabel("BASELINE SHIFT"),
-                                    Padding(EdgeInsets::all(6),baselineShiftSlider_),
+                                    Padding(EdgeInsets::all(6), baselineShiftSlider_),
                                     Row({superscriptBtn_,
                                          SizedBox(3, 0), subscriptBtn_,
                                          SizedBox(3, 0), baselineResetBtn_})
@@ -4326,13 +4326,13 @@ public:
 
                                     SizedBox(0, 4),
                                     sideLabel("LINE HEIGHT"),
-                                    Padding(EdgeInsets::all(6),lineHeightSlider_),
+                                    Padding(EdgeInsets::all(6), lineHeightSlider_),
                                     SizedBox(0, 4),
                                     sideLabel("LETTER SPACING"),
-                                    Padding(EdgeInsets::all(6),letterSpacingSlider_),
+                                    Padding(EdgeInsets::all(6), letterSpacingSlider_),
 
                                     sideLabel("OPACITY"),
-                                    Padding(EdgeInsets::all(6),opacitySlider_),
+                                    Padding(EdgeInsets::all(6), opacitySlider_),
 
                                     sideLabel("BACKGROUND"),
                                     Row({bgToggleBtn_, SizedBox(4, 0), bgColorPicker_})->setPadding(6),
