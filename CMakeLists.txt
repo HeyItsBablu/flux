@@ -29,8 +29,8 @@ option(FLUX_BUILD_TESTS    "Build tests"                OFF)
 # ============================================================================
 
 if(NOT ANDROID)
-    if(NOT MSVC AND NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-        message(FATAL_ERROR "FluxUI requires MSVC (Windows) or GCC/Clang (Linux).")
+    if(NOT MSVC AND NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+        message(FATAL_ERROR "FluxUI requires MSVC (Windows), GCC/Clang (Linux), or AppleClang (macOS).")
     endif()
 endif()
 
@@ -120,7 +120,7 @@ if(WIN32 OR (UNIX AND NOT APPLE AND NOT ANDROID))
 endif()
 
 # ============================================================================
-# NanoVG  (all platforms)
+# NanoVG  
 #
 # Android  → GLES2 backend, no glad, nanovg_gl_impl.c is Android-specific
 # Win/Linux → GL3 backend, glad provides the loader, nanovg_gl_impl.c shared
@@ -157,6 +157,9 @@ if(NOT TARGET nanovg)
     endif()
 endif()
 
+
+
+
 # ============================================================================
 # Linux platform dependencies
 # ============================================================================
@@ -179,6 +182,22 @@ if(UNIX AND NOT APPLE AND NOT ANDROID)
     message(STATUS "FFmpeg avformat : ${AVFORMAT_VERSION}")
     message(STATUS "FFmpeg avcodec  : ${AVCODEC_VERSION}")
     message(STATUS "FFmpeg swscale  : ${SWSCALE_VERSION}")
+endif()
+
+# ============================================================================
+# macOS platform dependencies
+# ============================================================================
+
+if(APPLE)
+    find_library(COCOA_LIB          Cocoa           REQUIRED)
+    find_library(METAL_LIB          Metal           REQUIRED)
+    find_library(METALKIT_LIB       MetalKit        REQUIRED)
+    find_library(QUARTZCORE_LIB     QuartzCore      REQUIRED)
+    find_library(COREGRAPHICS_LIB   CoreGraphics    REQUIRED)
+    find_library(CORETEXT_LIB       CoreText        REQUIRED)
+    find_library(COREFOUNDATION_LIB CoreFoundation  REQUIRED)
+    find_library(AUDIOTOOLBOX_LIB   AudioToolbox    REQUIRED)
+    find_library(AVFOUNDATION_LIB   AVFoundation    REQUIRED)
 endif()
 
 # ============================================================================
@@ -296,6 +315,28 @@ elseif(ANDROID)
 
     target_link_options(flux PUBLIC
             "-Wl,-u,ANativeActivity_onCreate"
+    )
+
+elseif(APPLE)
+    target_link_libraries(flux PUBLIC
+            stb
+            CURL::libcurl
+            ${COCOA_LIB}
+            ${METAL_LIB}
+            ${METALKIT_LIB}
+            ${QUARTZCORE_LIB}
+            ${COREGRAPHICS_LIB}
+            ${CORETEXT_LIB}
+            ${COREFOUNDATION_LIB}
+            ${AUDIOTOOLBOX_LIB}
+            ${AVFOUNDATION_LIB}
+    )
+    target_compile_options(flux PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -fexceptions
+            -fobjc-arc          # ARC for Objective-C Metal bridge code
     )
 
 elseif(UNIX AND NOT APPLE)
