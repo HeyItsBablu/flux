@@ -2,11 +2,31 @@ cmake_minimum_required(VERSION 3.21)
 project(flux VERSION 0.1.0 LANGUAGES CXX C)
 
 # ============================================================================
+# ccache 
+# ============================================================================
+
+find_program(CCACHE_PROGRAM ccache)
+if(CCACHE_PROGRAM)
+    message(STATUS "ccache found: ${CCACHE_PROGRAM}")
+    set(CMAKE_CXX_COMPILER_LAUNCHER ${CCACHE_PROGRAM})
+    set(CMAKE_C_COMPILER_LAUNCHER   ${CCACHE_PROGRAM})
+else()
+    message(STATUS "ccache not found — builds will not be cached")
+endif()
+
+# ============================================================================
 # Options
 # ============================================================================
 
 option(FLUX_BUILD_EXAMPLES "Build example applications" OFF)
 option(FLUX_BUILD_TESTS    "Build tests"                OFF)
+
+# ============================================================================
+# Persistent deps cache  (survives build/ deletion)
+# ============================================================================
+
+set(FETCHCONTENT_BASE_DIR "${CMAKE_SOURCE_DIR}/_deps" CACHE PATH
+    "Where FetchContent stores downloaded and built dependencies" FORCE)
 
 # ============================================================================
 # Compiler guard  (skip on Android — NDK uses Clang but reports differently)
