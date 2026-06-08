@@ -47,47 +47,37 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # ============================================================================
-# FetchContent dependencies
+# mbedtls  (Android only — git submodule at external/mbedtls)
 # ============================================================================
 
-include(FetchContent)
-
 if(ANDROID)
-    FetchContent_Declare(mbedtls
-            GIT_REPOSITORY https://github.com/Mbed-TLS/mbedtls.git
-            GIT_TAG        v3.6.2
-    )
     set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
     set(ENABLE_TESTING  OFF CACHE BOOL "" FORCE)
-    FetchContent_MakeAvailable(mbedtls)
+    add_subdirectory(external/mbedtls)
 
     set(MBEDTLS_INCLUDE_DIRS
-            "${mbedtls_SOURCE_DIR}/include"
+            "${CMAKE_CURRENT_SOURCE_DIR}/external/mbedtls/include"
             CACHE PATH "" FORCE)
     set(MBEDTLS_LIBRARY     mbedtls    CACHE STRING "" FORCE)
     set(MBEDX509_LIBRARY    mbedx509   CACHE STRING "" FORCE)
     set(MBEDCRYPTO_LIBRARY  mbedcrypto CACHE STRING "" FORCE)
-    set(MBEDTLS_ROOT_DIR "${mbedtls_SOURCE_DIR}" CACHE PATH "" FORCE)
+    set(MBEDTLS_ROOT_DIR
+            "${CMAKE_CURRENT_SOURCE_DIR}/external/mbedtls"
+            CACHE PATH "" FORCE)
 endif()
 
-# ── libcurl ───────────────────────────────────────────────────────────────────
+# ── libcurl  (git submodule at external/curl) ─────────────────────────────────
 
-FetchContent_Declare(curl
-        GIT_REPOSITORY https://github.com/curl/curl.git
-        GIT_TAG        curl-8_20_0
-)
+set(BUILD_EXAMPLES         OFF CACHE BOOL "" FORCE)
+set(BUILD_CURL_EXE         OFF CACHE BOOL "" FORCE)
+set(BUILD_TESTING          OFF CACHE BOOL "" FORCE)
+set(CURL_DISABLE_TESTS     ON  CACHE BOOL "" FORCE)
+set(CURL_USE_LIBSSH2       OFF CACHE BOOL "" FORCE)
+set(CURL_USE_LIBPSL        OFF CACHE BOOL "" FORCE)
+set(CURL_USE_LIBRTMP       OFF CACHE BOOL "" FORCE)
+set(CURL_DISABLE_LDAP      ON  CACHE BOOL "" FORCE)
+set(CURL_ENABLE_WEBSOCKETS ON  CACHE BOOL "" FORCE)
 
-
-set(BUILD_EXAMPLES     OFF CACHE BOOL "" FORCE)
-set(BUILD_CURL_EXE     OFF CACHE BOOL "" FORCE)
-set(BUILD_TESTING      OFF CACHE BOOL "" FORCE)
-set(CURL_DISABLE_TESTS ON  CACHE BOOL "" FORCE)
-# set(HTTP_ONLY          ON  CACHE BOOL "" FORCE)
-set(CURL_USE_LIBSSH2   OFF CACHE BOOL "" FORCE)
-set(CURL_USE_LIBPSL    OFF CACHE BOOL "" FORCE)
-set(CURL_USE_LIBRTMP   OFF CACHE BOOL "" FORCE)
-set(CURL_DISABLE_LDAP  ON  CACHE BOOL "" FORCE)
-set(CURL_ENABLE_WEBSOCKETS ON CACHE BOOL "" FORCE)
 if(NOT ANDROID)
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 endif()
@@ -100,12 +90,15 @@ if(ANDROID)
 elseif(WIN32)
     set(CURL_USE_SCHANNEL ON  CACHE BOOL "" FORCE)
     set(CURL_USE_OPENSSL  OFF CACHE BOOL "" FORCE)
+elseif(APPLE)
+    set(CURL_USE_SECTRANSP ON  CACHE BOOL "" FORCE)
+    set(CURL_USE_OPENSSL   OFF CACHE BOOL "" FORCE)
 elseif(UNIX AND NOT APPLE)
     set(CURL_USE_OPENSSL  ON  CACHE BOOL "" FORCE)
     set(CURL_USE_SCHANNEL OFF CACHE BOOL "" FORCE)
 endif()
 
-FetchContent_MakeAvailable(curl)
+add_subdirectory(external/curl)
 
 # ============================================================================
 # stb  (local — header-only + single implementation file)
