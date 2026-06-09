@@ -174,6 +174,13 @@ void PlatformWindow::destroy() {
     nativeHandle = nullptr;
 }
 
+NativeWindow PlatformWindow::handle() const {
+    return nativeHandle;
+}
+bool PlatformWindow::isMouseCaptured() const {
+    return mouseCapture;
+}
+
 // ── run — no-op on Android (android_main IS the loop) ────────────────────────
 int PlatformWindow::run() { return 0; }
 

@@ -57,7 +57,7 @@ public:
 
     // ── Geometry query helpers (platform-neutral) ─────────────────────────
     // Returns {x, y, w, h} of the scrollbar thumb in widget-local pixels.
-    std::tuple<float,float,float,float> thumbRect(int glW, int glH) const {
+    std::tuple<float,float,float,float> thumbRect(int /*glW*/, int /*glH*/) const {
         float ts, tl;
         thumbPixels(ts, tl);
         float halfW      = currentW_ * 0.5f;

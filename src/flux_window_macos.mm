@@ -329,6 +329,8 @@ struct PlatformWindow::MacState {
 }
 @end
 
+
+
 // ============================================================================
 // PlatformWindow — macOS implementation
 // ============================================================================
@@ -463,6 +465,14 @@ void PlatformWindow::destroy() {
 int PlatformWindow::run() {
     [NSApp run];
     return 0;
+}
+
+
+NativeWindow PlatformWindow::handle() const {
+    return macState ? reinterpret_cast<NativeWindow>(macState->nsWindow) : nullptr;
+}
+bool PlatformWindow::isMouseCaptured() const {
+    return macState && macState->mouseCapture;
 }
 
 // ============================================================================

@@ -359,6 +359,14 @@ void PlatformWindow::destroy() {
     SDL_Quit();
 }
 
+
+NativeWindow PlatformWindow::handle() const {
+    return nativeHandle;
+}
+bool PlatformWindow::isMouseCaptured() const {
+    return mouseCapture;
+}
+
 // ============================================================================
 // PlatformWindow::run
 // ============================================================================

@@ -14,8 +14,8 @@ class CanvasWidget;
 class CairoCompositor;
 class Canvas2DGL;
 
-#  include <glad/glad.h>
-#  include <SDL2/SDL.h>
+#include <glad/glad.h>
+#include <SDL2/SDL.h>
 
 #endif
 
@@ -23,19 +23,20 @@ class Canvas2DGL;
 // WindowCallbacks
 // ============================================================================
 
-struct WindowCallbacks {
-    std::function<void(GraphicsContext& ctx, int width, int height)> onPaint;
-    std::function<void(GraphicsContext& ctx, int width, int height)> onResize;
+struct WindowCallbacks
+{
+    std::function<void(GraphicsContext &ctx, int width, int height)> onPaint;
+    std::function<void(GraphicsContext &ctx, int width, int height)> onResize;
 
     std::function<bool(int x, int y)> onMouseDown;
     std::function<bool(int x, int y)> onMouseUp;
     std::function<bool(int x, int y)> onMouseMove;
     std::function<bool(int x, int y)> onRightClick;
-    std::function<bool(int delta)>    onMouseWheel;
-    std::function<void()>             onMouseLeave;
+    std::function<bool(int delta)> onMouseWheel;
+    std::function<void()> onMouseLeave;
 
-    std::function<bool(int keyCode)>  onKeyDown;
-    std::function<bool(wchar_t ch)>   onChar;
+    std::function<bool(int keyCode)> onKeyDown;
+    std::function<bool(wchar_t ch)> onChar;
 
     std::function<void(TimerID timerId)> onTimer;
     std::function<void()> onNonClientMouseDown;
@@ -46,18 +47,19 @@ struct WindowCallbacks {
 // PlatformWindow
 // ============================================================================
 
-class PlatformWindow {
+class PlatformWindow
+{
 public:
-    PlatformWindow()  = default;
+    PlatformWindow() = default;
     ~PlatformWindow() { destroy(); }
 
-    PlatformWindow(const PlatformWindow&)            = delete;
-    PlatformWindow& operator=(const PlatformWindow&) = delete;
+    PlatformWindow(const PlatformWindow &) = delete;
+    PlatformWindow &operator=(const PlatformWindow &) = delete;
 
-    bool create(const std::string& title, int width, int height,
-                AppInstance hInstance, void* userData);
+    bool create(const std::string &title, int width, int height,
+                AppInstance hInstance, void *userData);
     void destroy();
-    int  run();
+    int run();
 
     WindowCallbacks callbacks;
 
@@ -66,18 +68,11 @@ public:
     void setTimer(TimerID id, int ms);
     void killTimer(TimerID id);
 
-    NativeWindow handle() const {
-#ifdef _WIN32
-        return hwnd;
-#else
-        return nativeHandle;
-#endif
-    }
+    int clientWidth() const { return cachedWidth; }
+    int clientHeight() const { return cachedHeight; }
 
-    int  clientWidth()  const { return cachedWidth;  }
-    int  clientHeight() const { return cachedHeight; }
-
-    bool valid() const {
+    bool valid() const
+    {
 #ifdef _WIN32
         return hwnd != nullptr;
 #elif defined(__linux__) && !defined(__ANDROID__)
@@ -89,47 +84,50 @@ public:
 #endif
     }
 
-    void        setClipboardText(const std::string& text);
+    void setClipboardText(const std::string &text);
     std::string getClipboardText();
 
     void captureMouseInput();
     void releaseMouseInput();
 
-    bool isMouseCaptured() const {
-#ifdef _WIN32
-        return GetCapture() == hwnd;
-#else
-        return mouseCapture;
-#endif
-    }
+    NativeWindow handle() const;
+    bool isMouseCaptured() const;
 
-    struct ScreenPoint { int x = 0, y = 0; };
-    struct ClientSize  { int width = 0, height = 0; };
+    struct ScreenPoint
+    {
+        int x = 0, y = 0;
+    };
+    struct ClientSize
+    {
+        int width = 0, height = 0;
+    };
 
     ScreenPoint clientToScreen(int cx, int cy) const;
     ScreenPoint screenToClient(int sx, int sy) const;
-    ClientSize  getClientSize() const;
+    ClientSize getClientSize() const;
 
     void setResizeCursorH();
     void setResizeCursorV();
     void setDefaultCursor();
 
-    void           startupGdiplus();
+    void startupGdiplus();
     GraphicsContext getMeasureContext() const;
 
     // ── DPI helpers (Linux HiDPI: drawable pixels / logical pixels) ───────────
 #if defined(__linux__) && !defined(__ANDROID__)
-    float dpiScaleX() const {
-        return (logicalWidth_  > 0)
-            ? float(cachedWidth)  / float(logicalWidth_)
-            : 1.f;
+    float dpiScaleX() const
+    {
+        return (logicalWidth_ > 0)
+                   ? float(cachedWidth) / float(logicalWidth_)
+                   : 1.f;
     }
-    float dpiScaleY() const {
+    float dpiScaleY() const
+    {
         return (logicalHeight_ > 0)
-            ? float(cachedHeight) / float(logicalHeight_)
-            : 1.f;
+                   ? float(cachedHeight) / float(logicalHeight_)
+                   : 1.f;
     }
-    int logicalWidth()  const { return logicalWidth_;  }
+    int logicalWidth() const { return logicalWidth_; }
     int logicalHeight() const { return logicalHeight_; }
 #endif
 
@@ -138,26 +136,26 @@ public:
     EGLSurface getEGLSurface() const;
     EGLContext getEGLContext() const;
 
-    void handleAndroidEvent(const AInputEvent* event);
+    void handleAndroidEvent(const AInputEvent *event);
     void pollTimers();
-    void reinitSurface(ANativeWindow* window);
+    void reinitSurface(ANativeWindow *window);
     void destroySurface();
 #endif
     void updateClientSize();
 
 private:
     // ── Shared ───────────────────────────────────────────────────────────────
-    AppInstance hInstance   = nullptr;
-    int cachedWidth         = 0;
-    int cachedHeight        = 0;
+    AppInstance hInstance = nullptr;
+    int cachedWidth = 0;
+    int cachedHeight = 0;
 
     // =========================================================================
     // Win32
     // =========================================================================
 #ifdef _WIN32
-    NativeWindow hwnd        = nullptr;
-    BackBuffer   backBuffer;
-    ULONG_PTR    gdiplusToken = 0;
+    NativeWindow hwnd = nullptr;
+    BackBuffer backBuffer;
+    ULONG_PTR gdiplusToken = 0;
 
     void shutdownGdiplus();
     static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg,
@@ -171,37 +169,37 @@ private:
 
     struct CairoState;
 
-    SDL_Window*   nativeHandle  = nullptr;
-    SDL_GLContext glContext_     = nullptr;
+    SDL_Window *nativeHandle = nullptr;
+    SDL_GLContext glContext_ = nullptr;
 
-    Canvas2DGL*      canvasGL_        = nullptr;
-    CairoCompositor* cairoCompositor_ = nullptr;
+    Canvas2DGL *canvasGL_ = nullptr;
+    CairoCompositor *cairoCompositor_ = nullptr;
 
-    int                  logicalWidth_  = 0;
-    int                  logicalHeight_ = 0;
+    int logicalWidth_ = 0;
+    int logicalHeight_ = 0;
     std::vector<uint8_t> cairoPixelBuf_;
-    CanvasWidget*        capturedCanvas_ = nullptr;
-    CanvasWidget*        focusedCanvas_  = nullptr;
-    bool        running      = false;
-    bool        mouseCapture = false;
-    bool        dirty        = false;
-    CairoState* cairoState   = nullptr;
+    CanvasWidget *capturedCanvas_ = nullptr;
+    CanvasWidget *focusedCanvas_ = nullptr;
+    bool running = false;
+    bool mouseCapture = false;
+    bool dirty = false;
+    CairoState *cairoState = nullptr;
 
     std::unordered_map<TimerID, SDL_TimerID> sdlTimerMap;
 
     // ── Canvas widget registry ────────────────────────────────────────────────
-    std::vector<CanvasWidget*> canvasWidgets_;
+    std::vector<CanvasWidget *> canvasWidgets_;
 
-    void registerCanvas  (CanvasWidget* c);
-    void unregisterCanvas(CanvasWidget* c);
-    CanvasWidget* hitTestCanvas(int sx, int sy);
+    void registerCanvas(CanvasWidget *c);
+    void unregisterCanvas(CanvasWidget *c);
+    CanvasWidget *hitTestCanvas(int sx, int sy);
 
 public:
-    void registerCanvas_public  (CanvasWidget* c) { registerCanvas(c);   }
-    void unregisterCanvas_public(CanvasWidget* c) { unregisterCanvas(c); }
+    void registerCanvas_public(CanvasWidget *c) { registerCanvas(c); }
+    void unregisterCanvas_public(CanvasWidget *c) { unregisterCanvas(c); }
 
 private:
-    void handleSDLEvent(const SDL_Event& e);
+    void handleSDLEvent(const SDL_Event &e);
 
 #endif // __linux__
 
@@ -211,20 +209,21 @@ private:
 #ifdef __ANDROID__
     struct EGLState;
 
-    struct TimerEntry {
-        int      intervalMs;
+    struct TimerEntry
+    {
+        int intervalMs;
         uint32_t nextFireMs;
     };
 
-    android_app*   androidApp   = nullptr;
-    ANativeWindow* nativeHandle = nullptr;
-    bool           running      = false;
-    bool           mouseCapture = false;
-    bool           dirty        = false;
-    EGLState*      eglState     = nullptr;
+    android_app *androidApp = nullptr;
+    ANativeWindow *nativeHandle = nullptr;
+    bool running = false;
+    bool mouseCapture = false;
+    bool dirty = false;
+    EGLState *eglState = nullptr;
 
     std::unordered_map<TimerID, TimerEntry> androidTimers;
 #endif // __ANDROID__
 };
 
-#endif // FLUX_WINDOW_HPP 
+#endif // FLUX_WINDOW_HPP
