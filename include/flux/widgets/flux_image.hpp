@@ -154,6 +154,10 @@ public:
 #endif
 
 #if defined(__APPLE__) && !defined(__ANDROID__)
+  mutable std::mutex _decodeMutex;
+  DecodedImage _pending;       // decode thread -> UI thread
+  std::vector<uint8_t> pixels; // UI-thread render store
+
   struct MacScaleCache;
   struct MacScaleCacheDeleter
   {
@@ -188,21 +192,6 @@ public:
 
   std::vector<uint8_t> uploadBuffer;
   int uploadW = 0, uploadH = 0;
-#endif
-
-#if defined(__APPLE__) && !defined(__ANDROID__)
-  mutable std::mutex _decodeMutex;
-  DecodedImage _pending; // decode thread → UI thread
-
-  // Opaque cache pointer — avoids pulling <CoreGraphics/CoreGraphics.h> here
-  struct MacScaleCache;
-  struct MacScaleCacheDeleter
-  {
-    void operator()(MacScaleCache *) const;
-  };
-  mutable std::unique_ptr<MacScaleCache, MacScaleCacheDeleter> _macCache;
-  std::vector<uint8_t> pixels; // UI-thread render store
-
 #endif
 
   // ── Constructors ──────────────────────────────────────────────────────────
@@ -824,22 +813,16 @@ private:
   // Platform interface — implemented in platform .cpp / .mm files
   // =========================================================================
 
-  // Win32 only: full GDI+ decode (called instead of stb path)
+#ifdef _WIN32
   bool _platformDecode(const uint8_t *data, int len);
-
-  // Non-Win32: receive raw RGBA from stb, convert format, write to staging
+  bool _platformStorePixels(unsigned char *rgba, int w, int h); // stub, returns false
+#else
+  bool _platformDecode(const uint8_t *data, int len); // stub, returns false
   bool _platformStorePixels(unsigned char *rgba, int w, int h);
-
-  // Move staged pixels into render-ready store (UI thread)
+#endif
   void _platformPromote();
-
-  // Draw the image into ctx at (cx,cy,cw,ch)
   void _platformRender(GraphicsContext &ctx, int cx, int cy, int cw, int ch);
-
-  // Invalidate the scaled/pre-rendered cache
   void _platformInvalidateCache();
-
-  // Free all platform resources (called from destructor)
   void _platformDestroy();
 };
 

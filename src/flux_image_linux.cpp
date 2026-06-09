@@ -150,7 +150,7 @@ void ImageWidget::_platformRender(GraphicsContext &ctx, int cx, int cy,
     if (pixels.empty() || !ctx.cr)
         return;
     if (!_linuxCache)
-        _linuxCache = std::make_unique<LinuxScaleCache>();
+        _linuxCache.reset(new LinuxScaleCache());
     auto &cache = *_linuxCache;
 
     DestRect d = _calculateDestRect(cx, cy, cw, ch);

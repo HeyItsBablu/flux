@@ -185,7 +185,7 @@ void ImageWidget::_platformPromote() {
 void ImageWidget::_platformRender(GraphicsContext &ctx, int cx, int cy,
                                   int cw, int ch) {
     if (pixels.empty() || !ctx.cgContext) return;
-    if (!_macCache) _macCache = std::make_unique<MacScaleCache>();
+    if (!_macCache) _macCache.reset(new MacScaleCache());
     auto &cache = *_macCache;
 
     CGContextRef cgCtx = ctx.cgContext;
