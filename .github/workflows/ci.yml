@@ -155,7 +155,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=${{ matrix.config }} \
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=${{ matrix.android_abi }} \
-            -DANDROID_PLATFORM=android-26 \
+            -DANDROID_PLATFORM=android-28 \
             -DFLUX_BUILD_EXAMPLES=OFF
 
       # ── Build ────────────────────────────────────────────────────────────────
