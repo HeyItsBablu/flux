@@ -14,22 +14,13 @@ extern float       FluxAndroid_getDpiScale();
 
 class ScaffoldWidget;
 
-
-
 class OverlayHost {
 public:
     virtual ~OverlayHost() { destroyPopup(); }
 
-    // ── Interface every overlay widget must implement ─────────────────────
     virtual void setScaffold(ScaffoldWidget *s) = 0;
 
-    // Paint overlay content into ctx.
-    // Win32   : ctx wraps a DIB DC sized to (popupW x popupH), origin = (0,0).
-    // Linux   : ctx wraps the main cairo_t*, origin = client coords of popup.
-    // Android : ctx carries (popupW x popupH); NVG context is global to frame.
     virtual void renderPopupContent(GraphicsContext &/*ctx*/, FontCache &/*fc*/) {}
-
-    // ── Popup lifecycle (called by derived open/close methods) ────────────
 
     // =========================================================================
     // Win32
@@ -83,7 +74,6 @@ public:
         return pt;
     }
 
-
     static void forwardMouseEvent(HWND popupHwnd, UINT msg, WPARAM wp, LPARAM lp) {
         HWND owner = GetWindow(popupHwnd, GW_OWNER);
         if (!owner) return;
@@ -93,11 +83,9 @@ public:
     }
 
     // =========================================================================
-    // Linux (Cairo) and Android (NanoVG) — shared non-Win32 interface
+    // Linux, Android, macOS — shared non-Win32 interface
     // =========================================================================
 #else // !_WIN32
-
-
 
     void showPopup(NativeWindow /*parent*/,
                    int screenX, int screenY,
@@ -114,12 +102,23 @@ public:
             originX_ = screenX;
             originY_ = screenY;
         }
-#else
-
+#elif defined(__APPLE__)
+        // macOS: coordinates are already in logical client space.
+        // CoreGraphics origin is top-left matching FluxUI convention.
+        auto *ui = FluxUI::getCurrentInstance();
+        if (ui) {
+            auto client = ui->screenToClient(screenX, screenY);
+            originX_ = client.x;
+            originY_ = client.y;
+        } else {
+            originX_ = screenX;
+            originY_ = screenY;
+        }
+#else // Android
         auto *ui = FluxUI::getCurrentInstance();
         if (ui) {
             auto sz = ui->getClientSize();
-            (void)sz; // used only in the asserts below
+            (void)sz;
             assert(screenX <= sz.width  &&
                    "showPopup: screenX looks like physical px — pass logical px");
             assert(screenY <= sz.height &&
@@ -137,7 +136,6 @@ public:
         markDirty_();
     }
 
-
     void hidePopup() {
         int w = popupW_;
         int h = popupH_;
@@ -154,41 +152,44 @@ public:
     int overlayW() const { return popupW_; }
     int overlayH() const { return popupH_; }
 
-    // Called by the scaffold's render pass for each overlay in the stack.
+    // Called by scaffold's render pass for each overlay.
     void renderOverlay(GraphicsContext &ctx, FontCache &fc) {
         if (!visible_ || popupW_ <= 0 || popupH_ <= 0)
             return;
 
 #if defined(__linux__) && !defined(__ANDROID__)
-        // Cairo: save/translate/clip/restore so renderPopupContent sees a
-        // local (0,0) origin matching the Win32 DIB coordinate system.
+        // Cairo: save/translate/clip/restore so renderPopupContent sees (0,0).
         cairo_t *cr = ctx.cr;
         cairo_save(cr);
-
         cairo_rectangle(cr, originX_, originY_, popupW_, popupH_);
         cairo_clip(cr);
         cairo_translate(cr, originX_, originY_);
-
         GraphicsContext localCtx(cr, popupW_, popupH_);
         renderPopupContent(localCtx, fc);
-
         cairo_restore(cr);
+
+#elif defined(__APPLE__)
+        // macOS CoreGraphics: save/translate/clip/restore.
+        // CGContext origin is already top-left after our flip in MacState.
+        CGContextRef cg = ctx.cgContext;
+        if (!cg) return;
+        CGContextSaveGState(cg);
+        CGContextClipToRect(cg, CGRectMake(originX_, originY_, popupW_, popupH_));
+        CGContextTranslateCTM(cg, originX_, originY_);
+        GraphicsContext localCtx(cg, popupW_, popupH_);
+        renderPopupContent(localCtx, fc);
+        CGContextRestoreGState(cg);
 
 #else // Android / NanoVG
         NVGcontext* vg = FluxAndroid_getVG();
         if (!vg) return;
-
-
         nvgSave(vg);
-
         float dpi = FluxAndroid_getDpiScale();
         nvgTranslate(vg,
                      static_cast<float>(originX_) * dpi,
                      static_cast<float>(originY_) * dpi);
-
         GraphicsContext localCtx(popupW_, popupH_);
         renderPopupContent(localCtx, fc);
-
         nvgRestore(vg);
 #endif
     }
@@ -217,7 +218,6 @@ private:
         if (dibDC_ && dibBmp_ && popupW_ == w && popupH_ == h)
             return;
         freeDIB_();
-
         BITMAPINFOHEADER bih{};
         bih.biSize        = sizeof(bih);
         bih.biWidth       = w;
@@ -225,16 +225,13 @@ private:
         bih.biPlanes      = 1;
         bih.biBitCount    = 32;
         bih.biCompression = BI_RGB;
-
         BITMAPINFO bi{};
         bi.bmiHeader = bih;
-
         HDC screenDC = GetDC(nullptr);
         dibBmp_ = CreateDIBSection(screenDC, &bi, DIB_RGB_COLORS,
                                    &dibBits_, nullptr, 0);
         ReleaseDC(nullptr, screenDC);
         assert(dibBmp_);
-
         dibDC_  = CreateCompatibleDC(nullptr);
         dibOld_ = static_cast<HBITMAP>(SelectObject(dibDC_, dibBmp_));
     }
@@ -259,18 +256,15 @@ private:
         if (!popupHwnd_ || popupW_ <= 0 || popupH_ <= 0)
             return;
         ensureDIB_(popupW_, popupH_);
-
         {
             HBRUSH clearBrush = CreateSolidBrush(kClearKey_);
             RECT all = {0, 0, popupW_, popupH_};
             FillRect(dibDC_, &all, clearBrush);
             DeleteObject(clearBrush);
         }
-
         GraphicsContext ctx(dibDC_);
         renderPopupContent(ctx, fontCache);
         fixupAlpha_();
-
         SIZE          dstSz{popupW_, popupH_};
         POINT         srcPt{0, 0};
         BLENDFUNCTION bf{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
@@ -278,24 +272,17 @@ private:
                             dibDC_, &srcPt, 0, &bf, ULW_ALPHA);
     }
 
-
     void fixupAlpha_() {
         if (!dibBits_) return;
         auto *px = static_cast<BYTE *>(dibBits_);
         const int n = popupW_ * popupH_;
         for (int i = 0; i < n; ++i, px += 4) {
-            // px layout: [0]=B [1]=G [2]=R [3]=A
             if (px[3] == 0) {
-                if (px[0] == 1 && px[1] == 2 && px[2] == 3) {
-                    // Sentinel clear-color → fully transparent (click-through).
+                if (px[0] == 1 && px[1] == 2 && px[2] == 3)
                     px[0] = px[1] = px[2] = px[3] = 0;
-                } else {
-                    // GDI-drawn pixel — alpha was never written. Force opaque
-                    // so it is both visible and receives mouse hit-testing.
+                else
                     px[3] = 255;
-                }
             }
-            // alpha > 0: renderer wrote a real alpha value — leave it alone.
         }
     }
 
@@ -322,8 +309,7 @@ private:
                               reinterpret_cast<LONG_PTR>(cs->lpCreateParams));
             return 0;
         }
-        case WM_ERASEBKGND:
-            return 1;
+        case WM_ERASEBKGND: return 1;
         case WM_PAINT: {
             PAINTSTRUCT ps;
             BeginPaint(hwnd, &ps);
@@ -336,7 +322,6 @@ private:
         case WM_RBUTTONUP:
         case WM_MOUSEMOVE:
         case WM_MOUSEWHEEL:
-
             forwardMouseEvent(hwnd, msg, wp, lp);
             return 0;
         case WM_NCHITTEST:
@@ -347,14 +332,13 @@ private:
     }
 
     // =========================================================================
-    // Linux + Android shared private internals
+    // Linux + Android + macOS shared private internals
     // =========================================================================
 #else // !_WIN32
 
     int  originX_ = 0;
     int  originY_ = 0;
     bool visible_ = false;
-
 
     void markDirty_(int w = -1, int h = -1) {
         auto *ui = FluxUI::getCurrentInstance();
