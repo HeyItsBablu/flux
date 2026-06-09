@@ -4,7 +4,7 @@
 // Shows a scrolling waveform while recording, plus a record/stop button.
 // On stop, saves a timestamped WAV file via FluxMic and fires onSaved.
 //
-// Supported platforms: Android, Windows, Linux desktop
+// Supported platforms: Android, Windows, Linux desktop, macOS
 //
 // Usage:
 //   MicRecorder()
@@ -15,8 +15,10 @@
 //
 #pragma once
 
-// Compile on Android, Windows, and Linux desktop — everywhere FluxMic runs.
-#if defined(__ANDROID__) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
+// Compile on Android, Windows, Linux desktop, and macOS — everywhere FluxMic runs.
+#if defined(__ANDROID__) || defined(_WIN32) || \
+    (defined(__linux__) && !defined(__ANDROID__)) || \
+    (defined(__APPLE__) && defined(TARGET_OS_OSX) && TARGET_OS_OSX)
 
 #include "flux/flux.hpp"
 #include "flux/flux_mic.hpp"
@@ -30,6 +32,12 @@
     static constexpr const char* kMicUIFont = "Segoe UI";
 #elif defined(__ANDROID__)
     static constexpr const char* kMicUIFont = "Roboto";
+#elif defined(__APPLE__)
+    // San Francisco is the system UI font on macOS 10.11+.
+    // ".AppleSystemUIFont" is the canonical internal name that always resolves
+    // to SF Pro regardless of OS version; "SF Pro Display" and "Helvetica Neue"
+    // are reasonable fallbacks for older SDKs.
+    static constexpr const char* kMicUIFont = ".AppleSystemUIFont";
 #else  // Linux
     static constexpr const char* kMicUIFont = "DejaVu Sans";
 #endif
@@ -179,7 +187,7 @@ public:
 
         // ── Status label ──────────────────────────────────────────────────────
         // _micBasename handles both '/' and '\\' so the filename displays
-        // correctly whether we're on Windows, Linux, or Android.
+        // correctly whether we're on Windows, Linux, macOS, or Android.
         std::string status;
         if (recording) {
             status = "Recording...";
@@ -300,4 +308,4 @@ inline MicRecorderWidgetPtr MicRecorder() {
     return std::make_shared<MicRecorderWidget>();
 }
 
-#endif // Android || Windows || Linux
+#endif // Android || Windows || Linux || macOS

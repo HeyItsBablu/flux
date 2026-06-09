@@ -5,6 +5,7 @@
 //   Android : AAudio  (AAUDIO_INPUT_PRESET_VOICE_RECOGNITION, exclusive, float32)
 //   Windows : WASAPI  (shared mode, auto format-detect, mono mix-down)
 //   Linux   : ALSA    (SND_PCM_FORMAT_FLOAT_LE → S16_LE fallback, default device)
+//   macOS   : AVAudioEngine  (input tap, 48 kHz mono float32)
 //
 // Common pipeline (all platforms):
 //   Audio input  →  mono float32 ring buffer (5-min cap, 48 kHz)
@@ -21,6 +22,7 @@
 //   Android : aaudio
 //   Windows : ole32  mmdevapi
 //   Linux   : asound
+//   macOS   : AVFoundation  (already linked by the flux CMakeLists)
 //
 #pragma once
 
@@ -916,3 +918,315 @@ private:
 };
 
 #endif // __ANDROID__
+
+
+// ============================================================================
+// macOS — AVAudioEngine backend
+//
+// Design notes:
+//   • AVAudioEngine is the modern replacement for AudioQueue on Apple platforms.
+//     It is already linked (AVFoundation is in the CMakeLists target_link_libraries).
+//   • We install a tap on the engine's inputNode using
+//     installTapOnBus:bufferSize:format:block:.  The block is called on an
+//     internal CoreAudio thread whenever a buffer is ready (~10ms / 480 frames
+//     at 48 kHz), so no polling thread is needed for ingestion.
+//   • A lightweight watchdog thread wakes every 100ms solely to check the
+//     5-minute cap (kRingSize) and fire the auto-stop path — identical to how
+//     the Android backend handles it, just at lower frequency since the tap
+//     already handles the cap check inline.
+//   • The engine requests mono float32 at 48 kHz.  If the hardware doesn't
+//     support 48 kHz natively AVAudioEngine transparently resamples.
+//   • Microphone permission on macOS 10.14+: the app's Info.plist must contain
+//     NSMicrophoneUsageDescription.  AVAudioEngine will throw an ObjC exception
+//     if permission is denied; we wrap engine start in @try/@catch and surface
+//     it as State::Error.
+//   • Save directory: ~/Music/FluxMic  (auto-created).
+//     Override by defining FLUXMIC_SAVE_DIR and providing
+//     FluxMac_getMicSaveDir() before including this header.
+// ============================================================================
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#if TARGET_OS_OSX
+
+#import <AVFoundation/AVFoundation.h>
+#import <Foundation/Foundation.h>
+
+#include <pwd.h>
+#include <sys/stat.h>
+
+#undef  MIC_LOGI
+#undef  MIC_LOGE
+#define MIC_LOGI(fmt, ...) NSLog(@"[FluxMic] " @ fmt, ##__VA_ARGS__)
+#define MIC_LOGE(fmt, ...) NSLog(@"[FluxMic][E] " @ fmt, ##__VA_ARGS__)
+
+// ── Save-directory helper ────────────────────────────────────────────────────
+// Default: ~/Music/FluxMic
+// Define FLUXMIC_SAVE_DIR before including this header to supply your own
+// FluxMac_getMicSaveDir() instead.
+#ifndef FLUXMIC_SAVE_DIR
+inline std::string FluxMac_getMicSaveDir() {
+    // Prefer NSSearchPathForDirectoriesInDomains for sandbox compatibility
+    NSArray<NSString*>* dirs =
+        NSSearchPathForDirectoriesInDomains(NSMusicDirectory, NSUserDomainMask, YES);
+    std::string base = dirs.count > 0
+        ? std::string(dirs[0].UTF8String)
+        : ([]() -> std::string {
+               const char* h = getenv("HOME");
+               if (!h) { struct passwd* pw = getpwuid(getuid()); h = pw ? pw->pw_dir : "."; }
+               return std::string(h) + "/Music";
+           })();
+    std::string dir = base + "/FluxMic";
+    mkdir(dir.c_str(), 0755); // no-op if it already exists
+    return dir;
+}
+#endif
+
+// ============================================================================
+class FluxMic {
+public:
+    static FluxMic& get() { static FluxMic inst; return inst; }
+
+    static constexpr int    kSampleRate = 48000;
+    static constexpr int    kChannels   = 1;
+    static constexpr int    kMaxSeconds = 300;
+    static constexpr size_t kRingSize   = static_cast<size_t>(kSampleRate) * kMaxSeconds;
+
+    enum class State { Idle, Recording, Stopping, Error };
+
+    State  getState()          const { return s_state.load(); }
+    bool   isRecording()       const { return s_state == State::Recording; }
+    float  getAmplitude()      const { return s_amplitude.load(); }
+    float  getProgress()       const {
+        return std::min(1.f, static_cast<float>(s_writePos.load()) /
+                              static_cast<float>(kRingSize));
+    }
+    float  getElapsedSeconds() const {
+        return static_cast<float>(s_writePos.load()) /
+               static_cast<float>(kSampleRate);
+    }
+    const std::string& getLastSavedPath() const { return s_lastSavedPath; }
+
+    using SaveCallback = std::function<void(const std::string&)>;
+    void setOnSaved(SaveCallback cb) { s_onSaved = std::move(cb); }
+
+    // ── start ─────────────────────────────────────────────────────────────────
+    bool start() {
+        if (s_state == State::Recording) return true;
+        if (s_state == State::Stopping)  return false;
+
+        s_ring.assign(kRingSize, 0.f);
+        s_writePos  = 0;
+        s_amplitude = 0.f;
+        s_rmsAccum  = 0.f;
+        s_rmsSamples = 0;
+
+        if (!_openEngine()) { s_state = State::Error; return false; }
+
+        s_state    = State::Recording;
+        s_stopFlag = false;
+
+        // Watchdog thread: checks the 5-minute cap every 100ms so the
+        // tap callback itself never has to do a state transition.
+        s_watchdog = std::thread(&FluxMic::_watchdogLoop, this);
+
+        NSLog(@"[FluxMic] Recording started — max %d s", kMaxSeconds);
+        return true;
+    }
+
+    // ── stop + save ───────────────────────────────────────────────────────────
+    void stop() {
+        if (s_state != State::Recording) return;
+        s_state    = State::Stopping;
+        s_stopFlag = true;
+        if (s_watchdog.joinable()) s_watchdog.join();
+        _closeEngine();
+        _saveWAV();
+        s_state = State::Idle;
+    }
+
+    // ── cancel (discard) ─────────────────────────────────────────────────────
+    void cancel() {
+        if (s_state != State::Recording) return;
+        s_state    = State::Stopping;
+        s_stopFlag = true;
+        if (s_watchdog.joinable()) s_watchdog.join();
+        _closeEngine();
+        s_writePos  = 0;
+        s_amplitude = 0.f;
+        s_state = State::Idle;
+        NSLog(@"[FluxMic] Recording cancelled");
+    }
+
+    void getWaveform(std::vector<float>& out, size_t count) const {
+        FluxMicDetail::buildWaveform(s_ring, s_writePos.load(), out, count);
+    }
+
+private:
+    FluxMic()  { s_ring.reserve(kRingSize); }
+    ~FluxMic() { cancel(); }
+
+    // ── Ring buffer & meters ──────────────────────────────────────────────────
+    std::vector<float>  s_ring;
+    std::atomic<size_t> s_writePos   { 0 };
+    std::atomic<float>  s_amplitude  { 0.f };
+
+    // RMS accumulator — written only from the tap callback (one CoreAudio
+    // thread), so no mutex needed.
+    float s_rmsAccum   = 0.f;
+    int   s_rmsSamples = 0;
+    // 50ms RMS window at 48 kHz
+    static constexpr int kRmsWindow = kSampleRate / 20;
+
+    // ── AVFoundation objects (ObjC, strong references) ────────────────────────
+    AVAudioEngine*    s_engine    = nil;
+    AVAudioInputNode* s_inputNode = nil;  // owned by the engine, not retained separately
+
+    // ── Control ───────────────────────────────────────────────────────────────
+    std::thread        s_watchdog;
+    std::atomic<bool>  s_stopFlag { false };
+    std::atomic<State> s_state    { State::Idle };
+    std::string        s_lastSavedPath;
+    SaveCallback       s_onSaved;
+
+    // ── Open AVAudioEngine and install input tap ───────────────────────────────
+    //
+    // AVAudioEngine automatically handles:
+    //   • hardware format negotiation (sample-rate conversion if needed)
+    //   • multi-channel → mono is done by requesting a mono format on the tap
+    //   • microphone permission checks (throws NSException if denied)
+    //
+    bool _openEngine() {
+        s_engine    = [[AVAudioEngine alloc] init];
+        s_inputNode = s_engine.inputNode;
+
+        // Request mono float32 at 48 kHz.
+        // AVAudioEngine inserts a format-conversion node automatically when
+        // the hardware native format differs.
+        AVAudioFormat* tapFormat =
+            [[AVAudioFormat alloc] initWithCommonFormat:AVAudioPCMFormatFloat32
+                                             sampleRate:kSampleRate
+                                               channels:kChannels
+                                            interleaved:NO];
+        if (!tapFormat) {
+            NSLog(@"[FluxMic][E] Failed to create AVAudioFormat");
+            s_engine = nil; return false;
+        }
+
+        // bufferSize is a *hint*; CoreAudio may deliver larger or smaller
+        // buffers.  480 frames = 10ms @ 48 kHz, matching the other backends.
+        const AVAudioFrameCount kTapBufferFrames = 480;
+
+        // Capture self by pointer (not ObjC block retain) to avoid a retain
+        // cycle.  The tap is always removed before the engine is released.
+        FluxMic* self = this;
+
+        [s_inputNode installTapOnBus:0
+                          bufferSize:kTapBufferFrames
+                              format:tapFormat
+                               block:^(AVAudioPCMBuffer* buffer, AVAudioTime* /*when*/) {
+            if (!buffer || !buffer.floatChannelData) return;
+
+            const float* src    = buffer.floatChannelData[0]; // mono, non-interleaved
+            AVAudioFrameCount n = buffer.frameLength;
+            if (n == 0) return;
+
+            size_t wp    = self->s_writePos.load();
+            size_t space = kRingSize - wp;
+            size_t count = (n < space) ? n : space;
+
+            // Write samples to ring buffer
+            memcpy(self->s_ring.data() + wp, src, count * sizeof(float));
+            self->s_writePos.store(wp + count);
+
+            // Update RMS amplitude
+            for (size_t i = 0; i < count; i++) {
+                float v = src[i];
+                self->s_rmsAccum  += v * v;
+                self->s_rmsSamples++;
+                if (self->s_rmsSamples >= kRmsWindow) {
+                    float rms = std::sqrt(self->s_rmsAccum / self->s_rmsSamples);
+                    self->s_amplitude.store(
+                        self->s_amplitude.load() * 0.7f + rms * 0.3f);
+                    self->s_rmsAccum   = 0.f;
+                    self->s_rmsSamples = 0;
+                }
+            }
+
+            // Hit the 5-minute cap — signal the watchdog to stop
+            if (self->s_writePos.load() >= kRingSize && !self->s_stopFlag.load()) {
+                NSLog(@"[FluxMic] Max recording duration reached — signalling stop");
+                self->s_stopFlag.store(true);
+                self->s_state.store(State::Stopping);
+            }
+        }];
+
+        // Start the engine (may throw NSException if mic permission denied)
+        NSError* err = nil;
+        BOOL ok = NO;
+        @try {
+            ok = [s_engine startAndReturnError:&err];
+        } @catch (NSException* ex) {
+            NSLog(@"[FluxMic][E] AVAudioEngine start threw: %@ — %@",
+                  ex.name, ex.reason);
+            _closeEngine(); return false;
+        }
+
+        if (!ok) {
+            NSLog(@"[FluxMic][E] AVAudioEngine startAndReturnError: %@",
+                  err.localizedDescription);
+            _closeEngine(); return false;
+        }
+
+        NSLog(@"[FluxMic] AVAudioEngine started — %d Hz  %d ch  float32",
+              kSampleRate, kChannels);
+        return true;
+    }
+
+    // ── Teardown ──────────────────────────────────────────────────────────────
+    void _closeEngine() {
+        if (!s_engine) return;
+        // Remove the tap before stopping — avoids a race where the tap fires
+        // after the ring buffer has been cleared.
+        [s_inputNode removeTapOnBus:0];
+        [s_engine stop];
+        s_engine    = nil;
+        s_inputNode = nil;
+    }
+
+    // ── Watchdog thread ───────────────────────────────────────────────────────
+    //
+    // Wakes every 100ms.  Its only job is to notice when s_stopFlag has been
+    // set (either by the caller via stop()/cancel() or by the tap hitting the
+    // 5-minute cap) so that the stop path can be driven from a non-CoreAudio
+    // thread — same pattern as the Android poll loop.
+    //
+    void _watchdogLoop() {
+        NSLog(@"[FluxMic] Watchdog started");
+        while (!s_stopFlag.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        NSLog(@"[FluxMic] Watchdog exited — %zu samples (%.2f s)",
+              s_writePos.load(),
+              static_cast<float>(s_writePos.load()) / kSampleRate);
+    }
+
+    // ── Save WAV ──────────────────────────────────────────────────────────────
+    void _saveWAV() {
+        size_t n = s_writePos.load();
+        if (n == 0) { NSLog(@"[FluxMic][E] Nothing captured — no WAV written"); return; }
+        std::string path = WavWriter::makeTimestampedPath(FluxMac_getMicSaveDir());
+        NSLog(@"[FluxMic] Saving WAV: %s (%zu samples, %.2f s)",
+              path.c_str(), n, static_cast<float>(n) / kSampleRate);
+        std::string result = WavWriter::write(path, s_ring.data(), n,
+                                              static_cast<uint32_t>(kSampleRate), 1);
+        if (!result.empty()) {
+            s_lastSavedPath = result;
+            if (s_onSaved) s_onSaved(result);
+        } else {
+            NSLog(@"[FluxMic][E] WAV write FAILED: %s", path.c_str());
+        }
+    }
+};
+
+#endif // TARGET_OS_OSX
+#endif // __APPLE__
