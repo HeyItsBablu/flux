@@ -9,9 +9,9 @@
 // Usage:
 //   MicRecorder()
 //       ->setWidth(320)->setHeight(120)
-//       ->setOnSaved([](const std::string& path) {
-//           LOGI("Saved to %s", path.c_str());
-//       })
+    //   ->setOnSaved([](const std::string& path) {
+    //       LOGI("Saved to %s", path.c_str());
+    //   })
 //
 #pragma once
 
