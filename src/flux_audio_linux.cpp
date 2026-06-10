@@ -158,7 +158,7 @@ struct FluxAudio::Impl {
         snd_pcm_hw_params_set_period_size_near(pcm, hw, &period, nullptr);
 
         snd_pcm_uframes_t bufSize = period * 4;
-        snd_pcm_hw_params_set_buffer_size_near(pcm, hw, &bufSize, nullptr);
+        snd_pcm_hw_params_set_buffer_size_near(pcm, hw, &bufSize);
 
         err = snd_pcm_hw_params(pcm, hw);
         if (err < 0) {
