@@ -8,11 +8,14 @@
 #import <MetalKit/MetalKit.h>
 #import <QuartzCore/CAMetalLayer.h>
 
+#include "flux_window.hpp" 
 #include "flux_canvas.hpp"  // for CanvasWidget*
 #include "flux_canvas2d.hpp"
 
 #include <vector>
 #include <unordered_map>
+
+@class FluxNSView;
 
 struct PlatformWindow::MacState {
     NSWindow*        nsWindow       = nil;
