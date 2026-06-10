@@ -6,17 +6,12 @@
 #include "flux_app.hpp"
 #include "flux_state.hpp"
 #include "widgets/widgets.hpp"
-#include "flux_canvas2d.hpp"
-
-#if !defined(__APPLE__)
-#include "flux_canvas.hpp"
-#endif
-
 #include "main_app.hpp"
 #include "flux_android_jni.hpp"
 #include "flux_audio.hpp"
 #include "flux_camera.hpp"
 #include "flux_file.hpp"
 #include "flux_secure_storage.hpp"
-
+#include "flux_canvas.hpp"
+#include "flux_canvas2d.hpp"
 #endif // FLUX_HPP

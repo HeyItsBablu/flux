@@ -42,4 +42,4 @@ function(add_flux_example NAME)
 
 endfunction()
 
-add_flux_example(audioplayer)
+add_flux_example(textcanvas)

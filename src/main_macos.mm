@@ -55,10 +55,10 @@
     _app->createWindow(cfg->title, w, h);
 
     if (cfg->fullscreen) {
-        NSWindow* win = reinterpret_cast<NSWindow*>(_app->getWindow());
+        NSWindow* win = (__bridge NSWindow*)_app->getWindow();
         if (win) [win toggleFullScreen:nil];
     } else if (cfg->maximize) {
-        NSWindow* win = reinterpret_cast<NSWindow*>(_app->getWindow());
+        NSWindow* win = (__bridge NSWindow*)_app->getWindow();
         if (win) [win zoom:nil];
     }
 }
