@@ -224,6 +224,15 @@ private:
 
     std::unordered_map<TimerID, TimerEntry> androidTimers;
 #endif // __ANDROID__
+
+#ifdef __APPLE__
+#if TARGET_OS_OSX
+    struct MacState;
+    MacState* macState = nullptr;
+
+    CanvasWidget* hitTestCanvas(int x, int y);
+#endif
+#endif
 };
 
 #endif // FLUX_WINDOW_HPP

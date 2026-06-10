@@ -2,7 +2,6 @@ if(ANDROID)
     return()
 endif()
 
-
 function(add_flux_example NAME)
 
     if(WIN32)
@@ -11,6 +10,12 @@ function(add_flux_example NAME)
             ${CMAKE_SOURCE_DIR}/src/main_win32.cpp
         )
         target_link_options(${NAME} PRIVATE /SUBSYSTEM:WINDOWS)
+
+    elseif(APPLE)
+        add_executable(${NAME}
+            ${NAME}.cpp
+            ${CMAKE_SOURCE_DIR}/src/main_macos.mm
+        )
 
     elseif(UNIX)
         add_executable(${NAME}
@@ -38,7 +43,3 @@ function(add_flux_example NAME)
 endfunction()
 
 add_flux_example(audioplayer)
-
-
-
-

@@ -467,7 +467,7 @@ int PlatformWindow::run() {
     return 0;
 }
 
-
+ 
 NativeWindow PlatformWindow::handle() const {
     return macState ? reinterpret_cast<NativeWindow>(macState->nsWindow) : nullptr;
 }

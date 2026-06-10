@@ -222,6 +222,15 @@ endif()
 file(GLOB_RECURSE FLUX_SOURCES CONFIGURE_DEPENDS src/*.cpp)
 
 
+if(APPLE)
+    file(GLOB_RECURSE FLUX_MM_SOURCES CONFIGURE_DEPENDS src/*.mm)
+    set_source_files_properties(${FLUX_MM_SOURCES}
+        PROPERTIES COMPILE_FLAGS "-x objective-c++"
+    )
+    list(APPEND FLUX_SOURCES ${FLUX_MM_SOURCES})
+endif()
+
+
 if(WIN32)
     list(FILTER FLUX_SOURCES EXCLUDE REGEX ".*flux_canvas2d_win32\\.cpp$")
 endif()
