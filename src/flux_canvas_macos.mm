@@ -6,9 +6,10 @@
 
 #import <Cocoa/Cocoa.h>
 #import <Metal/Metal.h>
+#import <Metal/MTLDrawable.h>
 #import <MetalKit/MetalKit.h>
-#import <QuartzCore/CAMetalLayer.h>
 #import <QuartzCore/QuartzCore.h>
+#import <QuartzCore/CAMetalLayer.h>
 
 #include "flux/flux_window.hpp"
 #include "flux/flux_canvas.hpp"
