@@ -5,10 +5,11 @@
 #if TARGET_OS_OSX
 
 
-
 #import <Foundation/Foundation.h>
-#import <QuartzCore/QuartzCore.h>
 #import <Metal/Metal.h>
+#import <Metal/MTLRenderCommandEncoder.h>
+#import <Metal/MTLCommandBuffer.h>
+#import <QuartzCore/CAMetalLayer.h>
 #import <MetalKit/MetalKit.h>
 #import <Cocoa/Cocoa.h>
 
