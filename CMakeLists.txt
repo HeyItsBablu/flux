@@ -126,12 +126,11 @@ endif()
 # Win/Linux → GL3 backend, glad provides the loader, nanovg_gl_impl.c shared
 # ============================================================================
 
-if(NOT TARGET nanovg)
+if(NOT TARGET nanovg AND NOT APPLE)
     set(NANOVG_SOURCES
             external/nanovg/src/nanovg.c
             external/nanovg/src/nanovg_gl_impl.c
     )
-
     add_library(nanovg STATIC ${NANOVG_SOURCES})
     set_source_files_properties(${NANOVG_SOURCES} PROPERTIES LANGUAGE C)
 
@@ -277,7 +276,7 @@ target_compile_definitions(flux PUBLIC
 
 if(ANDROID)
     target_compile_definitions(flux PUBLIC NANOVG_GLES2)
-else()
+elseif(NOT APPLE)
     target_compile_definitions(flux PUBLIC NANOVG_GL3)
 endif()
 
@@ -379,21 +378,13 @@ endif()
 # ── Compiler options ──────────────────────────────────────────────────────────
 
 if(MSVC)
-    target_compile_options(flux PUBLIC  
-            /utf-8
-    )
+    target_compile_options(flux PUBLIC /utf-8)
+    target_compile_options(flux PRIVATE /W4 /permissive- /Zc:__cplusplus /EHsc)
+elseif(APPLE)
+    # Already handled in the Apple target_compile_options block above — no duplicate
+elseif(UNIX)
     target_compile_options(flux PRIVATE
-            /W4
-            /permissive-
-            /Zc:__cplusplus
-            /EHsc
-    )
-else()
-    target_compile_options(flux PRIVATE
-            -Wall
-            -Wextra
-            -Wpedantic
-            -fexceptions
+            -Wall -Wextra -Wpedantic -fexceptions
     )
 endif()
 
@@ -420,10 +411,10 @@ if(NOT ANDROID)
     include(GNUInstallDirs)
     include(CMakePackageConfigHelpers)
 
-    set(FLUX_INSTALL_TARGETS flux nanovg stb)
-
+    set(FLUX_INSTALL_TARGETS flux stb)
+    
     if(WIN32 OR (UNIX AND NOT APPLE AND NOT ANDROID))
-        list(APPEND FLUX_INSTALL_TARGETS glad)
+        list(APPEND FLUX_INSTALL_TARGETS glad nanovg)
     endif()
 
     install(TARGETS ${FLUX_INSTALL_TARGETS}
