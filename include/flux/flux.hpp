@@ -8,9 +8,9 @@
 #include "widgets/widgets.hpp"
 #include "flux_canvas2d.hpp"
 
-#if !defined(__APPLE__)
+// #if !defined(__APPLE__)
 #include "flux_canvas.hpp"
-#endif
+// #endif
 
 #include "main_app.hpp"
 #include "flux_android_jni.hpp"

@@ -27,6 +27,7 @@ jobs:
       - name: Configure
         run: |
           cmake -S . -B build \
+            --fresh \
             -G "Ninja" \
             -DCMAKE_BUILD_TYPE=${{ matrix.config }} \
             -DFLUX_BUILD_EXAMPLES=ON
