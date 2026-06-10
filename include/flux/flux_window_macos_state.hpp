@@ -3,8 +3,7 @@
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
 
-#define __gl3_h_
-#define __gl_h_
+
 
 #import <Cocoa/Cocoa.h>
 #import <Metal/Metal.h>
