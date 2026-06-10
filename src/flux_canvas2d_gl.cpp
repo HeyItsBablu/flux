@@ -12,7 +12,9 @@
 #include <fstream>
 #include <vector>
 
+#ifndef __ANDROID__
 #define STB_TRUETYPE_IMPLEMENTATION
+#endif
 #include <stb_truetype.h>
 
 #include <stb_image.h>

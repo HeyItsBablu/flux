@@ -7,8 +7,7 @@ public:
     return Scaffold(
         AppBar("Flux App"),
         Expanded(
-            Center(AudioPlayerFromUrl("https://www.learningcontainer.com/"
-                                      "wp-content/uploads/2020/02/Kalimba.mp3")
+            Center(AudioPlayer("screenshots/TumMile.mp3")
                        ->setWidth(280))),
         nullptr, nullptr);
   }
