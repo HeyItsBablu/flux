@@ -30,6 +30,8 @@ jobs:
             --fresh \
             -G "Ninja" \
             -DCMAKE_BUILD_TYPE=${{ matrix.config }} \
+            -DCMAKE_OSX_SYSROOT=$(xcrun --sdk macosx --show-sdk-path) \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DFLUX_BUILD_EXAMPLES=ON
 
       - name: Build
