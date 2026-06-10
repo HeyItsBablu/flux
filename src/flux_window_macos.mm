@@ -5,6 +5,7 @@
 
 #include "flux/flux_window.hpp"
 #include "flux/flux_canvas.hpp"
+#include "flux/flux_window_macos_state.hpp"
 
 #import <Cocoa/Cocoa.h>
 #import <Metal/Metal.h>

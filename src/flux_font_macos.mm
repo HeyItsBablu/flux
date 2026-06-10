@@ -93,7 +93,7 @@ NativeFont FontCache::createFont(const FontKey& key) {
 
     // We store the CTFontRef as void*. The cache holds the +1 retain count
     // returned by CTFontCreate*.
-    return reinterpret_cast<NativeFont>(font);
+    return reinterpret_cast<NativeFont>((uintptr_t)font);
 }
 
 // ============================================================================
