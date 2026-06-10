@@ -386,7 +386,7 @@ EGLConfig _getEGLConfig() {
 
             s_extractor = AMediaExtractor_new();
             media_status_t st = AMediaExtractor_setDataSourceFd(s_extractor, fd, start, len);
-            ::close(fd);
+            //::close(fd);
             if (st != AMEDIA_OK) {
                 __android_log_print(ANDROID_LOG_ERROR, "FluxVideo",
                                     "setDataSourceFd failed: %d", (int)st);

@@ -639,7 +639,7 @@ private:
     tmpl.push_back('\0');
     int fd = mkstemps(tmpl.data(), (int)ext.size());
     if (fd < 0) return {};
-    close(fd);
+    //close(fd);
     outPath = std::string(tmpl.data());
     FILE *f = fopen(outPath.c_str(), "wb");
 

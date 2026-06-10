@@ -45,7 +45,7 @@ inline std::string VP_writeTempFile(const std::vector<uint8_t> &bytes,
    tmplBuf.push_back('\0');
    int fd = mkstemp(tmplBuf.data());
    if (fd < 0) return {};
-   close(fd);
+   //close(fd);
    std::string outPath = std::string(tmplBuf.data()) + ext;
    ::rename(tmplBuf.data(), outPath.c_str());
    FILE *f = fopen(outPath.c_str(), "wb");
