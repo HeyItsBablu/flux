@@ -17,7 +17,11 @@
 #include "flux_scrollbar.hpp"
 #include "flux_render_surface.hpp"
 #include "flux_canvas_types.hpp"
+
+
+#if !defined(__APPLE__)
 #include "flux_glutil.hpp"
+#endif
 
 #include <chrono>
 #include <functional>

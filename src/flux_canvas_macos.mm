@@ -6,7 +6,6 @@
 
 #import <Cocoa/Cocoa.h>
 #import <Metal/Metal.h>
-#import <Metal/MTLDrawable.h>
 #import <MetalKit/MetalKit.h>
 #import <QuartzCore/QuartzCore.h>
 #import <QuartzCore/CAMetalLayer.h>
@@ -16,7 +15,6 @@
 #include "flux/flux_window_macos_state.hpp"
 #include <cassert>
 #include <unordered_map>
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Scrollbar shaders (Metal Shading Language)
 // ─────────────────────────────────────────────────────────────────────────────

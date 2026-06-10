@@ -19,14 +19,12 @@
 #  include <glad/glad.h>
 #elif defined(__ANDROID__)
 #  include <GLES3/gl3.h>
-#elif defined(__APPLE__)
-#  include <TargetConditionals.h>
-#  if TARGET_OS_OSX
-     // macOS: no GL needed here — Metal draw calls are in flux_canvas_macos.mm
-#  endif
 #endif
+// macOS: no GL header — Metal path only
 
+#if !defined(__APPLE__)
 #include "flux_glutil.hpp"
+#endif
 
 #ifndef M_PI
 #  define M_PI 3.14159265358979323846

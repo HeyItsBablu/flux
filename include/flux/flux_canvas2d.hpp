@@ -16,13 +16,13 @@
 #include <vector>
 #include <memory>
 
-// ── GL (glad included by CanvasWidget before us) ─────────────────────────────
-#if defined(_WIN32) || defined(__linux__) && !defined(__ANDROID__)
+#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
 #include <glad/glad.h>
 #elif defined(__ANDROID__)
 #include <GLES3/gl3.h>
 #elif defined(__APPLE__)
-#include <OpenGL/gl3.h>
+// GLuint/GLenum stubs provided by flux_glutil.hpp.
+#include "flux_glutil.hpp"
 #endif
 
 // ─────────────────────────────────────────────────────────────────────────────
