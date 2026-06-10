@@ -181,6 +181,32 @@ public:
     void onKeyDownEvent(const SDL_KeyboardEvent &e);
     void onKeyUpEvent(const SDL_KeyboardEvent &e);
 #endif
+
+    // ── macOS-only ────────────────────────────────────────────────────────────
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#if TARGET_OS_OSX
+    static void initEventType();
+    static Uint32 repaintEventType();
+
+    void setCanvasGL(Canvas2DGL *gl);
+    void onWindowResize(int newW, int newH);
+    void preRenderPass();
+    void glRenderPass();
+
+    bool isInitialized() const;
+    bool needsRepaint() const;
+    bool containsPoint(int wx, int wy) const;
+
+    void onMouseLeave();
+
+    void onMouseButtonDown(int sx, int sy, int button);
+    void onMouseButtonUp(int sx, int sy, int button);
+    void onMouseMove(int sx, int sy);
+    void onScrollWheel(float deltaY);
+    void onKeyDown(int keyCode);
+#endif
+#endif
 };
 
 // ── Factory helpers ───────────────────────────────────────────────────────────

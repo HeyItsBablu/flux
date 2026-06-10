@@ -19,6 +19,14 @@ class Canvas2DGL;
 
 #endif
 
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#if TARGET_OS_OSX
+class CanvasWidget;
+class Canvas2DGL;
+#endif
+#endif
+
 // ============================================================================
 // WindowCallbacks
 // ============================================================================
@@ -228,9 +236,15 @@ private:
 #ifdef __APPLE__
 #if TARGET_OS_OSX
     struct MacState;
-    MacState* macState = nullptr;
+    MacState *macState = nullptr;
+    friend class CanvasWidget;
+    CanvasWidget *hitTestCanvas(int x, int y);
 
-    CanvasWidget* hitTestCanvas(int x, int y);
+public:
+    void registerCanvas_public(CanvasWidget *c);
+    void unregisterCanvas_public(CanvasWidget *c);
+
+private:
 #endif
 #endif
 };

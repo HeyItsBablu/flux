@@ -5,9 +5,10 @@
 #if TARGET_OS_OSX
 
 #include "flux/flux_canvas.hpp"
-
+#import <Cocoa/Cocoa.h>
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
+#import <MetalKit/MetalKit.h>
 #include <cassert>
 #include <unordered_map>
 
