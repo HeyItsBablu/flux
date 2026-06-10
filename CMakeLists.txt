@@ -241,8 +241,16 @@ if(APPLE)
     list(APPEND FLUX_SOURCES ${FLUX_MM_SOURCES})
 endif()
 
-if(WIN32)
-    list(FILTER FLUX_SOURCES EXCLUDE REGEX ".*flux_canvas2d_win32\\.cpp$")
+if(NOT WIN32)
+    list(FILTER FLUX_SOURCES EXCLUDE REGEX ".*_win32\\.cpp$")
+endif()
+
+if(NOT (UNIX AND NOT APPLE AND NOT ANDROID))
+    list(FILTER FLUX_SOURCES EXCLUDE REGEX ".*_linux\\.cpp$")
+endif()
+
+if(NOT ANDROID)
+    list(FILTER FLUX_SOURCES EXCLUDE REGEX ".*_android\\.cpp$")
 endif()
 
 list(FILTER FLUX_SOURCES EXCLUDE REGEX ".*stb_impl\\.cpp$")
@@ -358,7 +366,6 @@ elseif(APPLE)
             -Wpedantic
             -fexceptions
             -fobjc-arc
-            -F${CMAKE_OSX_SYSROOT}/System/Library/Frameworks 
     )
 
 elseif(UNIX AND NOT APPLE)

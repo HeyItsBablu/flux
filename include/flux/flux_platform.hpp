@@ -388,7 +388,7 @@ inline std::wstring toWideString(const char* data, int byteCount) {
 // ============================================================================
 // APPLE PLATFORM (macOS)
 // ============================================================================
-
+ 
 #ifdef __APPLE__
 #include <TargetConditionals.h>
 
