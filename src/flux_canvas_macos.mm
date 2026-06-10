@@ -4,13 +4,12 @@
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
 
-
 #import <Foundation/Foundation.h>
+#import <CoreGraphics/CoreGraphics.h>
+#import <CoreText/CoreText.h>
 #import <Metal/Metal.h>
-#import <Metal/MTLRenderCommandEncoder.h>
-#import <Metal/MTLCommandBuffer.h>
-#import <QuartzCore/CAMetalLayer.h>
 #import <MetalKit/MetalKit.h>
+#import <QuartzCore/CAMetalLayer.h>
 #import <Cocoa/Cocoa.h>
 
 #include "flux/flux_window.hpp"

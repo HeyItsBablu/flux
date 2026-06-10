@@ -394,8 +394,13 @@ inline std::wstring toWideString(const char* data, int byteCount) {
 
 #if TARGET_OS_OSX
 
+#ifdef __OBJC__
+#import <CoreGraphics/CoreGraphics.h>
+#import <CoreText/CoreText.h>
+#else
 #include <CoreGraphics/CoreGraphics.h>
 #include <CoreText/CoreText.h>
+#endif
 #include <ctime>
 
 using NativeWindow  = void*;        // NSWindow* — forward declared, cast at use site
