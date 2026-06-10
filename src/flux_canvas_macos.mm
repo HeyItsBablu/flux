@@ -6,11 +6,11 @@
 
 
 
-#import <Cocoa/Cocoa.h>
+#import <Foundation/Foundation.h>
+#import <QuartzCore/QuartzCore.h>
 #import <Metal/Metal.h>
 #import <MetalKit/MetalKit.h>
-#import <QuartzCore/QuartzCore.h>
-#import <QuartzCore/CAMetalLayer.h>
+#import <Cocoa/Cocoa.h>
 
 #include "flux/flux_window.hpp"
 #include "flux/flux_canvas.hpp"

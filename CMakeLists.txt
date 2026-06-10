@@ -358,6 +358,7 @@ elseif(APPLE)
             -Wpedantic
             -fexceptions
             -fobjc-arc
+            -F${CMAKE_OSX_SYSROOT}/System/Library/Frameworks 
     )
 
 elseif(UNIX AND NOT APPLE)
