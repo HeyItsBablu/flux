@@ -88,7 +88,6 @@ public:
 
     // ── Shared state (all platforms) ──────────────────────────────────────────
 
-
     bool viewportEnabled_ = true;
     bool scrollbarsEnabled_ = true;
 
@@ -187,7 +186,7 @@ public:
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
     static void initEventType();
-    static Uint32 repaintEventType();
+    static uint32_t repaintEventType();
 
     void setCanvasGL(Canvas2DGL *gl);
     void onWindowResize(int newW, int newH);

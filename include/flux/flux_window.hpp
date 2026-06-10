@@ -23,7 +23,7 @@ class Canvas2DGL;
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
 class CanvasWidget;
-class Canvas2DGL;
+struct Canvas2DGL;
 #endif
 #endif
 

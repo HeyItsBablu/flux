@@ -4,11 +4,12 @@
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
 
-#include "flux/flux_canvas.hpp"
 #import <Cocoa/Cocoa.h>
 #import <Metal/Metal.h>
-#import <QuartzCore/CAMetalLayer.h>
 #import <MetalKit/MetalKit.h>
+#import <QuartzCore/CAMetalLayer.h>
+#include "flux/flux_window.hpp"
+#include "flux/flux_canvas.hpp"
 #include <cassert>
 #include <unordered_map>
 
@@ -753,7 +754,7 @@ void CanvasWidget::renderScrollbarsGL(int glW, int glH, double dt) {
 
 // SDL event stubs — not used on macOS
 void CanvasWidget::initEventType()  {}
-Uint32 CanvasWidget::repaintEventType() { return 0; }
+uint32_t CanvasWidget::repaintEventType() { return 0; }
 
 #endif // TARGET_OS_OSX
 #endif // __APPLE__
