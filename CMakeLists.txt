@@ -196,21 +196,8 @@ if(UNIX AND NOT APPLE AND NOT ANDROID)
     message(STATUS "FFmpeg swscale  : ${SWSCALE_VERSION}")
 endif()
 
-# ============================================================================
-# macOS platform dependencies
-# ============================================================================
 
-if(APPLE)
-    find_library(COCOA_LIB          Cocoa           REQUIRED)
-    find_library(METAL_LIB          Metal           REQUIRED)
-    find_library(METALKIT_LIB       MetalKit        REQUIRED)
-    find_library(QUARTZCORE_LIB     QuartzCore      REQUIRED)
-    find_library(COREGRAPHICS_LIB   CoreGraphics    REQUIRED)
-    find_library(CORETEXT_LIB       CoreText        REQUIRED)
-    find_library(COREFOUNDATION_LIB CoreFoundation  REQUIRED)
-    find_library(AUDIOTOOLBOX_LIB   AudioToolbox    REQUIRED)
-    find_library(AVFOUNDATION_LIB   AVFoundation    REQUIRED)
-endif()
+
 
 # ============================================================================
 # Android platform dependencies
@@ -350,15 +337,15 @@ elseif(APPLE)
             stb
             freetype
             CURL::libcurl
-            ${COCOA_LIB}
-            ${METAL_LIB}
-            ${METALKIT_LIB}
-            ${QUARTZCORE_LIB}
-            ${COREGRAPHICS_LIB}
-            ${CORETEXT_LIB}
-            ${COREFOUNDATION_LIB}
-            ${AUDIOTOOLBOX_LIB}
-            ${AVFOUNDATION_LIB}
+            "-framework Cocoa"
+            "-framework Metal"
+            "-framework MetalKit"
+            "-framework QuartzCore"
+            "-framework CoreGraphics"
+            "-framework CoreText"
+            "-framework CoreFoundation"
+            "-framework AudioToolbox"
+            "-framework AVFoundation"
     )
     target_compile_options(flux PRIVATE
             -Wall
@@ -367,6 +354,7 @@ elseif(APPLE)
             -fexceptions
             -fobjc-arc
     )
+
 
 elseif(UNIX AND NOT APPLE)
     target_link_libraries(flux PUBLIC
