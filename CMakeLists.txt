@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.21)
 project(flux VERSION 0.1.0 LANGUAGES CXX C)
 
 # ============================================================================
-# ccache 
+# ccache
 # ============================================================================
 
 if(NOT ANDROID)
@@ -22,7 +22,6 @@ endif()
 
 option(FLUX_BUILD_EXAMPLES "Build example applications" OFF)
 option(FLUX_BUILD_TESTS    "Build tests"                OFF)
-
 
 # ============================================================================
 # Compiler guard  (skip on Android — NDK uses Clang but reports differently)
@@ -62,7 +61,9 @@ if(ANDROID)
             CACHE PATH "" FORCE)
 endif()
 
-# ── libcurl  (git submodule at external/curl) ─────────────────────────────────
+# ============================================================================
+# libcurl  (git submodule at external/curl)
+# ============================================================================
 
 set(BUILD_EXAMPLES         OFF CACHE BOOL "" FORCE)
 set(BUILD_CURL_EXE         OFF CACHE BOOL "" FORCE)
@@ -97,6 +98,21 @@ endif()
 add_subdirectory(external/curl)
 
 # ============================================================================
+# FreeType  (git submodule at external/freetype — all platforms)
+#
+# All platforms use Canvas2DGL (even macOS routes through it for Metal),
+# so FreeType is required everywhere.  Optional deps are disabled so it
+# builds as a fully self-contained static library with no extra system deps.
+# ============================================================================
+
+set(FT_DISABLE_ZLIB     ON CACHE BOOL "" FORCE)
+set(FT_DISABLE_BZIP2    ON CACHE BOOL "" FORCE)
+set(FT_DISABLE_PNG      ON CACHE BOOL "" FORCE)
+set(FT_DISABLE_HARFBUZZ ON CACHE BOOL "" FORCE)
+set(FT_DISABLE_BROTLI   ON CACHE BOOL "" FORCE)
+add_subdirectory(external/freetype)
+
+# ============================================================================
 # stb  (local — header-only + single implementation file)
 # ============================================================================
 
@@ -120,10 +136,11 @@ if(WIN32 OR (UNIX AND NOT APPLE AND NOT ANDROID))
 endif()
 
 # ============================================================================
-# NanoVG  
+# NanoVG
 #
 # Android  → GLES2 backend, no glad, nanovg_gl_impl.c is Android-specific
 # Win/Linux → GL3 backend, glad provides the loader, nanovg_gl_impl.c shared
+# macOS    → not used (Metal + CoreGraphics path)
 # ============================================================================
 
 if(NOT TARGET nanovg AND NOT APPLE)
@@ -138,7 +155,6 @@ if(NOT TARGET nanovg AND NOT APPLE)
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/nanovg/src>
             $<INSTALL_INTERFACE:include>
     )
-
 
     target_compile_definitions(nanovg PRIVATE STB_IMAGE_STATIC)
     target_link_libraries(nanovg PUBLIC stb)
@@ -155,9 +171,6 @@ if(NOT TARGET nanovg AND NOT APPLE)
         target_link_libraries(nanovg PUBLIC glad)
     endif()
 endif()
-
-
-
 
 # ============================================================================
 # Linux platform dependencies
@@ -220,7 +233,6 @@ endif()
 
 file(GLOB_RECURSE FLUX_SOURCES CONFIGURE_DEPENDS src/*.cpp)
 
-
 if(APPLE)
     file(GLOB_RECURSE FLUX_MM_SOURCES CONFIGURE_DEPENDS src/*.mm)
     set_source_files_properties(${FLUX_MM_SOURCES}
@@ -229,11 +241,9 @@ if(APPLE)
     list(APPEND FLUX_SOURCES ${FLUX_MM_SOURCES})
 endif()
 
-
 if(WIN32)
     list(FILTER FLUX_SOURCES EXCLUDE REGEX ".*flux_canvas2d_win32\\.cpp$")
 endif()
-
 
 list(FILTER FLUX_SOURCES EXCLUDE REGEX ".*stb_impl\\.cpp$")
 
@@ -246,6 +256,7 @@ target_include_directories(flux
         PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/freetype/include>
 
         $<$<NOT:$<BOOL:${APPLE}>>:$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/nanovg/src>>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${SDL2_INCLUDE_DIRS}>
@@ -273,7 +284,6 @@ target_compile_definitions(flux PUBLIC
         CURL_ENABLE_WEBSOCKETS
 )
 
-
 if(ANDROID)
     target_compile_definitions(flux PUBLIC NANOVG_GLES2)
 elseif(NOT APPLE)
@@ -285,6 +295,7 @@ endif()
 if(WIN32)
     target_link_libraries(flux PUBLIC
             stb
+            freetype
             glad
             nanovg
             CURL::libcurl
@@ -310,6 +321,7 @@ elseif(ANDROID)
 
     target_link_libraries(flux PUBLIC
             stb
+            freetype
             app_glue
             nanovg
             CURL::libcurl
@@ -328,6 +340,7 @@ elseif(ANDROID)
 elseif(APPLE)
     target_link_libraries(flux PUBLIC
             stb
+            freetype
             CURL::libcurl
             ${COCOA_LIB}
             ${METAL_LIB}
@@ -344,12 +357,13 @@ elseif(APPLE)
             -Wextra
             -Wpedantic
             -fexceptions
-            -fobjc-arc          # ARC for Objective-C Metal bridge code
+            -fobjc-arc
     )
 
 elseif(UNIX AND NOT APPLE)
     target_link_libraries(flux PUBLIC
             stb
+            freetype
             glad
             nanovg
             OpenGL::GL
@@ -381,7 +395,7 @@ if(MSVC)
     target_compile_options(flux PUBLIC /utf-8)
     target_compile_options(flux PRIVATE /W4 /permissive- /Zc:__cplusplus /EHsc)
 elseif(APPLE)
-    # Already handled in the Apple target_compile_options block above — no duplicate
+    # Already handled in the Apple target_compile_options block above
 elseif(UNIX)
     target_compile_options(flux PRIVATE
             -Wall -Wextra -Wpedantic -fexceptions
@@ -411,8 +425,9 @@ if(NOT ANDROID)
     include(GNUInstallDirs)
     include(CMakePackageConfigHelpers)
 
-    set(FLUX_INSTALL_TARGETS flux stb)
-    
+    # freetype is installed on all desktop platforms
+    set(FLUX_INSTALL_TARGETS flux stb freetype)
+
     if(WIN32 OR (UNIX AND NOT APPLE AND NOT ANDROID))
         list(APPEND FLUX_INSTALL_TARGETS glad nanovg)
     endif()
@@ -432,6 +447,12 @@ if(NOT ANDROID)
 
     # Install stb public headers
     install(DIRECTORY external/stb/
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+            FILES_MATCHING PATTERN "*.h"
+    )
+
+    # Install freetype public headers
+    install(DIRECTORY external/freetype/include/
             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
             FILES_MATCHING PATTERN "*.h"
     )
