@@ -12,6 +12,18 @@
 #include <fstream>
 #include <vector>
 
+
+// Real GL headers — must come before flux_canvas2d.hpp on all platforms
+#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
+#include <glad/glad.h>
+#elif defined(__ANDROID__)
+#include <GLES3/gl3.h>
+#elif defined(__APPLE__)
+#include <OpenGL/gl3.h>   
+#endif
+
+
+
 #ifndef __ANDROID__
 #define STB_TRUETYPE_IMPLEMENTATION
 #endif

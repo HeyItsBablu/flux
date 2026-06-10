@@ -21,8 +21,12 @@
 #elif defined(__ANDROID__)
 #include <GLES3/gl3.h>
 #elif defined(__APPLE__)
-// GLuint/GLenum stubs provided by flux_glutil.hpp.
-#include "flux_glutil.hpp"
+#include <stdint.h>
+using GLuint  = uint32_t;
+using GLenum  = uint32_t;
+using GLint   = int32_t;
+using GLsizei = int32_t;
+using GLfloat = float;
 #endif
 
 // ─────────────────────────────────────────────────────────────────────────────
