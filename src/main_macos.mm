@@ -7,7 +7,7 @@
 #include <cstdio>
 
 #include "flux/flux.hpp"
-#include "app.hpp"
+
 
 // ============================================================================
 // FluxAppDelegate — sets up the app menu and launches the FluxUI window
