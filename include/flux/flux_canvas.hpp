@@ -182,30 +182,30 @@ public:
 #endif
 
     // ── macOS-only ────────────────────────────────────────────────────────────
-// #ifdef __APPLE__
-// #include <TargetConditionals.h>
-// #if TARGET_OS_OSX
-//     static void initEventType();
-//     static uint32_t repaintEventType();
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#if TARGET_OS_OSX
+    static void initEventType();
+    static uint32_t repaintEventType();
 
-//     void setCanvasGL(Canvas2DGL *gl);
-//     void onWindowResize(int newW, int newH);
-//     void preRenderPass();
-//     void glRenderPass();
+    void setCanvasGL(Canvas2DGL *gl);
+    void onWindowResize(int newW, int newH);
+    void preRenderPass();
+    void glRenderPass();
 
-//     bool isInitialized() const;
-//     bool needsRepaint() const;
-//     bool containsPoint(int wx, int wy) const;
+    bool isInitialized() const;
+    bool needsRepaint() const;
+    bool containsPoint(int wx, int wy) const;
 
-//     void onMouseLeave();
+    void onMouseLeave();
 
-//     void onMouseButtonDown(int sx, int sy, int button);
-//     void onMouseButtonUp(int sx, int sy, int button);
-//     void onMouseMove(int sx, int sy);
-//     void onScrollWheel(float deltaY);
-//     void onKeyDown(int keyCode);
-// #endif
-// #endif
+    void onMouseButtonDown(int sx, int sy, int button);
+    void onMouseButtonUp(int sx, int sy, int button);
+    void onMouseMove(int sx, int sy);
+    void onScrollWheel(float deltaY);
+    void onKeyDown(int keyCode);
+#endif
+#endif
 };
 
 // ── Factory helpers ───────────────────────────────────────────────────────────

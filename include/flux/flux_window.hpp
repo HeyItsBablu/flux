@@ -237,10 +237,10 @@ private:
 #if TARGET_OS_OSX
     struct MacState;
     MacState *macState = nullptr;
-    friend class CanvasWidget;
     CanvasWidget *hitTestCanvas(int x, int y);
 
 public:
+MacState* getMacState() const { return macState; } 
     void registerCanvas_public(CanvasWidget *c);
     void unregisterCanvas_public(CanvasWidget *c);
 

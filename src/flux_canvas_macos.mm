@@ -224,11 +224,11 @@ static void initCanvas(CanvasWidget* w) {
     // Device from window's macState
     auto* inst = FluxUI::getCurrentInstance();
     auto* pw   = inst ? inst->getPlatformWindowPtr() : nullptr;
-    if (!pw || !pw->macState) return;
+    if (!pw || !pw->getMacState()) return;
 
-    s.device    = pw->macState->metalDevice;
+    s.device    = pw->getMacState()->metalDevice;
     s.cmdQueue  = [s.device newCommandQueue];
-    s.metalLayer = pw->macState->metalLayer;
+    s.metalLayer = pw->getMacState()->metalLayer;
 
     // Compile MSL shaders
     NSError* err = nil;
