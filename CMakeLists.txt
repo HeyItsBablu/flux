@@ -252,7 +252,6 @@ target_include_directories(flux
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${CAIRO_INCLUDE_DIRS}>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${PANGOCAIRO_INCLUDE_DIRS}>
         PRIVATE
-        $<$<BOOL:${APPLE}>:${CMAKE_CURRENT_SOURCE_DIR}/external/nanovg/src>
         $<$<OR:$<BOOL:${WIN32}>,$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${APPLE}>>,$<NOT:$<BOOL:${ANDROID}>>>>:${CMAKE_CURRENT_SOURCE_DIR}/external/glad/include>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${AVFORMAT_INCLUDE_DIRS}>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>>:${AVCODEC_INCLUDE_DIRS}>
