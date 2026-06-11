@@ -353,6 +353,8 @@ elseif(APPLE)
             -Wpedantic
             -fexceptions
             -fobjc-arc
+            -fmodules          
+            -fcxx-modules      
     )
 
 
