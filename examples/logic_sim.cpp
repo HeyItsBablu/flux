@@ -6384,7 +6384,7 @@ public:
 
                 // Content — monospaced text, scrollable
                 Expanded(
-                    ListView({Text(ttContent_, [](const std::string &s)
+                    ScrollView({Text(ttContent_, [](const std::string &s)
                                    { return s; })
                                   ->setFontSize(11)
                                   ->setFontFamily("Consolas")

@@ -501,7 +501,7 @@ public:
     auto label = [](const char *s)
     { return Text(s)->setFontSize(9)->setTextColor(Color::fromRGB(140, 140, 160))->setPaddingLRTB(8, 8, 6, 2); };
 
-    auto sidebar = Container(ListView({
+    auto sidebar = Container(ScrollView({
                                  label("TOOL"),
                                  toolRow,
                                  SizedBox(0, 4),

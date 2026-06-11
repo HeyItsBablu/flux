@@ -1045,7 +1045,7 @@ public:
                             // ── Sidebar
                             // ───────────────────────────────────────
                             Container(
-                                ListView({
+                                ScrollView({
                                     HSLPanel(258)
                                         ->setData(hslState)
                                         ->setActiveTab(HSLTab::All)

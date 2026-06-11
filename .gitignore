@@ -1,3 +1,4 @@
 /build/
 /todo.txt
 /_deps/
+/examples/CMakeLists.txt

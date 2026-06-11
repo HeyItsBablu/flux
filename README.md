@@ -922,7 +922,7 @@ Scrollable list. Static initializer-list form or reactive `State<vector<T>>` bui
 
 ```cpp
 // Static
-ListView({
+ScrollView({
     Card(Text("Item A")),
     Card(Text("Item B")),
 })->setSpacing(8);

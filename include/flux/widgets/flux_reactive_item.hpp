@@ -43,7 +43,7 @@
 //
 //   If you prefer identity by a data field supply a key function:
 //
-//     ListView(items)
+//     ScrollView(items)
 //       ->setKeyFn([](const TaskRef& r) -> uintptr_t { return r->get().id; })
 //       ->itemBuilder(…);
 //

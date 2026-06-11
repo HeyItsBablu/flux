@@ -1351,7 +1351,7 @@ public:
                 activePicker_->open(); });
 
         // ── Sidebar ───────────────────────────────────────────
-        auto sidebar = Container(ListView({
+        auto sidebar = Container(ScrollView({
                                      label("TOOLS"),
                                      Container(toolCol)->setHeight(int(toolDefs.size()) * 38),
                                      SizedBox(0, 4),

@@ -169,23 +169,23 @@ struct ScrollbarState {
 };
 
 // ============================================================================
-// SCROLLABLE LISTVIEW — STATIC (initializer_list construction)
+// SCROLLABLE ScrollView — STATIC (initializer_list construction)
 // ============================================================================
 //
-//   ListView({ widget1, widget2, widget3 })
+//   ScrollView({ widget1, widget2, widget3 })
 //       ->setSpacing(8)
 //       ->setHorizontal(true)
 //
 
 
-class ListViewStatic : public Widget {
+class ScrollViewWidget : public Widget {
 private:
   ScrollbarState sb;
   GestureState   gesture;
   TimerID        flingTimer = 0;
   int            itemSpacing = 0;
   std::function<WidgetPtr()> separatorBuilder;
-  std::shared_ptr<ListViewStatic> self;
+  std::shared_ptr<ScrollViewWidget> self;
 
   void stopFling() {
     if (flingTimer) {
@@ -257,33 +257,33 @@ private:
   }
 
 public:
-  ~ListViewStatic() override { stopFling(); }
-  void setSelf(std::shared_ptr<ListViewStatic> ptr) { self = ptr; }
+  ~ScrollViewWidget() override { stopFling(); }
+  void setSelf(std::shared_ptr<ScrollViewWidget> ptr) { self = ptr; }
 
   // ── Fluent configuration ──────────────────────────────────────────────
 
-  std::shared_ptr<ListViewStatic> setSpacing(int s) { itemSpacing = s; return self; }
-  std::shared_ptr<ListViewStatic> setHorizontal(bool h) {
+  std::shared_ptr<ScrollViewWidget> setSpacing(int s) { itemSpacing = s; return self; }
+  std::shared_ptr<ScrollViewWidget> setHorizontal(bool h) {
     sb.horizontal = h; sb.scrollOffset = 0; markNeedsLayout(); return self;
   }
-  std::shared_ptr<ListViewStatic> separator(std::function<WidgetPtr()> fn) {
+  std::shared_ptr<ScrollViewWidget> separator(std::function<WidgetPtr()> fn) {
     separatorBuilder = fn; applySeparators(); return self;
   }
-  std::shared_ptr<ListViewStatic> setHeight(int h) {
+  std::shared_ptr<ScrollViewWidget> setHeight(int h) {
     height = h; autoHeight = false; markNeedsLayout(); return self;
   }
-  std::shared_ptr<ListViewStatic> setPadding(int p) {
+  std::shared_ptr<ScrollViewWidget> setPadding(int p) {
     paddingLeft = paddingRight = paddingTop = paddingBottom = p;
     markNeedsLayout(); return self;
   }
-  std::shared_ptr<ListViewStatic> setBackgroundColor(Color c) {
+  std::shared_ptr<ScrollViewWidget> setBackgroundColor(Color c) {
     backgroundColor = c; hasBackground = true; markNeedsPaint(); return self;
   }
-  std::shared_ptr<ListViewStatic> setScrollbarSize(int s)  { sb.size = s; return self; }
-  std::shared_ptr<ListViewStatic> setScrollbarColor(Color c)       { sb.colorNormal = c; return self; }
-  std::shared_ptr<ListViewStatic> setScrollbarHoverColor(Color c)  { sb.colorHover  = c; return self; }
-  std::shared_ptr<ListViewStatic> setScrollbarActiveColor(Color c) { sb.colorActive = c; return self; }
-  std::shared_ptr<ListViewStatic> setScrollbarTrackColor(Color c)  { sb.colorTrack  = c; return self; }
+  std::shared_ptr<ScrollViewWidget> setScrollbarSize(int s)  { sb.size = s; return self; }
+  std::shared_ptr<ScrollViewWidget> setScrollbarColor(Color c)       { sb.colorNormal = c; return self; }
+  std::shared_ptr<ScrollViewWidget> setScrollbarHoverColor(Color c)  { sb.colorHover  = c; return self; }
+  std::shared_ptr<ScrollViewWidget> setScrollbarActiveColor(Color c) { sb.colorActive = c; return self; }
+  std::shared_ptr<ScrollViewWidget> setScrollbarTrackColor(Color c)  { sb.colorTrack  = c; return self; }
 
   // ── Layout ────────────────────────────────────────────────────────────
   //
@@ -485,10 +485,10 @@ public:
 
 // ── Factory ───────────────────────────────────────────────────────────────────
 
-using ListViewStaticPtr = std::shared_ptr<ListViewStatic>;
+using ScrollViewWidgetPtr = std::shared_ptr<ScrollViewWidget>;
 
-inline ListViewStaticPtr ListView(std::initializer_list<WidgetPtr> items) {
-  auto w = std::make_shared<ListViewStatic>();
+inline ScrollViewWidgetPtr ScrollView(std::initializer_list<WidgetPtr> items) {
+  auto w = std::make_shared<ScrollViewWidget>();
   w->setSelf(w);
   for (auto &item : items)
     if (item) w->addChild(item);

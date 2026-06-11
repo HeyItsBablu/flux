@@ -55,7 +55,7 @@ public:
     return Scaffold(
         AppBar("FutureBuilder — All Three Types"),
         Expanded(
-            ListView(
+            ScrollView(
                 {
                     // ── 4. NetworkImage — URL image fetch
                     // ─────────────────────

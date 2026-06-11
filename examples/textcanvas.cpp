@@ -4112,7 +4112,7 @@ public:
 
         // ── Sidebar ───────────────────────────────────────────
         auto sidebar = Container(
-                           ListView({
+                           ScrollView({
                                // TOOLS
                                sideLabel("TOOLS"),
 
@@ -4280,7 +4280,7 @@ public:
     if (auto c = wc.lock()) c->redraw(); });
 
         auto rightSidebar = Container(
-                                ListView({
+                                ScrollView({
 
                                     // FONT
                                     sideLabel("FONT FAMILY"),

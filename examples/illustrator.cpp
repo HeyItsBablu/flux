@@ -1166,7 +1166,7 @@ strokeColor.set(ColorToHex(c));
     // =========================================================================
     auto rightPanel =
         Container(
-            ListView(
+            ScrollView(
                 {
                     // ── Transform
                     // ─────────────────────────────────────────────────

@@ -1473,7 +1473,7 @@ public:
     }
 
     // ── Sidebar assembly ──────────────────────────────────────────────────
-    auto sidebar = Container(ListView({
+    auto sidebar = Container(ScrollView({
                                  Text("SHAPES")
                                      ->setFontSize(9)
                                      ->setTextColor(Color::fromRGB(140, 140, 160))

@@ -4,9 +4,9 @@ class MyApp : public Widget {
 public:
   WidgetPtr build() override {
     return Scaffold(
-        AppBar("ListView with Images"),
+        AppBar("ScrollView with Images"),
         Expanded(
-            ListView(
+            ScrollView(
                 {
 
                     Row({
@@ -181,6 +181,6 @@ public:
 };
 
 WidgetPtr createApp(FluxUI *app) {
-  return FluxApp("Flux - ListView Images", std::make_shared<MyApp>(),
+  return FluxApp("Flux - ScrollView Images", std::make_shared<MyApp>(),
                  AppTheme::light(), false, 600, 400, false, false);
 }
