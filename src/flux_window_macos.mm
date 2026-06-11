@@ -402,7 +402,7 @@ int PlatformWindow::run() {
 
  
 NativeWindow PlatformWindow::handle() const {
-    return macState ? reinterpret_cast<NativeWindow>(macState->nsWindow) : nullptr;
+    return macState ? (__bridge NativeWindow)(macState->nsWindow) : nullptr;
 }
 bool PlatformWindow::isMouseCaptured() const {
     return macState && macState->mouseCapture;

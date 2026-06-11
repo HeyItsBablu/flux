@@ -34,6 +34,54 @@ jobs:
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DFLUX_BUILD_EXAMPLES=ON
 
+      - name: Diagnose Metal header visibility
+        run: |
+          SDK=$(xcrun --sdk macosx --show-sdk-path)
+          echo "=== Checking CAMetalDrawable declaration in SDK ==="
+          grep -r "CAMetalDrawable" "$SDK/System/Library/Frameworks/Metal.framework/Headers/" | head -5 || echo "NOT FOUND in Metal headers"
+          grep -r "CAMetalDrawable" "$SDK/System/Library/Frameworks/QuartzCore.framework/Headers/" | head -5 || echo "NOT FOUND in QuartzCore headers"
+
+          echo ""
+          echo "=== Preprocessing flux_canvas_macos.mm to check Metal type visibility ==="
+          /usr/bin/c++ \
+            -x objective-c++ \
+            -std=c++20 \
+            -arch arm64 \
+            -isysroot "$SDK" \
+            -I include \
+            -I external/freetype/include \
+            -I external/stb \
+            -I external/curl/include \
+            -E src/flux_canvas_macos.mm 2>&1 | \
+            grep -n "CAMetalDrawable" | head -20 || echo "CAMetalDrawable not found in preprocessed output"
+
+          echo ""
+          echo "=== First 50 lines of preprocessed output (include chain) ==="
+          /usr/bin/c++ \
+            -x objective-c++ \
+            -std=c++20 \
+            -arch arm64 \
+            -isysroot "$SDK" \
+            -I include \
+            -I external/freetype/include \
+            -I external/stb \
+            -I external/curl/include \
+            -E src/flux_canvas_macos.mm 2>&1 | head -50
+
+          echo ""
+          echo "=== Checking which header defines CAMetalDrawable ==="
+          /usr/bin/c++ \
+            -x objective-c++ \
+            -std=c++20 \
+            -arch arm64 \
+            -isysroot "$SDK" \
+            -I include \
+            -I external/freetype/include \
+            -I external/stb \
+            -I external/curl/include \
+            -E -dI src/flux_canvas_macos.mm 2>&1 | \
+            grep -B5 "CAMetalDrawable" | head -40 || echo "No includes before CAMetalDrawable found"
+
       - name: Build
         run: cmake --build build --parallel
 

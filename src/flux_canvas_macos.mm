@@ -1,18 +1,18 @@
 // flux_canvas_macos.mm
 
-// Metal MUST be imported before the #ifdef guard so that CAMetalDrawable,
-// MTLCommandBuffer, and MTLRenderCommandEncoder are fully declared before
-// any flux header is processed.
-#import <Metal/Metal.h>
-#import <QuartzCore/CAMetalLayer.h>
-#import <MetalKit/MetalKit.h>
+// Use @import (modules) rather than #import so that Metal protocol
+// types are GUARANTEED visible regardless of include guard state.
+// This bypasses the CAMetalDrawable/MTLCommandBuffer undeclared issue.
+@import Metal;
+@import QuartzCore;
+@import MetalKit;
 
 #ifdef __APPLE__
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
 
-#import <Foundation/Foundation.h>
-#import <Cocoa/Cocoa.h>
+@import Foundation;
+@import Cocoa;
 #import <CoreGraphics/CoreGraphics.h>
 #import <CoreText/CoreText.h>
 
@@ -59,7 +59,7 @@ using namespace metal;
 
 struct Vert    { float2 pos [[attribute(0)]]; float2 uv [[attribute(1)]]; };
 struct VOut    { float4 pos [[position]]; float2 uv; };
-struct Uniforms { float4x4 mvp; float4 color; int mode; };  // mode: 0=solid 1=font 2=rgba
+struct Uniforms { float4x4 mvp; float4 color; int mode; };
 
 vertex VOut canvas_vert(Vert in [[stage_in]],
                         constant Uniforms& u [[buffer(1)]]) {
@@ -97,13 +97,12 @@ struct MacCanvasState {
     int    physX          = 0;
     int    physY          = 0;
 
-    // Metal resources
-    id<MTLDevice>              device      = nil;
-    id<MTLCommandQueue>        cmdQueue    = nil;
-    id<MTLRenderPipelineState> sbPipeline  = nil;
+    id<MTLDevice>              device         = nil;
+    id<MTLCommandQueue>        cmdQueue       = nil;
+    id<MTLRenderPipelineState> sbPipeline     = nil;
     id<MTLRenderPipelineState> canvasPipeline = nil;
-    id<MTLBuffer>              vertexBuf   = nil;   // reused each frame
-    CAMetalLayer*              metalLayer  = nil;   // borrowed from window
+    id<MTLBuffer>              vertexBuf      = nil;
+    CAMetalLayer*              metalLayer     = nil;
 };
 
 static std::unordered_map<CanvasWidget*, MacCanvasState> s_macState;
@@ -144,8 +143,6 @@ static void scheduleRepaint(CanvasWidget* w) {
 static float getDpiScale() {
     auto* inst = FluxUI::getCurrentInstance();
     if (!inst) return 1.f;
-    auto* pw = inst->getPlatformWindowPtr();
-    if (!pw) return 1.f;
     NSScreen* scr = [NSScreen mainScreen];
     return scr ? (float)scr.backingScaleFactor : 1.f;
 }
@@ -163,7 +160,6 @@ static int getWindowPhysH() {
     return pw ? pw->clientHeight() : 1;
 }
 
-// Build column-major orthographic matrix (same convention as glutil::ortho)
 static void metalOrtho(float l, float r, float b, float t, float out[16]) {
     memset(out, 0, 64);
     out[0]  =  2.f / (r - l);
@@ -199,7 +195,6 @@ makePipeline(id<MTLDevice> device,
         desc.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
     }
 
-    // Vertex descriptor: position (float2) + uv (float2), 16 bytes stride
     MTLVertexDescriptor* vd = [[MTLVertexDescriptor alloc] init];
     vd.attributes[0].format      = MTLVertexFormatFloat2;
     vd.attributes[0].offset      = 0;
@@ -207,7 +202,7 @@ makePipeline(id<MTLDevice> device,
     vd.attributes[1].format      = MTLVertexFormatFloat2;
     vd.attributes[1].offset      = 8;
     vd.attributes[1].bufferIndex = 0;
-    vd.layouts[0].stride         = 16; // 4 floats × 4 bytes
+    vd.layouts[0].stride         = 16;
     desc.vertexDescriptor = vd;
 
     NSError* err = nil;
@@ -219,7 +214,7 @@ makePipeline(id<MTLDevice> device,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// initCanvas — one-time Metal setup
+// initCanvas
 // ─────────────────────────────────────────────────────────────────────────────
 
 static void initCanvas(CanvasWidget* w) {
@@ -230,8 +225,8 @@ static void initCanvas(CanvasWidget* w) {
     auto* pw   = inst ? inst->getPlatformWindowPtr() : nullptr;
     if (!pw || !pw->getMacState()) return;
 
-    s.device    = pw->getMacState()->metalDevice;
-    s.cmdQueue  = [s.device newCommandQueue];
+    s.device     = pw->getMacState()->metalDevice;
+    s.cmdQueue   = [s.device newCommandQueue];
     s.metalLayer = pw->getMacState()->metalLayer;
 
     NSError* err = nil;
@@ -291,7 +286,7 @@ static void initCanvas(CanvasWidget* w) {
 
 static void syncPhysicalGeometry(CanvasWidget* w) {
     auto& s = macState(w);
-    float dpi = getDpiScale();
+    float dpi    = getDpiScale();
     int newPhysW = (int)(w->width  * dpi);
     int newPhysH = (int)(w->height * dpi);
     int newPhysX = (int)(w->x      * dpi);
@@ -343,11 +338,9 @@ void CanvasWidget::glRenderPass() {
     int glW = s.lastW < 1 ? 1 : s.lastW;
     int glH = s.lastH < 1 ? 1 : s.lastH;
 
-    // Acquire drawable
     id<CAMetalDrawable> drawable = [s.metalLayer nextDrawable];
     if (!drawable) return;
 
-    // Build ortho MVP for this widget in window space
     float winW = (float)getWindowPhysW();
     float winH = (float)getWindowPhysH();
     float z    = vp_.zoom();
@@ -369,7 +362,6 @@ void CanvasWidget::glRenderPass() {
             for (int k = 0; k < 4; ++k)
                 mvp[col*4+row] += ortho[k*4+row] * vp[col*4+k];
 
-    // Render pass descriptor
     MTLRenderPassDescriptor* rpd = [MTLRenderPassDescriptor renderPassDescriptor];
     rpd.colorAttachments[0].texture     = drawable.texture;
     rpd.colorAttachments[0].loadAction  = MTLLoadActionLoad;
@@ -378,7 +370,6 @@ void CanvasWidget::glRenderPass() {
     id<MTLCommandBuffer>        cmd = [s.cmdQueue commandBuffer];
     id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:rpd];
 
-    // Scissor to widget bounds
     MTLScissorRect sci;
     sci.x      = (NSUInteger)s.physX;
     sci.y      = (NSUInteger)s.physY;
@@ -386,18 +377,16 @@ void CanvasWidget::glRenderPass() {
     sci.height = (NSUInteger)glH;
     [enc setScissorRect:sci];
 
-    // ── Draw canvas surface ───────────────────────────────────────────────────
     if (s.canvasPipeline && canvasGL_) {
         [enc setRenderPipelineState:s.canvasPipeline];
-
         Canvas2D ctx(canvasGL_, canvasW_, canvasH_, mvp);
         activeSurface_->render(ctx);
     }
 
-    // ── Scrollbars ────────────────────────────────────────────────────────────
     updateSBGeometry(glW, glH);
 
-    auto drawSBQuads = [&](const std::vector<float>& verts, float r, float g, float b, float a) {
+    auto drawSBQuads = [&](const std::vector<float>& verts,
+                           float r, float g, float b, float a) {
         if (verts.empty() || !s.sbPipeline) return;
         size_t sz = verts.size() * sizeof(float);
         memcpy([s.vertexBuf contents], verts.data(), sz);
@@ -407,7 +396,8 @@ void CanvasWidget::glRenderPass() {
         metalOrtho(0.f, (float)glW, (float)glH, 0.f, sbOrtho);
         SBUniforms uni;
         memcpy(uni.mvp, sbOrtho, 64);
-        uni.color[0] = r; uni.color[1] = g; uni.color[2] = b; uni.color[3] = a;
+        uni.color[0] = r; uni.color[1] = g;
+        uni.color[2] = b; uni.color[3] = a;
 
         [enc setRenderPipelineState:s.sbPipeline];
         [enc setVertexBuffer:s.vertexBuf offset:0 atIndex:0];
@@ -418,21 +408,19 @@ void CanvasWidget::glRenderPass() {
                 vertexCount:(NSUInteger)(verts.size() / 4)];
     };
 
-    // H-scrollbar thumb
     if (hBar_.isVisible()) {
         auto [tx, ty, tw, th] = hBar_.thumbRect(glW, glH);
         std::vector<float> v = {
-            tx, ty, 0,0,  tx+tw, ty, 1,0,  tx+tw, ty+th, 1,1,
-            tx+tw, ty+th, 1,1,  tx, ty+th, 0,1,  tx, ty, 0,0
+            tx,    ty,    0,0,  tx+tw, ty,    1,0,  tx+tw, ty+th, 1,1,
+            tx+tw, ty+th, 1,1,  tx,    ty+th, 0,1,  tx,    ty,    0,0
         };
         drawSBQuads(v, 0.6f, 0.6f, 0.6f, hBar_.alpha());
     }
-    // V-scrollbar thumb
     if (vBar_.isVisible()) {
         auto [tx, ty, tw, th] = vBar_.thumbRect(glW, glH);
         std::vector<float> v = {
-            tx, ty, 0,0,  tx+tw, ty, 1,0,  tx+tw, ty+th, 1,1,
-            tx+tw, ty+th, 1,1,  tx, ty+th, 0,1,  tx, ty, 0,0
+            tx,    ty,    0,0,  tx+tw, ty,    1,0,  tx+tw, ty+th, 1,1,
+            tx+tw, ty+th, 1,1,  tx,    ty+th, 0,1,  tx,    ty,    0,0
         };
         drawSBQuads(v, 0.6f, 0.6f, 0.6f, vBar_.alpha());
     }
@@ -445,14 +433,18 @@ void CanvasWidget::glRenderPass() {
         scheduleRepaint(this);
 }
 
-bool CanvasWidget::isInitialized()  const { return macState(const_cast<CanvasWidget*>(this)).initialized; }
-bool CanvasWidget::needsRepaint()   const { return macState(const_cast<CanvasWidget*>(this)).repaintPending; }
+bool CanvasWidget::isInitialized() const {
+    return macState(const_cast<CanvasWidget*>(this)).initialized;
+}
+bool CanvasWidget::needsRepaint() const {
+    return macState(const_cast<CanvasWidget*>(this)).repaintPending;
+}
 bool CanvasWidget::containsPoint(int wx, int wy) const {
     return wx >= x && wx < (x + width) && wy >= y && wy < (y + height);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CanvasWidget member implementations (macOS)
+// CanvasWidget member implementations
 // ─────────────────────────────────────────────────────────────────────────────
 
 CanvasWidget::CanvasWidget()
@@ -480,7 +472,9 @@ CanvasWidget::~CanvasWidget() {
     unregisterWithPlatform(this);
 }
 
-std::shared_ptr<CanvasWidget> CanvasWidget::setViewportEnabled(bool e)  { viewportEnabled_ = e; return ptr(); }
+std::shared_ptr<CanvasWidget> CanvasWidget::setViewportEnabled(bool e)
+    { viewportEnabled_ = e; return ptr(); }
+
 std::shared_ptr<CanvasWidget> CanvasWidget::setScrollbarsEnabled(bool e) {
     scrollbarsEnabled_ = e;
     auto& s = macState(this);
@@ -512,7 +506,8 @@ std::shared_ptr<CanvasWidget> CanvasWidget::setCanvasSize(int w, int h) {
     return ptr();
 }
 
-std::shared_ptr<CanvasWidget> CanvasWidget::redraw() { markNeedsPaint(); return ptr(); }
+std::shared_ptr<CanvasWidget> CanvasWidget::redraw()
+    { markNeedsPaint(); return ptr(); }
 
 void CanvasWidget::computeLayout(GraphicsContext& /*ctx*/,
                                  const BoxConstraints& c, FontCache&) {
@@ -567,7 +562,7 @@ void CanvasWidget::onWindowResize(int /*newW*/, int /*newH*/) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Mouse / keyboard events
+// Mouse / keyboard
 // ─────────────────────────────────────────────────────────────────────────────
 
 void CanvasWidget::onMouseLeave() {
@@ -577,9 +572,7 @@ void CanvasWidget::onMouseLeave() {
 }
 
 void CanvasWidget::onMouseButtonDown(int sx, int sy, int button) {
-    if (button == 2 && viewportEnabled_) {
-        beginPan(sx, sy); return;
-    }
+    if (button == 2 && viewportEnabled_) { beginPan(sx, sy); return; }
     if (button == 0) {
         bool hC = hBar_.onMouseDown(sx, sy, [this](float t){ applyHScrollFraction(t); });
         bool vC = !hC && vBar_.onMouseDown(sx, sy, [this](float t){ applyVScrollFraction(t); });
@@ -649,7 +642,6 @@ void CanvasWidget::onKeyDown(int keyCode) {
     bool shift = platformShiftDown();
     bool alt   = platformAltDown();
     bool consumed = false;
-
     if (ctrl && viewportEnabled_) {
         if (keyCode == VK_OemPlus || keyCode == 43) {
             vp_.zoomIn(); pokeScrollbars(); scheduleRepaint(this); consumed = true;
@@ -666,13 +658,13 @@ void CanvasWidget::onKeyDown(int keyCode) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Shared helper implementations
+// Shared helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
 void CanvasWidget::viewportDims(int glW, int glH, int& vpW, int& vpH) const {
     if (!viewportEnabled_ || !scrollbarsEnabled_) { vpW=glW; vpH=glH; return; }
     ScrollbarInfo h = vp_.scrollbarH(), v = vp_.scrollbarV();
-    float dpi = getDpiScale();
+    float dpi    = getDpiScale();
     int sbThickX = (int)(kSBThick * dpi);
     int sbThickY = (int)(kSBThick * dpi);
     vpW = glW - (v.visible ? sbThickX : 0);
@@ -738,7 +730,6 @@ void CanvasWidget::activatePendingSurface() {
     vp_.setCanvasSize(canvasW_, canvasH_);
 }
 
-// ensureSBProgram / renderScrollbarsGL / renderSBCorner are no-ops on macOS
 void CanvasWidget::ensureSBProgram(const char*, const char*) {}
 void CanvasWidget::renderSBCorner(int, int) {}
 void CanvasWidget::renderScrollbarsGL(int /*glW*/, int /*glH*/, double dt) {
@@ -746,8 +737,7 @@ void CanvasWidget::renderScrollbarsGL(int /*glW*/, int /*glH*/, double dt) {
     vBar_.tick(dt);
 }
 
-// SDL event stubs — not used on macOS
-void CanvasWidget::initEventType()  {}
+void CanvasWidget::initEventType() {}
 uint32_t CanvasWidget::repaintEventType() { return 0; }
 
 #endif // TARGET_OS_OSX
