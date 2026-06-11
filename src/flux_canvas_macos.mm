@@ -5,12 +5,12 @@
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
 
-#import <Cocoa/Cocoa.h>
-#import <Metal/Metal.h>
-#import <MetalKit/MetalKit.h>
-#import <QuartzCore/QuartzCore.h>  
-#import <CoreGraphics/CoreGraphics.h>
-#import <CoreText/CoreText.h>
+@import Cocoa;
+@import Metal;
+@import MetalKit;
+@import QuartzCore;
+@import CoreGraphics;
+@import CoreText;
 
 #include "flux/flux_canvas2d.hpp"
 #include "flux/flux_window.hpp"

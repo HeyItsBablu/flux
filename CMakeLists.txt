@@ -225,10 +225,6 @@ if(APPLE)
     set_source_files_properties(${FLUX_MM_SOURCES}
         PROPERTIES COMPILE_FLAGS "-x objective-c++"
     )
-    set_source_files_properties(
-        src/flux_canvas_macos.mm
-        PROPERTIES COMPILE_FLAGS "-x objective-c++ -fmodules -fcxx-modules"
-    )
     list(APPEND FLUX_SOURCES ${FLUX_MM_SOURCES})
 endif()
 
