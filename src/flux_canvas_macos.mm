@@ -1,18 +1,14 @@
 // flux_canvas_macos.mm
 
-// Use @import (modules) rather than #import so that Metal protocol
-// types are GUARANTEED visible regardless of include guard state.
-// This bypasses the CAMetalDrawable/MTLCommandBuffer undeclared issue.
-@import Metal;
-@import QuartzCore;
-@import MetalKit;
 
 #ifdef __APPLE__
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
 
-@import Foundation;
-@import Cocoa;
+#import <Cocoa/Cocoa.h>
+#import <Metal/Metal.h>
+#import <MetalKit/MetalKit.h>
+#import <QuartzCore/CAMetalLayer.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <CoreText/CoreText.h>
 
