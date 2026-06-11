@@ -32,7 +32,9 @@
 
 #include "flux/flux_canvas2d.hpp"
 #include "flux/flux_canvas_types.hpp"
+#ifndef __APPLE__
 #include "flux/flux_glutil.hpp"
+#endif
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846

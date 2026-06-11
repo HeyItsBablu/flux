@@ -5,13 +5,15 @@
 #if TARGET_OS_OSX
 
 #import <Foundation/Foundation.h>
+#import <Metal/Metal.h>
+#import <QuartzCore/CAMetalLayer.h>
+#import <MetalKit/MetalKit.h>
+#import <Cocoa/Cocoa.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <CoreText/CoreText.h>
-#import <Metal/Metal.h>
-#import <MetalKit/MetalKit.h>
-#import <QuartzCore/CAMetalLayer.h>
-#import <Cocoa/Cocoa.h>
 
+
+#include "flux/flux_canvas2d.hpp"
 #include "flux/flux_window.hpp"
 #include "flux/flux_canvas.hpp"
 #include "flux/flux_window_macos_state.hpp"

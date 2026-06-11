@@ -22,12 +22,53 @@
 #include <GLES3/gl3.h>
 #elif defined(__APPLE__)
 #include <stdint.h>
-using GLuint  = uint32_t;
-using GLenum  = uint32_t;
-using GLint   = int32_t;
-using GLsizei = int32_t;
-using GLfloat = float;
+using GLuint   = uint32_t;
+using GLenum   = uint32_t;
+using GLint    = int32_t;
+using GLsizei  = int32_t;
+using GLfloat  = float;
+using GLubyte  = uint8_t;
+static inline void glGenTextures(int,GLuint*){}
+static inline void glBindTexture(GLenum,GLuint){}
+static inline void glTexParameteri(GLenum,GLenum,GLint){}
+static inline void glTexImage2D(GLenum,GLint,GLint,GLsizei,GLsizei,GLint,GLenum,GLenum,const void*){}
+static inline void glTexSubImage2D(GLenum,GLint,GLint,GLint,GLsizei,GLsizei,GLenum,GLenum,const void*){}
+static inline void glDeleteTextures(GLsizei,const GLuint*){}
+static inline void glGenVertexArrays(GLsizei,GLuint*){}
+static inline void glBindVertexArray(GLuint){}
+static inline void glDeleteVertexArrays(GLsizei,const GLuint*){}
+static inline void glGenBuffers(GLsizei,GLuint*){}
+static inline void glBindBuffer(GLenum,GLuint){}
+static inline void glBufferData(GLenum,size_t,const void*,GLenum){}
+static inline void glDeleteBuffers(GLsizei,const GLuint*){}
+static inline void glEnableVertexAttribArray(GLuint){}
+static inline void glVertexAttribPointer(GLuint,GLint,GLenum,uint8_t,GLsizei,const void*){}
+static inline void glUseProgram(GLuint){}
+static inline void glUniformMatrix4fv(GLint,GLsizei,uint8_t,const GLfloat*){}
+static inline void glUniform4f(GLint,GLfloat,GLfloat,GLfloat,GLfloat){}
+static inline void glUniform1i(GLint,GLint){}
+static inline void glDrawArrays(GLenum,GLint,GLsizei){}
+static inline void glEnable(GLenum){}
+static inline void glDisable(GLenum){}
+static inline void glBlendFunc(GLenum,GLenum){}
+static inline void glScissor(GLint,GLint,GLsizei,GLsizei){}
+static inline void glReadPixels(GLint,GLint,GLsizei,GLsizei,GLenum,GLenum,void*){}
+static inline void glActiveTexture(GLenum){}
+static inline void glDeleteProgram(GLuint){}
+static inline GLint glGetUniformLocation(GLuint,const char*){ return -1; }
+static constexpr GLenum GL_TEXTURE_2D=0,GL_R8=0,GL_RED=0,GL_RGBA=0,
+    GL_UNSIGNED_BYTE=0,GL_LINEAR=0,GL_NEAREST=0,GL_CLAMP_TO_EDGE=0,
+    GL_TEXTURE_MIN_FILTER=0,GL_TEXTURE_MAG_FILTER=0,GL_TEXTURE_WRAP_S=0,
+    GL_TEXTURE_WRAP_T=0,GL_ARRAY_BUFFER=0,GL_DYNAMIC_DRAW=0,
+    GL_FLOAT=0,GL_FALSE=0,GL_TRIANGLES=0,GL_TRIANGLE_FAN=0,
+    GL_TRIANGLE_STRIP=0,GL_BLEND=0,GL_SCISSOR_TEST=0,GL_TEXTURE0=0,GL_SRC_ALPHA=0,GL_ONE_MINUS_SRC_ALPHA=0,
+    GL_ONE=0,GL_ZERO=0;
+namespace glutil {
+    static inline GLuint linkProgram(const char*,const char*){ return 0; }
+}
 #endif
+
+
 
 // FreeType forward declarations — keeps this header clean of ft2build.h.
 // The full FreeType headers are included only in flux_canvas2d_gl.cpp.

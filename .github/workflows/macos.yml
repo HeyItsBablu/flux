@@ -24,35 +24,6 @@ jobs:
       - name: Install Ninja
         run: brew install ninja
 
-      - name: Diagnose Metal headers
-        run: |
-          SDK=$(xcrun --sdk macosx --show-sdk-path)
-          echo "=== Metal import in isolation ==="
-          echo '#import <Metal/Metal.h>' | \
-            /usr/bin/c++ -x objective-c++ \
-              -arch arm64 \
-              -isysroot $SDK \
-              -E - 2>&1 | grep -i 'CAMetalDrawable' | head -5 || echo "NOT FOUND in isolation"
-
-          echo "=== CAMetalLayer import ==="
-          echo '#import <QuartzCore/CAMetalLayer.h>' | \
-            /usr/bin/c++ -x objective-c++ \
-              -arch arm64 \
-              -isysroot $SDK \
-              -E - 2>&1 | grep -i 'CAMetalDrawable' | head -5 || echo "NOT FOUND in CAMetalLayer"
-
-          echo "=== Full file preprocessed ==="
-          /usr/bin/c++ -x objective-c++ \
-            -arch arm64 \
-            -isysroot $SDK \
-            -I${{ github.workspace }}/include \
-            -I${{ github.workspace }}/external/freetype/include \
-            -I${{ github.workspace }}/external/stb \
-            -I${{ github.workspace }}/external/curl/include \
-            -DCURL_ENABLE_WEBSOCKETS -DCURL_STATICLIB \
-            -E ${{ github.workspace }}/src/flux_canvas_macos.mm 2>&1 | \
-            grep -n 'CAMetalDrawable' | head -10 || echo "NOT FOUND in full file"
-
       - name: Configure
         run: |
           cmake -S . -B build \
