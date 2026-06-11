@@ -12,7 +12,7 @@ struct Painter {
 
     explicit Painter(GraphicsContext &c) : ctx(c) {}
 
-    // ── Filled rounded rect (GDI+ anti-aliased) ───────────────────────────
+    // ── Filled rounded rect (GDI+ anti-aliased) ─────────────────────────── 
     void fillRoundedRect(int x, int y, int w, int h, int radius, Color color);
 
     // ── Border only (GDI+ anti-aliased) ──────────────────────────────────

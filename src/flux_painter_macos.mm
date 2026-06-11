@@ -12,7 +12,7 @@
 
 // ── Color helper ──────────────────────────────────────────────────────────────
 
-static void setFillColor(CGContextRef ctx, Color c) {
+static void setFillColor(CGContextRef ctx, Color c) { 
     CGContextSetRGBFillColor(ctx,
         c.r / 255.0, c.g / 255.0, c.b / 255.0, c.a / 255.0);
 }
@@ -364,7 +364,30 @@ void Painter::fillPolygonAlpha(const std::vector<std::pair<int,int>>& points,
 // flux_painter_linux.cpp but use CoreText for measurement.
 // Implement them the same way as Linux replacing Pango calls
 // with CTLine/CTFont equivalents.
+void Painter::drawRichText(const std::wstring&,
+                           const RichTextParams&,
+                           FontCache&)
+{
+}
 
+void Painter::drawRichTextA(const std::string&,
+                            const RichTextParams&,
+                            FontCache&)
+{
+}
+
+void Painter::measureRichText(const std::wstring&,
+                              const TextStyle&,
+                              FontCache&,
+                              int,
+                              bool,
+                              int,
+                              int& outWidth,
+                              int& outHeight)
+{
+    outWidth = 0;
+    outHeight = 0;
+}
 void Painter::drawWavyLine(int x, int y, int len, Color color, int amplitude) {
     if (len <= 0) return;
     const int step = amplitude * 2;
