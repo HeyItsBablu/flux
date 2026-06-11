@@ -187,7 +187,6 @@ public:
 
     // ── macOS-only ────────────────────────────────────────────────────────────
 #ifdef __APPLE__
-#include <TargetConditionals.h>
 #if TARGET_OS_OSX
     static void initEventType();
     static uint32_t repaintEventType();

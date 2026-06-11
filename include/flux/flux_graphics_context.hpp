@@ -138,7 +138,6 @@ struct MeasureContext
 #endif // __ANDROID__
 
 #ifdef __APPLE__
-#include <TargetConditionals.h>
 #if TARGET_OS_OSX
 
     // CoreGraphics context is owned by the window/view — never by MeasureContext.
