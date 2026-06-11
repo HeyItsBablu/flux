@@ -1,3 +1,4 @@
+//flux_window_macos_state.hpp - macOS-specific state for Flux windows
 #pragma once
 #ifdef __APPLE__
 #include <TargetConditionals.h>
