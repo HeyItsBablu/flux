@@ -151,11 +151,12 @@ public:
 #endif
     void updateClientSize();
 
-private:
-    // ── Shared ───────────────────────────────────────────────────────────────
-    AppInstance hInstance = nullptr;
-    int cachedWidth = 0;
+    // ── Shared (public so platform .mm files can access directly) ─────────────
+    int cachedWidth  = 0;
     int cachedHeight = 0;
+
+private:
+    AppInstance hInstance = nullptr;
 
     // =========================================================================
     // Win32
@@ -233,18 +234,18 @@ private:
     std::unordered_map<TimerID, TimerEntry> androidTimers;
 #endif // __ANDROID__
 
+    // =========================================================================
+    // Apple / macOS
+    // =========================================================================
 #ifdef __APPLE__
 #if TARGET_OS_OSX
+public:
     struct MacState;
     MacState *macState = nullptr;
     CanvasWidget *hitTestCanvas(int x, int y);
-
-public:
-MacState* getMacState() const { return macState; } 
+    MacState *getMacState() const { return macState; }
     void registerCanvas_public(CanvasWidget *c);
     void unregisterCanvas_public(CanvasWidget *c);
-
-private:
 #endif
 #endif
 };

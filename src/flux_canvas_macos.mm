@@ -1,17 +1,20 @@
 // flux_canvas_macos.mm
-// Compiled only on macOS.
+
+// Metal MUST be imported before the #ifdef guard so that CAMetalDrawable,
+// MTLCommandBuffer, and MTLRenderCommandEncoder are fully declared before
+// any flux header is processed.
+#import <Metal/Metal.h>
+#import <QuartzCore/CAMetalLayer.h>
+#import <MetalKit/MetalKit.h>
+
 #ifdef __APPLE__
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
 
 #import <Foundation/Foundation.h>
-#import <Metal/Metal.h>
-#import <QuartzCore/CAMetalLayer.h>
-#import <MetalKit/MetalKit.h>
 #import <Cocoa/Cocoa.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <CoreText/CoreText.h>
-
 
 #include "flux/flux_canvas2d.hpp"
 #include "flux/flux_window.hpp"
@@ -19,6 +22,7 @@
 #include "flux/flux_window_macos_state.hpp"
 #include <cassert>
 #include <unordered_map>
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Scrollbar shaders (Metal Shading Language)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -128,7 +132,6 @@ static void scheduleRepaint(CanvasWidget* w) {
     auto& s = macState(w);
     if (!s.repaintPending) {
         s.repaintPending = true;
-        // Dispatch to main queue — safe from any thread
         dispatch_async(dispatch_get_main_queue(), ^{
             auto* inst = FluxUI::getCurrentInstance();
             if (!inst) return;
@@ -143,7 +146,6 @@ static float getDpiScale() {
     if (!inst) return 1.f;
     auto* pw = inst->getPlatformWindowPtr();
     if (!pw) return 1.f;
-    // Use backing pixel ratio
     NSScreen* scr = [NSScreen mainScreen];
     return scr ? (float)scr.backingScaleFactor : 1.f;
 }
@@ -224,7 +226,6 @@ static void initCanvas(CanvasWidget* w) {
     auto& s = macState(w);
     assert(!s.initialized);
 
-    // Device from window's macState
     auto* inst = FluxUI::getCurrentInstance();
     auto* pw   = inst ? inst->getPlatformWindowPtr() : nullptr;
     if (!pw || !pw->getMacState()) return;
@@ -233,7 +234,6 @@ static void initCanvas(CanvasWidget* w) {
     s.cmdQueue  = [s.device newCommandQueue];
     s.metalLayer = pw->getMacState()->metalLayer;
 
-    // Compile MSL shaders
     NSError* err = nil;
 
     id<MTLLibrary> sbLib = [s.device
@@ -260,11 +260,9 @@ static void initCanvas(CanvasWidget* w) {
     if (cvLib)
         s.canvasPipeline = makePipeline(s.device, cvLib, "canvas_vert", "canvas_frag", fmt, true);
 
-    // Dynamic vertex buffer — 256 KB, enough for any frame
     s.vertexBuf = [s.device newBufferWithLength:256 * 1024
                                         options:MTLResourceStorageModeShared];
 
-    // Sizes
     s.lastW = (w->width  > 0) ? (int)(w->width  * getDpiScale()) : 1;
     s.lastH = (w->height > 0) ? (int)(w->height * getDpiScale()) : 1;
     s.physX = (int)(w->x * getDpiScale());
@@ -316,8 +314,7 @@ static void syncPhysicalGeometry(CanvasWidget* w) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// glRenderPass (macOS: Metal render pass)
-// preRenderPass + glRenderPass mirror the Linux split
+// preRenderPass + glRenderPass
 // ─────────────────────────────────────────────────────────────────────────────
 
 void CanvasWidget::preRenderPass() {
@@ -375,11 +372,11 @@ void CanvasWidget::glRenderPass() {
     // Render pass descriptor
     MTLRenderPassDescriptor* rpd = [MTLRenderPassDescriptor renderPassDescriptor];
     rpd.colorAttachments[0].texture     = drawable.texture;
-    rpd.colorAttachments[0].loadAction  = MTLLoadActionLoad;   // preserve existing
+    rpd.colorAttachments[0].loadAction  = MTLLoadActionLoad;
     rpd.colorAttachments[0].storeAction = MTLStoreActionStore;
 
-    id<MTLCommandBuffer>        cmd    = [s.cmdQueue commandBuffer];
-    id<MTLRenderCommandEncoder> enc    = [cmd renderCommandEncoderWithDescriptor:rpd];
+    id<MTLCommandBuffer>        cmd = [s.cmdQueue commandBuffer];
+    id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:rpd];
 
     // Scissor to widget bounds
     MTLScissorRect sci;
@@ -389,17 +386,12 @@ void CanvasWidget::glRenderPass() {
     sci.height = (NSUInteger)glH;
     [enc setScissorRect:sci];
 
-    // ── Draw canvas surface via Canvas2D (CPU-side geometry → Metal) ──────────
+    // ── Draw canvas surface ───────────────────────────────────────────────────
     if (s.canvasPipeline && canvasGL_) {
         [enc setRenderPipelineState:s.canvasPipeline];
 
         Canvas2D ctx(canvasGL_, canvasW_, canvasH_, mvp);
         activeSurface_->render(ctx);
-
-        // Canvas2D generates geometry into canvasGL_->vbo (OpenGL path).
-        // On macOS we reuse Canvas2DGL for CPU-side tessellation only;
-        // the actual draw calls below flush the pending vertex data.
-        // (See note in implementation comments.)
     }
 
     // ── Scrollbars ────────────────────────────────────────────────────────────
@@ -530,8 +522,6 @@ void CanvasWidget::computeLayout(GraphicsContext& /*ctx*/,
     scheduleRepaint(this);
 }
 
-// render() punches a transparent hole in the CG overlay (same as Linux/Cairo).
-// Metal draws underneath the CG surface layer, so clearing here is correct.
 void CanvasWidget::render(GraphicsContext& ctx, FontCache&) {
     if (ctx.cgContext) {
         CGContextSaveGState(ctx.cgContext);
@@ -572,12 +562,12 @@ void CanvasWidget::setCanvasGL(Canvas2DGL* gl) {
 void CanvasWidget::onWindowResize(int /*newW*/, int /*newH*/) {
     auto& s = macState(this);
     if (!s.initialized) return;
-    s.lastW = 0; s.lastH = 0;   // force syncPhysicalGeometry
+    s.lastW = 0; s.lastH = 0;
     scheduleRepaint(this);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Mouse / keyboard events (forwarded from FluxNSView via PlatformWindow)
+// Mouse / keyboard events
 // ─────────────────────────────────────────────────────────────────────────────
 
 void CanvasWidget::onMouseLeave() {
@@ -586,13 +576,11 @@ void CanvasWidget::onMouseLeave() {
     scheduleRepaint(this);
 }
 
-// These mirror the Linux SDL event handlers in naming and logic.
-
 void CanvasWidget::onMouseButtonDown(int sx, int sy, int button) {
-    if (button == 2 && viewportEnabled_) { // middle
+    if (button == 2 && viewportEnabled_) {
         beginPan(sx, sy); return;
     }
-    if (button == 0) { // left
+    if (button == 0) {
         bool hC = hBar_.onMouseDown(sx, sy, [this](float t){ applyHScrollFraction(t); });
         bool vC = !hC && vBar_.onMouseDown(sx, sy, [this](float t){ applyVScrollFraction(t); });
         if (!hC && !vC) {
@@ -605,7 +593,7 @@ void CanvasWidget::onMouseButtonDown(int sx, int sy, int button) {
         }
         scheduleRepaint(this);
     }
-    if (button == 1 && activeSurface_) { // right
+    if (button == 1 && activeSurface_) {
         auto [cx, cy] = vp_.screenToCanvas(float(sx), float(sy));
         activeSurface_->onRightMouseDown(cx, cy);
     }
@@ -667,7 +655,7 @@ void CanvasWidget::onKeyDown(int keyCode) {
             vp_.zoomIn(); pokeScrollbars(); scheduleRepaint(this); consumed = true;
         } else if (keyCode == VK_OemMinus || keyCode == 45) {
             vp_.zoomOut(); pokeScrollbars(); scheduleRepaint(this); consumed = true;
-        } else if (keyCode == 29 /* kVK_ANSI_0 */) {
+        } else if (keyCode == 29) {
             vp_.resetZoom(); pokeScrollbars(); scheduleRepaint(this); consumed = true;
         }
     }
@@ -699,7 +687,7 @@ void CanvasWidget::updateViewportSize(int glW, int glH) {
 }
 
 void CanvasWidget::updateSBGeometry(int glW, int glH) {
-    float dpi     = getDpiScale();
+    float dpi      = getDpiScale();
     float sbThickX = kSBThick * dpi;
     float sbThickY = kSBThick * dpi;
     ScrollbarInfo h = vp_.scrollbarH(), v = vp_.scrollbarV();
@@ -740,6 +728,7 @@ void CanvasWidget::applyVScrollFraction(float thumbMin) {
     vp_.setOffsetY(t / (1.f - span) * range);
     pokeScrollbars(); scheduleRepaint(this);
 }
+
 void CanvasWidget::activatePendingSurface() {
     if (!pendingSurface_) return;
     if (activeSurface_) { activeSurface_->destroy(); activeSurface_.reset(); }
@@ -750,10 +739,9 @@ void CanvasWidget::activatePendingSurface() {
 }
 
 // ensureSBProgram / renderScrollbarsGL / renderSBCorner are no-ops on macOS
-// — scrollbars are drawn inline in glRenderPass via Metal pipelines above.
 void CanvasWidget::ensureSBProgram(const char*, const char*) {}
 void CanvasWidget::renderSBCorner(int, int) {}
-void CanvasWidget::renderScrollbarsGL(int glW, int glH, double dt) {
+void CanvasWidget::renderScrollbarsGL(int /*glW*/, int /*glH*/, double dt) {
     hBar_.tick(dt);
     vBar_.tick(dt);
 }

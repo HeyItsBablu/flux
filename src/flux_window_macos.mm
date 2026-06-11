@@ -132,7 +132,7 @@
     if (cw) {
         s.capturedCanvas = cw;
         s.focusedCanvas  = cw;
-        cw->onMouseDown(mx - cw->x, my - cw->y);
+        cw->onMouseButtonDown(mx - cw->x, my - cw->y, 0);
         _win->macState->dirty = true; return;
     }
     s.focusedCanvas = nullptr;
@@ -148,7 +148,7 @@
     auto& s = *_win->macState;
     CanvasWidget* cw = s.capturedCanvas ? s.capturedCanvas : _win->hitTestCanvas(mx, my);
     s.capturedCanvas = nullptr;
-    if (cw) { cw->onMouseUp(mx - cw->x, my - cw->y); [self setNeedsDisplay:YES]; return; }
+    if (cw) { cw->onMouseButtonUp(mx - cw->x, my - cw->y, 0); [self setNeedsDisplay:YES]; return; }
     if (_win->callbacks.onMouseUp && _win->callbacks.onMouseUp(mx, my))
         [self setNeedsDisplay:YES];
 }
@@ -200,8 +200,6 @@
 
     // Pass to focused canvas first
     if (s.focusedCanvas) {
-        // Canvas widgets use a platform-agnostic key code
-        // For now pass macOS key code directly
         s.focusedCanvas->onKeyDown((int)event.keyCode);
         [self setNeedsDisplay:YES];
         return;
