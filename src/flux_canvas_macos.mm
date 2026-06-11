@@ -8,7 +8,7 @@
 #import <Cocoa/Cocoa.h>
 #import <Metal/Metal.h>
 #import <MetalKit/MetalKit.h>
-#import <QuartzCore/CAMetalLayer.h>
+#import <QuartzCore/QuartzCore.h>  
 #import <CoreGraphics/CoreGraphics.h>
 #import <CoreText/CoreText.h>
 
