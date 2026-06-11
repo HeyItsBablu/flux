@@ -24,38 +24,41 @@
 //
 #pragma once
 
-#include "../flux_http.hpp"   // FluxHttp + fluxPostToUIThread
-
+#include "../flux_http.hpp" // FluxHttp + fluxPostToUIThread
 
 //// Write bytes to a platform temp file with the given extension.
 //// Returns the final path on success, empty string on failure.
 inline std::string VP_writeTempFile(const std::vector<uint8_t> &bytes,
-                                   const std::string &ext) {
+                                    const std::string &ext)
+{
 #ifdef _WIN32
-   char tmpDir[MAX_PATH];
-   if (GetTempPathA(MAX_PATH, tmpDir) == 0) return {};
-   char tmpFile[MAX_PATH];
-   if (GetTempFileNameA(tmpDir, "flxv", 0, tmpFile) == 0) return {};
-   std::string outPath = std::string(tmpFile) + ext;
-   FILE *f = nullptr;
-   fopen_s(&f, outPath.c_str(), "wb");
+    char tmpDir[MAX_PATH];
+    if (GetTempPathA(MAX_PATH, tmpDir) == 0)
+        return {};
+    char tmpFile[MAX_PATH];
+    if (GetTempFileNameA(tmpDir, "flxv", 0, tmpFile) == 0)
+        return {};
+    std::string outPath = std::string(tmpFile) + ext;
+    FILE *f = nullptr;
+    fopen_s(&f, outPath.c_str(), "wb");
 #else
-   std::string tmpl = std::string(P_tmpdir) + "/flxvideoXXXXXX";
-   std::vector<char> tmplBuf(tmpl.begin(), tmpl.end());
-   tmplBuf.push_back('\0');
-   int fd = mkstemp(tmplBuf.data());
-   if (fd < 0) return {};
-   //close(fd);
-   std::string outPath = std::string(tmplBuf.data()) + ext;
-   ::rename(tmplBuf.data(), outPath.c_str());
-   FILE *f = fopen(outPath.c_str(), "wb");
+    std::string tmpl = std::string(P_tmpdir) + "/flxvideoXXXXXX";
+    std::vector<char> tmplBuf(tmpl.begin(), tmpl.end());
+    tmplBuf.push_back('\0');
+    int fd = mkstemp(tmplBuf.data());
+    if (fd < 0)
+        return {};
+    // close(fd);
+    std::string outPath = std::string(tmplBuf.data()) + ext;
+    ::rename(tmplBuf.data(), outPath.c_str());
+    FILE *f = fopen(outPath.c_str(), "wb");
 #endif
-   if (!f) return {};
-   fwrite(bytes.data(), 1, bytes.size(), f);
-   fclose(f);
-   return outPath;
+    if (!f)
+        return {};
+    fwrite(bytes.data(), 1, bytes.size(), f);
+    fclose(f);
+    return outPath;
 }
-
 
 // ============================================================================
 // VideoPlayerWidget — Android (NanoVG / OES backend)
@@ -79,29 +82,38 @@ inline std::string VP_writeTempFile(const std::vector<uint8_t> &bytes,
 // VideoSourceType
 // ============================================================================
 
-enum class VideoSourceType { None, Path, Url, Memory };
+enum class VideoSourceType
+{
+    None,
+    Path,
+    Url,
+    Memory
+};
 
 // ── Magic-byte container detection ───────────────────────────────────────────
-inline std::string VP_detectVideoExtension(const std::vector<uint8_t>& bytes) {
-    if (bytes.size() >= 12) {
-        if (bytes[4]=='f' && bytes[5]=='t' && bytes[6]=='y' && bytes[7]=='p')
+inline std::string VP_detectVideoExtension(const std::vector<uint8_t> &bytes)
+{
+    if (bytes.size() >= 12)
+    {
+        if (bytes[4] == 'f' && bytes[5] == 't' && bytes[6] == 'y' && bytes[7] == 'p')
             return ".mp4";
-        if (bytes[4]=='m' && bytes[5]=='o' && bytes[6]=='o' && bytes[7]=='v')
+        if (bytes[4] == 'm' && bytes[5] == 'o' && bytes[6] == 'o' && bytes[7] == 'v')
             return ".mov";
     }
-    if (bytes.size() >= 4) {
-        if (bytes[0]=='R' && bytes[1]=='I' && bytes[2]=='F' && bytes[3]=='F')
+    if (bytes.size() >= 4)
+    {
+        if (bytes[0] == 'R' && bytes[1] == 'I' && bytes[2] == 'F' && bytes[3] == 'F')
             return ".avi";
-        if (bytes[0]==0x1A && bytes[1]==0x45 && bytes[2]==0xDF && bytes[3]==0xA3)
+        if (bytes[0] == 0x1A && bytes[1] == 0x45 && bytes[2] == 0xDF && bytes[3] == 0xA3)
             return ".mkv";
     }
-    if (bytes.size() >= 3) {
-        if (bytes[0]=='F' && bytes[1]=='L' && bytes[2]=='V')
+    if (bytes.size() >= 3)
+    {
+        if (bytes[0] == 'F' && bytes[1] == 'L' && bytes[2] == 'V')
             return ".flv";
     }
     return ".mp4";
 }
-
 
 // ============================================================================
 // VideoPlayerWidget — Android (NanoVG / OES backend)
@@ -113,111 +125,158 @@ inline std::string VP_detectVideoExtension(const std::vector<uint8_t>& bytes) {
 #include "flux_icons.hpp"
 
 // NanoVG OES extension — implemented in your nanovg_gl_utils or equivalent
-extern int         NVG_createImageFromOES(NVGcontext* vg, GLuint oesTexId, int w, int h);
-extern void        NVG_updateImageFromOES(NVGcontext* vg, int nvgImage, GLuint oesTexId);
-extern NVGcontext* FluxAndroid_getVG();
+extern int NVG_createImageFromOES(NVGcontext *vg, GLuint oesTexId, int w, int h);
+extern void NVG_updateImageFromOES(NVGcontext *vg, int nvgImage, GLuint oesTexId);
+extern NVGcontext *FluxAndroid_getVG();
 
 // ============================================================================
 
-class VideoPlayerWidget : public Widget {
+class VideoPlayerWidget : public Widget
+{
 public:
     // ── Config ────────────────────────────────────────────────────────────
     std::string videoPath;
-    int  barHeight = 40;
-    bool autoPlay  = false;
+    int barHeight = 40;
+    bool autoPlay = false;
 
     // ── Colors ────────────────────────────────────────────────────────────
-    Color colBar         = Color::fromRGBA( 20,  20,  20, 220);
-    Color colTrackBg     = Color::fromRGB (100, 100, 100);
-    Color colTrackFill   = Color::fromRGB (220, 220, 220);
-    Color colThumb       = Color::fromRGB (255, 255, 255);
-    Color colText        = Color::fromRGB (230, 230, 230);
-    Color colIcon        = Color::fromRGB (220, 220, 220);
-    Color colIconHov     = Color::fromRGB (255, 255, 255);
-    Color colOverlay     = Color::fromRGBA(  0,   0,   0,  60);
-    Color colLoadingText = Color::fromRGB (180, 180, 180);
-    Color colErrorText   = Color::fromRGB (220,  80,  80);
+    Color colBar = Color::fromRGBA(20, 20, 20, 220);
+    Color colTrackBg = Color::fromRGB(100, 100, 100);
+    Color colTrackFill = Color::fromRGB(220, 220, 220);
+    Color colThumb = Color::fromRGB(255, 255, 255);
+    Color colText = Color::fromRGB(230, 230, 230);
+    Color colIcon = Color::fromRGB(220, 220, 220);
+    Color colIconHov = Color::fromRGB(255, 255, 255);
+    Color colOverlay = Color::fromRGBA(0, 0, 0, 60);
+    Color colLoadingText = Color::fromRGB(180, 180, 180);
+    Color colErrorText = Color::fromRGB(220, 80, 80);
 
     // ── Fluent setters ────────────────────────────────────────────────────
-    std::shared_ptr<VideoPlayerWidget> setPath(const std::string& p) {
-        videoPath   = p;
+    std::shared_ptr<VideoPlayerWidget> setPath(const std::string &p)
+    {
+        videoPath = p;
         _sourceType = VideoSourceType::Path;
         _sourceUrl.clear();
         _sourceMemory.clear();
         return self();
     }
-    std::shared_ptr<VideoPlayerWidget> setUrl(const std::string& url) {
-        _sourceUrl  = url;
+    std::shared_ptr<VideoPlayerWidget> setUrl(const std::string &url)
+    {
+        _sourceUrl = url;
         _sourceType = VideoSourceType::Url;
         videoPath.clear();
         _sourceMemory.clear();
         return self();
     }
-    std::shared_ptr<VideoPlayerWidget> setMemory(const std::vector<uint8_t>& bytes) {
+    std::shared_ptr<VideoPlayerWidget> setMemory(const std::vector<uint8_t> &bytes)
+    {
         _sourceMemory = bytes;
-        _sourceType   = VideoSourceType::Memory;
+        _sourceType = VideoSourceType::Memory;
         videoPath.clear();
         _sourceUrl.clear();
         return self();
     }
-    std::shared_ptr<VideoPlayerWidget> setMemory(const uint8_t* data, size_t len) {
+    std::shared_ptr<VideoPlayerWidget> setMemory(const uint8_t *data, size_t len)
+    {
         _sourceMemory.assign(data, data + len);
         _sourceType = VideoSourceType::Memory;
         videoPath.clear();
         _sourceUrl.clear();
         return self();
     }
-    std::shared_ptr<VideoPlayerWidget> setWidth(int w)  { Widget::width  = w; autoWidth  = false; return self(); }
-    std::shared_ptr<VideoPlayerWidget> setHeight(int h) { Widget::height = h; autoHeight = false; return self(); }
-    std::shared_ptr<VideoPlayerWidget> setAutoPlay(bool b) { autoPlay = b; return self(); }
+    std::shared_ptr<VideoPlayerWidget> setWidth(int w)
+    {
+        Widget::width = w;
+        autoWidth = false;
+        return self();
+    }
+    std::shared_ptr<VideoPlayerWidget> setHeight(int h)
+    {
+        Widget::height = h;
+        autoHeight = false;
+        return self();
+    }
+    std::shared_ptr<VideoPlayerWidget> setAutoPlay(bool b)
+    {
+        autoPlay = b;
+        return self();
+    }
 
     // ── Constructor / destructor ──────────────────────────────────────────
-    VideoPlayerWidget() {
+    VideoPlayerWidget()
+    {
         autoWidth = autoHeight = false;
-        width = 320; height = 180;
+        width = 320;
+        height = 180;
 
-        auto& vid = FluxVideo::get();
+        auto &vid = FluxVideo::get();
 
-        vid.setOnFinished([this]() {
+        vid.setOnFinished([this]()
+                          {
             _playing  = false;
             _finished = true;
             _progress = 1.f;
-            markNeedsPaint();
-        });
+            markNeedsPaint(); });
 
-        // FIX #4 — do NOT call NVG functions here (wrong thread).
-        // Just store dimensions and set dirty flag; render() will build the image.
-        vid.setOnReady([this](int w, int h) {
+
+        vid.setOnReady([this](int w, int h)
+                       {
             _vidW          = w;
             _vidH          = h;
             _nvgImageDirty = true;
-            markNeedsPaint();
-        });
+            markNeedsPaint(); });
     }
-
-    ~VideoPlayerWidget() {
+    ~VideoPlayerWidget()
+    {
         _stopTimers();
         FluxVideo::get().close();
         FluxVideo::get().setOnFinished(nullptr);
         FluxVideo::get().setOnReady(nullptr);
-        // Delete NVG image on GL thread (destructor called from GL thread)
-        NVGcontext* vg = FluxAndroid_getVG();
+
+        NVGcontext *vg = FluxAndroid_getVG();
         if (_nvgImage >= 0 && vg)
+        {
             nvgDeleteImage(vg, _nvgImage);
+            _nvgImage = -1;
+        }
+        if (_fbo)
+        {
+            glDeleteFramebuffers(1, &_fbo);
+            _fbo = 0;
+        }
+        if (_fboTex)
+        {
+            glDeleteTextures(1, &_fboTex);
+            _fboTex = 0;
+        }
+        if (_oesVBO)
+        {
+            glDeleteBuffers(1, &_oesVBO);
+            _oesVBO = 0;
+        }
+        if (_oesProgram)
+        {
+            glDeleteProgram(_oesProgram);
+            _oesProgram = 0;
+        }
     }
 
     // =========================================================================
     // Layout
     // =========================================================================
 
-    void computeLayout(GraphicsContext& /*ctx*/, const BoxConstraints& constraints,
-                       FontCache& /*fontCache*/) override {
-        if (autoWidth)  width  = constraints.maxWidth;
-        if (autoHeight) height = constraints.maxHeight;
+    void computeLayout(GraphicsContext & /*ctx*/, const BoxConstraints &constraints,
+                       FontCache & /*fontCache*/) override
+    {
+        if (autoWidth)
+            width = constraints.maxWidth;
+        if (autoHeight)
+            height = constraints.maxHeight;
         applyConstraints();
         needsLayout = false;
 
-        if (!_opened) {
+        if (!_opened)
+        {
             _opened = true;
             _openVideoSource();
         }
@@ -227,70 +286,84 @@ public:
     // Render  (called on GL thread — safe to call NVG here)
     // =========================================================================
 
-    void render(GraphicsContext& ctx, FontCache& fontCache) override {
-        NVGcontext* vg = FluxAndroid_getVG();
-        auto&       vid = FluxVideo::get();
+    void render(GraphicsContext &ctx, FontCache &fontCache) override
+    {
+        NVGcontext *vg = FluxAndroid_getVG();
+        auto &vid = FluxVideo::get();
 
-        // FIX #4 — build / rebuild NVG image here on the GL thread
-        if (_nvgImageDirty && _vidW > 0 && vg) {
+        _initGLResources();
+
+        // ── Rebuild FBO when video size changes ───────────────────────────────
+        if (_nvgImageDirty && _vidW > 0 && _vidH > 0 && vg)
+        {
             _nvgImageDirty = false;
-            if (_nvgImage >= 0) {
-                nvgDeleteImage(vg, _nvgImage);
-                _nvgImage = -1;
-            }
-            _nvgImage = NVG_createImageFromOES(vg, vid.getTextureId(), _vidW, _vidH);
+            _rebuildFBO(vg, _vidW, _vidH);
         }
 
-        // Latch new frame from SurfaceTexture
-        if (vid.updateFrame() && _nvgImage >= 0) {
-            NVG_updateImageFromOES(vg, _nvgImage, vid.getTextureId());
+        // ── Latch new frame: updateTexImage first, then blit OES → FBO ────────
+        bool gotFrame = vid.updateFrame();
+        if (gotFrame && _fbo && _oesProgram)
+        {
+            _blitOESToFBO(vid.getTextureId());
             _progress = vid.getProgress();
         }
 
         Painter p(ctx);
 
-        // ── Loading / error overlay ──────────────────────────────────
-        if (_netState == NetState::Loading) {
-            _renderStatusOverlay(p, fontCache, "\xe2\x80\xa6 Loading\xe2\x80\xa6", colLoadingText);
+        // ── Status overlays ───────────────────────────────────────────────────
+        if (_netState == NetState::Loading)
+        {
+            _renderStatusOverlay(p, fontCache, "\xe2\x80\xa6 Loading\xe2\x80\xa6",
+                                 colLoadingText);
             needsPaint = false;
             return;
         }
-        if (_netState == NetState::Error) {
+        if (_netState == NetState::Error)
+        {
             _renderStatusOverlay(p, fontCache, "Error loading video", colErrorText);
             needsPaint = false;
             return;
         }
 
-        // ── Video frame ───────────────────────────────────────────────
-        if (_nvgImage >= 0 && _vidW > 0 && _vidH > 0) {
-            float vidAR = (float)_vidW / (float)_vidH;
-            float widAR = (float)width  / (float)(height - barHeight);
+        // Black background
+        p.fillRect(x, y, width, height, Color::fromRGB(0, 0, 0));
+
+        // ── Draw video frame via NVG ──────────────────────────────────────────
+        if (_nvgImage >= 0 && _fboW > 0 && _fboH > 0 && vg)
+        {
+            int videoAreaH = height - barHeight;
+
+            float vidAR = (float)_fboW / (float)_fboH;
+            float widAR = (float)width / (float)videoAreaH;
 
             float dstW, dstH, dstX, dstY;
-            if (vidAR > widAR) {
+            if (vidAR > widAR)
+            {
                 dstW = (float)width;
                 dstH = dstW / vidAR;
                 dstX = (float)x;
-                dstY = (float)y + (height - barHeight - dstH) * 0.5f;
-            } else {
-                dstH = (float)(height - barHeight);
+                dstY = (float)y + ((float)videoAreaH - dstH) * 0.5f;
+            }
+            else
+            {
+                dstH = (float)videoAreaH;
                 dstW = dstH * vidAR;
                 dstX = (float)x + ((float)width - dstW) * 0.5f;
                 dstY = (float)y;
             }
 
-            NVGpaint imgPaint = nvgImagePattern(vg, dstX, dstY, dstW, dstH,
-                                                0.f, _nvgImage, 1.f);
+            // NVG_IMAGE_NODELETE means NVG doesn't own the texture —
+            // we manage lifetime ourselves
+            NVGpaint imgPaint = nvgImagePattern(vg,
+                                                dstX, dstY, dstW, dstH, 0.f, _nvgImage, 1.f);
+
             nvgBeginPath(vg);
             nvgRect(vg, dstX, dstY, dstW, dstH);
             nvgFillPaint(vg, imgPaint);
             nvgFill(vg);
 
             if (_barVisible)
-                p.fillRect(x, y, width, height - barHeight, colOverlay);
-        } else {
-            // Black placeholder while loading
-            p.fillRect(x, y, width, height, Color::fromRGB(20, 20, 20));
+                p.fillRect(x, y, width, videoAreaH, colOverlay);
         }
 
         if (_barVisible)
@@ -306,21 +379,26 @@ public:
     // Mouse events
     // =========================================================================
 
-    bool handleMouseDown(int mx, int my) override {
-        if (!_inWidget(mx, my)) return false;
-        if (!_inRect(mx, my, _barRect)) {
+    bool handleMouseDown(int mx, int my) override
+    {
+        if (!_inWidget(mx, my))
+            return false;
+        if (!_inRect(mx, my, _barRect))
+        {
             _barVisible = true;
             _resetBarTimer();
             _togglePlayPause();
             markNeedsPaint();
             return true;
         }
-        if (_inRect(mx, my, _playBtnRect)) {
+        if (_inRect(mx, my, _playBtnRect))
+        {
             _togglePlayPause();
             markNeedsPaint();
             return true;
         }
-        if (_inRect(mx, my, _trackRect)) {
+        if (_inRect(mx, my, _trackRect))
+        {
             _dragging = true;
             FluxUI::getCurrentInstance()->captureMouseInput();
             _seekFromMouse(mx);
@@ -330,8 +408,10 @@ public:
         return true;
     }
 
-    bool handleMouseUp(int, int) override {
-        if (_dragging) {
+    bool handleMouseUp(int, int) override
+    {
+        if (_dragging)
+        {
             _dragging = false;
             FluxUI::getCurrentInstance()->releaseMouseInput();
             markNeedsPaint();
@@ -339,17 +419,32 @@ public:
         return false;
     }
 
-    bool handleMouseMove(int mx, int my) override {
-        if (_dragging) { _seekFromMouse(mx); return true; }
+    bool handleMouseMove(int mx, int my) override
+    {
+        if (_dragging)
+        {
+            _seekFromMouse(mx);
+            return true;
+        }
         bool inW = _inWidget(mx, my);
-        if (inW != _barVisible) { _barVisible = inW; markNeedsPaint(); }
-        if (inW) _resetBarTimer();
+        if (inW != _barVisible)
+        {
+            _barVisible = inW;
+            markNeedsPaint();
+        }
+        if (inW)
+            _resetBarTimer();
         bool hp = _inRect(mx, my, _playBtnRect);
-        if (hp != _hovPlay) { _hovPlay = hp; markNeedsPaint(); }
+        if (hp != _hovPlay)
+        {
+            _hovPlay = hp;
+            markNeedsPaint();
+        }
         return false;
     }
 
-    bool handleMouseLeave() override {
+    bool handleMouseLeave() override
+    {
         _barVisible = _hovPlay = false;
         markNeedsPaint();
         return true;
@@ -357,45 +452,277 @@ public:
 
 private:
     // ── Source ────────────────────────────────────────────────────────────
-    VideoSourceType      _sourceType   = VideoSourceType::None;
-    std::string          _sourceUrl;
+    VideoSourceType _sourceType = VideoSourceType::None;
+    std::string _sourceUrl;
     std::vector<uint8_t> _sourceMemory;
 
-    enum class NetState { Idle, Loading, Error };
+    enum class NetState
+    {
+        Idle,
+        Loading,
+        Error
+    };
     NetState _netState = NetState::Idle;
 
     // ── Playback state ────────────────────────────────────────────────────
-    bool  _opened   = false;
-    bool  _playing  = false;
-    bool  _finished = false;
+    bool _opened = false;
+    bool _playing = false;
+    bool _finished = false;
     float _progress = 0.f;
 
     // ── Video frame ───────────────────────────────────────────────────────
-    int  _vidW      = 0;
-    int  _vidH      = 0;
-    int  _nvgImage  = -1;
-    bool _nvgImageDirty = false;   // FIX #4: set by onReady, consumed in render()
+    int _vidW = 0;
+    int _vidH = 0;
+    // ── In VideoPlayerWidget private members, replace _nvgImage / _nvgImageDirty ──
+
+    GLuint _fboTex = 0; // GL_TEXTURE_2D — the composited frame
+    GLuint _fbo = 0;    // FBO we blit OES → _fboTex into
+    int _fboW = 0;
+    int _fboH = 0;
+    int _nvgImage = -1; // NVG handle wrapping _fboTex
+
+    // OES blit program (created once)
+    GLuint _oesProgram = 0;
+    GLuint _oesVAO = 0; // or just use raw attrib 0
+    GLuint _oesVBO = 0;
+
+    bool _glResourcesReady = false;
+    bool _nvgImageDirty = false; // still used: resize trigger
+    std::vector<uint8_t> _fboPixels;
+
+    // ── Add this helper — call once from render() before first blit ───────────────
+
+    void _initGLResources()
+    {
+        if (_glResourcesReady)
+            return;
+        _glResourcesReady = true;
+
+        // Vertex + fragment shader that samples an OES texture and writes RGB
+        static const char *vsrc = R"(
+        attribute vec2 aPos;
+        attribute vec2 aUV;
+        varying   vec2 vUV;
+        void main() {
+            vUV         = aUV;
+            gl_Position = vec4(aPos, 0.0, 1.0);
+        }
+    )";
+
+        static const char *fsrc = R"(
+        #extension GL_OES_EGL_image_external : require
+        precision mediump float;
+        uniform samplerExternalOES uTex;
+        varying vec2 vUV;
+        void main() {
+            gl_FragColor = texture2D(uTex, vUV);
+        }
+    )";
+
+        auto compile = [](GLenum type, const char *src) -> GLuint
+        {
+            GLuint s = glCreateShader(type);
+            glShaderSource(s, 1, &src, nullptr);
+            glCompileShader(s);
+            GLint ok = 0;
+            glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
+            if (!ok)
+            {
+                char log[512];
+                glGetShaderInfoLog(s, 512, nullptr, log);
+                __android_log_print(ANDROID_LOG_ERROR, "FluxVideo",
+                                    "Shader compile error: %s", log);
+            }
+            return s;
+        };
+
+        GLuint vs = compile(GL_VERTEX_SHADER, vsrc);
+        GLuint fs = compile(GL_FRAGMENT_SHADER, fsrc);
+        _oesProgram = glCreateProgram();
+        glAttachShader(_oesProgram, vs);
+        glAttachShader(_oesProgram, fs);
+        glBindAttribLocation(_oesProgram, 0, "aPos");
+        glBindAttribLocation(_oesProgram, 1, "aUV");
+        glLinkProgram(_oesProgram);
+        glDeleteShader(vs);
+        glDeleteShader(fs);
+
+        // Fullscreen quad: pos(-1..1) + uv(0..1)
+        // Note: OES textures from MediaCodec are often vertically flipped
+        // depending on device. Flip UV.y here: uv.y = 1.0 - y
+        static const float quad[] = {
+            //  x      y     u    v
+            -1.f,
+            -1.f,
+            0.f,
+            1.f, // bottom-left
+            1.f,
+            -1.f,
+            1.f,
+            1.f, // bottom-right
+            -1.f,
+            1.f,
+            0.f,
+            0.f, // top-left
+            1.f,
+            1.f,
+            1.f,
+            0.f, // top-right
+        };
+
+        glGenBuffers(1, &_oesVBO);
+        glBindBuffer(GL_ARRAY_BUFFER, _oesVBO);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STATIC_DRAW);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+    }
+
+    // ── Rebuild FBO + NVG image when video dimensions change ─────────────────────
+
+    void _rebuildFBO(NVGcontext *vg, int w, int h)
+    {
+        if (_fbo)
+        {
+            glDeleteFramebuffers(1, &_fbo);
+            _fbo = 0;
+        }
+        if (_fboTex)
+        {
+            glDeleteTextures(1, &_fboTex);
+            _fboTex = 0;
+        }
+        if (_nvgImage >= 0 && vg)
+        {
+            nvgDeleteImage(vg, _nvgImage);
+            _nvgImage = -1;
+        }
+
+        _fboW = w;
+        _fboH = h;
+        if (w <= 0 || h <= 0)
+            return;
+
+        // FBO texture — used as render target for OES blit
+        glGenTextures(1, &_fboTex);
+        glBindTexture(GL_TEXTURE_2D, _fboTex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0,
+                     GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glBindTexture(GL_TEXTURE_2D, 0);
+
+        glGenFramebuffers(1, &_fbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, _fbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                               GL_TEXTURE_2D, _fboTex, 0);
+        GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+        if (status != GL_FRAMEBUFFER_COMPLETE)
+        {
+            __android_log_print(ANDROID_LOG_ERROR, "FluxVideo",
+                                "FBO incomplete: 0x%x", status);
+            return;
+        }
+
+        // Allocate pixel readback buffer
+        _fboPixels.resize((size_t)(w * h * 4));
+
+        // Create NVG image from blank data — we'll update it every frame
+        // NVG_IMAGE_NEAREST avoids blurring on pixel-exact blits
+        _nvgImage = nvgCreateImageRGBA(vg, w, h, 0,
+                                       _fboPixels.data());
+
+        __android_log_print(ANDROID_LOG_DEBUG, "FluxVideo",
+                            "FBO %dx%d created, nvgImage=%d", w, h, _nvgImage);
+    }
+
+    // ── Blit OES → FBO ────────────────────────────────────────────────────────────
+
+    void _blitOESToFBO(GLuint oesTexId)
+    {
+        if (!_fbo || !_oesProgram)
+            return;
+
+        GLint prevFBO = 0;
+        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFBO);
+        GLint prevViewport[4];
+        glGetIntegerv(GL_VIEWPORT, prevViewport);
+        GLint prevProgram = 0;
+        glGetIntegerv(GL_CURRENT_PROGRAM, &prevProgram);
+
+        glBindFramebuffer(GL_FRAMEBUFFER, _fbo);
+        glViewport(0, 0, _fboW, _fboH);
+        glDisable(GL_BLEND);
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_STENCIL_TEST);
+
+        glUseProgram(_oesProgram);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_EXTERNAL_OES, oesTexId);
+        glUniform1i(glGetUniformLocation(_oesProgram, "uTex"), 0);
+
+        glBindBuffer(GL_ARRAY_BUFFER, _oesVBO);
+        glEnableVertexAttribArray(0);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE,
+                              4 * sizeof(float), (void *)0);
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE,
+                              4 * sizeof(float), (void *)(2 * sizeof(float)));
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        glDisableVertexAttribArray(0);
+        glDisableVertexAttribArray(1);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindTexture(GL_TEXTURE_EXTERNAL_OES, 0);
+
+        // ── Readback FBO → CPU → NVG image update ──────────────────────────
+        // glReadPixels from the FBO we just rendered into
+        if (_nvgImage >= 0 && !_fboPixels.empty())
+        {
+            glReadPixels(0, 0, _fboW, _fboH,
+                         GL_RGBA, GL_UNSIGNED_BYTE,
+                         _fboPixels.data());
+
+            NVGcontext *vg = FluxAndroid_getVG();
+            if (vg)
+                nvgUpdateImage(vg, _nvgImage, _fboPixels.data());
+        }
+
+        // Restore state
+        glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)prevFBO);
+        glViewport(prevViewport[0], prevViewport[1],
+                   prevViewport[2], prevViewport[3]);
+        glUseProgram((GLuint)prevProgram);
+        glEnable(GL_BLEND);
+    }
 
     // ── Interaction ───────────────────────────────────────────────────────
-    bool _dragging   = false;
+    bool _dragging = false;
     bool _barVisible = true;
-    bool _hovPlay    = false;
+    bool _hovPlay = false;
 
-    struct Rect { int x, y, w, h; };
+    struct Rect
+    {
+        int x, y, w, h;
+    };
     Rect _barRect{}, _playBtnRect{}, _trackRect{};
 
     // ── Timers ────────────────────────────────────────────────────────────
     TimerID _progressTimer = 0;
-    TimerID _barHideTimer  = 0;
+    TimerID _barHideTimer = 0;
 
     // ── Source dispatch ───────────────────────────────────────────────────
 
-    void _openVideoSource() {
-        if (_sourceType == VideoSourceType::Url && !_sourceUrl.empty()) {
+    void _openVideoSource()
+    {
+        if (_sourceType == VideoSourceType::Url && !_sourceUrl.empty())
+        {
             _loadFromUrl();
             return;
         }
-        if (_sourceType == VideoSourceType::Memory && !_sourceMemory.empty()) {
+        if (_sourceType == VideoSourceType::Memory && !_sourceMemory.empty())
+        {
             _playFromMemory();
             return;
         }
@@ -403,12 +730,14 @@ private:
             _openVideo();
     }
 
-    void _loadFromUrl() {
+    void _loadFromUrl()
+    {
         _netState = NetState::Loading;
         markNeedsPaint();
         std::weak_ptr<VideoPlayerWidget> weak = self();
         std::string url = _sourceUrl;
-        FluxHttp::get(url, [weak](HttpResult result) {
+        FluxHttp::get(url, [weak](HttpResult result)
+                      {
             auto s = weak.lock();
             if (!s) return;
             if (!result.success || result.body.empty()) {
@@ -419,15 +748,17 @@ private:
             const auto* d = reinterpret_cast<const uint8_t*>(result.body.data());
             s->_sourceMemory.assign(d, d + result.body.size());
             s->_netState = NetState::Idle;
-            s->_playFromMemory();
-        });
+            s->_playFromMemory(); });
     }
 
-    void _playFromMemory() {
-        if (_sourceMemory.empty()) return;
-        std::string ext  = VP_detectVideoExtension(_sourceMemory);
+    void _playFromMemory()
+    {
+        if (_sourceMemory.empty())
+            return;
+        std::string ext = VP_detectVideoExtension(_sourceMemory);
         std::string path = VP_writeTempFile(_sourceMemory, ext);
-        if (path.empty()) {
+        if (path.empty())
+        {
             _netState = NetState::Error;
             markNeedsPaint();
             return;
@@ -436,18 +767,22 @@ private:
         _openVideo();
     }
 
-    void _openVideo() {
+    void _openVideo()
+    {
         FluxVideo::get().open(videoPath);
-        if (autoPlay) {
+        if (autoPlay)
+        {
             FluxVideo::get().play();
             _playing = true;
             _startProgressTimer();
         }
     }
 
-    void _togglePlayPause() {
-        auto& vid = FluxVideo::get();
-        if (_finished) {
+    void _togglePlayPause()
+    {
+        auto &vid = FluxVideo::get();
+        if (_finished)
+        {
             _finished = false;
             _progress = 0.f;
             vid.seekToProgress(0.f);
@@ -456,24 +791,30 @@ private:
             _startProgressTimer();
             return;
         }
-        if (_playing) {
+        if (_playing)
+        {
             vid.pause();
             _playing = false;
-        } else {
+        }
+        else
+        {
             vid.play();
             _playing = true;
             _startProgressTimer();
         }
     }
 
-    void _seekFromMouse(int mx) {
-        if (_trackRect.w <= 0) return;
+    void _seekFromMouse(int mx)
+    {
+        if (_trackRect.w <= 0)
+            return;
         float t = std::max(0.f,
                            std::min(1.f,
                                     (float)(mx - _trackRect.x) / (float)_trackRect.w));
         _progress = t;
         FluxVideo::get().seekToProgress(t);
-        if (_finished && t < 0.999f) {
+        if (_finished && t < 0.999f)
+        {
             _finished = false;
             FluxVideo::get().play();
             _playing = true;
@@ -482,46 +823,68 @@ private:
         markNeedsPaint();
     }
 
-    void _startProgressTimer() {
-        if (_progressTimer) return;
-        _progressTimer = FluxUI::getCurrentInstance()->setInterval(33, [this]() {
+    void _startProgressTimer()
+    {
+        if (_progressTimer)
+            return;
+        _progressTimer = FluxUI::getCurrentInstance()->setInterval(33, [this]()
+                                                                   {
             if (_playing) {
                 _progress = FluxVideo::get().getProgress();
                 markNeedsPaint();
-            }
-        });
+            } });
     }
 
-    void _resetBarTimer() {
-        auto* ui = FluxUI::getCurrentInstance();
-        if (!ui) return;
-        if (_barHideTimer) { ui->clearInterval(_barHideTimer); _barHideTimer = 0; }
-        _barHideTimer = ui->setInterval(3000, [this]() {
+    void _resetBarTimer()
+    {
+        auto *ui = FluxUI::getCurrentInstance();
+        if (!ui)
+            return;
+        if (_barHideTimer)
+        {
+            ui->clearInterval(_barHideTimer);
+            _barHideTimer = 0;
+        }
+        _barHideTimer = ui->setInterval(3000, [this]()
+                                        {
             auto* u = FluxUI::getCurrentInstance();
             if (u && _barHideTimer) { u->clearInterval(_barHideTimer); _barHideTimer = 0; }
-            if (_playing) { _barVisible = false; markNeedsPaint(); }
-        });
+            if (_playing) { _barVisible = false; markNeedsPaint(); } });
     }
 
-    void _stopTimers() {
-        auto* ui = FluxUI::getCurrentInstance();
-        if (!ui) return;
-        if (_progressTimer) { ui->clearInterval(_progressTimer); _progressTimer = 0; }
-        if (_barHideTimer)  { ui->clearInterval(_barHideTimer);  _barHideTimer  = 0; }
+    void _stopTimers()
+    {
+        auto *ui = FluxUI::getCurrentInstance();
+        if (!ui)
+            return;
+        if (_progressTimer)
+        {
+            ui->clearInterval(_progressTimer);
+            _progressTimer = 0;
+        }
+        if (_barHideTimer)
+        {
+            ui->clearInterval(_barHideTimer);
+            _barHideTimer = 0;
+        }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────
 
-    std::shared_ptr<VideoPlayerWidget> self() {
+    std::shared_ptr<VideoPlayerWidget> self()
+    {
         return std::static_pointer_cast<VideoPlayerWidget>(shared_from_this());
     }
-    bool _inWidget(int mx, int my) const {
+    bool _inWidget(int mx, int my) const
+    {
         return mx >= x && mx < x + width && my >= y && my < y + height;
     }
-    static bool _inRect(int mx, int my, const Rect& r) {
+    static bool _inRect(int mx, int my, const Rect &r)
+    {
         return mx >= r.x && mx < r.x + r.w && my >= r.y && my < r.y + r.h;
     }
-    static std::string _fmtTime(float s) {
+    static std::string _fmtTime(float s)
+    {
         int si = (int)s;
         char buf[16];
         snprintf(buf, sizeof(buf), "%d:%02d", si / 60, si % 60);
@@ -530,63 +893,95 @@ private:
 
     // ── Rendering helpers ─────────────────────────────────────────────────
 
-    void _renderStatusOverlay(Painter& p, FontCache& fontCache,
-                               const std::string& msg, Color col) {
+    void _renderStatusOverlay(Painter &p, FontCache &fontCache,
+                              const std::string &msg, Color col)
+    {
         p.fillRect(x, y, width, height, Color::fromRGB(20, 20, 20));
         NativeFont tf = fontCache.getFont("Segoe UI", 14, FontWeight::Normal);
         p.drawTextA(msg, x, y, width, height, tf, col,
                     DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }
 
-    void _renderBar(GraphicsContext& ctx, FontCache& fontCache, Painter& p) {
-        int barY  = y + height - barHeight;
-        _barRect  = { x, barY, width, barHeight };
+    void _renderBar(GraphicsContext &ctx, FontCache &fontCache, Painter &p)
+    {
+        int barY = y + height - barHeight;
+        _barRect = {x, barY, width, barHeight};
+
+        // Bar background
         p.fillRect(x, barY, width, barHeight, colBar);
 
-        int midY  = barY + barHeight / 2;
-        int cx    = x + 6;
+        int midY = barY + barHeight / 2;
         int btnSz = 28;
-        _playBtnRect = { cx, barY + (barHeight - btnSz) / 2, btnSz, btnSz };
+        int cx = x + 8;
 
-        // Play / pause icon
+        // Play / pause button rect
+        _playBtnRect = {cx, barY + (barHeight - btnSz) / 2, btnSz, btnSz};
+
         {
             NativeFont iconFont = fontCache.getFont(kIconFont, 18, FontWeight::Normal);
             std::wstring g(1, FluxIcons::glyph(_playing ? FluxIcons::Pause : FluxIcons::Play));
             Color c = _hovPlay ? colIconHov : colIcon;
-            p.drawText(g, _playBtnRect.x, _playBtnRect.y,
+            p.drawText(g,
+                       _playBtnRect.x, _playBtnRect.y,
                        _playBtnRect.w, _playBtnRect.h,
-                       iconFont, c, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                       iconFont, c,
+                       DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         }
         cx += btnSz + 6;
 
-        // Timestamp
-        float       dur = FluxVideo::get().getDurationSeconds();
-        std::string ts  = _fmtTime(_progress * dur) + " / " + _fmtTime(dur);
-        NativeFont  tf  = fontCache.getFont("Segoe UI", 12, FontWeight::Normal);
+        // Timestamp — measure in LOGICAL pixels
+        float dur = FluxVideo::get().getDurationSeconds();
+        std::string ts = _fmtTime(_progress * dur) + " / " + _fmtTime(dur);
+        NativeFont tf = fontCache.getFont("Segoe UI", 12, FontWeight::Normal);
+
         int tw = 0, th = 0;
-        Painter(ctx).measureText(toWideString(ts), tf, tw, th);
-        p.drawText(toWideString(ts), cx, barY, tw + 4, barHeight, tf, colText,
+        p.measureText(toWideString(ts), tf, tw, th);
+
+        // Guard: if measureText returned physical pixels (NVG measures at physical
+        // scale before nvgScale is applied), divide back down.
+        // A timestamp string at font-size 12 should never exceed ~120 logical px;
+        // if tw is larger than half the widget width something is wrong.
+        float dpi = FluxAndroid_getDpiScale();
+        if (tw > width / 2)
+            tw = (int)(tw / dpi);
+
+        p.drawText(toWideString(ts),
+                   cx, barY, tw + 4, barHeight,
+                   tf, colText,
                    DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        cx += tw + 8;
+        cx += tw + 10;
 
-        // Seek track
-        int trackW = std::max(20, x + width - 12 - cx);
-        _trackRect = { cx, midY - 8, trackW, 16 };
+        // Seek track — remaining width minus right margin
+        int trackW = x + width - 12 - cx;
+        if (trackW < 20)
+            trackW = 20;
 
-        p.fillRoundedRectGDI(cx, midY - 1, trackW, 3, 3, colTrackBg,  colTrackBg,  0);
+        _trackRect = {cx, midY - 8, trackW, 16};
+
+        // Track background
+        p.fillRoundedRectGDI(cx, midY - 2, trackW, 4, 2,
+                             colTrackBg, colTrackBg, 0);
+
+        // Filled portion
         int fillW = (int)(_progress * trackW);
         if (fillW > 0)
-            p.fillRoundedRectGDI(cx, midY - 1, fillW, 3, 3, colTrackFill, colTrackFill, 0);
-        p.drawEllipse(cx + fillW - 6, midY - 6, 12, 12, colThumb, colThumb, 0);
+            p.fillRoundedRectGDI(cx, midY - 2, fillW, 4, 2,
+                                 colTrackFill, colTrackFill, 0);
+
+        // Thumb circle — centered on fill end
+        int thumbX = cx + fillW - 6;
+        int thumbY = midY - 6;
+        p.drawEllipse(thumbX, thumbY, 12, 12, colThumb, colThumb, 0);
     }
 
-    void _renderCenterPlay(Painter& p, FontCache& fontCache) {
+    void _renderCenterPlay(Painter &p, FontCache &fontCache)
+    {
         int cx = x + width / 2;
         int cy = y + (height - barHeight) / 2;
-        int r  = 28;
+        int r = 28;
         p.drawEllipse(cx - r, cy - r, r * 2, r * 2,
                       Color::fromRGBA(0, 0, 0, 160), Color::fromRGBA(0, 0, 0, 0), 0);
-        NativeFont   iconFont = fontCache.getFont(kIconFont, 32, FontWeight::Normal);
+        NativeFont iconFont = fontCache.getFont(kIconFont, 32, FontWeight::Normal);
         std::wstring g(1, FluxIcons::glyph(FluxIcons::Play));
         p.drawText(g, cx - r, cy - r, r * 2, r * 2,
                    iconFont, Color::fromRGB(255, 255, 255),
@@ -598,21 +993,26 @@ private:
 
 using VideoPlayerWidgetPtr = std::shared_ptr<VideoPlayerWidget>;
 
-inline VideoPlayerWidgetPtr VideoPlayer(const std::string& path = "") {
+inline VideoPlayerWidgetPtr VideoPlayer(const std::string &path = "")
+{
     auto w = std::make_shared<VideoPlayerWidget>();
-    if (!path.empty()) w->setPath(path);
+    if (!path.empty())
+        w->setPath(path);
     return w;
 }
 
-inline VideoPlayerWidgetPtr VideoPlayerFromUrl(const std::string& url) {
+inline VideoPlayerWidgetPtr VideoPlayerFromUrl(const std::string &url)
+{
     return std::make_shared<VideoPlayerWidget>()->setUrl(url);
 }
 
-inline VideoPlayerWidgetPtr VideoPlayerFromMemory(const std::vector<uint8_t>& bytes) {
+inline VideoPlayerWidgetPtr VideoPlayerFromMemory(const std::vector<uint8_t> &bytes)
+{
     return std::make_shared<VideoPlayerWidget>()->setMemory(bytes);
 }
 
-inline VideoPlayerWidgetPtr VideoPlayerFromMemory(const uint8_t* data, size_t len) {
+inline VideoPlayerWidgetPtr VideoPlayerFromMemory(const uint8_t *data, size_t len)
+{
     return std::make_shared<VideoPlayerWidget>()->setMemory(data, len);
 }
 
@@ -627,48 +1027,53 @@ inline VideoPlayerWidgetPtr VideoPlayerFromMemory(const uint8_t* data, size_t le
 #include "flux/flux_video.hpp"
 #include "flux_icons.hpp"
 
-class VideoPlayerWidget : public Widget {
+class VideoPlayerWidget : public Widget
+{
 public:
     std::string videoPath;
-    int  barHeight = 40;
-    bool autoPlay  = false;
+    int barHeight = 40;
+    bool autoPlay = false;
 
-    Color colBar       = Color::fromRGBA( 20,  20,  20, 220);
-    Color colTrackBg   = Color::fromRGB (100, 100, 100);
-    Color colTrackFill = Color::fromRGB (220, 220, 220);
-    Color colThumb     = Color::fromRGB (255, 255, 255);
-    Color colText      = Color::fromRGB (230, 230, 230);
-    Color colIcon      = Color::fromRGB (220, 220, 220);
-    Color colIconHov   = Color::fromRGB (255, 255, 255);
-    Color colBg        = Color::fromRGB (  0,   0,   0);
+    Color colBar = Color::fromRGBA(20, 20, 20, 220);
+    Color colTrackBg = Color::fromRGB(100, 100, 100);
+    Color colTrackFill = Color::fromRGB(220, 220, 220);
+    Color colThumb = Color::fromRGB(255, 255, 255);
+    Color colText = Color::fromRGB(230, 230, 230);
+    Color colIcon = Color::fromRGB(220, 220, 220);
+    Color colIconHov = Color::fromRGB(255, 255, 255);
+    Color colBg = Color::fromRGB(0, 0, 0);
     Color colLoadingText = Color::fromRGB(180, 180, 180);
-    Color colErrorText   = Color::fromRGB(220,  80,  80);
+    Color colErrorText = Color::fromRGB(220, 80, 80);
 
-    std::shared_ptr<VideoPlayerWidget> setPath(const std::string &p) {
-        videoPath   = p;
+    std::shared_ptr<VideoPlayerWidget> setPath(const std::string &p)
+    {
+        videoPath = p;
         _sourceType = VideoSourceType::Path;
         _sourceUrl.clear();
         _sourceMemory.clear();
         return self();
     }
 
-    std::shared_ptr<VideoPlayerWidget> setUrl(const std::string &url) {
-        _sourceUrl  = url;
+    std::shared_ptr<VideoPlayerWidget> setUrl(const std::string &url)
+    {
+        _sourceUrl = url;
         _sourceType = VideoSourceType::Url;
         videoPath.clear();
         _sourceMemory.clear();
         return self();
     }
 
-    std::shared_ptr<VideoPlayerWidget> setMemory(const std::vector<uint8_t> &bytes) {
+    std::shared_ptr<VideoPlayerWidget> setMemory(const std::vector<uint8_t> &bytes)
+    {
         _sourceMemory = bytes;
-        _sourceType   = VideoSourceType::Memory;
+        _sourceType = VideoSourceType::Memory;
         videoPath.clear();
         _sourceUrl.clear();
         return self();
     }
 
-    std::shared_ptr<VideoPlayerWidget> setMemory(const uint8_t *data, size_t len) {
+    std::shared_ptr<VideoPlayerWidget> setMemory(const uint8_t *data, size_t len)
+    {
         _sourceMemory.assign(data, data + len);
         _sourceType = VideoSourceType::Memory;
         videoPath.clear();
@@ -676,29 +1081,41 @@ public:
         return self();
     }
 
-    std::shared_ptr<VideoPlayerWidget> setWidth(int w) {
-        Widget::width = w; autoWidth = false; return self();
+    std::shared_ptr<VideoPlayerWidget> setWidth(int w)
+    {
+        Widget::width = w;
+        autoWidth = false;
+        return self();
     }
-    std::shared_ptr<VideoPlayerWidget> setHeight(int h) {
-        Widget::height = h; autoHeight = false; return self();
+    std::shared_ptr<VideoPlayerWidget> setHeight(int h)
+    {
+        Widget::height = h;
+        autoHeight = false;
+        return self();
     }
-    std::shared_ptr<VideoPlayerWidget> setAutoPlay(bool b) {
-        autoPlay = b; return self();
+    std::shared_ptr<VideoPlayerWidget> setAutoPlay(bool b)
+    {
+        autoPlay = b;
+        return self();
     }
 
-    VideoPlayerWidget() {
+    VideoPlayerWidget()
+    {
         autoWidth = autoHeight = false;
-        width = 320; height = 180;
+        width = 320;
+        height = 180;
 
-        FluxVideo::get().setOnFinished([this]() {
+        FluxVideo::get().setOnFinished([this]()
+                                       {
             _finishedPending = true;
             if (auto *ui = FluxUI::getCurrentInstance())
-                ui->invalidateWidget(x, y, width, height);
-        });
-        FluxVideo::get().setOnReady([this](int, int) { markNeedsPaint(); });
+                ui->invalidateWidget(x, y, width, height); });
+        FluxVideo::get().setOnReady([this](int, int)
+                                    { markNeedsPaint(); });
     }
 
-    ~VideoPlayerWidget() {
+    ~VideoPlayerWidget()
+    {
         _destroyed = true;
         _stopTimers();
         FluxVideo::get().close();
@@ -708,68 +1125,92 @@ public:
 
     // ── Layout ────────────────────────────────────────────────────────────
     void computeLayout(GraphicsContext & /*ctx*/, const BoxConstraints &constraints,
-                       FontCache & /*fontCache*/) override {
-        if (autoWidth)  width  = constraints.maxWidth;
-        if (autoHeight) height = constraints.maxHeight;
+                       FontCache & /*fontCache*/) override
+    {
+        if (autoWidth)
+            width = constraints.maxWidth;
+        if (autoHeight)
+            height = constraints.maxHeight;
         applyConstraints();
         needsLayout = false;
 
-        if (!_opened) {
+        if (!_opened)
+        {
             _opened = true;
             _openVideoSource();
         }
     }
 
     // ── Render ────────────────────────────────────────────────────────────
-    void render(GraphicsContext &ctx, FontCache &fontCache) override {
-        if (_finishedPending.exchange(false)) {
-            _playing = false; _finished = true; _progress = 1.f;
+    void render(GraphicsContext &ctx, FontCache &fontCache) override
+    {
+        if (_finishedPending.exchange(false))
+        {
+            _playing = false;
+            _finished = true;
+            _progress = 1.f;
         }
 
         Painter p(ctx);
         p.fillRect(x, y, width, height, colBg);
 
         // ── Loading / error overlay ──────────────────────────────────
-        if (_netState == NetState::Loading) {
+        if (_netState == NetState::Loading)
+        {
             _renderStatusOverlay(p, fontCache, "... Loading ...", colLoadingText);
-            needsPaint = false; return;
+            needsPaint = false;
+            return;
         }
-        if (_netState == NetState::Error) {
+        if (_netState == NetState::Error)
+        {
             _renderStatusOverlay(p, fontCache, "Error loading video", colErrorText);
-            needsPaint = false; return;
+            needsPaint = false;
+            return;
         }
 
         auto letterbox = [&](int srcW, int srcH,
-                             int &dstX, int &dstY, int &dstW, int &dstH) {
+                             int &dstX, int &dstY, int &dstW, int &dstH)
+        {
             float vidAR = (float)srcW / (float)srcH;
-            float widAR = (float)width  / (float)(height - barHeight);
-            if (vidAR > widAR) {
-                dstW = width; dstH = (int)(dstW / vidAR);
-                dstX = x;    dstY = y + (height - barHeight - dstH) / 2;
-            } else {
-                dstH = height - barHeight; dstW = (int)(dstH * vidAR);
-                dstX = x + (width - dstW) / 2; dstY = y;
+            float widAR = (float)width / (float)(height - barHeight);
+            if (vidAR > widAR)
+            {
+                dstW = width;
+                dstH = (int)(dstW / vidAR);
+                dstX = x;
+                dstY = y + (height - barHeight - dstH) / 2;
+            }
+            else
+            {
+                dstH = height - barHeight;
+                dstW = (int)(dstH * vidAR);
+                dstX = x + (width - dstW) / 2;
+                dstY = y;
             }
         };
 
-        if (FluxVideo::get().hasNewFrame()) {
+        if (FluxVideo::get().hasNewFrame())
+        {
             auto frame = FluxVideo::get().lockFrame();
-            if (frame.data && frame.width > 0 && frame.height > 0) {
+            if (frame.data && frame.width > 0 && frame.height > 0)
+            {
                 int byteCount = frame.stride * frame.height;
                 _frameCache.assign(frame.data, frame.data + byteCount);
-                _cachedSrcW = frame.width; _cachedSrcH = frame.height;
+                _cachedSrcW = frame.width;
+                _cachedSrcH = frame.height;
                 _cachedBmi = {};
-                _cachedBmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
-                _cachedBmi.bmiHeader.biWidth       = frame.width;
-                _cachedBmi.bmiHeader.biHeight      = -frame.height;
-                _cachedBmi.bmiHeader.biPlanes      = 1;
-                _cachedBmi.bmiHeader.biBitCount    = 24;
+                _cachedBmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+                _cachedBmi.bmiHeader.biWidth = frame.width;
+                _cachedBmi.bmiHeader.biHeight = -frame.height;
+                _cachedBmi.bmiHeader.biPlanes = 1;
+                _cachedBmi.bmiHeader.biBitCount = 24;
                 _cachedBmi.bmiHeader.biCompression = BI_RGB;
             }
             _progress = FluxVideo::get().getProgress();
         }
 
-        if (!_frameCache.empty() && _cachedSrcW > 0) {
+        if (!_frameCache.empty() && _cachedSrcW > 0)
+        {
             int dstX, dstY, dstW, dstH;
             letterbox(_cachedSrcW, _cachedSrcH, dstX, dstY, dstW, dstH);
             ::SetStretchBltMode(ctx.hdc, HALFTONE);
@@ -779,22 +1220,27 @@ public:
                             _frameCache.data(), &_cachedBmi, DIB_RGB_COLORS, SRCCOPY);
         }
 
-        if (_barVisible) _renderBar(ctx, fontCache, p);
-        if (!_playing && _barVisible) _renderCenterPlay(p, fontCache);
+        if (_barVisible)
+            _renderBar(ctx, fontCache, p);
+        if (!_playing && _barVisible)
+            _renderCenterPlay(p, fontCache);
         needsPaint = false;
     }
 
     // ── Mouse events ──────────────────────────────────────────────────────
-    bool handleMouseDown(int mx, int my) override {
-        if (!_inWidget(mx, my)) return false;
+    bool handleMouseDown(int mx, int my) override
+    {
+        if (!_inWidget(mx, my))
+            return false;
 
-        int barY  = y + height - barHeight;
+        int barY = y + height - barHeight;
         int btnSz = 28;
-        Rect barArea  = {x, barY, width, barHeight};
-        Rect playBtn  = {x + 6, barY + (barHeight - btnSz) / 2, btnSz, btnSz};
+        Rect barArea = {x, barY, width, barHeight};
+        Rect playBtn = {x + 6, barY + (barHeight - btnSz) / 2, btnSz, btnSz};
 
         // Tap on the video area (above the bar): show bar + toggle play/pause
-        if (!_inRect(mx, my, barArea)) {
+        if (!_inRect(mx, my, barArea))
+        {
             _barVisible = true;
             _resetBarTimer();
             _togglePlayPause();
@@ -807,78 +1253,123 @@ public:
         _resetBarTimer();
         markNeedsPaint();
 
-        if (_inRect(mx, my, playBtn)) { _togglePlayPause(); return true; }
-        if (_inRect(mx, my, _trackRect)) {
+        if (_inRect(mx, my, playBtn))
+        {
+            _togglePlayPause();
+            return true;
+        }
+        if (_inRect(mx, my, _trackRect))
+        {
             _dragging = true;
             FluxUI::getCurrentInstance()->captureMouseInput();
-            _seekFromMouse(mx); return true;
+            _seekFromMouse(mx);
+            return true;
         }
         return true;
     }
 
-    bool handleMouseUp(int, int) override {
-        if (_dragging) { _dragging = false; FluxUI::getCurrentInstance()->releaseMouseInput(); }
+    bool handleMouseUp(int, int) override
+    {
+        if (_dragging)
+        {
+            _dragging = false;
+            FluxUI::getCurrentInstance()->releaseMouseInput();
+        }
         return false;
     }
 
-    bool handleMouseMove(int mx, int my) override {
-        if (_dragging) { _seekFromMouse(mx); return true; }
+    bool handleMouseMove(int mx, int my) override
+    {
+        if (_dragging)
+        {
+            _seekFromMouse(mx);
+            return true;
+        }
         bool inW = _inWidget(mx, my);
-        if (inW != _barVisible) { _barVisible = inW; markNeedsPaint(); }
-        if (inW) _resetBarTimer();
+        if (inW != _barVisible)
+        {
+            _barVisible = inW;
+            markNeedsPaint();
+        }
+        if (inW)
+            _resetBarTimer();
         bool hp = _inRect(mx, my, _playBtnRect);
-        if (hp != _hovPlay) { _hovPlay = hp; markNeedsPaint(); }
+        if (hp != _hovPlay)
+        {
+            _hovPlay = hp;
+            markNeedsPaint();
+        }
         return false;
     }
 
-    bool handleMouseLeave() override {
-        _barVisible = _hovPlay = false; markNeedsPaint(); return true;
+    bool handleMouseLeave() override
+    {
+        _barVisible = _hovPlay = false;
+        markNeedsPaint();
+        return true;
     }
 
 private:
     // ── Source ────────────────────────────────────────────────────────────
-    VideoSourceType      _sourceType   = VideoSourceType::None;
-    std::string          _sourceUrl;
+    VideoSourceType _sourceType = VideoSourceType::None;
+    std::string _sourceUrl;
     std::vector<uint8_t> _sourceMemory;
 
-    enum class NetState { Idle, Loading, Error };
+    enum class NetState
+    {
+        Idle,
+        Loading,
+        Error
+    };
     NetState _netState = NetState::Idle;
 
-    bool  _opened   = false;
-    bool  _playing  = false;
-    bool  _finished = false;
+    bool _opened = false;
+    bool _playing = false;
+    bool _finished = false;
     float _progress = 0.f;
-    bool  _dragging = false;
-    bool  _barVisible = true;
-    bool  _hovPlay  = false;
+    bool _dragging = false;
+    bool _barVisible = true;
+    bool _hovPlay = false;
 
     std::vector<uint8_t> _frameCache;
     BITMAPINFO _cachedBmi{};
     int _cachedSrcW = 0, _cachedSrcH = 0;
 
-    struct Rect { int x, y, w, h; };
+    struct Rect
+    {
+        int x, y, w, h;
+    };
     Rect _barRect{}, _playBtnRect{}, _trackRect{};
 
     TimerID _progressTimer = 0, _barHideTimer = 0;
-    std::atomic<bool> _destroyed      {false};
+    std::atomic<bool> _destroyed{false};
     std::atomic<bool> _finishedPending{false};
 
     // ── Source dispatch ───────────────────────────────────────────────────
-    void _openVideoSource() {
-        if (_sourceType == VideoSourceType::Url && !_sourceUrl.empty()) {
-            _loadFromUrl(); return;
+    void _openVideoSource()
+    {
+        if (_sourceType == VideoSourceType::Url && !_sourceUrl.empty())
+        {
+            _loadFromUrl();
+            return;
         }
-        if (_sourceType == VideoSourceType::Memory && !_sourceMemory.empty()) {
-            _playFromMemory(); return;
+        if (_sourceType == VideoSourceType::Memory && !_sourceMemory.empty())
+        {
+            _playFromMemory();
+            return;
         }
-        if (!videoPath.empty()) _openVideo();
+        if (!videoPath.empty())
+            _openVideo();
     }
 
-    void _loadFromUrl() {
-        _netState = NetState::Loading; markNeedsPaint();
+    void _loadFromUrl()
+    {
+        _netState = NetState::Loading;
+        markNeedsPaint();
         std::weak_ptr<VideoPlayerWidget> weak = self();
         std::string url = _sourceUrl;
-        FluxHttp::get(url, [weak](HttpResult result) {
+        FluxHttp::get(url, [weak](HttpResult result)
+                      {
             auto s = weak.lock();
             if (!s) return;
             if (!result.success || result.body.empty()) {
@@ -887,98 +1378,161 @@ private:
             const auto *d = reinterpret_cast<const uint8_t *>(result.body.data());
             s->_sourceMemory.assign(d, d + result.body.size());
             s->_netState = NetState::Idle;
-            s->_playFromMemory();
-        });
+            s->_playFromMemory(); });
     }
 
-    void _playFromMemory() {
-        if (_sourceMemory.empty()) return;
-        std::string ext  = VP_detectVideoExtension(_sourceMemory);
+    void _playFromMemory()
+    {
+        if (_sourceMemory.empty())
+            return;
+        std::string ext = VP_detectVideoExtension(_sourceMemory);
         std::string path = VP_writeTempFile(_sourceMemory, ext);
-        if (path.empty()) { _netState = NetState::Error; markNeedsPaint(); return; }
+        if (path.empty())
+        {
+            _netState = NetState::Error;
+            markNeedsPaint();
+            return;
+        }
         videoPath = path;
         _openVideo();
     }
 
-    void _openVideo() {
+    void _openVideo()
+    {
         FluxVideo::get().open(videoPath);
-        if (autoPlay) { FluxVideo::get().play(); _playing = true; _startProgressTimer(); }
-    }
-
-    void _togglePlayPause() {
-        auto &vid = FluxVideo::get();
-        if (_finished) {
-            _finished = false; _progress = 0.f;
-            vid.seekToProgress(0.f); vid.play(); _playing = true; _startProgressTimer(); return;
+        if (autoPlay)
+        {
+            FluxVideo::get().play();
+            _playing = true;
+            _startProgressTimer();
         }
-        if (_playing) { vid.pause(); _playing = false; }
-        else          { vid.play();  _playing = true; _startProgressTimer(); }
     }
 
-    void _seekFromMouse(int mx) {
-        if (_trackRect.w <= 0) return;
+    void _togglePlayPause()
+    {
+        auto &vid = FluxVideo::get();
+        if (_finished)
+        {
+            _finished = false;
+            _progress = 0.f;
+            vid.seekToProgress(0.f);
+            vid.play();
+            _playing = true;
+            _startProgressTimer();
+            return;
+        }
+        if (_playing)
+        {
+            vid.pause();
+            _playing = false;
+        }
+        else
+        {
+            vid.play();
+            _playing = true;
+            _startProgressTimer();
+        }
+    }
+
+    void _seekFromMouse(int mx)
+    {
+        if (_trackRect.w <= 0)
+            return;
         float t = std::max(0.f, std::min(1.f, (float)(mx - _trackRect.x) / (float)_trackRect.w));
-        _progress = t; FluxVideo::get().seekToProgress(t);
-        if (_finished && t < 0.999f) {
-            _finished = false; FluxVideo::get().play(); _playing = true; _startProgressTimer();
+        _progress = t;
+        FluxVideo::get().seekToProgress(t);
+        if (_finished && t < 0.999f)
+        {
+            _finished = false;
+            FluxVideo::get().play();
+            _playing = true;
+            _startProgressTimer();
         }
         markNeedsPaint();
     }
 
-    void _startProgressTimer() {
-        if (_progressTimer) return;
-        _progressTimer = FluxUI::getCurrentInstance()->setInterval(33, [this]() {
+    void _startProgressTimer()
+    {
+        if (_progressTimer)
+            return;
+        _progressTimer = FluxUI::getCurrentInstance()->setInterval(33, [this]()
+                                                                   {
             if (_destroyed) return;
-            if (_playing) { _progress = FluxVideo::get().getProgress(); markNeedsPaint(); }
-        });
+            if (_playing) { _progress = FluxVideo::get().getProgress(); markNeedsPaint(); } });
     }
 
-    void _resetBarTimer() {
-        auto *ui = FluxUI::getCurrentInstance(); if (!ui) return;
-        if (_barHideTimer) { ui->clearInterval(_barHideTimer); _barHideTimer = 0; }
-        _barHideTimer = ui->setInterval(3000, [this]() {
+    void _resetBarTimer()
+    {
+        auto *ui = FluxUI::getCurrentInstance();
+        if (!ui)
+            return;
+        if (_barHideTimer)
+        {
+            ui->clearInterval(_barHideTimer);
+            _barHideTimer = 0;
+        }
+        _barHideTimer = ui->setInterval(3000, [this]()
+                                        {
             if (_destroyed) return;
             auto *u = FluxUI::getCurrentInstance();
             if (u && _barHideTimer) { u->clearInterval(_barHideTimer); _barHideTimer = 0; }
-            if (_playing) { _barVisible = false; markNeedsPaint(); }
-        });
+            if (_playing) { _barVisible = false; markNeedsPaint(); } });
     }
 
-    void _stopTimers() {
-        auto *ui = FluxUI::getCurrentInstance(); if (!ui) return;
-        if (_progressTimer) { ui->clearInterval(_progressTimer); _progressTimer = 0; }
-        if (_barHideTimer)  { ui->clearInterval(_barHideTimer);  _barHideTimer  = 0; }
+    void _stopTimers()
+    {
+        auto *ui = FluxUI::getCurrentInstance();
+        if (!ui)
+            return;
+        if (_progressTimer)
+        {
+            ui->clearInterval(_progressTimer);
+            _progressTimer = 0;
+        }
+        if (_barHideTimer)
+        {
+            ui->clearInterval(_barHideTimer);
+            _barHideTimer = 0;
+        }
     }
 
-    std::shared_ptr<VideoPlayerWidget> self() {
+    std::shared_ptr<VideoPlayerWidget> self()
+    {
         return std::static_pointer_cast<VideoPlayerWidget>(shared_from_this());
     }
-    bool _inWidget(int mx, int my) const {
+    bool _inWidget(int mx, int my) const
+    {
         return mx >= x && mx < x + width && my >= y && my < y + height;
     }
-    static bool _inRect(int mx, int my, const Rect &r) {
+    static bool _inRect(int mx, int my, const Rect &r)
+    {
         return mx >= r.x && mx < r.x + r.w && my >= r.y && my < r.y + r.h;
     }
 
-    static std::string _fmtTime(float s) {
-        int si = (int)s; char buf[16];
-        snprintf(buf, sizeof(buf), "%d:%02d", si / 60, si % 60); return buf;
+    static std::string _fmtTime(float s)
+    {
+        int si = (int)s;
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%d:%02d", si / 60, si % 60);
+        return buf;
     }
 
     void _renderStatusOverlay(Painter &p, FontCache &fontCache,
-                               const std::string &msg, Color col) {
+                              const std::string &msg, Color col)
+    {
         NativeFont tf = fontCache.getFont("Segoe UI", 14, FontWeight::Normal);
         p.drawTextA(msg, x, y, width, height, tf, col,
                     DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }
 
-    void _renderBar(GraphicsContext & /*ctx*/, FontCache &fontCache, Painter &p) {
+    void _renderBar(GraphicsContext & /*ctx*/, FontCache &fontCache, Painter &p)
+    {
         int barY = y + height - barHeight;
         _barRect = {x, barY, width, barHeight};
         p.fillRect(x, barY, width, barHeight, colBar);
 
         int midY = barY + barHeight / 2;
-        int cx   = x + 6;
+        int cx = x + 6;
         int btnSz = 28;
         _playBtnRect = {cx, barY + (barHeight - btnSz) / 2, btnSz, btnSz};
 
@@ -1009,39 +1563,44 @@ private:
         p.drawEllipse(cx + fillW - 6, midY - 6, 12, 12, colThumb, colThumb, 0);
     }
 
-    void _renderCenterPlay(Painter &p, FontCache &fontCache) {
+    void _renderCenterPlay(Painter &p, FontCache &fontCache)
+    {
         int cx = x + width / 2, cy = y + (height - barHeight) / 2, r = 28;
         p.drawEllipse(cx - r, cy - r, r * 2, r * 2,
-                      Color::fromRGBA(0,0,0,160), Color::fromRGBA(0,0,0,0), 0);
+                      Color::fromRGBA(0, 0, 0, 160), Color::fromRGBA(0, 0, 0, 0), 0);
         NativeFont iconFont = fontCache.getFont(kIconFont, 32, FontWeight::Normal);
         std::wstring g(1, FluxIcons::glyph(FluxIcons::Play));
         p.drawText(g, cx - r, cy - r, r * 2, r * 2, iconFont,
-                   Color::fromRGB(255,255,255), DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                   Color::fromRGB(255, 255, 255), DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }
 };
 
 using VideoPlayerWidgetPtr = std::shared_ptr<VideoPlayerWidget>;
 
-inline VideoPlayerWidgetPtr VideoPlayer(const std::string &path = "") {
+inline VideoPlayerWidgetPtr VideoPlayer(const std::string &path = "")
+{
     auto w = std::make_shared<VideoPlayerWidget>();
-    if (!path.empty()) w->setPath(path);
+    if (!path.empty())
+        w->setPath(path);
     return w;
 }
 
-inline VideoPlayerWidgetPtr VideoPlayerFromUrl(const std::string &url) {
+inline VideoPlayerWidgetPtr VideoPlayerFromUrl(const std::string &url)
+{
     return std::make_shared<VideoPlayerWidget>()->setUrl(url);
 }
 
-inline VideoPlayerWidgetPtr VideoPlayerFromMemory(const std::vector<uint8_t> &bytes) {
+inline VideoPlayerWidgetPtr VideoPlayerFromMemory(const std::vector<uint8_t> &bytes)
+{
     return std::make_shared<VideoPlayerWidget>()->setMemory(bytes);
 }
 
-inline VideoPlayerWidgetPtr VideoPlayerFromMemory(const uint8_t *data, size_t len) {
+inline VideoPlayerWidgetPtr VideoPlayerFromMemory(const uint8_t *data, size_t len)
+{
     return std::make_shared<VideoPlayerWidget>()->setMemory(data, len);
 }
 
 #endif // _WIN32
-
 
 // ============================================================================
 // VideoPlayerWidget — Linux (Cairo / SDL backend)
@@ -1053,48 +1612,53 @@ inline VideoPlayerWidgetPtr VideoPlayerFromMemory(const uint8_t *data, size_t le
 #include "flux_icons.hpp"
 #include <cairo/cairo.h>
 
-class VideoPlayerWidget : public Widget {
+class VideoPlayerWidget : public Widget
+{
 public:
     std::string videoPath;
-    int  barHeight = 40;
-    bool autoPlay  = false;
+    int barHeight = 40;
+    bool autoPlay = false;
 
-    Color colBar       = Color::fromRGBA( 20,  20,  20, 220);
-    Color colTrackBg   = Color::fromRGB (100, 100, 100);
-    Color colTrackFill = Color::fromRGB (220, 220, 220);
-    Color colThumb     = Color::fromRGB (255, 255, 255);
-    Color colText      = Color::fromRGB (230, 230, 230);
-    Color colIcon      = Color::fromRGB (220, 220, 220);
-    Color colIconHov   = Color::fromRGB (255, 255, 255);
-    Color colBg        = Color::fromRGB (  0,   0,   0);
+    Color colBar = Color::fromRGBA(20, 20, 20, 220);
+    Color colTrackBg = Color::fromRGB(100, 100, 100);
+    Color colTrackFill = Color::fromRGB(220, 220, 220);
+    Color colThumb = Color::fromRGB(255, 255, 255);
+    Color colText = Color::fromRGB(230, 230, 230);
+    Color colIcon = Color::fromRGB(220, 220, 220);
+    Color colIconHov = Color::fromRGB(255, 255, 255);
+    Color colBg = Color::fromRGB(0, 0, 0);
     Color colLoadingText = Color::fromRGB(180, 180, 180);
-    Color colErrorText   = Color::fromRGB(220,  80,  80);
+    Color colErrorText = Color::fromRGB(220, 80, 80);
 
-    std::shared_ptr<VideoPlayerWidget> setPath(const std::string &p) {
-        videoPath   = p;
+    std::shared_ptr<VideoPlayerWidget> setPath(const std::string &p)
+    {
+        videoPath = p;
         _sourceType = VideoSourceType::Path;
         _sourceUrl.clear();
         _sourceMemory.clear();
         return self();
     }
 
-    std::shared_ptr<VideoPlayerWidget> setUrl(const std::string &url) {
-        _sourceUrl  = url;
+    std::shared_ptr<VideoPlayerWidget> setUrl(const std::string &url)
+    {
+        _sourceUrl = url;
         _sourceType = VideoSourceType::Url;
         videoPath.clear();
         _sourceMemory.clear();
         return self();
     }
 
-    std::shared_ptr<VideoPlayerWidget> setMemory(const std::vector<uint8_t> &bytes) {
+    std::shared_ptr<VideoPlayerWidget> setMemory(const std::vector<uint8_t> &bytes)
+    {
         _sourceMemory = bytes;
-        _sourceType   = VideoSourceType::Memory;
+        _sourceType = VideoSourceType::Memory;
         videoPath.clear();
         _sourceUrl.clear();
         return self();
     }
 
-    std::shared_ptr<VideoPlayerWidget> setMemory(const uint8_t *data, size_t len) {
+    std::shared_ptr<VideoPlayerWidget> setMemory(const uint8_t *data, size_t len)
+    {
         _sourceMemory.assign(data, data + len);
         _sourceType = VideoSourceType::Memory;
         videoPath.clear();
@@ -1102,29 +1666,41 @@ public:
         return self();
     }
 
-    std::shared_ptr<VideoPlayerWidget> setWidth(int w) {
-        Widget::width = w; autoWidth = false; return self();
+    std::shared_ptr<VideoPlayerWidget> setWidth(int w)
+    {
+        Widget::width = w;
+        autoWidth = false;
+        return self();
     }
-    std::shared_ptr<VideoPlayerWidget> setHeight(int h) {
-        Widget::height = h; autoHeight = false; return self();
+    std::shared_ptr<VideoPlayerWidget> setHeight(int h)
+    {
+        Widget::height = h;
+        autoHeight = false;
+        return self();
     }
-    std::shared_ptr<VideoPlayerWidget> setAutoPlay(bool b) {
-        autoPlay = b; return self();
+    std::shared_ptr<VideoPlayerWidget> setAutoPlay(bool b)
+    {
+        autoPlay = b;
+        return self();
     }
 
-    VideoPlayerWidget() {
+    VideoPlayerWidget()
+    {
         autoWidth = autoHeight = false;
-        width = 320; height = 180;
+        width = 320;
+        height = 180;
 
-        FluxVideo::get().setOnFinished([this]() {
+        FluxVideo::get().setOnFinished([this]()
+                                       {
             _finishedPending = true;
             if (auto *ui = FluxUI::getCurrentInstance())
-                ui->invalidateWidget(x, y, width, height);
-        });
-        FluxVideo::get().setOnReady([this](int, int) { markNeedsPaint(); });
+                ui->invalidateWidget(x, y, width, height); });
+        FluxVideo::get().setOnReady([this](int, int)
+                                    { markNeedsPaint(); });
     }
 
-    ~VideoPlayerWidget() {
+    ~VideoPlayerWidget()
+    {
         _destroyed = true;
         _stopTimers();
         FluxVideo::get().close();
@@ -1135,62 +1711,85 @@ public:
 
     // ── Layout ────────────────────────────────────────────────────────────
     void computeLayout(GraphicsContext & /*ctx*/, const BoxConstraints &constraints,
-                       FontCache & /*fontCache*/) override {
-        if (autoWidth)  width  = constraints.maxWidth;
-        if (autoHeight) height = constraints.maxHeight;
+                       FontCache & /*fontCache*/) override
+    {
+        if (autoWidth)
+            width = constraints.maxWidth;
+        if (autoHeight)
+            height = constraints.maxHeight;
         applyConstraints();
         needsLayout = false;
 
-        if (!_opened) {
+        if (!_opened)
+        {
             _opened = true;
             _openVideoSource();
         }
     }
 
     // ── Render ────────────────────────────────────────────────────────────
-    void render(GraphicsContext &ctx, FontCache &fontCache) override {
-        if (_finishedPending.exchange(false)) {
-            _playing = false; _finished = true; _progress = 1.f;
+    void render(GraphicsContext &ctx, FontCache &fontCache) override
+    {
+        if (_finishedPending.exchange(false))
+        {
+            _playing = false;
+            _finished = true;
+            _progress = 1.f;
         }
 
         Painter p(ctx);
         p.fillRect(x, y, width, height, colBg);
 
         // ── Loading / error overlay ──────────────────────────────────
-        if (_netState == NetState::Loading) {
+        if (_netState == NetState::Loading)
+        {
             _renderStatusOverlay(p, fontCache, "... Loading ...", colLoadingText);
-            needsPaint = false; return;
+            needsPaint = false;
+            return;
         }
-        if (_netState == NetState::Error) {
+        if (_netState == NetState::Error)
+        {
             _renderStatusOverlay(p, fontCache, "Error loading video", colErrorText);
-            needsPaint = false; return;
+            needsPaint = false;
+            return;
         }
 
-        if (FluxVideo::get().hasNewFrame()) {
+        if (FluxVideo::get().hasNewFrame())
+        {
             auto frame = FluxVideo::get().lockFrame();
-            if (frame.data && frame.width > 0 && frame.height > 0) {
+            if (frame.data && frame.width > 0 && frame.height > 0)
+            {
                 int byteCount = frame.stride * frame.height;
                 _frameCache.assign(frame.data, frame.data + byteCount);
-                _cachedSrcW = frame.width; _cachedSrcH = frame.height;
+                _cachedSrcW = frame.width;
+                _cachedSrcH = frame.height;
                 if (_cachedSrcW != _cairoSurfW || _cachedSrcH != _cairoSurfH)
                     _rebuildCairoSurface();
             }
             _progress = FluxVideo::get().getProgress();
         }
 
-        if (_cairoSurf && !_frameCache.empty() && _cachedSrcW > 0 && ctx.cr) {
+        if (_cairoSurf && !_frameCache.empty() && _cachedSrcW > 0 && ctx.cr)
+        {
             _updateCairoPixels();
             cairo_surface_mark_dirty(_cairoSurf);
 
             float vidAR = (float)_cachedSrcW / (float)_cachedSrcH;
-            float widAR = (float)width  / (float)(height - barHeight);
+            float widAR = (float)width / (float)(height - barHeight);
             int dstX, dstY, dstW, dstH;
-            if (vidAR > widAR) {
-                dstW = width; dstH = (int)((float)dstW / vidAR);
-                dstX = x;    dstY = y + (height - barHeight - dstH) / 2;
-            } else {
-                dstH = height - barHeight; dstW = (int)((float)dstH * vidAR);
-                dstX = x + (width - dstW) / 2; dstY = y;
+            if (vidAR > widAR)
+            {
+                dstW = width;
+                dstH = (int)((float)dstW / vidAR);
+                dstX = x;
+                dstY = y + (height - barHeight - dstH) / 2;
+            }
+            else
+            {
+                dstH = height - barHeight;
+                dstW = (int)((float)dstH * vidAR);
+                dstX = x + (width - dstW) / 2;
+                dstY = y;
             }
 
             cairo_save(ctx.cr);
@@ -1205,118 +1804,188 @@ public:
             cairo_restore(ctx.cr);
         }
 
-        if (_barVisible) _renderBar(ctx, fontCache, p);
-        if (!_playing && _barVisible) _renderCenterPlay(p, fontCache);
+        if (_barVisible)
+            _renderBar(ctx, fontCache, p);
+        if (!_playing && _barVisible)
+            _renderCenterPlay(p, fontCache);
         needsPaint = false;
     }
 
     // ── Mouse events ──────────────────────────────────────────────────────
-    bool handleMouseDown(int mx, int my) override {
-        if (!_inWidget(mx, my)) return false;
-        if (!_inRect(mx, my, _barRect)) {
-            _barVisible = true; _resetBarTimer(); _togglePlayPause(); markNeedsPaint(); return true;
+    bool handleMouseDown(int mx, int my) override
+    {
+        if (!_inWidget(mx, my))
+            return false;
+        if (!_inRect(mx, my, _barRect))
+        {
+            _barVisible = true;
+            _resetBarTimer();
+            _togglePlayPause();
+            markNeedsPaint();
+            return true;
         }
-        if (_inRect(mx, my, _playBtnRect)) { _togglePlayPause(); markNeedsPaint(); return true; }
-        if (_inRect(mx, my, _trackRect)) {
+        if (_inRect(mx, my, _playBtnRect))
+        {
+            _togglePlayPause();
+            markNeedsPaint();
+            return true;
+        }
+        if (_inRect(mx, my, _trackRect))
+        {
             _dragging = true;
             FluxUI::getCurrentInstance()->captureMouseInput();
-            _seekFromMouse(mx); markNeedsPaint(); return true;
+            _seekFromMouse(mx);
+            markNeedsPaint();
+            return true;
         }
         return true;
     }
 
-    bool handleMouseUp(int, int) override {
-        if (_dragging) { _dragging = false; FluxUI::getCurrentInstance()->releaseMouseInput(); }
+    bool handleMouseUp(int, int) override
+    {
+        if (_dragging)
+        {
+            _dragging = false;
+            FluxUI::getCurrentInstance()->releaseMouseInput();
+        }
         return false;
     }
 
-    bool handleMouseMove(int mx, int my) override {
-        if (_dragging) { _seekFromMouse(mx); return true; }
+    bool handleMouseMove(int mx, int my) override
+    {
+        if (_dragging)
+        {
+            _seekFromMouse(mx);
+            return true;
+        }
         bool inW = _inWidget(mx, my);
-        if (inW != _barVisible) { _barVisible = inW; markNeedsPaint(); }
-        if (inW) _resetBarTimer();
+        if (inW != _barVisible)
+        {
+            _barVisible = inW;
+            markNeedsPaint();
+        }
+        if (inW)
+            _resetBarTimer();
         bool hp = _inRect(mx, my, _playBtnRect);
-        if (hp != _hovPlay) { _hovPlay = hp; markNeedsPaint(); }
+        if (hp != _hovPlay)
+        {
+            _hovPlay = hp;
+            markNeedsPaint();
+        }
         return false;
     }
 
-    bool handleMouseLeave() override {
-        _barVisible = _hovPlay = false; markNeedsPaint(); return true;
+    bool handleMouseLeave() override
+    {
+        _barVisible = _hovPlay = false;
+        markNeedsPaint();
+        return true;
     }
 
 private:
     // ── Source ────────────────────────────────────────────────────────────
-    VideoSourceType      _sourceType   = VideoSourceType::None;
-    std::string          _sourceUrl;
+    VideoSourceType _sourceType = VideoSourceType::None;
+    std::string _sourceUrl;
     std::vector<uint8_t> _sourceMemory;
 
-    enum class NetState { Idle, Loading, Error };
+    enum class NetState
+    {
+        Idle,
+        Loading,
+        Error
+    };
     NetState _netState = NetState::Idle;
 
-    bool  _opened   = false;
-    bool  _playing  = false;
-    bool  _finished = false;
+    bool _opened = false;
+    bool _playing = false;
+    bool _finished = false;
     float _progress = 0.f;
-    bool  _dragging = false;
-    bool  _barVisible = true;
-    bool  _hovPlay  = false;
+    bool _dragging = false;
+    bool _barVisible = true;
+    bool _hovPlay = false;
 
     std::vector<uint8_t> _frameCache;
     int _cachedSrcW = 0, _cachedSrcH = 0;
 
     std::vector<uint8_t> _cairoPixels;
-    cairo_surface_t     *_cairoSurf  = nullptr;
-    int                  _cairoSurfW = 0, _cairoSurfH = 0;
+    cairo_surface_t *_cairoSurf = nullptr;
+    int _cairoSurfW = 0, _cairoSurfH = 0;
 
-    struct Rect { int x, y, w, h; };
+    struct Rect
+    {
+        int x, y, w, h;
+    };
     Rect _barRect{}, _playBtnRect{}, _trackRect{};
 
     TimerID _progressTimer = 0, _barHideTimer = 0;
-    std::atomic<bool> _destroyed      {false};
+    std::atomic<bool> _destroyed{false};
     std::atomic<bool> _finishedPending{false};
 
     // ── Cairo helpers ──────────────────────────────────────────────────────
-    void _rebuildCairoSurface() {
+    void _rebuildCairoSurface()
+    {
         _freeCairoSurface();
-        if (_cachedSrcW <= 0 || _cachedSrcH <= 0) return;
+        if (_cachedSrcW <= 0 || _cachedSrcH <= 0)
+            return;
         _cairoPixels.resize((size_t)(_cachedSrcW * _cachedSrcH * 4));
         _cairoSurf = cairo_image_surface_create_for_data(
             _cairoPixels.data(), CAIRO_FORMAT_RGB24,
             _cachedSrcW, _cachedSrcH, _cachedSrcW * 4);
-        _cairoSurfW = _cachedSrcW; _cairoSurfH = _cachedSrcH;
+        _cairoSurfW = _cachedSrcW;
+        _cairoSurfH = _cachedSrcH;
     }
 
-    void _freeCairoSurface() {
-        if (_cairoSurf) { cairo_surface_destroy(_cairoSurf); _cairoSurf = nullptr; }
+    void _freeCairoSurface()
+    {
+        if (_cairoSurf)
+        {
+            cairo_surface_destroy(_cairoSurf);
+            _cairoSurf = nullptr;
+        }
         _cairoSurfW = _cairoSurfH = 0;
     }
 
-    void _updateCairoPixels() {
+    void _updateCairoPixels()
+    {
         int n = _cachedSrcW * _cachedSrcH;
         const uint8_t *src = _frameCache.data();
-        uint8_t       *dst = _cairoPixels.data();
-        for (int i = 0; i < n; i++) {
-            dst[0] = src[2]; dst[1] = src[1]; dst[2] = src[0]; dst[3] = 0xFF;
-            src += 3; dst += 4;
+        uint8_t *dst = _cairoPixels.data();
+        for (int i = 0; i < n; i++)
+        {
+            dst[0] = src[2];
+            dst[1] = src[1];
+            dst[2] = src[0];
+            dst[3] = 0xFF;
+            src += 3;
+            dst += 4;
         }
     }
 
     // ── Source dispatch ────────────────────────────────────────────────────
-    void _openVideoSource() {
-        if (_sourceType == VideoSourceType::Url && !_sourceUrl.empty()) {
-            _loadFromUrl(); return;
+    void _openVideoSource()
+    {
+        if (_sourceType == VideoSourceType::Url && !_sourceUrl.empty())
+        {
+            _loadFromUrl();
+            return;
         }
-        if (_sourceType == VideoSourceType::Memory && !_sourceMemory.empty()) {
-            _playFromMemory(); return;
+        if (_sourceType == VideoSourceType::Memory && !_sourceMemory.empty())
+        {
+            _playFromMemory();
+            return;
         }
-        if (!videoPath.empty()) _openVideo();
+        if (!videoPath.empty())
+            _openVideo();
     }
 
-    void _loadFromUrl() {
-        _netState = NetState::Loading; markNeedsPaint();
+    void _loadFromUrl()
+    {
+        _netState = NetState::Loading;
+        markNeedsPaint();
         std::weak_ptr<VideoPlayerWidget> weak = self();
         std::string url = _sourceUrl;
-        FluxHttp::get(url, [weak](HttpResult result) {
+        FluxHttp::get(url, [weak](HttpResult result)
+                      {
             auto s = weak.lock();
             if (!s) return;
             if (!result.success || result.body.empty()) {
@@ -1325,98 +1994,161 @@ private:
             const auto *d = reinterpret_cast<const uint8_t *>(result.body.data());
             s->_sourceMemory.assign(d, d + result.body.size());
             s->_netState = NetState::Idle;
-            s->_playFromMemory();
-        });
+            s->_playFromMemory(); });
     }
 
-    void _playFromMemory() {
-        if (_sourceMemory.empty()) return;
-        std::string ext  = VP_detectVideoExtension(_sourceMemory);
+    void _playFromMemory()
+    {
+        if (_sourceMemory.empty())
+            return;
+        std::string ext = VP_detectVideoExtension(_sourceMemory);
         std::string path = VP_writeTempFile(_sourceMemory, ext);
-        if (path.empty()) { _netState = NetState::Error; markNeedsPaint(); return; }
+        if (path.empty())
+        {
+            _netState = NetState::Error;
+            markNeedsPaint();
+            return;
+        }
         videoPath = path;
         _openVideo();
     }
 
-    void _openVideo() {
+    void _openVideo()
+    {
         FluxVideo::get().open(videoPath);
-        if (autoPlay) { FluxVideo::get().play(); _playing = true; _startProgressTimer(); }
-    }
-
-    void _togglePlayPause() {
-        auto &vid = FluxVideo::get();
-        if (_finished) {
-            _finished = false; _progress = 0.f;
-            vid.seekToProgress(0.f); vid.play(); _playing = true; _startProgressTimer(); return;
+        if (autoPlay)
+        {
+            FluxVideo::get().play();
+            _playing = true;
+            _startProgressTimer();
         }
-        if (_playing) { vid.pause(); _playing = false; }
-        else          { vid.play();  _playing = true; _startProgressTimer(); }
     }
 
-    void _seekFromMouse(int mx) {
-        if (_trackRect.w <= 0) return;
+    void _togglePlayPause()
+    {
+        auto &vid = FluxVideo::get();
+        if (_finished)
+        {
+            _finished = false;
+            _progress = 0.f;
+            vid.seekToProgress(0.f);
+            vid.play();
+            _playing = true;
+            _startProgressTimer();
+            return;
+        }
+        if (_playing)
+        {
+            vid.pause();
+            _playing = false;
+        }
+        else
+        {
+            vid.play();
+            _playing = true;
+            _startProgressTimer();
+        }
+    }
+
+    void _seekFromMouse(int mx)
+    {
+        if (_trackRect.w <= 0)
+            return;
         float t = std::max(0.f, std::min(1.f, (float)(mx - _trackRect.x) / (float)_trackRect.w));
-        _progress = t; FluxVideo::get().seekToProgress(t);
-        if (_finished && t < 0.999f) {
-            _finished = false; FluxVideo::get().play(); _playing = true; _startProgressTimer();
+        _progress = t;
+        FluxVideo::get().seekToProgress(t);
+        if (_finished && t < 0.999f)
+        {
+            _finished = false;
+            FluxVideo::get().play();
+            _playing = true;
+            _startProgressTimer();
         }
         markNeedsPaint();
     }
 
-    void _startProgressTimer() {
-        if (_progressTimer) return;
-        _progressTimer = FluxUI::getCurrentInstance()->setInterval(33, [this]() {
+    void _startProgressTimer()
+    {
+        if (_progressTimer)
+            return;
+        _progressTimer = FluxUI::getCurrentInstance()->setInterval(33, [this]()
+                                                                   {
             if (_destroyed) return;
-            if (_playing) { _progress = FluxVideo::get().getProgress(); markNeedsPaint(); }
-        });
+            if (_playing) { _progress = FluxVideo::get().getProgress(); markNeedsPaint(); } });
     }
 
-    void _resetBarTimer() {
-        auto *ui = FluxUI::getCurrentInstance(); if (!ui) return;
-        if (_barHideTimer) { ui->clearInterval(_barHideTimer); _barHideTimer = 0; }
-        _barHideTimer = ui->setInterval(3000, [this]() {
+    void _resetBarTimer()
+    {
+        auto *ui = FluxUI::getCurrentInstance();
+        if (!ui)
+            return;
+        if (_barHideTimer)
+        {
+            ui->clearInterval(_barHideTimer);
+            _barHideTimer = 0;
+        }
+        _barHideTimer = ui->setInterval(3000, [this]()
+                                        {
             if (_destroyed) return;
             auto *u = FluxUI::getCurrentInstance();
             if (u && _barHideTimer) { u->clearInterval(_barHideTimer); _barHideTimer = 0; }
-            if (_playing) { _barVisible = false; markNeedsPaint(); }
-        });
+            if (_playing) { _barVisible = false; markNeedsPaint(); } });
     }
 
-    void _stopTimers() {
-        auto *ui = FluxUI::getCurrentInstance(); if (!ui) return;
-        if (_progressTimer) { ui->clearInterval(_progressTimer); _progressTimer = 0; }
-        if (_barHideTimer)  { ui->clearInterval(_barHideTimer);  _barHideTimer  = 0; }
+    void _stopTimers()
+    {
+        auto *ui = FluxUI::getCurrentInstance();
+        if (!ui)
+            return;
+        if (_progressTimer)
+        {
+            ui->clearInterval(_progressTimer);
+            _progressTimer = 0;
+        }
+        if (_barHideTimer)
+        {
+            ui->clearInterval(_barHideTimer);
+            _barHideTimer = 0;
+        }
     }
 
-    std::shared_ptr<VideoPlayerWidget> self() {
+    std::shared_ptr<VideoPlayerWidget> self()
+    {
         return std::static_pointer_cast<VideoPlayerWidget>(shared_from_this());
     }
-    bool _inWidget(int mx, int my) const {
+    bool _inWidget(int mx, int my) const
+    {
         return mx >= x && mx < x + width && my >= y && my < y + height;
     }
-    static bool _inRect(int mx, int my, const Rect &r) {
+    static bool _inRect(int mx, int my, const Rect &r)
+    {
         return mx >= r.x && mx < r.x + r.w && my >= r.y && my < r.y + r.h;
     }
 
-    static std::string _fmtTime(float s) {
-        int si = (int)s; char buf[16];
-        snprintf(buf, sizeof(buf), "%d:%02d", si / 60, si % 60); return buf;
+    static std::string _fmtTime(float s)
+    {
+        int si = (int)s;
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%d:%02d", si / 60, si % 60);
+        return buf;
     }
 
     void _renderStatusOverlay(Painter &p, FontCache &fontCache,
-                               const std::string &msg, Color col) {
+                              const std::string &msg, Color col)
+    {
         NativeFont tf = fontCache.getFont("Sans", 14, FontWeight::Normal);
         p.drawTextA(msg, x, y, width, height, tf, col,
                     DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }
 
-    void _renderBar(GraphicsContext &ctx, FontCache &fontCache, Painter &p) {
+    void _renderBar(GraphicsContext &ctx, FontCache &fontCache, Painter &p)
+    {
         int barY = y + height - barHeight;
         _barRect = {x, barY, width, barHeight};
         p.fillRect(x, barY, width, barHeight, colBar);
 
         int midY = barY + barHeight / 2;
-        int cx   = x + 6;
+        int cx = x + 6;
         int btnSz = 28;
         _playBtnRect = {cx, barY + (barHeight - btnSz) / 2, btnSz, btnSz};
 
@@ -1447,34 +2179,40 @@ private:
         p.drawEllipse(cx + fillW - 6, midY - 6, 12, 12, colThumb, colThumb, 0);
     }
 
-    void _renderCenterPlay(Painter &p, FontCache &fontCache) {
+    void _renderCenterPlay(Painter &p, FontCache &fontCache)
+    {
         int cx = x + width / 2, cy = y + (height - barHeight) / 2, r = 28;
         p.drawEllipse(cx - r, cy - r, r * 2, r * 2,
-                      Color::fromRGBA(0,0,0,160), Color::fromRGBA(0,0,0,0), 0);
+                      Color::fromRGBA(0, 0, 0, 160), Color::fromRGBA(0, 0, 0, 0), 0);
         NativeFont iconFont = fontCache.getFont(kIconFont, 32, FontWeight::Normal);
         std::wstring g(1, FluxIcons::glyph(FluxIcons::Play));
         p.drawText(g, cx - r, cy - r, r * 2, r * 2, iconFont,
-                   Color::fromRGB(255,255,255), DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                   Color::fromRGB(255, 255, 255), DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }
 };
 
 using VideoPlayerWidgetPtr = std::shared_ptr<VideoPlayerWidget>;
 
-inline VideoPlayerWidgetPtr VideoPlayer(const std::string &path = "") {
+inline VideoPlayerWidgetPtr VideoPlayer(const std::string &path = "")
+{
     auto w = std::make_shared<VideoPlayerWidget>();
-    if (!path.empty()) w->setPath(path);
+    if (!path.empty())
+        w->setPath(path);
     return w;
 }
 
-inline VideoPlayerWidgetPtr VideoPlayerFromUrl(const std::string &url) {
+inline VideoPlayerWidgetPtr VideoPlayerFromUrl(const std::string &url)
+{
     return std::make_shared<VideoPlayerWidget>()->setUrl(url);
 }
 
-inline VideoPlayerWidgetPtr VideoPlayerFromMemory(const std::vector<uint8_t> &bytes) {
+inline VideoPlayerWidgetPtr VideoPlayerFromMemory(const std::vector<uint8_t> &bytes)
+{
     return std::make_shared<VideoPlayerWidget>()->setMemory(bytes);
 }
 
-inline VideoPlayerWidgetPtr VideoPlayerFromMemory(const uint8_t *data, size_t len) {
+inline VideoPlayerWidgetPtr VideoPlayerFromMemory(const uint8_t *data, size_t len)
+{
     return std::make_shared<VideoPlayerWidget>()->setMemory(data, len);
 }
 
