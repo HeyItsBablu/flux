@@ -352,9 +352,11 @@ elseif(APPLE)
             -Wextra
             -Wpedantic
             -fexceptions
-            -fobjc-arc
-            -fmodules          
-            -fcxx-modules      
+            -fobjc-arc  
+    )
+    set_source_files_properties(
+        src/flux_canvas_macos.mm
+        PROPERTIES COMPILE_FLAGS "-fmodules -fcxx-modules"
     )
 
 
