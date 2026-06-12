@@ -197,7 +197,11 @@ static AVAssetReader* _makeReader(AVAsset* asset, int64_t startUs,
     reader.timeRange = range;
 
     // ── Video output ──────────────────────────────────────────────────────
-    NSArray<AVAssetTrack*>* videoTracks = [asset tracksWithMediaType:AVMediaTypeVideo];
+    #pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+NSArray<AVAssetTrack*>* videoTracks = [asset tracksWithMediaType:AVMediaTypeVideo];
+NSArray<AVAssetTrack*>* audioTracks = [asset tracksWithMediaType:AVMediaTypeAudio];
+#pragma clang diagnostic pop
     *outVideo = nil;
     if (videoTracks.count > 0) {
         NSDictionary* videoSettings = @{
@@ -296,7 +300,11 @@ static void decodeLoop(std::string path) {
         s.durationUs = (int64_t)(CMTimeGetSeconds(dur) * 1e6);
 
     // Video dimensions
-    NSArray<AVAssetTrack*>* videoTracks = [asset tracksWithMediaType:AVMediaTypeVideo];
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+NSArray<AVAssetTrack*>* videoTracks = [asset tracksWithMediaType:AVMediaTypeVideo];
+NSArray<AVAssetTrack*>* audioTracks = [asset tracksWithMediaType:AVMediaTypeAudio];
+#pragma clang diagnostic pop
     if (videoTracks.count == 0) {
         NSLog(@"[FluxVideo] No video track in: %@", url);
         s.state = FluxVideo::State::Error;

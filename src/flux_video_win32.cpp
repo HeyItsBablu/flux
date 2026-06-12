@@ -137,6 +137,7 @@ FluxVideo &FluxVideo::get()
     static FluxVideo instance;
     return instance;
 }
+FluxVideo::~FluxVideo() { close(); }
 
 FluxVideo::State FluxVideo::getState() const { return impl().state.load(); }
 bool FluxVideo::isPlaying() const { return impl().state == State::Playing; }

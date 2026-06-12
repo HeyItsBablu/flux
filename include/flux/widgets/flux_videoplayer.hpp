@@ -957,7 +957,7 @@ private:
             24,                        // bitsPerPixel
             (size_t)(_cachedSrcW * 3), // bytesPerRow (no padding — we stripped it above)
             _cgColorSpace,
-            (CGBitmapInfo)(kCGBitmapByteOrderDefault | kCGImageAlphaNone), // RGB24, no alpha
+            (CGBitmapInfo)((uint32_t)kCGBitmapByteOrderDefault | (uint32_t)kCGImageAlphaNone), // RGB24, no alpha
             provider,
             nullptr, // no decode array
             false,   // shouldInterpolate (we set it on ctx instead)

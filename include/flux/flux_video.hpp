@@ -128,7 +128,7 @@ private:
     // No data members — all state lives in an anonymous-namespace struct
     // inside the platform .cpp.  The singleton is a zero-size token object.
     FluxVideo() = default;
-    ~FluxVideo() = default;
+    ~FluxVideo();
 
     FluxVideo(const FluxVideo &) = delete;
     FluxVideo &operator=(const FluxVideo &) = delete;
