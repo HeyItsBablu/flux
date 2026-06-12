@@ -1,6 +1,6 @@
 // flux_videoplayer.hpp
 // Self-contained video player widget for FluxUI.
-// Single class shared across Android, Windows, and Linux.
+// Single class shared across Android, Windows, Linux, and macOS.
 // Platform differences are isolated to render(), private frame-storage
 // members, and a few small helpers — everything else is written once.
 //
@@ -28,6 +28,14 @@
 #   include "flux_icons.hpp"
     extern NVGcontext* FluxAndroid_getVG();
     extern float       FluxAndroid_getDpiScale();
+#elif defined(__APPLE__)
+#   include <TargetConditionals.h>
+#   if TARGET_OS_OSX
+#       include "flux/flux.hpp"
+#       include "flux/flux_video.hpp"
+#       include "flux_icons.hpp"
+#       import  <CoreGraphics/CoreGraphics.h>
+#   endif
 #elif defined(_WIN32)
 #   include "flux/flux.hpp"
 #   include "flux/flux_video.hpp"
@@ -184,7 +192,6 @@ public:
 
 #ifdef __ANDROID__
         // Android: callbacks fire on decode thread → safe to call markNeedsPaint directly.
-        // _finishedPending not needed because the GL thread owns all state.
         FluxVideo::get().setOnFinished([this]()
         {
             _playing  = false;
@@ -201,7 +208,7 @@ public:
             markNeedsPaint();
         });
 #else
-        // Windows / Linux: finish callback may arrive on decode thread;
+        // Win32 / Linux / macOS: finish callback may arrive on decode thread;
         // use atomic flag and consume it in render() on the UI thread.
         FluxVideo::get().setOnFinished([this]()
         {
@@ -233,6 +240,8 @@ public:
         if (_fboTex)     { glDeleteTextures(1,    &_fboTex);      _fboTex     = 0; }
         if (_oesVBO)     { glDeleteBuffers(1,      &_oesVBO);     _oesVBO     = 0; }
         if (_oesProgram) { glDeleteProgram(_oesProgram);          _oesProgram = 0; }
+#elif defined(__APPLE__) && TARGET_OS_OSX
+        _freeCGResources();
 #elif defined(__linux__)
         _freeCairoSurface();
 #endif
@@ -325,6 +334,83 @@ public:
 
                 if (_barVisible)
                     p.fillRect(x, y, width, videoAreaH, colOverlay);
+            }
+        }
+
+#elif defined(__APPLE__) && TARGET_OS_OSX
+        {
+            // ── macOS: CoreGraphics blit path ─────────────────────────────────
+            //
+            // flux_video_macos.mm delivers RGB24 frames via the same
+            // hasNewFrame() / lockFrame() API as Win32 and Linux.
+            // We cache the latest frame, convert it to a CGImage each render,
+            // and let CoreGraphics handle letterboxed scaling.
+            //
+            // NOTE: We rebuild the CGImage on every new frame rather than
+            // caching it — CGImage is immutable and creating one is cheap
+            // compared to a full decode. If profiling shows it matters,
+            // introduce a CGBitmapContext that we blit into instead.
+
+            if (_finishedPending.exchange(false)) {
+                _playing  = false;
+                _finished = true;
+                _progress = 1.f;
+            }
+
+            if (FluxVideo::get().hasNewFrame()) {
+                auto frame = FluxVideo::get().lockFrame();
+                if (frame.data && frame.width > 0 && frame.height > 0) {
+                    // Copy row by row to strip any row-padding from the decoder.
+                    int expectedStride = frame.width * 3;
+                    _frameCache.resize((size_t)(frame.width * frame.height * 3));
+                    if (frame.stride == expectedStride) {
+                        memcpy(_frameCache.data(), frame.data,
+                               _frameCache.size());
+                    } else {
+                        const uint8_t* src = frame.data;
+                        uint8_t*       dst = _frameCache.data();
+                        for (int row = 0; row < frame.height; ++row) {
+                            memcpy(dst, src, (size_t)expectedStride);
+                            src += frame.stride;
+                            dst += expectedStride;
+                        }
+                    }
+                    _cachedSrcW = frame.width;
+                    _cachedSrcH = frame.height;
+                    _cgImageDirty = true;
+                }
+                _progress = FluxVideo::get().getProgress();
+            }
+
+            if (!_frameCache.empty() && _cachedSrcW > 0 && ctx.cgContext) {
+                // Rebuild the CGImage only when a new frame arrived.
+                if (_cgImageDirty) {
+                    _cgImageDirty = false;
+                    _rebuildCGImage();
+                }
+
+                if (_cgImage) {
+                    int dstX, dstY, dstW, dstH;
+                    _letterbox(_cachedSrcW, _cachedSrcH, dstX, dstY, dstW, dstH);
+
+                    CGContextRef cg = ctx.cgContext;
+                    CGContextSaveGState(cg);
+
+                    // CoreGraphics draws images with the origin at bottom-left
+                    // and y increasing upward, which is the opposite of our
+                    // widget coordinate system (top-left, y downward).
+                    // Flip the CTM so that (dstX, dstY) refers to the top-left
+                    // corner of the destination rect as seen on screen.
+                    CGContextTranslateCTM(cg, dstX, dstY + dstH);
+                    CGContextScaleCTM(cg, 1.0, -1.0);
+
+                    CGContextSetInterpolationQuality(cg, kCGInterpolationHigh);
+                    CGContextDrawImage(cg,
+                        CGRectMake(0, 0, (CGFloat)dstW, (CGFloat)dstH),
+                        _cgImage);
+
+                    CGContextRestoreGState(cg);
+                }
             }
         }
 
@@ -442,7 +528,6 @@ public:
             markNeedsPaint();
             return true;
         }
-        // Tapped inside bar but not on a control — show bar
         _barVisible = true;
         _resetBarTimer();
         markNeedsPaint();
@@ -525,6 +610,19 @@ private:
     bool   _glResourcesReady = false;
     bool   _nvgImageDirty    = false;
     std::vector<uint8_t> _fboPixels;
+
+#elif defined(__APPLE__) && TARGET_OS_OSX
+    // macOS: raw RGB24 cache + a CGImage built from it.
+    // _cgColorSpace is retained for the lifetime of the widget to avoid
+    // re-creating it on every frame; _cgImage is released and rebuilt
+    // whenever a new frame arrives.
+    std::vector<uint8_t> _frameCache;
+    int                  _cachedSrcW   = 0, _cachedSrcH = 0;
+    bool                 _cgImageDirty = false;
+    CGImageRef           _cgImage      = nullptr;
+    CGColorSpaceRef      _cgColorSpace = nullptr;
+    std::atomic<bool>    _destroyed{false};
+    std::atomic<bool>    _finishedPending{false};
 
 #elif defined(_WIN32)
     std::vector<uint8_t> _frameCache;
@@ -693,8 +791,8 @@ private:
     // Platform-specific helpers
     // =========================================================================
 
-    // ── Letterbox (Win32 + Linux shared, not needed on Android which uses float) ──
-#if defined(_WIN32) || defined(__linux__)
+    // ── Letterbox (Win32 + Linux + macOS — not needed on Android) ─────────────
+#if defined(_WIN32) || defined(__linux__) || (defined(__APPLE__) && TARGET_OS_OSX)
     void _letterbox(int srcW, int srcH, int& dstX, int& dstY, int& dstW, int& dstH) const
     {
         float vidAR = (float)srcW / (float)srcH;
@@ -712,6 +810,62 @@ private:
         }
     }
 #endif
+
+    // ── macOS CoreGraphics helpers ─────────────────────────────────────────────
+#if defined(__APPLE__) && TARGET_OS_OSX
+
+    // Build (or rebuild) the CGImage from the current _frameCache contents.
+    // Called only when _cgImageDirty is set, so typically once per decoded frame.
+    void _rebuildCGImage()
+    {
+        if (_cgImage) {
+            CGImageRelease(_cgImage);
+            _cgImage = nullptr;
+        }
+        if (_frameCache.empty() || _cachedSrcW <= 0 || _cachedSrcH <= 0) return;
+
+        // Lazily create the device-RGB colour space (retained).
+        if (!_cgColorSpace)
+            _cgColorSpace = CGColorSpaceCreateDeviceRGB();
+
+        // Wrap _frameCache in a CGDataProvider without copying.
+        // The retain/release pair ensures the cache outlives the provider.
+        // We use a simple no-op releaser because _frameCache is owned by this
+        // object and will always outlive the CGImage it backs.
+        CGDataProviderRef provider = CGDataProviderCreateWithData(
+            nullptr,
+            _frameCache.data(),
+            _frameCache.size(),
+            nullptr  // no-op release callback — _frameCache is member-owned
+        );
+
+        if (!provider) return;
+
+        // kCVPixelFormatType_24RGB → 8 bits per component, 3 components, no alpha.
+        _cgImage = CGImageCreate(
+            (size_t)_cachedSrcW,           // width
+            (size_t)_cachedSrcH,           // height
+            8,                             // bitsPerComponent
+            24,                            // bitsPerPixel
+            (size_t)(_cachedSrcW * 3),     // bytesPerRow (no padding — we stripped it above)
+            _cgColorSpace,
+            kCGBitmapByteOrderDefault | kCGImageAlphaNone, // RGB24, no alpha
+            provider,
+            nullptr,                       // no decode array
+            false,                         // shouldInterpolate (we set it on ctx instead)
+            kCGRenderingIntentDefault
+        );
+
+        CGDataProviderRelease(provider);
+    }
+
+    void _freeCGResources()
+    {
+        if (_cgImage)      { CGImageRelease(_cgImage);           _cgImage      = nullptr; }
+        if (_cgColorSpace) { CGColorSpaceRelease(_cgColorSpace); _cgColorSpace = nullptr; }
+    }
+
+#endif // __APPLE__ && TARGET_OS_OSX
 
     // ── Android GL helpers ────────────────────────────────────────────────────
 #ifdef __ANDROID__
@@ -758,7 +912,6 @@ private:
         glDeleteShader(vs);
         glDeleteShader(fs);
 
-        // Fullscreen quad — UV.y flipped for MediaCodec orientation
         static const float quad[] = {
             -1.f, -1.f,  0.f, 1.f,
              1.f, -1.f,  1.f, 1.f,
@@ -891,10 +1044,11 @@ private:
     // Shared rendering helpers
     // =========================================================================
 
-    // Font name differs per platform; everything else is identical
     static const char* _uiFont()
     {
-#ifdef __linux__
+#if defined(__APPLE__) && TARGET_OS_OSX
+        return "SF Pro Text";  // San Francisco — present on all macOS 10.11+
+#elif defined(__linux__)
         return "Sans";
 #else
         return "Segoe UI";
@@ -938,8 +1092,6 @@ private:
         p.measureText(toWideString(ts), tf, tw, th);
 
 #ifdef __ANDROID__
-        // NVG measureText returns physical pixels before nvgScale is applied;
-        // divide back down if the value looks unreasonably large.
         float dpi = FluxAndroid_getDpiScale();
         if (tw > width / 2) tw = (int)(tw / dpi);
 #endif

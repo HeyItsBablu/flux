@@ -99,10 +99,6 @@ add_subdirectory(external/curl)
 
 # ============================================================================
 # FreeType  (git submodule at external/freetype — all platforms)
-#
-# All platforms use Canvas2DGL (even macOS routes through it for Metal),
-# so FreeType is required everywhere.  Optional deps are disabled so it
-# builds as a fully self-contained static library with no extra system deps.
 # ============================================================================
 
 set(FT_DISABLE_ZLIB     ON CACHE BOOL "" FORCE)
@@ -138,8 +134,8 @@ endif()
 # ============================================================================
 # NanoVG
 #
-# Android  → GLES2 backend, no glad, nanovg_gl_impl.c is Android-specific
-# Win/Linux → GL3 backend, glad provides the loader, nanovg_gl_impl.c shared
+# Android  → GLES2 backend
+# Win/Linux → GL3 backend via glad
 # macOS    → not used (Metal + CoreGraphics path)
 # ============================================================================
 
@@ -196,9 +192,6 @@ if(UNIX AND NOT APPLE AND NOT ANDROID)
     message(STATUS "FFmpeg swscale  : ${SWSCALE_VERSION}")
 endif()
 
-
-
-
 # ============================================================================
 # Android platform dependencies
 # ============================================================================
@@ -220,24 +213,47 @@ endif()
 
 file(GLOB_RECURSE FLUX_SOURCES CONFIGURE_DEPENDS src/*.cpp)
 
+# FIX 1: Collect .mm sources separately and tag them as Objective-C++.
+#         The old code used COMPILE_FLAGS "-x objective-c++" which sets a
+#         file-level property — that's correct — but the property must be set
+#         BEFORE add_library sees the files, and CONFIGURE_DEPENDS ensures
+#         re-globbing on new .mm additions.
 if(APPLE)
     file(GLOB_RECURSE FLUX_MM_SOURCES CONFIGURE_DEPENDS src/*.mm)
-    set_source_files_properties(${FLUX_MM_SOURCES}
-        PROPERTIES COMPILE_FLAGS "-x objective-c++"
-    )
+    foreach(_mm_src ${FLUX_MM_SOURCES})
+        set_source_files_properties(${_mm_src}
+            PROPERTIES
+                COMPILE_FLAGS "-x objective-c++"
+                # ARC is enabled target-wide via -fobjc-arc in compile options;
+                # no per-file flag needed here.
+        )
+    endforeach()
     list(APPEND FLUX_SOURCES ${FLUX_MM_SOURCES})
 endif()
 
+# Platform source exclusions — order matters: most-specific first.
 if(NOT WIN32)
     list(FILTER FLUX_SOURCES EXCLUDE REGEX ".*_win32\\.cpp$")
 endif()
 
+# FIX 2: The _linux.cpp filter previously used a bare UNIX check which would
+#         accidentally exclude Linux-named files on macOS (UNIX is TRUE there).
+#         Scope it properly to desktop Linux only.
 if(NOT (UNIX AND NOT APPLE AND NOT ANDROID))
     list(FILTER FLUX_SOURCES EXCLUDE REGEX ".*_linux\\.cpp$")
 endif()
 
 if(NOT ANDROID)
     list(FILTER FLUX_SOURCES EXCLUDE REGEX ".*_android\\.cpp$")
+    list(FILTER FLUX_SOURCES EXCLUDE REGEX ".*_android\\.mm$")
+endif()
+
+# FIX 3: Exclude _macos.mm on non-Apple platforms so the file isn't compiled
+#         on Windows/Linux/Android (where TARGET_OS_OSX guard in the .mm would
+#         technically make it a no-op, but a missing AVFoundation include would
+#         cause a hard error before the preprocessor guard fires).
+if(NOT APPLE)
+    list(FILTER FLUX_SOURCES EXCLUDE REGEX ".*_macos\\.mm$")
 endif()
 
 list(FILTER FLUX_SOURCES EXCLUDE REGEX ".*stb_impl\\.cpp$")
@@ -333,6 +349,13 @@ elseif(ANDROID)
     )
 
 elseif(APPLE)
+    # FIX 4: Added CoreMedia and CoreVideo — required by flux_video_macos.mm
+    #         (CMSampleBufferRef, CVPixelBufferRef, CMAudioFormatDescriptionRef).
+    #         Without these the linker finds the symbols at link time (they're in
+    #         AVFoundation's umbrella) but the headers won't resolve at compile
+    #         time and you get implicit declaration warnings that become errors
+    #         with -Werror. Explicit framework linkage also makes the dependency
+    #         graph correct for Xcode-generated projects.
     target_link_libraries(flux PUBLIC
             stb
             freetype
@@ -346,16 +369,16 @@ elseif(APPLE)
             "-framework CoreFoundation"
             "-framework AudioToolbox"
             "-framework AVFoundation"
+            "-framework CoreMedia"      # FIX 4a: CMSampleBufferRef, CMTime, etc.
+            "-framework CoreVideo"      # FIX 4b: CVPixelBufferRef, CVPixelBuffer*
     )
     target_compile_options(flux PRIVATE
             -Wall
             -Wextra
             -Wpedantic
             -fexceptions
-            -fobjc-arc  
+            -fobjc-arc
     )
-
-
 
 elseif(UNIX AND NOT APPLE)
     target_link_libraries(flux PUBLIC
@@ -392,7 +415,7 @@ if(MSVC)
     target_compile_options(flux PUBLIC /utf-8)
     target_compile_options(flux PRIVATE /W4 /permissive- /Zc:__cplusplus /EHsc)
 elseif(APPLE)
-    # Already handled in the Apple target_compile_options block above
+    # Already handled in the Apple target_link_libraries block above
 elseif(UNIX)
     target_compile_options(flux PRIVATE
             -Wall -Wextra -Wpedantic -fexceptions
@@ -422,7 +445,6 @@ if(NOT ANDROID)
     include(GNUInstallDirs)
     include(CMakePackageConfigHelpers)
 
-    # freetype is installed on all desktop platforms
     set(FLUX_INSTALL_TARGETS flux stb freetype)
 
     if(WIN32 OR (UNIX AND NOT APPLE AND NOT ANDROID))
@@ -436,19 +458,16 @@ if(NOT ANDROID)
 
     install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
-    # Install nanovg public headers so the INSTALL_INTERFACE path resolves
     install(DIRECTORY external/nanovg/src/
             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
             FILES_MATCHING PATTERN "*.h"
     )
 
-    # Install stb public headers
     install(DIRECTORY external/stb/
             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
             FILES_MATCHING PATTERN "*.h"
     )
 
-    # Install freetype public headers
     install(DIRECTORY external/freetype/include/
             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
             FILES_MATCHING PATTERN "*.h"
