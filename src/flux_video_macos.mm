@@ -17,8 +17,8 @@
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
 
-#include "flux_video.hpp"
-#include "flux_audio.hpp"
+#include "flux/flux_video.hpp"
+#include "flux/flux_audio.hpp"
 
 #import <AVFoundation/AVFoundation.h>
 #import <CoreMedia/CoreMedia.h>
