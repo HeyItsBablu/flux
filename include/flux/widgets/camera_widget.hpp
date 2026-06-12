@@ -655,7 +655,7 @@ public:
         // ── Flash overlay — alpha-blended white rect via AlphaBlend ───────────
         if (_flashAlpha > 0.f) {
             HDC     memDC = ::CreateCompatibleDC(ctx.hdc);
-            HBITMAP hbm   = ::CreateCompatibleBitmap(ctx.hdc, 1, 1);
+            HBITMAP hbm   = ::CreateCompatibleBitmap(ctx.hdc, 1, 1); 
             HGDIOBJ old   = ::SelectObject(memDC, hbm);
             ::SetPixel(memDC, 0, 0, RGB(255, 255, 255));
 
