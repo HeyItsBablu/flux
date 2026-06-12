@@ -11,75 +11,89 @@
 // Compile flags: -x objective-c++ -fobjc-arc  (set in CMakeLists via SKILL)
 // Frameworks:    AVFoundation, CoreMedia, CoreVideo, CoreGraphics,
 //                Foundation, AppKit
+//
+// Required addition to flux_camera.hpp — inside the private: section, add an
+// #elif defined(__APPLE__) block before __linux__:
+//
+//   #elif defined(__APPLE__)
+//       void*  _macosImpl = nullptr;
+//       std::atomic<int>  _cameraIndex { 0 };
+//       std::mutex        _frameMutex;
+//       bool _openDeviceAtIndex(int index);
+//       void _saveJpegFromBGRA(const uint8_t* bgra, int w, int h);
+//   #endif
 
 #if defined(__APPLE__) && !defined(__IPHONE_OS_VERSION_MIN_REQUIRED)
 
-#import  <AVFoundation/AVFoundation.h>
-#import  <CoreMedia/CoreMedia.h>
-#import  <CoreVideo/CoreVideo.h>
-#import  <CoreGraphics/CoreGraphics.h>
-#import  <ImageIO/ImageIO.h>
-#import  <Foundation/Foundation.h>
-#import  <AppKit/AppKit.h>
+#import <AVFoundation/AVFoundation.h>
+#import <CoreMedia/CoreMedia.h>
+#import <CoreVideo/CoreVideo.h>
+#import <CoreGraphics/CoreGraphics.h>
+#import <ImageIO/ImageIO.h>
+#import <Foundation/Foundation.h>
+#import <AppKit/AppKit.h>
 
 #include "flux/flux_camera.hpp"
 
-#include <chrono>
 #include <cstdio>
 #include <ctime>
 
-// ── Logging helpers ─────────────────────────────────────────────────────────
+// ── Logging helpers ──────────────────────────────────────────────────────────
 
-#define CAM_LOGI(...) do { \
-    NSLog(@"[FluxCamera] " @__VA_ARGS__); \
-} while(0)
-#define CAM_LOGE(...) do { \
-    NSLog(@"[FluxCamera][ERR] " @__VA_ARGS__); \
-} while(0)
+#define CAM_LOGI(fmt, ...) \
+    do { fprintf(stderr, "[FluxCamera] " fmt "\n", ##__VA_ARGS__); } while(0)
+#define CAM_LOGE(fmt, ...) \
+    do { fprintf(stderr, "[FluxCamera][ERR] " fmt "\n", ##__VA_ARGS__); } while(0)
 
-// ── Forward declarations ────────────────────────────────────────────────────
+// ── File-save helper — forward declaration ───────────────────────────────────
+// Defined at the bottom of this file. Declared here so every @implementation
+// block that calls it can see it without a full definition.
+
+static std::string FluxMac_saveJpegToPictures(const std::string& filename,
+                                               const uint8_t* data,
+                                               size_t length);
+
+// ── ObjC class forward declarations ─────────────────────────────────────────
 
 @class FluxVideoCaptureDelegate;
 @class FluxPhotoCaptureDelegate;
 
 // ============================================================================
-// Internal Objective-C state — stored as a plain struct of strong references
-// inside the FluxCamera singleton via a void* _macosImpl pointer.
-//
-// We use a plain struct rather than a dedicated ObjC class so that the C++
-// header stays free of ObjC types (important for mixed-language TUs).
+// MacOSImpl — plain C++ struct that owns all ObjC strong references.
+// Kept out of the public header so no ObjC types leak into mixed-language TUs.
 // ============================================================================
 
 struct MacOSImpl {
-    AVCaptureSession*            session              = nil;
-    AVCaptureDeviceInput*        currentInput         = nil;
-    AVCaptureVideoDataOutput*    videoOutput          = nil;
-    AVCapturePhotoOutput*        photoOutput          = nil;
-    FluxVideoCaptureDelegate*    videoDelegate        = nil;
-    FluxPhotoCaptureDelegate*    photoDelegate        = nil;
-    dispatch_queue_t             videoQueue           = nullptr;
+    AVCaptureSession*            session         = nil;
+    AVCaptureDeviceInput*        currentInput    = nil;
+    AVCaptureVideoDataOutput*    videoOutput     = nil;
+    AVCapturePhotoOutput*        photoOutput     = nil;
+    FluxVideoCaptureDelegate*    videoDelegate   = nil;
+    FluxPhotoCaptureDelegate*    photoDelegate   = nil;
+    dispatch_queue_t             videoQueue      = nullptr;
 
-    // Frame buffer — BGRA32, protected by _frameMutex in FluxCamera
+    // Frame buffer — BGRA32, protected by FluxCamera::_frameMutex
     std::vector<uint8_t>         frameData;
 
-    // Device list snapshots (index mirrors _cameraIndex)
-    NSArray<AVCaptureDevice*>*   devices              = nil;
-    int                          deviceCount          = 0;
+    // Snapshot of the device list; index mirrors FluxCamera::_cameraIndex
+    NSArray<AVCaptureDevice*>*   devices         = nil;
+    int                          deviceCount     = 0;
 };
 
 // ============================================================================
 // AVCaptureVideoDataOutputSampleBufferDelegate  (preview frames)
 // ============================================================================
 
-@interface FluxVideoCaptureDelegate : NSObject <AVCaptureVideoDataOutputSampleBufferDelegate>
+@interface FluxVideoCaptureDelegate
+    : NSObject <AVCaptureVideoDataOutputSampleBufferDelegate>
 @property (nonatomic, assign) FluxCamera* owner;
 @end
 
 @implementation FluxVideoCaptureDelegate
 
-- (void)captureOutput:(AVCaptureOutput*)__unused output
-didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
-       fromConnection:(AVCaptureConnection*)__unused connection
+- (void)captureOutput:(AVCaptureOutput*)      __unused output
+didOutputSampleBuffer:(CMSampleBufferRef)              sampleBuffer
+       fromConnection:(AVCaptureConnection*)  __unused connection
 {
     FluxCamera* cam = self.owner;
     if (!cam || cam->getState() == FluxCamera::State::Closed) return;
@@ -89,20 +103,18 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 
     CVPixelBufferLockBaseAddress(imageBuffer, kCVPixelBufferLock_ReadOnly);
 
-    int    w      = (int)CVPixelBufferGetWidth(imageBuffer);
-    int    h      = (int)CVPixelBufferGetHeight(imageBuffer);
-    size_t stride = CVPixelBufferGetBytesPerRow(imageBuffer);
-    uint8_t* src  = static_cast<uint8_t*>(
-                        CVPixelBufferGetBaseAddress(imageBuffer));
+    int      w      = (int)CVPixelBufferGetWidth(imageBuffer);
+    int      h      = (int)CVPixelBufferGetHeight(imageBuffer);
+    size_t   stride = CVPixelBufferGetBytesPerRow(imageBuffer);
+    uint8_t* src    = static_cast<uint8_t*>(CVPixelBufferGetBaseAddress(imageBuffer));
 
     if (src && w > 0 && h > 0) {
         MacOSImpl* impl = static_cast<MacOSImpl*>(cam->_macosImpl);
 
-        // Copy under the frame mutex
         {
             std::lock_guard<std::mutex> lock(cam->_frameMutex);
             impl->frameData.resize((size_t)(w * h * 4));
-            // stride may be padded — copy row-by-row
+            // CVPixelBuffer rows may be stride-padded — copy row by row
             for (int row = 0; row < h; ++row) {
                 std::memcpy(impl->frameData.data() + row * w * 4,
                             src + row * stride,
@@ -110,13 +122,12 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
             }
         }
 
-        cam->_previewW   = w;
-        cam->_previewH   = h;
+        cam->_previewW    = w;
+        cam->_previewH    = h;
         cam->_pendingFrame = true;
 
-        // If a capture was requested, save the current frame as JPEG.
-        // (Real photo capture uses AVCapturePhotoOutput below; this path
-        //  acts as a fast fallback when photoOutput is unavailable.)
+        // Fallback still-capture: encode the current preview frame as JPEG
+        // when AVCapturePhotoOutput is unavailable.
         if (cam->_captureRequested.exchange(false)) {
             cam->_saveJpegFromBGRA(impl->frameData.data(), w, h);
         }
@@ -125,28 +136,29 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
     CVPixelBufferUnlockBaseAddress(imageBuffer, kCVPixelBufferLock_ReadOnly);
 }
 
-- (void)captureOutput:(AVCaptureOutput*)__unused output
-  didDropSampleBuffer:(CMSampleBufferRef)__unused sampleBuffer
-       fromConnection:(AVCaptureConnection*)__unused connection
+- (void)captureOutput:(AVCaptureOutput*)     __unused output
+  didDropSampleBuffer:(CMSampleBufferRef)    __unused sampleBuffer
+       fromConnection:(AVCaptureConnection*) __unused connection
 {
-    // Silently drop; no action needed.
+    // Silently discard late frames.
 }
 
 @end
 
 // ============================================================================
-// AVCapturePhotoCaptureDelegate  (still capture via AVCapturePhotoOutput)
+// AVCapturePhotoCaptureDelegate  (full-resolution still via AVCapturePhotoOutput)
 // ============================================================================
 
-@interface FluxPhotoCaptureDelegate : NSObject <AVCapturePhotoCaptureDelegate>
+@interface FluxPhotoCaptureDelegate
+    : NSObject <AVCapturePhotoCaptureDelegate>
 @property (nonatomic, assign) FluxCamera* owner;
 @end
 
 @implementation FluxPhotoCaptureDelegate
 
-- (void)captureOutput:(AVCapturePhotoOutput*)__unused output
-didFinishProcessingPhoto:(AVCapturePhoto*)photo
-                error:(NSError*)error
+- (void)captureOutput:(AVCapturePhotoOutput*) __unused output
+didFinishProcessingPhoto:(AVCapturePhoto*)             photo
+                error:(NSError*)                       error
 {
     FluxCamera* cam = self.owner;
     if (!cam) return;
@@ -164,7 +176,6 @@ didFinishProcessingPhoto:(AVCapturePhoto*)photo
         return;
     }
 
-    // Build timestamped filename
     std::time_t t  = std::time(nullptr);
     std::tm     tm = {};
     localtime_r(&t, &tm);
@@ -174,7 +185,7 @@ didFinishProcessingPhoto:(AVCapturePhoto*)photo
     std::string path = FluxMac_saveJpegToPictures(
             fname,
             static_cast<const uint8_t*>(jpegData.bytes),
-            jpegData.length);
+            (size_t)jpegData.length);
 
     if (!path.empty()) {
         cam->_lastPhotoPath = path;
@@ -188,14 +199,6 @@ didFinishProcessingPhoto:(AVCapturePhoto*)photo
 @end
 
 // ============================================================================
-// File-save helper (forward-declared below, defined at bottom of file)
-// ============================================================================
-
-static std::string FluxMac_saveJpegToPictures(const std::string& filename,
-                                               const uint8_t* data,
-                                               size_t length);
-
-// ============================================================================
 // Singleton
 // ============================================================================
 
@@ -207,10 +210,8 @@ FluxCamera& FluxCamera::get() {
 bool FluxCamera::isFrontCamera() const {
     MacOSImpl* impl = static_cast<MacOSImpl*>(_macosImpl);
     if (!impl || !impl->currentInput) return false;
-
-    AVCaptureDevice* dev = impl->currentInput.device;
-    // On Mac, "front" ≈ built-in FaceTime camera (position == front)
-    return (dev.position == AVCaptureDevicePositionFront);
+    // On Mac the built-in FaceTime HD camera reports AVCaptureDevicePositionFront
+    return (impl->currentInput.device.position == AVCaptureDevicePositionFront);
 }
 
 // ── Frame access ─────────────────────────────────────────────────────────────
@@ -227,7 +228,7 @@ FluxCamera::FrameLock FluxCamera::lockFrame() {
     return fl;
 }
 
-// ── Flash ─────────────────────────────────────────────────────────────────────
+// ── Flash ────────────────────────────────────────────────────────────────────
 
 void FluxCamera::setFlash(bool on) {
     _flashOn = on;
@@ -243,13 +244,10 @@ void FluxCamera::_applyFlash() {
 
     NSError* err = nil;
     if ([dev lockForConfiguration:&err]) {
-        if (_flashOn.load()) {
-            if ([dev isTorchModeSupported:AVCaptureTorchModeOn])
-                dev.torchMode = AVCaptureTorchModeOn;
-        } else {
-            if ([dev isTorchModeSupported:AVCaptureTorchModeOff])
-                dev.torchMode = AVCaptureTorchModeOff;
-        }
+        AVCaptureTorchMode mode = _flashOn.load() ? AVCaptureTorchModeOn
+                                                  : AVCaptureTorchModeOff;
+        if ([dev isTorchModeSupported:mode])
+            dev.torchMode = mode;
         [dev unlockForConfiguration];
     } else {
         CAM_LOGE("lockForConfiguration failed: %s",
@@ -263,38 +261,44 @@ void FluxCamera::_applyFlash() {
 
 bool FluxCamera::open(bool useFront) {
     if (_state != State::Closed) close();
-
     _state = State::Opening;
 
-    // Allocate impl struct
     MacOSImpl* impl = new MacOSImpl();
     _macosImpl = impl;
 
-    // ── Enumerate devices ──────────────────────────────────────────────────
-    // Prefer the Discovery session API (macOS 10.15+); fall back to
-    // AVCaptureDevice.devices for older SDKs.
-
+    // ── Enumerate video capture devices ───────────────────────────────────
     NSMutableArray<AVCaptureDevice*>* devList = [NSMutableArray array];
 
     if (@available(macOS 10.15, *)) {
-        NSArray<AVCaptureDeviceType>* types = @[
-            AVCaptureDeviceTypeBuiltInWideAngleCamera,
-            AVCaptureDeviceTypeExternalUnknown
-        ];
+        // Choose the correct external-camera type constant based on SDK version
+        NSArray<AVCaptureDeviceType>* types;
+        if (@available(macOS 14.0, *)) {
+            types = @[
+                AVCaptureDeviceTypeBuiltInWideAngleCamera,
+                AVCaptureDeviceTypeExternal
+            ];
+        } else {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+            types = @[
+                AVCaptureDeviceTypeBuiltInWideAngleCamera,
+                AVCaptureDeviceTypeExternalUnknown
+            ];
+#pragma clang diagnostic pop
+        }
+
         AVCaptureDeviceDiscoverySession* disc =
             [AVCaptureDeviceDiscoverySession
                 discoverySessionWithDeviceTypes:types
                                       mediaType:AVMediaTypeVideo
                                        position:AVCaptureDevicePositionUnspecified];
-        for (AVCaptureDevice* d in disc.devices) {
+        for (AVCaptureDevice* d in disc.devices)
             [devList addObject:d];
-        }
     } else {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-        for (AVCaptureDevice* d in [AVCaptureDevice devicesWithMediaType:AVMediaTypeVideo]) {
+        for (AVCaptureDevice* d in [AVCaptureDevice devicesWithMediaType:AVMediaTypeVideo])
             [devList addObject:d];
-        }
 #pragma clang diagnostic pop
     }
 
@@ -307,19 +311,19 @@ bool FluxCamera::open(bool useFront) {
     impl->devices     = [devList copy];
     impl->deviceCount = (int)devList.count;
 
-    // Pick device: prefer front/back based on argument; on Mac most built-ins
-    // report AVCaptureDevicePositionFront (FaceTime HD).
+    // Pick initial device index
     int idx = 0;
     if (useFront) {
         for (int i = 0; i < impl->deviceCount; ++i) {
             if (impl->devices[i].position == AVCaptureDevicePositionFront) {
-                idx = i; break;
+                idx = i;
+                break;
             }
         }
     }
     _cameraIndex = idx;
 
-    if (![self _openDeviceAtIndex:idx]) {
+    if (!_openDeviceAtIndex(idx)) {
         _state = State::Error;
         return false;
     }
@@ -330,20 +334,19 @@ bool FluxCamera::open(bool useFront) {
     return true;
 }
 
-// Internal — (re-)opens a device by index and (re-)wires the session.
-// Must be called with _state != Previewing (caller manages state transitions).
+// Internal — creates/replaces the AVCaptureSession for the given device index.
 bool FluxCamera::_openDeviceAtIndex(int index) {
     MacOSImpl* impl = static_cast<MacOSImpl*>(_macosImpl);
     if (!impl || index < 0 || index >= impl->deviceCount) return false;
 
     AVCaptureDevice* dev = impl->devices[index];
 
-    // ── Session ────────────────────────────────────────────────────────────
+    // ── Session ───────────────────────────────────────────────────────────
     impl->session = [[AVCaptureSession alloc] init];
     [impl->session beginConfiguration];
     impl->session.sessionPreset = AVCaptureSessionPresetHigh;
 
-    // ── Input ──────────────────────────────────────────────────────────────
+    // ── Input ─────────────────────────────────────────────────────────────
     NSError* err = nil;
     impl->currentInput = [AVCaptureDeviceInput deviceInputWithDevice:dev error:&err];
     if (!impl->currentInput) {
@@ -357,12 +360,11 @@ bool FluxCamera::_openDeviceAtIndex(int index) {
     }
     [impl->session addInput:impl->currentInput];
 
-    // ── Video output (preview frames → CPU BGRA32) ─────────────────────────
+    // ── Video data output (preview frames → CPU BGRA32) ───────────────────
     impl->videoOutput = [[AVCaptureVideoDataOutput alloc] init];
     impl->videoOutput.alwaysDiscardsLateVideoFrames = YES;
     impl->videoOutput.videoSettings = @{
-        (id)kCVPixelBufferPixelFormatTypeKey :
-            @(kCVPixelFormatType_32BGRA)
+        (id)kCVPixelBufferPixelFormatTypeKey : @(kCVPixelFormatType_32BGRA)
     };
 
     impl->videoQueue = dispatch_queue_create(
@@ -386,16 +388,15 @@ bool FluxCamera::_openDeviceAtIndex(int index) {
     if (vidConn && [vidConn isVideoOrientationSupported])
         vidConn.videoOrientation = AVCaptureVideoOrientationLandscapeRight;
 
-    // ── Photo output ───────────────────────────────────────────────────────
+    // ── Photo output (full-resolution still capture) ──────────────────────
     impl->photoOutput = [[AVCapturePhotoOutput alloc] init];
     if ([impl->session canAddOutput:impl->photoOutput]) {
         [impl->session addOutput:impl->photoOutput];
-
         impl->photoDelegate = [[FluxPhotoCaptureDelegate alloc] init];
         impl->photoDelegate.owner = this;
     } else {
         CAM_LOGI("canAddOutput(photoOutput) returned NO — will use frame fallback");
-        impl->photoOutput  = nil;
+        impl->photoOutput   = nil;
         impl->photoDelegate = nil;
     }
 
@@ -410,10 +411,10 @@ bool FluxCamera::_openDeviceAtIndex(int index) {
 // =============================================================================
 
 void FluxCamera::flipCamera() {
-    MacOSImpl* impl = static_cast<MacOSImpl*>(_macosImpl);
-    int count = impl ? impl->deviceCount : 0;
-    int next  = (count > 1) ? ((_cameraIndex.load() + 1) % count) : 0;
-    bool wantFront = false;
+    MacOSImpl* impl  = static_cast<MacOSImpl*>(_macosImpl);
+    int        count = impl ? impl->deviceCount : 0;
+    int        next  = (count > 1) ? ((_cameraIndex.load() + 1) % count) : 0;
+    bool wantFront   = false;
     if (impl && next < impl->deviceCount)
         wantFront = (impl->devices[next].position == AVCaptureDevicePositionFront);
     close();
@@ -421,7 +422,7 @@ void FluxCamera::flipCamera() {
 }
 
 // =============================================================================
-// UPDATE FRAME
+// UPDATE FRAME — call once per render tick on the UI thread
 // =============================================================================
 
 bool FluxCamera::updateFrame() {
@@ -442,7 +443,7 @@ void FluxCamera::capturePhoto() {
     MacOSImpl* impl = static_cast<MacOSImpl*>(_macosImpl);
 
     if (impl && impl->photoOutput && impl->photoDelegate) {
-        // Use AVCapturePhotoOutput for full-resolution still
+        // Full-resolution path via AVCapturePhotoOutput
         AVCapturePhotoSettings* settings;
         if (@available(macOS 11.0, *)) {
             settings = [AVCapturePhotoSettings
@@ -455,7 +456,7 @@ void FluxCamera::capturePhoto() {
         [impl->photoOutput capturePhotoWithSettings:settings
                                            delegate:impl->photoDelegate];
     } else {
-        // Fallback: grab next preview frame as JPEG
+        // Fallback: encode the next incoming preview frame
         _captureRequested = true;
     }
 
@@ -469,29 +470,29 @@ void FluxCamera::capturePhoto() {
 void FluxCamera::close() {
     MacOSImpl* impl = static_cast<MacOSImpl*>(_macosImpl);
 
-    if (impl && impl->session) {
-        [impl->session stopRunning];
+    if (impl) {
+        if (impl->session) {
+            [impl->session stopRunning];
 
-        // Detach delegates before releasing to prevent callbacks after close
-        if (impl->videoOutput)
-            [impl->videoOutput setSampleBufferDelegate:nil queue:nullptr];
+            // Detach sample-buffer delegate before tearing down to prevent
+            // callbacks firing on a dangling pointer.
+            if (impl->videoOutput)
+                [impl->videoOutput setSampleBufferDelegate:nil queue:nullptr];
 
-        impl->session     = nil;
-        impl->currentInput = nil;
-        impl->videoOutput  = nil;
-        impl->photoOutput  = nil;
-        impl->videoDelegate = nil;
-        impl->photoDelegate = nil;
-        impl->devices      = nil;
-        impl->frameData.clear();
-
-        if (impl->videoQueue) {
-            impl->videoQueue = nullptr; // ARC releases under ObjC; dispatch is C
+            impl->session       = nil;
+            impl->currentInput  = nil;
+            impl->videoOutput   = nil;
+            impl->photoOutput   = nil;
+            impl->videoDelegate = nil;
+            impl->photoDelegate = nil;
+            impl->devices       = nil;
+            impl->frameData.clear();
+            impl->videoQueue    = nullptr; // dispatch_queue_t is a C type; nil it last
         }
-    }
 
-    delete impl;
-    _macosImpl = nullptr;
+        delete impl;
+        _macosImpl = nullptr;
+    }
 
     _state            = State::Closed;
     _pendingFrame     = false;
@@ -504,24 +505,23 @@ void FluxCamera::close() {
 }
 
 // =============================================================================
-// JPEG ENCODE + SAVE via ImageIO / CoreGraphics
+// JPEG ENCODE + SAVE  (BGRA32 fallback path via ImageIO / CoreGraphics)
 // =============================================================================
 
 void FluxCamera::_saveJpegFromBGRA(const uint8_t* bgra, int w, int h) {
     if (!bgra || w <= 0 || h <= 0) return;
 
-    // Wrap the raw BGRA pixels in a CGImage (no copy — lifetime is this scope)
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
 
+    // Wrap raw BGRA pixels in a CGBitmapContext — no pixel copy, lifetime = scope
     CGContextRef ctx = CGBitmapContextCreate(
             const_cast<uint8_t*>(bgra),
             (size_t)w, (size_t)h,
-            8,              // bits per component
-            (size_t)(w * 4),
+            8,               // bits per component
+            (size_t)(w * 4), // bytes per row (tightly packed)
             cs,
-            kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst
-            // BGRA32 on little-endian = ByteOrder32Little | AlphaPremultipliedFirst
-    );
+            // BGRA32 little-endian: ByteOrder32Little + AlphaPremultipliedFirst
+            kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst);
     CGColorSpaceRelease(cs);
 
     if (!ctx) {
@@ -537,19 +537,16 @@ void FluxCamera::_saveJpegFromBGRA(const uint8_t* bgra, int w, int h) {
         return;
     }
 
-    // Build timestamped filename
     std::time_t t  = std::time(nullptr);
     std::tm     tm = {};
     localtime_r(&t, &tm);
     char fname[64];
     std::strftime(fname, sizeof(fname), "IMG_%Y%m%d_%H%M%S.jpg", &tm);
 
-    // Encode to an in-memory CFMutableData
+    // Encode to in-memory JPEG via ImageIO
     CFMutableDataRef jpegData = CFDataCreateMutable(kCFAllocatorDefault, 0);
     CGImageDestinationRef dest = CGImageDestinationCreateWithData(
-            jpegData,
-            kUTTypeJPEG,
-            1, nullptr);
+            jpegData, kUTTypeJPEG, 1, nullptr);
 
     if (!dest) {
         CAM_LOGE("CGImageDestinationCreateWithData failed");
@@ -558,11 +555,11 @@ void FluxCamera::_saveJpegFromBGRA(const uint8_t* bgra, int w, int h) {
         return;
     }
 
-    // JPEG quality = 0.90
-    NSDictionary* props = @{ (id)kCGImageDestinationLossyCompressionQuality : @(0.90f) };
+    NSDictionary* props = @{
+        (id)kCGImageDestinationLossyCompressionQuality : @(0.90f)
+    };
     CGImageDestinationAddImage(dest, cgImage, (__bridge CFDictionaryRef)props);
     CGImageDestinationFinalize(dest);
-
     CFRelease(dest);
     CGImageRelease(cgImage);
 
@@ -570,7 +567,6 @@ void FluxCamera::_saveJpegFromBGRA(const uint8_t* bgra, int w, int h) {
             fname,
             CFDataGetBytePtr(jpegData),
             (size_t)CFDataGetLength(jpegData));
-
     CFRelease(jpegData);
 
     if (!path.empty()) {
@@ -584,12 +580,12 @@ void FluxCamera::_saveJpegFromBGRA(const uint8_t* bgra, int w, int h) {
 
 // =============================================================================
 // FluxMac_saveJpegToPictures
-// Saves JPEG bytes to ~/Pictures/FluxCam/<filename>, returns the full path.
+// Writes JPEG bytes to ~/Pictures/FluxCam/<filename> and returns the full path.
 // =============================================================================
 
 static std::string FluxMac_saveJpegToPictures(const std::string& filename,
-                                               const uint8_t* data,
-                                               size_t length) {
+                                               const uint8_t*     data,
+                                               size_t             length) {
     NSArray<NSURL*>* picURLs = [[NSFileManager defaultManager]
         URLsForDirectory:NSPicturesDirectory
                inDomains:NSUserDomainMask];
@@ -607,10 +603,10 @@ static std::string FluxMac_saveJpegToPictures(const std::string& filename,
         createDirectoryAtURL:dirURL
  withIntermediateDirectories:YES
                   attributes:nil
-                       error:&err];  // ok if already exists
+                       error:&err]; // ok if the directory already exists
 
-    NSString* nsName = [NSString stringWithUTF8String:filename.c_str()];
-    NSURL*    fileURL = [dirURL URLByAppendingPathComponent:nsName];
+    NSURL* fileURL = [dirURL URLByAppendingPathComponent:
+                        [NSString stringWithUTF8String:filename.c_str()]];
 
     NSData* nsData = [NSData dataWithBytes:data length:length];
     if (![nsData writeToURL:fileURL options:NSDataWritingAtomic error:&err]) {

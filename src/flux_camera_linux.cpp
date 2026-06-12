@@ -25,6 +25,10 @@
 #include <jpeglib.h>
 #include <setjmp.h>
 
+// Forward declaration — defined in flux_window_linux.cpp
+void FluxWin_markNeedsPaint();
+
+
 #define CAM_LOGI(fmt, ...) \
     do { fprintf(stderr, "[FluxCamera] INFO  " fmt "\n", ##__VA_ARGS__); fflush(stderr); } while(0)
 #define CAM_LOGE(fmt, ...) \
