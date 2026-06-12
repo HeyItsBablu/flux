@@ -236,6 +236,7 @@ private:
     bool _decodeMJPEG(const uint8_t *data, size_t len, std::vector<uint8_t> &rgb);
     bool _decodeYUYV(const uint8_t *src, size_t len, std::vector<uint8_t> &rgb);
     void _saveJpeg(const std::vector<uint8_t> &rgb, int w, int h);
+
 #elif defined(__APPLE__)
     // ── macOS: AVFoundation objects (opaque pointer to MacOSImpl) ────────
     void *_macosImpl = nullptr;
@@ -245,5 +246,9 @@ private:
 
     bool _openDeviceAtIndex(int index);
     void _saveJpegFromBGRA(const uint8_t *bgra, int w, int h);
+
+    // Pure C++ bridge struct — grants the macOS implementation file access
+    // to private members without involving any ObjC class names here.
+    friend struct FluxCameraMacOSAccess;
 #endif
 };
