@@ -219,7 +219,7 @@ NSArray<AVAssetTrack*>* audioTracks = [asset tracksWithMediaType:AVMediaTypeAudi
     }
 
     // ── Audio output ──────────────────────────────────────────────────────
-    NSArray<AVAssetTrack*>* audioTracks = [asset tracksWithMediaType:AVMediaTypeAudio];
+
     *outAudio = nil;
     if (audioTracks.count > 0) {
         // Request linear PCM float32, interleaved, native sample rate
@@ -321,7 +321,7 @@ NSArray<AVAssetTrack*>* audioTracks = [asset tracksWithMediaType:AVMediaTypeAudi
     s.videoHeight = vidH;
 
     // Audio properties
-    NSArray<AVAssetTrack*>* audioTracks = [asset tracksWithMediaType:AVMediaTypeAudio];
+
     if (audioTracks.count > 0) {
         // Read native sample rate / channel count from format descriptions
         NSArray* fmts = audioTracks[0].formatDescriptions;
