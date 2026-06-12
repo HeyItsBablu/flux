@@ -42,4 +42,4 @@ function(add_flux_example NAME)
 
 endfunction()
 
-add_flux_example(helloworld)
+add_flux_example(videoplayer)

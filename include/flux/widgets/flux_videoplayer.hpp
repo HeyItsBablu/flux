@@ -21,6 +21,8 @@
 // ── Platform headers ──────────────────────────────────────────────────────────
 
 #ifdef __ANDROID__
+#   include <GLES2/gl2.h>
+#   include <GLES2/gl2ext.h>
 #   include "flux/flux.hpp"
 #   include "flux/flux_video.hpp"
 #   include "flux_icons.hpp"
