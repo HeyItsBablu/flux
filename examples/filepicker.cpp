@@ -1,11 +1,13 @@
 #include "flux/flux.hpp"
 
-class MyApp : public Widget {
-    State<std::string>              singlePath{""};
+class MyApp : public Widget
+{
+    State<std::string> singlePath{""};
     State<std::vector<std::string>> multiPaths{{}};
 
 public:
-    WidgetPtr build() override {
+    WidgetPtr build() override
+    {
         return Scaffold(
             AppBar("File Picker Demo"),
             Column({
@@ -15,14 +17,14 @@ public:
                     ->setMode(FilePickerMode::Open)
                     ->addFilter("Images", {"*.png", "*.jpg", "*.jpeg"})
                     ->addFilter("All Files", {"*.*"})
-                    ->setShowPath(false)
+
                     ->bindPath(singlePath),
-                Text(singlePath, [](const std::string& p) -> std::string {
+                Text(singlePath, [](const std::string &p) -> std::string
+                     {
                   
                     if (p.empty()) return "No file selected";
                     auto pos = p.find_last_of("\\/");
-                    return (pos != std::string::npos) ? p.substr(pos + 1) : p;
-                }),
+                    return (pos != std::string::npos) ? p.substr(pos + 1) : p; }),
 
                 Divider(),
 
@@ -32,9 +34,10 @@ public:
                     ->setMode(FilePickerMode::OpenMultiple)
                     ->addFilter("Images", {"*.png", "*.jpg", "*.jpeg"})
                     ->addFilter("All Files", {"*.*"})
-                    ->setShowPath(false)
+
                     ->bindPaths(multiPaths),
-                Text(multiPaths, [](const std::vector<std::string>& ps) -> std::string {
+                Text(multiPaths, [](const std::vector<std::string> &ps) -> std::string
+                     {
                     std::cout <<"The file path is "<< ps.empty() <<"the name "<< std::endl;
                     if (ps.empty()) return "No files selected";
                     std::string out;
@@ -44,14 +47,14 @@ public:
                         if (!out.empty()) out += ", ";
                         out += (pos != std::string::npos) ? p.substr(pos + 1) : p;
                     }
-                    return out;
-                }),
-            }),nullptr,nullptr
-        );
+                    return out; }),
+            }),
+            nullptr, nullptr);
     }
 };
 
-WidgetPtr createApp(FluxUI* app) {
+WidgetPtr createApp(FluxUI *app)
+{
     return FluxApp("FluxUI - App", std::make_shared<MyApp>(), AppTheme::light(),
                    false, 900, 700, false, false);
 }

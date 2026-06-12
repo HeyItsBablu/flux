@@ -213,11 +213,7 @@ endif()
 
 file(GLOB_RECURSE FLUX_SOURCES CONFIGURE_DEPENDS src/*.cpp)
 
-# FIX 1: Collect .mm sources separately and tag them as Objective-C++.
-#         The old code used COMPILE_FLAGS "-x objective-c++" which sets a
-#         file-level property — that's correct — but the property must be set
-#         BEFORE add_library sees the files, and CONFIGURE_DEPENDS ensures
-#         re-globbing on new .mm additions.
+
 if(APPLE)
     file(GLOB_RECURSE FLUX_MM_SOURCES CONFIGURE_DEPENDS src/*.mm)
     foreach(_mm_src ${FLUX_MM_SOURCES})
@@ -236,9 +232,7 @@ if(NOT WIN32)
     list(FILTER FLUX_SOURCES EXCLUDE REGEX ".*_win32\\.cpp$")
 endif()
 
-# FIX 2: The _linux.cpp filter previously used a bare UNIX check which would
-#         accidentally exclude Linux-named files on macOS (UNIX is TRUE there).
-#         Scope it properly to desktop Linux only.
+
 if(NOT (UNIX AND NOT APPLE AND NOT ANDROID))
     list(FILTER FLUX_SOURCES EXCLUDE REGEX ".*_linux\\.cpp$")
 endif()
@@ -248,10 +242,7 @@ if(NOT ANDROID)
     list(FILTER FLUX_SOURCES EXCLUDE REGEX ".*_android\\.mm$")
 endif()
 
-# FIX 3: Exclude _macos.mm on non-Apple platforms so the file isn't compiled
-#         on Windows/Linux/Android (where TARGET_OS_OSX guard in the .mm would
-#         technically make it a no-op, but a missing AVFoundation include would
-#         cause a hard error before the preprocessor guard fires).
+
 if(NOT APPLE)
     list(FILTER FLUX_SOURCES EXCLUDE REGEX ".*_macos\\.mm$")
 endif()
@@ -349,13 +340,7 @@ elseif(ANDROID)
     )
 
 elseif(APPLE)
-    # FIX 4: Added CoreMedia and CoreVideo — required by flux_video_macos.mm
-    #         (CMSampleBufferRef, CVPixelBufferRef, CMAudioFormatDescriptionRef).
-    #         Without these the linker finds the symbols at link time (they're in
-    #         AVFoundation's umbrella) but the headers won't resolve at compile
-    #         time and you get implicit declaration warnings that become errors
-    #         with -Werror. Explicit framework linkage also makes the dependency
-    #         graph correct for Xcode-generated projects.
+
     target_link_libraries(flux PUBLIC
             stb
             freetype
@@ -369,8 +354,9 @@ elseif(APPLE)
             "-framework CoreFoundation"
             "-framework AudioToolbox"
             "-framework AVFoundation"
-            "-framework CoreMedia"      # FIX 4a: CMSampleBufferRef, CMTime, etc.
-            "-framework CoreVideo"      # FIX 4b: CVPixelBufferRef, CVPixelBuffer*
+            "-framework CoreMedia"      
+            "-framework CoreVideo"      
+            "-framework UniformTypeIdentifiers"
     )
     target_compile_options(flux PRIVATE
             -Wall

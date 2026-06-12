@@ -158,6 +158,45 @@ namespace FluxFilePickerAndroid
 #endif // __ANDROID__
 
 // ============================================================================
+// MACOS BACKEND — forward declarations
+// ============================================================================
+
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#if TARGET_OS_OSX
+
+namespace FluxFilePickerMacOS
+{
+
+  // All functions dispatch to the main queue internally and are safe to call
+  // from any thread.  Callbacks are invoked on the main thread.
+
+  void pickFileAsync(const std::string &title,
+                     const std::string &initialDir,
+                     const std::vector<FileFilter> &filters,
+                     std::function<void(std::string)> callback);
+
+  void pickFilesAsync(const std::string &title,
+                      const std::string &initialDir,
+                      const std::vector<FileFilter> &filters,
+                      std::function<void(std::vector<std::string>)> callback);
+
+  void saveFileAsync(const std::string &title,
+                     const std::string &initialDir,
+                     const std::string &defaultFilename,
+                     const std::vector<FileFilter> &filters,
+                     std::function<void(std::string)> callback);
+
+  void pickFolderAsync(const std::string &title,
+                       const std::string &initialDir,
+                       std::function<void(std::string)> callback);
+
+} // namespace FluxFilePickerMacOS
+
+#endif // TARGET_OS_OSX
+#endif // __APPLE__
+
+// ============================================================================
 // FILE PICKER WIDGET
 // ============================================================================
 //
@@ -181,6 +220,7 @@ namespace FluxFilePickerAndroid
 //   Linux    — zenity (GNOME) or kdialog (KDE), async via background thread
 //   Android  — ACTION_OPEN_DOCUMENT / CREATE_DOCUMENT / OPEN_DOCUMENT_TREE
 //              via startActivityForResult, bridged through FluxBridge.java
+//   macOS    — NSOpenPanel / NSSavePanel, async via dispatch_async(main_queue)
 //
 // ── String label (plain text trigger) ─────────────────────────────────────
 //
