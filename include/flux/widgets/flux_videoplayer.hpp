@@ -21,78 +21,96 @@
 // ── Platform headers ──────────────────────────────────────────────────────────
 
 #ifdef __ANDROID__
-#   include <GLES2/gl2.h>
-#   include <GLES2/gl2ext.h>
-#   include "flux/flux.hpp"
-#   include "flux/flux_video.hpp"
-#   include "flux_icons.hpp"
-    extern NVGcontext* FluxAndroid_getVG();
-    extern float       FluxAndroid_getDpiScale();
+#include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>
+#include "flux/flux.hpp"
+#include "flux/flux_video.hpp"
+#include "flux_icons.hpp"
+extern NVGcontext *FluxAndroid_getVG();
+extern float FluxAndroid_getDpiScale();
 #elif defined(__APPLE__)
-#   include <TargetConditionals.h>
-#   if TARGET_OS_OSX
-#       include "flux/flux.hpp"
-#       include "flux/flux_video.hpp"
-#       include "flux_icons.hpp"
-#       import  <CoreGraphics/CoreGraphics.h>
-#   endif
+#include <TargetConditionals.h>
+#if TARGET_OS_OSX
+#include "flux/flux.hpp"
+#include "flux/flux_video.hpp"
+#include "flux_icons.hpp"
+#include <CoreGraphics/CoreGraphics.h>
+#endif
 #elif defined(_WIN32)
-#   include "flux/flux.hpp"
-#   include "flux/flux_video.hpp"
-#   include "flux_icons.hpp"
+#include "flux/flux.hpp"
+#include "flux/flux_video.hpp"
+#include "flux_icons.hpp"
 #elif defined(__linux__)
-#   include "flux/flux.hpp"
-#   include "flux/flux_video.hpp"
-#   include "flux_icons.hpp"
-#   include <cairo/cairo.h>
+#include "flux/flux.hpp"
+#include "flux/flux_video.hpp"
+#include "flux_icons.hpp"
+#include <cairo/cairo.h>
 #endif
 
 // ============================================================================
 // Shared utilities
 // ============================================================================
 
-enum class VideoSourceType { None, Path, Url, Memory };
+enum class VideoSourceType
+{
+    None,
+    Path,
+    Url,
+    Memory
+};
 
 // Magic-byte container detection — returns ".mp4", ".mov", ".avi", ".mkv", ".flv"
-inline std::string VP_detectVideoExtension(const std::vector<uint8_t>& bytes)
+inline std::string VP_detectVideoExtension(const std::vector<uint8_t> &bytes)
 {
-    if (bytes.size() >= 12) {
-        if (bytes[4]=='f' && bytes[5]=='t' && bytes[6]=='y' && bytes[7]=='p') return ".mp4";
-        if (bytes[4]=='m' && bytes[5]=='o' && bytes[6]=='o' && bytes[7]=='v') return ".mov";
+    if (bytes.size() >= 12)
+    {
+        if (bytes[4] == 'f' && bytes[5] == 't' && bytes[6] == 'y' && bytes[7] == 'p')
+            return ".mp4";
+        if (bytes[4] == 'm' && bytes[5] == 'o' && bytes[6] == 'o' && bytes[7] == 'v')
+            return ".mov";
     }
-    if (bytes.size() >= 4) {
-        if (bytes[0]=='R' && bytes[1]=='I' && bytes[2]=='F' && bytes[3]=='F') return ".avi";
-        if (bytes[0]==0x1A && bytes[1]==0x45 && bytes[2]==0xDF && bytes[3]==0xA3) return ".mkv";
+    if (bytes.size() >= 4)
+    {
+        if (bytes[0] == 'R' && bytes[1] == 'I' && bytes[2] == 'F' && bytes[3] == 'F')
+            return ".avi";
+        if (bytes[0] == 0x1A && bytes[1] == 0x45 && bytes[2] == 0xDF && bytes[3] == 0xA3)
+            return ".mkv";
     }
-    if (bytes.size() >= 3) {
-        if (bytes[0]=='F' && bytes[1]=='L' && bytes[2]=='V') return ".flv";
+    if (bytes.size() >= 3)
+    {
+        if (bytes[0] == 'F' && bytes[1] == 'L' && bytes[2] == 'V')
+            return ".flv";
     }
     return ".mp4";
 }
 
 // Write bytes to a platform temp file with the given extension.
 // Returns the final path on success, empty string on failure.
-inline std::string VP_writeTempFile(const std::vector<uint8_t>& bytes, const std::string& ext)
+inline std::string VP_writeTempFile(const std::vector<uint8_t> &bytes, const std::string &ext)
 {
 #ifdef _WIN32
     char tmpDir[MAX_PATH];
-    if (GetTempPathA(MAX_PATH, tmpDir) == 0) return {};
+    if (GetTempPathA(MAX_PATH, tmpDir) == 0)
+        return {};
     char tmpFile[MAX_PATH];
-    if (GetTempFileNameA(tmpDir, "flxv", 0, tmpFile) == 0) return {};
+    if (GetTempFileNameA(tmpDir, "flxv", 0, tmpFile) == 0)
+        return {};
     std::string outPath = std::string(tmpFile) + ext;
-    FILE* f = nullptr;
+    FILE *f = nullptr;
     fopen_s(&f, outPath.c_str(), "wb");
 #else
     std::string tmpl = std::string(P_tmpdir) + "/flxvideoXXXXXX";
     std::vector<char> tmplBuf(tmpl.begin(), tmpl.end());
     tmplBuf.push_back('\0');
     int fd = mkstemp(tmplBuf.data());
-    if (fd < 0) return {};
+    if (fd < 0)
+        return {};
     std::string outPath = std::string(tmplBuf.data()) + ext;
     ::rename(tmplBuf.data(), outPath.c_str());
-    FILE* f = fopen(outPath.c_str(), "wb");
+    FILE *f = fopen(outPath.c_str(), "wb");
 #endif
-    if (!f) return {};
+    if (!f)
+        return {};
     fwrite(bytes.data(), 1, bytes.size(), f);
     fclose(f);
     return outPath;
@@ -105,55 +123,54 @@ inline std::string VP_writeTempFile(const std::vector<uint8_t>& bytes, const std
 class VideoPlayerWidget : public Widget
 {
 public:
-
     // ── Public config ─────────────────────────────────────────────────────────
     std::string videoPath;
-    int  barHeight = 40;
-    bool autoPlay  = false;
+    int barHeight = 40;
+    bool autoPlay = false;
 
     // ── Colors ────────────────────────────────────────────────────────────────
-    Color colBar         = Color::fromRGBA(20,  20,  20,  220);
-    Color colTrackBg     = Color::fromRGB (100, 100, 100);
-    Color colTrackFill   = Color::fromRGB (220, 220, 220);
-    Color colThumb       = Color::fromRGB (255, 255, 255);
-    Color colText        = Color::fromRGB (230, 230, 230);
-    Color colIcon        = Color::fromRGB (220, 220, 220);
-    Color colIconHov     = Color::fromRGB (255, 255, 255);
-    Color colBg          = Color::fromRGB (0,   0,   0  );
-    Color colOverlay     = Color::fromRGBA(0,   0,   0,  60 );
-    Color colLoadingText = Color::fromRGB (180, 180, 180);
-    Color colErrorText   = Color::fromRGB (220, 80,  80 );
+    Color colBar = Color::fromRGBA(20, 20, 20, 220);
+    Color colTrackBg = Color::fromRGB(100, 100, 100);
+    Color colTrackFill = Color::fromRGB(220, 220, 220);
+    Color colThumb = Color::fromRGB(255, 255, 255);
+    Color colText = Color::fromRGB(230, 230, 230);
+    Color colIcon = Color::fromRGB(220, 220, 220);
+    Color colIconHov = Color::fromRGB(255, 255, 255);
+    Color colBg = Color::fromRGB(0, 0, 0);
+    Color colOverlay = Color::fromRGBA(0, 0, 0, 60);
+    Color colLoadingText = Color::fromRGB(180, 180, 180);
+    Color colErrorText = Color::fromRGB(220, 80, 80);
 
     // ── Fluent setters ────────────────────────────────────────────────────────
 
-    std::shared_ptr<VideoPlayerWidget> setPath(const std::string& p)
+    std::shared_ptr<VideoPlayerWidget> setPath(const std::string &p)
     {
-        videoPath    = p;
-        _sourceType  = VideoSourceType::Path;
+        videoPath = p;
+        _sourceType = VideoSourceType::Path;
         _sourceUrl.clear();
         _sourceMemory.clear();
         return self();
     }
 
-    std::shared_ptr<VideoPlayerWidget> setUrl(const std::string& url)
+    std::shared_ptr<VideoPlayerWidget> setUrl(const std::string &url)
     {
-        _sourceUrl   = url;
-        _sourceType  = VideoSourceType::Url;
+        _sourceUrl = url;
+        _sourceType = VideoSourceType::Url;
         videoPath.clear();
         _sourceMemory.clear();
         return self();
     }
 
-    std::shared_ptr<VideoPlayerWidget> setMemory(const std::vector<uint8_t>& bytes)
+    std::shared_ptr<VideoPlayerWidget> setMemory(const std::vector<uint8_t> &bytes)
     {
         _sourceMemory = bytes;
-        _sourceType   = VideoSourceType::Memory;
+        _sourceType = VideoSourceType::Memory;
         videoPath.clear();
         _sourceUrl.clear();
         return self();
     }
 
-    std::shared_ptr<VideoPlayerWidget> setMemory(const uint8_t* data, size_t len)
+    std::shared_ptr<VideoPlayerWidget> setMemory(const uint8_t *data, size_t len)
     {
         _sourceMemory.assign(data, data + len);
         _sourceType = VideoSourceType::Memory;
@@ -187,37 +204,35 @@ public:
     VideoPlayerWidget()
     {
         autoWidth = autoHeight = false;
-        width  = 320;
+        width = 320;
         height = 180;
 
 #ifdef __ANDROID__
         // Android: callbacks fire on decode thread → safe to call markNeedsPaint directly.
         FluxVideo::get().setOnFinished([this]()
-        {
+                                       {
             _playing  = false;
             _finished = true;
             _progress = 1.f;
-            markNeedsPaint();
-        });
+            markNeedsPaint(); });
 
         FluxVideo::get().setOnReady([this](int w, int h)
-        {
+                                    {
             _vidW          = w;
             _vidH          = h;
             _nvgImageDirty = true;
-            markNeedsPaint();
-        });
+            markNeedsPaint(); });
 #else
         // Win32 / Linux / macOS: finish callback may arrive on decode thread;
         // use atomic flag and consume it in render() on the UI thread.
         FluxVideo::get().setOnFinished([this]()
-        {
+                                       {
             _finishedPending = true;
             if (auto* ui = FluxUI::getCurrentInstance())
-                ui->invalidateWidget(x, y, width, height);
-        });
+                ui->invalidateWidget(x, y, width, height); });
 
-        FluxVideo::get().setOnReady([this](int, int) { markNeedsPaint(); });
+        FluxVideo::get().setOnReady([this](int, int)
+                                    { markNeedsPaint(); });
 #endif
     }
 
@@ -234,12 +249,32 @@ public:
         FluxVideo::get().setOnReady(nullptr);
 
 #ifdef __ANDROID__
-        NVGcontext* vg = FluxAndroid_getVG();
-        if (_nvgImage >= 0 && vg) { nvgDeleteImage(vg, _nvgImage); _nvgImage = -1; }
-        if (_fbo)        { glDeleteFramebuffers(1, &_fbo);        _fbo        = 0; }
-        if (_fboTex)     { glDeleteTextures(1,    &_fboTex);      _fboTex     = 0; }
-        if (_oesVBO)     { glDeleteBuffers(1,      &_oesVBO);     _oesVBO     = 0; }
-        if (_oesProgram) { glDeleteProgram(_oesProgram);          _oesProgram = 0; }
+        NVGcontext *vg = FluxAndroid_getVG();
+        if (_nvgImage >= 0 && vg)
+        {
+            nvgDeleteImage(vg, _nvgImage);
+            _nvgImage = -1;
+        }
+        if (_fbo)
+        {
+            glDeleteFramebuffers(1, &_fbo);
+            _fbo = 0;
+        }
+        if (_fboTex)
+        {
+            glDeleteTextures(1, &_fboTex);
+            _fboTex = 0;
+        }
+        if (_oesVBO)
+        {
+            glDeleteBuffers(1, &_oesVBO);
+            _oesVBO = 0;
+        }
+        if (_oesProgram)
+        {
+            glDeleteProgram(_oesProgram);
+            _oesProgram = 0;
+        }
 #elif defined(__APPLE__) && TARGET_OS_OSX
         _freeCGResources();
 #elif defined(__linux__)
@@ -251,15 +286,18 @@ public:
     // Layout — identical on all platforms
     // =========================================================================
 
-    void computeLayout(GraphicsContext& /*ctx*/, const BoxConstraints& constraints,
-                       FontCache& /*fontCache*/) override
+    void computeLayout(GraphicsContext & /*ctx*/, const BoxConstraints &constraints,
+                       FontCache & /*fontCache*/) override
     {
-        if (autoWidth)  width  = constraints.maxWidth;
-        if (autoHeight) height = constraints.maxHeight;
+        if (autoWidth)
+            width = constraints.maxWidth;
+        if (autoHeight)
+            height = constraints.maxHeight;
         applyConstraints();
         needsLayout = false;
 
-        if (!_opened) {
+        if (!_opened)
+        {
             _opened = true;
             _openVideoSource();
         }
@@ -269,18 +307,20 @@ public:
     // Render — platform-specific frame blit, shared bar/overlay rendering
     // =========================================================================
 
-    void render(GraphicsContext& ctx, FontCache& fontCache) override
+    void render(GraphicsContext &ctx, FontCache &fontCache) override
     {
         Painter p(ctx);
 
         // ── Loading / error overlays (shared) ─────────────────────────────────
-        if (_netState == NetState::Loading) {
+        if (_netState == NetState::Loading)
+        {
             p.fillRect(x, y, width, height, colBg);
             _renderStatusOverlay(p, fontCache, "... Loading ...", colLoadingText);
             needsPaint = false;
             return;
         }
-        if (_netState == NetState::Error) {
+        if (_netState == NetState::Error)
+        {
             p.fillRect(x, y, width, height, colBg);
             _renderStatusOverlay(p, fontCache, "Error loading video", colErrorText);
             needsPaint = false;
@@ -293,32 +333,38 @@ public:
 
 #ifdef __ANDROID__
         {
-            NVGcontext* vg  = FluxAndroid_getVG();
-            auto&       vid = FluxVideo::get();
+            NVGcontext *vg = FluxAndroid_getVG();
+            auto &vid = FluxVideo::get();
 
             _initGLResources();
 
-            if (_nvgImageDirty && _vidW > 0 && _vidH > 0 && vg) {
+            if (_nvgImageDirty && _vidW > 0 && _vidH > 0 && vg)
+            {
                 _nvgImageDirty = false;
                 _rebuildFBO(vg, _vidW, _vidH);
             }
 
-            if (vid.updateFrame() && _fbo && _oesProgram) {
+            if (vid.updateFrame() && _fbo && _oesProgram)
+            {
                 _blitOESToFBO(vid.getTextureId());
                 _progress = vid.getProgress();
             }
 
-            if (_nvgImage >= 0 && _fboW > 0 && _fboH > 0 && vg) {
-                int   videoAreaH = height - barHeight;
+            if (_nvgImage >= 0 && _fboW > 0 && _fboH > 0 && vg)
+            {
+                int videoAreaH = height - barHeight;
                 float vidAR = (float)_fboW / (float)_fboH;
-                float widAR = (float)width  / (float)videoAreaH;
+                float widAR = (float)width / (float)videoAreaH;
                 float dstW, dstH, dstX, dstY;
-                if (vidAR > widAR) {
+                if (vidAR > widAR)
+                {
                     dstW = (float)width;
                     dstH = dstW / vidAR;
                     dstX = (float)x;
                     dstY = (float)y + ((float)videoAreaH - dstH) * 0.5f;
-                } else {
+                }
+                else
+                {
                     dstH = (float)videoAreaH;
                     dstW = dstH * vidAR;
                     dstX = (float)x + ((float)width - dstW) * 0.5f;
@@ -351,25 +397,32 @@ public:
             // compared to a full decode. If profiling shows it matters,
             // introduce a CGBitmapContext that we blit into instead.
 
-            if (_finishedPending.exchange(false)) {
-                _playing  = false;
+            if (_finishedPending.exchange(false))
+            {
+                _playing = false;
                 _finished = true;
                 _progress = 1.f;
             }
 
-            if (FluxVideo::get().hasNewFrame()) {
+            if (FluxVideo::get().hasNewFrame())
+            {
                 auto frame = FluxVideo::get().lockFrame();
-                if (frame.data && frame.width > 0 && frame.height > 0) {
+                if (frame.data && frame.width > 0 && frame.height > 0)
+                {
                     // Copy row by row to strip any row-padding from the decoder.
                     int expectedStride = frame.width * 3;
                     _frameCache.resize((size_t)(frame.width * frame.height * 3));
-                    if (frame.stride == expectedStride) {
+                    if (frame.stride == expectedStride)
+                    {
                         memcpy(_frameCache.data(), frame.data,
                                _frameCache.size());
-                    } else {
-                        const uint8_t* src = frame.data;
-                        uint8_t*       dst = _frameCache.data();
-                        for (int row = 0; row < frame.height; ++row) {
+                    }
+                    else
+                    {
+                        const uint8_t *src = frame.data;
+                        uint8_t *dst = _frameCache.data();
+                        for (int row = 0; row < frame.height; ++row)
+                        {
                             memcpy(dst, src, (size_t)expectedStride);
                             src += frame.stride;
                             dst += expectedStride;
@@ -382,14 +435,17 @@ public:
                 _progress = FluxVideo::get().getProgress();
             }
 
-            if (!_frameCache.empty() && _cachedSrcW > 0 && ctx.cgContext) {
+            if (!_frameCache.empty() && _cachedSrcW > 0 && ctx.cgContext)
+            {
                 // Rebuild the CGImage only when a new frame arrived.
-                if (_cgImageDirty) {
+                if (_cgImageDirty)
+                {
                     _cgImageDirty = false;
                     _rebuildCGImage();
                 }
 
-                if (_cgImage) {
+                if (_cgImage)
+                {
                     int dstX, dstY, dstW, dstH;
                     _letterbox(_cachedSrcW, _cachedSrcH, dstX, dstY, dstW, dstH);
 
@@ -406,8 +462,8 @@ public:
 
                     CGContextSetInterpolationQuality(cg, kCGInterpolationHigh);
                     CGContextDrawImage(cg,
-                        CGRectMake(0, 0, (CGFloat)dstW, (CGFloat)dstH),
-                        _cgImage);
+                                       CGRectMake(0, 0, (CGFloat)dstW, (CGFloat)dstH),
+                                       _cgImage);
 
                     CGContextRestoreGState(cg);
                 }
@@ -416,30 +472,34 @@ public:
 
 #elif defined(_WIN32)
         {
-            if (_finishedPending.exchange(false)) {
-                _playing  = false;
+            if (_finishedPending.exchange(false))
+            {
+                _playing = false;
                 _finished = true;
                 _progress = 1.f;
             }
 
-            if (FluxVideo::get().hasNewFrame()) {
+            if (FluxVideo::get().hasNewFrame())
+            {
                 auto frame = FluxVideo::get().lockFrame();
-                if (frame.data && frame.width > 0 && frame.height > 0) {
+                if (frame.data && frame.width > 0 && frame.height > 0)
+                {
                     _frameCache.assign(frame.data, frame.data + frame.stride * frame.height);
                     _cachedSrcW = frame.width;
                     _cachedSrcH = frame.height;
-                    _cachedBmi  = {};
-                    _cachedBmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
-                    _cachedBmi.bmiHeader.biWidth        = frame.width;
-                    _cachedBmi.bmiHeader.biHeight       = -frame.height; // top-down
-                    _cachedBmi.bmiHeader.biPlanes       = 1;
-                    _cachedBmi.bmiHeader.biBitCount     = 24;
-                    _cachedBmi.bmiHeader.biCompression  = BI_RGB;
+                    _cachedBmi = {};
+                    _cachedBmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+                    _cachedBmi.bmiHeader.biWidth = frame.width;
+                    _cachedBmi.bmiHeader.biHeight = -frame.height; // top-down
+                    _cachedBmi.bmiHeader.biPlanes = 1;
+                    _cachedBmi.bmiHeader.biBitCount = 24;
+                    _cachedBmi.bmiHeader.biCompression = BI_RGB;
                 }
                 _progress = FluxVideo::get().getProgress();
             }
 
-            if (!_frameCache.empty() && _cachedSrcW > 0) {
+            if (!_frameCache.empty() && _cachedSrcW > 0)
+            {
                 int dstX, dstY, dstW, dstH;
                 _letterbox(_cachedSrcW, _cachedSrcH, dstX, dstY, dstW, dstH);
                 ::SetStretchBltMode(ctx.hdc, HALFTONE);
@@ -453,15 +513,18 @@ public:
 
 #elif defined(__linux__)
         {
-            if (_finishedPending.exchange(false)) {
-                _playing  = false;
+            if (_finishedPending.exchange(false))
+            {
+                _playing = false;
                 _finished = true;
                 _progress = 1.f;
             }
 
-            if (FluxVideo::get().hasNewFrame()) {
+            if (FluxVideo::get().hasNewFrame())
+            {
                 auto frame = FluxVideo::get().lockFrame();
-                if (frame.data && frame.width > 0 && frame.height > 0) {
+                if (frame.data && frame.width > 0 && frame.height > 0)
+                {
                     _frameCache.assign(frame.data, frame.data + frame.stride * frame.height);
                     _cachedSrcW = frame.width;
                     _cachedSrcH = frame.height;
@@ -471,7 +534,8 @@ public:
                 _progress = FluxVideo::get().getProgress();
             }
 
-            if (_cairoSurf && !_frameCache.empty() && _cachedSrcW > 0 && ctx.cr) {
+            if (_cairoSurf && !_frameCache.empty() && _cachedSrcW > 0 && ctx.cr)
+            {
                 _updateCairoPixels();
                 cairo_surface_mark_dirty(_cairoSurf);
 
@@ -507,21 +571,25 @@ public:
 
     bool handleMouseDown(int mx, int my) override
     {
-        if (!_inWidget(mx, my)) return false;
+        if (!_inWidget(mx, my))
+            return false;
 
-        if (!_inRect(mx, my, _barRect)) {
+        if (!_inRect(mx, my, _barRect))
+        {
             _barVisible = true;
             _resetBarTimer();
             _togglePlayPause();
             markNeedsPaint();
             return true;
         }
-        if (_inRect(mx, my, _playBtnRect)) {
+        if (_inRect(mx, my, _playBtnRect))
+        {
             _togglePlayPause();
             markNeedsPaint();
             return true;
         }
-        if (_inRect(mx, my, _trackRect)) {
+        if (_inRect(mx, my, _trackRect))
+        {
             _dragging = true;
             FluxUI::getCurrentInstance()->captureMouseInput();
             _seekFromMouse(mx);
@@ -536,7 +604,8 @@ public:
 
     bool handleMouseUp(int, int) override
     {
-        if (_dragging) {
+        if (_dragging)
+        {
             _dragging = false;
             FluxUI::getCurrentInstance()->releaseMouseInput();
             markNeedsPaint();
@@ -546,19 +615,23 @@ public:
 
     bool handleMouseMove(int mx, int my) override
     {
-        if (_dragging) {
+        if (_dragging)
+        {
             _seekFromMouse(mx);
             return true;
         }
         bool inW = _inWidget(mx, my);
-        if (inW != _barVisible) {
+        if (inW != _barVisible)
+        {
             _barVisible = inW;
             markNeedsPaint();
         }
-        if (inW) _resetBarTimer();
+        if (inW)
+            _resetBarTimer();
 
         bool hp = _inRect(mx, my, _playBtnRect);
-        if (hp != _hovPlay) {
+        if (hp != _hovPlay)
+        {
             _hovPlay = hp;
             markNeedsPaint();
         }
@@ -573,42 +646,49 @@ public:
     }
 
 private:
-
     // ── Source ────────────────────────────────────────────────────────────────
-    VideoSourceType      _sourceType = VideoSourceType::None;
-    std::string          _sourceUrl;
+    VideoSourceType _sourceType = VideoSourceType::None;
+    std::string _sourceUrl;
     std::vector<uint8_t> _sourceMemory;
 
-    enum class NetState { Idle, Loading, Error };
+    enum class NetState
+    {
+        Idle,
+        Loading,
+        Error
+    };
     NetState _netState = NetState::Idle;
 
     // ── Shared playback state ─────────────────────────────────────────────────
-    bool  _opened   = false;
-    bool  _playing  = false;
-    bool  _finished = false;
+    bool _opened = false;
+    bool _playing = false;
+    bool _finished = false;
     float _progress = 0.f;
-    bool  _dragging    = false;
-    bool  _barVisible  = true;
-    bool  _hovPlay     = false;
+    bool _dragging = false;
+    bool _barVisible = true;
+    bool _hovPlay = false;
 
-    struct Rect { int x, y, w, h; };
+    struct Rect
+    {
+        int x, y, w, h;
+    };
     Rect _barRect{}, _playBtnRect{}, _trackRect{};
 
     TimerID _progressTimer = 0;
-    TimerID _barHideTimer  = 0;
+    TimerID _barHideTimer = 0;
 
     // ── Platform frame storage ────────────────────────────────────────────────
 #ifdef __ANDROID__
-    int    _vidW = 0, _vidH = 0;
-    GLuint _fboTex     = 0;
-    GLuint _fbo        = 0;
-    int    _fboW       = 0, _fboH = 0;
-    int    _nvgImage   = -1;
+    int _vidW = 0, _vidH = 0;
+    GLuint _fboTex = 0;
+    GLuint _fbo = 0;
+    int _fboW = 0, _fboH = 0;
+    int _nvgImage = -1;
     GLuint _oesProgram = 0;
-    GLuint _oesVAO     = 0;
-    GLuint _oesVBO     = 0;
-    bool   _glResourcesReady = false;
-    bool   _nvgImageDirty    = false;
+    GLuint _oesVAO = 0;
+    GLuint _oesVBO = 0;
+    bool _glResourcesReady = false;
+    bool _nvgImageDirty = false;
     std::vector<uint8_t> _fboPixels;
 
 #elif defined(__APPLE__) && TARGET_OS_OSX
@@ -617,28 +697,28 @@ private:
     // re-creating it on every frame; _cgImage is released and rebuilt
     // whenever a new frame arrives.
     std::vector<uint8_t> _frameCache;
-    int                  _cachedSrcW   = 0, _cachedSrcH = 0;
-    bool                 _cgImageDirty = false;
-    CGImageRef           _cgImage      = nullptr;
-    CGColorSpaceRef      _cgColorSpace = nullptr;
-    std::atomic<bool>    _destroyed{false};
-    std::atomic<bool>    _finishedPending{false};
+    int _cachedSrcW = 0, _cachedSrcH = 0;
+    bool _cgImageDirty = false;
+    CGImageRef _cgImage = nullptr;
+    CGColorSpaceRef _cgColorSpace = nullptr;
+    std::atomic<bool> _destroyed{false};
+    std::atomic<bool> _finishedPending{false};
 
 #elif defined(_WIN32)
     std::vector<uint8_t> _frameCache;
-    BITMAPINFO           _cachedBmi{};
-    int                  _cachedSrcW = 0, _cachedSrcH = 0;
-    std::atomic<bool>    _destroyed{false};
-    std::atomic<bool>    _finishedPending{false};
+    BITMAPINFO _cachedBmi{};
+    int _cachedSrcW = 0, _cachedSrcH = 0;
+    std::atomic<bool> _destroyed{false};
+    std::atomic<bool> _finishedPending{false};
 
 #elif defined(__linux__)
     std::vector<uint8_t> _frameCache;
-    int                  _cachedSrcW = 0, _cachedSrcH = 0;
+    int _cachedSrcW = 0, _cachedSrcH = 0;
     std::vector<uint8_t> _cairoPixels;
-    cairo_surface_t*     _cairoSurf  = nullptr;
-    int                  _cairoSurfW = 0, _cairoSurfH = 0;
-    std::atomic<bool>    _destroyed{false};
-    std::atomic<bool>    _finishedPending{false};
+    cairo_surface_t *_cairoSurf = nullptr;
+    int _cairoSurfW = 0, _cairoSurfH = 0;
+    std::atomic<bool> _destroyed{false};
+    std::atomic<bool> _finishedPending{false};
 #endif
 
     // =========================================================================
@@ -647,11 +727,15 @@ private:
 
     void _openVideoSource()
     {
-        if (_sourceType == VideoSourceType::Url && !_sourceUrl.empty()) {
-            _loadFromUrl(); return;
+        if (_sourceType == VideoSourceType::Url && !_sourceUrl.empty())
+        {
+            _loadFromUrl();
+            return;
         }
-        if (_sourceType == VideoSourceType::Memory && !_sourceMemory.empty()) {
-            _playFromMemory(); return;
+        if (_sourceType == VideoSourceType::Memory && !_sourceMemory.empty())
+        {
+            _playFromMemory();
+            return;
         }
         if (!videoPath.empty())
             _openVideo();
@@ -664,7 +748,7 @@ private:
         std::weak_ptr<VideoPlayerWidget> weak = self();
         std::string url = _sourceUrl;
         FluxHttp::get(url, [weak](HttpResult result)
-        {
+                      {
             auto s = weak.lock();
             if (!s) return;
             if (!result.success || result.body.empty()) {
@@ -675,16 +759,17 @@ private:
             const auto* d = reinterpret_cast<const uint8_t*>(result.body.data());
             s->_sourceMemory.assign(d, d + result.body.size());
             s->_netState = NetState::Idle;
-            s->_playFromMemory();
-        });
+            s->_playFromMemory(); });
     }
 
     void _playFromMemory()
     {
-        if (_sourceMemory.empty()) return;
-        std::string ext  = VP_detectVideoExtension(_sourceMemory);
+        if (_sourceMemory.empty())
+            return;
+        std::string ext = VP_detectVideoExtension(_sourceMemory);
         std::string path = VP_writeTempFile(_sourceMemory, ext);
-        if (path.empty()) {
+        if (path.empty())
+        {
             _netState = NetState::Error;
             markNeedsPaint();
             return;
@@ -696,7 +781,8 @@ private:
     void _openVideo()
     {
         FluxVideo::get().open(videoPath);
-        if (autoPlay) {
+        if (autoPlay)
+        {
             FluxVideo::get().play();
             _playing = true;
             _startProgressTimer();
@@ -709,8 +795,9 @@ private:
 
     void _togglePlayPause()
     {
-        auto& vid = FluxVideo::get();
-        if (_finished) {
+        auto &vid = FluxVideo::get();
+        if (_finished)
+        {
             _finished = false;
             _progress = 0.f;
             vid.seekToProgress(0.f);
@@ -719,10 +806,13 @@ private:
             _startProgressTimer();
             return;
         }
-        if (_playing) {
+        if (_playing)
+        {
             vid.pause();
             _playing = false;
-        } else {
+        }
+        else
+        {
             vid.play();
             _playing = true;
             _startProgressTimer();
@@ -731,12 +821,14 @@ private:
 
     void _seekFromMouse(int mx)
     {
-        if (_trackRect.w <= 0) return;
+        if (_trackRect.w <= 0)
+            return;
         float t = std::max(0.f, std::min(1.f,
-                    (float)(mx - _trackRect.x) / (float)_trackRect.w));
+                                         (float)(mx - _trackRect.x) / (float)_trackRect.w));
         _progress = t;
         FluxVideo::get().seekToProgress(t);
-        if (_finished && t < 0.999f) {
+        if (_finished && t < 0.999f)
+        {
             _finished = false;
             FluxVideo::get().play();
             _playing = true;
@@ -747,44 +839,54 @@ private:
 
     void _startProgressTimer()
     {
-        if (_progressTimer) return;
+        if (_progressTimer)
+            return;
         _progressTimer = FluxUI::getCurrentInstance()->setInterval(33, [this]()
-        {
+                                                                   {
 #if !defined(__ANDROID__)
             if (_destroyed) return;
 #endif
             if (_playing) {
                 _progress = FluxVideo::get().getProgress();
                 markNeedsPaint();
-            }
-        });
+            } });
     }
 
     void _resetBarTimer()
     {
-        auto* ui = FluxUI::getCurrentInstance();
-        if (!ui) return;
-        if (_barHideTimer) {
+        auto *ui = FluxUI::getCurrentInstance();
+        if (!ui)
+            return;
+        if (_barHideTimer)
+        {
             ui->clearInterval(_barHideTimer);
             _barHideTimer = 0;
         }
         _barHideTimer = ui->setInterval(3000, [this]()
-        {
+                                        {
 #if !defined(__ANDROID__)
             if (_destroyed) return;
 #endif
             auto* u = FluxUI::getCurrentInstance();
             if (u && _barHideTimer) { u->clearInterval(_barHideTimer); _barHideTimer = 0; }
-            if (_playing) { _barVisible = false; markNeedsPaint(); }
-        });
+            if (_playing) { _barVisible = false; markNeedsPaint(); } });
     }
 
     void _stopTimers()
     {
-        auto* ui = FluxUI::getCurrentInstance();
-        if (!ui) return;
-        if (_progressTimer) { ui->clearInterval(_progressTimer); _progressTimer = 0; }
-        if (_barHideTimer)  { ui->clearInterval(_barHideTimer);  _barHideTimer  = 0; }
+        auto *ui = FluxUI::getCurrentInstance();
+        if (!ui)
+            return;
+        if (_progressTimer)
+        {
+            ui->clearInterval(_progressTimer);
+            _progressTimer = 0;
+        }
+        if (_barHideTimer)
+        {
+            ui->clearInterval(_barHideTimer);
+            _barHideTimer = 0;
+        }
     }
 
     // =========================================================================
@@ -793,16 +895,19 @@ private:
 
     // ── Letterbox (Win32 + Linux + macOS — not needed on Android) ─────────────
 #if defined(_WIN32) || defined(__linux__) || (defined(__APPLE__) && TARGET_OS_OSX)
-    void _letterbox(int srcW, int srcH, int& dstX, int& dstY, int& dstW, int& dstH) const
+    void _letterbox(int srcW, int srcH, int &dstX, int &dstY, int &dstW, int &dstH) const
     {
         float vidAR = (float)srcW / (float)srcH;
         float widAR = (float)width / (float)(height - barHeight);
-        if (vidAR > widAR) {
+        if (vidAR > widAR)
+        {
             dstW = width;
             dstH = (int)((float)dstW / vidAR);
             dstX = x;
             dstY = y + (height - barHeight - dstH) / 2;
-        } else {
+        }
+        else
+        {
             dstH = height - barHeight;
             dstW = (int)((float)dstH * vidAR);
             dstX = x + (width - dstW) / 2;
@@ -818,11 +923,13 @@ private:
     // Called only when _cgImageDirty is set, so typically once per decoded frame.
     void _rebuildCGImage()
     {
-        if (_cgImage) {
+        if (_cgImage)
+        {
             CGImageRelease(_cgImage);
             _cgImage = nullptr;
         }
-        if (_frameCache.empty() || _cachedSrcW <= 0 || _cachedSrcH <= 0) return;
+        if (_frameCache.empty() || _cachedSrcW <= 0 || _cachedSrcH <= 0)
+            return;
 
         // Lazily create the device-RGB colour space (retained).
         if (!_cgColorSpace)
@@ -836,33 +943,41 @@ private:
             nullptr,
             _frameCache.data(),
             _frameCache.size(),
-            nullptr  // no-op release callback — _frameCache is member-owned
+            nullptr // no-op release callback — _frameCache is member-owned
         );
 
-        if (!provider) return;
+        if (!provider)
+            return;
 
         // kCVPixelFormatType_24RGB → 8 bits per component, 3 components, no alpha.
         _cgImage = CGImageCreate(
-            (size_t)_cachedSrcW,           // width
-            (size_t)_cachedSrcH,           // height
-            8,                             // bitsPerComponent
-            24,                            // bitsPerPixel
-            (size_t)(_cachedSrcW * 3),     // bytesPerRow (no padding — we stripped it above)
+            (size_t)_cachedSrcW,       // width
+            (size_t)_cachedSrcH,       // height
+            8,                         // bitsPerComponent
+            24,                        // bitsPerPixel
+            (size_t)(_cachedSrcW * 3), // bytesPerRow (no padding — we stripped it above)
             _cgColorSpace,
-            kCGBitmapByteOrderDefault | kCGImageAlphaNone, // RGB24, no alpha
+            (CGBitmapInfo)(kCGBitmapByteOrderDefault | kCGImageAlphaNone), // RGB24, no alpha
             provider,
-            nullptr,                       // no decode array
-            false,                         // shouldInterpolate (we set it on ctx instead)
-            kCGRenderingIntentDefault
-        );
+            nullptr, // no decode array
+            false,   // shouldInterpolate (we set it on ctx instead)
+            kCGRenderingIntentDefault);
 
         CGDataProviderRelease(provider);
     }
 
     void _freeCGResources()
     {
-        if (_cgImage)      { CGImageRelease(_cgImage);           _cgImage      = nullptr; }
-        if (_cgColorSpace) { CGColorSpaceRelease(_cgColorSpace); _cgColorSpace = nullptr; }
+        if (_cgImage)
+        {
+            CGImageRelease(_cgImage);
+            _cgImage = nullptr;
+        }
+        if (_cgColorSpace)
+        {
+            CGColorSpaceRelease(_cgColorSpace);
+            _cgColorSpace = nullptr;
+        }
     }
 
 #endif // __APPLE__ && TARGET_OS_OSX
@@ -871,16 +986,17 @@ private:
 #ifdef __ANDROID__
     void _initGLResources()
     {
-        if (_glResourcesReady) return;
+        if (_glResourcesReady)
+            return;
         _glResourcesReady = true;
 
-        static const char* vsrc = R"(
+        static const char *vsrc = R"(
             attribute vec2 aPos;
             attribute vec2 aUV;
             varying   vec2 vUV;
             void main() { vUV = aUV; gl_Position = vec4(aPos, 0.0, 1.0); }
         )";
-        static const char* fsrc = R"(
+        static const char *fsrc = R"(
             #extension GL_OES_EGL_image_external : require
             precision mediump float;
             uniform samplerExternalOES uTex;
@@ -888,20 +1004,24 @@ private:
             void main() { gl_FragColor = texture2D(uTex, vUV); }
         )";
 
-        auto compile = [](GLenum type, const char* src) -> GLuint {
+        auto compile = [](GLenum type, const char *src) -> GLuint
+        {
             GLuint s = glCreateShader(type);
             glShaderSource(s, 1, &src, nullptr);
             glCompileShader(s);
-            GLint ok = 0; glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
-            if (!ok) {
-                char log[512]; glGetShaderInfoLog(s, 512, nullptr, log);
+            GLint ok = 0;
+            glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
+            if (!ok)
+            {
+                char log[512];
+                glGetShaderInfoLog(s, 512, nullptr, log);
                 __android_log_print(ANDROID_LOG_ERROR, "FluxVideo",
                                     "Shader compile error: %s", log);
             }
             return s;
         };
 
-        GLuint vs = compile(GL_VERTEX_SHADER,   vsrc);
+        GLuint vs = compile(GL_VERTEX_SHADER, vsrc);
         GLuint fs = compile(GL_FRAGMENT_SHADER, fsrc);
         _oesProgram = glCreateProgram();
         glAttachShader(_oesProgram, vs);
@@ -913,10 +1033,22 @@ private:
         glDeleteShader(fs);
 
         static const float quad[] = {
-            -1.f, -1.f,  0.f, 1.f,
-             1.f, -1.f,  1.f, 1.f,
-            -1.f,  1.f,  0.f, 0.f,
-             1.f,  1.f,  1.f, 0.f,
+            -1.f,
+            -1.f,
+            0.f,
+            1.f,
+            1.f,
+            -1.f,
+            1.f,
+            1.f,
+            -1.f,
+            1.f,
+            0.f,
+            0.f,
+            1.f,
+            1.f,
+            1.f,
+            0.f,
         };
         glGenBuffers(1, &_oesVBO);
         glBindBuffer(GL_ARRAY_BUFFER, _oesVBO);
@@ -924,14 +1056,28 @@ private:
         glBindBuffer(GL_ARRAY_BUFFER, 0);
     }
 
-    void _rebuildFBO(NVGcontext* vg, int w, int h)
+    void _rebuildFBO(NVGcontext *vg, int w, int h)
     {
-        if (_fbo)    { glDeleteFramebuffers(1, &_fbo);   _fbo    = 0; }
-        if (_fboTex) { glDeleteTextures(1,    &_fboTex); _fboTex = 0; }
-        if (_nvgImage >= 0 && vg) { nvgDeleteImage(vg, _nvgImage); _nvgImage = -1; }
+        if (_fbo)
+        {
+            glDeleteFramebuffers(1, &_fbo);
+            _fbo = 0;
+        }
+        if (_fboTex)
+        {
+            glDeleteTextures(1, &_fboTex);
+            _fboTex = 0;
+        }
+        if (_nvgImage >= 0 && vg)
+        {
+            nvgDeleteImage(vg, _nvgImage);
+            _nvgImage = -1;
+        }
 
-        _fboW = w; _fboH = h;
-        if (w <= 0 || h <= 0) return;
+        _fboW = w;
+        _fboH = h;
+        if (w <= 0 || h <= 0)
+            return;
 
         glGenTextures(1, &_fboTex);
         glBindTexture(GL_TEXTURE_2D, _fboTex);
@@ -949,7 +1095,8 @@ private:
         GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-        if (status != GL_FRAMEBUFFER_COMPLETE) {
+        if (status != GL_FRAMEBUFFER_COMPLETE)
+        {
             __android_log_print(ANDROID_LOG_ERROR, "FluxVideo",
                                 "FBO incomplete: 0x%x", status);
             return;
@@ -963,11 +1110,15 @@ private:
 
     void _blitOESToFBO(GLuint oesTexId)
     {
-        if (!_fbo || !_oesProgram) return;
+        if (!_fbo || !_oesProgram)
+            return;
 
-        GLint prevFBO = 0;      glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFBO);
-        GLint prevVP[4];        glGetIntegerv(GL_VIEWPORT, prevVP);
-        GLint prevProg = 0;     glGetIntegerv(GL_CURRENT_PROGRAM, &prevProg);
+        GLint prevFBO = 0;
+        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFBO);
+        GLint prevVP[4];
+        glGetIntegerv(GL_VIEWPORT, prevVP);
+        GLint prevProg = 0;
+        glGetIntegerv(GL_CURRENT_PROGRAM, &prevProg);
 
         glBindFramebuffer(GL_FRAMEBUFFER, _fbo);
         glViewport(0, 0, _fboW, _fboH);
@@ -983,18 +1134,20 @@ private:
         glBindBuffer(GL_ARRAY_BUFFER, _oesVBO);
         glEnableVertexAttribArray(0);
         glEnableVertexAttribArray(1);
-        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float), (void*)0);
-        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float), (void*)(2*sizeof(float)));
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)0);
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)(2 * sizeof(float)));
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
         glDisableVertexAttribArray(0);
         glDisableVertexAttribArray(1);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         glBindTexture(GL_TEXTURE_EXTERNAL_OES, 0);
 
-        if (_nvgImage >= 0 && !_fboPixels.empty()) {
+        if (_nvgImage >= 0 && !_fboPixels.empty())
+        {
             glReadPixels(0, 0, _fboW, _fboH, GL_RGBA, GL_UNSIGNED_BYTE, _fboPixels.data());
-            NVGcontext* vg = FluxAndroid_getVG();
-            if (vg) nvgUpdateImage(vg, _nvgImage, _fboPixels.data());
+            NVGcontext *vg = FluxAndroid_getVG();
+            if (vg)
+                nvgUpdateImage(vg, _nvgImage, _fboPixels.data());
         }
 
         glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)prevFBO);
@@ -1009,7 +1162,8 @@ private:
     void _rebuildCairoSurface()
     {
         _freeCairoSurface();
-        if (_cachedSrcW <= 0 || _cachedSrcH <= 0) return;
+        if (_cachedSrcW <= 0 || _cachedSrcH <= 0)
+            return;
         _cairoPixels.resize((size_t)(_cachedSrcW * _cachedSrcH * 4));
         _cairoSurf = cairo_image_surface_create_for_data(
             _cairoPixels.data(), CAIRO_FORMAT_RGB24,
@@ -1020,7 +1174,11 @@ private:
 
     void _freeCairoSurface()
     {
-        if (_cairoSurf) { cairo_surface_destroy(_cairoSurf); _cairoSurf = nullptr; }
+        if (_cairoSurf)
+        {
+            cairo_surface_destroy(_cairoSurf);
+            _cairoSurf = nullptr;
+        }
         _cairoSurfW = _cairoSurfH = 0;
     }
 
@@ -1028,14 +1186,16 @@ private:
     {
         // FluxVideo delivers RGB24; Cairo ARGB32 stores as BGRX in memory
         int n = _cachedSrcW * _cachedSrcH;
-        const uint8_t* src = _frameCache.data();
-        uint8_t*       dst = _cairoPixels.data();
-        for (int i = 0; i < n; ++i) {
+        const uint8_t *src = _frameCache.data();
+        uint8_t *dst = _cairoPixels.data();
+        for (int i = 0; i < n; ++i)
+        {
             dst[0] = src[2]; // B
             dst[1] = src[1]; // G
             dst[2] = src[0]; // R
             dst[3] = 0xFF;
-            src += 3; dst += 4;
+            src += 3;
+            dst += 4;
         }
     }
 #endif // __linux__
@@ -1044,10 +1204,10 @@ private:
     // Shared rendering helpers
     // =========================================================================
 
-    static const char* _uiFont()
+    static const char *_uiFont()
     {
 #if defined(__APPLE__) && TARGET_OS_OSX
-        return "SF Pro Text";  // San Francisco — present on all macOS 10.11+
+        return "SF Pro Text"; // San Francisco — present on all macOS 10.11+
 #elif defined(__linux__)
         return "Sans";
 #else
@@ -1055,23 +1215,23 @@ private:
 #endif
     }
 
-    void _renderStatusOverlay(Painter& p, FontCache& fontCache,
-                              const std::string& msg, Color col)
+    void _renderStatusOverlay(Painter &p, FontCache &fontCache,
+                              const std::string &msg, Color col)
     {
         NativeFont tf = fontCache.getFont(_uiFont(), 14, FontWeight::Normal);
         p.drawTextA(msg, x, y, width, height, tf, col,
                     DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }
 
-    void _renderBar(GraphicsContext& /*ctx*/, FontCache& fontCache, Painter& p)
+    void _renderBar(GraphicsContext & /*ctx*/, FontCache &fontCache, Painter &p)
     {
         int barY = y + height - barHeight;
         _barRect = {x, barY, width, barHeight};
         p.fillRect(x, barY, width, barHeight, colBar);
 
-        int midY  = barY + barHeight / 2;
+        int midY = barY + barHeight / 2;
         int btnSz = 28;
-        int cx    = x + 8;
+        int cx = x + 8;
 
         _playBtnRect = {cx, barY + (barHeight - btnSz) / 2, btnSz, btnSz};
         {
@@ -1079,21 +1239,22 @@ private:
             std::wstring g(1, FluxIcons::glyph(_playing ? FluxIcons::Pause : FluxIcons::Play));
             Color c = _hovPlay ? colIconHov : colIcon;
             p.drawText(g, _playBtnRect.x, _playBtnRect.y,
-                          _playBtnRect.w, _playBtnRect.h,
-                          iconFont, c, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                       _playBtnRect.w, _playBtnRect.h,
+                       iconFont, c, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         }
         cx += btnSz + 6;
 
         // Timestamp
-        float       dur = FluxVideo::get().getDurationSeconds();
-        std::string ts  = _fmtTime(_progress * dur) + " / " + _fmtTime(dur);
-        NativeFont  tf  = fontCache.getFont(_uiFont(), 12, FontWeight::Normal);
+        float dur = FluxVideo::get().getDurationSeconds();
+        std::string ts = _fmtTime(_progress * dur) + " / " + _fmtTime(dur);
+        NativeFont tf = fontCache.getFont(_uiFont(), 12, FontWeight::Normal);
         int tw = 0, th = 0;
         p.measureText(toWideString(ts), tf, tw, th);
 
 #ifdef __ANDROID__
         float dpi = FluxAndroid_getDpiScale();
-        if (tw > width / 2) tw = (int)(tw / dpi);
+        if (tw > width / 2)
+            tw = (int)(tw / dpi);
 #endif
 
         p.drawText(toWideString(ts), cx, barY, tw + 4, barHeight,
@@ -1104,22 +1265,22 @@ private:
         int trackW = std::max(20, x + width - 12 - cx);
         _trackRect = {cx, midY - 8, trackW, 16};
 
-        p.fillRoundedRectGDI(cx, midY - 2, trackW, 4, 2, colTrackBg,   colTrackBg,   0);
+        p.fillRoundedRectGDI(cx, midY - 2, trackW, 4, 2, colTrackBg, colTrackBg, 0);
         int fillW = (int)(_progress * trackW);
         if (fillW > 0)
             p.fillRoundedRectGDI(cx, midY - 2, fillW, 4, 2, colTrackFill, colTrackFill, 0);
         p.drawEllipse(cx + fillW - 6, midY - 6, 12, 12, colThumb, colThumb, 0);
     }
 
-    void _renderCenterPlay(Painter& p, FontCache& fontCache)
+    void _renderCenterPlay(Painter &p, FontCache &fontCache)
     {
         int cx = x + width / 2;
         int cy = y + (height - barHeight) / 2;
-        int r  = 28;
+        int r = 28;
         p.drawEllipse(cx - r, cy - r, r * 2, r * 2,
                       Color::fromRGBA(0, 0, 0, 160),
                       Color::fromRGBA(0, 0, 0, 0), 0);
-        NativeFont   iconFont = fontCache.getFont(kIconFont, 32, FontWeight::Normal);
+        NativeFont iconFont = fontCache.getFont(kIconFont, 32, FontWeight::Normal);
         std::wstring g(1, FluxIcons::glyph(FluxIcons::Play));
         p.drawText(g, cx - r, cy - r, r * 2, r * 2,
                    iconFont, Color::fromRGB(255, 255, 255),
@@ -1140,7 +1301,7 @@ private:
         return mx >= x && mx < x + width && my >= y && my < y + height;
     }
 
-    static bool _inRect(int mx, int my, const Rect& r)
+    static bool _inRect(int mx, int my, const Rect &r)
     {
         return mx >= r.x && mx < r.x + r.w && my >= r.y && my < r.y + r.h;
     }
@@ -1160,24 +1321,25 @@ private:
 
 using VideoPlayerWidgetPtr = std::shared_ptr<VideoPlayerWidget>;
 
-inline VideoPlayerWidgetPtr VideoPlayer(const std::string& path = "")
+inline VideoPlayerWidgetPtr VideoPlayer(const std::string &path = "")
 {
     auto w = std::make_shared<VideoPlayerWidget>();
-    if (!path.empty()) w->setPath(path);
+    if (!path.empty())
+        w->setPath(path);
     return w;
 }
 
-inline VideoPlayerWidgetPtr VideoPlayerFromUrl(const std::string& url)
+inline VideoPlayerWidgetPtr VideoPlayerFromUrl(const std::string &url)
 {
     return std::make_shared<VideoPlayerWidget>()->setUrl(url);
 }
 
-inline VideoPlayerWidgetPtr VideoPlayerFromMemory(const std::vector<uint8_t>& bytes)
+inline VideoPlayerWidgetPtr VideoPlayerFromMemory(const std::vector<uint8_t> &bytes)
 {
     return std::make_shared<VideoPlayerWidget>()->setMemory(bytes);
 }
 
-inline VideoPlayerWidgetPtr VideoPlayerFromMemory(const uint8_t* data, size_t len)
+inline VideoPlayerWidgetPtr VideoPlayerFromMemory(const uint8_t *data, size_t len)
 {
     return std::make_shared<VideoPlayerWidget>()->setMemory(data, len);
 }

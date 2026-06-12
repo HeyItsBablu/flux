@@ -12,15 +12,7 @@
 // Frame format: kCVPixelFormatType_24RGB → 3 bytes/pixel, no padding on macOS.
 // The widget blits using CGBitmapContext / CGImageRef exactly like the Win32
 // StretchDIBits path but through CoreGraphics.
-//
-// Dependencies (add to CMakeLists macOS block):
-//   find_library(AV_FOUNDATION  AVFoundation)
-//   find_library(CORE_MEDIA     CoreMedia)
-//   find_library(CORE_VIDEO     CoreVideo)
-//   find_library(AUDIO_TOOLBOX  AudioToolbox)
-//   target_link_libraries(${TARGET} PRIVATE
-//       ${AV_FOUNDATION} ${CORE_MEDIA} ${CORE_VIDEO} ${AUDIO_TOOLBOX})
-//
+
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX

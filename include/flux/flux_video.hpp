@@ -38,32 +38,44 @@
 #include <vector>
 
 #ifdef __ANDROID__
-#  include <GLES2/gl2.h>   // GLuint
+#include <GLES2/gl2.h> // GLuint
 #endif
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
 // ============================================================================
 // FluxVideo
 // ============================================================================
 
-class FluxVideo {
+class FluxVideo
+{
 public:
     using FinishCallback = std::function<void()>;
 
     // ── Singleton ─────────────────────────────────────────────────────────────
-    static FluxVideo& get();
+    static FluxVideo &get();
 
     // ── Playback state ─────────────────────────────────────────────────────────
-    enum class State { Idle, Loading, Playing, Paused, Finished, Error };
+    enum class State
+    {
+        Idle,
+        Loading,
+        Playing,
+        Paused,
+        Finished,
+        Error
+    };
 
-    State getState()           const;
-    bool  isPlaying()          const;
-    bool  isPaused()           const;
-    bool  isFinished()         const;
+    State getState() const;
+    bool isPlaying() const;
+    bool isPaused() const;
+    bool isFinished() const;
     float getDurationSeconds() const;
     float getPositionSeconds() const;
-    float getProgress()        const;
-    int   getVideoWidth()      const;
-    int   getVideoHeight()     const;
+    float getProgress() const;
+    int getVideoWidth() const;
+    int getVideoHeight() const;
 
     // ── Callbacks ──────────────────────────────────────────────────────────────
     void setOnFinished(FinishCallback cb);
@@ -73,15 +85,15 @@ public:
     // open() is non-blocking: it starts the decode thread and returns
     // immediately. Listen for onReady to know when the first frame is decoded.
     // Must be called on the GL thread on Android (creates the OES texture).
-    bool open(const std::string& path);
+    bool open(const std::string &path);
     void close();
 
     // ── Playback control ───────────────────────────────────────────────────────
-    void  play();
-    void  pause();
-    void  seekToProgress(float p);   // [0, 1]
-    void  seekToSeconds(float secs);
-    void  setVolume(float v);
+    void play();
+    void pause();
+    void seekToProgress(float p); // [0, 1]
+    void seekToSeconds(float secs);
+    void setVolume(float v);
     float getVolume() const;
 
     // ── Frame consumption ──────────────────────────────────────────────────────
@@ -90,23 +102,24 @@ public:
     // Call once per vsync on the GL thread.  Returns true if the texture
     // was updated this vsync.
 #ifdef __ANDROID__
-    bool   updateFrame();
-    bool   hasNewFrame() const;
+    bool updateFrame();
+    bool hasNewFrame() const;
     GLuint getTextureId() const;
 #endif
 
     // Win32 / Linux — CPU pixel buffer path.
     // Check hasNewFrame(), then lock to read the RGB24 pixels.
     // The lock releases the mutex when it goes out of scope.
-#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
+#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || (defined(__APPLE__) && TARGET_OS_OSX)
     bool hasNewFrame() const;
 
-    struct FrameLock {
+    struct FrameLock
+    {
         std::unique_lock<std::mutex> lock;
-        const uint8_t* data   = nullptr;
-        int            width  = 0;
-        int            height = 0;
-        int            stride = 0;
+        const uint8_t *data = nullptr;
+        int width = 0;
+        int height = 0;
+        int stride = 0;
     };
     FrameLock lockFrame();
 #endif
@@ -114,9 +127,9 @@ public:
 private:
     // No data members — all state lives in an anonymous-namespace struct
     // inside the platform .cpp.  The singleton is a zero-size token object.
-    FluxVideo()  = default;
+    FluxVideo() = default;
     ~FluxVideo() = default;
 
-    FluxVideo(const FluxVideo&)            = delete;
-    FluxVideo& operator=(const FluxVideo&) = delete;
+    FluxVideo(const FluxVideo &) = delete;
+    FluxVideo &operator=(const FluxVideo &) = delete;
 };
