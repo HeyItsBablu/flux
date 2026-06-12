@@ -30,9 +30,7 @@
 #define CAM_LOGE(fmt, ...) \
     do { fprintf(stderr, "[FluxCamera] ERROR " fmt "\n", ##__VA_ARGS__); fflush(stderr); } while(0)
 
-// Trigger a repaint from the capture thread — same pattern as Windows.
-// Implemented in flux_window_linux.cpp via SDL_PushEvent (exposed below).
-void FluxWin_markNeedsPaint() {}
+
 
 // ============================================================================
 // Singleton
