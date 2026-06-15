@@ -1,7 +1,7 @@
-![Windows](https://github.com/HeyItsBablu/flux/actions/workflows/windows.yml/badge.svg)
+<!-- ![Windows](https://github.com/HeyItsBablu/flux/actions/workflows/windows.yml/badge.svg)
 ![Linux](https://github.com/HeyItsBablu/flux/actions/workflows/linux.yml/badge.svg)
 ![macOS](https://github.com/HeyItsBablu/flux/actions/workflows/macos.yml/badge.svg)
-![Android](https://github.com/HeyItsBablu/flux/actions/workflows/android.yml/badge.svg)
+![Android](https://github.com/HeyItsBablu/flux/actions/workflows/android.yml/badge.svg) -->
 
 # FluxUI
 
