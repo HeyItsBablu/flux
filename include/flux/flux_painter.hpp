@@ -7,12 +7,13 @@
 #include <string>
 #include <vector>
 
-struct Painter {
+struct Painter
+{
     GraphicsContext &ctx;
 
     explicit Painter(GraphicsContext &c) : ctx(c) {}
 
-    // ── Filled rounded rect (GDI+ anti-aliased) ─────────────────────────── 
+    // ── Filled rounded rect (GDI+ anti-aliased) ───────────────────────────
     void fillRoundedRect(int x, int y, int w, int h, int radius, Color color);
 
     // ── Border only (GDI+ anti-aliased) ──────────────────────────────────
@@ -92,22 +93,23 @@ struct Painter {
     // =========================================================================
 
     // ── Parameters shared by all rich-text drawing calls ─────────────────────
-    struct RichTextParams {
-        int              x             = 0;
-        int              y             = 0;
-        int              w             = 0;
-        int              h             = 0;
+    struct RichTextParams
+    {
+        int x = 0;
+        int y = 0;
+        int w = 0;
+        int h = 0;
 
-        TextAlign        textAlign         = TextAlign::Left;
+        TextAlign textAlign = TextAlign::Left;
         TextAlignVertical textAlignVertical = TextAlignVertical::Top;
-        TextOverflow     overflow           = TextOverflow::Clip;
-        TextDirection    direction          = TextDirection::LTR;
+        TextOverflow overflow = TextOverflow::Clip;
+        TextDirection direction = TextDirection::LTR;
 
-        bool             softWrap       = true;   // wrap at word boundaries
-        int              maxLines       = 0;       // 0 = unlimited
+        bool softWrap = true; // wrap at word boundaries
+        int maxLines = 0;     // 0 = unlimited
 
         // The style carries font, color, spacing, decoration, shadows, etc.
-        TextStyle        style;
+        TextStyle style;
     };
 
     // ── Main rich-text draw call (wide string) ────────────────────────────────
@@ -148,11 +150,11 @@ struct Painter {
     void drawWavyLine(int x, int y, int len, Color color, int amplitude = 2);
 
     // ── Arc stroke (used by CircularProgressIndicatorWidget) ──────────────────
-// startAngle and sweepAngle are in radians. 0 = 3 o'clock, clockwise.
-void drawArc(float cx, float cy, float radius,
-             int strokeWidth,
-             float startAngle, float sweepAngle,
-             Color color, bool roundedCaps);
+    // startAngle and sweepAngle are in radians. 0 = 3 o'clock, clockwise.
+    void drawArc(float cx, float cy, float radius,
+                 int strokeWidth,
+                 float startAngle, float sweepAngle,
+                 Color color, bool roundedCaps);
 };
 
 #endif // FLUX_PAINTER_HPP

@@ -23,6 +23,10 @@ void PlatformWindow::shutdownGdiplus()
   gdiplusToken = 0;
 }
 
+bool PlatformWindow::valid() const {
+    return hwnd != nullptr;
+}
+
 void PlatformWindow::setClipboardText(const std::string &text)
 {
   if (!hwnd || !OpenClipboard(hwnd))

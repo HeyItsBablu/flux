@@ -684,6 +684,11 @@ void PlatformWindow::killTimer(TimerID id) {
     }
 }
 
+bool PlatformWindow::valid() const {
+     return nativeHandle != nullptr;
+}
+
+
 // ============================================================================
 // Clipboard / input / coords / cursors
 // ============================================================================

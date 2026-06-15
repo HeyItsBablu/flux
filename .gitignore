@@ -1,4 +1,5 @@
 /build/
+/build-web/
 /todo.txt
 /_deps/
 /examples/CMakeLists.txt

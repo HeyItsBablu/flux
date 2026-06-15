@@ -262,6 +262,7 @@ void        PlatformWindow::releaseMouseInput()            { mouseCapture = fals
 void        PlatformWindow::setResizeCursorH()             {}
 void        PlatformWindow::setResizeCursorV()             {}
 void        PlatformWindow::setDefaultCursor()             {}
+
 void        PlatformWindow::setClipboardText(const std::string&) {}
 std::string PlatformWindow::getClipboardText()             { return {}; }
 
@@ -271,6 +272,12 @@ PlatformWindow::ScreenPoint
 PlatformWindow::screenToClient(int x, int y) const { return {x, y}; }
 PlatformWindow::ClientSize
 PlatformWindow::getClientSize() const { return {cachedWidth, cachedHeight}; }
+
+
+bool PlatformWindow::valid() const {
+    return eglState != nullptr;
+}
+
 
 EGLDisplay PlatformWindow::getEGLDisplay() const {
     return eglState ? eglState->display : EGL_NO_DISPLAY;

@@ -527,6 +527,10 @@ GraphicsContext PlatformWindow::getMeasureContext() const {
                            macState->cgHeight);
 }
 
+bool PlatformWindow::valid() const {
+    return macState != nullptr && macState->nsWindow != nil;
+}
+
 // ============================================================================
 // Clipboard
 // ============================================================================

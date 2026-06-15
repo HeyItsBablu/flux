@@ -68,6 +68,7 @@ public:
                 AppInstance hInstance, void *userData);
     void destroy();
     int run();
+    void tick();
 
     WindowCallbacks callbacks;
 
@@ -79,18 +80,7 @@ public:
     int clientWidth() const { return cachedWidth; }
     int clientHeight() const { return cachedHeight; }
 
-    bool valid() const
-    {
-#ifdef _WIN32
-        return hwnd != nullptr;
-#elif defined(__linux__) && !defined(__ANDROID__)
-        return nativeHandle != nullptr;
-#elif defined(__ANDROID__)
-        return eglState != nullptr;
-#else
-        return false;
-#endif
-    }
+    bool valid() const;
 
     void setClipboardText(const std::string &text);
     std::string getClipboardText();
@@ -152,7 +142,7 @@ public:
     void updateClientSize();
 
     // ── Shared (public so platform .mm files can access directly) ─────────────
-    int cachedWidth  = 0;
+    int cachedWidth = 0;
     int cachedHeight = 0;
 
 private:
@@ -247,6 +237,14 @@ public:
     void registerCanvas_public(CanvasWidget *c);
     void unregisterCanvas_public(CanvasWidget *c);
 #endif
+#endif
+    // =====================================================================
+    // Web (Emscripten)
+    // =====================================================================
+#ifdef __EMSCRIPTEN__
+public:
+    struct WebState; // defined in flux_window_web.cpp
+    WebState *webState = nullptr;
 #endif
 };
 
