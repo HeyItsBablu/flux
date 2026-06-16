@@ -5,14 +5,31 @@
 // fluxPostToUIThread — marshals an HTTP result back to the UI thread.
 //
 // One branch per platform:
+//   Web     : queue drained each frame via fluxDrainHttpQueue()
 //   Windows : PostMessage  (WM_USER + 0x200)
 //   Linux   : SDL_PushEvent into a registered custom event type
 //   Android : ALooper pipe
 //   macOS   : dispatch_async to the main queue (GCD)
 // ============================================================================
 
+// ─── Web / Emscripten ────────────────────────────────────────────────────────
+#if defined(__EMSCRIPTEN__)
+
+// Implementation lives in flux_http_web.cpp.
+// The header only needs the declarations so that flux_http.hpp callers compile.
+
+// Posts result into the per-frame drain queue (thread-safe).
+void fluxPostToUIThread(HttpCallback callback, HttpResult result);
+
+// Call once per frame from your emscripten_set_main_loop body.
+void fluxDrainHttpQueue();
+
+// No-ops — present so platform-agnostic startup code can call them safely.
+inline void fluxSetUIWindow(void *) {}
+inline void fluxDrainPendingMessages() {}
+
 // ─── Windows ────────────────────────────────────────────────────────────────
-#if defined(_WIN32)
+#elif defined(_WIN32)
 
 #include <windows.h>
 

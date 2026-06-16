@@ -5,7 +5,9 @@
 #include <string>
 #include <thread>
 
-#include <curl/curl.h>
+#ifndef __EMSCRIPTEN__
+#  include <curl/curl.h>
+#endif
 
 // ============================================================================
 // HTTP REQUEST / RESPONSE
@@ -36,7 +38,7 @@ struct HttpResult {
 
 using HttpCallback = std::function<void(HttpResult)>;
 
-// Forward declaration — implemented per-platform below the class
+// Forward declaration — implemented per-platform in flux_http_platform.hpp
 void fluxPostToUIThread(HttpCallback callback, HttpResult result);
 
 // ============================================================================
@@ -70,33 +72,24 @@ public:
     }
 
     // ── Full request ─────────────────────────────────────────────────────────
+    // On web: implemented in flux_http_web.cpp (Emscripten Fetch API).
+    // On native: implemented below using libcurl on a detached thread.
     static void send(HttpRequest  request,
                      HttpCallback callback,
-                     bool         postToUI = true)
-    {
-        std::thread([request  = std::move(request),
-                     callback = std::move(callback),
-                     postToUI]() mutable
-        {
-            HttpResult result = perform(request);
-
-            if (postToUI)
-                fluxPostToUIThread(std::move(callback), std::move(result));
-            else if (callback)
-                callback(result);
-        }).detach();
-    }
+                     bool         postToUI = true);
 
     // ── Global init / cleanup (call once at app start/end) ───────────────────
-    static void globalInit()    { curl_global_init(CURL_GLOBAL_DEFAULT); }
-    static void globalCleanup() { curl_global_cleanup(); }
-    static void setCABundle(const std::string& path) {
-        s_caBundle_ = path;
-    }
-    static const std::string& getCABundle()           { return s_caBundle_; }
+    // No-ops on web; curl_global_init / curl_global_cleanup on native.
+    static void globalInit();
+    static void globalCleanup();
+
+    static void setCABundle(const std::string& path) { s_caBundle_ = path; }
+    static const std::string& getCABundle()          { return s_caBundle_; }
 
 private:
     static inline std::string s_caBundle_;
+
+#ifndef __EMSCRIPTEN__
     // ── libcurl write callback ────────────────────────────────────────────────
     static size_t writeCallback(char* ptr, size_t size,
                                 size_t nmemb, void* userdata)
@@ -122,7 +115,7 @@ private:
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeCallback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA,     &responseBody);
 
-        // ── SSL ───────────────────────────────────────────────────────────────────
+        // ── SSL ───────────────────────────────────────────────────────────────
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, req.verifySsl ? 1L : 0L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, req.verifySsl ? 2L : 0L);
         if (!s_caBundle_.empty())
@@ -161,10 +154,6 @@ private:
         curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS,        (long)req.timeoutMs);
         curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, (long)(req.timeoutMs / 2));
 
-        // ── SSL ───────────────────────────────────────────────────────────────
-        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, req.verifySsl ? 1L : 0L);
-        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, req.verifySsl ? 2L : 0L);
-
         // ── Follow redirects ──────────────────────────────────────────────────
         curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
         curl_easy_setopt(curl, CURLOPT_MAXREDIRS,      5L);
@@ -188,4 +177,34 @@ private:
         curl_easy_cleanup(curl);
         return res;
     }
+#endif // !__EMSCRIPTEN__
 };
+
+// ============================================================================
+// NATIVE send / globalInit / globalCleanup
+// On web these three are defined in flux_http_web.cpp instead.
+// ============================================================================
+
+#ifndef __EMSCRIPTEN__
+
+inline void FluxHttp::globalInit()    { curl_global_init(CURL_GLOBAL_DEFAULT); }
+inline void FluxHttp::globalCleanup() { curl_global_cleanup(); }
+
+inline void FluxHttp::send(HttpRequest  request,
+                            HttpCallback callback,
+                            bool         postToUI)
+{
+    std::thread([request  = std::move(request),
+                 callback = std::move(callback),
+                 postToUI]() mutable
+    {
+        HttpResult result = perform(request);
+
+        if (postToUI)
+            fluxPostToUIThread(std::move(callback), std::move(result));
+        else if (callback)
+            callback(result);
+    }).detach();
+}
+
+#endif // !__EMSCRIPTEN__
