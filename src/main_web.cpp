@@ -165,6 +165,8 @@ int main()
     //   • Running the initial layout pass with (w, h)
     s_app->createWindow(title, w, h);
 
+    // Register the rounded-rect JS helper used by the painter.
+    fluxPainterWebInit();
     // ── 5. Register the C resize callback with JS ─────────────────────────────
     //
     // shell.html checks Module._fluxOnResize after onRuntimeInitialized.

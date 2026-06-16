@@ -310,9 +310,9 @@ namespace Key
 
     // Modifier state — reads the globals maintained by flux_window_web.cpp.
     // Declared extern in flux_platform.hpp, defined in flux_window_web.cpp.
-    inline bool isShiftDown() { return g_fluxShiftDown; }
-    inline bool isControlDown() { return g_fluxCtrlDown; }
-    inline bool isAltDown() { return g_fluxAltDown; }
+    inline bool isShiftDown() { return flux_web_detail::g_shiftDown; }
+    inline bool isControlDown() { return flux_web_detail::g_ctrlDown; }
+    inline bool isAltDown() { return flux_web_detail::g_altDown; }
 
 #else
 #error "Unsupported platform — add Key:: mappings to flux_keys.hpp"

@@ -467,6 +467,9 @@ MeasureContext FluxUI::getMeasureContext() {
     return MeasureContext(nullptr, 0, 0);
     #endif
 
+#elif defined(__EMSCRIPTEN__)
+    GraphicsContext gc = window.getMeasureContext();
+    return MeasureContext(gc.width, gc.height);
 #else
     return MeasureContext(nullptr, 0, 0);
 #endif

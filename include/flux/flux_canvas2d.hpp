@@ -20,6 +20,8 @@
 #include <glad/glad.h>
 #elif defined(__ANDROID__)
 #include <GLES3/gl3.h>
+#elif defined(__EMSCRIPTEN__)
+#include <GLES3/gl3.h>
 #elif defined(__APPLE__)
 #include <stdint.h>
 using GLuint   = uint32_t;

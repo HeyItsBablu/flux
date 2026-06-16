@@ -18,7 +18,6 @@
 #include "flux_render_surface.hpp"
 #include "flux_canvas_types.hpp"
 
-
 #if !defined(__APPLE__)
 #include "flux_glutil.hpp"
 #endif
@@ -149,6 +148,15 @@ public:
     void ensureSBProgram(const char *vert, const char *frag);
     void renderScrollbarsGL(int glW, int glH, double dt);
     void renderSBCorner(int glW, int glH);
+
+    // ── Web-only ──────────────────────────────────────────────────────────────
+#ifdef __EMSCRIPTEN__
+    bool handleMouseDown(int mx, int my) override;
+    bool handleMouseMove(int mx, int my) override;
+    bool handleMouseUp(int mx, int my) override;
+    bool handleMouseWheel(int delta) override;
+    bool handleKeyDown(int keyCode) override;
+#endif
 
     // ── Android-only ──────────────────────────────────────────────────────────
 #ifdef __ANDROID__

@@ -588,6 +588,7 @@ static constexpr int VK_DELETE = 46;  // Delete
 static constexpr int VK_SHIFT = 16;   // Shift
 static constexpr int VK_CONTROL = 17; // Control
 static constexpr int VK_MENU = 18;    // Alt
+static constexpr int VK_SPACE = 32;   // Space
 
 // ── Modifier state ────────────────────────────────────────────────────────────
 //
