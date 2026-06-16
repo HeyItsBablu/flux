@@ -164,6 +164,7 @@ namespace
 
 void Painter::fillRect(int x, int y, int w, int h, Color color)
 {
+
     char col[32];
     cssColor(color, col, sizeof(col));
     EM_ASM({

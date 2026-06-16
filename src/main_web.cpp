@@ -41,6 +41,8 @@
 // ============================================================================
 
 WidgetPtr createApp(FluxUI *app);
+extern "C" void fluxPainterWebInit();
+extern "C" EMSCRIPTEN_WEBGL_CONTEXT_HANDLE fluxGetGLContext();
 
 // ============================================================================
 // Module-level state
@@ -81,6 +83,13 @@ namespace
     {
         if (s_app)
         {
+            EMSCRIPTEN_WEBGL_CONTEXT_HANDLE ctx = fluxGetGLContext();
+            if (ctx > 0)
+                emscripten_webgl_make_context_current(ctx);
+
+            // Always invalidate — canvas surfaces need continuous redraw
+            s_app->getPlatformWindow().invalidate();
+
             s_app->getPlatformWindow().tick();
         }
     }
@@ -98,15 +107,29 @@ extern "C" EMSCRIPTEN_KEEPALIVE void fluxOnResize(int physicalWidth, int physica
     if (!s_app)
         return;
 
-    PlatformWindow &win = s_app->getPlatformWindow();
-    win.cachedWidth = physicalWidth;
-    win.cachedHeight = physicalHeight;
+    double dpr = EM_ASM_DOUBLE({ return Module._fluxDPR || 1.0; });
+    int logicalW = (int)(physicalWidth / dpr);
+    int logicalH = (int)(physicalHeight / dpr);
 
-    // Trigger a full layout pass with the new dimensions, then repaint.
+    PlatformWindow &win = s_app->getPlatformWindow();
+    win.cachedWidth = logicalW;
+    win.cachedHeight = logicalH;
+
+    // DPR scale transform stays the same
+    EM_ASM({
+        var dpr = Module._fluxDPR || 1.0;
+        var ctx = Module._fluxCtx2D;
+        if (ctx)
+        {
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.scale(dpr, dpr);
+        }
+    });
+
     if (win.callbacks.onResize)
     {
-        GraphicsContext ctx(physicalWidth, physicalHeight);
-        win.callbacks.onResize(ctx, physicalWidth, physicalHeight);
+        GraphicsContext ctx(logicalW, logicalH);
+        win.callbacks.onResize(ctx, logicalW, logicalH);
     }
     win.invalidate();
 }
@@ -117,81 +140,49 @@ extern "C" EMSCRIPTEN_KEEPALIVE void fluxOnResize(int physicalWidth, int physica
 
 int main()
 {
-
-#ifdef FLUX_DEBUG
-    // Unbuffered stdout so printf/puts appear in the browser console immediately.
-    setvbuf(stdout, nullptr, _IONBF, 0);
-    setvbuf(stderr, nullptr, _IONBF, 0);
-#endif
-
-    // ── 1. Create FluxUI ──────────────────────────────────────────────────────
-    //
-    // AppInstance is nullptr on web — there is no platform handle equivalent.
     s_app = new FluxUI(nullptr);
 
-    // ── 2. Build widget tree ──────────────────────────────────────────────────
-    //
-    // build() calls startupGdiplus() (no-op on web), runs the builder lambda,
-    // and wires the widget tree.  createApp() is user-supplied.
+    // ── 1. Read physical canvas size ──────────────────────────────────────
+    int physW = canvasPhysicalWidth();
+    int physH = canvasPhysicalHeight();
+    double dpr = EM_ASM_DOUBLE({ return Module._fluxDPR || 1.0; });
+    int logicalW = (int)(physW / dpr); // 666 logical
+    int logicalH = (int)(physH / dpr); // 734 logical
+
+    auto cfg = FluxAppWidget::getInstance(); // may be null before build, see below
+    const std::string title = "FluxUI";      // temp title, updated after build
+
+    // ── 2. Create window FIRST so valid() returns true during build ───────
+    s_app->createWindow(title, logicalW, logicalH);
+
+    // ── 3. Now build — wireCallbacks + rebuild will run layout correctly ──
     s_app->build([&]()
                  { return createApp(s_app); });
 
-    // ── 3. Read app config ────────────────────────────────────────────────────
-    //
-    // FluxAppWidget stores the title the app author declared.  Window size and
-    // fullscreen flags are ignored on web — the canvas fills the viewport.
-    auto cfg = FluxAppWidget::getInstance();
+    // ── 4. Read actual app config after build ─────────────────────────────
+    cfg = FluxAppWidget::getInstance();
+    // (title is already set; window is live)
 
-    const std::string title = cfg ? cfg->title : "FluxUI";
-
-    // Physical pixel dimensions — already DPR-scaled by shell.html.
-    int w = canvasPhysicalWidth();
-    int h = canvasPhysicalHeight();
-
-    // Fallback: if JS hasn't set dimensions yet (shouldn't happen in normal
-    // shell.html flow), use a sensible default and let the resize callback
-    // correct it on the first rAF.
-    if (w <= 0)
-        w = 800;
-    if (h <= 0)
-        h = 600;
-
-    // ── 4. Create window (registers JS event listeners) ───────────────────────
-    //
-    // On web "create window" means:
-    //   • Storing the canvas selector ("#flux-ui") as the NativeWindow handle
-    //   • Registering keyboard / mouse / touch / resize callbacks via
-    //     emscripten_set_*_callback in flux_window_web.cpp
-    //   • Running the initial layout pass with (w, h)
-    s_app->createWindow(title, w, h);
-
-    // Register the rounded-rect JS helper used by the painter.
+    // ── 5. Register painter helpers ───────────────────────────────────────
     fluxPainterWebInit();
-    // ── 5. Register the C resize callback with JS ─────────────────────────────
-    //
-    // shell.html checks Module._fluxOnResize after onRuntimeInitialized.
-    // We point it at our C wrapper so the JS resize handler can call back into
-    // C++ when the browser window changes size.
+
+    // ── 6. Register C resize callback with JS ─────────────────────────────
     EM_ASM({
+        Module._fluxOnResizeCpp = Module.cwrap('fluxOnResize', null, [ 'number', 'number' ]);
         Module._fluxOnResize = function(w, h)
         {
-            // w and h are physical pixels passed from shell.html's resizeCanvases().
             Module._fluxOnResizeCpp(w, h);
         };
     });
 
-    // ── 6. Hand control to the browser ───────────────────────────────────────
-    //
-    // simulate_infinite_loop = 0: main() returns normally; Emscripten keeps
-    // calling s_tick() via rAF until the page is closed.
-    // fps = 0: use requestAnimationFrame (matches display refresh rate).
-    //
-    // Do NOT call s_app->run() — that would enter a blocking loop and freeze
-    // the browser tab.
-    emscripten_set_main_loop(s_tick, /*fps=*/0, /*simulate_infinite_loop=*/0);
+    // ── 6b. Fire an initial resize so cachedWidth/Height match the real canvas ──
+    fluxOnResize(physW, physH);
 
-    // main() returns here.  s_app stays alive (static storage, never deleted).
-    // Emscripten continues to drive s_tick() via rAF.
+    // ── 7. Hand control to browser ────────────────────────────────────────
+    // Force initial repaint
+    s_app->getPlatformWindow().invalidate();
+    emscripten_set_main_loop(s_tick, 0, 0);
+
     return 0;
 }
 

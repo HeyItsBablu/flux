@@ -1,0 +1,252 @@
+<!-- shell.html -->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>FluxUI</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #000;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+
+        /* ── Canvas container ──────────────────────────────────────────────── */
+
+        #flux-root {
+            position: relative;
+            width: 100%;
+            height: 100%;
+        }
+
+        /*
+         * flux-gl  — WebGL2 canvas, sits BEHIND
+         *            Used exclusively by CanvasWidget
+         *            Renders only into CanvasWidget regions via scissor rect
+         */
+        #flux-gl {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            /* pointer-events off — all input handled by flux-ui on top */
+            pointer-events: none;
+        }
+
+        /*
+         * flux-ui  — Canvas 2D canvas, sits ON TOP
+         *            Used for all regular widget rendering
+         *            (buttons, text, containers, borders, etc.)
+         */
+        #flux-ui {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            /* pointer-events on — this canvas receives all user input */
+            pointer-events: auto;
+            /* prevent default touch behaviors (scroll, zoom) */
+            touch-action: none;
+        }
+
+        /* ── Loading screen ────────────────────────────────────────────────── */
+
+        #flux-loading {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: #fafafa;
+            z-index: 100;
+            transition: opacity 0.3s ease;
+        }
+
+        #flux-loading.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .flux-spinner {
+            width: 32px;
+            height: 32px;
+            border: 3px solid #e0e0e0;
+            border-top-color: #2196f3;
+            border-radius: 50%;
+            animation: flux-spin 0.8s linear infinite;
+            margin-bottom: 16px;
+        }
+
+        @keyframes flux-spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .flux-loading-text {
+            font-size: 13px;
+            color: #888;
+            letter-spacing: 0.02em;
+        }
+
+        /* ── Error screen ──────────────────────────────────────────────────── */
+
+        #flux-error {
+            display: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: #fafafa;
+            z-index: 200;
+            padding: 32px;
+            text-align: center;
+        }
+
+        #flux-error.visible {
+            display: flex;
+        }
+
+        .flux-error-title {
+            font-size: 16px;
+            font-weight: 500;
+            color: #d32f2f;
+            margin-bottom: 8px;
+        }
+
+        .flux-error-message {
+            font-size: 13px;
+            color: #666;
+            max-width: 480px;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="flux-root">
+        <!-- WebGL2 layer (behind) — CanvasWidget only -->
+        <canvas id="flux-gl"></canvas>
+
+        <!-- Canvas 2D layer (front) — all regular widgets -->
+        <canvas id="flux-ui"></canvas>
+
+        <!-- Loading overlay — hidden once WASM is ready -->
+        <div id="flux-loading">
+            <div class="flux-spinner"></div>
+            <div class="flux-loading-text">Loading...</div>
+        </div>
+
+        <!-- Error overlay — shown if WASM fails to load -->
+        <div id="flux-error">
+            <div class="flux-error-title">Failed to load</div>
+            <div class="flux-error-message" id="flux-error-message">
+                An error occurred while loading the application.
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const uiCanvas = document.getElementById('flux-ui');
+        const glCanvas = document.getElementById('flux-gl');
+        const loading = document.getElementById('flux-loading');
+        const errorDiv = document.getElementById('flux-error');
+        const errorMsg = document.getElementById('flux-error-message');
+
+        const ctx2d = uiCanvas.getContext('2d', {
+            alpha: true,
+            desynchronized: true,
+        });
+
+        function resizeCanvases() {
+            const dpr = window.devicePixelRatio || 1;
+            const w = Math.floor(window.innerWidth * dpr);
+            const h = Math.floor(window.innerHeight * dpr);
+            if (uiCanvas.width !== w || uiCanvas.height !== h) {
+                uiCanvas.width = w;
+                uiCanvas.height = h;
+                glCanvas.width = w;
+                glCanvas.height = h;
+                Module._fluxPhysicalWidth = w;
+                Module._fluxPhysicalHeight = h;
+                Module._fluxDPR = dpr;
+                if (typeof Module._fluxOnResize === 'function')
+                    Module._fluxOnResize(w, h);
+            }
+        }
+
+        // Emscripten 3.x: use var Module = {} as a plain settings object
+        // The generated JS reads these keys before creating its own Module
+        var Module = {};
+        Module.canvas = glCanvas;
+        Module._fluxCtx2D = ctx2d;
+        Module._fluxPhysicalWidth = 0;
+        Module._fluxPhysicalHeight = 0;
+        Module._fluxDPR = window.devicePixelRatio || 1;
+        Module._fluxOnResize = null;
+        Module.locateFile = function (path, prefix) { return prefix + path; };
+        Module.print = function (t) { console.log('[flux]', t); };
+        Module.printErr = function (t) { console.error('[flux]', t); };
+        Module.setStatus = function (text) {
+            if (!text) return;
+            const m = text.match(/(\d+(\.\d+)?)\/(\d+)/);
+            if (m) {
+                const pct = Math.round(parseInt(m[1]) / parseInt(m[3]) * 100);
+                document.querySelector('.flux-loading-text').textContent =
+                    'Loading... ' + pct + '%';
+            }
+        };
+        Module.onAbort = function (reason) {
+            errorMsg.textContent = 'Application error: ' + reason;
+            errorDiv.classList.add('visible');
+            loading.classList.add('hidden');
+        };
+        Module.onRuntimeInitialized = function () {
+            console.log('[flux] onRuntimeInitialized fired');
+            console.log('[flux] _fluxPhysicalHeight =', Module._fluxPhysicalHeight);
+            resizeCanvases();
+            loading.classList.add('hidden');
+            // Fire initial resize so C++ cachedWidth/Height match actual canvas size
+            const dpr = window.devicePixelRatio || 1;
+            const w = Math.floor(window.innerWidth * dpr);
+            const h = Math.floor(window.innerHeight * dpr);
+            if (typeof Module._fluxOnResize === 'function')
+                Module._fluxOnResize(w, h);
+        };
+
+        resizeCanvases();
+        window.addEventListener('resize', resizeCanvases);
+        window.addEventListener('error', function (e) {
+            errorMsg.textContent = e.message || 'An unexpected error occurred.';
+            errorDiv.classList.add('visible');
+            loading.classList.add('hidden');
+        });
+    </script>
+
+    {{{ SCRIPT }}}
+
+</body>
+
+</html>

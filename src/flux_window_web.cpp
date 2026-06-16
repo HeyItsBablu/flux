@@ -52,7 +52,7 @@
 #include <string>
 #include <unordered_map>
 #include <functional>
-#include <cstring>    // memset
+#include <cstring> // memset
 
 // ============================================================================
 // Web-only private state
@@ -62,10 +62,11 @@
 // EGLState on other platforms.
 // ============================================================================
 
-struct PlatformWindow::WebState {
-    bool initialized   = false;
-    bool dirty         = false;
-    bool mouseCapture  = false;
+struct PlatformWindow::WebState
+{
+    bool initialized = false;
+    bool dirty = false;
+    bool mouseCapture = false;
 
     // Interval timer map: FluxUI TimerID → Emscripten interval handle (long).
     // emscripten_set_interval returns a long; we store it so killTimer() can
@@ -77,27 +78,30 @@ struct PlatformWindow::WebState {
 // Internal helpers
 // ============================================================================
 
-namespace {
+namespace
+{
 
-// ── CSS colour string ─────────────────────────────────────────────────────────
+    // ── CSS colour string ─────────────────────────────────────────────────────────
 
-// Builds "rgba(r,g,b,a/255)" for passing to EM_ASM fillStyle / strokeStyle.
-// Kept as a C-string written into a stack buffer to avoid heap allocation on
-// every paint call.  Buffer is 32 bytes — "rgba(255,255,255,1.000)" = 22 chars.
-void colorToCSS(Color c, char *buf, int bufLen) {
-    float a = c.a / 255.f;
-    snprintf(buf, bufLen, "rgba(%d,%d,%d,%.3f)", c.r, c.g, c.b, a);
-}
+    // Builds "rgba(r,g,b,a/255)" for passing to EM_ASM fillStyle / strokeStyle.
+    // Kept as a C-string written into a stack buffer to avoid heap allocation on
+    // every paint call.  Buffer is 32 bytes — "rgba(255,255,255,1.000)" = 22 chars.
+    void colorToCSS(Color c, char *buf, int bufLen)
+    {
+        float a = c.a / 255.f;
+        snprintf(buf, bufLen, "rgba(%d,%d,%d,%.3f)", c.r, c.g, c.b, a);
+    }
 
-// ── Map Emscripten HTML5 key code → VK_* ──────────────────────────────────────
-//
-// EmscriptenKeyboardEvent::keyCode carries the browser's legacy keyCode value,
-// which matches the VK_* constants we defined in the __EMSCRIPTEN__ block of
-// flux_platform.hpp.  No translation needed — return as-is.
+    // ── Map Emscripten HTML5 key code → VK_* ──────────────────────────────────────
+    //
+    // EmscriptenKeyboardEvent::keyCode carries the browser's legacy keyCode value,
+    // which matches the VK_* constants we defined in the __EMSCRIPTEN__ block of
+    // flux_platform.hpp.  No translation needed — return as-is.
 
-inline int emKeyToVK(const EmscriptenKeyboardEvent *e) {
-    return (int)e->keyCode;
-}
+    inline int emKeyToVK(const EmscriptenKeyboardEvent *e)
+    {
+        return (int)e->keyCode;
+    }
 
 } // namespace
 
@@ -117,28 +121,35 @@ static EM_BOOL onMouseDown(int /*eventType*/,
                            void *userData)
 {
     auto *self = static_cast<PlatformWindow *>(userData);
-    if (!self || !self->webState) return EM_FALSE;
+    printf("[flux] self=%p webState=%p\n", (void *)self, (void *)self->webState);
 
-    // Update modifier state so platformCtrlDown() etc. stay correct.
-    flux_web_detail::g_ctrlDown  = e->ctrlKey;
-    flux_web_detail::g_shiftDown = e->shiftKey;
-    flux_web_detail::g_altDown   = e->altKey;
+    if (!self || !self->webState)
+    {
+        printf("[flux] EARLY RETURN null\n");
+        return EM_FALSE;
+    }
 
+    double dpr = EM_ASM_DOUBLE({ return Module._fluxDPR || 1.0; });
     int x = (int)e->targetX;
     int y = (int)e->targetY;
 
-    // Scale logical CSS pixels → physical pixels.
-    double dpr = EM_ASM_DOUBLE({ return Module._fluxDPR || 1.0; });
-    x = (int)(x * dpr);
-    y = (int)(y * dpr);
+    printf("[flux] coords after dpr: x=%d y=%d dpr=%f\n", x, y, dpr);
+    printf("[flux] button=%d hasMouseDown=%d hasRightClick=%d\n",
+           e->button,
+           self->callbacks.onMouseDown ? 1 : 0,
+           self->callbacks.onRightClick ? 1 : 0);
 
     bool handled = false;
     if (e->button == 0 && self->callbacks.onMouseDown)
+    {
+        printf("[flux] calling callbacks.onMouseDown\n");
         handled = self->callbacks.onMouseDown(x, y);
-    else if (e->button == 2 && self->callbacks.onRightClick)
-        handled = self->callbacks.onRightClick(x, y);
+        printf("[flux] callbacks.onMouseDown returned: %d\n", handled);
+    }
 
-    if (handled) self->invalidate();
+    printf("[flux] handled=%d calling invalidate\n", handled);
+    if (handled)
+        self->invalidate();
     return handled ? EM_TRUE : EM_FALSE;
 }
 
@@ -149,20 +160,23 @@ static EM_BOOL onMouseUp(int /*eventType*/,
                          void *userData)
 {
     auto *self = static_cast<PlatformWindow *>(userData);
-    if (!self || !self->webState) return EM_FALSE;
+    if (!self || !self->webState)
+        return EM_FALSE;
 
-    flux_web_detail::g_ctrlDown  = e->ctrlKey;
+    flux_web_detail::g_ctrlDown = e->ctrlKey;
     flux_web_detail::g_shiftDown = e->shiftKey;
-    flux_web_detail::g_altDown   = e->altKey;
+    flux_web_detail::g_altDown = e->altKey;
 
-    if (e->button != 0 || !self->callbacks.onMouseUp) return EM_FALSE;
+    if (e->button != 0 || !self->callbacks.onMouseUp)
+        return EM_FALSE;
 
     double dpr = EM_ASM_DOUBLE({ return Module._fluxDPR || 1.0; });
-    int x = (int)(e->targetX * dpr);
-    int y = (int)(e->targetY * dpr);
+    int x = (int)e->targetX;
+    int y = (int)e->targetY;
 
     bool handled = self->callbacks.onMouseUp(x, y);
-    if (handled) self->invalidate();
+    if (handled)
+        self->invalidate();
 
     // Release simulated capture on mouse-up (mirrors Win32 ReleaseCapture).
     if (self->webState->mouseCapture)
@@ -178,20 +192,23 @@ static EM_BOOL onMouseMove(int /*eventType*/,
                            void *userData)
 {
     auto *self = static_cast<PlatformWindow *>(userData);
-    if (!self || !self->webState) return EM_FALSE;
+    if (!self || !self->webState)
+        return EM_FALSE;
 
-    flux_web_detail::g_ctrlDown  = e->ctrlKey;
+    flux_web_detail::g_ctrlDown = e->ctrlKey;
     flux_web_detail::g_shiftDown = e->shiftKey;
-    flux_web_detail::g_altDown   = e->altKey;
+    flux_web_detail::g_altDown = e->altKey;
 
-    if (!self->callbacks.onMouseMove) return EM_FALSE;
+    if (!self->callbacks.onMouseMove)
+        return EM_FALSE;
 
     double dpr = EM_ASM_DOUBLE({ return Module._fluxDPR || 1.0; });
-    int x = (int)(e->targetX * dpr);
-    int y = (int)(e->targetY * dpr);
+    int x = (int)e->targetX;
+    int y = (int)e->targetY;
 
     bool handled = self->callbacks.onMouseMove(x, y);
-    if (handled) self->invalidate();
+    if (handled)
+        self->invalidate();
     return handled ? EM_TRUE : EM_FALSE;
 }
 
@@ -202,7 +219,8 @@ static EM_BOOL onMouseLeave(int /*eventType*/,
                             void *userData)
 {
     auto *self = static_cast<PlatformWindow *>(userData);
-    if (!self || !self->webState) return EM_FALSE;
+    if (!self || !self->webState)
+        return EM_FALSE;
 
     if (self->callbacks.onMouseLeave)
         self->callbacks.onMouseLeave();
@@ -218,19 +236,22 @@ static EM_BOOL onWheel(int /*eventType*/,
                        void *userData)
 {
     auto *self = static_cast<PlatformWindow *>(userData);
-    if (!self || !self->webState || !self->callbacks.onMouseWheel) return EM_FALSE;
+    if (!self || !self->webState || !self->callbacks.onMouseWheel)
+        return EM_FALSE;
 
     // Normalize to Win32 WHEEL_DELTA (120 per notch).
     // deltaY is in CSS pixels by default (DOM_DELTA_PIXEL).
     // Positive deltaY = scroll down = negative WHEEL_DELTA (same as Win32).
     int delta = (e->deltaY != 0.0)
-        ? (int)(-(e->deltaY / std::abs(e->deltaY)) * WHEEL_DELTA)
-        : 0;
+                    ? (int)(-(e->deltaY / std::abs(e->deltaY)) * WHEEL_DELTA)
+                    : 0;
 
-    if (delta == 0) return EM_FALSE;
+    if (delta == 0)
+        return EM_FALSE;
 
     bool handled = self->callbacks.onMouseWheel(delta);
-    if (handled) self->invalidate();
+    if (handled)
+        self->invalidate();
     return handled ? EM_TRUE : EM_FALSE;
 }
 
@@ -241,15 +262,17 @@ static EM_BOOL onKeyDown(int /*eventType*/,
                          void *userData)
 {
     auto *self = static_cast<PlatformWindow *>(userData);
-    if (!self || !self->webState) return EM_FALSE;
+    if (!self || !self->webState)
+        return EM_FALSE;
 
-    flux_web_detail::g_ctrlDown  = e->ctrlKey;
+    flux_web_detail::g_ctrlDown = e->ctrlKey;
     flux_web_detail::g_shiftDown = e->shiftKey;
-    flux_web_detail::g_altDown   = e->altKey;
+    flux_web_detail::g_altDown = e->altKey;
 
     // ── onKeyDown — VK_* dispatch ─────────────────────────────────────────────
     bool handled = false;
-    if (self->callbacks.onKeyDown) {
+    if (self->callbacks.onKeyDown)
+    {
         int vk = emKeyToVK(e);
         handled = self->callbacks.onKeyDown(vk);
     }
@@ -261,18 +284,22 @@ static EM_BOOL onKeyDown(int /*eventType*/,
     // Single-character keys (length == 1) are printable; multi-character
     // strings ("Shift", "Control", "ArrowLeft", …) are control keys
     // already handled above via onKeyDown.
-    if (!handled && self->callbacks.onChar) {
+    if (!handled && self->callbacks.onChar)
+    {
         const char *key = e->key;
         // key is UTF-8; single ASCII printable character check:
-        if (key[0] != '\0' && key[1] == '\0') {
+        if (key[0] != '\0' && key[1] == '\0')
+        {
             wchar_t ch = (wchar_t)(unsigned char)key[0];
-            if (ch >= 32) { // exclude control characters
+            if (ch >= 32)
+            { // exclude control characters
                 handled = self->callbacks.onChar(ch);
             }
         }
     }
 
-    if (handled) self->invalidate();
+    if (handled)
+        self->invalidate();
 
     // Return EM_TRUE to prevent default browser behaviour (e.g. space scrolling
     // the page, Tab moving focus out of the canvas) when FluxUI handled the key.
@@ -289,15 +316,18 @@ static EM_BOOL onTouchStart(int /*eventType*/,
                             void *userData)
 {
     auto *self = static_cast<PlatformWindow *>(userData);
-    if (!self || !self->webState || e->numTouches == 0) return EM_FALSE;
-    if (!self->callbacks.onMouseDown) return EM_FALSE;
+    if (!self || !self->webState || e->numTouches == 0)
+        return EM_FALSE;
+    if (!self->callbacks.onMouseDown)
+        return EM_FALSE;
 
     double dpr = EM_ASM_DOUBLE({ return Module._fluxDPR || 1.0; });
     int x = (int)(e->touches[0].targetX * dpr);
     int y = (int)(e->touches[0].targetY * dpr);
 
     bool handled = self->callbacks.onMouseDown(x, y);
-    if (handled) self->invalidate();
+    if (handled)
+        self->invalidate();
     return EM_TRUE; // always consume touch to prevent scroll
 }
 
@@ -306,7 +336,8 @@ static EM_BOOL onTouchEnd(int /*eventType*/,
                           void *userData)
 {
     auto *self = static_cast<PlatformWindow *>(userData);
-    if (!self || !self->webState || e->numTouches == 0) return EM_FALSE;
+    if (!self || !self->webState || e->numTouches == 0)
+        return EM_FALSE;
 
     double dpr = EM_ASM_DOUBLE({ return Module._fluxDPR || 1.0; });
     int x = (int)(e->touches[0].targetX * dpr);
@@ -324,15 +355,18 @@ static EM_BOOL onTouchMove(int /*eventType*/,
                            void *userData)
 {
     auto *self = static_cast<PlatformWindow *>(userData);
-    if (!self || !self->webState || e->numTouches == 0) return EM_FALSE;
-    if (!self->callbacks.onMouseMove) return EM_FALSE;
+    if (!self || !self->webState || e->numTouches == 0)
+        return EM_FALSE;
+    if (!self->callbacks.onMouseMove)
+        return EM_FALSE;
 
     double dpr = EM_ASM_DOUBLE({ return Module._fluxDPR || 1.0; });
     int x = (int)(e->touches[0].targetX * dpr);
     int y = (int)(e->touches[0].targetY * dpr);
 
     bool handled = self->callbacks.onMouseMove(x, y);
-    if (handled) self->invalidate();
+    if (handled)
+        self->invalidate();
     return EM_TRUE; // consume to prevent page scroll
 }
 
@@ -341,14 +375,17 @@ static EM_BOOL onTouchMove(int /*eventType*/,
 // emscripten_set_interval fires a C callback repeatedly.  We wrap it to
 // call the WindowCallbacks::onTimer function and then trigger a repaint.
 
-struct TimerShimArg {
+struct TimerShimArg
+{
     PlatformWindow *window;
-    TimerID         timerId;
+    TimerID timerId;
 };
 
-static void timerShim(void *arg) {
+static void timerShim(void *arg)
+{
     auto *shim = static_cast<TimerShimArg *>(arg);
-    if (!shim || !shim->window) return;
+    if (!shim || !shim->window)
+        return;
 
     if (shim->window->callbacks.onTimer)
         shim->window->callbacks.onTimer(shim->timerId);
@@ -368,8 +405,13 @@ bool PlatformWindow::create(const std::string & /*title*/,
 {
     webState = new WebState();
 
-    cachedWidth  = width;
-    cachedHeight = height;
+    // Use actual physical canvas size, not the logical size from createApp().
+    // The JS side has already sized the canvases to window.innerWidth/Height * dpr.
+    int physW = EM_ASM_INT({ return Module._fluxPhysicalWidth  | 0; });
+    int physH = EM_ASM_INT({ return Module._fluxPhysicalHeight | 0; });
+    cachedWidth  = (physW > 0) ? physW : width;
+    cachedHeight = (physH > 0) ? physH : height;
+
 
     // ── Scale the Canvas 2D context by devicePixelRatio ──────────────────────
     //
@@ -379,7 +421,8 @@ bool PlatformWindow::create(const std::string & /*title*/,
     EM_ASM({
         var dpr = Module._fluxDPR || 1.0;
         var ctx = Module._fluxCtx2D;
-        if (ctx) {
+        if (ctx)
+        {
             ctx.scale(dpr, dpr);
         }
     });
@@ -389,11 +432,11 @@ bool PlatformWindow::create(const std::string & /*title*/,
     // useCapture = true for mouse/touch so we receive events even when the
     // pointer exits the canvas bounds during a drag (simulates SetCapture).
 
-    emscripten_set_mousedown_callback ("#flux-ui", this, /*useCapture=*/1, onMouseDown);
-    emscripten_set_mouseup_callback   ("#flux-ui", this, /*useCapture=*/1, onMouseUp);
-    emscripten_set_mousemove_callback ("#flux-ui", this, /*useCapture=*/1, onMouseMove);
+    emscripten_set_mousedown_callback("#flux-ui", this, /*useCapture=*/1, onMouseDown);
+    emscripten_set_mouseup_callback("#flux-ui", this, /*useCapture=*/1, onMouseUp);
+    emscripten_set_mousemove_callback("#flux-ui", this, /*useCapture=*/1, onMouseMove);
     emscripten_set_mouseleave_callback("#flux-ui", this, /*useCapture=*/0, onMouseLeave);
-    emscripten_set_wheel_callback     ("#flux-ui", this, /*useCapture=*/1, onWheel);
+    emscripten_set_wheel_callback("#flux-ui", this, /*useCapture=*/1, onWheel);
 
     // Keyboard events must be registered on the document (not the canvas)
     // because canvases don't receive keyboard focus by default.
@@ -402,8 +445,8 @@ bool PlatformWindow::create(const std::string & /*title*/,
 
     // Touch — canvas element, prevent-default so the page doesn't scroll.
     emscripten_set_touchstart_callback("#flux-ui", this, /*useCapture=*/1, onTouchStart);
-    emscripten_set_touchend_callback  ("#flux-ui", this, /*useCapture=*/1, onTouchEnd);
-    emscripten_set_touchmove_callback ("#flux-ui", this, /*useCapture=*/1, onTouchMove);
+    emscripten_set_touchend_callback("#flux-ui", this, /*useCapture=*/1, onTouchEnd);
+    emscripten_set_touchmove_callback("#flux-ui", this, /*useCapture=*/1, onTouchMove);
 
     webState->initialized = true;
 
@@ -415,8 +458,10 @@ bool PlatformWindow::create(const std::string & /*title*/,
 
 // ── destroy ───────────────────────────────────────────────────────────────────
 
-void PlatformWindow::destroy() {
-    if (!webState) return;
+void PlatformWindow::destroy()
+{
+    if (!webState)
+        return;
 
     // Cancel all live interval timers.
     for (auto &[id, handle] : webState->timerHandles)
@@ -424,16 +469,16 @@ void PlatformWindow::destroy() {
     webState->timerHandles.clear();
 
     // Unregister event listeners.
-    emscripten_set_mousedown_callback ("#flux-ui", nullptr, 0, nullptr);
-    emscripten_set_mouseup_callback   ("#flux-ui", nullptr, 0, nullptr);
-    emscripten_set_mousemove_callback ("#flux-ui", nullptr, 0, nullptr);
+    emscripten_set_mousedown_callback("#flux-ui", nullptr, 0, nullptr);
+    emscripten_set_mouseup_callback("#flux-ui", nullptr, 0, nullptr);
+    emscripten_set_mousemove_callback("#flux-ui", nullptr, 0, nullptr);
     emscripten_set_mouseleave_callback("#flux-ui", nullptr, 0, nullptr);
-    emscripten_set_wheel_callback     ("#flux-ui", nullptr, 0, nullptr);
-    emscripten_set_keydown_callback   (EMSCRIPTEN_EVENT_TARGET_DOCUMENT,
-                                       nullptr, 0, nullptr);
+    emscripten_set_wheel_callback("#flux-ui", nullptr, 0, nullptr);
+    emscripten_set_keydown_callback(EMSCRIPTEN_EVENT_TARGET_DOCUMENT,
+                                    nullptr, 0, nullptr);
     emscripten_set_touchstart_callback("#flux-ui", nullptr, 0, nullptr);
-    emscripten_set_touchend_callback  ("#flux-ui", nullptr, 0, nullptr);
-    emscripten_set_touchmove_callback ("#flux-ui", nullptr, 0, nullptr);
+    emscripten_set_touchend_callback("#flux-ui", nullptr, 0, nullptr);
+    emscripten_set_touchmove_callback("#flux-ui", nullptr, 0, nullptr);
 
     delete webState;
     webState = nullptr;
@@ -443,32 +488,40 @@ void PlatformWindow::destroy() {
 //
 // Called from main_web.cpp s_tick() at ~60 fps via requestAnimationFrame.
 // Only repaints when the dirty flag is set, so idle frames cost almost nothing.
+extern void fluxClearCanvasWidgetRects();
 
-void PlatformWindow::tick() {
-    if (!webState || !webState->dirty) return;
+
+void PlatformWindow::tick()
+{
+    if (!webState || !webState->dirty)
+        return;
     webState->dirty = false;
 
     int w = cachedWidth;
     int h = cachedHeight;
 
-    // Clear the Canvas 2D surface before each frame.
-    // We clear using the logical size (physical px / dpr) because the transform
-    // applied in create() already scales drawing coordinates by dpr.
     EM_ASM({
         var ctx = Module._fluxCtx2D;
         var dpr = Module._fluxDPR || 1.0;
         if (ctx) {
             ctx.save();
-            ctx.setTransform(1, 0, 0, 1, 0, 0); // reset transform
-            ctx.clearRect(0, 0, $0, $1);         // clear physical pixels
-            ctx.restore();                        // restore dpr scale transform
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.clearRect(0, 0, $0 * dpr, $1 * dpr);
+            ctx.restore();
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         }
     }, w, h);
 
-    if (callbacks.onPaint) {
+    if (callbacks.onPaint)
+    {
         GraphicsContext ctx(w, h);
         callbacks.onPaint(ctx, w, h);
     }
+
+    // After all widgets have painted, punch transparent holes where
+    // CanvasWidgets live so the WebGL layer shows through.
+    // We collect the rects during onPaint via a global list.
+    fluxClearCanvasWidgetRects();  // <-- ADD THIS
 }
 
 // ── run ───────────────────────────────────────────────────────────────────────
@@ -476,7 +529,8 @@ void PlatformWindow::tick() {
 // Never called on web — main_web.cpp uses emscripten_set_main_loop instead.
 // Provided so the linker is satisfied if run() is referenced anywhere.
 
-int PlatformWindow::run() {
+int PlatformWindow::run()
+{
     // On web the main loop is driven by emscripten_set_main_loop in main_web.cpp.
     // This function should never be reached; assert in debug builds.
     emscripten_log(EM_LOG_WARN, "PlatformWindow::run() called on web — no-op");
@@ -485,14 +539,18 @@ int PlatformWindow::run() {
 
 // ── invalidate / invalidateRect ───────────────────────────────────────────────
 
-void PlatformWindow::invalidate() {
-    if (webState) webState->dirty = true;
+void PlatformWindow::invalidate()
+{
+    if (webState)
+        webState->dirty = true;
 }
 
-void PlatformWindow::invalidateRect(int /*x*/, int /*y*/, int /*w*/, int /*h*/) {
+void PlatformWindow::invalidateRect(int /*x*/, int /*y*/, int /*w*/, int /*h*/)
+{
     // Canvas 2D has no partial-invalidation mechanism — always redraw the full
     // surface.  Set the same dirty flag as invalidate().
-    if (webState) webState->dirty = true;
+    if (webState)
+        webState->dirty = true;
 }
 
 // ── valid ─────────────────────────────────────────────────────────────────────
@@ -511,28 +569,34 @@ void PlatformWindow::invalidateRect(int /*x*/, int /*y*/, int /*w*/, int /*h*/) 
 
 // ── Timers ────────────────────────────────────────────────────────────────────
 
-void PlatformWindow::setTimer(TimerID id, int ms) {
-    if (!webState) return;
+void PlatformWindow::setTimer(TimerID id, int ms)
+{
+    if (!webState)
+        return;
 
     // Kill any existing timer with this id before creating a new one.
     auto it = webState->timerHandles.find(id);
-    if (it != webState->timerHandles.end()) {
+    if (it != webState->timerHandles.end())
+    {
         emscripten_clear_interval(it->second);
         webState->timerHandles.erase(it);
     }
 
     // TimerShimArg lives for the lifetime of the timer.  It is freed in
     // killTimer() when the interval is cancelled.
-    auto *arg   = new TimerShimArg{this, id};
+    auto *arg = new TimerShimArg{this, id};
     long handle = emscripten_set_interval(timerShim, (double)ms, arg);
     webState->timerHandles[id] = handle;
 }
 
-void PlatformWindow::killTimer(TimerID id) {
-    if (!webState) return;
+void PlatformWindow::killTimer(TimerID id)
+{
+    if (!webState)
+        return;
 
     auto it = webState->timerHandles.find(id);
-    if (it == webState->timerHandles.end()) return;
+    if (it == webState->timerHandles.end())
+        return;
 
     emscripten_clear_interval(it->second);
     webState->timerHandles.erase(it);
@@ -547,19 +611,25 @@ void PlatformWindow::killTimer(TimerID id) {
 // already receive events outside the canvas during a drag, which is sufficient
 // for the resize-splitter and drag use cases in FluxUI.
 
-void PlatformWindow::captureMouseInput() {
-    if (webState) webState->mouseCapture = true;
+void PlatformWindow::captureMouseInput()
+{
+    if (webState)
+        webState->mouseCapture = true;
 }
 
-void PlatformWindow::releaseMouseInput() {
-    if (webState) webState->mouseCapture = false;
+void PlatformWindow::releaseMouseInput()
+{
+    if (webState)
+        webState->mouseCapture = false;
 }
 
-bool PlatformWindow::isMouseCaptured() const {
+bool PlatformWindow::isMouseCaptured() const
+{
     return webState && webState->mouseCapture;
 }
 
-bool PlatformWindow::valid() const {
+bool PlatformWindow::valid() const
+{
     return webState != nullptr && webState->initialized;
 }
 
@@ -571,15 +641,15 @@ bool PlatformWindow::valid() const {
 // FluxUI and other browser tabs / native apps will not work until the async
 // Clipboard API is integrated.
 
-void PlatformWindow::setClipboardText(const std::string &text) {
-    EM_ASM({
-        Module._fluxClipboard = UTF8ToString($0);
-    }, text.c_str());
+void PlatformWindow::setClipboardText(const std::string &text)
+{
+    EM_ASM({ Module._fluxClipboard = UTF8ToString($0); }, text.c_str());
 }
 
-std::string PlatformWindow::getClipboardText() {
+std::string PlatformWindow::getClipboardText()
+{
     char *ptr = (char *)EM_ASM_PTR({
-        var s   = Module._fluxClipboard || "";
+        var s = Module._fluxClipboard || "";
         var len = lengthBytesUTF8(s) + 1;
         var buf = _malloc(len);
         stringToUTF8(s, buf, len);
@@ -592,29 +662,34 @@ std::string PlatformWindow::getClipboardText() {
 
 // ── Handle / size accessors ───────────────────────────────────────────────────
 
-NativeWindow PlatformWindow::handle() const {
+NativeWindow PlatformWindow::handle() const
+{
     // NativeWindow is void* on web.  We return the canvas selector as a
     // stable pointer — the string literal lives in the read-only data segment.
     return const_cast<void *>(static_cast<const void *>("#flux-ui"));
 }
 
-void PlatformWindow::updateClientSize() {
+void PlatformWindow::updateClientSize()
+{
     // Physical dimensions are pushed in from JS via fluxOnResize() in
     // main_web.cpp.  Nothing to do here — cachedWidth/cachedHeight are
     // already up to date.
 }
 
-PlatformWindow::ScreenPoint PlatformWindow::clientToScreen(int cx, int cy) const {
+PlatformWindow::ScreenPoint PlatformWindow::clientToScreen(int cx, int cy) const
+{
     // On web there is no distinction between client and screen coordinates
     // for our purposes — canvas coordinates are already viewport-relative.
     return {cx, cy};
 }
 
-PlatformWindow::ScreenPoint PlatformWindow::screenToClient(int sx, int sy) const {
+PlatformWindow::ScreenPoint PlatformWindow::screenToClient(int sx, int sy) const
+{
     return {sx, sy};
 }
 
-PlatformWindow::ClientSize PlatformWindow::getClientSize() const {
+PlatformWindow::ClientSize PlatformWindow::getClientSize() const
+{
     return {cachedWidth, cachedHeight};
 }
 
@@ -624,7 +699,8 @@ PlatformWindow::ClientSize PlatformWindow::getClientSize() const {
 // flux_font_web.cpp.  We just need to hand the painter a context with the
 // correct dimensions.
 
-GraphicsContext PlatformWindow::getMeasureContext() const {
+GraphicsContext PlatformWindow::getMeasureContext() const
+{
     return GraphicsContext(cachedWidth, cachedHeight);
 }
 
@@ -636,15 +712,18 @@ void PlatformWindow::startupGdiplus() {}
 
 // ── Cursor ────────────────────────────────────────────────────────────────────
 
-void PlatformWindow::setResizeCursorH() {
+void PlatformWindow::setResizeCursorH()
+{
     EM_ASM({ document.getElementById('flux-ui').style.cursor = 'ew-resize'; });
 }
 
-void PlatformWindow::setResizeCursorV() {
+void PlatformWindow::setResizeCursorV()
+{
     EM_ASM({ document.getElementById('flux-ui').style.cursor = 'ns-resize'; });
 }
 
-void PlatformWindow::setDefaultCursor() {
+void PlatformWindow::setDefaultCursor()
+{
     EM_ASM({ document.getElementById('flux-ui').style.cursor = 'default'; });
 }
 

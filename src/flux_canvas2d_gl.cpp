@@ -44,7 +44,7 @@
 // GLSL shaders  (identical to old version)
 // ─────────────────────────────────────────────────────────────────────────────
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(__EMSCRIPTEN__)
 static const char *kFlatVert =
     "#version 300 es\n"
     "precision mediump float;\n"

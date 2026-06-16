@@ -18,6 +18,19 @@ function(add_flux_example NAME)
             "--shell-file=${CMAKE_SOURCE_DIR}/web/shell.html"
             "--preload-file=${CMAKE_SOURCE_DIR}/web/fonts@/fonts"
             "-sEXIT_RUNTIME=0"
+            "-sUSE_WEBGL2=1"
+            "-sMIN_WEBGL_VERSION=2"
+            "-sMAX_WEBGL_VERSION=2"
+            "-sFULL_ES3=1"
+            "-sALLOW_MEMORY_GROWTH=1"
+            "-sINITIAL_MEMORY=67108864"
+            "-sFETCH=1"
+            "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString']"
+            "-sENVIRONMENT=web"
+            "-sGL_ENABLE_GET_PROC_ADDRESS=1"
+            "-sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=['$Browser']"
+            $<$<CONFIG:Debug>:-sASSERTIONS=2>
+            $<$<CONFIG:Debug>:-sSAFE_HEAP=1>
         )
 
     elseif(WIN32)
@@ -60,4 +73,4 @@ function(add_flux_example NAME)
 
 endfunction()
 
-add_flux_example(helloworld)
+add_flux_example(triangle)

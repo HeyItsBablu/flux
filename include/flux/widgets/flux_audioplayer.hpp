@@ -29,6 +29,10 @@
 std::string FluxAndroid_getFilesDir();
 #endif
 
+#ifndef _WIN32
+#include <unistd.h>  // close(), used by the Linux/Android temp-file path below
+#endif
+
 // ============================================================================
 // Helpers
 // ============================================================================

@@ -1,55 +1,51 @@
 #include "flux/flux.hpp"
 
-class TriangleSurface : public RenderSurface {
-    float time_ = 0;
+class TriangleSurface : public RenderSurface
+{
+  float time_ = 0;
 
 public:
-    void initialize(int, int) override {}
-    void resize(int, int)     override {}
-    void destroy()            override {}
-    void update(double dt)    override { time_ += float(dt); }
+  void initialize(int, int) override {}
+  void resize(int, int) override {}
+  void destroy() override {}
+  void update(double dt) override { time_ += float(dt); }
 
-    void render(Canvas2D& ctx) override {
-        float w  = float(ctx.width());
-        float h  = float(ctx.height());
-        float cx = w * 0.5f;
-        float cy = h * 0.5f;
-        float r  = std::min(w, h) * 0.4f;
+  void render(Canvas2D &ctx) override
+  {
+    ctx.setFillColor({15, 15, 20, 255});
+    ctx.fillRect(0, 0, ctx.width(), ctx.height());
 
-        ctx.setFillColor(Color::fromRGB(15, 15, 20));
-        ctx.fillRect(0, 0, w, h);
+    ctx.setFillColor({255, 80, 80, 255}); // solid red — no HSV/gradient
+    ctx.beginPath();
+    float cx = ctx.width() * 0.5f;
+    float cy = ctx.height() * 0.5f;
+    float r = std::min(ctx.width(), ctx.height()) * 0.4f;
+    ctx.moveTo(cx, cy - r);
+    ctx.lineTo(cx - r * 0.866f, cy + r * 0.5f);
+    ctx.lineTo(cx + r * 0.866f, cy + r * 0.5f);
+    ctx.closePath();
+    ctx.fill();
+  }
 
-        float hue = time_ * 30.f;
-        ctx.beginLinearGradient(cx, cy - r, cx, cy + r);
-        ctx.addColorStop(0.f, Color::fromHSV(hue,         0.8f, 1.f));
-        ctx.addColorStop(1.f, Color::fromHSV(hue + 120.f, 0.8f, 0.6f));
-        ctx.setFillGradient();
-
-        ctx.beginPath();
-        ctx.moveTo(cx,               cy - r);
-        ctx.lineTo(cx - r * 0.866f,  cy + r * 0.5f);
-        ctx.lineTo(cx + r * 0.866f,  cy + r * 0.5f);
-        ctx.closePath();
-        ctx.fill();
-    }
-
-    bool needsContinuousRedraw() const override { return true; }
+  bool needsContinuousRedraw() const override { return true; }
 };
 // ============================================================================
 // App
 // ============================================================================
 
-class TriangleApp : public Widget {
+class TriangleApp : public Widget
+{
   static constexpr int kCanvasW = 512, kCanvasH = 512;
 
 public:
-  WidgetPtr build() override {
+  WidgetPtr build() override
+  {
     auto canvas = std::make_shared<CanvasWidget>();
-
     canvas->setScrollbarsEnabled(false);
+    canvas->setViewportEnabled(false); // disable pan/zoom too if not needed
     canvas->setSurface<TriangleSurface>();
 
-   return Scaffold(AppBar("Trianlge App"), Expanded(canvas),nullptr,nullptr);
+    return Scaffold(AppBar("Trianlge App"), Expanded(canvas), nullptr, nullptr);
   }
 };
 
@@ -57,7 +53,8 @@ public:
 // Entry point
 // ============================================================================
 
-WidgetPtr createApp(FluxUI *app) {
+WidgetPtr createApp(FluxUI *app)
+{
   return FluxApp("Triangle", std::make_shared<TriangleApp>(), AppTheme::dark(),
                  false,  // debugShowWidgetBounds
                  512,    // width

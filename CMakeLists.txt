@@ -360,27 +360,27 @@ elseif(EMSCRIPTEN)
             freetype
     )
 
-    target_link_options(flux PUBLIC
-            # WebGL2
-            "-sUSE_WEBGL2=1"
-            "-sFULL_ES3=1"
-            # Memory — grow as needed, start at 64MB
-            "-sALLOW_MEMORY_GROWTH=1"
-            "-sINITIAL_MEMORY=67108864"
-            # Emscripten Fetch API replaces libcurl
-            "-sFETCH=1"
-            # Runtime methods callable from JS side
-            "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString']"
-            # Target environment
-            "-sENVIRONMENT=web"
-    )
+    # target_link_options(flux PUBLIC
+    #         # WebGL2
+    #         "-sUSE_WEBGL2=1"
+    #         "-sFULL_ES3=1"
+    #         # Memory — grow as needed, start at 64MB
+    #         "-sALLOW_MEMORY_GROWTH=1"
+    #         "-sINITIAL_MEMORY=67108864"
+    #         # Emscripten Fetch API replaces libcurl
+    #         "-sFETCH=1"
+    #         # Runtime methods callable from JS side
+    #         "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString']"
+    #         # Target environment
+    #         "-sENVIRONMENT=web"
+    # )
 
-    # Debug-only — adds bounds checking and heap validation
-    # Removed from release builds for performance
-    target_link_options(flux PUBLIC
-            $<$<CONFIG:Debug>:-sASSERTIONS=2>
-            $<$<CONFIG:Debug>:-sSAFE_HEAP=1>
-    )
+    # # Debug-only — adds bounds checking and heap validation
+    # # Removed from release builds for performance
+    # target_link_options(flux PUBLIC
+    #         $<$<CONFIG:Debug>:-sASSERTIONS=2>
+    #         $<$<CONFIG:Debug>:-sSAFE_HEAP=1>
+    # )
 
 elseif(ANDROID)
     find_library(log-lib     log)

@@ -153,10 +153,20 @@ public:
     float getInputLevel() const { return 0.f; }
 #endif
 
+
+    // Opaque handle, declared public only so platform backends can pass
+    // FluxAudio::Impl* across C/JS interop boundaries from non-member
+    // extern "C" thunks (Emscripten callbacks). The struct body is only
+    // ever defined inside the one platform .cpp that owns it.
+    struct Impl;
+
 private:
     FluxAudio();
     ~FluxAudio();
 
-    struct Impl;
     Impl* m_impl;
+
+    // Web-only: play bytes already read into memory (used by playFromPath
+    // after it pulls the file out of MEMFS).
+    bool _playFromMemoryInternal(const uint8_t* data, size_t len);
 };
