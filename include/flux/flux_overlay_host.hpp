@@ -114,6 +114,10 @@ public:
             originX_ = screenX;
             originY_ = screenY;
         }
+#elif defined(__EMSCRIPTEN__)
+        // On web, clientToScreen is identity so callers pass client coords directly.
+        originX_ = screenX;
+        originY_ = screenY;
 #else // Android
         auto *ui = FluxUI::getCurrentInstance();
         if (ui) {
@@ -153,12 +157,11 @@ public:
     int overlayH() const { return popupH_; }
 
     // Called by scaffold's render pass for each overlay.
-    void renderOverlay(GraphicsContext &ctx, FontCache &fc) {
+void renderOverlay(GraphicsContext &ctx, FontCache &fc) {
         if (!visible_ || popupW_ <= 0 || popupH_ <= 0)
             return;
 
 #if defined(__linux__) && !defined(__ANDROID__)
-        // Cairo: save/translate/clip/restore so renderPopupContent sees (0,0).
         cairo_t *cr = ctx.cr;
         cairo_save(cr);
         cairo_rectangle(cr, originX_, originY_, popupW_, popupH_);
@@ -169,8 +172,6 @@ public:
         cairo_restore(cr);
 
 #elif defined(__APPLE__)
-        // macOS CoreGraphics: save/translate/clip/restore.
-        // CGContext origin is already top-left after our flip in MacState.
         CGContextRef cg = ctx.cgContext;
         if (!cg) return;
         CGContextSaveGState(cg);
@@ -179,6 +180,32 @@ public:
         GraphicsContext localCtx(cg, popupW_, popupH_);
         renderPopupContent(localCtx, fc);
         CGContextRestoreGState(cg);
+
+#elif defined(__EMSCRIPTEN__)
+        // Save the current canvas state (which has dpr scale applied from create()).
+        // Clip to the overlay rect and translate so renderPopupContent draws at (0,0).
+        EM_ASM({
+            var c = Module._fluxCtx2D;
+            if (!c) return;
+            c.save();
+            c.beginPath();
+            c.rect($0, $1, $2, $3);
+            c.clip();
+            c.translate($0, $1);
+        }, originX_, originY_, popupW_, popupH_);
+
+        {
+            GraphicsContext localCtx(popupW_, popupH_);
+            renderPopupContent(localCtx, fc);
+        }
+
+        // restore() returns exactly to the saved state (dpr scale still in effect).
+        // No re-scale needed.
+        EM_ASM({
+            var c = Module._fluxCtx2D;
+            if (!c) return;
+            c.restore();
+        });
 
 #else // Android / NanoVG
         NVGcontext* vg = FluxAndroid_getVG();

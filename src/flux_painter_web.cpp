@@ -361,9 +361,9 @@ void Painter::popClipRect()
         if (!c)
             return;
         c.restore();
-        // Re-apply dpr scale — restore() pops it back to identity.
-        var dpr = Module._fluxDPR || 1.0;
-        c.scale(dpr, dpr);
+        // restore() already returns to the pre-push state which has dpr scale
+        // applied from create(). No re-scale needed — adding it here compounds
+        // it on nested push/pop pairs.
     });
 }
 
