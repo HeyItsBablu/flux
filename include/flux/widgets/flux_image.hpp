@@ -5,7 +5,7 @@
 #include "../flux_http.hpp"
 
 // ============================================================================
-// SHARED DECODE  (stb_image — used by Linux, Android, macOS)
+// SHARED DECODE  (stb_image — used by Linux, Android, macOS, Web)
 // Win32 uses GDI+ instead and does NOT include stb here.
 // ============================================================================
 
@@ -139,10 +139,6 @@ public:
   };
 
   // ── Platform member storage ───────────────────────────────────────────────
-  // Declarations only — implementations live in platform files.
-
-  // 3. Add explicit destructor declarations for each pimpl type
-  // Replace the forward-declare-only structs with custom deleters:
 
 #ifdef _WIN32
   struct Win32State;
@@ -177,6 +173,14 @@ public:
     void operator()(LinuxScaleCache *) const;
   };
   mutable std::unique_ptr<LinuxScaleCache, LinuxScaleCacheDeleter> _linuxCache;
+
+#elif defined(__EMSCRIPTEN__)
+  // Web: no background threads without -sPTHREAD.
+  // _decodeMutex is a no-op mutex (single-threaded WASM), kept for API
+  // compatibility with _platformStorePixels / _platformPromote.
+  mutable std::mutex _decodeMutex;
+  DecodedImage _pending;       // staging: written by decode, read by promote
+  std::vector<uint8_t> pixels; // CPU-side copy for context-loss re-upload
 #endif
 
 #ifdef __ANDROID__
@@ -502,6 +506,11 @@ private:
 
   // =========================================================================
   // _loadAssetAsync
+  //
+  // Web: std::thread is unavailable without -sPTHREAD and aborts at runtime.
+  // Emscripten virtualises fopen() so the file read works fine on the main
+  // thread against the preloaded VFS.  We decode synchronously and let
+  // _platformPromote() be called from the next computeLayout / render pass.
   // =========================================================================
   void _loadAssetAsync(const std::string &path)
   {
@@ -514,6 +523,44 @@ private:
     _setLoadState(ImageLoadState::Loading);
     markNeedsPaint();
 
+#ifdef __EMSCRIPTEN__
+    // ── Web: decode synchronously on the main thread ──────────────────────
+    // fopen() works via Emscripten's virtual FS (files preloaded with
+    // --preload-file).  No thread needed; _platformPromote() will be called
+    // from the next computeLayout / render pass and upload the pixels.
+    FILE *f = fopen(path.c_str(), "rb");
+    if (!f)
+    {
+      _setLoadState(ImageLoadState::Error);
+      _scheduleRebuild();
+      return;
+    }
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (sz <= 0)
+    {
+      fclose(f);
+      _setLoadState(ImageLoadState::Error);
+      _scheduleRebuild();
+      return;
+    }
+    std::vector<uint8_t> buf((size_t)sz);
+    size_t nread = fread(buf.data(), 1, (size_t)sz, f);
+    fclose(f);
+    if ((long)nread != sz)
+    {
+      _setLoadState(ImageLoadState::Error);
+      _scheduleRebuild();
+      return;
+    }
+    bool ok = _decodeIntoStaging(buf.data(), (int)buf.size());
+    if (!ok)
+      _setLoadState(ImageLoadState::Error);
+    _scheduleRebuild();
+
+#else
+    // ── Native: decode on a background thread ────────────────────────────
     std::weak_ptr<ImageWidget> weak =
         std::static_pointer_cast<ImageWidget>(shared_from_this());
 
@@ -575,6 +622,7 @@ private:
             if (!ok) self->_setLoadState(ImageLoadState::Error);
             self->_scheduleRebuild(); })
         .detach();
+#endif // __EMSCRIPTEN__
   }
 
   // =========================================================================
