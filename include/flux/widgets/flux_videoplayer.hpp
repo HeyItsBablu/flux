@@ -1,9 +1,10 @@
 // flux_videoplayer.hpp
 // Self-contained video player widget for FluxUI.
-// Single class shared across Android, Windows, Linux, and macOS.
+// Single class shared across Android, Windows, Linux, macOS, and Web
+// (Emscripten).
 // Platform differences are isolated to render(), private frame-storage
 // members, and a few small helpers — everything else is written once.
-//
+
 // Usage (path):
 //   VideoPlayer("video/sample.mp4")->setWidth(480)->setHeight(270)
 //
@@ -45,6 +46,10 @@ extern float FluxAndroid_getDpiScale();
 #include "flux/flux_video.hpp"
 #include "flux_icons.hpp"
 #include <cairo/cairo.h>
+#elif defined(__EMSCRIPTEN__)
+#include "flux/flux.hpp"
+#include "flux/flux_video.hpp"
+#include "flux_icons.hpp"
 #endif
 
 // ============================================================================
@@ -223,8 +228,9 @@ public:
             _nvgImageDirty = true;
             markNeedsPaint(); });
 #else
-        // Win32 / Linux / macOS: finish callback may arrive on decode thread;
-        // use atomic flag and consume it in render() on the UI thread.
+        // Win32 / Linux / macOS / Web: finish callback may arrive off the
+        // UI thread; use atomic flag and consume it in render() on the UI
+        // thread.
         FluxVideo::get().setOnFinished([this]()
                                        {
             _finishedPending = true;
@@ -554,7 +560,42 @@ public:
                 cairo_restore(ctx.cr);
             }
         }
+
+#elif defined(__EMSCRIPTEN__)
+        {
+            // ── Web: Canvas2D blit path ────────────────────────────────────
+            //
+            // flux_video_web.cpp's hidden <video> element does its own
+            // demux/decode/A-V sync, so there's no CPU pixel buffer to lock
+            // like Win32/Linux/macOS. hasNewFrame() just means "the element
+            // has a frame ready" — every call that returns true blits
+            // whatever frame the browser currently holds straight into the
+            // shared canvas, so we only need the destination rect.
+
+            if (_finishedPending.exchange(false))
+            {
+                _playing = false;
+                _finished = true;
+                _progress = 1.f;
+            }
+
+            auto &vid = FluxVideo::get();
+            if (vid.hasNewFrame())
+            {
+                int srcW = vid.getVideoWidth();
+                int srcH = vid.getVideoHeight();
+                if (srcW > 0 && srcH > 0)
+                {
+                    int dstX, dstY, dstW, dstH;
+                    _letterbox(srcW, srcH, dstX, dstY, dstW, dstH);
+                    vid.renderFrame(dstX, dstY, dstW, dstH);
+                }
+                _progress = vid.getProgress();
+            }
+        }
 #endif
+
+        // ── Shared bar + center-play overlay ──────────────────────────────────
 
         // ── Shared bar + center-play overlay ──────────────────────────────────
         if (_barVisible)
@@ -717,6 +758,13 @@ private:
     std::vector<uint8_t> _cairoPixels;
     cairo_surface_t *_cairoSurf = nullptr;
     int _cairoSurfW = 0, _cairoSurfH = 0;
+    std::atomic<bool> _destroyed{false};
+    std::atomic<bool> _finishedPending{false};
+
+#elif defined(__EMSCRIPTEN__)
+    // No pixel buffer to cache — FluxVideo::renderFrame() blits the
+    // <video> element straight into the canvas. Same destroyed/pending
+    // bookkeeping as the other non-Android platforms, nothing else.
     std::atomic<bool> _destroyed{false};
     std::atomic<bool> _finishedPending{false};
 #endif
@@ -893,8 +941,8 @@ private:
     // Platform-specific helpers
     // =========================================================================
 
-    // ── Letterbox (Win32 + Linux + macOS — not needed on Android) ─────────────
-#if defined(_WIN32) || defined(__linux__) || (defined(__APPLE__) && TARGET_OS_OSX)
+// ── Letterbox (Win32 + Linux + macOS + Web — not needed on Android) ───────
+#if defined(_WIN32) || defined(__linux__) || (defined(__APPLE__) && TARGET_OS_OSX) || defined(__EMSCRIPTEN__)
     void _letterbox(int srcW, int srcH, int &dstX, int &dstY, int &dstW, int &dstH) const
     {
         float vidAR = (float)srcW / (float)srcH;

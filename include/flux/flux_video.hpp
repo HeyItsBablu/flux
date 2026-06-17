@@ -124,6 +124,16 @@ public:
     FrameLock lockFrame();
 #endif
 
+    // Web (Emscripten) — Canvas2D blit path.
+    // There's no CPU pixel buffer to lock; the hidden <video> element is
+    // blitted straight into the page's canvas context. renderFrame() takes
+    // a destination rect in the same physical-pixel space Painter uses.
+#ifdef __EMSCRIPTEN__
+    bool hasNewFrame() const;
+    void renderFrame(int dstX, int dstY, int dstW, int dstH) const;
+#endif
+
+private:
 private:
     // No data members — all state lives in an anonymous-namespace struct
     // inside the platform .cpp.  The singleton is a zero-size token object.
