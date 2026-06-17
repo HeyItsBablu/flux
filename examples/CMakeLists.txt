@@ -73,4 +73,4 @@ function(add_flux_example NAME)
 
 endfunction()
 
-add_flux_example(triangle)
+add_flux_example(helloworld)

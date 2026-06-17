@@ -71,7 +71,7 @@ namespace
     {
         int w = static_cast<int>(weight); // 300 / 400 / 700
 
-        // Fallback chain: requested family → system UI → generic sans-serif.
+        // Fallback chain: requested family -> system UI -> generic sans-serif.
         // If the requested family IS a system UI font or generic, it will just
         // appear twice in the list — browsers deduplicate that silently.
         char buf[512];
@@ -187,7 +187,7 @@ void measureWebText(const char *cssFont, const char *utf8Text,
 
         // Prefer bounding-box metrics; fall back to actualBoundingBox sum,
         // then to a rough estimate based on the font size extracted from the
-        // font string (e.g. "700 14px Inter" → 14).
+        // font string (e.g. "700 14px Inter" -> 14).
         var h;
         if (m.fontBoundingBoxAscent !== undefined &&
             m.fontBoundingBoxDescent !== undefined) {
@@ -232,9 +232,9 @@ void measureWebTextW(const char *cssFont, const std::wstring &wtext,
         return;
     }
 
-    // Convert wstring → UTF-8.  BMP only (all chars ≤ U+FFFF).
+    // Convert wstring -> UTF-8. Handles codepoints above U+FFFF (icon glyphs).
     std::string utf8;
-    utf8.reserve(wtext.size() * 3); // worst case 3 bytes per BMP char
+    utf8.reserve(wtext.size() * 4); // worst case 4 bytes per char
     for (wchar_t wc : wtext)
     {
         uint32_t cp = static_cast<uint32_t>(wc);
@@ -247,9 +247,16 @@ void measureWebTextW(const char *cssFont, const std::wstring &wtext,
             utf8 += static_cast<char>(0xC0 | (cp >> 6));
             utf8 += static_cast<char>(0x80 | (cp & 0x3F));
         }
-        else
+        else if (cp < 0x10000)
         {
             utf8 += static_cast<char>(0xE0 | (cp >> 12));
+            utf8 += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+            utf8 += static_cast<char>(0x80 | (cp & 0x3F));
+        }
+        else
+        {
+            utf8 += static_cast<char>(0xF0 | (cp >> 18));
+            utf8 += static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
             utf8 += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
             utf8 += static_cast<char>(0x80 | (cp & 0x3F));
         }

@@ -7,14 +7,14 @@
 // Android : Material Design Icons webfont v5+ (Templarian/MaterialDesign-Webfont)
 //           Codepoints are in the Unicode Supplementary Private Use Area,
 //           range U+F0001–U+F1AF0. These require 4-byte UTF-8 encoding and
-//           wchar_t values above 0xFFFF (use char32_t or surrogate pairs
+//           wchar_t values above 0xFFFF (use char32_t or surrogate pairs 
 //           on platforms where wchar_t is 16-bit — see flux_painter_android.cpp).
 //
 // Usage:
 //   Icon(FluxIcons::Add)              — uses platform default font
 //   Icon(FluxIcons::Add, 20)          — explicit size
 // ============================================================================
-
+ 
 // ── Platform font name ────────────────────────────────────────────────────────
 #ifdef _WIN32
     inline constexpr const char* kIconFont = "Segoe MDL2 Assets";

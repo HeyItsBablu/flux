@@ -206,6 +206,23 @@
         Module._fluxPhysicalHeight = 0;
         Module._fluxDPR = window.devicePixelRatio || 1;
         Module._fluxOnResize = null;
+        Module.preRun = Module.preRun || [];
+        Module.preRun.push(function () {
+            addRunDependency('flux-mdi-font');
+            const mdiFont = new FontFace(
+                'Material Design Icons',
+                'url(https://cdnjs.cloudflare.com/ajax/libs/MaterialDesign-Webfont/7.4.47/fonts/materialdesignicons-webfont.woff2)'
+            );
+            document.fonts.add(mdiFont);
+            mdiFont.load()
+                .then(function () {
+                    removeRunDependency('flux-mdi-font');
+                })
+                .catch(function (err) {
+                    console.error('[flux] MDI font failed to load:', err);
+                    removeRunDependency('flux-mdi-font'); // don't block forever — icons just won't render
+                });
+        });
         Module.locateFile = function (path, prefix) { return prefix + path; };
         Module.print = function (t) { console.log('[flux]', t); };
         Module.printErr = function (t) { console.error('[flux]', t); };
