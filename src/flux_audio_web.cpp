@@ -227,8 +227,6 @@ extern "C"
     }
 }
 
-
-
 // ============================================================================
 // FluxAudio public API — web implementation
 // ============================================================================
@@ -330,7 +328,7 @@ void FluxAudio::seekToSeconds(float seconds)
         {
             // Re-pause immediately: suspend the context.
             EM_ASM({
-                if (Module._fluxAC && Module._fluxAC.state == = 'running')
+                if (Module._fluxAC &&Module._fluxAC.state === 'running')
                     Module._fluxAC.suspend();
             });
             m_impl->playing = false;
@@ -620,8 +618,6 @@ void FluxAudio::shutdown()
     });
 }
 
-
-
 // ============================================================================
 // C-exported helpers called from JS
 //
@@ -686,3 +682,6 @@ extern "C" void fluxAudioWebInit()
 }
 
 #endif // __EMSCRIPTEN__
+
+
+//_fluxAudioImplPtr and the pointer-passing scheme reinterpret-casts a 64-bit Impl* down to a 32-bit int (reinterpret_cast<int>(self)). On wasm32 builds that's harmless since pointers are 32-bit, but if this project ever targets wasm64 (-sMEMORY64), those casts will truncate pointers and corrupt the impl argument passed back from JS. Not something breaking your current build, just worth keeping in mind if a 64-bit wasm target is ever on the roadmap.
