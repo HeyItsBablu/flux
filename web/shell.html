@@ -224,8 +224,7 @@
             loading.classList.add('hidden');
         };
         Module.onRuntimeInitialized = function () {
-            console.log('[flux] onRuntimeInitialized fired');
-            console.log('[flux] _fluxPhysicalHeight =', Module._fluxPhysicalHeight);
+
             resizeCanvases();
             loading.classList.add('hidden');
             // Fire initial resize so C++ cachedWidth/Height match actual canvas size

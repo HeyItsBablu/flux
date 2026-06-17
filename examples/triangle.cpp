@@ -60,5 +60,5 @@ WidgetPtr createApp(FluxUI *app)
                  512,    // width
                  512,    // height
                  false,  // maximize
-                 false); // fullscreen
+                 true); // fullscreen
 }

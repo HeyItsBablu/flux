@@ -21,6 +21,9 @@ public:
   void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override
   {
+    printf("[EXPANDED %p] IN  constraints: minW=%d maxW=%d minH=%d maxH=%d\n",
+           (void *)this, constraints.minWidth, constraints.maxWidth,
+           constraints.minHeight, constraints.maxHeight);
 
     int contentW =
         std::max(0, constraints.maxWidth - paddingLeft - paddingRight);
@@ -32,7 +35,15 @@ public:
     if (!children.empty())
     {
       BoxConstraints childConstraints(minW, contentW, minH, contentH);
+
+      printf("[EXPANDED %p] -> child constraints: minW=%d maxW=%d minH=%d maxH=%d\n",
+             (void *)this, childConstraints.minWidth, childConstraints.maxWidth,
+             childConstraints.minHeight, childConstraints.maxHeight);
+
       children[0]->computeLayout(ctx, childConstraints, fontCache);
+
+      printf("[EXPANDED %p] <- child result: w=%d h=%d\n",
+             (void *)this, children[0]->width, children[0]->height);
 
       // Our size wraps the child, clamped to what parent allocated.
       width = std::max(constraints.minWidth,
@@ -48,6 +59,8 @@ public:
       height = constraints.minHeight > 0 ? constraints.minHeight
                                          : constraints.maxHeight;
     }
+
+    printf("[EXPANDED %p] OUT final size: w=%d h=%d\n", (void *)this, width, height);
 
     needsLayout = false;
   }
@@ -1507,7 +1520,7 @@ inline std::shared_ptr<SizedBoxWidget> SizedBox(int w, int h,
 {
   auto box = std::make_shared<SizedBoxWidget>();
   if (w >= 0)
-  { 
+  {
     box->width = w;
     box->autoWidth = false;
   }

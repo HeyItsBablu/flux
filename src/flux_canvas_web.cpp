@@ -82,13 +82,11 @@ void fluxClearCanvasWidgetRects()
         return;
     for (auto &r : s_holeRects)
     {
+
         EM_ASM({
             var ctx = Module._fluxCtx2D;
             if (!ctx) return;
-            ctx.save();
-            ctx.setTransform(1, 0, 0, 1, 0, 0);
-            ctx.clearRect($0, $1, $2, $3);
-            ctx.restore(); }, r.x, r.y, r.w, r.h);
+            ctx.clearRect($0, $1, $2, $3); }, r.x, r.y, r.w, r.h);
     }
     s_holeRects.clear();
 }
@@ -217,9 +215,7 @@ static Canvas2DGL *acquireSharedGL()
             return nullptr;
         }
 
-        // Register fonts from the preloaded /fonts/ directory.
-        // The examples/CMakeLists.txt --preload-file maps
-        // web/fonts → /fonts at runtime.
+
         auto reg = [](const char *name, const char *path)
         {
             if (!Canvas2D::registerFont(s_sharedGL, name, path))
@@ -256,7 +252,6 @@ static void ensureInit(CanvasWidget *w)
     if (s.initialized)
         return;
 
-    // Must create and make current BEFORE any GL calls
     if (!ensureWebGLContext())
         return;
 
@@ -264,13 +259,20 @@ static void ensureInit(CanvasWidget *w)
     if (!w->canvasGL_)
         return;
 
-    // Scrollbar GL program (shared structure on CanvasWidget).
     w->ensureSBProgram(kSBVert, kSBFrag);
 
-    // Viewport init.
+    double dpr = EM_ASM_DOUBLE({ return Module._fluxDPR || 1.0; });
+    int physW = (int)std::lround(w->width * dpr);
+    int physH = (int)std::lround(w->height * dpr);
+
+    // vp_ and updateViewportSize operate in the same logical units as
+    // docW()/docH() — keep them consistent with each other.
     w->vp_.init(w->width, w->height, w->docW(), w->docH());
     w->updateViewportSize(w->width, w->height);
-    w->updateSBGeometry(w->width, w->height);
+
+    // Scrollbar geometry is drawn directly via raw GL into the physical
+    // framebuffer — needs physical pixels, same as the GL viewport below.
+    w->updateSBGeometry(physW, physH);
     w->vp_.fitToView();
 
     w->lastTick_ = CanvasWidget::Clock::now();
@@ -283,7 +285,8 @@ static void ensureInit(CanvasWidget *w)
     s.lastW = w->width;
     s.lastH = w->height;
     s.initialized = true;
-    printf("[flux] ensureInit complete w=%d h=%d\n", w->width, w->height);
+    printf("[flux] ensureInit complete w=%d h=%d (physical %dx%d, dpr=%.3f)\n",
+           w->width, w->height, physW, physH, dpr);
     scheduleRepaint(w);
 }
 
@@ -356,19 +359,9 @@ static void tickAndRender(CanvasWidget *w)
         emscripten_webgl_make_context_current(s_glCtx);
 
     if (w->pendingSurface_)
-    {
-        printf("[flux] activating pending surface\n");
         w->activatePendingSurface();
-        printf("[flux] activeSurface after activate: %p\n", (void *)w->activeSurface_.get());
-    }
     if (!w->activeSurface_)
-    {
-        printf("[flux] no activeSurface, returning\n");
         return;
-    }
- 
-    printf("[flux] rendering surface physX=%d physY=%d physW=%d physH=%d\n",
-           w->x, w->y, w->width, w->height);
 
     // ── Timing ────────────────────────────────────────────────────────────
     auto now = CanvasWidget::Clock::now();
@@ -376,31 +369,33 @@ static void tickAndRender(CanvasWidget *w)
     w->lastTick_ = now;
     w->activeSurface_->update(dt);
 
-    // ── Widget rect in physical pixels ────────────────────────────────────
-    int physX = w->x;
-    int physY = w->y;
-    int physW = w->width;
-    int physH = w->height;
+    // ── Widget rect — layout coordinates are LOGICAL (CSS) pixels ─────────
+    int logicalW = w->width;
+    int logicalH = w->height;
+
+
+    double dpr = EM_ASM_DOUBLE({ return Module._fluxDPR || 1.0; });
+    int physX = (int)std::lround(w->x * dpr);
+    int physY = (int)std::lround(w->y * dpr);
+    int physW = (int)std::lround(logicalW * dpr);
+    int physH = (int)std::lround(logicalH * dpr);
 
     // Total physical canvas size (needed for GL viewport and ortho).
     int totalW = EM_ASM_INT({ return Module._fluxPhysicalWidth | 0; });
     int totalH = EM_ASM_INT({ return Module._fluxPhysicalHeight | 0; });
 
-    // Handle resize.
-    if (physW != s.lastW || physH != s.lastH)
+    // Handle resize — compare in LOGICAL units, matching docW()/docH()
+    // and vp_'s canvas size.
+    if (logicalW != s.lastW || logicalH != s.lastH)
     {
-        s.lastW = physW;
-        s.lastH = physH;
-        w->updateViewportSize(physW, physH);
+        s.lastW = logicalW;
+        s.lastH = logicalH;
+        w->updateViewportSize(logicalW, logicalH);
         if (w->onGLResize)
-            w->onGLResize(physW, physH);
+            w->onGLResize(logicalW, logicalH);
     }
 
-    // ── GL setup ──────────────────────────────────────────────────────────
-    // Scissor to this widget's rect so we don't overdraw other widgets.
-    // WebGL (like OpenGL) uses bottom-left origin for scissor/viewport;
-    // our coordinate system has y=0 at top, so flip:
-    //   gl_y = totalH - physY - physH
+    // ── GL setup (physical pixels) ──────────────────────────────────────
     int glY = totalH - physY - physH;
 
     glEnable(GL_SCISSOR_TEST);
@@ -413,17 +408,16 @@ static void tickAndRender(CanvasWidget *w)
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    // ── Surface pre-render (raw GL pass) ──────────────────────────────────
     w->activeSurface_->preRender();
 
     // ── Build MVP for Canvas2D ────────────────────────────────────────────
-    // Ortho projection maps [0, docW] × [0, docH] → clip space,
-    // then pan/zoom applied via the viewport transform.
-    float z = w->vp_.zoom();
+    // vp_.zoom()/offsetX()/offsetY() operate in logical/document units, so
+    // fold dpr into the scale — this maps logical document space onto the
+    // physical viewport set above.
+    float z = w->vp_.zoom() * (float)dpr;
     float ox = -w->vp_.offsetX() * z;
     float oy = -w->vp_.offsetY() * z;
 
-    // Ortho over the widget's physical pixel rect (origin at widget top-left).
     float ortho[16];
     glutil::ortho(0.f, float(physW), float(physH), 0.f, ortho);
 
@@ -456,8 +450,7 @@ static void tickAndRender(CanvasWidget *w)
             for (int i = (int)kShadowLayers; i >= 1; --i)
             {
                 float spread = float(i) * 2.f;
-                float alpha = kShadowAlpha *
-                              (1.f - float(i - 1) / kShadowLayers);
+                float alpha = kShadowAlpha * (1.f - float(i - 1) / kShadowLayers);
                 float sx = ox + kShadowOffX - spread;
                 float sy = oy + kShadowOffY - spread;
                 float sw = cw + spread * 2.f;
@@ -470,8 +463,7 @@ static void tickAndRender(CanvasWidget *w)
                     sx, sy + sh, sx, sy};
                 glBufferData(GL_ARRAY_BUFFER, sizeof(v), v, GL_DYNAMIC_DRAW);
                 glEnableVertexAttribArray(0);
-                glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE,
-                                      2 * sizeof(float), nullptr);
+                glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
                 glDisableVertexAttribArray(1);
                 glDrawArrays(GL_TRIANGLES, 0, 6);
             }
@@ -485,15 +477,13 @@ static void tickAndRender(CanvasWidget *w)
         w->activeSurface_->render(ctx);
     }
 
-    // ── Scrollbars ────────────────────────────────────────────────────────
+    // ── Scrollbars (physical pixels — same GL pipeline as content) ────────
     w->updateSBGeometry(physW, physH);
     w->renderScrollbarsGL(physW, physH, dt);
 
-    // ── Restore full GL viewport for next widget / next frame ─────────────
     glDisable(GL_SCISSOR_TEST);
     glViewport(0, 0, totalW, totalH);
 
-    // Continuous-redraw surfaces keep the dirty flag set.
     if (w->activeSurface_->needsContinuousRedraw())
         scheduleRepaint(w);
 

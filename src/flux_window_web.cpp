@@ -121,11 +121,11 @@ static EM_BOOL onMouseDown(int /*eventType*/,
                            void *userData)
 {
     auto *self = static_cast<PlatformWindow *>(userData);
-    printf("[flux] self=%p webState=%p\n", (void *)self, (void *)self->webState);
+    
 
     if (!self || !self->webState)
     {
-        printf("[flux] EARLY RETURN null\n");
+  
         return EM_FALSE;
     }
 
@@ -133,21 +133,17 @@ static EM_BOOL onMouseDown(int /*eventType*/,
     int x = (int)e->targetX;
     int y = (int)e->targetY;
 
-    printf("[flux] coords after dpr: x=%d y=%d dpr=%f\n", x, y, dpr);
-    printf("[flux] button=%d hasMouseDown=%d hasRightClick=%d\n",
-           e->button,
-           self->callbacks.onMouseDown ? 1 : 0,
-           self->callbacks.onRightClick ? 1 : 0);
+
 
     bool handled = false;
     if (e->button == 0 && self->callbacks.onMouseDown)
     {
-        printf("[flux] calling callbacks.onMouseDown\n");
+       
         handled = self->callbacks.onMouseDown(x, y);
-        printf("[flux] callbacks.onMouseDown returned: %d\n", handled);
+       
     }
 
-    printf("[flux] handled=%d calling invalidate\n", handled);
+
     if (handled)
         self->invalidate();
     return handled ? EM_TRUE : EM_FALSE;

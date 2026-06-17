@@ -238,38 +238,33 @@ void FluxUI::wireCallbacks()
 
     window.callbacks.onMouseDown = [this](int x, int y) -> bool
     {
-        printf("[flux] FluxUI onMouseDown: x=%d y=%d root=%p\n", x, y, (void *)root.get());
         if (!root)
         {
-            printf("[flux] root is null!\n");
+
             return false;
         }
 
-        printf("[flux] calling handleDialogOverlays\n");
         if (handleDialogOverlays(x, y))
         {
-            printf("[flux] handled by dialog\n");
-            return true;
-        }
-        printf("[flux] calling handleDropdownOverlays\n");
-        if (handleDropdownOverlays(x, y))
-        {
-            printf("[flux] handled by dropdown\n");
+
             return true;
         }
 
-        printf("[flux] calling findAndHandleMouseEvent\n");
+        if (handleDropdownOverlays(x, y))
+        {
+
+            return true;
+        }
+
         bool handled = findAndHandleMouseEvent(root.get(), x, y,
                                                [x, y, this](Widget *w)
                                                {
-                                                   printf("[flux] trying widget: %s at (%d,%d,%d,%d)\n",
-                                                          w->getId().c_str(), w->x, w->y, w->width, w->height);
                                                    bool h = w->handleMouseDown(x, y);
                                                    if (h && w->isFocusable)
                                                        setFocus(w);
                                                    return h;
                                                });
-        printf("[flux] findAndHandleMouseEvent returned: %d\n", handled);
+
         return handled;
     };
 
