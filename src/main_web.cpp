@@ -81,6 +81,7 @@ namespace
 
     void s_tick()
     {
+        fluxDrainHttpQueue(); 
         if (s_app)
         {
             EMSCRIPTEN_WEBGL_CONTEXT_HANDLE ctx = fluxGetGLContext();

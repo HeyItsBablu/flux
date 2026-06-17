@@ -29,37 +29,44 @@
 // never need to know which platform they're on.
 // ============================================================================
 
-namespace {
+namespace
+{
 
-struct WebPendingCallback {
-    HttpCallback callback;
-    HttpResult   result;
-};
+    struct WebPendingCallback
+    {
+        HttpCallback callback;
+        HttpResult result;
+    };
 
-std::mutex                        gQueueMutex;
-std::queue<WebPendingCallback>    gQueue;
+    std::mutex gQueueMutex;
+    std::queue<WebPendingCallback> gQueue;
 
-}   // namespace
+} // namespace
 
 // ── fluxPostToUIThread ───────────────────────────────────────────────────────
 // Called from the Fetch completion callback (already main thread on web).
 // We queue instead of calling directly so that callers can't accidentally
 // nest re-entrant layout/render passes.
-void fluxPostToUIThread(HttpCallback callback, HttpResult result) {
+void fluxPostToUIThread(HttpCallback callback, HttpResult result)
+{
+  
     std::lock_guard<std::mutex> lock(gQueueMutex);
-    gQueue.push({ std::move(callback), std::move(result) });
+    gQueue.push({std::move(callback), std::move(result)});
 }
 
 // ── fluxDrainHttpQueue ───────────────────────────────────────────────────────
 // Call once per frame from your main loop (e.g. inside the
 // requestAnimationFrame callback or emscripten_set_main_loop body).
-void fluxDrainHttpQueue() {
+void fluxDrainHttpQueue()
+{
+
     std::queue<WebPendingCallback> local;
     {
         std::lock_guard<std::mutex> lock(gQueueMutex);
         std::swap(local, gQueue);
     }
-    while (!local.empty()) {
+    while (!local.empty())
+    {
         auto &item = local.front();
         if (item.callback)
             item.callback(std::move(item.result));
@@ -70,28 +77,31 @@ void fluxDrainHttpQueue() {
 // ── No-ops matching the native platform API surface ──────────────────────────
 // These are called from platform-agnostic startup / teardown code.
 
-void fluxSetUIWindow(void * /*hwnd*/) {}   // no HWND on web
-void fluxDrainPendingMessages()       {}   // superseded by fluxDrainHttpQueue
+void fluxSetUIWindow(void * /*hwnd*/) {} // no HWND on web
+void fluxDrainPendingMessages() {}       // superseded by fluxDrainHttpQueue
 
 // ============================================================================
 // PER-REQUEST STATE
 // One heap-allocated block per in-flight request; freed in the callbacks.
 // ============================================================================
 
-struct WebFetchState {
+struct WebFetchState
+{
     HttpCallback callback;
-    std::string  requestBody;  // kept alive for the duration of the fetch
+    std::string requestBody; // kept alive for the duration of the fetch
 };
 
 // ============================================================================
 // FETCH CALLBACKS (fire on main thread)
 // ============================================================================
 
-static void onFetchSuccess(emscripten_fetch_t *fetch) {
+static void onFetchSuccess(emscripten_fetch_t *fetch)
+{
+  
     auto *state = static_cast<WebFetchState *>(fetch->userData);
 
     HttpResult result;
-    result.success    = (fetch->status >= 200 && fetch->status < 300);
+    result.success = (fetch->status >= 200 && fetch->status < 300);
     result.statusCode = static_cast<int>(fetch->status);
     if (fetch->numBytes > 0)
         result.body.assign(fetch->data,
@@ -105,14 +115,15 @@ static void onFetchSuccess(emscripten_fetch_t *fetch) {
     delete state;
 }
 
-static void onFetchError(emscripten_fetch_t *fetch) {
+static void onFetchError(emscripten_fetch_t *fetch)
+{
     auto *state = static_cast<WebFetchState *>(fetch->userData);
 
     HttpResult result;
-    result.success    = false;
+    result.success = false;
     result.statusCode = static_cast<int>(fetch->status);
-    result.error      = "Fetch error (status " +
-                        std::to_string(fetch->status) + ")";
+    result.error = "Fetch error (status " +
+                   std::to_string(fetch->status) + ")";
 
     fluxPostToUIThread(std::move(state->callback), std::move(result));
 
@@ -125,7 +136,7 @@ static void onFetchError(emscripten_fetch_t *fetch) {
 // No-ops on web — no curl_global_init needed.
 // ============================================================================
 
-void FluxHttp::globalInit()    {}
+void FluxHttp::globalInit() {}
 void FluxHttp::globalCleanup() {}
 
 // ============================================================================
@@ -138,13 +149,13 @@ void FluxHttp::globalCleanup() {}
 // until emscripten_fetch() returns — Emscripten copies what it needs.
 // ============================================================================
 
-void FluxHttp::send(HttpRequest  request,
+void FluxHttp::send(HttpRequest request,
                     HttpCallback callback,
-                    bool         /*postToUI*/)   // always true on web
+                    bool /*postToUI*/) // always true on web
 {
-    auto *state      = new WebFetchState;
-    state->callback  = std::move(callback);
-    state->requestBody = request.body;  // keep alive for POST/PUT/PATCH
+    auto *state = new WebFetchState;
+    state->callback = std::move(callback);
+    state->requestBody = request.body; // keep alive for POST/PUT/PATCH
 
     emscripten_fetch_attr_t attr;
     emscripten_fetch_attr_init(&attr);
@@ -165,15 +176,16 @@ void FluxHttp::send(HttpRequest  request,
 
     // ── Callbacks ─────────────────────────────────────────────────────────────
     attr.onsuccess = onFetchSuccess;
-    attr.onerror   = onFetchError;
-    attr.userData  = state;
+    attr.onerror = onFetchError;
+    attr.userData = state;
 
     // ── Headers ───────────────────────────────────────────────────────────────
     // Emscripten Fetch expects a null-terminated array of key/value pairs:
     //   { "Key1", "Val1", "Key2", "Val2", nullptr }
     std::vector<const char *> headerPairs;
     headerPairs.reserve(request.headers.size() * 2 + 1);
-    for (auto &[k, v] : request.headers) {
+    for (auto &[k, v] : request.headers)
+    {
         headerPairs.push_back(k.c_str());
         headerPairs.push_back(v.c_str());
     }
@@ -183,8 +195,9 @@ void FluxHttp::send(HttpRequest  request,
         attr.requestHeaders = headerPairs.data();
 
     // ── Body (POST / PUT / PATCH) ─────────────────────────────────────────────
-    if (!state->requestBody.empty()) {
-        attr.requestData     = state->requestBody.data();
+    if (!state->requestBody.empty())
+    {
+        attr.requestData = state->requestBody.data();
         attr.requestDataSize = state->requestBody.size();
     }
 
