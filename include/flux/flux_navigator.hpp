@@ -1,3 +1,4 @@
+// flux_navigator.hpp
 #pragma once
 
 // ============================================================================
@@ -25,6 +26,14 @@
 //
 // NOTE: Navigator::push(widget) and Navigator::pushReplacement(widget)
 //       are intentionally removed. All navigation must use named routes.
+//
+// WEB (Emscripten):
+//   On web builds, every stack mutation also syncs the browser URL hash
+//   (e.g. "#/settings") via history.pushState/replaceState, and the
+//   browser's Back/Forward buttons drive the stack back via _onHashChange,
+//   which is wired up from main_web.cpp. Deep links (loading the page with
+//   a hash already set) are honored in init(). None of this affects native
+//   builds — it's compiled out entirely without __EMSCRIPTEN__.
 // ============================================================================
 
 #include "flux/flux_core.hpp"
@@ -38,11 +47,15 @@
 #include <unordered_map>
 #include <vector>
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 class NavigatorWidget;
 
 struct NavEntry
 {
-    WidgetPtr   widget;
+    WidgetPtr widget;
     std::string name;
 };
 
@@ -56,7 +69,7 @@ struct RouteDefinition
     using Builder = std::function<WidgetPtr()>;
 
     std::string name;
-    Builder     builder;
+    Builder builder;
 
     // Allows brace-list syntax: { "/path", [] { return ...; } }
     RouteDefinition(std::string n, Builder b)
@@ -76,6 +89,10 @@ public:
     //
     // All routes must be registered here. No route can be pushed that was not
     // declared in this call. The initialRoute must match one of the entries.
+    //
+    // On web, if the page was loaded with a hash matching a registered route
+    // (e.g. navigation.html#/settings), that route is used instead of
+    // initialRoute — this is what makes deep links / bookmarks / refresh work.
 
     static WidgetPtr init(
         std::initializer_list<RouteDefinition> routes,
@@ -94,16 +111,31 @@ public:
             _routes[def.name] = def.builder;
         }
 
+        std::string startRoute = initialRoute;
+
+#ifdef __EMSCRIPTEN__
+        std::string fromHash = _getInitialHash();
+        if (!fromHash.empty())
+        {
+            std::string candidate = fromHash[0] == '/' ? fromHash : ("/" + fromHash);
+            if (_routes.count(candidate))
+                startRoute = candidate;
+        }
+#endif
+
         // Push the initial route onto the stack.
-        auto it = _routes.find(initialRoute);
+        auto it = _routes.find(startRoute);
         if (it == _routes.end())
         {
             std::cerr << "[Navigator] init: initialRoute \""
-                      << initialRoute << "\" not found in route table.\n";
+                      << startRoute << "\" not found in route table.\n";
         }
         else
         {
-            _stack.push_back({it->second(), initialRoute});
+            _stack.push_back({it->second(), startRoute});
+#ifdef __EMSCRIPTEN__
+            _setHash(startRoute, /*replace=*/true);
+#endif
         }
 
         return std::static_pointer_cast<Widget>(std::make_shared<NavigatorWidget>());
@@ -115,11 +147,16 @@ public:
     static bool navigate(const std::string &name)
     {
         auto *builder = findRoute(name, "navigate");
-        if (!builder) return false;
-        if (!checkHost()) return false;
+        if (!builder)
+            return false;
+        if (!checkHost())
+            return false;
 
         _stack.push_back({(*builder)(), name});
         _rebuild();
+#ifdef __EMSCRIPTEN__
+        _setHash(name, /*replace=*/false);
+#endif
         return true;
     }
 
@@ -127,12 +164,18 @@ public:
     static bool pushReplacementNamed(const std::string &name)
     {
         auto *builder = findRoute(name, "pushReplacementNamed");
-        if (!builder) return false;
-        if (!checkHost()) return false;
+        if (!builder)
+            return false;
+        if (!checkHost())
+            return false;
 
-        if (!_stack.empty()) _stack.pop_back();
+        if (!_stack.empty())
+            _stack.pop_back();
         _stack.push_back({(*builder)(), name});
         _rebuild();
+#ifdef __EMSCRIPTEN__
+        _setHash(name, /*replace=*/true);
+#endif
         return true;
     }
 
@@ -140,12 +183,17 @@ public:
     static bool pushAndRemoveAllNamed(const std::string &name)
     {
         auto *builder = findRoute(name, "pushAndRemoveAllNamed");
-        if (!builder) return false;
-        if (!checkHost()) return false;
+        if (!builder)
+            return false;
+        if (!checkHost())
+            return false;
 
         _stack.clear();
         _stack.push_back({(*builder)(), name});
         _rebuild();
+#ifdef __EMSCRIPTEN__
+        _setHash(name, /*replace=*/true);
+#endif
         return true;
     }
 
@@ -153,9 +201,17 @@ public:
 
     static bool pop()
     {
-        if (!checkHost() || _stack.size() <= 1) return false;
+        if (!checkHost() || _stack.size() <= 1)
+            return false;
         _stack.pop_back();
         _rebuild();
+#ifdef __EMSCRIPTEN__
+        // Tell the browser to step back too, so its session history stays in
+        // sync. This fires a hashchange asynchronously, which _onHashChange
+        // will see as already matching the (already-updated) stack and
+        // treat as a no-op.
+        EM_ASM({ history.back(); });
+#endif
         return true;
     }
 
@@ -165,16 +221,21 @@ public:
     // If the name is not in the stack, does nothing.
     static void popUntil(const std::string &name)
     {
-        if (!checkHost()) return;
+        if (!checkHost())
+            return;
         while (_stack.size() > 1 && _stack.back().name != name)
             _stack.pop_back();
         _rebuild();
+#ifdef __EMSCRIPTEN__
+        if (!_stack.empty())
+            _setHash(_stack.back().name, /*replace=*/true);
+#endif
     }
 
     // ── Queries ───────────────────────────────────────────────────────────────
 
-    static bool        canPop()      { return _stack.size() > 1; }
-    static int         stackDepth()  { return static_cast<int>(_stack.size()); }
+    static bool canPop() { return _stack.size() > 1; }
+    static int stackDepth() { return static_cast<int>(_stack.size()); }
     static std::string currentName() { return _stack.empty() ? "" : _stack.back().name; }
 
     // Returns true if the given route name exists in the route table.
@@ -185,14 +246,61 @@ public:
 
     // ── Internal ─────────────────────────────────────────────────────────────
 
-    static void    _setHost(NavigatorWidget *w) { _host = w; }
-    static void    _clearHost(NavigatorWidget *w) { if (_host == w) _host = nullptr; }
+    static void _setHost(NavigatorWidget *w) { _host = w; }
+    static void _clearHost(NavigatorWidget *w)
+    {
+        if (_host == w)
+            _host = nullptr;
+    }
     static WidgetPtr _currentWidget() { return _stack.empty() ? nullptr : _stack.back().widget; }
-    static void    _rebuild();
+    static void _rebuild();
+
+#ifdef __EMSCRIPTEN__
+    // Called from JS (via main_web.cpp's exported wrapper) whenever the
+    // browser hash changes — covers Back/Forward buttons, manual URL edits,
+    // and deep links. Idempotent: if the stack already matches, no-op.
+    static void _onHashChange(const char *hash)
+    {
+        std::string name = hash ? hash : "";
+        if (name.empty())
+            return;
+        if (name[0] != '/')
+            name = "/" + name;
+
+        if (!_stack.empty() && _stack.back().name == name)
+            return;
+
+        // Already somewhere in the stack? (Back button case.) Trim to it.
+        for (int i = (int)_stack.size() - 1; i >= 0; --i)
+        {
+            if (_stack[i].name == name)
+            {
+                _stack.resize(i + 1);
+                _rebuild();
+                return;
+            }
+        }
+
+        // Not in the stack — forward navigation or a deep link to a known route.
+        auto it = _routes.find(name);
+        if (it != _routes.end())
+        {
+            _stack.push_back({it->second(), name});
+            _rebuild();
+        }
+#ifdef FLUX_DEBUG
+        else
+        {
+            std::cerr << "[Navigator] _onHashChange: unknown route \""
+                      << name << "\" ignored.\n";
+        }
+#endif
+    }
+#endif
 
 private:
-    static NavigatorWidget                              *_host;
-    static std::vector<NavEntry>                         _stack;
+    static NavigatorWidget *_host;
+    static std::vector<NavEntry> _stack;
     static std::unordered_map<std::string, RouteBuilder> _routes;
 
     // Returns a pointer to the builder for the given route, or nullptr.
@@ -200,12 +308,13 @@ private:
                                          const char *callerName)
     {
         auto it = _routes.find(name);
-        if (it != _routes.end()) return &it->second;
+        if (it != _routes.end())
+            return &it->second;
 
 #ifdef FLUX_DEBUG
         std::cerr << "[Navigator] " << callerName
                   << ": unknown route \"" << name << "\". "
-                     "Did you register it in Navigator::init()?\n";
+                                                     "Did you register it in Navigator::init()?\n";
 #endif
         return nullptr;
     }
@@ -222,12 +331,37 @@ private:
         }
         return true;
     }
+
+#ifdef __EMSCRIPTEN__
+    // Push (replace=false) or replace (replace=true) the browser's URL hash.
+    static void _setHash(const std::string &name, bool replace)
+    {
+        EM_ASM({
+            var name = UTF8ToString($0);
+            if ($1) {
+                history.replaceState(null, '', '#' + name);
+            } else {
+                location.hash = name;
+            } }, name.c_str(), replace ? 1 : 0);
+    }
+
+    // Reads location.hash at startup, for deep-linking
+    // (e.g. navigation.html#/settings).
+    static std::string _getInitialHash()
+    {
+        char buf[256] = {0};
+        EM_ASM({
+            var h = location.hash.length > 1 ? location.hash.slice(1) : '';
+            stringToUTF8(h, $0, $1); }, buf, (int)sizeof(buf));
+        return std::string(buf);
+    }
+#endif
 };
 
-inline NavigatorWidget                              *Navigator::_host   = nullptr;
-inline std::vector<NavEntry>                         Navigator::_stack  = {};
+inline NavigatorWidget *Navigator::_host = nullptr;
+inline std::vector<NavEntry> Navigator::_stack = {};
 inline std::unordered_map<std::string, Navigator::RouteBuilder>
-                                                     Navigator::_routes = {};
+    Navigator::_routes = {};
 
 // ============================================================================
 // NAVIGATOR WIDGET  (unchanged from original)
@@ -261,8 +395,10 @@ public:
                        const BoxConstraints &constraints,
                        FontCache &fontCache) override
     {
-        if (autoWidth)  width  = constraints.maxWidth;
-        if (autoHeight) height = constraints.maxHeight;
+        if (autoWidth)
+            width = constraints.maxWidth;
+        if (autoHeight)
+            height = constraints.maxHeight;
 
         if (!children.empty())
             children[0]->computeLayout(
@@ -281,17 +417,19 @@ public:
             c->y = cy;
             c->positionChildren(
                 cx + c->paddingLeft, cy + c->paddingTop,
-                c->width  - c->paddingLeft - c->paddingRight,
-                c->height - c->paddingTop  - c->paddingBottom);
+                c->width - c->paddingLeft - c->paddingRight,
+                c->height - c->paddingTop - c->paddingBottom);
         }
     }
 
     bool handleKeyDown(int keyCode) override
     {
 #ifdef _WIN32
-        if (keyCode == VK_ESCAPE) return Navigator::maybePop();
+        if (keyCode == VK_ESCAPE)
+            return Navigator::maybePop();
 #else
-        if (keyCode == 27)        return Navigator::maybePop();
+        if (keyCode == 27)
+            return Navigator::maybePop();
 #endif
         return !children.empty() && children[0]->handleKeyDown(keyCode);
     }
@@ -316,5 +454,6 @@ private:
 
 inline void Navigator::_rebuild()
 {
-    if (_host) _host->swapContent();
+    if (_host)
+        _host->swapContent();
 }

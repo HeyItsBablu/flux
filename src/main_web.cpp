@@ -27,6 +27,11 @@
 //
 //   => The FluxUI instance lives for the lifetime of the page (static storage)
 //     so Emscripten's main-loop callback can reach it without a global.
+//
+//   => If the app uses Navigator (flux_navigator.hpp), browser Back/Forward
+//     and the URL hash are wired up here: fluxNavigatorHashChanged() is the
+//     C-side landing pad for JS's 'hashchange' listener, registered in main()
+//     after build() so it doesn't see the initial hash set during init().
 
 #ifdef __EMSCRIPTEN__
 
@@ -35,6 +40,7 @@
 #include <cstdio>
 
 #include "flux/flux.hpp"
+#include "flux/flux_navigator.hpp"
 
 // ============================================================================
 // Forward declaration — defined by the application (e.g. helloworld.cpp)
@@ -81,7 +87,7 @@ namespace
 
     void s_tick()
     {
-        fluxDrainHttpQueue(); 
+        fluxDrainHttpQueue();
         if (s_app)
         {
             EMSCRIPTEN_WEBGL_CONTEXT_HANDLE ctx = fluxGetGLContext();
@@ -136,6 +142,18 @@ extern "C" EMSCRIPTEN_KEEPALIVE void fluxOnResize(int physicalWidth, int physica
 }
 
 // ============================================================================
+// Navigator hash-change callback — exposed as a C symbol so shell-registered
+// JS ('hashchange' listener, wired up in main() below) can call back into
+// Navigator::_onHashChange when the browser Back/Forward buttons fire, or
+// the user edits the URL hash directly.
+// ============================================================================
+
+extern "C" EMSCRIPTEN_KEEPALIVE void fluxNavigatorHashChanged(const char *hash)
+{
+    Navigator::_onHashChange(hash);
+}
+
+// ============================================================================
 // main
 // ============================================================================
 
@@ -176,7 +194,17 @@ int main()
         };
     });
 
-    // ── 6b. Fire an initial resize so cachedWidth/Height match the real canvas ──
+    // ── 6b. Wire browser Back/Forward (URL hash) to the Navigator ─────────
+    // Registered after build() so it doesn't see the hashchange (if any)
+    // that Navigator::init() may have triggered while establishing the
+    // initial route's hash.
+    EM_ASM({
+        window.addEventListener('hashchange', function() {
+            var h = location.hash.length > 1 ? location.hash.slice(1) : '';
+            Module.ccall('fluxNavigatorHashChanged', null, [ 'string' ], [ h ]); });
+    });
+
+    // ── 6c. Fire an initial resize so cachedWidth/Height match the real canvas ──
     fluxOnResize(physW, physH);
 
     // ── 7. Hand control to browser ────────────────────────────────────────
