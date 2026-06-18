@@ -5,6 +5,7 @@
 //   flux_camera_android.cpp — NDK Camera2 (ACameraManager / AImageReader)
 //   flux_camera_win32.cpp   — Windows Media Foundation (IMFSourceReader)
 //   flux_camera_linux.cpp   — V4L2 (/dev/videoN)
+//   flux_camera_web.cpp     — getUserMedia() + hidden <video> element
 //
 // Usage:
 //   FluxCamera::get().open();           // open back (default) camera + start preview
@@ -41,6 +42,8 @@
 // V4L2 headers are only needed in the .cpp; no platform handles leak
 // into the public header on Linux.
 #endif
+// Web (Emscripten) needs no platform headers here either — everything
+// lives behind getUserMedia()/the DOM in flux_camera_web.cpp.
 
 // ============================================================================
 // FluxCamera
@@ -66,7 +69,12 @@ public:
     bool isPreviewing() const { return _state == State::Previewing; }
     bool isCapturing() const { return _state == State::Capturing; }
     bool isFlashOn() const { return _flashOn.load(); }
+#ifndef __EMSCRIPTEN__
+    // Web overrides this below: there's no decode thread flipping
+    // _newFrame, so it queries the <video> element's readyState directly
+    // instead (see the Emscripten branch a little further down).
     bool hasNewFrame() const { return _newFrame.load(); }
+#endif
     bool isFrontCamera() const;
 
     int getPreviewWidth() const { return _previewW.load(); }
@@ -77,8 +85,23 @@ public:
 #if defined(__ANDROID__)
     // Android renders preview via an OES texture bound to a SurfaceTexture.
     GLuint getTextureId() const { return _oesTexture; }
+#elif defined(__EMSCRIPTEN__)
+    // Web: the browser owns capture + decode end-to-end (getUserMedia →
+    // hidden <video> element). There's no CPU pixel buffer to lock, and
+    // since FluxUI's web painter is Canvas2D rather than WebGL (the WebGL
+    // canvas is reserved for CanvasWidget — see flux_painter_web.cpp /
+    // flux_window_web.cpp), there's no texture to upload into either.
+    // This mirrors FluxVideo's web surface exactly: hasNewFrame() +
+    // renderFrame() blit the live <video> element straight into the 2D
+    // canvas each tick. `mirror` lets the caller flip the image
+    // horizontally for a front-camera "selfie" preview — the same
+    // decision camera_widget_win32.cpp makes itself via isFrontCamera()
+    // rather than something the engine imposes.
+    bool hasNewFrame() const;
+    void renderFrame(int dstX, int dstY, int dstW, int dstH,
+                     bool mirror = false) const;
 #else
-    // Windows/Linux expose CPU-side BGRA32/RGB24 frame buffers.
+    // Windows/Linux/macOS expose CPU-side BGRA32/RGB24 frame buffers.
     struct FrameLock
     {
         std::unique_lock<std::mutex> lock;
@@ -250,5 +273,18 @@ private:
     // Pure C++ bridge struct — grants the macOS implementation file access
     // to private members without involving any ObjC class names here.
     friend struct FluxCameraMacOSAccess;
+
+#elif defined(__EMSCRIPTEN__)
+    std::atomic<bool> _useFront{false};
+
+// Public so extern "C" thunks in flux_camera_web.cpp can reach them.
+// Not part of the stable API — call only from flux_camera_web.cpp.
+public:
+    static void _onStreamReady(int width, int height);
+    static void _onStreamError();
+    static void _onCaptureError();
+    static void _onPhotoBytes(const uint8_t *data, int len);
+
+private:
 #endif
 };

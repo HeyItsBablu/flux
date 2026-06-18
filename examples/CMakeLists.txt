@@ -93,4 +93,4 @@ function(add_flux_example NAME)
 
 endfunction()
 
-add_flux_example(mictest)
+add_flux_example(cameratest)
