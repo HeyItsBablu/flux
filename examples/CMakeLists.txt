@@ -30,6 +30,9 @@ function(add_flux_example NAME)
             "-sENVIRONMENT=web"
             "-sGL_ENABLE_GET_PROC_ADDRESS=1"
             "-sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=['$Browser']"
+            "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToNewUTF8','lengthBytesUTF8','HEAPU8','HEAPF32']"
+            "-sEXPORTED_FUNCTIONS=['_main','_malloc','_free',\
+            '_fluxWsOnOpen','_fluxWsOnMessage','_fluxWsOnError','_fluxWsOnClose']"
             $<$<CONFIG:Debug>:-sASSERTIONS=2>
             $<$<CONFIG:Debug>:-sSAFE_HEAP=1>
         )
@@ -93,4 +96,4 @@ function(add_flux_example NAME)
 
 endfunction()
 
-add_flux_example(cameratest)
+add_flux_example(streamtest)

@@ -28,11 +28,11 @@
 #include "flux_audioplayer.hpp"
 #include "flux_videoplayer.hpp"
 #include "mic.hpp"
-// #include "camera_widget.hpp"
+#include "camera_widget.hpp"
 #include "flux_future_builder.hpp"
 #include "flux_file_picker.hpp"
 #include "flux_graph.hpp"
 #include "flux_padding.hpp"
-// #include "flux_stream_builder.hpp"
+#include "flux_stream_builder.hpp"
 #include "flux_circular_progress.hpp"
 #endif // WIDGETS_HPP
