@@ -15,10 +15,10 @@
 //
 #pragma once
 
-// Compile on Android, Windows, Linux desktop, and macOS — everywhere FluxMic runs.
 #if defined(__ANDROID__) || defined(_WIN32) || \
     (defined(__linux__) && !defined(__ANDROID__)) || \
-    (defined(__APPLE__) && defined(TARGET_OS_OSX) && TARGET_OS_OSX)
+    (defined(__APPLE__) && defined(TARGET_OS_OSX) && TARGET_OS_OSX) || \
+    defined(__EMSCRIPTEN__)
 
 #include "flux/flux.hpp"
 #include "flux/flux_mic.hpp"
@@ -33,11 +33,9 @@
 #elif defined(__ANDROID__)
     static constexpr const char* kMicUIFont = "Roboto";
 #elif defined(__APPLE__)
-    // San Francisco is the system UI font on macOS 10.11+.
-    // ".AppleSystemUIFont" is the canonical internal name that always resolves
-    // to SF Pro regardless of OS version; "SF Pro Display" and "Helvetica Neue"
-    // are reasonable fallbacks for older SDKs.
     static constexpr const char* kMicUIFont = ".AppleSystemUIFont";
+#elif defined(__EMSCRIPTEN__)
+    static constexpr const char* kMicUIFont = "Inter";
 #else  // Linux
     static constexpr const char* kMicUIFont = "DejaVu Sans";
 #endif

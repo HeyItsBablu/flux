@@ -25,7 +25,8 @@ function(add_flux_example NAME)
             "-sALLOW_MEMORY_GROWTH=1"
             "-sINITIAL_MEMORY=67108864"
             "-sFETCH=1"
-            "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','HEAPU8']"
+            "-sEXPORTED_FUNCTIONS=['_main','_malloc','_free']"
+            "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','HEAPU8','HEAPF32']"
             "-sENVIRONMENT=web"
             "-sGL_ENABLE_GET_PROC_ADDRESS=1"
             "-sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=['$Browser']"
@@ -92,4 +93,4 @@ function(add_flux_example NAME)
 
 endfunction()
 
-add_flux_example(videoplayer)
+add_flux_example(mictest)
