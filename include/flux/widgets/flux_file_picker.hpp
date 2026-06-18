@@ -15,7 +15,7 @@
 
 struct FileFilter
 {
-  std::string label;
+  std::string label; 
   std::vector<std::string> extensions;
   bool showExtsInLabel = true;
 
@@ -195,6 +195,51 @@ namespace FluxFilePickerMacOS
 
 #endif // TARGET_OS_OSX
 #endif // __APPLE__
+
+
+// ============================================================================
+// WEB BACKEND (Emscripten) — forward declarations
+// ============================================================================
+//
+// There's no native dialog in a browser tab and no real filesystem path to
+// hand back. To keep the existing "you get a path, fopen() it" contract
+// working, results are materialized into Emscripten's MEMFS virtual
+// filesystem and the MEMFS path is what gets returned.
+//
+//   Open / Open Multiple — backed by a hidden <input type="file">. Selected
+//     files are read via FileReader and written under /flux_web_uploads/.
+//
+//   Save — no dialog appears. A scratch path under /flux_web_saves/ is
+//     handed back immediately; the caller writes to it synchronously, then
+//     the bytes are downloaded via a synthetic <a download> click.
+//
+//   Folder — unsupported. Always reports cancellation.
+//
+#ifdef __EMSCRIPTEN__
+
+namespace FluxFilePickerWeb
+{
+
+  void pickFileAsync(const std::string &title,
+                     const std::vector<FileFilter> &filters,
+                     std::function<void(std::string)> callback);
+
+  void pickFilesAsync(const std::string &title,
+                      const std::vector<FileFilter> &filters,
+                      std::function<void(std::vector<std::string>)> callback);
+
+  void saveFileAsync(const std::string &title,
+                     const std::string &defaultFilename,
+                     const std::vector<FileFilter> &filters,
+                     std::function<void(std::string)> callback);
+
+  // Always invokes callback("") — folder picking has no web equivalent here.
+  void pickFolderAsync(const std::string &title,
+                       std::function<void(std::string)> callback);
+
+} // namespace FluxFilePickerWeb
+
+#endif // __EMSCRIPTEN__
 
 // ============================================================================
 // FILE PICKER WIDGET
