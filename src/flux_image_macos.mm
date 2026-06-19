@@ -14,7 +14,7 @@
 // ============================================================================
 // MacScaleCache definition
 // ============================================================================
-
+ 
 struct ImageWidget::MacScaleCache {
     CGImageRef image   = nullptr;
     int        w       = 0;
@@ -188,8 +188,6 @@ void ImageWidget::_platformRender(GraphicsContext &ctx, int cx, int cy,
     if (!_macCache) _macCache.reset(new MacScaleCache());
     auto &cache = *_macCache;
 
-    CGContextRef cgCtx = ctx.cgContext;
-
     DestRect d  = _calculateDestRect(cx, cy, cw, ch);
     int dw = std::max(1, (int)d.w);
     int dh = std::max(1, (int)d.h);
@@ -204,12 +202,10 @@ void ImageWidget::_platformRender(GraphicsContext &ctx, int cx, int cy,
     if (stale) {
         cache.invalidate();
 
-        // Build base CGImage from pixel store
         CGImageRef base = makeCGImage(pixels.data(), imageWidth, imageHeight);
         if (!base) return;
 
         if (dw == imageWidth && dh == imageHeight) {
-            // No scaling needed — use base directly
             cache.image = base;
         } else {
             cache.image = makeScaledCGImage(base, imageWidth, imageHeight,
@@ -225,49 +221,24 @@ void ImageWidget::_platformRender(GraphicsContext &ctx, int cx, int cy,
         cache.quality = (int)filterQuality;
     }
 
-    CGContextSaveGState(cgCtx);
+    Painter painter(ctx);
+    Painter::ImageDrawParams params;
+    params.image    = cache.image;
+    params.srcWidth  = dw;
+    params.srcHeight = dh;
+    params.clipX = cx;
+    params.clipY = cy;
+    params.clipW = cw;
+    params.clipH = ch;
+    params.destX = d.x;
+    params.destY = d.y;
+    params.destW = d.w;
+    params.destH = d.h;
+    params.borderRadius = borderRadius;
+    params.repeat = repeat;
+    params.filterQuality = filterQuality;
 
-    // ── Clip ─────────────────────────────────────────────────────────────────
-    if (borderRadius > 0)
-        cgClipRoundedRect(cgCtx, cx, cy, cw, ch, (CGFloat)borderRadius);
-    else
-        CGContextClipToRect(cgCtx, CGRectMake(cx, cy, cw, ch));
-
-    // ── Draw ─────────────────────────────────────────────────────────────────
-    // CoreGraphics origin is bottom-left; FluxUI is top-left.
-    // Flip the CTM so we can use top-left coordinates directly.
-    CGContextTranslateCTM(cgCtx, 0, (CGFloat)(cy + ch));
-    CGContextScaleCTM(cgCtx, 1.0, -1.0);
-    // After flip, top-left (cx, cy) in FluxUI space maps to bottom-left here.
-    // The image rect in the flipped space:
-    CGFloat flippedY = (CGFloat)(cy + ch) - (d.y + d.h) + (CGFloat)cy;
-    // Simpler: translate then draw from 0.
-    // Reset translation — just draw at flipped coords directly.
-    // In flipped space, y-axis points down so the image rect is:
-    CGFloat imgY = (CGFloat)ch - ((d.y - (CGFloat)cy) + d.h);
-
-    // Use kCGInterpolationNone for the final draw — scaling already done.
-    CGContextSetInterpolationQuality(cgCtx, kCGInterpolationNone);
-
-    if (repeat != ImageRepeat::NoRepeat) {
-        float tileW  = d.w, tileH  = d.h;
-        float startX = (repeat == ImageRepeat::RepeatY) ? d.x - cx         : 0.f;
-        float startY = (repeat == ImageRepeat::RepeatX) ? (float)ch - (d.y - cy + tileH) : 0.f;
-        float endX   = (repeat == ImageRepeat::RepeatY) ? d.x - cx + tileW  : (float)cw;
-        float endY   = (repeat == ImageRepeat::RepeatX) ? (float)ch - (d.y - cy) : (float)ch;
-
-        for (float ty = startY; ty < endY; ty += tileH)
-            for (float tx = startX; tx < endX; tx += tileW)
-                CGContextDrawImage(cgCtx,
-                    CGRectMake(tx, ty, tileW, tileH),
-                    cache.image);
-    } else {
-        CGContextDrawImage(cgCtx,
-            CGRectMake(d.x - cx, imgY, d.w, d.h),
-            cache.image);
-    }
-
-    CGContextRestoreGState(cgCtx);
+    painter.drawImage(params);
 }
 
 // ============================================================================

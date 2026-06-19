@@ -12,7 +12,7 @@
 
 // ── Color helper ──────────────────────────────────────────────────────────────
 
-static void setFillColor(CGContextRef ctx, Color c) { 
+static void setFillColor(CGContextRef ctx, Color c) {  
     CGContextSetRGBFillColor(ctx,
         c.r / 255.0, c.g / 255.0, c.b / 255.0, c.a / 255.0);
 }
@@ -35,6 +35,32 @@ static void addRoundedRectPath(CGContextRef ctx,
     CGContextAddArcToPoint(ctx, x,     y + h, x,     y,     r);
     CGContextAddArcToPoint(ctx, x,     y,     x + w, y,     r);
     CGContextClosePath(ctx);
+}
+
+// Add a rounded-rect clip path using CGPathCreateWithRoundedRect (10.9+).
+static void cgClipRoundedRect(CGContextRef ctx,
+                               CGFloat rx, CGFloat ry,
+                               CGFloat rw, CGFloat rh,
+                               CGFloat radius)
+{
+    CGFloat r = std::min(radius, std::min(rw * 0.5f, rh * 0.5f));
+    CGPathRef path = CGPathCreateWithRoundedRect(
+        CGRectMake(rx, ry, rw, rh), r, r, nullptr);
+    CGContextAddPath(ctx, path);
+    CGContextClip(ctx);
+    CGPathRelease(path);
+}
+
+static CGInterpolationQuality cgInterpolationFromQuality(FilterQuality q)
+{
+    switch (q)
+    {
+    case FilterQuality::None:   return kCGInterpolationNone;
+    case FilterQuality::Low:    return kCGInterpolationLow;
+    case FilterQuality::Medium: return kCGInterpolationMedium;
+    case FilterQuality::High:   return kCGInterpolationHigh;
+    }
+    return kCGInterpolationLow;
 }
 
 // ============================================================================
@@ -427,4 +453,66 @@ void Painter::drawArc(float cx, float cy, float radius,
     CGContextRestoreGState(cg);
 }
 
+
+// ============================================================================
+// Painter::drawImage
+// ============================================================================
+
+void Painter::drawImage(const ImageDrawParams &params)
+{
+    if (!params.image || params.clipW <= 0 || params.clipH <= 0)
+        return;
+
+    CGContextRef cgCtx = ctx.cgContext;
+    if (!cgCtx)
+        return;
+
+    CGContextSaveGState(cgCtx);
+
+    // ── Clip ─────────────────────────────────────────────────────────────────
+    if (params.borderRadius > 0)
+        cgClipRoundedRect(cgCtx, params.clipX, params.clipY, params.clipW, params.clipH,
+                          (CGFloat)params.borderRadius);
+    else
+        CGContextClipToRect(cgCtx, CGRectMake(params.clipX, params.clipY,
+                                              params.clipW, params.clipH));
+
+    // ── Draw ─────────────────────────────────────────────────────────────────
+    // CoreGraphics origin is bottom-left; FluxUI is top-left. Flip the CTM
+    // around the bottom of the clip rect so the rest of the math can work in
+    // top-left-relative coordinates.
+    CGContextTranslateCTM(cgCtx, 0, (CGFloat)(params.clipY + params.clipH));
+    CGContextScaleCTM(cgCtx, 1.0, -1.0);
+
+    bool needsScale = (params.srcWidth != (int)params.destW ||
+                       params.srcHeight != (int)params.destH);
+    CGContextSetInterpolationQuality(cgCtx,
+        needsScale ? cgInterpolationFromQuality(params.filterQuality) : kCGInterpolationNone);
+
+    float localX = params.destX - (float)params.clipX;
+    float imgY = (float)params.clipH - ((params.destY - (float)params.clipY) + params.destH);
+
+    if (params.repeat != ImageRepeat::NoRepeat)
+    {
+        float tileW = params.destW, tileH = params.destH;
+        float startX = (params.repeat == ImageRepeat::RepeatY) ? localX : 0.f;
+        float startY = (params.repeat == ImageRepeat::RepeatX)
+                            ? (float)params.clipH - ((params.destY - (float)params.clipY) + tileH)
+                            : 0.f;
+        float endX = (params.repeat == ImageRepeat::RepeatY) ? localX + tileW : (float)params.clipW;
+        float endY = (params.repeat == ImageRepeat::RepeatX)
+                            ? (float)params.clipH - (params.destY - (float)params.clipY)
+                            : (float)params.clipH;
+
+        for (float ty = startY; ty < endY; ty += tileH)
+            for (float tx = startX; tx < endX; tx += tileW)
+                CGContextDrawImage(cgCtx, CGRectMake(tx, ty, tileW, tileH), params.image);
+    }
+    else
+    {
+        CGContextDrawImage(cgCtx, CGRectMake(localX, imgY, params.destW, params.destH), params.image);
+    }
+
+    CGContextRestoreGState(cgCtx);
+}
 #endif // __APPLE__
