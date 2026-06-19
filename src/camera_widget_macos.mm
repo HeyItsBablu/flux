@@ -179,28 +179,14 @@ bool CameraWidget::_platformRenderPreview(GraphicsContext& ctx, Painter& p,
                    (y + viewH) - (int)(dst.origin.y + dst.size.height),
                    colPlaceholder);
 
-    // CoreGraphics Y axis: origin at bottom-left, flip for top-left widget coords
-    CGContextSaveGState(cg);
-    CGContextTranslateCTM(cg, 0, y + viewH);
-    CGContextScaleCTM(cg, 1.0, -1.0);
-
-    // Re-express dst in the flipped space
-    CGRect flippedDst = CGRectMake(
-            dst.origin.x,
-            (y + viewH) - dst.origin.y - dst.size.height,
-            dst.size.width,
-            dst.size.height);
-
-    // Mirror front camera horizontally
-    if (cam.isFrontCamera()) {
-        CGContextTranslateCTM(cg,
-                              flippedDst.origin.x * 2 + flippedDst.size.width, 0);
-        CGContextScaleCTM(cg, -1.0, 1.0);
-    }
-
-    CGContextSetInterpolationQuality(cg, kCGInterpolationLow);
-    CGContextDrawImage(cg, flippedDst, asCGImage(s.previewImage));
-    CGContextRestoreGState(cg);
+    Painter::CameraDrawParams cp;
+    cp.frame  = (NativeImage)s.previewImage;
+    cp.dstX   = (int)dst.origin.x;
+    cp.dstY   = (int)dst.origin.y;
+    cp.dstW   = (int)dst.size.width;
+    cp.dstH   = (int)dst.size.height;
+    cp.mirror = cam.isFrontCamera();
+    p.drawCamera(cp);
     return true;
 }
 

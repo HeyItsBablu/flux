@@ -250,6 +250,35 @@ struct Painter
     };
 
     void drawVideo(const VideoDrawParams &params);
+
+    struct CameraDrawParams
+    {
+        // Destination rect (letterboxed, computed by widget)
+        int dstX = 0, dstY = 0, dstW = 0, dstH = 0;
+
+        // Mirror horizontally (front camera selfie flip)
+        bool mirror = false;
+
+        // Platform frame handle
+        // macOS  : CGImageRef       cast to NativeImage  (BGRA32)
+        // Linux  : cairo_surface_t* cast to NativeImage  (RGB24 as BGRX)
+        // Android: NVG image handle (int, stored as NativeImage)
+        // Web    : unused           (renderFrame() blits directly)
+        // Win32  : unused           (uses pixels + bmi below)
+        NativeImage frame{};
+
+#ifdef _WIN32
+        const void *pixels = nullptr;    // _frameCache.data() — BGRA32
+        const BITMAPINFO *bmi = nullptr; // &bmi
+        int srcW = 0, srcH = 0;
+#endif
+
+#ifdef __ANDROID__
+        int srcW = 0, srcH = 0;
+#endif
+    };
+
+    void drawCamera(const CameraDrawParams &params);
 };
 
 #endif // FLUX_PAINTER_HPP

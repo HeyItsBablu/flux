@@ -37,6 +37,7 @@
 #include "flux/flux_font.hpp"
 #include "flux/flux_platform.hpp"
 #include "flux/flux_video.hpp"
+#include "flux/flux_camera.hpp"
 
 #include <emscripten.h>
 #include <cstdio>
@@ -1175,6 +1176,14 @@ void Painter::drawVideo(const VideoDrawParams& params)
     if (params.dstW <= 0 || params.dstH <= 0) return;
     FluxVideo::get().renderFrame(params.dstX, params.dstY,
                                  params.dstW, params.dstH);
+}
+
+void Painter::drawCamera(const CameraDrawParams& params)
+{
+    if (params.dstW <= 0 || params.dstH <= 0) return;
+    FluxCamera::get().renderFrame(
+        params.dstX, params.dstY, params.dstW, params.dstH,
+        params.mirror);
 }
 
 #endif // __EMSCRIPTEN__

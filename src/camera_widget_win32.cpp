@@ -107,24 +107,18 @@ bool CameraWidget::_platformRenderPreview(GraphicsContext &ctx, Painter &p,
     if (dstY + dstH < y + viewH)
         p.fillRect(x, dstY + dstH, width, (y + viewH) - (dstY + dstH), colPlaceholder);
 
-    ::SetStretchBltMode(ctx.hdc, HALFTONE);
-    ::SetBrushOrgEx(ctx.hdc, 0, 0, nullptr);
-
-    if (cam.isFrontCamera())
-    {
-        // Negative dstW → GDI mirrors horizontally
-        ::StretchDIBits(ctx.hdc,
-                        dstX + dstW, dstY, -dstW, dstH,
-                        0, 0, s.cachedSrcW, s.cachedSrcH,
-                        s.frameCache.data(), &s.bmi, DIB_RGB_COLORS, SRCCOPY);
-    }
-    else
-    {
-        ::StretchDIBits(ctx.hdc,
-                        dstX, dstY, dstW, dstH,
-                        0, 0, s.cachedSrcW, s.cachedSrcH,
-                        s.frameCache.data(), &s.bmi, DIB_RGB_COLORS, SRCCOPY);
-    }
+    Painter::CameraDrawParams cp;
+    cp.pixels = s.frameCache.data();
+    cp.bmi = &s.bmi;
+    cp.srcW = s.cachedSrcW;
+    cp.srcH = s.cachedSrcH;
+    cp.dstX = dstX;
+    cp.dstY = dstY;
+    cp.dstW = dstW;
+    cp.dstH = dstH;
+    cp.mirror = cam.isFrontCamera();
+    p.drawCamera(cp);
+    return true;
     return true;
 }
 

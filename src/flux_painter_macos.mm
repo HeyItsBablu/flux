@@ -529,4 +529,27 @@ void Painter::drawVideo(const VideoDrawParams& params)
         (CGImageRef)params.frame);
     CGContextRestoreGState(cg);
 }
+
+void Painter::drawCamera(const CameraDrawParams& params)
+{
+    if (!params.frame || params.dstW <= 0 || params.dstH <= 0) return;
+    CGContextRef cg = ctx.cgContext;
+    CGContextSaveGState(cg);
+
+    // Flip Y for top-left origin
+    CGContextTranslateCTM(cg, params.dstX, params.dstY + params.dstH);
+    CGContextScaleCTM(cg, 1.0, -1.0);
+
+    if (params.mirror)
+    {
+        CGContextTranslateCTM(cg, params.dstW, 0);
+        CGContextScaleCTM(cg, -1.0, 1.0);
+    }
+
+    CGContextSetInterpolationQuality(cg, kCGInterpolationLow);
+    CGContextDrawImage(cg,
+        CGRectMake(0, 0, params.dstW, params.dstH),
+        (CGImageRef)params.frame);
+    CGContextRestoreGState(cg);
+}
 #endif // __APPLE__

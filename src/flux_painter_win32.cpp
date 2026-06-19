@@ -1257,4 +1257,34 @@ void Painter::drawVideo(const VideoDrawParams &params)
                   DIB_RGB_COLORS, SRCCOPY);
 }
 
+void Painter::drawCamera(const CameraDrawParams &params)
+{
+  if (!params.pixels || !params.bmi ||
+      params.srcW <= 0 || params.srcH <= 0 ||
+      params.dstW <= 0 || params.dstH <= 0)
+    return;
+
+  ::SetStretchBltMode(ctx.hdc, HALFTONE);
+  ::SetBrushOrgEx(ctx.hdc, 0, 0, nullptr);
+
+  if (params.mirror)
+  {
+    // Negative dstW mirrors horizontally — same trick camera_widget_win32 uses
+    ::StretchDIBits(ctx.hdc,
+                    params.dstX + params.dstW, params.dstY,
+                    -params.dstW, params.dstH,
+                    0, 0, params.srcW, params.srcH,
+                    params.pixels, params.bmi,
+                    DIB_RGB_COLORS, SRCCOPY);
+  }
+  else
+  {
+    ::StretchDIBits(ctx.hdc,
+                    params.dstX, params.dstY, params.dstW, params.dstH,
+                    0, 0, params.srcW, params.srcH,
+                    params.pixels, params.bmi,
+                    DIB_RGB_COLORS, SRCCOPY);
+  }
+}
+
 #endif // _WIN32

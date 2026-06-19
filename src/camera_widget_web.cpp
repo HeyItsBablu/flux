@@ -56,9 +56,11 @@ void CameraWidget::_platformScheduleOpen()
 void CameraWidget::_platformOnFlip()
 {
     EM_ASM({
-        if (Module._fluxCameraThumbEl) {
+        if (Module._fluxCameraThumbEl)
+        {
             Module._fluxCameraThumbEl.src = '';
-            if (Module._fluxCameraThumbBlobUrl) {
+            if (Module._fluxCameraThumbBlobUrl)
+            {
                 URL.revokeObjectURL(Module._fluxCameraThumbBlobUrl);
                 Module._fluxCameraThumbBlobUrl = null;
             }
@@ -82,7 +84,7 @@ bool CameraWidget::_platformRenderPreview(GraphicsContext & /*ctx*/, Painter &p,
         return false;
 
     // ── Letterbox / pillarbox ──────────────────────────────────────────────
-    float camAR    = (float)srcW / (float)srcH;
+    float camAR = (float)srcW / (float)srcH;
     float widgetAR = (float)width / (float)viewH;
     int dstW, dstH, dstX, dstY;
     if (camAR > widgetAR)
@@ -110,8 +112,13 @@ bool CameraWidget::_platformRenderPreview(GraphicsContext & /*ctx*/, Painter &p,
     if (dstY + dstH < y + viewH)
         p.fillRect(x, dstY + dstH, width, (y + viewH) - (dstY + dstH), colPlaceholder);
 
-    // ── Blit via FluxCamera::renderFrame — mirrors front camera ───────────
-    cam.renderFrame(dstX, dstY, dstW, dstH, cam.isFrontCamera());
+    Painter::CameraDrawParams cp;
+    cp.dstX = dstX;
+    cp.dstY = dstY;
+    cp.dstW = dstW;
+    cp.dstH = dstH;
+    cp.mirror = cam.isFrontCamera();
+    p.drawCamera(cp);
 
     return true;
 }
@@ -137,8 +144,7 @@ void CameraWidget::_platformRenderFlash(GraphicsContext & /*ctx*/, Painter &p,
         c.globalAlpha = $4 / 255.0;
         c.fillStyle = 'rgb(255,255,255)';
         c.fillRect($0, $1, $2, $3);
-        c.globalAlpha = prev;
-    }, x, y, width, viewH, alpha);
+        c.globalAlpha = prev; }, x, y, width, viewH, alpha);
 }
 
 // ── _platformRenderThumb ──────────────────────────────────────────────────────
@@ -156,8 +162,7 @@ bool CameraWidget::_platformRenderThumb(GraphicsContext & /*ctx*/,
         var c = Module._fluxCtx2D;
         if (!c) return 0;
         c.drawImage(img, $0, $1, $2, $3);
-        return 1;
-    }, thumbX, thumbY, thumbW, thumbH) != 0;
+        return 1; }, thumbX, thumbY, thumbW, thumbH) != 0;
 }
 
 // ── _platformLoadThumb ────────────────────────────────────────────────────────
@@ -198,8 +203,7 @@ void CameraWidget::_platformLoadThumb(const std::string &path)
         var blob = new Blob([bytes], { type: 'image/jpeg' });
         var url  = URL.createObjectURL(blob);
         Module._fluxCameraThumbBlobUrl  = url;
-        Module._fluxCameraThumbEl.src   = url;
-    }, path.c_str());
+        Module._fluxCameraThumbEl.src   = url; }, path.c_str());
 }
 
 // ── _platformDestroy ──────────────────────────────────────────────────────────
@@ -211,13 +215,15 @@ void CameraWidget::_platformLoadThumb(const std::string &path)
 void CameraWidget::_platformDestroy()
 {
     EM_ASM({
-        if (Module._fluxCameraThumbEl) {
+        if (Module._fluxCameraThumbEl)
+        {
             Module._fluxCameraThumbEl.src = '';
             if (Module._fluxCameraThumbEl.parentNode)
                 Module._fluxCameraThumbEl.parentNode.removeChild(Module._fluxCameraThumbEl);
             Module._fluxCameraThumbEl = null;
         }
-        if (Module._fluxCameraThumbBlobUrl) {
+        if (Module._fluxCameraThumbBlobUrl)
+        {
             URL.revokeObjectURL(Module._fluxCameraThumbBlobUrl);
             Module._fluxCameraThumbBlobUrl = null;
         }

@@ -132,17 +132,15 @@ bool CameraWidget::_platformRenderPreview(GraphicsContext &ctx, Painter &p,
     if (dstY + dstH < viewH)
         p.fillRect(x, y + dstY + dstH, width, viewH - dstY - dstH, colPlaceholder);
 
-    // Scale and blit via Cairo
-    cairo_save(ctx.cr);
-    cairo_translate(ctx.cr, x + dstX, y + dstY);
-    cairo_scale(ctx.cr,
-                (double)dstW / (double)s.cachedSrcW,
-                (double)dstH / (double)s.cachedSrcH);
-    cairo_set_source_surface(ctx.cr, s.previewSurf, 0, 0);
-    cairo_pattern_set_filter(cairo_get_source(ctx.cr), CAIRO_FILTER_BILINEAR);
-    cairo_rectangle(ctx.cr, 0, 0, s.cachedSrcW, s.cachedSrcH);
-    cairo_fill(ctx.cr);
-    cairo_restore(ctx.cr);
+    Painter::CameraDrawParams cp;
+    cp.frame = (NativeImage)s.previewSurf;
+    cp.dstX = x + dstX;
+    cp.dstY = y + dstY;
+    cp.dstW = dstW;
+    cp.dstH = dstH;
+    cp.mirror = false; // Linux V4L2 has no front camera concept
+    p.drawCamera(cp);
+    return true;
     return true;
 }
 
