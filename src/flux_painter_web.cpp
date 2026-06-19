@@ -219,7 +219,7 @@ void Painter::drawBorder(int x, int y, int w, int h, int radius, Color color,
         c.lineWidth   = $6;
         if ($4 > 0) {
             Module._fluxRRect(c, $0, $1, $2, $3, $4);
-        } else {
+        } else { 
             c.beginPath();
             c.rect($0, $1, $2, $3);
         }

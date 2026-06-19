@@ -158,7 +158,8 @@ void ImageWidget::_platformRender(GraphicsContext &ctx, int cx, int cy,
     int dh = std::max(1, (int)d.h);
 
     // ── Rebuild scaled surface if stale ──────────────────────────────────────
-    bool stale = !cache.surface || cache.w != dw || cache.h != dh || cache.fit != (int)fit || cache.quality != (int)filterQuality;
+    bool stale = !cache.surface || cache.w != dw || cache.h != dh ||
+                cache.fit != (int)fit || cache.quality != (int)filterQuality;
 
     if (stale)
     {
@@ -176,12 +177,9 @@ void ImageWidget::_platformRender(GraphicsContext &ctx, int cx, int cy,
 
             if (cairo_surface_status(src) == CAIRO_STATUS_SUCCESS)
             {
-                cairo_scale(scr,
-                            (double)dw / imageWidth,
-                            (double)dh / imageHeight);
+                cairo_scale(scr, (double)dw / imageWidth, (double)dh / imageHeight);
                 cairo_set_source_surface(scr, src, 0.0, 0.0);
-                cairo_pattern_set_filter(cairo_get_source(scr),
-                                         cairoFilter(filterQuality));
+                cairo_pattern_set_filter(cairo_get_source(scr), cairoFilter(filterQuality));
                 cairo_paint(scr);
             }
             cairo_surface_destroy(src);
@@ -199,64 +197,41 @@ void ImageWidget::_platformRender(GraphicsContext &ctx, int cx, int cy,
         }
     }
 
-    cairo_t *cr = ctx.cr;
-    cairo_save(cr);
-
-    if (borderRadius > 0)
-        cairoRoundedRectPath(cr, x, y, width, height, borderRadius);
-    else
-        cairo_rectangle(cr, cx, cy, cw, ch);
-    cairo_clip(cr);
+    Painter painter(ctx);
+    Painter::ImageDrawParams params;
+    params.clipX = cx;
+    params.clipY = cy;
+    params.clipW = cw;
+    params.clipH = ch;
+    params.destX = d.x;
+    params.destY = d.y;
+    params.destW = d.w;
+    params.destH = d.h;
+    params.borderRadius = borderRadius;
+    params.repeat = repeat;
+    params.filterQuality = filterQuality;
 
     if (cache.surface)
     {
-        if (repeat != ImageRepeat::NoRepeat)
-        {
-            float tileW = d.w, tileH = d.h;
-            float startX = (repeat == ImageRepeat::RepeatY) ? d.x : (float)cx;
-            float startY = (repeat == ImageRepeat::RepeatX) ? d.y : (float)cy;
-            float endX = (repeat == ImageRepeat::RepeatY) ? d.x + tileW : (float)(cx + cw);
-            float endY = (repeat == ImageRepeat::RepeatX) ? d.y + tileH : (float)(cy + ch);
-
-            for (float ty = startY; ty < endY; ty += tileH)
-            {
-                for (float tx = startX; tx < endX; tx += tileW)
-                {
-                    cairo_set_source_surface(cr, cache.surface, tx, ty);
-                    cairo_pattern_set_filter(cairo_get_source(cr),
-                                             CAIRO_FILTER_NEAREST);
-                    cairo_rectangle(cr, tx, ty, tileW, tileH);
-                    cairo_fill(cr);
-                }
-            }
-        }
-        else
-        {
-            cairo_set_source_surface(cr, cache.surface, d.x, d.y);
-            cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_NEAREST);
-            cairo_paint(cr);
-        }
+        // Cache already pre-scaled to dw×dh — painter does a plain (unscaled) blit.
+        params.image = cache.surface;
+        params.srcWidth = dw;
+        params.srcHeight = dh;
+        painter.drawImage(params);
     }
     else
     {
-        // Slow fallback — no pre-scaled surface
+        // No usable cache — let painter scale the raw pixel buffer at draw time.
         cairo_surface_t *src = cairo_image_surface_create_for_data(
             const_cast<uint8_t *>(pixels.data()),
             CAIRO_FORMAT_ARGB32,
             imageWidth, imageHeight, imageWidth * 4);
-        if (cairo_surface_status(src) == CAIRO_STATUS_SUCCESS)
-        {
-            cairo_translate(cr, d.x, d.y);
-            cairo_scale(cr, d.w / imageWidth, d.h / imageHeight);
-            cairo_set_source_surface(cr, src, 0.0, 0.0);
-            cairo_pattern_set_filter(cairo_get_source(cr),
-                                     cairoFilter(filterQuality));
-            cairo_paint(cr);
-        }
+        params.image = src;
+        params.srcWidth = imageWidth;
+        params.srcHeight = imageHeight;
+        painter.drawImage(params);
         cairo_surface_destroy(src);
     }
-
-    cairo_restore(cr);
 }
 
 // ============================================================================

@@ -1114,7 +1114,7 @@ void Painter::drawArc(float cx, float cy, float radius,
                       float startAngle, float sweepAngle,
                       Color color, bool roundedCaps)
 {
-    cairo_t* cr = ctx.cr;
+    cairo_t *cr = ctx.cr;
     CairoSave save(cr);
 
     cairo_set_antialias(cr, CAIRO_ANTIALIAS_BEST);
@@ -1134,6 +1134,76 @@ void Painter::drawArc(float cx, float cy, float radius,
               static_cast<double>(startAngle + sweepAngle));
 
     cairo_stroke(cr);
+}
+
+// ============================================================================
+// Painter::drawImage  (Linux / Cairo)
+// ============================================================================
+
+static cairo_filter_t cairoFilterFromQuality(FilterQuality q)
+{
+    switch (q)
+    {
+    case FilterQuality::None:
+        return CAIRO_FILTER_NEAREST;
+    case FilterQuality::Low:
+        return CAIRO_FILTER_BILINEAR;
+    case FilterQuality::Medium:
+        return CAIRO_FILTER_BILINEAR;
+    case FilterQuality::High:
+        return CAIRO_FILTER_BEST;
+    }
+    return CAIRO_FILTER_BILINEAR;
+}
+
+void Painter::drawImage(const ImageDrawParams &params)
+{
+    if (!params.image || params.clipW <= 0 || params.clipH <= 0)
+        return;
+
+    cairo_t *cr = ctx.cr;
+    CairoSave save(cr);
+
+    if (params.borderRadius > 0)
+        makeRoundedPath(cr, params.clipX, params.clipY, params.clipW, params.clipH,
+                        params.borderRadius);
+    else
+        cairo_rectangle(cr, params.clipX, params.clipY, params.clipW, params.clipH);
+    cairo_clip(cr);
+
+    bool needsScale = (params.srcWidth != (int)params.destW ||
+                       params.srcHeight != (int)params.destH);
+    cairo_filter_t cf = needsScale ? cairoFilterFromQuality(params.filterQuality)
+                                   : CAIRO_FILTER_NEAREST;
+
+    auto drawOneTile = [&](double tx, double ty)
+    {
+        cairo_save(cr);
+        cairo_translate(cr, tx, ty);
+        if (needsScale)
+            cairo_scale(cr, params.destW / params.srcWidth, params.destH / params.srcHeight);
+        cairo_set_source_surface(cr, params.image, 0.0, 0.0);
+        cairo_pattern_set_filter(cairo_get_source(cr), cf);
+        cairo_paint(cr);
+        cairo_restore(cr);
+    };
+
+    if (params.repeat != ImageRepeat::NoRepeat)
+    {
+        float tileW = params.destW, tileH = params.destH;
+        float startX = (params.repeat == ImageRepeat::RepeatY) ? params.destX : (float)params.clipX;
+        float startY = (params.repeat == ImageRepeat::RepeatX) ? params.destY : (float)params.clipY;
+        float endX = (params.repeat == ImageRepeat::RepeatY) ? params.destX + tileW : (float)(params.clipX + params.clipW);
+        float endY = (params.repeat == ImageRepeat::RepeatX) ? params.destY + tileH : (float)(params.clipY + params.clipH);
+
+        for (float ty = startY; ty < endY; ty += tileH)
+            for (float tx = startX; tx < endX; tx += tileW)
+                drawOneTile(tx, ty);
+    }
+    else
+    {
+        drawOneTile(params.destX, params.destY);
+    }
 }
 
 #endif // __linux__

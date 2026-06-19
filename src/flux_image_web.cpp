@@ -12,7 +12,7 @@
 // _platformDecode() is a stub returning false — we never use GDI+ or any
 // other native decoder on web, so the stb path always runs.
 //
-// Staging / promote
+// Staging / promote 
 // ─────────────────
 // Because decoding may happen on a background thread (asset loads, network
 // images), we follow the same two-phase pattern used on Linux / macOS:
