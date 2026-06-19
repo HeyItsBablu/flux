@@ -825,32 +825,42 @@ void Painter::drawVideo(const VideoDrawParams &params)
 
 void Painter::drawCamera(const CameraDrawParams &params)
 {
-    if (!s_vg || params.frame == -1 || params.dstW <= 0)
+    if (!s_vg || params.frame == -1 ||
+        params.dstW <= 0 || params.dstH <= 0)
         return;
 
+    nvgSave(s_vg);
+
+    // Apply rotation around the given center point
+    if (params.rotationDeg != 0.f)
+    {
+        float rad = params.rotationDeg * (NVG_PI / 180.f);
+        nvgTranslate(s_vg, params.rotCenterX, params.rotCenterY);
+        nvgRotate(s_vg, rad);
+        nvgTranslate(s_vg, -params.rotCenterX, -params.rotCenterY);
+    }
+
+    // Mirror (front camera)
     if (params.mirror)
     {
-        // Flip horizontally: shift pattern origin to right edge, scale -1
-        NVGpaint paint = nvgImagePattern(s_vg,
-                                         params.dstX + params.dstW, params.dstY,
-                                         -params.dstW, params.dstH,
-                                         0.f, params.frame, 1.f);
-        nvgBeginPath(s_vg);
-        nvgRect(s_vg, params.dstX, params.dstY, params.dstW, params.dstH);
-        nvgFillPaint(s_vg, paint);
-        nvgFill(s_vg);
+        nvgTranslate(s_vg, params.dstX + params.dstW, params.dstY);
+        nvgScale(s_vg, -1.f, 1.f);
+        nvgTranslate(s_vg, -params.dstX, -params.dstY);
     }
-    else
-    {
-        NVGpaint paint = nvgImagePattern(s_vg,
-                                         params.dstX, params.dstY,
-                                         params.dstW, params.dstH,
-                                         0.f, params.frame, 1.f);
-        nvgBeginPath(s_vg);
-        nvgRect(s_vg, params.dstX, params.dstY, params.dstW, params.dstH);
-        nvgFillPaint(s_vg, paint);
-        nvgFill(s_vg);
-    }
+
+    NVGpaint paint = nvgImagePattern(s_vg,
+                                     (float)params.dstX, (float)params.dstY,
+                                     (float)params.dstW, (float)params.dstH,
+                                     0.f, params.frame, 1.f);
+
+    nvgBeginPath(s_vg);
+    nvgRect(s_vg,
+            (float)params.dstX, (float)params.dstY,
+            (float)params.dstW, (float)params.dstH);
+    nvgFillPaint(s_vg, paint);
+    nvgFill(s_vg);
+
+    nvgRestore(s_vg);
 }
 
 #endif // __ANDROID__

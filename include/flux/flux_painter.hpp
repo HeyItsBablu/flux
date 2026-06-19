@@ -259,6 +259,12 @@ struct Painter
         // Mirror horizontally (front camera selfie flip)
         bool mirror = false;
 
+        // Rotation in degrees — 0, 90, 180, 270.
+        // Center of rotation in widget coordinates.
+        float rotationDeg = 0.f;
+        float rotCenterX = 0.f;
+        float rotCenterY = 0.f;
+
         // Platform frame handle
         // macOS  : CGImageRef       cast to NativeImage  (BGRA32)
         // Linux  : cairo_surface_t* cast to NativeImage  (RGB24 as BGRX)

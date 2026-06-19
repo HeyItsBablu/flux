@@ -62,7 +62,7 @@ void CameraWidget::_platformOnFlip()
 
 // ── _platformRenderPreview ────────────────────────────────────────────────────
 
-bool CameraWidget::_platformRenderPreview(GraphicsContext & /*ctx*/, Painter & /*p*/,
+bool CameraWidget::_platformRenderPreview(GraphicsContext & /*ctx*/, Painter &p,
                                           FontCache & /*fontCache*/, int viewH)
 {
     auto &cam = FluxCamera::get();
@@ -76,7 +76,8 @@ bool CameraWidget::_platformRenderPreview(GraphicsContext & /*ctx*/, Painter & /
 
         if (_android.nvgImage < 0)
         {
-            _android.tex2dHandle = NVG_blitOESToTex2D(cam.getTextureId(), blitW, blitH);
+            _android.tex2dHandle = NVG_blitOESToTex2D(
+                cam.getTextureId(), blitW, blitH);
             _android.nvgImage = nvgCreateImageGLES2(vg, _android.tex2dHandle,
                                                     blitW, blitH, 0);
         }
@@ -111,26 +112,27 @@ bool CameraWidget::_platformRenderPreview(GraphicsContext & /*ctx*/, Painter & /
 
     float cx = (float)x + (float)width * 0.5f;
     float cy = (float)y + (float)viewH * 0.5f;
-
-    nvgSave(vg);
-    nvgScissor(vg, x, y, width, viewH);
-
-    nvgSave(vg);
-    nvgTranslate(vg, cx, cy);
-    nvgRotate(vg, NVG_PI * 0.5f);
-    nvgTranslate(vg, -cx, -cy);
-
     float patX = cx - drawW * 0.5f;
     float patY = cy - drawH * 0.5f;
 
-    NVGpaint imgPaint = nvgImagePattern(vg, patX, patY, drawW, drawH,
-                                        0.f, _android.nvgImage, 1.f);
-    nvgBeginPath(vg);
-    nvgRect(vg, patX, patY, drawW, drawH);
-    nvgFillPaint(vg, imgPaint);
-    nvgFill(vg);
+    // Clip to view area
+    nvgSave(vg);
+    nvgScissor(vg, (float)x, (float)y, (float)width, (float)viewH);
 
-    nvgRestore(vg);
+    Painter::CameraDrawParams cp;
+    cp.frame = (NativeImage)_android.nvgImage;
+    cp.srcW = cam.getPreviewWidth();
+    cp.srcH = cam.getPreviewHeight();
+    cp.dstX = (int)patX;
+    cp.dstY = (int)patY;
+    cp.dstW = (int)drawW;
+    cp.dstH = (int)drawH;
+    cp.mirror = false; // Android handles orientation via rotation
+    cp.rotationDeg = 90.f;
+    cp.rotCenterX = cx;
+    cp.rotCenterY = cy;
+    p.drawCamera(cp);
+
     nvgRestore(vg);
     return true;
 }
