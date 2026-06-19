@@ -205,7 +205,7 @@ struct Painter
 
     struct ImageDrawParams
     {
-        NativeImage image = nullptr; // platform-native, already-decoded image
+        NativeImage image{}; // platform-native, already-decoded image
         int srcWidth = 0;
         int srcHeight = 0;
 

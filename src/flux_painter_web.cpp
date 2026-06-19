@@ -1098,4 +1098,75 @@ void Painter::drawRichTextA(const std::string &text,
     drawRichText(ws, params, fontCache);
 }
 
+// ============================================================================
+// Painter::drawImage
+// ============================================================================
+
+void Painter::drawImage(const ImageDrawParams &params)
+{
+    if (params.image <= 0 || params.clipW <= 0 || params.clipH <= 0)
+        return;
+
+    const char *patternRepeat = "no-repeat";
+    if (params.repeat == ImageRepeat::Repeat)
+        patternRepeat = "repeat";
+    if (params.repeat == ImageRepeat::RepeatX)
+        patternRepeat = "repeat-x";
+    if (params.repeat == ImageRepeat::RepeatY)
+        patternRepeat = "repeat-y";
+
+    int quality = (int)params.filterQuality;
+
+    EM_ASM({
+        var c = Module._fluxCtx2D;
+        if (!c) return;
+        var oc = Module._fluxImgStore && Module._fluxImgStore.get($0);
+        if (!oc) return;
+        var cx = $1;
+        var cy = $2;
+        var cw = $3;
+        var ch = $4;
+        var dx = $5;
+        var dy = $6;
+        var dw = $7;
+        var dh = $8;
+        var r  = $9;
+        var q  = $10;
+        var rp = UTF8ToString($11);
+        c.imageSmoothingEnabled = (q > 0);
+        c.imageSmoothingQuality = (q >= 3) ? 'high' : (q >= 2) ? 'medium' : 'low';
+        c.save();
+        c.beginPath();
+        if (r > 0) {
+            if (Module._fluxRRect) {
+                Module._fluxRRect(c, cx, cy, cw, ch, r);
+            } else {
+                c.moveTo(cx + r, cy);
+                c.lineTo(cx + cw - r, cy);
+                c.arcTo(cx + cw, cy, cx + cw, cy + r, r);
+                c.lineTo(cx + cw, cy + ch - r);
+                c.arcTo(cx + cw, cy + ch, cx + cw - r, cy + ch, r);
+                c.lineTo(cx + r, cy + ch);
+                c.arcTo(cx, cy + ch, cx, cy + ch - r, r);
+                c.lineTo(cx, cy + r);
+                c.arcTo(cx, cy, cx + r, cy, r);
+                c.closePath();
+            }
+        } else {
+            c.rect(cx, cy, cw, ch);
+        }
+        c.clip();
+        if (rp !== 'no-repeat') {
+            var pat = c.createPattern(oc, rp);
+            if (pat) {
+                c.translate(dx, dy);
+                c.fillStyle = pat;
+                c.fillRect(cx - dx, cy - dy, cw, ch);
+            }
+        } else {
+            c.drawImage(oc, dx, dy, dw, dh);
+        }
+        c.restore(); }, params.image, params.clipX, params.clipY, params.clipW, params.clipH, (int)params.destX, (int)params.destY, (int)params.destW, (int)params.destH, params.borderRadius, quality, patternRepeat);
+}
+
 #endif // __EMSCRIPTEN__

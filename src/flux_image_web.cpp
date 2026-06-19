@@ -12,7 +12,7 @@
 // _platformDecode() is a stub returning false — we never use GDI+ or any
 // other native decoder on web, so the stb path always runs.
 //
-// Staging / promote 
+// Staging / promote
 // ─────────────────
 // Because decoding may happen on a background thread (asset loads, network
 // images), we follow the same two-phase pattern used on Linux / macOS:
@@ -206,7 +206,7 @@ void ImageWidget::_platformPromote()
 // EM_ASM rule enforced throughout: one var per line, no comma-chained decls.
 // ============================================================================
 
-void ImageWidget::_platformRender(GraphicsContext & /*ctx*/,
+void ImageWidget::_platformRender(GraphicsContext &ctx,
                                   int cx, int cy, int cw, int ch)
 {
     auto &ws = webImg(this);
@@ -215,112 +215,24 @@ void ImageWidget::_platformRender(GraphicsContext & /*ctx*/,
 
     DestRect d = _calculateDestRect(cx, cy, cw, ch);
 
-    const char *patternRepeat = "no-repeat";
-    if (repeat == ImageRepeat::Repeat)
-        patternRepeat = "repeat";
-    if (repeat == ImageRepeat::RepeatX)
-        patternRepeat = "repeat-x";
-    if (repeat == ImageRepeat::RepeatY)
-        patternRepeat = "repeat-y";
+    Painter painter(ctx);
+    Painter::ImageDrawParams params;
+    params.image = ws.key; // NativeImage on web = OffscreenCanvas store key
+    params.srcWidth = imageWidth;
+    params.srcHeight = imageHeight;
+    params.clipX = cx;
+    params.clipY = cy;
+    params.clipW = cw;
+    params.clipH = ch;
+    params.destX = d.x;
+    params.destY = d.y;
+    params.destW = d.w;
+    params.destH = d.h;
+    params.borderRadius = borderRadius;
+    params.repeat = repeat;
+    params.filterQuality = filterQuality;
 
-    // FilterQuality → int: None=0 Low=1 Medium=2 High=3
-    int quality = (int)filterQuality;
-
-    if (borderRadius > 0)
-    {
-        // ── Rounded corners: save → clip rounded rect → draw → restore ────
-        // All parameters passed as separate positional args ($0..$14).
-        // No comma-chained var declarations inside the block.
-        EM_ASM({
-            var c = Module._fluxCtx2D;
-            if (!c) return;
-            var oc = Module._fluxImgStore && Module._fluxImgStore.get($0);
-            if (!oc) return;
-            var cx = $1;
-            var cy = $2;
-            var cw = $3;
-            var ch = $4;
-            var dx = $5;
-            var dy = $6;
-            var dw = $7;
-            var dh = $8;
-            var wx = $9;
-            var wy = $10;
-            var fw = $11;
-            var fh = $12;
-            var r  = $13;
-            var q  = $14;
-            var rp = UTF8ToString($15);
-            c.imageSmoothingEnabled = (q > 0);
-            c.imageSmoothingQuality = (q >= 3) ? 'high' : (q >= 2) ? 'medium' : 'low';
-            c.save();
-            if (Module._fluxRRect) {
-                Module._fluxRRect(c, wx, wy, fw, fh, r);
-            } else {
-                c.beginPath();
-                c.moveTo(wx + r, wy);
-                c.lineTo(wx + fw - r, wy);
-                c.arcTo(wx + fw, wy, wx + fw, wy + r, r);
-                c.lineTo(wx + fw, wy + fh - r);
-                c.arcTo(wx + fw, wy + fh, wx + fw - r, wy + fh, r);
-                c.lineTo(wx + r, wy + fh);
-                c.arcTo(wx, wy + fh, wx, wy + fh - r, r);
-                c.lineTo(wx, wy + r);
-                c.arcTo(wx, wy, wx + r, wy, r);
-                c.closePath();
-            }
-            c.clip();
-            c.beginPath();
-            c.rect(cx, cy, cw, ch);
-            c.clip();
-            if (rp !== 'no-repeat') {
-                var pat = c.createPattern(oc, rp);
-                if (pat) {
-                    c.translate(dx, dy);
-                    c.fillStyle = pat;
-                    c.fillRect(cx - dx, cy - dy, cw, ch);
-                }
-            } else {
-                c.drawImage(oc, dx, dy, dw, dh);
-            }
-            c.restore(); }, ws.key, cx, cy, cw, ch, (int)d.x, (int)d.y, (int)d.w, (int)d.h, x, y, (int)width, (int)height, (int)borderRadius, quality, patternRepeat);
-    }
-    else
-    {
-        // ── No border radius — clip to content rect and draw ──────────────
-        EM_ASM({
-            var c = Module._fluxCtx2D;
-            if (!c) return;
-            var oc = Module._fluxImgStore && Module._fluxImgStore.get($0);
-            if (!oc) return;
-            var cx = $1;
-            var cy = $2;
-            var cw = $3;
-            var ch = $4;
-            var dx = $5;
-            var dy = $6;
-            var dw = $7;
-            var dh = $8;
-            var q  = $9;
-            var rp = UTF8ToString($10);
-            c.imageSmoothingEnabled = (q > 0);
-            c.imageSmoothingQuality = (q >= 3) ? 'high' : (q >= 2) ? 'medium' : 'low';
-            c.save();
-            c.beginPath();
-            c.rect(cx, cy, cw, ch);
-            c.clip();
-            if (rp !== 'no-repeat') {
-                var pat = c.createPattern(oc, rp);
-                if (pat) {
-                    c.translate(dx, dy);
-                    c.fillStyle = pat;
-                    c.fillRect(cx - dx, cy - dy, cw, ch);
-                }
-            } else {
-                c.drawImage(oc, dx, dy, dw, dh);
-            }
-            c.restore(); }, ws.key, cx, cy, cw, ch, (int)d.x, (int)d.y, (int)d.w, (int)d.h, quality, patternRepeat);
-    }
+    painter.drawImage(params);
 }
 
 // ============================================================================
