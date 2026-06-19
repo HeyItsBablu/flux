@@ -8,7 +8,8 @@
 // -----------------------------------------------------------------------
 
 static void makeRoundedPath(Gdiplus::GraphicsPath &path, int x, int y, int w,
-                            int h, int r) {
+                            int h, int r)
+{
   int d = r * 2;
   path.AddArc(x, y, d, d, 180, 90);
   path.AddArc(x + w - d, y, d, d, 270, 90);
@@ -22,17 +23,21 @@ static void makeRoundedPath(Gdiplus::GraphicsPath &path, int x, int y, int w,
 // -----------------------------------------------------------------------
 
 void Painter::fillRoundedRect(int x, int y, int w, int h, int radius,
-                              Color color) {
+                              Color color)
+{
   Gdiplus::Graphics g(ctx.hdc);
   g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
 
   Gdiplus::SolidBrush brush(toGdipColor(color));
 
-  if (radius > 0) {
+  if (radius > 0)
+  {
     Gdiplus::GraphicsPath path;
     makeRoundedPath(path, x, y, w, h, radius);
     g.FillPath(&brush, &path);
-  } else {
+  }
+  else
+  {
     Gdiplus::RectF rect((Gdiplus::REAL)x, (Gdiplus::REAL)y, (Gdiplus::REAL)w,
                         (Gdiplus::REAL)h);
     g.FillRectangle(&brush, rect);
@@ -44,17 +49,21 @@ void Painter::fillRoundedRect(int x, int y, int w, int h, int radius,
 // -----------------------------------------------------------------------
 
 void Painter::drawBorder(int x, int y, int w, int h, int radius, Color color,
-                         int borderWidth) {
+                         int borderWidth)
+{
   Gdiplus::Graphics g(ctx.hdc);
   g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
 
   Gdiplus::Pen pen(toGdipColor(color), (Gdiplus::REAL)borderWidth);
 
-  if (radius > 0) {
+  if (radius > 0)
+  {
     Gdiplus::GraphicsPath path;
     makeRoundedPath(path, x, y, w, h, radius);
     g.DrawPath(&pen, &path);
-  } else {
+  }
+  else
+  {
     Gdiplus::RectF rect((Gdiplus::REAL)x, (Gdiplus::REAL)y, (Gdiplus::REAL)w,
                         (Gdiplus::REAL)h);
     g.DrawRectangle(&pen, rect);
@@ -65,7 +74,8 @@ void Painter::drawBorder(int x, int y, int w, int h, int radius, Color color,
 // Painter::fillRect  (GDI)
 // -----------------------------------------------------------------------
 
-void Painter::fillRect(int x, int y, int w, int h, Color color) {
+void Painter::fillRect(int x, int y, int w, int h, Color color)
+{
   RECT rect = {x, y, x + w, y + h};
   HBRUSH brush = CreateSolidBrush(toColorRef(color));
   ::FillRect(ctx.hdc, &rect, brush);
@@ -77,7 +87,8 @@ void Painter::fillRect(int x, int y, int w, int h, Color color) {
 // -----------------------------------------------------------------------
 
 void Painter::fillRoundedRectGDI(int x, int y, int w, int h, int radius,
-                                 Color fill, Color stroke, int strokeWidth) {
+                                 Color fill, Color stroke, int strokeWidth)
+{
   HBRUSH hBrush = CreateSolidBrush(toColorRef(fill));
   HPEN hPen = (strokeWidth > 0)
                   ? CreatePen(PS_SOLID, strokeWidth, toColorRef(stroke))
@@ -100,7 +111,8 @@ void Painter::fillRoundedRectGDI(int x, int y, int w, int h, int radius,
 // -----------------------------------------------------------------------
 
 void Painter::drawEllipse(int x, int y, int w, int h, Color fill, Color stroke,
-                          int strokeWidth) {
+                          int strokeWidth)
+{
   HBRUSH hBrush = CreateSolidBrush(toColorRef(fill));
   HPEN hPen = (strokeWidth > 0)
                   ? CreatePen(PS_SOLID, strokeWidth, toColorRef(stroke))
@@ -122,7 +134,8 @@ void Painter::drawEllipse(int x, int y, int w, int h, Color fill, Color stroke,
 // Painter::drawLine
 // -----------------------------------------------------------------------
 
-void Painter::drawLine(int x1, int y1, int x2, int y2, Color color, int width) {
+void Painter::drawLine(int x1, int y1, int x2, int y2, Color color, int width)
+{
   HPEN hPen = CreatePen(PS_SOLID, width, toColorRef(color));
   HPEN oldPen = (HPEN)SelectObject(ctx.hdc, hPen);
 
@@ -138,7 +151,8 @@ void Painter::drawLine(int x1, int y1, int x2, int y2, Color color, int width) {
 // -----------------------------------------------------------------------
 
 void Painter::drawText(const std::wstring &text, int x, int y, int w, int h,
-                       NativeFont font, Color color, UINT format) {
+                       NativeFont font, Color color, UINT format)
+{
   if (text.empty())
     return;
 
@@ -158,8 +172,10 @@ void Painter::drawText(const std::wstring &text, int x, int y, int w, int h,
 // -----------------------------------------------------------------------
 
 void Painter::measureText(const std::wstring &text, NativeFont font,
-                          int &outWidth, int &outHeight) {
-  if (text.empty()) {
+                          int &outWidth, int &outHeight)
+{
+  if (text.empty())
+  {
     outWidth = outHeight = 0;
     return;
   }
@@ -179,7 +195,8 @@ void Painter::measureText(const std::wstring &text, NativeFont font,
 // Painter::pushClipRect / popClipRect
 // -----------------------------------------------------------------------
 
-void Painter::pushClipRect(int x, int y, int w, int h) {
+void Painter::pushClipRect(int x, int y, int w, int h)
+{
   HRGN rgn = CreateRectRgn(x, y, x + w, y + h);
   SelectClipRgn(ctx.hdc, rgn);
   DeleteObject(rgn);
@@ -192,24 +209,28 @@ void Painter::popClipRect() { SelectClipRgn(ctx.hdc, nullptr); }
 // -----------------------------------------------------------------------
 
 void Painter::fillGradientRect(int x, int y, int w, int h,
-                               const std::vector<Color> &colors) {
+                               const std::vector<Color> &colors)
+{
   if (colors.empty() || w <= 0 || h <= 0)
     return;
 
-  if (colors.size() == 1) {
+  if (colors.size() == 1)
+  {
     fillRect(x, y, w, h, colors[0]);
     return;
   }
 
   const int stops = static_cast<int>(colors.size());
 
-  for (int i = 0; i < w; ++i) {
+  for (int i = 0; i < w; ++i)
+  {
     double t = static_cast<double>(i) / (w - 1);
     double scaled = t * (stops - 1);
     int idx = static_cast<int>(scaled);
     double frac = scaled - idx;
 
-    if (idx >= stops - 1) {
+    if (idx >= stops - 1)
+    {
       idx = stops - 2;
       frac = 1.0;
     }
@@ -228,7 +249,8 @@ void Painter::fillGradientRect(int x, int y, int w, int h,
 // -----------------------------------------------------------------------
 
 void Painter::drawRectOutline(int x, int y, int w, int h, Color color,
-                              int strokeWidth) {
+                              int strokeWidth)
+{
   HPEN hPen = CreatePen(PS_SOLID, strokeWidth, toColorRef(color));
   HPEN oldPen = (HPEN)SelectObject(ctx.hdc, hPen);
   HBRUSH oldBrush = (HBRUSH)SelectObject(ctx.hdc, GetStockObject(NULL_BRUSH));
@@ -245,7 +267,8 @@ void Painter::drawRectOutline(int x, int y, int w, int h, Color color,
 // -----------------------------------------------------------------------
 
 void Painter::pushClipRoundedRect(int x, int y, int w, int h,
-                                  int cornerDiameter) {
+                                  int cornerDiameter)
+{
   HRGN rgn =
       CreateRoundRectRgn(x, y, x + w, y + h, cornerDiameter, cornerDiameter);
   SelectClipRgn(ctx.hdc, rgn);
@@ -258,7 +281,8 @@ void Painter::pushClipRoundedRect(int x, int y, int w, int h,
 
 void Painter::drawRoundedRectOutline(int x, int y, int w, int h,
                                      int cornerDiameter, Color stroke,
-                                     int strokeWidth) {
+                                     int strokeWidth)
+{
   HPEN hPen = CreatePen(PS_SOLID, strokeWidth, toColorRef(stroke));
   HPEN oldPen = (HPEN)SelectObject(ctx.hdc, hPen);
   HBRUSH oldBrush = (HBRUSH)SelectObject(ctx.hdc, GetStockObject(NULL_BRUSH));
@@ -274,7 +298,8 @@ void Painter::drawRoundedRectOutline(int x, int y, int w, int h,
 // Painter::fillRectAlpha
 // -----------------------------------------------------------------------
 
-void Painter::fillRectAlpha(int x, int y, int w, int h, Color color) {
+void Painter::fillRectAlpha(int x, int y, int w, int h, Color color)
+{
   HDC tmpDC = CreateCompatibleDC(ctx.hdc);
   HBITMAP tmpBmp = CreateCompatibleBitmap(ctx.hdc, w, h);
   HBITMAP tmpOld = (HBITMAP)SelectObject(tmpDC, tmpBmp);
@@ -297,7 +322,8 @@ void Painter::fillRectAlpha(int x, int y, int w, int h, Color color) {
 // -----------------------------------------------------------------------
 
 void Painter::drawTextA(const std::string &text, int x, int y, int w, int h,
-                        NativeFont font, Color color, UINT format) {
+                        NativeFont font, Color color, UINT format)
+{
   if (text.empty())
     return;
   int wlen = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
@@ -311,7 +337,8 @@ void Painter::drawTextA(const std::string &text, int x, int y, int w, int h,
 // -----------------------------------------------------------------------
 
 void Painter::fillRoundedRegion(int x, int y, int w, int h, int cornerRadius,
-                                Color color) {
+                                Color color)
+{
   HBRUSH hb = CreateSolidBrush(toColorRef(color));
   HRGN rgn = CreateRoundRectRgn(x, y, x + w, y + h, cornerRadius, cornerRadius);
   FillRgn(ctx.hdc, rgn, hb);
@@ -323,11 +350,13 @@ void Painter::fillRoundedRegion(int x, int y, int w, int h, int cornerRadius,
 // Painter::drawHLine / drawVLine
 // -----------------------------------------------------------------------
 
-void Painter::drawHLine(int x, int y, int len, Color color, int strokeWidth) {
+void Painter::drawHLine(int x, int y, int len, Color color, int strokeWidth)
+{
   drawLine(x, y, x + len, y, color, strokeWidth);
 }
 
-void Painter::drawVLine(int x, int y, int len, Color color, int strokeWidth) {
+void Painter::drawVLine(int x, int y, int len, Color color, int strokeWidth)
+{
   drawLine(x, y, x, y + len, color, strokeWidth);
 }
 
@@ -336,7 +365,8 @@ void Painter::drawVLine(int x, int y, int len, Color color, int strokeWidth) {
 // -----------------------------------------------------------------------
 
 void Painter::fillRectWithLeftAccent(int x, int y, int w, int h, Color bg,
-                                     Color accent, int stripWidth) {
+                                     Color accent, int stripWidth)
+{
   fillRect(x, y, w, h, bg);
   fillRect(x, y, stripWidth, h, accent);
 }
@@ -346,7 +376,8 @@ void Painter::fillRectWithLeftAccent(int x, int y, int w, int h, Color bg,
 // -----------------------------------------------------------------------
 
 void Painter::fillColumnBars(int x, int y, int w, int h,
-                             const std::vector<int> &barHeights, Color color) {
+                             const std::vector<int> &barHeights, Color color)
+{
   if (w <= 0 || h <= 0 || barHeights.empty())
     return;
 
@@ -369,9 +400,11 @@ void Painter::fillColumnBars(int x, int y, int w, int h,
   memset(bits, 0, w * h * 4);
 
   int cols = std::min(w, (int)barHeights.size());
-  for (int px = 0; px < cols; ++px) {
+  for (int px = 0; px < cols; ++px)
+  {
     int barH = std::max(0, std::min(h, barHeights[px]));
-    for (int py = h - barH; py < h; ++py) {
+    for (int py = h - barH; py < h; ++py)
+    {
       uint8_t *pixel = (uint8_t *)bits + (py * w + px) * 4;
       pixel[0] = color.b;
       pixel[1] = color.g;
@@ -395,7 +428,8 @@ void Painter::fillColumnBars(int x, int y, int w, int h,
 // -----------------------------------------------------------------------
 
 void Painter::drawPolyline(const std::vector<std::pair<int, int>> &points,
-                           Color color, int strokeWidth) {
+                           Color color, int strokeWidth)
+{
   if (points.size() < 2)
     return;
 
@@ -415,13 +449,15 @@ void Painter::drawPolyline(const std::vector<std::pair<int, int>> &points,
 // -----------------------------------------------------------------------
 
 void Painter::fillPolygonAlpha(const std::vector<std::pair<int, int>> &points,
-                               Color color) {
+                               Color color)
+{
   if (points.size() < 3)
     return;
 
   int x0 = points[0].first, y0 = points[0].second;
   int x1 = x0, y1 = y0;
-  for (auto &p : points) {
+  for (auto &p : points)
+  {
     x0 = std::min(x0, p.first);
     y0 = std::min(y0, p.second);
     x1 = std::max(x1, p.first);
@@ -504,7 +540,8 @@ void Painter::fillPolygonAlpha(const std::vector<std::pair<int, int>> &points,
 // Internal: get the native HFONT from a TextStyle
 // -----------------------------------------------------------------------
 
-static NativeFont fontFromStyle(const TextStyle &style, FontCache &fontCache) {
+static NativeFont fontFromStyle(const TextStyle &style, FontCache &fontCache)
+{
   bool underline = hasDecoration(style.decoration, TextDecoration::Underline);
   bool strikeOut = hasDecoration(style.decoration, TextDecoration::LineThrough);
 
@@ -512,10 +549,11 @@ static NativeFont fontFromStyle(const TextStyle &style, FontCache &fontCache) {
                            style.fontWeight, underline, strikeOut);
 }
 
-
 static int measureLine(HDC hdc, const wchar_t *str, int len,
-                       float letterSpacing, int &outSingleLineH) {
-  if (len <= 0) {
+                       float letterSpacing, int &outSingleLineH)
+{
+  if (len <= 0)
+  {
     SIZE sz = {};
     GetTextExtentPoint32W(hdc, L" ", 1, &sz);
     outSingleLineH = sz.cy;
@@ -534,15 +572,16 @@ static int measureLine(HDC hdc, const wchar_t *str, int len,
   return sz.cx + extra * std::max(0, len - 1);
 }
 
-
-struct LineSpan {
+struct LineSpan
+{
   int start;
   int length;
 };
 
 static std::vector<LineSpan> wrapText(HDC hdc, const std::wstring &text,
                                       NativeFont font, int maxWidth,
-                                      bool softWrap, float letterSpacing) {
+                                      bool softWrap, float letterSpacing)
+{
   std::vector<LineSpan> lines;
   const int n = static_cast<int>(text.size());
   if (n == 0)
@@ -551,42 +590,53 @@ static std::vector<LineSpan> wrapText(HDC hdc, const std::wstring &text,
   HFONT oldFont = (HFONT)SelectObject(hdc, font);
 
   int pos = 0;
-  while (pos < n) {
+  while (pos < n)
+  {
     // Find the next newline
     int nlPos = pos;
     while (nlPos < n && text[nlPos] != L'\n')
       ++nlPos;
 
-    if (!softWrap || maxWidth <= 0) {
+    if (!softWrap || maxWidth <= 0)
+    {
       // No wrapping — one line per newline
       lines.push_back({pos, nlPos - pos});
-    } else {
+    }
+    else
+    {
       // Word-wrap within [pos, nlPos)
       int lineStart = pos;
-      while (lineStart < nlPos) {
+      while (lineStart < nlPos)
+      {
         // Binary-search for the longest prefix that fits
         int lo = 0, hi = nlPos - lineStart, fit = 0;
-        while (lo <= hi) {
+        while (lo <= hi)
+        {
           int mid = (lo + hi) / 2;
           int dummy;
           int w = measureLine(hdc, text.c_str() + lineStart, mid, letterSpacing,
                               dummy);
-          if (w <= maxWidth) {
+          if (w <= maxWidth)
+          {
             fit = mid;
             lo = mid + 1;
-          } else {
+          }
+          else
+          {
             hi = mid - 1;
           }
         }
 
-        if (fit == 0) {
+        if (fit == 0)
+        {
           // Even a single character doesn't fit — force one char
           fit = 1;
         }
 
         // Try to break at a word boundary
         int breakAt = fit;
-        if (lineStart + fit < nlPos) {
+        if (lineStart + fit < nlPos)
+        {
           // Walk back to a space
           int wb = fit;
           while (wb > 1 && text[lineStart + wb - 1] != L' ')
@@ -618,7 +668,8 @@ static std::vector<LineSpan> wrapText(HDC hdc, const std::wstring &text,
 // -----------------------------------------------------------------------
 
 void Painter::drawFadeOverlay(int x, int y, int w, int h, int fadeWidth,
-                              Color bg) {
+                              Color bg)
+{
   if (fadeWidth <= 0 || w <= 0 || h <= 0)
     return;
   int startX = x + w - fadeWidth;
@@ -634,7 +685,8 @@ void Painter::drawFadeOverlay(int x, int y, int w, int h, int fadeWidth,
 // Painter::drawWavyLine
 // -----------------------------------------------------------------------
 
-void Painter::drawWavyLine(int x, int y, int len, Color color, int amplitude) {
+void Painter::drawWavyLine(int x, int y, int len, Color color, int amplitude)
+{
   if (len <= 0)
     return;
   const int step = amplitude * 2;
@@ -643,7 +695,8 @@ void Painter::drawWavyLine(int x, int y, int len, Color color, int amplitude) {
 
   int px = x;
   bool up = true;
-  while (px < x + len) {
+  while (px < x + len)
+  {
     pts.push_back({px, up ? y - amplitude : y + amplitude});
     px += step;
     up = !up;
@@ -664,7 +717,8 @@ void Painter::drawWavyLine(int x, int y, int len, Color color, int amplitude) {
 
 void Painter::drawTextDecorationLine(int lineX, int lineY, int lineW,
                                      const TextStyle &style,
-                                     TextDecoration which) {
+                                     TextDecoration which)
+{
   if (lineW <= 0)
     return;
 
@@ -676,17 +730,23 @@ void Painter::drawTextDecorationLine(int lineX, int lineY, int lineW,
   Color dc = style.decorationColor;
 
   int decorY = lineY;
-  if (which == TextDecoration::Underline) {
+  if (which == TextDecoration::Underline)
+  {
     // Typically 1-2 px below the baseline
     decorY = lineY + tm.tmAscent + 1;
-  } else if (which == TextDecoration::Overline) {
+  }
+  else if (which == TextDecoration::Overline)
+  {
     decorY = lineY;
-  } else if (which == TextDecoration::LineThrough) {
+  }
+  else if (which == TextDecoration::LineThrough)
+  {
     // Midway through the cap height
     decorY = lineY + tm.tmAscent - tm.tmAscent / 3;
   }
 
-  switch (style.decorationStyle) {
+  switch (style.decorationStyle)
+  {
   case TextDecorationStyle::Solid:
     drawHLine(lineX, decorY, lineW, dc, thickness);
     break;
@@ -696,14 +756,16 @@ void Painter::drawTextDecorationLine(int lineX, int lineY, int lineW,
     drawHLine(lineX, decorY + 2, lineW, dc, thickness);
     break;
 
-  case TextDecorationStyle::Dotted: {
+  case TextDecorationStyle::Dotted:
+  {
     // Simulate dots by drawing short segments with gaps
     for (int px = lineX; px < lineX + lineW; px += 4)
       drawHLine(px, decorY, std::min(2, lineX + lineW - px), dc, thickness);
     break;
   }
 
-  case TextDecorationStyle::Dashed: {
+  case TextDecorationStyle::Dashed:
+  {
     for (int px = lineX; px < lineX + lineW; px += 8)
       drawHLine(px, decorY, std::min(5, lineX + lineW - px), dc, thickness);
     break;
@@ -721,7 +783,8 @@ void Painter::drawTextDecorationLine(int lineX, int lineY, int lineW,
 
 void Painter::measureRichText(const std::wstring &text, const TextStyle &style,
                               FontCache &fontCache, int maxWidth, bool softWrap,
-                              int maxLines, int &outWidth, int &outHeight) {
+                              int maxLines, int &outWidth, int &outHeight)
+{
   outWidth = outHeight = 0;
   if (text.empty())
     return;
@@ -747,7 +810,8 @@ void Painter::measureRichText(const std::wstring &text, const TextStyle &style,
   int totalLines = (maxLines > 0) ? std::min((int)lines.size(), maxLines)
                                   : (int)lines.size();
 
-  for (int i = 0; i < totalLines; ++i) {
+  for (int i = 0; i < totalLines; ++i)
+  {
     const auto &span = lines[i];
     int dummy;
     int w = measureLine(ctx.hdc, text.c_str() + span.start, span.length,
@@ -766,7 +830,8 @@ void Painter::measureRichText(const std::wstring &text, const TextStyle &style,
 // -----------------------------------------------------------------------
 
 void Painter::drawRichText(const std::wstring &text,
-                           const RichTextParams &params, FontCache &fontCache) {
+                           const RichTextParams &params, FontCache &fontCache)
+{
   if (text.empty() || params.w <= 0 || params.h <= 0)
     return;
 
@@ -799,7 +864,8 @@ void Painter::drawRichText(const std::wstring &text,
   int blockH = totalLines * lineHeightPx;
 
   int startY = params.y;
-  switch (params.textAlignVertical) {
+  switch (params.textAlignVertical)
+  {
   case TextAlignVertical::Top:
     startY = params.y;
     break;
@@ -822,7 +888,8 @@ void Painter::drawRichText(const std::wstring &text,
   SetTextColor(ctx.hdc, toColorRef(textColor));
 
   // ── Draw each line ────────────────────────────────────────────────────
-  for (int i = 0; i < totalLines; ++i) {
+  for (int i = 0; i < totalLines; ++i)
+  {
     const auto &span = lines[i];
     const wchar_t *lineStr = text.c_str() + span.start;
     int lineLen = span.length;
@@ -844,7 +911,8 @@ void Painter::drawRichText(const std::wstring &text,
     int lineX = params.x;
     bool isRTL = (params.direction == TextDirection::RTL);
 
-    switch (params.textAlign) {
+    switch (params.textAlign)
+    {
     case TextAlign::Left:
     case TextAlign::Start:
       lineX = isRTL ? (params.x + params.w - lineW) : params.x;
@@ -859,29 +927,35 @@ void Painter::drawRichText(const std::wstring &text,
       lineX = params.x + (params.w - lineW) / 2;
       break;
 
-    case TextAlign::Justify: {
+    case TextAlign::Justify:
+    {
       // For the last line (or a line shorter than the box), left-align.
       // For other lines, expand spaces to fill the full width.
       bool isLast = (i == totalLines - 1);
-      if (!isLast && lineLen > 1 && lineW < params.w) {
+      if (!isLast && lineLen > 1 && lineW < params.w)
+      {
         // Count spaces in this line
         int spaceCount = 0;
         for (int k = 0; k < lineLen; ++k)
           if (lineStr[k] == L' ')
             ++spaceCount;
 
-        if (spaceCount > 0) {
+        if (spaceCount > 0)
+        {
           int extraPerSpace = (params.w - lineW) / spaceCount;
           // Draw word by word with expanded spacing
           int curX = params.x;
           int wordStart = 0;
-          for (int k = 0; k <= lineLen; ++k) {
+          for (int k = 0; k <= lineLen; ++k)
+          {
             bool isEnd = (k == lineLen || lineStr[k] == L' ');
-            if (isEnd && k > wordStart) {
+            if (isEnd && k > wordStart)
+            {
               // Draw word
               RECT wr = {curX, lineY, curX + params.w, lineY + lineHeightPx};
               // Draw shadows first
-              for (const auto &sh : style.shadows) {
+              for (const auto &sh : style.shadows)
+              {
                 SetTextColor(ctx.hdc, toColorRef(sh.color));
                 RECT sr = wr;
                 OffsetRect(&sr, sh.offsetX, sh.offsetY);
@@ -904,7 +978,8 @@ void Painter::drawRichText(const std::wstring &text,
           }
 
           // Draw decorations for this line manually
-          if (style.decoration != TextDecoration::None) {
+          if (style.decoration != TextDecoration::None)
+          {
             if (style.hasOverline())
               drawTextDecorationLine(params.x, lineY, lineW, style,
                                      TextDecoration::Overline);
@@ -921,7 +996,8 @@ void Painter::drawRichText(const std::wstring &text,
     }
 
     // ── Per-run background color ──────────────────────────────────────
-    if (style.backgroundColor.has_value()) {
+    if (style.backgroundColor.has_value())
+    {
       RECT bgRect = {lineX, lineY, lineX + lineW, lineY + lineHeightPx};
       HBRUSH bgBr = CreateSolidBrush(toColorRef(*style.backgroundColor));
       FillRect(ctx.hdc, &bgRect, bgBr);
@@ -936,7 +1012,8 @@ void Painter::drawRichText(const std::wstring &text,
     UINT drawFlags = DT_LEFT | DT_SINGLELINE;
 
     if (isLastVisible && hasMoreLines &&
-        params.overflow == TextOverflow::Ellipsis) {
+        params.overflow == TextOverflow::Ellipsis)
+    {
       // DT_MODIFYSTRING requires a writable, null-terminated buffer
       std::wstring ellipsisLine(lineStr, lineLen);
       ellipsisLine.resize(lineLen + 4); // room for "..." + null
@@ -948,10 +1025,12 @@ void Painter::drawRichText(const std::wstring &text,
     }
 
     // ── Draw shadows ──────────────────────────────────────────────────
-    for (const auto &sh : style.shadows) {
+    for (const auto &sh : style.shadows)
+    {
       // Approximate blur by drawing multiple offset copies at lower alpha
       int blurPasses = (sh.blurRadius > 0) ? std::min(sh.blurRadius, 3) : 1;
-      for (int bp = 0; bp < blurPasses; ++bp) {
+      for (int bp = 0; bp < blurPasses; ++bp)
+      {
         Color shadowCol =
             sh.color.withAlpha(static_cast<uint8_t>(sh.color.a / blurPasses));
         SetTextColor(ctx.hdc, toColorRef(shadowCol));
@@ -977,7 +1056,8 @@ void Painter::drawRichText(const std::wstring &text,
 
     if (style.hasLineThrough() &&
         (style.decorationStyle != TextDecorationStyle::Solid ||
-         style.decorationColor != textColor)) {
+         style.decorationColor != textColor))
+    {
       // Reset baked strikeout to plain font for manual draw
       NativeFont plainFont =
           fontCache.getFont(style.fontFamily, style.scaledFontSize(),
@@ -992,7 +1072,8 @@ void Painter::drawRichText(const std::wstring &text,
 
     // ── Fade overlay (last line when overflow == Fade) ────────────────
     if (isLastVisible && hasMoreLines &&
-        params.overflow == TextOverflow::Fade) {
+        params.overflow == TextOverflow::Fade)
+    {
       // Determine what color to fade to (widget background or white)
       Color fadeBg = Color::fromRGB(255, 255, 255);
       int fadeW = std::min(60, params.w / 3);
@@ -1014,7 +1095,8 @@ void Painter::drawRichText(const std::wstring &text,
 
 void Painter::drawRichTextA(const std::string &text,
                             const RichTextParams &params,
-                            FontCache &fontCache) {
+                            FontCache &fontCache)
+{
   if (text.empty())
     return;
   int wlen = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
@@ -1028,23 +1110,135 @@ void Painter::drawArc(float cx, float cy, float radius,
                       float startAngle, float sweepAngle,
                       Color color, bool roundedCaps)
 {
+  Gdiplus::Graphics g(ctx.hdc);
+  g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+
+  Gdiplus::Pen pen(
+      Gdiplus::Color(color.a, color.r, color.g, color.b),
+      static_cast<Gdiplus::REAL>(strokeWidth));
+  pen.SetLineCap(
+      roundedCaps ? Gdiplus::LineCapRound : Gdiplus::LineCapFlat,
+      roundedCaps ? Gdiplus::LineCapRound : Gdiplus::LineCapFlat,
+      Gdiplus::DashCapRound);
+
+  constexpr float kRad2Deg = 180.0f / 3.14159265f;
+  float d = radius * 2.0f;
+  g.DrawArc(&pen,
+            cx - radius, cy - radius, d, d,
+            startAngle * kRad2Deg,
+            sweepAngle * kRad2Deg);
+}
+
+// -----------------------------------------------------------------------
+// Painter::drawImage  (Win32 / GDI+)
+// -----------------------------------------------------------------------
+
+static Gdiplus::InterpolationMode gdiInterpolationFromQuality(FilterQuality q)
+{
+  switch (q)
+  {
+  case FilterQuality::None:
+    return Gdiplus::InterpolationModeNearestNeighbor;
+  case FilterQuality::Low:
+    return Gdiplus::InterpolationModeBilinear;
+  case FilterQuality::Medium:
+    return Gdiplus::InterpolationModeHighQualityBilinear;
+  case FilterQuality::High:
+    return Gdiplus::InterpolationModeHighQualityBicubic;
+  }
+  return Gdiplus::InterpolationModeBilinear;
+}
+
+void Painter::drawImage(const ImageDrawParams &params)
+{
+  if (!params.image || params.clipW <= 0 || params.clipH <= 0)
+    return;
+
+  bool needsScale = (params.srcWidth != (int)params.destW ||
+                     params.srcHeight != (int)params.destH);
+  Gdiplus::InterpolationMode interp = needsScale
+                                          ? gdiInterpolationFromQuality(params.filterQuality)
+                                          : Gdiplus::InterpolationModeNearestNeighbor;
+
+  // ── Fast path: no border radius ──────────────────────────────────────────
+  if (params.borderRadius <= 0)
+  {
     Gdiplus::Graphics g(ctx.hdc);
-    g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+    g.SetInterpolationMode(interp);
+    g.SetClip(Gdiplus::Rect(params.clipX, params.clipY, params.clipW, params.clipH));
 
-    Gdiplus::Pen pen(
-        Gdiplus::Color(color.a, color.r, color.g, color.b),
-        static_cast<Gdiplus::REAL>(strokeWidth));
-    pen.SetLineCap(
-        roundedCaps ? Gdiplus::LineCapRound : Gdiplus::LineCapFlat,
-        roundedCaps ? Gdiplus::LineCapRound : Gdiplus::LineCapFlat,
-        Gdiplus::DashCapRound);
+    if (params.repeat != ImageRepeat::NoRepeat)
+    {
+      float tileW = params.destW, tileH = params.destH;
+      float startX = (params.repeat == ImageRepeat::RepeatY) ? params.destX : (float)params.clipX;
+      float startY = (params.repeat == ImageRepeat::RepeatX) ? params.destY : (float)params.clipY;
+      float endX = (params.repeat == ImageRepeat::RepeatY) ? params.destX + tileW : (float)(params.clipX + params.clipW);
+      float endY = (params.repeat == ImageRepeat::RepeatX) ? params.destY + tileH : (float)(params.clipY + params.clipH);
 
-    constexpr float kRad2Deg = 180.0f / 3.14159265f;
-    float d = radius * 2.0f;
-    g.DrawArc(&pen,
-              cx - radius, cy - radius, d, d,
-              startAngle * kRad2Deg,
-              sweepAngle * kRad2Deg);
+      for (float ty = startY; ty < endY; ty += tileH)
+        for (float tx = startX; tx < endX; tx += tileW)
+          g.DrawImage(params.image, Gdiplus::RectF(tx, ty, tileW, tileH));
+    }
+    else
+    {
+      g.DrawImage(params.image,
+                  Gdiplus::RectF(params.destX, params.destY, params.destW, params.destH));
+    }
+    return;
+  }
+
+  // ── Rounded corners: render to an offscreen ARGB bitmap, then blit ───────
+  int ow = params.clipW, oh = params.clipH;
+  Gdiplus::Bitmap offscreen(ow, oh, PixelFormat32bppPARGB);
+  if (offscreen.GetLastStatus() != Gdiplus::Ok)
+    return;
+
+  {
+    Gdiplus::Graphics og(&offscreen);
+    og.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+    og.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
+    og.SetInterpolationMode(interp);
+    og.Clear(Gdiplus::Color(0, 0, 0, 0));
+
+    float r = (float)params.borderRadius;
+    float diam = r * 2.0f;
+    float fw = (float)ow;
+    float fh = (float)oh;
+
+    Gdiplus::GraphicsPath path;
+    path.AddArc(0.f, 0.f, diam, diam, 180.f, 90.f);
+    path.AddArc(fw - diam, 0.f, diam, diam, 270.f, 90.f);
+    path.AddArc(fw - diam, fh - diam, diam, diam, 0.f, 90.f);
+    path.AddArc(0.f, fh - diam, diam, diam, 90.f, 90.f);
+    path.CloseFigure();
+
+    Gdiplus::Region region(&path);
+    og.SetClip(&region);
+
+    float lx = params.destX - (float)params.clipX;
+    float ly = params.destY - (float)params.clipY;
+
+    if (params.repeat != ImageRepeat::NoRepeat)
+    {
+      float tileW = params.destW, tileH = params.destH;
+      float startX = (params.repeat == ImageRepeat::RepeatY) ? lx : 0.f;
+      float startY = (params.repeat == ImageRepeat::RepeatX) ? ly : 0.f;
+      float endX = (params.repeat == ImageRepeat::RepeatY) ? lx + tileW : (float)ow;
+      float endY = (params.repeat == ImageRepeat::RepeatX) ? ly + tileH : (float)oh;
+      for (float ty = startY; ty < endY; ty += tileH)
+        for (float tx = startX; tx < endX; tx += tileW)
+          og.DrawImage(params.image, Gdiplus::RectF(tx, ty, tileW, tileH));
+    }
+    else
+    {
+      og.DrawImage(params.image, Gdiplus::RectF(lx, ly, params.destW, params.destH));
+    }
+  }
+
+  Gdiplus::Graphics g(ctx.hdc);
+  g.SetInterpolationMode(Gdiplus::InterpolationModeNearestNeighbor);
+  g.DrawImage(&offscreen,
+              Gdiplus::RectF((float)params.clipX, (float)params.clipY, (float)ow, (float)oh));
 }
 
 #endif // _WIN32

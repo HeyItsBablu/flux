@@ -3,6 +3,7 @@
 
 #include "../flux_core.hpp"
 #include "../flux_http.hpp"
+#include "../flux_painter.hpp" 
 
 // ============================================================================
 // SHARED DECODE  (stb_image — used by Linux, Android, macOS, Web)
@@ -52,29 +53,7 @@ enum class ImageFit
   ScaleDown
 };
 
-// ============================================================================
-// IMAGE REPEAT
-// ============================================================================
 
-enum class ImageRepeat
-{
-  NoRepeat,
-  Repeat,
-  RepeatX,
-  RepeatY
-};
-
-// ============================================================================
-// FILTER QUALITY
-// ============================================================================
-
-enum class FilterQuality
-{
-  None,
-  Low,
-  Medium,
-  High
-};
 
 // ============================================================================
 // IMAGE LOAD STATE

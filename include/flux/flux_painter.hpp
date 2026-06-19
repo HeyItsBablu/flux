@@ -7,6 +7,44 @@
 #include <string>
 #include <vector>
 
+// ── Native image handle (platform-specific) ────────────────────────────────
+#ifdef _WIN32
+namespace Gdiplus
+{
+    class Bitmap;
+}
+using NativeImage = Gdiplus::Bitmap *;
+#elif defined(__APPLE__) && !defined(__ANDROID__)
+using NativeImage = struct CGImage *;
+#elif defined(__ANDROID__)
+using NativeImage = int; // NanoVG image handle (nvgImage)
+#elif defined(__linux__)
+typedef struct _cairo_surface cairo_surface_t;
+using NativeImage = cairo_surface_t *;
+#elif defined(__EMSCRIPTEN__)
+using NativeImage = int; // OffscreenCanvas store key
+#else
+using NativeImage = void *;
+#endif
+
+// ── Image repeat / filter quality (moved here from flux_image.hpp — these
+//    describe HOW Painter draws an image, not widget state) ────────────────
+enum class ImageRepeat
+{
+    NoRepeat,
+    Repeat,
+    RepeatX,
+    RepeatY
+};
+
+enum class FilterQuality
+{
+    None,
+    Low,
+    Medium,
+    High
+};
+
 struct Painter
 {
     GraphicsContext &ctx;
@@ -155,6 +193,35 @@ struct Painter
                  int strokeWidth,
                  float startAngle, float sweepAngle,
                  Color color, bool roundedCaps);
+
+    // =========================================================================
+    // IMAGE DRAWING — the only place that issues system image-blit calls.
+    // ImageWidget/_platformRender prepares `image` (already decoded, and
+    // ideally pre-scaled to destW/destH) and hands it here. If srcWidth/
+    // srcHeight differ from destW/destH, drawImage scales at draw time using
+    // filterQuality — this covers both the "cache hit" (srcW==destW) and
+    // "fallback, not yet cached" (srcW==original image size) cases uniformly.
+    // =========================================================================
+
+    struct ImageDrawParams
+    {
+        NativeImage image = nullptr; // platform-native, already-decoded image
+        int srcWidth = 0;
+        int srcHeight = 0;
+
+        // Clip rect == widget's padded content rect; also bounds repeat tiling.
+        int clipX = 0, clipY = 0, clipW = 0, clipH = 0;
+
+        // Single-tile placement rect, already computed by the widget's
+        // fit/alignment math (e.g. ImageWidget::_calculateDestRect).
+        float destX = 0, destY = 0, destW = 0, destH = 0;
+
+        int borderRadius = 0;
+        ImageRepeat repeat = ImageRepeat::NoRepeat;
+        FilterQuality filterQuality = FilterQuality::Low;
+    };
+
+    void drawImage(const ImageDrawParams &params);
 };
 
 #endif // FLUX_PAINTER_HPP
