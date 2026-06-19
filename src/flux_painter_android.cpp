@@ -809,4 +809,17 @@ void Painter::drawImage(const ImageDrawParams &params)
     nvgRestore(s_vg);
 }
 
+void Painter::drawVideo(const VideoDrawParams& params)
+{
+    if (!s_vg || params.frame == -1 || params.dstW <= 0) return;
+    NVGpaint paint = nvgImagePattern(s_vg,
+        params.dstX, params.dstY,
+        params.dstW, params.dstH,
+        0.f, params.frame, 1.f);
+    nvgBeginPath(s_vg);
+    nvgRect(s_vg, params.dstX, params.dstY, params.dstW, params.dstH);
+    nvgFillPaint(s_vg, paint);
+    nvgFill(s_vg);
+}
+
 #endif // __ANDROID__

@@ -1206,4 +1206,21 @@ void Painter::drawImage(const ImageDrawParams &params)
     }
 }
 
+void Painter::drawVideo(const VideoDrawParams& params)
+{
+    if (!params.frame || params.dstW <= 0 || params.dstH <= 0) return;
+    cairo_t* cr = ctx.cr;
+    cairo_save(cr);
+    // _cairoSurf dimensions come from the surface itself
+    int srcW = cairo_image_surface_get_width(params.frame);
+    int srcH = cairo_image_surface_get_height(params.frame);
+    cairo_translate(cr, params.dstX, params.dstY);
+    cairo_scale(cr, (double)params.dstW/srcW, (double)params.dstH/srcH);
+    cairo_set_source_surface(cr, params.frame, 0, 0);
+    cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_BILINEAR);
+    cairo_rectangle(cr, 0, 0, srcW, srcH);
+    cairo_fill(cr);
+    cairo_restore(cr);
+}
+
 #endif // __linux__

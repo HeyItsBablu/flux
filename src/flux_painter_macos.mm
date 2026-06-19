@@ -515,4 +515,18 @@ void Painter::drawImage(const ImageDrawParams &params)
 
     CGContextRestoreGState(cgCtx);
 }
+
+void Painter::drawVideo(const VideoDrawParams& params)
+{
+    if (!params.frame || params.dstW <= 0 || params.dstH <= 0) return;
+    CGContextRef cg = ctx.cgContext;
+    CGContextSaveGState(cg);
+    CGContextTranslateCTM(cg, params.dstX, params.dstY + params.dstH);
+    CGContextScaleCTM(cg, 1.0, -1.0);
+    CGContextSetInterpolationQuality(cg, kCGInterpolationHigh);
+    CGContextDrawImage(cg,
+        CGRectMake(0, 0, params.dstW, params.dstH),
+        (CGImageRef)params.frame);
+    CGContextRestoreGState(cg);
+}
 #endif // __APPLE__
