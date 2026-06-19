@@ -27,6 +27,24 @@
 // NOTE: Navigator::push(widget) and Navigator::pushReplacement(widget)
 //       are intentionally removed. All navigation must use named routes.
 //
+// PASSING ARGUMENTS:
+//   Navigator::navigate("/details", productId); // any type, via std::any
+//
+//   class DetailsPage : public Widget {
+//   public:
+//       DetailsPage() { id = Navigator::arguments<int>(); } // ctor only!
+//       int id = 0;
+//       WidgetPtr build() override { ... }
+//   };
+//
+//   Navigator::arguments<T>()        — read once, in the destination
+//                                       widget's CONSTRUCTOR only.
+//   Navigator::currentArguments<T>() — safe to read any time the route is
+//                                       current (build(), callbacks, etc).
+//
+//   Arguments are in-memory only — they don't survive a web page refresh
+//   or get encoded into the URL hash.
+//
 // WEB (Emscripten):
 //   On web builds, every stack mutation also syncs the browser URL hash
 //   (e.g. "#/settings") via history.pushState/replaceState, and the
@@ -39,6 +57,7 @@
 #include "flux/flux_core.hpp"
 #include "flux/flux_app.hpp"
 
+#include <any>
 #include <functional>
 #include <initializer_list>
 #include <iostream>
@@ -57,6 +76,7 @@ struct NavEntry
 {
     WidgetPtr widget;
     std::string name;
+    std::any arguments;
 };
 
 // ============================================================================
@@ -144,7 +164,10 @@ public:
     // ── Named navigation ─────────────────────────────────────────────────────
 
     // Push a new instance of the named route onto the stack.
-    static bool navigate(const std::string &name)
+    // `arguments` is readable in the destination widget's constructor via
+    // Navigator::arguments<T>(), and any time thereafter via
+    // Navigator::currentArguments<T>().
+    static bool navigate(const std::string &name, std::any arguments = {})
     {
         auto *builder = findRoute(name, "navigate");
         if (!builder)
@@ -152,7 +175,11 @@ public:
         if (!checkHost())
             return false;
 
-        _stack.push_back({(*builder)(), name});
+        _pendingArguments = std::move(arguments);
+        WidgetPtr widget = (*builder)();
+        _stack.push_back({widget, name, _pendingArguments});
+        _pendingArguments.reset();
+
         _rebuild();
 #ifdef __EMSCRIPTEN__
         _setHash(name, /*replace=*/false);
@@ -161,7 +188,7 @@ public:
     }
 
     // Replace the top of the stack with a new instance of the named route.
-    static bool pushReplacementNamed(const std::string &name)
+    static bool pushReplacementNamed(const std::string &name, std::any arguments = {})
     {
         auto *builder = findRoute(name, "pushReplacementNamed");
         if (!builder)
@@ -171,7 +198,12 @@ public:
 
         if (!_stack.empty())
             _stack.pop_back();
-        _stack.push_back({(*builder)(), name});
+
+        _pendingArguments = std::move(arguments);
+        WidgetPtr widget = (*builder)();
+        _stack.push_back({widget, name, _pendingArguments});
+        _pendingArguments.reset();
+
         _rebuild();
 #ifdef __EMSCRIPTEN__
         _setHash(name, /*replace=*/true);
@@ -180,7 +212,7 @@ public:
     }
 
     // Clear the entire stack and push the named route as the new root.
-    static bool pushAndRemoveAllNamed(const std::string &name)
+    static bool pushAndRemoveAllNamed(const std::string &name, std::any arguments = {})
     {
         auto *builder = findRoute(name, "pushAndRemoveAllNamed");
         if (!builder)
@@ -189,7 +221,12 @@ public:
             return false;
 
         _stack.clear();
-        _stack.push_back({(*builder)(), name});
+
+        _pendingArguments = std::move(arguments);
+        WidgetPtr widget = (*builder)();
+        _stack.push_back({widget, name, _pendingArguments});
+        _pendingArguments.reset();
+
         _rebuild();
 #ifdef __EMSCRIPTEN__
         _setHash(name, /*replace=*/true);
@@ -244,6 +281,32 @@ public:
         return _routes.count(name) > 0;
     }
 
+    // ── Arguments ────────────────────────────────────────────────────────────
+
+    // Call from your destination widget's CONSTRUCTOR (not build()) to read
+    // the value passed to navigate()/pushReplacementNamed()/pushAndRemoveAllNamed().
+    // Returns defaultValue if no arguments were passed or the type doesn't match.
+    template <typename T>
+    static T arguments(T defaultValue = T())
+    {
+        if (auto *p = std::any_cast<T>(&_pendingArguments))
+            return *p;
+        return defaultValue;
+    }
+
+    // Safe to call any time the route is current — from build(), event
+    // handlers, nested children, etc. Reads from the stack entry rather
+    // than the transient value used only during construction.
+    template <typename T>
+    static T currentArguments(T defaultValue = T())
+    {
+        if (_stack.empty())
+            return defaultValue;
+        if (auto *p = std::any_cast<T>(&_stack.back().arguments))
+            return *p;
+        return defaultValue;
+    }
+
     // ── Internal ─────────────────────────────────────────────────────────────
 
     static void _setHost(NavigatorWidget *w) { _host = w; }
@@ -282,6 +345,7 @@ public:
         }
 
         // Not in the stack — forward navigation or a deep link to a known route.
+        // Note: no arguments are available on this path (see header comment).
         auto it = _routes.find(name);
         if (it != _routes.end())
         {
@@ -302,6 +366,7 @@ private:
     static NavigatorWidget *_host;
     static std::vector<NavEntry> _stack;
     static std::unordered_map<std::string, RouteBuilder> _routes;
+    static std::any _pendingArguments;
 
     // Returns a pointer to the builder for the given route, or nullptr.
     static const RouteBuilder *findRoute(const std::string &name,
@@ -342,7 +407,8 @@ private:
                 history.replaceState(null, '', '#' + name);
             } else {
                 location.hash = name;
-            } }, name.c_str(), replace ? 1 : 0);
+            }
+        }, name.c_str(), replace ? 1 : 0);
     }
 
     // Reads location.hash at startup, for deep-linking
@@ -352,7 +418,8 @@ private:
         char buf[256] = {0};
         EM_ASM({
             var h = location.hash.length > 1 ? location.hash.slice(1) : '';
-            stringToUTF8(h, $0, $1); }, buf, (int)sizeof(buf));
+            stringToUTF8(h, $0, $1);
+        }, buf, (int)sizeof(buf));
         return std::string(buf);
     }
 #endif
@@ -362,6 +429,7 @@ inline NavigatorWidget *Navigator::_host = nullptr;
 inline std::vector<NavEntry> Navigator::_stack = {};
 inline std::unordered_map<std::string, Navigator::RouteBuilder>
     Navigator::_routes = {};
+inline std::any Navigator::_pendingArguments = {};
 
 // ============================================================================
 // NAVIGATOR WIDGET  (unchanged from original)

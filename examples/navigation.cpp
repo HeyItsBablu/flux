@@ -4,12 +4,15 @@
 class PageTwo : public Widget
 {
 public:
+  PageTwo() { productId = Navigator::arguments<int>(-1); } // read in ctor
+
+  int productId;
+
   WidgetPtr build() override
   {
     return Scaffold(
         AppBar("Page Two"),
-        Expanded(Center(Button("Go Back", []
-                               { Navigator::pop(); }))),
+        Expanded(Center(Text("Product #" + std::to_string(productId)))),
         nullptr, nullptr);
   }
 };
@@ -22,7 +25,7 @@ public:
     return Scaffold(
         AppBar("Page One"),
         Expanded(Center(Button("Go to Page Two", []
-                               { Navigator::navigate("/settings"); }))),
+                               { Navigator::navigate("/settings", 42); }))),
         nullptr, nullptr);
   }
 };
