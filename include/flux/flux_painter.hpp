@@ -222,6 +222,34 @@ struct Painter
     };
 
     void drawImage(const ImageDrawParams &params);
+
+    struct VideoDrawParams
+    {
+        // ── Destination rect (letterboxed, computed by widget) ────────────────
+        int dstX = 0, dstY = 0, dstW = 0, dstH = 0;
+
+        // ── Platform frame handle ─────────────────────────────────────────────
+        // macOS  : CGImageRef        cast to NativeImage
+        // Linux  : cairo_surface_t*  cast to NativeImage
+        // Android: NVG image handle  (int, stored as NativeImage)
+        // Web    : unused            (video element blits itself)
+        // Win32  : unused            (uses pixels + bmi below)
+        NativeImage frame{};
+
+        // ── Win32 only ────────────────────────────────────────────────────────
+#ifdef _WIN32
+        const void *pixels = nullptr;    // _frameCache.data()
+        const BITMAPINFO *bmi = nullptr; // &_cachedBmi
+        int srcW = 0, srcH = 0;
+#endif
+
+        // ── Android only ──────────────────────────────────────────────────────
+#ifdef __ANDROID__
+        int srcW = 0, srcH = 0;
+#endif
+    };
+
+    void drawVideo(const VideoDrawParams &params);
 };
 
 #endif // FLUX_PAINTER_HPP

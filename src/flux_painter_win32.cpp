@@ -1241,4 +1241,20 @@ void Painter::drawImage(const ImageDrawParams &params)
               Gdiplus::RectF((float)params.clipX, (float)params.clipY, (float)ow, (float)oh));
 }
 
+void Painter::drawVideo(const VideoDrawParams &params)
+{
+  if (!params.pixels || !params.bmi ||
+      params.srcW <= 0 || params.srcH <= 0 ||
+      params.dstW <= 0 || params.dstH <= 0)
+    return;
+
+  ::SetStretchBltMode(ctx.hdc, HALFTONE);
+  ::SetBrushOrgEx(ctx.hdc, 0, 0, nullptr);
+  ::StretchDIBits(ctx.hdc,
+                  params.dstX, params.dstY, params.dstW, params.dstH,
+                  0, 0, params.srcW, params.srcH,
+                  params.pixels, params.bmi,
+                  DIB_RGB_COLORS, SRCCOPY);
+}
+
 #endif // _WIN32

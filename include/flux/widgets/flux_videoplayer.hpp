@@ -377,12 +377,15 @@ public:
                     dstY = (float)y;
                 }
 
-                NVGpaint imgPaint = nvgImagePattern(vg, dstX, dstY, dstW, dstH,
-                                                    0.f, _nvgImage, 1.f);
-                nvgBeginPath(vg);
-                nvgRect(vg, dstX, dstY, dstW, dstH);
-                nvgFillPaint(vg, imgPaint);
-                nvgFill(vg);
+                Painter::VideoDrawParams vp;
+                vp.frame = _nvgImage;
+                vp.srcW = _fboW;
+                vp.srcH = _fboH;
+                vp.dstX = (int)dstX;
+                vp.dstY = (int)dstY;
+                vp.dstW = (int)dstW;
+                vp.dstH = (int)dstH;
+                p.drawVideo(vp);
 
                 if (_barVisible)
                     p.fillRect(x, y, width, videoAreaH, colOverlay);
@@ -391,18 +394,6 @@ public:
 
 #elif defined(__APPLE__) && TARGET_OS_OSX
         {
-            // ── macOS: CoreGraphics blit path ─────────────────────────────────
-            //
-            // flux_video_macos.mm delivers RGB24 frames via the same
-            // hasNewFrame() / lockFrame() API as Win32 and Linux.
-            // We cache the latest frame, convert it to a CGImage each render,
-            // and let CoreGraphics handle letterboxed scaling.
-            //
-            // NOTE: We rebuild the CGImage on every new frame rather than
-            // caching it — CGImage is immutable and creating one is cheap
-            // compared to a full decode. If profiling shows it matters,
-            // introduce a CGBitmapContext that we blit into instead.
-
             if (_finishedPending.exchange(false))
             {
                 _playing = false;
@@ -415,13 +406,11 @@ public:
                 auto frame = FluxVideo::get().lockFrame();
                 if (frame.data && frame.width > 0 && frame.height > 0)
                 {
-                    // Copy row by row to strip any row-padding from the decoder.
                     int expectedStride = frame.width * 3;
                     _frameCache.resize((size_t)(frame.width * frame.height * 3));
                     if (frame.stride == expectedStride)
                     {
-                        memcpy(_frameCache.data(), frame.data,
-                               _frameCache.size());
+                        memcpy(_frameCache.data(), frame.data, _frameCache.size());
                     }
                     else
                     {
@@ -443,7 +432,6 @@ public:
 
             if (!_frameCache.empty() && _cachedSrcW > 0 && ctx.cgContext)
             {
-                // Rebuild the CGImage only when a new frame arrived.
                 if (_cgImageDirty)
                 {
                     _cgImageDirty = false;
@@ -452,26 +440,10 @@ public:
 
                 if (_cgImage)
                 {
-                    int dstX, dstY, dstW, dstH;
-                    _letterbox(_cachedSrcW, _cachedSrcH, dstX, dstY, dstW, dstH);
-
-                    CGContextRef cg = ctx.cgContext;
-                    CGContextSaveGState(cg);
-
-                    // CoreGraphics draws images with the origin at bottom-left
-                    // and y increasing upward, which is the opposite of our
-                    // widget coordinate system (top-left, y downward).
-                    // Flip the CTM so that (dstX, dstY) refers to the top-left
-                    // corner of the destination rect as seen on screen.
-                    CGContextTranslateCTM(cg, dstX, dstY + dstH);
-                    CGContextScaleCTM(cg, 1.0, -1.0);
-
-                    CGContextSetInterpolationQuality(cg, kCGInterpolationHigh);
-                    CGContextDrawImage(cg,
-                                       CGRectMake(0, 0, (CGFloat)dstW, (CGFloat)dstH),
-                                       _cgImage);
-
-                    CGContextRestoreGState(cg);
+                    Painter::VideoDrawParams vp;
+                    vp.frame = (NativeImage)_cgImage;
+                    _letterbox(_cachedSrcW, _cachedSrcH, vp.dstX, vp.dstY, vp.dstW, vp.dstH);
+                    p.drawVideo(vp);
                 }
             }
         }
@@ -496,7 +468,7 @@ public:
                     _cachedBmi = {};
                     _cachedBmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
                     _cachedBmi.bmiHeader.biWidth = frame.width;
-                    _cachedBmi.bmiHeader.biHeight = -frame.height; // top-down
+                    _cachedBmi.bmiHeader.biHeight = -frame.height;
                     _cachedBmi.bmiHeader.biPlanes = 1;
                     _cachedBmi.bmiHeader.biBitCount = 24;
                     _cachedBmi.bmiHeader.biCompression = BI_RGB;
@@ -506,14 +478,13 @@ public:
 
             if (!_frameCache.empty() && _cachedSrcW > 0)
             {
-                int dstX, dstY, dstW, dstH;
-                _letterbox(_cachedSrcW, _cachedSrcH, dstX, dstY, dstW, dstH);
-                ::SetStretchBltMode(ctx.hdc, HALFTONE);
-                ::SetBrushOrgEx(ctx.hdc, 0, 0, nullptr);
-                ::StretchDIBits(ctx.hdc, dstX, dstY, dstW, dstH,
-                                0, 0, _cachedSrcW, _cachedSrcH,
-                                _frameCache.data(), &_cachedBmi,
-                                DIB_RGB_COLORS, SRCCOPY);
+                Painter::VideoDrawParams vp;
+                vp.pixels = _frameCache.data();
+                vp.bmi = &_cachedBmi;
+                vp.srcW = _cachedSrcW;
+                vp.srcH = _cachedSrcH;
+                _letterbox(_cachedSrcW, _cachedSrcH, vp.dstX, vp.dstY, vp.dstW, vp.dstH);
+                p.drawVideo(vp);
             }
         }
 
@@ -545,33 +516,15 @@ public:
                 _updateCairoPixels();
                 cairo_surface_mark_dirty(_cairoSurf);
 
-                int dstX, dstY, dstW, dstH;
-                _letterbox(_cachedSrcW, _cachedSrcH, dstX, dstY, dstW, dstH);
-
-                cairo_save(ctx.cr);
-                cairo_translate(ctx.cr, dstX, dstY);
-                cairo_scale(ctx.cr,
-                            (double)dstW / (double)_cachedSrcW,
-                            (double)dstH / (double)_cachedSrcH);
-                cairo_set_source_surface(ctx.cr, _cairoSurf, 0, 0);
-                cairo_pattern_set_filter(cairo_get_source(ctx.cr), CAIRO_FILTER_BILINEAR);
-                cairo_rectangle(ctx.cr, 0, 0, _cachedSrcW, _cachedSrcH);
-                cairo_fill(ctx.cr);
-                cairo_restore(ctx.cr);
+                Painter::VideoDrawParams vp;
+                vp.frame = (NativeImage)_cairoSurf;
+                _letterbox(_cachedSrcW, _cachedSrcH, vp.dstX, vp.dstY, vp.dstW, vp.dstH);
+                p.drawVideo(vp);
             }
         }
 
 #elif defined(__EMSCRIPTEN__)
         {
-            // ── Web: Canvas2D blit path ────────────────────────────────────
-            //
-            // flux_video_web.cpp's hidden <video> element does its own
-            // demux/decode/A-V sync, so there's no CPU pixel buffer to lock
-            // like Win32/Linux/macOS. hasNewFrame() just means "the element
-            // has a frame ready" — every call that returns true blits
-            // whatever frame the browser currently holds straight into the
-            // shared canvas, so we only need the destination rect.
-
             if (_finishedPending.exchange(false))
             {
                 _playing = false;
@@ -586,18 +539,16 @@ public:
                 int srcH = vid.getVideoHeight();
                 if (srcW > 0 && srcH > 0)
                 {
-                    int dstX, dstY, dstW, dstH;
-                    _letterbox(srcW, srcH, dstX, dstY, dstW, dstH);
-                    vid.renderFrame(dstX, dstY, dstW, dstH);
+                    Painter::VideoDrawParams vp;
+                    _letterbox(srcW, srcH, vp.dstX, vp.dstY, vp.dstW, vp.dstH);
+                    p.drawVideo(vp);
                 }
                 _progress = vid.getProgress();
             }
         }
 #endif
 
-        // ── Shared bar + center-play overlay ──────────────────────────────────
-
-        // ── Shared bar + center-play overlay ──────────────────────────────────
+        // ── Shared bar + center-play overlay ──────────────────────────────────────
         if (_barVisible)
             _renderBar(ctx, fontCache, p);
         if (!_playing && _barVisible)
