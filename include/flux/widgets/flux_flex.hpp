@@ -181,8 +181,6 @@ private:
     int containerCrossSize_ = 0;
     int totalCross_ = 0;
 
-    
-
     // ── helpers ──────────────────────────────────────────────────────────────
 
     FlexProps resolveProps() const
@@ -859,9 +857,14 @@ public:
 
     bool handleMouseMove(int mx, int my) override
     {
+        int cbx = x + resolved_.paddingLeft;
+        int cby = y + resolved_.paddingTop;
+        int cbw = width - resolved_.paddingLeft - resolved_.paddingRight;
+        int cbh = height - resolved_.paddingTop - resolved_.paddingBottom;
+
         if (sb_.isDragging)
         {
-            if (!sb_.onMouseMove(mx, my, x, y, width, height))
+            if (!sb_.onMouseMove(mx, my, cbx, cby, cbw, cbh))
                 return false;
             repositionChildren();
             markNeedsPaint();
@@ -880,7 +883,7 @@ public:
             }
             return true;
         }
-        if (sb_.onMouseMove(mx, my, x, y, width, height))
+        if (sb_.onMouseMove(mx, my, cbx, cby, cbw, cbh))
         {
             markNeedsPaint();
             return true;
@@ -890,7 +893,12 @@ public:
     bool handleMouseDown(int mx, int my) override
     {
         stopFling();
-        if (sb_.onMouseDown(mx, my, x, y, width, height))
+        int cbx = x + resolved_.paddingLeft;
+        int cby = y + resolved_.paddingTop;
+        int cbw = width - resolved_.paddingLeft - resolved_.paddingRight;
+        int cbh = height - resolved_.paddingTop - resolved_.paddingBottom;
+
+        if (sb_.onMouseDown(mx, my, cbx, cby, cbw, cbh))
         {
             if (sb_.isDragging)
                 if (auto *ui = FluxUI::getCurrentInstance())
@@ -977,7 +985,11 @@ public:
         if (P.hasBorder)
             painter.drawBorder(x, y, width, height, P.borderRadius, P.borderColor, P.borderWidth);
 
-        sb_.render(ctx, x, y, width, height);
+        int cbx = x + P.paddingLeft;
+        int cby = y + P.paddingTop;
+        int cbw = width - P.paddingLeft - P.paddingRight;
+        int cbh = height - P.paddingTop - P.paddingBottom;
+        sb_.render(ctx, cbx, cby, cbw, cbh);
         needsPaint = false;
     }
 };
