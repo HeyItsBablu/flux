@@ -4,7 +4,7 @@
 #include "../flux_core.hpp"
 #include "../flux_state.hpp"
 #include "../flux_gesture.hpp"
-#include "flux_collection.hpp" 
+#include "flux_collection.hpp"
 #include <functional>
 #include <vector>
 #include <algorithm>
@@ -135,16 +135,6 @@ struct FlexProps
 // ============================================================================
 
 template <typename T>
-inline std::shared_ptr<T> FlexItem(std::shared_ptr<T> child, int grow = 0,
-                                   int shrink = 1, int basis = -1, int order = 0)
-{
-    child->flexGrow = grow;
-    child->flexShrink = shrink;
-    child->flexBasis = basis;
-    child->order = order;
-    return child;
-}
-template <typename T>
 inline std::shared_ptr<T> WidthMode(std::shared_ptr<T> w, SizeMode m)
 {
     w->widthMode = m;
@@ -156,9 +146,6 @@ inline std::shared_ptr<T> HeightMode(std::shared_ptr<T> w, SizeMode m)
     w->heightMode = m;
     return w;
 }
-
-
-
 
 // ============================================================================
 // FLEX WIDGET
@@ -351,6 +338,31 @@ public:
     {
         height = h;
         heightMode = SizeMode::Fixed;
+        markNeedsLayout();
+        return self();
+    }
+
+    std::shared_ptr<FlexWidget> setFlexGrow(int g)
+    {
+        flexGrow = g;
+        markNeedsLayout();
+        return self();
+    }
+    std::shared_ptr<FlexWidget> setFlexShrink(int s)
+    {
+        flexShrink = s;
+        markNeedsLayout();
+        return self();
+    }
+    std::shared_ptr<FlexWidget> setFlexBasis(int b)
+    {
+        flexBasis = b;
+        markNeedsLayout();
+        return self();
+    }
+    std::shared_ptr<FlexWidget> setOrder(int o)
+    {
+        order = o;
         markNeedsLayout();
         return self();
     }
