@@ -59,26 +59,6 @@ WidgetPtr FluxUI::findByIdRecursive(WidgetPtr widget, const std::string &id)
     return nullptr;
 }
 
-// ============================================================================
-// SCAFFOLD LOOKUP — unrelated to overlays; only backs getRootScaffold()
-// ============================================================================
-
-namespace
-{
-    ScaffoldWidget *findScaffold(Widget *widget)
-    {
-        if (!widget)
-            return nullptr;
-        if (auto *s = dynamic_cast<ScaffoldWidget *>(widget))
-            return s;
-        for (auto &child : widget->children)
-        {
-            if (auto *s = findScaffold(child.get()))
-                return s;
-        }
-        return nullptr;
-    }
-} // namespace
 
 // ============================================================================
 // CALLBACK WIRING
@@ -292,7 +272,7 @@ void FluxUI::rebuild()
     overlayMgr_.closeAll();
 
     root = builder();
-    cachedScaffold_ = findScaffold(root.get()); // unrelated to overlays — see getRootScaffold()
+  
 
     if (window.valid())
     {
@@ -467,7 +447,3 @@ void FluxUI::setResizeCursorH() { window.setResizeCursorH(); }
 void FluxUI::setResizeCursorV() { window.setResizeCursorV(); }
 void FluxUI::setDefaultCursor() { window.setDefaultCursor(); }
 
-ScaffoldWidget *FluxUI::getRootScaffold()
-{
-    return cachedScaffold_;
-}

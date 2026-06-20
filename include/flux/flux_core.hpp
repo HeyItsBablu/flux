@@ -59,9 +59,7 @@ private:
 
   std::unordered_map<const void *, std::shared_ptr<void>> appSingletons_;
 
-  // Resolved once per rebuild(); used only by getRootScaffold(). Has no
-  // relationship to overlays anymore — that's entirely owned by overlayMgr_.
-  ScaffoldWidget *cachedScaffold_ = nullptr;
+
 
   // Owns everything overlay-related: native popups, z-order, input dispatch.
   // Widgets talk to it directly via overlays(); core never needs to know
@@ -151,7 +149,7 @@ public:
     return std::static_pointer_cast<T>(it->second);
   }
 
-  ScaffoldWidget *getRootScaffold();
+
 };
 
 #endif // FLUX_CORE_HPP
