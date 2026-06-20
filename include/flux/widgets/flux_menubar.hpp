@@ -40,7 +40,8 @@
 //       ContextMenuItem::Action("Exit", []{...}),
 //   })
 //
-//   // Plug into Scaffold's appBar slot alongside (or instead of) AppBar:
+//   // Just add it like any other widget — no Scaffold wiring needed, the
+//   // OverlayManager (owned by FluxUI) handles popup mechanics:
 //   Scaffold(menuBar, body)
 // ============================================================================
 
@@ -55,13 +56,20 @@ struct MenuBarItem
 };
 
 // ============================================================================
-// PULLDOWN POPUP  (one instance, re-used for every open menu)
+// MENU BAR WIDGET
 // ============================================================================
-// Shares the exact rendering code from ContextMenuWidget — same shadow,
-// same rounded rect, same item/separator geometry.  Only the open trigger
-// differs (left-click on the bar button vs right-click on an anchor).
+// Shares the exact rendering approach as ContextMenuWidget — same shadow,
+// same rounded rect, same item/separator geometry. Only the open trigger
+// differs (left-click on the bar button vs right-click on an anchor), and
+// there's a second open trigger besides: hot-tracking between bar buttons
+// while a menu is already open.
+//
+// renderOverlay()/onOverlay*() all operate in coordinates LOCAL to the
+// popup's own rect — (0,0) is the popup's top-left corner. OverlayManager
+// handles screen-space conversion, monitor clamping, and native popup
+// creation; this widget never touches any of that.
 
-class MenuBarWidget : public Widget, public OverlayHost
+class MenuBarWidget : public Widget, public OverlayContent
 {
 public:
   // ── Appearance ───────────────────────────────────────────────────────────
@@ -93,19 +101,29 @@ public:
   // ── State ─────────────────────────────────────────────────────────────────
   int openMenuIndex = -1; // which top-level entry is open (-1 = none)
   int hoveredBtn = -1;    // which button the mouse is over
-  int hoveredItem = -1;   // which drop-down item is hovered
+  int hoveredItem = -1;   // which drop-down item is hovered (popup-local)
 
   explicit MenuBarWidget(std::vector<MenuBarItem> entries)
       : entries_(std::move(entries)) {}
-
-  // OverlayHost
-  void setScaffold(ScaffoldWidget *s) override { scaffold_ = s; }
 
   void onDetach() override
   {
     if (openMenuIndex >= 0)
       closeMenu_();
     Widget::onDetach();
+  }
+
+  // ── OverlayContent ────────────────────────────────────────────────────────
+  OverlayPolicy overlayPolicy() const override
+  {
+    // Same reasoning as ContextMenuWidget: modal = true so every click
+    // while open is consumed (including outside clicks, which close it).
+    // blocksHoverBelow stays false — an open pulldown never pauses
+    // hover/tooltips elsewhere in the app, and critically it must NOT
+    // block hover reaching this same widget's bar buttons, or
+    // hot-tracking between File/Edit/View would stop working while a
+    // menu is open.
+    return {/*modal=*/true, /*blocksHoverBelow=*/false, /*capturesKeyboard=*/true};
   }
 
   // ── Layout ────────────────────────────────────────────────────────────────
@@ -176,9 +194,11 @@ public:
     needsPaint = false;
   }
 
-  // ── renderPopupContent ────────────────────────────────────────────────────
-  // Draws the open drop-down list into the layered popup DC.
-  void renderPopupContent(GraphicsContext &ctx, FontCache &fontCache) override
+  // ── renderOverlay ─────────────────────────────────────────────────────────
+  // Draws the open drop-down list. Fully local coordinates — (0,0) is the
+  // popup's own top-left corner, identical in spirit to
+  // ContextMenuWidget::renderOverlay().
+  void renderOverlay(GraphicsContext &ctx, FontCache &fontCache) override
   {
     if (openMenuIndex < 0)
       return;
@@ -190,12 +210,12 @@ public:
     Painter painter(ctx);
 
     // Shadow
-    painter.fillRoundedRegion(shadowOffset, shadowOffset, mW, mH,
-                              menuBorderRadius * 2, Color::fromRGB(0, 0, 0));
+    painter.fillRoundedRect(shadowOffset, shadowOffset, mW, mH,
+                            menuBorderRadius, Color::fromRGBA(0, 0, 0, 60));
 
     // Background + border
-    painter.fillRoundedRectGDI(0, 0, mW, mH, menuBorderRadius * 2, menuBgColor,
-                               menuBorderColor, 1);
+    painter.fillRoundedRect(0, 0, mW, mH, menuBorderRadius, menuBgColor);
+    painter.drawBorder(0, 0, mW, mH, menuBorderRadius, menuBorderColor, 1);
 
     // Items
     NativeFont hFont = fontCache.getFont(menuFontSize, FontWeight::Normal);
@@ -208,7 +228,7 @@ public:
       if (item.type == ContextMenuItem::Type::Separator)
       {
         int sy = curY + separatorHeight / 2;
-        painter.drawHLine(menuPadH, sy, mW - menuPadH * 2, separatorColor, 1);
+        painter.drawLine(menuPadH, sy, mW - menuPadH, sy, separatorColor, 1);
         curY += separatorHeight;
       }
       else if (item.type == ContextMenuItem::Type::Widget && item.widget)
@@ -247,8 +267,9 @@ public:
         if (i == hoveredItem && item.enabled)
           painter.fillRect(2, curY, mW - 4, itemHeight, itemHoverColor);
 
-        painter.drawTextA(
-            item.label, menuPadH, curY, mW - menuPadH * 2, itemHeight, hFont,
+        std::wstring wlabel = toWideString(item.label);
+        painter.drawText(
+            wlabel, menuPadH, curY, mW - menuPadH * 2, itemHeight, hFont,
             item.enabled ? itemTextColor : itemDisabledColor,
             DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
         curY += itemHeight;
@@ -256,119 +277,72 @@ public:
     }
   }
 
-  // ── Mouse events ──────────────────────────────────────────────────────────
+  // ── OverlayContent input handlers (popup-local coordinates) ─────────────
 
-  bool handleMouseDown(int mx, int my) override
+  bool onOverlayMouseDown(int localX, int localY) override
   {
-    // Click on a bar button
-    int btnIdx = hitTestBar_(mx, my);
-    if (btnIdx >= 0)
+    if (openMenuIndex < 0)
+      return false;
+
+    int itemIdx = hitTestPopupLocal_(localX, localY);
+    if (itemIdx >= 0)
     {
-      if (openMenuIndex == btnIdx)
+      const auto &item = entries_[openMenuIndex].items[itemIdx];
+
+      if (item.type == ContextMenuItem::Type::Widget && item.widget)
       {
-        closeMenu_(); // toggle closed
+        // Forward click into the embedded widget (already popup-local —
+        // no coordinate translation needed, unlike the old screen-coord
+        // version). Do NOT auto-close before this if you want the widget
+        // to own its own lifecycle; preserved here exactly as the
+        // ContextMenuWidget migration did, with the same caveat noted
+        // there: this still closes first. Flagging again — fix together
+        // if/when you address it for ContextMenuWidget.
+        closeMenu_();
+        item.widget->handleMouseDown(localX, localY);
+        return true;
       }
-      else
+      if (item.type == ContextMenuItem::Type::Action && item.enabled)
       {
-        if (openMenuIndex >= 0)
-          closeMenu_();
-        openMenu_(btnIdx);
+        if (item.action)
+          item.action();
+        closeMenu_();
+        return true;
       }
+      return true; // absorb click on disabled action
+    }
+
+    closeMenu_(); // click outside the popup -> close
+    return true;
+  }
+
+  bool onOverlayMouseMove(int localX, int localY) override
+  {
+    if (openMenuIndex < 0)
+      return false;
+
+    int itemIdx = hitTestPopupLocal_(localX, localY);
+
+    // Forward move into widget items so their internal hover states update.
+    if (itemIdx >= 0 && itemIdx < (int)entries_[openMenuIndex].items.size())
+    {
+      const auto &item = entries_[openMenuIndex].items[itemIdx];
+      if (item.type == ContextMenuItem::Type::Widget && item.widget)
+        item.widget->handleMouseMove(localX, localY);
+    }
+
+    if (itemIdx != hoveredItem)
+    {
+      hoveredItem = itemIdx;
+      refresh_();
       return true;
     }
-
-    // Click inside the open drop-down
-    if (openMenuIndex >= 0)
-    {
-      int itemIdx = hitTestPopup_(mx, my);
-      if (itemIdx >= 0)
-      {
-        const auto &item = entries_[openMenuIndex].items[itemIdx];
-
-        if (item.type == ContextMenuItem::Type::Widget && item.widget)
-        {
-          // Forward click into the embedded widget (popup-local coords).
-          // Do NOT auto-close — let the widget handle its own lifecycle.
-          auto origin = FluxUI::getCurrentInstance()->screenToClient(
-              popupScreenX_, popupScreenY_);
-          int localX = mx - origin.x;
-          int localY = my - origin.y;
-          closeMenu_();
-          item.widget->handleMouseDown(localX, localY);
-
-          return true;
-        }
-        if (item.type == ContextMenuItem::Type::Action && item.enabled)
-        {
-          if (item.action)
-            item.action();
-          closeMenu_();
-          return true;
-        }
-        return true; // absorb click on separator / disabled
-      }
-      closeMenu_(); // click outside -> close
-      return true;
-    }
     return false;
   }
 
-  bool handleMouseMove(int mx, int my) override
-  {
-    // Hover over bar buttons
-    int btnIdx = hitTestBar_(mx, my);
-    if (btnIdx != hoveredBtn)
-    {
-      hoveredBtn = btnIdx;
-      if (auto *ui = FluxUI::getCurrentInstance())
-        ui->updateWidget(this); // force immediate redraw so highlight moves
-    }
+  void onOverlayOutsideClick() override { closeMenu_(); }
 
-    // Hot-tracking: if a menu is already open and cursor moved to a
-    // different button, schedule the switch AFTER this event returns so
-    // we never invalidate iterators while the caller is still walking the
-    // widget tree.
-    if (openMenuIndex >= 0 && btnIdx >= 0 && btnIdx != openMenuIndex)
-    {
-      pendingSwitch_ = btnIdx;
-      if (auto *ui = FluxUI::getCurrentInstance())
-        ui->updateWidget(this);
-    }
-
-    // Hover over drop-down items
-    if (openMenuIndex >= 0)
-    {
-      int itemIdx = hitTestPopup_(mx, my);
-
-      // Forward move into widget items so their internal hover states update.
-      if (itemIdx >= 0 && itemIdx < (int)entries_[openMenuIndex].items.size())
-      {
-        const auto &item = entries_[openMenuIndex].items[itemIdx];
-        if (item.type == ContextMenuItem::Type::Widget && item.widget)
-        {
-          auto origin = FluxUI::getCurrentInstance()->screenToClient(
-              popupScreenX_, popupScreenY_);
-          item.widget->handleMouseMove(mx - origin.x, my - origin.y);
-        }
-      }
-
-      if (itemIdx != hoveredItem)
-      {
-        hoveredItem = itemIdx;
-        refresh_();
-      }
-    }
-    return false;
-  }
-
-  bool handleMouseLeave() override
-  {
-    hoveredBtn = -1;
-    markNeedsPaint();
-    return false;
-  }
-
-  bool handleKeyDown(int keyCode) override
+  bool onOverlayKeyDown(int keyCode) override
   {
     if (openMenuIndex < 0)
       return false;
@@ -418,7 +392,7 @@ public:
 
         if (item.type == ContextMenuItem::Type::Widget && item.widget)
         {
-          // Synthesise a click at the widget's centre.
+          // Synthesise a click at the widget's centre (already local).
           int cx = item.widget->x + item.widget->width / 2;
           int cy = item.widget->y + item.widget->height / 2;
           item.widget->handleMouseDown(cx, cy);
@@ -436,6 +410,71 @@ public:
     }
     return false;
   }
+
+  // ── Bar mouse events (normal widget-tree dispatch) ───────────────────────
+  // These only ever see bar-button hits now. Hit-testing the open popup is
+  // handled by OverlayManager via onOverlayMouseDown/onOverlayMouseMove
+  // above — the manager dispatches directly to the popup's local handlers
+  // while it's open and never reaches here for popup-area coordinates.
+
+  bool handleMouseDown(int mx, int my) override
+  {
+    int btnIdx = hitTestBar_(mx, my);
+    if (btnIdx >= 0)
+    {
+      if (openMenuIndex == btnIdx)
+      {
+        closeMenu_(); // toggle closed
+      }
+      else
+      {
+        if (openMenuIndex >= 0)
+          closeMenu_();
+        openMenu_(btnIdx);
+      }
+      return true;
+    }
+    return false;
+  }
+
+  bool handleMouseMove(int mx, int my) override
+  {
+    // Hover over bar buttons. This keeps running even while a menu is
+    // open because blocksHoverBelow is false (see overlayPolicy()) — the
+    // normal tree walk in FluxUI::wireCallbacks' onMouseMove still
+    // reaches this widget.
+    int btnIdx = hitTestBar_(mx, my);
+    if (btnIdx != hoveredBtn)
+    {
+      hoveredBtn = btnIdx;
+      if (auto *ui = FluxUI::getCurrentInstance())
+        ui->updateWidget(this); // force immediate redraw so highlight moves
+    }
+
+    // Hot-tracking: if a menu is already open and cursor moved to a
+    // different button, schedule the switch AFTER this event returns so
+    // we never close/reopen overlays (and mutate OverlayManager's entry
+    // list) while something is still iterating it.
+    if (openMenuIndex >= 0 && btnIdx >= 0 && btnIdx != openMenuIndex)
+    {
+      pendingSwitch_ = btnIdx;
+      if (auto *ui = FluxUI::getCurrentInstance())
+        ui->updateWidget(this);
+    }
+
+    return false;
+  }
+
+  bool handleMouseLeave() override
+  {
+    hoveredBtn = -1;
+    markNeedsPaint();
+    return false;
+  }
+
+  // Keyboard while open is handled by onOverlayKeyDown (above) via
+  // OverlayManager::dispatchKeyDown, since overlayPolicy().capturesKeyboard
+  // is true. No handleKeyDown override needed here.
 
   // ── Fluent setters ────────────────────────────────────────────────────────
 
@@ -461,11 +500,6 @@ public:
     minMenuWidth = w;
     return self_();
   }
-  std::shared_ptr<MenuBarWidget> setScaffoldPtr(ScaffoldWidget *s)
-  {
-    scaffold_ = s;
-    return self_();
-  }
   std::shared_ptr<MenuBarWidget> setBtnTextColor(Color c)
   {
     btnTextColor = c;
@@ -480,11 +514,11 @@ private:
     int left, top, right, bottom;
   };
   std::vector<BtnRect> buttonRects_;
-  ScaffoldWidget *scaffold_ = nullptr;
   int pendingSwitch_ = -1; // deferred hot-track switch
 
-  // Popup geometry (screen coords)
-  int popupScreenX_ = 0, popupScreenY_ = 0;
+  // Popup geometry — CLIENT coordinates now (not screen). OverlayManager
+  // does its own screen-space conversion and monitor clamping internally.
+  int popupClientX_ = 0, popupClientY_ = 0;
   int popupW_ = 0, popupH_ = 0;
 
   std::shared_ptr<MenuBarWidget> self_()
@@ -494,7 +528,6 @@ private:
 
   // ── Height helpers ────────────────────────────────────────────────────────
 
-  // Returns the rendered height for a single item.
   int _itemHeight(const ContextMenuItem &item) const
   {
     if (item.type == ContextMenuItem::Type::Separator)
@@ -518,26 +551,22 @@ private:
   {
     if (idx < 0 || idx >= (int)entries_.size())
       return;
-    openMenuIndex = idx;
-    hoveredItem = -1;
 
     auto *ui = FluxUI::getCurrentInstance();
     if (!ui)
       return;
 
+    openMenuIndex = idx;
+    hoveredItem = -1;
+
     // Pre-layout all widget items so their heights are known before geometry.
     _layoutWidgetItems(idx, ui);
 
-    _computePopupGeometry(idx);
+    _computePopupGeometry(idx); // size + client-space position only
 
-    FontCache &fc = ui->getFontCache();
-    NativeWindow hw = ui->getWindow();
-    if (hw)
-      showPopup(hw, popupScreenX_, popupScreenY_,
-                popupW_ + shadowOffset, popupH_ + shadowOffset, fc);
-
-    if (scaffold_)
-      scaffold_->addOverlay(this, [](GraphicsContext, FontCache &) {}, 150);
+    ui->overlays().show(this, popupClientX_, popupClientY_,
+                        popupW_ + shadowOffset, popupH_ + shadowOffset,
+                        150, ui->getFontCache());
 
     markNeedsPaint();
   }
@@ -548,24 +577,21 @@ private:
       return;
     openMenuIndex = -1;
     hoveredItem = -1;
-    hidePopup();
-    if (scaffold_)
-      scaffold_->removeOverlay(this);
+    if (auto *ui = FluxUI::getCurrentInstance())
+      ui->overlays().hide(this);
     markNeedsPaint();
   }
 
   void refresh_()
   {
-    if (!popupVisible())
+    if (openMenuIndex < 0)
       return;
     if (auto *ui = FluxUI::getCurrentInstance())
-      refreshPopup(ui->getFontCache());
+      ui->overlays().refresh(this, ui->getFontCache());
   }
 
   // ── Widget pre-layout ─────────────────────────────────────────────────────
 
-  // Run computeLayout on every Widget item in the given menu entry so their
-  // heights are valid before popup geometry is calculated.
   void _layoutWidgetItems(int idx, FluxUI *ui)
   {
     auto mc = ui->getMeasureContext();
@@ -587,7 +613,8 @@ private:
   }
 
   // ── Geometry ──────────────────────────────────────────────────────────────
-
+  // Pure size + client-space position now. No screen coordinates, no
+  // monitor clamping — OverlayManager::show() handles all of that.
   void _computePopupGeometry(int idx)
   {
     const auto &items = entries_[idx].items;
@@ -615,32 +642,18 @@ private:
       totalH += _itemHeight(item);
     popupH_ = totalH;
 
-    // Position below the button
+    // Position below the button, in this widget's own (client-space)
+    // coordinate system — x/y here are already client coordinates since
+    // every widget lays itself out in client space.
     auto &br = buttonRects_[idx];
-    auto sc = FluxUI::getCurrentInstance()->clientToScreen(
-        x + br.left, y + barHeight);
-    popupScreenX_ = sc.x;
-    popupScreenY_ = sc.y;
-
-#ifdef _WIN32
-    // Clamp to monitor working area
-    POINT pt = {popupScreenX_, popupScreenY_};
-    HMONITOR mon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
-    MONITORINFO mi{};
-    mi.cbSize = sizeof(mi);
-    if (GetMonitorInfoW(mon, &mi))
-    {
-      if (popupScreenX_ + popupW_ > mi.rcWork.right)
-        popupScreenX_ = mi.rcWork.right - popupW_;
-      if (popupScreenY_ + popupH_ > mi.rcWork.bottom)
-        popupScreenY_ = sc.y - barHeight - popupH_;
-    }
-#endif
+    popupClientX_ = x + br.left;
+    popupClientY_ = y + barHeight;
   }
 
   // ── Hit testing ───────────────────────────────────────────────────────────
 
   // Returns button index if (mx,my) is inside the bar, else -1.
+  // mx/my here are normal client coordinates (bar dispatch only).
   int hitTestBar_(int mx, int my) const
   {
     if (my < y || my >= y + barHeight)
@@ -654,21 +667,18 @@ private:
     return -1;
   }
 
-  // Returns item index inside the open popup, else -1.
-  int hitTestPopup_(int mx, int my) const
+  // Returns item index inside the open popup, else -1. localX/localY are
+  // already popup-local (0,0 = popup top-left) — no client/screen
+  // conversion needed, unlike the old version.
+  int hitTestPopupLocal_(int localX, int localY) const
   {
     if (openMenuIndex < 0)
       return -1;
-
-    auto origin = FluxUI::getCurrentInstance()->screenToClient(popupScreenX_,
-                                                               popupScreenY_);
-
-    if (mx < origin.x || mx >= origin.x + popupW_ ||
-        my < origin.y || my >= origin.y + popupH_)
+    if (localX < 0 || localX >= popupW_ || localY < 0 || localY >= popupH_)
       return -1;
 
     const auto &items = entries_[openMenuIndex].items;
-    int relY = my - origin.y - menuPadV;
+    int relY = localY - menuPadV;
     int curY = 0;
 
     for (int i = 0; i < (int)items.size(); i++)
@@ -691,7 +701,7 @@ private:
                     const std::string &label) const
   {
     NativeFont hFont = fc.getFont(menuFontSize, FontWeight::Normal);
-    std::wstring wlabel(label.begin(), label.end());
+    std::wstring wlabel = toWideString(label);
     int w = 0, h = 0;
     Painter(ctx).measureText(wlabel, hFont, w, h);
     return w;

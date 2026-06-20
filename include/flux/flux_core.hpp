@@ -4,6 +4,7 @@
 #include "flux_font.hpp"
 #include "flux_keys.hpp"
 #include "flux_layoutengine.hpp"
+#include "flux_overlay_manager.hpp"
 #include "flux_renderer.hpp"
 #include "flux_widget.hpp"
 #include "flux_window.hpp"
@@ -11,6 +12,7 @@
 #include <functional>
 #include <map>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 // ============================================================================
@@ -57,22 +59,17 @@ private:
 
   std::unordered_map<const void *, std::shared_ptr<void>> appSingletons_;
 
+  // Resolved once per rebuild(); used only by getRootScaffold(). Has no
+  // relationship to overlays anymore — that's entirely owned by overlayMgr_.
+  ScaffoldWidget *cachedScaffold_ = nullptr;
 
-  static constexpr int kDialogZIndex = 200;
+  // Owns everything overlay-related: native popups, z-order, input dispatch.
+  // Widgets talk to it directly via overlays(); core never needs to know
+  // which overlay widget types exist.
+  OverlayManager overlayMgr_;
 
-  // No Win32 types in any of these signatures
-  void wireScaffoldToWidgets(ScaffoldWidget *scaffold, Widget *widget);
   Widget *findLayoutBoundary(Widget *widget);
   WidgetPtr findByIdRecursive(WidgetPtr widget, const std::string &id);
-
-  bool handleDropdownOverlays(int x, int y);
-  bool handleDialogOverlays(int x, int y);
-  bool handleOverlayMouseMove(int x, int y);
-  bool handleOverlayMouseWheel(int delta);
-  bool handleOverlayKeyDown(int keyCode);
-  bool handleOverlayRightClick(int x, int y);
-  bool handleOverlayMouseUp(int x, int y);
-
   void wireCallbacks();
 
 public:
@@ -128,6 +125,13 @@ public:
   void setResizeCursorH();
   void setResizeCursorV();
   void setDefaultCursor();
+
+  // ── Overlays ────────────────────────────────────────────────────────────
+  // Any widget implementing OverlayContent calls this directly — e.g.
+  //   FluxUI::getCurrentInstance()->overlays().show(this, x, y, w, h, zIndex, fontCache);
+  // Core has no per-type knowledge of dropdowns/menus/dialogs/tooltips;
+  // adding a new overlay widget never requires touching this class.
+  OverlayManager &overlays() { return overlayMgr_; }
 
   template <typename T>
   std::shared_ptr<T>

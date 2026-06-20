@@ -62,7 +62,10 @@ static FluxDate today() {
 // ============================================================================
 //
 // A text-field-style trigger that opens a calendar popup when clicked.
-// Follows the same OverlayHost pattern as DropdownWidget.
+// Follows the same OverlayContent pattern as DropdownWidget — the trigger
+// field is a normal Widget in the tree; the calendar popup is owned and
+// positioned by OverlayManager and rendered/hit-tested entirely in
+// coordinates LOCAL to the popup's own rect (0,0 = popup top-left).
 //
 // Usage:
 //   auto dp = DatePicker()
@@ -76,7 +79,7 @@ static FluxDate today() {
 //   auto dp = DatePicker()->setDate(selectedDate);
 // ============================================================================
 
-class DatePickerWidget : public Widget, public OverlayHost {
+class DatePickerWidget : public Widget, public OverlayContent {
 public:
   // ── Selection & navigation state ─────────────────────────────────────────
   FluxDate selectedDate; // currently selected date (may be invalid)
@@ -152,12 +155,25 @@ public:
     viewMonth = td.month;
   }
 
-  void setScaffold(ScaffoldWidget *s) override { scaffold_ = s; }
-
   void onDetach() override {
     if (isOpen)
       closeCalendar_();
     Widget::onDetach();
+  }
+
+  // ── OverlayContent ────────────────────────────────────────────────────────
+  OverlayPolicy overlayPolicy() const override {
+    // Same reasoning as DropdownWidget: modal so outside clicks close the
+    // calendar and clicks inside it (nav arrows, day cells, year cells)
+    // are fully consumed. blocksHoverBelow stays false — an open calendar
+    // shouldn't pause hover/tooltips elsewhere in the app.
+    // capturesKeyboard is true for consistency with the other popup
+    // overlays, though note this widget currently implements no
+    // onOverlayKeyDown — there's no keyboard navigation (arrow keys,
+    // Enter, Escape) wired up here yet, same as in the pre-migration
+    // code. Flagging as a gap, not something this migration adds or
+    // silently fixes.
+    return {/*modal=*/true, /*blocksHoverBelow=*/false, /*capturesKeyboard=*/true};
   }
 
   // ── Layout ────────────────────────────────────────────────────────────────
@@ -199,8 +215,11 @@ public:
     needsPaint = false;
   }
 
-  // ── renderPopupContent ────────────────────────────────────────────────────
-  void renderPopupContent(GraphicsContext &ctx, FontCache &fontCache) override {
+  // ── renderOverlay ─────────────────────────────────────────────────────────
+  // Local coordinates — (0,0) is the popup's own top-left corner. Body is
+  // unchanged from the old renderPopupContent: it was already drawing
+  // entirely in popup-local space.
+  void renderOverlay(GraphicsContext &ctx, FontCache &fontCache) override {
     if (!isOpen)
       return;
     _computePopupSize();
@@ -225,7 +244,54 @@ public:
       _renderCalendarGrid(ctx, fontCache);
   }
 
-  // ── Mouse events ──────────────────────────────────────────────────────────
+  // ── OverlayContent input handlers (popup-local coordinates) ─────────────
+  // No more screenToClient(popupScreenX_, popupScreenY_) round-trip —
+  // OverlayManager already delivers coordinates relative to the popup's
+  // own top-left corner.
+
+  bool onOverlayMouseDown(int localX, int localY) override {
+    if (!isOpen)
+      return false;
+
+    if (localX >= 0 && localX < popupW_ && localY >= 0 && localY < popupH_) {
+      if (showingYears)
+        _handleYearPickerClick(localX, localY);
+      else
+        _handleCalendarClick(localX, localY);
+      return true;
+    }
+
+    closeCalendar_();
+    return true;
+  }
+
+  bool onOverlayMouseMove(int localX, int localY) override {
+    if (!isOpen)
+      return false;
+
+    int newHover = -1;
+    if (localX >= 0 && localX < popupW_ && localY >= 0 && localY < popupH_) {
+      if (showingYears)
+        newHover = _yearIndexAt(localX, localY);
+      else
+        newHover = _dayIndexAt(localX, localY);
+    }
+
+    if (newHover != hoveredCell_) {
+      hoveredCell_ = newHover;
+      refresh_();
+      return true;
+    }
+    return false;
+  }
+
+  void onOverlayOutsideClick() override { closeCalendar_(); }
+
+  // ── Bar/trigger mouse events (normal widget-tree dispatch) ──────────────
+  // Only ever sees the trigger field now — popup hit-testing moved to
+  // onOverlayMouseDown/onOverlayMouseMove above. While the popup is open,
+  // OverlayManager routes clicks/moves directly to those handlers instead
+  // of here (matches the modal entries in DropdownWidget/ContextMenuWidget).
 
   bool handleMouseDown(int mx, int my) override {
     if (mx >= x && mx < x + width && my >= y && my < y + height) {
@@ -234,49 +300,6 @@ public:
       else
         openCalendar_();
       return true;
-    }
-
-    if (!isOpen)
-      return false;
-
-    // Convert stored screen origin to current client coords
-    auto origin = FluxUI::getCurrentInstance()->screenToClient(popupScreenX_,
-                                                               popupScreenY_);
-    int rx = mx - origin.x;
-    int ry = my - origin.y;
-
-    if (rx >= 0 && rx < popupW_ && ry >= 0 && ry < popupH_) {
-      if (showingYears)
-        _handleYearPickerClick(rx, ry);
-      else
-        _handleCalendarClick(rx, ry);
-      return true;
-    }
-
-    closeCalendar_();
-    return true;
-  }
-
-  bool handleMouseMove(int mx, int my) override {
-    if (!isOpen)
-      return false;
-
-    auto origin = FluxUI::getCurrentInstance()->screenToClient(popupScreenX_,
-                                                               popupScreenY_);
-    int rx = mx - origin.x;
-    int ry = my - origin.y;
-
-    int newHover = -1;
-    if (rx >= 0 && rx < popupW_ && ry >= 0 && ry < popupH_) {
-      if (showingYears)
-        newHover = _yearIndexAt(rx, ry);
-      else
-        newHover = _dayIndexAt(rx, ry);
-    }
-
-    if (newHover != hoveredCell_) {
-      hoveredCell_ = newHover;
-      refresh_();
     }
     return false;
   }
@@ -359,10 +382,8 @@ public:
   }
 
 private:
-  ScaffoldWidget *scaffold_ = nullptr;
   State<FluxDate> *boundState_ = nullptr;
 
-  int popupScreenX_ = 0, popupScreenY_ = 0;
   int popupW_ = 0, popupH_ = 0;
   int hoveredCell_ = -1; // day index (0-41) or year index
 
@@ -427,6 +448,11 @@ private:
   void openCalendar_() {
     if (isOpen)
       return;
+
+    auto *ui = FluxUI::getCurrentInstance();
+    if (!ui)
+      return;
+
     if (!selectedDate.isValid()) {
       FluxDate td = FluxDate::today();
       viewYear = td.year;
@@ -436,40 +462,14 @@ private:
     showingYears = false;
     hoveredCell_ = -1;
 
-    _computePopupSize();
+    _computePopupSize(); // size only — positioning/clamping is the manager's job now
 
-    NativeWindow hw = FluxUI::getCurrentInstance()->getWindow();
-    if (hw) {
-      // Position below the field using FluxUI::clientToScreen
-      auto sc = FluxUI::getCurrentInstance()->clientToScreen(x, y + height + 2);
-      popupScreenX_ = sc.x;
-      popupScreenY_ = sc.y;
-
-#ifdef _WIN32
-      // Clamp to monitor
-      POINT pt = {popupScreenX_, popupScreenY_};
-      HMONITOR mon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
-      MONITORINFO mi{};
-      mi.cbSize = sizeof(mi);
-      if (GetMonitorInfoW(mon, &mi)) {
-        if (popupScreenX_ + popupW_ > mi.rcWork.right)
-          popupScreenX_ = mi.rcWork.right - popupW_;
-        if (popupScreenY_ + popupH_ > mi.rcWork.bottom) {
-          auto above =
-              FluxUI::getCurrentInstance()->clientToScreen(x, y - popupH_ - 2);
-          popupScreenY_ = above.y;
-        }
-      }
-#endif
-      FontCache &fc = FluxUI::getCurrentInstance()->getFontCache();
-      showPopup(hw, popupScreenX_, popupScreenY_, popupW_ + shadowOffset,
-                popupH_ + shadowOffset, fc);
-    }
-
-    if (scaffold_)
-      scaffold_->addOverlay(
-          this, [](GraphicsContext &, FontCache &) {},
-          100); // fix HDC → GraphicsContext
+    // Position below the field, in CLIENT coordinates. No more manual
+    // clientToScreen + #ifdef _WIN32 monitor clamping — OverlayManager::
+    // show() does all of that internally.
+    ui->overlays().show(this, x, y + height + 2,
+                        popupW_ + shadowOffset, popupH_ + shadowOffset,
+                        100, ui->getFontCache());
 
     markNeedsPaint();
   }
@@ -480,17 +480,16 @@ private:
     isOpen = false;
     showingYears = false;
     hoveredCell_ = -1;
-    hidePopup();
-    if (scaffold_)
-      scaffold_->removeOverlay(this);
+    if (auto *ui = FluxUI::getCurrentInstance())
+      ui->overlays().hide(this);
     markNeedsPaint();
   }
 
   void refresh_() {
-    if (!isOpen || !popupVisible())
+    if (!isOpen)
       return;
     if (auto *ui = FluxUI::getCurrentInstance())
-      refreshPopup(ui->getFontCache());
+      ui->overlays().refresh(this, ui->getFontCache());
   }
 
   // ── Calendar rendering ────────────────────────────────────────────────────
@@ -569,7 +568,12 @@ private:
                         selectedDate.day == dayNum;
       bool isToday =
           today.year == dYear && today.month == dMonth && today.day == dayNum;
-      // bool isHovered = (cell == hoveredCell_) && thisMonth;
+      // NOTE: this was commented out in the pre-migration source, which
+      // left `isHovered` undefined below it (almost certainly a
+      // pre-existing bug / non-compiling line, not something this
+      // migration introduced). Restored here so hover highlighting on
+      // day cells actually works.
+      bool isHovered = (cell == hoveredCell_) && thisMonth;
       bool isDisabled = _isDisabled(dYear, dMonth, dayNum);
 
       // Cell background
@@ -647,7 +651,7 @@ private:
     }
   }
 
-  // ── Click handlers ────────────────────────────────────────────────────────
+  // ── Click handlers (popup-local coordinates) ─────────────────────────────
 
   void _handleCalendarClick(int rx, int ry) {
     // Nav arrows
@@ -760,7 +764,7 @@ private:
     refresh_();
   }
 
-  // ── Hit testing ───────────────────────────────────────────────────────────
+  // ── Hit testing (popup-local coordinates) ────────────────────────────────
 
   // Returns 0-41 for the cell under (rx,ry) in the calendar grid, else -1
   int _dayIndexAt(int rx, int ry) const {

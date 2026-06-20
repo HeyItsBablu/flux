@@ -1,6 +1,5 @@
 #include "flux/flux_core.hpp"
 #include "flux/flux_app.hpp"
-#include "flux/flux_overlay_host.hpp"
 
 // ============================================================================
 // STATIC MEMBER DEFINITION
@@ -61,21 +60,7 @@ WidgetPtr FluxUI::findByIdRecursive(WidgetPtr widget, const std::string &id)
 }
 
 // ============================================================================
-// SCAFFOLD WIRING
-// ============================================================================
-
-void FluxUI::wireScaffoldToWidgets(ScaffoldWidget *scaffold, Widget *widget)
-{
-    if (!widget)
-        return;
-    if (auto *host = dynamic_cast<OverlayHost *>(widget))
-        host->setScaffold(scaffold);
-    for (auto &child : widget->children)
-        wireScaffoldToWidgets(scaffold, child.get());
-}
-
-// ============================================================================
-// OVERLAY DISPATCHERS
+// SCAFFOLD LOOKUP — unrelated to overlays; only backs getRootScaffold()
 // ============================================================================
 
 namespace
@@ -95,115 +80,6 @@ namespace
     }
 } // namespace
 
-bool FluxUI::handleDialogOverlays(int mouseX, int mouseY)
-{
-    auto *scaffold = findScaffold(root.get());
-    if (!scaffold || !scaffold->hasOverlays())
-        return false;
-    const auto &stack = scaffold->getOverlayStack();
-    std::vector<Widget *> dialogWidgets;
-    for (const auto &entry : stack)
-        if (entry.zIndex >= kDialogZIndex && entry.widget)
-            dialogWidgets.push_back(entry.widget);
-    for (auto it = dialogWidgets.rbegin(); it != dialogWidgets.rend(); ++it)
-        if ((*it)->handleMouseDown(mouseX, mouseY))
-            return true;
-    return false;
-}
-
-bool FluxUI::handleDropdownOverlays(int mouseX, int mouseY)
-{
-    auto *scaffold = findScaffold(root.get());
-    if (!scaffold || !scaffold->hasOverlays())
-        return false;
-    const auto &stack = scaffold->getOverlayStack();
-    for (auto it = stack.rbegin(); it != stack.rend(); ++it)
-    {
-        if (it->zIndex >= kDialogZIndex)
-            continue;
-        if (it->widget && it->widget->handleMouseDown(mouseX, mouseY))
-            return true;
-    }
-    return false;
-}
-
-bool FluxUI::handleOverlayMouseMove(int mouseX, int mouseY)
-{
-    auto *scaffold = findScaffold(root.get());
-    if (!scaffold || !scaffold->hasOverlays())
-        return false;
-    const auto &stack = scaffold->getOverlayStack();
-    for (auto it = stack.rbegin(); it != stack.rend(); ++it)
-        if (it->widget && it->widget->handleMouseMove(mouseX, mouseY))
-            return true;
-    return false;
-}
-
-bool FluxUI::handleOverlayMouseWheel(int delta)
-{
-    auto *scaffold = findScaffold(root.get());
-    if (!scaffold || !scaffold->hasOverlays())
-        return false;
-    const auto &stack = scaffold->getOverlayStack();
-    for (auto it = stack.rbegin(); it != stack.rend(); ++it)
-        if (it->widget && it->widget->handleMouseWheel(delta))
-            return true;
-    return false;
-}
-
-bool FluxUI::handleOverlayKeyDown(int keyCode)
-{
-    auto *scaffold = findScaffold(root.get());
-    if (!scaffold || !scaffold->hasOverlays())
-        return false;
-    const auto &stack = scaffold->getOverlayStack();
-    Widget *bestDialog = nullptr;
-    Widget *bestNonDialog = nullptr;
-    for (auto it = stack.rbegin(); it != stack.rend(); ++it)
-    {
-        if (!it->widget)
-            continue;
-        if (it->zIndex >= kDialogZIndex)
-        {
-            if (!bestDialog)
-                bestDialog = it->widget;
-        }
-        else
-        {
-            if (!bestNonDialog)
-                bestNonDialog = it->widget;
-        }
-        if (bestDialog && bestNonDialog)
-            break;
-    }
-    Widget *target = bestDialog ? bestDialog : bestNonDialog;
-    return target ? target->handleKeyDown(keyCode) : false;
-}
-
-bool FluxUI::handleOverlayMouseUp(int mouseX, int mouseY)
-{
-    auto *scaffold = findScaffold(root.get());
-    if (!scaffold || !scaffold->hasOverlays())
-        return false;
-    const auto &stack = scaffold->getOverlayStack();
-    for (auto it = stack.rbegin(); it != stack.rend(); ++it)
-        if (it->widget && it->widget->handleMouseUp(mouseX, mouseY))
-            return true;
-    return false;
-}
-
-bool FluxUI::handleOverlayRightClick(int mouseX, int mouseY)
-{
-    auto *scaffold = findScaffold(root.get());
-    if (!scaffold || !scaffold->hasOverlays())
-        return false;
-    const auto &stack = scaffold->getOverlayStack();
-    for (auto it = stack.rbegin(); it != stack.rend(); ++it)
-        if (it->widget && it->widget->handleRightClick(mouseX, mouseY))
-            return true;
-    return false;
-}
-
 // ============================================================================
 // CALLBACK WIRING
 // ============================================================================
@@ -215,6 +91,7 @@ void FluxUI::wireCallbacks()
         if (!root)
             return;
         Renderer::renderWidget(ctx, root.get(), fontCache);
+        overlayMgr_.renderAll(ctx, fontCache); // non-Win32: paints open overlays inline
     };
 
     window.callbacks.onResize = [this](GraphicsContext &ctx, int w, int h)
@@ -225,63 +102,30 @@ void FluxUI::wireCallbacks()
         LayoutEngine::positionWidget(root.get(), 0, 0);
     };
 
-    window.callbacks.onMouseWheel = [this](int delta) -> bool
-    {
-        if (!root)
-            return false;
-        if (handleOverlayMouseWheel(delta))
-            return true;
-        if (focusedWidget && focusedWidget->handleMouseWheel(delta))
-            return true;
-        return false;
-    };
-
     window.callbacks.onMouseDown = [this](int x, int y) -> bool
     {
         if (!root)
-        {
-
             return false;
-        }
-
-        if (handleDialogOverlays(x, y))
-        {
-
+        if (overlayMgr_.dispatchMouseDown(x, y))
             return true;
-        }
-
-        if (handleDropdownOverlays(x, y))
-        {
-
-            return true;
-        }
-
-        bool handled = findAndHandleMouseEvent(root.get(), x, y,
-                                               [x, y, this](Widget *w)
-                                               {
-                                                   bool h = w->handleMouseDown(x, y);
-                                                   if (h && w->isFocusable)
-                                                       setFocus(w);
-                                                   return h;
-                                               });
-
-        return handled;
+        return findAndHandleMouseEvent(root.get(), x, y, [x, y, this](Widget *w)
+                                       {
+            bool h = w->handleMouseDown(x, y);
+            if (h && w->isFocusable) setFocus(w);
+            return h; });
     };
 
     window.callbacks.onMouseUp = [this](int x, int y) -> bool
     {
         if (!root)
             return false;
-        if (handleOverlayMouseUp(x, y))
+        if (overlayMgr_.dispatchMouseUp(x, y))
             return true;
-        bool hasCaptured = window.isMouseCaptured();
-        if (hasCaptured)
-        {
-            if (broadcastMouseEvent(root.get(), x, y,
-                                    [](Widget *w, int mx, int my)
-                                    { return w->handleMouseUp(mx, my); }))
-                return true;
-        }
+        if (window.isMouseCaptured() &&
+            broadcastMouseEvent(root.get(), x, y,
+                                [](Widget *w, int mx, int my)
+                                { return w->handleMouseUp(mx, my); }))
+            return true;
         return findAndHandleMouseEvent(root.get(), x, y,
                                        [x, y](Widget *w)
                                        { return w->handleMouseUp(x, y); });
@@ -291,15 +135,16 @@ void FluxUI::wireCallbacks()
     {
         if (!root)
             return false;
-        bool hasCaptured = window.isMouseCaptured();
-        if (hasCaptured)
-        {
-            if (broadcastMouseEvent(root.get(), x, y,
-                                    [](Widget *w, int mx, int my)
-                                    { return w->handleMouseMove(mx, my); }))
-                return true;
-        }
-        bool overlay = handleOverlayMouseMove(x, y);
+        if (window.isMouseCaptured() &&
+            broadcastMouseEvent(root.get(), x, y,
+                                [](Widget *w, int mx, int my)
+                                { return w->handleMouseMove(mx, my); }))
+            return true;
+
+        bool overlay = overlayMgr_.dispatchMouseMove(x, y);
+        if (overlayMgr_.hasBlockingOverlay())
+            return overlay; // modal overlay open — don't touch the tree underneath
+
         bool hover = updateHoverStates(root.get(), x, y);
         bool custom = findAndHandleMouseEvent(root.get(), x, y,
                                               [x, y](Widget *w)
@@ -307,17 +152,20 @@ void FluxUI::wireCallbacks()
         return overlay || hover || custom;
     };
 
-    window.callbacks.onMouseLeave = [this]()
+    window.callbacks.onMouseWheel = [this](int delta) -> bool
     {
-        if (root)
-            root->clearHoverState();
+        if (!root)
+            return false;
+        if (overlayMgr_.dispatchMouseWheel(delta))
+            return true;
+        return focusedWidget && focusedWidget->handleMouseWheel(delta);
     };
 
     window.callbacks.onRightClick = [this](int x, int y) -> bool
     {
         if (!root)
             return false;
-        if (handleOverlayRightClick(x, y))
+        if (overlayMgr_.dispatchRightClick(x, y))
             return true;
         return findAndHandleMouseEvent(root.get(), x, y,
                                        [x, y](Widget *w)
@@ -326,9 +174,15 @@ void FluxUI::wireCallbacks()
 
     window.callbacks.onKeyDown = [this](int keyCode) -> bool
     {
-        if (handleOverlayKeyDown(keyCode))
+        if (overlayMgr_.dispatchKeyDown(keyCode))
             return true;
         return focusedWidget && focusedWidget->handleKeyDown(keyCode);
+    };
+
+    window.callbacks.onMouseLeave = [this]()
+    {
+        if (root)
+            root->clearHoverState();
     };
 
     window.callbacks.onChar = [this](wchar_t ch) -> bool
@@ -433,12 +287,13 @@ void FluxUI::rebuild()
     focusedWidget = nullptr;
     if (root)
         root->onDetach();
-    if (root)
-    {
-        if (auto *scaffold = findScaffold(root.get()))
-            scaffold->clearOverlays();
-    }
+
+    // Close anything still open from the tree we're about to discard.
+    overlayMgr_.closeAll();
+
     root = builder();
+    cachedScaffold_ = findScaffold(root.get()); // unrelated to overlays — see getRootScaffold()
+
     if (window.valid())
     {
         auto mc = getMeasureContext();
@@ -446,14 +301,7 @@ void FluxUI::rebuild()
                                     window.clientWidth(), window.clientHeight(),
                                     fontCache);
         LayoutEngine::positionWidget(root.get(), 0, 0);
-        if (auto *scaffold = findScaffold(root.get()))
-            wireScaffoldToWidgets(scaffold, root.get());
         window.invalidate();
-    }
-    else
-    {
-        if (auto *scaffold = findScaffold(root.get()))
-            wireScaffoldToWidgets(scaffold, root.get());
     }
 }
 
@@ -530,8 +378,6 @@ NativeWindow FluxUI::createWindow(const std::string &title, int w, int h)
                                     window.clientWidth(), window.clientHeight(),
                                     fontCache);
         LayoutEngine::positionWidget(root.get(), 0, 0);
-        if (auto *scaffold = findScaffold(root.get()))
-            wireScaffoldToWidgets(scaffold, root.get());
     }
     for (auto &[id, fn] : pendingTimers)
         fn();
@@ -623,5 +469,5 @@ void FluxUI::setDefaultCursor() { window.setDefaultCursor(); }
 
 ScaffoldWidget *FluxUI::getRootScaffold()
 {
-    return findScaffold(root.get());
+    return cachedScaffold_;
 }

@@ -2,7 +2,6 @@
 #define FLUX_KEYBOARD_HPP
 
 #include "../flux_core.hpp"
-#include "../flux_overlay_host.hpp"
 #include "flux_structure.hpp"
 #include <functional>
 #include <string>
@@ -118,8 +117,20 @@ inline std::vector<std::vector<VKey>> symbols() {
 } // namespace KeyboardLayout
 
 // ── Widget ───────────────────────────────────────────────────────────────────
+//
+// A singleton, screen-anchored overlay (see instance()) rather than a
+// normal tree-anchored widget — it has zero size in the widget tree
+// (computeLayout always returns 0x0) and shows itself via the
+// OverlayManager only when requestShow() is called, typically from a text
+// field gaining focus on a touch platform.
+//
+// renderOverlay()/onOverlay*() all operate in coordinates LOCAL to the
+// keyboard's own overlay rect — (0,0) is the keyboard's top-left corner,
+// same as every other OverlayContent widget. OverlayManager handles
+// screen-space conversion and native popup creation; this widget never
+// touches any of that.
 
-class VirtualKeyboardWidget : public Widget, public OverlayHost {
+class VirtualKeyboardWidget : public Widget, public OverlayContent {
 public:
   // Geometry
   int keyboardHeight = 280;
@@ -144,22 +155,23 @@ public:
   Color numLabelColor = Color::fromRGB(90, 90, 90);
 
 private:
-  ScaffoldWidget *scaffold = nullptr;
-
   bool isVisible_ = false;
   bool shiftActive_ = false;
   bool symbolPage_ = false;
   int pressedRow_ = -1;
   int pressedCol_ = -1;
+
+  // Guards against requestHide() (called externally, e.g. from
+  // notifyFocusLost on a stray focus change) dismissing the keyboard
+  // mid-press, between handleMouseDown/handleMouseUp landing on a key.
+  // Orthogonal to overlay click routing — kept as-is.
   bool suppressHide_ = false;
 
   struct KeyRect {
     int x, y, w, h, row, col;
   };
   std::vector<KeyRect> keyRects_;
-  int kbClientX_ = 0;
-  int kbClientY_ = 0;
-  int kbW_ = 0;
+  int kbW_ = 0; // == keyboard overlay width; height is always keyboardHeight
 
   Widget *targetWidget_ = nullptr;
 
@@ -184,7 +196,29 @@ public:
     hide_();
   }
 
-  void setScaffold(ScaffoldWidget *s) override { scaffold = s; }
+  void onDetach() override {
+    if (isVisible_)
+      hide_();
+    Widget::onDetach();
+  }
+
+  // ── OverlayContent ────────────────────────────────────────────────────────
+  OverlayPolicy overlayPolicy() const override {
+    // modal=true is what makes OverlayManager deliver onOverlayOutsideClick
+    // for taps outside the keyboard, which is how this widget now detects
+    // "tap elsewhere to dismiss" (previously done by manually comparing
+    // my < kbClientY_ against every window-wide mouse-down). The keyboard
+    // doesn't need to swallow clicks elsewhere in the app the way a dialog
+    // does, but modal is what wires up the dismiss callback, so it stays
+    // true.
+    // blocksHoverBelow=false: typing shouldn't pause hover/tooltips
+    // elsewhere on screen.
+    // capturesKeyboard=false: this widget never goes through
+    // onOverlayKeyDown — it injects characters directly into
+    // targetWidget_ via handleChar/handleKeyDown instead of routing
+    // through the overlay key-event path.
+    return {/*modal=*/true, /*blocksHoverBelow=*/false, /*capturesKeyboard=*/false};
+  }
 
   // ── Layout / render (zero size in the normal widget tree) ────────────────
 
@@ -196,9 +230,11 @@ public:
 
   void render(GraphicsContext &, FontCache &) override { needsPaint = false; }
 
-  // ── Popup content ─────────────────────────────────────────────────────────
+  // ── renderOverlay ─────────────────────────────────────────────────────────
+  // Already fully local-coordinate — (0,0) is the keyboard's own top-left
+  // corner, unchanged from the old renderPopupContent body.
 
-  void renderPopupContent(GraphicsContext &ctx, FontCache &fontCache) override {
+  void renderOverlay(GraphicsContext &ctx, FontCache &fontCache) override {
     if (!isVisible_)
       return;
 
@@ -225,23 +261,22 @@ public:
     }
   }
 
-  // ── Mouse / touch events ──────────────────────────────────────────────────
+  // ── OverlayContent input handlers (overlay-local coordinates) ───────────
+  // localX/localY are already relative to the keyboard's own top-left —
+  // no more manual `mx - kbClientX_` subtraction needed, and no more
+  // manual `my < kbClientY_` check either: a click that lands outside
+  // this overlay's rect never reaches onOverlayMouseDown at all, it goes
+  // to onOverlayOutsideClick below instead.
 
-  bool handleMouseDown(int mx, int my) override {
+  bool onOverlayMouseDown(int localX, int localY) override {
     if (!isVisible_)
       return false;
-    if (my < kbClientY_) {
-      hide_();
-      if (auto *ui = FluxUI::getCurrentInstance())
-        ui->setFocus(nullptr);
-      return true;
-    }
+
     suppressHide_ = true;
 
-    int lx = mx - kbClientX_;
-    int ly = my - kbClientY_;
     for (auto &kr : keyRects_) {
-      if (lx >= kr.x && lx < kr.x + kr.w && ly >= kr.y && ly < kr.y + kr.h) {
+      if (localX >= kr.x && localX < kr.x + kr.w && localY >= kr.y &&
+          localY < kr.y + kr.h) {
         pressedRow_ = kr.row;
         pressedCol_ = kr.col;
         refreshPopupIfOpen_();
@@ -251,16 +286,14 @@ public:
     return true;
   }
 
-  bool handleMouseUp(int mx, int my) override {
+  bool onOverlayMouseUp(int localX, int localY) override {
     if (!isVisible_)
       return false;
 
-    int lx = mx - kbClientX_;
-    int ly = my - kbClientY_;
-
     for (auto &kr : keyRects_) {
-      if (lx >= kr.x && lx < kr.x + kr.w && ly >= kr.y && ly < kr.y + kr.h &&
-          kr.row == pressedRow_ && kr.col == pressedCol_) {
+      if (localX >= kr.x && localX < kr.x + kr.w && localY >= kr.y &&
+          localY < kr.y + kr.h && kr.row == pressedRow_ &&
+          kr.col == pressedCol_) {
         fireKey_(kr.row, kr.col);
         break;
       }
@@ -272,7 +305,18 @@ public:
     return true;
   }
 
-  bool handleMouseMove(int /*mx*/, int /*my*/) override { return isVisible_; }
+  bool onOverlayMouseMove(int, int) override { return isVisible_; }
+
+  // Tap above/outside the keyboard -> dismiss it and clear focus. This is
+  // the direct replacement for the old `if (my < kbClientY_) hide_()`
+  // check inside handleMouseDown, now driven by the manager's own
+  // inside/outside hit-test against the registered overlay rect instead
+  // of a manual y-coordinate comparison.
+  void onOverlayOutsideClick() override {
+    hide_();
+    if (auto *ui = FluxUI::getCurrentInstance())
+      ui->setFocus(nullptr);
+  }
 
   bool handleMouseLeave() override {
     if (suppressHide_) {
@@ -289,29 +333,27 @@ private:
     if (isVisible_)
       return;
 
-    if (auto *ui = FluxUI::getCurrentInstance())
-      scaffold = ui->getRootScaffold();
+    auto *ui = FluxUI::getCurrentInstance();
+    if (!ui)
+      return;
 
     isVisible_ = true;
     shiftActive_ = true;
     symbolPage_ = false;
     pressedRow_ = pressedCol_ = -1;
 
-    auto sz = FluxUI::getCurrentInstance()->getClientSize();
+    auto sz = ui->getClientSize();
     kbW_ = sz.width;
-    kbClientX_ = 0;
-    kbClientY_ = sz.height - keyboardHeight;
+    int kbClientX = 0;
+    int kbClientY = sz.height - keyboardHeight;
 
     buildKeyRects_();
 
-    auto origin = FluxUI::getCurrentInstance()->clientToScreen(0, kbClientY_);
-    FontCache &fc = FluxUI::getCurrentInstance()->getFontCache();
-    NativeWindow hw = FluxUI::getCurrentInstance()->getWindow();
-    if (hw)
-      showPopup(hw, origin.x, origin.y, kbW_, keyboardHeight, fc);
-
-    if (scaffold)
-      scaffold->addOverlayHitTarget(this, 300);
+    // zIndex 300: above everything else (dropdowns 100, tooltips 50,
+    // context menus / menu-bar pulldowns 150) — the on-screen keyboard
+    // should never be obscured by another overlay.
+    ui->overlays().show(this, kbClientX, kbClientY, kbW_, keyboardHeight,
+                        300, ui->getFontCache());
   }
 
   void hide_() {
@@ -319,9 +361,8 @@ private:
       return;
     isVisible_ = false;
     targetWidget_ = nullptr;
-    hidePopup();
-    if (scaffold)
-      scaffold->removeOverlay(this);
+    if (auto *ui = FluxUI::getCurrentInstance())
+      ui->overlays().hide(this);
   }
 
   // ── Key rect cache ────────────────────────────────────────────────────────
@@ -496,10 +537,10 @@ private:
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   void refreshPopupIfOpen_() {
-    if (!isVisible_ || !popupVisible())
+    if (!isVisible_)
       return;
     if (auto *ui = FluxUI::getCurrentInstance())
-      refreshPopup(ui->getFontCache());
+      ui->overlays().refresh(this, ui->getFontCache());
   }
 
   static std::string toUpper_(const std::string &s) {

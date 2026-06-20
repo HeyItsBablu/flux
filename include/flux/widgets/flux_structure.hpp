@@ -5,162 +5,51 @@
 
 #include "flux_layout.hpp"
 #include "../flux_state.hpp"
-#include "../flux_overlay_host.hpp"
 #include <iostream>
+
+
+class ToastWidget;  
 
 // ============================================================================
 // CONCRETE WIDGET CLASSES
 // ============================================================================
-class ToastWidget;
-struct OverlayEntry {
-  Widget *widget = nullptr;
-  std::function<void(GraphicsContext &, FontCache &)>
-      renderer; // nullptr for popup overlays
-  int zIndex = 0;
-
-  // Full entry — widget renders into back-buffer
-  OverlayEntry(Widget *w, std::function<void(GraphicsContext &, FontCache &)> r,
-               int z = 0)
-      : widget(w), renderer(r), zIndex(z) {}
-
-  // Hit-target only — visual is in a popup window
-  OverlayEntry(Widget *w, int z = 0)
-      : widget(w), renderer(nullptr), zIndex(z) {}
-};
-
-// --- Scaffold Widget ---
-// --- Scaffold Widget ---
 class ScaffoldWidget : public Widget {
 private:
-  std::vector<OverlayEntry> overlayStack;
   std::shared_ptr<FABWidget> fab_;
 
-  void sortOverlayStack() {
-    std::stable_sort(overlayStack.begin(), overlayStack.end(),
-                     [](const OverlayEntry &a, const OverlayEntry &b) {
-                       return a.zIndex < b.zIndex;
-                     });
-  }
-
 public:
-  // ── FAB ───────────────────────────────────────────────────────────────
   void setFAB(std::shared_ptr<FABWidget> f) {
     fab_ = f;
-    if (f)
-      addChild(f); // added to children so findAndHandleMouseEvent reaches it
+    if (f) addChild(f);
     markNeedsLayout();
   }
 
-  // ── Overlay stack ─────────────────────────────────────────────────────
-  void addOverlayHitTarget(Widget *widget, int zIndex = 0) {
-    for (auto &entry : overlayStack) {
-      if (entry.widget == widget) {
-        entry.zIndex = zIndex;
-        sortOverlayStack();
-        return;
-      }
-    }
-    overlayStack.emplace_back(widget, zIndex);
-    sortOverlayStack();
-    markNeedsPaint();
-  }
-
-  void addOverlay(Widget *widget,
-                  std::function<void(GraphicsContext &, FontCache &)> renderer,
-                  int zIndex = 0) {
-    for (auto &entry : overlayStack) {
-      if (entry.widget == widget) {
-        entry.renderer = renderer;
-        entry.zIndex   = zIndex;
-        sortOverlayStack();
-        markNeedsPaint();
-        return;
-      }
-    }
-    overlayStack.emplace_back(widget, renderer, zIndex);
-    sortOverlayStack();
-    markNeedsPaint();
-  }
-
-  void removeOverlay(Widget *widget) {
-    overlayStack.erase(
-        std::remove_if(overlayStack.begin(), overlayStack.end(),
-                       [widget](const OverlayEntry &e) {
-                         return e.widget == widget;
-                       }),
-        overlayStack.end());
-    markNeedsPaint();
-  }
-
-  void clearOverlays() {
-    overlayStack.clear();
-    markNeedsPaint();
-  }
-
-  bool hasOverlays() const { return !overlayStack.empty(); }
-
-  const std::vector<OverlayEntry> &getOverlayStack() const {
-    return overlayStack;
-  }
-
-  Widget *getTopmostOverlay() const {
-    return overlayStack.empty() ? nullptr : overlayStack.back().widget;
-  }
-
-  // ── Layout ────────────────────────────────────────────────────────────
-  void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
-                     FontCache &fontCache) override {
+  void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints, FontCache &fontCache) override {
     if (autoWidth)  width  = constraints.maxWidth;
     if (autoHeight) height = constraints.maxHeight;
-
     BoxConstraints childConstraints = BoxConstraints::tight(width, height);
-
     for (auto &child : children) {
-      // FAB is in children but gets special layout — skip it in normal pass
-      if (child.get() == fab_.get())
-        continue;
+      if (child.get() == fab_.get()) continue;
       child->computeLayout(ctx, childConstraints, fontCache);
     }
-
-    // FAB: measure then pin to scaffold bounds
     if (fab_) {
       fab_->computeLayout(ctx, childConstraints, fontCache);
       fab_->positionInScaffold(x, y, width, height);
     }
-
     applyConstraints();
     needsLayout = false;
   }
 
-  // ── Render ────────────────────────────────────────────────────────────
   void render(GraphicsContext &ctx, FontCache &fontCache) override {
-    // Normal children (column with appbar + body)
     for (auto &child : children) {
-      if (child.get() == fab_.get())
-        continue; // rendered separately below
+      if (child.get() == fab_.get()) continue;
       child->render(ctx, fontCache);
     }
-
-    // FAB — above content, below dialog overlays
-    if (fab_)
-      fab_->render(ctx, fontCache);
-
-    // Overlay stack (dropdowns, context menus, tooltips, dialogs on non-Win32)
-    for (const auto &entry : overlayStack) {
-      if (entry.renderer) {
-        entry.renderer(ctx, fontCache);
-      }
-#if !defined(_WIN32)
-      else if (entry.widget) {
-        if (auto *host = dynamic_cast<OverlayHost *>(entry.widget))
-          host->renderOverlay(ctx, fontCache);
-      }
-#endif
-    }
-
+    if (fab_) fab_->render(ctx, fontCache);
     needsPaint = false;
   }
 };
+
 
 // --- AppBar Widget ---
 class AppBarWidget : public Widget {

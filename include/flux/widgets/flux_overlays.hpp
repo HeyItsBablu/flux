@@ -2,7 +2,7 @@
 #define FLUX_OVERLAYS_HPP
 
 #include "flux_structure.hpp"
-#include "../flux_overlay_host.hpp"
+
 #include "../flux_app.hpp"
 #include "../flux_core.hpp"
 #include <algorithm>
@@ -72,15 +72,9 @@ struct ContextMenuItem
 // CONTEXT MENU WIDGET
 // ============================================================================
 
-class ContextMenuWidget : public Widget, public OverlayHost
+class ContextMenuWidget : public Widget, public OverlayContent
 {
 private:
-  ScaffoldWidget *scaffold = nullptr;
-
-  // Screen coords — for showPopup only
-  int menuX = 0, menuY = 0;
-  // Client coords — for hit-testing, stored once at open time
-  int menuClientX = 0, menuClientY = 0;
   int menuW = 0, menuH = 0;
 
   std::vector<ContextMenuItem> items;
@@ -118,13 +112,21 @@ public:
     }
   }
 
-  void setScaffold(ScaffoldWidget *s) override { scaffold = s; }
-
   void onDetach() override
   {
     if (isOpen)
       closeMenu();
     Widget::onDetach();
+  }
+
+  // ── OverlayContent ────────────────────────────────────────────────────
+  OverlayPolicy overlayPolicy() const override
+  {
+    // modal = true: every click while open is consumed, including clicks
+    // outside the menu (which close it) — matches the original behavior
+    // exactly. blocksHoverBelow stays false: a context menu never paused
+    // hover/tooltips elsewhere in the app.
+    return {/*modal=*/true, /*blocksHoverBelow=*/false, /*capturesKeyboard=*/true};
   }
 
   // ── Builder API ───────────────────────────────────────────────────────
@@ -160,7 +162,7 @@ public:
     return std::static_pointer_cast<ContextMenuWidget>(shared_from_this());
   }
 
-  // ── Layout ────────────────────────────────────────────────────────────
+  // ── Layout (anchor only — menu itself has no in-tree size) ────────────
   void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override
   {
@@ -205,23 +207,22 @@ public:
     needsPaint = false;
   }
 
-  // ── renderPopupContent ────────────────────────────────────────────────
-  void renderPopupContent(GraphicsContext &ctx, FontCache &fontCache) override
+  // ── renderOverlay ─────────────────────────────────────────────────────
+  // Drawing was already entirely in local coordinates (0,0 = menu
+  // top-left) — no changes needed inside this body at all.
+  void renderOverlay(GraphicsContext &ctx, FontCache &fontCache) override
   {
     if (!isOpen || items.empty())
       return;
 
     Painter painter(ctx);
 
-    // Shadow
     painter.fillRoundedRect(shadowOffset, shadowOffset, menuW, menuH,
                             menuBorderRadius, Color::fromRGBA(0, 0, 0, 60));
 
-    // Background + border
     painter.fillRoundedRect(0, 0, menuW, menuH, menuBorderRadius, menuBgColor);
     painter.drawBorder(0, 0, menuW, menuH, menuBorderRadius, menuBorderColor, 1);
 
-    // Items
     NativeFont font = fontCache.getFont(menuFontSize, FontWeight::Normal);
     int currentY = paddingV;
 
@@ -243,7 +244,6 @@ public:
         if (i == hoveredIndex)
           painter.fillRect(2, currentY, menuW - 4, rowH, itemHoverColor);
 
-        // Layout the embedded widget into the available row width
         auto *ui = FluxUI::getCurrentInstance();
         if (ui)
         {
@@ -268,12 +268,10 @@ public:
       }
       else
       {
-        // Action row
         if (i == hoveredIndex && item.enabled)
           painter.fillRect(2, currentY, menuW - 4, itemHeight, itemHoverColor);
 
         std::wstring wlabel = toWideString(item.label);
-
         Color textCol = item.enabled ? itemTextColor : itemDisabledColor;
         painter.drawText(
             wlabel, paddingH, currentY, menuW - paddingH * 2, itemHeight, font,
@@ -283,67 +281,54 @@ public:
     }
   }
 
-  // ── Mouse Events ──────────────────────────────────────────────────────
-  bool handleMouseDown(int mx, int my) override
+  // ── OverlayContent input handlers ───────────────────────────────────────
+  // Coordinates are already local to the menu's own rect — directly
+  // equivalent to the old (mx - menuClientX, my - menuClientY) math.
+
+  bool onOverlayMouseDown(int localX, int localY) override
   {
-    if (!isOpen)
-      return false;
+    int relativeY = localY - paddingV;
+    int itemIdx = getItemIndexAtY(relativeY);
 
-    if (mx >= menuClientX && mx < menuClientX + menuW &&
-        my >= menuClientY && my < menuClientY + menuH)
+    if (itemIdx >= 0 && itemIdx < (int)items.size())
     {
-      int relativeY = my - menuClientY - paddingV;
-      int itemIdx = getItemIndexAtY(relativeY);
-      if (itemIdx >= 0 && itemIdx < (int)items.size())
+      const auto &item = items[itemIdx];
+
+      if (item.type == ContextMenuItem::Type::Widget && item.widget)
       {
-        const auto &item = items[itemIdx];
-
-        if (item.type == ContextMenuItem::Type::Widget && item.widget)
-        {
-          // Forward click into the embedded widget (in popup-local coords).
-          // Do NOT auto-close — let the widget handle its own lifecycle.
-          int localX = mx - menuClientX;
-          int localY = my - menuClientY;
-          closeMenu();
-          item.widget->handleMouseDown(localX, localY);
-
-          return true;
-        }
-        if (item.type == ContextMenuItem::Type::Action && item.enabled)
-        {
-          if (item.action)
-            item.action();
-          closeMenu();
-          return true;
-        }
+        // NOTE: preserved as-is from the original — this still closes the
+        // menu before the embedded widget sees the click, which contradicts
+        // the "the widget decides whether to stay open" contract documented
+        // on ContextMenuItem::Widget(). Flagging again since it survived
+        // the migration unchanged; worth fixing separately if you want it.
+        closeMenu();
+        item.widget->handleMouseDown(localX, localY);
+        return true;
       }
-      return true;
+      if (item.type == ContextMenuItem::Type::Action && item.enabled)
+      {
+        if (item.action)
+          item.action();
+        closeMenu();
+        return true;
+      }
     }
     closeMenu();
     return true;
   }
 
-  bool handleMouseMove(int mx, int my) override
+  bool onOverlayMouseMove(int localX, int localY) override
   {
-    if (!isOpen)
-      return false;
-
-    if (mx >= menuClientX && mx < menuClientX + menuW &&
-        my >= menuClientY && my < menuClientY + menuH)
+    if (localX >= 0 && localX < menuW && localY >= 0 && localY < menuH)
     {
-      int relativeY = my - menuClientY - paddingV;
+      int relativeY = localY - paddingV;
       int itemIdx = getItemIndexAtY(relativeY);
 
-      // Forward move into widget items regardless of hover-index change
       if (itemIdx >= 0 && itemIdx < (int)items.size())
       {
         const auto &item = items[itemIdx];
         if (item.type == ContextMenuItem::Type::Widget && item.widget)
-        {
-          int localX = mx - menuClientX;
-          int localY = my - menuClientY;
           item.widget->handleMouseMove(localX, localY);
-        }
       }
 
       if (itemIdx != hoveredIndex)
@@ -354,19 +339,16 @@ public:
         return true;
       }
     }
-    else
+    else if (hoveredIndex != -1)
     {
-      if (hoveredIndex != -1)
-      {
-        hoveredIndex = -1;
-        refreshPopupIfOpen_();
-        return true;
-      }
+      hoveredIndex = -1;
+      refreshPopupIfOpen_();
+      return true;
     }
     return false;
   }
 
-  bool handleRightClick(int /*mx*/, int /*my*/) override
+  bool onOverlayRightClick(int, int) override
   {
     if (!isOpen)
       return false;
@@ -374,7 +356,9 @@ public:
     return true;
   }
 
-  bool handleKeyDown(int keyCode) override
+  void onOverlayOutsideClick() override { closeMenu(); }
+
+  bool onOverlayKeyDown(int keyCode) override
   {
     if (!isOpen || items.empty())
       return false;
@@ -404,7 +388,6 @@ public:
         const auto &item = items[selectedIndex];
         if (item.type == ContextMenuItem::Type::Widget && item.widget)
         {
-          // Treat Enter as a click at the widget's centre
           int cx = item.widget->x + item.widget->width / 2;
           int cy = item.widget->y + item.widget->height / 2;
           closeMenu();
@@ -425,8 +408,6 @@ public:
   }
 
 private:
-  // ── Height helper ─────────────────────────────────────────────────────
-  // Returns the rendered height for a single item.
   int _itemHeight(const ContextMenuItem &item) const
   {
     if (item.type == ContextMenuItem::Type::Separator)
@@ -440,8 +421,6 @@ private:
   {
     if (!item.widget)
       return itemHeight;
-    // Use the widget's measured height if already laid out, else fall back to
-    // the widget's minHeight (or itemHeight so the row is never zero-height).
     int h = item.widget->height > 0 ? item.widget->height : item.widget->minHeight;
     return h > 0 ? h : itemHeight;
   }
@@ -472,25 +451,16 @@ private:
     if (!ui)
       return;
 
-    // Pre-layout all widget items so their heights are known before geometry.
     _layoutWidgetItems(ui);
-
-    computeMenuGeometry(clientX, clientY);
+    computeMenuGeometry(); // size only — positioning/clamping is the manager's job now
 
     isOpen = true;
     hoveredIndex = -1;
     selectedIndex = findFirstActionIndex();
 
-    NativeWindow hw = ui->getWindow();
-    if (hw)
-    {
-      FontCache &fc = ui->getFontCache();
-      showPopup(hw, menuX, menuY, menuW + shadowOffset, menuH + shadowOffset,
-                fc);
-    }
-
-    if (scaffold)
-      scaffold->addOverlayHitTarget(this, 150);
+    ui->overlays().show(this, clientX, clientY,
+                        menuW + shadowOffset, menuH + shadowOffset,
+                        150, ui->getFontCache());
   }
 
   void closeMenu()
@@ -500,20 +470,10 @@ private:
     isOpen = false;
     hoveredIndex = -1;
     selectedIndex = -1;
-#ifdef _WIN32
-    hidePopup();
-    if (scaffold)
-      scaffold->removeOverlay(this);
-#else
-    if (scaffold)
-      scaffold->removeOverlay(this);
-    hidePopup();
-#endif
+    if (auto *ui = FluxUI::getCurrentInstance())
+      ui->overlays().hide(this);
   }
 
-  // Run computeLayout on every Widget item so heights are valid before the
-  // popup geometry is calculated.  Uses a dummy GraphicsContext/FontCache from
-  // the current FluxUI instance.
   void _layoutWidgetItems(FluxUI *ui)
   {
     auto mc = ui->getMeasureContext();
@@ -525,7 +485,6 @@ private:
       {
         if (item.widget->needsLayout || item.widget->height == 0)
         {
-          // First pass: loose width = minWidth so we get a sensible height.
           item.widget->computeLayout(
               mc.ctx,
               BoxConstraints::loose(minWidth - paddingH * 2, kUnbounded),
@@ -535,7 +494,9 @@ private:
     }
   }
 
-  void computeMenuGeometry(int clientX, int clientY)
+  // Pure size calculation now — no screen coordinates, no monitor
+  // clamping. OverlayManager::show() handles all of that internally.
+  void computeMenuGeometry()
   {
     static constexpr int kGlyphWidthPx = 7;
 
@@ -550,7 +511,6 @@ private:
       }
       else if (item.type == ContextMenuItem::Type::Widget && item.widget)
       {
-        // Account for the widget's natural width + our horizontal padding
         int lw = item.widget->width > 0 ? item.widget->width : item.widget->minWidth;
         maxLabelWidth = std::max(maxLabelWidth, lw);
       }
@@ -561,52 +521,14 @@ private:
     for (const auto &item : items)
       totalH += _itemHeight(item);
     menuH = totalH;
-
-    menuClientX = clientX;
-    menuClientY = clientY;
-
-    auto sc = FluxUI::getCurrentInstance()->clientToScreen(clientX, clientY);
-    menuX = sc.x;
-    menuY = sc.y;
-
-#ifdef _WIN32
-    POINT pt = {menuX, menuY};
-    HMONITOR mon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
-    MONITORINFO mi{};
-    mi.cbSize = sizeof(mi);
-    if (GetMonitorInfoW(mon, &mi))
-    {
-      if (menuX + menuW > mi.rcWork.right)
-      {
-        menuX = mi.rcWork.right - menuW;
-        menuClientX = FluxUI::getCurrentInstance()->screenToClient(menuX, menuY).x;
-      }
-      if (menuX < mi.rcWork.left)
-      {
-        menuX = mi.rcWork.left;
-        menuClientX = FluxUI::getCurrentInstance()->screenToClient(menuX, menuY).x;
-      }
-      if (menuY + menuH > mi.rcWork.bottom)
-      {
-        menuY = mi.rcWork.bottom - menuH;
-        menuClientY = FluxUI::getCurrentInstance()->screenToClient(menuX, menuY).y;
-      }
-      if (menuY < mi.rcWork.top)
-      {
-        menuY = mi.rcWork.top;
-        menuClientY = FluxUI::getCurrentInstance()->screenToClient(menuX, menuY).y;
-      }
-    }
-#endif
   }
 
   void refreshPopupIfOpen_()
   {
-    if (!isOpen || !popupVisible())
+    if (!isOpen)
       return;
-    auto *ui = FluxUI::getCurrentInstance();
-    if (ui)
-      refreshPopup(ui->getFontCache());
+    if (auto *ui = FluxUI::getCurrentInstance())
+      ui->overlays().refresh(this, ui->getFontCache());
   }
 
   void moveToPrevious()
@@ -670,8 +592,6 @@ private:
     return 0;
   }
 
-  // Returns the item index whose row contains relativeY (relative to paddingV
-  // offset already removed by the caller).
   int getItemIndexAtY(int relativeY) const
   {
     int currentY = 0;
@@ -694,14 +614,14 @@ private:
 // DIALOG WIDGET
 // ============================================================================
 
-class DialogWidget : public Widget, public OverlayHost
+class DialogWidget : public Widget, public OverlayContent
 {
 private:
-  ScaffoldWidget *scaffold = nullptr;
-  bool contentLayoutDirty = true;
+  bool popupShown_ = false;
+  bool contentDirty_ = true;
 
-  int openedWinW_ = 0;
-  int openedWinH_ = 0;
+  int dialogX_ = 0, dialogY_ = 0; // box position within the overlay rect
+  int winW_ = 0, winH_ = 0;       // client size captured when opened
 
 public:
   bool isOpen = false;
@@ -710,7 +630,6 @@ public:
   int dialogWidth = 400;
   int dialogHeight = 300;
   Color overlayColor = Color::fromRGBA(0, 0, 0, 128);
-  int overlayAlpha = 128;
   Color dialogBgColor = Color::fromRGBA(255, 255, 255, 255);
   Color dialogBorderColor = Color::fromRGBA(200, 200, 200, 255);
   int dialogBorderRadius = 8;
@@ -718,146 +637,162 @@ public:
 
   std::function<void()> onClose;
   bool closeOnClickOutside = true;
+  bool closeOnEscape = true;
 
   DialogWidget() { hasBackground = false; }
 
-  void setScaffold(ScaffoldWidget *s) override { scaffold = s; }
+  void onDetach() override
+  {
+    if (isOpen)
+      close();
+    Widget::onDetach();
+  }
 
-  // ── Layout ────────────────────────────────────────────────────────────
-  void computeLayout(GraphicsContext &, const BoxConstraints &,
-                     FontCache &) override
+  // ── OverlayContent ────────────────────────────────────────────────────
+  OverlayPolicy overlayPolicy() const override
+  {
+    // A dialog owns the whole screen while open — nothing below it should
+    // see clicks, hover, or keys.
+    return {/*modal=*/true, /*blocksHoverBelow=*/true, /*capturesKeyboard=*/true};
+  }
+
+  void renderOverlay(GraphicsContext &ctx, FontCache &fontCache) override
+  {
+    if (!isOpen)
+      return;
+
+    Painter painter(ctx);
+
+    // Dim scrim across the whole overlay rect (the full client area —
+    // see open()).
+    painter.fillRectAlpha(0, 0, winW_, winH_, overlayColor);
+
+    dialogX_ = (winW_ - dialogWidth) / 2;
+    dialogY_ = (winH_ - dialogHeight) / 2;
+
+    painter.fillRoundedRect(dialogX_, dialogY_, dialogWidth, dialogHeight,
+                            dialogBorderRadius, dialogBgColor);
+    painter.drawBorder(dialogX_, dialogY_, dialogWidth, dialogHeight,
+                       dialogBorderRadius, dialogBorderColor, 1);
+
+    if (content)
+    {
+      layoutContentIfNeeded(ctx, fontCache);
+      content->render(ctx, fontCache);
+    }
+  }
+
+  // Coordinates are local to the overlay rect, which is the full client
+  // area starting at (0,0) — numerically identical to absolute client
+  // coordinates, same as ToastWidget.
+  bool onOverlayMouseDown(int mx, int my) override
+  {
+    if (!isOpen)
+      return false;
+
+    if (mx < dialogX_ || mx >= dialogX_ + dialogWidth ||
+        my < dialogY_ || my >= dialogY_ + dialogHeight)
+    {
+      if (closeOnClickOutside)
+        close();
+      return true; // modal — swallow regardless of whether we closed
+    }
+
+    if (content)
+      dispatchContentMouseDown(mx, my);
+
+    return true;
+  }
+
+  bool onOverlayMouseUp(int mx, int my) override
+  {
+    if (!isOpen || !content)
+      return false;
+    return broadcastMouseEvent(content.get(), mx, my,
+                               [](Widget *w, int x, int y)
+                               { return w->handleMouseUp(x, y); });
+  }
+
+  bool onOverlayMouseMove(int mx, int my) override
+  {
+    if (!isOpen || !content)
+      return false;
+    // blocksHoverBelow keeps FluxUI from running updateHoverStates on
+    // root while the dialog is open, so the dialog has to drive hover
+    // for its own content subtree itself (otherwise buttons inside the
+    // dialog would never show hover feedback).
+    return updateHoverStates(content.get(), mx, my);
+  }
+
+  bool onOverlayKeyDown(int keyCode) override
+  {
+    if (!isOpen)
+      return false;
+    if (closeOnEscape && keyCode == Key::Escape)
+    {
+      close();
+      return true;
+    }
+    return true; // modal — swallow all keys while open, handled or not
+  }
+
+  void onOverlayOutsideClick() override
+  {
+    // The dialog's overlay rect covers the full client area, so
+    // onOverlayMouseDown already handles "inside the scrim, outside the
+    // box". This only fires if a click somehow lands outside the
+    // overlay's own rect entirely — shouldn't happen for a full-window
+    // overlay, but close defensively if it ever does.
+    if (closeOnClickOutside)
+      close();
+  }
+
+  // ── Builder API ───────────────────────────────────────────────────────
+  std::shared_ptr<DialogWidget> setContent(WidgetPtr child)
+  {
+    content = child;
+    if (content)
+      content->parent = this;
+    contentDirty_ = true;
+    return self_();
+  }
+  std::shared_ptr<DialogWidget> setSize(int w, int h)
+  {
+    dialogWidth = w;
+    dialogHeight = h;
+    contentDirty_ = true;
+    return self_();
+  }
+  std::shared_ptr<DialogWidget> setCloseOnClickOutside(bool value)
+  {
+    closeOnClickOutside = value;
+    return self_();
+  }
+  std::shared_ptr<DialogWidget> setCloseOnEscape(bool value)
+  {
+    closeOnEscape = value;
+    return self_();
+  }
+  std::shared_ptr<DialogWidget> setOnClose(std::function<void()> cb)
+  {
+    onClose = cb;
+    return self_();
+  }
+  std::shared_ptr<DialogWidget> setOverlayColor(Color c)
+  {
+    overlayColor = c;
+    return self_();
+  }
+
+  // ── Normal Widget — zero-size anchor, purely so onDetach() fires ──────
+  void computeLayout(GraphicsContext &, const BoxConstraints &, FontCache &) override
   {
     width = 0;
     height = 0;
     needsLayout = false;
   }
+  void positionChildren(int, int, int, int) override {}
   void render(GraphicsContext &, FontCache &) override { needsPaint = false; }
-
-  // ── renderPopupContent ────────────────────────────────────────────────
-  void renderPopupContent(GraphicsContext &ctx, FontCache &fontCache) override
-  {
-    if (!isOpen)
-      return;
-
-    auto *ui = FluxUI::getCurrentInstance();
-    if (!ui)
-      return;
-
-    Painter painter(ctx);
-
-    auto sz = ui->getClientSize();
-    int winW = sz.width;
-    int winH = sz.height;
-
-    if (winW != openedWinW_ || winH != openedWinH_)
-    {
-      contentLayoutDirty = true;
-      openedWinW_ = winW;
-      openedWinH_ = winH;
-    }
-
-    // Semi-transparent dim overlay
-    painter.fillRectAlpha(0, 0, winW, winH, overlayColor);
-
-    int dialogX = (winW - dialogWidth) / 2;
-    int dialogY = (winH - dialogHeight) / 2;
-
-    // Dialog box
-    painter.fillRoundedRect(dialogX, dialogY, dialogWidth, dialogHeight,
-                            dialogBorderRadius, dialogBgColor);
-    painter.drawBorder(dialogX, dialogY, dialogWidth, dialogHeight,
-                       dialogBorderRadius, dialogBorderColor, 1);
-
-    // Content
-    if (content)
-    {
-      int contentX = dialogX + dialogPadding;
-      int contentY = dialogY + dialogPadding;
-      int contentW = dialogWidth - dialogPadding * 2;
-      int contentH = dialogHeight - dialogPadding * 2;
-
-      if (contentLayoutDirty)
-      {
-        content->computeLayout(ctx, BoxConstraints::tight(contentW, contentH),
-                               fontCache);
-        content->x = contentX;
-        content->y = contentY;
-        content->positionChildren(
-            contentX + content->paddingLeft,
-            contentY + content->paddingTop,
-            content->width - content->paddingLeft - content->paddingRight,
-            content->height - content->paddingTop - content->paddingBottom);
-        contentLayoutDirty = false;
-      }
-      content->render(ctx, fontCache);
-    }
-  }
-
-  // ── Mouse Events ──────────────────────────────────────────────────────
-  bool handleMouseDown(int mx, int my) override
-  {
-    if (!isOpen)
-      return false;
-
-    auto *ui = FluxUI::getCurrentInstance();
-    if (!ui)
-      return false;
-
-    auto sz = ui->getClientSize();
-    int winW = sz.width;
-    int winH = sz.height;
-
-    int dialogX = (winW - dialogWidth) / 2;
-    int dialogY = (winH - dialogHeight) / 2;
-
-    if (mx < dialogX || mx >= dialogX + dialogWidth ||
-        my < dialogY || my >= dialogY + dialogHeight)
-    {
-      if (closeOnClickOutside)
-        close();
-      return true;
-    }
-
-    if (content)
-    {
-      Widget *toFocus = nullptr;
-      if (findAndHandleMouseEvent(
-              content.get(), mx, my, [mx, my, &toFocus](Widget *w)
-              {
-                bool handled = w->handleMouseDown(mx, my);
-                if (!handled && w->onClick && mx >= w->x &&
-                    mx < w->x + w->width && my >= w->y &&
-                    my < w->y + w->height) {
-                  w->onClick();
-                  handled = true;
-                }
-                if (handled && w->isFocusable)
-                  toFocus = w;
-                return handled; }))
-      {
-        if (toFocus && FluxUI::getCurrentInstance())
-          FluxUI::getCurrentInstance()->setFocus(toFocus);
-        return true;
-      }
-      Widget *clicked = findWidgetAt(content.get(), mx, my);
-      if (clicked)
-      {
-        if (clicked->onClick)
-        {
-          clicked->onClick();
-          return true;
-        }
-        if (clicked->isFocusable)
-        {
-          clicked->handleMouseDown(mx, my);
-          if (FluxUI::getCurrentInstance())
-            FluxUI::getCurrentInstance()->setFocus(clicked);
-          return true;
-        }
-      }
-    }
-    return true;
-  }
 
   // ── Open / Close ──────────────────────────────────────────────────────
   void open()
@@ -870,49 +805,16 @@ public:
       return;
 
     isOpen = true;
-    contentLayoutDirty = true;
+    contentDirty_ = true;
 
     auto sz = ui->getClientSize();
-    int winW = sz.width;
-    int winH = sz.height;
+    winW_ = sz.width;
+    winH_ = sz.height;
+    dialogX_ = (winW_ - dialogWidth) / 2;
+    dialogY_ = (winH_ - dialogHeight) / 2;
 
-    openedWinW_ = winW;
-    openedWinH_ = winH;
-
-    if (content)
-    {
-      auto mc = ui->getMeasureContext();
-      FontCache &fc = ui->getFontCache();
-      int contentW = dialogWidth - dialogPadding * 2;
-      int contentH = dialogHeight - dialogPadding * 2;
-      content->computeLayout(mc.ctx, BoxConstraints::tight(contentW, contentH),
-                             fc);
-
-      int dialogX = (winW - dialogWidth) / 2;
-      int dialogY = (winH - dialogHeight) / 2;
-      int contentX = dialogX + dialogPadding;
-      int contentY = dialogY + dialogPadding;
-      content->x = contentX;
-      content->y = contentY;
-      content->positionChildren(
-          contentX + content->paddingLeft,
-          contentY + content->paddingTop,
-          content->width - content->paddingLeft - content->paddingRight,
-          content->height - content->paddingTop - content->paddingBottom);
-      contentLayoutDirty = false;
-    }
-
-    NativeWindow hw = ui->getWindow();
-    if (hw)
-    {
-      auto origin = ui->clientToScreen(0, 0);
-      FontCache &fc = ui->getFontCache();
-      showPopup(hw, origin.x, origin.y, winW, winH, fc);
-    }
-
-    if (scaffold)
-      scaffold->addOverlayHitTarget(this, 200);
-    markNeedsPaint();
+    ui->overlays().show(this, 0, 0, winW_, winH_, 200, ui->getFontCache());
+    popupShown_ = true;
   }
 
   void close()
@@ -920,78 +822,107 @@ public:
     if (!isOpen)
       return;
     isOpen = false;
-    contentLayoutDirty = true;
 
     auto *ui = FluxUI::getCurrentInstance();
     if (ui)
     {
       Widget *focused = ui->getFocusedWidget();
-      if (focused && isDescendantOf(focused, content.get()))
+      if (focused && content && isDescendantOf(focused, content.get()))
         ui->setFocus(nullptr);
+      if (popupShown_)
+        ui->overlays().hide(this);
     }
-
-#ifdef _WIN32
-    hidePopup();
-    if (scaffold)
-      scaffold->removeOverlay(this);
-#else
-    if (scaffold)
-      scaffold->removeOverlay(this);
-    hidePopup();
-#endif
+    popupShown_ = false;
 
     if (onClose)
       onClose();
-    markNeedsPaint();
-  }
-
-  // ── Builder Methods ───────────────────────────────────────────────────
-  std::shared_ptr<DialogWidget> setContent(WidgetPtr child)
-  {
-    content = child;
-    if (content)
-      content->parent = this;
-    contentLayoutDirty = true;
-    markNeedsPaint();
-    return std::static_pointer_cast<DialogWidget>(shared_from_this());
-  }
-  std::shared_ptr<DialogWidget> setSize(int w, int h)
-  {
-    dialogWidth = w;
-    dialogHeight = h;
-    contentLayoutDirty = true;
-    markNeedsPaint();
-    return std::static_pointer_cast<DialogWidget>(shared_from_this());
-  }
-  std::shared_ptr<DialogWidget> setCloseOnClickOutside(bool value)
-  {
-    closeOnClickOutside = value;
-    return std::static_pointer_cast<DialogWidget>(shared_from_this());
-  }
-  std::shared_ptr<DialogWidget> setOnClose(std::function<void()> cb)
-  {
-    onClose = cb;
-    return std::static_pointer_cast<DialogWidget>(shared_from_this());
-  }
-  std::shared_ptr<DialogWidget> setOverlayAlpha(int alpha)
-  {
-    overlayAlpha = alpha;
-    return std::static_pointer_cast<DialogWidget>(shared_from_this());
   }
 
 private:
+  std::shared_ptr<DialogWidget> self_()
+  {
+    return std::static_pointer_cast<DialogWidget>(shared_from_this());
+  }
+
+  void layoutContentIfNeeded(GraphicsContext &ctx, FontCache &fontCache)
+  {
+    int contentX = dialogX_ + dialogPadding;
+    int contentY = dialogY_ + dialogPadding;
+    int contentW = dialogWidth - dialogPadding * 2;
+    int contentH = dialogHeight - dialogPadding * 2;
+
+    if (contentDirty_ || content->needsLayout)
+    {
+      content->computeLayout(ctx, BoxConstraints::tight(contentW, contentH), fontCache);
+      contentDirty_ = false;
+    }
+
+    content->x = contentX;
+    content->y = contentY;
+    content->positionChildren(
+        contentX + content->paddingLeft,
+        contentY + content->paddingTop,
+        content->width - content->paddingLeft - content->paddingRight,
+        content->height - content->paddingTop - content->paddingBottom);
+  }
+
+  bool dispatchContentMouseDown(int mx, int my)
+  {
+    auto *ui = FluxUI::getCurrentInstance();
+    Widget *toFocus = nullptr;
+
+    bool handled = findAndHandleMouseEvent(
+        content.get(), mx, my,
+        [mx, my, &toFocus](Widget *w)
+        {
+          bool h = w->handleMouseDown(mx, my);
+          if (!h && w->onClick && mx >= w->x && mx < w->x + w->width &&
+              my >= w->y && my < w->y + w->height)
+          {
+            w->onClick();
+            h = true;
+          }
+          if (h && w->isFocusable)
+            toFocus = w;
+          return h;
+        });
+
+    if (handled)
+    {
+      if (toFocus && ui)
+        ui->setFocus(toFocus);
+      return true;
+    }
+
+    Widget *clicked = findWidgetAt(content.get(), mx, my);
+    if (clicked)
+    {
+      if (clicked->onClick)
+      {
+        clicked->onClick();
+        return true;
+      }
+      if (clicked->isFocusable)
+      {
+        clicked->handleMouseDown(mx, my);
+        if (ui)
+          ui->setFocus(clicked);
+        return true;
+      }
+    }
+    return false;
+  }
+
   bool isDescendantOf(Widget *candidate, Widget *subtreeRoot)
   {
-    if (!candidate || !subtreeRoot)
-      return false;
-    Widget *current = candidate->parent;
+    Widget *current = candidate;
     while (current)
     {
       if (current == subtreeRoot)
         return true;
       current = current->parent;
     }
-    return candidate == subtreeRoot;
+    return false;
   }
 };
 
@@ -1006,13 +937,10 @@ enum class TooltipPosition
   Auto
 };
 
-class TooltipWidget : public Widget, public OverlayHost
+class TooltipWidget : public Widget, public OverlayContent
 {
 private:
-  ScaffoldWidget *scaffold = nullptr;
-
-  int tipScreenX = 0, tipScreenY = 0;
-  int tipW = 0, tipH = 0;
+  int tipW_ = 0, tipH_ = 0;
 
   std::string tipText;
   TooltipPosition preferredPosition = TooltipPosition::Auto;
@@ -1025,6 +953,8 @@ private:
   int tipPadV = 6;
   int tipBorderRadius = 4;
   int tipMaxWidth = 240;
+  int tipGap = 6; // space between anchor and bubble
+  int shadowOffset = 2;
 
 public:
   bool isVisible = false;
@@ -1039,8 +969,6 @@ public:
     }
   }
 
-  void setScaffold(ScaffoldWidget *s) override { scaffold = s; }
-
   void onDetach() override
   {
     if (isVisible)
@@ -1048,39 +976,77 @@ public:
     Widget::onDetach();
   }
 
+  // ── OverlayContent ────────────────────────────────────────────────────
+  OverlayPolicy overlayPolicy() const override
+  {
+    // Tooltips are purely informational — never modal, never eat hover
+    // from the tree below, never capture keyboard. Whatever is under the
+    // cursor behaves exactly as if the tooltip weren't there.
+    return {/*modal=*/false, /*blocksHoverBelow=*/false, /*capturesKeyboard=*/false};
+  }
+
+  void renderOverlay(GraphicsContext &ctx, FontCache &fontCache) override
+  {
+    if (!isVisible || tipText.empty())
+      return;
+
+    Painter painter(ctx);
+
+    painter.fillRoundedRect(shadowOffset, shadowOffset, tipW_, tipH_,
+                            tipBorderRadius, Color::fromRGBA(0, 0, 0, 60));
+    painter.fillRoundedRect(0, 0, tipW_, tipH_, tipBorderRadius, tipBgColor);
+    painter.drawBorder(0, 0, tipW_, tipH_, tipBorderRadius, tipBorderColor, 1);
+
+    std::wstring wtip = toWideString(tipText);
+    NativeFont font = fontCache.getFont(tipFontSize, FontWeight::Normal);
+    painter.drawText(wtip, tipPadH, tipPadV, tipW_ - tipPadH * 2,
+                     tipH_ - tipPadV * 2, font, tipTextColor,
+                     DT_CENTER | DT_VCENTER | DT_WORDBREAK | DT_END_ELLIPSIS);
+  }
+
+  // A click anywhere means the user moved on from hovering — dismiss, but
+  // never claim the click (return false) so it still reaches the anchor
+  // or whatever's underneath.
+  bool onOverlayMouseDown(int, int) override
+  {
+    closeTooltip();
+    return false;
+  }
+  void onOverlayOutsideClick() override { closeTooltip(); }
+
   // ── Builder API ───────────────────────────────────────────────────────
   std::shared_ptr<TooltipWidget> setTooltipText(const std::string &t)
   {
     tipText = t;
-    return std::static_pointer_cast<TooltipWidget>(shared_from_this());
+    return self_();
   }
   std::shared_ptr<TooltipWidget> setPosition(TooltipPosition pos)
   {
     preferredPosition = pos;
-    return std::static_pointer_cast<TooltipWidget>(shared_from_this());
+    return self_();
   }
   std::shared_ptr<TooltipWidget> setTooltipBackground(Color color)
   {
     tipBgColor = color;
-    return std::static_pointer_cast<TooltipWidget>(shared_from_this());
+    return self_();
   }
   std::shared_ptr<TooltipWidget> setTooltipTextColor(Color color)
   {
     tipTextColor = color;
-    return std::static_pointer_cast<TooltipWidget>(shared_from_this());
+    return self_();
   }
   std::shared_ptr<TooltipWidget> setTooltipFontSize(int size)
   {
     tipFontSize = size;
-    return std::static_pointer_cast<TooltipWidget>(shared_from_this());
+    return self_();
   }
   std::shared_ptr<TooltipWidget> setTooltipMaxWidth(int w)
   {
     tipMaxWidth = w;
-    return std::static_pointer_cast<TooltipWidget>(shared_from_this());
+    return self_();
   }
 
-  // ── Layout ────────────────────────────────────────────────────────────
+  // ── Layout (anchor only — tooltip itself has no in-tree size) ─────────
   void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override
   {
@@ -1088,6 +1054,7 @@ public:
       width = constraints.maxWidth;
     if (autoHeight)
       height = constraints.maxHeight;
+
     if (!children.empty())
     {
       auto &anchor = children[0];
@@ -1123,31 +1090,12 @@ public:
     needsPaint = false;
   }
 
-  // ── renderPopupContent ────────────────────────────────────────────────
-  void renderPopupContent(GraphicsContext &ctx, FontCache &fontCache) override
+private:
+  std::shared_ptr<TooltipWidget> self_()
   {
-    if (!isVisible || tipText.empty())
-      return;
-
-    Painter painter(ctx);
-
-    // Shadow
-    painter.fillRoundedRect(2, 2, tipW, tipH, tipBorderRadius,
-                            Color::fromRGBA(0, 0, 0, 60));
-
-    // Bubble
-    painter.fillRoundedRect(0, 0, tipW, tipH, tipBorderRadius, tipBgColor);
-    painter.drawBorder(0, 0, tipW, tipH, tipBorderRadius, tipBorderColor, 1);
-
-    // Text
-    std::wstring wtip = toWideString(tipText);
-    NativeFont font = fontCache.getFont(tipFontSize, FontWeight::Normal);
-    painter.drawText(wtip, tipPadH, tipPadV, tipW - tipPadH * 2,
-                     tipH - tipPadV * 2, font, tipTextColor,
-                     DT_CENTER | DT_VCENTER | DT_WORDBREAK | DT_END_ELLIPSIS);
+    return std::static_pointer_cast<TooltipWidget>(shared_from_this());
   }
 
-private:
   void chainAnchorHover(Widget *anchor)
   {
     HoverHandler previous = anchor->onHover;
@@ -1162,45 +1110,12 @@ private:
     };
   }
 
-  void openTooltip()
-  {
-    if (isVisible || tipText.empty())
-      return;
-    computeBubbleGeometry();
-    isVisible = true;
-
-    auto *ui = FluxUI::getCurrentInstance();
-    if (!ui)
-      return;
-
-    NativeWindow hw = ui->getWindow();
-    if (hw)
-    {
-      FontCache &fc = ui->getFontCache();
-      showPopup(hw, tipScreenX, tipScreenY, tipW + 2, tipH + 2, fc);
-    }
-
-    if (scaffold)
-      scaffold->addOverlayHitTarget(this, 50);
-  }
-
-  void closeTooltip()
-  {
-    if (!isVisible)
-      return;
-    isVisible = false;
-#ifdef _WIN32
-    hidePopup();
-    if (scaffold)
-      scaffold->removeOverlay(this);
-#else
-    if (scaffold)
-      scaffold->removeOverlay(this);
-    hidePopup();
-#endif
-  }
-
-  void computeBubbleGeometry()
+  // clientX/clientY are MAIN-WINDOW CLIENT coordinates, same space show()
+  // expects. Win32's show() does its own screen-space monitor clamping on
+  // top of this; the clamp here just keeps the bubble inside the window
+  // itself, which matters on every platform including non-Win32 (where
+  // show() does no clamping at all).
+  void computeBubbleGeometry(FluxUI *ui, int &outClientX, int &outClientY)
   {
     std::wstring wtip = toWideString(tipText);
     int charW = static_cast<int>(tipFontSize * 0.62f);
@@ -1209,43 +1124,65 @@ private:
     int maxTW = tipMaxWidth - tipPadH * 2;
     int lines = std::max(1, (textW + maxTW - 1) / maxTW);
 
-    tipW = std::min(textW + tipPadH * 2, tipMaxWidth);
-    tipH = lines * lineH + tipPadV * 2;
+    tipW_ = std::min(textW + tipPadH * 2, tipMaxWidth);
+    tipH_ = lines * lineH + tipPadV * 2;
 
     int anchorCX = x + width / 2;
-    int anchorCY = y;
+    int above = y - tipH_ - tipGap;
+    int below = y + height + tipGap;
+    bool fitsAbove = above >= 0;
+
+    int clientX = anchorCX - tipW_ / 2;
+    int clientY;
+    if (preferredPosition == TooltipPosition::Above)
+      clientY = fitsAbove ? above : 0;
+    else if (preferredPosition == TooltipPosition::Below)
+      clientY = below;
+    else // Auto
+      clientY = fitsAbove ? above : below;
+
+    auto sz = ui->getClientSize();
+    if (clientX + tipW_ > sz.width)
+      clientX = sz.width - tipW_;
+    if (clientX < 0)
+      clientX = 0;
+    if (clientY + tipH_ > sz.height)
+      clientY = sz.height - tipH_;
+    if (clientY < 0)
+      clientY = 0;
+
+    outClientX = clientX;
+    outClientY = clientY;
+  }
+
+  void openTooltip()
+  {
+    if (isVisible || tipText.empty())
+      return;
 
     auto *ui = FluxUI::getCurrentInstance();
     if (!ui)
       return;
 
-    auto sc = ui->clientToScreen(anchorCX - tipW / 2, anchorCY);
-    tipScreenX = sc.x;
-    tipScreenY = sc.y - tipH - 6;
+    int clientX, clientY;
+    computeBubbleGeometry(ui, clientX, clientY);
 
-#ifdef _WIN32
-    POINT pt = {sc.x, sc.y};
-    HMONITOR mon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
-    MONITORINFO mi{};
-    mi.cbSize = sizeof(mi);
-    if (GetMonitorInfoW(mon, &mi))
-    {
-      bool wantAbove = (preferredPosition != TooltipPosition::Below);
-      auto below = ui->clientToScreen(anchorCX - tipW / 2, y + height + 6);
-      if (wantAbove && tipScreenY >= mi.rcWork.top)
-      {
-        // above fits — already set
-      }
-      else
-      {
-        tipScreenY = below.y;
-      }
-      if (tipScreenX + tipW > mi.rcWork.right)
-        tipScreenX = mi.rcWork.right - tipW;
-      if (tipScreenX < mi.rcWork.left)
-        tipScreenX = mi.rcWork.left;
-    }
-#endif
+    isVisible = true;
+
+    // zIndex 50: above the base widget tree, below dropdowns (100) and
+    // context menus (150) — a tooltip should never sit on top of an open
+    // menu/dropdown it happens to overlap.
+    ui->overlays().show(this, clientX, clientY, tipW_, tipH_, 50,
+                        ui->getFontCache());
+  }
+
+  void closeTooltip()
+  {
+    if (!isVisible)
+      return;
+    isVisible = false;
+    if (auto *ui = FluxUI::getCurrentInstance())
+      ui->overlays().hide(this);
   }
 };
 
@@ -1253,15 +1190,9 @@ private:
 // DROPDOWN WIDGET
 // ============================================================================
 
-class DropdownWidget : public Widget, public OverlayHost
+class DropdownWidget : public Widget, public OverlayContent
 {
 private:
-  ScaffoldWidget *scaffold = nullptr;
-
-  // Screen coords — for showPopup only
-  int listScreenX = 0, listScreenY = 0;
-  // Client coords — for hit-testing, stored once at open time
-  int listClientX = 0, listClientY = 0;
   int listWidth_ = 0;
 
 public:
@@ -1304,72 +1235,13 @@ public:
     autoHeight = false;
   }
 
-  void setScaffold(ScaffoldWidget *s) override { scaffold = s; }
+  // ── OverlayContent ────────────────────────────────────────────────────
+  // overlayPolicy() not overridden — default (non-modal) is correct here.
 
-  // ── Layout ────────────────────────────────────────────────────────────
-  void computeLayout(GraphicsContext &, const BoxConstraints &constraints,
-                     FontCache &) override
+  void renderOverlay(GraphicsContext &ctx, FontCache &fontCache) override
   {
-    if (autoWidth)
-      width = constraints.maxWidth;
-    applyConstraints();
-    needsLayout = false;
-  }
-
-  // ── Render main box ───────────────────────────────────────────────────
-  void render(GraphicsContext &ctx, FontCache &fontCache) override
-  {
-    borderColor = isFocused ? dropdownFocusedBorderColor : dropdownBorderColor;
-    drawRoundedRectangle(ctx);
-
-    Painter painter(ctx);
-    NativeFont font = fontCache.getFont(fontSize, fontWeight);
-
-    Color textCol =
-        (selectedIndex >= 0 && selectedIndex < (int)options.size())
-            ? getCurrentTextColor()
-            : placeholderColor;
-    const std::string &label =
-        (selectedIndex >= 0 && selectedIndex < (int)options.size())
-            ? options[selectedIndex]
-            : placeholder;
-
-    std::wstring wlabel = toWideString(label);
-    painter.drawText(wlabel, x + paddingLeft, y + paddingTop,
-                     width - paddingLeft - paddingRight,
-                     height - paddingTop - paddingBottom,
-                     font, textCol,
-                     DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-
-    int arrowX = x + width - paddingRight + 10;
-    int arrowY = y + height / 2;
-    int hs = arrowSize / 2;
-    int vs = arrowSize / 4;
-
-    if (isOpen)
-    {
-      painter.drawLine(arrowX - hs, arrowY + vs, arrowX, arrowY - vs,
-                       arrowColor, 2);
-      painter.drawLine(arrowX, arrowY - vs, arrowX + hs, arrowY + vs,
-                       arrowColor, 2);
-    }
-    else
-    {
-      painter.drawLine(arrowX - hs, arrowY - vs, arrowX, arrowY + vs,
-                       arrowColor, 2);
-      painter.drawLine(arrowX, arrowY + vs, arrowX + hs, arrowY - vs,
-                       arrowColor, 2);
-    }
-
-    needsPaint = false;
-  }
-
-  // ── renderPopupContent ────────────────────────────────────────────────
-  void renderPopupContent(GraphicsContext &ctx, FontCache &fontCache) override
-  {
-    if (!isOpen || options.empty())
+    if (options.empty())
       return;
-
     Painter painter(ctx);
 
     int visibleCount = std::min((int)options.size(), maxVisibleItems);
@@ -1377,76 +1249,50 @@ public:
 
     painter.fillRect(0, 0, listWidth_, listH, listBgColor);
     painter.drawRectOutline(0, 0, listWidth_, listH, listBorderColor, 1);
-
     painter.pushClipRect(1, 1, listWidth_ - 2, listH - 2);
 
     NativeFont font = fontCache.getFont(fontSize, fontWeight);
-
     int endIndex = std::min((int)options.size(), scrollOffset + visibleCount);
     for (int i = scrollOffset; i < endIndex; i++)
     {
       int itemY = 1 + (i - scrollOffset) * itemHeight;
-
       if (i == hoveredItemIndex)
         painter.fillRect(1, itemY, listWidth_ - 2, itemHeight, itemHoverColor);
       else if (i == selectedIndex)
-        painter.fillRect(1, itemY, listWidth_ - 2, itemHeight,
-                         itemSelectedColor);
+        painter.fillRect(1, itemY, listWidth_ - 2, itemHeight, itemSelectedColor);
 
       std::wstring wopt = toWideString(options[i]);
       painter.drawText(wopt, 12, itemY, listWidth_ - 24, itemHeight, font,
                        Color::fromRGB(30, 30, 30),
                        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
     }
-
     painter.popClipRect();
   }
 
-  // ── Mouse Events ──────────────────────────────────────────────────────
-  bool handleMouseDown(int mx, int my) override
+  bool onOverlayMouseDown(int localX, int localY) override
   {
-    if (isOpen)
+    int visibleCount = std::min((int)options.size(), maxVisibleItems);
+    int listH = visibleCount * itemHeight + 2;
+    if (localX < 0 || localX >= listWidth_ || localY < 0 || localY >= listH)
     {
-      int visibleCount = std::min((int)options.size(), maxVisibleItems);
-      int listH = visibleCount * itemHeight + 2;
-
-      if (mx >= listClientX && mx < listClientX + listWidth_ &&
-          my >= listClientY && my < listClientY + listH)
-      {
-        int itemIndex = scrollOffset + ((my - listClientY - 1) / itemHeight);
-        if (itemIndex >= 0 && itemIndex < (int)options.size())
-          selectItem(itemIndex);
-        closeDropdown();
-        return true;
-      }
       closeDropdown();
       return true;
     }
-    else
-    {
-      if (mx >= x && mx < x + width && my >= y && my < y + height)
-      {
-        openDropdown();
-        return true;
-      }
-    }
-    return false;
+    int itemIndex = scrollOffset + ((localY - 1) / itemHeight);
+    if (itemIndex >= 0 && itemIndex < (int)options.size())
+      selectItem(itemIndex);
+    closeDropdown();
+    return true;
   }
 
-  bool handleMouseMove(int mx, int my) override
+  bool onOverlayMouseMove(int localX, int localY) override
   {
-    if (!isOpen)
-      return false;
-
     int visibleCount = std::min((int)options.size(), maxVisibleItems);
     int listH = visibleCount * itemHeight + 2;
-
-    if (mx >= listClientX && mx < listClientX + listWidth_ &&
-        my >= listClientY && my < listClientY + listH)
+    if (localX >= 0 && localX < listWidth_ && localY >= 0 && localY < listH)
     {
-      int itemIndex = scrollOffset + ((my - listClientY - 1) / itemHeight);
-      if (itemIndex >= 0 && itemIndex < (int)options.size() &&
-          itemIndex != hoveredItemIndex)
+      int itemIndex = scrollOffset + ((localY - 1) / itemHeight);
+      if (itemIndex != hoveredItemIndex)
       {
         hoveredItemIndex = itemIndex;
         refreshDropdownPopup_();
@@ -1462,10 +1308,8 @@ public:
     return false;
   }
 
-  bool handleMouseWheel(int delta) override
+  bool onOverlayMouseWheel(int delta) override
   {
-    if (!isOpen)
-      return false;
     int maxScroll = std::max(0, (int)options.size() - maxVisibleItems);
     scrollOffset = (delta > 0) ? std::max(0, scrollOffset - 1)
                                : std::min(maxScroll, scrollOffset + 1);
@@ -1473,7 +1317,7 @@ public:
     return true;
   }
 
-  bool handleKeyDown(int keyCode) override
+  bool onOverlayKeyDown(int keyCode) override
   {
     if (options.empty())
       return false;
@@ -1481,83 +1325,133 @@ public:
     {
     case Key::Return:
     case Key::Space:
-      if (isOpen)
-      {
-        int idx = (hoveredItemIndex >= 0) ? hoveredItemIndex : selectedIndex;
-        if (idx >= 0 && idx < (int)options.size())
-          selectItem(idx);
-        closeDropdown();
-      }
-      else
-      {
-        openDropdown();
-        hoveredItemIndex = selectedIndex;
-        if (hoveredItemIndex >= 0)
-          ensureItemVisible(hoveredItemIndex);
-      }
-      markNeedsPaint();
+    {
+      int idx = (hoveredItemIndex >= 0) ? hoveredItemIndex : selectedIndex;
+      if (idx >= 0 && idx < (int)options.size())
+        selectItem(idx);
+      closeDropdown();
       return true;
+    }
     case Key::Escape:
-      if (isOpen)
-      {
-        closeDropdown();
-        markNeedsPaint();
-        return true;
-      }
-      break;
+      closeDropdown();
+      return true;
     case Key::Up:
-      if (isOpen)
-      {
-        if (hoveredItemIndex < 0)
-          hoveredItemIndex = std::max(0, selectedIndex);
-        else if (hoveredItemIndex > 0)
-          hoveredItemIndex--;
-        ensureItemVisible(hoveredItemIndex);
-        refreshDropdownPopup_();
-      }
-      else if (selectedIndex > 0)
-      {
-        selectItem(selectedIndex - 1);
-      }
+      if (hoveredItemIndex < 0)
+        hoveredItemIndex = std::max(0, selectedIndex);
+      else if (hoveredItemIndex > 0)
+        hoveredItemIndex--;
+      ensureItemVisible(hoveredItemIndex);
+      refreshDropdownPopup_();
       return true;
     case Key::Down:
-      if (isOpen)
-      {
-        if (hoveredItemIndex < 0)
-          hoveredItemIndex = std::max(0, selectedIndex);
-        else if (hoveredItemIndex < (int)options.size() - 1)
-          hoveredItemIndex++;
-        ensureItemVisible(hoveredItemIndex);
-        refreshDropdownPopup_();
-      }
-      else if (selectedIndex < (int)options.size() - 1)
-      {
-        selectItem(selectedIndex + 1);
-      }
+      if (hoveredItemIndex < 0)
+        hoveredItemIndex = std::max(0, selectedIndex);
+      else if (hoveredItemIndex < (int)options.size() - 1)
+        hoveredItemIndex++;
+      ensureItemVisible(hoveredItemIndex);
+      refreshDropdownPopup_();
       return true;
     case Key::Home:
-      if (isOpen)
-      {
-        hoveredItemIndex = 0;
-        scrollOffset = 0;
-        refreshDropdownPopup_();
-      }
-      else
-      {
-        selectItem(0);
-      }
+      hoveredItemIndex = 0;
+      scrollOffset = 0;
+      refreshDropdownPopup_();
       return true;
     case Key::End:
-      if (isOpen)
-      {
-        hoveredItemIndex = (int)options.size() - 1;
-        scrollOffset = std::max(0, (int)options.size() - maxVisibleItems);
-        refreshDropdownPopup_();
-      }
-      else
-      {
-        selectItem((int)options.size() - 1);
-      }
+      hoveredItemIndex = (int)options.size() - 1;
+      scrollOffset = std::max(0, (int)options.size() - maxVisibleItems);
+      refreshDropdownPopup_();
+      return true;
+    }
+    return false;
+  }
+
+  void onOverlayOutsideClick() override { closeDropdown(); }
+
+  // ── Normal Widget — closed-state box ─────────────────────────────────
+  void computeLayout(GraphicsContext &, const BoxConstraints &constraints, FontCache &) override
+  {
+    if (autoWidth)
+      width = constraints.maxWidth;
+    applyConstraints();
+    needsLayout = false;
+  }
+
+  void render(GraphicsContext &ctx, FontCache &fontCache) override
+  {
+    borderColor = isFocused ? dropdownFocusedBorderColor : dropdownBorderColor;
+    drawRoundedRectangle(ctx);
+
+    Painter painter(ctx);
+    NativeFont font = fontCache.getFont(fontSize, fontWeight);
+    Color textCol = (selectedIndex >= 0 && selectedIndex < (int)options.size())
+                        ? getCurrentTextColor()
+                        : placeholderColor;
+    const std::string &label = (selectedIndex >= 0 && selectedIndex < (int)options.size())
+                                   ? options[selectedIndex]
+                                   : placeholder;
+
+    std::wstring wlabel = toWideString(label);
+    painter.drawText(wlabel, x + paddingLeft, y + paddingTop,
+                     width - paddingLeft - paddingRight, height - paddingTop - paddingBottom,
+                     font, textCol, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+    int arrowX = x + width - paddingRight + 10;
+    int arrowY = y + height / 2;
+    int hs = arrowSize / 2, vs = arrowSize / 4;
+    if (isOpen)
+    {
+      painter.drawLine(arrowX - hs, arrowY + vs, arrowX, arrowY - vs, arrowColor, 2);
+      painter.drawLine(arrowX, arrowY - vs, arrowX + hs, arrowY + vs, arrowColor, 2);
+    }
+    else
+    {
+      painter.drawLine(arrowX - hs, arrowY - vs, arrowX, arrowY + vs, arrowColor, 2);
+      painter.drawLine(arrowX, arrowY + vs, arrowX + hs, arrowY - vs, arrowColor, 2);
+    }
+    needsPaint = false;
+  }
+
+  bool handleMouseDown(int mx, int my) override
+  {
+    if (isOpen)
+      return false; // manager routes to onOverlayMouseDown while open
+    if (mx >= x && mx < x + width && my >= y && my < y + height)
+    {
+      openDropdown();
+      return true;
+    }
+    return false;
+  }
+
+  bool handleKeyDown(int keyCode) override
+  {
+    if (isOpen)
+      return false; // manager routes to onOverlayKeyDown while open
+    if (options.empty())
+      return false;
+    switch (keyCode)
+    {
+    case Key::Return:
+    case Key::Space:
+      openDropdown();
+      hoveredItemIndex = selectedIndex;
+      if (hoveredItemIndex >= 0)
+        ensureItemVisible(hoveredItemIndex);
+      markNeedsPaint();
+      return true;
+    case Key::Up:
+      if (selectedIndex > 0)
+        selectItem(selectedIndex - 1);
+      return true;
+    case Key::Down:
+      if (selectedIndex < (int)options.size() - 1)
+        selectItem(selectedIndex + 1);
+      return true;
+    case Key::Home:
+      selectItem(0);
+      return true;
+    case Key::End:
+      selectItem((int)options.size() - 1);
       return true;
     }
     return false;
@@ -1572,24 +1466,24 @@ public:
     return true;
   }
 
-  // ── Builder Methods ───────────────────────────────────────────────────
+  OverlayPolicy overlayPolicy() const override
+  {
+    return {/*modal=*/true, /*blocksHoverBelow=*/false, /*capturesKeyboard=*/true};
+  }
 
-  std::shared_ptr<DropdownWidget>
-  setOptions(const std::vector<std::string> &opts)
+  // ── Builder methods — unchanged from before ──────────────────────────
+  std::shared_ptr<DropdownWidget> setOptions(const std::vector<std::string> &opts)
   {
     options = opts;
     if (selectedIndex >= (int)options.size())
       selectedIndex = -1;
-
     scrollOffset = 0;
     hoveredItemIndex = -1;
-
     if (isOpen)
       closeDropdown();
     markNeedsPaint();
     return std::static_pointer_cast<DropdownWidget>(shared_from_this());
   }
-
   std::shared_ptr<DropdownWidget> setPlaceholder(const std::string &ph)
   {
     placeholder = ph;
@@ -1608,36 +1502,24 @@ public:
     markNeedsPaint();
     return std::static_pointer_cast<DropdownWidget>(shared_from_this());
   }
-  std::shared_ptr<DropdownWidget> setOnSelectionChanged(
-      std::function<void(int, const std::string &)> callback)
+  std::shared_ptr<DropdownWidget> setOnSelectionChanged(std::function<void(int, const std::string &)> cb)
   {
-    onSelectionChanged = callback;
+    onSelectionChanged = cb;
     return std::static_pointer_cast<DropdownWidget>(shared_from_this());
   }
   std::shared_ptr<DropdownWidget> setSelectedIndex(State<int> &state)
   {
     selectedIndex = state.get();
-    state.bindProperty(
-        shared_from_this(),
-        [](Widget *w, const int &val)
-        {
-          static_cast<DropdownWidget *>(w)->selectedIndex = val;
-        },
-        false);
+    state.bindProperty(shared_from_this(), [](Widget *w, const int &val)
+                       { static_cast<DropdownWidget *>(w)->selectedIndex = val; }, false);
     boundIntState = &state;
     return std::static_pointer_cast<DropdownWidget>(shared_from_this());
   }
   std::shared_ptr<DropdownWidget> setSelectedValue(State<std::string> &state)
   {
     selectedIndex = findOptionIndex(state.get());
-    state.bindProperty(
-        shared_from_this(),
-        [](Widget *w, const std::string &val)
-        {
-          static_cast<DropdownWidget *>(w)->selectedIndex =
-              static_cast<DropdownWidget *>(w)->findOptionIndex(val);
-        },
-        false);
+    state.bindProperty(shared_from_this(), [](Widget *w, const std::string &val)
+                       { static_cast<DropdownWidget *>(w)->selectedIndex = static_cast<DropdownWidget *>(w)->findOptionIndex(val); }, false);
     boundStringState = &state;
     return std::static_pointer_cast<DropdownWidget>(shared_from_this());
   }
@@ -1648,67 +1530,24 @@ public:
     return std::static_pointer_cast<DropdownWidget>(shared_from_this());
   }
 
-  bool hasOverlay() const { return isOpen && !options.empty(); }
-
 private:
   State<int> *boundIntState = nullptr;
   State<std::string> *boundStringState = nullptr;
 
   void openDropdown()
   {
-    if (isOpen)
-      return;
-
     auto *ui = FluxUI::getCurrentInstance();
-    if (!ui)
+    if (!ui || isOpen)
       return;
-
     isOpen = true;
     hoveredItemIndex = -1;
     scrollOffset = 0;
     listWidth_ = width;
 
-    listClientX = x;
-    listClientY = y + height + 2;
-
     int visibleCount = std::min((int)options.size(), maxVisibleItems);
     int listH = visibleCount * itemHeight + 2;
 
-    auto sc = ui->clientToScreen(listClientX, listClientY);
-    listScreenX = sc.x;
-    listScreenY = sc.y;
-
-#ifdef _WIN32
-    POINT pt = {listScreenX, listScreenY};
-    HMONITOR mon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
-    MONITORINFO mi{};
-    mi.cbSize = sizeof(mi);
-    if (GetMonitorInfoW(mon, &mi))
-    {
-      if (listScreenX + listWidth_ > mi.rcWork.right)
-      {
-        listScreenX = mi.rcWork.right - listWidth_;
-        listClientX = ui->screenToClient(listScreenX, listScreenY).x;
-      }
-      if (listScreenY + listH > mi.rcWork.bottom)
-      {
-        auto above = ui->clientToScreen(x, y - listH - 2);
-        listScreenY = above.y;
-        listClientY = y - listH - 2;
-        listClientX = ui->screenToClient(listScreenX, listScreenY).x;
-      }
-    }
-#endif
-
-    NativeWindow hw = ui->getWindow();
-    if (hw)
-    {
-      FontCache &fc = ui->getFontCache();
-      showPopup(hw, listScreenX, listScreenY, listWidth_, listH, fc);
-    }
-
-    if (scaffold)
-      scaffold->addOverlayHitTarget(this, 100);
+    ui->overlays().show(this, x, y + height + 2, listWidth_, listH, 100, ui->getFontCache());
     markNeedsPaint();
   }
 
@@ -1718,25 +1557,17 @@ private:
       return;
     isOpen = false;
     hoveredItemIndex = -1;
-#ifdef _WIN32
-    hidePopup();
-    if (scaffold)
-      scaffold->removeOverlay(this);
-#else
-    if (scaffold)
-      scaffold->removeOverlay(this);
-    hidePopup();
-#endif
+    if (auto *ui = FluxUI::getCurrentInstance())
+      ui->overlays().hide(this);
     markNeedsPaint();
   }
 
   void refreshDropdownPopup_()
   {
-    if (!isOpen || !popupVisible())
+    if (!isOpen)
       return;
-    auto *ui = FluxUI::getCurrentInstance();
-    if (ui)
-      refreshPopup(ui->getFontCache());
+    if (auto *ui = FluxUI::getCurrentInstance())
+      ui->overlays().refresh(this, ui->getFontCache());
   }
 
   void selectItem(int index)

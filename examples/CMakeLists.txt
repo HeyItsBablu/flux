@@ -94,4 +94,4 @@ function(add_flux_example NAME)
 
 endfunction()
 
-add_flux_example(cameratest)
+add_flux_example(datepicker)
