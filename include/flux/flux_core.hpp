@@ -21,7 +21,7 @@
 
 template <typename T>
 class State;
-class ScaffoldWidget;
+
 
 // ============================================================================
 // MOUSE EVENT BROADCAST HELPERS
