@@ -390,7 +390,6 @@ public:
 
         BoxConstraints self = selfConstraints(constraints);
 
-        // Resolve OUR OWN size mode against incoming constraints (as a flex item).
         int outerMaxW = (widthMode == SizeMode::Fixed) ? width : self.maxWidth;
         int outerMaxH = (heightMode == SizeMode::Fixed) ? height : self.maxHeight;
         if (widthMode == SizeMode::Full)
@@ -411,10 +410,6 @@ public:
         containerMainSize_ = isRowAxis_ ? contentMaxW : contentMaxH;
         containerCrossSize_ = isRowAxis_ ? contentMaxH : contentMaxW;
 
-        // If scrolling along the main axis (nowrap), main axis is effectively unbounded
-        // for measurement purposes (content can exceed viewport, scrollbar handles it).
-        int measureMainSize = scrollableMain ? kUnbounded : containerMainSize_;
-
         // ---- STEP 0: order children ----
         std::vector<Widget *> ordered;
         for (auto &c : children)
@@ -431,9 +426,15 @@ public:
         for (size_t i = 0; i < ordered.size(); i++)
         {
             Widget *c = ordered[i];
+            SizeMode mainMode = isRowAxis_ ? c->widthMode : c->heightMode;
+
             if (c->flexBasis >= 0)
             {
                 hypoMain[i] = c->flexBasis;
+            }
+            else if (mainMode == SizeMode::Fixed)
+            {
+                hypoMain[i] = isRowAxis_ ? c->width : c->height;
             }
             else
             {
@@ -480,13 +481,18 @@ public:
         if (wrapReversed_)
             std::reverse(lines_.begin(), lines_.end());
 
-        // rebuild a hypoMain lookup by pointer (lines reference Widget* not index)
         auto hypoOf = [&](Widget *w) -> int
         {
             for (size_t i = 0; i < ordered.size(); i++)
                 if (ordered[i] == w)
                     return hypoMain[i];
             return 0;
+        };
+
+        auto isMainFixed = [&](Widget *c) -> bool
+        {
+            SizeMode mainMode = isRowAxis_ ? c->widthMode : c->heightMode;
+            return mainMode == SizeMode::Fixed && c->flexBasis < 0;
         };
 
         // ---- STEP 3: per-line flex resolution + final child layout ----
@@ -505,8 +511,17 @@ public:
             for (auto *c : line.items)
                 resolvedMain[c] = hypoOf(c);
 
+            // Freeze fixed-size items — they never participate in grow/shrink
+            {
+                std::vector<Widget *> nonFixed;
+                for (auto *c : active)
+                    if (!isMainFixed(c))
+                        nonFixed.push_back(c);
+                active = nonFixed;
+            }
+
             for (int iter = 0; iter < 8; iter++)
-            { // bounded freeze/redistribute loop
+            {
                 if (freeSpace > 0)
                 {
                     int totalGrow = 0;
@@ -563,38 +578,59 @@ public:
                     break;
             }
 
-            // ---- lay out each child at resolved main size; loose cross first ----
+            // ---- first pass: layout each child loosely on cross axis ----
             int lineCrossMax = 0;
             for (auto *c : line.items)
             {
                 int mainC = std::max(0, resolvedMain[c]);
-                BoxConstraints childC = isRowAxis_
-                                            ? BoxConstraints(mainC, mainC, 0, containerCrossSize_)
-                                            : BoxConstraints(0, containerCrossSize_, mainC, mainC);
-                c->computeLayout(ctx, childC, fontCache);
+                SizeMode crossMode = isRowAxis_ ? c->heightMode : c->widthMode;
+
+                if (crossMode == SizeMode::Fixed)
+                {
+                    int fixedCross = isRowAxis_ ? c->height : c->width;
+                    BoxConstraints childC = isRowAxis_
+                                                ? BoxConstraints(mainC, mainC, fixedCross, fixedCross)
+                                                : BoxConstraints(fixedCross, fixedCross, mainC, mainC);
+                    c->computeLayout(ctx, childC, fontCache);
+                }
+                else
+                {
+                    BoxConstraints childC = isRowAxis_
+                                                ? BoxConstraints(mainC, mainC, 0, containerCrossSize_)
+                                                : BoxConstraints(0, containerCrossSize_, mainC, mainC);
+                    c->computeLayout(ctx, childC, fontCache);
+                }
                 lineCrossMax = std::max(lineCrossMax, crossSize(c, isRowAxis_));
             }
 
-            // ---- second pass: stretch items (per-child widthMode/heightMode wins) ----
+            // ---- second pass: stretch items to full container cross size ----
+            int stretchCross = (P.alignItems == AlignItems::Stretch)
+                                   ? containerCrossSize_
+                                   : lineCrossMax;
+
             for (auto *c : line.items)
             {
                 SizeMode crossMode = isRowAxis_ ? c->heightMode : c->widthMode;
+                if (crossMode == SizeMode::Fixed)
+                    continue;
+
                 bool wantsStretch = (crossMode == SizeMode::Full) ||
-                                    (crossMode != SizeMode::Fixed && crossMode != SizeMode::Fit &&
-                                     P.alignItems == AlignItems::Stretch);
-                // Fit/Fixed explicitly opt out of stretch, mirroring CSS explicit-size-wins.
-                if (crossMode == SizeMode::Fit || crossMode == SizeMode::Fixed)
-                    wantsStretch = false;
+                                    (P.alignItems == AlignItems::Stretch);
                 if (!wantsStretch)
                     continue;
+
                 int mainC = std::max(0, resolvedMain[c]);
                 BoxConstraints childC = isRowAxis_
-                                            ? BoxConstraints(mainC, mainC, lineCrossMax, lineCrossMax)
-                                            : BoxConstraints(lineCrossMax, lineCrossMax, mainC, mainC);
+                                            ? BoxConstraints(mainC, mainC, stretchCross, stretchCross)
+                                            : BoxConstraints(stretchCross, stretchCross, mainC, mainC);
                 c->computeLayout(ctx, childC, fontCache);
             }
 
-            line.usedMain = basisSum; // recompute precisely below
+            // Recompute lineCrossMax after stretch
+            lineCrossMax = 0;
+            for (auto *c : line.items)
+                lineCrossMax = std::max(lineCrossMax, crossSize(c, isRowAxis_));
+
             int usedMainFinal = 0;
             for (size_t i = 0; i < line.items.size(); i++)
             {
@@ -618,15 +654,12 @@ public:
                 totalCross_ += P.gap;
         }
 
-        int finalContentMain = scrollableMain ? containerMainSize_ : containerMainSize_;
-        int finalContentCross = scrollableCross ? containerCrossSize_ : totalCross_;
-
         int finalW, finalH;
         if (isRowAxis_)
         {
-            finalW = (widthMode == SizeMode::Fit) ? /*shrink-wrap main*/ std::min(outerMaxW, basisSumOfAllLines(lines_, P.gap)) : outerMaxW;
+            finalW = (widthMode == SizeMode::Fit) ? std::min(outerMaxW, basisSumOfAllLines(lines_, P.gap)) : outerMaxW;
             finalH = (heightMode == SizeMode::Fit) ? (totalCross_ + padV) : outerMaxH;
-            finalW = std::max(finalW, padH); // never negative
+            finalW = std::max(finalW, padH);
         }
         else
         {
@@ -642,9 +675,7 @@ public:
         {
             int contentMain = 0;
             for (size_t i = 0; i < lines_.size(); i++)
-            {
-                contentMain = std::max(contentMain, lines_[i].usedMain); // nowrap => 1 line anyway
-            }
+                contentMain = std::max(contentMain, lines_[i].usedMain);
             sb_.horizontal = isRowAxis_;
             sb_.contentMain = contentMain;
             sb_.viewportMain = containerMainSize_;

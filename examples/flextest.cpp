@@ -7,27 +7,34 @@ public:
     WidgetPtr build() override
     {
         return Flex({
-                        Flex({Text("1x")})
-                            ->setBackgroundColor(Color::fromRGB(220, 80, 80))
+                        Flex({Text("Nav")})
+                            ->setBackgroundColor(Color::fromRGB(50, 50, 150))
                             ->setPadding(12)
-                            ->setFlexGrow(1),
+                            ->setFlexGrow(1)
+                            ->setHeight(100),
 
-                        Flex({Text("2x")})
+                        Flex({Text("Content")})
                             ->setBackgroundColor(Color::fromRGB(80, 180, 80))
                             ->setPadding(12)
-                            ->setFlexGrow(2),
+                            ->setFlexGrow(3)
+                            ->setHeight(100),
 
-                        Flex({Text("1x")})
-                            ->setBackgroundColor(Color::fromRGB(80, 80, 220))
+                        Flex({Text("Sidebar")})
+                            ->setBackgroundColor(Color::fromRGB(180, 80, 80))
                             ->setPadding(12)
-                            ->setFlexGrow(1),
+                            ->setFlexGrow(1)
+                            ->setHeight(100),
                     })
-            ->setDirection(FlexDirection::Row)
+            ->setDirection(FlexDirection::Column) // base (mobile): stacked
             ->setGap(8)
             ->setPadding(16)
             ->setAlignItems(AlignItems::Stretch)
             ->setWidthMode(SizeMode::Full)
-            ->setHeightMode(SizeMode::Full);
+            ->setHeightMode(SizeMode::Full)
+            ->responsive(Breakpoint::Md, [](FlexProps &p)
+                         {
+                             p.direction = FlexDirection::Row; // >= 768px: side by side
+                         });
     }
 };
 
