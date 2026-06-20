@@ -1,6 +1,9 @@
 #ifndef WIDGETS_HPP
 #define WIDGETS_HPP
 
+
+
+#include "flux_flex.hpp"
 #include "flux_action.hpp"
 #include "flux_collection.hpp"
 #include "flux_conditional.hpp"

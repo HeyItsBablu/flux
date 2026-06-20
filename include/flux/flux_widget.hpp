@@ -20,7 +20,8 @@
 // FORWARD DECLARATIONS
 // ============================================================================
 
-template <typename T> class State;
+template <typename T>
+class State;
 
 class Widget;
 
@@ -34,79 +35,87 @@ using HoverHandler = std::function<void(bool)>;
 
 static constexpr int kUnbounded = std::numeric_limits<int>::max() / 2;
 
-struct BoxConstraints {
+struct BoxConstraints
+{
   int minWidth, maxWidth, minHeight, maxHeight;
 
   BoxConstraints(int minW, int maxW, int minH, int maxH)
-      : minWidth(minW), maxWidth(maxW), minHeight(minH), maxHeight(maxH) {
+      : minWidth(minW), maxWidth(maxW), minHeight(minH), maxHeight(maxH)
+  {
     normalize();
   }
 
-  static BoxConstraints tight(int w, int h) {
+  static BoxConstraints tight(int w, int h)
+  {
     return BoxConstraints(w, w, h, h);
   }
-  static BoxConstraints loose(int w, int h) {
+  static BoxConstraints loose(int w, int h)
+  {
     return BoxConstraints(0, w, 0, h);
   }
 
-
-  static BoxConstraints infinite() {
+  static BoxConstraints infinite()
+  {
     return BoxConstraints(0, kUnbounded, 0, kUnbounded);
   }
 
-
-  void normalize() {
-    minWidth  = std::max(0, minWidth);
+  void normalize()
+  {
+    minWidth = std::max(0, minWidth);
     minHeight = std::max(0, minHeight);
 
-    assert(maxWidth  >= minWidth  &&
+    assert(maxWidth >= minWidth &&
            "BoxConstraints: maxWidth < minWidth — inverted constraint");
     assert(maxHeight >= minHeight &&
            "BoxConstraints: maxHeight < minHeight — inverted constraint");
 
     // Release-mode safety net: clamp instead of crashing.
-    if (maxWidth  < minWidth)  maxWidth  = minWidth;
-    if (maxHeight < minHeight) maxHeight = minHeight;
+    if (maxWidth < minWidth)
+      maxWidth = minWidth;
+    if (maxHeight < minHeight)
+      maxHeight = minHeight;
   }
 
-  int clampWidth(int w) const {
+  int clampWidth(int w) const
+  {
     return std::max(minWidth, std::min(maxWidth, w));
   }
-  int clampHeight(int h) const {
+  int clampHeight(int h) const
+  {
     return std::max(minHeight, std::min(maxHeight, h));
   }
 
-
-  BoxConstraints deflate(int horizontal, int vertical) const {
-    int newMaxW = std::max(0, maxWidth  - horizontal);
+  BoxConstraints deflate(int horizontal, int vertical) const
+  {
+    int newMaxW = std::max(0, maxWidth - horizontal);
     int newMaxH = std::max(0, maxHeight - vertical);
 
-
-    int newMinW = std::max(0, std::min(newMaxW, minWidth  - horizontal));
+    int newMinW = std::max(0, std::min(newMaxW, minWidth - horizontal));
     int newMinH = std::max(0, std::min(newMaxH, minHeight - vertical));
 
     return BoxConstraints(newMinW, newMaxW, newMinH, newMaxH);
   }
 
-
-  BoxConstraints intersect(int wMin, int wMax, int hMin, int hMax) const {
-    int newMinW = std::max(minWidth,  wMin);
-    int newMaxW = std::min(maxWidth,  wMax);
+  BoxConstraints intersect(int wMin, int wMax, int hMin, int hMax) const
+  {
+    int newMinW = std::max(minWidth, wMin);
+    int newMaxW = std::min(maxWidth, wMax);
     int newMinH = std::max(minHeight, hMin);
     int newMaxH = std::min(maxHeight, hMax);
 
- 
     newMaxW = std::max(newMinW, newMaxW);
     newMaxH = std::max(newMinH, newMaxH);
 
 #ifndef NDEBUG
 
-    if (newMaxW > maxWidth || newMaxW > wMax) {
+    if (newMaxW > maxWidth || newMaxW > wMax)
+    {
       std::cerr << "[BoxConstraints::intersect] WARNING: result maxWidth ("
                 << newMaxW << ") exceeds both inputs (" << maxWidth
                 << ", " << wMax << ") — check widget constraints.\n";
     }
-    if (newMaxH > maxHeight || newMaxH > hMax) {
+    if (newMaxH > maxHeight || newMaxH > hMax)
+    {
       std::cerr << "[BoxConstraints::intersect] WARNING: result maxHeight ("
                 << newMaxH << ") exceeds both inputs (" << maxHeight
                 << ", " << hMax << ") — check widget constraints.\n";
@@ -121,7 +130,8 @@ struct BoxConstraints {
 // ENUMS
 // ============================================================================
 
-enum class Alignment {
+enum class Alignment
+{
   Start,
   Center,
   End,
@@ -135,7 +145,8 @@ enum class Alignment {
   BottomRight
 };
 
-enum class CrossAxisAlignment {
+enum class CrossAxisAlignment
+{
   Start,
   Center,
   End,
@@ -145,7 +156,8 @@ enum class CrossAxisAlignment {
   Stretch
 };
 
-enum class MainAxisAlignment {
+enum class MainAxisAlignment
+{
   Start,
   Center,
   End,
@@ -153,13 +165,21 @@ enum class MainAxisAlignment {
   SpaceAround,
   SpaceEvenly,
   Stretch
+};
+
+enum class SizeMode
+{
+  Fixed,
+  Fit,
+  Full
 };
 
 // ============================================================================
 // WIDGET BASE CLASS
 // ============================================================================
 
-class Widget : public std::enable_shared_from_this<Widget> {
+class Widget : public std::enable_shared_from_this<Widget>
+{
 private:
   bool mounted = false;
 
@@ -172,8 +192,7 @@ public:
   int width = 0, height = 0;
   int minWidth = 0, minHeight = 0;
 
-
-  int maxWidth  = kUnbounded;
+  int maxWidth = kUnbounded;
   int maxHeight = kUnbounded;
 
   bool autoWidth = true, autoHeight = true;
@@ -197,6 +216,14 @@ public:
   CrossAxisAlignment crossAxisAlignment = CrossAxisAlignment::Start;
   MainAxisAlignment mainAxisAlignment = MainAxisAlignment::Start;
   int spacing = 0;
+
+  // Flex-item properties (read by whatever Flex container is this widget's parent)
+  SizeMode widthMode = SizeMode::Fit;
+  SizeMode heightMode = SizeMode::Fit;
+  int flexGrow = 0;   // 0 = don't grow (CSS default)
+  int flexShrink = 1; // 1 = shrink by default (CSS default)
+  int flexBasis = -1; // -1 = auto (use intrinsic/measured size)
+  int order = 0;
 
   OverflowInfo overflow;
 
@@ -245,14 +272,17 @@ public:
 
   virtual bool isExpanded() const { return false; }
 
-  virtual void onDetach() {
-    for (auto &child : children) {
+  virtual void onDetach()
+  {
+    for (auto &child : children)
+    {
       child->parent = nullptr;
       child->onDetach();
     }
   }
 
-  virtual WidgetPtr build() {
+  virtual WidgetPtr build()
+  {
     return nullptr;
   }
   virtual void onMount() {}
@@ -288,7 +318,8 @@ public:
   virtual bool handleMouseMove(int /*mx*/, int /*my*/) { return false; }
   virtual bool handleMouseLeave() { return false; }
 
-  virtual bool handleRightClick(int mx, int my) {
+  virtual bool handleRightClick(int mx, int my)
+  {
     if (onRightClick)
       return onRightClick(mx, my);
     return false;
@@ -298,7 +329,8 @@ public:
   virtual bool handleChar(wchar_t /*ch*/) { return false; }
   virtual bool handleTimer(UINT /*timerId*/) { return false; }
 
-  virtual bool handleFocus(bool focused) {
+  virtual bool handleFocus(bool focused)
+  {
     isFocused = focused;
     markNeedsPaint();
     return true;
@@ -308,10 +340,12 @@ public:
   // Hover helpers
   // -----------------------------------------------------------------------
 
-  bool updateHoverState(int mouseX, int mouseY) {
+  bool updateHoverState(int mouseX, int mouseY)
+  {
     bool nowHovered = (mouseX >= x && mouseX < x + width && mouseY >= y &&
                        mouseY < y + height);
-    if (nowHovered != isHovered) {
+    if (nowHovered != isHovered)
+    {
       isHovered = nowHovered;
       if (onHover)
         onHover(isHovered);
@@ -321,8 +355,10 @@ public:
     return false;
   }
 
-  void clearHoverState() {
-    if (isHovered) {
+  void clearHoverState()
+  {
+    if (isHovered)
+    {
       isHovered = false;
       if (onHover)
         onHover(false);
@@ -332,14 +368,17 @@ public:
       child->clearHoverState();
   }
 
-  Color getCurrentBackgroundColor() const {
+  Color getCurrentBackgroundColor() const
+  {
     return (isHovered && hasHoverBackground) ? hoverBackgroundColor
                                              : backgroundColor;
   }
-  Color getCurrentTextColor() const {
+  Color getCurrentTextColor() const
+  {
     return (isHovered && hasHoverTextColor) ? hoverTextColor : textColor;
   }
-  Color getCurrentBorderColor() const {
+  Color getCurrentBorderColor() const
+  {
     return (isHovered && hasHoverBorderColor) ? hoverBorderColor : borderColor;
   }
 
@@ -347,7 +386,8 @@ public:
   // Dirty tracking
   // -----------------------------------------------------------------------
 
-  void markNeedsLayout() {
+  void markNeedsLayout()
+  {
     needsLayout = true;
     needsPaint = true;
     if (parent)
@@ -360,12 +400,14 @@ public:
   // Tree helpers
   // -----------------------------------------------------------------------
 
-  WidgetPtr setId(const std::string &i) {
+  WidgetPtr setId(const std::string &i)
+  {
     id = i;
     return shared_from_this();
   }
 
-  void addChild(WidgetPtr child) {
+  void addChild(WidgetPtr child)
+  {
     if (!child)
       return;
     children.push_back(child);
@@ -380,36 +422,47 @@ public:
   // Constraint helpers
   // -----------------------------------------------------------------------
 
-  BoxConstraints selfConstraints(const BoxConstraints &incoming) const {
+  BoxConstraints selfConstraints(const BoxConstraints &incoming) const
+  {
     return incoming.intersect(minWidth, maxWidth, minHeight, maxHeight);
   }
 
-  BoxConstraints contentConstraints(const BoxConstraints &incoming) const {
+  BoxConstraints contentConstraints(const BoxConstraints &incoming) const
+  {
     return incoming.deflate(paddingLeft + paddingRight,
                             paddingTop + paddingBottom);
   }
 
 protected:
-  template <typename T> static std::string valueToString(const T &val) {
+  template <typename T>
+  static std::string valueToString(const T &val)
+  {
     if constexpr (std::is_same_v<T, std::string>)
       return val;
     else if constexpr (std::is_same_v<T, bool>)
       return val ? "true" : "false";
-    else if constexpr (std::is_floating_point_v<T>) {
+    else if constexpr (std::is_floating_point_v<T>)
+    {
       std::ostringstream oss;
       oss << std::fixed << std::setprecision(2) << val;
       return oss.str();
-    } else if constexpr (std::is_integral_v<T>)
+    }
+    else if constexpr (std::is_integral_v<T>)
       return std::to_string(val);
     else
       return "[unsupported type]";
   }
 
-  void applyConstraints() {
-    if (width  < minWidth)  width  = minWidth;
-    if (height < minHeight) height = minHeight;
-    if (width  > maxWidth)  width  = maxWidth;
-    if (height > maxHeight) height = maxHeight;
+  void applyConstraints()
+  {
+    if (width < minWidth)
+      width = minWidth;
+    if (height < minHeight)
+      height = minHeight;
+    if (width > maxWidth)
+      width = maxWidth;
+    if (height > maxHeight)
+      height = maxHeight;
   }
 };
 
@@ -425,13 +478,16 @@ Widget *findWidgetAt(Widget *w, int x, int y);
 
 template <typename Handler>
 inline bool findAndHandleMouseEvent(Widget *widget, int x, int y,
-                                    Handler handler) {
+                                    Handler handler)
+{
   if (!widget || !widget->visible)
     return false;
   if (x >= widget->x && x < widget->x + widget->width && y >= widget->y &&
-      y < widget->y + widget->height) {
+      y < widget->y + widget->height)
+  {
     for (auto it = widget->children.rbegin(); it != widget->children.rend();
-         ++it) {
+         ++it)
+    {
       if (findAndHandleMouseEvent(it->get(), x, y, handler))
         return true;
     }
