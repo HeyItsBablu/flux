@@ -181,6 +181,8 @@ private:
     int containerCrossSize_ = 0;
     int totalCross_ = 0;
 
+    
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     FlexProps resolveProps() const
@@ -221,12 +223,13 @@ private:
         {
             flingTimer_ = ui->setInterval(16, [this]()
                                           {
-        int delta = gesture_.tickFling();
-        if (delta == 0) { stopFling(); return; }
-        sb_.scrollOffset += delta;
-        sb_.clamp(); sb_.updateThumb();
-        markNeedsLayout(); // cheap: just re-run positionChildren via partial relayout
-        if (auto *u = FluxUI::getCurrentInstance()) u->invalidateWidget(this); });
+    int delta = gesture_.tickFling();
+    if (delta == 0) { stopFling(); return; }
+    sb_.scrollOffset += delta;
+    sb_.clamp(); sb_.updateThumb();
+    repositionChildren();  // ← was markNeedsLayout()
+    markNeedsPaint();
+    if (auto *u = FluxUI::getCurrentInstance()) u->invalidateWidget(this); });
         }
     }
 
@@ -826,10 +829,21 @@ public:
         }
     }
 
+    void repositionChildren()
+    {
+        positionChildren(
+            x + resolved_.paddingLeft,
+            y + resolved_.paddingTop,
+            width - resolved_.paddingLeft - resolved_.paddingRight,
+            height - resolved_.paddingTop - resolved_.paddingBottom);
+        if (auto *ui = FluxUI::getCurrentInstance())
+            ui->invalidateWidget(this);
+    }
+
     int contentX_or_y(int contentX, int contentY, bool wantMainAxisOrigin) const
     {
         bool wantX = isRowAxis_ ? wantMainAxisOrigin : !wantMainAxisOrigin;
-        return wantX ? contentX + resolved_.paddingLeft : contentY + resolved_.paddingTop;
+        return wantX ? contentX : contentY;
     }
 
     // ── Mouse / scroll ───────────────────────────────────────────────────────
@@ -838,9 +852,40 @@ public:
     {
         if (!sb_.onWheel(delta))
             return false;
-        markNeedsLayout(); // re-run positionChildren via relayout (cheap path can be added later)
+        repositionChildren();
         markNeedsPaint();
         return true;
+    }
+
+    bool handleMouseMove(int mx, int my) override
+    {
+        if (sb_.isDragging)
+        {
+            if (!sb_.onMouseMove(mx, my, x, y, width, height))
+                return false;
+            repositionChildren();
+            markNeedsPaint();
+            return true;
+        }
+        if (gesture_.isDragging)
+        {
+            int delta = gesture_.onMove(mx, my);
+            if (delta != 0)
+            {
+                sb_.scrollOffset += delta;
+                sb_.clamp();
+                sb_.updateThumb();
+                repositionChildren();
+                markNeedsPaint();
+            }
+            return true;
+        }
+        if (sb_.onMouseMove(mx, my, x, y, width, height))
+        {
+            markNeedsPaint();
+            return true;
+        }
+        return false;
     }
     bool handleMouseDown(int mx, int my) override
     {
@@ -850,7 +895,7 @@ public:
             if (sb_.isDragging)
                 if (auto *ui = FluxUI::getCurrentInstance())
                     ui->captureMouseInput();
-            markNeedsLayout();
+            repositionChildren();
             markNeedsPaint();
             return true;
         }
@@ -886,36 +931,7 @@ public:
         }
         return false;
     }
-    bool handleMouseMove(int mx, int my) override
-    {
-        if (sb_.isDragging)
-        {
-            if (!sb_.onMouseMove(mx, my, x, y, width, height))
-                return false;
-            markNeedsLayout();
-            markNeedsPaint();
-            return true;
-        }
-        if (gesture_.isDragging)
-        {
-            int delta = gesture_.onMove(mx, my);
-            if (delta != 0)
-            {
-                sb_.scrollOffset += delta;
-                sb_.clamp();
-                sb_.updateThumb();
-                markNeedsLayout();
-                markNeedsPaint();
-            }
-            return true;
-        }
-        if (sb_.onMouseMove(mx, my, x, y, width, height))
-        {
-            markNeedsPaint();
-            return true;
-        }
-        return false;
-    }
+
     bool handleMouseLeave() override
     {
         gesture_.cancel();
