@@ -94,4 +94,4 @@ function(add_flux_example NAME)
 
 endfunction()
 
-add_flux_example(cad)
+add_flux_example(httptest)
