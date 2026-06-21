@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <string>
 #include <cmath>
+#include <vector>
 
 // ============================================================================
 // CROSS-PLATFORM COLOR
@@ -682,6 +683,7 @@ static constexpr int WHEEL_DELTA = 120;
 struct GraphicsContext
 {
     NativeContext hdc = nullptr;
+    std::vector<HRGN> clipStack;
 
     GraphicsContext() = default;
     explicit GraphicsContext(NativeContext h) : hdc(h) {}
@@ -797,6 +799,8 @@ struct MeasureContext
 #ifdef _WIN32
 
     HWND hwnd = nullptr;
+
+    
 
     explicit MeasureContext(HWND h) : hwnd(h), ctx(GetDC(h)) {}
 

@@ -197,12 +197,44 @@ void Painter::measureText(const std::wstring &text, NativeFont font,
 
 void Painter::pushClipRect(int x, int y, int w, int h)
 {
-  HRGN rgn = CreateRectRgn(x, y, x + w, y + h);
-  SelectClipRgn(ctx.hdc, rgn);
-  DeleteObject(rgn);
+    // Save whatever clip region is currently active
+    HRGN saved = CreateRectRgn(0, 0, 0, 0);
+    if (GetClipRgn(ctx.hdc, saved) != 1) {
+        DeleteObject(saved);
+        saved = nullptr; // nullptr = no clip was active
+    }
+    ctx.clipStack.push_back(saved);
+
+    // Intersect — never replace
+    HRGN newRgn = CreateRectRgn(x, y, x + w, y + h);
+    ExtSelectClipRgn(ctx.hdc, newRgn, RGN_AND);
+    DeleteObject(newRgn);
 }
 
-void Painter::popClipRect() { SelectClipRgn(ctx.hdc, nullptr); }
+void Painter::popClipRect()
+{
+    if (ctx.clipStack.empty()) return;
+
+    HRGN saved = ctx.clipStack.back();
+    ctx.clipStack.pop_back();
+
+    SelectClipRgn(ctx.hdc, saved); // nullptr correctly means "remove all clipping"
+    if (saved) DeleteObject(saved);
+}
+
+void Painter::pushClipRoundedRect(int x, int y, int w, int h, int cornerDiameter)
+{
+    HRGN saved = CreateRectRgn(0, 0, 0, 0);
+    if (GetClipRgn(ctx.hdc, saved) != 1) {
+        DeleteObject(saved);
+        saved = nullptr;
+    }
+    ctx.clipStack.push_back(saved);
+
+    HRGN newRgn = CreateRoundRectRgn(x, y, x + w, y + h, cornerDiameter, cornerDiameter);
+    ExtSelectClipRgn(ctx.hdc, newRgn, RGN_AND);
+    DeleteObject(newRgn);
+}
 
 // -----------------------------------------------------------------------
 // Painter::fillGradientRect
@@ -262,18 +294,6 @@ void Painter::drawRectOutline(int x, int y, int w, int h, Color color,
   DeleteObject(hPen);
 }
 
-// -----------------------------------------------------------------------
-// Painter::pushClipRoundedRect
-// -----------------------------------------------------------------------
-
-void Painter::pushClipRoundedRect(int x, int y, int w, int h,
-                                  int cornerDiameter)
-{
-  HRGN rgn =
-      CreateRoundRectRgn(x, y, x + w, y + h, cornerDiameter, cornerDiameter);
-  SelectClipRgn(ctx.hdc, rgn);
-  DeleteObject(rgn);
-}
 
 // -----------------------------------------------------------------------
 // Painter::drawRoundedRectOutline

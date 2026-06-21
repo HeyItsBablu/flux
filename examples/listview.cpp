@@ -3,51 +3,29 @@
 class MyApp : public Widget
 {
 
-    std::shared_ptr<SliderWidget> lineHeightSlider_;
-
 public:
     WidgetPtr build() override
     {
-        lineHeightSlider_ = Slider(0.8, 3.0, 0.05);
-        lineHeightSlider_->value = 1.3;
 
-        return Scaffold(
-            AppBar("List view Demo"),
-            Expanded(ScrollView(
+        return Flex({Flex({Text("App Bar")})
+                         ->setBackgroundColor(Color::fromRGB(50, 50, 150))
+                         ->setPadding(12)
+                         ->setWidthMode(SizeMode::Full)
+                         ->setHeight(50),
+                     Flex(
                          {
 
-                             Padding(EdgeInsets::all(76), lineHeightSlider_),
-                             Row({
-                                 Text("Item 1"),
-                                 Text("Item 2"),
-                             }),
-                             Container(Text("Hello"))
+                             Flex({Text("Hello")})
+                                 ->setAlignItems(AlignItems::Center)
+                                 ->setJustifyContent(JustifyContent::Center)
                                  ->setWidth(80)
                                  ->setHeight(80)
                                  ->setBorderRadius(8)
                                  ->setBackgroundColor(Color::fromRGB(100, 100, 100)),
-                             Row({
 
-                                     Column(
-                                         {
-                                             Text("Image Title")
-                                                 ->setFontSize(16)
-                                                 ->setFontWeight(FontWeight::Bold)
-                                                 ->setTextColor(Color::fromRGB(30, 30, 30)),
-                                             Text("Some subtitle text here")
-                                                 ->setFontSize(13)
-                                                 ->setTextColor(Color::fromRGB(100, 100, 100)),
-                                         })
-                                         ->setSpacing(4)
-                                         ->setMainAxisSize(MainAxisSize::Min),
-                                 })
-                                 ->setSpacing(12)
-                                 ->setCrossAxisAlignment(CrossAxisAlignment::Center),
                              Text("Item 3"),
                              Text("Item 1"),
-                             Button("Click",
-                                    []()
-                                    { std::cout << "Button clicked" << std::endl; }),
+
                              Text("Item 2"),
                              Text("Item 3"),
                              Text("Item 1"),
@@ -74,15 +52,17 @@ public:
                              Text("Item 3"),
                              Text("Item 1"),
                              Text("Item 2"),
-                             Text("Item 3"),
-                             Button("Click",
-                                    []()
-                                    { std::cout << "Button clicked" << std::endl; })})
-                         ->setSpacing(8)
-                         ->setPadding(12)),
-            nullptr, nullptr
-
-        );
+                             Text("Item 3")})
+                         ->setBackgroundColor(Color::fromRGB(280, 180, 180))
+                         ->setScrollable(true)
+                         ->setDirection(FlexDirection::Column)
+                         ->setGap(8)
+                         ->setAlignItems(AlignItems::Stretch)
+                         ->setWidthMode(SizeMode::Full)
+                         ->setHeightMode(SizeMode::Full)})
+            ->setWidthMode(SizeMode::Full)
+            ->setHeightMode(SizeMode::Full)
+            ->setDirection(FlexDirection::Column);
     }
 };
 
