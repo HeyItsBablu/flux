@@ -6,7 +6,8 @@ public:
   WidgetPtr build() override
   {
 
-    return Flex({Text("Hello, Flux!")})
+    return Flex({AudioPlayer("screenshots/TumMile.mp3")
+                  ->setWidth(280)})
         ->setBackgroundColor(Color::fromRGB(280, 180, 180))
         ->setAlignItems(AlignItems::Center)
         ->setJustifyContent(JustifyContent::Center)

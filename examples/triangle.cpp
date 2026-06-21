@@ -41,11 +41,16 @@ public:
   WidgetPtr build() override
   {
     auto canvas = std::make_shared<CanvasWidget>();
-    canvas->setScrollbarsEnabled(false);
-    canvas->setViewportEnabled(false); // disable pan/zoom too if not needed
-    canvas->setSurface<TriangleSurface>();
+    canvas->setScrollbarsEnabled(false)
+          ->setViewportEnabled(false)
+          ->setFlexGrow(1)
+          ->setSurface<TriangleSurface>();
 
-    return Scaffold(AppBar("Trianlge App"), Expanded(canvas), nullptr, nullptr);
+    return Flex({canvas})
+        ->setDirection(FlexDirection::Column)
+        ->setAlignItems(AlignItems::Stretch)
+        ->setWidthMode(SizeMode::Full)
+        ->setHeightMode(SizeMode::Full);
   }
 };
 
@@ -56,9 +61,9 @@ public:
 WidgetPtr createApp(FluxUI *app)
 {
   return FluxApp("Triangle", std::make_shared<TriangleApp>(), AppTheme::dark(),
-                 false,  // debugShowWidgetBounds
-                 512,    // width
-                 512,    // height
-                 false,  // maximize
-                 true); // fullscreen
+                 false, // debugShowWidgetBounds
+                 800,   // width
+                 800,   // height
+                 false, // maximize
+                 false); // fullscreen
 }

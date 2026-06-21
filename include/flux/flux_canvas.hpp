@@ -75,6 +75,13 @@ public:
     std::shared_ptr<CanvasWidget> setCanvasSize(int w, int h);
     std::shared_ptr<CanvasWidget> redraw();
 
+    std::shared_ptr<CanvasWidget> setFlexGrow(int g)
+    {
+        flexGrow = g;
+        markNeedsLayout();
+        return ptr();
+    }
+
     int docW() const { return docW_ ? docW_ : canvasW_; }
     int docH() const { return docH_ ? docH_ : canvasH_; }
 

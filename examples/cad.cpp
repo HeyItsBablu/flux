@@ -1149,8 +1149,8 @@ public:
         }
 
         // ── Snap toggle ───────────────────────────────────────────────────
-        snapBtn_ = Button("Snap")->setHeight(28)->setWidth(44)->setBackgroundColor(kInactiveBg)->setOnClick([this, ws, wc]()
-                                                                                                            {
+        snapBtn_ = Button("Snap")->setHeight(28)->setBackgroundColor(kInactiveBg)->setOnClick([this, ws, wc]()
+                                                                                              {
                 if(auto s=ws.lock()){
                     s->snapToGrid_=!s->snapToGrid_;
                     snapBtn_->setBackgroundColor(s->snapToGrid_?kActiveBg:kInactiveBg);
@@ -1159,7 +1159,7 @@ public:
 
         // ── Toolbar buttons ───────────────────────────────────────────────
         auto mkBtn = [&](const char *lbl, int w, auto fn)
-        { return Button(lbl)->setHeight(28)->setWidth(w)->setOnClick(fn); };
+        { return Button(lbl)->setHeight(28)->setOnClick(fn); };
 
         auto undoBtn = mkBtn("↩", 30, [this, ws, wc]()
                              {if(auto s=ws.lock()){s->commitTextEdit();s->undo();}refreshStatus();if(auto c=wc.lock())c->redraw(); });
@@ -1185,69 +1185,83 @@ public:
             activePicker_->open(); });
 
         // ── Toolbar ───────────────────────────────────────────────────────
-        auto toolbar = Container(
-                           Row({
-                                   Text("CAD")->setFontSize(12)->setTextColor(Color::fromRGB(180, 180, 200)),
-                                   SizedBox(10, 0),
-                                   undoBtn,
-                                   SizedBox(2, 0),
-                                   redoBtn,
-                                   SizedBox(6, 0),
-                                   clrBtn,
-                                   SizedBox(6, 0),
-                                   fitBtn,
-                                   SizedBox(2, 0),
-                                   rstBtn,
-                                   SizedBox(6, 0),
-                                   snapBtn_,
-                                   SizedBox(6, 0),
-                                   svgBtn,
-                                   SizedBox(6, 0),
-                                   delBtn,
-                               })
-                               ->setPadding(8)
-                               ->setSpacing(3)
-                               ->setCrossAxisAlignment(CrossAxisAlignment::Center))
-                           ->setHeight(40)
-                           ->setBackgroundColor(Color::fromRGB(20, 20, 26));
+        auto toolbar =
+            Flex({
+                     Text("CAD")->setFontSize(12)->setTextColor(Color::fromRGB(180, 180, 200)),
+                     SizedBox(10, 0),
+                     undoBtn,
+                     SizedBox(2, 0),
+                     redoBtn,
+                     SizedBox(6, 0),
+                     clrBtn,
+                     SizedBox(6, 0),
+                     fitBtn,
+                     SizedBox(2, 0),
+                     rstBtn,
+                     SizedBox(6, 0),
+                     snapBtn_,
+                     SizedBox(6, 0),
+                     svgBtn,
+                     SizedBox(6, 0),
+                     delBtn,
+                 })
+                ->setHeight(40)
+                ->setDirection(FlexDirection::Row)
+                ->setPadding(8)
+                ->setGap(3)
+                ->setBackgroundColor(Color::fromRGB(20, 20, 26))
+                ->setWidthMode(SizeMode::Full);
 
         // ── Sidebar ───────────────────────────────────────────────────────
-        auto sidebar = Container(Column({Container(toolCol)->setHeight(int(toolDefs.size()) * 38 + 12)}))
+        auto sidebar = Flex({toolCol})
                            ->setWidth(54)
-                           ->setBackgroundColor(kSidebarBg);
+                           ->setBackgroundColor(kSidebarBg)
+                           ->setDirection(FlexDirection::Column)
+                           ->setPadding(0)
+                           ->setGap(0);
 
         // ── Status bar ────────────────────────────────────────────────────
-        auto statusBar = Container(
-                             Row({
-                                     Text(selLabel_, [](const std::string &s)
-                                          { return s; })
-                                         ->setFontSize(11)
-                                         ->setTextColor(Color::fromRGB(140, 140, 160))
-                                         ->setMinWidth(110),
-                                     SizedBox(16, 0),
-                                     Text(cursorLabel_, [](const std::string &s)
-                                          { return "XY " + s; })
-                                         ->setFontSize(11)
-                                         ->setTextColor(Color::fromRGB(80, 200, 120)),
-                                     SizedBox(16, 0),
-                                     Text(zoomLabel_, [](const std::string &s)
-                                          { return "Zoom " + s; })
-                                         ->setFontSize(11)
-                                         ->setTextColor(Color::fromRGB(140, 140, 160)),
-                                     SizedBox(16, 0),
-                                     Text("Mid-drag / Space: pan  ·  Ctrl+scroll: zoom  ·  Shift: constrain")
-                                         ->setFontSize(10)
-                                         ->setTextColor(Color::fromRGB(70, 70, 85)),
-                                 })
-                                 ->setPadding(5)
-                                 ->setSpacing(0)
-                                 ->setCrossAxisAlignment(CrossAxisAlignment::Center))
-                             ->setHeight(24)
-                             ->setBackgroundColor(Color::fromRGB(14, 14, 18));
+        auto statusBar =
+            Flex({
+                     Text(selLabel_, [](const std::string &s)
+                          { return s; })
+                         ->setFontSize(11)
+                         ->setTextColor(Color::fromRGB(140, 140, 160))
+                         ->setMinWidth(110),
+                     SizedBox(16, 0),
+                     Text(cursorLabel_, [](const std::string &s)
+                          { return "XY " + s; })
+                         ->setFontSize(11)
+                         ->setTextColor(Color::fromRGB(80, 200, 120)),
+                     SizedBox(16, 0),
+                     Text(zoomLabel_, [](const std::string &s)
+                          { return "Zoom " + s; })
+                         ->setFontSize(11)
+                         ->setTextColor(Color::fromRGB(140, 140, 160)),
+                     SizedBox(16, 0),
+                     Text("Mid-drag / Space: pan  ·  Ctrl+scroll: zoom  ·  Shift: constrain")
+                         ->setFontSize(10)
+                         ->setTextColor(Color::fromRGB(70, 70, 85)),
+                 })
+                ->setPadding(5)
+                ->setGap(0)
+                ->setDirection(FlexDirection::Row)
+                ->setHeight(24)
+                ->setBackgroundColor(Color::fromRGB(14, 14, 18));
 
-        return Scaffold(nullptr,
-                        Expanded(Column({toolbar, Expanded(Row({sidebar, Expanded(canvas_)})), statusBar})),
-                        nullptr, nullptr);
+        return Flex({Flex({toolbar,
+
+                           Flex({sidebar,
+                                 canvas_->setFlexGrow(1)})
+                               ->setWidthMode(SizeMode::Full)
+                               ->setHeightMode(SizeMode::Full),
+                           statusBar})
+                         ->setDirection(FlexDirection::Column)
+                         ->setWidthMode(SizeMode::Full)
+                         ->setHeightMode(SizeMode::Full)})
+            ->setWidthMode(SizeMode::Full)
+            ->setHeightMode(SizeMode::Full);
+        ;
     }
 };
 
