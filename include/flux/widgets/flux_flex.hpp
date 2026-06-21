@@ -385,6 +385,11 @@ public:
         resolved_ = resolveProps();
         const FlexProps &P = resolved_;
 
+        paddingLeft = P.paddingLeft;
+        paddingRight = P.paddingRight;
+        paddingTop = P.paddingTop;
+        paddingBottom = P.paddingBottom;
+
         isRowAxis_ = (P.direction == FlexDirection::Row || P.direction == FlexDirection::RowReverse);
         mainIsReversed_ = (P.direction == FlexDirection::RowReverse || P.direction == FlexDirection::ColumnReverse);
         wrapReversed_ = (P.wrap == FlexWrap::WrapReverse);

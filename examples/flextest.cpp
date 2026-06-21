@@ -25,6 +25,7 @@ public:
                             ->setWidth(300)
                             ->setHeight(500),
                     })
+            ->setBackgroundColor(Color::fromRGB(280, 180, 180))
             ->setScrollable(true)
             ->setDirection(FlexDirection::Column) // base (mobile): stacked
             ->setGap(8)
