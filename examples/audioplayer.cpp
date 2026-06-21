@@ -1,19 +1,22 @@
 #include "flux/flux.hpp"
 
-class MyApp : public Widget {
+class MyApp : public Widget
+{
 public:
-  WidgetPtr build() override {
+  WidgetPtr build() override
+  {
 
-    return Scaffold(
-        AppBar("Flux App"),
-        Expanded(
-            Center(AudioPlayer("screenshots/TumMile.mp3")
-                       ->setWidth(280))),
-        nullptr, nullptr);
+    return Flex({Text("Hello, Flux!")})
+        ->setBackgroundColor(Color::fromRGB(280, 180, 180))
+        ->setAlignItems(AlignItems::Center)
+        ->setJustifyContent(JustifyContent::Center)
+        ->setWidthMode(SizeMode::Full)
+        ->setHeightMode(SizeMode::Full);
   }
 };
 
-WidgetPtr createApp(FluxUI *app) {
+WidgetPtr createApp(FluxUI *app)
+{
   return FluxApp("FluxUI - App", std::make_shared<MyApp>(), AppTheme::light(),
                  false, 900, 700, false, false);
 }

@@ -584,6 +584,14 @@ public:
                     break;
             }
 
+            if (lines_.size() == 1)
+            {
+                LineMetric &only = lines_.front();
+                only.crossSize = scrollableCross
+                                     ? std::max(containerCrossSize_, only.crossSize)
+                                     : containerCrossSize_;
+            }
+
             // ---- first pass: layout each child loosely on cross axis ----
             int lineCrossMax = 0;
             for (auto *c : line.items)
@@ -645,7 +653,9 @@ public:
                     usedMainFinal += P.gap;
             }
             line.usedMain = usedMainFinal;
-            line.crossSize = lineCrossMax;
+            line.crossSize = (lines_.size() == 1)
+                                 ? (scrollableCross ? std::max(containerCrossSize_, lineCrossMax) : containerCrossSize_)
+                                 : lineCrossMax;
             line.resolvedMain.clear();
             for (auto *c : line.items)
                 line.resolvedMain.push_back(resolvedMain[c]);
