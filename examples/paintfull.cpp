@@ -1332,8 +1332,8 @@ public:
                       });
         activePicker_->open(); });
 
-    auto saveRow = Row({savePngBtn, saveJpgBtn});
-    saveRow->setSpacing(4);
+    auto saveRow = Flex({savePngBtn, saveJpgBtn});
+    saveRow->setGap(4);
 
     // ── Sidebar label helper ──────────────────────────────────────────────
     auto label = [](const char *s)
@@ -1343,14 +1343,14 @@ public:
 
     // ── Shape / tool buttons (2-column grid) ─────────────────────────────
     shapeButtons_.resize(shapeTools_.size());
-    auto shapeGrid = Column({});
-    shapeGrid->setSpacing(3);
-    shapeGrid->setPadding(6);
+    auto shapeGrid = Flex({});
+    shapeGrid->setGap(3);
+    shapeGrid->setPadding(6)->setHeightMode(SizeMode::Fit)->setDirection(FlexDirection::Column);
 
     for (int row = 0; row < int(shapeTools_.size()); row += 2)
     {
-      auto rowW = Row({});
-      rowW->setSpacing(3);
+      auto rowW = Flex({});
+      rowW->setGap(3);
       for (int col = 0; col < 2 && row + col < int(shapeTools_.size()); ++col)
       {
         int idx = row + col;
@@ -1442,13 +1442,13 @@ public:
             } });
 
     // ── Palette swatches ───────────────────────────────────────────────
-    auto swatchGrid = Column({});
-    swatchGrid->setSpacing(3);
+    auto swatchGrid = Flex({});
+    swatchGrid->setGap(3)->setDirection(FlexDirection::Column);
 
     for (int row = 0; row < int(palette_.size()); row += 3)
     {
-      auto rowW = Row({});
-      rowW->setSpacing(3);
+      auto rowW = Flex({});
+      rowW->setGap(3);
       for (int col = 0; col < 3 && row + col < int(palette_.size()); ++col)
       {
         int idx = row + col;
@@ -1473,30 +1473,33 @@ public:
     }
 
     // ── Sidebar assembly ──────────────────────────────────────────────────
-    auto sidebar = Container(ScrollView({
-                                 Text("SHAPES")
-                                     ->setFontSize(9)
-                                     ->setTextColor(Color::fromRGB(140, 140, 160))
-                                     ->setPaddingLRTB(8, 8, 8, 4),
-                                 Container(shapeGrid)->setHeight(96),
-                                 textHintLabel,
-                                 SizedBox(0, 4),
-                                 colorLabel,
-                                 colorPicker_,
-                                 SizedBox(0, 4),
-                                 Container(swatchGrid)->setHeight(120),
-                                 SizedBox(0, 6),
-                                 label("RESIZE"),
-                                 Text("H")->setFontSize(9)->setTextColor(Color::fromRGB(140, 140, 160))->setPaddingLRTB(8, 8, 2, 1),
-                                 hInput,
-                                 Text("W")->setFontSize(9)->setTextColor(Color::fromRGB(140, 140, 160))->setPaddingLRTB(8, 8, 2, 1),
-                                 wInput,
-                                 SizedBox(0, 2),
-                                 applyBtn,
+    auto sidebar = Flex({
+                            Text("SHAPES")
+                                ->setFontSize(9)
+                                ->setTextColor(Color::fromRGB(140, 140, 160))
+                                ->setPaddingLRTB(8, 8, 8, 4),
+                            shapeGrid,
+                            textHintLabel,
+                            SizedBox(0, 4),
+                            colorLabel,
+                            colorPicker_,
+                            SizedBox(0, 4),
+                            swatchGrid,
+                            SizedBox(0, 6),
+                            label("RESIZE"),
+                            Text("H")->setFontSize(9)->setTextColor(Color::fromRGB(140, 140, 160))->setPaddingLRTB(8, 8, 2, 1),
+                            hInput,
+                            Text("W")->setFontSize(9)->setTextColor(Color::fromRGB(140, 140, 160))->setPaddingLRTB(8, 8, 2, 1),
+                            wInput,
+                            SizedBox(0, 2),
+                            applyBtn,
 
-                             }))
+                        })
+                       ->setScrollable(true)
                        ->setWidth(120)
-                       ->setBackgroundColor(Color::fromRGB(28, 28, 30));
+                       ->setBackgroundColor(Color::fromRGB(28, 28, 30))
+                       ->setDirection(FlexDirection::Column)
+                       ->setHeightMode(SizeMode::Full);
 
     // ── Undo / Redo buttons ───────────────────────────────────────────────
     auto undoBtn = Button("↩")
@@ -1554,68 +1557,67 @@ public:
                                         s->brushRadius_ = float(v); });
 
     // ── Toolbar ───────────────────────────────────────────────────────────
-    auto toolbar = Container(
-                       Row({
-                               Text("Paint")
-                                   ->setFontSize(13)
-                                   ->setTextColor(Color::fromRGB(220, 220, 220)),
-                               SizedBox(8, 0),
-                               openBtn,
-                               saveRow,
-                               brushSlider_,
-                               SizedBox(8, 0),
-                               eraserBtn_,
-                               SizedBox(8, 0),
-                               clearBtn,
-                               SizedBox(8, 0),
-                               undoBtn,
-                               SizedBox(8, 0),
-                               redoBtn,
-                           })
-                           ->setPadding(8)
-                           ->setSpacing(6)
-                           ->setCrossAxisAlignment(CrossAxisAlignment::Center))
-                       ->setHeight(44)
-                       ->setBackgroundColor(Color::fromRGB(28, 28, 30));
+    auto toolbar =
+        Flex({
+                 Text("Paint")
+                     ->setFontSize(13)
+                     ->setTextColor(Color::fromRGB(220, 220, 220)),
+                 SizedBox(8, 0),
+                 openBtn,
+                 saveRow,
+                 brushSlider_,
+                 SizedBox(8, 0),
+                 eraserBtn_,
+                 SizedBox(8, 0),
+                 clearBtn,
+                 SizedBox(8, 0),
+                 undoBtn,
+                 SizedBox(8, 0),
+                 redoBtn,
+             })
+            ->setPadding(8)
+            ->setHeight(44)
+            ->setBackgroundColor(Color::fromRGB(28, 28, 30));
 
     // ── Status bar ────────────────────────────────────────────────────────
-    auto statusBar = Container(
-                         Row({
-                                 Text(cursorPosLabel_, [](const std::string &s)
-                                      { return s; })
-                                     ->setFontSize(11)
-                                     ->setTextColor(Color::fromRGB(160, 160, 160))
-                                     ->setMinWidth(80),
-                                 SizedBox(16, 0),
-                                 Text(canvasSizeLabel_, [](const std::string &s)
-                                      { return s; })
-                                     ->setFontSize(11)
-                                     ->setTextColor(Color::fromRGB(160, 160, 160)),
-                                 SizedBox(16, 0),
-                                 Text(zoomLabel_, [](const std::string &s)
-                                      { return "Zoom: " + s; })
-                                     ->setFontSize(11)
-                                     ->setTextColor(Color::fromRGB(160, 160, 160)),
-                             })
-                             ->setPadding(4)
-                             ->setSpacing(0)
-                             ->setCrossAxisAlignment(CrossAxisAlignment::Center))
-                         ->setHeight(24)
-                         ->setBackgroundColor(Color::fromRGB(22, 22, 24));
+    auto statusBar =
+        Flex({
+                 Text(cursorPosLabel_, [](const std::string &s)
+                      { return s; })
+                     ->setFontSize(11)
+                     ->setTextColor(Color::fromRGB(160, 160, 160))
+                     ->setMinWidth(80),
+                 SizedBox(16, 0),
+                 Text(canvasSizeLabel_, [](const std::string &s)
+                      { return s; })
+                     ->setFontSize(11)
+                     ->setTextColor(Color::fromRGB(160, 160, 160)),
+                 SizedBox(16, 0),
+                 Text(zoomLabel_, [](const std::string &s)
+                      { return "Zoom: " + s; })
+                     ->setFontSize(11)
+                     ->setTextColor(Color::fromRGB(160, 160, 160)),
+             })
+            ->setPadding(4)
+            ->setHeight(24)
+            ->setBackgroundColor(Color::fromRGB(22, 22, 24));
 
-    return Scaffold(
-        nullptr,
-        Expanded(Column({
-            toolbar,
-            Expanded(Row({
-                sidebar,
-                Expanded(canvas_),
-            })),
-            statusBar,
-        })),
-        nullptr,
-        nullptr);
-  } 
+    return Flex({
+                    toolbar,
+                    Flex({
+                             sidebar,
+                             canvas_->setFlexGrow(1),
+                         })
+                        ->setDirection(FlexDirection::Row)
+                        ->setHeightMode(SizeMode::Full)
+                        ->setWidthMode(SizeMode::Full),
+
+                    statusBar,
+                })
+        ->setDirection(FlexDirection::Column)
+        ->setHeightMode(SizeMode::Full)
+        ->setWidthMode(SizeMode::Full);
+  }
 };
 
 WidgetPtr createApp(FluxUI *app)
