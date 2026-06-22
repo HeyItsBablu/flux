@@ -9,7 +9,7 @@
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
-#endif 
+#endif
 
 // ============================================================
 //  TextBlock
@@ -3900,8 +3900,8 @@ public:
             Color::fromRGB(140, 50, 200),
             Color::fromRGB(255, 255, 255),
         };
-        auto swatchRow = Row({});
-        swatchRow->setSpacing(3);
+        auto swatchRow = Flex({});
+        swatchRow->setGap(3);
         for (auto &c : swatches)
         {
             auto btn = Button("")
@@ -4111,30 +4111,35 @@ public:
     if (auto c = wc.lock()) c->redraw(); });
 
         // ── Sidebar ───────────────────────────────────────────
-        auto sidebar = Container(
-                           ScrollView({
-                               // TOOLS
-                               sideLabel("TOOLS"),
+        auto sidebar =
+            Flex({
+                     // TOOLS
+                     sideLabel("TOOLS"),
 
-                               Row({selectToolBtn_, SizedBox(4, 0), textToolBtn_})->setPadding(6),
-                               Row({pathTextBtn_, SizedBox(4, 0), multiSelectBtn_})->setPadding(6),
-                               SizedBox(0, 4),
-                               sideLabel("TRANSFORM"),
-                               Container(moveToolBtn_)->setPadding(6),
-                               Container(scaleToolBtn_)->setPadding(6),
-                               Container(rotateToolBtn_)->setPadding(6),
-                               sideLabel("ROTATION"),
-                               Container(rotateResetBtn_)->setPadding(6)->setHeight(40),
+                     Flex({selectToolBtn_, SizedBox(4, 0), textToolBtn_}),
+                     Flex({pathTextBtn_, SizedBox(4, 0), multiSelectBtn_}),
+                     SizedBox(0, 4),
+                     sideLabel("TRANSFORM"),
+                     moveToolBtn_,
+                     scaleToolBtn_,
+                     rotateToolBtn_,
+                     sideLabel("ROTATION"),
+                     rotateResetBtn_,
 
-                               sideLabel("MULTI-EDIT"),
-                               Container(bulkBoldBtn_)->setPadding(6)->setHeight(38),
-                               Container(bulkSizeUpBtn_)->setPadding(6)->setHeight(38),
-                               Container(bulkSizeDownBtn_)->setPadding(6)->setHeight(38),
-                               Container(deleteAllBtn_)->setPadding(6)->setHeight(38),
+                     sideLabel("MULTI-EDIT"),
+                     bulkBoldBtn_,
+                     bulkSizeUpBtn_,
+                     bulkSizeDownBtn_,
+                     deleteAllBtn_,
 
-                           }))
-                           ->setWidth(220)
-                           ->setBackgroundColor(Color::fromRGB(28, 28, 30));
+                 })
+                ->setDirection(FlexDirection::Column)
+                ->setScrollable(true)
+                ->setWidth(220)
+                ->setBackgroundColor(Color::fromRGB(28, 28, 30))
+                ->setHeightMode(SizeMode::Full)
+                ->setPadding(6)
+                ->setGap(8);
 
         // ── Background toggle + color picker ─────────────────────
         bgToggleBtn_ = Button("BG")
@@ -4143,19 +4148,21 @@ public:
                            ->setBackgroundColor(kStyleInactiveBg)
                            ->setOnClick([this, ws, wc]()
                                         {
-        if (auto s = ws.lock()) {
-            s->applyToSelectedBlock([](TextBlock &b) {
-                b.bgEnabled = !b.bgEnabled;
-            });
-        }
-        // Sync button color
-        if (auto s = ws.lock()) {
-            const TextBlock *b = s->selectedBlock();
-            if (bgToggleBtn_)
-                bgToggleBtn_->setBackgroundColor(
-                    (b && b->bgEnabled) ? kStyleActiveBg : kStyleInactiveBg);
-        }
-        if (auto c = wc.lock()) c->redraw(); });
+            if (auto s = ws.lock())
+            {
+                s->applyToSelectedBlock([](TextBlock &b)
+                                        { b.bgEnabled = !b.bgEnabled; });
+            }
+            // Sync button color
+            if (auto s = ws.lock())
+            {
+                const TextBlock *b = s->selectedBlock();
+                if (bgToggleBtn_)
+                    bgToggleBtn_->setBackgroundColor(
+                        (b && b->bgEnabled) ? kStyleActiveBg : kStyleInactiveBg);
+            }
+            if (auto c = wc.lock())
+                c->redraw(); });
 
         bgColorPicker_ = ColorPicker(Color::fromRGBA(255, 255, 255, 180));
         bgColorPicker_->pickerSize = 90;
@@ -4172,14 +4179,16 @@ public:
         bgColorPicker_->width = bgColorPicker_->pickerSize + bgColorPicker_->paddingLeft + bgColorPicker_->paddingRight;
         bgColorPicker_->setOnColorChanged([ws, wc](Color c)
                                           {
-    if (auto s = ws.lock()) {
-        s->applyToSelectedBlock([c](TextBlock &b) {
+            if (auto s = ws.lock())
+            {
+                s->applyToSelectedBlock([c](TextBlock &b)
+                                        {
             b.bgColor = c;
             // Auto-enable bg when color is picked with visible alpha
-            if (c.a > 0) b.bgEnabled = true;
-        });
-    }
-    if (auto cv = wc.lock()) cv->redraw(); });
+            if (c.a > 0) b.bgEnabled = true; });
+            }
+            if (auto cv = wc.lock())
+                cv->redraw(); });
 
         // ── Stroke toggle + width slider ─────────────────────────
         strokeToggleBtn_ = Button("Stroke")
@@ -4188,29 +4197,32 @@ public:
                                ->setBackgroundColor(kStyleInactiveBg)
                                ->setOnClick([this, ws, wc]()
                                             {
-        if (auto s = ws.lock()) {
-            s->applyToSelectedBlock([](TextBlock &b) {
-                b.strokeEnabled = !b.strokeEnabled;
-            });
-        }
-        if (auto s = ws.lock()) {
-            const TextBlock *b = s->selectedBlock();
-            if (strokeToggleBtn_)
-                strokeToggleBtn_->setBackgroundColor(
-                    (b && b->strokeEnabled) ? kStyleActiveBg : kStyleInactiveBg);
-        }
-        if (auto c = wc.lock()) c->redraw(); });
+            if (auto s = ws.lock())
+            {
+                s->applyToSelectedBlock([](TextBlock &b)
+                                        { b.strokeEnabled = !b.strokeEnabled; });
+            }
+            if (auto s = ws.lock())
+            {
+                const TextBlock *b = s->selectedBlock();
+                if (strokeToggleBtn_)
+                    strokeToggleBtn_->setBackgroundColor(
+                        (b && b->strokeEnabled) ? kStyleActiveBg : kStyleInactiveBg);
+            }
+            if (auto c = wc.lock())
+                c->redraw(); });
 
         strokeWidthSlider_ = Slider(0.5, 12.0, 0.25);
         strokeWidthSlider_->value = 1.5;
         strokeWidthSlider_->setOnValueChanged([ws, wc](double val)
                                               {
-    if (auto s = ws.lock()) {
-        s->applyToSelectedBlock([val](TextBlock &b) {
-            b.strokeWidth = float(val);
-        });
-    }
-    if (auto c = wc.lock()) c->redraw(); });
+            if (auto s = ws.lock())
+            {
+                s->applyToSelectedBlock([val](TextBlock &b)
+                                        { b.strokeWidth = float(val); });
+            }
+            if (auto c = wc.lock())
+                c->redraw(); });
 
         // ── Stroke color picker ───────────────────────────────────
         strokeColorPicker_ = ColorPicker(Color::fromRGB(0, 0, 0));
@@ -4228,12 +4240,13 @@ public:
         strokeColorPicker_->width = strokeColorPicker_->pickerSize + strokeColorPicker_->paddingLeft + strokeColorPicker_->paddingRight;
         strokeColorPicker_->setOnColorChanged([ws, wc](Color c)
                                               {
-    if (auto s = ws.lock()) {
-        s->applyToSelectedBlock([c](TextBlock &b) {
-            b.strokeColor = c;
-        });
-    }
-    if (auto cv = wc.lock()) cv->redraw(); });
+            if (auto s = ws.lock())
+            {
+                s->applyToSelectedBlock([c](TextBlock &b)
+                                        { b.strokeColor = c; });
+            }
+            if (auto cv = wc.lock())
+                cv->redraw(); });
 
         // ── Shadow toggle ─────────────────────────────────────────
         shadowToggleBtn_ = Button("Shadow")
@@ -4242,187 +4255,192 @@ public:
                                ->setBackgroundColor(kStyleInactiveBg)
                                ->setOnClick([this, ws, wc]()
                                             {
-        if (auto s = ws.lock()) {
-            s->applyToSelectedBlock([](TextBlock &b) {
-                b.shadowEnabled = !b.shadowEnabled;
-            });
-        }
-        if (auto s = ws.lock()) {
-            const TextBlock *b = s->selectedBlock();
-            if (shadowToggleBtn_)
-                shadowToggleBtn_->setBackgroundColor(
-                    (b && b->shadowEnabled) ? kStyleActiveBg : kStyleInactiveBg);
-        }
-        if (auto c = wc.lock()) c->redraw(); });
+            if (auto s = ws.lock())
+            {
+                s->applyToSelectedBlock([](TextBlock &b)
+                                        { b.shadowEnabled = !b.shadowEnabled; });
+            }
+            if (auto s = ws.lock())
+            {
+                const TextBlock *b = s->selectedBlock();
+                if (shadowToggleBtn_)
+                    shadowToggleBtn_->setBackgroundColor(
+                        (b && b->shadowEnabled) ? kStyleActiveBg : kStyleInactiveBg);
+            }
+            if (auto c = wc.lock())
+                c->redraw(); });
 
         // ── Shadow X offset slider ────────────────────────────────
         shadowXSlider_ = Slider(-20.0, 20.0, 0.5);
         shadowXSlider_->value = 2.0;
         shadowXSlider_->setOnValueChanged([ws, wc](double val)
                                           {
-    if (auto s = ws.lock()) {
-        s->applyToSelectedBlock([val](TextBlock &b) {
-            b.shadowOffsetX = float(val);
-        });
-    }
-    if (auto c = wc.lock()) c->redraw(); });
+            if (auto s = ws.lock())
+            {
+                s->applyToSelectedBlock([val](TextBlock &b)
+                                        { b.shadowOffsetX = float(val); });
+            }
+            if (auto c = wc.lock())
+                c->redraw(); });
 
         // ── Shadow Y offset slider ────────────────────────────────
         shadowYSlider_ = Slider(-20.0, 20.0, 0.5);
         shadowYSlider_->value = 2.0;
         shadowYSlider_->setOnValueChanged([ws, wc](double val)
                                           {
-    if (auto s = ws.lock()) {
-        s->applyToSelectedBlock([val](TextBlock &b) {
-            b.shadowOffsetY = float(val);
-        });
-    }
-    if (auto c = wc.lock()) c->redraw(); });
+            if (auto s = ws.lock())
+            {
+                s->applyToSelectedBlock([val](TextBlock &b)
+                                        { b.shadowOffsetY = float(val); });
+            }
+            if (auto c = wc.lock())
+                c->redraw(); });
 
-        auto rightSidebar = Container(
-                                ScrollView({
+        auto rightSidebar =
+            Flex({
 
-                                    // FONT
-                                    sideLabel("FONT FAMILY"),
-                                    Padding(EdgeInsets::all(6), fontFamilyDropdown_),
+                     // FONT
+                     sideLabel("FONT FAMILY"),
+                     fontFamilyDropdown_,
 
-                                    sideLabel("SIZE"),
-                                    Row({
-                                            Container(fontSizeDropdown_)->setWidth(80),
-                                            SizedBox(4, 0),
-                                            fontSizeInput_,
+                     sideLabel("SIZE"),
+                     Flex({
+                        fontSizeDropdown_,
+                         SizedBox(4, 0),
+                         fontSizeInput_,
 
-                                        })
-                                        ->setPadding(6),
-                                    sideLabel("STYLE"),
-                                    Row({boldBtn_, SizedBox(2, 0), italicBtn_, SizedBox(2, 0),
-                                         underlineBtn_, SizedBox(2, 0), strikethroughBtn_})
-                                        ->setPadding(6),
+                     }),
+                     sideLabel("STYLE"),
+                     Flex({boldBtn_, SizedBox(2, 0), italicBtn_, SizedBox(2, 0),
+                           underlineBtn_, SizedBox(2, 0), strikethroughBtn_}),
 
-                                    Row({allCapsBtn_, SizedBox(2, 0), smallCapsBtn_,
-                                         SizedBox(2, 0), kerningBtn_})
-                                        ->setPadding(6),
+                     Flex({allCapsBtn_, SizedBox(2, 0), smallCapsBtn_,
+                           SizedBox(2, 0), kerningBtn_}),
 
-                                    sideLabel("ALIGNMENT"),
-                                    Row({alignLeftBtn_,
-                                         SizedBox(2, 0), alignCenterBtn_,
-                                         SizedBox(2, 0), alignRightBtn_,
-                                         SizedBox(2, 0), alignJustifyBtn_})
-                                        ->setPadding(6),
+                     sideLabel("ALIGNMENT"),
+                     Flex({alignLeftBtn_,
+                           SizedBox(2, 0), alignCenterBtn_,
+                           SizedBox(2, 0), alignRightBtn_,
+                           SizedBox(2, 0), alignJustifyBtn_}),
 
-                                    SizedBox(0, 4),
+                     SizedBox(0, 4),
 
-                                    sideLabel("BASELINE SHIFT"),
-                                    Padding(EdgeInsets::all(6), baselineShiftSlider_),
-                                    Row({superscriptBtn_,
-                                         SizedBox(3, 0), subscriptBtn_,
-                                         SizedBox(3, 0), baselineResetBtn_})
-                                        ->setPadding(6),
+                     sideLabel("BASELINE SHIFT"),
+                     Padding(EdgeInsets::all(6), baselineShiftSlider_),
+                     Flex({superscriptBtn_,
+                           SizedBox(3, 0), subscriptBtn_,
+                           SizedBox(3, 0), baselineResetBtn_}),
 
-                                    // COLOR
-                                    sideLabel("COLOR"),
-                                    colorPicker_,
-                                    swatchRow,
+                     // COLOR
+                     sideLabel("COLOR"),
+                     colorPicker_,
+                     swatchRow,
 
-                                    SizedBox(0, 4),
-                                    sideLabel("LINE HEIGHT"),
-                                    Padding(EdgeInsets::all(6), lineHeightSlider_),
-                                    SizedBox(0, 4),
-                                    sideLabel("LETTER SPACING"),
-                                    Padding(EdgeInsets::all(6), letterSpacingSlider_),
+                     SizedBox(0, 4),
+                     sideLabel("LINE HEIGHT"),
+                     lineHeightSlider_,
+                     SizedBox(0, 4),
+                     sideLabel("LETTER SPACING"),
+                     letterSpacingSlider_,
 
-                                    sideLabel("OPACITY"),
-                                    Padding(EdgeInsets::all(6), opacitySlider_),
+                     sideLabel("OPACITY"),
+                     opacitySlider_,
 
-                                    sideLabel("BACKGROUND"),
-                                    Row({bgToggleBtn_, SizedBox(4, 0), bgColorPicker_})->setPadding(6),
+                     sideLabel("BACKGROUND"),
+                     Flex({bgToggleBtn_, SizedBox(4, 0), bgColorPicker_}),
 
-                                    sideLabel("STROKE"),
-                                    Row({strokeToggleBtn_, SizedBox(4, 0), strokeWidthSlider_})->setPadding(6),
-                                    strokeColorPicker_,
+                     sideLabel("STROKE"),
+                     Flex({strokeToggleBtn_, SizedBox(4, 0), strokeWidthSlider_})->setDirection(FlexDirection::Column),
+                     strokeColorPicker_,
 
-                                    sideLabel("SHADOW"),
-                                    Row({shadowToggleBtn_})->setPadding(6),
-                                    Row({Text("X")->setFontSize(9), shadowXSlider_})->setPadding(6),
-                                    Row({Text("Y")->setFontSize(9), shadowYSlider_})->setPadding(6),
-                                }))
-                                ->setWidth(280)
-                                ->setBackgroundColor(Color::fromRGB(28, 28, 30));
+                     sideLabel("SHADOW"),
+                     Flex({shadowToggleBtn_}),
+                     Flex({Text("X")->setFontSize(9), shadowXSlider_}),
+                     Flex({Text("Y")->setFontSize(9), shadowYSlider_}),
+                 })
+                ->setDirection(FlexDirection::Column)
+                ->setScrollable(true)
+                ->setWidth(280)
+                ->setBackgroundColor(Color::fromRGB(28, 28, 30))
+                ->setHeightMode(SizeMode::Full)
+                ->setPadding(6);
 
         // ── Toolbar ───────────────────────────────────────────
-        auto toolbar = Container(
-                           Row({
-                                   Text("TextCanvas")
-                                       ->setFontSize(13)
-                                       ->setTextColor(Color::fromRGB(220, 220, 220)),
-                                   SizedBox(12, 0),
-                                   Text(toolLabel_, [](const std::string &s)
-                                        { return "Tool: " + s; })
-                                       ->setFontSize(11)
-                                       ->setTextColor(Color::fromRGB(140, 140, 160)),
-                                   SizedBox(8, 0),
-                                   Text(blockCountLabel_, [](const std::string &s)
-                                        { return s; })
-                                       ->setFontSize(11)
-                                       ->setTextColor(Color::fromRGB(140, 140, 160)),
-                                   SizedBox(8, 0),
-                                   Text(zoomLabel_, [](const std::string &s)
-                                        { return "Zoom: " + s; })
-                                       ->setFontSize(11)
-                                       ->setTextColor(Color::fromRGB(140, 140, 160)),
+        auto toolbar =
+            Flex({
+                     Text("TextCanvas")
+                         ->setFontSize(13)
+                         ->setTextColor(Color::fromRGB(220, 220, 220)),
+                     SizedBox(12, 0),
+                     Text(toolLabel_, [](const std::string &s)
+                          { return "Tool: " + s; })
+                         ->setFontSize(11)
+                         ->setTextColor(Color::fromRGB(140, 140, 160)),
+                     SizedBox(8, 0),
+                     Text(blockCountLabel_, [](const std::string &s)
+                          { return s; })
+                         ->setFontSize(11)
+                         ->setTextColor(Color::fromRGB(140, 140, 160)),
+                     SizedBox(8, 0),
+                     Text(zoomLabel_, [](const std::string &s)
+                          { return "Zoom: " + s; })
+                         ->setFontSize(11)
+                         ->setTextColor(Color::fromRGB(140, 140, 160)),
 
-                                   Row({
-                                           undoBtn,
-                                           SizedBox(4, 0),
-                                           redoBtn,
-                                           SizedBox(8, 0),
-                                           commitBtn,
-                                           SizedBox(4, 0),
-                                           deleteBtn,
-                                           SizedBox(4, 0),
-                                           clearBtn,
-                                       })
-                                       ->setSpacing(0)
-                                       ->setPadding(6)
-                                       ->setCrossAxisAlignment(CrossAxisAlignment::Center),
+                     Flex({
+                              undoBtn,
+                              redoBtn,
+                              commitBtn,
+                              deleteBtn,
+                              clearBtn,
+                          })
+                         ->setGap(4)
+                         ->setPadding(6)
+                         ->setJustifyContent(JustifyContent::Center)
+                         ->setAlignContent(AlignContent::Center),
 
-                               })
-                               ->setPadding(10)
-                               ->setSpacing(0)
-                               ->setCrossAxisAlignment(CrossAxisAlignment::Center))
-                           ->setHeight(42)
-                           ->setBackgroundColor(Color::fromRGB(24, 24, 26));
+                 })
+                ->setPadding(10)
+                ->setGap(0)
+
+                ->setHeight(42)
+                ->setBackgroundColor(Color::fromRGB(24, 24, 26));
 
         // ── Status bar ────────────────────────────────────────
-        auto statusBar = Container(
-                             Row({
-                                     Text(posLabel_, [](const std::string &s)
-                                          { return "x,y  " + s; })
-                                         ->setFontSize(10)
-                                         ->setTextColor(Color::fromRGB(150, 150, 160))
-                                         ->setMinWidth(110),
-                                     SizedBox(16, 0),
-                                     Text("Enter = commit  •  Esc = cancel  •  Shift+ -> = select  •  Ctrl+scroll = zoom")
-                                         ->setFontSize(10)
-                                         ->setTextColor(Color::fromRGB(110, 110, 120)),
-                                 })
-                                 ->setPadding(4)
-                                 ->setSpacing(0)
-                                 ->setCrossAxisAlignment(CrossAxisAlignment::Center))
-                             ->setHeight(24)
-                             ->setBackgroundColor(Color::fromRGB(20, 20, 22));
+        auto statusBar =
+            Flex({
+                     Text(posLabel_, [](const std::string &s)
+                          { return "x,y  " + s; })
+                         ->setFontSize(10)
+                         ->setTextColor(Color::fromRGB(150, 150, 160))
+                         ->setMinWidth(110),
+                     SizedBox(16, 0),
+                     Text("Enter = commit  •  Esc = cancel  •  Shift+ -> = select  •  Ctrl+scroll = zoom")
+                         ->setFontSize(10)
+                         ->setTextColor(Color::fromRGB(110, 110, 120)),
+                 })
+                ->setPadding(4)
+                ->setGap(0)
+
+                ->setHeight(24)
+                ->setBackgroundColor(Color::fromRGB(20, 20, 22));
 
         // ── Root ─────────────────────────────────────────────
-        return Scaffold(
-            nullptr,
-            Expanded(Column({
-                toolbar,
-                Expanded(Row({sidebar,
-                              Expanded(canvas_),
-                              rightSidebar})),
-                statusBar,
-            })),
-            nullptr, nullptr);
+        return Flex({
+                        toolbar,
+                        Flex({sidebar,
+                              canvas_->setFlexGrow(1),
+                              rightSidebar})
+                            ->setDirection(FlexDirection::Row)
+                            ->setHeightMode(SizeMode::Full)
+                            ->setWidthMode(SizeMode::Full),
+                        statusBar,
+                    })
+            ->setDirection(FlexDirection::Column)
+
+            ->setHeightMode(SizeMode::Full)
+            ->setWidthMode(SizeMode::Full)
+            ->setJustifyContent(JustifyContent::SpaceBetween);
     }
 };
 

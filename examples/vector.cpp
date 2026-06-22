@@ -1429,7 +1429,7 @@ public:
         return Flex({
                         toolbar,
                         Flex({
-                                 sidebar,
+                                 sidebar, 
                                  canvas_->setFlexGrow(1),
                              })
                             ->setDirection(FlexDirection::Row)

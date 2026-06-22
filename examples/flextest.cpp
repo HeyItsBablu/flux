@@ -11,7 +11,10 @@ public:
                             ->setBackgroundColor(Color::fromRGB(50, 50, 150))
                             ->setPadding(12)
                             ->setWidth(420)
-                            ->setHeight(100),
+                            ->setHeight(100)
+                            ->setAlignItems(AlignItems::Center)
+                            ->setJustifyContent(JustifyContent::Center)
+                            ->setAlignContent(AlignContent::Center),
 
                         Flex({Text("Nav")})
                             ->setBackgroundColor(Color::fromRGB(50, 50, 150))
