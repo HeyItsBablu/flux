@@ -416,6 +416,12 @@ public:
         containerMainSize_ = isRowAxis_ ? contentMaxW : contentMaxH;
         containerCrossSize_ = isRowAxis_ ? contentMaxH : contentMaxW;
 
+        // ── Is THIS Flex's own cross axis being Fit-sized? If so, we must not
+        //    force-stretch children to containerCrossSize_, since that size is
+        //    just "whatever space was offered", not our actual target size. ────
+        SizeMode crossAxisMode = isRowAxis_ ? heightMode : widthMode;
+        bool crossIsFit = (crossAxisMode == SizeMode::Fit);
+
         // ---- STEP 0: order children ----
         std::vector<Widget *> ordered;
         for (auto &c : children)
@@ -584,14 +590,6 @@ public:
                     break;
             }
 
-            if (lines_.size() == 1)
-            {
-                LineMetric &only = lines_.front();
-                only.crossSize = scrollableCross
-                                     ? std::max(containerCrossSize_, only.crossSize)
-                                     : containerCrossSize_;
-            }
-
             // ---- first pass: layout each child loosely on cross axis ----
             int lineCrossMax = 0;
             for (auto *c : line.items)
@@ -617,8 +615,8 @@ public:
                 lineCrossMax = std::max(lineCrossMax, crossSize(c, isRowAxis_));
             }
 
-            // ---- second pass: stretch items to full container cross size ----
-            int stretchCross = (P.alignItems == AlignItems::Stretch)
+            // ---- second pass: stretch items, UNLESS our own cross axis is Fit ----
+            int stretchCross = (P.alignItems == AlignItems::Stretch && !crossIsFit)
                                    ? containerCrossSize_
                                    : lineCrossMax;
 
@@ -629,7 +627,7 @@ public:
                     continue;
 
                 bool wantsStretch = (crossMode == SizeMode::Full) ||
-                                    (P.alignItems == AlignItems::Stretch);
+                                    (P.alignItems == AlignItems::Stretch && !crossIsFit);
                 if (!wantsStretch)
                     continue;
 
@@ -653,9 +651,12 @@ public:
                     usedMainFinal += P.gap;
             }
             line.usedMain = usedMainFinal;
-            line.crossSize = (lines_.size() == 1)
-                                 ? (scrollableCross ? std::max(containerCrossSize_, lineCrossMax) : containerCrossSize_)
+
+            // Content-based cross size — NOT forced to containerCrossSize_ ----
+            line.crossSize = scrollableCross
+                                 ? std::max(containerCrossSize_, lineCrossMax)
                                  : lineCrossMax;
+
             line.resolvedMain.clear();
             for (auto *c : line.items)
                 line.resolvedMain.push_back(resolvedMain[c]);
