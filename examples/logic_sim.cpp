@@ -6146,14 +6146,14 @@ public:
         {"7SEG", CircuitNodeType::SevenSegment},
     };
 
-    auto sideCol = Column({});
-    sideCol->setSpacing(3)->setPadding(6);
+    auto sideCol = Flex({})->setDirection(FlexDirection::Column);
+    sideCol->setGap(3)->setPadding(6)->setHeightMode(SizeMode::Fit);
 
     for (auto &gd : gateDefs)
     {
       if (gd.divider)
       {
-        sideCol->addChild(Container()->setWidth(86)->setHeight(1)->setBackgroundColor(Color::fromRGBA(60, 60, 75, 255)));
+        sideCol->addChild(Flex({})->setWidth(86)->setHeight(1)->setBackgroundColor(Color::fromRGBA(60, 60, 75, 255)));
         sideCol->addChild(SizedBox(0, 3));
         continue;
       }
@@ -6180,7 +6180,10 @@ public:
       sideCol->addChild(btn);
     }
 
-    auto sidebar = Container(Column({Container(sideCol)->setHeight(420)}))->setWidth(86)->setBackgroundColor(kSidebarBg);
+    auto sidebar = Flex({sideCol})
+                       ->setDirection(FlexDirection::Column)
+                       ->setWidth(86)
+                       ->setBackgroundColor(kSidebarBg);
 
     auto dupBtn = Button("Duplicate")
                       ->setHeight(26)
@@ -6321,37 +6324,36 @@ public:
                            })
                        ->setBtnTextColor(Color::fromRGB(255, 255, 255));
 
-    auto toolbar = Container(
-                       Row({
+    auto toolbar =
+        Flex({
 
-                               menuBar,
-                               SizedBox(200, 0),
-                               undoBtn,
-                               SizedBox(2, 0),
-                               redoBtn,
-                               SizedBox(2, 0),
-                               copyBtn,
-                               SizedBox(2, 0),
-                               pasteBtn,
-                               SizedBox(2, 0),
-                               dupBtn,
-                               SizedBox(2, 0),
-                               delBtn,
-                               SizedBox(2, 0),
-                               clrBtn,
-                               //  SizedBox(2, 0),
-                               //  fitBtn,
-                               //  SizedBox(2, 0),
-                               //  rstBtn,
-                               SizedBox(2, 0),
-                               ttBtn,
+                 menuBar,
+                 SizedBox(200, 0),
+                 undoBtn,
+                 SizedBox(2, 0),
+                 redoBtn,
+                 SizedBox(2, 0),
+                 copyBtn,
+                 SizedBox(2, 0),
+                 pasteBtn,
+                 SizedBox(2, 0),
+                 dupBtn,
+                 SizedBox(2, 0),
+                 delBtn,
+                 SizedBox(2, 0),
+                 clrBtn,
+                 //  SizedBox(2, 0),
+                 //  fitBtn,
+                 //  SizedBox(2, 0),
+                 //  rstBtn,
+                 SizedBox(2, 0),
+                 ttBtn,
 
-                           })
-                           ->setPadding(1)
-                           ->setSpacing(1)
-                           ->setCrossAxisAlignment(CrossAxisAlignment::Center))
-                       ->setHeight(40)
-                       ->setBackgroundColor(kToolbarBg);
+             })
+            ->setPadding(1)
+            ->setGap(1)
+            ->setHeight(40)
+            ->setBackgroundColor(kToolbarBg);
 
     // ── Truth table panel (shown/hidden with Conditional) ─────────────────
     auto ttRefreshBtn = Button("Refresh")
@@ -6360,37 +6362,40 @@ public:
                                          { rebuildTruthTable(); });
 
     auto ttPanel =
-        Container(
-            Column({
-                // Header bar
-                Container(
-                    Row({
-                            Text("Truth Table")
-                                ->setFontSize(11)
-                                ->setTextColor(Color::fromRGB(160, 160, 180)),
-                            SizedBox(6, 0),
-                            ttRefreshBtn,
-                        })
-                        ->setPadding(6)
-                        ->setSpacing(2)
-                        ->setCrossAxisAlignment(CrossAxisAlignment::Center))
-                    ->setHeight(32)
-                    ->setBackgroundColor(Color::fromRGB(14, 14, 20)),
 
-                // Divider
-                Container()
-                    ->setHeight(1)
-                    ->setBackgroundColor(Color::fromRGBA(60, 60, 75, 255)),
+        Flex({
+                 // Header bar
 
-                // Content — monospaced text, scrollable
-                Expanded(
-                    ScrollView({Text(ttContent_, [](const std::string &s)
-                                   { return s; })
-                                  ->setFontSize(11)
-                                  ->setFontFamily("Consolas")
-                                  ->setTextColor(Color::fromRGB(160, 210, 160))
-                                  ->setPadding(8)})),
-            }))
+                 Flex({
+                          Text("Truth Table")
+                              ->setFontSize(11)
+                              ->setTextColor(Color::fromRGB(160, 160, 180)),
+                          SizedBox(6, 0),
+                          ttRefreshBtn,
+                      })
+                     ->setPadding(6)
+                     ->setGap(2)
+                     ->setHeight(32)
+                     ->setBackgroundColor(Color::fromRGB(14, 14, 20)),
+
+                 // Divider
+                 Flex({})
+                     ->setHeight(1)
+                     ->setWidthMode(SizeMode::Full)
+                     ->setBackgroundColor(Color::fromRGBA(60, 60, 75, 255)),
+
+                 // Content — monospaced text, scrollable
+
+                 Flex({Text(ttContent_, [](const std::string &s)
+                            { return s; })
+                           ->setFontSize(11)
+                           ->setFontFamily("Consolas")
+                           ->setTextColor(Color::fromRGB(160, 210, 160))
+                           ->setPadding(8)})
+                     ->setDirection(FlexDirection::Column)
+                     ->setScrollable(true),
+             })
+            ->setDirection(FlexDirection::Column)
             ->setWidth(210)
             ->setBackgroundColor(Color::fromRGB(13, 13, 18))
             ->setBorderColor(Color::fromRGBA(60, 60, 75, 255))
@@ -6401,45 +6406,50 @@ public:
                              ->Then([ttPanel]()
                                     { return ttPanel; })
                              ->Else([]()
-                                    { return Container()->setHeight(0)->setWidth(0); });
+                                    { return Flex({})->setHeight(0)->setWidth(0); });
 
     // ── Status bar ────────────────────────────────────────────────────
-    auto statusBar = Container(
-                         Row({
+    auto statusBar =
+        Flex({
 
-                                 Text(selLabel_, [](const std::string &s)
-                                      { return s; })
-                                     ->setFontSize(11)
-                                     ->setTextColor(Color::fromRGB(80, 160, 255))
-                                     ->setMinWidth(80),
-                                 SizedBox(14, 0),
-                                 Text(cursorLabel_, [](const std::string &s)
-                                      { return "XY " + s; })
-                                     ->setFontSize(11)
-                                     ->setTextColor(Color::fromRGB(70, 190, 110)),
-                                 SizedBox(14, 0),
-                                 Text(zoomLabel_, [](const std::string &s)
-                                      { return "Zoom " + s; })
-                                     ->setFontSize(11)
-                                     ->setTextColor(Color::fromRGB(120, 120, 140)),
-                                 SizedBox(14, 0),
-                                 Text("Mid/Space: pan · Ctrl+scroll: zoom · Click IN: toggle · Select+Delete: remove wire")
-                                     ->setFontSize(10)
-                                     ->setTextColor(Color::fromRGB(60, 60, 75)),
-                             })
-                             ->setPadding(5)
-                             ->setSpacing(0)
-                             ->setCrossAxisAlignment(CrossAxisAlignment::Center))
-                         ->setHeight(24)
-                         ->setBackgroundColor(Color::fromRGB(10, 10, 14));
+                 Text(selLabel_, [](const std::string &s)
+                      { return s; })
+                     ->setFontSize(11)
+                     ->setTextColor(Color::fromRGB(80, 160, 255))
+                     ->setMinWidth(80),
+                 SizedBox(14, 0),
+                 Text(cursorLabel_, [](const std::string &s)
+                      { return "XY " + s; })
+                     ->setFontSize(11)
+                     ->setTextColor(Color::fromRGB(70, 190, 110)),
+                 SizedBox(14, 0),
+                 Text(zoomLabel_, [](const std::string &s)
+                      { return "Zoom " + s; })
+                     ->setFontSize(11)
+                     ->setTextColor(Color::fromRGB(120, 120, 140)),
+                 SizedBox(14, 0),
+                 Text("Mid/Space: pan · Ctrl+scroll: zoom · Click IN: toggle · Select+Delete: remove wire")
+                     ->setFontSize(10)
+                     ->setTextColor(Color::fromRGB(60, 60, 75)),
+             })
+            ->setPadding(5)
+            ->setHeight(24)
+            ->setBackgroundColor(Color::fromRGB(10, 10, 14));
 
-    return Scaffold(nullptr,
-                    Expanded(Column({
-                        toolbar,
-                        Expanded(Row({sidebar, Expanded(canvas_), ttConditional})),
-                        statusBar,
-                    })),
-                    nullptr, nullptr);
+    return Flex({
+                    toolbar,
+                    Flex({
+                      sidebar, 
+                      canvas_->setFlexGrow(1),
+                      ttConditional
+                    })
+                    ->setWidthMode(SizeMode::Full)
+                    ->setHeightMode(SizeMode::Full),
+                    statusBar,
+                })
+        ->setWidthMode(SizeMode::Full)
+        ->setHeightMode(SizeMode::Full)
+        ->setDirection(FlexDirection::Column);
   }
 };
 
