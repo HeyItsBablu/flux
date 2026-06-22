@@ -9,13 +9,14 @@ public:
 
   WidgetPtr build() override
   {
-    return Container(Column({Text("Current count:"), Text(counter),
-                             Text(counter,
-                                  [](int v)
-                                  {
-                                    return v % 2 == 0 ? "Even" : "Odd";
-                                  })}))
-        ->setHeight(400);
+    return Flex({Text("Current count:"), Text(counter),
+                 Text(counter,
+                      [](int v)
+                      {
+                        return v % 2 == 0 ? "Even" : "Odd";
+                      })})
+        ->setHeightMode(SizeMode::Fit);
+        //doesn't shows with setHeight but shows with mode
   }
 };
 
@@ -28,12 +29,12 @@ public:
 
   WidgetPtr build() override
   {
-    return Row({Button("Increment", [this]()
-                       { counter++; }),
-                Button("Decrement", [this]()
-                       { counter--; }),
-                Button("Reset", [this]()
-                       { counter.set(0); })});
+    return Flex({Button("Increment", [this]()
+                        { counter++; }),
+                 Button("Decrement", [this]()
+                        { counter--; }),
+                 Button("Reset", [this]()
+                        { counter.set(0); })});
   }
 };
 
@@ -44,11 +45,27 @@ class MyApp : public Widget
 public:
   WidgetPtr build() override
   {
-    return Scaffold(
-        AppBar("Flux App"),
-        Expanded(Center(Column({std::make_shared<CounterDisplay>(counter),
-                                std::make_shared<CounterControls>(counter)}))),
-        nullptr, nullptr);
+
+    return Flex({Flex({Text("Nav")})
+                     ->setBackgroundColor(Color::fromRGB(50, 50, 150))
+                     ->setPadding(12)
+                     ->setWidthMode(SizeMode::Full)
+                     ->setHeight(50)
+                     ->setAlignItems(AlignItems::Center)
+                     ->setJustifyContent(JustifyContent::Center)
+                     ->setAlignContent(AlignContent::Center),
+
+                 Flex({std::make_shared<CounterDisplay>(counter),
+                       std::make_shared<CounterControls>(counter)})
+                     ->setDirection(FlexDirection::Column)})
+
+        ->setScrollable(false)
+        ->setDirection(FlexDirection::Column) // base (mobile): stacked
+        ->setGap(8)
+        ->setPadding(16)
+        ->setAlignItems(AlignItems::Stretch)
+        ->setWidthMode(SizeMode::Full)
+        ->setHeightMode(SizeMode::Full);
   }
 };
 

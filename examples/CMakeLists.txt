@@ -94,4 +94,4 @@ function(add_flux_example NAME)
 
 endfunction()
 
-add_flux_example(overlaytest)
+add_flux_example(logic_sim)

@@ -20,7 +20,7 @@ public:
                             ->setBackgroundColor(Color::fromRGB(50, 50, 150))
                             ->setPadding(12)
                             ->setWidthMode(SizeMode::Full)
-                            ->setHeightMode(SizeMode::Fit),
+                            ->setHeightMode(SizeMode::Full),
 
                         Flex({Text("Nav")})
                             ->setBackgroundColor(Color::fromRGB(50, 50, 150))

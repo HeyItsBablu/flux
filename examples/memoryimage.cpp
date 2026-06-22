@@ -2,22 +2,22 @@
 #include <fstream>
 #include <vector>
 
-class MyApp : public Widget {
+class MyApp : public Widget
+{
   State<std::vector<uint8_t>> imageBytes{{}};
   State<std::string> pickedName{""};
 
 public:
-  WidgetPtr build() override {
+  WidgetPtr build() override
+  {
 
-    return Scaffold(
-        AppBar("MemoryImage Demo"),
-        Column({// ── Pick button ───────────────────────────────────────
-                FilePicker()
-                    ->setMode(FilePickerMode::Open)
-                    ->addFilter("Images", {"*.png", "*.jpg", "*.jpeg", "*.bmp"})
-                    ->addFilter("All Files", {"*.*"})
-                    ->setShowPath(false)
-                    ->setOnChanged([this](const std::string &path) {
+    return Flex({// ── Pick button ───────────────────────────────────────
+                 FilePicker()
+                     ->setMode(FilePickerMode::Open)
+                     ->addFilter("Images", {"*.png", "*.jpg", "*.jpeg", "*.bmp"})
+                     ->addFilter("All Files", {"*.*"})
+                     ->setOnChanged([this](const std::string &path)
+                                    {
                       if (path.empty())
                         return;
 
@@ -37,46 +37,50 @@ public:
                                          : path);
 
                       // Push bytes into state → triggers rebuild
-                      imageBytes.set(std::move(bytes));
-                    }),
+                      imageBytes.set(std::move(bytes)); }),
 
-                // ── Filename label ────────────────────────────────────
-                Text(pickedName,
-                     [](const std::string &n) -> std::string {
-                       return n.empty() ? "No file selected" : n;
-                     })
-                    ->setTextColor(Color::fromRGB(80, 80, 90))
-                    ->setFontSize(13),
+                 // ── Filename label ────────────────────────────────────
+                 Text(pickedName,
+                      [](const std::string &n) -> std::string
+                      {
+                        return n.empty() ? "No file selected" : n;
+                      })
+                     ->setTextColor(Color::fromRGB(80, 80, 90))
+                     ->setFontSize(13),
 
-                Conditional(imageBytes,
-                            [](std::vector<uint8_t> v) { return v.empty(); })
-                    ->Then([]() {
-                      return Container(Text("Select Image")
-                                           ->setTextAlign(TextAlign::Center)
-                                           ->setTextAlignVertical(
-                                               TextAlignVertical::Center))
-                          ->setWidth(400)
-                          ->setHeight(300)
-                          ->setBackgroundColor(Color::fromRGB(200, 200, 200))
-                          ->setBorderRadius(8);
-                    })
-                    ->Else([this]() {
-                      return MemoryImage(imageBytes.get())
-                          ->setFit(ImageFit::Cover)
-                          ->setWidth(400)
-                          ->setHeight(300)
-                          ->setBorderRadius(8);
-                    })
+                 Conditional(imageBytes,
+                             [](std::vector<uint8_t> v)
+                             { return v.empty(); })
+                     ->Then([]()
+                            { return Container(Text("Select Image")
+                                                   ->setTextAlign(TextAlign::Center)
+                                                   ->setTextAlignVertical(
+                                                       TextAlignVertical::Center))
+                                  ->setWidth(400)
+                                  ->setHeight(300)
+                                  ->setBackgroundColor(Color::fromRGB(200, 200, 200))
+                                  ->setBorderRadius(8); })
+                     ->Else([this]()
+                            { return MemoryImage(imageBytes.get())
+                                  ->setFit(ImageFit::Cover)
+                                  ->setWidth(400)
+                                  ->setHeight(300)
+                                  ->setBorderRadius(8); })
 
-               })
-            ->setSpacing(16)
-            ->setPadding(24)
-            ->setCrossAxisAlignment(CrossAxisAlignment::Center),
-        nullptr, nullptr);
+                })
+        ->setBackgroundColor(Color::fromRGB(280, 180, 180))
+        ->setScrollable(false)
+        ->setDirection(FlexDirection::Column) // base (mobile): stacked
+        ->setGap(8)
+        ->setPadding(16)
+        ->setAlignItems(AlignItems::Stretch)
+        ->setWidthMode(SizeMode::Full)
+        ->setHeightMode(SizeMode::Full);
   }
 };
 
-WidgetPtr createApp(FluxUI *app) {
+WidgetPtr createApp(FluxUI *app)
+{
   return FluxApp("FluxUI - MemoryImage", std::make_shared<MyApp>(),
                  AppTheme::light(), false, 600, 500, false, false);
 }
