@@ -439,6 +439,8 @@ public:
         {
             Widget *c = ordered[i];
             SizeMode mainMode = isRowAxis_ ? c->widthMode : c->heightMode;
+            SizeMode crossMode = isRowAxis_ ? c->heightMode : c->widthMode;
+            int fixedCross = isRowAxis_ ? c->height : c->width;
 
             if (c->flexBasis >= 0)
             {
@@ -450,9 +452,12 @@ public:
             }
             else
             {
+                int crossForMeasure = (crossMode == SizeMode::Fixed)
+                                          ? fixedCross
+                                          : containerCrossSize_;
                 BoxConstraints measureC = isRowAxis_
-                                              ? BoxConstraints::loose(kUnbounded, containerCrossSize_)
-                                              : BoxConstraints::loose(containerCrossSize_, kUnbounded);
+                                              ? BoxConstraints::loose(kUnbounded, crossForMeasure)
+                                              : BoxConstraints::loose(crossForMeasure, kUnbounded);
                 c->computeLayout(ctx, measureC, fontCache);
                 hypoMain[i] = mainSize(c, isRowAxis_);
             }
@@ -627,7 +632,7 @@ public:
                     continue;
 
                 bool wantsStretch = (crossMode == SizeMode::Full) ||
-                                    (P.alignItems == AlignItems::Stretch && !crossIsFit);
+                                    (P.alignItems == AlignItems::Stretch && !crossIsFit && crossMode != SizeMode::Fit);
                 if (!wantsStretch)
                     continue;
 
@@ -674,13 +679,13 @@ public:
         int finalW, finalH;
         if (isRowAxis_)
         {
-            finalW = (widthMode == SizeMode::Fit) ? std::min(outerMaxW, basisSumOfAllLines(lines_, P.gap)) : outerMaxW;
+            finalW = (widthMode == SizeMode::Fit) ? std::min(outerMaxW, basisSumOfAllLines(lines_, P.gap) + padH) : outerMaxW;
             finalH = (heightMode == SizeMode::Fit) ? (totalCross_ + padV) : outerMaxH;
             finalW = std::max(finalW, padH);
         }
         else
         {
-            finalH = (heightMode == SizeMode::Fit) ? std::min(outerMaxH, basisSumOfAllLines(lines_, P.gap)) : outerMaxH;
+            finalH = (heightMode == SizeMode::Fit) ? std::min(outerMaxH, basisSumOfAllLines(lines_, P.gap) + padV) : outerMaxH;
             finalW = (widthMode == SizeMode::Fit) ? (totalCross_ + padH) : outerMaxW;
             finalH = std::max(finalH, padV);
         }
