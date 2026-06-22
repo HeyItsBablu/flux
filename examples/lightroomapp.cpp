@@ -187,8 +187,10 @@ void main(){
 
 // ── Shader linker
 // ─────────────────────────────────────────────────────────────
-static GLuint linkProgram() {
-  auto compile = [](GLenum type, const char *src) -> GLuint {
+static GLuint linkProgram()
+{
+  auto compile = [](GLenum type, const char *src) -> GLuint
+  {
     GLuint s = glCreateShader(type);
     glShaderSource(s, 1, &src, nullptr);
     glCompileShader(s);
@@ -205,13 +207,16 @@ static GLuint linkProgram() {
   return p;
 }
 
-static void u1f(GLuint prog, const char *name, float v) {
+static void u1f(GLuint prog, const char *name, float v)
+{
   glUniform1f(glGetUniformLocation(prog, name), v);
 }
-static void u2f(GLuint prog, const char *name, float x, float y) {
+static void u2f(GLuint prog, const char *name, float x, float y)
+{
   glUniform2f(glGetUniformLocation(prog, name), x, y);
 }
-static void u1i(GLuint prog, const char *name, int v) {
+static void u1i(GLuint prog, const char *name, int v)
+{
   glUniform1i(glGetUniformLocation(prog, name), v);
 }
 
@@ -219,7 +224,8 @@ static void u1i(GLuint prog, const char *name, int v) {
 //  ImageSurface
 // ─────────────────────────────────────────────────────────────────────────────
 
-class ImageSurface : public RenderSurface {
+class ImageSurface : public RenderSurface
+{
 public:
   // ── Callbacks ─────────────────────────────────────────────────────────────
   std::function<void(bool, const std::string &)> onExportDone;
@@ -229,7 +235,8 @@ public:
 
   // ── Called from UI thread ─────────────────────────────────────────────────
 
-  void requestLoad(const std::string &path) {
+  void requestLoad(const std::string &path)
+  {
     {
       std::lock_guard<std::mutex> lk(mx_);
       pending_ = path;
@@ -237,7 +244,8 @@ public:
     pendingLoad_.store(true);
   }
 
-  void requestExport(const std::string &path) {
+  void requestExport(const std::string &path)
+  {
     {
       std::lock_guard<std::mutex> lk(exportMx_);
       exportPath_ = path;
@@ -248,17 +256,20 @@ public:
   // Basic adjustment setters
   void setExposure(float v) { exposure_.store(v, std::memory_order_relaxed); }
   void setContrast(float v) { contrast_.store(v, std::memory_order_relaxed); }
-  void setHighlights(float v) {
+  void setHighlights(float v)
+  {
     highlights_.store(v, std::memory_order_relaxed);
   }
   void setShadows(float v) { shadows_.store(v, std::memory_order_relaxed); }
   void setWhites(float v) { whites_.store(v, std::memory_order_relaxed); }
   void setBlacks(float v) { blacks_.store(v, std::memory_order_relaxed); }
-  void setSaturation(float v) {
+  void setSaturation(float v)
+  {
     saturation_.store(v, std::memory_order_relaxed);
   }
   void setVibrance(float v) { vibrance_.store(v, std::memory_order_relaxed); }
-  void setTemperature(float v) {
+  void setTemperature(float v)
+  {
     temperature_.store(v, std::memory_order_relaxed);
   }
   void setTint(float v) { tint_.store(v, std::memory_order_relaxed); }
@@ -269,7 +280,8 @@ public:
   void uploadCurveLUTs(const std::array<uint8_t, 256> &lutRGB,
                        const std::array<uint8_t, 256> &lutR,
                        const std::array<uint8_t, 256> &lutG,
-                       const std::array<uint8_t, 256> &lutB) {
+                       const std::array<uint8_t, 256> &lutB)
+  {
     std::array<uint8_t, 256 * 4> packed{};
     std::copy(lutRGB.begin(), lutRGB.end(), packed.begin() + 0 * 256);
     std::copy(lutR.begin(), lutR.end(), packed.begin() + 1 * 256);
@@ -287,7 +299,8 @@ public:
 
   void uploadHSLLUTs(const std::array<uint8_t, 360> &hue,
                      const std::array<uint8_t, 360> &sat,
-                     const std::array<uint8_t, 360> &lum) {
+                     const std::array<uint8_t, 360> &lum)
+  {
     {
       std::lock_guard<std::mutex> lk(hslMx_);
       pendingHSLHue_ = hue;
@@ -303,7 +316,8 @@ public:
   }
 
   // ── Histogram readback ────────────────────────────────────────────────────
-  void requestHistogramReadback(std::function<void(HistogramData)> cb) {
+  void requestHistogramReadback(std::function<void(HistogramData)> cb)
+  {
     std::lock_guard<std::mutex> lk(histCbMx_);
     histCallback_ = std::move(cb);
     histReadbackRequested_.store(true, std::memory_order_relaxed);
@@ -311,7 +325,8 @@ public:
 
   bool needsContinuousRedraw() const override { return false; }
 
-  void initialize(int w, int h) override {
+  void initialize(int w, int h) override
+  {
     viewW_ = w;
     viewH_ = h;
     buildShaderAndQuad();
@@ -319,30 +334,35 @@ public:
     buildHSLLUTTextures();
   }
 
-  void resize(int w, int h) override {
+  void resize(int w, int h) override
+  {
     viewW_ = w;
     viewH_ = h;
   }
 
   void update(double) override {}
 
-  void render(Canvas2D &ctx) override {
+  void render(Canvas2D &ctx) override
+  {
     ctx_ = &ctx;
 
     // ── Load pending image ──────────────────────────────────────────────
-    if (pendingLoad_.load()) {
+    if (pendingLoad_.load())
+    {
       pendingLoad_.store(false);
       std::string path;
       {
         std::lock_guard<std::mutex> lk(mx_);
         path = pending_;
       }
-      if (img_) {
+      if (img_)
+      {
         ctx_->freeImage(img_);
         img_ = nullptr;
       }
       img_ = ctx_->loadImage(path);
-      if (img_) {
+      if (img_)
+      {
         imgW_ = img_->width;
         imgH_ = img_->height;
         rebuildExportFBO(imgW_, imgH_);
@@ -360,7 +380,8 @@ public:
     // ── Upload pending curve LUT ────────────────────────────────────────
     {
       std::lock_guard<std::mutex> lk(curveMx_);
-      if (curveLUTDirty_ && curveTex_) {
+      if (curveLUTDirty_ && curveTex_)
+      {
         glBindTexture(GL_TEXTURE_2D, curveTex_);
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 256, 4, GL_RED,
                         GL_UNSIGNED_BYTE, pendingCurveLUT_.data());
@@ -372,18 +393,22 @@ public:
     // ── Upload pending HSL LUTs ─────────────────────────────────────────
     {
       std::lock_guard<std::mutex> lk(hslMx_);
-      if (hslLUTDirty_) {
-        if (hslHueTex_) {
+      if (hslLUTDirty_)
+      {
+        if (hslHueTex_)
+        {
           glBindTexture(GL_TEXTURE_2D, hslHueTex_);
           glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 360, 1, GL_RED,
                           GL_UNSIGNED_BYTE, pendingHSLHue_.data());
         }
-        if (hslSatTex_) {
+        if (hslSatTex_)
+        {
           glBindTexture(GL_TEXTURE_2D, hslSatTex_);
           glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 360, 1, GL_RED,
                           GL_UNSIGNED_BYTE, pendingHSLSat_.data());
         }
-        if (hslLumTex_) {
+        if (hslLumTex_)
+        {
           glBindTexture(GL_TEXTURE_2D, hslLumTex_);
           glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 360, 1, GL_RED,
                           GL_UNSIGNED_BYTE, pendingHSLLum_.data());
@@ -394,7 +419,8 @@ public:
     }
 
     // ── Export ──────────────────────────────────────────────────────────
-    if (pendingExport_.load()) {
+    if (pendingExport_.load())
+    {
       pendingExport_.store(false);
       std::string path;
       {
@@ -435,8 +461,30 @@ public:
     }
 
     float verts[] = {
-        0.f, 0.f, 0.f, 0.f, iw,  0.f, 1.f, 0.f, iw,  ih,  1.f, 1.f,
-        iw,  ih,  1.f, 1.f, 0.f, ih,  0.f, 1.f, 0.f, 0.f, 0.f, 0.f,
+        0.f,
+        0.f,
+        0.f,
+        0.f,
+        iw,
+        0.f,
+        1.f,
+        0.f,
+        iw,
+        ih,
+        1.f,
+        1.f,
+        iw,
+        ih,
+        1.f,
+        1.f,
+        0.f,
+        ih,
+        0.f,
+        1.f,
+        0.f,
+        0.f,
+        0.f,
+        0.f,
     };
     glBindVertexArray(vao_);
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
@@ -445,7 +493,8 @@ public:
     bindAndDraw(prog_, mvp, img_->texId, iw, ih);
 
     // Restore texture / VAO state
-    for (int unit = 4; unit >= 0; --unit) {
+    for (int unit = 4; unit >= 0; --unit)
+    {
       glActiveTexture(GL_TEXTURE0 + unit);
       glBindTexture(GL_TEXTURE_2D, 0);
     }
@@ -453,43 +502,53 @@ public:
     glUseProgram(0);
 
     // ── Histogram readback ──────────────────────────────────────────────
-    if (histReadbackRequested_.load(std::memory_order_relaxed)) {
+    if (histReadbackRequested_.load(std::memory_order_relaxed))
+    {
       histReadbackRequested_.store(false, std::memory_order_relaxed);
       doHistogramReadback();
     }
   }
 
-  void destroy() override {
-    if (img_ && ctx_) {
+  void destroy() override
+  {
+    if (img_ && ctx_)
+    {
       ctx_->freeImage(img_);
       img_ = nullptr;
     }
     ctx_ = nullptr;
-    if (prog_) {
+    if (prog_)
+    {
       glDeleteProgram(prog_);
       prog_ = 0;
     }
-    if (vao_) {
+    if (vao_)
+    {
       glDeleteVertexArrays(1, &vao_);
       vao_ = 0;
     }
-    if (vbo_) {
+    if (vbo_)
+    {
       glDeleteBuffers(1, &vbo_);
       vbo_ = 0;
     }
-    if (curveTex_) {
+    if (curveTex_)
+    {
       glDeleteTextures(1, &curveTex_);
       curveTex_ = 0;
     }
-    if (hslHueTex_) {
+    if (hslHueTex_)
+    {
       glDeleteTextures(1, &hslHueTex_);
       hslHueTex_ = 0;
     }
-    if (hslSatTex_) {
+    if (hslSatTex_)
+    {
       glDeleteTextures(1, &hslSatTex_);
       hslSatTex_ = 0;
     }
-    if (hslLumTex_) {
+    if (hslLumTex_)
+    {
       glDeleteTextures(1, &hslLumTex_);
       hslLumTex_ = 0;
     }
@@ -556,7 +615,8 @@ private:
   static const std::array<uint8_t, 256> kIdentityLUT;
 
   // ── GL setup ──────────────────────────────────────────────────────────────
-  void buildShaderAndQuad() {
+  void buildShaderAndQuad()
+  {
     prog_ = linkProgram();
     glGenVertexArrays(1, &vao_);
     glGenBuffers(1, &vbo_);
@@ -573,7 +633,8 @@ private:
     glBindVertexArray(0);
   }
 
-  void buildCurveLUTTexture() {
+  void buildCurveLUTTexture()
+  {
     glGenTextures(1, &curveTex_);
     glBindTexture(GL_TEXTURE_2D, curveTex_);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -589,8 +650,10 @@ private:
     glBindTexture(GL_TEXTURE_2D, 0);
   }
 
-  void buildHSLLUTTextures() {
-    auto make360 = [](GLuint &tex, uint8_t fill) {
+  void buildHSLLUTTextures()
+  {
+    auto make360 = [](GLuint &tex, uint8_t fill)
+    {
       glGenTextures(1, &tex);
       glBindTexture(GL_TEXTURE_2D, tex);
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -608,7 +671,8 @@ private:
     make360(hslLumTex_, 128);
   }
 
-  void rebuildExportFBO(int w, int h) {
+  void rebuildExportFBO(int w, int h)
+  {
     destroyExportFBO();
 
     glGenTextures(1, &exportTex_);
@@ -631,12 +695,15 @@ private:
     exportFBOH_ = h;
   }
 
-  void destroyExportFBO() {
-    if (exportFBO_) {
+  void destroyExportFBO()
+  {
+    if (exportFBO_)
+    {
       glDeleteFramebuffers(1, &exportFBO_);
       exportFBO_ = 0;
     }
-    if (exportTex_) {
+    if (exportTex_)
+    {
       glDeleteTextures(1, &exportTex_);
       exportTex_ = 0;
     }
@@ -644,7 +711,8 @@ private:
   }
 
   void bindAndDraw(GLuint prog, const float mvp[16], GLuint imgTex, float iw,
-                   float ih) {
+                   float ih)
+  {
     glUseProgram(prog);
     glUniformMatrix4fv(glGetUniformLocation(prog, "uMVP"), 1, GL_FALSE, mvp);
 
@@ -693,8 +761,10 @@ private:
   }
 
   // ── Export: render at full image resolution → readback → write file ───────
-  void doExport(const std::string &path) {
-    if (!img_ || !img_->texId || !exportFBO_ || imgW_ <= 0 || imgH_ <= 0) {
+  void doExport(const std::string &path)
+  {
+    if (!img_ || !img_->texId || !exportFBO_ || imgW_ <= 0 || imgH_ <= 0)
+    {
       if (onExportDone)
         onExportDone(false, "No image loaded.");
       return;
@@ -714,8 +784,30 @@ private:
     // Normal UVs — no flip needed because MVP and glReadPixels
     // both agree on the same Y convention now.
     float verts[] = {
-        0.f, 0.f, 0.f, 0.f, iw,  0.f, 1.f, 0.f, iw,  ih,  1.f, 1.f,
-        iw,  ih,  1.f, 1.f, 0.f, ih,  0.f, 1.f, 0.f, 0.f, 0.f, 0.f,
+        0.f,
+        0.f,
+        0.f,
+        0.f,
+        iw,
+        0.f,
+        1.f,
+        0.f,
+        iw,
+        ih,
+        1.f,
+        1.f,
+        iw,
+        ih,
+        1.f,
+        1.f,
+        0.f,
+        ih,
+        0.f,
+        1.f,
+        0.f,
+        0.f,
+        0.f,
+        0.f,
     };
     glBindVertexArray(vao_);
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
@@ -735,7 +827,8 @@ private:
 
     size_t rowBytes = size_t(imgW_) * 4;
     std::vector<uint8_t> rowTmp(rowBytes);
-    for (int top = 0, bot = imgH_ - 1; top < bot; ++top, --bot) {
+    for (int top = 0, bot = imgH_ - 1; top < bot; ++top, --bot)
+    {
       uint8_t *rowTop = raw.data() + top * rowBytes;
       uint8_t *rowBot = raw.data() + bot * rowBytes;
       std::memcpy(rowTmp.data(), rowTop, rowBytes);
@@ -747,7 +840,8 @@ private:
     glBindFramebuffer(GL_FRAMEBUFFER, prevFBO);
     glViewport(prevViewport[0], prevViewport[1], prevViewport[2],
                prevViewport[3]);
-    for (int unit = 4; unit >= 0; --unit) {
+    for (int unit = 4; unit >= 0; --unit)
+    {
       glActiveTexture(GL_TEXTURE0 + unit);
       glBindTexture(GL_TEXTURE_2D, 0);
     }
@@ -775,7 +869,8 @@ private:
       onExportDone(ok, ok ? "Export saved." : "Export failed.");
   }
 
-  void doHistogramReadback() {
+  void doHistogramReadback()
+  {
     std::function<void(HistogramData)> cb;
     {
       std::lock_guard<std::mutex> lk(histCbMx_);
@@ -798,12 +893,14 @@ private:
     std::vector<uint8_t> pixels(readW * readH * 4);
     std::vector<uint8_t> rowBuf(fbW * 4);
     int dstRow = 0;
-    for (int srcRow = 0; srcRow < fbH && dstRow < readH; srcRow += strideY) {
+    for (int srcRow = 0; srcRow < fbH && dstRow < readH; srcRow += strideY)
+    {
       int glY = fbH - srcRow - 1; // GL origin is bottom-left
       glReadPixels(0, glY, fbW, 1, GL_RGBA, GL_UNSIGNED_BYTE, rowBuf.data());
       uint8_t *dst = pixels.data() + dstRow * readW * 4;
       for (int col = 0, dstCol = 0; col < fbW && dstCol < readW;
-           col += strideX, ++dstCol) {
+           col += strideX, ++dstCol)
+      {
         dst[dstCol * 4 + 0] = rowBuf[col * 4 + 0];
         dst[dstCol * 4 + 1] = rowBuf[col * 4 + 1];
         dst[dstCol * 4 + 2] = rowBuf[col * 4 + 2];
@@ -818,7 +915,8 @@ private:
   }
 };
 
-const std::array<uint8_t, 256> ImageSurface::kIdentityLUT = []() {
+const std::array<uint8_t, 256> ImageSurface::kIdentityLUT = []()
+{
   std::array<uint8_t, 256> a{};
   for (int i = 0; i < 256; ++i)
     a[i] = (uint8_t)i;
@@ -829,7 +927,8 @@ const std::array<uint8_t, 256> ImageSurface::kIdentityLUT = []() {
 //  LightRoomApp
 // ─────────────────────────────────────────────────────────────────────────────
 
-class LightRoomApp : public Widget {
+class LightRoomApp : public Widget
+{
   State<std::string> filePath{""};
   State<std::string> statusMsg{"Open an image to begin."};
 
@@ -857,7 +956,8 @@ class LightRoomApp : public Widget {
   State<Color> statusColor{kColorOk};
 
 public:
-  WidgetPtr build() override {
+  WidgetPtr build() override
+  {
     auto canvas = std::make_shared<CanvasWidget>();
 
     // ── Enable viewport so MMB pan and scroll-zoom work natively ─────────
@@ -875,22 +975,26 @@ public:
 
     // ── Zoom label ───────────────────────────────────────────────────────
     // onViewportChanged fires every time the zoom level changes.
-    canvas->onViewportChanged = [this](float zoom) {
+    canvas->onViewportChanged = [this](float zoom)
+    {
       char buf[32];
       std::snprintf(buf, sizeof(buf), "%.0f%%", zoom * 100.f);
       zoomLabel.set(buf);
     };
 
     // ── Wire export result back to status bar ────────────────────────────
-    surface->onExportDone = [this](bool ok, const std::string &msg) {
+    surface->onExportDone = [this](bool ok, const std::string &msg)
+    {
       statusMsg.set(msg);
       statusColor.set(ok ? kColorOk : kColorErr);
     };
 
     // ── Wire image-loaded callback: resize canvas + fit to view ──────────
     // This gives the Lightroom-style "fit image to window" on open.
-    surface->onImageLoaded = [wc](int w, int h) {
-      if (auto c = wc.lock()) {
+    surface->onImageLoaded = [wc](int w, int h)
+    {
+      if (auto c = wc.lock())
+      {
         // Tell the viewport the canvas extent matches the image pixels.
         c->setCanvasSize(w, h);
         // Fit the image to the current view (zoom to fit, centered).
@@ -900,16 +1004,20 @@ public:
 
     // ── Histogram refresh ────────────────────────────────────────────────
     surface->requestHistogramReadback(
-        [this](HistogramData hd) { histState.set(std::move(hd)); });
+        [this](HistogramData hd)
+        { histState.set(std::move(hd)); });
 
-    auto refreshHistogram = [ws, this]() {
+    auto refreshHistogram = [ws, this]()
+    {
       if (auto s = ws.lock())
         s->requestHistogramReadback(
-            [this](HistogramData hd) { histState.set(std::move(hd)); });
+            [this](HistogramData hd)
+            { histState.set(std::move(hd)); });
     };
 
     // ── Curve LUTs ───────────────────────────────────────────────────────
-    auto pushCurveLUTs = [ws, this, refreshHistogram](const ToneCurveData &d) {
+    auto pushCurveLUTs = [ws, this, refreshHistogram](const ToneCurveData &d)
+    {
       curveState.set(d);
       if (auto s = ws.lock())
         s->uploadCurveLUTs(d.rgb.buildLUT(), d.r.buildLUT(), d.g.buildLUT(),
@@ -918,9 +1026,11 @@ public:
     };
 
     // ── HSL LUTs ─────────────────────────────────────────────────────────
-    auto pushHSLLUTs = [ws, this, refreshHistogram](const HSLData &d) {
+    auto pushHSLLUTs = [ws, this, refreshHistogram](const HSLData &d)
+    {
       hslState.set(d);
-      if (auto s = ws.lock()) {
+      if (auto s = ws.lock())
+      {
         auto gpu = d.buildGPULUTs();
         s->uploadHSLLUTs(gpu.hue, gpu.sat, gpu.lum);
       }
@@ -930,199 +1040,204 @@ public:
     // ── Slider builder ────────────────────────────────────────────────────
     auto sliderCol = [](const char *label, double lo, double hi, double step,
                         State<double> &st,
-                        std::function<void(double)> onChange) -> WidgetPtr {
-      return Column({
-                        Text(label)->setFontSize(11)->setTextColor(
-                            Color::fromRGB(180, 180, 200)),
-                        Slider(lo, hi, step)
-                            ->setValue(st)
-                            ->setOnValueChanged([onChange, &st](double v) {
+                        std::function<void(double)> onChange) -> WidgetPtr
+    {
+      return Flex({
+                      Text(label)->setFontSize(11)->setTextColor(
+                          Color::fromRGB(180, 180, 200)),
+                      Slider(lo, hi, step)
+                          ->setValue(st)
+                          ->setOnValueChanged([onChange, &st](double v)
+                                              {
                               st.set(v);
-                              onChange(v);
-                            }),
-                    })
-          ->setSpacing(4)
-          ->setCrossAxisAlignment(CrossAxisAlignment::Start)
-          ->setMainAxisSize(MainAxisSize::Min);
+                              onChange(v); }),
+                  })
+          ->setDirection(FlexDirection::Column)
+          ->setGap(4);
     };
 
-    auto sectionLabel = [](const char *title) -> WidgetPtr {
+    auto sectionLabel = [](const char *title) -> WidgetPtr
+    {
       return Text(title)->setFontSize(10)->setTextColor(
           Color::fromRGB(110, 110, 140));
     };
 
-#define SLIDER_CB(setter)                                                      \
+#define SLIDER_CB(setter) \
   [ws, refreshHistogram](double v) {                                           \
     if (auto s = ws.lock())                                                    \
       s->setter(float(v));                                                     \
-    refreshHistogram();                                                        \
-  }
+    refreshHistogram(); }
 
     // ── Zoom controls (fit / 1:1 / reset) ────────────────────────────────
-    auto zoomFitBtn = Button("Fit")->setOnClick([wc]() {
+    auto zoomFitBtn = Button("Fit")->setOnClick([wc]()
+                                                {
       if (auto c = wc.lock()) {
         c->viewport().fitToView();
-      }
-    });
+      } });
 
-    auto zoom1x1Btn = Button("1:1")->setOnClick([wc]() {
+    auto zoom1x1Btn = Button("1:1")->setOnClick([wc]()
+                                                {
       if (auto c = wc.lock()) {
         c->viewport().resetZoom(); // zoom = 1.0, centered
-      }
-    });
+      } });
 
-    return Scaffold(
-        nullptr,
-        Expanded(Center(
-            Container(
-                Column(
-                    {
-                        // ── File picker + zoom controls row
-                        // ───────────────────
-                        Row({
-                                // Open
-                                FilePicker()
-                                    ->setMode(FilePickerMode::Open)
-                                    ->addFilter("Images", {"*.png", "*.jpg",
-                                                           "*.jpeg", "*.bmp"})
-                                    ->addFilter("All Files", {"*.*"})
-                                    ->setShowPath(true)
-                                    ->bindPath(filePath)
-                                    ->setOnChanged(
-                                        [ws, refreshHistogram,
-                                         this](const std::string &path) {
-                                          statusMsg.set("Loading…");
-                                          statusColor.set(kColorOk);
-                                          if (auto s = ws.lock())
-                                            s->requestLoad(path);
-                                          refreshHistogram();
-                                        }),
+    return Flex(
+               {
+                   // ── File picker + zoom controls row
+                   // ───────────────────
+                   Flex({
+                            // Open
+                            FilePicker()
+                                ->setMode(FilePickerMode::Open)
+                                ->addFilter("Images", {"*.png", "*.jpg",
+                                                       "*.jpeg", "*.bmp"})
+                                ->addFilter("All Files", {"*.*"})
 
-                                // Export
-                                FilePicker("💾 Export")
-                                    ->setMode(FilePickerMode::Save)
-                                    ->setTitle("Export edited image")
-                                    ->setDefaultFilename("edited.png")
-                                    ->addFilter("PNG", {"*.png"})
-                                    ->addFilter("JPEG", {"*.jpg", "*.jpeg"})
-                                    ->addFilter("BMP", {"*.bmp"})
-                                    ->setDefaultExtension("png")
-                                    ->setShowPath(false)
-                                    ->setOnChanged(
-                                        [ws, this](const std::string &path) {
-                                          statusMsg.set("Exporting…");
-                                          statusColor.set(kColorOk);
-                                          if (auto s = ws.lock())
-                                            s->requestExport(path);
-                                        }),
+                                ->bindPath(filePath)
+                                ->setOnChanged(
+                                    [ws, refreshHistogram,
+                                     this](const std::string &path)
+                                    {
+                                      statusMsg.set("Loading…");
+                                      statusColor.set(kColorOk);
+                                      if (auto s = ws.lock())
+                                        s->requestLoad(path);
+                                      refreshHistogram();
+                                    }),
 
-                                // Fit-to-view button
-                                zoomFitBtn,
+                            // Export
+                            FilePicker("💾 Export")
+                                ->setMode(FilePickerMode::Save)
+                                ->setTitle("Export edited image")
+                                ->setDefaultFilename("edited.png")
+                                ->addFilter("PNG", {"*.png"})
+                                ->addFilter("JPEG", {"*.jpg", "*.jpeg"})
+                                ->addFilter("BMP", {"*.bmp"})
+                                ->setDefaultExtension("png")
 
-                                // 1:1 pixel button
-                                zoom1x1Btn,
+                                ->setOnChanged(
+                                    [ws, this](const std::string &path)
+                                    {
+                                      statusMsg.set("Exporting…");
+                                      statusColor.set(kColorOk);
+                                      if (auto s = ws.lock())
+                                        s->requestExport(path);
+                                    }),
 
-                                // Live zoom percentage label
-                                Text(zoomLabel,
-                                     [](const std::string &s) { return s; })
-                                    ->setFontSize(10)
-                                    ->setTextColor(
-                                        Color::fromRGB(140, 140, 160)),
+                            // Fit-to-view button
+                            zoomFitBtn,
 
-                                // Status indicator
-                                Text(statusMsg,
-                                     [](const std::string &s) { return s; })
-                                    ->setFontSize(10)
-                                    ->setTextColor(statusColor.get()),
-                            })
-                            ->setCrossAxisAlignment(CrossAxisAlignment::Center)
-                            ->setSpacing(12),
+                            // 1:1 pixel button
+                            zoom1x1Btn,
 
-                        // ── Main row: canvas + sidebar
-                        // ────────────────────────
-                        Expanded(Container(Row({
-                            Expanded(canvas),
+                            // Live zoom percentage label
+                            Text(zoomLabel,
+                                 [](const std::string &s)
+                                 { return s; })
+                                ->setFontSize(10)
+                                ->setTextColor(
+                                    Color::fromRGB(140, 140, 160)),
+
+                            // Status indicator
+                            Text(statusMsg,
+                                 [](const std::string &s)
+                                 { return s; })
+                                ->setFontSize(10)
+                                ->setTextColor(statusColor.get()),
+                        })
+                       ->setGap(12)
+                       ->setHeight(60),
+
+                   // ── Main row: canvas + sidebar
+                   // ────────────────────────
+                   Flex({
+                            canvas->setFlexGrow(1),
                             // ── Sidebar
                             // ───────────────────────────────────────
-                            Container(
-                                ScrollView({
-                                    HSLPanel(258)
-                                        ->setData(hslState)
-                                        ->setActiveTab(HSLTab::All)
-                                        ->setOnHSLChanged(pushHSLLUTs),
 
-                                    ToneCurve(258, 220)
-                                        ->setShowHistogram(true)
-                                        ->setShowRegions(true)
-                                        ->setShowGrid(true)
-                                        ->setCurveData(curveState)
-                                        ->setOnCurveChanged(pushCurveLUTs),
+                            Flex({
+                                     HSLPanel(258)
+                                         ->setData(hslState)
+                                         ->setActiveTab(HSLTab::All)
+                                         ->setOnHSLChanged(pushHSLLUTs),
 
-                                    Histogram(258, 90)
-                                        ->setData(histState)
-                                        ->setMode(HistogramMode::RGB)
-                                        ->setShowGrid(true)
-                                        ->setShowClip(true)
-                                        ->setShowChannelToggles(true)
-                                        ->setLogScale(false)
-                                        ->setBgColor(Color::fromRGB(14, 14, 22))
-                                        ->setOnZoneClicked([this](float pos) {
-                                          sExposure.set(std::max(
-                                              -5.0, std::min(5.0, (pos - 0.5) *
-                                                                      4.0)));
-                                        }),
+                                     ToneCurve(258, 220)
+                                         ->setShowHistogram(true)
+                                         ->setShowRegions(true)
+                                         ->setShowGrid(true)
+                                         ->setCurveData(curveState)
+                                         ->setOnCurveChanged(pushCurveLUTs),
 
-                                    // LIGHT
-                                    sectionLabel("LIGHT"),
-                                    sliderCol("Exposure", -3.0, 3.0, 0.1,
-                                              sExposure,
-                                              SLIDER_CB(setExposure)),
-                                    sliderCol("Contrast", -1.0, 1.0, 0.05,
-                                              sContrast,
-                                              SLIDER_CB(setContrast)),
-                                    sliderCol("Highlights", -1.0, 1.0, 0.05,
-                                              sHighlights,
-                                              SLIDER_CB(setHighlights)),
-                                    sliderCol("Shadows", -1.0, 1.0, 0.05,
-                                              sShadows, SLIDER_CB(setShadows)),
-                                    sliderCol("Whites", -1.0, 1.0, 0.05,
-                                              sWhites, SLIDER_CB(setWhites)),
-                                    sliderCol("Blacks", -1.0, 1.0, 0.05,
-                                              sBlacks, SLIDER_CB(setBlacks)),
+                                     Histogram(258, 90)
+                                         ->setData(histState)
+                                         ->setMode(HistogramMode::RGB)
+                                         ->setShowGrid(true)
+                                         ->setShowClip(true)
+                                         ->setShowChannelToggles(true)
+                                         ->setLogScale(false)
+                                         ->setBgColor(Color::fromRGB(14, 14, 22))
+                                         ->setOnZoneClicked([this](float pos)
+                                                            { sExposure.set(std::max(
+                                                                  -5.0, std::min(5.0, (pos - 0.5) *
+                                                                                          4.0))); }),
 
-                                    // COLOR
-                                    sectionLabel("COLOR"),
-                                    sliderCol("Temperature", -1.0, 1.0, 0.05,
-                                              sTemperature,
-                                              SLIDER_CB(setTemperature)),
-                                    sliderCol("Tint", -1.0, 1.0, 0.05, sTint,
-                                              SLIDER_CB(setTint)),
-                                    sliderCol("Vibrance", -1.0, 1.0, 0.05,
-                                              sVibrance,
-                                              SLIDER_CB(setVibrance)),
-                                    sliderCol("Saturation", -1.0, 1.0, 0.05,
-                                              sSaturation,
-                                              SLIDER_CB(setSaturation)),
+                                     // LIGHT
+                                     sectionLabel("LIGHT"),
+                                     sliderCol("Exposure", -3.0, 3.0, 0.1,
+                                               sExposure,
+                                               SLIDER_CB(setExposure)),
+                                     sliderCol("Contrast", -1.0, 1.0, 0.05,
+                                               sContrast,
+                                               SLIDER_CB(setContrast)),
+                                     sliderCol("Highlights", -1.0, 1.0, 0.05,
+                                               sHighlights,
+                                               SLIDER_CB(setHighlights)),
+                                     sliderCol("Shadows", -1.0, 1.0, 0.05,
+                                               sShadows, SLIDER_CB(setShadows)),
+                                     sliderCol("Whites", -1.0, 1.0, 0.05,
+                                               sWhites, SLIDER_CB(setWhites)),
+                                     sliderCol("Blacks", -1.0, 1.0, 0.05,
+                                               sBlacks, SLIDER_CB(setBlacks)),
 
-                                    // DETAIL
-                                    sectionLabel("DETAIL"),
-                                    sliderCol("Sharpness", 0.0, 1.0, 0.05,
-                                              sSharpness,
-                                              SLIDER_CB(setSharpness)),
-                                }))
+                                     // COLOR
+                                     sectionLabel("COLOR"),
+                                     sliderCol("Temperature", -1.0, 1.0, 0.05,
+                                               sTemperature,
+                                               SLIDER_CB(setTemperature)),
+                                     sliderCol("Tint", -1.0, 1.0, 0.05, sTint,
+                                               SLIDER_CB(setTint)),
+                                     sliderCol("Vibrance", -1.0, 1.0, 0.05,
+                                               sVibrance,
+                                               SLIDER_CB(setVibrance)),
+                                     sliderCol("Saturation", -1.0, 1.0, 0.05,
+                                               sSaturation,
+                                               SLIDER_CB(setSaturation)),
+
+                                     // DETAIL
+                                     sectionLabel("DETAIL"),
+                                     sliderCol("Sharpness", 0.0, 1.0, 0.05,
+                                               sSharpness,
+                                               SLIDER_CB(setSharpness)),
+                                 })
+                                ->setDirection(FlexDirection::Column)
+                                ->setScrollable(true)
                                 ->setPadding(10)
                                 ->setWidth(250),
-                        }))),
-                    })
-                    ->setCrossAxisAlignment(CrossAxisAlignment::Center))
-                ->setBorderRadius(10))),
-        nullptr, nullptr);
+                        })
+                       ->setWidthMode(SizeMode::Full)
+                       ->setHeightMode(SizeMode::Full),
+
+               })
+        ->setWidthMode(SizeMode::Full)
+        ->setHeightMode(SizeMode::Full)
+        ->setDirection(FlexDirection::Column);
 
 #undef SLIDER_CB
   }
 };
 
-WidgetPtr createApp(FluxUI *app) {
+WidgetPtr createApp(FluxUI *app)
+{
   return FluxApp("Light Room App", std::make_shared<LightRoomApp>(),
                  AppTheme::dark(), false, 1000, 700, false, true);
 }
