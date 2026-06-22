@@ -1432,7 +1432,7 @@ public:
                                  sidebar, 
                                  canvas_->setFlexGrow(1),
                              })
-                            ->setDirection(FlexDirection::Row)
+                            ->setDirection(FlexDirection::Row) 
                             ->setHeightMode(SizeMode::Full)
                             ->setWidthMode(SizeMode::Full),
 

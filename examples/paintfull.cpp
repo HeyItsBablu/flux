@@ -1615,7 +1615,7 @@ public:
         })),
         nullptr,
         nullptr);
-  }
+  } 
 };
 
 WidgetPtr createApp(FluxUI *app)

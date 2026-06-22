@@ -469,8 +469,8 @@ public:
     };
     toolBtns_.resize(tools.size());
 
-    auto toolRow = Row({});
-    toolRow->setSpacing(4);
+    auto toolRow = Flex({});
+    toolRow->setGap(4);
     for (int i = 0; i < int(tools.size()); i++)
     {
       auto &t = tools[i];
@@ -501,26 +501,26 @@ public:
     auto label = [](const char *s)
     { return Text(s)->setFontSize(9)->setTextColor(Color::fromRGB(140, 140, 160))->setPaddingLRTB(8, 8, 6, 2); };
 
-    auto sidebar = Container(ScrollView({
-                                 label("TOOL"),
-                                 toolRow,
-                                 SizedBox(0, 4),
-                                 label("RESIZE"),
-                                 Text("H")->setFontSize(9)->setTextColor(Color::fromRGB(140, 140, 160))->setPaddingLRTB(8, 8, 2, 1),
-                                 hInput,
-                                 Text("W")->setFontSize(9)->setTextColor(Color::fromRGB(140, 140, 160))->setPaddingLRTB(8, 8, 2, 1),
-                                 wInput,
-                                 SizedBox(0, 2),
-                                 applyBtn,
-                                 SizedBox(0, 8),
-                             }))
+    auto sidebar = Flex({
+                            label("TOOL"),
+                            toolRow,
+                            SizedBox(0, 4),
+                            label("RESIZE"),
+                            Text("H")->setFontSize(9)->setTextColor(Color::fromRGB(140, 140, 160))->setPaddingLRTB(8, 8, 2, 1),
+                            hInput,
+                            Text("W")->setFontSize(9)->setTextColor(Color::fromRGB(140, 140, 160))->setPaddingLRTB(8, 8, 2, 1),
+                            wInput,
+                            SizedBox(0, 2),
+                            applyBtn,
+                            SizedBox(0, 8),
+                        })
+                       ->setDirection(FlexDirection::Column)
+                       ->setScrollable(true)
+                       ->setHeightMode(SizeMode::Full)
                        ->setWidth(120)
                        ->setBackgroundColor(Color::fromRGB(28, 28, 30));
 
-    return Scaffold(
-        nullptr,
-        Expanded(Row({sidebar, Expanded(canvas_)})),
-        nullptr, nullptr);
+    return Flex({sidebar, canvas_->setFlexGrow(1)})->setHeightMode(SizeMode::Full)->setWidthMode(SizeMode::Full);
   }
 };
 
