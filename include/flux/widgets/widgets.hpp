@@ -4,6 +4,7 @@
 
 
 #include "flux_flex.hpp"
+#include "flux_flex_builder.hpp"
 #include "flux_action.hpp"
 #include "flux_collection.hpp"
 #include "flux_conditional.hpp"
@@ -24,6 +25,7 @@
 #include "flux_datepicker.hpp"
 #include "flux_tabview.hpp"
 #include "flux_treeview.hpp"
+#include "flux_sizedbox.hpp"
 
 #include "flux_toast.hpp"
 #include "flux_input_extended.hpp"

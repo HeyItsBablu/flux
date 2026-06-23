@@ -654,7 +654,7 @@ public:
 
 private:
     template <size_t... Is>
-    void addListenersImpl(std::index_sequence<Is...>) {
+    void addListenersImpl(std::index_sequence<Is...>) { 
         std::weak_ptr<bool> wa = alive;
         std::mutex *mtx = &mutex;
         bool *d = &dirty;
