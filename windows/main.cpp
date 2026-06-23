@@ -15,7 +15,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
 
 
     auto cfg = FluxAppWidget::getInstance();
-
+ 
     int w = cfg->windowWidth;
     int h = cfg->windowHeight;
     if (cfg->fullscreen || cfg->maximize) {

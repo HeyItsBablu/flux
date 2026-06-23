@@ -487,7 +487,7 @@ endif()
 
 if(NOT ANDROID)
     if(FLUX_BUILD_EXAMPLES)
-        add_subdirectory(examples)
+        add_subdirectory(lib)
     endif()
 
     if(FLUX_BUILD_TESTS AND NOT EMSCRIPTEN)
