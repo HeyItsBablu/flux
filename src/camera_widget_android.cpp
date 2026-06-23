@@ -34,12 +34,18 @@ static bool _hasCameraPermission()
 // Starts a 500 ms permission-check timer.
 // Sets _shouldOpen once permission is granted; the render() path picks it up.
 
+extern void FluxAndroid_requestPermission(const char* permission);
+
 void CameraWidget::_platformScheduleOpen()
 {
     if (_permCheckTimer)
         return;
+
+    // Request camera permission the first time this widget appears
+    FluxAndroid_requestPermission("android.permission.CAMERA");
+
     _permCheckTimer = FluxUI::getCurrentInstance()->setInterval(500, [this]()
-                                                                {
+    {
         if (_hasCameraPermission()) {
             auto* ui = FluxUI::getCurrentInstance();
             if (ui && _permCheckTimer) {
@@ -48,7 +54,8 @@ void CameraWidget::_platformScheduleOpen()
             }
             _shouldOpen = true;
             markNeedsPaint();
-        } });
+        }
+    });
 }
 
 // ── _platformOnFlip ───────────────────────────────────────────────────────────

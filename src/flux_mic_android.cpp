@@ -10,6 +10,8 @@
 
 #include <aaudio/AAudio.h>
 #include <android/log.h>
+#include <jni.h>
+#include <android/native_activity.h>
 
 // ============================================================================
 // Logging
@@ -22,6 +24,11 @@
 // Must be defined exactly once in a .cpp file that is linked into the binary.
 // ============================================================================
 extern std::string FluxAndroid_getFilesDir();
+
+// ── JNI bridge — provided by the app layer (main_android.cpp) ────────────────
+extern JNIEnv *getJNIEnv();
+extern ANativeActivity *s_activity;
+extern void FluxAndroid_requestPermission(const char *permission);
 
 // ============================================================================
 // FluxMic::Impl — AAudio capture
@@ -172,9 +179,32 @@ float  FluxMic::getElapsedSeconds() const {
 const std::string& FluxMic::getLastSavedPath() const { return m_impl->lastSavedPath; }
 void FluxMic::setOnSaved(SaveCallback cb) { m_impl->onSaved = std::move(cb); }
 
+extern void FluxAndroid_requestPermission(const char* permission);
+
+static bool _hasMicPermission()
+{
+    JNIEnv *env = getJNIEnv();
+    if (!env || !s_activity) return false;
+
+    jobject actObj = s_activity->clazz;
+    jclass actCls = env->GetObjectClass(actObj);
+    jmethodID check = env->GetMethodID(actCls,
+                                       "checkSelfPermission", "(Ljava/lang/String;)I");
+    jstring perm = env->NewStringUTF("android.permission.RECORD_AUDIO");
+    jint result = env->CallIntMethod(actObj, check, perm);
+    env->DeleteLocalRef(perm);
+    return result == 0;
+}
+
 bool FluxMic::start() {
     if (m_impl->state == State::Recording) return true;
     if (m_impl->state == State::Stopping)  return false;
+
+    if (!_hasMicPermission()) {
+        FluxAndroid_requestPermission("android.permission.RECORD_AUDIO");
+        MIC_LOGI("RECORD_AUDIO not granted — requested, returning false");
+        return false;
+    }
 
     m_impl->ring.assign(kRingSize, 0.f);
     m_impl->writePos  = 0;

@@ -436,7 +436,7 @@ void FluxVideo_destroySurfaceTexture(void *surfaceTexture)
 extern void NVG_initOESBlit(int maxW, int maxH);
 
 // ── Permissions ───────────────────────────────────────────────────────────────
-static void requestPermissionsFromNative()
+void FluxAndroid_requestPermission(const char* permission)
 {
     JNIEnv *env = getJNIEnv();
     if (!env || !s_activity)
@@ -446,30 +446,18 @@ static void requestPermissionsFromNative()
     jclass activityCls = env->GetObjectClass(activityObj);
     jmethodID checkPerm = env->GetMethodID(activityCls, "checkSelfPermission",
                                            "(Ljava/lang/String;)I");
+    jstring jp = env->NewStringUTF(permission);
+    jint result = env->CallIntMethod(activityObj, checkPerm, jp);
+    env->DeleteLocalRef(jp);
+    if (result == 0) return; // already granted
+
     jmethodID reqPerms = env->GetMethodID(activityCls, "requestPermissions",
                                           "([Ljava/lang/String;I)V");
     jclass strCls = env->FindClass("java/lang/String");
-
-    std::vector<std::string> needed;
-    auto check = [&](const char *perm)
-    {
-        jstring jp = env->NewStringUTF(perm);
-        if (env->CallIntMethod(activityObj, checkPerm, jp) != 0)
-            needed.push_back(perm);
-        env->DeleteLocalRef(jp);
-    };
-    check("android.permission.CAMERA");
-    check("android.permission.RECORD_AUDIO");
-    if (needed.empty())
-        return;
-
-    jobjectArray arr = env->NewObjectArray((jsize)needed.size(), strCls, nullptr);
-    for (int i = 0; i < (int)needed.size(); ++i)
-    {
-        jstring p = env->NewStringUTF(needed[i].c_str());
-        env->SetObjectArrayElement(arr, i, p);
-        env->DeleteLocalRef(p);
-    }
+    jobjectArray arr = env->NewObjectArray(1, strCls, nullptr);
+    jstring p = env->NewStringUTF(permission);
+    env->SetObjectArrayElement(arr, 0, p);
+    env->DeleteLocalRef(p);
     env->CallVoidMethod(activityObj, reqPerms, arr, 1001);
     env->DeleteLocalRef(arr);
 }
@@ -523,7 +511,7 @@ static void handle_cmd(android_app *app, int32_t cmd)
         s_activity = app->activity;
 
         FluxFilePickerAndroid::init(getJNIEnv(), app->activity);
-        requestPermissionsFromNative();
+
         FluxJNI::init(app);
         FluxAndroid_setAssetManager(app->activity->assetManager);
 
