@@ -285,6 +285,40 @@ struct Painter
     };
 
     void drawCamera(const CameraDrawParams &params);
+
+
+    struct PageDrawParams
+    {
+        int x = 0, y = 0, w = 0, h = 0;
+
+        struct Region
+        {
+            bool present = false;
+            int x = 0, y = 0, w = 0, h = 0;
+
+            bool hasBackground = false;
+            Color background = Color::fromRGB(255, 255, 255);
+
+            // Drop-shadow depth in pixels. For header: shadow cast downward from
+            // its bottom edge (sticky-app-bar look). For footer: shadow cast
+            // upward from its top edge. 0 = no shadow.
+            int elevation = 0;
+        };
+
+        Region header;
+        Region body;
+        Region footer;
+
+        bool hasPageBackground = false;
+        Color pageBackground = Color::fromRGB(255, 255, 255);
+
+        // Reconciliation key — unused by every backend today. Reserved for a
+        // future DOM backend to find-or-create <header>/<main>/<footer> wrapper
+        // elements and re-parent the real child DOM nodes into them.
+        std::string widgetId;
+    };
+
+    void drawPage(const PageDrawParams &params);
 };
 
 #endif // FLUX_PAINTER_HPP

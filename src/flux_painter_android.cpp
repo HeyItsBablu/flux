@@ -863,4 +863,61 @@ void Painter::drawCamera(const CameraDrawParams &params)
     nvgRestore(s_vg);
 }
 
+// ============================================================================
+// Painter::drawPage  (Android / NanoVG)
+// Append to flux_painter_android.cpp, inside the #ifdef __ANDROID__ block.
+// ============================================================================
+
+void Painter::drawPage(const PageDrawParams &params)
+{
+    if (!s_vg)
+        return;
+
+    if (params.hasPageBackground)
+        fillRect(params.x, params.y, params.w, params.h, params.pageBackground);
+
+    if (params.body.present && params.body.hasBackground)
+        fillRect(params.body.x, params.body.y, params.body.w, params.body.h,
+                 params.body.background);
+
+    if (params.header.present)
+    {
+        if (params.header.hasBackground)
+            fillRect(params.header.x, params.header.y, params.header.w, params.header.h,
+                     params.header.background);
+        if (params.header.elevation > 0)
+        {
+            NVGpaint paint = nvgLinearGradient(s_vg,
+                (float)params.header.x, (float)(params.header.y + params.header.h),
+                (float)params.header.x, (float)(params.header.y + params.header.h + params.header.elevation),
+                nvgRGBA(0, 0, 0, 60), nvgRGBA(0, 0, 0, 0));
+            nvgBeginPath(s_vg);
+            nvgRect(s_vg, (float)params.header.x, (float)(params.header.y + params.header.h),
+                    (float)params.header.w, (float)params.header.elevation);
+            nvgFillPaint(s_vg, paint);
+            nvgFill(s_vg);
+        }
+    }
+
+    if (params.footer.present)
+    {
+        if (params.footer.hasBackground)
+            fillRect(params.footer.x, params.footer.y, params.footer.w, params.footer.h,
+                     params.footer.background);
+        if (params.footer.elevation > 0)
+        {
+            int startY = params.footer.y - params.footer.elevation;
+            NVGpaint paint = nvgLinearGradient(s_vg,
+                (float)params.footer.x, (float)startY,
+                (float)params.footer.x, (float)params.footer.y,
+                nvgRGBA(0, 0, 0, 0), nvgRGBA(0, 0, 0, 60));
+            nvgBeginPath(s_vg);
+            nvgRect(s_vg, (float)params.footer.x, (float)startY,
+                    (float)params.footer.w, (float)params.footer.elevation);
+            nvgFillPaint(s_vg, paint);
+            nvgFill(s_vg);
+        }
+    }
+}
+
 #endif // __ANDROID__

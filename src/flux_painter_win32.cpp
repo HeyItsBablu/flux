@@ -1307,4 +1307,58 @@ void Painter::drawCamera(const CameraDrawParams &params)
   }
 }
 
+
+// ============================================================================
+// Painter::drawPage  (Win32 / GDI+)
+// Append to flux_painter_win32.cpp, inside the #ifdef _WIN32 block.
+// ============================================================================
+
+void Painter::drawPage(const PageDrawParams &params)
+{
+    if (params.hasPageBackground)
+        fillRect(params.x, params.y, params.w, params.h, params.pageBackground);
+
+    if (params.body.present && params.body.hasBackground)
+        fillRect(params.body.x, params.body.y, params.body.w, params.body.h,
+                 params.body.background);
+
+    if (params.header.present)
+    {
+        if (params.header.hasBackground)
+            fillRect(params.header.x, params.header.y, params.header.w, params.header.h,
+                     params.header.background);
+        if (params.header.elevation > 0)
+        {
+            Color from = Color::fromRGB(0, 0, 0).withAlpha(60);
+            Color to = Color::fromRGB(0, 0, 0).withAlpha(0);
+            int shadowY = params.header.y + params.header.h;
+            for (int i = 0; i < params.header.elevation; ++i)
+            {
+                double t = (double)i / params.header.elevation;
+                fillRectAlpha(params.header.x, shadowY + i, params.header.w, 1,
+                              from.interpolate(to, t));
+            }
+        }
+    }
+
+    if (params.footer.present)
+    {
+        if (params.footer.hasBackground)
+            fillRect(params.footer.x, params.footer.y, params.footer.w, params.footer.h,
+                     params.footer.background);
+        if (params.footer.elevation > 0)
+        {
+            Color from = Color::fromRGB(0, 0, 0).withAlpha(0);
+            Color to = Color::fromRGB(0, 0, 0).withAlpha(60);
+            int startY = params.footer.y - params.footer.elevation;
+            for (int i = 0; i < params.footer.elevation; ++i)
+            {
+                double t = (double)i / params.footer.elevation;
+                fillRectAlpha(params.footer.x, startY + i, params.footer.w, 1,
+                              from.interpolate(to, t));
+            }
+        }
+    }
+}
+
 #endif // _WIN32

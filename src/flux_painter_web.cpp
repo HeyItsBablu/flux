@@ -1186,4 +1186,72 @@ void Painter::drawCamera(const CameraDrawParams& params)
         params.mirror);
 }
 
+
+// ============================================================================
+// Painter::drawPage  (Emscripten / Canvas2D — future DOM migration point)
+// Append to flux_painter_web.cpp, inside the #ifdef __EMSCRIPTEN__ block.
+//
+// Same future-proofing posture as drawImage/drawCamera/drawVideo: today this
+// just paints rects + gradients on Module._fluxCtx2D. params.widgetId is
+// carried through but unused. When Page migrates to real DOM, this function
+// becomes the place that finds-or-creates <header>/<main>/<footer> wrapper
+// <div>s keyed by widgetId, positions them via absolute CSS left/top/width/
+// height, and lets the (also-migrated) child draw calls reconcile into those
+// wrappers instead of drawing onto canvas at all.
+// ============================================================================
+
+void Painter::drawPage(const PageDrawParams &params)
+{
+    if (params.hasPageBackground)
+        fillRect(params.x, params.y, params.w, params.h, params.pageBackground);
+
+    if (params.body.present && params.body.hasBackground)
+        fillRect(params.body.x, params.body.y, params.body.w, params.body.h,
+                params.body.background);
+
+    if (params.header.present)
+    {
+        if (params.header.hasBackground)
+            fillRect(params.header.x, params.header.y, params.header.w, params.header.h,
+                    params.header.background);
+        if (params.header.elevation > 0)
+        {
+            int hx = params.header.x;
+            int hy = params.header.y + params.header.h;
+            int hw = params.header.w;
+            int hh = params.header.elevation;
+            EM_ASM({
+                var c = Module._fluxCtx2D;
+                if (!c) return;
+                var grad = c.createLinearGradient(0, $1, 0, $1 + $3);
+                grad.addColorStop(0, "rgba(0,0,0,0.24)");
+                grad.addColorStop(1, "rgba(0,0,0,0)");
+                c.fillStyle = grad;
+                c.fillRect($0, $1, $2, $3); }, hx, hy, hw, hh);
+        }
+    }
+
+    if (params.footer.present)
+    {
+        if (params.footer.hasBackground)
+            fillRect(params.footer.x, params.footer.y, params.footer.w, params.footer.h,
+                    params.footer.background);
+        if (params.footer.elevation > 0)
+        {
+            int fx = params.footer.x;
+            int fy = params.footer.y - params.footer.elevation;
+            int fw = params.footer.w;
+            int fhh = params.footer.elevation;
+            EM_ASM({
+                var c = Module._fluxCtx2D;
+                if (!c) return;
+                var grad = c.createLinearGradient(0, $1, 0, $1 + $3);
+                grad.addColorStop(0, "rgba(0,0,0,0)");
+                grad.addColorStop(1, "rgba(0,0,0,0.24)");
+                c.fillStyle = grad;
+                c.fillRect($0, $1, $2, $3); }, fx, fy, fw, fhh);
+        }
+    }
+}
+
 #endif // __EMSCRIPTEN__

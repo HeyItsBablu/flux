@@ -2,7 +2,7 @@
 #define WIDGETS_HPP
 
 
-
+#include "flux_page.hpp"
 #include "flux_flex.hpp"
 #include "flux_flex_builder.hpp"
 #include "flux_action.hpp"
