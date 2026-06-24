@@ -5,7 +5,7 @@
       "name": "msvc-debug",
       "displayName": "MSVC Debug",
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build/msvc",
+      "binaryDir": "${sourceDir}/build/msvc", 
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "FLUX_BUILD_EXAMPLES": "ON",

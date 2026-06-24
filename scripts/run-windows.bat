@@ -24,12 +24,12 @@ if "%VS_PATH%"=="" (
 :: Activate the x64 MSVC environment
 call "%VS_PATH%\VC\Auxiliary\Build\vcvars64.bat"
 
-cmake -S . -B build-windows -G Ninja ^
+cmake -S . -B build\msvc -G Ninja ^
     -DCMAKE_BUILD_TYPE=Debug ^
     -DFLUX_BUILD_EXAMPLES=ON ^
     -DCMAKE_C_COMPILER=cl.exe ^
     -DCMAKE_CXX_COMPILER=cl.exe
 
-cmake --build build-windows
+cmake --build build\msvc
 
-build-windows\lib\flux_app.exe
+build\msvc\lib\flux_app.exe
