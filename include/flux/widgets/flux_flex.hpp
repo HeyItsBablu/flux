@@ -287,6 +287,14 @@ public:
         markNeedsLayout();
         return self();
     }
+
+    std::shared_ptr<FlexWidget> setPaddingHV(int h, int v)
+    {
+        baseProps_.paddingLeft = baseProps_.paddingRight = h;
+        baseProps_.paddingTop = baseProps_.paddingBottom = v;
+        markNeedsLayout();
+        return self();
+    }
     std::shared_ptr<FlexWidget> setBackgroundColor(Color c)
     {
         baseProps_.hasBackground = true;
@@ -455,9 +463,16 @@ public:
                 int crossForMeasure = (crossMode == SizeMode::Fixed)
                                           ? fixedCross
                                           : containerCrossSize_;
+
+                // For Full-mode children on the main axis, measure with the container
+                // size rather than kUnbounded so intrinsic-size-based tracks (fillTrack)
+                // inside nested grids get a real budget.
+                bool mainFull = (mainMode == SizeMode::Full);
+                int mainBudget = mainFull ? containerMainSize_ : kUnbounded;
+
                 BoxConstraints measureC = isRowAxis_
-                                              ? BoxConstraints::loose(kUnbounded, crossForMeasure)
-                                              : BoxConstraints::loose(crossForMeasure, kUnbounded);
+                                              ? BoxConstraints::loose(mainBudget, crossForMeasure)
+                                              : BoxConstraints::loose(crossForMeasure, mainBudget);
                 c->computeLayout(ctx, measureC, fontCache);
                 hypoMain[i] = mainSize(c, isRowAxis_);
             }
