@@ -1,3 +1,4 @@
+//windows/main.cpp
 #include "flux/flux.hpp"
 #ifdef _WIN32
 
@@ -14,7 +15,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     app.build([&]() { return createApp(&app); });
 
 
-    auto cfg = FluxAppWidget::getInstance();
+    auto cfg = FluxAppWidget::getInstance(); 
  
     int w = cfg->windowWidth;
     int h = cfg->windowHeight;

@@ -1,4 +1,4 @@
-// app.hpp
+// main_app.hpp
 #pragma once
 
 #include "flux/flux.hpp"

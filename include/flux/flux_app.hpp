@@ -261,23 +261,29 @@ inline std::weak_ptr<FluxAppWidget> FluxAppWidget::instance_;
 // FLUX APP FACTORY
 // ============================================================================
 
-inline WidgetPtr FluxApp(const std::string &title, WidgetPtr home,
-                         const AppTheme &theme = AppTheme::light(),
-                         bool debugShowWidgetBounds = false,
-                         int width = 900, int height = 700,
-                         bool maximize = false, bool fullscreen = true)
+
+
+struct FluxAppConfig {
+    std::string title               = "FluxUI App";
+    AppTheme    theme               = AppTheme::light();
+    int         width               = 900;
+    int         height              = 700;
+    bool        maximize            = false;
+    bool        fullscreen          = false;
+    bool        debugWidgetBounds   = false;
+};
+
+inline WidgetPtr FluxApp(WidgetPtr home, FluxAppConfig cfg = {})
 {
-  auto app = std::make_shared<FluxAppWidget>(title, home);
-
-  app->registerInstance(app);
-
-  app->setTheme(theme);
-  app->debugShowWidgetBounds = debugShowWidgetBounds;
-  app->windowWidth = width;
-  app->windowHeight = height;
-  app->maximize = maximize;
-  app->fullscreen = fullscreen;
-  return app;
+    auto app = std::make_shared<FluxAppWidget>(cfg.title, home);
+    app->registerInstance(app);
+    app->setTheme(cfg.theme);
+    app->debugShowWidgetBounds = cfg.debugWidgetBounds;
+    app->windowWidth           = cfg.width;
+    app->windowHeight          = cfg.height;
+    app->maximize              = cfg.maximize;
+    app->fullscreen            = cfg.fullscreen;
+    return app;
 }
 
 #endif // FLUX_APP_HPP

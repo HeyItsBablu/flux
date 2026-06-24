@@ -27,6 +27,10 @@ public:
 
 WidgetPtr createApp(FluxUI *app)
 {
-    return FluxApp("FluxUI - App", std::make_shared<MyApp>(), AppTheme::light(),
-                   false, 900, 700, false, false);
+    return FluxApp(std::make_shared<MyApp>(), {
+                                                  .title = "FluxUI App",
+                                                  .theme = AppTheme::dark(),
+                                                  .width = 1280,
+                                                  .height = 720,
+                                              });
 }
