@@ -5,67 +5,63 @@
 
 # FluxUI
 
-A declarative, Flutter-inspired widget toolkit for building native UIs in C++.  
-Chain methods, compose layouts, bind reactive state — write once, run on Windows, Linux, and Android.
+A declarative, cross-platform widget toolkit for C++.  
+Chain methods, compose layouts, bind reactive state — one codebase, five platforms.
 
-**Platforms:** Windows 10+ · Linux · Android · **Compiler:** MSVC 2022 / GCC / Clang · **Standard:** C++20 · **Renderer:** GDI+ / OpenGL / Cairo / NanoVG
+**Platforms:** Windows · Linux · macOS · Android · Web  
+**Compiler:** MSVC 2022 / GCC / Clang / AppleClang  
+**Standard:** C++20  
+**Renderer:** GDI+ · Cairo · Metal · NanoVG · WebGL2
 
 ---
 
 ## Quick start
 
-The fastest way to get going is with the **Flux CLI** — it scaffolds a new project and handles all CMake / build wiring automatically.
+### With scripts (recommended)
 
-### With the CLI (recommended)
+Clone the repo, drop your app in `lib/main.cpp`, and run the script for your platform:
 
-**Install on Linux:**
+```bat
+scripts\run-windows.bat
+```
 ```bash
-curl -LO https://github.com/HeyItsBablu/flux-cli/releases/latest/download/flux
-chmod +x flux
-sudo mv flux /usr/local/bin/
+scripts/run-linux.sh
+scripts/run-macos.sh
+```
+```bat
+scripts\run-android.bat
+scripts\run-web.bat
 ```
 
-**Install on Windows:** download `flux.exe` from [Releases](https://github.com/HeyItsBablu/flux-cli/releases/latest), place it anywhere, and add that folder to your system `PATH`.
-
-**Create and run your app:**
-```bash
-flux create my_app
-cd my_app
-flux run windows   # or: flux run linux
-```
-
-See the [CLI section](#cli) below for the full command reference.
-
-### Manually with CMake
-
-```cmake
-include(FetchContent)
-FetchContent_Declare(flux
-    GIT_REPOSITORY https://github.com/HeyItsBablu/flux.git
-    GIT_TAG        v0.1.0
-)
-FetchContent_MakeAvailable(flux)
-target_link_libraries(my_app PRIVATE flux::flux)
-```
+See [INSTALL.md](INSTALL.md) for prerequisites and setup per platform.
 
 ```cpp
-#include <flux/flux.hpp>
+#include "flux/flux.hpp"
 
 class MyApp : public Widget {
+    State<int> counter{0};
 public:
     WidgetPtr build() override {
-        return Scaffold(
-            AppBar("My App"),
-            Center(Text("Hello World")));
+        return Flex({
+            Text(counter)->setFontSize(18),
+            Button("Click", [this]{ counter++; })
+        })
+        ->setAlignItems(AlignItems::Center)
+        ->setJustifyContent(JustifyContent::Center)
+        ->setWidthMode(SizeMode::Full)
+        ->setHeightMode(SizeMode::Full)
+        ->setDirection(FlexDirection::Column)
+        ->setGap(8);
     }
 };
 
-WidgetPtr createApp(FluxUI *app) {
-    return FluxApp(
-        "My App",
-        std::make_shared<MyApp>(),
-        AppTheme::light(),
-        false, 900, 700, false, false);
+WidgetPtr createApp(FluxUI* app) {
+    return FluxApp(std::make_shared<MyApp>(), {
+        .title  = "My App",
+        .theme  = AppTheme::light(),
+        .width  = 900,
+        .height = 700,
+    });
 }
 ```
 
@@ -100,6 +96,8 @@ WidgetPtr createApp(FluxUI *app) {
 
 - [Components](#components)
 - [Display](#display)
+- [Flex](#flex)
+- [FlexBuilder](#flexbuilder)
 - [Interaction](#interaction)
 - [Input](#input)
 - [Collection](#collection)
@@ -124,36 +122,78 @@ Base class for all UI components. Override `build()` to return your widget tree.
 
 ```cpp
 class MyApp : public Widget {
+    State<int> counter{0};
 public:
     WidgetPtr build() override {
-        return Scaffold(
-            AppBar("My App"),
-            Center(Text("Hello World")));
+        return Flex({
+            Text(counter)->setFontSize(18),
+            Button("Click", [this]{ counter++; })
+        })
+        ->setWidthMode(SizeMode::Full)
+        ->setHeightMode(SizeMode::Full)
+        ->setAlignItems(AlignItems::Center)
+        ->setJustifyContent(JustifyContent::Center)
+        ->setDirection(FlexDirection::Column)
+        ->setGap(8);
     }
 };
 
-WidgetPtr createApp(FluxUI *app) {
-    return FluxApp(
-        "My App",
-        std::make_shared<MyApp>(),
-        AppTheme::light(),
-        false, 900, 700, false, false);
+WidgetPtr createApp(FluxUI* app) {
+    return FluxApp(std::make_shared<MyApp>(), {
+        .title  = "My App",
+        .theme  = AppTheme::light(),
+        .width  = 900,
+        .height = 700,
+    });
 }
 ```
 
 | Method | Description |
 |---|---|
-| `build()` | Returns the widget tree. Called **once** at startup — never again on state change |
-| `initState()` | Optional setup hook, called once after construction |
-| `dispose()` | Optional cleanup hook, called on destruction |
+| `build()` | Returns the widget tree. Called once at startup — never again on state change |
+| `onMount()` | Optional setup hook, called once after the widget is first laid out |
+| `onDetach()` | Optional cleanup hook, called when the widget is removed from the tree |
 
-> **Key difference from Flutter:** `build()` is called **once**. State changes flow directly to widgets via the observer system — no rebuild is triggered.
+> **Key difference from Flutter:** `build()` is called **once**. State changes flow directly to bound widgets via the observer system — no rebuild is triggered.
+
+**Layout properties**
+
+| Property | Type | Description |
+|---|---|---|
+| `widthMode` / `heightMode` | `SizeMode` | `Fixed` — exact size · `Fit` — shrink to content · `Full` — fill parent |
+| `flexGrow` | `int` | How much free space this widget takes (0 = don't grow) |
+| `flexShrink` | `int` | Whether this widget shrinks when space is tight (default 1) |
+| `flexBasis` | `int` | Starting size before flex is applied (-1 = auto) |
+| `padding` / `paddingLeft/Right/Top/Bottom` | `int` | Inner spacing |
+| `margin` / `marginLeft/Right/Top/Bottom` | `int` | Outer spacing |
+| `minWidth` / `minHeight` | `int` | Size floor |
+| `maxWidth` / `maxHeight` | `int` | Size ceiling |
+| `alignment` | `Alignment` | Self-alignment within parent |
+| `visible` | `bool` | Hidden widgets take no space and receive no events |
+
+**Appearance**
+
+| Property | Type | Description |
+|---|---|---|
+| `backgroundColor` | `Color` | Fill color (requires `hasBackground = true`) |
+| `borderColor` / `borderWidth` / `borderRadius` | — | Border styling (requires `hasBorder = true`) |
+| `hoverBackgroundColor` / `hoverTextColor` / `hoverBorderColor` | `Color` | Automatically applied on hover |
+| `fontSize` / `fontWeight` / `fontFamily` | — | Text styling inherited by children |
+
+**Events**
+
+| Property | Type | Description |
+|---|---|---|
+| `onClick` | `ClickHandler` | Fires on left click |
+| `onHover` | `HoverHandler` | Fires with `true` on enter, `false` on leave |
+| `onRightClick` | `function<bool(int,int)>` | Fires on right click with cursor position |
 
 ---
 
 ### Passing state to children
 
-The parent owns the state and passes a reference to child widgets.
+The parent owns the state. Children receive it as a `State<T>&` reference in
+their constructor — no copies, no wrappers, no special syntax.
 
 ```cpp
 class CounterDisplay : public Widget {
@@ -162,13 +202,13 @@ public:
     CounterDisplay(State<int>& counter) : counter(counter) {}
 
     WidgetPtr build() override {
-        return Column({
+        return Flex({
             Text("Current count:"),
             Text(counter),
             Text(counter, [](int v) {
                 return v % 2 == 0 ? "Even" : "Odd";
             })
-        });
+        })->setHeightMode(SizeMode::Fit);
     }
 };
 
@@ -178,43 +218,48 @@ public:
     CounterControls(State<int>& counter) : counter(counter) {}
 
     WidgetPtr build() override {
-        return Row({
-            Button("Increment", [this]{ counter++; }),
-            Button("Decrement", [this]{ counter--; }),
-            Button("Reset",     [this]{ counter.set(0); })
+        return Flex({
+            Button("Increment", [this]{ counter++;       }),
+            Button("Decrement", [this]{ counter--;       }),
+            Button("Reset",     [this]{ counter.set(0);  })
         });
     }
 };
 
 class MyApp : public Widget {
-    State<int> counter{0};
+    State<int> counter{0};  // owned here
 public:
     WidgetPtr build() override {
-        return Scaffold(
-            AppBar("Flux App"),
-            Center(
-                Column({
-                    std::make_shared<CounterDisplay>(counter),
-                    std::make_shared<CounterControls>(counter)
-                })
-            )
-        );
+        return Flex({
+            Flex({ Text("Nav") })
+                ->setBackgroundColor(Color::fromRGB(50, 50, 150))
+                ->setPadding(12)
+                ->setWidthMode(SizeMode::Full)
+                ->setHeight(50)
+                ->setAlignItems(AlignItems::Center)
+                ->setJustifyContent(JustifyContent::Center),
+
+            Flex({
+                std::make_shared<CounterDisplay>(counter),
+                std::make_shared<CounterControls>(counter)
+            })->setDirection(FlexDirection::Column)
+        })
+        ->setDirection(FlexDirection::Column)
+        ->setGap(8)
+        ->setPadding(16)
+        ->setAlignItems(AlignItems::Stretch)
+        ->setWidthMode(SizeMode::Full)
+        ->setHeightMode(SizeMode::Full);
     }
 };
 ```
 
----
+A few things to note:
 
-### deref helper
-
-Converts a `State<T>*` pointer to `State<T>&` so it works with all widget APIs.
-
-```cpp
-Text(deref(count))
-TextInput("...")->setInputValue(deref(text))
-Slider(0, 100, 1)->setValue(deref(value))
-Toggle("...")->setValue(deref(enabled))
-```
+- **Ownership stays in the parent.** `MyApp` declares `State<int> counter{0}` as a member. Children hold a `&` reference — they can read and mutate it but never outlive it.
+- **Any child can write.** `CounterControls` calls `counter++`, `counter--`, and `counter.set(0)` directly. Both `CounterDisplay` and any other widget bound to `counter` update automatically.
+- **`Text` accepts state directly.** `Text(counter)` renders the current value and re-renders whenever it changes. The optional transform overload `Text(counter, fn)` lets you derive a string from the value — here used to show `"Even"` or `"Odd"`.
+- **Pass with `std::make_shared`.** Children are heap-allocated widgets, so pass the reference through the constructor: `std::make_shared<CounterDisplay>(counter)`.
 
 ---
 
@@ -486,6 +531,277 @@ AssetImage("avatar.png")->setWidth(64)->setHeight(64)->setBorderRadius(32);
 | `setErrorBuilder(fn)` | `() -> WidgetPtr` | Custom widget shown on error |
 
 ---
+
+
+## Flex
+
+The core layout widget. Implements a CSS Flexbox-compatible layout engine —
+direction, wrapping, alignment, gaps, and scrolling all work the same way.
+
+```cpp
+Flex({
+    Text("Hello"),
+    Button("Click", [this]{ counter++; })
+})
+->setDirection(FlexDirection::Column)
+->setAlignItems(AlignItems::Center)
+->setJustifyContent(JustifyContent::Center)
+->setGap(8)
+->setWidthMode(SizeMode::Full)
+->setHeightMode(SizeMode::Full);
+```
+
+---
+
+### Direction
+
+| Value | Description |
+|---|---|
+| `FlexDirection::Row` | Left to right (default) |
+| `FlexDirection::RowReverse` | Right to left |
+| `FlexDirection::Column` | Top to bottom |
+| `FlexDirection::ColumnReverse` | Bottom to top |
+
+---
+
+### Wrap
+
+| Value | Description |
+|---|---|
+| `FlexWrap::NoWrap` | Single line, items may overflow (default) |
+| `FlexWrap::Wrap` | Items wrap to new lines |
+| `FlexWrap::WrapReverse` | Items wrap in reverse direction |
+
+---
+
+### JustifyContent
+
+Distribution along the main axis.
+
+| Value | Description |
+|---|---|
+| `Start` | Pack toward start (default) |
+| `End` | Pack toward end |
+| `Center` | Center the group |
+| `SpaceBetween` | Equal gaps between items, no outer gap |
+| `SpaceAround` | Equal gaps around each item |
+| `SpaceEvenly` | Equal gaps between items and edges |
+
+---
+
+### AlignItems
+
+Alignment on the cross axis.
+
+| Value | Description |
+|---|---|
+| `Start` | Align to start edge |
+| `End` | Align to end edge |
+| `Center` | Center each item |
+| `Stretch` | Stretch to fill cross axis (default) |
+| `Baseline` | Align to text baseline |
+
+---
+
+### AlignContent
+
+Multi-line distribution on the cross axis. Only meaningful with `FlexWrap::Wrap`.
+
+| Value | Description |
+|---|---|
+| `Start` | Pack lines toward start |
+| `End` | Pack lines toward end |
+| `Center` | Center lines as a group |
+| `SpaceBetween` | Equal gaps between lines, no outer gap |
+| `SpaceAround` | Equal gaps around each line |
+| `SpaceEvenly` | Equal gaps between lines and edges |
+| `Stretch` | Stretch lines to fill cross axis |
+
+---
+
+### Methods
+
+| Method | Type | Description |
+|---|---|---|
+| `setDirection(d)` | `FlexDirection` | Main axis direction |
+| `setWrap(w)` | `FlexWrap` | Line wrapping behavior |
+| `setJustifyContent(j)` | `JustifyContent` | Main axis distribution |
+| `setAlignItems(a)` | `AlignItems` | Cross axis alignment per item |
+| `setAlignContent(a)` | `AlignContent` | Cross axis distribution of lines |
+| `setGap(px)` | `int` | Gap between all items |
+| `setScrollable(v)` | `bool` | Enable scroll and fling on the main axis |
+| `setPadding(px)` | `int` | Uniform inner padding |
+| `setBackgroundColor(c)` | `Color` | Background fill |
+| `setBorderColor(c)` | `Color` | Border color |
+| `setBorderWidth(w)` | `int` | Border thickness |
+| `setBorderRadius(r)` | `int` | Corner rounding |
+| `setWidthMode(m)` | `SizeMode` | `Fixed` · `Fit` · `Full` |
+| `setHeightMode(m)` | `SizeMode` | `Fixed` · `Fit` · `Full` |
+| `setWidth(w)` | `int` | Fixed width (sets mode to Fixed) |
+| `setHeight(h)` | `int` | Fixed height (sets mode to Fixed) |
+| `setFlexGrow(n)` | `int` | How much free space this item takes (0 = don't grow) |
+| `setFlexShrink(n)` | `int` | Whether this item shrinks under pressure (default 1) |
+| `setFlexBasis(px)` | `int` | Starting size before flex is applied (-1 = auto) |
+| `setOrder(n)` | `int` | Layout order override |
+| `responsive(bp, fn)` | `Breakpoint, fn(FlexProps&)` | Override any prop at a breakpoint |
+
+---
+
+### Responsive overrides
+
+Props can be overridden at any breakpoint using a mobile-first cascade.
+Overrides stack — `Sm` applies at 640px and up, `Md` at 768px and up, and so on.
+
+```cpp
+Flex({ ... })
+->setDirection(FlexDirection::Column)       // base (mobile): stacked
+->responsive(Breakpoint::Md, [](FlexProps& p) {
+    p.direction = FlexDirection::Row;       // tablet+: side by side
+    p.gap = 16;
+})
+->responsive(Breakpoint::Lg, [](FlexProps& p) {
+    p.justify = JustifyContent::SpaceBetween;
+});
+```
+
+Default breakpoint thresholds match Tailwind CSS:
+
+| Breakpoint | Default threshold |
+|---|---|
+| `Sm` | 640px |
+| `Md` | 768px |
+| `Lg` | 1024px |
+| `Xl` | 1280px |
+| `Xxl` | 1536px |
+
+Override globally with:
+
+```cpp
+BreakpointProvider::set({ .sm=480, .md=768, .lg=1024 });
+```
+
+---
+
+## FlexBuilder
+
+A virtualised, key-aware version of `Flex` for dynamic lists. Items are built
+lazily on demand and cached by key. Only visible items are rendered. Layout can
+also be skipped for off-screen items when `setVirtualizeLayout(true)` is set
+alongside a fixed item extent.
+
+### Static list from a vector
+
+```cpp
+std::vector<std::string> items = { "Apple", "Banana", "Cherry" };
+
+FlexBuilder(items,
+    [](int i, const std::string& s){ return FlexItemKey::fromIndex(i); },
+    [](int i, const std::string& s){ return Text(s); }
+)
+->setDirection(FlexDirection::Column)
+->setScrollable(true)
+->setGap(8);
+```
+
+### Reactive list from State
+
+```cpp
+struct Todo { int64_t id; std::string text; };
+State<std::vector<Todo>> todos{{}};
+
+FlexBuilder(todos,
+    [](int, const Todo& t){ return FlexItemKey::fromInt64(t.id); },
+    [](int, const Todo& t){ return Text(t.text); }
+)
+->setDirection(FlexDirection::Column)
+->setScrollable(true)
+->setGap(8)
+->setWidthMode(SizeMode::Full);
+
+// Any mutation auto-updates the list
+todos.push_back({ nextId++, "Buy milk" });
+todos.erase(2);
+```
+
+### Virtualised layout for large lists
+
+```cpp
+FlexBuilder(items, keyFn, builderFn)
+->setDirection(FlexDirection::Column)
+->setItemExtent(48)           // every item is exactly 48px tall
+->setVirtualizeLayout(true)   // skip layout for off-screen items
+->setScrollable(true);
+```
+
+---
+
+### Factory overloads
+
+| Signature | Description |
+|---|---|
+| `FlexBuilder(vector, keyFn, builderFn)` | Static snapshot with stable keys |
+| `FlexBuilder(vector, builderFn)` | Static snapshot, index keys — safe for append-only lists |
+| `FlexBuilder(State<vector>, keyFn, builderFn)` | Reactive — auto-rebuilds on state change |
+| `FlexBuilder(State<vector>, builderFn)` | Reactive, index keys — safe for append-only lists |
+
+---
+
+### Keys
+
+Keys identify each item in the cache across rebuilds. Without stable keys,
+deleting or reordering items causes the wrong widget to appear in the wrong slot.
+
+```cpp
+FlexItemKey::fromIndex(i)          // position-based — safe only for static lists
+FlexItemKey::fromInt64(item.id)    // stable integer id
+FlexItemKey::fromString(item.uuid) // stable string id
+```
+
+Always provide a `keyFn` when the list can be mutated (insert, delete, reorder).
+
+```cpp
+// integer id from a database row
+FlexBuilder(todos,
+    [](int, const Todo& t){ return FlexItemKey::fromInt64(t.id); },
+    [](int, const Todo& t){ return Text(t.text); }
+);
+
+// string UUID
+FlexBuilder(files,
+    [](int, const File& f){ return FlexItemKey::fromString(f.uuid); },
+    [](int, const File& f){ return FileRow(f); }
+);
+```
+
+> Without a `keyFn`, a debug warning fires on first use reminding you to add one.
+
+---
+
+### Methods
+
+**FlexBuilder-specific**
+
+| Method | Type | Description |
+|---|---|---|
+| `setItemCount(n)` | `int` | Total number of items |
+| `setItemBuilder(fn)` | `(int) -> WidgetPtr` | Builder called per item |
+| `setKeyFn(fn)` | `(int) -> FlexItemKey` | Stable key per item — required for mutable lists |
+| `setItemExtent(px)` | `int` | Fixed item size along the main axis (required for virtualization) |
+| `setVirtualizeLayout(v)` | `bool` | Skip layout for off-screen items — requires `setItemExtent` |
+| `invalidateItems()` | — | Discard all cached widgets and rebuild |
+| `invalidateItem(idx)` | `int` | Discard one cached widget by index |
+| `scrollToIndex(idx, animate)` | `int, bool` | Scroll to bring an item into view |
+| `scrollToStart()` | — | Scroll to the beginning |
+| `scrollToEnd()` | — | Scroll to the end |
+
+**Shared with Flex**
+
+All `Flex` methods are available on `FlexBuilder` as well:
+`setDirection`, `setWrap`, `setJustifyContent`, `setAlignItems`, `setAlignContent`,
+`setGap`, `setScrollable`, `setPadding`, `setBackgroundColor`, `setBorderColor`,
+`setBorderWidth`, `setBorderRadius`, `setWidthMode`, `setHeightMode`,
+`setWidth`, `setHeight`, `setFlexGrow`, `setFlexShrink`, `setFlexBasis`,
+`setOrder`, `responsive`.
 
 ## Interaction
 

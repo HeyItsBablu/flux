@@ -16,7 +16,7 @@ public:
                         return v % 2 == 0 ? "Even" : "Odd";
                       })})
         ->setHeightMode(SizeMode::Fit);
-        //doesn't shows with setHeight but shows with mode
+      
   }
 };
 
