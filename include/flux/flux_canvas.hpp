@@ -13,7 +13,7 @@
 #include "flux_widget.hpp"
 #include "flux_keys.hpp"
 #include "flux_core.hpp"
-#include "flux_canvas2d.hpp"
+#include "flux_canvas2d_d2d.hpp"
 #include "flux_scrollbar.hpp"
 #include "flux_render_surface.hpp"
 #include "flux_canvas_types.hpp"
@@ -118,8 +118,6 @@ public:
     Clock::time_point lastTick_ = Clock::now();
     double frameDt_ = 0.0;
 
-    Canvas2DGL *canvasGL_ = nullptr;
-
     // ── Shared helpers ────────────────────────────────────────────────────────
 
     std::shared_ptr<CanvasWidget> ptr()
@@ -165,6 +163,14 @@ public:
     bool handleKeyDown(int keyCode) override;
 #endif
 
+// ── Win32-only input ──────────────────────────────────────────────────────
+#if defined(_WIN32)
+    bool handleMouseDown(int mx, int my) override;
+    bool handleMouseMove(int mx, int my) override;
+    bool handleMouseUp(int mx, int my) override;
+    bool handleMouseWheel(int delta) override;
+    bool handleKeyDown(int keyCode) override;
+#endif
     // ── Android-only ──────────────────────────────────────────────────────────
 #ifdef __ANDROID__
     static void tickAllGL(Widget *root, int windowW, int windowH, float dpi);

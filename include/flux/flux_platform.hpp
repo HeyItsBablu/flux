@@ -146,23 +146,23 @@ using NativeColor = Color;
 
 #include <windows.h>
 #include <windowsx.h>
-#include <sdkddkver.h> 
+#include <sdkddkver.h>
 #include <d2d1_3.h>
 #include <d2d1_1helper.h>
 #include <dwrite_3.h>
 
 using AppInstance = HINSTANCE;
-using TimerID     = uint32_t;
+using TimerID = uint32_t;
 
 // ── BrushCache forward declaration ───────────────────────────────────────────
 struct BrushCache;
 
 // ── Type aliases ──────────────────────────────────────────────────────────────
 
-using NativeWindow  = HWND;
-using NativeContext = ID2D1DeviceContext1*;
-using NativeFont    = IDWriteTextFormat*;
-using NativeImage   = ID2D1Bitmap1*;
+using NativeWindow = HWND;
+using NativeContext = ID2D1DeviceContext1 *;
+using NativeFont = IDWriteTextFormat *;
+using NativeImage = ID2D1Bitmap1 *;
 
 // ── Tick / input helpers ──────────────────────────────────────────────────────
 
@@ -249,7 +249,7 @@ using NativeFont = void *;
 using AppInstance = void *;
 using TimerID = uint32_t;
 using UINT = unsigned int;
-using NativeImage = void*;
+using NativeImage = void *;
 
 inline uint32_t platformTickCount()
 {
@@ -409,7 +409,7 @@ using NativeFont = void *;
 using AppInstance = void *;
 using TimerID = uint32_t;
 using UINT = unsigned int;
-using NativeImage = void*;
+using NativeImage = void *;
 
 static constexpr UINT DT_LEFT = 0x0000u;
 static constexpr UINT DT_CENTER = 0x0001u;
@@ -486,7 +486,7 @@ using NativeFont = void *;
 using AppInstance = void *;
 using TimerID = long;
 using UINT = unsigned int;
-using NativeImage = void*;
+using NativeImage = void *;
 
 static constexpr UINT DT_LEFT = 0x0000u;
 static constexpr UINT DT_CENTER = 0x0001u;
@@ -572,10 +572,6 @@ static constexpr int WHEEL_DELTA = 120;
 
 #ifdef _WIN32
 
-
-
-
-
 struct GraphicsContext
 {
     ID2D1DeviceContext1 *dc = nullptr; // the D2D render target
@@ -583,7 +579,7 @@ struct GraphicsContext
     ID2D1Factory1 *factory = nullptr;  // thread-safe D2D factory
     BrushCache *brushes = nullptr;     // per-device brush cache
 
-    std::vector<HRGN>    clipStack;
+    std::vector<HRGN> clipStack;
 
     GraphicsContext() = default;
     GraphicsContext(ID2D1DeviceContext1 *dc,

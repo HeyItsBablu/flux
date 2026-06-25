@@ -13,5 +13,5 @@
 #include "flux_camera.hpp"
 #include "flux_secure_storage.hpp"
 #include "flux_canvas.hpp"
-#include "flux_canvas2d.hpp"
+// #include "flux_canvas2d.hpp"
 #endif // FLUX_HPP

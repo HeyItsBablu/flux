@@ -79,7 +79,7 @@ public:
 
     bool create(const std::string &title, int width, int height,
                 AppInstance hInstance, void *userData);
-  
+
     void startRenderLoop();
     void destroy();
     int run();
@@ -129,8 +129,8 @@ public:
     void setResizeCursorH();
     void setResizeCursorV();
     void setDefaultCursor();
-
-
+    
+    D3DDevice *getD3DDevice() const { return d3dDevice_; }
 
     // ── Measure context ───────────────────────────────────────────────────────
     // Returns a borrowed view of the D2D device context (Win32) or the
