@@ -353,8 +353,12 @@ void Painter::fillRoundedRegion(int x, int y, int w, int h,
 // Painter::pushClipRect / popClipRect
 // ============================================================================
 
-void Painter::pushClipRect(int x, int y, int w, int h)
+void Painter::pushClipRect(int x, int y, int w, int h, int cornerRadius)
 {
+    if (cornerRadius > 0) {
+        pushClipRoundedRect(x, y, w, h, cornerRadius * 2); // diameter convention
+        return;
+    }
     EM_ASM({
         var c = Module._fluxCtx2D;
         if (!c) return;
@@ -1106,7 +1110,7 @@ void Painter::drawRichTextA(const std::string &text,
 
 void Painter::drawImage(const ImageDrawParams &params)
 {
-    if (params.image <= 0 || params.clipW <= 0 || params.clipH <= 0)
+    if (!params.image || params.clipW <= 0 || params.clipH <= 0)
         return;
 
     const char *patternRepeat = "no-repeat";
@@ -1171,21 +1175,22 @@ void Painter::drawImage(const ImageDrawParams &params)
         c.restore(); }, params.image, params.clipX, params.clipY, params.clipW, params.clipH, (int)params.destX, (int)params.destY, (int)params.destW, (int)params.destH, params.borderRadius, quality, patternRepeat);
 }
 
-void Painter::drawVideo(const VideoDrawParams& params)
+void Painter::drawVideo(const VideoDrawParams &params)
 {
-    if (params.dstW <= 0 || params.dstH <= 0) return;
+    if (params.dstW <= 0 || params.dstH <= 0)
+        return;
     FluxVideo::get().renderFrame(params.dstX, params.dstY,
                                  params.dstW, params.dstH);
 }
 
-void Painter::drawCamera(const CameraDrawParams& params)
+void Painter::drawCamera(const CameraDrawParams &params)
 {
-    if (params.dstW <= 0 || params.dstH <= 0) return;
+    if (params.dstW <= 0 || params.dstH <= 0)
+        return;
     FluxCamera::get().renderFrame(
         params.dstX, params.dstY, params.dstW, params.dstH,
         params.mirror);
 }
-
 
 // ============================================================================
 // Painter::drawPage  (Emscripten / Canvas2D — future DOM migration point)
@@ -1207,13 +1212,13 @@ void Painter::drawPage(const PageDrawParams &params)
 
     if (params.body.present && params.body.hasBackground)
         fillRect(params.body.x, params.body.y, params.body.w, params.body.h,
-                params.body.background);
+                 params.body.background);
 
     if (params.header.present)
     {
         if (params.header.hasBackground)
             fillRect(params.header.x, params.header.y, params.header.w, params.header.h,
-                    params.header.background);
+                     params.header.background);
         if (params.header.elevation > 0)
         {
             int hx = params.header.x;
@@ -1235,7 +1240,7 @@ void Painter::drawPage(const PageDrawParams &params)
     {
         if (params.footer.hasBackground)
             fillRect(params.footer.x, params.footer.y, params.footer.w, params.footer.h,
-                    params.footer.background);
+                     params.footer.background);
         if (params.footer.elevation > 0)
         {
             int fx = params.footer.x;

@@ -3,34 +3,40 @@
 
 #include "flux/widgets/flux_image.hpp"
 
-#include <gdiplus.h>
+#include <wincodec.h>   // WIC — replaces GDI+ for image decoding
 #include <mutex>
-#include <objidl.h>
+#include <d2d1_1.h>
+#include <wrl/client.h>
+
+using Microsoft::WRL::ComPtr;
+
+#pragma comment(lib, "windowscodecs.lib")
 
 // ============================================================================
 // Win32State definition
+//
+// Strategy: WIC decodes compressed image bytes (PNG, JPEG, BMP, GIF, TIFF…)
+// into raw BGRA32 pixels on the background thread.  The raw pixels sit in
+// pendingPixels until _platformRender() is called on the render thread inside
+// BeginDraw/EndDraw — the only safe place to call CreateBitmap / CopyFromMemory
+// on the D2D device context.
+//
+// No GDI+ / GdiplusStartup needed.  WIC is always available on Vista+.
 // ============================================================================
 
 struct ImageWidget::Win32State
 {
-    std::unique_ptr<Gdiplus::Bitmap> bitmap;
     mutable std::mutex decodeMutex;
 
-    mutable std::unique_ptr<Gdiplus::Bitmap> scaledBitmap;
-    mutable int scaledW = 0;
-    mutable int scaledH = 0;
-    mutable int scaledFit = -1;
-    mutable int scaledQuality = -1;
+    // ── Decode-thread side ────────────────────────────────────────────────────
+    std::vector<uint8_t> pendingPixels;
+    int pendingW = 0;
+    int pendingH = 0;
 
-    // Set to true by decode thread to signal cache flush needed
-    mutable bool pendingFlush = false;
-
-    void invalidateCache()
-    {
-        scaledBitmap.reset();
-        scaledW = scaledH = 0;
-        scaledFit = scaledQuality = -1;
-    }
+    // ── Render-thread side (written & read only inside BeginDraw/EndDraw) ─────
+    ComPtr<ID2D1Bitmap1> d2dBitmap;
+    int bitmapW = 0;
+    int bitmapH = 0;
 };
 
 void ImageWidget::Win32StateDeleter::operator()(Win32State *p) const { delete p; }
@@ -38,43 +44,18 @@ void ImageWidget::Win32StateDeleter::operator()(Win32State *p) const { delete p;
 ImageWidget::~ImageWidget() { _platformDestroy(); }
 
 // ============================================================================
-// Helpers (file-scope)
-// ============================================================================
-
-static Gdiplus::InterpolationMode gdiInterpolation(FilterQuality q)
-{
-    switch (q)
-    {
-    case FilterQuality::None:
-        return Gdiplus::InterpolationModeNearestNeighbor;
-    case FilterQuality::Low:
-        return Gdiplus::InterpolationModeBilinear;
-    case FilterQuality::Medium:
-        return Gdiplus::InterpolationModeHighQualityBilinear;
-    case FilterQuality::High:
-        return Gdiplus::InterpolationModeHighQualityBicubic;
-    }
-    return Gdiplus::InterpolationModeBilinear;
-}
-
-static void renderRepeat(Gdiplus::Graphics &g, Gdiplus::Bitmap *src,
-                         ImageRepeat repeat,
-                         const ImageWidget::DestRect &d,
-                         int cx, int cy, int cw, int ch)
-{
-    float tileW = d.w, tileH = d.h;
-    float startX = (repeat == ImageRepeat::RepeatY) ? d.x : (float)cx;
-    float startY = (repeat == ImageRepeat::RepeatX) ? d.y : (float)cy;
-    float endX = (repeat == ImageRepeat::RepeatY) ? d.x + tileW : (float)(cx + cw);
-    float endY = (repeat == ImageRepeat::RepeatX) ? d.y + tileH : (float)(cy + ch);
-
-    for (float ty = startY; ty < endY; ty += tileH)
-        for (float tx = startX; tx < endX; tx += tileW)
-            g.DrawImage(src, Gdiplus::RectF(tx, ty, tileW, tileH));
-}
-
-// ============================================================================
-// _platformDecode   (Win32 — GDI+ stream, called from background thread)
+// _platformDecode  (background thread)
+//
+// WIC pipeline:
+//   IWICImagingFactory
+//     → IWICBitmapDecoder      (from IStream wrapping the raw bytes)
+//       → IWICBitmapFrameDecode
+//         → IWICFormatConverter  (convert any format → GUID_WICPixelFormat32bppPBGRA)
+//           → CopyPixels()       (write into our CPU buffer)
+//
+// GUID_WICPixelFormat32bppPBGRA == pre-multiplied BGRA32
+//   == DXGI_FORMAT_B8G8R8A8_UNORM + D2D1_ALPHA_MODE_PREMULTIPLIED
+// so the pixels can be uploaded to a D2D bitmap directly.
 // ============================================================================
 
 bool ImageWidget::_platformDecode(const uint8_t *data, int len)
@@ -82,171 +63,208 @@ bool ImageWidget::_platformDecode(const uint8_t *data, int len)
     if (!_win32)
         _win32.reset(new Win32State());
 
-    IStream *stream = nullptr;
+    fluxLog("[_platformDecode] len=" + std::to_string(len));
+
+    // CoInitialize for this background thread
+    HRESULT hrCo = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    fluxLog("[_platformDecode] CoInitializeEx hr=0x" + [hrCo](){
+        char b[16]; sprintf_s(b, "%08X", (unsigned)hrCo); return std::string(b); }());
+
+    // 1. Wrap bytes in IStream
     HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, (SIZE_T)len);
-    if (!hMem)
-        return false;
+    if (!hMem) { fluxLog("[_platformDecode] GlobalAlloc failed"); CoUninitialize(); return false; }
 
     void *ptr = GlobalLock(hMem);
-    if (!ptr)
-    {
-        GlobalFree(hMem);
-        return false;
-    }
+    if (!ptr) { GlobalFree(hMem); fluxLog("[_platformDecode] GlobalLock failed"); CoUninitialize(); return false; }
     memcpy(ptr, data, len);
     GlobalUnlock(hMem);
 
-    if (CreateStreamOnHGlobal(hMem, TRUE, &stream) != S_OK)
-    {
-        GlobalFree(hMem);
-        return false;
-    }
+    ComPtr<IStream> stream;
+    HRESULT hr = CreateStreamOnHGlobal(hMem, TRUE, stream.GetAddressOf());
+    fluxLog("[_platformDecode] CreateStreamOnHGlobal hr=0x" + [hr](){
+        char b[16]; sprintf_s(b, "%08X", (unsigned)hr); return std::string(b); }());
+    if (FAILED(hr)) { GlobalFree(hMem); CoUninitialize(); return false; }
 
-    std::unique_ptr<Gdiplus::Bitmap> decoded;
-    try
-    {
-        decoded = std::make_unique<Gdiplus::Bitmap>(stream);
-        stream->Release();
-        if (!decoded || decoded->GetLastStatus() != Gdiplus::Ok)
-            return false;
-    }
-    catch (...)
-    {
-        stream->Release();
-        return false;
-    }
+    // 2. WIC factory
+    ComPtr<IWICImagingFactory> wicFactory;
+    hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr,
+                          CLSCTX_INPROC_SERVER, IID_PPV_ARGS(wicFactory.GetAddressOf()));
+    fluxLog("[_platformDecode] CoCreateInstance WICFactory hr=0x" + [hr](){
+        char b[16]; sprintf_s(b, "%08X", (unsigned)hr); return std::string(b); }());
+    if (FAILED(hr) || !wicFactory) { CoUninitialize(); return false; }
 
-    int w = (int)decoded->GetWidth();
-    int h = (int)decoded->GetHeight();
-    if (w == 0 || h == 0)
-        return false;
+    // 3. Decoder
+    ComPtr<IWICBitmapDecoder> decoder;
+    hr = wicFactory->CreateDecoderFromStream(stream.Get(), nullptr,
+                                             WICDecodeMetadataCacheOnLoad,
+                                             decoder.GetAddressOf());
+    fluxLog("[_platformDecode] CreateDecoderFromStream hr=0x" + [hr](){
+        char b[16]; sprintf_s(b, "%08X", (unsigned)hr); return std::string(b); }());
+    if (FAILED(hr) || !decoder) { CoUninitialize(); return false; }
+
+    // 4. Frame
+    ComPtr<IWICBitmapFrameDecode> frame;
+    hr = decoder->GetFrame(0, frame.GetAddressOf());
+    fluxLog("[_platformDecode] GetFrame hr=0x" + [hr](){
+        char b[16]; sprintf_s(b, "%08X", (unsigned)hr); return std::string(b); }());
+    if (FAILED(hr) || !frame) { CoUninitialize(); return false; }
+
+    // 5. Format converter
+    ComPtr<IWICFormatConverter> converter;
+    hr = wicFactory->CreateFormatConverter(converter.GetAddressOf());
+    if (FAILED(hr)) { CoUninitialize(); return false; }
+
+    hr = converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppPBGRA,
+                               WICBitmapDitherTypeNone, nullptr, 0.0,
+                               WICBitmapPaletteTypeCustom);
+    fluxLog("[_platformDecode] converter->Initialize hr=0x" + [hr](){
+        char b[16]; sprintf_s(b, "%08X", (unsigned)hr); return std::string(b); }());
+    if (FAILED(hr)) { CoUninitialize(); return false; }
+
+    // 6. Copy pixels
+    UINT w = 0, h = 0;
+    converter->GetSize(&w, &h);
+    fluxLog("[_platformDecode] size=" + std::to_string(w) + "x" + std::to_string(h));
+
+    const UINT stride = w * 4;
+    const UINT bufSize = stride * h;
+    std::vector<uint8_t> pixels(bufSize);
+    hr = converter->CopyPixels(nullptr, stride, bufSize, pixels.data());
+    fluxLog("[_platformDecode] CopyPixels hr=0x" + [hr](){
+        char b[16]; sprintf_s(b, "%08X", (unsigned)hr); return std::string(b); }());
+    if (FAILED(hr)) { CoUninitialize(); return false; }
 
     {
         std::lock_guard<std::mutex> lock(_win32->decodeMutex);
-        _win32->bitmap = std::move(decoded);
-        imageWidth = w;
-        imageHeight = h;
-        _win32->pendingFlush = true;
+        _win32->pendingPixels = std::move(pixels);
+        _win32->pendingW      = (int)w;
+        _win32->pendingH      = (int)h;
+        imageWidth            = (int)w;
+        imageHeight           = (int)h;
     }
+
     _setLoadState(ImageLoadState::Loaded);
+    fluxLog("[_platformDecode] SUCCESS w=" + std::to_string(w) + " h=" + std::to_string(h));
+    CoUninitialize();
     return true;
 }
 
 // ============================================================================
-// _platformStorePixels  — not used on Win32
+// _platformStorePixels  — not used on Win32 (stb path is bypassed)
 // ============================================================================
 
 bool ImageWidget::_platformStorePixels(unsigned char * /*rgba*/,
                                        int /*w*/, int /*h*/)
 {
-    return false; // GDI+ path never calls stb
+    return false;
 }
 
 // ============================================================================
-// _platformPromote  (flush scaled cache if decode thread flagged it)
+// _platformPromote  — no-op on Win32
+//
+// Upload happens inside _platformRender() where ctx.dc is always live.
 // ============================================================================
 
 void ImageWidget::_platformPromote()
 {
-    if (!_win32)
-        return;
-    std::lock_guard<std::mutex> lock(_win32->decodeMutex);
-    if (_win32->pendingFlush)
-    {
-        _win32->invalidateCache();
-        _win32->pendingFlush = false;
-    }
+    // Intentionally empty — upload happens in _platformRender().
 }
 
 // ============================================================================
-// _platformRender
+// _platformRender  (render thread, inside BeginDraw/EndDraw)
+//
+// 1. If pendingPixels is non-empty, upload to D2D bitmap.
+// 2. DrawBitmap into the clip rect — D2D handles GPU-side scaling.
 // ============================================================================
 
 void ImageWidget::_platformRender(GraphicsContext &ctx, int cx, int cy,
                                   int cw, int ch)
 {
-    if (!_win32)
-        return;
-    std::lock_guard<std::mutex> lock(_win32->decodeMutex);
-    if (!_win32->bitmap)
+    if (!_win32 || !ctx.dc)
         return;
 
-    DestRect d = _calculateDestRect(cx, cy, cw, ch);
-    int dw = std::max(1, (int)d.w);
-    int dh = std::max(1, (int)d.h);
-
-    // ── Rebuild scaled bitmap if stale ───────────────────────────────────────
-    bool stale = !_win32->scaledBitmap || _win32->scaledW != dw || _win32->scaledH != dh || _win32->scaledFit != (int)fit || _win32->scaledQuality != (int)filterQuality;
-
-    if (stale)
+    // ── Upload pending pixels if the decode thread produced new ones ──────────
     {
-        _win32->scaledBitmap =
-            std::make_unique<Gdiplus::Bitmap>(dw, dh, PixelFormat32bppPARGB);
-        if (_win32->scaledBitmap &&
-            _win32->scaledBitmap->GetLastStatus() == Gdiplus::Ok)
+        std::lock_guard<std::mutex> lock(_win32->decodeMutex);
+
+        if (!_win32->pendingPixels.empty())
         {
-            Gdiplus::Graphics sg(_win32->scaledBitmap.get());
-            sg.SetInterpolationMode(gdiInterpolation(filterQuality));
-            sg.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
-            sg.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
-            sg.DrawImage(_win32->bitmap.get(),
-                         Gdiplus::RectF(0.f, 0.f, (float)dw, (float)dh));
-            _win32->scaledW = dw;
-            _win32->scaledH = dh;
-            _win32->scaledFit = (int)fit;
-            _win32->scaledQuality = (int)filterQuality;
-        }
-        else
-        {
-            _win32->scaledBitmap.reset();
-            _win32->scaledW = _win32->scaledH = 0;
-            _win32->scaledFit = _win32->scaledQuality = -1;
+            int w = _win32->pendingW;
+            int h = _win32->pendingH;
+
+            // Recreate bitmap if size changed
+            if (!_win32->d2dBitmap ||
+                _win32->bitmapW != w ||
+                _win32->bitmapH != h)
+            {
+                _win32->d2dBitmap = nullptr;
+
+                D2D1_BITMAP_PROPERTIES1 bp = D2D1::BitmapProperties1(
+                    D2D1_BITMAP_OPTIONS_NONE,
+                    D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
+                                      D2D1_ALPHA_MODE_PREMULTIPLIED));
+
+                HRESULT hr = ctx.dc->CreateBitmap(
+                    D2D1::SizeU((UINT32)w, (UINT32)h),
+                    nullptr, 0,
+                    bp,
+                    &_win32->d2dBitmap);
+
+                if (FAILED(hr))
+                {
+                    _win32->pendingPixels.clear();
+                    _win32->pendingW = _win32->pendingH = 0;
+                    return;
+                }
+
+                _win32->bitmapW = w;
+                _win32->bitmapH = h;
+            }
+
+            // Upload pixels to GPU
+            D2D1_RECT_U destRect = D2D1::RectU(0, 0, (UINT32)w, (UINT32)h);
+            _win32->d2dBitmap->CopyFromMemory(
+                &destRect,
+                _win32->pendingPixels.data(),
+                (UINT32)(w * 4));
+
+            _win32->pendingPixels.clear();
+            _win32->pendingW = _win32->pendingH = 0;
         }
     }
+
+    if (!_win32->d2dBitmap)
+        return;
+
+    // ── Draw ──────────────────────────────────────────────────────────────────
+    DestRect d = _calculateDestRect(cx, cy, cw, ch);
 
     Painter painter(ctx);
     Painter::ImageDrawParams params;
-    params.clipX = cx;
-    params.clipY = cy;
-    params.clipW = cw;
-    params.clipH = ch;
-    params.destX = d.x;
-    params.destY = d.y;
-    params.destW = d.w;
-    params.destH = d.h;
-    params.borderRadius = borderRadius;
-    params.repeat = repeat;
+    params.image         = static_cast<NativeImage>(_win32->d2dBitmap.Get());
+    params.srcWidth      = _win32->bitmapW;
+    params.srcHeight     = _win32->bitmapH;
+    params.clipX         = cx;
+    params.clipY         = cy;
+    params.clipW         = cw;
+    params.clipH         = ch;
+    params.destX         = d.x;
+    params.destY         = d.y;
+    params.destW         = d.w;
+    params.destH         = d.h;
+    params.borderRadius  = borderRadius;
+    params.repeat        = repeat;
     params.filterQuality = filterQuality;
-
-    if (_win32->scaledBitmap)
-    {
-        // Pre-scaled — painter does a plain (unscaled, NEAREST) blit.
-        params.image = _win32->scaledBitmap.get();
-        params.srcWidth = dw;
-        params.srcHeight = dh;
-    }
-    else
-    {
-        // No usable cache — let painter scale the raw bitmap at draw time.
-        params.image = _win32->bitmap.get();
-        params.srcWidth = imageWidth;
-        params.srcHeight = imageHeight;
-    }
 
     painter.drawImage(params);
 }
 
 // ============================================================================
-// _platformInvalidateCache
+// _platformInvalidateCache  — no-op (D2D scales at draw time)
 // ============================================================================
 
 void ImageWidget::_platformInvalidateCache()
 {
-    if (_win32)
-    {
-        std::lock_guard<std::mutex> lock(_win32->decodeMutex);
-        _win32->invalidateCache();
-    }
 }
 
 // ============================================================================

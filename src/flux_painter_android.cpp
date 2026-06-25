@@ -200,7 +200,7 @@ void Painter::measureText(const std::wstring &text, NativeFont fontHandle,
     outH = static_cast<int>(bounds[3] - bounds[1]);
 }
 
-void Painter::pushClipRect(int x, int y, int w, int h)
+void Painter::pushClipRect(int x, int y, int w, int h, int /*cornerRadius*/)
 {
     if (!s_vg)
         return;

@@ -2,8 +2,8 @@
 // Media Foundation A/V decode engine for FluxUI on Windows.
 //
 // Pipeline:
-//   IMFSourceReader (any_stream) → video: RGB24 → CPU frame buffer
-//                               → audio: PCM float → FluxAudio ring buffer
+//   IMFSourceReader (any_stream) -> video: RGB24 -> CPU frame buffer
+//                               -> audio: PCM float -> FluxAudio ring buffer
 //
 // The decode thread reads one sample per iteration; the UI thread blits the
 // frame buffer via StretchDIBits inside VideoPlayerWidget.
@@ -38,29 +38,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-
-// ── One-time COM / MF initialisation ──────────────────────────────────────────
-namespace
-{
-    struct MFInit
-    {
-        MFInit()
-        {
-            HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-            if (FAILED(hr) && hr != RPC_E_CHANGED_MODE)
-                fprintf(stderr, "[FluxVideo] CoInitializeEx failed: 0x%08X\n", (unsigned)hr);
-            hr = MFStartup(MF_VERSION);
-            if (FAILED(hr))
-                fprintf(stderr, "[FluxVideo] MFStartup failed: 0x%08X\n", (unsigned)hr);
-        }
-        ~MFInit()
-        {
-            MFShutdown();
-            CoUninitialize();
-        }
-    };
-    static MFInit s_mfInit;
-} // namespace
 
 // ============================================================================
 // Internal state
@@ -124,7 +101,25 @@ namespace
 
 static VideoState &impl()
 {
-    static VideoState s;
+    struct MFInit
+    {
+        MFInit()
+        {
+            HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+            if (FAILED(hr) && hr != RPC_E_CHANGED_MODE)
+                fprintf(stderr, "[FluxVideo] CoInitializeEx failed: 0x%08X\n", (unsigned)hr);
+            hr = MFStartup(MF_VERSION);
+            if (FAILED(hr))
+                fprintf(stderr, "[FluxVideo] MFStartup failed: 0x%08X\n", (unsigned)hr);
+        }
+        ~MFInit()
+        {
+            MFShutdown();
+            CoUninitialize();
+        }
+    };
+    static MFInit s_mfInit; // 1st constructed -> last destroyed
+    static VideoState s;    // 2nd constructed -> destroyed before MFInit
     return s;
 }
 
@@ -134,7 +129,8 @@ static VideoState &impl()
 
 FluxVideo &FluxVideo::get()
 {
-    static FluxVideo instance;
+    impl();                    // forces MFInit + VideoState to construct first
+    static FluxVideo instance; // constructs last -> destructs first -> close() runs while MF still live
     return instance;
 }
 FluxVideo::~FluxVideo() { close(); }
@@ -527,8 +523,11 @@ static void decodeLoop(std::string path)
                 s.state = FluxVideo::State::Finished;
                 bool expected = false;
                 if (s.didFireFinish.compare_exchange_strong(expected, true))
-                    if (s.finishCallback)
+                {
+                    std::lock_guard<std::mutex> lk(s.cmdMutex);
+                    if (!s.stopDecode && s.finishCallback)
                         s.finishCallback();
+                }
                 break;
             }
             else
@@ -635,6 +634,9 @@ void FluxVideo::close()
     s.cmdCV.notify_all();
     s.pauseCV.notify_all();
 
+    s.finishCallback = nullptr;
+    s.readyCallback = nullptr;
+
     if (s.decodeThread.joinable())
         s.decodeThread.join();
 
@@ -650,5 +652,4 @@ void FluxVideo::close()
     s.videoEOS = false;
     s.audioEOS = false;
 }
-
 #endif // _WIN32

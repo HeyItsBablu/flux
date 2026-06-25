@@ -132,15 +132,10 @@ struct Color
             static_cast<uint8_t>(a + (other.a - a) * t));
     }
 
-    bool operator==(const Color &o) const
-    {
-        return r == o.r && g == o.g && b == o.b && a == o.a;
-    }
+    bool operator==(const Color &o) const { return r == o.r && g == o.g && b == o.b && a == o.a; }
     bool operator!=(const Color &o) const { return !(*this == o); }
 };
 
-// Widgets and API code use Color exclusively.
-// NativeColor is only used inside Painter implementations.
 using NativeColor = Color;
 
 // ============================================================================
@@ -151,78 +146,23 @@ using NativeColor = Color;
 
 #include <windows.h>
 #include <windowsx.h>
-#include <objidl.h>
-#include <gdiplus.h>
-#pragma comment(lib, "gdiplus.lib")
+#include <sdkddkver.h> 
+#include <d2d1_3.h>
+#include <d2d1_1helper.h>
+#include <dwrite_3.h>
+
+using AppInstance = HINSTANCE;
+using TimerID     = uint32_t;
+
+// ── BrushCache forward declaration ───────────────────────────────────────────
+struct BrushCache;
 
 // ── Type aliases ──────────────────────────────────────────────────────────────
 
-using NativeWindow = HWND;
-using NativeContext = HDC;
-using NativeFont = HFONT;
-using AppInstance = HINSTANCE;
-using TimerID = UINT;
-
-// ── WGL extension typedefs ────────────────────────────────────────────────────
-
-using PFNWGLCREATECONTEXTATTRIBSARBPROC =
-    HGLRC(WINAPI *)(HDC, HGLRC, const int *);
-using PFNWGLCHOOSEPIXELFORMATARBPROC =
-    BOOL(WINAPI *)(HDC, const int *, const FLOAT *, UINT, int *, UINT *);
-
-// ── Color conversion helpers — only used inside Painter / platform code ───────
-
-inline COLORREF toColorRef(Color c) { return RGB(c.r, c.g, c.b); }
-inline BYTE toAlphaByte(Color c) { return c.a; }
-inline Gdiplus::Color toGdipColor(Color c)
-{
-    return Gdiplus::Color(c.a, c.r, c.g, c.b);
-}
-
-// ── BackBuffer ────────────────────────────────────────────────────────────────
-
-struct BackBuffer
-{
-    HDC hdc = nullptr;
-    HBITMAP hbm = nullptr;
-    HBITMAP hbmOld = nullptr;
-    int width = 0;
-    int height = 0;
-
-    bool valid() const { return hdc != nullptr; }
-
-    void create(HWND hwnd, int w, int h)
-    {
-        if (hdc && (w != width || h != height))
-            destroy();
-        if (!hdc)
-        {
-            HDC screen = GetDC(hwnd);
-            hdc = CreateCompatibleDC(screen);
-            hbm = CreateCompatibleBitmap(screen, w, h);
-            hbmOld = (HBITMAP)SelectObject(hdc, hbm);
-            ReleaseDC(hwnd, screen);
-            width = w;
-            height = h;
-        }
-    }
-
-    void destroy()
-    {
-        if (hdc)
-        {
-            SelectObject(hdc, hbmOld);
-            DeleteObject(hbm);
-            DeleteDC(hdc);
-            hdc = nullptr;
-            hbm = nullptr;
-            hbmOld = nullptr;
-        }
-    }
-
-    // Defined after GraphicsContext is complete — see bottom of this file.
-    inline struct GraphicsContext context();
-};
+using NativeWindow  = HWND;
+using NativeContext = ID2D1DeviceContext1*;
+using NativeFont    = IDWriteTextFormat*;
+using NativeImage   = ID2D1Bitmap1*;
 
 // ── Tick / input helpers ──────────────────────────────────────────────────────
 
@@ -262,12 +202,40 @@ inline std::wstring toWideString(const char *data, int byteCount)
     return result;
 }
 
-// DT_* text format flags are already defined by <windows.h> — no redefinition.
+// ── DT_* text format flags ────────────────────────────────────────────────────
+// These are cross-platform aliases used by Painter::drawText and IconWidget.
+// On Win32 we define them here explicitly (same values as the Win32 SDK) so
+// that flux_painter_d2d.cpp can interpret them without including <windows.h>
+// in platform-neutral code.
+//
+// NOTE: <windows.h> defines these too, but its values match ours, so there
+// is no conflict when both are visible.
+
+#ifndef DT_LEFT
+static constexpr UINT DT_LEFT = 0x0000u;
+static constexpr UINT DT_CENTER = 0x0001u;
+static constexpr UINT DT_RIGHT = 0x0002u;
+static constexpr UINT DT_VCENTER = 0x0004u;
+static constexpr UINT DT_TOP = 0x0000u;
+static constexpr UINT DT_WORDBREAK = 0x0010u;
+static constexpr UINT DT_SINGLELINE = 0x0020u;
+static constexpr UINT DT_NOCLIP = 0x0100u;
+static constexpr UINT DT_END_ELLIPSIS = 0x8000u;
+static constexpr UINT DT_MODIFYSTRING = 0x10000u;
+#endif
+
+// ── WGL extension typedefs (still needed by flux_canvas_win32.cpp) ────────────
+// CanvasWidget on Win32 moves to D2D inline rendering, but we keep these
+// typedefs for any remaining GL canvas path on non-Win32 builds included here.
+using PFNWGLCREATECONTEXTATTRIBSARBPROC =
+    HGLRC(WINAPI *)(HDC, HGLRC, const int *);
+using PFNWGLCHOOSEPIXELFORMATARBPROC =
+    BOOL(WINAPI *)(HDC, const int *, const FLOAT *, UINT, int *, UINT *);
 
 #endif // _WIN32
 
 // ============================================================================
-// LINUX PLATFORM
+// LINUX PLATFORM  (unchanged)
 // ============================================================================
 #if defined(__linux__) && !defined(__ANDROID__)
 
@@ -276,15 +244,12 @@ inline std::wstring toWideString(const char *data, int byteCount)
 #include <cairo/cairo.h>
 #include <pango/pangocairo.h>
 
-// ── Type aliases ──────────────────────────────────────────────────────────────
-
 using NativeWindow = SDL_Window *;
-using NativeFont = void *;  // PangoFontDescription* — cast in font/painter
-using AppInstance = void *; // unused on Linux; kept for API symmetry
+using NativeFont = void *;
+using AppInstance = void *;
 using TimerID = uint32_t;
-using UINT = unsigned int; // mirrors Win32; used by DT_* flags and TimerID
-
-// ── Tick helper ───────────────────────────────────────────────────────────────
+using UINT = unsigned int;
+using NativeImage = void*;
 
 inline uint32_t platformTickCount()
 {
@@ -293,28 +258,14 @@ inline uint32_t platformTickCount()
     return static_cast<uint32_t>(ts.tv_sec * 1000u + ts.tv_nsec / 1'000'000u);
 }
 
-// ── Key state ─────────────────────────────────────────────────────────────────
-
 inline bool platformKeyDown(int sdlScancode)
 {
     const uint8_t *state = SDL_GetKeyboardState(nullptr);
     return state != nullptr && state[sdlScancode];
 }
-
-inline bool platformCtrlDown()
-{
-    return (SDL_GetModState() & (KMOD_LCTRL | KMOD_RCTRL)) != 0;
-}
-inline bool platformShiftDown()
-{
-    return (SDL_GetModState() & (KMOD_LSHIFT | KMOD_RSHIFT)) != 0;
-}
-inline bool platformAltDown()
-{
-    return (SDL_GetModState() & (KMOD_LALT | KMOD_RALT)) != 0;
-}
-
-// ── Key code aliases — VK_* names → SDL_SCANCODE_* values ────────────────────
+inline bool platformCtrlDown() { return (SDL_GetModState() & (KMOD_LCTRL | KMOD_RCTRL)) != 0; }
+inline bool platformShiftDown() { return (SDL_GetModState() & (KMOD_LSHIFT | KMOD_RSHIFT)) != 0; }
+inline bool platformAltDown() { return (SDL_GetModState() & (KMOD_LALT | KMOD_RALT)) != 0; }
 
 static constexpr int VK_BACK = SDL_SCANCODE_BACKSPACE;
 static constexpr int VK_DELETE = SDL_SCANCODE_DELETE;
@@ -333,8 +284,6 @@ static constexpr int VK_CONTROL = SDL_SCANCODE_LCTRL;
 static constexpr int VK_SHIFT = SDL_SCANCODE_LSHIFT;
 static constexpr int VK_MENU = SDL_SCANCODE_LALT;
 
-// ── Text format flags — mirrors Win32 DT_* (identical numeric values) ────────
-
 static constexpr UINT DT_LEFT = 0x0000u;
 static constexpr UINT DT_CENTER = 0x0001u;
 static constexpr UINT DT_RIGHT = 0x0002u;
@@ -345,8 +294,6 @@ static constexpr UINT DT_SINGLELINE = 0x0020u;
 static constexpr UINT DT_NOCLIP = 0x0100u;
 static constexpr UINT DT_END_ELLIPSIS = 0x8000u;
 
-// ── String helpers ────────────────────────────────────────────────────────────
-
 inline std::wstring toWideString(const std::string &utf8)
 {
     std::wstring out;
@@ -355,7 +302,6 @@ inline std::wstring toWideString(const std::string &utf8)
         out += static_cast<wchar_t>(c);
     return out;
 }
-
 inline std::wstring toWideString(const char *data, int byteCount)
 {
     if (!data || byteCount <= 0)
@@ -370,7 +316,7 @@ inline std::wstring toWideString(const char *data, int byteCount)
 #endif // __linux__
 
 // ============================================================================
-// ANDROID PLATFORM
+// ANDROID PLATFORM  (unchanged)
 // ============================================================================
 
 #ifdef __ANDROID__
@@ -386,6 +332,7 @@ using NativeFont = void *;
 using AppInstance = android_app *;
 using TimerID = uint32_t;
 using UINT = unsigned int;
+using NativeImage = int;
 
 static constexpr UINT DT_LEFT = 0x0000u;
 static constexpr UINT DT_CENTER = 0x0001u;
@@ -413,7 +360,6 @@ inline uint32_t platformTickCount()
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return static_cast<uint32_t>(ts.tv_sec * 1000u + ts.tv_nsec / 1'000'000u);
 }
-
 inline bool platformCtrlDown() { return false; }
 inline bool platformShiftDown() { return false; }
 inline bool platformAltDown() { return false; }
@@ -441,7 +387,7 @@ inline std::wstring toWideString(const char *data, int byteCount)
 #endif // __ANDROID__
 
 // ============================================================================
-// APPLE PLATFORM (macOS)
+// APPLE PLATFORM (macOS)  (unchanged)
 // ============================================================================
 
 #ifdef __APPLE__
@@ -463,6 +409,7 @@ using NativeFont = void *;
 using AppInstance = void *;
 using TimerID = uint32_t;
 using UINT = unsigned int;
+using NativeImage = void*;
 
 static constexpr UINT DT_LEFT = 0x0000u;
 static constexpr UINT DT_CENTER = 0x0001u;
@@ -497,7 +444,6 @@ inline uint32_t platformTickCount()
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return static_cast<uint32_t>(ts.tv_sec * 1000u + ts.tv_nsec / 1'000'000u);
 }
-
 inline bool platformKeyDown(int) { return false; }
 inline bool platformCtrlDown() { return false; }
 inline bool platformShiftDown() { return false; }
@@ -511,7 +457,6 @@ inline std::wstring toWideString(const std::string &utf8)
         out += static_cast<wchar_t>(c);
     return out;
 }
-
 inline std::wstring toWideString(const char *data, int byteCount)
 {
     if (!data || byteCount <= 0)
@@ -527,7 +472,7 @@ inline std::wstring toWideString(const char *data, int byteCount)
 #endif // __APPLE__
 
 // ============================================================================
-// WEB PLATFORM (Emscripten)
+// WEB PLATFORM (Emscripten)  (unchanged)
 // ============================================================================
 
 #ifdef __EMSCRIPTEN__
@@ -536,26 +481,12 @@ inline std::wstring toWideString(const char *data, int byteCount)
 #include <emscripten/html5.h>
 #include <ctime>
 
-// ── Type aliases ──────────────────────────────────────────────────────────────
-//
-// NativeWindow  — canvas CSS selector string stored as void* (cast at use site
-//                 in flux_window_web.cpp).  The two canvases are:
-//                   "#flux-ui"  — Canvas 2D layer (painter / all widgets)
-//                   "#flux-gl"  — WebGL2 layer    (CanvasWidget only)
-//
-// NativeFont    — heap-allocated CSS font string, e.g. "bold 14px Inter".
-//                 Managed by FontCache in flux_font_web.cpp.
-//
-// AppInstance   — unused on web; kept for API symmetry with other platforms.
-// TimerID       — Emscripten interval handle returned by emscripten_set_interval.
-
-using NativeWindow = void *; // const char* canvas selector — cast at use site
-using NativeFont = void *;   // CSS font string — cast in font/painter
-using AppInstance = void *;  // unused on web
-using TimerID = long;        // emscripten_set_interval handle
-using UINT = unsigned int;   // mirrors Win32; used by DT_* flags
-
-// ── Text format flags — same values as all other platforms ───────────────────
+using NativeWindow = void *;
+using NativeFont = void *;
+using AppInstance = void *;
+using TimerID = long;
+using UINT = unsigned int;
+using NativeImage = void*;
 
 static constexpr UINT DT_LEFT = 0x0000u;
 static constexpr UINT DT_CENTER = 0x0001u;
@@ -567,37 +498,23 @@ static constexpr UINT DT_SINGLELINE = 0x0020u;
 static constexpr UINT DT_NOCLIP = 0x0100u;
 static constexpr UINT DT_END_ELLIPSIS = 0x8000u;
 
-// ── VK_* key code aliases — HTML KeyboardEvent.keyCode values ─────────────────
-//
-// These match the browser's legacy keyCode values, which Emscripten exposes
-// through emscripten_html5.h as DOM_KEY_LOCATION_* + key event structs.
-// The subset here covers everything FluxUI widgets test for.
-
-static constexpr int VK_BACK = 8;     // Backspace
-static constexpr int VK_TAB = 9;      // Tab
-static constexpr int VK_RETURN = 13;  // Enter
-static constexpr int VK_ESCAPE = 27;  // Escape
-static constexpr int VK_PRIOR = 33;   // Page Up
-static constexpr int VK_NEXT = 34;    // Page Down
-static constexpr int VK_END = 35;     // End
-static constexpr int VK_HOME = 36;    // Home
-static constexpr int VK_LEFT = 37;    // Arrow Left
-static constexpr int VK_UP = 38;      // Arrow Up
-static constexpr int VK_RIGHT = 39;   // Arrow Right
-static constexpr int VK_DOWN = 40;    // Arrow Down
-static constexpr int VK_DELETE = 46;  // Delete
-static constexpr int VK_SHIFT = 16;   // Shift
-static constexpr int VK_CONTROL = 17; // Control
-static constexpr int VK_MENU = 18;    // Alt
-static constexpr int VK_SPACE = 32;   // Space
-
-// ── Modifier state ────────────────────────────────────────────────────────────
-//
-// Emscripten does not expose a synchronous "is key held right now" query like
-// Win32's GetKeyState() or SDL's SDL_GetKeyboardState().  Instead, modifier
-// state is captured from the most-recent keyboard/mouse event and stored here
-// by flux_window_web.cpp.  All four functions read from these globals so the
-// rest of FluxUI can call them identically to every other platform.
+static constexpr int VK_BACK = 8;
+static constexpr int VK_TAB = 9;
+static constexpr int VK_RETURN = 13;
+static constexpr int VK_ESCAPE = 27;
+static constexpr int VK_PRIOR = 33;
+static constexpr int VK_NEXT = 34;
+static constexpr int VK_END = 35;
+static constexpr int VK_HOME = 36;
+static constexpr int VK_LEFT = 37;
+static constexpr int VK_UP = 38;
+static constexpr int VK_RIGHT = 39;
+static constexpr int VK_DOWN = 40;
+static constexpr int VK_DELETE = 46;
+static constexpr int VK_SHIFT = 16;
+static constexpr int VK_CONTROL = 17;
+static constexpr int VK_MENU = 18;
+static constexpr int VK_SPACE = 32;
 
 namespace flux_web_detail
 {
@@ -605,31 +522,15 @@ namespace flux_web_detail
     inline bool g_shiftDown = false;
     inline bool g_altDown = false;
 }
-
 inline bool platformCtrlDown() { return flux_web_detail::g_ctrlDown; }
 inline bool platformShiftDown() { return flux_web_detail::g_shiftDown; }
 inline bool platformAltDown() { return flux_web_detail::g_altDown; }
-
-// platformKeyDown() — not meaningful on web (no synchronous scan-code query).
-// Returns false so widgets that call it at non-event time get a safe answer.
-// Event-driven key checks go through the keydown/keyup callbacks in
-// flux_window_web.cpp instead.
 inline bool platformKeyDown(int) { return false; }
-
-// ── Tick helper ───────────────────────────────────────────────────────────────
 
 inline uint32_t platformTickCount()
 {
-    // emscripten_get_now() returns milliseconds as a double.
     return static_cast<uint32_t>(emscripten_get_now());
 }
-
-// ── String helpers ────────────────────────────────────────────────────────────
-//
-// The web painter works in UTF-8 throughout (Canvas 2D fillText accepts it
-// directly via EM_ASM).  toWideString() is provided for call-site compatibility
-// with widget code that still builds std::wstrings — the BMP-only path used on
-// Android/macOS/Linux is sufficient for UI label text on web too.
 
 inline std::wstring toWideString(const std::string &utf8)
 {
@@ -639,7 +540,6 @@ inline std::wstring toWideString(const std::string &utf8)
         out += static_cast<wchar_t>(c);
     return out;
 }
-
 inline std::wstring toWideString(const char *data, int byteCount)
 {
     if (!data || byteCount <= 0)
@@ -664,31 +564,35 @@ static constexpr int WHEEL_DELTA = 120;
 // ============================================================================
 // GraphicsContext
 //
-// Thin wrapper around the platform drawing surface passed to every Painter
-// call and every layout/measure operation.
+// Win32: wraps ID2D1DeviceContext1* + factories + brush cache.
+//        No longer owns any resource — all lifetime is in D3DDevice.
 //
-// Win32     : wraps HDC           — lifetime tied to BackBuffer HDC.
-// Linux     : wraps cairo_t*      — borrowed from CairoState; never owned here.
-// Android   : wraps width/height  — NanoVG is stateful; no context pointer needed.
-// macOS     : wraps CGContextRef  — borrowed from the MTKView draw callback.
-// Web       : wraps width/height  — Canvas 2D context lives in JS; C++ side
-//             only needs dimensions for layout/clip maths.  Painter methods
-//             reach the actual context via EM_ASM / Module._fluxCtx2D.
-//
-// Rule: GraphicsContext never owns or frees its underlying handle.
+// Other platforms: unchanged.
 // ============================================================================
 
 #ifdef _WIN32
 
+
+
+
+
 struct GraphicsContext
 {
-    NativeContext hdc = nullptr;
-    std::vector<HRGN> clipStack;
+    ID2D1DeviceContext1 *dc = nullptr; // the D2D render target
+    IDWriteFactory3 *dwrite = nullptr; // thread-safe DWrite factory
+    ID2D1Factory1 *factory = nullptr;  // thread-safe D2D factory
+    BrushCache *brushes = nullptr;     // per-device brush cache
+
+    std::vector<HRGN>    clipStack;
 
     GraphicsContext() = default;
-    explicit GraphicsContext(NativeContext h) : hdc(h) {}
+    GraphicsContext(ID2D1DeviceContext1 *dc,
+                    IDWriteFactory3 *dwrite,
+                    ID2D1Factory1 *factory,
+                    BrushCache *brushes)
+        : dc(dc), dwrite(dwrite), factory(factory), brushes(brushes) {}
 
-    bool valid() const { return hdc != nullptr; }
+    bool valid() const { return dc != nullptr; }
 };
 
 #endif // _WIN32
@@ -749,27 +653,10 @@ struct GraphicsContext
 
 #ifdef __EMSCRIPTEN__
 
-// ── Web GraphicsContext ───────────────────────────────────────────────────────
-//
-// The Canvas 2D rendering context (CanvasRenderingContext2D) lives entirely in
-// JavaScript as Module._fluxCtx2D.  C++ never holds a pointer to it.
-//
-// GraphicsContext therefore carries only the physical pixel dimensions of the
-// #flux-ui canvas, which the painter needs for:
-//   • clip-rect calculations
-//   • coordinate transforms (logical → physical when DPR != 1)
-//   • bounds checks in layout code
-//
-// Both fields are in physical pixels (already multiplied by devicePixelRatio).
-// Logical-pixel dimensions = width / dpr  (dpr stored in Module._fluxDPR).
-//
-// The painter accesses the JS context exclusively through EM_ASM blocks:
-//   EM_ASM({ const ctx = Module._fluxCtx2D; ctx.fillRect(...); });
-
 struct GraphicsContext
 {
-    int width = 0;  // physical pixels (CSS px * devicePixelRatio)
-    int height = 0; // physical pixels
+    int width = 0;
+    int height = 0;
 
     GraphicsContext() = default;
     GraphicsContext(int w, int h) : width(w), height(h) {}
@@ -782,9 +669,11 @@ struct GraphicsContext
 // ============================================================================
 // MeasureContext
 //
-// Wraps a GraphicsContext for text-measurement calls that happen outside of
-// a paint pass.  Non-copyable; movable so PlatformWindow::getMeasureContext()
-// can return by value.
+// Win32: borrows the always-live D2D context from D3DDevice.
+//        No resource acquisition/release — the device context lives on the
+//        render thread and stays valid for the window lifetime.
+//
+// Other platforms: unchanged.
 // ============================================================================
 
 struct MeasureContext
@@ -797,71 +686,38 @@ struct MeasureContext
     MeasureContext &operator=(MeasureContext &&) = default;
 
 #ifdef _WIN32
+    // Borrow the live D2D context — no GetDC/ReleaseDC, no HWND needed.
+    // DWrite is thread-safe so measureText can safely be called from any thread.
+    explicit MeasureContext(ID2D1DeviceContext1 *dc,
+                            IDWriteFactory3 *dwrite,
+                            ID2D1Factory1 *factory,
+                            BrushCache *brushes)
+        : ctx(dc, dwrite, factory, brushes) {}
 
-    HWND hwnd = nullptr;
-
-    
-
-    explicit MeasureContext(HWND h) : hwnd(h), ctx(GetDC(h)) {}
-
-    ~MeasureContext()
-    {
-        if (hwnd && ctx.hdc)
-            ReleaseDC(hwnd, ctx.hdc);
-    }
-
-#endif // _WIN32
+    ~MeasureContext() = default; // nothing to release
+#endif
 
 #if defined(__linux__) && !defined(__ANDROID__)
-
     explicit MeasureContext(cairo_t *cr, int w = 0, int h = 0)
         : ctx(cr, w, h) {}
-
     ~MeasureContext() = default;
-
-#endif // __linux__
+#endif
 
 #ifdef __ANDROID__
-
     explicit MeasureContext(int w, int h) : ctx(w, h) {}
-
     ~MeasureContext() = default;
-
-#endif // __ANDROID__
+#endif
 
 #ifdef __APPLE__
 #if TARGET_OS_OSX
-
     explicit MeasureContext(CGContextRef cg, int w = 0, int h = 0)
         : ctx(cg, w, h) {}
-
     ~MeasureContext() = default;
-
-#endif // TARGET_OS_OSX
-#endif // __APPLE__
+#endif
+#endif
 
 #ifdef __EMSCRIPTEN__
-
-    // ── Web MeasureContext ────────────────────────────────────────────────────
-    //
-    // Text measurement on web uses Canvas 2D's ctx.measureText(), called via
-    // EM_ASM in flux_font_web.cpp.  No C++ resource needs to be acquired or
-    // released — the JS context is always live while the page is running.
-    //
-    // Dimensions come from the current #flux-ui canvas size, passed in by
-    // flux_window_web.cpp when it calls getMeasureContext().
-
     explicit MeasureContext(int w, int h) : ctx(w, h) {}
-
     ~MeasureContext() = default;
-
-#endif // __EMSCRIPTEN__
-};
-
-// ── BackBuffer::context() — defined here, after GraphicsContext is complete ───
-#ifdef _WIN32
-inline GraphicsContext BackBuffer::context()
-{
-    return GraphicsContext(hdc);
-}
 #endif
+};

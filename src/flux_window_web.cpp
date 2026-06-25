@@ -129,7 +129,7 @@ static EM_BOOL onMouseDown(int /*eventType*/,
         return EM_FALSE;
     }
 
-    double dpr = EM_ASM_DOUBLE({ return Module._fluxDPR || 1.0; });
+    //double dpr = EM_ASM_DOUBLE({ return Module._fluxDPR || 1.0; });
     int x = (int)e->targetX;
     int y = (int)e->targetY;
 
@@ -700,11 +700,6 @@ GraphicsContext PlatformWindow::getMeasureContext() const
     return GraphicsContext(cachedWidth, cachedHeight);
 }
 
-// ── startupGdiplus ────────────────────────────────────────────────────────────
-//
-// Called by FluxUI::build() unconditionally.  No-op on web.
-
-void PlatformWindow::startupGdiplus() {}
 
 // ── Cursor ────────────────────────────────────────────────────────────────────
 
@@ -712,7 +707,13 @@ void PlatformWindow::setResizeCursorH()
 {
     EM_ASM({ document.getElementById('flux-ui').style.cursor = 'ew-resize'; });
 }
-
+void PlatformWindow::startRenderLoop()
+{
+    // No-op on web — the main loop is driven by emscripten_set_main_loop
+    // in main_web.cpp. The first tick() call will paint immediately because
+    // create() already sets webState->dirty = true.
+}
+ 
 void PlatformWindow::setResizeCursorV()
 {
     EM_ASM({ document.getElementById('flux-ui').style.cursor = 'ns-resize'; });

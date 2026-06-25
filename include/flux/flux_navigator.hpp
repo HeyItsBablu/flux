@@ -404,7 +404,7 @@ private:
         EM_ASM({
             var name = UTF8ToString($0);
             if ($1) {
-                history.replaceState(null, '', '#' + name);
+                history.replaceState(null, "", '#' + name);
             } else {
                 location.hash = name;
             }
@@ -417,7 +417,7 @@ private:
     {
         char buf[256] = {0};
         EM_ASM({
-            var h = location.hash.length > 1 ? location.hash.slice(1) : '';
+            var h = location.hash.length > 1 ? location.hash.slice(1) : "";
             stringToUTF8(h, $0, $1);
         }, buf, (int)sizeof(buf));
         return std::string(buf);

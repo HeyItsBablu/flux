@@ -111,6 +111,8 @@ public:
   void releaseMouseInput();
   MeasureContext getMeasureContext();
 
+  void postToRenderThread(std::function<void()> fn);
+
   PlatformWindow::ScreenPoint clientToScreen(int cx, int cy) const;
   PlatformWindow::ScreenPoint screenToClient(int sx, int sy) const;
   PlatformWindow::ClientSize getClientSize() const;

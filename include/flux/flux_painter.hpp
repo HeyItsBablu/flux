@@ -7,318 +7,187 @@
 #include <string>
 #include <vector>
 
-// ── Native image handle (platform-specific) ────────────────────────────────
-#ifdef _WIN32
-namespace Gdiplus
-{
-    class Bitmap;
-}
-using NativeImage = Gdiplus::Bitmap *;
-#elif defined(__APPLE__) && !defined(__ANDROID__)
-using NativeImage = struct CGImage *;
-#elif defined(__ANDROID__)
-using NativeImage = int; // NanoVG image handle (nvgImage)
-#elif defined(__linux__)
-typedef struct _cairo_surface cairo_surface_t;
-using NativeImage = cairo_surface_t *;
-#elif defined(__EMSCRIPTEN__)
-using NativeImage = int; // OffscreenCanvas store key
-#else
-using NativeImage = void *;
-#endif
+// ── ImageRepeat / FilterQuality ───────────────────────────────────────────────
 
-// ── Image repeat / filter quality (moved here from flux_image.hpp — these
-//    describe HOW Painter draws an image, not widget state) ────────────────
-enum class ImageRepeat
-{
-    NoRepeat,
-    Repeat,
-    RepeatX,
-    RepeatY
-};
+enum class ImageRepeat  { NoRepeat, Repeat, RepeatX, RepeatY };
+enum class FilterQuality{ None, Low, Medium, High };
 
-enum class FilterQuality
-{
-    None,
-    Low,
-    Medium,
-    High
-};
+// ============================================================================
+// Painter
+// Stack-allocated wrapper around GraphicsContext.
+// One instance per draw call site; never stored.
+// ============================================================================
 
 struct Painter
 {
-    GraphicsContext &ctx;
+    GraphicsContext& ctx;
+    explicit Painter(GraphicsContext& c) : ctx(c) {}
 
-    explicit Painter(GraphicsContext &c) : ctx(c) {}
-
-    // ── Filled rounded rect (GDI+ anti-aliased) ───────────────────────────
-    void fillRoundedRect(int x, int y, int w, int h, int radius, Color color);
-
-    // ── Border only (GDI+ anti-aliased) ──────────────────────────────────
-    void drawBorder(int x, int y, int w, int h, int radius, Color color,
-                    int borderWidth);
-
-    // ── Solid filled rect (no rounding) ──────────────────────────────────
+    // ── Filled shapes ─────────────────────────────────────────────────────────
     void fillRect(int x, int y, int w, int h, Color color);
+    void fillRoundedRect(int x, int y, int w, int h, int radius, Color color);
+    void fillRectAlpha(int x, int y, int w, int h, Color color);
+    void fillRoundedRegion(int x, int y, int w, int h, int cornerRadius, Color color);
+    void fillRectWithLeftAccent(int x, int y, int w, int h,
+                                Color bg, Color accent, int stripWidth);
+    void fillColumnBars(int x, int y, int w, int h,
+                        const std::vector<int>& barHeights, Color color);
+    void fillGradientRect(int x, int y, int w, int h,
+                          const std::vector<Color>& colors);
 
-    // ── Filled rounded rect via GDI RoundRect (for non-GDI+ paths) ───────
+    // GDI-compat overload: radius is a diameter (Win32 RoundRect convention).
+    // On D2D this halves the radius and delegates to fillRoundedRect.
     void fillRoundedRectGDI(int x, int y, int w, int h, int radius,
                             Color fill, Color stroke, int strokeWidth);
 
-    // ── Ellipse (filled + optional stroke) ────────────────────────────────
-    void drawEllipse(int x, int y, int w, int h,
-                     Color fill, Color stroke, int strokeWidth);
-
-    // ── Line segment ──────────────────────────────────────────────────────
-    void drawLine(int x1, int y1, int x2, int y2, Color color, int width);
-
-    // ── Text (wide) — low-level, no style object ──────────────────────────
-    void drawText(const std::wstring &text, int x, int y, int w, int h,
-                  NativeFont font, Color color, UINT format);
-
-    // ── Text (narrow / UTF-8) — low-level ────────────────────────────────
-    void drawTextA(const std::string &text, int x, int y, int w, int h,
-                   NativeFont font, Color color, UINT format);
-
-    // ── Text measurement (no drawing) ─────────────────────────────────────
-    void measureText(const std::wstring &text, NativeFont font,
-                     int &outWidth, int &outHeight);
-
-    // ── Clip region management ────────────────────────────────────────────
-    void pushClipRect(int x, int y, int w, int h);
-    void popClipRect();
-    void pushClipRoundedRect(int x, int y, int w, int h, int cornerDiameter);
-
-    // ── Gradient filled rect ──────────────────────────────────────────────
-    void fillGradientRect(int x, int y, int w, int h,
-                          const std::vector<Color> &colors);
-
-    // ── Rect / rounded rect outlines ──────────────────────────────────────
-    void drawRectOutline(int x, int y, int w, int h,
-                         Color color, int strokeWidth);
-    void drawRoundedRectOutline(int x, int y, int w, int h, int cornerDiameter,
-                                Color stroke, int strokeWidth);
-
-    // ── Alpha-blended solid rect ──────────────────────────────────────────
-    void fillRectAlpha(int x, int y, int w, int h, Color color);
-
-    // ── Filled region via rounded-rect HRGN ──────────────────────────────
-    void fillRoundedRegion(int x, int y, int w, int h,
-                           int cornerRadius, Color color);
-
-    // ── Horizontal / vertical line helpers ───────────────────────────────
-    void drawHLine(int x, int y, int len, Color color, int strokeWidth = 1);
-    void drawVLine(int x, int y, int len, Color color, int strokeWidth = 1);
-
-    // ── Filled rect with a solid left accent strip ────────────────────────
-    void fillRectWithLeftAccent(int x, int y, int w, int h,
-                                Color bg, Color accent, int stripWidth);
-
-    // ── Column bar chart fill ─────────────────────────────────────────────
-    void fillColumnBars(int x, int y, int w, int h,
-                        const std::vector<int> &barHeights, Color color);
-
-    // ── Polyline ──────────────────────────────────────────────────────────
-    void drawPolyline(const std::vector<std::pair<int, int>> &points,
-                      Color color, int strokeWidth);
-
-    // ── Alpha-blended polygon fill ────────────────────────────────────────
-    void fillPolygonAlpha(const std::vector<std::pair<int, int>> &points,
+    void fillPolygonAlpha(const std::vector<std::pair<int,int>>& points,
                           Color color);
 
-    // =========================================================================
-    // RICH TEXT DRAWING — Flutter-like, uses TextStyle
-    // =========================================================================
-
-    // ── Parameters shared by all rich-text drawing calls ─────────────────────
-    struct RichTextParams
-    {
-        int x = 0;
-        int y = 0;
-        int w = 0;
-        int h = 0;
-
-        TextAlign textAlign = TextAlign::Left;
-        TextAlignVertical textAlignVertical = TextAlignVertical::Top;
-        TextOverflow overflow = TextOverflow::Clip;
-        TextDirection direction = TextDirection::LTR;
-
-        bool softWrap = true; // wrap at word boundaries
-        int maxLines = 0;     // 0 = unlimited
-
-        // The style carries font, color, spacing, decoration, shadows, etc.
-        TextStyle style;
-    };
-
-    // ── Main rich-text draw call (wide string) ────────────────────────────────
-    // This is the single function that TextWidget ultimately calls.
-    void drawRichText(const std::wstring &text,
-                      const RichTextParams &params,
-                      FontCache &fontCache);
-
-    // ── Convenience overload for narrow UTF-8 strings ─────────────────────────
-    void drawRichTextA(const std::string &text,
-                       const RichTextParams &params,
-                       FontCache &fontCache);
-
-    // ── Rich text measurement (no drawing) ───────────────────────────────────
-    // Returns the bounding box the text would occupy with the given params.
-    // maxWidth limits line wrapping; use kUnbounded for single-line measure.
-    void measureRichText(const std::wstring &text,
-                         const TextStyle &style,
-                         FontCache &fontCache,
-                         int maxWidth,
-                         bool softWrap,
-                         int maxLines,
-                         int &outWidth, int &outHeight);
-
-    // ── Fade overlay helper (used internally for TextOverflow::Fade) ──────────
-    // Draws a horizontal gradient from transparent to `bg` over the last
-    // `fadeWidth` pixels of [x, y, w, h].
-    void drawFadeOverlay(int x, int y, int w, int h, int fadeWidth, Color bg);
-
-    // ── Decoration line drawing helpers ──────────────────────────────────────
-    // Called internally after text is drawn to render underline / overline /
-    // line-through at the correct baseline position.
-    void drawTextDecorationLine(int lineX, int lineY, int lineW,
-                                const TextStyle &style,
-                                TextDecoration which);
-
-    // ── Wavy line helper (TextDecorationStyle::Wavy approximation) ───────────
-    void drawWavyLine(int x, int y, int len, Color color, int amplitude = 2);
-
-    // ── Arc stroke (used by CircularProgressIndicatorWidget) ──────────────────
-    // startAngle and sweepAngle are in radians. 0 = 3 o'clock, clockwise.
+    // ── Stroked shapes ────────────────────────────────────────────────────────
+    void drawBorder(int x, int y, int w, int h, int radius,
+                    Color color, int borderWidth);
+    void drawEllipse(int x, int y, int w, int h,
+                     Color fill, Color stroke, int strokeWidth);
+    void drawLine(int x1, int y1, int x2, int y2, Color color, int width);
+    void drawHLine(int x, int y, int len, Color color, int strokeWidth = 1);
+    void drawVLine(int x, int y, int len, Color color, int strokeWidth = 1);
+    void drawPolyline(const std::vector<std::pair<int,int>>& points,
+                      Color color, int strokeWidth);
+    void drawRectOutline(int x, int y, int w, int h,
+                         Color color, int strokeWidth);
+    void drawRoundedRectOutline(int x, int y, int w, int h,
+                                int cornerDiameter,
+                                Color stroke, int strokeWidth);
     void drawArc(float cx, float cy, float radius,
                  int strokeWidth,
                  float startAngle, float sweepAngle,
                  Color color, bool roundedCaps);
+    void drawWavyLine(int x, int y, int len, Color color, int amplitude = 2);
 
-    // =========================================================================
-    // IMAGE DRAWING — the only place that issues system image-blit calls.
-    // ImageWidget/_platformRender prepares `image` (already decoded, and
-    // ideally pre-scaled to destW/destH) and hands it here. If srcWidth/
-    // srcHeight differ from destW/destH, drawImage scales at draw time using
-    // filterQuality — this covers both the "cache hit" (srcW==destW) and
-    // "fallback, not yet cached" (srcW==original image size) cases uniformly.
-    // =========================================================================
+    // ── Clip ──────────────────────────────────────────────────────────────────
+    // Primary overload — cornerRadius=0 means axis-aligned clip (fastest).
+    // cornerRadius>0 uses a rounded-rect layer clip.
+    void pushClipRect(int x, int y, int w, int h, int cornerRadius = 0); 
+    void popClipRect();
+
+    // Legacy overload kept for source compatibility (all existing call sites
+    // that don't pass a radius still compile without changes).
+    void pushClipRoundedRect(int x, int y, int w, int h, int cornerDiameter);
+
+    // ── Opacity / shadow layers (D2D; no-op on other platforms) ──────────────
+    // Draw a GPU shadow under a rect. blurRadius controls softness.
+    void drawShadow(int x, int y, int w, int h,
+                    int radius, int blurRadius,
+                    Color color, int offsetX, int offsetY);
+
+    // Begin/end a compositing layer with fractional opacity.
+    // Every beginLayer must be matched by an endLayer.
+    void beginLayer(float opacity);
+    void endLayer();
+
+    // ── Text (low-level — used by IconWidget) ─────────────────────────────────
+    // UINT format: DT_CENTER / DT_RIGHT / DT_VCENTER flags (cross-platform).
+    void drawText(const std::wstring& text, int x, int y, int w, int h,
+                  NativeFont font, Color color, UINT format);
+    void drawTextA(const std::string& text, int x, int y, int w, int h,
+                   NativeFont font, Color color, UINT format);
+    void measureText(const std::wstring& text, NativeFont font,
+                     int& outWidth, int& outHeight);
+
+    // ── Rich text ─────────────────────────────────────────────────────────────
+    struct RichTextParams
+    {
+        int x=0, y=0, w=0, h=0;
+        TextAlign         textAlign        = TextAlign::Left;
+        TextAlignVertical textAlignVertical= TextAlignVertical::Top;
+        TextOverflow      overflow         = TextOverflow::Clip;
+        TextDirection     direction        = TextDirection::LTR;
+        bool              softWrap         = true;
+        int               maxLines         = 0;
+        TextStyle         style;
+    };
+
+    void drawRichText(const std::wstring& text,
+                      const RichTextParams& params,
+                      FontCache& fontCache);
+    void drawRichTextA(const std::string& text,
+                       const RichTextParams& params,
+                       FontCache& fontCache);
+    void measureRichText(const std::wstring& text,
+                         const TextStyle& style,
+                         FontCache& fontCache,
+                         int maxWidth, bool softWrap, int maxLines,
+                         int& outWidth, int& outHeight);
+
+    // ── Decoration helpers ────────────────────────────────────────────────────
+    void drawFadeOverlay(int x, int y, int w, int h, int fadeWidth, Color bg);
+    void drawTextDecorationLine(int lineX, int lineY, int lineW,
+                                const TextStyle& style,
+                                TextDecoration which);
+
+    // ── Image / Video / Camera / Page ─────────────────────────────────────────
 
     struct ImageDrawParams
     {
-        NativeImage image{}; // platform-native, already-decoded image
-        int srcWidth = 0;
-        int srcHeight = 0;
-
-        // Clip rect == widget's padded content rect; also bounds repeat tiling.
-        int clipX = 0, clipY = 0, clipW = 0, clipH = 0;
-
-        // Single-tile placement rect, already computed by the widget's
-        // fit/alignment math (e.g. ImageWidget::_calculateDestRect).
-        float destX = 0, destY = 0, destW = 0, destH = 0;
-
-        int borderRadius = 0;
-        ImageRepeat repeat = ImageRepeat::NoRepeat;
-        FilterQuality filterQuality = FilterQuality::Low;
+        NativeImage   image{};
+        int           srcWidth  = 0;
+        int           srcHeight = 0;
+        int           clipX=0, clipY=0, clipW=0, clipH=0;
+        float         destX=0, destY=0, destW=0, destH=0;
+        int           borderRadius    = 0;
+        ImageRepeat   repeat          = ImageRepeat::NoRepeat;
+        FilterQuality filterQuality   = FilterQuality::Low;
     };
-
-    void drawImage(const ImageDrawParams &params);
+    void drawImage(const ImageDrawParams& params);
 
     struct VideoDrawParams
     {
-        // ── Destination rect (letterboxed, computed by widget) ────────────────
-        int dstX = 0, dstY = 0, dstW = 0, dstH = 0;
-
-        // ── Platform frame handle ─────────────────────────────────────────────
-        // macOS  : CGImageRef        cast to NativeImage
-        // Linux  : cairo_surface_t*  cast to NativeImage
-        // Android: NVG image handle  (int, stored as NativeImage)
-        // Web    : unused            (video element blits itself)
-        // Win32  : unused            (uses pixels + bmi below)
+        int         dstX=0, dstY=0, dstW=0, dstH=0;
         NativeImage frame{};
 
-        // ── Win32 only ────────────────────────────────────────────────────────
 #ifdef _WIN32
-        const void *pixels = nullptr;    // _frameCache.data()
-        const BITMAPINFO *bmi = nullptr; // &_cachedBmi
-        int srcW = 0, srcH = 0;
+        // Win32 D2D path: frame is ID2D1Bitmap1* — no separate pixel/bmi needed
 #endif
-
-        // ── Android only ──────────────────────────────────────────────────────
 #ifdef __ANDROID__
-        int srcW = 0, srcH = 0;
+        int srcW=0, srcH=0;
 #endif
     };
-
-    void drawVideo(const VideoDrawParams &params);
+    void drawVideo(const VideoDrawParams& params);
 
     struct CameraDrawParams
     {
-        // Destination rect (letterboxed, computed by widget)
-        int dstX = 0, dstY = 0, dstW = 0, dstH = 0;
-
-        // Mirror horizontally (front camera selfie flip)
-        bool mirror = false;
-
-        // Rotation in degrees — 0, 90, 180, 270.
-        // Center of rotation in widget coordinates.
-        float rotationDeg = 0.f;
-        float rotCenterX = 0.f;
-        float rotCenterY = 0.f;
-
-        // Platform frame handle
-        // macOS  : CGImageRef       cast to NativeImage  (BGRA32)
-        // Linux  : cairo_surface_t* cast to NativeImage  (RGB24 as BGRX)
-        // Android: NVG image handle (int, stored as NativeImage)
-        // Web    : unused           (renderFrame() blits directly)
-        // Win32  : unused           (uses pixels + bmi below)
+        int         dstX=0, dstY=0, dstW=0, dstH=0;
+        bool        mirror      = false;
+        float       rotationDeg = 0.f;
+        float       rotCenterX  = 0.f;
+        float       rotCenterY  = 0.f;
         NativeImage frame{};
 
-#ifdef _WIN32
-        const void *pixels = nullptr;    // _frameCache.data() — BGRA32
-        const BITMAPINFO *bmi = nullptr; // &bmi
-        int srcW = 0, srcH = 0;
-#endif
-
 #ifdef __ANDROID__
-        int srcW = 0, srcH = 0;
+        int srcW=0, srcH=0;
 #endif
     };
-
-    void drawCamera(const CameraDrawParams &params);
-
+    void drawCamera(const CameraDrawParams& params);
 
     struct PageDrawParams
     {
-        int x = 0, y = 0, w = 0, h = 0;
+        int x=0, y=0, w=0, h=0;
 
         struct Region
         {
-            bool present = false;
-            int x = 0, y = 0, w = 0, h = 0;
-
-            bool hasBackground = false;
-            Color background = Color::fromRGB(255, 255, 255);
-
-            // Drop-shadow depth in pixels. For header: shadow cast downward from
-            // its bottom edge (sticky-app-bar look). For footer: shadow cast
-            // upward from its top edge. 0 = no shadow.
-            int elevation = 0;
+            bool  present       = false;
+            int   x=0, y=0, w=0, h=0;
+            bool  hasBackground = false;
+            Color background    = Color::fromRGB(255,255,255);
+            int   elevation     = 0;
         };
 
-        Region header;
-        Region body;
-        Region footer;
-
-        bool hasPageBackground = false;
-        Color pageBackground = Color::fromRGB(255, 255, 255);
-
-        // Reconciliation key — unused by every backend today. Reserved for a
-        // future DOM backend to find-or-create <header>/<main>/<footer> wrapper
-        // elements and re-parent the real child DOM nodes into them.
+        Region header, body, footer;
+        bool  hasPageBackground = false;
+        Color pageBackground    = Color::fromRGB(255,255,255);
         std::string widgetId;
     };
-
-    void drawPage(const PageDrawParams &params);
+    void drawPage(const PageDrawParams& params);
 };
 
 #endif // FLUX_PAINTER_HPP

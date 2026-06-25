@@ -41,6 +41,7 @@
 
 #include "flux/flux.hpp"
 #include "flux/flux_navigator.hpp"
+#include "flux/flux_http_platform.hpp"
 
 // ============================================================================
 // Forward declaration — defined by the application (e.g. helloworld.cpp)
@@ -200,7 +201,7 @@ int main()
     // initial route's hash.
     EM_ASM({
         window.addEventListener('hashchange', function() {
-            var h = location.hash.length > 1 ? location.hash.slice(1) : '';
+            var h = location.hash.length > 1 ? location.hash.slice(1) : "";
             Module.ccall('fluxNavigatorHashChanged', null, [ 'string' ], [ h ]); });
     });
 

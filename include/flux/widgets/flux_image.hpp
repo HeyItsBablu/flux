@@ -3,7 +3,9 @@
 
 #include "../flux_core.hpp"
 #include "../flux_http.hpp"
-#include "../flux_painter.hpp" 
+#include "../flux_painter.hpp"
+#include <direct.h>
+#include "flux/flux_debug_log.hpp"
 
 // ============================================================================
 // SHARED DECODE  (stb_image — used by Linux, Android, macOS, Web)
@@ -52,8 +54,6 @@ enum class ImageFit
   None,
   ScaleDown
 };
-
-
 
 // ============================================================================
 // IMAGE LOAD STATE
@@ -475,12 +475,31 @@ private:
     hasError = (s == ImageLoadState::Error);
   }
 
+  // AFTER:
   void _scheduleRebuild()
   {
-    if (auto *ui = FluxUI::getCurrentInstance())
-      ui->partialRebuild(this);
-    else
+    auto *ui = FluxUI::getCurrentInstance();
+    if (!ui)
+    {
       markNeedsLayout();
+      return;
+    }
+
+    // NEVER call partialRebuild directly from a background thread —
+    // the widget tree is owned by the render thread.
+    // Post to the render loop so it runs safely between frames.
+    std::weak_ptr<ImageWidget> weak =
+        std::static_pointer_cast<ImageWidget>(shared_from_this());
+
+    ui->postToRenderThread([weak]()
+                           {
+        auto self = weak.lock();
+        if (!self) return;
+        auto *ui2 = FluxUI::getCurrentInstance();
+        if (ui2)
+            ui2->partialRebuild(self.get());
+        else
+            self->markNeedsLayout(); });
   }
 
   // =========================================================================
@@ -569,8 +588,26 @@ private:
             AAsset_close(asset);
 #else
 #ifdef _WIN32
-            FILE *f = nullptr;
-            fopen_s(&f, path.c_str(), "rb");
+char cwd[512];
+_getcwd(cwd, sizeof(cwd));
+fluxLog("[_loadAssetAsync] cwd=" + std::string(cwd) + " path=" + path);
+std::cout <<std::string(cwd) <<" "<< path <<std::endl;
+
+FILE *f = nullptr;
+errno_t err = fopen_s(&f, path.c_str(), "rb");
+fluxLog("[_loadAssetAsync] fopen result: f=" + std::string(f ? "valid" : "NULL") +
+        " errno=" + std::to_string(err));
+
+        std::cout <<"[_loadAssetAsync] fopen result: f=" << std::string(f ? "valid" : "NULL")<<  " errno=" << std::to_string(err)<<std::endl;
+
+if (!f) {
+    fluxLog("[_loadAssetAsync] FILE OPEN FAILED errno=" + std::to_string(err));
+    std::cout <<"[_loadAssetAsync] FILE OPEN FAILED errno=" << std::to_string(err)<<std::endl;
+
+    self->_setLoadState(ImageLoadState::Error);
+    self->_scheduleRebuild();
+    return;
+}
 #else
             FILE *f = fopen(path.c_str(), "rb");
 #endif

@@ -64,7 +64,7 @@ using Microsoft::WRL::ComPtr;
 // CameraWidget
 // ============================================================================
 
-class CameraWidget : public Widget
+class CameraWidget : public Widget 
 {
 public:
     // ── Config ────────────────────────────────────────────────────────────────
@@ -335,18 +335,24 @@ public:
 #endif // __ANDROID__
 
 #ifdef _WIN32
-    // ── Windows: GDI StretchDIBits preview, WIC thumbnail ─────────────────
     struct Win32State
     {
         std::vector<uint8_t> frameCache; // BGRA32, top-down
-        BITMAPINFO bmi{};
         int cachedSrcW = 0;
         int cachedSrcH = 0;
 
-        std::vector<uint8_t> thumbCache; // BGRA32, top-down (WIC decoded)
+        Microsoft::WRL::ComPtr<ID2D1Bitmap> d2dBitmap;
+        int d2dBitmapW = 0;
+        int d2dBitmapH = 0;
+
+        std::vector<uint8_t> thumbCache;
         BITMAPINFO thumbBmi{};
         int thumbSrcW = 0;
         int thumbSrcH = 0;
+
+        Microsoft::WRL::ComPtr<ID2D1Bitmap> thumbD2dBitmap;
+        int thumbD2dW = 0;
+        int thumbD2dH = 0;
     };
     struct Win32StateDeleter
     {

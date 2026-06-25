@@ -27,7 +27,7 @@
 #include "flux/flux.hpp"
 #include "flux/flux_video.hpp"
 #include "flux_icons.hpp"
-#include "nanovg.h" 
+#include "nanovg.h"
 extern NVGcontext *FluxAndroid_getVG();
 extern float FluxAndroid_getDpiScale();
 #elif defined(__APPLE__)
@@ -42,6 +42,7 @@ extern float FluxAndroid_getDpiScale();
 #include "flux/flux.hpp"
 #include "flux/flux_video.hpp"
 #include "flux_icons.hpp"
+#include <wrl/client.h>
 #elif defined(__linux__)
 #include "flux/flux.hpp"
 #include "flux/flux_video.hpp"
@@ -251,9 +252,7 @@ public:
         _destroyed = true;
 #endif
         _stopTimers();
-        FluxVideo::get().close();
-        FluxVideo::get().setOnFinished(nullptr);
-        FluxVideo::get().setOnReady(nullptr);
+        FluxVideo::get().close(); 
 
 #ifdef __ANDROID__
         NVGcontext *vg = FluxAndroid_getVG();
@@ -463,27 +462,65 @@ public:
                 auto frame = FluxVideo::get().lockFrame();
                 if (frame.data && frame.width > 0 && frame.height > 0)
                 {
-                    _frameCache.assign(frame.data, frame.data + frame.stride * frame.height);
                     _cachedSrcW = frame.width;
                     _cachedSrcH = frame.height;
-                    _cachedBmi = {};
-                    _cachedBmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-                    _cachedBmi.bmiHeader.biWidth = frame.width;
-                    _cachedBmi.bmiHeader.biHeight = -frame.height;
-                    _cachedBmi.bmiHeader.biPlanes = 1;
-                    _cachedBmi.bmiHeader.biBitCount = 24;
-                    _cachedBmi.bmiHeader.biCompression = BI_RGB;
+
+                    // Convert RGB24 → BGRA32 (D2D requires 32bpp)
+                    int nPixels = frame.width * frame.height;
+                    _frameCache.resize(nPixels * 4);
+                    const uint8_t *src = frame.data;
+                    uint8_t *dst = _frameCache.data();
+                    for (int i = 0; i < nPixels; ++i)
+                    {
+                        dst[0] = src[2]; // B
+                        dst[1] = src[1]; // G
+                        dst[2] = src[0]; // R
+                        dst[3] = 0xFF;   // A
+                        src += 3;
+                        dst += 4;
+                    }
+                    _d2dBitmapDirty = true;
                 }
                 _progress = FluxVideo::get().getProgress();
             }
 
-            if (!_frameCache.empty() && _cachedSrcW > 0)
+            // Upload to D2D bitmap if pixel data changed
+            if (_d2dBitmapDirty && !_frameCache.empty() && _cachedSrcW > 0 && ctx.dc)
+            {
+                _d2dBitmapDirty = false;
+
+                // Recreate bitmap if size changed
+                if (!_d2dBitmap ||
+                    _d2dBitmapW != _cachedSrcW ||
+                    _d2dBitmapH != _cachedSrcH)
+                {
+                    _d2dBitmap = nullptr;
+                    _d2dBitmapW = _cachedSrcW;
+                    _d2dBitmapH = _cachedSrcH;
+
+                    D2D1_BITMAP_PROPERTIES bp = D2D1::BitmapProperties(
+                        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
+                                          D2D1_ALPHA_MODE_IGNORE));
+                    ctx.dc->CreateBitmap(
+                        D2D1::SizeU((UINT32)_cachedSrcW, (UINT32)_cachedSrcH),
+                        bp, &_d2dBitmap);
+                }
+
+                if (_d2dBitmap)
+                {
+                    D2D1_RECT_U destRect = D2D1::RectU(
+                        0, 0, (UINT32)_cachedSrcW, (UINT32)_cachedSrcH);
+                    _d2dBitmap->CopyFromMemory(
+                        &destRect,
+                        _frameCache.data(),
+                        (UINT32)(_cachedSrcW * 4));
+                }
+            }
+
+            if (_d2dBitmap && _cachedSrcW > 0)
             {
                 Painter::VideoDrawParams vp;
-                vp.pixels = _frameCache.data();
-                vp.bmi = &_cachedBmi;
-                vp.srcW = _cachedSrcW;
-                vp.srcH = _cachedSrcH;
+                vp.frame = static_cast<NativeImage>(_d2dBitmap.Get());
                 _letterbox(_cachedSrcW, _cachedSrcH, vp.dstX, vp.dstY, vp.dstW, vp.dstH);
                 p.drawVideo(vp);
             }
@@ -699,8 +736,10 @@ private:
 
 #elif defined(_WIN32)
     std::vector<uint8_t> _frameCache;
-    BITMAPINFO _cachedBmi{};
     int _cachedSrcW = 0, _cachedSrcH = 0;
+    bool _d2dBitmapDirty = false;
+    int _d2dBitmapW = 0, _d2dBitmapH = 0;
+    Microsoft::WRL::ComPtr<ID2D1Bitmap> _d2dBitmap;
     std::atomic<bool> _destroyed{false};
     std::atomic<bool> _finishedPending{false};
 
@@ -865,11 +904,16 @@ private:
         _barHideTimer = ui->setInterval(3000, [this]()
                                         {
 #if !defined(__ANDROID__)
-            if (_destroyed) return;
+                                            if (_destroyed)
+                                                return;
 #endif
-            auto* u = FluxUI::getCurrentInstance();
-            if (u && _barHideTimer) { u->clearInterval(_barHideTimer); _barHideTimer = 0; }
-            if (_playing) { _barVisible = false; markNeedsPaint(); } });
+                                            if (_playing)
+                                            {
+                                                _barVisible = false;
+                                                markNeedsPaint();
+                                            }
+                                            // do NOT clear/touch _barHideTimer here
+                                        });
     }
 
     void _stopTimers()

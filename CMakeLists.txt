@@ -340,6 +340,7 @@ if(WIN32)
             glad
             nanovg
             CURL::libcurl
+            dxguid        
             Msimg32
             Gdiplus
             opengl32

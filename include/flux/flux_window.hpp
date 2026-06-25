@@ -1,4 +1,3 @@
-//include/flux/flux_window.hpp
 #ifndef FLUX_WINDOW_HPP
 #define FLUX_WINDOW_HPP
 
@@ -14,10 +13,8 @@
 class CanvasWidget;
 class CairoCompositor;
 class Canvas2DGL;
-
 #include <glad/glad.h>
 #include <SDL2/SDL.h>
-
 #endif
 
 #ifdef __APPLE__
@@ -28,15 +25,27 @@ struct Canvas2DGL;
 #endif
 #endif
 
+// Win32: forward-declare our new GPU objects so the header stays lean.
+// Full types are only needed in flux_window_win32.cpp.
+#ifdef _WIN32
+struct D3DDevice;
+class RenderLoop;
+#endif
+
 // ============================================================================
 // WindowCallbacks
 // ============================================================================
 
 struct WindowCallbacks
 {
+    // Paint: called on the render thread each frame with dt in seconds.
+    // ctx is the D2D device context on Win32, cairo_t* on Linux, etc.
     std::function<void(GraphicsContext &ctx, int width, int height)> onPaint;
+
+    // Resize: called on the render thread after the swap chain is resized.
     std::function<void(GraphicsContext &ctx, int width, int height)> onResize;
 
+    // Input: all called on the message thread, return true to request redraw.
     std::function<bool(int x, int y)> onMouseDown;
     std::function<bool(int x, int y)> onMouseUp;
     std::function<bool(int x, int y)> onMouseMove;
@@ -47,7 +56,10 @@ struct WindowCallbacks
     std::function<bool(int keyCode)> onKeyDown;
     std::function<bool(wchar_t ch)> onChar;
 
-    std::function<void(TimerID timerId)> onTimer;
+    // Timer: on Win32 these are now fired on the render thread by RenderLoop.
+    // On other platforms they still use the platform timer mechanism.
+    std::function<void(TimerID id)> onTimer;
+
     std::function<void()> onNonClientMouseDown;
     std::function<void()> onFocusLost;
 };
@@ -67,14 +79,23 @@ public:
 
     bool create(const std::string &title, int width, int height,
                 AppInstance hInstance, void *userData);
+  
+    void startRenderLoop();
     void destroy();
     int run();
     void tick();
 
     WindowCallbacks callbacks;
 
+    // ── Dirty signaling ───────────────────────────────────────────────────────
+    // On Win32 these now signal the RenderLoop rather than calling
+    // InvalidateRect. On other platforms the behaviour is unchanged.
     void invalidate();
     void invalidateRect(int x, int y, int w, int h);
+
+    // ── Timers ────────────────────────────────────────────────────────────────
+    // On Win32 these are routed through RenderLoop (sub-frame accuracy,
+    // render-thread execution). On other platforms: SDL_AddTimer / SetTimer.
     void setTimer(TimerID id, int ms);
     void killTimer(TimerID id);
 
@@ -109,10 +130,22 @@ public:
     void setResizeCursorV();
     void setDefaultCursor();
 
-    void startupGdiplus();
+
+
+    // ── Measure context ───────────────────────────────────────────────────────
+    // Returns a borrowed view of the D2D device context (Win32) or the
+    // platform equivalent. Used by LayoutEngine for text measurement.
     GraphicsContext getMeasureContext() const;
 
-    // ── DPI helpers (Linux HiDPI: drawable pixels / logical pixels) ───────────
+    // ── D2D context accessor (Win32 only) ─────────────────────────────────────
+    // Exposes the live D2D device context so FluxUI::getMeasureContext()
+    // can borrow it without going through PlatformWindow internals.
+#ifdef _WIN32
+    GraphicsContext getD2DContext() const;
+    RenderLoop *getRenderLoop() const { return renderLoop_; }
+#endif
+
+    // ── DPI helpers (Linux HiDPI) ─────────────────────────────────────────────
 #if defined(__linux__) && !defined(__ANDROID__)
     float dpiScaleX() const
     {
@@ -134,30 +167,34 @@ public:
     EGLDisplay getEGLDisplay() const;
     EGLSurface getEGLSurface() const;
     EGLContext getEGLContext() const;
-
     void handleAndroidEvent(const AInputEvent *event);
     void pollTimers();
     void reinitSurface(ANativeWindow *window);
     void destroySurface();
 #endif
+
     void updateClientSize();
 
-    // ── Shared (public so platform .mm files can access directly) ─────────────
+    // Shared (public so platform .mm files can access directly)
     int cachedWidth = 0;
     int cachedHeight = 0;
 
 private:
-    AppInstance hInstance = nullptr;
+    AppInstance hInstance_ = nullptr;
 
     // =========================================================================
     // Win32
     // =========================================================================
 #ifdef _WIN32
-    NativeWindow hwnd = nullptr;
-    BackBuffer backBuffer;
-    ULONG_PTR gdiplusToken = 0;
+    HWND hwnd_ = nullptr;
+    D3DDevice *d3dDevice_ = nullptr;   // owns GPU pipeline
+    RenderLoop *renderLoop_ = nullptr; // owns render thread + timers
 
-    void shutdownGdiplus();
+    // Message-thread timer id → render-loop timer id mapping.
+    // setTimer(id, ms) registers with renderLoop_ and stores the mapping
+    // so killTimer(id) can find and remove the right render-loop entry.
+    std::unordered_map<TimerID, uint32_t> timerMap_;
+
     static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg,
                                        WPARAM wParam, LPARAM lParam);
 #endif // _WIN32
@@ -171,7 +208,6 @@ private:
 
     SDL_Window *nativeHandle = nullptr;
     SDL_GLContext glContext_ = nullptr;
-
     Canvas2DGL *canvasGL_ = nullptr;
     CairoCompositor *cairoCompositor_ = nullptr;
 
@@ -187,9 +223,7 @@ private:
 
     std::unordered_map<TimerID, SDL_TimerID> sdlTimerMap;
 
-    // ── Canvas widget registry ────────────────────────────────────────────────
     std::vector<CanvasWidget *> canvasWidgets_;
-
     void registerCanvas(CanvasWidget *c);
     void unregisterCanvas(CanvasWidget *c);
     CanvasWidget *hitTestCanvas(int sx, int sy);
@@ -208,7 +242,6 @@ private:
     // =========================================================================
 #ifdef __ANDROID__
     struct EGLState;
-
     struct TimerEntry
     {
         int intervalMs;
@@ -239,12 +272,13 @@ public:
     void unregisterCanvas_public(CanvasWidget *c);
 #endif
 #endif
-    // =====================================================================
+
+    // =========================================================================
     // Web (Emscripten)
-    // =====================================================================
+    // =========================================================================
 #ifdef __EMSCRIPTEN__
 public:
-    struct WebState; // defined in flux_window_web.cpp
+    struct WebState;
     WebState *webState = nullptr;
 #endif
 };

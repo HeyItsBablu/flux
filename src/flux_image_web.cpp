@@ -217,7 +217,7 @@ void ImageWidget::_platformRender(GraphicsContext &ctx,
 
     Painter painter(ctx);
     Painter::ImageDrawParams params;
-    params.image = ws.key; // NativeImage on web = OffscreenCanvas store key
+    params.image = reinterpret_cast<NativeImage>(static_cast<uintptr_t>(ws.key)); // NativeImage on web = OffscreenCanvas store key
     params.srcWidth = imageWidth;
     params.srcHeight = imageHeight;
     params.clipX = cx;

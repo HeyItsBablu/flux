@@ -47,14 +47,13 @@ void CameraWidget::_platformOnFlip()
 }
 
 // ── _platformRenderPreview ────────────────────────────────────────────────────
-
 bool CameraWidget::_platformRenderPreview(GraphicsContext &ctx, Painter &p,
                                           FontCache & /*fontCache*/, int viewH)
 {
     auto &cam = FluxCamera::get();
     auto &s = getWin32(_win32);
 
-    // Pull latest frame
+    // Pull latest frame — camera delivers BGRA32
     if (cam.updateFrame() && cam.getPreviewWidth() > 0)
     {
         auto frame = cam.lockFrame();
@@ -64,19 +63,39 @@ bool CameraWidget::_platformRenderPreview(GraphicsContext &ctx, Painter &p,
             s.frameCache.assign(frame.data, frame.data + bytes);
             s.cachedSrcW = frame.width;
             s.cachedSrcH = frame.height;
-
-            s.bmi = {};
-            s.bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-            s.bmi.bmiHeader.biWidth = frame.width;
-            s.bmi.bmiHeader.biHeight = -frame.height; // top-down
-            s.bmi.bmiHeader.biPlanes = 1;
-            s.bmi.bmiHeader.biBitCount = 32;
-            s.bmi.bmiHeader.biCompression = BI_RGB;
         }
     }
 
-    if (s.frameCache.empty() || s.cachedSrcW <= 0)
+    if (s.frameCache.empty() || s.cachedSrcW <= 0 || !ctx.dc)
         return false;
+
+    // Upload to D2D bitmap if size changed or first time
+    if (!s.d2dBitmap ||
+        s.d2dBitmapW != s.cachedSrcW ||
+        s.d2dBitmapH != s.cachedSrcH)
+    {
+        s.d2dBitmap = nullptr;
+        s.d2dBitmapW = s.cachedSrcW;
+        s.d2dBitmapH = s.cachedSrcH;
+
+        D2D1_BITMAP_PROPERTIES bp = D2D1::BitmapProperties(
+            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
+                              D2D1_ALPHA_MODE_IGNORE));
+        ctx.dc->CreateBitmap(
+            D2D1::SizeU((UINT32)s.cachedSrcW, (UINT32)s.cachedSrcH),
+            nullptr, 0,
+            bp, &s.d2dBitmap);
+    }
+
+    if (s.d2dBitmap)
+    {
+        D2D1_RECT_U r = D2D1::RectU(0, 0,
+                                    (UINT32)s.cachedSrcW,
+                                    (UINT32)s.cachedSrcH);
+        s.d2dBitmap->CopyFromMemory(&r,
+                                    s.frameCache.data(),
+                                    (UINT32)(s.cachedSrcW * 4));
+    }
 
     // Letterbox / pillarbox
     float camAR = (float)s.cachedSrcW / (float)s.cachedSrcH;
@@ -108,10 +127,7 @@ bool CameraWidget::_platformRenderPreview(GraphicsContext &ctx, Painter &p,
         p.fillRect(x, dstY + dstH, width, (y + viewH) - (dstY + dstH), colPlaceholder);
 
     Painter::CameraDrawParams cp;
-    cp.pixels = s.frameCache.data();
-    cp.bmi = &s.bmi;
-    cp.srcW = s.cachedSrcW;
-    cp.srcH = s.cachedSrcH;
+    cp.frame = static_cast<NativeImage>(s.d2dBitmap.Get());
     cp.dstX = dstX;
     cp.dstY = dstY;
     cp.dstW = dstW;
@@ -119,45 +135,64 @@ bool CameraWidget::_platformRenderPreview(GraphicsContext &ctx, Painter &p,
     cp.mirror = cam.isFrontCamera();
     p.drawCamera(cp);
     return true;
-    return true;
 }
 
-// ── _platformRenderFlash ──────────────────────────────────────────────────────
-
-void CameraWidget::_platformRenderFlash(GraphicsContext &ctx, Painter & /*p*/,
+void CameraWidget::_platformRenderFlash(GraphicsContext &ctx, Painter &p,
                                         int viewH)
 {
-    HDC memDC = ::CreateCompatibleDC(ctx.hdc);
-    HBITMAP hbm = ::CreateCompatibleBitmap(ctx.hdc, 1, 1);
-    HGDIOBJ old = ::SelectObject(memDC, hbm);
-    ::SetPixel(memDC, 0, 0, RGB(255, 255, 255));
-
-    BLENDFUNCTION bf = {};
-    bf.BlendOp = AC_SRC_OVER;
-    bf.SourceConstantAlpha = (BYTE)(_flashAlpha * 255.f);
-    bf.AlphaFormat = 0;
-    ::AlphaBlend(ctx.hdc, x, y, width, viewH, memDC, 0, 0, 1, 1, bf);
-
-    ::SelectObject(memDC, old);
-    ::DeleteObject(hbm);
-    ::DeleteDC(memDC);
+    // D2D path: just fill a semi-transparent white rect — no GDI needed
+    Color flashColor = Color::fromRGBA(255, 255, 255,
+                                       (uint8_t)(_flashAlpha * 255.f));
+    p.fillRect(x, y, width, viewH, flashColor);
 }
-
-// ── _platformRenderThumb ──────────────────────────────────────────────────────
 
 bool CameraWidget::_platformRenderThumb(GraphicsContext &ctx,
                                         int thumbX, int thumbY,
                                         int thumbW, int thumbH)
 {
-    if (!_win32 || _win32->thumbCache.empty() || _win32->thumbSrcW <= 0)
+    if (!_win32 || _win32->thumbCache.empty() || _win32->thumbSrcW <= 0 || !ctx.dc)
         return false;
+
     auto &s = *_win32;
-    ::SetStretchBltMode(ctx.hdc, HALFTONE);
-    ::SetBrushOrgEx(ctx.hdc, 0, 0, nullptr);
-    ::StretchDIBits(ctx.hdc,
-                    thumbX, thumbY, thumbW, thumbH,
-                    0, 0, s.thumbSrcW, s.thumbSrcH,
-                    s.thumbCache.data(), &s.thumbBmi, DIB_RGB_COLORS, SRCCOPY);
+
+    // Upload thumbnail to D2D bitmap on first use or size change
+    if (!s.thumbD2dBitmap ||
+        s.thumbD2dW != s.thumbSrcW ||
+        s.thumbD2dH != s.thumbSrcH)
+    {
+        s.thumbD2dBitmap = nullptr;
+        s.thumbD2dW = s.thumbSrcW;
+        s.thumbD2dH = s.thumbSrcH;
+
+        D2D1_BITMAP_PROPERTIES bp = D2D1::BitmapProperties(
+            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
+                              D2D1_ALPHA_MODE_IGNORE));
+        ctx.dc->CreateBitmap(
+            D2D1::SizeU((UINT32)s.thumbSrcW, (UINT32)s.thumbSrcH),
+            nullptr, 0,
+            bp, &s.thumbD2dBitmap);
+
+        if (s.thumbD2dBitmap)
+        {
+            D2D1_RECT_U r = D2D1::RectU(0, 0,
+                                        (UINT32)s.thumbSrcW,
+                                        (UINT32)s.thumbSrcH);
+            s.thumbD2dBitmap->CopyFromMemory(&r,
+                                             s.thumbCache.data(),
+                                             (UINT32)(s.thumbSrcW * 4));
+        }
+    }
+
+    if (!s.thumbD2dBitmap)
+        return false;
+
+    Painter::CameraDrawParams cp;
+    cp.frame = static_cast<NativeImage>(s.thumbD2dBitmap.Get());
+    cp.dstX = thumbX;
+    cp.dstY = thumbY;
+    cp.dstW = thumbW;
+    cp.dstH = thumbH;
+    Painter(ctx).drawCamera(cp);
     return true;
 }
 
