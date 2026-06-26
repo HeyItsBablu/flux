@@ -31,8 +31,7 @@ public:
         auto body = Flex({})
                         ->setDirection(FlexDirection::Row)
                         ->setWrap(FlexWrap::Wrap)
-                        ->setJustifyContent(JustifyContent::Center)
-                        ->setAlignContent(AlignContent::SpaceBetween)
+                        
                         ->setGap(12)
                         ->setPadding(16)
                         ->setWidthMode(SizeMode::Full)
