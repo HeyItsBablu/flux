@@ -13,8 +13,8 @@
 // Thread-safety: all methods must be called on the render thread.
 // ============================================================================
 
-#include "flux/flux_d3d_device.hpp"   // D3DDevice, BrushCache
-#include "flux/flux_platform.hpp" 
+#include "flux/flux_d3d_device.hpp" // D3DDevice, BrushCache
+#include "flux/flux_platform.hpp"
 #include "flux/flux_canvas_types.hpp" // RGBA, ScrollbarInfo, Viewport
 
 #include <d2d1_3.h>
@@ -29,7 +29,7 @@
 
 // FreeType forward-decls (implementation includes ft2build.h)
 typedef struct FT_LibraryRec_ *FT_Library;
-typedef struct FT_FaceRec_    *FT_Face;
+typedef struct FT_FaceRec_ *FT_Face;
 
 using Microsoft::WRL::ComPtr;
 
@@ -40,19 +40,51 @@ using Microsoft::WRL::ComPtr;
 struct Canvas2DImage
 {
     ComPtr<ID2D1Bitmap1> bitmap; // nullptr == invalid
-    int width  = 0;
+    int width = 0;
     int height = 0;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Enums (identical public surface to the GL version)
 // ─────────────────────────────────────────────────────────────────────────────
-enum class CanvasTextAlign  { Left, Right, Center };
-enum class TextBaseline     { Top, Middle, Bottom, Alphabetic };
-enum class LineCap          { Butt, Round, Square };
-enum class LineJoin         { Miter, Round, Bevel };
-enum class CompositeOp      { SourceOver, Copy, Xor, Multiply, Screen };
-enum class FillRule         { NonZero, EvenOdd };
+enum class CanvasTextAlign
+{
+    Left,
+    Right,
+    Center
+};
+enum class TextBaseline
+{
+    Top,
+    Middle,
+    Bottom,
+    Alphabetic
+};
+enum class LineCap
+{
+    Butt,
+    Round,
+    Square
+};
+enum class LineJoin
+{
+    Miter,
+    Round,
+    Bevel
+};
+enum class CompositeOp
+{
+    SourceOver,
+    Copy,
+    Xor,
+    Multiply,
+    Screen
+};
+enum class FillRule
+{
+    NonZero,
+    EvenOdd
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Canvas2DD2D  — shared D2D resources (one per CanvasWidget)
@@ -67,19 +99,19 @@ struct Canvas2DD2D
 
     // ── Off-screen render target (document-sized) ─────────────────────────
     // CanvasWidget renders into this, then composites it into the main DC.
-    ComPtr<ID2D1DeviceContext> offscreenDC;   // targets offscreenBitmap
-    ComPtr<ID2D1Bitmap1>       offscreenBitmap;
-    int                        bitmapW = 0;
-    int                        bitmapH = 0;
+    ComPtr<ID2D1DeviceContext> offscreenDC; // targets offscreenBitmap
+    ComPtr<ID2D1Bitmap1> offscreenBitmap;
+    int bitmapW = 0;
+    int bitmapH = 0;
 
     // ── FreeType ─────────────────────────────────────────────────────────
     FT_Library ftLibrary = nullptr;
 
     struct FontFace
     {
-        std::string          name;
+        std::string name;
         std::vector<uint8_t> ttfData; // kept alive — FT_Face refs it
-        FT_Face              ftFace = nullptr;
+        FT_Face ftFace = nullptr;
     };
     std::vector<FontFace> fonts;
 
@@ -88,8 +120,8 @@ struct Canvas2DD2D
     static constexpr int kAtlasW = 1024;
     static constexpr int kAtlasH = 1024;
 
-    std::vector<uint8_t>       atlasPixels; // BGRA, kAtlasW*kAtlasH*4
-    ComPtr<ID2D1Bitmap>        atlasBitmap; // D2D_ALPHA_MODE_PREMULTIPLIED
+    std::vector<uint8_t> atlasPixels; // BGRA, kAtlasW*kAtlasH*4
+    ComPtr<ID2D1Bitmap> atlasBitmap;  // D2D_ALPHA_MODE_PREMULTIPLIED
 
     int shelfX = 0, shelfY = 0, shelfH = 0;
 
@@ -106,7 +138,7 @@ struct Canvas2DD2D
         GlyphKey key;
         int atlasX = 0, atlasY = 0;
         int glyphW = 0, glyphH = 0;
-        int xoff   = 0, yoff = 0;
+        int xoff = 0, yoff = 0;
         int advance = 0;
     };
     std::vector<GlyphEntry> glyphs;
@@ -122,8 +154,8 @@ struct Canvas2DD2D
     static bool registerFont(Canvas2DD2D *self,
                              const std::string &name,
                              const std::string &path);
-    int  findFont(const std::string &name) const;
-    int  addFont(const std::string &name, const std::string &path);
+    int findFont(const std::string &name) const;
+    int addFont(const std::string &name, const std::string &path);
 
     // ── Glyph cache ───────────────────────────────────────────────────────
     const GlyphEntry *getGlyph(int fontIdx, int codepoint, int pixelSize);
@@ -144,11 +176,11 @@ struct Canvas2D
     explicit Canvas2D(Canvas2DD2D *d2d, int canvasW, int canvasH);
     ~Canvas2D() = default;
 
-    Canvas2D(const Canvas2D &)            = delete;
+    Canvas2D(const Canvas2D &) = delete;
     Canvas2D &operator=(const Canvas2D &) = delete;
 
     // ── Dimensions ────────────────────────────────────────────────────────
-    int width()  const { return canvasW_; }
+    int width() const { return canvasW_; }
     int height() const { return canvasH_; }
 
     // ── State stack ───────────────────────────────────────────────────────
@@ -217,9 +249,9 @@ struct Canvas2D
     Canvas2DImage *loadImage(const std::string &path);
     Canvas2DImage *loadImageFromMemory(const unsigned char *data, int byteLen);
     Canvas2DImage *wrapBitmap(ComPtr<ID2D1Bitmap1> bmp, int w, int h);
-    void           updateImage(Canvas2DImage *img,
-                               const unsigned char *rgba, int w, int h);
-    void           freeImage(Canvas2DImage *img);
+    void updateImage(Canvas2DImage *img,
+                     const unsigned char *rgba, int w, int h);
+    void freeImage(Canvas2DImage *img);
 
     void drawImage(const Canvas2DImage *img, float dx, float dy);
     void drawImage(const Canvas2DImage *img,
@@ -229,13 +261,13 @@ struct Canvas2D
                    float dx, float dy, float dw, float dh);
 
     // ── Text ──────────────────────────────────────────────────────────────
-    void  setFont(const std::string &fontDesc);
-    void  setTextAlign(CanvasTextAlign align);
-    void  setTextBaseline(TextBaseline baseline);
-    void  fillText(const std::string &text, float x, float y,
-                   float maxWidth = -1.f);
-    void  strokeText(const std::string &text, float x, float y,
-                     float maxWidth = -1.f);
+    void setFont(const std::string &fontDesc);
+    void setTextAlign(CanvasTextAlign align);
+    void setTextBaseline(TextBaseline baseline);
+    void fillText(const std::string &text, float x, float y,
+                  float maxWidth = -1.f);
+    void strokeText(const std::string &text, float x, float y,
+                    float maxWidth = -1.f);
     float measureText(const std::string &text);
 
     // ── Clip rect ─────────────────────────────────────────────────────────
@@ -249,12 +281,20 @@ struct Canvas2D
                       int srcW, int srcH, float dx, float dy);
 
     float currentFontSize() const { return fontSize_; }
-    int   currentFontIdx()  const { return resolveFont(); }
+    int currentFontIdx() const { return resolveFont(); }
+
+    // ── Kerning ───────────────────────────────────────────────────────────────
+    float getKernAdvance(int fontIdx, int cp1, int cp2, int pixelSize) const
+    {
+        if (!d2d_)
+            return 0.f;
+        return d2d_->getKernAdvance(fontIdx, cp1, cp2, pixelSize);
+    }
 
     // ── Accessors used by Canvas2DD2D internals ────────────────────────────
-    Canvas2DD2D *d2d_    = nullptr;
-    int          canvasW_ = 0;
-    int          canvasH_ = 0;
+    Canvas2DD2D *d2d_ = nullptr;
+    int canvasW_ = 0;
+    int canvasH_ = 0;
 
 private:
     // The D2D device context we draw into (= d2d_->offscreenDC)
@@ -264,19 +304,24 @@ private:
     D2D1_MATRIX_3X2_F ctm_ = D2D1::Matrix3x2F::Identity();
 
     // ── Draw state ────────────────────────────────────────────────────────
-    Color       fillColor_   = {0, 0, 0, 255};
-    Color       strokeColor_ = {0, 0, 0, 255};
-    float       lineWidth_   = 1.f;
-    float       globalAlpha_ = 1.f;
-    bool        fillIsGrad_  = false;
-    FillRule    fillRule_    = FillRule::NonZero;
+    Color fillColor_ = {0, 0, 0, 255};
+    Color strokeColor_ = {0, 0, 0, 255};
+    float lineWidth_ = 1.f;
+    float globalAlpha_ = 1.f;
+    bool fillIsGrad_ = false;
+    FillRule fillRule_ = FillRule::NonZero;
     CompositeOp compositeOp_ = CompositeOp::SourceOver;
-    LineCap     lineCap_     = LineCap::Butt;
-    LineJoin    lineJoin_    = LineJoin::Miter;
-    float       miterLimit_  = 10.f;
+    LineCap lineCap_ = LineCap::Butt;
+    LineJoin lineJoin_ = LineJoin::Miter;
+    float miterLimit_ = 10.f;
 
     // ── Gradient state ────────────────────────────────────────────────────
-    enum class GradType { None, Linear, Radial };
+    enum class GradType
+    {
+        None,
+        Linear,
+        Radial
+    };
     GradType gradType_ = GradType::None;
     float gx0_ = 0, gy0_ = 0, gx1_ = 0, gy1_ = 0;
     float gcx_ = 0, gcy_ = 0, gInR_ = 0, gOutR_ = 0;
@@ -286,16 +331,21 @@ private:
     int clipDepth_ = 0; // counts PushAxisAlignedClip calls
 
     // ── Text state ────────────────────────────────────────────────────────
-    std::string     fontFace_     = "sans";
-    float           fontSize_     = 14.f;
-    bool            fontBold_     = false;
-    bool            fontItalic_   = false;
-    CanvasTextAlign textAlign_    = CanvasTextAlign::Left;
-    TextBaseline    textBaseline_ = TextBaseline::Alphabetic;
+    std::string fontFace_ = "sans";
+    float fontSize_ = 14.f;
+    bool fontBold_ = false;
+    bool fontItalic_ = false;
+    CanvasTextAlign textAlign_ = CanvasTextAlign::Left;
+    TextBaseline textBaseline_ = TextBaseline::Alphabetic;
 
     // ── Path ──────────────────────────────────────────────────────────────
     // We accumulate path commands and flush to a D2D PathGeometry on fill/stroke
-    struct PathPt { float x, y; bool move; bool close; };
+    struct PathPt
+    {
+        float x, y;
+        bool move;
+        bool close;
+    };
     std::vector<PathPt> path_;
     float curX_ = 0, curY_ = 0;
     float pathStartX_ = 0, pathStartY_ = 0;
@@ -306,17 +356,17 @@ private:
         D2D1_MATRIX_3X2_F ctm;
         Color fillColor, strokeColor;
         float lineWidth, globalAlpha;
-        bool  fillIsGrad;
-        int   clipDepth;
+        bool fillIsGrad;
+        int clipDepth;
         GradType gradType;
         float gx0, gy0, gx1, gy1, gcx, gcy, gInR, gOutR;
         std::vector<std::pair<float, Color>> stops;
         std::string fontFace;
         float fontSize;
-        bool  fontBold, fontItalic;
-        CanvasTextAlign  textAlign;
-        TextBaseline     textBaseline;
-        LineCap  lineCap;
+        bool fontBold, fontItalic;
+        CanvasTextAlign textAlign;
+        TextBaseline textBaseline;
+        LineCap lineCap;
         LineJoin lineJoin;
     };
     std::vector<SaveState> stateStack_;
@@ -330,7 +380,7 @@ private:
     void drawPathStroked();
     D2D1_COLOR_F toD2D(Color c) const;
     void parseFontDesc(const std::string &desc);
-    int  resolveFont() const;
+    int resolveFont() const;
     void applyTransform();
     void pushTransform(D2D1_MATRIX_3X2_F m);
 

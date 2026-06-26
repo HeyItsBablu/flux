@@ -868,22 +868,12 @@ public:
       // Draw floating selection pixels
       if (hasSelection_ && !selPixels_.empty())
       {
-        // Upload as a temporary GL texture each frame
-        // (cheap for selection-size tiles; could cache)
-        GLuint tmpTex = 0;
-        glGenTextures(1, &tmpTex);
-        glBindTexture(GL_TEXTURE_2D, tmpTex);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, selPixW_, selPixH_, 0,
-                     GL_RGBA, GL_UNSIGNED_BYTE, selPixels_.data());
-        glBindTexture(GL_TEXTURE_2D, 0);
-        Canvas2DImage *tmp = ctx.wrapTexture(tmpTex, selPixW_, selPixH_);
-        ctx.drawImage(tmp, selX_, selY_, selW_, selH_);
+        // Create a temporary image from raw RGBA pixels and draw it
+        Canvas2DImage *tmp = new Canvas2DImage();
+        ctx.updateImage(tmp, selPixels_.data(), selPixW_, selPixH_);
+        if (tmp->bitmap)
+          ctx.drawImage(tmp, selX_, selY_, float(selPixW_), float(selPixH_));
         delete tmp;
-        glDeleteTextures(1, &tmpTex);
       }
 
       // Marching-ants dashed border
@@ -1013,17 +1003,14 @@ private:
     {
       if (!s.glImage)
       {
-        GLuint tex = 0;
-        glGenTextures(1, &tex);
-        glBindTexture(GL_TEXTURE_2D, tex);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, s.imageW, s.imageH, 0,
-                     GL_RGBA, GL_UNSIGNED_BYTE, s.imageData.data());
-        glBindTexture(GL_TEXTURE_2D, 0);
-        s.glImage = ctx.wrapTexture(tex, s.imageW, s.imageH);
+        // imageData is raw RGBA pixels — use updateImage path directly
+        auto *img = new Canvas2DImage();
+        // updateImage calls createBitmapFromRGBA which handles RGBA→BGRA conversion
+        ctx.updateImage(img, s.imageData.data(), s.imageW, s.imageH);
+        if (img->bitmap)
+          s.glImage = img;
+        else
+          delete img;
       }
       if (s.glImage)
         ctx.drawImage(s.glImage, 0.f, 0.f, float(s.imageW), float(s.imageH));
@@ -1140,6 +1127,11 @@ class PaintApp : public Widget
   static constexpr Color kActiveBg = {60, 120, 220, 255};
   static constexpr Color kInactiveBg = {50, 50, 54, 255};
 
+  float pendingZoom_ = -1.f;
+  float pendingMouseX_ = -1.f;
+  float pendingMouseY_ = -1.f;
+  bool pendingMousePos_ = false;
+
   void updateCanvasSizeLabel()
   {
     if (!surface_)
@@ -1205,6 +1197,24 @@ class PaintApp : public Widget
         shapeButtons_[i]->setBackgroundColor(i == idx ? kActiveBg : kInactiveBg);
   }
 
+  void flushPending()
+  {
+    if (pendingZoom_ >= 0.f)
+    {
+      char buf[16];
+      std::snprintf(buf, sizeof(buf), "%.0f%%", pendingZoom_ * 100.f);
+      zoomLabel_.set(buf);
+      pendingZoom_ = -1.f;
+    }
+    if (pendingMousePos_)
+    {
+      char buf[32];
+      std::snprintf(buf, sizeof(buf), "%.0f, %.0f", pendingMouseX_, pendingMouseY_);
+      cursorPosLabel_.set(buf);
+      pendingMousePos_ = false;
+    }
+  }
+
 public:
   WidgetPtr build() override
   {
@@ -1216,9 +1226,7 @@ public:
     {
       if (surface_)
         surface_->currentZoom_ = zoom;
-      char buf[16];
-      std::snprintf(buf, sizeof(buf), "%.0f%%", zoom * 100.f);
-      zoomLabel_.set(buf);
+      pendingZoom_ = zoom; // store only, never set State here
     };
 
     surface_ = canvas_->setSurface<PaintSurface>();
@@ -1226,13 +1234,14 @@ public:
 
     surface_->onMousePosChanged = [this](float x, float y)
     {
-      char buf[32];
-      std::snprintf(buf, sizeof(buf), "%.0f, %.0f", x, y);
-      cursorPosLabel_.set(buf);
+      pendingMouseX_ = x;
+      pendingMouseY_ = y;
+      pendingMousePos_ = true;
     };
 
     surface_->onStrokeCommitted = [this]()
     {
+      flushPending();
       canUndo_.set(surface_->canUndo());
       canRedo_.set(surface_->canRedo());
       canvas_->redraw();
@@ -1620,13 +1629,14 @@ public:
   }
 };
 
+// ============================================================
+//  Entry point
+// ============================================================
+
 WidgetPtr createApp(FluxUI *app)
 {
-  return FluxApp(
-      "Paint",
-      std::make_shared<PaintApp>(),
-      AppTheme::dark(),
-      false,
-      960, 680,
-      false, true);
+  return FluxApp("Paint App")
+      .setTheme(AppTheme::dark())
+      .setFullscreenMode(true)
+      .build(std::make_shared<PaintApp>());
 }
