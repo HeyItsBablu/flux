@@ -170,6 +170,7 @@ public:
     bool handleMouseUp(int mx, int my) override;
     bool handleMouseWheel(int delta) override;
     bool handleKeyDown(int keyCode) override;
+     bool handleChar(wchar_t ch) override;
 #endif
     // ── Android-only ──────────────────────────────────────────────────────────
 #ifdef __ANDROID__

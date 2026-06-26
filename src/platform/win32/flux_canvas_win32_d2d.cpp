@@ -15,7 +15,7 @@
 #include "flux/flux_canvas.hpp"
 #include "flux/flux_canvas2d_d2d.hpp"
 #include "flux/flux_d3d_device.hpp"
-#include "flux/flux_core.hpp"        // FluxUI::getCurrentInstance()
+#include "flux/flux_core.hpp" // FluxUI::getCurrentInstance()
 
 #include <d2d1_3.h>
 #include <d2d1_1helper.h>
@@ -34,10 +34,10 @@ using Microsoft::WRL::ComPtr;
 
 struct Win32D2DCanvasState
 {
-    Canvas2DD2D *d2d    = nullptr; // owned by the widget
-    bool         inited = false;
-    int          lastW  = 0;
-    int          lastH  = 0;
+    Canvas2DD2D *d2d = nullptr; // owned by the widget
+    bool inited = false;
+    int lastW = 0;
+    int lastH = 0;
 };
 
 static std::unordered_map<CanvasWidget *, Win32D2DCanvasState> s_d2dState;
@@ -59,16 +59,19 @@ static inline D2D1_COLOR_F rgba(float r, float g, float b, float a)
 static D3DDevice *getDevice()
 {
     auto *inst = FluxUI::getCurrentInstance();
-    if (!inst) return nullptr;
+    if (!inst)
+        return nullptr;
     auto *win = inst->getPlatformWindowPtr();
-    if (!win) return nullptr;
+    if (!win)
+        return nullptr;
     return win->getD3DDevice();
 }
 
 static ID2D1DeviceContext *mainDC()
 {
     auto *inst = FluxUI::getCurrentInstance();
-    if (!inst) return nullptr;
+    if (!inst)
+        return nullptr;
     auto ctx = inst->getPlatformWindowPtr()->getD2DContext();
     return ctx.dc;
 }
@@ -83,7 +86,8 @@ static void ensureD2D(CanvasWidget *w, GraphicsContext &gctx)
     if (!s.d2d)
     {
         D3DDevice *dev = getDevice();
-        if (!dev || !dev->valid) return;
+        if (!dev || !dev->valid)
+            return;
 
         s.d2d = new Canvas2DD2D();
         if (!s.d2d->init(dev))
@@ -98,12 +102,12 @@ static void ensureD2D(CanvasWidget *w, GraphicsContext &gctx)
         {
             Canvas2DD2D::registerFont(s.d2d, name, path);
         };
-        reg("sans",             "C:\\Windows\\Fonts\\segoeui.ttf");
-        reg("sans-bold",        "C:\\Windows\\Fonts\\segoeuib.ttf");
-        reg("sans-italic",      "C:\\Windows\\Fonts\\segoeuii.ttf");
+        reg("sans", "C:\\Windows\\Fonts\\segoeui.ttf");
+        reg("sans-bold", "C:\\Windows\\Fonts\\segoeuib.ttf");
+        reg("sans-italic", "C:\\Windows\\Fonts\\segoeuii.ttf");
         reg("sans-bold-italic", "C:\\Windows\\Fonts\\segoeuiz.ttf");
-        reg("mono",             "C:\\Windows\\Fonts\\consola.ttf");
-        reg("mono-bold",        "C:\\Windows\\Fonts\\consolab.ttf");
+        reg("mono", "C:\\Windows\\Fonts\\consola.ttf");
+        reg("mono-bold", "C:\\Windows\\Fonts\\consolab.ttf");
 
         s.inited = true;
     }
@@ -125,7 +129,8 @@ static void ensureD2D(CanvasWidget *w, GraphicsContext &gctx)
 static void destroyD2D(CanvasWidget *w)
 {
     auto it = s_d2dState.find(w);
-    if (it == s_d2dState.end()) return;
+    if (it == s_d2dState.end())
+        return;
 
     auto &s = it->second;
     if (s.d2d)
@@ -149,7 +154,8 @@ static void destroyD2D(CanvasWidget *w)
 
 void CanvasWidget::activatePendingSurface()
 {
-    if (!pendingSurface_) return;
+    if (!pendingSurface_)
+        return;
     if (activeSurface_)
     {
         activeSurface_->destroy();
@@ -166,12 +172,13 @@ void CanvasWidget::activatePendingSurface()
 // ─────────────────────────────────────────────────────────────────────────────
 
 static void drawScrollbarD2D(ID2D1DeviceContext *dc,
-                              ID2D1Factory1     *factory,
-                              const CustomScrollbar &bar,
-                              int glW, int glH,
-                              float alpha)
+                             ID2D1Factory1 *factory,
+                             const CustomScrollbar &bar,
+                             int glW, int glH,
+                             float alpha)
 {
-    if (!bar.isVisible() || alpha < 0.005f) return;
+    if (!bar.isVisible() || alpha < 0.005f)
+        return;
 
     // ── Track ────────────────────────────────────────────────────────────────
     {
@@ -179,8 +186,9 @@ static void drawScrollbarD2D(ID2D1DeviceContext *dc,
         D2D1_RECT_F r = D2D1::RectF(tx, ty, tx + tw, ty + th);
         ComPtr<ID2D1SolidColorBrush> br;
         dc->CreateSolidColorBrush(rgba(0.08f, 0.08f, 0.08f, alpha * 0.3f),
-                                   br.GetAddressOf());
-        if (br) dc->FillRectangle(r, br.Get());
+                                  br.GetAddressOf());
+        if (br)
+            dc->FillRectangle(r, br.Get());
     }
 
     // ── Thumb ─────────────────────────────────────────────────────────────────
@@ -192,22 +200,25 @@ static void drawScrollbarD2D(ID2D1DeviceContext *dc,
         float tc = 0.76f;
         ComPtr<ID2D1SolidColorBrush> br;
         dc->CreateSolidColorBrush(rgba(tc, tc, tc, alpha), br.GetAddressOf());
-        if (br) dc->FillRoundedRectangle(rr, br.Get());
+        if (br)
+            dc->FillRoundedRectangle(rr, br.Get());
     }
 }
 
 static void drawScrollbarCornerD2D(ID2D1DeviceContext *dc,
-                                    const CustomScrollbar &hBar,
-                                    const CustomScrollbar &vBar,
-                                    int glW, int glH)
+                                   const CustomScrollbar &hBar,
+                                   const CustomScrollbar &vBar,
+                                   int glW, int glH)
 {
-    if (!hBar.isVisible() || !vBar.isVisible()) return;
+    if (!hBar.isVisible() || !vBar.isVisible())
+        return;
     float thick = CustomScrollbar::kTrackThick;
     D2D1_RECT_F r = D2D1::RectF(float(glW) - thick, float(glH) - thick,
-                                  float(glW),          float(glH));
+                                float(glW), float(glH));
     ComPtr<ID2D1SolidColorBrush> br;
     dc->CreateSolidColorBrush(rgba(0.12f, 0.12f, 0.12f, 0.35f), br.GetAddressOf());
-    if (br) dc->FillRectangle(r, br.Get());
+    if (br)
+        dc->FillRectangle(r, br.Get());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -215,17 +226,17 @@ static void drawScrollbarCornerD2D(ID2D1DeviceContext *dc,
 // ─────────────────────────────────────────────────────────────────────────────
 
 static void drawDropShadow(ID2D1DeviceContext *dc,
-                            ID2D1Factory1     *factory,
-                            float ox, float oy, float cw, float ch)
+                           ID2D1Factory1 *factory,
+                           float ox, float oy, float cw, float ch)
 {
-    const float kOffX  = 6.f, kOffY  = 6.f;
-    const int   kLayers = 4;
+    const float kOffX = 6.f, kOffY = 6.f;
+    const int kLayers = 4;
     const float kBaseAlpha = 0.18f;
 
     for (int i = kLayers; i >= 1; --i)
     {
         float spread = float(i) * 2.f;
-        float alpha  = kBaseAlpha * (1.f - float(i - 1) / float(kLayers));
+        float alpha = kBaseAlpha * (1.f - float(i - 1) / float(kLayers));
         D2D1_RECT_F r = D2D1::RectF(
             ox + kOffX - spread,
             oy + kOffY - spread,
@@ -234,7 +245,8 @@ static void drawDropShadow(ID2D1DeviceContext *dc,
 
         ComPtr<ID2D1SolidColorBrush> br;
         dc->CreateSolidColorBrush(rgba(0, 0, 0, alpha), br.GetAddressOf());
-        if (br) dc->FillRectangle(r, br.Get());
+        if (br)
+            dc->FillRectangle(r, br.Get());
     }
 }
 
@@ -245,11 +257,13 @@ static void drawDropShadow(ID2D1DeviceContext *dc,
 static void tickAndRender(CanvasWidget *w, GraphicsContext &gctx)
 {
     auto &s = d2dState(w);
-    if (!s.d2d || !s.d2d->offscreenBitmap) return;
+    if (!s.d2d || !s.d2d->offscreenBitmap)
+        return;
 
     if (w->pendingSurface_)
         w->activatePendingSurface();
-    if (!w->activeSurface_) return;
+    if (!w->activeSurface_)
+        return;
 
     // Timing
     auto now = CanvasWidget::Clock::now();
@@ -274,8 +288,9 @@ static void tickAndRender(CanvasWidget *w, GraphicsContext &gctx)
 
     // ── Composite into main DC ────────────────────────────────────────────
     ID2D1DeviceContext *dc = gctx.dc;
-    ID2D1Factory1      *factory = gctx.factory;
-    if (!dc) return;
+    ID2D1Factory1 *factory = gctx.factory;
+    if (!dc)
+        return;
 
     int vpW = w->width, vpH = w->height;
 
@@ -305,7 +320,7 @@ static void tickAndRender(CanvasWidget *w, GraphicsContext &gctx)
         D2D1_ANTIALIAS_MODE_ALIASED);
 
     D2D1_RECT_F docRect = D2D1::RectF(0, 0,
-                                       float(w->docW()), float(w->docH()));
+                                      float(w->docW()), float(w->docH()));
     dc->DrawBitmap(s.d2d->offscreenBitmap.Get(), &docRect, 1.f,
                    D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
 
@@ -350,10 +365,11 @@ CanvasWidget::CanvasWidget()
     : hBar_(CustomScrollbar::Axis::Horizontal),
       vBar_(CustomScrollbar::Axis::Vertical)
 {
-    autoWidth  = true;
+    autoWidth = true;
     autoHeight = true;
-    width  = 400;
+    width = 400;
     height = 300;
+    isFocusable = true;
 }
 
 CanvasWidget::~CanvasWidget()
@@ -378,12 +394,13 @@ std::shared_ptr<CanvasWidget> CanvasWidget::setScrollbarsEnabled(bool e)
 bool CanvasWidget::scrollbarsEnabled() const { return scrollbarsEnabled_; }
 
 RenderSurface *CanvasWidget::getSurface() const { return activeSurface_.get(); }
-const Viewport &CanvasWidget::viewport() const  { return vp_; }
-Viewport &CanvasWidget::viewport()              { return vp_; }
+const Viewport &CanvasWidget::viewport() const { return vp_; }
+Viewport &CanvasWidget::viewport() { return vp_; }
 
 std::shared_ptr<CanvasWidget> CanvasWidget::setSize(int w, int h)
 {
-    width = w; height = h;
+    width = w;
+    height = h;
     autoWidth = autoHeight = false;
     markNeedsLayout();
     return ptr();
@@ -391,13 +408,15 @@ std::shared_ptr<CanvasWidget> CanvasWidget::setSize(int w, int h)
 
 std::shared_ptr<CanvasWidget> CanvasWidget::setCanvasSize(int w, int h)
 {
-    docW_ = w; docH_ = h;
+    docW_ = w;
+    docH_ = h;
     vp_.setCanvasSize(w, h);
     auto &s = d2dState(this);
     if (s.d2d)
     {
         s.d2d->resizeBitmap(w, h);
-        s.lastW = w; s.lastH = h;
+        s.lastW = w;
+        s.lastH = h;
         if (activeSurface_)
             activeSurface_->resize(w, h);
     }
@@ -412,10 +431,12 @@ std::shared_ptr<CanvasWidget> CanvasWidget::redraw()
 }
 
 void CanvasWidget::computeLayout(GraphicsContext & /*ctx*/,
-                                  const BoxConstraints &c, FontCache &)
+                                 const BoxConstraints &c, FontCache &)
 {
-    if (autoWidth)  width  = (c.maxWidth  < kUnbounded) ? c.maxWidth  : width;
-    if (autoHeight) height = (c.maxHeight < kUnbounded) ? c.maxHeight : height;
+    if (autoWidth)
+        width = (c.maxWidth < kUnbounded) ? c.maxWidth : width;
+    if (autoHeight)
+        height = (c.maxHeight < kUnbounded) ? c.maxHeight : height;
     canvasW_ = width;
     canvasH_ = height;
     needsLayout = false;
@@ -427,7 +448,8 @@ void CanvasWidget::render(GraphicsContext &ctx, FontCache &)
     ensureD2D(this, ctx);
 
     auto &s = d2dState(this);
-    if (!s.d2d) return;
+    if (!s.d2d)
+        return;
 
     // First-time viewport init
     if (!s.inited || vp_.viewW() != float(width) || vp_.viewH() != float(height))
@@ -436,8 +458,10 @@ void CanvasWidget::render(GraphicsContext &ctx, FontCache &)
         vp_.fitToView();
         updateViewportSize(width, height);
         updateSBGeometry(width, height);
-        if (onViewportChanged) onViewportChanged(vp_.zoom());
-        if (onGLResize) onGLResize(width, height);
+        if (onViewportChanged)
+            onViewportChanged(vp_.zoom());
+        if (onGLResize)
+            onGLResize(width, height);
         s.inited = true;
     }
 
@@ -467,13 +491,17 @@ void CanvasWidget::viewportDims(int glW, int glH, int &vpW, int &vpH) const
 {
     if (!viewportEnabled_ || !scrollbarsEnabled_)
     {
-        vpW = glW; vpH = glH; return;
+        vpW = glW;
+        vpH = glH;
+        return;
     }
     ScrollbarInfo h = vp_.scrollbarH(), v = vp_.scrollbarV();
     vpW = glW - (v.visible ? (int)kSBThick : 0);
     vpH = glH - (h.visible ? (int)kSBThick : 0);
-    if (vpW < 1) vpW = 1;
-    if (vpH < 1) vpH = 1;
+    if (vpW < 1)
+        vpW = 1;
+    if (vpH < 1)
+        vpH = 1;
 }
 
 void CanvasWidget::updateViewportSize(int glW, int glH)
@@ -498,9 +526,11 @@ void CanvasWidget::updateSBGeometry(int glW, int glH)
 
 void CanvasWidget::beginPan(int sx, int sy)
 {
-    panning_    = true;
-    panStartSX_ = sx; panStartSY_ = sy;
-    panStartOX_ = vp_.offsetX(); panStartOY_ = vp_.offsetY();
+    panning_ = true;
+    panStartSX_ = sx;
+    panStartSY_ = sy;
+    panStartOX_ = vp_.offsetX();
+    panStartOY_ = vp_.offsetY();
 }
 
 void CanvasWidget::continuePan(int sx, int sy)
@@ -520,9 +550,10 @@ void CanvasWidget::pokeScrollbars()
 
 void CanvasWidget::applyHScrollFraction(float thumbMin)
 {
-    float span  = vp_.scrollbarH().thumbMax - vp_.scrollbarH().thumbMin;
+    float span = vp_.scrollbarH().thumbMax - vp_.scrollbarH().thumbMin;
     float range = vp_.canvasW() - vp_.viewW() / vp_.zoom();
-    if (range <= 0.f) return;
+    if (range <= 0.f)
+        return;
     vp_.setOffsetX(thumbMin / (1.f - span) * range);
     pokeScrollbars();
     markNeedsPaint();
@@ -530,9 +561,10 @@ void CanvasWidget::applyHScrollFraction(float thumbMin)
 
 void CanvasWidget::applyVScrollFraction(float thumbMin)
 {
-    float span  = vp_.scrollbarV().thumbMax - vp_.scrollbarV().thumbMin;
+    float span = vp_.scrollbarV().thumbMax - vp_.scrollbarV().thumbMin;
     float range = vp_.canvasH() - vp_.viewH() / vp_.zoom();
-    if (range <= 0.f) return;
+    if (range <= 0.f)
+        return;
     float t = 1.f - thumbMin - span;
     vp_.setOffsetY(t / (1.f - span) * range);
     pokeScrollbars();
@@ -551,18 +583,23 @@ void CanvasWidget::applyVScrollFraction(float thumbMin)
 
 bool CanvasWidget::handleMouseDown(int sx, int sy)
 {
-    bool hC = hBar_.onMouseDown(sx, sy, [this](float t){ applyHScrollFraction(t); });
-    bool vC = !hC && vBar_.onMouseDown(sx, sy, [this](float t){ applyVScrollFraction(t); });
+    int localX = sx - x;
+    int localY = sy - y;
+
+    bool hC = hBar_.onMouseDown(localX, localY, [this](float t)
+                                { applyHScrollFraction(t); });
+    bool vC = !hC && vBar_.onMouseDown(localX, localY, [this](float t)
+                                       { applyVScrollFraction(t); });
 
     if (!hC && !vC)
     {
         if (viewportEnabled_ && panning_)
         {
-            beginPan(sx, sy);
+            beginPan(localX, localY);
         }
         else if (activeSurface_)
         {
-            auto [cx, cy] = vp_.screenToCanvas(float(sx), float(sy));
+            auto [cx, cy] = vp_.screenToCanvas(float(localX), float(localY));
             activeSurface_->onMouseDown(cx, cy);
         }
     }
@@ -572,17 +609,21 @@ bool CanvasWidget::handleMouseDown(int sx, int sy)
 
 bool CanvasWidget::handleMouseMove(int sx, int sy)
 {
-    bool hDrag = hBar_.onMouseMove(sx, sy);
-    bool vDrag = vBar_.onMouseMove(sx, sy);
+    int localX = sx - x;
+    int localY = sy - y;
+
+    bool hDrag = hBar_.onMouseMove(localX, localY);
+    bool vDrag = vBar_.onMouseMove(localX, localY);
     markNeedsPaint();
 
-    if (hDrag || vDrag) return true;
+    if (hDrag || vDrag)
+        return true;
 
     if (panning_)
-        continuePan(sx, sy);
+        continuePan(localX, localY);
     else if (activeSurface_)
     {
-        auto [cx, cy] = vp_.screenToCanvas(float(sx), float(sy));
+        auto [cx, cy] = vp_.screenToCanvas(float(localX), float(localY));
         activeSurface_->onMouseMove(cx, cy);
     }
     return true;
@@ -590,15 +631,18 @@ bool CanvasWidget::handleMouseMove(int sx, int sy)
 
 bool CanvasWidget::handleMouseUp(int sx, int sy)
 {
-    bool hR = hBar_.onMouseUp(sx, sy);
-    bool vR = vBar_.onMouseUp(sx, sy);
+    int localX = sx - x;
+    int localY = sy - y;
+
+    bool hR = hBar_.onMouseUp(localX, localY);
+    bool vR = vBar_.onMouseUp(localX, localY);
     if (!hR && !vR)
     {
         if (panning_)
             panning_ = false;
         else if (activeSurface_)
         {
-            auto [cx, cy] = vp_.screenToCanvas(float(sx), float(sy));
+            auto [cx, cy] = vp_.screenToCanvas(float(localX), float(localY));
             activeSurface_->onMouseUp(cx, cy);
         }
     }
@@ -608,8 +652,9 @@ bool CanvasWidget::handleMouseUp(int sx, int sy)
 
 bool CanvasWidget::handleMouseWheel(int delta)
 {
-    if (!viewportEnabled_) return false;
-    bool ctrl  = platformCtrlDown();
+    if (!viewportEnabled_)
+        return false;
+    bool ctrl = platformCtrlDown();
     bool shift = platformShiftDown();
     if (ctrl)
     {
@@ -626,37 +671,70 @@ bool CanvasWidget::handleMouseWheel(int delta)
         vp_.panByScreen(0.f, -(float(delta) / WHEEL_DELTA) * 40.f);
     }
     pokeScrollbars();
-    if (onViewportChanged) onViewportChanged(vp_.zoom());
+    if (onViewportChanged)
+        onViewportChanged(vp_.zoom());
+    markNeedsPaint();
+    return true;
+}
+
+bool CanvasWidget::handleChar(wchar_t ch)
+{
+    if (!activeSurface_)
+        return false;
+    if (ch < 32 || ch == 127)
+        return false; // control chars handled by keydown
+
+    KeyEvent ke{};
+    ke.codepoint = int(ch);
+    ke.virtualKey = 0;
+    ke.ctrl = platformCtrlDown();
+    ke.shift = platformShiftDown();
+    ke.alt = platformAltDown();
+    activeSurface_->onKeyDown(ke);
     markNeedsPaint();
     return true;
 }
 
 bool CanvasWidget::handleKeyDown(int keyCode)
 {
-    bool ctrl  = platformCtrlDown();
+    bool ctrl = platformCtrlDown();
     bool shift = platformShiftDown();
-    bool alt   = platformAltDown();
+    bool alt = platformAltDown();
 
     if (ctrl && viewportEnabled_)
     {
         // +/- zoom, 0 = reset
         if (keyCode == VK_OEM_PLUS || keyCode == VK_ADD)
         {
-            vp_.zoomIn(); pokeScrollbars(); markNeedsPaint(); return true;
+            vp_.zoomIn();
+            pokeScrollbars();
+            markNeedsPaint();
+            return true;
         }
         if (keyCode == VK_OEM_MINUS || keyCode == VK_SUBTRACT)
         {
-            vp_.zoomOut(); pokeScrollbars(); markNeedsPaint(); return true;
+            vp_.zoomOut();
+            pokeScrollbars();
+            markNeedsPaint();
+            return true;
         }
         if (keyCode == '0')
         {
-            vp_.resetZoom(); pokeScrollbars(); markNeedsPaint(); return true;
+            vp_.resetZoom();
+            pokeScrollbars();
+            markNeedsPaint();
+            return true;
         }
     }
 
     if (activeSurface_)
     {
-        KeyEvent ke{0, keyCode, ctrl, shift, alt};
+        KeyEvent ke{};
+        ke.codepoint = 0;
+        ke.virtualKey = keyCode;
+        ke.ctrl = ctrl;
+        ke.shift = shift;
+        ke.alt = alt;
         activeSurface_->onKeyDown(ke);
         markNeedsPaint();
     }
