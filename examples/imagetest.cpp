@@ -32,7 +32,7 @@ public:
                            ->setGap(12),
 
                        Flex({
-                                Flex({AssetImage("screenshots/counter.png")
+                                Flex({AssetImage("assets/counter.png")
                                           ->setFit(ImageFit::Cover)})
                                     ->setWidth(80)
                                     ->setHeight(80)
@@ -53,7 +53,7 @@ public:
                             })
                            ->setGap(12),
                        Flex({
-                                Flex({AssetImage("screenshots/batman.jpg")
+                                Flex({AssetImage("assets/batman.jpg")
                                           ->setFit(ImageFit::Cover)})
                                     ->setWidth(80)
                                     ->setHeight(80)
@@ -74,7 +74,7 @@ public:
                             })
                            ->setGap(12),
                        Flex({
-                                Flex({AssetImage("screenshots/layout.png")
+                                Flex({AssetImage("assets/layout.png")
                                           ->setFit(ImageFit::Cover)})
                                     ->setWidth(80)
                                     ->setHeight(80)
@@ -95,7 +95,7 @@ public:
                             })
                            ->setGap(12),
                        Flex({
-                                Flex({AssetImage("screenshots/illustrator.png")
+                                Flex({AssetImage("assets/illustrator.png")
                                           ->setFit(ImageFit::Cover)})
                                     ->setWidth(80)
                                     ->setHeight(80)
@@ -116,7 +116,7 @@ public:
                             })
                            ->setGap(12),
                        Flex({
-                                Flex({AssetImage("screenshots/logic_sim.png")
+                                Flex({AssetImage("assets/logic_sim.png")
                                           ->setFit(ImageFit::Cover)})
                                     ->setWidth(80)
                                     ->setHeight(80)
@@ -137,7 +137,7 @@ public:
                             })
                            ->setGap(12),
                        Flex({
-                                Flex({AssetImage("screenshots/graph.png")
+                                Flex({AssetImage("assets/graph.png")
                                           ->setFit(ImageFit::Cover)})
                                     ->setWidth(80)
                                     ->setHeight(80)
@@ -169,8 +169,12 @@ public:
     }
 };
 
+
+
 WidgetPtr createApp(FluxUI *app)
 {
-    return FluxApp("Flux - ScrollView Images", std::make_shared<MyApp>(),
-                   AppTheme::light(), false, 600, 400, false, false);
+    return FluxApp("CRUD App")
+        .setTheme(AppTheme::light())
+        .setFullscreenMode(true)
+        .build(std::make_shared<MyApp>());
 }

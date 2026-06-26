@@ -121,10 +121,8 @@ public:
 
 WidgetPtr createApp(FluxUI *app)
 {
-    return FluxApp(std::make_shared<MyApp>(), {
-                                                  .title = "FluxUI Grid Demo",
-                                                  .theme = AppTheme::light(),
-                                                  .width = 1280,
-                                                  .height = 720,
-                                              });
+    return FluxApp("FluxUI Grid Demo")
+        .setTheme(AppTheme::light())
+        .setFullscreenMode(true)
+        .build(std::make_shared<MyApp>());
 }

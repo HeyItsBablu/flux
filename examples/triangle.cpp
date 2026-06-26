@@ -54,16 +54,16 @@ public:
   }
 };
 
-// ============================================================================
-// Entry point
-// ============================================================================
+
+
+// ============================================================
+//  Entry point
+// ============================================================
 
 WidgetPtr createApp(FluxUI *app)
 {
-  return FluxApp("Triangle", std::make_shared<TriangleApp>(), AppTheme::dark(),
-                 false, // debugShowWidgetBounds
-                 800,   // width
-                 800,   // height
-                 false, // maximize
-                 false); // fullscreen
+  return FluxApp("Wrap App")
+      .setTheme(AppTheme::light())
+      .setFullscreenMode(true)
+      .build(std::make_shared<TriangleApp>());
 }

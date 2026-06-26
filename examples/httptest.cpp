@@ -7,6 +7,8 @@ struct Post
   std::string id;
   std::string title;
   std::string body;
+
+  auto operator<=>(const Post&) const = default;
 };
 
 class CrudApp : public Widget
@@ -232,8 +234,12 @@ public:
   }
 };
 
+
+
 WidgetPtr createApp(FluxUI *app)
 {
-  return FluxApp("CRUD App", std::make_shared<CrudApp>(), AppTheme::light(),
-                 false, 900, 700, false, false);
+    return FluxApp("CRUD App")
+        .setTheme(AppTheme::light())
+        .setFullscreenMode(true)
+        .build(std::make_shared<CrudApp>());
 }

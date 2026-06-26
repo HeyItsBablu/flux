@@ -79,8 +79,14 @@ public:
   }
 };
 
+// ============================================================
+//  Entry point
+// ============================================================
+
 WidgetPtr createApp(FluxUI *app)
 {
-  return FluxApp("FluxUI - MemoryImage", std::make_shared<MyApp>(),
-                 AppTheme::light(), false, 600, 500, false, false);
+    return FluxApp("Memory Image App")
+        .setTheme(AppTheme::light())
+        .setFullscreenMode(true)
+        .build(std::make_shared<MyApp>());
 }

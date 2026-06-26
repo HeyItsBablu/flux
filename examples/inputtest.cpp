@@ -18,7 +18,7 @@ public:
         return Flex(
                    {
                        Text("Book a Stay")
-                           ->setFontSize(20)
+                           ->setFontSize(20) 
                            ->setFontWeight(FontWeight::Bold),
 
                        SizedBox(0, 20),
@@ -228,13 +228,15 @@ public:
     }
 };
 
+
+// ============================================================
+//  Entry point
+// ============================================================
+
 WidgetPtr createApp(FluxUI *app)
 {
-    return FluxApp("FluxUI - Paint", std::make_shared<MyApp>(), AppTheme::light(),
-                   false, // debugShowWidgetBounds
-                   900,   // width
-                   700,   // height
-                   false, // maximize
-                   true   // fullscreen
-    );
+  return FluxApp("Wrap App")
+      .setTheme(AppTheme::light())
+      .setFullscreenMode(true)
+      .build(std::make_shared<MyApp>());
 }

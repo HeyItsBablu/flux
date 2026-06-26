@@ -183,15 +183,16 @@ public:
     }
 };
 
+
+
+// ============================================================
+//  Entry point
+// ============================================================
+
 WidgetPtr createApp(FluxUI *app)
 {
-    return FluxApp(
-        "FluxUI — Overlay System Test",
-        std::make_shared<OverlayTestApp>(),
-        AppTheme::light(),
-        false,
-        720,
-        700,
-        true,
-        false);
+  return FluxApp("Wrap App")
+      .setTheme(AppTheme::light())
+      .setFullscreenMode(true)
+      .build(std::make_shared<OverlayTestApp>());
 }
