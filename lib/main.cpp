@@ -1013,17 +1013,8 @@ private:
     {
       if (!s.glImage)
       {
-        // GLuint tex = 0;
-        // glGenTextures(1, &tex);
-        // glBindTexture(GL_TEXTURE_2D, tex);
-        // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        // glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, s.imageW, s.imageH, 0,
-        //              GL_RGBA, GL_UNSIGNED_BYTE, s.imageData.data());
-        // glBindTexture(GL_TEXTURE_2D, 0);
-        // s.glImage = ctx.wrapTexture(tex, s.imageW, s.imageH);
+        s.glImage = ctx.loadImageFromMemory(s.imageData.data(),
+                                            (int)s.imageData.size());
       }
       if (s.glImage)
         ctx.drawImage(s.glImage, 0.f, 0.f, float(s.imageW), float(s.imageH));
@@ -1210,23 +1201,23 @@ class PaintApp : public Widget
         shapeButtons_[i]->setBackgroundColor(i == idx ? kActiveBg : kInactiveBg);
   }
 
-void flushPending()
-{
+  void flushPending()
+  {
     if (pendingZoom_ >= 0.f)
     {
-        char buf[16];
-        std::snprintf(buf, sizeof(buf), "%.0f%%", pendingZoom_ * 100.f);
-        zoomLabel_.set(buf);
-        pendingZoom_ = -1.f;
+      char buf[16];
+      std::snprintf(buf, sizeof(buf), "%.0f%%", pendingZoom_ * 100.f);
+      zoomLabel_.set(buf);
+      pendingZoom_ = -1.f;
     }
     if (pendingMousePos_)
     {
-        char buf[32];
-        std::snprintf(buf, sizeof(buf), "%.0f, %.0f", pendingMouseX_, pendingMouseY_);
-        cursorPosLabel_.set(buf);
-        pendingMousePos_ = false;
+      char buf[32];
+      std::snprintf(buf, sizeof(buf), "%.0f, %.0f", pendingMouseX_, pendingMouseY_);
+      cursorPosLabel_.set(buf);
+      pendingMousePos_ = false;
     }
-}
+  }
 
 public:
   WidgetPtr build() override
@@ -1250,8 +1241,6 @@ public:
       pendingMouseX_ = x;
       pendingMouseY_ = y;
       pendingMousePos_ = true;
-
-
     };
 
     surface_->onStrokeCommitted = [this]()
