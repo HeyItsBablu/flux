@@ -299,20 +299,20 @@ private:
 
     if (!s.imageData.empty() && s.imageW > 0 && s.imageH > 0)
     {
-      if (!s.glImage)
-      {
-        GLuint tex = 0;
-        glGenTextures(1, &tex);
-        glBindTexture(GL_TEXTURE_2D, tex);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, s.imageW, s.imageH, 0,
-                     GL_RGBA, GL_UNSIGNED_BYTE, s.imageData.data());
-        glBindTexture(GL_TEXTURE_2D, 0);
-        s.glImage = ctx.wrapTexture(tex, s.imageW, s.imageH);
-      }
+      //   if (!s.glImage)
+      //   {
+      //     GLuint tex = 0;
+      //     glGenTextures(1, &tex);
+      //     glBindTexture(GL_TEXTURE_2D, tex);
+      //     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+      //     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      //     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      //     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      //     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, s.imageW, s.imageH, 0,
+      //                  GL_RGBA, GL_UNSIGNED_BYTE, s.imageData.data());
+      //     glBindTexture(GL_TEXTURE_2D, 0);
+      //     s.glImage = ctx.wrapTexture(tex, s.imageW, s.imageH);
+      //   }
       if (s.glImage)
         ctx.drawImage(s.glImage, 0.f, 0.f, float(s.imageW), float(s.imageH));
       return;
@@ -524,13 +524,14 @@ public:
   }
 };
 
+// ============================================================
+//  Entry point
+// ============================================================
+
 WidgetPtr createApp(FluxUI *app)
 {
-  return FluxApp(
-      "Paint",
-      std::make_shared<PaintApp>(),
-      AppTheme::dark(),
-      false,
-      960, 680,
-      false, true);
+  return FluxApp("Paint App")
+      .setTheme(AppTheme::dark())
+      .setFullscreenMode(true)
+      .build(std::make_shared<PaintApp>());
 }

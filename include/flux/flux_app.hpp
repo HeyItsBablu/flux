@@ -263,27 +263,78 @@ inline std::weak_ptr<FluxAppWidget> FluxAppWidget::instance_;
 
 
 
-struct FluxAppConfig {
-    std::string title               = "FluxUI App";
-    AppTheme    theme               = AppTheme::light();
-    int         width               = 900;
-    int         height              = 700;
-    bool        maximize            = false;
-    bool        fullscreen          = false;
-    bool        debugWidgetBounds   = false;
+// ============================================================================
+// FLUX APP FACTORY
+// ============================================================================
+
+class FluxAppBuilder
+{
+public:
+  explicit FluxAppBuilder(std::string title)
+  {
+    cfg_.title = std::move(title);
+  }
+
+  FluxAppBuilder &setTheme(const AppTheme &theme)
+  {
+    cfg_.theme = theme;
+    return *this;
+  }
+
+  FluxAppBuilder &setSize(int width, int height)
+  {
+    cfg_.width = width;
+    cfg_.height = height;
+    return *this;
+  }
+
+  FluxAppBuilder &setFullscreenMode(bool fullscreen = true)
+  {
+    cfg_.fullscreen = fullscreen;
+    return *this;
+  }
+
+  FluxAppBuilder &setMaximized(bool maximize = true)
+  {
+    cfg_.maximize = maximize;
+    return *this;
+  }
+
+  FluxAppBuilder &setDebugWidgetBounds(bool debug = true)
+  {
+    cfg_.debugWidgetBounds = debug;
+    return *this;
+  }
+
+  WidgetPtr build(WidgetPtr home)
+  {
+    auto app = std::make_shared<FluxAppWidget>(cfg_.title, home);
+    app->registerInstance(app);
+    app->setTheme(cfg_.theme);
+    app->debugShowWidgetBounds = cfg_.debugWidgetBounds;
+    app->windowWidth = cfg_.width;
+    app->windowHeight = cfg_.height;
+    app->maximize = cfg_.maximize;
+    app->fullscreen = cfg_.fullscreen;
+    return app;
+  }
+
+private:
+  struct Config
+  {
+    std::string title = "FluxUI App";
+    AppTheme theme = AppTheme::light();
+    int width = 900;
+    int height = 700;
+    bool maximize = false;
+    bool fullscreen = false;
+    bool debugWidgetBounds = false;
+  } cfg_;
 };
 
-inline WidgetPtr FluxApp(WidgetPtr home, FluxAppConfig cfg = {})
+inline FluxAppBuilder FluxApp(std::string title)
 {
-    auto app = std::make_shared<FluxAppWidget>(cfg.title, home);
-    app->registerInstance(app);
-    app->setTheme(cfg.theme);
-    app->debugShowWidgetBounds = cfg.debugWidgetBounds;
-    app->windowWidth           = cfg.width;
-    app->windowHeight          = cfg.height;
-    app->maximize              = cfg.maximize;
-    app->fullscreen            = cfg.fullscreen;
-    return app;
+  return FluxAppBuilder(std::move(title));
 }
 
 #endif // FLUX_APP_HPP
