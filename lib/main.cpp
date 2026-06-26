@@ -1140,6 +1140,11 @@ class PaintApp : public Widget
   static constexpr Color kActiveBg = {60, 120, 220, 255};
   static constexpr Color kInactiveBg = {50, 50, 54, 255};
 
+  float pendingZoom_ = -1.f;
+  float pendingMouseX_ = -1.f;
+  float pendingMouseY_ = -1.f;
+  bool pendingMousePos_ = false;
+
   void updateCanvasSizeLabel()
   {
     if (!surface_)
@@ -1205,6 +1210,24 @@ class PaintApp : public Widget
         shapeButtons_[i]->setBackgroundColor(i == idx ? kActiveBg : kInactiveBg);
   }
 
+void flushPending()
+{
+    if (pendingZoom_ >= 0.f)
+    {
+        char buf[16];
+        std::snprintf(buf, sizeof(buf), "%.0f%%", pendingZoom_ * 100.f);
+        zoomLabel_.set(buf);
+        pendingZoom_ = -1.f;
+    }
+    if (pendingMousePos_)
+    {
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "%.0f, %.0f", pendingMouseX_, pendingMouseY_);
+        cursorPosLabel_.set(buf);
+        pendingMousePos_ = false;
+    }
+}
+
 public:
   WidgetPtr build() override
   {
@@ -1216,9 +1239,7 @@ public:
     {
       if (surface_)
         surface_->currentZoom_ = zoom;
-      char buf[16];
-      std::snprintf(buf, sizeof(buf), "%.0f%%", zoom * 100.f);
-      zoomLabel_.set(buf);
+      pendingZoom_ = zoom; // store only, never set State here
     };
 
     surface_ = canvas_->setSurface<PaintSurface>();
@@ -1226,13 +1247,16 @@ public:
 
     surface_->onMousePosChanged = [this](float x, float y)
     {
-      char buf[32];
-      std::snprintf(buf, sizeof(buf), "%.0f, %.0f", x, y);
-      cursorPosLabel_.set(buf);
+      pendingMouseX_ = x;
+      pendingMouseY_ = y;
+      pendingMousePos_ = true;
+
+
     };
 
     surface_->onStrokeCommitted = [this]()
     {
+      flushPending();
       canUndo_.set(surface_->canUndo());
       canRedo_.set(surface_->canRedo());
       canvas_->redraw();

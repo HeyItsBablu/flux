@@ -4448,15 +4448,12 @@ public:
 //  Entry point
 // ============================================================
 
+
+
 WidgetPtr createApp(FluxUI *app)
 {
-    return FluxApp(
-        "TextCanvas",
-        std::make_shared<TextApp>(),
-        AppTheme::dark(),
-        false, // debugShowWidgetBounds
-        1180,  // window width (wider to accommodate bigger sidebar)
-        720,   // window height
-        false, // maximize
-        true); // fullscreen
+  return FluxApp("TextCanvas App")
+      .setTheme(AppTheme::dark())
+      .setFullscreenMode(true)
+      .build(std::make_shared<TextApp>());
 }
