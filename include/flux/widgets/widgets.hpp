@@ -29,7 +29,8 @@
 #include "flux_sizedbox.hpp"
 
 #include "flux_toast.hpp"
-#include "flux_input_extended.hpp"
+#include "flux_numberinput.hpp"
+#include "flux_textarea.hpp"
 #include "flux_accordion.hpp"
 #include "flux_audioplayer.hpp"
 #include "flux_videoplayer.hpp"
