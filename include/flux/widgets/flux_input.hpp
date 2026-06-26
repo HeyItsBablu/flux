@@ -926,10 +926,14 @@ public:
       selectedRadio->markNeedsPaint();
     }
     selectedValue = selectedRadio->value;
-    if (onSelectionChanged)
-      onSelectionChanged(selectedValue);
+    // Set the bound state FIRST.  State::set() now guards against
+    // same-value re-notification, so if the app's onSelectionChanged
+    // callback also calls state.set() with the same value, the second
+    // call is a no-op — no double repaint, no flicker.
     if (boundStringState)
       boundStringState->set(selectedValue);
+    if (onSelectionChanged)
+      onSelectionChanged(selectedValue);
   }
 
   std::shared_ptr<RadioGroupWidget> setOrientation(bool vertical)
