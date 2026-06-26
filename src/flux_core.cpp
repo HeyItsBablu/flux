@@ -111,11 +111,24 @@ void FluxUI::wireCallbacks()
             return false;
         if (overlayMgr_.dispatchMouseDown(x, y))
             return true;
-        return findAndHandleMouseEvent(root.get(), x, y, [x, y, this](Widget *w)
-                                       {
-            bool h = w->handleMouseDown(x, y);
-            if (h && w->isFocusable) setFocus(w);
-            return h; });
+        bool focusableHit = false;
+        bool handled = findAndHandleMouseEvent(
+            root.get(), x, y,
+            [x, y, this, &focusableHit](Widget *w)
+            {
+                bool h = w->handleMouseDown(x, y);
+                if (h && w->isFocusable)
+                {
+                    setFocus(w);
+                    focusableHit = true;
+                }
+                return h;
+            });
+        // If no focusable widget handled this click, clear focus.
+        // This ensures text inputs lose focus when the user clicks elsewhere.
+        if (!focusableHit)
+            setFocus(nullptr);
+        return handled;
     };
     fluxLog("[wireCallbacks] Step 4: onMouseDown wired");
 

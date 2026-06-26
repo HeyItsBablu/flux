@@ -50,12 +50,15 @@ public:
     }
 };
 
+
+// ============================================================
+//  Entry point
+// ============================================================
+
 WidgetPtr createApp(FluxUI *app)
 {
-    return FluxApp(std::make_shared<MyApp>(), {
-                                                  .title = "FluxUI Wrap Demo",
-                                                  .theme = AppTheme::dark(),
-                                                  .width = 600,
-                                                  .height = 720,
-                                              });
+  return FluxApp("Wrap App")
+      .setTheme(AppTheme::light())
+      .setFullscreenMode(true)
+      .build(std::make_shared<MyApp>());
 }

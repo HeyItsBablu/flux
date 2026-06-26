@@ -6438,13 +6438,11 @@ public:
 
     return Flex({
                     toolbar,
-                    Flex({
-                      sidebar, 
-                      canvas_->setFlexGrow(1),
-                      ttConditional
-                    })
-                    ->setWidthMode(SizeMode::Full)
-                    ->setHeightMode(SizeMode::Full),
+                    Flex({sidebar,
+                          canvas_->setFlexGrow(1),
+                          ttConditional})
+                        ->setWidthMode(SizeMode::Full)
+                        ->setHeightMode(SizeMode::Full),
                     statusBar,
                 })
         ->setWidthMode(SizeMode::Full)
@@ -6453,15 +6451,14 @@ public:
   }
 };
 
-// ── Entry point ───────────────────────────────────────────────────────────────
+// ============================================================
+//  Entry point
+// ============================================================
 
 WidgetPtr createApp(FluxUI *app)
 {
-  return FluxApp(
-      "Circuit Designer",
-      std::make_shared<CircuitApp>(),
-      AppTheme::dark(),
-      false,
-      1280, 800,
-      false, true);
+  return FluxApp("Circuit App")
+      .setTheme(AppTheme::dark())
+      .setFullscreenMode(true)
+      .build(std::make_shared<CircuitApp>());
 }
