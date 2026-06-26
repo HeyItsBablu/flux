@@ -4,7 +4,7 @@
 #include "../flux_core.hpp"
 #include "../flux_http.hpp"
 #include "../flux_painter.hpp"
-#include <direct.h>
+
 #include "flux/flux_debug_log.hpp"
 
 // ============================================================================
@@ -588,22 +588,12 @@ private:
             AAsset_close(asset);
 #else
 #ifdef _WIN32
-char cwd[512];
-_getcwd(cwd, sizeof(cwd));
-fluxLog("[_loadAssetAsync] cwd=" + std::string(cwd) + " path=" + path);
-std::cout <<std::string(cwd) <<" "<< path <<std::endl;
+
 
 FILE *f = nullptr;
 errno_t err = fopen_s(&f, path.c_str(), "rb");
-fluxLog("[_loadAssetAsync] fopen result: f=" + std::string(f ? "valid" : "NULL") +
-        " errno=" + std::to_string(err));
-
-        std::cout <<"[_loadAssetAsync] fopen result: f=" << std::string(f ? "valid" : "NULL")<<  " errno=" << std::to_string(err)<<std::endl;
 
 if (!f) {
-    fluxLog("[_loadAssetAsync] FILE OPEN FAILED errno=" + std::to_string(err));
-    std::cout <<"[_loadAssetAsync] FILE OPEN FAILED errno=" << std::to_string(err)<<std::endl;
-
     self->_setLoadState(ImageLoadState::Error);
     self->_scheduleRebuild();
     return;

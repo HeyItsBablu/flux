@@ -5,59 +5,176 @@ class MyApp : public Widget
 public:
     WidgetPtr build() override
     {
-        auto header = Flex({Text("Wrap Demo")->setFontSize(20)})
-                          ->setAlignItems(AlignItems::Center)
-                          ->setJustifyContent(JustifyContent::Center)
-                          ->setHeight(56)
-                          ->setHeightMode(SizeMode::Fixed)
-                          ->setWidthMode(SizeMode::Full);
+        return Flex(
+                   {
 
-        // 9 fixed-size boxes, each 120x80, in a Row that wraps.
-        std::vector<WidgetPtr> boxes;
-        for (int i = 1; i <= 9; ++i)
-        {
-            boxes.push_back(
-                Flex({Text(std::to_string(i))->setFontSize(16)})
-                    ->setAlignItems(AlignItems::Center)
-                    ->setJustifyContent(JustifyContent::Center)
-                    ->setWidth(120)
-                    ->setHeight(80)
-                    ->setWidthMode(SizeMode::Fixed)
-                    ->setHeightMode(SizeMode::Fixed)
-                    ->setBackgroundColor(Color::fromRGB(180, 200, 255))
-                    ->setBorderRadius(8));
-        }
+                       Flex({
+                                Flex({NetworkImage("https://picsum.photos/"
+                                                   "seed/fluxui/600/200")
+                                          ->setFit(ImageFit::Cover)})
+                                    ->setWidth(80)
+                                    ->setHeight(80)
+                                    ->setBorderRadius(8),
 
-        auto body = Flex({})
-                        ->setDirection(FlexDirection::Row)
-                        ->setWrap(FlexWrap::Wrap)
-                        
-                        ->setGap(12)
-                        ->setPadding(16)
-                        ->setWidthMode(SizeMode::Full)
-                        ->setHeightMode(SizeMode::Full)
-                        ->setBackgroundColor(Color::fromRGB(250, 250, 250));
+                                Flex({
+                                         Text("Image Title")
+                                             ->setFontSize(16)
+                                             ->setFontWeight(FontWeight::Bold)
+                                             ->setTextColor(
+                                                 Color::fromRGB(30, 30, 30)),
+                                         Text("Some subtitle text here")
+                                             ->setFontSize(13)
+                                             ->setTextColor(
+                                                 Color::fromRGB(100, 100, 100)),
+                                     })
+                                    ->setDirection(FlexDirection::Column),
+                            })
+                           ->setGap(12),
 
-        for (auto &box : boxes)
-            body->addChild(box);
+                       Flex({
+                                Flex({AssetImage("assets/counter.png")
+                                          ->setFit(ImageFit::Cover)})
+                                    ->setWidth(80)
+                                    ->setHeight(80)
+                                    ->setBorderRadius(8),
 
-        return Page()
-            ->setHeader(header)
-            ->setBody(body)
-            ->setHeaderBackgroundColor(Color::fromRGB(240, 240, 245))
-            ->setHeaderElevation(4);
+                                Flex({
+                                         Text("Another Title")
+                                             ->setFontSize(16)
+                                             ->setFontWeight(FontWeight::Bold)
+                                             ->setTextColor(
+                                                 Color::fromRGB(30, 30, 30)),
+                                         Text("Another subtitle here")
+                                             ->setFontSize(13)
+                                             ->setTextColor(
+                                                 Color::fromRGB(100, 100, 100)),
+                                     })
+                                    ->setDirection(FlexDirection::Column),
+                            })
+                           ->setGap(12),
+                       Flex({
+                                Flex({AssetImage("assets/batman.jpg")
+                                          ->setFit(ImageFit::Cover)})
+                                    ->setWidth(80)
+                                    ->setHeight(80)
+                                    ->setBorderRadius(8),
+
+                                Flex({
+                                         Text("Another Title")
+                                             ->setFontSize(16)
+                                             ->setFontWeight(FontWeight::Bold)
+                                             ->setTextColor(
+                                                 Color::fromRGB(30, 30, 30)),
+                                         Text("Another subtitle here")
+                                             ->setFontSize(13)
+                                             ->setTextColor(
+                                                 Color::fromRGB(100, 100, 100)),
+                                     })
+                                    ->setDirection(FlexDirection::Column),
+                            })
+                           ->setGap(12),
+                       Flex({
+                                Flex({AssetImage("assets/layout.png")
+                                          ->setFit(ImageFit::Cover)})
+                                    ->setWidth(80)
+                                    ->setHeight(80)
+                                    ->setBorderRadius(8),
+
+                                Flex({
+                                         Text("Another Title")
+                                             ->setFontSize(16)
+                                             ->setFontWeight(FontWeight::Bold)
+                                             ->setTextColor(
+                                                 Color::fromRGB(30, 30, 30)),
+                                         Text("Another subtitle here")
+                                             ->setFontSize(13)
+                                             ->setTextColor(
+                                                 Color::fromRGB(100, 100, 100)),
+                                     })
+                                    ->setDirection(FlexDirection::Column),
+                            })
+                           ->setGap(12),
+                       Flex({
+                                Flex({AssetImage("assets/illustrator.png")
+                                          ->setFit(ImageFit::Cover)})
+                                    ->setWidth(80)
+                                    ->setHeight(80)
+                                    ->setBorderRadius(8),
+
+                                Flex({
+                                         Text("Another Title")
+                                             ->setFontSize(16)
+                                             ->setFontWeight(FontWeight::Bold)
+                                             ->setTextColor(
+                                                 Color::fromRGB(30, 30, 30)),
+                                         Text("Another subtitle here")
+                                             ->setFontSize(13)
+                                             ->setTextColor(
+                                                 Color::fromRGB(100, 100, 100)),
+                                     })
+                                    ->setDirection(FlexDirection::Column),
+                            })
+                           ->setGap(12),
+                       Flex({
+                                Flex({AssetImage("assets/logic_sim.png")
+                                          ->setFit(ImageFit::Cover)})
+                                    ->setWidth(80)
+                                    ->setHeight(80)
+                                    ->setBorderRadius(8),
+
+                                Flex({
+                                         Text("Another Title")
+                                             ->setFontSize(16)
+                                             ->setFontWeight(FontWeight::Bold)
+                                             ->setTextColor(
+                                                 Color::fromRGB(30, 30, 30)),
+                                         Text("Another subtitle here")
+                                             ->setFontSize(13)
+                                             ->setTextColor(
+                                                 Color::fromRGB(100, 100, 100)),
+                                     })
+                                    ->setDirection(FlexDirection::Column),
+                            })
+                           ->setGap(12),
+                       Flex({
+                                Flex({AssetImage("assets/graph.png")
+                                          ->setFit(ImageFit::Cover)})
+                                    ->setWidth(80)
+                                    ->setHeight(80)
+                                    ->setBorderRadius(8),
+
+                                Flex({
+                                         Text("Another Title")
+                                             ->setFontSize(16)
+                                             ->setFontWeight(FontWeight::Bold)
+                                             ->setTextColor(
+                                                 Color::fromRGB(30, 30, 30)),
+                                         Text("Another subtitle here")
+                                             ->setFontSize(13)
+                                             ->setTextColor(
+                                                 Color::fromRGB(100, 100, 100)),
+                                     })
+                                    ->setDirection(FlexDirection::Column),
+                            })
+                           ->setGap(12),
+
+                   })
+            ->setScrollable(true)
+            ->setDirection(FlexDirection::Column) // base (mobile): stacked
+            ->setGap(8)
+            ->setPadding(16)
+            ->setAlignItems(AlignItems::Stretch)
+            ->setWidthMode(SizeMode::Full)
+            ->setHeightMode(SizeMode::Full);
     }
 };
 
 
-// ============================================================
-//  Entry point
-// ============================================================
 
 WidgetPtr createApp(FluxUI *app)
 {
-  return FluxApp("Wrap App")
-      .setTheme(AppTheme::light())
-      .setFullscreenMode(true)
-      .build(std::make_shared<MyApp>());
+    return FluxApp("CRUD App")
+        .setTheme(AppTheme::light())
+        .setFullscreenMode(true)
+        .build(std::make_shared<MyApp>());
 }
