@@ -276,14 +276,11 @@ static void tickAndRender(CanvasWidget *w, GraphicsContext &gctx)
     offDC->BeginDraw();
     offDC->Clear(D2D1::ColorF(D2D1::ColorF::White));
     offDC->SetTransform(D2D1::Matrix3x2F::Identity());
-
-    w->activeSurface_->preRender(); // GL pre-pass is no-op on D2D surfaces
-
+    w->activeSurface_->preRender();
     {
         Canvas2D ctx(s.d2d, w->docW(), w->docH());
         w->activeSurface_->render(ctx);
     }
-
     offDC->EndDraw();
 
     // ── Composite into main DC ────────────────────────────────────────────
@@ -294,56 +291,64 @@ static void tickAndRender(CanvasWidget *w, GraphicsContext &gctx)
 
     int vpW = w->width, vpH = w->height;
 
-    // Viewport transform: pan + zoom
     float zoom = w->vp_.zoom();
-    float offX = -w->vp_.offsetX() * zoom + float(w->x);
-    float offY = -w->vp_.offsetY() * zoom + float(w->y);
+    float offX = float(w->x) - w->vp_.offsetX() * zoom;
+    float offY = float(w->y) - w->vp_.offsetY() * zoom;
 
-    // Drop shadow (screen-space, before canvas bitmap)
-    float docPxW = float(w->docW()) * zoom;
-    float docPxH = float(w->docH()) * zoom;
-    drawDropShadow(dc, factory, offX, offY, docPxW, docPxH);
-
-    // Canvas bitmap with viewport transform
     D2D1_MATRIX_3X2_F prevTransform;
     dc->GetTransform(&prevTransform);
 
-    D2D1_MATRIX_3X2_F vpTransform =
-        D2D1::Matrix3x2F::Scale(zoom, zoom) *
-        D2D1::Matrix3x2F::Translation(offX, offY);
-    dc->SetTransform(vpTransform * prevTransform);
-
-    // Clip to widget bounds
+    // 1. Push clip in current (window) space BEFORE changing transform
     dc->PushAxisAlignedClip(
         D2D1::RectF(float(w->x), float(w->y),
                     float(w->x + vpW), float(w->y + vpH)),
         D2D1_ANTIALIAS_MODE_ALIASED);
 
+    // 2. Now set the viewport transform
+    // screenPt = canvasPt * zoom + (offX, offY)
+    D2D1_MATRIX_3X2_F vpTransform =
+        D2D1::Matrix3x2F::Scale(zoom, zoom) *
+        D2D1::Matrix3x2F::Translation(offX, offY);
+    dc->SetTransform(vpTransform * prevTransform);
+
+    // 3. Draw the bitmap in canvas space (0,0 → docW,docH)
     D2D1_RECT_F docRect = D2D1::RectF(0, 0,
                                       float(w->docW()), float(w->docH()));
+
+    // Fill widget background (the "mat" around the canvas document)
+    dc->SetTransform(prevTransform);
+    {
+        ComPtr<ID2D1SolidColorBrush> matBrush;
+        dc->CreateSolidColorBrush(D2D1::ColorF(0.78f, 0.78f, 0.78f, 1.f), matBrush.GetAddressOf());
+        if (matBrush)
+            dc->FillRectangle(
+                D2D1::RectF(float(w->x), float(w->y),
+                            float(w->x + vpW), float(w->y + vpH)),
+                matBrush.Get());
+    }
+    // Then restore the viewport transform before drawing the bitmap
+    dc->SetTransform(vpTransform * prevTransform);
     dc->DrawBitmap(s.d2d->offscreenBitmap.Get(), &docRect, 1.f,
                    D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
 
     dc->PopAxisAlignedClip();
     dc->SetTransform(prevTransform);
 
-    // ── Scrollbars (in widget-local screen space) ──────────────────────────
+    // ── Scrollbars ────────────────────────────────────────────────────────
     if (w->scrollbarsEnabled_ && w->viewportEnabled_)
     {
         w->updateSBGeometry(vpW, vpH);
-
-        // Tick animations
         double dt2 = dt;
         w->hBar_.tick(dt2);
         w->vBar_.tick(dt2);
 
-        // Translate DC to widget origin
         D2D1_MATRIX_3X2_F sbTransform =
             D2D1::Matrix3x2F::Translation(float(w->x), float(w->y));
         dc->SetTransform(sbTransform * prevTransform);
 
         dc->PushAxisAlignedClip(
-            D2D1::RectF(0, 0, float(vpW), float(vpH)),
+            D2D1::RectF(float(w->x), float(w->y),
+                        float(w->x + vpW), float(w->y + vpH)),
             D2D1_ANTIALIAS_MODE_ALIASED);
 
         drawScrollbarD2D(dc, factory, w->hBar_, vpW, vpH, w->hBar_.alpha());
