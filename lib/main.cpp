@@ -868,22 +868,12 @@ public:
       // Draw floating selection pixels
       if (hasSelection_ && !selPixels_.empty())
       {
-        // // Upload as a temporary GL texture each frame
-        // // (cheap for selection-size tiles; could cache)
-        // GLuint tmpTex = 0;
-        // glGenTextures(1, &tmpTex);
-        // glBindTexture(GL_TEXTURE_2D, tmpTex);
-        // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        // glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, selPixW_, selPixH_, 0,
-        //              GL_RGBA, GL_UNSIGNED_BYTE, selPixels_.data());
-        // glBindTexture(GL_TEXTURE_2D, 0);
-        // Canvas2DImage *tmp = ctx.wrapTexture(tmpTex, selPixW_, selPixH_);
-        // ctx.drawImage(tmp, selX_, selY_, selW_, selH_);
-        // delete tmp;
-        // glDeleteTextures(1, &tmpTex);
+        // Create a temporary image from raw RGBA pixels and draw it
+        Canvas2DImage *tmp = new Canvas2DImage();
+        ctx.updateImage(tmp, selPixels_.data(), selPixW_, selPixH_);
+        if (tmp->bitmap)
+          ctx.drawImage(tmp, selX_, selY_, float(selPixW_), float(selPixH_));
+        delete tmp;
       }
 
       // Marching-ants dashed border
@@ -1013,8 +1003,14 @@ private:
     {
       if (!s.glImage)
       {
-        s.glImage = ctx.loadImageFromMemory(s.imageData.data(),
-                                            (int)s.imageData.size());
+        // imageData is raw RGBA pixels — use updateImage path directly
+        auto *img = new Canvas2DImage();
+        // updateImage calls createBitmapFromRGBA which handles RGBA→BGRA conversion
+        ctx.updateImage(img, s.imageData.data(), s.imageW, s.imageH);
+        if (img->bitmap)
+          s.glImage = img;
+        else
+          delete img;
       }
       if (s.glImage)
         ctx.drawImage(s.glImage, 0.f, 0.f, float(s.imageW), float(s.imageH));
