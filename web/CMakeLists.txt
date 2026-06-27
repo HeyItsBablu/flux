@@ -8,8 +8,20 @@ set_target_properties(flux_app PROPERTIES SUFFIX ".html")
 target_link_libraries(flux_app PRIVATE flux::flux)
 target_include_directories(flux_app PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
+target_compile_definitions(flux_app PRIVATE
+    FLUX_APP_NAME="${FLUX_APP_NAME}"
+    FLUX_APP_VERSION="${FLUX_APP_VERSION}"
+    FLUX_APP_BUNDLE_ID="${FLUX_APP_BUNDLE_ID}"
+)
+
+# Generate shell.html from template
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/shell.html.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/shell.html"
+)
+
 target_link_options(flux_app PRIVATE
-    "--shell-file=${CMAKE_CURRENT_SOURCE_DIR}/shell.html"
+    "--shell-file=${CMAKE_CURRENT_BINARY_DIR}/shell.html"
     "--preload-file=${CMAKE_SOURCE_DIR}/web/fonts@/fonts"
     "-sEXIT_RUNTIME=0"
     "-sUSE_WEBGL2=1"

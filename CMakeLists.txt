@@ -1,6 +1,13 @@
 cmake_minimum_required(VERSION 3.21)
 project(flux VERSION 0.1.0 LANGUAGES CXX C)
 
+include(config/AppConfig.cmake)
+
+# Override project version from config
+cmake_policy(SET CMP0048 NEW)
+project(flux VERSION ${FLUX_APP_VERSION} LANGUAGES CXX C)
+
+
 # ============================================================================
 # ccache
 # ============================================================================

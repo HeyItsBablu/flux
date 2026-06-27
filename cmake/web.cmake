@@ -1,16 +1,6 @@
 # cmake/web.cmake
 # Emscripten toolchain file for FluxUI web builds.
-#
-# Usage (option A — recommended):
-#   emcmake cmake -B build-web -DFLUX_BUILD_EXAMPLES=ON -DCMAKE_BUILD_TYPE=Release
-#   cmake --build build-web
-#
-# Usage (option B — explicit toolchain):
-#   cmake -B build-web \
-#       -DCMAKE_TOOLCHAIN_FILE=cmake/web.cmake \
-#       -DFLUX_BUILD_EXAMPLES=ON \
-#       -DCMAKE_BUILD_TYPE=Release
-#   cmake --build build-web
+
 
 set(CMAKE_SYSTEM_NAME Emscripten)
 set(CMAKE_SYSTEM_VERSION 1)
