@@ -1,0 +1,6 @@
+{
+  "name":    "My Application",
+  "bundleId": "com.example.myapplication",
+  "version": "1.0.0",
+  "build":   1
+}

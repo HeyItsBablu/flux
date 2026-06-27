@@ -1,10 +1,7 @@
-# ============================================================================
-# Flux App Configuration 
-# ============================================================================
+# config/AppConfig.cmake
+file(READ "${CMAKE_SOURCE_DIR}/config/AppConfig.json" FLUX_CONFIG_JSON)
 
-set(FLUX_APP_NAME         "MyApplication")
-set(FLUX_APP_BUNDLE_ID    "com.example.myapplication")
-set(FLUX_APP_VERSION      "1.0.0")
-set(FLUX_APP_BUILD        1)
-set(FLUX_APP_ICON         "${CMAKE_SOURCE_DIR}/config/icon.png")
-set(FLUX_APP_SPLASH_COLOR "#FFFFFF")
+string(JSON FLUX_APP_NAME    GET ${FLUX_CONFIG_JSON} name)
+string(JSON FLUX_APP_BUNDLE_ID GET ${FLUX_CONFIG_JSON} bundleId)
+string(JSON FLUX_APP_VERSION GET ${FLUX_CONFIG_JSON} version)
+string(JSON FLUX_APP_BUILD   GET ${FLUX_CONFIG_JSON} build)
