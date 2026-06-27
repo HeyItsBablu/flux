@@ -12,6 +12,9 @@
 #include "flux/flux_canvas2d.hpp"
 #include "flux/widgets/flux_file_picker.hpp"
 
+// Forward declaration — defined in lib/main.cpp
+WidgetPtr createApp(FluxUI* app); 
+
 #include "nanovg.h"
 #include "nanovg_gl.h"
 

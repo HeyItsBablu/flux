@@ -3,6 +3,9 @@
 #include "flux/flux_debug_log.hpp"
 #ifdef _WIN32
 
+// Forward declaration — defined in lib/main.cpp
+WidgetPtr createApp(FluxUI* app);
+
 #include <dbghelp.h>
 #pragma comment(lib, "dbghelp.lib")
 

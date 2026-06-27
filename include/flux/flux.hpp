@@ -7,7 +7,6 @@
 #include "flux_app.hpp"
 #include "flux_state.hpp"
 #include "widgets/widgets.hpp"
-#include "main_app.hpp"
 #include "flux_android_jni.hpp"
 #include "flux_audio.hpp"
 #include "flux_camera.hpp"

@@ -9,6 +9,10 @@
 #include "flux/flux.hpp"
 
 
+// Forward declaration — defined in lib/main.cpp
+WidgetPtr createApp(FluxUI* app);
+
+
 // ============================================================================
 // FluxAppDelegate — sets up the app menu and launches the FluxUI window
 // ============================================================================

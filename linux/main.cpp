@@ -6,6 +6,9 @@
 #include <SDL2/SDL.h>
 #include "flux/flux.hpp"
 
+// Forward declaration — defined in lib/main.cpp
+WidgetPtr createApp(FluxUI* app);
+
 int main(int /*argc*/, char** /*argv*/) {
 
 #ifdef FLUX_DEBUG
