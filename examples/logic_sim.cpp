@@ -1995,8 +1995,7 @@ public:
       }
     }
 
-    // 5c. NEW: Auto-promote gate ports that have no crossing wire
-    //     — this is what makes connectors appear even without IN/OUT nodes.
+
     for (int id : selIds)
     {
       const CircuitNode *n = findNodeConst(id);

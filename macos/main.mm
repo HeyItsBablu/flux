@@ -1,4 +1,4 @@
-// main_macos.mm
+//macos/main.mm
 #ifdef __APPLE__
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX

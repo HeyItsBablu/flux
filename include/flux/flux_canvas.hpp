@@ -13,7 +13,7 @@
 #include "flux_widget.hpp"
 #include "flux_keys.hpp"
 #include "flux_core.hpp"
-#include "flux_canvas2d_d2d.hpp"
+#include "flux_canvas2d.hpp"
 #include "flux_scrollbar.hpp"
 #include "flux_render_surface.hpp"
 #include "flux_canvas_types.hpp"
@@ -28,6 +28,13 @@
 
 // ── Platform-specific GL / windowing headers included by each .cpp ────────────
 // (not included here so this header stays platform-neutral)
+
+// Canvas2DGL is the per-context font/shader/atlas state used by the GL
+// backend (flux_canvas2d_gl.cpp).  It is fully defined only in
+// flux_canvas2d_backend.hpp (included by the platform .cpp files, never
+// from here).  CanvasWidget only ever stores/forwards the pointer — it
+// never dereferences it directly — so a forward declaration is sufficient.
+struct Canvas2DGL;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CanvasWidget
@@ -118,6 +125,13 @@ public:
     Clock::time_point lastTick_ = Clock::now();
     double frameDt_ = 0.0;
 
+    // ── GL backend pointer (GL platforms only: Linux, Web, Android, macOS) ────
+    // Opaque here — only flux_canvas2d_gl.cpp and the platform .cpp files
+    // (which include flux_canvas2d_backend.hpp) dereference it. Win32 never
+    // sets or reads this (it uses Canvas2DD2D / Canvas2DBackend locally
+    // instead, stored in its own per-widget state map).
+    Canvas2DGL *canvasGL_ = nullptr;
+
     // ── Shared helpers ────────────────────────────────────────────────────────
 
     std::shared_ptr<CanvasWidget> ptr()
@@ -170,7 +184,7 @@ public:
     bool handleMouseUp(int mx, int my) override;
     bool handleMouseWheel(int delta) override;
     bool handleKeyDown(int keyCode) override;
-     bool handleChar(wchar_t ch) override;
+    bool handleChar(wchar_t ch) override;
 #endif
     // ── Android-only ──────────────────────────────────────────────────────────
 #ifdef __ANDROID__

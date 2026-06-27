@@ -1,4 +1,4 @@
-// src/main_web.cpp
+// web/main.cpp
 //
 // Web entry point for FluxUI (Emscripten / WASM).
 //

@@ -33,7 +33,7 @@
 //                         ├─ surface->update(dt)
 //                         ├─ GL: viewport + scissor to widget rect
 //                         ├─ surface->preRender()
-//                         ├─ Canvas2D ctx(canvasGL_, ..., mvp)
+//                         ├─ Canvas2D ctx(s_sharedBackend, ..., mvp set on backend)
 //                         ├─ surface->render(ctx)
 //                         └─ renderScrollbarsGL() (draws into #flux-gl)
 //
@@ -54,10 +54,21 @@
 // emscripten_webgl_make_context_current() — Emscripten keeps it current.
 // Canvas2DGL::init() is called once and uses the already-current context.
 // There is no wglMakeCurrent / eglMakeCurrent equivalent needed.
+//
+// Canvas2D backend
+// ────────────────
+// All CanvasWidgets on the page share a single Canvas2DGL (font atlas,
+// shaders, VAO/VBO) AND a single Canvas2DBackend wrapping it. Canvas2D is
+// only ever constructed as Canvas2D(Canvas2DBackend*, w, h) — never from a
+// raw Canvas2DGL* — so each widget writes its own per-frame MVP into the
+// shared backend's `mvp` field immediately before constructing its Canvas2D
+// and rendering. This is safe because all widgets render sequentially on
+// the same thread within a single frame.
 
 #ifdef __EMSCRIPTEN__
 
 #include "flux/flux_canvas.hpp"
+#include "flux/flux_canvas2d_backend.hpp"
 
 #include <emscripten.h>
 #include <emscripten/html5.h>
@@ -65,6 +76,7 @@
 
 #include <cassert>
 #include <cstdio>
+#include <cstring>
 #include <unordered_map>
 #include <algorithm>
 #include <chrono>
@@ -146,10 +158,12 @@ static void scheduleRepaint(CanvasWidget *w)
 // ── Canvas2DGL singleton ──────────────────────────────────────────────────────
 //
 // All CanvasWidgets on the page share a single GL context and therefore a
-// single Canvas2DGL (font atlas, shader programs, VAO/VBO).  It is created
-// on first CanvasWidget init and destroyed when the last one is detached.
+// single Canvas2DGL (font atlas, shader programs, VAO/VBO), wrapped in a
+// single Canvas2DBackend.  Created on first CanvasWidget init and destroyed
+// when the last one is detached.
 
 static Canvas2DGL *s_sharedGL = nullptr;
+static Canvas2DBackend *s_sharedBackend = nullptr;
 static int s_sharedGLUsers = 0;
 
 // ── WebGL2 context (created once, shared by all CanvasWidgets) ────────────────
@@ -215,10 +229,11 @@ static Canvas2DGL *acquireSharedGL()
             return nullptr;
         }
 
+        s_sharedBackend = Canvas2DBackend::create(s_sharedGL);
 
         auto reg = [](const char *name, const char *path)
         {
-            if (!Canvas2D::registerFont(s_sharedGL, name, path))
+            if (!Canvas2D::registerFont(s_sharedBackend, name, path))
                 emscripten_log(EM_LOG_WARN,
                                "FluxCanvas: font '%s' not found at '%s'", name, path);
         };
@@ -235,6 +250,11 @@ static void releaseSharedGL()
 {
     if (--s_sharedGLUsers <= 0 && s_sharedGL)
     {
+        if (s_sharedBackend)
+        {
+            Canvas2DBackend::destroy(s_sharedBackend);
+            s_sharedBackend = nullptr;
+        }
         s_sharedGL->destroy();
         delete s_sharedGL;
         s_sharedGL = nullptr;
@@ -352,7 +372,7 @@ static void destroyGL(CanvasWidget *w)
 static void tickAndRender(CanvasWidget *w)
 {
     auto &s = webState(w);
-    if (!s.initialized || !w->canvasGL_)
+    if (!s.initialized || !w->canvasGL_ || !s_sharedBackend)
         return;
 
     if (s_glCtx > 0)
@@ -372,7 +392,6 @@ static void tickAndRender(CanvasWidget *w)
     // ── Widget rect — layout coordinates are LOGICAL (CSS) pixels ─────────
     int logicalW = w->width;
     int logicalH = w->height;
-
 
     double dpr = EM_ASM_DOUBLE({ return Module._fluxDPR || 1.0; });
     int physX = (int)std::lround(w->x * dpr);
@@ -472,8 +491,13 @@ static void tickAndRender(CanvasWidget *w)
     }
 
     // ── Canvas2D render pass ──────────────────────────────────────────────
+    // Canvas2D only ever takes a Canvas2DBackend* (not a raw Canvas2DGL*),
+    // so write this widget's per-frame MVP into the shared backend right
+    // before constructing/using it. Safe: all canvases render sequentially
+    // on this thread within one frame.
     {
-        Canvas2D ctx(w->canvasGL_, w->docW(), w->docH(), mvp);
+        std::memcpy(s_sharedBackend->mvp, mvp, sizeof(mvp));
+        Canvas2D ctx(s_sharedBackend, w->docW(), w->docH());
         w->activeSurface_->render(ctx);
     }
 

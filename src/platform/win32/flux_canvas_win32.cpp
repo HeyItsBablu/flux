@@ -1,10 +1,10 @@
-// flux_canvas_win32_d2d.cpp
+// flux_canvas_win32.cpp
 // Win32 CanvasWidget implementation using Direct2D.
 // Replaces flux_canvas_win32.cpp entirely — no GL, no child HWND, no WGL.
 //
 // Architecture:
 //   CanvasWidget::render() is called by the widget tree on the render thread.
-//   It drives Canvas2DD2D (off-screen D2D bitmap) → surface renders into it →
+//   It drives Canvas2D (off-screen D2D bitmap) → surface renders into it →
 //   the bitmap is composited into the main D2D device context with the correct
 //   viewport transform applied.
 //
@@ -13,7 +13,8 @@
 #ifdef _WIN32
 
 #include "flux/flux_canvas.hpp"
-#include "flux/flux_canvas2d_d2d.hpp"
+#include "flux/flux_canvas2d.hpp"
+#include "flux/flux_canvas2d_backend.hpp"
 #include "flux/flux_d3d_device.hpp"
 #include "flux/flux_core.hpp" // FluxUI::getCurrentInstance()
 
@@ -34,7 +35,8 @@ using Microsoft::WRL::ComPtr;
 
 struct Win32D2DCanvasState
 {
-    Canvas2DD2D *d2d = nullptr; // owned by the widget
+    Canvas2DD2D *d2d = nullptr;           // owned by the widget — D2D resources
+    Canvas2DBackend *backend = nullptr;   // owned by the widget — wraps d2d for Canvas2D
     bool inited = false;
     int lastW = 0;
     int lastH = 0;
@@ -77,7 +79,7 @@ static ID2D1DeviceContext *mainDC()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Ensure Canvas2DD2D is initialised and bitmap is the right size
+// Ensure Canvas2D is initialised and bitmap is the right size
 // ─────────────────────────────────────────────────────────────────────────────
 
 static void ensureD2D(CanvasWidget *w, GraphicsContext &gctx)
@@ -97,10 +99,19 @@ static void ensureD2D(CanvasWidget *w, GraphicsContext &gctx)
             return;
         }
 
+        s.backend = Canvas2DBackend::create(s.d2d);
+        if (!s.backend)
+        {
+            s.d2d->destroy();
+            delete s.d2d;
+            s.d2d = nullptr;
+            return;
+        }
+
         // Register default fonts (same set as the GL path)
         auto reg = [&](const char *name, const char *path)
         {
-            Canvas2DD2D::registerFont(s.d2d, name, path);
+            Canvas2D::registerFont(s.backend, name, path);
         };
         reg("sans", "C:\\Windows\\Fonts\\segoeui.ttf");
         reg("sans-bold", "C:\\Windows\\Fonts\\segoeuib.ttf");
@@ -133,14 +144,20 @@ static void destroyD2D(CanvasWidget *w)
         return;
 
     auto &s = it->second;
+    if (w->activeSurface_)
+    {
+        w->activeSurface_->destroy();
+        w->activeSurface_.reset();
+    }
+    w->pendingSurface_.reset();
+
+    if (s.backend)
+    {
+        Canvas2DBackend::destroy(s.backend);
+        s.backend = nullptr;
+    }
     if (s.d2d)
     {
-        if (w->activeSurface_)
-        {
-            w->activeSurface_->destroy();
-            w->activeSurface_.reset();
-        }
-        w->pendingSurface_.reset();
         s.d2d->destroy();
         delete s.d2d;
         s.d2d = nullptr;
@@ -257,7 +274,7 @@ static void drawDropShadow(ID2D1DeviceContext *dc,
 static void tickAndRender(CanvasWidget *w, GraphicsContext &gctx)
 {
     auto &s = d2dState(w);
-    if (!s.d2d || !s.d2d->offscreenBitmap)
+    if (!s.d2d || !s.backend || !s.d2d->offscreenBitmap)
         return;
 
     if (w->pendingSurface_)
@@ -278,7 +295,7 @@ static void tickAndRender(CanvasWidget *w, GraphicsContext &gctx)
     offDC->SetTransform(D2D1::Matrix3x2F::Identity());
     w->activeSurface_->preRender();
     {
-        Canvas2D ctx(s.d2d, w->docW(), w->docH());
+        Canvas2D ctx(s.backend, w->docW(), w->docH());
         w->activeSurface_->render(ctx);
     }
     offDC->EndDraw();
@@ -453,7 +470,7 @@ void CanvasWidget::render(GraphicsContext &ctx, FontCache &)
     ensureD2D(this, ctx);
 
     auto &s = d2dState(this);
-    if (!s.d2d)
+    if (!s.d2d || !s.backend)
         return;
 
     // First-time viewport init

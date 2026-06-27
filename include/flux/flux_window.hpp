@@ -129,8 +129,6 @@ public:
     void setResizeCursorH();
     void setResizeCursorV();
     void setDefaultCursor();
-    
-    D3DDevice *getD3DDevice() const { return d3dDevice_; }
 
     // ── Measure context ───────────────────────────────────────────────────────
     // Returns a borrowed view of the D2D device context (Win32) or the
@@ -143,6 +141,7 @@ public:
 #ifdef _WIN32
     GraphicsContext getD2DContext() const;
     RenderLoop *getRenderLoop() const { return renderLoop_; }
+    D3DDevice *getD3DDevice() const { return d3dDevice_; }
 #endif
 
     // ── DPI helpers (Linux HiDPI) ─────────────────────────────────────────────

@@ -1,180 +1,68 @@
+//lib/main.cpp
 #include "flux/flux.hpp"
 
-class MyApp : public Widget
+class TriangleSurface : public RenderSurface
 {
+  float time_ = 0;
+
 public:
-    WidgetPtr build() override
-    {
-        return Flex(
-                   {
+  void initialize(int, int) override {}
+  void resize(int, int) override {}
+  void destroy() override {}
+  void update(double dt) override { time_ += float(dt); }
 
-                       Flex({
-                                Flex({NetworkImage("https://picsum.photos/"
-                                                   "seed/fluxui/600/200")
-                                          ->setFit(ImageFit::Cover)})
-                                    ->setWidth(80)
-                                    ->setHeight(80)
-                                    ->setBorderRadius(8),
+  void render(Canvas2D &ctx) override
+  {
+    ctx.setFillColor({15, 15, 20, 255});
+    ctx.fillRect(0, 0, ctx.width(), ctx.height());
 
-                                Flex({
-                                         Text("Image Title")
-                                             ->setFontSize(16)
-                                             ->setFontWeight(FontWeight::Bold)
-                                             ->setTextColor(
-                                                 Color::fromRGB(30, 30, 30)),
-                                         Text("Some subtitle text here")
-                                             ->setFontSize(13)
-                                             ->setTextColor(
-                                                 Color::fromRGB(100, 100, 100)),
-                                     })
-                                    ->setDirection(FlexDirection::Column),
-                            })
-                           ->setGap(12),
+    ctx.setFillColor({255, 80, 80, 255}); // solid red — no HSV/gradient
+    ctx.beginPath();
+    float cx = ctx.width() * 0.5f;
+    float cy = ctx.height() * 0.5f;
+    float r = std::min(ctx.width(), ctx.height()) * 0.4f;
+    ctx.moveTo(cx, cy - r);
+    ctx.lineTo(cx - r * 0.866f, cy + r * 0.5f);
+    ctx.lineTo(cx + r * 0.866f, cy + r * 0.5f);
+    ctx.closePath();
+    ctx.fill();
+  }
 
-                       Flex({
-                                Flex({AssetImage("assets/counter.png")
-                                          ->setFit(ImageFit::Cover)})
-                                    ->setWidth(80)
-                                    ->setHeight(80)
-                                    ->setBorderRadius(8),
+  bool needsContinuousRedraw() const override { return true; }
+};
+// ============================================================================
+// App
+// ============================================================================
 
-                                Flex({
-                                         Text("Another Title")
-                                             ->setFontSize(16)
-                                             ->setFontWeight(FontWeight::Bold)
-                                             ->setTextColor(
-                                                 Color::fromRGB(30, 30, 30)),
-                                         Text("Another subtitle here")
-                                             ->setFontSize(13)
-                                             ->setTextColor(
-                                                 Color::fromRGB(100, 100, 100)),
-                                     })
-                                    ->setDirection(FlexDirection::Column),
-                            })
-                           ->setGap(12),
-                       Flex({
-                                Flex({AssetImage("assets/batman.jpg")
-                                          ->setFit(ImageFit::Cover)})
-                                    ->setWidth(80)
-                                    ->setHeight(80)
-                                    ->setBorderRadius(8),
+class TriangleApp : public Widget
+{
+  static constexpr int kCanvasW = 512, kCanvasH = 512;
 
-                                Flex({
-                                         Text("Another Title")
-                                             ->setFontSize(16)
-                                             ->setFontWeight(FontWeight::Bold)
-                                             ->setTextColor(
-                                                 Color::fromRGB(30, 30, 30)),
-                                         Text("Another subtitle here")
-                                             ->setFontSize(13)
-                                             ->setTextColor(
-                                                 Color::fromRGB(100, 100, 100)),
-                                     })
-                                    ->setDirection(FlexDirection::Column),
-                            })
-                           ->setGap(12),
-                       Flex({
-                                Flex({AssetImage("assets/layout.png")
-                                          ->setFit(ImageFit::Cover)})
-                                    ->setWidth(80)
-                                    ->setHeight(80)
-                                    ->setBorderRadius(8),
+public:
+  WidgetPtr build() override
+  {
+    auto canvas = std::make_shared<CanvasWidget>();
+    canvas->setScrollbarsEnabled(false)
+        ->setViewportEnabled(false)
+        ->setFlexGrow(1)
+        ->setSurface<TriangleSurface>();
 
-                                Flex({
-                                         Text("Another Title")
-                                             ->setFontSize(16)
-                                             ->setFontWeight(FontWeight::Bold)
-                                             ->setTextColor(
-                                                 Color::fromRGB(30, 30, 30)),
-                                         Text("Another subtitle here")
-                                             ->setFontSize(13)
-                                             ->setTextColor(
-                                                 Color::fromRGB(100, 100, 100)),
-                                     })
-                                    ->setDirection(FlexDirection::Column),
-                            })
-                           ->setGap(12),
-                       Flex({
-                                Flex({AssetImage("assets/illustrator.png")
-                                          ->setFit(ImageFit::Cover)})
-                                    ->setWidth(80)
-                                    ->setHeight(80)
-                                    ->setBorderRadius(8),
-
-                                Flex({
-                                         Text("Another Title")
-                                             ->setFontSize(16)
-                                             ->setFontWeight(FontWeight::Bold)
-                                             ->setTextColor(
-                                                 Color::fromRGB(30, 30, 30)),
-                                         Text("Another subtitle here")
-                                             ->setFontSize(13)
-                                             ->setTextColor(
-                                                 Color::fromRGB(100, 100, 100)),
-                                     })
-                                    ->setDirection(FlexDirection::Column),
-                            })
-                           ->setGap(12),
-                       Flex({
-                                Flex({AssetImage("assets/logic_sim.png")
-                                          ->setFit(ImageFit::Cover)})
-                                    ->setWidth(80)
-                                    ->setHeight(80)
-                                    ->setBorderRadius(8),
-
-                                Flex({
-                                         Text("Another Title")
-                                             ->setFontSize(16)
-                                             ->setFontWeight(FontWeight::Bold)
-                                             ->setTextColor(
-                                                 Color::fromRGB(30, 30, 30)),
-                                         Text("Another subtitle here")
-                                             ->setFontSize(13)
-                                             ->setTextColor(
-                                                 Color::fromRGB(100, 100, 100)),
-                                     })
-                                    ->setDirection(FlexDirection::Column),
-                            })
-                           ->setGap(12),
-                       Flex({
-                                Flex({AssetImage("assets/graph.png")
-                                          ->setFit(ImageFit::Cover)})
-                                    ->setWidth(80)
-                                    ->setHeight(80)
-                                    ->setBorderRadius(8),
-
-                                Flex({
-                                         Text("Another Title")
-                                             ->setFontSize(16)
-                                             ->setFontWeight(FontWeight::Bold)
-                                             ->setTextColor(
-                                                 Color::fromRGB(30, 30, 30)),
-                                         Text("Another subtitle here")
-                                             ->setFontSize(13)
-                                             ->setTextColor(
-                                                 Color::fromRGB(100, 100, 100)),
-                                     })
-                                    ->setDirection(FlexDirection::Column),
-                            })
-                           ->setGap(12),
-
-                   })
-            ->setScrollable(true)
-            ->setDirection(FlexDirection::Column) // base (mobile): stacked
-            ->setGap(8)
-            ->setPadding(16)
-            ->setAlignItems(AlignItems::Stretch)
-            ->setWidthMode(SizeMode::Full)
-            ->setHeightMode(SizeMode::Full);
-    }
+    return Flex({canvas})
+        ->setDirection(FlexDirection::Column)
+        ->setAlignItems(AlignItems::Stretch)
+        ->setWidthMode(SizeMode::Full)
+        ->setHeightMode(SizeMode::Full);
+  }
 };
 
-
+// ============================================================
+//  Entry point
+// ============================================================
 
 WidgetPtr createApp(FluxUI *app)
 {
-    return FluxApp("CRUD App")
-        .setTheme(AppTheme::light())
-        .setFullscreenMode(true)
-        .build(std::make_shared<MyApp>());
+  return FluxApp("Triangle App")
+      .setTheme(AppTheme::light())
+      .setFullscreenMode(true)
+      .build(std::make_shared<TriangleApp>());
 }
