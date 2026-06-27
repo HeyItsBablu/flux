@@ -487,8 +487,14 @@ endif()
 # ============================================================================
 
 if(NOT ANDROID)
-    if(FLUX_BUILD_EXAMPLES)
-        add_subdirectory(lib)
+    if(EMSCRIPTEN)
+        add_subdirectory(web)
+    elseif(WIN32)
+        add_subdirectory(windows)
+    elseif(APPLE)
+        add_subdirectory(macos)
+    elseif(UNIX)
+        add_subdirectory(linux)
     endif()
 
     if(FLUX_BUILD_TESTS AND NOT EMSCRIPTEN)

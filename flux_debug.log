@@ -1,0 +1,747 @@
+[MAIN] Step 1: started
+[MAIN] Step 2: FluxUI constructed
+[MAIN] Step 2a: builder lambda called
+[MAIN] Step 2b: createApp returned result=valid
+[MAIN] Step 3: build returned
+[MAIN] Step 4: cfg=valid
+[MAIN] Step 5: size=900x700
+[MAIN] Step 5a: fullscreen 1536x864
+[MAIN] Step 6: calling createWindow
+[createWindow] Step 1: entered title='Triangle App' 1536x864
+[wireCallbacks] Step 1: entered
+[wireCallbacks] Step 2: onPaint wired
+[wireCallbacks] Step 3: onResize wired
+[wireCallbacks] Step 4: onMouseDown wired
+[wireCallbacks] Step 5: onMouseUp wired
+[wireCallbacks] Step 6: onMouseMove wired
+[wireCallbacks] Step 7: onMouseWheel wired
+[wireCallbacks] Step 8: onRightClick wired
+[wireCallbacks] Step 9: onKeyDown wired
+[wireCallbacks] Step 10: onMouseLeave wired
+[wireCallbacks] Step 11: onChar wired
+[wireCallbacks] Step 12: onTimer wired
+[wireCallbacks] Step 13: onNonClientMouseDown wired
+[wireCallbacks] Step 14: done
+[createWindow] Step 2: wireCallbacks done
+[PlatformWindow::create] Step 1: entered
+[PlatformWindow::create] Step 2: class registered
+[WM_SIZE] called
+[PlatformWindow::create] Step 3: HWND=valid
+[PlatformWindow::create] Step 4: client size=1536x845
+[PlatformWindow::create] Step 5: creating D3DDevice
+[PlatformWindow::create] Step 6: D3DDevice created
+[PlatformWindow::create] Step 7: creating RenderLoop
+[PlatformWindow::create] Step 8: done (render loop not started yet)
+[createWindow] Step 3: window.create done, valid=1
+[createWindow] Step 4: dc=valid dwrite=valid
+[createWindow] Step 5: DWrite factory set
+[createWindow] Step 6: running initial layout 1536x845
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899B8618
+  [3] 0x00007FF7899B7FAF
+  [4] 0x00007FF78995E369
+  [5] 0x00007FF789995A1B
+  [6] 0x00007FF789962715
+  [7] 0x00007FF78997FBE4
+  [8] 0x00007FF78996A61E
+  [9] 0x00007FF7899411D9
+
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899B8618
+  [3] 0x00007FF7899B7F3F
+  [4] 0x00007FF78995E3AB
+  [5] 0x00007FF789995A1B
+  [6] 0x00007FF789962715
+  [7] 0x00007FF78997FBE4
+  [8] 0x00007FF78996A61E
+  [9] 0x00007FF7899411D9
+
+[createWindow] Step 7: layout done root: x=0 y=0 w=1536 h=845
+[createWindow] Step 8: processing pendingTimers count=0
+[createWindow] Step 9: starting render loop
+[PlatformWindow::startRenderLoop] starting
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3000
+  [2] 0x00007FF78996AB7E
+  [3] 0x00007FF7899411D9
+  [4] 0x00007FF789BC2702
+  [5] 0x00007FF789BC25F2
+  [6] 0x00007FF789BC24AE
+  [7] 0x00007FF789BC279E
+  [8] 0x00007FF930EBE957
+  [9] 0x00007FF931407C1C
+
+[PlatformWindow::startRenderLoop] done
+[createWindow] Step 10: done
+[MAIN] Step 7: createWindow returned
+[runLoop] waiting waitMs=INFINITE continuous=0 paintDirty=1 layoutDirty=0
+[runLoop] shouldPaint=1
+[onFrame] START
+[onFrame] beginDraw done, calling onPaint
+[onPaint] root: x=0 y=0 w=1536 h=845 children=1
+[onPaint] page child: x=0 y=0 w=1536 h=845
+[WM_SIZE] called
+[MAIN] Step 8: entering run
+[WM_MOUSEMOVE] x=826 y=371
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899B8618
+  [3] 0x00007FF7899975FF
+  [4] 0x00007FF789996D6C
+  [5] 0x00007FF789996DF6
+  [6] 0x00007FF789996DF6
+  [7] 0x00007FF789996DF6
+  [8] 0x00007FF78996C689
+  [9] 0x00007FF7899770AD
+
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899B8618
+  [3] 0x00007FF7899B9580
+  [4] 0x00007FF78996C839
+  [5] 0x00007FF789976B9C
+  [6] 0x00007FF789976B5A
+  [7] 0x00007FF789976B5A
+  [8] 0x00007FF789976B5A
+  [9] 0x00007FF78996C72D
+
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899D49A9
+  [3] 0x00007FF92F82C396
+  [4] 0x00007FF92F82A7ED
+  [5] 0x00007FF7899D3200
+  [6] 0x00007FF78996AC1B
+  [7] 0x00007FF78994128B
+  [8] 0x00007FF789BC2702
+  [9] 0x00007FF789BC25F2
+
+[WM_PAINT] called
+[WM_MOUSEMOVE] x=826 y=371
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899B8618
+  [3] 0x00007FF7899B9580
+  [4] 0x00007FF78996C839
+  [5] 0x00007FF789976B9C
+  [6] 0x00007FF789976B5A
+  [7] 0x00007FF789976B5A
+  [8] 0x00007FF789976B5A
+  [9] 0x00007FF78996C72D
+
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899D49A9
+  [3] 0x00007FF92F82C396
+  [4] 0x00007FF92F82A7ED
+  [5] 0x00007FF7899D3200
+  [6] 0x00007FF78996AC1B
+  [7] 0x00007FF78994128B
+  [8] 0x00007FF789BC2702
+  [9] 0x00007FF789BC25F2
+
+[onFrame] onPaint returned
+[onFrame] END present hr=0x00000000
+[runLoop] waiting waitMs=INFINITE continuous=0 paintDirty=1 layoutDirty=1
+[runLoop] handling resize 1536x793
+[onResize] 1536x793
+[onResize] done
+[runLoop] running layout
+[onLayout] called
+[onLayout] done
+[runLoop] shouldPaint=1
+[onFrame] START
+[onFrame] beginDraw done, calling onPaint
+[onPaint] root: x=0 y=0 w=1536 h=793 children=1
+[onPaint] page child: x=0 y=0 w=1536 h=793
+[onFrame] onPaint returned
+[onFrame] END present hr=0x00000000
+[runLoop] waiting waitMs=INFINITE continuous=0 paintDirty=0 layoutDirty=0
+[WM_MOUSEMOVE] x=837 y=363
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899B8618
+  [3] 0x00007FF7899B9580
+  [4] 0x00007FF78996C839
+  [5] 0x00007FF789976B9C
+  [6] 0x00007FF789976B5A
+  [7] 0x00007FF789976B5A
+  [8] 0x00007FF789976B5A
+  [9] 0x00007FF78996C72D
+
+[PlatformWindow::invalidate] called
+[runLoop] shouldPaint=1
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899D49A9
+  [3] 0x00007FF92F82C396
+  [4] 0x00007FF92F82A7ED
+  [5] 0x00007FF7899D3200
+  [6] 0x00007FF78996AC1B
+  [7] 0x00007FF78994128B
+  [8] 0x00007FF789BC2702
+  [9] 0x00007FF789BC25F2
+
+[onFrame] START
+[onFrame] beginDraw done, calling onPaint
+[onPaint] root: x=0 y=0 w=1536 h=793 children=1
+[onPaint] page child: x=0 y=0 w=1536 h=793
+[onFrame] onPaint returned
+[onFrame] END present hr=0x00000000
+[runLoop] waiting waitMs=INFINITE continuous=0 paintDirty=1 layoutDirty=0
+[runLoop] shouldPaint=1
+[onFrame] START
+[onFrame] beginDraw done, calling onPaint
+[onPaint] root: x=0 y=0 w=1536 h=793 children=1
+[onPaint] page child: x=0 y=0 w=1536 h=793
+[onFrame] onPaint returned
+[onFrame] END present hr=0x00000000
+[runLoop] waiting waitMs=INFINITE continuous=0 paintDirty=0 layoutDirty=0
+[WM_MOUSEMOVE] x=850 y=351
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899B8618
+  [3] 0x00007FF7899B9580
+  [4] 0x00007FF78996C839
+  [5] 0x00007FF789976B9C
+  [6] 0x00007FF789976B5A
+  [7] 0x00007FF789976B5A
+  [8] 0x00007FF789976B5A
+  [9] 0x00007FF78996C72D
+
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899D49A9
+  [3] 0x00007FF92F82C396
+  [4] 0x00007FF92F82A7ED
+  [5] 0x00007FF7899D3200
+  [6] 0x00007FF78996AC1B
+  [7] 0x00007FF78994128B
+  [8] 0x00007FF789BC2702
+  [9] 0x00007FF789BC25F2
+
+[runLoop] shouldPaint=1
+[onFrame] START
+[onFrame] beginDraw done, calling onPaint
+[onPaint] root: x=0 y=0 w=1536 h=793 children=1
+[onPaint] page child: x=0 y=0 w=1536 h=793
+[onFrame] onPaint returned
+[WM_MOUSEMOVE] x=864 y=338
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899B8618
+  [3] 0x00007FF7899B9580
+  [4] 0x00007FF78996C839
+  [5] 0x00007FF789976B9C
+  [6] 0x00007FF789976B5A
+  [7] 0x00007FF789976B5A
+  [8] 0x00007FF789976B5A
+  [9] 0x00007FF78996C72D
+
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899D49A9
+  [3] 0x00007FF92F82C396
+  [4] 0x00007FF92F82A7ED
+  [5] 0x00007FF7899D3200
+  [6] 0x00007FF78996AC1B
+  [7] 0x00007FF78994128B
+  [8] 0x00007FF789BC2702
+  [9] 0x00007FF789BC25F2
+
+[onFrame] END present hr=0x00000000
+[runLoop] waiting waitMs=INFINITE continuous=0 paintDirty=1 layoutDirty=0
+[runLoop] shouldPaint=1
+[onFrame] START
+[onFrame] beginDraw done, calling onPaint
+[onPaint] root: x=0 y=0 w=1536 h=793 children=1
+[onPaint] page child: x=0 y=0 w=1536 h=793
+[onFrame] onPaint returned
+[WM_MOUSEMOVE] x=885 y=320
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899B8618
+  [3] 0x00007FF7899B9580
+  [4] 0x00007FF78996C839
+  [5] 0x00007FF789976B9C
+  [6] 0x00007FF789976B5A
+  [7] 0x00007FF789976B5A
+  [8] 0x00007FF789976B5A
+  [9] 0x00007FF78996C72D
+
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899D49A9
+  [3] 0x00007FF92F82C396
+  [4] 0x00007FF92F82A7ED
+  [5] 0x00007FF7899D3200
+  [6] 0x00007FF78996AC1B
+  [7] 0x00007FF78994128B
+  [8] 0x00007FF789BC2702
+  [9] 0x00007FF789BC25F2
+
+[WM_MOUSEMOVE] x=908 y=299
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899B8618
+  [3] 0x00007FF7899B9580
+  [4] 0x00007FF78996C839
+  [5] 0x00007FF789976B9C
+  [6] 0x00007FF789976B5A
+  [7] 0x00007FF789976B5A
+  [8] 0x00007FF789976B5A
+  [9] 0x00007FF78996C72D
+
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899D49A9
+  [3] 0x00007FF92F82C396
+  [4] 0x00007FF92F82A7ED
+  [5] 0x00007FF7899D3200
+  [6] 0x00007FF78996AC1B
+  [7] 0x00007FF78994128B
+  [8] 0x00007FF789BC2702
+  [9] 0x00007FF789BC25F2
+
+[onFrame] END present hr=0x00000000
+[runLoop] waiting waitMs=INFINITE continuous=0 paintDirty=1 layoutDirty=0
+[runLoop] shouldPaint=1
+[onFrame] START
+[onFrame] beginDraw done, calling onPaint
+[onPaint] root: x=0 y=0 w=1536 h=793 children=1
+[onPaint] page child: x=0 y=0 w=1536 h=793
+[onFrame] onPaint returned
+[WM_MOUSEMOVE] x=934 y=277
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899B8618
+  [3] 0x00007FF7899B9580
+  [4] 0x00007FF78996C839
+  [5] 0x00007FF789976B9C
+  [6] 0x00007FF789976B5A
+  [7] 0x00007FF789976B5A
+  [8] 0x00007FF789976B5A
+  [9] 0x00007FF78996C72D
+
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899D49A9
+  [3] 0x00007FF92F82C396
+  [4] 0x00007FF92F82A7ED
+  [5] 0x00007FF7899D3200
+  [6] 0x00007FF78996AC1B
+  [7] 0x00007FF78994128B
+  [8] 0x00007FF789BC2702
+  [9] 0x00007FF789BC25F2
+
+[WM_MOUSEMOVE] x=964 y=254
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899B8618
+  [3] 0x00007FF7899B9580
+  [4] 0x00007FF78996C839
+  [5] 0x00007FF789976B9C
+  [6] 0x00007FF789976B5A
+  [7] 0x00007FF789976B5A
+  [8] 0x00007FF789976B5A
+  [9] 0x00007FF78996C72D
+
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899D49A9
+  [3] 0x00007FF92F82C396
+  [4] 0x00007FF92F82A7ED
+  [5] 0x00007FF7899D3200
+  [6] 0x00007FF78996AC1B
+  [7] 0x00007FF78994128B
+  [8] 0x00007FF789BC2702
+  [9] 0x00007FF789BC25F2
+
+[onFrame] END present hr=0x00000000
+[runLoop] waiting waitMs=INFINITE continuous=0 paintDirty=1 layoutDirty=0
+[runLoop] shouldPaint=1
+[onFrame] START
+[onFrame] beginDraw done, calling onPaint
+[onPaint] root: x=0 y=0 w=1536 h=793 children=1
+[onPaint] page child: x=0 y=0 w=1536 h=793
+[onFrame] onPaint returned
+[WM_MOUSEMOVE] x=994 y=228
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899B8618
+  [3] 0x00007FF7899B9580
+  [4] 0x00007FF78996C839
+  [5] 0x00007FF789976B9C
+  [6] 0x00007FF789976B5A
+  [7] 0x00007FF789976B5A
+  [8] 0x00007FF789976B5A
+  [9] 0x00007FF78996C72D
+
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899D49A9
+  [3] 0x00007FF92F82C396
+  [4] 0x00007FF92F82A7ED
+  [5] 0x00007FF7899D3200
+  [6] 0x00007FF78996AC1B
+  [7] 0x00007FF78994128B
+  [8] 0x00007FF789BC2702
+  [9] 0x00007FF789BC25F2
+
+[onFrame] END present hr=0x00000000
+[WM_MOUSEMOVE] x=1030 y=198
+[runLoop] waiting waitMs=INFINITE continuous=0 paintDirty=1 layoutDirty=0
+[runLoop] shouldPaint=1
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899B8618
+  [3] 0x00007FF7899B9580
+  [4] 0x00007FF78996C839
+  [5] 0x00007FF789976B9C
+  [6] 0x00007FF789976B5A
+  [7] 0x00007FF789976B5A
+  [8] 0x00007FF789976B5A
+  [9] 0x00007FF78996C72D
+
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899D49A9
+  [3] 0x00007FF92F82C396
+  [4] 0x00007FF92F82A7ED
+  [5] 0x00007FF7899D3200
+  [6] 0x00007FF78996AC1B
+  [7] 0x00007FF78994128B
+  [8] 0x00007FF789BC2702
+  [9] 0x00007FF789BC25F2
+
+[onFrame] START
+[onFrame] beginDraw done, calling onPaint
+[onPaint] root: x=0 y=0 w=1536 h=793 children=1
+[onPaint] page child: x=0 y=0 w=1536 h=793
+[onFrame] onPaint returned
+[WM_MOUSEMOVE] x=1066 y=170
+[PlatformWindow::invalidate] called
+[onFrame] END present hr=0x00000000
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899B8618
+  [3] 0x00007FF7899B9580
+  [4] 0x00007FF78996C839
+  [5] 0x00007FF789976B9C
+  [6] 0x00007FF789976B5A
+  [7] 0x00007FF789976B5A
+  [8] 0x00007FF789976B5A
+  [9] 0x00007FF78996C72D
+
+[PlatformWindow::invalidate] called
+[runLoop] waiting waitMs=INFINITE continuous=0 paintDirty=1 layoutDirty=0
+[runLoop] shouldPaint=1
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899D49A9
+  [3] 0x00007FF92F82C396
+  [4] 0x00007FF92F82A7ED
+  [5] 0x00007FF7899D3200
+  [6] 0x00007FF78996AC1B
+  [7] 0x00007FF78994128B
+  [8] 0x00007FF789BC2702
+  [9] 0x00007FF789BC25F2
+
+[onFrame] START
+[onFrame] beginDraw done, calling onPaint
+[onPaint] root: x=0 y=0 w=1536 h=793 children=1
+[onPaint] page child: x=0 y=0 w=1536 h=793
+[onFrame] onPaint returned
+[WM_MOUSEMOVE] x=1102 y=141
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899B8618
+  [3] 0x00007FF7899B9580
+  [4] 0x00007FF78996C839
+  [5] 0x00007FF789976B9C
+  [6] 0x00007FF789976B5A
+  [7] 0x00007FF789976B5A
+  [8] 0x00007FF789976B5A
+  [9] 0x00007FF78996C72D
+
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899D49A9
+  [3] 0x00007FF92F82C396
+  [4] 0x00007FF92F82A7ED
+  [5] 0x00007FF7899D3200
+  [6] 0x00007FF78996AC1B
+  [7] 0x00007FF78994128B
+  [8] 0x00007FF789BC2702
+  [9] 0x00007FF789BC25F2
+
+[onFrame] END present hr=0x00000000
+[runLoop] waiting waitMs=INFINITE continuous=0 paintDirty=1 layoutDirty=0
+[runLoop] shouldPaint=1
+[onFrame] START
+[onFrame] beginDraw done, calling onPaint
+[onPaint] root: x=0 y=0 w=1536 h=793 children=1
+[onPaint] page child: x=0 y=0 w=1536 h=793
+[onFrame] onPaint returned
+[WM_MOUSEMOVE] x=1141 y=115
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899B8618
+  [3] 0x00007FF7899B9580
+  [4] 0x00007FF78996C839
+  [5] 0x00007FF789976B9C
+  [6] 0x00007FF789976B5A
+  [7] 0x00007FF789976B5A
+  [8] 0x00007FF789976B5A
+  [9] 0x00007FF78996C72D
+
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899D49A9
+  [3] 0x00007FF92F82C396
+  [4] 0x00007FF92F82A7ED
+  [5] 0x00007FF7899D3200
+  [6] 0x00007FF78996AC1B
+  [7] 0x00007FF78994128B
+  [8] 0x00007FF789BC2702
+  [9] 0x00007FF789BC25F2
+
+[onFrame] END present hr=0x00000000
+[runLoop] waiting waitMs=INFINITE continuous=0 paintDirty=1 layoutDirty=0
+[runLoop] shouldPaint=1
+[onFrame] START
+[onFrame] beginDraw done, calling onPaint
+[onPaint] root: x=0 y=0 w=1536 h=793 children=1
+[onPaint] page child: x=0 y=0 w=1536 h=793
+[onFrame] onPaint returned
+[WM_MOUSEMOVE] x=1178 y=87
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899B8618
+  [3] 0x00007FF7899B9580
+  [4] 0x00007FF78996C839
+  [5] 0x00007FF789976B9C
+  [6] 0x00007FF789976B5A
+  [7] 0x00007FF789976B5A
+  [8] 0x00007FF789976B5A
+  [9] 0x00007FF78996C72D
+
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899D49A9
+  [3] 0x00007FF92F82C396
+  [4] 0x00007FF92F82A7ED
+  [5] 0x00007FF7899D3200
+  [6] 0x00007FF78996AC1B
+  [7] 0x00007FF78994128B
+  [8] 0x00007FF789BC2702
+  [9] 0x00007FF789BC25F2
+
+[onFrame] END present hr=0x00000000
+[runLoop] waiting waitMs=INFINITE continuous=0 paintDirty=1 layoutDirty=0
+[runLoop] shouldPaint=1
+[onFrame] START
+[onFrame] beginDraw done, calling onPaint
+[onPaint] root: x=0 y=0 w=1536 h=793 children=1
+[onPaint] page child: x=0 y=0 w=1536 h=793
+[onFrame] onPaint returned
+[WM_MOUSEMOVE] x=1217 y=61
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899B8618
+  [3] 0x00007FF7899B9580
+  [4] 0x00007FF78996C839
+  [5] 0x00007FF789976B9C
+  [6] 0x00007FF789976B5A
+  [7] 0x00007FF789976B5A
+  [8] 0x00007FF789976B5A
+  [9] 0x00007FF78996C72D
+
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899D49A9
+  [3] 0x00007FF92F82C396
+  [4] 0x00007FF92F82A7ED
+  [5] 0x00007FF7899D3200
+  [6] 0x00007FF78996AC1B
+  [7] 0x00007FF78994128B
+  [8] 0x00007FF789BC2702
+  [9] 0x00007FF789BC25F2
+
+[onFrame] END present hr=0x00000000
+[runLoop] waiting waitMs=INFINITE continuous=0 paintDirty=1 layoutDirty=0
+[runLoop] shouldPaint=1
+[onFrame] START
+[onFrame] beginDraw done, calling onPaint
+[onPaint] root: x=0 y=0 w=1536 h=793 children=1
+[onPaint] page child: x=0 y=0 w=1536 h=793
+[WM_MOUSEMOVE] x=1258 y=34
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899B8618
+  [3] 0x00007FF7899B9580
+  [4] 0x00007FF78996C839
+  [5] 0x00007FF789976B9C
+  [6] 0x00007FF789976B5A
+  [7] 0x00007FF789976B5A
+  [8] 0x00007FF789976B5A
+  [9] 0x00007FF78996C72D
+
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899D49A9
+  [3] 0x00007FF92F82C396
+  [4] 0x00007FF92F82A7ED
+  [5] 0x00007FF7899D3200
+  [6] 0x00007FF78996AC1B
+  [7] 0x00007FF78994128B
+  [8] 0x00007FF789BC2702
+  [9] 0x00007FF789BC25F2
+
+[onFrame] onPaint returned
+[WM_MOUSEMOVE] x=1298 y=7
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899B8618
+  [3] 0x00007FF7899B9580
+  [4] 0x00007FF78996C839
+  [5] 0x00007FF789976B9C
+  [6] 0x00007FF789976B5A
+  [7] 0x00007FF789976B5A
+  [8] 0x00007FF789976B5A
+  [9] 0x00007FF78996C72D
+
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899D49A9
+  [3] 0x00007FF92F82C396
+  [4] 0x00007FF92F82A7ED
+  [5] 0x00007FF7899D3200
+  [6] 0x00007FF78996AC1B
+  [7] 0x00007FF78994128B
+  [8] 0x00007FF789BC2702
+  [9] 0x00007FF789BC25F2
+
+[onFrame] END present hr=0x00000000
+[runLoop] waiting waitMs=INFINITE continuous=0 paintDirty=1 layoutDirty=0
+[runLoop] shouldPaint=1
+[onFrame] START
+[onFrame] beginDraw done, calling onPaint
+[onPaint] root: x=0 y=0 w=1536 h=793 children=1
+[onPaint] page child: x=0 y=0 w=1536 h=793
+[onFrame] onPaint returned
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899B8618
+  [3] 0x00007FF78997FA50
+  [4] 0x00007FF78997FAB7
+  [5] 0x00007FF78997FAB7
+  [6] 0x00007FF78997FAB7
+  [7] 0x00007FF78996CC69
+  [8] 0x00007FF789977174
+  [9] 0x00007FF78996DFCB
+
+[PlatformWindow::invalidate] called
+[RenderLoop::markDirty] called from:
+  [0] 0x00007FF7899DC02D
+  [1] 0x00007FF7899D3291
+  [2] 0x00007FF7899D49F8
+  [3] 0x00007FF92F82C396
+  [4] 0x00007FF92F82A7ED
+  [5] 0x00007FF7899D3200
+  [6] 0x00007FF78996AC1B
+  [7] 0x00007FF78994128B
+  [8] 0x00007FF789BC2702
+  [9] 0x00007FF789BC25F2
+
+[onFrame] END present hr=0x00000000
+[runLoop] waiting waitMs=INFINITE continuous=0 paintDirty=1 layoutDirty=0
+[runLoop] shouldPaint=1
+[onFrame] START
+[onFrame] beginDraw done, calling onPaint
+[onPaint] root: x=0 y=0 w=1536 h=793 children=1
+[onPaint] page child: x=0 y=0 w=1536 h=793
+[onFrame] onPaint returned
+[onFrame] END present hr=0x00000000
+[runLoop] waiting waitMs=INFINITE continuous=0 paintDirty=0 layoutDirty=0
+[MAIN] Step 9: run returned 0
