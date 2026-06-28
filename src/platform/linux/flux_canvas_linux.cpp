@@ -6,7 +6,6 @@
 #include <SDL2/SDL.h>
 #include <cassert>
 
-
 void Canvas2D_setCairo(Canvas2D &ctx, cairo_t *cr);
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -404,77 +403,24 @@ void CanvasWidget::glRenderPass()
 
     cairo_restore(cr);
 
-    // Scrollbars — drawn in widget-local logical coords using Painter.
-    GraphicsContext gctx(cr, width, height);
-    _renderScrollbarsCairo(gctx);
+    if (scrollbarsEnabled_)
+    {
+        auto &s = linuxState(this);
+        updateSBGeometry(s.lastW, s.lastH);
+        hBar_.tick(frameDt_);
+        vBar_.tick(frameDt_);
+
+        GraphicsContext gctx(cr, width, height);
+        Painter p(gctx);
+        p.drawScrollbar(hBar_, s.lastW, s.lastH);
+        p.drawScrollbar(vBar_, s.lastW, s.lastH);
+
+        if ((hBar_.needsRedraw() || vBar_.needsRedraw()) &&
+            !linuxState(this).repaintPending)
+            scheduleRepaint(this);
+    }
 
     if (activeSurface_->needsContinuousRedraw())
-        scheduleRepaint(this);
-}
-
-void CanvasWidget::_renderScrollbarsCairo(GraphicsContext &ctx)
-{
-    if (!scrollbarsEnabled_)
-        return;
-
-    bool hFade = hBar_.tick(frameDt_);
-    bool vFade = vBar_.tick(frameDt_);
-
-    auto &s = linuxState(this);
-    updateSBGeometry(s.lastW, s.lastH);
-
-    Painter p(ctx);
-
-    // Horizontal scrollbar
-    if (hBar_.isVisible())
-    {
-        ScrollbarInfo hi = vp_.scrollbarH();
-        float sbH = kSBThick;
-        float barY = (float)(y + height) - sbH;
-        float barW = (float)width - (vBar_.isVisible() ? kSBThick : 0.f);
-
-        // Track
-        p.fillRect((int)x, (int)barY, (int)barW, (int)sbH,
-                   Color::fromRGBA(30, 30, 30, 180));
-        // Thumb
-        float thumbX = (float)x + hi.thumbMin * barW;
-        float thumbW = (hi.thumbMax - hi.thumbMin) * barW;
-        p.fillRoundedRect((int)thumbX, (int)barY + 2,
-                          (int)thumbW, (int)sbH - 4, 3,
-                          Color::fromRGBA(180, 180, 180,
-                                          (uint8_t)(hBar_.alpha() * 200)));
-    }
-
-    // Vertical scrollbar
-    if (vBar_.isVisible())
-    {
-        ScrollbarInfo vi = vp_.scrollbarV();
-        float sbW = kSBThick;
-        float barX = (float)(x + width) - sbW;
-        float barH = (float)height - (hBar_.isVisible() ? kSBThick : 0.f);
-
-        // Track
-        p.fillRect((int)barX, (int)y, (int)sbW, (int)barH,
-                   Color::fromRGBA(30, 30, 30, 180));
-        // Thumb
-        float thumbY = (float)y + vi.thumbMin * barH;
-        float thumbH = (vi.thumbMax - vi.thumbMin) * barH;
-        p.fillRoundedRect((int)barX + 2, (int)thumbY,
-                          (int)sbW - 4, (int)thumbH, 3,
-                          Color::fromRGBA(180, 180, 180,
-                                          (uint8_t)(vBar_.alpha() * 200)));
-    }
-
-    // Corner square when both bars visible
-    if (hBar_.isVisible() && vBar_.isVisible() && scrollbarsEnabled_)
-    {
-        p.fillRect((int)(x + width - kSBThick),
-                   (int)(y + height - kSBThick),
-                   (int)kSBThick, (int)kSBThick,
-                   Color::fromRGBA(30, 30, 30, 180));
-    }
-
-    if ((hFade || vFade) && !s.repaintPending)
         scheduleRepaint(this);
 }
 
@@ -787,8 +733,7 @@ void CanvasWidget::activatePendingSurface()
     vp_.setCanvasSize(canvasW_, canvasH_);
 }
 
-
-void CanvasWidget::setBackend(Canvas2DBackend* b)
+void CanvasWidget::setBackend(Canvas2DBackend *b)
 {
     backend_ = b;
 }

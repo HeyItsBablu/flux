@@ -1312,4 +1312,32 @@ void Painter::drawPage(const PageDrawParams &params)
     }
 }
 
+void Painter::drawScrollbar(const CustomScrollbar& bar, int glW, int glH)
+{
+    if (!bar.isVisible() || bar.alpha() < 0.005f)
+        return;
+ 
+    cairo_t* cr   = ctx.cr;
+    float    alpha = bar.alpha();
+ 
+    // ── Track background ──────────────────────────────────────────────────────
+    {
+        auto [tx, ty, tw, th] = bar.trackRect(glW, glH);
+        CairoSave save(cr);
+        cairo_set_source_rgba(cr, 0.08, 0.08, 0.08, alpha * 0.30);
+        cairo_rectangle(cr, tx, ty, tw, th);
+        cairo_fill(cr);
+    }
+ 
+    // ── Thumb ─────────────────────────────────────────────────────────────────
+    {
+        auto [tx, ty, tw, th] = bar.thumbRect(glW, glH);
+        double r = std::min(tw, th) * 0.5;
+        CairoSave save(cr);
+        cairo_set_source_rgba(cr, 0.76, 0.76, 0.76, alpha);
+        makeRoundedPath(cr, tx, ty, tw, th, r);
+        cairo_fill(cr);
+    }
+}
+
 #endif // __linux__

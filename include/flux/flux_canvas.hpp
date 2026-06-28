@@ -124,17 +124,7 @@ public:
 #endif
 
 #if defined(__ANDROID__) || defined(__EMSCRIPTEN__)
-    Canvas2DGL      *canvasGL_ = nullptr;
-
-    unsigned int sbProg_  = 0;
-    unsigned int sbVAO_   = 0;
-    unsigned int sbVBO_   = 0;
-    int          sbMVP_   = -1;
-    int          sbColor_ = -1;
-
-    void ensureSBProgram(const char *vert, const char *frag);
-    void renderScrollbarsGL(int glW, int glH, double dt);
-    void renderSBCorner(int glW, int glH);
+    Canvas2DGL *canvasGL_ = nullptr;
 #endif
 
     // ── Shared helpers ────────────────────────────────────────────────────────
@@ -171,7 +161,7 @@ public:
     bool handleKeyDown(int keyCode) override;
 #endif
 
-// ── Win32-only input ──────────────────────────────────────────────────────
+    // ── Win32-only input ──────────────────────────────────────────────────────
 #if defined(_WIN32)
     bool handleMouseDown(int mx, int my) override;
     bool handleMouseMove(int mx, int my) override;
@@ -180,6 +170,7 @@ public:
     bool handleKeyDown(int keyCode) override;
     bool handleChar(wchar_t ch) override;
 #endif
+
     // ── Android-only ──────────────────────────────────────────────────────────
 #ifdef __ANDROID__
     static void tickAllGL(Widget *root, int windowW, int windowH, float dpi);
@@ -195,12 +186,11 @@ public:
     static void initEventType();
     static Uint32 repaintEventType();
 
-    void setBackend(Canvas2DBackend *b); 
+    void setBackend(Canvas2DBackend *b);
     void setCairo(cairo_t *cr);
     void onWindowResize(int newW, int newH);
     void preRenderPass();
-    void glRenderPass(); // name kept — now Cairo-based
-    void _renderScrollbarsCairo(GraphicsContext &ctx);
+    void glRenderPass();
 
     bool isInitialized() const;
     bool needsRepaint() const;

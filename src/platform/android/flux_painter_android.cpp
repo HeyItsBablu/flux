@@ -920,4 +920,34 @@ void Painter::drawPage(const PageDrawParams &params)
     }
 }
 
+
+
+
+void Painter::drawScrollbar(const CustomScrollbar& bar, int glW, int glH)
+{
+    if (!s_vg || !bar.isVisible() || bar.alpha() < 0.005f)
+        return;
+
+    float alpha = bar.alpha();
+
+    // ── Track background ──────────────────────────────────────────────────────
+    {
+        auto [tx, ty, tw, th] = bar.trackRect(glW, glH);
+        nvgBeginPath(s_vg);
+        nvgRect(s_vg, tx, ty, tw, th);
+        nvgFillColor(s_vg, nvgRGBAf(0.08f, 0.08f, 0.08f, alpha * 0.30f));
+        nvgFill(s_vg);
+    }
+
+    // ── Thumb ─────────────────────────────────────────────────────────────────
+    {
+        auto [tx, ty, tw, th] = bar.thumbRect(glW, glH);
+        float r = std::min(tw, th) * 0.5f;
+        nvgBeginPath(s_vg);
+        nvgRoundedRect(s_vg, tx, ty, tw, th, r);
+        nvgFillColor(s_vg, nvgRGBAf(0.76f, 0.76f, 0.76f, alpha));
+        nvgFill(s_vg);
+    }
+}
+
 #endif // __ANDROID__

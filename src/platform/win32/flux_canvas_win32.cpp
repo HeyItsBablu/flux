@@ -35,8 +35,8 @@ using Microsoft::WRL::ComPtr;
 
 struct Win32D2DCanvasState
 {
-    Canvas2DD2D *d2d = nullptr;           // owned by the widget — D2D resources
-    Canvas2DBackend *backend = nullptr;   // owned by the widget — wraps d2d for Canvas2D
+    Canvas2DD2D *d2d = nullptr;         // owned by the widget — D2D resources
+    Canvas2DBackend *backend = nullptr; // owned by the widget — wraps d2d for Canvas2D
     bool inited = false;
     int lastW = 0;
     int lastH = 0;
@@ -185,60 +185,6 @@ void CanvasWidget::activatePendingSurface()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Draw scrollbars into the main DC using D2D primitives
-// ─────────────────────────────────────────────────────────────────────────────
-
-static void drawScrollbarD2D(ID2D1DeviceContext *dc,
-                             ID2D1Factory1 *factory,
-                             const CustomScrollbar &bar,
-                             int glW, int glH,
-                             float alpha)
-{
-    if (!bar.isVisible() || alpha < 0.005f)
-        return;
-
-    // ── Track ────────────────────────────────────────────────────────────────
-    {
-        auto [tx, ty, tw, th] = bar.trackRect(glW, glH);
-        D2D1_RECT_F r = D2D1::RectF(tx, ty, tx + tw, ty + th);
-        ComPtr<ID2D1SolidColorBrush> br;
-        dc->CreateSolidColorBrush(rgba(0.08f, 0.08f, 0.08f, alpha * 0.3f),
-                                  br.GetAddressOf());
-        if (br)
-            dc->FillRectangle(r, br.Get());
-    }
-
-    // ── Thumb ─────────────────────────────────────────────────────────────────
-    {
-        auto [tx, ty, tw, th] = bar.thumbRect(glW, glH);
-        float r = std::min(tw, th) * 0.5f;
-        D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(
-            D2D1::RectF(tx, ty, tx + tw, ty + th), r, r);
-        float tc = 0.76f;
-        ComPtr<ID2D1SolidColorBrush> br;
-        dc->CreateSolidColorBrush(rgba(tc, tc, tc, alpha), br.GetAddressOf());
-        if (br)
-            dc->FillRoundedRectangle(rr, br.Get());
-    }
-}
-
-static void drawScrollbarCornerD2D(ID2D1DeviceContext *dc,
-                                   const CustomScrollbar &hBar,
-                                   const CustomScrollbar &vBar,
-                                   int glW, int glH)
-{
-    if (!hBar.isVisible() || !vBar.isVisible())
-        return;
-    float thick = CustomScrollbar::kTrackThick;
-    D2D1_RECT_F r = D2D1::RectF(float(glW) - thick, float(glH) - thick,
-                                float(glW), float(glH));
-    ComPtr<ID2D1SolidColorBrush> br;
-    dc->CreateSolidColorBrush(rgba(0.12f, 0.12f, 0.12f, 0.35f), br.GetAddressOf());
-    if (br)
-        dc->FillRectangle(r, br.Get());
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Drop shadow (drawn before compositing the canvas bitmap)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -355,9 +301,8 @@ static void tickAndRender(CanvasWidget *w, GraphicsContext &gctx)
     if (w->scrollbarsEnabled_ && w->viewportEnabled_)
     {
         w->updateSBGeometry(vpW, vpH);
-        double dt2 = dt;
-        w->hBar_.tick(dt2);
-        w->vBar_.tick(dt2);
+        w->hBar_.tick(dt);
+        w->vBar_.tick(dt);
 
         D2D1_MATRIX_3X2_F sbTransform =
             D2D1::Matrix3x2F::Translation(float(w->x), float(w->y));
@@ -368,9 +313,9 @@ static void tickAndRender(CanvasWidget *w, GraphicsContext &gctx)
                         float(w->x + vpW), float(w->y + vpH)),
             D2D1_ANTIALIAS_MODE_ALIASED);
 
-        drawScrollbarD2D(dc, factory, w->hBar_, vpW, vpH, w->hBar_.alpha());
-        drawScrollbarD2D(dc, factory, w->vBar_, vpW, vpH, w->vBar_.alpha());
-        drawScrollbarCornerD2D(dc, w->hBar_, w->vBar_, vpW, vpH);
+        Painter p(gctx);
+        p.drawScrollbar(w->hBar_, vpW, vpH);
+        p.drawScrollbar(w->vBar_, vpW, vpH);
 
         dc->PopAxisAlignedClip();
         dc->SetTransform(prevTransform);
@@ -762,6 +707,5 @@ bool CanvasWidget::handleKeyDown(int keyCode)
     }
     return false;
 }
-
 
 #endif // _WIN32

@@ -10,50 +10,32 @@
 #include "nanovg.h"
 #include "nanovg_gl.h"
 
-#define CANVAS_LOGI(...) __android_log_print(ANDROID_LOG_INFO,  "CanvasWidget", __VA_ARGS__)
+#define CANVAS_LOGI(...) __android_log_print(ANDROID_LOG_INFO, "CanvasWidget", __VA_ARGS__)
 #define CANVAS_LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "CanvasWidget", __VA_ARGS__)
 
-extern float        FluxAndroid_getDpiScale();
-extern Canvas2DGL*  FluxAndroid_getCanvasGL();
-extern NVGcontext*  FluxAndroid_getVG();
+extern float FluxAndroid_getDpiScale();
+extern Canvas2DGL *FluxAndroid_getCanvasGL();
+extern NVGcontext *FluxAndroid_getVG();
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Scrollbar shaders (GLES 3)
-// ─────────────────────────────────────────────────────────────────────────────
-
-static const char* kSBVert_Android =
-    "#version 300 es\n"
-    "precision mediump float;\n"
-    "layout(location=0) in vec2 aPos;\n"
-    "uniform mat4 uMVP;\n"
-    "void main(){ gl_Position = uMVP * vec4(aPos, 0.0, 1.0); }\n";
-
-static const char* kSBFrag_Android =
-    "#version 300 es\n"
-    "precision mediump float;\n"
-    "out vec4 fragColor;\n"
-    "uniform vec4 uColor;\n"
-    "void main(){ fragColor = uColor; }\n";
-
-
-
-struct AndroidCanvasState {
-    bool   glInitialized = false;
+struct AndroidCanvasState
+{
+    bool glInitialized = false;
 
     // FBO
-    GLuint fboId    = 0;
-    GLuint fboTex   = 0;
+    GLuint fboId = 0;
+    GLuint fboTex = 0;
     GLuint fboDepth = 0;
-    int    fboW     = 0;
-    int    fboH     = 0;
-    int    nvgImage = -1;   // NanoVG handle wrapping fboTex
+    int fboW = 0;
+    int fboH = 0;
+    int nvgImage = -1; // NanoVG handle wrapping fboTex
 };
 
 // One state blob per CanvasWidget instance; keyed by pointer.
 #include <unordered_map>
-static std::unordered_map<CanvasWidget*, AndroidCanvasState> s_androidState;
+static std::unordered_map<CanvasWidget *, AndroidCanvasState> s_androidState;
 
-static AndroidCanvasState& androidState(CanvasWidget* w) {
+static AndroidCanvasState &androidState(CanvasWidget *w)
+{
     return s_androidState[w];
 }
 
@@ -61,22 +43,42 @@ static AndroidCanvasState& androidState(CanvasWidget* w) {
 // FBO helpers (Android-local)
 // ─────────────────────────────────────────────────────────────────────────────
 
-static void deleteFBO(CanvasWidget* w) {
-    auto& s = androidState(w);
-    NVGcontext* vg = FluxAndroid_getVG();
-    if (s.nvgImage != -1 && vg) { nvgDeleteImage(vg, s.nvgImage); s.nvgImage = -1; }
-    if (s.fboId)    { glDeleteFramebuffers(1,  &s.fboId);    s.fboId    = 0; }
-    if (s.fboTex)   { glDeleteTextures(1,       &s.fboTex);  s.fboTex   = 0; }
-    if (s.fboDepth) { glDeleteRenderbuffers(1,  &s.fboDepth);s.fboDepth = 0; }
+static void deleteFBO(CanvasWidget *w)
+{
+    auto &s = androidState(w);
+    NVGcontext *vg = FluxAndroid_getVG();
+    if (s.nvgImage != -1 && vg)
+    {
+        nvgDeleteImage(vg, s.nvgImage);
+        s.nvgImage = -1;
+    }
+    if (s.fboId)
+    {
+        glDeleteFramebuffers(1, &s.fboId);
+        s.fboId = 0;
+    }
+    if (s.fboTex)
+    {
+        glDeleteTextures(1, &s.fboTex);
+        s.fboTex = 0;
+    }
+    if (s.fboDepth)
+    {
+        glDeleteRenderbuffers(1, &s.fboDepth);
+        s.fboDepth = 0;
+    }
     s.fboW = s.fboH = 0;
 }
 
-static void ensureFBO(CanvasWidget* w, int physW, int physH) {
-    auto& s = androidState(w);
-    if (s.fboId && s.fboW == physW && s.fboH == physH) return;
+static void ensureFBO(CanvasWidget *w, int physW, int physH)
+{
+    auto &s = androidState(w);
+    if (s.fboId && s.fboW == physW && s.fboH == physH)
+        return;
     deleteFBO(w);
 
-    s.fboW = physW; s.fboH = physH;
+    s.fboW = physW;
+    s.fboH = physH;
 
     glGenTextures(1, &s.fboTex);
     glBindTexture(GL_TEXTURE_2D, s.fboTex);
@@ -108,9 +110,11 @@ static void ensureFBO(CanvasWidget* w, int physW, int physH) {
 
     // Register texture with NanoVG so render() can blit it.
     // NVG_IMAGE_FLIPY because FBO Y=0 is bottom, NanoVG expects top-left.
-    NVGcontext* vg = FluxAndroid_getVG();
-    if (vg) {
-        if (s.nvgImage != -1) nvgDeleteImage(vg, s.nvgImage);
+    NVGcontext *vg = FluxAndroid_getVG();
+    if (vg)
+    {
+        if (s.nvgImage != -1)
+            nvgDeleteImage(vg, s.nvgImage);
 #if defined(NANOVG_GLES2)
         s.nvgImage = nvglCreateImageFromHandleGLES2(vg, s.fboTex, physW, physH,
                                                     NVG_IMAGE_FLIPY);
@@ -128,13 +132,14 @@ static void ensureFBO(CanvasWidget* w, int physW, int physH) {
 // GL init (lazy, first tickAllGL)
 // ─────────────────────────────────────────────────────────────────────────────
 
-static void ensureGL(CanvasWidget* w, int windowW, int windowH, float dpi) {
-    auto& s = androidState(w);
-    if (s.glInitialized) return;
+static void ensureGL(CanvasWidget *w, int windowW, int windowH, float dpi)
+{
+    auto &s = androidState(w);
+    if (s.glInitialized)
+        return;
     s.glInitialized = true;
 
     w->canvasGL_ = FluxAndroid_getCanvasGL();
-    w->ensureSBProgram(kSBVert_Android, kSBFrag_Android);
 
     // canvasW_/canvasH_ are now physical pixels set by computeLayout
     int physW = w->canvasW_ > 0 ? w->canvasW_ : windowW;
@@ -147,21 +152,27 @@ static void ensureGL(CanvasWidget* w, int windowW, int windowH, float dpi) {
     w->activatePendingSurface();
     w->lastTick_ = CanvasWidget::Clock::now();
 
-    if (w->onViewportChanged) w->onViewportChanged(w->vp_.zoom());
-    if (w->onGLResize)        w->onGLResize(physW, physH);
+    if (w->onViewportChanged)
+        w->onViewportChanged(w->vp_.zoom());
+    if (w->onGLResize)
+        w->onGLResize(physW, physH);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Pass 1: render surface into FBO  (called from android_main before NanoVG)
 // ─────────────────────────────────────────────────────────────────────────────
 
-static void glRenderPass(CanvasWidget* w, int windowW, int windowH, float dpi) {
+static void glRenderPass(CanvasWidget *w, int windowW, int windowH, float dpi)
+{
     ensureGL(w, windowW, windowH, dpi);
-    if (!w->canvasGL_) return;
-    if (w->pendingSurface_) w->activatePendingSurface();
-    if (!w->activeSurface_) return;
+    if (!w->canvasGL_)
+        return;
+    if (w->pendingSurface_)
+        w->activatePendingSurface();
+    if (!w->activeSurface_)
+        return;
 
-    auto& s = androidState(w);
+    auto &s = androidState(w);
 
     auto now = CanvasWidget::Clock::now();
     w->frameDt_ = std::chrono::duration<double>(now - w->lastTick_).count();
@@ -170,7 +181,7 @@ static void glRenderPass(CanvasWidget* w, int windowW, int windowH, float dpi) {
     w->activeSurface_->update(w->frameDt_);
     w->activeSurface_->preRender();
 
-    int physW = int(w->width  * dpi);
+    int physW = int(w->width * dpi);
     int physH = int(w->height * dpi);
     ensureFBO(w, physW, physH);
 
@@ -182,33 +193,41 @@ static void glRenderPass(CanvasWidget* w, int windowW, int windowH, float dpi) {
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    float z  = w->vp_.zoom();
+    float z = w->vp_.zoom();
     float ox = -w->vp_.offsetX() * z;
-    float oy =  w->vp_.offsetY() * z;
+    float oy = w->vp_.offsetY() * z;
 
     float orthoM[16];
     glutil::ortho(0.f, float(physW), float(physH), 0.f, orthoM);
 
     float vpM[16] = {
-        z,  0,  0, 0,
-        0,  z,  0, 0,
-        0,  0,  1, 0,
-        ox, oy, 0, 1
-    };
+        z, 0, 0, 0,
+        0, z, 0, 0,
+        0, 0, 1, 0,
+        ox, oy, 0, 1};
     float mvp[16] = {};
     for (int col = 0; col < 4; ++col)
         for (int row = 0; row < 4; ++row)
             for (int k = 0; k < 4; ++k)
-                mvp[col*4+row] += orthoM[k*4+row] * vpM[col*4+k];
+                mvp[col * 4 + row] += orthoM[k * 4 + row] * vpM[col * 4 + k];
 
     {
         Canvas2D ctx(w->canvasGL_, w->canvasW_, w->canvasH_, mvp);
         w->activeSurface_->render(ctx);
     }
 
-    // ── Scrollbars (also into FBO, widget-local coords) ───────────────────
     w->updateSBGeometry(physW, physH);
-    w->renderScrollbarsGL(physW, physH, w->frameDt_);
+    {
+        // Scrollbars draw into the NanoVG layer via Painter.
+        // GraphicsContext on Android wraps the NVGcontext implicitly
+        // (Painter uses FluxAndroid_getVG() internally).
+        GraphicsContext gctx;
+        Painter p(gctx);
+        p.drawScrollbar(w->hBar_, physW, physH);
+        p.drawScrollbar(w->vBar_, physW, physH);
+    }
+    w->hBar_.tick(w->frameDt_);
+    w->vBar_.tick(w->frameDt_);
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
@@ -216,74 +235,89 @@ static void glRenderPass(CanvasWidget* w, int windowW, int windowH, float dpi) {
     w->needsPaint = true;
 
     if (w->activeSurface_->needsContinuousRedraw())
-        w->Widget::markNeedsPaint();   // calls base to propagate
+        w->Widget::markNeedsPaint(); // calls base to propagate
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CanvasWidget member implementations (Android)
 // ─────────────────────────────────────────────────────────────────────────────
 
-
 CanvasWidget::CanvasWidget()
-    : hBar_(CustomScrollbar::Axis::Horizontal)
-    , vBar_(CustomScrollbar::Axis::Vertical)
+    : hBar_(CustomScrollbar::Axis::Horizontal), vBar_(CustomScrollbar::Axis::Vertical)
 {
-    autoWidth  = true;   // was false — must match Win32/Linux
-    autoHeight = true;   // was false
-    width  = 400;
+    autoWidth = true;  // was false — must match Win32/Linux
+    autoHeight = true; // was false
+    width = 400;
     height = 300;
 }
 
-CanvasWidget::~CanvasWidget() {
+CanvasWidget::~CanvasWidget()
+{
     // Destroy surface and GL resources
-    if (activeSurface_) { activeSurface_->destroy(); activeSurface_.reset(); }
+    if (activeSurface_)
+    {
+        activeSurface_->destroy();
+        activeSurface_.reset();
+    }
     pendingSurface_.reset();
     deleteFBO(this);
-    if (sbProg_) { glDeleteProgram(sbProg_);         sbProg_ = 0; }
-    if (sbVAO_)  { glDeleteVertexArrays(1, &sbVAO_); sbVAO_  = 0; }
-    if (sbVBO_)  { glDeleteBuffers(1,      &sbVBO_); sbVBO_  = 0; }
-    canvasGL_    = nullptr;
+    canvasGL_ = nullptr;
     s_androidState.erase(this);
 }
 
-std::shared_ptr<CanvasWidget> CanvasWidget::setViewportEnabled(bool e) {
-    viewportEnabled_ = e; return ptr();
+std::shared_ptr<CanvasWidget> CanvasWidget::setViewportEnabled(bool e)
+{
+    viewportEnabled_ = e;
+    return ptr();
 }
-std::shared_ptr<CanvasWidget> CanvasWidget::setScrollbarsEnabled(bool e) {
-    scrollbarsEnabled_ = e; return ptr();
+std::shared_ptr<CanvasWidget> CanvasWidget::setScrollbarsEnabled(bool e)
+{
+    scrollbarsEnabled_ = e;
+    return ptr();
 }
 bool CanvasWidget::scrollbarsEnabled() const { return scrollbarsEnabled_; }
 
-RenderSurface*  CanvasWidget::getSurface() const { return activeSurface_.get(); }
-const Viewport& CanvasWidget::viewport()   const { return vp_; }
-Viewport&       CanvasWidget::viewport()         { return vp_; }
+RenderSurface *CanvasWidget::getSurface() const { return activeSurface_.get(); }
+const Viewport &CanvasWidget::viewport() const { return vp_; }
+Viewport &CanvasWidget::viewport() { return vp_; }
 
-std::shared_ptr<CanvasWidget> CanvasWidget::setSize(int w, int h) {
-    width = w; height = h;
+std::shared_ptr<CanvasWidget> CanvasWidget::setSize(int w, int h)
+{
+    width = w;
+    height = h;
     autoWidth = autoHeight = false;
     markNeedsLayout();
     return ptr();
 }
-std::shared_ptr<CanvasWidget> CanvasWidget::setCanvasSize(int w, int h) {
-    canvasW_ = w; canvasH_ = h;
+std::shared_ptr<CanvasWidget> CanvasWidget::setCanvasSize(int w, int h)
+{
+    canvasW_ = w;
+    canvasH_ = h;
     vp_.setCanvasSize(w, h);
-    if (activeSurface_) activeSurface_->resize(w, h);
+    if (activeSurface_)
+        activeSurface_->resize(w, h);
     return ptr();
 }
-std::shared_ptr<CanvasWidget> CanvasWidget::redraw() { markNeedsPaint(); return ptr(); }
+std::shared_ptr<CanvasWidget> CanvasWidget::redraw()
+{
+    markNeedsPaint();
+    return ptr();
+}
 
-void CanvasWidget::computeLayout(GraphicsContext& /*ctx*/,
-                                 const BoxConstraints& c, FontCache&) {
+void CanvasWidget::computeLayout(GraphicsContext & /*ctx*/,
+                                 const BoxConstraints &c, FontCache &)
+{
     if (autoWidth)
-        width  = (c.maxWidth  < kUnbounded) ? c.maxWidth  : width;
+        width = (c.maxWidth < kUnbounded) ? c.maxWidth : width;
     if (autoHeight)
         height = (c.maxHeight < kUnbounded) ? c.maxHeight : height;
 
     float dpi = FluxAndroid_getDpiScale();
-    int newPhysW = int(width  * dpi);
+    int newPhysW = int(width * dpi);
     int newPhysH = int(height * dpi);
 
-    if (newPhysW != canvasW_ || newPhysH != canvasH_) {
+    if (newPhysW != canvasW_ || newPhysH != canvasH_)
+    {
         canvasW_ = newPhysW;
         canvasH_ = newPhysH;
         // Force ensureGL to reinitialise with correct dims
@@ -294,10 +328,15 @@ void CanvasWidget::computeLayout(GraphicsContext& /*ctx*/,
 }
 
 // Pass 2 (NanoVG): blit FBO texture into the UI
-void CanvasWidget::render(GraphicsContext& /*ctx*/, FontCache&) {
-    NVGcontext* vg = FluxAndroid_getVG();
-    auto& s = androidState(this);
-    if (!vg || s.nvgImage == -1) { needsPaint = false; return; }
+void CanvasWidget::render(GraphicsContext & /*ctx*/, FontCache &)
+{
+    NVGcontext *vg = FluxAndroid_getVG();
+    auto &s = androidState(this);
+    if (!vg || s.nvgImage == -1)
+    {
+        needsPaint = false;
+        return;
+    }
 
     NVGpaint paint = nvgImagePattern(vg,
                                      float(x), float(y),
@@ -311,43 +350,55 @@ void CanvasWidget::render(GraphicsContext& /*ctx*/, FontCache&) {
     needsPaint = false;
 }
 
-void CanvasWidget::onDetach() {
-    if (activeSurface_) { activeSurface_->destroy(); activeSurface_.reset(); }
+void CanvasWidget::onDetach()
+{
+    if (activeSurface_)
+    {
+        activeSurface_->destroy();
+        activeSurface_.reset();
+    }
     pendingSurface_.reset();
     deleteFBO(this);
-    if (sbProg_) { glDeleteProgram(sbProg_);         sbProg_ = 0; }
-    if (sbVAO_)  { glDeleteVertexArrays(1, &sbVAO_); sbVAO_  = 0; }
-    if (sbVBO_)  { glDeleteBuffers(1,      &sbVBO_); sbVBO_  = 0; }
     canvasGL_ = nullptr;
     androidState(this).glInitialized = false;
     s_androidState.erase(this);
     Widget::onDetach();
 }
 
-void CanvasWidget::markNeedsPaint() {
+void CanvasWidget::markNeedsPaint()
+{
     Widget::markNeedsPaint();
     needsPaint = true;
 }
 
 // Static pass-1 traversal called from android_main before NanoVG
-void CanvasWidget::tickAllGL(Widget* root, int windowW, int windowH, float dpi) {
-    if (!root) return;
-    if (auto* cw = dynamic_cast<CanvasWidget*>(root))
+void CanvasWidget::tickAllGL(Widget *root, int windowW, int windowH, float dpi)
+{
+    if (!root)
+        return;
+    if (auto *cw = dynamic_cast<CanvasWidget *>(root))
         glRenderPass(cw, windowW, windowH, dpi);
-    for (auto& child : root->children)
+    for (auto &child : root->children)
         tickAllGL(child.get(), windowW, windowH, dpi);
 }
 
 // ── Touch input ───────────────────────────────────────────────────────────────
 
-bool CanvasWidget::handleMouseDown(int mx, int my) {
-    if (!hitTest(mx, my)) return false;
+bool CanvasWidget::handleMouseDown(int mx, int my)
+{
+    if (!hitTest(mx, my))
+        return false;
     int lx = mx - x, ly = my - y;
-    bool hC = hBar_.onMouseDown(lx, ly, [this](float t){ applyHScrollFraction(t); });
-    bool vC = !hC && vBar_.onMouseDown(lx, ly, [this](float t){ applyVScrollFraction(t); });
-    if (!hC && !vC) {
-        if (viewportEnabled_) beginPan(lx, ly);
-        else if (activeSurface_) {
+    bool hC = hBar_.onMouseDown(lx, ly, [this](float t)
+                                { applyHScrollFraction(t); });
+    bool vC = !hC && vBar_.onMouseDown(lx, ly, [this](float t)
+                                       { applyVScrollFraction(t); });
+    if (!hC && !vC)
+    {
+        if (viewportEnabled_)
+            beginPan(lx, ly);
+        else if (activeSurface_)
+        {
             auto [cx, cy] = vp_.screenToCanvas(float(lx), float(ly));
             activeSurface_->onMouseDown(cx, cy);
         }
@@ -355,27 +406,36 @@ bool CanvasWidget::handleMouseDown(int mx, int my) {
     return true;
 }
 
-bool CanvasWidget::handleMouseMove(int mx, int my) {
-    if (!hitTest(mx, my) && !panning_) return false;
+bool CanvasWidget::handleMouseMove(int mx, int my)
+{
+    if (!hitTest(mx, my) && !panning_)
+        return false;
     int lx = mx - x, ly = my - y;
     bool hDrag = hBar_.onMouseMove(lx, ly);
     bool vDrag = vBar_.onMouseMove(lx, ly);
-    if (hDrag || vDrag) return true;
-    if (panning_) continuePan(lx, ly);
-    else if (activeSurface_) {
+    if (hDrag || vDrag)
+        return true;
+    if (panning_)
+        continuePan(lx, ly);
+    else if (activeSurface_)
+    {
         auto [cx, cy] = vp_.screenToCanvas(float(lx), float(ly));
         activeSurface_->onMouseMove(cx, cy);
     }
     return true;
 }
 
-bool CanvasWidget::handleMouseUp(int mx, int my) {
+bool CanvasWidget::handleMouseUp(int mx, int my)
+{
     int lx = mx - x, ly = my - y;
     bool hR = hBar_.onMouseUp(lx, ly);
     bool vR = vBar_.onMouseUp(lx, ly);
-    if (!hR && !vR) {
-        if (panning_) panning_ = false;
-        else if (activeSurface_) {
+    if (!hR && !vR)
+    {
+        if (panning_)
+            panning_ = false;
+        else if (activeSurface_)
+        {
             auto [cx, cy] = vp_.screenToCanvas(float(lx), float(ly));
             activeSurface_->onMouseUp(cx, cy);
         }
@@ -383,7 +443,8 @@ bool CanvasWidget::handleMouseUp(int mx, int my) {
     return true;
 }
 
-bool CanvasWidget::hitTest(int mx, int my) const {
+bool CanvasWidget::hitTest(int mx, int my) const
+{
     return mx >= x && mx < x + width && my >= y && my < y + height;
 }
 
@@ -391,21 +452,32 @@ bool CanvasWidget::hitTest(int mx, int my) const {
 // Shared helper implementations (defined once; other platforms link the same)
 // ─────────────────────────────────────────────────────────────────────────────
 
-void CanvasWidget::viewportDims(int glW, int glH, int& vpW, int& vpH) const {
-    if (!viewportEnabled_ || !scrollbarsEnabled_) { vpW=glW; vpH=glH; return; }
+void CanvasWidget::viewportDims(int glW, int glH, int &vpW, int &vpH) const
+{
+    if (!viewportEnabled_ || !scrollbarsEnabled_)
+    {
+        vpW = glW;
+        vpH = glH;
+        return;
+    }
     ScrollbarInfo h = vp_.scrollbarH(), v = vp_.scrollbarV();
     vpW = glW - (v.visible ? (int)kSBThick : 0);
     vpH = glH - (h.visible ? (int)kSBThick : 0);
-    if (vpW < 1) vpW = 1;
-    if (vpH < 1) vpH = 1;
+    if (vpW < 1)
+        vpW = 1;
+    if (vpH < 1)
+        vpH = 1;
 }
 
-void CanvasWidget::updateViewportSize(int glW, int glH) {
-    int vpW, vpH; viewportDims(glW, glH, vpW, vpH);
+void CanvasWidget::updateViewportSize(int glW, int glH)
+{
+    int vpW, vpH;
+    viewportDims(glW, glH, vpW, vpH);
     vp_.setViewSize(vpW, vpH);
 }
 
-void CanvasWidget::updateSBGeometry(int glW, int glH) {
+void CanvasWidget::updateSBGeometry(int glW, int glH)
+{
     ScrollbarInfo h = vp_.scrollbarH(), v = vp_.scrollbarV();
     float hLen = float(glW) - (v.visible ? kSBThick : 0.f);
     hBar_.setGeometry(0.f, float(glH) - kSBThick, hLen);
@@ -417,57 +489,81 @@ void CanvasWidget::updateSBGeometry(int glW, int glH) {
                    v.visible && scrollbarsEnabled_ && viewportEnabled_);
 }
 
-void CanvasWidget::beginPan(int sx, int sy) {
-    panning_ = true; panStartSX_ = sx; panStartSY_ = sy;
-    panStartOX_ = vp_.offsetX(); panStartOY_ = vp_.offsetY();
+void CanvasWidget::beginPan(int sx, int sy)
+{
+    panning_ = true;
+    panStartSX_ = sx;
+    panStartSY_ = sy;
+    panStartOX_ = vp_.offsetX();
+    panStartOY_ = vp_.offsetY();
 }
-void CanvasWidget::continuePan(int sx, int sy) {
+void CanvasWidget::continuePan(int sx, int sy)
+{
     float dx = float(sx - panStartSX_), dy = float(sy - panStartSY_);
-    vp_.setOffset(panStartOX_ - dx/vp_.zoom(),
-                  panStartOY_ + dy/vp_.zoom());
+    vp_.setOffset(panStartOX_ - dx / vp_.zoom(),
+                  panStartOY_ + dy / vp_.zoom());
     pokeScrollbars();
 }
-void CanvasWidget::pokeScrollbars() {
-    hBar_.poke(); vBar_.poke();
-    if (onViewportChanged) onViewportChanged(vp_.zoom());
+void CanvasWidget::pokeScrollbars()
+{
+    hBar_.poke();
+    vBar_.poke();
+    if (onViewportChanged)
+        onViewportChanged(vp_.zoom());
 }
 
-void CanvasWidget::applyHScrollFraction(float thumbMin) {
-    float span  = vp_.scrollbarH().thumbMax - vp_.scrollbarH().thumbMin;
+void CanvasWidget::applyHScrollFraction(float thumbMin)
+{
+    float span = vp_.scrollbarH().thumbMax - vp_.scrollbarH().thumbMin;
     float range = vp_.canvasW() - vp_.viewW() / vp_.zoom();
-    if (range <= 0.f) return;
+    if (range <= 0.f)
+        return;
     vp_.setOffsetX(thumbMin / (1.f - span) * range);
     pokeScrollbars();
 }
-void CanvasWidget::applyVScrollFraction(float thumbMin) {
-    float span  = vp_.scrollbarV().thumbMax - vp_.scrollbarV().thumbMin;
+void CanvasWidget::applyVScrollFraction(float thumbMin)
+{
+    float span = vp_.scrollbarV().thumbMax - vp_.scrollbarV().thumbMin;
     float range = vp_.canvasH() - vp_.viewH() / vp_.zoom();
-    if (range <= 0.f) return;
+    if (range <= 0.f)
+        return;
     float t = 1.f - thumbMin - span;
     vp_.setOffsetY(t / (1.f - span) * range);
     pokeScrollbars();
 }
 
-void CanvasWidget::activatePendingSurface() {
-    if (!pendingSurface_) return;
-    if (activeSurface_) { activeSurface_->destroy(); activeSurface_.reset(); }
+void CanvasWidget::activatePendingSurface()
+{
+    if (!pendingSurface_)
+        return;
+    if (activeSurface_)
+    {
+        activeSurface_->destroy();
+        activeSurface_.reset();
+    }
     activeSurface_ = pendingSurface_;
     pendingSurface_.reset();
     activeSurface_->initialize(canvasW_, canvasH_);
     vp_.setCanvasSize(canvasW_, canvasH_);
 }
 
-void CanvasWidget::ensureSBProgram(const char* vert, const char* frag) {
-    if (sbProg_) return;
-    sbProg_  = glutil::linkProgram(vert, frag);
-    sbMVP_   = glGetUniformLocation(sbProg_, "uMVP");
+void CanvasWidget::ensureSBProgram(const char *vert, const char *frag)
+{
+    if (sbProg_)
+        return;
+    sbProg_ = glutil::linkProgram(vert, frag);
+    sbMVP_ = glGetUniformLocation(sbProg_, "uMVP");
     sbColor_ = glGetUniformLocation(sbProg_, "uColor");
-    if (!sbVAO_) glGenVertexArrays(1, &sbVAO_);
-    if (!sbVBO_) glGenBuffers(1, &sbVBO_);
+    if (!sbVAO_)
+        glGenVertexArrays(1, &sbVAO_);
+    if (!sbVBO_)
+        glGenBuffers(1, &sbVBO_);
 }
 
-void CanvasWidget::renderSBCorner(int glW, int glH) {
-    if (!hBar_.isVisible() || !vBar_.isVisible() || !scrollbarsEnabled_) return;
+void CanvasWidget::renderSBCorner(int glW, int glH)
+{
+    if (!hBar_.isVisible() || !vBar_.isVisible() || !scrollbarsEnabled_)
+        return;
     float cx = float(glW) - kSBThick;
     float cy = float(glH) - kSBThick;
     float mvp[16];
@@ -476,23 +572,24 @@ void CanvasWidget::renderSBCorner(int glW, int glH) {
     glUniformMatrix4fv(sbMVP_, 1, GL_FALSE, mvp);
     glUniform4f(sbColor_, 0.12f, 0.12f, 0.12f, 0.35f);
     float v[] = {
-        cx,          cy,           cx+kSBThick, cy,
-        cx+kSBThick, cy+kSBThick,  cx+kSBThick, cy+kSBThick,
-        cx,          cy+kSBThick,  cx,           cy
-    };
+        cx, cy, cx + kSBThick, cy,
+        cx + kSBThick, cy + kSBThick, cx + kSBThick, cy + kSBThick,
+        cx, cy + kSBThick, cx, cy};
     glBindVertexArray(sbVAO_);
     glBindBuffer(GL_ARRAY_BUFFER, sbVBO_);
     glBufferData(GL_ARRAY_BUFFER, sizeof(v), v, GL_DYNAMIC_DRAW);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2*sizeof(float), nullptr);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
     glDrawArrays(GL_TRIANGLES, 0, 6);
     glBindVertexArray(0);
 }
 
-void CanvasWidget::renderScrollbarsGL(int glW, int glH, double dt) {
+void CanvasWidget::renderScrollbarsGL(int glW, int glH, double dt)
+{
     bool hFade = hBar_.tick(dt);
     bool vFade = vBar_.tick(dt);
-    if (!hBar_.needsRedraw() && !vBar_.needsRedraw()) return;
+    if (!hBar_.needsRedraw() && !vBar_.needsRedraw())
+        return;
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);

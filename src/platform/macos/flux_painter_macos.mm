@@ -605,4 +605,37 @@ void Painter::drawPage(const PageDrawParams &params)
         }
     }
 }
+
+void Painter::drawScrollbar(const CustomScrollbar& bar, int glW, int glH)
+{
+    if (!bar.isVisible() || bar.alpha() < 0.005f)
+        return;
+ 
+    CGContextRef cg = ctx.cgContext;
+    float alpha     = bar.alpha();
+ 
+    // ── Track background ──────────────────────────────────────────────────────
+    {
+        auto [tx, ty, tw, th] = bar.trackRect(glW, glH);
+        CGContextSaveGState(cg);
+        CGContextSetRGBFillColor(cg, 0.08f, 0.08f, 0.08f, alpha * 0.30f);
+        CGContextFillRect(cg, CGRectMake(tx, ty, tw, th));
+        CGContextRestoreGState(cg);
+    }
+ 
+    // ── Thumb ─────────────────────────────────────────────────────────────────
+    {
+        auto [tx, ty, tw, th] = bar.thumbRect(glW, glH);
+        float r = std::min(tw, th) * 0.5f;
+        CGContextSaveGState(cg);
+        CGContextSetRGBFillColor(cg, 0.76f, 0.76f, 0.76f, alpha);
+        // Use CGPathCreateWithRoundedRect for the thumb
+        CGPathRef path = CGPathCreateWithRoundedRect(
+            CGRectMake(tx, ty, tw, th), r, r, nullptr);
+        CGContextAddPath(cg, path);
+        CGContextFillPath(cg);
+        CGPathRelease(path);
+        CGContextRestoreGState(cg);
+    }
+}
 #endif // __APPLE__

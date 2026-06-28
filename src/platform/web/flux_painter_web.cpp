@@ -1259,4 +1259,40 @@ void Painter::drawPage(const PageDrawParams &params)
     }
 }
 
+void Painter::drawScrollbar(const CustomScrollbar& bar, int glW, int glH)
+{
+    if (!bar.isVisible() || bar.alpha() < 0.005f)
+        return;
+ 
+    float alpha = bar.alpha();
+ 
+    // ── Track background ──────────────────────────────────────────────────────
+    {
+        auto [tx, ty, tw, th] = bar.trackRect(glW, glH);
+        char col[32];
+        snprintf(col, sizeof(col), "rgba(20,20,20,%.3f)", alpha * 0.30f);
+        EM_ASM({
+            var c = Module._fluxCtx2D;
+            if (!c) return;
+            c.fillStyle = UTF8ToString($4);
+            c.fillRect($0, $1, $2, $3);
+        }, (int)tx, (int)ty, (int)tw, (int)th, col);
+    }
+ 
+    // ── Thumb ─────────────────────────────────────────────────────────────────
+    {
+        auto [tx, ty, tw, th] = bar.thumbRect(glW, glH);
+        float r = std::min(tw, th) * 0.5f;
+        char col[32];
+        snprintf(col, sizeof(col), "rgba(194,194,194,%.3f)", alpha);
+        EM_ASM({
+            var c = Module._fluxCtx2D;
+            if (!c) return;
+            c.fillStyle = UTF8ToString($5);
+            Module._fluxRRect(c, $0, $1, $2, $3, $4);
+            c.fill();
+        }, (double)tx, (double)ty, (double)tw, (double)th, (double)r, col);
+    }
+}
+
 #endif // __EMSCRIPTEN__

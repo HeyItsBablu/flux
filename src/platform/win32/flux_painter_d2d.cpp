@@ -5,7 +5,6 @@
 
 #ifdef _WIN32
 
-
 #include "flux/flux_painter.hpp"
 #include "flux/flux_font.hpp"
 #include "flux/flux_text_style.hpp"
@@ -15,15 +14,13 @@
 #include <d2d1_1helper.h>
 #include <d2d1effects.h>
 #include <dwrite_3.h>
-#include <wincodec.h>           // IWICImagingFactory — for image decode
+#include <wincodec.h> // IWICImagingFactory — for image decode
 #include <wrl/client.h>
 
 #include <algorithm>
 
 #include <string>
 #include <vector>
-
-
 
 using Microsoft::WRL::ComPtr;
 
@@ -67,7 +64,7 @@ static inline D2D1_ELLIPSE toEllipse(int x, int y, int w, int h)
 
 // Retrieve or create a solid-colour brush from the per-device cache.
 // Returns nullptr on failure (logged internally by BrushCache).
-static ID2D1SolidColorBrush* getBrush(GraphicsContext& ctx, Color c)
+static ID2D1SolidColorBrush *getBrush(GraphicsContext &ctx, Color c)
 {
     return ctx.brushes->get(ctx.dc, c);
 }
@@ -78,8 +75,9 @@ static ID2D1SolidColorBrush* getBrush(GraphicsContext& ctx, Color c)
 
 void Painter::fillRect(int x, int y, int w, int h, Color color)
 {
-    auto* br = getBrush(ctx, color);
-    if (!br) return;
+    auto *br = getBrush(ctx, color);
+    if (!br)
+        return;
     ctx.dc->FillRectangle(toRect(x, y, w, h), br);
 }
 
@@ -90,8 +88,9 @@ void Painter::fillRect(int x, int y, int w, int h, Color color)
 void Painter::fillRoundedRect(int x, int y, int w, int h,
                               int radius, Color color)
 {
-    auto* br = getBrush(ctx, color);
-    if (!br) return;
+    auto *br = getBrush(ctx, color);
+    if (!br)
+        return;
     if (radius <= 0)
         ctx.dc->FillRectangle(toRect(x, y, w, h), br);
     else
@@ -105,8 +104,9 @@ void Painter::fillRoundedRect(int x, int y, int w, int h,
 void Painter::drawBorder(int x, int y, int w, int h,
                          int radius, Color color, int borderWidth)
 {
-    auto* br = getBrush(ctx, color);
-    if (!br) return;
+    auto *br = getBrush(ctx, color);
+    if (!br)
+        return;
     float bw = static_cast<float>(borderWidth);
     if (radius <= 0)
         ctx.dc->DrawRectangle(toRect(x, y, w, h), br, bw);
@@ -139,13 +139,13 @@ void Painter::drawEllipse(int x, int y, int w, int h,
 {
     D2D1_ELLIPSE el = toEllipse(x, y, w, h);
 
-    auto* fillBr = getBrush(ctx, fill);
+    auto *fillBr = getBrush(ctx, fill);
     if (fillBr)
         ctx.dc->FillEllipse(el, fillBr);
 
     if (strokeWidth > 0)
     {
-        auto* stBr = getBrush(ctx, stroke);
+        auto *stBr = getBrush(ctx, stroke);
         if (stBr)
             ctx.dc->DrawEllipse(el, stBr, static_cast<float>(strokeWidth));
     }
@@ -180,8 +180,9 @@ void Painter::fillRoundedRegion(int x, int y, int w, int h,
 void Painter::drawRectOutline(int x, int y, int w, int h,
                               Color color, int strokeWidth)
 {
-    auto* br = getBrush(ctx, color);
-    if (!br) return;
+    auto *br = getBrush(ctx, color);
+    if (!br)
+        return;
     ctx.dc->DrawRectangle(toRect(x, y, w, h), br, static_cast<float>(strokeWidth));
 }
 
@@ -194,8 +195,9 @@ void Painter::drawRoundedRectOutline(int x, int y, int w, int h,
                                      int cornerDiameter,
                                      Color stroke, int strokeWidth)
 {
-    auto* br = getBrush(ctx, stroke);
-    if (!br) return;
+    auto *br = getBrush(ctx, stroke);
+    if (!br)
+        return;
     ctx.dc->DrawRoundedRectangle(
         toRoundedRect(x, y, w, h, cornerDiameter / 2),
         br,
@@ -209,8 +211,9 @@ void Painter::drawRoundedRectOutline(int x, int y, int w, int h,
 void Painter::drawLine(int x1, int y1, int x2, int y2,
                        Color color, int width)
 {
-    auto* br = getBrush(ctx, color);
-    if (!br) return;
+    auto *br = getBrush(ctx, color);
+    if (!br)
+        return;
     ctx.dc->DrawLine(
         D2D1::Point2F(static_cast<float>(x1), static_cast<float>(y1)),
         D2D1::Point2F(static_cast<float>(x2), static_cast<float>(y2)),
@@ -236,14 +239,16 @@ void Painter::drawVLine(int x, int y, int len, Color color, int strokeWidth)
 // Painter::drawPolyline
 // ============================================================================
 
-void Painter::drawPolyline(const std::vector<std::pair<int, int>>& points,
+void Painter::drawPolyline(const std::vector<std::pair<int, int>> &points,
                            Color color, int strokeWidth)
 {
-    if (points.size() < 2) return;
+    if (points.size() < 2)
+        return;
 
     ComPtr<ID2D1PathGeometry> path;
     ctx.factory->CreatePathGeometry(&path);
-    if (!path) return;
+    if (!path)
+        return;
 
     ComPtr<ID2D1GeometrySink> sink;
     path->Open(&sink);
@@ -260,7 +265,7 @@ void Painter::drawPolyline(const std::vector<std::pair<int, int>>& points,
     sink->EndFigure(D2D1_FIGURE_END_OPEN);
     sink->Close();
 
-    auto* br = getBrush(ctx, color);
+    auto *br = getBrush(ctx, color);
     if (br)
         ctx.dc->DrawGeometry(path.Get(), br, static_cast<float>(strokeWidth));
 }
@@ -269,14 +274,16 @@ void Painter::drawPolyline(const std::vector<std::pair<int, int>>& points,
 // Painter::fillPolygonAlpha
 // ============================================================================
 
-void Painter::fillPolygonAlpha(const std::vector<std::pair<int, int>>& points,
+void Painter::fillPolygonAlpha(const std::vector<std::pair<int, int>> &points,
                                Color color)
 {
-    if (points.size() < 3) return;
+    if (points.size() < 3)
+        return;
 
     ComPtr<ID2D1PathGeometry> path;
     ctx.factory->CreatePathGeometry(&path);
-    if (!path) return;
+    if (!path)
+        return;
 
     ComPtr<ID2D1GeometrySink> sink;
     path->Open(&sink);
@@ -293,7 +300,7 @@ void Painter::fillPolygonAlpha(const std::vector<std::pair<int, int>>& points,
     sink->EndFigure(D2D1_FIGURE_END_CLOSED);
     sink->Close();
 
-    auto* br = getBrush(ctx, color);
+    auto *br = getBrush(ctx, color);
     if (br)
         ctx.dc->FillGeometry(path.Get(), br);
 }
@@ -316,18 +323,21 @@ void Painter::fillRectWithLeftAccent(int x, int y, int w, int h,
 // ============================================================================
 
 void Painter::fillColumnBars(int x, int y, int w, int h,
-                             const std::vector<int>& barHeights, Color color)
+                             const std::vector<int> &barHeights, Color color)
 {
-    if (w <= 0 || h <= 0 || barHeights.empty()) return;
+    if (w <= 0 || h <= 0 || barHeights.empty())
+        return;
 
-    auto* br = getBrush(ctx, color);
-    if (!br) return;
+    auto *br = getBrush(ctx, color);
+    if (!br)
+        return;
 
     int cols = std::min(w, static_cast<int>(barHeights.size()));
     for (int i = 0; i < cols; ++i)
     {
         int barH = std::max(0, std::min(h, barHeights[i]));
-        if (barH == 0) continue;
+        if (barH == 0)
+            continue;
         ctx.dc->FillRectangle(
             D2D1::RectF(
                 static_cast<float>(x + i),
@@ -344,9 +354,10 @@ void Painter::fillColumnBars(int x, int y, int w, int h,
 // ============================================================================
 
 void Painter::fillGradientRect(int x, int y, int w, int h,
-                               const std::vector<Color>& colors)
+                               const std::vector<Color> &colors)
 {
-    if (colors.empty() || w <= 0 || h <= 0) return;
+    if (colors.empty() || w <= 0 || h <= 0)
+        return;
 
     if (colors.size() == 1)
     {
@@ -361,7 +372,7 @@ void Painter::fillGradientRect(int x, int y, int w, int h,
     {
         D2D1_GRADIENT_STOP s;
         s.position = static_cast<float>(i) / static_cast<float>(colors.size() - 1);
-        s.color    = toD2D(colors[i]);
+        s.color = toD2D(colors[i]);
         stops.push_back(s);
     }
 
@@ -372,17 +383,18 @@ void Painter::fillGradientRect(int x, int y, int w, int h,
         D2D1_GAMMA_2_2,
         D2D1_EXTEND_MODE_CLAMP,
         &stopCollection);
-    if (FAILED(hr) || !stopCollection) return;
+    if (FAILED(hr) || !stopCollection)
+        return;
 
     // Horizontal left-to-right gradient
     D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES props = {
-        D2D1::Point2F(static_cast<float>(x),     static_cast<float>(y)),
-        D2D1::Point2F(static_cast<float>(x + w), static_cast<float>(y))
-    };
+        D2D1::Point2F(static_cast<float>(x), static_cast<float>(y)),
+        D2D1::Point2F(static_cast<float>(x + w), static_cast<float>(y))};
 
     ComPtr<ID2D1LinearGradientBrush> brush;
     hr = ctx.dc->CreateLinearGradientBrush(props, stopCollection.Get(), &brush);
-    if (FAILED(hr) || !brush) return;
+    if (FAILED(hr) || !brush)
+        return;
 
     ctx.dc->FillRectangle(toRect(x, y, w, h), brush.Get());
 }
@@ -398,7 +410,7 @@ void Painter::fillGradientRect(int x, int y, int w, int h,
 // we repurpose: nullptr entry = axis-aligned, non-null = layer.
 // ============================================================================
 
-void Painter::pushClipRect(int x, int y, int w, int h, int cornerRadius) 
+void Painter::pushClipRect(int x, int y, int w, int h, int cornerRadius)
 {
     if (cornerRadius <= 0)
     {
@@ -432,10 +444,10 @@ void Painter::pushClipRect(int x, int y, int w, int h, int cornerRadius)
     }
 }
 
-
 void Painter::popClipRect()
 {
-    if (ctx.clipStack.empty()) return;
+    if (ctx.clipStack.empty())
+        return;
 
     HRGN sentinel = ctx.clipStack.back();
     ctx.clipStack.pop_back();
@@ -470,7 +482,8 @@ void Painter::drawArc(float cx, float cy, float radius,
                       float startAngle, float sweepAngle,
                       Color color, bool roundedCaps)
 {
-    if (radius <= 0 || sweepAngle == 0.f) return;
+    if (radius <= 0 || sweepAngle == 0.f)
+        return;
 
     // Compute start and end points
     float x0 = cx + radius * std::cos(startAngle);
@@ -481,25 +494,25 @@ void Painter::drawArc(float cx, float cy, float radius,
 
     // D2D arc sweep direction: positive angle = clockwise in screen space
     D2D1_SWEEP_DIRECTION sweep = (sweepAngle >= 0)
-        ? D2D1_SWEEP_DIRECTION_CLOCKWISE
-        : D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE;
+                                     ? D2D1_SWEEP_DIRECTION_CLOCKWISE
+                                     : D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE;
 
     // Large arc flag: sweep > 180°
     D2D1_ARC_SIZE arcSize = (std::abs(sweepAngle) > static_cast<float>(M_PI))
-        ? D2D1_ARC_SIZE_LARGE
-        : D2D1_ARC_SIZE_SMALL;
+                                ? D2D1_ARC_SIZE_LARGE
+                                : D2D1_ARC_SIZE_SMALL;
 
     D2D1_ARC_SEGMENT arc = {
         D2D1::Point2F(x1, y1),
         D2D1::SizeF(radius, radius),
-        0.f,        // rotation angle of ellipse
+        0.f, // rotation angle of ellipse
         sweep,
-        arcSize
-    };
+        arcSize};
 
     ComPtr<ID2D1PathGeometry> path;
     ctx.factory->CreatePathGeometry(&path);
-    if (!path) return;
+    if (!path)
+        return;
 
     ComPtr<ID2D1GeometrySink> sink;
     path->Open(&sink);
@@ -508,8 +521,9 @@ void Painter::drawArc(float cx, float cy, float radius,
     sink->EndFigure(D2D1_FIGURE_END_OPEN);
     sink->Close();
 
-    auto* br = getBrush(ctx, color);
-    if (!br) return;
+    auto *br = getBrush(ctx, color);
+    if (!br)
+        return;
 
     // Stroke style for rounded caps
     ComPtr<ID2D1StrokeStyle> strokeStyle;
@@ -534,7 +548,8 @@ void Painter::drawArc(float cx, float cy, float radius,
 
 void Painter::drawWavyLine(int x, int y, int len, Color color, int amplitude)
 {
-    if (len <= 0) return;
+    if (len <= 0)
+        return;
     const int step = amplitude * 2;
     std::vector<std::pair<int, int>> pts;
     pts.reserve(len / step + 2);
@@ -558,9 +573,11 @@ void Painter::drawWavyLine(int x, int y, int len, Color color, int amplitude)
 void Painter::drawFadeOverlay(int x, int y, int w, int h,
                               int fadeWidth, Color bg)
 {
-    if (fadeWidth <= 0 || w <= 0 || h <= 0) return;
+    if (fadeWidth <= 0 || w <= 0 || h <= 0)
+        return;
     int startX = x + w - fadeWidth;
-    if (startX < x) startX = x;
+    if (startX < x)
+        startX = x;
     std::vector<Color> stops = {bg.withAlpha(0), bg.withAlpha(255)};
     fillGradientRect(startX, y, fadeWidth, h, stops);
 }
@@ -577,14 +594,15 @@ void Painter::drawShadow(int x, int y, int w, int h,
     // Create a command list to capture the shape
     ComPtr<ID2D1CommandList> cmdList;
     HRESULT hr = ctx.dc->CreateCommandList(&cmdList);
-    if (FAILED(hr)) return;
+    if (FAILED(hr))
+        return;
 
     // Draw the base shape into the command list
-    ID2D1Image* prevTarget = nullptr;
+    ID2D1Image *prevTarget = nullptr;
     ctx.dc->GetTarget(&prevTarget);
     ctx.dc->SetTarget(cmdList.Get());
 
-    auto* br = getBrush(ctx, color);
+    auto *br = getBrush(ctx, color);
     if (br)
     {
         if (radius > 0)
@@ -594,20 +612,22 @@ void Painter::drawShadow(int x, int y, int w, int h,
     }
 
     ctx.dc->SetTarget(prevTarget);
-    if (prevTarget) prevTarget->Release();
+    if (prevTarget)
+        prevTarget->Release();
     cmdList->Close();
 
     // Shadow effect
     ComPtr<ID2D1Effect> shadowEffect;
     hr = ctx.dc->CreateEffect(CLSID_D2D1Shadow, &shadowEffect);
-    if (FAILED(hr)) return;
+    if (FAILED(hr))
+        return;
 
     shadowEffect->SetInput(0, cmdList.Get());
     shadowEffect->SetValue(D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION,
                            static_cast<float>(blurRadius) * 0.5f);
     shadowEffect->SetValue(D2D1_SHADOW_PROP_COLOR,
-        D2D1::Vector4F(color.r / 255.f, color.g / 255.f,
-                       color.b / 255.f, color.a / 255.f));
+                           D2D1::Vector4F(color.r / 255.f, color.g / 255.f,
+                                          color.b / 255.f, color.a / 255.f));
 
     // Draw shadow offset from the shape
     ctx.dc->DrawImage(
@@ -632,7 +652,8 @@ void Painter::beginLayer(float opacity)
 
 void Painter::endLayer()
 {
-    if (ctx.clipStack.empty()) return;
+    if (ctx.clipStack.empty())
+        return;
     ctx.clipStack.pop_back();
     ctx.dc->PopLayer();
 }
@@ -641,14 +662,14 @@ void Painter::endLayer()
 // Painter::drawImage
 // ============================================================================
 
-void Painter::drawImage(const ImageDrawParams& params)
+void Painter::drawImage(const ImageDrawParams &params)
 {
     if (!params.image || params.clipW <= 0 || params.clipH <= 0)
         return;
 
     // params.image is an ID2D1Bitmap1* cast to NativeImage (Gdiplus::Bitmap* alias
     // is gone; on Win32 NativeImage is now ID2D1Bitmap1*).
-    auto* bitmap = static_cast<ID2D1Bitmap1*>(params.image);
+    auto *bitmap = static_cast<ID2D1Bitmap1 *>(params.image);
 
     // Destination rect
     D2D1_RECT_F dest = D2D1::RectF(
@@ -658,15 +679,15 @@ void Painter::drawImage(const ImageDrawParams& params)
 
     // Clip rect
     D2D1_RECT_F clip = toRect(params.clipX, params.clipY,
-                               params.clipW, params.clipH);
+                              params.clipW, params.clipH);
 
     auto drawOneTile = [&](D2D1_RECT_F d)
     {
         ctx.dc->DrawBitmap(
             bitmap, d,
-            1.f,                              // opacity
+            1.f, // opacity
             D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
-            nullptr);                         // source rect = whole bitmap
+            nullptr); // source rect = whole bitmap
     };
 
     if (params.borderRadius <= 0)
@@ -677,15 +698,17 @@ void Painter::drawImage(const ImageDrawParams& params)
         {
             float tileW = params.destW, tileH = params.destH;
             float startX = (params.repeat == ImageRepeat::RepeatY)
-                               ? params.destX : (float)params.clipX;
+                               ? params.destX
+                               : (float)params.clipX;
             float startY = (params.repeat == ImageRepeat::RepeatX)
-                               ? params.destY : (float)params.clipY;
-            float endX   = (params.repeat == ImageRepeat::RepeatY)
-                               ? params.destX + tileW
-                               : (float)(params.clipX + params.clipW);
-            float endY   = (params.repeat == ImageRepeat::RepeatX)
-                               ? params.destY + tileH
-                               : (float)(params.clipY + params.clipH);
+                               ? params.destY
+                               : (float)params.clipY;
+            float endX = (params.repeat == ImageRepeat::RepeatY)
+                             ? params.destX + tileW
+                             : (float)(params.clipX + params.clipW);
+            float endY = (params.repeat == ImageRepeat::RepeatX)
+                             ? params.destY + tileH
+                             : (float)(params.clipY + params.clipH);
 
             for (float ty = startY; ty < endY; ty += tileH)
                 for (float tx = startX; tx < endX; tx += tileW)
@@ -704,7 +727,7 @@ void Painter::drawImage(const ImageDrawParams& params)
         ComPtr<ID2D1RoundedRectangleGeometry> geom;
         ctx.factory->CreateRoundedRectangleGeometry(
             D2D1::RoundedRect(clip, (float)params.borderRadius,
-                                    (float)params.borderRadius),
+                              (float)params.borderRadius),
             &geom);
 
         D2D1_LAYER_PARAMETERS lp = D2D1::LayerParameters(clip, geom.Get());
@@ -714,15 +737,17 @@ void Painter::drawImage(const ImageDrawParams& params)
         {
             float tileW = params.destW, tileH = params.destH;
             float startX = (params.repeat == ImageRepeat::RepeatY)
-                               ? params.destX : (float)params.clipX;
+                               ? params.destX
+                               : (float)params.clipX;
             float startY = (params.repeat == ImageRepeat::RepeatX)
-                               ? params.destY : (float)params.clipY;
-            float endX   = (params.repeat == ImageRepeat::RepeatY)
-                               ? params.destX + tileW
-                               : (float)(params.clipX + params.clipW);
-            float endY   = (params.repeat == ImageRepeat::RepeatX)
-                               ? params.destY + tileH
-                               : (float)(params.clipY + params.clipH);
+                               ? params.destY
+                               : (float)params.clipY;
+            float endX = (params.repeat == ImageRepeat::RepeatY)
+                             ? params.destX + tileW
+                             : (float)(params.clipX + params.clipW);
+            float endY = (params.repeat == ImageRepeat::RepeatX)
+                             ? params.destY + tileH
+                             : (float)(params.clipY + params.clipH);
 
             for (float ty = startY; ty < endY; ty += tileH)
                 for (float tx = startX; tx < endX; tx += tileW)
@@ -741,12 +766,13 @@ void Painter::drawImage(const ImageDrawParams& params)
 // Painter::drawVideo
 // ============================================================================
 
-void Painter::drawVideo(const VideoDrawParams& params)
+void Painter::drawVideo(const VideoDrawParams &params)
 {
     if (!params.frame ||
-        params.dstW <= 0 || params.dstH <= 0) return;
+        params.dstW <= 0 || params.dstH <= 0)
+        return;
 
-    auto* bitmap = static_cast<ID2D1Bitmap1*>(params.frame);
+    auto *bitmap = static_cast<ID2D1Bitmap1 *>(params.frame);
     ctx.dc->DrawBitmap(
         bitmap,
         D2D1::RectF(
@@ -761,12 +787,13 @@ void Painter::drawVideo(const VideoDrawParams& params)
 // Painter::drawCamera
 // ============================================================================
 
-void Painter::drawCamera(const CameraDrawParams& params)
+void Painter::drawCamera(const CameraDrawParams &params)
 {
     if (!params.frame ||
-        params.dstW <= 0 || params.dstH <= 0) return;
+        params.dstW <= 0 || params.dstH <= 0)
+        return;
 
-    auto* bitmap = static_cast<ID2D1Bitmap1*>(params.frame);
+    auto *bitmap = static_cast<ID2D1Bitmap1 *>(params.frame);
 
     D2D1_RECT_F dest = D2D1::RectF(
         (float)params.dstX, (float)params.dstY,
@@ -784,8 +811,8 @@ void Painter::drawCamera(const CameraDrawParams& params)
 
         D2D1_MATRIX_3X2_F flip = D2D1::Matrix3x2F(
             -1.f, 0.f,
-             0.f, 1.f,
-             2.f * cx, 0.f);
+            0.f, 1.f,
+            2.f * cx, 0.f);
 
         ctx.dc->SetTransform(flip * prev);
         ctx.dc->DrawBitmap(bitmap, dest, 1.f,
@@ -803,7 +830,7 @@ void Painter::drawCamera(const CameraDrawParams& params)
 // Painter::drawPage
 // ============================================================================
 
-void Painter::drawPage(const PageDrawParams& params)
+void Painter::drawPage(const PageDrawParams &params)
 {
     if (params.hasPageBackground)
         fillRect(params.x, params.y, params.w, params.h, params.pageBackground);
@@ -823,8 +850,7 @@ void Painter::drawPage(const PageDrawParams& params)
             int shadowY = params.header.y + params.header.h;
             std::vector<Color> stops = {
                 Color::fromRGB(0, 0, 0).withAlpha(60),
-                Color::fromRGB(0, 0, 0).withAlpha(0)
-            };
+                Color::fromRGB(0, 0, 0).withAlpha(0)};
             fillGradientRect(params.header.x, shadowY,
                              params.header.w, params.header.elevation, stops);
         }
@@ -841,8 +867,7 @@ void Painter::drawPage(const PageDrawParams& params)
             int startY = params.footer.y - params.footer.elevation;
             std::vector<Color> stops = {
                 Color::fromRGB(0, 0, 0).withAlpha(0),
-                Color::fromRGB(0, 0, 0).withAlpha(60)
-            };
+                Color::fromRGB(0, 0, 0).withAlpha(60)};
             fillGradientRect(params.footer.x, startY,
                              params.footer.w, params.footer.elevation, stops);
         }
@@ -859,21 +884,25 @@ void Painter::drawPage(const PageDrawParams& params)
 //   DT_VCENTER → center vertically
 // ============================================================================
 
-void Painter::drawText(const std::wstring& text, int x, int y, int w, int h,
+void Painter::drawText(const std::wstring &text, int x, int y, int w, int h,
                        NativeFont font, Color color, UINT format)
 {
-    if (text.empty() || !font || !ctx.dwrite) return;
+    if (text.empty() || !font || !ctx.dwrite)
+        return;
 
-    auto* fmt = static_cast<IDWriteTextFormat*>(font);
+    auto *fmt = static_cast<IDWriteTextFormat *>(font);
 
     // Apply horizontal alignment to a temporary copy of the format.
     // We cannot mutate the cached format directly.
     DWRITE_TEXT_ALIGNMENT hAlign = DWRITE_TEXT_ALIGNMENT_LEADING;
-    if (format & DT_CENTER) hAlign = DWRITE_TEXT_ALIGNMENT_CENTER;
-    else if (format & DT_RIGHT) hAlign = DWRITE_TEXT_ALIGNMENT_TRAILING;
+    if (format & DT_CENTER)
+        hAlign = DWRITE_TEXT_ALIGNMENT_CENTER;
+    else if (format & DT_RIGHT)
+        hAlign = DWRITE_TEXT_ALIGNMENT_TRAILING;
 
     DWRITE_PARAGRAPH_ALIGNMENT vAlign = DWRITE_PARAGRAPH_ALIGNMENT_NEAR;
-    if (format & DT_VCENTER) vAlign = DWRITE_PARAGRAPH_ALIGNMENT_CENTER;
+    if (format & DT_VCENTER)
+        vAlign = DWRITE_PARAGRAPH_ALIGNMENT_CENTER;
 
     // Create a layout for this specific draw call.
     ComPtr<IDWriteTextLayout> layout;
@@ -884,14 +913,16 @@ void Painter::drawText(const std::wstring& text, int x, int y, int w, int h,
         static_cast<float>(w),
         static_cast<float>(h),
         &layout);
-    if (FAILED(hr) || !layout) return;
+    if (FAILED(hr) || !layout)
+        return;
 
     layout->SetTextAlignment(hAlign);
     layout->SetParagraphAlignment(vAlign);
     layout->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
 
-    auto* br = getBrush(ctx, color);
-    if (!br) return;
+    auto *br = getBrush(ctx, color);
+    if (!br)
+        return;
 
     ctx.dc->DrawTextLayout(
         D2D1::Point2F(static_cast<float>(x), static_cast<float>(y)),
@@ -904,10 +935,11 @@ void Painter::drawText(const std::wstring& text, int x, int y, int w, int h,
 // Painter::drawTextA  (UTF-8 → wide → drawText)
 // ============================================================================
 
-void Painter::drawTextA(const std::string& text, int x, int y, int w, int h,
+void Painter::drawTextA(const std::string &text, int x, int y, int w, int h,
                         NativeFont font, Color color, UINT format)
 {
-    if (text.empty()) return;
+    if (text.empty())
+        return;
     drawText(toWideString(text), x, y, w, h, font, color, format);
 }
 
@@ -915,28 +947,30 @@ void Painter::drawTextA(const std::string& text, int x, int y, int w, int h,
 // Painter::measureText  (low-level — used by layout engine)
 // ============================================================================
 
-void Painter::measureText(const std::wstring& text, NativeFont font,
-                          int& outWidth, int& outHeight)
+void Painter::measureText(const std::wstring &text, NativeFont font,
+                          int &outWidth, int &outHeight)
 {
     outWidth = outHeight = 0;
-    if (text.empty() || !font || !ctx.dwrite) return;
+    if (text.empty() || !font || !ctx.dwrite)
+        return;
 
-    auto* fmt = static_cast<IDWriteTextFormat*>(font);
+    auto *fmt = static_cast<IDWriteTextFormat *>(font);
 
     ComPtr<IDWriteTextLayout> layout;
     HRESULT hr = ctx.dwrite->CreateTextLayout(
         text.c_str(),
         static_cast<UINT32>(text.size()),
         fmt,
-        10000.f,   // no wrap constraint
+        10000.f, // no wrap constraint
         10000.f,
         &layout);
-    if (FAILED(hr) || !layout) return;
+    if (FAILED(hr) || !layout)
+        return;
 
     DWRITE_TEXT_METRICS metrics = {};
     layout->GetMetrics(&metrics);
 
-    outWidth  = static_cast<int>(std::ceil(metrics.widthIncludingTrailingWhitespace));
+    outWidth = static_cast<int>(std::ceil(metrics.widthIncludingTrailingWhitespace));
     outHeight = static_cast<int>(std::ceil(metrics.height));
 }
 
@@ -947,26 +981,28 @@ void Painter::measureText(const std::wstring& text, NativeFont font,
 // Build an IDWriteTextLayout for one line of text with all TextStyle
 // properties applied. The caller draws or measures it, then releases.
 static ComPtr<IDWriteTextLayout> makeLayout(
-    GraphicsContext& ctx,
-    FontCache& fontCache,
-    const wchar_t* str, int len,
-    const TextStyle& style,
+    GraphicsContext &ctx,
+    FontCache &fontCache,
+    const wchar_t *str, int len,
+    const TextStyle &style,
     float maxW, float maxH)
 {
     NativeFont nf = fontCache.getFont(
         style.fontFamily,
         style.scaledFontSize(),
         style.fontWeight);
-    if (!nf) return nullptr;
+    if (!nf)
+        return nullptr;
 
-    auto* fmt = static_cast<IDWriteTextFormat*>(nf);
+    auto *fmt = static_cast<IDWriteTextFormat *>(nf);
 
     ComPtr<IDWriteTextLayout> layout;
     HRESULT hr = ctx.dwrite->CreateTextLayout(
         str, static_cast<UINT32>(len),
         fmt, maxW, maxH,
         &layout);
-    if (FAILED(hr) || !layout) return nullptr;
+    if (FAILED(hr) || !layout)
+        return nullptr;
 
     layout->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
 
@@ -983,9 +1019,9 @@ static ComPtr<IDWriteTextLayout> makeLayout(
     if (SUCCEEDED(layout.As(&layout1)) && style.letterSpacing != 0.f)
     {
         layout1->SetCharacterSpacing(
-            0.f,                   // leading spacing
-            style.letterSpacing,   // trailing spacing
-            0.f,                   // minimum advance width
+            0.f,                 // leading spacing
+            style.letterSpacing, // trailing spacing
+            0.f,                 // minimum advance width
             all);
     }
 
@@ -993,9 +1029,13 @@ static ComPtr<IDWriteTextLayout> makeLayout(
 }
 
 // Measure a layout and return pixel width. outLineH receives natural height.
-static int measureLayout(IDWriteTextLayout* layout, int& outLineH)
+static int measureLayout(IDWriteTextLayout *layout, int &outLineH)
 {
-    if (!layout) { outLineH = 0; return 0; }
+    if (!layout)
+    {
+        outLineH = 0;
+        return 0;
+    }
     DWRITE_TEXT_METRICS m = {};
     layout->GetMetrics(&m);
     outLineH = static_cast<int>(std::ceil(m.height));
@@ -1003,25 +1043,31 @@ static int measureLayout(IDWriteTextLayout* layout, int& outLineH)
 }
 
 // Split a wstring into line spans respecting '\n' and optional word-wrap.
-struct LineSpanD2D { int start; int length; };
+struct LineSpanD2D
+{
+    int start;
+    int length;
+};
 
 static std::vector<LineSpanD2D> wrapText(
-    GraphicsContext& ctx,
-    FontCache& fontCache,
-    const std::wstring& text,
-    const TextStyle& style,
+    GraphicsContext &ctx,
+    FontCache &fontCache,
+    const std::wstring &text,
+    const TextStyle &style,
     int maxWidth, bool softWrap)
 {
     std::vector<LineSpanD2D> lines;
     const int n = static_cast<int>(text.size());
-    if (n == 0) return lines;
+    if (n == 0)
+        return lines;
 
     int pos = 0;
     while (pos < n)
     {
         // Find next newline
         int nlPos = pos;
-        while (nlPos < n && text[nlPos] != L'\n') ++nlPos;
+        while (nlPos < n && text[nlPos] != L'\n')
+            ++nlPos;
 
         if (!softWrap || maxWidth <= 0)
         {
@@ -1038,39 +1084,52 @@ static std::vector<LineSpanD2D> wrapText(
                 {
                     int mid = (lo + hi) / 2;
                     auto layout = makeLayout(ctx, fontCache,
-                        text.c_str() + lineStart, mid,
-                        style, (float)maxWidth, 10000.f);
+                                             text.c_str() + lineStart, mid,
+                                             style, (float)maxWidth, 10000.f);
                     if (layout)
                     {
                         DWRITE_TEXT_METRICS m = {};
                         layout->GetMetrics(&m);
                         if (m.widthIncludingTrailingWhitespace <= (float)maxWidth)
-                        { fit = mid; lo = mid + 1; }
+                        {
+                            fit = mid;
+                            lo = mid + 1;
+                        }
                         else
-                        { hi = mid - 1; }
+                        {
+                            hi = mid - 1;
+                        }
                     }
-                    else { hi = mid - 1; }
+                    else
+                    {
+                        hi = mid - 1;
+                    }
                 }
 
-                if (fit == 0) fit = 1; // force at least one char
+                if (fit == 0)
+                    fit = 1; // force at least one char
 
                 // Try to break at a word boundary
                 int breakAt = fit;
                 if (lineStart + fit < nlPos)
                 {
                     int wb = fit;
-                    while (wb > 1 && text[lineStart + wb - 1] != L' ') --wb;
-                    if (wb > 1) breakAt = wb;
+                    while (wb > 1 && text[lineStart + wb - 1] != L' ')
+                        --wb;
+                    if (wb > 1)
+                        breakAt = wb;
                 }
 
                 lines.push_back({lineStart, breakAt});
                 lineStart += breakAt;
-                while (lineStart < nlPos && text[lineStart] == L' ') ++lineStart;
+                while (lineStart < nlPos && text[lineStart] == L' ')
+                    ++lineStart;
             }
         }
 
         pos = nlPos + 1;
-        if (nlPos == n) break;
+        if (nlPos == n)
+            break;
     }
     return lines;
 }
@@ -1079,14 +1138,15 @@ static std::vector<LineSpanD2D> wrapText(
 // Painter::measureRichText
 // ============================================================================
 
-void Painter::measureRichText(const std::wstring& text,
-                              const TextStyle& style,
-                              FontCache& fontCache,
+void Painter::measureRichText(const std::wstring &text,
+                              const TextStyle &style,
+                              FontCache &fontCache,
                               int maxWidth, bool softWrap, int maxLines,
-                              int& outWidth, int& outHeight)
+                              int &outWidth, int &outHeight)
 {
     outWidth = outHeight = 0;
-    if (text.empty() || !ctx.dwrite) return;
+    if (text.empty() || !ctx.dwrite)
+        return;
 
     auto lines = wrapText(ctx, fontCache, text, style,
                           softWrap ? maxWidth : 0, softWrap);
@@ -1095,24 +1155,25 @@ void Painter::measureRichText(const std::wstring& text,
     {
         // Measure one line to get natural line height
         auto layout = makeLayout(ctx, fontCache,
-            text.c_str(),
-            lines.empty() ? 0 : lines[0].length,
-            style, 10000.f, 10000.f);
+                                 text.c_str(),
+                                 lines.empty() ? 0 : lines[0].length,
+                                 style, 10000.f, 10000.f);
         measureLayout(layout.Get(), lineH);
-        if (lineH == 0) lineH = style.scaledFontSize();
+        if (lineH == 0)
+            lineH = style.scaledFontSize();
     }
     int lineHeightPx = static_cast<int>(lineH * style.height);
 
     int totalLines = (maxLines > 0)
-        ? std::min((int)lines.size(), maxLines)
-        : (int)lines.size();
+                         ? std::min((int)lines.size(), maxLines)
+                         : (int)lines.size();
 
     for (int i = 0; i < totalLines; ++i)
     {
-        auto& span = lines[i];
+        auto &span = lines[i];
         auto layout = makeLayout(ctx, fontCache,
-            text.c_str() + span.start, span.length,
-            style, 10000.f, 10000.f);
+                                 text.c_str() + span.start, span.length,
+                                 style, 10000.f, 10000.f);
         int dummy;
         int w = measureLayout(layout.Get(), dummy);
         outWidth = std::max(outWidth, w);
@@ -1128,21 +1189,25 @@ void Painter::measureRichText(const std::wstring& text,
 // ============================================================================
 
 void Painter::drawTextDecorationLine(int lineX, int lineY, int lineW,
-                                     const TextStyle& style,
+                                     const TextStyle &style,
                                      TextDecoration which)
 {
-    if (lineW <= 0) return;
+    if (lineW <= 0)
+        return;
 
     // Use DWrite line metrics for baseline geometry
-    int fontSize  = style.scaledFontSize();
-    int ascent    = static_cast<int>(fontSize * 0.75f);
+    int fontSize = style.scaledFontSize();
+    int ascent = static_cast<int>(fontSize * 0.75f);
     int thickness = style.decorationThickness;
-    Color dc      = style.decorationColor;
+    Color dc = style.decorationColor;
 
     int decorY = lineY;
-    if      (which == TextDecoration::Underline)   decorY = lineY + ascent + 1;
-    else if (which == TextDecoration::Overline)    decorY = lineY;
-    else if (which == TextDecoration::LineThrough) decorY = lineY + ascent - ascent / 3;
+    if (which == TextDecoration::Underline)
+        decorY = lineY + ascent + 1;
+    else if (which == TextDecoration::Overline)
+        decorY = lineY;
+    else if (which == TextDecoration::LineThrough)
+        decorY = lineY + ascent - ascent / 3;
 
     switch (style.decorationStyle)
     {
@@ -1150,7 +1215,7 @@ void Painter::drawTextDecorationLine(int lineX, int lineY, int lineW,
         drawHLine(lineX, decorY, lineW, dc, thickness);
         break;
     case TextDecorationStyle::Double:
-        drawHLine(lineX, decorY,     lineW, dc, thickness);
+        drawHLine(lineX, decorY, lineW, dc, thickness);
         drawHLine(lineX, decorY + 2, lineW, dc, thickness);
         break;
     case TextDecorationStyle::Dotted:
@@ -1171,41 +1236,48 @@ void Painter::drawTextDecorationLine(int lineX, int lineY, int lineW,
 // Painter::drawRichText
 // ============================================================================
 
-void Painter::drawRichText(const std::wstring& text,
-                           const RichTextParams& params,
-                           FontCache& fontCache)
+void Painter::drawRichText(const std::wstring &text,
+                           const RichTextParams &params,
+                           FontCache &fontCache)
 {
-    if (text.empty() || params.w <= 0 || params.h <= 0 || !ctx.dwrite) return;
+    if (text.empty() || params.w <= 0 || params.h <= 0 || !ctx.dwrite)
+        return;
 
-    const TextStyle& style = params.style;
+    const TextStyle &style = params.style;
 
     int wrapWidth = params.softWrap ? params.w : 0;
-    auto lines    = wrapText(ctx, fontCache, text, style, wrapWidth, params.softWrap);
+    auto lines = wrapText(ctx, fontCache, text, style, wrapWidth, params.softWrap);
 
     // Natural line height from a sample layout
     int lineH = 0;
     {
         auto layout = makeLayout(ctx, fontCache,
-            text.c_str(),
-            lines.empty() ? 0 : lines[0].length,
-            style, 10000.f, 10000.f);
+                                 text.c_str(),
+                                 lines.empty() ? 0 : lines[0].length,
+                                 style, 10000.f, 10000.f);
         measureLayout(layout.Get(), lineH);
-        if (lineH == 0) lineH = style.scaledFontSize();
+        if (lineH == 0)
+            lineH = style.scaledFontSize();
     }
     int lineHeightPx = static_cast<int>(lineH * style.height);
 
     int totalLines = (params.maxLines > 0)
-        ? std::min((int)lines.size(), params.maxLines)
-        : (int)lines.size();
+                         ? std::min((int)lines.size(), params.maxLines)
+                         : (int)lines.size();
 
     // Vertical alignment of the whole text block
-    int blockH  = totalLines * lineHeightPx;
-    int startY  = params.y;
+    int blockH = totalLines * lineHeightPx;
+    int startY = params.y;
     switch (params.textAlignVertical)
     {
-    case TextAlignVertical::Center: startY = params.y + (params.h - blockH) / 2; break;
-    case TextAlignVertical::Bottom: startY = params.y + params.h - blockH;        break;
-    default: break;
+    case TextAlignVertical::Center:
+        startY = params.y + (params.h - blockH) / 2;
+        break;
+    case TextAlignVertical::Bottom:
+        startY = params.y + params.h - blockH;
+        break;
+    default:
+        break;
     }
 
     // Clip if needed
@@ -1215,24 +1287,27 @@ void Painter::drawRichText(const std::wstring& text,
 
     for (int i = 0; i < totalLines; ++i)
     {
-        auto& span = lines[i];
-        int lineY  = startY + i * lineHeightPx;
+        auto &span = lines[i];
+        int lineY = startY + i * lineHeightPx;
 
-        if (lineY + lineHeightPx < params.y) continue;
-        if (lineY > params.y + params.h)     break;
+        if (lineY + lineHeightPx < params.y)
+            continue;
+        if (lineY > params.y + params.h)
+            break;
 
         // Measure this line for alignment
         auto layout = makeLayout(ctx, fontCache,
-            text.c_str() + span.start, span.length,
-            style, (float)params.w, (float)lineHeightPx);
-        if (!layout) continue;
+                                 text.c_str() + span.start, span.length,
+                                 style, (float)params.w, (float)lineHeightPx);
+        if (!layout)
+            continue;
 
         int dummy;
         int lineW = measureLayout(layout.Get(), dummy);
 
         // Horizontal alignment
-        int lineX     = params.x;
-        bool isRTL    = (params.direction == TextDirection::RTL);
+        int lineX = params.x;
+        bool isRTL = (params.direction == TextDirection::RTL);
         switch (params.textAlign)
         {
         case TextAlign::Right:
@@ -1257,18 +1332,19 @@ void Painter::drawRichText(const std::wstring& text,
         }
 
         bool isLastVisible = (i == totalLines - 1);
-        bool hasMoreLines  = ((int)lines.size() > totalLines) ||
-                             (totalLines == 1 && lineW > params.w);
+        bool hasMoreLines = ((int)lines.size() > totalLines) ||
+                            (totalLines == 1 && lineW > params.w);
 
         // Per-run background
         if (style.backgroundColor.has_value())
             fillRect(lineX, lineY, lineW, lineHeightPx, *style.backgroundColor);
 
         // ── Shadows ───────────────────────────────────────────────────────────
-        for (const auto& sh : style.shadows)
+        for (const auto &sh : style.shadows)
         {
-            auto* shBr = getBrush(ctx, sh.color);
-            if (!shBr) continue;
+            auto *shBr = getBrush(ctx, sh.color);
+            if (!shBr)
+                continue;
 
             // Approximate blur by drawing multiple offset copies at lower alpha
             int passes = (sh.blurRadius > 0) ? std::min(sh.blurRadius, 3) : 1;
@@ -1276,8 +1352,9 @@ void Painter::drawRichText(const std::wstring& text,
             {
                 Color sc = sh.color.withAlpha(
                     static_cast<uint8_t>(sh.color.a / passes));
-                auto* sbr = getBrush(ctx, sc);
-                if (!sbr) continue;
+                auto *sbr = getBrush(ctx, sc);
+                if (!sbr)
+                    continue;
                 ctx.dc->DrawTextLayout(
                     D2D1::Point2F(
                         static_cast<float>(lineX + sh.offsetX + bp),
@@ -1296,7 +1373,7 @@ void Painter::drawRichText(const std::wstring& text,
                 style.fontFamily, style.scaledFontSize(), style.fontWeight);
             if (nf)
             {
-                auto* fmt = static_cast<IDWriteTextFormat*>(nf);
+                auto *fmt = static_cast<IDWriteTextFormat *>(nf);
                 ComPtr<IDWriteTextLayout> ellLayout;
                 ctx.dwrite->CreateTextLayout(
                     text.c_str() + span.start,
@@ -1317,7 +1394,7 @@ void Painter::drawRichText(const std::wstring& text,
                     ellLayout->SetTrimming(&trimming, ellipsisSign.Get());
                     ellLayout->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
 
-                    auto* textBr = getBrush(ctx, style.color);
+                    auto *textBr = getBrush(ctx, style.color);
                     if (textBr)
                         ctx.dc->DrawTextLayout(
                             D2D1::Point2F((float)params.x, (float)lineY),
@@ -1333,7 +1410,7 @@ void Painter::drawRichText(const std::wstring& text,
         }
 
         // ── Normal draw ───────────────────────────────────────────────────────
-        auto* textBr = getBrush(ctx, style.color);
+        auto *textBr = getBrush(ctx, style.color);
         if (textBr)
             ctx.dc->DrawTextLayout(
                 D2D1::Point2F(static_cast<float>(lineX),
@@ -1362,7 +1439,7 @@ void Painter::drawRichText(const std::wstring& text,
             params.overflow == TextOverflow::Fade)
         {
             Color fadeBg = Color::fromRGB(255, 255, 255);
-            int fadeW    = std::min(60, params.w / 3);
+            int fadeW = std::min(60, params.w / 3);
             drawFadeOverlay(params.x, lineY, params.w, lineHeightPx, fadeW, fadeBg);
         }
     }
@@ -1375,12 +1452,44 @@ void Painter::drawRichText(const std::wstring& text,
 // Painter::drawRichTextA  (UTF-8 convenience overload)
 // ============================================================================
 
-void Painter::drawRichTextA(const std::string& text,
-                            const RichTextParams& params,
-                            FontCache& fontCache)
+void Painter::drawRichTextA(const std::string &text,
+                            const RichTextParams &params,
+                            FontCache &fontCache)
 {
-    if (text.empty()) return;
+    if (text.empty())
+        return;
     drawRichText(toWideString(text), params, fontCache);
+}
+
+void Painter::drawScrollbar(const CustomScrollbar &bar, int glW, int glH)
+{
+    if (!bar.isVisible() || bar.alpha() < 0.005f)
+        return;
+
+    float alpha = bar.alpha();
+
+    // ── Track background ──────────────────────────────────────────────────────
+    {
+        auto [tx, ty, tw, th] = bar.trackRect(glW, glH);
+        auto *br = getBrush(ctx, Color::fromRGBA(20, 20, 20,
+                                                 static_cast<uint8_t>(alpha * 0.30f * 255)));
+        if (br)
+            ctx.dc->FillRectangle(
+                D2D1::RectF(tx, ty, tx + tw, ty + th), br);
+    }
+
+    // ── Thumb ─────────────────────────────────────────────────────────────────
+    {
+        auto [tx, ty, tw, th] = bar.thumbRect(glW, glH);
+        float r = std::min(tw, th) * 0.5f;
+        uint8_t a = static_cast<uint8_t>(alpha * 255);
+        auto *br = getBrush(ctx, Color::fromRGBA(194, 194, 194, a));
+        if (br)
+            ctx.dc->FillRoundedRectangle(
+                D2D1::RoundedRect(
+                    D2D1::RectF(tx, ty, tx + tw, ty + th), r, r),
+                br);
+    }
 }
 
 #endif // _WIN32

@@ -373,46 +373,21 @@ void CanvasWidget::glRenderPass() {
         activeSurface_->render(ctx);
     }
 
+
+
+
+
     updateSBGeometry(glW, glH);
-
-    auto drawSBQuads = [&](const std::vector<float>& verts,
-                           float r, float g, float b, float a) {
-        if (verts.empty() || !s.sbPipeline) return;
-        size_t sz = verts.size() * sizeof(float);
-        memcpy([s.vertexBuf contents], verts.data(), sz);
-
-        struct SBUniforms { float mvp[16]; float color[4]; };
-        float sbOrtho[16];
-        metalOrtho(0.f, (float)glW, (float)glH, 0.f, sbOrtho);
-        SBUniforms uni;
-        memcpy(uni.mvp, sbOrtho, 64);
-        uni.color[0] = r; uni.color[1] = g;
-        uni.color[2] = b; uni.color[3] = a;
-
-        [enc setRenderPipelineState:s.sbPipeline];
-        [enc setVertexBuffer:s.vertexBuf offset:0 atIndex:0];
-        [enc setVertexBytes:&uni length:sizeof(uni) atIndex:1];
-        [enc setFragmentBytes:&uni length:sizeof(uni) atIndex:1];
-        [enc drawPrimitives:MTLPrimitiveTypeTriangle
-                vertexStart:0
-                vertexCount:(NSUInteger)(verts.size() / 4)];
-    };
-
-    if (hBar_.isVisible()) {
-        auto [tx, ty, tw, th] = hBar_.thumbRect(glW, glH);
-        std::vector<float> v = {
-            tx,    ty,    0,0,  tx+tw, ty,    1,0,  tx+tw, ty+th, 1,1,
-            tx+tw, ty+th, 1,1,  tx,    ty+th, 0,1,  tx,    ty,    0,0
-        };
-        drawSBQuads(v, 0.6f, 0.6f, 0.6f, hBar_.alpha());
-    }
-    if (vBar_.isVisible()) {
-        auto [tx, ty, tw, th] = vBar_.thumbRect(glW, glH);
-        std::vector<float> v = {
-            tx,    ty,    0,0,  tx+tw, ty,    1,0,  tx+tw, ty+th, 1,1,
-            tx+tw, ty+th, 1,1,  tx,    ty+th, 0,1,  tx,    ty,    0,0
-        };
-        drawSBQuads(v, 0.6f, 0.6f, 0.6f, vBar_.alpha());
+    hBar_.tick(frameDt_);
+    vBar_.tick(frameDt_);
+ 
+    {
+        // Scrollbars draw via CoreGraphics through Painter.
+        // GraphicsContext carries the CGContextRef from the current pass.
+        GraphicsContext gctx(cgContext);
+        Painter p(gctx);
+        p.drawScrollbar(hBar_, glW, glH);
+        p.drawScrollbar(vBar_, glW, glH);
     }
 
     [enc endEncoding];
@@ -722,9 +697,9 @@ void CanvasWidget::activatePendingSurface() {
 
 void CanvasWidget::ensureSBProgram(const char*, const char*) {}
 void CanvasWidget::renderSBCorner(int, int) {}
-void CanvasWidget::renderScrollbarsGL(int /*glW*/, int /*glH*/, double dt) {
-    hBar_.tick(dt);
-    vBar_.tick(dt);
+void CanvasWidget::renderScrollbarsGL(int /*glW*/, int /*glH*/, double /*dt*/)
+{
+    // tick() now called in glRenderPass() before Painter::drawScrollbar.
 }
 
 void CanvasWidget::initEventType() {}
