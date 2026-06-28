@@ -119,9 +119,11 @@ public:
     // (which include flux_canvas2d_backend.hpp) dereference it. Win32 never
     // sets or reads this (it uses Canvas2DD2D / Canvas2DBackend locally
     // instead, stored in its own per-widget state map).
+#ifndef _WIN32
+    Canvas2DBackend *backend_ = nullptr;
+#endif
 
 #if defined(__ANDROID__) || defined(__EMSCRIPTEN__)
-    Canvas2DBackend *backend_  = nullptr;
     Canvas2DGL      *canvasGL_ = nullptr;
 
     unsigned int sbProg_  = 0;
