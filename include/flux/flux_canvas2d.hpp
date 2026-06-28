@@ -106,7 +106,7 @@ struct Canvas2D
     // On GL platforms, set backend->mvp before calling this constructor.
     // On D2D, the MVP is not used (D2D manages its own transform stack).
     // -------------------------------------------------------------------------
-    explicit Canvas2D(Canvas2DBackend* backend, int canvasW, int canvasH);
+    explicit Canvas2D(Canvas2DBackend *backend, int canvasW, int canvasH);
     ~Canvas2D() = default;
 
     Canvas2D(const Canvas2D &) = delete;
@@ -229,13 +229,25 @@ struct Canvas2D
         Radial
     };
 
-#if !defined(_WIN32)
-    // Cairo / GL backend: the active cairo_t* (Linux) or Canvas2DGL* (other).
-    // Public so Canvas2D_setCairo() and the static getCr() helper in
-    // flux_canvas2d_cairo.cpp can access it without friend/linkage conflicts.
-    // On Linux this stores a cairo_t* reinterpret_cast'd to Canvas2DGL*;
-    // it is never dereferenced as a Canvas2DGL on that platform.
+#if defined(__ANDROID__) || defined(__EMSCRIPTEN__)
+    // GL backend pointer — Android/Web only.
     Canvas2DGL *canvasGL_ = nullptr;
+
+    // 3×3 column-major transform matrix — GL only.
+    // Cairo and D2D manage their own transform stacks natively.
+    struct Mat3
+    {
+        float m[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+        static Mat3 identity();
+        Mat3 multiply(const Mat3 &b) const;
+        Mat3 translated(float dx, float dy) const;
+        Mat3 scaled(float sx, float sy) const;
+        Mat3 rotated(float angle) const;
+        void apply(float &x, float &y) const;
+    };
+#elif defined(__linux__) && !defined(__ANDROID__)
+    // Cairo context pointer — Linux only.
+    cairo_t *cairoCtx_ = nullptr;
 #endif
 
 private:
@@ -296,9 +308,10 @@ private:
         // GL platforms track the CTM here so save/restore can replay it.
         // Cairo manages its own transform stack via cairo_save/cairo_restore,
         // so no CTM storage is needed there.  D2D has its own transform too.
-#if !defined(_WIN32) && !defined(__linux__)
+#if defined(__ANDROID__) || defined(__EMSCRIPTEN__)
         Mat3 ctm;
 #endif
+
 #if defined(_WIN32)
         // D2D stores its transform differently — see d2d .cpp
         float d2dCtmM11, d2dCtmM12, d2dCtmM21, d2dCtmM22, d2dCtmDx, d2dCtmDy;
@@ -319,6 +332,24 @@ private:
         LineJoin lineJoin;
     };
     std::vector<SaveState> stateStack_;
+
+    // ── GL-only transform state ───────────────────────────────────────────
+#if defined(__ANDROID__) || defined(__EMSCRIPTEN__)
+    Mat3 ctm_;
+    void buildMVP(float out[16]) const;
+    // Internal helpers used by GL draw calls
+    Color blendAlpha(Color c) const;
+    void uploadAndDraw(const float *verts, int count, unsigned int mode,
+                       Color col, float alpha = 1.f);
+    void drawTexturedQuad(unsigned int tex,
+                          float sx, float sy, float sw, float sh,
+                          float dx, float dy, float dw, float dh,
+                          int texW, int texH, float alpha = 1.f);
+    void tessellateArc(float cx, float cy, float r,
+                       float a0, float a1, bool ccw, bool move);
+    void fillPath();
+    void strokePath();
+#endif
 
     // ── Helpers ───────────────────────────────────────────────────────────
     void parseFontDesc(const std::string &desc);

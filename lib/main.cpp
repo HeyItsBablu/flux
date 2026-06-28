@@ -8,7 +8,7 @@ class TriangleSurface : public RenderSurface
 public:
   void initialize(int, int) override {} 
   void resize(int, int) override {}
-  void destroy() override {}
+  void destroy() override {} 
   void update(double dt) override { time_ += float(dt); }
 
   void render(Canvas2D &ctx) override

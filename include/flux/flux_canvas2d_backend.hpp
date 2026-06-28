@@ -3,39 +3,29 @@
 // flux_canvas2d_backend.hpp  —  Internal backend definitions
 //
 // Included ONLY by:
-//   flux_canvas2d_gl.cpp
-//   flux_canvas2d_d2d.cpp
+//   flux_canvas2d_gl.cpp        (Android, Web  — GLES3/WebGL2)
+//   flux_canvas2d_cairo.cpp     (Linux          — Cairo)
+//   flux_canvas2d_metal.cpp     (macOS          — Metal stub)
+//   flux_canvas2d_d2d.cpp       (Win32          — Direct2D)
 //
-// Never include this from flux_canvas.hpp or any RenderSurface header.
+// Never include this from flux_canvas2d.hpp or any RenderSurface header.
 // RenderSurface authors see only flux_canvas2d.hpp.
+//
+// Platform matrix:
+//   __ANDROID__  || __EMSCRIPTEN__  → GL block   (Canvas2DGL, GLES3)
+//   __linux__    && !__ANDROID__    → Cairo block (Canvas2DCairo)
+//   __APPLE__    && TARGET_OS_OSX   → Metal stub  (Canvas2DMetal, no GL)
+//   _WIN32                          → D2D block   (Canvas2DD2D)
 // ============================================================================
 
 #include "flux_canvas2d.hpp"
 
-// ─────────────────────────────────────────────────────────────────────────────
-// GL backend
-// ─────────────────────────────────────────────────────────────────────────────
-#if !defined(_WIN32)
+// =============================================================================
+// GL backend  —  Android (GLES3) + Web/Emscripten (WebGL2) ONLY
+// =============================================================================
+#if defined(__ANDROID__) || defined(__EMSCRIPTEN__)
 
-// GL / GLES headers — included here so the main header stays clean.
-#if defined(__linux__) && !defined(__ANDROID__)
-#include <glad/glad.h>
-#elif defined(__ANDROID__) || defined(__EMSCRIPTEN__)
 #include <GLES3/gl3.h>
-#elif defined(__APPLE__)
-#include <TargetConditionals.h>
-#if TARGET_OS_OSX
-// macOS uses Metal via Canvas2DGL stub — GL types still needed for
-// the shared Canvas2DGL struct even though draw calls go through Metal.
-#include <stdint.h>
-using GLuint = uint32_t;
-using GLenum = uint32_t;
-using GLint = int32_t;
-using GLsizei = int32_t;
-using GLfloat = float;
-using GLubyte = uint8_t;
-#endif
-#endif
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
@@ -46,8 +36,6 @@ using GLubyte = uint8_t;
 #include <cstdint>
 
 // ── Concrete image type for GL ────────────────────────────────────────────────
-// Canvas2DImage* returned to callers is actually a Canvas2DImageGL*.
-// freeImage() deletes via the virtual destructor, which cleans up texId.
 struct Canvas2DImageGL : Canvas2DImage
 {
     GLuint texId = 0;
@@ -55,14 +43,14 @@ struct Canvas2DImageGL : Canvas2DImage
 };
 
 // ── Shared GL resources (font atlas, shaders, VAO/VBO) ───────────────────────
-// One per GL context.  Created by CanvasWidget, passed into Canvas2DBackend.
+// One per GL context. Created by CanvasWidget, passed into Canvas2DBackend.
 struct Canvas2DGL
 {
     // ── Flat-colour / textured shader ─────────────────────────────────────
-    GLuint flatProg = 0;
-    GLint flatMVP = -1;
-    GLint flatColor = -1;
-    GLint flatMode = -1; // 0=solid, 1=font atlas R8, 2=RGBA tex
+    GLuint flatProg  = 0;
+    GLint  flatMVP   = -1;
+    GLint  flatColor = -1;
+    GLint  flatMode  = -1; // 0=solid, 1=font atlas R8, 2=RGBA tex
 
     // ── Dynamic geometry ──────────────────────────────────────────────────
     GLuint vao = 0, vbo = 0;
@@ -77,12 +65,12 @@ struct Canvas2DGL
 
     struct FontFace
     {
-        std::string name;
+        std::string          name;
         std::vector<uint8_t> ttfData; // kept alive — FT_Face refs it
-        FT_Face ftFace = nullptr;
+        FT_Face              ftFace = nullptr;
     };
-    std::vector<FontFace> fonts;
-    std::vector<unsigned char> atlasPixels; // atlasW * atlasH, single channel
+    std::vector<FontFace>          fonts;
+    std::vector<unsigned char>     atlasPixels; // atlasW * atlasH, single channel
 
     // atlas shelf packer cursor
     int shelfX = 0, shelfY = 0, shelfH = 0;
@@ -92,7 +80,7 @@ struct Canvas2DGL
         int fontIdx, codepoint, pixelSize;
         bool operator==(const GlyphKey &o) const
         {
-            return fontIdx == o.fontIdx &&
+            return fontIdx   == o.fontIdx   &&
                    codepoint == o.codepoint &&
                    pixelSize == o.pixelSize;
         }
@@ -106,10 +94,10 @@ struct Canvas2DGL
     };
     std::vector<GlyphEntry> glyphs;
 
-    bool init();
-    void destroy();
-    int findFont(const std::string &name) const;
-    int addFont(const std::string &name, const std::string &path);
+    bool  init();
+    void  destroy();
+    int   findFont(const std::string &name) const;
+    int   addFont(const std::string &name, const std::string &path);
     const GlyphEntry *getGlyph(int fontIdx, int codepoint, int pixelSize);
     float getKernAdvance(int fontIdx, int cp1, int cp2, int pixelSize) const;
 
@@ -119,11 +107,9 @@ private:
 };
 
 // ── Canvas2DBackend — GL edition ──────────────────────────────────────────────
-//
 // CanvasWidget holds one of these per widget (or a shared one on Web/Android).
 // Before constructing Canvas2D each frame, set mvp to the combined
-// ortho × viewport matrix.  Canvas2D::buildMVP() multiplies ctm_ into it.
-//
+// ortho × viewport matrix. Canvas2D::buildMVP() multiplies ctm_ into it.
 struct Canvas2DBackend
 {
     Canvas2DGL *gl = nullptr; // owned externally by CanvasWidget
@@ -135,19 +121,182 @@ struct Canvas2DBackend
         1, 0, 0, 0,
         0, 1, 0, 0,
         0, 0, 1, 0,
-        0, 0, 0, 1};
+        0, 0, 0, 1 };
 
-    // Factory helpers called by CanvasWidget
     static Canvas2DBackend *create(Canvas2DGL *gl);
-    static void destroy(Canvas2DBackend *b); // does NOT free gl
+    static void             destroy(Canvas2DBackend *b); // does NOT free gl
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// D2D backend
-// ─────────────────────────────────────────────────────────────────────────────
-#else // _WIN32
+// =============================================================================
+// Cairo backend  —  Linux desktop ONLY (not Android)
+// =============================================================================
+#elif defined(__linux__) && !defined(__ANDROID__)
 
-#include "flux/flux_d3d_device.hpp" // D3DDevice
+#include <cairo/cairo.h>
+
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#include FT_GLYPH_H
+
+#include <string>
+#include <vector>
+#include <cstdint>
+
+// ── Concrete image type for Cairo ─────────────────────────────────────────────
+struct Canvas2DImageCairo : Canvas2DImage
+{
+    cairo_surface_t *surface = nullptr;
+    ~Canvas2DImageCairo() override;  // defined in flux_canvas2d_cairo.cpp
+};
+
+// ── Shared Cairo resources ────────────────────────────────────────────────────
+// One per CanvasWidget. Owns the FreeType library + font atlas painted via Cairo.
+struct Canvas2DCairo
+{
+    cairo_t *cr = nullptr; // borrowed each frame from CanvasWidget — not owned
+
+    // FreeType (used for glyph metrics; Cairo uses its own text rendering
+    // internally, but we keep FT for advance/kern queries that match GL behaviour)
+    FT_Library ftLibrary = nullptr;
+
+    struct FontFace
+    {
+        std::string          name;
+        std::vector<uint8_t> ttfData;
+        FT_Face              ftFace    = nullptr;
+        cairo_font_face_t   *cairoFace = nullptr;
+    };
+    std::vector<FontFace> fonts;
+
+    struct GlyphKey
+    {
+        int fontIdx, codepoint, pixelSize;
+        bool operator==(const GlyphKey &o) const
+        {
+            return fontIdx   == o.fontIdx   &&
+                   codepoint == o.codepoint &&
+                   pixelSize == o.pixelSize;
+        }
+    };
+    struct GlyphEntry
+    {
+        GlyphKey key;
+        int xoff, yoff, advance;
+    };
+    std::vector<GlyphEntry> glyphs;
+
+    bool  init();
+    void  destroy();
+    int   findFont(const std::string &name) const;
+    int   addFont(const std::string &name, const std::string &path);
+    const GlyphEntry *getGlyph(int fontIdx, int codepoint, int pixelSize);
+    float getKernAdvance(int fontIdx, int cp1, int cp2, int pixelSize) const;
+};
+
+// ── Canvas2DBackend — Cairo edition ──────────────────────────────────────────
+// cr is set each frame by CanvasWidget before constructing Canvas2D.
+// mvp is unused on Cairo (Cairo manages its own transform stack).
+struct Canvas2DBackend
+{
+    Canvas2DCairo *cairo = nullptr; // owned externally by CanvasWidget
+
+    // mvp unused on Cairo — kept so shared CanvasWidget code compiles cleanly.
+    float mvp[16] = {
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1 };
+
+    static Canvas2DBackend *create(Canvas2DCairo *cairo);
+    static void             destroy(Canvas2DBackend *b);
+};
+
+// =============================================================================
+// Metal stub  —  macOS ONLY
+// No GL types. No FreeType pulled from this path.
+// Draw calls are forwarded to Metal via Canvas2DMetal.
+// =============================================================================
+#elif defined(__APPLE__)
+#include <TargetConditionals.h>
+#if TARGET_OS_OSX
+
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#include FT_GLYPH_H
+
+#include <string>
+#include <vector>
+#include <cstdint>
+
+// Opaque forward — full definition in flux_canvas2d_metal.mm
+struct Canvas2DMetalContext;
+
+// ── Concrete image type for Metal ────────────────────────────────────────────
+struct Canvas2DImageMetal : Canvas2DImage
+{
+    Canvas2DMetalContext *ctx = nullptr; // texture handle, owned
+    ~Canvas2DImageMetal() override;      // defined in flux_canvas2d_metal.mm
+};
+
+// ── Shared Metal resources ────────────────────────────────────────────────────
+struct Canvas2DMetal
+{
+    Canvas2DMetalContext *ctx = nullptr; // owned
+
+    FT_Library ftLibrary = nullptr;
+
+    struct FontFace
+    {
+        std::string          name;
+        std::vector<uint8_t> ttfData;
+        FT_Face              ftFace = nullptr;
+    };
+    std::vector<FontFace> fonts;
+
+    struct GlyphKey
+    {
+        int fontIdx, codepoint, pixelSize;
+        bool operator==(const GlyphKey &o) const
+        {
+            return fontIdx == o.fontIdx && codepoint == o.codepoint && pixelSize == o.pixelSize;
+        }
+    };
+    struct GlyphEntry { GlyphKey key; int xoff, yoff, advance; };
+    std::vector<GlyphEntry> glyphs;
+
+    bool  init();
+    void  destroy();
+    int   findFont(const std::string &name) const;
+    int   addFont(const std::string &name, const std::string &path);
+    const GlyphEntry *getGlyph(int fontIdx, int codepoint, int pixelSize);
+    float getKernAdvance(int fontIdx, int cp1, int cp2, int pixelSize) const;
+};
+
+// ── Canvas2DBackend — Metal edition ──────────────────────────────────────────
+struct Canvas2DBackend
+{
+    Canvas2DMetal *metal = nullptr;
+
+    // mvp unused on Metal — kept for shared CanvasWidget compilation.
+    float mvp[16] = {
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1 };
+
+    static Canvas2DBackend *create(Canvas2DMetal *metal);
+    static void             destroy(Canvas2DBackend *b);
+};
+
+#endif // TARGET_OS_OSX
+#endif // __APPLE__
+
+// =============================================================================
+// D2D backend  —  Win32 ONLY
+// =============================================================================
+#ifdef _WIN32
+
+#include "flux/flux_d3d_device.hpp"
 
 #include <d2d1_3.h>
 #include <d2d1_1helper.h>
@@ -172,32 +321,28 @@ struct Canvas2DImageD2D : Canvas2DImage
 };
 
 // ── Shared D2D resources ──────────────────────────────────────────────────────
-// One per CanvasWidget.  Owns the offscreen render target + glyph atlas.
 struct Canvas2DD2D
 {
     D3DDevice *device = nullptr; // borrowed — not owned
 
-    // Off-screen render target (document-sized)
     ComPtr<ID2D1DeviceContext> offscreenDC;
-    ComPtr<ID2D1Bitmap1> offscreenBitmap;
+    ComPtr<ID2D1Bitmap1>       offscreenBitmap;
     int bitmapW = 0, bitmapH = 0;
 
-    // FreeType
     FT_Library ftLibrary = nullptr;
 
     struct FontFace
     {
-        std::string name;
+        std::string          name;
         std::vector<uint8_t> ttfData;
-        FT_Face ftFace = nullptr;
+        FT_Face              ftFace = nullptr;
     };
     std::vector<FontFace> fonts;
 
-    // Glyph atlas (BGRA, premultiplied grey in all 4 channels)
     static constexpr int kAtlasW = 1024;
     static constexpr int kAtlasH = 1024;
-    std::vector<uint8_t> atlasPixels; // kAtlasW * kAtlasH * 4
-    ComPtr<ID2D1Bitmap> atlasBitmap;
+    std::vector<uint8_t>   atlasPixels; // kAtlasW * kAtlasH * 4  (BGRA premul)
+    ComPtr<ID2D1Bitmap>    atlasBitmap;
     int shelfX = 0, shelfY = 0, shelfH = 0;
 
     struct GlyphKey
@@ -205,7 +350,7 @@ struct Canvas2DD2D
         int fontIdx, codepoint, pixelSize;
         bool operator==(const GlyphKey &o) const
         {
-            return fontIdx == o.fontIdx &&
+            return fontIdx   == o.fontIdx   &&
                    codepoint == o.codepoint &&
                    pixelSize == o.pixelSize;
         }
@@ -225,8 +370,8 @@ struct Canvas2DD2D
     static bool registerFont(Canvas2DD2D *self,
                              const std::string &name,
                              const std::string &path);
-    int findFont(const std::string &name) const;
-    int addFont(const std::string &name, const std::string &path);
+    int   findFont(const std::string &name) const;
+    int   addFont(const std::string &name, const std::string &path);
     const GlyphEntry *getGlyph(int fontIdx, int codepoint, int pixelSize);
     float getKernAdvance(int fontIdx, int cp1, int cp2, int pixelSize) const;
 
@@ -236,26 +381,23 @@ private:
 };
 
 // ── Canvas2DBackend — D2D edition ─────────────────────────────────────────────
-//
 // On Win32 there is no MVP: D2D applies the viewport/zoom transform on the
 // main device context in CanvasWidget::render() before blitting the offscreen
-// bitmap.  Canvas2D's translate/scale/rotate methods manipulate the D2D
-// transform stack directly via offscreenDC->SetTransform().
-//
+// bitmap. Canvas2D's translate/scale/rotate manipulate the D2D transform
+// stack directly via offscreenDC->SetTransform().
 struct Canvas2DBackend
 {
     Canvas2DD2D *d2d = nullptr; // owned externally by CanvasWidget
 
-    // mvp is unused on D2D — kept in the struct so CanvasWidget code that
-    // sets it compiles without #ifdefs.
+    // mvp is unused on D2D — kept so CanvasWidget code compiles without #ifdefs.
     float mvp[16] = {
         1, 0, 0, 0,
         0, 1, 0, 0,
         0, 0, 1, 0,
-        0, 0, 0, 1};
+        0, 0, 0, 1 };
 
     static Canvas2DBackend *create(Canvas2DD2D *d2d);
-    static void destroy(Canvas2DBackend *b);
+    static void             destroy(Canvas2DBackend *b);
 };
 
 #endif // _WIN32

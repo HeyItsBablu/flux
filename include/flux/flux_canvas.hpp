@@ -18,16 +18,12 @@
 #include "flux_render_surface.hpp"
 #include "flux_canvas_types.hpp"
 
-
-
 #include <chrono>
 #include <functional>
 #include <memory>
 
 // ── Platform-specific GL / windowing headers included by each .cpp ────────────
 // (not included here so this header stays platform-neutral)
-
-
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CanvasWidget
@@ -124,8 +120,20 @@ public:
     // sets or reads this (it uses Canvas2DD2D / Canvas2DBackend locally
     // instead, stored in its own per-widget state map).
 
+#if defined(__ANDROID__) || defined(__EMSCRIPTEN__)
+    Canvas2DBackend *backend_  = nullptr;
+    Canvas2DGL      *canvasGL_ = nullptr;
 
-    Canvas2DBackend* backend_ = nullptr;
+    unsigned int sbProg_  = 0;
+    unsigned int sbVAO_   = 0;
+    unsigned int sbVBO_   = 0;
+    int          sbMVP_   = -1;
+    int          sbColor_ = -1;
+
+    void ensureSBProgram(const char *vert, const char *frag);
+    void renderScrollbarsGL(int glW, int glH, double dt);
+    void renderSBCorner(int glW, int glH);
+#endif
 
     // ── Shared helpers ────────────────────────────────────────────────────────
 
@@ -185,12 +193,12 @@ public:
     static void initEventType();
     static Uint32 repaintEventType();
 
-    void setBackend(Canvas2DBackend* b);
-    void setCairo(cairo_t* cr);
+    void setBackend(Canvas2DBackend *b); 
+    void setCairo(cairo_t *cr);
     void onWindowResize(int newW, int newH);
     void preRenderPass();
-    void glRenderPass();               // name kept — now Cairo-based
-    void _renderScrollbarsCairo(GraphicsContext& ctx);
+    void glRenderPass(); // name kept — now Cairo-based
+    void _renderScrollbarsCairo(GraphicsContext &ctx);
 
     bool isInitialized() const;
     bool needsRepaint() const;
