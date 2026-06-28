@@ -10,7 +10,7 @@
 // ── Platform GL headers ───────────────────────────────────────────────────────
 #if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
 #include <glad/glad.h>
-#elif defined(__ANDROID__) || defined(__EMSCRIPTEN__)
+#elif defined(__ANDROID__) || defined(__EMSCRIPTEN__) 
 #include <GLES3/gl3.h>
 #elif defined(__APPLE__)
 #include <TargetConditionals.h>

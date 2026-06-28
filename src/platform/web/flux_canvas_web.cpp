@@ -59,7 +59,6 @@
 
 #include "flux/flux_canvas.hpp"
 #include "flux/flux_canvas2d_backend.hpp"
-#include "flux/flux_glutil.hpp"
 #include "flux/flux_painter.hpp"
 
 #include <emscripten.h>
@@ -73,6 +72,28 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+
+// Column-major, maps [l,r] x [b,t] → NDC.
+static void webOrtho(float l, float r, float b, float t, float out[16])
+{
+    float rml = r - l, tmb = t - b;
+    out[0] = 2.f / rml;
+    out[1] = 0;
+    out[2] = 0;
+    out[3] = 0;
+    out[4] = 0;
+    out[5] = 2.f / tmb;
+    out[6] = 0;
+    out[7] = 0;
+    out[8] = 0;
+    out[9] = 0;
+    out[10] = -1;
+    out[11] = 0;
+    out[12] = -(r + l) / rml;
+    out[13] = -(t + b) / tmb;
+    out[14] = 0;
+    out[15] = 1;
+}
 
 struct CanvasHoleRect
 {
@@ -200,10 +221,10 @@ static Canvas2DGL *acquireSharedGL()
                 emscripten_log(EM_LOG_WARN,
                                "FluxCanvas: font '%s' not found at '%s'", name, path);
         };
-        reg("sans",            "/fonts/Inter_18pt-Regular.ttf");
-        reg("sans-bold",       "/fonts/Inter_18pt-Bold.ttf");
-        reg("sans-italic",     "/fonts/Inter_18pt-Italic.ttf");
-        reg("sans-bold-italic","/fonts/Inter_18pt-BoldItalic.ttf");
+        reg("sans", "/fonts/Inter_18pt-Regular.ttf");
+        reg("sans-bold", "/fonts/Inter_18pt-Bold.ttf");
+        reg("sans-italic", "/fonts/Inter_18pt-Italic.ttf");
+        reg("sans-bold-italic", "/fonts/Inter_18pt-BoldItalic.ttf");
     }
     ++s_sharedGLUsers;
     return s_sharedGL;
@@ -333,7 +354,7 @@ static void tickAndRender(CanvasWidget *w)
     int physW = (int)std::lround(logicalW * dpr);
     int physH = (int)std::lround(logicalH * dpr);
 
-    int totalW = EM_ASM_INT({ return Module._fluxPhysicalWidth  | 0; });
+    int totalW = EM_ASM_INT({ return Module._fluxPhysicalWidth | 0; });
     int totalH = EM_ASM_INT({ return Module._fluxPhysicalHeight | 0; });
 
     if (logicalW != s.lastW || logicalH != s.lastH)
@@ -361,12 +382,12 @@ static void tickAndRender(CanvasWidget *w)
     w->activeSurface_->preRender();
 
     // ── Build MVP for Canvas2D ────────────────────────────────────────────
-    float z  = w->vp_.zoom() * (float)dpr;
+    float z = w->vp_.zoom() * (float)dpr;
     float ox = -w->vp_.offsetX() * z;
     float oy = -w->vp_.offsetY() * z;
 
     float ortho[16];
-    glutil::ortho(0.f, float(physW), float(physH), 0.f, ortho);
+    webOrtho(0.f, float(physW), float(physH), 0.f, ortho);
 
     float vp[16] = {z, 0, 0, 0, 0, z, 0, 0, 0, 0, 1, 0, ox, oy, 0, 1};
     float mvp[16] = {};
@@ -415,9 +436,9 @@ CanvasWidget::CanvasWidget()
     : hBar_(CustomScrollbar::Axis::Horizontal),
       vBar_(CustomScrollbar::Axis::Vertical)
 {
-    autoWidth  = true;
+    autoWidth = true;
     autoHeight = true;
-    width  = 400;
+    width = 400;
     height = 300;
 }
 
@@ -441,13 +462,14 @@ std::shared_ptr<CanvasWidget> CanvasWidget::setScrollbarsEnabled(bool e)
 }
 bool CanvasWidget::scrollbarsEnabled() const { return scrollbarsEnabled_; }
 
-RenderSurface  *CanvasWidget::getSurface()  const { return activeSurface_.get(); }
-const Viewport &CanvasWidget::viewport()    const { return vp_; }
-Viewport       &CanvasWidget::viewport()          { return vp_; }
+RenderSurface *CanvasWidget::getSurface() const { return activeSurface_.get(); }
+const Viewport &CanvasWidget::viewport() const { return vp_; }
+Viewport &CanvasWidget::viewport() { return vp_; }
 
 std::shared_ptr<CanvasWidget> CanvasWidget::setSize(int w, int h)
 {
-    width = w; height = h;
+    width = w;
+    height = h;
     autoWidth = autoHeight = false;
     markNeedsLayout();
     return ptr();
@@ -478,7 +500,7 @@ void CanvasWidget::computeLayout(GraphicsContext & /*ctx*/,
                                  const BoxConstraints &c, FontCache &)
 {
     if (autoWidth)
-        width  = (c.maxWidth  < kUnbounded) ? c.maxWidth  : width;
+        width = (c.maxWidth < kUnbounded) ? c.maxWidth : width;
     if (autoHeight)
         height = (c.maxHeight < kUnbounded) ? c.maxHeight : height;
 
@@ -515,9 +537,11 @@ void CanvasWidget::markNeedsPaint()
 bool CanvasWidget::handleMouseDown(int mx, int my)
 {
     bool hC = hBar_.onMouseDown(mx - x, my - y,
-                                [this](float t){ applyHScrollFraction(t); });
+                                [this](float t)
+                                { applyHScrollFraction(t); });
     bool vC = !hC && vBar_.onMouseDown(mx - x, my - y,
-                                       [this](float t){ applyVScrollFraction(t); });
+                                       [this](float t)
+                                       { applyVScrollFraction(t); });
     if (!hC && !vC)
     {
         if (viewportEnabled_ && platformKeyDown(VK_SPACE))
@@ -538,7 +562,8 @@ bool CanvasWidget::handleMouseMove(int mx, int my)
     bool hDrag = hBar_.onMouseMove(lx, ly);
     bool vDrag = vBar_.onMouseMove(lx, ly);
     scheduleRepaint(this);
-    if (hDrag || vDrag) return true;
+    if (hDrag || vDrag)
+        return true;
     if (panning_)
         continuePan(lx, ly);
     else if (activeSurface_)
@@ -556,7 +581,8 @@ bool CanvasWidget::handleMouseUp(int mx, int my)
     bool vR = vBar_.onMouseUp(lx, ly);
     if (!hR && !vR)
     {
-        if (panning_) panning_ = false;
+        if (panning_)
+            panning_ = false;
         else if (activeSurface_)
         {
             auto [cx, cy] = vp_.screenToCanvas(float(lx), float(ly));
@@ -569,8 +595,9 @@ bool CanvasWidget::handleMouseUp(int mx, int my)
 
 bool CanvasWidget::handleMouseWheel(int delta)
 {
-    if (!viewportEnabled_) return false;
-    bool ctrl  = platformCtrlDown();
+    if (!viewportEnabled_)
+        return false;
+    bool ctrl = platformCtrlDown();
     bool shift = platformShiftDown();
     if (ctrl)
     {
@@ -588,17 +615,32 @@ bool CanvasWidget::handleMouseWheel(int delta)
 
 bool CanvasWidget::handleKeyDown(int keyCode)
 {
-    bool ctrl  = platformCtrlDown();
+    bool ctrl = platformCtrlDown();
     bool shift = platformShiftDown();
-    bool alt   = platformAltDown();
+    bool alt = platformAltDown();
     if (ctrl && viewportEnabled_)
     {
         if (keyCode == VK_UP || keyCode == '=')
-            { vp_.zoomIn();    pokeScrollbars(); scheduleRepaint(this); return true; }
+        {
+            vp_.zoomIn();
+            pokeScrollbars();
+            scheduleRepaint(this);
+            return true;
+        }
         if (keyCode == VK_DOWN || keyCode == '-')
-            { vp_.zoomOut();   pokeScrollbars(); scheduleRepaint(this); return true; }
+        {
+            vp_.zoomOut();
+            pokeScrollbars();
+            scheduleRepaint(this);
+            return true;
+        }
         if (keyCode == '0')
-            { vp_.resetZoom(); pokeScrollbars(); scheduleRepaint(this); return true; }
+        {
+            vp_.resetZoom();
+            pokeScrollbars();
+            scheduleRepaint(this);
+            return true;
+        }
     }
     if (activeSurface_)
     {
@@ -611,12 +653,19 @@ bool CanvasWidget::handleKeyDown(int keyCode)
 
 void CanvasWidget::viewportDims(int glW, int glH, int &vpW, int &vpH) const
 {
-    if (!viewportEnabled_ || !scrollbarsEnabled_) { vpW = glW; vpH = glH; return; }
+    if (!viewportEnabled_ || !scrollbarsEnabled_)
+    {
+        vpW = glW;
+        vpH = glH;
+        return;
+    }
     ScrollbarInfo h = vp_.scrollbarH(), v = vp_.scrollbarV();
     vpW = glW - (v.visible ? (int)kSBThick : 0);
     vpH = glH - (h.visible ? (int)kSBThick : 0);
-    if (vpW < 1) vpW = 1;
-    if (vpH < 1) vpH = 1;
+    if (vpW < 1)
+        vpW = 1;
+    if (vpH < 1)
+        vpH = 1;
 }
 
 void CanvasWidget::updateViewportSize(int glW, int glH)
@@ -642,8 +691,10 @@ void CanvasWidget::updateSBGeometry(int glW, int glH)
 void CanvasWidget::beginPan(int sx, int sy)
 {
     panning_ = true;
-    panStartSX_ = sx; panStartSY_ = sy;
-    panStartOX_ = vp_.offsetX(); panStartOY_ = vp_.offsetY();
+    panStartSX_ = sx;
+    panStartSY_ = sy;
+    panStartOX_ = vp_.offsetX();
+    panStartOY_ = vp_.offsetY();
 }
 
 void CanvasWidget::continuePan(int sx, int sy)
@@ -655,13 +706,18 @@ void CanvasWidget::continuePan(int sx, int sy)
     scheduleRepaint(this);
 }
 
-void CanvasWidget::pokeScrollbars() { hBar_.poke(); vBar_.poke(); }
+void CanvasWidget::pokeScrollbars()
+{
+    hBar_.poke();
+    vBar_.poke();
+}
 
 void CanvasWidget::applyHScrollFraction(float thumbMin)
 {
-    float span  = vp_.scrollbarH().thumbMax - vp_.scrollbarH().thumbMin;
+    float span = vp_.scrollbarH().thumbMax - vp_.scrollbarH().thumbMin;
     float range = vp_.canvasW() - vp_.viewW() / vp_.zoom();
-    if (range <= 0.f) return;
+    if (range <= 0.f)
+        return;
     vp_.setOffsetX(thumbMin / (1.f - span) * range);
     pokeScrollbars();
     scheduleRepaint(this);
@@ -669,9 +725,10 @@ void CanvasWidget::applyHScrollFraction(float thumbMin)
 
 void CanvasWidget::applyVScrollFraction(float thumbMin)
 {
-    float span  = vp_.scrollbarV().thumbMax - vp_.scrollbarV().thumbMin;
+    float span = vp_.scrollbarV().thumbMax - vp_.scrollbarV().thumbMin;
     float range = vp_.canvasH() - vp_.viewH() / vp_.zoom();
-    if (range <= 0.f) return;
+    if (range <= 0.f)
+        return;
     float t = 1.f - thumbMin - span;
     vp_.setOffsetY(t / (1.f - span) * range);
     pokeScrollbars();
@@ -680,8 +737,13 @@ void CanvasWidget::applyVScrollFraction(float thumbMin)
 
 void CanvasWidget::activatePendingSurface()
 {
-    if (!pendingSurface_) return;
-    if (activeSurface_) { activeSurface_->destroy(); activeSurface_.reset(); }
+    if (!pendingSurface_)
+        return;
+    if (activeSurface_)
+    {
+        activeSurface_->destroy();
+        activeSurface_.reset();
+    }
     activeSurface_ = pendingSurface_;
     pendingSurface_.reset();
     activeSurface_->initialize(docW(), docH());
