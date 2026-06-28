@@ -2,28 +2,12 @@
 #if defined(__linux__) && !defined(__ANDROID__)
 
 #include "flux/flux_canvas.hpp"
-
-#include <glad/glad.h>
+#include <cairo/cairo.h>
 #include <SDL2/SDL.h>
 #include <cassert>
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Scrollbar shaders (GL 3.3 core)
-// ─────────────────────────────────────────────────────────────────────────────
 
-static const char *kLinuxSBVert = R"GLSL(
-#version 330 core
-layout(location=0) in vec2 aPos;
-uniform mat4 uMVP;
-void main(){ gl_Position = uMVP * vec4(aPos, 0.0, 1.0); }
-)GLSL";
-
-static const char *kLinuxSBFrag = R"GLSL(
-#version 330 core
-out vec4 fragColor;
-uniform vec4 uColor;
-void main(){ fragColor = uColor; }
-)GLSL";
+void Canvas2D_setCairo(Canvas2D &ctx, cairo_t *cr);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Linux-only per-widget state
@@ -37,11 +21,20 @@ struct LinuxCanvasState
     int lastH = 0;
     int physX = 0;
     int physY = 0;
+    cairo_t *cr = nullptr;
 };
 
 #include <unordered_map>
-static std::unordered_map<CanvasWidget *, LinuxCanvasState> s_linuxState;
-static LinuxCanvasState &linuxState(CanvasWidget *w) { return s_linuxState[w]; }
+static std::unordered_map<CanvasWidget *, LinuxCanvasState> &getLinuxStateMap()
+{
+    static std::unordered_map<CanvasWidget *, LinuxCanvasState> s_map;
+    return s_map;
+}
+
+static LinuxCanvasState &linuxState(CanvasWidget *w)
+{
+    return getLinuxStateMap()[w];
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SDL repaint event type
@@ -54,7 +47,7 @@ void CanvasWidget::initEventType()
     if (s_repaintEventType_ == 0)
     {
         Uint32 t = SDL_RegisterEvents(1);
-        s_repaintEventType_ = (t != (Uint32)-1) ? t : SDL_USEREVENT;
+        s_repaintEventType_ = (t != static_cast<Uint32>(-1)) ? t : static_cast<Uint32>(SDL_USEREVENT);
     }
 }
 Uint32 CanvasWidget::repaintEventType() { return s_repaintEventType_; }
@@ -138,7 +131,7 @@ static void scheduleRepaint(CanvasWidget *w)
         s.repaintPending = true;
         SDL_Event e;
         SDL_zero(e);
-        e.type = (s_repaintEventType_ != 0) ? s_repaintEventType_ : SDL_USEREVENT;
+        e.type = (s_repaintEventType_ != 0u) ? s_repaintEventType_ : static_cast<Uint32>(SDL_USEREVENT);
         e.user.code = 0;
         e.user.data1 = w;
         SDL_PushEvent(&e);
@@ -188,7 +181,7 @@ static void syncPhysicalGeometry(CanvasWidget *w)
 static void initCanvas(CanvasWidget *w)
 {
     auto &s = linuxState(w);
-    assert(w->canvasGL_ && !s.initialized);
+    assert(!s.initialized);
 
     s.lastW = (w->width > 0) ? toPhysW(w->width) : 1;
     s.lastH = (w->height > 0) ? toPhysH(w->height) : 1;
@@ -238,24 +231,8 @@ CanvasWidget::~CanvasWidget()
         activeSurface_.reset();
     }
     pendingSurface_.reset();
-    if (sbProg_)
-    {
-        glDeleteProgram(sbProg_);
-        sbProg_ = 0;
-    }
-    if (sbVAO_)
-    {
-        glDeleteVertexArrays(1, &sbVAO_);
-        sbVAO_ = 0;
-    }
-    if (sbVBO_)
-    {
-        glDeleteBuffers(1, &sbVBO_);
-        sbVBO_ = 0;
-    }
-    canvasGL_ = nullptr;
     linuxState(this).initialized = false;
-    s_linuxState.erase(this);
+    getLinuxStateMap().erase(this);
     unregisterWithPlatform(this);
 }
 
@@ -327,16 +304,9 @@ void CanvasWidget::computeLayout(GraphicsContext & /*ctx*/,
 
 void CanvasWidget::render(GraphicsContext &ctx, FontCache &)
 {
-    // Punch a transparent hole in the Cairo overlay so GL shows through.
+    // Store the cairo_t so glRenderPass can use it.
     if (ctx.cr)
-    {
-        cairo_save(ctx.cr);
-        cairo_set_operator(ctx.cr, CAIRO_OPERATOR_CLEAR);
-        cairo_rectangle(ctx.cr, double(x), double(y),
-                        double(width), double(height));
-        cairo_fill(ctx.cr);
-        cairo_restore(ctx.cr);
-    }
+        setCairo(ctx.cr);
     needsPaint = false;
 }
 
@@ -348,23 +318,7 @@ void CanvasWidget::onDetach()
         activeSurface_.reset();
     }
     pendingSurface_.reset();
-    if (sbProg_)
-    {
-        glDeleteProgram(sbProg_);
-        sbProg_ = 0;
-    }
-    if (sbVAO_)
-    {
-        glDeleteVertexArrays(1, &sbVAO_);
-        sbVAO_ = 0;
-    }
-    if (sbVBO_)
-    {
-        glDeleteBuffers(1, &sbVBO_);
-        sbVBO_ = 0;
-    }
-    canvasGL_ = nullptr;
-    s_linuxState.erase(this);
+    getLinuxStateMap().erase(this);
     unregisterWithPlatform(this);
     Widget::onDetach();
 }
@@ -375,11 +329,11 @@ void CanvasWidget::markNeedsPaint()
     scheduleRepaint(this);
 }
 
-void CanvasWidget::setCanvasGL(Canvas2DGL *gl)
+void CanvasWidget::setCairo(cairo_t *cr)
 {
-    canvasGL_ = gl;
+    linuxState(this).cr = cr;
     auto &s = linuxState(this);
-    if (canvasGL_ && !s.initialized)
+    if (cr && !s.initialized)
         initCanvas(this);
 }
 
@@ -397,7 +351,8 @@ void CanvasWidget::onWindowResize(int /*newW*/, int /*newH*/)
 void CanvasWidget::preRenderPass()
 {
     auto &s = linuxState(this);
-    if (!canvasGL_ || !s.initialized)
+
+    if (!s.cr || !s.initialized)
         return;
 
     // Sync logical layout → physical GL dims every frame.
@@ -414,66 +369,112 @@ void CanvasWidget::preRenderPass()
 
     activeSurface_->update(frameDt_);
     activeSurface_->preRender();
-
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 void CanvasWidget::glRenderPass()
 {
     auto &s = linuxState(this);
-    if (!canvasGL_ || !s.initialized)
-        return;
-    if (!activeSurface_)
+    if (!s.cr || !s.initialized || !activeSurface_)
         return;
 
     s.repaintPending = false;
 
-    int glW = s.lastW < 1 ? 1 : s.lastW;
-    int glH = s.lastH < 1 ? 1 : s.lastH;
-    int physX = s.physX;
-    int physY = s.physY;
+    cairo_t *cr = s.cr;
 
-    // Scissor to this widget's physical rect.
-    // glScissor Y is from the framebuffer bottom.
-    int winH = getWindowPhysH();
-    glEnable(GL_SCISSOR_TEST);
-    glScissor(physX, winH - physY - glH, glW, glH);
+    // Clip to widget logical bounds.
+    cairo_save(cr);
+    cairo_rectangle(cr, (double)x, (double)y,
+                    (double)width, (double)height);
+    cairo_clip(cr);
 
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-    // Ortho over full physical window, translated to widget physical origin.
+    // Apply viewport transform (pan + zoom) relative to widget origin.
+    cairo_translate(cr, (double)x, (double)y);
     float z = vp_.zoom();
-    float ox = -vp_.offsetX() * z + float(physX);
-    float oy = vp_.offsetY() * z + float(physY);
+    float ox = -vp_.offsetX() * z;
+    float oy = -vp_.offsetY() * z;
+    cairo_translate(cr, ox, oy);
+    cairo_scale(cr, z, z);
 
-    float ortho[16];
-    glutil::ortho(0.f, float(getWindowPhysW()),
-                  float(getWindowPhysH()), 0.f, ortho);
-
-    float vp[16] = {
-        z, 0, 0, 0,
-        0, z, 0, 0,
-        0, 0, 1, 0,
-        ox, oy, 0, 1};
-    float mvp[16] = {};
-    for (int col = 0; col < 4; ++col)
-        for (int row = 0; row < 4; ++row)
-            for (int k = 0; k < 4; ++k)
-                mvp[col * 4 + row] += ortho[k * 4 + row] * vp[col * 4 + k];
-
+    // Hand off to the surface.
     {
-        Canvas2D ctx(canvasGL_, canvasW_, canvasH_, mvp);
+        Canvas2D ctx(backend_, canvasW_, canvasH_);
+        Canvas2D_setCairo(ctx, cr);
         activeSurface_->render(ctx);
     }
 
-    ensureSBProgram(kLinuxSBVert, kLinuxSBFrag);
-    updateSBGeometry(glW, glH);
-    renderScrollbarsGL(glW, glH, frameDt_);
+    cairo_restore(cr);
 
-    glDisable(GL_SCISSOR_TEST);
+    // Scrollbars — drawn in widget-local logical coords using Painter.
+    GraphicsContext gctx(cr, width, height);
+    _renderScrollbarsCairo(gctx);
 
     if (activeSurface_->needsContinuousRedraw())
+        scheduleRepaint(this);
+}
+
+void CanvasWidget::_renderScrollbarsCairo(GraphicsContext &ctx)
+{
+    if (!scrollbarsEnabled_)
+        return;
+
+    bool hFade = hBar_.tick(frameDt_);
+    bool vFade = vBar_.tick(frameDt_);
+
+    auto &s = linuxState(this);
+    updateSBGeometry(s.lastW, s.lastH);
+
+    Painter p(ctx);
+
+    // Horizontal scrollbar
+    if (hBar_.isVisible())
+    {
+        ScrollbarInfo hi = vp_.scrollbarH();
+        float sbH = kSBThick;
+        float barY = (float)(y + height) - sbH;
+        float barW = (float)width - (vBar_.isVisible() ? kSBThick : 0.f);
+
+        // Track
+        p.fillRect((int)x, (int)barY, (int)barW, (int)sbH,
+                   Color::fromRGBA(30, 30, 30, 180));
+        // Thumb
+        float thumbX = (float)x + hi.thumbMin * barW;
+        float thumbW = (hi.thumbMax - hi.thumbMin) * barW;
+        p.fillRoundedRect((int)thumbX, (int)barY + 2,
+                          (int)thumbW, (int)sbH - 4, 3,
+                          Color::fromRGBA(180, 180, 180,
+                                          (uint8_t)(hBar_.alpha() * 200)));
+    }
+
+    // Vertical scrollbar
+    if (vBar_.isVisible())
+    {
+        ScrollbarInfo vi = vp_.scrollbarV();
+        float sbW = kSBThick;
+        float barX = (float)(x + width) - sbW;
+        float barH = (float)height - (hBar_.isVisible() ? kSBThick : 0.f);
+
+        // Track
+        p.fillRect((int)barX, (int)y, (int)sbW, (int)barH,
+                   Color::fromRGBA(30, 30, 30, 180));
+        // Thumb
+        float thumbY = (float)y + vi.thumbMin * barH;
+        float thumbH = (vi.thumbMax - vi.thumbMin) * barH;
+        p.fillRoundedRect((int)barX + 2, (int)thumbY,
+                          (int)sbW - 4, (int)thumbH, 3,
+                          Color::fromRGBA(180, 180, 180,
+                                          (uint8_t)(vBar_.alpha() * 200)));
+    }
+
+    // Corner square when both bars visible
+    if (hBar_.isVisible() && vBar_.isVisible() && scrollbarsEnabled_)
+    {
+        p.fillRect((int)(x + width - kSBThick),
+                   (int)(y + height - kSBThick),
+                   (int)kSBThick, (int)kSBThick,
+                   Color::fromRGBA(30, 30, 30, 180));
+    }
+
+    if ((hFade || vFade) && !s.repaintPending)
         scheduleRepaint(this);
 }
 
@@ -672,15 +673,18 @@ void CanvasWidget::onKeyDownEvent(const SDL_KeyboardEvent &e)
             consumed = true;
         }
     }
-    if (!consumed && activeSurface_) {
-        KeyEvent ke{ 0, e.keysym.sym, ctrl, shift, alt };
+    if (!consumed && activeSurface_)
+    {
+        KeyEvent ke{0, e.keysym.sym, ctrl, shift, alt};
         activeSurface_->onKeyDown(ke);
     }
 }
 
-void CanvasWidget::onKeyUpEvent(const SDL_KeyboardEvent& e) {
-    if (activeSurface_) {
-        KeyEvent ke{ 0, e.keysym.sym, false, false, false };
+void CanvasWidget::onKeyUpEvent(const SDL_KeyboardEvent &e)
+{
+    if (activeSurface_)
+    {
+        KeyEvent ke{0, e.keysym.sym, false, false, false};
         activeSurface_->onKeyUp(ke);
     }
 }
@@ -782,65 +786,10 @@ void CanvasWidget::activatePendingSurface()
     activeSurface_->initialize(canvasW_, canvasH_);
     vp_.setCanvasSize(canvasW_, canvasH_);
 }
-void CanvasWidget::ensureSBProgram(const char *vert, const char *frag)
-{
-    if (sbProg_)
-        return;
-    sbProg_ = glutil::linkProgram(vert, frag);
-    assert(sbProg_ && "CanvasWidget: scrollbar shader link failed");
-    sbMVP_ = glGetUniformLocation(sbProg_, "uMVP");
-    sbColor_ = glGetUniformLocation(sbProg_, "uColor");
-    if (!sbVAO_)
-        glGenVertexArrays(1, &sbVAO_);
-    if (!sbVBO_)
-        glGenBuffers(1, &sbVBO_);
-}
-void CanvasWidget::renderSBCorner(int glW, int glH)
-{
-    if (!hBar_.isVisible() || !vBar_.isVisible() || !scrollbarsEnabled_)
-        return;
-    float sbThickX = kSBThick * getDpiScaleX();
-    float sbThickY = kSBThick * getDpiScaleY();
-    float cx = float(glW) - sbThickX;
-    float cy = float(glH) - sbThickY;
-    float mvp[16];
-    glutil::ortho(0.f, float(glW), float(glH), 0.f, mvp);
-    glUseProgram(sbProg_);
-    glUniformMatrix4fv(sbMVP_, 1, GL_FALSE, mvp);
-    glUniform4f(sbColor_, 0.12f, 0.12f, 0.12f, 0.35f);
-    float v[] = {
-        cx, cy,
-        cx + sbThickX, cy,
-        cx + sbThickX, cy + sbThickY,
-        cx + sbThickX, cy + sbThickY,
-        cx, cy + sbThickY,
-        cx, cy};
-    glBindVertexArray(sbVAO_);
-    glBindBuffer(GL_ARRAY_BUFFER, sbVBO_);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(v), v, GL_DYNAMIC_DRAW);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 2, nullptr);
-    glDisableVertexAttribArray(1);
-    glDrawArrays(GL_TRIANGLES, 0, 6);
-    glBindVertexArray(0);
-}
-void CanvasWidget::renderScrollbarsGL(int glW, int glH, double dt)
-{
-    bool hFade = hBar_.tick(dt);
-    bool vFade = vBar_.tick(dt);
-    if (!hBar_.needsRedraw() && !vBar_.needsRedraw())
-    {
-        if ((hFade || vFade) && !linuxState(this).repaintPending)
-            scheduleRepaint(this);
-        return;
-    }
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    hBar_.render(sbProg_, sbVAO_, sbVBO_, sbMVP_, sbColor_, glW, glH);
-    vBar_.render(sbProg_, sbVAO_, sbVBO_, sbMVP_, sbColor_, glW, glH);
-    renderSBCorner(glW, glH);
-    if ((hFade || vFade) && !linuxState(this).repaintPending)
-        scheduleRepaint(this);
-}
 
+
+void CanvasWidget::setBackend(Canvas2DBackend* b)
+{
+    backend_ = b;
+}
 #endif

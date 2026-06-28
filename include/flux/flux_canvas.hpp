@@ -18,9 +18,7 @@
 #include "flux_render_surface.hpp"
 #include "flux_canvas_types.hpp"
 
-#if !defined(__APPLE__)
-#include "flux_glutil.hpp"
-#endif
+
 
 #include <chrono>
 #include <functional>
@@ -29,12 +27,7 @@
 // ── Platform-specific GL / windowing headers included by each .cpp ────────────
 // (not included here so this header stays platform-neutral)
 
-// Canvas2DGL is the per-context font/shader/atlas state used by the GL
-// backend (flux_canvas2d_gl.cpp).  It is fully defined only in
-// flux_canvas2d_backend.hpp (included by the platform .cpp files, never
-// from here).  CanvasWidget only ever stores/forwards the pointer — it
-// never dereferences it directly — so a forward declaration is sufficient.
-struct Canvas2DGL;
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CanvasWidget
@@ -130,7 +123,9 @@ public:
     // (which include flux_canvas2d_backend.hpp) dereference it. Win32 never
     // sets or reads this (it uses Canvas2DD2D / Canvas2DBackend locally
     // instead, stored in its own per-widget state map).
-    Canvas2DGL *canvasGL_ = nullptr;
+
+
+    Canvas2DBackend* backend_ = nullptr;
 
     // ── Shared helpers ────────────────────────────────────────────────────────
 
@@ -156,17 +151,6 @@ public:
     bool panning_ = false;
     int panStartSX_ = 0, panStartSY_ = 0;
     float panStartOX_ = 0, panStartOY_ = 0;
-
-    // ── Scrollbar GL program (shared structure, created per platform) ─────────
-    GLuint sbProg_ = 0;
-    GLint sbMVP_ = -1;
-    GLint sbColor_ = -1;
-    GLuint sbVAO_ = 0;
-    GLuint sbVBO_ = 0;
-
-    void ensureSBProgram(const char *vert, const char *frag);
-    void renderScrollbarsGL(int glW, int glH, double dt);
-    void renderSBCorner(int glW, int glH);
 
     // ── Web-only ──────────────────────────────────────────────────────────────
 #ifdef __EMSCRIPTEN__
@@ -201,10 +185,12 @@ public:
     static void initEventType();
     static Uint32 repaintEventType();
 
-    void setCanvasGL(Canvas2DGL *gl);
+    void setBackend(Canvas2DBackend* b);
+    void setCairo(cairo_t* cr);
     void onWindowResize(int newW, int newH);
     void preRenderPass();
-    void glRenderPass();
+    void glRenderPass();               // name kept — now Cairo-based
+    void _renderScrollbarsCairo(GraphicsContext& ctx);
 
     bool isInitialized() const;
     bool needsRepaint() const;

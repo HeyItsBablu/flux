@@ -342,7 +342,7 @@ void Painter::measureText(const std::wstring &text, NativeFont font,
 // Painter::pushClipRect / popClipRect
 // ============================================================================
 
-void Painter::pushClipRect(int x, int y, int w, int h)
+void Painter::pushClipRect(int x, int y, int w, int h, int /*cornerRadius*/)
 {
     cairo_t *cr = ctx.cr;
     cairo_save(cr); // matched by popClipRect
@@ -1162,6 +1162,7 @@ void Painter::drawImage(const ImageDrawParams &params)
         return;
 
     cairo_t *cr = ctx.cr;
+    cairo_surface_t *surf = static_cast<cairo_surface_t *>(params.image);
     CairoSave save(cr);
 
     if (params.borderRadius > 0)
@@ -1182,7 +1183,7 @@ void Painter::drawImage(const ImageDrawParams &params)
         cairo_translate(cr, tx, ty);
         if (needsScale)
             cairo_scale(cr, params.destW / params.srcWidth, params.destH / params.srcHeight);
-        cairo_set_source_surface(cr, params.image, 0.0, 0.0);
+        cairo_set_source_surface(cr, surf, 0.0, 0.0);
         cairo_pattern_set_filter(cairo_get_source(cr), cf);
         cairo_paint(cr);
         cairo_restore(cr);
@@ -1211,13 +1212,13 @@ void Painter::drawVideo(const VideoDrawParams &params)
     if (!params.frame || params.dstW <= 0 || params.dstH <= 0)
         return;
     cairo_t *cr = ctx.cr;
+    cairo_surface_t *surf = static_cast<cairo_surface_t *>(params.frame);
     cairo_save(cr);
-    // _cairoSurf dimensions come from the surface itself
-    int srcW = cairo_image_surface_get_width(params.frame);
-    int srcH = cairo_image_surface_get_height(params.frame);
+    int srcW = cairo_image_surface_get_width(surf);
+    int srcH = cairo_image_surface_get_height(surf);
     cairo_translate(cr, params.dstX, params.dstY);
     cairo_scale(cr, (double)params.dstW / srcW, (double)params.dstH / srcH);
-    cairo_set_source_surface(cr, params.frame, 0, 0);
+    cairo_set_source_surface(cr, surf, 0, 0);
     cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_BILINEAR);
     cairo_rectangle(cr, 0, 0, srcW, srcH);
     cairo_fill(cr);
@@ -1229,8 +1230,9 @@ void Painter::drawCamera(const CameraDrawParams &params)
     if (!params.frame || params.dstW <= 0 || params.dstH <= 0)
         return;
     cairo_t *cr = ctx.cr;
-    int srcW = cairo_image_surface_get_width(params.frame);
-    int srcH = cairo_image_surface_get_height(params.frame);
+    cairo_surface_t *surf = static_cast<cairo_surface_t *>(params.frame);
+    int srcW = cairo_image_surface_get_width(surf);
+    int srcH = cairo_image_surface_get_height(surf);
     if (srcW <= 0 || srcH <= 0)
         return;
 
@@ -1245,13 +1247,12 @@ void Painter::drawCamera(const CameraDrawParams &params)
         cairo_translate(cr, params.dstX, params.dstY);
         cairo_scale(cr, (double)params.dstW / srcW, (double)params.dstH / srcH);
     }
-    cairo_set_source_surface(cr, params.frame, 0, 0);
+    cairo_set_source_surface(cr, surf, 0, 0);
     cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_BILINEAR);
     cairo_rectangle(cr, 0, 0, srcW, srcH);
     cairo_fill(cr);
     cairo_restore(cr);
 }
-
 
 // ============================================================================
 // Painter::drawPage  (Linux / Cairo)

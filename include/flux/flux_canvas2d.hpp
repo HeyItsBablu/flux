@@ -47,9 +47,9 @@ struct Canvas2DImage
 {
     virtual ~Canvas2DImage() = default;
     int width = 0;
-    int height = 0; 
+    int height = 0;
 };
- 
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Enums  (identical across all backends)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -106,7 +106,7 @@ struct Canvas2D
     // On GL platforms, set backend->mvp before calling this constructor.
     // On D2D, the MVP is not used (D2D manages its own transform stack).
     // -------------------------------------------------------------------------
-    explicit Canvas2D(Canvas2DBackend *backend, int canvasW, int canvasH);
+    explicit Canvas2D(Canvas2DBackend* backend, int canvasW, int canvasH);
     ~Canvas2D() = default;
 
     Canvas2D(const Canvas2D &) = delete;
@@ -221,31 +221,30 @@ struct Canvas2D
     // ── Backend access (CanvasWidget internals only) ───────────────────────
     Canvas2DBackend *backend() const { return backend_; }
 
+    // ── Gradient type (public so free functions in cairo backend can use it)
+    enum class GradType
+    {
+        None,
+        Linear,
+        Radial
+    };
+
+#if !defined(_WIN32)
+    // Cairo / GL backend: the active cairo_t* (Linux) or Canvas2DGL* (other).
+    // Public so Canvas2D_setCairo() and the static getCr() helper in
+    // flux_canvas2d_cairo.cpp can access it without friend/linkage conflicts.
+    // On Linux this stores a cairo_t* reinterpret_cast'd to Canvas2DGL*;
+    // it is never dereferenced as a Canvas2DGL on that platform.
+    Canvas2DGL *canvasGL_ = nullptr;
+#endif
+
 private:
     // ── Backend ───────────────────────────────────────────────────────────
     Canvas2DBackend *backend_ = nullptr;
     int w_ = 0, h_ = 0;
 
-    // ── GL-only: local CTM (2-D affine, 3×3 stored row-major) ────────────
-    // D2D manages its own transform stack via dc->SetTransform; on GL we
-    // maintain a software matrix and multiply it into baseMVP at draw time.
-#if !defined(_WIN32)
-    struct Mat3
-    {
-        float m[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
-        static Mat3 identity();
-        Mat3 multiply(const Mat3 &b) const;
-        Mat3 translated(float dx, float dy) const;
-        Mat3 scaled(float sx, float sy) const;
-        Mat3 rotated(float r) const;
-        void apply(float &x, float &y) const;
-    };
-    Mat3 ctm_;
-    void buildMVP(float out[16]) const;
-#endif
-
     // ── Draw state (shared across all backends) ───────────────────────────
-    Canvas2DGL *canvasGL_ = nullptr;
+
     Color fillColor_ = {0, 0, 0, 255};
     Color strokeColor_ = {0, 0, 0, 255};
     float lineWidth_ = 1.f;
@@ -259,12 +258,6 @@ private:
     int clipDepth_ = 0;
 
     // ── Gradient state ────────────────────────────────────────────────────
-    enum class GradType
-    {
-        None,
-        Linear,
-        Radial
-    };
     GradType gradType_ = GradType::None;
     float gx0_ = 0, gy0_ = 0, gx1_ = 0, gy1_ = 0;
     float gcx_ = 0, gcy_ = 0, gInR_ = 0, gOutR_ = 0;
@@ -300,9 +293,13 @@ private:
     // ── Save/restore state ────────────────────────────────────────────────
     struct SaveState
     {
-#if !defined(_WIN32)
+        // GL platforms track the CTM here so save/restore can replay it.
+        // Cairo manages its own transform stack via cairo_save/cairo_restore,
+        // so no CTM storage is needed there.  D2D has its own transform too.
+#if !defined(_WIN32) && !defined(__linux__)
         Mat3 ctm;
-#else
+#endif
+#if defined(_WIN32)
         // D2D stores its transform differently — see d2d .cpp
         float d2dCtmM11, d2dCtmM12, d2dCtmM21, d2dCtmM22, d2dCtmDx, d2dCtmDy;
 #endif
@@ -327,20 +324,7 @@ private:
     void parseFontDesc(const std::string &desc);
     int resolveFont() const;
 
-#if !defined(_WIN32)
-    // GL-specific draw helpers
-    Color blendAlpha(Color c) const;
-    void uploadAndDraw(const float *verts, int count, unsigned int glMode,
-                       Color col, float alpha = 1.f);
-    void drawTexturedQuad(unsigned int texId,
-                          float sx, float sy, float sw, float sh,
-                          float dx, float dy, float dw, float dh,
-                          int texW, int texH, float alpha = 1.f);
-    void tessellateArc(float cx, float cy, float r,
-                       float a0, float a1, bool ccw, bool move);
-    void strokePath();
-    void fillPath();
-#else
+#if defined(_WIN32)
     // D2D-specific draw helpers — forward declared here, defined in d2d .cpp
     void *getBrush(Color c);                                 // returns ID2D1SolidColorBrush*
     void *makeStrokeStyle() const;                           // returns ComPtr<ID2D1StrokeStyle>

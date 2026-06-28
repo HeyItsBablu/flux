@@ -11,10 +11,9 @@
 
 #if defined(__linux__) && !defined(__ANDROID__)
 class CanvasWidget;
-class CairoCompositor;
-class Canvas2DGL;
-#include <glad/glad.h>
+
 #include <SDL2/SDL.h>
+struct Canvas2DBackend;
 #endif
 
 #ifdef __APPLE__
@@ -146,20 +145,11 @@ public:
 
     // ── DPI helpers (Linux HiDPI) ─────────────────────────────────────────────
 #if defined(__linux__) && !defined(__ANDROID__)
-    float dpiScaleX() const
-    {
-        return (logicalWidth_ > 0)
-                   ? float(cachedWidth) / float(logicalWidth_)
-                   : 1.f;
-    }
-    float dpiScaleY() const
-    {
-        return (logicalHeight_ > 0)
-                   ? float(cachedHeight) / float(logicalHeight_)
-                   : 1.f;
-    }
+    float dpiScaleX() const { return 1.f; }
+    float dpiScaleY() const { return 1.f; }
     int logicalWidth() const { return logicalWidth_; }
     int logicalHeight() const { return logicalHeight_; }
+    void _blitCairoToScreen();
 #endif
 
 #ifdef __ANDROID__
@@ -206,9 +196,7 @@ private:
     struct CairoState;
 
     SDL_Window *nativeHandle = nullptr;
-    SDL_GLContext glContext_ = nullptr;
-    Canvas2DGL *canvasGL_ = nullptr;
-    CairoCompositor *cairoCompositor_ = nullptr;
+    Canvas2DBackend *canvasBackend_ = nullptr;
 
     int logicalWidth_ = 0;
     int logicalHeight_ = 0;

@@ -6,7 +6,7 @@ class TriangleSurface : public RenderSurface
   float time_ = 0;
 
 public:
-  void initialize(int, int) override {}
+  void initialize(int, int) override {} 
   void resize(int, int) override {}
   void destroy() override {}
   void update(double dt) override { time_ += float(dt); }

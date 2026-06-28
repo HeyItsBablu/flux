@@ -763,12 +763,5 @@ bool CanvasWidget::handleKeyDown(int keyCode)
     return false;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Stub methods that were GL-specific — no-ops on D2D path
-// ─────────────────────────────────────────────────────────────────────────────
-
-void CanvasWidget::ensureSBProgram(const char *, const char *) {}
-void CanvasWidget::renderScrollbarsGL(int, int, double) {}
-void CanvasWidget::renderSBCorner(int, int) {}
 
 #endif // _WIN32
