@@ -16,7 +16,7 @@
 #include "flux_canvas2d.hpp"
 #include "flux_scrollbar.hpp"
 #include "flux_render_surface.hpp"
-#include "flux_canvas_types.hpp" 
+#include "flux_viewport.hpp"
 
 #include <chrono>
 #include <functional>

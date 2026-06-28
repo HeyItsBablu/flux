@@ -20,7 +20,7 @@
 // ============================================================================
 
 #include "flux_platform.hpp"
-#include "flux_canvas_types.hpp" // Color, RGBA, ScrollbarInfo, Viewport
+
 
 #include <string>
 #include <vector>

@@ -30,9 +30,7 @@
 // ── Internal backend header (defines Canvas2DBackend, Canvas2DGL, etc.) ──────
 #include "flux/flux_canvas2d_backend.hpp"
 
-#ifndef __APPLE__
-#include "flux/flux_glutil.hpp"
-#endif
+
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -102,6 +100,57 @@ void main(){
 )GLSL";
 #endif
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Local shader compilation helpers 
+// ─────────────────────────────────────────────────────────────────────────────
+
+static GLuint compileGLShader(GLenum type, const char *src)
+{
+    GLuint s = glCreateShader(type);
+    glShaderSource(s, 1, &src, nullptr);
+    glCompileShader(s);
+    GLint ok = 0;
+    glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
+    if (!ok)
+    {
+        char buf[1024];
+        GLsizei len = 0;
+        glGetShaderInfoLog(s, 1024, &len, buf);
+        glDeleteShader(s);
+        return 0;
+    }
+    return s;
+}
+
+static GLuint linkGLProgram(const char *vert, const char *frag)
+{
+    GLuint vs = compileGLShader(GL_VERTEX_SHADER, vert);
+    GLuint fs = compileGLShader(GL_FRAGMENT_SHADER, frag);
+    if (!vs || !fs)
+    {
+        if (vs) glDeleteShader(vs);
+        if (fs) glDeleteShader(fs);
+        return 0;
+    }
+    GLuint p = glCreateProgram();
+    glAttachShader(p, vs);
+    glAttachShader(p, fs);
+    glLinkProgram(p);
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+    GLint ok = 0;
+    glGetProgramiv(p, GL_LINK_STATUS, &ok);
+    if (!ok)
+    {
+        char buf[1024];
+        GLsizei len = 0;
+        glGetProgramInfoLog(p, 1024, &len, buf);
+        glDeleteProgram(p);
+        return 0;
+    }
+    return p;
+}
+
 // =============================================================================
 // Canvas2DImageGL destructor — deletes the GL texture
 // =============================================================================
@@ -121,7 +170,7 @@ bool Canvas2DGL::init()
     if (FT_Init_FreeType(&ftLibrary))
         return false;
 
-    flatProg = glutil::linkProgram(kFlatVert, kFlatFrag);
+    flatProg = linkGLProgram(kFlatVert, kFlatFrag);
     if (!flatProg)
         return false;
 

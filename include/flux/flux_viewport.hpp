@@ -1,120 +1,13 @@
 #pragma once
-
 // ============================================================================
-// flux_canvas_types.hpp
-// Pure data types shared across CanvasWidget, RasterSurface, VectorSurface,
-// and LayeredSurface. No platform headers, no GL headers.
+// flux_viewport.hpp
+// Viewport / ScrollbarInfo — pure data + logic, no platform headers, no GL.
 // ============================================================================
 
-#include <cstdint> 
-#include <string>
-#include <vector>
-
-// ============================================================================
-// COLOR
-// ============================================================================
-
-struct RGBA
-{
-  float r, g, b, a;
-};
-
-// Parse a CSS hex color string ("#rrggbb" or "#rrggbbaa") or a named color
-// ("black", "white", "red", "green", "blue", "transparent").
-// Returns {1,1,1,1} on parse failure.
-inline RGBA parseHexColor(const std::string &css)
-{
-  auto h2f = [](unsigned v)
-  { return v / 255.f; };
-  try
-  {
-    if (!css.empty() && css[0] == '#')
-    {
-      std::string h = css.substr(1);
-      if (h.size() == 6)
-      {
-        unsigned n = (unsigned)std::stoul(h, nullptr, 16);
-        return {h2f((n >> 16) & 0xFF), h2f((n >> 8) & 0xFF), h2f(n & 0xFF), 1.f};
-      }
-      if (h.size() == 8)
-      {
-        unsigned n = (unsigned)std::stoul(h, nullptr, 16);
-        return {h2f((n >> 24) & 0xFF), h2f((n >> 16) & 0xFF),
-                h2f((n >> 8) & 0xFF), h2f(n & 0xFF)};
-      }
-    }
-  }
-  catch (...)
-  {
-  }
-
-  static const struct
-  {
-    const char *n;
-    RGBA c;
-  } kNamed[] = {
-      {"black", {0, 0, 0, 1}},
-      {"white", {1, 1, 1, 1}},
-      {"red", {1, 0, 0, 1}},
-      {"green", {0, .5f, 0, 1}},
-      {"blue", {0, 0, 1, 1}},
-      {"transparent", {0, 0, 0, 0}},
-  };
-  std::string lo = css;
-  for (auto &c : lo)
-    c = (char)tolower((unsigned char)c);
-  for (auto &e : kNamed)
-    if (lo == e.n)
-      return e.c;
-
-  return {1, 1, 1, 1};
-}
-
-// ============================================================================
-// TOOL IDS
-// ============================================================================
-
-using ToolId = int;
-static constexpr ToolId kToolBrush = 0;
-static constexpr ToolId kToolEraser = 1;
-
-// ============================================================================
-// STROKE
-// ============================================================================
-
-struct StrokePoint
-{
-  float x, y, pressure;
-};
-
-struct StrokeStyle
-{
-  float r = 0, g = 0, b = 0, a = 1;
-  float radius = 4;
-  float hardness = 0.8f;
-  float opacity = 1;
-  ToolId tool = kToolBrush;
-};
-
-struct Stroke
-{
-  StrokeStyle style;
-  std::vector<StrokePoint> points;
-};
-
-// ============================================================================
-// TEXT
-// ============================================================================
-
-struct CanvasTextStyle
-{
-  std::wstring fontFace = L"Arial";
-  int fontSize = 20;
-  float r = 0, g = 0, b = 0;
-  bool bold = false;
-  bool italic = false;
-  bool underline = false;
-};
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <utility>
 
 // ============================================================================
 // SCROLLBAR
@@ -130,11 +23,6 @@ struct ScrollbarInfo
 // ============================================================================
 // VIEWPORT
 // ============================================================================
-
-#include <algorithm>
-#include <array>
-#include <cmath>
-#include <utility>
 
 static constexpr float kMinZoom = 1.f / 16.f;
 static constexpr float kMaxZoom = 32.f;
@@ -249,9 +137,7 @@ public:
             std::clamp(1.f - offsetY_ / ch_, 0.f, 1.f), true};
   }
 
-  // Fills a column-major 4x4 orthographic MVP for the current view.
-  // Requires flux_glutil.hpp to be included before calling.
-  // Forward-declared here; definition called via glutil::ortho.
+
   void buildMVP(float out[16]) const;
 
   float zoom() const { return zoom_; }
