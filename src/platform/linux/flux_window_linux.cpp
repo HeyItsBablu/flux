@@ -5,6 +5,7 @@
 #include "flux/flux_window.hpp"
 #include "flux/widgets/flux_file_picker.hpp"
 #include "flux/flux_canvas.hpp"
+#include "flux/flux_core.hpp"
 
 #include <SDL2/SDL.h>
 #include <cairo/cairo.h>
@@ -230,6 +231,9 @@ int PlatformWindow::run()
             handleSDLEvent(e);
         while (SDL_PollEvent(&e))
             handleSDLEvent(e);
+
+        if (auto *ui = FluxUI::getCurrentInstance())
+            ui->drainPendingRebuilds();
 
         if (!dirty)
             for (CanvasWidget *cw : canvasWidgets_)

@@ -137,7 +137,6 @@ private:
 
     auto onSuccess = [weak](T value)
     {
-      
       // This lambda is always invoked on the UI thread (postToUI=true).
       auto self = weak.lock();
       if (!self)
@@ -166,12 +165,10 @@ private:
 
   void triggerRebuild()
   {
-
-    // partialRebuild is a UI-thread-only call — safe here.
+    needsLayout = true;
+    needsPaint = true;
     if (auto *ui = FluxUI::getCurrentInstance())
-      ui->partialRebuild(this);
-
-    markNeedsLayout();
+      ui->scheduleRebuild(this); 
   }
 
   void rebuildChild(GraphicsContext & /*ctx*/, FontCache & /*fontCache*/)

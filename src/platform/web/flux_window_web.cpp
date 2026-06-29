@@ -45,6 +45,7 @@
 
 #include "flux/flux_window.hpp"
 #include "flux/flux_platform.hpp"
+#include "flux/flux_core.hpp"
 
 #include <emscripten.h>
 #include <emscripten/html5.h>
@@ -121,28 +122,23 @@ static EM_BOOL onMouseDown(int /*eventType*/,
                            void *userData)
 {
     auto *self = static_cast<PlatformWindow *>(userData);
-    
 
     if (!self || !self->webState)
     {
-  
+
         return EM_FALSE;
     }
 
-    //double dpr = EM_ASM_DOUBLE({ return Module._fluxDPR || 1.0; });
+    // double dpr = EM_ASM_DOUBLE({ return Module._fluxDPR || 1.0; });
     int x = (int)e->targetX;
     int y = (int)e->targetY;
-
-
 
     bool handled = false;
     if (e->button == 0 && self->callbacks.onMouseDown)
     {
-       
-        handled = self->callbacks.onMouseDown(x, y);
-       
-    }
 
+        handled = self->callbacks.onMouseDown(x, y);
+    }
 
     if (handled)
         self->invalidate();
@@ -403,11 +399,10 @@ bool PlatformWindow::create(const std::string & /*title*/,
 
     // Use actual physical canvas size, not the logical size from createApp().
     // The JS side has already sized the canvases to window.innerWidth/Height * dpr.
-    int physW = EM_ASM_INT({ return Module._fluxPhysicalWidth  | 0; });
+    int physW = EM_ASM_INT({ return Module._fluxPhysicalWidth | 0; });
     int physH = EM_ASM_INT({ return Module._fluxPhysicalHeight | 0; });
-    cachedWidth  = (physW > 0) ? physW : width;
+    cachedWidth = (physW > 0) ? physW : width;
     cachedHeight = (physH > 0) ? physH : height;
-
 
     // ── Scale the Canvas 2D context by devicePixelRatio ──────────────────────
     //
@@ -486,12 +481,14 @@ void PlatformWindow::destroy()
 // Only repaints when the dirty flag is set, so idle frames cost almost nothing.
 extern void fluxClearCanvasWidgetRects();
 
-
 void PlatformWindow::tick()
 {
     if (!webState || !webState->dirty)
         return;
     webState->dirty = false;
+
+    if (auto *ui = FluxUI::getCurrentInstance())
+        ui->drainPendingRebuilds();
 
     int w = cachedWidth;
     int h = cachedHeight;
@@ -505,8 +502,7 @@ void PlatformWindow::tick()
             ctx.clearRect(0, 0, $0 * dpr, $1 * dpr);
             ctx.restore();
             ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        }
-    }, w, h);
+        } }, w, h);
 
     if (callbacks.onPaint)
     {
@@ -517,7 +513,7 @@ void PlatformWindow::tick()
     // After all widgets have painted, punch transparent holes where
     // CanvasWidgets live so the WebGL layer shows through.
     // We collect the rects during onPaint via a global list.
-    fluxClearCanvasWidgetRects();  // <-- ADD THIS
+    fluxClearCanvasWidgetRects(); // <-- ADD THIS
 }
 
 // ── run ───────────────────────────────────────────────────────────────────────
@@ -700,7 +696,6 @@ GraphicsContext PlatformWindow::getMeasureContext() const
     return GraphicsContext(cachedWidth, cachedHeight);
 }
 
-
 // ── Cursor ────────────────────────────────────────────────────────────────────
 
 void PlatformWindow::setResizeCursorH()
@@ -713,7 +708,7 @@ void PlatformWindow::startRenderLoop()
     // in main_web.cpp. The first tick() call will paint immediately because
     // create() already sets webState->dirty = true.
 }
- 
+
 void PlatformWindow::setResizeCursorV()
 {
     EM_ASM({ document.getElementById('flux-ui').style.cursor = 'ns-resize'; });

@@ -512,6 +512,25 @@ void FluxUI::invalidateWidget(int x, int y, int w, int h)
 void FluxUI::captureMouseInput() { window.captureMouseInput(); }
 void FluxUI::releaseMouseInput() { window.releaseMouseInput(); }
 
+
+
+void FluxUI::scheduleRebuild(Widget* widget)
+{
+    std::lock_guard<std::mutex> lock(pendingRebuildsMutex_);
+    pendingRebuilds_.push_back(widget);
+    window.invalidate(); // thread-safe: just sets dirty = true
+}
+
+void FluxUI::drainPendingRebuilds()
+{
+    std::vector<Widget*> local;
+    {
+        std::lock_guard<std::mutex> lock(pendingRebuildsMutex_);
+        local.swap(pendingRebuilds_);
+    }
+    for (Widget* w : local)
+        partialRebuild(w); // safe: always called from render thread
+}
 // ============================================================================
 // getMeasureContext  — platform branch
 // ============================================================================

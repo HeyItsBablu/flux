@@ -1,4 +1,4 @@
-//include/flux/flux_core.hpp
+// include/flux/flux_core.hpp
 #ifndef FLUX_CORE_HPP
 #define FLUX_CORE_HPP
 
@@ -15,6 +15,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <mutex>
 
 // ============================================================================
 // FORWARD DECLARATIONS
@@ -22,7 +23,6 @@
 
 template <typename T>
 class State;
-
 
 // ============================================================================
 // MOUSE EVENT BROADCAST HELPERS
@@ -60,7 +60,8 @@ private:
 
   std::unordered_map<const void *, std::shared_ptr<void>> appSingletons_;
 
-
+  std::mutex pendingRebuildsMutex_;
+  std::vector<Widget *> pendingRebuilds_;
 
   // Owns everything overlay-related: native popups, z-order, input dispatch.
   // Widgets talk to it directly via overlays(); core never needs to know
@@ -127,6 +128,9 @@ public:
   void setResizeCursorV();
   void setDefaultCursor();
 
+  void scheduleRebuild(Widget *widget);
+  void drainPendingRebuilds();
+
   // ── Overlays ────────────────────────────────────────────────────────────
   // Any widget implementing OverlayContent calls this directly — e.g.
   //   FluxUI::getCurrentInstance()->overlays().show(this, x, y, w, h, zIndex, fontCache);
@@ -151,8 +155,6 @@ public:
     }
     return std::static_pointer_cast<T>(it->second);
   }
-
-
 };
 
 #endif // FLUX_CORE_HPP

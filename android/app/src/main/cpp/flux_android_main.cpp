@@ -608,6 +608,8 @@ void android_main(android_app *app)
         win.pollTimers();
         FluxFilePickerAndroid::drainPendingCallbacks();
 
+        s_app->drainPendingRebuilds();
+
         auto sz = win.getClientSize();
         float dpi = FluxAndroid_getDpiScale();
         int physW = (int)(sz.width * dpi);

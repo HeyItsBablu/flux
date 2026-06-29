@@ -216,6 +216,7 @@ void main() {
 
 static const char *kRoundFS = R"(
 precision mediump float;
+varying vec2 vLocal;
 uniform vec2  uHalfSize;   // half-width, half-height of the rect
 uniform float uRadius;     // corner radius
 uniform vec4  uColor;

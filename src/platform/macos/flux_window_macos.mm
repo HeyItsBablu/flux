@@ -15,6 +15,7 @@
 #include "flux/flux_window.hpp"
 #include "flux/flux_canvas.hpp"
 #include "flux/flux_window_macos_state.hpp"
+#include "flux/flux_core.hpp"
 
 #include <unordered_map>
 #include <vector>
@@ -416,6 +417,8 @@ void PlatformWindow::invalidate() {
     if (!macState) return;
     macState->dirty = true;
     dispatch_async(dispatch_get_main_queue(), ^{
+        if (auto *ui = FluxUI::getCurrentInstance())
+            ui->drainPendingRebuilds();
         if (macState && macState->nsView)
             [macState->nsView setNeedsDisplay:YES];
     });
