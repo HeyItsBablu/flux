@@ -3,19 +3,29 @@
 #ifdef __ANDROID__
 
 #include "flux/flux_canvas.hpp"
+#include "flux/flux_painter.hpp"
+#include "flux/flux_canvas2d_backend.hpp"
 
 #include <GLES3/gl3.h>
 #include <EGL/egl.h>
 #include <android/log.h>
-#include "nanovg.h"
-#include "nanovg_gl.h"
+
+static void localOrtho(float l, float r, float b, float t, float out[16])
+{
+    memset(out, 0, 64);
+    out[0] = 2.f / (r - l);
+    out[5] = 2.f / (t - b);
+    out[10] = -1.f;
+    out[12] = -(r + l) / (r - l);
+    out[13] = -(t + b) / (t - b);
+    out[15] = 1.f;
+}
 
 #define CANVAS_LOGI(...) __android_log_print(ANDROID_LOG_INFO, "CanvasWidget", __VA_ARGS__)
 #define CANVAS_LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "CanvasWidget", __VA_ARGS__)
 
 extern float FluxAndroid_getDpiScale();
 extern Canvas2DGL *FluxAndroid_getCanvasGL();
-extern NVGcontext *FluxAndroid_getVG();
 
 struct AndroidCanvasState
 {
@@ -27,7 +37,7 @@ struct AndroidCanvasState
     GLuint fboDepth = 0;
     int fboW = 0;
     int fboH = 0;
-    int nvgImage = -1; // NanoVG handle wrapping fboTex
+    // REMOVED: int nvgImage — fboTex is now drawn directly via Painter::drawImage
 };
 
 // One state blob per CanvasWidget instance; keyed by pointer.
@@ -46,12 +56,7 @@ static AndroidCanvasState &androidState(CanvasWidget *w)
 static void deleteFBO(CanvasWidget *w)
 {
     auto &s = androidState(w);
-    NVGcontext *vg = FluxAndroid_getVG();
-    if (s.nvgImage != -1 && vg)
-    {
-        nvgDeleteImage(vg, s.nvgImage);
-        s.nvgImage = -1;
-    }
+
     if (s.fboId)
     {
         glDeleteFramebuffers(1, &s.fboId);
@@ -107,32 +112,13 @@ static void ensureFBO(CanvasWidget *w, int physW, int physH)
         CANVAS_LOGE("FBO incomplete: 0x%x", status);
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-    // Register texture with NanoVG so render() can blit it.
-    // NVG_IMAGE_FLIPY because FBO Y=0 is bottom, NanoVG expects top-left.
-    NVGcontext *vg = FluxAndroid_getVG();
-    if (vg)
-    {
-        if (s.nvgImage != -1)
-            nvgDeleteImage(vg, s.nvgImage);
-#if defined(NANOVG_GLES2)
-        s.nvgImage = nvglCreateImageFromHandleGLES2(vg, s.fboTex, physW, physH,
-                                                    NVG_IMAGE_FLIPY);
-#elif defined(NANOVG_GLES3)
-        s.nvgImage = nvglCreateImageFromHandleGLES3(vg, s.fboTex, physW, physH,
-                                                    NVG_IMAGE_FLIPY);
-#else
-        s.nvgImage = nvglCreateImageFromHandleGL3(vg, s.fboTex, physW, physH,
-                                                  NVG_IMAGE_FLIPY);
-#endif
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GL init (lazy, first tickAllGL)
 // ─────────────────────────────────────────────────────────────────────────────
 
-static void ensureGL(CanvasWidget *w, int windowW, int windowH, float dpi)
+static void ensureGL(CanvasWidget *w, int windowW, int windowH, float /*dpi*/)
 {
     auto &s = androidState(w);
     if (s.glInitialized)
@@ -159,7 +145,7 @@ static void ensureGL(CanvasWidget *w, int windowW, int windowH, float dpi)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Pass 1: render surface into FBO  (called from android_main before NanoVG)
+// Pass 1: render surface into FBO  (called from android_main before Painter)
 // ─────────────────────────────────────────────────────────────────────────────
 
 static void glRenderPass(CanvasWidget *w, int windowW, int windowH, float dpi)
@@ -198,7 +184,7 @@ static void glRenderPass(CanvasWidget *w, int windowW, int windowH, float dpi)
     float oy = w->vp_.offsetY() * z;
 
     float orthoM[16];
-    glutil::ortho(0.f, float(physW), float(physH), 0.f, orthoM);
+    localOrtho(0.f, float(physW), float(physH), 0.f, orthoM);
 
     float vpM[16] = {
         z, 0, 0, 0,
@@ -212,15 +198,19 @@ static void glRenderPass(CanvasWidget *w, int windowW, int windowH, float dpi)
                 mvp[col * 4 + row] += orthoM[k * 4 + row] * vpM[col * 4 + k];
 
     {
-        Canvas2D ctx(w->canvasGL_, w->canvasW_, w->canvasH_, mvp);
-        w->activeSurface_->render(ctx);
+        Canvas2DBackend *b = Canvas2DBackend::create(w->canvasGL_);
+        memcpy(b->mvp, mvp, 64);
+        {
+            Canvas2D ctx(b, w->canvasW_, w->canvasH_);
+            w->activeSurface_->render(ctx);
+        }
+        Canvas2DBackend::destroy(b);
     }
 
     w->updateSBGeometry(physW, physH);
     {
-        // Scrollbars draw into the NanoVG layer via Painter.
-        // GraphicsContext on Android wraps the NVGcontext implicitly
-        // (Painter uses FluxAndroid_getVG() internally).
+        // Scrollbars draw via the same plain-GLES2 Painter used everywhere
+        // else on Android (flux_painter_android.cpp)
         GraphicsContext gctx;
         Painter p(gctx);
         p.drawScrollbar(w->hBar_, physW, physH);
@@ -231,7 +221,7 @@ static void glRenderPass(CanvasWidget *w, int windowW, int windowH, float dpi)
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-    // Mark NanoVG pass dirty so render() gets called this frame
+    // Mark the UI pass dirty so render() blits the updated FBO this frame
     w->needsPaint = true;
 
     if (w->activeSurface_->needsContinuousRedraw())
@@ -245,15 +235,14 @@ static void glRenderPass(CanvasWidget *w, int windowW, int windowH, float dpi)
 CanvasWidget::CanvasWidget()
     : hBar_(CustomScrollbar::Axis::Horizontal), vBar_(CustomScrollbar::Axis::Vertical)
 {
-    autoWidth = true;  // was false — must match Win32/Linux
-    autoHeight = true; // was false
+    autoWidth = true;
+    autoHeight = true;
     width = 400;
     height = 300;
 }
 
 CanvasWidget::~CanvasWidget()
 {
-    // Destroy surface and GL resources
     if (activeSurface_)
     {
         activeSurface_->destroy();
@@ -320,32 +309,39 @@ void CanvasWidget::computeLayout(GraphicsContext & /*ctx*/,
     {
         canvasW_ = newPhysW;
         canvasH_ = newPhysH;
-        // Force ensureGL to reinitialise with correct dims
         androidState(this).glInitialized = false;
     }
 
     needsLayout = false;
 }
 
-// Pass 2 (NanoVG): blit FBO texture into the UI
-void CanvasWidget::render(GraphicsContext & /*ctx*/, FontCache &)
+// Pass 2: blit FBO texture into the UI — plain Painter::drawImage
+void CanvasWidget::render(GraphicsContext &ctx, FontCache &)
 {
-    NVGcontext *vg = FluxAndroid_getVG();
     auto &s = androidState(this);
-    if (!vg || s.nvgImage == -1)
+    if (!s.fboTex)
     {
         needsPaint = false;
         return;
     }
 
-    NVGpaint paint = nvgImagePattern(vg,
-                                     float(x), float(y),
-                                     float(width), float(height),
-                                     0.f, s.nvgImage, 1.f);
-    nvgBeginPath(vg);
-    nvgRect(vg, float(x), float(y), float(width), float(height));
-    nvgFillPaint(vg, paint);
-    nvgFill(vg);
+    Painter p(ctx);
+    Painter::ImageDrawParams ip;
+    ip.image = (NativeImage)s.fboTex;
+    ip.srcWidth = s.fboW;
+    ip.srcHeight = s.fboH;
+    ip.clipX = x;
+    ip.clipY = y;
+    ip.clipW = width;
+    ip.clipH = height;
+    ip.destX = (float)x;
+    ip.destY = (float)y;
+    ip.destW = (float)width;
+    ip.destH = (float)height;
+    // FBO render targets are bottom-up in GL's sampling convention while the
+    // canvas surface was rendered top-down  — flip on the way out.
+    ip.flipY = true;
+    p.drawImage(ip);
 
     needsPaint = false;
 }
@@ -371,7 +367,7 @@ void CanvasWidget::markNeedsPaint()
     needsPaint = true;
 }
 
-// Static pass-1 traversal called from android_main before NanoVG
+// Static pass-1 traversal called from android_main before the UI paint pass
 void CanvasWidget::tickAllGL(Widget *root, int windowW, int windowH, float dpi)
 {
     if (!root)
@@ -547,56 +543,8 @@ void CanvasWidget::activatePendingSurface()
     vp_.setCanvasSize(canvasW_, canvasH_);
 }
 
-void CanvasWidget::ensureSBProgram(const char *vert, const char *frag)
-{
-    if (sbProg_)
-        return;
-    sbProg_ = glutil::linkProgram(vert, frag);
-    sbMVP_ = glGetUniformLocation(sbProg_, "uMVP");
-    sbColor_ = glGetUniformLocation(sbProg_, "uColor");
-    if (!sbVAO_)
-        glGenVertexArrays(1, &sbVAO_);
-    if (!sbVBO_)
-        glGenBuffers(1, &sbVBO_);
-}
 
-void CanvasWidget::renderSBCorner(int glW, int glH)
-{
-    if (!hBar_.isVisible() || !vBar_.isVisible() || !scrollbarsEnabled_)
-        return;
-    float cx = float(glW) - kSBThick;
-    float cy = float(glH) - kSBThick;
-    float mvp[16];
-    glutil::ortho(0.f, float(glW), float(glH), 0.f, mvp);
-    glUseProgram(sbProg_);
-    glUniformMatrix4fv(sbMVP_, 1, GL_FALSE, mvp);
-    glUniform4f(sbColor_, 0.12f, 0.12f, 0.12f, 0.35f);
-    float v[] = {
-        cx, cy, cx + kSBThick, cy,
-        cx + kSBThick, cy + kSBThick, cx + kSBThick, cy + kSBThick,
-        cx, cy + kSBThick, cx, cy};
-    glBindVertexArray(sbVAO_);
-    glBindBuffer(GL_ARRAY_BUFFER, sbVBO_);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(v), v, GL_DYNAMIC_DRAW);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
-    glDrawArrays(GL_TRIANGLES, 0, 6);
-    glBindVertexArray(0);
-}
 
-void CanvasWidget::renderScrollbarsGL(int glW, int glH, double dt)
-{
-    bool hFade = hBar_.tick(dt);
-    bool vFade = vBar_.tick(dt);
-    if (!hBar_.needsRedraw() && !vBar_.needsRedraw())
-        return;
 
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-    hBar_.render(sbProg_, sbVAO_, sbVBO_, sbMVP_, sbColor_, glW, glH);
-    vBar_.render(sbProg_, sbVAO_, sbVBO_, sbMVP_, sbColor_, glW, glH);
-    renderSBCorner(glW, glH);
-}
 
 #endif

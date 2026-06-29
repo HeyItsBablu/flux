@@ -2,11 +2,7 @@
 #include "flux/flux_core.hpp"
 #include <algorithm>
 
-#ifdef __ANDROID__
-#include "nanovg.h"
-extern NVGcontext *FluxAndroid_getVG();
-extern float FluxAndroid_getDpiScale();
-#endif
+
 
 struct OverlayManager::Entry
 {
@@ -301,16 +297,13 @@ void OverlayManager::renderAll(GraphicsContext &ctx, FontCache &fc)
         }
         EM_ASM({ var c = Module._fluxCtx2D; if (c) c.restore(); });
 
-#else // Android / NanoVG
-        NVGcontext *vg = FluxAndroid_getVG();
-        if (!vg)
-            continue;
-        nvgSave(vg);
-        float dpi = FluxAndroid_getDpiScale();
-        nvgTranslate(vg, e->clientX * dpi, e->clientY * dpi);
+#else // Android / OpenGL ES (FluxGL)
+    {
         GraphicsContext localCtx(e->w, e->h);
+        localCtx.overlayOffsetX = e->clientX;
+        localCtx.overlayOffsetY = e->clientY;
         e->content->renderOverlay(localCtx, fc);
-        nvgRestore(vg);
+    }
 #endif
     }
 }

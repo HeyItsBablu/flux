@@ -342,7 +342,7 @@ bool PlatformWindow::create(const std::string& title,
         return false;
     }
 
-    // ── Canvas2DGL (Metal-backed NanoVG equivalent) ───────────────────────────
+    // ── Canvas2DGL (Metal-backed ) ───────────────────────────
     s.canvasGL = new Canvas2DGL();
     if (!s.canvasGL->init()) {
         fprintf(stderr, "PlatformWindow: Canvas2DGL init failed\n");

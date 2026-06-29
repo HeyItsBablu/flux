@@ -154,43 +154,7 @@ if(WIN32 OR (UNIX AND NOT APPLE AND NOT ANDROID AND NOT EMSCRIPTEN))
     )
 endif()
 
-# ============================================================================
-# NanoVG
-#
-# Android  → GLES2 backend
-# Win/Linux → GL3 backend via glad
-# macOS    → not used (Metal + CoreGraphics path)
-# Web      → not used (Canvas 2D + WebGL2 path)
-# ============================================================================
 
-if(NOT TARGET nanovg AND NOT APPLE AND NOT EMSCRIPTEN)
-    set(NANOVG_SOURCES
-            external/nanovg/src/nanovg.c
-            external/nanovg/src/nanovg_gl_impl.c
-    )
-    add_library(nanovg STATIC ${NANOVG_SOURCES})
-    set_source_files_properties(${NANOVG_SOURCES} PROPERTIES LANGUAGE C)
-
-    target_include_directories(nanovg PUBLIC
-            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/nanovg/src>
-            $<INSTALL_INTERFACE:include>
-    )
-
-    target_compile_definitions(nanovg PRIVATE STB_IMAGE_STATIC)
-    target_link_libraries(nanovg PUBLIC stb)
-
-    if(ANDROID)
-        target_compile_definitions(nanovg PRIVATE NANOVG_GLES2_IMPLEMENTATION)
-        find_library(gles-lib GLESv3)
-        target_link_libraries(nanovg PUBLIC ${gles-lib})
-    else()
-        target_compile_definitions(nanovg PRIVATE NANOVG_GL3_IMPLEMENTATION)
-        target_include_directories(nanovg PRIVATE
-                ${CMAKE_CURRENT_SOURCE_DIR}/external/glad/include
-        )
-        target_link_libraries(nanovg PUBLIC glad)
-    endif()
-endif()
 
 # ============================================================================
 # Linux platform dependencies
@@ -289,8 +253,6 @@ target_include_directories(flux
         $<INSTALL_INTERFACE:include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/freetype/include>
 
-        $<$<AND:$<NOT:$<BOOL:${APPLE}>>,$<NOT:$<BOOL:${EMSCRIPTEN}>>>:
-            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/nanovg/src>>
 
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>,$<NOT:$<BOOL:${EMSCRIPTEN}>>>:
             ${SDL2_INCLUDE_DIRS}>
@@ -329,13 +291,8 @@ target_compile_definitions(flux PUBLIC
         CURL_ENABLE_WEBSOCKETS
 )
 
-if(ANDROID)
-    target_compile_definitions(flux PUBLIC NANOVG_GLES2)
-elseif(EMSCRIPTEN)
-    # Canvas 2D + WebGL2 — no NanoVG definitions needed
+if(EMSCRIPTEN)
     target_compile_definitions(flux PUBLIC FLUX_WEB)
-elseif(NOT APPLE)
-    target_compile_definitions(flux PUBLIC NANOVG_GL3)
 endif()
 
 # ── Link libraries ────────────────────────────────────────────────────────────
@@ -345,7 +302,6 @@ if(WIN32)
             stb
             freetype
             glad
-            nanovg
             CURL::libcurl
             dxguid        
             Msimg32
@@ -400,7 +356,6 @@ elseif(ANDROID)
             stb
             freetype
             app_glue
-            nanovg
             CURL::libcurl
             mbedtls
             mbedcrypto
@@ -445,7 +400,6 @@ elseif(UNIX AND NOT APPLE)
             stb
             freetype
             glad
-            nanovg
             OpenGL::GL
             CURL::libcurl
             ${SDL2_LIBRARIES}
@@ -522,7 +476,7 @@ if(NOT ANDROID AND NOT EMSCRIPTEN)
     set(FLUX_INSTALL_TARGETS flux stb freetype)
 
     if(WIN32 OR (UNIX AND NOT APPLE AND NOT ANDROID))
-        list(APPEND FLUX_INSTALL_TARGETS glad nanovg)
+        list(APPEND FLUX_INSTALL_TARGETS glad)
     endif()
 
     install(TARGETS ${FLUX_INSTALL_TARGETS}
@@ -532,10 +486,7 @@ if(NOT ANDROID AND NOT EMSCRIPTEN)
 
     install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
-    install(DIRECTORY external/nanovg/src/
-            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-            FILES_MATCHING PATTERN "*.h"
-    )
+
 
     install(DIRECTORY external/stb/
             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}

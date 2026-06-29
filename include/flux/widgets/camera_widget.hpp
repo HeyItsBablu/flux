@@ -4,7 +4,7 @@
 // Single class — platform separation mirrors flux_image.hpp:
 //   platform state lives in nested structs (Android/Win32/Linux/macOS)
 //   platform methods are declared here, implemented in:
-//       camera_widget_android.cpp  — NanoVG / GLES2
+//       camera_widget_android.cpp  — GLES2
 //       camera_widget_win32.cpp    — GDI StretchDIBits / WIC
 //       camera_widget_linux.cpp    — Cairo / libjpeg
 //       camera_widget_macos.mm     — CoreGraphics / AVFoundation
@@ -29,19 +29,8 @@
 // ── Platform-specific system headers (kept isolated) ─────────────────────────
 
 #ifdef __ANDROID__
-#ifndef NANOVG_GLES2
-#define NANOVG_GLES2
-#endif
-#include "nanovg_gl.h"
-static inline int nvgCreateImageGLES2(NVGcontext *vg, GLuint texId,
-                                      int w, int h, int flags)
-{
-    return nvglCreateImageFromHandleGLES2(vg, texId, w, h, flags);
-}
-extern int NVG_createImageFromOES(NVGcontext *vg, GLuint oesTexId, int w, int h);
-extern void NVG_updateImageFromOES(NVGcontext *vg, int nvgImage, GLuint oesTexId);
-extern GLuint NVG_blitOESToTex2D(GLuint oesTexId, int w, int h);
-extern NVGcontext *FluxAndroid_getVG();
+#include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>
 #endif // __ANDROID__
 
 #ifdef _WIN32
@@ -64,7 +53,7 @@ using Microsoft::WRL::ComPtr;
 // CameraWidget
 // ============================================================================
 
-class CameraWidget : public Widget 
+class CameraWidget : public Widget
 {
 public:
     // ── Config ────────────────────────────────────────────────────────────────
@@ -324,14 +313,27 @@ public:
     // =========================================================================
 
 #ifdef __ANDROID__
-    // ── Android: NanoVG / OES texture ─────────────────────────────────────
+    // ── Android: raw GLES2 ──────────────────────────────────────
     struct AndroidState
     {
-        int nvgImage = -1;
-        int thumbImage = -1;
-        GLuint tex2dHandle = 0;
+        // OES preview → rotated GL_TEXTURE_2D, blitted once per frame
+        GLuint fbo = 0;
+        GLuint fboTex = 0;
+        int fboW = 0, fboH = 0; // already portrait (sensorH x sensorW)
+
+        GLuint blitProgram = 0;
+        GLuint blitVBO = 0;
+        bool glResourcesReady = false;
+
+        // Thumbnail: decoded JPEG → GL_TEXTURE_2D
+        GLuint thumbTex = 0;
+        int thumbW = 0, thumbH = 0;
     };
     AndroidState _android;
+
+    void _initGLBlitPipeline();
+    void _rebuildFBO(int sensorW, int sensorH);
+    void _blitOESToFBO(GLuint oesTexId);
 #endif // __ANDROID__
 
 #ifdef _WIN32

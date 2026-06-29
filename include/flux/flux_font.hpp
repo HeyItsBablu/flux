@@ -9,7 +9,7 @@
 // FontWeight
 // Win32:   DWrite DWRITE_FONT_WEIGHT values (Light=300, Normal=400, Bold=700)
 // Linux:   PANGO_WEIGHT_LIGHT=300, _NORMAL=400, _BOLD=700
-// Android: passed to NanoVG — same numeric values
+// Android: passed to  — same numeric values
 // macOS:   passed to CTFont — same numeric values
 //
 // The numeric values are identical across all platforms so the enum is

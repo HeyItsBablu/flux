@@ -150,6 +150,7 @@ struct Painter
         int borderRadius = 0;
         ImageRepeat repeat = ImageRepeat::NoRepeat;
         FilterQuality filterQuality = FilterQuality::Low;
+        bool flipY = false; // true for FBO-backed textures (GL render-target convention)
     };
     void drawImage(const ImageDrawParams &params);
 

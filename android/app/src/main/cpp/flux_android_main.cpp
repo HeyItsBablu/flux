@@ -1,7 +1,7 @@
-//src/flux_android_main.cpp
+// flux_android_main.cpp
 #ifdef __ANDROID__
 #include <EGL/egl.h>
-#include <GLES3/gl3.h>
+#include <GLES2/gl2.h>
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
 #include <android_native_app_glue.h>
@@ -11,16 +11,14 @@
 #include "flux/flux.hpp"
 #include "flux/flux_canvas2d.hpp"
 #include "flux/widgets/flux_file_picker.hpp"
-
+#include "flux/flux_gl.hpp"
+#include "flux/flux_oes_blit.hpp"
+#include "flux/flux_canvas2d_backend.hpp"
 // Forward declaration — defined in lib/main.cpp
-WidgetPtr createApp(FluxUI* app); 
-
-#include "nanovg.h"
-#include "nanovg_gl.h"
+WidgetPtr createApp(FluxUI *app);
 
 // ── Statics ───────────────────────────────────────────────────────────────────
 static FluxUI *s_app = nullptr;
-static NVGcontext *s_vg = nullptr;
 static Canvas2DGL *s_canvasGL = nullptr;
 static AAssetManager *s_assetManager = nullptr;
 ANativeActivity *s_activity = nullptr;
@@ -36,20 +34,14 @@ static EGLSurface s_eglSurface = EGL_NO_SURFACE;
 // ── Misc ─────────────────────────────────────────────────────────────────────
 static std::string s_cacertPath;
 
-// ── MDI font path (extracted from assets to internal storage) ─────────────────
+// ── MDI font path ─────────────────────────────────────────────────────────────
 static std::string s_mdiFontPath;
-
 const std::string &FluxAndroid_getMDIFontPath() { return s_mdiFontPath; }
 
 // ── DPI scale ─────────────────────────────────────────────────────────────────
 static float s_dpiScale = 1.f;
 void FluxAndroid_setDpiScale(float scale) { s_dpiScale = scale; }
 float FluxAndroid_getDpiScale() { return s_dpiScale; }
-
-// ── NVG accessor ──────────────────────────────────────────────────────────────
-static NVGcontext *s_vgCurrent = nullptr;
-void FluxAndroid_setVG(NVGcontext *vg) { s_vgCurrent = vg; }
-NVGcontext *FluxAndroid_getVG() { return s_vgCurrent; }
 
 // ── Canvas2DGL accessor ───────────────────────────────────────────────────────
 Canvas2DGL *FluxAndroid_getCanvasGL() { return s_canvasGL; }
@@ -90,7 +82,11 @@ static void canvasGL_registerFonts()
         {"mono", "/system/fonts/DroidSansMono.ttf"},
     };
     for (auto &f : fonts)
-        Canvas2D::registerFont(s_canvasGL, f.name, f.path);
+    {
+        Canvas2DBackend *b = Canvas2DBackend::create(s_canvasGL);
+        Canvas2D::registerFont(b, f.name, f.path);
+        Canvas2DBackend::destroy(b);
+    }
 }
 
 static void canvasGL_create()
@@ -125,6 +121,38 @@ static void canvasGL_destroyGLObjects()
         s_canvasGL->destroy();
 }
 
+// ── GL font registration ──────────────────────────────────────────────────────
+// Called after FluxGL_init() / FluxGL_reinit() so the glyph atlas is ready.
+static void gl_registerFonts()
+{
+    // Default / UI fonts
+    FluxGL_registerFont("default", "/system/fonts/Roboto-Regular.ttf");
+    FluxGL_registerFont("Roboto_regular", "/system/fonts/Roboto-Regular.ttf");
+    FluxGL_registerFont("Roboto_bold", "/system/fonts/Roboto-Bold.ttf");
+    FluxGL_registerFont("Roboto_light", "/system/fonts/Roboto-Light.ttf");
+    FluxGL_registerFont("Segoe UI_regular", "/system/fonts/Roboto-Regular.ttf");
+    FluxGL_registerFont("Segoe UI_bold", "/system/fonts/Roboto-Bold.ttf");
+    FluxGL_registerFont("Segoe UI_light", "/system/fonts/Roboto-Light.ttf");
+
+    // MDI icon font
+    if (!s_mdiFontPath.empty())
+    {
+        int h = FluxGL_registerFont("Material Design Icons_regular", s_mdiFontPath);
+        if (h != -1)
+            __android_log_print(ANDROID_LOG_INFO, "FluxUI",
+                                "FluxGL: MDI font registered, index=%d", h);
+        else
+            __android_log_print(ANDROID_LOG_ERROR, "FluxUI",
+                                "FluxGL: Failed to register MDI font from %s",
+                                s_mdiFontPath.c_str());
+    }
+    else
+    {
+        __android_log_print(ANDROID_LOG_WARN, "FluxUI",
+                            "FluxGL: MDI font path empty — icons will not render");
+    }
+}
+
 // ── CA cert extraction ────────────────────────────────────────────────────────
 static void extractCACert(android_app *app)
 {
@@ -149,9 +177,6 @@ static void extractCACert(android_app *app)
 }
 
 // ── MDI font extraction ───────────────────────────────────────────────────────
-// Copies materialdesignicons-webfont.ttf from assets/ to internal storage
-// so NanoVG (which needs a file path) can load it.
-// Only writes the file if it doesn't already exist to avoid redundant I/O.
 static void extractMDIFont(android_app *app)
 {
     AAssetManager *am = app->activity->assetManager;
@@ -160,13 +185,10 @@ static void extractMDIFont(android_app *app)
 
     s_mdiFontPath = std::string(app->activity->internalDataPath) + "/materialdesignicons-webfont.ttf";
 
-    // Skip extraction if already on disk
     FILE *check = fopen(s_mdiFontPath.c_str(), "rb");
     if (check)
     {
         fclose(check);
-        __android_log_print(ANDROID_LOG_INFO, "FluxUI",
-                            "MDI font already extracted at %s", s_mdiFontPath.c_str());
         return;
     }
 
@@ -175,8 +197,7 @@ static void extractMDIFont(android_app *app)
     if (!asset)
     {
         __android_log_print(ANDROID_LOG_ERROR, "FluxUI",
-                            "MDI font asset not found! "
-                            "Add materialdesignicons-webfont.ttf to your assets/ folder.");
+                            "MDI font asset not found!");
         s_mdiFontPath.clear();
         return;
     }
@@ -186,57 +207,12 @@ static void extractMDIFont(android_app *app)
     {
         fwrite(AAsset_getBuffer(asset), 1, AAsset_getLength(asset), f);
         fclose(f);
-        __android_log_print(ANDROID_LOG_INFO, "FluxUI",
-                            "MDI font extracted to %s", s_mdiFontPath.c_str());
     }
     else
     {
-        __android_log_print(ANDROID_LOG_ERROR, "FluxUI",
-                            "Failed to write MDI font to %s", s_mdiFontPath.c_str());
         s_mdiFontPath.clear();
     }
     AAsset_close(asset);
-}
-
-// ── NVG font registration (called after every nvgCreateGLES2) ─────────────────
-// Registers all fonts that the FontCache may request by name.
-// Must be called with a live NVGcontext each time the context is recreated.
-static void nvg_registerFonts(NVGcontext *vg)
-{
-    if (!vg)
-        return;
-
-    // Default / UI fonts
-    nvgCreateFont(vg, "default", "/system/fonts/Roboto-Regular.ttf");
-    nvgCreateFont(vg, "Roboto_regular", "/system/fonts/Roboto-Regular.ttf");
-    nvgCreateFont(vg, "Roboto_bold", "/system/fonts/Roboto-Bold.ttf");
-    nvgCreateFont(vg, "Roboto_light", "/system/fonts/Roboto-Light.ttf");
-    nvgCreateFont(vg, "Segoe UI_regular", "/system/fonts/Roboto-Regular.ttf");
-    nvgCreateFont(vg, "Segoe UI_bold", "/system/fonts/Roboto-Bold.ttf");
-    nvgCreateFont(vg, "Segoe UI_light", "/system/fonts/Roboto-Light.ttf");
-
-    // MDI icon font — only if successfully extracted
-    if (!s_mdiFontPath.empty())
-    {
-        int handle = nvgCreateFont(vg, "Material Design Icons_regular",
-                                   s_mdiFontPath.c_str());
-        if (handle != -1)
-        {
-            __android_log_print(ANDROID_LOG_INFO, "FluxUI",
-                                "NVG: MDI font registered, handle=%d", handle);
-        }
-        else
-        {
-            __android_log_print(ANDROID_LOG_ERROR, "FluxUI",
-                                "NVG: Failed to register MDI font from %s",
-                                s_mdiFontPath.c_str());
-        }
-    }
-    else
-    {
-        __android_log_print(ANDROID_LOG_WARN, "FluxUI",
-                            "NVG: MDI font path empty — icons will not render");
-    }
 }
 
 // ── JNI / platform helpers ────────────────────────────────────────────────────
@@ -247,12 +223,10 @@ std::string FluxAndroid_getFilesDir()
         return "/sdcard";
     jobject activityObj = s_activity->clazz;
     jclass activityCls = env->GetObjectClass(activityObj);
-    jmethodID getFilesDir = env->GetMethodID(activityCls, "getFilesDir",
-                                             "()Ljava/io/File;");
+    jmethodID getFilesDir = env->GetMethodID(activityCls, "getFilesDir", "()Ljava/io/File;");
     jobject filesDir = env->CallObjectMethod(activityObj, getFilesDir);
     jclass fileCls = env->GetObjectClass(filesDir);
-    jmethodID getAbs = env->GetMethodID(fileCls, "getAbsolutePath",
-                                        "()Ljava/lang/String;");
+    jmethodID getAbs = env->GetMethodID(fileCls, "getAbsolutePath", "()Ljava/lang/String;");
     jstring pathStr = (jstring)env->CallObjectMethod(filesDir, getAbs);
     const char *chars = env->GetStringUTFChars(pathStr, nullptr);
     std::string result(chars);
@@ -437,8 +411,6 @@ void FluxVideo_destroySurfaceTexture(void *surfaceTexture)
     env->DeleteGlobalRef(reinterpret_cast<jobject>(surfaceTexture));
 }
 
-extern void NVG_initOESBlit(int maxW, int maxH);
-
 // ── Permissions ───────────────────────────────────────────────────────────────
 void FluxAndroid_requestPermission(const char* permission)
 {
@@ -466,6 +438,8 @@ void FluxAndroid_requestPermission(const char* permission)
     env->DeleteLocalRef(arr);
 }
 
+
+
 // ── Input ─────────────────────────────────────────────────────────────────────
 static int32_t handle_input(android_app * /*app*/, AInputEvent *event)
 {
@@ -479,24 +453,13 @@ static void debugListAssets(AAssetManager *am, const char *path = "")
 {
     AAssetDir *dir = AAssetManager_openDir(am, path);
     if (!dir)
-    {
-        __android_log_print(ANDROID_LOG_DEBUG, "FluxAssets",
-                            "openDir failed for: '%s'", path);
         return;
-    }
     const char *name;
-    bool found = false;
     while ((name = AAssetDir_getNextFileName(dir)) != nullptr)
     {
-        found = true;
-        std::string fullPath = std::string(path).empty()
-                                   ? name
-                                   : std::string(path) + "/" + name;
-        __android_log_print(ANDROID_LOG_DEBUG, "FluxAssets", "  [FILE] %s", fullPath.c_str());
+        std::string full = std::string(path).empty() ? name : std::string(path) + "/" + name;
+        __android_log_print(ANDROID_LOG_DEBUG, "FluxAssets", "  [FILE] %s", full.c_str());
     }
-    if (!found)
-        __android_log_print(ANDROID_LOG_DEBUG, "FluxAssets",
-                            "  (empty or no files in '%s')", path);
     AAssetDir_close(dir);
 }
 
@@ -505,7 +468,6 @@ static void handle_cmd(android_app *app, int32_t cmd)
 {
     switch (cmd)
     {
-
     case APP_CMD_INIT_WINDOW:
     {
         if (!app->window)
@@ -515,25 +477,17 @@ static void handle_cmd(android_app *app, int32_t cmd)
         s_activity = app->activity;
 
         FluxFilePickerAndroid::init(getJNIEnv(), app->activity);
-
         FluxJNI::init(app);
         FluxAndroid_setAssetManager(app->activity->assetManager);
 
-        // ── Debug: list all assets ────────────────────────────────────────────────
         __android_log_print(ANDROID_LOG_DEBUG, "FluxAssets", "=== Asset listing ===");
-        debugListAssets(app->activity->assetManager, "");       // root
-        debugListAssets(app->activity->assetManager, "images"); // images/
-        debugListAssets(app->activity->assetManager, "videos"); // videos/
+        debugListAssets(app->activity->assetManager, "");
         __android_log_print(ANDROID_LOG_DEBUG, "FluxAssets", "=====================");
 
         extractCACert(app);
         if (!s_cacertPath.empty())
             FluxHttp::setCABundle(s_cacertPath);
 
-        // ── Extract MDI icon font from assets to internal storage ──────────────────
-        // Must happen before nvgCreateGLES2 so s_mdiFontPath is ready for
-        // nvg_registerFonts(). The path is also used by flux_font_android.cpp
-        // via FluxAndroid_getMDIFontPath() when the FontCache creates a font entry.
         extractMDIFont(app);
 
         // DPI
@@ -549,20 +503,12 @@ static void handle_cmd(android_app *app, int32_t cmd)
             s_app->build([&]()
                          { return createApp(s_app); });
             auto fcfg = FluxAppWidget::getInstance();
-            s_app->createWindow(fcfg->title,
-                                fcfg->windowWidth,
-                                fcfg->windowHeight);
+            s_app->createWindow(fcfg->title, fcfg->windowWidth, fcfg->windowHeight);
 
-            if (s_vg)
-            {
-                nvgDeleteGLES2(s_vg);
-                s_vg = nullptr;
-            }
-            s_vg = nvgCreateGLES2(NVG_ANTIALIAS);
-            nvg_registerFonts(s_vg); // registers default + MDI
-            FluxAndroid_setVG(s_vg);
+            // ── FluxGL (replaces nvgCreateGLES2) ─────────────────────────
+            FluxGL_init();
+            gl_registerFonts();
 
-            // Canvas2DGL
             canvasGL_create();
 
             auto &win = s_app->getPlatformWindow();
@@ -570,24 +516,17 @@ static void handle_cmd(android_app *app, int32_t cmd)
             s_eglContext = win.getEGLContext();
             s_eglSurface = win.getEGLSurface();
 
-            NVG_initOESBlit(1920, 1080);
+            FluxOESBlit_init(1920, 1080);
             s_app->getFontCache().clear();
         }
         else
         {
             // ── Surface reconnect ─────────────────────────────────────────
-            // NVGcontext is destroyed with the GL context, so we must
-            // recreate it and re-register ALL fonts again.
             s_app->getPlatformWindow().reinitSurface(app->window);
 
-            if (s_vg)
-            {
-                nvgDeleteGLES2(s_vg);
-                s_vg = nullptr;
-            }
-            s_vg = nvgCreateGLES2(NVG_ANTIALIAS);
-            nvg_registerFonts(s_vg); // registers default + MDI
-            FluxAndroid_setVG(s_vg);
+            // ── Reinit FluxGL (replaces nvgDeleteGLES2 / nvgCreateGLES2) ─
+            FluxGL_reinit();
+            gl_registerFonts();
 
             canvasGL_reinit();
 
@@ -596,10 +535,7 @@ static void handle_cmd(android_app *app, int32_t cmd)
             s_eglContext = win.getEGLContext();
             s_eglSurface = win.getEGLSurface();
 
-            NVG_initOESBlit(1920, 1080);
-            // Clear the FontCache so stale nvgHandle values (from the
-            // previous context) are not reused — createFont() will
-            // re-register each font with the new NVGcontext on demand.
+            FluxOESBlit_reinit();
             s_app->getFontCache().clear();
             s_app->getRoot()->markNeedsLayout();
         }
@@ -611,13 +547,9 @@ static void handle_cmd(android_app *app, int32_t cmd)
         FluxMic::get().cancel();
         FluxVideo::get().close();
 
-        if (s_vg)
-        {
-            nvgDeleteGLES2(s_vg);
-            s_vg = nullptr;
-            FluxAndroid_setVG(nullptr);
-        }
-
+        // ── Destroy FluxGL (replaces nvgDeleteGLES2) ──────────────────────
+        FluxGL_destroy();
+        FluxOESBlit_destroy();
         canvasGL_destroyGLObjects();
 
         if (s_app)
@@ -669,7 +601,7 @@ void android_main(android_app *app)
                 return;
         }
 
-        if (!s_app || !s_vg)
+        if (!s_app || !FluxGL_get())
             continue;
 
         auto &win = s_app->getPlatformWindow();
@@ -678,36 +610,27 @@ void android_main(android_app *app)
 
         auto sz = win.getClientSize();
         float dpi = FluxAndroid_getDpiScale();
-        int physW = int(sz.width * dpi);
-        int physH = int(sz.height * dpi);
+        int physW = (int)(sz.width * dpi);
+        int physH = (int)(sz.height * dpi);
 
         // ── Pass 1: render each CanvasWidget into its own FBO ─────────────
-
         if (s_canvasGL)
-        {
-            CanvasWidget::tickAllGL(s_app->getRoot().get(),
-                                    sz.width, sz.height, dpi);
-        }
+            CanvasWidget::tickAllGL(s_app->getRoot().get(), sz.width, sz.height, dpi);
 
-        // ── Pass 2: NanoVG renders the full UI onto the default framebuffer.
-
+        // ── Pass 2: FluxGL renders the full UI ────────────────────────────
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glViewport(0, 0, physW, physH);
         glClearColor(0.f, 0.f, 0.f, 1.f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-        nvgBeginFrame(s_vg, float(physW), float(physH), dpi);
-        FluxAndroid_setVG(s_vg);
-        nvgScale(s_vg, dpi, dpi);
+        // Begin frame: sets viewport + blend state in FluxGL
+        FluxGL_beginFrame((float)sz.width, (float)sz.height, dpi);
 
         GraphicsContext gc(sz.width, sz.height);
-        Renderer::renderWidget(gc, s_app->getRoot().get(),
-                               s_app->getFontCache());
-
-        nvgEndFrame(s_vg);
+        Renderer::renderWidget(gc, s_app->getRoot().get(), s_app->getFontCache());
 
         eglSwapBuffers(win.getEGLDisplay(), win.getEGLSurface());
     }

@@ -3,14 +3,14 @@
 //
 // Pipeline:
 //   ACameraManager → ACameraDevice → ACaptureSession
-//       ├── Preview  → SurfaceTexture → OES texture → NanoVG viewfinder
+//       ├── Preview  → SurfaceTexture → OES texture
 //       └── Capture  → AImageReader  → JPEG bytes   → MediaStore (Gallery)
 
 #ifdef __ANDROID__
 
 #include "flux/flux_camera.hpp"
 #include <EGL/egl.h>
-#include <GLES2/gl2ext.h>
+#include <GLES2/gl2ext.h> 
 #include <camera/NdkCameraMetadataTags.h>
 #include <camera/NdkCaptureRequest.h>
 #include <android/native_window_jni.h>

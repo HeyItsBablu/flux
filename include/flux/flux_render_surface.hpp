@@ -30,7 +30,7 @@ public:
   // Default is no-op; override in surfaces that run their own GL passes.
   virtual void preRender() {}
 
-  // Called INSIDE nvgBeginFrame/nvgEndFrame — NanoVG only here.
+  
   virtual void render(Canvas2D &ctx) = 0;
 
   virtual void onMouseDown(float, float) {}

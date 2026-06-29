@@ -20,6 +20,32 @@ struct PlatformWindow::EGLState
     EGLContext context = EGL_NO_CONTEXT;
 };
 
+// ── EGL config attributes ─────────────────────────────────────────────────────
+
+
+static const EGLint kAttribsES3[] = {
+    EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
+    EGL_RED_SIZE, 8,
+    EGL_GREEN_SIZE, 8,
+    EGL_BLUE_SIZE, 8,
+    EGL_ALPHA_SIZE, 8,
+    EGL_DEPTH_SIZE, 16,
+    // EGL_STENCIL_SIZE removed — not needed by FluxGL
+    EGL_NONE};
+
+static const EGLint kAttribsES2[] = {
+    EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+    EGL_RED_SIZE, 8,
+    EGL_GREEN_SIZE, 8,
+    EGL_BLUE_SIZE, 8,
+    EGL_ALPHA_SIZE, 8,
+    EGL_DEPTH_SIZE, 16,
+    // EGL_STENCIL_SIZE removed — not needed by FluxGL
+    EGL_NONE};
+
+static const EGLint kCtxES3[] = {EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE};
+static const EGLint kCtxES2[] = {EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE};
+
 // ── create ────────────────────────────────────────────────────────────────────
 bool PlatformWindow::create(const std::string & /*title*/,
                             int /*w*/, int /*h*/,
@@ -29,16 +55,6 @@ bool PlatformWindow::create(const std::string & /*title*/,
     nativeHandle = app->window;
     eglState = new EGLState();
 
-    const EGLint attribs[] = {
-        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
-        EGL_RED_SIZE, 8,
-        EGL_GREEN_SIZE, 8,
-        EGL_BLUE_SIZE, 8,
-        EGL_ALPHA_SIZE, 8,
-        EGL_DEPTH_SIZE, 16,
-        EGL_STENCIL_SIZE, 8,
-        EGL_NONE};
-
     EGLDisplay dpy = eglGetDisplay(EGL_DEFAULT_DISPLAY);
     if (!eglInitialize(dpy, nullptr, nullptr))
     {
@@ -46,41 +62,30 @@ bool PlatformWindow::create(const std::string & /*title*/,
         return false;
     }
 
+    // Try ES3 config, fall back to ES2
     EGLConfig cfg;
     EGLint nCfg = 0;
-    if (!eglChooseConfig(dpy, attribs, &cfg, 1, &nCfg) || nCfg == 0)
-    {
-        // Retry with ES2 bit
-        const EGLint attribs2[] = {
-            EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
-            EGL_RED_SIZE, 8,
-            EGL_GREEN_SIZE, 8,
-            EGL_BLUE_SIZE, 8,
-            EGL_ALPHA_SIZE, 8,
-            EGL_DEPTH_SIZE, 16,
-            EGL_STENCIL_SIZE, 8,
-            EGL_NONE};
-        if (!eglChooseConfig(dpy, attribs2, &cfg, 1, &nCfg) || nCfg == 0)
+    if (!eglChooseConfig(dpy, kAttribsES3, &cfg, 1, &nCfg) || nCfg == 0)
+        if (!eglChooseConfig(dpy, kAttribsES2, &cfg, 1, &nCfg) || nCfg == 0)
         {
             LOGE("eglChooseConfig failed");
             return false;
         }
-    }
 
     EGLint fmt = 0;
     eglGetConfigAttrib(dpy, cfg, EGL_NATIVE_VISUAL_ID, &fmt);
     ANativeWindow_setBuffersGeometry(app->window, 0, 0, fmt);
 
     EGLSurface srf = eglCreateWindowSurface(dpy, cfg, app->window, nullptr);
-    // Try ES3 first, fall back to ES2
-    const EGLint ctxA3[] = {EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE};
-    const EGLint ctxA2[] = {EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE};
-    EGLContext ctx = eglCreateContext(dpy, cfg, EGL_NO_CONTEXT, ctxA3);
+
+    // Try ES3 context, fall back to ES2
+    EGLContext ctx = eglCreateContext(dpy, cfg, EGL_NO_CONTEXT, kCtxES3);
     if (ctx == EGL_NO_CONTEXT)
     {
         LOGI("ES3 context failed, falling back to ES2");
-        ctx = eglCreateContext(dpy, cfg, EGL_NO_CONTEXT, ctxA2);
+        ctx = eglCreateContext(dpy, cfg, EGL_NO_CONTEXT, kCtxES2);
     }
+
     if (!eglMakeCurrent(dpy, srf, srf, ctx))
     {
         LOGE("eglMakeCurrent failed");
@@ -90,6 +95,7 @@ bool PlatformWindow::create(const std::string & /*title*/,
     EGLint w = 0, h = 0;
     eglQuerySurface(dpy, srf, EGL_WIDTH, &w);
     eglQuerySurface(dpy, srf, EGL_HEIGHT, &h);
+
     float dpi = FluxAndroid_getDpiScale();
     eglState->display = dpy;
     eglState->surface = srf;
@@ -98,10 +104,11 @@ bool PlatformWindow::create(const std::string & /*title*/,
     cachedHeight = static_cast<int>(h / dpi);
 
     glViewport(0, 0, w, h);
-    LOGI("EGL ready %dx%d", w, h);
+    LOGI("EGL ready %dx%d (logical %dx%d)", w, h, cachedWidth, cachedHeight);
     return true;
 }
 
+// ── reinitSurface ─────────────────────────────────────────────────────────────
 void PlatformWindow::reinitSurface(ANativeWindow *window)
 {
     if (!eglState)
@@ -116,19 +123,11 @@ void PlatformWindow::reinitSurface(ANativeWindow *window)
         s.surface = EGL_NO_SURFACE;
     }
 
-    // Get the config again to create the new surface
-    const EGLint attribs[] = {
-        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
-        EGL_RED_SIZE, 8,
-        EGL_GREEN_SIZE, 8,
-        EGL_BLUE_SIZE, 8,
-        EGL_ALPHA_SIZE, 8,
-        EGL_DEPTH_SIZE, 16,
-        EGL_STENCIL_SIZE, 8,
-        EGL_NONE};
+    // Re-query config to create the new surface (same attribs, no stencil)
     EGLConfig cfg;
     EGLint nCfg = 0;
-    eglChooseConfig(s.display, attribs, &cfg, 1, &nCfg);
+    if (!eglChooseConfig(s.display, kAttribsES3, &cfg, 1, &nCfg) || nCfg == 0)
+        eglChooseConfig(s.display, kAttribsES2, &cfg, 1, &nCfg);
 
     EGLint fmt = 0;
     eglGetConfigAttrib(s.display, cfg, EGL_NATIVE_VISUAL_ID, &fmt);
@@ -150,15 +149,17 @@ void PlatformWindow::reinitSurface(ANativeWindow *window)
     EGLint w = 0, h = 0;
     eglQuerySurface(s.display, s.surface, EGL_WIDTH, &w);
     eglQuerySurface(s.display, s.surface, EGL_HEIGHT, &h);
+
     float dpi = FluxAndroid_getDpiScale();
     cachedWidth = static_cast<int>(w / dpi);
     cachedHeight = static_cast<int>(h / dpi);
     nativeHandle = window;
 
     glViewport(0, 0, w, h);
-    LOGI("reinitSurface: %dx%d", w, h);
+    LOGI("reinitSurface: %dx%d (logical %dx%d)", w, h, cachedWidth, cachedHeight);
 }
 
+// ── destroySurface ────────────────────────────────────────────────────────────
 void PlatformWindow::destroySurface()
 {
     if (!eglState || eglState->surface == EGL_NO_SURFACE)
@@ -177,8 +178,7 @@ void PlatformWindow::destroy()
     auto &s = *eglState;
     if (s.display != EGL_NO_DISPLAY)
     {
-        eglMakeCurrent(s.display,
-                       EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        eglMakeCurrent(s.display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
         if (s.context != EGL_NO_CONTEXT)
             eglDestroyContext(s.display, s.context);
         if (s.surface != EGL_NO_SURFACE)
@@ -190,16 +190,11 @@ void PlatformWindow::destroy()
     nativeHandle = nullptr;
 }
 
-NativeWindow PlatformWindow::handle() const
-{
-    return nativeHandle;
-}
-bool PlatformWindow::isMouseCaptured() const
-{
-    return mouseCapture;
-}
+// ── accessors ─────────────────────────────────────────────────────────────────
+NativeWindow PlatformWindow::handle() const { return nativeHandle; }
+bool PlatformWindow::isMouseCaptured() const { return mouseCapture; }
 
-// ── run — no-op on Android (android_main IS the loop) ────────────────────────
+// ── run — no-op (android_main IS the loop) ───────────────────────────────────
 int PlatformWindow::run() { return 0; }
 
 // ── invalidate ────────────────────────────────────────────────────────────────
@@ -239,7 +234,6 @@ void PlatformWindow::updateClientSize()
     EGLint w = 0, h = 0;
     eglQuerySurface(eglState->display, eglState->surface, EGL_WIDTH, &w);
     eglQuerySurface(eglState->display, eglState->surface, EGL_HEIGHT, &h);
-    // Store logical pixels — physical / dpi
     float dpi = FluxAndroid_getDpiScale();
     cachedWidth = static_cast<int>(w / dpi);
     cachedHeight = static_cast<int>(h / dpi);
@@ -250,9 +244,7 @@ GraphicsContext PlatformWindow::getMeasureContext() const
     return GraphicsContext(cachedWidth, cachedHeight);
 }
 
-// ── touch input → FluxUI callbacks ───────────────────────────────────────────
-// In flux_window_android.cpp, inside handleAndroidEvent or equivalent:
-
+// ── touch input ───────────────────────────────────────────────────────────────
 void PlatformWindow::handleAndroidEvent(const AInputEvent *event)
 {
     if (AInputEvent_getType(event) != AINPUT_EVENT_TYPE_MOTION)
@@ -260,7 +252,6 @@ void PlatformWindow::handleAndroidEvent(const AInputEvent *event)
 
     int32_t action = AMotionEvent_getAction(event) & AMOTION_EVENT_ACTION_MASK;
 
-    // ── Convert physical pixels → logical pixels to match widget layout ──
     float dpi = FluxAndroid_getDpiScale();
     int mx = (int)(AMotionEvent_getX(event, 0) / dpi);
     int my = (int)(AMotionEvent_getY(event, 0) / dpi);
@@ -279,42 +270,33 @@ void PlatformWindow::handleAndroidEvent(const AInputEvent *event)
     case AMOTION_EVENT_ACTION_CANCEL:
         if (callbacks.onMouseUp && callbacks.onMouseUp(mx, my))
             dirty = true;
-        if (action == AMOTION_EVENT_ACTION_CANCEL)
-            if (callbacks.onMouseLeave)
-                callbacks.onMouseLeave();
+        if (action == AMOTION_EVENT_ACTION_CANCEL && callbacks.onMouseLeave)
+            callbacks.onMouseLeave();
         break;
     }
 }
 
 // ── stubs ────────────────────────────────────────────────────────────────────
-
 void PlatformWindow::captureMouseInput() { mouseCapture = true; }
 void PlatformWindow::releaseMouseInput() { mouseCapture = false; }
 void PlatformWindow::setResizeCursorH() {}
 void PlatformWindow::setResizeCursorV() {}
 void PlatformWindow::setDefaultCursor() {}
-void PlatformWindow::startRenderLoop(){}
+void PlatformWindow::startRenderLoop() {}
 
 void PlatformWindow::setClipboardText(const std::string &) {}
 std::string PlatformWindow::getClipboardText() { return {}; }
 
-PlatformWindow::ScreenPoint
-PlatformWindow::clientToScreen(int x, int y) const { return {x, y}; }
-PlatformWindow::ScreenPoint
-PlatformWindow::screenToClient(int x, int y) const { return {x, y}; }
-PlatformWindow::ClientSize
-PlatformWindow::getClientSize() const { return {cachedWidth, cachedHeight}; }
+PlatformWindow::ScreenPoint PlatformWindow::clientToScreen(int x, int y) const { return {x, y}; }
+PlatformWindow::ScreenPoint PlatformWindow::screenToClient(int x, int y) const { return {x, y}; }
+PlatformWindow::ClientSize PlatformWindow::getClientSize() const { return {cachedWidth, cachedHeight}; }
 
-bool PlatformWindow::valid() const
-{
-    return eglState != nullptr;
-}
+bool PlatformWindow::valid() const { return eglState != nullptr; }
 
 EGLDisplay PlatformWindow::getEGLDisplay() const
 {
     return eglState ? eglState->display : EGL_NO_DISPLAY;
 }
-
 EGLSurface PlatformWindow::getEGLSurface() const
 {
     return eglState ? eglState->surface : EGL_NO_SURFACE;

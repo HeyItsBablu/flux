@@ -1,4 +1,3 @@
-//lib/main.cpp
 #include "flux/flux.hpp"
 
 class TriangleSurface : public RenderSurface
@@ -6,9 +5,9 @@ class TriangleSurface : public RenderSurface
   float time_ = 0;
 
 public:
-  void initialize(int, int) override {} 
+  void initialize(int, int) override {}
   void resize(int, int) override {}
-  void destroy() override {} 
+  void destroy() override {}
   void update(double dt) override { time_ += float(dt); }
 
   void render(Canvas2D &ctx) override
@@ -43,9 +42,9 @@ public:
   {
     auto canvas = std::make_shared<CanvasWidget>();
     canvas->setScrollbarsEnabled(false)
-        ->setViewportEnabled(false)
-        ->setFlexGrow(1)
-        ->setSurface<TriangleSurface>();
+          ->setViewportEnabled(false)
+          ->setFlexGrow(1)
+          ->setSurface<TriangleSurface>();
 
     return Flex({canvas})
         ->setDirection(FlexDirection::Column)
@@ -54,14 +53,16 @@ public:
         ->setHeightMode(SizeMode::Full);
   }
 };
- 
+
+
+
 // ============================================================
 //  Entry point
 // ============================================================
 
 WidgetPtr createApp(FluxUI *app)
 {
-  return FluxApp("Triangle App")
+  return FluxApp("Wrap App")
       .setTheme(AppTheme::light())
       .setFullscreenMode(true)
       .build(std::make_shared<TriangleApp>());

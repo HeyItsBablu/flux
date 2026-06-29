@@ -11,7 +11,7 @@ Chain methods, compose layouts, bind reactive state — one codebase, five platf
 **Platforms:** Windows · Linux · macOS · Android · Web  
 **Compiler:** MSVC 2022 / GCC / Clang / AppleClang  
 **Standard:** C++20  
-**Renderer:** GDI+ · Cairo · Metal · NanoVG · WebGL2
+**Renderer:** GDI+ · Cairo · Metal · OpenGl ES · WebGL2
 
 ---
 
@@ -2795,7 +2795,7 @@ AudioPlayer("audio/track.mp3")
 
 Self-contained video player widget. Blits decoded frames each render tick and overlays a control bar on hover. Supports local files, HTTP/HTTPS URLs, and in-memory buffers.
 
-**Platform support:** Android (NanoVG/OES), Windows (GDI StretchDIBits), Linux (Cairo/SDL2).
+**Platform support:** Android (OES), Windows (GDI StretchDIBits), Linux (Cairo/SDL2).
 
 ```cpp
 // Local file

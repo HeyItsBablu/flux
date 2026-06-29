@@ -154,33 +154,24 @@ using NativeColor = Color;
 using AppInstance = HINSTANCE;
 using TimerID = uint32_t;
 
-// ── BrushCache forward declaration ───────────────────────────────────────────
 struct BrushCache;
-
-// ── Type aliases ──────────────────────────────────────────────────────────────
 
 using NativeWindow = HWND;
 using NativeContext = ID2D1DeviceContext1 *;
 using NativeFont = IDWriteTextFormat *;
 using NativeImage = ID2D1Bitmap1 *;
 
-// ── Tick / input helpers ──────────────────────────────────────────────────────
-
 inline uint32_t platformTickCount()
 {
     return static_cast<uint32_t>(GetTickCount64());
 }
-
 inline bool platformKeyDown(int keyCode)
 {
     return (GetKeyState(keyCode) & 0x8000) != 0;
 }
-
 inline bool platformCtrlDown() { return platformKeyDown(VK_CONTROL); }
 inline bool platformShiftDown() { return platformKeyDown(VK_SHIFT); }
 inline bool platformAltDown() { return platformKeyDown(VK_MENU); }
-
-// ── String helpers ────────────────────────────────────────────────────────────
 
 inline std::wstring toWideString(const std::string &utf8)
 {
@@ -191,7 +182,6 @@ inline std::wstring toWideString(const std::string &utf8)
     MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, result.data(), len);
     return result;
 }
-
 inline std::wstring toWideString(const char *data, int byteCount)
 {
     if (!data || byteCount <= 0)
@@ -201,15 +191,6 @@ inline std::wstring toWideString(const char *data, int byteCount)
     MultiByteToWideChar(CP_UTF8, 0, data, byteCount, result.data(), len);
     return result;
 }
-
-// ── DT_* text format flags ────────────────────────────────────────────────────
-// These are cross-platform aliases used by Painter::drawText and IconWidget.
-// On Win32 we define them here explicitly (same values as the Win32 SDK) so
-// that flux_painter_d2d.cpp can interpret them without including <windows.h>
-// in platform-neutral code.
-//
-// NOTE: <windows.h> defines these too, but its values match ours, so there
-// is no conflict when both are visible.
 
 #ifndef DT_LEFT
 static constexpr UINT DT_LEFT = 0x0000u;
@@ -224,9 +205,6 @@ static constexpr UINT DT_END_ELLIPSIS = 0x8000u;
 static constexpr UINT DT_MODIFYSTRING = 0x10000u;
 #endif
 
-// ── WGL extension typedefs (still needed by flux_canvas_win32.cpp) ────────────
-// CanvasWidget on Win32 moves to D2D inline rendering, but we keep these
-// typedefs for any remaining GL canvas path on non-Win32 builds included here.
 using PFNWGLCREATECONTEXTATTRIBSARBPROC =
     HGLRC(WINAPI *)(HDC, HGLRC, const int *);
 using PFNWGLCHOOSEPIXELFORMATARBPROC =
@@ -235,7 +213,7 @@ using PFNWGLCHOOSEPIXELFORMATARBPROC =
 #endif // _WIN32
 
 // ============================================================================
-// LINUX PLATFORM  (unchanged)
+// LINUX PLATFORM
 // ============================================================================
 #if defined(__linux__) && !defined(__ANDROID__)
 
@@ -257,7 +235,6 @@ inline uint32_t platformTickCount()
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return static_cast<uint32_t>(ts.tv_sec * 1000u + ts.tv_nsec / 1'000'000u);
 }
-
 inline bool platformKeyDown(int sdlScancode)
 {
     const uint8_t *state = SDL_GetKeyboardState(nullptr);
@@ -316,7 +293,7 @@ inline std::wstring toWideString(const char *data, int byteCount)
 #endif // __linux__
 
 // ============================================================================
-// ANDROID PLATFORM  (unchanged)
+// ANDROID PLATFORM
 // ============================================================================
 
 #ifdef __ANDROID__
@@ -324,6 +301,7 @@ inline std::wstring toWideString(const char *data, int byteCount)
 #include <android_native_app_glue.h>
 #include <android/log.h>
 #include <EGL/egl.h>
+// ── NativeImage is a GL texture handle — must include gl2.h for GLuint ───────
 #include <GLES2/gl2.h>
 #include <ctime>
 
@@ -332,7 +310,8 @@ using NativeFont = void *;
 using AppInstance = android_app *;
 using TimerID = uint32_t;
 using UINT = unsigned int;
-using NativeImage = int;
+
+using NativeImage = GLuint;
 
 static constexpr UINT DT_LEFT = 0x0000u;
 static constexpr UINT DT_CENTER = 0x0001u;
@@ -387,7 +366,7 @@ inline std::wstring toWideString(const char *data, int byteCount)
 #endif // __ANDROID__
 
 // ============================================================================
-// APPLE PLATFORM (macOS)  (unchanged)
+// APPLE PLATFORM (macOS)
 // ============================================================================
 
 #ifdef __APPLE__
@@ -472,7 +451,7 @@ inline std::wstring toWideString(const char *data, int byteCount)
 #endif // __APPLE__
 
 // ============================================================================
-// WEB PLATFORM (Emscripten)  (unchanged)
+// WEB PLATFORM (Emscripten)
 // ============================================================================
 
 #ifdef __EMSCRIPTEN__
@@ -563,21 +542,16 @@ static constexpr int WHEEL_DELTA = 120;
 
 // ============================================================================
 // GraphicsContext
-//
-// Win32: wraps ID2D1DeviceContext1* + factories + brush cache.
-//        No longer owns any resource — all lifetime is in D3DDevice.
-//
-// Other platforms: unchanged.
 // ============================================================================
 
 #ifdef _WIN32
 
 struct GraphicsContext
 {
-    ID2D1DeviceContext1 *dc = nullptr; // the D2D render target
-    IDWriteFactory3 *dwrite = nullptr; // thread-safe DWrite factory
-    ID2D1Factory1 *factory = nullptr;  // thread-safe D2D factory
-    BrushCache *brushes = nullptr;     // per-device brush cache
+    ID2D1DeviceContext1 *dc = nullptr;
+    IDWriteFactory3 *dwrite = nullptr;
+    ID2D1Factory1 *factory = nullptr;
+    BrushCache *brushes = nullptr;
 
     std::vector<HRGN> clipStack;
 
@@ -616,6 +590,8 @@ struct GraphicsContext
 {
     int width = 0;
     int height = 0;
+    int overlayOffsetX = 0;
+    int overlayOffsetY = 0;
 
     GraphicsContext() = default;
     GraphicsContext(int w, int h) : width(w), height(h) {}
@@ -664,12 +640,6 @@ struct GraphicsContext
 
 // ============================================================================
 // MeasureContext
-//
-// Win32: borrows the always-live D2D context from D3DDevice.
-//        No resource acquisition/release — the device context lives on the
-//        render thread and stays valid for the window lifetime.
-//
-// Other platforms: unchanged.
 // ============================================================================
 
 struct MeasureContext
@@ -682,15 +652,12 @@ struct MeasureContext
     MeasureContext &operator=(MeasureContext &&) = default;
 
 #ifdef _WIN32
-    // Borrow the live D2D context — no GetDC/ReleaseDC, no HWND needed.
-    // DWrite is thread-safe so measureText can safely be called from any thread.
     explicit MeasureContext(ID2D1DeviceContext1 *dc,
                             IDWriteFactory3 *dwrite,
                             ID2D1Factory1 *factory,
                             BrushCache *brushes)
         : ctx(dc, dwrite, factory, brushes) {}
-
-    ~MeasureContext() = default; // nothing to release
+    ~MeasureContext() = default;
 #endif
 
 #if defined(__linux__) && !defined(__ANDROID__)
