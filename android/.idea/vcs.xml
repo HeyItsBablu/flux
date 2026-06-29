@@ -1,12 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="VcsDirectoryMappings">
+    <mapping directory="$PROJECT_DIR$/.." vcs="Git" />
     <mapping directory="$PROJECT_DIR$" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/app/src/main/cpp/flux" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/app/src/main/cpp/flux/external/curl" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/app/src/main/cpp/flux/external/freetype" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/app/src/main/cpp/flux/external/freetype/subprojects/dlg" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/app/src/main/cpp/flux/external/mbedtls" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/app/src/main/cpp/flux/external/mbedtls/framework" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/../external/curl" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/../external/emsdk" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/../external/mbedtls" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/../external/mbedtls/framework" vcs="Git" />
   </component>
 </project>

@@ -6,6 +6,7 @@ android {
     namespace = "com.example.myapplication"
     compileSdk = 36
 
+
     defaultConfig {
         applicationId = "com.example.myapplication"
         minSdk = 28
@@ -14,6 +15,15 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    sourceSets {
+        getByName("main") {
+            assets.srcDirs(
+                "src/main/assets",
+                "../../assets"   
+            )
+        }
     }
 
     buildTypes {

@@ -21,7 +21,7 @@ WidgetPtr createApp(FluxUI* app);
     FluxUI* _app;
 }
 @end
-
+ 
 @implementation FluxAppDelegate
 
 - (void)applicationDidFinishLaunching:(NSNotification*)notification {

@@ -7,7 +7,7 @@
 #include <GLES2/gl2.h>
 #include <android/log.h>
 
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "FluxUI", __VA_ARGS__)
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "FluxUI", __VA_ARGS__) 
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "FluxUI", __VA_ARGS__)
 
 extern float FluxAndroid_getDpiScale();
