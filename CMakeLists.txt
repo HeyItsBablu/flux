@@ -119,17 +119,6 @@ if(NOT EMSCRIPTEN)
 endif()
 
 # ============================================================================
-# FreeType  (git submodule at external/freetype — all platforms)
-# ============================================================================
-
-set(FT_DISABLE_ZLIB     ON CACHE BOOL "" FORCE)
-set(FT_DISABLE_BZIP2    ON CACHE BOOL "" FORCE)
-set(FT_DISABLE_PNG      ON CACHE BOOL "" FORCE)
-set(FT_DISABLE_HARFBUZZ ON CACHE BOOL "" FORCE)
-set(FT_DISABLE_BROTLI   ON CACHE BOOL "" FORCE)
-add_subdirectory(external/freetype)
-
-# ============================================================================
 # stb  (local — header-only + single implementation file)
 # ============================================================================
 
@@ -138,23 +127,6 @@ target_include_directories(stb PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/stb>
         $<INSTALL_INTERFACE:include>
 )
-
-# ============================================================================
-# GLAD  (Windows + Linux desktop only)
-# Android uses EGL/GLES directly
-# Web uses WebGL2 via Emscripten directly — no loader needed
-# ============================================================================
-
-if(WIN32 OR (UNIX AND NOT APPLE AND NOT ANDROID AND NOT EMSCRIPTEN))
-    add_library(glad STATIC external/glad/src/glad.c)
-    set_source_files_properties(external/glad/src/glad.c PROPERTIES LANGUAGE C)
-    target_include_directories(glad PUBLIC
-            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/glad/include>
-            $<INSTALL_INTERFACE:include>
-    )
-endif()
-
-
 
 # ============================================================================
 # Linux platform dependencies
@@ -251,8 +223,6 @@ target_include_directories(flux
         PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/freetype/include>
-
 
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>,$<NOT:$<BOOL:${EMSCRIPTEN}>>>:
             ${SDL2_INCLUDE_DIRS}>
@@ -262,8 +232,6 @@ target_include_directories(flux
             ${PANGOCAIRO_INCLUDE_DIRS}>
 
         PRIVATE
-        $<$<OR:$<BOOL:${WIN32}>,$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${APPLE}>>,$<NOT:$<BOOL:${ANDROID}>>,$<NOT:$<BOOL:${EMSCRIPTEN}>>>>:
-            ${CMAKE_CURRENT_SOURCE_DIR}/external/glad/include>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>,$<NOT:$<BOOL:${EMSCRIPTEN}>>>:
             ${AVFORMAT_INCLUDE_DIRS}>
         $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${ANDROID}>>,$<NOT:$<BOOL:${EMSCRIPTEN}>>>:
@@ -300,10 +268,8 @@ endif()
 if(WIN32)
     target_link_libraries(flux PUBLIC
             stb
-            freetype
-            glad
             CURL::libcurl
-            dxguid        
+            dxguid
             Msimg32
             Gdiplus
             opengl32
@@ -321,7 +287,6 @@ if(WIN32)
 elseif(EMSCRIPTEN)
     target_link_libraries(flux PUBLIC
             stb
-            freetype
     )
 
     # target_link_options(flux PUBLIC
@@ -354,7 +319,6 @@ elseif(ANDROID)
 
     target_link_libraries(flux PUBLIC
             stb
-            freetype
             app_glue
             CURL::libcurl
             mbedtls
@@ -372,7 +336,6 @@ elseif(ANDROID)
 elseif(APPLE)
     target_link_libraries(flux PUBLIC
             stb
-            freetype
             CURL::libcurl
             "-framework Cocoa"
             "-framework Metal"
@@ -398,8 +361,6 @@ elseif(APPLE)
 elseif(UNIX AND NOT APPLE)
     target_link_libraries(flux PUBLIC
             stb
-            freetype
-            glad
             OpenGL::GL
             CURL::libcurl
             ${SDL2_LIBRARIES}
@@ -473,11 +434,7 @@ if(NOT ANDROID AND NOT EMSCRIPTEN)
     include(GNUInstallDirs)
     include(CMakePackageConfigHelpers)
 
-    set(FLUX_INSTALL_TARGETS flux stb freetype)
-
-    if(WIN32 OR (UNIX AND NOT APPLE AND NOT ANDROID))
-        list(APPEND FLUX_INSTALL_TARGETS glad)
-    endif()
+    set(FLUX_INSTALL_TARGETS flux stb)
 
     install(TARGETS ${FLUX_INSTALL_TARGETS}
             EXPORT  fluxTargets
@@ -486,14 +443,7 @@ if(NOT ANDROID AND NOT EMSCRIPTEN)
 
     install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
-
-
     install(DIRECTORY external/stb/
-            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-            FILES_MATCHING PATTERN "*.h"
-    )
-
-    install(DIRECTORY external/freetype/include/
             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
             FILES_MATCHING PATTERN "*.h"
     )
