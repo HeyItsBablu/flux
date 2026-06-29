@@ -22,8 +22,8 @@
 #include <thread>
 #include <vector>
 
-#include "../../external/dr/dr_mp3.h"
-#include "../../external/dr/dr_wav.h"
+#include "dr_mp3.h"
+#include "dr_wav.h"
 
 #define AUDIO_LOGI(fmt, ...)                                       \
     do                                                             \

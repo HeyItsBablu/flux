@@ -129,6 +129,16 @@ target_include_directories(stb PUBLIC
 )
 
 # ============================================================================
+# dr_libs  (local — header-only + single implementation file)
+# ============================================================================
+
+add_library(dr STATIC src/flux_audio_impl.cpp)
+target_include_directories(dr PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/dr>
+        $<INSTALL_INTERFACE:include>
+)
+
+# ============================================================================
 # Linux platform dependencies
 # Guarded against Emscripten — UNIX is TRUE on Linux host even when
 # cross-compiling to web, so the guard is required.
@@ -213,6 +223,7 @@ if(NOT EMSCRIPTEN)
 endif()
 
 list(FILTER FLUX_SOURCES EXCLUDE REGEX ".*stb_impl\\.cpp$")
+list(FILTER FLUX_SOURCES EXCLUDE REGEX ".*flux_audio_impl\\.cpp$")
 
 add_library(flux STATIC ${FLUX_SOURCES})
 add_library(flux::flux ALIAS flux)
@@ -268,6 +279,7 @@ endif()
 if(WIN32)
     target_link_libraries(flux PUBLIC
             stb
+            dr
             CURL::libcurl
             dxguid
             Msimg32
@@ -287,6 +299,7 @@ if(WIN32)
 elseif(EMSCRIPTEN)
     target_link_libraries(flux PUBLIC
             stb
+            dr
     )
 
     # target_link_options(flux PUBLIC
@@ -319,6 +332,7 @@ elseif(ANDROID)
 
     target_link_libraries(flux PUBLIC
             stb
+            dr
             app_glue
             CURL::libcurl
             mbedtls
@@ -336,6 +350,7 @@ elseif(ANDROID)
 elseif(APPLE)
     target_link_libraries(flux PUBLIC
             stb
+            dr
             CURL::libcurl
             "-framework Cocoa"
             "-framework Metal"
@@ -361,6 +376,7 @@ elseif(APPLE)
 elseif(UNIX AND NOT APPLE)
     target_link_libraries(flux PUBLIC
             stb
+            dr
             OpenGL::GL
             CURL::libcurl
             ${SDL2_LIBRARIES}
@@ -434,7 +450,7 @@ if(NOT ANDROID AND NOT EMSCRIPTEN)
     include(GNUInstallDirs)
     include(CMakePackageConfigHelpers)
 
-    set(FLUX_INSTALL_TARGETS flux stb)
+    set(FLUX_INSTALL_TARGETS flux stb dr)
 
     install(TARGETS ${FLUX_INSTALL_TARGETS}
             EXPORT  fluxTargets
@@ -444,6 +460,11 @@ if(NOT ANDROID AND NOT EMSCRIPTEN)
     install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
     install(DIRECTORY external/stb/
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+            FILES_MATCHING PATTERN "*.h"
+    )
+
+    install(DIRECTORY external/dr/
             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
             FILES_MATCHING PATTERN "*.h"
     )

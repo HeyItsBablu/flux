@@ -22,8 +22,8 @@
 #include <thread>
 #include <vector>
 
-#include "../../external/dr/dr_mp3.h"
-#include "../../external/dr/dr_wav.h"
+#include "dr_mp3.h"
+#include "dr_wav.h"
 
 #define AUDIO_LOGI(fmt, ...) fprintf(stderr, "[FluxAudio] " fmt "\n", ##__VA_ARGS__)
 #define AUDIO_LOGE(fmt, ...) AUDIO_LOGI(fmt, ##__VA_ARGS__)
