@@ -2,11 +2,7 @@
 // flux_canvas2d_d2d.cpp
 // Direct2D implementation of Canvas2D for Win32.
 //
-// Option A: Canvas2DBackend::mvp exists in the struct but is ignored here —
-// D2D applies the viewport transform externally in CanvasWidget::render()
-// via dc->SetTransform() before blitting the offscreen bitmap.
-// Canvas2D::translate/scale/rotate manipulate the D2D offscreen DC transform
-// directly through the d2dM** members.
+// Font rasterization: stb_truetype (matches all other backends).
 // ============================================================================
 
 #ifdef _WIN32
@@ -22,10 +18,9 @@
 // ── Internal backend header ───────────────────────────────────────────────────
 #include "flux/flux_canvas2d_backend.hpp"
 
-// ── FreeType ──────────────────────────────────────────────────────────────────
-#include <ft2build.h>
-#include FT_FREETYPE_H
-#include FT_GLYPH_H
+// ── stb_truetype ──────────────────────────────────────────────────────────────
+
+#include <stb_truetype.h>
 
 // ── stb_image ─────────────────────────────────────────────────────────────────
 #include <stb_image.h>
@@ -54,16 +49,10 @@ static inline D2D1_ROUNDED_RECT makeRounded(float x, float y, float w, float h, 
     return D2D1::RoundedRect(makeRect(x, y, w, h), r, r);
 }
 
-// Helper to get the D2D device context from the backend
 static inline ID2D1DeviceContext *getDC(Canvas2DBackend *b)
 {
     return b->d2d->offscreenDC.Get();
 }
-
-// =============================================================================
-// Canvas2DImageD2D destructor
-// =============================================================================
-// Nothing to do — ComPtr handles lifetime automatically.
 
 // =============================================================================
 // Canvas2DD2D — init / destroy
@@ -73,9 +62,6 @@ bool Canvas2DD2D::init(D3DDevice *dev)
 {
     assert(dev && dev->valid);
     device = dev;
-
-    if (FT_Init_FreeType(&ftLibrary))
-        return false;
 
     atlasPixels.assign(size_t(kAtlasW) * kAtlasH * 4, 0);
 
@@ -121,19 +107,8 @@ bool Canvas2DD2D::resizeBitmap(int w, int h)
 
 void Canvas2DD2D::destroy()
 {
-    for (auto &f : fonts)
-        if (f.ftFace)
-        {
-            FT_Done_Face(f.ftFace);
-            f.ftFace = nullptr;
-        }
-    fonts.clear();
+    fonts.clear(); // stbtt_fontinfo has no explicit cleanup needed
     glyphs.clear();
-    if (ftLibrary)
-    {
-        FT_Done_FreeType(ftLibrary);
-        ftLibrary = nullptr;
-    }
     atlasBitmap.Reset();
     offscreenBitmap.Reset();
     offscreenDC.Reset();
@@ -161,6 +136,7 @@ int Canvas2DD2D::addFont(const std::string &name, const std::string &path)
     int ex = findFont(name);
     if (ex >= 0)
         return ex;
+
     std::ifstream f(path, std::ios::binary | std::ios::ate);
     if (!f)
         return -1;
@@ -168,6 +144,7 @@ int Canvas2DD2D::addFont(const std::string &name, const std::string &path)
     if (sz <= 0)
         return -1;
     f.seekg(0);
+
     fonts.push_back({});
     auto &face = fonts.back();
     face.name = name;
@@ -178,13 +155,15 @@ int Canvas2DD2D::addFont(const std::string &name, const std::string &path)
         fonts.pop_back();
         return -1;
     }
-    FT_Error err = FT_New_Memory_Face(ftLibrary, face.ttfData.data(),
-                                      FT_Long(face.ttfData.size()), 0, &face.ftFace);
-    if (err)
+
+    if (!stbtt_InitFont(&face.info, face.ttfData.data(),
+                        stbtt_GetFontOffsetForIndex(face.ttfData.data(), 0)))
     {
         fonts.pop_back();
         return -1;
     }
+
+    face.ready = true;
     return int(fonts.size()) - 1;
 }
 
@@ -198,27 +177,28 @@ void Canvas2DD2D::uploadAtlas()
 
 bool Canvas2DD2D::bakeGlyph(int fontIdx, int codepoint, int pixelSize, GlyphEntry &out)
 {
-    if (fontIdx < 0 || fontIdx >= (int)fonts.size())
-        return false;
-    FT_Face face = fonts[fontIdx].ftFace;
-    FT_Set_Pixel_Sizes(face, 0, FT_UInt(pixelSize));
-    FT_UInt gi = FT_Get_Char_Index(face, FT_ULong(codepoint));
-    if (FT_Load_Glyph(face, gi, FT_LOAD_DEFAULT))
-        return false;
-    if (FT_Render_Glyph(face->glyph, FT_RENDER_MODE_NORMAL))
+    if (fontIdx < 0 || fontIdx >= (int)fonts.size() || !fonts[fontIdx].ready)
         return false;
 
-    FT_GlyphSlot slot = face->glyph;
-    FT_Bitmap &bmp = slot->bitmap;
-    int gw = (int)bmp.width, gh = (int)bmp.rows;
-    int advance = int(slot->advance.x >> 6);
-    int xoff = slot->bitmap_left, yoff = -slot->bitmap_top;
+    const stbtt_fontinfo *info = &fonts[fontIdx].info;
+    float scale = stbtt_ScaleForPixelHeight(info, float(pixelSize));
 
-    if (gw <= 0 || gh <= 0)
+    int xoff, yoff, gw, gh;
+    unsigned char *bmp = stbtt_GetCodepointBitmap(
+        info, scale, scale, codepoint, &gw, &gh, &xoff, &yoff);
+
+    int advanceWidth, leftBearing;
+    stbtt_GetCodepointHMetrics(info, codepoint, &advanceWidth, &leftBearing);
+    int advance = int(float(advanceWidth) * scale + 0.5f);
+
+    if (!bmp || gw <= 0 || gh <= 0)
     {
+        if (bmp)
+            stbtt_FreeBitmap(bmp, nullptr);
         out = {GlyphKey{fontIdx, codepoint, pixelSize}, 0, 0, 0, 0, xoff, yoff, advance};
         return true;
     }
+
     if (shelfX + gw + 1 > kAtlasW)
     {
         shelfX = 0;
@@ -227,28 +207,33 @@ bool Canvas2DD2D::bakeGlyph(int fontIdx, int codepoint, int pixelSize, GlyphEntr
     }
     if (shelfY + gh + 1 > kAtlasH)
     {
+        // Atlas full — return glyph metrics without atlas coords
+        stbtt_FreeBitmap(bmp, nullptr);
         out = {GlyphKey{fontIdx, codepoint, pixelSize}, 0, 0, gw, gh, xoff, yoff, advance};
         return true;
     }
 
-    const int srcPitch = std::abs(bmp.pitch);
+    // stbtt produces a single-channel alpha bitmap; expand to BGRA premultiplied
     for (int row = 0; row < gh; ++row)
     {
-        const uint8_t *src = bmp.buffer + row * srcPitch;
+        const uint8_t *src = bmp + row * gw;
         uint8_t *dst = atlasPixels.data() + ((shelfY + row) * kAtlasW + shelfX) * 4;
         for (int col = 0; col < gw; ++col)
         {
             uint8_t g = src[col];
-            dst[col * 4 + 0] = g;
-            dst[col * 4 + 1] = g;
-            dst[col * 4 + 2] = g;
-            dst[col * 4 + 3] = g;
+            dst[col * 4 + 0] = g; // B
+            dst[col * 4 + 1] = g; // G
+            dst[col * 4 + 2] = g; // R
+            dst[col * 4 + 3] = g; // A  (premultiplied white * alpha)
         }
     }
+
     out = {GlyphKey{fontIdx, codepoint, pixelSize}, shelfX, shelfY, gw, gh, xoff, yoff, advance};
     shelfX += gw + 1;
     if (gh > shelfH)
         shelfH = gh;
+
+    stbtt_FreeBitmap(bmp, nullptr);
     uploadAtlas();
     return true;
 }
@@ -267,18 +252,12 @@ const Canvas2DD2D::GlyphEntry *Canvas2DD2D::getGlyph(int fontIdx, int codepoint,
 
 float Canvas2DD2D::getKernAdvance(int fontIdx, int cp1, int cp2, int pixelSize) const
 {
-    if (fontIdx < 0 || fontIdx >= (int)fonts.size())
+    if (fontIdx < 0 || fontIdx >= (int)fonts.size() || !fonts[fontIdx].ready)
         return 0.f;
-    FT_Face face = fonts[fontIdx].ftFace;
-    if (!FT_HAS_KERNING(face))
-        return 0.f;
-    FT_Set_Pixel_Sizes(face, 0, FT_UInt(pixelSize));
-    FT_UInt g1 = FT_Get_Char_Index(face, FT_ULong(cp1));
-    FT_UInt g2 = FT_Get_Char_Index(face, FT_ULong(cp2));
-    FT_Vector delta;
-    if (FT_Get_Kerning(face, g1, g2, FT_KERNING_DEFAULT, &delta))
-        return 0.f;
-    return float(delta.x >> 6);
+    const stbtt_fontinfo *info = &fonts[fontIdx].info;
+    float scale = stbtt_ScaleForPixelHeight(info, float(pixelSize));
+    int kern = stbtt_GetCodepointKernAdvance(info, cp1, cp2);
+    return float(kern) * scale;
 }
 
 // =============================================================================
@@ -294,7 +273,6 @@ Canvas2DBackend *Canvas2DBackend::create(Canvas2DD2D *d2d)
 
 void Canvas2DBackend::destroy(Canvas2DBackend *b)
 {
-    // d2d owned externally
     delete b;
 }
 
@@ -307,17 +285,12 @@ Canvas2D::Canvas2D(Canvas2DBackend *backend, int w, int h)
 {
     assert(backend_ && backend_->d2d && backend_->d2d->offscreenDC);
 
-    // Initialize brush cache (std::unordered_map<uint32_t, ComPtr<ID2D1SolidColorBrush>>)
     using BrushMap = std::unordered_map<uint32_t, ComPtr<ID2D1SolidColorBrush>>;
     brushCache_ = new BrushMap();
 
-    // Reset D2D transform to identity
-    d2dM11_ = 1;
-    d2dM12_ = 0;
-    d2dM21_ = 0;
-    d2dM22_ = 1;
-    d2dDx_ = 0;
-    d2dDy_ = 0;
+    d2dM11_ = 1; d2dM12_ = 0;
+    d2dM21_ = 0; d2dM22_ = 1;
+    d2dDx_  = 0; d2dDy_  = 0;
     applyD2DTransform();
 }
 
@@ -328,8 +301,8 @@ Canvas2D::Canvas2D(Canvas2DBackend *backend, int w, int h)
 void Canvas2D::applyD2DTransform()
 {
     D2D1_MATRIX_3X2_F m = D2D1::Matrix3x2F(d2dM11_, d2dM12_,
-                                           d2dM21_, d2dM22_,
-                                           d2dDx_, d2dDy_);
+                                            d2dM21_, d2dM22_,
+                                            d2dDx_,  d2dDy_);
     getDC(backend_)->SetTransform(m);
 }
 
@@ -350,19 +323,15 @@ void *Canvas2D::getBrush(Color c)
 void *Canvas2D::makeStrokeStyle() const
 {
     D2D1_CAP_STYLE cap = D2D1_CAP_STYLE_FLAT;
-    if (lineCap_ == LineCap::Round)
-        cap = D2D1_CAP_STYLE_ROUND;
-    if (lineCap_ == LineCap::Square)
-        cap = D2D1_CAP_STYLE_SQUARE;
+    if (lineCap_ == LineCap::Round)  cap = D2D1_CAP_STYLE_ROUND;
+    if (lineCap_ == LineCap::Square) cap = D2D1_CAP_STYLE_SQUARE;
     D2D1_LINE_JOIN join = D2D1_LINE_JOIN_MITER;
-    if (lineJoin_ == LineJoin::Round)
-        join = D2D1_LINE_JOIN_ROUND;
-    if (lineJoin_ == LineJoin::Bevel)
-        join = D2D1_LINE_JOIN_BEVEL;
+    if (lineJoin_ == LineJoin::Round) join = D2D1_LINE_JOIN_ROUND;
+    if (lineJoin_ == LineJoin::Bevel) join = D2D1_LINE_JOIN_BEVEL;
     D2D1_STROKE_STYLE_PROPERTIES sp = D2D1::StrokeStyleProperties(cap, cap, cap, join, miterLimit_);
     auto *ss = new ComPtr<ID2D1StrokeStyle>();
     backend_->d2d->device->d2dFactory->CreateStrokeStyle(sp, nullptr, 0, ss->GetAddressOf());
-    return ss; // caller must delete
+    return ss;
 }
 
 void *Canvas2D::makeFillBrush(float x, float y, float w, float h)
@@ -389,16 +358,14 @@ void *Canvas2D::makeFillBrush(float x, float y, float w, float h)
         D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES lp = {{gx0_, gy0_}, {gx1_, gy1_}};
         ComPtr<ID2D1LinearGradientBrush> lb;
         dc->CreateLinearGradientBrush(lp, coll.Get(), lb.GetAddressOf());
-        if (lb)
-            lb->QueryInterface(IID_PPV_ARGS(br->GetAddressOf()));
+        if (lb) lb->QueryInterface(IID_PPV_ARGS(br->GetAddressOf()));
     }
     else
     {
         D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES rp = {{gcx_, gcy_}, {0, 0}, gOutR_, gOutR_};
         ComPtr<ID2D1RadialGradientBrush> rb;
         dc->CreateRadialGradientBrush(rp, coll.Get(), rb.GetAddressOf());
-        if (rb)
-            rb->QueryInterface(IID_PPV_ARGS(br->GetAddressOf()));
+        if (rb) rb->QueryInterface(IID_PPV_ARGS(br->GetAddressOf()));
     }
     return br;
 }
@@ -407,12 +374,10 @@ void *Canvas2D::buildPathGeometry() const
 {
     ComPtr<ID2D1PathGeometry> geom;
     backend_->d2d->device->d2dFactory->CreatePathGeometry(geom.GetAddressOf());
-    if (!geom)
-        return nullptr;
+    if (!geom) return nullptr;
     ComPtr<ID2D1GeometrySink> sink;
     geom->Open(sink.GetAddressOf());
-    if (!sink)
-        return nullptr;
+    if (!sink) return nullptr;
     sink->SetFillMode(fillRule_ == FillRule::EvenOdd ? D2D1_FILL_MODE_ALTERNATE : D2D1_FILL_MODE_WINDING);
 
     bool figureOpen = false;
@@ -420,17 +385,12 @@ void *Canvas2D::buildPathGeometry() const
     {
         if (pt.close)
         {
-            if (figureOpen)
-            {
-                sink->EndFigure(D2D1_FIGURE_END_CLOSED);
-                figureOpen = false;
-            }
+            if (figureOpen) { sink->EndFigure(D2D1_FIGURE_END_CLOSED); figureOpen = false; }
             continue;
         }
         if (pt.move)
         {
-            if (figureOpen)
-                sink->EndFigure(D2D1_FIGURE_END_OPEN);
+            if (figureOpen) sink->EndFigure(D2D1_FIGURE_END_OPEN);
             sink->BeginFigure(D2D1::Point2F(pt.x, pt.y), D2D1_FIGURE_BEGIN_FILLED);
             figureOpen = true;
         }
@@ -445,19 +405,17 @@ void *Canvas2D::buildPathGeometry() const
                 sink->AddLine(D2D1::Point2F(pt.x, pt.y));
         }
     }
-    if (figureOpen)
-        sink->EndFigure(D2D1_FIGURE_END_OPEN);
+    if (figureOpen) sink->EndFigure(D2D1_FIGURE_END_OPEN);
     sink->Close();
     auto *ret = new ComPtr<ID2D1PathGeometry>(geom);
-    return ret; // caller must delete
+    return ret;
 }
 
 void Canvas2D::drawPathFilled()
 {
     auto *geomPtr = static_cast<ComPtr<ID2D1PathGeometry> *>(buildPathGeometry());
-    if (!geomPtr)
-        return;
-    auto *brPtr = static_cast<ComPtr<ID2D1Brush> *>(makeFillBrush(0, 0, (float)w_, (float)h_));
+    if (!geomPtr) return;
+    auto *brPtr = static_cast<ComPtr<ID2D1Brush> *>(makeFillBrush(0, 0, float(w_), float(h_)));
     if (brPtr && *brPtr)
         getDC(backend_)->FillGeometry(geomPtr->Get(), brPtr->Get());
     delete brPtr;
@@ -467,8 +425,7 @@ void Canvas2D::drawPathFilled()
 void Canvas2D::drawPathStroked()
 {
     auto *geomPtr = static_cast<ComPtr<ID2D1PathGeometry> *>(buildPathGeometry());
-    if (!geomPtr)
-        return;
+    if (!geomPtr) return;
     auto *ssPtr = static_cast<ComPtr<ID2D1StrokeStyle> *>(makeStrokeStyle());
     auto *br = static_cast<ID2D1SolidColorBrush *>(getBrush(strokeColor_));
     if (br)
@@ -484,88 +441,66 @@ void Canvas2D::drawPathStroked()
 
 void Canvas2D::save()
 {
-    using BrushMap = std::unordered_map<uint32_t, ComPtr<ID2D1SolidColorBrush>>;
     SaveState s;
-    s.d2dCtmM11 = d2dM11_;
-    s.d2dCtmM12 = d2dM12_;
-    s.d2dCtmM21 = d2dM21_;
-    s.d2dCtmM22 = d2dM22_;
-    s.d2dCtmDx = d2dDx_;
-    s.d2dCtmDy = d2dDy_;
-    s.fillColor = fillColor_;
-    s.strokeColor = strokeColor_;
-    s.lineWidth = lineWidth_;
-    s.globalAlpha = globalAlpha_;
-    s.fillIsGrad = fillIsGrad_;
-    s.clipDepth = clipDepth_;
-    s.gradType = gradType_;
-    s.gx0 = gx0_;
-    s.gy0 = gy0_;
-    s.gx1 = gx1_;
-    s.gy1 = gy1_;
-    s.gcx = gcx_;
-    s.gcy = gcy_;
-    s.gInR = gInR_;
-    s.gOutR = gOutR_;
-    s.stops = gStops_;
-    s.fontFace = fontFace_;
-    s.fontSize = fontSize_;
-    s.fontBold = fontBold_;
-    s.fontItalic = fontItalic_;
-    s.textAlign = textAlign_;
+    s.d2dCtmM11 = d2dM11_; s.d2dCtmM12 = d2dM12_;
+    s.d2dCtmM21 = d2dM21_; s.d2dCtmM22 = d2dM22_;
+    s.d2dCtmDx  = d2dDx_;  s.d2dCtmDy  = d2dDy_;
+    s.fillColor    = fillColor_;
+    s.strokeColor  = strokeColor_;
+    s.lineWidth    = lineWidth_;
+    s.globalAlpha  = globalAlpha_;
+    s.fillIsGrad   = fillIsGrad_;
+    s.clipDepth    = clipDepth_;
+    s.gradType     = gradType_;
+    s.gx0 = gx0_; s.gy0 = gy0_; s.gx1 = gx1_; s.gy1 = gy1_;
+    s.gcx = gcx_; s.gcy = gcy_; s.gInR = gInR_; s.gOutR = gOutR_;
+    s.stops        = gStops_;
+    s.fontFace     = fontFace_;
+    s.fontSize     = fontSize_;
+    s.fontBold     = fontBold_;
+    s.fontItalic   = fontItalic_;
+    s.textAlign    = textAlign_;
     s.textBaseline = textBaseline_;
-    s.lineCap = lineCap_;
-    s.lineJoin = lineJoin_;
+    s.lineCap      = lineCap_;
+    s.lineJoin     = lineJoin_;
     stateStack_.push_back(std::move(s));
 }
 
 void Canvas2D::restore()
 {
-    if (stateStack_.empty())
-        return;
+    if (stateStack_.empty()) return;
     const SaveState &s = stateStack_.back();
 
-    // Pop D2D axis-aligned clip layers
     while (clipDepth_ > s.clipDepth)
     {
         getDC(backend_)->PopAxisAlignedClip();
         --clipDepth_;
     }
 
-    d2dM11_ = s.d2dCtmM11;
-    d2dM12_ = s.d2dCtmM12;
-    d2dM21_ = s.d2dCtmM21;
-    d2dM22_ = s.d2dCtmM22;
-    d2dDx_ = s.d2dCtmDx;
-    d2dDy_ = s.d2dCtmDy;
+    d2dM11_ = s.d2dCtmM11; d2dM12_ = s.d2dCtmM12;
+    d2dM21_ = s.d2dCtmM21; d2dM22_ = s.d2dCtmM22;
+    d2dDx_  = s.d2dCtmDx;  d2dDy_  = s.d2dCtmDy;
     applyD2DTransform();
 
-    fillColor_ = s.fillColor;
-    strokeColor_ = s.strokeColor;
-    lineWidth_ = s.lineWidth;
-    globalAlpha_ = s.globalAlpha;
-    fillIsGrad_ = s.fillIsGrad;
-    clipDepth_ = s.clipDepth;
-    gradType_ = s.gradType;
-    gx0_ = s.gx0;
-    gy0_ = s.gy0;
-    gx1_ = s.gx1;
-    gy1_ = s.gy1;
-    gcx_ = s.gcx;
-    gcy_ = s.gcy;
-    gInR_ = s.gInR;
-    gOutR_ = s.gOutR;
-    gStops_ = s.stops;
-    fontFace_ = s.fontFace;
-    fontSize_ = s.fontSize;
-    fontBold_ = s.fontBold;
-    fontItalic_ = s.fontItalic;
-    textAlign_ = s.textAlign;
+    fillColor_    = s.fillColor;
+    strokeColor_  = s.strokeColor;
+    lineWidth_    = s.lineWidth;
+    globalAlpha_  = s.globalAlpha;
+    fillIsGrad_   = s.fillIsGrad;
+    clipDepth_    = s.clipDepth;
+    gradType_     = s.gradType;
+    gx0_ = s.gx0; gy0_ = s.gy0; gx1_ = s.gx1; gy1_ = s.gy1;
+    gcx_ = s.gcx; gcy_ = s.gcy; gInR_ = s.gInR; gOutR_ = s.gOutR;
+    gStops_       = s.stops;
+    fontFace_     = s.fontFace;
+    fontSize_     = s.fontSize;
+    fontBold_     = s.fontBold;
+    fontItalic_   = s.fontItalic;
+    textAlign_    = s.textAlign;
     textBaseline_ = s.textBaseline;
-    lineCap_ = s.lineCap;
-    lineJoin_ = s.lineJoin;
+    lineCap_      = s.lineCap;
+    lineJoin_     = s.lineJoin;
 
-    // Invalidate brush cache — globalAlpha may have changed
     using BrushMap = std::unordered_map<uint32_t, ComPtr<ID2D1SolidColorBrush>>;
     static_cast<BrushMap *>(brushCache_)->clear();
 
@@ -578,38 +513,30 @@ void Canvas2D::restore()
 
 void Canvas2D::translate(float dx, float dy)
 {
-    // Post-multiply translation: new = old * T
     d2dDx_ += d2dM11_ * dx + d2dM21_ * dy;
     d2dDy_ += d2dM12_ * dx + d2dM22_ * dy;
     applyD2DTransform();
 }
 void Canvas2D::scale(float sx, float sy)
 {
-    d2dM11_ *= sx;
-    d2dM12_ *= sx;
-    d2dM21_ *= sy;
-    d2dM22_ *= sy;
+    d2dM11_ *= sx; d2dM12_ *= sx;
+    d2dM21_ *= sy; d2dM22_ *= sy;
     applyD2DTransform();
 }
 void Canvas2D::rotate(float r)
 {
     float c = cosf(r), s = sinf(r);
-    float m11 = d2dM11_ * c + d2dM21_ * s, m12 = d2dM12_ * c + d2dM22_ * s;
+    float m11 = d2dM11_ * c + d2dM21_ * s,  m12 = d2dM12_ * c + d2dM22_ * s;
     float m21 = d2dM11_ * -s + d2dM21_ * c, m22 = d2dM12_ * -s + d2dM22_ * c;
-    d2dM11_ = m11;
-    d2dM12_ = m12;
-    d2dM21_ = m21;
-    d2dM22_ = m22;
+    d2dM11_ = m11; d2dM12_ = m12;
+    d2dM21_ = m21; d2dM22_ = m22;
     applyD2DTransform();
 }
 void Canvas2D::resetTransform()
 {
-    d2dM11_ = 1;
-    d2dM12_ = 0;
-    d2dM21_ = 0;
-    d2dM22_ = 1;
-    d2dDx_ = 0;
-    d2dDy_ = 0;
+    d2dM11_ = 1; d2dM12_ = 0;
+    d2dM21_ = 0; d2dM22_ = 1;
+    d2dDx_  = 0; d2dDy_  = 0;
     applyD2DTransform();
 }
 
@@ -630,10 +557,10 @@ void Canvas2D::setStrokeColor(Color c)
     using BrushMap = std::unordered_map<uint32_t, ComPtr<ID2D1SolidColorBrush>>;
     static_cast<BrushMap *>(brushCache_)->clear();
 }
-void Canvas2D::setLineWidth(float w) { lineWidth_ = w; }
-void Canvas2D::setLineCap(LineCap c) { lineCap_ = c; }
+void Canvas2D::setLineWidth(float w)    { lineWidth_ = w; }
+void Canvas2D::setLineCap(LineCap c)   { lineCap_ = c; }
 void Canvas2D::setLineJoin(LineJoin j) { lineJoin_ = j; }
-void Canvas2D::setMiterLimit(float l) { miterLimit_ = l; }
+void Canvas2D::setMiterLimit(float l)  { miterLimit_ = l; }
 void Canvas2D::setFillRule(FillRule r) { fillRule_ = r; }
 void Canvas2D::setGlobalAlpha(float a)
 {
@@ -650,23 +577,17 @@ void Canvas2D::setCompositeOp(CompositeOp op) { compositeOp_ = op; /* TODO: map 
 void Canvas2D::beginLinearGradient(float x0, float y0, float x1, float y1)
 {
     gradType_ = GradType::Linear;
-    gx0_ = x0;
-    gy0_ = y0;
-    gx1_ = x1;
-    gy1_ = y1;
+    gx0_ = x0; gy0_ = y0; gx1_ = x1; gy1_ = y1;
     gStops_.clear();
 }
 void Canvas2D::beginRadialGradient(float cx, float cy, float ir, float outr)
 {
     gradType_ = GradType::Radial;
-    gcx_ = cx;
-    gcy_ = cy;
-    gInR_ = ir;
-    gOutR_ = outr;
+    gcx_ = cx; gcy_ = cy; gInR_ = ir; gOutR_ = outr;
     gStops_.clear();
 }
 void Canvas2D::addColorStop(float t, Color c) { gStops_.push_back({t, c}); }
-void Canvas2D::setFillGradient() { fillIsGrad_ = true; }
+void Canvas2D::setFillGradient()              { fillIsGrad_ = true; }
 
 // =============================================================================
 // Primitives
@@ -676,47 +597,41 @@ void Canvas2D::clearRect(float x, float y, float w, float h)
 {
     ComPtr<ID2D1SolidColorBrush> br;
     getDC(backend_)->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0, 0), br.GetAddressOf());
-    if (br)
-        getDC(backend_)->FillRectangle(makeRect(x, y, w, h), br.Get());
+    if (br) getDC(backend_)->FillRectangle(makeRect(x, y, w, h), br.Get());
 }
 void Canvas2D::fillRect(float x, float y, float w, float h)
 {
     auto *brPtr = static_cast<ComPtr<ID2D1Brush> *>(makeFillBrush(x, y, w, h));
-    if (brPtr && *brPtr)
-        getDC(backend_)->FillRectangle(makeRect(x, y, w, h), brPtr->Get());
+    if (brPtr && *brPtr) getDC(backend_)->FillRectangle(makeRect(x, y, w, h), brPtr->Get());
     delete brPtr;
 }
 void Canvas2D::strokeRect(float x, float y, float w, float h)
 {
     auto *ssPtr = static_cast<ComPtr<ID2D1StrokeStyle> *>(makeStrokeStyle());
     auto *br = static_cast<ID2D1SolidColorBrush *>(getBrush(strokeColor_));
-    if (br)
-        getDC(backend_)->DrawRectangle(makeRect(x, y, w, h), br, lineWidth_,
-                                       ssPtr ? ssPtr->Get() : nullptr);
+    if (br) getDC(backend_)->DrawRectangle(makeRect(x, y, w, h), br, lineWidth_,
+                                            ssPtr ? ssPtr->Get() : nullptr);
     delete ssPtr;
 }
 void Canvas2D::fillRoundedRect(float x, float y, float w, float h, float r)
 {
     auto *brPtr = static_cast<ComPtr<ID2D1Brush> *>(makeFillBrush(x, y, w, h));
-    if (brPtr && *brPtr)
-        getDC(backend_)->FillRoundedRectangle(makeRounded(x, y, w, h, r), brPtr->Get());
+    if (brPtr && *brPtr) getDC(backend_)->FillRoundedRectangle(makeRounded(x, y, w, h, r), brPtr->Get());
     delete brPtr;
 }
 void Canvas2D::strokeRoundedRect(float x, float y, float w, float h, float r)
 {
     auto *ssPtr = static_cast<ComPtr<ID2D1StrokeStyle> *>(makeStrokeStyle());
     auto *br = static_cast<ID2D1SolidColorBrush *>(getBrush(strokeColor_));
-    if (br)
-        getDC(backend_)->DrawRoundedRectangle(makeRounded(x, y, w, h, r), br, lineWidth_,
-                                              ssPtr ? ssPtr->Get() : nullptr);
+    if (br) getDC(backend_)->DrawRoundedRectangle(makeRounded(x, y, w, h, r), br, lineWidth_,
+                                                   ssPtr ? ssPtr->Get() : nullptr);
     delete ssPtr;
 }
 void Canvas2D::fillCircle(float cx, float cy, float r)
 {
     D2D1_ELLIPSE el = D2D1::Ellipse(D2D1::Point2F(cx, cy), r, r);
     auto *brPtr = static_cast<ComPtr<ID2D1Brush> *>(makeFillBrush(cx - r, cy - r, r * 2, r * 2));
-    if (brPtr && *brPtr)
-        getDC(backend_)->FillEllipse(el, brPtr->Get());
+    if (brPtr && *brPtr) getDC(backend_)->FillEllipse(el, brPtr->Get());
     delete brPtr;
 }
 void Canvas2D::strokeCircle(float cx, float cy, float r)
@@ -724,8 +639,7 @@ void Canvas2D::strokeCircle(float cx, float cy, float r)
     D2D1_ELLIPSE el = D2D1::Ellipse(D2D1::Point2F(cx, cy), r, r);
     auto *ssPtr = static_cast<ComPtr<ID2D1StrokeStyle> *>(makeStrokeStyle());
     auto *br = static_cast<ID2D1SolidColorBrush *>(getBrush(strokeColor_));
-    if (br)
-        getDC(backend_)->DrawEllipse(el, br, lineWidth_, ssPtr ? ssPtr->Get() : nullptr);
+    if (br) getDC(backend_)->DrawEllipse(el, br, lineWidth_, ssPtr ? ssPtr->Get() : nullptr);
     delete ssPtr;
 }
 
@@ -743,18 +657,14 @@ void Canvas2D::moveTo(float x, float y)
 }
 void Canvas2D::lineTo(float x, float y)
 {
-    curX_ = x;
-    curY_ = y;
+    curX_ = x; curY_ = y;
     path_.push_back({x, y, false, false});
 }
-
 void Canvas2D::arc(float cx, float cy, float radius, float a0, float a1, bool ccw)
 {
-    int segs = std::max(8, int(radius * 0.5f));
-    segs = std::min(segs, 64);
+    int segs = std::min(std::max(8, int(radius * 0.5f)), 64);
     float step = (a1 - a0) / float(segs);
-    if (ccw)
-        step = -step;
+    if (ccw) step = -step;
     for (int i = 0; i <= segs; ++i)
     {
         float a = a0 + step * float(i);
@@ -772,10 +682,10 @@ void Canvas2D::quadraticCurveTo(float cpx, float cpy, float x, float y)
     for (int i = 1; i <= n; ++i)
     {
         float t = float(i) / n, mt = 1 - t;
-        path_.push_back({mt * mt * curX_ + 2 * mt * t * cpx + t * t * x, mt * mt * curY_ + 2 * mt * t * cpy + t * t * y, false, false});
+        path_.push_back({mt*mt*curX_ + 2*mt*t*cpx + t*t*x,
+                         mt*mt*curY_ + 2*mt*t*cpy + t*t*y, false, false});
     }
-    curX_ = x;
-    curY_ = y;
+    curX_ = x; curY_ = y;
 }
 void Canvas2D::bezierCurveTo(float c1x, float c1y, float c2x, float c2y, float x, float y)
 {
@@ -783,35 +693,32 @@ void Canvas2D::bezierCurveTo(float c1x, float c1y, float c2x, float c2y, float x
     for (int i = 1; i <= n; ++i)
     {
         float t = float(i) / n, mt = 1 - t;
-        path_.push_back({mt * mt * mt * curX_ + 3 * mt * mt * t * c1x + 3 * mt * t * t * c2x + t * t * t * x, mt * mt * mt * curY_ + 3 * mt * mt * t * c1y + 3 * mt * t * t * c2y + t * t * t * y, false, false});
+        path_.push_back({mt*mt*mt*curX_ + 3*mt*mt*t*c1x + 3*mt*t*t*c2x + t*t*t*x,
+                         mt*mt*mt*curY_ + 3*mt*mt*t*c1y + 3*mt*t*t*c2y + t*t*t*y, false, false});
     }
-    curX_ = x;
-    curY_ = y;
+    curX_ = x; curY_ = y;
 }
 void Canvas2D::rect(float x, float y, float w, float h)
 {
-    moveTo(x, y);
-    lineTo(x + w, y);
-    lineTo(x + w, y + h);
-    lineTo(x, y + h);
-    closePath();
+    moveTo(x, y); lineTo(x+w, y); lineTo(x+w, y+h); lineTo(x, y+h); closePath();
 }
-void Canvas2D::ellipse(float cx, float cy, float rx, float ry, float rot, float a0, float a1, bool ccw)
+void Canvas2D::ellipse(float cx, float cy, float rx, float ry,
+                       float rot, float a0, float a1, bool ccw)
 {
     int segs = 32;
     float step = (a1 - a0) / float(segs);
-    if (ccw)
-        step = -step;
+    if (ccw) step = -step;
     for (int i = 0; i <= segs; ++i)
     {
         float a = a0 + step * float(i);
         float px = cosf(a) * rx, py = sinf(a) * ry;
-        path_.push_back({cosf(rot) * px - sinf(rot) * py + cx, sinf(rot) * px + cosf(rot) * py + cy, i == 0, false});
+        path_.push_back({cosf(rot)*px - sinf(rot)*py + cx,
+                         sinf(rot)*px + cosf(rot)*py + cy, i == 0, false});
     }
 }
-void Canvas2D::fill() { drawPathFilled(); }
-void Canvas2D::stroke() { drawPathStroked(); }
-void Canvas2D::clip() { /* use pushClipRect */ }
+void Canvas2D::fill()  { drawPathFilled(); }
+void Canvas2D::stroke(){ drawPathStroked(); }
+void Canvas2D::clip()  { /* use pushClipRect */ }
 
 // =============================================================================
 // Clip rect
@@ -824,8 +731,7 @@ void Canvas2D::pushClipRect(float x, float y, float w, float h)
 }
 void Canvas2D::popClipRect()
 {
-    if (clipDepth_ <= 0)
-        return;
+    if (clipDepth_ <= 0) return;
     getDC(backend_)->PopAxisAlignedClip();
     --clipDepth_;
 }
@@ -840,10 +746,10 @@ static ComPtr<ID2D1Bitmap1> createBitmapFromRGBA(ID2D1DeviceContext *dc,
     std::vector<uint8_t> bgra(size_t(w) * h * 4);
     for (int i = 0; i < w * h; ++i)
     {
-        bgra[i * 4 + 0] = rgba[i * 4 + 2];
-        bgra[i * 4 + 1] = rgba[i * 4 + 1];
-        bgra[i * 4 + 2] = rgba[i * 4 + 0];
-        bgra[i * 4 + 3] = rgba[i * 4 + 3];
+        bgra[i*4+0] = rgba[i*4+2];
+        bgra[i*4+1] = rgba[i*4+1];
+        bgra[i*4+2] = rgba[i*4+0];
+        bgra[i*4+3] = rgba[i*4+3];
     }
     D2D1_BITMAP_PROPERTIES1 props = D2D1::BitmapProperties1(
         D2D1_BITMAP_OPTIONS_NONE,
@@ -854,11 +760,9 @@ static ComPtr<ID2D1Bitmap1> createBitmapFromRGBA(ID2D1DeviceContext *dc,
 }
 
 bool Canvas2D::registerFont(Canvas2DBackend *backend,
-                            const std::string &name,
-                            const std::string &path)
+                            const std::string &name, const std::string &path)
 {
-    return backend && backend->d2d &&
-           Canvas2DD2D::registerFont(backend->d2d, name, path);
+    return backend && backend->d2d && Canvas2DD2D::registerFont(backend->d2d, name, path);
 }
 
 Canvas2DImage *Canvas2D::loadImage(const std::string &path)
@@ -866,16 +770,12 @@ Canvas2DImage *Canvas2D::loadImage(const std::string &path)
     int w, h, ch;
     stbi_set_flip_vertically_on_load(0);
     uint8_t *data = stbi_load(path.c_str(), &w, &h, &ch, 4);
-    if (!data)
-        return nullptr;
+    if (!data) return nullptr;
     auto bmp = createBitmapFromRGBA(getDC(backend_), data, w, h);
     stbi_image_free(data);
-    if (!bmp)
-        return nullptr;
+    if (!bmp) return nullptr;
     auto *img = new Canvas2DImageD2D();
-    img->bitmap = bmp;
-    img->width = w;
-    img->height = h;
+    img->bitmap = bmp; img->width = w; img->height = h;
     return img;
 }
 Canvas2DImage *Canvas2D::loadImageFromMemory(const unsigned char *data, int byteLen)
@@ -883,26 +783,20 @@ Canvas2DImage *Canvas2D::loadImageFromMemory(const unsigned char *data, int byte
     int w, h, ch;
     stbi_set_flip_vertically_on_load(0);
     uint8_t *px = stbi_load_from_memory(data, byteLen, &w, &h, &ch, 4);
-    if (!px)
-        return nullptr;
+    if (!px) return nullptr;
     auto bmp = createBitmapFromRGBA(getDC(backend_), px, w, h);
     stbi_image_free(px);
-    if (!bmp)
-        return nullptr;
+    if (!bmp) return nullptr;
     auto *img = new Canvas2DImageD2D();
-    img->bitmap = bmp;
-    img->width = w;
-    img->height = h;
+    img->bitmap = bmp; img->width = w; img->height = h;
     return img;
 }
 void Canvas2D::updateImage(Canvas2DImage *img, const unsigned char *rgba, int w, int h)
 {
-    if (!img)
-        return;
+    if (!img) return;
     auto *di = static_cast<Canvas2DImageD2D *>(img);
     di->bitmap = createBitmapFromRGBA(getDC(backend_), rgba, w, h);
-    img->width = w;
-    img->height = h;
+    img->width = w; img->height = h;
 }
 void Canvas2D::freeImage(Canvas2DImage *img) { delete img; }
 
@@ -916,34 +810,31 @@ static void drawBitmapRegion(ID2D1DeviceContext *dc, ID2D1Bitmap *bmp,
 
 void Canvas2D::drawImage(const Canvas2DImage *img, float dx, float dy)
 {
-    if (!img)
-        return;
+    if (!img) return;
     const auto *di = static_cast<const Canvas2DImageD2D *>(img);
-    if (!di->bitmap)
-        return;
-    drawBitmapRegion(getDC(backend_), di->bitmap.Get(), 0, 0, float(img->width), float(img->height),
+    if (!di->bitmap) return;
+    drawBitmapRegion(getDC(backend_), di->bitmap.Get(),
+                     0, 0, float(img->width), float(img->height),
                      dx, dy, float(img->width), float(img->height), globalAlpha_);
 }
 void Canvas2D::drawImage(const Canvas2DImage *img, float dx, float dy, float dw, float dh)
 {
-    if (!img)
-        return;
+    if (!img) return;
     const auto *di = static_cast<const Canvas2DImageD2D *>(img);
-    if (!di->bitmap)
-        return;
-    drawBitmapRegion(getDC(backend_), di->bitmap.Get(), 0, 0, float(img->width), float(img->height),
+    if (!di->bitmap) return;
+    drawBitmapRegion(getDC(backend_), di->bitmap.Get(),
+                     0, 0, float(img->width), float(img->height),
                      dx, dy, dw, dh, globalAlpha_);
 }
 void Canvas2D::drawImage(const Canvas2DImage *img,
                          float sx, float sy, float sw, float sh,
                          float dx, float dy, float dw, float dh)
 {
-    if (!img)
-        return;
+    if (!img) return;
     const auto *di = static_cast<const Canvas2DImageD2D *>(img);
-    if (!di->bitmap)
-        return;
-    drawBitmapRegion(getDC(backend_), di->bitmap.Get(), sx, sy, sw, sh, dx, dy, dw, dh, globalAlpha_);
+    if (!di->bitmap) return;
+    drawBitmapRegion(getDC(backend_), di->bitmap.Get(),
+                     sx, sy, sw, sh, dx, dy, dw, dh, globalAlpha_);
 }
 
 // =============================================================================
@@ -952,70 +843,43 @@ void Canvas2D::drawImage(const Canvas2DImage *img,
 
 void Canvas2D::parseFontDesc(const std::string &desc)
 {
-    fontBold_ = false;
-    fontItalic_ = false;
-    fontSize_ = 14.f;
-    fontFace_ = "sans";
+    fontBold_ = false; fontItalic_ = false;
+    fontSize_ = 14.f;  fontFace_   = "sans";
     std::istringstream ss(desc);
     std::string tok, family;
     while (ss >> tok)
     {
-        if (tok == "bold")
-        {
-            fontBold_ = true;
-            continue;
-        }
-        if (tok == "italic")
-        {
-            fontItalic_ = true;
-            continue;
-        }
+        if (tok == "bold")   { fontBold_   = true; continue; }
+        if (tok == "italic") { fontItalic_ = true; continue; }
         if (tok.size() > 2 && tok.compare(tok.size() - 2, 2, "px") == 0)
         {
             fontSize_ = std::stof(tok.substr(0, tok.size() - 2));
             std::getline(ss, family);
             auto start = family.find_first_not_of(" \t");
-            if (start != std::string::npos)
-                family = family.substr(start);
+            if (start != std::string::npos) family = family.substr(start);
             break;
         }
     }
-    if (!family.empty())
-        fontFace_ = family;
+    if (!family.empty()) fontFace_ = family;
 }
 
 void Canvas2D::setFont(const std::string &desc) { parseFontDesc(desc); }
-void Canvas2D::setTextAlign(CanvasTextAlign a) { textAlign_ = a; }
-void Canvas2D::setTextBaseline(TextBaseline b) { textBaseline_ = b; }
+void Canvas2D::setTextAlign(CanvasTextAlign a)  { textAlign_ = a; }
+void Canvas2D::setTextBaseline(TextBaseline b)  { textBaseline_ = b; }
 
 int Canvas2D::resolveFont() const
 {
     auto *d2d = backend_->d2d;
-    if (fontBold_ && fontItalic_)
-    {
-        int i = d2d->findFont(fontFace_ + "-bold-italic");
-        if (i >= 0)
-            return i;
-    }
-    if (fontBold_)
-    {
-        int i = d2d->findFont(fontFace_ + "-bold");
-        if (i >= 0)
-            return i;
-    }
-    if (fontItalic_)
-    {
-        int i = d2d->findFont(fontFace_ + "-italic");
-        if (i >= 0)
-            return i;
-    }
+    if (fontBold_ && fontItalic_) { int i = d2d->findFont(fontFace_ + "-bold-italic"); if (i >= 0) return i; }
+    if (fontBold_)                { int i = d2d->findFont(fontFace_ + "-bold");         if (i >= 0) return i; }
+    if (fontItalic_)              { int i = d2d->findFont(fontFace_ + "-italic");       if (i >= 0) return i; }
     int i = d2d->findFont(fontFace_);
-    if (i >= 0)
-        return i;
+    if (i >= 0) return i;
     return d2d->fonts.empty() ? -1 : 0;
 }
 
 int Canvas2D::currentFontIdx() const { return resolveFont(); }
+
 float Canvas2D::getKernAdvance(int fontIdx, int cp1, int cp2, int pixelSize) const
 {
     return backend_->d2d->getKernAdvance(fontIdx, cp1, cp2, pixelSize);
@@ -1023,53 +887,50 @@ float Canvas2D::getKernAdvance(int fontIdx, int cp1, int cp2, int pixelSize) con
 
 void Canvas2D::fillText(const std::string &text, float x, float y, float /*maxW*/)
 {
-    if (text.empty())
-        return;
+    if (text.empty()) return;
     int fontIdx = resolveFont();
-    if (fontIdx < 0)
-        return;
-    auto *d2d = backend_->d2d;
-    int ps = std::max(4, int(fontSize_ + 0.5f));
-    FT_Face face = d2d->fonts[fontIdx].ftFace;
-    FT_Set_Pixel_Sizes(face, 0, FT_UInt(ps));
-    float scale = float(ps) / float(face->units_per_EM);
-    float ascender = float(face->ascender) * scale;
+    if (fontIdx < 0) return;
 
+    auto *d2d = backend_->d2d;
+    const stbtt_fontinfo *info = &d2d->fonts[fontIdx].info;
+    int ps = std::max(4, int(fontSize_ + 0.5f));
+    float scale = stbtt_ScaleForPixelHeight(info, float(ps));
+
+    int ascent, descent, lineGap;
+    stbtt_GetFontVMetrics(info, &ascent, &descent, &lineGap);
+    float ascender = float(ascent) * scale;
+
+    // Measure total width for alignment
     float totalW = 0;
     for (unsigned char ch : text)
     {
         auto *g = d2d->getGlyph(fontIdx, ch, ps);
-        if (g)
-            totalW += float(g->advance);
+        if (g) totalW += float(g->advance);
     }
+
     float px = x;
-    if (textAlign_ == CanvasTextAlign::Center)
-        px = x - totalW * 0.5f;
-    if (textAlign_ == CanvasTextAlign::Right)
-        px = x - totalW;
+    if (textAlign_ == CanvasTextAlign::Center) px = x - totalW * 0.5f;
+    if (textAlign_ == CanvasTextAlign::Right)  px = x - totalW;
+
     float py = y;
-    if (textBaseline_ == TextBaseline::Top)
-        py = y + ascender;
-    if (textBaseline_ == TextBaseline::Middle)
-        py = y + ascender * 0.5f;
-    if (textBaseline_ == TextBaseline::Bottom)
-        py = y + float(face->descender) * scale;
+    if (textBaseline_ == TextBaseline::Top)    py = y + ascender;
+    if (textBaseline_ == TextBaseline::Middle) py = y + ascender * 0.5f;
+    if (textBaseline_ == TextBaseline::Bottom) py = y + float(descent) * scale;
 
     ComPtr<ID2D1SolidColorBrush> textBrush;
     getDC(backend_)->CreateSolidColorBrush(toD2DColor(fillColor_, globalAlpha_), textBrush.GetAddressOf());
-    if (!textBrush)
-        return;
+    if (!textBrush) return;
 
     getDC(backend_)->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
     for (unsigned char ch : text)
     {
         auto *g = d2d->getGlyph(fontIdx, ch, ps);
-        if (!g)
-            continue;
+        if (!g) continue;
         if (g->glyphW > 0 && g->glyphH > 0)
         {
             float gx = px + float(g->xoff), gy = py + float(g->yoff);
-            D2D1_RECT_F src = D2D1::RectF(float(g->atlasX), float(g->atlasY), float(g->atlasX + g->glyphW), float(g->atlasY + g->glyphH));
+            D2D1_RECT_F src = D2D1::RectF(float(g->atlasX), float(g->atlasY),
+                                           float(g->atlasX + g->glyphW), float(g->atlasY + g->glyphH));
             D2D1_RECT_F dst = D2D1::RectF(gx, gy, gx + float(g->glyphW), gy + float(g->glyphH));
             getDC(backend_)->FillOpacityMask(d2d->atlasBitmap.Get(), textBrush.Get(),
                                              D2D1_OPACITY_MASK_CONTENT_TEXT_NATURAL, &dst, &src);
@@ -1093,18 +954,15 @@ void Canvas2D::strokeText(const std::string &text, float x, float y, float maxW)
 
 float Canvas2D::measureText(const std::string &text)
 {
-    if (text.empty())
-        return 0.f;
+    if (text.empty()) return 0.f;
     int fontIdx = resolveFont();
-    if (fontIdx < 0)
-        return float(text.size()) * fontSize_ * 0.6f;
+    if (fontIdx < 0) return float(text.size()) * fontSize_ * 0.6f;
     int ps = std::max(4, int(fontSize_ + 0.5f));
     float total = 0;
     for (unsigned char ch : text)
     {
         auto *g = backend_->d2d->getGlyph(fontIdx, ch, ps);
-        if (g)
-            total += float(g->advance);
+        if (g) total += float(g->advance);
     }
     return total;
 }
@@ -1120,16 +978,14 @@ void Canvas2D::getImageData(float x, float y, float w, float h,
     out.assign(size_t(iw) * ih * 4, 0);
     // Full GPU→CPU readback requires a D3D11 staging texture.
     // Returning zeros for now — add staging path if needed.
-    (void)x;
-    (void)y;
+    (void)x; (void)y;
 }
 
 void Canvas2D::putImageData(const std::vector<uint8_t> &data,
                             int srcW, int srcH, float dx, float dy)
 {
     auto bmp = createBitmapFromRGBA(getDC(backend_), data.data(), srcW, srcH);
-    if (!bmp)
-        return;
+    if (!bmp) return;
     D2D1_RECT_F dst = makeRect(dx, dy, float(srcW), float(srcH));
     D2D1_RECT_F src = makeRect(0, 0, float(srcW), float(srcH));
     getDC(backend_)->DrawBitmap(bmp.Get(), &dst, globalAlpha_,

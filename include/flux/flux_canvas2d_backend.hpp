@@ -20,20 +20,19 @@
 
 #include "flux_canvas2d.hpp"
 
+
+#include <stb_truetype.h>
+
+#include <string>
+#include <vector>
+#include <cstdint>
+
 // =============================================================================
 // GL backend  —  Android (GLES3) + Web/Emscripten (WebGL2) ONLY
 // =============================================================================
 #if defined(__ANDROID__) || defined(__EMSCRIPTEN__)
 
 #include <GLES3/gl3.h>
-
-#include <ft2build.h>
-#include FT_FREETYPE_H
-#include FT_GLYPH_H
-
-#include <string>
-#include <vector>
-#include <cstdint>
 
 // ── Concrete image type for GL ────────────────────────────────────────────────
 struct Canvas2DImageGL : Canvas2DImage
@@ -55,9 +54,6 @@ struct Canvas2DGL
     // ── Dynamic geometry ──────────────────────────────────────────────────
     GLuint vao = 0, vbo = 0;
 
-    // ── FreeType ──────────────────────────────────────────────────────────
-    FT_Library ftLibrary = nullptr;
-
     // ── Font atlas (R8, single channel, 1024×1024) ────────────────────────
     GLuint fontTex = 0;
     int atlasW = 1024;
@@ -66,11 +62,12 @@ struct Canvas2DGL
     struct FontFace
     {
         std::string          name;
-        std::vector<uint8_t> ttfData; // kept alive — FT_Face refs it
-        FT_Face              ftFace = nullptr;
+        std::vector<uint8_t> ttfData; // kept alive — stbtt_fontinfo refs it
+        stbtt_fontinfo       info    = {};
+        bool                 ready   = false;
     };
-    std::vector<FontFace>          fonts;
-    std::vector<unsigned char>     atlasPixels; // atlasW * atlasH, single channel
+    std::vector<FontFace>      fonts;
+    std::vector<uint8_t>       atlasPixels; // atlasW * atlasH, single channel
 
     // atlas shelf packer cursor
     int shelfX = 0, shelfY = 0, shelfH = 0;
@@ -107,16 +104,10 @@ private:
 };
 
 // ── Canvas2DBackend — GL edition ──────────────────────────────────────────────
-// CanvasWidget holds one of these per widget (or a shared one on Web/Android).
-// Before constructing Canvas2D each frame, set mvp to the combined
-// ortho × viewport matrix. Canvas2D::buildMVP() multiplies ctm_ into it.
 struct Canvas2DBackend
 {
     Canvas2DGL *gl = nullptr; // owned externally by CanvasWidget
 
-    // Set by CanvasWidget before each Canvas2D construction:
-    //   memcpy(backend->mvp, computedMVP, 64);
-    //   Canvas2D ctx(backend, w, h);
     float mvp[16] = {
         1, 0, 0, 0,
         0, 1, 0, 0,
@@ -124,7 +115,7 @@ struct Canvas2DBackend
         0, 0, 0, 1 };
 
     static Canvas2DBackend *create(Canvas2DGL *gl);
-    static void             destroy(Canvas2DBackend *b); // does NOT free gl
+    static void             destroy(Canvas2DBackend *b);
 };
 
 // =============================================================================
@@ -134,14 +125,6 @@ struct Canvas2DBackend
 
 #include <cairo/cairo.h>
 
-#include <ft2build.h>
-#include FT_FREETYPE_H
-#include FT_GLYPH_H
-
-#include <string>
-#include <vector>
-#include <cstdint>
-
 // ── Concrete image type for Cairo ─────────────────────────────────────────────
 struct Canvas2DImageCairo : Canvas2DImage
 {
@@ -150,20 +133,18 @@ struct Canvas2DImageCairo : Canvas2DImage
 };
 
 // ── Shared Cairo resources ────────────────────────────────────────────────────
-// One per CanvasWidget. Owns the FreeType library + font atlas painted via Cairo.
+// stbtt is used for advance/kern queries to match GL behaviour.
+// Cairo/Pango handles actual glyph rendering.
 struct Canvas2DCairo
 {
     cairo_t *cr = nullptr; // borrowed each frame from CanvasWidget — not owned
-
-    // FreeType (used for glyph metrics; Cairo uses its own text rendering
-    // internally, but we keep FT for advance/kern queries that match GL behaviour)
-    FT_Library ftLibrary = nullptr;
 
     struct FontFace
     {
         std::string          name;
         std::vector<uint8_t> ttfData;
-        FT_Face              ftFace    = nullptr;
+        stbtt_fontinfo       info  = {};
+        bool                 ready = false;
         cairo_font_face_t   *cairoFace = nullptr;
     };
     std::vector<FontFace> fonts;
@@ -194,8 +175,6 @@ struct Canvas2DCairo
 };
 
 // ── Canvas2DBackend — Cairo edition ──────────────────────────────────────────
-// cr is set each frame by CanvasWidget before constructing Canvas2D.
-// mvp is unused on Cairo (Cairo manages its own transform stack).
 struct Canvas2DBackend
 {
     Canvas2DCairo *cairo = nullptr; // owned externally by CanvasWidget
@@ -213,20 +192,10 @@ struct Canvas2DBackend
 
 // =============================================================================
 // Metal stub  —  macOS ONLY
-// No GL types. No FreeType pulled from this path.
-// Draw calls are forwarded to Metal via Canvas2DMetal.
 // =============================================================================
 #elif defined(__APPLE__)
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
-
-#include <ft2build.h>
-#include FT_FREETYPE_H
-#include FT_GLYPH_H
-
-#include <string>
-#include <vector>
-#include <cstdint>
 
 // Opaque forward — full definition in flux_canvas2d_metal.mm
 struct Canvas2DMetalContext;
@@ -243,13 +212,12 @@ struct Canvas2DMetal
 {
     Canvas2DMetalContext *ctx = nullptr; // owned
 
-    FT_Library ftLibrary = nullptr;
-
     struct FontFace
     {
         std::string          name;
         std::vector<uint8_t> ttfData;
-        FT_Face              ftFace = nullptr;
+        stbtt_fontinfo       info  = {};
+        bool                 ready = false;
     };
     std::vector<FontFace> fonts;
 
@@ -302,14 +270,7 @@ struct Canvas2DBackend
 #include <d2d1_1helper.h>
 #include <wrl/client.h>
 
-#include <ft2build.h>
-#include FT_FREETYPE_H
-#include FT_GLYPH_H
-
-#include <string>
-#include <vector>
 #include <unordered_map>
-#include <cstdint>
 
 using Microsoft::WRL::ComPtr;
 
@@ -329,13 +290,12 @@ struct Canvas2DD2D
     ComPtr<ID2D1Bitmap1>       offscreenBitmap;
     int bitmapW = 0, bitmapH = 0;
 
-    FT_Library ftLibrary = nullptr;
-
     struct FontFace
     {
         std::string          name;
         std::vector<uint8_t> ttfData;
-        FT_Face              ftFace = nullptr;
+        stbtt_fontinfo       info  = {};
+        bool                 ready = false;
     };
     std::vector<FontFace> fonts;
 
@@ -381,10 +341,6 @@ private:
 };
 
 // ── Canvas2DBackend — D2D edition ─────────────────────────────────────────────
-// On Win32 there is no MVP: D2D applies the viewport/zoom transform on the
-// main device context in CanvasWidget::render() before blitting the offscreen
-// bitmap. Canvas2D's translate/scale/rotate manipulate the D2D transform
-// stack directly via offscreenDC->SetTransform().
 struct Canvas2DBackend
 {
     Canvas2DD2D *d2d = nullptr; // owned externally by CanvasWidget
