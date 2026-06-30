@@ -589,7 +589,7 @@ public:
     // ── Scroll helpers ────────────────────────────────────────────────────────
 
     // Programmatically scroll to an item by index.
-    void scrollToIndex(int index, bool animate = false)
+    void scrollToIndex(int index, bool /*animate*/)
     {
         if (itemLayouts_.empty())
             return;
@@ -724,13 +724,7 @@ public:
         SizeMode crossAxisSelfMode = isRowAxis_ ? heightMode : widthMode;
         bool crossIsFit = (crossAxisSelfMode == SizeMode::Fit);
 
-        auto childConstraints = [&](int fixedMain) -> BoxConstraints
-        {
-            if (isRowAxis_)
-                return BoxConstraints(fixedMain, fixedMain, 0, containerCrossSize_);
-            else
-                return BoxConstraints(0, containerCrossSize_, fixedMain, fixedMain);
-        };
+
 
         for (int i = count; i != end; i += step)
         {

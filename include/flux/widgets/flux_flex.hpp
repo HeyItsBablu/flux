@@ -731,7 +731,7 @@ public:
         needsLayout = false;
     }
 
-    static int basisSumOfAllLines(const std::vector<LineMetric> &lines, int gap)
+    static int basisSumOfAllLines(const std::vector<LineMetric> &lines, int /*gap*/)
     {
         int maxLine = 0;
         for (auto &l : lines)

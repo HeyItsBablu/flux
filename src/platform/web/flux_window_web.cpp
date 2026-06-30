@@ -82,16 +82,7 @@ struct PlatformWindow::WebState
 namespace
 {
 
-    // ── CSS colour string ─────────────────────────────────────────────────────────
 
-    // Builds "rgba(r,g,b,a/255)" for passing to EM_ASM fillStyle / strokeStyle.
-    // Kept as a C-string written into a stack buffer to avoid heap allocation on
-    // every paint call.  Buffer is 32 bytes — "rgba(255,255,255,1.000)" = 22 chars.
-    void colorToCSS(Color c, char *buf, int bufLen)
-    {
-        float a = c.a / 255.f;
-        snprintf(buf, bufLen, "rgba(%d,%d,%d,%.3f)", c.r, c.g, c.b, a);
-    }
 
     // ── Map Emscripten HTML5 key code → VK_* ──────────────────────────────────────
     //
@@ -162,7 +153,7 @@ static EM_BOOL onMouseUp(int /*eventType*/,
     if (e->button != 0 || !self->callbacks.onMouseUp)
         return EM_FALSE;
 
-    double dpr = EM_ASM_DOUBLE({ return Module._fluxDPR || 1.0; });
+
     int x = (int)e->targetX;
     int y = (int)e->targetY;
 

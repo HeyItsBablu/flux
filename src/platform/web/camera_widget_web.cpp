@@ -58,7 +58,7 @@ void CameraWidget::_platformOnFlip()
     EM_ASM({
         if (Module._fluxCameraThumbEl)
         {
-            Module._fluxCameraThumbEl.src = '';
+            Module._fluxCameraThumbEl.src = "";
             if (Module._fluxCameraThumbBlobUrl)
             {
                 URL.revokeObjectURL(Module._fluxCameraThumbBlobUrl);
@@ -127,7 +127,7 @@ bool CameraWidget::_platformRenderPreview(GraphicsContext & /*ctx*/, Painter &p,
 // A plain white fillRect at the current alpha — Canvas2D globalAlpha handles
 // the blend, so no separate bitmap or AlphaBlend call is needed.
 
-void CameraWidget::_platformRenderFlash(GraphicsContext & /*ctx*/, Painter &p,
+void CameraWidget::_platformRenderFlash(GraphicsContext & /*ctx*/, Painter &/*p*/,
                                         int viewH)
 {
     // Temporarily override the painter's global alpha for this one rect.
@@ -217,7 +217,7 @@ void CameraWidget::_platformDestroy()
     EM_ASM({
         if (Module._fluxCameraThumbEl)
         {
-            Module._fluxCameraThumbEl.src = '';
+            Module._fluxCameraThumbEl.src = "";
             if (Module._fluxCameraThumbEl.parentNode)
                 Module._fluxCameraThumbEl.parentNode.removeChild(Module._fluxCameraThumbEl);
             Module._fluxCameraThumbEl = null;

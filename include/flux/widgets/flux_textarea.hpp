@@ -161,7 +161,7 @@ public:
             NativeFont gutterFont = fontCache.getFont(fontFamily, fontSize - 1, FontWeight::Normal);
             int lineNum = 1;
             int gy      = innerY - scrollY;
-            bool newLineNext = true;
+         
             for (int ci = 0; ci <= (int)inputValue.size(); ++ci)
             {
                 bool isNewLine = (ci == 0) ||
@@ -958,7 +958,7 @@ private:
                 my >= y && my < y + height);
     }
 
-    void drawScrollbar(Painter& painter, int innerY, int viewH) const
+    void drawScrollbar(Painter& painter, int /*innerY*/, int viewH) const
     {
         // Only draw when content overflows
         if (contentHeight <= viewH) return;

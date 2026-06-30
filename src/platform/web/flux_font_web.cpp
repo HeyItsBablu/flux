@@ -197,7 +197,7 @@ void measureWebText(const char *cssFont, const char *utf8Text,
             h = Math.ceil(m.actualBoundingBoxAscent + m.actualBoundingBoxDescent);
         } else {
             // Last resort: parse "NNN px" out of the font string.
-            var match = font.match(/(\d+)px/);
+            var match = font.match(/(\\d+)px/);
             h = match ? Math.ceil(parseInt(match[1]) * 1.3) : 16;
         }
 

@@ -74,7 +74,7 @@ void FluxUI::wireCallbacks()
 {
     fluxLog("[wireCallbacks] Step 1: entered");
 
-    window.callbacks.onPaint = [this](GraphicsContext &ctx, int w, int h)
+    window.callbacks.onPaint = [this](GraphicsContext &ctx, int /*w*/, int /*h*/)
     {
         if (!root)
             return;
