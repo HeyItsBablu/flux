@@ -327,31 +327,29 @@ bool PlatformWindow::create(const std::string& title,
     cachedWidth  = (int)backing.size.width;
     cachedHeight = (int)backing.size.height;
 
-    // ── Call site #1: initial UI Metal layer + glyph atlas setup ─────────────
+    // ── Call site #1: initial UI Metal layer + glyph atlas + canvas backend ──
+    // ensureUILayer() also lazily creates s.canvasMetal / s.canvasBackend
+    // via ensureCanvasBackend() internally (see flux_window_macos_state.hpp).
     if (!s.ensureUILayer(cachedWidth, cachedHeight)) {
         fprintf(stderr, "PlatformWindow: ensureUILayer failed at create()\n");
         return false;
     }
 
-    // ── Canvas2DGL (per-widget Metal canvas) — unchanged from Stage 0 ────────
-    s.canvasGL = new Canvas2DGL();
-    if (!s.canvasGL->init()) {
-        fprintf(stderr, "PlatformWindow: Canvas2DGL init failed\n");
-        delete s.canvasGL; s.canvasGL = nullptr;
-    }
-
-    if (s.canvasGL) {
+    // ── Canvas2D Metal backend (shared, per-window) — fonts registered once ──
+    if (s.canvasBackend) {
         auto regFont = [&](const char* name, const char* path) {
-            if (!Canvas2D::registerFont(s.canvasGL, name, path))
+            if (!Canvas2D::registerFont(s.canvasBackend, name, path))
                 fprintf(stderr, "PlatformWindow: font '%s' not found at '%s'\n", name, path);
         };
         regFont("sans",      "/System/Library/Fonts/Helvetica.ttc");
         regFont("sans-bold", "/System/Library/Fonts/Helvetica.ttc");
         regFont("mono",      "/System/Library/Fonts/Menlo.ttc");
+    } else {
+        fprintf(stderr, "PlatformWindow: canvasBackend unavailable, fonts not registered\n");
     }
 
     for (CanvasWidget* cw : s.canvasWidgets)
-        if (cw) cw->setCanvasGL(s.canvasGL);
+        if (cw && s.canvasBackend) cw->setCanvasBackend(s.canvasBackend);
 
     [s.nsWindow makeKeyAndOrderFront:nil];
     [NSApp activateIgnoringOtherApps:YES];
@@ -368,9 +366,10 @@ void PlatformWindow::destroy() {
         [timer invalidate];
     s.timerMap.clear();
 
-    if (s.canvasGL) { s.canvasGL->destroy(); delete s.canvasGL; s.canvasGL = nullptr; }
     if (s.nsWindow) { [s.nsWindow close]; s.nsWindow = nil; }
 
+    // canvasBackend/canvasMetal teardown happens in ~MacState() via
+    // teardownCanvasBackend() — no explicit call needed here.
     delete macState;
     macState = nullptr;
 }
@@ -546,11 +545,7 @@ void PlatformWindow::setResizeCursorH() { [[NSCursor resizeLeftRightCursor] set]
 void PlatformWindow::setResizeCursorV() { [[NSCursor resizeUpDownCursor] set]; }
 void PlatformWindow::setDefaultCursor() { [[NSCursor arrowCursor] set]; }
 
-// ============================================================================
-// Stubs
-// ============================================================================
 
-void PlatformWindow::startupGdiplus() {} // no-op on macOS
 
 #endif // TARGET_OS_OSX
 #endif // __APPLE__

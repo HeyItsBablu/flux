@@ -1,5 +1,3 @@
-
-
 // flux_canvas_macos.mm
 
 #ifdef __APPLE__
@@ -7,77 +5,24 @@
 #if TARGET_OS_OSX
 
 #include "flux/flux_canvas2d.hpp"
+#include "flux/flux_canvas2d_backend.hpp"
 #include "flux/flux_window.hpp"
 #include "flux/flux_canvas.hpp"
 #include "flux/flux_window_macos_state.hpp"
+#include "flux/flux_painter.hpp"
 #include <cassert>
 #include <unordered_map>
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Scrollbar shaders (Metal Shading Language)
-// ─────────────────────────────────────────────────────────────────────────────
-
-static const char* kMSL_SB = R"MSL(
-#include <metal_stdlib>
-using namespace metal;
-
-struct VSIn  { float2 pos [[attribute(0)]]; };
-struct VSOut { float4 pos [[position]]; float4 col; };
-
-struct Uniforms { float4x4 mvp; float4 color; };
-
-vertex VSOut sb_vert(VSIn in [[stage_in]],
-                     constant Uniforms& u [[buffer(1)]]) {
-    VSOut out;
-    out.pos = u.mvp * float4(in.pos, 0.0, 1.0);
-    out.col = u.color;
-    return out;
-}
-
-fragment float4 sb_frag(VSOut in [[stage_in]]) {
-    return in.col;
-}
-)MSL";
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Canvas2D Metal shaders
-// ─────────────────────────────────────────────────────────────────────────────
-
-static const char* kMSL_Canvas = R"MSL(
-#include <metal_stdlib>
-using namespace metal;
-
-struct Vert    { float2 pos [[attribute(0)]]; float2 uv [[attribute(1)]]; };
-struct VOut    { float4 pos [[position]]; float2 uv; };
-struct Uniforms { float4x4 mvp; float4 color; int mode; };
-
-vertex VOut canvas_vert(Vert in [[stage_in]],
-                        constant Uniforms& u [[buffer(1)]]) {
-    VOut out;
-    out.pos = u.mvp * float4(in.pos, 0.0, 1.0);
-    out.uv  = in.uv;
-    return out;
-}
-
-fragment float4 canvas_frag(VOut in [[stage_in]],
-                             constant Uniforms& u [[buffer(1)]],
-                             texture2d<float> tex [[texture(0)]],
-                             sampler smp [[sampler(0)]]) {
-    if (u.mode == 0) {
-        return u.color;
-    } else if (u.mode == 1) {
-        float a = tex.sample(smp, in.uv).r;
-        return float4(u.color.rgb, u.color.a * a);
-    } else {
-        float4 t = tex.sample(smp, in.uv);
-        return t * u.color.a;
-    }
-}
-)MSL";
-
-// ─────────────────────────────────────────────────────────────────────────────
+// ============================================================================
 // macOS per-widget state
-// ─────────────────────────────────────────────────────────────────────────────
+//
+// Each CanvasWidget owns its own CAMetalLayer/command queue (kept separate
+// from MacState::uiMetalLayer until Stage 4 unifies frame orchestration —
+// see flux_window_macos.mm's renderFrame). Canvas content rendering itself
+// (Canvas2D fill/stroke/text calls) is handled internally by Canvas2DMetal
+// via the shared MacState::canvasBackend; this struct only tracks the
+// widget's own surface/sizing/lifecycle plumbing.
+// ============================================================================
 
 struct MacCanvasState {
     bool   initialized    = false;
@@ -87,20 +32,19 @@ struct MacCanvasState {
     int    physX          = 0;
     int    physY          = 0;
 
-    id<MTLDevice>              device         = nil;
-    id<MTLCommandQueue>        cmdQueue       = nil;
-    id<MTLRenderPipelineState> sbPipeline     = nil;
-    id<MTLRenderPipelineState> canvasPipeline = nil;
-    id<MTLBuffer>              vertexBuf      = nil;
-    CAMetalLayer*              metalLayer     = nil;
+    id<MTLDevice>       device   = nil;
+    id<MTLCommandQueue> cmdQueue = nil;
+    CAMetalLayer        *metalLayer = nil;
+
+    Canvas2DBackend *backend = nullptr; // borrowed from MacState — not owned
 };
 
 static std::unordered_map<CanvasWidget*, MacCanvasState> s_macState;
 static MacCanvasState& macState(CanvasWidget* w) { return s_macState[w]; }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ============================================================================
 // Helpers
-// ─────────────────────────────────────────────────────────────────────────────
+// ============================================================================
 
 static void registerWithPlatform(CanvasWidget* w) {
     auto* inst = FluxUI::getCurrentInstance();
@@ -160,52 +104,9 @@ static void metalOrtho(float l, float r, float b, float t, float out[16]) {
     out[15] =  1.f;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Metal pipeline creation
-// ─────────────────────────────────────────────────────────────────────────────
-
-static id<MTLRenderPipelineState>
-makePipeline(id<MTLDevice> device,
-             id<MTLLibrary> lib,
-             const char* vertName,
-             const char* fragName,
-             MTLPixelFormat pixFmt,
-             bool blendEnabled)
-{
-    MTLRenderPipelineDescriptor* desc = [[MTLRenderPipelineDescriptor alloc] init];
-    desc.vertexFunction   = [lib newFunctionWithName:[NSString stringWithUTF8String:vertName]];
-    desc.fragmentFunction = [lib newFunctionWithName:[NSString stringWithUTF8String:fragName]];
-    desc.colorAttachments[0].pixelFormat = pixFmt;
-
-    if (blendEnabled) {
-        desc.colorAttachments[0].blendingEnabled             = YES;
-        desc.colorAttachments[0].sourceRGBBlendFactor        = MTLBlendFactorSourceAlpha;
-        desc.colorAttachments[0].destinationRGBBlendFactor   = MTLBlendFactorOneMinusSourceAlpha;
-        desc.colorAttachments[0].sourceAlphaBlendFactor      = MTLBlendFactorOne;
-        desc.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
-    }
-
-    MTLVertexDescriptor* vd = [[MTLVertexDescriptor alloc] init];
-    vd.attributes[0].format      = MTLVertexFormatFloat2;
-    vd.attributes[0].offset      = 0;
-    vd.attributes[0].bufferIndex = 0;
-    vd.attributes[1].format      = MTLVertexFormatFloat2;
-    vd.attributes[1].offset      = 8;
-    vd.attributes[1].bufferIndex = 0;
-    vd.layouts[0].stride         = 16;
-    desc.vertexDescriptor = vd;
-
-    NSError* err = nil;
-    id<MTLRenderPipelineState> ps = [device newRenderPipelineStateWithDescriptor:desc error:&err];
-    if (!ps)
-        fprintf(stderr, "flux_canvas_macos: pipeline '%s/%s' failed: %s\n",
-                vertName, fragName, [[err localizedDescription] UTF8String]);
-    return ps;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
+// ============================================================================
 // initCanvas
-// ─────────────────────────────────────────────────────────────────────────────
+// ============================================================================
 
 static void initCanvas(CanvasWidget* w) {
     auto& s = macState(w);
@@ -215,43 +116,23 @@ static void initCanvas(CanvasWidget* w) {
     auto* pw   = inst ? inst->getPlatformWindowPtr() : nullptr;
     if (!pw || !pw->getMacState()) return;
 
-    s.device     = pw->getMacState()->metalDevice;
+    auto* mac = pw->getMacState();
+    s.device     = mac->metalDevice;
     s.cmdQueue   = [s.device newCommandQueue];
-    s.metalLayer = pw->getMacState()->metalLayer;
+    s.metalLayer = [CAMetalLayer layer];
+    s.metalLayer.device          = s.device;
+    s.metalLayer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
+    s.metalLayer.framebufferOnly = YES;
+    s.metalLayer.zPosition       = 0.0; // beneath uiMetalLayer (zPosition 1.0)
+    [pw->getMacState()->nsView.layer insertSublayer:s.metalLayer atIndex:0];
 
-    NSError* err = nil;
-
-    id<MTLLibrary> sbLib = [s.device
-        newLibraryWithSource:[NSString stringWithUTF8String:kMSL_SB]
-                     options:nil
-                       error:&err];
-    if (!sbLib)
-        fprintf(stderr, "flux_canvas_macos: SB shader error: %s\n",
-                [[err localizedDescription] UTF8String]);
-
-    id<MTLLibrary> cvLib = [s.device
-        newLibraryWithSource:[NSString stringWithUTF8String:kMSL_Canvas]
-                     options:nil
-                       error:&err];
-    if (!cvLib)
-        fprintf(stderr, "flux_canvas_macos: Canvas shader error: %s\n",
-                [[err localizedDescription] UTF8String]);
-
-    MTLPixelFormat fmt = s.metalLayer ? s.metalLayer.pixelFormat
-                                      : MTLPixelFormatBGRA8Unorm;
-
-    if (sbLib)
-        s.sbPipeline = makePipeline(s.device, sbLib, "sb_vert", "sb_frag", fmt, true);
-    if (cvLib)
-        s.canvasPipeline = makePipeline(s.device, cvLib, "canvas_vert", "canvas_frag", fmt, true);
-
-    s.vertexBuf = [s.device newBufferWithLength:256 * 1024
-                                        options:MTLResourceStorageModeShared];
+    s.backend = mac->canvasBackend; // shared, borrowed
 
     s.lastW = (w->width  > 0) ? (int)(w->width  * getDpiScale()) : 1;
     s.lastH = (w->height > 0) ? (int)(w->height * getDpiScale()) : 1;
     s.physX = (int)(w->x * getDpiScale());
     s.physY = (int)(w->y * getDpiScale());
+    s.metalLayer.drawableSize = CGSizeMake(s.lastW, s.lastH);
 
     w->canvasW_ = s.lastW;
     w->canvasH_ = s.lastH;
@@ -270,9 +151,9 @@ static void initCanvas(CanvasWidget* w) {
     if (w->onGLResize)        w->onGLResize(s.lastW, s.lastH);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ============================================================================
 // syncPhysicalGeometry
-// ─────────────────────────────────────────────────────────────────────────────
+// ============================================================================
 
 static void syncPhysicalGeometry(CanvasWidget* w) {
     auto& s = macState(w);
@@ -288,6 +169,7 @@ static void syncPhysicalGeometry(CanvasWidget* w) {
     if (newPhysW == s.lastW && newPhysH == s.lastH) return;
     s.lastW = newPhysW;
     s.lastH = newPhysH;
+    s.metalLayer.drawableSize = CGSizeMake(s.lastW < 1 ? 1 : s.lastW, s.lastH < 1 ? 1 : s.lastH);
     w->canvasW_ = newPhysW;
     w->canvasH_ = newPhysH;
     w->vp_.setCanvasSize(newPhysW, newPhysH);
@@ -298,9 +180,9 @@ static void syncPhysicalGeometry(CanvasWidget* w) {
     w->vp_.fitToView();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ============================================================================
 // preRenderPass + glRenderPass
-// ─────────────────────────────────────────────────────────────────────────────
+// ============================================================================
 
 void CanvasWidget::preRenderPass() {
     auto& s = macState(this);
@@ -340,7 +222,9 @@ void CanvasWidget::glRenderPass() {
     float ortho[16];
     metalOrtho(0.f, winW, winH, 0.f, ortho);
 
-    float vp[16] = {
+    // Pan/zoom transform composed with the window-space ortho projection —
+    // used for the canvas content itself (RenderSurface::render via Canvas2D).
+    float vpMat[16] = {
         z,  0,  0, 0,
         0,  z,  0, 0,
         0,  0,  1, 0,
@@ -350,11 +234,12 @@ void CanvasWidget::glRenderPass() {
     for (int col = 0; col < 4; ++col)
         for (int row = 0; row < 4; ++row)
             for (int k = 0; k < 4; ++k)
-                mvp[col*4+row] += ortho[k*4+row] * vp[col*4+k];
+                mvp[col*4+row] += ortho[k*4+row] * vpMat[col*4+k];
 
     MTLRenderPassDescriptor* rpd = [MTLRenderPassDescriptor renderPassDescriptor];
     rpd.colorAttachments[0].texture     = drawable.texture;
-    rpd.colorAttachments[0].loadAction  = MTLLoadActionLoad;
+    rpd.colorAttachments[0].loadAction  = MTLLoadActionClear;
+    rpd.colorAttachments[0].clearColor  = MTLClearColorMake(0, 0, 0, 0);
     rpd.colorAttachments[0].storeAction = MTLStoreActionStore;
 
     auto cmd = [s.cmdQueue commandBuffer];
@@ -367,24 +252,34 @@ void CanvasWidget::glRenderPass() {
     sci.height = (NSUInteger)glH;
     [enc setScissorRect:sci];
 
-    if (s.canvasPipeline && canvasGL_) {
-        [enc setRenderPipelineState:s.canvasPipeline];
-        Canvas2D ctx(canvasGL_, canvasW_, canvasH_, mvp);
-        activeSurface_->render(ctx);
+    // ── Canvas content (RenderSurface) — drawn via the shared Canvas2DMetal
+    // backend. Wire the live encoder/device/mvp into the backend for the
+    // duration of this frame before constructing Canvas2D, and unwire it
+    // immediately after — without this, Canvas2D's draw calls silently
+    // no-op (currentFrame() returns nullptr inside flux_canvas2d_metal.mm).
+    if (s.backend && s.backend->metal) {
+        Canvas2DMetalBeginFrame(s.backend->metal, s.device, enc, mvp);
+        Canvas2D ctx2d(s.backend, canvasW_, canvasH_);
+        activeSurface_->render(ctx2d);
+        Canvas2DMetalEndFrame(s.backend->metal);
     }
-
-
-
-
 
     updateSBGeometry(glW, glH);
     hBar_.tick(frameDt_);
     vBar_.tick(frameDt_);
- 
+
+    // ── Scrollbars — drawn through Painter's Metal solid pipeline, sharing
+    // the same painterRes(device) pipeline cache flux_painter_macos.mm uses
+    // for UI content. Uses the window-space ortho only (no pan/zoom — the
+    // scrollbar track is fixed to the widget's screen rect).
     {
-        // Scrollbars draw via CoreGraphics through Painter.
-        // GraphicsContext carries the CGContextRef from the current pass.
-        GraphicsContext gctx(cgContext);
+        GraphicsContext gctx;
+        gctx.mtlDevice  = (__bridge void*)s.device;
+        gctx.mtlEncoder = (__bridge void*)enc;
+        gctx.width  = glW;
+        gctx.height = glH;
+        memcpy(gctx.mvp, ortho, sizeof(ortho));
+
         Painter p(gctx);
         p.drawScrollbar(hBar_, glW, glH);
         p.drawScrollbar(vBar_, glW, glH);
@@ -408,9 +303,9 @@ bool CanvasWidget::containsPoint(int wx, int wy) const {
     return wx >= x && wx < (x + width) && wy >= y && wy < (y + height);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ============================================================================
 // CanvasWidget member implementations
-// ─────────────────────────────────────────────────────────────────────────────
+// ============================================================================
 
 CanvasWidget::CanvasWidget()
     : hBar_(CustomScrollbar::Axis::Horizontal)
@@ -426,13 +321,12 @@ CanvasWidget::CanvasWidget()
 CanvasWidget::~CanvasWidget() {
     if (activeSurface_) { activeSurface_->destroy(); activeSurface_.reset(); }
     pendingSurface_.reset();
-    canvasGL_ = nullptr;
+    backend_ = nullptr;
     auto& s = macState(this);
-    s.sbPipeline     = nil;
-    s.canvasPipeline = nil;
-    s.vertexBuf      = nil;
-    s.cmdQueue       = nil;
-    s.initialized    = false;
+    s.cmdQueue    = nil;
+    s.metalLayer  = nil;
+    s.backend     = nullptr;
+    s.initialized = false;
     s_macState.erase(this);
     unregisterWithPlatform(this);
 }
@@ -482,26 +376,26 @@ void CanvasWidget::computeLayout(GraphicsContext& /*ctx*/,
     scheduleRepaint(this);
 }
 
-void CanvasWidget::render(GraphicsContext& ctx, FontCache&) {
-    if (ctx.cgContext) {
-        CGContextSaveGState(ctx.cgContext);
-        CGContextSetBlendMode(ctx.cgContext, kCGBlendModeClear);
-        CGContextFillRect(ctx.cgContext, CGRectMake(x, y, width, height));
-        CGContextRestoreGState(ctx.cgContext);
-    }
+void CanvasWidget::render(GraphicsContext& /*ctx*/, FontCache&) {
+    // No-op: uiMetalLayer (the UI content layer) is transparent by default
+    // (see MacState::ensureUILayer's opaque=NO + renderFrame's transparent
+    // clear color), and this widget's own CAMetalLayer renders beneath it
+    // at zPosition 0. No "punch a hole" step is needed — UI content simply
+    // never draws over canvas regions unless a widget explicitly paints
+    // there. (Old CG path used CGContextSetBlendMode(kCGBlendModeClear),
+    // which no longer applies since GraphicsContext has no cgContext field.)
     needsPaint = false;
 }
 
 void CanvasWidget::onDetach() {
     if (activeSurface_) { activeSurface_->destroy(); activeSurface_.reset(); }
     pendingSurface_.reset();
-    canvasGL_ = nullptr;
+    backend_ = nullptr;
     auto& s = macState(this);
-    s.sbPipeline     = nil;
-    s.canvasPipeline = nil;
-    s.vertexBuf      = nil;
-    s.cmdQueue       = nil;
-    s.initialized    = false;
+    s.cmdQueue    = nil;
+    s.metalLayer  = nil;
+    s.backend     = nullptr;
+    s.initialized = false;
     s_macState.erase(this);
     unregisterWithPlatform(this);
     Widget::onDetach();
@@ -512,10 +406,11 @@ void CanvasWidget::markNeedsPaint() {
     scheduleRepaint(this);
 }
 
-void CanvasWidget::setCanvasGL(Canvas2DGL* gl) {
-    canvasGL_ = gl;
+void CanvasWidget::setCanvasBackend(Canvas2DBackend* backend) {
+    backend_ = backend;
     auto& s = macState(this);
-    if (canvasGL_ && !s.initialized)
+    s.backend = backend;
+    if (backend_ && !s.initialized)
         initCanvas(this);
 }
 
@@ -526,9 +421,9 @@ void CanvasWidget::onWindowResize(int /*newW*/, int /*newH*/) {
     scheduleRepaint(this);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ============================================================================
 // Mouse / keyboard
-// ─────────────────────────────────────────────────────────────────────────────
+// ============================================================================
 
 void CanvasWidget::onMouseLeave() {
     hBar_.onMouseLeave();
@@ -622,9 +517,9 @@ void CanvasWidget::onKeyDown(int keyCode) {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ============================================================================
 // Shared helpers
-// ─────────────────────────────────────────────────────────────────────────────
+// ============================================================================
 
 void CanvasWidget::viewportDims(int glW, int glH, int& vpW, int& vpH) const {
     if (!viewportEnabled_ || !scrollbarsEnabled_) { vpW=glW; vpH=glH; return; }
@@ -693,13 +588,6 @@ void CanvasWidget::activatePendingSurface() {
     pendingSurface_.reset();
     activeSurface_->initialize(canvasW_, canvasH_);
     vp_.setCanvasSize(canvasW_, canvasH_);
-}
-
-void CanvasWidget::ensureSBProgram(const char*, const char*) {}
-void CanvasWidget::renderSBCorner(int, int) {}
-void CanvasWidget::renderScrollbarsGL(int /*glW*/, int /*glH*/, double /*dt*/)
-{
-    // tick() now called in glRenderPass() before Painter::drawScrollbar.
 }
 
 void CanvasWidget::initEventType() {}

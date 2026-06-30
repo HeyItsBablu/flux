@@ -20,7 +20,7 @@ struct Canvas2DBackend;
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
 class CanvasWidget;
-struct Canvas2DGL;
+struct Canvas2DBackend;
 #endif
 #endif
 

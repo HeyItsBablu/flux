@@ -20,7 +20,6 @@
 
 #include "flux_canvas2d.hpp"
 
-
 #include <stb_truetype.h>
 
 #include <string>
@@ -46,10 +45,10 @@ struct Canvas2DImageGL : Canvas2DImage
 struct Canvas2DGL
 {
     // ── Flat-colour / textured shader ─────────────────────────────────────
-    GLuint flatProg  = 0;
-    GLint  flatMVP   = -1;
-    GLint  flatColor = -1;
-    GLint  flatMode  = -1; // 0=solid, 1=font atlas R8, 2=RGBA tex
+    GLuint flatProg = 0;
+    GLint flatMVP = -1;
+    GLint flatColor = -1;
+    GLint flatMode = -1; // 0=solid, 1=font atlas R8, 2=RGBA tex
 
     // ── Dynamic geometry ──────────────────────────────────────────────────
     GLuint vao = 0, vbo = 0;
@@ -61,13 +60,13 @@ struct Canvas2DGL
 
     struct FontFace
     {
-        std::string          name;
+        std::string name;
         std::vector<uint8_t> ttfData; // kept alive — stbtt_fontinfo refs it
-        stbtt_fontinfo       info    = {};
-        bool                 ready   = false;
+        stbtt_fontinfo info = {};
+        bool ready = false;
     };
-    std::vector<FontFace>      fonts;
-    std::vector<uint8_t>       atlasPixels; // atlasW * atlasH, single channel
+    std::vector<FontFace> fonts;
+    std::vector<uint8_t> atlasPixels; // atlasW * atlasH, single channel
 
     // atlas shelf packer cursor
     int shelfX = 0, shelfY = 0, shelfH = 0;
@@ -77,7 +76,7 @@ struct Canvas2DGL
         int fontIdx, codepoint, pixelSize;
         bool operator==(const GlyphKey &o) const
         {
-            return fontIdx   == o.fontIdx   &&
+            return fontIdx == o.fontIdx &&
                    codepoint == o.codepoint &&
                    pixelSize == o.pixelSize;
         }
@@ -91,10 +90,10 @@ struct Canvas2DGL
     };
     std::vector<GlyphEntry> glyphs;
 
-    bool  init();
-    void  destroy();
-    int   findFont(const std::string &name) const;
-    int   addFont(const std::string &name, const std::string &path);
+    bool init();
+    void destroy();
+    int findFont(const std::string &name) const;
+    int addFont(const std::string &name, const std::string &path);
     const GlyphEntry *getGlyph(int fontIdx, int codepoint, int pixelSize);
     float getKernAdvance(int fontIdx, int cp1, int cp2, int pixelSize) const;
 
@@ -112,10 +111,10 @@ struct Canvas2DBackend
         1, 0, 0, 0,
         0, 1, 0, 0,
         0, 0, 1, 0,
-        0, 0, 0, 1 };
+        0, 0, 0, 1};
 
     static Canvas2DBackend *create(Canvas2DGL *gl);
-    static void             destroy(Canvas2DBackend *b);
+    static void destroy(Canvas2DBackend *b);
 };
 
 // =============================================================================
@@ -129,7 +128,7 @@ struct Canvas2DBackend
 struct Canvas2DImageCairo : Canvas2DImage
 {
     cairo_surface_t *surface = nullptr;
-    ~Canvas2DImageCairo() override;  // defined in flux_canvas2d_cairo.cpp
+    ~Canvas2DImageCairo() override; // defined in flux_canvas2d_cairo.cpp
 };
 
 // ── Shared Cairo resources ────────────────────────────────────────────────────
@@ -141,11 +140,11 @@ struct Canvas2DCairo
 
     struct FontFace
     {
-        std::string          name;
+        std::string name;
         std::vector<uint8_t> ttfData;
-        stbtt_fontinfo       info  = {};
-        bool                 ready = false;
-        cairo_font_face_t   *cairoFace = nullptr;
+        stbtt_fontinfo info = {};
+        bool ready = false;
+        cairo_font_face_t *cairoFace = nullptr;
     };
     std::vector<FontFace> fonts;
 
@@ -154,7 +153,7 @@ struct Canvas2DCairo
         int fontIdx, codepoint, pixelSize;
         bool operator==(const GlyphKey &o) const
         {
-            return fontIdx   == o.fontIdx   &&
+            return fontIdx == o.fontIdx &&
                    codepoint == o.codepoint &&
                    pixelSize == o.pixelSize;
         }
@@ -166,10 +165,10 @@ struct Canvas2DCairo
     };
     std::vector<GlyphEntry> glyphs;
 
-    bool  init();
-    void  destroy();
-    int   findFont(const std::string &name) const;
-    int   addFont(const std::string &name, const std::string &path);
+    bool init();
+    void destroy();
+    int findFont(const std::string &name) const;
+    int addFont(const std::string &name, const std::string &path);
     const GlyphEntry *getGlyph(int fontIdx, int codepoint, int pixelSize);
     float getKernAdvance(int fontIdx, int cp1, int cp2, int pixelSize) const;
 };
@@ -184,10 +183,10 @@ struct Canvas2DBackend
         1, 0, 0, 0,
         0, 1, 0, 0,
         0, 0, 1, 0,
-        0, 0, 0, 1 };
+        0, 0, 0, 1};
 
     static Canvas2DBackend *create(Canvas2DCairo *cairo);
-    static void             destroy(Canvas2DBackend *b);
+    static void destroy(Canvas2DBackend *b);
 };
 
 // =============================================================================
@@ -196,6 +195,8 @@ struct Canvas2DBackend
 #elif defined(__APPLE__)
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
+
+#import <Metal/Metal.h> // needed for id<MTLDevice>/id<MTLRenderCommandEncoder> below
 
 // Opaque forward — full definition in flux_canvas2d_metal.mm
 struct Canvas2DMetalContext;
@@ -214,10 +215,10 @@ struct Canvas2DMetal
 
     struct FontFace
     {
-        std::string          name;
+        std::string name;
         std::vector<uint8_t> ttfData;
-        stbtt_fontinfo       info  = {};
-        bool                 ready = false;
+        stbtt_fontinfo info = {};
+        bool ready = false;
     };
     std::vector<FontFace> fonts;
 
@@ -229,13 +230,17 @@ struct Canvas2DMetal
             return fontIdx == o.fontIdx && codepoint == o.codepoint && pixelSize == o.pixelSize;
         }
     };
-    struct GlyphEntry { GlyphKey key; int xoff, yoff, advance; };
+    struct GlyphEntry
+    {
+        GlyphKey key;
+        int xoff, yoff, advance;
+    };
     std::vector<GlyphEntry> glyphs;
 
-    bool  init();
-    void  destroy();
-    int   findFont(const std::string &name) const;
-    int   addFont(const std::string &name, const std::string &path);
+    bool init();
+    void destroy();
+    int findFont(const std::string &name) const;
+    int addFont(const std::string &name, const std::string &path);
     const GlyphEntry *getGlyph(int fontIdx, int codepoint, int pixelSize);
     float getKernAdvance(int fontIdx, int cp1, int cp2, int pixelSize) const;
 };
@@ -246,15 +251,31 @@ struct Canvas2DBackend
     Canvas2DMetal *metal = nullptr;
 
     // mvp unused on Metal — kept for shared CanvasWidget compilation.
+    // Live per-frame uniforms (including the real mvp) are passed via
+    // Canvas2DMetalBeginFrame below, not read from this field.
     float mvp[16] = {
         1, 0, 0, 0,
         0, 1, 0, 0,
         0, 0, 1, 0,
-        0, 0, 0, 1 };
+        0, 0, 0, 1};
 
     static Canvas2DBackend *create(Canvas2DMetal *metal);
-    static void             destroy(Canvas2DBackend *b);
+    static void destroy(Canvas2DBackend *b);
 };
+
+// ── Encoder wiring (Stage: Canvas2D Metal backend) ───────────────────────────
+// Canvas2D's constructor (flux_canvas2d.hpp) takes no encoder parameter, so
+// the live MTLRenderCommandEncoder for the current frame must be supplied
+// separately. CanvasWidget::glRenderPass() (flux_canvas_macos.mm) calls
+// these immediately around its Canvas2D usage:
+//
+//   Canvas2DMetalBeginFrame(s.backend->metal, s.device, enc, mvp);
+//   Canvas2D ctx2d(s.backend, canvasW_, canvasH_);
+//   activeSurface_->render(ctx2d);
+//   Canvas2DMetalEndFrame(s.backend->metal);
+//
+
+void Canvas2DMetalEndFrame(Canvas2DMetal *metal);
 
 #endif // TARGET_OS_OSX
 #endif // __APPLE__
@@ -287,22 +308,22 @@ struct Canvas2DD2D
     D3DDevice *device = nullptr; // borrowed — not owned
 
     ComPtr<ID2D1DeviceContext> offscreenDC;
-    ComPtr<ID2D1Bitmap1>       offscreenBitmap;
+    ComPtr<ID2D1Bitmap1> offscreenBitmap;
     int bitmapW = 0, bitmapH = 0;
 
     struct FontFace
     {
-        std::string          name;
+        std::string name;
         std::vector<uint8_t> ttfData;
-        stbtt_fontinfo       info  = {};
-        bool                 ready = false;
+        stbtt_fontinfo info = {};
+        bool ready = false;
     };
     std::vector<FontFace> fonts;
 
     static constexpr int kAtlasW = 1024;
     static constexpr int kAtlasH = 1024;
-    std::vector<uint8_t>   atlasPixels; // kAtlasW * kAtlasH * 4  (BGRA premul)
-    ComPtr<ID2D1Bitmap>    atlasBitmap;
+    std::vector<uint8_t> atlasPixels; // kAtlasW * kAtlasH * 4  (BGRA premul)
+    ComPtr<ID2D1Bitmap> atlasBitmap;
     int shelfX = 0, shelfY = 0, shelfH = 0;
 
     struct GlyphKey
@@ -310,7 +331,7 @@ struct Canvas2DD2D
         int fontIdx, codepoint, pixelSize;
         bool operator==(const GlyphKey &o) const
         {
-            return fontIdx   == o.fontIdx   &&
+            return fontIdx == o.fontIdx &&
                    codepoint == o.codepoint &&
                    pixelSize == o.pixelSize;
         }
@@ -330,8 +351,8 @@ struct Canvas2DD2D
     static bool registerFont(Canvas2DD2D *self,
                              const std::string &name,
                              const std::string &path);
-    int   findFont(const std::string &name) const;
-    int   addFont(const std::string &name, const std::string &path);
+    int findFont(const std::string &name) const;
+    int addFont(const std::string &name, const std::string &path);
     const GlyphEntry *getGlyph(int fontIdx, int codepoint, int pixelSize);
     float getKernAdvance(int fontIdx, int cp1, int cp2, int pixelSize) const;
 
@@ -350,10 +371,10 @@ struct Canvas2DBackend
         1, 0, 0, 0,
         0, 1, 0, 0,
         0, 0, 1, 0,
-        0, 0, 0, 1 };
+        0, 0, 0, 1};
 
     static Canvas2DBackend *create(Canvas2DD2D *d2d);
-    static void             destroy(Canvas2DBackend *b);
+    static void destroy(Canvas2DBackend *b);
 };
 
 #endif // _WIN32

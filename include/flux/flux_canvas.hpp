@@ -207,13 +207,17 @@ public:
     void onKeyUpEvent(const SDL_KeyboardEvent &e);
 #endif
 
-    // ── macOS-only ────────────────────────────────────────────────────────────
+// ── macOS-only ────────────────────────────────────────────────────────────
 #ifdef __APPLE__
 #if TARGET_OS_OSX
     static void initEventType();
     static uint32_t repaintEventType();
 
-    void setCanvasGL(Canvas2DGL *gl);
+    // Renamed from setCanvasGL(Canvas2DGL*) — macOS uses the Metal backend
+    // (Canvas2DMetal wrapped in Canvas2DBackend), not the GL backend type,
+    // which is Android/Web-only per flux_canvas2d_backend.hpp. backend_
+    // (Canvas2DBackend*) is already declared above under #ifndef _WIN32.
+    void setCanvasBackend(Canvas2DBackend *backend);
     void onWindowResize(int newW, int newH);
     void preRenderPass();
     void glRenderPass();
