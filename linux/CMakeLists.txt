@@ -10,7 +10,7 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/assets")
     add_custom_command(TARGET flux_app POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_SOURCE_DIR}/assets"
-            "$<TARGET_FILE_DIR:flux_app>/assets"
+            "$<TARGET_FILE_DIR:flux_app>"
         COMMENT "Copying assets"
     )
 endif()

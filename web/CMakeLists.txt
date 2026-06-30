@@ -43,6 +43,6 @@ target_link_options(flux_app PRIVATE
 
 if(EXISTS "${CMAKE_SOURCE_DIR}/assets")
     target_link_options(flux_app PRIVATE
-        "--preload-file=${CMAKE_SOURCE_DIR}/assets@/assets"
+        "--preload-file=${CMAKE_SOURCE_DIR}/assets/.@/"
     )
 endif()
