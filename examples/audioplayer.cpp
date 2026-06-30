@@ -6,7 +6,7 @@ public:
   WidgetPtr build() override
   {
 
-    return Flex({AudioPlayer("screenshots/TumMile.mp3")
+    return Flex({AudioPlayer("TumMile.mp3")
                      ->setWidth(280),
                  CameraView()->setWidth(380)->setHeight(270)->setOnPhoto(
                      [](const std::string &path)
@@ -21,6 +21,8 @@ public:
 
 WidgetPtr createApp(FluxUI *app)
 {
-  return FluxApp("FluxUI - App", std::make_shared<MyApp>(), AppTheme::light(),
-                 false, 900, 700, false, false);
+  return FluxApp("Audio Player App")
+      .setTheme(AppTheme::light())
+      .setFullscreenMode(true)
+      .build(std::make_shared<MyApp>());
 }
