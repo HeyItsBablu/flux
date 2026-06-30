@@ -135,32 +135,8 @@ public:
     return self();
   }
 
-  /// Attach an artwork image widget.
-  /// Pass any ImageWidgetPtr (asset, network, memory).
-  /// setArtworkSize() controls the rendered square size (default 40px = full
-  /// player height; call after setArtworkSize() for larger art).
-  std::shared_ptr<AudioPlayerWidget>
-  setArtwork(ImageWidgetPtr img, int size = 0) {
-    _artWidget = std::move(img);
-    if (size > 0)
-      artworkSize = size;
-    else if (artworkSize == 0)
-      artworkSize = playerHeight; // square thumbnail flush with player height
-    _artWidget->setWidth(artworkSize)->setHeight(artworkSize);
-    _artWidget->setFit(ImageFit::Cover);
-    markNeedsLayout();
-    return self();
-  }
 
-  /// Resize the artwork column (can be called before or after setArtwork).
-  std::shared_ptr<AudioPlayerWidget> setArtworkSize(int px) {
-    artworkSize = px;
-    if (_artWidget) {
-      _artWidget->setWidth(px)->setHeight(px);
-    }
-    markNeedsLayout();
-    return self();
-  }
+
 
   // ── Constructor ───────────────────────────────────────────────────────────
   AudioPlayerWidget() {
@@ -198,11 +174,7 @@ public:
     height = std::max(playerHeight, artworkSize);
     applyConstraints();
 
-    // Layout child artwork widget
-    if (_artWidget && artworkSize > 0) {
-      BoxConstraints artC = BoxConstraints::tight(artworkSize, artworkSize);
-      _artWidget->computeLayout(ctx, artC, fontCache);
-    }
+
 
     needsLayout = false;
   }
@@ -231,15 +203,7 @@ public:
     int cx   = x;
     int midY = y + height / 2;
 
-    // ── Artwork thumbnail ────────────────────────────────────────────────
-    if (_artWidget && artworkSize > 0) {
-      int artY = y + (height - artworkSize) / 2;
-      _artWidget->x = cx;
-      _artWidget->y = artY;
-      _artWidget->setBorderRadius(pillarRadius); // match pill left edge
-      _artWidget->render(ctx, fontCache);
-      cx += artworkSize + 4;
-    }
+
 
     // ── Loading / error overlay ──────────────────────────────────────────
     if (_netState == NetState::Loading) {
@@ -430,8 +394,7 @@ private:
   std::string            _sourceUrl;
   std::vector<uint8_t>   _sourceMemory;
 
-  // ── Artwork ───────────────────────────────────────────────────────────────
-  ImageWidgetPtr _artWidget;
+
 
   // ── Network loading state ─────────────────────────────────────────────────
   enum class NetState { Idle, Loading, Error };

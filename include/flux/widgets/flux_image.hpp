@@ -863,23 +863,29 @@ private:
 // FACTORY FUNCTIONS
 // ============================================================================
 
-using ImageWidgetPtr = std::shared_ptr<ImageWidget>;
-
-inline ImageWidgetPtr AssetImage(const std::string &path)
-{
-    return ImageWidget::asset(path);
-}
-inline ImageWidgetPtr Image()
+inline std::shared_ptr<ImageWidget> Image()
 {
     return std::make_shared<ImageWidget>();
 }
-inline ImageWidgetPtr NetworkImage(const std::string &url, bool postToUI = true)
+
+// String overload: path vs URL by prefix
+inline std::shared_ptr<ImageWidget> Image(const std::string &pathOrUrl, bool postToUI = true)
 {
-    return ImageWidget::network(url, postToUI);
+    return pathOrUrl.rfind("http://", 0) == 0 || pathOrUrl.rfind("https://", 0) == 0
+               ? ImageWidget::network(pathOrUrl, postToUI)
+               : ImageWidget::asset(pathOrUrl);
 }
-inline ImageWidgetPtr MemoryImage(const std::vector<uint8_t> &bytes)
+
+// Bytes overload: in-memory image data
+inline std::shared_ptr<ImageWidget> Image(const std::vector<uint8_t> &bytes)
 {
     return ImageWidget::memory(bytes);
+}
+
+// Optional: raw pointer + length, for cases where you don't already have a vector
+inline std::shared_ptr<ImageWidget> Image(const uint8_t *data, size_t len)
+{
+    return ImageWidget::memory(std::vector<uint8_t>(data, data + len));
 }
 
 #endif // FLUX_IMAGE_HPP
