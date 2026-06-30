@@ -16,14 +16,14 @@
 // ============================================================================
  
 struct ImageWidget::MacScaleCache {
-    CGImageRef image   = nullptr;
+    id<MTLTexture> texture = nil;
     int        w       = 0;
     int        h       = 0;
     int        fit     = -1;
     int        quality = -1;
 
     void invalidate() {
-        if (image) { CGImageRelease(image); image = nullptr; }
+        texture = nil;   // ARC releases
         w = h = 0;
         fit = quality = -1;
     }
@@ -121,18 +121,35 @@ static CGInterpolationQuality cgInterpolation(FilterQuality q) {
     return kCGInterpolationLow;
 }
 
-// Add a rounded-rect clip path using CGPathCreateWithRoundedRect (10.9+).
-static void cgClipRoundedRect(CGContextRef ctx,
-                               CGFloat rx, CGFloat ry,
-                               CGFloat rw, CGFloat rh,
-                               CGFloat radius) {
-    CGFloat r = std::min(radius, std::min(rw * 0.5f, rh * 0.5f));
-    CGPathRef path = CGPathCreateWithRoundedRect(
-        CGRectMake(rx, ry, rw, rh), r, r, nullptr);
-    CGContextAddPath(ctx, path);
-    CGContextClip(ctx);
-    CGPathRelease(path);
+static id<MTLTexture> uploadCGImageToMetal(id<MTLDevice> device, CGImageRef img) {
+    if (!device || !img) return nil;
+    size_t w = CGImageGetWidth(img);
+    size_t h = CGImageGetHeight(img);
+    if (w == 0 || h == 0) return nil;
+
+    // Re-render into a tightly-packed BGRA buffer so we control the layout
+    // Metal expects exactly (CGImageGetBytesPerRow isn't guaranteed to match).
+    std::vector<uint8_t> buf(w * h * 4);
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    CGContextRef cg = CGBitmapContextCreate(
+        buf.data(), w, h, 8, w * 4, cs,
+        kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host);
+    CGColorSpaceRelease(cs);
+    if (!cg) return nil;
+    CGContextDrawImage(cg, CGRectMake(0, 0, w, h), img);
+    CGContextRelease(cg);
+
+    MTLTextureDescriptor *td = [MTLTextureDescriptor
+        texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+                                      width:w height:h mipmapped:NO];
+    td.usage = MTLTextureUsageShaderRead;
+    id<MTLTexture> tex = [device newTextureWithDescriptor:td];
+    [tex replaceRegion:MTLRegionMake2D(0, 0, w, h) mipmapLevel:0
+            withBytes:buf.data() bytesPerRow:w * 4];
+    return tex;
 }
+
+
 
 // ============================================================================
 // _platformDecode  — not used on macOS (stb path handles decode)
@@ -184,7 +201,9 @@ void ImageWidget::_platformPromote() {
 
 void ImageWidget::_platformRender(GraphicsContext &ctx, int cx, int cy,
                                   int cw, int ch) {
-    if (pixels.empty() || !ctx.cgContext) return;
+    if (pixels.empty() || !ctx.mtlDevice) return;
+    id<MTLDevice> device = (__bridge id<MTLDevice>)ctx.mtlDevice;
+
     if (!_macCache) _macCache.reset(new MacScaleCache());
     auto &cache = *_macCache;
 
@@ -192,8 +211,7 @@ void ImageWidget::_platformRender(GraphicsContext &ctx, int cx, int cy,
     int dw = std::max(1, (int)d.w);
     int dh = std::max(1, (int)d.h);
 
-    // ── Rebuild scaled CGImageRef if stale ───────────────────────────────────
-    bool stale = !cache.image
+    bool stale = !cache.texture
               || cache.w       != dw
               || cache.h       != dh
               || cache.fit     != (int)fit
@@ -205,15 +223,19 @@ void ImageWidget::_platformRender(GraphicsContext &ctx, int cx, int cy,
         CGImageRef base = makeCGImage(pixels.data(), imageWidth, imageHeight);
         if (!base) return;
 
-        if (dw == imageWidth && dh == imageHeight) {
-            cache.image = base;
-        } else {
-            cache.image = makeScaledCGImage(base, imageWidth, imageHeight,
-                                            dw, dh,
-                                            cgInterpolation(filterQuality));
-            CGImageRelease(base);
-            if (!cache.image) return;
+        CGImageRef finalImg = base;
+        CGImageRef scaled = nullptr;
+        if (dw != imageWidth || dh != imageHeight) {
+            scaled = makeScaledCGImage(base, imageWidth, imageHeight,
+                                       dw, dh, cgInterpolation(filterQuality));
+            if (scaled) finalImg = scaled;
         }
+
+        cache.texture = uploadCGImageToMetal(device, finalImg);
+
+        if (scaled) CGImageRelease(scaled);
+        CGImageRelease(base);
+        if (!cache.texture) return;
 
         cache.w       = dw;
         cache.h       = dh;
@@ -223,7 +245,7 @@ void ImageWidget::_platformRender(GraphicsContext &ctx, int cx, int cy,
 
     Painter painter(ctx);
     Painter::ImageDrawParams params;
-    params.image    = cache.image;
+    params.image    = (__bridge void*)cache.texture; // NativeImage = void*, bridged id<MTLTexture>
     params.srcWidth  = dw;
     params.srcHeight = dh;
     params.clipX = cx;
@@ -240,7 +262,6 @@ void ImageWidget::_platformRender(GraphicsContext &ctx, int cx, int cy,
 
     painter.drawImage(params);
 }
-
 // ============================================================================
 // _platformInvalidateCache
 // ============================================================================

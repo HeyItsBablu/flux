@@ -559,8 +559,9 @@ MeasureContext FluxUI::getMeasureContext()
 #elif defined(__APPLE__)
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
-    GraphicsContext gc = window.getMeasureContext();
-    return MeasureContext(gc.cgContext, gc.width, gc.height);
+    MeasureContext mc;
+    mc.ctx = window.getMeasureContext();
+    return mc;
 #else
     return MeasureContext(nullptr, 0, 0);
 #endif

@@ -183,14 +183,64 @@
 - (void)rightMouseDown:(NSEvent*)event {
     if (!_win) return;
     NSPoint p = [self fluxPoint:event];
-    if (_win->callbacks.onRightClick &&
-        _win->callbacks.onRightClick((int)p.x, (int)p.y))
+    int mx = (int)p.x, my = (int)p.y;
+
+    auto& s = *_win->macState;
+    CanvasWidget* cw = _win->hitTestCanvas(mx, my);
+    if (cw) {
+        cw->onMouseButtonDown(mx - cw->x, my - cw->y, 1); // button==1 -> right click
+        [self renderFrame];
+        return;
+    }
+    if (_win->callbacks.onRightClick && _win->callbacks.onRightClick(mx, my))
         [self renderFrame];
 }
 
+- (void)otherMouseDown:(NSEvent*)event {
+    if (!_win || event.buttonNumber != 2) return;
+    NSPoint p = [self fluxPoint:event];
+    int mx = (int)p.x, my = (int)p.y;
+
+    auto& s = *_win->macState;
+    CanvasWidget* cw = _win->hitTestCanvas(mx, my);
+    if (cw) {
+        s.capturedCanvas = cw;
+        cw->onMouseButtonDown(mx - cw->x, my - cw->y, 2);
+        [self renderFrame];
+    }
+}
+
+- (void)otherMouseUp:(NSEvent*)event {
+    if (!_win || event.buttonNumber != 2) return;
+    NSPoint p = [self fluxPoint:event];
+    int mx = (int)p.x, my = (int)p.y;
+
+    auto& s = *_win->macState;
+    CanvasWidget* cw = s.capturedCanvas;
+    s.capturedCanvas = nullptr;
+    if (cw) {
+        cw->onMouseButtonUp(mx - cw->x, my - cw->y, 2);
+        [self renderFrame];
+    }
+}
+
+- (void)otherMouseDragged:(NSEvent*)event { [self mouseMoved:event]; }
+
 - (void)scrollWheel:(NSEvent*)event {
     if (!_win) return;
-    int delta = (int)(event.scrollingDeltaY * WHEEL_DELTA);
+    NSPoint p = [self fluxPoint:event];
+    int mx = (int)p.x, my = (int)p.y;
+    float deltaY = (float)event.scrollingDeltaY;
+
+    auto& s = *_win->macState;
+    CanvasWidget* cw = s.capturedCanvas ? s.capturedCanvas : _win->hitTestCanvas(mx, my);
+    if (cw) {
+        cw->onScrollWheel(deltaY);
+        [self renderFrame];
+        return;
+    }
+
+    int delta = (int)(deltaY * WHEEL_DELTA);
     if (_win->callbacks.onMouseWheel && _win->callbacks.onMouseWheel(delta))
         [self renderFrame];
 }
@@ -442,7 +492,7 @@ void PlatformWindow::killTimer(TimerID id) {
 void PlatformWindow::registerCanvas_public(CanvasWidget* c) {
     if (!c || !macState) return;
     macState->canvasWidgets.push_back(c);
-    if (macState->canvasGL) c->setCanvasGL(macState->canvasGL);
+    if (macState->canvasBackend) c->setCanvasBackend(macState->canvasBackend);
 }
 
 void PlatformWindow::unregisterCanvas_public(CanvasWidget* c) {

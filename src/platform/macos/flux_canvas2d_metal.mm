@@ -577,7 +577,7 @@ void Canvas2D::strokeCircle(float cx, float cy, float r)
 // no bezier subdivision adaptive to scale) — sufficient for simple UI
 // shapes, flagged as a known limitation for complex paths.
 
-void Canvas2D::beginPath() { path_.clear(); clipDepth_ = clipDepth_; }
+void Canvas2D::beginPath() { path_.clear(); }
 void Canvas2D::closePath() { if (!path_.empty()) path_.push_back({pathStartX_, pathStartY_, false}); }
 void Canvas2D::moveTo(float x, float y) { path_.push_back({x, y, true}); pathStartX_=x; pathStartY_=y; curX_=x; curY_=y; }
 void Canvas2D::lineTo(float x, float y) { path_.push_back({x, y, false}); curX_=x; curY_=y; }
