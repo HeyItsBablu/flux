@@ -3,15 +3,12 @@
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
 
-// Metal imports FIRST — before any flux headers
 #import <Cocoa/Cocoa.h>
 #import <Metal/Metal.h>
 #import <MetalKit/MetalKit.h>
 #import <QuartzCore/CAMetalLayer.h>
-#import <CoreGraphics/CoreGraphics.h>
 #import <AudioToolbox/AudioToolbox.h>
 
-// flux headers AFTER
 #include "flux/flux_window.hpp"
 #include "flux/flux_canvas.hpp"
 #include "flux/flux_window_macos_state.hpp"
@@ -27,17 +24,16 @@
 @class FluxNSView;
 @class FluxAppDelegate;
 
-
-
-
 // ============================================================================
-// FluxNSView — NSView subclass that bridges Cocoa events to PlatformWindow
+// FluxNSView — bridges Cocoa events to PlatformWindow; renderFrame is the
+// single paint entry point (replaces the old CG-based drawRect: pipeline).
 // ============================================================================
 
 @interface FluxNSView : NSView <NSWindowDelegate> {
     PlatformWindow* _win;
 }
 - (instancetype)initWithFrame:(NSRect)frame window:(PlatformWindow*)win;
+- (void)renderFrame;
 @end
 
 @implementation FluxNSView
@@ -54,31 +50,52 @@
 - (BOOL)acceptsFirstResponder { return YES; }
 - (BOOL)isOpaque              { return YES; }
 
-// ── Drawing ──────────────────────────────────────────────────────────────────
-- (void)drawRect:(NSRect)dirtyRect {
+// Content now lives entirely in uiMetalLayer (and per-CanvasWidget Metal
+// layers beneath it), which present independently of AppKit's CG drawing
+// cycle. Nothing to draw here.
+- (void)drawRect:(NSRect)dirtyRect { /* intentionally empty */ }
+
+// ── Single paint entry point ────────────────────────────────────────────────
+- (void)renderFrame {
     if (!_win || !_win->macState) return;
     auto& s = *_win->macState;
-    if (!s.cgContext) return;
+    if (!s.ensureUILayer(_win->cachedWidth, _win->cachedHeight)) return;
 
-    // Clear CG surface
-    CGContextClearRect(s.cgContext, CGRectMake(0, 0, s.cgWidth, s.cgHeight));
+    id<CAMetalDrawable> drawable = [s.uiMetalLayer nextDrawable];
+    if (!drawable) return;
 
-    // Paint UI widgets
-    GraphicsContext ctx(s.cgContext, s.cgWidth, s.cgHeight);
+    MTLRenderPassDescriptor* rpd = [MTLRenderPassDescriptor renderPassDescriptor];
+    rpd.colorAttachments[0].texture     = drawable.texture;
+    rpd.colorAttachments[0].loadAction  = MTLLoadActionClear;
+    rpd.colorAttachments[0].clearColor  = MTLClearColorMake(0, 0, 0, 0); // transparent
+    rpd.colorAttachments[0].storeAction = MTLStoreActionStore;
+
+    id<MTLCommandBuffer> cmd = [s.commandQueue commandBuffer];
+    id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:rpd];
+
+    GraphicsContext ctx;
+    ctx.mtlDevice          = (__bridge void*)s.metalDevice;
+    ctx.mtlEncoder         = (__bridge void*)enc;
+    ctx.width              = _win->cachedWidth;
+    ctx.height             = _win->cachedHeight;
+    ctx.textScratchProvider = &s;
+
+    // Orthographic projection: pixel space (top-left origin) -> clip space.
+    float l = 0, r = (float)ctx.width, t = 0, b = (float)ctx.height;
+    memset(ctx.mvp, 0, sizeof(ctx.mvp));
+    ctx.mvp[0]  =  2.f / (r - l);
+    ctx.mvp[5]  =  2.f / (t - b);
+    ctx.mvp[10] = -1.f;
+    ctx.mvp[12] = -(r + l) / (r - l);
+    ctx.mvp[13] = -(b + t) / (b - t);
+    ctx.mvp[15] =  1.f;
+
     if (_win->callbacks.onPaint)
-        _win->callbacks.onPaint(ctx, s.cgWidth, s.cgHeight);
+        _win->callbacks.onPaint(ctx, ctx.width, ctx.height);
 
-    // Composite CG pixels into the view via CGImage
-    CGContextRef viewCtx = [[NSGraphicsContext currentContext] CGContext];
-    if (viewCtx && s.cgContext) {
-        CGImageRef img = CGBitmapContextCreateImage(s.cgContext);
-        if (img) {
-            NSRect bounds = self.bounds;
-            CGContextDrawImage(viewCtx,
-                CGRectMake(0, 0, bounds.size.width, bounds.size.height), img);
-            CGImageRelease(img);
-        }
-    }
+    [enc endEncoding];
+    [cmd presentDrawable:drawable];
+    [cmd commit];
 }
 
 // ── Resize ───────────────────────────────────────────────────────────────────
@@ -86,39 +103,34 @@
     [super setFrameSize:newSize];
     if (!_win || !_win->macState) return;
 
-    // Use backing (physical) pixels for cachedWidth/Height
     NSRect backing = [self convertRectToBacking:self.bounds];
     _win->cachedWidth  = (int)backing.size.width;
     _win->cachedHeight = (int)backing.size.height;
 
+    auto& s = *_win->macState;
+    s.ensureUILayer(_win->cachedWidth, _win->cachedHeight); // resize uiMetalLayer + (re)gate atlas init
+
     int lw = (int)newSize.width;
     int lh = (int)newSize.height;
 
-    auto& s = *_win->macState;
-    s.rebuildCGContext(lw, lh);
-
-    // Update Metal layer size
-    if (s.metalLayer) {
-        s.metalLayer.drawableSize = backing.size;
-    }
-
-    // Notify canvas widgets
     for (CanvasWidget* cw : s.canvasWidgets)
         if (cw) cw->onWindowResize(_win->cachedWidth, _win->cachedHeight);
 
-    if (_win->callbacks.onResize && s.cgContext) {
-        GraphicsContext ctx(s.cgContext, lw, lh);
+    if (_win->callbacks.onResize) {
+        GraphicsContext ctx; // layout-only context: no mtlEncoder, Painter calls no-op safely
+        ctx.width = lw;
+        ctx.height = lh;
+        ctx.textScratchProvider = &s;
         _win->callbacks.onResize(ctx, lw, lh);
     }
 
-    [self setNeedsDisplay:YES];
+    [self renderFrame];
 }
 
 // ── Mouse events ─────────────────────────────────────────────────────────────
 
 - (NSPoint)fluxPoint:(NSEvent*)event {
     NSPoint p = [self convertPoint:event.locationInWindow fromView:nil];
-    // Flip Y — AppKit origin is bottom-left, FluxUI is top-left
     return NSMakePoint(p.x, self.bounds.size.height - p.y);
 }
 
@@ -134,11 +146,11 @@
         s.capturedCanvas = cw;
         s.focusedCanvas  = cw;
         cw->onMouseButtonDown(mx - cw->x, my - cw->y, 0);
-        _win->macState->dirty = true; return;
+        [self renderFrame]; return;
     }
     s.focusedCanvas = nullptr;
     if (_win->callbacks.onMouseDown && _win->callbacks.onMouseDown(mx, my))
-        [self setNeedsDisplay:YES];
+        [self renderFrame];
 }
 
 - (void)mouseUp:(NSEvent*)event {
@@ -149,9 +161,9 @@
     auto& s = *_win->macState;
     CanvasWidget* cw = s.capturedCanvas ? s.capturedCanvas : _win->hitTestCanvas(mx, my);
     s.capturedCanvas = nullptr;
-    if (cw) { cw->onMouseButtonUp(mx - cw->x, my - cw->y, 0); [self setNeedsDisplay:YES]; return; }
+    if (cw) { cw->onMouseButtonUp(mx - cw->x, my - cw->y, 0); [self renderFrame]; return; }
     if (_win->callbacks.onMouseUp && _win->callbacks.onMouseUp(mx, my))
-        [self setNeedsDisplay:YES];
+        [self renderFrame];
 }
 
 - (void)mouseDragged:(NSEvent*)event { [self mouseMoved:event]; }
@@ -163,9 +175,9 @@
 
     auto& s = *_win->macState;
     CanvasWidget* cw = s.capturedCanvas ? s.capturedCanvas : _win->hitTestCanvas(mx, my);
-    if (cw) { cw->onMouseMove(mx - cw->x, my - cw->y); [self setNeedsDisplay:YES]; return; }
+    if (cw) { cw->onMouseMove(mx - cw->x, my - cw->y); [self renderFrame]; return; }
     if (_win->callbacks.onMouseMove && _win->callbacks.onMouseMove(mx, my))
-        [self setNeedsDisplay:YES];
+        [self renderFrame];
 }
 
 - (void)rightMouseDown:(NSEvent*)event {
@@ -173,15 +185,14 @@
     NSPoint p = [self fluxPoint:event];
     if (_win->callbacks.onRightClick &&
         _win->callbacks.onRightClick((int)p.x, (int)p.y))
-        [self setNeedsDisplay:YES];
+        [self renderFrame];
 }
 
 - (void)scrollWheel:(NSEvent*)event {
     if (!_win) return;
-    // Normalize to Win32 WHEEL_DELTA units
     int delta = (int)(event.scrollingDeltaY * WHEEL_DELTA);
     if (_win->callbacks.onMouseWheel && _win->callbacks.onMouseWheel(delta))
-        [self setNeedsDisplay:YES];
+        [self renderFrame];
 }
 
 - (void)mouseExited:(NSEvent*)event {
@@ -191,6 +202,7 @@
     for (CanvasWidget* cw : s.canvasWidgets)
         if (cw) cw->onMouseLeave();
     if (_win->callbacks.onMouseLeave) _win->callbacks.onMouseLeave();
+    [self renderFrame];
 }
 
 // ── Keyboard events ───────────────────────────────────────────────────────────
@@ -199,24 +211,23 @@
     if (!_win) return;
     auto& s = *_win->macState;
 
-    // Pass to focused canvas first
     if (s.focusedCanvas) {
         s.focusedCanvas->onKeyDown((int)event.keyCode);
-        [self setNeedsDisplay:YES];
+        [self renderFrame];
         return;
     }
 
-    if (_win->callbacks.onKeyDown &&
-        _win->callbacks.onKeyDown((int)event.keyCode))
-        [self setNeedsDisplay:YES];
+    bool needsRedraw = false;
+    if (_win->callbacks.onKeyDown && _win->callbacks.onKeyDown((int)event.keyCode))
+        needsRedraw = true;
 
-    // Character input
     NSString* chars = event.characters;
     if (chars.length > 0 && _win->callbacks.onChar) {
         wchar_t ch = (wchar_t)[chars characterAtIndex:0];
-        if (ch >= 32 && _win->callbacks.onChar(ch))  // skip control chars
-            [self setNeedsDisplay:YES];
+        if (ch >= 32 && _win->callbacks.onChar(ch))
+            needsRedraw = true;
     }
+    if (needsRedraw) [self renderFrame];
 }
 
 // ── NSWindowDelegate ──────────────────────────────────────────────────────────
@@ -232,13 +243,13 @@
     s.capturedCanvas = nullptr;
     s.focusedCanvas  = nullptr;
     if (_win->callbacks.onFocusLost) _win->callbacks.onFocusLost();
-    [self setNeedsDisplay:YES];
+    [self renderFrame];
 }
 
 @end
 
 // ============================================================================
-// Timer shim — bridges NSTimer to PlatformWindow callbacks
+// Timer shim
 // ============================================================================
 
 @interface FluxTimerShim : NSObject {
@@ -263,8 +274,6 @@
 }
 @end
 
-
-
 // ============================================================================
 // PlatformWindow — macOS implementation
 // ============================================================================
@@ -275,18 +284,15 @@ bool PlatformWindow::create(const std::string& title,
     macState = new MacState();
     auto& s  = *macState;
 
-    // ── NSApplication setup ───────────────────────────────────────────────────
     [NSApplication sharedApplication];
     [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
 
-    // ── Metal device ──────────────────────────────────────────────────────────
     s.metalDevice = MTLCreateSystemDefaultDevice();
     if (!s.metalDevice) {
         fprintf(stderr, "PlatformWindow: no Metal device\n");
         return false;
     }
 
-    // ── NSWindow ──────────────────────────────────────────────────────────────
     NSRect frame = NSMakeRect(0, 0, width, height);
     NSWindowStyleMask style =
         NSWindowStyleMaskTitled        |
@@ -302,13 +308,11 @@ bool PlatformWindow::create(const std::string& title,
     [s.nsWindow setTitle:[NSString stringWithUTF8String:title.c_str()]];
     [s.nsWindow center];
 
-    // ── FluxNSView ────────────────────────────────────────────────────────────
     s.nsView = [[FluxNSView alloc] initWithFrame:frame window:this];
     [s.nsWindow setContentView:s.nsView];
     [s.nsWindow setDelegate:s.nsView];
     [s.nsWindow makeFirstResponder:s.nsView];
 
-    // Track mouse-moved and mouse-exit events
     [s.nsView addTrackingArea:[[NSTrackingArea alloc]
         initWithRect:frame
              options:NSTrackingMouseMoved |
@@ -318,32 +322,18 @@ bool PlatformWindow::create(const std::string& title,
                owner:s.nsView
             userInfo:nil]];
 
-    // ── Metal layer on top of the view (canvas only) ──────────────────────────
-    s.metalLayer              = [CAMetalLayer layer];
-    s.metalLayer.device       = s.metalDevice;
-    s.metalLayer.pixelFormat  = MTLPixelFormatBGRA8Unorm;
-    s.metalLayer.framebufferOnly = YES;
-
-    // Metal layer sits behind the CG overlay — insert at index 0
-    [s.nsView.layer insertSublayer:s.metalLayer atIndex:0];
-
     // ── Physical / logical sizes ──────────────────────────────────────────────
     NSRect backing = [s.nsView convertRectToBacking:s.nsView.bounds];
     cachedWidth  = (int)backing.size.width;
     cachedHeight = (int)backing.size.height;
 
-    int lw = (int)frame.size.width;
-    int lh = (int)frame.size.height;
-
-    s.metalLayer.drawableSize = backing.size;
-
-    // ── CoreGraphics CPU surface for UI painter ───────────────────────────────
-    if (!s.rebuildCGContext(lw, lh)) {
-        fprintf(stderr, "PlatformWindow: CGContext creation failed\n");
+    // ── Call site #1: initial UI Metal layer + glyph atlas setup ─────────────
+    if (!s.ensureUILayer(cachedWidth, cachedHeight)) {
+        fprintf(stderr, "PlatformWindow: ensureUILayer failed at create()\n");
         return false;
     }
 
-    // ── Canvas2DGL (Metal-backed ) ───────────────────────────
+    // ── Canvas2DGL (per-widget Metal canvas) — unchanged from Stage 0 ────────
     s.canvasGL = new Canvas2DGL();
     if (!s.canvasGL->init()) {
         fprintf(stderr, "PlatformWindow: Canvas2DGL init failed\n");
@@ -351,7 +341,6 @@ bool PlatformWindow::create(const std::string& title,
     }
 
     if (s.canvasGL) {
-        // Register fonts — adjust paths for macOS system fonts
         auto regFont = [&](const char* name, const char* path) {
             if (!Canvas2D::registerFont(s.canvasGL, name, path))
                 fprintf(stderr, "PlatformWindow: font '%s' not found at '%s'\n", name, path);
@@ -361,21 +350,15 @@ bool PlatformWindow::create(const std::string& title,
         regFont("mono",      "/System/Library/Fonts/Menlo.ttc");
     }
 
-    // Notify pre-registered canvas widgets
     for (CanvasWidget* cw : s.canvasWidgets)
         if (cw) cw->setCanvasGL(s.canvasGL);
 
-    // ── Show window ───────────────────────────────────────────────────────────
     [s.nsWindow makeKeyAndOrderFront:nil];
     [NSApp activateIgnoringOtherApps:YES];
 
     s.running = true;
     return true;
 }
-
-// ============================================================================
-// destroy
-// ============================================================================
 
 void PlatformWindow::destroy() {
     if (!macState) return;
@@ -392,16 +375,11 @@ void PlatformWindow::destroy() {
     macState = nullptr;
 }
 
-// ============================================================================
-// run
-// ============================================================================
-
 int PlatformWindow::run() {
     [NSApp run];
     return 0;
 }
 
- 
 NativeWindow PlatformWindow::handle() const {
     return macState ? (__bridge NativeWindow)(macState->nsWindow) : nullptr;
 }
@@ -411,6 +389,10 @@ bool PlatformWindow::isMouseCaptured() const {
 
 // ============================================================================
 // invalidate / invalidateRect
+//
+// Metal redraws the full frame each pass (no partial-surface presentation),
+// so invalidateRect collapses to invalidate. x/y/w/h kept for signature
+// compatibility with callers (e.g. FluxUI::invalidateWidget) but unused.
 // ============================================================================
 
 void PlatformWindow::invalidate() {
@@ -420,18 +402,12 @@ void PlatformWindow::invalidate() {
         if (auto *ui = FluxUI::getCurrentInstance())
             ui->drainPendingRebuilds();
         if (macState && macState->nsView)
-            [macState->nsView setNeedsDisplay:YES];
+            [macState->nsView renderFrame];
     });
 }
 
-void PlatformWindow::invalidateRect(int x, int y, int w, int h) {
-    if (!macState || !macState->nsView) return;
-    macState->dirty = true;
-    NSRect r = NSMakeRect(x, y, w, h);
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (macState && macState->nsView)
-            [macState->nsView setNeedsDisplayInRect:r];
-    });
+void PlatformWindow::invalidateRect(int /*x*/, int /*y*/, int /*w*/, int /*h*/) {
+    invalidate();
 }
 
 // ============================================================================
@@ -497,6 +473,9 @@ void PlatformWindow::updateClientSize() {
     NSRect backing = [macState->nsView convertRectToBacking:macState->nsView.bounds];
     cachedWidth  = (int)backing.size.width;
     cachedHeight = (int)backing.size.height;
+    // ── Call site #3: keep uiMetalLayer's drawable size in sync if this is
+    // ever invoked outside of setFrameSize: (e.g. from a DPI-change path).
+    if (macState) macState->ensureUILayer(cachedWidth, cachedHeight);
 }
 
 PlatformWindow::ClientSize PlatformWindow::getClientSize() const {
@@ -520,14 +499,19 @@ PlatformWindow::screenToClient(int sx, int sy) const {
 }
 
 // ============================================================================
-// GraphicsContext for measure
+// GraphicsContext for measure — layout-only, no Metal encoder needed.
+// CoreText measurement (FontCache / Painter::measureText) doesn't touch
+// any field here beyond what's already populated.
 // ============================================================================
 
 GraphicsContext PlatformWindow::getMeasureContext() const {
-    if (!macState) return GraphicsContext();
-    return GraphicsContext(macState->cgContext,
-                           macState->cgWidth,
-                           macState->cgHeight);
+    GraphicsContext ctx;
+    if (macState) {
+        ctx.width  = cachedWidth;
+        ctx.height = cachedHeight;
+        ctx.textScratchProvider = macState;
+    }
+    return ctx;
 }
 
 bool PlatformWindow::valid() const {
@@ -558,21 +542,15 @@ std::string PlatformWindow::getClipboardText() {
 void PlatformWindow::captureMouseInput()  { if (macState) macState->mouseCapture = true;  }
 void PlatformWindow::releaseMouseInput()  { if (macState) macState->mouseCapture = false; }
 
-void PlatformWindow::setResizeCursorH() {
-    [[NSCursor resizeLeftRightCursor] set];
-}
-void PlatformWindow::setResizeCursorV() {
-    [[NSCursor resizeUpDownCursor] set];
-}
-void PlatformWindow::setDefaultCursor() {
-    [[NSCursor arrowCursor] set];
-}
+void PlatformWindow::setResizeCursorH() { [[NSCursor resizeLeftRightCursor] set]; }
+void PlatformWindow::setResizeCursorV() { [[NSCursor resizeUpDownCursor] set]; }
+void PlatformWindow::setDefaultCursor() { [[NSCursor arrowCursor] set]; }
 
 // ============================================================================
 // Stubs
 // ============================================================================
 
-void PlatformWindow::startupGdiplus() {}   // no-op on macOS
+void PlatformWindow::startupGdiplus() {} // no-op on macOS
 
 #endif // TARGET_OS_OSX
 #endif // __APPLE__

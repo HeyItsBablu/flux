@@ -1,293 +1,631 @@
 #ifdef __APPLE__
-
 #include <TargetConditionals.h>
-
 #if !TARGET_OS_OSX
     #error "flux_painter_macos.mm is for macOS only"
 #endif
 
 #include "flux/flux_painter.hpp"
-#import <CoreGraphics/CoreGraphics.h>
+#include "flux/flux_window_macos_state.hpp" // fluxTextScratch / fluxGlyphAtlas bridges
+#import <Metal/Metal.h>
 #import <CoreText/CoreText.h>
+#import <CoreGraphics/CoreGraphics.h>
+#include <vector>
+#include <cmath>
+#include <algorithm>
 
-// ── Color helper ──────────────────────────────────────────────────────────────
+// ============================================================================
+// Shared Metal shaders
+//
+// painter_solid_frag   — flat color fills/strokes (rects, lines, arcs)
+// painter_tex_frag     — RGBA textured quads (images)
+// painter_glyph_frag   — R8 (alpha-only) textured quads, tinted by color.rgb
+//                        — used for all text, sampling the glyph atlas.
+// ============================================================================
 
-static void setFillColor(CGContextRef ctx, Color c) {  
-    CGContextSetRGBFillColor(ctx,
-        c.r / 255.0, c.g / 255.0, c.b / 255.0, c.a / 255.0);
+static const char *kMSL_Painter = R"MSL(
+#include <metal_stdlib>
+using namespace metal;
+
+struct VertexIn  { float2 pos [[attribute(0)]]; float2 uv [[attribute(1)]]; };
+struct VertexOut { float4 pos [[position]]; float2 uv; };
+struct Uniforms  { float4x4 mvp; float4 color; };
+
+vertex VertexOut painter_vert(VertexIn in [[stage_in]],
+                              constant Uniforms& u [[buffer(1)]]) {
+    VertexOut out;
+    out.pos = u.mvp * float4(in.pos, 0.0, 1.0);
+    out.uv  = in.uv;
+    return out;
 }
 
-static void setStrokeColor(CGContextRef ctx, Color c) {
-    CGContextSetRGBStrokeColor(ctx,
-        c.r / 255.0, c.g / 255.0, c.b / 255.0, c.a / 255.0);
+fragment float4 painter_solid_frag(VertexOut in [[stage_in]],
+                                   constant Uniforms& u [[buffer(1)]]) {
+    return u.color;
 }
 
-// ── Rounded rect path ─────────────────────────────────────────────────────────
+fragment float4 painter_tex_frag(VertexOut in [[stage_in]],
+                                 constant Uniforms& u [[buffer(1)]],
+                                 texture2d<float> tex [[texture(0)]],
+                                 sampler smp [[sampler(0)]]) {
+    float4 t = tex.sample(smp, in.uv);
+    return t * u.color.a;
+}
 
-static void addRoundedRectPath(CGContextRef ctx,
-                                int x, int y, int w, int h, int radius)
+fragment float4 painter_glyph_frag(VertexOut in [[stage_in]],
+                                   constant Uniforms& u [[buffer(1)]],
+                                   texture2d<float> tex [[texture(0)]],
+                                   sampler smp [[sampler(0)]]) {
+    float coverage = tex.sample(smp, in.uv).r;
+    return float4(u.color.rgb, u.color.a * coverage);
+}
+)MSL";
+
+// ============================================================================
+// Pipeline cache — keyed by device. Stage 1 (shared MacState GPU resources)
+// may eventually fold this into MacState directly; kept self-contained here
+// so Painter doesn't need MacState beyond the two bridge calls.
+// ============================================================================
+
+struct PainterMetalRes
 {
-    CGFloat r = std::min(radius, std::min(w, h) / 2);
-    CGContextBeginPath(ctx);
-    CGContextMoveToPoint(ctx, x + r, y);
-    CGContextAddArcToPoint(ctx, x + w, y,     x + w, y + h, r);
-    CGContextAddArcToPoint(ctx, x + w, y + h, x,     y + h, r);
-    CGContextAddArcToPoint(ctx, x,     y + h, x,     y,     r);
-    CGContextAddArcToPoint(ctx, x,     y,     x + w, y,     r);
-    CGContextClosePath(ctx);
-}
+    id<MTLDevice> device = nil;
+    id<MTLRenderPipelineState> solid = nil;
+    id<MTLRenderPipelineState> textured = nil;
+    id<MTLRenderPipelineState> glyph = nil;
+    id<MTLSamplerState> sampler = nil;
+};
 
-// Add a rounded-rect clip path using CGPathCreateWithRoundedRect (10.9+).
-static void cgClipRoundedRect(CGContextRef ctx,
-                               CGFloat rx, CGFloat ry,
-                               CGFloat rw, CGFloat rh,
-                               CGFloat radius)
+static PainterMetalRes &painterRes(id<MTLDevice> device)
 {
-    CGFloat r = std::min(radius, std::min(rw * 0.5f, rh * 0.5f));
-    CGPathRef path = CGPathCreateWithRoundedRect(
-        CGRectMake(rx, ry, rw, rh), r, r, nullptr);
-    CGContextAddPath(ctx, path);
-    CGContextClip(ctx);
-    CGPathRelease(path);
-}
+    static PainterMetalRes res;
+    if (res.device == device)
+        return res;
 
-static CGInterpolationQuality cgInterpolationFromQuality(FilterQuality q)
-{
-    switch (q)
+    res.device = device;
+    NSError *err = nil;
+    id<MTLLibrary> lib = [device newLibraryWithSource:
+        [NSString stringWithUTF8String:kMSL_Painter] options:nil error:&err];
+    if (!lib)
     {
-    case FilterQuality::None:   return kCGInterpolationNone;
-    case FilterQuality::Low:    return kCGInterpolationLow;
-    case FilterQuality::Medium: return kCGInterpolationMedium;
-    case FilterQuality::High:   return kCGInterpolationHigh;
+        fprintf(stderr, "flux_painter_macos: shader compile failed: %s\n",
+                [[err localizedDescription] UTF8String]);
+        return res;
     }
-    return kCGInterpolationLow;
+
+    MTLVertexDescriptor *vd = [[MTLVertexDescriptor alloc] init];
+    vd.attributes[0].format = MTLVertexFormatFloat2;
+    vd.attributes[0].offset = 0;
+    vd.attributes[0].bufferIndex = 0;
+    vd.attributes[1].format = MTLVertexFormatFloat2;
+    vd.attributes[1].offset = 8;
+    vd.attributes[1].bufferIndex = 0;
+    vd.layouts[0].stride = 16;
+
+    auto makePipeline = [&](NSString *fragName) -> id<MTLRenderPipelineState> {
+        MTLRenderPipelineDescriptor *desc = [[MTLRenderPipelineDescriptor alloc] init];
+        desc.vertexFunction = [lib newFunctionWithName:@"painter_vert"];
+        desc.fragmentFunction = [lib newFunctionWithName:fragName];
+        desc.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
+        desc.colorAttachments[0].blendingEnabled = YES;
+        desc.colorAttachments[0].sourceRGBBlendFactor = MTLBlendFactorSourceAlpha;
+        desc.colorAttachments[0].destinationRGBBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
+        desc.colorAttachments[0].sourceAlphaBlendFactor = MTLBlendFactorOne;
+        desc.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
+        desc.vertexDescriptor = vd;
+        NSError *e = nil;
+        id<MTLRenderPipelineState> ps = [device newRenderPipelineStateWithDescriptor:desc error:&e];
+        if (!ps)
+            fprintf(stderr, "flux_painter_macos: pipeline '%s' failed: %s\n",
+                    [fragName UTF8String], [[e localizedDescription] UTF8String]);
+        return ps;
+    };
+
+    res.solid    = makePipeline(@"painter_solid_frag");
+    res.textured = makePipeline(@"painter_tex_frag");
+    res.glyph    = makePipeline(@"painter_glyph_frag");
+
+    MTLSamplerDescriptor *sd = [[MTLSamplerDescriptor alloc] init];
+    sd.minFilter = MTLSamplerMinMagFilterLinear;
+    sd.magFilter = MTLSamplerMinMagFilterLinear;
+    res.sampler = [device newSamplerStateWithDescriptor:sd];
+
+    return res;
 }
 
 // ============================================================================
-// Basic shapes
+// Vertex / draw helpers
 // ============================================================================
 
-void Painter::fillRoundedRect(int x, int y, int w, int h,
-                               int radius, Color color)
+struct PVertex { float x, y, u, v; };
+struct Uniforms { float mvp[16]; float color[4]; };
+
+static id<MTLDevice> dev(GraphicsContext &ctx) { return (__bridge id<MTLDevice>)ctx.mtlDevice; }
+static id<MTLRenderCommandEncoder> enc(GraphicsContext &ctx) { return (__bridge id<MTLRenderCommandEncoder>)ctx.mtlEncoder; }
+
+static void drawTriList(GraphicsContext &ctx, const std::vector<PVertex> &verts,
+                        Color color, id<MTLRenderPipelineState> pipeline)
 {
-    CGContextRef cg = ctx.cgContext;
-    CGContextSaveGState(cg);
-    setFillColor(cg, color);
-    if (radius > 0)
-        addRoundedRectPath(cg, x, y, w, h, radius);
-    else
-        CGContextAddRect(cg, CGRectMake(x, y, w, h));
-    CGContextFillPath(cg);
-    CGContextRestoreGState(cg);
+    if (verts.empty()) return;
+    id<MTLRenderCommandEncoder> e = enc(ctx);
+    if (!e || !pipeline) return;
+
+    [e setRenderPipelineState:pipeline];
+    [e setVertexBytes:verts.data() length:verts.size() * sizeof(PVertex) atIndex:0];
+
+    Uniforms u;
+    memcpy(u.mvp, ctx.mvp, sizeof(u.mvp));
+    u.color[0] = color.r / 255.f; u.color[1] = color.g / 255.f;
+    u.color[2] = color.b / 255.f; u.color[3] = color.a / 255.f;
+    [e setVertexBytes:&u length:sizeof(u) atIndex:1];
+    [e setFragmentBytes:&u length:sizeof(u) atIndex:1];
+
+    [e drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:verts.size()];
 }
 
-void Painter::drawBorder(int x, int y, int w, int h,
-                          int radius, Color color, int borderWidth)
+static void drawTexturedTriList(GraphicsContext &ctx, const std::vector<PVertex> &verts,
+                                Color tint, id<MTLTexture> tex,
+                                id<MTLRenderPipelineState> pipeline)
 {
-    CGContextRef cg = ctx.cgContext;
-    CGContextSaveGState(cg);
-    CGContextSetLineWidth(cg, borderWidth);
-    setStrokeColor(cg, color);
-    if (radius > 0)
-        addRoundedRectPath(cg, x, y, w, h, radius);
-    else
-        CGContextAddRect(cg, CGRectMake(x, y, w, h));
-    CGContextStrokePath(cg);
-    CGContextRestoreGState(cg);
+    if (verts.empty() || !tex) return;
+    id<MTLRenderCommandEncoder> e = enc(ctx);
+    if (!e || !pipeline) return;
+
+    auto &res = painterRes(dev(ctx));
+    [e setRenderPipelineState:pipeline];
+    [e setVertexBytes:verts.data() length:verts.size() * sizeof(PVertex) atIndex:0];
+
+    Uniforms u;
+    memcpy(u.mvp, ctx.mvp, sizeof(u.mvp));
+    u.color[0] = tint.r / 255.f; u.color[1] = tint.g / 255.f;
+    u.color[2] = tint.b / 255.f; u.color[3] = tint.a / 255.f;
+    [e setVertexBytes:&u length:sizeof(u) atIndex:1];
+    [e setFragmentBytes:&u length:sizeof(u) atIndex:1];
+    [e setFragmentTexture:tex atIndex:0];
+    [e setFragmentSamplerState:res.sampler atIndex:0];
+
+    [e drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:verts.size()];
 }
+
+static void quad(std::vector<PVertex> &out, float x, float y, float w, float h,
+                 float u0 = 0, float v0 = 0, float u1 = 1, float v1 = 1)
+{
+    out.push_back({x,     y,     u0, v0});
+    out.push_back({x + w, y,     u1, v0});
+    out.push_back({x,     y + h, u0, v1});
+    out.push_back({x + w, y,     u1, v0});
+    out.push_back({x + w, y + h, u1, v1});
+    out.push_back({x,     y + h, u0, v1});
+}
+
+static void strokeSegment(std::vector<PVertex> &out, float x1, float y1,
+                          float x2, float y2, float width)
+{
+    float dx = x2 - x1, dy = y2 - y1;
+    float len = sqrtf(dx*dx + dy*dy);
+    if (len < 0.0001f) return;
+    float nx = -dy / len * (width * 0.5f);
+    float ny =  dx / len * (width * 0.5f);
+    out.push_back({x1+nx, y1+ny, 0,0});
+    out.push_back({x1-nx, y1-ny, 0,0});
+    out.push_back({x2+nx, y2+ny, 0,0});
+    out.push_back({x2+nx, y2+ny, 0,0});
+    out.push_back({x1-nx, y1-ny, 0,0});
+    out.push_back({x2-nx, y2-ny, 0,0});
+}
+
+// ============================================================================
+// Basic fills
+// ============================================================================
 
 void Painter::fillRect(int x, int y, int w, int h, Color color)
 {
-    CGContextRef cg = ctx.cgContext;
-    CGContextSaveGState(cg);
-    setFillColor(cg, color);
-    CGContextFillRect(cg, CGRectMake(x, y, w, h));
-    CGContextRestoreGState(cg);
+    auto &res = painterRes(dev(ctx));
+    std::vector<PVertex> v;
+    quad(v, (float)x, (float)y, (float)w, (float)h);
+    drawTriList(ctx, v, color, res.solid);
+}
+
+void Painter::fillRectAlpha(int x, int y, int w, int h, Color color)
+{
+    fillRect(x, y, w, h, color); // alpha already carried by Color.a
+}
+
+void Painter::fillRoundedRect(int x, int y, int w, int h, int radius, Color color)
+{
+    auto &res = painterRes(dev(ctx));
+    std::vector<PVertex> v;
+    float r = std::min((float)radius, std::min(w, h) * 0.5f);
+
+    if (r <= 0.f) { quad(v, x, y, w, h); drawTriList(ctx, v, color, res.solid); return; }
+
+    quad(v, x + r, y,         w - 2*r, r);
+    quad(v, x + r, y + h - r, w - 2*r, r);
+    quad(v, x,     y + r,     w,       h - 2*r);
+
+    auto corner = [&](float cx, float cy, float a0, float a1) {
+        const int segs = 12;
+        for (int i = 0; i < segs; ++i) {
+            float t0 = a0 + (a1 - a0) * (i / (float)segs);
+            float t1 = a0 + (a1 - a0) * ((i + 1) / (float)segs);
+            v.push_back({cx, cy, 0, 0});
+            v.push_back({cx + r * cosf(t0), cy + r * sinf(t0), 0, 0});
+            v.push_back({cx + r * cosf(t1), cy + r * sinf(t1), 0, 0});
+        }
+    };
+    const float PI = 3.14159265f;
+    corner(x + r,     y + r,     PI,      1.5f*PI);
+    corner(x + w - r, y + r,     1.5f*PI, 2.f*PI);
+    corner(x + w - r, y + h - r, 0,       0.5f*PI);
+    corner(x + r,     y + h - r, 0.5f*PI, PI);
+
+    drawTriList(ctx, v, color, res.solid);
+}
+
+void Painter::fillRoundedRegion(int x, int y, int w, int h, int r, Color c) {
+    fillRoundedRect(x, y, w, h, r, c);
+}
+
+void Painter::fillRectWithLeftAccent(int x, int y, int w, int h,
+                                     Color bg, Color accent, int stripWidth) {
+    fillRect(x, y, w, h, bg);
+    fillRect(x, y, stripWidth, h, accent);
 }
 
 void Painter::fillRoundedRectGDI(int x, int y, int w, int h, int radius,
-                                  Color fill, Color stroke, int strokeWidth)
-{
-    fillRoundedRect(x, y, w, h, radius * 0.5, fill);
+                                 Color fill, Color stroke, int strokeWidth) {
+    fillRoundedRect(x, y, w, h, radius / 2, fill);
     if (strokeWidth > 0)
-        drawBorder(x, y, w, h, radius * 0.5, stroke, strokeWidth);
+        drawRoundedRectOutline(x, y, w, h, radius, stroke, strokeWidth);
 }
 
-void Painter::drawEllipse(int x, int y, int w, int h,
-                           Color fill, Color stroke, int strokeWidth)
-{
-    CGContextRef cg = ctx.cgContext;
-    CGContextSaveGState(cg);
-    CGRect r = CGRectMake(x, y, w, h);
-    setFillColor(cg, fill);
-    CGContextFillEllipseInRect(cg, r);
-    if (strokeWidth > 0) {
-        CGContextSetLineWidth(cg, strokeWidth);
-        setStrokeColor(cg, stroke);
-        CGContextStrokeEllipseInRect(cg, r);
+void Painter::fillColumnBars(int x, int y, int w, int h,
+                             const std::vector<int> &barHeights, Color color) {
+    int cols = std::min(w, (int)barHeights.size());
+    for (int i = 0; i < cols; ++i) {
+        int bh = std::max(0, std::min(h, barHeights[i]));
+        fillRect(x + i, y + h - bh, 1, bh, color);
     }
-    CGContextRestoreGState(cg);
 }
 
-void Painter::drawLine(int x1, int y1, int x2, int y2,
-                        Color color, int width)
+void Painter::fillPolygonAlpha(const std::vector<std::pair<int,int>> &points, Color color)
 {
-    CGContextRef cg = ctx.cgContext;
-    CGContextSaveGState(cg);
-    CGContextSetLineWidth(cg, width);
-    setStrokeColor(cg, color);
-    CGContextMoveToPoint(cg, x1, y1);
-    CGContextAddLineToPoint(cg, x2, y2);
-    CGContextStrokePath(cg);
-    CGContextRestoreGState(cg);
-}
-
-void Painter::drawHLine(int x, int y, int len, Color color, int sw) {
-    drawLine(x, y, x + len, y, color, sw);
-}
-void Painter::drawVLine(int x, int y, int len, Color color, int sw) {
-    drawLine(x, y, x, y + len, color, sw);
+    if (points.size() < 3) return;
+    auto &res = painterRes(dev(ctx));
+    std::vector<PVertex> v;
+    for (size_t i = 1; i + 1 < points.size(); ++i) {
+        v.push_back({(float)points[0].first, (float)points[0].second, 0, 0});
+        v.push_back({(float)points[i].first, (float)points[i].second, 0, 0});
+        v.push_back({(float)points[i+1].first, (float)points[i+1].second, 0, 0});
+    }
+    drawTriList(ctx, v, color, res.solid);
 }
 
 // ============================================================================
-// Clip
+// Strokes
 // ============================================================================
 
-void Painter::pushClipRect(int x, int y, int w, int h)
+void Painter::drawLine(int x1, int y1, int x2, int y2, Color color, int width)
 {
-    CGContextSaveGState(ctx.cgContext);
-    CGContextClipToRect(ctx.cgContext, CGRectMake(x, y, w, h));
+    auto &res = painterRes(dev(ctx));
+    std::vector<PVertex> v;
+    strokeSegment(v, (float)x1, (float)y1, (float)x2, (float)y2, (float)width);
+    drawTriList(ctx, v, color, res.solid);
+}
+void Painter::drawHLine(int x, int y, int len, Color c, int sw) { drawLine(x, y, x+len, y, c, sw); }
+void Painter::drawVLine(int x, int y, int len, Color c, int sw) { drawLine(x, y, x, y+len, c, sw); }
+
+void Painter::drawPolyline(const std::vector<std::pair<int,int>> &points,
+                           Color color, int strokeWidth)
+{
+    if (points.size() < 2) return;
+    auto &res = painterRes(dev(ctx));
+    std::vector<PVertex> v;
+    for (size_t i = 1; i < points.size(); ++i)
+        strokeSegment(v, (float)points[i-1].first, (float)points[i-1].second,
+                     (float)points[i].first, (float)points[i].second, (float)strokeWidth);
+    drawTriList(ctx, v, color, res.solid);
+}
+
+void Painter::drawBorder(int x, int y, int w, int h, int radius,
+                         Color color, int borderWidth)
+{
+    if (radius <= 0) {
+        drawHLine(x, y, w, color, borderWidth);
+        drawHLine(x, y + h - borderWidth, w, color, borderWidth);
+        drawVLine(x, y, h, color, borderWidth);
+        drawVLine(x + w - borderWidth, y, h, color, borderWidth);
+        return;
+    }
+    drawRoundedRectOutline(x, y, w, h, radius * 2, color, borderWidth);
+}
+
+void Painter::drawRectOutline(int x, int y, int w, int h, Color c, int sw) {
+    drawBorder(x, y, w, h, 0, c, sw);
+}
+
+void Painter::drawRoundedRectOutline(int x, int y, int w, int h,
+                                     int cornerDiameter, Color stroke, int strokeWidth)
+{
+    // TODO (Stage 3 polish): proper mitered outline via stencil-punched
+    // double fillRoundedRect. Interim: straight edges + arc strokes.
+    int r = cornerDiameter / 2;
+    drawHLine(x + r, y, w - 2*r, stroke, strokeWidth);
+    drawHLine(x + r, y + h, w - 2*r, stroke, strokeWidth);
+    drawVLine(x, y + r, h - 2*r, stroke, strokeWidth);
+    drawVLine(x + w, y + r, h - 2*r, stroke, strokeWidth);
+    drawArc(x + r,     y + r,     r, strokeWidth, 180, 90, stroke, false);
+    drawArc(x + w - r, y + r,     r, strokeWidth, 270, 90, stroke, false);
+    drawArc(x + w - r, y + h - r, r, strokeWidth, 0,   90, stroke, false);
+    drawArc(x + r,     y + h - r, r, strokeWidth, 90,  90, stroke, false);
+}
+
+void Painter::drawArc(float cx, float cy, float radius, int strokeWidth,
+                      float startAngle, float sweepAngle, Color color, bool /*roundedCaps*/)
+{
+    auto &res = painterRes(dev(ctx));
+    std::vector<PVertex> v;
+    const int segs = std::max(4, (int)(fabsf(sweepAngle) / 6.f));
+    const float DEG2RAD = 3.14159265f / 180.f;
+    float prevX = cx + radius * cosf(startAngle * DEG2RAD);
+    float prevY = cy + radius * sinf(startAngle * DEG2RAD);
+    for (int i = 1; i <= segs; ++i) {
+        float a = (startAngle + sweepAngle * (i / (float)segs)) * DEG2RAD;
+        float px = cx + radius * cosf(a), py = cy + radius * sinf(a);
+        strokeSegment(v, prevX, prevY, px, py, (float)strokeWidth);
+        prevX = px; prevY = py;
+    }
+    drawTriList(ctx, v, color, res.solid);
+}
+
+void Painter::drawEllipse(int x, int y, int w, int h, Color fill, Color stroke, int strokeWidth)
+{
+    float cx = x + w * 0.5f, cy = y + h * 0.5f;
+    auto &res = painterRes(dev(ctx));
+    std::vector<PVertex> v;
+    const int segs = 32;
+    for (int i = 0; i < segs; ++i) {
+        float t0 = (i / (float)segs) * 2.f * 3.14159265f;
+        float t1 = ((i+1) / (float)segs) * 2.f * 3.14159265f;
+        v.push_back({cx, cy, 0, 0});
+        v.push_back({cx + (w*0.5f)*cosf(t0), cy + (h*0.5f)*sinf(t0), 0, 0});
+        v.push_back({cx + (w*0.5f)*cosf(t1), cy + (h*0.5f)*sinf(t1), 0, 0});
+    }
+    drawTriList(ctx, v, fill, res.solid);
+    if (strokeWidth > 0) {
+        std::vector<PVertex> sv;
+        for (int i = 0; i < segs; ++i) {
+            float t0 = (i / (float)segs) * 2.f * 3.14159265f;
+            float t1 = ((i+1) / (float)segs) * 2.f * 3.14159265f;
+            strokeSegment(sv, cx+(w*0.5f)*cosf(t0), cy+(h*0.5f)*sinf(t0),
+                         cx+(w*0.5f)*cosf(t1), cy+(h*0.5f)*sinf(t1), (float)strokeWidth);
+        }
+        drawTriList(ctx, sv, stroke, res.solid);
+    }
+}
+
+void Painter::drawWavyLine(int x, int y, int len, Color color, int amplitude)
+{
+    if (len <= 0) return;
+    std::vector<std::pair<int,int>> pts;
+    int step = amplitude * 2, px = x; bool up = true;
+    while (px < x + len) {
+        pts.push_back({px, up ? y - amplitude : y + amplitude});
+        px += step; up = !up;
+    }
+    pts.push_back({x + len, y});
+    drawPolyline(pts, color, 1);
+}
+
+// ============================================================================
+// Clip — axis-aligned via Metal scissor rect. Rounded clip deferred (TODO).
+// ============================================================================
+
+void Painter::pushClipRect(int x, int y, int w, int h, int cornerRadius)
+{
+    if (cornerRadius > 0) {
+        // TODO: stencil-based rounded clip. Falls back to bounding-box
+        // clip for now — safe (no overdraw beyond bounds), slightly
+        // imprecise at rounded corners.
+    }
+    id<MTLRenderCommandEncoder> e = enc(ctx);
+    if (!e) return;
+    MTLScissorRect r;
+    r.x = (NSUInteger)std::max(0, x);
+    r.y = (NSUInteger)std::max(0, y);
+    r.width  = (NSUInteger)std::max(0, w);
+    r.height = (NSUInteger)std::max(0, h);
+    [e setScissorRect:r];
 }
 
 void Painter::popClipRect()
 {
-    CGContextRestoreGState(ctx.cgContext);
+    // TODO: real clip stack (host it on MacState alongside the encoder so
+    // nested push/pop restores the *previous* rect, not always full-frame).
+    id<MTLRenderCommandEncoder> e = enc(ctx);
+    if (!e) return;
+    MTLScissorRect r{0, 0, (NSUInteger)ctx.width, (NSUInteger)ctx.height};
+    [e setScissorRect:r];
 }
 
 void Painter::pushClipRoundedRect(int x, int y, int w, int h, int cornerDiameter)
 {
-    CGContextSaveGState(ctx.cgContext);
-    addRoundedRectPath(ctx.cgContext, x, y, w, h, cornerDiameter * 0.5);
-    CGContextClip(ctx.cgContext);
+    pushClipRect(x, y, w, h, cornerDiameter / 2);
 }
 
 // ============================================================================
-// Gradient
+// Gradient — TODO: multi-stop needs a 1D LUT texture or per-vertex color
+// interpolation in a dedicated shader. Approximated with a 2-color blend.
 // ============================================================================
 
-void Painter::fillGradientRect(int x, int y, int w, int h,
-                                const std::vector<Color>& colors)
+void Painter::fillGradientRect(int x, int y, int w, int h, const std::vector<Color> &colors)
 {
     if (colors.empty() || w <= 0 || h <= 0) return;
     if (colors.size() == 1) { fillRect(x, y, w, h, colors[0]); return; }
+    fillRect(x, y, w, h, colors.front().interpolate(colors.back(), 0.5));
+}
 
-    CGContextRef cg = ctx.cgContext;
-    CGContextSaveGState(cg);
-
-    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-    std::vector<CGFloat> comps;
-    std::vector<CGFloat> locs;
-    comps.reserve(colors.size() * 4);
-    locs.reserve(colors.size());
-
-    for (int i = 0; i < (int)colors.size(); ++i) {
-        const Color& c = colors[i];
-        comps.push_back(c.r / 255.0);
-        comps.push_back(c.g / 255.0);
-        comps.push_back(c.b / 255.0);
-        comps.push_back(c.a / 255.0);
-        locs.push_back((double)i / (colors.size() - 1));
-    }
-
-    CGGradientRef grad = CGGradientCreateWithColorComponents(
-        cs, comps.data(), locs.data(), colors.size());
-
-    CGContextClipToRect(cg, CGRectMake(x, y, w, h));
-    CGContextDrawLinearGradient(cg, grad,
-        CGPointMake(x, y), CGPointMake(x + w, y), 0);
-
-    CGGradientRelease(grad);
-    CGColorSpaceRelease(cs);
-    CGContextRestoreGState(cg);
+void Painter::drawFadeOverlay(int x, int y, int w, int h, int fadeWidth, Color bg)
+{
+    if (fadeWidth <= 0 || w <= 0 || h <= 0) return;
+    int startX = std::max(x, x + w - fadeWidth);
+    fillGradientRect(startX, y, fadeWidth, h, { bg.withAlpha(0), bg.withAlpha(255) });
 }
 
 // ============================================================================
-// Text — CoreText
+// Layers / shadows — deferred (need offscreen render target + composite,
+// and a blur kernel respectively). Not blocking vector/text migration.
 // ============================================================================
 
-void Painter::drawText(const std::wstring& text, int x, int y, int w, int h,
+void Painter::beginLayer(float /*opacity*/) { /* TODO */ }
+void Painter::endLayer() { /* TODO */ }
+void Painter::drawShadow(int, int, int, int, int, int, Color, int, int) { /* TODO */ }
+
+// ============================================================================
+// drawTextDecorationLine — underline/strikethrough as explicit geometry.
+// Previously implicit via CTLine attributes; now drawn manually since we
+// render glyphs ourselves rather than handing the whole line to CTLineDraw.
+// ============================================================================
+
+void Painter::drawTextDecorationLine(int lineX, int lineY, int lineW,
+                                     const TextStyle & /*style*/,
+                                     TextDecoration /*which*/)
+{
+    // Generic 1px solid line — callers (drawRichTextA) compute lineY per
+    // decoration type (underline/strikethrough) from font metrics and call
+    // this once per decoration. Style-specific (dotted/wavy/double) left
+    // as a follow-up; solid covers the common case.
+    drawHLine(lineX, lineY, lineW, Color::fromRGB(0, 0, 0), 1);
+}
+
+// ============================================================================
+// Text — Stage 2: glyph-atlas based. CoreText is used ONLY for shaping
+// (CTLineCreateWithAttributedString + CTRun glyph/position extraction) and
+// measurement; no CG/CTLineDraw rendering happens here anymore.
+// ============================================================================
+
+namespace {
+
+struct ShapedGlyphRun
+{
+    CTFontRef font; // borrowed from the run's attributes
+    std::vector<CGGlyph> glyphs;
+    std::vector<CGPoint> positions; // pen-space, baseline-relative, from CTLine
+};
+
+// Shape a CFAttributedStringRef into per-run glyph/position arrays.
+std::vector<ShapedGlyphRun> shapeLine(CTLineRef line)
+{
+    std::vector<ShapedGlyphRun> runs;
+    CFArrayRef ctRuns = CTLineGetGlyphRuns(line);
+    CFIndex runCount = CFArrayGetCount(ctRuns);
+
+    for (CFIndex i = 0; i < runCount; ++i)
+    {
+        CTRunRef run = (CTRunRef)CFArrayGetValueAtIndex(ctRuns, i);
+        CFIndex count = CTRunGetGlyphCount(run);
+        if (count == 0) continue;
+
+        CFDictionaryRef attrs = CTRunGetAttributes(run);
+        CTFontRef font = (CTFontRef)CFDictionaryGetValue(attrs, kCTFontAttributeName);
+        if (!font) continue;
+
+        ShapedGlyphRun sr;
+        sr.font = font;
+        sr.glyphs.resize(count);
+        sr.positions.resize(count);
+        CTRunGetGlyphs(run, CFRangeMake(0, count), sr.glyphs.data());
+        CTRunGetPositions(run, CFRangeMake(0, count), sr.positions.data());
+        runs.push_back(std::move(sr));
+    }
+    return runs;
+}
+
+// Emit textured quads for one shaped line into `verts`, anchored at
+// (originX, originY) in top-left pixel space (CoreText positions are
+// baseline-relative with y-up; we flip here).
+void emitGlyphQuads(GlyphAtlas &atlas, const std::vector<ShapedGlyphRun> &runs,
+                    float originX, float originY, std::vector<PVertex> &verts)
+{
+    for (const auto &run : runs)
+    {
+        for (size_t i = 0; i < run.glyphs.size(); ++i)
+        {
+            const GlyphEntry *entry = atlas.getOrInsert(run.font, run.glyphs[i]);
+            if (!entry || entry->width <= 0.f || entry->height <= 0.f)
+                continue; // atlas full, or whitespace glyph (correctly skipped)
+
+            float penX = originX + (float)run.positions[i].x;
+            float penY = originY - (float)run.positions[i].y; // flip: CT y-up -> our y-down
+
+            float qx = penX + entry->offsetX;
+            float qy = penY - entry->offsetY - entry->height; // bbox origin is glyph-bottom in CT space
+
+            quad(verts, qx, qy, entry->width, entry->height,
+                entry->uvMinX, entry->uvMinY, entry->uvMaxX, entry->uvMaxY);
+        }
+    }
+}
+
+} // anonymous namespace
+
+void Painter::drawTextA(const std::string &text, int x, int y, int w, int h,
                         NativeFont font, Color color, UINT format)
 {
+    if (text.empty() || !ctx.textScratchProvider) return;
+    GlyphAtlas *atlas = fluxGlyphAtlas(ctx.textScratchProvider);
+    if (!atlas) return;
+
+    CTFontRef ctFont = reinterpret_cast<CTFontRef>(font);
+    CFStringRef str = CFStringCreateWithCString(nullptr, text.c_str(), kCFStringEncodingUTF8);
+    CFStringRef keys[] = { kCTFontAttributeName };
+    CFTypeRef vals[] = { ctFont };
+    CFDictionaryRef attrs = CFDictionaryCreate(nullptr, (const void**)keys, (const void**)vals, 1,
+        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    CFAttributedStringRef attrStr = CFAttributedStringCreate(nullptr, str, attrs);
+    CTLineRef line = CTLineCreateWithAttributedString(attrStr);
+
+    double lineWidth = CTLineGetTypographicBounds(line, nullptr, nullptr, nullptr);
+    CGFloat ascent = 0;
+    CTLineGetTypographicBounds(line, &ascent, nullptr, nullptr);
+
+    float drawX = (float)x;
+    if (format & DT_CENTER) drawX = x + (w - (float)lineWidth) * 0.5f;
+    else if (format & DT_RIGHT) drawX = x + w - (float)lineWidth;
+
+    float drawY = (format & DT_VCENTER) ? (y + (h - ascent) * 0.5f) : (y + h - ascent);
+
+    auto runs = shapeLine(line);
+    std::vector<PVertex> verts;
+    // originY passed as the baseline's y in top-left space: drawY currently
+    // represents the top of the ascent box, so the baseline sits at
+    // drawY + ascent.
+    emitGlyphQuads(*atlas, runs, drawX, drawY + (float)ascent, verts);
+
+    if (!verts.empty())
+    {
+        auto &res = painterRes(dev(ctx));
+        drawTexturedTriList(ctx, verts, color, atlas->texture(), res.glyph);
+    }
+
+    CFRelease(line); CFRelease(attrStr); CFRelease(attrs); CFRelease(str);
+}
+
+void Painter::drawText(const std::wstring &text, int x, int y, int w, int h,
+                       NativeFont font, Color color, UINT format)
+{
     if (text.empty()) return;
-    // wstring → UTF-8 → drawTextA
     std::string utf8;
     for (wchar_t wc : text) {
         uint32_t cp = wc;
-        if (cp < 0x80)       utf8 += (char)cp;
+        if (cp < 0x80) utf8 += (char)cp;
         else if (cp < 0x800) { utf8 += (char)(0xC0|(cp>>6)); utf8 += (char)(0x80|(cp&0x3F)); }
-        else                 { utf8 += (char)(0xE0|(cp>>12)); utf8 += (char)(0x80|((cp>>6)&0x3F)); utf8 += (char)(0x80|(cp&0x3F)); }
+        else { utf8 += (char)(0xE0|(cp>>12)); utf8 += (char)(0x80|((cp>>6)&0x3F)); utf8 += (char)(0x80|(cp&0x3F)); }
     }
     drawTextA(utf8, x, y, w, h, font, color, format);
 }
 
-void Painter::drawTextA(const std::string& text, int x, int y, int w, int h,
-                         NativeFont font, Color color, UINT format)
-{
-    if (text.empty()) return;
-
-    CGContextRef cg = ctx.cgContext;
-    CGContextSaveGState(cg);
-
-    // CoreText draws with bottom-left origin; flip for top-left coords
-    CGContextTranslateCTM(cg, 0, y + h);
-    CGContextScaleCTM(cg, 1.0, -1.0);
-
-    CTFontRef ctFont = reinterpret_cast<CTFontRef>(font);
-
-    CGFloat r = color.r / 255.0, g = color.g / 255.0,
-            b = color.b / 255.0, a = color.a / 255.0;
-    CGColorRef cgColor = CGColorCreateGenericRGB(r, g, b, a);
-
-    CFStringRef str = CFStringCreateWithCString(
-        nullptr, text.c_str(), kCFStringEncodingUTF8);
-
-    CFStringRef keys[] = { kCTFontAttributeName, kCTForegroundColorAttributeName };
-    CFTypeRef   vals[] = { ctFont, cgColor };
-    CFDictionaryRef attrs = CFDictionaryCreate(nullptr,
-        (const void**)keys, (const void**)vals, 2,
-        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-
-    CFAttributedStringRef attrStr =
-        CFAttributedStringCreate(nullptr, str, attrs);
-    CTLineRef line = CTLineCreateWithAttributedString(attrStr);
-
-    // Horizontal alignment
-    CGFloat drawX = x;
-    if (format & DT_CENTER) {
-        CGFloat lineW = CTLineGetTypographicBounds(line, nullptr, nullptr, nullptr);
-        drawX = x + (w - lineW) * 0.5;
-    } else if (format & DT_RIGHT) {
-        CGFloat lineW = CTLineGetTypographicBounds(line, nullptr, nullptr, nullptr);
-        drawX = x + w - lineW;
-    }
-
-    // Vertical: baseline is approximate (ascent ~75% of font size)
-    CGFloat ascent = 0;
-    CTLineGetTypographicBounds(line, &ascent, nullptr, nullptr);
-    CGFloat drawY = (format & DT_VCENTER)
-        ? (h - ascent) * 0.5
-        : h - ascent;
-
-    CGContextSetTextPosition(cg, drawX, drawY);
-    CTLineDraw(line, cg);
-
-    CFRelease(line); CFRelease(attrStr);
-    CFRelease(attrs); CFRelease(str); CGColorRelease(cgColor);
-    CGContextRestoreGState(cg);
-}
-
-void Painter::measureText(const std::wstring& text, NativeFont font,
-                           int& outWidth, int& outHeight)
+void Painter::measureText(const std::wstring &text, NativeFont font,
+                          int &outWidth, int &outHeight)
 {
     if (text.empty()) { outWidth = outHeight = 0; return; }
     std::string utf8;
@@ -301,9 +639,8 @@ void Painter::measureText(const std::wstring& text, NativeFont font,
     CTFontRef ctFont = reinterpret_cast<CTFontRef>(font);
     CFStringRef str = CFStringCreateWithCString(nullptr, utf8.c_str(), kCFStringEncodingUTF8);
     CFStringRef keys[] = { kCTFontAttributeName };
-    CFTypeRef   vals[] = { ctFont };
-    CFDictionaryRef attrs = CFDictionaryCreate(nullptr,
-        (const void**)keys, (const void**)vals, 1,
+    CFTypeRef vals[] = { ctFont };
+    CFDictionaryRef attrs = CFDictionaryCreate(nullptr, (const void**)keys, (const void**)vals, 1,
         &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
     CFAttributedStringRef attrStr = CFAttributedStringCreate(nullptr, str, attrs);
     CTLineRef line = CTLineCreateWithAttributedString(attrStr);
@@ -316,246 +653,149 @@ void Painter::measureText(const std::wstring& text, NativeFont font,
 }
 
 // ============================================================================
-// Remaining methods — delegate to existing helpers
+// Rich text — single TextStyle applied to the whole run (matches
+// RichTextParams's existing shape: one `style` field, not per-span).
+// Decorations (underline/strikethrough) drawn manually via
+// drawTextDecorationLine since CTLineDraw no longer renders anything.
 // ============================================================================
 
-void Painter::fillRectAlpha(int x, int y, int w, int h, Color color) {
-    fillRect(x, y, w, h, color); // CGContext handles alpha via color.a
-}
-
-void Painter::fillRoundedRegion(int x, int y, int w, int h,
-                                 int cornerRadius, Color color) {
-    fillRoundedRect(x, y, w, h, cornerRadius, color);
-}
-
-void Painter::fillRectWithLeftAccent(int x, int y, int w, int h,
-                                      Color bg, Color accent, int stripWidth) {
-    fillRect(x, y, w, h, bg);
-    fillRect(x, y, stripWidth, h, accent);
-}
-
-void Painter::drawRectOutline(int x, int y, int w, int h,
-                               Color color, int strokeWidth) {
-    drawBorder(x, y, w, h, 0, color, strokeWidth);
-}
-
-void Painter::drawRoundedRectOutline(int x, int y, int w, int h,
-                                      int cornerDiameter,
-                                      Color stroke, int strokeWidth) {
-    drawBorder(x, y, w, h, cornerDiameter * 0.5, stroke, strokeWidth);
-}
-
-void Painter::fillColumnBars(int x, int y, int w, int h,
-                              const std::vector<int>& barHeights, Color color)
+void Painter::drawRichTextA(const std::string &text,
+                            const RichTextParams &params,
+                            FontCache &fontCache)
 {
-    int cols = std::min(w, (int)barHeights.size());
-    for (int i = 0; i < cols; ++i) {
-        int bh = std::max(0, std::min(h, barHeights[i]));
-        fillRect(x + i, y + h - bh, 1, bh, color);
+    if (text.empty() || !ctx.textScratchProvider) return;
+    GlyphAtlas *atlas = fluxGlyphAtlas(ctx.textScratchProvider);
+    if (!atlas) return;
+
+    NativeFont nf = fontCache.getFont(
+        params.style.fontFamily.empty() ? "Helvetica" : params.style.fontFamily,
+        params.style.fontSize, params.style.fontWeight);
+    CTFontRef ctFont = reinterpret_cast<CTFontRef>(nf);
+
+    CFStringRef str = CFStringCreateWithCString(nullptr, text.c_str(), kCFStringEncodingUTF8);
+    CFStringRef keys[] = { kCTFontAttributeName };
+    CFTypeRef vals[] = { ctFont };
+    CFDictionaryRef attrs = CFDictionaryCreate(nullptr, (const void**)keys, (const void**)vals, 1,
+        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    CFAttributedStringRef attrStr = CFAttributedStringCreate(nullptr, str, attrs);
+
+    // NOTE: softWrap / maxLines multi-line layout is not implemented in this
+    // pass — single CTLine only, matching what the old CG implementation's
+    // stub also left unhandled (drawRichText/A were empty no-ops before
+    // Stage 2; this is new functionality, not a regression).
+    CTLineRef line = CTLineCreateWithAttributedString(attrStr);
+
+    CGFloat ascent = 0, descent = 0;
+    double lineWidth = CTLineGetTypographicBounds(line, &ascent, &descent, nullptr);
+
+    float drawX = (float)params.x;
+    if (params.textAlign == TextAlign::Center) drawX = params.x + (params.w - (float)lineWidth) * 0.5f;
+    else if (params.textAlign == TextAlign::Right) drawX = params.x + params.w - (float)lineWidth;
+
+    float drawY = (params.textAlignVertical == TextAlignVertical::Center)
+        ? params.y + (params.h - (ascent + descent)) * 0.5f
+        : params.y;
+
+    auto runs = shapeLine(line);
+    std::vector<PVertex> verts;
+    emitGlyphQuads(*atlas, runs, drawX, drawY + (float)ascent, verts);
+
+    if (!verts.empty())
+    {
+        auto &res = painterRes(dev(ctx));
+        drawTexturedTriList(ctx, verts, params.style.color, atlas->texture(), res.glyph);
     }
-}
 
-void Painter::drawPolyline(const std::vector<std::pair<int,int>>& points,
-                            Color color, int strokeWidth)
-{
-    if (points.size() < 2) return;
-    CGContextRef cg = ctx.cgContext;
-    CGContextSaveGState(cg);
-    CGContextSetLineWidth(cg, strokeWidth);
-    setStrokeColor(cg, color);
-    CGContextMoveToPoint(cg, points[0].first, points[0].second);
-    for (size_t i = 1; i < points.size(); ++i)
-        CGContextAddLineToPoint(cg, points[i].first, points[i].second);
-    CGContextStrokePath(cg);
-    CGContextRestoreGState(cg);
-}
-
-void Painter::fillPolygonAlpha(const std::vector<std::pair<int,int>>& points,
-                                Color color)
-{
-    if (points.size() < 3) return;
-    CGContextRef cg = ctx.cgContext;
-    CGContextSaveGState(cg);
-    setFillColor(cg, color);
-    CGContextMoveToPoint(cg, points[0].first, points[0].second);
-    for (size_t i = 1; i < points.size(); ++i)
-        CGContextAddLineToPoint(cg, points[i].first, points[i].second);
-    CGContextClosePath(cg);
-    CGContextFillPath(cg);
-    CGContextRestoreGState(cg);
-}
-
-// Rich text — wavyline, fade, decorations, measureRichText,
-// drawRichText, drawRichTextA follow the same structure as
-// flux_painter_linux.cpp but use CoreText for measurement.
-// Implement them the same way as Linux replacing Pango calls
-// with CTLine/CTFont equivalents.
-void Painter::drawRichText(const std::wstring&,
-                           const RichTextParams&,
-                           FontCache&)
-{
-}
-
-void Painter::drawRichTextA(const std::string&,
-                            const RichTextParams&,
-                            FontCache&)
-{
-}
-
-void Painter::measureRichText(const std::wstring&,
-                              const TextStyle&,
-                              FontCache&,
-                              int,
-                              bool,
-                              int,
-                              int& outWidth,
-                              int& outHeight)
-{
-    outWidth = 0;
-    outHeight = 0;
-}
-void Painter::drawWavyLine(int x, int y, int len, Color color, int amplitude) {
-    if (len <= 0) return;
-    const int step = amplitude * 2;
-    std::vector<std::pair<int,int>> pts;
-    int px = x; bool up = true;
-    while (px < x + len) {
-        pts.push_back({px, up ? y - amplitude : y + amplitude});
-        px += step; up = !up;
+    if (hasDecoration(params.style.decoration, TextDecoration::Underline))
+    {
+        CGFloat underlinePos = CTFontGetUnderlinePosition(ctFont);
+        CGFloat underlineThk = std::max((CGFloat)1.0, CTFontGetUnderlineThickness(ctFont));
+        int lineY = (int)(drawY + ascent - underlinePos);
+        drawHLine((int)drawX, lineY, (int)lineWidth, params.style.color, (int)underlineThk);
     }
-    pts.push_back({x + len, y});
-    if (pts.size() >= 2) drawPolyline(pts, color, 1);
+    if (hasDecoration(params.style.decoration, TextDecoration::LineThrough))
+    {
+        int lineY = (int)(drawY + ascent * 0.6f); // ~strikethrough height, no direct CTFont accessor
+        drawHLine((int)drawX, lineY, (int)lineWidth, params.style.color, 1);
+    }
+
+    CFRelease(line); CFRelease(attrStr); CFRelease(attrs); CFRelease(str);
 }
 
-void Painter::drawFadeOverlay(int x, int y, int w, int h,
-                               int fadeWidth, Color bg) {
-    if (fadeWidth <= 0 || w <= 0 || h <= 0) return;
-    int startX = x + w - fadeWidth;
-    if (startX < x) startX = x;
-    std::vector<Color> stops = { bg.withAlpha(0), bg.withAlpha(255) };
-    fillGradientRect(startX, y, fadeWidth, h, stops);
-}
-
-void Painter::drawArc(float cx, float cy, float radius,
-                      int strokeWidth, float startAngle, float sweepAngle,
-                      Color color, bool roundedCaps)
+void Painter::drawRichText(const std::wstring &text,
+                           const RichTextParams &params,
+                           FontCache &fontCache)
 {
-    CGContextRef cg = ctx.cgContext;
-    CGContextSaveGState(cg);
-    CGContextSetLineWidth(cg, strokeWidth);
-    CGContextSetLineCap(cg, roundedCaps ? kCGLineCapRound : kCGLineCapButt);
-    setStrokeColor(cg, color);
-    // CG angles: 0 = right, counter-clockwise positive
-    // Our convention: 0 = right, clockwise positive → negate for CG
-    CGContextAddArc(cg, cx, cy, radius,
-                    -startAngle, -(startAngle + sweepAngle), 1);
-    CGContextStrokePath(cg);
-    CGContextRestoreGState(cg);
+    if (text.empty()) return;
+    std::string utf8;
+    for (wchar_t wc : text) {
+        uint32_t cp = wc;
+        if (cp < 0x80) utf8 += (char)cp;
+        else if (cp < 0x800) { utf8 += (char)(0xC0|(cp>>6)); utf8 += (char)(0x80|(cp&0x3F)); }
+        else { utf8 += (char)(0xE0|(cp>>12)); utf8 += (char)(0x80|((cp>>6)&0x3F)); utf8 += (char)(0x80|(cp&0x3F)); }
+    }
+    drawRichTextA(utf8, params, fontCache);
 }
 
+void Painter::measureRichText(const std::wstring &text,
+                              const TextStyle &style,
+                              FontCache &fontCache,
+                              int maxWidth, bool /*softWrap*/, int /*maxLines*/,
+                              int &outWidth, int &outHeight)
+{
+    if (text.empty()) { outWidth = outHeight = 0; return; }
+    NativeFont nf = fontCache.getFont(
+        style.fontFamily.empty() ? "Helvetica" : style.fontFamily,
+        style.fontSize, style.fontWeight);
+    measureText(text, nf, outWidth, outHeight);
+    if (maxWidth > 0) outWidth = std::min(outWidth, maxWidth);
+}
 
 // ============================================================================
-// Painter::drawImage
+// Images
 // ============================================================================
 
 void Painter::drawImage(const ImageDrawParams &params)
 {
-    if (!params.image || params.clipW <= 0 || params.clipH <= 0)
-        return;
+    if (!params.image || params.clipW <= 0 || params.clipH <= 0) return;
+    auto &res = painterRes(dev(ctx));
 
-    CGContextRef cgCtx = ctx.cgContext;
-    if (!cgCtx)
-        return;
+    // NativeImage is expected to carry an id<MTLTexture> on macOS once the
+    // image-loading path is ported to Metal (currently a loose end flagged
+    // in Stage 3 — NativeImage is still void* and nothing populates it on
+    // this platform yet).
+    id<MTLTexture> tex = (__bridge id<MTLTexture>)(void*)params.image;
 
-    CGContextSaveGState(cgCtx);
-
-    // ── Clip ─────────────────────────────────────────────────────────────────
-    if (params.borderRadius > 0)
-        cgClipRoundedRect(cgCtx, params.clipX, params.clipY, params.clipW, params.clipH,
-                          (CGFloat)params.borderRadius);
-    else
-        CGContextClipToRect(cgCtx, CGRectMake(params.clipX, params.clipY,
-                                              params.clipW, params.clipH));
-
-    // ── Draw ─────────────────────────────────────────────────────────────────
-    // CoreGraphics origin is bottom-left; FluxUI is top-left. Flip the CTM
-    // around the bottom of the clip rect so the rest of the math can work in
-    // top-left-relative coordinates.
-    CGContextTranslateCTM(cgCtx, 0, (CGFloat)(params.clipY + params.clipH));
-    CGContextScaleCTM(cgCtx, 1.0, -1.0);
-
-    bool needsScale = (params.srcWidth != (int)params.destW ||
-                       params.srcHeight != (int)params.destH);
-    CGContextSetInterpolationQuality(cgCtx,
-        needsScale ? cgInterpolationFromQuality(params.filterQuality) : kCGInterpolationNone);
-
-    float localX = params.destX - (float)params.clipX;
-    float imgY = (float)params.clipH - ((params.destY - (float)params.clipY) + params.destH);
-
-    if (params.repeat != ImageRepeat::NoRepeat)
-    {
-        float tileW = params.destW, tileH = params.destH;
-        float startX = (params.repeat == ImageRepeat::RepeatY) ? localX : 0.f;
-        float startY = (params.repeat == ImageRepeat::RepeatX)
-                            ? (float)params.clipH - ((params.destY - (float)params.clipY) + tileH)
-                            : 0.f;
-        float endX = (params.repeat == ImageRepeat::RepeatY) ? localX + tileW : (float)params.clipW;
-        float endY = (params.repeat == ImageRepeat::RepeatX)
-                            ? (float)params.clipH - (params.destY - (float)params.clipY)
-                            : (float)params.clipH;
-
-        for (float ty = startY; ty < endY; ty += tileH)
-            for (float tx = startX; tx < endX; tx += tileW)
-                CGContextDrawImage(cgCtx, CGRectMake(tx, ty, tileW, tileH), params.image);
-    }
-    else
-    {
-        CGContextDrawImage(cgCtx, CGRectMake(localX, imgY, params.destW, params.destH), params.image);
-    }
-
-    CGContextRestoreGState(cgCtx);
+    std::vector<PVertex> v;
+    quad(v, params.destX, params.destY, params.destW, params.destH);
+    drawTexturedTriList(ctx, v, Color::fromRGBA(255,255,255, 255), tex, res.textured);
 }
 
-void Painter::drawVideo(const VideoDrawParams& params)
+void Painter::drawVideo(const VideoDrawParams &params)
 {
     if (!params.frame || params.dstW <= 0 || params.dstH <= 0) return;
-    CGContextRef cg = ctx.cgContext;
-    CGContextSaveGState(cg);
-    CGContextTranslateCTM(cg, params.dstX, params.dstY + params.dstH);
-    CGContextScaleCTM(cg, 1.0, -1.0);
-    CGContextSetInterpolationQuality(cg, kCGInterpolationHigh);
-    CGContextDrawImage(cg,
-        CGRectMake(0, 0, params.dstW, params.dstH),
-        (CGImageRef)params.frame);
-    CGContextRestoreGState(cg);
+    auto &res = painterRes(dev(ctx));
+    id<MTLTexture> tex = (__bridge id<MTLTexture>)(void*)params.frame;
+    std::vector<PVertex> v;
+    quad(v, (float)params.dstX, (float)params.dstY, (float)params.dstW, (float)params.dstH);
+    drawTexturedTriList(ctx, v, Color::fromRGBA(255,255,255,255), tex, res.textured);
 }
 
-void Painter::drawCamera(const CameraDrawParams& params)
+void Painter::drawCamera(const CameraDrawParams &params)
 {
     if (!params.frame || params.dstW <= 0 || params.dstH <= 0) return;
-    CGContextRef cg = ctx.cgContext;
-    CGContextSaveGState(cg);
-
-    // Flip Y for top-left origin
-    CGContextTranslateCTM(cg, params.dstX, params.dstY + params.dstH);
-    CGContextScaleCTM(cg, 1.0, -1.0);
-
-    if (params.mirror)
-    {
-        CGContextTranslateCTM(cg, params.dstW, 0);
-        CGContextScaleCTM(cg, -1.0, 1.0);
-    }
-
-    CGContextSetInterpolationQuality(cg, kCGInterpolationLow);
-    CGContextDrawImage(cg,
-        CGRectMake(0, 0, params.dstW, params.dstH),
-        (CGImageRef)params.frame);
-    CGContextRestoreGState(cg);
+    auto &res = painterRes(dev(ctx));
+    id<MTLTexture> tex = (__bridge id<MTLTexture>)(void*)params.frame;
+    std::vector<PVertex> v;
+    float u0 = params.mirror ? 1.f : 0.f, u1 = params.mirror ? 0.f : 1.f;
+    quad(v, (float)params.dstX, (float)params.dstY, (float)params.dstW, (float)params.dstH,
+        u0, 0.f, u1, 1.f);
+    drawTexturedTriList(ctx, v, Color::fromRGBA(255,255,255,255), tex, res.textured);
 }
 
 // ============================================================================
-// Painter::drawPage  (macOS / CoreGraphics)
-// Append to flux_painter_macos.mm, inside the #ifdef __APPLE__ block.
+// Page (header/body/footer regions) — composition of fillRect + simple
+// elevation gradients, same structure as prior CG version.
 // ============================================================================
 
 void Painter::drawPage(const PageDrawParams &params)
@@ -606,36 +846,31 @@ void Painter::drawPage(const PageDrawParams &params)
     }
 }
 
-void Painter::drawScrollbar(const CustomScrollbar& bar, int glW, int glH)
+// ============================================================================
+// Scrollbar — now drawn through the same Metal solid pipeline as everything
+// else, rather than the separate CG-via-Painter detour the old
+// CanvasWidget::glRenderPass used at the end of its frame.
+// ============================================================================
+
+void Painter::drawScrollbar(const CustomScrollbar &bar, int glW, int glH)
 {
     if (!bar.isVisible() || bar.alpha() < 0.005f)
         return;
- 
-    CGContextRef cg = ctx.cgContext;
-    float alpha     = bar.alpha();
- 
-    // ── Track background ──────────────────────────────────────────────────────
+
+    float alpha = bar.alpha();
+
     {
         auto [tx, ty, tw, th] = bar.trackRect(glW, glH);
-        CGContextSaveGState(cg);
-        CGContextSetRGBFillColor(cg, 0.08f, 0.08f, 0.08f, alpha * 0.30f);
-        CGContextFillRect(cg, CGRectMake(tx, ty, tw, th));
-        CGContextRestoreGState(cg);
+        fillRect((int)tx, (int)ty, (int)tw, (int)th,
+                 Color::fromRGBA(20, 20, 20, (uint8_t)(alpha * 0.30f * 255)));
     }
- 
-    // ── Thumb ─────────────────────────────────────────────────────────────────
     {
         auto [tx, ty, tw, th] = bar.thumbRect(glW, glH);
-        float r = std::min(tw, th) * 0.5f;
-        CGContextSaveGState(cg);
-        CGContextSetRGBFillColor(cg, 0.76f, 0.76f, 0.76f, alpha);
-        // Use CGPathCreateWithRoundedRect for the thumb
-        CGPathRef path = CGPathCreateWithRoundedRect(
-            CGRectMake(tx, ty, tw, th), r, r, nullptr);
-        CGContextAddPath(cg, path);
-        CGContextFillPath(cg);
-        CGPathRelease(path);
-        CGContextRestoreGState(cg);
+        int r = (int)(std::min(tw, th) * 0.5f);
+        fillRoundedRect((int)tx, (int)ty, (int)tw, (int)th, r,
+                        Color::fromRGBA(194, 194, 194, (uint8_t)(alpha * 255)));
     }
 }
+
+#endif // TARGET_OS_OSX
 #endif // __APPLE__

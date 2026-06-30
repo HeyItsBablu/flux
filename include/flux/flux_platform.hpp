@@ -609,15 +609,48 @@ struct GraphicsContext
 
 struct GraphicsContext
 {
-    CGContextRef cgContext = nullptr;
-    int width = 0;
+    // ── Metal (primary path — vectors, images, fills, and now text via the
+    // glyph atlas) ───────────────────────────────────────────────────────────
+    // Real types: id<MTLDevice>, id<MTLRenderCommandEncoder>,
+    // id<MTLRenderPipelineState>, id<MTLBuffer>. Stored as void* here so this
+    // header stays usable from plain .cpp translation units; cast via
+    // (__bridge id<...>) only inside flux_painter_macos.mm / flux_window_macos.mm.
+    void *mtlDevice        = nullptr;
+    void *mtlEncoder       = nullptr; // current frame's render command encoder; null for measure-only contexts
+    void *solidPipeline    = nullptr; // unused currently — Painter builds its own pipeline cache; reserved for Stage 1 consolidation
+    void *texturedPipeline = nullptr; // unused currently — see above
+    void *scratchVertexBuf = nullptr; // unused currently — see above
+
+    // Orthographic projection mapping window pixel space -> clip space.
+    // Column-major, matches the layout used in flux_window_macos.mm's renderFrame.
+    float mvp[16] = {
+        1,0,0,0,
+        0,1,0,0,
+        0,0,1,0,
+        0,0,0,1
+    };
+
+    int width  = 0; // physical pixels
     int height = 0;
 
-    GraphicsContext() = default;
-    explicit GraphicsContext(CGContextRef cg, int w = 0, int h = 0)
-        : cgContext(cg), width(w), height(h) {}
+    // ── Bridge to PlatformWindow::MacState (opaque here) ────────────────────
+    // Used by Painter::drawTextA/drawRichTextA to reach the per-window
+    // GlyphAtlas via fluxGlyphAtlas(), and by the (legacy/optional) scratch
+    // CG buffer via fluxTextScratch(). Always a PlatformWindow::MacState* on
+    // this platform; kept void* so this header doesn't need to know that
+    // type. Set on every GraphicsContext handed to Painter or LayoutEngine —
+    // including measure-only contexts, since CoreText measurement also
+    // resolves through the same FontCache/CTFontRef path.
+    void *textScratchProvider = nullptr;
 
-    bool valid() const { return cgContext != nullptr; }
+    GraphicsContext() = default;
+
+    // valid() distinguishes a paint-capable context (has a live Metal
+    // encoder) from a measure/layout-only context (mtlEncoder is null).
+    // Painter's draw methods early-return safely when this is false via
+    // their own enc(ctx) null checks — valid() is for callers who want to
+    // check before doing any work at all.
+    bool valid() const { return mtlEncoder != nullptr; }
 };
 
 #endif // TARGET_OS_OSX
@@ -673,8 +706,11 @@ struct MeasureContext
 
 #ifdef __APPLE__
 #if TARGET_OS_OSX
-    explicit MeasureContext(CGContextRef cg, int w = 0, int h = 0)
-        : ctx(cg, w, h) {}
+    // No parameterized constructor needed — GraphicsContext's fields
+    // (width/height/textScratchProvider) are public and set directly by
+    // the caller (see PlatformWindow::getMeasureContext() in
+    // flux_window_macos.mm) before/after this MeasureContext wraps it.
+    MeasureContext() = default;
     ~MeasureContext() = default;
 #endif
 #endif
