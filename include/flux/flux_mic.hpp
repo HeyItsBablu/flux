@@ -60,8 +60,8 @@
 extern "C"
 {
     void *FluxMicMacBridge_open(int sampleRate, int channels, void *implPtr);
-    void  FluxMicMacBridge_close(void *bridge);
-    void  FluxMicMacBridge_destroy(void *bridge);
+    void FluxMicMacBridge_close(void *bridge);
+    void FluxMicMacBridge_destroy(void *bridge);
 }
 
 #endif // TARGET_OS_OSX
@@ -77,7 +77,7 @@ public:
     static FluxMic &get();
 
     static constexpr int kDefaultSampleRate = 48000;
-    static constexpr int kDefaultChannels   = 1;
+    static constexpr int kDefaultChannels = 1;
 
     enum class State
     {
@@ -107,17 +107,17 @@ public:
 
     // ── Status ────────────────────────────────────────────────────────────
     State getState() const;
-    bool  isRecording() const;
-    float getInputLevel() const;     // current RMS, 0..1 — poll for UI meters
-    int   getSampleRate() const;
-    int   getChannels() const;
+    bool isRecording() const;
+    float getInputLevel() const; // current RMS, 0..1 — poll for UI meters
+    int getSampleRate() const;
+    int getChannels() const;
+
+    struct Impl;
 
 private:
     FluxMic();
     ~FluxMic();
 
-    // Each platform backend defines its own private members in its .cpp/.mm.
-    // Forward-declared so this header stays free of platform-specific types.
-    struct Impl;
+
     Impl *m_impl;
 };

@@ -105,7 +105,7 @@ bool FluxMic::start(FrameCallback cb)
             })
             .catch(function(e) {
                 console.error('[FluxMic] getUserMedia failed:', e);
-            }); }, sampleRate);
+            }); }, m_impl->sampleRate);
 
     return true; // async — caller should treat isRecording()/permission as eventual
 }
