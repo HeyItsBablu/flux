@@ -11,75 +11,48 @@
 #if defined(__APPLE__) && !defined(__IPHONE_OS_VERSION_MIN_REQUIRED)
 
 #include "flux/widgets/camera_widget.hpp"
-
+#include "flux/flux_window_macos_state.hpp"
+#import <Metal/Metal.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <ImageIO/ImageIO.h>
 #import <Foundation/Foundation.h>
 
-// ── Convenience casts ─────────────────────────────────────────────────────────
-// MacOSState stores CGImageRef as void* to keep CoreGraphics out of the header.
 
-static inline CGImageRef asCGImage(void* p) {
-    return static_cast<CGImageRef>(p);
+
+
+// ── Convenience casts ─────────────────────────────────────────────────────────
+static inline id<MTLTexture> asMTLTexture(void* p) {
+    return (__bridge id<MTLTexture>)p;
 }
 
-// ── MacOSState deleter — CGImageRelease + delete ──────────────────────────────
-
+// ── MacOSState deleter — release retained textures ────────────────────────────
 void CameraWidget::MacOSStateDeleter::operator()(MacOSState* p) const {
     if (p) {
-        if (p->previewImage) CGImageRelease(asCGImage(p->previewImage));
-        if (p->thumbImage)   CGImageRelease(asCGImage(p->thumbImage));
+        if (p->previewTexture) { id<MTLTexture> t = (__bridge_transfer id<MTLTexture>)p->previewTexture; (void)t; }
+        if (p->thumbTexture)   { id<MTLTexture> t = (__bridge_transfer id<MTLTexture>)p->thumbTexture;   (void)t; }
     }
     delete p;
 }
 
-// ── Lazy initialiser ──────────────────────────────────────────────────────────
+// ── Build an id<MTLTexture> from a BGRA32 CPU buffer ──────────────────────────
+static id<MTLTexture> makeMTLTextureFromBGRA(id<MTLDevice> device,
+                                              const uint8_t* bgra, int w, int h) {
+    if (!device || !bgra || w <= 0 || h <= 0) return nil;
+    MTLTextureDescriptor* td = [MTLTextureDescriptor
+        texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+                                      width:w height:h mipmapped:NO];
+    td.usage = MTLTextureUsageShaderRead;
+    id<MTLTexture> tex = [device newTextureWithDescriptor:td];
+    [tex replaceRegion:MTLRegionMake2D(0, 0, w, h) mipmapLevel:0
+            withBytes:bgra bytesPerRow:(NSUInteger)w * 4];
+    return tex;
+}
 
 static CameraWidget::MacOSState& getMac(
         std::unique_ptr<CameraWidget::MacOSState,
                         CameraWidget::MacOSStateDeleter>& ptr) {
     if (!ptr) ptr.reset(new CameraWidget::MacOSState());
     return *ptr;
-}
-
-// ── Internal: build a CGImageRef from a BGRA32 CPU buffer ────────────────────
-// The image does NOT copy the buffer — the caller must keep the FrameLock alive
-// for the duration of the draw call, or pass a copy.  Here we copy once into a
-// CFData so the CGImage is self-contained and the lock can be released early.
-
-static CGImageRef makeCGImageFromBGRA(const uint8_t* bgra, int w, int h) {
-    if (!bgra || w <= 0 || h <= 0) return nullptr;
-
-    size_t stride   = (size_t)(w * 4);
-    size_t byteSize = stride * (size_t)h;
-
-    // Copy into a CFData so the CGImage lifetime is independent of the lock.
-    CFDataRef data = CFDataCreate(kCFAllocatorDefault, bgra, (CFIndex)byteSize);
-    if (!data) return nullptr;
-
-    CGDataProviderRef provider =
-        CGDataProviderCreateWithCFData(data);
-    CFRelease(data);   // provider holds its own ref
-
-    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-
-    // kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst = BGRA
-    CGImageRef img = CGImageCreate(
-            (size_t)w, (size_t)h,
-            8,                          // bits per component
-            32,                         // bits per pixel
-            stride,
-            cs,
-            (CGBitmapInfo)(kCGBitmapByteOrder32Little |
-                           kCGImageAlphaPremultipliedFirst),
-            provider,
-            nullptr,                    // no decode array
-            false,                      // shouldInterpolate
-            kCGRenderingIntentDefault);
-
-    CGColorSpaceRelease(cs);
-    CGDataProviderRelease(provider);
-    return img;
 }
 
 // ── Internal: letterbox rect helper ──────────────────────────────────────────
@@ -120,11 +93,12 @@ void CameraWidget::_platformScheduleOpen() {
 // Drop the cached preview CGImage so a fresh one is built for the new device.
 
 void CameraWidget::_platformOnFlip() {
-    if (_macos && _macos->previewImage) {
-        CGImageRelease(asCGImage(_macos->previewImage));
-        _macos->previewImage = nullptr;
-        _macos->cachedSrcW   = 0;
-        _macos->cachedSrcH   = 0;
+    if (_macos && _macos->previewTexture) {
+        id<MTLTexture> t = (__bridge_transfer id<MTLTexture>)_macos->previewTexture;
+        (void)t; // released
+        _macos->previewTexture = nullptr;
+        _macos->cachedSrcW = 0;
+        _macos->cachedSrcH = 0;
     }
 }
 
@@ -137,50 +111,41 @@ bool CameraWidget::_platformRenderPreview(GraphicsContext& ctx, Painter& p,
     auto& cam = FluxCamera::get();
     auto& s   = getMac(_macos);
 
-    // Pull latest frame
+    if (!ctx.mtlDevice) return false;
+    id<MTLDevice> device = (__bridge id<MTLDevice>)ctx.mtlDevice;
+
     if (cam.updateFrame() && cam.getPreviewWidth() > 0) {
-        auto frame = cam.lockFrame();   // holds _frameMutex until destroyed
+        auto frame = cam.lockFrame();
         if (frame.data && frame.width > 0 && frame.height > 0) {
-            // Rebuild CGImage only when dimensions change (common case: same
-            // size every frame, so we create a new one cheaply each frame via
-            // the CFData path — no persistent surface like Cairo needs).
-            if (s.previewImage) {
-                CGImageRelease(asCGImage(s.previewImage));
-                s.previewImage = nullptr;
+            id<MTLTexture> newTex = makeMTLTextureFromBGRA(device, frame.data,
+                                                            frame.width, frame.height);
+            if (s.previewTexture) {
+                id<MTLTexture> old = (__bridge_transfer id<MTLTexture>)s.previewTexture;
+                (void)old;
             }
-            s.previewImage = makeCGImageFromBGRA(
-                    frame.data, frame.width, frame.height);
+            s.previewTexture = newTex ? (__bridge_retained void*)newTex : nullptr;
             s.cachedSrcW = frame.width;
             s.cachedSrcH = frame.height;
         }
-    }   // FrameLock released here — safe to draw
+    }
 
-    if (!s.previewImage || s.cachedSrcW <= 0 || !ctx.cgContext)
-        return false;
+    if (!s.previewTexture || s.cachedSrcW <= 0) return false;
 
-    CGContextRef cg = ctx.cgContext;
+    CGRect dst = letterboxRect(s.cachedSrcW, s.cachedSrcH, x, y, width, viewH);
 
-    // Letterbox rect
-    CGRect dst = letterboxRect(s.cachedSrcW, s.cachedSrcH,
-                               x, y, width, viewH);
-
-    // Fill any exposed letterbox bars with the placeholder colour
     if ((int)dst.origin.x > x)
         p.fillRect(x, y, (int)dst.origin.x - x, viewH, colPlaceholder);
     if ((int)(dst.origin.x + dst.size.width) < x + width)
         p.fillRect((int)(dst.origin.x + dst.size.width), y,
-                   (x + width) - (int)(dst.origin.x + dst.size.width),
-                   viewH, colPlaceholder);
+                   (x + width) - (int)(dst.origin.x + dst.size.width), viewH, colPlaceholder);
     if ((int)dst.origin.y > y)
         p.fillRect(x, y, width, (int)dst.origin.y - y, colPlaceholder);
     if ((int)(dst.origin.y + dst.size.height) < y + viewH)
-        p.fillRect(x, (int)(dst.origin.y + dst.size.height),
-                   width,
-                   (y + viewH) - (int)(dst.origin.y + dst.size.height),
-                   colPlaceholder);
+        p.fillRect(x, (int)(dst.origin.y + dst.size.height), width,
+                   (y + viewH) - (int)(dst.origin.y + dst.size.height), colPlaceholder);
 
     Painter::CameraDrawParams cp;
-    cp.frame  = (NativeImage)s.previewImage;
+    cp.frame  = (__bridge NativeImage)asMTLTexture(s.previewTexture);
     cp.dstX   = (int)dst.origin.x;
     cp.dstY   = (int)dst.origin.y;
     cp.dstW   = (int)dst.size.width;
@@ -208,19 +173,17 @@ void CameraWidget::_platformRenderFlash(GraphicsContext& /*ctx*/, Painter& p,
 bool CameraWidget::_platformRenderThumb(GraphicsContext& ctx,
                                         int thumbX, int thumbY,
                                         int thumbW, int thumbH) {
-    if (!_macos || !_macos->thumbImage || !ctx.cgContext) return false;
+    if (!_macos || !_macos->thumbTexture) return false;
 
-    CGContextRef cg = ctx.cgContext;
-
-    CGContextSaveGState(cg);
-    // Flip Y for top-left origin
-    CGContextTranslateCTM(cg, 0, thumbY * 2 + thumbH);
-    CGContextScaleCTM(cg, 1.0, -1.0);
-
-    CGRect dst = CGRectMake(thumbX, thumbY, thumbW, thumbH);
-    CGContextSetInterpolationQuality(cg, kCGInterpolationLow);
-    CGContextDrawImage(cg, dst, asCGImage(_macos->thumbImage));
-    CGContextRestoreGState(cg);
+    Painter p(ctx);
+    Painter::ImageDrawParams ip;
+    ip.image  = (__bridge NativeImage)asMTLTexture(_macos->thumbTexture);
+    ip.destX  = (float)thumbX;
+    ip.destY  = (float)thumbY;
+    ip.destW  = (float)thumbW;
+    ip.destH  = (float)thumbH;
+    ip.clipX = thumbX; ip.clipY = thumbY; ip.clipW = thumbW; ip.clipH = thumbH;
+    p.drawImage(ip);
     return true;
 }
 
@@ -232,27 +195,52 @@ bool CameraWidget::_platformRenderThumb(GraphicsContext& ctx,
 void CameraWidget::_platformLoadThumb(const std::string& path) {
     auto& s = getMac(_macos);
 
-    if (s.thumbImage) {
-        CGImageRelease(asCGImage(s.thumbImage));
-        s.thumbImage = nullptr;
-        s.thumbSrcW  = s.thumbSrcH = 0;
+    if (s.thumbTexture) {
+        id<MTLTexture> old = (__bridge_transfer id<MTLTexture>)s.thumbTexture;
+        (void)old;
+        s.thumbTexture = nullptr;
+        s.thumbSrcW = s.thumbSrcH = 0;
     }
 
     NSString* nsPath = [NSString stringWithUTF8String:path.c_str()];
     NSURL*    url    = [NSURL fileURLWithPath:nsPath];
     if (!url) return;
 
-    CGImageSourceRef source =
-        CGImageSourceCreateWithURL((__bridge CFURLRef)url, nullptr);
+    CGImageSourceRef source = CGImageSourceCreateWithURL((__bridge CFURLRef)url, nullptr);
     if (!source) return;
-
     CGImageRef img = CGImageSourceCreateImageAtIndex(source, 0, nullptr);
     CFRelease(source);
     if (!img) return;
 
-    s.thumbImage = img;
-    s.thumbSrcW  = (int)CGImageGetWidth(img);
-    s.thumbSrcH  = (int)CGImageGetHeight(img);
+    int w = (int)CGImageGetWidth(img);
+    int h = (int)CGImageGetHeight(img);
+
+    std::vector<uint8_t> bgra((size_t)w * h * 4);
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    CGContextRef cg = CGBitmapContextCreate(
+        bgra.data(), w, h, 8, w * 4, cs,
+        kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little);
+    CGColorSpaceRelease(cs);
+    if (cg) {
+        CGContextDrawImage(cg, CGRectMake(0, 0, w, h), img);
+        CGContextRelease(cg);
+    }
+    CGImageRelease(img);
+    if (!cg) return;
+
+    // Note: device isn't available here (no GraphicsContext passed into
+    // _platformLoadThumb) — grab it from FluxUI's current window instead.
+    auto* inst = FluxUI::getCurrentInstance();
+    auto* pw = inst ? inst->getPlatformWindowPtr() : nullptr;
+    auto* mac = pw ? pw->getMacState() : nullptr;
+    if (!mac || !mac->metalDevice) return;
+
+    id<MTLTexture> tex = makeMTLTextureFromBGRA(mac->metalDevice, bgra.data(), w, h);
+    if (tex) {
+        s.thumbTexture = (__bridge_retained void*)tex;
+        s.thumbSrcW = w;
+        s.thumbSrcH = h;
+    }
 }
 
 // =============================================================================

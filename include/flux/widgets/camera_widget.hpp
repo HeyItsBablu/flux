@@ -388,20 +388,13 @@ public:
 #endif // Linux
 
 #if defined(__APPLE__) && !defined(__ANDROID__)
-    // ── macOS: CoreGraphics CGImage preview + thumbnail cache ─────────────
-    // CGImageRef is typedef struct CGImage* — stored as void* so this header
-    // stays clean without pulling in <CoreGraphics/CoreGraphics.h>.
-    // The .mm file casts back to CGImageRef.
     struct MacOSState
     {
-        // Cached preview image rebuilt whenever frame dimensions change.
-        // Wraps the live BGRA32 frame buffer via CGDataProvider.
-        void *previewImage = nullptr; // CGImageRef, retained
+        void *previewTexture = nullptr; // id<MTLTexture>, retained via __bridge_retained in the .mm
         int cachedSrcW = 0;
         int cachedSrcH = 0;
 
-        // Decoded JPEG thumbnail; rebuilt once per photo.
-        void *thumbImage = nullptr; // CGImageRef, retained
+        void *thumbTexture = nullptr;   // id<MTLTexture>, retained via __bridge_retained
         int thumbSrcW = 0;
         int thumbSrcH = 0;
     };

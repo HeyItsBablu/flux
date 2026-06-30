@@ -273,7 +273,7 @@ public:
         }
 
 #elif defined(__APPLE__) && TARGET_OS_OSX
-        _freeCGResources();
+        _freeVideoTexture();
 #elif defined(__linux__)
         _freeCairoSurface();
 #endif
@@ -389,58 +389,58 @@ public:
         }
 
 #elif defined(__APPLE__) && TARGET_OS_OSX
+{
+    if (_finishedPending.exchange(false))
+    {
+        _playing = false;
+        _finished = true;
+        _progress = 1.f;
+    }
+    if (FluxVideo::get().hasNewFrame())
+    {
+        auto frame = FluxVideo::get().lockFrame();
+        if (frame.data && frame.width > 0 && frame.height > 0)
         {
-            if (_finishedPending.exchange(false))
+            int expectedStride = frame.width * 3;
+            _frameCache.resize((size_t)(frame.width * frame.height * 3));
+            if (frame.stride == expectedStride)
             {
-                _playing = false;
-                _finished = true;
-                _progress = 1.f;
+                memcpy(_frameCache.data(), frame.data, _frameCache.size());
             }
-            if (FluxVideo::get().hasNewFrame())
+            else
             {
-                auto frame = FluxVideo::get().lockFrame();
-                if (frame.data && frame.width > 0 && frame.height > 0)
+                const uint8_t *src = frame.data;
+                uint8_t *dst = _frameCache.data();
+                for (int row = 0; row < frame.height; ++row)
                 {
-                    int expectedStride = frame.width * 3;
-                    _frameCache.resize((size_t)(frame.width * frame.height * 3));
-                    if (frame.stride == expectedStride)
-                    {
-                        memcpy(_frameCache.data(), frame.data, _frameCache.size());
-                    }
-                    else
-                    {
-                        const uint8_t *src = frame.data;
-                        uint8_t *dst = _frameCache.data();
-                        for (int row = 0; row < frame.height; ++row)
-                        {
-                            memcpy(dst, src, (size_t)expectedStride);
-                            src += frame.stride;
-                            dst += expectedStride;
-                        }
-                    }
-                    _cachedSrcW = frame.width;
-                    _cachedSrcH = frame.height;
-                    _cgImageDirty = true;
-                }
-                _progress = FluxVideo::get().getProgress();
-            }
-            if (!_frameCache.empty() && _cachedSrcW > 0 && ctx.cgContext)
-            {
-                if (_cgImageDirty)
-                {
-                    _cgImageDirty = false;
-                    _rebuildCGImage();
-                }
-                if (_cgImage)
-                {
-                    Painter::VideoDrawParams vp;
-                    vp.frame = (NativeImage)_cgImage;
-                    _letterbox(_cachedSrcW, _cachedSrcH,
-                               vp.dstX, vp.dstY, vp.dstW, vp.dstH);
-                    p.drawVideo(vp);
+                    memcpy(dst, src, (size_t)expectedStride);
+                    src += frame.stride;
+                    dst += expectedStride;
                 }
             }
+            _cachedSrcW = frame.width;
+            _cachedSrcH = frame.height;
+            _videoTexDirty = true;
         }
+        _progress = FluxVideo::get().getProgress();
+    }
+    if (!_frameCache.empty() && _cachedSrcW > 0 && ctx.mtlDevice)
+    {
+        if (_videoTexDirty)
+        {
+            _videoTexDirty = false;
+            _rebuildVideoTexture((__bridge id<MTLDevice>)ctx.mtlDevice);
+        }
+        if (_videoTex)
+        {
+            Painter::VideoDrawParams vp;
+            vp.frame = (__bridge NativeImage)_videoTex;
+            _letterbox(_cachedSrcW, _cachedSrcH,
+                       vp.dstX, vp.dstY, vp.dstW, vp.dstH);
+            p.drawVideo(vp);
+        }
+    }
+}
 
 #elif defined(_WIN32)
         {
@@ -709,9 +709,8 @@ private:
 #elif defined(__APPLE__) && TARGET_OS_OSX
     std::vector<uint8_t> _frameCache;
     int _cachedSrcW = 0, _cachedSrcH = 0;
-    bool _cgImageDirty = false;
-    CGImageRef _cgImage = nullptr;
-    CGColorSpaceRef _cgColorSpace = nullptr;
+    bool _videoTexDirty = false;
+    id<MTLTexture> _videoTex = nil;
     std::atomic<bool> _destroyed{false};
     std::atomic<bool> _finishedPending{false};
 
@@ -927,46 +926,36 @@ private:
     }
 #endif
 
-    // ── macOS CoreGraphics helpers ─────────────────────────────────────────────
 #if defined(__APPLE__) && TARGET_OS_OSX
-    void _rebuildCGImage()
+    void _rebuildVideoTexture(id<MTLDevice> device)
     {
-        if (_cgImage)
-        {
-            CGImageRelease(_cgImage);
-            _cgImage = nullptr;
+        _videoTex = nil;
+        if (_frameCache.empty() || _cachedSrcW <= 0 || _cachedSrcH <= 0 || !device)
+            return;
+
+        // RGB24 -> BGRA8 (Metal has no 3-byte texture format).
+        size_t n = (size_t)_cachedSrcW * (size_t)_cachedSrcH;
+        std::vector<uint8_t> bgra(n * 4);
+        const uint8_t* src = _frameCache.data();
+        uint8_t* dst = bgra.data();
+        for (size_t i = 0; i < n; ++i) {
+            dst[0] = src[2]; dst[1] = src[1]; dst[2] = src[0]; dst[3] = 0xFF;
+            src += 3; dst += 4;
         }
-        if (_frameCache.empty() || _cachedSrcW <= 0 || _cachedSrcH <= 0)
-            return;
-        if (!_cgColorSpace)
-            _cgColorSpace = CGColorSpaceCreateDeviceRGB();
 
-        CGDataProviderRef provider = CGDataProviderCreateWithData(
-            nullptr, _frameCache.data(), _frameCache.size(), nullptr);
-        if (!provider)
-            return;
-
-        _cgImage = CGImageCreate(
-            (size_t)_cachedSrcW, (size_t)_cachedSrcH,
-            8, 24, (size_t)(_cachedSrcW * 3), _cgColorSpace,
-            (CGBitmapInfo)((uint32_t)kCGBitmapByteOrderDefault |
-                           (uint32_t)kCGImageAlphaNone),
-            provider, nullptr, false, kCGRenderingIntentDefault);
-        CGDataProviderRelease(provider);
+        MTLTextureDescriptor* td = [MTLTextureDescriptor
+            texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+                                          width:_cachedSrcW height:_cachedSrcH mipmapped:NO];
+        td.usage = MTLTextureUsageShaderRead;
+        id<MTLTexture> tex = [device newTextureWithDescriptor:td];
+        [tex replaceRegion:MTLRegionMake2D(0, 0, _cachedSrcW, _cachedSrcH) mipmapLevel:0
+                withBytes:bgra.data() bytesPerRow:(NSUInteger)_cachedSrcW * 4];
+        _videoTex = tex;
     }
 
-    void _freeCGResources()
+    void _freeVideoTexture()
     {
-        if (_cgImage)
-        {
-            CGImageRelease(_cgImage);
-            _cgImage = nullptr;
-        }
-        if (_cgColorSpace)
-        {
-            CGColorSpaceRelease(_cgColorSpace);
-            _cgColorSpace = nullptr;
-        }
+        _videoTex = nil; // ARC releases
     }
 #endif
 
