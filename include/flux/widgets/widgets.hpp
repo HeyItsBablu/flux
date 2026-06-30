@@ -34,7 +34,6 @@
 #include "flux_accordion.hpp"
 #include "flux_audioplayer.hpp"
 #include "flux_videoplayer.hpp"
-#include "mic.hpp"
 #include "camera_widget.hpp"
 #include "flux_future_builder.hpp"
 #include "flux_file_picker.hpp"
