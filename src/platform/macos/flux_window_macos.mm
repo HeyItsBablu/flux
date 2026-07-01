@@ -10,23 +10,18 @@
 #import <AudioToolbox/AudioToolbox.h>
 
 #include "flux/flux_window.hpp"
-#include "flux/flux_canvas.hpp"
 #include "flux/flux_window_macos_state.hpp"
 #include "flux/flux_core.hpp"
 
 #include <unordered_map>
 #include <vector>
 
-// ============================================================================
-// Forward declarations
-// ============================================================================
-
 @class FluxNSView;
-@class FluxAppDelegate;
 
 // ============================================================================
-// FluxNSView — bridges Cocoa events to PlatformWindow; renderFrame is the
-// single paint entry point (replaces the old CG-based drawRect: pipeline).
+// FluxNSView — bridges Cocoa events to PlatformWindow callbacks.
+// Every mouse/keyboard event goes straight to the generic WindowCallbacks;
+// no canvas-specific hit-testing or dispatch lives here anymore.
 // ============================================================================
 
 @interface FluxNSView : NSView <NSWindowDelegate> {
@@ -40,22 +35,18 @@
 
 - (instancetype)initWithFrame:(NSRect)frame window:(PlatformWindow*)win {
     self = [super initWithFrame:frame];
-    if (self) {
-        _win = win;
-        self.wantsLayer = YES;
-    }
+    if (self) { _win = win; self.wantsLayer = YES; }
     return self;
 }
 
 - (BOOL)acceptsFirstResponder { return YES; }
 - (BOOL)isOpaque              { return YES; }
+- (void)drawRect:(NSRect)dirtyRect { /* intentionally empty — Metal renders */ }
 
-// Content now lives entirely in uiMetalLayer (and per-CanvasWidget Metal
-// layers beneath it), which present independently of AppKit's CG drawing
-// cycle. Nothing to draw here.
-- (void)drawRect:(NSRect)dirtyRect { /* intentionally empty */ }
-
-// ── Single paint entry point ────────────────────────────────────────────────
+// ── Single paint entry point ─────────────────────────────────────────────────
+// Renders the UI Metal layer (Painter's vector + text content).
+// Each CanvasWidget renders to its own separate CAMetalLayer (zPosition 0)
+// from within its render() override — no loop over widgets here.
 - (void)renderFrame {
     if (!_win || !_win->macState) return;
     auto& s = *_win->macState;
@@ -67,20 +58,19 @@
     MTLRenderPassDescriptor* rpd = [MTLRenderPassDescriptor renderPassDescriptor];
     rpd.colorAttachments[0].texture     = drawable.texture;
     rpd.colorAttachments[0].loadAction  = MTLLoadActionClear;
-    rpd.colorAttachments[0].clearColor  = MTLClearColorMake(0, 0, 0, 0); // transparent
+    rpd.colorAttachments[0].clearColor  = MTLClearColorMake(0, 0, 0, 0);
     rpd.colorAttachments[0].storeAction = MTLStoreActionStore;
 
     id<MTLCommandBuffer> cmd = [s.commandQueue commandBuffer];
     id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:rpd];
 
     GraphicsContext ctx;
-    ctx.mtlDevice          = (__bridge void*)s.metalDevice;
-    ctx.mtlEncoder         = (__bridge void*)enc;
-    ctx.width              = _win->cachedWidth;
-    ctx.height             = _win->cachedHeight;
+    ctx.mtlDevice           = (__bridge void*)s.metalDevice;
+    ctx.mtlEncoder          = (__bridge void*)enc;
+    ctx.width               = _win->cachedWidth;
+    ctx.height              = _win->cachedHeight;
     ctx.textScratchProvider = &s;
 
-    // Orthographic projection: pixel space (top-left origin) -> clip space.
     float l = 0, r = (float)ctx.width, t = 0, b = (float)ctx.height;
     memset(ctx.mvp, 0, sizeof(ctx.mvp));
     ctx.mvp[0]  =  2.f / (r - l);
@@ -90,6 +80,8 @@
     ctx.mvp[13] = -(b + t) / (b - t);
     ctx.mvp[15] =  1.f;
 
+    // onPaint walks the full widget tree. CanvasWidget::render() draws to its
+    // own CAMetalLayer inline; no separate pre/glRenderPass loop needed.
     if (_win->callbacks.onPaint)
         _win->callbacks.onPaint(ctx, ctx.width, ctx.height);
 
@@ -108,17 +100,18 @@
     _win->cachedHeight = (int)backing.size.height;
 
     auto& s = *_win->macState;
-    s.ensureUILayer(_win->cachedWidth, _win->cachedHeight); // resize uiMetalLayer + (re)gate atlas init
+    s.ensureUILayer(_win->cachedWidth, _win->cachedHeight);
 
     int lw = (int)newSize.width;
     int lh = (int)newSize.height;
 
-    for (CanvasWidget* cw : s.canvasWidgets)
-        if (cw) cw->onWindowResize(_win->cachedWidth, _win->cachedHeight);
+    // No per-widget canvas resize loop — each CanvasWidget detects size
+    // changes itself via syncPhysicalGeometry() in its next render() call,
+    // the same way every other widget detects layout changes.
 
     if (_win->callbacks.onResize) {
-        GraphicsContext ctx; // layout-only context: no mtlEncoder, Painter calls no-op safely
-        ctx.width = lw;
+        GraphicsContext ctx;
+        ctx.width  = lw;
         ctx.height = lh;
         ctx.textScratchProvider = &s;
         _win->callbacks.onResize(ctx, lw, lh);
@@ -127,42 +120,31 @@
     [self renderFrame];
 }
 
-// ── Mouse events ─────────────────────────────────────────────────────────────
-
+// ── Coordinate helper ─────────────────────────────────────────────────────────
 - (NSPoint)fluxPoint:(NSEvent*)event {
     NSPoint p = [self convertPoint:event.locationInWindow fromView:nil];
     return NSMakePoint(p.x, self.bounds.size.height - p.y);
 }
 
+// ── Mouse events — all go straight to generic callbacks ──────────────────────
+// The widget tree dispatch in flux_core.cpp (findAndHandleMouseEvent /
+// broadcastMouseEvent) routes to CanvasWidget::handleMouseDown/Move/Up
+// exactly as it does for every other Widget type on every platform.
+
 - (void)mouseDown:(NSEvent*)event {
     if (!_win) return;
-    NSPoint p = [self fluxPoint:event];
-    int mx = (int)p.x, my = (int)p.y;
     [self becomeFirstResponder];
-
-    auto& s = *_win->macState;
-    CanvasWidget* cw = _win->hitTestCanvas(mx, my);
-    if (cw) {
-        s.capturedCanvas = cw;
-        s.focusedCanvas  = cw;
-        cw->onMouseButtonDown(mx - cw->x, my - cw->y, 0);
-        [self renderFrame]; return;
-    }
-    s.focusedCanvas = nullptr;
-    if (_win->callbacks.onMouseDown && _win->callbacks.onMouseDown(mx, my))
+    NSPoint p = [self fluxPoint:event];
+    if (_win->callbacks.onMouseDown &&
+        _win->callbacks.onMouseDown((int)p.x, (int)p.y))
         [self renderFrame];
 }
 
 - (void)mouseUp:(NSEvent*)event {
     if (!_win) return;
     NSPoint p = [self fluxPoint:event];
-    int mx = (int)p.x, my = (int)p.y;
-
-    auto& s = *_win->macState;
-    CanvasWidget* cw = s.capturedCanvas ? s.capturedCanvas : _win->hitTestCanvas(mx, my);
-    s.capturedCanvas = nullptr;
-    if (cw) { cw->onMouseButtonUp(mx - cw->x, my - cw->y, 0); [self renderFrame]; return; }
-    if (_win->callbacks.onMouseUp && _win->callbacks.onMouseUp(mx, my))
+    if (_win->callbacks.onMouseUp &&
+        _win->callbacks.onMouseUp((int)p.x, (int)p.y))
         [self renderFrame];
 }
 
@@ -171,75 +153,46 @@
 - (void)mouseMoved:(NSEvent*)event {
     if (!_win) return;
     NSPoint p = [self fluxPoint:event];
-    int mx = (int)p.x, my = (int)p.y;
-
-    auto& s = *_win->macState;
-    CanvasWidget* cw = s.capturedCanvas ? s.capturedCanvas : _win->hitTestCanvas(mx, my);
-    if (cw) { cw->onMouseMove(mx - cw->x, my - cw->y); [self renderFrame]; return; }
-    if (_win->callbacks.onMouseMove && _win->callbacks.onMouseMove(mx, my))
+    if (_win->callbacks.onMouseMove &&
+        _win->callbacks.onMouseMove((int)p.x, (int)p.y))
         [self renderFrame];
 }
 
 - (void)rightMouseDown:(NSEvent*)event {
     if (!_win) return;
     NSPoint p = [self fluxPoint:event];
-    int mx = (int)p.x, my = (int)p.y;
-
-    auto& s = *_win->macState;
-    CanvasWidget* cw = _win->hitTestCanvas(mx, my);
-    if (cw) {
-        cw->onMouseButtonDown(mx - cw->x, my - cw->y, 1); // button==1 -> right click
-        [self renderFrame];
-        return;
-    }
-    if (_win->callbacks.onRightClick && _win->callbacks.onRightClick(mx, my))
+    if (_win->callbacks.onRightClick &&
+        _win->callbacks.onRightClick((int)p.x, (int)p.y))
         [self renderFrame];
 }
 
 - (void)otherMouseDown:(NSEvent*)event {
+    // Middle-button pan is handled via space+drag through the normal
+    // handleMouseDown override in CanvasWidget (same as Linux/Win32).
+    // We still forward as a generic mouseDown so the widget can respond.
     if (!_win || event.buttonNumber != 2) return;
     NSPoint p = [self fluxPoint:event];
-    int mx = (int)p.x, my = (int)p.y;
-
-    auto& s = *_win->macState;
-    CanvasWidget* cw = _win->hitTestCanvas(mx, my);
-    if (cw) {
-        s.capturedCanvas = cw;
-        cw->onMouseButtonDown(mx - cw->x, my - cw->y, 2);
+    if (_win->callbacks.onMouseDown &&
+        _win->callbacks.onMouseDown((int)p.x, (int)p.y))
         [self renderFrame];
-    }
 }
 
 - (void)otherMouseUp:(NSEvent*)event {
     if (!_win || event.buttonNumber != 2) return;
     NSPoint p = [self fluxPoint:event];
-    int mx = (int)p.x, my = (int)p.y;
-
-    auto& s = *_win->macState;
-    CanvasWidget* cw = s.capturedCanvas;
-    s.capturedCanvas = nullptr;
-    if (cw) {
-        cw->onMouseButtonUp(mx - cw->x, my - cw->y, 2);
+    if (_win->callbacks.onMouseUp &&
+        _win->callbacks.onMouseUp((int)p.x, (int)p.y))
         [self renderFrame];
-    }
 }
 
 - (void)otherMouseDragged:(NSEvent*)event { [self mouseMoved:event]; }
 
 - (void)scrollWheel:(NSEvent*)event {
     if (!_win) return;
-    NSPoint p = [self fluxPoint:event];
-    int mx = (int)p.x, my = (int)p.y;
+    // Convert to the same WHEEL_DELTA integer convention every other platform
+    // uses; CanvasWidget::handleMouseWheel receives it via the generic
+    // focusedWidget path in FluxUI::wireCallbacks.
     float deltaY = (float)event.scrollingDeltaY;
-
-    auto& s = *_win->macState;
-    CanvasWidget* cw = s.capturedCanvas ? s.capturedCanvas : _win->hitTestCanvas(mx, my);
-    if (cw) {
-        cw->onScrollWheel(deltaY);
-        [self renderFrame];
-        return;
-    }
-
     int delta = (int)(deltaY * WHEEL_DELTA);
     if (_win->callbacks.onMouseWheel && _win->callbacks.onMouseWheel(delta))
         [self renderFrame];
@@ -247,28 +200,23 @@
 
 - (void)mouseExited:(NSEvent*)event {
     if (!_win) return;
-    auto& s = *_win->macState;
-    s.capturedCanvas = nullptr;
-    for (CanvasWidget* cw : s.canvasWidgets)
-        if (cw) cw->onMouseLeave();
-    if (_win->callbacks.onMouseLeave) _win->callbacks.onMouseLeave();
+    // Generic mouse-leave: FluxUI's onMouseLeave clears hover states on the
+    // whole widget tree. CanvasWidget handles its own scrollbar/pan cleanup
+    // via handleMouseLeave() override.
+    if (_win->callbacks.onMouseLeave)
+        _win->callbacks.onMouseLeave();
     [self renderFrame];
 }
 
-// ── Keyboard events ───────────────────────────────────────────────────────────
+// ── Keyboard ──────────────────────────────────────────────────────────────────
+// Routes through the normal focusedWidget path — CanvasWidget sets
+// isFocusable=true and FluxUI::setFocus() picks it up on mouseDown.
 
 - (void)keyDown:(NSEvent*)event {
     if (!_win) return;
-    auto& s = *_win->macState;
-
-    if (s.focusedCanvas) {
-        s.focusedCanvas->onKeyDown((int)event.keyCode);
-        [self renderFrame];
-        return;
-    }
-
     bool needsRedraw = false;
-    if (_win->callbacks.onKeyDown && _win->callbacks.onKeyDown((int)event.keyCode))
+    if (_win->callbacks.onKeyDown &&
+        _win->callbacks.onKeyDown((int)event.keyCode))
         needsRedraw = true;
 
     NSString* chars = event.characters;
@@ -289,10 +237,10 @@
 
 - (void)windowDidResignKey:(NSNotification*)notification {
     if (!_win) return;
-    auto& s = *_win->macState;
-    s.capturedCanvas = nullptr;
-    s.focusedCanvas  = nullptr;
-    if (_win->callbacks.onFocusLost) _win->callbacks.onFocusLost();
+    // No canvas-specific state to clear — capturedCanvas/focusedCanvas are
+    // gone. FluxUI's generic onFocusLost clears focusedWidget.
+    if (_win->callbacks.onFocusLost)
+        _win->callbacks.onFocusLost();
     [self renderFrame];
 }
 
@@ -372,34 +320,17 @@ bool PlatformWindow::create(const std::string& title,
                owner:s.nsView
             userInfo:nil]];
 
-    // ── Physical / logical sizes ──────────────────────────────────────────────
     NSRect backing = [s.nsView convertRectToBacking:s.nsView.bounds];
     cachedWidth  = (int)backing.size.width;
     cachedHeight = (int)backing.size.height;
 
-    // ── Call site #1: initial UI Metal layer + glyph atlas + canvas backend ──
-    // ensureUILayer() also lazily creates s.canvasMetal / s.canvasBackend
-    // via ensureCanvasBackend() internally (see flux_window_macos_state.hpp).
+    // ensureUILayer sets up the UI Metal layer and glyph atlas.
+    // No canvas backend registered here — each CanvasWidget creates and
+    // registers its own fonts lazily on first render(), same as Win32.
     if (!s.ensureUILayer(cachedWidth, cachedHeight)) {
         fprintf(stderr, "PlatformWindow: ensureUILayer failed at create()\n");
         return false;
     }
-
-    // ── Canvas2D Metal backend (shared, per-window) — fonts registered once ──
-    if (s.canvasBackend) {
-        auto regFont = [&](const char* name, const char* path) {
-            if (!Canvas2D::registerFont(s.canvasBackend, name, path))
-                fprintf(stderr, "PlatformWindow: font '%s' not found at '%s'\n", name, path);
-        };
-        regFont("sans",      "/System/Library/Fonts/Helvetica.ttc");
-        regFont("sans-bold", "/System/Library/Fonts/Helvetica.ttc");
-        regFont("mono",      "/System/Library/Fonts/Menlo.ttc");
-    } else {
-        fprintf(stderr, "PlatformWindow: canvasBackend unavailable, fonts not registered\n");
-    }
-
-    for (CanvasWidget* cw : s.canvasWidgets)
-        if (cw && s.canvasBackend) cw->setCanvasBackend(s.canvasBackend);
 
     [s.nsWindow makeKeyAndOrderFront:nil];
     [NSApp activateIgnoringOtherApps:YES];
@@ -418,11 +349,11 @@ void PlatformWindow::destroy() {
 
     if (s.nsWindow) { [s.nsWindow close]; s.nsWindow = nil; }
 
-    // canvasBackend/canvasMetal teardown happens in ~MacState() via
-    // teardownCanvasBackend() — no explicit call needed here.
     delete macState;
     macState = nullptr;
 }
+
+void PlatformWindow::startRenderLoop() {}
 
 int PlatformWindow::run() {
     [NSApp run];
@@ -438,10 +369,6 @@ bool PlatformWindow::isMouseCaptured() const {
 
 // ============================================================================
 // invalidate / invalidateRect
-//
-// Metal redraws the full frame each pass (no partial-surface presentation),
-// so invalidateRect collapses to invalidate. x/y/w/h kept for signature
-// compatibility with callers (e.g. FluxUI::invalidateWidget) but unused.
 // ============================================================================
 
 void PlatformWindow::invalidate() {
@@ -466,7 +393,6 @@ void PlatformWindow::invalidateRect(int /*x*/, int /*y*/, int /*w*/, int /*h*/) 
 void PlatformWindow::setTimer(TimerID id, int ms) {
     if (!macState) return;
     killTimer(id);
-
     FluxTimerShim* shim = [[FluxTimerShim alloc] initWithWindow:this timerID:id];
     NSTimer* timer = [NSTimer scheduledTimerWithTimeInterval:ms / 1000.0
                                                       target:shim
@@ -486,34 +412,6 @@ void PlatformWindow::killTimer(TimerID id) {
 }
 
 // ============================================================================
-// Canvas widget registry
-// ============================================================================
-
-void PlatformWindow::registerCanvas_public(CanvasWidget* c) {
-    if (!c || !macState) return;
-    macState->canvasWidgets.push_back(c);
-    if (macState->canvasBackend) c->setCanvasBackend(macState->canvasBackend);
-}
-
-void PlatformWindow::unregisterCanvas_public(CanvasWidget* c) {
-    if (!macState) return;
-    if (macState->capturedCanvas == c) macState->capturedCanvas = nullptr;
-    if (macState->focusedCanvas  == c) macState->focusedCanvas  = nullptr;
-    auto& v = macState->canvasWidgets;
-    v.erase(std::remove(v.begin(), v.end(), c), v.end());
-}
-
-CanvasWidget* PlatformWindow::hitTestCanvas(int x, int y) {
-    if (!macState) return nullptr;
-    for (auto it = macState->canvasWidgets.rbegin();
-         it != macState->canvasWidgets.rend(); ++it) {
-        CanvasWidget* cw = *it;
-        if (cw && cw->isInitialized() && cw->containsPoint(x, y)) return cw;
-    }
-    return nullptr;
-}
-
-// ============================================================================
 // Size helpers
 // ============================================================================
 
@@ -522,8 +420,6 @@ void PlatformWindow::updateClientSize() {
     NSRect backing = [macState->nsView convertRectToBacking:macState->nsView.bounds];
     cachedWidth  = (int)backing.size.width;
     cachedHeight = (int)backing.size.height;
-    // ── Call site #3: keep uiMetalLayer's drawable size in sync if this is
-    // ever invoked outside of setFrameSize: (e.g. from a DPI-change path).
     if (macState) macState->ensureUILayer(cachedWidth, cachedHeight);
 }
 
@@ -533,25 +429,17 @@ PlatformWindow::ClientSize PlatformWindow::getClientSize() const {
     return {(int)b.size.width, (int)b.size.height};
 }
 
-PlatformWindow::ScreenPoint
-PlatformWindow::clientToScreen(int cx, int cy) const {
+PlatformWindow::ScreenPoint PlatformWindow::clientToScreen(int cx, int cy) const {
     if (!macState || !macState->nsWindow) return {cx, cy};
     NSRect r = [macState->nsWindow convertRectToScreen:NSMakeRect(cx, cy, 1, 1)];
     return {(int)r.origin.x, (int)r.origin.y};
 }
 
-PlatformWindow::ScreenPoint
-PlatformWindow::screenToClient(int sx, int sy) const {
+PlatformWindow::ScreenPoint PlatformWindow::screenToClient(int sx, int sy) const {
     if (!macState || !macState->nsWindow) return {sx, sy};
     NSRect r = [macState->nsWindow convertRectFromScreen:NSMakeRect(sx, sy, 1, 1)];
     return {(int)r.origin.x, (int)r.origin.y};
 }
-
-// ============================================================================
-// GraphicsContext for measure — layout-only, no Metal encoder needed.
-// CoreText measurement (FontCache / Painter::measureText) doesn't touch
-// any field here beyond what's already populated.
-// ============================================================================
 
 GraphicsContext PlatformWindow::getMeasureContext() const {
     GraphicsContext ctx;
@@ -594,8 +482,6 @@ void PlatformWindow::releaseMouseInput()  { if (macState) macState->mouseCapture
 void PlatformWindow::setResizeCursorH() { [[NSCursor resizeLeftRightCursor] set]; }
 void PlatformWindow::setResizeCursorV() { [[NSCursor resizeUpDownCursor] set]; }
 void PlatformWindow::setDefaultCursor() { [[NSCursor arrowCursor] set]; }
-
-
 
 #endif // TARGET_OS_OSX
 #endif // __APPLE__

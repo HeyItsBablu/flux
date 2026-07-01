@@ -10,19 +10,15 @@
 #include <vector>
 
 #if defined(__linux__) && !defined(__ANDROID__)
+
 #include <SDL2/SDL.h>
 #endif
 
 #ifdef __APPLE__
 #include <TargetConditionals.h>
-#if TARGET_OS_OSX
-class CanvasWidget;
-struct Canvas2DBackend;
-#endif
+
 #endif
 
-// Win32: forward-declare our new GPU objects so the header stays lean.
-// Full types are only needed in flux_window_win32.cpp.
 #ifdef _WIN32
 struct D3DDevice;
 class RenderLoop;
@@ -225,10 +221,7 @@ private:
 public:
     struct MacState;
     MacState *macState = nullptr;
-    CanvasWidget *hitTestCanvas(int x, int y);
     MacState *getMacState() const { return macState; }
-    void registerCanvas_public(CanvasWidget *c);
-    void unregisterCanvas_public(CanvasWidget *c);
 #endif
 #endif
 

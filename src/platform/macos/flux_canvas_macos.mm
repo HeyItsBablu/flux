@@ -1,5 +1,4 @@
 // flux_canvas_macos.mm
-
 #ifdef __APPLE__
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
@@ -15,86 +14,76 @@
 
 // ============================================================================
 // macOS per-widget state
-//
-// Each CanvasWidget owns its own CAMetalLayer/command queue (kept separate
-// from MacState::uiMetalLayer until Stage 4 unifies frame orchestration —
-// see flux_window_macos.mm's renderFrame). Canvas content rendering itself
-// (Canvas2D fill/stroke/text calls) is handled internally by Canvas2DMetal
-// via the shared MacState::canvasBackend; this struct only tracks the
-// widget's own surface/sizing/lifecycle plumbing.
 // ============================================================================
 
-struct MacCanvasState {
-    bool   initialized    = false;
-    bool   repaintPending = false;
-    int    lastW          = 0;
-    int    lastH          = 0;
-    int    physX          = 0;
-    int    physY          = 0;
+struct MacCanvasState
+{
+    bool initialized    = false;
+    bool repaintPending = false;
+    int  lastW          = 0;
+    int  lastH          = 0;
+    int  physX          = 0;
+    int  physY          = 0;
 
-    id<MTLDevice>       device   = nil;
-    id<MTLCommandQueue> cmdQueue = nil;
+    // ── Metal resources (per-widget) ─────────────────────────────────────────
+    id<MTLDevice>       device    = nil;
+    id<MTLCommandQueue> cmdQueue  = nil;
     CAMetalLayer        *metalLayer = nil;
 
-    Canvas2DBackend *backend = nullptr; // borrowed from MacState — not owned
+    // ── Canvas2D backend (per-widget, owned) ─────────────────────────────────
+    // Created in initCanvas, destroyed in destroyCanvas. Not shared —
+    // each widget registers its own fonts, same as Win32's ensureD2D().
+    Canvas2DMetal   *canvasMetal  = nullptr;
+    Canvas2DBackend *backend      = nullptr;
 };
 
-static std::unordered_map<CanvasWidget*, MacCanvasState> s_macState;
-static MacCanvasState& macState(CanvasWidget* w) { return s_macState[w]; }
+static std::unordered_map<CanvasWidget *, MacCanvasState> s_macState;
+static MacCanvasState &macState(CanvasWidget *w) { return s_macState[w]; }
 
 // ============================================================================
 // Helpers
 // ============================================================================
 
-static void registerWithPlatform(CanvasWidget* w) {
-    auto* inst = FluxUI::getCurrentInstance();
-    if (!inst) return;
-    auto* pw = inst->getPlatformWindowPtr();
-    if (pw) pw->registerCanvas_public(w);
-}
-static void unregisterWithPlatform(CanvasWidget* w) {
-    auto* inst = FluxUI::getCurrentInstance();
-    if (!inst) return;
-    auto* pw = inst->getPlatformWindowPtr();
-    if (pw) pw->unregisterCanvas_public(w);
-}
-
-static void scheduleRepaint(CanvasWidget* w) {
+static void scheduleRepaint(CanvasWidget *w)
+{
     if (w->onViewportChanged)
         w->onViewportChanged(w->vp_.zoom());
-    auto& s = macState(w);
-    if (!s.repaintPending) {
+    auto &s = macState(w);
+    if (!s.repaintPending)
+    {
         s.repaintPending = true;
         dispatch_async(dispatch_get_main_queue(), ^{
-            auto* inst = FluxUI::getCurrentInstance();
+            auto *inst = FluxUI::getCurrentInstance();
             if (!inst) return;
-            auto* pw = inst->getPlatformWindowPtr();
+            auto *pw = inst->getPlatformWindowPtr();
             if (pw) pw->invalidate();
         });
     }
 }
 
-static float getDpiScale() {
-    auto* inst = FluxUI::getCurrentInstance();
-    if (!inst) return 1.f;
-    NSScreen* scr = [NSScreen mainScreen];
+static float getDpiScale()
+{
+    NSScreen *scr = [NSScreen mainScreen];
     return scr ? (float)scr.backingScaleFactor : 1.f;
 }
 
-static int getWindowPhysW() {
-    auto* inst = FluxUI::getCurrentInstance();
+static int getWindowPhysW()
+{
+    auto *inst = FluxUI::getCurrentInstance();
     if (!inst) return 1;
-    auto* pw = inst->getPlatformWindowPtr();
+    auto *pw = inst->getPlatformWindowPtr();
     return pw ? pw->clientWidth() : 1;
 }
-static int getWindowPhysH() {
-    auto* inst = FluxUI::getCurrentInstance();
+static int getWindowPhysH()
+{
+    auto *inst = FluxUI::getCurrentInstance();
     if (!inst) return 1;
-    auto* pw = inst->getPlatformWindowPtr();
+    auto *pw = inst->getPlatformWindowPtr();
     return pw ? pw->clientHeight() : 1;
 }
 
-static void metalOrtho(float l, float r, float b, float t, float out[16]) {
+static void metalOrtho(float l, float r, float b, float t, float out[16])
+{
     memset(out, 0, 64);
     out[0]  =  2.f / (r - l);
     out[5]  =  2.f / (t - b);
@@ -105,33 +94,68 @@ static void metalOrtho(float l, float r, float b, float t, float out[16]) {
 }
 
 // ============================================================================
-// initCanvas
+// initCanvas — creates per-widget Metal resources and Canvas2D backend,
+// registers fonts. Mirroring ensureD2D() in flux_canvas_win32.cpp:
+// PlatformWindow is only used to fetch the shared MTLDevice (like Win32
+// fetches D3DDevice*); everything else is owned by this widget.
 // ============================================================================
 
-static void initCanvas(CanvasWidget* w) {
-    auto& s = macState(w);
-    assert(!s.initialized);
+static void initCanvas(CanvasWidget *w)
+{
+    auto &s = macState(w);
+    if (s.initialized) return;
 
-    auto* inst = FluxUI::getCurrentInstance();
-    auto* pw   = inst ? inst->getPlatformWindowPtr() : nullptr;
+    auto *inst = FluxUI::getCurrentInstance();
+    auto *pw   = inst ? inst->getPlatformWindowPtr() : nullptr;
     if (!pw || !pw->getMacState()) return;
 
-    auto* mac = pw->getMacState();
-    s.device     = mac->metalDevice;
-    s.cmdQueue   = [s.device newCommandQueue];
-    s.metalLayer = [CAMetalLayer layer];
-    s.metalLayer.device          = s.device;
-    s.metalLayer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
-    s.metalLayer.framebufferOnly = YES;
-    s.metalLayer.zPosition       = 0.0; // beneath uiMetalLayer (zPosition 1.0)
-    [pw->getMacState()->nsView.layer insertSublayer:s.metalLayer atIndex:0];
+    auto *mac = pw->getMacState();
 
-    s.backend = mac->canvasBackend; // shared, borrowed
+    // ── Metal resources ───────────────────────────────────────────────────────
+    s.device   = mac->metalDevice; // borrowed reference — device is window-lifetime
+    s.cmdQueue = [s.device newCommandQueue];
 
-    s.lastW = (w->width  > 0) ? (int)(w->width  * getDpiScale()) : 1;
-    s.lastH = (w->height > 0) ? (int)(w->height * getDpiScale()) : 1;
-    s.physX = (int)(w->x * getDpiScale());
-    s.physY = (int)(w->y * getDpiScale());
+    s.metalLayer                  = [CAMetalLayer layer];
+    s.metalLayer.device           = s.device;
+    s.metalLayer.pixelFormat      = MTLPixelFormatBGRA8Unorm;
+    s.metalLayer.framebufferOnly  = YES;
+    s.metalLayer.zPosition        = 0.0; // beneath uiMetalLayer (zPosition 1.0)
+    [mac->nsView.layer insertSublayer:s.metalLayer atIndex:0];
+
+    // ── Canvas2D backend (per-widget, owned) ─────────────────────────────────
+    s.canvasMetal = new Canvas2DMetal();
+    if (!s.canvasMetal->init())
+    {
+        delete s.canvasMetal;
+        s.canvasMetal = nullptr;
+        return;
+    }
+    s.backend = Canvas2DBackend::create(s.canvasMetal);
+    if (!s.backend)
+    {
+        s.canvasMetal->destroy();
+        delete s.canvasMetal;
+        s.canvasMetal = nullptr;
+        return;
+    }
+
+    // Font registration — one set per widget, same as Win32's ensureD2D().
+    auto reg = [&](const char *name, const char *path)
+    {
+        Canvas2D::registerFont(s.backend, name, path);
+    };
+    reg("sans",      "/System/Library/Fonts/Helvetica.ttc");
+    reg("sans-bold", "/System/Library/Fonts/Helvetica.ttc");
+    reg("mono",      "/System/Library/Fonts/Menlo.ttc");
+
+    w->backend_ = s.backend;
+
+    // ── Viewport / surface init ───────────────────────────────────────────────
+    float dpi = getDpiScale();
+    s.lastW = (w->width  > 0) ? (int)(w->width  * dpi) : 1;
+    s.lastH = (w->height > 0) ? (int)(w->height * dpi) : 1;
+    s.physX = (int)(w->x * dpi);
+    s.physY = (int)(w->y * dpi);
     s.metalLayer.drawableSize = CGSizeMake(s.lastW, s.lastH);
 
     w->canvasW_ = s.lastW;
@@ -152,11 +176,38 @@ static void initCanvas(CanvasWidget* w) {
 }
 
 // ============================================================================
-// syncPhysicalGeometry
+// destroyCanvas — tears down per-widget Metal resources and backend.
+// Mirrors destroyD2D() in flux_canvas_win32.cpp.
 // ============================================================================
 
-static void syncPhysicalGeometry(CanvasWidget* w) {
-    auto& s = macState(w);
+static void destroyCanvas(CanvasWidget *w)
+{
+    auto it = s_macState.find(w);
+    if (it == s_macState.end()) return;
+    auto &s = it->second;
+
+    if (w->activeSurface_) { w->activeSurface_->destroy(); w->activeSurface_.reset(); }
+    w->pendingSurface_.reset();
+    w->backend_ = nullptr;
+
+    if (s.backend)     { Canvas2DBackend::destroy(s.backend); s.backend = nullptr; }
+    if (s.canvasMetal) { s.canvasMetal->destroy(); delete s.canvasMetal; s.canvasMetal = nullptr; }
+
+    s.cmdQueue   = nil;
+    s.metalLayer = nil;
+    s.device     = nil;
+
+    s_macState.erase(it);
+}
+
+// ============================================================================
+// syncPhysicalGeometry — detect size/position changes from the widget's
+// own layout fields. Called every render(), same pattern as Linux.
+// ============================================================================
+
+static void syncPhysicalGeometry(CanvasWidget *w)
+{
+    auto &s = macState(w);
     float dpi    = getDpiScale();
     int newPhysW = (int)(w->width  * dpi);
     int newPhysH = (int)(w->height * dpi);
@@ -169,7 +220,11 @@ static void syncPhysicalGeometry(CanvasWidget* w) {
     if (newPhysW == s.lastW && newPhysH == s.lastH) return;
     s.lastW = newPhysW;
     s.lastH = newPhysH;
-    s.metalLayer.drawableSize = CGSizeMake(s.lastW < 1 ? 1 : s.lastW, s.lastH < 1 ? 1 : s.lastH);
+
+    s.metalLayer.drawableSize = CGSizeMake(
+        s.lastW < 1 ? 1 : s.lastW,
+        s.lastH < 1 ? 1 : s.lastH);
+
     w->canvasW_ = newPhysW;
     w->canvasH_ = newPhysH;
     w->vp_.setCanvasSize(newPhysW, newPhysH);
@@ -181,37 +236,107 @@ static void syncPhysicalGeometry(CanvasWidget* w) {
 }
 
 // ============================================================================
-// preRenderPass + glRenderPass
+// CanvasWidget member implementations (macOS)
 // ============================================================================
 
-void CanvasWidget::preRenderPass() {
-    auto& s = macState(this);
-    if (!s.initialized) return;
+CanvasWidget::CanvasWidget()
+    : hBar_(CustomScrollbar::Axis::Horizontal)
+    , vBar_(CustomScrollbar::Axis::Vertical)
+{
+    autoWidth  = true;
+    autoHeight = true;
+    width  = 400;
+    height = 300;
+    isFocusable = true; // focus flows through FluxUI's normal Widget system
+}
+
+CanvasWidget::~CanvasWidget()
+{
+    destroyCanvas(this);
+}
+
+std::shared_ptr<CanvasWidget> CanvasWidget::setViewportEnabled(bool e)
+    { viewportEnabled_ = e; return ptr(); }
+
+std::shared_ptr<CanvasWidget> CanvasWidget::setScrollbarsEnabled(bool e)
+{
+    scrollbarsEnabled_ = e;
+    auto &s = macState(this);
+    if (s.initialized) { updateViewportSize(s.lastW, s.lastH); scheduleRepaint(this); }
+    return ptr();
+}
+bool CanvasWidget::scrollbarsEnabled() const { return scrollbarsEnabled_; }
+
+RenderSurface  *CanvasWidget::getSurface() const { return activeSurface_.get(); }
+const Viewport &CanvasWidget::viewport()   const { return vp_; }
+Viewport       &CanvasWidget::viewport()         { return vp_; }
+
+std::shared_ptr<CanvasWidget> CanvasWidget::setSize(int w, int h)
+{
+    width = w; height = h;
+    autoWidth = autoHeight = false;
+    markNeedsLayout();
+    return ptr();
+}
+
+std::shared_ptr<CanvasWidget> CanvasWidget::setCanvasSize(int w, int h)
+{
+    float dpi = getDpiScale();
+    canvasW_ = (int)(w * dpi);
+    canvasH_ = (int)(h * dpi);
+    auto &s = macState(this);
+    if (s.initialized)
+    {
+        vp_.setCanvasSize(canvasW_, canvasH_);
+        if (activeSurface_) activeSurface_->resize(canvasW_, canvasH_);
+    }
+    return ptr();
+}
+
+std::shared_ptr<CanvasWidget> CanvasWidget::redraw()
+    { markNeedsPaint(); return ptr(); }
+
+void CanvasWidget::computeLayout(GraphicsContext & /*ctx*/,
+                                 const BoxConstraints &c, FontCache &)
+{
+    if (autoWidth)  width  = (c.maxWidth  < kUnbounded) ? c.maxWidth  : width;
+    if (autoHeight) height = (c.maxHeight < kUnbounded) ? c.maxHeight : height;
+    needsLayout = false;
+    scheduleRepaint(this);
+}
+
+// render() does everything inline — lazy init, geometry sync, tick, and
+// draw to the widget's own CAMetalLayer. This mirrors the Linux single-pass
+// approach; the canvas renders to a separate Metal layer beneath the UI
+// layer, so compositing is free (Metal layer ordering handles it).
+void CanvasWidget::render(GraphicsContext & /*ctx*/, FontCache &)
+{
+    auto &s = macState(this);
+
+    if (!s.initialized)
+        initCanvas(this);
+    if (!s.initialized) { needsPaint = false; return; }
 
     syncPhysicalGeometry(this);
-    if (pendingSurface_) activatePendingSurface();
-    if (!activeSurface_) return;
 
+    if (pendingSurface_) activatePendingSurface();
+    if (!activeSurface_) { needsPaint = false; return; }
+
+    // ── tick ──
     auto now = Clock::now();
     frameDt_  = std::chrono::duration<double>(now - lastTick_).count();
     lastTick_ = now;
-
     activeSurface_->update(frameDt_);
     activeSurface_->preRender();
-}
 
-void CanvasWidget::glRenderPass() {
-    auto& s = macState(this);
-    if (!s.initialized || !s.cmdQueue || !s.metalLayer) return;
-    if (!activeSurface_) return;
-
+    // ── draw ──
     s.repaintPending = false;
 
     int glW = s.lastW < 1 ? 1 : s.lastW;
     int glH = s.lastH < 1 ? 1 : s.lastH;
 
     auto drawable = [s.metalLayer nextDrawable];
-    if (!drawable) return;
+    if (!drawable) { needsPaint = false; return; }
 
     float winW = (float)getWindowPhysW();
     float winH = (float)getWindowPhysH();
@@ -222,8 +347,6 @@ void CanvasWidget::glRenderPass() {
     float ortho[16];
     metalOrtho(0.f, winW, winH, 0.f, ortho);
 
-    // Pan/zoom transform composed with the window-space ortho projection —
-    // used for the canvas content itself (RenderSurface::render via Canvas2D).
     float vpMat[16] = {
         z,  0,  0, 0,
         0,  z,  0, 0,
@@ -236,7 +359,7 @@ void CanvasWidget::glRenderPass() {
             for (int k = 0; k < 4; ++k)
                 mvp[col*4+row] += ortho[k*4+row] * vpMat[col*4+k];
 
-    MTLRenderPassDescriptor* rpd = [MTLRenderPassDescriptor renderPassDescriptor];
+    MTLRenderPassDescriptor *rpd = [MTLRenderPassDescriptor renderPassDescriptor];
     rpd.colorAttachments[0].texture     = drawable.texture;
     rpd.colorAttachments[0].loadAction  = MTLLoadActionClear;
     rpd.colorAttachments[0].clearColor  = MTLClearColorMake(0, 0, 0, 0);
@@ -252,12 +375,8 @@ void CanvasWidget::glRenderPass() {
     sci.height = (NSUInteger)glH;
     [enc setScissorRect:sci];
 
-    // ── Canvas content (RenderSurface) — drawn via the shared Canvas2DMetal
-    // backend. Wire the live encoder/device/mvp into the backend for the
-    // duration of this frame before constructing Canvas2D, and unwire it
-    // immediately after — without this, Canvas2D's draw calls silently
-    // no-op (currentFrame() returns nullptr inside flux_canvas2d_metal.mm).
-    if (s.backend && s.backend->metal) {
+    if (s.backend && s.backend->metal)
+    {
         Canvas2DMetalBeginFrame(s.backend->metal, s.device, enc, mvp);
         Canvas2D ctx2d(s.backend, canvasW_, canvasH_);
         activeSurface_->render(ctx2d);
@@ -268,10 +387,6 @@ void CanvasWidget::glRenderPass() {
     hBar_.tick(frameDt_);
     vBar_.tick(frameDt_);
 
-    // ── Scrollbars — drawn through Painter's Metal solid pipeline, sharing
-    // the same painterRes(device) pipeline cache flux_painter_macos.mm uses
-    // for UI content. Uses the window-space ortho only (no pan/zoom — the
-    // scrollbar track is fixed to the widget's screen rect).
     {
         GraphicsContext gctx;
         gctx.mtlDevice  = (__bridge void*)s.device;
@@ -291,238 +406,175 @@ void CanvasWidget::glRenderPass() {
 
     if (activeSurface_->needsContinuousRedraw())
         scheduleRepaint(this);
-}
 
-bool CanvasWidget::isInitialized() const {
-    return macState(const_cast<CanvasWidget*>(this)).initialized;
-}
-bool CanvasWidget::needsRepaint() const {
-    return macState(const_cast<CanvasWidget*>(this)).repaintPending;
-}
-bool CanvasWidget::containsPoint(int wx, int wy) const {
-    return wx >= x && wx < (x + width) && wy >= y && wy < (y + height);
-}
-
-// ============================================================================
-// CanvasWidget member implementations
-// ============================================================================
-
-CanvasWidget::CanvasWidget()
-    : hBar_(CustomScrollbar::Axis::Horizontal)
-    , vBar_(CustomScrollbar::Axis::Vertical)
-{
-    autoWidth  = true;
-    autoHeight = true;
-    width  = 400;
-    height = 300;
-    registerWithPlatform(this);
-}
-
-CanvasWidget::~CanvasWidget() {
-    if (activeSurface_) { activeSurface_->destroy(); activeSurface_.reset(); }
-    pendingSurface_.reset();
-    backend_ = nullptr;
-    auto& s = macState(this);
-    s.cmdQueue    = nil;
-    s.metalLayer  = nil;
-    s.backend     = nullptr;
-    s.initialized = false;
-    s_macState.erase(this);
-    unregisterWithPlatform(this);
-}
-
-std::shared_ptr<CanvasWidget> CanvasWidget::setViewportEnabled(bool e)
-    { viewportEnabled_ = e; return ptr(); }
-
-std::shared_ptr<CanvasWidget> CanvasWidget::setScrollbarsEnabled(bool e) {
-    scrollbarsEnabled_ = e;
-    auto& s = macState(this);
-    if (s.initialized) { updateViewportSize(s.lastW, s.lastH); scheduleRepaint(this); }
-    return ptr();
-}
-bool CanvasWidget::scrollbarsEnabled() const { return scrollbarsEnabled_; }
-
-RenderSurface*  CanvasWidget::getSurface() const { return activeSurface_.get(); }
-const Viewport& CanvasWidget::viewport()   const { return vp_; }
-Viewport&       CanvasWidget::viewport()         { return vp_; }
-
-std::shared_ptr<CanvasWidget> CanvasWidget::setSize(int w, int h) {
-    width = w; height = h;
-    autoWidth = autoHeight = false;
-    markNeedsLayout();
-    return ptr();
-}
-
-std::shared_ptr<CanvasWidget> CanvasWidget::setCanvasSize(int w, int h) {
-    float dpi = getDpiScale();
-    canvasW_ = (int)(w * dpi);
-    canvasH_ = (int)(h * dpi);
-    auto& s = macState(this);
-    if (s.initialized) {
-        vp_.setCanvasSize(canvasW_, canvasH_);
-        if (activeSurface_) activeSurface_->resize(canvasW_, canvasH_);
-    }
-    return ptr();
-}
-
-std::shared_ptr<CanvasWidget> CanvasWidget::redraw()
-    { markNeedsPaint(); return ptr(); }
-
-void CanvasWidget::computeLayout(GraphicsContext& /*ctx*/,
-                                 const BoxConstraints& c, FontCache&) {
-    if (autoWidth)  width  = (c.maxWidth  < kUnbounded) ? c.maxWidth  : width;
-    if (autoHeight) height = (c.maxHeight < kUnbounded) ? c.maxHeight : height;
-    needsLayout = false;
-    scheduleRepaint(this);
-}
-
-void CanvasWidget::render(GraphicsContext& /*ctx*/, FontCache&) {
-    // No-op: uiMetalLayer (the UI content layer) is transparent by default
-    // (see MacState::ensureUILayer's opaque=NO + renderFrame's transparent
-    // clear color), and this widget's own CAMetalLayer renders beneath it
-    // at zPosition 0. No "punch a hole" step is needed — UI content simply
-    // never draws over canvas regions unless a widget explicitly paints
-    // there. (Old CG path used CGContextSetBlendMode(kCGBlendModeClear),
-    // which no longer applies since GraphicsContext has no cgContext field.)
     needsPaint = false;
 }
 
-void CanvasWidget::onDetach() {
-    if (activeSurface_) { activeSurface_->destroy(); activeSurface_.reset(); }
-    pendingSurface_.reset();
-    backend_ = nullptr;
-    auto& s = macState(this);
-    s.cmdQueue    = nil;
-    s.metalLayer  = nil;
-    s.backend     = nullptr;
-    s.initialized = false;
-    s_macState.erase(this);
-    unregisterWithPlatform(this);
+void CanvasWidget::onDetach()
+{
+    destroyCanvas(this);
     Widget::onDetach();
 }
 
-void CanvasWidget::markNeedsPaint() {
+void CanvasWidget::markNeedsPaint()
+{
     Widget::markNeedsPaint();
     scheduleRepaint(this);
 }
 
-void CanvasWidget::setCanvasBackend(Canvas2DBackend* backend) {
-    backend_ = backend;
-    auto& s = macState(this);
-    s.backend = backend;
-    if (backend_ && !s.initialized)
-        initCanvas(this);
-}
-
-void CanvasWidget::onWindowResize(int /*newW*/, int /*newH*/) {
-    auto& s = macState(this);
+void CanvasWidget::onWindowResize(int /*newW*/, int /*newH*/)
+{
+    // No longer called externally by PlatformWindow (it no longer knows we
+    // exist). Kept for optional direct calls; normal resize is detected
+    // automatically by syncPhysicalGeometry() on the next render().
+    auto &s = macState(this);
     if (!s.initialized) return;
-    s.lastW = 0; s.lastH = 0;
+    s.lastW = 0;
+    s.lastH = 0;
     scheduleRepaint(this);
 }
+
+bool CanvasWidget::isInitialized() const
+    { return macState(const_cast<CanvasWidget *>(this)).initialized; }
+bool CanvasWidget::needsRepaint() const
+    { return macState(const_cast<CanvasWidget *>(this)).repaintPending; }
+bool CanvasWidget::containsPoint(int wx, int wy) const
+    { return wx >= x && wx < (x + width) && wy >= y && wy < (y + height); }
 
 // ============================================================================
-// Mouse / keyboard
+// Input — real Widget overrides, reached through the normal dispatch chain
+// in flux_core.cpp (findAndHandleMouseEvent / broadcastMouseEvent /
+// focusedWidget). Coordinates arrive in window space; translate to
+// widget-local ourselves, same as Win32 and Linux.
 // ============================================================================
 
-void CanvasWidget::onMouseLeave() {
-    hBar_.onMouseLeave();
-    vBar_.onMouseLeave();
-    scheduleRepaint(this);
-}
+bool CanvasWidget::handleMouseDown(int mx, int my)
+{
+    int lx = mx - x, ly = my - y;
 
-void CanvasWidget::onMouseButtonDown(int sx, int sy, int button) {
-    if (button == 2 && viewportEnabled_) { beginPan(sx, sy); return; }
-    if (button == 0) {
-        bool hC = hBar_.onMouseDown(sx, sy, [this](float t){ applyHScrollFraction(t); });
-        bool vC = !hC && vBar_.onMouseDown(sx, sy, [this](float t){ applyVScrollFraction(t); });
-        if (!hC && !vC) {
-            if (viewportEnabled_ && platformSpaceDown())
-                beginPan(sx, sy);
-            else if (activeSurface_) {
-                auto [cx, cy] = vp_.screenToCanvas(float(sx), float(sy));
-                activeSurface_->onMouseDown(cx, cy);
-            }
+    if (auto *inst = FluxUI::getCurrentInstance())
+        inst->captureMouseInput();
+
+    bool hC = hBar_.onMouseDown(lx, ly, [this](float t) { applyHScrollFraction(t); });
+    bool vC = !hC && vBar_.onMouseDown(lx, ly, [this](float t) { applyVScrollFraction(t); });
+
+    if (!hC && !vC)
+    {
+        if (viewportEnabled_ && platformSpaceDown())
+            beginPan(lx, ly);
+        else if (activeSurface_)
+        {
+            auto [cx, cy] = vp_.screenToCanvas(float(lx), float(ly));
+            activeSurface_->onMouseDown(cx, cy);
         }
-        scheduleRepaint(this);
     }
-    if (button == 1 && activeSurface_) {
-        auto [cx, cy] = vp_.screenToCanvas(float(sx), float(sy));
-        activeSurface_->onRightMouseDown(cx, cy);
-    }
-}
-
-void CanvasWidget::onMouseButtonUp(int sx, int sy, int button) {
-    if (button == 2) { panning_ = false; return; }
-    if (button == 0) {
-        bool hR = hBar_.onMouseUp(sx, sy);
-        bool vR = vBar_.onMouseUp(sx, sy);
-        if (!hR && !vR) {
-            if (panning_) panning_ = false;
-            else if (activeSurface_) {
-                auto [cx, cy] = vp_.screenToCanvas(float(sx), float(sy));
-                activeSurface_->onMouseUp(cx, cy);
-            }
-        }
-        scheduleRepaint(this);
-    }
-}
-
-void CanvasWidget::onMouseMove(int sx, int sy) {
-    bool hDrag = hBar_.onMouseMove(sx, sy);
-    bool vDrag = vBar_.onMouseMove(sx, sy);
     scheduleRepaint(this);
-    if (hDrag || vDrag) return;
-    if (panning_) continuePan(sx, sy);
-    else if (activeSurface_) {
-        auto [cx, cy] = vp_.screenToCanvas(float(sx), float(sy));
+    return true;
+}
+
+bool CanvasWidget::handleMouseMove(int mx, int my)
+{
+    int lx = mx - x, ly = my - y;
+
+    bool hDrag = hBar_.onMouseMove(lx, ly);
+    bool vDrag = vBar_.onMouseMove(lx, ly);
+    scheduleRepaint(this);
+    if (hDrag || vDrag) return true;
+
+    if (panning_)
+        continuePan(lx, ly);
+    else if (activeSurface_)
+    {
+        auto [cx, cy] = vp_.screenToCanvas(float(lx), float(ly));
         activeSurface_->onMouseMove(cx, cy);
     }
+    return true;
 }
 
-void CanvasWidget::onScrollWheel(float deltaY) {
-    if (!viewportEnabled_) return;
-    int delta = (int)(deltaY * WHEEL_DELTA);
+bool CanvasWidget::handleMouseUp(int mx, int my)
+{
+    int lx = mx - x, ly = my - y;
+
+    if (auto *inst = FluxUI::getCurrentInstance())
+        inst->releaseMouseInput();
+
+    bool hR = hBar_.onMouseUp(lx, ly);
+    bool vR = vBar_.onMouseUp(lx, ly);
+    if (!hR && !vR)
+    {
+        if (panning_) panning_ = false;
+        else if (activeSurface_)
+        {
+            auto [cx, cy] = vp_.screenToCanvas(float(lx), float(ly));
+            activeSurface_->onMouseUp(cx, cy);
+        }
+    }
+    scheduleRepaint(this);
+    return true;
+}
+
+bool CanvasWidget::handleMouseWheel(int delta)
+{
+    if (!viewportEnabled_) return false;
     bool ctrl  = platformCtrlDown();
     bool shift = platformShiftDown();
-    if (ctrl) {
+
+    if (ctrl)
+    {
         float f = (delta > 0) ? 1.1f : 1.f / 1.1f;
         vp_.zoomToward(float(width) * 0.5f, float(height) * 0.5f, f);
-    } else if (shift) {
-        vp_.panByScreen(float(delta) * 0.5f, 0.f);
-    } else {
-        vp_.panByScreen(0.f, -(float(delta) / float(WHEEL_DELTA)) * 40.f);
     }
+    else if (shift)
+        vp_.panByScreen(float(delta) * 0.5f, 0.f);
+    else
+        vp_.panByScreen(0.f, -(float(delta) / float(WHEEL_DELTA)) * 40.f);
+
     pokeScrollbars();
     scheduleRepaint(this);
+    return true;
 }
 
-void CanvasWidget::onKeyDown(int keyCode) {
+bool CanvasWidget::handleKeyDown(int keyCode)
+{
     bool ctrl  = platformCtrlDown();
     bool shift = platformShiftDown();
     bool alt   = platformAltDown();
     bool consumed = false;
-    if (ctrl && viewportEnabled_) {
-        if (keyCode == VK_OemPlus || keyCode == 43) {
-            vp_.zoomIn(); pokeScrollbars(); scheduleRepaint(this); consumed = true;
-        } else if (keyCode == VK_OemMinus || keyCode == 45) {
-            vp_.zoomOut(); pokeScrollbars(); scheduleRepaint(this); consumed = true;
-        } else if (keyCode == 29) {
-            vp_.resetZoom(); pokeScrollbars(); scheduleRepaint(this); consumed = true;
-        }
+
+    if (ctrl && viewportEnabled_)
+    {
+        if (keyCode == VK_OemPlus || keyCode == 43)
+        { vp_.zoomIn(); pokeScrollbars(); scheduleRepaint(this); consumed = true; }
+        else if (keyCode == VK_OemMinus || keyCode == 45)
+        { vp_.zoomOut(); pokeScrollbars(); scheduleRepaint(this); consumed = true; }
+        else if (keyCode == 29)
+        { vp_.resetZoom(); pokeScrollbars(); scheduleRepaint(this); consumed = true; }
     }
-    if (!consumed && activeSurface_) {
+
+    if (!consumed && activeSurface_)
+    {
         KeyEvent ke{0, keyCode, ctrl, shift, alt};
         activeSurface_->onKeyDown(ke);
     }
+    return consumed;
+}
+
+bool CanvasWidget::handleMouseLeave()
+{
+    hBar_.onMouseLeave();
+    vBar_.onMouseLeave();
+    if (panning_) panning_ = false;
+    scheduleRepaint(this);
+    return true;
 }
 
 // ============================================================================
 // Shared helpers
 // ============================================================================
 
-void CanvasWidget::viewportDims(int glW, int glH, int& vpW, int& vpH) const {
-    if (!viewportEnabled_ || !scrollbarsEnabled_) { vpW=glW; vpH=glH; return; }
+void CanvasWidget::viewportDims(int glW, int glH, int &vpW, int &vpH) const
+{
+    if (!viewportEnabled_ || !scrollbarsEnabled_) { vpW = glW; vpH = glH; return; }
     ScrollbarInfo h = vp_.scrollbarH(), v = vp_.scrollbarV();
     float dpi    = getDpiScale();
     int sbThickX = (int)(kSBThick * dpi);
@@ -533,12 +585,15 @@ void CanvasWidget::viewportDims(int glW, int glH, int& vpW, int& vpH) const {
     if (vpH < 1) vpH = 1;
 }
 
-void CanvasWidget::updateViewportSize(int glW, int glH) {
-    int vpW, vpH; viewportDims(glW, glH, vpW, vpH);
+void CanvasWidget::updateViewportSize(int glW, int glH)
+{
+    int vpW, vpH;
+    viewportDims(glW, glH, vpW, vpH);
     vp_.setViewSize(vpW, vpH);
 }
 
-void CanvasWidget::updateSBGeometry(int glW, int glH) {
+void CanvasWidget::updateSBGeometry(int glW, int glH)
+{
     float dpi      = getDpiScale();
     float sbThickX = kSBThick * dpi;
     float sbThickY = kSBThick * dpi;
@@ -553,26 +608,34 @@ void CanvasWidget::updateSBGeometry(int glW, int glH) {
                    v.visible && scrollbarsEnabled_ && viewportEnabled_);
 }
 
-void CanvasWidget::beginPan(int sx, int sy) {
-    panning_ = true; panStartSX_ = sx; panStartSY_ = sy;
+void CanvasWidget::beginPan(int sx, int sy)
+{
+    panning_ = true;
+    panStartSX_ = sx; panStartSY_ = sy;
     panStartOX_ = vp_.offsetX(); panStartOY_ = vp_.offsetY();
 }
-void CanvasWidget::continuePan(int sx, int sy) {
+
+void CanvasWidget::continuePan(int sx, int sy)
+{
     float dx = float(sx - panStartSX_), dy = float(sy - panStartSY_);
-    vp_.setOffset(panStartOX_ - dx/vp_.zoom(), panStartOY_ + dy/vp_.zoom());
+    vp_.setOffset(panStartOX_ - dx / vp_.zoom(), panStartOY_ + dy / vp_.zoom());
     pokeScrollbars();
     scheduleRepaint(this);
 }
+
 void CanvasWidget::pokeScrollbars() { hBar_.poke(); vBar_.poke(); }
 
-void CanvasWidget::applyHScrollFraction(float thumbMin) {
+void CanvasWidget::applyHScrollFraction(float thumbMin)
+{
     float span  = vp_.scrollbarH().thumbMax - vp_.scrollbarH().thumbMin;
     float range = vp_.canvasW() - vp_.viewW() / vp_.zoom();
     if (range <= 0.f) return;
     vp_.setOffsetX(thumbMin / (1.f - span) * range);
     pokeScrollbars(); scheduleRepaint(this);
 }
-void CanvasWidget::applyVScrollFraction(float thumbMin) {
+
+void CanvasWidget::applyVScrollFraction(float thumbMin)
+{
     float span  = vp_.scrollbarV().thumbMax - vp_.scrollbarV().thumbMin;
     float range = vp_.canvasH() - vp_.viewH() / vp_.zoom();
     if (range <= 0.f) return;
@@ -581,7 +644,8 @@ void CanvasWidget::applyVScrollFraction(float thumbMin) {
     pokeScrollbars(); scheduleRepaint(this);
 }
 
-void CanvasWidget::activatePendingSurface() {
+void CanvasWidget::activatePendingSurface()
+{
     if (!pendingSurface_) return;
     if (activeSurface_) { activeSurface_->destroy(); activeSurface_.reset(); }
     activeSurface_ = pendingSurface_;
@@ -590,6 +654,10 @@ void CanvasWidget::activatePendingSurface() {
     vp_.setCanvasSize(canvasW_, canvasH_);
 }
 
+// initEventType / repaintEventType — macOS no longer uses a custom event
+// type for repaint signals. scheduleRepaint() calls pw->invalidate() which
+// dispatches via dispatch_async on the main queue. These stubs exist only
+// so any old call sites compile cleanly during the transition period.
 void CanvasWidget::initEventType() {}
 uint32_t CanvasWidget::repaintEventType() { return 0; }
 

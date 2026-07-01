@@ -38,7 +38,13 @@
 //   canvas->setSurface<MyRenderSurface>(...);
 //   canvas->setViewportEnabled(true);
 //   canvas->setScrollbarsEnabled(true);
-
+//
+// CanvasWidget is a fully standalone Widget on every platform: it is
+// self-registering by construction (no external registry call required),
+// and on Win32 / Linux / Android / Web it participates in input dispatch
+// purely through the normal Widget::handleMouseDown/Move/Up/Wheel/KeyDown
+// virtuals — PlatformWindow has no special-cased knowledge of CanvasWidget
+// as a type on those platforms.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class CanvasWidget : public Widget
@@ -207,31 +213,25 @@ public:
 #endif
 
 // ── macOS-only ────────────────────────────────────────────────────────────
+// Standalone Widget overrides — same shape as the Linux and Win32 blocks.
+// No registry, no pre/glRenderPass split, no bespoke NSEvent-typed methods.
+// render() handles lazy init + tick + draw to the widget's own CAMetalLayer
+// inline, during the normal widget-tree paint pass.
 #ifdef __APPLE__
 #if TARGET_OS_OSX
-    static void initEventType();
-    static uint32_t repaintEventType();
+    bool handleMouseDown(int mx, int my) override;
+    bool handleMouseMove(int mx, int my) override;
+    bool handleMouseUp(int mx, int my) override;
+    bool handleMouseWheel(int delta) override;
+    bool handleKeyDown(int keyCode) override;
+    bool handleMouseLeave() override;
 
-    // Renamed from setCanvasGL(Canvas2DGL*) — macOS uses the Metal backend
-    // (Canvas2DMetal wrapped in Canvas2DBackend), not the GL backend type,
-    // which is Android/Web-only per flux_canvas2d_backend.hpp. backend_
-    // (Canvas2DBackend*) is already declared above under #ifndef _WIN32.
-    void setCanvasBackend(Canvas2DBackend *backend);
+    // Kept for internal use — not called externally by PlatformWindow anymore.
     void onWindowResize(int newW, int newH);
-    void preRenderPass();
-    void glRenderPass();
 
     bool isInitialized() const;
     bool needsRepaint() const;
     bool containsPoint(int wx, int wy) const;
-
-    void onMouseLeave();
-
-    void onMouseButtonDown(int sx, int sy, int button);
-    void onMouseButtonUp(int sx, int sy, int button);
-    void onMouseMove(int sx, int sy);
-    void onScrollWheel(float deltaY);
-    void onKeyDown(int keyCode);
 #endif
 #endif
 };
