@@ -32,8 +32,8 @@
 #include "dr_mp3.h"
 #include "dr_wav.h"
 
-#define AUDIO_LOGI(fmt, ...) fprintf(stderr, "[FluxAudio] " fmt "\n", ##__VA_ARGS__)
-#define AUDIO_LOGE(fmt, ...) AUDIO_LOGI(fmt, ##__VA_ARGS__)
+#define AUDIO_LOGI(fmt, ...) fprintf(stderr, "[FluxAudio] " fmt "\n" __VA_OPT__(,) __VA_ARGS__)
+#define AUDIO_LOGE(fmt, ...) AUDIO_LOGI(fmt __VA_OPT__(,) __VA_ARGS__)
 
 // ============================================================================
 // FluxAudio::Impl
@@ -158,7 +158,9 @@ struct FluxAudio::Impl {
         NSError* err = nil;
         if (![engine startAndReturnError:&err]) {
             AUDIO_LOGE("AVAudioEngine start failed: %s",
-                       err.localizedDescription.UTF8String ?: "unknown");
+                       err.localizedDescription.UTF8String
+                           ? err.localizedDescription.UTF8String
+                           : "unknown");
             engine     = nil;
             playerNode = nil;
             return false;

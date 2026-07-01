@@ -16,7 +16,23 @@
 #include <unordered_map>
 #include <vector>
 
-@class FluxNSView;
+// ============================================================================
+// FluxNSView — declared here (full @interface, not just a forward @class) so
+// that PlatformWindow::MacState below can use NSView properties like .layer
+// and .bounds on it. A bare `@class FluxNSView;` forward declaration only
+// tells the compiler a type by this name exists, not that it inherits from
+// NSView, so those properties would be invisible to MacState::ensureUILayer().
+// The @implementation block stays further down, after MacState is defined,
+// since FluxNSView's methods (renderFrame, event handlers) need the full
+// MacState definition to reach _win->macState.
+// ============================================================================
+
+@interface FluxNSView : NSView <NSWindowDelegate> {
+    PlatformWindow* _win;
+}
+- (instancetype)initWithFrame:(NSRect)frame window:(PlatformWindow*)win;
+- (void)renderFrame;
+@end
 
 // ============================================================================
 // PlatformWindow::MacState
@@ -78,13 +94,6 @@ struct PlatformWindow::MacState
         timerMap.clear();
     }
 };
-
-@interface FluxNSView : NSView <NSWindowDelegate> {
-    PlatformWindow* _win;
-}
-- (instancetype)initWithFrame:(NSRect)frame window:(PlatformWindow*)win;
-- (void)renderFrame;
-@end
 
 @implementation FluxNSView
 

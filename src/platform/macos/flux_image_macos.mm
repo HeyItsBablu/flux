@@ -7,23 +7,34 @@
 
 #import <CoreGraphics/CoreGraphics.h>
 #import <CoreFoundation/CoreFoundation.h>
+#import <Metal/Metal.h>
 
 #include <algorithm>
 #include <cmath>
+
+// Releases an id<MTLTexture> retained via __bridge_retained, given as void*.
+// Forward-declared here because MacScaleCache::invalidate() (right below)
+// needs to call it, but the full Objective-C-aware definition lives further
+// down in the file-scope helpers section, after this struct.
+static inline void releaseMTLTexture(void *p);
+
 
 // ============================================================================
 // MacScaleCache definition
 // ============================================================================
  
 struct ImageWidget::MacScaleCache {
-    id<MTLTexture> texture = nil;
+    void      *texture = nullptr; // opaque id<MTLTexture>, owned via __bridge_retained
     int        w       = 0;
     int        h       = 0;
     int        fit     = -1;
     int        quality = -1;
 
     void invalidate() {
-        texture = nil;   // ARC releases
+        releaseMTLTexture(texture); 
+        texture = nullptr;          
+
+         
         w = h = 0;
         fit = quality = -1;
     }
@@ -39,7 +50,20 @@ ImageWidget::~ImageWidget() { _platformDestroy(); }
 // Helpers (file-scope)
 // ============================================================================
 
-// stb RGBA → CoreGraphics premultiplied ARGB (BGRA on little-endian)
+// Releases an id<MTLTexture> retained via __bridge_retained, given as void*.
+// Must live at file scope, not as an ImageWidget:: member or a member of
+// any class nested within it: Widget has a non-static data member also
+// named 'id' (backing getId()), and unqualified lookup inside such a
+// member function finds that field first, shadowing the Objective-C 'id'
+// type keyword — id<MTLTexture> then fails to parse as a type at all.
+static inline void releaseMTLTexture(void *p) {
+    if (p) {
+        id<MTLTexture> t = (__bridge_transfer id<MTLTexture>)p;
+        (void)t;
+    }
+}
+
+ // stb RGBA → CoreGraphics premultiplied ARGB (BGRA on little-endian)
 // CG wants kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host
 // which on ARM/x86 is BGRA in memory.
 static void convertRGBAToCGPremul(unsigned char *src, int w, int h,
@@ -90,9 +114,8 @@ static CGImageRef makeCGImage(const uint8_t *pixels, int w, int h) {
 
 // Build a pre-scaled CGImageRef via an offscreen CGBitmapContext.
 static CGImageRef makeScaledCGImage(CGImageRef src,
-                                     int srcW, int srcH,
                                      int dstW, int dstH,
-                                     CGInterpolationQuality iq) {
+                                      CGInterpolationQuality iq) {
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
     CGContextRef ctx = CGBitmapContextCreate(
         nullptr,          // let CG allocate
@@ -149,6 +172,16 @@ static id<MTLTexture> uploadCGImageToMetal(id<MTLDevice> device, CGImageRef img)
     return tex;
 }
 
+// Wrapper _platformRender calls directly: takes/returns opaque void* so the
+// ImageWidget:: member function itself never needs an id<...>-typed local
+// (same shadowing reason as releaseMTLTexture above).
+static void *uploadCGImageToMetalRetained(void *deviceOpaque, CGImageRef img) {
+    id<MTLDevice> device = (__bridge id<MTLDevice>)deviceOpaque;
+    id<MTLTexture> tex = uploadCGImageToMetal(device, img);
+    return tex ? (__bridge_retained void *)tex : nullptr;
+}
+
+
 
 
 // ============================================================================
@@ -202,7 +235,7 @@ void ImageWidget::_platformPromote() {
 void ImageWidget::_platformRender(GraphicsContext &ctx, int cx, int cy,
                                   int cw, int ch) {
     if (pixels.empty() || !ctx.mtlDevice) return;
-    id<MTLDevice> device = (__bridge id<MTLDevice>)ctx.mtlDevice;
+    
 
     if (!_macCache) _macCache.reset(new MacScaleCache());
     auto &cache = *_macCache;
@@ -226,12 +259,12 @@ void ImageWidget::_platformRender(GraphicsContext &ctx, int cx, int cy,
         CGImageRef finalImg = base;
         CGImageRef scaled = nullptr;
         if (dw != imageWidth || dh != imageHeight) {
-            scaled = makeScaledCGImage(base, imageWidth, imageHeight,
-                                       dw, dh, cgInterpolation(filterQuality));
+            scaled = makeScaledCGImage(base, dw, dh,
+                                       cgInterpolation(filterQuality));
             if (scaled) finalImg = scaled;
         }
 
-        cache.texture = uploadCGImageToMetal(device, finalImg);
+        cache.texture = uploadCGImageToMetalRetained(ctx.mtlDevice, finalImg);
 
         if (scaled) CGImageRelease(scaled);
         CGImageRelease(base);
@@ -245,7 +278,7 @@ void ImageWidget::_platformRender(GraphicsContext &ctx, int cx, int cy,
 
     Painter painter(ctx);
     Painter::ImageDrawParams params;
-    params.image    = (__bridge void*)cache.texture; // NativeImage = void*, bridged id<MTLTexture>
+    params.image    = cache.texture; // cache.texture is already void*; NativeImage = void* on Apple
     params.srcWidth  = dw;
     params.srcHeight = dh;
     params.clipX = cx;

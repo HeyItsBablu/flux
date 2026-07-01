@@ -1,7 +1,5 @@
 // flux_mic_macos.mm
-// macOS AVAudioEngine input-tap capture backend for FluxMic.
-// Must be compiled as Objective-C++.
-// Link against: AVFoundation
+
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
@@ -40,26 +38,29 @@ struct FluxMic::Impl
         AVAudioInputNode *input = engine.inputNode;
         AVAudioFormat *inputFormat = [input outputFormatForBus:0];
 
+
         AVAudioFormat *targetFormat = [[AVAudioFormat alloc]
             initWithCommonFormat:AVAudioPCMFormatFloat32
                       sampleRate:(double)sampleRate
                         channels:1
                      interleaved:NO];
 
-        __weak Impl *weakSelfNotUsed = nullptr; (void)weakSelfNotUsed;
         Impl *self = this;
 
         [input installTapOnBus:0
                      bufferSize:1024
-                         format:inputFormat
+                         format:targetFormat
                           block:^(AVAudioPCMBuffer *buffer, AVAudioTime *) {
             if (!self->capturing.load()) return;
 
             AVAudioFrameCount frames = buffer.frameLength;
             int srcCh = (int)buffer.format.channelCount;
 
+
+            float *const *chData = buffer.floatChannelData;
+            if (!chData || srcCh <= 0) return;
+
             self->monoBuf.resize(frames);
-            float **chData = buffer.floatChannelData;
             for (AVAudioFrameCount i = 0; i < frames; i++)
             {
                 float sum = 0.f;
@@ -74,6 +75,8 @@ struct FluxMic::Impl
 
             if (self->cb) self->cb(self->monoBuf.data(), self->monoBuf.size());
         }];
+
+        (void)inputFormat; 
     }
 };
 

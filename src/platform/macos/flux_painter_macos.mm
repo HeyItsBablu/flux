@@ -870,5 +870,5 @@ void Painter::drawScrollbar(const CustomScrollbar &bar, int glW, int glH)
     }
 }
 
-#endif // TARGET_OS_OSX
+
 #endif // __APPLE__

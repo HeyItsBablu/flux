@@ -174,8 +174,8 @@ public:
   // Layout
   // =========================================================================
 
-  void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
-                     FontCache &fontCache) override
+  void computeLayout(GraphicsContext & /*ctx*/, const BoxConstraints &constraints,
+                     FontCache & /*fontCache*/) override
   {
     if (autoWidth)
     {

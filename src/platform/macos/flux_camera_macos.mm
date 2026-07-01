@@ -30,9 +30,9 @@
 // ── Logging helpers ──────────────────────────────────────────────────────────
 
 #define CAM_LOGI(fmt, ...) \
-    do { fprintf(stderr, "[FluxCamera] " fmt "\n", ##__VA_ARGS__); } while(0)
+    do { fprintf(stderr, "[FluxCamera] " fmt "\n" __VA_OPT__(,) __VA_ARGS__); } while(0)
 #define CAM_LOGE(fmt, ...) \
-    do { fprintf(stderr, "[FluxCamera][ERR] " fmt "\n", ##__VA_ARGS__); } while(0)
+    do { fprintf(stderr, "[FluxCamera][ERR] " fmt "\n" __VA_OPT__(,) __VA_ARGS__); } while(0)
 
 // ── File-save helper — forward declaration ───────────────────────────────────
 

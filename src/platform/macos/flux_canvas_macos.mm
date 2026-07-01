@@ -526,14 +526,14 @@ bool CanvasWidget::handleKeyDown(int keyCode)
 {
     bool ctrl  = platformCtrlDown();
     bool shift = platformShiftDown();
-    bool alt   = platformAltDown();
+    bool alt   = platformAltDown(); 
     bool consumed = false;
 
     if (ctrl && viewportEnabled_)
     {
-        if (keyCode == VK_OemPlus || keyCode == 43)
+        if (keyCode == Key::OemPlus || keyCode == 43)
         { vp_.zoomIn(); pokeScrollbars(); scheduleRepaint(this); consumed = true; }
-        else if (keyCode == VK_OemMinus || keyCode == 45)
+        else if (keyCode == Key::OemMinus || keyCode == 45)
         { vp_.zoomOut(); pokeScrollbars(); scheduleRepaint(this); consumed = true; }
         else if (keyCode == 29)
         { vp_.resetZoom(); pokeScrollbars(); scheduleRepaint(this); consumed = true; }
@@ -642,8 +642,7 @@ void CanvasWidget::activatePendingSurface()
     vp_.setCanvasSize(canvasW_, canvasH_);
 }
 
-void CanvasWidget::initEventType() {}
-uint32_t CanvasWidget::repaintEventType() { return 0; }
+
 
 #endif // TARGET_OS_OSX
 #endif // __APPLE__

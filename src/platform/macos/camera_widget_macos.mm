@@ -24,14 +24,32 @@ static inline id<MTLTexture> asMTLTexture(void* p) {
     return (__bridge id<MTLTexture>)p;
 }
 
+// Releases an id<MTLTexture> retained via __bridge_retained, given as void*.
+// Must live at file scope, not as a CameraWidget:: member: Widget has a
+// non-static data member also named 'id' (backing getId()), and unqualified
+// lookup inside a member function of CameraWidget or any class nested in it
+// (like MacOSStateDeleter below) finds that field first, shadowing the
+// Objective-C 'id' type keyword entirely — id<MTLTexture> then parses as a
+// comparison expression instead of a type. Free functions like this one are
+// outside that lookup path and unaffected.
+static inline void releaseMTLTexture(void* p) {
+    if (p) {
+        id<MTLTexture> t = (__bridge_transfer id<MTLTexture>)p;
+        (void)t;
+    }
+}
+
+
 // ── MacOSState deleter — release retained textures ────────────────────────────
 void CameraWidget::MacOSStateDeleter::operator()(MacOSState* p) const {
     if (p) {
-        if (p->previewTexture) { id<MTLTexture> t = (__bridge_transfer id<MTLTexture>)p->previewTexture; (void)t; }
-        if (p->thumbTexture)   { id<MTLTexture> t = (__bridge_transfer id<MTLTexture>)p->thumbTexture;   (void)t; }
+        releaseMTLTexture(p->previewTexture);
+        releaseMTLTexture(p->thumbTexture);
     }
     delete p;
 }
+
+
 
 // ── Build an id<MTLTexture> from a BGRA32 CPU buffer ──────────────────────────
 static id<MTLTexture> makeMTLTextureFromBGRA(id<MTLDevice> device,
@@ -45,6 +63,18 @@ static id<MTLTexture> makeMTLTextureFromBGRA(id<MTLDevice> device,
     [tex replaceRegion:MTLRegionMake2D(0, 0, w, h) mipmapLevel:0
             withBytes:bgra bytesPerRow:(NSUInteger)w * 4];
     return tex;
+}
+
+// File-scope wrapper around makeMTLTextureFromBGRA that takes/returns opaque
+// void* so callers never need an id<MTLDevice>-typed local. Required because
+// CameraWidget (like ImageWidget) has a non-static 'id' data member that
+// shadows the Objective-C 'id' keyword via unqualified lookup inside member
+// functions — see releaseMTLTexture's comment above for the full story.
+static void *makeMTLTextureFromBGRARetained(void *deviceOpaque,
+                                             const uint8_t *bgra, int w, int h) {
+    id<MTLDevice> device = (__bridge id<MTLDevice>)deviceOpaque;
+    id<MTLTexture> tex = makeMTLTextureFromBGRA(device, bgra, w, h);
+    return tex ? (__bridge_retained void *)tex : nullptr;
 }
 
 static CameraWidget::MacOSState& getMac(
@@ -93,8 +123,7 @@ void CameraWidget::_platformScheduleOpen() {
 
 void CameraWidget::_platformOnFlip() {
     if (_macos && _macos->previewTexture) {
-        id<MTLTexture> t = (__bridge_transfer id<MTLTexture>)_macos->previewTexture;
-        (void)t; // released
+         releaseMTLTexture(_macos->previewTexture);
         _macos->previewTexture = nullptr;
         _macos->cachedSrcW = 0;
         _macos->cachedSrcH = 0;
@@ -111,18 +140,14 @@ bool CameraWidget::_platformRenderPreview(GraphicsContext& ctx, Painter& p,
     auto& s   = getMac(_macos);
 
     if (!ctx.mtlDevice) return false;
-    id<MTLDevice> device = (__bridge id<MTLDevice>)ctx.mtlDevice;
 
     if (cam.updateFrame() && cam.getPreviewWidth() > 0) {
         auto frame = cam.lockFrame();
         if (frame.data && frame.width > 0 && frame.height > 0) {
-            id<MTLTexture> newTex = makeMTLTextureFromBGRA(device, frame.data,
-                                                            frame.width, frame.height);
-            if (s.previewTexture) {
-                id<MTLTexture> old = (__bridge_transfer id<MTLTexture>)s.previewTexture;
-                (void)old;
-            }
-            s.previewTexture = newTex ? (__bridge_retained void*)newTex : nullptr;
+           void *newTex = makeMTLTextureFromBGRARetained(
+               ctx.mtlDevice, frame.data, frame.width, frame.height);
+           releaseMTLTexture(s.previewTexture);
+           s.previewTexture = newTex;
             s.cachedSrcW = frame.width;
             s.cachedSrcH = frame.height;
         }
@@ -194,12 +219,9 @@ bool CameraWidget::_platformRenderThumb(GraphicsContext& ctx,
 void CameraWidget::_platformLoadThumb(const std::string& path) {
     auto& s = getMac(_macos);
 
-    if (s.thumbTexture) {
-        id<MTLTexture> old = (__bridge_transfer id<MTLTexture>)s.thumbTexture;
-        (void)old;
-        s.thumbTexture = nullptr;
-        s.thumbSrcW = s.thumbSrcH = 0;
-    }
+    releaseMTLTexture(s.thumbTexture);
+    s.thumbTexture = nullptr;
+    s.thumbSrcW = s.thumbSrcH = 0;
 
     NSString* nsPath = [NSString stringWithUTF8String:path.c_str()];
     NSURL*    url    = [NSURL fileURLWithPath:nsPath];
@@ -216,9 +238,10 @@ void CameraWidget::_platformLoadThumb(const std::string& path) {
 
     std::vector<uint8_t> bgra((size_t)w * h * 4);
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    CGBitmapInfo bitmapInfo = static_cast<CGBitmapInfo>(kCGImageAlphaPremultipliedFirst) |
+                          kCGBitmapByteOrder32Little;
     CGContextRef cg = CGBitmapContextCreate(
-        bgra.data(), w, h, 8, w * 4, cs,
-        kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little);
+        bgra.data(), w, h, 8, w * 4, cs, bitmapInfo);
     CGColorSpaceRelease(cs);
     if (cg) {
         CGContextDrawImage(cg, CGRectMake(0, 0, w, h), img);
@@ -229,12 +252,12 @@ void CameraWidget::_platformLoadThumb(const std::string& path) {
 
     auto* inst = FluxUI::getCurrentInstance();
     auto* pw = inst ? inst->getPlatformWindowPtr() : nullptr;
-    id<MTLDevice> device = pw ? (__bridge id<MTLDevice>)pw->getMacMetalDevicePtr() : nil;
-    if (!device) return;
+    void *deviceOpaque = pw ? pw->getMacMetalDevicePtr() : nullptr;
+    if (!deviceOpaque) return;
     
-    id<MTLTexture> tex = makeMTLTextureFromBGRA(device, bgra.data(), w, h);
+    void *tex = makeMTLTextureFromBGRARetained(deviceOpaque, bgra.data(), w, h);
     if (tex) {
-        s.thumbTexture = (__bridge_retained void*)tex;
+        s.thumbTexture = tex;
         s.thumbSrcW = w;
         s.thumbSrcH = h;
     }

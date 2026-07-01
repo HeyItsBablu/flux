@@ -2,7 +2,14 @@
 #include "flux/flux_core.hpp"
 #include <algorithm>
 
-
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#if TARGET_OS_OSX
+void flux_overlayManager_renderMac(GraphicsContext &ctx, OverlayContent *content,
+                                    FontCache &fc, int clientX, int clientY,
+                                    int w, int h);
+#endif
+#endif
 
 struct OverlayManager::Entry
 {
@@ -271,15 +278,10 @@ void OverlayManager::renderAll(GraphicsContext &ctx, FontCache &fc)
         cairo_restore(cr);
 
 #elif defined(__APPLE__)
-        CGContextRef cg = ctx.cgContext;
-        if (!cg)
+        if (!ctx.mtlEncoder)
             continue;
-        CGContextSaveGState(cg);
-        CGContextClipToRect(cg, CGRectMake(e->clientX, e->clientY, e->w, e->h));
-        CGContextTranslateCTM(cg, e->clientX, e->clientY);
-        GraphicsContext localCtx(cg, e->w, e->h);
-        e->content->renderOverlay(localCtx, fc);
-        CGContextRestoreGState(cg);
+        flux_overlayManager_renderMac(ctx, e->content, fc,
+                                      e->clientX, e->clientY, e->w, e->h);
 
 #elif defined(__EMSCRIPTEN__)
         EM_ASM({
@@ -289,8 +291,7 @@ void OverlayManager::renderAll(GraphicsContext &ctx, FontCache &fc)
             c.beginPath();
             c.rect($0, $1, $2, $3);
             c.clip();
-            c.translate($0, $1);
-        }, e->clientX, e->clientY, e->w, e->h);
+            c.translate($0, $1); }, e->clientX, e->clientY, e->w, e->h);
         {
             GraphicsContext localCtx(e->w, e->h);
             e->content->renderOverlay(localCtx, fc);
@@ -298,12 +299,12 @@ void OverlayManager::renderAll(GraphicsContext &ctx, FontCache &fc)
         EM_ASM({ var c = Module._fluxCtx2D; if (c) c.restore(); });
 
 #else // Android / OpenGL ES (FluxGL)
-    {
-        GraphicsContext localCtx(e->w, e->h);
-        localCtx.overlayOffsetX = e->clientX;
-        localCtx.overlayOffsetY = e->clientY;
-        e->content->renderOverlay(localCtx, fc);
-    }
+        {
+            GraphicsContext localCtx(e->w, e->h);
+            localCtx.overlayOffsetX = e->clientX;
+            localCtx.overlayOffsetY = e->clientY;
+            e->content->renderOverlay(localCtx, fc);
+        }
 #endif
     }
 }
