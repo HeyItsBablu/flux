@@ -3,11 +3,14 @@
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
 
+#import <Cocoa/Cocoa.h>
+#import <Metal/Metal.h>
+#import <QuartzCore/CAMetalLayer.h>
+
 #include "flux/flux_canvas2d.hpp"
 #include "flux/flux_canvas2d_backend.hpp"
 #include "flux/flux_window.hpp"
 #include "flux/flux_canvas.hpp"
-#include "flux/flux_window_macos_state.hpp"
 #include "flux/flux_painter.hpp"
 #include <cassert>
 #include <unordered_map>
@@ -107,12 +110,14 @@ static void initCanvas(CanvasWidget *w)
 
     auto *inst = FluxUI::getCurrentInstance();
     auto *pw   = inst ? inst->getPlatformWindowPtr() : nullptr;
-    if (!pw || !pw->getMacState()) return;
+    if (!pw) return;
 
-    auto *mac = pw->getMacState();
+    id<MTLDevice> device = (__bridge id<MTLDevice>)pw->getMacMetalDevicePtr();
+    NSView       *nsView = (__bridge NSView *)pw->getMacNSViewPtr();
+    if (!device || !nsView) return;
 
     // ── Metal resources ───────────────────────────────────────────────────────
-    s.device   = mac->metalDevice; // borrowed reference — device is window-lifetime
+    s.device   = device; // borrowed reference — device is window-lifetime
     s.cmdQueue = [s.device newCommandQueue];
 
     s.metalLayer                  = [CAMetalLayer layer];
@@ -120,7 +125,7 @@ static void initCanvas(CanvasWidget *w)
     s.metalLayer.pixelFormat      = MTLPixelFormatBGRA8Unorm;
     s.metalLayer.framebufferOnly  = YES;
     s.metalLayer.zPosition        = 0.0; // beneath uiMetalLayer (zPosition 1.0)
-    [mac->nsView.layer insertSublayer:s.metalLayer atIndex:0];
+    [nsView.layer insertSublayer:s.metalLayer atIndex:0];
 
     // ── Canvas2D backend (per-widget, owned) ─────────────────────────────────
     s.canvasMetal = new Canvas2DMetal();

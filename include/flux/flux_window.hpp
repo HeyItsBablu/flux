@@ -219,9 +219,13 @@ private:
 #ifdef __APPLE__
 #if TARGET_OS_OSX
 public:
-    struct MacState;
+    struct MacState;              // opaque — full definition lives only in flux_window_macos.mm
     MacState *macState = nullptr;
-    MacState *getMacState() const { return macState; }
+
+    // Narrow accessors so other .mm files never need MacState's full
+    // definition. Caller does the (__bridge id<...>) cast.
+    void *getMacMetalDevicePtr() const;
+    void *getMacNSViewPtr() const;
 #endif
 #endif
 

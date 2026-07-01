@@ -5,7 +5,7 @@
 #endif
 
 #include "flux/flux_painter.hpp"
-#include "flux/flux_window_macos_state.hpp" // fluxTextScratch / fluxGlyphAtlas bridges
+#include "flux/flux_glyph_atlas_macos.hpp"
 #import <Metal/Metal.h>
 #import <CoreText/CoreText.h>
 #import <CoreGraphics/CoreGraphics.h>
@@ -571,9 +571,8 @@ void emitGlyphQuads(GlyphAtlas &atlas, const std::vector<ShapedGlyphRun> &runs,
 void Painter::drawTextA(const std::string &text, int x, int y, int w, int h,
                         NativeFont font, Color color, UINT format)
 {
-    if (text.empty() || !ctx.textScratchProvider) return;
-    GlyphAtlas *atlas = fluxGlyphAtlas(ctx.textScratchProvider);
-    if (!atlas) return;
+    if (text.empty() || !ctx.glyphAtlas) return;
+    GlyphAtlas *atlas = static_cast<GlyphAtlas *>(ctx.glyphAtlas);
 
     CTFontRef ctFont = reinterpret_cast<CTFontRef>(font);
     CFStringRef str = CFStringCreateWithCString(nullptr, text.c_str(), kCFStringEncodingUTF8);
@@ -663,9 +662,8 @@ void Painter::drawRichTextA(const std::string &text,
                             const RichTextParams &params,
                             FontCache &fontCache)
 {
-    if (text.empty() || !ctx.textScratchProvider) return;
-    GlyphAtlas *atlas = fluxGlyphAtlas(ctx.textScratchProvider);
-    if (!atlas) return;
+    if (text.empty() || !ctx.glyphAtlas) return;
+    GlyphAtlas *atlas = static_cast<GlyphAtlas *>(ctx.glyphAtlas);
 
     NativeFont nf = fontCache.getFont(
         params.style.fontFamily.empty() ? "Helvetica" : params.style.fontFamily,

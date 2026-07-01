@@ -172,8 +172,7 @@ inline bool platformKeyDown(int keyCode)
 inline bool platformCtrlDown() { return platformKeyDown(VK_CONTROL); }
 inline bool platformShiftDown() { return platformKeyDown(VK_SHIFT); }
 inline bool platformAltDown() { return platformKeyDown(VK_MENU); }
-inline bool platformSpaceDown() { return platformKeyDown(VK_SPACE); }  // VK_SPACE = 0x20, already defined by windows.h
-
+inline bool platformSpaceDown() { return platformKeyDown(VK_SPACE); } // VK_SPACE = 0x20, already defined by windows.h
 
 inline std::wstring toWideString(const std::string &utf8)
 {
@@ -431,7 +430,7 @@ inline bool platformKeyDown(int) { return false; }
 inline bool platformCtrlDown() { return false; }
 inline bool platformShiftDown() { return false; }
 inline bool platformAltDown() { return false; }
-inline bool platformSpaceDown() { return false; } 
+inline bool platformSpaceDown() { return false; }
 
 inline std::wstring toWideString(const std::string &utf8)
 {
@@ -615,39 +614,23 @@ struct GraphicsContext
 
 struct GraphicsContext
 {
-    // ── Metal (primary path — vectors, images, fills, and now text via the
-    // glyph atlas) ───────────────────────────────────────────────────────────
-    // Real types: id<MTLDevice>, id<MTLRenderCommandEncoder>,
-    // id<MTLRenderPipelineState>, id<MTLBuffer>. Stored as void* here so this
-    // header stays usable from plain .cpp translation units; cast via
-    // (__bridge id<...>) only inside flux_painter_macos.mm / flux_window_macos.mm.
-    void *mtlDevice        = nullptr;
-    void *mtlEncoder       = nullptr; // current frame's render command encoder; null for measure-only contexts
-    void *solidPipeline    = nullptr; // unused currently — Painter builds its own pipeline cache; reserved for Stage 1 consolidation
-    void *texturedPipeline = nullptr; // unused currently — see above
+
+    void *mtlDevice = nullptr;
+    void *mtlEncoder = nullptr;       // current frame's render command encoder; null for measure-only contexts
+    void *solidPipeline = nullptr;    // unused currently — Painter builds its own pipeline cache; reserved for Stage 1 consolidation
+    void *glyphAtlas = nullptr;       // GlyphAtlas*
     void *scratchVertexBuf = nullptr; // unused currently — see above
 
     // Orthographic projection mapping window pixel space -> clip space.
     // Column-major, matches the layout used in flux_window_macos.mm's renderFrame.
     float mvp[16] = {
-        1,0,0,0,
-        0,1,0,0,
-        0,0,1,0,
-        0,0,0,1
-    };
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1};
 
-    int width  = 0; // physical pixels
+    int width = 0; // physical pixels
     int height = 0;
-
-    // ── Bridge to PlatformWindow::MacState (opaque here) ────────────────────
-    // Used by Painter::drawTextA/drawRichTextA to reach the per-window
-    // GlyphAtlas via fluxGlyphAtlas(), and by the (legacy/optional) scratch
-    // CG buffer via fluxTextScratch(). Always a PlatformWindow::MacState* on
-    // this platform; kept void* so this header doesn't need to know that
-    // type. Set on every GraphicsContext handed to Painter or LayoutEngine —
-    // including measure-only contexts, since CoreText measurement also
-    // resolves through the same FontCache/CTFontRef path.
-    void *textScratchProvider = nullptr;
 
     GraphicsContext() = default;
 
@@ -712,10 +695,6 @@ struct MeasureContext
 
 #ifdef __APPLE__
 #if TARGET_OS_OSX
-    // No parameterized constructor needed — GraphicsContext's fields
-    // (width/height/textScratchProvider) are public and set directly by
-    // the caller (see PlatformWindow::getMeasureContext() in
-    // flux_window_macos.mm) before/after this MeasureContext wraps it.
     MeasureContext() = default;
     ~MeasureContext() = default;
 #endif

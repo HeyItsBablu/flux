@@ -10,7 +10,7 @@
 #import <AudioToolbox/AudioToolbox.h>
 
 #include "flux/flux_window.hpp"
-#include "flux/flux_window_macos_state.hpp"
+#include "flux/flux_glyph_atlas_macos.hpp" 
 #include "flux/flux_core.hpp"
 
 #include <unordered_map>
@@ -19,10 +19,65 @@
 @class FluxNSView;
 
 // ============================================================================
-// FluxNSView — bridges Cocoa events to PlatformWindow callbacks.
-// Every mouse/keyboard event goes straight to the generic WindowCallbacks;
-// no canvas-specific hit-testing or dispatch lives here anymore.
+// PlatformWindow::MacState
+// Window-lifetime resources: Cocoa window/view, shared Metal device/queue,
+// UI glyph atlas, timers. Defined ONLY in this file — same pattern as
+// PlatformWindow::CairoState in flux_window_linux.cpp. Other .mm files
+// (painter, canvas) reach the pieces they need through GraphicsContext
+// fields or the narrow getMacMetalDevicePtr()/getMacNSViewPtr() accessors
+// below, never through this struct directly.
 // ============================================================================
+struct PlatformWindow::MacState
+{
+    NSWindow   *nsWindow = nil;
+    FluxNSView *nsView   = nil;
+
+    id<MTLDevice>       metalDevice  = nil;
+    id<MTLCommandQueue> commandQueue = nil;
+    CAMetalLayer        *uiMetalLayer = nil;
+
+    GlyphAtlas glyphAtlas;
+    bool glyphAtlasReady = false;
+
+    std::unordered_map<TimerID, NSTimer *> timerMap;
+
+    bool running      = false;
+    bool dirty        = false;
+    bool mouseCapture = false;
+
+    bool ensureUILayer(int physW, int physH)
+    {
+        if (!metalDevice) return false;
+
+        if (!commandQueue)
+            commandQueue = [metalDevice newCommandQueue];
+
+        if (!uiMetalLayer)
+        {
+            uiMetalLayer = [CAMetalLayer layer];
+            uiMetalLayer.device          = metalDevice;
+            uiMetalLayer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
+            uiMetalLayer.framebufferOnly = YES;
+            uiMetalLayer.opaque          = NO;
+            [nsView.layer addSublayer:uiMetalLayer];
+            uiMetalLayer.zPosition = 1.0;
+        }
+        uiMetalLayer.frame        = nsView.bounds;
+        uiMetalLayer.drawableSize = CGSizeMake(physW, physH);
+
+        if (!glyphAtlasReady)
+            glyphAtlasReady = glyphAtlas.init(metalDevice);
+
+        return true;
+    }
+
+    ~MacState()
+    {
+        for (auto &[id, timer] : timerMap)
+            [timer invalidate];
+        timerMap.clear();
+    }
+};
 
 @interface FluxNSView : NSView <NSWindowDelegate> {
     PlatformWindow* _win;
@@ -69,7 +124,7 @@
     ctx.mtlEncoder          = (__bridge void*)enc;
     ctx.width               = _win->cachedWidth;
     ctx.height              = _win->cachedHeight;
-    ctx.textScratchProvider = &s;
+    ctx.glyphAtlas = s.glyphAtlasReady ? &s.glyphAtlas : nullptr;
 
     float l = 0, r = (float)ctx.width, t = 0, b = (float)ctx.height;
     memset(ctx.mvp, 0, sizeof(ctx.mvp));
@@ -113,7 +168,7 @@
         GraphicsContext ctx;
         ctx.width  = lw;
         ctx.height = lh;
-        ctx.textScratchProvider = &s;
+        ctx.glyphAtlas = s.glyphAtlasReady ? &s.glyphAtlas : nullptr;
         _win->callbacks.onResize(ctx, lw, lh);
     }
 
@@ -446,9 +501,22 @@ GraphicsContext PlatformWindow::getMeasureContext() const {
     if (macState) {
         ctx.width  = cachedWidth;
         ctx.height = cachedHeight;
-        ctx.textScratchProvider = macState;
+        ctx.glyphAtlas = macState->glyphAtlasReady ? &macState->glyphAtlas : nullptr;
     }
     return ctx;
+}
+
+// ============================================================================
+// Narrow accessors — let flux_canvas_macos.mm reach the shared Metal device
+// and the Cocoa view without needing MacState's full definition.
+// ============================================================================
+
+void *PlatformWindow::getMacMetalDevicePtr() const {
+    return macState ? (__bridge void *)macState->metalDevice : nullptr;
+}
+
+void *PlatformWindow::getMacNSViewPtr() const {
+    return macState ? (__bridge void *)macState->nsView : nullptr;
 }
 
 bool PlatformWindow::valid() const {

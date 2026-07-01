@@ -13,8 +13,8 @@
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 #include "flux/widgets/flux_file_picker.hpp"
-#include "flux/flux_window.hpp"
-#include "flux/flux_window_macos_state.hpp"
+#include "flux/flux_window.hpp" 
+
 
 #include <string>
 #include <vector>
@@ -70,9 +70,12 @@ static void applyFileFilter(NSSavePanel* panel, const std::vector<FileFilter>& f
 
 static NSWindow* ownerWindow()
 {
-    if (auto* ui = FluxUI::getCurrentInstance())
-        if (auto* ms = ui->getPlatformWindow().getMacState())
-            return ms->nsWindow;
+    if (auto* inst = FluxUI::getCurrentInstance())
+        if (auto* pw = inst->getPlatformWindowPtr())
+        {
+            NSView* view = (__bridge NSView*)pw->getMacNSViewPtr();
+            return view.window;
+        }
     return nil;
 }
 

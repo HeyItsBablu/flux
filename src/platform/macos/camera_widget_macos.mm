@@ -11,7 +11,6 @@
 #if defined(__APPLE__) && !defined(__IPHONE_OS_VERSION_MIN_REQUIRED)
 
 #include "flux/widgets/camera_widget.hpp"
-#include "flux/flux_window_macos_state.hpp"
 #import <Metal/Metal.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <ImageIO/ImageIO.h>
@@ -228,14 +227,12 @@ void CameraWidget::_platformLoadThumb(const std::string& path) {
     CGImageRelease(img);
     if (!cg) return;
 
-    // Note: device isn't available here (no GraphicsContext passed into
-    // _platformLoadThumb) — grab it from FluxUI's current window instead.
     auto* inst = FluxUI::getCurrentInstance();
     auto* pw = inst ? inst->getPlatformWindowPtr() : nullptr;
-    auto* mac = pw ? pw->getMacState() : nullptr;
-    if (!mac || !mac->metalDevice) return;
-
-    id<MTLTexture> tex = makeMTLTextureFromBGRA(mac->metalDevice, bgra.data(), w, h);
+    id<MTLDevice> device = pw ? (__bridge id<MTLDevice>)pw->getMacMetalDevicePtr() : nil;
+    if (!device) return;
+    
+    id<MTLTexture> tex = makeMTLTextureFromBGRA(device, bgra.data(), w, h);
     if (tex) {
         s.thumbTexture = (__bridge_retained void*)tex;
         s.thumbSrcW = w;
