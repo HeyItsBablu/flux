@@ -4,7 +4,6 @@
 #include "flux/flux_http_platform.hpp"
 #include "flux/flux_window.hpp"
 #include "flux/widgets/flux_file_picker.hpp"
-#include "flux/flux_canvas.hpp"
 #include "flux/flux_core.hpp"
 
 #include <SDL2/SDL.h>
@@ -15,11 +14,6 @@
 #include <cstring>
 #include <stdexcept>
 #include <vector>
-
-struct Canvas2DBackend;
-void Canvas2D_setCairo(Canvas2D &ctx, cairo_t *cr);
-extern Canvas2DBackend *Canvas2DBackend_create();
-extern void Canvas2DBackend_destroy(Canvas2DBackend *);
 
 // ============================================================================
 // DEBUG MACRO
@@ -35,12 +29,17 @@ extern void Canvas2DBackend_destroy(Canvas2DBackend *);
 // ============================================================================
 // FluxWin_markNeedsPaint — callable from any thread
 // ============================================================================
+// Generic repaint-request event type — owned by PlatformWindow, not by any
+// particular widget. Any code (CanvasWidget included) that wants to request
+// a repaint posts this event; PlatformWindow doesn't need to know who.
+static Uint32 gFluxRepaintEventType = 0;
+
 void FluxWin_markNeedsPaint()
 {
     SDL_Event e;
     SDL_zero(e);
-    Uint32 t = CanvasWidget::repaintEventType();
-    e.type = (t != 0) ? t : SDL_USEREVENT;
+    Uint32 t = (gFluxRepaintEventType != 0) ? gFluxRepaintEventType : SDL_USEREVENT;
+    e.type = t;
     e.user.code = -1;
     SDL_PushEvent(&e);
 }
@@ -122,7 +121,6 @@ void PlatformWindow::startRenderLoop() {}
 bool PlatformWindow::create(const std::string &title, int width, int height,
                             AppInstance /*instance*/, void * /*userData*/)
 {
-
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0)
     {
         fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
@@ -130,7 +128,10 @@ bool PlatformWindow::create(const std::string &title, int width, int height,
     }
 
     gFluxTimerEventType = SDL_RegisterEvents(1);
-    CanvasWidget::initEventType();
+    gFluxRepaintEventType = SDL_RegisterEvents(1);
+    if (gFluxRepaintEventType == static_cast<Uint32>(-1))
+        gFluxRepaintEventType = SDL_USEREVENT;
+
     fluxInitUIThread();
 
     nativeHandle = SDL_CreateWindow(title.c_str(),
@@ -145,37 +146,22 @@ bool PlatformWindow::create(const std::string &title, int width, int height,
         return false;
     }
 
-    // Physical drawable size (may differ from logical on HiDPI displays).
     SDL_GL_GetDrawableSize(nativeHandle, &cachedWidth, &cachedHeight);
-    // Logical window size (what the OS / SDL reports for event coordinates).
     SDL_GetWindowSize(nativeHandle, &logicalWidth_, &logicalHeight_);
 
     fprintf(stderr, "PlatformWindow: logical=%dx%d  physical=%dx%d  scale=%.2fx%.2f\n",
             logicalWidth_, logicalHeight_,
             cachedWidth, cachedHeight,
             dpiScaleX(), dpiScaleY());
-    // Canvas2D Cairo backend
-    canvasBackend_ = Canvas2DBackend_create();
 
-    Canvas2D::registerFont(canvasBackend_, "sans",
-                           "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
-    Canvas2D::registerFont(canvasBackend_, "sans-bold",
-                           "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf");
-    Canvas2D::registerFont(canvasBackend_, "sans-italic",
-                           "/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf");
-    Canvas2D::registerFont(canvasBackend_, "mono",
-                           "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf");
-    Canvas2D::registerFont(canvasBackend_, "mono-bold",
-                           "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf");
+    // No Canvas2DBackend creation here — each CanvasWidget lazily creates
+    // and owns its own backend (and registers its own fonts) the first
+    // time it renders, mirroring flux_canvas_win32.cpp's ensureD2D(). This
+    // window has no canvas-rendering resource of any kind.
 
     cairoState = new CairoState();
     if (!cairoState->rebuild(logicalWidth_, logicalHeight_))
         fprintf(stderr, "PlatformWindow: CairoState::rebuild failed\n");
-
-    // Notify any already-registered canvas widgets.
-    for (CanvasWidget *cw : canvasWidgets_)
-        if (cw)
-            cw->setBackend(canvasBackend_);
 
     running = true;
     return true;
@@ -192,11 +178,6 @@ void PlatformWindow::destroy()
 
     fluxShutdownHttpQueue();
 
-    if (canvasBackend_)
-    {
-        Canvas2DBackend_destroy(canvasBackend_);
-        canvasBackend_ = nullptr;
-    }
     delete cairoState;
     cairoState = nullptr;
     if (nativeHandle)
@@ -218,6 +199,11 @@ bool PlatformWindow::isMouseCaptured() const
 
 // ============================================================================
 // PlatformWindow::run
+//
+// Single-pass paint: callbacks.onPaint walks the entire widget tree once.
+// Widgets that need per-frame ticking (CanvasWidget included) do so inline
+// inside their own render() override — there is no separate widget-type-
+// specific pass driven from here.
 // ============================================================================
 int PlatformWindow::run()
 {
@@ -225,7 +211,6 @@ int PlatformWindow::run()
 
     while (running)
     {
-
         bool hasEvent = (SDL_WaitEventTimeout(&e, 16) != 0);
         if (hasEvent)
             handleSDLEvent(e);
@@ -235,24 +220,14 @@ int PlatformWindow::run()
         if (auto *ui = FluxUI::getCurrentInstance())
             ui->drainPendingRebuilds();
 
-        if (!dirty)
-            for (CanvasWidget *cw : canvasWidgets_)
-                if (cw && cw->isInitialized() && cw->needsRepaint())
-                {
-                    dirty = true;
-                    break;
-                }
-
         fluxProcessHttpEvents();
 
         if (!dirty)
             continue;
         dirty = false;
 
-        // Single Cairo pass — no GL involved.
         if (cairoState && cairoState->cr)
         {
-            // Clear to transparent.
             cairo_save(cairoState->cr);
             cairo_set_operator(cairoState->cr, CAIRO_OPERATOR_CLEAR);
             cairo_paint(cairoState->cr);
@@ -260,24 +235,12 @@ int PlatformWindow::run()
 
             GraphicsContext ctx(cairoState->cr, logicalWidth_, logicalHeight_);
 
-            // Pre-render (surface update / dt tick) for all canvas widgets.
-            for (CanvasWidget *cw : canvasWidgets_)
-                if (cw && cw->isInitialized())
-                    cw->preRenderPass();
-
-            // Paint entire widget tree (including CanvasWidgets via render()).
             if (callbacks.onPaint)
                 callbacks.onPaint(ctx, logicalWidth_, logicalHeight_);
-
-            // Now let each CanvasWidget draw its surface into the same cairo_t.
-            for (CanvasWidget *cw : canvasWidgets_)
-                if (cw && cw->isInitialized())
-                    cw->glRenderPass();
 
             cairo_surface_flush(cairoState->cairoSurf);
         }
 
-        // Blit Cairo ARGB32 surface to screen via SDL.
         _blitCairoToScreen();
     }
 
@@ -295,11 +258,10 @@ void PlatformWindow::_blitCairoToScreen()
         cairoState->height,
         32,
         cairoState->width * 4,
-        // Cairo ARGB32 on little-endian: B=byte0, G=byte1, R=byte2, A=byte3
-        0x00FF0000u,  // R mask
-        0x0000FF00u,  // G mask
-        0x000000FFu,  // B mask
-        0xFF000000u); // A mask
+        0x00FF0000u,
+        0x0000FF00u,
+        0x000000FFu,
+        0xFF000000u);
 
     if (!sdlSurf)
         return;
@@ -314,52 +276,19 @@ void PlatformWindow::_blitCairoToScreen()
 }
 
 // ============================================================================
-// Canvas registry
-// ============================================================================
-void PlatformWindow::registerCanvas(CanvasWidget *c)
-{
-    if (!c)
-        return;
-    canvasWidgets_.push_back(c);
-    if (canvasBackend_)
-        c->setBackend(canvasBackend_);
-}
-
-void PlatformWindow::unregisterCanvas(CanvasWidget *c)
-{
-    if (capturedCanvas_ == c)
-        capturedCanvas_ = nullptr;
-    if (focusedCanvas_ == c)
-        focusedCanvas_ = nullptr;
-    canvasWidgets_.erase(
-        std::remove(canvasWidgets_.begin(), canvasWidgets_.end(), c),
-        canvasWidgets_.end());
-}
-
-CanvasWidget *PlatformWindow::hitTestCanvas(int sx, int sy)
-{
-    // sx/sy are LOGICAL pixel coordinates from SDL events.
-    // CanvasWidget::containsPoint also works in logical pixels — correct.
-    for (auto it = canvasWidgets_.rbegin(); it != canvasWidgets_.rend(); ++it)
-    {
-        CanvasWidget *cw = *it;
-        if (cw && cw->isInitialized() && cw->containsPoint(sx, sy))
-            return cw;
-    }
-    return nullptr;
-}
-
-// ============================================================================
 // handleSDLEvent
-// All SDL mouse/key event coordinates are in LOGICAL pixels.
+//
+// Every input event flows through the generic WindowCallbacks. There is no
+// canvas-specific hit-testing or dispatch here — that responsibility lives
+// entirely in the widget tree (FluxUI::wireCallbacks / findAndHandleMouseEvent
+// / broadcastMouseEvent), exactly as it does for every other widget type.
 // ============================================================================
 void PlatformWindow::handleSDLEvent(const SDL_Event &e)
 {
-
     if (e.type == gFluxHttpEventType)
         return;
 
-    if (e.type == CanvasWidget::repaintEventType())
+    if (e.type == gFluxRepaintEventType)
     {
         dirty = true;
         return;
@@ -374,20 +303,6 @@ void PlatformWindow::handleSDLEvent(const SDL_Event &e)
 
     case SDL_MOUSEBUTTONDOWN:
     {
-        CanvasWidget *cw = hitTestCanvas(e.button.x, e.button.y);
-        if (cw)
-        {
-            capturedCanvas_ = cw;
-            focusedCanvas_ = cw;
-            SDL_Event local = e;
-            // Deliver event in widget-local logical coordinates.
-            local.button.x -= cw->x;
-            local.button.y -= cw->y;
-            cw->handleSDLEvent(local);
-            dirty = true;
-            break;
-        }
-        focusedCanvas_ = nullptr;
         if (e.button.button == SDL_BUTTON_LEFT && callbacks.onMouseDown)
             if (callbacks.onMouseDown(e.button.x, e.button.y))
                 dirty = true;
@@ -399,21 +314,6 @@ void PlatformWindow::handleSDLEvent(const SDL_Event &e)
 
     case SDL_MOUSEBUTTONUP:
     {
-        CanvasWidget *cw = capturedCanvas_
-                               ? capturedCanvas_
-                               : hitTestCanvas(e.button.x, e.button.y);
-        if (e.button.button == SDL_BUTTON_LEFT ||
-            e.button.button == SDL_BUTTON_MIDDLE)
-            capturedCanvas_ = nullptr;
-        if (cw)
-        {
-            SDL_Event local = e;
-            local.button.x -= cw->x;
-            local.button.y -= cw->y;
-            cw->handleSDLEvent(local);
-            dirty = true;
-            break;
-        }
         if (e.button.button == SDL_BUTTON_LEFT && callbacks.onMouseUp)
             if (callbacks.onMouseUp(e.button.x, e.button.y))
                 dirty = true;
@@ -422,18 +322,6 @@ void PlatformWindow::handleSDLEvent(const SDL_Event &e)
 
     case SDL_MOUSEMOTION:
     {
-        CanvasWidget *cw = capturedCanvas_
-                               ? capturedCanvas_
-                               : hitTestCanvas(e.motion.x, e.motion.y);
-        if (cw)
-        {
-            SDL_Event local = e;
-            local.motion.x -= cw->x;
-            local.motion.y -= cw->y;
-            cw->handleSDLEvent(local);
-            dirty = true;
-            break;
-        }
         if (callbacks.onMouseMove)
             if (callbacks.onMouseMove(e.motion.x, e.motion.y))
                 dirty = true;
@@ -442,15 +330,9 @@ void PlatformWindow::handleSDLEvent(const SDL_Event &e)
 
     case SDL_MOUSEWHEEL:
     {
-        int mx, my;
-        SDL_GetMouseState(&mx, &my);
-        CanvasWidget *cw = hitTestCanvas(mx, my);
-        if (cw)
-        {
-            cw->handleSDLEvent(e);
-            dirty = true;
-            break;
-        }
+        // No positional hit-test here. Wheel routes to whatever currently
+        // holds focus (FluxUI::focusedWidget), same model as Win32's
+        // WM_MOUSEWHEEL handler.
         int delta = e.wheel.y * WHEEL_DELTA;
         if (callbacks.onMouseWheel && callbacks.onMouseWheel(delta))
             dirty = true;
@@ -458,22 +340,14 @@ void PlatformWindow::handleSDLEvent(const SDL_Event &e)
     }
 
     case SDL_KEYDOWN:
-        if (focusedCanvas_)
-        {
-            focusedCanvas_->handleSDLEvent(e);
-            dirty = true;
-            break;
-        }
         if (callbacks.onKeyDown && callbacks.onKeyDown(e.key.keysym.sym))
             dirty = true;
         break;
 
     case SDL_KEYUP:
-        if (focusedCanvas_)
-        {
-            focusedCanvas_->handleSDLEvent(e);
-            break;
-        }
+        // Key-up is not currently surfaced through WindowCallbacks; widgets
+        // needing it (e.g. CanvasWidget releasing a modifier) can track
+        // modifier state from subsequent KEYDOWN/mouse events instead.
         break;
 
     case SDL_TEXTINPUT:
@@ -504,7 +378,6 @@ void PlatformWindow::handleSDLEvent(const SDL_Event &e)
         case SDL_WINDOWEVENT_RESIZED:
         case SDL_WINDOWEVENT_SIZE_CHANGED:
         {
-
             SDL_GetWindowSize(nativeHandle, &logicalWidth_, &logicalHeight_);
 
             fprintf(stderr, "PlatformWindow resize: logical=%dx%d  physical=%dx%d\n",
@@ -513,7 +386,6 @@ void PlatformWindow::handleSDLEvent(const SDL_Event &e)
             cachedWidth = logicalWidth_;
             cachedHeight = logicalHeight_;
 
-            // Rebuild Cairo surface at the new LOGICAL size.
             if (cairoState)
                 cairoState->rebuild(logicalWidth_, logicalHeight_);
 
@@ -523,11 +395,11 @@ void PlatformWindow::handleSDLEvent(const SDL_Event &e)
                 callbacks.onResize(ctx, logicalWidth_, logicalHeight_);
             }
 
-            // Notify canvas widgets — they will recompute their physical size
-            // from their logical width/height + the new DPI scale internally.
-            for (CanvasWidget *cw : canvasWidgets_)
-                if (cw)
-                    cw->onWindowResize(cachedWidth, cachedHeight);
+            // No canvas-widget resize notification loop here — any widget
+            // that cares about size changes detects it itself inside
+            // computeLayout()/render() by comparing against its own
+            // last-known width/height, the same way every other widget
+            // already reacts to layout changes.
 
             dirty = true;
             break;
@@ -538,17 +410,12 @@ void PlatformWindow::handleSDLEvent(const SDL_Event &e)
             break;
 
         case SDL_WINDOWEVENT_LEAVE:
-            capturedCanvas_ = nullptr;
-            for (CanvasWidget *cw : canvasWidgets_)
-                if (cw)
-                    cw->onMouseLeave();
             if (callbacks.onMouseLeave)
                 callbacks.onMouseLeave();
+            dirty = true;
             break;
 
         case SDL_WINDOWEVENT_FOCUS_LOST:
-            capturedCanvas_ = nullptr;
-            focusedCanvas_ = nullptr;
             if (callbacks.onFocusLost)
                 callbacks.onFocusLost();
             dirty = true;
@@ -587,8 +454,7 @@ void PlatformWindow::invalidate()
     dirty = true;
     SDL_Event e;
     SDL_zero(e);
-    Uint32 t = CanvasWidget::repaintEventType();
-    e.type = (t != 0) ? t : static_cast<Uint32>(SDL_USEREVENT);
+    e.type = (gFluxRepaintEventType != 0) ? gFluxRepaintEventType : static_cast<Uint32>(SDL_USEREVENT);
     e.user.code = -1;
     SDL_PushEvent(&e);
 }
@@ -700,7 +566,6 @@ void PlatformWindow::updateClientSize()
 {
     if (nativeHandle)
     {
-
         SDL_GetWindowSize(nativeHandle, &logicalWidth_, &logicalHeight_);
         cachedWidth = logicalWidth_;
         cachedHeight = logicalHeight_;

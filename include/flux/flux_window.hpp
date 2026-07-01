@@ -10,10 +10,7 @@
 #include <vector>
 
 #if defined(__linux__) && !defined(__ANDROID__)
-class CanvasWidget;
-
 #include <SDL2/SDL.h>
-struct Canvas2DBackend;
 #endif
 
 #ifdef __APPLE__
@@ -87,14 +84,10 @@ public:
     WindowCallbacks callbacks;
 
     // ── Dirty signaling ───────────────────────────────────────────────────────
-    // On Win32 these now signal the RenderLoop rather than calling
-    // InvalidateRect. On other platforms the behaviour is unchanged.
     void invalidate();
     void invalidateRect(int x, int y, int w, int h);
 
     // ── Timers ────────────────────────────────────────────────────────────────
-    // On Win32 these are routed through RenderLoop (sub-frame accuracy,
-    // render-thread execution). On other platforms: SDL_AddTimer / SetTimer.
     void setTimer(TimerID id, int ms);
     void killTimer(TimerID id);
 
@@ -130,13 +123,8 @@ public:
     void setDefaultCursor();
 
     // ── Measure context ───────────────────────────────────────────────────────
-    // Returns a borrowed view of the D2D device context (Win32) or the
-    // platform equivalent. Used by LayoutEngine for text measurement.
     GraphicsContext getMeasureContext() const;
 
-    // ── D2D context accessor (Win32 only) ─────────────────────────────────────
-    // Exposes the live D2D device context so FluxUI::getMeasureContext()
-    // can borrow it without going through PlatformWindow internals.
 #ifdef _WIN32
     GraphicsContext getD2DContext() const;
     RenderLoop *getRenderLoop() const { return renderLoop_; }
@@ -176,12 +164,9 @@ private:
     // =========================================================================
 #ifdef _WIN32
     HWND hwnd_ = nullptr;
-    D3DDevice *d3dDevice_ = nullptr;   // owns GPU pipeline
-    RenderLoop *renderLoop_ = nullptr; // owns render thread + timers
+    D3DDevice *d3dDevice_ = nullptr;
+    RenderLoop *renderLoop_ = nullptr;
 
-    // Message-thread timer id → render-loop timer id mapping.
-    // setTimer(id, ms) registers with renderLoop_ and stores the mapping
-    // so killTimer(id) can find and remove the right render-loop entry.
     std::unordered_map<TimerID, uint32_t> timerMap_;
 
     static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg,
@@ -196,13 +181,10 @@ private:
     struct CairoState;
 
     SDL_Window *nativeHandle = nullptr;
-    Canvas2DBackend *canvasBackend_ = nullptr;
 
     int logicalWidth_ = 0;
     int logicalHeight_ = 0;
     std::vector<uint8_t> cairoPixelBuf_;
-    CanvasWidget *capturedCanvas_ = nullptr;
-    CanvasWidget *focusedCanvas_ = nullptr;
     bool running = false;
     bool mouseCapture = false;
     bool dirty = false;
@@ -210,16 +192,6 @@ private:
 
     std::unordered_map<TimerID, SDL_TimerID> sdlTimerMap;
 
-    std::vector<CanvasWidget *> canvasWidgets_;
-    void registerCanvas(CanvasWidget *c);
-    void unregisterCanvas(CanvasWidget *c);
-    CanvasWidget *hitTestCanvas(int sx, int sy);
-
-public:
-    void registerCanvas_public(CanvasWidget *c) { registerCanvas(c); }
-    void unregisterCanvas_public(CanvasWidget *c) { unregisterCanvas(c); }
-
-private:
     void handleSDLEvent(const SDL_Event &e);
 
 #endif // __linux__

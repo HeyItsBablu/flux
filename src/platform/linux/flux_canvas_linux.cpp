@@ -5,11 +5,19 @@
 #include <cairo/cairo.h>
 #include <SDL2/SDL.h>
 #include <cassert>
+#include <unordered_map>
 
 void Canvas2D_setCairo(Canvas2D &ctx, cairo_t *cr);
+extern Canvas2DBackend *Canvas2DBackend_create();
+extern void Canvas2DBackend_destroy(Canvas2DBackend *);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Linux-only per-widget state
+//
+// Each CanvasWidget owns its own Canvas2DBackend (created lazily on first
+// render, destroyed in the widget's own destructor) — mirroring exactly how
+// flux_canvas_win32.cpp's Win32D2DCanvasState owns its own Canvas2DD2D/
+// Canvas2DBackend per widget rather than sharing one from PlatformWindow.
 // ─────────────────────────────────────────────────────────────────────────────
 
 struct LinuxCanvasState
@@ -20,10 +28,9 @@ struct LinuxCanvasState
     int lastH = 0;
     int physX = 0;
     int physY = 0;
-    cairo_t *cr = nullptr;
+    Canvas2DBackend *backend = nullptr; // owned by this widget
 };
 
-#include <unordered_map>
 static std::unordered_map<CanvasWidget *, LinuxCanvasState> &getLinuxStateMap()
 {
     static std::unordered_map<CanvasWidget *, LinuxCanvasState> s_map;
@@ -34,22 +41,6 @@ static LinuxCanvasState &linuxState(CanvasWidget *w)
 {
     return getLinuxStateMap()[w];
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SDL repaint event type
-// ─────────────────────────────────────────────────────────────────────────────
-
-static Uint32 s_repaintEventType_ = 0;
-
-void CanvasWidget::initEventType()
-{
-    if (s_repaintEventType_ == 0)
-    {
-        Uint32 t = SDL_RegisterEvents(1);
-        s_repaintEventType_ = (t != static_cast<Uint32>(-1)) ? t : static_cast<Uint32>(SDL_USEREVENT);
-    }
-}
-Uint32 CanvasWidget::repaintEventType() { return s_repaintEventType_; }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DPI helpers
@@ -71,22 +62,6 @@ static float getDpiScaleY()
     auto *pw = inst->getPlatformWindowPtr();
     return pw ? pw->dpiScaleY() : 1.f;
 }
-static int getWindowPhysW()
-{
-    auto *inst = FluxUI::getCurrentInstance();
-    if (!inst)
-        return 1;
-    auto *pw = inst->getPlatformWindowPtr();
-    return pw ? pw->clientWidth() : 1;
-}
-static int getWindowPhysH()
-{
-    auto *inst = FluxUI::getCurrentInstance();
-    if (!inst)
-        return 1;
-    auto *pw = inst->getPlatformWindowPtr();
-    return pw ? pw->clientHeight() : 1;
-}
 
 static int toPhysX(int lx) { return int(float(lx) * getDpiScaleX()); }
 static int toPhysY(int ly) { return int(float(ly) * getDpiScaleY()); }
@@ -94,30 +69,9 @@ static int toPhysW(int lw) { return int(float(lw) * getDpiScaleX()); }
 static int toPhysH(int lh) { return int(float(lh) * getDpiScaleY()); }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Platform registration helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-static void registerWithPlatform(CanvasWidget *w)
-{
-    auto *inst = FluxUI::getCurrentInstance();
-    if (!inst)
-        return;
-    auto *pw = inst->getPlatformWindowPtr();
-    if (pw)
-        pw->registerCanvas_public(w);
-}
-static void unregisterWithPlatform(CanvasWidget *w)
-{
-    auto *inst = FluxUI::getCurrentInstance();
-    if (!inst)
-        return;
-    auto *pw = inst->getPlatformWindowPtr();
-    if (pw)
-        pw->unregisterCanvas_public(w);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// scheduleRepaint
+// scheduleRepaint — goes through the generic PlatformWindow::invalidate(),
+// not a canvas-specific event type. PlatformWindow has no idea this call
+// originated from a CanvasWidget.
 // ─────────────────────────────────────────────────────────────────────────────
 
 static void scheduleRepaint(CanvasWidget *w)
@@ -128,14 +82,100 @@ static void scheduleRepaint(CanvasWidget *w)
     if (!s.repaintPending)
     {
         s.repaintPending = true;
-        SDL_Event e;
-        SDL_zero(e);
-        e.type = (s_repaintEventType_ != 0u) ? s_repaintEventType_ : static_cast<Uint32>(SDL_USEREVENT);
-        e.user.code = 0;
-        e.user.data1 = w;
-        SDL_PushEvent(&e);
+        if (auto *inst = FluxUI::getCurrentInstance())
+            if (auto *pw = inst->getPlatformWindowPtr())
+                pw->invalidate();
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// initCanvas — creates and owns this widget's own Canvas2DBackend, lazily,
+// on first render. No PlatformWindow involvement at all. Mirrors
+// flux_canvas_win32.cpp's ensureD2D(): same five logical font slots,
+// registered freshly per widget (cheap — Canvas2DBackend on Linux is just a
+// borrowed PangoFontMap singleton pointer plus a small name->path map).
+// ─────────────────────────────────────────────────────────────────────────────
+
+static void initCanvas(CanvasWidget *w)
+{
+    auto &s = linuxState(w);
+    if (s.initialized)
+        return;
+
+    s.backend = Canvas2DBackend_create();
+    if (!s.backend)
+        return;
+
+    auto reg = [&](const char *name, const char *path)
+    {
+        Canvas2D::registerFont(s.backend, name, path);
+    };
+    reg("sans", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
+    reg("sans-bold", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf");
+    reg("sans-italic", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf");
+    reg("mono", "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf");
+    reg("mono-bold", "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf");
+
+    w->backend_ = s.backend;
+
+    s.lastW = (w->width > 0) ? toPhysW(w->width) : 1;
+    s.lastH = (w->height > 0) ? toPhysH(w->height) : 1;
+    s.physX = toPhysX(w->x);
+    s.physY = toPhysY(w->y);
+
+    w->canvasW_ = s.lastW;
+    w->canvasH_ = s.lastH;
+
+    w->vp_.init(s.lastW, s.lastH, w->canvasW_, w->canvasH_);
+    w->updateViewportSize(s.lastW, s.lastH);
+    w->updateSBGeometry(s.lastW, s.lastH);
+    w->vp_.fitToView();
+
+    w->activatePendingSurface();
+    w->lastTick_ = CanvasWidget::Clock::now();
+    w->frameDt_ = 0.0;
+
+    s.initialized = true;
+
+    if (w->onViewportChanged)
+        w->onViewportChanged(w->vp_.zoom());
+    if (w->onGLResize)
+        w->onGLResize(s.lastW, s.lastH);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// destroyCanvas — tears down this widget's own backend. Called from the
+// destructor and onDetach(), mirroring flux_canvas_win32.cpp's destroyD2D().
+// ─────────────────────────────────────────────────────────────────────────────
+
+static void destroyCanvas(CanvasWidget *w)
+{
+    auto it = getLinuxStateMap().find(w);
+    if (it == getLinuxStateMap().end())
+        return;
+    auto &s = it->second;
+
+    if (w->activeSurface_)
+    {
+        w->activeSurface_->destroy();
+        w->activeSurface_.reset();
+    }
+    w->pendingSurface_.reset();
+
+    if (s.backend)
+    {
+        Canvas2DBackend_destroy(s.backend);
+        s.backend = nullptr;
+    }
+    w->backend_ = nullptr;
+
+    getLinuxStateMap().erase(it);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// syncPhysicalGeometry — re-derive physical size/position from the widget's
+// own (already-laid-out) logical x/y/width/height. Called every render().
+// ─────────────────────────────────────────────────────────────────────────────
 
 static void syncPhysicalGeometry(CanvasWidget *w)
 {
@@ -146,7 +186,6 @@ static void syncPhysicalGeometry(CanvasWidget *w)
     const int newPhysX = toPhysX(w->x);
     const int newPhysY = toPhysY(w->y);
 
-    // Always update position — widget may move without resizing.
     s.physX = newPhysX;
     s.physY = newPhysY;
 
@@ -169,43 +208,7 @@ static void syncPhysicalGeometry(CanvasWidget *w)
     if (w->onGLResize)
         w->onGLResize(s.lastW, s.lastH);
 
-    // Fit content to new size.
     w->vp_.fitToView();
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// initCanvas  — one-time GL setup; size may still be default here
-// ─────────────────────────────────────────────────────────────────────────────
-
-static void initCanvas(CanvasWidget *w)
-{
-    auto &s = linuxState(w);
-    assert(!s.initialized);
-
-    s.lastW = (w->width > 0) ? toPhysW(w->width) : 1;
-    s.lastH = (w->height > 0) ? toPhysH(w->height) : 1;
-    s.physX = toPhysX(w->x);
-    s.physY = toPhysY(w->y);
-
-    // Initialise canvasW_/canvasH_ to physical size right away.
-    w->canvasW_ = s.lastW;
-    w->canvasH_ = s.lastH;
-
-    w->vp_.init(s.lastW, s.lastH, w->canvasW_, w->canvasH_);
-    w->updateViewportSize(s.lastW, s.lastH);
-    w->updateSBGeometry(s.lastW, s.lastH);
-    w->vp_.fitToView();
-
-    w->activatePendingSurface();
-    w->lastTick_ = CanvasWidget::Clock::now();
-    w->frameDt_ = 0.0;
-
-    s.initialized = true;
-
-    if (w->onViewportChanged)
-        w->onViewportChanged(w->vp_.zoom());
-    if (w->onGLResize)
-        w->onGLResize(s.lastW, s.lastH);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -219,20 +222,13 @@ CanvasWidget::CanvasWidget()
     autoHeight = true;
     width = 400;
     height = 300;
-    registerWithPlatform(this);
+    isFocusable = true; // focus flows through the normal Widget/FluxUI focus
+                        // system now — no PlatformWindow-side focusedCanvas_.
 }
 
 CanvasWidget::~CanvasWidget()
 {
-    if (activeSurface_)
-    {
-        activeSurface_->destroy();
-        activeSurface_.reset();
-    }
-    pendingSurface_.reset();
-    linuxState(this).initialized = false;
-    getLinuxStateMap().erase(this);
-    unregisterWithPlatform(this);
+    destroyCanvas(this);
 }
 
 std::shared_ptr<CanvasWidget> CanvasWidget::setViewportEnabled(bool e)
@@ -269,7 +265,6 @@ std::shared_ptr<CanvasWidget> CanvasWidget::setSize(int w, int h)
 
 std::shared_ptr<CanvasWidget> CanvasWidget::setCanvasSize(int w, int h)
 {
-
     canvasW_ = toPhysW(w);
     canvasH_ = toPhysH(h);
     auto &s = linuxState(this);
@@ -297,96 +292,58 @@ void CanvasWidget::computeLayout(GraphicsContext & /*ctx*/,
         height = (c.maxHeight < kUnbounded) ? c.maxHeight : height;
 
     needsLayout = false;
-    // Trigger a preRenderPass so syncPhysicalGeometry picks up the new size.
     scheduleRepaint(this);
 }
 
+// render() now does everything: lazy-init, geometry sync, surface tick,
+// and the actual Cairo draw — all inline, in one call, on the normal
+// widget-tree paint pass. No external pre/gl split, no separate driver.
 void CanvasWidget::render(GraphicsContext &ctx, FontCache &)
 {
-    // Store the cairo_t so glRenderPass can use it.
-    if (ctx.cr)
-        setCairo(ctx.cr);
-    needsPaint = false;
-}
-
-void CanvasWidget::onDetach()
-{
-    if (activeSurface_)
+    if (!ctx.cr)
     {
-        activeSurface_->destroy();
-        activeSurface_.reset();
+        needsPaint = false;
+        return;
     }
-    pendingSurface_.reset();
-    getLinuxStateMap().erase(this);
-    unregisterWithPlatform(this);
-    Widget::onDetach();
-}
 
-void CanvasWidget::markNeedsPaint()
-{
-    Widget::markNeedsPaint();
-    scheduleRepaint(this);
-}
-
-void CanvasWidget::setCairo(cairo_t *cr)
-{
-    linuxState(this).cr = cr;
     auto &s = linuxState(this);
-    if (cr && !s.initialized)
-        initCanvas(this);
-}
 
-void CanvasWidget::onWindowResize(int /*newW*/, int /*newH*/)
-{
-    auto &s = linuxState(this);
     if (!s.initialized)
+        initCanvas(this);
+    if (!s.initialized)
+    {
+        // Backend not available yet (e.g. very first frame before
+        // PlatformWindow::create finished). Try again next paint.
+        needsPaint = false;
         return;
-    // Force full recalc on the next preRenderPass.
-    s.lastW = 0;
-    s.lastH = 0;
-    scheduleRepaint(this);
-}
+    }
 
-void CanvasWidget::preRenderPass()
-{
-    auto &s = linuxState(this);
-
-    if (!s.cr || !s.initialized)
-        return;
-
-    // Sync logical layout → physical GL dims every frame.
     syncPhysicalGeometry(this);
 
     if (pendingSurface_)
         activatePendingSurface();
     if (!activeSurface_)
+    {
+        needsPaint = false;
         return;
+    }
 
+    // ── tick ──
     auto now = Clock::now();
     frameDt_ = std::chrono::duration<double>(now - lastTick_).count();
     lastTick_ = now;
-
     activeSurface_->update(frameDt_);
     activeSurface_->preRender();
-}
 
-void CanvasWidget::glRenderPass()
-{
-    auto &s = linuxState(this);
-    if (!s.cr || !s.initialized || !activeSurface_)
-        return;
-
+    // ── draw ──
     s.repaintPending = false;
 
-    cairo_t *cr = s.cr;
+    cairo_t *cr = ctx.cr;
 
-    // Clip to widget logical bounds.
     cairo_save(cr);
-    cairo_rectangle(cr, (double)x, (double)y,
-                    (double)width, (double)height);
+    cairo_rectangle(cr, (double)x, (double)y, (double)width, (double)height);
     cairo_clip(cr);
 
-    // Apply viewport transform (pan + zoom) relative to widget origin.
     cairo_translate(cr, (double)x, (double)y);
     float z = vp_.zoom();
     float ox = -vp_.offsetX() * z;
@@ -394,18 +351,16 @@ void CanvasWidget::glRenderPass()
     cairo_translate(cr, ox, oy);
     cairo_scale(cr, z, z);
 
-    // Hand off to the surface.
     {
-        Canvas2D ctx(backend_, canvasW_, canvasH_);
-        Canvas2D_setCairo(ctx, cr);
-        activeSurface_->render(ctx);
+        Canvas2D canvasCtx(backend_, canvasW_, canvasH_);
+        Canvas2D_setCairo(canvasCtx, cr);
+        activeSurface_->render(canvasCtx);
     }
 
     cairo_restore(cr);
 
     if (scrollbarsEnabled_)
     {
-        auto &s = linuxState(this);
         updateSBGeometry(s.lastW, s.lastH);
         hBar_.tick(frameDt_);
         vBar_.tick(frameDt_);
@@ -415,13 +370,40 @@ void CanvasWidget::glRenderPass()
         p.drawScrollbar(hBar_, s.lastW, s.lastH);
         p.drawScrollbar(vBar_, s.lastW, s.lastH);
 
-        if ((hBar_.needsRedraw() || vBar_.needsRedraw()) &&
-            !linuxState(this).repaintPending)
+        if ((hBar_.needsRedraw() || vBar_.needsRedraw()) && !s.repaintPending)
             scheduleRepaint(this);
     }
 
     if (activeSurface_->needsContinuousRedraw())
         scheduleRepaint(this);
+
+    needsPaint = false;
+}
+
+void CanvasWidget::onDetach()
+{
+    destroyCanvas(this);
+    Widget::onDetach();
+}
+
+void CanvasWidget::markNeedsPaint()
+{
+    Widget::markNeedsPaint();
+    scheduleRepaint(this);
+}
+
+void CanvasWidget::onWindowResize(int /*newW*/, int /*newH*/)
+{
+    // No longer called externally by PlatformWindow (it has no idea we
+    // exist). Kept as a public method in case something else wants to
+    // force-invalidate cached geometry; normal resizes are now picked up
+    // automatically by syncPhysicalGeometry() on the next render().
+    auto &s = linuxState(this);
+    if (!s.initialized)
+        return;
+    s.lastW = 0;
+    s.lastH = 0;
+    scheduleRepaint(this);
 }
 
 bool CanvasWidget::isInitialized() const { return linuxState(const_cast<CanvasWidget *>(this)).initialized; }
@@ -437,144 +419,110 @@ void CanvasWidget::onMouseLeave()
 {
     hBar_.onMouseLeave();
     vBar_.onMouseLeave();
+    if (panning_)
+        panning_ = false; // cancel any in-progress pan — PlatformWindow no
+                          // longer does this for us on window-leave/focus-lost
     scheduleRepaint(this);
 }
 
-// ── SDL event forwarding ──────────────────────────────────────────────────────
-void CanvasWidget::handleSDLEvent(const SDL_Event &e)
-{
-    switch (e.type)
-    {
-    case SDL_MOUSEBUTTONDOWN:
-        onMouseButtonDown(e.button);
-        break;
-    case SDL_MOUSEBUTTONUP:
-        onMouseButtonUp(e.button);
-        break;
-    case SDL_MOUSEMOTION:
-        onMouseMotion(e.motion);
-        break;
-    case SDL_MOUSEWHEEL:
-        onMouseWheel(e.wheel);
-        break;
-    case SDL_KEYDOWN:
-        onKeyDownEvent(e.key);
-        break;
-    case SDL_KEYUP:
-        onKeyUpEvent(e.key);
-        break;
-    default:
-        break;
-    }
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Input — real Widget overrides, reached through the normal dispatch chain
+// in flux_core.cpp (findAndHandleMouseEvent / broadcastMouseEvent /
+// focusedWidget). Coordinates arrive in window space; we translate to
+// widget-local ourselves, same convention as the Win32 implementation.
+// ─────────────────────────────────────────────────────────────────────────────
 
-void CanvasWidget::onMouseButtonDown(const SDL_MouseButtonEvent &e)
+bool CanvasWidget::handleMouseDown(int mx, int my)
 {
-    SDL_CaptureMouse(SDL_TRUE);
-    int sx = e.x, sy = e.y;
-    if (e.button == SDL_BUTTON_MIDDLE && viewportEnabled_)
+    int lx = mx - x;
+    int ly = my - y;
+
+    if (auto *inst = FluxUI::getCurrentInstance())
+        inst->captureMouseInput();
+
+    bool hC = hBar_.onMouseDown(lx, ly, [this](float t)
+                                { applyHScrollFraction(t); });
+    bool vC = !hC && vBar_.onMouseDown(lx, ly, [this](float t)
+                                       { applyVScrollFraction(t); });
+    if (!hC && !vC)
     {
-        beginPan(sx, sy);
-        return;
-    }
-    if (e.button == SDL_BUTTON_LEFT)
-    {
-        bool hC = hBar_.onMouseDown(sx, sy,
-                                    [this](float t)
-                                    { applyHScrollFraction(t); });
-        bool vC = !hC && vBar_.onMouseDown(sx, sy,
-                                           [this](float t)
-                                           { applyVScrollFraction(t); });
-        if (!hC && !vC)
+        if (viewportEnabled_ && platformSpaceDown())
         {
-            if (viewportEnabled_ &&
-                (SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_SPACE] != 0))
-            {
-                beginPan(sx, sy);
-            }
-            else if (activeSurface_)
-            {
-                auto [cx, cy] = vp_.screenToCanvas(float(sx), float(sy));
-                activeSurface_->onMouseDown(cx, cy);
-            }
+            beginPan(lx, ly);
         }
-        scheduleRepaint(this);
-    }
-    if (e.button == SDL_BUTTON_RIGHT && activeSurface_)
-    {
-        auto [cx, cy] = vp_.screenToCanvas(float(sx), float(sy));
-        activeSurface_->onRightMouseDown(cx, cy);
-    }
-}
-
-void CanvasWidget::onMouseButtonUp(const SDL_MouseButtonEvent &e)
-{
-    SDL_CaptureMouse(SDL_FALSE);
-    int sx = e.x, sy = e.y;
-    if (e.button == SDL_BUTTON_MIDDLE)
-    {
-        panning_ = false;
-        return;
-    }
-    if (e.button == SDL_BUTTON_LEFT)
-    {
-        bool hR = hBar_.onMouseUp(sx, sy);
-        bool vR = vBar_.onMouseUp(sx, sy);
-        if (!hR && !vR)
+        else if (activeSurface_)
         {
-            if (panning_)
-            {
-                panning_ = false;
-            }
-            else if (activeSurface_)
-            {
-                auto [cx, cy] = vp_.screenToCanvas(float(sx), float(sy));
-                activeSurface_->onMouseUp(cx, cy);
-            }
+            auto [cx, cy] = vp_.screenToCanvas(float(lx), float(ly));
+            activeSurface_->onMouseDown(cx, cy);
         }
-        scheduleRepaint(this);
     }
-    if (e.button == SDL_BUTTON_RIGHT && activeSurface_)
-    {
-        auto [cx, cy] = vp_.screenToCanvas(float(e.x), float(e.y));
-        activeSurface_->onMouseUp(cx, cy);
-    }
+    scheduleRepaint(this);
+    return true;
 }
 
-void CanvasWidget::onMouseMotion(const SDL_MouseMotionEvent &e)
+bool CanvasWidget::handleMouseMove(int mx, int my)
 {
-    int sx = e.x, sy = e.y;
-    bool hDrag = hBar_.onMouseMove(sx, sy);
-    bool vDrag = vBar_.onMouseMove(sx, sy);
+    int lx = mx - x;
+    int ly = my - y;
+
+    bool hDrag = hBar_.onMouseMove(lx, ly);
+    bool vDrag = vBar_.onMouseMove(lx, ly);
     scheduleRepaint(this);
     if (hDrag || vDrag)
-        return;
+        return true;
+
     if (panning_)
     {
-        continuePan(sx, sy);
+        continuePan(lx, ly);
     }
     else if (activeSurface_)
     {
-        auto [cx, cy] = vp_.screenToCanvas(float(sx), float(sy));
+        auto [cx, cy] = vp_.screenToCanvas(float(lx), float(ly));
         activeSurface_->onMouseMove(cx, cy);
     }
+    return true;
 }
 
-void CanvasWidget::onMouseWheel(const SDL_MouseWheelEvent &e)
+bool CanvasWidget::handleMouseUp(int mx, int my)
+{
+    int lx = mx - x;
+    int ly = my - y;
+
+    if (auto *inst = FluxUI::getCurrentInstance())
+        inst->releaseMouseInput();
+
+    bool hR = hBar_.onMouseUp(lx, ly);
+    bool vR = vBar_.onMouseUp(lx, ly);
+    if (!hR && !vR)
+    {
+        if (panning_)
+        {
+            panning_ = false;
+        }
+        else if (activeSurface_)
+        {
+            auto [cx, cy] = vp_.screenToCanvas(float(lx), float(ly));
+            activeSurface_->onMouseUp(cx, cy);
+        }
+    }
+    scheduleRepaint(this);
+    return true;
+}
+
+bool CanvasWidget::handleMouseWheel(int delta)
 {
     if (!viewportEnabled_)
-        return;
-    static constexpr int kWheelDelta = 120;
-    int delta = e.y * kWheelDelta;
+        return false;
+
     bool ctrl = platformCtrlDown();
     bool shift = platformShiftDown();
-    int wmx, wmy;
-    SDL_GetMouseState(&wmx, &wmy);
-    int mx = wmx - x, my = wmy - y;
+
     if (ctrl)
     {
         float f = (delta > 0) ? 1.1f : 1.f / 1.1f;
-        vp_.zoomToward(float(mx), float(my), f);
+        // SDL_MOUSEWHEEL carries no cursor position, so — same limitation
+        // Win32's WM_MOUSEWHEEL has — zoom toward the widget's own center.
+        vp_.zoomToward(float(width) * 0.5f, float(height) * 0.5f, f);
     }
     else if (shift)
     {
@@ -582,36 +530,36 @@ void CanvasWidget::onMouseWheel(const SDL_MouseWheelEvent &e)
     }
     else
     {
-        vp_.panByScreen(0.f, -(float(delta) / float(kWheelDelta)) * 40.f);
+        vp_.panByScreen(0.f, -(float(delta) / float(WHEEL_DELTA)) * 40.f);
     }
     pokeScrollbars();
     scheduleRepaint(this);
+    return true;
 }
 
-void CanvasWidget::onKeyDownEvent(const SDL_KeyboardEvent &e)
+bool CanvasWidget::handleKeyDown(int keyCode)
 {
     bool ctrl = platformCtrlDown();
     bool shift = platformShiftDown();
-    bool alt = false;
     bool consumed = false;
+
     if (ctrl && viewportEnabled_)
     {
-        SDL_Keycode k = e.keysym.sym;
-        if (k == SDLK_EQUALS || k == SDLK_PLUS || k == SDLK_KP_PLUS)
+        if (keyCode == SDLK_EQUALS || keyCode == SDLK_PLUS || keyCode == SDLK_KP_PLUS)
         {
             vp_.zoomIn();
             pokeScrollbars();
             scheduleRepaint(this);
             consumed = true;
         }
-        else if (k == SDLK_MINUS || k == SDLK_KP_MINUS)
+        else if (keyCode == SDLK_MINUS || keyCode == SDLK_KP_MINUS)
         {
             vp_.zoomOut();
             pokeScrollbars();
             scheduleRepaint(this);
             consumed = true;
         }
-        else if (k == SDLK_0 || k == SDLK_KP_0)
+        else if (keyCode == SDLK_0 || keyCode == SDLK_KP_0)
         {
             vp_.resetZoom();
             pokeScrollbars();
@@ -619,20 +567,13 @@ void CanvasWidget::onKeyDownEvent(const SDL_KeyboardEvent &e)
             consumed = true;
         }
     }
+
     if (!consumed && activeSurface_)
     {
-        KeyEvent ke{0, e.keysym.sym, ctrl, shift, alt};
+        KeyEvent ke{0, keyCode, ctrl, shift, false};
         activeSurface_->onKeyDown(ke);
     }
-}
-
-void CanvasWidget::onKeyUpEvent(const SDL_KeyboardEvent &e)
-{
-    if (activeSurface_)
-    {
-        KeyEvent ke{0, e.keysym.sym, false, false, false};
-        activeSurface_->onKeyUp(ke);
-    }
+    return consumed;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -733,8 +674,4 @@ void CanvasWidget::activatePendingSurface()
     vp_.setCanvasSize(canvasW_, canvasH_);
 }
 
-void CanvasWidget::setBackend(Canvas2DBackend *b)
-{
-    backend_ = b;
-}
 #endif

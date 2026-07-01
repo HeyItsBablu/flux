@@ -38,6 +38,7 @@
 //   canvas->setSurface<MyRenderSurface>(...);
 //   canvas->setViewportEnabled(true);
 //   canvas->setScrollbarsEnabled(true);
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 class CanvasWidget : public Widget
@@ -181,30 +182,28 @@ public:
 #endif
 
     // ── Linux-only ────────────────────────────────────────────────────────────
+    // Standalone Widget overrides — identical shape to the Win32 block above.
+    // No SDL-typed methods, no setCairo/preRenderPass/glRenderPass split, no
+    // initEventType/repaintEventType (PlatformWindow owns the generic repaint
+    // event itself now). render() handles tick + draw inline.
 #if defined(__linux__) && !defined(__ANDROID__)
-#include <SDL2/SDL.h>
-    static void initEventType();
-    static Uint32 repaintEventType();
+    bool handleMouseDown(int mx, int my) override;
+    bool handleMouseMove(int mx, int my) override;
+    bool handleMouseUp(int mx, int my) override;
+    bool handleMouseWheel(int delta) override;
+    bool handleKeyDown(int keyCode) override;
 
-    void setBackend(Canvas2DBackend *b);
-    void setCairo(cairo_t *cr);
+    // Still used internally (geometry sync) — not part of the public
+    // PlatformWindow-facing surface anymore. Backend is now created and
+    // owned entirely within this widget (see flux_canvas_linux.cpp); there
+    // is no setBackend() — nothing external ever pushes it in.
     void onWindowResize(int newW, int newH);
-    void preRenderPass();
-    void glRenderPass();
 
     bool isInitialized() const;
     bool needsRepaint() const;
     bool containsPoint(int wx, int wy) const;
 
     void onMouseLeave();
-    void handleSDLEvent(const SDL_Event &e);
-
-    void onMouseButtonDown(const SDL_MouseButtonEvent &e);
-    void onMouseButtonUp(const SDL_MouseButtonEvent &e);
-    void onMouseMotion(const SDL_MouseMotionEvent &e);
-    void onMouseWheel(const SDL_MouseWheelEvent &e);
-    void onKeyDownEvent(const SDL_KeyboardEvent &e);
-    void onKeyUpEvent(const SDL_KeyboardEvent &e);
 #endif
 
 // ── macOS-only ────────────────────────────────────────────────────────────
