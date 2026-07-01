@@ -172,6 +172,8 @@ inline bool platformKeyDown(int keyCode)
 inline bool platformCtrlDown() { return platformKeyDown(VK_CONTROL); }
 inline bool platformShiftDown() { return platformKeyDown(VK_SHIFT); }
 inline bool platformAltDown() { return platformKeyDown(VK_MENU); }
+inline bool platformSpaceDown() { return platformKeyDown(VK_SPACE); }  // VK_SPACE = 0x20, already defined by windows.h
+
 
 inline std::wstring toWideString(const std::string &utf8)
 {
@@ -243,6 +245,7 @@ inline bool platformKeyDown(int sdlScancode)
 inline bool platformCtrlDown() { return (SDL_GetModState() & (KMOD_LCTRL | KMOD_RCTRL)) != 0; }
 inline bool platformShiftDown() { return (SDL_GetModState() & (KMOD_LSHIFT | KMOD_RSHIFT)) != 0; }
 inline bool platformAltDown() { return (SDL_GetModState() & (KMOD_LALT | KMOD_RALT)) != 0; }
+inline bool platformSpaceDown() { return platformKeyDown(SDL_SCANCODE_SPACE); }
 
 static constexpr int VK_BACK = SDL_SCANCODE_BACKSPACE;
 static constexpr int VK_DELETE = SDL_SCANCODE_DELETE;
@@ -343,6 +346,7 @@ inline bool platformCtrlDown() { return false; }
 inline bool platformShiftDown() { return false; }
 inline bool platformAltDown() { return false; }
 inline bool platformKeyDown(int) { return false; }
+inline bool platformSpaceDown() { return false; }
 
 inline std::wstring toWideString(const std::string &utf8)
 {
@@ -427,6 +431,7 @@ inline bool platformKeyDown(int) { return false; }
 inline bool platformCtrlDown() { return false; }
 inline bool platformShiftDown() { return false; }
 inline bool platformAltDown() { return false; }
+inline bool platformSpaceDown() { return false; } 
 
 inline std::wstring toWideString(const std::string &utf8)
 {
@@ -505,6 +510,7 @@ inline bool platformCtrlDown() { return flux_web_detail::g_ctrlDown; }
 inline bool platformShiftDown() { return flux_web_detail::g_shiftDown; }
 inline bool platformAltDown() { return flux_web_detail::g_altDown; }
 inline bool platformKeyDown(int) { return false; }
+inline bool platformSpaceDown() { return platformKeyDown(VK_SPACE); }
 
 inline uint32_t platformTickCount()
 {
