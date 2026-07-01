@@ -1,20 +1,9 @@
 // flux_canvas_win32.cpp
 // Win32 CanvasWidget implementation using Direct2D.
-// Replaces flux_canvas_win32.cpp entirely — no GL, no child HWND, no WGL.
-//
-// Architecture:
-//   CanvasWidget::render() is called by the widget tree on the render thread.
-//   It drives Canvas2D (off-screen D2D bitmap) → surface renders into it →
-//   the bitmap is composited into the main D2D device context with the correct
-//   viewport transform applied.
-//
-// Scrollbars are drawn with the same D2D primitives as Painter, using the
-//   existing CustomScrollbar geometry helpers (thumbRect / trackRect).
 #ifdef _WIN32
 
 #include "flux/flux_canvas.hpp"
 #include "flux/flux_canvas2d.hpp"
-#include "flux/flux_canvas2d_backend.hpp"
 #include "flux/flux_d3d_device.hpp"
 #include "flux/flux_core.hpp" // FluxUI::getCurrentInstance()
 
@@ -27,6 +16,14 @@
 
 using Microsoft::WRL::ComPtr;
 
+// ── Canvas2DBackend lifecycle — defined in flux_canvas2d_d2d.cpp.
+// No shared header: this is the entire contract between the two files.
+extern Canvas2DBackend *Canvas2DBackend_create(D3DDevice *dev);
+extern void Canvas2DBackend_destroy(Canvas2DBackend *b);
+extern bool Canvas2DBackend_resizeBitmap(Canvas2DBackend *b, int w, int h);
+extern ID2D1DeviceContext *Canvas2DBackend_offscreenDC(Canvas2DBackend *b);
+extern ID2D1Bitmap1 *Canvas2DBackend_offscreenBitmap(Canvas2DBackend *b);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Per-widget D2D state (stored in a parallel map, same pattern as before)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -35,8 +32,7 @@ using Microsoft::WRL::ComPtr;
 
 struct Win32D2DCanvasState
 {
-    Canvas2DD2D *d2d = nullptr;         // owned by the widget — D2D resources
-    Canvas2DBackend *backend = nullptr; // owned by the widget — wraps d2d for Canvas2D
+    Canvas2DBackend *backend = nullptr; // owned by the widget
     bool inited = false;
     int lastW = 0;
     int lastH = 0;
@@ -85,28 +81,15 @@ static ID2D1DeviceContext *mainDC()
 static void ensureD2D(CanvasWidget *w, GraphicsContext &gctx)
 {
     auto &s = d2dState(w);
-    if (!s.d2d)
+    if (!s.backend)
     {
         D3DDevice *dev = getDevice();
         if (!dev || !dev->valid)
             return;
 
-        s.d2d = new Canvas2DD2D();
-        if (!s.d2d->init(dev))
-        {
-            delete s.d2d;
-            s.d2d = nullptr;
-            return;
-        }
-
-        s.backend = Canvas2DBackend::create(s.d2d);
+        s.backend = Canvas2DBackend_create(dev);
         if (!s.backend)
-        {
-            s.d2d->destroy();
-            delete s.d2d;
-            s.d2d = nullptr;
             return;
-        }
 
         // Register default fonts (same set as the GL path)
         auto reg = [&](const char *name, const char *path)
@@ -125,16 +108,16 @@ static void ensureD2D(CanvasWidget *w, GraphicsContext &gctx)
 
     // Resize off-screen bitmap if needed
     int docW = w->docW(), docH = w->docH();
-    if (docW != s.lastW || docH != s.lastH || !s.d2d->offscreenBitmap)
+    if (docW != s.lastW || docH != s.lastH)
     {
-        s.d2d->resizeBitmap(docW, docH);
+        Canvas2DBackend_resizeBitmap(s.backend, docW, docH);
         s.lastW = docW;
         s.lastH = docH;
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Destroy GL state (called from destructor / onDetach)
+// Destroy D2D state (called from destructor / onDetach)
 // ─────────────────────────────────────────────────────────────────────────────
 
 static void destroyD2D(CanvasWidget *w)
@@ -153,14 +136,8 @@ static void destroyD2D(CanvasWidget *w)
 
     if (s.backend)
     {
-        Canvas2DBackend::destroy(s.backend);
+        Canvas2DBackend_destroy(s.backend);
         s.backend = nullptr;
-    }
-    if (s.d2d)
-    {
-        s.d2d->destroy();
-        delete s.d2d;
-        s.d2d = nullptr;
     }
     s_d2dState.erase(it);
 }
@@ -220,7 +197,9 @@ static void drawDropShadow(ID2D1DeviceContext *dc,
 static void tickAndRender(CanvasWidget *w, GraphicsContext &gctx)
 {
     auto &s = d2dState(w);
-    if (!s.d2d || !s.backend || !s.d2d->offscreenBitmap)
+    ID2D1DeviceContext *offDC = s.backend ? Canvas2DBackend_offscreenDC(s.backend) : nullptr;
+    ID2D1Bitmap1 *offBitmap = s.backend ? Canvas2DBackend_offscreenBitmap(s.backend) : nullptr;
+    if (!s.backend || !offDC || !offBitmap)
         return;
 
     if (w->pendingSurface_)
@@ -235,7 +214,6 @@ static void tickAndRender(CanvasWidget *w, GraphicsContext &gctx)
     w->activeSurface_->update(dt);
 
     // ── Render surface into off-screen bitmap ─────────────────────────────
-    auto *offDC = s.d2d->offscreenDC.Get();
     offDC->BeginDraw();
     offDC->Clear(D2D1::ColorF(D2D1::ColorF::White));
     offDC->SetTransform(D2D1::Matrix3x2F::Identity());
@@ -268,7 +246,6 @@ static void tickAndRender(CanvasWidget *w, GraphicsContext &gctx)
         D2D1_ANTIALIAS_MODE_ALIASED);
 
     // 2. Now set the viewport transform
-    // screenPt = canvasPt * zoom + (offX, offY)
     D2D1_MATRIX_3X2_F vpTransform =
         D2D1::Matrix3x2F::Scale(zoom, zoom) *
         D2D1::Matrix3x2F::Translation(offX, offY);
@@ -291,7 +268,7 @@ static void tickAndRender(CanvasWidget *w, GraphicsContext &gctx)
     }
     // Then restore the viewport transform before drawing the bitmap
     dc->SetTransform(vpTransform * prevTransform);
-    dc->DrawBitmap(s.d2d->offscreenBitmap.Get(), &docRect, 1.f,
+    dc->DrawBitmap(offBitmap, &docRect, 1.f,
                    D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
 
     dc->PopAxisAlignedClip();
@@ -379,9 +356,9 @@ std::shared_ptr<CanvasWidget> CanvasWidget::setCanvasSize(int w, int h)
     docH_ = h;
     vp_.setCanvasSize(w, h);
     auto &s = d2dState(this);
-    if (s.d2d)
+    if (s.backend)
     {
-        s.d2d->resizeBitmap(w, h);
+        Canvas2DBackend_resizeBitmap(s.backend, w, h);
         s.lastW = w;
         s.lastH = h;
         if (activeSurface_)
@@ -415,7 +392,7 @@ void CanvasWidget::render(GraphicsContext &ctx, FontCache &)
     ensureD2D(this, ctx);
 
     auto &s = d2dState(this);
-    if (!s.d2d || !s.backend)
+    if (!s.backend)
         return;
 
     // First-time viewport init
@@ -539,14 +516,8 @@ void CanvasWidget::applyVScrollFraction(float thumbMin)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Input handling
-// Input coordinates arrive in window space from PlatformWindow's WndProc.
-// CanvasWidget receives them via the widget tree hit-test and translates
-// them to canvas space using the viewport.
+// Input handling — unchanged
 // ─────────────────────────────────────────────────────────────────────────────
-
-// These are called by the widget dispatch layer (not WndProc directly).
-// The (sx, sy) coords are already widget-local (0,0 = top-left of widget).
 
 bool CanvasWidget::handleMouseDown(int sx, int sy)
 {
@@ -626,7 +597,6 @@ bool CanvasWidget::handleMouseWheel(int delta)
     if (ctrl)
     {
         float f = (delta > 0) ? 1.1f : 1.f / 1.1f;
-        // Zoom toward widget centre
         vp_.zoomToward(float(width) * 0.5f, float(height) * 0.5f, f);
     }
     else if (shift)
@@ -649,7 +619,7 @@ bool CanvasWidget::handleChar(wchar_t ch)
     if (!activeSurface_)
         return false;
     if (ch < 32 || ch == 127)
-        return false; // control chars handled by keydown
+        return false;
 
     KeyEvent ke{};
     ke.codepoint = int(ch);
@@ -670,7 +640,6 @@ bool CanvasWidget::handleKeyDown(int keyCode)
 
     if (ctrl && viewportEnabled_)
     {
-        // +/- zoom, 0 = reset
         if (keyCode == VK_OEM_PLUS || keyCode == VK_ADD)
         {
             vp_.zoomIn();

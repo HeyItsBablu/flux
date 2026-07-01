@@ -1,28 +1,34 @@
 // flux_canvas2d_metal.mm
 //
-// Metal implementation of the Canvas2D API (flux_canvas2d.hpp) backing
-// Canvas2DMetal / Canvas2DBackend (flux_canvas2d_backend.hpp, Apple block).
+// Metal implementation of the Canvas2D API (flux_canvas2d.hpp).
 //
-// Encoder wiring: Canvas2DMetalBeginFrame()/EndFrame() (declared in
-// flux_canvas2d_backend.hpp) hand the live MTLRenderCommandEncoder to this
-// backend for the duration of one frame. CanvasWidget::glRenderPass() calls
-// them around its Canvas2D usage.
+// Canvas2DBackend is defined ENTIRELY in this file — no shared backend
+// header. It is opaque everywhere else (flux_canvas2d.hpp forward-declares
+// it; flux_canvas_macos.mm only ever holds/passes a Canvas2DBackend*).
+//
+// Lifecycle / frame wiring exposed to flux_canvas_macos.mm as four free
+// functions (declared `extern` locally in that file — no shared header):
+//
+//   Canvas2DBackend *Canvas2DBackend_create(id<MTLDevice> device);
+//   void             Canvas2DBackend_destroy(Canvas2DBackend *b);
+//   void             Canvas2DBackend_metalBeginFrame(Canvas2DBackend *b,
+//                         id<MTLRenderCommandEncoder> encoder, const float mvp[16]);
+//   void             Canvas2DBackend_metalEndFrame(Canvas2DBackend *b);
 //
 #ifdef __APPLE__
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
 
-#include "flux/flux_canvas2d_backend.hpp"
+#include "flux/flux_canvas2d.hpp"
 #import <Metal/Metal.h>
 #import <CoreGraphics/CoreGraphics.h>
 #include <cmath>
 #include <cstring>
 #include <fstream>
-#include <unordered_map>
+#include <string>
+#include <vector>
 
 #include <stb_truetype.h>
-
-
 
 // ============================================================================
 // Shaders
@@ -61,23 +67,23 @@ fragment float4 c2d_frag(VertexOut in [[stage_in]],
 )MSL";
 
 // ============================================================================
-// Canvas2DImageMetal — concrete image type (declared in backend.hpp)
+// Canvas2DImageMetal — concrete image type, private to this file.
+// (Canvas2DImage base struct is the only thing flux_canvas2d.hpp exposes.)
 // ============================================================================
 
-struct Canvas2DMetalContext
+struct Canvas2DMetalTexContext
 {
     id<MTLTexture> texture = nil;
 };
 
-Canvas2DImageMetal::~Canvas2DImageMetal()
+struct Canvas2DImageMetal : Canvas2DImage
 {
-    delete ctx;
-}
+    Canvas2DMetalTexContext *ctx = nullptr;
+    ~Canvas2DImageMetal() override { delete ctx; }
+};
 
 // ============================================================================
-// Internal Metal resources, lazily built per-device (mirrors painterRes()
-// pattern in flux_painter_macos.mm — separate cache since Canvas2D is a
-// distinct user-facing surface from Painter's UI rendering).
+// Shared pipeline/sampler cache, lazily built per-device.
 // ============================================================================
 
 namespace {
@@ -143,149 +149,142 @@ struct CVertex { float x, y, u, v; };
 } // anonymous namespace
 
 // ============================================================================
-// Canvas2DMetal — font atlas + frame state
+// Canvas2DBackend — FULL definition, private to this translation unit.
+//
+// Owns: font faces + glyph metric cache (stb_truetype), and this frame's
+// live encoder/device/mvp (set by Canvas2DBackend_metalBeginFrame, cleared
+// by Canvas2DBackend_metalEndFrame). One instance per CanvasWidget, created
+// once and reused every frame — NOT re-created per frame.
 // ============================================================================
 
-bool Canvas2DMetal::init()
+struct Canvas2DBackend
 {
-    ctx = new Canvas2DMetalContext();
-    return true;
-}
+    // ── Fonts / glyphs ───────────────────────────────────────────────────
+    struct FontFace
+    {
+        std::string name;
+        std::vector<uint8_t> ttfData;
+        stbtt_fontinfo info = {};
+        bool ready = false;
+    };
+    std::vector<FontFace> fonts;
 
-void Canvas2DMetal::destroy()
-{
-    delete ctx;
-    ctx = nullptr;
-}
+    struct GlyphKey
+    {
+        int fontIdx, codepoint, pixelSize;
+        bool operator==(const GlyphKey &o) const
+        {
+            return fontIdx == o.fontIdx && codepoint == o.codepoint && pixelSize == o.pixelSize;
+        }
+    };
+    struct GlyphEntry
+    {
+        GlyphKey key;
+        int xoff, yoff, advance;
+    };
+    std::vector<GlyphEntry> glyphs;
 
-int Canvas2DMetal::findFont(const std::string &name) const
-{
-    for (size_t i = 0; i < fonts.size(); ++i)
-        if (fonts[i].name == name) return (int)i;
-    return -1;
-}
+    int findFont(const std::string &name) const
+    {
+        for (size_t i = 0; i < fonts.size(); ++i)
+            if (fonts[i].name == name) return (int)i;
+        return -1;
+    }
 
-int Canvas2DMetal::addFont(const std::string &name, const std::string &path)
-{
-    int existing = findFont(name);
-    if (existing >= 0) return existing;
+    int addFont(const std::string &name, const std::string &path)
+    {
+        int existing = findFont(name);
+        if (existing >= 0) return existing;
 
-    std::ifstream f(path, std::ios::binary | std::ios::ate);
-    if (!f) return -1;
-    auto size = f.tellg();
-    f.seekg(0);
-    std::vector<uint8_t> data((size_t)size);
-    f.read(reinterpret_cast<char *>(data.data()), size);
+        std::ifstream f(path, std::ios::binary | std::ios::ate);
+        if (!f) return -1;
+        auto size = f.tellg();
+        f.seekg(0);
+        std::vector<uint8_t> data((size_t)size);
+        f.read(reinterpret_cast<char *>(data.data()), size);
 
-    FontFace face;
-    face.name = name;
-    face.ttfData = std::move(data);
-    face.ready = stbtt_InitFont(&face.info, face.ttfData.data(),
-                                stbtt_GetFontOffsetForIndex(face.ttfData.data(), 0)) != 0;
-    if (!face.ready) return -1;
+        FontFace face;
+        face.name = name;
+        face.ttfData = std::move(data);
+        face.ready = stbtt_InitFont(&face.info, face.ttfData.data(),
+                                    stbtt_GetFontOffsetForIndex(face.ttfData.data(), 0)) != 0;
+        if (!face.ready) return -1;
 
-    fonts.push_back(std::move(face));
-    return (int)fonts.size() - 1;
-}
+        fonts.push_back(std::move(face));
+        return (int)fonts.size() - 1;
+    }
 
-const Canvas2DMetal::GlyphEntry *
-Canvas2DMetal::getGlyph(int fontIdx, int codepoint, int pixelSize)
-{
-    if (fontIdx < 0 || fontIdx >= (int)fonts.size()) return nullptr;
-    GlyphKey key{fontIdx, codepoint, pixelSize};
-    for (auto &g : glyphs)
-        if (g.key == key) return &g;
+    const GlyphEntry *getGlyph(int fontIdx, int codepoint, int pixelSize)
+    {
+        if (fontIdx < 0 || fontIdx >= (int)fonts.size()) return nullptr;
+        GlyphKey key{fontIdx, codepoint, pixelSize};
+        for (auto &g : glyphs)
+            if (g.key == key) return &g;
 
-    // Lazily compute and cache advance/bearing only — actual glyph bitmap
-    // rasterization for drawing happens per-call in fillText (see below),
-    // matching the GL backend's split between metric cache and draw-time
-    // rasterization for simplicity (no shared bitmap atlas on this path yet).
-    FontFace &f = fonts[fontIdx];
-    if (!f.ready) return nullptr;
+        FontFace &f = fonts[fontIdx];
+        if (!f.ready) return nullptr;
 
-    float scale = stbtt_ScaleForPixelHeight(&f.info, (float)pixelSize);
-    int advanceRaw, lsbRaw;
-    stbtt_GetCodepointHMetrics(&f.info, codepoint, &advanceRaw, &lsbRaw);
-    int x0, y0, x1, y1;
-    stbtt_GetCodepointBitmapBox(&f.info, codepoint, scale, scale, &x0, &y0, &x1, &y1);
+        float scale = stbtt_ScaleForPixelHeight(&f.info, (float)pixelSize);
+        int advanceRaw, lsbRaw;
+        stbtt_GetCodepointHMetrics(&f.info, codepoint, &advanceRaw, &lsbRaw);
+        int x0, y0, x1, y1;
+        stbtt_GetCodepointBitmapBox(&f.info, codepoint, scale, scale, &x0, &y0, &x1, &y1);
 
-    GlyphEntry entry;
-    entry.key = key;
-    entry.xoff = x0;
-    entry.yoff = y0;
-    entry.advance = (int)std::round(advanceRaw * scale);
-    glyphs.push_back(entry);
-    return &glyphs.back();
-}
+        GlyphEntry entry;
+        entry.key = key;
+        entry.xoff = x0;
+        entry.yoff = y0;
+        entry.advance = (int)std::round(advanceRaw * scale);
+        glyphs.push_back(entry);
+        return &glyphs.back();
+    }
 
-float Canvas2DMetal::getKernAdvance(int fontIdx, int cp1, int cp2, int pixelSize) const
-{
-    if (fontIdx < 0 || fontIdx >= (int)fonts.size()) return 0.f;
-    const FontFace &f = fonts[fontIdx];
-    if (!f.ready) return 0.f;
-    float scale = stbtt_ScaleForPixelHeight(&f.info, (float)pixelSize);
-    return stbtt_GetCodepointKernAdvance(&f.info, cp1, cp2) * scale;
-}
+    float getKernAdvance(int fontIdx, int cp1, int cp2, int pixelSize) const
+    {
+        if (fontIdx < 0 || fontIdx >= (int)fonts.size()) return 0.f;
+        const FontFace &f = fonts[fontIdx];
+        if (!f.ready) return 0.f;
+        float scale = stbtt_ScaleForPixelHeight(&f.info, (float)pixelSize);
+        return stbtt_GetCodepointKernAdvance(&f.info, cp1, cp2) * scale;
+    }
 
-// ── Frame state (encoder wiring) ─────────────────────────────────────────────
-// These three members + beginFrame/endFrame are NEW relative to
-// flux_canvas2d_backend.hpp's declared Canvas2DMetal shape — added here as
-// the resolution to the encoder-passing gap. Declared via category-style
-// extension since the header only forward-declares the struct's documented
-// members; here we attach the frame-scoped fields as plain members appended
-// at the point of first use is not possible in C++ from a .mm without
-// touching the header, so these live as static thread-local state instead,
-// scoped per Canvas2DMetalContext pointer (one active frame at a time, which
-// matches actual usage: one CanvasWidget renders at a time on the render
-// thread).
-
-namespace {
-struct FrameState
-{
-    id<MTLRenderCommandEncoder> encoder = nil;
-    id<MTLDevice> device = nil;
-    float mvp[16];
+    // ── This frame's live encoder state ─────────────────────────────────
+    // Valid only between Canvas2DBackend_metalBeginFrame/EndFrame calls.
+    id<MTLRenderCommandEncoder> frameEncoder = nil;
+    id<MTLDevice> frameDevice = nil;
+    float frameMVP[16] = {};
 };
-std::unordered_map<Canvas2DMetalContext *, FrameState> g_frameState;
-}
-
-void Canvas2DMetalBeginFrame(Canvas2DMetal *metal, id<MTLDevice> device,
-                             id<MTLRenderCommandEncoder> encoder, const float mvp[16])
-{
-    if (!metal || !metal->ctx) return;
-    FrameState &fs = g_frameState[metal->ctx];
-    fs.encoder = encoder;
-    fs.device = device;
-    memcpy(fs.mvp, mvp, sizeof(fs.mvp));
-}
-
-void Canvas2DMetalEndFrame(Canvas2DMetal *metal)
-{
-    if (!metal || !metal->ctx) return;
-    g_frameState.erase(metal->ctx);
-}
-
-static FrameState *currentFrame(Canvas2DBackend *backend)
-{
-    if (!backend || !backend->metal || !backend->metal->ctx) return nullptr;
-    auto it = g_frameState.find(backend->metal->ctx);
-    return it != g_frameState.end() ? &it->second : nullptr;
-}
 
 // ============================================================================
-// Canvas2DBackend — create/destroy
+// Public lifecycle / frame API — the ONLY surface flux_canvas_macos.mm sees.
 // ============================================================================
 
-Canvas2DBackend *Canvas2DBackend::create(Canvas2DMetal *metal)
+Canvas2DBackend *Canvas2DBackend_create(id<MTLDevice> /*device*/)
 {
-    auto *b = new Canvas2DBackend();
-    b->metal = metal;
-    return b;
+    return new Canvas2DBackend();
 }
 
-void Canvas2DBackend::destroy(Canvas2DBackend *b)
+void Canvas2DBackend_destroy(Canvas2DBackend *b)
 {
     delete b;
+}
+
+void Canvas2DBackend_metalBeginFrame(Canvas2DBackend *b,
+                                     id<MTLDevice> device,
+                                     id<MTLRenderCommandEncoder> encoder,
+                                     const float mvp[16])
+{
+    if (!b) return;
+    b->frameEncoder = encoder;
+    b->frameDevice = device;
+    memcpy(b->frameMVP, mvp, sizeof(b->frameMVP));
+}
+
+void Canvas2DBackend_metalEndFrame(Canvas2DBackend *b)
+{
+    if (!b) return;
+    b->frameEncoder = nil;
+    b->frameDevice = nil;
 }
 
 // ============================================================================
@@ -297,7 +296,7 @@ Canvas2D::Canvas2D(Canvas2DBackend *backend, int canvasW, int canvasH)
 {
 }
 
-// ── State stack ──────────────────────────────────────────────────────────────
+// ── State stack ──────────────────────────────────────────────────────────
 
 void Canvas2D::save()
 {
@@ -348,16 +347,13 @@ void Canvas2D::restore()
     stateStack_.pop_back();
 }
 
-// ── Transform — TODO: Metal path has no CTM tracking yet (unlike the GL
-// Mat3 path). translate/scale/rotate are no-ops for now; callers needing
-// transforms should bake them into vertex coordinates directly until this
-// is implemented. Flagging rather than silently no-op-ing without a trace.
-void Canvas2D::translate(float, float) { /* TODO: Metal CTM not yet implemented */ }
+// ── Transform — TODO: no CTM tracking on this path yet.
+void Canvas2D::translate(float, float) { /* TODO */ }
 void Canvas2D::scale(float, float) { /* TODO */ }
 void Canvas2D::rotate(float) { /* TODO */ }
 void Canvas2D::resetTransform() { /* TODO */ }
 
-// ── Style ─────────────────────────────────────────────────────────────────────
+// ── Style ────────────────────────────────────────────────────────────────
 
 void Canvas2D::setFillColor(Color c) { fillColor_ = c; fillIsGrad_ = false; }
 void Canvas2D::setStrokeColor(Color c) { strokeColor_ = c; }
@@ -366,11 +362,10 @@ void Canvas2D::setLineCap(LineCap cap) { lineCap_ = cap; }
 void Canvas2D::setLineJoin(LineJoin join) { lineJoin_ = join; }
 void Canvas2D::setMiterLimit(float limit) { miterLimit_ = limit; }
 void Canvas2D::setGlobalAlpha(float a) { globalAlpha_ = a; }
-void Canvas2D::setCompositeOp(CompositeOp op) { compositeOp_ = op; } // TODO: only SourceOver blend wired in pipeline
+void Canvas2D::setCompositeOp(CompositeOp op) { compositeOp_ = op; }
 void Canvas2D::setFillRule(FillRule rule) { fillRule_ = rule; }
 
-// ── Gradient — TODO: same limitation as Painter's fillGradientRect: no LUT
-// texture yet, multi-stop unsupported. Recorded but unused at draw time.
+// ── Gradient — TODO: no LUT texture, multi-stop unsupported.
 void Canvas2D::beginLinearGradient(float x0, float y0, float x1, float y1)
 {
     gradType_ = GradType::Linear;
@@ -386,7 +381,7 @@ void Canvas2D::beginRadialGradient(float cx, float cy, float innerR, float outer
 void Canvas2D::addColorStop(float t, Color c) { gStops_.push_back({t, c}); }
 void Canvas2D::setFillGradient() { fillIsGrad_ = true; }
 
-// ── Draw helpers ──────────────────────────────────────────────────────────────
+// ── Draw helpers ────────────────────────────────────────────────────────
 
 static void pushQuad(std::vector<CVertex> &out, float x, float y, float w, float h,
                      float u0=0, float v0=0, float u1=1, float v1=1)
@@ -402,80 +397,70 @@ static void pushQuad(std::vector<CVertex> &out, float x, float y, float w, float
 static void drawSolid(Canvas2DBackend *backend, const std::vector<CVertex> &verts,
                       Color color, float globalAlpha)
 {
-    if (verts.empty()) return;
-    FrameState *fs = currentFrame(backend);
-    if (!fs || !fs->encoder) return;
-    auto &res = c2dRes(fs->device);
+    if (verts.empty() || !backend || !backend->frameEncoder) return;
+    auto &res = c2dRes(backend->frameDevice);
     if (!res.pipeline) return;
 
-    [fs->encoder setRenderPipelineState:res.pipeline];
-    [fs->encoder setVertexBytes:verts.data() length:verts.size()*sizeof(CVertex) atIndex:0];
+    [backend->frameEncoder setRenderPipelineState:res.pipeline];
+    [backend->frameEncoder setVertexBytes:verts.data() length:verts.size()*sizeof(CVertex) atIndex:0];
 
     struct { float mvp[16]; float color[4]; int mode; } u;
-    memcpy(u.mvp, fs->mvp, sizeof(u.mvp));
+    memcpy(u.mvp, backend->frameMVP, sizeof(u.mvp));
     u.color[0] = color.r/255.f; u.color[1] = color.g/255.f;
     u.color[2] = color.b/255.f; u.color[3] = (color.a/255.f) * globalAlpha;
     u.mode = 0;
-    [fs->encoder setVertexBytes:&u length:sizeof(u) atIndex:1];
-    [fs->encoder setFragmentBytes:&u length:sizeof(u) atIndex:1];
-    [fs->encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:verts.size()];
+    [backend->frameEncoder setVertexBytes:&u length:sizeof(u) atIndex:1];
+    [backend->frameEncoder setFragmentBytes:&u length:sizeof(u) atIndex:1];
+    [backend->frameEncoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:verts.size()];
 }
 
 static void drawTexturedR8(Canvas2DBackend *backend, const std::vector<CVertex> &verts,
                            Color tint, float globalAlpha, id<MTLTexture> tex)
 {
-    if (verts.empty() || !tex) return;
-    FrameState *fs = currentFrame(backend);
-    if (!fs || !fs->encoder) return;
-    auto &res = c2dRes(fs->device);
+    if (verts.empty() || !tex || !backend || !backend->frameEncoder) return;
+    auto &res = c2dRes(backend->frameDevice);
     if (!res.pipeline) return;
 
-    [fs->encoder setRenderPipelineState:res.pipeline];
-    [fs->encoder setVertexBytes:verts.data() length:verts.size()*sizeof(CVertex) atIndex:0];
+    [backend->frameEncoder setRenderPipelineState:res.pipeline];
+    [backend->frameEncoder setVertexBytes:verts.data() length:verts.size()*sizeof(CVertex) atIndex:0];
 
     struct { float mvp[16]; float color[4]; int mode; } u;
-    memcpy(u.mvp, fs->mvp, sizeof(u.mvp));
+    memcpy(u.mvp, backend->frameMVP, sizeof(u.mvp));
     u.color[0] = tint.r/255.f; u.color[1] = tint.g/255.f;
     u.color[2] = tint.b/255.f; u.color[3] = (tint.a/255.f) * globalAlpha;
     u.mode = 1;
-    [fs->encoder setVertexBytes:&u length:sizeof(u) atIndex:1];
-    [fs->encoder setFragmentBytes:&u length:sizeof(u) atIndex:1];
-    [fs->encoder setFragmentTexture:tex atIndex:0];
-    [fs->encoder setFragmentSamplerState:res.sampler atIndex:0];
-    [fs->encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:verts.size()];
+    [backend->frameEncoder setVertexBytes:&u length:sizeof(u) atIndex:1];
+    [backend->frameEncoder setFragmentBytes:&u length:sizeof(u) atIndex:1];
+    [backend->frameEncoder setFragmentTexture:tex atIndex:0];
+    [backend->frameEncoder setFragmentSamplerState:res.sampler atIndex:0];
+    [backend->frameEncoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:verts.size()];
 }
 
 static void drawTexturedRGBA(Canvas2DBackend *backend, const std::vector<CVertex> &verts,
                              float globalAlpha, id<MTLTexture> tex)
 {
-    if (verts.empty() || !tex) return;
-    FrameState *fs = currentFrame(backend);
-    if (!fs || !fs->encoder) return;
-    auto &res = c2dRes(fs->device);
+    if (verts.empty() || !tex || !backend || !backend->frameEncoder) return;
+    auto &res = c2dRes(backend->frameDevice);
     if (!res.pipeline) return;
 
-    [fs->encoder setRenderPipelineState:res.pipeline];
-    [fs->encoder setVertexBytes:verts.data() length:verts.size()*sizeof(CVertex) atIndex:0];
+    [backend->frameEncoder setRenderPipelineState:res.pipeline];
+    [backend->frameEncoder setVertexBytes:verts.data() length:verts.size()*sizeof(CVertex) atIndex:0];
 
     struct { float mvp[16]; float color[4]; int mode; } u;
-    memcpy(u.mvp, fs->mvp, sizeof(u.mvp));
+    memcpy(u.mvp, backend->frameMVP, sizeof(u.mvp));
     u.color[0]=u.color[1]=u.color[2]=1.f; u.color[3]=globalAlpha;
     u.mode = 2;
-    [fs->encoder setVertexBytes:&u length:sizeof(u) atIndex:1];
-    [fs->encoder setFragmentBytes:&u length:sizeof(u) atIndex:1];
-    [fs->encoder setFragmentTexture:tex atIndex:0];
-    [fs->encoder setFragmentSamplerState:res.sampler atIndex:0];
-    [fs->encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:verts.size()];
+    [backend->frameEncoder setVertexBytes:&u length:sizeof(u) atIndex:1];
+    [backend->frameEncoder setFragmentBytes:&u length:sizeof(u) atIndex:1];
+    [backend->frameEncoder setFragmentTexture:tex atIndex:0];
+    [backend->frameEncoder setFragmentSamplerState:res.sampler atIndex:0];
+    [backend->frameEncoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:verts.size()];
 }
 
-// ── Primitives ────────────────────────────────────────────────────────────────
+// ── Primitives ───────────────────────────────────────────────────────────
 
 void Canvas2D::clearRect(float x, float y, float w, float h)
 {
-    // No true "clear to transparent" sub-rect in this pass — Metal load
-    // action clears the whole pass already (see glRenderPass). Approximate
-    // by filling with transparent black, which at least zeroes coverage
-    // for content drawn before this call.
     std::vector<CVertex> v;
     pushQuad(v, x, y, w, h);
     drawSolid(backend_, v, Color::fromRGBA(0,0,0,0), 1.f);
@@ -530,8 +515,6 @@ void Canvas2D::fillRoundedRect(float x, float y, float w, float h, float r)
 
 void Canvas2D::strokeRoundedRect(float x, float y, float w, float h, float r)
 {
-    // TODO: proper rounded outline (same deferred technique as Painter's
-    // drawRoundedRectOutline). Falls back to a sharp-corner stroke for now.
     strokeRect(x, y, w, h);
     (void)r;
 }
@@ -569,14 +552,7 @@ void Canvas2D::strokeCircle(float cx, float cy, float r)
     drawSolid(backend_, v, strokeColor_, globalAlpha_);
 }
 
-// ── Path API — TODO: minimal implementation. beginPath/lineTo/etc. record
-// points; fill()/stroke() triangulate as a simple fan (convex paths only)
-// or polyline-stroke, matching Painter's fillPolygonAlpha/drawPolyline
-// approach. Arcs/beziers are flattened to line segments at a fixed
-// tolerance. This is NOT a full path renderer (no proper concave fill,
-// no bezier subdivision adaptive to scale) — sufficient for simple UI
-// shapes, flagged as a known limitation for complex paths.
-
+// ── Path API — TODO: minimal (convex fan fill / polyline stroke).
 void Canvas2D::beginPath() { path_.clear(); }
 void Canvas2D::closePath() { if (!path_.empty()) path_.push_back({pathStartX_, pathStartY_, false}); }
 void Canvas2D::moveTo(float x, float y) { path_.push_back({x, y, true}); pathStartX_=x; pathStartY_=y; curX_=x; curY_=y; }
@@ -593,7 +569,7 @@ void Canvas2D::arc(float cx, float cy, float radius, float startAngle, float end
         lineTo(x, y);
     }
 }
-void Canvas2D::arcTo(float, float, float x2, float y2, float) { lineTo(x2, y2); } // TODO: true arcTo tangent calc
+void Canvas2D::arcTo(float, float, float x2, float y2, float) { lineTo(x2, y2); }
 void Canvas2D::quadraticCurveTo(float cpx, float cpy, float x, float y)
 {
     const int segs = 16;
@@ -666,29 +642,23 @@ void Canvas2D::stroke()
 
 void Canvas2D::clip()
 {
-    // TODO: real clip stack via scissor or stencil, mirroring Painter's
-    // pushClipRect approach. Path-based clip needs a stencil mask since
-    // arbitrary paths aren't axis-aligned — deferred.
     ++clipDepth_;
 }
 
-// ── Font registration ─────────────────────────────────────────────────────────
+// ── Font registration ───────────────────────────────────────────────────
 
 bool Canvas2D::registerFont(Canvas2DBackend *backend, const std::string &name,
                             const std::string &ttfPath)
 {
-    if (!backend || !backend->metal) return false;
-    return backend->metal->addFont(name, ttfPath) >= 0;
+    if (!backend) return false;
+    return backend->addFont(name, ttfPath) >= 0;
 }
 
-// ── Image ─────────────────────────────────────────────────────────────────────
+// ── Image ────────────────────────────────────────────────────────────────
 
 Canvas2DImage *Canvas2D::loadImage(const std::string &path)
 {
-    // TODO: actual file decode (PNG/JPEG via stb_image) not wired here —
-    // this project's image pipeline (NativeImage population, flagged as a
-    // loose end back in the Painter stage) needs to land first. Stub
-    // returns nullptr rather than silently fabricating a blank texture.
+    // TODO: PNG/JPEG decode not wired here yet.
     (void)path;
     return nullptr;
 }
@@ -696,23 +666,20 @@ Canvas2DImage *Canvas2D::loadImage(const std::string &path)
 Canvas2DImage *Canvas2D::loadImageFromMemory(const unsigned char *data, int byteLen)
 {
     (void)data; (void)byteLen;
-    return nullptr; // TODO: same as loadImage
+    return nullptr;
 }
 
 void Canvas2D::updateImage(Canvas2DImage *img, const unsigned char *rgba, int w, int h)
 {
     auto *m = static_cast<Canvas2DImageMetal *>(img);
-    if (!m) return;
-    FrameState *fs = currentFrame(backend_);
-    id<MTLDevice> device = fs ? fs->device : nil;
-    if (!device) return;
+    if (!m || !backend_ || !backend_->frameDevice) return;
 
-    if (!m->ctx) m->ctx = new Canvas2DMetalContext();
+    if (!m->ctx) m->ctx = new Canvas2DMetalTexContext();
     if (!m->ctx->texture || m->width != w || m->height != h) {
         MTLTextureDescriptor *td = [MTLTextureDescriptor
             texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
                                           width:w height:h mipmapped:NO];
-        m->ctx->texture = [device newTextureWithDescriptor:td];
+        m->ctx->texture = [backend_->frameDevice newTextureWithDescriptor:td];
         m->width = w; m->height = h;
     }
     [m->ctx->texture replaceRegion:MTLRegionMake2D(0,0,w,h) mipmapLevel:0
@@ -751,11 +718,7 @@ void Canvas2D::drawImage(const Canvas2DImage *img, float sx, float sy, float sw,
     drawTexturedRGBA(backend_, v, globalAlpha_, m->ctx->texture);
 }
 
-// ── Text ──────────────────────────────────────────────────────────────────────
-// Draw-time-rasterized (no shared atlas on this path, unlike Painter's
-// GlyphAtlas — Canvas2D's text usage is typically lower-volume, e.g.
-// labels inside custom RenderSurface content). Each fillText call
-// rasterizes its glyphs into a temporary texture per call.
+// ── Text ─────────────────────────────────────────────────────────────────
 
 void Canvas2D::parseFontDesc(const std::string &desc)
 {
@@ -777,26 +740,26 @@ void Canvas2D::setTextBaseline(TextBaseline baseline) { textBaseline_ = baseline
 
 int Canvas2D::resolveFont() const
 {
-    if (!backend_ || !backend_->metal) return -1;
-    int idx = backend_->metal->findFont(fontFace_);
-    return idx >= 0 ? idx : (backend_->metal->fonts.empty() ? -1 : 0);
+    if (!backend_) return -1;
+    int idx = backend_->findFont(fontFace_);
+    return idx >= 0 ? idx : (backend_->fonts.empty() ? -1 : 0);
 }
 int Canvas2D::currentFontIdx() const { return resolveFont(); }
 
 float Canvas2D::getKernAdvance(int fontIdx, int cp1, int cp2, int pixelSize) const
 {
-    return backend_ && backend_->metal ? backend_->metal->getKernAdvance(fontIdx, cp1, cp2, pixelSize) : 0.f;
+    return backend_ ? backend_->getKernAdvance(fontIdx, cp1, cp2, pixelSize) : 0.f;
 }
 
 float Canvas2D::measureText(const std::string &text)
 {
     int fontIdx = resolveFont();
-    if (fontIdx < 0 || !backend_->metal) return 0.f;
+    if (fontIdx < 0 || !backend_) return 0.f;
     float total = 0.f;
     int prevCp = 0;
     for (unsigned char c : text) {
         int cp = c;
-        const auto *g = backend_->metal->getGlyph(fontIdx, cp, (int)fontSize_);
+        const auto *g = backend_->getGlyph(fontIdx, cp, (int)fontSize_);
         if (g) total += g->advance;
         if (prevCp) total += getKernAdvance(fontIdx, prevCp, cp, (int)fontSize_);
         prevCp = cp;
@@ -810,12 +773,12 @@ static void drawTextInternal(Canvas2D *self, Canvas2DBackend *backend,
                              const std::string &fontFace, float fontSize,
                              CanvasTextAlign align, TextBaseline baseline)
 {
-    if (!backend || !backend->metal || text.empty()) return;
-    int fontIdx = backend->metal->findFont(fontFace);
-    if (fontIdx < 0) fontIdx = backend->metal->fonts.empty() ? -1 : 0;
+    if (!backend || text.empty()) return;
+    int fontIdx = backend->findFont(fontFace);
+    if (fontIdx < 0) fontIdx = backend->fonts.empty() ? -1 : 0;
     if (fontIdx < 0) return;
 
-    auto &face = backend->metal->fonts[fontIdx];
+    auto &face = backend->fonts[fontIdx];
     if (!face.ready) return;
 
     float scale = stbtt_ScaleForPixelHeight(&face.info, fontSize);
@@ -831,10 +794,8 @@ static void drawTextInternal(Canvas2D *self, Canvas2DBackend *backend,
     if (baseline == TextBaseline::Top) baselineY = y + ascent * scale;
     else if (baseline == TextBaseline::Middle) baselineY = y + (ascent + descent) * 0.5f * scale;
     else if (baseline == TextBaseline::Bottom) baselineY = y + descent * scale;
-    // Alphabetic: y is already the baseline.
 
-    FrameState *fs = currentFrame(backend);
-    if (!fs || !fs->device) return;
+    if (!backend->frameDevice) return;
 
     float penX = startX;
     int prevCp = 0;
@@ -853,7 +814,7 @@ static void drawTextInternal(Canvas2D *self, Canvas2DBackend *backend,
             MTLTextureDescriptor *td = [MTLTextureDescriptor
                 texture2DDescriptorWithPixelFormat:MTLPixelFormatR8Unorm
                                               width:w height:h mipmapped:NO];
-            id<MTLTexture> tex = [fs->device newTextureWithDescriptor:td];
+            id<MTLTexture> tex = [backend->frameDevice newTextureWithDescriptor:td];
             [tex replaceRegion:MTLRegionMake2D(0,0,w,h) mipmapLevel:0
                     withBytes:bitmap.data() bytesPerRow:w];
 
@@ -877,48 +838,39 @@ void Canvas2D::fillText(const std::string &text, float x, float y, float /*maxWi
 
 void Canvas2D::strokeText(const std::string &text, float x, float y, float /*maxWidth*/)
 {
-    // TODO: true outlined glyph stroke not implemented — falls back to a
-    // filled draw using strokeColor_ so callers at least get visible output.
     drawTextInternal(this, backend_, text, x, y, strokeColor_, globalAlpha_,
                      fontFace_, fontSize_, textAlign_, textBaseline_);
 }
 
-// ── Clip rect ─────────────────────────────────────────────────────────────────
+// ── Clip rect ────────────────────────────────────────────────────────────
 
 void Canvas2D::pushClipRect(float x, float y, float w, float h)
 {
-    FrameState *fs = currentFrame(backend_);
-    if (!fs || !fs->encoder) return;
+    if (!backend_ || !backend_->frameEncoder) return;
     MTLScissorRect r;
     r.x = (NSUInteger)std::max(0.f, x);
     r.y = (NSUInteger)std::max(0.f, y);
     r.width = (NSUInteger)std::max(0.f, w);
     r.height = (NSUInteger)std::max(0.f, h);
-    [fs->encoder setScissorRect:r];
+    [backend_->frameEncoder setScissorRect:r];
     ++clipDepth_;
 }
 
 void Canvas2D::popClipRect()
 {
-    // TODO: real stack (same limitation noted in Painter::popClipRect) —
-    // resets to full canvas bounds rather than the previous nested rect.
-    FrameState *fs = currentFrame(backend_);
-    if (!fs || !fs->encoder) return;
+    if (!backend_ || !backend_->frameEncoder) return;
     MTLScissorRect r{0, 0, (NSUInteger)w_, (NSUInteger)h_};
-    [fs->encoder setScissorRect:r];
+    [backend_->frameEncoder setScissorRect:r];
     if (clipDepth_ > 0) --clipDepth_;
 }
 
-// ── Pixel access — TODO: not implemented for Metal (would need a
-// blit-to-CPU-readable-buffer round trip). Stubs avoid silent corruption
-// by leaving `out` untouched / doing nothing, rather than guessing data.
+// ── Pixel access — TODO: not implemented on this path.
 void Canvas2D::getImageData(float, float, float, float, std::vector<uint8_t> &out)
 {
-    out.clear(); // TODO
+    out.clear();
 }
 void Canvas2D::putImageData(const std::vector<uint8_t> &, int, int, float, float)
 {
-    // TODO
 }
 
 #endif // TARGET_OS_OSX

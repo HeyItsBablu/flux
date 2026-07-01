@@ -503,7 +503,7 @@ GraphicsContext PlatformWindow::getMeasureContext() const {
         ctx.height = cachedHeight;
         ctx.glyphAtlas = macState->glyphAtlasReady ? &macState->glyphAtlas : nullptr;
     }
-    return ctx;
+    return ctx; 
 }
 
 // ============================================================================

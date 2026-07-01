@@ -224,7 +224,7 @@ public:
 
     // Narrow accessors so other .mm files never need MacState's full
     // definition. Caller does the (__bridge id<...>) cast.
-    void *getMacMetalDevicePtr() const;
+    void *getMacMetalDevicePtr() const; 
     void *getMacNSViewPtr() const;
 #endif
 #endif

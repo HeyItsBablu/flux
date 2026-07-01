@@ -8,12 +8,20 @@
 #import <QuartzCore/CAMetalLayer.h>
 
 #include "flux/flux_canvas2d.hpp"
-#include "flux/flux_canvas2d_backend.hpp"
 #include "flux/flux_window.hpp"
 #include "flux/flux_canvas.hpp"
 #include "flux/flux_painter.hpp"
 #include <cassert>
 #include <unordered_map>
+
+// ── Canvas2DBackend lifecycle — defined in flux_canvas2d_metal.mm.
+// No shared header: this is the entire contract between the two files.
+extern Canvas2DBackend *Canvas2DBackend_create(id<MTLDevice> device);
+extern void Canvas2DBackend_destroy(Canvas2DBackend *b);
+extern void Canvas2DBackend_metalBeginFrame(Canvas2DBackend *b, id<MTLDevice> device,
+                                            id<MTLRenderCommandEncoder> encoder,
+                                            const float mvp[16]);
+extern void Canvas2DBackend_metalEndFrame(Canvas2DBackend *b);
 
 // ============================================================================
 // macOS per-widget state
@@ -36,8 +44,7 @@ struct MacCanvasState
     // ── Canvas2D backend (per-widget, owned) ─────────────────────────────────
     // Created in initCanvas, destroyed in destroyCanvas. Not shared —
     // each widget registers its own fonts, same as Win32's ensureD2D().
-    Canvas2DMetal   *canvasMetal  = nullptr;
-    Canvas2DBackend *backend      = nullptr;
+    Canvas2DBackend *backend = nullptr;
 };
 
 static std::unordered_map<CanvasWidget *, MacCanvasState> s_macState;
@@ -98,9 +105,7 @@ static void metalOrtho(float l, float r, float b, float t, float out[16])
 
 // ============================================================================
 // initCanvas — creates per-widget Metal resources and Canvas2D backend,
-// registers fonts. Mirroring ensureD2D() in flux_canvas_win32.cpp:
-// PlatformWindow is only used to fetch the shared MTLDevice (like Win32
-// fetches D3DDevice*); everything else is owned by this widget.
+// registers fonts. Mirroring ensureD2D() in flux_canvas_win32.cpp.
 // ============================================================================
 
 static void initCanvas(CanvasWidget *w)
@@ -108,7 +113,7 @@ static void initCanvas(CanvasWidget *w)
     auto &s = macState(w);
     if (s.initialized) return;
 
-    auto *inst = FluxUI::getCurrentInstance();
+    auto *inst = FluxUI::getCurrentInstance(); 
     auto *pw   = inst ? inst->getPlatformWindowPtr() : nullptr;
     if (!pw) return;
 
@@ -128,21 +133,8 @@ static void initCanvas(CanvasWidget *w)
     [nsView.layer insertSublayer:s.metalLayer atIndex:0];
 
     // ── Canvas2D backend (per-widget, owned) ─────────────────────────────────
-    s.canvasMetal = new Canvas2DMetal();
-    if (!s.canvasMetal->init())
-    {
-        delete s.canvasMetal;
-        s.canvasMetal = nullptr;
-        return;
-    }
-    s.backend = Canvas2DBackend::create(s.canvasMetal);
-    if (!s.backend)
-    {
-        s.canvasMetal->destroy();
-        delete s.canvasMetal;
-        s.canvasMetal = nullptr;
-        return;
-    }
+    s.backend = Canvas2DBackend_create(s.device);
+    if (!s.backend) return;
 
     // Font registration — one set per widget, same as Win32's ensureD2D().
     auto reg = [&](const char *name, const char *path)
@@ -195,8 +187,7 @@ static void destroyCanvas(CanvasWidget *w)
     w->pendingSurface_.reset();
     w->backend_ = nullptr;
 
-    if (s.backend)     { Canvas2DBackend::destroy(s.backend); s.backend = nullptr; }
-    if (s.canvasMetal) { s.canvasMetal->destroy(); delete s.canvasMetal; s.canvasMetal = nullptr; }
+    if (s.backend) { Canvas2DBackend_destroy(s.backend); s.backend = nullptr; }
 
     s.cmdQueue   = nil;
     s.metalLayer = nil;
@@ -311,9 +302,7 @@ void CanvasWidget::computeLayout(GraphicsContext & /*ctx*/,
 }
 
 // render() does everything inline — lazy init, geometry sync, tick, and
-// draw to the widget's own CAMetalLayer. This mirrors the Linux single-pass
-// approach; the canvas renders to a separate Metal layer beneath the UI
-// layer, so compositing is free (Metal layer ordering handles it).
+// draw to the widget's own CAMetalLayer.
 void CanvasWidget::render(GraphicsContext & /*ctx*/, FontCache &)
 {
     auto &s = macState(this);
@@ -380,12 +369,12 @@ void CanvasWidget::render(GraphicsContext & /*ctx*/, FontCache &)
     sci.height = (NSUInteger)glH;
     [enc setScissorRect:sci];
 
-    if (s.backend && s.backend->metal)
+    if (s.backend)
     {
-        Canvas2DMetalBeginFrame(s.backend->metal, s.device, enc, mvp);
+        Canvas2DBackend_metalBeginFrame(s.backend, s.device, enc, mvp);
         Canvas2D ctx2d(s.backend, canvasW_, canvasH_);
         activeSurface_->render(ctx2d);
-        Canvas2DMetalEndFrame(s.backend->metal);
+        Canvas2DBackend_metalEndFrame(s.backend);
     }
 
     updateSBGeometry(glW, glH);
@@ -429,9 +418,6 @@ void CanvasWidget::markNeedsPaint()
 
 void CanvasWidget::onWindowResize(int /*newW*/, int /*newH*/)
 {
-    // No longer called externally by PlatformWindow (it no longer knows we
-    // exist). Kept for optional direct calls; normal resize is detected
-    // automatically by syncPhysicalGeometry() on the next render().
     auto &s = macState(this);
     if (!s.initialized) return;
     s.lastW = 0;
@@ -447,10 +433,7 @@ bool CanvasWidget::containsPoint(int wx, int wy) const
     { return wx >= x && wx < (x + width) && wy >= y && wy < (y + height); }
 
 // ============================================================================
-// Input — real Widget overrides, reached through the normal dispatch chain
-// in flux_core.cpp (findAndHandleMouseEvent / broadcastMouseEvent /
-// focusedWidget). Coordinates arrive in window space; translate to
-// widget-local ourselves, same as Win32 and Linux.
+// Input — unchanged from before
 // ============================================================================
 
 bool CanvasWidget::handleMouseDown(int mx, int my)
@@ -574,7 +557,7 @@ bool CanvasWidget::handleMouseLeave()
 }
 
 // ============================================================================
-// Shared helpers
+// Shared helpers — unchanged
 // ============================================================================
 
 void CanvasWidget::viewportDims(int glW, int glH, int &vpW, int &vpH) const
@@ -659,10 +642,6 @@ void CanvasWidget::activatePendingSurface()
     vp_.setCanvasSize(canvasW_, canvasH_);
 }
 
-// initEventType / repaintEventType — macOS no longer uses a custom event
-// type for repaint signals. scheduleRepaint() calls pw->invalidate() which
-// dispatches via dispatch_async on the main queue. These stubs exist only
-// so any old call sites compile cleanly during the transition period.
 void CanvasWidget::initEventType() {}
 uint32_t CanvasWidget::repaintEventType() { return 0; }
 

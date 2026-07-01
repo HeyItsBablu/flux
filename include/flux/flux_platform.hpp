@@ -688,7 +688,7 @@ struct MeasureContext
     ~MeasureContext() = default;
 #endif
 
-#ifdef __ANDROID__
+#ifdef __ANDROID__ 
     explicit MeasureContext(int w, int h) : ctx(w, h) {}
     ~MeasureContext() = default;
 #endif

@@ -76,7 +76,7 @@ namespace
 
     int canvasPhysicalHeight()
     {
-        return EM_ASM_INT({ return Module._fluxPhysicalHeight | 0; });
+        return EM_ASM_INT({ return Module._fluxPhysicalHeight | 0; }); 
     }
 
     // ── Per-frame tick ────────────────────────────────────────────────────────────

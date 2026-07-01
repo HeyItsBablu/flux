@@ -2,27 +2,40 @@
 // flux_canvas2d_d2d.cpp
 // Direct2D implementation of Canvas2D for Win32.
 //
+//
+// Lifecycle / offscreen-target access exposed to flux_canvas_win32.cpp as
+// free functions (declared `extern` locally in that file):
+//
+//   Canvas2DBackend    *Canvas2DBackend_create(D3DDevice *dev);
+//   void                Canvas2DBackend_destroy(Canvas2DBackend *b);
+//   bool                Canvas2DBackend_resizeBitmap(Canvas2DBackend *b, int w, int h);
+//   ID2D1DeviceContext  *Canvas2DBackend_offscreenDC(Canvas2DBackend *b);
+//   ID2D1Bitmap1        *Canvas2DBackend_offscreenBitmap(Canvas2DBackend *b);
+//
 // Font rasterization: stb_truetype (matches all other backends).
 // ============================================================================
 
 #ifdef _WIN32
 
 #define _USE_MATH_DEFINES
+#include "flux/flux_canvas2d.hpp"
+#include "flux/flux_d3d_device.hpp"
+
 #include <cmath>
 #include <cassert>
 #include <cstring>
 #include <algorithm>
 #include <fstream>
 #include <sstream>
+#include <string>
+#include <vector>
+#include <unordered_map>
 
-// ── Internal backend header ───────────────────────────────────────────────────
-#include "flux/flux_canvas2d_backend.hpp"
-
-// ── stb_truetype ──────────────────────────────────────────────────────────────
+#include <d2d1_3.h>
+#include <d2d1_1helper.h>
+#include <wrl/client.h>
 
 #include <stb_truetype.h>
-
-// ── stb_image ─────────────────────────────────────────────────────────────────
 #include <stb_image.h>
 
 #include <wincodec.h>
@@ -31,6 +44,15 @@
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
+
+using Microsoft::WRL::ComPtr;
+
+// ── Concrete image type — private to this file ──────────────────────────────
+struct Canvas2DImageD2D : Canvas2DImage
+{
+    ComPtr<ID2D1Bitmap1> bitmap;
+    ~Canvas2DImageD2D() override = default;
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -49,231 +71,291 @@ static inline D2D1_ROUNDED_RECT makeRounded(float x, float y, float w, float h, 
     return D2D1::RoundedRect(makeRect(x, y, w, h), r, r);
 }
 
+// =============================================================================
+// Canvas2DBackend — FULL definition, private to this translation unit.
+//
+// Owns: the D3D device (borrowed), offscreen render target bitmap, glyph
+// atlas bitmap + font faces, and the brush cache used by Canvas2D. One
+// instance per CanvasWidget, created once and reused every frame.
+// =============================================================================
+
+struct Canvas2DBackend
+{
+    D3DDevice *device = nullptr; // borrowed — not owned
+
+    ComPtr<ID2D1DeviceContext> offscreenDC;
+    ComPtr<ID2D1Bitmap1> offscreenBitmap;
+    int bitmapW = 0, bitmapH = 0;
+
+    struct FontFace
+    {
+        std::string name;
+        std::vector<uint8_t> ttfData;
+        stbtt_fontinfo info = {};
+        bool ready = false;
+    };
+    std::vector<FontFace> fonts;
+
+    static constexpr int kAtlasW = 1024;
+    static constexpr int kAtlasH = 1024;
+    std::vector<uint8_t> atlasPixels; // kAtlasW * kAtlasH * 4  (BGRA premul)
+    ComPtr<ID2D1Bitmap> atlasBitmap;
+    int shelfX = 0, shelfY = 0, shelfH = 0;
+
+    struct GlyphKey
+    {
+        int fontIdx, codepoint, pixelSize;
+        bool operator==(const GlyphKey &o) const
+        {
+            return fontIdx == o.fontIdx &&
+                   codepoint == o.codepoint &&
+                   pixelSize == o.pixelSize;
+        }
+    };
+    struct GlyphEntry
+    {
+        GlyphKey key;
+        int atlasX, atlasY, glyphW, glyphH;
+        int xoff, yoff, advance;
+    };
+    std::vector<GlyphEntry> glyphs;
+
+    bool init(D3DDevice *dev)
+    {
+        assert(dev && dev->valid);
+        device = dev;
+
+        atlasPixels.assign(size_t(kAtlasW) * kAtlasH * 4, 0);
+
+        D2D1_BITMAP_PROPERTIES bmpProps = D2D1::BitmapProperties(
+            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+        HRESULT hr = dev->d2dContext->CreateBitmap(
+            D2D1::SizeU(kAtlasW, kAtlasH),
+            atlasPixels.data(), kAtlasW * 4, bmpProps,
+            atlasBitmap.GetAddressOf());
+        return SUCCEEDED(hr);
+    }
+
+    bool resizeBitmap(int w, int h)
+    {
+        if (w <= 0 || h <= 0)
+            return false;
+        if (w == bitmapW && h == bitmapH && offscreenBitmap)
+            return true;
+
+        offscreenDC.Reset();
+        offscreenBitmap.Reset();
+
+        D2D1_BITMAP_PROPERTIES1 bmpProps = D2D1::BitmapProperties1(
+            D2D1_BITMAP_OPTIONS_TARGET,
+            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+        HRESULT hr = device->d2dContext->CreateBitmap(
+            D2D1::SizeU(w, h), nullptr, 0, bmpProps,
+            offscreenBitmap.GetAddressOf());
+        if (FAILED(hr))
+            return false;
+
+        ComPtr<ID2D1DeviceContext> dc;
+        hr = device->d2dDevice->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &dc);
+        if (FAILED(hr))
+            return false;
+
+        dc->SetTarget(offscreenBitmap.Get());
+        offscreenDC = dc;
+        bitmapW = w;
+        bitmapH = h;
+        return true;
+    }
+
+    void destroy()
+    {
+        fonts.clear(); // stbtt_fontinfo has no explicit cleanup needed
+        glyphs.clear();
+        atlasBitmap.Reset();
+        offscreenBitmap.Reset();
+        offscreenDC.Reset();
+        device = nullptr;
+    }
+
+    // ── Font management ─────────────────────────────────────────────────
+
+    int findFont(const std::string &name) const
+    {
+        for (int i = 0; i < (int)fonts.size(); ++i)
+            if (fonts[i].name == name)
+                return i;
+        return -1;
+    }
+
+    int addFont(const std::string &name, const std::string &path)
+    {
+        int ex = findFont(name);
+        if (ex >= 0)
+            return ex;
+
+        std::ifstream f(path, std::ios::binary | std::ios::ate);
+        if (!f)
+            return -1;
+        auto sz = f.tellg();
+        if (sz <= 0)
+            return -1;
+        f.seekg(0);
+
+        fonts.push_back({});
+        auto &face = fonts.back();
+        face.name = name;
+        face.ttfData.resize(size_t(sz));
+        f.read(reinterpret_cast<char *>(face.ttfData.data()), sz);
+        if (!f)
+        {
+            fonts.pop_back();
+            return -1;
+        }
+
+        if (!stbtt_InitFont(&face.info, face.ttfData.data(),
+                            stbtt_GetFontOffsetForIndex(face.ttfData.data(), 0)))
+        {
+            fonts.pop_back();
+            return -1;
+        }
+
+        face.ready = true;
+        return int(fonts.size()) - 1;
+    }
+
+    // ── Glyph atlas ──────────────────────────────────────────────────────
+
+    void uploadAtlas()
+    {
+        D2D1_RECT_U dst = D2D1::RectU(0, 0, kAtlasW, kAtlasH);
+        atlasBitmap->CopyFromMemory(&dst, atlasPixels.data(), kAtlasW * 4);
+    }
+
+    bool bakeGlyph(int fontIdx, int codepoint, int pixelSize, GlyphEntry &out)
+    {
+        if (fontIdx < 0 || fontIdx >= (int)fonts.size() || !fonts[fontIdx].ready)
+            return false;
+
+        const stbtt_fontinfo *info = &fonts[fontIdx].info;
+        float scale = stbtt_ScaleForPixelHeight(info, float(pixelSize));
+
+        int xoff, yoff, gw, gh;
+        unsigned char *bmp = stbtt_GetCodepointBitmap(
+            info, scale, scale, codepoint, &gw, &gh, &xoff, &yoff);
+
+        int advanceWidth, leftBearing;
+        stbtt_GetCodepointHMetrics(info, codepoint, &advanceWidth, &leftBearing);
+        int advance = int(float(advanceWidth) * scale + 0.5f);
+
+        if (!bmp || gw <= 0 || gh <= 0)
+        {
+            if (bmp)
+                stbtt_FreeBitmap(bmp, nullptr);
+            out = {GlyphKey{fontIdx, codepoint, pixelSize}, 0, 0, 0, 0, xoff, yoff, advance};
+            return true;
+        }
+
+        if (shelfX + gw + 1 > kAtlasW)
+        {
+            shelfX = 0;
+            shelfY += shelfH + 1;
+            shelfH = 0;
+        }
+        if (shelfY + gh + 1 > kAtlasH)
+        {
+            stbtt_FreeBitmap(bmp, nullptr);
+            out = {GlyphKey{fontIdx, codepoint, pixelSize}, 0, 0, gw, gh, xoff, yoff, advance};
+            return true;
+        }
+
+        for (int row = 0; row < gh; ++row)
+        {
+            const uint8_t *src = bmp + row * gw;
+            uint8_t *dst = atlasPixels.data() + ((shelfY + row) * kAtlasW + shelfX) * 4;
+            for (int col = 0; col < gw; ++col)
+            {
+                uint8_t g = src[col];
+                dst[col * 4 + 0] = g; // B
+                dst[col * 4 + 1] = g; // G
+                dst[col * 4 + 2] = g; // R
+                dst[col * 4 + 3] = g; // A  (premultiplied white * alpha)
+            }
+        }
+
+        out = {GlyphKey{fontIdx, codepoint, pixelSize}, shelfX, shelfY, gw, gh, xoff, yoff, advance};
+        shelfX += gw + 1;
+        if (gh > shelfH)
+            shelfH = gh;
+
+        stbtt_FreeBitmap(bmp, nullptr);
+        uploadAtlas();
+        return true;
+    }
+
+    const GlyphEntry *getGlyph(int fontIdx, int codepoint, int pixelSize)
+    {
+        for (auto &g : glyphs)
+            if (g.key.fontIdx == fontIdx && g.key.codepoint == codepoint && g.key.pixelSize == pixelSize)
+                return &g;
+        GlyphEntry e;
+        if (!bakeGlyph(fontIdx, codepoint, pixelSize, e))
+            return nullptr;
+        glyphs.push_back(e);
+        return &glyphs.back();
+    }
+
+    float getKernAdvance(int fontIdx, int cp1, int cp2, int pixelSize) const
+    {
+        if (fontIdx < 0 || fontIdx >= (int)fonts.size() || !fonts[fontIdx].ready)
+            return 0.f;
+        const stbtt_fontinfo *info = &fonts[fontIdx].info;
+        float scale = stbtt_ScaleForPixelHeight(info, float(pixelSize));
+        int kern = stbtt_GetCodepointKernAdvance(info, cp1, cp2);
+        return float(kern) * scale;
+    }
+};
+
 static inline ID2D1DeviceContext *getDC(Canvas2DBackend *b)
 {
-    return b->d2d->offscreenDC.Get();
+    return b->offscreenDC.Get();
 }
 
-// =============================================================================
-// Canvas2DD2D — init / destroy
-// =============================================================================
+// ============================================================================
+// Public lifecycle / offscreen-target API — the ONLY surface
+// flux_canvas_win32.cpp sees.
+// ============================================================================
 
-bool Canvas2DD2D::init(D3DDevice *dev)
-{
-    assert(dev && dev->valid);
-    device = dev;
-
-    atlasPixels.assign(size_t(kAtlasW) * kAtlasH * 4, 0);
-
-    D2D1_BITMAP_PROPERTIES bmpProps = D2D1::BitmapProperties(
-        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
-    HRESULT hr = dev->d2dContext->CreateBitmap(
-        D2D1::SizeU(kAtlasW, kAtlasH),
-        atlasPixels.data(), kAtlasW * 4, bmpProps,
-        atlasBitmap.GetAddressOf());
-    return SUCCEEDED(hr);
-}
-
-bool Canvas2DD2D::resizeBitmap(int w, int h)
-{
-    if (w <= 0 || h <= 0)
-        return false;
-    if (w == bitmapW && h == bitmapH && offscreenBitmap)
-        return true;
-
-    offscreenDC.Reset();
-    offscreenBitmap.Reset();
-
-    D2D1_BITMAP_PROPERTIES1 bmpProps = D2D1::BitmapProperties1(
-        D2D1_BITMAP_OPTIONS_TARGET,
-        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
-    HRESULT hr = device->d2dContext->CreateBitmap(
-        D2D1::SizeU(w, h), nullptr, 0, bmpProps,
-        offscreenBitmap.GetAddressOf());
-    if (FAILED(hr))
-        return false;
-
-    ComPtr<ID2D1DeviceContext> dc;
-    hr = device->d2dDevice->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &dc);
-    if (FAILED(hr))
-        return false;
-
-    dc->SetTarget(offscreenBitmap.Get());
-    offscreenDC = dc;
-    bitmapW = w;
-    bitmapH = h;
-    return true;
-}
-
-void Canvas2DD2D::destroy()
-{
-    fonts.clear(); // stbtt_fontinfo has no explicit cleanup needed
-    glyphs.clear();
-    atlasBitmap.Reset();
-    offscreenBitmap.Reset();
-    offscreenDC.Reset();
-    device = nullptr;
-}
-
-// ── Font management ───────────────────────────────────────────────────────────
-
-bool Canvas2DD2D::registerFont(Canvas2DD2D *self, const std::string &name,
-                               const std::string &path)
-{
-    return self && self->addFont(name, path) >= 0;
-}
-
-int Canvas2DD2D::findFont(const std::string &name) const
-{
-    for (int i = 0; i < (int)fonts.size(); ++i)
-        if (fonts[i].name == name)
-            return i;
-    return -1;
-}
-
-int Canvas2DD2D::addFont(const std::string &name, const std::string &path)
-{
-    int ex = findFont(name);
-    if (ex >= 0)
-        return ex;
-
-    std::ifstream f(path, std::ios::binary | std::ios::ate);
-    if (!f)
-        return -1;
-    auto sz = f.tellg();
-    if (sz <= 0)
-        return -1;
-    f.seekg(0);
-
-    fonts.push_back({});
-    auto &face = fonts.back();
-    face.name = name;
-    face.ttfData.resize(size_t(sz));
-    f.read(reinterpret_cast<char *>(face.ttfData.data()), sz);
-    if (!f)
-    {
-        fonts.pop_back();
-        return -1;
-    }
-
-    if (!stbtt_InitFont(&face.info, face.ttfData.data(),
-                        stbtt_GetFontOffsetForIndex(face.ttfData.data(), 0)))
-    {
-        fonts.pop_back();
-        return -1;
-    }
-
-    face.ready = true;
-    return int(fonts.size()) - 1;
-}
-
-// ── Glyph atlas ───────────────────────────────────────────────────────────────
-
-void Canvas2DD2D::uploadAtlas()
-{
-    D2D1_RECT_U dst = D2D1::RectU(0, 0, kAtlasW, kAtlasH);
-    atlasBitmap->CopyFromMemory(&dst, atlasPixels.data(), kAtlasW * 4);
-}
-
-bool Canvas2DD2D::bakeGlyph(int fontIdx, int codepoint, int pixelSize, GlyphEntry &out)
-{
-    if (fontIdx < 0 || fontIdx >= (int)fonts.size() || !fonts[fontIdx].ready)
-        return false;
-
-    const stbtt_fontinfo *info = &fonts[fontIdx].info;
-    float scale = stbtt_ScaleForPixelHeight(info, float(pixelSize));
-
-    int xoff, yoff, gw, gh;
-    unsigned char *bmp = stbtt_GetCodepointBitmap(
-        info, scale, scale, codepoint, &gw, &gh, &xoff, &yoff);
-
-    int advanceWidth, leftBearing;
-    stbtt_GetCodepointHMetrics(info, codepoint, &advanceWidth, &leftBearing);
-    int advance = int(float(advanceWidth) * scale + 0.5f);
-
-    if (!bmp || gw <= 0 || gh <= 0)
-    {
-        if (bmp)
-            stbtt_FreeBitmap(bmp, nullptr);
-        out = {GlyphKey{fontIdx, codepoint, pixelSize}, 0, 0, 0, 0, xoff, yoff, advance};
-        return true;
-    }
-
-    if (shelfX + gw + 1 > kAtlasW)
-    {
-        shelfX = 0;
-        shelfY += shelfH + 1;
-        shelfH = 0;
-    }
-    if (shelfY + gh + 1 > kAtlasH)
-    {
-        // Atlas full — return glyph metrics without atlas coords
-        stbtt_FreeBitmap(bmp, nullptr);
-        out = {GlyphKey{fontIdx, codepoint, pixelSize}, 0, 0, gw, gh, xoff, yoff, advance};
-        return true;
-    }
-
-    // stbtt produces a single-channel alpha bitmap; expand to BGRA premultiplied
-    for (int row = 0; row < gh; ++row)
-    {
-        const uint8_t *src = bmp + row * gw;
-        uint8_t *dst = atlasPixels.data() + ((shelfY + row) * kAtlasW + shelfX) * 4;
-        for (int col = 0; col < gw; ++col)
-        {
-            uint8_t g = src[col];
-            dst[col * 4 + 0] = g; // B
-            dst[col * 4 + 1] = g; // G
-            dst[col * 4 + 2] = g; // R
-            dst[col * 4 + 3] = g; // A  (premultiplied white * alpha)
-        }
-    }
-
-    out = {GlyphKey{fontIdx, codepoint, pixelSize}, shelfX, shelfY, gw, gh, xoff, yoff, advance};
-    shelfX += gw + 1;
-    if (gh > shelfH)
-        shelfH = gh;
-
-    stbtt_FreeBitmap(bmp, nullptr);
-    uploadAtlas();
-    return true;
-}
-
-const Canvas2DD2D::GlyphEntry *Canvas2DD2D::getGlyph(int fontIdx, int codepoint, int pixelSize)
-{
-    for (auto &g : glyphs)
-        if (g.key.fontIdx == fontIdx && g.key.codepoint == codepoint && g.key.pixelSize == pixelSize)
-            return &g;
-    GlyphEntry e;
-    if (!bakeGlyph(fontIdx, codepoint, pixelSize, e))
-        return nullptr;
-    glyphs.push_back(e);
-    return &glyphs.back();
-}
-
-float Canvas2DD2D::getKernAdvance(int fontIdx, int cp1, int cp2, int pixelSize) const
-{
-    if (fontIdx < 0 || fontIdx >= (int)fonts.size() || !fonts[fontIdx].ready)
-        return 0.f;
-    const stbtt_fontinfo *info = &fonts[fontIdx].info;
-    float scale = stbtt_ScaleForPixelHeight(info, float(pixelSize));
-    int kern = stbtt_GetCodepointKernAdvance(info, cp1, cp2);
-    return float(kern) * scale;
-}
-
-// =============================================================================
-// Canvas2DBackend — D2D factory
-// =============================================================================
-
-Canvas2DBackend *Canvas2DBackend::create(Canvas2DD2D *d2d)
+Canvas2DBackend *Canvas2DBackend_create(D3DDevice *dev)
 {
     auto *b = new Canvas2DBackend();
-    b->d2d = d2d;
+    if (!b->init(dev))
+    {
+        delete b;
+        return nullptr;
+    }
     return b;
 }
 
-void Canvas2DBackend::destroy(Canvas2DBackend *b)
+void Canvas2DBackend_destroy(Canvas2DBackend *b)
 {
+    if (!b) return;
+    b->destroy();
     delete b;
+}
+
+bool Canvas2DBackend_resizeBitmap(Canvas2DBackend *b, int w, int h)
+{
+    return b && b->resizeBitmap(w, h);
+}
+
+ID2D1DeviceContext *Canvas2DBackend_offscreenDC(Canvas2DBackend *b)
+{
+    return b ? b->offscreenDC.Get() : nullptr;
+}
+
+ID2D1Bitmap1 *Canvas2DBackend_offscreenBitmap(Canvas2DBackend *b)
+{
+    return b ? b->offscreenBitmap.Get() : nullptr;
 }
 
 // =============================================================================
@@ -283,7 +365,7 @@ void Canvas2DBackend::destroy(Canvas2DBackend *b)
 Canvas2D::Canvas2D(Canvas2DBackend *backend, int w, int h)
     : backend_(backend), w_(w), h_(h)
 {
-    assert(backend_ && backend_->d2d && backend_->d2d->offscreenDC);
+    assert(backend_ && backend_->offscreenDC);
 
     using BrushMap = std::unordered_map<uint32_t, ComPtr<ID2D1SolidColorBrush>>;
     brushCache_ = new BrushMap();
@@ -330,7 +412,7 @@ void *Canvas2D::makeStrokeStyle() const
     if (lineJoin_ == LineJoin::Bevel) join = D2D1_LINE_JOIN_BEVEL;
     D2D1_STROKE_STYLE_PROPERTIES sp = D2D1::StrokeStyleProperties(cap, cap, cap, join, miterLimit_);
     auto *ss = new ComPtr<ID2D1StrokeStyle>();
-    backend_->d2d->device->d2dFactory->CreateStrokeStyle(sp, nullptr, 0, ss->GetAddressOf());
+    backend_->device->d2dFactory->CreateStrokeStyle(sp, nullptr, 0, ss->GetAddressOf());
     return ss;
 }
 
@@ -373,7 +455,7 @@ void *Canvas2D::makeFillBrush(float x, float y, float w, float h)
 void *Canvas2D::buildPathGeometry() const
 {
     ComPtr<ID2D1PathGeometry> geom;
-    backend_->d2d->device->d2dFactory->CreatePathGeometry(geom.GetAddressOf());
+    backend_->device->d2dFactory->CreatePathGeometry(geom.GetAddressOf());
     if (!geom) return nullptr;
     ComPtr<ID2D1GeometrySink> sink;
     geom->Open(sink.GetAddressOf());
@@ -762,7 +844,7 @@ static ComPtr<ID2D1Bitmap1> createBitmapFromRGBA(ID2D1DeviceContext *dc,
 bool Canvas2D::registerFont(Canvas2DBackend *backend,
                             const std::string &name, const std::string &path)
 {
-    return backend && backend->d2d && Canvas2DD2D::registerFont(backend->d2d, name, path);
+    return backend && backend->addFont(name, path) >= 0;
 }
 
 Canvas2DImage *Canvas2D::loadImage(const std::string &path)
@@ -869,20 +951,19 @@ void Canvas2D::setTextBaseline(TextBaseline b)  { textBaseline_ = b; }
 
 int Canvas2D::resolveFont() const
 {
-    auto *d2d = backend_->d2d;
-    if (fontBold_ && fontItalic_) { int i = d2d->findFont(fontFace_ + "-bold-italic"); if (i >= 0) return i; }
-    if (fontBold_)                { int i = d2d->findFont(fontFace_ + "-bold");         if (i >= 0) return i; }
-    if (fontItalic_)              { int i = d2d->findFont(fontFace_ + "-italic");       if (i >= 0) return i; }
-    int i = d2d->findFont(fontFace_);
+    if (fontBold_ && fontItalic_) { int i = backend_->findFont(fontFace_ + "-bold-italic"); if (i >= 0) return i; }
+    if (fontBold_)                { int i = backend_->findFont(fontFace_ + "-bold");         if (i >= 0) return i; }
+    if (fontItalic_)              { int i = backend_->findFont(fontFace_ + "-italic");       if (i >= 0) return i; }
+    int i = backend_->findFont(fontFace_);
     if (i >= 0) return i;
-    return d2d->fonts.empty() ? -1 : 0;
+    return backend_->fonts.empty() ? -1 : 0;
 }
 
 int Canvas2D::currentFontIdx() const { return resolveFont(); }
 
 float Canvas2D::getKernAdvance(int fontIdx, int cp1, int cp2, int pixelSize) const
 {
-    return backend_->d2d->getKernAdvance(fontIdx, cp1, cp2, pixelSize);
+    return backend_->getKernAdvance(fontIdx, cp1, cp2, pixelSize);
 }
 
 void Canvas2D::fillText(const std::string &text, float x, float y, float /*maxW*/)
@@ -891,8 +972,7 @@ void Canvas2D::fillText(const std::string &text, float x, float y, float /*maxW*
     int fontIdx = resolveFont();
     if (fontIdx < 0) return;
 
-    auto *d2d = backend_->d2d;
-    const stbtt_fontinfo *info = &d2d->fonts[fontIdx].info;
+    const stbtt_fontinfo *info = &backend_->fonts[fontIdx].info;
     int ps = std::max(4, int(fontSize_ + 0.5f));
     float scale = stbtt_ScaleForPixelHeight(info, float(ps));
 
@@ -900,11 +980,10 @@ void Canvas2D::fillText(const std::string &text, float x, float y, float /*maxW*
     stbtt_GetFontVMetrics(info, &ascent, &descent, &lineGap);
     float ascender = float(ascent) * scale;
 
-    // Measure total width for alignment
     float totalW = 0;
     for (unsigned char ch : text)
     {
-        auto *g = d2d->getGlyph(fontIdx, ch, ps);
+        auto *g = backend_->getGlyph(fontIdx, ch, ps);
         if (g) totalW += float(g->advance);
     }
 
@@ -924,7 +1003,7 @@ void Canvas2D::fillText(const std::string &text, float x, float y, float /*maxW*
     getDC(backend_)->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
     for (unsigned char ch : text)
     {
-        auto *g = d2d->getGlyph(fontIdx, ch, ps);
+        auto *g = backend_->getGlyph(fontIdx, ch, ps);
         if (!g) continue;
         if (g->glyphW > 0 && g->glyphH > 0)
         {
@@ -932,7 +1011,7 @@ void Canvas2D::fillText(const std::string &text, float x, float y, float /*maxW*
             D2D1_RECT_F src = D2D1::RectF(float(g->atlasX), float(g->atlasY),
                                            float(g->atlasX + g->glyphW), float(g->atlasY + g->glyphH));
             D2D1_RECT_F dst = D2D1::RectF(gx, gy, gx + float(g->glyphW), gy + float(g->glyphH));
-            getDC(backend_)->FillOpacityMask(d2d->atlasBitmap.Get(), textBrush.Get(),
+            getDC(backend_)->FillOpacityMask(backend_->atlasBitmap.Get(), textBrush.Get(),
                                              D2D1_OPACITY_MASK_CONTENT_TEXT_NATURAL, &dst, &src);
         }
         px += float(g->advance);
@@ -961,7 +1040,7 @@ float Canvas2D::measureText(const std::string &text)
     float total = 0;
     for (unsigned char ch : text)
     {
-        auto *g = backend_->d2d->getGlyph(fontIdx, ch, ps);
+        auto *g = backend_->getGlyph(fontIdx, ch, ps);
         if (g) total += float(g->advance);
     }
     return total;
