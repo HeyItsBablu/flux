@@ -426,11 +426,24 @@ inline uint32_t platformTickCount()
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return static_cast<uint32_t>(ts.tv_sec * 1000u + ts.tv_nsec / 1'000'000u);
 }
-inline bool platformKeyDown(int) { return false; }
-inline bool platformCtrlDown() { return false; }
-inline bool platformShiftDown() { return false; }
-inline bool platformAltDown() { return false; }
-inline bool platformSpaceDown() { return false; }
+
+// Modifier / space state maintained by flux_window_macos.mm via
+// -flagsChanged:/-keyDown:/-keyUp: on FluxNSView — same pattern as
+// flux_web_detail below for Emscripten. AppKit reports Ctrl/Shift/Option
+// only through flagsChanged:, never through keyDown:/keyUp:, so these
+// must be tracked as persistent state rather than polled directly.
+namespace flux_mac_detail
+{
+    inline bool g_ctrlDown = false;
+    inline bool g_shiftDown = false;
+    inline bool g_altDown = false;
+    inline bool g_spaceDown = false;
+}
+inline bool platformKeyDown(int) { return false; } // no generic polling API on macOS; unused by canvas code
+inline bool platformCtrlDown() { return flux_mac_detail::g_ctrlDown; }
+inline bool platformShiftDown() { return flux_mac_detail::g_shiftDown; }
+inline bool platformAltDown() { return flux_mac_detail::g_altDown; }
+inline bool platformSpaceDown() { return flux_mac_detail::g_spaceDown; }
 
 inline std::wstring toWideString(const std::string &utf8)
 {
@@ -688,7 +701,7 @@ struct MeasureContext
     ~MeasureContext() = default;
 #endif
 
-#ifdef __ANDROID__ 
+#ifdef __ANDROID__
     explicit MeasureContext(int w, int h) : ctx(w, h) {}
     ~MeasureContext() = default;
 #endif

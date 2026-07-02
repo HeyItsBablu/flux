@@ -12,6 +12,7 @@
 #include "flux/flux_window.hpp"
 #include "flux/flux_glyph_atlas_macos.hpp" 
 #include "flux/flux_core.hpp"
+#include "flux/flux_keys.hpp"
 
 #include <unordered_map>
 #include <vector>
@@ -278,6 +279,10 @@ struct PlatformWindow::MacState
 
 - (void)keyDown:(NSEvent*)event {
     if (!_win) return;
+
+    if (event.keyCode == Key::Space)
+        flux_mac_detail::g_spaceDown = true;
+
     bool needsRedraw = false;
     if (_win->callbacks.onKeyDown &&
         _win->callbacks.onKeyDown((int)event.keyCode))
@@ -290,6 +295,24 @@ struct PlatformWindow::MacState
             needsRedraw = true;
     }
     if (needsRedraw) [self renderFrame];
+}
+
+
+
+// No onKeyUp in WindowCallbacks — this exists solely to clear the
+// space-drag-pan flag set above. Widget-level key-up handling isn't
+// wired anywhere else on any platform, so nothing else needs to change.
+- (void)keyUp:(NSEvent*)event {
+    if (event.keyCode == Key::Space)
+        flux_mac_detail::g_spaceDown = false;
+}
+
+// Ctrl/Shift/Option arrive only here on macOS, never via keyDown/keyUp.
+- (void)flagsChanged:(NSEvent*)event {
+    NSEventModifierFlags flags = event.modifierFlags;
+    flux_mac_detail::g_ctrlDown  = (flags & NSEventModifierFlagControl) != 0;
+    flux_mac_detail::g_shiftDown = (flags & NSEventModifierFlagShift)   != 0;
+    flux_mac_detail::g_altDown   = (flags & NSEventModifierFlagOption)  != 0;
 }
 
 // ── NSWindowDelegate ──────────────────────────────────────────────────────────
