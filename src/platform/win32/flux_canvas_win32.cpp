@@ -531,7 +531,7 @@ bool CanvasWidget::handleMouseDown(int sx, int sy)
 
     if (!hC && !vC)
     {
-        if (viewportEnabled_ && panning_)
+        if (viewportEnabled_ && platformSpaceDown())
         {
             beginPan(localX, localY);
         }
