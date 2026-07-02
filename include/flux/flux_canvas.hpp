@@ -130,7 +130,7 @@ public:
     Canvas2DBackend *backend_ = nullptr;
 #endif
 
-#if defined(__ANDROID__) || defined(__EMSCRIPTEN__)
+#ifdef __EMSCRIPTEN__
     Canvas2DGL *canvasGL_ = nullptr;
 #endif
 
@@ -181,6 +181,7 @@ public:
     // ── Android-only ──────────────────────────────────────────────────────────
 #ifdef __ANDROID__
     static void tickAllGL(Widget *root, int windowW, int windowH, float dpi);
+    void onGLContextLost() override;
     bool handleMouseDown(int mx, int my) override;
     bool handleMouseMove(int mx, int my) override;
     bool handleMouseUp(int mx, int my) override;

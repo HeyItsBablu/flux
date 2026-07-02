@@ -1,5 +1,5 @@
 // flux_canvas_android.cpp
-// Compiled only on Android.
+
 #ifdef __ANDROID__
 
 #include "flux/flux_canvas.hpp"
@@ -25,19 +25,33 @@ static void localOrtho(float l, float r, float b, float t, float out[16])
 #define CANVAS_LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "CanvasWidget", __VA_ARGS__)
 
 extern float FluxAndroid_getDpiScale();
-extern Canvas2DGL *FluxAndroid_getCanvasGL();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Per-widget Android canvas state
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 struct AndroidCanvasState
 {
-    bool glInitialized = false;
+    // ── GL object lifetime (shader/atlas/fonts/backend) ────────────────────
 
-    // FBO
+    bool glObjectsReady = false;
+
+    // ── Viewport lifetime (vp_ sizing) ──────────────────────────────────────
+
+    bool viewportReady = false;
+
+    // Owned entirely by this widget.
+    Canvas2DGL *gl = nullptr;
+    Canvas2DBackend *backend = nullptr;
+
+    // FBO — sized to the DOCUMENT (w->docW()/docH()), not the viewport.
+
     GLuint fboId = 0;
     GLuint fboTex = 0;
     GLuint fboDepth = 0;
     int fboW = 0;
     int fboH = 0;
-    // REMOVED: int nvgImage — fboTex is now drawn directly via Painter::drawImage
 };
 
 // One state blob per CanvasWidget instance; keyed by pointer.
@@ -73,6 +87,28 @@ static void deleteFBO(CanvasWidget *w)
         s.fboDepth = 0;
     }
     s.fboW = s.fboH = 0;
+}
+
+// Tears down this widget's own Canvas2DGL/Canvas2DBackend while the GL
+// context is still ALIVE (widget destroyed/detached during normal
+// operation, e.g. removed from the tree mid-session). Issues real
+// glDelete* calls. Do NOT call this from onGLContextLost() — the context
+// is already gone there; see that method for the CPU-side-only teardown.
+static void deleteGL(CanvasWidget *w)
+{
+    auto &s = androidState(w);
+    if (s.backend)
+    {
+        Canvas2DBackend::destroy(s.backend);
+        s.backend = nullptr;
+    }
+    if (s.gl)
+    {
+        s.gl->destroy();
+        delete s.gl;
+        s.gl = nullptr;
+    }
+    s.glObjectsReady = false;
 }
 
 static void ensureFBO(CanvasWidget *w, int physW, int physH)
@@ -115,23 +151,54 @@ static void ensureFBO(CanvasWidget *w, int physW, int physH)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GL init (lazy, first tickAllGL)
+// One-time (per-context) resource creation — shader, VAO/VBO, font atlas,
+// glyph cache, backend. Owned entirely by this widget. Survives resizes;
+// only cleared by onGLContextLost() (context died) or deleteGL() (widget
+// torn down while the context is alive).
 // ─────────────────────────────────────────────────────────────────────────────
 
-static void ensureGL(CanvasWidget *w, int windowW, int windowH, float /*dpi*/)
+static void ensureGLObjects(CanvasWidget *w)
 {
     auto &s = androidState(w);
-    if (s.glInitialized)
+    if (s.glObjectsReady)
         return;
-    s.glInitialized = true;
 
-    w->canvasGL_ = FluxAndroid_getCanvasGL();
+    s.gl = new Canvas2DGL();
+    if (!s.gl->init())
+    {
+        CANVAS_LOGE("Canvas2DGL init failed for widget %p", (void *)w);
+        delete s.gl;
+        s.gl = nullptr;
+        return; // leave glObjectsReady == false — retry next frame
+    }
+    s.gl->addFont("sans", "/system/fonts/Roboto-Regular.ttf");
+    s.gl->addFont("sans-bold", "/system/fonts/Roboto-Bold.ttf");
+    s.gl->addFont("sans-italic", "/system/fonts/Roboto-Italic.ttf");
+    s.gl->addFont("mono", "/system/fonts/DroidSansMono.ttf");
 
-    // canvasW_/canvasH_ are now physical pixels set by computeLayout
+    s.backend = Canvas2DBackend::create(s.gl);
+    s.glObjectsReady = true;
+}
+
+// Cheap viewport/surface (re)initialization — safe to repeat on every
+// resize. Independent of GL object lifetime; does not touch s.gl/s.backend.
+static void ensureViewport(CanvasWidget *w, int windowW, int windowH, float /*dpi*/)
+{
+    auto &s = androidState(w);
+    if (s.viewportReady)
+        return;
+    s.viewportReady = true;
+
+    // canvasW_/canvasH_ are physical pixels set by computeLayout — the
+    // widget's own on-screen (viewport) size.
     int physW = w->canvasW_ > 0 ? w->canvasW_ : windowW;
     int physH = w->canvasH_ > 0 ? w->canvasH_ : windowH;
 
-    w->vp_.init(physW, physH, physW, physH);
+    // docW()/docH() fall back to canvasW_/canvasH_ when unset (see
+    // flux_canvas.hpp). Passing the document extent here — not physW/physH
+    // for both view and canvas — is what lets the viewport pan/zoom beyond
+    // the visible widget bounds, matching Win32/Linux.
+    w->vp_.init(physW, physH, w->docW(), w->docH());
     w->updateViewportSize(physW, physH);
     w->vp_.fitToView();
 
@@ -150,15 +217,17 @@ static void ensureGL(CanvasWidget *w, int windowW, int windowH, float /*dpi*/)
 
 static void glRenderPass(CanvasWidget *w, int windowW, int windowH, float dpi)
 {
-    ensureGL(w, windowW, windowH, dpi);
-    if (!w->canvasGL_)
+    ensureGLObjects(w);
+    auto &s = androidState(w);
+    if (!s.gl || !s.backend)
         return;
+
+    ensureViewport(w, windowW, windowH, dpi);
+
     if (w->pendingSurface_)
         w->activatePendingSurface();
     if (!w->activeSurface_)
         return;
-
-    auto &s = androidState(w);
 
     auto now = CanvasWidget::Clock::now();
     w->frameDt_ = std::chrono::duration<double>(now - w->lastTick_).count();
@@ -167,46 +236,34 @@ static void glRenderPass(CanvasWidget *w, int windowW, int windowH, float dpi)
     w->activeSurface_->update(w->frameDt_);
     w->activeSurface_->preRender();
 
-    int physW = int(w->width * dpi);
-    int physH = int(w->height * dpi);
-    ensureFBO(w, physW, physH);
+    // FBO is sized to the DOCUMENT, not the viewport — matches Win32's
+    // offscreen bitmap (sized w->docW()/docH()) and Linux's Canvas2D
+    // (sized canvasW_/canvasH_, i.e. also the doc extent post-split).
+    int docW = w->docW();
+    int docH = w->docH();
+    ensureFBO(w, docW, docH);
 
     // ── Render surface into FBO ───────────────────────────────────────────
     glBindFramebuffer(GL_FRAMEBUFFER, s.fboId);
-    glViewport(0, 0, physW, physH);
+    glViewport(0, 0, docW, docH);
     glClearColor(0.f, 0.f, 0.f, 0.f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    float z = w->vp_.zoom();
-    float ox = -w->vp_.offsetX() * z;
-    float oy = w->vp_.offsetY() * z;
-
     float orthoM[16];
-    localOrtho(0.f, float(physW), float(physH), 0.f, orthoM);
-
-    float vpM[16] = {
-        z, 0, 0, 0,
-        0, z, 0, 0,
-        0, 0, 1, 0,
-        ox, oy, 0, 1};
-    float mvp[16] = {};
-    for (int col = 0; col < 4; ++col)
-        for (int row = 0; row < 4; ++row)
-            for (int k = 0; k < 4; ++k)
-                mvp[col * 4 + row] += orthoM[k * 4 + row] * vpM[col * 4 + k];
-
+    // No pan/zoom baked in here — the surface always renders at 1:1
+    // doc-space. Pan/zoom is applied later, at composite time in render().
+    localOrtho(0.f, float(docW), float(docH), 0.f, orthoM);
+    memcpy(s.backend->mvp, orthoM, 64);
     {
-        Canvas2DBackend *b = Canvas2DBackend::create(w->canvasGL_);
-        memcpy(b->mvp, mvp, 64);
-        {
-            Canvas2D ctx(b, w->canvasW_, w->canvasH_);
-            w->activeSurface_->render(ctx);
-        }
-        Canvas2DBackend::destroy(b);
+        Canvas2D ctx(s.backend, docW, docH);
+        w->activeSurface_->render(ctx);
     }
 
+    // Scrollbars are viewport-space UI chrome — drawn at viewport
+    // (physical widget) size, not doc size.
+    int physW = w->canvasW_, physH = w->canvasH_;
     w->updateSBGeometry(physW, physH);
     {
         // Scrollbars draw via the same plain-GLES2 Painter used everywhere
@@ -250,7 +307,7 @@ CanvasWidget::~CanvasWidget()
     }
     pendingSurface_.reset();
     deleteFBO(this);
-    canvasGL_ = nullptr;
+    deleteGL(this);
     s_androidState.erase(this);
 }
 
@@ -278,15 +335,22 @@ std::shared_ptr<CanvasWidget> CanvasWidget::setSize(int w, int h)
     markNeedsLayout();
     return ptr();
 }
+
 std::shared_ptr<CanvasWidget> CanvasWidget::setCanvasSize(int w, int h)
 {
-    canvasW_ = w;
-    canvasH_ = h;
-    vp_.setCanvasSize(w, h);
+    // w/h are logical pixels (matching the public API on every other
+    // platform) — store the DOCUMENT size in docW_/docH_, in physical
+    // pixels, distinct from canvasW_/canvasH_ (the viewport's own
+    // physical size, driven by computeLayout()).
+    float dpi = FluxAndroid_getDpiScale();
+    docW_ = int(w * dpi);
+    docH_ = int(h * dpi);
+    vp_.setCanvasSize(docW_, docH_);
     if (activeSurface_)
-        activeSurface_->resize(w, h);
+        activeSurface_->resize(docW_, docH_);
     return ptr();
 }
+
 std::shared_ptr<CanvasWidget> CanvasWidget::redraw()
 {
     markNeedsPaint();
@@ -309,13 +373,18 @@ void CanvasWidget::computeLayout(GraphicsContext & /*ctx*/,
     {
         canvasW_ = newPhysW;
         canvasH_ = newPhysH;
-        androidState(this).glInitialized = false;
+        // Cheap re-init only — GL objects (shader/atlas/fonts) are
+        // untouched by a mere resize.
+        androidState(this).viewportReady = false;
     }
 
     needsLayout = false;
 }
 
-// Pass 2: blit FBO texture into the UI — plain Painter::drawImage
+// Pass 2: composite the doc-sized FBO into the UI with pan/zoom applied
+// here (not baked into the FBO render) — mirrors Win32's D2D
+// transform-then-DrawBitmap and Linux's cairo_translate/scale-then-paint
+// composite step.
 void CanvasWidget::render(GraphicsContext &ctx, FontCache &)
 {
     auto &s = androidState(this);
@@ -325,11 +394,23 @@ void CanvasWidget::render(GraphicsContext &ctx, FontCache &)
         return;
     }
 
+    // Sample only the visible sub-rect of the doc-sized FBO, in doc-space
+    // pixels, scaled into the widget's on-screen rect.
+    float z = vp_.zoom();
+    float srcX = vp_.offsetX();
+    float srcY = vp_.offsetY();
+    float srcW = (z > 0.f) ? float(canvasW_) / z : float(canvasW_);
+    float srcH = (z > 0.f) ? float(canvasH_) / z : float(canvasH_);
+
     Painter p(ctx);
     Painter::ImageDrawParams ip;
     ip.image = (NativeImage)s.fboTex;
     ip.srcWidth = s.fboW;
     ip.srcHeight = s.fboH;
+    ip.srcX = srcX;
+    ip.srcY = srcY;
+    ip.srcW = srcW;
+    ip.srcH = srcH;
     ip.clipX = x;
     ip.clipY = y;
     ip.clipW = width;
@@ -355,10 +436,33 @@ void CanvasWidget::onDetach()
     }
     pendingSurface_.reset();
     deleteFBO(this);
-    canvasGL_ = nullptr;
-    androidState(this).glInitialized = false;
+    deleteGL(this);
     s_androidState.erase(this);
     Widget::onDetach();
+}
+
+// Context is already gone by the time this fires (invoked from
+// PlatformWindow::destroySurface() -> callbacks.onGLContextLost ->
+// Widget::onGLContextLost() tree-wide broadcast, wired in
+// FluxUI::wireCallbacks()) — CPU-side cleanup only, no glDelete* calls,
+// since they would be issued against a dead/absent context.
+void CanvasWidget::onGLContextLost()
+{
+    auto &s = androidState(this);
+    delete s.gl;
+    s.gl = nullptr;
+    delete s.backend;
+    s.backend = nullptr;
+    s.fboId = s.fboTex = s.fboDepth = 0;
+    s.fboW = s.fboH = 0;
+    s.glObjectsReady = false;
+    // viewportReady is deliberately left alone — vp_ (pan/zoom/offset) is
+    // pure CPU-side state and survives context loss fine. Leaving it true
+    // preserves the user's current pan/zoom across a background/foreground
+    // cycle; ensureFBO() still recreates the FBO next frame regardless,
+    // since fboId was zeroed above, and ensureGLObjects() rebuilds the
+    // shader/atlas/backend from scratch since glObjectsReady is now false.
+    Widget::onGLContextLost();
 }
 
 void CanvasWidget::markNeedsPaint()
@@ -539,12 +643,8 @@ void CanvasWidget::activatePendingSurface()
     }
     activeSurface_ = pendingSurface_;
     pendingSurface_.reset();
-    activeSurface_->initialize(canvasW_, canvasH_);
-    vp_.setCanvasSize(canvasW_, canvasH_);
+    activeSurface_->initialize(docW(), docH());
+    vp_.setCanvasSize(docW(), docH());
 }
-
-
-
-
 
 #endif

@@ -281,6 +281,19 @@ public:
     }
   }
 
+  // GL context loss (Android: EGL surface/context destroyed and later
+  // recreated, e.g. app backgrounded). Default is a plain tree-walk so
+  // every widget gets this for free; only GL-resource-owning widgets
+  // (CanvasWidget on Android) need to override it, clean up their own
+  // GL-owned state (CPU-side only — the context is already gone, so no
+  // glDelete* calls), then call Widget::onGLContextLost() to propagate.
+  virtual void onGLContextLost()
+  {
+    for (auto &child : children)
+      child->onGLContextLost();
+  }
+
+
   virtual WidgetPtr build()
   {
     return nullptr;

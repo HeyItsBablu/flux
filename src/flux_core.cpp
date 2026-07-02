@@ -228,6 +228,14 @@ void FluxUI::wireCallbacks()
     window.callbacks.onFocusLost = [this]()
     { setFocus(nullptr); };
     fluxLog("[wireCallbacks] Step 14: done");
+
+
+    window.callbacks.onGLContextLost = [this]()
+    {
+        if (root)
+            root->onGLContextLost();
+    };
+    fluxLog("[wireCallbacks] Step 15: onGLContextLost wired");
 }
 
 // ============================================================================

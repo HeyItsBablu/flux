@@ -162,6 +162,9 @@ void PlatformWindow::reinitSurface(ANativeWindow *window)
 // ── destroySurface ────────────────────────────────────────────────────────────
 void PlatformWindow::destroySurface()
 {
+    if (callbacks.onGLContextLost)
+        callbacks.onGLContextLost();
+
     if (!eglState || eglState->surface == EGL_NO_SURFACE)
         return;
     eglMakeCurrent(eglState->display,

@@ -9,17 +9,14 @@
 #include <time.h>
 
 #include "flux/flux.hpp"
-#include "flux/flux_canvas2d.hpp"
 #include "flux/widgets/flux_file_picker.hpp"
 #include "flux/flux_gl.hpp"
 #include "flux/flux_oes_blit.hpp"
-#include "flux/flux_canvas2d_backend.hpp"
 // Forward declaration — defined in lib/main.cpp
 WidgetPtr createApp(FluxUI *app);
 
 // ── Statics ───────────────────────────────────────────────────────────────────
 static FluxUI *s_app = nullptr;
-static Canvas2DGL *s_canvasGL = nullptr;
 static AAssetManager *s_assetManager = nullptr;
 ANativeActivity *s_activity = nullptr;
 
@@ -43,9 +40,6 @@ static float s_dpiScale = 1.f;
 void FluxAndroid_setDpiScale(float scale) { s_dpiScale = scale; }
 float FluxAndroid_getDpiScale() { return s_dpiScale; }
 
-// ── Canvas2DGL accessor ───────────────────────────────────────────────────────
-Canvas2DGL *FluxAndroid_getCanvasGL() { return s_canvasGL; }
-
 // ── Asset / misc accessors ────────────────────────────────────────────────────
 void FluxAndroid_setAssetManager(AAssetManager *am) { s_assetManager = am; }
 AAssetManager *FluxAndroid_getAssetManager() { return s_assetManager; }
@@ -64,61 +58,6 @@ JNIEnv *getJNIEnv()
     if (ret == JNI_EDETACHED)
         s_jvm->AttachCurrentThread(&env, nullptr);
     return env;
-}
-
-// ── Canvas2DGL helpers ────────────────────────────────────────────────────────
-static void canvasGL_registerFonts()
-{
-    if (!s_canvasGL)
-        return;
-    struct
-    {
-        const char *name;
-        const char *path;
-    } fonts[] = {
-        {"sans", "/system/fonts/Roboto-Regular.ttf"},
-        {"sans-bold", "/system/fonts/Roboto-Bold.ttf"},
-        {"sans-italic", "/system/fonts/Roboto-Italic.ttf"},
-        {"mono", "/system/fonts/DroidSansMono.ttf"},
-    };
-    for (auto &f : fonts)
-    {
-        Canvas2DBackend *b = Canvas2DBackend::create(s_canvasGL);
-        Canvas2D::registerFont(b, f.name, f.path);
-        Canvas2DBackend::destroy(b);
-    }
-}
-
-static void canvasGL_create()
-{
-    if (!s_canvasGL)
-        s_canvasGL = new Canvas2DGL();
-    if (!s_canvasGL->init())
-    {
-        __android_log_print(ANDROID_LOG_ERROR, "FluxUI", "Canvas2DGL init failed");
-    }
-    else
-    {
-        canvasGL_registerFonts();
-    }
-}
-
-static void canvasGL_reinit()
-{
-    if (!s_canvasGL)
-    {
-        canvasGL_create();
-        return;
-    }
-    s_canvasGL->destroy();
-    s_canvasGL->init();
-    canvasGL_registerFonts();
-}
-
-static void canvasGL_destroyGLObjects()
-{
-    if (s_canvasGL)
-        s_canvasGL->destroy();
 }
 
 // ── GL font registration ──────────────────────────────────────────────────────
@@ -509,8 +448,6 @@ static void handle_cmd(android_app *app, int32_t cmd)
             FluxGL_init();
             gl_registerFonts();
 
-            canvasGL_create();
-
             auto &win = s_app->getPlatformWindow();
             s_eglDisplay = win.getEGLDisplay();
             s_eglContext = win.getEGLContext();
@@ -528,8 +465,6 @@ static void handle_cmd(android_app *app, int32_t cmd)
             FluxGL_reinit();
             gl_registerFonts();
 
-            canvasGL_reinit();
-
             auto &win = s_app->getPlatformWindow();
             s_eglDisplay = win.getEGLDisplay();
             s_eglContext = win.getEGLContext();
@@ -544,13 +479,13 @@ static void handle_cmd(android_app *app, int32_t cmd)
 
     case APP_CMD_TERM_WINDOW:
         FluxCamera::get().close();
-        FluxMic::get().cancel();
+        FluxMic::get().close();
         FluxVideo::get().close();
 
         // ── Destroy FluxGL (replaces nvgDeleteGLES2) ──────────────────────
         FluxGL_destroy();
         FluxOESBlit_destroy();
-        canvasGL_destroyGLObjects();
+
 
         if (s_app)
             s_app->getPlatformWindow().destroySurface();
@@ -616,8 +551,10 @@ void android_main(android_app *app)
         int physH = (int)(sz.height * dpi);
 
         // ── Pass 1: render each CanvasWidget into its own FBO ─────────────
-        if (s_canvasGL)
-            CanvasWidget::tickAllGL(s_app->getRoot().get(), sz.width, sz.height, dpi);
+        // Each widget owns and lazily creates its own GL resources
+        // (shader/atlas/fonts/backend) on first render — no shared-global
+        // gate needed here.
+        CanvasWidget::tickAllGL(s_app->getRoot().get(), sz.width, sz.height, dpi);
 
         // ── Pass 2: FluxGL renders the full UI ────────────────────────────
         glBindFramebuffer(GL_FRAMEBUFFER, 0);

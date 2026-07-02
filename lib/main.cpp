@@ -1,69 +1,128 @@
 #include "flux/flux.hpp"
 
-class TriangleSurface : public RenderSurface
+class MyApp : public Widget
 {
-  float time_ = 0;
-
 public:
-  void initialize(int, int) override {}
-  void resize(int, int) override {}
-  void destroy() override {}
-  void update(double dt) override { time_ += float(dt); }
+    WidgetPtr build() override
+    {
+        auto header = Flex({Text("fillTrack() Test")->setFontSize(20)})
+                          ->setAlignItems(AlignItems::Center)
+                          ->setJustifyContent(JustifyContent::Center)
+                          ->setHeight(56)
+                          ->setHeightMode(SizeMode::Fixed)
+                          ->setWidthMode(SizeMode::Full);
 
-  void render(Canvas2D &ctx) override
-  {
-    ctx.setFillColor({15, 15, 20, 255});
-    ctx.fillRect(0, 0, ctx.width(), ctx.height());
+        auto footer = Flex({Text("v1.0.0")->setFontSize(12)})
+                          ->setAlignItems(AlignItems::Center)
+                          ->setJustifyContent(JustifyContent::Center)
+                          ->setHeight(32)
+                          ->setHeightMode(SizeMode::Fixed)
+                          ->setWidthMode(SizeMode::Full);
 
-    ctx.setFillColor({255, 80, 80, 255}); // solid red — no HSV/gradient
-    ctx.beginPath();
-    float cx = ctx.width() * 0.5f;
-    float cy = ctx.height() * 0.5f;
-    float r = std::min(ctx.width(), ctx.height()) * 0.4f;
-    ctx.moveTo(cx, cy - r);
-    ctx.lineTo(cx - r * 0.866f, cy + r * 0.5f);
-    ctx.lineTo(cx + r * 0.866f, cy + r * 0.5f);
-    ctx.closePath();
-    ctx.fill();
-  }
+        auto cell = [](const std::string &label, Color bg)
+        {
+            return Flex({Text(label)->setFontSize(13)})
+                ->setAlignItems(AlignItems::Center)
+                ->setJustifyContent(JustifyContent::Center)
+                ->setWidthMode(SizeMode::Full)
+                ->setHeightMode(SizeMode::Full)
+                ->setBackgroundColor(bg)
+                ->setBorderRadius(6);
+        };
 
-  bool needsContinuousRedraw() const override { return true; }
+        auto testA = Grid({
+                              cell("px(80)", Color::fromRGB(220, 235, 255)),
+                              cell("px(80)", Color::fromRGB(220, 235, 255)),
+                              cell("fillTrack(1)", Color::fromRGB(180, 220, 180)),
+                              cell("fillTrack(1)", Color::fromRGB(180, 220, 180)),
+                          })
+                         ->setColumns({fr(1), fr(1)})
+                         ->setRows({px(80), fillTrack(1)})
+                         ->setGap(8)
+                         ->setPadding(8)
+                         ->setWidthMode(SizeMode::Full)
+                         ->setHeightMode(SizeMode::Full)
+                         ->setBackgroundColor(Color::fromRGB(245, 245, 248))
+                         ->setBorderRadius(8);
+
+        auto testB = Grid({
+                              cell("px(60)", Color::fromRGB(255, 230, 200)),
+                              cell("px(60)", Color::fromRGB(255, 230, 200)),
+                              cell("fill(1) — 1/3", Color::fromRGB(255, 200, 180)),
+                              cell("fill(1) — 1/3", Color::fromRGB(255, 200, 180)),
+                              cell("fill(2) — 2/3", Color::fromRGB(240, 160, 140)),
+                              cell("fill(2) — 2/3", Color::fromRGB(240, 160, 140)),
+                          })
+                         ->setColumns({fr(1), fr(1)})
+                         ->setRows({px(60), fillTrack(1), fillTrack(2)})
+                         ->setGap(8)
+                         ->setPadding(8)
+                         ->setWidthMode(SizeMode::Full)
+                         ->setHeightMode(SizeMode::Full)
+                         ->setBackgroundColor(Color::fromRGB(245, 245, 248))
+                         ->setBorderRadius(8);
+
+        auto testC = Grid({
+                              cell("fill(1)", Color::fromRGB(230, 210, 255)),
+                              cell("fill(1)", Color::fromRGB(230, 210, 255)),
+                              cell("fill(1)", Color::fromRGB(210, 185, 255)),
+                              cell("fill(1)", Color::fromRGB(210, 185, 255)),
+                              cell("fill(1)", Color::fromRGB(190, 160, 255)),
+                              cell("fill(1)", Color::fromRGB(190, 160, 255)),
+                          })
+                         ->setColumns({fr(1), fr(1)})
+                         ->setRows({fillTrack(1), fillTrack(1), fillTrack(1)})
+                         ->setGap(8)
+                         ->setPadding(8)
+                         ->setWidthMode(SizeMode::Full)
+                         ->setHeightMode(SizeMode::Full)
+                         ->setBackgroundColor(Color::fromRGB(245, 245, 248))
+                         ->setBorderRadius(8);
+
+        // Declare labels and panels before body
+        auto labels = Flex({
+                               Flex({Text("A: px + fill(1)")->setFontSize(11)})
+                                   ->setJustifyContent(JustifyContent::Center)
+                                   ->setWidthMode(SizeMode::Full),
+                               Flex({Text("B: px + fill(1) + fill(2)")->setFontSize(11)})
+                                   ->setJustifyContent(JustifyContent::Center)
+                                   ->setWidthMode(SizeMode::Full),
+                               Flex({Text("C: fill(1) × 3")->setFontSize(11)})
+                                   ->setJustifyContent(JustifyContent::Center)
+                                   ->setWidthMode(SizeMode::Full),
+                           })
+                          ->setGap(12)
+                          ->setPaddingHV(16, 0)
+                          ->setWidthMode(SizeMode::Full)
+                          ->setHeight(28)
+                          ->setHeightMode(SizeMode::Fixed);
+
+        auto panels = Flex({testA, testB, testC})
+                          ->setGap(12)
+                          ->setPadding(16)
+                          ->setWidthMode(SizeMode::Full)
+                          ->setHeightMode(SizeMode::Full);
+
+        auto body = Flex({labels, panels})
+                        ->setDirection(FlexDirection::Column)
+                        ->setWidthMode(SizeMode::Full)
+                        ->setHeightMode(SizeMode::Full);
+
+        return Page()
+            ->setHeader(header)
+            ->setBody(body)
+            ->setFooter(footer)
+            ->setHeaderBackgroundColor(Color::fromRGB(240, 240, 245))
+            ->setHeaderElevation(4)
+            ->setBodyBackgroundColor(Color::fromRGB(255, 255, 255))
+            ->setFooterBackgroundColor(Color::fromRGB(240, 240, 245));
+    }
 };
-// ============================================================================
-// App
-// ============================================================================
-
-class TriangleApp : public Widget
-{
-  static constexpr int kCanvasW = 512, kCanvasH = 512;
-
-public:
-  WidgetPtr build() override
-  {
-    auto canvas = std::make_shared<CanvasWidget>();
-    canvas->setScrollbarsEnabled(false)
-          ->setViewportEnabled(false)
-          ->setFlexGrow(1)
-          ->setSurface<TriangleSurface>();
-
-    return Flex({canvas})
-        ->setDirection(FlexDirection::Column)
-        ->setAlignItems(AlignItems::Stretch)
-        ->setWidthMode(SizeMode::Full)
-        ->setHeightMode(SizeMode::Full);
-  }
-};
-
-
-
-// ============================================================
-//  Entry point
-// ============================================================
 
 WidgetPtr createApp(FluxUI *app)
 {
-  return FluxApp("Wrap App")
-      .setTheme(AppTheme::light())
-      .setFullscreenMode(true)
-      .build(std::make_shared<TriangleApp>());
+    return FluxApp("FluxUI Grid Demo")
+        .setTheme(AppTheme::light())
+        .setFullscreenMode(true)
+        .build(std::make_shared<MyApp>());
 }

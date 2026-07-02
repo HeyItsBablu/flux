@@ -33,8 +33,8 @@ extern float FluxAndroid_getDpiScale();
 // When a Painter is used for normal (non-overlay) rendering both fields are
 // zero, so there is no cost and no behavioural change outside of overlays.
 
-static inline int offX(const GraphicsContext& ctx) { return ctx.overlayOffsetX; }
-static inline int offY(const GraphicsContext& ctx) { return ctx.overlayOffsetY; }
+static inline int offX(const GraphicsContext &ctx) { return ctx.overlayOffsetX; }
+static inline int offY(const GraphicsContext &ctx) { return ctx.overlayOffsetY; }
 
 // ============================================================================
 // UTF-8 HELPERS
@@ -489,9 +489,9 @@ struct FluxGL
         {
             uRound.viewport = glGetUniformLocation(progRound, "uViewport");
             uRound.halfSize = glGetUniformLocation(progRound, "uHalfSize");
-            uRound.radius   = glGetUniformLocation(progRound, "uRadius");
-            uRound.color    = glGetUniformLocation(progRound, "uColor");
-            uRound.border   = glGetUniformLocation(progRound, "uBorder");
+            uRound.radius = glGetUniformLocation(progRound, "uRadius");
+            uRound.color = glGetUniformLocation(progRound, "uColor");
+            uRound.border = glGetUniformLocation(progRound, "uBorder");
         }
 
         // Shared VBO
@@ -516,12 +516,36 @@ struct FluxGL
 
     void destroy()
     {
-        if (progColor)  { glDeleteProgram(progColor);  progColor  = 0; }
-        if (progTex)    { glDeleteProgram(progTex);    progTex    = 0; }
-        if (progGlyph)  { glDeleteProgram(progGlyph);  progGlyph  = 0; }
-        if (progRound)  { glDeleteProgram(progRound);  progRound  = 0; }
-        if (vbo)        { glDeleteBuffers(1, &vbo);    vbo        = 0; }
-        if (atlasTex)   { glDeleteTextures(1, &atlasTex); atlasTex = 0; }
+        if (progColor)
+        {
+            glDeleteProgram(progColor);
+            progColor = 0;
+        }
+        if (progTex)
+        {
+            glDeleteProgram(progTex);
+            progTex = 0;
+        }
+        if (progGlyph)
+        {
+            glDeleteProgram(progGlyph);
+            progGlyph = 0;
+        }
+        if (progRound)
+        {
+            glDeleteProgram(progRound);
+            progRound = 0;
+        }
+        if (vbo)
+        {
+            glDeleteBuffers(1, &vbo);
+            vbo = 0;
+        }
+        if (atlasTex)
+        {
+            glDeleteTextures(1, &atlasTex);
+            atlasTex = 0;
+        }
         // Invalidate glyph handles — font data stays (fonts are re-registered after reinit)
         memset(&glyphMap, 0, sizeof(glyphMap));
         atlasX = atlasY = atlasRowH = 0;
@@ -621,14 +645,14 @@ struct FluxGL
             GlyphEntry *e = glyphMap.insert(key);
             if (!e)
                 return nullptr;
-            e->ax       = atlasX;
-            e->ay       = atlasY;
-            e->aw       = gw;
-            e->ah       = gh;
+            e->ax = atlasX;
+            e->ay = atlasY;
+            e->aw = gw;
+            e->ah = gh;
             e->bearingX = x0;
             e->bearingY = y0;
-            e->advance  = (int)(advance * scale);
-            e->valid    = true;
+            e->advance = (int)(advance * scale);
+            e->valid = true;
             atlasX += gw + 1;
             atlasDirty = true;
             return e;
@@ -641,8 +665,8 @@ struct FluxGL
         e->ax = e->ay = e->aw = e->ah = 0;
         e->bearingX = x0;
         e->bearingY = y0;
-        e->advance  = (int)(advance * scale);
-        e->valid    = true;
+        e->advance = (int)(advance * scale);
+        e->valid = true;
         return e;
     }
 
@@ -721,12 +745,42 @@ struct FluxGL
             return;
         float r = c.r / 255.f, g = c.g / 255.f, b = c.b / 255.f, a = c.a / 255.f;
         float verts[] = {
-            x,     y,     r, g, b, a,
-            x + w, y,     r, g, b, a,
-            x,     y + h, r, g, b, a,
-            x + w, y,     r, g, b, a,
-            x + w, y + h, r, g, b, a,
-            x,     y + h, r, g, b, a,
+            x,
+            y,
+            r,
+            g,
+            b,
+            a,
+            x + w,
+            y,
+            r,
+            g,
+            b,
+            a,
+            x,
+            y + h,
+            r,
+            g,
+            b,
+            a,
+            x + w,
+            y,
+            r,
+            g,
+            b,
+            a,
+            x + w,
+            y + h,
+            r,
+            g,
+            b,
+            a,
+            x,
+            y + h,
+            r,
+            g,
+            b,
+            a,
         };
         glUseProgram(progColor);
         glUniform2f(uColor.viewport, vpW, vpH);
@@ -746,24 +800,33 @@ struct FluxGL
     // ============================================================================
     void drawGradientRect(float x, float y, float w, float h, Color c0, Color c1)
     {
-        auto toF = [](Color c, float *out) {
-            out[0] = c.r / 255.f; out[1] = c.g / 255.f;
-            out[2] = c.b / 255.f; out[3] = c.a / 255.f;
+        auto toF = [](Color c, float *out)
+        {
+            out[0] = c.r / 255.f;
+            out[1] = c.g / 255.f;
+            out[2] = c.b / 255.f;
+            out[3] = c.a / 255.f;
         };
         float a[4], b2[4];
-        toF(c0, a); toF(c1, b2);
+        toF(c0, a);
+        toF(c1, b2);
         float verts[6 * 6];
         float *p = verts;
-        auto v = [&](float px, float py, float *col) {
-            *p++ = px; *p++ = py;
-            *p++ = col[0]; *p++ = col[1]; *p++ = col[2]; *p++ = col[3];
+        auto v = [&](float px, float py, float *col)
+        {
+            *p++ = px;
+            *p++ = py;
+            *p++ = col[0];
+            *p++ = col[1];
+            *p++ = col[2];
+            *p++ = col[3];
         };
-        v(x,     y,     a);
-        v(x + w, y,     b2);
-        v(x,     y + h, a);
-        v(x + w, y,     b2);
+        v(x, y, a);
+        v(x + w, y, b2);
+        v(x, y + h, a);
+        v(x + w, y, b2);
         v(x + w, y + h, b2);
-        v(x,     y + h, a);
+        v(x, y + h, a);
 
         glUseProgram(progColor);
         glUniform2f(uColor.viewport, vpW, vpH);
@@ -795,12 +858,30 @@ struct FluxGL
         float hw = w * 0.5f, hh = h * 0.5f;
 
         float verts[] = {
-            x,     y,     -hw, -hh,
-            x + w, y,      hw, -hh,
-            x,     y + h, -hw,  hh,
-            x + w, y,      hw, -hh,
-            x + w, y + h,  hw,  hh,
-            x,     y + h, -hw,  hh,
+            x,
+            y,
+            -hw,
+            -hh,
+            x + w,
+            y,
+            hw,
+            -hh,
+            x,
+            y + h,
+            -hw,
+            hh,
+            x + w,
+            y,
+            hw,
+            -hh,
+            x + w,
+            y + h,
+            hw,
+            hh,
+            x,
+            y + h,
+            -hw,
+            hh,
         };
         glUseProgram(progRound);
         glUniform2f(uRound.viewport, vpW, vpH);
@@ -830,16 +911,46 @@ struct FluxGL
         if (len < 0.001f)
             return;
         float nx = -dy / len * (width * 0.5f);
-        float ny =  dx / len * (width * 0.5f);
+        float ny = dx / len * (width * 0.5f);
         float r = color.r / 255.f, g = color.g / 255.f,
               b = color.b / 255.f, a = color.a / 255.f;
         float verts[] = {
-            x1 + nx, y1 + ny, r, g, b, a,
-            x1 - nx, y1 - ny, r, g, b, a,
-            x2 + nx, y2 + ny, r, g, b, a,
-            x1 - nx, y1 - ny, r, g, b, a,
-            x2 - nx, y2 - ny, r, g, b, a,
-            x2 + nx, y2 + ny, r, g, b, a,
+            x1 + nx,
+            y1 + ny,
+            r,
+            g,
+            b,
+            a,
+            x1 - nx,
+            y1 - ny,
+            r,
+            g,
+            b,
+            a,
+            x2 + nx,
+            y2 + ny,
+            r,
+            g,
+            b,
+            a,
+            x1 - nx,
+            y1 - ny,
+            r,
+            g,
+            b,
+            a,
+            x2 - nx,
+            y2 - ny,
+            r,
+            g,
+            b,
+            a,
+            x2 + nx,
+            y2 + ny,
+            r,
+            g,
+            b,
+            a,
         };
         glUseProgram(progColor);
         glUniform2f(uColor.viewport, vpW, vpH);
@@ -865,14 +976,21 @@ struct FluxGL
         verts.reserve((segs + 2) * 6);
         float fr = fill.r / 255.f, fg = fill.g / 255.f,
               fb = fill.b / 255.f, fa = fill.a / 255.f;
-        verts.push_back(cx); verts.push_back(cy);
-        verts.push_back(fr); verts.push_back(fg); verts.push_back(fb); verts.push_back(fa);
+        verts.push_back(cx);
+        verts.push_back(cy);
+        verts.push_back(fr);
+        verts.push_back(fg);
+        verts.push_back(fb);
+        verts.push_back(fa);
         for (int i = 0; i <= segs; ++i)
         {
             float angle = (float)i / segs * 2.f * (float)M_PI;
             verts.push_back(cx + cosf(angle) * rx);
             verts.push_back(cy + sinf(angle) * ry);
-            verts.push_back(fr); verts.push_back(fg); verts.push_back(fb); verts.push_back(fa);
+            verts.push_back(fr);
+            verts.push_back(fg);
+            verts.push_back(fb);
+            verts.push_back(fa);
         }
         glUseProgram(progColor);
         glUniform2f(uColor.viewport, vpW, vpH);
@@ -891,18 +1009,27 @@ struct FluxGL
             sv.reserve(segs * 12);
             for (int i = 0; i < segs; ++i)
             {
-                float a0 = (float)i       / segs * 2.f * (float)M_PI;
+                float a0 = (float)i / segs * 2.f * (float)M_PI;
                 float a1 = (float)(i + 1) / segs * 2.f * (float)M_PI;
-                float x0o = cx + cosf(a0) * rx,        y0o = cy + sinf(a0) * ry;
-                float x1o = cx + cosf(a1) * rx,        y1o = cy + sinf(a1) * ry;
+                float x0o = cx + cosf(a0) * rx, y0o = cy + sinf(a0) * ry;
+                float x1o = cx + cosf(a1) * rx, y1o = cy + sinf(a1) * ry;
                 float x0i = cx + cosf(a0) * (rx - strokeW), y0i = cy + sinf(a0) * (ry - strokeW);
                 float x1i = cx + cosf(a1) * (rx - strokeW), y1i = cy + sinf(a1) * (ry - strokeW);
-                auto push = [&](float px, float py) {
-                    sv.push_back(px); sv.push_back(py);
-                    sv.push_back(sr); sv.push_back(sg); sv.push_back(sb); sv.push_back(sa);
+                auto push = [&](float px, float py)
+                {
+                    sv.push_back(px);
+                    sv.push_back(py);
+                    sv.push_back(sr);
+                    sv.push_back(sg);
+                    sv.push_back(sb);
+                    sv.push_back(sa);
                 };
-                push(x0o, y0o); push(x1o, y1o); push(x0i, y0i);
-                push(x1o, y1o); push(x1i, y1i); push(x0i, y0i);
+                push(x0o, y0o);
+                push(x1o, y1o);
+                push(x0i, y0i);
+                push(x1o, y1o);
+                push(x1i, y1i);
+                push(x0i, y0i);
             }
             uploadVerts(sv.data(), sv.size() * sizeof(float));
             glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void *)0);
@@ -931,10 +1058,18 @@ struct FluxGL
         {
             float angle = startAngle + sweepAngle * (float)i / segs;
             float c2 = cosf(angle), s2 = sinf(angle);
-            verts.push_back(cx + c2 * radius); verts.push_back(cy + s2 * radius);
-            verts.push_back(r); verts.push_back(g); verts.push_back(b); verts.push_back(a);
-            verts.push_back(cx + c2 * innerR); verts.push_back(cy + s2 * innerR);
-            verts.push_back(r); verts.push_back(g); verts.push_back(b); verts.push_back(a);
+            verts.push_back(cx + c2 * radius);
+            verts.push_back(cy + s2 * radius);
+            verts.push_back(r);
+            verts.push_back(g);
+            verts.push_back(b);
+            verts.push_back(a);
+            verts.push_back(cx + c2 * innerR);
+            verts.push_back(cy + s2 * innerR);
+            verts.push_back(r);
+            verts.push_back(g);
+            verts.push_back(b);
+            verts.push_back(a);
         }
         glUseProgram(progColor);
         glUniform2f(uColor.viewport, vpW, vpH);
@@ -976,8 +1111,12 @@ struct FluxGL
         verts.reserve(pts.size() * 6);
         for (auto &[px, py] : pts)
         {
-            verts.push_back((float)px); verts.push_back((float)py);
-            verts.push_back(r); verts.push_back(g); verts.push_back(b); verts.push_back(a);
+            verts.push_back((float)px);
+            verts.push_back((float)py);
+            verts.push_back(r);
+            verts.push_back(g);
+            verts.push_back(b);
+            verts.push_back(a);
         }
         glUseProgram(progColor);
         glUniform2f(uColor.viewport, vpW, vpH);
@@ -1000,12 +1139,30 @@ struct FluxGL
                      float alpha = 1.f)
     {
         float verts[] = {
-            dstX,        dstY,        u0, v0,
-            dstX + dstW, dstY,        u1, v0,
-            dstX,        dstY + dstH, u0, v1,
-            dstX + dstW, dstY,        u1, v0,
-            dstX + dstW, dstY + dstH, u1, v1,
-            dstX,        dstY + dstH, u0, v1,
+            dstX,
+            dstY,
+            u0,
+            v0,
+            dstX + dstW,
+            dstY,
+            u1,
+            v0,
+            dstX,
+            dstY + dstH,
+            u0,
+            v1,
+            dstX + dstW,
+            dstY,
+            u1,
+            v0,
+            dstX + dstW,
+            dstY + dstH,
+            u1,
+            v1,
+            dstX,
+            dstY + dstH,
+            u0,
+            v1,
         };
         glUseProgram(progTex);
         glUniform2f(uTex.viewport, vpW, vpH);
@@ -1037,12 +1194,15 @@ struct FluxGL
             return 0;
         flushAtlas();
 
-        struct GlyphVert { float x, y, u, v; };
+        struct GlyphVert
+        {
+            float x, y, u, v;
+        };
         std::vector<GlyphVert> verts;
         verts.reserve(len * 6);
 
         float cx = x;
-        const char *p   = utf8;
+        const char *p = utf8;
         const char *end = utf8 + len;
 
         while (p < end)
@@ -1055,17 +1215,17 @@ struct FluxGL
             if (g->aw > 0 && g->ah > 0)
             {
                 float gx = cx + g->bearingX;
-                float gy = y  + g->bearingY;
+                float gy = y + g->bearingY;
                 float u0 = g->ax / (float)kAtlasW;
                 float v0 = g->ay / (float)kAtlasH;
                 float u1 = (g->ax + g->aw) / (float)kAtlasW;
                 float v1 = (g->ay + g->ah) / (float)kAtlasH;
-                verts.push_back({gx,          gy,          u0, v0});
-                verts.push_back({gx + g->aw,  gy,          u1, v0});
-                verts.push_back({gx,          gy + g->ah,  u0, v1});
-                verts.push_back({gx + g->aw,  gy,          u1, v0});
-                verts.push_back({gx + g->aw,  gy + g->ah,  u1, v1});
-                verts.push_back({gx,          gy + g->ah,  u0, v1});
+                verts.push_back({gx, gy, u0, v0});
+                verts.push_back({gx + g->aw, gy, u1, v0});
+                verts.push_back({gx, gy + g->ah, u0, v1});
+                verts.push_back({gx + g->aw, gy, u1, v0});
+                verts.push_back({gx + g->aw, gy + g->ah, u1, v1});
+                verts.push_back({gx, gy + g->ah, u0, v1});
             }
             cx += g->advance + letterSpacing;
         }
@@ -1107,7 +1267,7 @@ struct FluxGL
             return 0;
         FontEntry &fe = fonts[fontIdx];
         float scale = stbtt_ScaleForPixelHeight(&fe.info, (float)sizePx);
-        const char *p   = utf8;
+        const char *p = utf8;
         const char *end = utf8 + len;
         float cx = 0;
         while (p < end)
@@ -1133,8 +1293,8 @@ struct FluxGL
         float scale = stbtt_ScaleForPixelHeight(&fe.info, (float)sizePx);
         int a, d, lg;
         stbtt_GetFontVMetrics(&fe.info, &a, &d, &lg);
-        ascent  = (int)(a  * scale);
-        descent = (int)(d  * scale);
+        ascent = (int)(a * scale);
+        descent = (int)(d * scale);
         lineGap = (int)(lg * scale);
     }
 };
@@ -1166,7 +1326,11 @@ void FluxGL_destroy()
 
 void FluxGL_reinit()
 {
-    if (!s_gl) { FluxGL_init(); return; }
+    if (!s_gl)
+    {
+        FluxGL_init();
+        return;
+    }
     s_gl->destroy();
     s_gl->init();
 }
@@ -1179,13 +1343,15 @@ void FluxGL_beginFrame(float w, float h, float dpi)
 
 int FluxGL_registerFont(const std::string &name, const std::string &path)
 {
-    if (!s_gl) return -1;
+    if (!s_gl)
+        return -1;
     return s_gl->registerFont(name, path);
 }
 
 int FluxGL_findFont(const std::string &name)
 {
-    if (!s_gl) return -1;
+    if (!s_gl)
+        return -1;
     return s_gl->findFont(name);
 }
 
@@ -1219,7 +1385,8 @@ static int resolveFontSize(NativeFont fontHandle, int fallback = 16)
 
 void Painter::fillRect(int x, int y, int w, int h, Color color)
 {
-    if (!s_gl) return;
+    if (!s_gl)
+        return;
     s_gl->drawFilledRect(x + offX(ctx), y + offY(ctx), w, h, color);
 }
 
@@ -1230,7 +1397,8 @@ void Painter::fillRectAlpha(int x, int y, int w, int h, Color color)
 
 void Painter::fillRoundedRect(int x, int y, int w, int h, int radius, Color color)
 {
-    if (!s_gl) return;
+    if (!s_gl)
+        return;
     s_gl->drawRoundedRect(x + offX(ctx), y + offY(ctx), w, h, (float)radius, color, 0.f);
 }
 
@@ -1240,7 +1408,7 @@ void Painter::fillRoundedRegion(int x, int y, int w, int h, int r, Color color)
 }
 
 void Painter::fillRoundedRectGDI(int x, int y, int w, int h, int r,
-                                  Color fill, Color stroke, int sw)
+                                 Color fill, Color stroke, int sw)
 {
     fillRoundedRect(x, y, w, h, r / 2, fill); // delegates
     if (sw > 0 && stroke.a > 0)
@@ -1248,25 +1416,31 @@ void Painter::fillRoundedRectGDI(int x, int y, int w, int h, int r,
 }
 
 void Painter::fillRectWithLeftAccent(int x, int y, int w, int h,
-                                      Color bg, Color accent, int strip)
+                                     Color bg, Color accent, int strip)
 {
     fillRect(x, y, w, h, bg);         // delegates
     fillRect(x, y, strip, h, accent); // delegates
 }
 
 void Painter::fillGradientRect(int x, int y, int w, int h,
-                                const std::vector<Color> &colors)
+                               const std::vector<Color> &colors)
 {
-    if (!s_gl || colors.empty()) return;
-    if (colors.size() == 1) { fillRect(x, y, w, h, colors[0]); return; }
+    if (!s_gl || colors.empty())
+        return;
+    if (colors.size() == 1)
+    {
+        fillRect(x, y, w, h, colors[0]);
+        return;
+    }
     s_gl->drawGradientRect(x + offX(ctx), y + offY(ctx), w, h,
                            colors.front(), colors.back());
 }
 
 void Painter::fillColumnBars(int x, int y, int w, int h,
-                              const std::vector<int> &bars, Color color)
+                             const std::vector<int> &bars, Color color)
 {
-    if (!s_gl) return;
+    if (!s_gl)
+        return;
     int cols = std::min(w, (int)bars.size());
     for (int i = 0; i < cols; ++i)
     {
@@ -1278,7 +1452,8 @@ void Painter::fillColumnBars(int x, int y, int w, int h,
 
 void Painter::fillPolygonAlpha(const std::vector<std::pair<int, int>> &pts, Color color)
 {
-    if (!s_gl) return;
+    if (!s_gl)
+        return;
     std::vector<std::pair<int, int>> shifted;
     shifted.reserve(pts.size());
     for (auto &[px, py] : pts)
@@ -1289,16 +1464,17 @@ void Painter::fillPolygonAlpha(const std::vector<std::pair<int, int>> &pts, Colo
 // ── Stroked shapes ────────────────────────────────────────────────────────────
 
 void Painter::drawBorder(int x, int y, int w, int h, int radius,
-                          Color color, int borderWidth)
+                         Color color, int borderWidth)
 {
-    if (!s_gl) return;
+    if (!s_gl)
+        return;
     if (radius <= 0)
     {
         int ox = offX(ctx), oy = offY(ctx);
-        s_gl->drawFilledRect(x + ox, y + oy,           w,           borderWidth, color);
-        s_gl->drawFilledRect(x + ox, y + oy + h - borderWidth, w,  borderWidth, color);
-        s_gl->drawFilledRect(x + ox, y + oy,           borderWidth, h,           color);
-        s_gl->drawFilledRect(x + ox + w - borderWidth, y + oy, borderWidth, h,   color);
+        s_gl->drawFilledRect(x + ox, y + oy, w, borderWidth, color);
+        s_gl->drawFilledRect(x + ox, y + oy + h - borderWidth, w, borderWidth, color);
+        s_gl->drawFilledRect(x + ox, y + oy, borderWidth, h, color);
+        s_gl->drawFilledRect(x + ox + w - borderWidth, y + oy, borderWidth, h, color);
     }
     else
     {
@@ -1313,14 +1489,15 @@ void Painter::drawRectOutline(int x, int y, int w, int h, Color color, int sw)
 }
 
 void Painter::drawRoundedRectOutline(int x, int y, int w, int h,
-                                      int r, Color stroke, int sw)
+                                     int r, Color stroke, int sw)
 {
     drawBorder(x, y, w, h, r, stroke, sw); // delegates
 }
 
 void Painter::drawLine(int x1, int y1, int x2, int y2, Color color, int width)
 {
-    if (!s_gl) return;
+    if (!s_gl)
+        return;
     s_gl->drawLine(x1 + offX(ctx), y1 + offY(ctx),
                    x2 + offX(ctx), y2 + offY(ctx),
                    color, (float)width);
@@ -1337,9 +1514,10 @@ void Painter::drawVLine(int x, int y, int len, Color color, int sw)
 }
 
 void Painter::drawPolyline(const std::vector<std::pair<int, int>> &pts,
-                            Color color, int strokeWidth)
+                           Color color, int strokeWidth)
 {
-    if (!s_gl) return;
+    if (!s_gl)
+        return;
     std::vector<std::pair<int, int>> shifted;
     shifted.reserve(pts.size());
     for (auto &[px, py] : pts)
@@ -1348,20 +1526,22 @@ void Painter::drawPolyline(const std::vector<std::pair<int, int>> &pts,
 }
 
 void Painter::drawEllipse(int x, int y, int w, int h,
-                           Color fill, Color stroke, int strokeWidth)
+                          Color fill, Color stroke, int strokeWidth)
 {
-    if (!s_gl) return;
+    if (!s_gl)
+        return;
     float cx = (x + offX(ctx)) + w * 0.5f;
     float cy = (y + offY(ctx)) + h * 0.5f;
     s_gl->drawEllipse(cx, cy, w * 0.5f, h * 0.5f, fill, stroke, (float)strokeWidth);
 }
 
 void Painter::drawArc(float cx, float cy, float radius,
-                       int strokeWidth,
-                       float startAngle, float sweepAngle,
-                       Color color, bool roundedCaps)
+                      int strokeWidth,
+                      float startAngle, float sweepAngle,
+                      Color color, bool roundedCaps)
 {
-    if (!s_gl) return;
+    if (!s_gl)
+        return;
     s_gl->drawArc(cx + offX(ctx), cy + offY(ctx), radius, (float)strokeWidth,
                   startAngle, sweepAngle, color, roundedCaps);
 }
@@ -1395,7 +1575,8 @@ void Painter::endLayer() {}
 
 void Painter::drawWavyLine(int x, int y, int len, Color color, int amplitude)
 {
-    if (len <= 0) return;
+    if (len <= 0)
+        return;
     const int step = amplitude * 2;
     std::vector<std::pair<int, int>> pts;
     pts.reserve(len / step + 2);
@@ -1413,28 +1594,34 @@ void Painter::drawWavyLine(int x, int y, int len, Color color, int amplitude)
 }
 
 void Painter::drawFadeOverlay(int x, int y, int w, int h,
-                               int fadeWidth, Color bg)
+                              int fadeWidth, Color bg)
 {
-    if (fadeWidth <= 0 || w <= 0 || h <= 0) return;
+    if (fadeWidth <= 0 || w <= 0 || h <= 0)
+        return;
     int startX = x + w - fadeWidth;
-    if (startX < x) startX = x;
+    if (startX < x)
+        startX = x;
     std::vector<Color> stops = {bg.withAlpha(0), bg.withAlpha(255)};
     fillGradientRect(startX, y, fadeWidth, h, stops);
 }
 
 void Painter::drawTextDecorationLine(int lineX, int lineY, int lineW,
-                                      const TextStyle &style, TextDecoration which)
+                                     const TextStyle &style, TextDecoration which)
 {
-    if (lineW <= 0) return;
+    if (lineW <= 0)
+        return;
     int fontSize = style.scaledFontSize();
-    int ascent   = (int)(fontSize * 0.75f);
+    int ascent = (int)(fontSize * 0.75f);
     int thickness = style.decorationThickness;
     Color dc = style.decorationColor;
 
     int decorY = lineY;
-    if      (which == TextDecoration::Underline)   decorY = lineY + ascent + 1;
-    else if (which == TextDecoration::Overline)    decorY = lineY;
-    else if (which == TextDecoration::LineThrough) decorY = lineY + ascent - ascent / 3;
+    if (which == TextDecoration::Underline)
+        decorY = lineY + ascent + 1;
+    else if (which == TextDecoration::Overline)
+        decorY = lineY;
+    else if (which == TextDecoration::LineThrough)
+        decorY = lineY + ascent - ascent / 3;
 
     switch (style.decorationStyle)
     {
@@ -1442,7 +1629,7 @@ void Painter::drawTextDecorationLine(int lineX, int lineY, int lineW,
         drawHLine(lineX, decorY, lineW, dc, thickness);
         break;
     case TextDecorationStyle::Double:
-        drawHLine(lineX, decorY,     lineW, dc, thickness);
+        drawHLine(lineX, decorY, lineW, dc, thickness);
         drawHLine(lineX, decorY + 2, lineW, dc, thickness);
         break;
     case TextDecorationStyle::Dotted:
@@ -1464,12 +1651,13 @@ void Painter::drawTextDecorationLine(int lineX, int lineY, int lineW,
 // ============================================================================
 
 void Painter::drawText(const std::wstring &text, int x, int y, int w, int h,
-                        NativeFont fontHandle, Color color, UINT format)
+                       NativeFont fontHandle, Color color, UINT format)
 {
-    if (!s_gl || text.empty()) return;
+    if (!s_gl || text.empty())
+        return;
     std::string utf8 = wstringToUtf8(text);
     int fontIdx = resolveFont(fontHandle);
-    int sizePx  = resolveFontSize(fontHandle);
+    int sizePx = resolveFontSize(fontHandle);
 
     int tw = s_gl->measureLine(utf8.c_str(), (int)utf8.size(), fontIdx, sizePx);
 
@@ -1479,19 +1667,21 @@ void Painter::drawText(const std::wstring &text, int x, int y, int w, int h,
 
     // Start from the (already-logical) x/y and add the overlay offset.
     int tx = x + offX(ctx);
-    if      (format & DT_CENTER) tx = x + offX(ctx) + (w - tw) / 2;
-    else if (format & DT_RIGHT)  tx = x + offX(ctx) + w - tw;
+    if (format & DT_CENTER)
+        tx = x + offX(ctx) + (w - tw) / 2;
+    else if (format & DT_RIGHT)
+        tx = x + offX(ctx) + w - tw;
 
     int ty = (format & DT_VCENTER)
-           ? y + offY(ctx) + (h - th) / 2 + ascent
-           : y + offY(ctx) + ascent;
+                 ? y + offY(ctx) + (h - th) / 2 + ascent
+                 : y + offY(ctx) + ascent;
 
     s_gl->drawTextLine(utf8.c_str(), (int)utf8.size(),
                        (float)tx, (float)ty, fontIdx, sizePx, color);
 }
 
 void Painter::drawTextA(const std::string &text, int x, int y, int w, int h,
-                         NativeFont font, Color color, UINT format)
+                        NativeFont font, Color color, UINT format)
 {
     std::wstring wide;
     wide.reserve(text.size());
@@ -1501,13 +1691,14 @@ void Painter::drawTextA(const std::string &text, int x, int y, int w, int h,
 }
 
 void Painter::measureText(const std::wstring &text, NativeFont fontHandle,
-                           int &outW, int &outH)
+                          int &outW, int &outH)
 {
     outW = outH = 0;
-    if (!s_gl || text.empty()) return;
+    if (!s_gl || text.empty())
+        return;
     std::string utf8 = wstringToUtf8(text);
     int fontIdx = resolveFont(fontHandle);
-    int sizePx  = resolveFontSize(fontHandle);
+    int sizePx = resolveFontSize(fontHandle);
     outW = s_gl->measureLine(utf8.c_str(), (int)utf8.size(), fontIdx, sizePx);
     int a, d, lg;
     s_gl->getMetrics(fontIdx, sizePx, a, d, lg);
@@ -1518,7 +1709,10 @@ void Painter::measureText(const std::wstring &text, NativeFont fontHandle,
 // RICH TEXT HELPERS
 // ============================================================================
 
-struct LineSpanGL { int start, length; };
+struct LineSpanGL
+{
+    int start, length;
+};
 
 static std::vector<LineSpanGL> wrapText(const std::string &utf8,
                                         int maxWidth, bool softWrap,
@@ -1527,7 +1721,8 @@ static std::vector<LineSpanGL> wrapText(const std::string &utf8,
 {
     std::vector<LineSpanGL> lines;
     const int n = (int)utf8.size();
-    if (n == 0) return lines;
+    if (n == 0)
+        return lines;
 
     int pos = 0;
     while (pos < n)
@@ -1549,12 +1744,18 @@ static std::vector<LineSpanGL> wrapText(const std::string &utf8,
                 while (lo <= hi)
                 {
                     int mid = (lo + hi) / 2;
-                    int w2  = s_gl->measureLine(utf8.c_str() + lineStart, mid,
-                                                fontIdx, sizePx, letterSpacing);
-                    if (w2 <= maxWidth) { fit = mid; lo = mid + 1; }
-                    else                hi = mid - 1;
+                    int w2 = s_gl->measureLine(utf8.c_str() + lineStart, mid,
+                                               fontIdx, sizePx, letterSpacing);
+                    if (w2 <= maxWidth)
+                    {
+                        fit = mid;
+                        lo = mid + 1;
+                    }
+                    else
+                        hi = mid - 1;
                 }
-                if (fit == 0) fit = 1;
+                if (fit == 0)
+                    fit = 1;
 
                 int breakAt = fit;
                 if (lineStart + fit < nlPos)
@@ -1562,7 +1763,8 @@ static std::vector<LineSpanGL> wrapText(const std::string &utf8,
                     int wb = fit;
                     while (wb > 1 && utf8[lineStart + wb - 1] != ' ')
                         --wb;
-                    if (wb > 1) breakAt = wb;
+                    if (wb > 1)
+                        breakAt = wb;
                 }
 
                 lines.push_back({lineStart, breakAt});
@@ -1572,7 +1774,8 @@ static std::vector<LineSpanGL> wrapText(const std::string &utf8,
             }
         }
         pos = nlPos + 1;
-        if (nlPos == n) break;
+        if (nlPos == n)
+            break;
     }
     return lines;
 }
@@ -1581,24 +1784,25 @@ static std::vector<LineSpanGL> wrapText(const std::string &utf8,
 // Painter::measureRichText
 // ============================================================================
 void Painter::measureRichText(const std::wstring &text,
-                               const TextStyle &style,
-                               FontCache &fontCache,
-                               int maxWidth, bool softWrap, int maxLines,
-                               int &outWidth, int &outHeight)
+                              const TextStyle &style,
+                              FontCache &fontCache,
+                              int maxWidth, bool softWrap, int maxLines,
+                              int &outWidth, int &outHeight)
 {
     outWidth = outHeight = 0;
-    if (!s_gl || text.empty()) return;
+    if (!s_gl || text.empty())
+        return;
 
-    NativeFont font   = fontCache.getFont(style.fontFamily, style.scaledFontSize(), style.fontWeight);
-    int fontIdx       = resolveFont(font);
-    int sizePx        = style.scaledFontSize();
-    std::string utf8  = wstringToUtf8(text);
+    NativeFont font = fontCache.getFont(style.fontFamily, style.scaledFontSize(), style.fontWeight);
+    int fontIdx = resolveFont(font);
+    int sizePx = style.scaledFontSize();
+    std::string utf8 = wstringToUtf8(text);
 
     auto lines = wrapText(utf8, maxWidth, softWrap, fontIdx, sizePx, style.letterSpacing);
 
     int ascent, descent, lineGap;
     s_gl->getMetrics(fontIdx, sizePx, ascent, descent, lineGap);
-    int lineH       = ascent - descent + lineGap;
+    int lineH = ascent - descent + lineGap;
     int lineHeightPx = (int)(lineH * style.height);
 
     int total = (maxLines > 0) ? std::min((int)lines.size(), maxLines) : (int)lines.size();
@@ -1615,10 +1819,11 @@ void Painter::measureRichText(const std::wstring &text,
 // Painter::drawRichText
 // ============================================================================
 void Painter::drawRichText(const std::wstring &text,
-                            const RichTextParams &params,
-                            FontCache &fontCache)
+                           const RichTextParams &params,
+                           FontCache &fontCache)
 {
-    if (!s_gl || text.empty() || params.w <= 0 || params.h <= 0) return;
+    if (!s_gl || text.empty() || params.w <= 0 || params.h <= 0)
+        return;
 
     // Apply overlay offset to a local copy of the params rect.
     // All geometry emitted below goes through drawTextLine / fillRect /
@@ -1629,9 +1834,9 @@ void Painter::drawRichText(const std::wstring &text,
     p.y += offY(ctx);
 
     const TextStyle &style = p.style;
-    NativeFont font  = fontCache.getFont(style.fontFamily, style.scaledFontSize(), style.fontWeight);
-    int fontIdx      = resolveFont(font);
-    int sizePx       = style.scaledFontSize();
+    NativeFont font = fontCache.getFont(style.fontFamily, style.scaledFontSize(), style.fontWeight);
+    int fontIdx = resolveFont(font);
+    int sizePx = style.scaledFontSize();
     std::string utf8 = wstringToUtf8(text);
 
     int wrapWidth = p.softWrap ? p.w : 0;
@@ -1640,21 +1845,27 @@ void Painter::drawRichText(const std::wstring &text,
 
     int ascent, descent, lineGap;
     s_gl->getMetrics(fontIdx, sizePx, ascent, descent, lineGap);
-    int lineH        = ascent - descent + lineGap;
+    int lineH = ascent - descent + lineGap;
     int lineHeightPx = (int)(lineH * style.height);
-    if (lineHeightPx == 0) lineHeightPx = sizePx;
+    if (lineHeightPx == 0)
+        lineHeightPx = sizePx;
 
     int totalLines = (p.maxLines > 0)
-                   ? std::min((int)lines.size(), p.maxLines)
-                   : (int)lines.size();
+                         ? std::min((int)lines.size(), p.maxLines)
+                         : (int)lines.size();
 
-    int blockH  = totalLines * lineHeightPx;
-    int startY  = p.y;
+    int blockH = totalLines * lineHeightPx;
+    int startY = p.y;
     switch (p.textAlignVertical)
     {
-    case TextAlignVertical::Center: startY = p.y + (p.h - blockH) / 2; break;
-    case TextAlignVertical::Bottom: startY = p.y + p.h - blockH;       break;
-    default: break;
+    case TextAlignVertical::Center:
+        startY = p.y + (p.h - blockH) / 2;
+        break;
+    case TextAlignVertical::Bottom:
+        startY = p.y + p.h - blockH;
+        break;
+    default:
+        break;
     }
 
     bool needClip = (p.overflow != TextOverflow::Visible);
@@ -1671,14 +1882,16 @@ void Painter::drawRichText(const std::wstring &text,
         int lineY = startY + i * lineHeightPx;
         int drawY = lineY + ascent;
 
-        if (lineY + lineHeightPx < p.y) continue;
-        if (lineY > p.y + p.h)          break;
+        if (lineY + lineHeightPx < p.y)
+            continue;
+        if (lineY > p.y + p.h)
+            break;
 
         int lineW = s_gl->measureLine(utf8.c_str() + span.start, span.length,
                                       fontIdx, sizePx, style.letterSpacing);
 
         bool isRTL = (p.direction == TextDirection::RTL);
-        int lineX  = p.x;
+        int lineX = p.x;
         switch (p.textAlign)
         {
         case TextAlign::Right:
@@ -1694,7 +1907,7 @@ void Painter::drawRichText(const std::wstring &text,
         }
 
         bool isLastVisible = (i == totalLines - 1);
-        bool hasMoreLines  = ((int)lines.size() > totalLines);
+        bool hasMoreLines = ((int)lines.size() > totalLines);
 
         // Background
         if (style.backgroundColor.has_value())
@@ -1721,7 +1934,8 @@ void Painter::drawRichText(const std::wstring &text,
                 int tw = s_gl->measureLine((lineText + ellipsis).c_str(),
                                            (int)(lineText.size() + ellipsis.size()),
                                            fontIdx, sizePx, style.letterSpacing);
-                if (tw <= p.w || lineText.size() == 1) break;
+                if (tw <= p.w || lineText.size() == 1)
+                    break;
                 lineText.pop_back();
                 while (!lineText.empty() &&
                        (static_cast<unsigned char>(lineText.back()) & 0xC0) == 0x80)
@@ -1744,14 +1958,17 @@ void Painter::drawRichText(const std::wstring &text,
         // already carry the offset, so call s_gl directly.
         auto drawDecoLine = [&](int dx, int dy, int dw, TextDecoration which)
         {
-            int fontSize  = style.scaledFontSize();
-            int asc       = (int)(fontSize * 0.75f);
+            int fontSize = style.scaledFontSize();
+            int asc = (int)(fontSize * 0.75f);
             int thickness = style.decorationThickness;
-            Color dc      = style.decorationColor;
-            int decorY    = dy;
-            if      (which == TextDecoration::Underline)   decorY = dy + asc + 1;
-            else if (which == TextDecoration::Overline)    decorY = dy;
-            else if (which == TextDecoration::LineThrough) decorY = dy + asc - asc / 3;
+            Color dc = style.decorationColor;
+            int decorY = dy;
+            if (which == TextDecoration::Underline)
+                decorY = dy + asc + 1;
+            else if (which == TextDecoration::Overline)
+                decorY = dy;
+            else if (which == TextDecoration::LineThrough)
+                decorY = dy + asc - asc / 3;
 
             switch (style.decorationStyle)
             {
@@ -1759,7 +1976,7 @@ void Painter::drawRichText(const std::wstring &text,
                 s_gl->drawLine(dx, decorY, dx + dw, decorY, dc, thickness);
                 break;
             case TextDecorationStyle::Double:
-                s_gl->drawLine(dx, decorY,     dx + dw, decorY,     dc, thickness);
+                s_gl->drawLine(dx, decorY, dx + dw, decorY, dc, thickness);
                 s_gl->drawLine(dx, decorY + 2, dx + dw, decorY + 2, dc, thickness);
                 break;
             case TextDecorationStyle::Dotted:
@@ -1772,14 +1989,16 @@ void Painter::drawRichText(const std::wstring &text,
                 break;
             case TextDecorationStyle::Wavy:
             {
-                const int amp  = 2;
+                const int amp = 2;
                 const int step = amp * 2;
-                std::vector<std::pair<int,int>> wpts;
+                std::vector<std::pair<int, int>> wpts;
                 int wx = dx;
                 bool up = true;
-                while (wx < dx + dw) {
+                while (wx < dx + dw)
+                {
                     wpts.push_back({wx, up ? decorY - amp : decorY + amp});
-                    wx += step; up = !up;
+                    wx += step;
+                    up = !up;
                 }
                 wpts.push_back({dx + dw, decorY});
                 s_gl->drawPolyline(wpts, dc, 1.f);
@@ -1788,9 +2007,12 @@ void Painter::drawRichText(const std::wstring &text,
             }
         };
 
-        if (style.hasOverline())    drawDecoLine(lineX, lineY, lineW, TextDecoration::Overline);
-        if (style.hasUnderline())   drawDecoLine(lineX, lineY, lineW, TextDecoration::Underline);
-        if (style.hasLineThrough()) drawDecoLine(lineX, lineY, lineW, TextDecoration::LineThrough);
+        if (style.hasOverline())
+            drawDecoLine(lineX, lineY, lineW, TextDecoration::Overline);
+        if (style.hasUnderline())
+            drawDecoLine(lineX, lineY, lineW, TextDecoration::Underline);
+        if (style.hasLineThrough())
+            drawDecoLine(lineX, lineY, lineW, TextDecoration::LineThrough);
 
         // Fade overlay
         if (isLastVisible && hasMoreLines &&
@@ -1798,8 +2020,8 @@ void Painter::drawRichText(const std::wstring &text,
         {
             int fadeW = std::min(60, p.w / 3);
             int startX = p.x + p.w - fadeW;
-            std::vector<Color> stops = {Color::fromRGBA(255,255,255,0),
-                                        Color::fromRGBA(255,255,255,255)};
+            std::vector<Color> stops = {Color::fromRGBA(255, 255, 255, 0),
+                                        Color::fromRGBA(255, 255, 255, 255)};
             // Call s_gl directly — coords already offset
             s_gl->drawGradientRect(startX, lineY, fadeW, lineHeightPx,
                                    stops.front(), stops.back());
@@ -1811,10 +2033,11 @@ void Painter::drawRichText(const std::wstring &text,
 }
 
 void Painter::drawRichTextA(const std::string &text,
-                             const RichTextParams &params,
-                             FontCache &fontCache)
+                            const RichTextParams &params,
+                            FontCache &fontCache)
 {
-    if (text.empty()) return;
+    if (text.empty())
+        return;
     std::wstring wide;
     wide.reserve(text.size());
     for (unsigned char c : text)
@@ -1828,17 +2051,36 @@ void Painter::drawRichTextA(const std::string &text,
 
 void Painter::drawImage(const ImageDrawParams &p)
 {
-    if (!s_gl || p.image == -1 || p.clipW <= 0 || p.clipH <= 0) return;
+    if (!s_gl || p.image == -1 || p.clipW <= 0 || p.clipH <= 0)
+        return;
 
     // Shift both the clip rect and the dest rect by the overlay offset.
     ImageDrawParams sp = p;
-    sp.clipX  += offX(ctx);
-    sp.clipY  += offY(ctx);
-    sp.destX  += offX(ctx);
-    sp.destY  += offY(ctx);
+    sp.clipX += offX(ctx);
+    sp.clipY += offY(ctx);
+    sp.destX += offX(ctx);
+    sp.destY += offY(ctx);
 
-    float u0 = 0.f, v0 = sp.flipY ? 1.f : 0.f;
-    float u1 = 1.f, v1 = sp.flipY ? 0.f : 1.f;
+    // Compute UVs from the optional source sub-rect. srcW/srcH < 0 (the
+    // default) means "use the full texture" — identical to the old
+    // hardcoded 0..1 behavior, so every existing call site is unaffected.
+    float sw = (sp.srcW >= 0.f) ? sp.srcW : (float)sp.srcWidth;
+    float sh = (sp.srcH >= 0.f) ? sp.srcH : (float)sp.srcHeight;
+    float u0 = (sp.srcWidth  > 0) ? sp.srcX / sp.srcWidth              : 0.f;
+    float u1 = (sp.srcWidth  > 0) ? (sp.srcX + sw) / sp.srcWidth        : 1.f;
+    float v0, v1;
+    if (sp.srcHeight > 0)
+    {
+        float vTop    = sp.srcY / sp.srcHeight;
+        float vBottom = (sp.srcY + sh) / sp.srcHeight;
+        v0 = sp.flipY ? vBottom : vTop;
+        v1 = sp.flipY ? vTop    : vBottom;
+    }
+    else
+    {
+        v0 = sp.flipY ? 1.f : 0.f;
+        v1 = sp.flipY ? 0.f : 1.f;
+    }
 
     s_gl->pushScissor(sp.clipX, sp.clipY, sp.clipW, sp.clipH);
 
@@ -1874,7 +2116,8 @@ void Painter::drawImage(const ImageDrawParams &p)
 
 void Painter::drawVideo(const VideoDrawParams &p)
 {
-    if (!s_gl || p.frame == -1 || p.dstW <= 0) return;
+    if (!s_gl || p.frame == -1 || p.dstW <= 0)
+        return;
     s_gl->drawTexture((GLuint)p.frame,
                       (float)(p.dstX + offX(ctx)), (float)(p.dstY + offY(ctx)),
                       (float)p.dstW, (float)p.dstH);
@@ -1882,7 +2125,8 @@ void Painter::drawVideo(const VideoDrawParams &p)
 
 void Painter::drawCamera(const CameraDrawParams &p)
 {
-    if (!s_gl || p.frame == -1 || p.dstW <= 0 || p.dstH <= 0) return;
+    if (!s_gl || p.frame == -1 || p.dstW <= 0 || p.dstH <= 0)
+        return;
     float u0 = p.mirror ? 1.f : 0.f;
     float u1 = p.mirror ? 0.f : 1.f;
     s_gl->drawTexture((GLuint)p.frame,
@@ -1893,15 +2137,28 @@ void Painter::drawCamera(const CameraDrawParams &p)
 
 void Painter::drawPage(const PageDrawParams &p)
 {
-    if (!s_gl) return;
+    if (!s_gl)
+        return;
 
     // Shift every region by the overlay offset.
     PageDrawParams sp = p;
     sp.x += offX(ctx);
     sp.y += offY(ctx);
-    if (sp.body.present)   { sp.body.x   += offX(ctx); sp.body.y   += offY(ctx); }
-    if (sp.header.present) { sp.header.x += offX(ctx); sp.header.y += offY(ctx); }
-    if (sp.footer.present) { sp.footer.x += offX(ctx); sp.footer.y += offY(ctx); }
+    if (sp.body.present)
+    {
+        sp.body.x += offX(ctx);
+        sp.body.y += offY(ctx);
+    }
+    if (sp.header.present)
+    {
+        sp.header.x += offX(ctx);
+        sp.header.y += offY(ctx);
+    }
+    if (sp.footer.present)
+    {
+        sp.footer.x += offX(ctx);
+        sp.footer.y += offY(ctx);
+    }
 
     if (sp.hasPageBackground)
         s_gl->drawFilledRect(sp.x, sp.y, sp.w, sp.h, sp.pageBackground);
@@ -1919,7 +2176,7 @@ void Painter::drawPage(const PageDrawParams &p)
         {
             s_gl->drawGradientRect(sp.header.x, sp.header.y + sp.header.h,
                                    sp.header.w, sp.header.elevation,
-                                   Color::fromRGBA(0,0,0,60), Color::fromRGBA(0,0,0,0));
+                                   Color::fromRGBA(0, 0, 0, 60), Color::fromRGBA(0, 0, 0, 0));
         }
     }
 
@@ -1932,7 +2189,7 @@ void Painter::drawPage(const PageDrawParams &p)
         {
             s_gl->drawGradientRect(sp.footer.x, sp.footer.y - sp.footer.elevation,
                                    sp.footer.w, sp.footer.elevation,
-                                   Color::fromRGBA(0,0,0,0), Color::fromRGBA(0,0,0,60));
+                                   Color::fromRGBA(0, 0, 0, 0), Color::fromRGBA(0, 0, 0, 60));
         }
     }
 }

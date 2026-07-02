@@ -54,6 +54,12 @@ struct WindowCallbacks
 
     std::function<void()> onNonClientMouseDown;
     std::function<void()> onFocusLost;
+
+    // Fired when the platform's GL context/surface is destroyed out from
+    // under the app (Android: APP_CMD_TERM_WINDOW). Unused on platforms
+    // without this failure mode. Engine wires this to a tree-wide
+    // Widget::onGLContextLost() broadcast — see FluxUI::wireCallbacks().
+    std::function<void()> onGLContextLost;
 };
 
 // ============================================================================

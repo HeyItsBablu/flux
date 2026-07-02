@@ -145,6 +145,13 @@ struct Painter
         NativeImage image{};
         int srcWidth = 0;
         int srcHeight = 0;
+        // Optional source sub-rect, in the same pixel space as
+        // srcWidth/srcHeight. Sentinel: srcW/srcH < 0 means "use the
+        // full texture" (srcX/srcY ignored), preserving old behavior on
+        // every platform that doesn't set these. Used by Android's
+        // CanvasWidget to composite a pan/zoomed view of a doc-sized FBO.
+        float srcX = 0.f, srcY = 0.f;
+        float srcW = -1.f, srcH = -1.f;
         int clipX = 0, clipY = 0, clipW = 0, clipH = 0;
         float destX = 0, destY = 0, destW = 0, destH = 0;
         int borderRadius = 0;
