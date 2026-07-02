@@ -230,11 +230,17 @@ struct Canvas2D
     };
 
 #if defined(__ANDROID__) || defined(__EMSCRIPTEN__)
-    // GL backend pointer — Android/Web only.
+    // GL backend pointer — Android/Web only. Unused (stays nullptr) if this
+    // struct is ever compiled for a non-GL platform.
     Canvas2DGL *canvasGL_ = nullptr;
+#endif
 
+#if defined(__ANDROID__) || defined(__EMSCRIPTEN__) || (defined(__APPLE__) && TARGET_OS_OSX)
     // 3×3 column-major transform matrix — GL only.
     // Cairo and D2D manage their own transform stacks natively.
+    // Shared by GL (Android/Web) and Metal (macOS), both of which compose
+    // it into their per-draw MVP. Cairo and D2D manage their own transform
+    // stacks natively and don't need this.
     struct Mat3
     {
         float m[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
@@ -305,10 +311,8 @@ private:
     // ── Save/restore state ────────────────────────────────────────────────
     struct SaveState
     {
-        // GL platforms track the CTM here so save/restore can replay it.
-        // Cairo manages its own transform stack via cairo_save/cairo_restore,
-        // so no CTM storage is needed there.  D2D has its own transform too.
-#if defined(__ANDROID__) || defined(__EMSCRIPTEN__)
+
+#if defined(__ANDROID__) || defined(__EMSCRIPTEN__) || (defined(__APPLE__) && TARGET_OS_OSX)
         Mat3 ctm;
 #endif
 
@@ -349,6 +353,14 @@ private:
                        float a0, float a1, bool ccw, bool move);
     void fillPath();
     void strokePath();
+
+#elif defined(__APPLE__) && TARGET_OS_OSX
+    // Metal-only transform state — same Mat3 representation as GL, composed
+    // with backend_->frameMVP inside buildMVP(). Metal's vertex-building
+    // stays in free functions private to flux_canvas2d_metal.mm, so unlike
+    // the GL branch above, no draw-helper methods are declared here.
+    Mat3 ctm_;
+    void buildMVP(float out[16]) const;
 #endif
 
     // ── Helpers ───────────────────────────────────────────────────────────

@@ -30,6 +30,15 @@
 
 #include <stb_truetype.h>
 
+
+// stb_image — declaration only; implementation is provided by
+// src/stb_impl.cpp (STB_IMAGE_IMPLEMENTATION). Format support (JPEG/PNG/
+// BMP/TGA) is controlled entirely by stb_impl.cpp's STBI_ONLY_* defines —
+// any STBI_ONLY_* macros here would be no-ops, since this TU never sees
+// STB_IMAGE_IMPLEMENTATION.
+#include "stb_image.h"
+
+
 // ============================================================================
 // Shaders
 // ============================================================================
@@ -159,6 +168,12 @@ struct CVertex { float x, y, u, v; };
 
 struct Canvas2DBackend
 {
+    // Persistent device reference — separate from frameDevice below, which
+    // is only valid between Canvas2DBackend_metalBeginFrame/EndFrame. Image
+    // loading needs a device at any time (e.g. eager asset loading before
+    // the first frame renders), so it's captured once here at creation.
+    id<MTLDevice> device = nil;
+
     // ── Fonts / glyphs ───────────────────────────────────────────────────
     struct FontFace
     {
@@ -259,9 +274,11 @@ struct Canvas2DBackend
 // Public lifecycle / frame API — the ONLY surface flux_canvas_macos.mm sees.
 // ============================================================================
 
-Canvas2DBackend *Canvas2DBackend_create(id<MTLDevice> /*device*/)
+Canvas2DBackend *Canvas2DBackend_create(id<MTLDevice> device)
 {
-    return new Canvas2DBackend();
+    auto *b = new Canvas2DBackend();
+    b->device = device;
+    return b;
 }
 
 void Canvas2DBackend_destroy(Canvas2DBackend *b)
@@ -288,12 +305,85 @@ void Canvas2DBackend_metalEndFrame(Canvas2DBackend *b)
 }
 
 // ============================================================================
+// Canvas2D::Mat3 — CTM representation shared by GL and Metal backends.
+// GL's implementation lives in flux_canvas2d_gl.cpp; that TU is never
+// compiled for macOS, so Metal keeps its own copy here (same convention as
+// the duplicated ortho helpers across each platform's canvas backend).
+// ============================================================================
+
+Canvas2D::Mat3 Canvas2D::Mat3::identity() { return Mat3{}; }
+
+Canvas2D::Mat3 Canvas2D::Mat3::multiply(const Mat3 &b) const
+{
+    Mat3 r;
+    for (int row = 0; row < 3; ++row)
+        for (int col = 0; col < 3; ++col)
+        {
+            float s = 0;
+            for (int k = 0; k < 3; ++k)
+                s += m[row * 3 + k] * b.m[k * 3 + col];
+            r.m[row * 3 + col] = s;
+        }
+    return r;
+}
+
+Canvas2D::Mat3 Canvas2D::Mat3::translated(float dx, float dy) const
+{
+    Mat3 t;
+    t.m[2] = dx;
+    t.m[5] = dy;
+    return this->multiply(t);
+}
+Canvas2D::Mat3 Canvas2D::Mat3::scaled(float sx, float sy) const
+{
+    Mat3 s;
+    s.m[0] = sx;
+    s.m[4] = sy;
+    return this->multiply(s);
+}
+Canvas2D::Mat3 Canvas2D::Mat3::rotated(float a) const
+{
+    float c = cosf(a), s = sinf(a);
+    Mat3 r;
+    r.m[0] = c; r.m[1] = -s;
+    r.m[3] = s; r.m[4] =  c;
+    return this->multiply(r);
+}
+void Canvas2D::Mat3::apply(float &x, float &y) const
+{
+    float nx = m[0] * x + m[1] * y + m[2];
+    float ny = m[3] * x + m[4] * y + m[5];
+    x = nx;
+    y = ny;
+}
+
+// ============================================================================
 // Canvas2D — Metal implementation
 // ============================================================================
 
 Canvas2D::Canvas2D(Canvas2DBackend *backend, int canvasW, int canvasH)
     : backend_(backend), w_(canvasW), h_(canvasH)
 {
+    ctm_ = Mat3::identity();
+}
+
+// ── buildMVP — combines backend_->frameMVP (set per-frame by
+// Canvas2DBackend_metalBeginFrame, called from flux_canvas_macos.mm's
+// render()) with ctm_ (accumulated via translate/scale/rotate). Mirrors
+// the GL backend's buildMVP exactly. ─────────────────────────────────────
+void Canvas2D::buildMVP(float out[16]) const
+{
+    float c[16] = {
+        ctm_.m[0], ctm_.m[3], 0, 0,
+        ctm_.m[1], ctm_.m[4], 0, 0,
+        0,         0,         1, 0,
+        ctm_.m[2], ctm_.m[5], 0, 1};
+    const float *base = backend_->frameMVP;
+    memset(out, 0, 64);
+    for (int col = 0; col < 4; ++col)
+        for (int row = 0; row < 4; ++row)
+            for (int k = 0; k < 4; ++k)
+                out[col * 4 + row] += base[k * 4 + row] * c[col * 4 + k];
 }
 
 // ── State stack ──────────────────────────────────────────────────────────
@@ -301,6 +391,7 @@ Canvas2D::Canvas2D(Canvas2DBackend *backend, int canvasW, int canvasH)
 void Canvas2D::save()
 {
     SaveState s;
+    s.ctm = ctm_;
     s.fillColor = fillColor_;
     s.strokeColor = strokeColor_;
     s.lineWidth = lineWidth_;
@@ -326,6 +417,7 @@ void Canvas2D::restore()
 {
     if (stateStack_.empty()) return;
     const SaveState &s = stateStack_.back();
+    ctm_ = s.ctm;
     fillColor_ = s.fillColor;
     strokeColor_ = s.strokeColor;
     lineWidth_ = s.lineWidth;
@@ -347,11 +439,11 @@ void Canvas2D::restore()
     stateStack_.pop_back();
 }
 
-// ── Transform — TODO: no CTM tracking on this path yet.
-void Canvas2D::translate(float, float) { /* TODO */ }
-void Canvas2D::scale(float, float) { /* TODO */ }
-void Canvas2D::rotate(float) { /* TODO */ }
-void Canvas2D::resetTransform() { /* TODO */ }
+// ── Transform ────────────────────────────────────────────────────────────
+void Canvas2D::translate(float dx, float dy) { ctm_ = ctm_.translated(dx, dy); }
+void Canvas2D::scale(float sx, float sy)     { ctm_ = ctm_.scaled(sx, sy); }
+void Canvas2D::rotate(float r)               { ctm_ = ctm_.rotated(r); }
+void Canvas2D::resetTransform()              { ctm_ = Mat3::identity(); }
 
 // ── Style ────────────────────────────────────────────────────────────────
 
@@ -394,7 +486,8 @@ static void pushQuad(std::vector<CVertex> &out, float x, float y, float w, float
     out.push_back({x,     y + h, u0, v1});
 }
 
-static void drawSolid(Canvas2DBackend *backend, const std::vector<CVertex> &verts,
+static void drawSolid(Canvas2DBackend *backend, const float mvp[16],
+                      const std::vector<CVertex> &verts,
                       Color color, float globalAlpha)
 {
     if (verts.empty() || !backend || !backend->frameEncoder) return;
@@ -405,7 +498,7 @@ static void drawSolid(Canvas2DBackend *backend, const std::vector<CVertex> &vert
     [backend->frameEncoder setVertexBytes:verts.data() length:verts.size()*sizeof(CVertex) atIndex:0];
 
     struct { float mvp[16]; float color[4]; int mode; } u;
-    memcpy(u.mvp, backend->frameMVP, sizeof(u.mvp));
+    memcpy(u.mvp, mvp, sizeof(u.mvp));
     u.color[0] = color.r/255.f; u.color[1] = color.g/255.f;
     u.color[2] = color.b/255.f; u.color[3] = (color.a/255.f) * globalAlpha;
     u.mode = 0;
@@ -414,7 +507,8 @@ static void drawSolid(Canvas2DBackend *backend, const std::vector<CVertex> &vert
     [backend->frameEncoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:verts.size()];
 }
 
-static void drawTexturedR8(Canvas2DBackend *backend, const std::vector<CVertex> &verts,
+static void drawTexturedR8(Canvas2DBackend *backend, const float mvp[16],
+                           const std::vector<CVertex> &verts,
                            Color tint, float globalAlpha, id<MTLTexture> tex)
 {
     if (verts.empty() || !tex || !backend || !backend->frameEncoder) return;
@@ -425,7 +519,7 @@ static void drawTexturedR8(Canvas2DBackend *backend, const std::vector<CVertex> 
     [backend->frameEncoder setVertexBytes:verts.data() length:verts.size()*sizeof(CVertex) atIndex:0];
 
     struct { float mvp[16]; float color[4]; int mode; } u;
-    memcpy(u.mvp, backend->frameMVP, sizeof(u.mvp));
+    memcpy(u.mvp, mvp, sizeof(u.mvp));
     u.color[0] = tint.r/255.f; u.color[1] = tint.g/255.f;
     u.color[2] = tint.b/255.f; u.color[3] = (tint.a/255.f) * globalAlpha;
     u.mode = 1;
@@ -436,7 +530,8 @@ static void drawTexturedR8(Canvas2DBackend *backend, const std::vector<CVertex> 
     [backend->frameEncoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:verts.size()];
 }
 
-static void drawTexturedRGBA(Canvas2DBackend *backend, const std::vector<CVertex> &verts,
+static void drawTexturedRGBA(Canvas2DBackend *backend, const float mvp[16],
+                             const std::vector<CVertex> &verts,
                              float globalAlpha, id<MTLTexture> tex)
 {
     if (verts.empty() || !tex || !backend || !backend->frameEncoder) return;
@@ -447,7 +542,7 @@ static void drawTexturedRGBA(Canvas2DBackend *backend, const std::vector<CVertex
     [backend->frameEncoder setVertexBytes:verts.data() length:verts.size()*sizeof(CVertex) atIndex:0];
 
     struct { float mvp[16]; float color[4]; int mode; } u;
-    memcpy(u.mvp, backend->frameMVP, sizeof(u.mvp));
+    memcpy(u.mvp, mvp, sizeof(u.mvp));
     u.color[0]=u.color[1]=u.color[2]=1.f; u.color[3]=globalAlpha;
     u.mode = 2;
     [backend->frameEncoder setVertexBytes:&u length:sizeof(u) atIndex:1];
@@ -463,14 +558,16 @@ void Canvas2D::clearRect(float x, float y, float w, float h)
 {
     std::vector<CVertex> v;
     pushQuad(v, x, y, w, h);
-    drawSolid(backend_, v, Color::fromRGBA(0,0,0,0), 1.f);
+    float mvp[16]; buildMVP(mvp);
+    drawSolid(backend_, mvp, v, Color::fromRGBA(0,0,0,0), 1.f);
 }
 
 void Canvas2D::fillRect(float x, float y, float w, float h)
 {
     std::vector<CVertex> v;
     pushQuad(v, x, y, w, h);
-    drawSolid(backend_, v, fillColor_, globalAlpha_);
+    float mvp[16]; buildMVP(mvp);
+    drawSolid(backend_, mvp, v, fillColor_, globalAlpha_);
 }
 
 void Canvas2D::strokeRect(float x, float y, float w, float h)
@@ -481,14 +578,16 @@ void Canvas2D::strokeRect(float x, float y, float w, float h)
     pushQuad(v, x, y+h-lw, w, lw);
     pushQuad(v, x, y, lw, h);
     pushQuad(v, x+w-lw, y, lw, h);
-    drawSolid(backend_, v, strokeColor_, globalAlpha_);
+    float mvp[16]; buildMVP(mvp);
+    drawSolid(backend_, mvp, v, strokeColor_, globalAlpha_);
 }
 
 void Canvas2D::fillRoundedRect(float x, float y, float w, float h, float r)
 {
     r = std::min(r, std::min(w, h) * 0.5f);
     std::vector<CVertex> v;
-    if (r <= 0.f) { pushQuad(v, x, y, w, h); drawSolid(backend_, v, fillColor_, globalAlpha_); return; }
+    float mvp[16]; buildMVP(mvp);
+    if (r <= 0.f) { pushQuad(v, x, y, w, h); drawSolid(backend_, mvp, v, fillColor_, globalAlpha_); return; }
 
     pushQuad(v, x+r, y,     w-2*r, r);
     pushQuad(v, x+r, y+h-r, w-2*r, r);
@@ -510,7 +609,7 @@ void Canvas2D::fillRoundedRect(float x, float y, float w, float h, float r)
     corner(x+w-r, y+h-r, 0,       0.5f*PI);
     corner(x+r,   y+h-r, 0.5f*PI, PI);
 
-    drawSolid(backend_, v, fillColor_, globalAlpha_);
+    drawSolid(backend_, mvp, v, fillColor_, globalAlpha_);
 }
 
 void Canvas2D::strokeRoundedRect(float x, float y, float w, float h, float r)
@@ -530,7 +629,8 @@ void Canvas2D::fillCircle(float cx, float cy, float r)
         v.push_back({cx + r*cosf(t0), cy + r*sinf(t0), 0, 0});
         v.push_back({cx + r*cosf(t1), cy + r*sinf(t1), 0, 0});
     }
-    drawSolid(backend_, v, fillColor_, globalAlpha_);
+    float mvp[16]; buildMVP(mvp);
+    drawSolid(backend_, mvp, v, fillColor_, globalAlpha_);
 }
 
 void Canvas2D::strokeCircle(float cx, float cy, float r)
@@ -538,7 +638,7 @@ void Canvas2D::strokeCircle(float cx, float cy, float r)
     std::vector<CVertex> v;
     const int segs = 32;
     float lw = lineWidth_;
-    for (int i = 0; i < segs; ++i) {
+    for (int i = 0; i <= segs; ++i) {
         float t0 = (i/(float)segs)*2.f*3.14159265f;
         float t1 = ((i+1)/(float)segs)*2.f*3.14159265f;
         float x0 = cx+r*cosf(t0), y0 = cy+r*sinf(t0);
@@ -549,7 +649,8 @@ void Canvas2D::strokeCircle(float cx, float cy, float r)
         v.push_back({x0+nx,y0+ny,0,0}); v.push_back({x0-nx,y0-ny,0,0}); v.push_back({x1+nx,y1+ny,0,0});
         v.push_back({x1+nx,y1+ny,0,0}); v.push_back({x0-nx,y0-ny,0,0}); v.push_back({x1-nx,y1-ny,0,0});
     }
-    drawSolid(backend_, v, strokeColor_, globalAlpha_);
+    float mvp[16]; buildMVP(mvp);
+    drawSolid(backend_, mvp, v, strokeColor_, globalAlpha_);
 }
 
 // ── Path API — TODO: minimal (convex fan fill / polyline stroke).
@@ -620,7 +721,8 @@ void Canvas2D::fill()
         v.push_back({path_[i].x, path_[i].y, 0, 0});
         v.push_back({path_[i+1].x, path_[i+1].y, 0, 0});
     }
-    drawSolid(backend_, v, fillColor_, globalAlpha_);
+    float mvp[16]; buildMVP(mvp);
+    drawSolid(backend_, mvp, v, fillColor_, globalAlpha_);
 }
 
 void Canvas2D::stroke()
@@ -637,7 +739,8 @@ void Canvas2D::stroke()
         v.push_back({x0+nx,y0+ny,0,0}); v.push_back({x0-nx,y0-ny,0,0}); v.push_back({x1+nx,y1+ny,0,0});
         v.push_back({x1+nx,y1+ny,0,0}); v.push_back({x0-nx,y0-ny,0,0}); v.push_back({x1-nx,y1-ny,0,0});
     }
-    drawSolid(backend_, v, strokeColor_, globalAlpha_);
+    float mvp[16]; buildMVP(mvp);
+    drawSolid(backend_, mvp, v, strokeColor_, globalAlpha_);
 }
 
 void Canvas2D::clip()
@@ -656,30 +759,67 @@ bool Canvas2D::registerFont(Canvas2DBackend *backend, const std::string &name,
 
 // ── Image ────────────────────────────────────────────────────────────────
 
+static Canvas2DImage *makeImageFromRGBA(Canvas2DBackend *backend,
+                                        const unsigned char *rgba, int w, int h)
+{
+    if (!backend || !backend->device || !rgba || w <= 0 || h <= 0)
+        return nullptr;
+
+    auto *img = new Canvas2DImageMetal();
+    img->ctx = new Canvas2DMetalTexContext();
+
+    MTLTextureDescriptor *td = [MTLTextureDescriptor
+        texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+                                      width:w height:h mipmapped:NO];
+    img->ctx->texture = [backend->device newTextureWithDescriptor:td];
+    if (!img->ctx->texture)
+    {
+        delete img;
+        return nullptr;
+    }
+    [img->ctx->texture replaceRegion:MTLRegionMake2D(0, 0, w, h) mipmapLevel:0
+                           withBytes:rgba bytesPerRow:w * 4];
+
+    img->width = w;
+    img->height = h;
+    return img;
+}
+
 Canvas2DImage *Canvas2D::loadImage(const std::string &path)
 {
-    // TODO: PNG/JPEG decode not wired here yet.
-    (void)path;
-    return nullptr;
+    int w, h, ch;
+    stbi_set_flip_vertically_on_load(0);
+    unsigned char *data = stbi_load(path.c_str(), &w, &h, &ch, 4);
+    if (!data)
+        return nullptr;
+    Canvas2DImage *img = makeImageFromRGBA(backend_, data, w, h);
+    stbi_image_free(data);
+    return img;
 }
 
 Canvas2DImage *Canvas2D::loadImageFromMemory(const unsigned char *data, int byteLen)
 {
-    (void)data; (void)byteLen;
-    return nullptr;
+    int w, h, ch;
+    stbi_set_flip_vertically_on_load(0);
+    unsigned char *px = stbi_load_from_memory(data, byteLen, &w, &h, &ch, 4);
+    if (!px)
+        return nullptr;
+    Canvas2DImage *img = makeImageFromRGBA(backend_, px, w, h);
+    stbi_image_free(px);
+    return img;
 }
 
 void Canvas2D::updateImage(Canvas2DImage *img, const unsigned char *rgba, int w, int h)
 {
     auto *m = static_cast<Canvas2DImageMetal *>(img);
-    if (!m || !backend_ || !backend_->frameDevice) return;
+    if (!m || !backend_ || !backend_->device) return;
 
     if (!m->ctx) m->ctx = new Canvas2DMetalTexContext();
     if (!m->ctx->texture || m->width != w || m->height != h) {
         MTLTextureDescriptor *td = [MTLTextureDescriptor
             texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
                                           width:w height:h mipmapped:NO];
-        m->ctx->texture = [backend_->frameDevice newTextureWithDescriptor:td];
+        m->ctx->texture = [backend_->device newTextureWithDescriptor:td];
         m->width = w; m->height = h;
     }
     [m->ctx->texture replaceRegion:MTLRegionMake2D(0,0,w,h) mipmapLevel:0
@@ -703,7 +843,8 @@ void Canvas2D::drawImage(const Canvas2DImage *img, float dx, float dy, float dw,
     if (!m || !m->ctx || !m->ctx->texture) return;
     std::vector<CVertex> v;
     pushQuad(v, dx, dy, dw, dh);
-    drawTexturedRGBA(backend_, v, globalAlpha_, m->ctx->texture);
+    float mvp[16]; buildMVP(mvp);
+    drawTexturedRGBA(backend_, mvp, v, globalAlpha_, m->ctx->texture);
 }
 
 void Canvas2D::drawImage(const Canvas2DImage *img, float sx, float sy, float sw, float sh,
@@ -715,7 +856,8 @@ void Canvas2D::drawImage(const Canvas2DImage *img, float sx, float sy, float sw,
     float u1 = (sx+sw) / m->width, v1 = (sy+sh) / m->height;
     std::vector<CVertex> v;
     pushQuad(v, dx, dy, dw, dh, u0, v0, u1, v1);
-    drawTexturedRGBA(backend_, v, globalAlpha_, m->ctx->texture);
+    float mvp[16]; buildMVP(mvp);
+    drawTexturedRGBA(backend_, mvp, v, globalAlpha_, m->ctx->texture);
 }
 
 // ── Text ─────────────────────────────────────────────────────────────────
@@ -771,7 +913,8 @@ static void drawTextInternal(Canvas2D *self, Canvas2DBackend *backend,
                              const std::string &text, float x, float y,
                              Color color, float globalAlpha,
                              const std::string &fontFace, float fontSize,
-                             CanvasTextAlign align, TextBaseline baseline)
+                             CanvasTextAlign align, TextBaseline baseline,
+                             const float mvp[16])
 {
     if (!backend || text.empty()) return;
     int fontIdx = backend->findFont(fontFace);
@@ -820,7 +963,7 @@ static void drawTextInternal(Canvas2D *self, Canvas2DBackend *backend,
 
             std::vector<CVertex> v;
             pushQuad(v, penX + x0, baselineY + y0, (float)w, (float)h);
-            drawTexturedR8(backend, v, color, globalAlpha, tex);
+            drawTexturedR8(backend, mvp, v, color, globalAlpha, tex);
         }
 
         int advanceRaw, lsbRaw;
@@ -832,17 +975,24 @@ static void drawTextInternal(Canvas2D *self, Canvas2DBackend *backend,
 
 void Canvas2D::fillText(const std::string &text, float x, float y, float /*maxWidth*/)
 {
+    float mvp[16]; buildMVP(mvp);
     drawTextInternal(this, backend_, text, x, y, fillColor_, globalAlpha_,
-                     fontFace_, fontSize_, textAlign_, textBaseline_);
+                     fontFace_, fontSize_, textAlign_, textBaseline_, mvp);
 }
 
 void Canvas2D::strokeText(const std::string &text, float x, float y, float /*maxWidth*/)
 {
+    float mvp[16]; buildMVP(mvp);
     drawTextInternal(this, backend_, text, x, y, strokeColor_, globalAlpha_,
-                     fontFace_, fontSize_, textAlign_, textBaseline_);
+                     fontFace_, fontSize_, textAlign_, textBaseline_, mvp);
 }
 
 // ── Clip rect ────────────────────────────────────────────────────────────
+// NOTE: still screen-space only — does not yet account for ctm_. Harmless
+// while ctm_ was always identity (translate/scale/rotate were no-ops), but
+// now that those are real, a clip pushed inside a transformed block will
+// clip the wrong region. Tracked as a separate follow-up (needs the same
+// corner-projection approach as the GL backend's pushClipRect).
 
 void Canvas2D::pushClipRect(float x, float y, float w, float h)
 {
