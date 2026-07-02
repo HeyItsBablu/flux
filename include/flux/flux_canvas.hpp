@@ -121,18 +121,12 @@ public:
     Clock::time_point lastTick_ = Clock::now();
     double frameDt_ = 0.0;
 
-    // ── GL backend pointer (GL platforms only: Linux, Web, Android, macOS) ────
-    // Opaque here — only flux_canvas2d_gl.cpp and the platform .cpp files
-    // (which include flux_canvas2d_backend.hpp) dereference it. Win32 never
-    // sets or reads this (it uses Canvas2DD2D / Canvas2DBackend locally
-    // instead, stored in its own per-widget state map).
+
 #ifndef _WIN32
     Canvas2DBackend *backend_ = nullptr;
 #endif
 
-#ifdef __EMSCRIPTEN__
-    Canvas2DGL *canvasGL_ = nullptr;
-#endif
+
 
     // ── Shared helpers ────────────────────────────────────────────────────────
 

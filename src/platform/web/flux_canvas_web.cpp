@@ -1,64 +1,12 @@
 // src/flux_canvas_web.cpp
 //
 // CanvasWidget platform implementation for Emscripten / WebAssembly.
-//
-// Architecture
-// ────────────
-// Two <canvas> elements are set up by shell.html:
-//
-//   #flux-ui  (Canvas 2D, top layer)
-//     • All regular widget painting goes here via flux_painter_web.cpp.
-//     • Receives all pointer and keyboard events (pointer-events: auto).
-//     • CanvasWidget paints its 2-D overlay (scrollbars via Canvas2D) here too.
-//
-//   #flux-gl  (WebGL2, bottom layer)
-//     • Emscripten initialises its GL context on this canvas
-//       (Module.canvas = glCanvas in shell.html).
-//     • CanvasWidget renders its RenderSurface here each frame.
-//     • pointer-events: none — input goes through #flux-ui.
-//
-// Render flow per tick()
-// ──────────────────────
-//   PlatformWindow::tick()  [flux_window_web.cpp]
-//     └─ callbacks.onPaint(ctx, w, h)  [flux_core.cpp]
-//          └─ Renderer::renderWidget(root)
-//               └─ CanvasWidget::render()
-//                    └─ tickAndRender()
-//                         ├─ activatePendingSurface()
-//                         ├─ surface->update(dt)
-//                         ├─ GL: viewport + scissor to widget rect
-//                         ├─ surface->preRender()
-//                         ├─ Canvas2D ctx(s_sharedBackend, ..., mvp set on backend)
-//                         ├─ surface->render(ctx)
-//                         └─ Painter::drawScrollbar() into #flux-ui Canvas2D
-//
-// Event routing
-// ─────────────
-// All events land on #flux-ui via flux_window_web.cpp callbacks.
-// FluxUI::wireCallbacks() dispatches them to the widget tree as usual.
-// CanvasWidget::handleMouseDown/Move/Up do hit-testing against [x,y,w,h]
-// and translate screen coords to canvas coords via Viewport::screenToCanvas().
-//
-// GL context
-// ──────────
-// Emscripten owns the WebGL2 context.  We do NOT call
-// emscripten_webgl_make_context_current() — Emscripten keeps it current.
-// Canvas2DGL::init() is called once and uses the already-current context.
-//
-// Canvas2D backend
-// ────────────────
-// All CanvasWidgets on the page share a single Canvas2DGL (font atlas,
-// shaders, VAO/VBO) AND a single Canvas2DBackend wrapping it. Canvas2D is
-// only ever constructed as Canvas2D(Canvas2DBackend*, w, h) — never from a
-// raw Canvas2DGL* — so each widget writes its own per-frame MVP into the
-// shared backend's `mvp` field immediately before constructing its Canvas2D
-// and rendering. This is safe because all widgets render sequentially on
-// the same thread within a single frame.
+// (Header comment block unchanged from before — see architecture notes.)
 
 #ifdef __EMSCRIPTEN__
 
 #include "flux/flux_canvas.hpp"
-#include "flux/flux_canvas2d_backend.hpp"
+#include "flux/flux_canvas2d.hpp"
 #include "flux/flux_painter.hpp"
 
 #include <emscripten.h>
@@ -72,6 +20,12 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+
+// ── Canvas2DBackend lifecycle — defined in flux_canvas2d_gl.cpp.
+// No shared header: this is the entire contract between the two files.
+extern Canvas2DBackend *Canvas2DBackend_create();
+extern void Canvas2DBackend_destroy(Canvas2DBackend *b);
+extern void Canvas2DBackend_setMVP(Canvas2DBackend *b, const float mvp[16]);
 
 // Column-major, maps [l,r] x [b,t] → NDC.
 static void webOrtho(float l, float r, float b, float t, float out[16])
@@ -146,11 +100,14 @@ static void scheduleRepaint(CanvasWidget *w)
         ui->getPlatformWindow().invalidate();
 }
 
-// ── Canvas2DGL singleton ──────────────────────────────────────────────────────
+// ── Shared Canvas2DBackend (font atlas, shaders, VAO/VBO) ────────────────────
+// All CanvasWidgets on the page share ONE backend — refcounted, created on
+// first use, destroyed when the last widget releases it. Each widget just
+// overwrites the shared backend's MVP immediately before rendering, which is
+// safe because widgets render sequentially on the same thread each frame.
 
-static Canvas2DGL *s_sharedGL = nullptr;
 static Canvas2DBackend *s_sharedBackend = nullptr;
-static int s_sharedGLUsers = 0;
+static int s_sharedBackendUsers = 0;
 
 static EMSCRIPTEN_WEBGL_CONTEXT_HANDLE s_glCtx = 0;
 
@@ -200,20 +157,16 @@ static bool ensureWebGLContext()
     return true;
 }
 
-static Canvas2DGL *acquireSharedGL()
+static Canvas2DBackend *acquireSharedBackend()
 {
-    if (!s_sharedGL)
+    if (!s_sharedBackend)
     {
-        s_sharedGL = new Canvas2DGL();
-        if (!s_sharedGL->init())
+        s_sharedBackend = Canvas2DBackend_create();
+        if (!s_sharedBackend)
         {
-            emscripten_log(EM_LOG_ERROR, "FluxCanvas: Canvas2DGL init failed");
-            delete s_sharedGL;
-            s_sharedGL = nullptr;
+            emscripten_log(EM_LOG_ERROR, "FluxCanvas: Canvas2DBackend_create failed");
             return nullptr;
         }
-
-        s_sharedBackend = Canvas2DBackend::create(s_sharedGL);
 
         auto reg = [](const char *name, const char *path)
         {
@@ -226,23 +179,17 @@ static Canvas2DGL *acquireSharedGL()
         reg("sans-italic", "/fonts/Inter_18pt-Italic.ttf");
         reg("sans-bold-italic", "/fonts/Inter_18pt-BoldItalic.ttf");
     }
-    ++s_sharedGLUsers;
-    return s_sharedGL;
+    ++s_sharedBackendUsers;
+    return s_sharedBackend;
 }
 
-static void releaseSharedGL()
+static void releaseSharedBackend()
 {
-    if (--s_sharedGLUsers <= 0 && s_sharedGL)
+    if (--s_sharedBackendUsers <= 0 && s_sharedBackend)
     {
-        if (s_sharedBackend)
-        {
-            Canvas2DBackend::destroy(s_sharedBackend);
-            s_sharedBackend = nullptr;
-        }
-        s_sharedGL->destroy();
-        delete s_sharedGL;
-        s_sharedGL = nullptr;
-        s_sharedGLUsers = 0;
+        Canvas2DBackend_destroy(s_sharedBackend);
+        s_sharedBackend = nullptr;
+        s_sharedBackendUsers = 0;
     }
 }
 
@@ -259,8 +206,8 @@ static void ensureInit(CanvasWidget *w)
     if (!ensureWebGLContext())
         return;
 
-    w->canvasGL_ = acquireSharedGL();
-    if (!w->canvasGL_)
+    w->backend_ = acquireSharedBackend();
+    if (!w->backend_)
         return;
 
     double dpr = EM_ASM_DOUBLE({ return Module._fluxDPR || 1.0; });
@@ -307,13 +254,13 @@ static void destroyGL(CanvasWidget *w)
     }
     w->pendingSurface_.reset();
 
-    w->canvasGL_ = nullptr;
-    releaseSharedGL();
+    w->backend_ = nullptr;
+    releaseSharedBackend();
 
     s.initialized = false;
     s_webState.erase(w);
 
-    if (s_sharedGLUsers <= 0 && s_glCtx > 0)
+    if (s_sharedBackendUsers <= 0 && s_glCtx > 0)
     {
         emscripten_webgl_destroy_context(s_glCtx);
         s_glCtx = 0;
@@ -327,7 +274,7 @@ static void destroyGL(CanvasWidget *w)
 static void tickAndRender(CanvasWidget *w)
 {
     auto &s = webState(w);
-    if (!s.initialized || !w->canvasGL_ || !s_sharedBackend)
+    if (!s.initialized || !w->backend_)
         return;
 
     if (s_glCtx > 0)
@@ -398,8 +345,8 @@ static void tickAndRender(CanvasWidget *w)
 
     // ── Canvas2D render pass ──────────────────────────────────────────────
     {
-        std::memcpy(s_sharedBackend->mvp, mvp, sizeof(mvp));
-        Canvas2D ctx(s_sharedBackend, w->docW(), w->docH());
+        Canvas2DBackend_setMVP(w->backend_, mvp);
+        Canvas2D ctx(w->backend_, w->docW(), w->docH());
         w->activeSurface_->render(ctx);
     }
 

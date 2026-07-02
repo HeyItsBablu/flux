@@ -4,11 +4,18 @@
 
 #include "flux/flux_canvas.hpp"
 #include "flux/flux_painter.hpp"
-#include "flux/flux_canvas2d_backend.hpp"
+#include "flux/flux_canvas2d.hpp"
 
 #include <GLES3/gl3.h>
 #include <EGL/egl.h>
 #include <android/log.h>
+
+// ── Canvas2DBackend lifecycle — defined in flux_canvas2d_gl.cpp.
+// No shared header: this is the entire contract between the two files.
+extern Canvas2DBackend *Canvas2DBackend_create();
+extern void Canvas2DBackend_destroy(Canvas2DBackend *b);
+extern void Canvas2DBackend_destroyContextLost(Canvas2DBackend *b);
+extern void Canvas2DBackend_setMVP(Canvas2DBackend *b, const float mvp[16]);
 
 static void localOrtho(float l, float r, float b, float t, float out[16])
 {
@@ -28,25 +35,20 @@ extern float FluxAndroid_getDpiScale();
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Per-widget Android canvas state
-
 // ─────────────────────────────────────────────────────────────────────────────
 
 struct AndroidCanvasState
 {
     // ── GL object lifetime (shader/atlas/fonts/backend) ────────────────────
-
     bool glObjectsReady = false;
 
     // ── Viewport lifetime (vp_ sizing) ──────────────────────────────────────
-
     bool viewportReady = false;
 
     // Owned entirely by this widget.
-    Canvas2DGL *gl = nullptr;
     Canvas2DBackend *backend = nullptr;
 
     // FBO — sized to the DOCUMENT (w->docW()/docH()), not the viewport.
-
     GLuint fboId = 0;
     GLuint fboTex = 0;
     GLuint fboDepth = 0;
@@ -89,25 +91,20 @@ static void deleteFBO(CanvasWidget *w)
     s.fboW = s.fboH = 0;
 }
 
-// Tears down this widget's own Canvas2DGL/Canvas2DBackend while the GL
-// context is still ALIVE (widget destroyed/detached during normal
-// operation, e.g. removed from the tree mid-session). Issues real
-// glDelete* calls. Do NOT call this from onGLContextLost() — the context
-// is already gone there; see that method for the CPU-side-only teardown.
+// Tears down this widget's own Canvas2DBackend while the GL context is
+// still ALIVE (widget destroyed/detached during normal operation, e.g.
+// removed from the tree mid-session). Issues real glDelete* calls. Do NOT
+// call this from onGLContextLost() — the context is already gone there;
+// see that method for the CPU-side-only teardown.
 static void deleteGL(CanvasWidget *w)
 {
     auto &s = androidState(w);
     if (s.backend)
     {
-        Canvas2DBackend::destroy(s.backend);
+        Canvas2DBackend_destroy(s.backend);
         s.backend = nullptr;
     }
-    if (s.gl)
-    {
-        s.gl->destroy();
-        delete s.gl;
-        s.gl = nullptr;
-    }
+    w->backend_ = nullptr;
     s.glObjectsReady = false;
 }
 
@@ -163,25 +160,24 @@ static void ensureGLObjects(CanvasWidget *w)
     if (s.glObjectsReady)
         return;
 
-    s.gl = new Canvas2DGL();
-    if (!s.gl->init())
+    s.backend = Canvas2DBackend_create();
+    if (!s.backend)
     {
-        CANVAS_LOGE("Canvas2DGL init failed for widget %p", (void *)w);
-        delete s.gl;
-        s.gl = nullptr;
+        CANVAS_LOGE("Canvas2DBackend_create failed for widget %p", (void *)w);
         return; // leave glObjectsReady == false — retry next frame
     }
-    s.gl->addFont("sans", "/system/fonts/Roboto-Regular.ttf");
-    s.gl->addFont("sans-bold", "/system/fonts/Roboto-Bold.ttf");
-    s.gl->addFont("sans-italic", "/system/fonts/Roboto-Italic.ttf");
-    s.gl->addFont("mono", "/system/fonts/DroidSansMono.ttf");
 
-    s.backend = Canvas2DBackend::create(s.gl);
+    Canvas2D::registerFont(s.backend, "sans", "/system/fonts/Roboto-Regular.ttf");
+    Canvas2D::registerFont(s.backend, "sans-bold", "/system/fonts/Roboto-Bold.ttf");
+    Canvas2D::registerFont(s.backend, "sans-italic", "/system/fonts/Roboto-Italic.ttf");
+    Canvas2D::registerFont(s.backend, "mono", "/system/fonts/DroidSansMono.ttf");
+
+    w->backend_ = s.backend;
     s.glObjectsReady = true;
 }
 
 // Cheap viewport/surface (re)initialization — safe to repeat on every
-// resize. Independent of GL object lifetime; does not touch s.gl/s.backend.
+// resize. Independent of GL object lifetime; does not touch s.backend.
 static void ensureViewport(CanvasWidget *w, int windowW, int windowH, float /*dpi*/)
 {
     auto &s = androidState(w);
@@ -219,7 +215,7 @@ static void glRenderPass(CanvasWidget *w, int windowW, int windowH, float dpi)
 {
     ensureGLObjects(w);
     auto &s = androidState(w);
-    if (!s.gl || !s.backend)
+    if (!s.backend)
         return;
 
     ensureViewport(w, windowW, windowH, dpi);
@@ -255,7 +251,7 @@ static void glRenderPass(CanvasWidget *w, int windowW, int windowH, float dpi)
     // No pan/zoom baked in here — the surface always renders at 1:1
     // doc-space. Pan/zoom is applied later, at composite time in render().
     localOrtho(0.f, float(docW), float(docH), 0.f, orthoM);
-    memcpy(s.backend->mvp, orthoM, 64);
+    Canvas2DBackend_setMVP(s.backend, orthoM);
     {
         Canvas2D ctx(s.backend, docW, docH);
         w->activeSurface_->render(ctx);
@@ -449,10 +445,12 @@ void CanvasWidget::onDetach()
 void CanvasWidget::onGLContextLost()
 {
     auto &s = androidState(this);
-    delete s.gl;
-    s.gl = nullptr;
-    delete s.backend;
-    s.backend = nullptr;
+    if (s.backend)
+    {
+        Canvas2DBackend_destroyContextLost(s.backend);
+        s.backend = nullptr;
+    }
+    backend_ = nullptr;
     s.fboId = s.fboTex = s.fboDepth = 0;
     s.fboW = s.fboH = 0;
     s.glObjectsReady = false;

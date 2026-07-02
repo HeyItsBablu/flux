@@ -2,10 +2,28 @@
 // flux_canvas2d_gl.cpp
 // OpenGL / GLES3 implementation of Canvas2D.
 // Compiled on Web, Android.
+//
+// Canvas2DBackend is defined ENTIRELY in this file — no shared backend
+// header. Opaque everywhere else (flux_canvas2d.hpp forward-declares it).
+// The old Canvas2DGL/Canvas2DBackend two-struct split is gone — this is
+// one struct holding shader/VAO/VBO/font-atlas/glyph-cache/mvp together.
+//
+// Lifecycle exposed to the two widget files (flux_canvas_android.cpp,
+// flux_canvas_web.cpp) as free functions declared `extern` locally there:
+//
+//   Canvas2DBackend *Canvas2DBackend_create();
+//   void             Canvas2DBackend_destroy(Canvas2DBackend *b);
+//   void             Canvas2DBackend_destroyContextLost(Canvas2DBackend *b);
+//   void             Canvas2DBackend_setMVP(Canvas2DBackend *b, const float mvp[16]);
+//
+// _destroyContextLost() exists for Android's EGL-context-loss path: frees
+// the C++ object without issuing glDelete* calls, since the GL context is
+// already gone by the time it's called and those calls would be invalid.
 // ============================================================================
 
 #if defined(__ANDROID__) || defined(__EMSCRIPTEN__)
 
+#include "flux/flux_canvas2d.hpp"
 
 #include <stb_truetype.h>
 
@@ -16,14 +34,12 @@
 #include <cstring>
 #include <sstream>
 #include <fstream>
+#include <string>
 #include <vector>
 #include <GLES3/gl3.h>
 
 // ── stb_image ────────────────────────────────────────────────────────────────
 #include <stb_image.h>
-
-// ── Internal backend header (defines Canvas2DBackend, Canvas2DGL, etc.) ──────
-#include "flux/flux_canvas2d_backend.hpp"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -114,214 +130,294 @@ static GLuint linkGLProgram(const char *vert, const char *frag)
 }
 
 // =============================================================================
-// Canvas2DImageGL destructor — deletes the GL texture
+// Canvas2DImageGL — concrete image type, private to this file.
 // =============================================================================
 
-Canvas2DImageGL::~Canvas2DImageGL()
+struct Canvas2DImageGL : Canvas2DImage
 {
-    if (texId)
-        glDeleteTextures(1, &texId);
-}
-
-// =============================================================================
-// Canvas2DGL — init / destroy
-// =============================================================================
-
-bool Canvas2DGL::init()
-{
-    flatProg = linkGLProgram(kFlatVert, kFlatFrag);
-    if (!flatProg)
-        return false;
-
-    flatMVP   = glGetUniformLocation(flatProg, "uMVP");
-    flatColor = glGetUniformLocation(flatProg, "uColor");
-    flatMode  = glGetUniformLocation(flatProg, "uMode");
-
-    glGenVertexArrays(1, &vao);
-    glGenBuffers(1, &vbo);
-    glBindVertexArray(vao);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, 1024 * 4 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)0);
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
-                          (void *)(2 * sizeof(float)));
-    glBindVertexArray(0);
-
-    atlasPixels.assign(size_t(atlasW) * atlasH, 0);
-    glGenTextures(1, &fontTex);
-    glBindTexture(GL_TEXTURE_2D, fontTex);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, atlasW, atlasH, 0,
-                 GL_RED, GL_UNSIGNED_BYTE, atlasPixels.data());
-    glBindTexture(GL_TEXTURE_2D, 0);
-    return true;
-}
-
-void Canvas2DGL::destroy()
-{
-    fonts.clear();
-    glyphs.clear();
-
-    if (fontTex) { glDeleteTextures(1, &fontTex);    fontTex  = 0; }
-    if (vao)     { glDeleteVertexArrays(1, &vao);    vao      = 0; }
-    if (vbo)     { glDeleteBuffers(1, &vbo);         vbo      = 0; }
-    if (flatProg){ glDeleteProgram(flatProg);         flatProg = 0; }
-}
-
-// ── Font management ───────────────────────────────────────────────────────────
-
-int Canvas2DGL::findFont(const std::string &name) const
-{
-    for (int i = 0; i < (int)fonts.size(); ++i)
-        if (fonts[i].name == name)
-            return i;
-    return -1;
-}
-
-int Canvas2DGL::addFont(const std::string &name, const std::string &path)
-{
-    int ex = findFont(name);
-    if (ex >= 0)
-        return ex;
-
-    std::ifstream f(path, std::ios::binary | std::ios::ate);
-    if (!f)
-        return -1;
-    auto sz = f.tellg();
-    if (sz <= 0)
-        return -1;
-    f.seekg(0);
-
-    fonts.push_back({});
-    auto &face = fonts.back();
-    face.name = name;
-    face.ttfData.resize(size_t(sz));
-    f.read(reinterpret_cast<char *>(face.ttfData.data()), sz);
-    if (!f)
+    GLuint texId = 0;
+    ~Canvas2DImageGL() override
     {
-        fonts.pop_back();
-        return -1;
+        if (texId)
+            glDeleteTextures(1, &texId);
     }
+};
 
-    if (!stbtt_InitFont(&face.info, face.ttfData.data(),
-                        stbtt_GetFontOffsetForIndex(face.ttfData.data(), 0)))
-    {
-        fonts.pop_back();
-        return -1;
-    }
-    face.ready = true;
-    return int(fonts.size()) - 1;
-}
+// =============================================================================
+// Canvas2DBackend — FULL definition, private to this translation unit.
+//
+// Owns: flat shader program, VAO/VBO, R8 font atlas, glyph metric cache,
+// and the base MVP set once per frame by the widget file. One instance
+// per "GL context user" — either one per widget (Android) or one process
+// -wide shared instance (Web) — created once and reused every frame.
+// =============================================================================
 
-// ── Glyph atlas ───────────────────────────────────────────────────────────────
-
-void Canvas2DGL::uploadAtlas()
+struct Canvas2DBackend
 {
-    glBindTexture(GL_TEXTURE_2D, fontTex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, atlasW, atlasH, 0,
-                 GL_RED, GL_UNSIGNED_BYTE, atlasPixels.data());
-    glBindTexture(GL_TEXTURE_2D, 0);
-}
+    // ── Flat-colour / textured shader ─────────────────────────────────────
+    GLuint flatProg = 0;
+    GLint flatMVP = -1;
+    GLint flatColor = -1;
+    GLint flatMode = -1; // 0=solid, 1=font atlas R8, 2=RGBA tex
 
-bool Canvas2DGL::bakeGlyph(int fontIdx, int codepoint, int pixelSize, GlyphEntry &out)
-{
-    if (fontIdx < 0 || fontIdx >= (int)fonts.size() || !fonts[fontIdx].ready)
-        return false;
+    // ── Dynamic geometry ──────────────────────────────────────────────────
+    GLuint vao = 0, vbo = 0;
 
-    const stbtt_fontinfo *info = &fonts[fontIdx].info;
-    float scale = stbtt_ScaleForPixelHeight(info, float(pixelSize));
+    // ── Font atlas (R8, single channel, 1024×1024) ────────────────────────
+    GLuint fontTex = 0;
+    int atlasW = 1024;
+    int atlasH = 1024;
 
-    int xoff, yoff, gw, gh;
-    unsigned char *bitmap = stbtt_GetCodepointBitmap(
-        info, scale, scale, codepoint, &gw, &gh, &xoff, &yoff);
-
-    int advanceWidth, leftBearing;
-    stbtt_GetCodepointHMetrics(info, codepoint, &advanceWidth, &leftBearing);
-    int advance = int(advanceWidth * scale + 0.5f);
-
-    if (!bitmap || gw <= 0 || gh <= 0)
+    struct FontFace
     {
-        if (bitmap) stbtt_FreeBitmap(bitmap, nullptr);
-        out = {GlyphKey{fontIdx, codepoint, pixelSize}, 0, 0, 0, 0, xoff, yoff, advance};
+        std::string name;
+        std::vector<uint8_t> ttfData; // kept alive — stbtt_fontinfo refs it
+        stbtt_fontinfo info = {};
+        bool ready = false;
+    };
+    std::vector<FontFace> fonts;
+    std::vector<uint8_t> atlasPixels; // atlasW * atlasH, single channel
+
+    // atlas shelf packer cursor
+    int shelfX = 0, shelfY = 0, shelfH = 0;
+
+    struct GlyphKey
+    {
+        int fontIdx, codepoint, pixelSize;
+        bool operator==(const GlyphKey &o) const
+        {
+            return fontIdx == o.fontIdx &&
+                   codepoint == o.codepoint &&
+                   pixelSize == o.pixelSize;
+        }
+    };
+    struct GlyphEntry
+    {
+        GlyphKey key;
+        int atlasX, atlasY, glyphW, glyphH;
+        int xoff, yoff; // left / top bearing (pixels)
+        int advance;    // horizontal advance (pixels)
+    };
+    std::vector<GlyphEntry> glyphs;
+
+    // ── Base MVP, set once per frame by the widget file ────────────────────
+    float mvp[16] = {
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1};
+
+    bool init()
+    {
+        flatProg = linkGLProgram(kFlatVert, kFlatFrag);
+        if (!flatProg)
+            return false;
+
+        flatMVP   = glGetUniformLocation(flatProg, "uMVP");
+        flatColor = glGetUniformLocation(flatProg, "uColor");
+        flatMode  = glGetUniformLocation(flatProg, "uMode");
+
+        glGenVertexArrays(1, &vao);
+        glGenBuffers(1, &vbo);
+        glBindVertexArray(vao);
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        glBufferData(GL_ARRAY_BUFFER, 1024 * 4 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)0);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
+                              (void *)(2 * sizeof(float)));
+        glBindVertexArray(0);
+
+        atlasPixels.assign(size_t(atlasW) * atlasH, 0);
+        glGenTextures(1, &fontTex);
+        glBindTexture(GL_TEXTURE_2D, fontTex);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, atlasW, atlasH, 0,
+                     GL_RED, GL_UNSIGNED_BYTE, atlasPixels.data());
+        glBindTexture(GL_TEXTURE_2D, 0);
         return true;
     }
 
-    if (shelfX + gw + 1 > atlasW)
+    void destroy()
     {
-        shelfX = 0;
-        shelfY += shelfH + 1;
-        shelfH = 0;
+        fonts.clear();
+        glyphs.clear();
+
+        if (fontTex) { glDeleteTextures(1, &fontTex);    fontTex  = 0; }
+        if (vao)     { glDeleteVertexArrays(1, &vao);    vao      = 0; }
+        if (vbo)     { glDeleteBuffers(1, &vbo);         vbo      = 0; }
+        if (flatProg){ glDeleteProgram(flatProg);         flatProg = 0; }
     }
-    if (shelfY + gh + 1 > atlasH)
+
+    // ── Font management ─────────────────────────────────────────────────
+
+    int findFont(const std::string &name) const
     {
-        // Atlas full — still return a valid (invisible) entry.
+        for (int i = 0; i < (int)fonts.size(); ++i)
+            if (fonts[i].name == name)
+                return i;
+        return -1;
+    }
+
+    int addFont(const std::string &name, const std::string &path)
+    {
+        int ex = findFont(name);
+        if (ex >= 0)
+            return ex;
+
+        std::ifstream f(path, std::ios::binary | std::ios::ate);
+        if (!f)
+            return -1;
+        auto sz = f.tellg();
+        if (sz <= 0)
+            return -1;
+        f.seekg(0);
+
+        fonts.push_back({});
+        auto &face = fonts.back();
+        face.name = name;
+        face.ttfData.resize(size_t(sz));
+        f.read(reinterpret_cast<char *>(face.ttfData.data()), sz);
+        if (!f)
+        {
+            fonts.pop_back();
+            return -1;
+        }
+
+        if (!stbtt_InitFont(&face.info, face.ttfData.data(),
+                            stbtt_GetFontOffsetForIndex(face.ttfData.data(), 0)))
+        {
+            fonts.pop_back();
+            return -1;
+        }
+        face.ready = true;
+        return int(fonts.size()) - 1;
+    }
+
+    // ── Glyph atlas ──────────────────────────────────────────────────────
+
+    void uploadAtlas()
+    {
+        glBindTexture(GL_TEXTURE_2D, fontTex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, atlasW, atlasH, 0,
+                     GL_RED, GL_UNSIGNED_BYTE, atlasPixels.data());
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+
+    bool bakeGlyph(int fontIdx, int codepoint, int pixelSize, GlyphEntry &out)
+    {
+        if (fontIdx < 0 || fontIdx >= (int)fonts.size() || !fonts[fontIdx].ready)
+            return false;
+
+        const stbtt_fontinfo *info = &fonts[fontIdx].info;
+        float scale = stbtt_ScaleForPixelHeight(info, float(pixelSize));
+
+        int xoff, yoff, gw, gh;
+        unsigned char *bitmap = stbtt_GetCodepointBitmap(
+            info, scale, scale, codepoint, &gw, &gh, &xoff, &yoff);
+
+        int advanceWidth, leftBearing;
+        stbtt_GetCodepointHMetrics(info, codepoint, &advanceWidth, &leftBearing);
+        int advance = int(advanceWidth * scale + 0.5f);
+
+        if (!bitmap || gw <= 0 || gh <= 0)
+        {
+            if (bitmap) stbtt_FreeBitmap(bitmap, nullptr);
+            out = {GlyphKey{fontIdx, codepoint, pixelSize}, 0, 0, 0, 0, xoff, yoff, advance};
+            return true;
+        }
+
+        if (shelfX + gw + 1 > atlasW)
+        {
+            shelfX = 0;
+            shelfY += shelfH + 1;
+            shelfH = 0;
+        }
+        if (shelfY + gh + 1 > atlasH)
+        {
+            stbtt_FreeBitmap(bitmap, nullptr);
+            out = {GlyphKey{fontIdx, codepoint, pixelSize}, 0, 0, gw, gh, xoff, yoff, advance};
+            return true;
+        }
+
+        for (int row = 0; row < gh; ++row)
+        {
+            std::memcpy(atlasPixels.data() + (shelfY + row) * atlasW + shelfX,
+                        bitmap + row * gw,
+                        size_t(gw));
+        }
         stbtt_FreeBitmap(bitmap, nullptr);
-        out = {GlyphKey{fontIdx, codepoint, pixelSize}, 0, 0, gw, gh, xoff, yoff, advance};
+
+        out = {GlyphKey{fontIdx, codepoint, pixelSize},
+               shelfX, shelfY, gw, gh, xoff, yoff, advance};
+        shelfX += gw + 1;
+        if (gh > shelfH) shelfH = gh;
+        uploadAtlas();
         return true;
     }
 
-    for (int row = 0; row < gh; ++row)
+    const GlyphEntry *getGlyph(int fontIdx, int codepoint, int pixelSize)
     {
-        std::memcpy(atlasPixels.data() + (shelfY + row) * atlasW + shelfX,
-                    bitmap + row * gw,
-                    size_t(gw));
+        for (auto &g : glyphs)
+            if (g.key.fontIdx   == fontIdx   &&
+                g.key.codepoint == codepoint &&
+                g.key.pixelSize == pixelSize)
+                return &g;
+
+        GlyphEntry e;
+        if (!bakeGlyph(fontIdx, codepoint, pixelSize, e))
+            return nullptr;
+        glyphs.push_back(e);
+        return &glyphs.back();
     }
-    stbtt_FreeBitmap(bitmap, nullptr);
 
-    out = {GlyphKey{fontIdx, codepoint, pixelSize},
-           shelfX, shelfY, gw, gh, xoff, yoff, advance};
-    shelfX += gw + 1;
-    if (gh > shelfH) shelfH = gh;
-    uploadAtlas();
-    return true;
-}
+    float getKernAdvance(int fontIdx, int cp1, int cp2, int pixelSize) const
+    {
+        if (fontIdx < 0 || fontIdx >= (int)fonts.size() || !fonts[fontIdx].ready)
+            return 0.f;
+        const stbtt_fontinfo *info = &fonts[fontIdx].info;
+        float scale = stbtt_ScaleForPixelHeight(info, float(pixelSize));
+        int kern = stbtt_GetCodepointKernAdvance(info, cp1, cp2);
+        return kern * scale;
+    }
+};
 
-const Canvas2DGL::GlyphEntry *Canvas2DGL::getGlyph(int fontIdx, int codepoint,
-                                                    int pixelSize)
-{
-    for (auto &g : glyphs)
-        if (g.key.fontIdx   == fontIdx   &&
-            g.key.codepoint == codepoint &&
-            g.key.pixelSize == pixelSize)
-            return &g;
+// ============================================================================
+// Public lifecycle API — the ONLY surface the widget files see.
+// ============================================================================
 
-    GlyphEntry e;
-    if (!bakeGlyph(fontIdx, codepoint, pixelSize, e))
-        return nullptr;
-    glyphs.push_back(e);
-    return &glyphs.back();
-}
-
-float Canvas2DGL::getKernAdvance(int fontIdx, int cp1, int cp2, int pixelSize) const
-{
-    if (fontIdx < 0 || fontIdx >= (int)fonts.size() || !fonts[fontIdx].ready)
-        return 0.f;
-    const stbtt_fontinfo *info = &fonts[fontIdx].info;
-    float scale = stbtt_ScaleForPixelHeight(info, float(pixelSize));
-    int kern = stbtt_GetCodepointKernAdvance(info, cp1, cp2);
-    return kern * scale;
-}
-
-// =============================================================================
-// Canvas2DBackend — GL factory
-// =============================================================================
-
-Canvas2DBackend *Canvas2DBackend::create(Canvas2DGL *gl)
+Canvas2DBackend *Canvas2DBackend_create()
 {
     auto *b = new Canvas2DBackend();
-    b->gl = gl;
+    if (!b->init())
+    {
+        delete b;
+        return nullptr;
+    }
     return b;
 }
 
-void Canvas2DBackend::destroy(Canvas2DBackend *b)
+void Canvas2DBackend_destroy(Canvas2DBackend *b)
 {
-    // gl is owned externally — do not free here
+    if (!b) return;
+    b->destroy();
     delete b;
+}
+
+void Canvas2DBackend_destroyContextLost(Canvas2DBackend *b)
+{
+    // Context is already gone — free the C++ object only, no glDelete*
+    // calls (they'd be invalid against a dead/absent context).
+    delete b;
+}
+
+void Canvas2DBackend_setMVP(Canvas2DBackend *b, const float mvp[16])
+{
+    if (b) memcpy(b->mvp, mvp, sizeof(b->mvp));
 }
 
 // =============================================================================
@@ -381,7 +477,7 @@ void Canvas2D::Mat3::apply(float &x, float &y) const
 Canvas2D::Canvas2D(Canvas2DBackend *backend, int w, int h)
     : backend_(backend), w_(w), h_(h)
 {
-    assert(backend_ && backend_->gl && "Canvas2D: null GL backend");
+    assert(backend_ && "Canvas2D: null GL backend");
     ctm_ = Mat3::identity();
 }
 
@@ -529,20 +625,19 @@ Color Canvas2D::blendAlpha(Color c) const
 void Canvas2D::uploadAndDraw(const float *verts, int count, unsigned int mode,
                              Color col, float alpha)
 {
-    auto *gl = backend_->gl;
-    if (!gl->flatProg || !gl->vbo) return;
+    if (!backend_->flatProg || !backend_->vbo) return;
     float mvp[16];
     buildMVP(mvp);
 
-    glBindVertexArray(gl->vao);
-    glBindBuffer(GL_ARRAY_BUFFER, gl->vbo);
+    glBindVertexArray(backend_->vao);
+    glBindBuffer(GL_ARRAY_BUFFER, backend_->vbo);
     glBufferData(GL_ARRAY_BUFFER, count * 4 * sizeof(float), verts, GL_DYNAMIC_DRAW);
 
-    glUseProgram(gl->flatProg);
-    glUniformMatrix4fv(gl->flatMVP, 1, GL_FALSE, mvp);
+    glUseProgram(backend_->flatProg);
+    glUniformMatrix4fv(backend_->flatMVP, 1, GL_FALSE, mvp);
     float a = col.a / 255.f * globalAlpha_ * alpha;
-    glUniform4f(gl->flatColor, col.r / 255.f, col.g / 255.f, col.b / 255.f, a);
-    glUniform1i(gl->flatMode, 0);
+    glUniform4f(backend_->flatColor, col.r / 255.f, col.g / 255.f, col.b / 255.f, a);
+    glUniform1i(backend_->flatMode, 0);
 
     glDrawArrays((GLenum)mode, 0, count);
     glBindVertexArray(0);
@@ -553,7 +648,6 @@ void Canvas2D::drawTexturedQuad(unsigned int tex,
                                 float dx, float dy, float dw, float dh,
                                 int texW, int texH, float alpha)
 {
-    auto *gl = backend_->gl;
     float u0 = sx / texW, v0 = sy / texH, u1 = (sx + sw) / texW, v1 = (sy + sh) / texH;
     float verts[] = {
         dx,      dy,      u0, v0,
@@ -564,16 +658,16 @@ void Canvas2D::drawTexturedQuad(unsigned int tex,
         dx,      dy,      u0, v0};
     float mvp[16];
     buildMVP(mvp);
-    glBindVertexArray(gl->vao);
-    glBindBuffer(GL_ARRAY_BUFFER, gl->vbo);
+    glBindVertexArray(backend_->vao);
+    glBindBuffer(GL_ARRAY_BUFFER, backend_->vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_DYNAMIC_DRAW);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, (GLuint)tex);
-    glUseProgram(gl->flatProg);
-    glUniformMatrix4fv(gl->flatMVP, 1, GL_FALSE, mvp);
-    glUniform1i(gl->flatMode, 2);
-    glUniform4f(gl->flatColor, 1, 1, 1, alpha * globalAlpha_);
-    glUniform1i(glGetUniformLocation(gl->flatProg, "uTex"), 0);
+    glUseProgram(backend_->flatProg);
+    glUniformMatrix4fv(backend_->flatMVP, 1, GL_FALSE, mvp);
+    glUniform1i(backend_->flatMode, 2);
+    glUniform4f(backend_->flatColor, 1, 1, 1, alpha * globalAlpha_);
+    glUniform1i(glGetUniformLocation(backend_->flatProg, "uTex"), 0);
     glDrawArrays(GL_TRIANGLES, 0, 6);
     glBindTexture(GL_TEXTURE_2D, 0);
     glBindVertexArray(0);
@@ -884,7 +978,7 @@ bool Canvas2D::registerFont(Canvas2DBackend *backend,
                             const std::string &name,
                             const std::string &path)
 {
-    return backend && backend->gl && backend->gl->addFont(name, path) >= 0;
+    return backend && backend->addFont(name, path) >= 0;
 }
 
 // =============================================================================
@@ -1000,20 +1094,19 @@ void Canvas2D::setTextBaseline(TextBaseline b)   { textBaseline_ = b; }
 
 int Canvas2D::resolveFont() const
 {
-    auto *gl = backend_->gl;
-    if (fontBold_ && fontItalic_) { int i = gl->findFont(fontFace_ + "-bold-italic"); if (i >= 0) return i; }
-    if (fontBold_)                { int i = gl->findFont(fontFace_ + "-bold");        if (i >= 0) return i; }
-    if (fontItalic_)              { int i = gl->findFont(fontFace_ + "-italic");      if (i >= 0) return i; }
-    int i = gl->findFont(fontFace_);
+    if (fontBold_ && fontItalic_) { int i = backend_->findFont(fontFace_ + "-bold-italic"); if (i >= 0) return i; }
+    if (fontBold_)                { int i = backend_->findFont(fontFace_ + "-bold");        if (i >= 0) return i; }
+    if (fontItalic_)              { int i = backend_->findFont(fontFace_ + "-italic");      if (i >= 0) return i; }
+    int i = backend_->findFont(fontFace_);
     if (i >= 0) return i;
-    return gl->fonts.empty() ? -1 : 0;
+    return backend_->fonts.empty() ? -1 : 0;
 }
 
 int Canvas2D::currentFontIdx() const { return resolveFont(); }
 
 float Canvas2D::getKernAdvance(int fontIdx, int cp1, int cp2, int pixelSize) const
 {
-    return backend_->gl->getKernAdvance(fontIdx, cp1, cp2, pixelSize);
+    return backend_->getKernAdvance(fontIdx, cp1, cp2, pixelSize);
 }
 
 void Canvas2D::fillText(const std::string &text, float x, float y, float /*maxW*/)
@@ -1021,21 +1114,19 @@ void Canvas2D::fillText(const std::string &text, float x, float y, float /*maxW*
     if (text.empty()) return;
     int fontIdx = resolveFont();
     if (fontIdx < 0) return;
-    auto *gl = backend_->gl;
-    if (!gl->fonts[fontIdx].ready) return;
+    if (!backend_->fonts[fontIdx].ready) return;
 
     int ps = std::max(4, int(fontSize_ + 0.5f));
-    const stbtt_fontinfo *info = &gl->fonts[fontIdx].info;
+    const stbtt_fontinfo *info = &backend_->fonts[fontIdx].info;
     float scale     = stbtt_ScaleForPixelHeight(info, float(ps));
     int ascent_u, descent_u, lineGap_u;
     stbtt_GetFontVMetrics(info, &ascent_u, &descent_u, &lineGap_u);
     float ascender = ascent_u * scale;
 
-    // Measure total width for alignment.
     float totalW = 0;
     for (unsigned char ch : text)
     {
-        auto *g = gl->getGlyph(fontIdx, ch, ps);
+        auto *g = backend_->getGlyph(fontIdx, ch, ps);
         if (g) totalW += float(g->advance);
     }
 
@@ -1050,28 +1141,28 @@ void Canvas2D::fillText(const std::string &text, float x, float y, float /*maxW*
 
     float mvp[16];
     buildMVP(mvp);
-    glUseProgram(gl->flatProg);
-    glUniformMatrix4fv(gl->flatMVP, 1, GL_FALSE, mvp);
-    glUniform1i(gl->flatMode, 1);
+    glUseProgram(backend_->flatProg);
+    glUniformMatrix4fv(backend_->flatMVP, 1, GL_FALSE, mvp);
+    glUniform1i(backend_->flatMode, 1);
     float a = fillColor_.a / 255.f * globalAlpha_;
-    glUniform4f(gl->flatColor,
+    glUniform4f(backend_->flatColor,
                 fillColor_.r / 255.f, fillColor_.g / 255.f, fillColor_.b / 255.f, a);
-    glUniform1i(glGetUniformLocation(gl->flatProg, "uTex"), 0);
+    glUniform1i(glGetUniformLocation(backend_->flatProg, "uTex"), 0);
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, gl->fontTex);
-    glBindVertexArray(gl->vao);
+    glBindTexture(GL_TEXTURE_2D, backend_->fontTex);
+    glBindVertexArray(backend_->vao);
 
     for (unsigned char ch : text)
     {
-        auto *g = gl->getGlyph(fontIdx, ch, ps);
+        auto *g = backend_->getGlyph(fontIdx, ch, ps);
         if (!g) continue;
         if (g->glyphW > 0 && g->glyphH > 0)
         {
             float gx = px + float(g->xoff), gy = py + float(g->yoff);
-            float u0 = float(g->atlasX)           / float(gl->atlasW);
-            float v0 = float(g->atlasY)           / float(gl->atlasH);
-            float u1 = float(g->atlasX + g->glyphW) / float(gl->atlasW);
-            float v1 = float(g->atlasY + g->glyphH) / float(gl->atlasH);
+            float u0 = float(g->atlasX)           / float(backend_->atlasW);
+            float v0 = float(g->atlasY)           / float(backend_->atlasH);
+            float u1 = float(g->atlasX + g->glyphW) / float(backend_->atlasW);
+            float v1 = float(g->atlasY + g->glyphH) / float(backend_->atlasH);
             float verts[] = {
                 gx,            gy,            u0, v0,
                 gx + g->glyphW, gy,            u1, v0,
@@ -1079,7 +1170,7 @@ void Canvas2D::fillText(const std::string &text, float x, float y, float /*maxW*
                 gx + g->glyphW, gy + g->glyphH, u1, v1,
                 gx,            gy + g->glyphH, u0, v1,
                 gx,            gy,            u0, v0};
-            glBindBuffer(GL_ARRAY_BUFFER, gl->vbo);
+            glBindBuffer(GL_ARRAY_BUFFER, backend_->vbo);
             glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_DYNAMIC_DRAW);
             glDrawArrays(GL_TRIANGLES, 0, 6);
         }
@@ -1108,7 +1199,7 @@ float Canvas2D::measureText(const std::string &text)
     float total = 0;
     for (unsigned char ch : text)
     {
-        auto *g = backend_->gl->getGlyph(fontIdx, ch, ps);
+        auto *g = backend_->getGlyph(fontIdx, ch, ps);
         if (g) total += float(g->advance);
     }
     return total;
@@ -1124,7 +1215,6 @@ void Canvas2D::getImageData(float x, float y, float w, float h,
     int iw = int(w), ih = int(h);
     out.resize(size_t(iw) * ih * 4);
     glReadPixels(GLint(x), GLint(y), iw, ih, GL_RGBA, GL_UNSIGNED_BYTE, out.data());
-    // Flip rows — GL origin is bottom-left.
     for (int row = 0; row < ih / 2; ++row)
     {
         uint8_t *a = out.data() + row * iw * 4;
