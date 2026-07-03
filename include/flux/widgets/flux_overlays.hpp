@@ -3,8 +3,8 @@
 
 #include "flux_structure.hpp"
 
-#include "../flux_app.hpp"
-#include "../flux_core.hpp"
+#include "flux/flux_app.hpp"
+#include "flux/flux_core.hpp"
 #include <algorithm>
 
 // ============================================================================
@@ -72,7 +72,7 @@ struct ContextMenuItem
 // CONTEXT MENU WIDGET
 // ============================================================================
 
-class ContextMenuWidget : public Widget, public OverlayContent
+class ContextMenuWidget : public Widget
 {
 private:
   int menuW = 0, menuH = 0;
@@ -93,10 +93,234 @@ private:
   Color itemTextColor = Color::fromRGB(30, 30, 30);
   Color itemDisabledColor = Color::fromRGB(160, 160, 160);
   Color separatorColor = Color::fromRGB(220, 220, 220);
-
   int menuFontSize = 13;
   int menuBorderRadius = 6;
   int shadowOffset = 3;
+  // ── Popup-body surface ─────────────────────────────────────────────────
+  // See DropdownWidget::ListSurface for the general pattern. As a nested
+  // class it has full access to ContextMenuWidget's private members
+  // through `owner`. All draw/hit-test math below now works in absolute
+  // client coordinates (x/y is the surface's own real position), whereas
+  // the old renderOverlay()/onOverlay* body worked in local (0,0-relative)
+  // coordinates baked in by OverlayManager::renderAll() per-platform.
+  class MenuSurface : public Widget
+  {
+  public:
+    ContextMenuWidget *owner = nullptr;
+
+    void render(GraphicsContext &ctx, FontCache &fontCache) override
+    {
+      if (!owner || !owner->isOpen || owner->items.empty())
+        return;
+
+      Painter painter(ctx);
+
+      painter.fillRoundedRect(x + owner->shadowOffset, y + owner->shadowOffset,
+                              owner->menuW, owner->menuH,
+                              owner->menuBorderRadius, Color::fromRGBA(0, 0, 0, 60));
+
+      painter.fillRoundedRect(x, y, owner->menuW, owner->menuH,
+                              owner->menuBorderRadius, owner->menuBgColor);
+      painter.drawBorder(x, y, owner->menuW, owner->menuH,
+                         owner->menuBorderRadius, owner->menuBorderColor, 1);
+
+      NativeFont font = fontCache.getFont(owner->menuFontSize, FontWeight::Normal);
+      int currentY = y + owner->paddingV;
+
+      for (int i = 0; i < (int)owner->items.size(); i++)
+      {
+        const auto &item = owner->items[i];
+
+        if (item.type == ContextMenuItem::Type::Separator)
+        {
+          int sepY = currentY + owner->separatorHeight / 2;
+          painter.drawLine(x + owner->paddingH, sepY,
+                           x + owner->menuW - owner->paddingH, sepY,
+                           owner->separatorColor, 1);
+          currentY += owner->separatorHeight;
+        }
+        else if (item.type == ContextMenuItem::Type::Widget && item.widget)
+        {
+          int rowH = owner->_widgetItemHeight(item);
+
+          if (i == owner->hoveredIndex)
+            painter.fillRect(x + 2, currentY, owner->menuW - 4, rowH,
+                             owner->itemHoverColor);
+
+          auto *ui = FluxUI::getCurrentInstance();
+          if (ui)
+          {
+            if (item.widget->needsLayout)
+            {
+              item.widget->computeLayout(
+                  ctx,
+                  BoxConstraints::tight(owner->menuW - owner->paddingH * 2, rowH),
+                  fontCache);
+            }
+            item.widget->x = x + owner->paddingH;
+            item.widget->y = currentY;
+            item.widget->positionChildren(
+                item.widget->x + item.widget->paddingLeft,
+                item.widget->y + item.widget->paddingTop,
+                item.widget->width - item.widget->paddingLeft - item.widget->paddingRight,
+                item.widget->height - item.widget->paddingTop - item.widget->paddingBottom);
+            item.widget->render(ctx, fontCache);
+          }
+
+          currentY += rowH;
+        }
+        else
+        {
+          if (i == owner->hoveredIndex && item.enabled)
+            painter.fillRect(x + 2, currentY, owner->menuW - 4, owner->itemHeight,
+                             owner->itemHoverColor);
+
+          std::wstring wlabel = toWideString(item.label);
+          Color textCol = item.enabled ? owner->itemTextColor : owner->itemDisabledColor;
+          painter.drawText(
+              wlabel, x + owner->paddingH, currentY,
+              owner->menuW - owner->paddingH * 2, owner->itemHeight, font,
+              textCol, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+          currentY += owner->itemHeight;
+        }
+      }
+      needsPaint = false;
+    }
+
+    bool handleMouseDown(int mx, int my) override
+    {
+      if (!owner)
+        return false;
+      int relativeY = (my - y) - owner->paddingV;
+      int itemIdx = owner->getItemIndexAtY(relativeY);
+
+      if (itemIdx >= 0 && itemIdx < (int)owner->items.size())
+      {
+        const auto &item = owner->items[itemIdx];
+
+        if (item.type == ContextMenuItem::Type::Widget && item.widget)
+        {
+          // NOTE: preserved as-is from the pre-migration code — this still
+          // closes the menu before the embedded widget sees the click,
+          // which contradicts the "the widget decides whether to stay
+          // open" contract documented on ContextMenuItem::Widget(). Not
+          // fixed here to keep this a faithful behavioral port; worth
+          // addressing separately if you want it.
+          owner->closeMenu();
+          item.widget->handleMouseDown(mx, my);
+          return true;
+        }
+        if (item.type == ContextMenuItem::Type::Action && item.enabled)
+        {
+          if (item.action)
+            item.action();
+          owner->closeMenu();
+          return true;
+        }
+      }
+      owner->closeMenu();
+      return true;
+    }
+
+    bool handleMouseMove(int mx, int my) override
+    {
+      if (!owner)
+        return false;
+      int localX = mx - x, localY = my - y;
+      if (localX >= 0 && localX < owner->menuW && localY >= 0 && localY < owner->menuH)
+      {
+        int relativeY = localY - owner->paddingV;
+        int itemIdx = owner->getItemIndexAtY(relativeY);
+
+        if (itemIdx >= 0 && itemIdx < (int)owner->items.size())
+        {
+          const auto &item = owner->items[itemIdx];
+          if (item.type == ContextMenuItem::Type::Widget && item.widget)
+            item.widget->handleMouseMove(mx, my);
+        }
+
+        if (itemIdx != owner->hoveredIndex)
+        {
+          owner->hoveredIndex = itemIdx;
+          owner->selectedIndex = itemIdx;
+          owner->refreshPopupIfOpen_();
+          return true;
+        }
+      }
+      else if (owner->hoveredIndex != -1)
+      {
+        owner->hoveredIndex = -1;
+        owner->refreshPopupIfOpen_();
+        return true;
+      }
+      return false;
+    }
+
+    bool handleRightClick(int, int) override
+    {
+      if (!owner || !owner->isOpen)
+        return false;
+      owner->closeMenu();
+      return true;
+    }
+
+    void onOverlayOutsideClick() override
+    {
+      if (owner)
+        owner->closeMenu();
+    }
+
+    bool handleKeyDown(int keyCode) override
+    {
+      if (!owner || !owner->isOpen || owner->items.empty())
+        return false;
+      switch (keyCode)
+      {
+      case Key::Escape:
+        owner->closeMenu();
+        return true;
+      case Key::Up:
+        owner->moveToPrevious();
+        return true;
+      case Key::Down:
+        owner->moveToNext();
+        return true;
+      case Key::Home:
+        owner->selectedIndex = owner->hoveredIndex = owner->findFirstActionIndex();
+        owner->refreshPopupIfOpen_();
+        return true;
+      case Key::End:
+        owner->selectedIndex = owner->hoveredIndex = owner->findLastActionIndex();
+        owner->refreshPopupIfOpen_();
+        return true;
+      case Key::Return:
+      case Key::Space:
+        if (owner->selectedIndex >= 0 && owner->selectedIndex < (int)owner->items.size())
+        {
+          const auto &item = owner->items[owner->selectedIndex];
+          if (item.type == ContextMenuItem::Type::Widget && item.widget)
+          {
+            int cx = item.widget->x + item.widget->width / 2;
+            int cy = item.widget->y + item.widget->height / 2;
+            owner->closeMenu();
+            item.widget->handleMouseDown(cx, cy);
+            return true;
+          }
+          if (item.type == ContextMenuItem::Type::Action && item.enabled)
+          {
+            if (item.action)
+              item.action();
+            owner->closeMenu();
+            return true;
+          }
+        }
+        return true;
+      }
+      return false;
+    }
+  };
+
+  std::shared_ptr<MenuSurface> menuSurface_;
 
 public:
   bool isOpen = false;
@@ -105,6 +329,9 @@ public:
                              const std::vector<ContextMenuItem> &menuItems)
       : items(menuItems)
   {
+
+    menuSurface_ = std::make_shared<MenuSurface>();
+    menuSurface_->owner = this;
     if (anchor)
     {
       addChild(anchor);
@@ -117,16 +344,6 @@ public:
     if (isOpen)
       closeMenu();
     Widget::onDetach();
-  }
-
-  // ── OverlayContent ────────────────────────────────────────────────────
-  OverlayPolicy overlayPolicy() const override
-  {
-    // modal = true: every click while open is consumed, including clicks
-    // outside the menu (which close it) — matches the original behavior
-    // exactly. blocksHoverBelow stays false: a context menu never paused
-    // hover/tooltips elsewhere in the app.
-    return {/*modal=*/true, /*blocksHoverBelow=*/false, /*capturesKeyboard=*/true};
   }
 
   // ── Builder API ───────────────────────────────────────────────────────
@@ -207,206 +424,6 @@ public:
     needsPaint = false;
   }
 
-  // ── renderOverlay ─────────────────────────────────────────────────────
-  // Drawing was already entirely in local coordinates (0,0 = menu
-  // top-left) — no changes needed inside this body at all.
-  void renderOverlay(GraphicsContext &ctx, FontCache &fontCache) override
-  {
-    if (!isOpen || items.empty())
-      return;
-
-    Painter painter(ctx);
-
-    painter.fillRoundedRect(shadowOffset, shadowOffset, menuW, menuH,
-                            menuBorderRadius, Color::fromRGBA(0, 0, 0, 60));
-
-    painter.fillRoundedRect(0, 0, menuW, menuH, menuBorderRadius, menuBgColor);
-    painter.drawBorder(0, 0, menuW, menuH, menuBorderRadius, menuBorderColor, 1);
-
-    NativeFont font = fontCache.getFont(menuFontSize, FontWeight::Normal);
-    int currentY = paddingV;
-
-    for (int i = 0; i < (int)items.size(); i++)
-    {
-      const auto &item = items[i];
-
-      if (item.type == ContextMenuItem::Type::Separator)
-      {
-        int sepY = currentY + separatorHeight / 2;
-        painter.drawLine(paddingH, sepY, menuW - paddingH, sepY,
-                         separatorColor, 1);
-        currentY += separatorHeight;
-      }
-      else if (item.type == ContextMenuItem::Type::Widget && item.widget)
-      {
-        int rowH = _widgetItemHeight(item);
-
-        if (i == hoveredIndex)
-          painter.fillRect(2, currentY, menuW - 4, rowH, itemHoverColor);
-
-        auto *ui = FluxUI::getCurrentInstance();
-        if (ui)
-        {
-          if (item.widget->needsLayout)
-          {
-            item.widget->computeLayout(
-                ctx,
-                BoxConstraints::tight(menuW - paddingH * 2, rowH),
-                fontCache);
-          }
-          item.widget->x = paddingH;
-          item.widget->y = currentY;
-          item.widget->positionChildren(
-              item.widget->x + item.widget->paddingLeft,
-              item.widget->y + item.widget->paddingTop,
-              item.widget->width - item.widget->paddingLeft - item.widget->paddingRight,
-              item.widget->height - item.widget->paddingTop - item.widget->paddingBottom);
-          item.widget->render(ctx, fontCache);
-        }
-
-        currentY += rowH;
-      }
-      else
-      {
-        if (i == hoveredIndex && item.enabled)
-          painter.fillRect(2, currentY, menuW - 4, itemHeight, itemHoverColor);
-
-        std::wstring wlabel = toWideString(item.label);
-        Color textCol = item.enabled ? itemTextColor : itemDisabledColor;
-        painter.drawText(
-            wlabel, paddingH, currentY, menuW - paddingH * 2, itemHeight, font,
-            textCol, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-        currentY += itemHeight;
-      }
-    }
-  }
-
-  // ── OverlayContent input handlers ───────────────────────────────────────
-  // Coordinates are already local to the menu's own rect — directly
-  // equivalent to the old (mx - menuClientX, my - menuClientY) math.
-
-  bool onOverlayMouseDown(int localX, int localY) override
-  {
-    int relativeY = localY - paddingV;
-    int itemIdx = getItemIndexAtY(relativeY);
-
-    if (itemIdx >= 0 && itemIdx < (int)items.size())
-    {
-      const auto &item = items[itemIdx];
-
-      if (item.type == ContextMenuItem::Type::Widget && item.widget)
-      {
-        // NOTE: preserved as-is from the original — this still closes the
-        // menu before the embedded widget sees the click, which contradicts
-        // the "the widget decides whether to stay open" contract documented
-        // on ContextMenuItem::Widget(). Flagging again since it survived
-        // the migration unchanged; worth fixing separately if you want it.
-        closeMenu();
-        item.widget->handleMouseDown(localX, localY);
-        return true;
-      }
-      if (item.type == ContextMenuItem::Type::Action && item.enabled)
-      {
-        if (item.action)
-          item.action();
-        closeMenu();
-        return true;
-      }
-    }
-    closeMenu();
-    return true;
-  }
-
-  bool onOverlayMouseMove(int localX, int localY) override
-  {
-    if (localX >= 0 && localX < menuW && localY >= 0 && localY < menuH)
-    {
-      int relativeY = localY - paddingV;
-      int itemIdx = getItemIndexAtY(relativeY);
-
-      if (itemIdx >= 0 && itemIdx < (int)items.size())
-      {
-        const auto &item = items[itemIdx];
-        if (item.type == ContextMenuItem::Type::Widget && item.widget)
-          item.widget->handleMouseMove(localX, localY);
-      }
-
-      if (itemIdx != hoveredIndex)
-      {
-        hoveredIndex = itemIdx;
-        selectedIndex = itemIdx;
-        refreshPopupIfOpen_();
-        return true;
-      }
-    }
-    else if (hoveredIndex != -1)
-    {
-      hoveredIndex = -1;
-      refreshPopupIfOpen_();
-      return true;
-    }
-    return false;
-  }
-
-  bool onOverlayRightClick(int, int) override
-  {
-    if (!isOpen)
-      return false;
-    closeMenu();
-    return true;
-  }
-
-  void onOverlayOutsideClick() override { closeMenu(); }
-
-  bool onOverlayKeyDown(int keyCode) override
-  {
-    if (!isOpen || items.empty())
-      return false;
-    switch (keyCode)
-    {
-    case Key::Escape:
-      closeMenu();
-      return true;
-    case Key::Up:
-      moveToPrevious();
-      return true;
-    case Key::Down:
-      moveToNext();
-      return true;
-    case Key::Home:
-      selectedIndex = hoveredIndex = findFirstActionIndex();
-      refreshPopupIfOpen_();
-      return true;
-    case Key::End:
-      selectedIndex = hoveredIndex = findLastActionIndex();
-      refreshPopupIfOpen_();
-      return true;
-    case Key::Return:
-    case Key::Space:
-      if (selectedIndex >= 0 && selectedIndex < (int)items.size())
-      {
-        const auto &item = items[selectedIndex];
-        if (item.type == ContextMenuItem::Type::Widget && item.widget)
-        {
-          int cx = item.widget->x + item.widget->width / 2;
-          int cy = item.widget->y + item.widget->height / 2;
-          closeMenu();
-          item.widget->handleMouseDown(cx, cy);
-          return true;
-        }
-        if (item.type == ContextMenuItem::Type::Action && item.enabled)
-        {
-          if (item.action)
-            item.action();
-          closeMenu();
-          return true;
-        }
-      }
-      return true;
-    }
-    return false;
-  }
-
 private:
   int _itemHeight(const ContextMenuItem &item) const
   {
@@ -458,9 +475,13 @@ private:
     hoveredIndex = -1;
     selectedIndex = findFirstActionIndex();
 
-    ui->overlays().show(this, clientX, clientY,
-                        menuW + shadowOffset, menuH + shadowOffset,
-                        150, ui->getFontCache());
+    menuSurface_->x = clientX;
+    menuSurface_->y = clientY;
+    menuSurface_->width = menuW + shadowOffset;
+    menuSurface_->height = menuH + shadowOffset;
+    ui->showOverlay(menuSurface_.get(), /*zIndex=*/150,
+                    /*modal=*/true, /*blocksHoverBelow=*/false,
+                    /*capturesKeyboard=*/true);
   }
 
   void closeMenu()
@@ -471,7 +492,7 @@ private:
     hoveredIndex = -1;
     selectedIndex = -1;
     if (auto *ui = FluxUI::getCurrentInstance())
-      ui->overlays().hide(this);
+      ui->hideOverlay(menuSurface_.get());
   }
 
   void _layoutWidgetItems(FluxUI *ui)
@@ -528,7 +549,7 @@ private:
     if (!isOpen)
       return;
     if (auto *ui = FluxUI::getCurrentInstance())
-      ui->overlays().refresh(this, ui->getFontCache());
+      ui->refreshOverlay(menuSurface_.get());
   }
 
   void moveToPrevious()
@@ -614,14 +635,118 @@ private:
 // DIALOG WIDGET
 // ============================================================================
 
-class DialogWidget : public Widget, public OverlayContent
+class DialogWidget : public Widget
 {
 private:
   bool popupShown_ = false;
   bool contentDirty_ = true;
-
   int dialogX_ = 0, dialogY_ = 0; // box position within the overlay rect
   int winW_ = 0, winH_ = 0;       // client size captured when opened
+
+  // ── Popup-body surface ─────────────────────────────────────────────────
+  // Covers the full client area (x=0, y=0, width=winW_, height=winH_),
+  // same footprint the old overlay rect used. Because the surface's own
+  // origin is (0,0), every coordinate handleMouseDown/Move/Up receives is
+  // already numerically identical to the old "local to the overlay rect"
+  // coordinates — dialogX_/dialogY_ math below is untouched.
+  class DialogSurface : public Widget
+  {
+  public:
+    DialogWidget *owner = nullptr;
+
+    void render(GraphicsContext &ctx, FontCache &fontCache) override
+    {
+      if (!owner || !owner->isOpen)
+        return;
+
+      Painter painter(ctx);
+
+      // Dim scrim across the whole overlay rect (the full client area —
+      // see DialogWidget::open()).
+      painter.fillRectAlpha(x, y, width, height, owner->overlayColor);
+
+      owner->dialogX_ = x + (width - owner->dialogWidth) / 2;
+      owner->dialogY_ = y + (height - owner->dialogHeight) / 2;
+
+      painter.fillRoundedRect(owner->dialogX_, owner->dialogY_,
+                              owner->dialogWidth, owner->dialogHeight,
+                              owner->dialogBorderRadius, owner->dialogBgColor);
+      painter.drawBorder(owner->dialogX_, owner->dialogY_,
+                         owner->dialogWidth, owner->dialogHeight,
+                         owner->dialogBorderRadius, owner->dialogBorderColor, 1);
+
+      if (owner->content)
+      {
+        owner->layoutContentIfNeeded(ctx, fontCache);
+        owner->content->render(ctx, fontCache);
+      }
+      needsPaint = false;
+    }
+
+    bool handleMouseDown(int mx, int my) override
+    {
+      if (!owner || !owner->isOpen)
+        return false;
+
+      if (mx < owner->dialogX_ || mx >= owner->dialogX_ + owner->dialogWidth ||
+          my < owner->dialogY_ || my >= owner->dialogY_ + owner->dialogHeight)
+      {
+        if (owner->closeOnClickOutside)
+          owner->close();
+        return true; // modal — swallow regardless of whether we closed
+      }
+
+      if (owner->content)
+        owner->dispatchContentMouseDown(mx, my);
+
+      return true;
+    }
+
+    bool handleMouseUp(int mx, int my) override
+    {
+      if (!owner || !owner->isOpen || !owner->content)
+        return false;
+      return broadcastMouseEvent(owner->content.get(), mx, my,
+                                 [](Widget *w, int x2, int y2)
+                                 { return w->handleMouseUp(x2, y2); });
+    }
+
+    bool handleMouseMove(int mx, int my) override
+    {
+      if (!owner || !owner->isOpen || !owner->content)
+        return false;
+      // owner's overlay entry sets blocksHoverBelow=true, so FluxUI skips
+      // updateHoverStates on root while the dialog is open — the dialog
+      // has to drive hover for its own content subtree itself (otherwise
+      // buttons inside the dialog would never show hover feedback).
+      return updateHoverStates(owner->content.get(), mx, my);
+    }
+
+    bool handleKeyDown(int keyCode) override
+    {
+      if (!owner || !owner->isOpen)
+        return false;
+      if (owner->closeOnEscape && keyCode == Key::Escape)
+      {
+        owner->close();
+        return true;
+      }
+      return true; // modal — swallow all keys while open, handled or not
+    }
+
+    void onOverlayOutsideClick() override
+    {
+      // The dialog's overlay rect covers the full client area, so
+      // handleMouseDown already handles "inside the scrim, outside the
+      // box". This only fires if a click somehow lands outside the
+      // surface's own rect entirely — shouldn't happen for a full-window
+      // overlay, but close defensively if it ever does.
+      if (owner && owner->closeOnClickOutside)
+        owner->close();
+    }
+  };
+
+  std::shared_ptr<DialogSurface> dialogSurface_;
 
 public:
   bool isOpen = false;
@@ -639,112 +764,18 @@ public:
   bool closeOnClickOutside = true;
   bool closeOnEscape = true;
 
-  DialogWidget() { hasBackground = false; }
+  DialogWidget()
+  {
+    hasBackground = false;
+    dialogSurface_ = std::make_shared<DialogSurface>();
+    dialogSurface_->owner = this;
+  }
 
   void onDetach() override
   {
     if (isOpen)
       close();
     Widget::onDetach();
-  }
-
-  // ── OverlayContent ────────────────────────────────────────────────────
-  OverlayPolicy overlayPolicy() const override
-  {
-    // A dialog owns the whole screen while open — nothing below it should
-    // see clicks, hover, or keys.
-    return {/*modal=*/true, /*blocksHoverBelow=*/true, /*capturesKeyboard=*/true};
-  }
-
-  void renderOverlay(GraphicsContext &ctx, FontCache &fontCache) override
-  {
-    if (!isOpen)
-      return;
-
-    Painter painter(ctx);
-
-    // Dim scrim across the whole overlay rect (the full client area —
-    // see open()).
-    painter.fillRectAlpha(0, 0, winW_, winH_, overlayColor);
-
-    dialogX_ = (winW_ - dialogWidth) / 2;
-    dialogY_ = (winH_ - dialogHeight) / 2;
-
-    painter.fillRoundedRect(dialogX_, dialogY_, dialogWidth, dialogHeight,
-                            dialogBorderRadius, dialogBgColor);
-    painter.drawBorder(dialogX_, dialogY_, dialogWidth, dialogHeight,
-                       dialogBorderRadius, dialogBorderColor, 1);
-
-    if (content)
-    {
-      layoutContentIfNeeded(ctx, fontCache);
-      content->render(ctx, fontCache);
-    }
-  }
-
-  // Coordinates are local to the overlay rect, which is the full client
-  // area starting at (0,0) — numerically identical to absolute client
-  // coordinates, same as ToastWidget.
-  bool onOverlayMouseDown(int mx, int my) override
-  {
-    if (!isOpen)
-      return false;
-
-    if (mx < dialogX_ || mx >= dialogX_ + dialogWidth ||
-        my < dialogY_ || my >= dialogY_ + dialogHeight)
-    {
-      if (closeOnClickOutside)
-        close();
-      return true; // modal — swallow regardless of whether we closed
-    }
-
-    if (content)
-      dispatchContentMouseDown(mx, my);
-
-    return true;
-  }
-
-  bool onOverlayMouseUp(int mx, int my) override
-  {
-    if (!isOpen || !content)
-      return false;
-    return broadcastMouseEvent(content.get(), mx, my,
-                               [](Widget *w, int x, int y)
-                               { return w->handleMouseUp(x, y); });
-  }
-
-  bool onOverlayMouseMove(int mx, int my) override
-  {
-    if (!isOpen || !content)
-      return false;
-    // blocksHoverBelow keeps FluxUI from running updateHoverStates on
-    // root while the dialog is open, so the dialog has to drive hover
-    // for its own content subtree itself (otherwise buttons inside the
-    // dialog would never show hover feedback).
-    return updateHoverStates(content.get(), mx, my);
-  }
-
-  bool onOverlayKeyDown(int keyCode) override
-  {
-    if (!isOpen)
-      return false;
-    if (closeOnEscape && keyCode == Key::Escape)
-    {
-      close();
-      return true;
-    }
-    return true; // modal — swallow all keys while open, handled or not
-  }
-
-  void onOverlayOutsideClick() override
-  {
-    // The dialog's overlay rect covers the full client area, so
-    // onOverlayMouseDown already handles "inside the scrim, outside the
-    // box". This only fires if a click somehow lands outside the
-    // overlay's own rect entirely — shouldn't happen for a full-window
-    // overlay, but close defensively if it ever does.
-    if (closeOnClickOutside)
-      close();
   }
 
   // ── Builder API ───────────────────────────────────────────────────────
@@ -813,7 +844,15 @@ public:
     dialogX_ = (winW_ - dialogWidth) / 2;
     dialogY_ = (winH_ - dialogHeight) / 2;
 
-    ui->overlays().show(this, 0, 0, winW_, winH_, 200, ui->getFontCache());
+    dialogSurface_->x = 0;
+    dialogSurface_->y = 0;
+    dialogSurface_->width = winW_;
+    dialogSurface_->height = winH_;
+    // A dialog owns the whole screen while open — nothing below it should
+    // see clicks, hover, or keys.
+    ui->showOverlay(dialogSurface_.get(), /*zIndex=*/200,
+                    /*modal=*/true, /*blocksHoverBelow=*/true,
+                    /*capturesKeyboard=*/true);
     popupShown_ = true;
   }
 
@@ -830,7 +869,7 @@ public:
       if (focused && content && isDescendantOf(focused, content.get()))
         ui->setFocus(nullptr);
       if (popupShown_)
-        ui->overlays().hide(this);
+        ui->hideOverlay(dialogSurface_.get());
     }
     popupShown_ = false;
 
@@ -839,6 +878,7 @@ public:
   }
 
 private:
+  friend class DialogSurface;
   std::shared_ptr<DialogWidget> self_()
   {
     return std::static_pointer_cast<DialogWidget>(shared_from_this());
@@ -937,7 +977,7 @@ enum class TooltipPosition
   Auto
 };
 
-class TooltipWidget : public Widget, public OverlayContent
+class TooltipWidget : public Widget
 {
 private:
   int tipW_ = 0, tipH_ = 0;
@@ -956,12 +996,65 @@ private:
   int tipGap = 6; // space between anchor and bubble
   int shadowOffset = 2;
 
+  // ── Popup-body surface ─────────────────────────────────────────────────
+  // Non-modal, never captures keyboard, never blocks hover below — the
+  // bubble is purely informational. A click anywhere dismisses it but is
+  // never claimed (handleMouseDown returns false) so it still reaches
+  // whatever's underneath, matching the old onOverlayMouseDown contract.
+  class TipSurface : public Widget
+  {
+  public:
+    TooltipWidget *owner = nullptr;
+
+    void render(GraphicsContext &ctx, FontCache &fontCache) override
+    {
+      if (!owner || !owner->isVisible || owner->tipText.empty())
+        return;
+      Painter painter(ctx);
+
+      painter.fillRoundedRect(x + owner->shadowOffset, y + owner->shadowOffset,
+                              width, height, owner->tipBorderRadius,
+                              Color::fromRGBA(0, 0, 0, 60));
+      painter.fillRoundedRect(x, y, width, height, owner->tipBorderRadius,
+                              owner->tipBgColor);
+      painter.drawBorder(x, y, width, height, owner->tipBorderRadius,
+                         owner->tipBorderColor, 1);
+
+      std::wstring wtip = toWideString(owner->tipText);
+      NativeFont font = fontCache.getFont(owner->tipFontSize, FontWeight::Normal);
+      painter.drawText(wtip, x + owner->tipPadH, y + owner->tipPadV,
+                       width - owner->tipPadH * 2, height - owner->tipPadV * 2,
+                       font, owner->tipTextColor,
+                       DT_CENTER | DT_VCENTER | DT_WORDBREAK | DT_END_ELLIPSIS);
+      needsPaint = false;
+    }
+
+    bool handleMouseDown(int, int) override
+    {
+      if (owner)
+        owner->closeTooltip();
+      return false; // never claim the click — let it fall through
+    }
+
+    void onOverlayOutsideClick() override
+    {
+      if (owner)
+        owner->closeTooltip();
+    }
+  };
+
+  std::shared_ptr<TipSurface> tipSurface_;
+
 public:
   bool isVisible = false;
 
   explicit TooltipWidget(WidgetPtr anchor, const std::string &tooltip)
       : tipText(tooltip)
   {
+
+    tipSurface_ = std::make_shared<TipSurface>();
+    tipSurface_->owner = this;
+
     if (anchor)
     {
       addChild(anchor);
@@ -975,44 +1068,6 @@ public:
       closeTooltip();
     Widget::onDetach();
   }
-
-  // ── OverlayContent ────────────────────────────────────────────────────
-  OverlayPolicy overlayPolicy() const override
-  {
-    // Tooltips are purely informational — never modal, never eat hover
-    // from the tree below, never capture keyboard. Whatever is under the
-    // cursor behaves exactly as if the tooltip weren't there.
-    return {/*modal=*/false, /*blocksHoverBelow=*/false, /*capturesKeyboard=*/false};
-  }
-
-  void renderOverlay(GraphicsContext &ctx, FontCache &fontCache) override
-  {
-    if (!isVisible || tipText.empty())
-      return;
-
-    Painter painter(ctx);
-
-    painter.fillRoundedRect(shadowOffset, shadowOffset, tipW_, tipH_,
-                            tipBorderRadius, Color::fromRGBA(0, 0, 0, 60));
-    painter.fillRoundedRect(0, 0, tipW_, tipH_, tipBorderRadius, tipBgColor);
-    painter.drawBorder(0, 0, tipW_, tipH_, tipBorderRadius, tipBorderColor, 1);
-
-    std::wstring wtip = toWideString(tipText);
-    NativeFont font = fontCache.getFont(tipFontSize, FontWeight::Normal);
-    painter.drawText(wtip, tipPadH, tipPadV, tipW_ - tipPadH * 2,
-                     tipH_ - tipPadV * 2, font, tipTextColor,
-                     DT_CENTER | DT_VCENTER | DT_WORDBREAK | DT_END_ELLIPSIS);
-  }
-
-  // A click anywhere means the user moved on from hovering — dismiss, but
-  // never claim the click (return false) so it still reaches the anchor
-  // or whatever's underneath.
-  bool onOverlayMouseDown(int, int) override
-  {
-    closeTooltip();
-    return false;
-  }
-  void onOverlayOutsideClick() override { closeTooltip(); }
 
   // ── Builder API ───────────────────────────────────────────────────────
   std::shared_ptr<TooltipWidget> setTooltipText(const std::string &t)
@@ -1169,11 +1224,14 @@ private:
 
     isVisible = true;
 
-    // zIndex 50: above the base widget tree, below dropdowns (100) and
-    // context menus (150) — a tooltip should never sit on top of an open
-    // menu/dropdown it happens to overlap.
-    ui->overlays().show(this, clientX, clientY, tipW_, tipH_, 50,
-                        ui->getFontCache());
+    tipSurface_->x = clientX;
+    tipSurface_->y = clientY;
+    tipSurface_->width = tipW_;
+    tipSurface_->height = tipH_;
+
+    ui->showOverlay(tipSurface_.get(), /*zIndex=*/50,
+                    /*modal=*/false, /*blocksHoverBelow=*/false,
+                    /*capturesKeyboard=*/false);
   }
 
   void closeTooltip()
@@ -1182,442 +1240,22 @@ private:
       return;
     isVisible = false;
     if (auto *ui = FluxUI::getCurrentInstance())
-      ui->overlays().hide(this);
+      ui->hideOverlay(tipSurface_.get());
   }
 };
 
-// ============================================================================
-// DROPDOWN WIDGET
-// ============================================================================
 
-class DropdownWidget : public Widget, public OverlayContent
-{
-private:
-  int listWidth_ = 0;
-
-public:
-  std::vector<std::string> options;
-  int selectedIndex = -1;
-  bool isOpen = false;
-  int hoveredItemIndex = -1;
-
-  int itemHeight = 32;
-  int maxVisibleItems = 6;
-  int arrowSize = 8;
-  int scrollOffset = 0;
-
-  Color dropdownBgColor = Color::fromRGB(255, 255, 255);
-  Color dropdownBorderColor = Color::fromRGB(180, 180, 180);
-  Color dropdownFocusedBorderColor = Color::fromRGB(33, 150, 243);
-  Color placeholderColor = Color::fromRGB(150, 150, 150);
-  Color itemHoverColor = Color::fromRGB(240, 240, 240);
-  Color itemSelectedColor = Color::fromRGB(230, 245, 255);
-  Color listBgColor = Color::fromRGB(255, 255, 255);
-  Color listBorderColor = Color::fromRGB(200, 200, 200);
-  Color arrowColor = Color::fromRGB(100, 100, 100);
-
-  std::string placeholder = "Select an option...";
-  std::function<void(int, const std::string &)> onSelectionChanged;
-
-  DropdownWidget()
-  {
-    isFocusable = true;
-    hasBorder = true;
-    hasBackground = true;
-    backgroundColor = dropdownBgColor;
-    borderColor = dropdownBorderColor;
-    borderWidth = 1;
-    borderRadius = 4;
-    paddingLeft = 12;
-    paddingRight = 30;
-    paddingTop = paddingBottom = 8;
-    height = 36;
-    autoHeight = false;
-  }
-
-  // ── OverlayContent ────────────────────────────────────────────────────
-  // overlayPolicy() not overridden — default (non-modal) is correct here.
-
-  void renderOverlay(GraphicsContext &ctx, FontCache &fontCache) override
-  {
-    if (options.empty())
-      return;
-    Painter painter(ctx);
-
-    int visibleCount = std::min((int)options.size(), maxVisibleItems);
-    int listH = visibleCount * itemHeight + 2;
-
-    painter.fillRect(0, 0, listWidth_, listH, listBgColor);
-    painter.drawRectOutline(0, 0, listWidth_, listH, listBorderColor, 1);
-    painter.pushClipRect(1, 1, listWidth_ - 2, listH - 2);
-
-    NativeFont font = fontCache.getFont(fontSize, fontWeight);
-    int endIndex = std::min((int)options.size(), scrollOffset + visibleCount);
-    for (int i = scrollOffset; i < endIndex; i++)
-    {
-      int itemY = 1 + (i - scrollOffset) * itemHeight;
-      if (i == hoveredItemIndex)
-        painter.fillRect(1, itemY, listWidth_ - 2, itemHeight, itemHoverColor);
-      else if (i == selectedIndex)
-        painter.fillRect(1, itemY, listWidth_ - 2, itemHeight, itemSelectedColor);
-
-      std::wstring wopt = toWideString(options[i]);
-      painter.drawText(wopt, 12, itemY, listWidth_ - 24, itemHeight, font,
-                       Color::fromRGB(30, 30, 30),
-                       DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-    }
-    painter.popClipRect();
-  }
-
-  bool onOverlayMouseDown(int localX, int localY) override
-  {
-    int visibleCount = std::min((int)options.size(), maxVisibleItems);
-    int listH = visibleCount * itemHeight + 2;
-    if (localX < 0 || localX >= listWidth_ || localY < 0 || localY >= listH)
-    {
-      closeDropdown();
-      return true;
-    }
-    int itemIndex = scrollOffset + ((localY - 1) / itemHeight);
-    if (itemIndex >= 0 && itemIndex < (int)options.size())
-      selectItem(itemIndex);
-    closeDropdown();
-    return true;
-  }
-
-  bool onOverlayMouseMove(int localX, int localY) override
-  {
-    int visibleCount = std::min((int)options.size(), maxVisibleItems);
-    int listH = visibleCount * itemHeight + 2;
-    if (localX >= 0 && localX < listWidth_ && localY >= 0 && localY < listH)
-    {
-      int itemIndex = scrollOffset + ((localY - 1) / itemHeight);
-      if (itemIndex != hoveredItemIndex)
-      {
-        hoveredItemIndex = itemIndex;
-        refreshDropdownPopup_();
-        return true;
-      }
-    }
-    else if (hoveredItemIndex != -1)
-    {
-      hoveredItemIndex = -1;
-      refreshDropdownPopup_();
-      return true;
-    }
-    return false;
-  }
-
-  bool onOverlayMouseWheel(int delta) override
-  {
-    int maxScroll = std::max(0, (int)options.size() - maxVisibleItems);
-    scrollOffset = (delta > 0) ? std::max(0, scrollOffset - 1)
-                               : std::min(maxScroll, scrollOffset + 1);
-    refreshDropdownPopup_();
-    return true;
-  }
-
-  bool onOverlayKeyDown(int keyCode) override
-  {
-    if (options.empty())
-      return false;
-    switch (keyCode)
-    {
-    case Key::Return:
-    case Key::Space:
-    {
-      int idx = (hoveredItemIndex >= 0) ? hoveredItemIndex : selectedIndex;
-      if (idx >= 0 && idx < (int)options.size())
-        selectItem(idx);
-      closeDropdown();
-      return true;
-    }
-    case Key::Escape:
-      closeDropdown();
-      return true;
-    case Key::Up:
-      if (hoveredItemIndex < 0)
-        hoveredItemIndex = std::max(0, selectedIndex);
-      else if (hoveredItemIndex > 0)
-        hoveredItemIndex--;
-      ensureItemVisible(hoveredItemIndex);
-      refreshDropdownPopup_();
-      return true;
-    case Key::Down:
-      if (hoveredItemIndex < 0)
-        hoveredItemIndex = std::max(0, selectedIndex);
-      else if (hoveredItemIndex < (int)options.size() - 1)
-        hoveredItemIndex++;
-      ensureItemVisible(hoveredItemIndex);
-      refreshDropdownPopup_();
-      return true;
-    case Key::Home:
-      hoveredItemIndex = 0;
-      scrollOffset = 0;
-      refreshDropdownPopup_();
-      return true;
-    case Key::End:
-      hoveredItemIndex = (int)options.size() - 1;
-      scrollOffset = std::max(0, (int)options.size() - maxVisibleItems);
-      refreshDropdownPopup_();
-      return true;
-    }
-    return false;
-  }
-
-  void onOverlayOutsideClick() override { closeDropdown(); }
-
-  // ── Normal Widget — closed-state box ─────────────────────────────────
-  void computeLayout(GraphicsContext &, const BoxConstraints &constraints, FontCache &) override
-  {
-    if (autoWidth)
-      width = constraints.maxWidth;
-    applyConstraints();
-    needsLayout = false;
-  }
-
-  void render(GraphicsContext &ctx, FontCache &fontCache) override
-  {
-    borderColor = isFocused ? dropdownFocusedBorderColor : dropdownBorderColor;
-    drawRoundedRectangle(ctx);
-
-    Painter painter(ctx);
-    NativeFont font = fontCache.getFont(fontSize, fontWeight);
-    Color textCol = (selectedIndex >= 0 && selectedIndex < (int)options.size())
-                        ? getCurrentTextColor()
-                        : placeholderColor;
-    const std::string &label = (selectedIndex >= 0 && selectedIndex < (int)options.size())
-                                   ? options[selectedIndex]
-                                   : placeholder;
-
-    std::wstring wlabel = toWideString(label);
-    painter.drawText(wlabel, x + paddingLeft, y + paddingTop,
-                     width - paddingLeft - paddingRight, height - paddingTop - paddingBottom,
-                     font, textCol, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-
-    int arrowX = x + width - paddingRight + 10;
-    int arrowY = y + height / 2;
-    int hs = arrowSize / 2, vs = arrowSize / 4;
-    if (isOpen)
-    {
-      painter.drawLine(arrowX - hs, arrowY + vs, arrowX, arrowY - vs, arrowColor, 2);
-      painter.drawLine(arrowX, arrowY - vs, arrowX + hs, arrowY + vs, arrowColor, 2);
-    }
-    else
-    {
-      painter.drawLine(arrowX - hs, arrowY - vs, arrowX, arrowY + vs, arrowColor, 2);
-      painter.drawLine(arrowX, arrowY + vs, arrowX + hs, arrowY - vs, arrowColor, 2);
-    }
-    needsPaint = false;
-  }
-
-  bool handleMouseDown(int mx, int my) override
-  {
-    if (isOpen)
-      return false; // manager routes to onOverlayMouseDown while open
-    if (mx >= x && mx < x + width && my >= y && my < y + height)
-    {
-      openDropdown();
-      return true;
-    }
-    return false;
-  }
-
-  bool handleKeyDown(int keyCode) override
-  {
-    if (isOpen)
-      return false; // manager routes to onOverlayKeyDown while open
-    if (options.empty())
-      return false;
-    switch (keyCode)
-    {
-    case Key::Return:
-    case Key::Space:
-      openDropdown();
-      hoveredItemIndex = selectedIndex;
-      if (hoveredItemIndex >= 0)
-        ensureItemVisible(hoveredItemIndex);
-      markNeedsPaint();
-      return true;
-    case Key::Up:
-      if (selectedIndex > 0)
-        selectItem(selectedIndex - 1);
-      return true;
-    case Key::Down:
-      if (selectedIndex < (int)options.size() - 1)
-        selectItem(selectedIndex + 1);
-      return true;
-    case Key::Home:
-      selectItem(0);
-      return true;
-    case Key::End:
-      selectItem((int)options.size() - 1);
-      return true;
-    }
-    return false;
-  }
-
-  bool handleFocus(bool focused) override
-  {
-    isFocused = focused;
-    if (!focused && isOpen)
-      closeDropdown();
-    markNeedsPaint();
-    return true;
-  }
-
-  OverlayPolicy overlayPolicy() const override
-  {
-    return {/*modal=*/true, /*blocksHoverBelow=*/false, /*capturesKeyboard=*/true};
-  }
-
-  // ── Builder methods — unchanged from before ──────────────────────────
-  std::shared_ptr<DropdownWidget> setOptions(const std::vector<std::string> &opts)
-  {
-    options = opts;
-    if (selectedIndex >= (int)options.size())
-      selectedIndex = -1;
-    scrollOffset = 0;
-    hoveredItemIndex = -1;
-    if (isOpen)
-      closeDropdown();
-    markNeedsPaint();
-    return std::static_pointer_cast<DropdownWidget>(shared_from_this());
-  }
-  std::shared_ptr<DropdownWidget> setPlaceholder(const std::string &ph)
-  {
-    placeholder = ph;
-    markNeedsPaint();
-    return std::static_pointer_cast<DropdownWidget>(shared_from_this());
-  }
-  std::shared_ptr<DropdownWidget> setItemHeight(int h)
-  {
-    itemHeight = h;
-    markNeedsPaint();
-    return std::static_pointer_cast<DropdownWidget>(shared_from_this());
-  }
-  std::shared_ptr<DropdownWidget> setMaxVisibleItems(int count)
-  {
-    maxVisibleItems = count;
-    markNeedsPaint();
-    return std::static_pointer_cast<DropdownWidget>(shared_from_this());
-  }
-  std::shared_ptr<DropdownWidget> setOnSelectionChanged(std::function<void(int, const std::string &)> cb)
-  {
-    onSelectionChanged = cb;
-    return std::static_pointer_cast<DropdownWidget>(shared_from_this());
-  }
-  std::shared_ptr<DropdownWidget> setSelectedIndex(State<int> &state)
-  {
-    selectedIndex = state.get();
-    state.bindProperty(shared_from_this(), [](Widget *w, const int &val)
-                       { static_cast<DropdownWidget *>(w)->selectedIndex = val; }, false);
-    boundIntState = &state;
-    return std::static_pointer_cast<DropdownWidget>(shared_from_this());
-  }
-  std::shared_ptr<DropdownWidget> setSelectedValue(State<std::string> &state)
-  {
-    selectedIndex = findOptionIndex(state.get());
-    state.bindProperty(shared_from_this(), [](Widget *w, const std::string &val)
-                       { static_cast<DropdownWidget *>(w)->selectedIndex = static_cast<DropdownWidget *>(w)->findOptionIndex(val); }, false);
-    boundStringState = &state;
-    return std::static_pointer_cast<DropdownWidget>(shared_from_this());
-  }
-  std::shared_ptr<DropdownWidget> setWidth(int w)
-  {
-    width = w;
-    autoWidth = false;
-    return std::static_pointer_cast<DropdownWidget>(shared_from_this());
-  }
-
-private:
-  State<int> *boundIntState = nullptr;
-  State<std::string> *boundStringState = nullptr;
-
-  void openDropdown()
-  {
-    auto *ui = FluxUI::getCurrentInstance();
-    if (!ui || isOpen)
-      return;
-    isOpen = true;
-    hoveredItemIndex = -1;
-    scrollOffset = 0;
-    listWidth_ = width;
-
-    int visibleCount = std::min((int)options.size(), maxVisibleItems);
-    int listH = visibleCount * itemHeight + 2;
-
-    ui->overlays().show(this, x, y + height + 2, listWidth_, listH, 100, ui->getFontCache());
-    markNeedsPaint();
-  }
-
-  void closeDropdown()
-  {
-    if (!isOpen)
-      return;
-    isOpen = false;
-    hoveredItemIndex = -1;
-    if (auto *ui = FluxUI::getCurrentInstance())
-      ui->overlays().hide(this);
-    markNeedsPaint();
-  }
-
-  void refreshDropdownPopup_()
-  {
-    if (!isOpen)
-      return;
-    if (auto *ui = FluxUI::getCurrentInstance())
-      ui->overlays().refresh(this, ui->getFontCache());
-  }
-
-  void selectItem(int index)
-  {
-    if (index < 0 || index >= (int)options.size())
-      return;
-    selectedIndex = index;
-    if (onSelectionChanged)
-      onSelectionChanged(selectedIndex, options[selectedIndex]);
-    if (boundIntState)
-      boundIntState->set(selectedIndex);
-    if (boundStringState)
-      boundStringState->set(options[selectedIndex]);
-    markNeedsPaint();
-  }
-
-  void ensureItemVisible(int index)
-  {
-    if (index < scrollOffset)
-      scrollOffset = index;
-    else if (index >= scrollOffset + maxVisibleItems)
-      scrollOffset = index - maxVisibleItems + 1;
-  }
-
-  int findOptionIndex(const std::string &value) const
-  {
-    for (int i = 0; i < (int)options.size(); i++)
-      if (options[i] == value)
-        return i;
-    return -1;
-  }
-};
 
 // ============================================================================
 // FACTORY FUNCTIONS
 // ============================================================================
 
-using DropdownWidgetPtr = std::shared_ptr<DropdownWidget>;
+
 using TooltipWidgetPtr = std::shared_ptr<TooltipWidget>;
 using DialogWidgetPtr = std::shared_ptr<DialogWidget>;
 using ContextMenuWidgetPtr = std::shared_ptr<ContextMenuWidget>;
 
-inline DropdownWidgetPtr
-Dropdown(const std::vector<std::string> &options = {})
-{
-  auto w = std::make_shared<DropdownWidget>();
-  if (!options.empty())
-    w->setOptions(options);
-  return w;
-}
+
 
 inline TooltipWidgetPtr Tooltip(WidgetPtr anchor, const std::string &tooltip)
 {

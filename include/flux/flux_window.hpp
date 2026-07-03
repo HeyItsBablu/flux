@@ -159,12 +159,11 @@ public:
     int cachedHeight = 0;
 
 private:
-    AppInstance hInstance_ = nullptr;
-
     // =========================================================================
     // Win32
     // =========================================================================
 #ifdef _WIN32
+    AppInstance hInstance_ = nullptr;
     HWND hwnd_ = nullptr;
     D3DDevice *d3dDevice_ = nullptr;
     RenderLoop *renderLoop_ = nullptr;
@@ -225,12 +224,12 @@ private:
 #ifdef __APPLE__
 #if TARGET_OS_OSX
 public:
-    struct MacState;              // opaque — full definition lives only in flux_window_macos.mm
+    struct MacState; // opaque — full definition lives only in flux_window_macos.mm
     MacState *macState = nullptr;
 
     // Narrow accessors so other .mm files never need MacState's full
     // definition. Caller does the (__bridge id<...>) cast.
-    void *getMacMetalDevicePtr() const; 
+    void *getMacMetalDevicePtr() const;
     void *getMacNSViewPtr() const;
 #endif
 #endif

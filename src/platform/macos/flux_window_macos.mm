@@ -324,12 +324,42 @@ struct PlatformWindow::MacState
 
 - (void)windowDidResignKey:(NSNotification*)notification {
     if (!_win) return;
-    // No canvas-specific state to clear — capturedCanvas/focusedCanvas are
-    // gone. FluxUI's generic onFocusLost clears focusedWidget.
+
+    // AppKit only delivers keyDown/keyUp/flagsChanged to the key window.
+    // If Space/Ctrl/Shift/Option is held when focus is lost (Cmd-Tab away,
+    // a system dialog steals focus, etc.) and released while unfocused,
+    // no keyUp/flagsChanged ever fires here — the flag would otherwise
+    // stay stuck true indefinitely, causing e.g. space-drag-pan or
+    // Ctrl-zoom shortcuts to fire on the next interaction even though
+    // nothing is actually held. Reset unconditionally on focus loss;
+    // windowDidBecomeKey below resyncs modifiers (but not Space, which
+    // isn't queryable outside an event) if regained while still held.
+    flux_mac_detail::g_spaceDown = false;
+    flux_mac_detail::g_ctrlDown  = false;
+    flux_mac_detail::g_shiftDown = false;
+    flux_mac_detail::g_altDown   = false;
+
     if (_win->callbacks.onFocusLost)
         _win->callbacks.onFocusLost();
     [self renderFrame];
 }
+
+- (void)windowDidBecomeKey:(NSNotification*)notification {
+    // Resync Ctrl/Shift/Option from AppKit's current global modifier
+    // state — [NSEvent modifierFlags] is a class query, not tied to a
+    // specific event, so this correctly detects a modifier that's still
+    // physically held at the moment focus returns (e.g. Cmd-Tab back
+    // while still pressing Ctrl). Space intentionally NOT resynced here:
+    // unlike Ctrl/Shift/Option, it isn't part of NSEvent.modifierFlags,
+    // so there's no way to query whether it's currently held without a
+    // live event — it stays reset from windowDidResignKey until the next
+    // real keyDown/keyUp.
+    NSEventModifierFlags flags = [NSEvent modifierFlags];
+    flux_mac_detail::g_ctrlDown  = (flags & NSEventModifierFlagControl) != 0;
+    flux_mac_detail::g_shiftDown = (flags & NSEventModifierFlagShift)   != 0;
+    flux_mac_detail::g_altDown   = (flags & NSEventModifierFlagOption)  != 0;
+}
+
 
 @end
 

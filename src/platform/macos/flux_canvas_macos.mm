@@ -20,6 +20,7 @@ extern Canvas2DBackend *Canvas2DBackend_create(id<MTLDevice> device);
 extern void Canvas2DBackend_destroy(Canvas2DBackend *b);
 extern void Canvas2DBackend_metalBeginFrame(Canvas2DBackend *b, id<MTLDevice> device,
                                             id<MTLRenderCommandEncoder> encoder,
+                                            id<MTLTexture> targetTexture,
                                             const float mvp[16]);
 extern void Canvas2DBackend_metalEndFrame(Canvas2DBackend *b);
 
@@ -128,7 +129,7 @@ static void initCanvas(CanvasWidget *w)
     s.metalLayer                  = [CAMetalLayer layer];
     s.metalLayer.device           = s.device;
     s.metalLayer.pixelFormat      = MTLPixelFormatBGRA8Unorm;
-    s.metalLayer.framebufferOnly  = YES;
+    s.metalLayer.framebufferOnly  = NO;
     s.metalLayer.zPosition        = 0.0; // beneath uiMetalLayer (zPosition 1.0)
     [nsView.layer insertSublayer:s.metalLayer atIndex:0];
 
@@ -371,7 +372,7 @@ void CanvasWidget::render(GraphicsContext & /*ctx*/, FontCache &)
 
     if (s.backend)
     {
-        Canvas2DBackend_metalBeginFrame(s.backend, s.device, enc, mvp);
+        Canvas2DBackend_metalBeginFrame(s.backend, s.device, enc, drawable.texture, mvp);
         Canvas2D ctx2d(s.backend, canvasW_, canvasH_);
         activeSurface_->render(ctx2d);
         Canvas2DBackend_metalEndFrame(s.backend);

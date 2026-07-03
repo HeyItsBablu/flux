@@ -807,7 +807,7 @@ void Painter::drawCamera(const CameraDrawParams &params)
         ctx.dc->GetTransform(&prev);
 
         float cx = params.dstX + params.dstW * 0.5f;
-        float cy = params.dstY + params.dstH * 0.5f;
+        
 
         D2D1_MATRIX_3X2_F flip = D2D1::Matrix3x2F(
             -1.f, 0.f,

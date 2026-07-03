@@ -26,15 +26,6 @@
 // ============================================================================
 extern float FluxAndroid_getDpiScale();
 
-// ============================================================================
-// OVERLAY OFFSET HELPERS
-// ============================================================================
-// Every Painter method that emits geometry adds these to its x/y arguments.
-// When a Painter is used for normal (non-overlay) rendering both fields are
-// zero, so there is no cost and no behavioural change outside of overlays.
-
-static inline int offX(const GraphicsContext &ctx) { return ctx.overlayOffsetX; }
-static inline int offY(const GraphicsContext &ctx) { return ctx.overlayOffsetY; }
 
 // ============================================================================
 // UTF-8 HELPERS
@@ -1387,7 +1378,7 @@ void Painter::fillRect(int x, int y, int w, int h, Color color)
 {
     if (!s_gl)
         return;
-    s_gl->drawFilledRect(x + offX(ctx), y + offY(ctx), w, h, color);
+    s_gl->drawFilledRect(x, y, w, h, color);
 }
 
 void Painter::fillRectAlpha(int x, int y, int w, int h, Color color)
@@ -1399,7 +1390,7 @@ void Painter::fillRoundedRect(int x, int y, int w, int h, int radius, Color colo
 {
     if (!s_gl)
         return;
-    s_gl->drawRoundedRect(x + offX(ctx), y + offY(ctx), w, h, (float)radius, color, 0.f);
+    s_gl->drawRoundedRect(x, y, w, h, (float)radius, color, 0.f);
 }
 
 void Painter::fillRoundedRegion(int x, int y, int w, int h, int r, Color color)
@@ -1432,8 +1423,7 @@ void Painter::fillGradientRect(int x, int y, int w, int h,
         fillRect(x, y, w, h, colors[0]);
         return;
     }
-    s_gl->drawGradientRect(x + offX(ctx), y + offY(ctx), w, h,
-                           colors.front(), colors.back());
+    s_gl->drawGradientRect(x, y, w, h, colors.front(), colors.back());
 }
 
 void Painter::fillColumnBars(int x, int y, int w, int h,
@@ -1446,7 +1436,7 @@ void Painter::fillColumnBars(int x, int y, int w, int h,
     {
         int bh = std::max(0, std::min(h, bars[i]));
         if (bh > 0)
-            s_gl->drawFilledRect(x + offX(ctx) + i, y + offY(ctx) + h - bh, 1, bh, color);
+            s_gl->drawFilledRect(x + i, y + h - bh, 1, bh, color);
     }
 }
 
@@ -1454,11 +1444,7 @@ void Painter::fillPolygonAlpha(const std::vector<std::pair<int, int>> &pts, Colo
 {
     if (!s_gl)
         return;
-    std::vector<std::pair<int, int>> shifted;
-    shifted.reserve(pts.size());
-    for (auto &[px, py] : pts)
-        shifted.push_back({px + offX(ctx), py + offY(ctx)});
-    s_gl->drawPolygon(shifted, color);
+    s_gl->drawPolygon(pts, color);
 }
 
 // ── Stroked shapes ────────────────────────────────────────────────────────────
@@ -1470,16 +1456,14 @@ void Painter::drawBorder(int x, int y, int w, int h, int radius,
         return;
     if (radius <= 0)
     {
-        int ox = offX(ctx), oy = offY(ctx);
-        s_gl->drawFilledRect(x + ox, y + oy, w, borderWidth, color);
-        s_gl->drawFilledRect(x + ox, y + oy + h - borderWidth, w, borderWidth, color);
-        s_gl->drawFilledRect(x + ox, y + oy, borderWidth, h, color);
-        s_gl->drawFilledRect(x + ox + w - borderWidth, y + oy, borderWidth, h, color);
+        s_gl->drawFilledRect(x, y, w, borderWidth, color);
+        s_gl->drawFilledRect(x, y + h - borderWidth, w, borderWidth, color);
+        s_gl->drawFilledRect(x, y, borderWidth, h, color);
+        s_gl->drawFilledRect(x + w - borderWidth, y, borderWidth, h, color);
     }
     else
     {
-        s_gl->drawRoundedRect(x + offX(ctx), y + offY(ctx), w, h,
-                              (float)radius, color, (float)borderWidth);
+        s_gl->drawRoundedRect(x, y, w, h, (float)radius, color, (float)borderWidth);
     }
 }
 
@@ -1498,9 +1482,7 @@ void Painter::drawLine(int x1, int y1, int x2, int y2, Color color, int width)
 {
     if (!s_gl)
         return;
-    s_gl->drawLine(x1 + offX(ctx), y1 + offY(ctx),
-                   x2 + offX(ctx), y2 + offY(ctx),
-                   color, (float)width);
+    s_gl->drawLine(x1, y1, x2, y2, color, (float)width);
 }
 
 void Painter::drawHLine(int x, int y, int len, Color color, int sw)
@@ -1518,11 +1500,7 @@ void Painter::drawPolyline(const std::vector<std::pair<int, int>> &pts,
 {
     if (!s_gl)
         return;
-    std::vector<std::pair<int, int>> shifted;
-    shifted.reserve(pts.size());
-    for (auto &[px, py] : pts)
-        shifted.push_back({px + offX(ctx), py + offY(ctx)});
-    s_gl->drawPolyline(shifted, color, (float)strokeWidth);
+    s_gl->drawPolyline(pts, color, (float)strokeWidth);
 }
 
 void Painter::drawEllipse(int x, int y, int w, int h,
@@ -1530,8 +1508,8 @@ void Painter::drawEllipse(int x, int y, int w, int h,
 {
     if (!s_gl)
         return;
-    float cx = (x + offX(ctx)) + w * 0.5f;
-    float cy = (y + offY(ctx)) + h * 0.5f;
+    float cx = x + w * 0.5f;
+    float cy = y + h * 0.5f;
     s_gl->drawEllipse(cx, cy, w * 0.5f, h * 0.5f, fill, stroke, (float)strokeWidth);
 }
 
@@ -1542,7 +1520,7 @@ void Painter::drawArc(float cx, float cy, float radius,
 {
     if (!s_gl)
         return;
-    s_gl->drawArc(cx + offX(ctx), cy + offY(ctx), radius, (float)strokeWidth,
+    s_gl->drawArc(cx, cy, radius, (float)strokeWidth,
                   startAngle, sweepAngle, color, roundedCaps);
 }
 
@@ -1551,7 +1529,7 @@ void Painter::drawArc(float cx, float cy, float radius,
 void Painter::pushClipRect(int x, int y, int w, int h, int /*cornerRadius*/)
 {
     if (s_gl)
-        s_gl->pushScissor(x + offX(ctx), y + offY(ctx), w, h);
+        s_gl->pushScissor(x, y, w, h);
 }
 
 void Painter::popClipRect()
@@ -1665,16 +1643,16 @@ void Painter::drawText(const std::wstring &text, int x, int y, int w, int h,
     s_gl->getMetrics(fontIdx, sizePx, ascent, descent, lineGap);
     int th = ascent - descent;
 
-    // Start from the (already-logical) x/y and add the overlay offset.
-    int tx = x + offX(ctx);
+    
+    int tx = x;
     if (format & DT_CENTER)
-        tx = x + offX(ctx) + (w - tw) / 2;
+        tx = x + (w - tw) / 2;
     else if (format & DT_RIGHT)
-        tx = x + offX(ctx) + w - tw;
+        tx = x + w - tw;
 
     int ty = (format & DT_VCENTER)
-                 ? y + offY(ctx) + (h - th) / 2 + ascent
-                 : y + offY(ctx) + ascent;
+                 ? y + (h - th) / 2 + ascent
+                 : y + ascent;
 
     s_gl->drawTextLine(utf8.c_str(), (int)utf8.size(),
                        (float)tx, (float)ty, fontIdx, sizePx, color);
@@ -1825,13 +1803,9 @@ void Painter::drawRichText(const std::wstring &text,
     if (!s_gl || text.empty() || params.w <= 0 || params.h <= 0)
         return;
 
-    // Apply overlay offset to a local copy of the params rect.
-    // All geometry emitted below goes through drawTextLine / fillRect /
-    // drawPolyline, but those delegate to s_gl directly rather than back
-    // through Painter, so we must bake the offset here.
+
     RichTextParams p = params;
-    p.x += offX(ctx);
-    p.y += offY(ctx);
+
 
     const TextStyle &style = p.style;
     NativeFont font = fontCache.getFont(style.fontFamily, style.scaledFontSize(), style.fontWeight);
@@ -1871,8 +1845,6 @@ void Painter::drawRichText(const std::wstring &text,
     bool needClip = (p.overflow != TextOverflow::Visible);
     if (needClip)
     {
-        // pushClipRect would double-add the offset, so call s_gl directly
-        // with already-shifted coords.
         s_gl->pushScissor(p.x, p.y, p.w, p.h);
     }
 
@@ -2054,12 +2026,9 @@ void Painter::drawImage(const ImageDrawParams &p)
     if (!s_gl || p.image == -1 || p.clipW <= 0 || p.clipH <= 0)
         return;
 
-    // Shift both the clip rect and the dest rect by the overlay offset.
+   
     ImageDrawParams sp = p;
-    sp.clipX += offX(ctx);
-    sp.clipY += offY(ctx);
-    sp.destX += offX(ctx);
-    sp.destY += offY(ctx);
+
 
     // Compute UVs from the optional source sub-rect. srcW/srcH < 0 (the
     // default) means "use the full texture" — identical to the old
@@ -2119,7 +2088,7 @@ void Painter::drawVideo(const VideoDrawParams &p)
     if (!s_gl || p.frame == -1 || p.dstW <= 0)
         return;
     s_gl->drawTexture((GLuint)p.frame,
-                      (float)(p.dstX + offX(ctx)), (float)(p.dstY + offY(ctx)),
+                      (float)p.dstX, (float)p.dstY,
                       (float)p.dstW, (float)p.dstH);
 }
 
@@ -2130,7 +2099,7 @@ void Painter::drawCamera(const CameraDrawParams &p)
     float u0 = p.mirror ? 1.f : 0.f;
     float u1 = p.mirror ? 0.f : 1.f;
     s_gl->drawTexture((GLuint)p.frame,
-                      (float)(p.dstX + offX(ctx)), (float)(p.dstY + offY(ctx)),
+                      (float)p.dstX, (float)p.dstY,
                       (float)p.dstW, (float)p.dstH,
                       u0, 0.f, u1, 1.f);
 }
@@ -2140,25 +2109,9 @@ void Painter::drawPage(const PageDrawParams &p)
     if (!s_gl)
         return;
 
-    // Shift every region by the overlay offset.
+    
     PageDrawParams sp = p;
-    sp.x += offX(ctx);
-    sp.y += offY(ctx);
-    if (sp.body.present)
-    {
-        sp.body.x += offX(ctx);
-        sp.body.y += offY(ctx);
-    }
-    if (sp.header.present)
-    {
-        sp.header.x += offX(ctx);
-        sp.header.y += offY(ctx);
-    }
-    if (sp.footer.present)
-    {
-        sp.footer.x += offX(ctx);
-        sp.footer.y += offY(ctx);
-    }
+
 
     if (sp.hasPageBackground)
         s_gl->drawFilledRect(sp.x, sp.y, sp.w, sp.h, sp.pageBackground);
@@ -2167,7 +2120,7 @@ void Painter::drawPage(const PageDrawParams &p)
         s_gl->drawFilledRect(sp.body.x, sp.body.y, sp.body.w, sp.body.h,
                              sp.body.background);
 
-    if (sp.header.present)
+    if (sp.header.present) 
     {
         if (sp.header.hasBackground)
             s_gl->drawFilledRect(sp.header.x, sp.header.y, sp.header.w, sp.header.h,

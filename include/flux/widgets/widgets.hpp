@@ -41,4 +41,5 @@
 #include "flux_padding.hpp"
 #include "flux_stream_builder.hpp"
 #include "flux_circular_progress.hpp"
+#include "dropdown.hpp"
 #endif // WIDGETS_HPP

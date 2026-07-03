@@ -1,8 +1,8 @@
 #ifndef FLUX_TOAST_HPP
 #define FLUX_TOAST_HPP
 
-#include "../flux_app.hpp"
-#include "../flux_core.hpp"
+#include "flux/flux_app.hpp"
+#include "flux/flux_core.hpp"
 
 #include <chrono>
 #include <deque>
@@ -54,9 +54,120 @@ struct ToastEntry
 // TOAST WIDGET
 // ============================================================================
 
-class ToastWidget : public Widget, public OverlayContent
+class ToastWidget : public Widget
 {
 public:
+    // ── Popup-body surface ───────────────────────────────────────────────
+    // Covers the full client area (x=0,y=0,width=winW,height=winH), same
+    // footprint the old overlay rect used — so lastDrawX/Y, already
+    // computed against (0,0)-relative winW/winH in _computeToastPos, stay
+    // numerically absolute with zero changes needed there.
+    class ToastSurface : public Widget
+    {
+    public:
+        ToastWidget *owner = nullptr;
+
+        void render(GraphicsContext &ctx, FontCache &fontCache) override
+        {
+            if (!owner || owner->active_.empty())
+                return;
+
+            int winW = owner->_winW();
+            int winH = owner->_winH();
+            int count = std::min((int)owner->active_.size(), owner->maxVisible_);
+
+            for (int i = 0; i < count; i++)
+            {
+                ToastWidget::ActiveToast &at = owner->active_[i];
+                int tH = owner->_toastH(at.entry);
+                int tW = owner->toastWidth_;
+
+                owner->_computeToastPos(i, tW, tH, winW, winH,
+                                        at.lastDrawX, at.lastDrawY);
+                at.lastDrawW = tW;
+                at.lastDrawH = tH;
+
+                owner->_renderSingleToast(ctx, fontCache, at,
+                                          at.lastDrawX, at.lastDrawY, tW, tH);
+            }
+            needsPaint = false;
+        }
+
+        bool handleMouseDown(int mx, int my) override
+        {
+            if (!owner || owner->active_.empty())
+                return false;
+
+            int count = std::min((int)owner->active_.size(), owner->maxVisible_);
+            for (int i = 0; i < count; i++)
+            {
+                ToastWidget::ActiveToast &at = owner->active_[i];
+                int tX = at.lastDrawX, tY = at.lastDrawY;
+                int tW = at.lastDrawW, tH = at.lastDrawH;
+
+                if (mx < tX || mx >= tX + tW || my < tY || my >= tY + tH)
+                    continue;
+
+                int relX = mx - tX;
+                int relY = my - tY;
+
+                // Close button — top-right 20×20 zone
+                if (relX >= tW - 28 && relX < tW - 8 &&
+                    relY >= 8 && relY < 28)
+                {
+                    owner->_dismiss(i);
+                    return true;
+                }
+
+                // Action button
+                if (!at.entry.actionLabel.empty())
+                {
+                    int btnW = (int)at.entry.actionLabel.size() *
+                                   (owner->fontSize_ / 2) +
+                               16;
+                    int btnX = tW - 8 - btnW;
+                    int btnY = tH - 28;
+                    if (relX >= btnX && relX < btnX + btnW &&
+                        relY >= btnY && relY < btnY + 20)
+                    {
+                        if (at.entry.onAction)
+                            at.entry.onAction();
+                        owner->_dismiss(i);
+                        return true;
+                    }
+                }
+
+                // Click anywhere else dismisses
+                owner->_dismiss(i);
+                return true;
+            }
+            return false;
+        }
+
+        bool handleMouseMove(int mx, int my) override
+        {
+            if (!owner || owner->active_.empty())
+                return false;
+            int count = std::min((int)owner->active_.size(), owner->maxVisible_);
+            for (int i = 0; i < count; i++)
+            {
+                ToastWidget::ActiveToast &at = owner->active_[i];
+                at.hovered = (mx >= at.lastDrawX &&
+                              mx < at.lastDrawX + at.lastDrawW &&
+                              my >= at.lastDrawY &&
+                              my < at.lastDrawY + at.lastDrawH);
+            }
+            return false; // never consume — toast never blocks the tree below
+        }
+
+        // No onOverlayOutsideClick override: toast registers with
+        // modal=false (see _pump()), so dispatchOverlayMouseDown's
+        // outside-branch calling the base no-op is correct — matches the
+        // original "overlayPolicy() not overridden" behavior exactly.
+    };
+
+    std::shared_ptr<ToastSurface> toastSurface_;
+
     // ── Appearance ────────────────────────────────────────────────────────
     ToastPosition position_ = ToastPosition::BottomRight;
     int toastWidth_ = 320;
@@ -87,6 +198,8 @@ public:
         height = 0;
         autoWidth = false;
         autoHeight = false;
+        toastSurface_ = std::make_shared<ToastSurface>();
+        toastSurface_->owner = this;
     }
 
     // ── Widget tree lifecycle ─────────────────────────────────────────────
@@ -185,111 +298,6 @@ public:
     {
         needsPaint = false;
     }
-
-    // ── OverlayContent interface ──────────────────────────────────────────
-    void renderOverlay(GraphicsContext &ctx, FontCache &fontCache) override
-    {
-        if (active_.empty())
-            return;
-
-        int winW = _winW();
-        int winH = _winH();
-        int count = std::min((int)active_.size(), maxVisible_);
-
-        for (int i = 0; i < count; i++)
-        {
-            ActiveToast &at = active_[i];
-            int tH = _toastH(at.entry);
-            int tW = toastWidth_;
-
-            _computeToastPos(i, tW, tH, winW, winH,
-                             at.lastDrawX, at.lastDrawY);
-            at.lastDrawW = tW;
-            at.lastDrawH = tH;
-
-            _renderSingleToast(ctx, fontCache, at,
-                               at.lastDrawX, at.lastDrawY, tW, tH);
-        }
-    }
-
-    // Coordinates here are local to the overlay rect, which spans the whole
-    // client area starting at (0,0) — numerically identical to the old
-    // absolute client coordinates this code was already written against.
-    bool onOverlayMouseDown(int mx, int my) override
-    {
-        if (active_.empty())
-            return false;
-
-        int count = std::min((int)active_.size(), maxVisible_);
-        for (int i = 0; i < count; i++)
-        {
-            ActiveToast &at = active_[i];
-            int tX = at.lastDrawX, tY = at.lastDrawY;
-            int tW = at.lastDrawW, tH = at.lastDrawH;
-
-            if (mx < tX || mx >= tX + tW || my < tY || my >= tY + tH)
-                continue;
-
-            int relX = mx - tX;
-            int relY = my - tY;
-
-            // Close button — top-right 20×20 zone
-            if (relX >= tW - 28 && relX < tW - 8 &&
-                relY >= 8 && relY < 28)
-            {
-                _dismiss(i);
-                return true;
-            }
-
-            // Action button
-            if (!at.entry.actionLabel.empty())
-            {
-                int btnW = (int)at.entry.actionLabel.size() *
-                               (fontSize_ / 2) +
-                           16;
-                int btnX = tW - 8 - btnW;
-                int btnY = tH - 28;
-                if (relX >= btnX && relX < btnX + btnW &&
-                    relY >= btnY && relY < btnY + 20)
-                {
-                    if (at.entry.onAction)
-                        at.entry.onAction();
-                    _dismiss(i);
-                    return true;
-                }
-            }
-
-            // Click anywhere else dismisses
-            _dismiss(i);
-            return true;
-        }
-        return false;
-    }
-
-    bool onOverlayMouseMove(int mx, int my) override
-    {
-        if (active_.empty())
-            return false;
-        int count = std::min((int)active_.size(), maxVisible_);
-        for (int i = 0; i < count; i++)
-        {
-            ActiveToast &at = active_[i];
-            at.hovered = (mx >= at.lastDrawX &&
-                          mx < at.lastDrawX + at.lastDrawW &&
-                          my >= at.lastDrawY &&
-                          my < at.lastDrawY + at.lastDrawH);
-        }
-        return false; // don't consume mouse moves — toast never blocks the tree below
-    }
-
-    // overlayPolicy() not overridden — toast is non-modal: clicks that miss
-    // every visible toast should still reach whatever's underneath. (The
-    // mouse-down dispatch only reaches here at all when a click lands inside
-    // the overlay's full-window rect and onOverlayMouseDown above returns
-    // false for that point — which it never does since every branch returns
-    // true once inside a toast's rect; a click that misses all toasts simply
-    // isn't inside any toast's *individual* rect, so onOverlayMouseDown
-    // returns false and the click correctly falls through to the tree.)
 
 private:
     // ── Active toast state ────────────────────────────────────────────────
@@ -522,10 +530,17 @@ private:
             auto *ui = FluxUI::getCurrentInstance();
             if (ui)
             {
+                toastSurface_->x = 0;
+                toastSurface_->y = 0;
+                toastSurface_->width = _winW();
+                toastSurface_->height = _winH();
                 // zIndex 75 — same band toasts always occupied: above
                 // dropdowns/tooltips, below context menus/dialogs.
-                ui->overlays().show(this, 0, 0, _winW(), _winH(), 75,
-                                    ui->getFontCache());
+                // modal=false: a click that misses every visible toast
+                // must still reach whatever's underneath.
+                ui->showOverlay(toastSurface_.get(), /*zIndex=*/75,
+                                /*modal=*/false, /*blocksHoverBelow=*/false,
+                                /*capturesKeyboard=*/true);
                 popupShown_ = true;
             }
         }
@@ -606,7 +621,7 @@ private:
         if (popupShown_)
         {
             if (auto *ui = FluxUI::getCurrentInstance())
-                ui->overlays().hide(this);
+                ui->hideOverlay(toastSurface_.get());
             popupShown_ = false;
         }
     }
@@ -617,7 +632,7 @@ private:
             return;
         auto *ui = FluxUI::getCurrentInstance();
         if (ui)
-            ui->overlays().refresh(this, ui->getFontCache());
+            ui->refreshOverlay(toastSurface_.get());
     }
 };
 

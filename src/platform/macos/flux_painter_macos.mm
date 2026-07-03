@@ -12,6 +12,7 @@
 #include <vector>
 #include <cmath>
 #include <algorithm>
+#include <utility>
 
 // ============================================================================
 // Shared Metal shaders
@@ -422,18 +423,28 @@ void Painter::drawWavyLine(int x, int y, int len, Color color, int amplitude)
 
 void Painter::pushClipRect(int x, int y, int w, int h, int cornerRadius)
 {
-    if (cornerRadius > 0) {
-        // TODO: stencil-based rounded clip. Falls back to bounding-box
-        // clip for now — safe (no overdraw beyond bounds), slightly
-        // imprecise at rounded corners.
-    }
+    if (cornerRadius > 0) {}
     id<MTLRenderCommandEncoder> e = enc(ctx);
     if (!e) return;
+
+
+    // Clamp into the render target's own bounds. Metal requires a scissor
+    // rect to fit entirely within the framebuffer — clamping only the
+    // lower bound (as before) still allows x+width / y+height to overshoot
+    // ctx.width/ctx.height, which Metal's validation layer rejects (hard
+    // assert in Debug/instrumented builds; undefined per the API contract
+    // even when it happens not to crash in Release).
+    int cx0 = std::max(0, x);
+    int cy0 = std::max(0, y);
+    int cx1 = std::min(x + w, ctx.width);
+    int cy1 = std::min(y + h, ctx.height);
+    if (cx1 < cx0) cx1 = cx0;
+    if (cy1 < cy0) cy1 = cy0;
     MTLScissorRect r;
-    r.x = (NSUInteger)std::max(0, x);
-    r.y = (NSUInteger)std::max(0, y);
-    r.width  = (NSUInteger)std::max(0, w);
-    r.height = (NSUInteger)std::max(0, h);
+    r.x      = (NSUInteger)cx0;
+    r.y      = (NSUInteger)cy0;
+    r.width  = (NSUInteger)(cx1 - cx0);
+    r.height = (NSUInteger)(cy1 - cy0);
     [e setScissorRect:r];
 }
 
@@ -764,8 +775,31 @@ void Painter::drawImage(const ImageDrawParams &params)
     // this platform yet).
     id<MTLTexture> tex = (__bridge id<MTLTexture>)(void*)params.image;
 
+    // Source sub-rect: srcW/srcH < 0 is the documented sentinel for "use
+    // the full texture" (see ImageDrawParams in flux_painter.hpp). Falls
+    // back to full-texture UVs (0,0)-(1,1) in that case, matching every
+    // call site that doesn't set these — same behavior as before this fix
+    // for the common case, real sub-rect sampling for the FBO-compositing
+    // case the header comment calls out (Android's pan/zoomed doc FBO).
+    float u0 = 0.f, v0 = 0.f, u1 = 1.f, v1 = 1.f;
+    if (params.srcW >= 0.f && params.srcH >= 0.f &&
+        params.srcWidth > 0 && params.srcHeight > 0)
+    {
+        u0 = params.srcX / (float)params.srcWidth;
+        v0 = params.srcY / (float)params.srcHeight;
+        u1 = (params.srcX + params.srcW) / (float)params.srcWidth;
+        v1 = (params.srcY + params.srcH) / (float)params.srcHeight;
+    }
+
+    // flipY: FBO/render-target textures are bottom-up in GL convention;
+    // the widget's own content is top-down. Flip by swapping v0/v1 rather
+    // than renormalizing, so it composes correctly with a sub-rect above.
+    if (params.flipY)
+        std::swap(v0, v1);
+
+
     std::vector<PVertex> v;
-    quad(v, params.destX, params.destY, params.destW, params.destH);
+    quad(v, params.destX, params.destY, params.destW, params.destH, u0, v0, u1, v1);
     drawTexturedTriList(ctx, v, Color::fromRGBA(255,255,255, 255), tex, res.textured);
 }
 

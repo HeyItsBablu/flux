@@ -5,7 +5,6 @@
 #include "flux_font.hpp"
 #include "flux_keys.hpp"
 #include "flux_layoutengine.hpp"
-#include "flux_overlay_manager.hpp"
 #include "flux_renderer.hpp"
 #include "flux_widget.hpp"
 #include "flux_window.hpp"
@@ -23,6 +22,25 @@
 
 template <typename T>
 class State;
+
+// ============================================================================
+// OVERLAY LAYER
+// ============================================================================
+// Replaces the old OverlayManager/OverlayContent split. Floating content
+// (dropdown lists, menus, tooltips, dialogs) is now an ordinary Widget with
+// real absolute x/y/width/height, rendered and dispatched last so it paints
+// on top and gets first shot at input. No popup windows, no per-platform
+// coordinate translation — every Painter backend already resolves absolute
+// coordinates correctly on its own.
+struct OverlayEntry
+{
+  Widget *widget = nullptr;
+  int zIndex = 0;
+  bool modal = false;            // swallows clicks outside; blocks tree below
+  bool blocksHoverBelow = false; // stops hover/move reaching the tree below
+  bool capturesKeyboard = true;  // gets first shot at key events while open
+  bool pendingRemoval = false;   // set by hideOverlay() during dispatch
+};
 
 // ============================================================================
 // MOUSE EVENT BROADCAST HELPERS
@@ -63,10 +81,16 @@ private:
   std::mutex pendingRebuildsMutex_;
   std::vector<Widget *> pendingRebuilds_;
 
-  // Owns everything overlay-related: native popups, z-order, input dispatch.
-  // Widgets talk to it directly via overlays(); core never needs to know
-  // which overlay widget types exist.
-  OverlayManager overlayMgr_;
+  // Floating overlay content (dropdowns, menus, tooltips, dialogs). Replaces
+  // the old OverlayManager object — just a sorted vector of Widget* plus
+  // policy flags now, no separate popup-managing subsystem.
+  std::vector<OverlayEntry> overlayLayer_;
+  int overlayDispatchDepth_ = 0;
+  struct OverlayDispatchScope;
+
+  OverlayEntry *findOverlay(Widget *widget);
+  void sortOverlaysByZ();
+  void pruneRemovedOverlays_();
 
   Widget *findLayoutBoundary(Widget *widget);
   WidgetPtr findByIdRecursive(WidgetPtr widget, const std::string &id);
@@ -131,12 +155,29 @@ public:
   void scheduleRebuild(Widget *widget);
   void drainPendingRebuilds();
 
-  // ── Overlays ────────────────────────────────────────────────────────────
-  // Any widget implementing OverlayContent calls this directly — e.g.
-  //   FluxUI::getCurrentInstance()->overlays().show(this, x, y, w, h, zIndex, fontCache);
-  // Core has no per-type knowledge of dropdowns/menus/dialogs/tooltips;
-  // adding a new overlay widget never requires touching this class.
-  OverlayManager &overlays() { return overlayMgr_; }
+  // ── Overlay layer ─────────────────────────────────────────────────────
+  // Floating widgets call these directly at open/close time, e.g.
+  //   FluxUI::getCurrentInstance()->showOverlay(this, 100);
+  // "widget" is expected to already have real absolute x/y/width/height —
+  // showOverlay only adds it to the paint/dispatch layer, it does no
+  // positioning of its own.
+  void showOverlay(Widget *widget, int zIndex,
+                   bool modal = true, bool blocksHoverBelow = false,
+                   bool capturesKeyboard = true);
+  void hideOverlay(Widget *widget);
+  void refreshOverlay(Widget *widget); // invalidates the widget's own rect;
+                                       // kept for call-site symmetry with
+                                       // the old refresh()
+  bool isOverlayOpen(Widget *widget) const;
+  void closeAllOverlays();
+  bool overlayHasBlocking() const;
+
+  bool dispatchOverlayMouseDown(int clientX, int clientY);
+  bool dispatchOverlayMouseUp(int clientX, int clientY);
+  bool dispatchOverlayMouseMove(int clientX, int clientY);
+  bool dispatchOverlayMouseWheel(int delta);
+  bool dispatchOverlayKeyDown(int keyCode);
+  bool dispatchOverlayRightClick(int clientX, int clientY);
 
   template <typename T>
   std::shared_ptr<T>

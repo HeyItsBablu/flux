@@ -130,8 +130,109 @@ inline std::vector<std::vector<VKey>> symbols() {
 // screen-space conversion and native popup creation; this widget never
 // touches any of that.
 
-class VirtualKeyboardWidget : public Widget, public OverlayContent {
+class VirtualKeyboardWidget : public Widget {
 public:
+  // ── Popup-body surface ─────────────────────────────────────────────────
+  // Spans the bottom strip of the screen (x=0, y=winH-keyboardHeight).
+  // keyRects_ stay stored in keyboard-local coordinates (unchanged) since
+  // hit-testing here subtracts the surface's own x/y first — matching the
+  // old contract where OverlayManager delivered already-local coordinates.
+  class KeyboardSurface : public Widget {
+  public:
+    VirtualKeyboardWidget *owner = nullptr;
+
+    void render(GraphicsContext &ctx, FontCache &fontCache) override {
+      if (!owner || !owner->isVisible_)
+        return;
+
+      Painter painter(ctx);
+      painter.fillRect(x, y, owner->kbW_, owner->keyboardHeight, owner->bgColor);
+
+      const auto &layout = owner->symbolPage_ ? KeyboardLayout::symbols()
+                                              : KeyboardLayout::qwerty();
+
+      NativeFont fontNormal = fontCache.getFont("Segoe UI", 15, FontWeight::Normal);
+      NativeFont fontSmall = fontCache.getFont("Segoe UI", 11, FontWeight::Normal);
+
+      int numRowY = owner->keyVGap;
+      owner->drawRow_(painter, fontNormal, fontSmall, KeyboardLayout::numberRow(),
+                      y + numRowY, owner->numberRowHeight, -1, x);
+
+      int curY = owner->keyVGap + owner->numberRowHeight + owner->keyVGap;
+      for (int r = 0; r < (int)layout.size(); r++) {
+        owner->drawRow_(painter, fontNormal, fontSmall, layout[r],
+                        y + curY, owner->keyRowHeight, r, x);
+        curY += owner->keyRowHeight + owner->keyVGap;
+      }
+      needsPaint = false;
+    }
+
+    bool handleMouseDown(int mx, int my) override {
+      if (!owner || !owner->isVisible_)
+        return false;
+      int localX = mx - x, localY = my - y;
+
+      owner->suppressHide_ = true;
+
+      for (auto &kr : owner->keyRects_) {
+        if (localX >= kr.x && localX < kr.x + kr.w && localY >= kr.y &&
+            localY < kr.y + kr.h) {
+          owner->pressedRow_ = kr.row;
+          owner->pressedCol_ = kr.col;
+          owner->refreshPopupIfOpen_();
+          return true;
+        }
+      }
+      return true;
+    }
+
+    bool handleMouseUp(int mx, int my) override {
+      if (!owner || !owner->isVisible_)
+        return false;
+      int localX = mx - x, localY = my - y;
+
+      for (auto &kr : owner->keyRects_) {
+        if (localX >= kr.x && localX < kr.x + kr.w && localY >= kr.y &&
+            localY < kr.y + kr.h && kr.row == owner->pressedRow_ &&
+            kr.col == owner->pressedCol_) {
+          owner->fireKey_(kr.row, kr.col);
+          break;
+        }
+      }
+
+      owner->pressedRow_ = owner->pressedCol_ = -1;
+      owner->suppressHide_ = false;
+      owner->refreshPopupIfOpen_();
+      return true;
+    }
+
+    bool handleMouseMove(int, int) override { return owner && owner->isVisible_; }
+
+    // Tap above/outside the keyboard -> dismiss it and clear focus. Direct
+    // replacement for the old `if (my < kbClientY_) hide_()` check, now
+    // driven by dispatchOverlayMouseDown's own inside/outside hit-test
+    // against this surface's registered rect.
+    void onOverlayOutsideClick() override {
+      if (!owner)
+        return;
+      owner->hide_();
+      if (auto *ui = FluxUI::getCurrentInstance())
+        ui->setFocus(nullptr);
+    }
+
+    bool handleMouseLeave() override {
+      if (!owner)
+        return false;
+      if (owner->suppressHide_) {
+        owner->suppressHide_ = false;
+        owner->pressedRow_ = owner->pressedCol_ = -1;
+      }
+      return false;
+    }
+  };
+
+  std::shared_ptr<KeyboardSurface> keyboardSurface_;
+
   // Geometry
   int keyboardHeight = 280;
   int numberRowHeight = 42;
@@ -176,6 +277,13 @@ private:
   Widget *targetWidget_ = nullptr;
 
 public:
+
+  VirtualKeyboardWidget() {
+    keyboardSurface_ = std::make_shared<KeyboardSurface>();
+    keyboardSurface_->owner = this;
+  }
+
+
   static std::shared_ptr<VirtualKeyboardWidget> instance() {
     auto *ui = FluxUI::getCurrentInstance();
     if (!ui)
@@ -202,23 +310,7 @@ public:
     Widget::onDetach();
   }
 
-  // ── OverlayContent ────────────────────────────────────────────────────────
-  OverlayPolicy overlayPolicy() const override {
-    // modal=true is what makes OverlayManager deliver onOverlayOutsideClick
-    // for taps outside the keyboard, which is how this widget now detects
-    // "tap elsewhere to dismiss" (previously done by manually comparing
-    // my < kbClientY_ against every window-wide mouse-down). The keyboard
-    // doesn't need to swallow clicks elsewhere in the app the way a dialog
-    // does, but modal is what wires up the dismiss callback, so it stays
-    // true.
-    // blocksHoverBelow=false: typing shouldn't pause hover/tooltips
-    // elsewhere on screen.
-    // capturesKeyboard=false: this widget never goes through
-    // onOverlayKeyDown — it injects characters directly into
-    // targetWidget_ via handleChar/handleKeyDown instead of routing
-    // through the overlay key-event path.
-    return {/*modal=*/true, /*blocksHoverBelow=*/false, /*capturesKeyboard=*/false};
-  }
+
 
   // ── Layout / render (zero size in the normal widget tree) ────────────────
 
@@ -230,103 +322,11 @@ public:
 
   void render(GraphicsContext &, FontCache &) override { needsPaint = false; }
 
-  // ── renderOverlay ─────────────────────────────────────────────────────────
-  // Already fully local-coordinate — (0,0) is the keyboard's own top-left
-  // corner, unchanged from the old renderPopupContent body.
 
-  void renderOverlay(GraphicsContext &ctx, FontCache &fontCache) override {
-    if (!isVisible_)
-      return;
 
-    Painter painter(ctx);
-    painter.fillRect(0, 0, kbW_, keyboardHeight, bgColor);
-
-    const auto &layout =
-        symbolPage_ ? KeyboardLayout::symbols() : KeyboardLayout::qwerty();
-
-    NativeFont fontNormal =
-        fontCache.getFont("Segoe UI", 15, FontWeight::Normal);
-    NativeFont fontSmall =
-        fontCache.getFont("Segoe UI", 11, FontWeight::Normal);
-
-    int numRowY = keyVGap;
-    drawRow_(painter, fontNormal, fontSmall, KeyboardLayout::numberRow(),
-             numRowY, numberRowHeight, -1);
-
-    int curY = keyVGap + numberRowHeight + keyVGap;
-    for (int r = 0; r < (int)layout.size(); r++) {
-      drawRow_(painter, fontNormal, fontSmall, layout[r], curY, keyRowHeight,
-               r);
-      curY += keyRowHeight + keyVGap;
-    }
-  }
-
-  // ── OverlayContent input handlers (overlay-local coordinates) ───────────
-  // localX/localY are already relative to the keyboard's own top-left —
-  // no more manual `mx - kbClientX_` subtraction needed, and no more
-  // manual `my < kbClientY_` check either: a click that lands outside
-  // this overlay's rect never reaches onOverlayMouseDown at all, it goes
-  // to onOverlayOutsideClick below instead.
-
-  bool onOverlayMouseDown(int localX, int localY) override {
-    if (!isVisible_)
-      return false;
-
-    suppressHide_ = true;
-
-    for (auto &kr : keyRects_) {
-      if (localX >= kr.x && localX < kr.x + kr.w && localY >= kr.y &&
-          localY < kr.y + kr.h) {
-        pressedRow_ = kr.row;
-        pressedCol_ = kr.col;
-        refreshPopupIfOpen_();
-        return true;
-      }
-    }
-    return true;
-  }
-
-  bool onOverlayMouseUp(int localX, int localY) override {
-    if (!isVisible_)
-      return false;
-
-    for (auto &kr : keyRects_) {
-      if (localX >= kr.x && localX < kr.x + kr.w && localY >= kr.y &&
-          localY < kr.y + kr.h && kr.row == pressedRow_ &&
-          kr.col == pressedCol_) {
-        fireKey_(kr.row, kr.col);
-        break;
-      }
-    }
-
-    pressedRow_ = pressedCol_ = -1;
-    suppressHide_ = false;
-    refreshPopupIfOpen_();
-    return true;
-  }
-
-  bool onOverlayMouseMove(int, int) override { return isVisible_; }
-
-  // Tap above/outside the keyboard -> dismiss it and clear focus. This is
-  // the direct replacement for the old `if (my < kbClientY_) hide_()`
-  // check inside handleMouseDown, now driven by the manager's own
-  // inside/outside hit-test against the registered overlay rect instead
-  // of a manual y-coordinate comparison.
-  void onOverlayOutsideClick() override {
-    hide_();
-    if (auto *ui = FluxUI::getCurrentInstance())
-      ui->setFocus(nullptr);
-  }
-
-  bool handleMouseLeave() override {
-    if (suppressHide_) {
-      suppressHide_ = false;
-      pressedRow_ = pressedCol_ = -1;
-    }
-    return false;
-  }
 
 private:
+friend class KeyboardSurface;
   // ── Show / hide ───────────────────────────────────────────────────────────
 
   void show_() {
@@ -349,11 +349,22 @@ private:
 
     buildKeyRects_();
 
+    keyboardSurface_->x = kbClientX;
+    keyboardSurface_->y = kbClientY;
+    keyboardSurface_->width = kbW_;
+    keyboardSurface_->height = keyboardHeight;
+    // modal=true is what makes dispatchOverlayMouseDown deliver
+    // onOverlayOutsideClick for taps outside the keyboard. blocksHoverBelow
+    // =false: typing shouldn't pause hover/tooltips elsewhere on screen.
+    // capturesKeyboard=false: this widget never routes through
+    // handleKeyDown — it injects characters directly into targetWidget_
+    // via handleChar/handleKeyDown on the *target*, not the surface.
     // zIndex 300: above everything else (dropdowns 100, tooltips 50,
     // context menus / menu-bar pulldowns 150) — the on-screen keyboard
     // should never be obscured by another overlay.
-    ui->overlays().show(this, kbClientX, kbClientY, kbW_, keyboardHeight,
-                        300, ui->getFontCache());
+    ui->showOverlay(keyboardSurface_.get(), /*zIndex=*/300,
+                    /*modal=*/true, /*blocksHoverBelow=*/false,
+                    /*capturesKeyboard=*/false);
   }
 
   void hide_() {
@@ -362,7 +373,7 @@ private:
     isVisible_ = false;
     targetWidget_ = nullptr;
     if (auto *ui = FluxUI::getCurrentInstance())
-      ui->overlays().hide(this);
+      ui->hideOverlay(keyboardSurface_.get());
   }
 
   // ── Key rect cache ────────────────────────────────────────────────────────
@@ -407,14 +418,15 @@ private:
   // ── Draw one row ──────────────────────────────────────────────────────────
 
   void drawRow_(Painter &painter, NativeFont fontNormal, NativeFont fontSmall,
-                const std::vector<VKey> &row, int rowY, int rowH, int rowIdx) {
+                const std::vector<VKey> &row, int rowY, int rowH, int rowIdx,
+                int ox) {
     float totalFlex = 0.f;
     for (auto &k : row)
       totalFlex += k.flex;
 
     int availW = kbW_ - sidePadding * 2;
     float unitW = (availW - keyHGap * ((int)row.size() - 1)) / totalFlex;
-    float curX = (float)sidePadding;
+    float curX = (float)sidePadding + ox;
 
     for (int c = 0; c < (int)row.size(); c++) {
       const VKey &k = row[c];
@@ -540,7 +552,7 @@ private:
     if (!isVisible_)
       return;
     if (auto *ui = FluxUI::getCurrentInstance())
-      ui->overlays().refresh(this, ui->getFontCache());
+      ui->refreshOverlay(keyboardSurface_.get());
   }
 
   static std::string toUpper_(const std::string &s) {

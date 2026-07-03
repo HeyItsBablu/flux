@@ -78,7 +78,7 @@ static ID2D1DeviceContext *mainDC()
 // Ensure Canvas2D is initialised and bitmap is the right size
 // ─────────────────────────────────────────────────────────────────────────────
 
-static void ensureD2D(CanvasWidget *w, GraphicsContext &gctx)
+static void ensureD2D(CanvasWidget *w, GraphicsContext &/*gctx*/)
 {
     auto &s = d2dState(w);
     if (!s.backend)
@@ -166,7 +166,7 @@ void CanvasWidget::activatePendingSurface()
 // ─────────────────────────────────────────────────────────────────────────────
 
 static void drawDropShadow(ID2D1DeviceContext *dc,
-                           ID2D1Factory1 *factory,
+                           ID2D1Factory1 */*factory*/,
                            float ox, float oy, float cw, float ch)
 {
     const float kOffX = 6.f, kOffY = 6.f;
@@ -226,7 +226,7 @@ static void tickAndRender(CanvasWidget *w, GraphicsContext &gctx)
 
     // ── Composite into main DC ────────────────────────────────────────────
     ID2D1DeviceContext *dc = gctx.dc;
-    ID2D1Factory1 *factory = gctx.factory;
+    
     if (!dc)
         return;
 

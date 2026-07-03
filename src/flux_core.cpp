@@ -1,6 +1,7 @@
 #include "flux/flux_core.hpp"
 #include "flux/flux_app.hpp"
 #include "flux/flux_debug_log.hpp"
+#include <algorithm>
 
 // Win32: we need RenderLoop to route timers through it.
 #ifdef _WIN32
@@ -92,7 +93,13 @@ void FluxUI::wireCallbacks()
                     " h=" + std::to_string(page->height));
         }
         Renderer::renderWidget(ctx, root.get(), fontCache);
-        overlayMgr_.renderAll(ctx, fontCache);
+        // Paint floating overlay content last, in z order, so it sits on
+        // top of the main tree. Every Painter backend resolves each
+        // widget's own absolute x/y — no clip/transform/offset needed here,
+        // unlike the old per-platform OverlayManager::renderAll().
+        for (auto &e : overlayLayer_)
+            if (!e.pendingRemoval)
+                e.widget->render(ctx, fontCache);
     };
     fluxLog("[wireCallbacks] Step 2: onPaint wired");
 
@@ -109,7 +116,7 @@ void FluxUI::wireCallbacks()
     {
         if (!root)
             return false;
-        if (overlayMgr_.dispatchMouseDown(x, y))
+        if (dispatchOverlayMouseDown(x, y))
             return true;
         bool focusableHit = false;
         bool handled = findAndHandleMouseEvent(
@@ -136,7 +143,7 @@ void FluxUI::wireCallbacks()
     {
         if (!root)
             return false;
-        if (overlayMgr_.dispatchMouseUp(x, y))
+        if (dispatchOverlayMouseUp(x, y))
             return true;
         if (window.isMouseCaptured() &&
             broadcastMouseEvent(root.get(), x, y,
@@ -158,8 +165,8 @@ void FluxUI::wireCallbacks()
                                 [](Widget *w, int mx, int my)
                                 { return w->handleMouseMove(mx, my); }))
             return true;
-        bool overlay = overlayMgr_.dispatchMouseMove(x, y);
-        if (overlayMgr_.hasBlockingOverlay())
+        bool overlay = dispatchOverlayMouseMove(x, y);
+        if (overlayHasBlocking())
             return overlay;
         bool hover = updateHoverStates(root.get(), x, y);
         bool custom = findAndHandleMouseEvent(root.get(), x, y,
@@ -173,7 +180,7 @@ void FluxUI::wireCallbacks()
     {
         if (!root)
             return false;
-        if (overlayMgr_.dispatchMouseWheel(delta))
+        if (dispatchOverlayMouseWheel(delta))
             return true;
         return focusedWidget && focusedWidget->handleMouseWheel(delta);
     };
@@ -183,7 +190,7 @@ void FluxUI::wireCallbacks()
     {
         if (!root)
             return false;
-        if (overlayMgr_.dispatchRightClick(x, y))
+        if (dispatchOverlayRightClick(x, y))
             return true;
         return findAndHandleMouseEvent(root.get(), x, y,
                                        [x, y](Widget *w)
@@ -193,7 +200,7 @@ void FluxUI::wireCallbacks()
 
     window.callbacks.onKeyDown = [this](int keyCode) -> bool
     {
-        if (overlayMgr_.dispatchKeyDown(keyCode))
+        if (dispatchOverlayKeyDown(keyCode))
             return true;
         return focusedWidget && focusedWidget->handleKeyDown(keyCode);
     };
@@ -228,7 +235,6 @@ void FluxUI::wireCallbacks()
     window.callbacks.onFocusLost = [this]()
     { setFocus(nullptr); };
     fluxLog("[wireCallbacks] Step 14: done");
-
 
     window.callbacks.onGLContextLost = [this]()
     {
@@ -316,8 +322,6 @@ void FluxUI::clearInterval(TimerID id)
 void FluxUI::build(std::function<WidgetPtr()> buildFunc)
 {
 
-
-    
     builder = buildFunc;
     rebuild();
 }
@@ -330,7 +334,7 @@ void FluxUI::rebuild()
     if (root)
         root->onDetach();
 
-    overlayMgr_.closeAll();
+    closeAllOverlays();
     root = builder();
 
     if (window.valid())
@@ -520,9 +524,7 @@ void FluxUI::invalidateWidget(int x, int y, int w, int h)
 void FluxUI::captureMouseInput() { window.captureMouseInput(); }
 void FluxUI::releaseMouseInput() { window.releaseMouseInput(); }
 
-
-
-void FluxUI::scheduleRebuild(Widget* widget)
+void FluxUI::scheduleRebuild(Widget *widget)
 {
     std::lock_guard<std::mutex> lock(pendingRebuildsMutex_);
     pendingRebuilds_.push_back(widget);
@@ -531,12 +533,12 @@ void FluxUI::scheduleRebuild(Widget* widget)
 
 void FluxUI::drainPendingRebuilds()
 {
-    std::vector<Widget*> local;
+    std::vector<Widget *> local;
     {
         std::lock_guard<std::mutex> lock(pendingRebuildsMutex_);
         local.swap(pendingRebuilds_);
     }
-    for (Widget* w : local)
+    for (Widget *w : local)
         partialRebuild(w); // safe: always called from render thread
 }
 // ============================================================================
@@ -585,7 +587,7 @@ MeasureContext FluxUI::getMeasureContext()
 void FluxUI::postToRenderThread(std::function<void()> fn)
 {
 #ifdef _WIN32
-    RenderLoop* rl = window.getRenderLoop();
+    RenderLoop *rl = window.getRenderLoop();
     if (rl)
     {
         rl->post(std::move(fn));
@@ -619,3 +621,197 @@ PlatformWindow::ClientSize FluxUI::getClientSize() const
 void FluxUI::setResizeCursorH() { window.setResizeCursorH(); }
 void FluxUI::setResizeCursorV() { window.setResizeCursorV(); }
 void FluxUI::setDefaultCursor() { window.setDefaultCursor(); }
+
+// ============================================================================
+// OVERLAY LAYER
+// ============================================================================
+
+struct FluxUI::OverlayDispatchScope
+{
+    FluxUI *ui;
+    explicit OverlayDispatchScope(FluxUI *u) : ui(u) { ++ui->overlayDispatchDepth_; }
+    ~OverlayDispatchScope()
+    {
+        if (--ui->overlayDispatchDepth_ == 0)
+            ui->pruneRemovedOverlays_();
+    }
+};
+
+static inline bool pointInWidget(Widget *w, int x, int y)
+{
+    return w && x >= w->x && x < w->x + w->width &&
+           y >= w->y && y < w->y + w->height;
+}
+
+OverlayEntry *FluxUI::findOverlay(Widget *widget)
+{
+    for (auto &e : overlayLayer_)
+        if (e.widget == widget && !e.pendingRemoval)
+            return &e;
+    return nullptr;
+}
+
+void FluxUI::sortOverlaysByZ()
+{
+    std::stable_sort(overlayLayer_.begin(), overlayLayer_.end(),
+                     [](const OverlayEntry &a, const OverlayEntry &b)
+                     { return a.zIndex < b.zIndex; });
+}
+
+void FluxUI::pruneRemovedOverlays_()
+{
+    overlayLayer_.erase(
+        std::remove_if(overlayLayer_.begin(), overlayLayer_.end(),
+                       [](const OverlayEntry &e)
+                       { return e.pendingRemoval; }),
+        overlayLayer_.end());
+}
+
+void FluxUI::showOverlay(Widget *widget, int zIndex,
+                         bool modal, bool blocksHoverBelow, bool capturesKeyboard)
+{
+    if (!widget)
+        return;
+    OverlayEntry *e = findOverlay(widget);
+    if (!e)
+    {
+        overlayLayer_.push_back({});
+        e = &overlayLayer_.back();
+        e->widget = widget;
+    }
+    e->zIndex = zIndex;
+    e->modal = modal;
+    e->blocksHoverBelow = blocksHoverBelow;
+    e->capturesKeyboard = capturesKeyboard;
+    e->pendingRemoval = false;
+    sortOverlaysByZ();
+    invalidateWidget(widget);
+}
+
+void FluxUI::hideOverlay(Widget *widget)
+{
+    OverlayEntry *e = findOverlay(widget);
+    if (!e)
+        return;
+    e->pendingRemoval = true;
+    if (overlayDispatchDepth_ == 0)
+        pruneRemovedOverlays_();
+    invalidateWidget(widget);
+}
+
+void FluxUI::refreshOverlay(Widget *widget)
+{
+    invalidateWidget(widget);
+}
+
+bool FluxUI::isOverlayOpen(Widget *widget) const
+{
+    for (auto &e : overlayLayer_)
+        if (e.widget == widget && !e.pendingRemoval)
+            return true;
+    return false;
+}
+
+void FluxUI::closeAllOverlays()
+{
+    for (auto &e : overlayLayer_)
+        e.pendingRemoval = true;
+    if (overlayDispatchDepth_ == 0)
+        pruneRemovedOverlays_();
+}
+
+bool FluxUI::overlayHasBlocking() const
+{
+    for (auto &e : overlayLayer_)
+        if (!e.pendingRemoval && e.blocksHoverBelow)
+            return true;
+    return false;
+}
+
+bool FluxUI::dispatchOverlayMouseDown(int clientX, int clientY)
+{
+    OverlayDispatchScope scope(this);
+    for (auto it = overlayLayer_.rbegin(); it != overlayLayer_.rend(); ++it)
+    {
+        if (it->pendingRemoval)
+            continue;
+        Widget *w = it->widget;
+        if (pointInWidget(w, clientX, clientY))
+        {
+            if (w->handleMouseDown(clientX, clientY))
+                return true;
+        }
+        else
+        {
+            w->onOverlayOutsideClick();
+        }
+        if (it->modal)
+            return true;
+    }
+    return false;
+}
+
+bool FluxUI::dispatchOverlayMouseUp(int clientX, int clientY)
+{
+    OverlayDispatchScope scope(this);
+    for (auto it = overlayLayer_.rbegin(); it != overlayLayer_.rend(); ++it)
+    {
+        if (it->pendingRemoval)
+            continue;
+        if (it->widget->handleMouseUp(clientX, clientY))
+            return true;
+    }
+    return false;
+}
+
+bool FluxUI::dispatchOverlayMouseMove(int clientX, int clientY)
+{
+    OverlayDispatchScope scope(this);
+    for (auto it = overlayLayer_.rbegin(); it != overlayLayer_.rend(); ++it)
+    {
+        if (it->pendingRemoval)
+            continue;
+        if (it->widget->handleMouseMove(clientX, clientY))
+            return true;
+    }
+    return false;
+}
+
+bool FluxUI::dispatchOverlayMouseWheel(int delta)
+{
+    OverlayDispatchScope scope(this);
+    for (auto it = overlayLayer_.rbegin(); it != overlayLayer_.rend(); ++it)
+    {
+        if (it->pendingRemoval)
+            continue;
+        if (it->widget->handleMouseWheel(delta))
+            return true;
+    }
+    return false;
+}
+
+bool FluxUI::dispatchOverlayKeyDown(int keyCode)
+{
+    OverlayDispatchScope scope(this);
+    for (auto it = overlayLayer_.rbegin(); it != overlayLayer_.rend(); ++it)
+    {
+        if (it->pendingRemoval)
+            continue;
+        if (it->capturesKeyboard)
+            return it->widget->handleKeyDown(keyCode);
+    }
+    return false;
+}
+
+bool FluxUI::dispatchOverlayRightClick(int clientX, int clientY)
+{
+    OverlayDispatchScope scope(this);
+    for (auto it = overlayLayer_.rbegin(); it != overlayLayer_.rend(); ++it)
+    {
+        if (it->pendingRemoval)
+            continue;
+        if (it->widget->handleRightClick(clientX, clientY))
+            return true;
+    }
+    return false;
+}

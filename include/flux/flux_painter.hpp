@@ -60,7 +60,7 @@ struct Painter
     void drawBorder(int x, int y, int w, int h, int radius,
                     Color color, int borderWidth);
     void drawEllipse(int x, int y, int w, int h,
-                     Color fill, Color stroke, int strokeWidth);
+                     Color fill, Color stroke, int strokeWidth); 
     void drawLine(int x1, int y1, int x2, int y2, Color color, int width);
     void drawHLine(int x, int y, int len, Color color, int strokeWidth = 1);
     void drawVLine(int x, int y, int len, Color color, int strokeWidth = 1);

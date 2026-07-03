@@ -37,22 +37,26 @@
 //  Points are stored in normalised [0,1]×[0,1] space.
 // ============================================================================
 
-struct CurvePoint {
+struct CurvePoint
+{
   float x = 0.f; // input  0..1
   float y = 0.f; // output 0..1
 };
 
-struct ToneCurveChannel {
+struct ToneCurveChannel
+{
   std::vector<CurvePoint> points;
 
-  ToneCurveChannel() {
+  ToneCurveChannel()
+  {
     // Identity: two fixed endpoints, Lightroom default
     points = {{0.f, 0.f}, {1.f, 1.f}};
   }
 
   // Evaluate the curve at input t ∈ [0,1] using Catmull-Rom spline.
   // Returns output ∈ [0,1].
-  float evaluate(float t) const {
+  float evaluate(float t) const
+  {
     if (points.size() < 2)
       return t;
     t = std::max(0.f, std::min(1.f, t));
@@ -65,15 +69,18 @@ struct ToneCurveChannel {
 
     // Find segment
     int seg = 0;
-    for (int i = 0; i + 1 < (int)points.size(); ++i) {
-      if (t <= points[i + 1].x) {
+    for (int i = 0; i + 1 < (int)points.size(); ++i)
+    {
+      if (t <= points[i + 1].x)
+      {
         seg = i;
         break;
       }
     }
 
     // Catmull-Rom control points (clamped at boundaries)
-    auto pt = [&](int i) -> CurvePoint {
+    auto pt = [&](int i) -> CurvePoint
+    {
       i = std::max(0, std::min((int)points.size() - 1, i));
       return points[i];
     };
@@ -104,14 +111,16 @@ struct ToneCurveChannel {
   }
 
   // Build a 256-entry LUT for GPU/export use
-  std::array<uint8_t, 256> buildLUT() const {
+  std::array<uint8_t, 256> buildLUT() const
+  {
     std::array<uint8_t, 256> lut;
     for (int i = 0; i < 256; ++i)
       lut[i] = (uint8_t)(evaluate(i / 255.f) * 255.f + 0.5f);
     return lut;
   }
 
-  bool isIdentity() const {
+  bool isIdentity() const
+  {
     if (points.size() != 2)
       return false;
     return std::abs(points[0].x) < 0.01f && std::abs(points[0].y) < 0.01f &&
@@ -122,11 +131,14 @@ struct ToneCurveChannel {
   void reset() { points = {{0.f, 0.f}, {1.f, 1.f}}; }
 
   // Ensure points are sorted by x and endpoints are clamped
-  void sort() {
+  void sort()
+  {
     std::sort(
         points.begin(), points.end(),
-        [](const CurvePoint &a, const CurvePoint &b) { return a.x < b.x; });
-    if (!points.empty()) {
+        [](const CurvePoint &a, const CurvePoint &b)
+        { return a.x < b.x; });
+    if (!points.empty())
+    {
       points.front().x = 0.f;
       points.back().x = 1.f;
     }
@@ -134,7 +146,8 @@ struct ToneCurveChannel {
 };
 
 // Parametric curve offsets (Lightroom's "Point Curve" sliders)
-struct ParametricCurve {
+struct ParametricCurve
+{
   float shadows = 0.f;    // -1..+1  pulls the shadows region
   float darks = 0.f;      // -1..+1
   float lights = 0.f;     // -1..+1
@@ -143,7 +156,8 @@ struct ParametricCurve {
   void reset() { shadows = darks = lights = highlights = 0.f; }
 
   // Bake parametric offsets into a ToneCurveChannel
-  ToneCurveChannel bake() const {
+  ToneCurveChannel bake() const
+  {
     ToneCurveChannel ch;
     ch.points = {
         {0.00f, std::max(0.f, std::min(1.f, 0.00f + shadows * 0.20f))},
@@ -156,7 +170,8 @@ struct ParametricCurve {
   }
 };
 
-struct ToneCurveData {
+struct ToneCurveData
+{
   ToneCurveChannel rgb; // composite (applied to all channels)
   ToneCurveChannel r;
   ToneCurveChannel g;
@@ -164,7 +179,8 @@ struct ToneCurveData {
   ParametricCurve parametric;
   bool useParametric = false; // parametric vs point-curve mode
 
-  void reset() {
+  void reset()
+  {
     rgb.reset();
     r.reset();
     g.reset();
@@ -178,9 +194,16 @@ struct ToneCurveData {
 //  TONE CURVE WIDGET
 // ============================================================================
 
-enum class CurveChannel { RGB, Red, Green, Blue };
+enum class CurveChannel
+{
+  RGB,
+  Red,
+  Green,
+  Blue
+};
 
-class ToneCurveWidget : public Widget {
+class ToneCurveWidget : public Widget
+{
 public:
   // ── Data ──────────────────────────────────────────────────────────────────
   ToneCurveData curveData;
@@ -219,7 +242,8 @@ public:
   std::function<void(const ToneCurveData &)> onCurveChanged;
 
   // ── Constructor ───────────────────────────────────────────────────────────
-  ToneCurveWidget() {
+  ToneCurveWidget()
+  {
     width = 256;
     height = 256;
     autoWidth = false;
@@ -229,17 +253,20 @@ public:
 
   // ── Fluent API ────────────────────────────────────────────────────────────
 
-  std::shared_ptr<ToneCurveWidget> setCurveData(const ToneCurveData &d) {
+  std::shared_ptr<ToneCurveWidget> setCurveData(const ToneCurveData &d)
+  {
     curveData = d;
     markNeedsPaint();
     return ptr();
   }
 
-  std::shared_ptr<ToneCurveWidget> setCurveData(State<ToneCurveData> &state) {
+  std::shared_ptr<ToneCurveWidget> setCurveData(State<ToneCurveData> &state)
+  {
     curveData = state.get();
     state.bindProperty(
         shared_from_this(),
-        [](Widget *w, const ToneCurveData &d) {
+        [](Widget *w, const ToneCurveData &d)
+        {
           static_cast<ToneCurveWidget *>(w)->curveData = d;
         },
         false);
@@ -247,31 +274,36 @@ public:
     return ptr();
   }
 
-  std::shared_ptr<ToneCurveWidget> setActiveChannel(CurveChannel ch) {
+  std::shared_ptr<ToneCurveWidget> setActiveChannel(CurveChannel ch)
+  {
     activeChannel = ch;
     markNeedsPaint();
     return ptr();
   }
 
-  std::shared_ptr<ToneCurveWidget> setShowHistogram(bool v) {
+  std::shared_ptr<ToneCurveWidget> setShowHistogram(bool v)
+  {
     showHistogram = v;
     markNeedsPaint();
     return ptr();
   }
 
-  std::shared_ptr<ToneCurveWidget> setShowRegions(bool v) {
+  std::shared_ptr<ToneCurveWidget> setShowRegions(bool v)
+  {
     showRegions = v;
     markNeedsPaint();
     return ptr();
   }
 
-  std::shared_ptr<ToneCurveWidget> setShowGrid(bool v) {
+  std::shared_ptr<ToneCurveWidget> setShowGrid(bool v)
+  {
     showGrid = v;
     markNeedsPaint();
     return ptr();
   }
 
-  std::shared_ptr<ToneCurveWidget> setParametricMode(bool v) {
+  std::shared_ptr<ToneCurveWidget> setParametricMode(bool v)
+  {
     parametricMode = v;
     curveData.useParametric = v;
     markNeedsPaint();
@@ -279,7 +311,8 @@ public:
   }
 
   std::shared_ptr<ToneCurveWidget>
-  setHistogram(const std::array<std::uint32_t, 256> &bins) {
+  setHistogram(const std::array<std::uint32_t, 256> &bins)
+  {
     histBins = bins;
     hasHistogram = true;
     markNeedsPaint();
@@ -290,7 +323,8 @@ public:
   std::shared_ptr<ToneCurveWidget>
   setHistogram(const std::array<std::uint32_t, 256> &r,
                const std::array<std::uint32_t, 256> &g,
-               const std::array<std::uint32_t, 256> &b) {
+               const std::array<std::uint32_t, 256> &b)
+  {
     for (int i = 0; i < 256; ++i)
       histBins[i] =
           (std::uint32_t)(0.2126f * r[i] + 0.7152f * g[i] + 0.0722f * b[i]);
@@ -300,19 +334,22 @@ public:
   }
 
   // TAT: call this when the mouse moves over the image canvas
-  std::shared_ptr<ToneCurveWidget> setTATValue(float normalisedInput) {
+  std::shared_ptr<ToneCurveWidget> setTATValue(float normalisedInput)
+  {
     tatValue = normalisedInput;
     markNeedsPaint();
     return ptr();
   }
 
   std::shared_ptr<ToneCurveWidget>
-  setOnCurveChanged(std::function<void(const ToneCurveData &)> cb) {
+  setOnCurveChanged(std::function<void(const ToneCurveData &)> cb)
+  {
     onCurveChanged = cb;
     return ptr();
   }
 
-  std::shared_ptr<ToneCurveWidget> setSize(int w, int h) {
+  std::shared_ptr<ToneCurveWidget> setSize(int w, int h)
+  {
     width = w;
     height = h;
     autoWidth = autoHeight = false;
@@ -320,14 +357,16 @@ public:
     return ptr();
   }
 
-  std::shared_ptr<ToneCurveWidget> setWidth(int w) {
+  std::shared_ptr<ToneCurveWidget> setWidth(int w)
+  {
     width = w;
     autoWidth = false;
     markNeedsLayout();
     return ptr();
   }
 
-  std::shared_ptr<ToneCurveWidget> setHeight(int h) {
+  std::shared_ptr<ToneCurveWidget> setHeight(int h)
+  {
     height = h;
     autoHeight = false;
     markNeedsLayout();
@@ -335,7 +374,8 @@ public:
   }
 
   // Reset curve to identity
-  std::shared_ptr<ToneCurveWidget> resetCurve() {
+  std::shared_ptr<ToneCurveWidget> resetCurve()
+  {
     activeChannelCurve().reset();
     selectedPoint = -1;
     notifyCurveChanged();
@@ -347,7 +387,8 @@ public:
 
   void computeLayout(GraphicsContext & /*ctx*/,
                      const BoxConstraints &constraints,
-                     FontCache & /*fontCache*/) override {
+                     FontCache & /*fontCache*/) override
+  {
     width = constraints.clampWidth(autoWidth ? constraints.maxWidth : width);
     height =
         constraints.clampHeight(autoHeight ? constraints.maxHeight : height);
@@ -357,7 +398,8 @@ public:
 
   // ── Render ────────────────────────────────────────────────────────────────
 
-  void render(GraphicsContext &ctx, FontCache &fontCache) override {
+  void render(GraphicsContext &ctx, FontCache &fontCache) override
+  {
     const int PAD_L = 6, PAD_R = 6, PAD_T = 6, PAD_B = 6;
     plotX = x + PAD_L;
     plotY = y + PAD_T;
@@ -381,7 +423,8 @@ public:
                      Color::fromRGB(55, 55, 55), 1);
 
     // TAT line
-    if (tatValue >= 0.f && tatValue <= 1.f) {
+    if (tatValue >= 0.f && tatValue <= 1.f)
+    {
       int tx = plotX + (int)(tatValue * plotW);
       painter.drawVLine(tx, plotY, plotH, tatLineColor, 1);
     }
@@ -391,7 +434,8 @@ public:
       painter.drawVLine(hoverX, plotY, plotH, Color::fromRGB(90, 90, 90), 1);
 
     // Curves
-    if (activeChannel == CurveChannel::RGB) {
+    if (activeChannel == CurveChannel::RGB)
+    {
       if (!curveData.r.isIdentity())
         drawCurve(ctx, curveData.r, curveColorR, 1, false);
       if (!curveData.g.isIdentity())
@@ -399,7 +443,9 @@ public:
       if (!curveData.b.isIdentity())
         drawCurve(ctx, curveData.b, curveColorB, 1, false);
       drawCurve(ctx, activeChannelCurve(), curveColorRGB, 2, true);
-    } else {
+    }
+    else
+    {
       drawCurve(ctx, activeChannelCurve(), channelColor(), 2, true);
     }
 
@@ -419,9 +465,11 @@ public:
 
   // ── Mouse ─────────────────────────────────────────────────────────────────
 
-  bool handleMouseDown(int mx, int my) override {
+  bool handleMouseDown(int mx, int my) override
+  {
     // Channel tab click
-    if (hitTestTab(mx, my) >= 0) {
+    if (hitTestTab(mx, my) >= 0)
+    {
       activeChannel = (CurveChannel)hitTestTab(mx, my);
       selectedPoint = -1;
       markNeedsPaint();
@@ -429,9 +477,11 @@ public:
     }
 
     // Parametric slider drag
-    if (parametricMode) {
+    if (parametricMode)
+    {
       int slot = hitTestParamSlider(mx, my);
-      if (slot >= 0) {
+      if (slot >= 0)
+      {
         draggingParamSlot = slot;
         dragStartX = mx;
         dragStartVal = getParamValue(slot);
@@ -445,7 +495,8 @@ public:
 
     // Hit test existing point
     int hit = hitTestPoint(mx, my);
-    if (hit >= 0) {
+    if (hit >= 0)
+    {
       selectedPoint = hit;
       dragging = true;
       dragStartX = mx;
@@ -462,8 +513,10 @@ public:
     auto &pts = activeChannelCurve().points;
 
     // Don't add too close to an existing point
-    for (auto &p : pts) {
-      if (std::abs(p.x - nx) < 0.03f) {
+    for (auto &p : pts)
+    {
+      if (std::abs(p.x - nx) < 0.03f)
+      {
         selectedPoint = -1;
         return true;
       }
@@ -472,12 +525,14 @@ public:
     pts.push_back({nx, ny});
     std::sort(
         pts.begin(), pts.end(),
-        [](const CurvePoint &a, const CurvePoint &b) { return a.x < b.x; });
+        [](const CurvePoint &a, const CurvePoint &b)
+        { return a.x < b.x; });
 
     // Find index after sort
     selectedPoint = -1;
     for (int i = 0; i < (int)pts.size(); ++i)
-      if (std::abs(pts[i].x - nx) < 0.001f) {
+      if (std::abs(pts[i].x - nx) < 0.001f)
+      {
         selectedPoint = i;
         break;
       }
@@ -490,21 +545,26 @@ public:
     return true;
   }
 
-  bool handleMouseUp(int /*mx*/, int /*my*/) override {
-    if (dragging) {
+  bool handleMouseUp(int /*mx*/, int /*my*/) override
+  {
+    if (dragging)
+    {
       dragging = false;
       markNeedsPaint();
     }
-    if (draggingParamSlot >= 0) {
+    if (draggingParamSlot >= 0)
+    {
       draggingParamSlot = -1;
       markNeedsPaint();
     }
     return false;
   }
 
-  bool handleMouseMove(int mx, int my) override {
+  bool handleMouseMove(int mx, int my) override
+  {
     // Parametric drag
-    if (draggingParamSlot >= 0) {
+    if (draggingParamSlot >= 0)
+    {
       float delta = (mx - dragStartX) / float(plotW) * 2.f; // -1..+1 range
       float nv = std::max(-1.f, std::min(1.f, dragStartVal + delta));
       setParamValue(draggingParamSlot, nv);
@@ -516,14 +576,18 @@ public:
     }
 
     // Point drag
-    if (dragging && selectedPoint >= 0) {
+    if (dragging && selectedPoint >= 0)
+    {
       auto &pts = activeChannelCurve().points;
       auto [nx, ny] = screenToNorm(mx, my);
 
       // Endpoints: only move Y
-      if (selectedPoint == 0 || selectedPoint == (int)pts.size() - 1) {
+      if (selectedPoint == 0 || selectedPoint == (int)pts.size() - 1)
+      {
         pts[selectedPoint].y = std::max(0.f, std::min(1.f, ny));
-      } else {
+      }
+      else
+      {
         // Constrain X between neighbours
         float xMin = pts[selectedPoint - 1].x + 0.01f;
         float xMax = pts[selectedPoint + 1].x - 0.01f;
@@ -538,23 +602,27 @@ public:
     // Hover
     bool inP = inPlot(mx, my);
     int newHX = inP ? mx : -1;
-    if (newHX != hoverX) {
+    if (newHX != hoverX)
+    {
       hoverX = newHX;
       markNeedsPaint();
     }
     return false;
   }
 
-  bool handleMouseLeave() override {
+  bool handleMouseLeave() override
+  {
     hoverX = -1;
     markNeedsPaint();
     return true;
   }
 
   // Double-click: delete point (except endpoints)
-  bool handleLButtonDblClk(int mx, int my) {
+  bool handleLButtonDblClk(int mx, int my)
+  {
     int hit = hitTestPoint(mx, my);
-    if (hit > 0 && hit < (int)activeChannelCurve().points.size() - 1) {
+    if (hit > 0 && hit < (int)activeChannelCurve().points.size() - 1)
+    {
       activeChannelCurve().points.erase(activeChannelCurve().points.begin() +
                                         hit);
       selectedPoint = -1;
@@ -565,7 +633,8 @@ public:
     return false;
   }
 
-  bool handleKeyDown(int keyCode) override {
+  bool handleKeyDown(int keyCode) override
+  {
     if (selectedPoint < 0)
       return false;
     auto &pts = activeChannelCurve().points;
@@ -575,7 +644,8 @@ public:
     const float step = 1.f / 255.f; // 1 level
     auto &p = pts[selectedPoint];
 
-    switch (keyCode) {
+    switch (keyCode)
+    {
     case Key::Up:
       p.y = std::min(1.f, p.y + step);
       break;
@@ -592,7 +662,8 @@ public:
       break;
     case Key::Delete:
     case Key::Backspace:
-      if (selectedPoint > 0 && selectedPoint < (int)pts.size() - 1) {
+      if (selectedPoint > 0 && selectedPoint < (int)pts.size() - 1)
+      {
         pts.erase(pts.begin() + selectedPoint);
         selectedPoint = -1;
       }
@@ -623,12 +694,15 @@ private:
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
-  std::shared_ptr<ToneCurveWidget> ptr() {
+  std::shared_ptr<ToneCurveWidget> ptr()
+  {
     return std::static_pointer_cast<ToneCurveWidget>(shared_from_this());
   }
 
-  ToneCurveChannel &activeChannelCurve() {
-    switch (activeChannel) {
+  ToneCurveChannel &activeChannelCurve()
+  {
+    switch (activeChannel)
+    {
     case CurveChannel::Red:
       return curveData.r;
     case CurveChannel::Green:
@@ -640,8 +714,10 @@ private:
     }
   }
 
-  Color channelColor() const {
-    switch (activeChannel) {
+  Color channelColor() const
+  {
+    switch (activeChannel)
+    {
     case CurveChannel::Red:
       return curveColorR;
     case CurveChannel::Green:
@@ -655,26 +731,31 @@ private:
 
   // Normalised [0,1] → screen pixel
   int normToScreenX(float nx) const { return plotX + (int)(nx * plotW); }
-  int normToScreenY(float ny) const {
+  int normToScreenY(float ny) const
+  {
     return plotY + plotH - (int)(ny * plotH);
   }
 
   // Screen → normalised
-  std::pair<float, float> screenToNorm(int sx, int sy) const {
+  std::pair<float, float> screenToNorm(int sx, int sy) const
+  {
     float nx = (float)(sx - plotX) / std::max(1, plotW);
     float ny = 1.f - (float)(sy - plotY) / std::max(1, plotH);
     return {nx, ny};
   }
 
-  bool inPlot(int mx, int my) const {
+  bool inPlot(int mx, int my) const
+  {
     return mx >= plotX && mx < plotX + plotW && my >= plotY &&
            my < plotY + plotH;
   }
 
-  int hitTestPoint(int mx, int my) const {
+  int hitTestPoint(int mx, int my) const
+  {
     const auto &pts =
         const_cast<ToneCurveWidget *>(this)->activeChannelCurve().points;
-    for (int i = 0; i < (int)pts.size(); ++i) {
+    for (int i = 0; i < (int)pts.size(); ++i)
+    {
       int px = normToScreenX(pts[i].x);
       int py = normToScreenY(pts[i].y);
       int dx = mx - px, dy = my - py;
@@ -684,16 +765,19 @@ private:
     return -1;
   }
 
-  void notifyCurveChanged() {
+  void notifyCurveChanged()
+  {
     if (onCurveChanged)
       onCurveChanged(curveData);
   }
 
   // ── Draw helpers ──────────────────────────────────────────────────────────
 
-  void drawRegions(GraphicsContext &ctx) {
+  void drawRegions(GraphicsContext &ctx)
+  {
     Painter painter(ctx);
-    struct Band {
+    struct Band
+    {
       float x0, x1;
       Color col;
     };
@@ -711,13 +795,15 @@ private:
       painter.drawVLine(normToScreenX(fx), plotY, plotH, Color::fromRGB(45, 45, 45), 1);
   }
 
-  void drawHistogram(GraphicsContext &ctx) {
+  void drawHistogram(GraphicsContext &ctx)
+  {
     Painter painter(ctx);
     std::uint32_t peak = 1;
     for (auto v : histBins)
       peak = std::max(peak, v);
 
-    for (int i = 0; i < 256; ++i) {
+    for (int i = 0; i < 256; ++i)
+    {
       float t = float(histBins[i]) / peak;
       t = (t > 0) ? (std::log(1.f + t * 9.f) / std::log(10.f)) : 0.f;
       int barH = (int)(t * plotH);
@@ -733,9 +819,11 @@ private:
     }
   }
 
-  void drawGrid(GraphicsContext &ctx) {
+  void drawGrid(GraphicsContext &ctx)
+  {
     Painter painter(ctx);
-    for (int i = 1; i <= 3; ++i) {
+    for (int i = 1; i <= 3; ++i)
+    {
       painter.drawVLine(plotX + plotW * i / 4, plotY, plotH, gridColor, 1);
       painter.drawHLine(plotX, plotY + plotH * i / 4, plotW, gridColor, 1);
     }
@@ -743,25 +831,29 @@ private:
 
   // Draw one smooth curve by evaluating 256 points
   void drawCurve(GraphicsContext &ctx, const ToneCurveChannel &ch, Color col,
-                 int lineWidth, bool drawFill) {
+                 int lineWidth, bool drawFill)
+  {
     Painter painter(ctx);
 
-    if (drawFill) {
+    if (drawFill)
+    {
       std::vector<std::pair<int, int>> poly;
       poly.reserve(plotW + 4);
       poly.push_back({plotX, plotY + plotH});
-      for (int px = 0; px <= plotW; ++px) {
+      for (int px = 0; px <= plotW; ++px)
+      {
         float nx = (float)px / plotW;
         float ny = ch.evaluate(nx);
         poly.push_back({plotX + px, normToScreenY(ny)});
       }
       poly.push_back({plotX + plotW, plotY + plotH});
-painter.fillPolygonAlpha(poly, col.withAlpha(28));
+      painter.fillPolygonAlpha(poly, col.withAlpha(28));
     }
 
     std::vector<std::pair<int, int>> pts;
     pts.reserve(plotW + 1);
-    for (int px = 0; px <= plotW; ++px) {
+    for (int px = 0; px <= plotW; ++px)
+    {
       float nx = (float)px / plotW;
       float ny = ch.evaluate(nx);
       pts.push_back({plotX + px, normToScreenY(ny)});
@@ -769,11 +861,13 @@ painter.fillPolygonAlpha(poly, col.withAlpha(28));
     painter.drawPolyline(pts, col, lineWidth);
   }
 
-  void drawPoints(GraphicsContext &ctx) {
+  void drawPoints(GraphicsContext &ctx)
+  {
     Painter painter(ctx);
     const auto &pts = activeChannelCurve().points;
 
-    for (int i = 0; i < (int)pts.size(); ++i) {
+    for (int i = 0; i < (int)pts.size(); ++i)
+    {
       int px = normToScreenX(pts[i].x);
       int py = normToScreenY(pts[i].y);
       bool sel = (i == selectedPoint);
@@ -792,8 +886,10 @@ painter.fillPolygonAlpha(poly, col.withAlpha(28));
 
   // ── Channel tab strip at top of widget ───────────────────────────────────
 
-  void drawChannelTabs(GraphicsContext &ctx, FontCache &fontCache) {
-    struct Tab {
+  void drawChannelTabs(GraphicsContext &ctx, FontCache &fontCache)
+  {
+    struct Tab
+    {
       CurveChannel ch;
       const char *label;
       Color col;
@@ -809,7 +905,8 @@ painter.fillPolygonAlpha(poly, col.withAlpha(28));
     Painter painter(ctx);
     NativeFont hFont = fontCache.getFont(9, FontWeight::Bold);
 
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 4; ++i)
+    {
       bool active = (tabs[i].ch == activeChannel);
       int sx = tx + i * tabW;
 
@@ -825,7 +922,8 @@ painter.fillPolygonAlpha(poly, col.withAlpha(28));
   }
   // ── In/Out tooltip ────────────────────────────────────────────────────────
 
-  void drawTooltip(GraphicsContext &ctx, FontCache &fontCache) {
+  void drawTooltip(GraphicsContext &ctx, FontCache &fontCache)
+  {
     if (hoverX < plotX || hoverX > plotX + plotW)
       return;
     Painter painter(ctx);
@@ -857,12 +955,14 @@ painter.fillPolygonAlpha(poly, col.withAlpha(28));
 
   // ── Parametric slider strip ───────────────────────────────────────────────
 
-  void drawParametricStrip(GraphicsContext &ctx, FontCache &fontCache) {
+  void drawParametricStrip(GraphicsContext &ctx, FontCache &fontCache)
+  {
     int sy = plotY + plotH + 6;
     int sw = plotW / 4;
     Painter painter(ctx);
 
-    struct Slot {
+    struct Slot
+    {
       const char *label;
       float value;
       Color col;
@@ -877,7 +977,8 @@ painter.fillPolygonAlpha(poly, col.withAlpha(28));
 
     NativeFont hFont = fontCache.getFont(8, FontWeight::Normal);
 
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 4; ++i)
+    {
       int sx = plotX + i * sw;
       int trackY = sy + 18;
       int trackX0 = sx + 4;
@@ -912,7 +1013,8 @@ painter.fillPolygonAlpha(poly, col.withAlpha(28));
   }
 
   // ── Tab hit test ─────────────────────────────────────────────────────────
-  int hitTestTab(int mx, int my) const {
+  int hitTestTab(int mx, int my) const
+  {
     if (my < y || my > y + kTabH)
       return -1;
     const int tabW = 32;
@@ -924,7 +1026,8 @@ painter.fillPolygonAlpha(poly, col.withAlpha(28));
   }
 
   // ── Parametric slider hit test ────────────────────────────────────────────
-  int hitTestParamSlider(int mx, int my) const {
+  int hitTestParamSlider(int mx, int my) const
+  {
     int sy = plotY + plotH + 6;
     if (my < sy || my > sy + kParamStripH)
       return -1;
@@ -933,8 +1036,10 @@ painter.fillPolygonAlpha(poly, col.withAlpha(28));
     return (slot >= 0 && slot < 4) ? slot : -1;
   }
 
-  float getParamValue(int slot) const {
-    switch (slot) {
+  float getParamValue(int slot) const
+  {
+    switch (slot)
+    {
     case 0:
       return curveData.parametric.shadows;
     case 1:
@@ -947,8 +1052,10 @@ painter.fillPolygonAlpha(poly, col.withAlpha(28));
     return 0.f;
   }
 
-  void setParamValue(int slot, float v) {
-    switch (slot) {
+  void setParamValue(int slot, float v)
+  {
+    switch (slot)
+    {
     case 0:
       curveData.parametric.shadows = v;
       break;
@@ -971,17 +1078,20 @@ painter.fillPolygonAlpha(poly, col.withAlpha(28));
 
 using ToneCurveWidgetPtr = std::shared_ptr<ToneCurveWidget>;
 
-inline ToneCurveWidgetPtr ToneCurve() {
+inline ToneCurveWidgetPtr ToneCurve()
+{
   return std::make_shared<ToneCurveWidget>();
 }
 
-inline ToneCurveWidgetPtr ToneCurve(int size) {
+inline ToneCurveWidgetPtr ToneCurve(int size)
+{
   auto w = std::make_shared<ToneCurveWidget>();
   w->setSize(size, size);
   return w;
 }
 
-inline ToneCurveWidgetPtr ToneCurve(int w, int h) {
+inline ToneCurveWidgetPtr ToneCurve(int w, int h)
+{
   auto widget = std::make_shared<ToneCurveWidget>();
   widget->setSize(w, h);
   return widget;

@@ -185,7 +185,7 @@ static EM_BOOL onMouseMove(int /*eventType*/,
     if (!self->callbacks.onMouseMove)
         return EM_FALSE;
 
-    double dpr = EM_ASM_DOUBLE({ return Module._fluxDPR || 1.0; });
+    
     int x = (int)e->targetX;
     int y = (int)e->targetY;
 

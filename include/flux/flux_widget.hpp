@@ -349,6 +349,13 @@ public:
     return true;
   }
 
+  // Called by FluxUI's overlay dispatch when a click lands outside this
+  // widget's bounds while it's registered as an open overlay (see
+  // FluxUI::showOverlay / dispatchOverlayMouseDown). No-op for every widget
+  // that isn't an overlay; overlay widgets override this to self-close.
+  virtual void onOverlayOutsideClick() {}
+
+
   // -----------------------------------------------------------------------
   // Hover helpers
   // -----------------------------------------------------------------------

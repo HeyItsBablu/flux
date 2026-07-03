@@ -608,8 +608,7 @@ struct GraphicsContext
 {
     int width = 0;
     int height = 0;
-    int overlayOffsetX = 0;
-    int overlayOffsetY = 0;
+
 
     GraphicsContext() = default;
     GraphicsContext(int w, int h) : width(w), height(h) {}

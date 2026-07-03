@@ -87,6 +87,37 @@ struct Canvas2DBackend
     ComPtr<ID2D1Bitmap1> offscreenBitmap;
     int bitmapW = 0, bitmapH = 0;
 
+    
+    // ── CPU-readback staging bitmap for getImageData ─────────────────────
+    // Sized to exactly the last-requested read region; recreated only when
+    // that region's size changes. Created with CPU_READ | CANNOT_DRAW so
+    // it can be Map()'d directly — this is the native D2D1.1 CPU-readback
+    // path and needs no D3D11 staging texture at all.
+    ComPtr<ID2D1Bitmap1> stagingBitmap;
+    int stagingW = 0, stagingH = 0;
+
+    bool ensureStagingBitmap(int w, int h)
+    {
+        if (w <= 0 || h <= 0)
+            return false;
+        if (stagingBitmap && w == stagingW && h == stagingH)
+            return true;
+
+        D2D1_BITMAP_PROPERTIES1 props = D2D1::BitmapProperties1(
+            D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+        ComPtr<ID2D1Bitmap1> bmp;
+        HRESULT hr = offscreenDC->CreateBitmap(
+            D2D1::SizeU(UINT32(w), UINT32(h)), nullptr, 0, props, bmp.GetAddressOf());
+        if (FAILED(hr))
+            return false;
+
+        stagingBitmap = bmp;
+        stagingW = w;
+        stagingH = h;
+        return true;
+    }
+
     struct FontFace
     {
         std::string name;
@@ -146,6 +177,9 @@ struct Canvas2DBackend
         offscreenDC.Reset();
         offscreenBitmap.Reset();
 
+        stagingBitmap.Reset();
+        stagingW = stagingH = 0;
+
         D2D1_BITMAP_PROPERTIES1 bmpProps = D2D1::BitmapProperties1(
             D2D1_BITMAP_OPTIONS_TARGET,
             D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
@@ -174,6 +208,7 @@ struct Canvas2DBackend
         atlasBitmap.Reset();
         offscreenBitmap.Reset();
         offscreenDC.Reset();
+        stagingBitmap.Reset();
         device = nullptr;
     }
 
@@ -416,7 +451,7 @@ void *Canvas2D::makeStrokeStyle() const
     return ss;
 }
 
-void *Canvas2D::makeFillBrush(float x, float y, float w, float h)
+void *Canvas2D::makeFillBrush(float /*x*/, float /*y*/, float /*w*/, float /*h*/)
 {
     auto *dc = getDC(backend_);
     if (!fillIsGrad_ || gStops_.empty())
@@ -1050,14 +1085,61 @@ float Canvas2D::measureText(const std::string &text)
 // Pixel access
 // =============================================================================
 
+// Reads back pixels from the offscreen render-target bitmap via D2D's
+// native CPU-readback path: CopyFromBitmap into a CPU_READ|CANNOT_DRAW
+// staging bitmap, then Map()/Unmap() it directly. No D3D11 staging
+// texture is needed — offscreenBitmap always holds the last fully
+// rendered frame (tickAndRender's BeginDraw/EndDraw already completes
+// before compositing), so this reads settled content, not a
+// still-in-flight frame.
 void Canvas2D::getImageData(float x, float y, float w, float h,
                             std::vector<uint8_t> &out)
 {
-    int iw = int(w), ih = int(h);
-    out.assign(size_t(iw) * ih * 4, 0);
-    // Full GPU→CPU readback requires a D3D11 staging texture.
-    // Returning zeros for now — add staging path if needed.
-    (void)x; (void)y;
+    out.clear();
+    if (!backend_ || !backend_->offscreenBitmap || !backend_->offscreenDC) return;
+    if (w <= 0.f || h <= 0.f) return;
+
+    int texW = backend_->bitmapW, texH = backend_->bitmapH;
+    int ix = std::max(0, int(x));
+    int iy = std::max(0, int(y));
+    int iw = std::min(int(w), texW - ix);
+    int ih = std::min(int(h), texH - iy);
+    if (iw <= 0 || ih <= 0) return;
+
+    if (!backend_->ensureStagingBitmap(iw, ih))
+        return;
+
+    D2D1_POINT_2U destPt = D2D1::Point2U(0, 0);
+    D2D1_RECT_U srcRect = D2D1::RectU(UINT32(ix), UINT32(iy),
+                                      UINT32(ix + iw), UINT32(iy + ih));
+    HRESULT hr = backend_->stagingBitmap->CopyFromBitmap(
+        &destPt, backend_->offscreenBitmap.Get(), &srcRect);
+    if (FAILED(hr)) return;
+
+    D2D1_MAPPED_RECT mapped;
+    hr = backend_->stagingBitmap->Map(D2D1_MAP_OPTIONS_READ, &mapped);
+    if (FAILED(hr)) return;
+
+    out.resize(size_t(iw) * ih * 4);
+    for (int row = 0; row < ih; ++row)
+    {
+        const uint8_t *src = mapped.bits + row * mapped.pitch;
+        uint8_t *dst = out.data() + size_t(row) * iw * 4;
+        for (int col = 0; col < iw; ++col)
+        {
+            // offscreenBitmap is BGRA premultiplied — convert to
+            // straight (non-premultiplied) RGBA, matching Cairo's
+            // getImageData contract.
+            uint8_t b = src[col*4+0], g = src[col*4+1],
+                    r = src[col*4+2], a = src[col*4+3];
+            dst[col*4+0] = a ? (uint8_t)((uint32_t)r * 255u / a) : 0;
+            dst[col*4+1] = a ? (uint8_t)((uint32_t)g * 255u / a) : 0;
+            dst[col*4+2] = a ? (uint8_t)((uint32_t)b * 255u / a) : 0;
+            dst[col*4+3] = a;
+        }
+    }
+
+    backend_->stagingBitmap->Unmap();
 }
 
 void Canvas2D::putImageData(const std::vector<uint8_t> &data,

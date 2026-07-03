@@ -12,7 +12,8 @@
 //   Canvas2DBackend *Canvas2DBackend_create(id<MTLDevice> device);
 //   void             Canvas2DBackend_destroy(Canvas2DBackend *b);
 //   void             Canvas2DBackend_metalBeginFrame(Canvas2DBackend *b,
-//                         id<MTLRenderCommandEncoder> encoder, const float mvp[16]);
+//                         id<MTLDevice> device, id<MTLRenderCommandEncoder> encoder,
+//                         id<MTLTexture> targetTexture, const float mvp[16]);
 //   void             Canvas2DBackend_metalEndFrame(Canvas2DBackend *b);
 //
 #ifdef __APPLE__
@@ -22,6 +23,7 @@
 #include "flux/flux_canvas2d.hpp"
 #import <Metal/Metal.h>
 #import <CoreGraphics/CoreGraphics.h>
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <fstream>
@@ -48,14 +50,21 @@ static const char *kMSL_Canvas2DMetal = R"MSL(
 using namespace metal;
 
 struct VertexIn  { float2 pos [[attribute(0)]]; float2 uv [[attribute(1)]]; };
-struct VertexOut { float4 pos [[position]]; float2 uv; };
-struct Uniforms  { float4x4 mvp; float4 color; int mode; }; // mode: 0=solid,1=R8 glyph,2=RGBA image
+struct VertexOut { float4 pos [[position]]; float2 uv; float2 local; };
+struct Uniforms  {
+    float4x4 mvp;
+    float4   color;
+    int      mode;        // 0=solid,1=R8 glyph,2=RGBA image,3=linear grad,4=radial grad
+    float4   gradP0P1;    // linear: p0.xy/p1.xy. radial: center.xy in .xy, unused .zw
+    float4   gradParams;  // radial: innerR in .x, outerR in .y. unused for linear
+};
 
 vertex VertexOut c2d_vert(VertexIn in [[stage_in]],
                           constant Uniforms& u [[buffer(1)]]) {
     VertexOut out;
     out.pos = u.mvp * float4(in.pos, 0.0, 1.0);
     out.uv  = in.uv;
+    out.local = in.pos; // canvas-space position, pre-transform — used by gradients
     return out;
 }
 
@@ -68,9 +77,27 @@ fragment float4 c2d_frag(VertexOut in [[stage_in]],
     } else if (u.mode == 1) {
         float a = tex.sample(smp, in.uv).r;
         return float4(u.color.rgb, u.color.a * a);
-    } else {
+    } else if (u.mode == 2) {
         float4 t = tex.sample(smp, in.uv);
         return t * u.color.a;
+    } else if (u.mode == 3) {
+        // Linear gradient: project local position onto the p0->p1 axis.
+        float2 p0 = u.gradP0P1.xy;
+        float2 p1 = u.gradP0P1.zw;
+        float2 d  = p1 - p0;
+        float  lenSq = max(dot(d, d), 1e-6);
+        float  t  = clamp(dot(in.local - p0, d) / lenSq, 0.0, 1.0);
+        float4 g  = tex.sample(smp, float2(t, 0.5));
+        return float4(g.rgb, g.a * u.color.a);
+    } else {
+        // Radial gradient: distance from center, remapped between innerR/outerR.
+        float2 c  = u.gradP0P1.xy;
+        float  r0 = u.gradParams.x;
+        float  r1 = u.gradParams.y;
+        float  dist = length(in.local - c);
+        float  t  = (r1 > r0) ? clamp((dist - r0) / (r1 - r0), 0.0, 1.0) : 0.0;
+        float4 g  = tex.sample(smp, float2(t, 0.5));
+        return float4(g.rgb, g.a * u.color.a);
     }
 }
 )MSL";
@@ -155,6 +182,25 @@ C2DMetalRes &c2dRes(id<MTLDevice> device)
 
 struct CVertex { float x, y, u, v; };
 
+
+// Mirrors the MSL `Uniforms` struct byte-for-byte, including the implicit
+// alignment padding MSL inserts after `int mode` to bring `gradP0P1` back
+// to a 16-byte boundary. Every draw call — solid, glyph, image, and both
+// gradient modes — uses this exact struct and always fills the whole
+// thing, even when the gradient fields are unused, since the fragment
+// shader's `constant Uniforms&` expects the full 128 bytes regardless of
+// which mode branch actually reads them.
+struct GradUniforms
+{
+    float mvp[16];
+    float color[4];
+    int   mode;
+    float pad0[3];
+    float gradP0P1[4];
+    float gradParams[4];
+};
+
+
 } // anonymous namespace
 
 // ============================================================================
@@ -173,6 +219,13 @@ struct Canvas2DBackend
     // loading needs a device at any time (e.g. eager asset loading before
     // the first frame renders), so it's captured once here at creation.
     id<MTLDevice> device = nil;
+
+
+    // Small dedicated queue for getImageData's blit-readback. Kept
+    // separate from the frame's own command buffer/encoder so a readback
+    // never has to interleave with in-flight render commands on the same
+    // queue. Created lazily on first use.
+    id<MTLCommandQueue> ioQueue = nil;
 
     // ── Fonts / glyphs ───────────────────────────────────────────────────
     struct FontFace
@@ -267,6 +320,7 @@ struct Canvas2DBackend
     // Valid only between Canvas2DBackend_metalBeginFrame/EndFrame calls.
     id<MTLRenderCommandEncoder> frameEncoder = nil;
     id<MTLDevice> frameDevice = nil;
+    id<MTLTexture> frameTexture = nil; // the drawable's texture this frame
     float frameMVP[16] = {};
 };
 
@@ -289,11 +343,13 @@ void Canvas2DBackend_destroy(Canvas2DBackend *b)
 void Canvas2DBackend_metalBeginFrame(Canvas2DBackend *b,
                                      id<MTLDevice> device,
                                      id<MTLRenderCommandEncoder> encoder,
+                                     id<MTLTexture> targetTexture,
                                      const float mvp[16])
 {
     if (!b) return;
     b->frameEncoder = encoder;
     b->frameDevice = device;
+    b->frameTexture = targetTexture;
     memcpy(b->frameMVP, mvp, sizeof(b->frameMVP));
 }
 
@@ -302,6 +358,8 @@ void Canvas2DBackend_metalEndFrame(Canvas2DBackend *b)
     if (!b) return;
     b->frameEncoder = nil;
     b->frameDevice = nil;
+    b->frameTexture = nil;
+
 }
 
 // ============================================================================
@@ -497,7 +555,7 @@ static void drawSolid(Canvas2DBackend *backend, const float mvp[16],
     [backend->frameEncoder setRenderPipelineState:res.pipeline];
     [backend->frameEncoder setVertexBytes:verts.data() length:verts.size()*sizeof(CVertex) atIndex:0];
 
-    struct { float mvp[16]; float color[4]; int mode; } u;
+    GradUniforms u{};
     memcpy(u.mvp, mvp, sizeof(u.mvp));
     u.color[0] = color.r/255.f; u.color[1] = color.g/255.f;
     u.color[2] = color.b/255.f; u.color[3] = (color.a/255.f) * globalAlpha;
@@ -518,7 +576,7 @@ static void drawTexturedR8(Canvas2DBackend *backend, const float mvp[16],
     [backend->frameEncoder setRenderPipelineState:res.pipeline];
     [backend->frameEncoder setVertexBytes:verts.data() length:verts.size()*sizeof(CVertex) atIndex:0];
 
-    struct { float mvp[16]; float color[4]; int mode; } u;
+    GradUniforms u{};
     memcpy(u.mvp, mvp, sizeof(u.mvp));
     u.color[0] = tint.r/255.f; u.color[1] = tint.g/255.f;
     u.color[2] = tint.b/255.f; u.color[3] = (tint.a/255.f) * globalAlpha;
@@ -541,13 +599,101 @@ static void drawTexturedRGBA(Canvas2DBackend *backend, const float mvp[16],
     [backend->frameEncoder setRenderPipelineState:res.pipeline];
     [backend->frameEncoder setVertexBytes:verts.data() length:verts.size()*sizeof(CVertex) atIndex:0];
 
-    struct { float mvp[16]; float color[4]; int mode; } u;
+    GradUniforms u{};
     memcpy(u.mvp, mvp, sizeof(u.mvp));
     u.color[0]=u.color[1]=u.color[2]=1.f; u.color[3]=globalAlpha;
     u.mode = 2;
     [backend->frameEncoder setVertexBytes:&u length:sizeof(u) atIndex:1];
     [backend->frameEncoder setFragmentBytes:&u length:sizeof(u) atIndex:1];
     [backend->frameEncoder setFragmentTexture:tex atIndex:0];
+    [backend->frameEncoder setFragmentSamplerState:res.sampler atIndex:0];
+    [backend->frameEncoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:verts.size()];
+}
+
+
+// Builds a 256x1 RGBA8 LUT from sorted color stops, sampled by the
+// fragment shader's computed `t`. Rebuilt on every gradient draw call —
+// deliberately uncached for this pass; if profiling shows this matters,
+// the natural fix is a small cache keyed by a hash of (gradType, stops).
+static id<MTLTexture> buildGradientLUT(id<MTLDevice> device,
+                                       const std::vector<std::pair<float, Color>> &stopsIn)
+{
+    if (!device || stopsIn.empty()) return nil;
+
+    std::vector<std::pair<float, Color>> stops = stopsIn;
+    std::sort(stops.begin(), stops.end(),
+             [](auto &a, auto &b) { return a.first < b.first; });
+
+    static constexpr int kLUTSize = 256;
+    std::vector<uint8_t> pixels(kLUTSize * 4);
+
+    for (int i = 0; i < kLUTSize; ++i)
+    {
+        float t = float(i) / float(kLUTSize - 1);
+        Color c;
+        if (t <= stops.front().first) c = stops.front().second;
+        else if (t >= stops.back().first) c = stops.back().second;
+        else
+        {
+            size_t j = 0;
+            while (j + 1 < stops.size() && stops[j + 1].first < t) ++j;
+            const auto &a = stops[j];
+            const auto &b = stops[std::min(j + 1, stops.size() - 1)];
+            float span = b.first - a.first;
+            float local = (span > 1e-6f) ? (t - a.first) / span : 0.f;
+            c = a.second.interpolate(b.second, local);
+        }
+        pixels[i*4+0] = c.r; pixels[i*4+1] = c.g;
+        pixels[i*4+2] = c.b; pixels[i*4+3] = c.a;
+    }
+
+    MTLTextureDescriptor *td = [MTLTextureDescriptor
+        texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+                                      width:kLUTSize height:1 mipmapped:NO];
+    id<MTLTexture> tex = [device newTextureWithDescriptor:td];
+    [tex replaceRegion:MTLRegionMake2D(0, 0, kLUTSize, 1) mipmapLevel:0
+             withBytes:pixels.data() bytesPerRow:kLUTSize * 4];
+    return tex;
+}
+
+static void drawGradient(Canvas2DBackend *backend, const float mvp[16],
+                         const std::vector<CVertex> &verts, float globalAlpha,
+                         Canvas2D::GradType gradType,
+                         float gx0, float gy0, float gx1, float gy1,
+                         float gcx, float gcy, float gInR, float gOutR,
+                         const std::vector<std::pair<float, Color>> &stops)
+{
+    if (verts.empty() || !backend || !backend->frameEncoder || stops.empty()) return;
+    auto &res = c2dRes(backend->frameDevice);
+    if (!res.pipeline) return;
+
+    id<MTLTexture> lut = buildGradientLUT(backend->frameDevice, stops);
+    if (!lut) return;
+
+    [backend->frameEncoder setRenderPipelineState:res.pipeline];
+    [backend->frameEncoder setVertexBytes:verts.data() length:verts.size()*sizeof(CVertex) atIndex:0];
+
+    GradUniforms u{};
+    memcpy(u.mvp, mvp, sizeof(u.mvp));
+    u.color[0] = u.color[1] = u.color[2] = 1.f;
+    u.color[3] = globalAlpha;
+
+    if (gradType == Canvas2D::GradType::Linear)
+    {
+        u.mode = 3;
+        u.gradP0P1[0] = gx0; u.gradP0P1[1] = gy0;
+        u.gradP0P1[2] = gx1; u.gradP0P1[3] = gy1;
+    }
+    else
+    {
+        u.mode = 4;
+        u.gradP0P1[0] = gcx; u.gradP0P1[1] = gcy;
+        u.gradParams[0] = gInR; u.gradParams[1] = gOutR;
+    }
+
+    [backend->frameEncoder setVertexBytes:&u length:sizeof(u) atIndex:1];
+    [backend->frameEncoder setFragmentBytes:&u length:sizeof(u) atIndex:1];
+    [backend->frameEncoder setFragmentTexture:lut atIndex:0];
     [backend->frameEncoder setFragmentSamplerState:res.sampler atIndex:0];
     [backend->frameEncoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:verts.size()];
 }
@@ -567,7 +713,11 @@ void Canvas2D::fillRect(float x, float y, float w, float h)
     std::vector<CVertex> v;
     pushQuad(v, x, y, w, h);
     float mvp[16]; buildMVP(mvp);
-    drawSolid(backend_, mvp, v, fillColor_, globalAlpha_);
+    if (fillIsGrad_ && !gStops_.empty())
+        drawGradient(backend_, mvp, v, globalAlpha_, gradType_,
+                    gx0_, gy0_, gx1_, gy1_, gcx_, gcy_, gInR_, gOutR_, gStops_);
+    else
+        drawSolid(backend_, mvp, v, fillColor_, globalAlpha_);
 }
 
 void Canvas2D::strokeRect(float x, float y, float w, float h)
@@ -587,7 +737,14 @@ void Canvas2D::fillRoundedRect(float x, float y, float w, float h, float r)
     r = std::min(r, std::min(w, h) * 0.5f);
     std::vector<CVertex> v;
     float mvp[16]; buildMVP(mvp);
-    if (r <= 0.f) { pushQuad(v, x, y, w, h); drawSolid(backend_, mvp, v, fillColor_, globalAlpha_); return; }
+    auto doFill = [&](const std::vector<CVertex> &vv) {
+        if (fillIsGrad_ && !gStops_.empty())
+            drawGradient(backend_, mvp, vv, globalAlpha_, gradType_,
+                        gx0_, gy0_, gx1_, gy1_, gcx_, gcy_, gInR_, gOutR_, gStops_);
+        else
+            drawSolid(backend_, mvp, vv, fillColor_, globalAlpha_);
+    };
+    if (r <= 0.f) { pushQuad(v, x, y, w, h); doFill(v); return; }
 
     pushQuad(v, x+r, y,     w-2*r, r);
     pushQuad(v, x+r, y+h-r, w-2*r, r);
@@ -609,7 +766,7 @@ void Canvas2D::fillRoundedRect(float x, float y, float w, float h, float r)
     corner(x+w-r, y+h-r, 0,       0.5f*PI);
     corner(x+r,   y+h-r, 0.5f*PI, PI);
 
-    drawSolid(backend_, mvp, v, fillColor_, globalAlpha_);
+    doFill(v);
 }
 
 void Canvas2D::strokeRoundedRect(float x, float y, float w, float h, float r)
@@ -630,7 +787,11 @@ void Canvas2D::fillCircle(float cx, float cy, float r)
         v.push_back({cx + r*cosf(t1), cy + r*sinf(t1), 0, 0});
     }
     float mvp[16]; buildMVP(mvp);
-    drawSolid(backend_, mvp, v, fillColor_, globalAlpha_);
+    if (fillIsGrad_ && !gStops_.empty())
+        drawGradient(backend_, mvp, v, globalAlpha_, gradType_,
+                    gx0_, gy0_, gx1_, gy1_, gcx_, gcy_, gInR_, gOutR_, gStops_);
+    else
+        drawSolid(backend_, mvp, v, fillColor_, globalAlpha_);
 }
 
 void Canvas2D::strokeCircle(float cx, float cy, float r)
@@ -722,7 +883,11 @@ void Canvas2D::fill()
         v.push_back({path_[i+1].x, path_[i+1].y, 0, 0});
     }
     float mvp[16]; buildMVP(mvp);
-    drawSolid(backend_, mvp, v, fillColor_, globalAlpha_);
+    if (fillIsGrad_ && !gStops_.empty())
+        drawGradient(backend_, mvp, v, globalAlpha_, gradType_,
+                    gx0_, gy0_, gx1_, gy1_, gcx_, gcy_, gInR_, gOutR_, gStops_);
+    else
+        drawSolid(backend_, mvp, v, fillColor_, globalAlpha_);
 }
 
 void Canvas2D::stroke()
@@ -988,20 +1153,56 @@ void Canvas2D::strokeText(const std::string &text, float x, float y, float /*max
 }
 
 // ── Clip rect ────────────────────────────────────────────────────────────
-// NOTE: still screen-space only — does not yet account for ctm_. Harmless
-// while ctm_ was always identity (translate/scale/rotate were no-ops), but
-// now that those are real, a clip pushed inside a transformed block will
-// clip the wrong region. Tracked as a separate follow-up (needs the same
-// corner-projection approach as the GL backend's pushClipRect).
+
 
 void Canvas2D::pushClipRect(float x, float y, float w, float h)
 {
     if (!backend_ || !backend_->frameEncoder) return;
+
+    // Project the rect's corners through ctm_ (canvas-space transform),
+    // then convert NDC -> pixel space using the base frameMVP's own
+    // implied viewport extent — same technique as flux_canvas2d_gl.cpp's
+    // pushClipRect. Deriving the viewport size from the matrix itself
+    // (rather than assuming it equals w_/h_) also happens to route around
+    // a mismatch worth flagging separately: flux_canvas_macos.mm builds
+    // frameMVP from the window's full physical size plus a baked-in
+    // widget offset (physX/physY), while this widget's actual render
+    // target (the per-widget CAMetalLayer) is sized only to the widget
+    // itself. That offset bakes into every draw call today, not just
+    // clipping — outside this fix's scope, but likely worth a follow-up
+    // look if canvas content appears mispositioned on multi-widget layouts.
+    float x0 = x, y0 = y;
+    ctm_.apply(x0, y0);
+    float x1 = x + w, y1 = y + h;
+    ctm_.apply(x1, y1);
+
+    const float *base = backend_->frameMVP;
+    float scaleX = base[0], scaleY = base[5];
+    float transX = base[12], transY = base[13];
+    float viewW = (scaleX != 0.f) ? 2.f / fabsf(scaleX) : float(w_);
+    float viewH = (scaleY != 0.f) ? 2.f / fabsf(scaleY) : float(h_);
+    auto toPixX = [&](float cx) { return (scaleX * cx + transX + 1.f) * 0.5f * viewW; };
+    auto toPixY = [&](float cy) { return (scaleY * cy + transY + 1.f) * 0.5f * viewH; };
+
+    float px0 = toPixX(x0), py0 = toPixY(y0);
+    float px1 = toPixX(x1), py1 = toPixY(y1);
+    if (px0 > px1) std::swap(px0, px1);
+    if (py0 > py1) std::swap(py0, py1);
+
+    // Clamp into this widget's own render-target bounds — Metal validates
+    // that a scissor rect must fit within the framebuffer and will assert
+    // otherwise, which the pre-fix version never risked since it only
+    // ever used the untransformed x/y/w/h directly.
+    px0 = std::max(0.f, std::min(px0, float(w_)));
+    py0 = std::max(0.f, std::min(py0, float(h_)));
+    px1 = std::max(px0, std::min(px1, float(w_)));
+    py1 = std::max(py0, std::min(py1, float(h_)));
+
     MTLScissorRect r;
-    r.x = (NSUInteger)std::max(0.f, x);
-    r.y = (NSUInteger)std::max(0.f, y);
-    r.width = (NSUInteger)std::max(0.f, w);
-    r.height = (NSUInteger)std::max(0.f, h);
+    r.x      = (NSUInteger)px0;
+    r.y      = (NSUInteger)py0;
+    r.width  = (NSUInteger)(px1 - px0);
+    r.height = (NSUInteger)(py1 - py0);
     [backend_->frameEncoder setScissorRect:r];
     ++clipDepth_;
 }
@@ -1015,12 +1216,78 @@ void Canvas2D::popClipRect()
 }
 
 // ── Pixel access — TODO: not implemented on this path.
-void Canvas2D::getImageData(float, float, float, float, std::vector<uint8_t> &out)
+// Reads back pixels from the current frame's render target via a blit
+// encoder on backend_->ioQueue, synced with waitUntilCompleted.
+//
+// LIMITATION: this reads whatever has already been committed to the GPU.
+// Metal command buffers execute out-of-order relative to a still-open
+// encoder, so draws issued earlier THIS frame, on the encoder that is
+// still open when this is called, are not guaranteed visible here yet —
+// only content from prior committed frames is reliably read. A full fix
+// requires the caller (flux_canvas_macos.mm) to end/commit/reopen its
+// encoder mid-frame before this call, which is a larger structural change
+// deliberately left as a follow-up rather than folded in silently here.
+void Canvas2D::getImageData(float x, float y, float w, float h,
+                            std::vector<uint8_t> &out)
 {
     out.clear();
+    if (!backend_ || !backend_->frameTexture || !backend_->device) return;
+    if (w <= 0 || h <= 0) return;
+
+    id<MTLTexture> tex = backend_->frameTexture;
+    int texW = (int)tex.width, texH = (int)tex.height;
+
+    int ix = std::max(0, (int)x);
+    int iy = std::max(0, (int)y);
+    int iw = std::min((int)w, texW - ix);
+    int ih = std::min((int)h, texH - iy);
+    if (iw <= 0 || ih <= 0) return;
+
+    if (!backend_->ioQueue)
+        backend_->ioQueue = [backend_->device newCommandQueue];
+
+    size_t bytesPerRow = size_t(iw) * 4;
+    id<MTLBuffer> readbackBuf = [backend_->device
+        newBufferWithLength:bytesPerRow * ih
+                    options:MTLResourceStorageModeShared];
+    if (!readbackBuf) return;
+
+    id<MTLCommandBuffer> cmd = [backend_->ioQueue commandBuffer];
+    id<MTLBlitCommandEncoder> blit = [cmd blitCommandEncoder];
+    [blit copyFromTexture:tex
+               sourceSlice:0
+               sourceLevel:0
+              sourceOrigin:MTLOriginMake(ix, iy, 0)
+                sourceSize:MTLSizeMake(iw, ih, 1)
+                  toBuffer:readbackBuf
+         destinationOffset:0
+    destinationBytesPerRow:bytesPerRow
+  destinationBytesPerImage:bytesPerRow * ih];
+    [blit endEncoding];
+    [cmd commit];
+    [cmd waitUntilCompleted];
+
+    const uint8_t *bgra = (const uint8_t *)readbackBuf.contents;
+    out.resize(size_t(iw) * ih * 4);
+    for (size_t i = 0; i < size_t(iw) * ih; ++i)
+    {
+        // BGRA8Unorm -> RGBA
+        out[i*4+0] = bgra[i*4+2];
+        out[i*4+1] = bgra[i*4+1];
+        out[i*4+2] = bgra[i*4+0];
+        out[i*4+3] = bgra[i*4+3];
+    }
 }
-void Canvas2D::putImageData(const std::vector<uint8_t> &, int, int, float, float)
+void Canvas2D::putImageData(const std::vector<uint8_t> &data, int srcW, int srcH,
+                            float dx, float dy)
 {
+    if (data.size() < size_t(srcW) * srcH * 4 || srcW <= 0 || srcH <= 0) return;
+
+    Canvas2DImage *tmp = makeImageFromRGBA(backend_, data.data(), srcW, srcH);
+    if (!tmp) return;
+
+    drawImage(tmp, dx, dy);
+    freeImage(tmp);
 }
 
 #endif // TARGET_OS_OSX
