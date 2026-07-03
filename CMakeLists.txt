@@ -435,6 +435,8 @@ if(NOT ANDROID)
         add_subdirectory(linux)
     endif()
 
+    add_subdirectory(cli) 
+
     if(FLUX_BUILD_TESTS AND NOT EMSCRIPTEN)
         enable_testing()
         add_subdirectory(tests)
