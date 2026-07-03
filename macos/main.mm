@@ -7,6 +7,8 @@
 #include <cstdio>
 
 #include "flux/flux.hpp"
+#include "AppConfig.generated.h"
+
 
 
 // Forward declaration — defined in lib/main.cpp
@@ -44,24 +46,26 @@ WidgetPtr createApp(FluxUI* app);
     _app = new FluxUI(nullptr);
     _app->build([&]() { return createApp(_app); });
 
-    auto cfg = FluxAppWidget::getInstance();
+    // Window geometry comes straight from AppConfig.json — FluxAppWidget
+    // no longer carries window state.
+    int w = FLUX_APP_WINDOW_WIDTH;
+    int h = FLUX_APP_WINDOW_HEIGHT;
+    bool fullscreen = static_cast<bool>(FLUX_APP_FULLSCREEN);
+    bool maximize   = static_cast<bool>(FLUX_APP_MAXIMIZE);
 
-    int w = cfg->windowWidth;
-    int h = cfg->windowHeight;
-
-    if (cfg->fullscreen || cfg->maximize) {
+    if (maximize && !fullscreen) {
         NSScreen* screen = [NSScreen mainScreen];
         NSRect    frame  = screen.visibleFrame;
         w = (int)frame.size.width;
         h = (int)frame.size.height;
     }
 
-    _app->createWindow(cfg->title, w, h);
+    _app->createWindow(FLUX_APP_NAME, w, h);
 
-    if (cfg->fullscreen) {
+    if (fullscreen) {
         NSWindow* win = (__bridge NSWindow*)_app->getWindow();
         if (win) [win toggleFullScreen:nil];
-    } else if (cfg->maximize) {
+    } else if (maximize) {
         NSWindow* win = (__bridge NSWindow*)_app->getWindow();
         if (win) [win zoom:nil];
     }

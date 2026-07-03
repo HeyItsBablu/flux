@@ -1,3 +1,5 @@
+import groovy.json.JsonSlurper
+
 pluginManagement {
     repositories {
         google {
@@ -14,6 +16,14 @@ pluginManagement {
 plugins {
     id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
 }
+
+// ============================================================================
+// App Configuration — read from repo root config/AppConfig.json
+// ============================================================================
+val configFile = file("../config/AppConfig.json")
+val config = JsonSlurper().parse(configFile) as Map<*, *>
+val fluxAppName  = config["name"]     as String
+
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
@@ -22,5 +32,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "My Application"
+rootProject.name = fluxAppName
 include(":app")

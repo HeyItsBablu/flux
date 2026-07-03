@@ -1,6 +1,7 @@
 //windows/main.cpp
 #include "flux/flux.hpp"
 #include "flux/flux_debug_log.hpp"
+#include "AppConfig.generated.h"
 #ifdef _WIN32
 
 // Forward declaration — defined in lib/main.cpp
@@ -15,7 +16,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
 
     SetUnhandledExceptionFilter([](EXCEPTION_POINTERS* ep) -> LONG {
         FILE* f = getDebugLogFile();
-        if (f) {
+        if (f) { 
             fprintf(f, "\n[CRASH] Exception code: 0x%08X\n",
                     ep->ExceptionRecord->ExceptionCode);
             fprintf(f, "[CRASH] At address:      0x%p\n",
@@ -91,42 +92,57 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     fluxLog("[MAIN] Step 1: started");
 
     FluxUI app(hInstance);
-    fluxLog("[MAIN] Step 2: FluxUI constructed");
+
 
     app.build([&]() {
-        fluxLog("[MAIN] Step 2a: builder lambda called");
+
         auto result = createApp(&app);
-        fluxLog("[MAIN] Step 2b: createApp returned result=" +
-                std::string(result ? "valid" : "NULL"));
         return result;
     });
-    fluxLog("[MAIN] Step 3: build returned");
+ 
 
-    auto cfg = FluxAppWidget::getInstance();
-    fluxLog("[MAIN] Step 4: cfg=" + std::string(cfg ? "valid" : "NULL"));
-    if (!cfg) { fluxLog("[MAIN] FATAL: cfg null"); return -1; }
+    int w = FLUX_APP_WINDOW_WIDTH;
+    int h = FLUX_APP_WINDOW_HEIGHT;
+    bool fullscreen = static_cast<bool>(FLUX_APP_FULLSCREEN);
+    bool maximize   = static_cast<bool>(FLUX_APP_MAXIMIZE);
 
-    int w = cfg->windowWidth;
-    int h = cfg->windowHeight;
-    fluxLog("[MAIN] Step 5: size=" + std::to_string(w) + "x" + std::to_string(h));
 
-    if (cfg->fullscreen || cfg->maximize) {
+    if (maximize && !fullscreen) {
         w = GetSystemMetrics(SM_CXSCREEN);
         h = GetSystemMetrics(SM_CYSCREEN);
-        fluxLog("[MAIN] Step 5a: fullscreen " +
-                std::to_string(w) + "x" + std::to_string(h));
+
     }
 
-    fluxLog("[MAIN] Step 6: calling createWindow");
-    app.createWindow(cfg->title, w, h);
-    fluxLog("[MAIN] Step 7: createWindow returned");
+    app.createWindow(FLUX_APP_NAME, w, h);
+    
 
-    if (cfg->maximize || cfg->fullscreen)
+
+    
+    
+    if (fullscreen) {
+        // True borderless fullscreen: strip title bar/border, size to the
+        // full monitor rect (not just the work area, which excludes the
+        // taskbar). SW_MAXIMIZE alone can't do this — it keeps window chrome.
+        HWND hwnd = app.getWindow();
+        LONG_PTR style = GetWindowLongPtr(hwnd, GWL_STYLE);
+        style &= ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX |
+                   WS_MAXIMIZEBOX | WS_SYSMENU);
+        SetWindowLongPtr(hwnd, GWL_STYLE, style);
+
+        HMONITOR hmon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO mi = { sizeof(mi) };
+        GetMonitorInfo(hmon, &mi);
+
+        SetWindowPos(hwnd, HWND_TOP,
+                     mi.rcMonitor.left, mi.rcMonitor.top,
+                     mi.rcMonitor.right  - mi.rcMonitor.left,
+                     mi.rcMonitor.bottom - mi.rcMonitor.top,
+                     SWP_NOZORDER | SWP_FRAMECHANGED);
+    } else if (maximize) {
         ShowWindow(app.getWindow(), SW_MAXIMIZE);
-
-    fluxLog("[MAIN] Step 8: entering run");
+    }
     int result = app.run();
-    fluxLog("[MAIN] Step 9: run returned " + std::to_string(result));
+
 
     fclose(getDebugLogFile());
     return result;

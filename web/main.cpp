@@ -6,7 +6,6 @@
 //   main()
 //     └─ FluxUI(nullptr)              — no AppInstance on web
 //     └─ app.build(createApp)         — runs builder, wires widget tree
-//     └─ FluxAppWidget::getInstance() — reads title / size config
 //     └─ app.createWindow(...)        — registers JS event callbacks
 //     └─ emscripten_set_main_loop     — hands control back to browser;
 //                                       s_tick() called ~60 fps by rAF
@@ -17,13 +16,15 @@
 //     blocking message loop; on web the browser owns the event loop.
 //     emscripten_set_main_loop replaces it.
 //
-//   => Window size:  FluxAppWidget::windowWidth / windowHeight are ignored.
+//   => Window size:  AppConfig's window width/height/fullscreen/maximize are
+//     all ignored on web — irrelevant, not just unread.
 //     The canvas always fills the browser viewport.  Physical pixel
 //     dimensions are read from Module._fluxPhysicalWidth / _fluxPhysicalHeight
 //     (set by shell.html's resizeCanvases() before WASM starts).
 //
-//   => fullscreen / maximize flags are also ignored — the CSS already makes
-//     both canvases 100 % width/height.
+//   => Title comes from FLUX_APP_NAME, baked in at compile time via
+//     target_compile_definitions in CMakeLists.txt (not the generated
+//     header used on native platforms — web takes a different path).
 //
 //   => The FluxUI instance lives for the lifetime of the page (static storage)
 //     so Emscripten's main-loop callback can reach it without a global.
@@ -56,7 +57,7 @@ extern "C" EMSCRIPTEN_WEBGL_CONTEXT_HANDLE fluxGetGLContext();
 // ============================================================================
 
 namespace
-{
+{ 
 
     // Owning pointer kept alive for the page lifetime.
     // Using a raw pointer in static storage avoids destructor-order issues
@@ -169,24 +170,24 @@ int main()
     int logicalW = (int)(physW / dpr); // 666 logical
     int logicalH = (int)(physH / dpr); // 734 logical
 
-    auto cfg = FluxAppWidget::getInstance(); // may be null before build, see below
-    const std::string title = "FluxUI";      // temp title, updated after build
-
     // ── 2. Create window FIRST so valid() returns true during build ───────
-    s_app->createWindow(title, logicalW, logicalH);
+    // Title comes straight from config (baked in at compile time via
+    // target_compile_definitions) — no need to wait on FluxAppWidget,
+    // which no longer tracks title/size anyway.
+    s_app->createWindow(FLUX_APP_NAME, logicalW, logicalH);
 
     // ── 3. Now build — wireCallbacks + rebuild will run layout correctly ──
     s_app->build([&]()
                  { return createApp(s_app); });
 
-    // ── 4. Read actual app config after build ─────────────────────────────
-    cfg = FluxAppWidget::getInstance();
-    // (title is already set; window is live)
 
-    // ── 5. Register painter helpers ───────────────────────────────────────
+
+
+    // ── 4. Register painter helpers ───────────────────────────────────────
+
     fluxPainterWebInit();
 
-    // ── 6. Register C resize callback with JS ─────────────────────────────
+    // ── 5. Register C resize callback with JS ─────────────────────────────
     EM_ASM({
         Module._fluxOnResizeCpp = Module.cwrap('fluxOnResize', null, [ 'number', 'number' ]);
         Module._fluxOnResize = function(w, h)

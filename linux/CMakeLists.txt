@@ -1,3 +1,4 @@
+include(${CMAKE_SOURCE_DIR}/config/AppConfig.cmake)
 add_executable(flux_app
     main.cpp
     ${CMAKE_SOURCE_DIR}/lib/main.cpp
@@ -5,6 +6,7 @@ add_executable(flux_app
 
 target_link_libraries(flux_app PRIVATE flux::flux)
 target_include_directories(flux_app PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_include_directories(flux_app PRIVATE ${CMAKE_BINARY_DIR}/generated)
 
 if(EXISTS "${CMAKE_SOURCE_DIR}/assets")
     add_custom_command(TARGET flux_app POST_BUILD
@@ -12,5 +14,5 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/assets")
             "${CMAKE_SOURCE_DIR}/assets"
             "$<TARGET_FILE_DIR:flux_app>"
         COMMENT "Copying assets"
-    )
+    ) 
 endif()

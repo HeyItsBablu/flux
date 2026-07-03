@@ -8,9 +8,17 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(FLUX_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../..")
 add_subdirectory(${FLUX_ROOT} flux_build)
 
+# ── Generate AppConfig.generated.h from AppConfig.json ─────────────────────
+include(${FLUX_ROOT}/config/AppConfig.cmake)
+
 add_library(native-lib SHARED
         flux_android_main.cpp
         ${FLUX_ROOT}/lib/main.cpp
+)
+
+
+target_include_directories(native-lib PRIVATE
+        "${CMAKE_BINARY_DIR}/generated"
 )
 
 target_link_libraries(native-lib PRIVATE

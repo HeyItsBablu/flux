@@ -5,11 +5,13 @@
 #include <string>
 #include <SDL2/SDL.h>
 #include "flux/flux.hpp"
+#include "AppConfig.generated.h"
+
 
 // Forward declaration — defined in lib/main.cpp
 WidgetPtr createApp(FluxUI* app);
 
-int main(int /*argc*/, char** /*argv*/) {
+int main(int /*argc*/, char** /*argv*/) { 
 
 #ifdef FLUX_DEBUG
     setvbuf(stdout, nullptr, _IONBF, 0);
@@ -50,13 +52,14 @@ int main(int /*argc*/, char** /*argv*/) {
     FluxUI app(nullptr);
     app.build([&]() { return createApp(&app); });
 
-    // getInstance() now returns shared_ptr<FluxAppWidget>, not a raw pointer.
-    auto cfg = FluxAppWidget::getInstance();
+    // Window geometry comes straight from AppConfig.json — FluxAppWidget
+    // no longer carries window state.
+    int w = FLUX_APP_WINDOW_WIDTH;
+    int h = FLUX_APP_WINDOW_HEIGHT;
+    bool fullscreen = static_cast<bool>(FLUX_APP_FULLSCREEN);
+    bool maximize   = static_cast<bool>(FLUX_APP_MAXIMIZE);
 
-    int w = cfg->windowWidth;
-    int h = cfg->windowHeight;
-
-    if (cfg->fullscreen || cfg->maximize) {
+    if (maximize && !fullscreen) {
         SDL_DisplayMode dm;
         if (SDL_GetCurrentDisplayMode(0, &dm) == 0) {
             w = dm.w;
@@ -64,10 +67,18 @@ int main(int /*argc*/, char** /*argv*/) {
         }
     }
 
-    app.createWindow(cfg->title, w, h);
+    app.createWindow(FLUX_APP_NAME, w, h);
 
-    if (cfg->fullscreen || cfg->maximize)
-        SDL_MaximizeWindow(static_cast<SDL_Window*>(app.getWindow()));
+    SDL_Window* sdlWindow = static_cast<SDL_Window*>(app.getWindow());
+
+    if (fullscreen) {
+        // True fullscreen: SDL_WINDOW_FULLSCREEN_DESKTOP borderlessly covers
+        // the whole screen at the desktop's current resolution — the SDL
+        // equivalent of what we do manually via GWL_STYLE on Windows.
+        SDL_SetWindowFullscreen(sdlWindow, SDL_WINDOW_FULLSCREEN_DESKTOP);
+    } else if (maximize) {
+        SDL_MaximizeWindow(sdlWindow);
+    }
 
     return app.run();
 }

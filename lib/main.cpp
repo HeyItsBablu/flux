@@ -193,6 +193,5 @@ WidgetPtr createApp(FluxUI *app)
 {
   return FluxApp("Wrap App")
       .setTheme(AppTheme::light())
-      .setFullscreenMode(true)
       .build(std::make_shared<OverlayTestApp>());
 }

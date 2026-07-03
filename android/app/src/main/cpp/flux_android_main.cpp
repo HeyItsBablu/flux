@@ -12,6 +12,7 @@
 #include "flux/widgets/flux_file_picker.hpp"
 #include "flux/flux_gl.hpp"
 #include "flux/flux_oes_blit.hpp"
+#include "AppConfig.generated.h"
 // Forward declaration — defined in lib/main.cpp
 WidgetPtr createApp(FluxUI *app);
 
@@ -441,8 +442,12 @@ static void handle_cmd(android_app *app, int32_t cmd)
             s_app = new FluxUI(app);
             s_app->build([&]()
                          { return createApp(s_app); });
-            auto fcfg = FluxAppWidget::getInstance();
-            s_app->createWindow(fcfg->title, fcfg->windowWidth, fcfg->windowHeight);
+            // Title/size come straight from AppConfig.json — FluxAppWidget no
+            // longer carries window state. Note: Android has no title bar
+            // (Theme.NoTitleBar.Fullscreen in the manifest) and the surface
+            // is always resized to the real screen via APP_CMD_WINDOW_RESIZED
+            // below, so these are just seed values before the real size is known.
+            s_app->createWindow(FLUX_APP_NAME, FLUX_APP_WINDOW_WIDTH, FLUX_APP_WINDOW_HEIGHT);
 
             // ── FluxGL (replaces nvgCreateGLES2) ─────────────────────────
             FluxGL_init();

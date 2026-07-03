@@ -2,5 +2,12 @@
   "name":    "My Application",
   "bundleId": "com.example.myapplication",
   "version": "1.0.0",
-  "build":   1
+  "build":   1,
+  "window": {
+    "width": 1280,
+    "height": 720,
+    "fullscreen": false,
+    "maximize": true
+  }
 }
+

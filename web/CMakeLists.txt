@@ -1,3 +1,4 @@
+include(${CMAKE_SOURCE_DIR}/config/AppConfig.cmake)
 add_executable(flux_app
     main.cpp
     ${CMAKE_SOURCE_DIR}/lib/main.cpp
@@ -18,6 +19,7 @@ target_compile_definitions(flux_app PRIVATE
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/shell.html.in"
     "${CMAKE_CURRENT_BINARY_DIR}/shell.html"
+    @ONLY
 )
 
 target_link_options(flux_app PRIVATE

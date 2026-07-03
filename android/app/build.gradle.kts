@@ -1,18 +1,31 @@
+import groovy.json.JsonSlurper
+
 plugins {
     alias(libs.plugins.android.application)
 }
 
+// ============================================================================
+// App Configuration — read from repo root config/AppConfig.json
+// ============================================================================
+val configFile = rootProject.file("../config/AppConfig.json")
+val config = JsonSlurper().parse(configFile) as Map<*, *>
+val fluxAppName  = config["name"]     as String
+val fluxBundleId = config["bundleId"] as String
+val fluxVersion  = config["version"]  as String
+val fluxBuildNum = config["build"]    as Int
+
 android {
-    namespace = "com.example.myapplication"
+    namespace  = fluxBundleId
     compileSdk = 36
 
 
     defaultConfig {
-        applicationId = "com.example.myapplication"
-        minSdk = 28
-        targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        applicationId = fluxBundleId
+        minSdk        = 28
+        targetSdk     = 36
+        versionCode   = fluxBuildNum
+        versionName   = fluxVersion
+        resValue("string", "app_name", fluxAppName)
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -45,6 +58,7 @@ android {
     }
     buildFeatures {
         viewBinding = true
+        resValues   = true  
     }
 }
 
