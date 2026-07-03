@@ -435,7 +435,9 @@ if(NOT ANDROID)
         add_subdirectory(linux)
     endif()
 
-    add_subdirectory(cli) 
+    if(NOT EMSCRIPTEN)
+        add_subdirectory(cli)   # native desktop hosts only
+    endif()
 
     if(FLUX_BUILD_TESTS AND NOT EMSCRIPTEN)
         enable_testing()

@@ -67,24 +67,24 @@ std::optional<fs::path> find_vs_install() {
     return fs::path(*out);
 }
 
-} // namespace
-
-int cmd_build_windows() {
+// Runs vswhere/vcvars/cmake configure+build. Returns {exit code, project root}.
+// project root is empty on failure.
+std::pair<int, fs::path> configure_and_build(bool /*release*/) {
     auto root = find_project_root();
     if (!root) {
         std::fprintf(stderr,
             "ERROR: could not locate project root "
             "(no CMakeLists.txt / config/AppConfig.cmake found above current directory).\n");
-        return 1;
+        return {1, {}};
     }
 
     auto vs_path = find_vs_install();
-    if (!vs_path) return 1;
+    if (!vs_path) return {1, {}};
 
     fs::path vcvars = *vs_path / "VC" / "Auxiliary" / "Build" / "vcvars64.bat";
     if (!fs::exists(vcvars)) {
         std::fprintf(stderr, "ERROR: vcvars64.bat not found at expected path: %s\n", vcvars.string().c_str());
-        return 1;
+        return {1, {}};
     }
 
     const std::string build_dir = "build\\msvc";
@@ -102,10 +102,27 @@ int cmd_build_windows() {
     int rc = std::system(command.c_str());
     if (rc != 0) {
         std::fprintf(stderr, "\nBuild failed (exit code %d).\n", rc);
-        return rc;
+        return {rc, {}};
     }
 
-    fs::path exe = *root / build_dir / "windows" / "flux_app.exe";
+    return {0, *root};
+}
+
+} // namespace
+
+int windows_build(bool release) {
+    auto [rc, root] = configure_and_build(release);
+    if (rc == 0) {
+        std::printf("\nBuild succeeded.\n");
+    }
+    return rc;
+}
+
+int windows_run(bool release) {
+    auto [rc, root] = configure_and_build(release);
+    if (rc != 0) return rc;
+
+    fs::path exe = root / "build" / "msvc" / "windows" / "flux_app.exe";
     if (!fs::exists(exe)) {
         std::fprintf(stderr, "\nBuild succeeded but could not find %s\n", exe.string().c_str());
         return 1;
