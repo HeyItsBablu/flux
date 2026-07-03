@@ -25,6 +25,7 @@ public:
 
 WidgetPtr createApp(FluxUI *app)
 {
-  return FluxApp("FluxUI - Graph", std::make_shared<MyApp>(), AppTheme::light(),
-                 false, 700, 500, false, false);
+  return FluxApp()
+      .setTheme(AppTheme::light())
+      .build(std::make_shared<MyApp>());
 }

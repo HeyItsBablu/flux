@@ -24,8 +24,7 @@ public:
 
 WidgetPtr createApp(FluxUI *app)
 {
-  return FluxApp("Video Player App")
+  return FluxApp()
       .setTheme(AppTheme::light())
-      .setFullscreenMode(true)
       .build(std::make_shared<MyApp>());
 }

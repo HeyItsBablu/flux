@@ -215,6 +215,7 @@ public:
 
 WidgetPtr createApp(FluxUI *app)
 {
-    return FluxApp("Flux - Text Features (Flex only)", std::make_shared<MyApp>(),
-                   AppTheme::light(), false, 640, 780, false, false);
+  return FluxApp()
+      .setTheme(AppTheme::light())
+      .build(std::make_shared<MyApp>());
 }

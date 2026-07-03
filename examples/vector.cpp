@@ -1446,11 +1446,7 @@ public:
 
 WidgetPtr createApp(FluxUI *app)
 {
-    return FluxApp(
-        "Vector",
-        std::make_shared<VectorApp>(),
-        AppTheme::dark(),
-        false,
-        1024, 720,
-        false, true);
+  return FluxApp()
+      .setTheme(AppTheme::light())
+      .build(std::make_shared<VectorApp>());
 }

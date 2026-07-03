@@ -1269,11 +1269,7 @@ public:
 
 WidgetPtr createApp(FluxUI *app)
 {
-    return FluxApp(
-        "CAD Canvas",
-        std::make_shared<CadApp>(),
-        AppTheme::dark(),
-        false,
-        1280, 800,
-        false, true);
+  return FluxApp()
+      .setTheme(AppTheme::light())
+      .build(std::make_shared<CadApp>());
 }

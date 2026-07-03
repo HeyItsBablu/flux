@@ -1238,6 +1238,7 @@ public:
 
 WidgetPtr createApp(FluxUI *app)
 {
-  return FluxApp("Light Room App", std::make_shared<LightRoomApp>(),
-                 AppTheme::dark(), false, 1000, 700, false, true);
+  return FluxApp()
+      .setTheme(AppTheme::light())
+      .build(std::make_shared<LightRoomApp>());
 }

@@ -91,15 +91,16 @@ public:
 
 WidgetPtr createApp(FluxUI *app)
 {
-    return FluxApp("My App",
-                   Navigator::init({
-                                       {"/", []
-                                        { return std::make_shared<SplashPage>(); }},
-                                       {"/login", []
-                                        { return std::make_shared<LoginPage>(); }},
-                                       {"/home", []
-                                        { return std::make_shared<HomePage>(); }},
-                                   },
-                                   "/"),
-                   AppTheme::light(), false, 900, 700, false, false);
+    return FluxApp()
+        .setTheme(AppTheme::light())
+        .setDebugWidgetBounds(false)
+        .build(Navigator::init({
+                                   {"/", []
+                                    { return std::make_shared<SplashPage>(); }},
+                                   {"/login", []
+                                    { return std::make_shared<LoginPage>(); }},
+                                   {"/home", []
+                                    { return std::make_shared<HomePage>(); }},
+                               },
+                               "/"));
 }

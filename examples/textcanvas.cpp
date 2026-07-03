@@ -4480,8 +4480,7 @@ public:
 
 WidgetPtr createApp(FluxUI *app)
 {
-  return FluxApp("TextCanvas App")
-      .setTheme(AppTheme::dark())
-      .setFullscreenMode(true)
+  return FluxApp()
+      .setTheme(AppTheme::light())
       .build(std::make_shared<TextApp>());
 }

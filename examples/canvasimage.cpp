@@ -74,9 +74,9 @@ public:
     }
 };
 
-WidgetPtr createApp(FluxUI* app) {
-    return FluxApp("Image Viewer",
-                   std::make_shared<ImageApp>(),
-                   AppTheme::dark(),
-                   false, 800, 600, false, false);
+WidgetPtr createApp(FluxUI *app)
+{
+  return FluxApp()
+      .setTheme(AppTheme::light())
+      .build(std::make_shared<ImageApp>());
 }

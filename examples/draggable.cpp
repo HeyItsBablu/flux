@@ -35,14 +35,7 @@ public:
 
 WidgetPtr createApp(FluxUI *app)
 {
-    return FluxApp(
-        "FluxUI - Draggable",
-        std::make_shared<DragDemo>(),
-        AppTheme::light(),
-        false, // debugShowWidgetBounds
-        900,   // width
-        700,   // height
-        false, // maximize
-        true   // fullscreen
-    );
+  return FluxApp()
+      .setTheme(AppTheme::light())
+      .build(std::make_shared<DragDemo>());
 }

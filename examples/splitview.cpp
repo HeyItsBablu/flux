@@ -50,14 +50,7 @@ public:
 
 WidgetPtr createApp(FluxUI *app)
 {
-    return FluxApp(
-        "FluxUI - Paint",
-        std::make_shared<MyApp>(),
-        AppTheme::light(),
-        false, // debugShowWidgetBounds
-        900,   // width
-        700,   // height
-        false, // maximize
-        true   // fullscreen
-    );
+  return FluxApp()
+      .setTheme(AppTheme::light())
+      .build(std::make_shared<MyApp>());
 }

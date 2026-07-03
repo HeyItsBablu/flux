@@ -38,7 +38,9 @@ public:
   }
 };
 
-WidgetPtr createApp(FluxUI *app) {
-  return FluxApp("Secure Storage", std::make_shared<MyApp>(), AppTheme::light(),
-                 false, 900, 700, false, false);
+WidgetPtr createApp(FluxUI *app)
+{
+  return FluxApp()
+      .setTheme(AppTheme::light())
+      .build(std::make_shared<MyApp>());
 }

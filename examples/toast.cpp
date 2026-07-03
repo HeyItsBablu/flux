@@ -104,11 +104,9 @@ public:
     }
 };
 
-WidgetPtr createApp(FluxUI *app) {
-    return FluxApp(
-        "Toast Test",
-        std::make_shared<ToastTestApp>(),
-        AppTheme::light(),
-        false, 680, 560, true, false
-    );
+WidgetPtr createApp(FluxUI *app)
+{
+  return FluxApp()
+      .setTheme(AppTheme::light())
+      .build(std::make_shared<ToastTestApp>());
 }

@@ -21,8 +21,7 @@ public:
 
 WidgetPtr createApp(FluxUI *app)
 {
-  return FluxApp("Audio Player App")
+  return FluxApp()
       .setTheme(AppTheme::light())
-      .setFullscreenMode(true)
       .build(std::make_shared<MyApp>());
 }

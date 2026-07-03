@@ -135,27 +135,27 @@ inline WidgetPtr ThemedCard(WidgetPtr child)
 
 // ============================================================================
 // FLUX APP WIDGET
+//
+// Purely a theme/widget-tree root now — window title, size, fullscreen, and
+// maximize state all live in AppConfig.json (see config/AppConfig.h.in) and
+// are read directly by each platform's main() / WinMain() / applicationDidFinishLaunching:,
+// not through this widget.
 // ============================================================================
 
 class FluxAppWidget : public Widget
 {
 public:
-  std::string title;
   AppTheme theme;
   bool debugShowWidgetBounds = false;
   WidgetPtr home;
-  int windowWidth = 900;
-  int windowHeight = 700;
-  bool maximize = false;
-  bool fullscreen = true;
 
   static std::shared_ptr<FluxAppWidget> getInstance()
   {
     return instance_.lock();
   }
 
-  FluxAppWidget(const std::string &appTitle, WidgetPtr homeWidget)
-      : title(appTitle), theme(AppTheme::light()), home(homeWidget)
+  explicit FluxAppWidget(WidgetPtr homeWidget)
+      : theme(AppTheme::light()), home(homeWidget)
   {
     assert(instance_.expired() &&
            "FluxAppWidget: second instance created while first is still alive. "
@@ -259,44 +259,18 @@ inline std::weak_ptr<FluxAppWidget> FluxAppWidget::instance_;
 
 // ============================================================================
 // FLUX APP FACTORY
-// ============================================================================
-
-
-
-// ============================================================================
-// FLUX APP FACTORY
+//
+// Scope intentionally limited to theme + debug bounds. Window title/size/
+// fullscreen/maximize are config-driven (AppConfig.json) and set directly
+// by platform main() files — not settable here.
 // ============================================================================
 
 class FluxAppBuilder
 {
 public:
-  explicit FluxAppBuilder(std::string title)
-  {
-    cfg_.title = std::move(title);
-  }
-
   FluxAppBuilder &setTheme(const AppTheme &theme)
   {
     cfg_.theme = theme;
-    return *this;
-  }
-
-  FluxAppBuilder &setSize(int width, int height)
-  {
-    cfg_.width = width;
-    cfg_.height = height;
-    return *this;
-  }
-
-  FluxAppBuilder &setFullscreenMode(bool fullscreen = true)
-  {
-    cfg_.fullscreen = fullscreen;
-    return *this;
-  }
-
-  FluxAppBuilder &setMaximized(bool maximize = true)
-  {
-    cfg_.maximize = maximize;
     return *this;
   }
 
@@ -308,33 +282,24 @@ public:
 
   WidgetPtr build(WidgetPtr home)
   {
-    auto app = std::make_shared<FluxAppWidget>(cfg_.title, home);
+    auto app = std::make_shared<FluxAppWidget>(home);
     app->registerInstance(app);
     app->setTheme(cfg_.theme);
     app->debugShowWidgetBounds = cfg_.debugWidgetBounds;
-    app->windowWidth = cfg_.width;
-    app->windowHeight = cfg_.height;
-    app->maximize = cfg_.maximize;
-    app->fullscreen = cfg_.fullscreen;
     return app;
   }
 
 private:
   struct Config
   {
-    std::string title = "FluxUI App";
     AppTheme theme = AppTheme::light();
-    int width = 900;
-    int height = 700;
-    bool maximize = false;
-    bool fullscreen = false;
     bool debugWidgetBounds = false;
   } cfg_;
 };
 
-inline FluxAppBuilder FluxApp(std::string title)
+inline FluxAppBuilder FluxApp()
 {
-  return FluxAppBuilder(std::move(title));
+  return FluxAppBuilder();
 }
 
 #endif // FLUX_APP_HPP

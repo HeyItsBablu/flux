@@ -1635,8 +1635,7 @@ public:
 
 WidgetPtr createApp(FluxUI *app)
 {
-  return FluxApp("Paint App")
-      .setTheme(AppTheme::dark())
-      .setFullscreenMode(true)
+  return FluxApp()
+      .setTheme(AppTheme::light())
       .build(std::make_shared<PaintApp>());
 }

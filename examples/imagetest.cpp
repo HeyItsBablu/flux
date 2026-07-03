@@ -143,8 +143,7 @@ private:
 
 WidgetPtr createApp(FluxUI *app)
 {
-    return FluxApp("CRUD App")
-        .setTheme(AppTheme::light())
-        .setFullscreenMode(true)
-        .build(std::make_shared<MyApp>());
+  return FluxApp()
+      .setTheme(AppTheme::light())
+      .build(std::make_shared<MyApp>());
 }
