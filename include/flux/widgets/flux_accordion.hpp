@@ -234,7 +234,7 @@ public:
     if (!visible)
       return;
 
-    Painter painter(ctx);
+    Painter painter(ctx, this);
 
     // Outer border
     if (showBorder)
@@ -435,7 +435,7 @@ private:
     bool isHov = (hoveredHeader_ == idx && !p.disabled);
     bool isExp = p.expanded;
 
-    Painter painter(ctx);
+    Painter painter(ctx, this);
 
     // Header background (with optional left accent when expanded)
     Color bg = isExp   ? headerActiveColor
@@ -495,7 +495,7 @@ private:
 
   void _drawChevron(GraphicsContext &ctx, int cx, int cy, bool pointUp,
                     Color color) const {
-    Painter painter(ctx);
+    Painter painter(ctx, this);
     int s = arrowSize / 2;
     if (pointUp) {
       painter.drawLine(cx - s, cy + s / 2, cx, cy - s / 2, color, 2);

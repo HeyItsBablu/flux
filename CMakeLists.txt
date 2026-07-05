@@ -41,7 +41,7 @@ option(FLUX_BUILD_TESTS    "Build tests"                OFF)
 #                       for why these two are mutually exclusive, never both.
 # ============================================================================
 
-set(FLUX_WEB_RENDERER "canvas" CACHE STRING "Web renderer: canvas or dom")
+set(FLUX_WEB_RENDERER "dom" CACHE STRING "Web renderer: canvas or dom")
 set_property(CACHE FLUX_WEB_RENDERER PROPERTY STRINGS canvas dom)
 
 

@@ -115,7 +115,7 @@ void ImageWidget::_platformRender(GraphicsContext& ctx,
 
     DestRect d = _calculateDestRect(cx, cy, cw, ch);
 
-    Painter painter(ctx);
+    Painter painter(ctx, this);
     Painter::ImageDrawParams params;
     params.image       = glTexture;   // GLuint cast to NativeImage (same type)
     params.srcWidth    = imageWidth;

@@ -49,7 +49,7 @@ public:
         if (value < 0.0f)
             startSpinner_();
 
-        Painter painter(ctx);
+        Painter painter(ctx, this);
 
         const float cx = float(x) + float(width)  * 0.5f;
         const float cy = float(y) + float(height) * 0.5f;

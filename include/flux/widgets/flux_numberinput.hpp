@@ -70,7 +70,7 @@ public:
     borderColor = isFocused ? focusedBorderColor : unfocusedBorderColor;
     drawRoundedRectangle(ctx);
 
-    Painter painter(ctx);
+    Painter painter(ctx, this);
     int btnW = 24;
     int btnX = x + width - btnW - 1;
 
@@ -345,7 +345,7 @@ private:
 
   void _drawArrow(GraphicsContext &ctx, int bx, int by, int bw, int bh,
                   bool up, bool hovered) const {
-    Painter painter(ctx);
+    Painter painter(ctx, this);
     if (hovered) painter.fillRect(bx + 1, by + 1, bw - 2, bh - 2, buttonHoverColor);
 
     int cx = bx + bw / 2;

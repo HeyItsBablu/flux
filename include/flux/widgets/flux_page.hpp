@@ -259,7 +259,7 @@ public:
         if (!visible)
             return;
 
-        Painter painter(ctx);
+        Painter painter(ctx, this);
 
         Painter::PageDrawParams params;
         params.x = x;

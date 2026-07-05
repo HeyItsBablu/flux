@@ -103,7 +103,7 @@ public:
         return;
       owner->_computePopupSize();
 
-      Painter painter(ctx);
+      Painter painter(ctx, this);
       int ox = x, oy = y;
 
       painter.fillRoundedRect(ox + owner->shadowOffset, oy + owner->shadowOffset,
@@ -274,7 +274,7 @@ public:
     borderColor = isFocused ? fieldFocusBorder : fieldBorderColor;
     drawRoundedRectangle(ctx);
 
-    Painter painter(ctx);
+    Painter painter(ctx, this);
     NativeFont font = fontCache.getFont(fieldFontSize, FontWeight::Normal);
 
     if (selectedDate.isValid())
@@ -546,7 +546,7 @@ private:
     int firstWD = _firstWeekday(viewYear, viewMonth);
     int daysInMon = _daysInMonth(viewYear, viewMonth);
     int gridTop = calHeaderH + calPadV + calWeekRowH;
-    Painter painter(ctx);
+    Painter painter(ctx, this);
 
     // ── Header background ─────────────────────────────────────────────────
     painter.fillRect(ox, oy, popupW_, calHeaderH, headerBgColor);
@@ -662,7 +662,7 @@ private:
 
   void _renderYearPicker(GraphicsContext &ctx, FontCache &fontCache,
                          int ox, int oy) {
-    Painter painter(ctx);
+    Painter painter(ctx, this);
 
     painter.fillRect(ox, oy, popupW_, calHeaderH, headerBgColor);
     _drawNavArrow(ctx, ox + calPadH + 8, oy + calHeaderH / 2, false);
@@ -867,7 +867,7 @@ private:
 
   void _drawNavArrow(GraphicsContext &ctx, int cx, int cy, bool right) const
   {
-    Painter painter(ctx);
+    Painter painter(ctx, this);
     int s = 5;
     if (right)
     {
@@ -883,7 +883,7 @@ private:
 
   void _drawCalendarIcon(GraphicsContext &ctx, int cx, int cy) const
   {
-    Painter painter(ctx);
+    Painter painter(ctx, this);
     Color iconColor = Color::fromRGB(140, 140, 140);
 
     // Outer rect outline

@@ -113,7 +113,7 @@ private:
       if (!owner || !owner->isOpen || owner->items.empty())
         return;
 
-      Painter painter(ctx);
+      Painter painter(ctx, this);
 
       painter.fillRoundedRect(x + owner->shadowOffset, y + owner->shadowOffset,
                               owner->menuW, owner->menuH,
@@ -659,7 +659,7 @@ private:
       if (!owner || !owner->isOpen)
         return;
 
-      Painter painter(ctx);
+      Painter painter(ctx, this);
 
       // Dim scrim across the whole overlay rect (the full client area —
       // see DialogWidget::open()).
@@ -1010,7 +1010,7 @@ private:
     {
       if (!owner || !owner->isVisible || owner->tipText.empty())
         return;
-      Painter painter(ctx);
+      Painter painter(ctx, this);
 
       painter.fillRoundedRect(x + owner->shadowOffset, y + owner->shadowOffset,
                               width, height, owner->tipBorderRadius,

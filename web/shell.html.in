@@ -216,18 +216,32 @@
         const errorDiv = document.getElementById('flux-error');
         const errorMsg = document.getElementById('flux-error-message');
 
-        const ctx2d = uiCanvas.getContext('2d', {
-            alpha: true,
-            desynchronized: true,
-        });
+        // uiCanvas is null on the DOM renderer — #flux-ui is never emitted
+        // there (see FLUX_CANVAS_RENDERER_MARKUP in web/CMakeLists.txt).
+        // Guard every use of it below instead of assuming it exists; an
+        // unguarded uiCanvas.getContext(...) here throws BEFORE `Module`
+        // is even declared further down, which silently kills the whole
+        // script and leaves the loading spinner showing forever with no
+        // visible error except a console exception.
+        const ctx2d = uiCanvas
+            ? uiCanvas.getContext('2d', { alpha: true, desynchronized: true })
+            : null;
 
         function resizeCanvases() {
             const dpr = window.devicePixelRatio || 1;
             const w = Math.floor(window.innerWidth * dpr);
             const h = Math.floor(window.innerHeight * dpr);
-            if (uiCanvas.width !== w || uiCanvas.height !== h) {
-                uiCanvas.width = w;
-                uiCanvas.height = h;
+            // On the DOM renderer there's no uiCanvas.width to compare
+            // against — fall back to comparing the last-known physical
+            // size instead, same effect (skip redundant resize work).
+            const changed = uiCanvas
+                ? (uiCanvas.width !== w || uiCanvas.height !== h)
+                : (Module._fluxPhysicalWidth !== w || Module._fluxPhysicalHeight !== h);
+            if (changed) {
+                if (uiCanvas) {
+                    uiCanvas.width = w;
+                    uiCanvas.height = h;
+                }
                 glCanvas.width = w;
                 glCanvas.height = h;
                 Module._fluxPhysicalWidth = w;

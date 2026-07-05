@@ -236,7 +236,7 @@ public:
     int px = x, py = y;
     int pw = width, ph = height - toggleH;
 
-    Painter painter(ctx);
+    Painter painter(ctx, this);
 
     // Background
     painter.fillRect(px, py, pw, ph, bgColor);
@@ -439,7 +439,7 @@ void renderToggles(GraphicsContext &ctx, FontCache &fontCache,
         {"L", lumColor, showLum},
     };
 
-    Painter painter(ctx);
+    Painter painter(ctx, this);
     painter.fillRect(tx, ty, tw, th, Color::fromRGB(20, 20, 20));
 
     NativeFont hFont = fontCache.getFont(9, FontWeight::Normal);

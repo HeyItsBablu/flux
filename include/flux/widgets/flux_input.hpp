@@ -80,7 +80,7 @@ public:
 
   void render(GraphicsContext &ctx, FontCache &fontCache) override
   {
-    Painter painter(ctx);
+    Painter painter(ctx, this);
 
     int toggleX = x + paddingLeft;
     int toggleY = y + paddingTop +
@@ -310,7 +310,7 @@ public:
 
   void render(GraphicsContext &ctx, FontCache & /*fontCache*/) override
   {
-    Painter painter(ctx);
+    Painter painter(ctx, this);
 
     int trackY = y + height / 2;
     int trackLeft = x + paddingLeft;
@@ -603,7 +603,7 @@ public:
 
   void render(GraphicsContext &ctx, FontCache &fontCache) override
   {
-    Painter painter(ctx);
+    Painter painter(ctx, this);
 
     int boxX = x + paddingLeft;
     int boxY = y + paddingTop + (height - paddingTop - paddingBottom - boxSize) / 2;
@@ -726,7 +726,7 @@ public:
 
   void render(GraphicsContext &ctx, FontCache &fontCache) override
   {
-    Painter painter(ctx);
+    Painter painter(ctx, this);
 
     int circleX = x + paddingLeft + circleSize / 2;
     int circleY = y + paddingTop + (height - paddingTop - paddingBottom) / 2;
@@ -1101,7 +1101,7 @@ public:
     borderColor = isFocused ? focusedBorderColor : unfocusedBorderColor;
     drawRoundedRectangle(ctx);
 
-    Painter painter(ctx);
+    Painter painter(ctx, this);
 
     int textX = x + paddingLeft;
     int clipW = width - paddingLeft - paddingRight;

@@ -92,7 +92,7 @@ void Widget::render(GraphicsContext &ctx, FontCache &fontCache) {
   if (!visible)
     return;
 
-  Painter painter(ctx);
+  Painter painter(ctx, this);
 
   if (hasBackground)
     painter.fillRoundedRect(x, y, width, height, borderRadius,
@@ -122,7 +122,7 @@ void Widget::render(GraphicsContext &ctx, FontCache &fontCache) {
 // ============================================================================
 
 void Widget::drawRoundedRectangle(GraphicsContext &ctx) {
-  Painter painter(ctx);
+  Painter painter(ctx, this);
 
   if (hasBackground)
     painter.fillRoundedRect(x, y, width, height, borderRadius,

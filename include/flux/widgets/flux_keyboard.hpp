@@ -145,7 +145,7 @@ public:
       if (!owner || !owner->isVisible_)
         return;
 
-      Painter painter(ctx);
+      Painter painter(ctx, this);
       painter.fillRect(x, y, owner->kbW_, owner->keyboardHeight, owner->bgColor);
 
       const auto &layout = owner->symbolPage_ ? KeyboardLayout::symbols()

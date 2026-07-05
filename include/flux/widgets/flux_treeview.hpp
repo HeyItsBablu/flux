@@ -183,7 +183,7 @@ public:
   void render(GraphicsContext &ctx, FontCache &fontCache) override {
     if (!visible)
       return;
-    Painter painter(ctx);
+    Painter painter(ctx, this);
 
     painter.pushClipRect(x, y, width, height);
     painter.fillRect(x, y, width, height, rowBgColor);
@@ -573,7 +573,7 @@ private:
                   int contentW) const {
     const auto &entry = flatList_[rowIdx];
     const TreeNode *node = entry.node;
-    Painter painter(ctx);
+    Painter painter(ctx, this);
 
     int rowY = y + rowIdx * rowHeight - scrollOffset_;
     int rowX = x;
@@ -624,7 +624,7 @@ private:
   }
 
   void _drawArrow(GraphicsContext &ctx, int cx, int cy, bool expanded) const {
-    Painter painter(ctx);
+    Painter painter(ctx, this);
     int s = arrowSize / 2;
     if (expanded) {
       painter.drawLine(cx - s, cy - s / 2, cx, cy + s / 2, arrowColor, 1);
@@ -636,7 +636,7 @@ private:
   }
 
   void _renderScrollbar(GraphicsContext &ctx) const {
-    Painter painter(ctx);
+    Painter painter(ctx, this);
     int totalH = (int)flatList_.size() * rowHeight;
     int sbX = x + width - scrollbarWidth - 1;
 

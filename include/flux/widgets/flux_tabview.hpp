@@ -430,7 +430,7 @@
 //   // ── Rendering ─────────────────────────────────────────────────────────────
 
 //   void _renderTabBar(GraphicsContext &ctx, FontCache &fontCache) const {
-//     Painter painter(ctx);
+//     Painter painter(ctx, this);
 
 //     // Bar background
 //     painter.fillRect(x, y, width, tabBarHeight, barBgColor);
@@ -474,7 +474,7 @@
 //   }
 
 //   void _renderContentArea(GraphicsContext &ctx, FontCache &fontCache) const {
-//     Painter painter(ctx);
+//     Painter painter(ctx, this);
 //     int paneTop = y + tabBarHeight + indicatorHeight;
 
 //     if (hasContentBg)

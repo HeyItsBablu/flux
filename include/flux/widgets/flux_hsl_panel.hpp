@@ -275,7 +275,7 @@ public:
 
   void render(GraphicsContext &ctx, FontCache &fc) override {
     cacheLayout();
-    Painter painter(ctx);
+    Painter painter(ctx, this);
 
     painter.fillRect(x, y, width, height, bgColor);
 
@@ -421,7 +421,7 @@ private:
   // ── Tab strip ─────────────────────────────────────────────────────────────
   void drawTabStrip(GraphicsContext &ctx, FontCache &fc) {
     static const char *kLabels[] = {"Hue", "Sat", "Lum", "All"};
-    Painter painter(ctx);
+    Painter painter(ctx, this);
 
     int tw = width / 4;
     NativeFont hf = fc.getFont(9, FontWeight::Bold);
@@ -453,7 +453,7 @@ private:
                    bool tatHL) {
     const BandMeta &m = kMeta[bi];
     int rh = rowHeight(bi);
-    Painter painter(ctx);
+    Painter painter(ctx, this);
 
     // TAT glow strip
     if (tatHL) {
@@ -515,7 +515,7 @@ Color glow = Color::fromRGB(
                   float val, int tx, int ty, int tw) {
     static const char *kChLabel[] = {"H", "S", "L"};
     Color chCol = channelColor(ch);
-    Painter painter(ctx);
+    Painter painter(ctx, this);
 
     // Channel letter
     NativeFont hf = fc.getFont(7, FontWeight::Normal);

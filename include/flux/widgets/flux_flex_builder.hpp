@@ -1058,7 +1058,7 @@ public:
     void render(GraphicsContext &ctx, FontCache &fontCache) override
     {
         const FlexProps &P = resolved_;
-        Painter painter(ctx);
+        Painter painter(ctx, this);
 
         if (P.hasBackground)
             painter.fillRoundedRect(x, y, width, height,

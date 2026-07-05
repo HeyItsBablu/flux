@@ -111,7 +111,7 @@ struct ScrollbarState
   {
     if (!isScrollable)
       return;
-    Painter painter(ctx);
+    Painter painter(ctx, this);
     Color thumbColor = isDragging   ? colorActive
                        : isHovering ? colorHover
                                     : colorNormal;
@@ -594,7 +594,7 @@ public:
   {
 
     sb.updateThumb();
-    Painter painter(ctx);
+    Painter painter(ctx, this);
 
     int sbSz = sb.isScrollable ? sb.size : 0;
     int clipX1, clipY1, clipX2, clipY2;
@@ -1159,7 +1159,7 @@ public:
   void render(GraphicsContext &ctx, FontCache &fontCache) override
   {
     sb.updateThumb();
-    Painter painter(ctx);
+    Painter painter(ctx, this);
 
     int sbSz = sb.isScrollable ? sb.size : 0;
     int clipX1, clipY1, clipX2, clipY2;

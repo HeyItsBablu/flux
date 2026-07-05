@@ -239,7 +239,7 @@ void ImageWidget::_platformRender(GraphicsContext &ctx, int cx, int cy,
     // ── Draw ──────────────────────────────────────────────────────────────────
     DestRect d = _calculateDestRect(cx, cy, cw, ch);
 
-    Painter painter(ctx);
+    Painter painter(ctx, this);
     Painter::ImageDrawParams params;
     params.image         = static_cast<NativeImage>(_win32->d2dBitmap.Get());
     params.srcWidth      = _win32->bitmapW;

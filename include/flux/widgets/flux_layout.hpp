@@ -72,7 +72,7 @@ public:
   {
     if (!visible)
       return;
-    Painter painter(ctx);
+    Painter painter(ctx, this);
     if (hasBackground)
       painter.fillRoundedRect(x, y, width, height, borderRadius,
                               getCurrentBackgroundColor());
@@ -1060,7 +1060,7 @@ public:
   {
     if (!visible)
       return;
-    Painter painter(ctx);
+    Painter painter(ctx, this);
     if (hasBackground)
       painter.fillRoundedRect(x, y, width, height, borderRadius,
                               getCurrentBackgroundColor());

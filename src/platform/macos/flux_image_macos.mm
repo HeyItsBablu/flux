@@ -276,7 +276,7 @@ void ImageWidget::_platformRender(GraphicsContext &ctx, int cx, int cy,
         cache.quality = (int)filterQuality;
     }
 
-    Painter painter(ctx);
+    Painter painter(ctx, this);
     Painter::ImageDrawParams params;
     params.image    = cache.texture; // cache.texture is already void*; NativeImage = void* on Apple
     params.srcWidth  = dw;

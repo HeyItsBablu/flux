@@ -409,7 +409,7 @@ private:
                             int tX, int tY, int tW, int tH) const
     {
         Color accent = _accentColor(at.entry.type);
-        Painter painter(ctx);
+        Painter painter(ctx, this);
 
         // Shadow
         painter.fillRectAlpha(tX + shadowOffset_, tY + shadowOffset_,

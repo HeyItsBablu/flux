@@ -197,7 +197,7 @@ void ImageWidget::_platformRender(GraphicsContext &ctx, int cx, int cy,
         }
     }
 
-    Painter painter(ctx);
+    Painter painter(ctx, this);
     Painter::ImageDrawParams params;
     params.clipX = cx;
     params.clipY = cy;

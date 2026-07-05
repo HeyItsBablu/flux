@@ -215,7 +215,7 @@ void ImageWidget::_platformRender(GraphicsContext &ctx,
 
     DestRect d = _calculateDestRect(cx, cy, cw, ch);
 
-    Painter painter(ctx);
+    Painter painter(ctx, this);
     Painter::ImageDrawParams params;
     params.image = reinterpret_cast<NativeImage>(static_cast<uintptr_t>(ws.key)); // NativeImage on web = OffscreenCanvas store key
     params.srcWidth = imageWidth;

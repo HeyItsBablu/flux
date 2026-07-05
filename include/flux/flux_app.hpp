@@ -239,7 +239,7 @@ public:
 
   void render(GraphicsContext &ctx, FontCache &fontCache) override
   {
-    Painter painter(ctx);
+    Painter painter(ctx, this);
     painter.fillRect(x, y, width, height, theme.backgroundColor);
 
     if (!children.empty())
@@ -262,7 +262,7 @@ private:
   {
     if (!w)
       return;
-    Painter(ctx, this).drawRectOutline(w->x, w->y, w->width, w->height,
+    Painter(ctx, w).drawRectOutline(w->x, w->y, w->width, w->height,
                                  Color::fromRGB(255, 0, 0), 1);
     for (auto &child : w->children)
       drawWidgetBounds(ctx, child.get());

@@ -773,7 +773,7 @@ public:
 
   void render(GraphicsContext &ctx, FontCache & /*fontCache*/) override
   {
-    Painter painter(ctx);
+    Painter painter(ctx, this);
     int rx = trackBorderRadius * 2;
 
     painter.fillRoundedRectGDI(x, y, width, height, rx, trackColor,

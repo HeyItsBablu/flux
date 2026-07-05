@@ -8,7 +8,7 @@ public:
     WidgetPtr build() override
     {
 
-        return Flex({Text("Hello World"),Text(counter),Button("Click Me",[this](){counter++;})})
+        return Flex({Text("Hello World")->setTextColor(Color::fromRGB(100, 100, 100)),Text(counter)->setTextColor(Color::fromRGB(100, 100, 100)),Button("Click Me",[this](){counter++;})})
                 ->setBackgroundColor(Color::fromRGB(255, 180, 180))
                 ->setAlignItems(AlignItems::Center)
                 ->setJustifyContent(JustifyContent::Center)

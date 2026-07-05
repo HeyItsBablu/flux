@@ -493,7 +493,7 @@ public:
     if (!visible)
       return;
 
-    Painter painter(ctx);
+    Painter painter(ctx, this);
 
     if (hasBackground)
     {
@@ -763,7 +763,7 @@ public:
   {
     if (!visible)
       return;
-    Painter painter(ctx);
+    Painter painter(ctx, this);
 
     // Shadow — drawn only around the outside (offset down-right, clipped
     // to avoid bleeding under the button body)
@@ -1086,7 +1086,7 @@ public:
   {
     if (!visible)
       return;
-    Painter painter(ctx);
+    Painter painter(ctx, this);
 
     const int cx = x + width / 2;
     const int cy = y + height / 2;

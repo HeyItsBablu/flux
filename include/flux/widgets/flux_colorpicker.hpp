@@ -196,7 +196,7 @@ public:
   {
     if (!visible)
       return;
-    Painter painter(ctx);
+    Painter painter(ctx, this);
 
     int cx = x + paddingLeft;
     int cy = y + paddingTop;
@@ -418,7 +418,7 @@ private:
   // Renders the saturation/value gradient square using GDI blending
   void renderSVSquare(GraphicsContext &ctx, int cx, int cy, int size)
   {
-    Painter painter(ctx);
+    Painter painter(ctx, this);
     // Draw column by column — each column is a vertical gradient
     // from HSV(h, s, 1) at top to HSV(h, s, 0) at bottom.
     // Approximate with strips of height 2 to halve D2D call count.
@@ -440,7 +440,7 @@ private:
   
   void renderHueBar(GraphicsContext &ctx, int cx, int cy, int barW, int barH)
   {
-    Painter painter(ctx);
+    Painter painter(ctx, this);
     for (int px = 0; px < barW; px++)
     {
       double hue = (double)px / barW * 360.0;
@@ -453,7 +453,7 @@ private:
   void renderAlphaBar(GraphicsContext &ctx, int cx, int cy, int barW,
                       int barH)
   {
-    Painter painter(ctx);
+    Painter painter(ctx, this);
 
     // Checkerboard background
     int tileSize = 4;
@@ -489,7 +489,7 @@ private:
   // Circular thumb for SV square
   void drawThumb(GraphicsContext &ctx, int tx, int ty, int radius)
   {
-    Painter painter(ctx);
+    Painter painter(ctx, this);
     // Dark outer ring
     painter.drawEllipse(tx - radius - 1, ty - radius - 1, (radius + 1) * 2, (radius + 1) * 2,
                         Color::fromRGB(0, 0, 0), Color::fromRGB(80, 80, 80), 1);
@@ -500,7 +500,7 @@ private:
 
   void drawBarThumb(GraphicsContext &ctx, int tx, int barY, int barH)
   {
-    Painter painter(ctx);
+    Painter painter(ctx, this);
     int py = barY + barH / 2;
     painter.drawEllipse(tx - 5, py - 5, 10, 10, Color::fromRGB(0, 0, 0),
                         Color::fromRGB(255, 255, 255), 2);

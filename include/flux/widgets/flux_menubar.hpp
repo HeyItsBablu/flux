@@ -92,7 +92,7 @@
 //         return;
 
 //       int mW = owner->popupW_, mH = owner->popupH_;
-//       Painter painter(ctx);
+//       Painter painter(ctx, this);
 
 //       painter.fillRoundedRect(x + owner->shadowOffset, y + owner->shadowOffset,
 //                               mW, mH, owner->menuBorderRadius,
@@ -375,7 +375,7 @@
 //   {
 //     if (!visible)
 //       return;
-//     Painter painter(ctx);
+//     Painter painter(ctx, this);
 
 //     if (pendingSwitch_ >= 0)
 //     {

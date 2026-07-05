@@ -32,7 +32,7 @@ private:
     {
       if (!owner || owner->options.empty())
         return;
-      Painter painter(ctx);
+      Painter painter(ctx, this);
 
       int visibleCount = std::min((int)owner->options.size(), owner->maxVisibleItems);
       int listH = visibleCount * owner->itemHeight + 2;
@@ -233,7 +233,7 @@ public:
     borderColor = isFocused ? dropdownFocusedBorderColor : dropdownBorderColor;
     drawRoundedRectangle(ctx);
 
-    Painter painter(ctx);
+    Painter painter(ctx, this);
     NativeFont font = fontCache.getFont(fontSize, fontWeight);
     Color textCol = (selectedIndex >= 0 && selectedIndex < (int)options.size())
                         ? getCurrentTextColor()

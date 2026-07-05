@@ -408,7 +408,7 @@ public:
     if (parametricMode)
       plotH -= kParamStripH + 6;
 
-    Painter painter(ctx);
+    Painter painter(ctx, this);
     painter.fillRect(x, y, width, height, bgColor);
 
     if (showRegions)
@@ -775,7 +775,7 @@ private:
 
   void drawRegions(GraphicsContext &ctx)
   {
-    Painter painter(ctx);
+    Painter painter(ctx, this);
     struct Band
     {
       float x0, x1;
@@ -797,7 +797,7 @@ private:
 
   void drawHistogram(GraphicsContext &ctx)
   {
-    Painter painter(ctx);
+    Painter painter(ctx, this);
     std::uint32_t peak = 1;
     for (auto v : histBins)
       peak = std::max(peak, v);
@@ -821,7 +821,7 @@ private:
 
   void drawGrid(GraphicsContext &ctx)
   {
-    Painter painter(ctx);
+    Painter painter(ctx, this);
     for (int i = 1; i <= 3; ++i)
     {
       painter.drawVLine(plotX + plotW * i / 4, plotY, plotH, gridColor, 1);
@@ -833,7 +833,7 @@ private:
   void drawCurve(GraphicsContext &ctx, const ToneCurveChannel &ch, Color col,
                  int lineWidth, bool drawFill)
   {
-    Painter painter(ctx);
+    Painter painter(ctx, this);
 
     if (drawFill)
     {
@@ -863,7 +863,7 @@ private:
 
   void drawPoints(GraphicsContext &ctx)
   {
-    Painter painter(ctx);
+    Painter painter(ctx, this);
     const auto &pts = activeChannelCurve().points;
 
     for (int i = 0; i < (int)pts.size(); ++i)
@@ -902,7 +902,7 @@ private:
     };
     const int tabW = 32;
     int tx = x + width - 4 * tabW - 4;
-    Painter painter(ctx);
+    Painter painter(ctx, this);
     NativeFont hFont = fontCache.getFont(9, FontWeight::Bold);
 
     for (int i = 0; i < 4; ++i)
@@ -926,7 +926,7 @@ private:
   {
     if (hoverX < plotX || hoverX > plotX + plotW)
       return;
-    Painter painter(ctx);
+    Painter painter(ctx, this);
 
     float nx = (float)(hoverX - plotX) / plotW;
     float ny = activeChannelCurve().evaluate(nx);
@@ -959,7 +959,7 @@ private:
   {
     int sy = plotY + plotH + 6;
     int sw = plotW / 4;
-    Painter painter(ctx);
+    Painter painter(ctx, this);
 
     struct Slot
     {

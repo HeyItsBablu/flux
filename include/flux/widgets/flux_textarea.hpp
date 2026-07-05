@@ -144,7 +144,7 @@
 //         borderColor = isFocused ? focusedBorderColor : unfocusedBorderColor;
 //         drawRoundedRectangle(ctx);
 
-//         Painter painter(ctx);
+//         Painter painter(ctx, this);
 //         NativeFont font = fontCache.getFont(fontFamily, fontSize, fontWeight);
 
 //         const int innerX = x + paddingLeft + gutterWidth_;

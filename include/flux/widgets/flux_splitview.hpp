@@ -442,7 +442,7 @@ private:
 
   // Draw the divider strip with optional grip dots
   void _renderDivider(GraphicsContext &ctx) const {
-    Painter painter(ctx);
+    Painter painter(ctx, this);
 
     Color col = _dragging         ? dividerDragColor
                 : _dividerHovered ? dividerHoverColor

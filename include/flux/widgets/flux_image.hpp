@@ -305,7 +305,7 @@ public:
     // =========================================================================
     void render(GraphicsContext &ctx, FontCache &fontCache) override
     {
-        Painter painter(ctx);
+        Painter painter(ctx, this);
 
         if (hasBackground)
             drawRoundedRectangle(ctx);
