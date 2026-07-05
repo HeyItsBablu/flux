@@ -147,11 +147,32 @@ namespace
     // ── Shared geometry application ──────────────────────────────────────────
     // Every fill/border call needs left/top/width/height set the same way;
     // centralised here so each Painter method stays a couple of lines.
-    void applyRect(IDomAdapter *adapter, DomNodeHandle node,
+    //
+    // IMPORTANT: x/y here are the widget's ABSOLUTE page coordinates (per
+    // the layout engine). CSS position:absolute resolves left/top against
+    // the nearest POSITIONED ANCESTOR, not the page — and every node this
+    // file creates is itself position:absolute (see ensureNode). Once a
+    // widget is nested two or more levels deep, its DOM parent is ALSO a
+    // positioned ancestor sitting at a non-zero offset, so writing
+    // absolute page coordinates double-counts that offset and the node
+    // renders outside its parent's clip region — invisible.
+    //
+    // Fix: subtract the OWNER'S PARENT WIDGET's absolute x/y (0 if no
+    // parent) before writing left/top. Safe because ensureNode() always
+    // makes a widget's DOM parent equal to Widget::parent's own node, so
+    // "owner's parent widget" and "this node's DOM parent" are always the
+    // same coordinate origin.
+    void applyRect(IDomAdapter *adapter, DomNodeHandle node, Widget *owner,
                   int x, int y, int w, int h)
     {
-        adapter->setStyle(node, "left", pxStr(x));
-        adapter->setStyle(node, "top", pxStr(y));
+        int localX = x, localY = y;
+        if (owner && owner->parent)
+        {
+            localX -= owner->parent->x;
+            localY -= owner->parent->y;
+        }
+        adapter->setStyle(node, "left", pxStr(localX));
+        adapter->setStyle(node, "top", pxStr(localY));
         adapter->setStyle(node, "width", pxStr(w));
         adapter->setStyle(node, "height", pxStr(h));
     }
@@ -247,7 +268,7 @@ void Painter::fillRect(int x, int y, int w, int h, Color color)
     IDomAdapter *adapter = getActiveDomAdapter();
     if (!adapter) return;
     DomNodeHandle node = ensureNode(owner);
-    applyRect(adapter, node, x, y, w, h);
+    applyRect(adapter, node, owner, x, y, w, h);
     char col[32];
     cssColor(color, col, sizeof(col));
     adapter->setStyle(node, "background-color", col);
@@ -259,7 +280,7 @@ void Painter::fillRoundedRect(int x, int y, int w, int h, int radius, Color colo
     IDomAdapter *adapter = getActiveDomAdapter();
     if (!adapter) return;
     DomNodeHandle node = ensureNode(owner);
-    applyRect(adapter, node, x, y, w, h);
+    applyRect(adapter, node, owner, x, y, w, h);
     char col[32];
     cssColor(color, col, sizeof(col));
     adapter->setStyle(node, "background-color", col);
@@ -298,7 +319,7 @@ void Painter::drawBorder(int x, int y, int w, int h, int radius,
     IDomAdapter *adapter = getActiveDomAdapter();
     if (!adapter) return;
     DomNodeHandle node = ensureNode(owner);
-    applyRect(adapter, node, x, y, w, h);
+    applyRect(adapter, node, owner, x, y, w, h);
     char col[32];
     cssColor(color, col, sizeof(col));
     adapter->setStyle(node, "border", pxStr(borderWidth) + " solid " + col);
@@ -327,7 +348,7 @@ void Painter::drawEllipse(int x, int y, int w, int h, Color fill, Color stroke, 
     IDomAdapter *adapter = getActiveDomAdapter();
     if (!adapter) return;
     DomNodeHandle node = ensureNode(owner);
-    applyRect(adapter, node, x, y, w, h);
+    applyRect(adapter, node, owner, x, y, w, h);
     adapter->setStyle(node, "border-radius", "50%");
     char fcol[32];
     cssColor(fill, fcol, sizeof(fcol));
@@ -360,7 +381,7 @@ void Painter::drawLine(int x1, int y1, int x2, int y2, Color color, int width)
 
     // Position a `width`-thick, `length`-long bar at (x1,y1), rotated to
     // point at (x2,y2) — the standard CSS "line via rotated div" trick.
-    applyRect(adapter, node, x1, y1 - width / 2, (int)std::round(length), width);
+    applyRect(adapter, node, owner, x1, y1 - width / 2, (int)std::round(length), width);
     char col[32];
     cssColor(color, col, sizeof(col));
     adapter->setStyle(node, "background-color", col);
@@ -396,7 +417,7 @@ void Painter::pushClipRect(int x, int y, int w, int h, int cornerRadius)
     IDomAdapter *adapter = getActiveDomAdapter();
     if (!adapter) return;
     DomNodeHandle node = ensureNode(owner);
-    applyRect(adapter, node, x, y, w, h);
+    applyRect(adapter, node, owner, x, y, w, h);
     adapter->setStyle(node, "overflow", "hidden");
     if (cornerRadius > 0)
         adapter->setStyle(node, "border-radius", pxStr(cornerRadius));
@@ -444,7 +465,7 @@ void Painter::drawText(const std::wstring &text, int x, int y, int w, int h,
     IDomAdapter *adapter = getActiveDomAdapter();
     if (!adapter) return;
     DomNodeHandle node = ensureNode(owner);
-    applyRect(adapter, node, x, y, w, h);
+    applyRect(adapter, node, owner, x, y, w, h);
 
     const char *cssFont = static_cast<const char *>(font);
     if (cssFont)
@@ -506,7 +527,7 @@ void Painter::drawRichText(const std::wstring &wtext,
     const char *cssFont = static_cast<const char *>(fnt);
 
     DomNodeHandle node = ensureNode(owner);
-    applyRect(adapter, node, params.x, params.y, params.w, params.h);
+    applyRect(adapter, node, owner, params.x, params.y, params.w, params.h);
 
     if (cssFont)
         adapter->setStyle(node, "font", cssFont);
@@ -643,7 +664,7 @@ void Painter::fillGradientRect(int x, int y, int w, int h, const std::vector<Col
     if (colors.size() == 1) { fillRect(x, y, w, h, colors[0]); return; }
 
     DomNodeHandle node = ensureNode(owner);
-    applyRect(adapter, node, x, y, w, h);
+    applyRect(adapter, node, owner, x, y, w, h);
 
     std::string css = "linear-gradient(to right";
     for (auto &c : colors)
@@ -677,7 +698,7 @@ void Painter::drawImage(const ImageDrawParams &params)
     if (!adapter) return;
 
     DomNodeHandle node = ensureNode(owner);
-    applyRect(adapter, node, params.clipX, params.clipY, params.clipW, params.clipH);
+    applyRect(adapter, node, owner, params.clipX, params.clipY, params.clipW, params.clipH);
     if (params.borderRadius > 0)
         adapter->setStyle(node, "border-radius", pxStr(params.borderRadius));
     adapter->setStyle(node, "overflow", "hidden");
