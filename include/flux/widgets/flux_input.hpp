@@ -4,6 +4,11 @@
 #include "../flux_core.hpp"
 #include "../flux_state.hpp"
 
+#if defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)
+#include "../flux_dom_adapter.hpp"
+extern DomNodeHandle fluxDomEnsureNode(Widget *owner, const char *tag);
+#endif
+
 #include "flux_keyboard.hpp"
 
 #include <algorithm>
@@ -1098,6 +1103,15 @@ public:
 
   void render(GraphicsContext &ctx, FontCache &fontCache) override
   {
+
+#if defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)
+    if (IDomAdapter *adapter = getActiveDomAdapter())
+    {
+        _renderDom(adapter);
+        needsPaint = false;
+        return;
+    }
+#endif
     borderColor = isFocused ? focusedBorderColor : unfocusedBorderColor;
     drawRoundedRectangle(ctx);
 
@@ -1145,6 +1159,16 @@ public:
 
   bool handleFocus(bool focused) override
   {
+
+#if defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)
+    // Real <input> owns its own native caret/blink — no hand-rolled
+    // cursor timer needed on this backend, and no VirtualKeyboard::
+    // notify*() either (the real element triggers the OS's own on-screen
+    // keyboard natively). Just keep isFocused in sync for anything else
+    // that reads it (e.g. border color in _renderDom below).
+    isFocused = focused;
+    return true;
+#else
     isFocused = focused;
     auto *ui = FluxUI::getCurrentInstance();
 
@@ -1170,6 +1194,8 @@ public:
 
     markNeedsPaint();
     return true;
+
+#endif
   }
 
   bool handleMouseDown(int mx, int my) override
@@ -1280,6 +1306,62 @@ public:
   }
 
 private:
+
+
+#if defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)
+  void onDomInputChanged(const std::string &value) override
+  {
+      inputValue = value;
+      // Real <input> owns real cursor position natively; this keeps our
+      // own bookkeeping field roughly in sync in case anything else on
+      // this widget still reads cursorPos (nothing does today, on this
+      // backend, but cheap to keep coherent).
+      cursorPos = (int)inputValue.size();
+      notifyStateBinding();
+  }
+
+  void onDomFocusChanged(bool focused) override
+  {
+      if (auto *ui = FluxUI::getCurrentInstance())
+          ui->setFocus(focused ? this : nullptr);
+      else
+          isFocused = focused;
+  }
+
+  void _renderDom(IDomAdapter *adapter)
+  {
+      DomNodeHandle node = fluxDomEnsureNode(this, "input");
+      char buf[24];
+      auto px = [&](int v) { snprintf(buf, sizeof(buf), "%dpx", v); return std::string(buf); };
+
+      adapter->setStyle(node, "left", px(x));
+      adapter->setStyle(node, "top", px(y));
+      adapter->setStyle(node, "width", px(width));
+      adapter->setStyle(node, "height", px(height));
+      adapter->setStyle(node, "box-sizing", "border-box");
+      adapter->setStyle(node, "padding-left", px(paddingLeft));
+      adapter->setStyle(node, "padding-right", px(paddingRight));
+      adapter->setStyle(node, "font-size", px(fontSize));
+      adapter->setStyle(node, "border-radius", px(borderRadius));
+      adapter->setStyle(node, "border", isFocused ? "1px solid rgb(33,150,243)"
+                                                  : "1px solid rgb(180,180,180)");
+      adapter->setStyle(node, "background-color", "rgb(255,255,255)");
+      adapter->setStyle(node, "color", "rgb(30,30,30)");
+      adapter->setStyle(node, "outline", "none"); // we draw our own focus border above
+
+      // Deliberate exception to "capture div owns all input" (see
+      // flux_window_dom.cpp) — a real <input> needs REAL pointer events
+      // and a real native focus target, so it stacks ABOVE the capture
+      // div rather than beneath it. Only this widget's node does this.
+      adapter->setStyle(node, "pointer-events", "auto");
+      adapter->setStyle(node, "z-index", "2");
+
+      adapter->setAttr(node, "placeholder", placeholder);
+      adapter->setInputValue(node, inputValue);
+      adapter->bindInputEvents(node, this);
+  }
+#endif
+
   State<std::string> *boundStringState = nullptr;
 
   void notifyStateBinding()

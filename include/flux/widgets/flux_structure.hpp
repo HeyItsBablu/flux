@@ -1,196 +1,196 @@
-#ifndef FLUX_STRUCTURE_HPP
-#define FLUX_STRUCTURE_HPP
+// #ifndef FLUX_STRUCTURE_HPP
+// #define FLUX_STRUCTURE_HPP
 
-#include "../flux_core.hpp"
+// #include "../flux_core.hpp"
 
-#include "flux_layout.hpp"
-#include "../flux_state.hpp"
-#include <iostream>
-
-
-class ToastWidget;  
-
-// ============================================================================
-// CONCRETE WIDGET CLASSES
-// ============================================================================
-class ScaffoldWidget : public Widget {
-private:
-  std::shared_ptr<FABWidget> fab_;
-
-public:
-  void setFAB(std::shared_ptr<FABWidget> f) {
-    fab_ = f;
-    if (f) addChild(f);
-    markNeedsLayout();
-  }
-
-  void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints, FontCache &fontCache) override {
-    if (autoWidth)  width  = constraints.maxWidth;
-    if (autoHeight) height = constraints.maxHeight;
-    BoxConstraints childConstraints = BoxConstraints::tight(width, height);
-    for (auto &child : children) {
-      if (child.get() == fab_.get()) continue;
-      child->computeLayout(ctx, childConstraints, fontCache);
-    }
-    if (fab_) {
-      fab_->computeLayout(ctx, childConstraints, fontCache);
-      fab_->positionInScaffold(x, y, width, height);
-    }
-    applyConstraints();
-    needsLayout = false;
-  }
-
-  void render(GraphicsContext &ctx, FontCache &fontCache) override {
-    for (auto &child : children) {
-      if (child.get() == fab_.get()) continue;
-      child->render(ctx, fontCache);
-    }
-    if (fab_) fab_->render(ctx, fontCache);
-    needsPaint = false;
-  }
-};
+// #include "flux_layout.hpp"
+// #include "../flux_state.hpp"
+// #include <iostream>
 
 
-// --- AppBar Widget ---
-class AppBarWidget : public Widget {
-public:
+// class ToastWidget;  
 
-  static constexpr int kDefaultHeight = 56;
+// // ============================================================================
+// // CONCRETE WIDGET CLASSES
+// // ============================================================================
+// class ScaffoldWidget : public Widget {
+// private:
+//   std::shared_ptr<FABWidget> fab_;
 
-  AppBarWidget() {
-    height     = kDefaultHeight;
-    autoHeight = false;   // AppBar height is always fixed — never shrink-wrap
-  }
+// public:
+//   void setFAB(std::shared_ptr<FABWidget> f) {
+//     fab_ = f;
+//     if (f) addChild(f);
+//     markNeedsLayout();
+//   }
 
-  void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
-                     FontCache &fontCache) override {
-    if (autoWidth)
-      width = constraints.maxWidth;
+//   void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints, FontCache &fontCache) override {
+//     if (autoWidth)  width  = constraints.maxWidth;
+//     if (autoHeight) height = constraints.maxHeight;
+//     BoxConstraints childConstraints = BoxConstraints::tight(width, height);
+//     for (auto &child : children) {
+//       if (child.get() == fab_.get()) continue;
+//       child->computeLayout(ctx, childConstraints, fontCache);
+//     }
+//     if (fab_) {
+//       fab_->computeLayout(ctx, childConstraints, fontCache);
+//       fab_->positionInScaffold(x, y, width, height);
+//     }
+//     applyConstraints();
+//     needsLayout = false;
+//   }
 
-    if (!children.empty()) {
-      children[0]->computeLayout(
-          ctx,
-          BoxConstraints::loose(width  - paddingLeft - paddingRight,
-                                height - paddingTop  - paddingBottom),
-          fontCache);
-    }
+//   void render(GraphicsContext &ctx, FontCache &fontCache) override {
+//     for (auto &child : children) {
+//       if (child.get() == fab_.get()) continue;
+//       child->render(ctx, fontCache);
+//     }
+//     if (fab_) fab_->render(ctx, fontCache);
+//     needsPaint = false;
+//   }
+// };
 
-    applyConstraints();
-    needsLayout = false;
-  }
 
-  void positionChildren(int contentX, int contentY,
-                        int contentWidth, int contentHeight) override {
-    if (!children.empty()) {
-      auto &child = children[0];
+// // --- AppBar Widget ---
+// class AppBarWidget : public Widget {
+// public:
 
-      // Center horizontally; fall back to left if title is too wide.
-      int cx = (child->width <= contentWidth)
-             ? contentX + (contentWidth - child->width) / 2
-             : contentX;
+//   static constexpr int kDefaultHeight = 56;
 
-      // Center vertically.
-      int cy = contentY + (contentHeight - child->height) / 2;
+//   AppBarWidget() {
+//     height     = kDefaultHeight;
+//     autoHeight = false;   // AppBar height is always fixed — never shrink-wrap
+//   }
 
-      child->x = cx;
-      child->y = cy;
+//   void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
+//                      FontCache &fontCache) override {
+//     if (autoWidth)
+//       width = constraints.maxWidth;
 
-      child->positionChildren(
-          child->x + child->paddingLeft,
-          child->y + child->paddingTop,
-          child->width  - child->paddingLeft - child->paddingRight,
-          child->height - child->paddingTop  - child->paddingBottom);
-    }
-  }
-};
+//     if (!children.empty()) {
+//       children[0]->computeLayout(
+//           ctx,
+//           BoxConstraints::loose(width  - paddingLeft - paddingRight,
+//                                 height - paddingTop  - paddingBottom),
+//           fontCache);
+//     }
 
-using ContainerWidgetPtr = std::shared_ptr<ContainerWidget>;
+//     applyConstraints();
+//     needsLayout = false;
+//   }
 
-inline ContainerWidgetPtr Card(WidgetPtr child) {
-  auto w = std::make_shared<ContainerWidget>();
-  w->hasBackground = true;
-  w->backgroundColor = Color::fromRGB(255, 255, 255);
-  w->hasBorder = true;
-  w->borderColor = Color::fromRGB(224, 224, 224);
-  w->borderWidth = 1;
-  w->borderRadius = 8;
-  w->paddingLeft = w->paddingRight = w->paddingTop = w->paddingBottom = 16;
-  if (child)
-    w->addChild(child);
-  return w;
-}
+//   void positionChildren(int contentX, int contentY,
+//                         int contentWidth, int contentHeight) override {
+//     if (!children.empty()) {
+//       auto &child = children[0];
 
-inline WidgetPtr AppBar(const std::string &title) {
-  auto w = std::make_shared<AppBarWidget>();
+//       // Center horizontally; fall back to left if title is too wide.
+//       int cx = (child->width <= contentWidth)
+//              ? contentX + (contentWidth - child->width) / 2
+//              : contentX;
 
-  w->hasBackground = true;
-  w->backgroundColor = Color::fromRGB(33, 150, 243);
+//       // Center vertically.
+//       int cy = contentY + (contentHeight - child->height) / 2;
 
-  auto titleWidget = Text(title)
-                         ->setFontSize(20)
-                         ->setFontWeight(FontWeight::Bold)
-                         ->setTextColor(Color::fromRGB(255, 255, 255));
+//       child->x = cx;
+//       child->y = cy;
 
-  w->addChild(titleWidget);
-  return w;
-}
+//       child->positionChildren(
+//           child->x + child->paddingLeft,
+//           child->y + child->paddingTop,
+//           child->width  - child->paddingLeft - child->paddingRight,
+//           child->height - child->paddingTop  - child->paddingBottom);
+//     }
+//   }
+// };
 
-inline WidgetPtr Scaffold(WidgetPtr appBar  = nullptr,
-                          WidgetPtr body    = nullptr,
-                          std::shared_ptr<FABWidget>   fab   = nullptr,
-                          std::shared_ptr<ToastWidget> toast = nullptr) {
-    auto w = std::make_shared<ScaffoldWidget>();
-    w->hasBackground   = true;
-    w->backgroundColor = Color::fromRGB(250, 250, 250);
+// using ContainerWidgetPtr = std::shared_ptr<ContainerWidget>;
 
-    auto column = std::make_shared<ColumnWidget>();
-    column->setSpacing(0);
-    if (appBar) column->addChild(appBar);
-    if (body)   column->addChild(body);
-    w->addChild(column);
+// inline ContainerWidgetPtr Card(WidgetPtr child) {
+//   auto w = std::make_shared<ContainerWidget>();
+//   w->hasBackground = true;
+//   w->backgroundColor = Color::fromRGB(255, 255, 255);
+//   w->hasBorder = true;
+//   w->borderColor = Color::fromRGB(224, 224, 224);
+//   w->borderWidth = 1;
+//   w->borderRadius = 8;
+//   w->paddingLeft = w->paddingRight = w->paddingTop = w->paddingBottom = 16;
+//   if (child)
+//     w->addChild(child);
+//   return w;
+// }
 
-    if (fab)   w->setFAB(fab);
-    if (toast) w->addChild(std::static_pointer_cast<Widget>(toast));
+// inline WidgetPtr AppBar(const std::string &title) {
+//   auto w = std::make_shared<AppBarWidget>();
 
-    return w;
-}
+//   w->hasBackground = true;
+//   w->backgroundColor = Color::fromRGB(33, 150, 243);
 
-inline WidgetPtr Scaffold(WidgetPtr appBar = nullptr,
-                          WidgetPtr body   = nullptr,
-                          std::shared_ptr<FABWidget> fab = nullptr) {
-    auto w = std::make_shared<ScaffoldWidget>();
-    w->hasBackground    = true;
-    w->backgroundColor  = Color::fromRGB(250, 250, 250);
+//   auto titleWidget = Text(title)
+//                          ->setFontSize(20)
+//                          ->setFontWeight(FontWeight::Bold)
+//                          ->setTextColor(Color::fromRGB(255, 255, 255));
 
-    auto column = std::make_shared<ColumnWidget>();
-    column->setSpacing(0);
-    if (appBar) column->addChild(appBar);
-    if (body)   column->addChild(body);
-    w->addChild(column);
+//   w->addChild(titleWidget);
+//   return w;
+// }
 
-    if (fab) w->setFAB(fab);  // ADD THIS
+// inline WidgetPtr Scaffold(WidgetPtr appBar  = nullptr,
+//                           WidgetPtr body    = nullptr,
+//                           std::shared_ptr<FABWidget>   fab   = nullptr,
+//                           std::shared_ptr<ToastWidget> toast = nullptr) {
+//     auto w = std::make_shared<ScaffoldWidget>();
+//     w->hasBackground   = true;
+//     w->backgroundColor = Color::fromRGB(250, 250, 250);
 
-    return w;
-}
+//     auto column = std::make_shared<ColumnWidget>();
+//     column->setSpacing(0);
+//     if (appBar) column->addChild(appBar);
+//     if (body)   column->addChild(body);
+//     w->addChild(column);
 
-inline WidgetPtr Scaffold(WidgetPtr appBar = nullptr,
-                          WidgetPtr body   = nullptr) {
-  auto w = std::make_shared<ScaffoldWidget>();
+//     if (fab)   w->setFAB(fab);
+//     if (toast) w->addChild(std::static_pointer_cast<Widget>(toast));
 
-  w->hasBackground = true;
-  w->backgroundColor = Color::fromRGB(250, 250, 250);
+//     return w;
+// }
 
-  auto column = std::make_shared<ColumnWidget>();
-  column->setSpacing(0);
+// inline WidgetPtr Scaffold(WidgetPtr appBar = nullptr,
+//                           WidgetPtr body   = nullptr,
+//                           std::shared_ptr<FABWidget> fab = nullptr) {
+//     auto w = std::make_shared<ScaffoldWidget>();
+//     w->hasBackground    = true;
+//     w->backgroundColor  = Color::fromRGB(250, 250, 250);
 
-  if (appBar)
-    column->addChild(appBar);
+//     auto column = std::make_shared<ColumnWidget>();
+//     column->setSpacing(0);
+//     if (appBar) column->addChild(appBar);
+//     if (body)   column->addChild(body);
+//     w->addChild(column);
 
-  if (body)
-    column->addChild(body);
+//     if (fab) w->setFAB(fab);  // ADD THIS
 
-  w->addChild(column);
-  return w;
-}
+//     return w;
+// }
 
-#endif
+// inline WidgetPtr Scaffold(WidgetPtr appBar = nullptr,
+//                           WidgetPtr body   = nullptr) {
+//   auto w = std::make_shared<ScaffoldWidget>();
+
+//   w->hasBackground = true;
+//   w->backgroundColor = Color::fromRGB(250, 250, 250);
+
+//   auto column = std::make_shared<ColumnWidget>();
+//   column->setSpacing(0);
+
+//   if (appBar)
+//     column->addChild(appBar);
+
+//   if (body)
+//     column->addChild(body);
+
+//   w->addChild(column);
+//   return w;
+// }
+
+// #endif

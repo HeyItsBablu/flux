@@ -349,6 +349,18 @@ public:
     return true;
   }
 
+  // DOM-backend only. Called when a real <input>/<textarea> element this
+  // widget owns (see TextInputWidget) fires a native browser 'input' or
+  // 'focus'/'blur' event. Default no-op — only widgets that get a
+  // dedicated real DOM element override these (per the "no hand-painted
+  // text editors" design decision). Declared on the base class, not a
+  // separate interface, so flux_dom_adapter_live.cpp's event dispatch can
+  // call through a plain Widget* without knowing the concrete type —
+  // same reasoning as onOverlayOutsideClick() a few lines up.
+  virtual void onDomInputChanged(const std::string & /*value*/) {}
+  virtual void onDomFocusChanged(bool /*focused*/) {}
+
+
   // Called by FluxUI's overlay dispatch when a click lands outside this
   // widget's bounds while it's registered as an open overlay (see
   // FluxUI::showOverlay / dispatchOverlayMouseDown). No-op for every widget

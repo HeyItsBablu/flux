@@ -149,6 +149,19 @@ static EM_BOOL onKeyDown(int, const EmscriptenKeyboardEvent *e, void *userData)
     auto *self = static_cast<PlatformWindow *>(userData);
     if (!self || !self->webState) return EM_FALSE;
 
+    // If a real <input>/<textarea> (TextInputWidget's dedicated element,
+    // see flux_input.hpp) currently owns native browser focus, let the
+    // browser handle this keystroke entirely. Forwarding it into
+    // callbacks.onKeyDown/onChar as well would double-handle it — the
+    // native element already updates its own .value, and our separate
+    // 'input' event listener (bindInputEvents) picks that up on its own.
+    bool nativeInputFocused = EM_ASM_INT({
+        var el = document.activeElement;
+        return (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) ? 1 : 0;
+    });
+    if (nativeInputFocused) return EM_FALSE;
+
+
     flux_web_detail::g_ctrlDown = e->ctrlKey;
     flux_web_detail::g_shiftDown = e->shiftKey;
     flux_web_detail::g_altDown = e->altKey;

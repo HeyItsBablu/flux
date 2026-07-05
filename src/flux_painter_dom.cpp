@@ -202,6 +202,22 @@ namespace
 
 } // namespace
 
+
+// ============================================================================
+// fluxDomEnsureNode — external entry point into the same widget->node cache
+// ensureNode() (above, internal-linkage) maintains. TextInputWidget
+// (flux_input.hpp) needs this to create/reuse its real <input> node
+// directly, bypassing every Painter primitive — it never calls fillRect/
+// drawBorder/etc. on this backend at all, per the "dedicated real
+// element" design decision.
+// ============================================================================
+
+DomNodeHandle fluxDomEnsureNode(Widget *owner, const char *tag)
+{
+    return ensureNode(owner, tag);
+}
+
+
 // ============================================================================
 // Widget eviction hook — called from Widget::onDetach() (wired in a small
 // follow-up edit to flux_widget.cpp, not part of this file). Removes the

@@ -31,6 +31,9 @@ constexpr DomNodeHandle kInvalidDomNode = 0;
 // code that uses it.
 // ============================================================================
 
+
+class Widget; // forward decl only — see bindInputEvents below
+
 class IDomAdapter
 {
 public:
@@ -75,6 +78,31 @@ public:
     // attaches under (the live document's mount point, or the
     // string-builder's root element). Called once, early, not per-frame.
     virtual void setRoot(DomNodeHandle node) = 0;
+
+
+
+    // ── Real <input>/<textarea> elements only ───────────────────────────
+    // Used exclusively by widgets that get a dedicated native form
+    // element instead of being painted (TextInputWidget today; a future
+    // native <select>-backed dropdown could reuse the same three calls).
+    // No other node type ever calls these.
+
+    // Sets the element's LIVE .value property, not an HTML attribute —
+    // attributes don't reflect what a user is actively typing.
+    virtual void setInputValue(DomNodeHandle node, const std::string &value) = 0;
+
+    // Moves real browser focus. Called when FluxUI's own focus system
+    // (FluxUI::setFocus) focuses/unfocuses a widget backed by a real
+    // input, so native focus and FluxUI's internal tracking stay in sync
+    // regardless of which side initiated the change.
+    virtual void focusNode(DomNodeHandle node) = 0;
+    virtual void blurNode(DomNodeHandle node) = 0;
+
+    // Wires native 'input'/'focus'/'blur' events on `node` to call back
+    // into owner->onDomInputChanged()/onDomFocusChanged(). Call once,
+    // right after creating the node — implementations must be idempotent
+    // if called again on an already-bound node (render() runs every frame).
+    virtual void bindInputEvents(DomNodeHandle node, Widget *owner) = 0;
 };
 
 // ============================================================================

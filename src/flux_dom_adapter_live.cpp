@@ -17,9 +17,40 @@
 #ifdef __EMSCRIPTEN__
 
 #include "flux/flux_dom_adapter.hpp"
+#include "flux/flux_widget.hpp"
 
 #include <emscripten.h>
 #include <cstdio>
+#include <unordered_map>
+
+// ============================================================================
+// Input-event reverse lookup + dispatch
+//
+// A SEPARATE map from flux_painter_dom.cpp's Widget*->handle cache (that
+// one maps ownership for painting; this one maps a specific input node's
+// handle back to the Widget* that should receive its native events).
+// thread_local for the same reason as every other piece of shared state
+// since Phase 0 — one active mapping per rendering thread.
+// ============================================================================
+
+namespace
+{
+    thread_local std::unordered_map<DomNodeHandle, Widget *> g_inputEventTargets;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE void fluxDomOnInputEvent(int handle, const char *value)
+{
+    auto it = g_inputEventTargets.find((DomNodeHandle)handle);
+    if (it != g_inputEventTargets.end() && it->second)
+        it->second->onDomInputChanged(value ? value : "");
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE void fluxDomOnFocusEvent(int handle, int focused)
+{
+    auto it = g_inputEventTargets.find((DomNodeHandle)handle);
+    if (it != g_inputEventTargets.end() && it->second)
+        it->second->onDomFocusChanged(focused != 0);
+}
 
 // ============================================================================
 // One-time JS-side registry setup
@@ -118,11 +149,65 @@ public:
     {
         if (node == kInvalidDomNode)
             return;
+        g_inputEventTargets.erase(node);
         EM_ASM({
             var el = Module._fluxDomNodes[$0];
             if (!el) return;
             if (el.parentNode) el.parentNode.removeChild(el);
             Module._fluxDomNodes[$0] = null; // free the slot
+        }, node);
+    }
+
+
+    void setInputValue(DomNodeHandle node, const std::string &value) override
+    {
+        if (node == kInvalidDomNode) return;
+        EM_ASM({
+            var el = Module._fluxDomNodes[$0];
+            if (!el) return;
+            var v = UTF8ToString($1);
+            // Only touch .value if it actually differs — assigning it
+            // unconditionally every frame would reset the user's cursor
+            // position mid-typing, even when the value didn't change.
+            if (el.value !== v) el.value = v;
+        }, node, value.c_str());
+    }
+
+    void focusNode(DomNodeHandle node) override
+    {
+        if (node == kInvalidDomNode) return;
+        EM_ASM({ var el = Module._fluxDomNodes[$0]; if (el && el.focus) el.focus(); }, node);
+    }
+
+    void blurNode(DomNodeHandle node) override
+    {
+        if (node == kInvalidDomNode) return;
+        EM_ASM({ var el = Module._fluxDomNodes[$0]; if (el && el.blur) el.blur(); }, node);
+    }
+
+    void bindInputEvents(DomNodeHandle node, Widget *owner) override
+    {
+        if (node == kInvalidDomNode) return;
+        g_inputEventTargets[node] = owner;
+        EM_ASM({
+            var el = Module._fluxDomNodes[$0];
+            if (!el) return;
+            if (el._fluxBound) return; // idempotent — render() calls this every frame
+            el._fluxBound = true;
+            var handle = $0;
+            el.addEventListener('input', function () {
+                var len = lengthBytesUTF8(el.value) + 1;
+                var buf = _malloc(len);
+                stringToUTF8(el.value, buf, len);
+                Module.ccall('fluxDomOnInputEvent', null, ['number', 'number'], [handle, buf]);
+                _free(buf);
+            });
+            el.addEventListener('focus', function () {
+                Module.ccall('fluxDomOnFocusEvent', null, ['number', 'number'], [handle, 1]);
+            });
+            el.addEventListener('blur', function () {
+                Module.ccall('fluxDomOnFocusEvent', null, ['number', 'number'], [handle, 0]);
+            });
         }, node);
     }
 

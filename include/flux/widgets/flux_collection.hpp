@@ -111,7 +111,7 @@ struct ScrollbarState
   {
     if (!isScrollable)
       return;
-    Painter painter(ctx, this);
+    Painter painter(ctx);
     Color thumbColor = isDragging   ? colorActive
                        : isHovering ? colorHover
                                     : colorNormal;
