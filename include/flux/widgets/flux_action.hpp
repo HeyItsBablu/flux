@@ -536,7 +536,7 @@ public:
     {
 
       NativeFont font = fontCache.getFont(fontFamily, fontSize, fontWeight);
-      Painter p(ctx);
+      Painter p(ctx, this);
       int tw = 0, th = 0;
       p.measureText(toWideString(text), font, tw, th);
 
@@ -985,7 +985,7 @@ private:
     }
     else
     {
-      Painter p(ctx);
+      Painter p(ctx, this);
       NativeFont f = fontCache.getFont(
           fontFamily.empty() ? "Segoe UI" : fontFamily,
           labelFontSize, FontWeight::Bold);

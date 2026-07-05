@@ -199,7 +199,7 @@ bool CameraWidget::_platformRenderThumb(GraphicsContext& ctx,
                                         int thumbW, int thumbH) {
     if (!_macos || !_macos->thumbTexture) return false;
 
-    Painter p(ctx);
+    Painter p(ctx, this);
     Painter::ImageDrawParams ip;
     ip.image  = (__bridge NativeImage)asMTLTexture(_macos->thumbTexture);
     ip.destX  = (float)thumbX;

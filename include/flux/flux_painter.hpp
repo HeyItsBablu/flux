@@ -8,6 +8,15 @@
 #include <string>
 #include <vector>
 
+
+// ── Forward declaration ───────────────────────────────────────────────────
+// Painter needs to tag each instance with the widget that owns it (see
+// below), but including flux_widget.hpp here would create a circular
+// include (flux_widget.hpp already includes flux_painter.hpp). A forward
+// declaration is all Painter needs, since it only ever stores the pointer.
+class Widget;
+
+
 // ── ImageRepeat / FilterQuality ───────────────────────────────────────────────
 
 enum class ImageRepeat
@@ -29,12 +38,23 @@ enum class FilterQuality
 // Painter
 // Stack-allocated wrapper around GraphicsContext.
 // One instance per draw call site; never stored.
+
+//
+// "owner" — the Widget this Painter instance is drawing on behalf of, if
+// any. Every existing backend (D2D/Cairo/Metal/Canvas2D) ignores this
+// field entirely — it exists purely so future backends (e.g. a DOM
+// backend) can correlate multiple draw calls (background fill, border,
+// text) that all belong to the same logical widget, without needing a
+// separate draw method per widget type. Defaults to nullptr so every
+// existing call site (`Painter(ctx)`) keeps compiling unchanged.
 // ============================================================================
 
 struct Painter
 {
     GraphicsContext &ctx;
-    explicit Painter(GraphicsContext &c) : ctx(c) {}
+    Widget *owner = nullptr;
+    explicit Painter(GraphicsContext &c, Widget *owner = nullptr)
+        : ctx(c), owner(owner) {}
 
     // ── Filled shapes ─────────────────────────────────────────────────────────
     void fillRect(int x, int y, int w, int h, Color color);

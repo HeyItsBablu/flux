@@ -74,7 +74,15 @@ private:
   PlatformWindow window;
   Widget *focusedWidget = nullptr;
 
-  static FluxUI *currentInstance;
+  // thread_local, not a plain global — see flux_core.cpp for the full
+  // rationale. A single browser tab or native app only ever has one
+  // thread doing UI work, so this behaves exactly as a plain global did
+  // before. It matters once multiple FluxUI instances render concurrently
+  // on different threads (e.g. an SSR host handling several requests at
+  // once) — each thread must resolve its OWN "currently active" instance,
+  // or ambient lookups like State<T>'s single-arg constructor and
+  // FlexWidget::resolveProps() could silently read another thread's app.
+  static thread_local FluxUI *currentInstance;
 
   std::unordered_map<const void *, std::shared_ptr<void>> appSingletons_;
 

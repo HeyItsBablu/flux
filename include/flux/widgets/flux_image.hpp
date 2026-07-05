@@ -520,6 +520,28 @@ private:
         _setLoadState(ImageLoadState::Loading);
         markNeedsPaint();
 
+        // ── SSR synchronous path ────────────────────────────────────────────
+        // A one-shot SSR render has no event loop to deliver the eventual
+        // background-thread result to, and no second frame in which a
+        // "Loading" placeholder would later be replaced with the real
+        // image — SSR renders exactly once. Read + decode inline instead
+        // of spawning a thread, so the very first (and only) render pass
+        // already has the real pixels. Native platforms and web are
+        // unaffected: fluxSSRSyncModeEnabled() is false everywhere except
+        // inside the SSR host's request-handling scope (see flux_http.hpp).
+        if (fluxSSRSyncModeEnabled())
+        {
+            std::vector<uint8_t> buf = _readFileBytesSync(path);
+            bool ok = !buf.empty() && _decodeIntoStaging(buf.data(), (int)buf.size());
+            if (!ok)
+                _setLoadState(ImageLoadState::Error);
+            else
+                _platformPromote();
+            _scheduleRebuild();
+            return;
+        }
+
+
 #ifdef __EMSCRIPTEN__
         FILE *f = fopen(path.c_str(), "rb");
         if (!f)
@@ -613,6 +635,34 @@ private:
             self->_scheduleRebuild(); })
             .detach();
 #endif // __EMSCRIPTEN__
+    }
+
+    // _readFileBytesSync — blocking whole-file read.
+    //
+    // Used by the SSR sync path above. Deliberately NOT wired into the
+    // Android/native-thread branches below — those have their own
+    // asset-manager / platform-specific open logic (AAssetManager on
+    // Android) that this helper doesn't replicate; it only covers the
+    // plain-file-path case SSR actually runs on (native/Linux host).
+    // =========================================================================
+    static std::vector<uint8_t> _readFileBytesSync(const std::string &path)
+    {
+        std::vector<uint8_t> buf;
+        FILE *f = fopen(path.c_str(), "rb");
+        if (!f)
+            return buf;
+        fseek(f, 0, SEEK_END);
+        long sz = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        if (sz > 0)
+        {
+            buf.resize((size_t)sz);
+            size_t nread = fread(buf.data(), 1, (size_t)sz, f);
+            if ((long)nread != sz)
+                buf.clear();
+        }
+        fclose(f);
+        return buf;
     }
 
     // =========================================================================

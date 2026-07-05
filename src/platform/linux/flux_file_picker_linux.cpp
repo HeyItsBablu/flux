@@ -470,7 +470,7 @@ void FilePickerWidget::_measureLabel(GraphicsContext &ctx, FontCache &fc)
 {
   // Measure the plain-text label to size the widget in label mode.
   NativeFont font = fc.getFont(fontFamily, labelFontSize, labelFontWeight);
-  Painter p(ctx);
+  Painter p(ctx, this);
   int tw = 0, th = 0;
   p.measureText(toWideString(_label()), font, tw, th);
   if (autoWidth)
@@ -724,7 +724,7 @@ void FilePickerWidget::render(GraphicsContext &ctx, FontCache &fontCache)
     // ── Label mode: plain text, no border/background ──────────────────────
     Color col = (isHovered && isFocusable) ? labelHoverColor : labelTextColor;
     NativeFont font = fontCache.getFont(fontFamily, labelFontSize, labelFontWeight);
-    Painter(ctx).drawTextA(_label(), x, y, width, height, font, col,
+    Painter(ctx, this).drawTextA(_label(), x, y, width, height, font, col,
                            DT_LEFT | DT_VCENTER | DT_SINGLELINE);
   }
 

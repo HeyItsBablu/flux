@@ -398,7 +398,7 @@ void CanvasWidget::render(GraphicsContext &ctx, FontCache &)
     float srcW = (z > 0.f) ? float(canvasW_) / z : float(canvasW_);
     float srcH = (z > 0.f) ? float(canvasH_) / z : float(canvasH_);
 
-    Painter p(ctx);
+    Painter p(ctx, this);
     Painter::ImageDrawParams ip;
     ip.image = (NativeImage)s.fboTex;
     ip.srcWidth = s.fboW;

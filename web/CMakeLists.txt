@@ -1,4 +1,22 @@
 include(${CMAKE_SOURCE_DIR}/config/AppConfig.cmake)
+
+
+# ── Renderer-specific shell.html markup ──────────────────────────────────────
+# Substituted into shell.html.in via configure_file() below. Keeping this
+# as plain string variables (rather than #ifdef in the .html.in itself)
+# means configure_file(@ONLY) can do the substitution with no preprocessor
+# involved — .html.in isn't run through the C preprocessor.
+if(FLUX_WEB_RENDERER STREQUAL "dom")
+    set(FLUX_DOM_RENDERER_MARKUP    "        <div id=\"flux-dom-root\"></div>")
+    set(FLUX_CANVAS_RENDERER_MARKUP "        <div id=\"flux-input-capture\"></div>")
+    # NOTE: flux-ui canvas is omitted entirely on this renderer — the DOM
+    # backend never touches Canvas2D. flux-gl stays (CanvasWidget/video/
+    # camera use it regardless of renderer, see main CMakeLists comment).
+else()
+    set(FLUX_DOM_RENDERER_MARKUP    "")
+    set(FLUX_CANVAS_RENDERER_MARKUP "        <canvas id=\"flux-ui\"></canvas>")
+endif()
+
 add_executable(flux_app
     main.cpp
     ${CMAKE_SOURCE_DIR}/lib/main.cpp

@@ -63,7 +63,7 @@ public:
       std::wstring wtext = toWideString(text);
       NativeFont font = fontCache.getFont(fontSize, fontWeight);
       int tw = 0, th = 0;
-      Painter(ctx).measureText(wtext, font, tw, th);
+      Painter(ctx, this).measureText(wtext, font, tw, th);
       width = toggleWidth + 12 + tw;
       height = std::max(toggleHeight, th);
     }
@@ -586,7 +586,7 @@ public:
       std::wstring wtext = toWideString(text);
       NativeFont font = fontCache.getFont(fontSize, fontWeight);
       int tw = 0, th = 0;
-      Painter(ctx).measureText(wtext, font, tw, th);
+      Painter(ctx, this).measureText(wtext, font, tw, th);
       width = boxSize + 8 + tw;
       height = std::max(boxSize, th);
     }
@@ -709,7 +709,7 @@ public:
       std::wstring wtext = toWideString(text);
       NativeFont font = fontCache.getFont(fontSize, fontWeight);
       int tw = 0, th = 0;
-      Painter(ctx).measureText(wtext, font, tw, th);
+      Painter(ctx, this).measureText(wtext, font, tw, th);
       width = circleSize + 8 + tw;
       height = std::max(circleSize, th);
     }
@@ -1300,7 +1300,7 @@ private:
     {
       std::wstring wpre = toWideString(inputValue.c_str(), i);
       int tw = 0, th = 0;
-      Painter(mc.ctx).measureText(wpre, font, tw, th);
+      Painter(mc.ctx, this).measureText(wpre, font, tw, th);
       int dist = abs(tw - pixelX);
       if (dist < bestDist)
       {
@@ -1325,7 +1325,7 @@ private:
     if (cursorPos > 0)
     {
       std::wstring wpre = toWideString(inputValue.c_str(), cursorPos);
-      Painter(mc.ctx).measureText(wpre, font, tw, th);
+      Painter(mc.ctx, this).measureText(wpre, font, tw, th);
     }
     int textAreaWidth = width - paddingLeft - paddingRight;
     int cursorX = tw - scrollOffset;

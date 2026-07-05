@@ -60,7 +60,7 @@ public:
     {
       // Measure natural (unwrapped) text width first
       int measW = 0, measH = 0;
-      Painter(ctx).measureRichText(toWideString(text), style, fontCache,
+      Painter(ctx, this).measureRichText(toWideString(text), style, fontCache,
                                    0,     // 0 = no wrap constraint
                                    false, // softWrap off for measuring natural width
                                    0,     // maxLines off
@@ -77,7 +77,7 @@ public:
         innerW = 0;
 
       int measW = 0, measH = 0;
-      Painter(ctx).measureRichText(toWideString(text), style, fontCache,
+      Painter(ctx, this).measureRichText(toWideString(text), style, fontCache,
                                    softWrap ? innerW : 0, softWrap, maxLines,
                                    measW, measH);
       height = measH + vPad;
@@ -122,7 +122,7 @@ public:
       if (isHovered && hasHoverTextColor)
         params.style.color = hoverTextColor;
 
-      Painter(ctx).drawRichText(toWideString(text), params, fontCache);
+      Painter(ctx, this).drawRichText(toWideString(text), params, fontCache);
     }
 
     needsPaint = false;
@@ -577,7 +577,7 @@ public:
 
     NativeFont font = fontCache.getFont(
         style.fontFamily, style.scaledFontSize(), style.fontWeight);
-    Painter(ctx).drawText(glyphText, x, y, width, height, font,
+    Painter(ctx, this).drawText(glyphText, x, y, width, height, font,
                           getCurrentTextColor(),
                           DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     needsPaint = false;

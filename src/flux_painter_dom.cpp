@@ -1,0 +1,718 @@
+// src/flux_painter_dom.cpp
+//
+// DOM Painter implementation for Emscripten / WebAssembly ("dom" renderer).
+// Compiled instead of flux_painter_web.cpp when FLUX_WEB_RENDERER=dom.
+//
+// Every method here talks ONLY to IDomAdapter (flux_dom_adapter.hpp) — never
+// EM_ASM, never a live `document` reference directly. That discipline is
+// what lets this exact file drive both:
+//   - the live browser (via LiveDomAdapter, flux_dom_adapter_live.cpp), and
+//   - a server-side HTML string builder (added in Phase 4)
+// with zero changes to anything below.
+//
+// Node ownership
+// ──────────────
+// Every geometry-producing call is tagged with Painter::owner (a Widget*,
+// added in Phase 0). ensureNode() below maps owner -> one persistent DOM
+// node, reused across every call and every frame for that widget, and
+// keeps it correctly parented under owner->parent's node automatically —
+// no widget code needs to manage DOM structure explicitly.
+//
+// Known scope limits (see notes below the code): a handful of Painter
+// methods used by only a few widgets are stubbed as documented no-ops
+// for now (drawArc, drawWavyLine, fillPolygonAlpha, beginLayer/endLayer,
+// drawShadow, drawScrollbar, drawPage). drawVideo/drawCamera are
+// PERMANENTLY no-ops on this backend by design — VideoPlayerWidget/
+// AudioPlayerWidget get dedicated real elements instead (a later,
+// separate change to those two widget files, not to Painter).
+
+#ifdef __EMSCRIPTEN__
+
+#include "flux/flux_painter.hpp"
+#include "flux/flux_dom_adapter.hpp"
+#include "flux/flux_widget.hpp"
+#include "flux/flux_font.hpp"
+#include "flux/flux_text_style.hpp"
+
+#include <unordered_map>
+#include <cstdio>
+#include <cmath>
+
+// ============================================================================
+// Forward declarations — implemented in flux_font_dom.cpp (next file).
+// Mirrors the exact split flux_painter_web.cpp / flux_font_web.cpp already
+// use: Painter's measure methods are thin wrappers around functions defined
+// in the font file, so font-measurement logic lives in one place.
+// ============================================================================
+
+void measureDomText(const char *cssFont, const std::wstring &wtext,
+                    int &outWidth, int &outHeight);
+void measureDomRichText(const std::wstring &wtext, const TextStyle &style,
+                        FontCache &fontCache, int maxWidth, bool softWrap,
+                        int maxLines, int &outWidth, int &outHeight);
+
+// ============================================================================
+// Internal helpers
+// ============================================================================
+
+namespace
+{
+    // ── Per-thread widget -> DOM node cache ──────────────────────────────────
+    //
+    // thread_local, matching every other piece of shared state fixed in
+    // Phase 0 (FluxUI::currentInstance, ThemeProvider::current_, etc). This
+    // matters here for a subtle reason beyond the usual "one SSR request per
+    // thread" argument: Widget* is a heap address, and after a Widget is
+    // destroyed its memory can be reused by an unrelated Widget later (even
+    // in a completely different request's tree, on a different thread). A
+    // process-wide cache could return a STALE, WRONG node for a brand-new
+    // widget that happens to land on a freed widget's old address. Per-thread
+    // storage plus the eviction hook below (wired into Widget::onDetach in a
+    // follow-up edit) closes that gap.
+    thread_local std::unordered_map<Widget *, DomNodeHandle> g_domNodeCache;
+
+    // ── CSS colour string ─────────────────────────────────────────────────────
+    void cssColor(Color c, char *buf, int bufLen)
+    {
+        float a = c.a / 255.f;
+        snprintf(buf, bufLen, "rgba(%d,%d,%d,%.3f)", c.r, c.g, c.b, a);
+    }
+
+    std::string pxStr(int v)
+    {
+        char buf[24];
+        snprintf(buf, sizeof(buf), "%dpx", v);
+        return buf;
+    }
+
+    // ── ensureNode ────────────────────────────────────────────────────────────
+    //
+    // Get-or-create the persistent DOM node for `owner`, and make sure it's
+    // correctly parented. Recurses up owner->parent so ancestors always
+    // exist before descendants ask to be appended to them — cheap in
+    // practice because every already-created ancestor is a single map
+    // lookup, not a re-creation.
+    //
+    // Known cost: this walks the parent chain and calls appendChild (an
+    // idempotent no-op per the IDomAdapter contract when nothing changed)
+    // on every single geometry call, for every widget, every frame. For very
+    // deep trees this is more redundant work than strictly necessary — a
+    // reasonable target for a later optimization (e.g. only re-verify
+    // parentage when a widget's actual Widget::parent pointer changes) but
+    // not a correctness problem, so left as-is for this first pass.
+    DomNodeHandle ensureNode(Widget *owner, const char *tag = "div")
+    {
+        if (!owner)
+            return kInvalidDomNode;
+        IDomAdapter *adapter = getActiveDomAdapter();
+        if (!adapter)
+            return kInvalidDomNode;
+
+        auto it = g_domNodeCache.find(owner);
+        DomNodeHandle handle;
+        bool created = false;
+
+        if (it != g_domNodeCache.end())
+        {
+            handle = it->second;
+        }
+        else
+        {
+            handle = adapter->createNode(tag);
+            g_domNodeCache[owner] = handle;
+            created = true;
+            // Every node paints at an explicit x/y via its own geometry
+            // calls, never relies on normal document flow — set this once
+            // at creation so later calls only need to update the numbers.
+            adapter->setStyle(handle, "position", "absolute");
+        }
+
+        if (owner->parent)
+        {
+            DomNodeHandle parentHandle = ensureNode(owner->parent, "div");
+            if (parentHandle != kInvalidDomNode)
+                adapter->appendChild(parentHandle, handle);
+        }
+        else if (created)
+        {
+            // Root widget (no Widget::parent) — this is the top of the
+            // tree; hand it to the adapter as the mount point. Only needs
+            // to happen once per node, hence gated on `created`.
+            adapter->setRoot(handle);
+        }
+
+        return handle;
+    }
+
+    // ── Shared geometry application ──────────────────────────────────────────
+    // Every fill/border call needs left/top/width/height set the same way;
+    // centralised here so each Painter method stays a couple of lines.
+    void applyRect(IDomAdapter *adapter, DomNodeHandle node,
+                  int x, int y, int w, int h)
+    {
+        adapter->setStyle(node, "left", pxStr(x));
+        adapter->setStyle(node, "top", pxStr(y));
+        adapter->setStyle(node, "width", pxStr(w));
+        adapter->setStyle(node, "height", pxStr(h));
+    }
+
+    // ── Enum -> CSS mappers ───────────────────────────────────────────────────
+
+    const char *cssTextAlign(TextAlign a)
+    {
+        switch (a)
+        {
+        case TextAlign::Center: return "center";
+        case TextAlign::Right:
+        case TextAlign::End: return "right";
+        case TextAlign::Justify: return "justify";
+        case TextAlign::Left:
+        case TextAlign::Start:
+        default: return "left";
+        }
+    }
+
+    const char *cssDecorationLine(TextDecoration d)
+    {
+        // CSS text-decoration-line accepts a space-separated combination;
+        // build the common cases used across the codebase's TextStyle.
+        bool u = hasDecoration(d, TextDecoration::Underline);
+        bool o = hasDecoration(d, TextDecoration::Overline);
+        bool s = hasDecoration(d, TextDecoration::LineThrough);
+        if (!u && !o && !s) return "none";
+        if (u && !o && !s) return "underline";
+        if (!u && o && !s) return "overline";
+        if (!u && !o && s) return "line-through";
+        if (u && s && !o) return "underline line-through";
+        return "underline overline line-through"; // all three — rare, but valid CSS
+    }
+
+    const char *cssDecorationStyle(TextDecorationStyle s)
+    {
+        switch (s)
+        {
+        case TextDecorationStyle::Double: return "double";
+        case TextDecorationStyle::Dotted: return "dotted";
+        case TextDecorationStyle::Dashed: return "dashed";
+        case TextDecorationStyle::Wavy: return "wavy";
+        case TextDecorationStyle::Solid:
+        default: return "solid";
+        }
+    }
+
+} // namespace
+
+// ============================================================================
+// Widget eviction hook — called from Widget::onDetach() (wired in a small
+// follow-up edit to flux_widget.cpp, not part of this file). Removes the
+// cached node (and, transitively via the adapter's real DOM removal, every
+// still-attached child under it) when a widget subtree is torn down —
+// e.g. Navigator swapping pages, or a FlexBuilderWidget item scrolling out
+// of its keyed cache.
+// ============================================================================
+
+void fluxDomEvictWidget(Widget *owner)
+{
+    auto it = g_domNodeCache.find(owner);
+    if (it == g_domNodeCache.end())
+        return;
+    if (IDomAdapter *adapter = getActiveDomAdapter())
+        adapter->removeNode(it->second);
+    g_domNodeCache.erase(it);
+}
+
+// ============================================================================
+// Painter::fillRect / fillRoundedRect / fillRectAlpha / fillRoundedRegion
+// ============================================================================
+
+void Painter::fillRect(int x, int y, int w, int h, Color color)
+{
+    if (!owner) return;
+    IDomAdapter *adapter = getActiveDomAdapter();
+    if (!adapter) return;
+    DomNodeHandle node = ensureNode(owner);
+    applyRect(adapter, node, x, y, w, h);
+    char col[32];
+    cssColor(color, col, sizeof(col));
+    adapter->setStyle(node, "background-color", col);
+}
+
+void Painter::fillRoundedRect(int x, int y, int w, int h, int radius, Color color)
+{
+    if (!owner) return;
+    IDomAdapter *adapter = getActiveDomAdapter();
+    if (!adapter) return;
+    DomNodeHandle node = ensureNode(owner);
+    applyRect(adapter, node, x, y, w, h);
+    char col[32];
+    cssColor(color, col, sizeof(col));
+    adapter->setStyle(node, "background-color", col);
+    adapter->setStyle(node, "border-radius", pxStr(radius));
+}
+
+void Painter::fillRectAlpha(int x, int y, int w, int h, Color color)
+{
+    // Alpha already lives in Color::a and cssColor() already encodes it as
+    // rgba(...) — no separate compositing step needed the way canvas
+    // sometimes requires.
+    fillRect(x, y, w, h, color);
+}
+
+void Painter::fillRoundedRegion(int x, int y, int w, int h, int cornerRadius, Color color)
+{
+    fillRoundedRect(x, y, w, h, cornerRadius, color);
+}
+
+void Painter::fillRoundedRectGDI(int x, int y, int w, int h, int radius,
+                                 Color fill, Color stroke, int strokeWidth)
+{
+    fillRoundedRect(x, y, w, h, radius, fill);
+    if (strokeWidth > 0)
+        drawRoundedRectOutline(x, y, w, h, radius * 2, stroke, strokeWidth);
+}
+
+// ============================================================================
+// Painter::drawBorder / drawRectOutline / drawRoundedRectOutline
+// ============================================================================
+
+void Painter::drawBorder(int x, int y, int w, int h, int radius,
+                         Color color, int borderWidth)
+{
+    if (!owner) return;
+    IDomAdapter *adapter = getActiveDomAdapter();
+    if (!adapter) return;
+    DomNodeHandle node = ensureNode(owner);
+    applyRect(adapter, node, x, y, w, h);
+    char col[32];
+    cssColor(color, col, sizeof(col));
+    adapter->setStyle(node, "border", pxStr(borderWidth) + " solid " + col);
+    if (radius > 0)
+        adapter->setStyle(node, "border-radius", pxStr(radius));
+}
+
+void Painter::drawRectOutline(int x, int y, int w, int h, Color color, int strokeWidth)
+{
+    drawBorder(x, y, w, h, 0, color, strokeWidth);
+}
+
+void Painter::drawRoundedRectOutline(int x, int y, int w, int h,
+                                     int cornerDiameter, Color stroke, int strokeWidth)
+{
+    drawBorder(x, y, w, h, cornerDiameter / 2, stroke, strokeWidth);
+}
+
+// ============================================================================
+// Painter::drawEllipse
+// ============================================================================
+
+void Painter::drawEllipse(int x, int y, int w, int h, Color fill, Color stroke, int strokeWidth)
+{
+    if (!owner) return;
+    IDomAdapter *adapter = getActiveDomAdapter();
+    if (!adapter) return;
+    DomNodeHandle node = ensureNode(owner);
+    applyRect(adapter, node, x, y, w, h);
+    adapter->setStyle(node, "border-radius", "50%");
+    char fcol[32];
+    cssColor(fill, fcol, sizeof(fcol));
+    adapter->setStyle(node, "background-color", fcol);
+    if (strokeWidth > 0)
+    {
+        char scol[32];
+        cssColor(stroke, scol, sizeof(scol));
+        adapter->setStyle(node, "border", pxStr(strokeWidth) + " solid " + scol);
+    }
+}
+
+// ============================================================================
+// Painter::drawLine / drawHLine / drawVLine
+//
+// A "line" in DOM terms is a thin absolutely-positioned filled rect —
+// same trick used by plenty of CSS-based UI kits, no canvas/SVG needed.
+// ============================================================================
+
+void Painter::drawLine(int x1, int y1, int x2, int y2, Color color, int width)
+{
+    if (!owner) return;
+    IDomAdapter *adapter = getActiveDomAdapter();
+    if (!adapter) return;
+    DomNodeHandle node = ensureNode(owner);
+
+    int dx = x2 - x1, dy = y2 - y1;
+    double length = std::sqrt((double)(dx * dx + dy * dy));
+    double angleDeg = std::atan2((double)dy, (double)dx) * 180.0 / M_PI;
+
+    // Position a `width`-thick, `length`-long bar at (x1,y1), rotated to
+    // point at (x2,y2) — the standard CSS "line via rotated div" trick.
+    applyRect(adapter, node, x1, y1 - width / 2, (int)std::round(length), width);
+    char col[32];
+    cssColor(color, col, sizeof(col));
+    adapter->setStyle(node, "background-color", col);
+    char rot[48];
+    snprintf(rot, sizeof(rot), "rotate(%.3fdeg)", angleDeg);
+    adapter->setStyle(node, "transform-origin", "0 50%");
+    adapter->setStyle(node, "transform", rot);
+}
+
+void Painter::drawHLine(int x, int y, int len, Color color, int strokeWidth)
+{
+    drawLine(x, y, x + len, y, color, strokeWidth);
+}
+
+void Painter::drawVLine(int x, int y, int len, Color color, int strokeWidth)
+{
+    drawLine(x, y, x, y + len, color, strokeWidth);
+}
+
+// ============================================================================
+// Painter::pushClipRect / popClipRect / pushClipRoundedRect
+//
+// Clipping in DOM is persistent CSS state on a node (overflow: hidden),
+// not a stack-based save/restore the way Canvas2D/D2D/Cairo need. So
+// pushClipRect just sets the property; popClipRect (which — note its
+// signature — takes no arguments at all, so it has no way to know which
+// node to "unclip" even if that concept applied) is correctly a no-op here.
+// ============================================================================
+
+void Painter::pushClipRect(int x, int y, int w, int h, int cornerRadius)
+{
+    if (!owner) return;
+    IDomAdapter *adapter = getActiveDomAdapter();
+    if (!adapter) return;
+    DomNodeHandle node = ensureNode(owner);
+    applyRect(adapter, node, x, y, w, h);
+    adapter->setStyle(node, "overflow", "hidden");
+    if (cornerRadius > 0)
+        adapter->setStyle(node, "border-radius", pxStr(cornerRadius));
+}
+
+void Painter::popClipRect()
+{
+    // Intentionally empty — see comment above.
+}
+
+void Painter::pushClipRoundedRect(int x, int y, int w, int h, int cornerDiameter)
+{
+    pushClipRect(x, y, w, h, cornerDiameter / 2);
+}
+
+// ============================================================================
+// Painter::drawText / drawTextA  (plain, single-style text)
+// ============================================================================
+
+namespace
+{
+    void applyDtAlignment(IDomAdapter *adapter, DomNodeHandle node, UINT format)
+    {
+        adapter->setStyle(node, "display", "flex");
+        adapter->setStyle(node, "align-items",
+                          (format & DT_VCENTER) ? "center" : "flex-start");
+        adapter->setStyle(node, "justify-content",
+                          (format & DT_CENTER) ? "center"
+                          : (format & DT_RIGHT) ? "flex-end"
+                                                : "flex-start");
+        adapter->setStyle(node, "white-space",
+                          (format & DT_SINGLELINE) ? "nowrap" : "normal");
+        if (format & DT_END_ELLIPSIS)
+        {
+            adapter->setStyle(node, "overflow", "hidden");
+            adapter->setStyle(node, "text-overflow", "ellipsis");
+        }
+    }
+}
+
+void Painter::drawText(const std::wstring &text, int x, int y, int w, int h,
+                       NativeFont font, Color color, UINT format)
+{
+    if (!owner || text.empty()) return;
+    IDomAdapter *adapter = getActiveDomAdapter();
+    if (!adapter) return;
+    DomNodeHandle node = ensureNode(owner);
+    applyRect(adapter, node, x, y, w, h);
+
+    const char *cssFont = static_cast<const char *>(font);
+    if (cssFont)
+        adapter->setStyle(node, "font", cssFont);
+
+    char col[32];
+    cssColor(color, col, sizeof(col));
+    adapter->setStyle(node, "color", col);
+    applyDtAlignment(adapter, node, format);
+
+    // wstring -> UTF-8. BMP-only is fine here (matches toWideString()'s
+    // own byte-for-byte scheme on non-Win32 web builds).
+    std::string utf8;
+    utf8.reserve(text.size());
+    for (wchar_t wc : text)
+        utf8 += static_cast<char>(static_cast<unsigned char>(wc));
+    adapter->setText(node, utf8);
+}
+
+void Painter::drawTextA(const std::string &text, int x, int y, int w, int h,
+                        NativeFont font, Color color, UINT format)
+{
+    if (text.empty()) return;
+    std::wstring ws(text.begin(), text.end());
+    drawText(ws, x, y, w, h, font, color, format);
+}
+
+// ============================================================================
+// Painter::measureText — thin forwarder (see flux_font_dom.cpp)
+// ============================================================================
+
+void Painter::measureText(const std::wstring &text, NativeFont font,
+                          int &outWidth, int &outHeight)
+{
+    if (text.empty()) { outWidth = outHeight = 0; return; }
+    const char *cssFont = static_cast<const char *>(font);
+    if (!cssFont) { outWidth = outHeight = 0; return; }
+    measureDomText(cssFont, text, outWidth, outHeight);
+}
+
+// ============================================================================
+// Painter::drawRichText / drawRichTextA / measureRichText
+// ============================================================================
+
+void Painter::drawRichText(const std::wstring &wtext,
+                           const RichTextParams &params,
+                           FontCache &fontCache)
+{
+    if (!owner || wtext.empty() || params.w <= 0 || params.h <= 0) return;
+    IDomAdapter *adapter = getActiveDomAdapter();
+    if (!adapter) return;
+
+    const TextStyle &style = params.style;
+    bool underline = hasDecoration(style.decoration, TextDecoration::Underline);
+    bool strikeOut = hasDecoration(style.decoration, TextDecoration::LineThrough);
+
+    NativeFont fnt = fontCache.getFont(style.fontFamily, style.scaledFontSize(),
+                                       style.fontWeight, underline, strikeOut);
+    const char *cssFont = static_cast<const char *>(fnt);
+
+    DomNodeHandle node = ensureNode(owner);
+    applyRect(adapter, node, params.x, params.y, params.w, params.h);
+
+    if (cssFont)
+        adapter->setStyle(node, "font", cssFont);
+
+    char col[32];
+    cssColor(style.color, col, sizeof(col));
+    adapter->setStyle(node, "color", col);
+
+    adapter->setStyle(node, "text-align", cssTextAlign(params.textAlign));
+    adapter->setStyle(node, "direction",
+                      params.direction == TextDirection::RTL ? "rtl" : "ltr");
+    adapter->setStyle(node, "white-space", params.softWrap ? "normal" : "nowrap");
+
+    // Vertical alignment within the box — CSS has no direct "vertical-align"
+    // for block content, so use flex the same way plain drawText does.
+    adapter->setStyle(node, "display", "flex");
+    adapter->setStyle(node, "flex-direction", "column");
+    adapter->setStyle(node, "justify-content",
+                      params.textAlignVertical == TextAlignVertical::Center ? "center"
+                      : params.textAlignVertical == TextAlignVertical::Bottom ? "flex-end"
+                                                                              : "flex-start");
+
+    // Overflow / ellipsis / fade.
+    // NOTE: this covers the single-line ellipsis case correctly. True
+    // multi-line ellipsis (maxLines > 1 with Ellipsis overflow) needs the
+    // -webkit-line-clamp family of properties — left as a documented
+    // follow-up since none of the widgets reviewed so far rely on it yet.
+    if (params.overflow == TextOverflow::Ellipsis)
+    {
+        adapter->setStyle(node, "overflow", "hidden");
+        adapter->setStyle(node, "text-overflow", "ellipsis");
+        if (params.maxLines == 1 || !params.softWrap)
+            adapter->setStyle(node, "white-space", "nowrap");
+    }
+    else if (params.overflow == TextOverflow::Clip)
+    {
+        adapter->setStyle(node, "overflow", "hidden");
+    }
+    if (params.maxLines > 0)
+        adapter->setStyle(node, "max-height", pxStr(
+            (int)(params.maxLines * style.scaledFontSize() * style.height * 1.2f)));
+
+    adapter->setStyle(node, "text-decoration-line", cssDecorationLine(style.decoration));
+    if (style.decoration != TextDecoration::None)
+    {
+        adapter->setStyle(node, "text-decoration-style", cssDecorationStyle(style.decorationStyle));
+        char dcol[32];
+        cssColor(style.decorationColor, dcol, sizeof(dcol));
+        adapter->setStyle(node, "text-decoration-color", dcol);
+        adapter->setStyle(node, "text-decoration-thickness", pxStr(style.decorationThickness));
+    }
+
+    if (!style.shadows.empty())
+    {
+        std::string shadowCss;
+        for (size_t i = 0; i < style.shadows.size(); ++i)
+        {
+            const auto &sh = style.shadows[i];
+            char shc[32];
+            cssColor(sh.color, shc, sizeof(shc));
+            char part[80];
+            snprintf(part, sizeof(part), "%dpx %dpx %s", sh.offsetX, sh.offsetY, shc);
+            if (i) shadowCss += ", ";
+            shadowCss += part;
+        }
+        adapter->setStyle(node, "text-shadow", shadowCss);
+    }
+
+    if (style.backgroundColor.has_value())
+    {
+        char bcol[32];
+        cssColor(*style.backgroundColor, bcol, sizeof(bcol));
+        adapter->setStyle(node, "background-color", bcol);
+    }
+
+    std::string utf8;
+    utf8.reserve(wtext.size());
+    for (wchar_t wc : wtext)
+        utf8 += static_cast<char>(static_cast<unsigned char>(wc));
+    adapter->setText(node, utf8);
+}
+
+void Painter::drawRichTextA(const std::string &text, const RichTextParams &params, FontCache &fontCache)
+{
+    if (text.empty()) return;
+    std::wstring ws(text.begin(), text.end());
+    drawRichText(ws, params, fontCache);
+}
+
+void Painter::measureRichText(const std::wstring &wtext, const TextStyle &style,
+                              FontCache &fontCache, int maxWidth, bool softWrap,
+                              int maxLines, int &outWidth, int &outHeight)
+{
+    if (wtext.empty()) { outWidth = outHeight = 0; return; }
+    measureDomRichText(wtext, style, fontCache, maxWidth, softWrap, maxLines, outWidth, outHeight);
+}
+
+// ============================================================================
+// Painter::drawFadeOverlay / drawTextDecorationLine
+//
+// Both delegate to primitives already implemented above — no direct
+// adapter access needed here, matching how flux_painter_web.cpp handles
+// them (drawFadeOverlay -> fillGradientRect; drawTextDecorationLine ->
+// drawHLine/drawWavyLine).
+// ============================================================================
+
+void Painter::drawFadeOverlay(int x, int y, int w, int h, int fadeWidth, Color bg)
+{
+    if (fadeWidth <= 0 || w <= 0 || h <= 0) return;
+    int startX = x + w - fadeWidth;
+    if (startX < x) startX = x;
+    fillGradientRect(startX, y, fadeWidth, h, {bg.withAlpha(0), bg.withAlpha(255)});
+}
+
+void Painter::drawTextDecorationLine(int lineX, int lineY, int lineW,
+                                     const TextStyle &style, TextDecoration which)
+{
+    // drawRichText already applies CSS text-decoration-* directly on the
+    // text node (the correct, native way to do this in DOM) — this method
+    // exists for the canvas backend's manual-geometry approach and has no
+    // DOM equivalent to perform. Left intentionally empty.
+    (void)lineX; (void)lineY; (void)lineW; (void)style; (void)which;
+}
+
+// ============================================================================
+// Painter::fillGradientRect
+// ============================================================================
+
+void Painter::fillGradientRect(int x, int y, int w, int h, const std::vector<Color> &colors)
+{
+    if (!owner || colors.empty() || w <= 0 || h <= 0) return;
+    IDomAdapter *adapter = getActiveDomAdapter();
+    if (!adapter) return;
+    if (colors.size() == 1) { fillRect(x, y, w, h, colors[0]); return; }
+
+    DomNodeHandle node = ensureNode(owner);
+    applyRect(adapter, node, x, y, w, h);
+
+    std::string css = "linear-gradient(to right";
+    for (auto &c : colors)
+    {
+        char col[32];
+        cssColor(c, col, sizeof(col));
+        css += ", ";
+        css += col;
+    }
+    css += ")";
+    adapter->setStyle(node, "background-image", css);
+}
+
+// ============================================================================
+// Painter::drawImage
+//
+// Best-effort for this first pass: reuses the same idea as CSS background
+// images. Requires the image-loading glue (wherever NativeImage handles are
+// produced for web today) to also expose a usable CSS url()/data-URI string
+// per handle — that lookup helper (analogous to Module._fluxImgStore in
+// flux_painter_web.cpp) needs a small addition to return a URL instead of
+// just a canvas/Image reference. Flagged as a follow-up wiring step, not
+// solved inside this file, since it touches the image-loading path rather
+// than Painter itself.
+// ============================================================================
+
+void Painter::drawImage(const ImageDrawParams &params)
+{
+    if (!owner || !params.image || params.clipW <= 0 || params.clipH <= 0) return;
+    IDomAdapter *adapter = getActiveDomAdapter();
+    if (!adapter) return;
+
+    DomNodeHandle node = ensureNode(owner);
+    applyRect(adapter, node, params.clipX, params.clipY, params.clipW, params.clipH);
+    if (params.borderRadius > 0)
+        adapter->setStyle(node, "border-radius", pxStr(params.borderRadius));
+    adapter->setStyle(node, "overflow", "hidden");
+
+    // See comment above — imageUrlForHandle() is the pending seam.
+    extern std::string imageUrlForHandle(NativeImage handle); // TODO wiring
+    std::string url = imageUrlForHandle(params.image);
+    if (!url.empty())
+    {
+        adapter->setStyle(node, "background-image", "url(" + url + ")");
+        const char *repeat =
+            params.repeat == ImageRepeat::Repeat ? "repeat"
+            : params.repeat == ImageRepeat::RepeatX ? "repeat-x"
+            : params.repeat == ImageRepeat::RepeatY ? "repeat-y"
+                                                     : "no-repeat";
+        adapter->setStyle(node, "background-repeat", repeat);
+        adapter->setStyle(node, "background-size",
+                          params.repeat == ImageRepeat::NoRepeat ? "cover" : "auto");
+        adapter->setStyle(node, "background-position", "center");
+    }
+}
+
+// ============================================================================
+// Deferred for later widget-specific migration passes — documented no-ops.
+// ============================================================================
+
+void Painter::fillRectWithLeftAccent(int x, int y, int w, int h, Color bg, Color accent, int stripWidth)
+{
+    fillRect(x, y, w, h, bg);
+    // Left accent strip as a second sub-node is exactly the "composite
+    // widget, multiple visual layers under one owner" case flagged when
+    // ProgressBarWidget was reviewed — deferred pending that design
+    // decision rather than solved ad hoc here.
+    (void)accent; (void)stripWidth;
+}
+
+void Painter::fillColumnBars(int, int, int, int, const std::vector<int> &, Color) { /* deferred */ }
+void Painter::fillPolygonAlpha(const std::vector<std::pair<int, int>> &, Color) { /* deferred */ }
+void Painter::drawArc(float, float, float, int, float, float, Color, bool) { /* deferred */ }
+void Painter::drawWavyLine(int, int, int, Color, int) { /* deferred */ }
+void Painter::drawShadow(int, int, int, int, int, int, Color, int, int) { /* deferred — CSS box-shadow candidate */ }
+void Painter::beginLayer(float) { /* deferred — see notes on canvas-native compositing-layer semantics */ }
+void Painter::endLayer() { /* deferred */ }
+void Painter::drawScrollbar(const CustomScrollbar &, int, int) { /* deferred — CustomScrollbar not yet reviewed */ }
+void Painter::drawPage(const PageDrawParams &) { /* deferred */ }
+
+// drawVideo / drawCamera — PERMANENTLY no-op on this backend by design.
+// VideoPlayerWidget / AudioPlayerWidget get dedicated <video>/<canvas>
+// elements instead of routing through Painter at all (a small, separate
+// change to those two widget files, tracked as its own Phase 1 item).
+void Painter::drawVideo(const VideoDrawParams &) {}
+void Painter::drawCamera(const CameraDrawParams &) {}
+
+#endif // __EMSCRIPTEN__

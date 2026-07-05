@@ -3,11 +3,12 @@
 
 class MyApp : public Widget
 {
+    State<int> counter = 0;
 public:
     WidgetPtr build() override
     {
 
-        return Flex({Text("Hello World")})
+        return Flex({Text("Hello World"),Text(counter),Button("Click Me",[this]{counter++})})
                 ->setBackgroundColor(Color::fromRGB(255, 180, 180))
                 ->setAlignItems(AlignItems::Center)
                 ->setJustifyContent(JustifyContent::Center)

@@ -79,9 +79,16 @@ public:
     static void set(const Breakpoints &b) { instance() = b; }
 
 private:
+
+    // thread_local — same rationale as ThemeProvider::current_,
+    // FluxAppWidget::instance_, and FluxUI::currentInstance elsewhere in
+    // Phase 0: one browser tab / native app has exactly one thread doing
+    // layout, so this is unchanged in practice there. It matters once
+    // multiple SSR requests lay out concurrently on different threads —
+    // each must see its own breakpoint configuration, not share one.
     static Breakpoints &instance()
     {
-        static Breakpoints b;
+        static thread_local Breakpoints b;
         return b;
     }
 };

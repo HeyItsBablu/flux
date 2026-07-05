@@ -157,7 +157,7 @@ public:
         }
 
         auto &cam = FluxCamera::get();
-        Painter p(ctx);
+        Painter p(ctx, this);
         int viewH = height - barHeight;
 
         // Load thumbnail when a new photo arrives

@@ -315,7 +315,7 @@ public:
 
     void render(GraphicsContext &ctx, FontCache &fontCache) override
     {
-        Painter p(ctx);
+        Painter p(ctx, this);
 
         // ── Loading / error overlays ──────────────────────────────────────────
         if (_netState == NetState::Loading)

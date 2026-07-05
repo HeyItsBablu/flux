@@ -44,6 +44,39 @@ using HttpCallback = std::function<void(HttpResult)>;
 // Forward declaration — implemented per-platform in flux_http_platform.hpp
 void fluxPostToUIThread(HttpCallback callback, HttpResult result);
 
+// SSR SYNCHRONOUS MODE
+//
+// Named generically (not "Http-specific") because the same problem — no
+// event loop to deliver an async result to during a one-shot SSR render —
+// applies to any backgrounded work a widget kicks off, not just HTTP
+// requests. ImageWidget's local-file loading (flux_image.hpp) uses this
+// same flag for exactly that reason: it never touches FluxHttp at all,
+// but needs the identical "run inline, right now" behavior during SSR.
+//
+// A one-shot, single-pass SSR render has no running event loop / message
+// pump to later deliver an async HTTP result to — fluxPostToUIThread's
+// per-platform implementations (PeekMessage, SDL_PushEvent, ALooper pipe,
+// GCD main queue) all assume something is actively draining them. On the
+// SSR host, nothing is.
+//
+// When this flag is set, FluxHttp::send() (native implementation only —
+// see below) skips the background thread entirely and calls perform()
+// inline, blocking the calling thread until the request completes, then
+// invokes the callback directly. This is safe specifically because the
+// SSR render model is "one thread owns one request's full render, start
+// to finish" — see the thread_local fixes elsewhere in Phase 0 for the
+// same underlying assumption.
+//
+// thread_local so the SSR host can turn this on only for the duration of
+// rendering one request, on the thread handling that request, without
+// affecting any other concurrently-rendering request/thread.
+// ============================================================================
+
+inline thread_local bool g_fluxSSRSyncMode = false;
+
+inline void fluxSetSSRSyncMode(bool enabled) { g_fluxSSRSyncMode = enabled; }
+inline bool fluxSSRSyncModeEnabled() { return g_fluxSSRSyncMode; }
+
 // ============================================================================
 // FLUX HTTP
 // ============================================================================
@@ -211,6 +244,19 @@ inline void FluxHttp::send(HttpRequest request,
                            HttpCallback callback,
                            bool postToUI)
 {
+
+    if (fluxSSRSyncModeEnabled())
+    {
+        // SSR path: block the calling thread, resolve inline, call back
+        // immediately. postToUI is ignored here — there is no UI thread
+        // to post to in this mode, and the caller (this same thread) is
+        // already exactly where the result needs to land.
+        HttpResult result = perform(request);
+        if (callback)
+            callback(std::move(result));
+        return;
+    }
+
     std::thread([request = std::move(request),
                  callback = std::move(callback),
                  postToUI]() mutable

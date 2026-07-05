@@ -333,7 +333,7 @@ bool CameraWidget::_platformRenderThumb(GraphicsContext &ctx,
     if (!_android.thumbTex)
         return false;
 
-    Painter p(ctx);
+    Painter p(ctx, this);
     Painter::ImageDrawParams ip;
     ip.image = (NativeImage)_android.thumbTex;
     ip.srcWidth = _android.thumbW;

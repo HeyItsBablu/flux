@@ -52,6 +52,20 @@ WidgetPtr createApp(FluxUI *app);
 extern "C" void fluxPainterWebInit();
 extern "C" EMSCRIPTEN_WEBGL_CONTEXT_HANDLE fluxGetGLContext();
 
+
+// ============================================================================
+// DOM renderer init hooks — only exist when compiled with
+// FLUX_WEB_RENDERER_DOM (see root CMakeLists.txt's FLUX_WEB_RENDERER
+// switch). Declared here rather than in a shared header since they're
+// only ever called from this one place, in main(), once.
+// ============================================================================
+
+#ifdef FLUX_WEB_RENDERER_DOM
+extern "C" void fluxDomAdapterLiveInit();
+extern "C" void fluxDomAdapterLiveActivate();
+extern "C" void fluxFontDomInit();
+#endif
+
 // ============================================================================
 // Module-level state
 // ============================================================================
@@ -176,6 +190,18 @@ int main()
     // which no longer tracks title/size anyway.
     s_app->createWindow(FLUX_APP_NAME, logicalW, logicalH);
 
+#ifdef FLUX_WEB_RENDERER_DOM
+    // Must happen BEFORE build() below — build()'s initial layout pass
+    // calls into Painter::measureText/measureRichText immediately, and
+    // those need getActiveDomAdapter() to already be non-null (this is
+    // the DOM-renderer equivalent of Module._fluxCtx2D already being set
+    // up by shell.html before WASM starts, for the canvas renderer).
+    fluxDomAdapterLiveInit();
+    fluxDomAdapterLiveActivate();
+    fluxFontDomInit();
+#endif
+
+
     // ── 3. Now build — wireCallbacks + rebuild will run layout correctly ──
     s_app->build([&]()
                  { return createApp(s_app); });
@@ -184,8 +210,10 @@ int main()
 
 
     // ── 4. Register painter helpers ───────────────────────────────────────
-
+#ifndef FLUX_WEB_RENDERER_DOM
     fluxPainterWebInit();
+#endif
+
 
     // ── 5. Register C resize callback with JS ─────────────────────────────
     EM_ASM({

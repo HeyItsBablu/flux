@@ -13,7 +13,10 @@
 // STATIC MEMBER DEFINITION
 // ============================================================================
 
-FluxUI *FluxUI::currentInstance = nullptr;
+// thread_local storage — one "currently active FluxUI" per OS thread, not
+// one per process. See the declaration in flux_core.hpp for why this
+// matters for concurrent SSR rendering.
+thread_local FluxUI *FluxUI::currentInstance = nullptr;
 
 // ============================================================================
 // CONSTRUCTION / DESTRUCTION

@@ -31,6 +31,21 @@ option(FLUX_BUILD_EXAMPLES "Build example applications" OFF)
 option(FLUX_BUILD_TESTS    "Build tests"                OFF)
 
 # ============================================================================
+# Web renderer selection
+#
+#   canvas (default) — existing Canvas2D-based Painter (flux_painter_web.cpp,
+#                       flux_font_web.cpp, flux_window_web.cpp).
+#   dom               — new DOM-based Painter (flux_painter_dom.cpp,
+#                       flux_font_dom.cpp, flux_window_dom.cpp,
+#                       flux_dom_adapter_live.cpp). See flux_dom_adapter.hpp
+#                       for why these two are mutually exclusive, never both.
+# ============================================================================
+
+set(FLUX_WEB_RENDERER "canvas" CACHE STRING "Web renderer: canvas or dom")
+set_property(CACHE FLUX_WEB_RENDERER PROPERTY STRINGS canvas dom)
+
+
+# ============================================================================
 # Compiler guard  (skip on Android — NDK uses Clang but reports differently)
 # ============================================================================
 
@@ -222,6 +237,55 @@ if(NOT EMSCRIPTEN)
     list(FILTER FLUX_SOURCES EXCLUDE REGEX ".*_web\\.cpp$")
 endif()
 
+# ── DOM-renderer files are ALWAYS excluded by default ────────────────────────
+# Unlike _web.cpp (excluded only on non-web builds), these files match no
+# platform-name pattern, so without an explicit exclusion here they'd be
+# swept into FLUX_SOURCES and compiled on EVERY build (their own
+# __EMSCRIPTEN__ guard only protects against non-web platforms, not against
+# being compiled alongside the canvas renderer on a web build). Always
+# exclude here; re-included below ONLY when FLUX_WEB_RENDERER == "dom".
+list(FILTER FLUX_SOURCES EXCLUDE REGEX ".*flux_painter_dom\\.cpp$")
+list(FILTER FLUX_SOURCES EXCLUDE REGEX ".*flux_font_dom\\.cpp$")
+list(FILTER FLUX_SOURCES EXCLUDE REGEX ".*flux_window_dom\\.cpp$")
+list(FILTER FLUX_SOURCES EXCLUDE REGEX ".*flux_dom_adapter_live\\.cpp$")
+
+
+
+# ── Renderer-specific exclusion, web builds only ─────────────────────────────
+# Both sets of files match "*_web.cpp$" / live alongside it, so this filter
+# runs AFTER the general web-inclusion logic above, narrowing further based
+# on which renderer was actually selected. On non-web builds both branches
+# are no-ops since FLUX_SOURCES contains none of these files at all (already
+# filtered out above).
+if(EMSCRIPTEN)
+    if(FLUX_WEB_RENDERER STREQUAL "dom")
+        # Only flux_painter_web.cpp and flux_window_web.cpp are actually
+        # REPLACED by the dom renderer. flux_font_web.cpp is NOT replaced —
+        # flux_font_dom.cpp only adds measurement functions alongside it
+        # and relies on FontCache's real implementation staying right here.
+        # Excluding it (as an earlier draft of this file did) is exactly
+        # what produces "undefined symbol: FontCache::getFont" at link time.
+        list(FILTER FLUX_SOURCES EXCLUDE REGEX ".*flux_painter_web\\.cpp$")
+
+        list(FILTER FLUX_SOURCES EXCLUDE REGEX ".*flux_window_web\\.cpp$")
+        list(APPEND FLUX_SOURCES
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/flux_painter_dom.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/flux_font_dom.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/flux_window_dom.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/flux_dom_adapter_live.cpp
+        )
+    endif()
+    # FLUX_WEB_RENDERER=canvas: the unconditional excludes above already
+    # removed the dom files from FLUX_SOURCES; nothing further needed —
+    # flux_painter_web.cpp/flux_font_web.cpp/flux_window_web.cpp were
+    # never touched by any exclusion, so they remain, as before.
+    # FLUX_WEB_RENDERER=canvas: no exclusion needed — the existing glob
+    # already picked up flux_painter_web.cpp/flux_font_web.cpp/
+    # flux_window_web.cpp, and flux_painter_dom.cpp etc. were never
+    # globbed as *_web.cpp in the first place, so they're simply absent.
+endif()
+
+
 list(FILTER FLUX_SOURCES EXCLUDE REGEX ".*stb_impl\\.cpp$")
 list(FILTER FLUX_SOURCES EXCLUDE REGEX ".*flux_audio_impl\\.cpp$")
 
@@ -272,6 +336,9 @@ target_compile_definitions(flux PUBLIC
 
 if(EMSCRIPTEN)
     target_compile_definitions(flux PUBLIC FLUX_WEB)
+    if(FLUX_WEB_RENDERER STREQUAL "dom")
+        target_compile_definitions(flux PUBLIC FLUX_WEB_RENDERER_DOM)
+    endif()
 endif()
 
 # ── Link libraries ────────────────────────────────────────────────────────────

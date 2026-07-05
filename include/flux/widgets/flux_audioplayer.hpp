@@ -211,7 +211,7 @@ public:
       }
     }
 
-    Painter p(ctx);
+    Painter p(ctx, this);
 
     // ── Pill background ──────────────────────────────────────────────────
     p.fillRoundedRectGDI(x, y, width, height, pillarRadius * 2, colBackground,

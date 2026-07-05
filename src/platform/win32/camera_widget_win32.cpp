@@ -192,7 +192,7 @@ bool CameraWidget::_platformRenderThumb(GraphicsContext &ctx,
     cp.dstY = thumbY;
     cp.dstW = thumbW;
     cp.dstH = thumbH;
-    Painter(ctx).drawCamera(cp);
+    Painter(ctx, this).drawCamera(cp);
     return true;
 }
 

@@ -82,6 +82,14 @@ struct AppTheme
   }
 };
 
+// ── Threading note ──────────────────────────────────────────────────────
+// current_ is thread_local, not a plain global. A single browser tab or
+// native app only ever has one thread doing UI work, so this behaves
+// exactly as before there. It matters once multiple SSR requests render
+// concurrently on different threads — each thread must see its own
+// "currently active" theme, or one request's colors could leak into
+// another's render.
+
 class ThemeProvider
 {
 public:
@@ -96,7 +104,9 @@ public:
   {
     if (current_)
       return *current_;
-    static AppTheme sDefault;
+    // Also thread_local: two threads with no bound theme must not share
+    // one mutable fallback instance.
+    static thread_local AppTheme sDefault;
     return sDefault;
   }
 
@@ -107,10 +117,10 @@ public:
   }
 
 private:
-  static AppTheme *current_;
+  static thread_local AppTheme *current_;
 };
 
-inline AppTheme *ThemeProvider::current_ = nullptr;
+inline thread_local AppTheme *ThemeProvider::current_ = nullptr;
 
 // ============================================================================
 // THEMED WIDGET FACTORIES
@@ -158,8 +168,10 @@ public:
       : theme(AppTheme::light()), home(homeWidget)
   {
     assert(instance_.expired() &&
-           "FluxAppWidget: second instance created while first is still alive. "
-           "Only one FluxAppWidget per process is supported.");
+           "FluxAppWidget: second instance created while first is still "
+           "alive on this thread. Only one FluxAppWidget per thread is "
+           "supported — each thread (e.g. each concurrently-rendering SSR "
+           "request) must own its own FluxAppWidget instance.");
 
     ThemeProvider::bind(&theme);
 
@@ -240,7 +252,9 @@ public:
   }
 
 private:
-  static std::weak_ptr<FluxAppWidget> instance_;
+  // thread_local for the same reason as ThemeProvider::current_ above —
+  // one "active app instance" per rendering thread, not one per process.
+  static thread_local std::weak_ptr<FluxAppWidget> instance_;
 
   void drawDebugBounds(GraphicsContext &ctx) { drawWidgetBounds(ctx, this); }
 
@@ -248,14 +262,14 @@ private:
   {
     if (!w)
       return;
-    Painter(ctx).drawRectOutline(w->x, w->y, w->width, w->height,
+    Painter(ctx, this).drawRectOutline(w->x, w->y, w->width, w->height,
                                  Color::fromRGB(255, 0, 0), 1);
     for (auto &child : w->children)
       drawWidgetBounds(ctx, child.get());
   }
 };
 
-inline std::weak_ptr<FluxAppWidget> FluxAppWidget::instance_;
+inline thread_local std::weak_ptr<FluxAppWidget> FluxAppWidget::instance_;
 
 // ============================================================================
 // FLUX APP FACTORY

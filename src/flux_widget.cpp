@@ -8,7 +8,7 @@ void Widget::measureText(GraphicsContext &ctx, FontCache &fontCache) {
     if (text.empty()) { width = height = 0; return; }
 
     NativeFont font = fontCache.getFont(fontFamily, fontSize, fontWeight);
-    Painter p(ctx);
+    Painter p(ctx, this);
     int tw = 0, th = 0;
     p.measureText(toWideString(text), font, tw, th);
 
@@ -27,7 +27,7 @@ void Widget::renderText(GraphicsContext &ctx, FontCache &fontCache,
 
   NativeFont font = fontCache.getFont(fontFamily, fontSize, fontWeight);
 
-  Painter(ctx).drawText(toWideString(text), x + paddingLeft, y + paddingTop,
+  Painter(ctx, this).drawText(toWideString(text), x + paddingLeft, y + paddingTop,
                         width - paddingLeft - paddingRight,
                         height - paddingTop - paddingBottom, font,
                         getCurrentTextColor(), format);

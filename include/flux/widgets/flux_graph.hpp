@@ -253,7 +253,7 @@ public:
 
     computeRange();
 
-    Painter p(ctx);
+    Painter p(ctx, this);
 
     // ── Background ─────────────────────────────────────────────────────────
     p.fillRoundedRect(x, y, width, height, borderRadius > 0 ? borderRadius : 6,
