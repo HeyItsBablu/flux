@@ -61,6 +61,7 @@
 #include <functional>
 #include <initializer_list>
 #include <iostream>
+#include <sstream>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -78,6 +79,60 @@ struct NavEntry
     std::string name;
     std::any arguments;
 };
+
+// ============================================================================
+// ROUTE PARAMS  (extracted from the URL, e.g. /products/:id -> {"id":"123"})
+// ============================================================================
+
+using RouteParams = std::unordered_map<std::string, std::string>;
+
+// ============================================================================
+// ROUTE MATCHING
+//
+// Splits both the registered pattern and the incoming path on '/', requires
+// the same segment count, and binds any ":name" segment in the pattern to
+// the corresponding literal segment in the path. A pattern with no ":name"
+// segments degenerates to plain exact-string matching — this is exactly
+// what the old std::unordered_map<std::string, RouteBuilder> lookup did,
+// so every existing route ("/settings", "/dashboard", ...) keeps matching
+// identically without being rewritten.
+// ============================================================================
+
+namespace flux_route_detail
+{
+    inline std::vector<std::string> splitSegments(const std::string &path)
+    {
+        std::vector<std::string> segs;
+        std::stringstream ss(path);
+        std::string seg;
+        while (std::getline(ss, seg, '/'))
+            if (!seg.empty())
+                segs.push_back(seg);
+        return segs;
+    }
+
+    // Returns true and fills outParams on match; false (outParams
+    // untouched) otherwise.
+    inline bool matchPattern(const std::string &pattern, const std::string &path,
+                             RouteParams &outParams)
+    {
+        auto patSegs = splitSegments(pattern);
+        auto pathSegs = splitSegments(path);
+        if (patSegs.size() != pathSegs.size())
+            return false;
+
+        RouteParams params;
+        for (size_t i = 0; i < patSegs.size(); ++i)
+        {
+            if (!patSegs[i].empty() && patSegs[i][0] == ':')
+                params[patSegs[i].substr(1)] = pathSegs[i];
+            else if (patSegs[i] != pathSegs[i])
+                return false;
+        }
+        outParams = std::move(params);
+        return true;
+    }
+}
 
 // ============================================================================
 // ROUTE TABLE ENTRY
@@ -124,37 +179,64 @@ public:
         for (auto &def : routes)
         {
 #ifdef FLUX_DEBUG
-            if (_routes.count(def.name))
+            if (hasRoute(def.name))
                 std::cerr << "[Navigator] init: duplicate route \""
                           << def.name << "\" — last definition wins.\n";
 #endif
-            _routes[def.name] = def.builder;
+            _routes.push_back(def);
         }
 
         std::string startRoute = initialRoute;
+        // Declared unconditionally so it's visible below outside the #ifdef,
+        // where it's used to populate _pendingArguments before the initial
+        // route's builder runs. Stays empty on native builds.
+        RouteParams initialParams;
 
 #ifdef __EMSCRIPTEN__
-        std::string fromHash = _getInitialHash();
-        if (!fromHash.empty())
+        // Renamed: real URL path instead of the browser hash fragment —
+        // see _getInitialPath()/_setPath() below. A server can see a real
+        // path in an incoming HTTP request; it can never see a hash
+        // fragment, since that never leaves the browser. This is the
+        // Phase 2 change that makes SSR able to know what to render.
+        std::string fromPath = _getInitialPath();
+
+        if (!fromPath.empty())
         {
-            std::string candidate = fromHash[0] == '/' ? fromHash : ("/" + fromHash);
-            if (_routes.count(candidate))
-                startRoute = candidate;
+            for (auto &def : _routes)
+            {
+                RouteParams p;
+                if (flux_route_detail::matchPattern(def.name, fromPath, p))
+                {
+                    startRoute = def.name;
+                    initialParams = std::move(p);
+                    break;
+                }
+            }
         }
 #endif
 
+        
         // Push the initial route onto the stack.
-        auto it = _routes.find(startRoute);
-        if (it == _routes.end())
+        RouteDefinition *matched = findRoute(startRoute, "init");
+        if (!matched)
         {
             std::cerr << "[Navigator] init: initialRoute \""
                       << startRoute << "\" not found in route table.\n";
         }
         else
         {
-            _stack.push_back({it->second(), startRoute});
+            // Populate params BEFORE calling the builder — mirrors the
+            // navigate()/pushReplacementNamed() pattern below, so a
+            // destination widget's constructor can read
+            // Navigator::arguments<RouteParams>() the exact same way
+            // regardless of whether the route was reached via init()'s
+            // deep-link path or a later navigate() call.
+            _pendingArguments = initialParams;
+            WidgetPtr w = matched->builder();
+            _stack.push_back({w, startRoute, _pendingArguments});
+            _pendingArguments.reset();
 #ifdef __EMSCRIPTEN__
-            _setHash(startRoute, /*replace=*/true);
+            _setPath(startRoute, /*replace=*/true);
 #endif
         }
 
@@ -169,20 +251,29 @@ public:
     // Navigator::currentArguments<T>().
     static bool navigate(const std::string &name, std::any arguments = {})
     {
-        auto *builder = findRoute(name, "navigate");
-        if (!builder)
+        RouteParams urlParams;
+        auto *route = findRoute(name, "navigate", &urlParams);
+        if (!route)
             return false;
         if (!checkHost())
             return false;
 
-        _pendingArguments = std::move(arguments);
-        WidgetPtr widget = (*builder)();
+        // Explicit `arguments` (if any) takes priority; URL-extracted
+        // params are the fallback available via
+        // Navigator::arguments<RouteParams>() when the caller didn't pass
+        // anything of their own. Most destination widgets only need one
+        // or the other, not both at once, so we don't try to merge them
+        // into a single blended type — arguments.has_value() lets a
+        // widget's constructor tell which one it actually got.
+        _pendingArguments = arguments.has_value() ? std::move(arguments)
+                                                  : std::any(urlParams);
+        WidgetPtr widget = route->builder();
         _stack.push_back({widget, name, _pendingArguments});
         _pendingArguments.reset();
 
         _rebuild();
 #ifdef __EMSCRIPTEN__
-        _setHash(name, /*replace=*/false);
+        _setPath(name, /*replace=*/false);
 #endif
         return true;
     }
@@ -190,8 +281,9 @@ public:
     // Replace the top of the stack with a new instance of the named route.
     static bool pushReplacementNamed(const std::string &name, std::any arguments = {})
     {
-        auto *builder = findRoute(name, "pushReplacementNamed");
-        if (!builder)
+        RouteParams urlParams;
+        auto *route = findRoute(name, "pushReplacementNamed", &urlParams);
+        if (!route)
             return false;
         if (!checkHost())
             return false;
@@ -199,14 +291,15 @@ public:
         if (!_stack.empty())
             _stack.pop_back();
 
-        _pendingArguments = std::move(arguments);
-        WidgetPtr widget = (*builder)();
+        _pendingArguments = arguments.has_value() ? std::move(arguments)
+                                                  : std::any(urlParams);
+        WidgetPtr widget = route->builder();
         _stack.push_back({widget, name, _pendingArguments});
         _pendingArguments.reset();
 
         _rebuild();
 #ifdef __EMSCRIPTEN__
-        _setHash(name, /*replace=*/true);
+        _setPath(name, /*replace=*/true);
 #endif
         return true;
     }
@@ -214,22 +307,23 @@ public:
     // Clear the entire stack and push the named route as the new root.
     static bool pushAndRemoveAllNamed(const std::string &name, std::any arguments = {})
     {
-        auto *builder = findRoute(name, "pushAndRemoveAllNamed");
-        if (!builder)
+        RouteParams urlParams;
+        auto *route = findRoute(name, "pushAndRemoveAllNamed", &urlParams);
+        if (!route)
             return false;
         if (!checkHost())
             return false;
 
         _stack.clear();
-
-        _pendingArguments = std::move(arguments);
-        WidgetPtr widget = (*builder)();
+        _pendingArguments = arguments.has_value() ? std::move(arguments)
+                                                  : std::any(urlParams);
+        WidgetPtr widget = route->builder();
         _stack.push_back({widget, name, _pendingArguments});
         _pendingArguments.reset();
 
         _rebuild();
 #ifdef __EMSCRIPTEN__
-        _setHash(name, /*replace=*/true);
+        _setPath(name, /*replace=*/true);
 #endif
         return true;
     }
@@ -265,7 +359,7 @@ public:
         _rebuild();
 #ifdef __EMSCRIPTEN__
         if (!_stack.empty())
-            _setHash(_stack.back().name, /*replace=*/true);
+            _setPath(_stack.back().name, /*replace=*/true);
 #endif
     }
 
@@ -278,7 +372,11 @@ public:
     // Returns true if the given route name exists in the route table.
     static bool hasRoute(const std::string &name)
     {
-        return _routes.count(name) > 0;
+        RouteParams unused;
+        for (auto &def : _routes)
+            if (flux_route_detail::matchPattern(def.name, name, unused))
+                return true;
+        return false;
     }
 
     // ── Arguments ────────────────────────────────────────────────────────────
@@ -319,21 +417,26 @@ public:
     static void _rebuild();
 
 #ifdef __EMSCRIPTEN__
-    // Called from JS (via main_web.cpp's exported wrapper) whenever the
-    // browser hash changes — covers Back/Forward buttons, manual URL edits,
+    // Called from JS (via web/main.cpp's exported wrapper) whenever the
+    // browser's URL path changes via popstate — covers Back/Forward
+    // buttons, manual URL edits,
     // and deep links. Idempotent: if the stack already matches, no-op.
-    static void _onHashChange(const char *hash)
+    static void _onPathChange(const char *path)
     {
-        std::string name = hash ? hash : "";
+        std::string name = path ? path : "";
         if (name.empty())
-            return;
-        if (name[0] != '/')
-            name = "/" + name;
+            name = "/";
 
         if (!_stack.empty() && _stack.back().name == name)
             return;
 
         // Already somewhere in the stack? (Back button case.) Trim to it.
+        // NOTE: this still compares against the STORED route pattern name
+        // (_stack[i].name), which for a parameterized route is the
+        // concrete path it was pushed with (e.g. "/products/123"), not
+        // the pattern — navigate()/pushReplacementNamed() always store
+        // the caller's concrete `name` argument in NavEntry::name, never
+        // the pattern, so this comparison is correct unchanged.
         for (int i = (int)_stack.size() - 1; i >= 0; --i)
         {
             if (_stack[i].name == name)
@@ -345,11 +448,17 @@ public:
         }
 
         // Not in the stack — forward navigation or a deep link to a known route.
-        // Note: no arguments are available on this path (see header comment).
-        auto it = _routes.find(name);
-        if (it != _routes.end())
+        RouteParams urlParams;
+        auto *route = findRoute(name, "_onPathChange", &urlParams);
+        if (route)
         {
-            _stack.push_back({it->second(), name});
+            // Previously: "no arguments are available on this path" — now
+            // fixed. Any :params in the matched pattern ARE available,
+            // exactly like the navigate() path above.
+            _pendingArguments = urlParams;
+            WidgetPtr w = route->builder();
+            _stack.push_back({w, name, _pendingArguments});
+            _pendingArguments.reset();
             _rebuild();
         }
 #ifdef FLUX_DEBUG
@@ -365,20 +474,37 @@ public:
 private:
     static NavigatorWidget *_host;
     static std::vector<NavEntry> _stack;
-    static std::unordered_map<std::string, RouteBuilder> _routes;
+    // Ordered list, not a map — patterns like "/products/:id" aren't
+    // exact-match keys, so lookup is now "walk in registration order,
+    // return first pattern that matches" rather than a hash lookup.
+    // Route count is small in practice (a handful to a few dozen), so the
+    // linear scan cost here is negligible.
+    static std::vector<RouteDefinition> _routes;
     static std::any _pendingArguments;
 
-    // Returns a pointer to the builder for the given route, or nullptr.
-    static const RouteBuilder *findRoute(const std::string &name,
-                                         const char *callerName)
+    // Returns a pointer to the matching RouteDefinition for a CONCRETE path
+    // (e.g. "/products/123", not "/products/:id"), and fills outParams with
+    // whatever segments the pattern bound along the way. Callers that don't
+    // need params (init()'s pre-match above already extracted its own) can
+    // ignore the out-param.
+    static RouteDefinition *findRoute(const std::string &concretePath,
+                                      const char *callerName,
+                                      RouteParams *outParams = nullptr)
     {
-        auto it = _routes.find(name);
-        if (it != _routes.end())
-            return &it->second;
+        for (auto &def : _routes)
+        {
+            RouteParams p;
+            if (flux_route_detail::matchPattern(def.name, concretePath, p))
+            {
+                if (outParams)
+                    *outParams = std::move(p);
+                return &def;
+            }
+        }
 
 #ifdef FLUX_DEBUG
         std::cerr << "[Navigator] " << callerName
-                  << ": unknown route \"" << name << "\". "
+                  << ": unknown route \"" << concretePath << "\". "
                                                      "Did you register it in Navigator::init()?\n";
 #endif
         return nullptr;
@@ -398,27 +524,31 @@ private:
     }
 
 #ifdef __EMSCRIPTEN__
-    // Push (replace=false) or replace (replace=true) the browser's URL hash.
-    static void _setHash(const std::string &name, bool replace)
+    // Push (replace=false) or replace (replace=true) the browser's real
+    // URL path via the History API — NOT location.hash. A hash fragment
+    // never reaches a server in an HTTP request; a real path does, which
+    // is the entire point of this Phase 2 change (a future SSR host needs
+    // to see the actual requested path).
+    static void _setPath(const std::string &name, bool replace)
     {
         EM_ASM({
             var name = UTF8ToString($0);
             if ($1) {
-                history.replaceState(null, "", '#' + name);
+                history.replaceState(null, "", name);
             } else {
-                location.hash = name;
+                history.pushState(null, "", name);
             }
         }, name.c_str(), replace ? 1 : 0);
     }
 
-    // Reads location.hash at startup, for deep-linking
-    // (e.g. navigation.html#/settings).
-    static std::string _getInitialHash()
+    // Reads location.pathname at startup, for deep-linking
+    // (e.g. requesting /settings directly instead of /#/settings).
+    static std::string _getInitialPath()
     {
         char buf[256] = {0};
         EM_ASM({
-            var h = location.hash.length > 1 ? location.hash.slice(1) : "";
-            stringToUTF8(h, $0, $1);
+            var p = location.pathname || "/";
+            stringToUTF8(p, $0, $1);
         }, buf, (int)sizeof(buf));
         return std::string(buf);
     }
@@ -427,8 +557,7 @@ private:
 
 inline NavigatorWidget *Navigator::_host = nullptr;
 inline std::vector<NavEntry> Navigator::_stack = {};
-inline std::unordered_map<std::string, Navigator::RouteBuilder>
-    Navigator::_routes = {};
+inline std::vector<RouteDefinition> Navigator::_routes = {};
 inline std::any Navigator::_pendingArguments = {};
 
 // ============================================================================

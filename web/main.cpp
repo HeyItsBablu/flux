@@ -58,7 +58,7 @@ extern "C" EMSCRIPTEN_WEBGL_CONTEXT_HANDLE fluxGetGLContext();
 // FLUX_WEB_RENDERER_DOM (see root CMakeLists.txt's FLUX_WEB_RENDERER
 // switch). Declared here rather than in a shared header since they're
 // only ever called from this one place, in main(), once.
-// ============================================================================
+// ============================================================================ 
 
 #ifdef FLUX_WEB_RENDERER_DOM
 extern "C" void fluxDomAdapterLiveInit();
@@ -158,15 +158,16 @@ extern "C" EMSCRIPTEN_KEEPALIVE void fluxOnResize(int physicalWidth, int physica
 }
 
 // ============================================================================
-// Navigator hash-change callback — exposed as a C symbol so shell-registered
-// JS ('hashchange' listener, wired up in main() below) can call back into
-// Navigator::_onHashChange when the browser Back/Forward buttons fire, or
-// the user edits the URL hash directly.
+// Navigator path-change callback — exposed as a C symbol so shell-registered
+// JS ('popstate' listener, wired up in main() below) can call back into
+// Navigator::_onPathChange when the browser Back/Forward buttons fire, or
+// the user edits the URL path directly. Renamed from
+// fluxNavigatorHashChanged (Phase 2: real paths, not hash fragments).
 // ============================================================================
 
-extern "C" EMSCRIPTEN_KEEPALIVE void fluxNavigatorHashChanged(const char *hash)
+extern "C" EMSCRIPTEN_KEEPALIVE void fluxNavigatorPathChanged(const char *path)
 {
-    Navigator::_onHashChange(hash);
+    Navigator::_onPathChange(path);
 }
 
 // ============================================================================
@@ -224,14 +225,20 @@ int main()
         };
     });
 
-    // ── 6b. Wire browser Back/Forward (URL hash) to the Navigator ─────────
-    // Registered after build() so it doesn't see the hashchange (if any)
+    // ── 6b. Wire browser Back/Forward (URL path) to the Navigator ──────────
+    // Registered after build() so it doesn't see the popstate (if any)
     // that Navigator::init() may have triggered while establishing the
     // initial route's hash.
     EM_ASM({
-        window.addEventListener('hashchange', function() {
-            var h = location.hash.length > 1 ? location.hash.slice(1) : "";
-            Module.ccall('fluxNavigatorHashChanged', null, [ 'string' ], [ h ]); });
+        // popstate fires on Back/Forward navigation between history
+        // entries pushed via history.pushState/replaceState (see
+        // Navigator::_setPath) — the real-path equivalent of the old
+        // 'hashchange' listener. It does NOT fire for the very first
+        // page load, which is intentional: init() above already read the
+        // initial path directly via _getInitialPath().
+        window.addEventListener('popstate', function() {
+            var p = location.pathname || "/";
+            Module.ccall('fluxNavigatorPathChanged', null, [ 'string' ], [ p ]); });
     });
 
     // ── 6c. Fire an initial resize so cachedWidth/Height match the real canvas ──

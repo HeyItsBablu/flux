@@ -1,53 +1,90 @@
 // lib/main.cpp
 #include "flux/flux.hpp"
+#include "flux/flux_navigator.hpp"
 
-class MyApp : public Widget
+// ============================================================
+//  Home page — plain static route, no params
+// ============================================================
+class HomePage : public Widget
 {
-    State<int> counter = 0;
-    State<std::string> textState{"Text"};
-
 public:
     WidgetPtr build() override
     {
+        return Flex({
+            Text("Home")->setFontWeight(FontWeight::Bold)->setFontSize(24),
+            Text("Pick a product:"),
+            Button("Product 1", []() { Navigator::navigate("/products/1"); }),
+            Button("Product 2", []() { Navigator::navigate("/products/2"); }),
+            Button("Go to Settings", []() { Navigator::navigate("/settings"); }),
+        })
+        ->setDirection(FlexDirection::Column)
+        ->setGap(12)
+        ->setPadding(24);
+    }
+};
 
-        return Flex({Text("Hello World")->setTextColor(Color::fromRGB(100, 100, 100)),
-                     Text(counter)->setTextColor(Color::fromRGB(100, 100, 100)),
-                     Text(textState)->setTextColor(Color::fromRGB(100, 100, 100)),
-                     // ── TextInput ─────────────────────────────────────────────
-                     Flex({Text("TextInput")
-                               ->setFontWeight(FontWeight::Bold)
-                               ->setMinWidth(120),
+// ============================================================
+//  Product page — parameterized route: /products/:id
+//  This is the actual thing Phase 2 adds. Reading the id in the
+//  CONSTRUCTOR proves params survive navigate(), browser back/
+//  forward, AND a hard page refresh on the deep link.
+// ============================================================
+class ProductPage : public Widget
+{
+    std::string productId;
+public:
+    ProductPage()
+    {
+        // arguments<T>() must be called in the constructor per the
+        // header's own documented contract.
+        RouteParams params = Navigator::arguments<RouteParams>();
+        auto it = params.find("id");
+        productId = (it != params.end()) ? it->second : "(missing)";
+    }
 
-                           TextInput("Type something...")->setInputValue(textState),
+    WidgetPtr build() override
+    {
+        return Flex({
+            Text("Product Page")->setFontWeight(FontWeight::Bold)->setFontSize(24),
+            Text("id = " + productId),
+            Button("Back", []() { Navigator::pop(); }),
+            Button("Go Home", []() { Navigator::pushAndRemoveAllNamed("/"); }),
+        })
+        ->setDirection(FlexDirection::Column)
+        ->setGap(12)
+        ->setPadding(24);
+    }
+};
 
-                           Text(textState,
-                                [](const std::string &v)
-                                {
-                                    return std::to_string((int)v.size()) + " chars";
-                                })
-                               ->setMinWidth(60)
-                               ->setTextColor(Color::fromRGB(100, 100, 100))})
-                         ->setGap(12)
-                         ->setPadding(16),
-                     Button("Click Me", [this]()
-                            { counter++; })})
-            ->setBackgroundColor(Color::fromRGB(255, 180, 180))
-            ->setAlignItems(AlignItems::Center)
-            ->setJustifyContent(JustifyContent::Center)
-            ->setAlignContent(AlignContent::Center)
-            ->setWidthMode(SizeMode::Full)
-            ->setHeightMode(SizeMode::Full)
-            ->setDirection(FlexDirection::Column);
+// ============================================================
+//  Settings page — second plain static route, to test that pop()
+//  and popUntil() still behave with a params-based stack mixed in.
+// ============================================================
+class SettingsPage : public Widget
+{
+public:
+    WidgetPtr build() override
+    {
+        return Flex({
+            Text("Settings")->setFontWeight(FontWeight::Bold)->setFontSize(24),
+            Button("Back", []() { Navigator::maybePop(); }),
+        })
+        ->setDirection(FlexDirection::Column)
+        ->setGap(12)
+        ->setPadding(24);
     }
 };
 
 // ============================================================
 //  Entry point
 // ============================================================
-
 WidgetPtr createApp(FluxUI *app)
 {
     return FluxApp()
         .setTheme(AppTheme::light())
-        .build(std::make_shared<MyApp>());
+        .build(Navigator::init({
+            {"/",              [] { return std::make_shared<HomePage>();     }},
+            {"/products/:id",  [] { return std::make_shared<ProductPage>();  }},
+            {"/settings",      [] { return std::make_shared<SettingsPage>(); }},
+        }, "/"));
 }
