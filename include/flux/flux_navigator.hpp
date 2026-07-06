@@ -187,6 +187,14 @@ public:
         }
 
         std::string startRoute = initialRoute;
+
+        // Separate from startRoute: startRoute may end up holding the
+        // matched PATTERN (e.g. "/products/:id") once the loop below
+        // runs, but the URL bar and the stack entry's NavEntry::name must
+        // reflect the CONCRETE path that was actually requested (e.g.
+        // "/products/1") — otherwise _setPath() below writes the literal
+        // pattern string into location.pathname instead of the real id.
+        std::string concretePath = initialRoute;
         // Declared unconditionally so it's visible below outside the #ifdef,
         // where it's used to populate _pendingArguments before the initial
         // route's builder runs. Stays empty on native builds.
@@ -208,6 +216,7 @@ public:
                 if (flux_route_detail::matchPattern(def.name, fromPath, p))
                 {
                     startRoute = def.name;
+                    concretePath = fromPath;
                     initialParams = std::move(p);
                     break;
                 }
@@ -233,10 +242,10 @@ public:
             // deep-link path or a later navigate() call.
             _pendingArguments = initialParams;
             WidgetPtr w = matched->builder();
-            _stack.push_back({w, startRoute, _pendingArguments});
+            _stack.push_back({w, concretePath, _pendingArguments});
             _pendingArguments.reset();
 #ifdef __EMSCRIPTEN__
-            _setPath(startRoute, /*replace=*/true);
+            _setPath(concretePath, /*replace=*/true);
 #endif
         }
 

@@ -5,6 +5,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+
+    <!-- Forces every relative URL on this page (scripts, the .wasm/.data
+         fetches Emscripten's generated JS performs, fonts, etc.) to
+         resolve against the site root, NOT the current browser path.
+         Needed because the SPA fallback server serves this exact same
+         HTML file for every route (/products/2, /settings, ...) — without
+         this, a relative "flux_app.js" resolves to "/products/flux_app.js"
+         when the current URL is /products/2, which 404s (or, worse,
+         silently matches the SPA fallback rule and serves HTML instead
+         of JS, which the browser then fails to parse as a script). -->
+    <base href="/">
     <title>@FLUX_APP_NAME@</title>
     <style>
         * {
