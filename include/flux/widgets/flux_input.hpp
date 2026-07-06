@@ -7,6 +7,7 @@
 #if defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)
 #include "../flux_dom_adapter.hpp"
 extern DomNodeHandle fluxDomEnsureNode(Widget *owner, const char *tag);
+extern void fluxDomApplyRect(Widget *owner, int x, int y, int w, int h);
 #endif
 
 #include "flux_keyboard.hpp"
@@ -1091,12 +1092,27 @@ public:
 
   bool isTextInput() const override { return true; }
 
-  void computeLayout(GraphicsContext & /*ctx*/,
+  void computeLayout(GraphicsContext &ctx,
                      const BoxConstraints &constraints,
-                     FontCache & /*fontCache*/) override
+                     FontCache &fontCache) override
   {
     if (autoWidth)
-      width = constraints.maxWidth;
+    {
+      if (constraints.maxWidth >= kUnbounded)
+      {
+        const std::string &sample = !inputValue.empty()   ? inputValue
+                                    : !placeholder.empty() ? placeholder
+                                                           : std::string("Type something...");
+        NativeFont font = fontCache.getFont(fontSize, fontWeight);
+        int tw = 0, th = 0;
+        Painter(ctx, this).measureText(toWideString(sample), font, tw, th);
+        width = std::max(150, tw + paddingLeft + paddingRight + 24);
+      }
+      else
+      {
+        width = constraints.maxWidth;
+      }
+    }
     applyConstraints();
     needsLayout = false;
   }
@@ -1334,10 +1350,7 @@ private:
       char buf[24];
       auto px = [&](int v) { snprintf(buf, sizeof(buf), "%dpx", v); return std::string(buf); };
 
-      adapter->setStyle(node, "left", px(x));
-      adapter->setStyle(node, "top", px(y));
-      adapter->setStyle(node, "width", px(width));
-      adapter->setStyle(node, "height", px(height));
+      fluxDomApplyRect(this, x, y, width, height);
       adapter->setStyle(node, "box-sizing", "border-box");
       adapter->setStyle(node, "padding-left", px(paddingLeft));
       adapter->setStyle(node, "padding-right", px(paddingRight));

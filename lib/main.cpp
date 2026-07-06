@@ -4,7 +4,7 @@
 class MyApp : public Widget
 {
     State<int> counter = 0;
-    State<std::string> textState{""};
+    State<std::string> textState{"Text"};
 
 public:
     WidgetPtr build() override

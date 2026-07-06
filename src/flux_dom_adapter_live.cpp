@@ -138,9 +138,23 @@ public:
             if (!p || !c) return;
             // Idempotent, per the IDomAdapter contract — render() calls this
             // every frame for every parent/child pair whether or not the
-            // structure actually changed. Avoid redundant reordering/reflow
-            // when the child is already correctly the last child.
-            if (p.lastElementChild === c) return;
+            // structure actually changed, in a FIXED sibling order. Checking
+            // only "is c the last child" means every sibling except the one
+            // rendered last this frame fails the check and gets physically
+            // re-appended — including nodes that already have real, correct
+            // parentage, just not "last child" position. A moved node is
+            // detached and reattached by the browser, which unconditionally
+            // blurs it if it currently holds focus (e.g. a live <input> —
+            // see TextInputWidget) — so a full-tree render pass would blur
+            // any focused input on every single frame. Checking actual
+            // parentage instead of sibling position avoids ALL of that
+            // churn: we only touch the DOM when c doesn't already live
+            // under p, which is the only case that actually needs fixing.
+            // Sibling order among absolutely-positioned nodes has no visual
+            // effect here (no z-index-free overlapping stacking to worry
+            // about), so leaving existing children in whatever order they
+            // were first inserted is safe.
+            if (c.parentNode === p) return;
             p.appendChild(c); // moves c if it already has a different parent
         }, parent, child);
     }

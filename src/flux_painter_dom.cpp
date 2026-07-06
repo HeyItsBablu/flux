@@ -84,7 +84,12 @@ namespace
         snprintf(buf, sizeof(buf), "%dpx", v);
         return buf;
     }
-
+    // Forward declaration — ensureNode() (below) needs to call this before
+    // its full definition is reached later in this same anonymous
+    // namespace; C++ doesn't hoist function bodies, only declarations.
+    void applyRect(IDomAdapter *adapter, DomNodeHandle node, Widget *owner,
+                  int x, int y, int w, int h);
+ 
     // ── ensureNode ────────────────────────────────────────────────────────────
     //
     // Get-or-create the persistent DOM node for `owner`, and make sure it's
@@ -140,6 +145,20 @@ namespace
             // to happen once per node, hence gated on `created`.
             adapter->setRoot(handle);
         }
+
+        // Keep this node's own geometry in sync unconditionally, not only
+        // when a Painter method happens to target this exact widget. A
+        // plain layout container (Column/Row/Padding/a bare Container with
+        // no background or border) never calls a Painter method on itself
+        // — Widget::render() only recurses into children in that case —
+        // so without this, its node is left as a bare
+        // `position:absolute` div with no left/top/width/height at all.
+        // CSS then falls back to static-position flow layout for it,
+        // which is essentially never where the widget tree says it
+        // actually is, and every descendant's applyRect() subtraction is
+        // computed against a DOM ancestor that isn't really there.
+        applyRect(adapter, handle, owner, owner->x, owner->y, owner->width, owner->height);
+
 
         return handle;
     }
@@ -222,6 +241,29 @@ namespace
     }
 
 } // namespace
+
+
+
+// ============================================================================
+// fluxDomApplyRect — external entry point into the same parent-relative
+// geometry math applyRect() (above, internal-linkage) uses for every other
+// Painter call. TextInputWidget::_renderDom() (flux_input.hpp) needs this
+// so its real <input> node is positioned the same way as every other node
+// in the tree — writing raw page-absolute x/y here (as it previously did)
+// double-counts the DOM parent's own offset the moment the input is nested
+// more than one level deep, since CSS position:absolute resolves against
+// the nearest positioned ancestor, not the page.
+// ============================================================================
+
+void fluxDomApplyRect(Widget *owner, int x, int y, int w, int h)
+{
+    IDomAdapter *adapter = getActiveDomAdapter();
+    if (!adapter || !owner)
+        return;
+    DomNodeHandle node = ensureNode(owner);
+    applyRect(adapter, node, owner, x, y, w, h);
+}
+
 
 
 // ============================================================================

@@ -174,6 +174,12 @@ enum class SizeMode
   Full
 };
 
+
+#if defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)
+extern void fluxDomEvictWidget(Widget *owner);
+#endif
+
+
 // ============================================================================
 // WIDGET BASE CLASS
 // ============================================================================
@@ -279,7 +285,18 @@ public:
       child->parent = nullptr;
       child->onDetach();
     }
+
+#if defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)
+    // Remove this widget's cached DOM node (and, via the adapter's real
+    // DOM removal, everything still parented under it) — children are
+    // evicted first via the recursion above, so this runs post-order,
+    // same as the rest of onDetach()'s teardown semantics.
+    fluxDomEvictWidget(this);
+#endif
+
   }
+
+
 
   // GL context loss (Android: EGL surface/context destroyed and later
   // recreated, e.g. app backgrounded). Default is a plain tree-walk so
