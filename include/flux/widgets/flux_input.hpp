@@ -6,8 +6,10 @@
 
 #if defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)
 #include "../flux_dom_adapter.hpp"
-extern DomNodeHandle fluxDomEnsureNode(Widget *owner, const char *tag);
-extern void fluxDomApplyRect(Widget *owner, int x, int y, int w, int h);
+// fluxDomEnsureNode / fluxDomApplyRect are declared once, with their
+// optional "slot" parameter, in flux_dom_adapter.hpp — not redeclared
+// here, to avoid a default-argument redefinition conflict now that
+// CheckBoxWidget (below) also needs them with a non-default slot.
 #endif
 
 #include "flux_keyboard.hpp"
@@ -86,6 +88,15 @@ public:
 
   void render(GraphicsContext &ctx, FontCache &fontCache) override
   {
+
+#if defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)
+    if (IDomAdapter *adapter = getActiveDomAdapter())
+    {
+        _renderDom(adapter);
+        needsPaint = false;
+        return;
+    }
+#endif
     Painter painter(ctx, this);
 
     int toggleX = x + paddingLeft;
@@ -258,6 +269,83 @@ private:
     if (boundBoolState)
       boundBoolState->set(toggled);
   }
+
+#if defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)
+  // Four layers under one owner: track, thumb-shadow, thumb, label.
+  // The thumb's LEFT position is animated via a real CSS transition
+  // rather than driven by animationProgress/a JS timer — on canvas,
+  // animationProgress snaps instantly to 0/1 (see render() above; there
+  // is no interpolation loop anywhere in this widget), so the canvas
+  // version's "animation" was really just an instant toggle rendered at
+  // whatever moment repaint happened to catch it. CSS transition gives
+  // an actual smooth slide for free, which is a strict visual upgrade,
+  // not a behavior change anything else here depends on.
+  void _renderDom(IDomAdapter *adapter)
+  {
+      char buf[24];
+      auto px = [&](int v) { snprintf(buf, sizeof(buf), "%dpx", v); return std::string(buf); };
+      char colbuf[32];
+      auto rgb = [&](Color c) { snprintf(colbuf, sizeof(colbuf), "rgb(%d,%d,%d)", c.r, c.g, c.b); return std::string(colbuf); };
+
+      int toggleX = x + paddingLeft;
+      int toggleY = y + paddingTop +
+                    (height - paddingTop - paddingBottom - toggleHeight) / 2;
+
+      Color trackColor = toggled ? trackOnColor : trackOffColor;
+
+      // ── Track ─────────────────────────────────────────────────────────
+      DomNodeHandle track = fluxDomEnsureNode(this, "div", "track");
+      fluxDomApplyRect(this, toggleX, toggleY, toggleWidth, toggleHeight, "track");
+      adapter->setStyle(track, "border-radius", px(toggleHeight / 2));
+      adapter->setStyle(track, "background-color", rgb(trackColor));
+      adapter->setStyle(track, "transition", "background-color 0.15s ease");
+      adapter->setStyle(track, "pointer-events", "none");
+
+      int thumbPadding = (toggleHeight - thumbSize) / 2;
+      int thumbOffX = toggleX + thumbPadding;
+      int thumbOnX = toggleX + toggleWidth - thumbSize - thumbPadding;
+      int thumbX = toggled ? thumbOnX : thumbOffX;
+      int thumbY = toggleY + thumbPadding;
+
+      // ── Thumb shadow — separate slot, sits directly behind the thumb.
+      DomNodeHandle shadow = fluxDomEnsureNode(this, "div", "shadow");
+      fluxDomApplyRect(this, thumbX - 1, thumbY + 2, thumbSize + 2, thumbSize, "shadow");
+      adapter->setStyle(shadow, "border-radius", "50%");
+      adapter->setStyle(shadow, "background-color", rgb(shadowColor));
+      adapter->setStyle(shadow, "transition", "left 0.15s ease");
+      adapter->setStyle(shadow, "pointer-events", "none");
+
+      // ── Thumb ─────────────────────────────────────────────────────────
+      Color currentThumbColor = isPressed        ? thumbPressedColor
+                                : isThumbHovered ? thumbHoverColor
+                                                 : thumbColor;
+      DomNodeHandle thumb = fluxDomEnsureNode(this, "div", "thumb");
+      fluxDomApplyRect(this, thumbX, thumbY, thumbSize, thumbSize, "thumb");
+      adapter->setStyle(thumb, "border-radius", "50%");
+      adapter->setStyle(thumb, "background-color", rgb(currentThumbColor));
+      adapter->setStyle(thumb, "border", "1px solid rgb(230,230,230)");
+      adapter->setStyle(thumb, "box-sizing", "border-box");
+      adapter->setStyle(thumb, "transition", "left 0.15s ease, background-color 0.15s ease");
+      adapter->setStyle(thumb, "pointer-events", "none");
+
+      // ── Label — separate slot, same pattern as CheckBox/RadioButton.
+      if (!text.empty())
+      {
+          int textX = toggleX + toggleWidth + 12;
+          int textW = (x + width - paddingRight) - textX;
+          DomNodeHandle label = fluxDomEnsureNode(this, "div", "label");
+          fluxDomApplyRect(this, textX, y + paddingTop, textW,
+                          height - paddingTop - paddingBottom, "label");
+          adapter->setStyle(label, "display", "flex");
+          adapter->setStyle(label, "align-items", "center");
+          adapter->setStyle(label, "white-space", "nowrap");
+          adapter->setStyle(label, "font-size", px(fontSize));
+          adapter->setStyle(label, "color", rgb(getCurrentTextColor()));
+          adapter->setStyle(label, "pointer-events", "none");
+          adapter->setText(label, text);
+      }
+  }
+#endif
 };
 
 using ToggleWidgetPtr = std::shared_ptr<ToggleWidget>;
@@ -316,6 +404,15 @@ public:
 
   void render(GraphicsContext &ctx, FontCache & /*fontCache*/) override
   {
+
+#if defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)
+    if (IDomAdapter *adapter = getActiveDomAdapter())
+    {
+        _renderDom(adapter);
+        needsPaint = false;
+        return;
+    }
+#endif
     Painter painter(ctx, this);
 
     int trackY = y + height / 2;
@@ -532,6 +629,75 @@ private:
   State<double> *boundDoubleState = nullptr;
   State<int> *boundIntState = nullptr;
 
+
+#if defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)
+  // Three layers under one owner: track, fill (progress), thumb.
+  // Deliberately NO position transition on fill/thumb — this widget
+  // updates continuously during a drag (see handleMouseMove ->
+  // updateValueFromMouseX, called on every reported mouse-move pixel),
+  // and a CSS transition would make the thumb visibly lag behind the
+  // live cursor position instead of tracking it. Toggle/RadioButton's
+  // transitions are safe because those are discrete, one-shot state
+  // flips, not a value that changes every frame while the user drags —
+  // that distinction is why the same technique isn't reused here for
+  // position (color-only transitions on hover/drag state are still
+  // fine and included below).
+  void _renderDom(IDomAdapter *adapter)
+  {
+      char buf[24];
+      auto px = [&](int v) { snprintf(buf, sizeof(buf), "%dpx", v); return std::string(buf); };
+      char colbuf[32];
+      auto rgb = [&](Color c) { snprintf(colbuf, sizeof(colbuf), "rgb(%d,%d,%d)", c.r, c.g, c.b); return std::string(colbuf); };
+
+      int trackY = y + height / 2;
+      int trackLeft = x + paddingLeft;
+      int trackRight = x + width - paddingRight;
+      int trackWidth = trackRight - trackLeft;
+
+      double normalizedValue = (maxValue > minValue)
+                                   ? (value - minValue) / (maxValue - minValue)
+                                   : 0.0;
+      int thumbX = trackLeft + (int)(normalizedValue * trackWidth);
+
+      // ── Track (full-width background) ────────────────────────────────
+      DomNodeHandle track = fluxDomEnsureNode(this, "div", "track");
+      fluxDomApplyRect(this, trackLeft, trackY - trackHeight / 2,
+                      trackWidth, trackHeight, "track");
+      adapter->setStyle(track, "border-radius", px(trackHeight / 2));
+      adapter->setStyle(track, "background-color", rgb(trackColor));
+      adapter->setStyle(track, "pointer-events", "none");
+
+      // ── Fill (progress up to the thumb) — separate slot, drawn on
+      // top of the track. Zero-width when value == minValue; the node
+      // is still created (not skipped) so later drags just widen it
+      // rather than creating/destroying it.
+      DomNodeHandle fill = fluxDomEnsureNode(this, "div", "fill");
+      int fillWidth = std::max(0, thumbX - trackLeft);
+      fluxDomApplyRect(this, trackLeft, trackY - trackHeight / 2,
+                      fillWidth, trackHeight, "fill");
+      adapter->setStyle(fill, "border-radius", px(trackHeight / 2));
+      adapter->setStyle(fill, "background-color", rgb(trackFillColor));
+      adapter->setStyle(fill, "pointer-events", "none");
+
+      // ── Thumb ─────────────────────────────────────────────────────────
+      Color currentThumbColor = isDragging       ? thumbDragColor
+                                : isThumbHovered ? thumbHoverColor
+                                                 : thumbColor;
+      DomNodeHandle thumb = fluxDomEnsureNode(this, "div", "thumb");
+      fluxDomApplyRect(this, thumbX - thumbRadius, trackY - thumbRadius,
+                      thumbRadius * 2, thumbRadius * 2, "thumb");
+      adapter->setStyle(thumb, "border-radius", "50%");
+      adapter->setStyle(thumb, "background-color", rgb(currentThumbColor));
+      adapter->setStyle(thumb, "border", "1px solid rgb(255,255,255)");
+      adapter->setStyle(thumb, "box-sizing", "border-box");
+      // Color-only transition is safe (doesn't fight live drag input,
+      // unlike a position transition would) — smooths the hover/press
+      // color swap the same way Toggle's track color transition does.
+      adapter->setStyle(thumb, "transition", "background-color 0.1s ease");
+      adapter->setStyle(thumb, "pointer-events", "none");
+  }
+#endif
+
   void updateValueFromMouseX(int mx)
   {
     int trackLeft = x + paddingLeft;
@@ -609,6 +775,15 @@ public:
 
   void render(GraphicsContext &ctx, FontCache &fontCache) override
   {
+
+#if defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)
+    if (IDomAdapter *adapter = getActiveDomAdapter())
+    {
+        _renderDom(adapter);
+        needsPaint = false;
+        return;
+    }
+#endif
     Painter painter(ctx, this);
 
     int boxX = x + paddingLeft;
@@ -668,6 +843,67 @@ public:
     { state.set(checked); };
     return shared_from_this();
   }
+
+
+private:
+#if defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)
+  // Hit-testing for clicks stays entirely in C++ (findAndHandleMouseEvent
+  // via the input-capture div — see flux_window_dom.cpp); these nodes are
+  // purely visual, hence pointer-events:none on both, matching every
+  // other non-native-input widget on this backend.
+  void _renderDom(IDomAdapter *adapter)
+  {
+      char buf[24];
+      auto px = [&](int v) { snprintf(buf, sizeof(buf), "%dpx", v); return std::string(buf); };
+      char colbuf[32];
+      auto rgb = [&](Color c) { snprintf(colbuf, sizeof(colbuf), "rgb(%d,%d,%d)", c.r, c.g, c.b); return std::string(colbuf); };
+
+      int boxX = x + paddingLeft;
+      int boxY = y + paddingTop + (height - paddingTop - paddingBottom - boxSize) / 2;
+
+      // ── Box + checkmark — ONE node. The checkmark is the node's own
+      // text content rather than a second overlapping layer, so it
+      // doesn't need its own slot.
+      DomNodeHandle box = fluxDomEnsureNode(this, "div", "box");
+      fluxDomApplyRect(this, boxX, boxY, boxSize, boxSize, "box");
+      Color fill = checked ? Color::fromRGB(76, 175, 80) : Color::fromRGB(255, 255, 255);
+      Color stroke = checked ? Color::fromRGB(56, 155, 60) : Color::fromRGB(150, 150, 150);
+      adapter->setStyle(box, "background-color", rgb(fill));
+      adapter->setStyle(box, "border", "1px solid " + rgb(stroke));
+      adapter->setStyle(box, "box-sizing", "border-box");
+      adapter->setStyle(box, "display", "flex");
+      adapter->setStyle(box, "align-items", "center");
+      adapter->setStyle(box, "justify-content", "center");
+      adapter->setStyle(box, "color", "rgb(255,255,255)");
+      adapter->setStyle(box, "font-size", px(std::max(8, boxSize - 4)));
+      adapter->setStyle(box, "line-height", "1");
+      adapter->setStyle(box, "pointer-events", "none");
+      // Unicode checkmark approximates the two hand-drawn lines the
+      // canvas/D2D/Cairo backends stroke — same cross-backend visual
+      // tolerance already accepted elsewhere for text/decoration in this
+      // file, not a pixel-exact match.
+      adapter->setText(box, checked ? "\xE2\x9C\x93" : "");
+
+      // ── Label — a SEPARATE node (different slot) under the SAME
+      // owner. Without slots this call would silently overwrite the box
+      // node above, since one Widget* used to map to exactly one node.
+      if (!text.empty())
+      {
+          int textX = boxX + boxSize + 8;
+          DomNodeHandle label = fluxDomEnsureNode(this, "div", "label");
+          fluxDomApplyRect(this, textX, y + paddingTop,
+                          (x + width - paddingRight) - textX,
+                          height - paddingTop - paddingBottom, "label");
+          adapter->setStyle(label, "display", "flex");
+          adapter->setStyle(label, "align-items", "center");
+          adapter->setStyle(label, "white-space", "nowrap");
+          adapter->setStyle(label, "font-size", px(fontSize));
+          adapter->setStyle(label, "color", rgb(getCurrentTextColor()));
+          adapter->setStyle(label, "pointer-events", "none");
+          adapter->setText(label, text);
+      }
+  }
+#endif
 };
 
 using CheckBoxWidgetPtr = std::shared_ptr<CheckBoxWidget>;
@@ -732,6 +968,14 @@ public:
 
   void render(GraphicsContext &ctx, FontCache &fontCache) override
   {
+#if defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)
+    if (IDomAdapter *adapter = getActiveDomAdapter())
+    {
+        _renderDom(adapter);
+        needsPaint = false;
+        return;
+    }
+#endif
     Painter painter(ctx, this);
 
     int circleX = x + paddingLeft + circleSize / 2;
@@ -811,6 +1055,68 @@ public:
     markNeedsPaint();
     return std::static_pointer_cast<RadioButtonWidget>(shared_from_this());
   }
+
+private:
+#if defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)
+  // Three independent visual layers under one owner: the outer ring, the
+  // inner filled dot (only when selected), and the label. Unlike
+  // CheckBoxWidget's checkmark — which could ride along as the box
+  // node's own text content — a radio's inner dot is a genuinely
+  // separate overlapping circle, so it needs its own slot rather than
+  // being folded into the ring node.
+  void _renderDom(IDomAdapter *adapter)
+  {
+      char buf[24];
+      auto px = [&](int v) { snprintf(buf, sizeof(buf), "%dpx", v); return std::string(buf); };
+      char colbuf[32];
+      auto rgb = [&](Color c) { snprintf(colbuf, sizeof(colbuf), "rgb(%d,%d,%d)", c.r, c.g, c.b); return std::string(colbuf); };
+
+      int circleX = x + paddingLeft;
+      int circleY = y + paddingTop + (height - paddingTop - paddingBottom - circleSize) / 2;
+
+      Color currentCircleColor = selected    ? selectedCircleColor
+                                : isHovered ? hoverCircleColor
+                                            : circleColor;
+
+      // ── Outer ring ────────────────────────────────────────────────────
+      DomNodeHandle ring = fluxDomEnsureNode(this, "div", "circle");
+      fluxDomApplyRect(this, circleX, circleY, circleSize, circleSize, "circle");
+      adapter->setStyle(ring, "border-radius", "50%");
+      adapter->setStyle(ring, "background-color", "rgb(255,255,255)");
+      adapter->setStyle(ring, "border", "2px solid " + rgb(currentCircleColor));
+      adapter->setStyle(ring, "box-sizing", "border-box");
+      adapter->setStyle(ring, "pointer-events", "none");
+
+      // ── Inner dot — separate slot, only shown when selected. Hidden
+      // (rather than removed) via display:none so the node is reused,
+      // not recreated, when selection toggles back and forth.
+      DomNodeHandle dot = fluxDomEnsureNode(this, "div", "dot");
+      int dotInset = (circleSize - innerCircleSize) / 2;
+      fluxDomApplyRect(this, circleX + dotInset, circleY + dotInset,
+                      innerCircleSize, innerCircleSize, "dot");
+      adapter->setStyle(dot, "border-radius", "50%");
+      adapter->setStyle(dot, "background-color", rgb(innerCircleColor));
+      adapter->setStyle(dot, "display", selected ? "block" : "none");
+      adapter->setStyle(dot, "pointer-events", "none");
+
+      // ── Label — separate slot, same as CheckBoxWidget's pattern.
+      if (!text.empty())
+      {
+          int textX = x + paddingLeft + circleSize + 8;
+          DomNodeHandle label = fluxDomEnsureNode(this, "div", "label");
+          fluxDomApplyRect(this, textX, y + paddingTop,
+                          (x + width - paddingRight) - textX,
+                          height - paddingTop - paddingBottom, "label");
+          adapter->setStyle(label, "display", "flex");
+          adapter->setStyle(label, "align-items", "center");
+          adapter->setStyle(label, "white-space", "nowrap");
+          adapter->setStyle(label, "font-size", px(fontSize));
+          adapter->setStyle(label, "color", rgb(getCurrentTextColor()));
+          adapter->setStyle(label, "pointer-events", "none");
+          adapter->setText(label, text);
+      }
+  }
+#endif
 };
 
 // ============================================================================

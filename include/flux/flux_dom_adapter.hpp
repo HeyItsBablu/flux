@@ -133,3 +133,29 @@ inline IDomAdapter *getActiveDomAdapter()
 {
     return g_activeDomAdapter;
 }
+
+
+// ============================================================================
+// Shared DOM-painter helper declarations
+// ============================================================================
+// Declared once here so widget files needing direct DOM-node access
+// (TextInputWidget, CheckBoxWidget, ...) don't each redeclare their own
+// copies — redeclaring a default argument for the same function in the
+// same translation unit is a hard error the moment two such headers are
+// both included somewhere.
+//
+// slot: distinguishes MULTIPLE persistent DOM nodes under the SAME
+// Widget* owner. Without this, a Widget* maps to exactly one cached node
+// (see ensureNode() in flux_painter_dom.cpp) — fine for widgets that
+// paint one visual layer, but CheckBoxWidget (box+checkmark vs. label),
+// ToggleWidget, SliderWidget, RadioButtonWidget etc. each paint several
+// independent layers under one owner, and every draw call after the
+// first would silently overwrite the previous layer's node without a
+// way to tell them apart. Default "" preserves the original
+// one-node-per-widget behavior for every existing call site.
+// ============================================================================
+
+extern DomNodeHandle fluxDomEnsureNode(Widget *owner, const char *tag,
+                                       const char *slot = "");
+extern void fluxDomApplyRect(Widget *owner, int x, int y, int w, int h,
+                             const char *slot = "");

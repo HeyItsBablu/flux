@@ -37,6 +37,7 @@
 #include <unordered_map>
 #include <cstdio>
 #include <cmath>
+#include <string>
 
 // ============================================================================
 // Forward declarations — implemented in flux_font_dom.cpp (next file).
@@ -69,7 +70,11 @@ namespace
     // widget that happens to land on a freed widget's old address. Per-thread
     // storage plus the eviction hook below (wired into Widget::onDetach in a
     // follow-up edit) closes that gap.
-    thread_local std::unordered_map<Widget *, DomNodeHandle> g_domNodeCache;
+    // Widget* -> (slot -> node). A widget with no slotted nodes just has
+    // one entry under the default key "" — the common case, unchanged
+    // cost from before.
+    thread_local std::unordered_map<Widget *, std::unordered_map<std::string, DomNodeHandle>>
+        g_domNodeCache;
 
     // ── CSS colour string ─────────────────────────────────────────────────────
     void cssColor(Color c, char *buf, int bufLen)
@@ -105,7 +110,8 @@ namespace
     // reasonable target for a later optimization (e.g. only re-verify
     // parentage when a widget's actual Widget::parent pointer changes) but
     // not a correctness problem, so left as-is for this first pass.
-    DomNodeHandle ensureNode(Widget *owner, const char *tag = "div")
+    DomNodeHandle ensureNode(Widget *owner, const char *tag = "div",
+                            const char *slot = "")
     {
         if (!owner)
             return kInvalidDomNode;
@@ -113,18 +119,20 @@ namespace
         if (!adapter)
             return kInvalidDomNode;
 
-        auto it = g_domNodeCache.find(owner);
+        auto &slotMap = g_domNodeCache[owner];
+        auto it = slotMap.find(slot);
+
         DomNodeHandle handle;
         bool created = false;
 
-        if (it != g_domNodeCache.end())
+        if (it != slotMap.end())
         {
             handle = it->second;
         }
         else
         {
             handle = adapter->createNode(tag);
-            g_domNodeCache[owner] = handle;
+            slotMap[slot] = handle;
             created = true;
             // Every node paints at an explicit x/y via its own geometry
             // calls, never relies on normal document flow — set this once
@@ -134,15 +142,22 @@ namespace
 
         if (owner->parent)
         {
+            // Slotted nodes (box/label/etc.) are siblings parented under
+            // the OWNER'S PARENT's default node — same as the owner's own
+            // default node would be. There's no per-widget "wrapper" node
+            // that slots nest inside. This keeps applyRect()'s coordinate
+            // math (which only ever looks at owner->parent, never at
+            // slot) correct for every slot without special-casing.            
             DomNodeHandle parentHandle = ensureNode(owner->parent, "div");
             if (parentHandle != kInvalidDomNode)
                 adapter->appendChild(parentHandle, handle);
         }
-        else if (created)
+        else if (created && slot[0] == '\0')
         {
-            // Root widget (no Widget::parent) — this is the top of the
-            // tree; hand it to the adapter as the mount point. Only needs
-            // to happen once per node, hence gated on `created`.
+            // Only the default-slot node of a parentless (root) widget
+            // can ever be the document mount point — a slotted node has
+            // no business being handed to setRoot().
+
             adapter->setRoot(handle);
         }
 
@@ -255,12 +270,12 @@ namespace
 // the nearest positioned ancestor, not the page.
 // ============================================================================
 
-void fluxDomApplyRect(Widget *owner, int x, int y, int w, int h)
+void fluxDomApplyRect(Widget *owner, int x, int y, int w, int h, const char *slot)
 {
     IDomAdapter *adapter = getActiveDomAdapter();
     if (!adapter || !owner)
         return;
-    DomNodeHandle node = ensureNode(owner);
+    DomNodeHandle node = ensureNode(owner, "div", slot);
     applyRect(adapter, node, owner, x, y, w, h);
 }
 
@@ -275,9 +290,9 @@ void fluxDomApplyRect(Widget *owner, int x, int y, int w, int h)
 // element" design decision.
 // ============================================================================
 
-DomNodeHandle fluxDomEnsureNode(Widget *owner, const char *tag)
+DomNodeHandle fluxDomEnsureNode(Widget *owner, const char *tag, const char *slot)
 {
-    return ensureNode(owner, tag);
+    return ensureNode(owner, tag, slot);
 }
 
 
@@ -295,8 +310,13 @@ void fluxDomEvictWidget(Widget *owner)
     auto it = g_domNodeCache.find(owner);
     if (it == g_domNodeCache.end())
         return;
-    if (IDomAdapter *adapter = getActiveDomAdapter())
-        adapter->removeNode(it->second);
+    // Remove EVERY slot's node, not just one — a widget that used
+    // multiple slots (box + label, etc.) must have all of them cleaned
+    // up on detach, or the unused ones leak in the live document.
+    IDomAdapter *adapter = getActiveDomAdapter();
+    for (auto &[slot, handle] : it->second)
+        if (adapter)
+            adapter->removeNode(handle);
     g_domNodeCache.erase(it);
 }
 
