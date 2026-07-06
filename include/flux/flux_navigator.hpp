@@ -56,6 +56,8 @@
 
 #include "flux/flux_core.hpp"
 #include "flux/flux_app.hpp"
+#include "flux/flux_hydration.hpp"
+#include "flux/flux_json.hpp"
 
 #include <any>
 #include <functional>
@@ -387,6 +389,41 @@ public:
                 return true;
         return false;
     }
+
+    // ── Hydration (page-level data — survives a refresh) ─────────────────────
+    //
+    // Distinct from arguments<T>()/currentArguments<T>() above, which are
+    // documented as in-memory only and explicitly do NOT survive a web page
+    // refresh. hydratedData<T>() reads from the blob a server embeds in the
+    // page (see flux_hydration.hpp) — it DOES survive a refresh, because the
+    // data travels with the HTML itself, not in a std::any that only exists
+    // for the lifetime of one running process.
+    //
+    // Mirrors TypedJsonBuilder's mapper convention exactly (flux_future_
+    // builder.hpp) rather than inventing a new JsonValue-consuming
+    // convention: the mapper receives a parsed JsonValue and returns T,
+    // exceptions during mapping are treated as "no data."
+    template <typename T>
+    static T hydratedData(std::function<T(const JsonValue &)> mapper,
+                          T defaultValue = T())
+    {
+        if (!fluxHydrationHasPageData())
+            return defaultValue;
+        JsonValue parsed;
+        if (!JsonParser::tryParse(fluxHydrationGetPageData(), parsed))
+            return defaultValue;
+        try
+        {
+            return mapper(parsed);
+        }
+        catch (...)
+        {
+            return defaultValue;
+        }
+    }
+
+    static bool hasHydratedData() { return fluxHydrationHasPageData(); }
+
 
     // ── Arguments ────────────────────────────────────────────────────────────
 

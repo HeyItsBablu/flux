@@ -221,6 +221,42 @@
         </div>
     </div>
 
+    <!-- ── Hydration data blob ─────────────────────────────────────────────
+         A future SSR host (Phase 4) embeds real page/widget data here as
+         window.__FLUX_DATA__ before this script runs. Today (Phase 3, no
+         server yet) this defaults to {} — a manual test harness can set
+         window.__FLUX_DATA__ itself before this block runs to exercise the
+         exact same code path a server response will use later.
+
+         Wire format: every value (page + each widget entry) MUST already
+         be a plain JS string — whoever populates this object (the future
+         SSR host, or a manual test) is responsible for choosing the right
+         string content per id (raw text for FetchBuilder-backed widgets,
+         valid JSON text for JsonBuilder/TypedJsonBuilder-backed ones and
+         for page data). This script does no type-specific work — it only
+         flattens the nested object into the delimited string format
+         flux_hydration.hpp's fluxHydrationParseBlob() expects, using
+         \x1E/\x1F as record/field separators (illegal inside valid JSON
+         text, so they never collide with real content, no escaping
+         needed). -->
+    <script>
+        (function () {
+            var d = window.__FLUX_DATA__ || {};
+            var page = (typeof d.page === 'string') ? d.page : '';
+            var widgets = d.widgets || {};
+            var parts = [];
+            if (page.length) parts.push('__page__\x1F' + page);
+            for (var k in widgets) {
+                if (Object.prototype.hasOwnProperty.call(widgets, k) &&
+                    typeof widgets[k] === 'string') {
+                    parts.push(k + '\x1F' + widgets[k]);
+                }
+            }
+            Module._fluxHydrationData = parts.join('\x1E');
+        })();
+    </script>
+    
+
     <script>
         const uiCanvas = document.getElementById('flux-ui');
         const glCanvas = document.getElementById('flux-gl');

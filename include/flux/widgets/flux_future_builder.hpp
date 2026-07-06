@@ -1,9 +1,10 @@
 #pragma once
-#include "../flux_core.hpp"
-#include "../flux_http.hpp"
-#include "../flux_http_platform.hpp"
-#include "../flux_json.hpp"
-#include "../flux_widget.hpp"
+#include "flux/flux_core.hpp"
+#include "flux/flux_http.hpp"
+#include "flux/flux_http_platform.hpp"
+#include "flux/flux_hydration.hpp"
+#include "flux/flux_json.hpp"
+#include "flux/flux_widget.hpp"
 #include <functional>
 #include <memory>
 #include <string>
@@ -47,14 +48,34 @@ public:
       std::function<void(std::function<void(T)> /*onSuccess*/,
                          std::function<void(std::string)> /*onError*/)>;
 
+  // Converts a raw hydration string (see flux_hydration.hpp) into T.
+  // Returns false if the raw value couldn't be turned into a valid T —
+  // callers treat that identically to "no hydration data at all" and
+  // fall through to a real fetch. Set automatically by FetchBuilder/
+  // JsonBuilder/TypedJsonBuilder below; can also be set directly for a
+  // hand-built FutureBuilderWidget<T>.
+  using HydrationMapper = std::function<bool(const std::string &, T &)>;
+
   Builder builder;
   Fetcher fetcher;
+  HydrationMapper hydrationMapper;
+
+  FutureBuilderWidget()
+  {
+    // Assigned at CONSTRUCTION time, not at first layout — construction
+    // order is what's actually deterministic and shared between a future
+    // SSR host and the client (both walk createApp()'s same code path in
+    // the same order); layout timing is not something a headless
+    // single-pass SSR render and a live, possibly-reflowed browser
+    // session are guaranteed to agree on.
+    hydrationId_ = fluxHydrationNextId();
+  }
 
   void computeLayout(GraphicsContext &ctx, const BoxConstraints &constraints,
                      FontCache &fontCache) override
   {
 
-    if (snapshot_.state == ConnectionState::None)
+    if (snapshot_.state == ConnectionState::None && !tryHydrate())
       startFetch();
 
     rebuildChild(ctx, fontCache);
@@ -112,6 +133,25 @@ public:
     fetcher = std::move(f);
     return self();
   }
+  std::shared_ptr<FutureBuilderWidget<T>> setHydrationMapper(HydrationMapper m)
+  {
+    hydrationMapper = std::move(m);
+    return self();
+  }
+
+  // Manual override — lets a caller directly hand this widget an already-
+  // resolved snapshot (bypassing hydrationMapper entirely), for cases
+  // where the raw-string automatic path above doesn't fit. Matches the
+  // roadmap's original wording exactly: "here's the answer already,
+  // don't fetch again."
+  std::shared_ptr<FutureBuilderWidget<T>> seedFromHydration(AsyncSnapshot<T> snap)
+  {
+    snapshot_ = std::move(snap);
+    fetchStarted_ = true; // suppresses the computeLayout() fetch trigger
+    return self();
+  }
+
+  const std::string &hydrationId() const { return hydrationId_; }
 
   void refresh()
   {
@@ -125,6 +165,29 @@ private:
   WidgetPtr child_;
 
   bool fetchStarted_ = false;
+  std::string hydrationId_;
+
+  // Returns true if hydration data existed for this widget AND the
+  // mapper successfully converted it — in which case snapshot_ is now
+  // Done and startFetch() must NOT run. Returns false in every other
+  // case (no mapper set, no data for this id, or the mapper rejected the
+  // raw value), leaving snapshot_ untouched so the normal fetch path runs
+  // exactly as it did before this file existed.
+  bool tryHydrate()
+  {
+    if (!hydrationMapper)
+      return false;
+    const std::string *raw = fluxHydrationGetWidgetData(hydrationId_);
+    if (!raw)
+      return false;
+    T value;
+    if (!hydrationMapper(*raw, value))
+      return false;
+    snapshot_.state = ConnectionState::Done;
+    snapshot_.data = std::move(value);
+    fetchStarted_ = true;
+    return true;
+  }
 
   void startFetch()
   {
@@ -207,6 +270,10 @@ inline std::shared_ptr<FutureBuilderWidget<std::string>> FetchBuilder(
 {
   auto w = std::make_shared<FutureBuilderWidget<std::string>>();
   w->setBuilder(builder);
+  // Raw text, hand-fetched with FluxHttp::get — the hydration value IS
+  // the response body verbatim, no JSON parsing involved either way.
+  w->setHydrationMapper([](const std::string &raw, std::string &out)
+                        { out = raw; return true; });
   w->setFetcher([url, postToUI](std::function<void(std::string)> onSuccess,
                                 std::function<void(std::string)> onError)
                 {
@@ -235,6 +302,10 @@ JsonBuilder(const std::string &url,
 {
   auto w = std::make_shared<FutureBuilderWidget<JsonValue>>();
   w->setBuilder(builder);
+  // T is JsonValue itself — the hydration value is just the raw JSON
+  // text; parsing it IS the whole conversion, no field extraction needed.
+  w->setHydrationMapper([](const std::string &raw, JsonValue &out)
+                        { return JsonParser::tryParse(raw, out); });
   w->setFetcher([url, postToUI](std::function<void(JsonValue)> onSuccess,
                                 std::function<void(std::string)> onError)
                 {
@@ -269,6 +340,21 @@ TypedJsonBuilder(const std::string &url,
 {
   auto w = std::make_shared<FutureBuilderWidget<T>>();
   w->setBuilder(builder);
+
+  // Reuses the EXACT SAME user-supplied `mapper` the caller already gave
+  // us for the live-fetch path below — one mapper, two callers (a real
+  // network response's parsed JSON, or a hydrated raw string's parsed
+  // JSON). This is deliberate: whatever JsonValue-consuming logic the
+  // caller already trusts for live data is automatically correct for
+  // hydration too, with no separate mapper to keep in sync.
+  w->setHydrationMapper([mapper](const std::string &raw, T &out) -> bool
+                        {
+                          JsonValue parsed;
+                          if (!JsonParser::tryParse(raw, parsed))
+                            return false;
+                          try { out = mapper(parsed); return true; }
+                          catch (...) { return false; }
+                        });
   w->setFetcher(
       [url, mapper, postToUI](std::function<void(T)> onSuccess,
                               std::function<void(std::string)> onError)

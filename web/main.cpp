@@ -43,6 +43,7 @@
 #include "flux/flux.hpp"
 #include "flux/flux_navigator.hpp"
 #include "flux/flux_http_platform.hpp"
+#include "flux/flux_hydration.hpp"
 
 // ============================================================================
 // Forward declaration — defined by the application (e.g. helloworld.cpp)
@@ -202,6 +203,25 @@ int main()
     fluxFontDomInit();
 #endif
 
+    // ── 2b. Read + parse the hydration blob, BEFORE build() ────────────────
+    // Must happen before build() constructs the widget tree: FutureBuilder-
+    // Widget's constructor (see flux_future_builder.hpp) calls
+    // fluxHydrationNextId() and immediately checks fluxHydrationGetWidgetData
+    // for that id — both need the blob already parsed and the ID counter
+    // freshly reset to zero, or IDs/data would be out of sync with what a
+    // server (Phase 4) or a manual test harness actually populated.
+    fluxHydrationResetIdCounter();
+    {
+        char *raw = (char *)EM_ASM_PTR({
+            var s = Module._fluxHydrationData || "";
+            var len = lengthBytesUTF8(s) + 1;
+            var buf = _malloc(len);
+            stringToUTF8(s, buf, len);
+            return buf;
+        });
+        fluxHydrationParseBlob(raw ? raw : "");
+        free(raw);
+    }
 
     // ── 3. Now build — wireCallbacks + rebuild will run layout correctly ──
     s_app->build([&]()
