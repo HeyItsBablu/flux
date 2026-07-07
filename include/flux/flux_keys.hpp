@@ -13,9 +13,74 @@ namespace Key
 {
 
 // ============================================================================
+// FLUX_SSR — headless, no real input device
+//
+// Checked BEFORE the Win32 branch below: an SSR build on Windows still has
+// _WIN32 defined (real host OS), but must not #include <windows.h> here —
+// that drags in GDI's own `Escape` macro, which collides with Key::Escape
+// below it. Values are arbitrary placeholders; nothing on this backend
+// ever produces a real keyboard event, so nothing ever compares against
+// these except widget code that's unreachable in a one-shot SSR render.
+// ============================================================================
+#if defined(FLUX_SSR)
+
+    inline constexpr int Left = 0;
+    inline constexpr int Right = 1;
+    inline constexpr int Up = 2;
+    inline constexpr int Down = 3;
+    inline constexpr int Home = 4;
+    inline constexpr int End = 5;
+    inline constexpr int PageUp = 6;
+    inline constexpr int PageDown = 7;
+    inline constexpr int Tab = 8;
+
+    inline constexpr int Backspace = 9;
+    inline constexpr int Delete = 10;
+    inline constexpr int Insert = 11;
+
+    inline constexpr int Return = 12;
+    inline constexpr int Escape = 13;
+    inline constexpr int Space = 14;
+
+    inline constexpr int Shift = 15;
+    inline constexpr int Control = 16;
+    inline constexpr int Alt = 17;
+
+    inline constexpr int F1 = 18;
+    inline constexpr int F2 = 19;
+    inline constexpr int F3 = 20;
+    inline constexpr int F4 = 21;
+    inline constexpr int F5 = 22;
+    inline constexpr int F6 = 23;
+    inline constexpr int F7 = 24;
+    inline constexpr int F8 = 25;
+    inline constexpr int F9 = 26;
+    inline constexpr int F10 = 27;
+    inline constexpr int F11 = 28;
+    inline constexpr int F12 = 29;
+
+    inline constexpr int OemPlus = 30;
+    inline constexpr int OemMinus = 31;
+    inline constexpr int NumpadPlus = 32;
+    inline constexpr int NumpadMinus = 33;
+    inline constexpr int NumpadMul = 34;
+    inline constexpr int NumpadDiv = 35;
+    inline constexpr int Oem1 = 36;
+    inline constexpr int Oem2 = 37;
+    inline constexpr int Oem3 = 38;
+    inline constexpr int Oem4 = 39;
+    inline constexpr int Oem5 = 40;
+    inline constexpr int Oem6 = 41;
+    inline constexpr int Oem7 = 42;
+
+    inline bool isShiftDown() { return false; }
+    inline bool isControlDown() { return false; }
+    inline bool isAltDown() { return false; }
+
+// ============================================================================
 // Win32
 // ============================================================================
-#ifdef _WIN32
+#elif defined(_WIN32)
 #include <windows.h>
 
     inline constexpr int Left = VK_LEFT;

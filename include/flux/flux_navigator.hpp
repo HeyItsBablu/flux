@@ -209,6 +209,18 @@ public:
         // fragment, since that never leaves the browser. This is the
         // Phase 2 change that makes SSR able to know what to render.
         std::string fromPath = _getInitialPath();
+#elif defined(FLUX_SSR)
+        // Native SSR equivalent of the browser reading location.pathname —
+        // the SSR host (ssr/main.cpp) sets this via setSSRRequestPath()
+        // BEFORE calling Navigator::init(), once per incoming HTTP
+        // request. Without this, init() would always fall back to
+        // "initialRoute" ("/") regardless of what path was actually
+        // requested — the server could never render anything but the
+        // home page.
+        std::string fromPath = _ssrRequestPath;
+#else
+        std::string fromPath;
+#endif
 
         if (!fromPath.empty())
         {
@@ -224,7 +236,7 @@ public:
                 }
             }
         }
-#endif
+
 
         
         // Push the initial route onto the stack.
@@ -379,6 +391,19 @@ public:
     static bool canPop() { return _stack.size() > 1; }
     static int stackDepth() { return static_cast<int>(_stack.size()); }
     static std::string currentName() { return _stack.empty() ? "" : _stack.back().name; }
+
+
+#ifdef FLUX_SSR
+    // Set by the SSR host (ssr/main.cpp) once per request, BEFORE calling
+    // Navigator::init() — the native-build equivalent of the browser's
+    // location.pathname. thread_local, same rationale as every other
+    // per-request-isolated piece of state introduced in Phase 0/3/4: one
+    // server thread handles requests sequentially, and each must see only
+    // its OWN requested path, never a previous request's leftover value.
+    static thread_local std::string _ssrRequestPath;
+    static void setSSRRequestPath(const std::string &path) { _ssrRequestPath = path; }
+#endif
+
 
     // Returns true if the given route name exists in the route table.
     static bool hasRoute(const std::string &name)
@@ -605,6 +630,10 @@ inline NavigatorWidget *Navigator::_host = nullptr;
 inline std::vector<NavEntry> Navigator::_stack = {};
 inline std::vector<RouteDefinition> Navigator::_routes = {};
 inline std::any Navigator::_pendingArguments = {};
+
+#ifdef FLUX_SSR
+inline thread_local std::string Navigator::_ssrRequestPath = "/";
+#endif
 
 // ============================================================================
 // NAVIGATOR WIDGET  (unchanged from original)

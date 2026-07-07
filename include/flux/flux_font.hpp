@@ -110,7 +110,7 @@ class FontCache
 {
 public:
 
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(FLUX_SSR)
     // ── Win32 / DWrite font key ───────────────────────────────────────────────
     struct FontKey
     {
@@ -159,14 +159,14 @@ private:
 
     // Win32 only: the DWrite factory is needed to create IDWriteTextFormat.
     // It is set once by FontCache::setDWriteFactory() after D3DDevice::create().
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(FLUX_SSR)
     IDWriteFactory3* dwriteFactory_ = nullptr;
 #endif
 
 public:
     ~FontCache() { clear(); }
 
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(FLUX_SSR)
     // Must be called before any getFont() on Win32.
     void setDWriteFactory(IDWriteFactory3* factory)
     {

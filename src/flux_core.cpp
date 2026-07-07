@@ -342,7 +342,7 @@ void FluxUI::rebuild()
 
     if (window.valid())
     {
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(FLUX_SSR)
         // Re-confirm factory in case FontCache was cleared after device loss.
         {
             auto ctx = window.getD2DContext();
@@ -439,7 +439,7 @@ NativeWindow FluxUI::createWindow(const std::string &title, int w, int h)
     fluxLog("[createWindow] Step 3: window.create done, valid=" +
             std::to_string(window.valid()));
 
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(FLUX_SSR)
     {
         auto ctx = window.getD2DContext();
         fluxLog("[createWindow] Step 4: dc=" +
@@ -550,10 +550,11 @@ void FluxUI::drainPendingRebuilds()
 
 MeasureContext FluxUI::getMeasureContext()
 {
-#ifdef _WIN32
-    // Borrow the always-live D2D device context.
-    // No GetDC/ReleaseDC — D3DDevice owns the context for the window lifetime.
-    // DWrite (used for text measurement) is documented thread-safe.
+#if defined(FLUX_SSR)
+    GraphicsContext gc = window.getMeasureContext();
+    return MeasureContext(gc.width, gc.height);
+
+#elif defined(_WIN32) && !defined(FLUX_SSR)
     auto ctx = window.getD2DContext();
     return MeasureContext(
         ctx.dc,
@@ -589,7 +590,7 @@ MeasureContext FluxUI::getMeasureContext()
 
 void FluxUI::postToRenderThread(std::function<void()> fn)
 {
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(FLUX_SSR)
     RenderLoop *rl = window.getRenderLoop();
     if (rl)
     {

@@ -140,7 +140,7 @@ inline void logWarning(const std::string &widgetType,
     if (info.overflowY > 0)
         msg += "  Y: " + std::to_string(info.overflowY) + "px";
     msg += "\n";
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(FLUX_SSR)
     OutputDebugStringA(msg.c_str());
 #else
     fputs(msg.c_str(), stderr);

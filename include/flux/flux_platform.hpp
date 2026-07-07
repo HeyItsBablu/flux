@@ -138,11 +138,107 @@ struct Color
 
 using NativeColor = Color;
 
+
+// ============================================================================
+// SSR (HEADLESS) PLATFORM
+//
+// Takes priority over the host OS's own branch below regardless of what
+// that host is — _WIN32/__linux__ are still true (they describe the real
+// compiler/OS), so every platform branch further down is additionally
+// guarded with `&& !defined(FLUX_SSR)` to stay mutually exclusive with
+// this one. SSR has no live window, no GPU device, no system font
+// service (flux_font_ssr.cpp uses stb_truetype instead of DWrite/Pango),
+// so every type here is a minimal, portable placeholder — not a stand-in
+// for a specific graphics API the way the OS branches are.
+// ============================================================================
+
+#if defined(FLUX_SSR)
+
+#include <chrono>
+
+using NativeWindow = void *;
+using NativeFont = void *;   // cast to SsrNativeFont* in flux_font_ssr.cpp
+using AppInstance = void *;
+using TimerID = uint32_t;
+using UINT = unsigned int;
+using NativeImage = void *;  // unused on this backend — no image decode path
+
+static constexpr UINT DT_LEFT = 0x0000u;
+static constexpr UINT DT_CENTER = 0x0001u;
+static constexpr UINT DT_RIGHT = 0x0002u;
+static constexpr UINT DT_VCENTER = 0x0004u;
+static constexpr UINT DT_TOP = 0x0000u;
+static constexpr UINT DT_WORDBREAK = 0x0010u;
+static constexpr UINT DT_SINGLELINE = 0x0020u;
+static constexpr UINT DT_NOCLIP = 0x0100u;
+static constexpr UINT DT_END_ELLIPSIS = 0x8000u;
+
+// No real input device on a headless server — these exist only so
+// widget code shared with every other platform (flux_core.cpp,
+// flux_widget.cpp, ...) still compiles unchanged.
+static constexpr int VK_BACK = 0;
+static constexpr int VK_DELETE = 1;
+static constexpr int VK_LEFT = 2;
+static constexpr int VK_RIGHT = 3;
+static constexpr int VK_UP = 4;
+static constexpr int VK_DOWN = 5;
+static constexpr int VK_HOME = 6;
+static constexpr int VK_END = 7;
+static constexpr int VK_RETURN = 8;
+static constexpr int VK_ESCAPE = 9;
+static constexpr int VK_TAB = 10;
+static constexpr int VK_PRIOR = 11;
+static constexpr int VK_NEXT = 12;
+static constexpr int VK_CONTROL = 13;
+static constexpr int VK_SHIFT = 14;
+static constexpr int VK_MENU = 15;
+
+inline bool platformKeyDown(int) { return false; }
+inline bool platformCtrlDown() { return false; }
+inline bool platformShiftDown() { return false; }
+inline bool platformAltDown() { return false; }
+inline bool platformSpaceDown() { return false; }
+
+// std::chrono instead of GetTickCount64/clock_gettime — portable across
+// whichever host OS is actually compiling this SSR build (Windows today,
+// Linux tomorrow), no per-host #ifdef needed here specifically.
+inline uint32_t platformTickCount()
+{
+    using namespace std::chrono;
+    return static_cast<uint32_t>(
+        duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count());
+}
+
+// Plain BMP-per-codepoint conversion — same simplification the
+// Linux/Android/macOS/Web branches already make; fine here for the same
+// reason (see flux_font_ssr.cpp's measurement code, which makes the
+// identical assumption).
+inline std::wstring toWideString(const std::string &utf8)
+{
+    std::wstring out;
+    out.reserve(utf8.size());
+    for (unsigned char c : utf8)
+        out += static_cast<wchar_t>(c);
+    return out;
+}
+inline std::wstring toWideString(const char *data, int byteCount)
+{
+    if (!data || byteCount <= 0)
+        return {};
+    std::wstring out;
+    out.reserve(byteCount);
+    for (int i = 0; i < byteCount; ++i)
+        out += static_cast<wchar_t>(static_cast<unsigned char>(data[i]));
+    return out;
+}
+
+#endif // FLUX_SSR
+
 // ============================================================================
 // WIN32 PLATFORM
 // ============================================================================
 
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(FLUX_SSR)
 
 #include <windows.h>
 #include <windowsx.h>
@@ -216,7 +312,7 @@ using PFNWGLCHOOSEPIXELFORMATARBPROC =
 // ============================================================================
 // LINUX PLATFORM
 // ============================================================================
-#if defined(__linux__) && !defined(__ANDROID__)
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(FLUX_SSR)
 
 #include <ctime>
 #include <SDL2/SDL.h>
@@ -562,7 +658,23 @@ static constexpr int WHEEL_DELTA = 120;
 // GraphicsContext
 // ============================================================================
 
-#ifdef _WIN32
+
+#if defined(FLUX_SSR)
+
+struct GraphicsContext
+{
+    int width = 0;
+    int height = 0;
+
+    GraphicsContext() = default;
+    GraphicsContext(int w, int h) : width(w), height(h) {}
+
+    bool valid() const { return width > 0 && height > 0; }
+};
+
+#endif // FLUX_SSR
+
+#if defined(_WIN32) && !defined(FLUX_SSR)
 
 struct GraphicsContext
 {
@@ -585,7 +697,7 @@ struct GraphicsContext
 
 #endif // _WIN32
 
-#if defined(__linux__) && !defined(__ANDROID__)
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(FLUX_SSR)
 
 struct GraphicsContext
 {
@@ -685,7 +797,12 @@ struct MeasureContext
     MeasureContext(MeasureContext &&) = default;
     MeasureContext &operator=(MeasureContext &&) = default;
 
-#ifdef _WIN32
+#ifdef FLUX_SSR
+    explicit MeasureContext(int w, int h) : ctx(w, h) {}
+    ~MeasureContext() = default;
+#endif
+
+#if defined(_WIN32) && !defined(FLUX_SSR)
     explicit MeasureContext(ID2D1DeviceContext1 *dc,
                             IDWriteFactory3 *dwrite,
                             ID2D1Factory1 *factory,
@@ -694,7 +811,7 @@ struct MeasureContext
     ~MeasureContext() = default;
 #endif
 
-#if defined(__linux__) && !defined(__ANDROID__)
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(FLUX_SSR)
     explicit MeasureContext(cairo_t *cr, int w = 0, int h = 0)
         : ctx(cr, w, h) {}
     ~MeasureContext() = default;

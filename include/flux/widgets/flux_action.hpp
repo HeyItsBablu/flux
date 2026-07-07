@@ -4,6 +4,7 @@
 #include "../flux_core.hpp"
 #include "flux_display.hpp"
 #include "flux_icons.hpp"
+#include "flux/flux_dom_adapter.hpp"
 #include <chrono>
 
 // ============================================================================
@@ -388,7 +389,7 @@ private:
 
   static uint32_t _getTimeMs()
   {
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(FLUX_SSR)
     return static_cast<uint32_t>(GetTickCount());
 #else
     using namespace std::chrono;
@@ -512,7 +513,30 @@ public:
     if (!children.empty())
       children[0]->render(ctx, fontCache);
     else if (!text.empty())
-      renderText(ctx, fontCache, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    {
+#if (defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)) || defined(FLUX_SSR)
+      // renderText()'s underlying drawText() call targets the SAME
+      // default-slot node fillRoundedRect/drawBorder above already
+      // configured for this widget — text and background would collide
+      // on one shared DOM node otherwise (visible as the doubled/
+      // misaligned label the SSR/DOM renderers were producing). Give
+      // the label an explicit separate slot, same pattern already used
+      // for CheckBoxWidget's box+label split.
+      if (IDomAdapter *adapter = getActiveDomAdapter())
+      {
+        DomNodeHandle label = fluxDomEnsureNode(this, "div", "label");
+        fluxDomApplyRect(this, x, y, width, height, "label");
+        adapter->setStyle(label, "display", "flex");
+        adapter->setStyle(label, "align-items", "center");
+        adapter->setStyle(label, "justify-content", "center");
+        adapter->setStyle(label, "color", "rgb(" + std::to_string(getCurrentTextColor().r) + "," + std::to_string(getCurrentTextColor().g) + "," + std::to_string(getCurrentTextColor().b) + ")");
+        adapter->setStyle(label, "pointer-events", "none");
+        adapter->setText(label, text);
+      }
+      else
+#endif
+        renderText(ctx, fontCache, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    }
 
     needsPaint = false;
   }

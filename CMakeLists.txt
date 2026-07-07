@@ -46,6 +46,19 @@ set_property(CACHE FLUX_WEB_RENDERER PROPERTY STRINGS canvas dom)
 
 
 # ============================================================================
+# SSR host (native, non-Emscripten) — see ssr/CMakeLists.txt.
+#
+# Deliberately built as its OWN, separate static library + executable, NOT
+# folded into the shared `flux` target's FLUX_WEB_RENDERER logic above.
+# The SSR host needs flux_painter_dom.cpp (DOM/string-builder painting)
+# while a normal native Linux build needs flux_painter_linux.cpp (Cairo) —
+# both define the same Painter:: symbols, so they can never coexist in one
+# library target. ssr/CMakeLists.txt hand-picks its own source list.
+# ============================================================================
+option(FLUX_BUILD_SSR "Build the native SSR host (flux_ssr)" OFF)
+
+
+# ============================================================================
 # Compiler guard  (skip on Android — NDK uses Clang but reports differently)
 # ============================================================================
 
@@ -509,6 +522,10 @@ if(NOT ANDROID)
     if(FLUX_BUILD_TESTS AND NOT EMSCRIPTEN)
         enable_testing()
         add_subdirectory(tests)
+    endif()
+
+    if(FLUX_BUILD_SSR AND NOT EMSCRIPTEN)
+        add_subdirectory(ssr)
     endif()
 endif()
 

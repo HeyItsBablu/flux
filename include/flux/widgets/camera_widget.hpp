@@ -336,7 +336,7 @@ public:
     void _blitOESToFBO(GLuint oesTexId);
 #endif // __ANDROID__
 
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(FLUX_SSR)
     struct Win32State
     {
         std::vector<uint8_t> frameCache; // BGRA32, top-down

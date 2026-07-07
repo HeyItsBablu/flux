@@ -56,13 +56,23 @@ void flux_videoPlayerMac_releaseTexture(void *texOpaque);
 #include "flux_icons.hpp"
 #include <wrl/client.h>
 
-#elif defined(__linux__)
+#elif defined(__linux__) && !defined(FLUX_SSR)
 #include "flux/flux.hpp"
 #include "flux/flux_video.hpp"
 #include "flux_icons.hpp"
 #include <cairo/cairo.h>
 
 #elif defined(__EMSCRIPTEN__)
+#include "flux/flux.hpp"
+#include "flux/flux_video.hpp"
+#include "flux_icons.hpp"
+
+
+#elif defined(FLUX_SSR)
+// No frame-blit backend at all — flux_ssr never paints video frames (no
+// GPU, no live window). FluxVideo::get() is still called unconditionally
+// below (constructor/destructor are gated only by !__ANDROID__, not by
+// platform), so flux_video.hpp is still needed for its declarations.
 #include "flux/flux.hpp"
 #include "flux/flux_video.hpp"
 #include "flux_icons.hpp"
@@ -282,7 +292,7 @@ public:
 
 #elif defined(__APPLE__) && TARGET_OS_OSX
         _freeVideoTexture();
-#elif defined(__linux__)
+#elif defined(__linux__) && !defined(FLUX_SSR)
         _freeCairoSurface();
 #endif
     }
@@ -450,7 +460,7 @@ public:
             }
         }
 
-#elif defined(_WIN32)
+#elif defined(_WIN32) && !defined(FLUX_SSR)
         {
             if (_finishedPending.exchange(false))
             {
@@ -516,7 +526,7 @@ public:
             }
         }
 
-#elif defined(__linux__)
+#elif defined(__linux__) && !defined(FLUX_SSR)
         {
             if (_finishedPending.exchange(false))
             {
@@ -723,7 +733,7 @@ private:
     std::atomic<bool> _destroyed{false};
     std::atomic<bool> _finishedPending{false};
 
-#elif defined(_WIN32)
+#elif defined(_WIN32) && !defined(FLUX_SSR)
     std::vector<uint8_t> _frameCache;
     int _cachedSrcW = 0, _cachedSrcH = 0;
     bool _d2dBitmapDirty = false;
@@ -732,7 +742,7 @@ private:
     std::atomic<bool> _destroyed{false};
     std::atomic<bool> _finishedPending{false};
 
-#elif defined(__linux__)
+#elif defined(__linux__) && !defined(FLUX_SSR)
     std::vector<uint8_t> _frameCache;
     int _cachedSrcW = 0, _cachedSrcH = 0;
     std::vector<uint8_t> _cairoPixels;
@@ -742,6 +752,15 @@ private:
     std::atomic<bool> _finishedPending{false};
 
 #elif defined(__EMSCRIPTEN__)
+    std::atomic<bool> _destroyed{false};
+    std::atomic<bool> _finishedPending{false};
+
+#elif defined(FLUX_SSR)
+    // No frame storage needed — render()'s FLUX_SSR case has no blit
+    // branch at all, nothing ever populates one. Constructor/destructor
+    // reference these two members unconditionally (guarded only by
+    // !__ANDROID__), so they must exist under every non-Android backend,
+    // this one included.
     std::atomic<bool> _destroyed{false};
     std::atomic<bool> _finishedPending{false};
 #endif
@@ -883,7 +902,7 @@ private:
         }
         _barHideTimer = ui->setInterval(3000, [this]()
                                         {
-#if !defined(__ANDROID__)
+#if !defined(__ANDROID__) 
             if (_destroyed) return;
 #endif
             if (_playing) { _barVisible = false; markNeedsPaint(); } });
@@ -1135,7 +1154,7 @@ private:
 #endif // __ANDROID__
 
     // ── Linux Cairo helpers ───────────────────────────────────────────────────
-#if defined(__linux__) && !defined(__ANDROID__)
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(FLUX_SSR)
     void _rebuildCairoSurface()
     {
         _freeCairoSurface();
@@ -1182,6 +1201,7 @@ private:
     {
 #if defined(__APPLE__) && TARGET_OS_OSX
         return "SF Pro Text";
+
 #elif defined(__linux__)
         return "Sans";
 #else

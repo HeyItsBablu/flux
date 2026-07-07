@@ -175,7 +175,7 @@ enum class SizeMode
 };
 
 
-#if defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)
+#if (defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)) || defined(FLUX_SSR)
 extern void fluxDomEvictWidget(Widget *owner);
 #endif
 
@@ -286,7 +286,7 @@ public:
       child->onDetach();
     }
 
-#if defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)
+#if (defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)) || defined(FLUX_SSR)
     // Remove this widget's cached DOM node (and, via the adapter's real
     // DOM removal, everything still parented under it) — children are
     // evicted first via the recursion above, so this runs post-order,

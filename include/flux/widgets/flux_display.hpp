@@ -35,6 +35,19 @@ public:
   // ── Typography style ──────────────────────────────────────────────────
 
   TextStyle style;
+private:
+  // Wrapping is only meaningful when width is externally constrained
+  // smaller than the text's own natural width. When autoWidth is true,
+  // the box IS that natural width by construction — there's no overflow
+  // for a wrap to resolve. This matters especially on SSR: the server
+  // measures with stb_truetype, the browser re-measures the same string
+  // with its own font shaper, and those two never agree to sub-pixel
+  // precision. If wrap is left "on" for an auto-width box, that tiny gap
+  // alone is enough to trigger a real wrap the server never predicted —
+  // silently breaking every sibling positioned below it.
+  bool effectiveSoftWrap_ = false;
+
+public:
 
   TextWidget()
   {
@@ -54,6 +67,8 @@ public:
   {
     int hPad = paddingLeft + paddingRight;
     int vPad = paddingTop + paddingBottom;
+
+    effectiveSoftWrap_ = softWrap && !autoWidth;
 
     // ── Width ─────────────────────────────────────────────────────────────
     if (autoWidth)
@@ -78,7 +93,8 @@ public:
 
       int measW = 0, measH = 0;
       Painter(ctx, this).measureRichText(toWideString(text), style, fontCache,
-                                   softWrap ? innerW : 0, softWrap, maxLines,
+                                   effectiveSoftWrap_ ? innerW : 0,
+                                   effectiveSoftWrap_, maxLines,
                                    measW, measH);
       height = measH + vPad;
     }
@@ -115,7 +131,7 @@ public:
       params.textAlignVertical = textAlignVertical;
       params.overflow = textOverflow;
       params.direction = textDirection;
-      params.softWrap = softWrap;
+      params.softWrap = effectiveSoftWrap_;
       params.maxLines = maxLines;
       params.style = style;
 

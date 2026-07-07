@@ -26,7 +26,12 @@
 // AudioPlayerWidget get dedicated real elements instead (a later,
 // separate change to those two widget files, not to Painter).
 
-#ifdef __EMSCRIPTEN__
+// FLUX_SSR added alongside __EMSCRIPTEN__: this file has NO direct EM_ASM
+// calls anywhere in it — every browser touch already goes through
+// IDomAdapter — so the exact same compiled code works against
+// flux_dom_adapter_stringbuilder.cpp (FLUX_SSR) with zero changes. This
+// is the payoff of Phase 1's adapter-interface discipline.
+#if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
 
 #include "flux/flux_painter.hpp"
 #include "flux/flux_dom_adapter.hpp"
@@ -51,6 +56,11 @@ void measureDomText(const char *cssFont, const std::wstring &wtext,
 void measureDomRichText(const std::wstring &wtext, const TextStyle &style,
                         FontCache &fontCache, int maxWidth, bool softWrap,
                         int maxLines, int &outWidth, int &outHeight);
+// Implemented per-backend: flux_font_ssr.cpp (stb_truetype metrics) and,
+// for the live web-DOM renderer, flux_font_dom.cpp (CSS-pixel-size-based
+// approximation matching that file's own font string).
+int fluxDomLineHeightPx(const std::string &fontFamily, int fontSize, FontWeight weight);
+
 
 // ============================================================================
 // Internal helpers
@@ -319,6 +329,23 @@ void fluxDomEvictWidget(Widget *owner)
             adapter->removeNode(handle);
     g_domNodeCache.erase(it);
 }
+
+// ============================================================================
+// fluxDomClearCacheForNewRequest — SSR-only. A live browser page never
+// needs this (the cache naturally lives exactly as long as the page
+// does); an SSR host's single server thread renders MANY requests
+// sequentially on the SAME thread_local storage, and Widget* addresses
+// get reused across requests the moment one request's tree is
+// destroyed — without this, a brand-new widget in request N+1 could
+// collide with a freed widget's stale cache entry from request N,
+// returning a handle into an ALREADY-DESTROYED StringBuilderDomAdapter.
+// ============================================================================
+
+void fluxDomClearCacheForNewRequest()
+{
+    g_domNodeCache.clear();
+}
+
 
 // ============================================================================
 // Painter::fillRect / fillRoundedRect / fillRectAlpha / fillRoundedRegion
@@ -597,6 +624,12 @@ void Painter::drawRichText(const std::wstring &wtext,
     char col[32];
     cssColor(style.color, col, sizeof(col));
     adapter->setStyle(node, "color", col);
+    // Pin line-height to the EXACT value measureDomRichText() used for
+    // layout — see fluxDomLineHeightPx's comment for why the browser's own
+    // default leading can't be trusted to match stb_truetype's numbers.
+    int lineHeightPx = fluxDomLineHeightPx(style.fontFamily, style.scaledFontSize(), style.fontWeight);
+    adapter->setStyle(node, "line-height", pxStr(lineHeightPx));
+
 
     adapter->setStyle(node, "text-align", cssTextAlign(params.textAlign));
     adapter->setStyle(node, "direction",
@@ -765,6 +798,7 @@ void Painter::drawImage(const ImageDrawParams &params)
         adapter->setStyle(node, "border-radius", pxStr(params.borderRadius));
     adapter->setStyle(node, "overflow", "hidden");
 
+#if defined(__EMSCRIPTEN__)
     // See comment above — imageUrlForHandle() is the pending seam.
     extern std::string imageUrlForHandle(NativeImage handle); // TODO wiring
     std::string url = imageUrlForHandle(params.image);
@@ -781,6 +815,10 @@ void Painter::drawImage(const ImageDrawParams &params)
                           params.repeat == ImageRepeat::NoRepeat ? "cover" : "auto");
         adapter->setStyle(node, "background-position", "center");
     }
+#endif
+    // FLUX_SSR: no image decode path on this backend — node is sized/clipped
+    // correctly but left without a background-image, until SSR gains an
+    // image pipeline of its own.
 }
 
 // ============================================================================
@@ -814,4 +852,4 @@ void Painter::drawPage(const PageDrawParams &) { /* deferred */ }
 void Painter::drawVideo(const VideoDrawParams &) {}
 void Painter::drawCamera(const CameraDrawParams &) {}
 
-#endif // __EMSCRIPTEN__
+#endif // __EMSCRIPTEN__ || FLUX_SSR

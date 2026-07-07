@@ -9,7 +9,11 @@
 #include <unordered_map>
 #include <vector>
 
-#if defined(__linux__) && !defined(__ANDROID__)
+// FLUX_SSR must be checked BEFORE the generic Linux branch below — an SSR
+// build IS compiled with __linux__ defined (it's a native Linux binary),
+// but must not pull in SDL2/Cairo fields it never uses. See
+// src/flux_window_headless.cpp for the implementation.
+#if !defined(FLUX_SSR) && defined(__linux__) && !defined(__ANDROID__)
 
 #include <SDL2/SDL.h>
 #endif
@@ -127,7 +131,7 @@ public:
     // ── Measure context ───────────────────────────────────────────────────────
     GraphicsContext getMeasureContext() const;
 
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(FLUX_SSR)
     GraphicsContext getD2DContext() const;
     RenderLoop *getRenderLoop() const { return renderLoop_; }
     D3DDevice *getD3DDevice() const { return d3dDevice_; }
@@ -162,7 +166,7 @@ private:
     // =========================================================================
     // Win32
     // =========================================================================
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(FLUX_SSR)
     AppInstance hInstance_ = nullptr;
     HWND hwnd_ = nullptr;
     D3DDevice *d3dDevice_ = nullptr;
@@ -177,7 +181,7 @@ private:
     // =========================================================================
     // Linux
     // =========================================================================
-#if defined(__linux__) && !defined(__ANDROID__)
+#if !defined(FLUX_SSR) && defined(__linux__) && !defined(__ANDROID__)
 
     struct CairoState;
 
@@ -217,6 +221,17 @@ private:
 
     std::unordered_map<TimerID, TimerEntry> androidTimers;
 #endif // __ANDROID__
+
+    // =========================================================================
+    // FLUX_SSR (headless — no window, no event loop, no GPU/graphics API)
+    // =========================================================================
+#ifdef FLUX_SSR
+public:
+    // No private state needed at all — cachedWidth/cachedHeight (already
+    // public, shared across every platform) are sufficient. See
+    // src/flux_window_headless.cpp.
+#endif
+
 
     // =========================================================================
     // Apple / macOS
