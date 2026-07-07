@@ -44,40 +44,7 @@ static void closeSocket(socket_t s) { close(s); }
 
 namespace
 {
-    // ── Minimal base64 encoder (no external dependency) ──────────────────────
-    std::string base64Encode(const std::string &bin)
-    {
-        static const char *tbl =
-            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        std::string out;
-        out.reserve(((bin.size() + 2) / 3) * 4);
-        size_t i = 0;
-        while (i + 2 < bin.size())
-        {
-            unsigned v = (unsigned char)bin[i] << 16 | (unsigned char)bin[i+1] << 8 | (unsigned char)bin[i+2];
-            out += tbl[(v >> 18) & 0x3F];
-            out += tbl[(v >> 12) & 0x3F];
-            out += tbl[(v >> 6) & 0x3F];
-            out += tbl[v & 0x3F];
-            i += 3;
-        }
-        if (i + 1 == bin.size())
-        {
-            unsigned v = (unsigned char)bin[i] << 16;
-            out += tbl[(v >> 18) & 0x3F];
-            out += tbl[(v >> 12) & 0x3F];
-            out += "==";
-        }
-        else if (i + 2 == bin.size())
-        {
-            unsigned v = (unsigned char)bin[i] << 16 | (unsigned char)bin[i+1] << 8;
-            out += tbl[(v >> 18) & 0x3F];
-            out += tbl[(v >> 12) & 0x3F];
-            out += tbl[(v >> 6) & 0x3F];
-            out += "=";
-        }
-        return out;
-    }
+
 
     std::string readFileBinary(const std::string &path)
     {
@@ -87,30 +54,77 @@ namespace
                            std::istreambuf_iterator<char>());
     }
 
-    // Built once at startup, reused for every request's <style> block.
-    // MUST use the exact same files flux_font_ssr.cpp loads for measurement
-    // — same directory (FLUX_SSR_FONT_DIR), same two filenames.
+    // The URL path fonts are served under. MUST use the exact same files
+    // flux_font_ssr.cpp loads for measurement — same directory
+    // (FLUX_SSR_FONT_DIR), same two filenames — just referenced by URL
+    // here instead of being read+embedded per request.
+    constexpr const char *kFontUrlPrefix = "/fonts/";
+    constexpr const char *kRegularFontFile = "Regular.ttf";
+    constexpr const char *kBoldFontFile = "Regular-Bold.ttf";
+
+    // Built once, reused for every request's <style> block. Previously
+    // this base64-encoded both TTFs and inlined them as data URIs into
+    // EVERY response (~900KB of duplicate font bytes per page, with zero
+    // caching benefit — the browser re-downloaded the same bytes on every
+    // navigation). Now it just references the static font route below via
+    // plain url(...), so the browser fetches each font file ONCE and
+    // reuses it for every subsequent page on the same origin.
     const std::string &fontFaceCss()
     {
         static const std::string css = []
         {
-            std::string dir = FLUX_SSR_FONT_DIR; // set by ssr/CMakeLists.txt
-            std::string reg = base64Encode(readFileBinary(dir + "/Regular.ttf"));
-            std::string bold = base64Encode(readFileBinary(dir + "/Regular-Bold.ttf"));
-            if (reg.empty() || bold.empty())
-            {
-                std::cerr << "flux_ssr: WARNING — could not load font files for @font-face embedding; "
-                             "text will render with a fallback font whose metrics won't match layout.\n";
-                return std::string();
-            }
+
             std::ostringstream css;
-            css << "@font-face{font-family:'Inter';font-weight:400;src:url(data:font/ttf;base64,"
-                << reg << ") format('truetype');}"
-                << "@font-face{font-family:'Inter';font-weight:700;src:url(data:font/ttf;base64,"
-                << bold << ") format('truetype');}";
+            css << "@font-face{font-family:'Inter';font-weight:400;src:url("
+                << kFontUrlPrefix << kRegularFontFile << ") format('truetype');}"
+                << "@font-face{font-family:'Inter';font-weight:700;src:url("
+                << kFontUrlPrefix << kBoldFontFile << ") format('truetype');}";
             return css.str();
         }();
         return css;
+    }
+
+    // ── Static font file serving ──────────────────────────────────────────
+    //
+    // Returns true and fills outBody/outContentType if `path` matches one
+    // of the two bundled font files under kFontUrlPrefix. Read from disk
+    // once at startup (font files don't change while the server is
+    // running) and cached in memory — same file, same bytes, every
+    // request; no reason to hit the filesystem per-request.
+    bool tryServeStaticFont(const std::string &path, std::string &outBody,
+                           std::string &outContentType)
+    {
+        static const std::string dir = FLUX_SSR_FONT_DIR; // set by ssr/CMakeLists.txt
+        static const std::string regularBytes = readFileBinary(dir + "/" + kRegularFontFile);
+        static const std::string boldBytes = readFileBinary(dir + "/" + kBoldFontFile);
+
+        if (path == std::string(kFontUrlPrefix) + kRegularFontFile)
+        {
+            if (regularBytes.empty())
+            {
+                std::cerr << "flux_ssr: WARNING — could not load " << kRegularFontFile
+                          << " for static serving; text will render with a fallback "
+                             "font whose metrics won't match layout.\n";
+                return false;
+            }
+            outBody = regularBytes;
+            outContentType = "font/ttf";
+            return true;
+        }
+        if (path == std::string(kFontUrlPrefix) + kBoldFontFile)
+        {
+            if (boldBytes.empty())
+            {
+                std::cerr << "flux_ssr: WARNING — could not load " << kBoldFontFile
+                          << " for static serving; text will render with a fallback "
+                             "font whose metrics won't match layout.\n";
+                return false;
+            }
+            outBody = boldBytes;
+            outContentType = "font/ttf";
+            return true;
+        }
+        return false;
     }
 }
 
@@ -233,28 +247,49 @@ std::string wrapFullPage(const std::string &bodyHtml)
 
         std::string body;
         int statusCode = 200;
+        std::string contentType = "text/html; charset=utf-8";
+        bool cacheable = false;
         try
         {
-            body = renderRequest(path);
+            if (tryServeStaticFont(path, body, contentType))
+            {
+                cacheable = true;
+            }
+            else
+            {
+                body = renderRequest(path);
+            }
         }
         catch (const std::exception &e)
         {
             statusCode = 500;
             body = std::string("Internal Server Error: ") + e.what();
+            contentType = "text/html; charset=utf-8";
             std::cerr << "flux_ssr: render failed for '" << path << "': " << e.what() << "\n";
         }
         catch (...)
         {
             statusCode = 500;
             body = "Internal Server Error";
+            contentType = "text/html; charset=utf-8";
             std::cerr << "flux_ssr: render failed for '" << path << "' (unknown exception)\n";
         }
 
         std::ostringstream response;
         response << "HTTP/1.1 " << statusCode << (statusCode == 200 ? " OK" : " Internal Server Error") << "\r\n"
-                 << "Content-Type: text/html; charset=utf-8\r\n"
-                 << "Content-Length: " << body.size() << "\r\n"
-                 << "Connection: close\r\n\r\n"
+                 << "Content-Type: " << contentType << "\r\n"
+                 << "Content-Length: " << body.size() << "\r\n";
+        if (cacheable)
+        {
+            // Font bytes never change while the server is running (read
+            // once at startup, see tryServeStaticFont) — safe to let the
+            // browser cache them for a long time instead of refetching on
+            // every navigation. If the bundled font files are ever
+            // swapped on disk, restart the server (or add a versioned
+            // filename/query string later if hot-swapping is needed).
+            response << "Cache-Control: public, max-age=31536000, immutable\r\n";
+        }
+        response << "Connection: close\r\n\r\n"
                  << body;
 
         std::string out = response.str();

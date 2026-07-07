@@ -217,4 +217,19 @@ void measureDomRichText(const std::wstring &wtext, const TextStyle &style,
     outHeight = (h > 0) ? h : 0;
 }
 
+// ============================================================================
+// fluxDomCssFontString — on this backend, NativeFont already IS a CSS font
+// string (see this file's header comment), so this is a pure passthrough.
+// fontFamily/fontSize/weight are accepted for interface parity with the
+// SSR implementation but unused here.
+// ============================================================================
+
+std::string fluxDomCssFontString(NativeFont font, const std::string & /*fontFamily*/,
+                                 int /*fontSize*/, FontWeight /*weight*/)
+{
+    const char *cssFont = static_cast<const char *>(font);
+    return cssFont ? std::string(cssFont) : std::string();
+}
+
+
 #endif // __EMSCRIPTEN__

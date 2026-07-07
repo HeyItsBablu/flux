@@ -266,7 +266,12 @@ void measureDomText(const char * /*cssFont*/, const std::wstring &wtext,
 {
     // cssFont ignored, as in the Pango version — kept only so the symbol
     // exists for linking. Real call sites should use measureDomRichText.
-    static FontCache defaultCache;
+    // thread_local: a future multi-threaded SSR host (Phase 6) renders
+    // requests concurrently across threads, and FontCache::cache is an
+    // unsynchronized std::map — a plain static here would be a data race
+    // the moment two requests measure text at once. Same rationale as
+    // every other per-thread state in this codebase since Phase 0.
+    static thread_local FontCache defaultCache;
     NativeFont fnt = defaultCache.getFont("Sans", 14, FontWeight::Normal);
     measureWithFont(reinterpret_cast<SsrNativeFont *>(fnt), wtext,
                     0, false, 0, outWidth, outHeight);
@@ -291,7 +296,7 @@ void measureDomRichText(const std::wstring &wtext, const TextStyle &style,
 // every sibling positioned below a multi-line-height-sensitive box.
 int fluxDomLineHeightPx(const std::string &fontFamily, int fontSize, FontWeight weight)
 {
-    static FontCache cache;
+    static thread_local FontCache cache; // see measureDomText's comment above
     NativeFont fnt = cache.getFont(fontFamily, fontSize, weight);
     auto *font = reinterpret_cast<SsrNativeFont *>(fnt);
     if (!font) return static_cast<int>(fontSize * 1.2f);
@@ -301,5 +306,34 @@ int fluxDomLineHeightPx(const std::string &fontFamily, int fontSize, FontWeight 
     stbtt_GetFontVMetrics(&font->info, &ascent, &descent, &lineGap);
     return static_cast<int>((ascent - descent + lineGap) * scale + 0.5f);
 }
+
+
+// ============================================================================
+// fluxDomCssFontString — SSR counterpart to flux_font_dom.cpp's passthrough.
+// NativeFont here is an SsrNativeFont*, not a string — casting it directly
+// to const char* (as flux_painter_dom.cpp used to do) reads raw struct
+// bytes (a stbtt_fontinfo plus a couple of ints/bools) as if they were a
+// C-string, which is undefined behavior and, even when it doesn't crash,
+// never produces a valid CSS value. Build the shorthand explicitly from
+// the same family/size/weight the caller already has on hand instead of
+// trying to recover it from the NativeFont handle.
+//
+// Family is intentionally hard-coded to 'Inter' regardless of the
+// `fontFamily` argument — this mirrors flux_font_ssr.cpp's own
+// documented divergence (stb_truetype has no fontconfig-style family
+// resolution; every request is mapped onto the bundled Inter files by
+// weight only) and must match the @font-face family name main.cpp's
+// fontFaceCss() registers, or the browser will silently fail to apply it.
+// ============================================================================
+
+std::string fluxDomCssFontString(NativeFont /*font*/, const std::string & /*fontFamily*/,
+                                 int fontSize, FontWeight weight)
+{
+    if (fontSize <= 0) fontSize = 14; // matches FontCache::getFont(size, weight)'s default
+    char buf[64];
+    snprintf(buf, sizeof(buf), "%d %dpx 'Inter'", static_cast<int>(weight), fontSize);
+    return std::string(buf);
+}
+
 
 #endif // FLUX_SSR

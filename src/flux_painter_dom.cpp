@@ -61,6 +61,15 @@ void measureDomRichText(const std::wstring &wtext, const TextStyle &style,
 // approximation matching that file's own font string).
 int fluxDomLineHeightPx(const std::string &fontFamily, int fontSize, FontWeight weight);
 
+// Implemented per-backend. NativeFont is NOT safely castable to
+// `const char*` on every backend — on live web (flux_font_dom.cpp) it IS
+// already a CSS font string, but on SSR (flux_font_ssr.cpp) it's a
+// pointer to an SsrNativeFont struct (stbtt_fontinfo + friends), and
+// reinterpreting that as a C-string is undefined behavior. This function
+// is the one seam that turns whatever NativeFont actually is into a
+// proper CSS `font` shorthand string for the given backend.
+std::string fluxDomCssFontString(NativeFont font, const std::string &fontFamily,
+                                 int fontSize, FontWeight weight);
 
 // ============================================================================
 // Internal helpers
@@ -556,8 +565,12 @@ void Painter::drawText(const std::wstring &text, int x, int y, int w, int h,
     DomNodeHandle node = ensureNode(owner);
     applyRect(adapter, node, owner, x, y, w, h);
 
-    const char *cssFont = static_cast<const char *>(font);
-    if (cssFont)
+    // drawText's plain-font callers (IconWidget, cursor math, etc.) don't
+    // carry family/size/weight alongside `font` — pass empty/0 defaults;
+    // the SSR implementation falls back to its own "Sans"/Normal default
+    // in that case, matching FontCache::getFont(size, weight)'s behavior.
+    std::string cssFont = fluxDomCssFontString(font, "", 0, FontWeight::Normal);
+    if (!cssFont.empty())
         adapter->setStyle(node, "font", cssFont);
 
     char col[32];
@@ -613,12 +626,13 @@ void Painter::drawRichText(const std::wstring &wtext,
 
     NativeFont fnt = fontCache.getFont(style.fontFamily, style.scaledFontSize(),
                                        style.fontWeight, underline, strikeOut);
-    const char *cssFont = static_cast<const char *>(fnt);
+    std::string cssFont = fluxDomCssFontString(fnt, style.fontFamily,
+                                               style.scaledFontSize(), style.fontWeight);
 
     DomNodeHandle node = ensureNode(owner);
     applyRect(adapter, node, owner, params.x, params.y, params.w, params.h);
 
-    if (cssFont)
+    if (!cssFont.empty())
         adapter->setStyle(node, "font", cssFont);
 
     char col[32];
