@@ -4,7 +4,7 @@
 #include "../flux_core.hpp"
 #include "../flux_state.hpp"
 
-#if defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)
+#if (defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)) || defined(FLUX_SSR)
 #include "../flux_dom_adapter.hpp"
 // fluxDomEnsureNode / fluxDomApplyRect are declared once, with their
 // optional "slot" parameter, in flux_dom_adapter.hpp — not redeclared
@@ -89,7 +89,7 @@ public:
   void render(GraphicsContext &ctx, FontCache &fontCache) override
   {
 
-#if defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)
+#if (defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)) || defined(FLUX_SSR)
     if (IDomAdapter *adapter = getActiveDomAdapter())
     {
         _renderDom(adapter);
@@ -270,7 +270,7 @@ private:
       boundBoolState->set(toggled);
   }
 
-#if defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)
+#if (defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)) || defined(FLUX_SSR)
   // Four layers under one owner: track, thumb-shadow, thumb, label.
   // The thumb's LEFT position is animated via a real CSS transition
   // rather than driven by animationProgress/a JS timer — on canvas,
@@ -405,7 +405,7 @@ public:
   void render(GraphicsContext &ctx, FontCache & /*fontCache*/) override
   {
 
-#if defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)
+#if (defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)) || defined(FLUX_SSR)
     if (IDomAdapter *adapter = getActiveDomAdapter())
     {
         _renderDom(adapter);
@@ -630,7 +630,7 @@ private:
   State<int> *boundIntState = nullptr;
 
 
-#if defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)
+#if (defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)) || defined(FLUX_SSR)
   // Three layers under one owner: track, fill (progress), thumb.
   // Deliberately NO position transition on fill/thumb — this widget
   // updates continuously during a drag (see handleMouseMove ->
@@ -776,7 +776,7 @@ public:
   void render(GraphicsContext &ctx, FontCache &fontCache) override
   {
 
-#if defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)
+#if (defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)) || defined(FLUX_SSR)
     if (IDomAdapter *adapter = getActiveDomAdapter())
     {
         _renderDom(adapter);
@@ -846,7 +846,7 @@ public:
 
 
 private:
-#if defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)
+#if (defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)) || defined(FLUX_SSR)
   // Hit-testing for clicks stays entirely in C++ (findAndHandleMouseEvent
   // via the input-capture div — see flux_window_dom.cpp); these nodes are
   // purely visual, hence pointer-events:none on both, matching every
@@ -968,7 +968,7 @@ public:
 
   void render(GraphicsContext &ctx, FontCache &fontCache) override
   {
-#if defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)
+#if (defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)) || defined(FLUX_SSR)
     if (IDomAdapter *adapter = getActiveDomAdapter())
     {
         _renderDom(adapter);
@@ -1057,7 +1057,7 @@ public:
   }
 
 private:
-#if defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)
+#if (defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)) || defined(FLUX_SSR)
   // Three independent visual layers under one owner: the outer ring, the
   // inner filled dot (only when selected), and the label. Unlike
   // CheckBoxWidget's checkmark — which could ride along as the box
@@ -1426,7 +1426,7 @@ public:
   void render(GraphicsContext &ctx, FontCache &fontCache) override
   {
 
-#if defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)
+#if (defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)) || defined(FLUX_SSR)
     if (IDomAdapter *adapter = getActiveDomAdapter())
     {
         _renderDom(adapter);
@@ -1482,7 +1482,7 @@ public:
   bool handleFocus(bool focused) override
   {
 
-#if defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)
+#if (defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)) || defined(FLUX_SSR)
     // Real <input> owns its own native caret/blink — no hand-rolled
     // cursor timer needed on this backend, and no VirtualKeyboard::
     // notify*() either (the real element triggers the OS's own on-screen
@@ -1630,7 +1630,7 @@ public:
 private:
 
 
-#if defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)
+#if (defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)) || defined(FLUX_SSR)
   void onDomInputChanged(const std::string &value) override
   {
       inputValue = value;
