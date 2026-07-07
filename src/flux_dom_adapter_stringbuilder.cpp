@@ -54,12 +54,17 @@ namespace
 class StringBuilderDomAdapter : public IDomAdapter
 {
 public:
-    DomNodeHandle createNode(const char *tag) override
+    DomNodeHandle createNode(const char *tag, const std::string &hydrationId) override
     {
         nodes_.push_back(PendingNode{});
         DomNodeHandle handle = (DomNodeHandle)nodes_.size(); // 1-based; 0 stays kInvalidDomNode
         nodes_.back().tag = tag;
         nodes_.back().isInput = (nodes_.back().tag == "input" || nodes_.back().tag == "textarea");
+        // The marker flux_dom_adapter_live.cpp looks for to adopt this
+        // exact element instead of recreating it on the client. Written
+        // as a real HTML attribute so it survives into the served page.
+        if (!hydrationId.empty())
+            nodes_.back().attrs["data-flux-id"] = hydrationId;
         return handle;
     }
 

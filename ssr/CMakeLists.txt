@@ -87,6 +87,38 @@ if(NOT IS_ABSOLUTE "${FLUX_SSR_FONT_DIR}")
     endif()
 endif()
 
+
+# ============================================================================
+# Web bundle location (Phase 5 — hydration)
+#
+# flux_ssr's HTML response boots the SAME client WASM bundle a pure
+# client-rendered page would (web/CMakeLists.txt's `flux_app` target).
+# This does NOT add flux_app as a build dependency of flux_ssr — the two
+# targets can be built independently (e.g. web bundle built once via
+# Emscripten toolchain, flux_ssr built natively) — it only tells flux_ssr
+# WHERE to find the already-built .js/.wasm/.data files at runtime.
+#
+# Default assumes a sibling build directory; override for your actual
+# layout, e.g.:
+#   cmake -B build/ssr -DFLUX_SSR_WEB_BUNDLE_DIR=C:/path/to/build/web
+# ============================================================================
+
+set(FLUX_SSR_WEB_BUNDLE_DIR "${CMAKE_BINARY_DIR}/web" CACHE STRING
+    "Directory containing the built flux_app.js/.wasm/.data (web/CMakeLists.txt's flux_app target)")
+
+target_compile_definitions(flux_ssr PRIVATE
+    FLUX_SSR_WEB_BUNDLE_DIR="${FLUX_SSR_WEB_BUNDLE_DIR}"
+)
+
+if(NOT EXISTS "${FLUX_SSR_WEB_BUNDLE_DIR}/flux_app.js")
+    message(WARNING
+        "flux_ssr: 'flux_app.js' not found under FLUX_SSR_WEB_BUNDLE_DIR "
+        "(${FLUX_SSR_WEB_BUNDLE_DIR}). flux_ssr will still start, but every "
+        "page it serves will show correct content with NO client-side "
+        "interactivity until the web bundle is built at that path (see "
+        "the FLUX_SSR_WEB_BUNDLE_DIR comment above).")
+endif()
+
 # ============================================================================
 # Link libraries
 # ============================================================================

@@ -94,6 +94,21 @@ namespace
     // cost from before.
     thread_local std::unordered_map<Widget *, std::unordered_map<std::string, DomNodeHandle>>
         g_domNodeCache;
+    // ── Per-node hydration id counter ────────────────────────────────────────
+    //
+    // Mirrors flux_hydration.hpp's fluxHydrationNextId() pattern exactly,
+    // but at DOM-NODE granularity — every widget's node gets one, not just
+    // hydration-aware widgets. As long as createApp()/build() run the same
+    // deterministic code path on the SSR host and the client (same tree,
+    // same order — the same requirement fluxHydrationNextId() already
+    // relies on), the Nth node CREATED on the server and the Nth node
+    // CREATED on the client are "the same" node, and
+    // flux_dom_adapter_live.cpp uses this id to adopt the server's
+    // existing element instead of duplicating it.
+    thread_local int g_domNodeIdCounter = 0;
+
+    std::string nextDomNodeHydrationId() { return "n" + std::to_string(g_domNodeIdCounter++); }
+
 
     // ── CSS colour string ─────────────────────────────────────────────────────
     void cssColor(Color c, char *buf, int bufLen)
@@ -150,7 +165,7 @@ namespace
         }
         else
         {
-            handle = adapter->createNode(tag);
+            handle = adapter->createNode(tag, nextDomNodeHydrationId());
             slotMap[slot] = handle;
             created = true;
             // Every node paints at an explicit x/y via its own geometry
@@ -865,5 +880,22 @@ void Painter::drawPage(const PageDrawParams &) { /* deferred */ }
 // change to those two widget files, tracked as its own Phase 1 item).
 void Painter::drawVideo(const VideoDrawParams &) {}
 void Painter::drawCamera(const CameraDrawParams &) {}
+
+
+// ============================================================================
+// fluxDomResetNodeIdCounter — reset the hydration-id counter above to 0.
+//
+// Two callers, two different reasons:
+//   - ssr/main.cpp calls this every request, alongside
+//     fluxDomClearCacheForNewRequest() — a new request's node ids must
+//     start from 0, not continue from wherever the previous request left
+//     off (this thread renders many requests sequentially).
+//   - web/main.cpp calls this ONCE, right before the very first build()
+//     of the page — never on later Navigator page swaps, which are
+//     client-only transitions with no server counterpart to match ids
+//     against (same rule fluxHydrationResetIdCounter() already documents).
+// ============================================================================
+
+void fluxDomResetNodeIdCounter() { g_domNodeIdCounter = 0; }
 
 #endif // __EMSCRIPTEN__ || FLUX_SSR

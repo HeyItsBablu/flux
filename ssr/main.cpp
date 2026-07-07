@@ -10,6 +10,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 
 // ── Socket platform shim ─────────────────────────────────────────────────
 // Winsock2 needs WSAStartup/WSACleanup, a SOCKET handle type instead of
@@ -32,7 +33,6 @@ static void closeSocket(socket_t s) { closesocket(s); }
 #include <netinet/in.h>
 #include <unistd.h>
 
-
 using socket_t = int;
 constexpr socket_t kInvalidSocket = -1;
 
@@ -45,11 +45,11 @@ static void closeSocket(socket_t s) { close(s); }
 namespace
 {
 
-
     std::string readFileBinary(const std::string &path)
     {
         std::ifstream f(path, std::ios::binary);
-        if (!f) return {};
+        if (!f)
+            return {};
         return std::string((std::istreambuf_iterator<char>(f)),
                            std::istreambuf_iterator<char>());
     }
@@ -73,7 +73,6 @@ namespace
     {
         static const std::string css = []
         {
-
             std::ostringstream css;
             css << "@font-face{font-family:'Inter';font-weight:400;src:url("
                 << kFontUrlPrefix << kRegularFontFile << ") format('truetype');}"
@@ -92,7 +91,7 @@ namespace
     // running) and cached in memory — same file, same bytes, every
     // request; no reason to hit the filesystem per-request.
     bool tryServeStaticFont(const std::string &path, std::string &outBody,
-                           std::string &outContentType)
+                            std::string &outContentType)
     {
         static const std::string dir = FLUX_SSR_FONT_DIR; // set by ssr/CMakeLists.txt
         static const std::string regularBytes = readFileBinary(dir + "/" + kRegularFontFile);
@@ -148,9 +147,144 @@ void fluxSsrDestroyDomAdapter(IDomAdapter *adapter);
 // widget could collide with a freed one's stale cache entry, returning a
 // DomNodeHandle that belongs to an ALREADY-DESTROYED adapter instance.
 extern void fluxDomClearCacheForNewRequest();
+extern void fluxDomResetNodeIdCounter();
 
 namespace
 {
+    // ── JS string-literal escaping ────────────────────────────────────────
+    //
+    // Turns arbitrary bytes (the hydration blob may contain fetched JSON
+    // text — quotes, backslashes, newlines, and possibly the two ASCII
+    // control chars \x1E/\x1F flux_hydration.hpp uses as record/field
+    // separators) into something safe to splice directly into
+    // `Module._fluxHydrationData = "...";` inside an inline <script> tag.
+    //
+    // Two passes:
+    //   1. Standard JS string escaping (backslash, quote, control chars).
+    //   2. Escape any "</" sequence as "<\/" — the HTML PARSER (not the
+    //      JS parser) scans for a literal "</script" case-insensitively
+    //      regardless of what's inside a JS string; if a hydrated JSON
+    //      value happened to contain the literal text "</script>" (e.g.
+    //      user-generated content fetched from an API), it would
+    //      prematurely close our <script> tag and corrupt the page. "\/"
+    //      is a no-op escape in JS (produces a plain "/") but breaks the
+    //      HTML parser's literal match.
+    std::string jsStringEscape(const std::string &raw)
+    {
+        std::string out;
+        out.reserve(raw.size() + 16);
+        for (unsigned char c : raw)
+        {
+            switch (c)
+            {
+            case '\\':
+                out += "\\\\";
+                break;
+            case '"':
+                out += "\\\"";
+                break;
+            case '\n':
+                out += "\\n";
+                break;
+            case '\r':
+                out += "\\r";
+                break;
+            default:
+                if (c < 0x20 || c == 0x7F)
+                {
+                    char buf[8];
+                    snprintf(buf, sizeof(buf), "\\x%02X", c);
+                    out += buf;
+                }
+                else
+                {
+                    out += static_cast<char>(c);
+                }
+            }
+        }
+        // Second pass: break up "</" so "</script" can never appear
+        // literally in the emitted HTML, regardless of what was escaped
+        // above (case above only escapes JS-meaningful characters, not
+        // '<' or '/' individually).
+        std::string safe;
+        safe.reserve(out.size());
+        for (size_t i = 0; i < out.size(); ++i)
+        {
+            if (out[i] == '<' && i + 1 < out.size() && out[i + 1] == '/')
+            {
+                safe += "<\\/";
+                ++i; // consumed the '/'
+            }
+            else
+            {
+                safe += out[i];
+            }
+        }
+        return safe;
+    }
+
+    // ── Web bundle static serving ──────────────────────────────────────────
+    //
+    // The SAME client WASM bundle a pure client-rendered page would load
+    // (web/CMakeLists.txt's `flux_app` target: flux_app.js/.wasm/.data) —
+    // Phase 5 hydration means the SSR-rendered page boots this exact
+    // bundle in the background, so it must be reachable at a URL the
+    // page's <script src="..."> can point to.
+    //
+    // FLUX_SSR_WEB_BUNDLE_DIR must be set at configure time (see
+    // ssr/CMakeLists.txt) to the directory containing the built
+    // flux_app.js/.wasm/.data files — typically the web build's own
+    // CMAKE_CURRENT_BINARY_DIR. This couples the SSR target to a
+    // successful prior (or simultaneous) web build; see the CMake diff
+    // below for how that dependency is expressed.
+    constexpr const char *kWebBundleUrlPrefix = "/app/";
+    struct WebAssetEntry
+    {
+        const char *filename;
+        const char *contentType;
+    };
+    constexpr WebAssetEntry kWebAssets[] = {
+        {"flux_app.js", "application/javascript"},
+        {"flux_app.wasm", "application/wasm"},
+        {"flux_app.data", "application/octet-stream"},
+    };
+
+    bool tryServeWebAsset(const std::string &path, std::string &outBody,
+                          std::string &outContentType)
+    {
+        static const std::string dir = FLUX_SSR_WEB_BUNDLE_DIR;
+        for (auto &asset : kWebAssets)
+        {
+            if (path == std::string(kWebBundleUrlPrefix) + asset.filename)
+            {
+                static std::unordered_map<std::string, std::string> cache;
+                static std::unordered_map<std::string, bool> warned;
+                auto it = cache.find(asset.filename);
+                if (it == cache.end())
+                {
+                    std::string bytes = readFileBinary(dir + "/" + asset.filename);
+                    it = cache.emplace(asset.filename, std::move(bytes)).first;
+                }
+                if (it->second.empty())
+                {
+                    if (!warned[asset.filename])
+                    {
+                        warned[asset.filename] = true;
+                        std::cerr << "flux_ssr: WARNING — " << asset.filename
+                                  << " not found under FLUX_SSR_WEB_BUNDLE_DIR ("
+                                  << dir << "); hydration will never boot on "
+                                            "any page until the web bundle is built.\n";
+                    }
+                    return false;
+                }
+                outBody = it->second;
+                outContentType = asset.contentType;
+                return true;
+            }
+        }
+        return false;
+    }
+
     // Fixed viewport — no real browser window to ask. This is the same
     // known, accepted tradeoff the original roadmap flagged for
     // responsive breakpoints: one SSR render reflects one assumed
@@ -170,19 +304,62 @@ namespace
         return requestLine.substr(firstSpace + 1, secondSpace - firstSpace - 1);
     }
 
-std::string wrapFullPage(const std::string &bodyHtml)
-{
-    std::ostringstream html;
-    html << "<!DOCTYPE html><html><head><meta charset=\"UTF-8\">"
-         << "<style>*{margin:0;padding:0;box-sizing:border-box;}"
-         << "html,body{width:100%;height:100%;font-family:'Inter',sans-serif;}"
-         << fontFaceCss()
-         << "</style></head><body>"
-         << "<div style=\"position:relative;width:100%;height:100%;\">"
-         << bodyHtml
-         << "</div></body></html>";
-    return html.str();
-}
+    // hydrationBlob: base64-encoded output of fluxHydrationSerializeBlob(),
+    // already collected by the time this is called (see renderRequest below).
+    std::string wrapFullPage(const std::string &bodyHtml, const std::string &hydrationBlob)
+    {
+        std::ostringstream html;
+        html << "<!DOCTYPE html><html><head><meta charset=\"UTF-8\">"
+             << "<style>*{margin:0;padding:0;box-sizing:border-box;}"
+             << "html,body{width:100%;height:100%;font-family:'Inter',sans-serif;}"
+             << fontFaceCss()
+             << "</style></head><body>"
+             // id="flux-dom-root" — REQUIRED. flux_dom_adapter_live.cpp's
+             // setRoot()/Module._fluxDomAdopt() both look up this exact id
+             // (matching shell.html.in's #flux-dom-root, see that file) to
+             // find the server-rendered content to mount into / adopt from.
+             << "<div id=\"flux-dom-root\" style=\"position:relative;width:100%;height:100%;\">"
+             << bodyHtml
+         // #flux-input-capture — REQUIRED for the page to be interactive
+         // at all post-hydration. flux_window_dom.cpp registers every
+         // mouse/touch/keyboard listener on this exact element selector
+         // (see emscripten_set_mousedown_callback("#flux-input-capture",
+         // ...) etc). Without it, hydration completes and the page LOOKS
+         // interactive but every click silently does nothing — no error,
+         // no console warning, just a dead page. Matches the markup
+         // web/CMakeLists.txt's FLUX_CANVAS_RENDERER_MARKUP generates for
+         // FLUX_WEB_RENDERER=dom builds.
+         << "<div id=\"flux-input-capture\" style=\"position:absolute;top:0;left:0;"
+            "width:100%;height:100%;touch-action:none;background:transparent;z-index:1;\"></div>"
+         // #flux-gl — present on both renderers; CanvasWidget/video/camera
+         // widgets use it regardless of which renderer draws everything
+         // else. Empty/inert until such a widget attaches to it.
+         << "<canvas id=\"flux-gl\" style=\"position:absolute;top:0;left:0;"
+            "width:100%;height:100%;pointer-events:none;\"></canvas>"
+         // ── Minimal Module bootstrap ──────────────────────────────────
+         // Deliberately NOT the full shell.html.in bootstrap (no loading
+         // spinner needed — the whole point of SSR is that real content
+         // is already visible; no error overlay wiring either, kept out
+         // for now as a known simplification). Just enough for
+         // web/main.cpp's main() to boot correctly against THIS
+         // document: canvas/DPR globals it reads at startup, and the
+         // hydration blob it reads before build().
+         << "<script>"
+            "var Module = {};"
+            "Module.canvas = document.getElementById('flux-gl');"
+            "Module._fluxDPR = window.devicePixelRatio || 1;"
+            "Module._fluxPhysicalWidth = Math.floor(window.innerWidth * Module._fluxDPR);"
+            "Module._fluxPhysicalHeight = Math.floor(window.innerHeight * Module._fluxDPR);"
+            "Module.locateFile = function(path, prefix) { return '" << kWebBundleUrlPrefix << "' + path; };"
+            // The hydration payload itself — see jsStringEscape()'s
+            // header comment for why this is safe to splice in raw
+            // rather than needing a separate encoding step.
+            "Module._fluxHydrationData = \"" << jsStringEscape(hydrationBlob) << "\";"
+         << "</script>"
+         << "<script src=\"" << kWebBundleUrlPrefix << "flux_app.js\"></script>"
+             << "</body></html>";
+        return html.str();
+    }
 
     // One request, start to finish. Returns the full HTML response body.
     std::string renderRequest(const std::string &requestedPath)
@@ -191,6 +368,7 @@ std::string wrapFullPage(const std::string &bodyHtml)
         fluxSetSSRSyncMode(true);
         fluxHydrationClear();
         fluxHydrationResetIdCounter();
+        fluxDomResetNodeIdCounter();
         fluxDomClearCacheForNewRequest();
         Navigator::setSSRRequestPath(requestedPath);
 
@@ -226,7 +404,8 @@ std::string wrapFullPage(const std::string &bodyHtml)
         fluxSsrDestroyDomAdapter(adapter);
         fluxSetSSRSyncMode(false);
 
-        return wrapFullPage(html);
+        
+        return wrapFullPage(html, fluxHydrationSerializeBlob());
     }
 
     void handleConnection(socket_t clientFd)
@@ -254,6 +433,17 @@ std::string wrapFullPage(const std::string &bodyHtml)
             if (tryServeStaticFont(path, body, contentType))
             {
                 cacheable = true;
+            }
+            else if (tryServeWebAsset(path, body, contentType))
+            {
+                // NOT marked cacheable=true (no long-lived Cache-Control)
+                // unlike the fonts. Rebuilding the app produces NEW bytes
+                // under the SAME filename (flux_app.js/.wasm/.data have
+                // no content hash in their name, unlike a typical
+                // webpack/vite build) — an aggressive immutable cache
+                // header here would strand returning visitors on a stale
+                // bundle after every deploy. Left uncached for now;
+                // revisit with hashed filenames if this needs to scale.
             }
             else
             {

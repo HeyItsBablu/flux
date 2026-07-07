@@ -107,6 +107,46 @@ namespace
 }
 
 // ============================================================================
+// fluxDomLineHeightPx — CSS-pixel line-height for the given font, so
+// Painter::drawRichText() can pin a DOM node's `line-height` to the exact
+// value measureDomRichText() assumed during layout (see flux_painter_dom.cpp
+// call site). Unlike the SSR backend (which derives this from
+// stb_truetype's ascent/descent/lineGap metrics), the live browser can
+// just ask the sandbox element directly — create a single line of text at
+// this font and read back its rendered line box height. Simpler and, by
+// construction, exactly what the browser will use when actually painting.
+// ============================================================================
+
+int fluxDomLineHeightPx(const std::string &fontFamily, int fontSize, FontWeight weight)
+{
+    // Build the same CSS font shorthand fluxDomCssFontString would, without
+    // needing a NativeFont handle on hand at every call site.
+    char fontBuf[96];
+    snprintf(fontBuf, sizeof(fontBuf), "%d %dpx '%s'",
+             static_cast<int>(weight), fontSize > 0 ? fontSize : 14,
+             fontFamily.empty() ? "sans-serif" : fontFamily.c_str());
+
+    double h = EM_ASM_DOUBLE({
+        var el = Module._fluxFontSandbox;
+        if (!el) return 0.0;
+
+        el.style.font        = UTF8ToString($0);
+        el.style.whiteSpace   = 'pre';
+        el.style.width        = 'auto';
+        el.style.display      = 'block';
+        el.style.overflow     = 'visible';
+        el.style.webkitLineClamp = '';
+        el.style.webkitBoxOrient = '';
+        el.textContent        = 'M'; // single reference glyph, single line
+
+        var rect = el.getBoundingClientRect();
+        return Math.ceil(rect.height);
+    }, fontBuf);
+
+    return (h > 0) ? (int)h : (int)(fontSize > 0 ? fontSize * 1.2 : 17);
+}
+
+// ============================================================================
 // measureDomText — natural (unwrapped) single-run width/height.
 //
 // Mirrors measureWebText's contract from flux_font_web.cpp: given a CSS

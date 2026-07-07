@@ -75,7 +75,45 @@ extern "C" void fluxDomAdapterLiveInit()
             Module._fluxDomNodes.push(el);
             return handle;
         };
+
+        // ── Hydration state ──────────────────────────────────────────────
+        //
+        // True only during the client's very first build+paint pass, right
+        // after loading a page the SSR host rendered. main.cpp flips this
+        // off (fluxDomAdapterLiveFinishHydration, below) immediately after
+        // that first pass completes — every node created after that point
+        // is genuinely new (a later Navigator page swap, a dropdown
+        // opening, etc.) and has no server-rendered counterpart to look
+        // for, so skipping the lookup avoids a wasted querySelector on
+        // every single node creation for the rest of the page's life.
+        Module._fluxHydrating = true;
+
+        // Module._fluxDomAdopt(hydrationId) -> Element | null
+        // Finds the server-rendered element carrying this exact
+        // data-flux-id, if one exists and hasn't already been adopted.
+        // Scoped to #flux-dom-root — the SSR mount point — so this never
+        // accidentally matches something unrelated elsewhere in the page.
+        Module._fluxDomAdopt = function(hydrationId)
+        {
+            var mount = document.getElementById('flux-dom-root');
+            if (!mount) return null;
+            var el = mount.querySelector('[data-flux-id="' + hydrationId + '"]');
+            if (!el || el._fluxAdopted) return null;
+            el._fluxAdopted = true; // guards against a (shouldn't-happen) double match
+            return el;
+        };
     });
+}
+
+// ============================================================================
+// fluxDomAdapterLiveFinishHydration — call once, right after the client's
+// FIRST build+paint pass completes (main.cpp). Turns off the adoption
+// lookup in createNode() below for the rest of the page's lifetime.
+// ============================================================================
+
+extern "C" void fluxDomAdapterLiveFinishHydration()
+{
+    EM_ASM({ Module._fluxHydrating = false; });
 }
 
 // ============================================================================
@@ -85,11 +123,23 @@ extern "C" void fluxDomAdapterLiveInit()
 class LiveDomAdapter : public IDomAdapter
 {
 public:
-    DomNodeHandle createNode(const char *tag) override
+    DomNodeHandle createNode(const char *tag, const std::string &hydrationId) override
     {
         int handle = EM_ASM_INT({
-            return Module._fluxDomAlloc(UTF8ToString($0));
-        }, tag);
+            var tagStr = UTF8ToString($0);
+            var hid = UTF8ToString($1);
+            if (Module._fluxHydrating && hid.length > 0)
+            {
+                var existing = Module._fluxDomAdopt(hid);
+                if (existing)
+                {
+                    var h = Module._fluxDomNodes.length;
+                    Module._fluxDomNodes.push(existing);
+                    return h;
+                }
+            }
+            return Module._fluxDomAlloc(tagStr);
+        }, tag, hydrationId.c_str());
         return (DomNodeHandle)handle;
     }
 

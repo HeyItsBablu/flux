@@ -64,6 +64,7 @@ extern "C" EMSCRIPTEN_WEBGL_CONTEXT_HANDLE fluxGetGLContext();
 #ifdef FLUX_WEB_RENDERER_DOM
 extern "C" void fluxDomAdapterLiveInit();
 extern "C" void fluxDomAdapterLiveActivate();
+extern "C" void fluxDomAdapterLiveFinishHydration();
 extern "C" void fluxFontDomInit();
 #endif
 
@@ -115,6 +116,22 @@ namespace
             s_app->getPlatformWindow().invalidate();
 
             s_app->getPlatformWindow().tick();
+
+#ifdef FLUX_WEB_RENDERER_DOM
+            // The FIRST tick() is the first real paint pass — this is
+            // when createNode()/ensureNode() calls actually run and try
+            // to adopt server-rendered elements (see
+            // flux_dom_adapter_live.cpp's Module._fluxHydrating check).
+            // Turn adoption mode off immediately afterward; every
+            // subsequent tick is a normal repaint with nothing left to
+            // adopt. Guarded so this only ever fires once per page load.
+            static bool s_hydrationFinished = false;
+            if (!s_hydrationFinished)
+            {
+                s_hydrationFinished = true;
+                fluxDomAdapterLiveFinishHydration();
+            }
+#endif
         }
     }
 
@@ -226,6 +243,7 @@ int main()
     // ── 3. Now build — wireCallbacks + rebuild will run layout correctly ──
     s_app->build([&]()
                  { return createApp(s_app); });
+
 
 
 

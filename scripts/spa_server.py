@@ -21,8 +21,28 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.path = "/flux_app.html"
         return super().do_GET()
 
-if __name__ == "__main__":
+    def log_message(self, format, *args):
+        # Suppress noisy per-request logging on Ctrl+C shutdown races
+        # (a request can land mid-teardown and throw a harmless
+        # ConnectionAbortedError from inside logging otherwise). Keep
+        # normal request logging otherwise.
+        super().log_message(format, *args)
+
+
+def main():
     port = 6931
-    with http.server.HTTPServer(("0.0.0.0", port), Handler) as httpd:
-        print(f"Serving {ROOT} with SPA fallback at http://localhost:{port}")
+    httpd = http.server.HTTPServer(("0.0.0.0", port), Handler)
+    print(f"Serving {ROOT} with SPA fallback at http://localhost:{port}")
+    print("Press Ctrl+C to stop.")
+
+    try:
         httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\n[spa_server] Ctrl+C received, shutting down...")
+    finally:
+        httpd.server_close()
+        print("[spa_server] Server closed.")
+
+
+if __name__ == "__main__":
+    main()

@@ -119,6 +119,38 @@ inline std::string fluxHydrationNextId()
 }
 
 // ============================================================================
+// fluxHydrationSerializeBlob — server-side wire format ENCODER.
+//
+// The exact inverse of fluxHydrationParseBlob() below: packs whatever
+// fluxHydrationSetPageData()/fluxHydrationAddWidgetData() collected during
+// THIS request's render into the \x1E/\x1F-delimited wire format the
+// client already knows how to decode. ssr/main.cpp calls this once, after
+// rendering, to get the string it embeds in the response for the browser
+// to later hand to fluxHydrationParseBlob() on boot.
+//
+// Didn't exist before Phase 5 because nothing needed to go this direction
+// yet — Phase 3 only exercised the reader side via a manual test harness.
+// ============================================================================
+
+inline std::string fluxHydrationSerializeBlob()
+{
+    std::string out;
+    auto appendRecord = [&](const std::string &id, const std::string &value)
+    {
+        if (!out.empty()) out += '\x1E';
+        out += id;
+        out += '\x1F';
+        out += value;
+    };
+    if (flux_hydration_detail::g_hasPageData)
+        appendRecord("__page__", flux_hydration_detail::g_pageData);
+    for (auto &[id, value] : flux_hydration_detail::g_widgetData)
+        appendRecord(id, value);
+    return out;
+}
+
+
+// ============================================================================
 // fluxHydrationParseBlob — client-side wire format decoder.
 //
 // Format: records separated by \x1E (ASCII Record Separator), each record

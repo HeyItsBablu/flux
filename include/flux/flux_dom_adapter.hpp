@@ -41,7 +41,17 @@ public:
 
     // Create a new node of the given HTML tag ("div", "span", "input", ...).
     // Returns kInvalidDomNode on failure (adapter not ready, etc).
-    virtual DomNodeHandle createNode(const char *tag) = 0;
+    //
+    // hydrationId: a stable, predictable identifier for THIS EXACT node,
+    // assigned in creation order by flux_painter_dom.cpp's ensureNode()
+    // (see nextDomNodeHydrationId() there) — the DOM-node-level
+    // counterpart to flux_hydration.hpp's per-widget fluxHydrationNextId().
+    // The SSR string-builder adapter writes it out as a `data-flux-id`
+    // attribute; the live browser adapter uses it to find and ADOPT the
+    // server-rendered element with the same id instead of duplicating it
+    // (Phase 5). Empty string means "no hydration correlation needed."
+    virtual DomNodeHandle createNode(const char *tag,
+                                     const std::string &hydrationId = "") = 0;
 
     // Set a single CSS property (e.g. "background-color", "12px").
     // Setting the SAME property on the SAME node repeatedly (e.g. every
