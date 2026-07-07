@@ -52,6 +52,14 @@ extern "C" EMSCRIPTEN_KEEPALIVE void fluxDomOnFocusEvent(int handle, int focused
         it->second->onDomFocusChanged(focused != 0);
 }
 
+
+extern "C" EMSCRIPTEN_KEEPALIVE void fluxDomOnScrollEvent(int handle, int scrollTop)
+{
+    auto it = g_inputEventTargets.find((DomNodeHandle)handle);
+    if (it != g_inputEventTargets.end() && it->second)
+        it->second->onDomScrollChanged(scrollTop);
+}
+
 // ============================================================================
 // One-time JS-side registry setup
 //
@@ -273,6 +281,33 @@ public:
                 Module.ccall('fluxDomOnFocusEvent', null, ['number', 'number'], [handle, 0]);
             });
         }, node);
+    }
+
+
+    void bindScrollEvent(DomNodeHandle node, Widget *owner) override
+    {
+        if (node == kInvalidDomNode) return;
+        g_inputEventTargets[node] = owner;
+        EM_ASM({
+            var el = Module._fluxDomNodes[$0];
+            if (!el) return;
+            if (el._fluxScrollBound) return; // idempotent, same as bindInputEvents' _fluxBound guard
+            el._fluxScrollBound = true;
+            var handle = $0;
+            el.addEventListener('scroll', function () {
+                Module.ccall('fluxDomOnScrollEvent', null, ['number', 'number'], [handle, el.scrollTop | 0]);
+            });
+        }, node);
+    }
+
+    void setBoolProperty(DomNodeHandle node, const char *name, bool value) override
+    {
+        if (node == kInvalidDomNode) return;
+        EM_ASM({
+            var el = Module._fluxDomNodes[$0];
+            if (!el) return;
+            el[UTF8ToString($1)] = $2 ? true : false;
+        }, node, name, value ? 1 : 0);
     }
 
     void setRoot(DomNodeHandle node) override

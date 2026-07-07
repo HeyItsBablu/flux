@@ -8,6 +8,7 @@ class MyApp : public Widget
     State<std::string> radioState{"Option A"};
     State<std::string> textState{""};
     State<double> numberState{42.0};
+    State<std::string> textAreaState{""};
 
 public:
     WidgetPtr build() override
@@ -100,7 +101,27 @@ public:
                            ->setPadding(16),
 
                        Divider(),
-
+                       // ── TextArea ──────────────────────────────────────────────
+                       Flex({Text("TextArea")
+                                 ->setFontWeight(FontWeight::Bold)
+                                 ->setMinWidth(120),
+                             TextArea("Write multiple lines...")
+                                 ->setInputValue(textAreaState)
+                                 ->setHeight(120)
+                                 ->setLineNumbers(true),
+                             Text(textAreaState,
+                                  [](const std::string &v)
+                                  {
+                                      int lines = 1;
+                                      for (char c : v)
+                                          if (c == '\n')
+                                              lines++;
+                                      return std::to_string(lines) + " lines";
+                                  })
+                                 ->setMinWidth(60)
+                                 ->setTextColor(Color::fromRGB(100, 100, 100))})
+                           ->setGap(12)
+                           ->setPadding(16),
 
                    })
             ->setBackgroundColor(Color::fromRGB(280, 180, 180))
@@ -114,14 +135,13 @@ public:
     }
 };
 
-
 // ============================================================
 //  Entry point
 // ============================================================
 
 WidgetPtr createApp(FluxUI *app)
 {
-  return FluxApp()
-      .setTheme(AppTheme::light())
-      .build(std::make_shared<MyApp>());
+    return FluxApp()
+        .setTheme(AppTheme::light())
+        .build(std::make_shared<MyApp>());
 }

@@ -377,6 +377,14 @@ public:
   virtual void onDomInputChanged(const std::string & /*value*/) {}
   virtual void onDomFocusChanged(bool /*focused*/) {}
 
+  // DOM-backend only, same family as the two above. Fired when a real
+  // scrollable element this widget owns (TextAreaWidget's <textarea>)
+  // reports a native 'scroll' event via IDomAdapter::bindScrollEvent —
+  // lets a sibling overlay node (a line-number gutter) stay positioned
+  // in lockstep with real native scrolling instead of our own
+  // hand-rolled scrollY field, which native scrolling bypasses entirely.
+  virtual void onDomScrollChanged(int /*scrollTop*/) {}
+
 
   // Called by FluxUI's overlay dispatch when a click lands outside this
   // widget's bounds while it's registered as an open overlay (see

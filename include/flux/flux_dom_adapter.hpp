@@ -113,6 +113,22 @@ public:
     // right after creating the node — implementations must be idempotent
     // if called again on an already-bound node (render() runs every frame).
     virtual void bindInputEvents(DomNodeHandle node, Widget *owner) = 0;
+
+    // Wires a native 'scroll' event on `node`, forwarding the new
+    // scrollTop back via owner->onDomScrollChanged(). Needed by widgets
+    // whose own SIBLING node (e.g. TextAreaWidget's line-number gutter)
+    // must track a real scrollable element's native scroll position.
+    // Default no-op — most widgets never need it, and the SSR
+    // string-builder adapter never will, since scroll position has no
+    // meaning before any JS has run.
+    virtual void bindScrollEvent(DomNodeHandle /*node*/, Widget * /*owner*/) {}
+
+    // Sets a LIVE IDL boolean PROPERTY (e.g. el.readOnly = true) — same
+    // property-vs-attribute distinction already drawn above for
+    // setInputValue(). Needed by TextAreaWidget::setReadOnly(), which
+    // must actually block native typing, not just decorate markup.
+    // Default no-op on this backend for the same reason as above.
+    virtual void setBoolProperty(DomNodeHandle /*node*/, const char * /*name*/, bool /*value*/) {}
 };
 
 // ============================================================================

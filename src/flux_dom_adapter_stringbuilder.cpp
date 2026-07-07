@@ -26,7 +26,18 @@ namespace
         std::unordered_map<std::string, std::string> attrs;
         std::string text;
         std::vector<DomNodeHandle> children;
-        bool isInput = false; // "input"/"textarea" — self-closing / value-via-attribute
+        // <input> is a genuine HTML void element — a lone `<input ... />`
+        // (or even without the slash) is always safe and self-contained.
+        bool isVoidInput = false;
+        // <textarea> is NOT void. `<textarea ... />` is parsed by the
+        // browser as an UNCLOSED opening tag: the tokenizer enters
+        // "rawtext" mode and swallows everything that follows in the
+        // document as literal TEXT content of the textarea — including
+        // the next sibling's own markup — until it finds a literal
+        // "</textarea>" string. It MUST always get a real closing tag,
+        // and its initial value must be written as text CONTENT between
+        // the tags, never as a "value" attribute (textarea has none).
+        bool isTextarea = false;
     };
 
     // Minimal HTML-attribute escaping — style/attr/text values can contain
@@ -59,7 +70,8 @@ public:
         nodes_.push_back(PendingNode{});
         DomNodeHandle handle = (DomNodeHandle)nodes_.size(); // 1-based; 0 stays kInvalidDomNode
         nodes_.back().tag = tag;
-        nodes_.back().isInput = (nodes_.back().tag == "input" || nodes_.back().tag == "textarea");
+        nodes_.back().isVoidInput = (nodes_.back().tag == "input");
+        nodes_.back().isTextarea  = (nodes_.back().tag == "textarea");
         // The marker flux_dom_adapter_live.cpp looks for to adopt this
         // exact element instead of recreating it on the client. Written
         // as a real HTML attribute so it survives into the served page.
@@ -109,14 +121,16 @@ public:
     // ── Real <input> support ─────────────────────────────────────────────
     void setInputValue(DomNodeHandle node, const std::string &value) override
     {
-        // For a STATIC html string (no live element to assign .value to
-        // later), the way to make an <input> show the right content on
-        // first paint IS the value attribute — this is the one place
-        // setAttr's semantics (persistent HTML attribute) are actually
-        // the correct behavior, unlike the live adapter's comment
-        // explicitly warning that attributes don't reflect live typing
-        // (irrelevant here — nothing is live yet).
-        if (auto *n = get(node)) n->attrs["value"] = value;
+        auto *n = get(node);
+        if (!n) return;
+        if (n->isTextarea)
+            // <textarea> has no value ATTRIBUTE — its initial content
+            // must be literal text between the open and close tags.
+            n->text = value;
+        else
+            // <input> — the value attribute IS correct and meaningful
+            // for a static, non-editable server render.
+            n->attrs["value"] = value;
     }
     void focusNode(DomNodeHandle) override { /* nothing to focus in static HTML */ }
     void blurNode(DomNodeHandle) override { }
@@ -171,12 +185,16 @@ private:
         for (auto &[k, v] : n->attrs)
             out << " " << k << "=\"" << escapeHtml(v) << "\"";
 
-        if (n->isInput)
+        if (n->isVoidInput)
         {
-            out << " />"; // <input>/<textarea> as self-closing is fine for
-                          // a static, non-editable server render
+            out << " />"; // <input> — genuinely void, self-close is safe
             return;
         }
+        // Every other tag — including <textarea> — gets a REAL closing
+        // tag. For <textarea>, n->text (set above by setInputValue) is
+        // its actual displayed/edited content, written as literal
+        // escaped text between the tags, exactly like any other
+        // element's text content.
 
         out << ">";
         out << escapeHtml(n->text);
