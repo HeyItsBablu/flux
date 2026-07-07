@@ -72,6 +72,16 @@ target_compile_definitions(flux_ssr PRIVATE
 set(FLUX_SSR_FONT_DIR "fonts" CACHE STRING
     "Directory (relative to flux_ssr's working dir, or absolute) containing Regular.ttf / Regular-Bold.ttf")
 
+# Windows paths use backslashes, and backslash+letter (\f, \b, \n, ...) is a
+# C++ escape sequence — embedding a raw Windows path straight into a string
+# literal via target_compile_definitions silently corrupts it (e.g. "...\flux\..."
+# becomes "...<form-feed>lux..." because \f means form-feed, \b means
+# backspace, etc). Forward slashes are accepted by every file API this
+# target actually calls (fopen/ifstream), so normalize here instead of
+# trying to double-escape backslashes.
+string(REPLACE "\\" "/" FLUX_SSR_FONT_DIR "${FLUX_SSR_FONT_DIR}")
+
+
 target_compile_definitions(flux_ssr PRIVATE
     FLUX_SSR_FONT_DIR="${FLUX_SSR_FONT_DIR}"
 )
@@ -105,6 +115,10 @@ endif()
 
 set(FLUX_SSR_WEB_BUNDLE_DIR "${CMAKE_BINARY_DIR}/web" CACHE STRING
     "Directory containing the built flux_app.js/.wasm/.data (web/CMakeLists.txt's flux_app target)")
+
+# Same backslash-escaping problem as FLUX_SSR_FONT_DIR above — normalize
+# before this value is ever used in a compile definition or a path check.
+string(REPLACE "\\" "/" FLUX_SSR_WEB_BUNDLE_DIR "${FLUX_SSR_WEB_BUNDLE_DIR}")
 
 target_compile_definitions(flux_ssr PRIVATE
     FLUX_SSR_WEB_BUNDLE_DIR="${FLUX_SSR_WEB_BUNDLE_DIR}"

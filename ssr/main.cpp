@@ -6,6 +6,7 @@
 #include "flux/flux_dom_adapter.hpp"
 #include "flux/flux_http.hpp"
 
+#include <cctype>
 #include <cstring>
 #include <iostream>
 #include <sstream>
@@ -291,8 +292,17 @@ namespace
     // viewport size, not every possible client width. A later
     // enhancement (also flagged originally) would render at N
     // breakpoint widths and let CSS media queries pick the right one.
-    constexpr int kSSRViewportWidth = 1280;
-    constexpr int kSSRViewportHeight = 800;
+    // Tuned closer to a typical browser window's actual inner size
+    // (chrome/tabs/etc already subtracted) to shrink the SSR->hydration
+    // reflow — still a guess, not a fix; see comment above.
+    //
+    // NOTE: this is now only the LAST-RESORT fallback — see
+    // resolveViewport() below, which prefers the client's REAL viewport
+    // whenever it's knowable.
+    constexpr int kSSRViewportWidthDefault = 1280;
+    constexpr int kSSRViewportHeightDefault = 800;
+    constexpr int kSSRViewportMin = 320;  // guard against bogus/hostile header values
+    constexpr int kSSRViewportMax = 4096;
 
     std::string extractRequestPath(const std::string &requestLine)
     {
@@ -302,6 +312,134 @@ namespace
         if (firstSpace == std::string::npos || secondSpace == std::string::npos)
             return "/";
         return requestLine.substr(firstSpace + 1, secondSpace - firstSpace - 1);
+    }
+
+    
+    // ── Request header parsing ────────────────────────────────────────────
+    //
+    // handleConnection() previously only looked at the request line and
+    // threw the rest of the buffer away. Real headers are what let us
+    // learn the client's ACTUAL viewport before rendering, instead of
+    // guessing a fixed size.
+    std::unordered_map<std::string, std::string> parseHeaders(std::istringstream &request)
+    {
+        std::unordered_map<std::string, std::string> headers;
+        std::string line;
+        while (std::getline(request, line))
+        {
+            if (!line.empty() && line.back() == '\r')
+                line.pop_back();
+            if (line.empty())
+                break; // blank line = end of headers
+            size_t colon = line.find(':');
+            if (colon == std::string::npos)
+                continue;
+            std::string key = line.substr(0, colon);
+            std::string val = line.substr(colon + 1);
+            size_t valStart = val.find_first_not_of(' ');
+            val = (valStart == std::string::npos) ? "" : val.substr(valStart);
+            for (auto &c : key)
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            headers[key] = val;
+        }
+        return headers;
+    }
+
+    std::unordered_map<std::string, std::string> parseCookies(const std::string &cookieHeader)
+    {
+        std::unordered_map<std::string, std::string> cookies;
+        size_t pos = 0;
+        while (pos < cookieHeader.size())
+        {
+            size_t semi = cookieHeader.find(';', pos);
+            std::string pair = cookieHeader.substr(
+                pos, semi == std::string::npos ? std::string::npos : semi - pos);
+            size_t eq = pair.find('=');
+            if (eq != std::string::npos)
+            {
+                std::string k = pair.substr(0, eq);
+                size_t kStart = k.find_first_not_of(' ');
+                k = (kStart == std::string::npos) ? "" : k.substr(kStart);
+                cookies[k] = pair.substr(eq + 1);
+            }
+            if (semi == std::string::npos)
+                break;
+            pos = semi + 1;
+        }
+        return cookies;
+    }
+
+    // ── Real viewport resolution ─────────────────────────────────────────
+    //
+    // Tries, in order:
+    //   1. Sec-CH-Viewport-Width/Height request headers — Chromium's User-
+    //      Agent Client Hints. Only present once we've asked for them via
+    //      Accept-CH/Critical-CH on a PRIOR response (see handleConnection
+    //      below, which forces Chromium to silently restart the very
+    //      first request WITH these headers attached, before we ever
+    //      render a mismatched page).
+    //   2. flux_vw / flux_vh cookies — set by wrapFullPage()'s inline
+    //      bootstrap script from window.innerWidth/innerHeight. Covers
+    //      Firefox/Safari, which implement no viewport Client Hints at
+    //      all: their first-ever visit still guesses, every visit after
+    //      that is pixel-accurate.
+    //   3. The hardcoded default — only reached on a true first-ever
+    //      visit with neither signal available yet.
+    struct ResolvedViewport
+    {
+        int width = kSSRViewportWidthDefault;
+        int height = kSSRViewportHeightDefault;
+        bool fromClientHints = false; // drives whether we (re-)send Accept-CH/Critical-CH
+    };
+
+    int clampDimension(double v)
+    {
+        return std::max(kSSRViewportMin,
+                        std::min(kSSRViewportMax, static_cast<int>(v)));
+    }
+
+    ResolvedViewport resolveViewport(const std::unordered_map<std::string, std::string> &headers)
+    {
+        ResolvedViewport out;
+
+        auto chW = headers.find("sec-ch-viewport-width");
+        auto chH = headers.find("sec-ch-viewport-height");
+        if (chW != headers.end() && chH != headers.end())
+        {
+            try
+            {
+                out.width = clampDimension(std::stod(chW->second));
+                out.height = clampDimension(std::stod(chH->second));
+                out.fromClientHints = true;
+                return out;
+            }
+            catch (...)
+            {
+                // Malformed header — fall through to cookie/default.
+            }
+        }
+
+        auto cookieHeader = headers.find("cookie");
+        if (cookieHeader != headers.end())
+        {
+            auto cookies = parseCookies(cookieHeader->second);
+            auto vw = cookies.find("flux_vw");
+            auto vh = cookies.find("flux_vh");
+            if (vw != cookies.end() && vh != cookies.end())
+            {
+                try
+                {
+                    out.width = clampDimension(std::stod(vw->second));
+                    out.height = clampDimension(std::stod(vh->second));
+                }
+                catch (...)
+                {
+                    // Malformed cookie — fall back to default.
+                }
+            }
+        }
+
+        return out;
     }
 
     // hydrationBlob: base64-encoded output of fluxHydrationSerializeBlob(),
@@ -350,6 +488,15 @@ namespace
             "Module._fluxDPR = window.devicePixelRatio || 1;"
             "Module._fluxPhysicalWidth = Math.floor(window.innerWidth * Module._fluxDPR);"
             "Module._fluxPhysicalHeight = Math.floor(window.innerHeight * Module._fluxDPR);"
+            // Fallback path for browsers with no viewport Client Hints
+            // (Firefox, Safari): remember the REAL viewport for next
+            // time, so resolveViewport() can use it instead of guessing.
+            // Chromium doesn't need this — it already told us via
+            // Sec-CH-Viewport-* headers before this response was even
+            // generated (see the Critical-CH handling in
+            // handleConnection() below).
+            "document.cookie = 'flux_vw=' + window.innerWidth + ';path=/;max-age=86400;SameSite=Lax';"
+            "document.cookie = 'flux_vh=' + window.innerHeight + ';path=/;max-age=86400;SameSite=Lax';"
             "Module.locateFile = function(path, prefix) { return '" << kWebBundleUrlPrefix << "' + path; };"
             // The hydration payload itself — see jsStringEscape()'s
             // header comment for why this is safe to splice in raw
@@ -362,7 +509,11 @@ namespace
     }
 
     // One request, start to finish. Returns the full HTML response body.
-    std::string renderRequest(const std::string &requestedPath)
+    // viewportWidth/viewportHeight come from resolveViewport() in
+    // handleConnection() — the ACTUAL client viewport whenever it's
+    // knowable, not a fixed guess.
+    std::string renderRequest(const std::string &requestedPath,
+                              int viewportWidth, int viewportHeight)
     {
         // ── Reset ALL per-request thread_local state ─────────────────────
         fluxSetSSRSyncMode(true);
@@ -384,7 +535,7 @@ namespace
             // "one alive instance per thread" invariants (Phase 0) to
             // hold across the NEXT request on this same thread.
             FluxUI fluxUI(nullptr);
-            fluxUI.createWindow("", kSSRViewportWidth, kSSRViewportHeight);
+            fluxUI.createWindow("", viewportWidth, viewportHeight);
             fluxUI.build([&]()
                          { return createApp(&fluxUI); });
 
@@ -392,10 +543,10 @@ namespace
             // platform (see flux_window_headless.cpp). This directly
             // invokes the exact same onPaint callback flux_core.cpp's
             // wireCallbacks() already wired up for every other platform.
-            GraphicsContext ctx(kSSRViewportWidth, kSSRViewportHeight);
+            GraphicsContext ctx(viewportWidth, viewportHeight);
             if (fluxUI.getPlatformWindow().callbacks.onPaint)
                 fluxUI.getPlatformWindow().callbacks.onPaint(
-                    ctx, kSSRViewportWidth, kSSRViewportHeight);
+                    ctx, viewportWidth, viewportHeight);
 
             html = fluxSsrSerializeDomAdapter(adapter);
         }
@@ -423,11 +574,14 @@ namespace
         std::string requestLine;
         std::getline(request, requestLine);
         std::string path = extractRequestPath(requestLine);
+        std::unordered_map<std::string, std::string> headers = parseHeaders(request);
 
         std::string body;
         int statusCode = 200;
         std::string contentType = "text/html; charset=utf-8";
         bool cacheable = false;
+        bool isRenderedPage = false;
+        bool viewportFromClientHints = false;
         try
         {
             if (tryServeStaticFont(path, body, contentType))
@@ -447,7 +601,10 @@ namespace
             }
             else
             {
-                body = renderRequest(path);
+                isRenderedPage = true;
+                ResolvedViewport vp = resolveViewport(headers);
+                viewportFromClientHints = vp.fromClientHints;
+                body = renderRequest(path, vp.width, vp.height);
             }
         }
         catch (const std::exception &e)
@@ -478,6 +635,22 @@ namespace
             // swapped on disk, restart the server (or add a versioned
             // filename/query string later if hot-swapping is needed).
             response << "Cache-Control: public, max-age=31536000, immutable\r\n";
+        }
+        if (isRenderedPage && !viewportFromClientHints)
+        {
+            // Ask Chromium for the client's real viewport before we ever
+            // render again. Accept-CH advertises which hints we want;
+            // Critical-CH additionally forces THIS request to silently
+            // restart (before the browser even shows this body) once
+            // those hints are available — so even a first-ever Chromium
+            // visit ends up rendering against the real viewport instead
+            // of the fallback default. No effect on Firefox/Safari (they
+            // ignore both headers) — those rely on the flux_vw/vh cookie
+            // fallback instead (see resolveViewport() /
+            // wrapFullPage()'s bootstrap script).
+            response << "Accept-CH: Sec-CH-Viewport-Width, Sec-CH-Viewport-Height\r\n"
+                     << "Critical-CH: Sec-CH-Viewport-Width, Sec-CH-Viewport-Height\r\n"
+                     << "Vary: Sec-CH-Viewport-Width, Sec-CH-Viewport-Height, Cookie\r\n";
         }
         response << "Connection: close\r\n\r\n"
                  << body;
