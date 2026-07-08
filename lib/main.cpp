@@ -1,166 +1,189 @@
 #include "flux/flux.hpp"
 
-class MyApp : public Widget
+class OverlayTestApp : public Widget
 {
-    State<bool> toggleState{false};
-    State<double> sliderState{50.0};
-    State<bool> checkState{false};
-    State<std::string> radioState{"Option A"};
-    State<std::string> textState{""};
-    State<double> numberState{42.0};
-    State<std::string> textAreaState{""};
+
+    State<int> counter{0};
     State<int> dropdownIndex{-1};
     State<std::string> lastAction{"(none)"};
+    State<bool> dialogOpen{false};
+
+    std::shared_ptr<DialogWidget> confirmDialog;
 
 public:
     WidgetPtr build() override
     {
-        return Flex(
-                   {
-                       Tooltip(Button("Hover me for tooltip", nullptr),
-                               "Fixed: close ordering collapses two repaints into one"),
-                       // ── Toggle ────────────────────────────────────────────────
-                       Flex({Text("DropDown")
-                                 ->setFontWeight(FontWeight::Bold)
-                                 ->setMinWidth(120),
 
-                             Dropdown({"Apple", "Banana", "Cherry",
-                                       "Date", "Elderberry", "Fig",
-                                       "Grape", "Honeydew"})
-                                 ->setSelectedIndex(dropdownIndex)
-                                 ->setPlaceholder("Pick a fruit...")
-                                 ->setMaxVisibleItems(5)
-                                 ->setOnSelectionChanged([this](int idx, const std::string &val)
-                                                         {
+        // ── Dialog ───────────────────────────────────────────────────────────
+        // Built fresh on every build() so the pointer is never stale.
+        confirmDialog = Dialog(
+                            Column({
+                                       Text("Dialog is open!")
+                                           ->setFontSize(18)
+                                           ->setFontWeight(FontWeight::Bold),
+                                       Text("This modal blocks all input beneath it."),
+                                       Text("Click Confirm / Cancel, or press Escape."),
+                                       Row({
+                                               Button("Confirm", [this]
+                                                      {
+            std::cout<<"Confirm clicked" << std::endl;
+            lastAction.set("Dialog: Confirmed");
+            dialogOpen.set(false);
+            confirmDialog->close(); }),
+                                               Button("Cancel", [this]
+                                                      {
+            lastAction.set("Dialog: Cancelled");
+            dialogOpen.set(false);
+            confirmDialog->close(); }),
+                                           })
+                                           ->setSpacing(12)
+                                           ->setCrossAxisAlignment(CrossAxisAlignment::Center),
+                                   })
+                                ->setSpacing(10)
+                                ->setCrossAxisAlignment(CrossAxisAlignment::Center))
+                            ->setSize(420, 220)
+                            ->setCloseOnClickOutside(true)
+                            ->setOnClose([this]
+                                         {
+        dialogOpen.set(false);
+        lastAction.set("Dialog: closed"); });
+
+        // ── Dropdown ─────────────────────────────────────────────────────────
+        auto dropdown = Dropdown({"Apple", "Banana", "Cherry",
+                                  "Date", "Elderberry", "Fig",
+                                  "Grape", "Honeydew"})
+                            ->setSelectedIndex(dropdownIndex)
+                            ->setPlaceholder("Pick a fruit...")
+                            ->setMaxVisibleItems(5)
+                            ->setOnSelectionChanged([this](int idx, const std::string &val)
+                                                    {
           dropdownIndex.set(idx);
           lastAction.set("Dropdown: " + val); })
-                                 ->setWidth(260),
-                             Text(toggleState, [](bool v)
-                                  { return v ? "On" : "Off"; })
-                                 ->setTextColor(Color::fromRGB(100, 100, 100))})
-                           ->setGap(12)
-                           ->setPadding(16),
+                            ->setWidth(260);
 
-                       Divider(),
+        // ── Context menu ─────────────────────────────────────────────────────
+        auto ctxAnchor = Flex({Text("Right-click me")
+                                   ->setTextColor(Color::fromRGB(255, 255, 255))
+                                   ->setFontSize(14)})
+                           
+                             ->setBorderRadius(6)
+                             ->setBackgroundColor(Color::fromRGB(33, 150, 243))
+                             ->setPadding(12);
 
-                       // ── Toggle ────────────────────────────────────────────────
-                       Flex({Text("Toggle")
-                                 ->setFontWeight(FontWeight::Bold)
-                                 ->setMinWidth(120),
-                             Toggle("Enable feature")
-                                 ->setValue(toggleState)
-                                 ->setOnToggleChanged(
-                                     [this](bool v)
-                                     { toggleState.set(v); }),
-                             Text(toggleState, [](bool v)
-                                  { return v ? "On" : "Off"; })
-                                 ->setTextColor(Color::fromRGB(100, 100, 100))})
-                           ->setGap(12)
-                           ->setPadding(16),
+        auto ctxMenu = ContextMenu(ctxAnchor, {
+                                                  ContextMenuItem::Action("Copy", [this]
+                                                                          { lastAction.set("ContextMenu: Copy"); }),
+                                                  ContextMenuItem::Action("Paste", [this]
+                                                                          { lastAction.set("ContextMenu: Paste"); }),
+                                                  ContextMenuItem::Separator(),
+                                                  ContextMenuItem::Action("Delete", [this]
+                                                                          { lastAction.set("ContextMenu: Delete"); }),
+                                                  ContextMenuItem::Action("Disabled action", nullptr, /*enabled=*/false),
+                                              });
 
-                       Divider(),
+        // ── Tooltip ──────────────────────────────────────────────────────────
+        auto tooltipBtn = Button("Hover me for tooltip", nullptr);
+        auto tip = Tooltip(tooltipBtn,
+                           "Fixed: close ordering collapses two repaints into one");
 
-                       // ── Slider ────────────────────────────────────────────────
-                       Flex({Text("Slider")
-                                 ->setFontWeight(FontWeight::Bold)
-                                 ->setMinWidth(120),
-                             Slider(0.0, 100.0, 1.0)
-                                 ->setValue(sliderState)
-                                 ->setOnValueChanged(
-                                     [this](double v)
-                                     { sliderState.set(v); }),
-                             Text(sliderState,
-                                  [](double v)
-                                  { return std::to_string((int)v); })
-                                 ->setMinWidth(32)
-                                 ->setTextColor(Color::fromRGB(100, 100, 100))})
-                           ->setGap(12)
-                           ->setPadding(16),
+        // ── Thin rule helper (replaces Divider / SizedBox) ────────────────────
+        auto rule = []() -> WidgetPtr
+        {
+            return Flex({})
+                ->setHeight(1)
+                ->setBackgroundColor(Color::fromRGB(220, 220, 220));
+        };
 
-                       Divider(),
+        // ── Main layout ───────────────────────────────────────────────────────
+        return Flex({
 
-                       // ── CheckBox ──────────────────────────────────────────────
-                       Flex({Text("CheckBox")
-                                 ->setFontWeight(FontWeight::Bold)
-                                 ->setMinWidth(120),
-                             CheckBox("Accept terms")->setInputValue(checkState),
-                             Text(checkState,
-                                  [](bool v)
-                                  { return v ? "Checked" : "Unchecked"; })
-                                 ->setTextColor(Color::fromRGB(100, 100, 100))})
-                           ->setGap(12)
-                           ->setPadding(16),
+                        // ── Counter ───────────────────────────────────────────────
+                        Text("Normal Widget Tree")
+                            ->setFontSize(15)
+                            ->setFontWeight(FontWeight::Bold),
+                        Flex({
+                                Text(counter)->setFontSize(18),
+                                Button("Increment", [this]
+                                       {
+            counter++;
+            lastAction.set("Counter: " + counter.toString()); }),
 
-                       Divider(),
+                                Button("Reset state", [this]
+                                       {
+            counter.set(0);
+            dropdownIndex.set(-1);
+            lastAction.set("State reset"); }),
+                            })
+                            ->setGap(10),
 
-                       // ── Radio ─────────────────────────────────────────────────
-                       Flex({Text("Radio")
-                                 ->setFontWeight(FontWeight::Bold)
-                                 ->setMinWidth(120),
-                             RadioGroupWithOptions({"Option A", "Option B", "Option C"})
-                                 ->setHorizontal()
-                                 ->bindValue(radioState)
-                                 ->setOnSelectionChanged([this](const std::string &v)
-                                                         { radioState.set(v); }),
-                             Text(radioState, [](const std::string &v)
-                                  { return v; })
-                                 ->setTextColor(Color::fromRGB(100, 100, 100))})
-                           ->setGap(12)
-                           ->setPadding(16),
+                        rule(),
 
-                       Divider(),
+                        // ── Dropdown ──────────────────────────────────────────────
+                        Text("Dropdown  (scroll & keyboard nav)")
+                            ->setFontSize(15)
+                            ->setFontWeight(FontWeight::Bold),
 
-                       // ── TextInput ─────────────────────────────────────────────
-                       Flex({Text("TextInput")
-                                 ->setFontWeight(FontWeight::Bold)
-                                 ->setMinWidth(120),
+                        dropdown,
 
-                             TextInput("Type something...")->setInputValue(textState),
+                        rule(),
 
-                             Text(textState,
-                                  [](const std::string &v)
-                                  {
-                                      return std::to_string((int)v.size()) + " chars";
-                                  })
-                                 ->setMinWidth(60)
-                                 ->setTextColor(Color::fromRGB(100, 100, 100))})
-                           ->setGap(12)
-                           ->setPadding(16),
+                        // ── Context menu ──────────────────────────────────────────
+                        Text("Context Menu  (right-click the blue box)")
+                            ->setFontSize(15)
+                            ->setFontWeight(FontWeight::Bold),
 
-                       Divider(),
-                       // ── TextArea ──────────────────────────────────────────────
-                       Flex({Text("TextArea")
-                                 ->setFontWeight(FontWeight::Bold)
-                                 ->setMinWidth(120),
-                             TextArea("Write multiple lines...")
-                                 ->setInputValue(textAreaState)
-                                 ->setHeight(120)
-                                 ->setLineNumbers(true),
-                             Text(textAreaState,
-                                  [](const std::string &v)
-                                  {
-                                      int lines = 1;
-                                      for (char c : v)
-                                          if (c == '\n')
-                                              lines++;
-                                      return std::to_string(lines) + " lines";
-                                  })
-                                 ->setMinWidth(60)
-                                 ->setTextColor(Color::fromRGB(100, 100, 100))})
-                           ->setGap(12)
-                           ->setPadding(16),
+                        ctxMenu,
 
-                   })
-            ->setBackgroundColor(Color::fromRGB(280, 180, 180))
-            ->setScrollable(false)
-            ->setDirection(FlexDirection::Column) // base (mobile): stacked
-            ->setGap(8)
-            ->setPadding(16)
-            ->setAlignItems(AlignItems::Stretch)
+                        rule(),
+
+                        // ── Tooltip ───────────────────────────────────────────────
+                        Text("Tooltip  (hover the button)")
+                            ->setFontSize(15)
+                            ->setFontWeight(FontWeight::Bold),
+
+                        tip,
+
+                        rule(),
+
+                        // ── Dialog ────────────────────────────────────────────────
+                        Text("Dialog  (modal, Escape closes, keyboard-routed)")
+                            ->setFontSize(15)
+                            ->setFontWeight(FontWeight::Bold),
+
+                        Button("Open Dialog", [this]
+                               {
+            if (!dialogOpen.get())
+            {
+                dialogOpen.set(true);
+                confirmDialog->open();
+                lastAction.set("Dialog: opened");
+            } }),
+
+                        rule(),
+
+                        // ── Status ────────────────────────────────────────────────
+                        Flex({
+                                Text("Last action: ")
+                                    ->setTextColor(Color::fromRGB(120, 120, 120))
+                                    ->setFontSize(13),
+                                Text(lastAction)
+                                    ->setFontSize(13)
+                                    ->setFontWeight(FontWeight::Bold),
+                            })
+                            ->setGap(4),
+
+                    })
+            ->setDirection(FlexDirection::Column)
+            ->setGap(12)
             ->setWidthMode(SizeMode::Full)
-            ->setHeightMode(SizeMode::Full);
+            ->setHeightMode(SizeMode::Full)
+            ->setBorderRadius(10)
+            ->setPadding(28)
+            ->setBackgroundColor(Color::fromRGB(255, 255, 255));
     }
 };
+
+
 
 // ============================================================
 //  Entry point
@@ -168,7 +191,7 @@ public:
 
 WidgetPtr createApp(FluxUI *app)
 {
-    return FluxApp()
-        .setTheme(AppTheme::light())
-        .build(std::make_shared<MyApp>());
+  return FluxApp()
+      .setTheme(AppTheme::light())
+      .build(std::make_shared<OverlayTestApp>());
 }

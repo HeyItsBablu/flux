@@ -17,7 +17,6 @@
 #include "flux_structure.hpp"
 #include "flux_icons.hpp"
 #include "flux_colorpicker.hpp"
-#include "flux_overlays.hpp"
 #include "flux_histogram.hpp"
 #include "flux_hsl_panel.hpp"
 #include "flux_tonecurve.hpp"
@@ -43,4 +42,6 @@
 #include "flux_circular_progress.hpp"
 #include "dropdown.hpp"
 #include "tooltip.hpp"
+#include "contextmenu.hpp"
+#include "dialog.hpp"
 #endif // WIDGETS_HPP
