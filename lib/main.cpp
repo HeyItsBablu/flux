@@ -17,6 +17,8 @@ public:
     {
         return Flex(
                    {
+                       Tooltip(Button("Hover me for tooltip", nullptr),
+                               "Fixed: close ordering collapses two repaints into one"),
                        // ── Toggle ────────────────────────────────────────────────
                        Flex({Text("DropDown")
                                  ->setFontWeight(FontWeight::Bold)
