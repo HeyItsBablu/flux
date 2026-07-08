@@ -9,12 +9,37 @@ class MyApp : public Widget
     State<std::string> textState{""};
     State<double> numberState{42.0};
     State<std::string> textAreaState{""};
+    State<int> dropdownIndex{-1};
+    State<std::string> lastAction{"(none)"};
 
 public:
     WidgetPtr build() override
     {
         return Flex(
                    {
+                       // ── Toggle ────────────────────────────────────────────────
+                       Flex({Text("DropDown")
+                                 ->setFontWeight(FontWeight::Bold)
+                                 ->setMinWidth(120),
+
+                             Dropdown({"Apple", "Banana", "Cherry",
+                                       "Date", "Elderberry", "Fig",
+                                       "Grape", "Honeydew"})
+                                 ->setSelectedIndex(dropdownIndex)
+                                 ->setPlaceholder("Pick a fruit...")
+                                 ->setMaxVisibleItems(5)
+                                 ->setOnSelectionChanged([this](int idx, const std::string &val)
+                                                         {
+          dropdownIndex.set(idx);
+          lastAction.set("Dropdown: " + val); })
+                                 ->setWidth(260),
+                             Text(toggleState, [](bool v)
+                                  { return v ? "On" : "Off"; })
+                                 ->setTextColor(Color::fromRGB(100, 100, 100))})
+                           ->setGap(12)
+                           ->setPadding(16),
+
+                       Divider(),
 
                        // ── Toggle ────────────────────────────────────────────────
                        Flex({Text("Toggle")

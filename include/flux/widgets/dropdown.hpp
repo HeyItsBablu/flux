@@ -7,6 +7,16 @@
 #include "flux/flux_core.hpp"
 #include <algorithm>
 
+#if (defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)) || defined(FLUX_SSR)
+#include "flux/flux_dom_adapter.hpp"
+// Declared in flux_painter_dom.cpp — normally invoked automatically from
+// Widget::onDetach() when a widget leaves the TREE. ListSurface never
+// does that (it's a long-lived overlay widget registered once via
+// showOverlay/hideOverlay, never addChild'd/removed from any parent),
+// so closeDropdown() below calls this directly instead.
+extern void fluxDomEvictWidget(Widget *owner);
+#endif
+
 // ============================================================================
 // DROPDOWN WIDGET
 // ============================================================================
@@ -30,6 +40,15 @@ private:
 
     void render(GraphicsContext &ctx, FontCache &fontCache) override
     {
+
+#if (defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)) || defined(FLUX_SSR)
+      if (IDomAdapter *adapter = getActiveDomAdapter())
+      {
+        _renderDom(adapter);
+        needsPaint = false;
+        return;
+      }
+#endif
       if (!owner || owner->options.empty())
         return;
       Painter painter(ctx, this);
@@ -173,6 +192,86 @@ private:
       if (owner)
         owner->closeDropdown();
     }
+
+  private:
+#if (defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)) || defined(FLUX_SSR)
+    // Pre-allocates owner->maxVisibleItems item slots UNCONDITIONALLY —
+    // the actual visible count varies frame to frame (fewer options,
+    // scroll position, etc.), but the CEILING (maxVisibleItems) is a
+    // fixed config value, not something that grows without bound. Hiding
+    // unused slots via display:none (rather than creating/evicting nodes
+    // dynamically) avoids needing any per-item node lifecycle tracking —
+    // same tradeoff RadioButtonWidget's inner dot already makes for its
+    // one binary shown/hidden state, just extended to N slots here.
+    void _renderDom(IDomAdapter *adapter)
+    {
+      if (!owner)
+        return;
+      char buf[24];
+      auto px = [&](int v)
+      { snprintf(buf, sizeof(buf), "%dpx", v); return std::string(buf); };
+      char colbuf[32];
+      auto rgb = [&](Color c)
+      { snprintf(colbuf, sizeof(colbuf), "rgb(%d,%d,%d)", c.r, c.g, c.b); return std::string(colbuf); };
+
+      int visibleCount = std::min((int)owner->options.size(), owner->maxVisibleItems);
+      int listH = visibleCount * owner->itemHeight + 2;
+
+      // ── Container background + border — one node ───────────────────
+      DomNodeHandle bg = fluxDomEnsureNode(this, "div", "bg");
+      fluxDomApplyRect(this, x, y, owner->listWidth_, listH, "bg");
+      adapter->setStyle(bg, "background-color", rgb(owner->listBgColor));
+      adapter->setStyle(bg, "border", "1px solid " + rgb(owner->listBorderColor));
+      adapter->setStyle(bg, "box-sizing", "border-box");
+      adapter->setStyle(bg, "overflow", "hidden");
+      adapter->setStyle(bg, "pointer-events", "none");
+      // Sits after the main tree in DOM order (no Widget::parent, see
+      // ensureNode's setRoot() branch) — no explicit z-index needed for
+      // correct stacking, but set a generous one anyway as a safety
+      // margin against any ancestor establishing an unexpected
+      // stacking context (e.g. a TextInput's z-index:2 elsewhere).
+      adapter->setStyle(bg, "z-index", "10");
+
+      int endIndex = std::min((int)owner->options.size(),
+                              owner->scrollOffset + visibleCount);
+
+      for (int slot = 0; slot < owner->maxVisibleItems; ++slot)
+      {
+        std::string slotName = "item" + std::to_string(slot);
+        DomNodeHandle item = fluxDomEnsureNode(this, "div", slotName.c_str());
+
+        int i = owner->scrollOffset + slot; // absolute option index for this row
+        bool rowActive = (owner->scrollOffset + slot) < endIndex;
+
+        if (!rowActive)
+        {
+          adapter->setStyle(item, "display", "none");
+          continue;
+        }
+
+        int itemY = y + 1 + slot * owner->itemHeight;
+        fluxDomApplyRect(this, x + 1, itemY, owner->listWidth_ - 2,
+                         owner->itemHeight, slotName.c_str());
+
+        Color bgColor = (i == owner->hoveredItemIndex) ? owner->itemHoverColor
+                        : (i == owner->selectedIndex)  ? owner->itemSelectedColor
+                                                       : Color::fromRGB(255, 255, 255);
+        adapter->setStyle(item, "display", "flex");
+        adapter->setStyle(item, "align-items", "center");
+        adapter->setStyle(item, "background-color", rgb(bgColor));
+        adapter->setStyle(item, "padding-left", px(11)); // matches canvas's x+12 minus the 1px item inset above
+        adapter->setStyle(item, "box-sizing", "border-box");
+        adapter->setStyle(item, "white-space", "nowrap");
+        adapter->setStyle(item, "overflow", "hidden");
+        adapter->setStyle(item, "text-overflow", "ellipsis");
+        adapter->setStyle(item, "font-size", px(owner->fontSize));
+        adapter->setStyle(item, "color", "rgb(30,30,30)");
+        adapter->setStyle(item, "pointer-events", "none");
+        adapter->setStyle(item, "z-index", "11");
+        adapter->setText(item, owner->options[i]);
+      }
+    }
+#endif
   };
 
   std::shared_ptr<ListSurface> listSurface_;
@@ -230,6 +329,14 @@ public:
 
   void render(GraphicsContext &ctx, FontCache &fontCache) override
   {
+#if (defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)) || defined(FLUX_SSR)
+    if (IDomAdapter *adapter = getActiveDomAdapter())
+    {
+        _renderDom(adapter);
+        needsPaint = false;
+        return;
+    }
+#endif
     borderColor = isFocused ? dropdownFocusedBorderColor : dropdownBorderColor;
     drawRoundedRectangle(ctx);
 
@@ -412,6 +519,20 @@ private:
     hoveredItemIndex = -1;
     if (auto *ui = FluxUI::getCurrentInstance())
       ui->hideOverlay(listSurface_.get());
+#if (defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)) || defined(FLUX_SSR)
+    // hideOverlay() only stops FUTURE render() calls on listSurface_ —
+    // it does NOT touch whatever DOM nodes the last successful render
+    // already created and attached under #flux-dom-root. Unlike the
+    // canvas backend (where "stop drawing" naturally means "gone" on
+    // the next cleared frame), DOM nodes are persistent objects that
+    // stay exactly as last styled until something explicitly removes
+    // them — hence the dropdown list staying visible/stale after close
+    // without this. Evicting here forces a full recreate on the next
+    // openDropdown(), which is a fine tradeoff for an overlay that only
+    // opens/closes on direct user action, not something repainted at
+    // high frequency.
+    fluxDomEvictWidget(listSurface_.get());
+#endif
     markNeedsPaint();
   }
 
@@ -452,9 +573,66 @@ private:
         return i;
     return -1;
   }
+
+#if (defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)) || defined(FLUX_SSR)
+  // Two layers under one owner: the box itself (background+border) and
+  // the label text; the arrow rides along as a THIRD slot rather than
+  // being folded into the box, since it's a distinct piece of text at
+  // a fixed position on the box's right edge, not part of the label's
+  // own flow.
+  void _renderDom(IDomAdapter *adapter)
+  {
+      char buf[24];
+      auto px = [&](int v) { snprintf(buf, sizeof(buf), "%dpx", v); return std::string(buf); };
+      char colbuf[32];
+      auto rgb = [&](Color c) { snprintf(colbuf, sizeof(colbuf), "rgb(%d,%d,%d)", c.r, c.g, c.b); return std::string(colbuf); };
+
+      // ── Box ───────────────────────────────────────────────────────────
+      DomNodeHandle box = fluxDomEnsureNode(this, "div", "box");
+      fluxDomApplyRect(this, x, y, width, height, "box");
+      adapter->setStyle(box, "background-color", rgb(dropdownBgColor));
+      adapter->setStyle(box, "border", "1px solid " +
+                        rgb(isFocused ? dropdownFocusedBorderColor : dropdownBorderColor));
+      adapter->setStyle(box, "border-radius", px(borderRadius));
+      adapter->setStyle(box, "box-sizing", "border-box");
+      adapter->setStyle(box, "pointer-events", "none");
+
+      // ── Label ─────────────────────────────────────────────────────────
+      bool hasSelection = (selectedIndex >= 0 && selectedIndex < (int)options.size());
+      const std::string &label = hasSelection ? options[selectedIndex] : placeholder;
+      DomNodeHandle labelNode = fluxDomEnsureNode(this, "div", "label");
+      fluxDomApplyRect(this, x + paddingLeft, y + paddingTop,
+                      width - paddingLeft - paddingRight,
+                      height - paddingTop - paddingBottom, "label");
+      adapter->setStyle(labelNode, "display", "flex");
+      adapter->setStyle(labelNode, "align-items", "center");
+      adapter->setStyle(labelNode, "white-space", "nowrap");
+      adapter->setStyle(labelNode, "overflow", "hidden");
+      adapter->setStyle(labelNode, "text-overflow", "ellipsis");
+      adapter->setStyle(labelNode, "font-size", px(fontSize));
+      adapter->setStyle(labelNode, "color", rgb(hasSelection ? getCurrentTextColor() : placeholderColor));
+      adapter->setStyle(labelNode, "pointer-events", "none");
+      adapter->setText(labelNode, label);
+
+      // ── Arrow — unicode glyph, same trick as CheckBoxWidget's
+      // checkmark, in place of two hand-drawn rotated line divs.
+      int arrowSizePx = std::max(10, arrowSize + 4);
+      DomNodeHandle arrow = fluxDomEnsureNode(this, "div", "arrow");
+      fluxDomApplyRect(this, x + width - paddingRight + 4,
+                      y + height / 2 - arrowSizePx / 2,
+                      arrowSizePx, arrowSizePx, "arrow");
+      adapter->setStyle(arrow, "display", "flex");
+      adapter->setStyle(arrow, "align-items", "center");
+      adapter->setStyle(arrow, "justify-content", "center");
+      adapter->setStyle(arrow, "font-size", px(arrowSizePx - 2));
+      adapter->setStyle(arrow, "color", rgb(arrowColor));
+      adapter->setStyle(arrow, "pointer-events", "none");
+      // "\xE2\x96\xB2" = ▲ (U+25B2), "\xE2\x96\xBC" = ▼ (U+25BC)
+      adapter->setText(arrow, isOpen ? "\xE2\x96\xB2" : "\xE2\x96\xBC");
+  }
+#endif
+
 };
-
-
 
 using DropdownWidgetPtr = std::shared_ptr<DropdownWidget>;
 

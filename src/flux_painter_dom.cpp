@@ -186,12 +186,21 @@ namespace
             if (parentHandle != kInvalidDomNode)
                 adapter->appendChild(parentHandle, handle);
         }
-        else if (created && slot[0] == '\0')
+        else if (created)
         {
-            // Only the default-slot node of a parentless (root) widget
-            // can ever be the document mount point — a slotted node has
-            // no business being handed to setRoot().
-
+            // A parentless (root) widget — no owner->parent to append
+            // under. EVERY node it creates, in EVERY slot, needs SOME
+            // attachment point or it never becomes visible at all, even
+            // though its styles/text are set correctly (exactly the
+            // "clickable but invisible" symptom this produces when
+            // missed). setRoot() is safe to call once per DISTINCT node
+            // — it's only reached here when `created` is true, i.e. the
+            // first time this exact (owner, slot) pair is seen — and the
+            // live adapter's setRoot() is itself just an appendChild
+            // under the mount point, so calling it once per slot simply
+            // makes each slot's node a sibling under #flux-dom-root,
+            // which is exactly the right behavior for e.g. ListSurface's
+            // "bg" node plus each of its "item0".."itemN" nodes.
             adapter->setRoot(handle);
         }
 
