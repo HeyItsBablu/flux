@@ -79,6 +79,7 @@ namespace
                 << kFontUrlPrefix << kRegularFontFile << ") format('truetype');}"
                 << "@font-face{font-family:'Inter';font-weight:700;src:url("
                 << kFontUrlPrefix << kBoldFontFile << ") format('truetype');}";
+
             return css.str();
         }();
         return css;
@@ -486,8 +487,23 @@ namespace
             "var Module = {};"
             "Module.canvas = document.getElementById('flux-gl');"
             "Module._fluxDPR = window.devicePixelRatio || 1;"
+            // Physical (device) pixels — canvas backing-store size only.
+            // NOT what the DOM renderer should lay out at: applyRect() in
+            // flux_painter_dom.cpp writes raw px values straight into CSS,
+            // which the browser always interprets as CSS/logical pixels.
+            // Booting the DOM renderer's FluxUI window from these on any
+            // DPR>1 display (basically all HiDPI screens) lays the whole
+            // tree out at ~DPR-times too large — which is exactly what
+            // hydration's "page jumps to a bigger size" symptom is.
             "Module._fluxPhysicalWidth = Math.floor(window.innerWidth * Module._fluxDPR);"
             "Module._fluxPhysicalHeight = Math.floor(window.innerHeight * Module._fluxDPR);"
+            // Logical (CSS) pixels — what the DOM renderer must boot at,
+            // to match the SSR pass, which resolved its own viewport in
+            // logical px the whole way through (Sec-CH-Viewport-*, the
+            // flux_vw/vh cookies below, and kSSRViewportWidthDefault are
+            // all logical-px values, never DPR-multiplied).
+            "Module._fluxLogicalWidth = window.innerWidth;"
+            "Module._fluxLogicalHeight = window.innerHeight;"
             // Fallback path for browsers with no viewport Client Hints
             // (Firefox, Safari): remember the REAL viewport for next
             // time, so resolveViewport() can use it instead of guessing.

@@ -112,8 +112,11 @@ namespace
             if (ctx > 0)
                 emscripten_webgl_make_context_current(ctx);
 
-            // Always invalidate — canvas surfaces need continuous redraw
-            s_app->getPlatformWindow().invalidate();
+#ifndef FLUX_WEB_RENDERER_DOM
+        // Canvas surfaces need continuous redraw — the backing store
+        // holds no state between frames the way DOM nodes do.
+           s_app->getPlatformWindow().invalidate();
+#endif
 
             s_app->getPlatformWindow().tick();
 
@@ -196,12 +199,18 @@ int main()
 {
     s_app = new FluxUI(nullptr);
 
-    // ── 1. Read physical canvas size ──────────────────────────────────────
+    // ── 1. Read physical + logical canvas size ──────────────────────────
     int physW = canvasPhysicalWidth();
     int physH = canvasPhysicalHeight();
-    double dpr = EM_ASM_DOUBLE({ return Module._fluxDPR || 1.0; });
-    int logicalW = (int)(physW / dpr); // 666 logical
-    int logicalH = (int)(physH / dpr); // 734 logical
+    // Read logical (CSS px) size directly rather than deriving it via
+    // physW/dpr — avoids a float divide that could round differently
+    // than the SSR host's own logical-px viewport (Sec-CH-Viewport-*
+    // headers / flux_vw,vh cookies are always integer CSS px, see
+    // ssr/main.cpp's resolveViewport()), which this value must agree
+    // with for the DOM renderer to boot at the same size hydration is
+    // replacing.
+    int logicalW = EM_ASM_INT({ return Module._fluxLogicalWidth  || (Module._fluxPhysicalWidth  / (Module._fluxDPR || 1)) | 0; });
+    int logicalH = EM_ASM_INT({ return Module._fluxLogicalHeight || (Module._fluxPhysicalHeight / (Module._fluxDPR || 1)) | 0; });
 
     // ── 2. Create window FIRST so valid() returns true during build ───────
     // Title comes straight from config (baked in at compile time via

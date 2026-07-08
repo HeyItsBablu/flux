@@ -146,6 +146,20 @@ int fluxDomLineHeightPx(const std::string &fontFamily, int fontSize, FontWeight 
     return (h > 0) ? (int)h : (int)(fontSize > 0 ? fontSize * 1.2 : 17);
 }
 
+
+// Must match flux_font_ssr.cpp's kWidthSafetyMarginPx /
+// kHeightSafetyMarginPxPerLine exactly. The server pads every
+// measurement by these amounts before layout ever sees it (to protect
+// against stb_truetype/browser metric drift — see that file's comment).
+// If the client's own measurement doesn't apply the SAME padding,
+// hydration always re-lays-out slightly smaller than what SSR shipped,
+// which is exactly the "settles into a smaller size" shift after boot.
+// TODO: move these two constants into a shared header (e.g.
+// flux_text_style.hpp) so they can't drift apart again.
+constexpr int kWidthSafetyMarginPx = 4;
+constexpr int kHeightSafetyMarginPxPerLine = 3;
+
+
 // ============================================================================
 // measureDomText — natural (unwrapped) single-run width/height.
 //
@@ -186,8 +200,15 @@ void measureDomText(const char *cssFont, const std::wstring &wtext,
 
     int w = (int)(packed / 1048576.0);
     int h = (int)(packed - w * 1048576.0);
-    outWidth = (w > 0) ? w : 0;
-    outHeight = (h > 0) ? h : 0;
+    if (w <= 0) w = 0;
+    if (h <= 0) h = 0;
+    // white-space:pre with no wrap constraint (see the EM_ASM above) —
+    // line count is just newlines+1, matching how server-side
+    // measureWithFont() counts lines for this same unwrapped case.
+    int lineCount = 1;
+    for (wchar_t wc : wtext) if (wc == L'\n') ++lineCount;
+    outWidth = w > 0 ? w + kWidthSafetyMarginPx : 0;
+    outHeight = h > 0 ? h + lineCount * kHeightSafetyMarginPxPerLine : 0;
 }
 
 // ============================================================================
@@ -253,8 +274,17 @@ void measureDomRichText(const std::wstring &wtext, const TextStyle &style,
 
     int w = (int)(packed / 1048576.0);
     int h = (int)(packed - w * 1048576.0);
-    outWidth = (w > 0) ? w : 0;
-    outHeight = (h > 0) ? h : 0;
+    if (w <= 0) { outWidth = 0; outHeight = 0; return; }
+    // Wrapped text: line count isn't known directly from
+    // getBoundingClientRect(), so derive it from the measured height
+    // divided by the same per-line height the CSS line-height gets
+    // pinned to (fluxDomLineHeightPx) — matches how many lines
+    // flux_painter_dom.cpp's drawRichText will actually render.
+    int lineHeightPx = fluxDomLineHeightPx(style.fontFamily, style.scaledFontSize(),
+                                           style.fontWeight);
+    int lineCount = (lineHeightPx > 0) ? std::max(1, (int)std::round((double)h / lineHeightPx)) : 1;
+    outWidth = w + kWidthSafetyMarginPx;
+    outHeight = h + lineCount * kHeightSafetyMarginPxPerLine;
 }
 
 // ============================================================================

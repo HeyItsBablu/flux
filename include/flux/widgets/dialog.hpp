@@ -176,6 +176,27 @@ private:
         adapter->setStyle(box, "pointer-events", "none");
         adapter->setStyle(box, "z-index", "21");
 
+
+        // Explicit default-slot ("") node for the surface itself. This is
+        // exactly the node ensureNode() implicitly creates/reuses as
+        // content's DOM PARENT the moment content (or any of its
+        // descendants) paints anything — see ensureNode's
+        // `owner->parent` branch, reached because DialogWidget::open()
+        // sets content->parent = dialogSurface_. Left unstyled, that
+        // implicit node gets no z-index at all, which defaults to
+        // z-index:auto (~0) — and a positioned sibling with NO explicit
+        // z-index always stacks BELOW any sibling that has a positive
+        // one, regardless of DOM insertion order. Since "scrim" (20) and
+        // "box" (21) both have explicit z-indexes, content's container
+        // was silently painting UNDERNEATH the opaque dialog box —
+        // fully positioned and correct, just invisible. Pre-creating it
+        // here (before content->render() runs) means the later implicit
+        // creation is a cache hit on this same, now-correctly-stacked
+        // node.
+        DomNodeHandle contentLayer = fluxDomEnsureNode(this, "div", "");
+        adapter->setStyle(contentLayer, "z-index", "22");
+        adapter->setStyle(contentLayer, "pointer-events", "none");
+
         if (owner->content)
         {
             owner->layoutContentIfNeeded(ctx, fontCache);

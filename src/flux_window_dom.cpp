@@ -245,10 +245,21 @@ bool PlatformWindow::create(const std::string &, int width, int height,
 {
     webState = new WebState();
 
-    int physW = EM_ASM_INT({ return Module._fluxPhysicalWidth | 0; });
-    int physH = EM_ASM_INT({ return Module._fluxPhysicalHeight | 0; });
-    cachedWidth = (physW > 0) ? physW : width;
-    cachedHeight = (physH > 0) ? physH : height;
+    // width/height here are already LOGICAL (CSS) pixels — main.cpp
+    // divides Module._fluxPhysicalWidth/Height by Module._fluxDPR before
+    // ever calling createWindow(), specifically so the DOM renderer's
+    // layout runs in the same units flux_painter_dom.cpp's applyRect()
+    // writes into CSS (always logical px, never device px). Re-reading
+    // the physical globals directly here — as flux_window_web.cpp's
+    // canvas-backend create() correctly does, since a <canvas> backing
+    // store DOES need physical pixels — was carried over into this file
+    // without accounting for that difference. Using physical dimensions
+    // meant every layout up to devicePixelRatio times too large on any
+    // HiDPI screen, which is exactly what produces a jump to a much
+    // larger size the instant hydration's first paint pass runs, right
+    // after the correctly (logically) sized SSR HTML was on screen.
+    cachedWidth = width;
+    cachedHeight = height;
 
     // ── Register event listeners on the capture div, NOT a canvas ──────────
     emscripten_set_mousedown_callback("#flux-input-capture", this, 1, onMouseDown);

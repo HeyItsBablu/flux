@@ -12,10 +12,24 @@
 extern void fluxDomEvictWidget(Widget *owner);
 #endif
 
-
 // ============================================================================
 // CONTEXT MENU ITEM
 // ============================================================================
+
+// ============================================================================
+// MENU TRIGGER
+// ============================================================================
+// RightClick — classic context menu (unchanged default behavior).
+// LeftClick  — desktop-style pulldown/menu-bar: a normal left click on the
+//              anchor opens the menu, flush against the anchor's bottom
+//              edge (see openMenuAt call site in handleMouseDown below),
+//              rather than at the raw click coordinates a right-click
+//              context menu uses.
+enum class MenuTrigger
+{
+  RightClick,
+  LeftClick
+};
 
 struct ContextMenuItem
 {
@@ -119,9 +133,9 @@ private:
 #if (defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)) || defined(FLUX_SSR)
       if (IDomAdapter *adapter = getActiveDomAdapter())
       {
-          _renderDom(adapter, ctx, fontCache);
-          needsPaint = false;
-          return;
+        _renderDom(adapter, ctx, fontCache);
+        needsPaint = false;
+        return;
       }
 #endif
       if (!owner || !owner->isOpen || owner->items.empty())
@@ -333,7 +347,6 @@ private:
       return false;
     }
 
-
   private:
 #if (defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)) || defined(FLUX_SSR)
     // One "bg" node for the menu chrome (background+border+shadow, same
@@ -346,95 +359,97 @@ private:
     // before this file had any DOM awareness at all).
     void _renderDom(IDomAdapter *adapter, GraphicsContext &ctx, FontCache &fontCache)
     {
-        if (!owner || !owner->isOpen || owner->items.empty())
-            return;
-        char buf[24];
-        auto px = [&](int v) { snprintf(buf, sizeof(buf), "%dpx", v); return std::string(buf); };
-        char colbuf[48];
-        auto rgba = [&](Color c) {
-            snprintf(colbuf, sizeof(colbuf), "rgba(%d,%d,%d,%.3f)", c.r, c.g, c.b, c.a / 255.f);
-            return std::string(colbuf);
-        };
+      if (!owner || !owner->isOpen || owner->items.empty())
+        return;
+      char buf[24];
+      auto px = [&](int v)
+      { snprintf(buf, sizeof(buf), "%dpx", v); return std::string(buf); };
+      char colbuf[48];
+      auto rgba = [&](Color c)
+      {
+        snprintf(colbuf, sizeof(colbuf), "rgba(%d,%d,%d,%.3f)", c.r, c.g, c.b, c.a / 255.f);
+        return std::string(colbuf);
+      };
 
-        DomNodeHandle bg = fluxDomEnsureNode(this, "div", "bg");
-        fluxDomApplyRect(this, x, y, owner->menuW, owner->menuH, "bg");
-        adapter->setStyle(bg, "background-color", rgba(owner->menuBgColor));
-        adapter->setStyle(bg, "border", "1px solid " + rgba(owner->menuBorderColor));
-        adapter->setStyle(bg, "border-radius", px(owner->menuBorderRadius));
-        adapter->setStyle(bg, "box-shadow",
-                          px(owner->shadowOffset) + " " + px(owner->shadowOffset) +
-                          " 0 rgba(0,0,0,0.235)");
-        adapter->setStyle(bg, "box-sizing", "border-box");
-        adapter->setStyle(bg, "pointer-events", "none");
-        adapter->setStyle(bg, "z-index", "10");
+      DomNodeHandle bg = fluxDomEnsureNode(this, "div", "bg");
+      fluxDomApplyRect(this, x, y, owner->menuW, owner->menuH, "bg");
+      adapter->setStyle(bg, "background-color", rgba(owner->menuBgColor));
+      adapter->setStyle(bg, "border", "1px solid " + rgba(owner->menuBorderColor));
+      adapter->setStyle(bg, "border-radius", px(owner->menuBorderRadius));
+      adapter->setStyle(bg, "box-shadow",
+                        px(owner->shadowOffset) + " " + px(owner->shadowOffset) +
+                            " 0 rgba(0,0,0,0.235)");
+      adapter->setStyle(bg, "box-sizing", "border-box");
+      adapter->setStyle(bg, "pointer-events", "none");
+      adapter->setStyle(bg, "z-index", "10");
 
-        int currentY = y + owner->paddingV;
+      int currentY = y + owner->paddingV;
 
-        for (int i = 0; i < (int)owner->items.size(); i++)
+      for (int i = 0; i < (int)owner->items.size(); i++)
+      {
+        const auto &item = owner->items[i];
+
+        if (item.type == ContextMenuItem::Type::Separator)
         {
-            const auto &item = owner->items[i];
-
-            if (item.type == ContextMenuItem::Type::Separator)
-            {
-                std::string slot = "sep" + std::to_string(i);
-                DomNodeHandle sep = fluxDomEnsureNode(this, "div", slot.c_str());
-                int sepY = currentY + owner->separatorHeight / 2;
-                fluxDomApplyRect(this, x + owner->paddingH, sepY,
-                                owner->menuW - owner->paddingH * 2, 1, slot.c_str());
-                adapter->setStyle(sep, "background-color", rgba(owner->separatorColor));
-                adapter->setStyle(sep, "pointer-events", "none");
-                adapter->setStyle(sep, "z-index", "11");
-                currentY += owner->separatorHeight;
-            }
-            else if (item.type == ContextMenuItem::Type::Widget && item.widget)
-            {
-                int rowH = owner->_widgetItemHeight(item);
-                std::string slot = "row" + std::to_string(i);
-                DomNodeHandle row = fluxDomEnsureNode(this, "div", slot.c_str());
-                fluxDomApplyRect(this, x + 2, currentY, owner->menuW - 4, rowH, slot.c_str());
-                adapter->setStyle(row, "background-color",
-                                  (i == owner->hoveredIndex) ? rgba(owner->itemHoverColor) : "transparent");
-                adapter->setStyle(row, "pointer-events", "none");
-                adapter->setStyle(row, "z-index", "11");
-
-                if (item.widget->needsLayout)
-                    item.widget->computeLayout(
-                        ctx, BoxConstraints::tight(owner->menuW - owner->paddingH * 2, rowH), fontCache);
-                item.widget->x = x + owner->paddingH;
-                item.widget->y = currentY;
-                item.widget->positionChildren(
-                    item.widget->x + item.widget->paddingLeft,
-                    item.widget->y + item.widget->paddingTop,
-                    item.widget->width - item.widget->paddingLeft - item.widget->paddingRight,
-                    item.widget->height - item.widget->paddingTop - item.widget->paddingBottom);
-                item.widget->render(ctx, fontCache);
-
-                currentY += rowH;
-            }
-            else
-            {
-                std::string slot = "item" + std::to_string(i);
-                DomNodeHandle node = fluxDomEnsureNode(this, "div", slot.c_str());
-                fluxDomApplyRect(this, x + 2, currentY, owner->menuW - 4, owner->itemHeight, slot.c_str());
-                bool highlighted = (i == owner->hoveredIndex && item.enabled);
-                adapter->setStyle(node, "background-color",
-                                  highlighted ? rgba(owner->itemHoverColor) : "transparent");
-                adapter->setStyle(node, "display", "flex");
-                adapter->setStyle(node, "align-items", "center");
-                adapter->setStyle(node, "padding-left", px(owner->paddingH - 2));
-                adapter->setStyle(node, "box-sizing", "border-box");
-                adapter->setStyle(node, "white-space", "nowrap");
-                adapter->setStyle(node, "overflow", "hidden");
-                adapter->setStyle(node, "text-overflow", "ellipsis");
-                adapter->setStyle(node, "font-size", px(owner->menuFontSize));
-                adapter->setStyle(node, "color",
-                                  rgba(item.enabled ? owner->itemTextColor : owner->itemDisabledColor));
-                adapter->setStyle(node, "pointer-events", "none");
-                adapter->setStyle(node, "z-index", "11");
-                adapter->setText(node, item.label);
-                currentY += owner->itemHeight;
-            }
+          std::string slot = "sep" + std::to_string(i);
+          DomNodeHandle sep = fluxDomEnsureNode(this, "div", slot.c_str());
+          int sepY = currentY + owner->separatorHeight / 2;
+          fluxDomApplyRect(this, x + owner->paddingH, sepY,
+                           owner->menuW - owner->paddingH * 2, 1, slot.c_str());
+          adapter->setStyle(sep, "background-color", rgba(owner->separatorColor));
+          adapter->setStyle(sep, "pointer-events", "none");
+          adapter->setStyle(sep, "z-index", "11");
+          currentY += owner->separatorHeight;
         }
+        else if (item.type == ContextMenuItem::Type::Widget && item.widget)
+        {
+          int rowH = owner->_widgetItemHeight(item);
+          std::string slot = "row" + std::to_string(i);
+          DomNodeHandle row = fluxDomEnsureNode(this, "div", slot.c_str());
+          fluxDomApplyRect(this, x + 2, currentY, owner->menuW - 4, rowH, slot.c_str());
+          adapter->setStyle(row, "background-color",
+                            (i == owner->hoveredIndex) ? rgba(owner->itemHoverColor) : "transparent");
+          adapter->setStyle(row, "pointer-events", "none");
+          adapter->setStyle(row, "z-index", "11");
+
+          if (item.widget->needsLayout)
+            item.widget->computeLayout(
+                ctx, BoxConstraints::tight(owner->menuW - owner->paddingH * 2, rowH), fontCache);
+          item.widget->x = x + owner->paddingH;
+          item.widget->y = currentY;
+          item.widget->positionChildren(
+              item.widget->x + item.widget->paddingLeft,
+              item.widget->y + item.widget->paddingTop,
+              item.widget->width - item.widget->paddingLeft - item.widget->paddingRight,
+              item.widget->height - item.widget->paddingTop - item.widget->paddingBottom);
+          item.widget->render(ctx, fontCache);
+
+          currentY += rowH;
+        }
+        else
+        {
+          std::string slot = "item" + std::to_string(i);
+          DomNodeHandle node = fluxDomEnsureNode(this, "div", slot.c_str());
+          fluxDomApplyRect(this, x + 2, currentY, owner->menuW - 4, owner->itemHeight, slot.c_str());
+          bool highlighted = (i == owner->hoveredIndex && item.enabled);
+          adapter->setStyle(node, "background-color",
+                            highlighted ? rgba(owner->itemHoverColor) : "transparent");
+          adapter->setStyle(node, "display", "flex");
+          adapter->setStyle(node, "align-items", "center");
+          adapter->setStyle(node, "padding-left", px(owner->paddingH - 2));
+          adapter->setStyle(node, "box-sizing", "border-box");
+          adapter->setStyle(node, "white-space", "nowrap");
+          adapter->setStyle(node, "overflow", "hidden");
+          adapter->setStyle(node, "text-overflow", "ellipsis");
+          adapter->setStyle(node, "font-size", px(owner->menuFontSize));
+          adapter->setStyle(node, "color",
+                            rgba(item.enabled ? owner->itemTextColor : owner->itemDisabledColor));
+          adapter->setStyle(node, "pointer-events", "none");
+          adapter->setStyle(node, "z-index", "11");
+          adapter->setText(node, item.label);
+          currentY += owner->itemHeight;
+        }
+      }
     }
 #endif
   };
@@ -444,6 +459,11 @@ private:
 public:
   bool isOpen = false;
 
+  std::shared_ptr<ContextMenuWidget> setTrigger(MenuTrigger t)
+  {
+    trigger_ = t;
+    return std::static_pointer_cast<ContextMenuWidget>(shared_from_this());
+  }
   explicit ContextMenuWidget(WidgetPtr anchor,
                              const std::vector<ContextMenuItem> &menuItems)
       : items(menuItems)
@@ -543,7 +563,33 @@ public:
     needsPaint = false;
   }
 
+  // Only meaningful when trigger_ == LeftClick. findAndHandleMouseEvent
+  // (flux_widget.hpp) checks CHILDREN first, then falls back to the
+  // PARENT's own handleMouseDown if none of them claimed the click —
+  // ContextMenuWidget is anchor's direct parent (see addChild(anchor)
+  // above), so this fires exactly when a click lands inside the
+  // anchor's bounds but the anchor itself didn't handle it (true for a
+  // plain Flex/Container anchor; a real Button anchor would already
+  // consume the click via its own handleMouseDown, so LeftClick trigger
+  // is intended for non-interactive anchors — a Flex "menu bar item",
+  // not a Button).
+  bool handleMouseDown(int mx, int my) override
+  {
+    if (trigger_ != MenuTrigger::LeftClick)
+      return false;
+    if (mx < x || mx >= x + width || my < y || my >= y + height)
+      return false;
+    // Pulldown convention: open flush below the anchor's own box,
+    // left-aligned to it — NOT at the raw click position a right-click
+    // context menu uses. x/y/width/height here are already synced to
+    // the anchor's box by computeLayout()/positionChildren() above.
+    openMenuAt(x, y + height + 2);
+    return true;
+  }
+
 private:
+  MenuTrigger trigger_ = MenuTrigger::RightClick;
+
   int _itemHeight(const ContextMenuItem &item) const
   {
     if (item.type == ContextMenuItem::Type::Separator)
@@ -566,6 +612,9 @@ private:
     std::function<bool(int, int)> previous = anchor->onRightClick;
     anchor->onRightClick = [this, anchor, previous](int mx, int my)
     {
+
+      if (trigger_ != MenuTrigger::RightClick)
+        return previous ? previous(mx, my) : false;
       if (mx >= anchor->x && mx < anchor->x + anchor->width &&
           my >= anchor->y && my < anchor->y + anchor->height)
       {
@@ -760,11 +809,9 @@ private:
   }
 };
 
-
 // ============================================================================
 // FACTORY FUNCTIONS
 // ============================================================================
-
 
 using ContextMenuWidgetPtr = std::shared_ptr<ContextMenuWidget>;
 
@@ -774,5 +821,16 @@ ContextMenu(WidgetPtr anchor, const std::vector<ContextMenuItem> &items)
   return std::make_shared<ContextMenuWidget>(anchor, items);
 }
 
+// Convenience wrapper — identical widget, pre-configured for the
+// desktop "menu bar pulldown" pattern: left-click opens, positioned
+// flush below the anchor. Equivalent to
+// ContextMenu(anchor, items)->setTrigger(MenuTrigger::LeftClick).
+inline ContextMenuWidgetPtr
+PulldownMenu(WidgetPtr anchor, const std::vector<ContextMenuItem> &items)
+{
+  auto w = std::make_shared<ContextMenuWidget>(anchor, items);
+  w->setTrigger(MenuTrigger::LeftClick);
+  return w;
+}
 
 #endif // FLUX_CONTEXT_MENU_HPP

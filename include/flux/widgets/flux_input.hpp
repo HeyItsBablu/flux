@@ -1141,9 +1141,26 @@ public:
     int localMaxW = 0;
     int localMaxH = 0;
 
+
+    // Children must NOT receive `constraints` directly — on later layout
+    // passes (e.g. this group sitting inside a FlexWidget row with
+    // Stretch/Fit sizing), `constraints` can arrive TIGHT with
+    // minWidth==maxWidth==<the group's own resolved width>, once the
+    // parent Flex has finished resolving this group's main-axis size.
+    // Passing that straight through forces EVERY child's clampWidth()
+    // to return exactly that tight value regardless of its own natural
+    // size — i.e. every radio button gets stretched to the WHOLE
+    // group's width, starting at the same x, producing the overlap.
+    // Children need a LOOSE constraint: bounded (not forced) by the
+    // group's cross-axis space, unconstrained on the main axis so each
+    // child can report its own natural size.
+    BoxConstraints childConstraints = isVertical
+        ? BoxConstraints(0, constraints.maxWidth, 0, kUnbounded)
+        : BoxConstraints(0, kUnbounded, 0, constraints.maxHeight);
+
     for (auto &child : children)
     {
-      child->computeLayout(ctx, constraints, fontCache);
+      child->computeLayout(ctx, childConstraints, fontCache);
       if (isVertical)
       {
         totalHeight += child->height + child->marginTop + child->marginBottom;
@@ -1695,7 +1712,7 @@ private:
       return 0;
     auto *ui = FluxUI::getCurrentInstance();
     MeasureContext mc = ui->getMeasureContext();
-    NativeFont font = ui->getFontCache().getFont(fontSize, fontWeight);
+    NativeFont font = ui->getFontCache().getFont(fontFamily, fontSize, fontWeight);
     int bestPos = 0, bestDist = abs(pixelX);
     for (int i = 1; i <= (int)inputValue.size(); i++)
     {
@@ -1721,7 +1738,7 @@ private:
     }
     auto *ui = FluxUI::getCurrentInstance();
     MeasureContext mc = ui->getMeasureContext();
-    NativeFont font = ui->getFontCache().getFont(fontSize, fontWeight);
+    NativeFont font = ui->getFontCache().getFont(fontFamily, fontSize, fontWeight);
     int tw = 0, th = 0;
     if (cursorPos > 0)
     {
