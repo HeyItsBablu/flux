@@ -544,7 +544,16 @@ public:
             int gapSum = (int)(line.items.size() > 1 ? P.gap * (line.items.size() - 1) : 0);
             int lineMainBudget = scrollableMain ? std::max(containerMainSize_, basisSum + gapSum)
                                                 : containerMainSize_;
-            int freeSpace = lineMainBudget - basisSum - gapSum;
+            // If the budget is (effectively) unbounded, we're in an intrinsic/
+            // hypothetical-size probe (e.g. STEP 1 measuring a Fit-width parent
+            // with a loose kUnbounded constraint), not a real layout pass.
+            // Resolving flex-grow against "infinite" free space would make any
+            // flexGrow child consume that infinity and poison the parent's
+            // measured intrinsic size. Treat it as zero free space instead —
+            // matches CSS's max-content sizing, which uses each item's
+            // flex-basis, not its grown size.
+            bool unboundedBudget = lineMainBudget >= kUnbounded;
+            int freeSpace = unboundedBudget ? 0 : (lineMainBudget - basisSum - gapSum);
 
             std::vector<Widget *> active = line.items;
             std::unordered_map<Widget *, int> resolvedMain;
@@ -655,7 +664,7 @@ public:
                     continue;
 
                 bool wantsStretch = (crossMode == SizeMode::Full) ||
-                                    (P.alignItems == AlignItems::Stretch && !crossIsFit && crossMode != SizeMode::Fit);
+                                    (P.alignItems == AlignItems::Stretch && !crossIsFit);
                 if (!wantsStretch)
                     continue;
 

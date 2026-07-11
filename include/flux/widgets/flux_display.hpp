@@ -545,6 +545,29 @@ public:
     markNeedsLayout();
     return self();
   }
+  // ── Flex-item properties (read by the parent FlexWidget, if any) ─────────
+
+  std::shared_ptr<TextWidget> setFlexGrow(int g)
+  {
+    flexGrow = g;
+    markNeedsLayout();
+    return self();
+  }
+
+  std::shared_ptr<TextWidget> setFlexShrink(int s)
+  {
+    flexShrink = s;
+    markNeedsLayout();
+    return self();
+  }
+
+  std::shared_ptr<TextWidget> setFlexBasis(int b)
+  {
+    flexBasis = b;
+    markNeedsLayout();
+    return self();
+  }
+
 
 private:
   std::shared_ptr<TextWidget> self()
