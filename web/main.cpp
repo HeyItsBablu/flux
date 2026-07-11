@@ -39,6 +39,7 @@
 #include <emscripten.h>
 #include <emscripten/html5.h>
 #include <cstdio>
+#include <cmath>
 
 #include "flux/flux.hpp"
 #include "flux/flux_navigator.hpp"
@@ -53,13 +54,12 @@ WidgetPtr createApp(FluxUI *app);
 extern "C" void fluxPainterWebInit();
 extern "C" EMSCRIPTEN_WEBGL_CONTEXT_HANDLE fluxGetGLContext();
 
-
 // ============================================================================
 // DOM renderer init hooks — only exist when compiled with
 // FLUX_WEB_RENDERER_DOM (see root CMakeLists.txt's FLUX_WEB_RENDERER
 // switch). Declared here rather than in a shared header since they're
 // only ever called from this one place, in main(), once.
-// ============================================================================ 
+// ============================================================================
 
 #ifdef FLUX_WEB_RENDERER_DOM
 extern "C" void fluxDomAdapterLiveInit();
@@ -73,7 +73,7 @@ extern "C" void fluxFontDomInit();
 // ============================================================================
 
 namespace
-{ 
+{
 
     // Owning pointer kept alive for the page lifetime.
     // Using a raw pointer in static storage avoids destructor-order issues
@@ -93,7 +93,7 @@ namespace
 
     int canvasPhysicalHeight()
     {
-        return EM_ASM_INT({ return Module._fluxPhysicalHeight | 0; }); 
+        return EM_ASM_INT({ return Module._fluxPhysicalHeight | 0; });
     }
 
     // ── Per-frame tick ────────────────────────────────────────────────────────────
@@ -113,9 +113,9 @@ namespace
                 emscripten_webgl_make_context_current(ctx);
 
 #ifndef FLUX_WEB_RENDERER_DOM
-        // Canvas surfaces need continuous redraw — the backing store
-        // holds no state between frames the way DOM nodes do.
-           s_app->getPlatformWindow().invalidate();
+            // Canvas surfaces need continuous redraw — the backing store
+            // holds no state between frames the way DOM nodes do.
+            s_app->getPlatformWindow().invalidate();
 #endif
 
             s_app->getPlatformWindow().tick();
@@ -139,21 +139,35 @@ namespace
     }
 
 } // namespace
-
 // ============================================================================
-// Resize callback — registered with JS by flux_window_web.cpp,
-// but also callable directly from C++ (e.g. on orientation change).
-// Exposed as a C symbol so shell.html can call Module._fluxOnResizeCpp(w,h).
+// applyResize — shared resize logic, taking the LOGICAL size directly.
+//
+// Split out of fluxOnResize() so the initial boot-time sync (main(), step
+// 6c) can apply the exact logical size it already computed from
+// Module._fluxLogicalWidth/Height, instead of re-deriving it from physical
+// pixels via fluxOnResize()'s lossy physicalWidth/dpr conversion.
+//
+// That round trip — JS computing physicalWidth = floor(logicalWidth * DPR),
+// then this file converting back via (int)(physicalWidth / dpr) — loses a
+// pixel whenever DPR isn't an integer (1.25, 1.5, 1.75 are all common on
+// scaled displays): e.g. DPR=1.5, logicalWidth=805 -> physicalWidth =
+// floor(1207.5) = 1207 -> back-converted = (int)(1207/1.5) = 804, not 805.
+// The SSR host never goes through this conversion at all (it lays out
+// directly in logical px — see ssr/main.cpp's resolveViewport()), so this
+// round trip is exactly what was producing the first-paint-vs-hydration
+// pixel mismatch, independent of anything server-side.
+//
+// fluxOnResize() (below) is still the right entry point for REAL runtime
+// resize events (window drag-resize, orientation change) — those only
+// ever have physical pixels available from the browser, so some
+// conversion there is unavoidable. Only the synthetic startup call in
+// main() can and should skip it.
 // ============================================================================
 
-extern "C" EMSCRIPTEN_KEEPALIVE void fluxOnResize(int physicalWidth, int physicalHeight)
+static void applyResize(int logicalW, int logicalH)
 {
     if (!s_app)
         return;
-
-    double dpr = EM_ASM_DOUBLE({ return Module._fluxDPR || 1.0; });
-    int logicalW = (int)(physicalWidth / dpr);
-    int logicalH = (int)(physicalHeight / dpr);
 
     PlatformWindow &win = s_app->getPlatformWindow();
     win.cachedWidth = logicalW;
@@ -176,6 +190,29 @@ extern "C" EMSCRIPTEN_KEEPALIVE void fluxOnResize(int physicalWidth, int physica
         win.callbacks.onResize(ctx, logicalW, logicalH);
     }
     win.invalidate();
+}
+
+// ============================================================================
+// Resize callback — registered with JS by flux_window_web.cpp,
+// but also callable directly from C++ (e.g. on orientation change).
+// Exposed as a C symbol so shell.html can call Module._fluxOnResizeCpp(w,h).
+// ============================================================================
+
+extern "C" EMSCRIPTEN_KEEPALIVE void fluxOnResize(int physicalWidth, int physicalHeight)
+{
+    if (!s_app)
+        return;
+
+    // Real runtime resize events only ever hand us physical pixels (the
+    // browser's ResizeObserver/window 'resize' reports device pixels
+    // via Module._fluxPhysicalWidth/Height) — round instead of truncate
+    // to minimize (not eliminate) drift here. This path is NOT used for
+    // the initial boot-time sync anymore — see applyResize() above and
+    // main()'s step 6c.
+    double dpr = EM_ASM_DOUBLE({ return Module._fluxDPR || 1.0; });
+    int logicalW = (int)std::round(physicalWidth / dpr);
+    int logicalH = (int)std::round(physicalHeight / dpr);
+    applyResize(logicalW, logicalH);
 }
 
 // ============================================================================
@@ -209,7 +246,7 @@ int main()
     // ssr/main.cpp's resolveViewport()), which this value must agree
     // with for the DOM renderer to boot at the same size hydration is
     // replacing.
-    int logicalW = EM_ASM_INT({ return Module._fluxLogicalWidth  || (Module._fluxPhysicalWidth  / (Module._fluxDPR || 1)) | 0; });
+    int logicalW = EM_ASM_INT({ return Module._fluxLogicalWidth || (Module._fluxPhysicalWidth / (Module._fluxDPR || 1)) | 0; });
     int logicalH = EM_ASM_INT({ return Module._fluxLogicalHeight || (Module._fluxPhysicalHeight / (Module._fluxDPR || 1)) | 0; });
 
     // ── 2. Create window FIRST so valid() returns true during build ───────
@@ -253,15 +290,10 @@ int main()
     s_app->build([&]()
                  { return createApp(s_app); });
 
-
-
-
-
     // ── 4. Register painter helpers ───────────────────────────────────────
 #ifndef FLUX_WEB_RENDERER_DOM
     fluxPainterWebInit();
 #endif
-
 
     // ── 5. Register C resize callback with JS ─────────────────────────────
     EM_ASM({
@@ -289,7 +321,15 @@ int main()
     });
 
     // ── 6c. Fire an initial resize so cachedWidth/Height match the real canvas ──
-    fluxOnResize(physW, physH);
+    // Use the logical size already read in step 1 directly — NOT
+    // fluxOnResize(physW, physH), which would re-derive logical size
+    // from physical pixels via a lossy round trip (see applyResize()'s
+    // header comment) and reintroduce a 1px drift against what SSR (and
+    // this file's own initial build() pass a few lines above) already
+    // laid out at. physW/physH remain used only for
+    // Module._fluxPhysicalWidth-derived concerns elsewhere, not for
+    // deriving logical size here.
+    applyResize(logicalW, logicalH);
 
     // ── 7. Hand control to browser ────────────────────────────────────────
     // Force initial repaint

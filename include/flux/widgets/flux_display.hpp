@@ -84,6 +84,7 @@ public:
     }
     width = constraints.clampWidth(width);
 
+
     // ── Height ────────────────────────────────────────────────────────────
     if (autoHeight)
     {

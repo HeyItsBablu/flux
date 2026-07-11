@@ -156,7 +156,15 @@ int fluxDomLineHeightPx(const std::string &fontFamily, int fontSize, FontWeight 
 // which is exactly the "settles into a smaller size" shift after boot.
 // TODO: move these two constants into a shared header (e.g.
 // flux_text_style.hpp) so they can't drift apart again.
-constexpr int kWidthSafetyMarginPx = 4;
+// Zero: the client's own sandbox measurement already IS what the
+// browser will paint (same DOM/CSS/font, same code path drawRichText
+// uses) — it needs no defensive padding against itself. SSR is the side
+// with a real measurement gap to close (stb_truetype's unhinted advance
+// widths vs the browser's hinted ones — see the per-character margin
+// comment in flux_font_ssr.cpp's measureWithFont), so that's where the
+// margin belongs. Padding both sides double-counts and reintroduces
+// exactly the drift this is meant to eliminate.
+constexpr int kWidthSafetyMarginPx = 0;
 constexpr int kHeightSafetyMarginPxPerLine = 3;
 
 
@@ -235,6 +243,8 @@ void measureDomRichText(const std::wstring &wtext, const TextStyle &style,
 
     std::string utf8 = wToUtf8(wtext);
 
+
+
     // maxWidth <= 0 means "no wrap constraint" (mirrors the canvas
     // backend's wrapTextWeb() convention) — treat identically to
     // softWrap=false for sandbox purposes.
@@ -285,6 +295,7 @@ void measureDomRichText(const std::wstring &wtext, const TextStyle &style,
     int lineCount = (lineHeightPx > 0) ? std::max(1, (int)std::round((double)h / lineHeightPx)) : 1;
     outWidth = w + kWidthSafetyMarginPx;
     outHeight = h + lineCount * kHeightSafetyMarginPxPerLine;
+
 }
 
 // ============================================================================

@@ -56,38 +56,47 @@
 
 namespace
 {
-
-    // ── CSS font string builder ───────────────────────────────────────────────────
-    //
-    // Format: "<weight> <size>px <family-with-fallbacks>"
-    //
-    // Family fallback chain appended automatically:
-    //   • System UI fonts first so the app looks native on each OS.
-    //   • Generic sans-serif last as the final safety net.
-    //
-    // The caller owns the returned char* and must free() it.
-
     char *buildCSSFont(const std::string &family, int size, FontWeight weight)
     {
         int w = static_cast<int>(weight); // 300 / 400 / 700
-
-        // Fallback chain: requested family -> system UI -> generic sans-serif.
-        // If the requested family IS a system UI font or generic, it will just
-        // appear twice in the list — browsers deduplicate that silently.
         char buf[512];
+
+#ifdef FLUX_WEB_RENDERER_DOM
+        // DOM renderer only ever has ONE font actually loaded via
+        // @font-face on an SSR-hydrated page: 'Inter' (Regular.ttf /
+        // Regular-Bold.ttf — see ssr/main.cpp's fontFaceCss() and
+        // flux_font_ssr.cpp's matching fluxDomCssFontString(), which
+        // hard-codes the same family for the exact same reason).
+        // Every widget's declared TextStyle::fontFamily (default
+        // "Segoe UI") is IGNORED here on purpose — honoring it would
+        // make FontCache::getFont() (used by both measureDomRichText
+        // and drawRichText) resolve to a family the browser never
+        // loaded, silently falling back to its default UI font. That
+        // produces different text metrics than stb_truetype measured
+        // server-side, which is exactly the "text jumps size/position
+        // right after hydration" bug — the client re-measures every
+        // node against a font SSR never used.
+        //
+        // (family param intentionally unused on this path — do not
+        // remove without also updating SSR to match a real per-widget
+        // family, which would need a proper multi-font bundle+loader
+        // on both sides, not just this shortcut.)
+        (void)family;
+        snprintf(buf, sizeof(buf), "%d %dpx 'Inter', sans-serif", w, size);
+#else
+        // Canvas renderer / non-SSR builds: unchanged, real fallback chain.
         snprintf(buf, sizeof(buf),
                  "%d %dpx %s, -apple-system, BlinkMacSystemFont, "
                  "'Segoe UI', Roboto, sans-serif",
                  w, size, family.c_str());
+#endif
 
-        // Heap-allocate so the pointer stays valid for the FontCache lifetime.
         char *result = static_cast<char *>(malloc(strlen(buf) + 1));
         if (result)
             strcpy(result, buf);
         return result;
     }
-
-} // namespace
+}
 
 // ============================================================================
 // FontCache::createFont

@@ -9,6 +9,7 @@
 #include <vector>
 #include <algorithm>
 
+
 // ============================================================================
 // ENUMS
 // ============================================================================
@@ -713,6 +714,8 @@ public:
         }
         width = self.clampWidth(finalW);
         height = self.clampHeight(finalH);
+
+
 
         // ---- STEP 5: scrollbar feed ----
         if (scrollAxisIsMain_)

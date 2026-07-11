@@ -373,24 +373,40 @@ namespace
     // ── Real viewport resolution ─────────────────────────────────────────
     //
     // Tries, in order:
-    //   1. Sec-CH-Viewport-Width/Height request headers — Chromium's User-
-    //      Agent Client Hints. Only present once we've asked for them via
-    //      Accept-CH/Critical-CH on a PRIOR response (see handleConnection
-    //      below, which forces Chromium to silently restart the very
-    //      first request WITH these headers attached, before we ever
-    //      render a mismatched page).
-    //   2. flux_vw / flux_vh cookies — set by wrapFullPage()'s inline
+    //   1. flux_vw / flux_vh cookies — set by wrapFullPage()'s inline
     //      bootstrap script from window.innerWidth/innerHeight. Covers
-    //      Firefox/Safari, which implement no viewport Client Hints at
-    //      all: their first-ever visit still guesses, every visit after
-    //      that is pixel-accurate.
+    //      every browser, and is GUARANTEED to equal what the client's
+    //      own hydration pass will read from window.innerWidth/Height —
+    //      because it IS that exact value, round-tripped through a
+    //      cookie. This must be tried BEFORE the Client Hints header:
+    //      Sec-CH-Viewport-Width/Height is Chromium's own rounding of
+    //      the viewport, which is NOT guaranteed to be bit-identical to
+    //      window.innerWidth (observed: consistently off by 1px in
+    //      testing — see the flux-flex-debug logs showing outerMax=806
+    //      server-side vs 805 client-side for the same page). Trusting
+    //      the header over the cookie reintroduced exactly the
+    //      hydration pixel-jump this whole viewport-resolution path
+    //      exists to prevent, just shrunk from "guessed default vs real
+    //      size" down to "off by 1px" — still visible on centered/
+    //      edge-aligned content.
+    //   2. Sec-CH-Viewport-Width/Height request headers — Chromium's
+    //      User-Agent Client Hints. Only present once we've asked for
+    //      them via Accept-CH/Critical-CH on a PRIOR response (see
+    //      handleConnection below). Used only as a fallback for a
+    //      browser's very FIRST-EVER visit, when no flux_vw/vh cookie
+    //      exists yet — better than the hardcoded default, even if not
+    //      pixel-perfect, since real content will still generally be
+    //      close to the right size a moment before the cookie-based
+    //      path takes over on the next request.
     //   3. The hardcoded default — only reached on a true first-ever
-    //      visit with neither signal available yet.
+    //      visit with neither signal available yet (e.g. Firefox/Safari,
+    //      which implement no viewport Client Hints at all, on their
+    //      very first request before any cookie has been set).
     struct ResolvedViewport
     {
         int width = kSSRViewportWidthDefault;
         int height = kSSRViewportHeightDefault;
-        bool fromClientHints = false; // drives whether we (re-)send Accept-CH/Critical-CH
+        bool fromCookie = false;
     };
 
     int clampDimension(double v)
@@ -403,22 +419,7 @@ namespace
     {
         ResolvedViewport out;
 
-        auto chW = headers.find("sec-ch-viewport-width");
-        auto chH = headers.find("sec-ch-viewport-height");
-        if (chW != headers.end() && chH != headers.end())
-        {
-            try
-            {
-                out.width = clampDimension(std::stod(chW->second));
-                out.height = clampDimension(std::stod(chH->second));
-                out.fromClientHints = true;
-                return out;
-            }
-            catch (...)
-            {
-                // Malformed header — fall through to cookie/default.
-            }
-        }
+
 
         auto cookieHeader = headers.find("cookie");
         if (cookieHeader != headers.end())
@@ -432,13 +433,31 @@ namespace
                 {
                     out.width = clampDimension(std::stod(vw->second));
                     out.height = clampDimension(std::stod(vh->second));
+                    out.fromCookie = true;
+                    return out;
                 }
                 catch (...)
                 {
-                    // Malformed cookie — fall back to default.
+                    // Malformed cookie — fall through to Client Hints/default.
                 }
             }
         }
+
+        auto chW = headers.find("sec-ch-viewport-width");
+        auto chH = headers.find("sec-ch-viewport-height");
+        if (chW != headers.end() && chH != headers.end())
+        {
+            try
+            {
+                out.width = clampDimension(std::stod(chW->second));
+                out.height = clampDimension(std::stod(chH->second));
+            }
+            catch (...)
+            {
+                // Malformed header — fall through to default.
+            }
+        }
+
 
         return out;
     }
@@ -519,7 +538,38 @@ namespace
             // rather than needing a separate encoding step.
             "Module._fluxHydrationData = \"" << jsStringEscape(hydrationBlob) << "\";"
          << "</script>"
-         << "<script src=\"" << kWebBundleUrlPrefix << "flux_app.js\"></script>"
+         // Was: an unconditional <script src="...flux_app.js"> here — that
+         // races the @font-face fetch the <style> block above triggers.
+         // Browsers start fetching a @font-face font as soon as they paint
+         // text needing it, but WASM boot (main.cpp's build() + first
+         // measurement pass) doesn't wait for that fetch. If Inter.ttf
+         // hasn't finished loading when the DOM renderer's hidden
+         // measurement sandbox measures its first string, the browser
+         // silently substitutes its own default sans-serif for that one
+         // measurement — different (wider) metrics than the stb_truetype
+         // numbers SSR shipped, which is exactly the width/position jump
+         // seen on hydration's first paint. Gate the bundle load on
+         // document.fonts.ready so 'Inter' is guaranteed available before
+         // main() ever runs.
+         << "<script>"
+            "(function(){"
+              "var start=function(){"
+                "var s=document.createElement('script');"
+                "s.src='" << kWebBundleUrlPrefix << "flux_app.js';"
+                "document.body.appendChild(s);"
+              "};"
+              "if (document.fonts && document.fonts.load) {"
+                "Promise.all(["
+                  "document.fonts.load(\"400 14px 'Inter'\").catch(function(){}),"
+                  "document.fonts.load(\"700 14px 'Inter'\").catch(function(){})"
+                "]).then(function(){ return document.fonts.ready; })"
+                 ".then(start, start);" // start anyway on failure — don't hang forever
+              "} else {"
+                "start();" // no FontFaceSet API (very old browser) — best effort
+              "}"
+            "})();"
+         << "</script>"
+
              << "</body></html>";
         return html.str();
     }
@@ -597,7 +647,7 @@ namespace
         std::string contentType = "text/html; charset=utf-8";
         bool cacheable = false;
         bool isRenderedPage = false;
-        bool viewportFromClientHints = false;
+        bool viewportFromCookie  = false;
         try
         {
             if (tryServeStaticFont(path, body, contentType))
@@ -619,7 +669,7 @@ namespace
             {
                 isRenderedPage = true;
                 ResolvedViewport vp = resolveViewport(headers);
-                viewportFromClientHints = vp.fromClientHints;
+                viewportFromCookie = vp.fromCookie;
                 body = renderRequest(path, vp.width, vp.height);
             }
         }
@@ -652,18 +702,21 @@ namespace
             // filename/query string later if hot-swapping is needed).
             response << "Cache-Control: public, max-age=31536000, immutable\r\n";
         }
-        if (isRenderedPage && !viewportFromClientHints)
+        if (isRenderedPage && !viewportFromCookie)
         {
-            // Ask Chromium for the client's real viewport before we ever
-            // render again. Accept-CH advertises which hints we want;
-            // Critical-CH additionally forces THIS request to silently
-            // restart (before the browser even shows this body) once
-            // those hints are available — so even a first-ever Chromium
-            // visit ends up rendering against the real viewport instead
-            // of the fallback default. No effect on Firefox/Safari (they
-            // ignore both headers) — those rely on the flux_vw/vh cookie
-            // fallback instead (see resolveViewport() /
-            // wrapFullPage()'s bootstrap script).
+            // Ask Chromium for an approximate client viewport for THIS
+            // browser's true first-ever visit, before any flux_vw/vh
+            // cookie exists — Accept-CH advertises which hints we want;
+            // Critical-CH forces this request to silently restart (before
+            // the browser even shows this body) once available, so even
+            // that very first Chromium visit renders close to the real
+            // size instead of the hardcoded default. Every visit AFTER
+            // this one will have the cookie and skip Client Hints
+            // entirely (see resolveViewport()), since the cookie is
+            // pixel-exact and the header is only an approximation of it.
+            // No effect on Firefox/Safari (they ignore both headers) —
+            // those rely on the cookie fallback the same way after their
+            // own first visit.
             response << "Accept-CH: Sec-CH-Viewport-Width, Sec-CH-Viewport-Height\r\n"
                      << "Critical-CH: Sec-CH-Viewport-Width, Sec-CH-Viewport-Height\r\n"
                      << "Vary: Sec-CH-Viewport-Width, Sec-CH-Viewport-Height, Cookie\r\n";

@@ -42,6 +42,7 @@
 #include <string>
 #include <vector>
 
+
 namespace
 {
     // ── Bundled font files ──────────────────────────────────────────────
@@ -163,23 +164,35 @@ namespace
 
             if (maxLines > 0 && lines > maxLines)
                 break;
+
+
         }
 
         maxLineWidth = std::max(maxLineWidth, lineWidth);
         if (maxLines > 0)
             lines = std::min(lines, maxLines);
 
-        // Safety margin: stb_truetype's raw advance-sum is a slightly different
-        // (and typically slightly narrower) measurement than what the browser's
-        // own rasterizer produces for the same string/font, even with the exact
-        // same bytes loaded via @font-face. Without slack here, a text box sized
-        // to the SSR-measured width can force an unwanted wrap the instant the
-        // browser measures it a pixel or two wider — which then also throws off
-        // every sibling positioned below it (the whole tree assumed the
-        // unwrapped, shorter height). A few px is invisible in normal layout but
-        // eliminates this class of divergence.
-        constexpr int kWidthSafetyMarginPx = 4;
-        outWidth = maxLineWidth + kWidthSafetyMarginPx;
+  
+
+        // Safety margin: stb_truetype returns UNHINTED advance widths —
+        // scaled straight from the font's design-unit metrics, with no
+        // grid-fitting applied. Browsers hint/grid-fit glyphs at small
+        // pixel sizes, which measurably WIDENS advances per-glyph
+        // (observed on 14px Inter: "Hello World" needs +11px over 11
+        // chars, "counter" needs +8px over 7 chars — both roughly
+        // 1-1.15px per character, NOT a fraction of total string width).
+        // A RATIO-based margin (e.g. 25% of maxLineWidth) was tried and
+        // is wrong for this reason: it overshoots badly on short strings
+        // and undershoots on long ones, and clamping it to a fixed cap
+        // just makes every string past ~9 characters collapse to the
+        // same margin regardless of actual length (exactly the bug that
+        // motivated this comment). Per-character is the right shape.
+        constexpr int kWidthSafetyMarginPerCharPx = 1;
+        constexpr int kWidthSafetyMarginFloorPx = 4;
+        int charCount = static_cast<int>(wtext.size());
+        int widthMargin = std::max(kWidthSafetyMarginFloorPx,
+                                   charCount * kWidthSafetyMarginPerCharPx);
+        outWidth = maxLineWidth + widthMargin;
 
         // Same story, vertically: pinning CSS line-height (see
         // fluxDomLineHeightPx / flux_painter_dom.cpp) keeps the TEXT LAYOUT
@@ -283,6 +296,7 @@ void measureDomRichText(const std::wstring &wtext, const TextStyle &style,
 {
     NativeFont fnt = fontCache.getFont(style.fontFamily, style.scaledFontSize(),
                                        style.fontWeight);
+
     measureWithFont(reinterpret_cast<SsrNativeFont *>(fnt), wtext,
                     maxWidth, softWrap, maxLines, outWidth, outHeight);
 }

@@ -109,7 +109,6 @@ namespace
 
     std::string nextDomNodeHydrationId() { return "n" + std::to_string(g_domNodeIdCounter++); }
 
-
     // ── CSS colour string ─────────────────────────────────────────────────────
     void cssColor(Color c, char *buf, int bufLen)
     {
@@ -127,8 +126,8 @@ namespace
     // its full definition is reached later in this same anonymous
     // namespace; C++ doesn't hoist function bodies, only declarations.
     void applyRect(IDomAdapter *adapter, DomNodeHandle node, Widget *owner,
-                  int x, int y, int w, int h);
- 
+                   int x, int y, int w, int h);
+
     // ── ensureNode ────────────────────────────────────────────────────────────
     //
     // Get-or-create the persistent DOM node for `owner`, and make sure it's
@@ -145,7 +144,7 @@ namespace
     // parentage when a widget's actual Widget::parent pointer changes) but
     // not a correctness problem, so left as-is for this first pass.
     DomNodeHandle ensureNode(Widget *owner, const char *tag = "div",
-                            const char *slot = "")
+                             const char *slot = "")
     {
         if (!owner)
             return kInvalidDomNode;
@@ -165,12 +164,10 @@ namespace
         }
         else
         {
+
             handle = adapter->createNode(tag, nextDomNodeHydrationId());
             slotMap[slot] = handle;
             created = true;
-            // Every node paints at an explicit x/y via its own geometry
-            // calls, never relies on normal document flow — set this once
-            // at creation so later calls only need to update the numbers.
             adapter->setStyle(handle, "position", "absolute");
         }
 
@@ -181,7 +178,7 @@ namespace
             // default node would be. There's no per-widget "wrapper" node
             // that slots nest inside. This keeps applyRect()'s coordinate
             // math (which only ever looks at owner->parent, never at
-            // slot) correct for every slot without special-casing.            
+            // slot) correct for every slot without special-casing.
             DomNodeHandle parentHandle = ensureNode(owner->parent, "div");
             if (parentHandle != kInvalidDomNode)
                 adapter->appendChild(parentHandle, handle);
@@ -217,7 +214,6 @@ namespace
         // computed against a DOM ancestor that isn't really there.
         applyRect(adapter, handle, owner, owner->x, owner->y, owner->width, owner->height);
 
-
         return handle;
     }
 
@@ -240,7 +236,7 @@ namespace
     // "owner's parent widget" and "this node's DOM parent" are always the
     // same coordinate origin.
     void applyRect(IDomAdapter *adapter, DomNodeHandle node, Widget *owner,
-                  int x, int y, int w, int h)
+                   int x, int y, int w, int h)
     {
         int localX = x, localY = y;
         if (owner && owner->parent)
@@ -260,13 +256,17 @@ namespace
     {
         switch (a)
         {
-        case TextAlign::Center: return "center";
+        case TextAlign::Center:
+            return "center";
         case TextAlign::Right:
-        case TextAlign::End: return "right";
-        case TextAlign::Justify: return "justify";
+        case TextAlign::End:
+            return "right";
+        case TextAlign::Justify:
+            return "justify";
         case TextAlign::Left:
         case TextAlign::Start:
-        default: return "left";
+        default:
+            return "left";
         }
     }
 
@@ -277,11 +277,16 @@ namespace
         bool u = hasDecoration(d, TextDecoration::Underline);
         bool o = hasDecoration(d, TextDecoration::Overline);
         bool s = hasDecoration(d, TextDecoration::LineThrough);
-        if (!u && !o && !s) return "none";
-        if (u && !o && !s) return "underline";
-        if (!u && o && !s) return "overline";
-        if (!u && !o && s) return "line-through";
-        if (u && s && !o) return "underline line-through";
+        if (!u && !o && !s)
+            return "none";
+        if (u && !o && !s)
+            return "underline";
+        if (!u && o && !s)
+            return "overline";
+        if (!u && !o && s)
+            return "line-through";
+        if (u && s && !o)
+            return "underline line-through";
         return "underline overline line-through"; // all three — rare, but valid CSS
     }
 
@@ -289,18 +294,21 @@ namespace
     {
         switch (s)
         {
-        case TextDecorationStyle::Double: return "double";
-        case TextDecorationStyle::Dotted: return "dotted";
-        case TextDecorationStyle::Dashed: return "dashed";
-        case TextDecorationStyle::Wavy: return "wavy";
+        case TextDecorationStyle::Double:
+            return "double";
+        case TextDecorationStyle::Dotted:
+            return "dotted";
+        case TextDecorationStyle::Dashed:
+            return "dashed";
+        case TextDecorationStyle::Wavy:
+            return "wavy";
         case TextDecorationStyle::Solid:
-        default: return "solid";
+        default:
+            return "solid";
         }
     }
 
 } // namespace
-
-
 
 // ============================================================================
 // fluxDomApplyRect — external entry point into the same parent-relative
@@ -322,8 +330,6 @@ void fluxDomApplyRect(Widget *owner, int x, int y, int w, int h, const char *slo
     applyRect(adapter, node, owner, x, y, w, h);
 }
 
-
-
 // ============================================================================
 // fluxDomEnsureNode — external entry point into the same widget->node cache
 // ensureNode() (above, internal-linkage) maintains. TextInputWidget
@@ -337,7 +343,6 @@ DomNodeHandle fluxDomEnsureNode(Widget *owner, const char *tag, const char *slot
 {
     return ensureNode(owner, tag, slot);
 }
-
 
 // ============================================================================
 // Widget eviction hook — called from Widget::onDetach() (wired in a small
@@ -379,16 +384,17 @@ void fluxDomClearCacheForNewRequest()
     g_domNodeCache.clear();
 }
 
-
 // ============================================================================
 // Painter::fillRect / fillRoundedRect / fillRectAlpha / fillRoundedRegion
 // ============================================================================
 
 void Painter::fillRect(int x, int y, int w, int h, Color color)
 {
-    if (!owner) return;
+    if (!owner)
+        return;
     IDomAdapter *adapter = getActiveDomAdapter();
-    if (!adapter) return;
+    if (!adapter)
+        return;
     DomNodeHandle node = ensureNode(owner);
     applyRect(adapter, node, owner, x, y, w, h);
     char col[32];
@@ -398,9 +404,11 @@ void Painter::fillRect(int x, int y, int w, int h, Color color)
 
 void Painter::fillRoundedRect(int x, int y, int w, int h, int radius, Color color)
 {
-    if (!owner) return;
+    if (!owner)
+        return;
     IDomAdapter *adapter = getActiveDomAdapter();
-    if (!adapter) return;
+    if (!adapter)
+        return;
     DomNodeHandle node = ensureNode(owner);
     applyRect(adapter, node, owner, x, y, w, h);
     char col[32];
@@ -437,9 +445,11 @@ void Painter::fillRoundedRectGDI(int x, int y, int w, int h, int radius,
 void Painter::drawBorder(int x, int y, int w, int h, int radius,
                          Color color, int borderWidth)
 {
-    if (!owner) return;
+    if (!owner)
+        return;
     IDomAdapter *adapter = getActiveDomAdapter();
-    if (!adapter) return;
+    if (!adapter)
+        return;
     DomNodeHandle node = ensureNode(owner);
     applyRect(adapter, node, owner, x, y, w, h);
     char col[32];
@@ -466,9 +476,11 @@ void Painter::drawRoundedRectOutline(int x, int y, int w, int h,
 
 void Painter::drawEllipse(int x, int y, int w, int h, Color fill, Color stroke, int strokeWidth)
 {
-    if (!owner) return;
+    if (!owner)
+        return;
     IDomAdapter *adapter = getActiveDomAdapter();
-    if (!adapter) return;
+    if (!adapter)
+        return;
     DomNodeHandle node = ensureNode(owner);
     applyRect(adapter, node, owner, x, y, w, h);
     adapter->setStyle(node, "border-radius", "50%");
@@ -492,9 +504,11 @@ void Painter::drawEllipse(int x, int y, int w, int h, Color fill, Color stroke, 
 
 void Painter::drawLine(int x1, int y1, int x2, int y2, Color color, int width)
 {
-    if (!owner) return;
+    if (!owner)
+        return;
     IDomAdapter *adapter = getActiveDomAdapter();
-    if (!adapter) return;
+    if (!adapter)
+        return;
     DomNodeHandle node = ensureNode(owner);
 
     int dx = x2 - x1, dy = y2 - y1;
@@ -535,9 +549,11 @@ void Painter::drawVLine(int x, int y, int len, Color color, int strokeWidth)
 
 void Painter::pushClipRect(int x, int y, int w, int h, int cornerRadius)
 {
-    if (!owner) return;
+    if (!owner)
+        return;
     IDomAdapter *adapter = getActiveDomAdapter();
-    if (!adapter) return;
+    if (!adapter)
+        return;
     DomNodeHandle node = ensureNode(owner);
     applyRect(adapter, node, owner, x, y, w, h);
     adapter->setStyle(node, "overflow", "hidden");
@@ -567,7 +583,7 @@ namespace
         adapter->setStyle(node, "align-items",
                           (format & DT_VCENTER) ? "center" : "flex-start");
         adapter->setStyle(node, "justify-content",
-                          (format & DT_CENTER) ? "center"
+                          (format & DT_CENTER)  ? "center"
                           : (format & DT_RIGHT) ? "flex-end"
                                                 : "flex-start");
         adapter->setStyle(node, "white-space",
@@ -583,9 +599,11 @@ namespace
 void Painter::drawText(const std::wstring &text, int x, int y, int w, int h,
                        NativeFont font, Color color, UINT format)
 {
-    if (!owner || text.empty()) return;
+    if (!owner || text.empty())
+        return;
     IDomAdapter *adapter = getActiveDomAdapter();
-    if (!adapter) return;
+    if (!adapter)
+        return;
     DomNodeHandle node = ensureNode(owner);
     applyRect(adapter, node, owner, x, y, w, h);
 
@@ -614,7 +632,8 @@ void Painter::drawText(const std::wstring &text, int x, int y, int w, int h,
 void Painter::drawTextA(const std::string &text, int x, int y, int w, int h,
                         NativeFont font, Color color, UINT format)
 {
-    if (text.empty()) return;
+    if (text.empty())
+        return;
     std::wstring ws(text.begin(), text.end());
     drawText(ws, x, y, w, h, font, color, format);
 }
@@ -626,9 +645,17 @@ void Painter::drawTextA(const std::string &text, int x, int y, int w, int h,
 void Painter::measureText(const std::wstring &text, NativeFont font,
                           int &outWidth, int &outHeight)
 {
-    if (text.empty()) { outWidth = outHeight = 0; return; }
+    if (text.empty())
+    {
+        outWidth = outHeight = 0;
+        return;
+    }
     const char *cssFont = static_cast<const char *>(font);
-    if (!cssFont) { outWidth = outHeight = 0; return; }
+    if (!cssFont)
+    {
+        outWidth = outHeight = 0;
+        return;
+    }
     measureDomText(cssFont, text, outWidth, outHeight);
 }
 
@@ -640,9 +667,11 @@ void Painter::drawRichText(const std::wstring &wtext,
                            const RichTextParams &params,
                            FontCache &fontCache)
 {
-    if (!owner || wtext.empty() || params.w <= 0 || params.h <= 0) return;
+    if (!owner || wtext.empty() || params.w <= 0 || params.h <= 0)
+        return;
     IDomAdapter *adapter = getActiveDomAdapter();
-    if (!adapter) return;
+    if (!adapter)
+        return;
 
     const TextStyle &style = params.style;
     bool underline = hasDecoration(style.decoration, TextDecoration::Underline);
@@ -668,7 +697,6 @@ void Painter::drawRichText(const std::wstring &wtext,
     int lineHeightPx = fluxDomLineHeightPx(style.fontFamily, style.scaledFontSize(), style.fontWeight);
     adapter->setStyle(node, "line-height", pxStr(lineHeightPx));
 
-
     adapter->setStyle(node, "text-align", cssTextAlign(params.textAlign));
     adapter->setStyle(node, "direction",
                       params.direction == TextDirection::RTL ? "rtl" : "ltr");
@@ -679,7 +707,7 @@ void Painter::drawRichText(const std::wstring &wtext,
     adapter->setStyle(node, "display", "flex");
     adapter->setStyle(node, "flex-direction", "column");
     adapter->setStyle(node, "justify-content",
-                      params.textAlignVertical == TextAlignVertical::Center ? "center"
+                      params.textAlignVertical == TextAlignVertical::Center   ? "center"
                       : params.textAlignVertical == TextAlignVertical::Bottom ? "flex-end"
                                                                               : "flex-start");
 
@@ -700,8 +728,7 @@ void Painter::drawRichText(const std::wstring &wtext,
         adapter->setStyle(node, "overflow", "hidden");
     }
     if (params.maxLines > 0)
-        adapter->setStyle(node, "max-height", pxStr(
-            (int)(params.maxLines * style.scaledFontSize() * style.height * 1.2f)));
+        adapter->setStyle(node, "max-height", pxStr((int)(params.maxLines * style.scaledFontSize() * style.height * 1.2f)));
 
     adapter->setStyle(node, "text-decoration-line", cssDecorationLine(style.decoration));
     if (style.decoration != TextDecoration::None)
@@ -723,7 +750,8 @@ void Painter::drawRichText(const std::wstring &wtext,
             cssColor(sh.color, shc, sizeof(shc));
             char part[80];
             snprintf(part, sizeof(part), "%dpx %dpx %s", sh.offsetX, sh.offsetY, shc);
-            if (i) shadowCss += ", ";
+            if (i)
+                shadowCss += ", ";
             shadowCss += part;
         }
         adapter->setStyle(node, "text-shadow", shadowCss);
@@ -745,7 +773,8 @@ void Painter::drawRichText(const std::wstring &wtext,
 
 void Painter::drawRichTextA(const std::string &text, const RichTextParams &params, FontCache &fontCache)
 {
-    if (text.empty()) return;
+    if (text.empty())
+        return;
     std::wstring ws(text.begin(), text.end());
     drawRichText(ws, params, fontCache);
 }
@@ -754,7 +783,11 @@ void Painter::measureRichText(const std::wstring &wtext, const TextStyle &style,
                               FontCache &fontCache, int maxWidth, bool softWrap,
                               int maxLines, int &outWidth, int &outHeight)
 {
-    if (wtext.empty()) { outWidth = outHeight = 0; return; }
+    if (wtext.empty())
+    {
+        outWidth = outHeight = 0;
+        return;
+    }
     measureDomRichText(wtext, style, fontCache, maxWidth, softWrap, maxLines, outWidth, outHeight);
 }
 
@@ -769,9 +802,11 @@ void Painter::measureRichText(const std::wstring &wtext, const TextStyle &style,
 
 void Painter::drawFadeOverlay(int x, int y, int w, int h, int fadeWidth, Color bg)
 {
-    if (fadeWidth <= 0 || w <= 0 || h <= 0) return;
+    if (fadeWidth <= 0 || w <= 0 || h <= 0)
+        return;
     int startX = x + w - fadeWidth;
-    if (startX < x) startX = x;
+    if (startX < x)
+        startX = x;
     fillGradientRect(startX, y, fadeWidth, h, {bg.withAlpha(0), bg.withAlpha(255)});
 }
 
@@ -782,7 +817,11 @@ void Painter::drawTextDecorationLine(int lineX, int lineY, int lineW,
     // text node (the correct, native way to do this in DOM) — this method
     // exists for the canvas backend's manual-geometry approach and has no
     // DOM equivalent to perform. Left intentionally empty.
-    (void)lineX; (void)lineY; (void)lineW; (void)style; (void)which;
+    (void)lineX;
+    (void)lineY;
+    (void)lineW;
+    (void)style;
+    (void)which;
 }
 
 // ============================================================================
@@ -791,10 +830,16 @@ void Painter::drawTextDecorationLine(int lineX, int lineY, int lineW,
 
 void Painter::fillGradientRect(int x, int y, int w, int h, const std::vector<Color> &colors)
 {
-    if (!owner || colors.empty() || w <= 0 || h <= 0) return;
+    if (!owner || colors.empty() || w <= 0 || h <= 0)
+        return;
     IDomAdapter *adapter = getActiveDomAdapter();
-    if (!adapter) return;
-    if (colors.size() == 1) { fillRect(x, y, w, h, colors[0]); return; }
+    if (!adapter)
+        return;
+    if (colors.size() == 1)
+    {
+        fillRect(x, y, w, h, colors[0]);
+        return;
+    }
 
     DomNodeHandle node = ensureNode(owner);
     applyRect(adapter, node, owner, x, y, w, h);
@@ -826,9 +871,11 @@ void Painter::fillGradientRect(int x, int y, int w, int h, const std::vector<Col
 
 void Painter::drawImage(const ImageDrawParams &params)
 {
-    if (!owner || !params.image || params.clipW <= 0 || params.clipH <= 0) return;
+    if (!owner || !params.image || params.clipW <= 0 || params.clipH <= 0)
+        return;
     IDomAdapter *adapter = getActiveDomAdapter();
-    if (!adapter) return;
+    if (!adapter)
+        return;
 
     DomNodeHandle node = ensureNode(owner);
     applyRect(adapter, node, owner, params.clipX, params.clipY, params.clipW, params.clipH);
@@ -844,10 +891,10 @@ void Painter::drawImage(const ImageDrawParams &params)
     {
         adapter->setStyle(node, "background-image", "url(" + url + ")");
         const char *repeat =
-            params.repeat == ImageRepeat::Repeat ? "repeat"
+            params.repeat == ImageRepeat::Repeat    ? "repeat"
             : params.repeat == ImageRepeat::RepeatX ? "repeat-x"
             : params.repeat == ImageRepeat::RepeatY ? "repeat-y"
-                                                     : "no-repeat";
+                                                    : "no-repeat";
         adapter->setStyle(node, "background-repeat", repeat);
         adapter->setStyle(node, "background-size",
                           params.repeat == ImageRepeat::NoRepeat ? "cover" : "auto");
@@ -870,7 +917,8 @@ void Painter::fillRectWithLeftAccent(int x, int y, int w, int h, Color bg, Color
     // widget, multiple visual layers under one owner" case flagged when
     // ProgressBarWidget was reviewed — deferred pending that design
     // decision rather than solved ad hoc here.
-    (void)accent; (void)stripWidth;
+    (void)accent;
+    (void)stripWidth;
 }
 
 void Painter::fillColumnBars(int, int, int, int, const std::vector<int> &, Color) { /* deferred */ }
@@ -889,7 +937,6 @@ void Painter::drawPage(const PageDrawParams &) { /* deferred */ }
 // change to those two widget files, tracked as its own Phase 1 item).
 void Painter::drawVideo(const VideoDrawParams &) {}
 void Painter::drawCamera(const CameraDrawParams &) {}
-
 
 // ============================================================================
 // fluxDomResetNodeIdCounter — reset the hydration-id counter above to 0.
