@@ -5,6 +5,7 @@
 #include "flux/flux_hydration.hpp"
 #include "flux/flux_dom_adapter.hpp"
 #include "flux/flux_http.hpp"
+#include "flux/flux_image_registry.hpp"
 
 #include <cctype>
 #include <cstring>
@@ -302,7 +303,7 @@ namespace
     // whenever it's knowable.
     constexpr int kSSRViewportWidthDefault = 1280;
     constexpr int kSSRViewportHeightDefault = 800;
-    constexpr int kSSRViewportMin = 320;  // guard against bogus/hostile header values
+    constexpr int kSSRViewportMin = 320; // guard against bogus/hostile header values
     constexpr int kSSRViewportMax = 4096;
 
     std::string extractRequestPath(const std::string &requestLine)
@@ -315,7 +316,6 @@ namespace
         return requestLine.substr(firstSpace + 1, secondSpace - firstSpace - 1);
     }
 
-    
     // ── Request header parsing ────────────────────────────────────────────
     //
     // handleConnection() previously only looked at the request line and
@@ -419,8 +419,6 @@ namespace
     {
         ResolvedViewport out;
 
-
-
         auto cookieHeader = headers.find("cookie");
         if (cookieHeader != headers.end())
         {
@@ -458,7 +456,6 @@ namespace
             }
         }
 
-
         return out;
     }
 
@@ -478,129 +475,132 @@ namespace
              // find the server-rendered content to mount into / adopt from.
              << "<div id=\"flux-dom-root\" style=\"position:relative;width:100%;height:100%;\">"
              << bodyHtml
-         // #flux-input-capture — REQUIRED for the page to be interactive
-         // at all post-hydration. flux_window_dom.cpp registers every
-         // mouse/touch/keyboard listener on this exact element selector
-         // (see emscripten_set_mousedown_callback("#flux-input-capture",
-         // ...) etc). Without it, hydration completes and the page LOOKS
-         // interactive but every click silently does nothing — no error,
-         // no console warning, just a dead page. Matches the markup
-         // web/CMakeLists.txt's FLUX_CANVAS_RENDERER_MARKUP generates for
-         // FLUX_WEB_RENDERER=dom builds.
-         << "<div id=\"flux-input-capture\" style=\"position:absolute;top:0;left:0;"
-            "width:100%;height:100%;touch-action:none;background:transparent;z-index:1;\"></div>"
-         // #flux-gl — present on both renderers; CanvasWidget/video/camera
-         // widgets use it regardless of which renderer draws everything
-         // else. Empty/inert until such a widget attaches to it.
-         << "<canvas id=\"flux-gl\" style=\"position:absolute;top:0;left:0;"
-            "width:100%;height:100%;pointer-events:none;\"></canvas>"
-         // ── Minimal Module bootstrap ──────────────────────────────────
-         // Deliberately NOT the full shell.html.in bootstrap (no loading
-         // spinner needed — the whole point of SSR is that real content
-         // is already visible; no error overlay wiring either, kept out
-         // for now as a known simplification). Just enough for
-         // web/main.cpp's main() to boot correctly against THIS
-         // document: canvas/DPR globals it reads at startup, and the
-         // hydration blob it reads before build().
-         << "<script>"
-            "var Module = {};"
-            "Module.canvas = document.getElementById('flux-gl');"
-            "Module._fluxDPR = window.devicePixelRatio || 1;"
-            // Physical (device) pixels — canvas backing-store size only.
-            // NOT what the DOM renderer should lay out at: applyRect() in
-            // flux_painter_dom.cpp writes raw px values straight into CSS,
-            // which the browser always interprets as CSS/logical pixels.
-            // Booting the DOM renderer's FluxUI window from these on any
-            // DPR>1 display (basically all HiDPI screens) lays the whole
-            // tree out at ~DPR-times too large — which is exactly what
-            // hydration's "page jumps to a bigger size" symptom is.
-            "Module._fluxPhysicalWidth = Math.floor(window.innerWidth * Module._fluxDPR);"
-            "Module._fluxPhysicalHeight = Math.floor(window.innerHeight * Module._fluxDPR);"
-            // Logical (CSS) pixels — what the DOM renderer must boot at,
-            // to match the SSR pass, which resolved its own viewport in
-            // logical px the whole way through (Sec-CH-Viewport-*, the
-            // flux_vw/vh cookies below, and kSSRViewportWidthDefault are
-            // all logical-px values, never DPR-multiplied).
-            "Module._fluxLogicalWidth = window.innerWidth;"
-            "Module._fluxLogicalHeight = window.innerHeight;"
-            // Fallback path for browsers with no viewport Client Hints
-            // (Firefox, Safari): remember the REAL viewport for next
-            // time, so resolveViewport() can use it instead of guessing.
-            // Chromium doesn't need this — it already told us via
-            // Sec-CH-Viewport-* headers before this response was even
-            // generated (see the Critical-CH handling in
-            // handleConnection() below).
-            "document.cookie = 'flux_vw=' + window.innerWidth + ';path=/;max-age=86400;SameSite=Lax';"
-            "document.cookie = 'flux_vh=' + window.innerHeight + ';path=/;max-age=86400;SameSite=Lax';"
-            "Module.locateFile = function(path, prefix) { return '" << kWebBundleUrlPrefix << "' + path; };"
-            // The hydration payload itself — see jsStringEscape()'s
-            // header comment for why this is safe to splice in raw
-            // rather than needing a separate encoding step.
-            "Module._fluxHydrationData = \"" << jsStringEscape(hydrationBlob) << "\";"
-         << "</script>"
-         // ── Window resize wiring ────────────────────────────────────────
-         // shell.html's client-only bootstrap registers a 'resize'
-         // listener (resizeCanvases()) that recomputes physical/logical
-         // dimensions and calls Module._fluxOnResize(), which is what
-         // ultimately triggers LayoutEngine::computeLayout() +
-         // positionWidget() via FluxUI::wireCallbacks()'s onResize
-         // handler. This minimal SSR bootstrap set the SAME globals once,
-         // at load time, but never registered an equivalent listener —
-         // so the page laid out correctly for the INITIAL viewport (the
-         // whole point of SSR) but then never heard about a later window
-         // resize at all: FlexWidget's own layout logic is already fully
-         // responsive (it reads FluxUI::getClientSize().width fresh every
-         // computeLayout()), it just never got RE-INVOKED. Guarded on
-         // Module._fluxOnResize existing, since that function is only
-         // installed once flux_app.js's main() has actually run — a
-         // resize firing before boot completes is safely ignored (the
-         // initial boot path in web/main.cpp already reads the current
-         // real size directly).
-         << "<script>"
-            "window.addEventListener('resize', function(){"
-              "var dpr = window.devicePixelRatio || 1;"
-              "var w = Math.floor(window.innerWidth * dpr);"
-              "var h = Math.floor(window.innerHeight * dpr);"
-              "Module._fluxDPR = dpr;"
-              "Module._fluxPhysicalWidth = w;"
-              "Module._fluxPhysicalHeight = h;"
-              "if (typeof Module._fluxOnResize === 'function')"
+             // #flux-input-capture — REQUIRED for the page to be interactive
+             // at all post-hydration. flux_window_dom.cpp registers every
+             // mouse/touch/keyboard listener on this exact element selector
+             // (see emscripten_set_mousedown_callback("#flux-input-capture",
+             // ...) etc). Without it, hydration completes and the page LOOKS
+             // interactive but every click silently does nothing — no error,
+             // no console warning, just a dead page. Matches the markup
+             // web/CMakeLists.txt's FLUX_CANVAS_RENDERER_MARKUP generates for
+             // FLUX_WEB_RENDERER=dom builds.
+             << "<div id=\"flux-input-capture\" style=\"position:absolute;top:0;left:0;"
+                "width:100%;height:100%;touch-action:none;background:transparent;z-index:1;\"></div>"
+             // #flux-gl — present on both renderers; CanvasWidget/video/camera
+             // widgets use it regardless of which renderer draws everything
+             // else. Empty/inert until such a widget attaches to it.
+             << "<canvas id=\"flux-gl\" style=\"position:absolute;top:0;left:0;"
+                "width:100%;height:100%;pointer-events:none;\"></canvas>"
+             // ── Minimal Module bootstrap ──────────────────────────────────
+             // Deliberately NOT the full shell.html.in bootstrap (no loading
+             // spinner needed — the whole point of SSR is that real content
+             // is already visible; no error overlay wiring either, kept out
+             // for now as a known simplification). Just enough for
+             // web/main.cpp's main() to boot correctly against THIS
+             // document: canvas/DPR globals it reads at startup, and the
+             // hydration blob it reads before build().
+             << "<script>"
+                "var Module = {};"
+                "Module.canvas = document.getElementById('flux-gl');"
+                "Module._fluxDPR = window.devicePixelRatio || 1;"
+                // Physical (device) pixels — canvas backing-store size only.
+                // NOT what the DOM renderer should lay out at: applyRect() in
+                // flux_painter_dom.cpp writes raw px values straight into CSS,
+                // which the browser always interprets as CSS/logical pixels.
+                // Booting the DOM renderer's FluxUI window from these on any
+                // DPR>1 display (basically all HiDPI screens) lays the whole
+                // tree out at ~DPR-times too large — which is exactly what
+                // hydration's "page jumps to a bigger size" symptom is.
+                "Module._fluxPhysicalWidth = Math.floor(window.innerWidth * Module._fluxDPR);"
+                "Module._fluxPhysicalHeight = Math.floor(window.innerHeight * Module._fluxDPR);"
+                // Logical (CSS) pixels — what the DOM renderer must boot at,
+                // to match the SSR pass, which resolved its own viewport in
+                // logical px the whole way through (Sec-CH-Viewport-*, the
+                // flux_vw/vh cookies below, and kSSRViewportWidthDefault are
+                // all logical-px values, never DPR-multiplied).
+                "Module._fluxLogicalWidth = window.innerWidth;"
+                "Module._fluxLogicalHeight = window.innerHeight;"
+                // Fallback path for browsers with no viewport Client Hints
+                // (Firefox, Safari): remember the REAL viewport for next
+                // time, so resolveViewport() can use it instead of guessing.
+                // Chromium doesn't need this — it already told us via
+                // Sec-CH-Viewport-* headers before this response was even
+                // generated (see the Critical-CH handling in
+                // handleConnection() below).
+                "document.cookie = 'flux_vw=' + window.innerWidth + ';path=/;max-age=86400;SameSite=Lax';"
+                "document.cookie = 'flux_vh=' + window.innerHeight + ';path=/;max-age=86400;SameSite=Lax';"
+                "Module.locateFile = function(path, prefix) { return '"
+             << kWebBundleUrlPrefix << "' + path; };"
+                                       // The hydration payload itself — see jsStringEscape()'s
+                                       // header comment for why this is safe to splice in raw
+                                       // rather than needing a separate encoding step.
+                                       "Module._fluxHydrationData = \""
+             << jsStringEscape(hydrationBlob) << "\";"
+             << "</script>"
+             // ── Window resize wiring ────────────────────────────────────────
+             // shell.html's client-only bootstrap registers a 'resize'
+             // listener (resizeCanvases()) that recomputes physical/logical
+             // dimensions and calls Module._fluxOnResize(), which is what
+             // ultimately triggers LayoutEngine::computeLayout() +
+             // positionWidget() via FluxUI::wireCallbacks()'s onResize
+             // handler. This minimal SSR bootstrap set the SAME globals once,
+             // at load time, but never registered an equivalent listener —
+             // so the page laid out correctly for the INITIAL viewport (the
+             // whole point of SSR) but then never heard about a later window
+             // resize at all: FlexWidget's own layout logic is already fully
+             // responsive (it reads FluxUI::getClientSize().width fresh every
+             // computeLayout()), it just never got RE-INVOKED. Guarded on
+             // Module._fluxOnResize existing, since that function is only
+             // installed once flux_app.js's main() has actually run — a
+             // resize firing before boot completes is safely ignored (the
+             // initial boot path in web/main.cpp already reads the current
+             // real size directly).
+             << "<script>"
+                "window.addEventListener('resize', function(){"
+                "var dpr = window.devicePixelRatio || 1;"
+                "var w = Math.floor(window.innerWidth * dpr);"
+                "var h = Math.floor(window.innerHeight * dpr);"
+                "Module._fluxDPR = dpr;"
+                "Module._fluxPhysicalWidth = w;"
+                "Module._fluxPhysicalHeight = h;"
+                "if (typeof Module._fluxOnResize === 'function')"
                 "Module._fluxOnResize(w, h);"
-              "document.cookie = 'flux_vw=' + window.innerWidth + ';path=/;max-age=86400;SameSite=Lax';"
-              "document.cookie = 'flux_vh=' + window.innerHeight + ';path=/;max-age=86400;SameSite=Lax';"
-            "});"
-         << "</script>"
-         // Was: an unconditional <script src="...flux_app.js"> here — that
-         // races the @font-face fetch the <style> block above triggers.
-         // Browsers start fetching a @font-face font as soon as they paint
-         // text needing it, but WASM boot (main.cpp's build() + first
-         // measurement pass) doesn't wait for that fetch. If Inter.ttf
-         // hasn't finished loading when the DOM renderer's hidden
-         // measurement sandbox measures its first string, the browser
-         // silently substitutes its own default sans-serif for that one
-         // measurement — different (wider) metrics than the stb_truetype
-         // numbers SSR shipped, which is exactly the width/position jump
-         // seen on hydration's first paint. Gate the bundle load on
-         // document.fonts.ready so 'Inter' is guaranteed available before
-         // main() ever runs.
-         << "<script>"
-            "(function(){"
-              "var start=function(){"
+                "document.cookie = 'flux_vw=' + window.innerWidth + ';path=/;max-age=86400;SameSite=Lax';"
+                "document.cookie = 'flux_vh=' + window.innerHeight + ';path=/;max-age=86400;SameSite=Lax';"
+                "});"
+             << "</script>"
+             // Was: an unconditional <script src="...flux_app.js"> here — that
+             // races the @font-face fetch the <style> block above triggers.
+             // Browsers start fetching a @font-face font as soon as they paint
+             // text needing it, but WASM boot (main.cpp's build() + first
+             // measurement pass) doesn't wait for that fetch. If Inter.ttf
+             // hasn't finished loading when the DOM renderer's hidden
+             // measurement sandbox measures its first string, the browser
+             // silently substitutes its own default sans-serif for that one
+             // measurement — different (wider) metrics than the stb_truetype
+             // numbers SSR shipped, which is exactly the width/position jump
+             // seen on hydration's first paint. Gate the bundle load on
+             // document.fonts.ready so 'Inter' is guaranteed available before
+             // main() ever runs.
+             << "<script>"
+                "(function(){"
+                "var start=function(){"
                 "var s=document.createElement('script');"
-                "s.src='" << kWebBundleUrlPrefix << "flux_app.js';"
-                "document.body.appendChild(s);"
-              "};"
-              "if (document.fonts && document.fonts.load) {"
-                "Promise.all(["
-                  "document.fonts.load(\"400 14px 'Inter'\").catch(function(){}),"
-                  "document.fonts.load(\"700 14px 'Inter'\").catch(function(){})"
-                "]).then(function(){ return document.fonts.ready; })"
-                 ".then(start, start);" // start anyway on failure — don't hang forever
-              "} else {"
-                "start();" // no FontFaceSet API (very old browser) — best effort
-              "}"
-            "})();"
-         << "</script>"
+                "s.src='"
+             << kWebBundleUrlPrefix << "flux_app.js';"
+                                       "document.body.appendChild(s);"
+                                       "};"
+                                       "if (document.fonts && document.fonts.load) {"
+                                       "Promise.all(["
+                                       "document.fonts.load(\"400 14px 'Inter'\").catch(function(){}),"
+                                       "document.fonts.load(\"700 14px 'Inter'\").catch(function(){})"
+                                       "]).then(function(){ return document.fonts.ready; })"
+                                       ".then(start, start);" // start anyway on failure — don't hang forever
+                                       "} else {"
+                                       "start();" // no FontFaceSet API (very old browser) — best effort
+                                       "}"
+                                       "})();"
+             << "</script>"
 
              << "</body></html>";
         return html.str();
@@ -653,7 +653,6 @@ namespace
         fluxSsrDestroyDomAdapter(adapter);
         fluxSetSSRSyncMode(false);
 
-        
         return wrapFullPage(html, fluxHydrationSerializeBlob());
     }
 
@@ -679,11 +678,17 @@ namespace
         std::string contentType = "text/html; charset=utf-8";
         bool cacheable = false;
         bool isRenderedPage = false;
-        bool viewportFromCookie  = false;
+        bool viewportFromCookie = false;
         try
         {
             if (tryServeStaticFont(path, body, contentType))
             {
+                cacheable = true;
+            }
+            else if (fluxImageRegistryServe(path, body, contentType))
+            {
+                // Content-addressed — the URL IS the hash, so it's safe
+                // to cache forever, same reasoning as the font route.
                 cacheable = true;
             }
             else if (tryServeWebAsset(path, body, contentType))

@@ -887,6 +887,18 @@ void Painter::drawImage(const ImageDrawParams &params)
     // See comment above — imageUrlForHandle() is the pending seam.
     extern std::string imageUrlForHandle(NativeImage handle); // TODO wiring
     std::string url = imageUrlForHandle(params.image);
+#elif defined(FLUX_SSR)
+    // params.image is an ImageWidget::SsrNativeImage* (flux_image_ssr.cpp)
+    // — either the widget's ORIGINAL network URL, or a content-addressed
+    // /img/<hash> path this process registered for an asset/memory image.
+    // Either way it's a URL the browser fetches itself during hydration;
+    // SSR never decodes pixels server-side.
+    struct SsrNativeImageShape { int width; int height; std::string url; };
+    std::string url = reinterpret_cast<const SsrNativeImageShape *>(params.image)->url;
+#else
+    std::string url;
+#endif
+#if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
     if (!url.empty())
     {
         adapter->setStyle(node, "background-image", "url(" + url + ")");
@@ -901,9 +913,7 @@ void Painter::drawImage(const ImageDrawParams &params)
         adapter->setStyle(node, "background-position", "center");
     }
 #endif
-    // FLUX_SSR: no image decode path on this backend — node is sized/clipped
-    // correctly but left without a background-image, until SSR gains an
-    // image pipeline of its own.
+
 }
 
 // ============================================================================

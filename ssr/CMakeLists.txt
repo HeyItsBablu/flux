@@ -19,10 +19,8 @@ set(FLUX_SSR_SOURCES
     ${CMAKE_SOURCE_DIR}/src/flux_painter_dom.cpp
     ${CMAKE_SOURCE_DIR}/src/flux_font_ssr.cpp
     ${CMAKE_SOURCE_DIR}/src/flux_dom_adapter_stringbuilder.cpp
-    # flux_font_linux.cpp is NO LONGER used here — flux_font_ssr.cpp now
-    # implements FontCache::createFont/getFont* itself, backed by
-    # stb_truetype instead of Pango. Removing this dependency is exactly
-    # what makes the SSR build platform-independent.
+    ${CMAKE_SOURCE_DIR}/src/flux_image_ssr.cpp
+
 )
 
 add_executable(flux_ssr

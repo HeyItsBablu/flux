@@ -262,4 +262,75 @@ void ImageWidget::_platformDestroy()
     pixels.clear();
 }
 
+
+// ============================================================================
+// imageUrlForHandle — the seam flux_painter_dom.cpp's drawImage() needs
+// (FLUX_WEB_RENDERER_DOM only). Turns the OffscreenCanvas already stored
+// under `key` in Module._fluxImgStore (see uploadPixels() above) into a
+// CSS-usable data: URL.
+//
+// OffscreenCanvas has no synchronous toDataURL() — only convertToBlob(),
+// which is async and would force drawImage() into a two-phase "URL isn't
+// ready yet" API, unlike every other Painter method here. Instead: blit
+// the OffscreenCanvas onto a throwaway REGULAR <canvas> (which does
+// support synchronous toDataURL()) and encode from there. This runs once
+// per (key, size) — the result is cached in a JS Map, so repeated calls
+// across frames (drawImage() runs every render, not just once) don't
+// re-encode identical pixels.
+//
+// Known cost, flagged rather than hidden: this base64-encodes the full
+// image into the DOM node's style attribute. Fine for a first pass and
+// for small/medium UI images; a large photo would be meaningfully
+// cheaper served as a real byte stream the way flux_image_ssr.cpp does
+// for the server-rendered path. Worth revisiting with a Blob + object
+// URL if this becomes a real cost — object URLs need explicit
+// revokeObjectURL() lifecycle management this cache doesn't do yet.
+// ============================================================================
+
+#ifdef FLUX_WEB_RENDERER_DOM
+std::string imageUrlForHandle(NativeImage handle)
+{
+    int key = static_cast<int>(reinterpret_cast<intptr_t>(handle));
+    if (key <= 0)
+        return {};
+
+    char *ptr = (char *)EM_ASM_PTR({
+        var key = $0;
+        var store = Module._fluxImgStore;
+        if (!store) return 0;
+        var oc = store.get(key);
+        if (!oc) return 0;
+
+        Module._fluxImgUrlCache = Module._fluxImgUrlCache || new Map();
+        var cached = Module._fluxImgUrlCache.get(key);
+        if (cached && cached.w === oc.width && cached.h === oc.height) {
+            var len = lengthBytesUTF8(cached.url) + 1;
+            var buf = _malloc(len);
+            stringToUTF8(cached.url, buf, len);
+            return buf;
+        }
+
+        var tmp = document.createElement('canvas');
+        tmp.width = oc.width;
+        tmp.height = oc.height;
+        var tctx = tmp.getContext('2d');
+        tctx.drawImage(oc, 0, 0);
+        var url = tmp.toDataURL('image/png');
+
+        Module._fluxImgUrlCache.set(key, { url: url, w: oc.width, h: oc.height });
+
+        var len = lengthBytesUTF8(url) + 1;
+        var buf = _malloc(len);
+        stringToUTF8(url, buf, len);
+        return buf;
+    }, key);
+
+    if (!ptr)
+        return {};
+    std::string result(ptr);
+    free(ptr);
+    return result;
+}
+#endif // FLUX_WEB_RENDERER_DOM
+
 #endif // __EMSCRIPTEN__

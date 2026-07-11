@@ -122,7 +122,7 @@ public:
 
     // ── Platform member storage ───────────────────────────────────────────────
 
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(FLUX_SSR)
     struct Win32State;
     struct Win32StateDeleter
     {
@@ -160,6 +160,13 @@ public:
     mutable std::mutex _decodeMutex;
     DecodedImage _pending;
     std::vector<uint8_t> pixels;
+#endif
+
+#ifdef FLUX_SSR
+    struct SsrNativeImage;
+    SsrNativeImage *_ssrPending = nullptr; // set by _platformDecode, moved by _platformPromote
+    SsrNativeImage *_ssrImage = nullptr;   // what _platformRender actually draws
+    bool _platformDecodeNetwork(const uint8_t *data, int len, const std::string &sourceUrl);
 #endif
 
 #ifdef __ANDROID__
@@ -603,7 +610,7 @@ private:
                 reinterpret_cast<const uint8_t*>(buf), len);
             AAsset_close(asset);
 #else
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(FLUX_SSR)
             FILE* f = nullptr;
             fopen_s(&f, path.c_str(), "rb");
 #else
@@ -687,7 +694,9 @@ private:
     // =========================================================================
     bool _decodeIntoStaging(const uint8_t *data, int len)
     {
-#ifdef _WIN32
+#if defined(FLUX_SSR)
+    return _platformDecode(data, len); // header-only dimension parse + registry
+#elif defined(_WIN32)
         return _platformDecode(data, len);
 #else
         int w = 0, h = 0, ch = 0;
@@ -896,7 +905,7 @@ private:
     // Platform interface — implemented in platform .cpp / .mm files
     // =========================================================================
 
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(FLUX_SSR)
     bool _platformDecode(const uint8_t *data, int len);
     bool _platformStorePixels(unsigned char *rgba, int w, int h); // stub
 #else
