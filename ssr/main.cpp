@@ -538,6 +538,38 @@ namespace
             // rather than needing a separate encoding step.
             "Module._fluxHydrationData = \"" << jsStringEscape(hydrationBlob) << "\";"
          << "</script>"
+         // ── Window resize wiring ────────────────────────────────────────
+         // shell.html's client-only bootstrap registers a 'resize'
+         // listener (resizeCanvases()) that recomputes physical/logical
+         // dimensions and calls Module._fluxOnResize(), which is what
+         // ultimately triggers LayoutEngine::computeLayout() +
+         // positionWidget() via FluxUI::wireCallbacks()'s onResize
+         // handler. This minimal SSR bootstrap set the SAME globals once,
+         // at load time, but never registered an equivalent listener —
+         // so the page laid out correctly for the INITIAL viewport (the
+         // whole point of SSR) but then never heard about a later window
+         // resize at all: FlexWidget's own layout logic is already fully
+         // responsive (it reads FluxUI::getClientSize().width fresh every
+         // computeLayout()), it just never got RE-INVOKED. Guarded on
+         // Module._fluxOnResize existing, since that function is only
+         // installed once flux_app.js's main() has actually run — a
+         // resize firing before boot completes is safely ignored (the
+         // initial boot path in web/main.cpp already reads the current
+         // real size directly).
+         << "<script>"
+            "window.addEventListener('resize', function(){"
+              "var dpr = window.devicePixelRatio || 1;"
+              "var w = Math.floor(window.innerWidth * dpr);"
+              "var h = Math.floor(window.innerHeight * dpr);"
+              "Module._fluxDPR = dpr;"
+              "Module._fluxPhysicalWidth = w;"
+              "Module._fluxPhysicalHeight = h;"
+              "if (typeof Module._fluxOnResize === 'function')"
+                "Module._fluxOnResize(w, h);"
+              "document.cookie = 'flux_vw=' + window.innerWidth + ';path=/;max-age=86400;SameSite=Lax';"
+              "document.cookie = 'flux_vh=' + window.innerHeight + ';path=/;max-age=86400;SameSite=Lax';"
+            "});"
+         << "</script>"
          // Was: an unconditional <script src="...flux_app.js"> here — that
          // races the @font-face fetch the <style> block above triggers.
          // Browsers start fetching a @font-face font as soon as they paint
