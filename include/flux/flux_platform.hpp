@@ -161,7 +161,14 @@ using NativeFont = void *;   // cast to SsrNativeFont* in flux_font_ssr.cpp
 using AppInstance = void *;
 using TimerID = uint32_t;
 using UINT = unsigned int;
-using NativeImage = void *;  // unused on this backend — no image decode path
+using NativeImage = void *;  // cast to ImageWidget::SsrNativeImage* in
+                              // flux_image_ssr.cpp — holds decoded
+                              // width/height plus the URL the browser
+                              // will fetch during hydration (SSR itself
+                              // never decodes pixels, just dimensions
+                              // via stbi_info_from_memory + a registered
+                              // content-addressed /img/<hash> URL, or the
+                              // original network URL for remote images).
 
 static constexpr UINT DT_LEFT = 0x0000u;
 static constexpr UINT DT_CENTER = 0x0001u;
