@@ -668,15 +668,41 @@ namespace
     // viewportWidth/viewportHeight come from resolveViewport() in
     // handleConnection() — the ACTUAL client viewport whenever it's
     // knowable, not a fixed guess.
+    //
+    // ── Parallel data fetching (Phase 6) ────────────────────────────────
+    //
+    // Runs the whole build()+layout() pass in a loop ("waves") instead of
+    // once. Each wave fully reconstructs the widget tree from scratch
+    // (createApp() runs again every time) — this is deliberate, not
+    // wasteful busywork: it's what makes FutureBuilderWidget/ImageWidget
+    // hydration IDs come out in the SAME order the client's single-pass
+    // hydration walk will produce.
+    //
+    // Why a naive "just re-layout the persistent tree" approach breaks:
+    // a nested FutureBuilderWidget only gets CONSTRUCTED once its parent
+    // resolves, so it's discovered on whatever wave reveals it. If two
+    // siblings A (nested: B) and C (nested: D) both resolve in the SAME
+    // wave, re-layouting a persistent tree visits A and C first (pass N),
+    // THEN reveals B and D on the NEXT pass — producing ids
+    // A=w0,C=w1,B=w2,D=w3. The client, hydrating in one instantaneous
+    // pass where A resolves immediately and reveals B before C is ever
+    // reached, produces A=w0,B=w1,C=w2,D=w3 — a mismatch, silently
+    // defeating hydration for every widget after the first divergence.
+    //
+    // Rebuilding from scratch avoids this because FluxHttp caches
+    // resolved GETs by URL (see flux_http.hpp) — on every fresh rebuild,
+    // an already-resolved widget's fetch resolves SYNCHRONOUSLY INLINE,
+    // so its nested content is revealed immediately, in the same
+    // depth-first walk, in the same relative order a single coherent
+    // pass would produce. Only genuinely new, still-unresolved fetches
+    // get deferred to the next wave.
     std::string renderRequest(const std::string &requestedPath,
                               int viewportWidth, int viewportHeight)
     {
         // ── Reset ALL per-request thread_local state ─────────────────────
         fluxSetSSRSyncMode(true);
         fluxHydrationClear();
-        fluxHydrationResetIdCounter();
-        fluxDomResetNodeIdCounter();
-        fluxDomClearCacheForNewRequest();
+        FluxHttp::ssrClearUrlCache(); // ONCE per request — never mid-loop
         Navigator::setSSRRequestPath(requestedPath);
 
         IDomAdapter *adapter = fluxSsrCreateDomAdapter();
@@ -684,27 +710,65 @@ namespace
 
         std::string html;
         {
-            // Scoped so FluxUI (and, transitively, FluxAppWidget/the
-            // whole widget tree) are FULLY destroyed before this
-            // function returns — required for the thread_local
-            // FluxAppWidget::instance_/FluxUI::currentInstance
-            // "one alive instance per thread" invariants (Phase 0) to
-            // hold across the NEXT request on this same thread.
-            FluxUI fluxUI(nullptr);
-            fluxUI.createWindow("", viewportWidth, viewportHeight);
-            fluxUI.build([&]()
-                         { return createApp(&fluxUI); });
+            // Generous but finite — guards against a builder that keeps
+            // producing new pending fetches forever (a bug, not a
+            // supported pattern: createApp() must be a deterministic,
+            // side-effect-free function of already-resolved data, same
+            // assumption every earlier phase already relies on).
+            constexpr int kMaxFetchWaves = 12;
 
-            // One manual render pass — no tick()/main-loop exists on this
-            // platform (see flux_window_headless.cpp). This directly
-            // invokes the exact same onPaint callback flux_core.cpp's
-            // wireCallbacks() already wired up for every other platform.
-            GraphicsContext ctx(viewportWidth, viewportHeight);
-            if (fluxUI.getPlatformWindow().callbacks.onPaint)
-                fluxUI.getPlatformWindow().callbacks.onPaint(
-                    ctx, viewportWidth, viewportHeight);
+            for (int wave = 0;; ++wave)
+            {
+                // Reset every PER-WAVE piece of state, not just per-
+                // request — a fresh FluxUI + fresh widget tree is
+                // constructed below, and stale DOM-node-cache/hydration-
+                // id-counter state from the PREVIOUS wave's (now
+                // destroyed) tree must not leak into this one, for
+                // exactly the same reason it must not leak across
+                // requests (see fluxDomClearCacheForNewRequest()'s
+                // header comment — Widget* addresses get reused the
+                // moment a tree is destroyed).
+                fluxHydrationResetIdCounter();
+                fluxDomResetNodeIdCounter();
+                fluxDomClearCacheForNewRequest();
 
-            html = fluxSsrSerializeDomAdapter(adapter);
+                // Scoped so FluxUI (and the whole widget tree) is FULLY
+                // destroyed before the next wave's — or this function's
+                // — thread_local resets run. Same Phase 0 invariant as
+                // before, just now exercised once per WAVE instead of
+                // once per REQUEST.
+                FluxUI fluxUI(nullptr);
+                fluxUI.createWindow("", viewportWidth, viewportHeight);
+                fluxUI.build([&]()
+                             { return createApp(&fluxUI); });
+
+                int fetched = FluxHttp::ssrDrainPendingFetches();
+                bool stable = (fetched == 0);
+                bool gaveUp = (!stable && wave >= kMaxFetchWaves);
+                if (gaveUp)
+                {
+                    std::cerr << "flux_ssr: WARNING — exceeded "
+                              << kMaxFetchWaves << " fetch waves for '"
+                              << requestedPath
+                              << "'; rendering with whatever resolved so far.\n";
+                }
+
+                if (stable || gaveUp)
+                {
+                    // Final tree — paint and serialize it. No manual
+                    // render pass on intermediate (thrown-away) waves;
+                    // they exist only to discover/resolve fetches, never
+                    // to be painted.
+                    GraphicsContext ctx(viewportWidth, viewportHeight);
+                    if (fluxUI.getPlatformWindow().callbacks.onPaint)
+                        fluxUI.getPlatformWindow().callbacks.onPaint(
+                            ctx, viewportWidth, viewportHeight);
+                    html = fluxSsrSerializeDomAdapter(adapter);
+                    break;
+                }
+                // else: loop again — some fetches are now resolved and
+                // cached; the next rebuild will pick them up inline.
+            }
         }
 
         setActiveDomAdapter(nullptr);
@@ -716,7 +780,7 @@ namespace
 
     void handleConnection(socket_t clientFd)
     {
-// TODO(flux_ssr): recv()'s fixed 8KB buffer silently truncates any
+        // TODO(flux_ssr): recv()'s fixed 8KB buffer silently truncates any
         // request whose request-line + headers exceed it. This is NOT just
         // a theoretical edge case for this server specifically — every
         // rendered page response sets flux_vw/flux_vh cookies (see
@@ -909,7 +973,6 @@ int main(int argc, char **argv)
         if (requested > 0)
             poolSize = static_cast<unsigned int>(requested);
     }
-
 
 #ifdef _WIN32
     WSADATA wsaData;

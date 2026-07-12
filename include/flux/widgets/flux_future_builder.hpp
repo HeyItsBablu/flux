@@ -239,7 +239,23 @@ private:
     if (!builder)
       return;
 
-    child_ = builder(snapshot_);
+        WidgetPtr newChild = builder(snapshot_);
+
+        // Evict the OUTGOING child's DOM node(s) before dropping the
+        // last reference to it — without this, swapping from
+        // LoadingWidget to the real content (or content -> error, etc.)
+        // leaves the old subtree's DOM nodes live and still parented,
+        // visually overlapping the new content at the same absolute
+        // position. Same onDetach()/fluxDomEvictWidget() contract every
+        // other subtree replacement already follows (FluxUI::rebuild(),
+        // NavigatorWidget::_installCurrent()).
+        if (child_ && child_ != newChild)
+        {
+            child_->parent = nullptr;
+            child_->onDetach();
+        }
+
+        child_ = newChild;
     auto c = child_;
     if (!c)
       return;

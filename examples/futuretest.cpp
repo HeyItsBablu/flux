@@ -19,7 +19,7 @@ Post postFromJson(const JsonValue &j)
 }
 
 // ============================================================================
-// Reusable card container
+// Reusable card Flex
 // ============================================================================
 
 static WidgetPtr SectionLabel(const std::string &text)
@@ -36,15 +36,15 @@ static WidgetPtr SectionLabel(const std::string &text)
 
 static WidgetPtr LoadingWidget(const std::string &label)
 {
-    return Row({
+    return Flex({
         Text(label)->setTextColor(Color::fromRGB(140, 140, 140))->setFontSize(13),
     });
 }
 
 static WidgetPtr ErrorWidget(const std::string &err)
 {
-    return Container(
-               Text("Error: " + err)->setTextColor(Color::fromRGB(220, 53, 69)))
+    return Flex({
+               Text("Error: " + err)->setTextColor(Color::fromRGB(220, 53, 69))})
         ->setPadding(8)
         ->setBackgroundColor(Color::fromRGB(255, 235, 238))
         ->setBorderRadius(6);
@@ -61,132 +61,9 @@ public:
     {
         return Flex(
                    {
-                       // ── 4. NetworkImage — URL image fetch
-                       // ─────────────────────
-                       SectionLabel("4 · NetworkImage — image from URL"),
-                       Container(Column({
-                                            Text("Cover photo (picsum.photos):")
-                                                ->setFontSize(12)
-                                                ->setTextColor(
-                                                    Color::fromRGB(100, 100, 100)),
-                                            SizedBox(0, 8),
-                                            Container(NetworkImage(
-                                                          "https://picsum.photos/"
-                                                          "seed/fluxui/600/200")
-                                                          ->setFit(ImageFit::Cover)
 
-                                                          ->setBorderRadius(6))
-                                                ->setWidth(600)
-                                                ->setHeight(200),
-                                        })
-                                     ->setSpacing(0))
-                           ->setHeight(400),
-                       // ── 1. FetchBuilder — raw HTTP string
-                       // ─────────────────────
-                       SectionLabel("1 · FetchBuilder — raw response string"),
-                       Container(
-                           FetchBuilder(
-                               "https://httpbin.org/get",
-                               [](const AsyncSnapshot<std::string> &snap)
-                                   -> WidgetPtr
-                               {
-                                   if (snap.isLoading())
-                                       return LoadingWidget("Fetching raw response…");
-                                   if (snap.hasError())
-                                       return ErrorWidget(snap.error);
-
-                                   // Just show a trimmed slice of the raw JSON text
-                                   std::string preview =
-                                       snap.data.substr(0, 120) + "…";
-                                   return Column(
-                                              {
-                                                  Text("Raw bytes received:")
-                                                      ->setFontWeight(
-                                                          FontWeight::Bold),
-                                                  Text(preview)
-                                                      ->setFontSize(12)
-                                                      ->setTextColor(Color::fromRGB(
-                                                          80, 80, 80)),
-                                                  Text(std::to_string(
-                                                           snap.data.size()) +
-                                                       " bytes total")
-                                                      ->setFontSize(11)
-                                                      ->setTextColor(Color::fromRGB(
-                                                          140, 140, 140)),
-                                              })
-                                       ->setSpacing(6);
-                               }))
-                           ->setHeight(200),
-
-                       SizedBox(0, 16),
-
-                       // ── 2. JsonBuilder — parsed JsonValue tree
-                       // ────────────────
-                       SectionLabel("2 · JsonBuilder — parsed JsonValue"),
-                       Container(
-                           JsonBuilder(
-                               "https://jsonplaceholder.typicode.com/users/1",
-                               [](const AsyncSnapshot<JsonValue> &snap)
-                                   -> WidgetPtr
-                               {
-                                   if (snap.isLoading())
-                                       return LoadingWidget("Fetching user…");
-                                   if (snap.hasError())
-                                       return ErrorWidget(snap.error);
-
-                                   const auto &j = snap.data;
-
-                                   // Safely dig into nested objects
-                                   std::string city =
-                                       j.has("address")
-                                           ? j["address"]["city"].getString()
-                                           : "—";
-                                   std::string company =
-                                       j.has("company")
-                                           ? j["company"]["name"].getString()
-                                           : "—";
-
-                                   return Column(
-                                              {
-                                                  Row({
-                                                      Text(j["name"].getString())
-                                                          ->setFontWeight(
-                                                              FontWeight::Bold)
-                                                          ->setFontSize(15),
-                                                      Text(" · " +
-                                                           j["email"].getString())
-                                                          ->setFontSize(13)
-                                                          ->setTextColor(
-                                                              Color::fromRGB(
-                                                                  100, 100, 100)),
-                                                  }),
-                                                  Row({
-                                                      Text("City: ")
-                                                          ->setFontSize(12)
-                                                          ->setTextColor(
-                                                              Color::fromRGB(
-                                                                  120, 120, 120)),
-                                                      Text(city)->setFontSize(12),
-                                                  }),
-                                                  Row({
-                                                      Text("Company: ")
-                                                          ->setFontSize(12)
-                                                          ->setTextColor(
-                                                              Color::fromRGB(
-                                                                  120, 120, 120)),
-                                                      Text(company)->setFontSize(12),
-                                                  }),
-                                              })
-                                       ->setSpacing(6);
-                               }))
-                           ->setHeight(200),
-
-                       SizedBox(0, 16),
-
-                       // ── 3. TypedJsonBuilder — deserialized Post struct
-                       // ────────
-                       SectionLabel("3 · TypedJsonBuilder — deserialized struct"),
-                       Container(
+                       SectionLabel("TypedJsonBuilder — deserialized struct"),
+                       Flex({
                            TypedJsonBuilder<Post>(
                                "https://jsonplaceholder.typicode.com/posts/1",
                                postFromJson,
@@ -198,9 +75,9 @@ public:
                                        return ErrorWidget(snap.error);
 
                                    const Post &p = snap.data;
-                                   return Column(
+                                   return Flex(
                                               {
-                                                  Row({
+                                                  Flex({
                                                       Text("Post " +
                                                            std::to_string(p.id))
                                                           ->setFontWeight(
@@ -223,8 +100,8 @@ public:
                                                       ->setTextColor(Color::fromRGB(
                                                           80, 80, 80)),
                                               })
-                                       ->setSpacing(8);
-                               }))
+                                       ->setGap(8)->setDirection(FlexDirection::Column);
+                               })})
                            ->setHeight(200),
 
                        SizedBox(0, 16),
