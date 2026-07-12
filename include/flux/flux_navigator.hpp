@@ -10,7 +10,7 @@
 // Setup — one change in createApp():
 //   return FluxApp("Title",
 //     Navigator::init({
-//       {"/"         , [] { return std::make_shared<HomePage>();    }},
+//       {"/"         , [] { return std::make_shared<HomePage>();    }}, 
 //       {"/settings" , [] { return std::make_shared<Settings>();    }},
 //       {"/dashboard", [] { return std::make_shared<Dashboard>();   }},
 //     }, "/")   // <-- initial route name
@@ -543,15 +543,28 @@ public:
 #endif
 
 private:
-    static NavigatorWidget *_host;
-    static std::vector<NavEntry> _stack;
+    // thread_local — SAME rationale as Navigator::_ssrRequestPath below,
+    // and every other piece of per-request state
+    // (FluxUI::currentInstance, the hydration counters, the DOM node
+    // cache). ssr/main.cpp's worker pool runs many requests CONCURRENTLY
+    // across N threads, each independently calling Navigator::init() via
+    // createApp(). Plain (non-thread_local) statics here meant every
+    // worker thread shared ONE _stack/_routes/_host — concurrent
+    // init()/navigate() calls raced on the same std::vector (UB on
+    // concurrent push_back/clear), and _host was a single global
+    // NavigatorWidget* that whichever thread constructed last would
+    // silently "win," letting one request's navigation calls operate on
+    // (or crash against, or use-after-free once that request's FluxUI
+    // was destroyed) a completely different request's widget tree.
+    static thread_local NavigatorWidget *_host;
+    static thread_local std::vector<NavEntry> _stack;
     // Ordered list, not a map — patterns like "/products/:id" aren't
     // exact-match keys, so lookup is now "walk in registration order,
     // return first pattern that matches" rather than a hash lookup.
     // Route count is small in practice (a handful to a few dozen), so the
     // linear scan cost here is negligible.
-    static std::vector<RouteDefinition> _routes;
-    static std::any _pendingArguments;
+    static thread_local std::vector<RouteDefinition> _routes;
+    static thread_local std::any _pendingArguments;
 
     // Returns a pointer to the matching RouteDefinition for a CONCRETE path
     // (e.g. "/products/123", not "/products/:id"), and fills outParams with
@@ -626,10 +639,10 @@ private:
 #endif
 };
 
-inline NavigatorWidget *Navigator::_host = nullptr;
-inline std::vector<NavEntry> Navigator::_stack = {};
-inline std::vector<RouteDefinition> Navigator::_routes = {};
-inline std::any Navigator::_pendingArguments = {};
+inline thread_local NavigatorWidget *Navigator::_host = nullptr;
+inline thread_local std::vector<NavEntry> Navigator::_stack = {};
+inline thread_local std::vector<RouteDefinition> Navigator::_routes = {};
+inline thread_local std::any Navigator::_pendingArguments = {};
 
 #ifdef FLUX_SSR
 inline thread_local std::string Navigator::_ssrRequestPath = "/";
