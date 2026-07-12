@@ -236,7 +236,7 @@ public:
         std::weak_ptr<ImageWidget> weak =
             std::static_pointer_cast<ImageWidget>(shared_from_this());
 
-        FluxHttp::get(url, [weak](HttpResult result)
+        FluxHttp::get(url, [weak, url](HttpResult result)
                       {
             auto self = weak.lock();
             if (!self) return;
@@ -246,7 +246,28 @@ public:
                 return;
             }
             const auto* data = reinterpret_cast<const uint8_t*>(result.body.data());
+#if defined(FLUX_SSR)
+            // Network images link straight through to their original URL
+            // on this backend — the browser fetches `url` itself, exactly
+            // like a plain client-rendered <img src> would. Distinct from
+            // _decodeIntoStaging()'s default path (still used by
+            // _loadAssetAsync/ImageWidget::memory()), which has no real
+            // external URL to fall back to and registers the bytes under
+            // a content-addressed /img/<hash> route instead. Only
+            // dimensions are needed here — the fetched bytes are decoded
+            // for width/height and then discarded, never stored or
+            // re-served by this process.
+            //
+            // v2 TODO: this is the seam where a rehosting/optimization
+            // pass (resize, re-encode, bounded+TTL'd cache, domain
+            // allowlist for SSRF safety) would replace the direct
+            // pass-through — see the registry's process-lifetime,
+            // never-evicted cache for why that needs its own design
+            // pass rather than reusing fluxImageRegistryRegister() as-is.
+            bool ok = self->_platformDecodeNetwork(data, (int)result.body.size(), url);
+#else
             bool ok = self->_decodeIntoStaging(data, (int)result.body.size());
+#endif
             if (!ok) self->_setLoadState(ImageLoadState::Error);
             self->_scheduleRebuild(); }, postToUI);
     }
