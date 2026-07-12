@@ -3,19 +3,6 @@
 // control aesthetic. All playback state is internal — app.cpp just instantiates
 // it.
 //
-// Usage:
-//   AudioPlayer("audio/sample.mp3")
-//       ->setWidth(380)
-//
-//   AudioPlayer()
-//       ->setUrl("https://example.com/audio.mp3")
-//       ->setArtwork(ImageWidget::network("https://example.com/cover.jpg"))
-//       ->setWidth(380)
-//
-//   AudioPlayer()
-//       ->setMemory(bytes)               // play from std::vector<uint8_t>
-//       ->setMemory(ptr, len)            // play from raw pointer + length
-//       ->setWidth(380)
 //
 #pragma once
 

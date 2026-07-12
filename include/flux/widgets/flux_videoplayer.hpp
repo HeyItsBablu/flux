@@ -4,20 +4,7 @@
 // Platform differences are isolated to render(), private frame-storage
 // members, and a few small helpers — everything else is written once.
 //
-// Usage (path):
-//   VideoPlayer("video/sample.mp4")->setWidth(480)->setHeight(270)
-//
-// Usage (URL):
-//   VideoPlayer("https://example.com/video.mp4")->setWidth(480)->setHeight(270)
-//
-// Usage (memory):
-//   VideoPlayer(bytes)->setWidth(480)->setHeight(270)
-//   VideoPlayer(ptr, len)->setWidth(480)->setHeight(270)
-//
-// Usage (empty, configure later):
-//   VideoPlayer()->setUrl("https://example.com/video.mp4")->setWidth(480)->setHeight(270)
-//
-//
+
 #pragma once
 
 #include "../flux_http.hpp"
@@ -312,11 +299,24 @@ public:
         applyConstraints();
         needsLayout = false;
 
+#ifndef FLUX_SSR
+        // Skipped entirely under SSR: opening a Url/Memory source means
+        // downloading the full video and writing it to a temp file
+        // (_loadFromUrl -> _playFromMemory -> VP_writeTempFile) before
+        // ever calling FluxVideo::open() — and the SSR stub backend
+        // (flux_video_ssr.cpp) discards that anyway, while render()'s
+        // platform blit chain has no FLUX_SSR branch to draw the result
+        // even if it succeeded. Every SSR render would otherwise pay for
+        // a full video download + disk write that can never be seen.
+        // The widget still lays out and paints its placeholder bar/
+        // black-box UI normally (see render()) — only the actual source
+        // open is skipped.
         if (!_opened)
         {
             _opened = true;
             _openVideoSource();
         }
+#endif
     }
 
     // =========================================================================

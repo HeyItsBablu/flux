@@ -20,6 +20,8 @@ set(FLUX_SSR_SOURCES
     ${CMAKE_SOURCE_DIR}/src/flux_font_ssr.cpp
     ${CMAKE_SOURCE_DIR}/src/flux_dom_adapter_stringbuilder.cpp
     ${CMAKE_SOURCE_DIR}/src/flux_image_ssr.cpp
+    ${CMAKE_SOURCE_DIR}/src/flux_audio_ssr.cpp
+    ${CMAKE_SOURCE_DIR}/src/flux_video_ssr.cpp
 
 )
 
