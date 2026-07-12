@@ -105,6 +105,36 @@ public:
                            ->setHeight(200),
 
                        SizedBox(0, 16),
+                       // ── Parallel-fetch test #2 ──────────────────────────
+                       // Independent, artificially slow (2s) fetch, unrelated
+                       // to the post above. If ssrDrainPendingFetches() is
+                       // genuinely parallel within a wave, adding this should
+                       // NOT roughly double total SSR render time — both
+                       // requests get dispatched together in the same wave
+                       // and resolved on separate threads. If it DOES double
+                       // (~4s instead of ~2s), the two fetches are being
+                       // resolved sequentially, not concurrently. Remove
+                       // this block once the timing test is done.
+                       SectionLabel("FetchBuilder — parallel slow fetch"),
+                       Flex({
+                           FetchBuilder(
+                               "https://httpbingo.org/delay/2",
+                               [](const AsyncSnapshot<std::string> &snap) -> WidgetPtr
+                               {
+                                   if (snap.isLoading())
+                                       return LoadingWidget("Fetching slow endpoint…");
+                                   if (snap.hasError())
+                                       return ErrorWidget(snap.error);
+                                   return Text("Slow fetch resolved (" +
+                                               std::to_string(snap.data.size()) +
+                                               " bytes)")
+                                       ->setFontSize(12)
+                                       ->setTextColor(Color::fromRGB(30, 120, 30));
+                               })})
+                           ->setHeight(40),
+
+                       SizedBox(0, 16),
+
 
                    })
 
