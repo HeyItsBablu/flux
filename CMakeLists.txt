@@ -149,12 +149,22 @@ endif()
 # ============================================================================
 # stb  (local — header-only + single implementation file)
 # ============================================================================
-
-add_library(stb STATIC src/stb_impl.cpp)
-target_include_directories(stb PUBLIC
+# Headers-only interface target — no compiled implementation. Exists
+# separately from the `stb` STATIC target below so consumers that provide
+# their own STB_*_IMPLEMENTATION in a self-contained TU (flux_ssr's
+# flux_font_ssr.cpp / flux_image_ssr.cpp) can get the include path
+# WITHOUT linking stb_impl.cpp.o's compiled symbols into their binary.
+# Linking the compiled `stb` target there is what silently relies on
+# "nothing else in the link needs stb_impl.cpp.o" to avoid duplicate
+# stbi_*/stbtt_* symbols — see ssr/CMakeLists.txt's comment.
+add_library(stb_headers INTERFACE)
+target_include_directories(stb_headers INTERFACE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/stb>
         $<INSTALL_INTERFACE:include>
 )
+
+add_library(stb STATIC src/stb_impl.cpp)
+target_link_libraries(stb PUBLIC stb_headers)
 
 # ============================================================================
 # dr_libs  (local — header-only + single implementation file)
@@ -538,7 +548,7 @@ if(NOT ANDROID AND NOT EMSCRIPTEN)
     include(GNUInstallDirs)
     include(CMakePackageConfigHelpers)
 
-    set(FLUX_INSTALL_TARGETS flux stb dr)
+    set(FLUX_INSTALL_TARGETS flux stb stb_headers dr)
 
     install(TARGETS ${FLUX_INSTALL_TARGETS}
             EXPORT  fluxTargets

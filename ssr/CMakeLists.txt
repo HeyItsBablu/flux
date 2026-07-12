@@ -137,10 +137,8 @@ endif()
 # Link libraries
 # ============================================================================
 
-# stb (vendored, header-only truetype + image impl) — already built as a
-# target by the root CMakeLists.txt. This replaces the Cairo/Pango link
-# entirely; no system library, no pkg-config, no vcpkg needed.
-target_link_libraries(flux_ssr PRIVATE stb)
+
+target_link_libraries(flux_ssr PRIVATE stb_headers)
 
 # Native HTTP fetch (FluxHttp's libcurl path, used in synchronous SSR mode
 # — see flux_http.hpp's fluxSetSSRSyncMode). CURL::libcurl is already
