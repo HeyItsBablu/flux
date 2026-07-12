@@ -1,3 +1,4 @@
+// ssr/main.cpp
 #ifdef FLUX_SSR
 
 #include "flux/flux.hpp"
@@ -13,6 +14,11 @@
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <algorithm>
+#include <condition_variable>
+#include <queue>
+#include <thread>
+#include <vector>
 
 // ── Socket platform shim ─────────────────────────────────────────────────
 // Winsock2 needs WSAStartup/WSACleanup, a SOCKET handle type instead of
@@ -46,6 +52,58 @@ static void closeSocket(socket_t s) { close(s); }
 
 namespace
 {
+
+    // ── Connection queue — accept() thread hands sockets off to a fixed
+    // worker pool. Each worker still processes exactly one connection at
+    // a time, start to finish, via handleConnection() — the invariant
+    // every thread_local reset in renderRequest() depends on (Phase 0/4)
+    // is "one thread, one request, fully sequential." Growing from 1
+    // thread to N doesn't change that invariant, it just makes it true N
+    // times over instead of once.
+    class ConnectionQueue
+    {
+    public:
+        void push(socket_t fd)
+        {
+            {
+                std::lock_guard<std::mutex> lock(mu_);
+                queue_.push(fd);
+            }
+            cv_.notify_one();
+        }
+
+        // Blocks until a connection is available, or shutdown() has been
+        // called and the queue has drained — in which case it returns
+        // kInvalidSocket, which workerLoop() below treats as "exit."
+        // Never a false sentinel: the accept loop only ever pushes
+        // sockets it already checked are valid.
+        socket_t pop()
+        {
+            std::unique_lock<std::mutex> lock(mu_);
+            cv_.wait(lock, [this]
+                     { return !queue_.empty() || shuttingDown_; });
+            if (queue_.empty())
+                return kInvalidSocket;
+            socket_t fd = queue_.front();
+            queue_.pop();
+            return fd;
+        }
+
+        void shutdown()
+        {
+            {
+                std::lock_guard<std::mutex> lock(mu_);
+                shuttingDown_ = true;
+            }
+            cv_.notify_all();
+        }
+
+    private:
+        std::mutex mu_;
+        std::condition_variable cv_;
+        std::queue<socket_t> queue_;
+        bool shuttingDown_ = false;
+    };
 
     std::string readFileBinary(const std::string &path)
     {
@@ -658,6 +716,51 @@ namespace
 
     void handleConnection(socket_t clientFd)
     {
+// TODO(flux_ssr): recv()'s fixed 8KB buffer silently truncates any
+        // request whose request-line + headers exceed it. This is NOT just
+        // a theoretical edge case for this server specifically — every
+        // rendered page response sets flux_vw/flux_vh cookies (see
+        // wrapFullPage()'s inline bootstrap script), and cookies only ever
+        // grow as more get added (session tokens, feature flags, etc. from
+        // whatever app is layered on top). A client that has accumulated
+        // enough cookies, or sends an unusually large User-Agent/Referer,
+        // can silently push the real Cookie header (or the request line
+        // itself) past this buffer with NO error raised — parseHeaders()
+        // just sees a truncated blob and either drops the tail of the
+        // header list or, worse, misparses a truncated line as if it were
+        // complete. A truncated Cookie header means resolveViewport()
+        // silently falls through to Client Hints/the hardcoded default
+        // instead of erroring, so this fails quietly as a viewport
+        // regression rather than loudly as a bug.
+        //
+        // Concretely wrong today:
+        //   1. Single fixed-size buf[8192], single recv() call — no loop.
+        //      TCP makes no guarette that one recv() returns the whole
+        //      request even if it WOULD fit in 8KB; a slow/fragmenting
+        //      client can split it across multiple packets, and this
+        //      code has no logic to keep reading until the blank-line
+        //      end-of-headers marker is actually seen.
+        //   2. No Content-Length handling at all — if this server ever
+        //      accepts request bodies (POST/PUT from a future API route,
+        //      form submission, etc.), there's no logic to read the body
+        //      past the headers, buffered or not.
+        //   3. No cap/reject path — if a request genuinely exceeds a
+        //      reasonable size, there's no explicit 431/413 response;
+        //      it just silently mishandles it.
+        //
+        // Fix shape: loop recv() into a growable std::string until the
+        // "\r\n\r\n" end-of-headers marker is found (or a hard size cap
+        // is hit, at which point return a real 431 Request Header Fields
+        // Too Large instead of silently truncating); then, if
+        // Content-Length is present, continue reading exactly that many
+        // additional bytes as the body. Needs a max-size cap regardless
+        // (e.g. 64KB headers / some configurable body limit) so a
+        // malicious or buggy client can't hold a worker thread hostage
+        // memory-growing forever — especially relevant now that
+        // handleConnection() runs on a fixed-size worker pool (see
+        // ConnectionQueue/workerLoop above): one stuck/slow-reading
+        // connection ties up one worker's throughput, not just one
+        // request's.
         char buf[8192];
         int n = recv(clientFd, buf, sizeof(buf) - 1, 0);
         if (n <= 0)
@@ -765,11 +868,48 @@ namespace
         send(clientFd, out.c_str(), static_cast<int>(out.size()), 0);
         closeSocket(clientFd);
     }
+
+    // ── Worker entry point ────────────────────────────────────────────────
+    //
+    // Pulls one connection at a time off the shared queue and handles it
+    // fully before asking for the next — never processes two connections
+    // concurrently on the same thread. This is what keeps every
+    // thread_local reset in renderRequest() (fluxHydrationClear(),
+    // fluxDomClearCacheForNewRequest(), Navigator::setSSRRequestPath(),
+    // etc) sufficient without any changes: each of N worker threads is
+    // its own independent instance of the exact same "one thread handles
+    // requests sequentially" world the single-threaded version already
+    // relied on.
+    void workerLoop(ConnectionQueue &queue)
+    {
+        for (;;)
+        {
+            socket_t fd = queue.pop();
+            if (fd == kInvalidSocket)
+                return; // shutdown() was called and the queue drained
+            handleConnection(fd);
+        }
+    }
 }
 
 int main(int argc, char **argv)
 {
     int port = (argc > 1) ? std::atoi(argv[1]) : 8080;
+
+    // Worker count: hardware_concurrency() by default, optionally
+    // overridden via argv[2] (e.g. `flux_ssr 8080 16`). Falls back to 4
+    // if the platform can't report a core count (hardware_concurrency()
+    // is allowed to return 0).
+    unsigned int poolSize = std::thread::hardware_concurrency();
+    if (poolSize == 0)
+        poolSize = 4;
+    if (argc > 2)
+    {
+        int requested = std::atoi(argv[2]);
+        if (requested > 0)
+            poolSize = static_cast<unsigned int>(requested);
+    }
+
 
 #ifdef _WIN32
     WSADATA wsaData;
@@ -809,19 +949,33 @@ int main(int argc, char **argv)
     listen(listenFd, 16);
 
     std::cout << "flux_ssr listening on http://0.0.0.0:" << port
-              << " (single-threaded — see Phase 6 for concurrency)\n";
+              << " (" << poolSize << " worker threads)\n";
 
-    // Sequential accept loop — deliberately simple. Every request is
-    // fully handled, start to finish, on this one thread before the next
-    // accept() runs, which is exactly what makes the thread_local reset
-    // discipline above sufficient for correctness right now.
+    ConnectionQueue queue;
+    std::vector<std::thread> workers;
+    workers.reserve(poolSize);
+    for (unsigned int i = 0; i < poolSize; ++i)
+        workers.emplace_back(workerLoop, std::ref(queue));
+
+    // Accept loop stays single-threaded and does nothing but dispatch —
+    // accept() itself is cheap and never blocks on a slow render, so one
+    // thread here is not a bottleneck. All the actual work (layout,
+    // paint, HTTP fetch) happens in workerLoop() on the pool.
     for (;;)
     {
         socket_t clientFd = accept(listenFd, nullptr, nullptr);
         if (clientFd == kInvalidSocket)
             continue;
-        handleConnection(clientFd);
+        queue.push(clientFd);
     }
+
+    // Unreachable under the current infinite accept loop (no signal
+    // handling / clean shutdown path exists yet) — left in place so a
+    // future SIGINT/SIGTERM handler has a correct shutdown sequence to
+    // call into rather than needing to invent one from scratch.
+    queue.shutdown();
+    for (auto &t : workers)
+        t.join();
 
     FluxHttp::globalCleanup();
 #ifdef _WIN32
