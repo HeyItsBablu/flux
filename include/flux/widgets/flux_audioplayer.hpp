@@ -12,6 +12,23 @@
 #include "flux_icons.hpp"
 #include "flux_image.hpp"
 
+// DOM-node access for the real <audio> element path — same approach as
+// VideoPlayerWidget. Needed on both the live browser DOM renderer and
+// SSR's string-builder adapter.
+#if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
+#include "flux/flux_dom_adapter.hpp"
+#endif
+
+#if defined(FLUX_SSR)
+inline std::string AP_resolveSsrAssetUrl(const std::string &localPath)
+{
+  // Same convention as VP_resolveSsrAssetUrl in flux_videoplayer.hpp —
+  // widget-supplied paths are relative to FLUX_SSR_ASSETS_DIR, served
+  // under /assets/ by ssr/main.cpp.
+  return std::string("/assets/") + localPath;
+}
+#endif
+
 #ifdef __ANDROID__
 std::string FluxAndroid_getFilesDir();
 #endif
@@ -187,6 +204,12 @@ public:
   void render(GraphicsContext &ctx, FontCache &fontCache) override
   {
 
+#if !defined(__EMSCRIPTEN__) && !defined(FLUX_SSR)
+    // Native platforms only — on the DOM/SSR renderer, _progress/_playing
+    // are driven entirely by onDomMediaTimeUpdate/Play/Pause/Ended below,
+    // fed by the real <audio> element's own events. FluxAudio::get() has
+    // no real backend there (SSR: inert stub; web: no native decode
+    // pipeline at all), so polling it would just read stale zeros.
     auto &audio = FluxAudio::get();
     if (_playing)
     {
@@ -197,12 +220,42 @@ public:
         _finished = (audio.getProgress() >= 0.999f);
       }
     }
+#endif
 
     Painter p(ctx, this);
 
+#if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
+    // ── Real <audio> element ──────────────────────────────────────────
+    // Hidden — this widget paints its own bar/track/icons via Painter,
+    // same as every other platform. The element exists purely as the
+    // actual playback engine and event source.
+    if (IDomAdapter *adapter = getActiveDomAdapter())
+    {
+      DomNodeHandle anode = fluxDomEnsureNode(this, "audio", "audioEl");
+      adapter->setStyle(anode, "display", "none");
+      adapter->bindMediaEvents(anode, this);
+      _domAudioNode = anode;
+
+      std::string resolvedUrl;
+      if (_sourceType == AudioSourceType::Url && !_sourceUrl.empty())
+        resolvedUrl = _sourceUrl;
+#if defined(FLUX_SSR)
+      else if (_sourceType == AudioSourceType::Path && !audioPath.empty())
+        resolvedUrl = AP_resolveSsrAssetUrl(audioPath);
+#endif
+      // Memory sources have no fetchable URL for a real <audio src> to
+      // point at — same limitation VideoPlayerWidget accepts for now.
+      if (!resolvedUrl.empty() && resolvedUrl != _domAudioSrcApplied)
+      {
+        adapter->setAttr(anode, "src", resolvedUrl);
+        _domAudioSrcApplied = resolvedUrl;
+      }
+    }
+#endif
+
     // ── Pill background ──────────────────────────────────────────────────
     p.fillRoundedRectGDI(x, y, width, height, pillarRadius * 2, colBackground,
-                         colBorder, 1);
+                         colBorder, 1, "pillBg");
 
     int cx = x;
     int midY = y + height / 2;
@@ -230,7 +283,7 @@ public:
 
     Color btnBg = _hovPlay ? Color::fromRGB(210, 210, 210) : colBackground;
     p.fillRoundedRectGDI(btnX, btnY, playBtnSize, playBtnSize, playBtnSize,
-                         btnBg, btnBg, 0);
+                         btnBg, btnBg, 0, "playBtnBg");
 
     {
       Color iconCol = _hovPlay ? colIconHover : colIconNormal;
@@ -242,13 +295,18 @@ public:
       std::wstring glyphStr(1, glyph);
 
       p.drawText(glyphStr, btnX, btnY, playBtnSize, playBtnSize,
-                 iconFont, iconCol, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                 iconFont, iconCol, DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+                 "playIcon");
     }
 
     cx += playBtnSize + 6;
 
     // ── Time display ─────────────────────────────────────────────────────
+#if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
+    float dur = _domAudioDuration;
+#else
     float dur = audio.getDurationSeconds();
+#endif
     float pos = _progress * dur;
     std::string timeStr = AP_formatTime(pos) + " / " + AP_formatTime(dur);
 
@@ -258,7 +316,7 @@ public:
     p.measureText(toWideString(timeStr), timeFont, tw, th);
 
     p.drawText(toWideString(timeStr), cx, y, tw + 4, height, timeFont, colText,
-               DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+               DT_LEFT | DT_VCENTER | DT_SINGLELINE, "timestamp");
     cx += tw + 8;
 
     // ── Seek track ───────────────────────────────────────────────────────
@@ -270,19 +328,20 @@ public:
     _trackRect = {trackLeft, midY - 8, trackW, 16};
 
     p.fillRoundedRectGDI(trackLeft, midY - trackHeight / 2, trackW, trackHeight,
-                         trackHeight, colTrackBg, colTrackBg, 0);
+                         trackHeight, colTrackBg, colTrackBg, 0, "trackBg");
 
     int fillW = (int)(_progress * trackW);
     if (fillW > 0)
     {
       p.fillRoundedRectGDI(trackLeft, midY - trackHeight / 2, fillW,
-                           trackHeight, trackHeight, colTrackFill, colTrackFill, 0);
+                           trackHeight, trackHeight, colTrackFill, colTrackFill, 0,
+                           "trackFill");
     }
 
     int thumbX = trackLeft + fillW;
     Color thumbCol = _hovTrack ? colThumbHover : colThumb;
     p.drawEllipse(thumbX - thumbRadius, midY - thumbRadius,
-                  thumbRadius * 2, thumbRadius * 2, thumbCol, thumbCol, 0);
+                  thumbRadius * 2, thumbRadius * 2, thumbCol, thumbCol, 0, "thumb");
 
     cx = trackRight + 4;
 
@@ -301,7 +360,8 @@ public:
 
       p.drawText(glyphStr, _volIconRect.x, _volIconRect.y,
                  _volIconRect.w, _volIconRect.h,
-                 iconFont, volCol, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                 iconFont, volCol, DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+                 "volIcon");
 
       cx += iconW + 4;
     }
@@ -320,7 +380,8 @@ public:
 
       p.drawText(glyphStr, _dotsIconRect.x, _dotsIconRect.y,
                  _dotsIconRect.w, _dotsIconRect.h,
-                 iconFont, dotsCol, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                 iconFont, dotsCol, DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+                 "dotsIcon");
     }
 
     needsPaint = false;
@@ -407,6 +468,48 @@ public:
     return true;
   }
 
+#if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
+  void onDomMediaTimeUpdate(float currentTimeSec, float durationSec) override
+  {
+    _domAudioDuration = durationSec;
+    if (durationSec > 0.f)
+      _progress = std::max(0.f, std::min(1.f, currentTimeSec / durationSec));
+    _requestRepaint();
+  }
+  void onDomMediaPlay() override
+  {
+    _playing = true;
+    _finished = false;
+    _requestRepaint();
+  }
+  void onDomMediaPause() override
+  {
+    _playing = false;
+    _requestRepaint();
+  }
+  void onDomMediaEnded() override
+  {
+    _playing = false;
+    _finished = true;
+    _progress = 1.f;
+    _requestRepaint();
+  }
+#endif
+
+private:
+#if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
+  // Native media events arrive outside FluxUI's normal input-driven
+  // render pass — markNeedsPaint() alone only sets a dirty flag the
+  // next INPUT event happens to pick up. invalidateWidget() is what
+  // actually schedules a real repaint here.
+  void _requestRepaint()
+  {
+    markNeedsPaint();
+    if (auto *ui = FluxUI::getCurrentInstance())
+      ui->invalidateWidget(x, y, width, height);
+  }
+#endif
+
 private:
   int _requestedWidth = 0;
 
@@ -462,6 +565,17 @@ private:
       _timerId = 0;
     }
   }
+#if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
+  // Real <audio> element backing this widget on the DOM/SSR renderer.
+  // Same three-field pattern as VideoPlayerWidget: node handle, the
+  // last src actually written (so render() doesn't restart playback
+  // by re-assigning an identical src every frame), and the real
+  // element's duration (FluxAudio::getDurationSeconds() is a
+  // permanent 0.f stub here, so this is the actual source of truth).
+  DomNodeHandle _domAudioNode = kInvalidDomNode;
+  std::string _domAudioSrcApplied;
+  float _domAudioDuration = 0.f;
+#endif
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   std::shared_ptr<AudioPlayerWidget> self()
@@ -480,12 +594,32 @@ private:
     NativeFont font = fontCache.getFont("Segoe UI", timeFontSize, FontWeight::Normal);
     int avail = (x + width) - barStartX - 8;
     p.drawTextA(msg, barStartX + 4, y, avail, height, font, col,
-                DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+                DT_LEFT | DT_VCENTER | DT_SINGLELINE, "statusText");
   }
 
   // ── Play / Pause toggle ────────────────────────────────────────────────────
   void _togglePlayPause()
   {
+#if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
+    if (IDomAdapter *adapter = getActiveDomAdapter())
+    {
+      if (_domAudioNode == kInvalidDomNode)
+        return; // element not created yet this frame
+      if (_finished.load())
+      {
+        adapter->seekNode(_domAudioNode, 0.f);
+        adapter->playNode(_domAudioNode);
+        // _playing/_finished flip via onDomMediaPlay() once the
+        // browser's real 'play' event fires — single source of truth.
+        return;
+      }
+      if (_playing.load())
+        adapter->pauseNode(_domAudioNode);
+      else
+        adapter->playNode(_domAudioNode);
+      return;
+    }
+#endif
     auto &audio = FluxAudio::get();
 
     // If a URL or memory source hasn't been loaded yet, kick off loading first
@@ -696,6 +830,23 @@ private:
     t = std::max(0.f, std::min(1.f, t));
     _progress = t;
 
+#if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
+    if (IDomAdapter *adapter = getActiveDomAdapter())
+    {
+      if (_domAudioNode != kInvalidDomNode)
+      {
+        adapter->seekNode(_domAudioNode, t * _domAudioDuration);
+        if (_finished.load() && t < 0.999f)
+        {
+          _finished = false;
+          adapter->playNode(_domAudioNode);
+        }
+      }
+      markNeedsPaint();
+      return;
+    }
+#endif
+
     auto &audio = FluxAudio::get();
     bool wasPaused = audio.isPaused();
     audio.seekToProgress(t);
@@ -709,6 +860,15 @@ private:
   // ── Mute / unmute ─────────────────────────────────────────────────────────
   void _toggleMute()
   {
+#if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
+    if (IDomAdapter *adapter = getActiveDomAdapter())
+    {
+      _muted = !_muted;
+      if (_domAudioNode != kInvalidDomNode)
+        adapter->setBoolProperty(_domAudioNode, "muted", _muted);
+      return;
+    }
+#endif
     auto &audio = FluxAudio::get();
     if (_muted)
     {

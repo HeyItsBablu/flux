@@ -5,18 +5,12 @@ class MyApp : public Widget
 public:
   WidgetPtr build() override
   {
-    return Flex(
-               {VideoPlayer("sample.mp4")
-                    ->setWidth(380)
-                    ->setHeight(270) // 16:9
-                    ->setAutoPlay(false)
 
-               })
-        ->setScrollable(true)
-        ->setDirection(FlexDirection::Column) // base (mobile): stacked
-        ->setGap(8)
-        ->setPadding(16)
-        ->setAlignItems(AlignItems::Stretch)
+    return Flex({AudioPlayer("TumMile.mp3")
+                     ->setWidth(280)})
+        ->setBackgroundColor(Color::fromRGB(255, 180, 180))
+        ->setAlignItems(AlignItems::Center)
+        ->setJustifyContent(JustifyContent::Center)
         ->setWidthMode(SizeMode::Full)
         ->setHeightMode(SizeMode::Full);
   }
