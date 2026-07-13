@@ -569,7 +569,6 @@ private:
             return;
         }
 
-
 #ifdef __EMSCRIPTEN__
         FILE *f = fopen(path.c_str(), "rb");
         if (!f)
@@ -676,7 +675,16 @@ private:
     static std::vector<uint8_t> _readFileBytesSync(const std::string &path)
     {
         std::vector<uint8_t> buf;
-        FILE *f = fopen(path.c_str(), "rb");
+#if defined(FLUX_SSR)
+        // Mirror ssr/main.cpp's tryServeAsset() resolution — the SSR
+        // process's CWD has no defined relationship to the assets folder,
+        // unlike Emscripten's --preload-file mount at the virtual FS root.
+        static const std::string dir = FLUX_SSR_ASSETS_DIR;
+        std::string resolved = (!path.empty() && path[0] == '/') ? path : dir + "/" + path;
+#else
+        const std::string &resolved = path;
+#endif
+        FILE *f = fopen(resolved.c_str(), "rb");
         if (!f)
             return buf;
         fseek(f, 0, SEEK_END);
@@ -716,7 +724,7 @@ private:
     bool _decodeIntoStaging(const uint8_t *data, int len)
     {
 #if defined(FLUX_SSR)
-    return _platformDecode(data, len); // header-only dimension parse + registry
+        return _platformDecode(data, len); // header-only dimension parse + registry
 #elif defined(_WIN32)
         return _platformDecode(data, len);
 #else
