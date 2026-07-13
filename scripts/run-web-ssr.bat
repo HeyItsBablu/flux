@@ -43,6 +43,7 @@ if not exist "%SSR_BUILD_DIR%\CMakeCache.txt" (
     echo [run-web-ssr] Step 2/3: configuring flux_ssr...
     cmake -B build\ssr ^
         -DFLUX_BUILD_SSR=ON ^
+        -DFLUX_BUILD_DESKTOP=OFF ^
         -DFLUX_SSR_WEB_BUNDLE_DIR="%REPO_ROOT%\build\web\web"
     if errorlevel 1 (
         echo [run-web-ssr] ERROR: cmake configure failed for build\ssr.

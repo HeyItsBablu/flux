@@ -30,6 +30,39 @@ endif()
 option(FLUX_BUILD_EXAMPLES "Build example applications" OFF)
 option(FLUX_BUILD_TESTS    "Build tests"                OFF)
 
+
+# ============================================================================
+# Desktop library toggle
+#
+# The `flux` target (and everything downstream of it — linux/windows/macos
+# platform apps, cli) pulls in SDL2 + Cairo + Pango + ALSA + FFmpeg on
+# native Linux via find_package/pkg_check_modules below. flux_ssr
+# (ssr/CMakeLists.txt) does NOT link against `flux` at all — it hand-picks
+# its own DOM/stb-based source list specifically so a thin headless SSR
+# deployment never needs a desktop's worth of system packages installed.
+#
+# Turning this OFF only has an effect on plain native Linux — Windows,
+# macOS, Android, and Emscripten builds all still need `flux` itself (the
+# platform app IS the flux library there), so FLUX_NEED_DESKTOP_LIB below
+# forces it back on for them regardless of this setting. This flag exists
+# purely so `cmake -DFLUX_BUILD_SSR=ON -DFLUX_BUILD_DESKTOP=OFF` on Linux
+# can configure and build flux_ssr without SDL2/Cairo/Pango/ALSA/FFmpeg
+# ever being searched for.
+# ============================================================================
+option(FLUX_BUILD_DESKTOP "Build the native desktop flux library, platform app, and cli (requires SDL2/Cairo/Pango/ALSA/FFmpeg on Linux)" ON)
+
+# True whenever the flux library is actually needed: either the desktop
+# build was explicitly requested, or the current platform has no other way
+# to produce an app at all (Windows/macOS/Android/Emscripten all build
+# their platform app FROM the flux library — there is no SSR-only path for
+# them the way there is on native Linux).
+if(FLUX_BUILD_DESKTOP OR NOT (UNIX AND NOT APPLE AND NOT ANDROID AND NOT EMSCRIPTEN))
+    set(FLUX_NEED_DESKTOP_LIB TRUE)
+else()
+    set(FLUX_NEED_DESKTOP_LIB FALSE)
+    message(STATUS "FLUX_BUILD_DESKTOP=OFF on native Linux — skipping SDL2/Cairo/Pango/ALSA/FFmpeg and the `flux` desktop library entirely. Only flux_ssr (if FLUX_BUILD_SSR=ON) will be built.")
+endif()
+
 # ============================================================================
 # Web renderer selection
 #
@@ -182,7 +215,7 @@ target_include_directories(dr PUBLIC
 # cross-compiling to web, so the guard is required.
 # ============================================================================
 
-if(UNIX AND NOT APPLE AND NOT ANDROID AND NOT EMSCRIPTEN)
+if(FLUX_NEED_DESKTOP_LIB AND UNIX AND NOT APPLE AND NOT ANDROID AND NOT EMSCRIPTEN)
     find_package(SDL2   REQUIRED)
     find_package(OpenGL REQUIRED)
     find_package(JPEG   REQUIRED)
@@ -221,6 +254,8 @@ endif()
 # FluxUI library sources
 # ============================================================================
 
+if(FLUX_NEED_DESKTOP_LIB)
+
 file(GLOB_RECURSE FLUX_SOURCES CONFIGURE_DEPENDS src/*.cpp)
 
 if(APPLE)
@@ -233,6 +268,8 @@ if(APPLE)
     endforeach()
     list(APPEND FLUX_SOURCES ${FLUX_MM_SOURCES})
 endif()
+
+endif() # FLUX_NEED_DESKTOP_LIB
 
 # ── Platform source exclusions ────────────────────────────────────────────────
 # Order matters: most-specific first.
@@ -514,7 +551,7 @@ endif()
 # Tests excluded on web — no native test runner available
 # ============================================================================
 
-if(NOT ANDROID)
+if(NOT ANDROID AND FLUX_NEED_DESKTOP_LIB)
     if(EMSCRIPTEN)
         add_subdirectory(web)
     elseif(WIN32)
@@ -533,10 +570,13 @@ if(NOT ANDROID)
         enable_testing()
         add_subdirectory(tests)
     endif()
+endif()
 
-    if(FLUX_BUILD_SSR AND NOT EMSCRIPTEN)
-        add_subdirectory(ssr)
-    endif()
+# flux_ssr never links against `flux` (see ssr/CMakeLists.txt) — deliberately
+# OUTSIDE the FLUX_NEED_DESKTOP_LIB guard above, so `-DFLUX_BUILD_SSR=ON
+# -DFLUX_BUILD_DESKTOP=OFF` builds flux_ssr with NO desktop deps at all.
+if(NOT ANDROID AND FLUX_BUILD_SSR AND NOT EMSCRIPTEN)
+    add_subdirectory(ssr)
 endif()
 
 # ============================================================================
@@ -548,7 +588,10 @@ if(NOT ANDROID AND NOT EMSCRIPTEN)
     include(GNUInstallDirs)
     include(CMakePackageConfigHelpers)
 
-    set(FLUX_INSTALL_TARGETS flux stb stb_headers dr)
+    set(FLUX_INSTALL_TARGETS stb stb_headers dr)
+    if(FLUX_NEED_DESKTOP_LIB)
+        list(APPEND FLUX_INSTALL_TARGETS flux)
+    endif()
 
     install(TARGETS ${FLUX_INSTALL_TARGETS}
             EXPORT  fluxTargets
