@@ -66,7 +66,7 @@ struct CairoSave
 // ============================================================================
 
 void Painter::fillRoundedRect(int x, int y, int w, int h,
-                              int radius, Color color)
+                              int radius, Color color, const char *slot)
 {
     cairo_t *cr = ctx.cr;
     CairoSave save(cr);
@@ -108,7 +108,7 @@ void Painter::drawBorder(int x, int y, int w, int h,
 // Painter::fillRect
 // ============================================================================
 
-void Painter::fillRect(int x, int y, int w, int h, Color color)
+void Painter::fillRect(int x, int y, int w, int h, Color color, const char *slot)
 {
     cairo_t *cr = ctx.cr;
     CairoSave save(cr);
@@ -156,7 +156,7 @@ void Painter::fillRoundedRectGDI(int x, int y, int w, int h, int radius,
 // ============================================================================
 
 void Painter::drawEllipse(int x, int y, int w, int h,
-                          Color fill, Color stroke, int strokeWidth)
+                          Color fill, Color stroke, int strokeWidth, const char *slot)
 {
     cairo_t *cr = ctx.cr;
     CairoSave save(cr);
@@ -210,7 +210,7 @@ void Painter::drawLine(int x1, int y1, int x2, int y2,
 
 void Painter::drawText(const std::wstring &text,
                        int x, int y, int w, int h,
-                       NativeFont font, Color color, UINT format)
+                       NativeFont font, Color color, UINT format, const char *slot)
 {
     if (text.empty())
         return;
@@ -245,7 +245,7 @@ void Painter::drawText(const std::wstring &text,
 
 void Painter::drawTextA(const std::string &text,
                         int x, int y, int w, int h,
-                        NativeFont font, Color color, UINT format)
+                        NativeFont font, Color color, UINT format, const char *slot)
 {
     if (text.empty())
         return;

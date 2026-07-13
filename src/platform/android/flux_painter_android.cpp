@@ -1374,7 +1374,7 @@ static int resolveFontSize(NativeFont fontHandle, int fallback = 16)
 
 // ── Filled shapes ─────────────────────────────────────────────────────────────
 
-void Painter::fillRect(int x, int y, int w, int h, Color color)
+void Painter::fillRect(int x, int y, int w, int h, Color color, const char *slot)
 {
     if (!s_gl)
         return;
@@ -1386,7 +1386,7 @@ void Painter::fillRectAlpha(int x, int y, int w, int h, Color color)
     fillRect(x, y, w, h, color); // delegates — offset applied there
 }
 
-void Painter::fillRoundedRect(int x, int y, int w, int h, int radius, Color color)
+void Painter::fillRoundedRect(int x, int y, int w, int h, int radius, Color color, const char *slot)
 {
     if (!s_gl)
         return;
@@ -1399,7 +1399,7 @@ void Painter::fillRoundedRegion(int x, int y, int w, int h, int r, Color color)
 }
 
 void Painter::fillRoundedRectGDI(int x, int y, int w, int h, int r,
-                                 Color fill, Color stroke, int sw)
+                                 Color fill, Color stroke, int sw, const char *slot)
 {
     fillRoundedRect(x, y, w, h, r / 2, fill); // delegates
     if (sw > 0 && stroke.a > 0)
@@ -1504,7 +1504,7 @@ void Painter::drawPolyline(const std::vector<std::pair<int, int>> &pts,
 }
 
 void Painter::drawEllipse(int x, int y, int w, int h,
-                          Color fill, Color stroke, int strokeWidth)
+                          Color fill, Color stroke, int strokeWidth, const char *slot)
 {
     if (!s_gl)
         return;
@@ -1629,7 +1629,7 @@ void Painter::drawTextDecorationLine(int lineX, int lineY, int lineW,
 // ============================================================================
 
 void Painter::drawText(const std::wstring &text, int x, int y, int w, int h,
-                       NativeFont fontHandle, Color color, UINT format)
+                       NativeFont fontHandle, Color color, UINT format, const char *slot)
 {
     if (!s_gl || text.empty())
         return;
@@ -1659,7 +1659,7 @@ void Painter::drawText(const std::wstring &text, int x, int y, int w, int h,
 }
 
 void Painter::drawTextA(const std::string &text, int x, int y, int w, int h,
-                        NativeFont font, Color color, UINT format)
+                        NativeFont font, Color color, UINT format, const char *slot)
 {
     std::wstring wide;
     wide.reserve(text.size());

@@ -388,28 +388,34 @@ void fluxDomClearCacheForNewRequest()
 // Painter::fillRect / fillRoundedRect / fillRectAlpha / fillRoundedRegion
 // ============================================================================
 
-void Painter::fillRect(int x, int y, int w, int h, Color color)
+void Painter::fillRect(int x, int y, int w, int h, Color color, const char *slot)
 {
     if (!owner)
         return;
     IDomAdapter *adapter = getActiveDomAdapter();
     if (!adapter)
         return;
-    DomNodeHandle node = ensureNode(owner);
+    DomNodeHandle node = ensureNode(owner, "div", slot);
     applyRect(adapter, node, owner, x, y, w, h);
     char col[32];
     cssColor(color, col, sizeof(col));
     adapter->setStyle(node, "background-color", col);
+    // A slotted node is reused ONLY by this same slot's calls going
+    // forward, but a stale border-radius from a previous frame where
+    // this exact slot was (mis-)used for a rounded shape must not leak
+    // forward. fillRect always means "plain rectangle" — reset it.
+    adapter->setStyle(node, "border-radius", "0px");
 }
 
-void Painter::fillRoundedRect(int x, int y, int w, int h, int radius, Color color)
+void Painter::fillRoundedRect(int x, int y, int w, int h, int radius, Color color,
+                              const char *slot)
 {
     if (!owner)
         return;
     IDomAdapter *adapter = getActiveDomAdapter();
     if (!adapter)
         return;
-    DomNodeHandle node = ensureNode(owner);
+    DomNodeHandle node = ensureNode(owner, "div", slot);
     applyRect(adapter, node, owner, x, y, w, h);
     char col[32];
     cssColor(color, col, sizeof(col));
@@ -431,11 +437,17 @@ void Painter::fillRoundedRegion(int x, int y, int w, int h, int cornerRadius, Co
 }
 
 void Painter::fillRoundedRectGDI(int x, int y, int w, int h, int radius,
-                                 Color fill, Color stroke, int strokeWidth)
+                                 Color fill, Color stroke, int strokeWidth,
+                                 const char *slot)
 {
-    fillRoundedRect(x, y, w, h, radius, fill);
+    fillRoundedRect(x, y, w, h, radius, fill, slot);
     if (strokeWidth > 0)
         drawRoundedRectOutline(x, y, w, h, radius * 2, stroke, strokeWidth);
+    // NOTE: the stroke path still targets the DEFAULT slot ("") — see
+    // the follow-up comment below. Not exercised by VideoPlayerWidget
+    // today (its fillRoundedRectGDI calls always pass strokeWidth=0),
+    // so left as a known gap rather than plumbing slot through
+    // drawBorder/drawRoundedRectOutline in this pass.
 }
 
 // ============================================================================
@@ -473,15 +485,15 @@ void Painter::drawRoundedRectOutline(int x, int y, int w, int h,
 // ============================================================================
 // Painter::drawEllipse
 // ============================================================================
-
-void Painter::drawEllipse(int x, int y, int w, int h, Color fill, Color stroke, int strokeWidth)
+void Painter::drawEllipse(int x, int y, int w, int h, Color fill, Color stroke,
+                          int strokeWidth, const char *slot)
 {
     if (!owner)
         return;
     IDomAdapter *adapter = getActiveDomAdapter();
     if (!adapter)
         return;
-    DomNodeHandle node = ensureNode(owner);
+    DomNodeHandle node = ensureNode(owner, "div", slot);
     applyRect(adapter, node, owner, x, y, w, h);
     adapter->setStyle(node, "border-radius", "50%");
     char fcol[32];
@@ -492,6 +504,13 @@ void Painter::drawEllipse(int x, int y, int w, int h, Color fill, Color stroke, 
         char scol[32];
         cssColor(stroke, scol, sizeof(scol));
         adapter->setStyle(node, "border", pxStr(strokeWidth) + " solid " + scol);
+    }
+    else
+    {
+        // Same leak-forward concern as fillRect: if this slot's node was
+        // previously used for a bordered shape, an explicit reset is
+        // needed since "no border" was never actively re-asserted before.
+        adapter->setStyle(node, "border", "none");
     }
 }
 
@@ -597,15 +616,19 @@ namespace
 }
 
 void Painter::drawText(const std::wstring &text, int x, int y, int w, int h,
-                       NativeFont font, Color color, UINT format)
+                       NativeFont font, Color color, UINT format, const char *slot)
 {
     if (!owner || text.empty())
         return;
     IDomAdapter *adapter = getActiveDomAdapter();
     if (!adapter)
         return;
-    DomNodeHandle node = ensureNode(owner);
+    DomNodeHandle node = ensureNode(owner, "div", slot);
     applyRect(adapter, node, owner, x, y, w, h);
+    // Text nodes must not inherit a stale background/border-radius from
+    // a shape previously (mis-)painted onto this same slot.
+    adapter->setStyle(node, "background-color", "transparent");
+    adapter->setStyle(node, "border-radius", "0px");
 
     // drawText's plain-font callers (IconWidget, cursor math, etc.) don't
     // carry family/size/weight alongside `font` — pass empty/0 defaults;
@@ -630,12 +653,12 @@ void Painter::drawText(const std::wstring &text, int x, int y, int w, int h,
 }
 
 void Painter::drawTextA(const std::string &text, int x, int y, int w, int h,
-                        NativeFont font, Color color, UINT format)
+                        NativeFont font, Color color, UINT format, const char *slot)
 {
     if (text.empty())
         return;
     std::wstring ws(text.begin(), text.end());
-    drawText(ws, x, y, w, h, font, color, format);
+    drawText(ws, x, y, w, h, font, color, format, slot);
 }
 
 // ============================================================================
@@ -893,7 +916,12 @@ void Painter::drawImage(const ImageDrawParams &params)
     // /img/<hash> path this process registered for an asset/memory image.
     // Either way it's a URL the browser fetches itself during hydration;
     // SSR never decodes pixels server-side.
-    struct SsrNativeImageShape { int width; int height; std::string url; };
+    struct SsrNativeImageShape
+    {
+        int width;
+        int height;
+        std::string url;
+    };
     std::string url = reinterpret_cast<const SsrNativeImageShape *>(params.image)->url;
 #else
     std::string url;
@@ -913,7 +941,6 @@ void Painter::drawImage(const ImageDrawParams &params)
         adapter->setStyle(node, "background-position", "center");
     }
 #endif
-
 }
 
 // ============================================================================

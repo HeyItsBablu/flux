@@ -218,7 +218,7 @@ static void strokeSegment(std::vector<PVertex> &out, float x1, float y1,
 // Basic fills
 // ============================================================================
 
-void Painter::fillRect(int x, int y, int w, int h, Color color)
+void Painter::fillRect(int x, int y, int w, int h, Color color, const char *slot)
 {
     auto &res = painterRes(dev(ctx));
     std::vector<PVertex> v;
@@ -231,7 +231,7 @@ void Painter::fillRectAlpha(int x, int y, int w, int h, Color color)
     fillRect(x, y, w, h, color); // alpha already carried by Color.a
 }
 
-void Painter::fillRoundedRect(int x, int y, int w, int h, int radius, Color color)
+void Painter::fillRoundedRect(int x, int y, int w, int h, int radius, Color color, const char *slot)
 {
     auto &res = painterRes(dev(ctx));
     std::vector<PVertex> v;
@@ -273,7 +273,7 @@ void Painter::fillRectWithLeftAccent(int x, int y, int w, int h,
 }
 
 void Painter::fillRoundedRectGDI(int x, int y, int w, int h, int radius,
-                                 Color fill, Color stroke, int strokeWidth) {
+                                 Color fill, Color stroke, int strokeWidth, const char *slot) {
     fillRoundedRect(x, y, w, h, radius / 2, fill);
     if (strokeWidth > 0)
         drawRoundedRectOutline(x, y, w, h, radius, stroke, strokeWidth);
@@ -378,7 +378,7 @@ void Painter::drawArc(float cx, float cy, float radius, int strokeWidth,
     drawTriList(ctx, v, color, res.solid);
 }
 
-void Painter::drawEllipse(int x, int y, int w, int h, Color fill, Color stroke, int strokeWidth)
+void Painter::drawEllipse(int x, int y, int w, int h, Color fill, Color stroke, int strokeWidth, const char *slot)
 {
     float cx = x + w * 0.5f, cy = y + h * 0.5f;
     auto &res = painterRes(dev(ctx));
@@ -580,7 +580,7 @@ void emitGlyphQuads(GlyphAtlas &atlas, const std::vector<ShapedGlyphRun> &runs,
 } // anonymous namespace
 
 void Painter::drawTextA(const std::string &text, int x, int y, int w, int h,
-                        NativeFont font, Color color, UINT format)
+                        NativeFont font, Color color, UINT format, const char *slot)
 {
     if (text.empty() || !ctx.glyphAtlas) return;
     GlyphAtlas *atlas = static_cast<GlyphAtlas *>(ctx.glyphAtlas);
@@ -621,7 +621,7 @@ void Painter::drawTextA(const std::string &text, int x, int y, int w, int h,
 }
 
 void Painter::drawText(const std::wstring &text, int x, int y, int w, int h,
-                       NativeFont font, Color color, UINT format)
+                       NativeFont font, Color color, UINT format, const char *slot)
 {
     if (text.empty()) return;
     std::string utf8;

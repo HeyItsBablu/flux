@@ -54,7 +54,6 @@ void flux_videoPlayerMac_releaseTexture(void *texOpaque);
 #include "flux/flux_video.hpp"
 #include "flux_icons.hpp"
 
-
 #elif defined(FLUX_SSR)
 // No frame-blit backend at all — flux_ssr never paints video frames (no
 // GPU, no live window). FluxVideo::get() is still called unconditionally
@@ -63,6 +62,14 @@ void flux_videoPlayerMac_releaseTexture(void *texOpaque);
 #include "flux/flux.hpp"
 #include "flux/flux_video.hpp"
 #include "flux_icons.hpp"
+#endif
+
+// DOM-node access for the "real <video> element" path — shared by both
+// the live browser DOM renderer and SSR's string-builder adapter, same
+// as TextInputWidget's approach for <input>. Neither of the two
+// #include blocks above pulls this in on its own.
+#if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
+#include "flux/flux_dom_adapter.hpp"
 #endif
 
 // ============================================================================
@@ -299,18 +306,34 @@ public:
         applyConstraints();
         needsLayout = false;
 
-#ifndef FLUX_SSR
-        // Skipped entirely under SSR: opening a Url/Memory source means
+#if !defined(FLUX_SSR) && !defined(__EMSCRIPTEN__)
+        // Skipped entirely under SSR AND under the DOM/web renderer:
+        // opening a Url/Memory source means
         // downloading the full video and writing it to a temp file
         // (_loadFromUrl -> _playFromMemory -> VP_writeTempFile) before
         // ever calling FluxVideo::open() — and the SSR stub backend
         // (flux_video_ssr.cpp) discards that anyway, while render()'s
         // platform blit chain has no FLUX_SSR branch to draw the result
-        // even if it succeeded. Every SSR render would otherwise pay for
-        // a full video download + disk write that can never be seen.
+        // even if it succeeded.
+        //
+        // On __EMSCRIPTEN__, this pipeline is now equally pointless: the
+        // DOM renderer's video branch (see render()) feeds a real
+        // <video src="..."> element directly and lets the BROWSER fetch
+        // and decode it — FluxVideo::get().open() is never called for
+        // that path at all. Running _openVideoSource() here anyway means
+        // _loadFromUrl() fires a redundant XMLHttpRequest that tries to
+        // pull the ENTIRE remote file into memory via FluxHttp::get(),
+        // purely to feed a decode pipeline nothing downstream reads from
+        // on this backend. Worse, that XHR is subject to CORS (unlike a
+        // <video> element's own fetch, which browsers exempt from CORS
+        // for playback, only restricting pixel-level readback) — so on
+        // any cross-origin host without Access-Control-Allow-Origin it
+        // fails outright and spams the console, while the real <video>
+        // tag plays the file successfully in parallel regardless.
+        //
         // The widget still lays out and paints its placeholder bar/
-        // black-box UI normally (see render()) — only the actual source
-        // open is skipped.
+        // black-box UI normally (see render()) — only the actual legacy
+        // source-open pipeline is skipped.
         if (!_opened)
         {
             _opened = true;
@@ -330,20 +353,20 @@ public:
         // ── Loading / error overlays ──────────────────────────────────────────
         if (_netState == NetState::Loading)
         {
-            p.fillRect(x, y, width, height, colBg);
+            p.fillRect(x, y, width, height, colBg, "bg");
             _renderStatusOverlay(p, fontCache, "... Loading ...", colLoadingText);
             needsPaint = false;
             return;
         }
         if (_netState == NetState::Error)
         {
-            p.fillRect(x, y, width, height, colBg);
+            p.fillRect(x, y, width, height, colBg, "bg");
             _renderStatusOverlay(p, fontCache, "Error loading video", colErrorText);
             needsPaint = false;
             return;
         }
 
-        p.fillRect(x, y, width, height, colBg);
+        p.fillRect(x, y, width, height, colBg, "bg");
 
         // ── Platform frame blit ───────────────────────────────────────────────
 
@@ -560,25 +583,30 @@ public:
             }
         }
 
-#elif defined(__EMSCRIPTEN__)
+#elif defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
+
         {
-            if (_finishedPending.exchange(false))
+            IDomAdapter *adapter = getActiveDomAdapter();
+            if (adapter)
             {
-                _playing = false;
-                _finished = true;
-                _progress = 1.f;
-            }
-            auto &vid = FluxVideo::get();
-            if (vid.hasNewFrame())
-            {
-                int srcW = vid.getVideoWidth(), srcH = vid.getVideoHeight();
-                if (srcW > 0 && srcH > 0)
+                int videoAreaH = height - barHeight;
+
+                DomNodeHandle vnode = fluxDomEnsureNode(this, "video", "videoEl");
+                fluxDomApplyRect(this, x, y, width, videoAreaH, "videoEl");
+
+                adapter->setStyle(vnode, "object-fit", "contain");
+                adapter->setStyle(vnode, "background-color", "#000000");
+                adapter->setStyle(vnode, "pointer-events", "none");
+
+                if (_sourceType == VideoSourceType::Url && !_sourceUrl.empty() && _sourceUrl != _domVideoSrcApplied)
                 {
-                    Painter::VideoDrawParams vp;
-                    _letterbox(srcW, srcH, vp.dstX, vp.dstY, vp.dstW, vp.dstH);
-                    p.drawVideo(vp);
+                    adapter->setAttr(vnode, "src", _sourceUrl);
+                    _domVideoSrcApplied = _sourceUrl;
+                    if (autoPlay)
+                        adapter->setBoolProperty(vnode, "autoplay", true);
                 }
-                _progress = vid.getProgress();
+
+
             }
         }
 #endif
@@ -675,6 +703,18 @@ private:
     VideoSourceType _sourceType = VideoSourceType::None;
     std::string _sourceUrl;
     std::vector<uint8_t> _sourceMemory;
+
+#if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
+        // Tracks which URL was last written to the real <video> element's
+        // src attribute, so render() (called every ~33ms by the progress
+        // timer) can skip re-setting it when nothing changed. Setting
+        // HTMLMediaElement.src — even to an IDENTICAL string — restarts
+        // the browser's resource-selection algorithm unconditionally;
+        // the browser does not diff the value. Without this guard the
+        // element reloads from scratch on every single repaint, which
+        // looks like "loads first frame, flickers, never actually plays."
+        std::string _domVideoSrcApplied;
+#endif
 
     enum class NetState
     {
@@ -1214,14 +1254,14 @@ private:
     {
         NativeFont tf = fc.getFont(_uiFont(), 14, FontWeight::Normal);
         p.drawTextA(msg, x, y, width, height, tf, col,
-                    DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                    DT_CENTER | DT_VCENTER | DT_SINGLELINE, "statusText");
     }
 
     void _renderBar(GraphicsContext & /*ctx*/, FontCache &fontCache, Painter &p)
     {
         int barY = y + height - barHeight;
         _barRect = {x, barY, width, barHeight};
-        p.fillRect(x, barY, width, barHeight, colBar);
+        p.fillRect(x, barY, width, barHeight, colBar, "barBg");
 
         int midY = barY + barHeight / 2;
         int btnSz = 28;
@@ -1235,7 +1275,8 @@ private:
             Color c = _hovPlay ? colIconHov : colIcon;
             p.drawText(g, _playBtnRect.x, _playBtnRect.y,
                        _playBtnRect.w, _playBtnRect.h,
-                       iconFont, c, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                       iconFont, c, DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+                       "playIcon");
         }
         cx += btnSz + 6;
 
@@ -1253,20 +1294,22 @@ private:
 #endif
 
         p.drawText(toWideString(ts), cx, barY, tw + 4, barHeight,
-                   tf, colText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+                   tf, colText, DT_LEFT | DT_VCENTER | DT_SINGLELINE,
+                   "timestamp");
+
         cx += tw + 10;
 
         int trackW = std::max(20, x + width - 12 - cx);
         _trackRect = {cx, midY - 8, trackW, 16};
 
         p.fillRoundedRectGDI(cx, midY - 2, trackW, 4, 2,
-                             colTrackBg, colTrackBg, 0);
+                             colTrackBg, colTrackBg, 0, "trackBg");
         int fillW = (int)(_progress * trackW);
         if (fillW > 0)
             p.fillRoundedRectGDI(cx, midY - 2, fillW, 4, 2,
-                                 colTrackFill, colTrackFill, 0);
+                                 colTrackFill, colTrackFill, 0, "trackFill");
         p.drawEllipse(cx + fillW - 6, midY - 6, 12, 12,
-                      colThumb, colThumb, 0);
+                      colThumb, colThumb, 0, "thumb");
     }
 
     void _renderCenterPlay(Painter &p, FontCache &fontCache)
@@ -1276,12 +1319,12 @@ private:
         int r = 28;
         p.drawEllipse(cx - r, cy - r, r * 2, r * 2,
                       Color::fromRGBA(0, 0, 0, 160),
-                      Color::fromRGBA(0, 0, 0, 0), 0);
+                      Color::fromRGBA(0, 0, 0, 0), 0, "centerCircle");
         NativeFont iconFont = fontCache.getFont(kIconFont, 32, FontWeight::Normal);
         std::wstring g(1, FluxIcons::glyph(FluxIcons::Play));
         p.drawText(g, cx - r, cy - r, r * 2, r * 2,
                    iconFont, Color::fromRGB(255, 255, 255),
-                   DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                   DT_CENTER | DT_VCENTER | DT_SINGLELINE, "centerIcon");
     }
 
     // =========================================================================

@@ -8,14 +8,12 @@
 #include <string>
 #include <vector>
 
-
 // ── Forward declaration ───────────────────────────────────────────────────
 // Painter needs to tag each instance with the widget that owns it (see
 // below), but including flux_widget.hpp here would create a circular
 // include (flux_widget.hpp already includes flux_painter.hpp). A forward
 // declaration is all Painter needs, since it only ever stores the pointer.
 class Widget;
-
 
 // ── ImageRepeat / FilterQuality ───────────────────────────────────────────────
 
@@ -57,8 +55,9 @@ struct Painter
         : ctx(c), owner(owner) {}
 
     // ── Filled shapes ─────────────────────────────────────────────────────────
-    void fillRect(int x, int y, int w, int h, Color color);
-    void fillRoundedRect(int x, int y, int w, int h, int radius, Color color);
+    void fillRect(int x, int y, int w, int h, Color color, const char *slot = "");
+    void fillRoundedRect(int x, int y, int w, int h, int radius, Color color,
+                         const char *slot = "");
     void fillRectAlpha(int x, int y, int w, int h, Color color);
     void fillRoundedRegion(int x, int y, int w, int h, int cornerRadius, Color color);
     void fillRectWithLeftAccent(int x, int y, int w, int h,
@@ -71,7 +70,8 @@ struct Painter
     // GDI-compat overload: radius is a diameter (Win32 RoundRect convention).
     // On D2D this halves the radius and delegates to fillRoundedRect.
     void fillRoundedRectGDI(int x, int y, int w, int h, int radius,
-                            Color fill, Color stroke, int strokeWidth);
+                            Color fill, Color stroke, int strokeWidth,
+                            const char *slot = "");
 
     void fillPolygonAlpha(const std::vector<std::pair<int, int>> &points,
                           Color color);
@@ -80,7 +80,8 @@ struct Painter
     void drawBorder(int x, int y, int w, int h, int radius,
                     Color color, int borderWidth);
     void drawEllipse(int x, int y, int w, int h,
-                     Color fill, Color stroke, int strokeWidth); 
+                     Color fill, Color stroke, int strokeWidth,
+                     const char *slot = "");
     void drawLine(int x1, int y1, int x2, int y2, Color color, int width);
     void drawHLine(int x, int y, int len, Color color, int strokeWidth = 1);
     void drawVLine(int x, int y, int len, Color color, int strokeWidth = 1);
@@ -121,9 +122,9 @@ struct Painter
     // ── Text (low-level — used by IconWidget) ─────────────────────────────────
     // UINT format: DT_CENTER / DT_RIGHT / DT_VCENTER flags (cross-platform).
     void drawText(const std::wstring &text, int x, int y, int w, int h,
-                  NativeFont font, Color color, UINT format);
+                  NativeFont font, Color color, UINT format, const char *slot = "");
     void drawTextA(const std::string &text, int x, int y, int w, int h,
-                   NativeFont font, Color color, UINT format);
+                   NativeFont font, Color color, UINT format, const char *slot = "");
     void measureText(const std::wstring &text, NativeFont font,
                      int &outWidth, int &outHeight);
 

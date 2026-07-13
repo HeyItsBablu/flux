@@ -171,7 +171,7 @@ namespace
 // Painter::fillRect
 // ============================================================================
 
-void Painter::fillRect(int x, int y, int w, int h, Color color)
+void Painter::fillRect(int x, int y, int w, int h, Color color, const char *slot)
 {
 
     char col[32];
@@ -188,7 +188,7 @@ void Painter::fillRect(int x, int y, int w, int h, Color color)
 // ============================================================================
 
 void Painter::fillRoundedRect(int x, int y, int w, int h, int radius,
-                              Color color)
+                              Color color, const char *slot)
 {
     if (radius <= 0)
     {
@@ -233,7 +233,7 @@ void Painter::drawBorder(int x, int y, int w, int h, int radius, Color color,
 // ============================================================================
 
 void Painter::fillRoundedRectGDI(int x, int y, int w, int h, int radius,
-                                 Color fill, Color stroke, int strokeWidth)
+                                 Color fill, Color stroke, int strokeWidth, const char *slot)
 {
     fillRoundedRect(x, y, w, h, radius, fill);
     if (strokeWidth > 0)
@@ -245,7 +245,7 @@ void Painter::fillRoundedRectGDI(int x, int y, int w, int h, int radius,
 // ============================================================================
 
 void Painter::drawEllipse(int x, int y, int w, int h,
-                          Color fill, Color stroke, int strokeWidth)
+                          Color fill, Color stroke, int strokeWidth, const char *slot)
 {
     char fcol[32];
     cssColor(fill, fcol, sizeof(fcol));
@@ -679,7 +679,7 @@ void Painter::measureText(const std::wstring &text, NativeFont font,
 // ============================================================================
 
 void Painter::drawText(const std::wstring &text, int x, int y, int w, int h,
-                       NativeFont font, Color color, UINT format)
+                       NativeFont font, Color color, UINT format, const char *slot)
 {
     if (text.empty())
         return;
@@ -751,7 +751,7 @@ void Painter::drawText(const std::wstring &text, int x, int y, int w, int h,
 // ============================================================================
 
 void Painter::drawTextA(const std::string &text, int x, int y, int w, int h,
-                        NativeFont font, Color color, UINT format)
+                        NativeFont font, Color color, UINT format, const char *slot)
 {
     if (text.empty())
         return;
