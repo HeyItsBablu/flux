@@ -31,7 +31,6 @@ constexpr DomNodeHandle kInvalidDomNode = 0;
 // code that uses it.
 // ============================================================================
 
-
 class Widget; // forward decl only — see bindInputEvents below
 
 class IDomAdapter
@@ -64,7 +63,7 @@ public:
     // markers (Phase 5) and for anything that isn't styling (input value,
     // href, etc).
     virtual void setAttr(DomNodeHandle node, const char *name,
-                        const std::string &value) = 0;
+                         const std::string &value) = 0;
 
     // Replace the node's text content. UTF-8 in; the adapter is responsible
     // for correct encoding on its own side (JS strings are UTF-16, but
@@ -88,8 +87,6 @@ public:
     // attaches under (the live document's mount point, or the
     // string-builder's root element). Called once, early, not per-frame.
     virtual void setRoot(DomNodeHandle node) = 0;
-
-
 
     // ── Real <input>/<textarea> elements only ───────────────────────────
     // Used exclusively by widgets that get a dedicated native form
@@ -129,6 +126,35 @@ public:
     // must actually block native typing, not just decorate markup.
     // Default no-op on this backend for the same reason as above.
     virtual void setBoolProperty(DomNodeHandle /*node*/, const char * /*name*/, bool /*value*/) {}
+
+    // ── Real <video>/<audio> elements only ──────────────────────────────
+    // Used exclusively by widgets that get a dedicated native media
+    // element instead of being painted (VideoPlayerWidget today; a
+    // future AudioPlayerWidget could reuse the same four calls).
+    //
+    // play()/pause() are METHOD calls on HTMLMediaElement, not IDL
+    // properties — setBoolProperty("paused", ...) cannot express them
+    // (assigning el.paused has no effect; it's a read-only computed
+    // property reflecting actual play state). These need their own
+    // primitives for that reason.
+    virtual void playNode(DomNodeHandle /*node*/) {}
+    virtual void pauseNode(DomNodeHandle /*node*/) {}
+
+    // Sets .currentTime directly, in seconds. Distinct from
+    // setInputValue for the same reason play/pause are distinct from
+    // setBoolProperty: currentTime is a live media-timeline property
+    // with browser-side seek semantics (may be asynchronous, may clamp
+    // to seekable ranges), not a plain string/bool IDL property.
+    virtual void seekNode(DomNodeHandle /*node*/, float /*seconds*/) {}
+
+    // Wires native 'timeupdate'/'play'/'pause'/'ended'/'loadedmetadata'
+    // events on `node` to call back into owner's onDomMedia*() hooks
+    // (see flux_widget.hpp). Call once, right after creating the node —
+    // implementations must be idempotent if called again on an
+    // already-bound node (render() runs every frame). Default no-op:
+    // most widgets never need it, and the SSR string-builder adapter
+    // never will — there is no live timeline before any JS has run.
+    virtual void bindMediaEvents(DomNodeHandle /*node*/, Widget * /*owner*/) {}
 };
 
 // ============================================================================
@@ -159,7 +185,6 @@ inline IDomAdapter *getActiveDomAdapter()
 {
     return g_activeDomAdapter;
 }
-
 
 // ============================================================================
 // Shared DOM-painter helper declarations

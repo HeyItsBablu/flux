@@ -133,6 +133,46 @@ if(NOT EXISTS "${FLUX_SSR_WEB_BUNDLE_DIR}/flux_app.js")
         "the FLUX_SSR_WEB_BUNDLE_DIR comment above).")
 endif()
 
+
+# ============================================================================
+# Static assets directory
+#
+# The web build has no equivalent need for a runtime route — assets/ is
+# baked into the WASM virtual filesystem at BUILD time via
+# web/CMakeLists.txt's `--preload-file=${CMAKE_SOURCE_DIR}/assets/.@/`.
+# flux_ssr has no virtual filesystem to preload into and no build step
+# that runs per-deploy, so the equivalent has to be a RUNTIME static-file
+# route instead: ssr/main.cpp serves real files off disk under this
+# directory whenever a request path starts with /assets/.
+#
+# This is the same problem VideoPlayerWidget's Path/Memory sources hit —
+# a widget-supplied local path (e.g. "assets/sample.mp4") lives on the
+# SERVER's disk and is not directly fetchable by the browser. Once this
+# route exists, widgets can translate a local assets-relative path into
+# a `/assets/<relpath>` URL the browser CAN fetch, the same way images
+# already do via flux_image_registry_serve's content-addressed /img/
+# route — this one is a plain passthrough instead of content-addressed,
+# since asset files are developer-managed and don't need cache-busting
+# via hash the way uploaded/generated images do.
+# ============================================================================
+
+set(FLUX_SSR_ASSETS_DIR "${CMAKE_SOURCE_DIR}/assets" CACHE STRING
+    "Directory served under the /assets/ URL prefix by flux_ssr (mirrors web/CMakeLists.txt's --preload-file=assets)")
+
+string(REPLACE "\\" "/" FLUX_SSR_ASSETS_DIR "${FLUX_SSR_ASSETS_DIR}")
+
+target_compile_definitions(flux_ssr PRIVATE
+    FLUX_SSR_ASSETS_DIR="${FLUX_SSR_ASSETS_DIR}"
+)
+
+if(NOT EXISTS "${FLUX_SSR_ASSETS_DIR}")
+    message(WARNING
+        "flux_ssr: FLUX_SSR_ASSETS_DIR (${FLUX_SSR_ASSETS_DIR}) does not exist. "
+        "flux_ssr will still start, but any VideoPlayer/ImageWidget using a "
+        "Path source under assets/ will 404 until this directory is present "
+        "at that path on the deploy host.")
+endif()
+
 # ============================================================================
 # Link libraries
 # ============================================================================

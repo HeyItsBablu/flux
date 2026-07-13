@@ -52,12 +52,39 @@ extern "C" EMSCRIPTEN_KEEPALIVE void fluxDomOnFocusEvent(int handle, int focused
         it->second->onDomFocusChanged(focused != 0);
 }
 
-
 extern "C" EMSCRIPTEN_KEEPALIVE void fluxDomOnScrollEvent(int handle, int scrollTop)
 {
     auto it = g_inputEventTargets.find((DomNodeHandle)handle);
     if (it != g_inputEventTargets.end() && it->second)
         it->second->onDomScrollChanged(scrollTop);
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE void fluxDomOnMediaTimeUpdate(int handle, float currentTime, float duration)
+{
+    auto it = g_inputEventTargets.find((DomNodeHandle)handle);
+    if (it != g_inputEventTargets.end() && it->second)
+        it->second->onDomMediaTimeUpdate(currentTime, duration);
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE void fluxDomOnMediaPlay(int handle)
+{
+    auto it = g_inputEventTargets.find((DomNodeHandle)handle);
+    if (it != g_inputEventTargets.end() && it->second)
+        it->second->onDomMediaPlay();
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE void fluxDomOnMediaPause(int handle)
+{
+    auto it = g_inputEventTargets.find((DomNodeHandle)handle);
+    if (it != g_inputEventTargets.end() && it->second)
+        it->second->onDomMediaPause();
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE void fluxDomOnMediaEnded(int handle)
+{
+    auto it = g_inputEventTargets.find((DomNodeHandle)handle);
+    if (it != g_inputEventTargets.end() && it->second)
+        it->second->onDomMediaEnded();
 }
 
 // ============================================================================
@@ -72,7 +99,7 @@ extern "C" void fluxDomAdapterLiveInit()
 {
     EM_ASM({
         // Slot 0 is reserved (kInvalidDomNode) — never assigned a real node.
-        Module._fluxDomNodes = [ null ];
+        Module._fluxDomNodes = [null];
 
         // Module._fluxDomAlloc(tagName) -> handle (int)
         // Creates a real element, stores it, returns its handle.
@@ -104,9 +131,11 @@ extern "C" void fluxDomAdapterLiveInit()
         Module._fluxDomAdopt = function(hydrationId)
         {
             var mount = document.getElementById('flux-dom-root');
-            if (!mount) return null;
+            if (!mount)
+                return null;
             var el = mount.querySelector('[data-flux-id="' + hydrationId + '"]');
-            if (!el || el._fluxAdopted) return null;
+            if (!el || el._fluxAdopted)
+                return null;
             el._fluxAdopted = true; // guards against a (shouldn't-happen) double match
             return el;
         };
@@ -146,12 +175,22 @@ public:
                     return h;
                 }
             }
-            return Module._fluxDomAlloc(tagStr);
-        }, tag, hydrationId.c_str());
+            return Module._fluxDomAlloc(tagStr); }, tag, hydrationId.c_str());
         return (DomNodeHandle)handle;
     }
 
     void setStyle(DomNodeHandle node, const char *prop,
+                  const std::string &value) override
+    {
+        if (node == kInvalidDomNode)
+            return;
+        EM_ASM({
+            var el = Module._fluxDomNodes[$0];
+            if (!el) return;
+            el.style.setProperty(UTF8ToString($1), UTF8ToString($2)); }, node, prop, value.c_str());
+    }
+
+    void setAttr(DomNodeHandle node, const char *name,
                  const std::string &value) override
     {
         if (node == kInvalidDomNode)
@@ -159,20 +198,7 @@ public:
         EM_ASM({
             var el = Module._fluxDomNodes[$0];
             if (!el) return;
-            el.style.setProperty(UTF8ToString($1), UTF8ToString($2));
-        }, node, prop, value.c_str());
-    }
-
-    void setAttr(DomNodeHandle node, const char *name,
-                const std::string &value) override
-    {
-        if (node == kInvalidDomNode)
-            return;
-        EM_ASM({
-            var el = Module._fluxDomNodes[$0];
-            if (!el) return;
-            el.setAttribute(UTF8ToString($1), UTF8ToString($2));
-        }, node, name, value.c_str());
+            el.setAttribute(UTF8ToString($1), UTF8ToString($2)); }, node, name, value.c_str());
     }
 
     void setText(DomNodeHandle node, const std::string &utf8Text) override
@@ -182,8 +208,7 @@ public:
         EM_ASM({
             var el = Module._fluxDomNodes[$0];
             if (!el) return;
-            el.textContent = UTF8ToString($1);
-        }, node, utf8Text.c_str());
+            el.textContent = UTF8ToString($1); }, node, utf8Text.c_str());
     }
 
     void appendChild(DomNodeHandle parent, DomNodeHandle child) override
@@ -193,7 +218,8 @@ public:
         EM_ASM({
             var p = Module._fluxDomNodes[$0];
             var c = Module._fluxDomNodes[$1];
-            if (!p || !c) return;
+            if (!p || !c)
+                return;
             // Idempotent, per the IDomAdapter contract — render() calls this
             // every frame for every parent/child pair whether or not the
             // structure actually changed, in a FIXED sibling order. Checking
@@ -212,9 +238,11 @@ public:
             // effect here (no z-index-free overlapping stacking to worry
             // about), so leaving existing children in whatever order they
             // were first inserted is safe.
-            if (c.parentNode === p) return;
+            if (c.parentNode === p)
+                return;
             p.appendChild(c); // moves c if it already has a different parent
-        }, parent, child);
+        },
+               parent, child);
     }
 
     void removeNode(DomNodeHandle node) override
@@ -224,16 +252,19 @@ public:
         g_inputEventTargets.erase(node);
         EM_ASM({
             var el = Module._fluxDomNodes[$0];
-            if (!el) return;
-            if (el.parentNode) el.parentNode.removeChild(el);
+            if (!el)
+                return;
+            if (el.parentNode)
+                el.parentNode.removeChild(el);
             Module._fluxDomNodes[$0] = null; // free the slot
-        }, node);
+        },
+               node);
     }
-
 
     void setInputValue(DomNodeHandle node, const std::string &value) override
     {
-        if (node == kInvalidDomNode) return;
+        if (node == kInvalidDomNode)
+            return;
         EM_ASM({
             var el = Module._fluxDomNodes[$0];
             if (!el) return;
@@ -241,25 +272,27 @@ public:
             // Only touch .value if it actually differs — assigning it
             // unconditionally every frame would reset the user's cursor
             // position mid-typing, even when the value didn't change.
-            if (el.value !== v) el.value = v;
-        }, node, value.c_str());
+            if (el.value !== v) el.value = v; }, node, value.c_str());
     }
 
     void focusNode(DomNodeHandle node) override
     {
-        if (node == kInvalidDomNode) return;
+        if (node == kInvalidDomNode)
+            return;
         EM_ASM({ var el = Module._fluxDomNodes[$0]; if (el && el.focus) el.focus(); }, node);
     }
 
     void blurNode(DomNodeHandle node) override
     {
-        if (node == kInvalidDomNode) return;
+        if (node == kInvalidDomNode)
+            return;
         EM_ASM({ var el = Module._fluxDomNodes[$0]; if (el && el.blur) el.blur(); }, node);
     }
 
     void bindInputEvents(DomNodeHandle node, Widget *owner) override
     {
-        if (node == kInvalidDomNode) return;
+        if (node == kInvalidDomNode)
+            return;
         g_inputEventTargets[node] = owner;
         EM_ASM({
             var el = Module._fluxDomNodes[$0];
@@ -279,14 +312,13 @@ public:
             });
             el.addEventListener('blur', function () {
                 Module.ccall('fluxDomOnFocusEvent', null, ['number', 'number'], [handle, 0]);
-            });
-        }, node);
+            }); }, node);
     }
-
 
     void bindScrollEvent(DomNodeHandle node, Widget *owner) override
     {
-        if (node == kInvalidDomNode) return;
+        if (node == kInvalidDomNode)
+            return;
         g_inputEventTargets[node] = owner;
         EM_ASM({
             var el = Module._fluxDomNodes[$0];
@@ -296,18 +328,93 @@ public:
             var handle = $0;
             el.addEventListener('scroll', function () {
                 Module.ccall('fluxDomOnScrollEvent', null, ['number', 'number'], [handle, el.scrollTop | 0]);
-            });
-        }, node);
+            }); }, node);
     }
 
     void setBoolProperty(DomNodeHandle node, const char *name, bool value) override
     {
-        if (node == kInvalidDomNode) return;
+        if (node == kInvalidDomNode)
+            return;
+        EM_ASM({
+             var el = Module._fluxDomNodes[$0];
+             if (!el) return;
+             el[UTF8ToString($1)] = $2 ? true : false; }, node, name, value ? 1 : 0);
+    }
+
+    void playNode(DomNodeHandle node) override
+    {
+        if (node == kInvalidDomNode)
+            return;
+        EM_ASM({
+            var el = Module._fluxDomNodes[$0];
+            // .play() returns a Promise that rejects if autoplay policy
+            // blocks it (e.g. no prior user gesture) — swallow that
+            // rejection rather than letting it surface as an unhandled
+            // promise rejection in the console. The widget's own
+            // 'pause' event (still fired in that case, since play()
+            // never actually started) is what keeps _playing accurate;
+            // see onDomMediaPause() wiring.
+            if (el && el.play) { var p = el.play(); if (p && p.catch) p.catch(function(){}); } }, node);
+    }
+
+    void pauseNode(DomNodeHandle node) override
+    {
+        if (node == kInvalidDomNode)
+            return;
+        EM_ASM({ var el = Module._fluxDomNodes[$0]; if (el && el.pause) el.pause(); }, node);
+    }
+
+    void seekNode(DomNodeHandle node, float seconds) override
+    {
+        if (node == kInvalidDomNode)
+            return;
         EM_ASM({
             var el = Module._fluxDomNodes[$0];
             if (!el) return;
-            el[UTF8ToString($1)] = $2 ? true : false;
-        }, node, name, value ? 1 : 0);
+            // Clamp into [0, duration] when duration is already known —
+            // an out-of-range currentTime write is a no-op in most
+            // browsers but some clamp differently; doing it ourselves
+            // keeps behavior consistent.
+            var d = isFinite(el.duration) ? el.duration : $1;
+            var t = Math.max(0, Math.min(d, $1));
+            el.currentTime = t; }, node, seconds);
+    }
+
+    void bindMediaEvents(DomNodeHandle node, Widget *owner) override
+    {
+        if (node == kInvalidDomNode)
+            return;
+        g_inputEventTargets[node] = owner;
+        EM_ASM({
+            var el = Module._fluxDomNodes[$0];
+            if (!el) return;
+            if (el._fluxMediaBound) return; // idempotent — render() calls this every frame
+            el._fluxMediaBound = true;
+            var handle = $0;
+            el.addEventListener('timeupdate', function () {
+                var d = isFinite(el.duration) ? el.duration : 0;
+                Module.ccall('fluxDomOnMediaTimeUpdate', null,
+                    ['number', 'number', 'number'], [handle, el.currentTime || 0, d]);
+            });
+            // loadedmetadata fires once duration/dimensions are known,
+            // often BEFORE the first timeupdate — without this too, the
+            // displayed duration stays "0:00" until playback actually
+            // starts advancing currentTime, which looks broken on a
+            // paused, just-loaded video.
+            el.addEventListener('loadedmetadata', function () {
+                var d = isFinite(el.duration) ? el.duration : 0;
+                Module.ccall('fluxDomOnMediaTimeUpdate', null,
+                    ['number', 'number', 'number'], [handle, el.currentTime || 0, d]);
+            });
+            el.addEventListener('play', function () {
+                Module.ccall('fluxDomOnMediaPlay', null, ['number'], [handle]);
+            });
+            el.addEventListener('pause', function () {
+                Module.ccall('fluxDomOnMediaPause', null, ['number'], [handle]);
+            });
+            el.addEventListener('ended', function () {
+                Module.ccall('fluxDomOnMediaEnded', null, ['number'], [handle]);
+            }); }, node);
     }
 
     void setRoot(DomNodeHandle node) override
@@ -317,8 +424,7 @@ public:
         EM_ASM({
             var el = Module._fluxDomNodes[$0];
             var mount = document.getElementById('flux-dom-root');
-            if (el && mount) mount.appendChild(el);
-        }, node);
+            if (el && mount) mount.appendChild(el); }, node);
     }
 };
 

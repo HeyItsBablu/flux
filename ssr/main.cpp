@@ -309,6 +309,87 @@ namespace
         {"flux_app.wasm", "application/wasm"},
         {"flux_app.data", "application/octet-stream"},
     };
+    // ── Static assets serving ─────────────────────────────────────────────
+    //
+    // Generic disk-backed passthrough under /assets/ — the SSR counterpart
+    // to web/CMakeLists.txt's --preload-file=assets. Unlike tryServeStaticFont
+    // (exactly two known filenames) or the content-addressed image registry,
+    // this serves ANY file under FLUX_SSR_ASSETS_DIR by relative path, so a
+    // widget can reference "assets/videos/sample.mp4" the same way it would
+    // on every other platform and have it resolve to a real fetchable URL.
+    constexpr const char *kAssetsUrlPrefix = "/assets/";
+
+    std::string assetContentType(const std::string &path)
+    {
+        auto hasExt = [&](const char *ext)
+        {
+            size_t n = strlen(ext);
+            return path.size() >= n &&
+                   path.compare(path.size() - n, n, ext) == 0;
+        };
+        if (hasExt(".mp4"))
+            return "video/mp4";
+        if (hasExt(".webm"))
+            return "video/webm";
+        if (hasExt(".mov"))
+            return "video/quicktime";
+        if (hasExt(".m3u8"))
+            return "application/vnd.apple.mpegurl";
+        if (hasExt(".png"))
+            return "image/png";
+        if (hasExt(".jpg") || hasExt(".jpeg"))
+            return "image/jpeg";
+        if (hasExt(".webp"))
+            return "image/webp";
+        if (hasExt(".svg"))
+            return "image/svg+xml";
+        if (hasExt(".mp3"))
+            return "audio/mpeg";
+        if (hasExt(".wav"))
+            return "audio/wav";
+        if (hasExt(".ogg"))
+            return "audio/ogg";
+        if (hasExt(".json"))
+            return "application/json";
+        return "application/octet-stream";
+    }
+
+    // Returns true and fills outBody/outContentType if `path` starts with
+    // /assets/ and the requested file exists under FLUX_SSR_ASSETS_DIR.
+    // Deliberately rejects any ".." path segment BEFORE ever touching the
+    // filesystem — without this, a request like
+    // "/assets/../../etc/passwd" would resolve outside FLUX_SSR_ASSETS_DIR
+    // entirely, turning a static-file route into an arbitrary file-read
+    // vulnerability. No such check exists for the font/web-bundle routes
+    // above because those two only ever compare against a FIXED, tiny set
+    // of known filenames — this route is the first one that takes an
+    // arbitrary caller-supplied path, so it's the first one that needs it.
+    bool tryServeAsset(const std::string &path, std::string &outBody,
+                       std::string &outContentType)
+    {
+        if (path.rfind(kAssetsUrlPrefix, 0) != 0)
+            return false;
+
+        std::string rel = path.substr(strlen(kAssetsUrlPrefix));
+        if (rel.empty() || rel.find("..") != std::string::npos)
+            return false;
+
+        static const std::string dir = FLUX_SSR_ASSETS_DIR; // set by ssr/CMakeLists.txt
+
+        // Not cached in memory like fonts/web-bundle bytes — asset libraries
+        // can be arbitrarily large (video files especially), and unlike
+        // those two fixed small files, caching every distinct asset ever
+        // requested would grow unboundedly. Read straight from disk per
+        // request; the OS page cache already absorbs repeat-read cost for
+        // frequently-served files.
+        std::string bytes = readFileBinary(dir + "/" + rel);
+        if (bytes.empty())
+            return false;
+
+        outBody = std::move(bytes);
+        outContentType = assetContentType(rel);
+        return true;
+    }
 
     bool tryServeWebAsset(const std::string &path, std::string &outBody,
                           std::string &outContentType)
@@ -857,6 +938,13 @@ namespace
                 // Content-addressed — the URL IS the hash, so it's safe
                 // to cache forever, same reasoning as the font route.
                 cacheable = true;
+            }
+            else if (tryServeAsset(path, body, contentType))
+            {
+                // Not marked cacheable=true — unlike fonts, asset files
+                // on disk CAN change between deploys without a filename
+                // change (no content hash in the URL, same reasoning
+                // tryServeWebAsset already documents for flux_app.js).
             }
             else if (tryServeWebAsset(path, body, contentType))
             {

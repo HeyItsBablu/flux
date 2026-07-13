@@ -72,6 +72,18 @@ void flux_videoPlayerMac_releaseTexture(void *texOpaque);
 #include "flux/flux_dom_adapter.hpp"
 #endif
 
+#if defined(FLUX_SSR)
+inline std::string VP_resolveSsrAssetUrl(const std::string &localPath)
+{
+    // Widget-supplied paths are expected relative to FLUX_SSR_ASSETS_DIR
+    // (mirrors web/CMakeLists.txt's --preload-file=assets@/ mount point,
+    // where the same relative path was already the convention). If the
+    // path isn't actually under that root, this can't help — caller
+    // falls back to whatever it already does (nothing renders).
+    return std::string("/assets/") + localPath;
+}
+#endif
+
 // ============================================================================
 // Shared utilities
 // ============================================================================
@@ -598,15 +610,31 @@ public:
                 adapter->setStyle(vnode, "background-color", "#000000");
                 adapter->setStyle(vnode, "pointer-events", "none");
 
-                if (_sourceType == VideoSourceType::Url && !_sourceUrl.empty() && _sourceUrl != _domVideoSrcApplied)
+                // Real playback state (currentTime/duration/play/pause/
+                // ended) now flows FROM the element INTO this widget via
+                // onDomMediaTimeUpdate/Play/Pause/Ended below — bound
+                // once per node (idempotent on the JS side), read every
+                // frame here is unnecessary.
+                adapter->bindMediaEvents(vnode, this);
+                _domVideoNode = vnode;
+
+                std::string resolvedUrl;
+                if (_sourceType == VideoSourceType::Url && !_sourceUrl.empty())
+                    resolvedUrl = _sourceUrl;
+#if defined(FLUX_SSR)
+                else if (_sourceType == VideoSourceType::Path && !videoPath.empty())
+                    resolvedUrl = VP_resolveSsrAssetUrl(videoPath);
+#endif
+                if (!resolvedUrl.empty() && resolvedUrl != _domVideoSrcApplied)
                 {
-                    adapter->setAttr(vnode, "src", _sourceUrl);
-                    _domVideoSrcApplied = _sourceUrl;
+                    adapter->setAttr(vnode, "src", resolvedUrl);
+                    _domVideoSrcApplied = resolvedUrl;
                     if (autoPlay)
+                    {
                         adapter->setBoolProperty(vnode, "autoplay", true);
+                        adapter->playNode(vnode);
+                    }
                 }
-
-
             }
         }
 #endif
@@ -698,6 +726,34 @@ public:
         return true;
     }
 
+#if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
+    void onDomMediaTimeUpdate(float currentTimeSec, float durationSec) override
+    {
+        _domVideoDuration = durationSec;
+        if (durationSec > 0.f)
+            _progress = std::max(0.f, std::min(1.f, currentTimeSec / durationSec));
+        _requestRepaint();
+    }
+    void onDomMediaPlay() override
+    {
+        _playing = true;
+        _finished = false;
+        _requestRepaint();
+    }
+    void onDomMediaPause() override
+    {
+        _playing = false;
+        _requestRepaint();
+    }
+    void onDomMediaEnded() override
+    {
+        _playing = false;
+        _finished = true;
+        _progress = 1.f;
+        _requestRepaint();
+    }
+#endif
+
 private:
     // ── Source ────────────────────────────────────────────────────────────────
     VideoSourceType _sourceType = VideoSourceType::None;
@@ -705,15 +761,33 @@ private:
     std::vector<uint8_t> _sourceMemory;
 
 #if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
-        // Tracks which URL was last written to the real <video> element's
-        // src attribute, so render() (called every ~33ms by the progress
-        // timer) can skip re-setting it when nothing changed. Setting
-        // HTMLMediaElement.src — even to an IDENTICAL string — restarts
-        // the browser's resource-selection algorithm unconditionally;
-        // the browser does not diff the value. Without this guard the
-        // element reloads from scratch on every single repaint, which
-        // looks like "loads first frame, flickers, never actually plays."
-        std::string _domVideoSrcApplied;
+    // Tracks which URL was last written to the real <video> element's
+    // src attribute, so render() (called every ~33ms by the progress
+    // timer) can skip re-setting it when nothing changed. Setting
+    // HTMLMediaElement.src — even to an IDENTICAL string — restarts
+    // the browser's resource-selection algorithm unconditionally;
+    // the browser does not diff the value. Without this guard the
+    // element reloads from scratch on every single repaint, which
+    // looks like "loads first frame, flickers, never actually plays."
+    std::string _domVideoSrcApplied;
+    DomNodeHandle _domVideoNode = kInvalidDomNode;
+    // Real element's reported duration — FluxVideo::get().getDurationSeconds()
+    // is a permanent 0.f stub on this backend, so _renderBar() needs its
+    // own source of truth, kept in sync via onDomMediaTimeUpdate below.
+    float _domVideoDuration = 0.f;
+    // Native browser media events (timeupdate/play/pause/ended) arrive
+    // outside FluxUI's normal input-driven render pass — markNeedsPaint()
+    // alone only sets a dirty flag that the next INPUT event happens to
+    // pick up (which is why this previously only visibly updated while
+    // the mouse was moving over the widget). invalidateWidget() is what
+    // actually schedules a real repaint for this callback.
+    void _requestRepaint()
+    {
+        markNeedsPaint();
+        if (auto *ui = FluxUI::getCurrentInstance())
+            ui->invalidateWidget(x, y, width, height);
+    }
+
 #endif
 
     enum class NetState
@@ -876,6 +950,27 @@ private:
 
     void _togglePlayPause()
     {
+
+#if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
+        IDomAdapter *adapter = getActiveDomAdapter();
+        if (adapter && _domVideoNode != kInvalidDomNode)
+        {
+            if (_finished)
+            {
+                adapter->seekNode(_domVideoNode, 0.f);
+                adapter->playNode(_domVideoNode);
+                // _playing/_finished are updated by onDomMediaPlay()
+                // once the browser's real 'play' event fires — not set
+                // here directly, to stay a single source of truth.
+                return;
+            }
+            if (_playing)
+                adapter->pauseNode(_domVideoNode);
+            else
+                adapter->playNode(_domVideoNode);
+            return;
+        }
+#endif
         auto &vid = FluxVideo::get();
         if (_finished)
         {
@@ -907,6 +1002,20 @@ private:
         float t = std::max(0.f, std::min(1.f,
                                          (float)(mx - _trackRect.x) / (float)_trackRect.w));
         _progress = t;
+#if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
+        IDomAdapter *adapter = getActiveDomAdapter();
+        if (adapter && _domVideoNode != kInvalidDomNode)
+        {
+            adapter->seekNode(_domVideoNode, t * _domVideoDuration);
+            if (_finished && t < 0.999f)
+            {
+                _finished = false;
+                adapter->playNode(_domVideoNode);
+            }
+            markNeedsPaint();
+            return;
+        }
+#endif
         FluxVideo::get().seekToProgress(t);
         if (_finished && t < 0.999f)
         {
@@ -920,6 +1029,14 @@ private:
 
     void _startProgressTimer()
     {
+#if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
+        // Real element drives _progress/_playing via onDomMediaTimeUpdate/
+        // Play/Pause/Ended (native 'timeupdate' events, browser-paced —
+        // typically 4-66Hz depending on the browser, no busy-poll
+        // needed). A separate 33ms poll against the dead FluxVideo
+        // singleton would only add redundant repaints.
+        return;
+#endif
         if (_progressTimer)
             return;
         _progressTimer = FluxUI::getCurrentInstance()->setInterval(33, [this]()
@@ -1281,7 +1398,11 @@ private:
         cx += btnSz + 6;
 
         // Timestamp
+#if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
+        float dur = _domVideoDuration;
+#else
         float dur = FluxVideo::get().getDurationSeconds();
+#endif
         std::string ts = _fmtTime(_progress * dur) + " / " + _fmtTime(dur);
         NativeFont tf = fontCache.getFont(_uiFont(), 12, FontWeight::Normal);
         int tw = 0, th = 0;

@@ -386,6 +386,16 @@ public:
   virtual void onDomScrollChanged(int /*scrollTop*/) {}
 
 
+  // DOM-backend only, same family as the three above. Fired when a real
+  // <video>/<audio> element this widget owns reports native
+  // timeupdate/play/pause/ended/loadedmetadata events via
+  // IDomAdapter::bindMediaEvents. Lets a widget's own custom controls
+  // (VideoPlayerWidget's bar) reflect the REAL element's playback state
+  // instead of maintaining a separate, unsynchronized copy of it.
+  virtual void onDomMediaTimeUpdate(float /*currentTimeSec*/, float /*durationSec*/) {}
+  virtual void onDomMediaPlay() {}
+  virtual void onDomMediaPause() {}
+  virtual void onDomMediaEnded() {}
   // Called by FluxUI's overlay dispatch when a click lands outside this
   // widget's bounds while it's registered as an open overlay (see
   // FluxUI::showOverlay / dispatchOverlayMouseDown). No-op for every widget
