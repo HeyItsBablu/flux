@@ -124,7 +124,7 @@ void Painter::fillRect(int x, int y, int w, int h, Color color, const char *slot
 // ============================================================================
 
 void Painter::fillRoundedRectGDI(int x, int y, int w, int h, int radius,
-                                 Color fill, Color stroke, int strokeWidth)
+                                 Color fill, Color stroke, int strokeWidth, const char *slot)
 {
     cairo_t *cr = ctx.cr;
     CairoSave save(cr);
