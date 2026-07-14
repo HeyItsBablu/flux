@@ -1,0 +1,12 @@
+{
+  "fmt": {
+    "git": "https://github.com/fmtlib/fmt",
+    "ref": "10.2.1",
+    "cmake_fragment": "add_subdirectory(external/fmt)\ntarget_link_libraries(flux PUBLIC fmt::fmt)\n"
+  },
+  "nlohmann-json": {
+    "git": "https://github.com/nlohmann/json",
+    "ref": "v3.11.3",
+    "cmake_fragment": "set(JSON_BuildTests OFF CACHE BOOL \"\" FORCE)\nadd_subdirectory(external/nlohmann-json)\ntarget_link_libraries(flux PUBLIC nlohmann_json::nlohmann_json)\n"
+  }
+}

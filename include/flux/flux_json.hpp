@@ -1,5 +1,6 @@
 // flux_json.hpp
 #pragma once
+#include <cstdio>
 #include <map>
 #include <memory>
 #include <stdexcept>
@@ -25,6 +26,28 @@ struct JsonValue
     std::variant<JsonNull, JsonBool, JsonNumber,
                  JsonString, JsonArray, JsonObject>
         data;
+
+    // ── Construction ──────────────────────────────────────────────────────
+    JsonValue() = default;
+    JsonValue(std::nullptr_t) {}
+    JsonValue(bool b) : data(b) {}
+    JsonValue(int i) : data(static_cast<double>(i)) {}
+    JsonValue(double d) : data(d) {}
+    JsonValue(const char* s) : data(std::string(s)) {}
+    JsonValue(std::string s) : data(std::move(s)) {}
+    JsonValue(JsonArray a) : data(std::move(a)) {}
+    JsonValue(JsonObject o) : data(std::move(o)) {}
+
+    // Enables: json::object() / json obj = { {"key", value}, ... };
+    JsonValue(std::initializer_list<std::pair<const std::string, JsonValue>> init)
+    {
+        JsonObject obj;
+        for (auto& kv : init) obj.emplace(kv.first, kv.second);
+        data = std::move(obj);
+    }
+
+    static JsonValue object() { return JsonValue(JsonObject{}); }
+    static JsonValue array() { return JsonValue(JsonArray{}); }
 
     // ── Type checks ──────────────────────────────────────────────────────────
     bool isNull() const { return std::holds_alternative<JsonNull>(data); }
@@ -60,7 +83,14 @@ struct JsonValue
         return isString() ? asString() : def;
     }
 
-    // ── Object key access ─────────────────────────────────────────────────────
+    // nlohmann-style .value(key, default) for object members
+    std::string value(const std::string& key, const std::string& def) const
+    {
+        const JsonValue* v = get(key);
+        return (v && v->isString()) ? v->asString() : def;
+    }
+
+    // ── Object key access (read-only, throws if missing) ──────────────────────
     const JsonValue &operator[](const std::string &key) const
     {
         auto &obj = asObject();
@@ -69,10 +99,25 @@ struct JsonValue
             throw std::out_of_range("Key not found: " + key);
         return it->second;
     }
+
+    // ── Object key access (mutable, auto-vivifies) ─────────────────────────────
+    JsonValue &operator[](const std::string &key)
+    {
+        if (!isObject()) data = JsonObject{};
+        return std::get<JsonObject>(data)[key];
+    }
+
     bool has(const std::string &key) const noexcept
     {
         return isObject() && asObject().count(key);
     }
+    bool contains(const std::string &key) const noexcept { return has(key); }
+
+    void erase(const std::string &key)
+    {
+        if (isObject()) std::get<JsonObject>(data).erase(key);
+    }
+
     // Returns nullptr-like value if key missing
     const JsonValue *get(const std::string &key) const noexcept
     {
@@ -92,7 +137,111 @@ struct JsonValue
             return asObject().size();
         return 0;
     }
+
+    // ── Serialization ──────────────────────────────────────────────────────
+    // dump(-1) => compact, dump(N) => pretty-printed with N-space indent
+    std::string dump(int indent = -1) const
+    {
+        std::string out;
+        dumpImpl(out, indent, 0);
+        return out;
+    }
+
+private:
+    static void appendEscaped(std::string &out, const std::string &s)
+    {
+        out += '"';
+        for (char c : s)
+        {
+            switch (c)
+            {
+            case '"': out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            case '\b': out += "\\b"; break;
+            case '\f': out += "\\f"; break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20)
+                {
+                    char buf[8];
+                    std::snprintf(buf, sizeof(buf), "\\u%04x", c);
+                    out += buf;
+                }
+                else
+                {
+                    out += c;
+                }
+            }
+        }
+        out += '"';
+    }
+
+    static void appendNumber(std::string &out, double d)
+    {
+        if (d == static_cast<long long>(d))
+        {
+            out += std::to_string(static_cast<long long>(d));
+        }
+        else
+        {
+            char buf[64];
+            std::snprintf(buf, sizeof(buf), "%g", d);
+            out += buf;
+        }
+    }
+
+    void dumpImpl(std::string &out, int indent, int depth) const
+    {
+        const bool pretty = indent >= 0;
+        const std::string pad = pretty ? std::string((depth + 1) * indent, ' ') : std::string();
+        const std::string closePad = pretty ? std::string(depth * indent, ' ') : std::string();
+        const std::string nl = pretty ? "\n" : "";
+        const std::string colon = pretty ? ": " : ":";
+
+        if (isNull()) { out += "null"; return; }
+        if (isBool()) { out += asBool() ? "true" : "false"; return; }
+        if (isNumber()) { appendNumber(out, asNumber()); return; }
+        if (isString()) { appendEscaped(out, asString()); return; }
+
+        if (isArray())
+        {
+            const auto &arr = asArray();
+            if (arr.empty()) { out += "[]"; return; }
+            out += "["; out += nl;
+            for (size_t i = 0; i < arr.size(); ++i)
+            {
+                out += pad;
+                arr[i].dumpImpl(out, indent, depth + 1);
+                if (i + 1 < arr.size()) out += ",";
+                out += nl;
+            }
+            out += closePad; out += "]";
+            return;
+        }
+
+        if (isObject())
+        {
+            const auto &obj = asObject();
+            if (obj.empty()) { out += "{}"; return; }
+            out += "{"; out += nl;
+            size_t i = 0;
+            for (const auto &[key, val] : obj)
+            {
+                out += pad;
+                appendEscaped(out, key);
+                out += colon;
+                val.dumpImpl(out, indent, depth + 1);
+                if (++i < obj.size()) out += ",";
+                out += nl;
+            }
+            out += closePad; out += "}";
+            return;
+        }
+    }
 };
+
 
 // ============================================================================
 // PARSER

@@ -529,6 +529,17 @@ elseif(UNIX AND NOT APPLE)
     )
 endif()
 
+
+# ============================================================================
+# Registry-managed packages (added via `flux add`)
+# Each external/<name>/flux-package.cmake is written by `flux add` and
+# removed by `flux remove` — nothing here needs to change per package.
+# ============================================================================
+file(GLOB FLUX_PACKAGE_FILES CONFIGURE_DEPENDS external/*/flux-package.cmake)
+foreach(pkg_file ${FLUX_PACKAGE_FILES})
+    include(${pkg_file})
+endforeach()
+
 # ── Compiler options ──────────────────────────────────────────────────────────
 
 if(MSVC)

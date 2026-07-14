@@ -1,5 +1,10 @@
 add_executable(flux_cli
     flux_cli.cpp
+    package_manager.cpp
+)
+
+target_include_directories(flux_cli PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 if(WIN32)
@@ -11,4 +16,3 @@ elseif(UNIX)
 endif()
 
 set_target_properties(flux_cli PROPERTIES OUTPUT_NAME "flux")
-target_include_directories(flux_cli PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

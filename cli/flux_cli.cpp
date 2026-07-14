@@ -2,6 +2,7 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include "package_manager.hpp"
 
 #if defined(_WIN32)
 int windows_build(bool release);
@@ -26,7 +27,9 @@ namespace
         std::printf("Usage:\n");
         std::printf("  flux run <platform> [--release]     Build and launch\n");
         std::printf("  flux build <platform> [--release]   Build only\n");
-        std::printf("  flux doctor [platform]               Check host toolchain\n\n");
+        std::printf("  flux doctor [platform]               Check host toolchain\n");
+        std::printf("  flux add <package> [--ref <ref>]     Add a dependency\n");
+        std::printf("  flux remove <package>                 Remove a dependency\n\n");
         std::printf("Platforms:\n");
         std::printf("  windows  linux  macos  web  android\n");
     }
@@ -173,27 +176,33 @@ namespace
 
 } // namespace
 
-int main(int argc, char** argv) {
-    if (argc < 2) {
+int main(int argc, char **argv)
+{
+    if (argc < 2)
+    {
         print_usage();
         return 1;
     }
 
     const std::string command = argv[1];
 
-    if (command == "help") {
+    if (command == "help")
+    {
         print_usage();
         return 0;
     }
 
-    if (command == "doctor") {
+    if (command == "doctor")
+    {
         std::string platform = (argc >= 3) ? argv[2] : host_platform_name();
-        if (platform.empty()) {
+        if (platform.empty())
+        {
             std::fprintf(stderr, "flux: could not determine host platform; pass one explicitly.\n\n");
             print_usage();
             return 1;
         }
-        if (!is_valid_platform(platform)) {
+        if (!is_valid_platform(platform))
+        {
             std::fprintf(stderr, "flux: unknown platform '%s'\n\n", platform.c_str());
             print_usage();
             return 1;
@@ -201,27 +210,58 @@ int main(int argc, char** argv) {
         return dispatch_doctor(platform);
     }
 
-    if (command != "run" && command != "build") {
+    if (command == "add" || command == "remove")
+    {
+        if (argc < 3)
+        {
+            std::fprintf(stderr, "flux: missing package name.\n\n");
+            print_usage();
+            return 1;
+        }
+        const std::string package = argv[2];
+
+        if (command == "remove")
+        {
+            return cmd_remove(package);
+        }
+
+        std::string ref_override;
+        for (int i = 3; i < argc; ++i)
+        {
+            std::string a = argv[i];
+            if (a == "--ref" && i + 1 < argc)
+            {
+                ref_override = argv[++i];
+            }
+        }
+        return cmd_add(package, ref_override);
+    }
+
+    if (command != "run" && command != "build")
+    {
         std::fprintf(stderr, "flux: unknown command '%s'\n\n", command.c_str());
         print_usage();
         return 1;
     }
 
-    if (argc < 3) {
+    if (argc < 3)
+    {
         std::fprintf(stderr, "flux: missing platform argument.\n\n");
         print_usage();
         return 1;
     }
 
     const std::string platform = argv[2];
-    if (!is_valid_platform(platform)) {
+    if (!is_valid_platform(platform))
+    {
         std::fprintf(stderr, "flux: unknown platform '%s'\n\n", platform.c_str());
         print_usage();
         return 1;
     }
 
     std::vector<std::string> flags;
-    for (int i = 3; i < argc; ++i) flags.emplace_back(argv[i]);
+    for (int i = 3; i < argc; ++i)
+        flags.emplace_back(argv[i]);
     const bool release = has_flag(flags, "--release");
 
     (void)is_desktop_platform; // reserved for host-compatibility checks as platforms are added
