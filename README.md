@@ -3,6 +3,7 @@
 ![macOS](https://github.com/HeyItsBablu/flux/actions/workflows/macos.yml/badge.svg)
 ![Android](https://github.com/HeyItsBablu/flux/actions/workflows/android.yml/badge.svg)
 ![Web](https://github.com/HeyItsBablu/flux/actions/workflows/web.yml/badge.svg)
+![SSR](https://github.com/HeyItsBablu/flux/actions/workflows/ssr.yml/badge.svg)
 
 # FluxUI
 

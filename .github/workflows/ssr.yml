@@ -1,0 +1,42 @@
+name: SSR
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [Debug, Release]
+
+    name: SSR ${{ matrix.config }} (Linux, headless)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: seanmiddleditch/gha-setup-ninja@v4
+
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -G "Ninja" \
+            -DCMAKE_BUILD_TYPE=${{ matrix.config }} \
+            -DFLUX_BUILD_SSR=ON \
+            -DFLUX_BUILD_DESKTOP=OFF
+
+      - name: Build
+        run: cmake --build build --target flux_ssr --parallel
+
+      - name: Upload artifacts
+        if: matrix.config == 'Release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: flux-ssr-linux-x64-release
+          path: build/ssr/flux_ssr
