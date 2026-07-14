@@ -562,7 +562,7 @@ MeasureContext FluxUI::getMeasureContext()
         ctx.factory,
         ctx.brushes);
 
-#elif defined(__linux__) && !defined(__ANDROID__)
+#elif defined(__linux__) && !defined(__ANDROID__) && !defined(FLUX_SSR)
     GraphicsContext gc = window.getMeasureContext();
     return MeasureContext(gc.cr, gc.width, gc.height);
 

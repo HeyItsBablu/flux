@@ -251,7 +251,7 @@ struct Canvas2D
         Mat3 rotated(float angle) const;
         void apply(float &x, float &y) const;
     };
-#elif defined(__linux__) && !defined(__ANDROID__)
+#elif defined(__linux__) && !defined(__ANDROID__) && !defined(FLUX_SSR)
     // Cairo context pointer — Linux only.
     cairo_t *cairoCtx_ = nullptr;
 #endif

@@ -71,7 +71,7 @@ inline void fluxPostToUIThread(HttpCallback callback, HttpResult result) {
 }
 
 // ─── Linux / SDL2 ───────────────────────────────────────────────────────────
-#elif defined(__linux__) && !defined(__ANDROID__)
+#elif defined(__linux__) && !defined(__ANDROID__) && !defined(FLUX_SSR)
 
 #include <SDL2/SDL.h>
 #include <algorithm>
