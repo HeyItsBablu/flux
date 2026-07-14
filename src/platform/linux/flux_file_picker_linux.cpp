@@ -2,7 +2,7 @@
 //
 // Linux implementation of FilePickerWidget and the async dialog backend.
 
-#if defined(__linux__) && !defined(__ANDROID__)
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(FLUX_SSR)
 
 #include "flux/widgets/flux_file_picker.hpp"
 

@@ -144,7 +144,7 @@ public:
     mutable std::unique_ptr<MacScaleCache, MacScaleCacheDeleter> _macCache;
 #endif
 
-#if defined(__linux__) && !defined(__ANDROID__)
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(FLUX_SSR)
     mutable std::mutex _decodeMutex;
     DecodedImage _pending;
     std::vector<uint8_t> pixels;

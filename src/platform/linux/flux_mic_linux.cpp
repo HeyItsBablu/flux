@@ -1,7 +1,7 @@
 // flux_mic_linux.cpp
 // Linux ALSA capture backend for FluxMic.
 // Link against: asound
-#if defined(__linux__) && !defined(__ANDROID__)
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(FLUX_SSR) 
 
 #include "flux/flux_mic.hpp"
 

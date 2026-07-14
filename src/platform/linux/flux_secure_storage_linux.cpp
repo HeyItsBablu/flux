@@ -6,7 +6,7 @@
 // libsecret is loaded at runtime with dlopen so the binary still works on
 // systems without libsecret installed (it will automatically fall back).
 
-#if defined(__linux__) && !defined(__ANDROID__)
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(FLUX_SSR)
 
 #include "flux/flux_secure_storage.hpp"
 #include "flux/flux_secure_crypto.hpp"

@@ -2,7 +2,7 @@
 // AES-256-GCM + PBKDF2-SHA256 helpers using OpenSSL (EVP API).
 // Used by the Linux fallback backend when libsecret is unavailable.
 
-#if defined(__linux__) && !defined(__ANDROID__)
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(FLUX_SSR)
 
 #include "flux/flux_secure_crypto.hpp"
 

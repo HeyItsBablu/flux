@@ -5,7 +5,7 @@
 //   V4L2 (/dev/videoN) → MJPEG or YUYV → libjpeg / software YUV→RGB24 →
 //       CPU frame buffer → lockFrame() → Cairo StretchBlit → SDL window
 
-#if defined(__linux__) && !defined(__ANDROID__)
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(FLUX_SSR)
 
 #include "flux/flux_camera.hpp"
 

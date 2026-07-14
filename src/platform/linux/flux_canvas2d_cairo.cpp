@@ -5,7 +5,7 @@
 // stb_image is NOT included here — flux_image_linux.cpp owns STB_IMAGE_IMPLEMENTATION.
 // Images are decoded via the stb target (stb_impl.cpp) already in the build.
 
-#if defined(__linux__) && !defined(__ANDROID__)
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(FLUX_SSR)
 
 #include "flux/flux_canvas2d.hpp"
 

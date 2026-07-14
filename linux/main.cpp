@@ -1,5 +1,5 @@
 //linux/main.cpp
-#if defined(__linux__) && !defined(__ANDROID__)
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(FLUX_SSR)
 #include <cstdio>
 #include <cstdlib>
 #include <string>

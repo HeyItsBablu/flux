@@ -187,7 +187,7 @@ public:
     // No SDL-typed methods, no setCairo/preRenderPass/glRenderPass split, no
     // initEventType/repaintEventType (PlatformWindow owns the generic repaint
     // event itself now). render() handles tick + draw inline.
-#if defined(__linux__) && !defined(__ANDROID__)
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(FLUX_SSR)
     bool handleMouseDown(int mx, int my) override;
     bool handleMouseMove(int mx, int my) override;
     bool handleMouseUp(int mx, int my) override;

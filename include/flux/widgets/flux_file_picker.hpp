@@ -39,7 +39,7 @@ enum class FilePickerMode
 // LINUX ASYNC SUPPORT
 // ============================================================================
 
-#if defined(__linux__) && !defined(__ANDROID__)
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(FLUX_SSR)
 #include <SDL2/SDL.h>
 
 // Magic SDL_USEREVENT code that identifies file picker results.

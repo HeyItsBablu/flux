@@ -6,7 +6,7 @@
 //
 // Link against: asound
 //
-#if defined(__linux__) && !defined(__ANDROID__)
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(FLUX_SSR)
 
 #include "flux/flux_audio.hpp"
 

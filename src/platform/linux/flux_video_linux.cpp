@@ -7,7 +7,7 @@
 //
 // CMakeLists: link libavformat libavcodec libavutil libswscale
 //
-#if defined(__linux__) && !defined(__ANDROID__)
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(FLUX_SSR)
 
 #include "flux/flux_video.hpp"
 #include "flux/flux_audio.hpp"

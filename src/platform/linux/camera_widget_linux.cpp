@@ -7,7 +7,7 @@
 //
 // Link: libjpeg  libv4l2  SDL2  cairo  pangocairo
 
-#if defined(__linux__) && !defined(__ANDROID__)
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(FLUX_SSR)
 
 #include "flux/widgets/camera_widget.hpp"
 

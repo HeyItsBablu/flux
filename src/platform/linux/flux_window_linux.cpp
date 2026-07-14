@@ -1,5 +1,5 @@
 // flux_window_linux.cpp
-#if defined(__linux__) && !defined(__ANDROID__)
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(FLUX_SSR)
 
 #include "flux/flux_http_platform.hpp"
 #include "flux/flux_window.hpp"
