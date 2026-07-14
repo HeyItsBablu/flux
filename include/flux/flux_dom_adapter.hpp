@@ -155,6 +155,25 @@ public:
     // most widgets never need it, and the SSR string-builder adapter
     // never will — there is no live timeline before any JS has run.
     virtual void bindMediaEvents(DomNodeHandle /*node*/, Widget * /*owner*/) {}
+
+    // ── Camera preview / captured-photo sources ─────────────────────────
+    // A live camera feed is a MediaStream, not a fetchable URL — it can't
+    // go through setAttr("src", ...) the way VideoPlayerWidget's file/URL
+    // sources do. Attaches whatever camera stream is CURRENTLY open (if
+    // any) to `node`'s .srcObject. Implementations must be idempotent —
+    // reassigning srcObject to a stream it's already attached to restarts
+    // playback, the same hazard VideoPlayerWidget::_domVideoSrcApplied
+    // guards against for plain src. Default no-op: SSR has no live
+    // stream and no live document to attach one to.
+    virtual void setCameraPreviewSource(DomNodeHandle /*node*/) {}
+
+    // Loads bytes from a native/MEMFS file path into `node`'s src via a
+    // Blob URL, revoking any previously-assigned Blob URL on this node
+    // first. Used by CameraWidget's thumbnail, which is written to disk
+    // by the capture pipeline rather than being reachable by ordinary
+    // URL. Default no-op: SSR never has a captured photo to read.
+    virtual void setImageSourceFromFile(DomNodeHandle /*node*/,
+                                        const std::string & /*path*/) {}
 };
 
 // ============================================================================

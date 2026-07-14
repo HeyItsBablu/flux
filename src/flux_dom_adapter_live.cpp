@@ -160,24 +160,25 @@ extern "C" void fluxDomAdapterLiveFinishHydration()
 class LiveDomAdapter : public IDomAdapter
 {
 public:
-    DomNodeHandle createNode(const char *tag, const std::string &hydrationId) override
-    {
-        int handle = EM_ASM_INT({
-            var tagStr = UTF8ToString($0);
-            var hid = UTF8ToString($1);
-            if (Module._fluxHydrating && hid.length > 0)
+DomNodeHandle createNode(const char *tag, const std::string &hydrationId) override
+{
+    int handle = EM_ASM_INT({
+        var tagStr = UTF8ToString($0);
+        var hid = UTF8ToString($1);
+        if (Module._fluxHydrating && hid.length > 0)
+        {
+            var existing = Module._fluxDomAdopt(hid);
+            if (existing)
             {
-                var existing = Module._fluxDomAdopt(hid);
-                if (existing)
-                {
-                    var h = Module._fluxDomNodes.length;
-                    Module._fluxDomNodes.push(existing);
-                    return h;
-                }
+                var h = Module._fluxDomNodes.length;
+                Module._fluxDomNodes.push(existing);
+                return h;
             }
-            return Module._fluxDomAlloc(tagStr); }, tag, hydrationId.c_str());
-        return (DomNodeHandle)handle;
-    }
+            console.warn('[flux] hydration MISS id="' + hid + '" tag=' + tagStr);
+        }
+        return Module._fluxDomAlloc(tagStr); }, tag, hydrationId.c_str());
+    return (DomNodeHandle)handle;
+}
 
     void setStyle(DomNodeHandle node, const char *prop,
                   const std::string &value) override
@@ -252,13 +253,13 @@ public:
         g_inputEventTargets.erase(node);
         EM_ASM({
             var el = Module._fluxDomNodes[$0];
-            if (!el)
-                return;
-            if (el.parentNode)
-                el.parentNode.removeChild(el);
-            Module._fluxDomNodes[$0] = null; // free the slot
-        },
-               node);
+            if (!el) return;
+            if (el._fluxBlobUrl) {
+                URL.revokeObjectURL(el._fluxBlobUrl);
+                el._fluxBlobUrl = null;
+            }
+            if (el.parentNode) el.parentNode.removeChild(el);
+            Module._fluxDomNodes[$0] = null; }, node);
     }
 
     void setInputValue(DomNodeHandle node, const std::string &value) override
@@ -415,6 +416,52 @@ public:
             el.addEventListener('ended', function () {
                 Module.ccall('fluxDomOnMediaEnded', null, ['number'], [handle]);
             }); }, node);
+    }
+
+    void setCameraPreviewSource(DomNodeHandle node) override
+    {
+        if (node == kInvalidDomNode)
+            return;
+        EM_ASM({
+            var el = Module._fluxDomNodes[$0];
+            if (!el) return;
+            var stream = Module._fluxCameraStream;
+            if (!stream) return;
+            // A MediaStream can feed any number of independent <video>
+            // elements at once — this is a SECOND sink alongside
+            // flux_camera_web.cpp's own hidden engine element, not a
+            // duplicate decode. Guard is still needed: reassigning
+            // srcObject to the SAME stream restarts it.
+            if (el.srcObject !== stream) {
+                el.srcObject = stream;
+                var p = el.play();
+                if (p && p.catch) p.catch(function(){});
+            } }, node);
+    }
+
+    void setImageSourceFromFile(DomNodeHandle node, const std::string &path) override
+    {
+        if (node == kInvalidDomNode)
+            return;
+        EM_ASM({
+            var el = Module._fluxDomNodes[$0];
+            if (!el) return;
+            var path = UTF8ToString($1);
+
+            if (el._fluxBlobUrl) {
+                URL.revokeObjectURL(el._fluxBlobUrl);
+                el._fluxBlobUrl = null;
+            }
+            var bytes;
+            try { bytes = FS.readFile(path); }
+            catch (e) {
+                console.error('[flux] setImageSourceFromFile: FS.readFile failed for', path, e);
+                return;
+            }
+            var blob = new Blob([bytes], { type: 'image/jpeg' });
+            var url = URL.createObjectURL(blob);
+            el._fluxBlobUrl = url;
+            el.src = url; }, node, path.c_str());
     }
 
     void setRoot(DomNodeHandle node) override

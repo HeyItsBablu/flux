@@ -148,7 +148,6 @@ public:
 
     void render(GraphicsContext &ctx, FontCache &fontCache) override
     {
-        // Deferred open flag set by platform (e.g. after permission granted)
         if (_shouldOpen)
         {
             _shouldOpen = false;
@@ -160,18 +159,15 @@ public:
         Painter p(ctx, this);
         int viewH = height - barHeight;
 
-        // Load thumbnail when a new photo arrives
         if (_thumbDirty && !_lastPhotoPath.empty())
         {
             _thumbDirty = false;
             _platformLoadThumb(_lastPhotoPath);
         }
 
-        // Preview — delegates all pixel work to the platform implementation
         if (!_platformRenderPreview(ctx, p, fontCache, viewH))
         {
-            // Placeholder while camera opens
-            p.fillRect(x, y, width, viewH, colPlaceholder);
+            p.fillRect(x, y, width, viewH, colPlaceholder, "previewBg");
             NativeFont tf = fontCache.getFont(
 #ifdef _WIN32
                 "Segoe UI",
@@ -184,72 +180,52 @@ public:
             p.drawText(toWideString("Opening camera..."),
                        x, y, width, viewH, tf,
                        Color::fromRGB(120, 120, 120),
-                       DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                       DT_CENTER | DT_VCENTER | DT_SINGLELINE, "previewText");
         }
 
-        // Flash overlay
         if (_flashAlpha > 0.f)
         {
-            _platformRenderFlash(ctx, p, viewH);
+            _platformRenderFlash(ctx, p, viewH); // give this its own slot too — see below
             _flashAlpha -= 0.15f;
             if (_flashAlpha < 0.f)
                 _flashAlpha = 0.f;
             markNeedsPaint();
         }
 
-        // Thumbnail (bottom-left corner)
         if (!_lastPhotoPath.empty())
         {
             constexpr int thumbW = 44, thumbH = 44;
             int thumbX = x + 8;
             int thumbY = y + viewH - thumbH - 8;
-
-            p.fillRect(thumbX - 2, thumbY - 2,
-                       thumbW + 4, thumbH + 4, colThumbBorder);
-
+            p.fillRect(thumbX - 2, thumbY - 2, thumbW + 4, thumbH + 4, colThumbBorder, "thumbBorder");
             if (!_platformRenderThumb(ctx, thumbX, thumbY, thumbW, thumbH))
-            {
-                p.fillRect(thumbX, thumbY, thumbW, thumbH,
-                           Color::fromRGB(60, 60, 60));
-            }
+                p.fillRect(thumbX, thumbY, thumbW, thumbH, Color::fromRGB(60, 60, 60), "thumbFallback");
         }
 
-        // Control bar
         int barY = y + viewH;
-        p.fillRect(x, barY, width, barHeight, colBar);
+        p.fillRect(x, barY, width, barHeight, colBar, "barBg");
         int midY = barY + barHeight / 2;
 
-        // Flash button (left)
         constexpr int iconR = 16;
         int flashCx = x + 36;
-        _flashBtnRect = {flashCx - iconR, barY + (barHeight - iconR * 2) / 2,
-                         iconR * 2, iconR * 2};
-        Color flashCol = _hovFlash
-                             ? colIconHov
-                             : (cam.isFlashOn() ? colIconActive : colIcon);
-        _drawFlashIcon(p, flashCx, midY, 12, flashCol);
+        _flashBtnRect = {flashCx - iconR, barY + (barHeight - iconR * 2) / 2, iconR * 2, iconR * 2};
+        Color flashCol = _hovFlash ? colIconHov : (cam.isFlashOn() ? colIconActive : colIcon);
+        _drawFlashIcon(p, flashCx, midY, 12, flashCol, "flashIcon");
 
-        // Shutter button (center)
         int shutterR = 22;
         int shutterCx = x + width / 2;
-        _shutterRect = {shutterCx - shutterR, barY + (barHeight - shutterR * 2) / 2,
-                        shutterR * 2, shutterR * 2};
-        p.drawEllipse(shutterCx - shutterR - 3,
-                      midY - shutterR - 3,
+        _shutterRect = {shutterCx - shutterR, barY + (barHeight - shutterR * 2) / 2, shutterR * 2, shutterR * 2};
+        p.drawEllipse(shutterCx - shutterR - 3, midY - shutterR - 3,
                       (shutterR + 3) * 2, (shutterR + 3) * 2,
-                      Color::fromRGBA(0, 0, 0, 0), colShutterRing, 2);
-        Color sc = cam.isCapturing()
-                       ? Color::fromRGB(200, 200, 200)
-                       : (_hovShutter ? colShutterHov : colShutter);
-        p.drawEllipse(shutterCx - shutterR, midY - shutterR,
-                      shutterR * 2, shutterR * 2, sc, sc, 0);
+                      Color::fromRGBA(0, 0, 0, 0), colShutterRing, 2, "shutterRing");
+        Color sc = cam.isCapturing() ? Color::fromRGB(200, 200, 200)
+                                     : (_hovShutter ? colShutterHov : colShutter);
+        p.drawEllipse(shutterCx - shutterR, midY - shutterR, shutterR * 2, shutterR * 2, sc, sc, 0, "shutterBtn");
 
-        // Flip button (right)
         int flipCx = x + width - 36;
-        _flipBtnRect = {flipCx - iconR, barY + (barHeight - iconR * 2) / 2,
-                        iconR * 2, iconR * 2};
+        _flipBtnRect = {flipCx - iconR, barY + (barHeight - iconR * 2) / 2, iconR * 2, iconR * 2};
         Color flipCol = _hovFlip ? colIconHov : colIcon;
-        _drawFlipIcon(p, flipCx, midY, 12, flipCol);
+        _drawFlipIcon(p, flipCx, midY, 12, flipCol, "flipIcon");
 
         needsPaint = false;
     }
@@ -363,7 +339,7 @@ public:
     std::unique_ptr<Win32State, Win32StateDeleter> _win32;
 #endif // _WIN32
 
-#if defined(__linux__) && !defined(__ANDROID__)
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(FLUX_SSR)
     // ── Linux: Cairo surfaces + BGRX frame cache ──────────────────────────
     struct LinuxState
     {
@@ -394,7 +370,7 @@ public:
         int cachedSrcW = 0;
         int cachedSrcH = 0;
 
-        void *thumbTexture = nullptr;   // id<MTLTexture>, retained via __bridge_retained
+        void *thumbTexture = nullptr; // id<MTLTexture>, retained via __bridge_retained
         int thumbSrcW = 0;
         int thumbSrcH = 0;
     };
@@ -417,6 +393,10 @@ private:
     bool _hovFlip = false;
 
     std::function<void(const std::string &)> _onPhoto;
+    // ── DOM/SSR shared state ─────────────────────────────────────────
+#if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
+    bool _domPreviewSrcApplied = false;
+#endif
 
     // ── Hit rects ─────────────────────────────────────────────────────────────
     struct Rect
@@ -506,17 +486,17 @@ private:
         markNeedsPaint();
     }
 
-    static void _drawFlashIcon(Painter &p, int cx, int cy, int sz, Color col)
+    static void _drawFlashIcon(Painter &p, int cx, int cy, int sz, Color col, const char *slot)
     {
-        p.fillRect(cx - 2, cy - sz, 4, sz * 2, col);
-        p.fillRect(cx - sz / 2, cy - 2, sz, 4, col);
+        p.fillRect(cx - 2, cy - sz, 4, sz * 2, col, (std::string(slot) + "_v").c_str());
+        p.fillRect(cx - sz / 2, cy - 2, sz, 4, col, (std::string(slot) + "_h").c_str());
     }
 
-    static void _drawFlipIcon(Painter &p, int cx, int cy, int sz, Color col)
+    static void _drawFlipIcon(Painter &p, int cx, int cy, int sz, Color col, const char *slot)
     {
-        p.fillRect(cx - sz, cy - 2, sz * 2, 4, col);
-        p.fillRect(cx - sz, cy - sz / 2, 4, sz, col);
-        p.fillRect(cx + sz - 4, cy - sz / 2, 4, sz, col);
+        p.fillRect(cx - sz, cy - 2, sz * 2, 4, col, (std::string(slot) + "_bar").c_str());
+        p.fillRect(cx - sz, cy - sz / 2, 4, sz, col, (std::string(slot) + "_arrowL").c_str());
+        p.fillRect(cx + sz - 4, cy - sz / 2, 4, sz, col, (std::string(slot) + "_arrowR").c_str());
     }
 
     std::shared_ptr<CameraWidget> self()
