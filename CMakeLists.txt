@@ -271,6 +271,8 @@ endif()
 
 endif() # FLUX_NEED_DESKTOP_LIB
 
+if(FLUX_NEED_DESKTOP_LIB)
+
 # ── Platform source exclusions ────────────────────────────────────────────────
 # Order matters: most-specific first.
 
@@ -545,6 +547,8 @@ elseif(UNIX)
             -Wall -Wextra -Wpedantic -fexceptions
     )
 endif()
+
+endif() # FLUX_NEED_DESKTOP_LIB
 
 # ============================================================================
 # Optional subdirectories
