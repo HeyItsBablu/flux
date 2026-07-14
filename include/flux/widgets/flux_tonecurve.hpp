@@ -27,6 +27,7 @@
 #include <array>
 #include <cassert>
 #include <cmath>
+#include <cstring>
 #include <functional>
 #include <string>
 #include <vector>

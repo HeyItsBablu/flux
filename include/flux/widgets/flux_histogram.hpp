@@ -6,13 +6,14 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstring>
 #include <functional>
 #include <string>
 #include <vector>
 
 // ============================================================================
 // HISTOGRAM DATA
-// ============================================================================
+// ============================================================================ 
 
 // Holds per-channel bin counts (256 bins each, matching 8-bit pixel values).
 // You can fill this from a bitmap, a State<>, or set it manually.
