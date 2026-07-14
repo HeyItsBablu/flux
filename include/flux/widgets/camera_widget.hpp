@@ -100,6 +100,15 @@ public:
     // ── Constructor / destructor ───────────────────────────────────────────────
     CameraWidget()
     {
+
+        // Cache the owning FluxUI now, while we're guaranteed to be running
+        // on the thread that constructed FluxUI (build() always runs there).
+        // FluxUI::getCurrentInstance() is backed by a thread_local and is
+        // NOT valid from the Win32 render thread, which is where render()/
+        // _startTimer() execute after startRenderLoop() — calling
+        // getCurrentInstance() from there returns nullptr and crashes.
+        _ui = FluxUI::getCurrentInstance();
+
         autoWidth = false;
         autoHeight = false;
         width = 380;
@@ -383,6 +392,7 @@ public:
 
 private:
     // ── Shared state ─────────────────────────────────────────────────────────
+    FluxUI *_ui = nullptr;
     bool _opened = false;
     bool _shouldOpen = false;
     bool _thumbDirty = false;
@@ -451,9 +461,9 @@ private:
 
     void _startTimer()
     {
-        if (_frameTimer)
+        if (_frameTimer || !_ui)
             return;
-        _frameTimer = FluxUI::getCurrentInstance()->setInterval(33, [this]()
+        _frameTimer = _ui->setInterval(33, [this]()
                                                                 {
             if (FluxCamera::get().isPreviewing() ||
                 FluxCamera::get().isCapturing())
@@ -462,17 +472,17 @@ private:
 
     void _stopTimer()
     {
-        auto *ui = FluxUI::getCurrentInstance();
-        if (!ui)
+
+        if (!_ui)
             return;
         if (_frameTimer)
         {
-            ui->clearInterval(_frameTimer);
+            _ui->clearInterval(_frameTimer);
             _frameTimer = 0;
         }
         if (_permCheckTimer)
         {
-            ui->clearInterval(_permCheckTimer);
+            _ui->clearInterval(_permCheckTimer);
             _permCheckTimer = 0;
         }
     }

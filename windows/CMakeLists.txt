@@ -1,3 +1,4 @@
+# windows/CMakeList.txt
 include(${CMAKE_SOURCE_DIR}/config/AppConfig.cmake)
 add_executable(flux_app WIN32
     main.cpp
