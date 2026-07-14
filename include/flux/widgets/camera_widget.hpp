@@ -43,7 +43,7 @@
 using Microsoft::WRL::ComPtr;
 #endif // _WIN32
 
-#if defined(__linux__) && !defined(__ANDROID__)
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(FLUX_SSR)
 #include <cairo/cairo.h>
 #include <jpeglib.h>
 #include <setjmp.h>

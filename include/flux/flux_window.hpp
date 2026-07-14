@@ -138,7 +138,7 @@ public:
 #endif
 
     // ── DPI helpers (Linux HiDPI) ─────────────────────────────────────────────
-#if defined(__linux__) && !defined(__ANDROID__)
+#if !defined(FLUX_SSR) && defined(__linux__) && !defined(__ANDROID__)
     float dpiScaleX() const { return 1.f; }
     float dpiScaleY() const { return 1.f; }
     int logicalWidth() const { return logicalWidth_; }
