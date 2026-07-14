@@ -244,3 +244,103 @@ int cmd_remove(const std::string& package) {
     std::printf("Re-run cmake configure to drop it from the build.\n");
     return 0;
 }
+
+int cmd_install() {
+    auto root = find_project_root();
+    if (!root) {
+        std::fprintf(stderr,
+            "ERROR: could not locate project root "
+            "(no CMakeLists.txt / config/AppConfig.cmake found above current directory).\n");
+        return 1;
+    }
+
+    if (!command_exists("git")) {
+        std::fprintf(stderr, "ERROR: git not found in PATH. Run 'flux doctor' to check your toolchain.\n");
+        return 1;
+    }
+
+    json manifest = load_manifest(*root);
+    const auto& packages = manifest["packages"].asObject();
+
+    if (packages.empty()) {
+        std::printf("flux: no dependencies listed in flux.deps.json\n");
+        return 0;
+    }
+
+    auto registry = load_json_file(registry_path(*root));
+    if (!registry) {
+        std::fprintf(stderr, "ERROR: could not read registry at %s\n", registry_path(*root).string().c_str());
+        return 1;
+    }
+
+    int failures = 0;
+
+    for (const auto& [name, entry] : packages) {
+        fs::path dest = *root / "external" / name;
+
+        if (fs::exists(dest) && !fs::is_empty(dest)) {
+            std::printf("  %-20s already present, skipping\n", name.c_str());
+            continue;
+        }
+
+        if (!entry.contains("source") || !entry.contains("commit")) {
+            std::fprintf(stderr, "ERROR: %s entry in flux.deps.json is malformed (missing source/commit).\n",
+                name.c_str());
+            ++failures;
+            continue;
+        }
+
+        if (!registry->contains(name)) {
+            std::fprintf(stderr,
+                "ERROR: %s is in flux.deps.json but no longer in the registry; "
+                "cannot regenerate its cmake fragment.\n", name.c_str());
+            ++failures;
+            continue;
+        }
+
+        std::string git_url = entry["source"].asString();
+        std::string commit = entry["commit"].asString();
+        std::string cmake_fragment = (*registry)[name]["cmake_fragment"].asString();
+
+        std::printf("Fetching %s @ %s...\n", name.c_str(), commit.c_str());
+
+        // Need full history (not --depth 1) since we're checking out an
+        // arbitrary pinned commit rather than a branch tip.
+        std::string clone_cmd = "git clone " + git_url + " \"" + dest.string() + "\" 2>&1";
+        if (std::system(clone_cmd.c_str()) != 0) {
+            std::fprintf(stderr, "ERROR: failed to clone %s\n", git_url.c_str());
+            ++failures;
+            continue;
+        }
+
+        std::string checkout_cmd = "git -C \"" + dest.string() + "\" checkout --detach " + commit + " 2>&1";
+        if (std::system(checkout_cmd.c_str()) != 0) {
+            std::fprintf(stderr, "ERROR: failed to check out %s @ %s\n", name.c_str(), commit.c_str());
+            fs::remove_all(dest);
+            ++failures;
+            continue;
+        }
+
+        fs::remove_all(dest / ".git");
+
+        std::ofstream frag_out(dest / "flux-package.cmake");
+        if (!frag_out) {
+            std::fprintf(stderr, "ERROR: could not write flux-package.cmake for %s\n", name.c_str());
+            fs::remove_all(dest);
+            ++failures;
+            continue;
+        }
+        frag_out << cmake_fragment;
+        frag_out.close();
+
+        std::printf("  %-20s installed\n", name.c_str());
+    }
+
+    if (failures > 0) {
+        std::fprintf(stderr, "\nflux: %d package(s) failed to install.\n", failures);
+        return 1;
+    }
+
+    std::printf("\nAll dependencies installed. Re-run cmake configure to pick them up.\n");
+    return 0;
+}

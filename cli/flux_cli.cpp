@@ -27,9 +27,10 @@ namespace
         std::printf("Usage:\n");
         std::printf("  flux run <platform> [--release]     Build and launch\n");
         std::printf("  flux build <platform> [--release]   Build only\n");
-        std::printf("  flux doctor [platform]               Check host toolchain\n");
-        std::printf("  flux add <package> [--ref <ref>]     Add a dependency\n");
-        std::printf("  flux remove <package>                 Remove a dependency\n\n");
+        std::printf("  flux doctor [platform]              Check host toolchain\n");
+        std::printf("  flux add <package> [--ref <ref>]    Add a dependency\n");
+        std::printf("  flux remove <package>               Remove a dependency\n\n");
+        std::printf("  flux install                        Install dependencies from flux.deps.json\n");
         std::printf("Platforms:\n");
         std::printf("  windows  linux  macos  web  android\n");
     }
@@ -235,6 +236,11 @@ int main(int argc, char **argv)
             }
         }
         return cmd_add(package, ref_override);
+    }
+
+    if (command == "install")
+    {
+        return cmd_install();
     }
 
     if (command != "run" && command != "build")
