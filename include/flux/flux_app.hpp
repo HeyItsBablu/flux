@@ -122,26 +122,7 @@ private:
 
 inline thread_local AppTheme *ThemeProvider::current_ = nullptr;
 
-// ============================================================================
-// THEMED WIDGET FACTORIES
-// ============================================================================
 
-inline WidgetPtr ThemedCard(WidgetPtr child)
-{
-  const AppTheme &theme = ThemeProvider::getTheme();
-  auto w = std::make_shared<ContainerWidget>();
-  w->hasBackground = true;
-  w->backgroundColor = theme.cardColor;
-  w->hasBorder = true;
-  w->borderColor = theme.cardBorderColor;
-  w->borderWidth = 1;
-  w->borderRadius = theme.cardBorderRadius;
-  w->paddingLeft = w->paddingRight = w->paddingTop = w->paddingBottom =
-      theme.cardPadding;
-  if (child)
-    w->addChild(child);
-  return w;
-}
 
 // ============================================================================
 // FLUX APP WIDGET

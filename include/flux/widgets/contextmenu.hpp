@@ -1,7 +1,7 @@
 #ifndef FLUX_CONTEXT_MENU_HPP
 #define FLUX_CONTEXT_MENU_HPP
 
-#include "flux_structure.hpp"
+
 
 #include "flux/flux_app.hpp"
 #include "flux/flux_core.hpp"

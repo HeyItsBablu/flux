@@ -13,5 +13,6 @@
 #include "flux_secure_storage.hpp"
 #include "flux_canvas.hpp"
 #include "flux_mic.hpp"
-// #include "flux_canvas2d.hpp"
+#include "flux_icons.hpp"
+
 #endif // FLUX_HPP

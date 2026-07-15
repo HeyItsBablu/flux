@@ -1,7 +1,7 @@
 #ifndef FLUX_DROPDOWN_HPP
 #define FLUX_DROPDOWN_HPP
 
-#include "flux_structure.hpp"
+
 
 #include "flux/flux_app.hpp"
 #include "flux/flux_core.hpp"

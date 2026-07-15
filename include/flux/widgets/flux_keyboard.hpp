@@ -2,7 +2,6 @@
 #define FLUX_KEYBOARD_HPP
 
 #include "../flux_core.hpp"
-#include "flux_structure.hpp"
 #include <functional>
 #include <string>
 #include <vector>

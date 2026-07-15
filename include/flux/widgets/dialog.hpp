@@ -1,7 +1,6 @@
 #ifndef FLUX_DIALOG_HPP
 #define FLUX_DIALOG_HPP
 
-#include "flux_structure.hpp"
 
 #include "flux/flux_app.hpp"
 #include "flux/flux_core.hpp"
