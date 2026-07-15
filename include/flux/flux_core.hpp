@@ -1,5 +1,5 @@
 // include/flux/flux_core.hpp
-#ifndef FLUX_CORE_HPP
+#ifndef FLUX_CORE_HPP 
 #define FLUX_CORE_HPP
 
 #include "flux_font.hpp"
@@ -8,6 +8,7 @@
 #include "flux_renderer.hpp"
 #include "flux_widget.hpp"
 #include "flux_window.hpp"
+
 
 #include <functional>
 #include <map>

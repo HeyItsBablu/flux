@@ -8,8 +8,8 @@
 
 #include "flux/flux.hpp"
 #include "flux/flux_audio.hpp"
-#include "../flux_http.hpp"
-#include "flux_icons.hpp"
+#include "flux/flux_http.hpp"
+#include "flux/flux_icons.hpp"
 #include "flux_image.hpp"
 
 // DOM-node access for the real <audio> element path — same approach as

@@ -1,11 +1,11 @@
 #ifndef FLUX_DISPLAY_HPP
 #define FLUX_DISPLAY_HPP
 
-#include "../flux_core.hpp"
-#include "../flux_state.hpp"
-#include "../flux_text_style.hpp"
-#include "../flux_widget.hpp"
-#include "flux_icons.hpp"
+#include "flux/flux_core.hpp"
+#include "flux/flux_state.hpp"
+#include "flux/flux_text_style.hpp"
+#include "flux/flux_widget.hpp"
+#include "flux/flux_icons.hpp"
 
 #include <algorithm>
 #include <cmath>

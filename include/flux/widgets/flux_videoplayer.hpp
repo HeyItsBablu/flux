@@ -17,7 +17,7 @@
 #include <GLES2/gl2ext.h>
 #include "flux/flux.hpp"
 #include "flux/flux_video.hpp"
-#include "flux_icons.hpp"
+#include "flux/flux_icons.hpp"
 extern float FluxAndroid_getDpiScale();
 
 #elif defined(__APPLE__)
@@ -25,7 +25,7 @@ extern float FluxAndroid_getDpiScale();
 #if TARGET_OS_OSX
 #include "flux/flux.hpp"
 #include "flux/flux_video.hpp"
-#include "flux_icons.hpp"
+#include "flux/flux_icons.hpp"
 #include <CoreGraphics/CoreGraphics.h>
 
 // Defined in flux_videoplayer_macos.mm, which is ObjC++ and can therefore
@@ -40,19 +40,19 @@ void flux_videoPlayerMac_releaseTexture(void *texOpaque);
 #elif defined(_WIN32)
 #include "flux/flux.hpp"
 #include "flux/flux_video.hpp"
-#include "flux_icons.hpp"
+#include "flux/flux_icons.hpp"
 #include <wrl/client.h>
 
 #elif defined(__linux__) && !defined(FLUX_SSR)
 #include "flux/flux.hpp"
 #include "flux/flux_video.hpp"
-#include "flux_icons.hpp"
+#include "flux/flux_icons.hpp"
 #include <cairo/cairo.h>
 
 #elif defined(__EMSCRIPTEN__)
 #include "flux/flux.hpp"
 #include "flux/flux_video.hpp"
-#include "flux_icons.hpp"
+#include "flux/flux_icons.hpp"
 
 #elif defined(FLUX_SSR)
 // No frame-blit backend at all — flux_ssr never paints video frames (no
@@ -61,7 +61,7 @@ void flux_videoPlayerMac_releaseTexture(void *texOpaque);
 // platform), so flux_video.hpp is still needed for its declarations.
 #include "flux/flux.hpp"
 #include "flux/flux_video.hpp"
-#include "flux_icons.hpp"
+#include "flux/flux_icons.hpp"
 #endif
 
 // DOM-node access for the "real <video> element" path — shared by both
