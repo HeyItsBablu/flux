@@ -6,7 +6,7 @@ public:
   WidgetPtr build() override
   {
 
-    return Flex({AudioPlayer("TumMile.mp3")
+    return Flex({AudioPlayer("kamhunt-sunflower-street-drumloop-85bpm-163900.mp3")
                      ->setWidth(280),
                  CameraView()->setWidth(380)->setHeight(270)->setOnPhoto(
                      [](const std::string &path)

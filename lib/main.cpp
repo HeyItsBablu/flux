@@ -5,14 +5,18 @@ class MyApp : public Widget
 public:
   WidgetPtr build() override
   {
+    return Flex(
+               {VideoPlayer("7199171-hd_1080_1920_25fps.mp4")
+                    ->setWidth(380)
+                    ->setHeight(270) // 16:9
+                    ->setAutoPlay(false)
 
-    return Flex({
-                 CameraView()->setWidth(380)->setHeight(270)->setOnPhoto(
-                     [](const std::string &path)
-                     { std::cout << path << std::endl; })})
-        ->setBackgroundColor(Color::fromRGB(280, 180, 180))
-        ->setAlignItems(AlignItems::Center)
-        ->setJustifyContent(JustifyContent::Center)
+               })
+        ->setScrollable(true)
+        ->setDirection(FlexDirection::Column) // base (mobile): stacked
+        ->setGap(8)
+        ->setPadding(16)
+        ->setAlignItems(AlignItems::Stretch)
         ->setWidthMode(SizeMode::Full)
         ->setHeightMode(SizeMode::Full);
   }

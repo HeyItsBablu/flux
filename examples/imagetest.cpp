@@ -9,7 +9,7 @@ public:
                    {
                        // ── 1. Cover fit, small radius ──────────────────────────
                        _row(
-                           Image("https://picsum.photos/seed/fluxui/600/200")
+                           Image("pexels-eva-lin-2162680647-38453702.jpg")
                                ->setFit(ImageFit::Cover)
                                ->setBorderRadius(8),
                            "Cover Fit",
@@ -17,7 +17,7 @@ public:
 
                        // ── 2. Contain fit, large radius, tint overlay ──────────
                        _row(
-                           Image("https://picsum.photos/seed/fluxtint/600/200")
+                           Image("pexels-gonzalo-acuna-166058093-10908491.jpg")
                                ->setFit(ImageFit::Contain)
                                ->setBorderRadius(24)
                                ->setTintColor(Color::fromRGBA(0, 100, 200, 80)),
@@ -26,7 +26,7 @@ public:
 
                        // ── 3. Fully circular (radius = half of size) ───────────
                        _row(
-                           Image("https://picsum.photos/seed/fluxcircle/200/200")
+                           Image("pexels-muhamad-izzul-isyraf-mohd-radzi-2159215967-35871158.jpg")
                                ->setFit(ImageFit::Cover)
                                ->setBorderRadius(40),
                            "Circular",
