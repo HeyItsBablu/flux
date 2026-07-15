@@ -174,6 +174,30 @@ enum class SizeMode
   Full
 };
 
+// ============================================================================
+// POSITION — pulls a widget out of (or keeps it in) normal flow.
+//
+//   Static   — default. Participates in whatever layout algorithm its parent
+//              container runs (Flex / Grid / Block main-axis flow).
+//   Relative — same as Static for sizing/flow purposes; reserved so callers
+//              can later add left/top-style nudges without leaving flow.
+//              Currently behaves identically to Static (no offset applied) —
+//              see flux_absolute.hpp if/when relative offsetting is added.
+//   Absolute — removed from its parent's flow entirely. Positioned via
+//              top/right/bottom/left against the DIRECT parent container's
+//              content box (not the nearest positioned ancestor — see
+//              flux_absolute.hpp for the rationale). Every FlexWidget/
+//              GridWidget/BoxWidget skips Absolute children when building
+//              their flow list, then calls layoutAbsoluteChildren() once at
+//              the end of computeLayout() to place them.
+// ============================================================================
+
+enum class Position
+{
+  Static,
+  Relative,
+  Absolute
+};
 
 #if (defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)) || defined(FLUX_SSR)
 extern void fluxDomEvictWidget(Widget *owner);
@@ -223,13 +247,24 @@ public:
   MainAxisAlignment mainAxisAlignment = MainAxisAlignment::Start;
   int spacing = 0;
 
-  // Flex-item properties (read by whatever Flex container is this widget's parent)
+  // Flex-item properties (read by whatever Flex/Box container is this
+  // widget's parent)
   SizeMode widthMode = SizeMode::Fit;
   SizeMode heightMode = SizeMode::Fit;
   int flexGrow = 0;   // 0 = don't grow (CSS default)
   int flexShrink = 1; // 1 = shrink by default (CSS default)
   int flexBasis = -1; // -1 = auto (use intrinsic/measured size)
   int order = 0;
+
+  // ── Position (see enum above) ─────────────────────────────────────────
+  Position position = Position::Static;
+  bool hasTop = false, hasRight = false, hasBottom = false, hasLeft = false;
+  int top = 0, right = 0, bottom = 0, left = 0;
+  // Paint/hit-test order among Position::Absolute siblings only (stable
+  // sort — ties keep insertion order). Widgets in normal flow are always
+  // painted before absolute siblings, matching CSS stacking of a plain
+  // `position: static` box vs its positioned children.
+  int zIndex = 0;
 
   OverflowInfo overflow;
 
@@ -337,6 +372,37 @@ public:
   void drawRoundedRectangle(GraphicsContext &ctx);
 
   virtual bool isTextInput() const { return false; }
+
+  // -----------------------------------------------------------------------
+  // Item-source hook — used by Map (see flux_map.hpp) and consumed by
+  // BoxWidget (see flux_box.hpp). A widget that overrides isItemSource() to
+  // return true is NEVER laid out or rendered directly by its parent
+  // container; instead the container calls expandItems() to obtain the
+  // real widgets it should treat as flow children for that frame, splices
+  // them into its normal child list, and lays those out instead. This is
+  // how `Box({ Text(...), Map(items, builder), Text(...) })` works without
+  // Box needing to know anything about Map's caching/virtualization.
+  //
+  // Base implementation returns false / empty — a plain Widget is never an
+  // item source, so every existing widget type is unaffected by this hook
+  // unless it explicitly opts in (only MapWidget does today).
+  // -----------------------------------------------------------------------
+
+  virtual bool isItemSource() const { return false; }
+
+  // scrollOffset / mainAxisBudget let an item source virtualize when its
+  // container is a scrollable single-axis flow (Box in Flex/Block mode
+  // with FlexWrap::NoWrap). Pass -1 for both when the caller has no single
+  // main axis to virtualize against (e.g. Box in Grid mode) — the item
+  // source should then just build everything.
+  virtual std::vector<Widget *> expandItems(GraphicsContext & /*ctx*/,
+                                            FontCache & /*fontCache*/,
+                                            const BoxConstraints & /*itemConstraints*/,
+                                            int /*scrollOffset*/,
+                                            int /*mainAxisBudget*/)
+  {
+    return {};
+  }
 
   // -----------------------------------------------------------------------
   // Mouse / keyboard event handlers
@@ -486,6 +552,51 @@ public:
   const std::string &getId() const { return id; }
 
   // -----------------------------------------------------------------------
+  // Position helpers (chainable, mirrors the rest of the widget setters)
+  // -----------------------------------------------------------------------
+
+  WidgetPtr setPosition(Position p)
+  {
+    position = p;
+    markNeedsLayout();
+    return shared_from_this();
+  }
+  WidgetPtr setTop(int v)
+  {
+    top = v;
+    hasTop = true;
+    markNeedsLayout();
+    return shared_from_this();
+  }
+  WidgetPtr setRight(int v)
+  {
+    right = v;
+    hasRight = true;
+    markNeedsLayout();
+    return shared_from_this();
+  }
+  WidgetPtr setBottom(int v)
+  {
+    bottom = v;
+    hasBottom = true;
+    markNeedsLayout();
+    return shared_from_this();
+  }
+  WidgetPtr setLeft(int v)
+  {
+    left = v;
+    hasLeft = true;
+    markNeedsLayout();
+    return shared_from_this();
+  }
+  WidgetPtr setZIndex(int z)
+  {
+    zIndex = z;
+    markNeedsPaint();
+    return shared_from_this();
+  }
+
+  // -----------------------------------------------------------------------
   // Constraint helpers
   // -----------------------------------------------------------------------
 
@@ -532,6 +643,83 @@ protected:
       height = maxHeight;
   }
 };
+
+// ============================================================================
+// ABSOLUTE-POSITIONED CHILD LAYOUT
+//
+// Shared by every container (BoxWidget in all three display modes, and any
+// future container type) so "position: absolute" behaves identically
+// everywhere instead of each container re-implementing it slightly
+// differently. Called once at the END of a container's computeLayout(),
+// after its own x/y/width/height are final.
+//
+// Deliberately resolves against the DIRECT parent's content box, not the
+// nearest "positioned" (relative/absolute) ancestor the way CSS does —
+// walking an arbitrary-depth ancestor chain at layout time is a real cost
+// and a real source of "why is this 400px off" bugs for comparatively
+// little benefit here. If you need to position against a further-up
+// ancestor, wrap that ancestor's subtree in an extra Box and anchor there.
+// ============================================================================
+
+inline void layoutAbsoluteChildren(Widget *container, GraphicsContext &ctx,
+                                   FontCache &fontCache)
+{
+  if (!container)
+    return;
+
+  int cx = container->x + container->paddingLeft;
+  int cy = container->y + container->paddingTop;
+  int cw = container->width - container->paddingLeft - container->paddingRight;
+  int ch = container->height - container->paddingTop - container->paddingBottom;
+  cw = std::max(0, cw);
+  ch = std::max(0, ch);
+
+  std::vector<Widget *> abs;
+  for (auto &c : container->children)
+    if (c->visible && c->position == Position::Absolute)
+      abs.push_back(c.get());
+
+  if (abs.empty())
+    return;
+
+  // Stable sort — ties keep insertion (children-vector) order, matching
+  // how CSS resolves equal z-index by document order.
+  std::stable_sort(abs.begin(), abs.end(), [](Widget *a, Widget *b)
+                   { return a->zIndex < b->zIndex; });
+
+  for (auto *child : abs)
+  {
+    int minW = 0, maxW = cw, minH = 0, maxH = ch;
+
+    if (child->hasLeft && child->hasRight)
+      minW = maxW = std::max(0, cw - child->left - child->right);
+    if (child->hasTop && child->hasBottom)
+      minH = maxH = std::max(0, ch - child->top - child->bottom);
+
+    // widthMode/heightMode == Fixed still wins over left+right sizing,
+    // same precedence Fixed always has elsewhere in the layout system.
+    if (child->widthMode == SizeMode::Fixed)
+      minW = maxW = child->width;
+    if (child->heightMode == SizeMode::Fixed)
+      minH = maxH = child->height;
+
+    child->computeLayout(ctx, BoxConstraints(minW, maxW, minH, maxH), fontCache);
+
+    int px = child->hasLeft ? cx + child->left
+             : child->hasRight ? cx + cw - child->right - child->width
+                               : cx;
+    int py = child->hasTop ? cy + child->top
+             : child->hasBottom ? cy + ch - child->bottom - child->height
+                                : cy;
+
+    child->x = px;
+    child->y = py;
+    child->positionChildren(child->x + child->paddingLeft,
+                            child->y + child->paddingTop,
+                            child->width - child->paddingLeft - child->paddingRight,
+                            child->height - child->paddingTop - child->paddingBottom);
+  }
+}
 
 // ============================================================================
 // HIT TESTING

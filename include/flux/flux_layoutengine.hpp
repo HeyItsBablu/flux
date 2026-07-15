@@ -10,6 +10,12 @@ public:
                               int availableHeight, FontCache &fontCache) {
         if (!w)
             return;
+        // Stamp the viewport width onto ctx before laying out, so any
+        // widget in the tree (BoxWidget::resolveProps(), for its
+        // responsive() breakpoints) can read it directly from the ctx
+        // it's already been handed, instead of reaching for a thread_local
+        // FluxUI singleton that may not be valid on the calling thread.
+        ctx.fluxViewportWidth = availableWidth;
         w->computeLayout(
             ctx, BoxConstraints::loose(availableWidth, availableHeight), fontCache);
     }

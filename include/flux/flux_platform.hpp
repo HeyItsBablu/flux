@@ -672,6 +672,7 @@ struct GraphicsContext
 {
     int width = 0;
     int height = 0;
+    int fluxViewportWidth = 0;
 
     GraphicsContext() = default;
     GraphicsContext(int w, int h) : width(w), height(h) {}
@@ -691,6 +692,7 @@ struct GraphicsContext
     BrushCache *brushes = nullptr;
 
     std::vector<HRGN> clipStack;
+    int fluxViewportWidth = 0;
 
     GraphicsContext() = default;
     GraphicsContext(ID2D1DeviceContext1 *dc,
@@ -711,6 +713,7 @@ struct GraphicsContext
     cairo_t *cr = nullptr;
     int width = 0;
     int height = 0;
+    int fluxViewportWidth = 0;
 
     GraphicsContext() = default;
     explicit GraphicsContext(cairo_t *c, int w = 0, int h = 0)
@@ -727,6 +730,7 @@ struct GraphicsContext
 {
     int width = 0;
     int height = 0;
+    int fluxViewportWidth = 0;
 
 
     GraphicsContext() = default;
@@ -762,6 +766,7 @@ struct GraphicsContext
 
     int width = 0; // physical pixels
     int height = 0;
+    int fluxViewportWidth = 0;
 
     GraphicsContext() = default;
 
@@ -782,6 +787,7 @@ struct GraphicsContext
 {
     int width = 0;
     int height = 0;
+    int fluxViewportWidth = 0;
 
     GraphicsContext() = default;
     GraphicsContext(int w, int h) : width(w), height(h) {}

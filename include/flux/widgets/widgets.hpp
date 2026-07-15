@@ -1,14 +1,15 @@
 #ifndef WIDGETS_HPP
 #define WIDGETS_HPP
 
-
+#include "flux_box.hpp"
+#include "flux_map.hpp"
 #include "flux_page.hpp"
-#include "flux_flex.hpp"
-#include "flux_flex_builder.hpp"
-#include "flux_grid.hpp"
+// #include "flux_flex.hpp"
+// #include "flux_flex_builder.hpp"
+// #include "flux_grid.hpp"
 #include "flux_action.hpp"
 #include "flux_display.hpp"
-#include "flux_collection.hpp"
+// #include "flux_collection.hpp"
 #include "flux_conditional.hpp"
 #include "flux_image.hpp"
 #include "flux_input.hpp"
