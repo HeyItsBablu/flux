@@ -587,6 +587,18 @@ private:
     // offer virtualization through this path (see class doc comment).
     bool scrollAxisIsMain_ = true;
 
+    // ── click tracking ───────────────────────────────────────────────────
+    // Separate from sb_/gesture_'s drag state: a Box only becomes a click
+    // target once onClick is set via setOnClick(). Press must both START
+    // and END inside our bounds to fire — same "drag off before release
+    // cancels" behavior as ButtonWidget/IconButtonWidget.
+    bool _pressed = false;
+
+    bool _hit(int mx, int my) const
+    {
+        return mx >= x && mx < x + width && my >= y && my < y + height;
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────
 
     BoxProps resolveProps(const GraphicsContext &ctx) const
@@ -944,7 +956,8 @@ private:
                     usedMainFinal += P.gap;
             }
             line.usedMain = usedMainFinal;
-            line.crossSize = scrollableCross
+            bool crossFillsContainer = (P.wrap == FlexWrap::NoWrap) || scrollableCross;
+            line.crossSize = crossFillsContainer
                                  ? std::max(containerCrossSize_, lineCrossMax)
                                  : lineCrossMax;
 
@@ -1908,6 +1921,16 @@ public:
         markNeedsLayout();
         return self();
     }
+    // ── Click handling ───────────────────────────────────────────────────
+    // Makes this Box a click target. Setting a handler here is what turns
+    // handleMouseDown/handleMouseUp's click detection on (see the private
+    // click-tracking block above) — a Box with no onClick set stays fully
+    // non-consuming for mouse events, same as before this feature existed.
+    std::shared_ptr<BoxWidget> setOnClick(ClickHandler h)
+    {
+        onClick = std::move(h);
+        return self();
+    }
 
     // ── Flex-only setters ────────────────────────────────────────────────
 
@@ -2185,6 +2208,16 @@ public:
                 ui->captureMouseInput();
             return true;
         }
+        // Only a click target if the caller opted in via setOnClick() —
+        // otherwise stay non-consuming so non-interactive Box containers
+        // (the overwhelming majority) behave exactly as before and don't
+        // block scroll/drag/hover on any ancestor.
+        if (onClick && _hit(mx, my))
+        {
+            _pressed = true;
+            markNeedsPaint();
+            return true;
+        }
         return false;
     }
     bool handleMouseUp(int mx, int my) override
@@ -2207,11 +2240,27 @@ public:
             markNeedsPaint();
             return true;
         }
+        if (_pressed)
+        {
+            _pressed = false;
+            markNeedsPaint();
+            // Fire only if release also lands inside bounds — dragging the
+            // pointer off the Box before releasing cancels the click, same
+            // convention as ButtonWidget::handleMouseUp.
+            if (onClick && _hit(mx, my))
+                onClick();
+            return true;
+        }
         return false;
     }
     bool handleMouseLeave() override
     {
         gesture_.cancel();
+        // A press that leaves the widget's bounds entirely (mouse capture
+        // lost, e.g. window blur mid-drag) shouldn't leave _pressed stuck
+        // true forever — clear it defensively, matching IconButtonWidget's
+        // handleMouseLeave doing the same for _pressed there.
+        _pressed = false;
         if (!sb_.onMouseLeave())
             return false;
         markNeedsPaint();
