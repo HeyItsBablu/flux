@@ -1,9 +1,9 @@
 #ifndef FLUX_ACTION_HPP
 #define FLUX_ACTION_HPP
 
-#include "../flux_core.hpp"
+#include "flux/flux_core.hpp"
 #include "flux_display.hpp"
-#include "flux_icons.hpp"
+#include "flux/flux_icons.hpp"
 #include "flux/flux_dom_adapter.hpp"
 #include <chrono>
 
