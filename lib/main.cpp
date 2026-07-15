@@ -1,67 +1,90 @@
+// lib/main.cpp
 #include "flux/flux.hpp"
+#include "flux/flux_navigator.hpp"
 
-class TriangleSurface : public RenderSurface
+// ============================================================
+//  Home page — plain static route, no params
+// ============================================================
+class HomePage : public Widget
 {
-    float time_ = 0;
-
-public:
-    void initialize(int, int) override {}
-    void resize(int, int) override {}
-    void destroy() override {}
-    void update(double dt) override { time_ += float(dt); }
-
-    void render(Canvas2D &ctx) override
-    {
-        ctx.setFillColor({15, 15, 20, 255});
-        ctx.fillRect(0, 0, ctx.width(), ctx.height());
-
-        ctx.setFillColor({255, 80, 80, 255}); // solid red — no HSV/gradient
-        ctx.beginPath();
-        float cx = ctx.width() * 0.5f;
-        float cy = ctx.height() * 0.5f;
-        float r = std::min(ctx.width(), ctx.height()) * 0.4f;
-        ctx.moveTo(cx, cy - r);
-        ctx.lineTo(cx - r * 0.866f, cy + r * 0.5f);
-        ctx.lineTo(cx + r * 0.866f, cy + r * 0.5f);
-        ctx.closePath();
-        ctx.fill();
-    }
-
-    bool needsContinuousRedraw() const override { return true; }
-};
-// ============================================================================
-// App
-// ============================================================================
-
-class TriangleApp : public Widget
-{
-    static constexpr int kCanvasW = 512, kCanvasH = 512;
-
 public:
     WidgetPtr build() override
     {
-        auto canvas = std::make_shared<CanvasWidget>();
-        canvas->setScrollbarsEnabled(false)
-            ->setViewportEnabled(false)
-            ->setFlexGrow(1)
-            ->setSurface<TriangleSurface>();
+        return Flex({
+            Text("Home")->setFontWeight(FontWeight::Bold)->setFontSize(24),
+            Text("Pick a product:"),
+            Button("Product 1", []() { Navigator::navigate("/products/1"); }),
+            Button("Product 2", []() { Navigator::navigate("/products/2"); }),
+            Button("Go to Settings", []() { Navigator::navigate("/settings"); }),
+        })
+        ->setDirection(FlexDirection::Column)
+        ->setGap(12)
+        ->setPadding(24);
+    }
+};
 
-        return Box({canvas})
-            ->setDisplay(Display::Flex)
-            ->setDirection(FlexDirection::Column)
-            ->setAlignItems(AlignItems::Stretch)
-            ->setWidthMode(SizeMode::Full)
-            ->setHeightMode(SizeMode::Full);
+// ============================================================
+//  Product page — parameterized route: /products/:id
+//  This is the actual thing Phase 2 adds. Reading the id in the
+//  CONSTRUCTOR proves params survive navigate(), browser back/
+//  forward, AND a hard page refresh on the deep link.
+// ============================================================
+class ProductPage : public Widget
+{
+    std::string productId;
+public:
+    ProductPage()
+    {
+        // arguments<T>() must be called in the constructor per the
+        // header's own documented contract.
+        RouteParams params = Navigator::arguments<RouteParams>();
+        auto it = params.find("id");
+        productId = (it != params.end()) ? it->second : "(missing)";
+    }
+
+    WidgetPtr build() override
+    {
+        return Flex({
+            Text("Product Page")->setFontWeight(FontWeight::Bold)->setFontSize(24),
+            Text("id = " + productId),
+            Button("Back", []() { Navigator::pop(); }),
+            Button("Go Home", []() { Navigator::pushAndRemoveAllNamed("/"); }),
+        })
+        ->setDirection(FlexDirection::Column)
+        ->setGap(12)
+        ->setPadding(24);
+    }
+};
+
+// ============================================================
+//  Settings page — second plain static route, to test that pop()
+//  and popUntil() still behave with a params-based stack mixed in.
+// ============================================================
+class SettingsPage : public Widget
+{
+public:
+    WidgetPtr build() override
+    {
+        return Flex({
+            Text("Settings")->setFontWeight(FontWeight::Bold)->setFontSize(24),
+            Button("Back", []() { Navigator::maybePop(); }),
+        })
+        ->setDirection(FlexDirection::Column)
+        ->setGap(12)
+        ->setPadding(24);
     }
 };
 
 // ============================================================
 //  Entry point
 // ============================================================
-
 WidgetPtr createApp(FluxUI *app)
 {
     return FluxApp()
         .setTheme(AppTheme::light())
-        .build(std::make_shared<TriangleApp>());
+        .build(Navigator::init({
+            {"/",              [] { return std::make_shared<HomePage>();     }},
+            {"/products/:id",  [] { return std::make_shared<ProductPage>();  }},
+            {"/settings",      [] { return std::make_shared<SettingsPage>(); }},
+        }, "/"));
 }

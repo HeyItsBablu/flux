@@ -6,7 +6,7 @@ public:
   WidgetPtr build() override
   {
     return Flex(
-               {VideoPlayer("assets/sample.mp4")
+               {VideoPlayer("7199171-hd_1080_1920_25fps.mp4")
                     ->setWidth(380)
                     ->setHeight(270) // 16:9
                     ->setAutoPlay(false)
