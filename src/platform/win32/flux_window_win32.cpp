@@ -32,7 +32,8 @@ static GraphicsContext makeContext(D3DDevice *dev)
         dev->d2dContext.Get(),
         dev->dwriteFactory.Get(),
         dev->d2dFactory.Get(),
-        &dev->brushCache);
+        &dev->brushCache,
+        dev);
 }
 
 // ============================================================================

@@ -254,6 +254,9 @@ inline std::wstring toWideString(const char *data, int byteCount)
 #include <d2d1_1helper.h>
 #include <dwrite_3.h>
 
+struct D3DDevice; // full definition in flux_d3d_device.hpp; only a pointer
+                   // is stored on GraphicsContext, so no include needed here.
+
 using AppInstance = HINSTANCE;
 using TimerID = uint32_t;
 
@@ -691,6 +694,15 @@ struct GraphicsContext
     ID2D1Factory1 *factory = nullptr;
     BrushCache *brushes = nullptr;
 
+
+    // Owning device for this frame — threaded through explicitly so
+    // render-thread-only code (CanvasWidget's D2D backend) never needs to
+    // fall back to the thread_local FluxUI::getCurrentInstance(), which is
+    // only ever set on the thread that constructed FluxUI (the main/UI
+    // thread on Win32, not the RenderLoop thread that actually calls
+    // render()). See flux_canvas_win32.cpp's ensureD2D/getDevice.
+    D3DDevice *device = nullptr;
+
     std::vector<HRGN> clipStack;
     int fluxViewportWidth = 0;
 
@@ -698,8 +710,9 @@ struct GraphicsContext
     GraphicsContext(ID2D1DeviceContext1 *dc,
                     IDWriteFactory3 *dwrite,
                     ID2D1Factory1 *factory,
-                    BrushCache *brushes)
-        : dc(dc), dwrite(dwrite), factory(factory), brushes(brushes) {}
+                    BrushCache *brushes,
+                    D3DDevice *device = nullptr)
+        : dc(dc), dwrite(dwrite), factory(factory), brushes(brushes), device(device) {}
 
     bool valid() const { return dc != nullptr; }
 };

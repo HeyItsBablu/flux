@@ -54,36 +54,18 @@ static inline D2D1_COLOR_F rgba(float r, float g, float b, float a)
     return D2D1::ColorF(r, g, b, a);
 }
 
-static D3DDevice *getDevice()
-{
-    auto *inst = FluxUI::getCurrentInstance();
-    if (!inst)
-        return nullptr;
-    auto *win = inst->getPlatformWindowPtr();
-    if (!win)
-        return nullptr;
-    return win->getD3DDevice();
-}
 
-static ID2D1DeviceContext *mainDC()
-{
-    auto *inst = FluxUI::getCurrentInstance();
-    if (!inst)
-        return nullptr;
-    auto ctx = inst->getPlatformWindowPtr()->getD2DContext();
-    return ctx.dc;
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Ensure Canvas2D is initialised and bitmap is the right size
 // ─────────────────────────────────────────────────────────────────────────────
 
-static void ensureD2D(CanvasWidget *w, GraphicsContext &/*gctx*/)
+static void ensureD2D(CanvasWidget *w, GraphicsContext &gctx)
 {
     auto &s = d2dState(w);
     if (!s.backend)
     {
-        D3DDevice *dev = getDevice();
+        D3DDevice *dev = gctx.device;
         if (!dev || !dev->valid)
             return;
 

@@ -1,4 +1,3 @@
-//app/src/main/cpp/main.cpp
 #include "flux/flux.hpp"
 
 class MyApp : public Widget
