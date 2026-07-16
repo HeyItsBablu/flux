@@ -575,7 +575,9 @@ void android_main(android_app *app)
         FluxGL_beginFrame((float)sz.width, (float)sz.height, dpi);
 
         GraphicsContext gc(sz.width, sz.height);
-        Renderer::renderWidget(gc, s_app->getRoot().get(), s_app->getFontCache());
+
+        if (win.callbacks.onPaint)
+            win.callbacks.onPaint(gc, sz.width, sz.height);
 
         eglSwapBuffers(win.getEGLDisplay(), win.getEGLSurface());
     }
