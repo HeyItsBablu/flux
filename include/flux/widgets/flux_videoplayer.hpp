@@ -1182,24 +1182,34 @@ private:
         glDeleteShader(vs);
         glDeleteShader(fs);
 
-        // Full-screen NDC quad (triangle strip)
+        // Full-screen NDC quad (triangle strip).
+        // V is flipped relative to a "naive" full-screen blit quad —
+        // without this flip, the frame written into _fboTex ends up
+        // upside down once it's re-sampled later by drawTexture()
+        // (whose vertex shader maps screen-top -> texel v=0). We don't
+        // have access to SurfaceTexture::getTransformMatrix() here (no
+        // per-frame transform is plumbed through from FluxVideo), so
+        // this assumes the common/default MediaCodec OES orientation.
+        // If a specific device/decoder still shows it flipped or
+        // mirrored, the real fix is threading getTransformMatrix()'s
+        // 4x4 matrix through into this shader instead of a fixed quad.
         static const float quad[] = {
             -1.f,
             -1.f,
             0.f,
-            1.f,
-            1.f,
-            -1.f,
-            1.f,
+            0.f,
             1.f,
             -1.f,
             1.f,
             0.f,
-            0.f,
-            1.f,
-            1.f,
+            -1.f,
             1.f,
             0.f,
+            1.f,
+            1.f,
+            1.f,
+            1.f,
+            1.f,
         };
         glGenBuffers(1, &_oesVBO);
         glBindBuffer(GL_ARRAY_BUFFER, _oesVBO);

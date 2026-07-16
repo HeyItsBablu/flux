@@ -172,49 +172,10 @@ public:
                            ->setGap(12)
                            ->setPadding(16),
 
-                       Divider(),
 
-                       // ── NumberInput ───────────────────────────────────────────
-                       Flex({Text("NumberInput")
-                                 ->setFontWeight(FontWeight::Bold)
-                                 ->setMinWidth(120),
-                             NumberInput(0.0, 999.0, 1.0)
-                                 ->setValue(numberState)
-                                 ->setOnValueChanged(
-                                     [this](double v)
-                                     { numberState.set(v); })
-                                 ->setWidth(120),
-                             Text(
-                                 numberState,
-                                 [](double v)
-                                 { return "= " + std::to_string((int)v); })
-                                 ->setTextColor(Color::fromRGB(100, 100, 100))})
-                           ->setGap(12)
-                           ->setPadding(16),
 
-                       Divider(),
 
-                       // ── SpinBox (decimal) ─────────────────────────────────────
-                       Flex({Text("SpinBox")
-                                 ->setFontWeight(FontWeight::Bold)
-                                 ->setMinWidth(120),
-                             SpinBox(0.0, 10.0, 0.1)
-                                 ->setDecimalPlaces(1)
-                                 ->setPrefix("x ")
-                                 ->setSuffix(" kg")
-                                 ->setValue(numberState)
-                                 ->setWidth(140),
-                             Text(numberState,
-                                  [](double v)
-                                  {
-                                      std::ostringstream oss;
-                                      oss << std::fixed << std::setprecision(1) << v
-                                          << " kg";
-                                      return oss.str();
-                                  })
-                                 ->setTextColor(Color::fromRGB(100, 100, 100))})
-                           ->setGap(12)
-                           ->setPadding(16),
+
 
                    })
             ->setBackgroundColor(Color::fromRGB(280, 180, 180))

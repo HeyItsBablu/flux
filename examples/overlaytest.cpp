@@ -17,30 +17,28 @@ public:
         // ── Dialog ───────────────────────────────────────────────────────────
         // Built fresh on every build() so the pointer is never stale.
         confirmDialog = Dialog(
-                            Column({
-                                       Text("Dialog is open!")
-                                           ->setFontSize(18)
-                                           ->setFontWeight(FontWeight::Bold),
-                                       Text("This modal blocks all input beneath it."),
-                                       Text("Click Confirm / Cancel, or press Escape."),
-                                       Row({
-                                               Button("Confirm", [this]
-                                                      {
+                            Box({
+                                    Text("Dialog is open!")
+                                        ->setFontSize(18)
+                                        ->setFontWeight(FontWeight::Bold),
+                                    Text("This modal blocks all input beneath it."),
+                                    Text("Click Confirm / Cancel, or press Escape."),
+                                    Row({
+                                            Button("Confirm", [this]
+                                                   {
             std::cout<<"Confirm clicked" << std::endl;
             lastAction.set("Dialog: Confirmed");
             dialogOpen.set(false);
             confirmDialog->close(); }),
-                                               Button("Cancel", [this]
-                                                      {
+                                            Button("Cancel", [this]
+                                                   {
             lastAction.set("Dialog: Cancelled");
             dialogOpen.set(false);
             confirmDialog->close(); }),
-                                           })
-                                           ->setSpacing(12)
-                                           ->setCrossAxisAlignment(CrossAxisAlignment::Center),
-                                   })
-                                ->setSpacing(10)
-                                ->setCrossAxisAlignment(CrossAxisAlignment::Center))
+                                        })
+                                        ->setGap(12),
+                                })
+                                ->setGap(10))
                             ->setSize(420, 220)
                             ->setCloseOnClickOutside(true)
                             ->setOnClose([this]
@@ -65,7 +63,7 @@ public:
         auto ctxAnchor = Flex({Text("Right-click me")
                                    ->setTextColor(Color::fromRGB(255, 255, 255))
                                    ->setFontSize(14)})
-                           
+
                              ->setBorderRadius(6)
                              ->setBackgroundColor(Color::fromRGB(33, 150, 243))
                              ->setPadding(12);
@@ -102,18 +100,18 @@ public:
                             ->setFontSize(15)
                             ->setFontWeight(FontWeight::Bold),
                         Flex({
-                                Text(counter)->setFontSize(18),
-                                Button("Increment", [this]
-                                       {
+                                 Text(counter)->setFontSize(18),
+                                 Button("Increment", [this]
+                                        {
             counter++;
             lastAction.set("Counter: " + counter.toString()); }),
 
-                                Button("Reset state", [this]
-                                       {
+                                 Button("Reset state", [this]
+                                        {
             counter.set(0);
             dropdownIndex.set(-1);
             lastAction.set("State reset"); }),
-                            })
+                             })
                             ->setGap(10),
 
                         rule(),
@@ -163,13 +161,13 @@ public:
 
                         // ── Status ────────────────────────────────────────────────
                         Flex({
-                                Text("Last action: ")
-                                    ->setTextColor(Color::fromRGB(120, 120, 120))
-                                    ->setFontSize(13),
-                                Text(lastAction)
-                                    ->setFontSize(13)
-                                    ->setFontWeight(FontWeight::Bold),
-                            })
+                                 Text("Last action: ")
+                                     ->setTextColor(Color::fromRGB(120, 120, 120))
+                                     ->setFontSize(13),
+                                 Text(lastAction)
+                                     ->setFontSize(13)
+                                     ->setFontWeight(FontWeight::Bold),
+                             })
                             ->setGap(4),
 
                     })
@@ -183,15 +181,13 @@ public:
     }
 };
 
-
-
 // ============================================================
 //  Entry point
 // ============================================================
 
 WidgetPtr createApp(FluxUI *app)
 {
-  return FluxApp()
-      .setTheme(AppTheme::light())
-      .build(std::make_shared<OverlayTestApp>());
+    return FluxApp()
+        .setTheme(AppTheme::light())
+        .build(std::make_shared<OverlayTestApp>());
 }
