@@ -2,190 +2,84 @@
 
 class MyApp : public Widget
 {
-    State<bool> toggleState{false};
-    State<double> sliderState{50.0};
-    State<bool> checkState{false};
-    State<std::string> radioState{"Option A"};
-    State<std::string> textState{""};
-    State<std::string> textAreaState{""};
-    State<double> numberState{42.0};
-    State<FluxDate> checkin{FluxDate{}};
-    State<FluxDate> checkout{FluxDate{}};
+    State<int> counter = 0;
 
 public:
     WidgetPtr build() override
     {
-        return Flex(
-                   {
-                       Text("Book a Stay")
-                           ->setFontSize(20) 
-                           ->setFontWeight(FontWeight::Bold),
+        constexpr int kFabSize = 56;
+        constexpr int kAppBarHeight = 56;
 
-                       SizedBox(0, 20),
+        auto appBar =
+            Box({
+                    Text("My App")
+                        ->setFontSize(20)
+                        ->setFontWeight(FontWeight::Bold)
+                        ->setTextColor(Color::fromRGB(255, 255, 255)),
+                })
+                ->setDisplay(Display::Flex)
+                ->setDirection(FlexDirection::Row)
+                ->setAlignItems(AlignItems::Center)
+                ->setJustifyContent(JustifyContent::Start)
+                ->setPaddingHV(16, 0)
+                ->setWidthMode(SizeMode::Full)
+                ->setHeightMode(SizeMode::Fixed)
+                ->setHeight(kAppBarHeight)
+                ->setBackgroundColor(Color::fromRGB(33, 150, 243));
 
-                       // ── Check-in ──────────────────────────────────────────
-                       Text("Check-in")
-                           ->setFontSize(12)
-                           ->setTextColor(Color::fromRGB(100, 100, 100)),
-                       SizedBox(0, 4),
-                       DatePicker()
-                           ->setDate(checkin)
-                           ->setPlaceholder("Select check-in date")
-                           ->setOnDateChanged([this](FluxDate d)
-                                              { checkin.set(d); }),
+        auto fab =
+            Box({
+                    Text("+")
+                        ->setFontSize(28)
+                        ->setFontWeight(FontWeight::Bold)
+                        ->setTextColor(Color::fromRGB(255, 255, 255)),
+                })
+                ->setDisplay(Display::Flex)
+                ->setAlignItems(AlignItems::Center)
+                ->setJustifyContent(JustifyContent::Center)
+                ->setWidthMode(SizeMode::Fixed)
+                ->setWidth(kFabSize)
+                ->setHeightMode(SizeMode::Fixed)
+                ->setHeight(kFabSize)
+                ->setBorderRadius(kFabSize / 2)
+                ->setBackgroundColor(Color::fromRGB(33, 150, 243))
+                ->setPositionMode(Position::Absolute)
+                ->setBottomPx(24)
+                ->setRightPx(24)
+                ->setZIndexVal(1)
+                ->setOnClick([this]
+                             { counter++; });
 
-                       SizedBox(0, 16),
+        auto body =
+            Box({
+                    Text("You have pushed the button this many times:")
+                        ->setFontSize(14)
+                        ->setTextColor(Color::fromRGB(90, 90, 90)),
+                    Text(counter)
+                        ->setFontSize(40)
+                        ->setFontWeight(FontWeight::Bold),
+                })
+                ->setDisplay(Display::Flex)
+                ->setDirection(FlexDirection::Column)
+                ->setAlignItems(AlignItems::Center)
+                ->setJustifyContent(JustifyContent::Center)
+                ->setGap(8)
+                ->setWidthMode(SizeMode::Full)
+                ->setHeightMode(SizeMode::Full)
+                ->setFlexGrow(1); // takes all remaining height below the app bar
 
-                       // ── Check-out ─────────────────────────────────────────
-                       Text("Check-out")
-                           ->setFontSize(12)
-                           ->setTextColor(Color::fromRGB(100, 100, 100)),
-                       SizedBox(0, 4),
-                       DatePicker()
-                           ->setDate(checkout)
-                           ->setPlaceholder("Select check-out date")
-                           ->setOnDateChanged([this](FluxDate d)
-                                              { checkout.set(d); }),
-
-                       SizedBox(0, 20),
-
-                       // ── Summary ───────────────────────────────────────────
-                       Text(checkin, [](FluxDate d)
-                            { return d.isValid()
-                                         ? "Check-in:  " + d.toString("%d %b %Y")
-                                         : "Check-in:  —"; })
-                           ->setFontSize(13),
-
-                       SizedBox(0, 4),
-
-                       Text(checkout, [](FluxDate d)
-                            { return d.isValid()
-                                         ? "Check-out: " + d.toString("%d %b %Y")
-                                         : "Check-out: —"; })
-                           ->setFontSize(13),
-
-                       // ── Toggle ────────────────────────────────────────────────
-                       Flex({Text("Toggle")
-                                 ->setFontWeight(FontWeight::Bold)
-                                 ->setMinWidth(120),
-                             Toggle("Enable feature")
-                                 ->setValue(toggleState)
-                                 ->setOnToggleChanged(
-                                     [this](bool v)
-                                     { toggleState.set(v); }),
-                             Text(toggleState, [](bool v)
-                                  { return v ? "On" : "Off"; })
-                                 ->setTextColor(Color::fromRGB(100, 100, 100))})
-                           ->setGap(12)
-                           ->setPadding(16),
-
-                       Divider(),
-
-                       // ── Slider ────────────────────────────────────────────────
-                       Flex({Text("Slider")
-                                 ->setFontWeight(FontWeight::Bold)
-                                 ->setMinWidth(120),
-                             Slider(0.0, 100.0, 1.0)
-                                 ->setValue(sliderState)
-                                 ->setOnValueChanged(
-                                     [this](double v)
-                                     { sliderState.set(v); }),
-                             Text(sliderState,
-                                  [](double v)
-                                  { return std::to_string((int)v); })
-                                 ->setMinWidth(32)
-                                 ->setTextColor(Color::fromRGB(100, 100, 100))})
-                           ->setGap(12)
-                           ->setPadding(16),
-
-                       Divider(),
-
-                       // ── CheckBox ──────────────────────────────────────────────
-                       Flex({Text("CheckBox")
-                                 ->setFontWeight(FontWeight::Bold)
-                                 ->setMinWidth(120),
-                             CheckBox("Accept terms")->setInputValue(checkState),
-                             Text(checkState,
-                                  [](bool v)
-                                  { return v ? "Checked" : "Unchecked"; })
-                                 ->setTextColor(Color::fromRGB(100, 100, 100))})
-                           ->setGap(12)
-                           ->setPadding(16),
-
-                       Divider(),
-
-                       // ── Radio ─────────────────────────────────────────────────
-                       Flex({Text("Radio")
-                                 ->setFontWeight(FontWeight::Bold)
-                                 ->setMinWidth(120),
-                             RadioGroupWithOptions({"Option A", "Option B", "Option C"})
-                                 ->setHorizontal()
-                                 ->bindValue(radioState)
-                                 ->setOnSelectionChanged([this](const std::string &v)
-                                                         { radioState.set(v); }),
-                             Text(radioState, [](const std::string &v)
-                                  { return v; })
-                                 ->setTextColor(Color::fromRGB(100, 100, 100))})
-                           ->setGap(12)
-                           ->setPadding(16),
-
-                       Divider(),
-
-                       // ── TextInput ─────────────────────────────────────────────
-                       Flex({Text("TextInput")
-                                 ->setFontWeight(FontWeight::Bold)
-                                 ->setMinWidth(120),
-
-                             TextInput("Type something...")->setInputValue(textState),
-
-                             Text(textState,
-                                  [](const std::string &v)
-                                  {
-                                      return std::to_string((int)v.size()) + " chars";
-                                  })
-                                 ->setMinWidth(60)
-                                 ->setTextColor(Color::fromRGB(100, 100, 100))})
-                           ->setGap(12)
-                           ->setPadding(16),
-
-                       Divider(),
-
-                       // ── TextArea ──────────────────────────────────────────────
-                       Flex({Text("TextArea")
-                                 ->setFontWeight(FontWeight::Bold)
-                                 ->setMinWidth(120),
-                             TextArea("Write multiple lines...")
-                                 ->setInputValue(textAreaState)
-                                 ->setHeight(120)
-                                 ->setLineNumbers(true),
-                             Text(textAreaState,
-                                  [](const std::string &v)
-                                  {
-                                      int lines = 1;
-                                      for (char c : v)
-                                          if (c == '\n')
-                                              lines++;
-                                      return std::to_string(lines) + " lines";
-                                  })
-                                 ->setMinWidth(60)
-                                 ->setTextColor(Color::fromRGB(100, 100, 100))})
-                           ->setGap(12)
-                           ->setPadding(16),
-
-                       Divider()
-
+        return Box({
+                       appBar,
+                       body,
+                       fab,
                    })
-            ->setBackgroundColor(Color::fromRGB(280, 180, 180))
-            ->setScrollable(true)
-            ->setDirection(FlexDirection::Column) // base (mobile): stacked
-            ->setGap(8)
-            ->setPadding(16)
-            ->setAlignItems(AlignItems::Stretch)
+            ->setDisplay(Display::Flex)
+            ->setDirection(FlexDirection::Column)
             ->setWidthMode(SizeMode::Full)
-            ->setHeightMode(SizeMode::Full);
+            ->setHeightMode(SizeMode::Full)
+            ->setBackgroundColor(Color::fromRGB(245, 245, 250));
     }
 };
-
 
 // ============================================================
 //  Entry point
@@ -193,7 +87,7 @@ public:
 
 WidgetPtr createApp(FluxUI *app)
 {
-  return FluxApp()
-      .setTheme(AppTheme::light())
-      .build(std::make_shared<MyApp>());
+    return FluxApp()
+        .setTheme(AppTheme::light())
+        .build(std::make_shared<MyApp>());
 }
