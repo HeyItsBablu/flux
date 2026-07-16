@@ -215,7 +215,13 @@ uniform float uBorder;     // 0 = fill, >0 = border width
 void main() {
     vec2  q   = abs(vLocal) - uHalfSize + vec2(uRadius);
     float d   = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - uRadius;
-    float aa  = fwidth(d);
+    // This is the fallback path used when GL_OES_standard_derivatives is
+    // NOT available — it must not call fwidth()/dFdx()/dFdy() itself, or
+    // it fails to compile for exactly the same reason kRoundFSExt does,
+    // and progRound silently ends up 0 (drawRoundedRect() then falls back
+    // to a square fillRect for every rounded rect in the app, FAB
+    // included). Use a fixed 1px antialiasing band instead.
+    const float aa = 1.0;
     float alpha = 1.0 - smoothstep(-aa, aa, d);
     if (uBorder > 0.0) {
         float inner = d + uBorder;
@@ -484,6 +490,11 @@ struct FluxGL
             uRound.color = glGetUniformLocation(progRound, "uColor");
             uRound.border = glGetUniformLocation(progRound, "uBorder");
         }
+        else
+        {
+            LOGW("FluxGL: rounded-rect shader failed on both paths — "
+                 "all rounded corners will render as squares");
+        }
 
         // Shared VBO
         glGenBuffers(1, &vbo);
@@ -603,10 +614,20 @@ struct FluxGL
             return &glyphMap.entries[slot];
 
         FontEntry &fe = fonts[fontIndex];
-        float scale = stbtt_ScaleForPixelHeight(&fe.info, (float)sizePx);
+        // Rasterize at DEVICE pixel resolution (sizePx * dpi), not the
+        // logical sizePx. The vertex shaders map logical-px quads to NDC
+        // and GL stretches that to the physical framebuffer — if the
+        // atlas bitmap only has `sizePx` source texels, that stretch is
+        // what blurs the text. sizePx itself stays logical everywhere
+        // else (measureLine, getMetrics, layout); only this rasterization
+        // scale and the metrics stored below are in device pixels —
+        // drawTextLine() divides them back by dpi before positioning.
+        // (Assumes a single, unchanging dpi for the process lifetime —
+        // true today since FluxGL is one instance per app.)
+        float devScale = stbtt_ScaleForPixelHeight(&fe.info, (float)sizePx * dpi);
 
         int x0, y0, x1, y1;
-        stbtt_GetCodepointBitmapBox(&fe.info, (int)cp, scale, scale,
+        stbtt_GetCodepointBitmapBox(&fe.info, (int)cp, devScale, devScale,
                                     &x0, &y0, &x1, &y1);
         int gw = x1 - x0, gh = y1 - y0;
 
@@ -628,7 +649,7 @@ struct FluxGL
             }
             stbtt_MakeCodepointBitmap(&fe.info,
                                       atlasPixels.data() + atlasY * kAtlasW + atlasX,
-                                      gw, gh, kAtlasW, scale, scale, (int)cp);
+                                      gw, gh, kAtlasW, devScale, devScale, (int)cp);
 
             if (gh > atlasRowH)
                 atlasRowH = gh;
@@ -638,11 +659,11 @@ struct FluxGL
                 return nullptr;
             e->ax = atlasX;
             e->ay = atlasY;
-            e->aw = gw;
-            e->ah = gh;
-            e->bearingX = x0;
-            e->bearingY = y0;
-            e->advance = (int)(advance * scale);
+            e->aw = gw;                          // device px (atlas/UV size)
+            e->ah = gh;                          // device px (atlas/UV size)
+            e->bearingX = x0;                    // device px
+            e->bearingY = y0;                    // device px
+            e->advance = (int)(advance * devScale); // device px
             e->valid = true;
             atlasX += gw + 1;
             atlasDirty = true;
@@ -656,7 +677,7 @@ struct FluxGL
         e->ax = e->ay = e->aw = e->ah = 0;
         e->bearingX = x0;
         e->bearingY = y0;
-        e->advance = (int)(advance * scale);
+        e->advance = (int)(advance * devScale);
         e->valid = true;
         return e;
     }
@@ -1192,6 +1213,12 @@ struct FluxGL
         std::vector<GlyphVert> verts;
         verts.reserve(len * 6);
 
+        // getGlyph() now returns metrics in DEVICE pixels (see its
+        // comment); x, y, letterSpacing, and the cursor this function
+        // advances are all LOGICAL pixels, so convert here.
+        const float invDpi = (dpi > 0.f) ? (1.f / dpi) : 1.f;
+
+
         float cx = x;
         const char *p = utf8;
         const char *end = utf8 + len;
@@ -1205,20 +1232,22 @@ struct FluxGL
 
             if (g->aw > 0 && g->ah > 0)
             {
-                float gx = cx + g->bearingX;
-                float gy = y + g->bearingY;
+                float gwLogical = g->aw * invDpi;
+                float ghLogical = g->ah * invDpi;
+                float gx = cx + g->bearingX * invDpi;
+                float gy = y + g->bearingY * invDpi;
                 float u0 = g->ax / (float)kAtlasW;
                 float v0 = g->ay / (float)kAtlasH;
                 float u1 = (g->ax + g->aw) / (float)kAtlasW;
                 float v1 = (g->ay + g->ah) / (float)kAtlasH;
                 verts.push_back({gx, gy, u0, v0});
-                verts.push_back({gx + g->aw, gy, u1, v0});
-                verts.push_back({gx, gy + g->ah, u0, v1});
-                verts.push_back({gx + g->aw, gy, u1, v0});
-                verts.push_back({gx + g->aw, gy + g->ah, u1, v1});
-                verts.push_back({gx, gy + g->ah, u0, v1});
+                verts.push_back({gx + gwLogical, gy, u1, v0});
+                verts.push_back({gx, gy + ghLogical, u0, v1});
+                verts.push_back({gx + gwLogical, gy, u1, v0});
+                verts.push_back({gx + gwLogical, gy + ghLogical, u1, v1});
+                verts.push_back({gx, gy + ghLogical, u0, v1});
             }
-            cx += g->advance + letterSpacing;
+            cx += g->advance * invDpi + letterSpacing;
         }
 
         if (verts.empty())

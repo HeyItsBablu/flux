@@ -9,6 +9,7 @@
 #include <time.h>
 
 #include "flux/flux.hpp"
+#include "flux/flux_mic.hpp"
 #include "flux/widgets/flux_file_picker.hpp"
 #include "flux/flux_gl.hpp"
 #include "flux/flux_oes_blit.hpp"
