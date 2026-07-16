@@ -8,12 +8,22 @@
 # FluxUI
 
 A declarative, cross-platform widget toolkit for C++.  
-Chain methods, compose layouts, bind reactive state — one codebase, five platforms.
+Chain methods, compose layouts, bind reactive state — one codebase, six platforms.
 
-**Platforms:** Windows · Linux · macOS · Android · Web  
+**Platforms:** Windows · Linux · macOS · Android · Web · Web SSR  
 **Compiler:** MSVC 2022 / GCC / Clang / AppleClang  
 **Standard:** C++20  
-**Renderer:** GDI+ · Cairo · Metal · OpenGl ES · WebGL2
+
+**Renderer per platform**
+
+| Platform | Renderer |
+|---|---|
+| Windows | Direct2D |
+| Linux | Cairo + Pango |
+| macOS | Metal |
+| Android | OpenGL ES |
+| Web | Canvas + WebGL2 |
+| Web SSR | HTML (string-built markup, no GPU/canvas) |
 
 ---
 
@@ -40,32 +50,102 @@ See [INSTALL.md](INSTALL.md) for prerequisites and setup per platform.
 ```cpp
 #include "flux/flux.hpp"
 
-class MyApp : public Widget {
-    State<int> counter{0};
+class MyApp : public Widget
+{
+    State<int> counter = 0;
+
 public:
-    WidgetPtr build() override {
-        return Flex({
-            Text(counter)->setFontSize(18),
-            Button("Click", [this]{ counter++; })
-        })
-        ->setAlignItems(AlignItems::Center)
-        ->setJustifyContent(JustifyContent::Center)
-        ->setWidthMode(SizeMode::Full)
-        ->setHeightMode(SizeMode::Full)
-        ->setDirection(FlexDirection::Column)
-        ->setGap(8);
+    WidgetPtr build() override
+    {
+        constexpr int kFabSize = 56;
+        constexpr int kAppBarHeight = 56;
+
+        auto appBar =
+            Box({
+                    Text("My App")
+                        ->setFontSize(20)
+                        ->setFontWeight(FontWeight::Bold)
+                        ->setTextColor(Color::fromRGB(255, 255, 255)),
+                })
+                ->setDisplay(Display::Flex)
+                ->setDirection(FlexDirection::Row)
+                ->setAlignItems(AlignItems::Center)
+                ->setJustifyContent(JustifyContent::Start)
+                ->setPaddingHV(16, 0)
+                ->setWidthMode(SizeMode::Full)
+                ->setHeightMode(SizeMode::Fixed)
+                ->setHeight(kAppBarHeight)
+                ->setBackgroundColor(Color::fromRGB(33, 150, 243));
+
+        auto fab =
+            Box({
+                    Text("+")
+                        ->setFontSize(28)
+                        ->setFontWeight(FontWeight::Bold)
+                        ->setTextColor(Color::fromRGB(255, 255, 255)),
+                })
+                ->setDisplay(Display::Flex)
+                ->setAlignItems(AlignItems::Center)
+                ->setJustifyContent(JustifyContent::Center)
+                ->setWidthMode(SizeMode::Fixed)
+                ->setWidth(kFabSize)
+                ->setHeightMode(SizeMode::Fixed)
+                ->setHeight(kFabSize)
+                ->setBorderRadius(kFabSize / 2)
+                ->setBackgroundColor(Color::fromRGB(33, 150, 243))
+                ->setPositionMode(Position::Absolute)
+                ->setBottomPx(24)
+                ->setRightPx(24)
+                ->setZIndexVal(1)
+                ->setOnClick([this]
+                             { counter++; });
+
+        auto body =
+            Box({
+                    Text("You have pushed the button this many times:")
+                        ->setFontSize(14)
+                        ->setTextColor(Color::fromRGB(90, 90, 90)),
+                    Text(counter)
+                        ->setFontSize(40)
+                        ->setFontWeight(FontWeight::Bold),
+                })
+                ->setDisplay(Display::Flex)
+                ->setDirection(FlexDirection::Column)
+                ->setAlignItems(AlignItems::Center)
+                ->setJustifyContent(JustifyContent::Center)
+                ->setGap(8)
+                ->setWidthMode(SizeMode::Full)
+                ->setHeightMode(SizeMode::Full)
+                ->setFlexGrow(1); // takes all remaining height below the app bar
+
+        return Box({
+                       appBar,
+                       body,
+                       fab,
+                   })
+            ->setDisplay(Display::Flex)
+            ->setDirection(FlexDirection::Column)
+            ->setWidthMode(SizeMode::Full)
+            ->setHeightMode(SizeMode::Full)
+            ->setBackgroundColor(Color::fromRGB(245, 245, 250));
     }
 };
 
-WidgetPtr createApp(FluxUI* app) {
-    return FluxApp(std::make_shared<MyApp>(), {
-        .title  = "My App",
-        .theme  = AppTheme::light(),
-        .width  = 900,
-        .height = 700,
-    });
+// ============================================================
+//  Entry point
+// ============================================================
+
+WidgetPtr createApp(FluxUI *app)
+{
+    return FluxApp()
+        .setTheme(AppTheme::light())
+        .build(std::make_shared<MyApp>());
 }
 ```
+
+> `Box` is the single general-purpose container widget — see [Box](#box) for
+> `Display::Flex` / `Display::Grid` / `Display::Block`, and [Map](#map) for
+> rendering dynamic lists.
 
 ---
 
@@ -98,15 +178,12 @@ WidgetPtr createApp(FluxUI* app) {
 
 - [Components](#components)
 - [Display](#display)
-- [Flex](#flex)
-- [FlexBuilder](#flexbuilder)
+- [Box](#box)
+- [Map](#map)
 - [Interaction](#interaction)
 - [Input](#input)
-- [Collection](#collection)
 - [Canvas](#canvas)
 - [State](#state)
-- [Layout](#layout)
-- [Structure](#structure)
 - [Overlay](#overlay)
 - [Navigation](#navigation)
 - [Data](#data)
@@ -141,12 +218,9 @@ public:
 };
 
 WidgetPtr createApp(FluxUI* app) {
-    return FluxApp(std::make_shared<MyApp>(), {
-        .title  = "My App",
-        .theme  = AppTheme::light(),
-        .width  = 900,
-        .height = 700,
-    });
+    return FluxApp()
+        .setTheme(AppTheme::light())
+        .build(std::make_shared<MyApp>());
 }
 ```
 
@@ -461,22 +535,22 @@ Graph(600, 300)
 
 ### Image
 
-Renders an image file with five fit modes. Supports local assets, network URLs, and in-memory buffers. All loading is asynchronous.
+Renders an image file with five fit modes. Supports local assets, network URLs, and in-memory buffers. All loading is asynchronous. A single overloaded `Image(...)` factory covers every source — path vs. URL is auto-detected by scheme prefix.
 
 ```cpp
-// Local asset (async)
-AssetImage("photo.jpg")
+// Local asset — auto-detected (no http/https prefix)
+Image("photo.jpg")
     ->setWidth(300)
     ->setHeight(200)
     ->setFit(ImageFit::Cover);
 
-// Network image
-NetworkImage("https://example.com/photo.jpg")
+// Network image — auto-detected (http/https prefix)
+Image("https://example.com/photo.jpg")
     ->setWidth(300)
     ->setHeight(200);
 
 // In-memory buffer
-MemoryImage(myBytes)
+Image(myBytes)
     ->setWidth(300);
 
 // Empty widget — load later
@@ -485,7 +559,7 @@ Image()
     ->setWidth(300);
 
 // Circle avatar
-AssetImage("avatar.png")->setWidth(64)->setHeight(64)->setBorderRadius(32);
+Image("avatar.png")->setWidth(64)->setHeight(64)->setBorderRadius(32);
 ```
 
 **Factory**
@@ -493,13 +567,12 @@ AssetImage("avatar.png")->setWidth(64)->setHeight(64)->setBorderRadius(32);
 | Signature | Description |
 |---|---|
 | `Image()` | Empty image widget — call `setImagePath()` or `setUrl()` to load |
-| `AssetImage(path)` | Load a local file asynchronously |
-| `NetworkImage(url)` | Load from an HTTP/HTTPS URL asynchronously |
-| `NetworkImage(url, postToUI)` | As above; `postToUI` controls UI-thread dispatch (default `true`) |
-| `MemoryImage(bytes)` | Decode from a `vector<uint8_t>` synchronously |
-| `ImageWidget::asset(path)` | Static named constructor — same as `AssetImage` |
-| `ImageWidget::network(url, postToUI)` | Static named constructor — same as `NetworkImage` |
-| `ImageWidget::memory(bytes)` | Static named constructor — same as `MemoryImage` |
+| `Image(pathOrUrl, postToUI = true)` | Local file or HTTP/HTTPS URL, auto-detected by scheme prefix; `postToUI` only applies to the network path |
+| `Image(bytes)` | Decode from a `vector<uint8_t>` |
+| `Image(data, len)` | Decode from a raw pointer + length |
+| `ImageWidget::asset(path)` | Static named constructor — local file only, no auto-detection |
+| `ImageWidget::network(url, postToUI)` | Static named constructor — network URL only, no auto-detection |
+| `ImageWidget::memory(bytes)` | Static named constructor — same as `Image(bytes)` |
 
 **ImageFit modes**
 
@@ -535,27 +608,51 @@ AssetImage("avatar.png")->setWidth(64)->setHeight(64)->setBorderRadius(32);
 ---
 
 
-## Flex
+## Box
 
-The core layout widget. Implements a CSS Flexbox-compatible layout engine —
-direction, wrapping, alignment, gaps, and scrolling all work the same way.
+`Box` is the single general-purpose container widget. It replaces the old
+`Flex`/`FlexBuilder`/`Grid` widgets with one widget whose layout **algorithm**
+is chosen via `setDisplay()`, the same way CSS chooses between
+`display: flex`, `display: grid`, and normal block flow on the same kind of
+box:
 
 ```cpp
-Flex({
-    Text("Hello"),
-    Button("Click", [this]{ counter++; })
-})
-->setDirection(FlexDirection::Column)
-->setAlignItems(AlignItems::Center)
-->setJustifyContent(JustifyContent::Center)
-->setGap(8)
-->setWidthMode(SizeMode::Full)
-->setHeightMode(SizeMode::Full);
+Box({...})->setDisplay(Display::Flex)->setDirection(FlexDirection::Row);
+Box({...})->setDisplay(Display::Grid)->setColumns({fr(1), fr(1)});
+Box({...});                                  // Display::Block (default)
 ```
 
----
+`Flex`, `Row`, and `Column` are thin convenience factories that return a
+`Box` pre-configured with `Display::Flex`:
 
-### Direction
+```cpp
+Flex({...})    // Box + Display::Flex + FlexDirection::Column
+Row({...})     // Box + Display::Flex + FlexDirection::Row
+Column({...})  // Box + Display::Flex + FlexDirection::Column
+```
+
+Every display mode shares padding, background/border, `scrollable()`, `gap`,
+position:`absolute` children, and item-source splicing (see [Map](#map)), so
+a `Map(...)` call can sit anywhere in a `Box`'s child list regardless of
+which display mode that `Box` is using:
+
+```cpp
+Box({
+    Text("Header"),
+    Map(todos, keyFn, [](int i, const Todo &t){ return Text(t.text); }),
+    Text("Footer"),
+})->setDisplay(Display::Flex)->setDirection(FlexDirection::Column);
+```
+
+### Display modes
+
+| Value | Description |
+|---|---|
+| `Display::Block` | Default. Plain top-to-bottom document flow — children stack vertically, each filling the container's content width unless `Fixed`. Scrolling, when enabled, is always vertical. |
+| `Display::Flex` | CSS Flexbox-compatible layout — direction, wrapping, alignment, gaps, and scrolling all work the same way as web Flexbox. |
+| `Display::Grid` | Fixed or responsive column/row tracks, explicit or auto item placement. |
+
+### Direction (Flex)
 
 | Value | Description |
 |---|---|
@@ -564,9 +661,7 @@ Flex({
 | `FlexDirection::Column` | Top to bottom |
 | `FlexDirection::ColumnReverse` | Bottom to top |
 
----
-
-### Wrap
+### Wrap (Flex)
 
 | Value | Description |
 |---|---|
@@ -574,13 +669,11 @@ Flex({
 | `FlexWrap::Wrap` | Items wrap to new lines |
 | `FlexWrap::WrapReverse` | Items wrap in reverse direction |
 
----
+### JustifyContent / AlignItems / AlignContent
 
-### JustifyContent
+Shared between Flex (main/cross axis) and Grid (`justifyContent`/`alignItems`/row distribution).
 
-Distribution along the main axis.
-
-| Value | Description |
+| JustifyContent | Description |
 |---|---|
 | `Start` | Pack toward start (default) |
 | `End` | Pack toward end |
@@ -589,13 +682,7 @@ Distribution along the main axis.
 | `SpaceAround` | Equal gaps around each item |
 | `SpaceEvenly` | Equal gaps between items and edges |
 
----
-
-### AlignItems
-
-Alignment on the cross axis.
-
-| Value | Description |
+| AlignItems | Description |
 |---|---|
 | `Start` | Align to start edge |
 | `End` | Align to end edge |
@@ -603,51 +690,88 @@ Alignment on the cross axis.
 | `Stretch` | Stretch to fill cross axis (default) |
 | `Baseline` | Align to text baseline |
 
----
+### Grid tracks
 
-### AlignContent
+```cpp
+Box({
+    Text("A"), Text("B"), Text("C"), Text("D"),
+})
+->setDisplay(Display::Grid)
+->setColumns({ fr(1), fr(1), px(120) })
+->setRows(repeat(2, autoTrack()))
+->setColumnGap(12)
+->setRowGap(12);
+```
 
-Multi-line distribution on the cross axis. Only meaningful with `FlexWrap::Wrap`.
-
-| Value | Description |
+| Helper | Description |
 |---|---|
-| `Start` | Pack lines toward start |
-| `End` | Pack lines toward end |
-| `Center` | Center lines as a group |
-| `SpaceBetween` | Equal gaps between lines, no outer gap |
-| `SpaceAround` | Equal gaps around each line |
-| `SpaceEvenly` | Equal gaps between lines and edges |
-| `Stretch` | Stretch lines to fill cross axis |
+| `px(n)` | Fixed-size track |
+| `fr(n = 1)` | Fractional remaining space |
+| `fillTrack(n = 1)` | Fills remaining space after fixed/fr tracks |
+| `autoTrack()` | Sized to its content |
+| `minContent()` / `maxContent()` | Min/max content sizing |
+| `repeat(count, pattern)` | Repeats a track pattern `count` times |
 
----
+Explicit per-item placement (Grid mode only) is done by wrapping a child in `BoxItem(...)`:
+
+```cpp
+Box({
+    BoxItem(Text("Wide"))->spanCols(2),
+    BoxItem(Text("Tall"))->at(3, 1)->spanRows(2),
+    Text("Auto-placed"),
+})->setDisplay(Display::Grid)->setColumns({ fr(1), fr(1), fr(1) });
+```
+
+| Method | Description |
+|---|---|
+| `atCol(c)` / `atRow(r)` / `at(c, r)` | Explicit 1-based column/row placement |
+| `spanCols(n)` / `spanRows(n)` / `span(cols, rows)` | Column/row span |
+| `withAlignSelf(a)` / `withJustifySelf(a)` | Override alignment for this item only |
 
 ### Methods
 
 | Method | Type | Description |
 |---|---|---|
-| `setDirection(d)` | `FlexDirection` | Main axis direction |
-| `setWrap(w)` | `FlexWrap` | Line wrapping behavior |
+| `setDisplay(d)` | `Display` | `Block` · `Flex` · `Grid` |
+| `setDirection(d)` | `FlexDirection` | Flex main axis direction |
+| `setWrap(w)` | `FlexWrap` | Flex line wrapping behavior |
+| `setColumns(tracks)` | `vector<TrackDef>` | Grid column tracks |
+| `setRows(tracks)` | `vector<TrackDef>` | Grid row tracks |
+| `setColumnGap(px)` / `setRowGap(px)` | `int` | Grid per-axis gap (falls back to `gap` if unset) |
+| `setJustifyItems(a)` | `AlignItems` | Grid per-cell horizontal default |
 | `setJustifyContent(j)` | `JustifyContent` | Main axis distribution |
 | `setAlignItems(a)` | `AlignItems` | Cross axis alignment per item |
 | `setAlignContent(a)` | `AlignContent` | Cross axis distribution of lines |
 | `setGap(px)` | `int` | Gap between all items |
-| `setScrollable(v)` | `bool` | Enable scroll and fling on the main axis |
-| `setPadding(px)` | `int` | Uniform inner padding |
+| `setScrollable(v)` | `bool` | Enable scroll and fling |
+| `setPadding(px)` / `setPaddingHV(h, v)` | `int` | Inner padding |
 | `setBackgroundColor(c)` | `Color` | Background fill |
-| `setBorderColor(c)` | `Color` | Border color |
-| `setBorderWidth(w)` | `int` | Border thickness |
-| `setBorderRadius(r)` | `int` | Corner rounding |
-| `setWidthMode(m)` | `SizeMode` | `Fixed` · `Fit` · `Full` |
-| `setHeightMode(m)` | `SizeMode` | `Fixed` · `Fit` · `Full` |
-| `setWidth(w)` | `int` | Fixed width (sets mode to Fixed) |
-| `setHeight(h)` | `int` | Fixed height (sets mode to Fixed) |
-| `setFlexGrow(n)` | `int` | How much free space this item takes (0 = don't grow) |
-| `setFlexShrink(n)` | `int` | Whether this item shrinks under pressure (default 1) |
-| `setFlexBasis(px)` | `int` | Starting size before flex is applied (-1 = auto) |
+| `setBorderColor(c)` / `setBorderWidth(w)` / `setBorderRadius(r)` | — | Border styling |
+| `setWidthMode(m)` / `setHeightMode(m)` | `SizeMode` | `Fixed` · `Fit` · `Full` |
+| `setWidth(w)` / `setHeight(h)` | `int` | Fixed dimensions (sets mode to `Fixed`) |
+| `setFlexGrow(n)` / `setFlexShrink(n)` / `setFlexBasis(px)` | `int` | Flex-item sizing within a parent Flex `Box` |
 | `setOrder(n)` | `int` | Layout order override |
-| `responsive(bp, fn)` | `Breakpoint, fn(FlexProps&)` | Override any prop at a breakpoint |
+| `setOnClick(fn)` | `ClickHandler` | Opts this Box in as a click target |
+| `responsive(bp, fn)` | `Breakpoint, fn(BoxProps&)` | Override any prop at a breakpoint |
 
----
+### Position:absolute
+
+Any `Box` (or other widget) can escape normal flow and be positioned
+relative to its nearest laid-out ancestor — used for things like a
+floating action button:
+
+```cpp
+fab->setPositionMode(Position::Absolute)
+   ->setBottomPx(24)
+   ->setRightPx(24)
+   ->setZIndexVal(1);
+```
+
+| Method | Description |
+|---|---|
+| `setPositionMode(p)` | `Position::Static` (default) or `Position::Absolute` |
+| `setTopPx(v)` / `setRightPx(v)` / `setBottomPx(v)` / `setLeftPx(v)` | Offsets from the matching edge |
+| `setZIndexVal(z)` | Paint order among sibling absolute children |
 
 ### Responsive overrides
 
@@ -655,13 +779,14 @@ Props can be overridden at any breakpoint using a mobile-first cascade.
 Overrides stack — `Sm` applies at 640px and up, `Md` at 768px and up, and so on.
 
 ```cpp
-Flex({ ... })
+Box({ ... })
+->setDisplay(Display::Flex)
 ->setDirection(FlexDirection::Column)       // base (mobile): stacked
-->responsive(Breakpoint::Md, [](FlexProps& p) {
+->responsive(Breakpoint::Md, [](BoxProps& p) {
     p.direction = FlexDirection::Row;       // tablet+: side by side
     p.gap = 16;
 })
-->responsive(Breakpoint::Lg, [](FlexProps& p) {
+->responsive(Breakpoint::Lg, [](BoxProps& p) {
     p.justify = JustifyContent::SpaceBetween;
 });
 ```
@@ -684,74 +809,48 @@ BreakpointProvider::set({ .sm=480, .md=768, .lg=1024 });
 
 ---
 
-## FlexBuilder
+## Map
 
-A virtualised, key-aware version of `Flex` for dynamic lists. Items are built
-lazily on demand and cached by key. Only visible items are rendered. Layout can
-also be skipped for off-screen items when `setVirtualizeLayout(true)` is set
-alongside a fixed item extent.
-
-### Static list from a vector
+`Map` is the `list.map()` equivalent — it decides which widgets exist for a
+list (lazy building, keyed caching, reactivity to `State<vector<T>>`,
+optional virtualization) and hands them to whichever `Box` it's nested
+inside. Layout, scrolling, and gestures belong entirely to that `Box`; `Map`
+itself contributes zero pixels and never appears in the render tree.
 
 ```cpp
-std::vector<std::string> items = { "Apple", "Banana", "Cherry" };
-
-FlexBuilder(items,
-    [](int i, const std::string& s){ return FlexItemKey::fromIndex(i); },
-    [](int i, const std::string& s){ return Text(s); }
-)
-->setDirection(FlexDirection::Column)
-->setScrollable(true)
-->setGap(8);
+Box({
+    Text("Header"),
+    Map(todos, [](int i, const Todo &t){ return Text(t.text); }),
+    Text("Footer"),
+})->setDisplay(Display::Flex)->setDirection(FlexDirection::Column);
 ```
 
-### Reactive list from State
+### Static usage (no reactivity, built once)
 
 ```cpp
-struct Todo { int64_t id; std::string text; };
-State<std::vector<Todo>> todos{{}};
+Map(itemCount, [](int i){ return Text("Item " + std::to_string(i)); })
+Map(myVector, [](int i, const T &item){ return ...; })
+```
 
-FlexBuilder(todos,
+### Reactive usage (rebuilds when State<vector<T>> changes)
+
+```cpp
+auto todos = app->useState(std::vector<Todo>{});
+Map(todos,
     [](int, const Todo& t){ return FlexItemKey::fromInt64(t.id); },
-    [](int, const Todo& t){ return Text(t.text); }
-)
-->setDirection(FlexDirection::Column)
-->setScrollable(true)
-->setGap(8)
-->setWidthMode(SizeMode::Full);
+    [](int i, const Todo& t){ return Text(t.text); })
+->setDirection(FlexDirection::Column);
 
-// Any mutation auto-updates the list
+// Any mutation to the bound State auto-updates the list
 todos.push_back({ nextId++, "Buy milk" });
 todos.erase(2);
 ```
 
-### Virtualised layout for large lists
-
-```cpp
-FlexBuilder(items, keyFn, builderFn)
-->setDirection(FlexDirection::Column)
-->setItemExtent(48)           // every item is exactly 48px tall
-->setVirtualizeLayout(true)   // skip layout for off-screen items
-->setScrollable(true);
-```
-
----
-
-### Factory overloads
-
-| Signature | Description |
-|---|---|
-| `FlexBuilder(vector, keyFn, builderFn)` | Static snapshot with stable keys |
-| `FlexBuilder(vector, builderFn)` | Static snapshot, index keys — safe for append-only lists |
-| `FlexBuilder(State<vector>, keyFn, builderFn)` | Reactive — auto-rebuilds on state change |
-| `FlexBuilder(State<vector>, builderFn)` | Reactive, index keys — safe for append-only lists |
-
----
-
-### Keys
-
-Keys identify each item in the cache across rebuilds. Without stable keys,
-deleting or reordering items causes the wrong widget to appear in the wrong slot.
+A stable key function is **required** for reactive/mutable lists — without
+it, deleting item[2] makes item[3]'s cached widget (and its state: typed
+text, scroll position, etc.) appear at item[2]'s slot, because the cache is
+keyed by position instead of identity. Static, append-only, or
+never-mutated lists are fine with the default index keys.
 
 ```cpp
 FlexItemKey::fromIndex(i)          // position-based — safe only for static lists
@@ -759,29 +858,32 @@ FlexItemKey::fromInt64(item.id)    // stable integer id
 FlexItemKey::fromString(item.uuid) // stable string id
 ```
 
-Always provide a `keyFn` when the list can be mutated (insert, delete, reorder).
-
-```cpp
-// integer id from a database row
-FlexBuilder(todos,
-    [](int, const Todo& t){ return FlexItemKey::fromInt64(t.id); },
-    [](int, const Todo& t){ return Text(t.text); }
-);
-
-// string UUID
-FlexBuilder(files,
-    [](int, const File& f){ return FlexItemKey::fromString(f.uuid); },
-    [](int, const File& f){ return FileRow(f); }
-);
-```
-
 > Without a `keyFn`, a debug warning fires on first use reminding you to add one.
 
----
+### Virtualization
+
+Only meaningful when the enclosing `Box` is in `Flex` or `Block` display
+mode with `FlexWrap::NoWrap` and `setScrollable(true)` — that's the only
+case with a single well-defined main axis + scroll offset to virtualize
+against. In any other context (Grid mode, or a non-scrollable container)
+`Box` builds every item, same as `setVirtualized(false)`.
+
+```cpp
+Map(items, keyFn, builderFn)
+    ->setItemExtent(48)      // every item is exactly 48px along the main axis
+    ->setVirtualized(true);  // only build/layout items near the viewport
+```
+
+### Factory overloads
+
+| Signature | Description |
+|---|---|
+| `Map(itemCount, builderFn)` | Index-count form, static |
+| `Map(vector, builderFn)` | Static snapshot with index keys — safe for append-only lists |
+| `Map(State<vector>, builderFn)` | Reactive, index keys — safe for append-only lists |
+| `Map(State<vector>, keyFn, builderFn)` | Reactive — auto-rebuilds on state change, with stable keys |
 
 ### Methods
-
-**FlexBuilder-specific**
 
 | Method | Type | Description |
 |---|---|---|
@@ -789,21 +891,9 @@ FlexBuilder(files,
 | `setItemBuilder(fn)` | `(int) -> WidgetPtr` | Builder called per item |
 | `setKeyFn(fn)` | `(int) -> FlexItemKey` | Stable key per item — required for mutable lists |
 | `setItemExtent(px)` | `int` | Fixed item size along the main axis (required for virtualization) |
-| `setVirtualizeLayout(v)` | `bool` | Skip layout for off-screen items — requires `setItemExtent` |
+| `setVirtualized(v)` | `bool` | Skip building/laying out off-screen items — requires `setItemExtent` and a scrollable, single-axis parent `Box` |
 | `invalidateItems()` | — | Discard all cached widgets and rebuild |
 | `invalidateItem(idx)` | `int` | Discard one cached widget by index |
-| `scrollToIndex(idx, animate)` | `int, bool` | Scroll to bring an item into view |
-| `scrollToStart()` | — | Scroll to the beginning |
-| `scrollToEnd()` | — | Scroll to the end |
-
-**Shared with Flex**
-
-All `Flex` methods are available on `FlexBuilder` as well:
-`setDirection`, `setWrap`, `setJustifyContent`, `setAlignItems`, `setAlignContent`,
-`setGap`, `setScrollable`, `setPadding`, `setBackgroundColor`, `setBorderColor`,
-`setBorderWidth`, `setBorderRadius`, `setWidthMode`, `setHeightMode`,
-`setWidth`, `setHeight`, `setFlexGrow`, `setFlexShrink`, `setFlexBasis`,
-`setOrder`, `responsive`.
 
 ## Interaction
 
@@ -842,50 +932,6 @@ Button(Row({Icon(FluxIcons::Upload), Text("Upload")}), [&]{ upload(); });
 | `setPaddingAll(l, t, r, b)` | `int ×4` | Per-side padding |
 | `setWidth(w)` | `int` | Fixed width |
 | `setHeight(h)` | `int` | Fixed height |
-
----
-
-### GestureDetector
-
-Wraps any widget and attaches pointer/gesture callbacks.
-
-```cpp
-GestureDetector(Card(Text("Click me")))
-    ->setOnTap([&]{ handleTap(); })
-    ->setOnDoubleTap([&]{ handleDouble(); })
-    ->setOnLongPress([&]{ showMenu(); })
-    ->setOnDragUpdate([&](int dx, int dy){ pan(dx, dy); })
-    ->setOnScrollUp([&](int delta){ zoom(delta); });
-
-// Shorthand drag
-GestureDetector(myWidget, [&](int dx, int dy){ pan(dx, dy); });
-```
-
-> Long press fires after 500ms. Double-tap window is 300ms. Drag starts after 5px of movement.
-
-**Factory**
-
-| Signature | Description |
-|---|---|
-| `GestureDetector(child)` | Wraps child with no initial callbacks |
-| `GestureDetector(child, onDrag)` | Shorthand with drag handler |
-
-**Callbacks**
-
-| Method | Signature | Description |
-|---|---|---|
-| `setOnTap` | `void()` | Single click |
-| `setOnDoubleTap` | `void()` | Two taps within 300ms |
-| `setOnLongPress` | `void()` | Press held 500ms |
-| `setOnSecondaryTap` | `void()` | Right-click |
-| `setOnHoverEnter` | `void()` | Cursor enters bounds |
-| `setOnHoverExit` | `void()` | Cursor leaves bounds |
-| `setOnPointerMove` | `void(x, y)` | Mouse position while inside |
-| `setOnDragStart` | `void()` | Drag threshold exceeded |
-| `setOnDragUpdate` | `void(dx, dy)` | Delta since last move |
-| `setOnDragEnd` | `void()` | Mouse released after drag |
-| `setOnScrollUp` | `void(delta)` | Wheel scrolled up |
-| `setOnScrollDown` | `void(delta)` | Wheel scrolled down |
 
 ---
 
@@ -1229,320 +1275,6 @@ FilePicker()
 | `hasSelection()` | `bool` | True if a path is selected |
 
 > **Linux async:** On Linux the dialog runs on a background thread via zenity or kdialog. Dispatch results back to the UI by calling `fluxFilePickerDispatchSDLEvent(e)` inside your `SDL_USEREVENT` handler.
-
----
-
-## Collection
-
-### ListView
-
-Scrollable list. Static initializer-list form or reactive `State<vector<T>>` builder form.
-
-```cpp
-// Static
-ScrollView({
-    Card(Text("Item A")),
-    Card(Text("Item B")),
-})->setSpacing(8);
-
-// Reactive builder
-ListView(contactsState)
-    ->itemBuilder([](int i, const Contact& c) -> WidgetPtr {
-        return Card(Text(c.name));
-    })
-    ->separator([]{ return Divider(); })
-    ->setSpacing(8);
-```
-
-**Factory**
-
-| Signature | Description |
-|---|---|
-| `ListView({item, item, ...})` | Static list |
-| `ListView(State<vector<T>>)` | Reactive list |
-
-**Methods (both modes)**
-
-| Method | Description |
-|---|---|
-| `setSpacing(px)` | Gap between items |
-| `setHorizontal(bool)` | Switch to horizontal scroll |
-| `setScrollbarSize(px)` | Scrollbar thickness |
-| `setScrollbarColor(c)` | Idle thumb color |
-| `setScrollbarHoverColor(c)` | Hover thumb color |
-| `setScrollbarActiveColor(c)` | Drag thumb color |
-| `setScrollbarTrackColor(c)` | Track background |
-| `setPadding(px)` | Inner padding (static mode) |
-| `setBackgroundColor(c)` | Background fill (static mode) |
-| `setHeight(h)` | Fixed height (static mode) |
-
-**Methods (reactive builder only)**
-
-| Method | Description |
-|---|---|
-| `itemBuilder(fn)` | Builder `(int index, const T&) -> WidgetPtr` |
-| `separator(fn)` | Widget inserted between items |
-| `setKeyFn(fn)` | Custom key function for diffing |
-
----
-
-### GridView
-
-Scrollable grid driven by `State<vector<T>>`.
-
-```cpp
-GridView(photosState)
-    ->columns(3)
-    ->itemBuilder([](int i, const Photo& p) -> WidgetPtr {
-        return Thumbnail(p);
-    })
-    ->setSpacing(12);
-
-// Responsive
-GridView(itemsState)->columnWidth(200)->itemBuilder(...);
-```
-
-| Method | Description |
-|---|---|
-| `itemBuilder(fn)` | Builder `(int index, const T&) -> WidgetPtr` |
-| `columns(n)` | Fixed column count |
-| `columnWidth(px)` | Responsive — derive column count from width |
-| `setSpacing(px)` | Set H and V spacing |
-| `setSpacingH(px)` | Horizontal gap |
-| `setSpacingV(px)` | Vertical gap |
-| `setScrollbarWidth(px)` | Scrollbar thickness |
-| `setScrollbarColor(c)` | Idle thumb color |
-| `setScrollbarHoverColor(c)` | Hover thumb color |
-| `setScrollbarActiveColor(c)` | Drag thumb color |
-| `setScrollbarTrackColor(c)` | Track background |
-| `setKeyFn(fn)` | Custom key function for diffing |
-
----
-
-### Grid
-
-Static fixed-column grid for a known set of children. Non-scrolling.
-
-```cpp
-Grid(3,
-    Card(Text("A")),
-    Card(Text("B")),
-    Card(Text("C"))
-)->setSpacing(16);
-
-GridFixedWidth(200, items...);
-GridFromList(4, widgetVector);
-```
-
-**Factory**
-
-| Signature | Description |
-|---|---|
-| `Grid(columns, widgets...)` | Fixed columns, variadic children |
-| `GridFixedWidth(cellWidth, widgets...)` | Responsive from variadic children |
-| `GridFromList(columns, vector)` | Fixed columns from runtime vector |
-| `GridFixedWidthFromList(cellWidth, vector)` | Responsive from runtime vector |
-
-**Methods**
-
-| Method | Description |
-|---|---|
-| `setColumnCount(n)` | Fixed column count |
-| `setColumnWidth(px)` | Responsive mode |
-| `setSpacing(px)` | Uniform gap |
-| `setSpacingH(px)` / `setSpacingV(px)` | Per-axis gap |
-| `setCrossAxisAlignment(a)` | `Start · Center · End · Stretch` |
-| `setMainAxisAlignment(a)` | `Start · Center · End` |
-| `setPadding(px)` | Uniform padding |
-| `setPaddingAll(l, t, r, b)` | Per-side padding |
-| `setBackgroundColor(c)` | Grid background |
-| `setWidth(w)` / `setHeight(h)` | Fixed dimensions |
-| `setFlex(n)` | Flex factor in parent |
-
----
-
-### Accordion
-
-Vertical stack of collapsible panels.
-
-```cpp
-#include "flux/flux_accordion.hpp"
-
-AccordionPanel p1("Appearance", "Theme & display");
-p1.icon     = L"\uE771";
-p1.expanded = true;
-p1.body = Column({
-    Row({ Text("Dark theme"), Toggle(&darkTheme) })->setSpacing(8),
-})->setSpacing(12)->setPadding(8);
-
-auto acc = Accordion({ p1, p2, p3 })
-               ->setSingleExpand(true)
-               ->setAccentColor(RGB(33, 150, 243))
-               ->setOnChanged([](int idx, bool open) { });
-```
-
-**AccordionPanel struct**
-
-```cpp
-AccordionPanel p("Title", "Optional subtitle");
-p.icon     = L"\uE713";
-p.expanded = false;
-p.disabled = false;
-p.body     = myWidget;
-```
-
-**Methods**
-
-| Method | Type | Description |
-|---|---|---|
-| `setSingleExpand(v)` | `bool` | At most one panel open at a time (default `false`) |
-| `setOnChanged(fn)` | `void(int, bool)` | Fires on every expand/collapse |
-| `expand(idx)` | `int` | Expand panel by index |
-| `collapse(idx)` | `int` | Collapse panel by index |
-| `toggle(idx)` | `int` | Toggle panel by index |
-| `expandAll()` | — | Expand all panels |
-| `collapseAll()` | — | Collapse all panels |
-| `panelAt(idx)` | `AccordionPanel*` | Mutable access to a panel |
-| `panelCount()` | `int` | Number of panels |
-| `setPanels(panels)` | `vector<AccordionPanel>` | Replace all panels at runtime |
-| `setHeaderHeight(h)` | `int` | Header row height (default 48px) |
-| `setBodyPadding(p)` | `int` | Padding inside body area (default 12px) |
-| `setShowBorder(v)` | `bool` | Outer rounded border (default `true`) |
-| `setShowSeparators(v)` | `bool` | Dividers between panels (default `true`) |
-| `setAccentColor(c)` | `Color` | Left bar and active header tint |
-| `setTitleFontSize(s)` | `int` | Header title font size |
-| `setWidth(w)` | `int` | Fixed width |
-| `setFlex(n)` | `int` | Flex factor in parent |
-
----
-
-### TreeView
-
-Scrollable hierarchical tree with expand/collapse, single selection, keyboard navigation, and optional indent guide lines.
-
-```cpp
-TreeNode root("Project");
-auto &src = root.addChild(TreeNode("src"));
-src.expanded = true;
-src.addChild(TreeNode("main.cpp"));
-
-auto tv = TreeView(root)
-    ->setOnSelectionChanged([](const TreeNode *n) {
-        std::cout << n->label << std::endl;
-    })
-    ->setShowGuideLines(true)
-    ->setFlex(1);
-
-// Multiple roots
-auto tv = TreeView({rootA, rootB, rootC});
-```
-
-**TreeNode struct**
-
-```cpp
-TreeNode node("label", "optional-id");
-node.expanded  = true;
-node.disabled  = false;
-node.icon      = L"\uE8B7";
-node.userData  = &myObj;
-
-node.addChild(TreeNode("child"));
-node.expandAll();
-node.collapseAll();
-node.isLeaf();
-```
-
-**Methods**
-
-| Method | Type | Description |
-|---|---|---|
-| `setOnSelectionChanged(fn)` | `void(const TreeNode*)` | Fires on click |
-| `setOnNodeExpanded(fn)` | `void(const TreeNode*)` | Fires on expand |
-| `setOnNodeCollapsed(fn)` | `void(const TreeNode*)` | Fires on collapse |
-| `setOnNodeDoubleClicked(fn)` | `void(const TreeNode*)` | Fires on double-click |
-| `setRoots(vector<TreeNode>)` | — | Replace the entire tree at runtime |
-| `selectById(id)` | `string` | Select a node by its id field |
-| `expandAll()` / `collapseAll()` | — | Expand or collapse all nodes |
-| `selectedNode()` | `const TreeNode*` | Currently selected node |
-| `setRowHeight(h)` | `int` | Row height in pixels (default 28) |
-| `setIndentWidth(w)` | `int` | Pixels per depth level (default 20) |
-| `setShowGuideLines(v)` | `bool` | Vertical indent guide lines |
-| `setFontSize(s)` | `int` | Label font size |
-| `setAccentColor(c)` | `Color` | Selection highlight color |
-| `setFlex(n)` | `int` | Flex factor in parent |
-
-> **Keyboard:** `↑/↓` move selection · `←` collapse or jump to parent · `→` expand or move to first child · `Home/End` jump to first/last · `Enter/Space` toggle expand.
-
----
-
-### DataTable
-
-Virtualised sortable data grid with resizable columns, alternating rows, scrollbars, and optional reactive data binding.
-
-```cpp
-std::vector<DataColumn> columns = {
-    DataColumn("name",   "Name",   180),
-    DataColumn("role",   "Role",   130),
-    DataColumn("age",    "Age",     60).setAlign(ColumnAlign::Right),
-    DataColumn("salary", "Salary", 110).setAlign(ColumnAlign::Right)
-        .setFormatter([](const std::string &v){ return "$" + v + "k"; }),
-};
-
-std::vector<DataRow> rows = {
-    DataRow("1").set("name","Alice").set("role","Engineer").set("age","29").set("salary","120"),
-};
-
-auto table = DataTable(columns, rows)
-    ->setAlternateRows(true)
-    ->setOnRowSelected([](int idx, const DataRow &row) {
-        std::cout << row.get("name") << std::endl;
-    });
-
-// Reactive rows
-State<std::vector<DataRow>> rowsState(..., app);
-auto table = DataTable(columns, rowsState);
-```
-
-**DataColumn**
-
-```cpp
-DataColumn col("key", "Label", 120);
-col.setAlign(ColumnAlign::Right);
-col.setSortable(false);
-col.setResizable(false);
-col.setMinWidth(40);
-col.setFormatter([](const std::string &v){ return "$" + v; });
-```
-
-**DataRow**
-
-```cpp
-DataRow row("optional-id");
-row.set("name", "Alice").set("age", "29");
-row.get("name");
-row.disabled = true;
-```
-
-**Methods**
-
-| Method | Type | Description |
-|---|---|---|
-| `setRows(vector<DataRow>)` | — | Replace rows at runtime |
-| `sortBy(key, ascending)` | `string, bool` | Sort programmatically |
-| `clearSort()` | — | Remove sort, restore insertion order |
-| `selectedIndex()` | `int` | Currently selected visual row index |
-| `selectedRow()` | `const DataRow*` | Currently selected row data |
-| `setAlternateRows(v)` | `bool` | Alternating row background (default true) |
-| `setShowColumnDividers(v)` | `bool` | Vertical column divider lines |
-| `setRowHeight(h)` | `int` | Row height in pixels (default 30) |
-| `setHeaderHeight(h)` | `int` | Header row height (default 36) |
-| `setHeaderBackground(c)` | `Color` | Header background color |
-| `setAccentColor(c)` | `Color` | Selection highlight and sort arrow color |
-| `setOnRowSelected(fn)` | `void(int, DataRow)` | Fires on single click |
-| `setOnRowDoubleClicked(fn)` | `void(int, DataRow)` | Fires on double-click |
-| `setOnSortChanged(fn)` | `void(string, bool)` | Fires when sort column changes |
-| `setFlex(n)` | `int` | Flex factor in parent |
-| `setWidth(w)` / `setHeight(h)` | `int` | Fixed dimensions |
 
 ---
 
@@ -2115,10 +1847,29 @@ public:
         canvas->setViewportEnabled(false);
         canvas->setSurface<TriangleSurface>();
 
-        return Scaffold(
-            AppBar("Animated Triangle"),
-            Center(canvas)
-        );
+        auto appBar =
+            Box({ Text("Animated Triangle")->setFontSize(20)->setFontWeight(FontWeight::Bold)
+                      ->setTextColor(Color::fromRGB(255, 255, 255)) })
+                ->setDisplay(Display::Flex)
+                ->setAlignItems(AlignItems::Center)
+                ->setPaddingHV(16, 0)
+                ->setWidthMode(SizeMode::Full)
+                ->setHeightMode(SizeMode::Fixed)
+                ->setHeight(56)
+                ->setBackgroundColor(Color::fromRGB(33, 150, 243));
+
+        return Column({
+            appBar,
+            Box({ canvas })
+                ->setDisplay(Display::Flex)
+                ->setAlignItems(AlignItems::Center)
+                ->setJustifyContent(JustifyContent::Center)
+                ->setWidthMode(SizeMode::Full)
+                ->setHeightMode(SizeMode::Full)
+                ->setFlexGrow(1),
+        })
+        ->setWidthMode(SizeMode::Full)
+        ->setHeightMode(SizeMode::Full);
     }
 };
 
@@ -2127,16 +1878,11 @@ public:
 // ─────────────────────────────────────────────────────────────────────────────
 
 WidgetPtr createApp(FluxUI* app) {
-    return FluxApp(
-        "Triangle",
-        std::make_shared<MyApp>(),
-        AppTheme::dark(),
-        false,   // debugShowWidgetBounds
-        560,     // window width
-        620,     // window height
-        false,   // maximize
-        false    // fullscreen
-    );
+    return FluxApp()
+        .setTheme(AppTheme::dark())
+        .setTitle("Triangle")
+        .setSize(560, 620)
+        .build(std::make_shared<MyApp>());
 }
 ```
 
@@ -2157,10 +1903,10 @@ RenderSurface  (your subclass)
 ├── update(dt)                 per-frame logic
 ├── preRender()                raw GL pass (optional)
 ├── render(ctx)                Canvas2D drawing
-├── resize(w, h)               canvas resized
-├── destroy()                  cleanup before GL teardown
-├── onMouseDown/Move/Up(x, y)  canvas-space mouse input
-├── onKeyDown/Up(event)        keyboard input
+├── resize(w, h)                canvas resized
+├── destroy()                   cleanup before GL teardown
+├── onMouseDown/Move/Up(x, y)   canvas-space mouse input
+├── onKeyDown/Up(event)         keyboard input
 └── needsContinuousRedraw()    return true for animation
 
 Canvas2D  (inside render())
@@ -2218,554 +1964,135 @@ Switch(tabIndex)
 
 ---
 
-## Layout
 
-### Row
+### Navigation (Routing)
 
-Lays children out horizontally with flex expansion support.
+`Navigator` drives named-route, stack-based navigation, similar to Flutter's
+`Navigator` or React Router. All routes are declared upfront in
+`Navigator::init()`, and are the only routes that can ever be pushed.
 
-```cpp
-Row({
-    Text("Label"),
-    Expanded(TextInput()),
-    Button("Send")
-})->setSpacing(8)->setCrossAxisAlignment(CrossAxisAlignment::Center);
-```
-
-| Method | Type | Description |
-|---|---|---|
-| `setSpacing(px)` | `int` | Gap between children |
-| `setCrossAxisAlignment(a)` | `CrossAxisAlignment` | Vertical alignment |
-| `setMainAxisAlignment(a)` | `MainAxisAlignment` | Horizontal distribution |
-| `setMainAxisSize(s)` | `MainAxisSize` | `Max` (fill) or `Min` (shrink-wrap) |
-| `setWidth(w)` | `int` | Fixed width |
-| `setHeight(h)` | `int` | Fixed height |
-| `setPadding(p)` | `int` | Uniform padding |
-| `setBackgroundColor(c)` | `Color` | Row background |
-| `setFlex(n)` | `int` | Flex factor in parent |
-
----
-
-### Column
-
-Lays children out vertically with flex expansion support.
+Routes can be static (`"/settings"`) or parameterized (`"/products/:id"`); a
+`:name` segment binds the matching path segment and is readable via
+`Navigator::arguments<RouteParams>()`. On Web builds, every stack mutation
+also syncs the browser URL, and the SSR host resolves the initial route
+straight from the incoming request path.
 
 ```cpp
-Column({
-    AppBar("Title"),
-    Expanded(ListView(itemsState)->itemBuilder(...)),
-})->setSpacing(0);
-```
-
-| Method | Type | Description |
-|---|---|---|
-| `setSpacing(px)` | `int` | Gap between children |
-| `setCrossAxisAlignment(a)` | `CrossAxisAlignment` | Horizontal alignment |
-| `setMainAxisAlignment(a)` | `MainAxisAlignment` | Vertical distribution |
-| `setMainAxisSize(s)` | `MainAxisSize` | `Max` (fill) or `Min` (shrink-wrap) |
-| `setWidth(w)` | `int` | Fixed width |
-| `setHeight(h)` | `int` | Fixed height |
-| `setPadding(p)` | `int` | Uniform padding |
-| `setBackgroundColor(c)` | `Color` | Column background |
-| `setBorderRadius(r)` | `int` | Corner rounding |
-| `setMinWidth(w)` | `int` | Minimum width |
-| `setFlex(n)` | `int` | Flex factor in parent |
-
----
-
-### Stack
-
-Layers children on top of each other. Supports absolute positioning via margins.
-
-```cpp
-Stack(
-    AssetImage("bg.jpg")->setWidth(400)->setHeight(300),
-    Positioned(Text("Overlay"), 10, 10)
-)->setExpand(true);
-```
-
-**Factory:** `Stack(widgets...)` or `Stack({widget, widget, ...})`
-
-**Positioned helper**
-
-```cpp
-Positioned(child, left, top, right, bottom)
-Positioned(child, state, xTransform, yTransform)
-Positioned(child, xState, xTransform, yState, yTransform)
-```
-
-**StackWidget methods**
-
-| Method | Description |
-|---|---|
-| `setAlignment(a)` | Default alignment for unpositioned children |
-| `setExpand(bool)` | Fill available space instead of shrink-wrapping |
-| `setWidth(w)` / `setHeight(h)` | Fixed dimensions |
-| `setPadding(p)` | Uniform padding |
-| `setBackgroundColor(c)` | Background fill |
-| `setBorderRadius(r)` | Corner rounding |
-| `setFlex(n)` | Flex factor in parent |
-
----
-
-### Container
-
-Single-child box with full styling — background, border, radius, padding, margin, size constraints, hover effects.
-
-```cpp
-Container(Text("Hello"))
-    ->setBackgroundColor(RGB(240,248,255))
-    ->setBorderColor(RGB(33,150,243))
-    ->setBorderWidth(1)
-    ->setBorderRadius(8)
-    ->setPadding(16)
-    ->setHoverBackgroundColor(RGB(220,240,255));
-
-// Reactive background
-Container(child)->setBackgroundColor(selectedState,
-    [](bool v){ return v ? RGB(230,245,255) : RGB(255,255,255); });
-
-// Reactive visibility
-Container(child)->setVisible(visibleState, [](bool v){ return v; });
-```
-
-| Method | Type | Description |
-|---|---|---|
-| `setBackgroundColor(color)` | `Color` | Fill color |
-| `setBackgroundColor(State, transform)` | State | Reactive background |
-| `setHoverBackgroundColor(color)` | `Color` | Fill on hover |
-| `setBorderColor(color)` | `Color` | Border stroke |
-| `setBorderColor(State, transform)` | State | Reactive border color |
-| `setHoverBorderColor(color)` | `Color` | Border on hover |
-| `setBorderWidth(w)` | `int` or State | Border thickness |
-| `setBorderRadius(r)` | `int` or State | Corner rounding |
-| `setPadding(p)` | `int` | Uniform inner padding |
-| `setPaddingAll(l,t,r,b)` | `int ×4` | Per-side inner padding |
-| `setMargin(m)` | `int` | Uniform outer margin |
-| `setMarginAll(l,t,r,b)` | `int ×4` | Per-side outer margin |
-| `setWidth(w)` | `int` or State | Fixed width |
-| `setHeight(h)` | `int` or State | Fixed height |
-| `setMinWidth(w)` | `int` | Minimum width |
-| `setMinHeight(h)` | `int` | Minimum height |
-| `setMaxWidth(w)` | `int` | Maximum width |
-| `setMaxHeight(h)` | `int` | Maximum height |
-| `setFlex(n)` | `int` | Flex factor |
-| `setOnHover(fn)` | `void(bool)` | Hover enter/leave callback |
-| `setVisible(v)` | `bool` or State | Show/hide |
-
----
-
-### Center
-
-Centers its single child both horizontally and vertically.
-
-```cpp
-Center(Text("No items found")->setTextColor(RGB(150,150,150)));
-```
-
----
-
-### Expanded
-
-Causes its child to fill remaining space along the parent Row or Column's main axis.
-
-```cpp
-Row({
-    Text("Label"),
-    Expanded(TextInput()),
-    Button("Go")
-});
-
-// Proportional — 2:1 split
-Row({
-    Expanded(Column(...), 2),
-    Expanded(Column(...), 1)
-});
-```
-
-**Factory:** `Expanded(child, flex = 1)`
-
-**Methods**
-
-| Method | Description |
-|---|---|
-| `setFlex(n)` | Override flex factor |
-| `setPadding(p)` | Uniform inner padding |
-| `setBackgroundColor(c)` | Background fill |
-
----
-
-### SizedBox
-
-Fixed-size box. Used as a spacer or to constrain a child to an exact size.
-
-```cpp
-SizedBox(0, 24);                        // 24px vertical gap
-SizedBox(16, 0);                        // 16px horizontal gap
-SizedBox(200, 48, Button("Submit"));    // constrained child
-```
-
----
-
-### Padding
-
-Uniform padding wrapper. Shorthand for `Container` with a single padding value.
-
-```cpp
-Padding(16, Text("Padded content"));
-```
-
----
-
-### SplitView
-
-Two-pane resizable container with a draggable divider.
-
-```cpp
-SplitView(leftWidget, rightWidget, 0.3f)
-    ->setMinPaneWidth(120)
-    ->setDividerColor(RGB(210, 210, 210));
-
-SplitViewVertical(topWidget, bottomWidget, 0.4f);
-
-State<float> ratio(0.5f, app);
-SplitView(left, right)->setRatio(ratio);
-```
-
-**Methods**
-
-| Method | Type | Description |
-|---|---|---|
-| `setRatio(r)` | `float` 0–1 | Fraction of space given to pane 0 |
-| `setRatio(State<float>)` | State | Reactive ratio binding |
-| `setMinPaneWidth(px)` | `int` | Minimum size of either pane |
-| `setDividerWidth(px)` | `int` | Divider thickness (default 6px) |
-| `setDividerColor(c)` | `Color` | Default divider color |
-| `setDividerHoverColor(c)` | `Color` | Divider color on hover |
-| `setDividerDragColor(c)` | `Color` | Divider color while dragging |
-| `setVertical(v)` | `bool` | Switch to top/bottom split |
-| `setResizable(v)` | `bool` | Allow drag resize (default true) |
-| `setOnRatioChanged(fn)` | `void(float)` | Fires after drag completes |
-| `getRatio()` | `float` | Current ratio |
-| `swapPanes()` | — | Swap pane 0 and pane 1 |
-| `collapsePane(idx)` | `int` | Collapse pane 0 or 1 fully |
-
----
-
-## Structure
-
-### Scaffold
-
-Root structure widget. Manages the overlay stack used by Dropdown, Tooltip, Dialog, and ContextMenu.
-
-```cpp
-Scaffold(
-    AppBar("My App"),
-    Column({ Text("Content") })
-);
-```
-
-> **Overlay zIndex order:** Tooltip = 50, Dropdown = 100, ContextMenu = 150, Dialog = 200.
-
-| Method | Description |
-|---|---|
-| `addOverlay(widget, renderer, zIndex)` | Register a floating overlay |
-| `removeOverlay(widget)` | Unregister a floating overlay |
-| `clearOverlays()` | Remove all overlays |
-| `hasOverlays()` | Returns true if overlays are active |
-| `getTopmostOverlay()` | Returns topmost overlay widget pointer |
-
----
-
-### AppBar
-
-56px tall header bar with blue background and bold white title.
-
-```cpp
-AppBar("Dashboard");
-```
-
----
-
-### Card
-
-White rounded-corner box with light border and 16px padding.
-
-```cpp
-Card(
-    Column({
-        Text("Title")->setFontWeight(FontWeight::Bold),
-        Text("Description")
-    })->setSpacing(8)
-);
-```
-
----
-
-## Navigation
-
-### TabView
-
-Tab bar with swappable content panes.
-
-```cpp
-TabView({
-    Tab("General",  generalWidget),
-    Tab("Display",  displayWidget),
-    Tab("Network",  networkWidget),
-})
-->setOnTabChanged([](int i) { std::cout << "Tab: " << i << std::endl; });
-
-State<int> activeTab(0, app);
-TabView({...})->setActiveIndex(activeTab);
-```
-
-**Methods**
-
-| Method | Type | Description |
-|---|---|---|
-| `setActiveIndex(idx)` | `int` | Switch to tab by index |
-| `setActiveIndex(State<int>)` | State | Two-way reactive binding |
-| `setOnTabChanged(fn)` | `void(int)` | Fires when active tab changes |
-| `setTabBarHeight(h)` | `int` | Height of the tab bar (default 40px) |
-| `setTabMinWidth(w)` | `int` | Minimum tab button width (default 90px) |
-| `setTabFontSize(s)` | `int` | Tab label font size |
-| `setIndicatorColor(c)` | `Color` | Active tab underline color |
-| `setActiveTabText(c)` | `Color` | Active tab label color |
-| `setBarBackground(c)` | `Color` | Tab bar background color |
-| `setContentPadding(p)` | `int` | Padding inside the content area |
-| `setHasContentBorder(v)` | `bool` | Border around content pane |
-| `setAccentColor(c)` | `Color` | Sets indicator, active text, hover together |
-| `setTabContent(idx, widget)` | — | Replace a tab's content at runtime |
-| `setTabLabel(idx, label)` | — | Rename a tab at runtime |
-| `tabCount()` | `int` | Number of tabs |
-| `setFlex(n)` | `int` | Flex factor in parent |
-
----
-
-### MenuBar
-
-Horizontal strip of labeled menus with pulldown lists.
-
-```cpp
-auto menuBar = MenuBar({
-    MenuBarItem("File", {
-        ContextMenuItem::Action("New",  [&]{ newFile(); }),
-        ContextMenuItem::Separator(),
-        ContextMenuItem::Action("Exit", []{ PostQuitMessage(0); }),
-    }),
-    MenuBarItem("Edit", {
-        ContextMenuItem::Action("Cut",   [&]{ cut(); }),
-        ContextMenuItem::Action("Copy",  [&]{ copy(); }),
-    }),
-});
-```
-
-**Methods**
-
-| Method | Type | Description |
-|---|---|---|
-| `setBarHeight(h)` | `int` | Height of the menu bar strip (default 28px) |
-| `setBarBackground(c)` | `Color` | Bar background color |
-| `setItemHeight(h)` | `int` | Dropdown item row height (default 28px) |
-| `setMinMenuWidth(w)` | `int` | Minimum dropdown width (default 160px) |
-
----
-
-## Overlay
-
-### Dropdown
-
-Select input that opens a scrollable overlay list.
-
-```cpp
-Dropdown({"Nepal", "India", "USA", "UK"})
-    ->setPlaceholder("Select a country")
-    ->setSelectedValue(countryState)
-    ->setOnSelectionChanged([&](int i, const std::string& v){
-        handleSelect(v);
-    });
-```
-
-**Factory:** `Dropdown(options)` or `Dropdown()`
-
-**Methods**
-
-| Method | Type | Description |
-|---|---|---|
-| `setOptions(opts)` | `vector<string>` | Set or replace options |
-| `setPlaceholder(text)` | `string` | Text when nothing selected |
-| `setSelectedIndex(State<int>)` | State | Two-way binding by index |
-| `setSelectedValue(State<string>)` | State | Two-way binding by value |
-| `setOnSelectionChanged(fn)` | `void(int, string)` | Change callback |
-| `setItemHeight(h)` | `int` | Row height (default 32px) |
-| `setMaxVisibleItems(n)` | `int` | Max rows before scroll (default 6) |
-| `setWidth(w)` | `int` | Fixed width |
-
----
-
-### Toast
-
-Floating notification toasts anchored to any point in the tree.
-
-```cpp
-auto toast = Toast()
-    ->setPosition(ToastPosition::BottomRight)
-    ->setMaxVisible(3);
-
-toast->show("File saved",      ToastType::Success);
-toast->show("Connection lost", ToastType::Error);
-
-toast->showEntry({
-    .message     = "Upload failed",
-    .title       = "Network Error",
-    .type        = ToastType::Error,
-    .durationMs  = 0,
-    .actionLabel = "Retry",
-    .onAction    = [&]{ retry(); },
-});
-```
-
-**ToastPosition / ToastType** — same as before (BottomRight/Left/Center, TopRight/Left/Center; Info/Success/Warning/Error).
-
-**Methods**
-
-| Method | Type | Description |
-|---|---|---|
-| `show(message, type, durationMs)` | — | Quick fire with defaults |
-| `showEntry(ToastEntry)` | — | Full control over all fields |
-| `dismissTop()` | — | Dismiss the topmost visible toast |
-| `dismissAll()` | — | Dismiss all toasts |
-| `setPosition(pos)` | `ToastPosition` | Screen corner/edge |
-| `setMaxVisible(n)` | `int` | Max simultaneous toasts (default 3) |
-| `setToastWidth(w)` | `int` | Toast panel width |
-| `setToastHeight(h)` | `int` | Base height per toast |
-| `setMarginEdge(m)` | `int` | Distance from window edge |
-| `setSpacing(s)` | `int` | Gap between stacked toasts |
-| `setFontSize(s)` | `int` | Toast text size |
-| `setBgColor(c)` | `Color` | Toast background |
-| `setColors(info, success, warning, error)` | `Color ×4` | Override all accent colors |
-
----
-
-### Tooltip
-
-Shows a floating text bubble on hover.
-
-```cpp
-Tooltip(
-    Button("Delete", [&]{ deleteItem(); }),
-    "Permanently removes the item"
-)->setPosition(TooltipPosition::Above);
-```
-
-**Factory:** `Tooltip(anchor, text)`
-
-**Methods**
-
-| Method | Type | Description |
-|---|---|---|
-| `setTooltipText(text)` | `string` | Update tooltip content |
-| `setPosition(pos)` | `TooltipPosition` | `Above · Below · Auto` |
-| `setTooltipBackground(color)` | `Color` | Bubble background |
-| `setTooltipTextColor(color)` | `Color` | Bubble text color |
-| `setTooltipFontSize(size)` | `int` | Font size inside bubble |
-| `setTooltipMaxWidth(w)` | `int` | Max bubble width (default 240px) |
-
----
-
-### Dialog
-
-Modal overlay with semi-transparent backdrop and centered content panel.
-
-```cpp
-auto dlg = Dialog(
-    Column({
-        Text("Confirm delete?")->setFontSize(16),
-        Row({
-            Button("Cancel", [&]{ dlg->close(); }),
-            Button("Delete", [&]{ deleteItem(); dlg->close(); })
-        })->setSpacing(8)
-    })
-)->setSize(360, 160)
- ->setCloseOnClickOutside(true);
-
-dlg->open();
-```
-
-**Methods**
-
-| Method | Type | Description |
-|---|---|---|
-| `open()` | — | Show the dialog |
-| `close()` | — | Dismiss the dialog |
-| `setContent(widget)` | `WidgetPtr` | Set or replace content |
-| `setSize(w, h)` | `int, int` | Panel dimensions (default 400×300) |
-| `setCloseOnClickOutside(bool)` | `bool` | Close on backdrop click (default true) |
-| `setOverlayAlpha(alpha)` | `int` 0–255 | Backdrop opacity (default 128) |
-| `setOnClose(fn)` | `void()` | Called when dismissed |
-
----
-
-### ContextMenu
-
-Attaches a right-click context menu to any anchor widget.
-
-```cpp
-ContextMenu(
-    Text("Right click me"),
-    {
-        {"Cut",   [&]{ cut(); }},
-        {"Copy",  [&]{ copy(); }},
-        ContextMenuItem::Separator(),
-        {"Paste", [&]{ paste(); }, false}
+// lib/main.cpp
+#include "flux/flux.hpp"
+#include "flux/flux_navigator.hpp"
+
+// ── Home page — plain static route, no params ──────────────────────────
+class HomePage : public Widget {
+public:
+    WidgetPtr build() override {
+        return Flex({
+            Text("Home")->setFontWeight(FontWeight::Bold)->setFontSize(24),
+            Text("Pick a product:"),
+            Button("Product 1", []() { Navigator::navigate("/products/1"); }),
+            Button("Product 2", []() { Navigator::navigate("/products/2"); }),
+            Button("Go to Settings", []() { Navigator::navigate("/settings"); }),
+        })
+        ->setDirection(FlexDirection::Column)
+        ->setGap(12)
+        ->setPadding(24);
     }
-);
+};
+
+// ── Product page — parameterized route: /products/:id ───────────────────
+// Params are read in the CONSTRUCTOR, and survive navigate(), browser
+// back/forward, and a hard page refresh on the deep link (Web/SSR).
+class ProductPage : public Widget {
+    std::string productId;
+public:
+    ProductPage() {
+        RouteParams params = Navigator::arguments<RouteParams>();
+        auto it = params.find("id");
+        productId = (it != params.end()) ? it->second : "(missing)";
+    }
+
+    WidgetPtr build() override {
+        return Flex({
+            Text("Product Page")->setFontWeight(FontWeight::Bold)->setFontSize(24),
+            Text("id = " + productId),
+            Button("Back", []() { Navigator::pop(); }),
+            Button("Go Home", []() { Navigator::pushAndRemoveAllNamed("/"); }),
+        })
+        ->setDirection(FlexDirection::Column)
+        ->setGap(12)
+        ->setPadding(24);
+    }
+};
+
+// ── Settings page — second plain static route ───────────────────────────
+class SettingsPage : public Widget {
+public:
+    WidgetPtr build() override {
+        return Flex({
+            Text("Settings")->setFontWeight(FontWeight::Bold)->setFontSize(24),
+            Button("Back", []() { Navigator::maybePop(); }),
+        })
+        ->setDirection(FlexDirection::Column)
+        ->setGap(12)
+        ->setPadding(24);
+    }
+};
+
+// ── Entry point ───────────────────────────────────────────────────────
+WidgetPtr createApp(FluxUI* app) {
+    return FluxApp()
+        .setTheme(AppTheme::light())
+        .build(Navigator::init({
+            {"/",              [] { return std::make_shared<HomePage>();     }},
+            {"/products/:id",  [] { return std::make_shared<ProductPage>();  }},
+            {"/settings",      [] { return std::make_shared<SettingsPage>(); }},
+        }, "/"));
+}
 ```
-
-**ContextMenuItem**
-
-| Factory | Description |
-|---|---|
-| `ContextMenuItem(label, action, enabled)` | Action item |
-| `ContextMenuItem::Action(label, action, enabled)` | Explicit action factory |
-| `ContextMenuItem::Separator()` | Visual divider |
 
 **Methods**
 
-| Method | Type | Description |
-|---|---|---|
-| `setMenuItems(items)` | `vector<ContextMenuItem>` | Replace all items |
-| `setItemHeight(h)` | `int` | Row height (default 28px) |
-| `setMinWidth(w)` | `int` | Minimum menu width (default 160px) |
-| `setMenuBackground(color)` | `Color` | Menu background |
-| `setMenuBorder(color)` | `Color` | Menu border color |
-| `setItemHoverColor(color)` | `Color` | Row highlight on hover |
+| Method | Description |
+|---|---|
+| `Navigator::init(routes, initialRoute)` | One-time setup — pass as the home widget in `createApp()` |
+| `Navigator::navigate(name, args = {})` | Push a new instance of a named route |
+| `Navigator::pushReplacementNamed(name, args = {})` | Replace the top of the stack |
+| `Navigator::pushAndRemoveAllNamed(name, args = {})` | Clear the stack and push a new root |
+| `Navigator::pop()` | Pop the top of the stack (no-op if only one entry remains) |
+| `Navigator::maybePop()` | Pop only if `canPop()` is true |
+| `Navigator::popUntil(name)` | Pop until the given route name is on top |
+| `Navigator::canPop()` | `true` if there's more than one entry on the stack |
+| `Navigator::currentName()` | The name of the currently active route |
+| `Navigator::arguments<T>(default = T())` | Read navigation args — **constructor only** |
+| `Navigator::currentArguments<T>(default = T())` | Read navigation args any time the route is current |
+| `Navigator::hasRoute(name)` | `true` if a route name is registered |
 
 ---
+
+## Data
 
 ## Media
 
 ### AudioPlayer
 
-Drop-in audio player widget. Supports local files, HTTP/HTTPS URLs, and in-memory buffers.
+Drop-in audio player widget. Supports local files, HTTP/HTTPS URLs, and in-memory buffers. A single overloaded `AudioPlayer(...)` factory covers every source — path vs. URL is auto-detected by scheme prefix.
 
 ```cpp
-// Local file
+// Local file — auto-detected (no http/https prefix)
 AudioPlayer("audio/sample.mp3")->setWidth(380);
 
 // Explicit path setter
 AudioPlayer()->setPath("audio/sample.mp3")->setWidth(380);
 
-// Stream from URL
-AudioPlayerFromUrl("https://example.com/music.mp3")->setWidth(400);
+// Stream from URL — auto-detected (http/https prefix)
+AudioPlayer("https://example.com/music.mp3")->setWidth(400);
 
 // In-memory buffer
-AudioPlayerFromMemory(myBytes)->setWidth(400);
+AudioPlayer(myBytes)->setWidth(400);
 
 // With artwork
 AudioPlayer("audio/track.mp3")
-    ->setArtwork(AssetImage("covers/album.jpg"), 60)
+    ->setArtwork(Image("covers/album.jpg"), 60)
     ->setWidth(420);
 ```
 
@@ -2773,10 +2100,10 @@ AudioPlayer("audio/track.mp3")
 
 | Signature | Description |
 |---|---|
-| `AudioPlayer(path = "")` | Player for a local file path |
-| `AudioPlayerFromUrl(url)` | Player that streams from an HTTP/HTTPS URL |
-| `AudioPlayerFromMemory(bytes)` | Player backed by a `vector<uint8_t>` buffer |
-| `AudioPlayerFromMemory(ptr, len)` | Player backed by a raw pointer + length |
+| `AudioPlayer()` | Empty player — no source set yet. Configure via `setPath`/`setUrl`/`setMemory` |
+| `AudioPlayer(pathOrUrl)` | Local file or HTTP/HTTPS URL, auto-detected by scheme prefix |
+| `AudioPlayer(bytes)` | Player backed by a `vector<uint8_t>` buffer (copy overload) |
+| `AudioPlayer(data, len)` | Player backed by a raw pointer + length |
 
 **Methods**
 
@@ -2795,33 +2122,33 @@ AudioPlayer("audio/track.mp3")
 
 ### VideoPlayer
 
-Self-contained video player widget. Blits decoded frames each render tick and overlays a control bar on hover. Supports local files, HTTP/HTTPS URLs, and in-memory buffers.
+Self-contained video player widget. Blits decoded frames each render tick and overlays a control bar on hover. Supports local files, HTTP/HTTPS URLs, and in-memory buffers. A single overloaded `VideoPlayer(...)` factory covers every source — path vs. URL is auto-detected by scheme prefix.
 
-**Platform support:** Android (OES), Windows (GDI StretchDIBits), Linux (Cairo/SDL2).
+**Platform support:** Android (OES), Windows (Direct2D), Linux (Cairo/SDL2).
 
 ```cpp
-// Local file
+// Local file — auto-detected (no http/https prefix)
 VideoPlayer("video/sample.mp4")
     ->setWidth(480)
     ->setHeight(270)
     ->setAutoPlay(true);
 
-// Stream from URL
-VideoPlayerFromUrl("https://example.com/video.mp4")
+// Stream from URL — auto-detected (http/https prefix)
+VideoPlayer("https://example.com/video.mp4")
     ->setWidth(480)->setHeight(270);
 
 // In-memory buffer
-VideoPlayerFromMemory(bytes)->setWidth(480)->setHeight(270);
+VideoPlayer(bytes)->setWidth(480)->setHeight(270);
 ```
 
 **Factory**
 
 | Signature | Description |
 |---|---|
-| `VideoPlayer(path = "")` | Player for a local file path |
-| `VideoPlayerFromUrl(url)` | Player that streams from an HTTP/HTTPS URL |
-| `VideoPlayerFromMemory(bytes)` | Player backed by a `vector<uint8_t>` buffer |
-| `VideoPlayerFromMemory(ptr, len)` | Player backed by a raw pointer + length |
+| `VideoPlayer()` | Empty player — no source set yet. Configure via `setPath`/`setUrl`/`setMemory` |
+| `VideoPlayer(pathOrUrl)` | Local file or HTTP/HTTPS URL, auto-detected by scheme prefix |
+| `VideoPlayer(bytes)` | Player backed by a `vector<uint8_t>` buffer (copy overload) |
+| `VideoPlayer(data, len)` | Player backed by a raw pointer + length |
 
 **Methods**
 
