@@ -1,8 +1,8 @@
 #ifndef FLUX_FILE_PICKER_HPP
 #define FLUX_FILE_PICKER_HPP
 
-#include "../flux_core.hpp"
-#include "../flux_state.hpp"
+#include "flux/flux_core.hpp"
+#include "flux/flux_state.hpp"
 
 
 #include <functional>

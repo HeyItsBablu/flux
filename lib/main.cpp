@@ -1,65 +1,18 @@
 #include "flux/flux.hpp"
 
-class CounterDisplay : public Widget
-{
-  State<int> &counter; // reference to parent's state
-
-public:
-  CounterDisplay(State<int> &counter) : counter(counter) {}
-
-  WidgetPtr build() override
-  {
-    return Flex({Text("Current count:"), Text(counter),
-                 Text(counter,
-                      [](int v)
-                      {
-                        return v % 2 == 0 ? "Even" : "Odd";
-                      })})
-        ->setHeightMode(SizeMode::Fit);
-      
-  }
-};
-
-class CounterControls : public Widget
-{
-  State<int> &counter; // reference to parent's state
-
-public:
-  CounterControls(State<int> &counter) : counter(counter) {}
-
-  WidgetPtr build() override
-  {
-    return Flex({Button("Increment", [this]()
-                        { counter++; }),
-                 Button("Decrement", [this]()
-                        { counter--; }),
-                 Button("Reset", [this]()
-                        { counter.set(0); })});
-  }
-};
-
 class MyApp : public Widget
 {
-  State<int> counter{0};
-
 public:
   WidgetPtr build() override
   {
+    return Flex(
+               {VideoPlayer("https://avtshare01.rz.tu-ilmenau.de/avt-vqdb-uhd-1/test_1/segments/bigbuck_bunny_8bit_200kbps_360p_60.0fps_hevc.mp4")
+                    ->setWidth(380)
+                    ->setHeight(270) // 16:9
+                    ->setAutoPlay(false)
 
-    return Flex({Flex({Text("Nav")})
-                     ->setBackgroundColor(Color::fromRGB(50, 50, 150))
-                     ->setPadding(12)
-                     ->setWidthMode(SizeMode::Full)
-                     ->setHeight(50)
-                     ->setAlignItems(AlignItems::Center)
-                     ->setJustifyContent(JustifyContent::Center)
-                     ->setAlignContent(AlignContent::Center),
-
-                 Flex({std::make_shared<CounterDisplay>(counter),
-                       std::make_shared<CounterControls>(counter)})
-                     ->setDirection(FlexDirection::Column)})
-
-        ->setScrollable(false)
+               })
+        ->setScrollable(true)
         ->setDirection(FlexDirection::Column) // base (mobile): stacked
         ->setGap(8)
         ->setPadding(16)

@@ -7,7 +7,7 @@
 
 #pragma once
 
-#include "../flux_http.hpp"
+#include "flux/flux_http.hpp"
 
 // ── Platform headers ──────────────────────────────────────────────────────────
 
@@ -177,6 +177,10 @@ public:
     Color colOverlay = Color::fromRGBA(0, 0, 0, 60);
     Color colLoadingText = Color::fromRGB(180, 180, 180);
     Color colErrorText = Color::fromRGB(220, 80, 80);
+    Color colSpinnerTrack = Color::fromRGBA(255, 255, 255, 40);
+    Color colSpinnerProgress = Color::fromRGB(255, 255, 255);
+    int spinnerDiameter = 40;
+    int spinnerStroke = 3;
 
     // ── Fluent setters ────────────────────────────────────────────────────────
 
@@ -366,14 +370,14 @@ public:
         if (_netState == NetState::Loading)
         {
             p.fillRect(x, y, width, height, colBg, "bg");
-            _renderStatusOverlay(p, fontCache, "... Loading ...", colLoadingText);
+            _renderLoadingSpinner(p);
             needsPaint = false;
             return;
         }
         if (_netState == NetState::Error)
         {
             p.fillRect(x, y, width, height, colBg, "bg");
-            _renderStatusOverlay(p, fontCache, "Error loading video", colErrorText);
+            _renderErrorIcon(p);
             needsPaint = false;
             return;
         }
@@ -815,6 +819,7 @@ private:
 
     TimerID _progressTimer = 0;
     TimerID _barHideTimer = 0;
+    float _spinAngle = -1.57079632f; // -halfPi, matches CircularProgressIndicatorWidget's start angle
 
     // ── Platform frame storage ────────────────────────────────────────────────
 
@@ -902,6 +907,7 @@ private:
     void _loadFromUrl()
     {
         _netState = NetState::Loading;
+        _startProgressTimer();
         markNeedsPaint();
         std::weak_ptr<VideoPlayerWidget> weak = self();
         std::string url = _sourceUrl;
@@ -909,7 +915,7 @@ private:
                       {
             auto s = weak.lock(); if (!s) return;
             if (!result.success || result.body.empty()) {
-                s->_netState = NetState::Error; s->markNeedsPaint(); return;
+                s->_netState = NetState::Error; s->_stopTimers(); s->markNeedsPaint(); return;
             }
             const auto *d = reinterpret_cast<const uint8_t*>(result.body.data());
             s->_sourceMemory.assign(d, d + result.body.size());
@@ -1044,7 +1050,8 @@ private:
 #if !defined(__ANDROID__)
             if (_destroyed) return;
 #endif
-            if (_playing) { _progress = FluxVideo::get().getProgress(); markNeedsPaint(); } });
+            if (_playing) { _progress = FluxVideo::get().getProgress(); markNeedsPaint(); }
+            else if (_netState == NetState::Loading) { markNeedsPaint(); } });
     }
 
     void _resetBarTimer()
@@ -1376,12 +1383,40 @@ private:
 #endif
     }
 
-    void _renderStatusOverlay(Painter &p, FontCache &fc,
-                              const std::string &msg, Color col)
+
+
+    void _renderLoadingSpinner(Painter &p)
     {
-        NativeFont tf = fc.getFont(_uiFont(), 14, FontWeight::Normal);
-        p.drawTextA(msg, x, y, width, height, tf, col,
-                    DT_CENTER | DT_VCENTER | DT_SINGLELINE, "statusText");
+        constexpr float kTwoPi = 6.28318530f;
+        constexpr float kSpinStep = 0.07f;
+
+        float cx = float(x) + float(width) * 0.5f;
+        float cy = float(y) + float(height) * 0.5f;
+        float r = float(spinnerDiameter) * 0.5f - float(spinnerStroke) * 0.5f;
+
+        p.drawArc(cx, cy, r, spinnerStroke, 0.0f, kTwoPi,
+                  colSpinnerTrack, false);
+        p.drawArc(cx, cy, r, spinnerStroke, _spinAngle, kTwoPi * 0.75f,
+                  colSpinnerProgress, true);
+
+        _spinAngle += kSpinStep;
+        if (_spinAngle >= kTwoPi)
+            _spinAngle -= kTwoPi;
+    }
+
+    void _renderErrorIcon(Painter &p)
+    {
+        int cx = x + width / 2;
+        int cy = y + height / 2;
+        int r = 22;
+
+        p.drawEllipse(cx - r, cy - r, r * 2, r * 2,
+                      Color::fromRGBA(0, 0, 0, 0), colErrorText, 2, "errorRing");
+
+        // Exclamation mark: stem + dot, same shape-drawing approach as
+        // CameraWidget's _drawFlashIcon/_drawFlipIcon.
+        p.fillRect(cx - 2, cy - 11, 4, 14, colErrorText, "errorStem");
+        p.fillRect(cx - 2, cy + 7, 4, 4, colErrorText, "errorDot");
     }
 
     void _renderBar(GraphicsContext & /*ctx*/, FontCache &fontCache, Painter &p)

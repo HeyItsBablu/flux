@@ -1,8 +1,8 @@
 #ifndef FLUX_INPUT_HPP
 #define FLUX_INPUT_HPP
 
-#include "../flux_core.hpp"
-#include "../flux_state.hpp"
+#include "flux/flux_core.hpp"
+#include "flux/flux_state.hpp"
 
 #if (defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)) || defined(FLUX_SSR)
 #include "../flux_dom_adapter.hpp"

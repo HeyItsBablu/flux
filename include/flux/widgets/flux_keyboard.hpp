@@ -1,7 +1,7 @@
 #ifndef FLUX_KEYBOARD_HPP
 #define FLUX_KEYBOARD_HPP
 
-#include "../flux_core.hpp"
+#include "flux/flux_core.hpp"
 #include <functional>
 #include <string>
 #include <vector>

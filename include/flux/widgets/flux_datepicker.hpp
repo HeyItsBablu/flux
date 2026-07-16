@@ -1,7 +1,7 @@
 #ifndef FLUX_DATE_PICKER_HPP
 #define FLUX_DATE_PICKER_HPP
 
-#include "../flux_core.hpp"
+#include "flux/flux_core.hpp"
 
 #include <ctime>
 #include <iomanip>

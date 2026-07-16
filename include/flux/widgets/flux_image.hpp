@@ -1,9 +1,9 @@
 #ifndef FLUX_IMAGE_HPP
 #define FLUX_IMAGE_HPP
 
-#include "../flux_core.hpp"
-#include "../flux_http.hpp"
-#include "../flux_painter.hpp"
+#include "flux/flux_core.hpp"
+#include "flux/flux_http.hpp"
+#include "flux/flux_painter.hpp"
 
 #include "flux/flux_debug_log.hpp"
 

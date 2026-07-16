@@ -1,8 +1,8 @@
 #pragma once
-#include "../flux_core.hpp"
-#include "../flux_json.hpp"
-#include "../flux_widget.hpp"
-#include "../flux_socket.hpp"
+#include "flux/flux_core.hpp"
+#include "flux/flux_json.hpp"
+#include "flux/flux_widget.hpp"
+#include "flux/flux_socket.hpp"
 
 #include <functional>
 #include <memory>

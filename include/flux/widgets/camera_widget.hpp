@@ -71,6 +71,11 @@ public:
     Color colFlash = Color::fromRGBA(255, 255, 255, 200);
     Color colPlaceholder = Color::fromRGB(20, 20, 20);
     Color colThumbBorder = Color::fromRGB(255, 255, 255);
+    Color colSpinnerTrack = Color::fromRGBA(255, 255, 255, 50);
+    Color colSpinnerProgress = Color::fromRGB(255, 255, 255);
+
+    int spinnerDiameter = 36;
+    int spinnerStroke = 3;
 
     // ── Fluent setters ────────────────────────────────────────────────────────
     std::shared_ptr<CameraWidget> setWidth(int w)
@@ -177,19 +182,24 @@ public:
         if (!_platformRenderPreview(ctx, p, fontCache, viewH))
         {
             p.fillRect(x, y, width, viewH, colPlaceholder, "previewBg");
-            NativeFont tf = fontCache.getFont(
-#ifdef _WIN32
-                "Segoe UI",
-#elif defined(__ANDROID__)
-                "Roboto",
-#else
-                "Sans",
-#endif
-                13, FontWeight::Normal);
-            p.drawText(toWideString("Opening camera..."),
-                       x, y, width, viewH, tf,
-                       Color::fromRGB(120, 120, 120),
-                       DT_CENTER | DT_VCENTER | DT_SINGLELINE, "previewText");
+
+            constexpr float kTwoPi = 6.28318530f;
+            constexpr float kSpinStep = 0.07f;
+
+            float cx = float(x) + float(width) * 0.5f;
+            float cy = float(y) + float(viewH) * 0.5f;
+            float r = float(spinnerDiameter) * 0.5f - float(spinnerStroke) * 0.5f;
+
+            p.drawArc(cx, cy, r, spinnerStroke, 0.0f, kTwoPi,
+                      colSpinnerTrack, false);
+            p.drawArc(cx, cy, r, spinnerStroke, _spinAngle, kTwoPi * 0.75f,
+                      colSpinnerProgress, true);
+
+            _spinAngle += kSpinStep;
+            if (_spinAngle >= kTwoPi)
+                _spinAngle -= kTwoPi;
+
+            markNeedsPaint();
         }
 
         if (_flashAlpha > 0.f)
@@ -401,6 +411,7 @@ private:
     bool _hovShutter = false;
     bool _hovFlash = false;
     bool _hovFlip = false;
+    float _spinAngle = -1.57079632f; // -halfPi, matches CircularProgressIndicatorWidget's start angle
 
     std::function<void(const std::string &)> _onPhoto;
     // ── DOM/SSR shared state ─────────────────────────────────────────
@@ -464,10 +475,13 @@ private:
         if (_frameTimer || !_ui)
             return;
         _frameTimer = _ui->setInterval(33, [this]()
-                                                                {
-            if (FluxCamera::get().isPreviewing() ||
-                FluxCamera::get().isCapturing())
-                markNeedsPaint(); });
+                                       {
+            // Always repaint while this timer is alive — it drives both
+            // the opening-state spinner and live camera frame updates.
+            // Only running between _platformScheduleOpen() and
+            // ~CameraWidget()/_stopTimer(), so this isn't wasted work
+            // outside that window.
+            markNeedsPaint(); });
     }
 
     void _stopTimer()

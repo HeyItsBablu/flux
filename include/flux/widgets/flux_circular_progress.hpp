@@ -2,8 +2,8 @@
 #ifndef FLUX_CIRCULAR_PROGRESS_HPP
 #define FLUX_CIRCULAR_PROGRESS_HPP
 
-#include "../flux_core.hpp"
-#include "../flux_state.hpp"
+#include "flux/flux_core.hpp"
+#include "flux/flux_state.hpp"
 
 #include <algorithm>
 #include <cmath>

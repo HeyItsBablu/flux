@@ -83,6 +83,11 @@ public:
   Color colLoadingText = Color::fromRGB(140, 140, 140);
   Color colErrorText = Color::fromRGB(180, 60, 60);
 
+  Color colSpinnerTrack = Color::fromRGBA(90, 90, 90, 40);
+  Color colSpinnerProgress = Color::fromRGB(90, 90, 90);
+
+  int spinnerDiameter = 18;
+  int spinnerStroke = 2;
   // ── Config ────────────────────────────────────────────────────────────────
   std::string audioPath;
   int playerHeight = 40;
@@ -263,14 +268,13 @@ public:
     // ── Loading / error overlay ──────────────────────────────────────────
     if (_netState == NetState::Loading)
     {
-      _renderStatusText(p, fontCache, cx, "\xe2\x80\xa6 Loading\xe2\x80\xa6",
-                        colLoadingText);
+      _renderLoadingSpinner(p, cx, midY);
       needsPaint = false;
       return;
     }
     if (_netState == NetState::Error)
     {
-      _renderStatusText(p, fontCache, cx, "Error loading audio", colErrorText);
+      _renderErrorIcon(p, cx, midY);
       needsPaint = false;
       return;
     }
@@ -538,6 +542,7 @@ private:
   bool _dragging = false;
   bool _hovPlay = false, _hovTrack = false;
   bool _hovVol = false, _hovDots = false;
+  float _spinAngle = -1.57079632f; // -halfPi, matches CircularProgressIndicatorWidget's start angle
 
   // ── Hit rects ────────────────────────────────────────────────────────────
   struct Rect
@@ -555,7 +560,8 @@ private:
       return;
     _timerId = FluxUI::getCurrentInstance()->setInterval(33, [this]()
                                                          {
-      if (_playing) markNeedsPaint(); });
+      if (_playing || _netState == NetState::Loading)
+        markNeedsPaint(); });
   }
   void _stopTimer()
   {
@@ -595,6 +601,39 @@ private:
     int avail = (x + width) - barStartX - 8;
     p.drawTextA(msg, barStartX + 4, y, avail, height, font, col,
                 DT_LEFT | DT_VCENTER | DT_SINGLELINE, "statusText");
+  }
+
+  // Draw a small indeterminate spinner centred vertically in the bar,
+  // starting where the play button would normally sit.
+  void _renderLoadingSpinner(Painter &p, int barStartX, int midY)
+  {
+    constexpr float kTwoPi = 6.28318530f;
+    constexpr float kSpinStep = 0.07f;
+
+    float cx = float(barStartX) + float(spinnerDiameter) * 0.5f + 4.f;
+    float cy = float(midY);
+    float r = float(spinnerDiameter) * 0.5f - float(spinnerStroke) * 0.5f;
+
+    p.drawArc(cx, cy, r, spinnerStroke, 0.0f, kTwoPi, colSpinnerTrack, false);
+    p.drawArc(cx, cy, r, spinnerStroke, _spinAngle, kTwoPi * 0.75f,
+              colSpinnerProgress, true);
+
+    _spinAngle += kSpinStep;
+    if (_spinAngle >= kTwoPi)
+      _spinAngle -= kTwoPi;
+  }
+
+  // Small "!" icon, sized to sit inline in the pill bar where the play
+  // button would normally be.
+  void _renderErrorIcon(Painter &p, int barStartX, int midY)
+  {
+    int cx = barStartX + spinnerDiameter / 2 + 4;
+    int r = spinnerDiameter / 2;
+
+    p.drawEllipse(cx - r, midY - r, r * 2, r * 2,
+                  Color::fromRGBA(0, 0, 0, 0), colErrorText, 2, "errorRing");
+    p.fillRect(cx - 2, midY - r + 4, 3, r, colErrorText, "errorStem");
+    p.fillRect(cx - 2, midY + r - 5, 3, 3, colErrorText, "errorDot");
   }
 
   // ── Play / Pause toggle ────────────────────────────────────────────────────
@@ -677,6 +716,7 @@ private:
   void _loadFromUrl()
   {
     _netState = NetState::Loading;
+    _startTimer();
     markNeedsPaint();
 
     std::weak_ptr<AudioPlayerWidget> weak = self();
@@ -689,6 +729,7 @@ private:
 
       if (!result.success || result.body.empty()) {
         self->_netState = NetState::Error;
+        self->_stopTimer();
         self->markNeedsPaint();
         return;
       }

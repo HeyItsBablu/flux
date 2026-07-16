@@ -1,8 +1,8 @@
 #ifndef FLUX_PADDING_HPP
 #define FLUX_PADDING_HPP
 
-#include "../flux_core.hpp"
-#include "../flux_state.hpp"
+#include "flux/flux_core.hpp"
+#include "flux/flux_state.hpp"
 
 // ============================================================================
 // EdgeInsets  —  immutable inset descriptor
