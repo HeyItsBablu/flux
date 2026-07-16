@@ -5,7 +5,7 @@
 #include "flux_core.hpp"
 
 #include "widgets/widgets.hpp"
-#include "flux_android_jni.hpp"
+
 #include "flux_canvas.hpp"
 
 #endif // FLUX_HPP

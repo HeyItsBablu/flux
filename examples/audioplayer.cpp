@@ -11,7 +11,7 @@ public:
                  CameraView()->setWidth(380)->setHeight(270)->setOnPhoto(
                      [](const std::string &path)
                      { std::cout << path << std::endl; })})
-        ->setBackgroundColor(Color::fromRGB(280, 180, 180))
+        ->setBackgroundColor(Color::fromRGB(20, 180, 180))
         ->setAlignItems(AlignItems::Center)
         ->setJustifyContent(JustifyContent::Center)
         ->setWidthMode(SizeMode::Full)
