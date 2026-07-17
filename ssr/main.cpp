@@ -614,8 +614,9 @@ namespace
              // find the server-rendered content to mount into / adopt from.
              << "<div id=\"flux-dom-root\" style=\"position:relative;width:100%;height:100%;\">"
              << bodyHtml
+             << "</div>" 
              // #flux-input-capture — REQUIRED for the page to be interactive
-             // at all post-hydration. flux_window_dom.cpp registers every
+             // at all post-hydration. flux_window_dom.cpp registers << bodyHtml
              // mouse/touch/keyboard listener on this exact element selector
              // (see emscripten_set_mousedown_callback("#flux-input-capture",
              // ...) etc). Without it, hydration completes and the page LOOKS
@@ -652,6 +653,8 @@ namespace
                 // hydration's "page jumps to a bigger size" symptom is.
                 "Module._fluxPhysicalWidth = Math.floor(window.innerWidth * Module._fluxDPR);"
                 "Module._fluxPhysicalHeight = Math.floor(window.innerHeight * Module._fluxDPR);"
+                "Module.canvas.width = Module._fluxPhysicalWidth;"
+                "Module.canvas.height = Module._fluxPhysicalHeight;"
                 // Logical (CSS) pixels — what the DOM renderer must boot at,
                 // to match the SSR pass, which resolved its own viewport in
                 // logical px the whole way through (Sec-CH-Viewport-*, the
@@ -702,6 +705,8 @@ namespace
                 "Module._fluxDPR = dpr;"
                 "Module._fluxPhysicalWidth = w;"
                 "Module._fluxPhysicalHeight = h;"
+                "Module.canvas.width = w;"
+                "Module.canvas.height = h;"
                 "if (typeof Module._fluxOnResize === 'function')"
                 "Module._fluxOnResize(w, h);"
                 "document.cookie = 'flux_vw=' + window.innerWidth + ';path=/;max-age=86400;SameSite=Lax';"

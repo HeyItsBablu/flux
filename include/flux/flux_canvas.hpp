@@ -163,7 +163,7 @@ public:
 #endif
 
     // ── Win32-only input ──────────────────────────────────────────────────────
-#if defined(_WIN32)
+#if defined(_WIN32) && !defined(FLUX_SSR)
     bool handleMouseDown(int mx, int my) override;
     bool handleMouseMove(int mx, int my) override;
     bool handleMouseUp(int mx, int my) override;

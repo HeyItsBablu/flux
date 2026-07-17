@@ -1,14 +1,50 @@
 #include "flux/flux.hpp"
 
-class MyApp : public Widget
+class TriangleSurface : public RenderSurface
 {
-    State<int> counter = 0;
+    float time_ = 0;
+
+public:
+    void initialize(int, int) override {}
+    void resize(int, int) override {}
+    void destroy() override {}
+    void update(double dt) override { time_ += float(dt); }
+
+    void render(Canvas2D &ctx) override
+    {
+        ctx.setFillColor({15, 15, 20, 255});
+        ctx.fillRect(0, 0, ctx.width(), ctx.height());
+
+        ctx.setFillColor({255, 80, 80, 255}); // solid red — no HSV/gradient
+        ctx.beginPath();
+        float cx = ctx.width() * 0.5f;
+        float cy = ctx.height() * 0.5f;
+        float r = std::min(ctx.width(), ctx.height()) * 0.4f;
+        ctx.moveTo(cx, cy - r);
+        ctx.lineTo(cx - r * 0.866f, cy + r * 0.5f);
+        ctx.lineTo(cx + r * 0.866f, cy + r * 0.5f);
+        ctx.closePath();
+        ctx.fill();
+    }
+
+    bool needsContinuousRedraw() const override { return true; }
+};
+// ============================================================================
+// App
+// ============================================================================
+
+class TriangleApp : public Widget
+{
+    static constexpr int kCanvasW = 512, kCanvasH = 512;
 
 public:
     WidgetPtr build() override
     {
-        constexpr int kFabSize = 56;
-        constexpr int kAppBarHeight = 56;
+        auto canvas = std::make_shared<CanvasWidget>();
+        canvas->setScrollbarsEnabled(false)
+            ->setViewportEnabled(false)
+            ->setFlexGrow(1)
+            ->setSurface<TriangleSurface>();
 
         auto appBar =
             Box({
@@ -24,54 +60,13 @@ public:
                 ->setPaddingHV(16, 0)
                 ->setWidthMode(SizeMode::Full)
                 ->setHeightMode(SizeMode::Fixed)
-                ->setHeight(kAppBarHeight)
+                ->setHeight(56)
                 ->setBackgroundColor(Color::fromRGB(33, 150, 243));
-
-        auto fab =
-            Box({
-                    Text("+")
-                        ->setFontSize(28)
-                        ->setFontWeight(FontWeight::Bold)
-                        ->setTextColor(Color::fromRGB(255, 255, 255)),
-                })
-                ->setDisplay(Display::Flex)
-                ->setAlignItems(AlignItems::Center)
-                ->setJustifyContent(JustifyContent::Center)
-                ->setWidthMode(SizeMode::Fixed)
-                ->setWidth(kFabSize)
-                ->setHeightMode(SizeMode::Fixed)
-                ->setHeight(kFabSize)
-                ->setBorderRadius(kFabSize / 2)
-                ->setBackgroundColor(Color::fromRGB(33, 150, 243))
-                ->setPositionMode(Position::Absolute)
-                ->setBottomPx(24)
-                ->setRightPx(24)
-                ->setZIndexVal(1)
-                ->setOnClick([this]
-                             { counter++; });
-
-        auto body =
-            Box({
-                    Text("You have pushed the button this many times:")
-                        ->setFontSize(14)
-                        ->setTextColor(Color::fromRGB(90, 90, 90)),
-                    Text(counter)
-                        ->setFontSize(40)
-                        ->setFontWeight(FontWeight::Bold),
-                })
-                ->setDisplay(Display::Flex)
-                ->setDirection(FlexDirection::Column)
-                ->setAlignItems(AlignItems::Center)
-                ->setJustifyContent(JustifyContent::Center)
-                ->setGap(8)
-                ->setWidthMode(SizeMode::Full)
-                ->setHeightMode(SizeMode::Full)
-                ->setFlexGrow(1); // takes all remaining height below the app bar
 
         return Box({
                        appBar,
-                       body,
-                       fab,
+                       canvas,
+                       
                    })
             ->setDisplay(Display::Flex)
             ->setDirection(FlexDirection::Column)
@@ -89,5 +84,5 @@ WidgetPtr createApp(FluxUI *app)
 {
     return FluxApp()
         .setTheme(AppTheme::light())
-        .build(std::make_shared<MyApp>());
+        .build(std::make_shared<TriangleApp>());
 }

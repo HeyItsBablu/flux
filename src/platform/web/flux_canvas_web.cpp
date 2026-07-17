@@ -128,7 +128,15 @@ static bool ensureWebGLContext()
     emscripten_webgl_init_context_attributes(&attrs);
     attrs.majorVersion = 2;
     attrs.minorVersion = 0;
-    attrs.alpha = 0;
+    // REQUIRED: #flux-gl is a shared, mostly-untouched canvas — only the
+    // scissor-rect region belonging to each live CanvasWidget ever gets
+    // drawn to (see tickAndRender()'s glScissor/glClear scoping). Every
+    // other pixel must stay genuinely transparent so the DOM-rendered
+    // tree underneath (#flux-dom-root) shows through it. With alpha:0,
+    // the browser composites the canvas as fully opaque and renders
+    // every untouched (0,0,0,0) pixel as solid black instead of see-
+    // through — which is what covered the whole page here.
+    attrs.alpha = 1;
     attrs.depth = 1;
     attrs.stencil = 1;
     attrs.antialias = 0;

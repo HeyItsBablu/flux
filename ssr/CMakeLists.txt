@@ -24,6 +24,8 @@ set(FLUX_SSR_SOURCES
     ${CMAKE_SOURCE_DIR}/src/flux_video_ssr.cpp
     ${CMAKE_SOURCE_DIR}/src/flux_camera_ssr.cpp
     ${CMAKE_SOURCE_DIR}/src/camera_widget_dom.cpp
+    ${CMAKE_SOURCE_DIR}/src/flux_canvas_ssr.cpp
+    ${CMAKE_SOURCE_DIR}/src/flux_canvas2d_ssr.cpp
 
 )
 
