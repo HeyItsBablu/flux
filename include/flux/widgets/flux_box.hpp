@@ -65,18 +65,39 @@
 struct ScrollbarState
 {
     // ── Configuration (set once by the owner) ────────────────────────────
-    int size = 8;
+    int size = 6;       // idle thickness — thin, browser-style
+    int hoverSize = 10; // thickness while hovered/dragging
+    int inset = 2;      // gap between the thumb and the container edge
     bool horizontal = false;
 
-    Color colorNormal = Color::fromRGB(180, 180, 180);
-    Color colorHover = Color::fromRGB(140, 140, 140);
-    Color colorActive = Color::fromRGB(100, 100, 100);
-    Color colorTrack = Color::fromRGB(245, 245, 245);
+    // Controls whether the bar is DRAWN/HIT-TESTABLE. Independent of
+    // isScrollable — content can still overflow and be scrolled (wheel,
+    // touch, drag) while this is false, same as CSS `scrollbar-width: none`
+    // with `overflow: auto`. Set via BoxWidget::setScrollbarVisible().
+    bool userVisible = true;
+
+    // Modern overlay scrollbars usually paint no track at all — just a
+    // floating thumb. Flip on for the classic "gutter + thumb" look.
+    bool showTrack = false;
+
+    // Classic clickable arrow buttons at each end of the track. Each click
+    // steps the scroll offset by arrowStep; holding isn't auto-repeated
+    // (no timer here) — a single click per press, like most modern UIs.
+    bool showArrows = true;
+    int arrowSize = 14; // px, square button at each end
+    int arrowStep = 40; // px scrolled per arrow click
+
+    Color colorNormal = Color::fromRGBA(120, 120, 120, 130);
+    Color colorHover = Color::fromRGBA(100, 100, 100, 190);
+    Color colorActive = Color::fromRGBA(80, 80, 80, 220);
+    Color colorTrack = Color::fromRGBA(0, 0, 0, 20);
+    Color arrowColorNormal = Color::fromRGBA(90, 90, 90, 160);
+    Color arrowColorHover = Color::fromRGBA(60, 60, 60, 220);
 
     // ── Computed each layout pass ─────────────────────────────────────────
     int contentMain = 0;
     int viewportMain = 0;
-    bool isScrollable = false;
+    bool isScrollable = false; // true whenever content overflows, regardless of userVisible
 
     int scrollOffset = 0;
     int thumbLength = 0;
@@ -87,6 +108,27 @@ struct ScrollbarState
     bool isHovering = false;
     int dragStartPos = 0;
     int dragStartOffset = 0;
+
+    enum class Zone
+    {
+        None,
+        ArrowStart,
+        TrackBefore,
+        Thumb,
+        TrackAfter,
+        ArrowEnd
+    };
+    Zone hoverZone = Zone::None; // which part is under the cursor, for arrow-hover highlight
+
+    // ── Derived helpers ───────────────────────────────────────────────────
+
+    // Should the bar actually be painted / hit-tested this frame?
+    bool isVisible() const { return isScrollable && userVisible; }
+
+    // Thickness animates (instantly, no easing here) between idle and
+    // hover/drag sizes — same "thin until you touch it" behavior browsers
+    // use today.
+    int currentThickness() const { return (isHovering || isDragging) ? hoverSize : size; }
 
     // ── Clamp / update ────────────────────────────────────────────────────
 
@@ -119,65 +161,168 @@ struct ScrollbarState
             scrollOffset = 0;
             isDragging = false;
             isHovering = false;
+            hoverZone = Zone::None;
         }
         isScrollable = s;
     }
 
-    // ── Hit-testing ───────────────────────────────────────────────────────
-
-    bool isOverThumb(int mx, int my, int wx, int wy, int ww, int wh) const
+    // ── Geometry / hit-testing ──────────────────────────────────────────
+    // Track length available for the thumb, after reserving space for the
+    // two arrow buttons (if shown). trackLen is the full strip length
+    // (ww or wh, minus the two `inset`s) passed in by the caller.
+    int usableTrackLen(int trackLen) const
     {
-        if (!isScrollable)
-            return false;
-        if (horizontal)
+        return showArrows ? std::max(1, trackLen - arrowSize * 2) : trackLen;
+    }
+
+    // On-screen thumb start/length within the arrow-reduced track.
+    // thumbOffset/thumbLength are computed against viewportMain (the full
+    // scrollable area, arrow-agnostic) — this rescales them into the
+    // actual pixel track that remains after the arrow buttons.
+    void screenThumb(int trackLen, int &outStart, int &outLen) const
+    {
+        int usable = usableTrackLen(trackLen);
+        int lead = showArrows ? arrowSize : 0;
+        if (viewportMain <= 0)
         {
-            int sbY = wy + wh - size;
-            return mx >= wx + thumbOffset && mx < wx + thumbOffset + thumbLength &&
-                   my >= sbY && my < wy + wh;
+            outStart = lead;
+            outLen = 0;
+            return;
         }
-        else
+        float scale = (float)usable / (float)std::max(1, viewportMain);
+        outLen = std::max(20, (int)(thumbLength * scale));
+        outLen = std::min(outLen, usable);
+        int range = std::max(0, usable - outLen);
+        float ratio = (viewportMain > thumbLength)
+                          ? (float)thumbOffset / (float)(viewportMain - thumbLength)
+                          : 0.f;
+        outStart = lead + (int)(ratio * range);
+    }
+
+    // Both use currentThickness()/inset so the clickable strip matches
+    // whatever's actually on screen (thin idle strip, fatter on hover).
+    Zone hitTest(int mx, int my, int wx, int wy, int ww, int wh) const
+    {
+        if (!isVisible())
+            return Zone::None;
+        int thick = currentThickness();
+        int trackLen = horizontal ? (ww - inset * 2) : (wh - inset * 2);
+        int crossStart = horizontal ? (wy + wh - thick - inset) : (wx + ww - thick - inset);
+        int crossEnd = crossStart + thick;
+        int mainPos = horizontal ? mx : my;
+        int crossPos = horizontal ? my : mx;
+        if (crossPos < crossStart || crossPos >= crossEnd)
+            return Zone::None;
+
+        int trackStart = horizontal ? (wx + inset) : (wy + inset);
+        int along = mainPos - trackStart;
+        if (along < 0 || along > trackLen)
+            return Zone::None;
+
+        if (showArrows)
         {
-            int sbX = wx + ww - size;
-            return mx >= sbX && mx < wx + ww &&
-                   my >= wy + thumbOffset && my < wy + thumbOffset + thumbLength;
+            if (along < arrowSize)
+                return Zone::ArrowStart;
+            if (along > trackLen - arrowSize)
+                return Zone::ArrowEnd;
         }
+
+        int ts, tl;
+        screenThumb(trackLen, ts, tl);
+        if (along < ts)
+            return Zone::TrackBefore;
+        if (along < ts + tl)
+            return Zone::Thumb;
+        return Zone::TrackAfter;
     }
 
     bool isInStrip(int mx, int my, int wx, int wy, int ww, int wh) const
     {
-        if (!isScrollable)
-            return false;
-        if (horizontal)
-            return my >= wy + wh - size && my < wy + wh;
-        else
-            return mx >= wx + ww - size && mx < wx + ww;
+        return hitTest(mx, my, wx, wy, ww, wh) != Zone::None;
     }
 
     // ── Rendering ─────────────────────────────────────────────────────────
+    // Pill-shaped thumb (radius = half thickness). Track is optional and
+    // off by default — overlay style floats over content instead of
+    // reserving a gutter (see the BoxWidget::render() clip change below).
+    //
+    // Arrow buttons are simple filled triangles (chevrons) drawn via
+    // fillPolygonAlpha, sized relative to arrowSize/thickness so they scale
+    // with setScrollbarThickness().
 
-    void render(GraphicsContext &ctx, int wx, int wy, int ww, int wh, Widget *owner) const
+    static void drawChevron(Painter &painter, int boxX, int boxY, int boxW, int boxH,
+                            bool horizontal, bool isStart, Color color)
     {
-        if (!isScrollable)
-            return;
-        Painter painter(ctx, owner);
-        Color thumbColor = isDragging   ? colorActive
-                           : isHovering ? colorHover
-                                        : colorNormal;
+        float cx = boxX + boxW * 0.5f;
+        float cy = boxY + boxH * 0.5f;
+        float s = std::min(boxW, boxH) * 0.28f;
+        std::vector<std::pair<int, int>> pts;
         if (horizontal)
         {
-            int sbY = wy + wh - size;
-            painter.fillRect(wx, sbY, ww, size, colorTrack, "sb-track");
-            painter.fillRect(wx + thumbOffset, sbY, thumbLength, size, thumbColor, "sb-thumb");
+            if (isStart) // ◀
+                pts = {{(int)(cx + s), (int)(cy - s)}, {(int)(cx - s), (int)cy}, {(int)(cx + s), (int)(cy + s)}};
+            else // ▶
+                pts = {{(int)(cx - s), (int)(cy - s)}, {(int)(cx + s), (int)cy}, {(int)(cx - s), (int)(cy + s)}};
         }
         else
         {
-            int sbX = wx + ww - size;
-            painter.fillRect(sbX, wy, size, wh, colorTrack, "sb-track");
-            painter.fillRect(sbX, wy + thumbOffset, size, thumbLength, thumbColor, "sb-thumb");
+            if (isStart) // ▲
+                pts = {{(int)(cx - s), (int)(cy + s)}, {(int)cx, (int)(cy - s)}, {(int)(cx + s), (int)(cy + s)}};
+            else // ▼
+                pts = {{(int)(cx - s), (int)(cy - s)}, {(int)cx, (int)(cy + s)}, {(int)(cx + s), (int)(cy - s)}};
+        }
+        painter.fillPolygonAlpha(pts, color);
+    }
+
+    void render(GraphicsContext &ctx, int wx, int wy, int ww, int wh, Widget *owner) const
+    {
+        if (!isVisible())
+            return;
+        Painter painter(ctx, owner);
+        int thick = currentThickness();
+        int radius = thick / 2;
+        Color thumbColor = isDragging   ? colorActive
+                           : isHovering ? colorHover
+                                        : colorNormal;
+
+        int trackLen = horizontal ? (ww - inset * 2) : (wh - inset * 2);
+        int ts, tl;
+        screenThumb(trackLen, ts, tl);
+        Color startArrowColor = (hoverZone == Zone::ArrowStart) ? arrowColorHover : arrowColorNormal;
+        Color endArrowColor = (hoverZone == Zone::ArrowEnd) ? arrowColorHover : arrowColorNormal;
+
+        if (horizontal)
+        {
+            int sbY = wy + wh - thick - inset;
+            int trackX0 = wx + inset;
+            if (showTrack)
+                painter.fillRoundedRect(trackX0, sbY, trackLen, thick, radius, colorTrack, "sb-track");
+            if (showArrows)
+            {
+                drawChevron(painter, trackX0, sbY, arrowSize, thick, true, true, startArrowColor);
+                drawChevron(painter, trackX0 + trackLen - arrowSize, sbY, arrowSize, thick, true, false, endArrowColor);
+            }
+            painter.fillRoundedRect(trackX0 + ts, sbY, tl, thick, radius, thumbColor, "sb-thumb");
+        }
+        else
+        {
+            int sbX = wx + ww - thick - inset;
+            int trackY0 = wy + inset;
+            if (showTrack)
+                painter.fillRoundedRect(sbX, trackY0, thick, trackLen, radius, colorTrack, "sb-track");
+            if (showArrows)
+            {
+                drawChevron(painter, sbX, trackY0, thick, arrowSize, false, true, startArrowColor);
+                drawChevron(painter, sbX, trackY0 + trackLen - arrowSize, thick, arrowSize, false, false, endArrowColor);
+            }
+            painter.fillRoundedRect(sbX, trackY0 + ts, thick, tl, radius, thumbColor, "sb-thumb");
         }
     }
 
     // ── Mouse handlers ────────────────────────────────────────────────────
+    // Wheel scrolling stays keyed to isScrollable alone (not isVisible) —
+    // you can hide the bar and still scroll with the wheel/trackpad, same
+    // as CSS scrollbar-width:none behavior.
 
     bool onWheel(int delta)
     {
@@ -191,22 +336,39 @@ struct ScrollbarState
 
     bool onMouseDown(int mx, int my, int wx, int wy, int ww, int wh)
     {
-        if (!isInStrip(mx, my, wx, wy, ww, wh))
+        Zone z = hitTest(mx, my, wx, wy, ww, wh);
+        if (z == Zone::None)
             return false;
-        int trackLen = horizontal ? ww : wh;
-        int pos = horizontal ? mx - wx : my - wy;
-        if (pos >= thumbOffset && pos < thumbOffset + thumbLength)
+
+        switch (z)
         {
+        case Zone::Thumb:
             isDragging = true;
             dragStartPos = horizontal ? mx : my;
             dragStartOffset = scrollOffset;
-        }
-        else
-        {
-            float ratio = (float)pos / (float)trackLen;
-            scrollOffset = (int)(ratio * (contentMain - viewportMain));
+            break;
+        case Zone::ArrowStart:
+            scrollOffset -= arrowStep;
             clamp();
             updateThumb();
+            break;
+        case Zone::ArrowEnd:
+            scrollOffset += arrowStep;
+            clamp();
+            updateThumb();
+            break;
+        case Zone::TrackBefore:
+            scrollOffset -= viewportMain;
+            clamp();
+            updateThumb();
+            break;
+        case Zone::TrackAfter:
+            scrollOffset += viewportMain;
+            clamp();
+            updateThumb();
+            break;
+        default:
+            break;
         }
         return true;
     }
@@ -229,27 +391,34 @@ struct ScrollbarState
                 onMouseUp();
                 return true;
             }
+            // Map drag delta through the arrow-reduced on-screen track so
+            // dragging feels 1:1 with the mouse even with arrows present.
+            int trackLen = horizontal ? (ww - inset * 2) : (wh - inset * 2);
+            int usable = usableTrackLen(trackLen);
+            int ts, tl;
+            screenThumb(trackLen, ts, tl);
             int curPos = horizontal ? mx : my;
             int delta = curPos - dragStartPos;
-            float ratio =
-                (viewportMain > thumbLength)
-                    ? (float)delta / (float)(viewportMain - thumbLength)
-                    : 0.f;
+            float ratio = (usable > tl) ? (float)delta / (float)(usable - tl) : 0.f;
             scrollOffset =
                 dragStartOffset + (int)(ratio * (contentMain - viewportMain));
             clamp();
             updateThumb();
             return true;
         }
+        Zone z = hitTest(mx, my, wx, wy, ww, wh);
         bool wasHovering = isHovering;
-        isHovering = isOverThumb(mx, my, wx, wy, ww, wh);
-        return wasHovering != isHovering;
+        Zone prevZone = hoverZone;
+        isHovering = (z != Zone::None);
+        hoverZone = z;
+        return (wasHovering != isHovering) || (prevZone != hoverZone);
     }
 
     bool onMouseLeave()
     {
-        bool changed = isHovering;
+        bool changed = isHovering || hoverZone != Zone::None;
         isHovering = false;
+        hoverZone = Zone::None;
         return changed;
     }
 };
@@ -507,6 +676,12 @@ struct BoxProps
     int borderRadius = 0;
 
     bool scrollable = false;
+
+    // ── Scrollbar appearance ────────────────────────────────────────────
+    bool scrollbarVisible = true; // draw/hit-test the bar (scrolling still works if false)
+    int scrollbarThickness = 6;   // idle thickness, px
+    int scrollbarHoverThickness = 10;
+    bool scrollbarArrows = true; // classic arrow buttons at each end
 
     JustifyContent justify = JustifyContent::Start;  // Flex main axis / Grid justifyContent
     AlignItems alignItems = AlignItems::Stretch;     // Flex cross axis / Grid alignItems
@@ -1947,6 +2122,26 @@ public:
         return self();
     }
 
+    std::shared_ptr<BoxWidget> setScrollbarVisible(bool v)
+    {
+        baseProps_.scrollbarVisible = v;
+        markNeedsPaint();
+        return self();
+    }
+    std::shared_ptr<BoxWidget> setScrollbarThickness(int idle, int hover = -1)
+    {
+        baseProps_.scrollbarThickness = idle;
+        baseProps_.scrollbarHoverThickness = (hover >= 0) ? hover : idle + 4;
+        markNeedsPaint();
+        return self();
+    }
+    std::shared_ptr<BoxWidget> setScrollbarArrows(bool v)
+    {
+        baseProps_.scrollbarArrows = v;
+        markNeedsPaint();
+        return self();
+    }
+
     // ── Grid-only setters ────────────────────────────────────────────────
 
     std::shared_ptr<BoxWidget> setColumns(std::vector<TrackDef> c)
@@ -2093,6 +2288,10 @@ public:
                        FontCache &fontCache) override
     {
         resolved_ = resolveProps(ctx);
+        sb_.userVisible = resolved_.scrollbarVisible;
+        sb_.size = resolved_.scrollbarThickness;
+        sb_.hoverSize = resolved_.scrollbarHoverThickness;
+        sb_.showArrows = resolved_.scrollbarArrows;
         paddingLeft = resolved_.paddingLeft;
         paddingRight = resolved_.paddingRight;
         paddingTop = resolved_.paddingTop;
@@ -2276,6 +2475,21 @@ public:
 
         if (P.hasBackground)
             painter.fillRoundedRect(x, y, width, height, P.borderRadius, P.backgroundColor);
+
+        // Overlay scrollbar — no gutter reserved, clip to the full box.
+        painter.pushClipRect(x, y, width, height);
+
+        for (auto &child : children)
+        {
+            if (!child->visible || child->position == Position::Absolute)
+                continue;
+            bool onScreen = child->x + child->width >= x && child->x < x + width &&
+                            child->y + child->height >= y && child->y < y + height;
+            if (onScreen)
+                child->render(ctx, fontCache);
+        }
+
+        painter.popClipRect();
 
         int sbSz = sb_.isScrollable ? sb_.size : 0;
         int clipX1 = x, clipY1 = y, clipX2 = x + width, clipY2 = y + height;
