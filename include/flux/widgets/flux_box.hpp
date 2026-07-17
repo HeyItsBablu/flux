@@ -155,25 +155,25 @@ struct ScrollbarState
 
     // ── Rendering ─────────────────────────────────────────────────────────
 
-    void render(GraphicsContext &ctx, int wx, int wy, int ww, int wh) const
+    void render(GraphicsContext &ctx, int wx, int wy, int ww, int wh, Widget *owner) const
     {
         if (!isScrollable)
             return;
-        Painter painter(ctx);
+        Painter painter(ctx, owner);
         Color thumbColor = isDragging   ? colorActive
                            : isHovering ? colorHover
                                         : colorNormal;
         if (horizontal)
         {
             int sbY = wy + wh - size;
-            painter.fillRect(wx, sbY, ww, size, colorTrack);
-            painter.fillRect(wx + thumbOffset, sbY, thumbLength, size, thumbColor);
+            painter.fillRect(wx, sbY, ww, size, colorTrack, "sb-track");
+            painter.fillRect(wx + thumbOffset, sbY, thumbLength, size, thumbColor, "sb-thumb");
         }
         else
         {
             int sbX = wx + ww - size;
-            painter.fillRect(sbX, wy, size, wh, colorTrack);
-            painter.fillRect(sbX, wy + thumbOffset, size, thumbLength, thumbColor);
+            painter.fillRect(sbX, wy, size, wh, colorTrack, "sb-track");
+            painter.fillRect(sbX, wy + thumbOffset, size, thumbLength, thumbColor, "sb-thumb");
         }
     }
 
@@ -2324,7 +2324,7 @@ public:
         int cbx = x + P.paddingLeft, cby = y + P.paddingTop;
         int cbw = width - P.paddingLeft - P.paddingRight;
         int cbh = height - P.paddingTop - P.paddingBottom;
-        sb_.render(ctx, cbx, cby, cbw, cbh);
+        sb_.render(ctx, cbx, cby, cbw, cbh, this);
         needsPaint = false;
     }
 };

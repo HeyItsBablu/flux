@@ -163,6 +163,8 @@ void FluxUI::wireCallbacks()
     {
         if (!root)
             return false;
+        lastMouseX_ = x;
+        lastMouseY_ = y;
         if (window.isMouseCaptured() &&
             broadcastMouseEvent(root.get(), x, y,
                                 [](Widget *w, int mx, int my)
@@ -185,6 +187,17 @@ void FluxUI::wireCallbacks()
             return false;
         if (dispatchOverlayMouseWheel(delta))
             return true;
+        // Wheel goes to whatever's under the cursor first — a scrollable
+        // container doesn't need focus to scroll, same as every browser
+        // and every native UI toolkit. Bubble up through parents since
+        // the widget directly under the cursor (e.g. a Text/Image leaf)
+        // is rarely the scrollable ancestor itself.
+        if (Widget *w = findWidgetAt(root.get(), lastMouseX_, lastMouseY_))
+        {
+            for (; w; w = w->parent)
+                if (w->handleMouseWheel(delta))
+                    return true;
+        }
         return focusedWidget && focusedWidget->handleMouseWheel(delta);
     };
     fluxLog("[wireCallbacks] Step 7: onMouseWheel wired");

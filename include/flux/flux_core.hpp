@@ -75,6 +75,14 @@ private:
   PlatformWindow window;
   Widget *focusedWidget = nullptr;
 
+
+  // Last known pointer position (client/logical px), updated on every
+  // onMouseMove. Wheel events carry no position of their own on most
+  // backends' current callback signature, so hit-testing for wheel
+  // delivery falls back to wherever the mouse last was.
+  int lastMouseX_ = 0;
+  int lastMouseY_ = 0;
+
   // thread_local, not a plain global — see flux_core.cpp for the full
   // rationale. A single browser tab or native app only ever has one
   // thread doing UI work, so this behaves exactly as a plain global did
