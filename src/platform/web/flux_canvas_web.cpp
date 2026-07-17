@@ -395,6 +395,7 @@ CanvasWidget::CanvasWidget()
     autoHeight = true;
     width = 400;
     height = 300;
+    isFocusable = true;
 }
 
 CanvasWidget::~CanvasWidget() { destroyGL(this); }
@@ -570,6 +571,7 @@ bool CanvasWidget::handleMouseWheel(int delta)
 
 bool CanvasWidget::handleKeyDown(int keyCode)
 {
+    printf("[flux] handleKeyDown keyCode=%d\n", keyCode);
     bool ctrl = platformCtrlDown();
     bool shift = platformShiftDown();
     bool alt = platformAltDown();
@@ -599,11 +601,42 @@ bool CanvasWidget::handleKeyDown(int keyCode)
     }
     if (activeSurface_)
     {
-        KeyEvent ke{0, keyCode, ctrl, shift, alt};
-        activeSurface_->onKeyDown(ke);
-        return true;
+        // Only intercept keys that don't produce a character via onChar.
+        // Let printable keys fall through so handleChar gets the real codepoint.
+        bool isPrintable = (keyCode >= '0' && keyCode <= 'Z') || keyCode == VK_SPACE; // adjust as needed
+        if (!isPrintable)
+        {
+            KeyEvent ke{0, keyCode, ctrl, shift, alt};
+            activeSurface_->onKeyDown(ke);
+            return true;
+        }
     }
     return false;
+}
+
+bool CanvasWidget::handleChar(wchar_t ch)
+{
+    printf("[flux] handleChar ch=%d ('%c')\n", (int)ch, (char)ch);
+
+    if (!activeSurface_)
+        return false;
+
+    // Mirrors flux_canvas_win32.cpp's handleChar (WM_CHAR-equivalent text
+    // entry). handleKeyDown above only ever carries a virtual key code —
+    // KeyEvent's codepoint is hardcoded to 0 there — so this is the only
+    // path that delivers a real character to activeSurface_.
+    if (ch < 32 || ch == 127)
+        return false;
+
+    KeyEvent ke{};
+    ke.codepoint = (int)ch;
+    ke.virtualKey = 0;
+    ke.ctrl = platformCtrlDown();
+    ke.shift = platformShiftDown();
+    ke.alt = platformAltDown();
+    activeSurface_->onKeyDown(ke);
+    scheduleRepaint(this);
+    return true;
 }
 
 void CanvasWidget::viewportDims(int glW, int glH, int &vpW, int &vpH) const
