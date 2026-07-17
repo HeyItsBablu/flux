@@ -871,7 +871,7 @@ public:
         // Create a temporary image from raw RGBA pixels and draw it
         Canvas2DImage *tmp = new Canvas2DImage();
         ctx.updateImage(tmp, selPixels_.data(), selPixW_, selPixH_);
-        if (tmp->bitmap)
+        if (tmp->width > 0 && tmp->height > 0)
           ctx.drawImage(tmp, selX_, selY_, float(selPixW_), float(selPixH_));
         delete tmp;
       }
@@ -1007,7 +1007,7 @@ private:
         auto *img = new Canvas2DImage();
         // updateImage calls createBitmapFromRGBA which handles RGBA→BGRA conversion
         ctx.updateImage(img, s.imageData.data(), s.imageW, s.imageH);
-        if (img->bitmap)
+        if (img->width > 0 && img->height > 0)
           s.glImage = img;
         else
           delete img;
@@ -1341,7 +1341,7 @@ public:
                       });
         activePicker_->open(); });
 
-    auto saveRow = Flex({savePngBtn, saveJpgBtn});
+    auto saveRow = Flex({savePngBtn, saveJpgBtn})->setDirection(FlexDirection::Row);
     saveRow->setGap(4);
 
     // ── Sidebar label helper ──────────────────────────────────────────────
@@ -1352,14 +1352,20 @@ public:
 
     // ── Shape / tool buttons (2-column grid) ─────────────────────────────
     shapeButtons_.resize(shapeTools_.size());
-    auto shapeGrid = Flex({});
+    auto shapeGrid = Box({})->setDisplay(Display::Flex)->setDirection(FlexDirection::Column)->setAlignItems(AlignItems::Start);
     shapeGrid->setGap(3);
-    shapeGrid->setPadding(6)->setHeightMode(SizeMode::Fit)->setDirection(FlexDirection::Column);
+    shapeGrid->setPadding(6)->setHeightMode(SizeMode::Fit);
 
     for (int row = 0; row < int(shapeTools_.size()); row += 2)
     {
-      auto rowW = Flex({});
-      rowW->setGap(3);
+      auto rowW = Box({})
+                      ->setDisplay(Display::Flex)
+                      ->setDirection(FlexDirection::Row)
+                      ->setAlignItems(AlignItems::Start)
+                      ->setWidthMode(SizeMode::Fit)
+                      ->setHeightMode(SizeMode::Fit)
+                      ->setGap(3);
+
       for (int col = 0; col < 2 && row + col < int(shapeTools_.size()); ++col)
       {
         int idx = row + col;
@@ -1482,32 +1488,35 @@ public:
     }
 
     // ── Sidebar assembly ──────────────────────────────────────────────────
-    auto sidebar = Flex({
-                            Text("SHAPES")
-                                ->setFontSize(9)
-                                ->setTextColor(Color::fromRGB(140, 140, 160))
-                                ->setPaddingLRTB(8, 8, 8, 4),
-                            shapeGrid,
-                            textHintLabel,
-                            SizedBox(0, 4),
-                            colorLabel,
-                            colorPicker_,
-                            SizedBox(0, 4),
-                            swatchGrid,
-                            SizedBox(0, 6),
-                            label("RESIZE"),
-                            Text("H")->setFontSize(9)->setTextColor(Color::fromRGB(140, 140, 160))->setPaddingLRTB(8, 8, 2, 1),
-                            hInput,
-                            Text("W")->setFontSize(9)->setTextColor(Color::fromRGB(140, 140, 160))->setPaddingLRTB(8, 8, 2, 1),
-                            wInput,
-                            SizedBox(0, 2),
-                            applyBtn,
+    auto sidebar = Box({
+                           Text("SHAPES")
+                               ->setFontSize(9)
+                               ->setTextColor(Color::fromRGB(140, 140, 160))
+                               ->setPaddingLRTB(8, 8, 8, 4),
+                           shapeGrid,
 
-                        })
+                           textHintLabel,
+                           SizedBox(0, 4),
+                           colorLabel,
+                           colorPicker_,
+                           SizedBox(0, 4),
+                           swatchGrid,
+                           SizedBox(0, 6),
+                           label("RESIZE"),
+                           Text("H")->setFontSize(9)->setTextColor(Color::fromRGB(140, 140, 160))->setPaddingLRTB(8, 8, 2, 1),
+                           hInput,
+                           Text("W")->setFontSize(9)->setTextColor(Color::fromRGB(140, 140, 160))->setPaddingLRTB(8, 8, 2, 1),
+                           wInput,
+                           SizedBox(0, 2),
+                           applyBtn,
+
+                       })
+                       ->setDisplay(Display::Flex)
+                       ->setDirection(FlexDirection::Column)
                        ->setScrollable(true)
                        ->setWidth(120)
                        ->setBackgroundColor(Color::fromRGB(28, 28, 30))
-                       ->setDirection(FlexDirection::Column)
+
                        ->setHeightMode(SizeMode::Full);
 
     // ── Undo / Redo buttons ───────────────────────────────────────────────
@@ -1567,25 +1576,29 @@ public:
 
     // ── Toolbar ───────────────────────────────────────────────────────────
     auto toolbar =
-        Flex({
-                 Text("Paint")
-                     ->setFontSize(13)
-                     ->setTextColor(Color::fromRGB(220, 220, 220)),
-                 SizedBox(8, 0),
-                 openBtn,
-                 saveRow,
-                 brushSlider_,
-                 SizedBox(8, 0),
-                 eraserBtn_,
-                 SizedBox(8, 0),
-                 clearBtn,
-                 SizedBox(8, 0),
-                 undoBtn,
-                 SizedBox(8, 0),
-                 redoBtn,
-             })
+        Box({
+                Text("Paint")
+                    ->setFontSize(13)
+                    ->setTextColor(Color::fromRGB(220, 220, 220)),
+                SizedBox(8, 0),
+                openBtn,
+                saveRow,
+                brushSlider_,
+                SizedBox(8, 0),
+                eraserBtn_,
+                SizedBox(8, 0),
+                clearBtn,
+                SizedBox(8, 0),
+                undoBtn,
+                SizedBox(8, 0),
+                redoBtn,
+            })
+            ->setDisplay(Display::Flex)
+            ->setDirection(FlexDirection::Row)
             ->setPadding(8)
+            ->setGap(8)
             ->setHeight(44)
+            ->setWidthMode(SizeMode::Full)
             ->setBackgroundColor(Color::fromRGB(28, 28, 30));
 
     // ── Status bar ────────────────────────────────────────────────────────

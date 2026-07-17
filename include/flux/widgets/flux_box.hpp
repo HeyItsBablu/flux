@@ -956,7 +956,7 @@ private:
                     usedMainFinal += P.gap;
             }
             line.usedMain = usedMainFinal;
-            bool crossFillsContainer = (P.wrap == FlexWrap::NoWrap) || scrollableCross;
+            bool crossFillsContainer = !crossIsFit && ((P.wrap == FlexWrap::NoWrap) || scrollableCross);
             line.crossSize = crossFillsContainer
                                  ? std::max(containerCrossSize_, lineCrossMax)
                                  : lineCrossMax;
@@ -2397,12 +2397,10 @@ inline BoxWidgetPtr Box(std::vector<BoxChild> children)
 // ── RN/web-flavored convenience aliases — same widget, friendlier defaults
 //    and names for people coming from React Native / HTML+CSS. ─────────────
 
-// Flex: a column flex container, like RN's  (flex-basis
-// is display:flex; flex-direction:column).
 inline BoxWidgetPtr Flex(std::initializer_list<BoxChild> children = {})
 {
     auto w = Box(children);
-    w->setDisplay(Display::Flex)->setDirection(FlexDirection::Column);
+    w->setDisplay(Display::Flex)->setDirection(FlexDirection::Row);
     return w;
 }
 

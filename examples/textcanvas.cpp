@@ -4142,30 +4142,41 @@ public:
 
     // ── Sidebar ───────────────────────────────────────────
     auto sidebar =
-        Flex({
-                 // TOOLS
-                 sideLabel("TOOLS"),
+        Box({
+                // TOOLS
+                sideLabel("TOOLS"),
 
-                 Flex({selectToolBtn_, SizedBox(4, 0), textToolBtn_}),
-                 Flex({pathTextBtn_, SizedBox(4, 0), multiSelectBtn_}),
-                 SizedBox(0, 4),
-                 sideLabel("TRANSFORM"),
-                 moveToolBtn_,
-                 scaleToolBtn_,
-                 rotateToolBtn_,
-                 sideLabel("ROTATION"),
-                 rotateResetBtn_,
+                Box({selectToolBtn_, textToolBtn_})
+                    ->setDisplay(Display::Flex)
+                    ->setDirection(FlexDirection::Row)
+                    ->setWidthMode(SizeMode::Full)
+                    ->setHeightMode(SizeMode::Fit)
+                    ->setGap(4),
+                Box({pathTextBtn_, multiSelectBtn_})
+                    ->setDisplay(Display::Flex)
+                    ->setDirection(FlexDirection::Row)
+                    ->setWidthMode(SizeMode::Full)
+                    ->setHeightMode(SizeMode::Fit)
+                    ->setGap(4),
 
-                 sideLabel("MULTI-EDIT"),
-                 bulkBoldBtn_,
-                 bulkSizeUpBtn_,
-                 bulkSizeDownBtn_,
-                 deleteAllBtn_,
+                sideLabel("TRANSFORM"),
+                moveToolBtn_,
+                scaleToolBtn_,
+                rotateToolBtn_,
+                sideLabel("ROTATION"),
+                rotateResetBtn_,
 
-             })
+                sideLabel("MULTI-EDIT"),
+                bulkBoldBtn_,
+                bulkSizeUpBtn_,
+                bulkSizeDownBtn_,
+                deleteAllBtn_,
+
+            })
+            ->setDisplay(Display::Flex)
             ->setDirection(FlexDirection::Column)
             ->setScrollable(true)
-            ->setWidth(220)
+            ->setWidth(260)
             ->setBackgroundColor(Color::fromRGB(28, 28, 30))
             ->setHeightMode(SizeMode::Full)
             ->setPadding(6)
@@ -4456,16 +4467,17 @@ public:
             ->setBackgroundColor(Color::fromRGB(20, 20, 22));
 
     // ── Root ─────────────────────────────────────────────
-    return Flex({
-                    toolbar,
-                    Flex({sidebar,
-                          canvas_->setFlexGrow(1),
-                          rightSidebar})
-                        ->setDirection(FlexDirection::Row)
-                        ->setHeightMode(SizeMode::Full)
-                        ->setWidthMode(SizeMode::Full),
-                    statusBar,
-                })
+    return Box({
+                   toolbar,
+                   Flex({sidebar,
+                         canvas_->setFlexGrow(1),
+                         rightSidebar})
+                       ->setDirection(FlexDirection::Row)
+                       ->setHeightMode(SizeMode::Full)
+                       ->setWidthMode(SizeMode::Full),
+                   statusBar,
+               })
+        ->setDisplay(Display::Flex)
         ->setDirection(FlexDirection::Column)
 
         ->setHeightMode(SizeMode::Full)
