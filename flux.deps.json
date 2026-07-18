@@ -1,9 +1,3 @@
 {
-  "packages": {
-    "charts": {
-      "commit": "4feed70ffc9ba36938ceb0d1339285b8cafdaade",
-      "source": "https://github.com/IAmTheFool/charts.git",
-      "version": "main"
-    }
-  }
+  "packages": {}
 }
