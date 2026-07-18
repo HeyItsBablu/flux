@@ -12,7 +12,7 @@ public:
 
         auto appBar =
             Box({
-                    Text("My App")
+                    Text("My App")a
                         ->setFontSize(20)
                         ->setFontWeight(FontWeight::Bold)
                         ->setTextColor(Color::fromRGB(255, 255, 255)),
