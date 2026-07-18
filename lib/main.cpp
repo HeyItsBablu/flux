@@ -2,92 +2,58 @@
 
 class MyApp : public Widget
 {
-    State<int> counter = 0;
-
 public:
-    WidgetPtr build() override
-    {
-        constexpr int kFabSize = 56;
-        constexpr int kAppBarHeight = 56;
+  WidgetPtr build() override
+  {
+    // Only visible below the "md" breakpoint — CSS equivalent: `block md:hidden`
+    auto mobileMenuButton =
+        Box({Text("☰ Menu")->setPadding(8)})
+            ->setBackgroundColor(Color::fromRGB(230, 230, 250))
+            ->setPadding(8)
+            ->hideAbove(Breakpoint::Md);
 
-        auto appBar =
-            Box({
-                    Text("My App")
-                        ->setFontSize(20)
-                        ->setFontWeight(FontWeight::Bold)
-                        ->setTextColor(Color::fromRGB(255, 255, 255)),
-                })
-                ->setDisplay(Display::Flex)
-                ->setDirection(FlexDirection::Row)
-                ->setAlignItems(AlignItems::Center)
-                ->setJustifyContent(JustifyContent::Start)
-                ->setPaddingHV(16, 0)
-                ->setWidthMode(SizeMode::Full)
-                ->setHeightMode(SizeMode::Fixed)
-                ->setHeight(kAppBarHeight)
-                ->setBackgroundColor(Color::fromRGB(33, 150, 243));
-
-        auto fab =
-            Box({
-                    Text("+")
-                        ->setFontSize(28)
-                        ->setFontWeight(FontWeight::Bold)
-                        ->setTextColor(Color::fromRGB(255, 255, 255)),
-                })
-                ->setDisplay(Display::Flex)
-                ->setAlignItems(AlignItems::Center)
-                ->setJustifyContent(JustifyContent::Center)
-                ->setWidthMode(SizeMode::Fixed)
-                ->setWidth(kFabSize)
-                ->setHeightMode(SizeMode::Fixed)
-                ->setHeight(kFabSize)
-                ->setBorderRadius(kFabSize / 2)
-                ->setBackgroundColor(Color::fromRGB(33, 150, 243))
-                ->setPositionMode(Position::Absolute)
-                ->setBottomPx(24)
-                ->setRightPx(24)
-                ->setZIndexVal(1)
-                ->setOnClick([this]
-                             { counter++; });
-
-        auto body =
-            Box({
-                    Text("You have pushed the button this many times:")
-                        ->setFontSize(14)
-                        ->setTextColor(Color::fromRGB(90, 90, 90)),
-                    Text(counter)
-                        ->setFontSize(40)
-                        ->setFontWeight(FontWeight::Bold),
-                })
-                ->setDisplay(Display::Flex)
-                ->setDirection(FlexDirection::Column)
-                ->setAlignItems(AlignItems::Center)
-                ->setJustifyContent(JustifyContent::Center)
-                ->setGap(8)
-                ->setWidthMode(SizeMode::Full)
-                ->setHeightMode(SizeMode::Full)
-                ->setFlexGrow(1); // takes all remaining height below the app bar
-
-        return Box({
-                       appBar,
-                       body,
-                       fab,
-                   })
+    // Only visible at "md" and up — CSS equivalent: `hidden md:block`
+    auto sidebar =
+        Box({
+                Text("Sidebar")->setPadding(8),
+                Text("Link 1")->setPadding(8),
+                Text("Link 2")->setPadding(8),
+            })
             ->setDisplay(Display::Flex)
             ->setDirection(FlexDirection::Column)
-            ->setWidthMode(SizeMode::Full)
-            ->setHeightMode(SizeMode::Full)
-            ->setBackgroundColor(Color::fromRGB(245, 245, 250));
-    }
-};
+            ->setWidth(200)
+            ->setBackgroundColor(Color::fromRGB(240, 240, 240))
+            ->hideBelow(Breakpoint::Md);
 
-// ============================================================
-//  Entry point
-// ============================================================
+    // Manually toggled — not breakpoint-driven at all
+    auto banner =
+        Box({Text("Heads up: maintenance tonight")->setPadding(8)})
+            ->setBackgroundColor(Color::fromRGB(255, 245, 200))
+            ->setId("banner")
+            ->setHidden(!showBanner_);
+
+    return Box({
+                   mobileMenuButton,
+                   Box({
+                           sidebar,
+                           Text("Main content area")->setPadding(16),
+                       })
+                       ->setDisplay(Display::Flex)
+                       ->setDirection(FlexDirection::Row)
+                       ->setGap(12),
+                   banner,
+               })
+        ->setDisplay(Display::Flex)
+        ->setDirection(FlexDirection::Column)
+        ->setGap(12)
+        ->setPadding(16);
+  }
+
+private:
+  bool showBanner_ = true;
+};
 
 WidgetPtr createApp(FluxUI *app)
 {
-    return FluxApp()
-        .setTheme(AppTheme::light())
-        .build(std::make_shared<MyApp>());
+  return FluxApp().setTheme(AppTheme::light()).build(std::make_shared<MyApp>());
 }

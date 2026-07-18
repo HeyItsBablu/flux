@@ -90,20 +90,7 @@ public:
             ->responsive(Breakpoint::Lg, [](BoxProps &p)
                          { p.columns = {fr(1), fr(1), fr(1), fr(1)}; });
 
-    // ------------------------------------------------------------------
-    // Test 3: continuously-animating sibling.
-    //
-    // Ticks its own state every frame via a timer, forcing repeated
-    // paint/layout passes independent of resize. On Win32 this keeps
-    // RenderLoop busy in continuous-ish fashion while you drag-resize,
-    // maximizing the chance of catching any residual thread-affinity bug
-    // (e.g. if a future change reintroduces a getCurrentInstance() call
-    // somewhere mid-layout, this is the widget most likely to expose it
-    // under load).
-    // ------------------------------------------------------------------
-    auto pulse = Box({Text("pulse")->setPadding(6)->setId("pulseLabel")})
-                     ->setPadding(10)
-                     ->setBackgroundColor(Color::fromRGB(240, 240, 240));
+
 
     return Box({
                    Text("resize the window; all sections below should stay in sync")
@@ -112,7 +99,7 @@ public:
                    Text("grid: 1 col < sm, 2 at sm, 3 at md, 4 at lg+")
                        ->setPadding(4),
                    grid,
-                   pulse,
+
                })
         ->setDisplay(Display::Flex)
         ->setDirection(FlexDirection::Column)
@@ -120,26 +107,7 @@ public:
         ->setPadding(16);
   }
 
-  void onMount() override
-  {
-    // Update the two nested labels + pulse counter every 500ms so state
-    // is refreshed independent of resize-driven layout passes, and both
-    // paths (resize-triggered layout vs timer-triggered rebuild) are
-    // exercised against the same tree.
-    if (auto *ui = FluxUI::getCurrentInstance())
-    {
-      ui->setInterval(500, [this]()
-                       {
-        tickCount_++;
-        if (auto *app = FluxUI::getCurrentInstance())
-        {
-            if (auto lbl = app->findById("pulseLabel"))
-                lbl->text = "pulse " + std::to_string(tickCount_);
-            if (auto ui2 = FluxUI::getCurrentInstance())
-                ui2->updateWidget(app->findById("pulseLabel").get());
-        } });
-    }
-  }
+
 
 private:
   int tickCount_ = 0;

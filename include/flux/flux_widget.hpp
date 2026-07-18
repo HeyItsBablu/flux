@@ -390,6 +390,16 @@ public:
 
   virtual bool isItemSource() const { return false; }
 
+  // Breakpoint/props-aware visibility check, used by container layout code
+  // (BoxWidget::collectFlowChildren, layoutAbsoluteChildren) INSTEAD OF the
+  // plain `visible` field when deciding whether to include a child in this
+  // frame's flow. Default just mirrors `visible` — only widgets whose
+  // visibility depends on something resolved at layout time (e.g. BoxWidget's
+  // breakpoint-driven `hidden` prop) need to override this. Overriding it is
+  // also expected to update `visible` as a side effect, since render(),
+  // hit-testing, and hover code all still read the plain field afterward.
+  virtual bool isVisibleForLayout(GraphicsContext & /*ctx*/) { return visible; }
+
   // scrollOffset / mainAxisBudget let an item source virtualize when its
   // container is a scrollable single-axis flow (Box in Flex/Block mode
   // with FlexWrap::NoWrap). Pass -1 for both when the caller has no single
@@ -676,7 +686,7 @@ inline void layoutAbsoluteChildren(Widget *container, GraphicsContext &ctx,
 
   std::vector<Widget *> abs;
   for (auto &c : container->children)
-    if (c->visible && c->position == Position::Absolute)
+    if (c->isVisibleForLayout(ctx) && c->position == Position::Absolute)
       abs.push_back(c.get());
 
   if (abs.empty())

@@ -663,6 +663,12 @@ struct BoxProps
 {
     Display display = Display::Block;
 
+    // CSS display:none analog — independent of `display` above (which only
+    // chooses the layout ALGORITHM for when we ARE in flow). Resolved through
+    // the same responsive() breakpoint pipeline as everything else in this
+    // struct, so hideAt()/showAt()/etc. below are just sugar over responsive().
+    bool hidden = false;
+
     // ── shared ───────────────────────────────────────────────────────────
     int paddingLeft = 0, paddingRight = 0, paddingTop = 0, paddingBottom = 0;
     int gap = 0; // used directly by Flex/Block; used as column/row gap
@@ -839,7 +845,7 @@ private:
         flat.reserve(children.size());
         for (auto &c : children)
         {
-            if (!c->visible)
+            if (!c->isVisibleForLayout(ctx))
                 continue;
             if (c->position == Position::Absolute)
                 continue;
@@ -2024,6 +2030,54 @@ public:
         return self();
     }
 
+
+    // Covariant override of Widget::setId — the base version returns
+    // WidgetPtr, which would silently downcast the chain and hide every
+    // BoxWidget-only setter (setHidden, hideAt, setColumns, ...) called
+    // after it. Shadowing it here keeps the fluent chain typed as
+    // shared_ptr<BoxWidget> no matter where setId() appears in the chain.
+    std::shared_ptr<BoxWidget> setId(const std::string &i)
+    {
+        id = i;
+        return self();
+    }
+
+    // ── Visibility (CSS display:none-style, breakpoint-aware) ──────────────
+    // Goes through BoxProps/responsive() rather than touching Widget::visible
+    // directly, so it composes with breakpoint overrides the same way every
+    // other Box prop does.
+    std::shared_ptr<BoxWidget> setHidden(bool h)
+    {
+        baseProps_.hidden = h;
+        markNeedsLayout();
+        return self();
+    }
+
+    // hideAt(Md)    → hidden from Md and up      (Tailwind: `md:hidden`)
+    // showAt(Md)    → visible from Md and up     (pairs with setHidden(true))
+    // hideBelow(Md) → hidden until Md, visible Md+   (`hidden md:block`)
+    // hideAbove(Md) → visible until Md, hidden Md+   (`block md:hidden`)
+    std::shared_ptr<BoxWidget> hideAt(Breakpoint bp)
+    {
+        return responsive(bp, [](BoxProps &p)
+                          { p.hidden = true; });
+    }
+    std::shared_ptr<BoxWidget> showAt(Breakpoint bp)
+    {
+        return responsive(bp, [](BoxProps &p)
+                          { p.hidden = false; });
+    }
+    std::shared_ptr<BoxWidget> hideBelow(Breakpoint bp)
+    {
+        setHidden(true);
+        return showAt(bp);
+    }
+    std::shared_ptr<BoxWidget> hideAbove(Breakpoint bp)
+    {
+        setHidden(false);
+        return hideAt(bp);
+    }
+
     // ── Shared setters ───────────────────────────────────────────────────
 
     std::shared_ptr<BoxWidget> setPadding(int p)
@@ -2288,6 +2342,19 @@ public:
                        FontCache &fontCache) override
     {
         resolved_ = resolveProps(ctx);
+        visible = !resolved_.hidden;
+
+        if (!visible)
+        {
+            // display:none — zero size, no children laid out, scrollbar/
+            // gesture state untouched. Matches CSS: display:none removes the
+            // whole subtree from flow, not just this box.
+            width = 0;
+            height = 0;
+            needsLayout = false;
+            return;
+        }
+
         sb_.userVisible = resolved_.scrollbarVisible;
         sb_.size = resolved_.scrollbarThickness;
         sb_.hoverSize = resolved_.scrollbarHoverThickness;
@@ -2317,6 +2384,16 @@ public:
         layoutAbsoluteChildren(this, ctx, fontCache);
 
         needsLayout = false;
+    }
+
+    // See Widget::isVisibleForLayout — lets a PARENT Box resolve our
+    // breakpoint-driven `hidden` state before it decides whether to include
+    // us in its flow this frame, without doing a full computeLayout() pass.
+    bool isVisibleForLayout(GraphicsContext &ctx) override
+    {
+        resolved_ = resolveProps(ctx);
+        visible = !resolved_.hidden;
+        return visible;
     }
 
     void positionChildren(int contentX, int contentY, int contentW, int contentH) override
@@ -2470,6 +2547,9 @@ public:
 
     void render(GraphicsContext &ctx, FontCache &fontCache) override
     {
+        if (!visible)
+            return;
+
         const BoxProps &P = resolved_;
         Painter painter(ctx, this);
 
