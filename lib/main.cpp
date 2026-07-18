@@ -22,7 +22,7 @@ public:
             ->setDisplay(Display::Flex)
             ->setDirection(FlexDirection::Column)
             ->setWidth(200)
-            ->setBackgroundColor(Color::fromRGB(240, 240, 240))
+            ->setBackgroundColor(Colors::blue)
             ->hideBelow(Breakpoint::Md);
 
     // Manually toggled — not breakpoint-driven at all
