@@ -1,93 +1,62 @@
+// dev/lib/main.cpp
+//
+// createApp() — the one function every flux platform main.cpp forward-
+// declares and calls. This is the whole "app" for the charts dev sandbox:
+// a simple screen exercising FluxPieChartWidget in both pie and donut mode,
+// so chart rendering/hit-testing can actually be seen and clicked rather
+// than reasoned about from headers alone.
+
 #include "flux/flux.hpp"
+#include "flux_charts/flux_charts.hpp"
 
-class MyApp : public Widget
+#include <cstdio>
+
+class ChartsDevApp : public Widget
 {
-    State<int> counter = 0;
-
 public:
-    WidgetPtr build() override
-    {
-        constexpr int kFabSize = 56;
-        constexpr int kAppBarHeight = 56;
+  WidgetPtr build() override
+  {
+    auto pie = PieChart(360, 320)
+                   ->setTitle("Browser Share")
+                   ->addSlice("Chrome", 65, Color::fromRGB(66, 133, 244))
+                   ->addSlice("Safari", 18, Color::fromRGB(255, 149, 0))
+                   ->addSlice("Firefox", 9, Color::fromRGB(255, 90, 95))
+                   ->addSlice("Edge", 5, Color::fromRGB(0, 178, 148))
+                   ->addSlice("Other", 3, Color::fromRGB(140, 140, 150))
+                   ->setOnSliceClick([](int idx)
+                                     { std::printf("[pie] slice %d clicked\n", idx); });
 
-        auto appBar =
-            Box({
-                    Text("My App")
-                        ->setFontSize(20)
-                        ->setFontWeight(FontWeight::Bold)
-                        ->setTextColor(Color::fromRGB(255, 255, 255)),
-                })
-                ->setDisplay(Display::Flex)
-                ->setDirection(FlexDirection::Row)
-                ->setAlignItems(AlignItems::Center)
-                ->setJustifyContent(JustifyContent::Start)
-                ->setPaddingHV(16, 0)
-                ->setWidthMode(SizeMode::Full)
-                ->setHeightMode(SizeMode::Fixed)
-                ->setHeight(kAppBarHeight)
-                ->setBackgroundColor(Color::fromRGB(33, 150, 243));
+    auto donut = DonutChart(360, 320, 0.6f)
+                     ->setTitle("Storage Used")
+                     ->addSlice("Photos", 42, Color::fromRGB(255, 193, 7))
+                     ->addSlice("Videos", 30, Color::fromRGB(33, 150, 243))
+                     ->addSlice("Docs", 12, Color::fromRGB(76, 175, 80))
+                     ->addSlice("Free", 16, Color::fromRGB(60, 60, 70));
+    auto candles = CandlestickChart(420, 320)
+                       ->setTitle("Price Action")
+                       ->addCandle("Mon", 100, 108, 97, 105)
+                       ->addCandle("Tue", 105, 110, 103, 102)
+                       ->addCandle("Wed", 102, 106, 99, 104)
+                       ->addCandle("Thu", 104, 112, 103, 111)
+                       ->addCandle("Fri", 111, 113, 106, 108);
 
-        auto fab =
-            Box({
-                    Text("+")
-                        ->setFontSize(28)
-                        ->setFontWeight(FontWeight::Bold)
-                        ->setTextColor(Color::fromRGB(255, 255, 255)),
-                })
-                ->setDisplay(Display::Flex)
-                ->setAlignItems(AlignItems::Center)
-                ->setJustifyContent(JustifyContent::Center)
-                ->setWidthMode(SizeMode::Fixed)
-                ->setWidth(kFabSize)
-                ->setHeightMode(SizeMode::Fixed)
-                ->setHeight(kFabSize)
-                ->setBorderRadius(kFabSize / 2)
-                ->setBackgroundColor(Color::fromRGB(33, 150, 243))
-                ->setPositionMode(Position::Absolute)
-                ->setBottomPx(24)
-                ->setRightPx(24)
-                ->setZIndexVal(1)
-                ->setOnClick([this]
-                             { counter++; });
-
-        auto body =
-            Box({
-                    Text("You have pushed the button this many times:")
-                        ->setFontSize(14)
-                        ->setTextColor(Color::fromRGB(90, 90, 90)),
-                    Text(counter)
-                        ->setFontSize(40)
-                        ->setFontWeight(FontWeight::Bold),
-                })
-                ->setDisplay(Display::Flex)
-                ->setDirection(FlexDirection::Column)
-                ->setAlignItems(AlignItems::Center)
-                ->setJustifyContent(JustifyContent::Center)
-                ->setGap(8)
-                ->setWidthMode(SizeMode::Full)
-                ->setHeightMode(SizeMode::Full)
-                ->setFlexGrow(1); // takes all remaining height below the app bar
-
-        return Box({
-                       appBar,
-                       body,
-                       fab,
-                   })
-            ->setDisplay(Display::Flex)
-            ->setDirection(FlexDirection::Column)
-            ->setWidthMode(SizeMode::Full)
-            ->setHeightMode(SizeMode::Full)
-            ->setBackgroundColor(Color::fromRGB(245, 245, 250));
-    }
+    return Box({
+                   Text("FluxCharts Dev Sandbox")
+                       ->setFontSize(20)
+                       ->setPadding(4),
+                   Box({pie, donut, candles})
+                       ->setDisplay(Display::Flex)
+                       ->setDirection(FlexDirection::Row)
+                       ->setGap(16),
+               })
+        ->setDisplay(Display::Flex)
+        ->setDirection(FlexDirection::Column)
+        ->setGap(12)
+        ->setPadding(16);
+  }
 };
 
-// ============================================================
-//  Entry point
-// ============================================================
-
-WidgetPtr createApp(FluxUI *app)
+WidgetPtr createApp(FluxUI * /*app*/)
 {
-    return FluxApp()
-        .setTheme(AppTheme::light())
-        .build(std::make_shared<MyApp>());
+  return FluxApp().setTheme(AppTheme::dark()).build(std::make_shared<ChartsDevApp>());
 }

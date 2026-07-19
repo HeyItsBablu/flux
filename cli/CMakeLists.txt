@@ -1,6 +1,8 @@
 add_executable(flux_cli
     flux_cli.cpp
     package_manager.cpp
+    create.cpp
+    util.cpp
 )
 
 target_include_directories(flux_cli PRIVATE
