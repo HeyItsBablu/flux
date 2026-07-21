@@ -1,3 +1,5 @@
+#include <cstddef>
+
 #define INCBIN_PREFIX g_
 #include "incbin.h"
 
