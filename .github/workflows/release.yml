@@ -16,11 +16,11 @@ name: release
 # Releases and put it on PATH — so this workflow's job is producing and
 # publishing those three binaries, not just validating buildability.
 #
-# Only the flux_cli target is built (not the full flux engine/examples) to
-# keep this fast. On Linux this still needs the same system packages as the
-# regular Linux CI job, because CMake's configure step probes for them
-# (find_package/pkg_check_modules) before target selection happens, even
-# though flux_cli itself doesn't link against SDL2/Cairo/Pango/FFmpeg.
+# flux_cli's build now also generates an embedded copy of the engine
+# template (see cli/tools/embed_template.cpp) by walking the full checked-
+# out source tree, including external/curl and external/mbedtls — but
+# since flux_cli doesn't link against those, only flux_template_embed and
+# flux_cli itself get compiled; curl/mbedtls are configured but not built.
 
 on:
   push:
