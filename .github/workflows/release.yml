@@ -1,0 +1,151 @@
+name: release
+
+# Triggered by pushing a version tag: git tag v0.1.0 && git push origin v0.1.0
+#
+# Two jobs, in order:
+#   1. build   - compiles just the flux CLI (target: flux_cli) on Windows,
+#      Linux, and macOS, then uploads each as a build artifact. A release
+#      job that skipped this could publish a tag with no working binary
+#      attached for one of the three platforms.
+#   2. release - only runs if build succeeds (needs: build). Downloads all
+#      three per-OS binaries, and attaches them to a GitHub Release at the
+#      pushed tag with auto-generated notes.
+#
+# Unlike charts (header-only, no compiled artifact), flux create's
+# generated README tells users to download `flux`/`flux.exe` directly from
+# Releases and put it on PATH — so this workflow's job is producing and
+# publishing those three binaries, not just validating buildability.
+#
+# Only the flux_cli target is built (not the full flux engine/examples) to
+# keep this fast. On Linux this still needs the same system packages as the
+# regular Linux CI job, because CMake's configure step probes for them
+# (find_package/pkg_check_modules) before target selection happens, even
+# though flux_cli itself doesn't link against SDL2/Cairo/Pango/FFmpeg.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout flux (with pinned submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            ninja-build \
+            libsdl2-dev \
+            libgl1-mesa-dev \
+            libglu1-mesa-dev \
+            libjpeg-dev \
+            libcairo2-dev \
+            libpango1.0-dev \
+            libasound2-dev \
+            libavformat-dev \
+            libavcodec-dev \
+            libavutil-dev \
+            libswscale-dev \
+            libssl-dev \
+            pkg-config
+
+      - name: Set up MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Set up Ninja (Windows/macOS)
+        if: runner.os != 'Linux'
+        uses: seanmiddleditch/gha-setup-ninja@v4
+
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cmake -S . -B build `
+            -G "Ninja" `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_C_COMPILER=cl `
+            -DCMAKE_CXX_COMPILER=cl `
+            -DFLUX_BUILD_EXAMPLES=OFF
+
+      - name: Configure (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cmake -S . -B build \
+            -G "Ninja" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DFLUX_BUILD_EXAMPLES=OFF
+
+      - name: Configure (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cmake -S . -B build \
+            -G "Ninja" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DFLUX_BUILD_EXAMPLES=OFF
+
+      - name: Build flux_cli
+        run: cmake --build build --target flux_cli --parallel
+
+      - name: Stage binary (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          mkdir dist
+          copy build\cli\flux.exe dist\flux-windows-x64.exe
+
+      - name: Stage binary (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir dist
+          cp build/cli/flux dist/flux-linux-x64
+
+      - name: Stage binary (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir dist
+          cp build/cli/flux dist/flux-macos-arm64
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flux-cli-${{ matrix.os }}
+          path: dist/*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: flux-cli-*
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/*

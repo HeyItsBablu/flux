@@ -566,6 +566,8 @@ endif() # FLUX_NEED_DESKTOP_LIB
 # Tests excluded on web — no native test runner available
 # ============================================================================
 
+option(FLUX_BUILD_CLI "Build the flux CLI (cli/)" ON)
+
 if(NOT ANDROID AND FLUX_NEED_DESKTOP_LIB)
     if(EMSCRIPTEN)
         add_subdirectory(web)
@@ -577,7 +579,7 @@ if(NOT ANDROID AND FLUX_NEED_DESKTOP_LIB)
         add_subdirectory(linux)
     endif()
 
-    if(NOT EMSCRIPTEN)
+    if(NOT EMSCRIPTEN AND FLUX_BUILD_CLI)
         add_subdirectory(cli)   # native desktop hosts only
     endif()
 
