@@ -121,13 +121,32 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # ============================================================================
-# mbedtls  (Android only — git submodule at external/mbedtls)
+# mbedtls  (git submodule at external/mbedtls)
+# Built on every non-Emscripten platform now — Android already needed it
+# for curl's TLS backend; native desktop now also needs it as
+# libdatachannel's DTLS backend (see the libdatachannel block below),
+# since libdatachannel has no Schannel/SecureTransport option the way
+# curl does, and this project vendors everything rather than requiring
+# consumers to install OpenSSL themselves.
 # ============================================================================
 
-if(ANDROID)
+if(NOT EMSCRIPTEN)
     set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
     set(ENABLE_TESTING  OFF CACHE BOOL "" FORCE)
     add_subdirectory(external/mbedtls)
+
+    # libdatachannel's DTLS-SRTP code (src/impl/dtlstransport.cpp) calls
+    # mbedtls_ssl_conf_dtls_srtp_protection_profiles() and references
+    # MBEDTLS_TLS_SRTP_* constants, which only exist in mbedTLS's own
+    # compiled output when MBEDTLS_SSL_DTLS_SRTP is defined for every
+    # mbedTLS translation unit — it's commented out in mbedtls_config.h
+    # by default. PUBLIC here so it also reaches every consumer of the
+    # mbedtls/mbedx509/mbedcrypto targets (libdatachannel), keeping both
+    # sides compiled against the same feature set.
+    target_compile_definitions(mbedtls    PUBLIC MBEDTLS_SSL_DTLS_SRTP)
+    target_compile_definitions(mbedx509   PUBLIC MBEDTLS_SSL_DTLS_SRTP)
+    target_compile_definitions(mbedcrypto PUBLIC MBEDTLS_SSL_DTLS_SRTP)
+
 
     set(MBEDTLS_INCLUDE_DIRS
             "${CMAKE_CURRENT_SOURCE_DIR}/external/mbedtls/include"
@@ -138,6 +157,26 @@ if(ANDROID)
     set(MBEDTLS_ROOT_DIR
             "${CMAKE_CURRENT_SOURCE_DIR}/external/mbedtls"
             CACHE PATH "" FORCE)
+
+
+    # libdatachannel/CMakeLists.txt:449 guards its own find_package(MbedTLS)
+    # call with `if(NOT TARGET MbedTLS::MbedTLS)` — a single combined
+    # target, not the three separate mbedtls/mbedx509/mbedcrypto targets
+    # this submodule actually builds. Without this target existing yet,
+    # that guard fails open and libdatachannel's vendored FindMbedTLS.cmake
+    # re-searches the system, which is what produces the
+    # "unsuitable version 0.0.0 / MbedTLS_LIBRARY-NOTFOUND" error — it's
+    # finding some unrelated stray install, not this submodule's build
+    # (which has no .lib on disk yet at configure time anyway).
+    # Wire up an INTERFACE target combining all three so the guard is
+    # satisfied and libdatachannel's search is skipped entirely.
+    if(NOT TARGET MbedTLS::MbedTLS)
+        add_library(MbedTLS::MbedTLS INTERFACE IMPORTED)
+        set_target_properties(MbedTLS::MbedTLS PROPERTIES
+            INTERFACE_LINK_LIBRARIES "mbedtls;mbedx509;mbedcrypto"
+            INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/external/mbedtls/include"
+        )
+    endif()
 endif()
 
 # ============================================================================
@@ -168,15 +207,44 @@ if(NOT EMSCRIPTEN)
     elseif(WIN32)
         set(CURL_USE_SCHANNEL ON  CACHE BOOL "" FORCE)
         set(CURL_USE_OPENSSL  OFF CACHE BOOL "" FORCE)
+        set(CURL_USE_MBEDTLS  OFF CACHE BOOL "" FORCE)
     elseif(APPLE)
         set(CURL_USE_SECTRANSP ON  CACHE BOOL "" FORCE)
         set(CURL_USE_OPENSSL   OFF CACHE BOOL "" FORCE)
+        set(CURL_USE_MBEDTLS   OFF CACHE BOOL "" FORCE)
     elseif(UNIX AND NOT APPLE)
         set(CURL_USE_OPENSSL  ON  CACHE BOOL "" FORCE)
         set(CURL_USE_SCHANNEL OFF CACHE BOOL "" FORCE)
+        set(CURL_USE_MBEDTLS  OFF CACHE BOOL "" FORCE)
     endif()
 
     add_subdirectory(external/curl)
+endif()
+
+# ============================================================================
+# libdatachannel  (git submodule at external/libdatachannel) — native WebRTC.
+# Skip on Web — flux_webrtc_web.cpp bridges to the browser's own
+# RTCPeerConnection instead, same split as libcurl vs Emscripten Fetch.
+# ============================================================================
+
+if(NOT EMSCRIPTEN)
+    set(NO_EXAMPLES ON CACHE BOOL "" FORCE)
+    set(NO_TESTS    ON CACHE BOOL "" FORCE)
+    set(NO_MEDIA    ON CACHE BOOL "" FORCE)   # data channels only for now —
+                                               # drops the libsrtp dependency
+                                               # entirely (audio/video is a
+                                               # future pass, see
+                                               # flux_webrtc_native.cpp TODOs)
+    set(USE_MBEDTLS ON CACHE BOOL "" FORCE)   # use the mbedtls submodule
+                                               # already vendored above
+                                               # instead of requiring
+                                               # OpenSSL to be installed —
+                                               # libdatachannel has no
+                                               # Schannel backend, unlike
+                                               # curl, so it can't fall
+                                               # back to the OS TLS stack
+                                               # the way FluxHttp does.
+    add_subdirectory(external/libdatachannel)
 endif()
 
 # ============================================================================
@@ -409,7 +477,8 @@ if(WIN32)
     target_link_libraries(flux PUBLIC
             stb
             dr
-            CURL::libcurl
+            $<BUILD_INTERFACE:CURL::libcurl>
+            $<BUILD_INTERFACE:LibDataChannel::LibDataChannelStatic>
             dxguid
             Msimg32
             Gdiplus
@@ -463,9 +532,10 @@ elseif(ANDROID)
             stb
             dr
             app_glue
-            CURL::libcurl
-            mbedtls
-            mbedcrypto
+            $<BUILD_INTERFACE:CURL::libcurl>
+            $<BUILD_INTERFACE:mbedtls>
+            $<BUILD_INTERFACE:mbedcrypto>
+            $<BUILD_INTERFACE:LibDataChannel::LibDataChannelStatic>
             ${log-lib}
             ${android-lib}
             ${egl-lib}
@@ -480,7 +550,8 @@ elseif(APPLE)
     target_link_libraries(flux PUBLIC
             stb
             dr
-            CURL::libcurl
+            $<BUILD_INTERFACE:CURL::libcurl>
+            $<BUILD_INTERFACE:LibDataChannel::LibDataChannelStatic>
             "-framework Cocoa"
             "-framework Metal"
             "-framework MetalKit"
@@ -507,7 +578,8 @@ elseif(UNIX AND NOT APPLE)
             stb
             dr
             OpenGL::GL
-            CURL::libcurl
+            $<BUILD_INTERFACE:CURL::libcurl>
+            $<BUILD_INTERFACE:LibDataChannel::LibDataChannelStatic>
             ${SDL2_LIBRARIES}
             ${CAIRO_LIBRARIES}
             ${PANGOCAIRO_LIBRARIES}

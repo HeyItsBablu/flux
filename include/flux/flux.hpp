@@ -8,4 +8,7 @@
 
 #include "flux_canvas.hpp"
 
+#include "flux/flux_webrtc.hpp"
+#include "flux/flux_webrtc_signaling.hpp"
+
 #endif // FLUX_HPP

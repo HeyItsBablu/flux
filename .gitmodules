@@ -10,3 +10,6 @@
 [submodule "external/emsdk"]
 	path = external/emsdk
 	url = https://github.com/emscripten-core/emsdk.git
+[submodule "external/libdatachannel"]
+	path = external/libdatachannel
+	url = https://github.com/paullouisageneau/libdatachannel.git

@@ -3,3 +3,6 @@
 
 /external/*
 !/external/.gitkeep
+!/external/curl
+!/external/mbedtls
+!/external/libdatachannel
