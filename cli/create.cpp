@@ -5,11 +5,14 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <cstdint>
+
+extern const unsigned char* flux_template_data();
+extern size_t flux_template_size();
 
 namespace
 {
 
-    constexpr const char *kTemplateRepo = "https://github.com/IAmTheFool/flux.git";
 
     bool is_valid_project_name(const std::string &name)
     {
@@ -31,55 +34,68 @@ namespace
         return out;
     }
 
-    std::optional<std::string> resolve_latest_tag()
+    // Reads the FTPL archive embedded in this binary (see
+    // cli/tools/embed_template.cpp for the writer / format) and writes its
+    // entries out under `dest`. Fully offline.
+    bool extract_embedded_template(const fs::path &dest)
     {
-        // Sorted descending by version; take the first line.
-        auto out = run_capture(
-            "git ls-remote --tags --sort=-v:refname " + std::string(kTemplateRepo) + " 2>&1");
-        if (!out || out->empty())
-            return std::nullopt;
+        const unsigned char *p = flux_template_data();
+        const unsigned char *end = p + flux_template_size();
 
-        std::string first_line = out->substr(0, out->find('\n'));
-        auto pos = first_line.find("refs/tags/");
-        if (pos == std::string::npos)
-            return std::nullopt;
-        return first_line.substr(pos + std::strlen("refs/tags/"));
-    }
-
-    int clone_template(const fs::path &dest, const std::string &ref)
-    {
-        std::string cmd = "git clone --branch " + ref + " --depth 1 --recurse-submodules " +
-                          kTemplateRepo + " \"" + dest.string() + "\" 2>&1";
-        return std::system(cmd.c_str());
-    }
-
-    // Engine-repo-only content a fresh app has no use for.
-    void strip_dev_only(const fs::path &root)
-    {
-        for (const char *rel : {"examples", "screenshots", "docs", "cli","scripts", ".git",".github"})
+        if (flux_template_size() < 8 || std::memcmp(p, "FTPL", 4) != 0)
         {
-            std::error_code ec;
-            fs::remove_all(root / rel, ec);
+            std::fprintf(stderr, "flux: embedded template archive is missing or corrupt.\n");
+            return false;
         }
-        for (const char *rel : {"CHANGELOG.md", "INSTALL.md"})
+        p += 4;
+        uint32_t count;
+        std::memcpy(&count, p, 4);
+        p += 4;
+
+        for (uint32_t i = 0; i < count; ++i)
         {
-            std::error_code ec;
-            fs::remove(root / rel, ec);
+            if (p + 2 > end) return false;
+            uint16_t path_len;
+            std::memcpy(&path_len, p, 2);
+            p += 2;
+
+            if (p + path_len > end) return false;
+            std::string rel(reinterpret_cast<const char *>(p), path_len);
+            p += path_len;
+
+            if (p + 1 > end) return false;
+            char type = static_cast<char>(*p);
+            p += 1;
+
+            if (p + 8 > end) return false;
+            uint64_t len;
+            std::memcpy(&len, p, 8);
+            p += 8;
+
+            if (p + len > end) return false;
+
+            fs::path out_path = dest / rel;
+            if (type == 1)
+            {
+                fs::create_directories(out_path);
+            }
+            else
+            {
+                fs::create_directories(out_path.parent_path());
+                std::ofstream f(out_path, std::ios::binary);
+                if (!f)
+                {
+                    std::fprintf(stderr, "flux: failed to write %s\n", out_path.string().c_str());
+                    return false;
+                }
+                if (len)
+                    f.write(reinterpret_cast<const char *>(p), static_cast<std::streamsize>(len));
+            }
+            p += len;
         }
+        return true;
     }
 
-
-    // Keep assets/ present but empty — the cloned tree ships the engine's
-    // own demo media (used by examples/), which we just deleted.
-    void reset_assets(const fs::path &root)
-    {
-        std::error_code ec;
-        fs::path assets = root / "assets";
-        for (const auto &entry : fs::directory_iterator(assets, ec))
-        {
-            fs::remove_all(entry.path(), ec);
-        }
-    }
 
     bool patch_app_config(const fs::path &root, const std::string &project_name)
     {
@@ -120,7 +136,7 @@ namespace
 
 } // namespace
 
-int cmd_create(const std::string &project_name, const std::string &ref)
+int cmd_create(const std::string &project_name)
 {
     if (!is_valid_project_name(project_name))
     {
@@ -137,33 +153,15 @@ int cmd_create(const std::string &project_name, const std::string &ref)
         return 1;
     }
 
-    if (!command_exists("git"))
+    std::printf("Creating '%s'...\n", project_name.c_str());
+    if (!extract_embedded_template(dest))
     {
-        std::fprintf(stderr, "ERROR: git not found in PATH. Run 'flux doctor' to check your toolchain.\n");
+        std::fprintf(stderr, "ERROR: failed to extract embedded template.\n");
+        std::error_code ec;
+        fs::remove_all(dest, ec);
         return 1;
     }
 
-    std::string resolved_ref = ref;
-    if (resolved_ref.empty())
-    {
-        auto latest = resolve_latest_tag();
-        if (!latest)
-        {
-            std::fprintf(stderr, "ERROR: could not resolve the latest release tag; pass --ref explicitly.\n");
-            return 1;
-        }
-        resolved_ref = *latest;
-    }
-
-    std::printf("Creating '%s' from flux %s...\n", project_name.c_str(), resolved_ref.c_str());
-    if (clone_template(dest, resolved_ref) != 0)
-    {
-        std::fprintf(stderr, "ERROR: failed to clone flux at ref '%s'.\n", resolved_ref.c_str());
-        return 1;
-    }
-
-    strip_dev_only(dest);
-    reset_assets(dest);
     write_readme(dest, project_name);
 
 
@@ -178,7 +176,10 @@ int cmd_create(const std::string &project_name, const std::string &ref)
         return 1;
     }
 
-    std::system(("git -C \"" + dest.string() + "\" init -q").c_str());
+    if (command_exists("git"))
+    {
+        std::system(("git -C \"" + dest.string() + "\" init -q").c_str());
+    }
 
     std::printf("\nCreated %s.\n", project_name.c_str());
     std::printf("  cd %s\n", project_name.c_str());

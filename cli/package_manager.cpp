@@ -31,7 +31,7 @@ std::optional<fs::path> find_project_root() {
 
 
 
-fs::path registry_path(const fs::path& root) { return root / "cli" / "registry" / "index.json"; }
+fs::path registry_path(const fs::path& root) { return root / "config" / "registry.json"; }
 fs::path manifest_path(const fs::path& root) { return root / "flux.deps.json"; }
 
 

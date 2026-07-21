@@ -26,7 +26,7 @@ namespace
     {
         std::printf("flux - FluxUI project CLI\n\n");
         std::printf("Usage:\n");
-        std::printf("  flux create <name> [--ref <tag>]    Scaffold a new project\n");
+        std::printf("  flux create <name>                  Scaffold a new project\n");
         std::printf("  flux run <platform> [--release]     Build and launch\n");
         std::printf("  flux build <platform> [--release]   Build only\n");
         std::printf("  flux doctor [platform]              Check host toolchain\n");
@@ -255,16 +255,7 @@ int main(int argc, char **argv)
         }
         const std::string project_name = argv[2];
 
-        std::string ref_override;
-        for (int i = 3; i < argc; ++i)
-        {
-            std::string a = argv[i];
-            if (a == "--ref" && i + 1 < argc)
-            {
-                ref_override = argv[++i];
-            }
-        }
-        return cmd_create(project_name, ref_override);
+        return cmd_create(project_name);
     }
 
     if (command != "run" && command != "build")
