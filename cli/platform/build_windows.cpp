@@ -121,7 +121,8 @@ namespace
             build_dir + " -G Ninja "
                         "-DCMAKE_BUILD_TYPE=Debug "
                         "-DCMAKE_C_COMPILER=cl.exe "
-                        "-DCMAKE_CXX_COMPILER=cl.exe && "
+                        "-DCMAKE_CXX_COMPILER=cl.exe "
+                        "-DFLUX_BUILD_CLI=OFF && "
                         "cmake --build " +
             build_dir;
 

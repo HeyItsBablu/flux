@@ -68,30 +68,6 @@ namespace
         }
     }
 
-    // A created project has no cli/ subdirectory to build (the flux CLI is a
-    // standalone binary downloaded from GitHub Releases, not built per-project).
-    bool disable_cli_build(const fs::path &root)
-    {
-        fs::path presets_path = root / "CMakePresets.json";
-        auto presets = load_json_file(presets_path);
-        if (!presets || !presets->contains("configurePresets"))
-            return false;
-
-        JsonValue &configure_presets = (*presets)["configurePresets"];
-        if (!configure_presets.isArray())
-            return false;
-
-        for (auto &preset : std::get<JsonArray>(configure_presets.data))
-        {
-            if (!preset.contains("cacheVariables"))
-            {
-                preset["cacheVariables"] = JsonValue::object();
-            }
-            preset["cacheVariables"]["FLUX_BUILD_CLI"] = std::string("OFF");
-        }
-
-        return write_json_file(presets_path, *presets);
-    }
 
     // Keep assets/ present but empty — the cloned tree ships the engine's
     // own demo media (used by examples/), which we just deleted.
@@ -190,11 +166,6 @@ int cmd_create(const std::string &project_name, const std::string &ref)
     reset_assets(dest);
     write_readme(dest, project_name);
 
-    if (!disable_cli_build(dest))
-    {
-        std::fprintf(stderr, "ERROR: cloned successfully but failed to patch CMakePresets.json\n");
-        return 1;
-    }
 
     if (!patch_app_config(dest, project_name))
     {
