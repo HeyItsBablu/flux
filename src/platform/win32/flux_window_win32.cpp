@@ -138,7 +138,7 @@ bool PlatformWindow::create(const std::string &title, int width, int height,
         }
     };
 
-    renderLoop_->onFrame = [this](float dt)
+    renderLoop_->onFrame = [this](float /*dt*/)
     {
         renderLoop_->drainPending();
         if (callbacks.onDrainRebuilds)
@@ -244,7 +244,7 @@ void PlatformWindow::invalidate()
         renderLoop_->markDirty();
 }
 
-void PlatformWindow::invalidateRect(int x, int y, int w, int h)
+void PlatformWindow::invalidateRect(int , int , int , int )
 {
 
     if (renderLoop_)

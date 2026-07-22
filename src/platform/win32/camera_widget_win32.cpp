@@ -137,7 +137,7 @@ bool CameraWidget::_platformRenderPreview(GraphicsContext &ctx, Painter &p,
     return true;
 }
 
-void CameraWidget::_platformRenderFlash(GraphicsContext &ctx, Painter &p,
+void CameraWidget::_platformRenderFlash(GraphicsContext &/*ctx*/, Painter &p,
                                         int viewH)
 {
     // D2D path: just fill a semi-transparent white rect — no GDI needed

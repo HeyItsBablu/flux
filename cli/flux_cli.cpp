@@ -103,7 +103,7 @@ namespace
     }
 
     // Platforms that require running the flux CLI on that same OS.
-    bool is_desktop_platform(const std::string &p)
+    [[maybe_unused]] bool is_desktop_platform(const std::string &p)
     {
         return p == "windows" || p == "linux" || p == "macos";
     }
@@ -285,7 +285,7 @@ int main(int argc, char **argv)
         flags.emplace_back(argv[i]);
     const bool release = has_flag(flags, "--release");
 
-    (void)is_desktop_platform; // reserved for host-compatibility checks as platforms are added
+
 
     return dispatch(command, platform, release);
 }

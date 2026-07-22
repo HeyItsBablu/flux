@@ -744,10 +744,10 @@ public:
         return std::static_pointer_cast<TextAreaWidget>(shared_from_this());
     }
 
-    std::shared_ptr<TextAreaWidget> setGutterColor(Color bg, Color text)
+    std::shared_ptr<TextAreaWidget> setGutterColor(Color bg, Color newTextColor)
     {
         gutterBg_   = bg;
-        gutterText_ = text;
+        gutterText_ = newTextColor;
         markNeedsPaint();
         return std::static_pointer_cast<TextAreaWidget>(shared_from_this());
     }

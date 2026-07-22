@@ -82,10 +82,6 @@ void FluxUI::wireCallbacks()
             return;
 
         std::lock_guard<std::recursive_mutex> lock(treeMutex_);
-        if (!root->children.empty())
-        {
-            auto *page = root->children[0].get();
-        }
         Renderer::renderWidget(ctx, root.get(), fontCache);
         // Paint floating overlay content last, in z order, so it sits on
         // top of the main tree. Every Painter backend resolves each

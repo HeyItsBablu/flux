@@ -270,7 +270,7 @@ struct FluxSecureStorage::Impl {
         return plain;
     }
 
-    std::map<std::string,std::string> readAllSync(SecureStorageError* err) {
+    std::map<std::string,std::string> readAllSync(SecureStorageError* /*err*/) {
         std::lock_guard<std::mutex> lk(mtx);
         auto raw = regReadAll(opts.serviceName);
         std::map<std::string,std::string> result;

@@ -73,7 +73,7 @@ static ID2D1SolidColorBrush *getBrush(GraphicsContext &ctx, Color c)
 // Painter::fillRect
 // ============================================================================
 
-void Painter::fillRect(int x, int y, int w, int h, Color color, const char *slot)
+void Painter::fillRect(int x, int y, int w, int h, Color color, const char */*slot*/)
 {
     auto *br = getBrush(ctx, color);
     if (!br)
@@ -86,7 +86,7 @@ void Painter::fillRect(int x, int y, int w, int h, Color color, const char *slot
 // ============================================================================
 
 void Painter::fillRoundedRect(int x, int y, int w, int h,
-                              int radius, Color color, const char *slot)
+                              int radius, Color color, const char */*slot*/)
 {
     auto *br = getBrush(ctx, color);
     if (!br)
@@ -122,7 +122,7 @@ void Painter::drawBorder(int x, int y, int w, int h,
 // ============================================================================
 
 void Painter::fillRoundedRectGDI(int x, int y, int w, int h, int radius,
-                                 Color fill, Color stroke, int strokeWidth, const char *slot)
+                                 Color fill, Color stroke, int strokeWidth, const char */*slot*/)
 {
     int r = radius / 2;
     fillRoundedRect(x, y, w, h, r, fill);
@@ -135,7 +135,7 @@ void Painter::fillRoundedRectGDI(int x, int y, int w, int h, int radius,
 // ============================================================================
 
 void Painter::drawEllipse(int x, int y, int w, int h,
-                          Color fill, Color stroke, int strokeWidth, const char *slot)
+                          Color fill, Color stroke, int strokeWidth, const char */*slot*/)
 {
     D2D1_ELLIPSE el = toEllipse(x, y, w, h);
 
@@ -885,7 +885,7 @@ void Painter::drawPage(const PageDrawParams &params)
 // ============================================================================
 
 void Painter::drawText(const std::wstring &text, int x, int y, int w, int h,
-                       NativeFont font, Color color, UINT format, const char *slot)
+                       NativeFont font, Color color, UINT format, const char */*slot*/)
 {
     if (text.empty() || !font || !ctx.dwrite)
         return;
@@ -936,7 +936,7 @@ void Painter::drawText(const std::wstring &text, int x, int y, int w, int h,
 // ============================================================================
 
 void Painter::drawTextA(const std::string &text, int x, int y, int w, int h,
-                        NativeFont font, Color color, UINT format, const char *slot)
+                        NativeFont font, Color color, UINT format, const char */*slot*/)
 {
     if (text.empty())
         return;

@@ -691,18 +691,18 @@ private:
     for (int i = 0; i < n; ++i)
     {
       int bx = barLeft(i, si, bg, n, pa);
-      int top = dataToPixY(s.values[i], pa);
-      int bh = std::abs(baseline - top);
+      int barTop = dataToPixY(s.values[i], pa);
+      int bh = std::abs(baseline - barTop);
       if (bh == 0)
         bh = 1; // always draw at least 1px
 
       if (s.values[i] >= 0)
-        p.fillRect(bx, top, bg.barW, bh, s.color);
+        p.fillRect(bx, barTop, bg.barW, bh, s.color);
       else
         p.fillRect(bx, baseline, bg.barW, bh, s.color);
 
       Color border = s.color.darken(40);
-      p.drawRectOutline(bx, s.values[i] >= 0 ? top : baseline, bg.barW, bh,
+      p.drawRectOutline(bx, s.values[i] >= 0 ? barTop : baseline, bg.barW, bh,
                         border, 1);
     }
   }

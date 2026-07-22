@@ -693,7 +693,12 @@ private:
 #else
         const std::string &resolved = path;
 #endif
+#if defined(_WIN32) && !defined(FLUX_SSR)
+        FILE *f = nullptr;
+        fopen_s(&f, resolved.c_str(), "rb");
+#else
         FILE *f = fopen(resolved.c_str(), "rb");
+#endif
         if (!f)
             return buf;
         fseek(f, 0, SEEK_END);

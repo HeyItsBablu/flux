@@ -664,14 +664,14 @@ private:
             // pre-existing bug / non-compiling line, not something this
             // migration introduced). Restored here so hover highlighting on
             // day cells actually works.
-            bool isHovered = (cell == hoveredCell_) && thisMonth;
+            bool cellHovered = (cell == hoveredCell_) && thisMonth;
             bool isDisabled = _isDisabled(dYear, dMonth, dayNum);
 
             // Cell background
             if (isSelected)
                 painter.fillRoundedRect(cx + 2, cy + 2, calCellSize - 4,
                                         calCellSize - 4, 4, daySelectedBg);
-            else if (isHovered && !isDisabled)
+            else if (cellHovered && !isDisabled)
                 painter.fillRoundedRect(cx + 2, cy + 2, calCellSize - 4,
                                         calCellSize - 4, 4, dayHoverBg);
 
