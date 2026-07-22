@@ -2556,20 +2556,6 @@ public:
         if (P.hasBackground)
             painter.fillRoundedRect(x, y, width, height, P.borderRadius, P.backgroundColor);
 
-        // Overlay scrollbar — no gutter reserved, clip to the full box.
-        painter.pushClipRect(x, y, width, height);
-
-        for (auto &child : children)
-        {
-            if (!child->visible || child->position == Position::Absolute)
-                continue;
-            bool onScreen = child->x + child->width >= x && child->x < x + width &&
-                            child->y + child->height >= y && child->y < y + height;
-            if (onScreen)
-                child->render(ctx, fontCache);
-        }
-
-        painter.popClipRect();
 
         int sbSz = sb_.isScrollable ? sb_.size : 0;
         int clipX1 = x, clipY1 = y, clipX2 = x + width, clipY2 = y + height;
