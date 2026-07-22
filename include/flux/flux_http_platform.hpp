@@ -28,6 +28,32 @@ void fluxDrainHttpQueue();
 inline void fluxSetUIWindow(void *) {}
 inline void fluxDrainPendingMessages() {}
 
+
+// ─── SSR (headless) ─────────────────────────────────────────────────────────
+//
+// Takes priority over the host OS's own branch below, same as
+// flux_platform.hpp's FLUX_SSR block — _WIN32/__linux__ are still true
+// (they describe the real compiler/OS the SSR binary happens to be built
+// on), so every other branch in this chain is additionally guarded with
+// `&& !defined(FLUX_SSR)` to stay mutually exclusive with this one.
+//
+// SSR always runs with fluxSetSSRSyncMode(true) during a request (see
+// ssr/main.cpp's renderRequest), so FluxHttp::send()'s async/postToUI
+// path that actually calls this is never exercised in practice — but the
+// symbol still has to exist or the SSR target fails to link, since
+// flux_http.hpp unconditionally forward-declares and references it.
+// Fall back to just invoking the callback directly, matching what every
+// other platform branch does when it has no live UI thread to post to
+// (e.g. Win32's gFluxUIWindow == nullptr case).
+#elif defined(FLUX_SSR)
+
+inline void fluxPostToUIThread(HttpCallback callback, HttpResult result) {
+    if (callback) callback(std::move(result));
+}
+inline void fluxSetUIWindow(void *) {}
+inline void fluxDrainPendingMessages() {}
+
+
 // ─── Windows ────────────────────────────────────────────────────────────────
 #elif defined(_WIN32)
 
