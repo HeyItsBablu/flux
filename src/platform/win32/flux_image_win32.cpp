@@ -7,7 +7,6 @@
 #include <mutex>
 #include <d2d1_1.h>
 #include <wrl/client.h>
-#include "flux/flux_debug_log.hpp"
 
 using Microsoft::WRL::ComPtr;
 

@@ -6,7 +6,7 @@
 #include "flux/flux_render_loop.hpp"
 #include "flux/flux_http_platform.hpp"
 #include "flux/flux_core.hpp" // FluxUI::getCurrentInstance(), getFontCache()
-#include "flux/flux_debug_log.hpp"
+
 #include <windowsx.h>
 #include <cassert>
 #include <cstdio>
@@ -72,7 +72,7 @@ bool PlatformWindow::valid() const
 bool PlatformWindow::create(const std::string &title, int width, int height,
                             AppInstance hInst, void *userData)
 {
-    fluxLog("[PlatformWindow::create] Step 1: entered");
+
     hInstance_ = hInst;
 
     WNDCLASSEXW wc = {};
@@ -84,7 +84,6 @@ bool PlatformWindow::create(const std::string &title, int width, int height,
     wc.hbrBackground = nullptr;
     wc.style = 0;
     RegisterClassExW(&wc);
-    fluxLog("[PlatformWindow::create] Step 2: class registered");
 
     RECT r = {0, 0, width, height};
     AdjustWindowRectEx(&r, WS_OVERLAPPEDWINDOW, FALSE, 0);
@@ -97,44 +96,29 @@ bool PlatformWindow::create(const std::string &title, int width, int height,
         r.right - r.left, r.bottom - r.top,
         nullptr, nullptr, hInstance_, userData);
 
-    fluxLog("[PlatformWindow::create] Step 3: HWND=" +
-            std::string(hwnd_ ? "valid" : "NULL"));
-
     if (!hwnd_)
     {
-        fluxLog("[PlatformWindow::create] FATAL: CreateWindowExW failed");
+
         return false;
     }
 
     updateClientSize();
-    fluxLog("[PlatformWindow::create] Step 4: client size=" +
-            std::to_string(cachedWidth) + "x" + std::to_string(cachedHeight));
 
-    fluxLog("[PlatformWindow::create] Step 5: creating D3DDevice");
     d3dDevice_ = new D3DDevice();
     if (!d3dDevice_->create(hwnd_, cachedWidth, cachedHeight))
     {
-        fluxLog("[PlatformWindow::create] FATAL: D3DDevice::create failed");
+
         delete d3dDevice_;
         d3dDevice_ = nullptr;
         DestroyWindow(hwnd_);
         hwnd_ = nullptr;
         return false;
     }
-    fluxLog("[PlatformWindow::create] Step 6: D3DDevice created");
 
-    fluxLog("[PlatformWindow::create] Step 7: creating RenderLoop");
     renderLoop_ = new RenderLoop();
 
     renderLoop_->onResize = [this](int newW, int newH)
     {
-        fluxLog("[onResize] " + std::to_string(newW) + "x" +
-                std::to_string(newH));
-        if (!d3dDevice_->resize(newW, newH))
-        {
-            if (!d3dDevice_->recover(hwnd_))
-                fluxLog("[onResize] FATAL: recovery failed");
-        }
         cachedWidth = newW;
 
         cachedHeight = newH;
@@ -143,18 +127,15 @@ bool PlatformWindow::create(const std::string &title, int width, int height,
             auto ctx = makeContext(d3dDevice_);
             callbacks.onResize(ctx, newW, newH);
         }
-        fluxLog("[onResize] done");
     };
 
     renderLoop_->onLayout = [this]()
     {
-        fluxLog("[onLayout] called");
         if (callbacks.onResize)
         {
             auto ctx = makeContext(d3dDevice_);
             callbacks.onResize(ctx, cachedWidth, cachedHeight);
         }
-        fluxLog("[onLayout] done");
     };
 
     renderLoop_->onFrame = [this](float dt)
@@ -162,24 +143,18 @@ bool PlatformWindow::create(const std::string &title, int width, int height,
         renderLoop_->drainPending();
         if (callbacks.onDrainRebuilds)
             callbacks.onDrainRebuilds();
-        fluxLog("[onFrame] START");
         if (!d3dDevice_ || !d3dDevice_->valid)
             return;
 
         d3dDevice_->beginDraw();
-        fluxLog("[onFrame] beginDraw done, calling onPaint");
 
         if (callbacks.onPaint)
         {
             auto ctx = makeContext(d3dDevice_);
             callbacks.onPaint(ctx, cachedWidth, cachedHeight);
-            fluxLog("[onFrame] onPaint returned"); // markDirty before or after this?
         }
 
         HRESULT hr = d3dDevice_->endDrawAndPresent(1);
-        fluxLog("[onFrame] END present hr=0x" + [hr]()
-                {
-        char buf[16]; sprintf_s(buf, "%08X", (unsigned)hr); return std::string(buf); }());
 
         if (d3dDevice_->isDeviceLost(hr))
             d3dDevice_->recover(hwnd_);
@@ -191,7 +166,6 @@ bool PlatformWindow::create(const std::string &title, int width, int height,
     // while computeLayout is already running on the main thread.
 
     fluxSetUIWindow(hwnd_);
-    fluxLog("[PlatformWindow::create] Step 8: done (render loop not started yet)");
     return true;
 }
 
@@ -199,10 +173,8 @@ void PlatformWindow::startRenderLoop()
 {
     if (!renderLoop_)
         return;
-    fluxLog("[PlatformWindow::startRenderLoop] starting");
     renderLoop_->start();
     renderLoop_->markDirty(); // only paint, no layout — layout already done
-    fluxLog("[PlatformWindow::startRenderLoop] done");
 }
 
 // ============================================================================
@@ -268,17 +240,13 @@ int PlatformWindow::run()
 
 void PlatformWindow::invalidate()
 {
-    fluxLog("[PlatformWindow::invalidate] called");
     if (renderLoop_)
         renderLoop_->markDirty();
 }
 
 void PlatformWindow::invalidateRect(int x, int y, int w, int h)
 {
-    fluxLog("[PlatformWindow::invalidateRect] x=" + std::to_string(x) +
-            " y=" + std::to_string(y) +
-            " w=" + std::to_string(w) +
-            " h=" + std::to_string(h));
+
     if (renderLoop_)
         renderLoop_->markDirty();
 }
@@ -449,7 +417,7 @@ LRESULT CALLBACK PlatformWindow::WindowProc(HWND hwnd, UINT uMsg,
         // the window so Windows doesn't keep re-posting it.
     case WM_PAINT:
     {
-        fluxLog("[WM_PAINT] called");
+
         ValidateRect(hwnd, nullptr);
         return 0;
     }
@@ -463,7 +431,7 @@ LRESULT CALLBACK PlatformWindow::WindowProc(HWND hwnd, UINT uMsg,
             return DefWindowProcW(hwnd, uMsg, wParam, lParam);
         if (wParam == SIZE_MINIMIZED)
             return 0;
-        fluxLog("[WM_SIZE] called");
+
         self->updateClientSize();
         int w = self->cachedWidth;
         int h = self->cachedHeight;
@@ -520,7 +488,6 @@ LRESULT CALLBACK PlatformWindow::WindowProc(HWND hwnd, UINT uMsg,
         if (!self)
             return 0;
         int x = GET_X_LPARAM(lParam), y = GET_Y_LPARAM(lParam);
-        fluxLog("[WM_MOUSEMOVE] x=" + std::to_string(x) + " y=" + std::to_string(y));
 
         TRACKMOUSEEVENT tme = {};
         tme.cbSize = sizeof(TRACKMOUSEEVENT);

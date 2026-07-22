@@ -5,7 +5,7 @@
 #include "flux/flux_http.hpp"
 #include "flux/flux_painter.hpp"
 
-#include "flux/flux_debug_log.hpp"
+
 
 // ============================================================================
 // SHARED DECODE  (stb_image — used by Linux, Android, macOS, Web)

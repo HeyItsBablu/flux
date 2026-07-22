@@ -2,7 +2,6 @@
 #ifdef _WIN32
 
 #include "flux/flux_render_loop.hpp"
-#include "flux/flux_debug_log.hpp"
 #include <algorithm>
 #include <climits>
 
@@ -74,7 +73,7 @@ void RenderLoop::markDirty()
         sprintf_s(buf, "  [%d] 0x%p\n", i, stack[i]);
         trace += buf;
     }
-    fluxLog(trace);
+
 
     paintDirty_.store(true);
     SetEvent(wakeEvent_);
@@ -82,7 +81,7 @@ void RenderLoop::markDirty()
 
 void RenderLoop::markLayoutDirty()
 {
-    fluxLog("[RenderLoop::markLayoutDirty] called");
+
     layoutDirty_.store(true);
     paintDirty_.store(true);
     SetEvent(wakeEvent_);
@@ -233,12 +232,7 @@ void RenderLoop::runLoop()
             waitMs = (timerMs == INT_MAX) ? INFINITE : (DWORD)timerMs;
         }
 
-        fluxLog("[runLoop] waiting waitMs=" +
-                (waitMs == INFINITE ? std::string("INFINITE")
-                                    : std::to_string(waitMs)) +
-                " continuous=" + std::to_string(continuous_.load()) +
-                " paintDirty=" + std::to_string(paintDirty_.load()) +
-                " layoutDirty=" + std::to_string(layoutDirty_.load()));
+
 
         if (waitMs > 0)
             WaitForSingleObject(wakeEvent_, waitMs);
@@ -249,8 +243,7 @@ void RenderLoop::runLoop()
         {
             int newW = pendingW_.load();
             int newH = pendingH_.load();
-            fluxLog("[runLoop] handling resize " +
-                    std::to_string(newW) + "x" + std::to_string(newH));
+
             if (onResize) onResize(newW, newH);
         }
 
@@ -258,12 +251,12 @@ void RenderLoop::runLoop()
 
         if (layoutDirty_.exchange(false))
         {
-            fluxLog("[runLoop] running layout");
+
             if (onLayout) onLayout();
         }
 
         bool shouldPaint = paintDirty_.exchange(false) || continuous_.load();
-        fluxLog("[runLoop] shouldPaint=" + std::to_string(shouldPaint));
+
 
         if (shouldPaint)
         {

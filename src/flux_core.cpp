@@ -1,6 +1,5 @@
 #include "flux/flux_core.hpp"
 #include "flux/flux_app.hpp"
-#include "flux/flux_debug_log.hpp"
 #include <algorithm>
 
 // Win32: we need RenderLoop to route timers through it.
@@ -76,24 +75,15 @@ WidgetPtr FluxUI::findByIdRecursive(WidgetPtr widget, const std::string &id)
 
 void FluxUI::wireCallbacks()
 {
-    fluxLog("[wireCallbacks] Step 1: entered");
 
     window.callbacks.onPaint = [this](GraphicsContext &ctx, int /*w*/, int /*h*/)
     {
         if (!root)
             return;
-        fluxLog("[onPaint] root: x=" + std::to_string(root->x) +
-                " y=" + std::to_string(root->y) +
-                " w=" + std::to_string(root->width) +
-                " h=" + std::to_string(root->height) +
-                " children=" + std::to_string(root->children.size()));
+
         if (!root->children.empty())
         {
             auto *page = root->children[0].get();
-            fluxLog("[onPaint] page child: x=" + std::to_string(page->x) +
-                    " y=" + std::to_string(page->y) +
-                    " w=" + std::to_string(page->width) +
-                    " h=" + std::to_string(page->height));
         }
         Renderer::renderWidget(ctx, root.get(), fontCache);
         // Paint floating overlay content last, in z order, so it sits on
@@ -104,7 +94,6 @@ void FluxUI::wireCallbacks()
             if (!e.pendingRemoval)
                 e.widget->render(ctx, fontCache);
     };
-    fluxLog("[wireCallbacks] Step 2: onPaint wired");
 
     window.callbacks.onResize = [this](GraphicsContext &ctx, int w, int h)
     {
@@ -113,7 +102,6 @@ void FluxUI::wireCallbacks()
         LayoutEngine::computeLayout(ctx, root.get(), w, h, fontCache);
         LayoutEngine::positionWidget(root.get(), 0, 0);
     };
-    fluxLog("[wireCallbacks] Step 3: onResize wired");
 
     window.callbacks.onMouseDown = [this](int x, int y) -> bool
     {
@@ -140,7 +128,6 @@ void FluxUI::wireCallbacks()
             setFocus(nullptr);
         return handled;
     };
-    fluxLog("[wireCallbacks] Step 4: onMouseDown wired");
 
     window.callbacks.onMouseUp = [this](int x, int y) -> bool
     {
@@ -157,7 +144,6 @@ void FluxUI::wireCallbacks()
                                        [x, y](Widget *w)
                                        { return w->handleMouseUp(x, y); });
     };
-    fluxLog("[wireCallbacks] Step 5: onMouseUp wired");
 
     window.callbacks.onMouseMove = [this](int x, int y) -> bool
     {
@@ -179,7 +165,6 @@ void FluxUI::wireCallbacks()
                                               { return w->handleMouseMove(x, y); });
         return overlay || hover || custom;
     };
-    fluxLog("[wireCallbacks] Step 6: onMouseMove wired");
 
     window.callbacks.onMouseWheel = [this](int delta) -> bool
     {
@@ -200,7 +185,6 @@ void FluxUI::wireCallbacks()
         }
         return focusedWidget && focusedWidget->handleMouseWheel(delta);
     };
-    fluxLog("[wireCallbacks] Step 7: onMouseWheel wired");
 
     window.callbacks.onRightClick = [this](int x, int y) -> bool
     {
@@ -212,7 +196,6 @@ void FluxUI::wireCallbacks()
                                        [x, y](Widget *w)
                                        { return w->handleRightClick(x, y); });
     };
-    fluxLog("[wireCallbacks] Step 8: onRightClick wired");
 
     window.callbacks.onKeyDown = [this](int keyCode) -> bool
     {
@@ -220,20 +203,17 @@ void FluxUI::wireCallbacks()
             return true;
         return focusedWidget && focusedWidget->handleKeyDown(keyCode);
     };
-    fluxLog("[wireCallbacks] Step 9: onKeyDown wired");
 
     window.callbacks.onMouseLeave = [this]()
     {
         if (root)
             root->clearHoverState();
     };
-    fluxLog("[wireCallbacks] Step 10: onMouseLeave wired");
 
     window.callbacks.onChar = [this](wchar_t ch) -> bool
     {
         return focusedWidget && focusedWidget->handleChar(ch);
     };
-    fluxLog("[wireCallbacks] Step 11: onChar wired");
 
     window.callbacks.onTimer = [this](TimerID id)
     {
@@ -242,25 +222,21 @@ void FluxUI::wireCallbacks()
             return;
         it->second();
     };
-    fluxLog("[wireCallbacks] Step 12: onTimer wired");
 
     window.callbacks.onDrainRebuilds = [this]()
     { drainPendingRebuilds(); };
 
     window.callbacks.onNonClientMouseDown = [this]()
     { setFocus(nullptr); };
-    fluxLog("[wireCallbacks] Step 13: onNonClientMouseDown wired");
 
     window.callbacks.onFocusLost = [this]()
     { setFocus(nullptr); };
-    fluxLog("[wireCallbacks] Step 14: done");
 
     window.callbacks.onGLContextLost = [this]()
     {
         if (root)
             root->onGLContextLost();
     };
-    fluxLog("[wireCallbacks] Step 15: onGLContextLost wired");
 }
 
 // ============================================================================
@@ -399,10 +375,7 @@ void FluxUI::invalidateWidget(Widget *widget)
 {
     if (!widget)
         return;
-    fluxLog("[invalidateWidget] x=" + std::to_string(widget->x) +
-            " y=" + std::to_string(widget->y) +
-            " w=" + std::to_string(widget->width) +
-            " h=" + std::to_string(widget->height));
+
     window.invalidateRect(widget->x, widget->y, widget->width, widget->height);
 }
 
@@ -445,60 +418,38 @@ void FluxUI::partialRebuild(Widget *widget)
 
 NativeWindow FluxUI::createWindow(const std::string &title, int w, int h)
 {
-    fluxLog("[createWindow] Step 1: entered title='" + title + "' " +
-            std::to_string(w) + "x" + std::to_string(h));
 
     wireCallbacks();
-    fluxLog("[createWindow] Step 2: wireCallbacks done");
 
     window.create(title, w, h, hInstance, &window);
-    fluxLog("[createWindow] Step 3: window.create done, valid=" +
-            std::to_string(window.valid()));
 
 #if defined(_WIN32) && !defined(FLUX_SSR)
     {
         auto ctx = window.getD2DContext();
-        fluxLog("[createWindow] Step 4: dc=" +
-                std::string(ctx.dc ? "valid" : "NULL") +
-                " dwrite=" + std::string(ctx.dwrite ? "valid" : "NULL"));
+
         if (ctx.dwrite)
         {
             fontCache.setDWriteFactory(ctx.dwrite);
-            fluxLog("[createWindow] Step 5: DWrite factory set");
         }
         else
         {
-            fluxLog("[createWindow] Step 5: WARNING dwrite is NULL");
         }
     }
 #endif
 
     if (root)
     {
-        fluxLog("[createWindow] Step 6: running initial layout " +
-                std::to_string(window.clientWidth()) + "x" +
-                std::to_string(window.clientHeight()));
 
         auto mc = getMeasureContext();
         LayoutEngine::computeLayout(mc.ctx, root.get(),
                                     window.clientWidth(), window.clientHeight(),
                                     fontCache);
         LayoutEngine::positionWidget(root.get(), 0, 0);
-
-        fluxLog("[createWindow] Step 7: layout done"
-                " root: x=" +
-                std::to_string(root->x) +
-                " y=" + std::to_string(root->y) +
-                " w=" + std::to_string(root->width) +
-                " h=" + std::to_string(root->height));
     }
     else
     {
-        fluxLog("[createWindow] Step 6: root is NULL, skipping layout");
     }
 
-    fluxLog("[createWindow] Step 8: processing pendingTimers count=" +
-            std::to_string(pendingTimers.size()));
     for (auto &[id, fn] : pendingTimers)
         fn();
     pendingTimers.clear();
@@ -506,9 +457,8 @@ NativeWindow FluxUI::createWindow(const std::string &title, int w, int h)
     // Start render loop NOW — after layout is complete.
     // This prevents onLayout from firing while computeLayout is running
     // on the main thread, which caused the 0xC0000005 crash.
-    fluxLog("[createWindow] Step 9: starting render loop");
+
     window.startRenderLoop();
-    fluxLog("[createWindow] Step 10: done");
 
     return window.handle();
 }
@@ -533,10 +483,7 @@ std::string FluxUI::getClipboardText() { return window.getClipboardText(); }
 
 void FluxUI::invalidateWidget(int x, int y, int w, int h)
 {
-    fluxLog("[invalidateWidget rect] x=" + std::to_string(x) +
-            " y=" + std::to_string(y) +
-            " w=" + std::to_string(w) +
-            " h=" + std::to_string(h));
+
     window.invalidateRect(x, y, w, h);
 }
 
