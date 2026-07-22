@@ -2048,6 +2048,16 @@ public:
     void setSelf(std::shared_ptr<BoxWidget> ptr) { self_ = ptr; }
     std::shared_ptr<BoxWidget> self() { return self_.lock(); }
 
+    // See Widget::isLayoutBoundary. BoxWidget never sets autoWidth/
+    // autoHeight (it has its own widthMode/heightMode), so the base
+    // default is always false here regardless of actual sizing — without
+    // this override, findLayoutBoundary() walks straight past every fixed
+    // -size Box (e.g. a 60x60 avatar container) all the way to the root.
+    bool isLayoutBoundary() const override
+    {
+        return widthMode == SizeMode::Fixed && heightMode == SizeMode::Fixed;
+    }
+
     // ── Item registration ────────────────────────────────────────────────
 
     // Plain widget — auto-placed in Grid mode, normal flow child otherwise.

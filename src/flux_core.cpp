@@ -47,7 +47,7 @@ Widget *FluxUI::findLayoutBoundary(Widget *widget)
     while (current)
     {
         boundary = current;
-        if (!current->autoWidth && !current->autoHeight)
+        if (current->isLayoutBoundary())
             break;
         current = current->parent;
     }
@@ -81,6 +81,7 @@ void FluxUI::wireCallbacks()
         if (!root)
             return;
 
+        std::lock_guard<std::mutex> lock(treeMutex_);
         if (!root->children.empty())
         {
             auto *page = root->children[0].get();
@@ -99,6 +100,7 @@ void FluxUI::wireCallbacks()
     {
         if (!root)
             return;
+        std::lock_guard<std::mutex> lock(treeMutex_);
         LayoutEngine::computeLayout(ctx, root.get(), w, h, fontCache);
         LayoutEngine::positionWidget(root.get(), 0, 0);
     };
@@ -107,6 +109,7 @@ void FluxUI::wireCallbacks()
     {
         if (!root)
             return false;
+        std::lock_guard<std::mutex> lock(treeMutex_);
         if (dispatchOverlayMouseDown(x, y))
             return true;
         bool focusableHit = false;
@@ -151,6 +154,7 @@ void FluxUI::wireCallbacks()
             return false;
         lastMouseX_ = x;
         lastMouseY_ = y;
+        std::lock_guard<std::mutex> lock(treeMutex_);
         if (window.isMouseCaptured() &&
             broadcastMouseEvent(root.get(), x, y,
                                 [](Widget *w, int mx, int my)
@@ -170,6 +174,7 @@ void FluxUI::wireCallbacks()
     {
         if (!root)
             return false;
+        std::lock_guard<std::mutex> lock(treeMutex_);
         if (dispatchOverlayMouseWheel(delta))
             return true;
         // Wheel goes to whatever's under the cursor first — a scrollable
@@ -325,6 +330,7 @@ void FluxUI::rebuild()
 {
     if (!builder)
         return;
+    std::lock_guard<std::mutex> lock(treeMutex_);
     focusedWidget = nullptr;
     if (root)
         root->onDetach();
@@ -383,6 +389,7 @@ void FluxUI::partialRebuild(Widget *widget)
 {
     if (!widget || !window.valid())
         return;
+    std::lock_guard<std::mutex> lock(treeMutex_);
     Widget *boundary = findLayoutBoundary(widget);
     Widget *current = widget;
     while (current && current != boundary)

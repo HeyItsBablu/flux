@@ -75,6 +75,20 @@ private:
   PlatformWindow window;
   Widget *focusedWidget = nullptr;
 
+  // Guards every read/write of the live widget tree (layout, position,
+  // paint, and event dispatch). On Win32, window-proc input callbacks
+  // (onMouseWheel/onMouseDown/onMouseMove/...) run on the thread pumping
+  // window messages, while RenderLoop-posted work (partialRebuild() from
+  // an async image/HTTP completion — see ImageWidget::_scheduleRebuild)
+  // runs on the render thread. Both touch the same non-atomic Widget
+  // member vectors (BoxWidget::flexLines_, gridPlaced_, sb_, etc.) with
+  // no prior synchronization, which is the root cause of the "vector
+  // subscript out of range" crash when scrolling coincides with an image
+  // finishing its async load. Every entry point below that walks or
+  // mutates the tree must hold this for its duration.
+  std::mutex treeMutex_;
+
+
 
   // Last known pointer position (client/logical px), updated on every
   // onMouseMove. Wheel events carry no position of their own on most

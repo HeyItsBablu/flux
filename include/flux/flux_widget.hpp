@@ -390,6 +390,21 @@ public:
 
   virtual bool isItemSource() const { return false; }
 
+  // Used by FluxUI::findLayoutBoundary to decide how far up the tree a
+  // partial rebuild needs to walk. A widget is a boundary when its own
+  // size no longer depends on its parent's constraints AND doesn't change
+  // based on its children — so relayouting inside it can never change its
+  // own width/height, and the walk can stop there instead of continuing
+  // to whatever ancestor actually determines this subtree's size.
+  //
+  // Default mirrors the base Widget's own sizing fields. BoxWidget
+  // overrides this — it never touches autoWidth/autoHeight itself, it has
+  // its own widthMode/heightMode, so the default here is always wrong for
+  // a BoxWidget and previously caused findLayoutBoundary to walk all the
+  // way to the root on every partial rebuild.
+  virtual bool isLayoutBoundary() const { return !autoWidth && !autoHeight; }
+
+
   // Breakpoint/props-aware visibility check, used by container layout code
   // (BoxWidget::collectFlowChildren, layoutAbsoluteChildren) INSTEAD OF the
   // plain `visible` field when deciding whether to include a child in this
