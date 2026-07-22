@@ -66,7 +66,6 @@ struct ScrollbarState
 {
     // ── Configuration (set once by the owner) ────────────────────────────
     int size = 6;       // idle thickness — thin, browser-style
-    int hoverSize = 10; // thickness while hovered/dragging
     int inset = 2;      // gap between the thumb and the container edge
     bool horizontal = false;
 
@@ -125,10 +124,9 @@ struct ScrollbarState
     // Should the bar actually be painted / hit-tested this frame?
     bool isVisible() const { return isScrollable && userVisible; }
 
-    // Thickness animates (instantly, no easing here) between idle and
-    // hover/drag sizes — same "thin until you touch it" behavior browsers
-    // use today.
-    int currentThickness() const { return (isHovering || isDragging) ? hoverSize : size; }
+    // Fixed thickness — only color changes on hover/drag (see thumbColor
+    // in render()); size no longer animates.
+    int currentThickness() const { return size; }
 
     // ── Clamp / update ────────────────────────────────────────────────────
 
@@ -686,7 +684,6 @@ struct BoxProps
     // ── Scrollbar appearance ────────────────────────────────────────────
     bool scrollbarVisible = true; // draw/hit-test the bar (scrolling still works if false)
     int scrollbarThickness = 6;   // idle thickness, px
-    int scrollbarHoverThickness = 10;
     bool scrollbarArrows = true; // classic arrow buttons at each end
 
     JustifyContent justify = JustifyContent::Start;  // Flex main axis / Grid justifyContent
@@ -821,10 +818,9 @@ private:
     //                          between the last bit of content and the
     //                          bar's own track, so they never look flush.
     //
-    // Sized against scrollbarHoverThickness (not the idle thickness) so the
-    // bar growing on hover/drag never has to eat into content — it just has
-    // a little unused space beside it while idle, and less (but still a
-    // few px) once grown.
+    // Sized against scrollbarThickness — the bar no longer grows on
+    // hover/drag, so the gutter only needs to fit its fixed idle size
+    // plus the usual inset/gap breathing room.
     static constexpr int kScrollbarTrackInset = 2;
     static constexpr int kScrollbarGutterGap = 4;
 
@@ -832,7 +828,7 @@ private:
     {
         if (!resolved_.scrollable || !resolved_.scrollbarVisible)
             return 0;
-        return resolved_.scrollbarHoverThickness + kScrollbarTrackInset + kScrollbarGutterGap;
+        return resolved_.scrollbarThickness + kScrollbarTrackInset + kScrollbarGutterGap;
     }
 
     void stopFling()
@@ -2239,10 +2235,9 @@ public:
         markNeedsPaint();
         return self();
     }
-    std::shared_ptr<BoxWidget> setScrollbarThickness(int idle, int hover = -1)
+    std::shared_ptr<BoxWidget> setScrollbarThickness(int idle)
     {
         baseProps_.scrollbarThickness = idle;
-        baseProps_.scrollbarHoverThickness = (hover >= 0) ? hover : idle + 4;
         markNeedsPaint();
         return self();
     }
@@ -2414,7 +2409,6 @@ public:
 
         sb_.userVisible = resolved_.scrollbarVisible;
         sb_.size = resolved_.scrollbarThickness;
-        sb_.hoverSize = resolved_.scrollbarHoverThickness;
         sb_.showArrows = resolved_.scrollbarArrows;
         paddingLeft = resolved_.paddingLeft;
         paddingRight = resolved_.paddingRight;
