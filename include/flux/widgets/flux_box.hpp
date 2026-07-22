@@ -255,7 +255,7 @@ struct ScrollbarState
     {
         float cx = boxX + boxW * 0.5f;
         float cy = boxY + boxH * 0.5f;
-        float s = std::min(boxW, boxH) * 0.28f;
+        float s = std::min(boxW, boxH) * 0.50f;
         std::vector<std::pair<int, int>> pts;
         if (horizontal)
         {
@@ -808,6 +808,33 @@ private:
     static int mainSize(const Widget *w, bool rowAxis) { return rowAxis ? w->width : w->height; }
     static int crossSize(const Widget *w, bool rowAxis) { return rowAxis ? w->height : w->width; }
 
+    // ── Scrollbar gutter reservation ─────────────────────────────────────
+    // One place for this so layout (which shrinks content), clipping, hit-
+    // testing, and drawing can never disagree about where the bar's own
+    // track lives. The track is carved out of the box's OWN bounds — NOT
+    // the padded content box — so it behaves like a real non-overlay
+    // scrollbar: padding never affects it, only content does.
+    //
+    //   kScrollbarTrackInset — mirrors ScrollbarState::inset's default (2px
+    //                          gap the thumb keeps from the container edge).
+    //   kScrollbarGutterGap  — a few extra px of deliberate breathing room
+    //                          between the last bit of content and the
+    //                          bar's own track, so they never look flush.
+    //
+    // Sized against scrollbarHoverThickness (not the idle thickness) so the
+    // bar growing on hover/drag never has to eat into content — it just has
+    // a little unused space beside it while idle, and less (but still a
+    // few px) once grown.
+    static constexpr int kScrollbarTrackInset = 2;
+    static constexpr int kScrollbarGutterGap = 4;
+
+    int scrollbarGutter() const
+    {
+        if (!resolved_.scrollable || !resolved_.scrollbarVisible)
+            return 0;
+        return resolved_.scrollbarHoverThickness + kScrollbarTrackInset + kScrollbarGutterGap;
+    }
+
     void stopFling()
     {
         if (flingTimer_)
@@ -892,8 +919,15 @@ private:
         bool scrollableMain = P.scrollable && (P.wrap == FlexWrap::NoWrap);
         bool scrollableCross = P.scrollable && (P.wrap != FlexWrap::NoWrap);
 
-        int contentMaxW = std::max(0, outerMaxW - padH);
-        int contentMaxH = std::max(0, outerMaxH - padV);
+        // Scrollbar sits on whichever screen axis is perpendicular to the
+        // scroll axis — same "horizontal bar reduces height, vertical bar
+        // reduces width" rule computed at the bottom of this function for
+        // sb_.horizontal, just done early enough here to affect measurement.
+        bool willBeHorizontalScrollbar = scrollAxisIsMain_ ? isRowAxis_ : !isRowAxis_;
+        int gutter = scrollbarGutter();
+
+        int contentMaxW = std::max(0, outerMaxW - padH - (willBeHorizontalScrollbar ? 0 : gutter));
+        int contentMaxH = std::max(0, outerMaxH - padV - (willBeHorizontalScrollbar ? gutter : 0));
 
         containerMainSize_ = isRowAxis_ ? contentMaxW : contentMaxH;
         containerCrossSize_ = isRowAxis_ ? contentMaxH : contentMaxW;
@@ -1364,6 +1398,11 @@ private:
 
         int padH = P.paddingLeft + P.paddingRight;
         int padV = P.paddingTop + P.paddingBottom;
+
+        // Block always scrolls vertically, so the bar is always on the
+        // right, always reducing available width.
+        int gutter = scrollbarGutter();
+
         // Two cases for an unbounded outerMaxW:
         //  - widthMode == Full: we're SUPPOSED to fill whatever's
         //    available, and "available" is genuinely unbounded (rare, but
@@ -1397,11 +1436,16 @@ private:
                 c->computeLayout(ctx, naturalC, fontCache);
                 maxNatural = std::max(maxNatural, c->width + marginH);
             }
-            contentMaxW = maxNatural;
+            // Fit-sizing content width doesn't need the gutter subtracted —
+            // it's shrink-to-fit against the children's own natural widths,
+            // which don't know about the scrollbar at all. (Fit + scrollable
+            // is an unusual combination in practice; Fixed/Full is the
+            // common scrollable-list case handled in the `else` branch.)
+            contentMaxW = maxNatural; // Fit-sizing: no gutter subtraction, see comment above
         }
         else
         {
-            contentMaxW = std::max(0, outerMaxW - padH);
+            contentMaxW = std::max(0, outerMaxW - padH - gutter);
         }
         containerMainSize_ = kUnbounded; // block content is unbounded vertically
         containerCrossSize_ = contentMaxW;
@@ -1671,7 +1715,11 @@ private:
         int padH = P.paddingLeft + P.paddingRight;
         int padV = P.paddingTop + P.paddingBottom;
 
-        gridContainerW_ = std::max(0, outerMaxW - padH);
+        // Grid always scrolls vertically only (see class doc comment
+        // above), so the bar always sits on the right and always reduces
+        // available column width — reserve it so Fr/Fill columns size
+        // against the true usable width instead of running under the bar.
+        gridContainerW_ = std::max(0, outerMaxW - padH - scrollbarGutter());
         gridContainerH_ = std::max(0, outerMaxH - padV);
 
         // Drop specs whose widget is gone or no longer actually parented
@@ -2029,7 +2077,6 @@ public:
         markNeedsLayout();
         return self();
     }
-
 
     // Covariant override of Widget::setId — the base version returns
     // WidgetPtr, which would silently downcast the chain and hide every
@@ -2428,9 +2475,10 @@ public:
     }
     bool handleMouseMove(int mx, int my) override
     {
-        int cbx = x + resolved_.paddingLeft, cby = y + resolved_.paddingTop;
-        int cbw = width - resolved_.paddingLeft - resolved_.paddingRight;
-        int cbh = height - resolved_.paddingTop - resolved_.paddingBottom;
+        // The bar's own track lives in the box's raw bounds, not the
+        // padded content box — see scrollbarGutter()/render() below. Hit-
+        // testing has to agree with wherever it's actually drawn.
+        int cbx = x, cby = y, cbw = width, cbh = height;
 
         if (sb_.isDragging)
         {
@@ -2463,9 +2511,7 @@ public:
     bool handleMouseDown(int mx, int my) override
     {
         stopFling();
-        int cbx = x + resolved_.paddingLeft, cby = y + resolved_.paddingTop;
-        int cbw = width - resolved_.paddingLeft - resolved_.paddingRight;
-        int cbh = height - resolved_.paddingTop - resolved_.paddingBottom;
+        int cbx = x, cby = y, cbw = width, cbh = height;
 
         if (sb_.onMouseDown(mx, my, cbx, cby, cbw, cbh))
         {
@@ -2555,16 +2601,18 @@ public:
 
         if (P.hasBackground)
             painter.fillRoundedRect(x, y, width, height, P.borderRadius, P.backgroundColor);
-
-
-        int sbSz = sb_.isScrollable ? sb_.size : 0;
+        // Same gutter the compute-layout pass already reserved (see
+        // scrollbarGutter()) — keying off resolved_ rather than
+        // sb_.isScrollable avoids the reserved space jumping right at the
+        // moment content starts/stops overflowing.
+        int gutter = scrollbarGutter();
         int clipX1 = x, clipY1 = y, clipX2 = x + width, clipY2 = y + height;
-        if (sb_.isScrollable)
+        if (gutter > 0)
         {
             if (sb_.horizontal)
-                clipY2 -= sbSz;
+                clipY2 -= gutter;
             else
-                clipX2 -= sbSz;
+                clipX2 -= gutter;
         }
         painter.pushClipRect(clipX1, clipY1, clipX2 - clipX1, clipY2 - clipY1);
 
@@ -2601,10 +2649,12 @@ public:
         if (P.hasBorder)
             painter.drawBorder(x, y, width, height, P.borderRadius, P.borderColor, P.borderWidth);
 
-        int cbx = x + P.paddingLeft, cby = y + P.paddingTop;
-        int cbw = width - P.paddingLeft - P.paddingRight;
-        int cbh = height - P.paddingTop - P.paddingBottom;
-        sb_.render(ctx, cbx, cby, cbw, cbh, this);
+        // Full box bounds, not the padded content box — the bar's own
+        // track sits in the reserved gutter outside the padding, same as
+        // a real non-overlay scrollbar. sb_'s own thick/inset math then
+        // draws the actual thumb a couple px in from that true edge.
+        sb_.render(ctx, x, y, width, height, this);
+
         needsPaint = false;
     }
 };
