@@ -129,6 +129,13 @@ public:
         void operator()(Win32State *) const;
     };
     std::unique_ptr<Win32State, Win32StateDeleter> _win32;
+    // Guards first-time construction of _win32 itself (not its contents —
+    // Win32State::decodeMutex already covers those). Without this, the
+    // decode thread's _win32.reset(new Win32State()) and the render
+    // thread's `if (!_win32)` / `_win32->decodeMutex` race on the raw
+    // pointer with no synchronization at all — a torn/reordered read on
+    // the render thread is a plausible crash, not just a stall.
+    std::once_flag _win32InitFlag;
 #endif
 
 #if defined(__APPLE__) && !defined(__ANDROID__)
@@ -524,13 +531,15 @@ private:
         std::weak_ptr<ImageWidget> weak =
             std::static_pointer_cast<ImageWidget>(shared_from_this());
 
-        ui->postToRenderThread([weak]()
+        ui->postToRenderThread([weak, ui]()
                                {
         auto self = weak.lock();
         if (!self) return;
-        auto* ui2 = FluxUI::getCurrentInstance();
-        if (ui2) ui2->partialRebuild(self.get());
-        else     self->markNeedsLayout(); });
+        // `ui` is captured directly from the thread that scheduled this,
+        // not re-looked-up via the thread_local FluxUI::getCurrentInstance()
+        // — that call runs on the render thread inside
+        // RenderLoop::drainPending(), where the thread_local was never set.
+        ui->partialRebuild(self.get()); });
 #endif
     }
 

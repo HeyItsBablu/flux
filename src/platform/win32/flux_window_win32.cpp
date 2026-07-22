@@ -160,8 +160,8 @@ bool PlatformWindow::create(const std::string &title, int width, int height,
     renderLoop_->onFrame = [this](float dt)
     {
         renderLoop_->drainPending();
-        if (auto *ui = FluxUI::getCurrentInstance())
-            ui->drainPendingRebuilds();
+        if (callbacks.onDrainRebuilds)
+            callbacks.onDrainRebuilds();
         fluxLog("[onFrame] START");
         if (!d3dDevice_ || !d3dDevice_->valid)
             return;

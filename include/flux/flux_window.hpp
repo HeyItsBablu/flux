@@ -56,6 +56,16 @@ struct WindowCallbacks
     // On other platforms they still use the platform timer mechanism.
     std::function<void(TimerID id)> onTimer;
 
+
+    // Drain any FutureBuilderWidget (etc.) rebuilds scheduled via
+    // FluxUI::scheduleRebuild(), called once per frame before onFrame's
+    // paint. Bound directly to the owning FluxUI at wiring time
+    // (FluxUI::wireCallbacks(), on the thread that constructed FluxUI) —
+    // deliberately NOT looked up via FluxUI::getCurrentInstance() inside
+    // the frame callback, since on Win32 that callback runs on
+    // RenderLoop's own dedicated thread, where the thread_local
+    // "currently active FluxUI" was never set.
+    std::function<void()> onDrainRebuilds;
     std::function<void()> onNonClientMouseDown;
     std::function<void()> onFocusLost;
 

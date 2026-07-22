@@ -3,10 +3,11 @@
 
 #include "flux/widgets/flux_image.hpp"
 
-#include <wincodec.h>   // WIC — replaces GDI+ for image decoding
+#include <wincodec.h> // WIC — replaces GDI+ for image decoding
 #include <mutex>
 #include <d2d1_1.h>
 #include <wrl/client.h>
+#include "flux/flux_debug_log.hpp"
 
 using Microsoft::WRL::ComPtr;
 
@@ -44,6 +45,29 @@ void ImageWidget::Win32StateDeleter::operator()(Win32State *p) const { delete p;
 ImageWidget::~ImageWidget() { _platformDestroy(); }
 
 // ============================================================================
+// ComInitGuard — RAII CoInitializeEx/CoUninitialize.
+//
+// Must be declared BEFORE any ComPtr<...> locals in a function so that,
+// per normal C++ stack-unwind order (reverse of declaration), it is
+// destroyed LAST — after every ComPtr has already released its
+// interface. Calling Release() on a COM interface after CoUninitialize()
+// has already torn down the apartment for this thread is undefined
+// behavior; explicit `CoUninitialize(); return ...;` calls placed above
+// still-in-scope ComPtr locals (the previous version of this file) hit
+// exactly that — Release() firing after the apartment was gone,
+// producing the 0xC0000005 crash inside ComPtr::~ComPtr.
+// ============================================================================
+struct ComInitGuard
+{
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    ~ComInitGuard()
+    {
+        if (SUCCEEDED(hr))
+            CoUninitialize();
+    }
+};
+
+// ============================================================================
 // _platformDecode  (background thread)
 //
 // WIC pipeline:
@@ -60,92 +84,99 @@ ImageWidget::~ImageWidget() { _platformDestroy(); }
 
 bool ImageWidget::_platformDecode(const uint8_t *data, int len)
 {
-    if (!_win32)
-        _win32.reset(new Win32State());
+    std::call_once(_win32InitFlag, [this]()
+                   { _win32.reset(new Win32State()); });
 
-    fluxLog("[_platformDecode] len=" + std::to_string(len));
-
-    // CoInitialize for this background thread
-    HRESULT hrCo = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    fluxLog("[_platformDecode] CoInitializeEx hr=0x" + [hrCo](){
-        char b[16]; sprintf_s(b, "%08X", (unsigned)hrCo); return std::string(b); }());
+    // Declared first → destroyed last → outlives every ComPtr below.
+    ComInitGuard com;
 
     // 1. Wrap bytes in IStream
     HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, (SIZE_T)len);
-    if (!hMem) { fluxLog("[_platformDecode] GlobalAlloc failed"); CoUninitialize(); return false; }
+    if (!hMem)
+    {
+
+        return false;
+    }
 
     void *ptr = GlobalLock(hMem);
-    if (!ptr) { GlobalFree(hMem); fluxLog("[_platformDecode] GlobalLock failed"); CoUninitialize(); return false; }
+    if (!ptr)
+    {
+        GlobalFree(hMem);
+
+        return false;
+    }
     memcpy(ptr, data, len);
     GlobalUnlock(hMem);
 
     ComPtr<IStream> stream;
     HRESULT hr = CreateStreamOnHGlobal(hMem, TRUE, stream.GetAddressOf());
-    fluxLog("[_platformDecode] CreateStreamOnHGlobal hr=0x" + [hr](){
-        char b[16]; sprintf_s(b, "%08X", (unsigned)hr); return std::string(b); }());
-    if (FAILED(hr)) { GlobalFree(hMem); CoUninitialize(); return false; }
+
+    if (FAILED(hr))
+    {
+        GlobalFree(hMem);
+        return false;
+    }
 
     // 2. WIC factory
     ComPtr<IWICImagingFactory> wicFactory;
     hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr,
                           CLSCTX_INPROC_SERVER, IID_PPV_ARGS(wicFactory.GetAddressOf()));
-    fluxLog("[_platformDecode] CoCreateInstance WICFactory hr=0x" + [hr](){
-        char b[16]; sprintf_s(b, "%08X", (unsigned)hr); return std::string(b); }());
-    if (FAILED(hr) || !wicFactory) { CoUninitialize(); return false; }
+
+    if (FAILED(hr) || !wicFactory)
+        return false;
 
     // 3. Decoder
     ComPtr<IWICBitmapDecoder> decoder;
     hr = wicFactory->CreateDecoderFromStream(stream.Get(), nullptr,
                                              WICDecodeMetadataCacheOnLoad,
                                              decoder.GetAddressOf());
-    fluxLog("[_platformDecode] CreateDecoderFromStream hr=0x" + [hr](){
-        char b[16]; sprintf_s(b, "%08X", (unsigned)hr); return std::string(b); }());
-    if (FAILED(hr) || !decoder) { CoUninitialize(); return false; }
+
+    if (FAILED(hr) || !decoder)
+        return false;
 
     // 4. Frame
     ComPtr<IWICBitmapFrameDecode> frame;
     hr = decoder->GetFrame(0, frame.GetAddressOf());
-    fluxLog("[_platformDecode] GetFrame hr=0x" + [hr](){
-        char b[16]; sprintf_s(b, "%08X", (unsigned)hr); return std::string(b); }());
-    if (FAILED(hr) || !frame) { CoUninitialize(); return false; }
+
+    if (FAILED(hr) || !frame)
+        return false;
 
     // 5. Format converter
     ComPtr<IWICFormatConverter> converter;
     hr = wicFactory->CreateFormatConverter(converter.GetAddressOf());
-    if (FAILED(hr)) { CoUninitialize(); return false; }
+    if (FAILED(hr))
+        return false;
 
     hr = converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppPBGRA,
                                WICBitmapDitherTypeNone, nullptr, 0.0,
                                WICBitmapPaletteTypeCustom);
-    fluxLog("[_platformDecode] converter->Initialize hr=0x" + [hr](){
-        char b[16]; sprintf_s(b, "%08X", (unsigned)hr); return std::string(b); }());
-    if (FAILED(hr)) { CoUninitialize(); return false; }
+
+    if (FAILED(hr))
+        return false;
 
     // 6. Copy pixels
     UINT w = 0, h = 0;
     converter->GetSize(&w, &h);
-    fluxLog("[_platformDecode] size=" + std::to_string(w) + "x" + std::to_string(h));
 
     const UINT stride = w * 4;
     const UINT bufSize = stride * h;
     std::vector<uint8_t> pixels(bufSize);
     hr = converter->CopyPixels(nullptr, stride, bufSize, pixels.data());
-    fluxLog("[_platformDecode] CopyPixels hr=0x" + [hr](){
-        char b[16]; sprintf_s(b, "%08X", (unsigned)hr); return std::string(b); }());
-    if (FAILED(hr)) { CoUninitialize(); return false; }
+
+    if (FAILED(hr))
+        return false;
 
     {
         std::lock_guard<std::mutex> lock(_win32->decodeMutex);
         _win32->pendingPixels = std::move(pixels);
-        _win32->pendingW      = (int)w;
-        _win32->pendingH      = (int)h;
-        imageWidth            = (int)w;
-        imageHeight           = (int)h;
+        _win32->pendingW = (int)w;
+        _win32->pendingH = (int)h;
+        imageWidth = (int)w;
+        imageHeight = (int)h;
     }
 
     _setLoadState(ImageLoadState::Loaded);
-    fluxLog("[_platformDecode] SUCCESS w=" + std::to_string(w) + " h=" + std::to_string(h));
-    CoUninitialize();
+
     return true;
 }
 
@@ -180,7 +211,10 @@ void ImageWidget::_platformPromote()
 void ImageWidget::_platformRender(GraphicsContext &ctx, int cx, int cy,
                                   int cw, int ch)
 {
-    if (!_win32 || !ctx.dc)
+
+    std::call_once(_win32InitFlag, [this]()
+                   { _win32.reset(new Win32State()); });
+    if (!ctx.dc)
         return;
 
     // ── Upload pending pixels if the decode thread produced new ones ──────────
@@ -241,19 +275,19 @@ void ImageWidget::_platformRender(GraphicsContext &ctx, int cx, int cy,
 
     Painter painter(ctx, this);
     Painter::ImageDrawParams params;
-    params.image         = static_cast<NativeImage>(_win32->d2dBitmap.Get());
-    params.srcWidth      = _win32->bitmapW;
-    params.srcHeight     = _win32->bitmapH;
-    params.clipX         = cx;
-    params.clipY         = cy;
-    params.clipW         = cw;
-    params.clipH         = ch;
-    params.destX         = d.x;
-    params.destY         = d.y;
-    params.destW         = d.w;
-    params.destH         = d.h;
-    params.borderRadius  = borderRadius;
-    params.repeat        = repeat;
+    params.image = static_cast<NativeImage>(_win32->d2dBitmap.Get());
+    params.srcWidth = _win32->bitmapW;
+    params.srcHeight = _win32->bitmapH;
+    params.clipX = cx;
+    params.clipY = cy;
+    params.clipW = cw;
+    params.clipH = ch;
+    params.destX = d.x;
+    params.destY = d.y;
+    params.destW = d.w;
+    params.destH = d.h;
+    params.borderRadius = borderRadius;
+    params.repeat = repeat;
     params.filterQuality = filterQuality;
 
     painter.drawImage(params);

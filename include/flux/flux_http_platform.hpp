@@ -45,7 +45,17 @@ inline void FluxHttp_Win32_HandleMessage(LPARAM lParam) {
     if (p) { if (p->callback) p->callback(std::move(p->result)); delete p; }
 }
 
-static HWND gFluxUIWindow = nullptr;
+// inline variable (C++17), not `static` — `static` here gave every TU
+// that includes this header its own private copy, so fluxSetUIWindow()
+// (called from flux_window_win32.cpp) and fluxPostToUIThread() (invoked
+// from whichever TU the linker folded the inline function into) could
+// end up reading/writing DIFFERENT storage. fluxPostToUIThread would
+// then see gFluxUIWindow == nullptr forever and fall into its "no UI
+// window yet" branch, invoking the HTTP callback directly on the
+// background worker thread instead of marshaling it via PostMessage —
+// which is exactly why FluxUI::getCurrentInstance() (thread_local) came
+// back NULL inside FutureBuilderWidget::triggerRebuild().
+inline HWND gFluxUIWindow = nullptr;
 inline void fluxSetUIWindow(HWND hwnd) { gFluxUIWindow = hwnd; }
 inline HWND fluxGetUIWindow()          { return gFluxUIWindow; }
 

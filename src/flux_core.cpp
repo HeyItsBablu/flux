@@ -244,6 +244,9 @@ void FluxUI::wireCallbacks()
     };
     fluxLog("[wireCallbacks] Step 12: onTimer wired");
 
+    window.callbacks.onDrainRebuilds = [this]()
+    { drainPendingRebuilds(); };
+
     window.callbacks.onNonClientMouseDown = [this]()
     { setFocus(nullptr); };
     fluxLog("[wireCallbacks] Step 13: onNonClientMouseDown wired");
