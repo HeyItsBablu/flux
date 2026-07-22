@@ -81,7 +81,7 @@ void FluxUI::wireCallbacks()
         if (!root)
             return;
 
-        std::lock_guard<std::mutex> lock(treeMutex_);
+        std::lock_guard<std::recursive_mutex> lock(treeMutex_);
         if (!root->children.empty())
         {
             auto *page = root->children[0].get();
@@ -100,7 +100,7 @@ void FluxUI::wireCallbacks()
     {
         if (!root)
             return;
-        std::lock_guard<std::mutex> lock(treeMutex_);
+        std::lock_guard<std::recursive_mutex> lock(treeMutex_);
         LayoutEngine::computeLayout(ctx, root.get(), w, h, fontCache);
         LayoutEngine::positionWidget(root.get(), 0, 0);
     };
@@ -109,7 +109,7 @@ void FluxUI::wireCallbacks()
     {
         if (!root)
             return false;
-        std::lock_guard<std::mutex> lock(treeMutex_);
+        std::lock_guard<std::recursive_mutex> lock(treeMutex_);
         if (dispatchOverlayMouseDown(x, y))
             return true;
         bool focusableHit = false;
@@ -154,7 +154,7 @@ void FluxUI::wireCallbacks()
             return false;
         lastMouseX_ = x;
         lastMouseY_ = y;
-        std::lock_guard<std::mutex> lock(treeMutex_);
+        std::lock_guard<std::recursive_mutex> lock(treeMutex_);
         if (window.isMouseCaptured() &&
             broadcastMouseEvent(root.get(), x, y,
                                 [](Widget *w, int mx, int my)
@@ -174,7 +174,7 @@ void FluxUI::wireCallbacks()
     {
         if (!root)
             return false;
-        std::lock_guard<std::mutex> lock(treeMutex_);
+        std::lock_guard<std::recursive_mutex> lock(treeMutex_);
         if (dispatchOverlayMouseWheel(delta))
             return true;
         // Wheel goes to whatever's under the cursor first — a scrollable
@@ -330,31 +330,37 @@ void FluxUI::rebuild()
 {
     if (!builder)
         return;
-    std::lock_guard<std::mutex> lock(treeMutex_);
-    focusedWidget = nullptr;
-    if (root)
-        root->onDetach();
+    {
+        std::lock_guard<std::recursive_mutex> lock(treeMutex_);
+        focusedWidget = nullptr;
+        if (root)
+            root->onDetach();
 
-    closeAllOverlays();
-    root = builder();
+        closeAllOverlays();
+        root = builder();
+
+        if (window.valid())
+        {
+#if defined(_WIN32) && !defined(FLUX_SSR)
+            // Re-confirm factory in case FontCache was cleared after device loss.
+            {
+                auto ctx = window.getD2DContext();
+                if (ctx.dwrite)
+                    fontCache.setDWriteFactory(ctx.dwrite);
+            }
+#endif
+            auto mc = getMeasureContext();
+            LayoutEngine::computeLayout(mc.ctx, root.get(),
+                                        window.clientWidth(), window.clientHeight(),
+                                        fontCache);
+            LayoutEngine::positionWidget(root.get(), 0, 0);
+        }
+    } // treeMutex_ released before invalidate() — SSR's invalidate() paints
+      // synchronously and re-enters treeMutex_ via onPaint on this same
+      // thread; holding the lock across it self-deadlocks (EDEADLK).
 
     if (window.valid())
-    {
-#if defined(_WIN32) && !defined(FLUX_SSR)
-        // Re-confirm factory in case FontCache was cleared after device loss.
-        {
-            auto ctx = window.getD2DContext();
-            if (ctx.dwrite)
-                fontCache.setDWriteFactory(ctx.dwrite);
-        }
-#endif
-        auto mc = getMeasureContext();
-        LayoutEngine::computeLayout(mc.ctx, root.get(),
-                                    window.clientWidth(), window.clientHeight(),
-                                    fontCache);
-        LayoutEngine::positionWidget(root.get(), 0, 0);
         window.invalidate();
-    }
 }
 
 // ============================================================================
@@ -389,31 +395,35 @@ void FluxUI::partialRebuild(Widget *widget)
 {
     if (!widget || !window.valid())
         return;
-    std::lock_guard<std::mutex> lock(treeMutex_);
-    Widget *boundary = findLayoutBoundary(widget);
-    Widget *current = widget;
-    while (current && current != boundary)
+    Widget *boundary;
     {
-        current->markNeedsLayout();
-        current = current->parent;
-    }
-    boundary->markNeedsLayout();
+        std::lock_guard<std::recursive_mutex> lock(treeMutex_);
+        boundary = findLayoutBoundary(widget);
+        Widget *current = widget;
+        while (current && current != boundary)
+        {
+            current->markNeedsLayout();
+            current = current->parent;
+        }
+        boundary->markNeedsLayout();
 
-    auto mc = getMeasureContext();
-    if (boundary == root.get())
-    {
-        LayoutEngine::computeLayout(mc.ctx, root.get(),
-                                    window.clientWidth(), window.clientHeight(),
-                                    fontCache);
-        LayoutEngine::positionWidget(root.get(), 0, 0);
-    }
-    else
-    {
-        LayoutEngine::computeLayout(mc.ctx, boundary,
-                                    boundary->width, boundary->height,
-                                    fontCache);
-        LayoutEngine::positionWidget(boundary, boundary->x, boundary->y);
-    }
+        auto mc = getMeasureContext();
+        if (boundary == root.get())
+        {
+            LayoutEngine::computeLayout(mc.ctx, root.get(),
+                                        window.clientWidth(), window.clientHeight(),
+                                        fontCache);
+            LayoutEngine::positionWidget(root.get(), 0, 0);
+        }
+        else
+        {
+            LayoutEngine::computeLayout(mc.ctx, boundary,
+                                        boundary->width, boundary->height,
+                                        fontCache);
+            LayoutEngine::positionWidget(boundary, boundary->x, boundary->y);
+        }
+    } // treeMutex_ released before invalidateRect() — same self-deadlock
+      // risk as rebuild() above under SSR's synchronous invalidate path.
 
     window.invalidateRect(boundary->x, boundary->y,
                           boundary->width, boundary->height);

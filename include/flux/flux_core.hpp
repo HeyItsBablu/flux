@@ -86,7 +86,17 @@ private:
   // subscript out of range" crash when scrolling coincides with an image
   // finishing its async load. Every entry point below that walks or
   // mutates the tree must hold this for its duration.
-  std::mutex treeMutex_;
+  //
+  // Recursive, not plain — SSR's synchronous fetch mode (fluxSetSSRSyncMode)
+  // resolves image/HTTP completions INLINE during build()/computeLayout(),
+  // which means a completion callback can call partialRebuild()/
+  // scheduleRebuild() on the SAME thread that's still inside rebuild()'s
+  // locked section. A plain std::mutex throws EDEADLK ("resource deadlock
+  // would occur") on that self-relock; recursive_mutex allows the same
+  // thread back in while still fully blocking the cross-thread races
+  // described above (a different thread still can't acquire while this
+  // thread holds it, recursively or not).
+  std::recursive_mutex treeMutex_;
 
 
 
