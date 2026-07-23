@@ -9,7 +9,6 @@
 #include "flux/flux_dom_adapter.hpp"
 #endif
 
-
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -1271,7 +1270,6 @@ public:
         }
 #endif
 
-
         if (doc_.valid && cw > 0 && ch > 0)
             _renderShapes(painter, cx, cy, cw, ch);
 
@@ -1381,8 +1379,6 @@ private:
         adapter->setStyle(node, "background-size", sizeMode);
     }
 #endif
-
-
 
     void _renderShapes(Painter &painter, int cx, int cy, int cw, int ch)
     {
