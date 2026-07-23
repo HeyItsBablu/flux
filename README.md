@@ -607,6 +607,70 @@ Image("avatar.png")->setWidth(64)->setHeight(64)->setBorderRadius(32);
 
 ---
 
+### Svg
+
+Renders inline SVG markup or an `.svg` asset file. Parses a practical subset
+of SVG 1.1 (`path`, `rect`, `circle`/`ellipse`, `line`, `polyline`/`polygon`,
+`g` groups, `transform`, `style=` attributes, gradients are ignored) and
+paints it with the same cross-platform primitives every other widget uses.
+A single overloaded `Svg(...)` factory covers both sources — markup vs.
+asset path is auto-detected by whether the string starts with `<`.
+
+```cpp
+// Inline markup — auto-detected (starts with '<')
+Svg("<svg viewBox='0 0 24 24'><path d='M12 2L2 22h20z' fill='#333'/></svg>")
+    ->setWidth(48)
+    ->setHeight(48);
+
+// Asset file — auto-detected (no leading '<')
+Svg("icons/settings.svg")
+    ->setFit(SvgFit::Contain)
+    ->setWidth(32)
+    ->setHeight(32);
+
+// Recolor every fill/stroke to a single flat tint (icon tinting)
+Svg("icons/heart.svg")
+    ->setTintColor(RGB(233, 30, 99))
+    ->setWidth(24)
+    ->setHeight(24);
+```
+
+**Factory**
+
+| Signature | Description |
+|---|---|
+| `Svg(svgTextOrPath)` | Inline markup or local asset path, auto-detected by leading `<` |
+| `SvgWidget::fromString(svgText)` | Static named constructor — inline markup only, no auto-detection |
+| `SvgWidget::asset(path)` | Static named constructor — local asset file only, no auto-detection |
+
+**SvgFit modes**
+
+| Value | Description |
+|---|---|
+| `SvgFit::Fill` | Stretch to fill — may distort |
+| `SvgFit::Contain` | Fit inside bounds, letterbox (default) |
+| `SvgFit::Cover` | Fill bounds, crop edges |
+| `SvgFit::None` | Original size, positioned by alignment |
+| `SvgFit::ScaleDown` | Like `None` but scales down if larger than container |
+
+**Methods**
+
+| Method | Type | Description |
+|---|---|---|
+| `setSource(svgText)` | `string` | Load or swap inline markup at runtime |
+| `loadAsset(path)` | `string` | Load or swap a local `.svg` file at runtime |
+| `setFit(mode)` | `SvgFit` | Sizing/cropping mode |
+| `setAlignment(a)` | `Alignment` | Positioning within the box (used by `None`/`ScaleDown`) |
+| `setTintColor(color)` | `Color` | Flat color override for every fill/stroke in the document; leave unset (alpha 0) to keep each shape's own colors |
+| `setWidth(w)` | `int` | Fixed width |
+| `setHeight(h)` | `int` | Fixed height |
+
+> Auto-sizes to the SVG's `viewBox` (or `width`/`height` attributes) when no
+> fixed size is set, same as `Image`'s default `Contain` behavior.
+
+---
+
+
 
 ## Box
 
