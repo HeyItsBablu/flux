@@ -52,11 +52,19 @@ public:
 
     auto body =
         Box({
-             Svg(R"(<svg viewBox="0 0 24 24"><path d="M12 2 L2 22 L22 22 Z" fill="#ff6600"/></svg>)")
-                 ->setWidth(32)
-                 ->setHeight(32),
-             Svg("alien-svgrepo-com.svg")->setFit(SvgFit::Contain)->setHeight(200)->setWidth(200),
-             Svg("genetics-svgrepo-com.svg")->setFit(SvgFit::Contain)->setHeight(200)->setWidth(200)})
+                Text("You have pushed the button this many times:")
+                    ->setFontSize(14)
+                    ->setTextColor(Color::fromRGB(90, 90, 90)),
+                Text(counter)
+                    ->setFontSize(40)
+                    ->setFontWeight(FontWeight::Bold),
+                Svg(R"(<svg viewBox="0 0 24 24"><path d="M12 2 L2 22 L22 22 Z" fill="#ff6600"/></svg>)")
+                    ->setWidth(32)
+                    ->setHeight(32),
+                Svg("alien-svgrepo-com.svg")->setFit(SvgFit::Contain)->setHeight(200)->setWidth(200),
+                Svg("genetics-svgrepo-com.svg")->setFit(SvgFit::Contain)->setHeight(200)->setWidth(200),
+                Image("pexels-eva-lin-2162680647-38453702.jpg")->setFit(ImageFit::Contain)->setHeight(200)->setWidth(200),
+            })
             ->setDisplay(Display::Flex)
             ->setDirection(FlexDirection::Column)
             ->setAlignItems(AlignItems::Center)

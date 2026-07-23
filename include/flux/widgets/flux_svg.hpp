@@ -5,6 +5,11 @@
 #include "flux/flux_widget.hpp"
 #include "flux/flux_painter.hpp"
 
+#if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
+#include "flux/flux_dom_adapter.hpp"
+#endif
+
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -1144,6 +1149,10 @@ public:
     std::shared_ptr<SvgWidget> setSource(const std::string &svgText)
     {
         doc_ = parseSvgDocument(svgText);
+        // Kept verbatim (not reconstructed from doc_) so the DOM/SSR
+        // backend can embed the browser's own SVG renderer instead of
+        // re-deriving markup from our parsed shape list — see _renderDom().
+        rawSvgText_ = svgText;
         markNeedsLayout();
         return self();
     }
@@ -1244,6 +1253,25 @@ public:
         int cw = width - paddingLeft - paddingRight;
         int ch = height - paddingTop - paddingBottom;
 
+#if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
+        // DOM backend: Painter::fillRect etc. each map to ONE persistent,
+        // reused DOM node per (owner, slot) — see flux_painter_dom.cpp's
+        // ensureNode(). _renderShapes() below calls fillRect/drawPolyline
+        // many times per shape (once per AA scanline row, once per stroke
+        // segment) with no slot, so on this backend every call would
+        // silently overwrite the SAME node instead of painting distinct
+        // rects — the browser only ever shows whatever the LAST call drew.
+        // Skip the shape-by-shape path entirely here and let the browser's
+        // own SVG renderer do the work via a background-image data URI.
+        if (getActiveDomAdapter() && cw > 0 && ch > 0)
+        {
+            _renderDom(cx, cy, cw, ch);
+            needsPaint = false;
+            return;
+        }
+#endif
+
+
         if (doc_.valid && cw > 0 && ch > 0)
             _renderShapes(painter, cx, cy, cw, ch);
 
@@ -1252,6 +1280,7 @@ public:
 
 private:
     SvgDocument doc_;
+    std::string rawSvgText_;
 
     std::shared_ptr<SvgWidget> self() { return std::static_pointer_cast<SvgWidget>(shared_from_this()); }
 
@@ -1271,6 +1300,89 @@ private:
             return doc_.viewBoxH;
         return 24.f;
     }
+
+#if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
+    // Percent-encodes the subset of characters that are unsafe (or that
+    // would prematurely terminate the surrounding CSS url("...") string)
+    // inside a `data:image/svg+xml,<...>` URI. Leaving most SVG markup
+    // (letters, digits, path-data punctuation like '.', '-', ',') un-
+    // encoded keeps the resulting string short; browsers accept a mix of
+    // encoded and literal UTF-8 bytes in this position.
+    static std::string _urlEncodeSvg(const std::string &s)
+    {
+        static const char *hex = "0123456789ABCDEF";
+        std::string out;
+        out.reserve(s.size() + s.size() / 4);
+        for (unsigned char c : s)
+        {
+            bool safe = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                        (c >= '0' && c <= '9') ||
+                        c == '.' || c == '-' || c == '_' || c == ':' ||
+                        c == '/' || c == ',' || c == ' ' || c == '=' ||
+                        c == ';';
+            if (safe)
+            {
+                out += (char)c;
+            }
+            else
+            {
+                out += '%';
+                out += hex[(c >> 4) & 0xF];
+                out += hex[c & 0xF];
+            }
+        }
+        return out;
+    }
+
+    // DOM backend paint path — see the comment at the render() call site.
+    // Embeds the ORIGINAL SVG markup as a background-image data URI on one
+    // reused node, letting the browser's native SVG renderer do the actual
+    // rasterization (correctly antialiased, for free) instead of our own
+    // scanline fill, which only works against a real pixel buffer.
+    //
+    // Known limitation: tintColor recoloring (used for flat icon tinting
+    // on every other backend) has no equivalent here yet — a CSS filter
+    // approximation or server-side text recolor of rawSvgText_ before
+    // encoding would be needed; left as a follow-up since none of the
+    // icons in this pass use it.
+    void _renderDom(int cx, int cy, int cw, int ch)
+    {
+        IDomAdapter *adapter = getActiveDomAdapter();
+        if (!adapter || rawSvgText_.empty())
+            return;
+
+        DomNodeHandle node = fluxDomEnsureNode(this, "div");
+        fluxDomApplyRect(this, cx, cy, cw, ch);
+
+        std::string dataUri = "data:image/svg+xml,";
+        dataUri += _urlEncodeSvg(rawSvgText_);
+        adapter->setStyle(node, "background-image", "url(\"" + dataUri + "\")");
+        adapter->setStyle(node, "background-repeat", "no-repeat");
+        adapter->setStyle(node, "background-position", "center");
+
+        const char *sizeMode = "contain";
+        switch (fit)
+        {
+        case SvgFit::Fill:
+            sizeMode = "100% 100%";
+            break;
+        case SvgFit::Cover:
+            sizeMode = "cover";
+            break;
+        case SvgFit::None:
+            sizeMode = "auto";
+            break;
+        case SvgFit::Contain:
+        case SvgFit::ScaleDown:
+        default:
+            sizeMode = "contain";
+            break;
+        }
+        adapter->setStyle(node, "background-size", sizeMode);
+    }
+#endif
+
+
 
     void _renderShapes(Painter &painter, int cx, int cy, int cw, int ch)
     {

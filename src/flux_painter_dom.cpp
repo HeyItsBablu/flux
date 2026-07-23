@@ -557,6 +557,59 @@ void Painter::drawVLine(int x, int y, int len, Color color, int strokeWidth)
 }
 
 // ============================================================================
+// Painter::drawPolyline
+//
+// Same "rotated thin div per segment" trick drawLine() uses above, but one
+// segment needs one node each — reusing a single default-slot node the way
+// drawLine does would just have each segment overwrite the last. Each
+// segment gets its own slot key ("poly0", "poly1", ...) so ensureNode()
+// gives it a stable, reused node across frames instead of creating new
+// DOM nodes every repaint.
+//
+// Known limitation: if a later call passes FEWER points than a previous
+// call did (variable-length polylines on the same owner), the extra
+// slotted nodes from the longer call are left stale/visible rather than
+// removed — no different in kind from the existing "leak forward" caveats
+// noted elsewhere in this file (see fillRect's border-radius reset
+// comment). Not an issue for SvgWidget, which redraws a fixed shape list
+// every frame.
+// ============================================================================
+
+void Painter::drawPolyline(const std::vector<std::pair<int, int>> &points,
+                           Color color, int strokeWidth)
+{
+    if (!owner || points.size() < 2)
+        return;
+    IDomAdapter *adapter = getActiveDomAdapter();
+    if (!adapter)
+        return;
+
+    char col[32];
+    cssColor(color, col, sizeof(col));
+
+    for (size_t i = 0; i + 1 < points.size(); ++i)
+    {
+        char slotBuf[32];
+        snprintf(slotBuf, sizeof(slotBuf), "poly%zu", i);
+        DomNodeHandle node = ensureNode(owner, "div", slotBuf);
+
+        int x1 = points[i].first, y1 = points[i].second;
+        int x2 = points[i + 1].first, y2 = points[i + 1].second;
+        int dx = x2 - x1, dy = y2 - y1;
+        double length = std::sqrt((double)(dx * dx + dy * dy));
+        double angleDeg = std::atan2((double)dy, (double)dx) * 180.0 / M_PI;
+
+        applyRect(adapter, node, owner, x1, y1 - strokeWidth / 2,
+                 (int)std::round(length), strokeWidth);
+        adapter->setStyle(node, "background-color", col);
+        char rot[48];
+        snprintf(rot, sizeof(rot), "rotate(%.3fdeg)", angleDeg);
+        adapter->setStyle(node, "transform-origin", "0 50%");
+        adapter->setStyle(node, "transform", rot);
+    }
+}
+
+// ============================================================================
 // Painter::pushClipRect / popClipRect / pushClipRoundedRect
 //
 // Clipping in DOM is persistent CSS state on a node (overflow: hidden),
