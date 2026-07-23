@@ -2,51 +2,90 @@
 
 class MyApp : public Widget
 {
+  State<int> counter = 0;
+
 public:
   WidgetPtr build() override
   {
-    std::vector<BoxChild> items;
-    for (int i = 1; i <= 20; i++)
-    {
-      items.push_back(
-          Box({
-                  Box({
-                          Image("https://picsum.photos/seed/list" + std::to_string(i) + "/100/100")
-                              ->setFit(ImageFit::Cover)
-                              ->setBorderRadius(8),
-                      })
-                      ->setWidthMode(SizeMode::Fixed)
-                      ->setWidth(60)
-                      ->setHeightMode(SizeMode::Fixed)
-                      ->setHeight(60),
+    constexpr int kFabSize = 56;
+    constexpr int kAppBarHeight = 56;
 
-                  Text("Item " + std::to_string(i))
-                      ->setFontSize(15)
-                      ->setFontWeight(FontWeight::Bold),
-              })
-              ->setDisplay(Display::Flex)
-              ->setDirection(FlexDirection::Row)
-              ->setGap(12)
-              ->setPadding(10)
-              ->setAlignItems(AlignItems::Center)
-              ->setBackgroundColor(Color::fromRGB(255, 255, 255))
-              ->setBorderColor(Color::fromRGB(230, 230, 230))
-              ->setBorderWidth(1)
-              ->setBorderRadius(8)
-              ->setWidthMode(SizeMode::Full));
-    }
+    auto appBar =
+        Box({
+                Text("My App")
+                    ->setFontSize(20)
+                    ->setFontWeight(FontWeight::Bold)
+                    ->setTextColor(Color::fromRGB(255, 255, 255)),
+            })
+            ->setDisplay(Display::Flex)
+            ->setDirection(FlexDirection::Row)
+            ->setAlignItems(AlignItems::Center)
+            ->setJustifyContent(JustifyContent::Start)
+            ->setPaddingHV(16, 0)
+            ->setWidthMode(SizeMode::Full)
+            ->setHeightMode(SizeMode::Fixed)
+            ->setHeight(kAppBarHeight)
+            ->setBackgroundColor(Color::fromRGB(33, 150, 243));
 
-    return Box(items)
-        ->setDisplay(Display::Block)
-        ->setGap(8)
-        ->setPadding(16)
+    auto fab =
+        Box({
+                Text("+")
+                    ->setFontSize(28)
+                    ->setFontWeight(FontWeight::Bold)
+                    ->setTextColor(Color::fromRGB(255, 255, 255)),
+            })
+            ->setDisplay(Display::Flex)
+            ->setAlignItems(AlignItems::Center)
+            ->setJustifyContent(JustifyContent::Center)
+            ->setWidthMode(SizeMode::Fixed)
+            ->setWidth(kFabSize)
+            ->setHeightMode(SizeMode::Fixed)
+            ->setHeight(kFabSize)
+            ->setBorderRadius(kFabSize / 2)
+            ->setBackgroundColor(Color::fromRGB(33, 150, 243))
+            ->setPositionMode(Position::Absolute)
+            ->setBottomPx(24)
+            ->setRightPx(24)
+            ->setZIndexVal(1)
+            ->setOnClick([this]
+                         { counter++; });
+
+    auto body =
+        Box({
+             Svg(R"(<svg viewBox="0 0 24 24"><path d="M12 2 L2 22 L22 22 Z" fill="#ff6600"/></svg>)")
+                 ->setWidth(32)
+                 ->setHeight(32),
+             Svg("alien-svgrepo-com.svg")->setFit(SvgFit::Contain)->setHeight(200)->setWidth(200),
+             Svg("genetics-svgrepo-com.svg")->setFit(SvgFit::Contain)->setHeight(200)->setWidth(200)})
+            ->setDisplay(Display::Flex)
+            ->setDirection(FlexDirection::Column)
+            ->setAlignItems(AlignItems::Center)
+            ->setJustifyContent(JustifyContent::Center)
+            ->setGap(8)
+            ->setWidthMode(SizeMode::Full)
+            ->setHeightMode(SizeMode::Full)
+            ->setFlexGrow(1); // takes all remaining height below the app bar
+
+    return Box({
+                   appBar,
+                   body,
+                   fab,
+               })
+        ->setDisplay(Display::Flex)
+        ->setDirection(FlexDirection::Column)
         ->setWidthMode(SizeMode::Full)
         ->setHeightMode(SizeMode::Full)
-        ->setScrollable(true);
+        ->setBackgroundColor(Color::fromRGB(245, 245, 250));
   }
 };
 
+// ============================================================
+//  Entry point
+// ============================================================
+
 WidgetPtr createApp(FluxUI *app)
 {
-  return FluxApp().setTheme(AppTheme::light()).build(std::make_shared<MyApp>());
+  return FluxApp()
+      .setTheme(AppTheme::light())
+      .build(std::make_shared<MyApp>());
 }
