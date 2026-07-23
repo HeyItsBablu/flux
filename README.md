@@ -1160,6 +1160,44 @@ CheckBox("I agree to the terms")->setInputValue(agreedState);
 
 ---
 
+### Dropdown
+
+Closed-state select box that opens a floating, scrollable option list on
+click — keyboard-navigable, with optional two-way binding to `State<int>`
+(index) or `State<string>` (value).
+
+```cpp
+Dropdown({"Small", "Medium", "Large"})
+    ->setPlaceholder("Choose a size")
+    ->setSelectedValue(sizeState)
+    ->setOnSelectionChanged([](int idx, const std::string& val) {
+        std::cout << "Picked: " << val << " (" << idx << ")\n";
+    })
+    ->setWidth(200);
+```
+
+**Factory:** `Dropdown(options = {})`
+
+**Methods**
+
+| Method | Type | Description |
+|---|---|---|
+| `setOptions(opts)` | `vector<string>` | Replace the option list |
+| `setPlaceholder(text)` | `string` | Shown when nothing is selected |
+| `setSelectedIndex(State<int>&)` | State | Two-way binding by index |
+| `setSelectedValue(State<string>&)` | State | Two-way binding by option value |
+| `setOnSelectionChanged(fn)` | `void(int, string)` | Fires on selection |
+| `setItemHeight(h)` | `int` | Row height in the open list |
+| `setMaxVisibleItems(n)` | `int` | Rows visible before scrolling (default 6) |
+| `setWidth(w)` | `int` | Fixed width |
+
+> **Keyboard:** closed — `↑/↓` step selection, `Enter/Space` opens. Open —
+> `↑/↓` move highlight, `Home/End` jump to first/last, `Enter/Space` confirm,
+> `Escape` close.
+
+---
+
+
 ### RadioGroup / RadioButton
 
 Mutually-exclusive radio buttons bound to `State<string>`.
@@ -2132,6 +2170,150 @@ WidgetPtr createApp(FluxUI* app) {
 | `Navigator::hasRoute(name)` | `true` if a route name is registered |
 
 ---
+ 
+## Overlay
+
+Dialog, ContextMenu, and Tooltip are all built the same way internally: a
+lightweight anchor widget sits in your normal tree, and the actual floating
+content renders through `FluxUI`'s overlay layer (`showOverlay`/`hideOverlay`)
+so it paints above everything else and captures input independent of normal
+layout.
+
+### Dialog
+
+Modal dialog box. Dims the screen, centers a content box, and blocks all
+input to the rest of the app while open.
+
+```cpp
+auto dialog = Dialog(
+    Flex({
+        Text("Delete this item?")->setFontSize(16),
+        Row({
+            Button("Cancel", [dialog]{ dialog->close(); }),
+            Button("Delete", [dialog]{ deleteItem(); dialog->close(); }),
+        })->setGap(8),
+    })->setDirection(FlexDirection::Column)->setGap(16)
+)
+->setSize(360, 160)
+->setCloseOnClickOutside(true)
+->setOnClose([]{ std::cout << "Dialog closed\n"; });
+
+// Trigger it from anywhere:
+dialog->open();
+```
+
+**Factory:** `Dialog(content = nullptr)`
+
+**Methods**
+
+| Method | Type | Description |
+|---|---|---|
+| `setContent(widget)` | `WidgetPtr` | Content rendered inside the dialog box |
+| `setSize(w, h)` | `int, int` | Fixed dialog box dimensions (default 400×300) |
+| `setCloseOnClickOutside(v)` | `bool` | Close when the scrim outside the box is clicked (default `true`) |
+| `setCloseOnEscape(v)` | `bool` | Close on `Escape` key (default `true`) |
+| `setOnClose(fn)` | `void()` | Fires whenever the dialog closes, by any means |
+| `setOverlayColor(c)` | `Color` | Scrim color behind the box |
+| `open()` | — | Show the dialog |
+| `close()` | — | Hide the dialog and fire `onClose` |
+
+> **Note:** `dialogWidth`/`dialogHeight`/`dialogBgColor`/`dialogBorderColor`/
+> `dialogBorderRadius`/`dialogPadding` are public fields you can also set
+> directly if you don't want a builder call for every tweak.
+
+---
+
+### ContextMenu / PulldownMenu
+
+Right-click context menu, or a left-click "pulldown" menu-bar style trigger.
+Both are the same widget — `PulldownMenu` is just `ContextMenu` pre-configured
+with `setTrigger(MenuTrigger::LeftClick)`.
+
+```cpp
+auto menu = ContextMenu(myListItem, {
+    ContextMenuItem::Action("Rename", [&]{ startRename(); }),
+    ContextMenuItem::Action("Duplicate", [&]{ duplicate(); }),
+    ContextMenuItem::Separator(),
+    ContextMenuItem::Action("Delete", [&]{ deleteItem(); }, /*enabled=*/canDelete),
+});
+
+// Menu-bar pulldown, opens flush below the anchor on left click:
+auto fileMenu = PulldownMenu(fileMenuButton, {
+    ContextMenuItem::Action("New",  [&]{ newFile();  }),
+    ContextMenuItem::Action("Open", [&]{ openFile(); }),
+});
+
+// A menu row can also be an arbitrary widget (e.g. a mini color swatch row):
+auto withWidgetRow = ContextMenu(anchor, {
+    ContextMenuItem::Action("Copy", [&]{ copy(); }),
+    ContextMenuItem::Widget(myCustomRowWidget),
+});
+```
+
+**Factory**
+
+| Signature | Description |
+|---|---|
+| `ContextMenu(anchor, items)` | Right-click trigger (default) |
+| `PulldownMenu(anchor, items)` | Left-click trigger, opens flush below the anchor |
+
+**`ContextMenuItem` factories**
+
+| Signature | Description |
+|---|---|
+| `ContextMenuItem::Action(label, onClick, enabled = true)` | Clickable row |
+| `ContextMenuItem::Separator()` | Thin divider line |
+| `ContextMenuItem::Widget(widget)` | Embed an arbitrary widget as a row — menu does not auto-close on click; the widget decides |
+
+**Methods**
+
+| Method | Type | Description |
+|---|---|---|
+| `setTrigger(t)` | `MenuTrigger::RightClick \| LeftClick` | Switch trigger mode |
+| `setMenuItems(items)` | `vector<ContextMenuItem>` | Replace all items |
+| `setItemHeight(h)` | `int` | Row height for `Action` items |
+| `setMinWidth(w)` | `int` | Minimum menu width |
+| `setMenuBackground(c)` / `setMenuBorder(c)` / `setItemHoverColor(c)` | `Color` | Styling |
+
+> **Keyboard:** `↑/↓` move selection · `Home/End` jump to first/last enabled item · `Enter/Space` activate · `Escape` close.
+
+---
+
+### Tooltip
+
+Hover-triggered info bubble, positioned above or below its anchor.
+
+```cpp
+Tooltip(
+    Icon(FluxIcons::Info)->setSize(18),
+    "This setting can't be changed after publishing."
+)
+->setPosition(TooltipPosition::Above)
+->setTooltipMaxWidth(200);
+```
+
+**Factory:** `Tooltip(anchor, text)`
+
+**`TooltipPosition`**
+
+| Value | Description |
+|---|---|
+| `Above` | Force above the anchor |
+| `Below` | Force below the anchor |
+| `Auto` | Above if it fits, otherwise below (default) |
+
+**Methods**
+
+| Method | Type | Description |
+|---|---|---|
+| `setTooltipText(t)` | `string` | Change the bubble text |
+| `setPosition(pos)` | `TooltipPosition` | Placement preference |
+| `setTooltipBackground(c)` / `setTooltipTextColor(c)` | `Color` | Styling |
+| `setTooltipFontSize(size)` | `int` | Bubble font size |
+| `setTooltipMaxWidth(w)` | `int` | Max width before text wraps |
+
+---
+
 
 ## Data
 
