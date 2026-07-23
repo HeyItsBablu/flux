@@ -135,8 +135,8 @@ int fluxDomLineHeightPx(const std::string &fontFamily, int fontSize, FontWeight 
         el.style.width        = 'auto';
         el.style.display      = 'block';
         el.style.overflow     = 'visible';
-        el.style.webkitLineClamp = '';
-        el.style.webkitBoxOrient = '';
+        el.style.webkitLineClamp = "";
+        el.style.webkitBoxOrient = "";
         el.textContent        = 'M'; // single reference glyph, single line
 
         var rect = el.getBoundingClientRect();
