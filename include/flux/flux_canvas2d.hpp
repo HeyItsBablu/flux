@@ -272,7 +272,10 @@ private:
     CompositeOp compositeOp_ = CompositeOp::SourceOver;
     LineCap lineCap_ = LineCap::Butt;
     LineJoin lineJoin_ = LineJoin::Miter;
-    float miterLimit_ = 10.f;
+    // Set via setMiterLimit() but not yet consulted by the GL backend's
+    // strokePath() miter-join case (D2D's stroke style does use it).
+    // TODO: clamp to bevel when miterLength/lineWidth > miterLimit_.
+    [[maybe_unused]] float miterLimit_ = 10.f;
     int clipDepth_ = 0;
 
     // ── Gradient state ────────────────────────────────────────────────────

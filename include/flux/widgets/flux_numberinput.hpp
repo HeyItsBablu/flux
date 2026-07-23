@@ -330,7 +330,9 @@ private:
   int         editCursorPos_ = 0;
   bool        editing_       = false;
   bool        cursorVisible_ = false;
+#if !((defined(__EMSCRIPTEN__) && defined(FLUX_WEB_RENDERER_DOM)) || defined(FLUX_SSR))
   TimerID     cursorTimerId_ = 0;
+#endif
   bool        upHovered_     = false;
   bool        downHovered_   = false;
 

@@ -416,7 +416,10 @@ private:
     std::function<void(const std::string &)> _onPhoto;
     // ── DOM/SSR shared state ─────────────────────────────────────────
 #if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
-    bool _domPreviewSrcApplied = false;
+    // TODO: wire this into the DOM preview node's src/stream attribute
+    // (see VideoPlayerWidget::_domVideoSrcApplied for the pattern) —
+    // currently set nowhere, so it's a no-op guard.
+    [[maybe_unused]] bool _domPreviewSrcApplied = false;
 #endif
 
     // ── Hit rects ─────────────────────────────────────────────────────────────

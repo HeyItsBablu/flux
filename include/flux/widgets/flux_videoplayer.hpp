@@ -803,7 +803,9 @@ private:
     NetState _netState = NetState::Idle;
 
     // ── Shared playback state ─────────────────────────────────────────────────
+#if !defined(FLUX_SSR) && !defined(__EMSCRIPTEN__)
     bool _opened = false;
+#endif
     bool _playing = false;
     bool _finished = false;
     float _progress = 0.f;
