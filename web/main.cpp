@@ -236,6 +236,33 @@ int main()
 {
     s_app = new FluxUI(nullptr);
 
+    // ── 0. Re-sync viewport globals before using them ────────────────────
+    // wrapFullPage()'s inline bootstrap script captured Module._fluxLogical*/
+    // _fluxPhysical* immediately after the SSR HTML was parsed — well
+    // BEFORE this point. document.fonts.ready + fetching/instantiating this
+    // WASM module both have to finish before main() ever runs, and that gap
+    // is long enough for the real viewport to have moved on underneath us
+    // (most commonly: a mobile browser's address bar auto-collapsing/
+    // expanding, which changes window.innerHeight with no guarantee a
+    // 'resize' event has fired and been handled yet). Using the stale
+    // captured values reproduces the same class of bug as the earlier
+    // Win32 swap-chain desync: layout (and, on the canvas backend, the
+    // canvas's own backing store) gets sized against a snapshot that no
+    // longer matches the real, current viewport, with nothing to resync it
+    // before first paint.
+    EM_ASM({
+        var dpr = window.devicePixelRatio || 1;
+        Module._fluxDPR = dpr;
+        Module._fluxLogicalWidth = window.innerWidth;
+        Module._fluxLogicalHeight = window.innerHeight;
+        Module._fluxPhysicalWidth = Math.floor(window.innerWidth * dpr);
+        Module._fluxPhysicalHeight = Math.floor(window.innerHeight * dpr);
+        if (Module.canvas) {
+            Module.canvas.width = Module._fluxPhysicalWidth;
+            Module.canvas.height = Module._fluxPhysicalHeight;
+        }
+    });
+
     // ── 1. Read physical + logical canvas size ──────────────────────────
     int physW = canvasPhysicalWidth();
     int physH = canvasPhysicalHeight();
