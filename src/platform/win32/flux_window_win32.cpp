@@ -119,6 +119,7 @@ bool PlatformWindow::create(const std::string &title, int width, int height,
 
     renderLoop_->onResize = [this](int newW, int newH)
     {
+        d3dDevice_->resize(newW, newH);
         cachedWidth = newW;
 
         cachedHeight = newH;
@@ -138,11 +139,12 @@ bool PlatformWindow::create(const std::string &title, int width, int height,
         }
     };
 
-    renderLoop_->onFrame = [this](float /*dt*/)
+    renderLoop_->onFrame = [this](float dt)
     {
         renderLoop_->drainPending();
         if (callbacks.onDrainRebuilds)
             callbacks.onDrainRebuilds();
+
         if (!d3dDevice_ || !d3dDevice_->valid)
             return;
 
@@ -240,11 +242,12 @@ int PlatformWindow::run()
 
 void PlatformWindow::invalidate()
 {
+
     if (renderLoop_)
         renderLoop_->markDirty();
 }
 
-void PlatformWindow::invalidateRect(int , int , int , int )
+void PlatformWindow::invalidateRect(int x, int y, int w, int h)
 {
 
     if (renderLoop_)

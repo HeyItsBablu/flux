@@ -76,7 +76,7 @@ public:
             ->setDisplay(Display::Flex)
             ->setDirection(FlexDirection::Column)
             ->setWidthMode(SizeMode::Full)
-            ->setHeight(500)
+            ->setHeightMode(SizeMode::Full)
             ->setBackgroundColor(Color::fromRGB(215, 245, 250));
     }
 };
