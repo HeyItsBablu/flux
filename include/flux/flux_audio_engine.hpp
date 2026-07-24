@@ -1,7 +1,6 @@
 // flux_audio_engine.hpp
 //
 // Cross-platform, multi-voice audio engine built on miniaudio.
-// Replaces FluxAudio (flux_audio.hpp) entirely.
 //
 // Design summary
 // ──────────────

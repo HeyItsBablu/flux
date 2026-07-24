@@ -18,7 +18,7 @@
 #if TARGET_OS_OSX
 
 #include "flux/flux_video.hpp"
-#include "flux/flux_audio.hpp"
+
 #include "flux/flux_audio_engine.hpp"
 
 #import <AVFoundation/AVFoundation.h>
