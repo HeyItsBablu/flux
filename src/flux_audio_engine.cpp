@@ -56,6 +56,12 @@ struct Voice
     float pan = 0.f;
     bool loop = false;
 
+
+    // Audio-thread-only. Set by applyCommand() when a StartVoice/
+    // StartStreamVoice command's targetFrame lands mid-block; consumed
+    // (and reset to 0) the next time mix() processes this voice.
+    ma_uint32 pendingOffset = 0;
+
     // ── Streaming voice state (audio-thread-only) ────────────────────────────
     bool isStream = false;
     AudioEngine::StreamCallback streamCb;
@@ -91,6 +97,12 @@ struct Command
     float floatArg = 0.f;
     uint32_t uintArg = 0; // sourceSampleRate for StartStreamVoice
     bool boolArg = false;
+
+
+    // Absolute engine sample-time (AudioEngine::currentSampleTime() space)
+    // this command should take effect at. 0 = apply as soon as possible,
+    // matching every pre-existing call site.
+    uint64_t targetFrame = 0;
 };
 
 class SpscCommandQueue
@@ -141,6 +153,12 @@ struct AudioEngine::Impl
 
     std::vector<Voice> voices;
     SpscCommandQueue commands{1024};
+
+
+    // Commands popped off the ring buffer whose targetFrame is beyond the
+    // current block. Re-checked every mix() call. Audio-thread-only —
+    // never touched from the UI thread.
+    std::vector<Command> pendingStarts;
 
     std::atomic<float> masterVolume{1.0f};
     std::atomic<uint64_t> clockFrames{0};
@@ -205,10 +223,33 @@ struct AudioEngine::Impl
 
     void mix(float *output, ma_uint32 frameCount)
     {
-        // Drain queued commands first — applied before this block is mixed.
+        uint64_t blockStart = clockFrames.load(std::memory_order_relaxed);
+        uint64_t blockEnd   = blockStart + frameCount;
+
+        // Drain queued commands. Anything whose targetFrame falls beyond
+        // this block is held in pendingStarts instead of applied now.
         Command cmd;
         while (commands.pop(cmd))
-            applyCommand(cmd);
+        {
+            if (cmd.targetFrame >= blockEnd)
+                pendingStarts.push_back(std::move(cmd));
+            else
+                applyCommand(cmd, blockStart);
+        }
+
+        // Sweep previously-held commands that are now due.
+        for (size_t i = 0; i < pendingStarts.size(); )
+        {
+            if (pendingStarts[i].targetFrame < blockEnd)
+            {
+                applyCommand(pendingStarts[i], blockStart);
+                pendingStarts.erase(pendingStarts.begin() + i);
+            }
+            else
+            {
+                i++;
+            }
+        }
 
         std::memset(output, 0, sizeof(float) * frameCount * channels);
 
@@ -220,6 +261,11 @@ struct AudioEngine::Impl
                 continue;
             if (v.paused.load(std::memory_order_relaxed))
                 continue;
+
+            // Consume this voice's start offset (0 for every voice except
+            // one that was just started mid-block by applyCommand()).
+            ma_uint32 startOffset = v.pendingOffset;
+            v.pendingOffset = 0;
 
             // Equal-power pan law.
             float panClamped = std::max(-1.f, std::min(1.f, v.pan));
@@ -246,7 +292,9 @@ struct AudioEngine::Impl
                 // Linear resample from source rate to engine rate, sample-and-hold
                 // continuity (prevSample) carried across callback block boundaries.
                 double pos = 0.0;
-                for (ma_uint32 i = 0; i < frameCount; i++)
+                for (ma_uint32 i = 0; i < startOffset; i++)
+                    pos += ratio; // keep resample cursor in sync with skipped frames
+                for (ma_uint32 i = startOffset; i < frameCount; i++)
                 {
                     size_t idx0 = (size_t)pos;
                     float frac = (float)(pos - (double)idx0);
@@ -275,7 +323,7 @@ struct AudioEngine::Impl
             if (s.channels == 0 || s.frameCount == 0)
                 continue;
 
-            for (ma_uint32 i = 0; i < frameCount; i++)
+            for (ma_uint32 i = startOffset; i < frameCount; i++)
             {
                 if (v.framePos >= s.frameCount)
                 {
@@ -313,7 +361,7 @@ struct AudioEngine::Impl
         clockFrames.fetch_add(frameCount, std::memory_order_relaxed);
     }
 
-    void applyCommand(Command &cmd)
+    void applyCommand(Command &cmd, uint64_t blockStart)
     {
         if (cmd.type == CmdType::SetMasterVolume)
         {
@@ -327,6 +375,13 @@ struct AudioEngine::Impl
         if (v.generation.load(std::memory_order_relaxed) != cmd.generation)
             return; // stale — voice slot was reused for something else
 
+        // Clamp: if targetFrame is at/before this block's start (already
+        // passed, or "ASAP"/0), start immediately with no offset.
+        ma_uint32 offset = (cmd.targetFrame > blockStart)
+                                ? static_cast<ma_uint32>(cmd.targetFrame - blockStart)
+                                : 0;
+
+
         switch (cmd.type)
         {
         case CmdType::StartVoice:
@@ -337,6 +392,7 @@ struct AudioEngine::Impl
             v.gain = cmd.floatArg;
             v.loop = cmd.boolArg;
             v.progress.store(0.f, std::memory_order_relaxed);
+            v.pendingOffset = offset;
             // v.active was already set true by play() on the UI thread.
             break;
         case CmdType::StartStreamVoice:
@@ -348,6 +404,7 @@ struct AudioEngine::Impl
             v.gain = cmd.floatArg;
             v.loop = false;
             v.progress.store(0.f, std::memory_order_relaxed);
+            v.pendingOffset = offset;
             // v.active was already set true by playStream() on the UI thread.
             break;
         case CmdType::StopVoice:
@@ -439,6 +496,7 @@ void AudioEngine::shutdown()
     std::lock_guard<std::mutex> lk(m_impl->bankMutex);
     m_impl->bank.clear();
     m_impl->voices.clear();
+    m_impl->pendingStarts.clear();
 }
 
 bool AudioEngine::isInitialized() const { return m_impl->deviceInitialized; }
@@ -516,6 +574,12 @@ bool AudioEngine::isSampleValid(SampleID id) const
 
 VoiceHandle AudioEngine::play(SampleID sample, float gain, float pan, bool loop)
 {
+    return play(sample, gain, pan, loop, 0);
+}
+
+VoiceHandle AudioEngine::play(SampleID sample, float gain, float pan, bool loop,
+                              uint64_t targetSampleTime)
+{
     ensureInitialized();
     if (!m_impl->deviceInitialized)
         return kInvalidVoice;
@@ -547,6 +611,7 @@ VoiceHandle AudioEngine::play(SampleID sample, float gain, float pan, bool loop)
             cmd.sample = decoded;
             cmd.floatArg = gain;
             cmd.boolArg = loop;
+            cmd.targetFrame = targetSampleTime;
 
             if (!m_impl->commands.push(std::move(cmd)))
             {
@@ -564,6 +629,12 @@ VoiceHandle AudioEngine::play(SampleID sample, float gain, float pan, bool loop)
 
 VoiceHandle AudioEngine::playStream(StreamCallback cb, uint32_t sourceSampleRate,
                                     float gain, float pan)
+{
+    return playStream(std::move(cb), sourceSampleRate, gain, pan, 0);
+}
+
+VoiceHandle AudioEngine::playStream(StreamCallback cb, uint32_t sourceSampleRate,
+                                    float gain, float pan, uint64_t targetSampleTime)
 {
     ensureInitialized();
     if (!m_impl->deviceInitialized || !cb)
@@ -587,6 +658,7 @@ VoiceHandle AudioEngine::playStream(StreamCallback cb, uint32_t sourceSampleRate
             cmd.streamCb = std::move(cb);
             cmd.uintArg = sourceSampleRate;
             cmd.floatArg = gain;
+            cmd.targetFrame = targetSampleTime;
 
             if (!m_impl->commands.push(std::move(cmd)))
             {

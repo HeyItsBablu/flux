@@ -69,6 +69,15 @@ public:
     // twice in a row plays two overlapping instances of the same sample.
     VoiceHandle play(SampleID sample, float gain = 1.0f, float pan = 0.0f, bool loop = false);
 
+
+    // Sample-accurate variant. targetSampleTime is an absolute value from
+    // currentSampleTime()'s clock — the voice starts on that exact sample
+    // instead of "next audio callback". 0 (default) preserves the original
+    // "as soon as possible" behavior; if targetSampleTime has already
+    // passed by the time the command is applied, it's clamped to now.
+    VoiceHandle play(SampleID sample, float gain, float pan, bool loop,
+                      uint64_t targetSampleTime);
+
     // ── Streaming voices ──────────────────────────────────────────────────────
     // For sources that can't be pre-decoded (e.g. a video file's audio track,
     // decoded frame-by-frame on another thread). `cb` is pulled from the audio
@@ -80,6 +89,11 @@ public:
     // for a stream voice; the caller owns lifetime and calls stopVoice() when done.
     VoiceHandle playStream(StreamCallback cb, uint32_t sourceSampleRate,
                            float gain = 1.0f, float pan = 0.0f);
+
+
+    // Sample-accurate variant, same semantics as the play() overload above.
+    VoiceHandle playStream(StreamCallback cb, uint32_t sourceSampleRate,
+                           float gain, float pan, uint64_t targetSampleTime);
 
     void stopVoice(VoiceHandle voice);
     void setVoiceGain(VoiceHandle voice, float gain);
