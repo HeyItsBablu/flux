@@ -14,7 +14,7 @@
 #ifdef _WIN32
 
 #include "flux/flux_video.hpp"
-#include "flux/flux_audio.hpp"
+#include "flux/flux_audio_engine.hpp"
 
 #include <mfapi.h>
 #include <mferror.h>
@@ -74,6 +74,11 @@ namespace
         std::mutex audioMutex;
         int audioChannels = 1;
         int audioSampleRate = 44100;
+
+        // ── AudioEngine voice ─────────────────────────────────────────────────
+        VoiceHandle audioVoice = kInvalidVoice;
+        float volume = 1.f;
+
 
         // ── Command channel ───────────────────────────────────────────────────
         std::mutex cmdMutex;
@@ -153,8 +158,13 @@ float FluxVideo::getProgress() const
 
 void FluxVideo::setOnFinished(FinishCallback cb) { impl().finishCallback = std::move(cb); }
 void FluxVideo::setOnReady(std::function<void(int w, int h)> cb) { impl().readyCallback = std::move(cb); }
-void FluxVideo::setVolume(float v) { FluxAudio::get().setVolume(v); }
-float FluxVideo::getVolume() const { return FluxAudio::get().getVolume(); }
+void FluxVideo::setVolume(float v)
+{
+    auto &s = impl();
+    s.volume = std::max(0.f, std::min(1.f, v));
+    AudioEngine::get().setVoiceGain(s.audioVoice, s.volume);
+}
+float FluxVideo::getVolume() const { return impl().volume; }
 
 FluxVideo::FrameLock FluxVideo::lockFrame()
 {
@@ -224,7 +234,7 @@ static void doSeek(IMFSourceReader *reader, int64_t targetHns)
         s.audioWrite = 0;
         s.audioRead = 0;
     }
-    FluxAudio::get().seekToSeconds((float)targetHns / 1e7f);
+
 
     s.clockBase = std::chrono::steady_clock::now();
     s.clockBaseHns = targetHns;
@@ -435,17 +445,17 @@ static void decodeLoop(std::string path)
             s.audioWrite = 0;
             s.audioRead = 0;
         }
-        FluxAudio::get().playStream(
+        s.audioVoice = AudioEngine::get().playStream(
             [](float *buf, int frames) -> int
             { return pullAudio(buf, frames); },
-            s.audioSampleRate);
+            (uint32_t)s.audioSampleRate, s.volume);
     }
 
     if (s.readyCallback)
         s.readyCallback(s.videoWidth.load(), s.videoHeight.load());
 
     s.state = FluxVideo::State::Paused;
-    FluxAudio::get().pause();
+AudioEngine::get().pauseVoice(s.audioVoice);
 
     {
         std::unique_lock<std::mutex> lk(s.cmdMutex);
@@ -458,7 +468,7 @@ static void decodeLoop(std::string path)
         }
         s.resumeRequested = false;
         s.state = FluxVideo::State::Playing;
-        FluxAudio::get().resume();
+        AudioEngine::get().resumeVoice(s.audioVoice);
     }
 
     s.clockBase = std::chrono::steady_clock::now();
@@ -487,7 +497,7 @@ static void decodeLoop(std::string path)
             {
                 s.pauseRequested = false;
                 s.state = FluxVideo::State::Paused;
-                FluxAudio::get().pause();
+                AudioEngine::get().pauseVoice(s.audioVoice);
 
                 s.pauseCV.wait(lk, [&s]
                                { return s.resumeRequested || s.stopDecode; });
@@ -495,7 +505,7 @@ static void decodeLoop(std::string path)
                     break;
                 s.resumeRequested = false;
                 s.state = FluxVideo::State::Playing;
-                FluxAudio::get().resume();
+                AudioEngine::get().resumeVoice(s.audioVoice);
                 s.clockBase = std::chrono::steady_clock::now();
                 s.clockBaseHns = s.positionHns.load();
             }
@@ -640,7 +650,9 @@ void FluxVideo::close()
     if (s.decodeThread.joinable())
         s.decodeThread.join();
 
-    FluxAudio::get().stopPlayback();
+    AudioEngine::get().stopVoice(s.audioVoice);
+    s.audioVoice = kInvalidVoice;
+    s.volume = 1.f;
 
     s.state = State::Idle;
     s.positionHns = 0;

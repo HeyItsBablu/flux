@@ -55,6 +55,13 @@ struct Voice
     float gain = 1.f;
     float pan = 0.f;
     bool loop = false;
+
+    // ── Streaming voice state (audio-thread-only) ────────────────────────────
+    bool isStream = false;
+    AudioEngine::StreamCallback streamCb;
+    uint32_t streamSampleRate = 0;
+    float prevSample = 0.f; // carries continuity across callback blocks
+    std::vector<float> streamScratch;
 };
 
 // ============================================================================
@@ -65,6 +72,7 @@ enum class CmdType : uint8_t
 {
     StartVoice,
     StopVoice,
+    StartStreamVoice,
     SetGain,
     SetPan,
     Seek,
@@ -79,7 +87,9 @@ struct Command
     uint32_t slot = 0;
     uint32_t generation = 0;
     std::shared_ptr<DecodedSample> sample; // only used by StartVoice
+    AudioEngine::StreamCallback streamCb;  // only used by StartStreamVoice
     float floatArg = 0.f;
+    uint32_t uintArg = 0; // sourceSampleRate for StartStreamVoice
     bool boolArg = false;
 };
 
@@ -210,18 +220,60 @@ struct AudioEngine::Impl
                 continue;
             if (v.paused.load(std::memory_order_relaxed))
                 continue;
-            if (!v.sample)
-                continue; // reserved by UI thread, StartVoice command not yet applied
-
-            const DecodedSample &s = *v.sample;
-            if (s.channels == 0 || s.frameCount == 0)
-                continue;
 
             // Equal-power pan law.
             float panClamped = std::max(-1.f, std::min(1.f, v.pan));
             float angle = (panClamped + 1.f) * 0.25f * 3.14159265f; // 0..pi/2
             float gainL = std::cos(angle) * v.gain * master;
             float gainR = std::sin(angle) * v.gain * master;
+
+            if (v.isStream)
+            {
+                if (!v.streamCb)
+                    continue; // reserved by UI thread, StartStreamVoice not yet applied
+
+                uint32_t srcRate = v.streamSampleRate > 0 ? v.streamSampleRate : sampleRate;
+                double ratio = (double)srcRate / (double)sampleRate;
+
+                size_t neededSrc = (size_t)((double)frameCount * ratio) + 2;
+                if (v.streamScratch.size() < neededSrc)
+                    v.streamScratch.resize(neededSrc);
+
+                int got = v.streamCb(v.streamScratch.data(), (int)neededSrc);
+                for (size_t i = (size_t)std::max(got, 0); i < neededSrc; i++)
+                    v.streamScratch[i] = 0.f;
+
+                // Linear resample from source rate to engine rate, sample-and-hold
+                // continuity (prevSample) carried across callback block boundaries.
+                double pos = 0.0;
+                for (ma_uint32 i = 0; i < frameCount; i++)
+                {
+                    size_t idx0 = (size_t)pos;
+                    float frac = (float)(pos - (double)idx0);
+                    float s0 = (idx0 == 0) ? v.prevSample : v.streamScratch[idx0 - 1];
+                    float s1 = (idx0 < neededSrc) ? v.streamScratch[idx0] : s0;
+                    float mono = s0 + (s1 - s0) * frac;
+
+                    output[i * channels + 0] += mono * gainL;
+                    if (channels > 1)
+                        output[i * channels + 1] += mono * gainR;
+
+                    pos += ratio;
+                }
+
+                size_t consumed = (size_t)pos;
+                v.prevSample = (consumed > 0 && consumed <= neededSrc)
+                                   ? v.streamScratch[consumed - 1]
+                                   : v.streamScratch[neededSrc - 1];
+                continue;
+            }
+
+            if (!v.sample)
+                continue; // reserved by UI thread, StartVoice command not yet applied
+
+            const DecodedSample &s = *v.sample;
+            if (s.channels == 0 || s.frameCount == 0)
+                continue;
 
             for (ma_uint32 i = 0; i < frameCount; i++)
             {
@@ -278,6 +330,8 @@ struct AudioEngine::Impl
         switch (cmd.type)
         {
         case CmdType::StartVoice:
+            v.isStream = false;
+            v.streamCb = nullptr;
             v.sample = std::move(cmd.sample);
             v.framePos = 0;
             v.gain = cmd.floatArg;
@@ -285,9 +339,22 @@ struct AudioEngine::Impl
             v.progress.store(0.f, std::memory_order_relaxed);
             // v.active was already set true by play() on the UI thread.
             break;
+        case CmdType::StartStreamVoice:
+            v.sample.reset();
+            v.isStream = true;
+            v.streamCb = std::move(cmd.streamCb);
+            v.streamSampleRate = cmd.uintArg;
+            v.prevSample = 0.f;
+            v.gain = cmd.floatArg;
+            v.loop = false;
+            v.progress.store(0.f, std::memory_order_relaxed);
+            // v.active was already set true by playStream() on the UI thread.
+            break;
         case CmdType::StopVoice:
             v.active.store(false, std::memory_order_release);
             v.sample.reset();
+            v.isStream = false;
+            v.streamCb = nullptr;
             break;
         case CmdType::SetGain:
             v.gain = cmd.floatArg;
@@ -382,7 +449,6 @@ void AudioEngine::ensureInitialized()
     if (!m_impl->deviceInitialized)
         init(); // falls back to the documented defaults (48kHz, stereo, 64 voices)
 }
-
 
 // ── Sample bank ────────────────────────────────────────────────────────────
 
@@ -496,6 +562,46 @@ VoiceHandle AudioEngine::play(SampleID sample, float gain, float pan, bool loop)
     return kInvalidVoice; // pool exhausted
 }
 
+VoiceHandle AudioEngine::playStream(StreamCallback cb, uint32_t sourceSampleRate,
+                                    float gain, float pan)
+{
+    ensureInitialized();
+    if (!m_impl->deviceInitialized || !cb)
+        return kInvalidVoice;
+
+    // Same single-producer slot-claim strategy as play(): find a free voice,
+    // CAS it active, then hand the actual payload to the audio thread via
+    // the command queue rather than touching audio-thread-only fields here.
+    for (uint32_t i = 0; i < m_impl->voices.size(); i++)
+    {
+        Voice &v = m_impl->voices[i];
+        bool expected = false;
+        if (v.active.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+        {
+            uint32_t gen = v.generation.fetch_add(1, std::memory_order_relaxed) + 1;
+
+            Command cmd;
+            cmd.type = CmdType::StartStreamVoice;
+            cmd.slot = i;
+            cmd.generation = gen;
+            cmd.streamCb = std::move(cb);
+            cmd.uintArg = sourceSampleRate;
+            cmd.floatArg = gain;
+
+            if (!m_impl->commands.push(std::move(cmd)))
+            {
+                v.active.store(false, std::memory_order_release);
+                return kInvalidVoice;
+            }
+
+            setVoicePan(Impl::makeHandle(i, gen), pan);
+            return Impl::makeHandle(i, gen);
+        }
+    }
+    return kInvalidVoice; // pool exhausted
+}
+
+
 void AudioEngine::stopVoice(VoiceHandle voice)
 {
     if (voice == kInvalidVoice)
@@ -571,7 +677,8 @@ float AudioEngine::getVoiceProgress(VoiceHandle voice) const
 
 void AudioEngine::pauseVoice(VoiceHandle voice)
 {
-    if (voice == kInvalidVoice) return;
+    if (voice == kInvalidVoice)
+        return;
     Command cmd;
     cmd.type = CmdType::PauseVoice;
     cmd.slot = Impl::handleSlot(voice);
@@ -581,7 +688,8 @@ void AudioEngine::pauseVoice(VoiceHandle voice)
 
 void AudioEngine::resumeVoice(VoiceHandle voice)
 {
-    if (voice == kInvalidVoice) return;
+    if (voice == kInvalidVoice)
+        return;
     Command cmd;
     cmd.type = CmdType::ResumeVoice;
     cmd.slot = Impl::handleSlot(voice);
@@ -591,9 +699,11 @@ void AudioEngine::resumeVoice(VoiceHandle voice)
 
 bool AudioEngine::isVoicePaused(VoiceHandle voice) const
 {
-    if (voice == kInvalidVoice) return false;
+    if (voice == kInvalidVoice)
+        return false;
     uint32_t slot = Impl::handleSlot(voice);
-    if (slot >= m_impl->voices.size()) return false;
+    if (slot >= m_impl->voices.size())
+        return false;
     const Voice &v = m_impl->voices[slot];
     if (v.generation.load(std::memory_order_relaxed) != Impl::handleGen(voice))
         return false;

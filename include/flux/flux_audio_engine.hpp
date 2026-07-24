@@ -30,6 +30,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <string>
 
 using SampleID = uint32_t;
@@ -41,6 +42,7 @@ constexpr VoiceHandle kInvalidVoice = 0;
 class AudioEngine
 {
 public:
+    using StreamCallback = std::function<int(float *buf, int frames)>;
     static AudioEngine &get();
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -67,6 +69,18 @@ public:
     // Every call to play() is an independent, overlappable voice — calling it
     // twice in a row plays two overlapping instances of the same sample.
     VoiceHandle play(SampleID sample, float gain = 1.0f, float pan = 0.0f, bool loop = false);
+
+    // ── Streaming voices ──────────────────────────────────────────────────────
+    // For sources that can't be pre-decoded (e.g. a video file's audio track,
+    // decoded frame-by-frame on another thread). `cb` is pulled from the audio
+    // callback and must already be downmixed to mono — exactly what every
+    // FluxVideo backend's pullAudio() produces. Internally linearly resampled
+    // from sourceSampleRate to the engine's own sampleRate(). Behaves like any
+    // other voice afterward — pauseVoice/resumeVoice/stopVoice/setVoiceGain/
+    // setVoicePan all work on the returned handle. There's no "finished" state
+    // for a stream voice; the caller owns lifetime and calls stopVoice() when done.
+    VoiceHandle playStream(StreamCallback cb, uint32_t sourceSampleRate,
+                           float gain = 1.0f, float pan = 0.0f);
 
     void stopVoice(VoiceHandle voice);
     void setVoiceGain(VoiceHandle voice, float gain);

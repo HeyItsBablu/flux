@@ -18,7 +18,7 @@
 #ifdef __ANDROID__
 
 #include "flux/flux_video.hpp"
-#include "flux/flux_audio.hpp"
+#include "flux/flux_audio_engine.hpp"
 
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
@@ -112,6 +112,11 @@ namespace
         std::atomic<int> audioRead{0};
         std::mutex audioMutex;
 
+
+        // ── AudioEngine voice ─────────────────────────────────────────────────
+        VoiceHandle audioVoice = kInvalidVoice;
+        float volume = 1.f;
+
         // ── Clock ─────────────────────────────────────────────────────────────
         std::chrono::steady_clock::time_point clockBase;
         int64_t clockBaseUs = 0;
@@ -159,8 +164,13 @@ float FluxVideo::getProgress() const
 
 void FluxVideo::setOnFinished(FinishCallback cb) { impl().finishCallback = std::move(cb); }
 void FluxVideo::setOnReady(std::function<void(int w, int h)> cb) { impl().readyCallback = std::move(cb); }
-void FluxVideo::setVolume(float v) { FluxAudio::get().setVolume(v); }
-float FluxVideo::getVolume() const { return FluxAudio::get().getVolume(); }
+void FluxVideo::setVolume(float v)
+{
+    auto &s = impl();
+    s.volume = std::max(0.f, std::min(1.f, v));
+    AudioEngine::get().setVoiceGain(s.audioVoice, s.volume);
+}
+float FluxVideo::getVolume() const { return impl().volume; }
 
 // ── OES texture ───────────────────────────────────────────────────────────────
 
@@ -382,7 +392,7 @@ static void doSeek(int64_t targetUs)
     s.clockBaseUs = targetUs;
     s.clockBase = std::chrono::steady_clock::now();
     s.positionUs = targetUs;
-    FluxAudio::get().seekToSeconds(targetUs / 1e6f);
+
     s.seekPending = false;
 }
 
@@ -521,12 +531,12 @@ static void decodeLoop()
 
     if (hasAudio)
     {
-        FluxAudio::get().playStream(
+        s.audioVoice = AudioEngine::get().playStream(
             [audioCh](float *buf, int frames) -> int
             {
                 return pullAudio(buf, frames, audioCh);
             },
-            audioSR);
+            (uint32_t)audioSR, s.volume);
     }
 
     if (s.readyCallback)
@@ -697,7 +707,7 @@ void FluxVideo::play()
         }
         s.state = State::Playing;
         s.pauseCV.notify_all();
-        FluxAudio::get().resume();
+        AudioEngine::get().resumeVoice(s.audioVoice);
     }
 }
 
@@ -707,7 +717,7 @@ void FluxVideo::pause()
     if (s.state == State::Playing)
     {
         s.state = State::Paused;
-        FluxAudio::get().pause();
+        AudioEngine::get().pauseVoice(s.audioVoice);
     }
 }
 
@@ -757,6 +767,11 @@ void FluxVideo::close()
     if (s.decodeThread.joinable())
         s.decodeThread.join();
 
+    AudioEngine::get().stopVoice(s.audioVoice);
+    s.audioVoice = kInvalidVoice;
+    s.volume = 1.f;
+
+    
     destroyAudioCodec();
     destroyVideoCodec();
 

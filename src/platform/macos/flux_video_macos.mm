@@ -19,6 +19,7 @@
 
 #include "flux/flux_video.hpp"
 #include "flux/flux_audio.hpp"
+#include "flux/flux_audio_engine.hpp"
 
 #import <AVFoundation/AVFoundation.h>
 #import <CoreMedia/CoreMedia.h>
@@ -63,6 +64,11 @@ struct VideoState {
     std::mutex           audioMutex;
     int                  audioChannels   = 2;
     int                  audioSampleRate = 44100;
+
+    // ── AudioEngine voice ─────────────────────────────────────────────────
+    VoiceHandle          audioVoice      = kInvalidVoice;
+    float                volume          = 1.f;
+
 
     // ── Command channel ───────────────────────────────────────────────────
     std::mutex              cmdMutex;
@@ -121,8 +127,12 @@ float FluxVideo::getProgress() const {
 
 void  FluxVideo::setOnFinished(FinishCallback cb)                    { impl().finishCallback = std::move(cb); }
 void  FluxVideo::setOnReady(std::function<void(int w, int h)> cb)    { impl().readyCallback  = std::move(cb); }
-void  FluxVideo::setVolume(float v)                                  { FluxAudio::get().setVolume(v); }
-float FluxVideo::getVolume() const                                   { return FluxAudio::get().getVolume(); }
+void  FluxVideo::setVolume(float v) {
+    auto& s = impl();
+    s.volume = std::max(0.f, std::min(1.f, v));
+    AudioEngine::get().setVoiceGain(s.audioVoice, s.volume);
+}
+float FluxVideo::getVolume() const { return impl().volume; }
 
 FluxVideo::FrameLock FluxVideo::lockFrame() {
     FrameLock fl;
@@ -357,9 +367,9 @@ NSArray<AVAssetTrack*>* audioTracks = [asset tracksWithMediaType:AVMediaTypeAudi
 
     // ── Start audio stream ────────────────────────────────────────────────
     if (hasAudio) {
-        FluxAudio::get().playStream(
+        s.audioVoice = AudioEngine::get().playStream(
             [](float* buf, int frames) -> int { return pullAudio(buf, frames); },
-            s.audioSampleRate);
+            (uint32_t)s.audioSampleRate, s.volume);
     }
 
     // ── Signal ready ──────────────────────────────────────────────────────
@@ -373,14 +383,14 @@ NSArray<AVAssetTrack*>* audioTracks = [asset tracksWithMediaType:AVMediaTypeAudi
 
     // ── Wait for first play() ─────────────────────────────────────────────
     s.state = FluxVideo::State::Paused;
-    FluxAudio::get().pause();
+    AudioEngine::get().pauseVoice(s.audioVoice);
     {
         std::unique_lock<std::mutex> lk(s.cmdMutex);
         s.pauseCV.wait(lk, [&s]{ return s.resumeRequested || s.stopDecode; });
         if (s.stopDecode) return;
         s.resumeRequested = false;
         s.state = FluxVideo::State::Playing;
-        FluxAudio::get().resume();
+        AudioEngine::get().resumeVoice(s.audioVoice);
     }
 
     s.clockBase   = std::chrono::steady_clock::now();
@@ -409,7 +419,7 @@ NSArray<AVAssetTrack*>* audioTracks = [asset tracksWithMediaType:AVMediaTypeAudi
                     std::lock_guard<std::mutex> alk(s.audioMutex);
                     s.audioWrite = 0; s.audioRead = 0;
                 }
-                FluxAudio::get().seekToSeconds((float)target / 1e6f);
+                
 
                 reader = _makeReader(asset, target, &videoOut, &audioOut);
                 if (!reader) break;
@@ -424,7 +434,7 @@ NSArray<AVAssetTrack*>* audioTracks = [asset tracksWithMediaType:AVMediaTypeAudi
             if (s.pauseRequested) {
                 s.pauseRequested = false;
                 s.state = FluxVideo::State::Paused;
-                FluxAudio::get().pause();
+                AudioEngine::get().pauseVoice(s.audioVoice);
 
                 s.pauseCV.wait(lk, [&s]{
                     return s.resumeRequested || s.stopDecode || s.seekPending;
@@ -441,7 +451,7 @@ NSArray<AVAssetTrack*>* audioTracks = [asset tracksWithMediaType:AVMediaTypeAudi
                         std::lock_guard<std::mutex> alk(s.audioMutex);
                         s.audioWrite = 0; s.audioRead = 0;
                     }
-                    FluxAudio::get().seekToSeconds((float)target / 1e6f);
+                    
                     reader = _makeReader(asset, target, &videoOut, &audioOut);
                     if (!reader) break;
 
@@ -451,13 +461,13 @@ NSArray<AVAssetTrack*>* audioTracks = [asset tracksWithMediaType:AVMediaTypeAudi
                     s.didFireFinish = false;
                     s.resumeRequested = false;
                     s.state = FluxVideo::State::Playing;
-                    FluxAudio::get().resume();
+                    AudioEngine::get().resumeVoice(s.audioVoice);
                     continue;
                 }
 
                 s.resumeRequested = false;
                 s.state = FluxVideo::State::Playing;
-                FluxAudio::get().resume();
+                AudioEngine::get().resumeVoice(s.audioVoice);
                 s.clockBase   = std::chrono::steady_clock::now();
                 s.clockBaseUs = s.positionUs.load();
             }
@@ -622,8 +632,10 @@ void FluxVideo::close() {
 
     if (s.decodeThread.joinable()) s.decodeThread.join();
 
-    FluxAudio::get().stopPlayback();
-
+    AudioEngine::get().stopVoice(s.audioVoice);
+    s.audioVoice = kInvalidVoice;
+    s.volume     = 1.f;
+    
     s.state       = State::Idle;
     s.positionUs  = 0;
     s.durationUs  = 0;
