@@ -544,7 +544,7 @@ private:
     if (IDomAdapter *adapter = getActiveDomAdapter())
     {
       if (_domAudioNode == kInvalidDomNode) return;
-      if (_finished.load())
+      if (_finished)
       {
         adapter->seekNode(_domAudioNode, 0.f);
         adapter->playNode(_domAudioNode);

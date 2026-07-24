@@ -27,6 +27,8 @@ set(FLUX_SSR_SOURCES
     ${CMAKE_SOURCE_DIR}/src/flux_canvas_ssr.cpp
     ${CMAKE_SOURCE_DIR}/src/flux_canvas2d_ssr.cpp
     ${CMAKE_SOURCE_DIR}/src/flux_file_picker_ssr.cpp
+    ${CMAKE_SOURCE_DIR}/src/flux_audio_engine.cpp
+
 
 )
 
