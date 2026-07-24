@@ -199,15 +199,7 @@ target_include_directories(stb_headers INTERFACE
 add_library(stb STATIC src/stb_impl.cpp)
 target_link_libraries(stb PUBLIC stb_headers)
 
-# ============================================================================
-# dr_libs  (local — header-only + single implementation file)
-# ============================================================================
 
-add_library(dr STATIC src/flux_audio_impl.cpp)
-target_include_directories(dr PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/dr>
-        $<INSTALL_INTERFACE:include>
-)
 
 # ============================================================================
 # Linux platform dependencies
@@ -408,7 +400,6 @@ endif()
 if(WIN32)
     target_link_libraries(flux PUBLIC
             stb
-            dr
             CURL::libcurl
             dxguid
             Msimg32
@@ -428,7 +419,6 @@ if(WIN32)
 elseif(EMSCRIPTEN)
     target_link_libraries(flux PUBLIC
             stb
-            dr
     )
 
     # target_link_options(flux PUBLIC
@@ -461,7 +451,6 @@ elseif(ANDROID)
 
     target_link_libraries(flux PUBLIC
             stb
-            dr
             app_glue
             CURL::libcurl
             mbedtls
@@ -479,7 +468,6 @@ elseif(ANDROID)
 elseif(APPLE)
     target_link_libraries(flux PUBLIC
             stb
-            dr
             CURL::libcurl
             "-framework Cocoa"
             "-framework Metal"
@@ -505,7 +493,6 @@ elseif(APPLE)
 elseif(UNIX AND NOT APPLE)
     target_link_libraries(flux PUBLIC
             stb
-            dr
             OpenGL::GL
             CURL::libcurl
             ${SDL2_LIBRARIES}
@@ -608,7 +595,7 @@ if(NOT ANDROID AND NOT EMSCRIPTEN)
     include(GNUInstallDirs)
     include(CMakePackageConfigHelpers)
 
-    set(FLUX_INSTALL_TARGETS stb stb_headers dr)
+    set(FLUX_INSTALL_TARGETS stb stb_headers)
     if(FLUX_NEED_DESKTOP_LIB)
         list(APPEND FLUX_INSTALL_TARGETS flux)
     endif()
