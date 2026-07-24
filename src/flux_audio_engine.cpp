@@ -56,7 +56,6 @@ struct Voice
     float pan = 0.f;
     bool loop = false;
 
-
     // Audio-thread-only. Set by applyCommand() when a StartVoice/
     // StartStreamVoice command's targetFrame lands mid-block; consumed
     // (and reset to 0) the next time mix() processes this voice.
@@ -97,7 +96,6 @@ struct Command
     float floatArg = 0.f;
     uint32_t uintArg = 0; // sourceSampleRate for StartStreamVoice
     bool boolArg = false;
-
 
     // Absolute engine sample-time (AudioEngine::currentSampleTime() space)
     // this command should take effect at. 0 = apply as soon as possible,
@@ -153,7 +151,6 @@ struct AudioEngine::Impl
 
     std::vector<Voice> voices;
     SpscCommandQueue commands{1024};
-
 
     // Commands popped off the ring buffer whose targetFrame is beyond the
     // current block. Re-checked every mix() call. Audio-thread-only —
@@ -224,7 +221,7 @@ struct AudioEngine::Impl
     void mix(float *output, ma_uint32 frameCount)
     {
         uint64_t blockStart = clockFrames.load(std::memory_order_relaxed);
-        uint64_t blockEnd   = blockStart + frameCount;
+        uint64_t blockEnd = blockStart + frameCount;
 
         // Drain queued commands. Anything whose targetFrame falls beyond
         // this block is held in pendingStarts instead of applied now.
@@ -238,7 +235,7 @@ struct AudioEngine::Impl
         }
 
         // Sweep previously-held commands that are now due.
-        for (size_t i = 0; i < pendingStarts.size(); )
+        for (size_t i = 0; i < pendingStarts.size();)
         {
             if (pendingStarts[i].targetFrame < blockEnd)
             {
@@ -286,14 +283,21 @@ struct AudioEngine::Impl
                     v.streamScratch.resize(neededSrc);
 
                 int got = v.streamCb(v.streamScratch.data(), (int)neededSrc);
+                if (got < 0)
+                {
+                    // Callback signaled completion — free the slot instead of
+                    // idling here forever consuming a voice from the pool.
+                    v.active.store(false, std::memory_order_release);
+                    v.streamCb = nullptr;
+                    continue;
+                }
                 for (size_t i = (size_t)std::max(got, 0); i < neededSrc; i++)
                     v.streamScratch[i] = 0.f;
 
                 // Linear resample from source rate to engine rate, sample-and-hold
                 // continuity (prevSample) carried across callback block boundaries.
                 double pos = 0.0;
-                for (ma_uint32 i = 0; i < startOffset; i++)
-                    pos += ratio; // keep resample cursor in sync with skipped frames
+
                 for (ma_uint32 i = startOffset; i < frameCount; i++)
                 {
                     size_t idx0 = (size_t)pos;
@@ -378,9 +382,8 @@ struct AudioEngine::Impl
         // Clamp: if targetFrame is at/before this block's start (already
         // passed, or "ASAP"/0), start immediately with no offset.
         ma_uint32 offset = (cmd.targetFrame > blockStart)
-                                ? static_cast<ma_uint32>(cmd.targetFrame - blockStart)
-                                : 0;
-
+                               ? static_cast<ma_uint32>(cmd.targetFrame - blockStart)
+                               : 0;
 
         switch (cmd.type)
         {
@@ -672,7 +675,6 @@ VoiceHandle AudioEngine::playStream(StreamCallback cb, uint32_t sourceSampleRate
     }
     return kInvalidVoice; // pool exhausted
 }
-
 
 void AudioEngine::stopVoice(VoiceHandle voice)
 {

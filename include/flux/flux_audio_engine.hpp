@@ -85,8 +85,12 @@ public:
     // FluxVideo backend's pullAudio() produces. Internally linearly resampled
     // from sourceSampleRate to the engine's own sampleRate(). Behaves like any
     // other voice afterward — pauseVoice/resumeVoice/stopVoice/setVoiceGain/
-    // setVoicePan all work on the returned handle. There's no "finished" state
-    // for a stream voice; the caller owns lifetime and calls stopVoice() when done.
+    // setVoicePan all work on the returned handle. A callback that produces a
+    // finite stream (e.g. a one-shot envelope) can signal completion by
+    // returning a negative value; the engine will then free the voice slot
+    // itself. Callbacks representing an open-ended source (e.g. a video's
+    // audio track) simply never return negative, and the caller owns
+    // lifetime and calls stopVoice() when done.
     VoiceHandle playStream(StreamCallback cb, uint32_t sourceSampleRate,
                            float gain = 1.0f, float pan = 0.0f);
 
