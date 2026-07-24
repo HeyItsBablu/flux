@@ -1,20 +1,30 @@
 // flux_audioplayer.hpp
 // Drop-in, self-contained audio player widget that mirrors the browser <audio>
-// control aesthetic. All playback state is internal — app.cpp just instantiates
-// it.
+// control aesthetic.
 //
+// Rewritten for Step 3 of the audio-engine migration:
+//   - Native platforms (Windows/Linux/macOS/Android) now play through the
+//     shared AudioEngine (flux_audio_engine.hpp) instead of the old
+//     one-voice-per-app FluxAudio singleton. Every widget instance gets its
+//     own VoiceHandle, so multiple players can run independently and
+//     destroying one no longer kills audio in every other widget.
+//   - Memory-sourced audio no longer round-trips through a temp file —
+//     AudioEngine::loadSampleFromMemory() decodes directly.
+//   - Path-sourced audio is decoded once (cached as a SampleID) rather than
+//     redecoded on every play().
+//   - Web (__EMSCRIPTEN__) and SSR (FLUX_SSR) still use the real <audio>
+//     DOM element path — miniaudio-under-Emscripten hasn't been verified
+//     yet, so that branch is left as-is per the migration plan and is
+//     orthogonal to everything below.
 //
 #pragma once
 
 #include "flux/flux.hpp"
-#include "flux/flux_audio.hpp"
+#include "flux/flux_audio_engine.hpp"
 #include "flux/flux_http.hpp"
 #include "flux/flux_icons.hpp"
 #include "flux_image.hpp"
 
-// DOM-node access for the real <audio> element path — same approach as
-// VideoPlayerWidget. Needed on both the live browser DOM renderer and
-// SSR's string-builder adapter.
 #if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
 #include "flux/flux_dom_adapter.hpp"
 #endif
@@ -22,19 +32,8 @@
 #if defined(FLUX_SSR)
 inline std::string AP_resolveSsrAssetUrl(const std::string &localPath)
 {
-  // Same convention as VP_resolveSsrAssetUrl in flux_videoplayer.hpp —
-  // widget-supplied paths are relative to FLUX_SSR_ASSETS_DIR, served
-  // under /assets/ by ssr/main.cpp.
   return std::string("/assets/") + localPath;
 }
-#endif
-
-#ifdef __ANDROID__
-std::string FluxAndroid_getFilesDir();
-#endif
-
-#ifndef _WIN32
-#include <unistd.h> // close(), used by the Linux/Android temp-file path below
 #endif
 
 // ============================================================================
@@ -88,64 +87,57 @@ public:
 
   int spinnerDiameter = 18;
   int spinnerStroke = 2;
+
   // ── Config ────────────────────────────────────────────────────────────────
-  std::string audioPath;
+  std::string audioPath; // display-only now; not used as a scratch path
   int playerHeight = 40;
-  int pillarRadius = 20; // full pill
+  int pillarRadius = 20;
   int trackHeight = 3;
   int thumbRadius = 6;
   int playBtnSize = 28;
-  int iconFontSize = 14; // font icon size for play/pause/vol/dots
+  int iconFontSize = 14;
   int timeFontSize = 12;
-  int volSliderW = 0; // 0 = hidden; set >0 to show inline volume
+  int volSliderW = 0;
 
-  // ── Artwork ───────────────────────────────────────────────────────────────
-  // When set, a square thumbnail is drawn on the left side of the player.
-  // The widget expands its height to accommodate the art (playerArtSize).
-  int artworkSize = 0; // 0 = no artwork; set via setArtwork() / setArtworkSize()
+  int artworkSize = 0;
 
   // ── Public fluent setters ─────────────────────────────────────────────────
 
-  /// Play a local file path (same as passing path to AudioPlayer())
   std::shared_ptr<AudioPlayerWidget> setPath(const std::string &p)
   {
     audioPath = p;
     _sourceType = AudioSourceType::Path;
     _sourceUrl.clear();
-    _sourceMemory.clear();
+    _invalidateLoadedSample();
     return self();
   }
 
-  /// Stream audio from an HTTP/HTTPS URL.
-  /// The bytes are downloaded on a background thread, then handed to FluxAudio.
   std::shared_ptr<AudioPlayerWidget> setUrl(const std::string &url)
   {
     _sourceUrl = url;
     _sourceType = AudioSourceType::Url;
     audioPath.clear();
-    _sourceMemory.clear();
+    _invalidateLoadedSample();
     return self();
   }
 
-  /// Play audio from an in-memory byte buffer (copy overload).
-  std::shared_ptr<AudioPlayerWidget>
-  setMemory(const std::vector<uint8_t> &bytes)
+  std::shared_ptr<AudioPlayerWidget> setMemory(const std::vector<uint8_t> &bytes)
   {
-    _sourceMemory = bytes;
+    _pendingMemory = bytes;
     _sourceType = AudioSourceType::Memory;
     audioPath.clear();
     _sourceUrl.clear();
+    _invalidateLoadedSample();
     return self();
   }
 
-  /// Play audio from a raw pointer + length (copies into internal buffer).
-  std::shared_ptr<AudioPlayerWidget> setMemory(const uint8_t *data,
-                                               size_t len)
+  std::shared_ptr<AudioPlayerWidget> setMemory(const uint8_t *data, size_t len)
   {
-    _sourceMemory.assign(data, data + len);
+    _pendingMemory.assign(data, data + len);
     _sourceType = AudioSourceType::Memory;
     audioPath.clear();
     _sourceUrl.clear();
+    _invalidateLoadedSample();
     return self();
   }
 
@@ -157,26 +149,23 @@ public:
     return self();
   }
 
-  // ── Constructor ───────────────────────────────────────────────────────────
+  // ── Constructor / destructor ───────────────────────────────────────────────
   AudioPlayerWidget()
   {
     height = playerHeight;
     autoHeight = false;
     autoWidth = true;
     isFocusable = false;
-
-    FluxAudio::get().setOnFinished([this]()
-                                   {
-      _playing  = false;
-      _finished = true;
-      _progress = 1.f; });
   }
 
   ~AudioPlayerWidget()
   {
     _stopTimer();
-    FluxAudio::get().setOnFinished(nullptr);
-    FluxAudio::get().closePlayback();
+    // Only ever touches this widget's own voice — never global engine state.
+    // This is the fix for the old bug where any player's destructor killed
+    // playback for every other player in the app.
+    if (_voice != kInvalidVoice)
+      AudioEngine::get().stopVoice(_voice);
   }
 
   // =========================================================================
@@ -187,18 +176,12 @@ public:
                      FontCache & /*fontCache*/) override
   {
     if (autoWidth)
-    {
       width = constraints.maxWidth;
-    }
     else
-    {
       width = std::min(_requestedWidth, constraints.maxWidth);
-    }
 
-    // Height grows when artwork is taller than the bar
     height = std::max(playerHeight, artworkSize);
     applyConstraints();
-
     needsLayout = false;
   }
 
@@ -208,21 +191,25 @@ public:
 
   void render(GraphicsContext &ctx, FontCache &fontCache) override
   {
-
 #if !defined(__EMSCRIPTEN__) && !defined(FLUX_SSR)
-    // Native platforms only — on the DOM/SSR renderer, _progress/_playing
-    // are driven entirely by onDomMediaTimeUpdate/Play/Pause/Ended below,
-    // fed by the real <audio> element's own events. FluxAudio::get() has
-    // no real backend there (SSR: inert stub; web: no native decode
-    // pipeline at all), so polling it would just read stale zeros.
-    auto &audio = FluxAudio::get();
-    if (_playing)
+    // Pull live progress from the engine every frame while playing.
+    if (_voice != kInvalidVoice)
     {
-      _progress = audio.getProgress();
-      if (!audio.isPlaying() && !audio.isPaused())
+      auto &engine = AudioEngine::get();
+      if (!engine.isVoiceActive(_voice))
       {
-        _playing = false;
-        _finished = (audio.getProgress() >= 0.999f);
+        // Voice finished naturally (reached end, not looping).
+        if (_playing)
+        {
+          _playing = false;
+          _finished = true;
+          _progress = 1.f;
+          _stopTimer();
+        }
+      }
+      else
+      {
+        _progress = engine.getVoiceProgress(_voice);
       }
     }
 #endif
@@ -230,10 +217,9 @@ public:
     Painter p(ctx, this);
 
 #if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
-    // ── Real <audio> element ──────────────────────────────────────────
-    // Hidden — this widget paints its own bar/track/icons via Painter,
-    // same as every other platform. The element exists purely as the
-    // actual playback engine and event source.
+    // ── Real <audio> element — unchanged from the previous implementation.
+    // See the migration notes at the top of this file: this path stays as-is
+    // until miniaudio-under-Emscripten is verified.
     if (IDomAdapter *adapter = getActiveDomAdapter())
     {
       DomNodeHandle anode = fluxDomEnsureNode(this, "audio", "audioEl");
@@ -248,8 +234,6 @@ public:
       else if (_sourceType == AudioSourceType::Path && !audioPath.empty())
         resolvedUrl = AP_resolveSsrAssetUrl(audioPath);
 #endif
-      // Memory sources have no fetchable URL for a real <audio src> to
-      // point at — same limitation VideoPlayerWidget accepts for now.
       if (!resolvedUrl.empty() && resolvedUrl != _domAudioSrcApplied)
       {
         adapter->setAttr(anode, "src", resolvedUrl);
@@ -265,7 +249,6 @@ public:
     int cx = x;
     int midY = y + height / 2;
 
-    // ── Loading / error overlay ──────────────────────────────────────────
     if (_netState == NetState::Loading)
     {
       _renderLoadingSpinner(p, cx, midY);
@@ -279,7 +262,7 @@ public:
       return;
     }
 
-    // ── Play / Pause button (font icon) ──────────────────────────────────
+    // ── Play / Pause button ────────────────────────────────────────────────
     cx += 6;
     int btnX = cx;
     int btnY = y + (height - playBtnSize) / 2;
@@ -291,16 +274,11 @@ public:
 
     {
       Color iconCol = _hovPlay ? colIconHover : colIconNormal;
-      NativeFont iconFont =
-          fontCache.getFont(kIconFont, iconFontSize, FontWeight::Normal);
-
-      wchar_t glyph = FluxIcons::glyph(_playing ? FluxIcons::Pause
-                                                : FluxIcons::Play);
+      NativeFont iconFont = fontCache.getFont(kIconFont, iconFontSize, FontWeight::Normal);
+      wchar_t glyph = FluxIcons::glyph(_playing ? FluxIcons::Pause : FluxIcons::Play);
       std::wstring glyphStr(1, glyph);
-
       p.drawText(glyphStr, btnX, btnY, playBtnSize, playBtnSize,
-                 iconFont, iconCol, DT_CENTER | DT_VCENTER | DT_SINGLELINE,
-                 "playIcon");
+                 iconFont, iconCol, DT_CENTER | DT_VCENTER | DT_SINGLELINE, "playIcon");
     }
 
     cx += playBtnSize + 6;
@@ -309,16 +287,16 @@ public:
 #if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
     float dur = _domAudioDuration;
 #else
-    float dur = audio.getDurationSeconds();
+    float dur = (_sampleId != kInvalidSample)
+                    ? AudioEngine::get().getSampleDurationSeconds(_sampleId)
+                    : 0.f;
 #endif
     float pos = _progress * dur;
     std::string timeStr = AP_formatTime(pos) + " / " + AP_formatTime(dur);
 
-    NativeFont timeFont =
-        fontCache.getFont("Segoe UI", timeFontSize, FontWeight::Normal);
+    NativeFont timeFont = fontCache.getFont("Segoe UI", timeFontSize, FontWeight::Normal);
     int tw = 0, th = 0;
     p.measureText(toWideString(timeStr), timeFont, tw, th);
-
     p.drawText(toWideString(timeStr), cx, y, tw + 4, height, timeFont, colText,
                DT_LEFT | DT_VCENTER | DT_SINGLELINE, "timestamp");
     cx += tw + 8;
@@ -336,11 +314,8 @@ public:
 
     int fillW = (int)(_progress * trackW);
     if (fillW > 0)
-    {
-      p.fillRoundedRectGDI(trackLeft, midY - trackHeight / 2, fillW,
-                           trackHeight, trackHeight, colTrackFill, colTrackFill, 0,
-                           "trackFill");
-    }
+      p.fillRoundedRectGDI(trackLeft, midY - trackHeight / 2, fillW, trackHeight,
+                           trackHeight, colTrackFill, colTrackFill, 0, "trackFill");
 
     int thumbX = trackLeft + fillW;
     Color thumbCol = _hovTrack ? colThumbHover : colThumb;
@@ -349,43 +324,29 @@ public:
 
     cx = trackRight + 4;
 
-    // ── Volume icon (font icon) ───────────────────────────────────────────
+    // ── Volume icon ────────────────────────────────────────────────────────
     {
       int iconW = 20, iconH = 20;
       _volIconRect = {cx, y + (height - iconH) / 2, iconW, iconH};
-
       Color volCol = _hovVol ? colIconHover : colIconNormal;
-      NativeFont iconFont =
-          fontCache.getFont(kIconFont, iconFontSize, FontWeight::Normal);
-
-      wchar_t glyph = FluxIcons::glyph(_muted ? FluxIcons::Mute
-                                              : FluxIcons::Volume);
+      NativeFont iconFont = fontCache.getFont(kIconFont, iconFontSize, FontWeight::Normal);
+      wchar_t glyph = FluxIcons::glyph(_muted ? FluxIcons::Mute : FluxIcons::Volume);
       std::wstring glyphStr(1, glyph);
-
-      p.drawText(glyphStr, _volIconRect.x, _volIconRect.y,
-                 _volIconRect.w, _volIconRect.h,
-                 iconFont, volCol, DT_CENTER | DT_VCENTER | DT_SINGLELINE,
-                 "volIcon");
-
+      p.drawText(glyphStr, _volIconRect.x, _volIconRect.y, _volIconRect.w, _volIconRect.h,
+                 iconFont, volCol, DT_CENTER | DT_VCENTER | DT_SINGLELINE, "volIcon");
       cx += iconW + 4;
     }
 
-    // ── More / dots icon (font icon) ─────────────────────────────────────
+    // ── More / dots icon ──────────────────────────────────────────────────
     {
       int iconW = 18, iconH = 20;
       _dotsIconRect = {cx, y + (height - iconH) / 2, iconW, iconH};
-
       Color dotsCol = _hovDots ? colIconHover : colIconNormal;
-      NativeFont iconFont =
-          fontCache.getFont(kIconFont, iconFontSize, FontWeight::Normal);
-
+      NativeFont iconFont = fontCache.getFont(kIconFont, iconFontSize, FontWeight::Normal);
       wchar_t glyph = FluxIcons::glyph(FluxIcons::More);
       std::wstring glyphStr(1, glyph);
-
-      p.drawText(glyphStr, _dotsIconRect.x, _dotsIconRect.y,
-                 _dotsIconRect.w, _dotsIconRect.h,
-                 iconFont, dotsCol, DT_CENTER | DT_VCENTER | DT_SINGLELINE,
-                 "dotsIcon");
+      p.drawText(glyphStr, _dotsIconRect.x, _dotsIconRect.y, _dotsIconRect.w, _dotsIconRect.h,
+                 iconFont, dotsCol, DT_CENTER | DT_VCENTER | DT_SINGLELINE, "dotsIcon");
     }
 
     needsPaint = false;
@@ -397,12 +358,7 @@ public:
 
   bool handleMouseDown(int mx, int my) override
   {
-    if (_inRect(mx, my, _playBtnRect))
-    {
-      _togglePlayPause();
-      markNeedsPaint();
-      return true;
-    }
+    if (_inRect(mx, my, _playBtnRect)) { _togglePlayPause(); markNeedsPaint(); return true; }
     if (_inRect(mx, my, _trackRect))
     {
       _dragging = true;
@@ -411,20 +367,8 @@ public:
       markNeedsPaint();
       return true;
     }
-
-    if (_inRect(mx, my, _volIconRect))
-    {
-      _toggleMute();
-      markNeedsPaint();
-      return true;
-    }
-
-    if (_inRect(mx, my, _dotsIconRect))
-    {
-      _onDotsClicked();
-      markNeedsPaint();
-      return true;
-    }
+    if (_inRect(mx, my, _volIconRect)) { _toggleMute(); markNeedsPaint(); return true; }
+    if (_inRect(mx, my, _dotsIconRect)) { _onDotsClicked(); markNeedsPaint(); return true; }
     return false;
   }
 
@@ -442,26 +386,17 @@ public:
 
   bool handleMouseMove(int mx, int my) override
   {
-    if (_dragging)
-    {
-      _seekFromMouse(mx);
-      return true;
-    }
+    if (_dragging) { _seekFromMouse(mx); return true; }
 
     bool hp = _inRect(mx, my, _playBtnRect);
     bool ht = _inRect(mx, my, _trackRect);
     bool hv = _inRect(mx, my, _volIconRect);
     bool hd = _inRect(mx, my, _dotsIconRect);
 
-    bool changed = (hp != _hovPlay || ht != _hovTrack ||
-                    hv != _hovVol || hd != _hovDots);
-    _hovPlay = hp;
-    _hovTrack = ht;
-    _hovVol = hv;
-    _hovDots = hd;
+    bool changed = (hp != _hovPlay || ht != _hovTrack || hv != _hovVol || hd != _hovDots);
+    _hovPlay = hp; _hovTrack = ht; _hovVol = hv; _hovDots = hd;
 
-    if (changed)
-      markNeedsPaint();
+    if (changed) markNeedsPaint();
     return changed;
   }
 
@@ -473,6 +408,7 @@ public:
   }
 
 #if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
+  // Unchanged DOM event bridge for the web/SSR path.
   void onDomMediaTimeUpdate(float currentTimeSec, float durationSec) override
   {
     _domAudioDuration = durationSec;
@@ -480,32 +416,13 @@ public:
       _progress = std::max(0.f, std::min(1.f, currentTimeSec / durationSec));
     _requestRepaint();
   }
-  void onDomMediaPlay() override
-  {
-    _playing = true;
-    _finished = false;
-    _requestRepaint();
-  }
-  void onDomMediaPause() override
-  {
-    _playing = false;
-    _requestRepaint();
-  }
-  void onDomMediaEnded() override
-  {
-    _playing = false;
-    _finished = true;
-    _progress = 1.f;
-    _requestRepaint();
-  }
+  void onDomMediaPlay() override { _playing = true; _finished = false; _requestRepaint(); }
+  void onDomMediaPause() override { _playing = false; _requestRepaint(); }
+  void onDomMediaEnded() override { _playing = false; _finished = true; _progress = 1.f; _requestRepaint(); }
 #endif
 
 private:
 #if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
-  // Native media events arrive outside FluxUI's normal input-driven
-  // render pass — markNeedsPaint() alone only sets a dirty flag the
-  // next INPUT event happens to pick up. invalidateWidget() is what
-  // actually schedules a real repaint here.
   void _requestRepaint()
   {
     markNeedsPaint();
@@ -520,44 +437,37 @@ private:
   // ── Source ────────────────────────────────────────────────────────────────
   AudioSourceType _sourceType = AudioSourceType::None;
   std::string _sourceUrl;
-  std::vector<uint8_t> _sourceMemory;
+  std::vector<uint8_t> _pendingMemory; // set via setMemory(), consumed on first play()
 
-  // ── Network loading state ─────────────────────────────────────────────────
-  enum class NetState
-  {
-    Idle,
-    Loading,
-    Error
-  };
+  // ── Engine-side identity ────────────────────────────────────────────────
+  // _sampleId: this widget's decoded audio, cached so replay doesn't redecode.
+  // _voice:    this widget's own playback instance. Never touches any other
+  //            widget's voice or global engine state.
+  SampleID _sampleId = kInvalidSample;
+  VoiceHandle _voice = kInvalidVoice;
+
+  enum class NetState { Idle, Loading, Error };
   NetState _netState = NetState::Idle;
 
-  // ── Playback state ────────────────────────────────────────────────────────
-  std::atomic<bool> _playing{false};
-  std::atomic<bool> _finished{false};
-  std::atomic<float> _progress{0.f};
+  bool _playing = false;
+  bool _finished = false;
+  float _progress = 0.f;
   bool _muted = false;
-  float _premuteVolume = 1.f;
+  float _premuteGain = 1.f;
 
-  // ── Interaction state ─────────────────────────────────────────────────────
   bool _dragging = false;
   bool _hovPlay = false, _hovTrack = false;
   bool _hovVol = false, _hovDots = false;
-  float _spinAngle = -1.57079632f; // -halfPi, matches CircularProgressIndicatorWidget's start angle
+  float _spinAngle = -1.57079632f;
 
-  // ── Hit rects ────────────────────────────────────────────────────────────
-  struct Rect
-  {
-    int x, y, w, h;
-  };
+  struct Rect { int x, y, w, h; };
   Rect _playBtnRect{}, _trackRect{}, _volIconRect{}, _dotsIconRect{};
 
-  // ── Timer ─────────────────────────────────────────────────────────────────
   TimerID _timerId = 0;
 
   void _startTimer()
   {
-    if (_timerId)
-      return;
+    if (_timerId) return;
     _timerId = FluxUI::getCurrentInstance()->setInterval(33, [this]()
                                                          {
       if (_playing || _netState == NetState::Loading)
@@ -571,19 +481,13 @@ private:
       _timerId = 0;
     }
   }
+
 #if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
-  // Real <audio> element backing this widget on the DOM/SSR renderer.
-  // Same three-field pattern as VideoPlayerWidget: node handle, the
-  // last src actually written (so render() doesn't restart playback
-  // by re-assigning an identical src every frame), and the real
-  // element's duration (FluxAudio::getDurationSeconds() is a
-  // permanent 0.f stub here, so this is the actual source of truth).
   DomNodeHandle _domAudioNode = kInvalidDomNode;
   std::string _domAudioSrcApplied;
   float _domAudioDuration = 0.f;
 #endif
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
   std::shared_ptr<AudioPlayerWidget> self()
   {
     return std::static_pointer_cast<AudioPlayerWidget>(shared_from_this());
@@ -593,45 +497,42 @@ private:
     return mx >= r.x && mx < r.x + r.w && my >= r.y && my < r.y + r.h;
   }
 
-  // Draw a centred status string (loading / error) inside the bar area
-  void _renderStatusText(Painter &p, FontCache &fontCache,
-                         int barStartX, const std::string &msg, Color col)
+  // Called whenever the source changes — this widget's old voice/sample are
+  // no longer valid, but nothing else in the app is affected.
+  void _invalidateLoadedSample()
   {
-    NativeFont font = fontCache.getFont("Segoe UI", timeFontSize, FontWeight::Normal);
-    int avail = (x + width) - barStartX - 8;
-    p.drawTextA(msg, barStartX + 4, y, avail, height, font, col,
-                DT_LEFT | DT_VCENTER | DT_SINGLELINE, "statusText");
+    if (_voice != kInvalidVoice)
+    {
+      AudioEngine::get().stopVoice(_voice);
+      _voice = kInvalidVoice;
+    }
+    _sampleId = kInvalidSample; // note: not unloaded from the bank here —
+                                // call AudioEngine::get().unloadSample(id)
+                                // yourself if you need to free memory eagerly.
+    _playing = false;
+    _finished = false;
+    _progress = 0.f;
+    _stopTimer();
   }
 
-  // Draw a small indeterminate spinner centred vertically in the bar,
-  // starting where the play button would normally sit.
   void _renderLoadingSpinner(Painter &p, int barStartX, int midY)
   {
     constexpr float kTwoPi = 6.28318530f;
     constexpr float kSpinStep = 0.07f;
-
     float cx = float(barStartX) + float(spinnerDiameter) * 0.5f + 4.f;
     float cy = float(midY);
     float r = float(spinnerDiameter) * 0.5f - float(spinnerStroke) * 0.5f;
-
     p.drawArc(cx, cy, r, spinnerStroke, 0.0f, kTwoPi, colSpinnerTrack, false);
-    p.drawArc(cx, cy, r, spinnerStroke, _spinAngle, kTwoPi * 0.75f,
-              colSpinnerProgress, true);
-
+    p.drawArc(cx, cy, r, spinnerStroke, _spinAngle, kTwoPi * 0.75f, colSpinnerProgress, true);
     _spinAngle += kSpinStep;
-    if (_spinAngle >= kTwoPi)
-      _spinAngle -= kTwoPi;
+    if (_spinAngle >= kTwoPi) _spinAngle -= kTwoPi;
   }
 
-  // Small "!" icon, sized to sit inline in the pill bar where the play
-  // button would normally be.
   void _renderErrorIcon(Painter &p, int barStartX, int midY)
   {
     int cx = barStartX + spinnerDiameter / 2 + 4;
     int r = spinnerDiameter / 2;
-
-    p.drawEllipse(cx - r, midY - r, r * 2, r * 2,
-                  Color::fromRGBA(0, 0, 0, 0), colErrorText, 2, "errorRing");
+    p.drawEllipse(cx - r, midY - r, r * 2, r * 2, Color::fromRGBA(0, 0, 0, 0), colErrorText, 2, "errorRing");
     p.fillRect(cx - 2, midY - r + 4, 3, r, colErrorText, "errorStem");
     p.fillRect(cx - 2, midY + r - 5, 3, 3, colErrorText, "errorDot");
   }
@@ -642,77 +543,78 @@ private:
 #if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
     if (IDomAdapter *adapter = getActiveDomAdapter())
     {
-      if (_domAudioNode == kInvalidDomNode)
-        return; // element not created yet this frame
+      if (_domAudioNode == kInvalidDomNode) return;
       if (_finished.load())
       {
         adapter->seekNode(_domAudioNode, 0.f);
         adapter->playNode(_domAudioNode);
-        // _playing/_finished flip via onDomMediaPlay() once the
-        // browser's real 'play' event fires — single source of truth.
         return;
       }
-      if (_playing.load())
-        adapter->pauseNode(_domAudioNode);
-      else
-        adapter->playNode(_domAudioNode);
+      if (_playing) adapter->pauseNode(_domAudioNode);
+      else adapter->playNode(_domAudioNode);
       return;
     }
 #endif
-    auto &audio = FluxAudio::get();
+    auto &engine = AudioEngine::get();
 
-    // If a URL or memory source hasn't been loaded yet, kick off loading first
-    if (!_playing.load() && !audio.isPaused() && !_finished.load())
+    // Nothing loaded yet — kick off loading/decoding first.
+    if (_sampleId == kInvalidSample)
     {
-      if (_sourceType == AudioSourceType::Url && !_sourceUrl.empty())
-      {
-        _loadFromUrl();
-        return;
-      }
-      if (_sourceType == AudioSourceType::Memory && !_sourceMemory.empty())
-      {
-        _playFromMemory();
-        return;
-      }
+      if (_sourceType == AudioSourceType::Url && !_sourceUrl.empty()) { _loadFromUrl(); return; }
+      if (_sourceType == AudioSourceType::Memory && !_pendingMemory.empty()) { _loadFromMemory(); return; }
+      if (_sourceType == AudioSourceType::Path && !audioPath.empty()) { _loadFromPath(); return; }
+      return; // nothing to play
     }
 
-    if (_finished.load())
+    if (_finished)
     {
       _finished = false;
       _progress = 0.f;
-      audio.seekToProgress(0.f);
-      audio.resume();
-      _playing = true;
-      _startTimer();
+      if (_voice != kInvalidVoice) engine.stopVoice(_voice);
+      _voice = engine.play(_sampleId, _muted ? 0.f : 1.f, 0.f, false);
+      _playing = (_voice != kInvalidVoice);
+      if (_playing) _startTimer();
       return;
     }
 
-    if (_playing.load())
+    if (_playing)
     {
-      audio.pause();
+      engine.pauseVoice(_voice);
       _playing = false;
       _stopTimer();
     }
-    else if (audio.isPaused())
+    else if (_voice != kInvalidVoice && engine.isVoicePaused(_voice))
     {
-      audio.resume();
+      engine.resumeVoice(_voice);
       _playing = true;
       _startTimer();
     }
     else
     {
-      if (!audioPath.empty())
-      {
-        audio.playFromPath(audioPath);
-        _playing = true;
-        _startTimer();
-      }
+      _voice = engine.play(_sampleId, _muted ? 0.f : 1.f, 0.f, false);
+      _playing = (_voice != kInvalidVoice);
+      if (_playing) _startTimer();
     }
   }
 
-  // ── URL loading ────────────────────────────────────────────────────────────
-  // Downloads the audio bytes on a background thread (via FluxHttp),
-  // then hands the raw PCM to FluxAudio on the UI thread.
+  // ── Loading paths ──────────────────────────────────────────────────────────
+
+  void _loadFromPath()
+  {
+    // Synchronous decode via AudioEngine — matches the old behaviour of
+    // playFromPath() doing the decode inline. If this needs to be async for
+    // large files, move it to a background thread and post the result back,
+    // same pattern as _loadFromUrl() below.
+    _sampleId = AudioEngine::get().loadSample(audioPath);
+    if (_sampleId == kInvalidSample)
+    {
+      _netState = NetState::Error;
+      markNeedsPaint();
+      return;
+    }
+    _startPlaybackOfLoadedSample();
+  }
+
   void _loadFromUrl()
   {
     _netState = NetState::Loading;
@@ -734,139 +636,50 @@ private:
         return;
       }
 
-      // Copy downloaded bytes into memory source and play
       const auto *data = reinterpret_cast<const uint8_t *>(result.body.data());
-      self->_sourceMemory.assign(data, data + result.body.size());
+      self->_sampleId = AudioEngine::get().loadSampleFromMemory(data, result.body.size());
       self->_netState = NetState::Idle;
-      self->_playFromMemory(); });
+
+      if (self->_sampleId == kInvalidSample) {
+        self->_netState = NetState::Error;
+        self->_stopTimer();
+        self->markNeedsPaint();
+        return;
+      }
+      self->_startPlaybackOfLoadedSample(); });
   }
 
-  // ── Memory playback ────────────────────────────────────────────────────────
-  // Decodes and plays audio from _sourceMemory.
-  // FluxAudio::playFromPath only accepts file paths, so we write the bytes to
-  // a temporary file and let the existing decode pipeline handle it.
-  // An alternative (when FluxAudio exposes playFromMemory) would call that
-  // directly — the #ifdef block below shows both approaches.
-  void _playFromMemory()
+  void _loadFromMemory()
   {
-    if (_sourceMemory.empty())
+    if (_pendingMemory.empty())
       return;
 
-    auto &audio = FluxAudio::get();
+    // Direct decode — no temp file, no disk I/O, no leaked scratch files.
+    _sampleId = AudioEngine::get().loadSampleFromMemory(_pendingMemory.data(), _pendingMemory.size());
+    _pendingMemory.clear(); // consumed; sample now lives in the engine's bank
 
-#if defined(FLUXAUDIO_HAS_PLAY_FROM_MEMORY)
-    // Future API — if FluxAudio gains a playFromMemory overload, use it here:
-    // audio.playFromMemory(_sourceMemory.data(), _sourceMemory.size());
-#else
-    // Current approach: write to a temp file with an extension hint so the
-    // dr_mp3 / dr_wav decoder inside FluxAudio can pick the right codec.
-    // We detect the format from the magic bytes to choose the right extension.
-    std::string ext = _detectAudioExtension(_sourceMemory);
-    std::string tmpPath = _writeTempFile(_sourceMemory, ext);
-    if (tmpPath.empty())
+    if (_sampleId == kInvalidSample)
     {
       _netState = NetState::Error;
       markNeedsPaint();
       return;
     }
-    audioPath = tmpPath;
-    audio.playFromPath(audioPath);
-#endif
+    _startPlaybackOfLoadedSample();
+  }
 
-    _playing = true;
+  void _startPlaybackOfLoadedSample()
+  {
+    _voice = AudioEngine::get().play(_sampleId, _muted ? 0.f : 1.f, 0.f, false);
+    _playing = (_voice != kInvalidVoice);
     _finished = false;
     _progress = 0.f;
-    _startTimer();
+    if (_playing) _startTimer();
     markNeedsPaint();
-  }
-
-  // ── Format detection from magic bytes ─────────────────────────────────────
-  static std::string _detectAudioExtension(const std::vector<uint8_t> &bytes)
-  {
-    if (bytes.size() >= 3)
-    {
-      // MP3: ID3 tag or sync word
-      if (bytes[0] == 0x49 && bytes[1] == 0x44 && bytes[2] == 0x33)
-        return ".mp3"; // "ID3"
-      if ((bytes[0] == 0xFF) && (bytes[1] & 0xE0) == 0xE0)
-        return ".mp3"; // MPEG sync
-    }
-    if (bytes.size() >= 4)
-    {
-      // WAV: "RIFF"
-      if (bytes[0] == 0x52 && bytes[1] == 0x49 &&
-          bytes[2] == 0x46 && bytes[3] == 0x46)
-        return ".wav";
-      // OGG
-      if (bytes[0] == 0x4F && bytes[1] == 0x67 &&
-          bytes[2] == 0x67 && bytes[3] == 0x53)
-        return ".ogg";
-      // FLAC
-      if (bytes[0] == 0x66 && bytes[1] == 0x4C &&
-          bytes[2] == 0x61 && bytes[3] == 0x43)
-        return ".flac";
-    }
-    return ".mp3"; // best-guess fallback
-  }
-
-  // ── Temp file writer ───────────────────────────────────────────────────────
-
-  static std::string _writeTempFile(const std::vector<uint8_t> &bytes,
-                                    const std::string &ext)
-  {
-#ifdef _WIN32
-    char tmpDir[MAX_PATH];
-    if (GetTempPathA(MAX_PATH, tmpDir) == 0)
-      return {};
-    char tmpFile[MAX_PATH];
-    if (GetTempFileNameA(tmpDir, "flx", 0, tmpFile) == 0)
-      return {};
-    std::string outPath = std::string(tmpFile) + ext;
-    FILE *f = nullptr;
-    fopen_s(&f, outPath.c_str(), "wb");
-
-#elif defined(__ANDROID__)
-
-    std::string dir = FluxAndroid_getFilesDir();
-    if (dir.empty())
-      return {};
-    std::string outPath = dir + "/flxaudio_XXXXXX" + ext;
-
-    // mkstemps needs a writable char buffer
-    std::vector<char> tmpl(outPath.begin(), outPath.end());
-    tmpl.push_back('\0');
-    int fd = mkstemps(tmpl.data(), (int)ext.size());
-    if (fd < 0)
-      return {};
-    // close(fd);
-    outPath = std::string(tmpl.data());
-    FILE *f = fopen(outPath.c_str(), "wb");
-
-#else
-    // Linux desktop
-    std::string tmpl = std::string(P_tmpdir) + "/flxaudioXXXXXX";
-    std::vector<char> tmplBuf(tmpl.begin(), tmpl.end());
-    tmplBuf.push_back('\0');
-    int fd = mkstemp(tmplBuf.data());
-    if (fd < 0)
-      return {};
-    close(fd);
-    std::string outPath = std::string(tmplBuf.data()) + ext;
-    ::rename(tmplBuf.data(), outPath.c_str());
-    FILE *f = fopen(outPath.c_str(), "wb");
-#endif
-
-    if (!f)
-      return {};
-    fwrite(bytes.data(), 1, bytes.size(), f);
-    fclose(f);
-    return outPath;
   }
 
   void _seekFromMouse(int mx)
   {
-    if (_trackRect.w <= 0)
-      return;
+    if (_trackRect.w <= 0) return;
     float t = (float)(mx - _trackRect.x) / (float)_trackRect.w;
     t = std::max(0.f, std::min(1.f, t));
     _progress = t;
@@ -877,23 +690,16 @@ private:
       if (_domAudioNode != kInvalidDomNode)
       {
         adapter->seekNode(_domAudioNode, t * _domAudioDuration);
-        if (_finished.load() && t < 0.999f)
-        {
-          _finished = false;
-          adapter->playNode(_domAudioNode);
-        }
+        if (_finished && t < 0.999f) { _finished = false; adapter->playNode(_domAudioNode); }
       }
       markNeedsPaint();
       return;
     }
 #endif
 
-    auto &audio = FluxAudio::get();
-    bool wasPaused = audio.isPaused();
-    audio.seekToProgress(t);
-    if (wasPaused)
-      audio.pause();
-    if (_finished.load() && t < 0.999f)
+    if (_voice != kInvalidVoice)
+      AudioEngine::get().seekVoice(_voice, t);
+    if (_finished && t < 0.999f)
       _finished = false;
     markNeedsPaint();
   }
@@ -910,31 +716,16 @@ private:
       return;
     }
 #endif
-    auto &audio = FluxAudio::get();
-    if (_muted)
-    {
-      audio.setVolume(_premuteVolume);
-      _muted = false;
-    }
-    else
-    {
-      _premuteVolume = audio.getVolume();
-      audio.setVolume(0.f);
-      _muted = true;
-    }
+    _muted = !_muted;
+    if (_voice != kInvalidVoice)
+      AudioEngine::get().setVoiceGain(_voice, _muted ? 0.f : _premuteGain);
   }
 
   // ── Three-dot menu ────────────────────────────────────────────────────────
   std::function<void()> _dotsCallback;
-
-  void _onDotsClicked()
-  {
-    if (_dotsCallback)
-      _dotsCallback();
-  }
+  void _onDotsClicked() { if (_dotsCallback) _dotsCallback(); }
 
 public:
-  //   AudioPlayer("a.mp3")->setOnDotsClicked([]{ /* show menu */ });
   std::shared_ptr<AudioPlayerWidget> setOnDotsClicked(std::function<void()> cb)
   {
     _dotsCallback = std::move(cb);
@@ -945,39 +736,27 @@ public:
 using AudioPlayerWidgetPtr = std::shared_ptr<AudioPlayerWidget>;
 
 // ============================================================================
-// Factory functions
+// Factory functions — unchanged signatures, same call sites still work
 // ============================================================================
 
-/// Empty player — no source set yet. Configure via setPath/setUrl/setMemory.
 inline AudioPlayerWidgetPtr AudioPlayer()
 {
   return std::make_shared<AudioPlayerWidget>();
 }
 
-/// Path or URL, auto-detected by scheme prefix.
-///
-///   AudioPlayer("audio/sample.mp3")              -> local path
-///   AudioPlayer("https://example.com/song.mp3")  -> streamed URL
-///
 inline AudioPlayerWidgetPtr AudioPlayer(const std::string &pathOrUrl)
 {
   auto w = std::make_shared<AudioPlayerWidget>();
-  if (pathOrUrl.empty())
-    return w;
-
-  bool isUrl = pathOrUrl.rfind("http://", 0) == 0 ||
-               pathOrUrl.rfind("https://", 0) == 0;
-
+  if (pathOrUrl.empty()) return w;
+  bool isUrl = pathOrUrl.rfind("http://", 0) == 0 || pathOrUrl.rfind("https://", 0) == 0;
   return isUrl ? w->setUrl(pathOrUrl) : w->setPath(pathOrUrl);
 }
 
-/// In-memory byte buffer (copy overload).
 inline AudioPlayerWidgetPtr AudioPlayer(const std::vector<uint8_t> &bytes)
 {
   return std::make_shared<AudioPlayerWidget>()->setMemory(bytes);
 }
 
-/// In-memory raw pointer + length.
 inline AudioPlayerWidgetPtr AudioPlayer(const uint8_t *data, size_t len)
 {
   return std::make_shared<AudioPlayerWidget>()->setMemory(data, len);
