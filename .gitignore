@@ -1,8 +1,8 @@
 /build/
 /todo.txt
 
-/external/*
+
 !/external/.gitkeep
 !/external/curl
 !/external/mbedtls
-!/external/libdatachannel
+!/external/emsdk
