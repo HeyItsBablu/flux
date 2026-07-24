@@ -97,7 +97,7 @@ public:
   int playBtnSize = 28;
   int iconFontSize = 14;
   int timeFontSize = 12;
-  int volSliderW = 0;
+  int volSliderW = 0; // 0 = no slider shown, just the mute-toggle icon
 
   int artworkSize = 0;
 
@@ -148,6 +148,29 @@ public:
     markNeedsLayout();
     return self();
   }
+
+  // Sets the non-muted playback volume (0..1). If currently unmuted and a
+  // voice is playing, applies immediately. If muted, takes effect on unmute.
+  std::shared_ptr<AudioPlayerWidget> setVolume(float v)
+  {
+    _currentVolume = std::max(0.f, std::min(1.f, v));
+
+#if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
+    if (IDomAdapter *adapter = getActiveDomAdapter())
+    {
+      if (_domAudioNode != kInvalidDomNode)
+        adapter->setFloatProperty(_domAudioNode, "volume", _currentVolume);
+      markNeedsPaint();
+      return self();
+    }
+#endif
+
+    if (!_muted && _voice != kInvalidVoice)
+      AudioEngine::get().setVoiceGain(_voice, _currentVolume);
+    markNeedsPaint();
+    return self();
+  }
+  float getVolume() const { return _currentVolume; }
 
   // ── Constructor / destructor ───────────────────────────────────────────────
   AudioPlayerWidget()
@@ -302,7 +325,8 @@ public:
     cx += tw + 8;
 
     // ── Seek track ───────────────────────────────────────────────────────
-    int rightReserve = 48;
+    int sliderReserve = (volSliderW > 0) ? (volSliderW + 8) : 0;
+    int rightReserve = 48 + sliderReserve;
     int trackLeft = cx;
     int trackRight = x + width - rightReserve;
     int trackW = std::max(20, trackRight - trackLeft);
@@ -337,6 +361,28 @@ public:
       cx += iconW + 4;
     }
 
+    // ── Volume slider (only when volSliderW > 0) ───────────────────────────
+    if (volSliderW > 0)
+    {
+      int sliderH = 4;
+      _volSliderRect = {cx, midY - 8, volSliderW, 16};
+
+      p.fillRoundedRectGDI(cx, midY - sliderH / 2, volSliderW, sliderH,
+                           sliderH, colTrackBg, colTrackBg, 0, "volSliderBg");
+
+      float displayedVol = _muted ? 0.f : _currentVolume;
+      int volFillW = (int)(displayedVol * volSliderW);
+      if (volFillW > 0)
+        p.fillRoundedRectGDI(cx, midY - sliderH / 2, volFillW, sliderH,
+                             sliderH, colTrackFill, colTrackFill, 0, "volSliderFill");
+
+      Color volThumbCol = _hovVolSlider ? colThumbHover : colThumb;
+      int vThumbX = cx + volFillW;
+      p.drawEllipse(vThumbX - 4, midY - 4, 8, 8, volThumbCol, volThumbCol, 0, "volSliderThumb");
+
+      cx += volSliderW + 8;
+    }
+
     // ── More / dots icon ──────────────────────────────────────────────────
     {
       int iconW = 18, iconH = 20;
@@ -358,7 +404,12 @@ public:
 
   bool handleMouseDown(int mx, int my) override
   {
-    if (_inRect(mx, my, _playBtnRect)) { _togglePlayPause(); markNeedsPaint(); return true; }
+    if (_inRect(mx, my, _playBtnRect))
+    {
+      _togglePlayPause();
+      markNeedsPaint();
+      return true;
+    }
     if (_inRect(mx, my, _trackRect))
     {
       _dragging = true;
@@ -367,8 +418,26 @@ public:
       markNeedsPaint();
       return true;
     }
-    if (_inRect(mx, my, _volIconRect)) { _toggleMute(); markNeedsPaint(); return true; }
-    if (_inRect(mx, my, _dotsIconRect)) { _onDotsClicked(); markNeedsPaint(); return true; }
+    if (_inRect(mx, my, _volIconRect))
+    {
+      _toggleMute();
+      markNeedsPaint();
+      return true;
+    }
+    if (volSliderW > 0 && _inRect(mx, my, _volSliderRect))
+    {
+      _draggingVolSlider = true;
+      FluxUI::getCurrentInstance()->captureMouseInput();
+      _setVolumeFromMouse(mx);
+      markNeedsPaint();
+      return true;
+    }
+    if (_inRect(mx, my, _dotsIconRect))
+    {
+      _onDotsClicked();
+      markNeedsPaint();
+      return true;
+    }
     return false;
   }
 
@@ -381,28 +450,46 @@ public:
       markNeedsPaint();
       return true;
     }
+    if (_draggingVolSlider)
+    {
+      _draggingVolSlider = false;
+      FluxUI::getCurrentInstance()->releaseMouseInput();
+      markNeedsPaint();
+      return true;
+    }
     return false;
   }
 
   bool handleMouseMove(int mx, int my) override
   {
-    if (_dragging) { _seekFromMouse(mx); return true; }
+    if (_draggingVolSlider)
+    {
+      _setVolumeFromMouse(mx);
+      return true;
+    }
 
     bool hp = _inRect(mx, my, _playBtnRect);
     bool ht = _inRect(mx, my, _trackRect);
     bool hv = _inRect(mx, my, _volIconRect);
     bool hd = _inRect(mx, my, _dotsIconRect);
+    bool hvs = volSliderW > 0 && _inRect(mx, my, _volSliderRect);
 
-    bool changed = (hp != _hovPlay || ht != _hovTrack || hv != _hovVol || hd != _hovDots);
-    _hovPlay = hp; _hovTrack = ht; _hovVol = hv; _hovDots = hd;
+    bool changed = (hp != _hovPlay || ht != _hovTrack || hv != _hovVol ||
+                    hd != _hovDots || hvs != _hovVolSlider);
+    _hovPlay = hp;
+    _hovTrack = ht;
+    _hovVol = hv;
+    _hovDots = hd;
+    _hovVolSlider = hvs;
 
-    if (changed) markNeedsPaint();
+    if (changed)
+      markNeedsPaint();
     return changed;
   }
 
   bool handleMouseLeave() override
   {
-    _hovPlay = _hovTrack = _hovVol = _hovDots = false;
+    _hovPlay = _hovTrack = _hovVol = _hovDots = _hovVolSlider = false;
     markNeedsPaint();
     return true;
   }
@@ -416,9 +503,24 @@ public:
       _progress = std::max(0.f, std::min(1.f, currentTimeSec / durationSec));
     _requestRepaint();
   }
-  void onDomMediaPlay() override { _playing = true; _finished = false; _requestRepaint(); }
-  void onDomMediaPause() override { _playing = false; _requestRepaint(); }
-  void onDomMediaEnded() override { _playing = false; _finished = true; _progress = 1.f; _requestRepaint(); }
+  void onDomMediaPlay() override
+  {
+    _playing = true;
+    _finished = false;
+    _requestRepaint();
+  }
+  void onDomMediaPause() override
+  {
+    _playing = false;
+    _requestRepaint();
+  }
+  void onDomMediaEnded() override
+  {
+    _playing = false;
+    _finished = true;
+    _progress = 1.f;
+    _requestRepaint();
+  }
 #endif
 
 private:
@@ -446,28 +548,39 @@ private:
   SampleID _sampleId = kInvalidSample;
   VoiceHandle _voice = kInvalidVoice;
 
-  enum class NetState { Idle, Loading, Error };
+  enum class NetState
+  {
+    Idle,
+    Loading,
+    Error
+  };
   NetState _netState = NetState::Idle;
 
   bool _playing = false;
   bool _finished = false;
   float _progress = 0.f;
   bool _muted = false;
-  float _premuteGain = 1.f;
+  float _currentVolume = 1.f; // non-muted volume level; source of truth for mute restore + slider fill
 
   bool _dragging = false;
   bool _hovPlay = false, _hovTrack = false;
   bool _hovVol = false, _hovDots = false;
+  bool _hovVolSlider = false;
+  bool _draggingVolSlider = false;
   float _spinAngle = -1.57079632f;
 
-  struct Rect { int x, y, w, h; };
-  Rect _playBtnRect{}, _trackRect{}, _volIconRect{}, _dotsIconRect{};
+  struct Rect
+  {
+    int x, y, w, h;
+  };
+  Rect _playBtnRect{}, _trackRect{}, _volIconRect{}, _volSliderRect{}, _dotsIconRect{};
 
   TimerID _timerId = 0;
 
   void _startTimer()
   {
-    if (_timerId) return;
+    if (_timerId)
+      return;
     _timerId = FluxUI::getCurrentInstance()->setInterval(33, [this]()
                                                          {
       if (_playing || _netState == NetState::Loading)
@@ -525,7 +638,8 @@ private:
     p.drawArc(cx, cy, r, spinnerStroke, 0.0f, kTwoPi, colSpinnerTrack, false);
     p.drawArc(cx, cy, r, spinnerStroke, _spinAngle, kTwoPi * 0.75f, colSpinnerProgress, true);
     _spinAngle += kSpinStep;
-    if (_spinAngle >= kTwoPi) _spinAngle -= kTwoPi;
+    if (_spinAngle >= kTwoPi)
+      _spinAngle -= kTwoPi;
   }
 
   void _renderErrorIcon(Painter &p, int barStartX, int midY)
@@ -543,15 +657,18 @@ private:
 #if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
     if (IDomAdapter *adapter = getActiveDomAdapter())
     {
-      if (_domAudioNode == kInvalidDomNode) return;
+      if (_domAudioNode == kInvalidDomNode)
+        return;
       if (_finished)
       {
         adapter->seekNode(_domAudioNode, 0.f);
         adapter->playNode(_domAudioNode);
         return;
       }
-      if (_playing) adapter->pauseNode(_domAudioNode);
-      else adapter->playNode(_domAudioNode);
+      if (_playing)
+        adapter->pauseNode(_domAudioNode);
+      else
+        adapter->playNode(_domAudioNode);
       return;
     }
 #endif
@@ -560,9 +677,21 @@ private:
     // Nothing loaded yet — kick off loading/decoding first.
     if (_sampleId == kInvalidSample)
     {
-      if (_sourceType == AudioSourceType::Url && !_sourceUrl.empty()) { _loadFromUrl(); return; }
-      if (_sourceType == AudioSourceType::Memory && !_pendingMemory.empty()) { _loadFromMemory(); return; }
-      if (_sourceType == AudioSourceType::Path && !audioPath.empty()) { _loadFromPath(); return; }
+      if (_sourceType == AudioSourceType::Url && !_sourceUrl.empty())
+      {
+        _loadFromUrl();
+        return;
+      }
+      if (_sourceType == AudioSourceType::Memory && !_pendingMemory.empty())
+      {
+        _loadFromMemory();
+        return;
+      }
+      if (_sourceType == AudioSourceType::Path && !audioPath.empty())
+      {
+        _loadFromPath();
+        return;
+      }
       return; // nothing to play
     }
 
@@ -570,10 +699,12 @@ private:
     {
       _finished = false;
       _progress = 0.f;
-      if (_voice != kInvalidVoice) engine.stopVoice(_voice);
-      _voice = engine.play(_sampleId, _muted ? 0.f : 1.f, 0.f, false);
+      if (_voice != kInvalidVoice)
+        engine.stopVoice(_voice);
+      _voice = engine.play(_sampleId, _muted ? 0.f : _currentVolume, 0.f, false);
       _playing = (_voice != kInvalidVoice);
-      if (_playing) _startTimer();
+      if (_playing)
+        _startTimer();
       return;
     }
 
@@ -591,9 +722,10 @@ private:
     }
     else
     {
-      _voice = engine.play(_sampleId, _muted ? 0.f : 1.f, 0.f, false);
+      _voice = engine.play(_sampleId, _muted ? 0.f : _currentVolume, 0.f, false);
       _playing = (_voice != kInvalidVoice);
-      if (_playing) _startTimer();
+      if (_playing)
+        _startTimer();
     }
   }
 
@@ -669,17 +801,19 @@ private:
 
   void _startPlaybackOfLoadedSample()
   {
-    _voice = AudioEngine::get().play(_sampleId, _muted ? 0.f : 1.f, 0.f, false);
+    _voice = AudioEngine::get().play(_sampleId, _muted ? 0.f : _currentVolume, 0.f, false);
     _playing = (_voice != kInvalidVoice);
     _finished = false;
     _progress = 0.f;
-    if (_playing) _startTimer();
+    if (_playing)
+      _startTimer();
     markNeedsPaint();
   }
 
   void _seekFromMouse(int mx)
   {
-    if (_trackRect.w <= 0) return;
+    if (_trackRect.w <= 0)
+      return;
     float t = (float)(mx - _trackRect.x) / (float)_trackRect.w;
     t = std::max(0.f, std::min(1.f, t));
     _progress = t;
@@ -690,7 +824,11 @@ private:
       if (_domAudioNode != kInvalidDomNode)
       {
         adapter->seekNode(_domAudioNode, t * _domAudioDuration);
-        if (_finished && t < 0.999f) { _finished = false; adapter->playNode(_domAudioNode); }
+        if (_finished && t < 0.999f)
+        {
+          _finished = false;
+          adapter->playNode(_domAudioNode);
+        }
       }
       markNeedsPaint();
       return;
@@ -701,6 +839,36 @@ private:
       AudioEngine::get().seekVoice(_voice, t);
     if (_finished && t < 0.999f)
       _finished = false;
+    markNeedsPaint();
+  }
+
+  // ── Volume slider drag ────────────────────────────────────────────────────
+  void _setVolumeFromMouse(int mx)
+  {
+    if (_volSliderRect.w <= 0)
+      return;
+    float t = (float)(mx - _volSliderRect.x) / (float)_volSliderRect.w;
+    t = std::max(0.f, std::min(1.f, t));
+    _currentVolume = t;
+    if (_muted && t > 0.f)
+      _muted = false; // dragging the slider up implicitly unmutes
+
+#if defined(__EMSCRIPTEN__) || defined(FLUX_SSR)
+    if (IDomAdapter *adapter = getActiveDomAdapter())
+    {
+      if (_domAudioNode != kInvalidDomNode)
+      {
+        adapter->setFloatProperty(_domAudioNode, "volume", _currentVolume);
+        if (_muted == false)
+          adapter->setBoolProperty(_domAudioNode, "muted", false);
+      }
+      markNeedsPaint();
+      return;
+    }
+#endif
+
+    if (_voice != kInvalidVoice)
+      AudioEngine::get().setVoiceGain(_voice, _muted ? 0.f : _currentVolume);
     markNeedsPaint();
   }
 
@@ -717,13 +885,20 @@ private:
     }
 #endif
     _muted = !_muted;
+    // Gain always restores to _currentVolume on unmute — no separate
+    // "pre-mute" snapshot needed since _currentVolume is never overwritten
+    // by the mute toggle itself, only by setVolume()/_setVolumeFromMouse().
     if (_voice != kInvalidVoice)
-      AudioEngine::get().setVoiceGain(_voice, _muted ? 0.f : _premuteGain);
+      AudioEngine::get().setVoiceGain(_voice, _muted ? 0.f : _currentVolume);
   }
 
   // ── Three-dot menu ────────────────────────────────────────────────────────
   std::function<void()> _dotsCallback;
-  void _onDotsClicked() { if (_dotsCallback) _dotsCallback(); }
+  void _onDotsClicked()
+  {
+    if (_dotsCallback)
+      _dotsCallback();
+  }
 
 public:
   std::shared_ptr<AudioPlayerWidget> setOnDotsClicked(std::function<void()> cb)
@@ -747,7 +922,8 @@ inline AudioPlayerWidgetPtr AudioPlayer()
 inline AudioPlayerWidgetPtr AudioPlayer(const std::string &pathOrUrl)
 {
   auto w = std::make_shared<AudioPlayerWidget>();
-  if (pathOrUrl.empty()) return w;
+  if (pathOrUrl.empty())
+    return w;
   bool isUrl = pathOrUrl.rfind("http://", 0) == 0 || pathOrUrl.rfind("https://", 0) == 0;
   return isUrl ? w->setUrl(pathOrUrl) : w->setPath(pathOrUrl);
 }

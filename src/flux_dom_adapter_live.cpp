@@ -342,6 +342,17 @@ DomNodeHandle createNode(const char *tag, const std::string &hydrationId) overri
              el[UTF8ToString($1)] = $2 ? true : false; }, node, name, value ? 1 : 0);
     }
 
+    void setFloatProperty(DomNodeHandle node, const char *name, float value) override
+    {
+        if (node == kInvalidDomNode)
+            return;
+        EM_ASM({
+             var el = Module._fluxDomNodes[$0];
+             if (!el) return;
+             el[UTF8ToString($1)] = $2; }, node, name, value);
+    }
+
+
     void playNode(DomNodeHandle node) override
     {
         if (node == kInvalidDomNode)

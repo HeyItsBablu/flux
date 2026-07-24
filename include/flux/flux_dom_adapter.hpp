@@ -127,6 +127,15 @@ public:
     // Default no-op on this backend for the same reason as above.
     virtual void setBoolProperty(DomNodeHandle /*node*/, const char * /*name*/, bool /*value*/) {}
 
+    // Sets a LIVE IDL numeric PROPERTY (e.g. el.volume = 0.5) — same
+    // property-vs-attribute distinction as setBoolProperty/setInputValue
+    // above. Needed by AudioPlayerWidget/VideoPlayerWidget's volume
+    // control: "volume" is not a reflected HTML attribute, so setAttr()
+    // has no effect on actual playback loudness, only setting the live
+    // property does. Default no-op on this backend for the same reason
+    // as setBoolProperty above.
+    virtual void setFloatProperty(DomNodeHandle /*node*/, const char * /*name*/, float /*value*/) {}
+
     // ── Real <video>/<audio> elements only ──────────────────────────────
     // Used exclusively by widgets that get a dedicated native media
     // element instead of being painted (VideoPlayerWidget today; a
