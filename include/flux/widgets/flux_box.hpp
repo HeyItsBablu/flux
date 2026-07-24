@@ -765,6 +765,15 @@ private:
     // offer virtualization through this path (see class doc comment).
     bool scrollAxisIsMain_ = true;
 
+    // Flattened, item-source-expanded list of this frame's flow children,
+    // in paint order. Populated at the end of whichever computeLayoutX_()
+    // ran, reusing the same flattened list layout already built via
+    // collectFlowChildren() — so render() can walk the ACTUAL widgets
+    // (e.g. the Text items a Map() expands to) instead of `children`,
+    // which for an item-source child only ever contains the MapWidget
+    // itself, and MapWidget::render() is a deliberate no-op.
+    std::vector<Widget *> renderFlowChildren_;
+
     // ── click tracking ───────────────────────────────────────────────────
     // Separate from sb_/gesture_'s drag state: a Box only becomes a click
     // target once onClick is set via setOnClick(). Press must both START
@@ -1009,6 +1018,8 @@ private:
         }
         if (wrapReversed_)
             std::reverse(flexLines_.begin(), flexLines_.end());
+
+        renderFlowChildren_ = ordered;
 
         std::unordered_map<Widget *, int> hypoIndex;
         hypoIndex.reserve(ordered.size());
@@ -1456,6 +1467,8 @@ private:
         // width measurement pass; re-collecting here would call
         // expandItems() on any Map child a second time for no benefit.
 
+        renderFlowChildren_ = ordered;
+
         LineMetric line; // single "line" — Block never wraps
         int cursor = 0;
         for (auto *c : ordered)
@@ -1737,6 +1750,8 @@ private:
         BoxConstraints looseForSource = BoxConstraints::loose(gridContainerW_, gridContainerH_);
         std::vector<Widget *> flowChildren = collectFlowChildren(
             ctx, fontCache, looseForSource, 0, -1);
+
+        renderFlowChildren_ = flowChildren;
 
         std::vector<BoxItemSpec *> specs;
         specs.reserve(flowChildren.size());
@@ -2620,12 +2635,15 @@ public:
         }
         painter.pushClipRect(clipX1, clipY1, clipX2 - clipX1, clipY2 - clipY1);
 
-        // Flow children first, in tree order (item sources render via
-        // whatever widgets they expanded to — those are ordinary children
-        // by the time render() walks the tree).
-        for (auto &child : children)
+        // Flow children first, in the SAME flattened order layout used
+        // (renderFlowChildren_) — NOT `children` directly. `children`
+        // holds only the MapWidget itself for an item-source child;
+        // MapWidget::render() is a no-op, so walking `children` here
+        // silently paints nothing for every Map()-expanded item even
+        // though they were laid out and positioned correctly.
+        for (auto *child : renderFlowChildren_)
         {
-            if (!child->visible || child->position == Position::Absolute)
+            if (!child || !child->visible)
                 continue;
             bool onScreen = child->x + child->width >= clipX1 && child->x < clipX2 &&
                             child->y + child->height >= clipY1 && child->y < clipY2;

@@ -49,12 +49,20 @@ struct Voice
     std::atomic<float> progress{0.f};    // 0..1, updated by audio thread each callback
     std::atomic<bool> paused{false};
 
+    // UI-thread-only bookkeeping for voice stealing: monotonically
+    // increasing "when did this voice start" stamp, so the pool can find
+    // the single oldest active voice to steal when it's full. Never
+    // touched by the audio thread.
+    std::atomic<uint64_t> startSeq{0};
+
     // Audio-thread-only fields below (never touched by UI thread directly)
     std::shared_ptr<DecodedSample> sample;
-    uint64_t framePos = 0;
+    double framePos = 0.0; // fractional — advances by pitchRatio per sample so
+                           // non-integer playback rates (pitch shift) work
     float gain = 1.f;
     float pan = 0.f;
     bool loop = false;
+    float pitchRatio = 1.f; // 1.0 = normal speed/pitch
 
     // Audio-thread-only. Set by applyCommand() when a StartVoice/
     // StartStreamVoice command's targetFrame lands mid-block; consumed
@@ -101,6 +109,7 @@ struct Command
     // this command should take effect at. 0 = apply as soon as possible,
     // matching every pre-existing call site.
     uint64_t targetFrame = 0;
+    float pitchArg = 1.f; // pitchRatio, only used by StartVoice
 };
 
 class SpscCommandQueue
@@ -152,6 +161,10 @@ struct AudioEngine::Impl
     std::vector<Voice> voices;
     SpscCommandQueue commands{1024};
 
+    // Hands out increasing start-order stamps for voice stealing. UI-thread
+    // only (both play() and playStream() are called from the UI thread).
+    std::atomic<uint64_t> nextStartSeq{1};
+
     // Commands popped off the ring buffer whose targetFrame is beyond the
     // current block. Re-checked every mix() call. Audio-thread-only —
     // never touched from the UI thread.
@@ -179,6 +192,42 @@ struct AudioEngine::Impl
     }
     static uint32_t handleSlot(VoiceHandle h) { return static_cast<uint32_t>(h & 0xFFFFFFFFu); }
     static uint32_t handleGen(VoiceHandle h) { return static_cast<uint32_t>(h >> 32); }
+
+    // Finds a free voice slot; if none is free, picks the oldest active
+    // voice (smallest startSeq) to steal instead. Returns {slot, wasFree}.
+    // slot == UINT32_MAX only when voices.size() == 0 (engine has no pool
+    // at all — e.g. init() was called with maxVoices = 0).
+    //
+    // Single-producer only (play()/playStream() are both called from the
+    // UI thread), so this plain scan-then-pick is race-free without extra
+    // locking — nothing else can claim/steal concurrently.
+    std::pair<uint32_t, bool> reserveVoiceSlot()
+    {
+        for (uint32_t i = 0; i < voices.size(); i++)
+        {
+            Voice &v = voices[i];
+            bool expected = false;
+            if (v.active.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+                return {i, true};
+        }
+
+        // Pool exhausted — steal whichever active voice has been playing
+        // longest. This mirrors standard sampler/synth voice-stealing
+        // policy: a dense pattern keeps sounding instead of silently
+        // dropping newer notes once every voice is busy.
+        uint32_t stealSlot = UINT32_MAX;
+        uint64_t oldestSeq = UINT64_MAX;
+        for (uint32_t i = 0; i < voices.size(); i++)
+        {
+            uint64_t seq = voices[i].startSeq.load(std::memory_order_relaxed);
+            if (seq < oldestSeq)
+            {
+                oldestSeq = seq;
+                stealSlot = i;
+            }
+        }
+        return {stealSlot, false};
+    }
 
     // ── Decode helper (UI thread) ─────────────────────────────────────────────
     std::shared_ptr<DecodedSample> decode(ma_decoder_config cfg, ma_uint64 *outFrameCount,
@@ -329,11 +378,11 @@ struct AudioEngine::Impl
 
             for (ma_uint32 i = startOffset; i < frameCount; i++)
             {
-                if (v.framePos >= s.frameCount)
+                if (v.framePos >= (double)s.frameCount)
                 {
                     if (v.loop)
                     {
-                        v.framePos = 0;
+                        v.framePos = std::fmod(v.framePos, (double)s.frameCount);
                     }
                     else
                     {
@@ -345,20 +394,28 @@ struct AudioEngine::Impl
                     }
                 }
 
-                const float *frame = &s.interleaved[static_cast<size_t>(v.framePos) * s.channels];
-                float sampL = frame[0];
-                float sampR = (s.channels > 1) ? frame[1] : frame[0];
+                // Linear interpolation between the two nearest frames so
+                // pitchRatio != 1.0 (non-integer stepping) doesn't alias.
+                size_t idx0 = static_cast<size_t>(v.framePos);
+                size_t idx1 = (idx0 + 1 < s.frameCount) ? idx0 + 1 : (v.loop ? 0 : idx0);
+                float frac = static_cast<float>(v.framePos - static_cast<double>(idx0));
+
+                const float *f0 = &s.interleaved[idx0 * s.channels];
+                const float *f1 = &s.interleaved[idx1 * s.channels];
+
+                float sampL = f0[0] + (f1[0] - f0[0]) * frac;
+                float sampR = (s.channels > 1) ? f0[1] + (f1[1] - f0[1]) * frac : sampL;
 
                 output[i * channels + 0] += sampL * gainL;
                 if (channels > 1)
                     output[i * channels + 1] += sampR * gainR;
 
-                v.framePos++;
+                v.framePos += v.pitchRatio;
             }
 
             if (s.frameCount > 0)
                 v.progress.store(
-                    std::min(1.f, static_cast<float>(v.framePos) / static_cast<float>(s.frameCount)),
+                    std::min(1.f, static_cast<float>(v.framePos / static_cast<double>(s.frameCount))),
                     std::memory_order_relaxed);
         }
 
@@ -391,9 +448,10 @@ struct AudioEngine::Impl
             v.isStream = false;
             v.streamCb = nullptr;
             v.sample = std::move(cmd.sample);
-            v.framePos = 0;
+            v.framePos = 0.0;
             v.gain = cmd.floatArg;
             v.loop = cmd.boolArg;
+            v.pitchRatio = cmd.pitchArg;
             v.progress.store(0.f, std::memory_order_relaxed);
             v.pendingOffset = offset;
             // v.active was already set true by play() on the UI thread.
@@ -424,7 +482,7 @@ struct AudioEngine::Impl
             break;
         case CmdType::Seek:
             if (v.sample)
-                v.framePos = static_cast<uint64_t>(
+                v.framePos = static_cast<double>(
                     std::max(0.f, std::min(1.f, cmd.floatArg)) * v.sample->frameCount);
             break;
         case CmdType::PauseVoice:
@@ -575,13 +633,10 @@ bool AudioEngine::isSampleValid(SampleID id) const
 
 // ── Voices ─────────────────────────────────────────────────────────────────
 
-VoiceHandle AudioEngine::play(SampleID sample, float gain, float pan, bool loop)
-{
-    return play(sample, gain, pan, loop, 0);
-}
+
 
 VoiceHandle AudioEngine::play(SampleID sample, float gain, float pan, bool loop,
-                              uint64_t targetSampleTime)
+                              float pitchRatio, uint64_t targetSampleTime)
 {
     ensureInitialized();
     if (!m_impl->deviceInitialized)
@@ -596,38 +651,46 @@ VoiceHandle AudioEngine::play(SampleID sample, float gain, float pan, bool loop,
         decoded = it->second;
     }
 
-    // Find a free slot. Single producer (UI thread calls play()), so a plain
-    // CAS against `active` is enough to avoid stomping a slot the audio
-    // thread is concurrently freeing.
-    for (uint32_t i = 0; i < m_impl->voices.size(); i++)
+    auto [slot, wasFree] = m_impl->reserveVoiceSlot();
+    if (slot == UINT32_MAX)
+        return kInvalidVoice; // engine has zero voices configured
+
+    Voice &v = m_impl->voices[slot];
+    // Not yet committed to v.generation — only stored after the command is
+    // confirmed queued, so a failed push never invalidates a still-valid
+    // handle (steal case) or leaves generation out of sync (free case).
+    uint32_t gen = v.generation.load(std::memory_order_relaxed) + 1;
+
+    Command cmd;
+    cmd.type = CmdType::StartVoice;
+    cmd.slot = slot;
+    cmd.generation = gen;
+    cmd.sample = decoded;
+    cmd.floatArg = gain;
+    cmd.boolArg = loop;
+    cmd.pitchArg = pitchRatio;
+    cmd.targetFrame = targetSampleTime;
+
+    if (!m_impl->commands.push(std::move(cmd)))
     {
-        Voice &v = m_impl->voices[i];
-        bool expected = false;
-        if (v.active.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
-        {
-            uint32_t gen = v.generation.fetch_add(1, std::memory_order_relaxed) + 1;
-
-            Command cmd;
-            cmd.type = CmdType::StartVoice;
-            cmd.slot = i;
-            cmd.generation = gen;
-            cmd.sample = decoded;
-            cmd.floatArg = gain;
-            cmd.boolArg = loop;
-            cmd.targetFrame = targetSampleTime;
-
-            if (!m_impl->commands.push(std::move(cmd)))
-            {
-                // Queue full (shouldn't happen with sane capacity) — back out.
-                v.active.store(false, std::memory_order_release);
-                return kInvalidVoice;
-            }
-
-            setVoicePan(Impl::makeHandle(i, gen), pan);
-            return Impl::makeHandle(i, gen);
-        }
+        // Queue full (shouldn't happen with sane capacity).
+        if (wasFree)
+            v.active.store(false, std::memory_order_release); // release the slot we just claimed
+        // If we were stealing instead, the victim voice is untouched —
+        // still playing under its own valid, unchanged generation.
+        return kInvalidVoice;
     }
-    return kInvalidVoice; // pool exhausted
+
+    // Commit now that the audio thread is guaranteed to see this command.
+    // This is also the point where the previous owner's handle (if any)
+    // becomes stale — isVoiceActive()/getVoiceProgress() on it will now
+    // correctly report "gone" instead of someone else's voice.
+    v.generation.store(gen, std::memory_order_relaxed);
+    v.startSeq.store(m_impl->nextStartSeq.fetch_add(1, std::memory_order_relaxed),
+                      std::memory_order_relaxed);
+
+    setVoicePan(Impl::makeHandle(slot, gen), pan);
+    return Impl::makeHandle(slot, gen);
 }
 
 VoiceHandle AudioEngine::playStream(StreamCallback cb, uint32_t sourceSampleRate,
@@ -643,37 +706,35 @@ VoiceHandle AudioEngine::playStream(StreamCallback cb, uint32_t sourceSampleRate
     if (!m_impl->deviceInitialized || !cb)
         return kInvalidVoice;
 
-    // Same single-producer slot-claim strategy as play(): find a free voice,
-    // CAS it active, then hand the actual payload to the audio thread via
-    // the command queue rather than touching audio-thread-only fields here.
-    for (uint32_t i = 0; i < m_impl->voices.size(); i++)
+    auto [slot, wasFree] = m_impl->reserveVoiceSlot();
+    if (slot == UINT32_MAX)
+        return kInvalidVoice; // engine has zero voices configured
+
+    Voice &v = m_impl->voices[slot];
+    uint32_t gen = v.generation.load(std::memory_order_relaxed) + 1;
+
+    Command cmd;
+    cmd.type = CmdType::StartStreamVoice;
+    cmd.slot = slot;
+    cmd.generation = gen;
+    cmd.streamCb = std::move(cb);
+    cmd.uintArg = sourceSampleRate;
+    cmd.floatArg = gain;
+    cmd.targetFrame = targetSampleTime;
+
+    if (!m_impl->commands.push(std::move(cmd)))
     {
-        Voice &v = m_impl->voices[i];
-        bool expected = false;
-        if (v.active.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
-        {
-            uint32_t gen = v.generation.fetch_add(1, std::memory_order_relaxed) + 1;
-
-            Command cmd;
-            cmd.type = CmdType::StartStreamVoice;
-            cmd.slot = i;
-            cmd.generation = gen;
-            cmd.streamCb = std::move(cb);
-            cmd.uintArg = sourceSampleRate;
-            cmd.floatArg = gain;
-            cmd.targetFrame = targetSampleTime;
-
-            if (!m_impl->commands.push(std::move(cmd)))
-            {
-                v.active.store(false, std::memory_order_release);
-                return kInvalidVoice;
-            }
-
-            setVoicePan(Impl::makeHandle(i, gen), pan);
-            return Impl::makeHandle(i, gen);
-        }
+        if (wasFree)
+            v.active.store(false, std::memory_order_release);
+        return kInvalidVoice;
     }
-    return kInvalidVoice; // pool exhausted
+
+    v.generation.store(gen, std::memory_order_relaxed);
+    v.startSeq.store(m_impl->nextStartSeq.fetch_add(1, std::memory_order_relaxed),
+                      std::memory_order_relaxed);
+
+    setVoicePan(Impl::makeHandle(slot, gen), pan);
+    return Impl::makeHandle(slot, gen);
 }
 
 void AudioEngine::stopVoice(VoiceHandle voice)

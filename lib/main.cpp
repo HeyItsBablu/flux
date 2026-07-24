@@ -15,7 +15,7 @@ struct StepData
   bool on = false;
   float velocity = 1.0f;      // 0..1, scales this hit's gain
   float pitchSemitones = 0.f; // -24..+24, shifts freqHz for synth tracks only
-                               // (see the note on StepHit::sampleId below)
+                              // (see the note on StepHit::sampleId below)
 };
 
 struct StepHit
@@ -24,12 +24,8 @@ struct StepHit
   float gain;
   float pan;
 
-  // If set to a valid sample, this track plays that sample instead of the
-  // synth test tone. Per-step pitch (StepData::pitchSemitones) is NOT
-  // applied to sample playback — play() has no rate/pitch argument, and
-  // routing samples through playStream() to get pitch would force a mono
-  // downmix per the engine's existing streaming contract. Flagging this
-  // as a known gap rather than quietly faking it.
+  // synth test tone. Per-step pitch (StepData::pitchSemitones) applies to
+  // sample playback too, via AudioEngine::play()'s pitchRatio argument.
   SampleID sampleId = kInvalidSample;
 };
 
@@ -60,23 +56,23 @@ class StepScheduler
 public:
   static constexpr int kSteps = 16;
   static constexpr int kMaxPatterns = 8; // fixed pool — same tradeoff as the
-                                          // engine's 64-voice pool: simple,
-                                          // real-time-safe, bounded memory.
-                                          // Bump this if 8 patterns isn't enough.
+                                         // engine's 64-voice pool: simple,
+                                         // real-time-safe, bounded memory.
+                                         // Bump this if 8 patterns isn't enough.
 
   double bpm = 120.0;
   bool playing = false;
   bool songMode = false; // false = loop editingSlot forever; true = play
-                          // through `arrangement`
+                         // through `arrangement`
 
   std::array<Pattern, kMaxPatterns> patternSlots;
-  std::vector<int> activeSlots;          // ordered list of in-use slot indices —
-                                          // this is the "pattern list" the UI enumerates
+  std::vector<int> activeSlots;              // ordered list of in-use slot indices —
+                                             // this is the "pattern list" the UI enumerates
   std::vector<ArrangementEntry> arrangement; // song sequence, in play order
 
   int arrangementPos = 0; // index into `arrangement`, valid only in song mode
-  int editingSlot = -1;    // which pattern the grid currently shows/edits
-  int playingSlot = -1;    // which pattern is currently sounding
+  int editingSlot = -1;   // which pattern the grid currently shows/edits
+  int playingSlot = -1;   // which pattern is currently sounding
   int currentStep = 0;
 
   std::vector<StepHit> trackVoice; // one timbre per track, shared across all patterns
@@ -124,13 +120,13 @@ public:
 
     patternSlots[slot].active = false;
     activeSlots.erase(std::remove(activeSlots.begin(), activeSlots.end(), slot),
-                       activeSlots.end());
+                      activeSlots.end());
 
     // Drop any arrangement entries that referenced the deleted pattern.
     arrangement.erase(
         std::remove_if(arrangement.begin(), arrangement.end(),
-                        [slot](const ArrangementEntry &e)
-                        { return e.patternSlot == slot; }),
+                       [slot](const ArrangementEntry &e)
+                       { return e.patternSlot == slot; }),
         arrangement.end());
     if (arrangementPos >= (int)arrangement.size())
       arrangementPos = 0;
@@ -172,7 +168,7 @@ public:
     currentStep = 0;
     arrangementPos = 0;
     playingSlot = (songMode && !arrangement.empty()) ? arrangement[0].patternSlot
-                                                       : editingSlot;
+                                                     : editingSlot;
     _nextStepFrame = AudioEngine::get().currentSampleTime();
   }
 
@@ -222,7 +218,10 @@ private:
   uint64_t _framesPerStep() const
   {
     double secondsPerStep = 60.0 / bpm / 4.0; // 16th notes, 4 per beat
-    return (uint64_t)(secondsPerStep * AudioEngine::get().sampleRate());
+    uint64_t frames = (uint64_t)(secondsPerStep * AudioEngine::get().sampleRate());
+    // Guard against tick()'s while-loop spinning forever if this ever
+    // truncates to 0 (extreme bpm and/or very low sample rate).
+    return std::max<uint64_t>(1, frames);
   }
 
   static void _fireStep(const StepHit &hit, const StepData &step, uint64_t targetFrame)
@@ -234,19 +233,29 @@ private:
     if (engine.isSampleValid(hit.sampleId))
     {
       // Sample-backed track: sample-accurate one-shot, velocity applied
-      // as gain. No pitch here — see StepHit::sampleId.
-      engine.play(hit.sampleId, effectiveGain, hit.pan, /*loop=*/false, targetFrame);
+      // as gain, pitch via pitchRatio.
+      float pitchRatio = std::pow(2.0f, step.pitchSemitones / 12.0f);
+      engine.play(hit.sampleId, effectiveGain, hit.pan, /*loop=*/false, pitchRatio, targetFrame);
       return;
     }
 
     _fireSynthStep(hit, step, effectiveGain, targetFrame);
   }
 
+  // Bundles the two pieces of per-note state the envelope callback needs.
+  // A single make_shared<> here replaces the previous pair of separate
+  // shared_ptr<float>/shared_ptr<int> allocations per note fired.
+  struct SynthNoteState
+  {
+    float phase = 0.f;
+    int samplesLeft = 0;
+  };
+
   static void _fireSynthStep(const StepHit &hit, const StepData &step,
                              float effectiveGain, uint64_t targetFrame)
   {
     auto &engine = AudioEngine::get();
-    auto phase = std::make_shared<float>(0.f);
+    auto state = std::make_shared<SynthNoteState>();
 
     // Pitch shift: each semitone is a factor of 2^(1/12).
     float pitchedFreq = hit.freqHz * std::pow(2.0f, step.pitchSemitones / 12.0f);
@@ -254,21 +263,21 @@ private:
 
     // Simple decaying envelope so each hit sounds like a "note" instead
     // of an infinite drone — decays over ~150ms then goes silent.
-    auto samplesLeft = std::make_shared<int>((int)(engine.sampleRate() * 0.15));
-    int totalSamples = *samplesLeft;
+    state->samplesLeft = (int)(engine.sampleRate() * 0.15);
+    int totalSamples = state->samplesLeft;
 
     AudioEngine::StreamCallback cb =
-        [phase, phaseInc, samplesLeft, totalSamples](float *buf, int frames) -> int
+        [state, phaseInc, totalSamples](float *buf, int frames) -> int
     {
-      if (*samplesLeft <= 0)
+      if (state->samplesLeft <= 0)
         return -1; // fully decayed — engine frees this voice slot
 
       for (int i = 0; i < frames; i++)
       {
-        float env = (float)*samplesLeft / (float)totalSamples; // linear decay
-        buf[i] = std::sin(*phase) * env * 0.3f;
-        *phase += phaseInc;
-        (*samplesLeft)--;
+        float env = (float)state->samplesLeft / (float)totalSamples; // linear decay
+        buf[i] = std::sin(state->phase) * env * 0.3f;
+        state->phase += phaseInc;
+        state->samplesLeft--;
       }
       return frames;
     };
@@ -333,7 +342,7 @@ public:
 
     _instrumentNameState.reserve(_seq->trackVoice.size());
     static const char *kDefaultNames[] = {"Low Tom (sine)", "Mid Tom (sine)",
-                                           "Clap (sine)", "Hi-Hat (sine)"};
+                                          "Clap (sine)", "Hi-Hat (sine)"};
     for (size_t t = 0; t < _seq->trackVoice.size(); t++)
       _instrumentNameState.emplace_back(
           t < 4 ? kDefaultNames[t] : "Track " + std::to_string(t) + " (sine)");
@@ -483,22 +492,21 @@ public:
   {
     ArrangementEntry e{_nextArrangementEntryId++, patternSlot};
     _seq->arrangement.push_back(e);
+
     _arrangementState.push_back(e);
+    printf("arrangementState size after add: %zu\n", _arrangementState.size());
   }
 
   void _removeArrangementEntryById(uint64_t id)
   {
-    // Search the scheduler's plain (readable) copy for the index, then
-    // apply that same index to both lists — they're always kept in the
-    // same order, so this avoids needing to read the State's value back.
     for (size_t i = 0; i < _seq->arrangement.size(); i++)
     {
       if (_seq->arrangement[i].id == id)
       {
         _seq->arrangement.erase(_seq->arrangement.begin() + i);
-        if (_seq->arrangementPos >= (int)_seq->arrangement.size())
-          _seq->arrangementPos = 0;
-        _arrangementState.erase((int)i);
+
+        _arrangementState.erase(i);
+        printf("arrangementState size after add: %zu\n", _arrangementState.size());
         break;
       }
     }
@@ -555,52 +563,52 @@ public:
           cell->setBorderRadius(4);
 
         auto cellWithMenu = ContextMenu(cell, {
-            ContextMenuItem::Widget(
-                Column({
-                    Text("Velocity")->setFontSize(11),
-                    Slider(0.0, 1.0, 0.05)
-                        ->setValue(_velocitySliderState[t][s])
-                        ->setWidth(140)
-                        ->setOnValueChanged([this, t, s](double v)
-                                            {
+                                                  ContextMenuItem::Widget(
+                                                      Column({
+                                                                 Text("Velocity")->setFontSize(11),
+                                                                 Slider(0.0, 1.0, 0.05)
+                                                                     ->setValue(_velocitySliderState[t][s])
+                                                                     ->setWidth(140)
+                                                                     ->setOnValueChanged([this, t, s](double v)
+                                                                                         {
                                               _seq->patternSlots[_seq->editingSlot]
                                                   .steps[t][s].velocity = (float)v;
-                                              _velocitySliderState[t][s].set(v);
-                                            }),
-                    Text("Pitch (semitones)")->setFontSize(11),
-                    Slider(-24.0, 24.0, 1.0)
-                        ->setValue(_pitchSliderState[t][s])
-                        ->setWidth(140)
-                        ->setOnValueChanged([this, t, s](double v)
-                                            {
+                                              _velocitySliderState[t][s].set(v); }),
+                                                                 Text("Pitch (semitones)")->setFontSize(11),
+                                                                 Slider(-24.0, 24.0, 1.0)
+                                                                     ->setValue(_pitchSliderState[t][s])
+                                                                     ->setWidth(140)
+                                                                     ->setOnValueChanged([this, t, s](double v)
+                                                                                         {
                                               _seq->patternSlots[_seq->editingSlot]
                                                   .steps[t][s].pitchSemitones = (float)v;
-                                              _pitchSliderState[t][s].set(v);
-                                            }),
-                })->setGap(4)->setPadding(8)),
-        });
+                                              _pitchSliderState[t][s].set(v); }),
+                                                             })
+                                                          ->setGap(4)
+                                                          ->setPadding(8)),
+                                              });
 
         stepButtons.push_back(cellWithMenu);
       }
 
       auto trackHeader = Row({
-                                  Text(_instrumentNameState[t])
-                                      ->setFontSize(12)
-                                      ->setWidth(120)
-                                      ->setOverflow(TextOverflow::Ellipsis)
-                                      ->setMaxLines(1),
-                                  FilePicker()
-                                      ->setMode(FilePickerMode::Open)
-                                      ->setTitle("Load instrument sample")
-                                      ->addFilter("Audio", {"*.wav", "*.mp3", "*.ogg", "*.flac"})
-                                      
-                                      ->setWidth(80)
-                                      ->setOnChanged([this, t](const std::string &path)
-                                                     { _loadTrackSample(t, path); }),
-                              })
-                              ->setGap(8)
-                              ->setAlignItems(AlignItems::Center)
-                              ->setWidth(210);
+                                 Text(_instrumentNameState[t])
+                                     ->setFontSize(12)
+                                     ->setWidth(120)
+                                     ->setOverflow(TextOverflow::Ellipsis)
+                                     ->setMaxLines(1),
+                                 FilePicker()
+                                     ->setMode(FilePickerMode::Open)
+                                     ->setTitle("Load instrument sample")
+                                     ->addFilter("Audio", {"*.wav", "*.mp3", "*.ogg", "*.flac"})
+
+                                     ->setWidth(80)
+                                     ->setOnChanged([this, t](const std::string &path)
+                                                    { _loadTrackSample(t, path); }),
+                             })
+                             ->setGap(8)
+                             ->setAlignItems(AlignItems::Center)
+                             ->setWidth(210);
 
       trackRows.push_back(
           Row({trackHeader, Row({stepButtons})->setGap(4)})
@@ -620,8 +628,7 @@ public:
                                                      if (idx < 0 || idx >= (int)_seq->activeSlots.size())
                                                        return;
                                                      _seq->setEditingPattern(_seq->activeSlots[idx]);
-                                                     _refreshGridFromPattern();
-                                                   })
+                                                     _refreshGridFromPattern(); })
                            ->setWidth(160);
 
     auto patternBar = Row({
@@ -642,6 +649,7 @@ public:
 
     // ── Arrangement bar (song mode) ─────────────────────────────────────
     auto arrangementList = Box({
+                                   _buildArrangementChip(ArrangementEntry{1, 0}), // TEMP: hardcoded probe
                                    Map<ArrangementEntry>(
                                        _arrangementState,
                                        [](int, const ArrangementEntry &e)
@@ -667,7 +675,7 @@ public:
                                          ->setAlignItems(AlignItems::Center),
                                      arrangementList,
                                  })
-                                 ->setGap(8);
+                              ->setGap(8);
 
     auto transportRow = Row({
                                 Button("▶ Play", [this]
@@ -675,8 +683,7 @@ public:
                                 Button("■ Stop", [this]
                                        {
                                          _seq->stop();
-                                         _currentStepState.set(-1);
-                                       }),
+                                         _currentStepState.set(-1); }),
                                 Text("BPM:"),
                                 NumberInput(40.0, 240.0, 1.0)->setValue(_bpmState)->setWidth(90)->setOnValueChanged([this](double v)
                                                                                                                     { _seq->bpm = v; }),

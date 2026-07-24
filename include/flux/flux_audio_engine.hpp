@@ -67,7 +67,21 @@ public:
     // ── Voices ────────────────────────────────────────────────────────────────
     // Every call to play() is an independent, overlappable voice — calling it
     // twice in a row plays two overlapping instances of the same sample.
-    VoiceHandle play(SampleID sample, float gain = 1.0f, float pan = 0.0f, bool loop = false);
+    //
+    // If every voice in the pool is currently busy, play()/playStream() steal
+    // the oldest active voice (the one that started longest ago) rather than
+    // failing outright — the same policy real samplers use, so a dense
+    // pattern doesn't start silently dropping notes once the pool fills up.
+    // The stolen voice's old VoiceHandle becomes invalid immediately (its
+    // generation no longer matches), so isVoiceActive()/getVoiceProgress()
+    // on it correctly report "gone". kInvalidVoice is now only returned if
+    // the engine has zero voices configured, or in the rare case the
+    // command queue itself is full.
+    // pitchRatio scales playback speed (and thus pitch): 1.0 = normal,
+    // 2.0 = one octave up, 0.5 = one octave down. Convert from semitones
+    // with std::pow(2.f, semitones / 12.f).
+    VoiceHandle play(SampleID sample, float gain = 1.0f, float pan = 0.0f, bool loop = false,
+                      float pitchRatio = 1.0f);
 
 
     // Sample-accurate variant. targetSampleTime is an absolute value from
@@ -76,7 +90,7 @@ public:
     // "as soon as possible" behavior; if targetSampleTime has already
     // passed by the time the command is applied, it's clamped to now.
     VoiceHandle play(SampleID sample, float gain, float pan, bool loop,
-                      uint64_t targetSampleTime);
+                      float pitchRatio, uint64_t targetSampleTime);
 
     // ── Streaming voices ──────────────────────────────────────────────────────
     // For sources that can't be pre-decoded (e.g. a video file's audio track,
