@@ -2684,27 +2684,5 @@ flux run linux
 |---|---|
 | `windows` | Locates Visual Studio, runs CMake + MSVC build, launches `build/Release/app.exe` |
 | `linux` | Runs CMake + GCC/Clang build, launches `build/app` |
-| `android` | *(coming soon)* |
+| `android` | Runs `gradlew installDebug` against `android/`, then launches the app via `adb shell am start` on the connected device/emulator |
 
-### App config — flux.json
-
-```json
-{
-    "name": "my_app",
-    "package": "com.example.my_app"
-}
-```
-
-| Field | Description |
-|---|---|
-| `name` | App name used in build output |
-| `package` | Android package identifier |
-
-### Building the CLI from source
-
-```bash
-git clone https://github.com/HeyItsBablu/flux-cli
-cd flux-cli
-cmake -B build -S .
-cmake --build build --config Release
-```

@@ -47,6 +47,8 @@ target_include_directories(flux_cli PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
 
+target_sources(flux_cli PRIVATE platform/build_android.cpp)
+
 if(WIN32)
     target_sources(flux_cli PRIVATE platform/build_windows.cpp)
 elseif(APPLE)

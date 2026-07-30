@@ -139,10 +139,14 @@ scripts/run-macos.sh
 scripts\run-android.bat
 ```
 
-> The `flux` CLI does not support Android yet (`flux run android` /
-> `flux doctor android` will report "not implemented"). Use the script
-> above for this platform.
-
+> As of this build, the `flux` CLI also supports Android —
+> `flux run android` / `flux build android` / `flux doctor android` all
+> work as an alternative to the script above. Both drive the same
+> underlying Gradle project, so pick whichever fits your workflow. The
+> CLI additionally needs the Android SDK location resolvable (via
+> `ANDROID_HOME`/`ANDROID_SDK_ROOT` or `android/local.properties`) and
+> `adb` reachable, same as Android Studio requires — run
+> `flux doctor android` to check both.
 ---
 
 ## Web
@@ -388,15 +392,20 @@ flux remove <package>               # Remove a dependency
 flux install                        # Install dependencies from flux.deps.json
 ```
 
-Supported platforms: `windows`, `linux`, `macos`. `web` and `android` are
-recognized as valid platform names but are **not implemented yet** — the
+Supported platforms: `windows`, `linux`, `macos`, `android`. `web` is
+recognized as a valid platform name but is **not implemented yet** — the
 CLI will tell you so rather than erroring as "unknown platform." Use the
-platform-specific scripts above for those two.
+`run-web` script above for that one.
+
+Unlike the three native desktop platforms, `android` doesn't require a
+matching host — `flux run android` works the same from Windows, macOS, or
+Linux, since it just shells out to the project's Gradle wrapper and `adb`.
 
 Each native subcommand must be run from a matching host — e.g.
 `flux run windows` only works when the CLI itself was built and is
 running on Windows; running it from macOS/Linux reports that a Windows
 host is required, rather than silently failing.
+(This host restriction does not apply to `android`.)
 
 > **`--release` is currently a no-op.** The CLI accepts the flag but
 > always builds Debug and prints a note saying so — there is no way to
