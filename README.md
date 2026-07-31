@@ -182,6 +182,7 @@ WidgetPtr createApp(FluxUI *app)
 - [Map](#map)
 - [Interaction](#interaction)
 - [Input](#input)
+- [Form](#form)
 - [Canvas](#canvas)
 - [State](#state)
 - [Overlay](#overlay)
@@ -1003,19 +1004,123 @@ Button(Row({Icon(FluxIcons::Upload), Text("Upload")}), [&]{ upload(); });
 
 ### TextInput
 
-Single-line text field with cursor, scroll, placeholder, and two-way `State<string>` binding.
+Single-line text field with cursor, scroll, placeholder, two-way `State<string>`
+binding, and per-type validation.
 
 ```cpp
 TextInput("Enter your name...")
     ->setInputValue(nameState)
     ->setWidth(320);
+
+
+// Built-in validation (Email/Url/Number) — border turns red after first
+// edit/blur if invalid; empty is always treated as neutral/valid.
+TextInput("you@example.com")
+    ->setInputType(InputType::Email)
+    ->setOnValidationChanged([](bool ok){ std::cout << ok << "\n"; });
+
+// Custom validator overrides the built-in check entirely — required for
+// types with no built-in rule (Text, Password, Tel, Search).
+TextInput("Phone")
+    ->setInputType(InputType::Tel)
+    ->setValidator([](const std::string& s){
+        return s.empty() || std::count_if(s.begin(), s.end(), ::isdigit) >= 7;
+    });
+``
+
+**InputType**
+
+| Value | Keystroke filtering | Built-in validation | Rendering |
+|---|---|---|---|
+| `InputType::Text` | none | none | plain |
+| `InputType::Password` | none | none | masked with `maskChar` |
+| `InputType::Number` | digits, one `.`, leading `-` only | numeric parse | plain |
+| `InputType::Email` | none | `user@host.tld` pattern | plain |
+| `InputType::Tel` | none | none — supply a `setValidator` | plain |
+| `InputType::Url` | none | `scheme://...` pattern | plain |
+| `InputType::Search` | none | none | plain |
+
+> `Number` here is still a `string`-backed field with filtered keystrokes,
+> not a numeric `State<T>` — use [`NumberInput`/`SpinBox`](#numberinput--spinbox)
+> when you need an actual bound number.
+
 ```
 
 | Method | Type | Description |
 |---|---|---|
 | `setInputValue(State<string>)` | State | Two-way reactive binding |
 | `setPlaceholder(text)` | `string` | Hint shown when empty |
+| `setInputType(t)` | `InputType` | Selects filtering, masking, and built-in validation (default `Text`) |
+| `setMaskChar(c)` | `wchar_t` | Glyph used to mask `Password` values (default `•`) |
+| `setValidator(fn)` | `(const string&) -> bool` | Overrides the built-in per-type check entirely |
+| `setOnValidationChanged(fn)` | `void(bool)` | Fires whenever validity flips |
+| `setInvalidBorderColor(c)` | `Color` | Border color shown once touched and invalid |
+| `isValid()` | `bool` | Current validity (empty value is always valid/neutral) |
+| `isTouched()` | `bool` | `true` after first edit or blur — gates when invalid styling shows |
 | `setWidth(w)` | `int` | Fixed width |
+
+---
+
+## Form
+
+`Form` is a thin coordinator, not a primitive — it stacks its children in a
+column (via `Box`) and has no idea what any individual field is. At
+`submit()` time it walks its subtree, finds every descendant implementing
+`Validatable` (`TextInput` today — any future widget opts in the same way
+via `dynamic_cast<Validatable*>`), touches it to reveal error state, and
+folds every field's validity into one aggregate result.
+
+`Form` deliberately does **not** collect field values into a map — build
+fields as local variables, pass them into `setChildren()`, and read them
+back directly (e.g. `emailInput->inputValue`) after a successful `submit()`.
+
+```cpp
+auto email = TextInput("you@example.com")->setInputType(InputType::Email);
+
+// Two-step construction: `form` must exist before the submit button's
+// lambda can capture it.
+auto form = Form();
+form->setChildren({
+        email,
+        Button("Submit", [form]{
+            if (form->submit())
+                std::cout << "Valid: " << email->inputValue << "\n";
+        }),
+    })
+    ->setGap(16)
+    ->setOnSubmit([email]{ /* fires only when the whole form is valid */ });
+```
+
+**Methods**
+
+| Method | Type | Description |
+|---|---|---|
+| `setChildren(fields)` | `vector<WidgetPtr>` | Fields (and anything else, e.g. a submit `Button`) rendered in order |
+| `setDirection(d)` | `FlexDirection` | Stack direction (default `Column`) |
+| `setGap(px)` | `int` | Gap between children |
+| `setOnSubmit(fn)` | `void()` | Fires from `submit()` only when the form is valid |
+| `submit()` | `bool` | Touches every validatable field (revealing invalid ones), returns aggregate validity, fires `onSubmit` if valid |
+| `isFormValid()` | `bool` | Read-only validity check — does not touch fields or reveal error state; handy for e.g. disabling a submit button pre-emptively |
+
+### Validatable
+
+Opt-in interface a widget implements (alongside `Widget`) to participate in
+a `Form`. `TextInput` implements this today; adding it to a new widget is
+all that's required for `Form` to discover it via subtree walk.
+
+```cpp
+class Validatable {
+public:
+    virtual bool isValid() const = 0;
+    virtual void markTouched() = 0;
+};
+```
+
+| Method | Description |
+|---|---|
+| `isValid()` | Current validity of this field |
+| `markTouched()` | Reveals this field's validation state (e.g. flips a "touched" flag so an untouched/empty field doesn't show invalid before the user interacts with it) |
+
 
 ---
 
