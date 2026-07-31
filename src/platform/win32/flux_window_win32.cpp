@@ -6,6 +6,7 @@
 #include "flux/flux_render_loop.hpp"
 #include "flux/flux_http_platform.hpp"
 #include "flux/flux_core.hpp" // FluxUI::getCurrentInstance(), getFontCache()
+#include "../windows/resource.h"
 
 #include <windowsx.h>
 #include <cassert>
@@ -83,6 +84,10 @@ bool PlatformWindow::create(const std::string &title, int width, int height,
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
     wc.hbrBackground = nullptr;
     wc.style = 0;
+    // Big icon (Alt+Tab, taskbar) and small icon (title bar, top-left)
+    wc.hIcon   = LoadIconW(hInstance_, MAKEINTRESOURCEW(IDI_APP_ICON));
+    wc.hIconSm = LoadIconW(hInstance_, MAKEINTRESOURCEW(IDI_APP_ICON));
+
     RegisterClassExW(&wc);
 
     RECT r = {0, 0, width, height};
