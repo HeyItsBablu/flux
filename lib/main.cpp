@@ -1,5 +1,4 @@
 #include "flux/flux.hpp"
-
 #include <cctype>
 
 class MyApp : public Widget
@@ -51,19 +50,35 @@ public:
         // Search — no built-in validation, just the DOM search keyboard hint.
         auto searchInput = TextInput("Search...")->setInputType(InputType::Search)->setWidth(320);
 
+        // Two-step construction: `form` has to exist before the submit
+        // button's lambda can capture it, so build the empty widget first,
+        // then fill in its children and submit handler.
+        auto form = Form();
+        form->setChildren({
+                    row("Text", textInput),
+                    row("Email (built-in validation)", emailInput),
+                    row("Password (masked)", passwordInput),
+                    row("Number (filtered keystrokes)", numberInput),
+                    row("Tel (custom validator: 7+ digits)", telInput),
+                    row("Url (built-in validation)", urlInput),
+                    row("Search", searchInput),
+                    Button("Submit", [form, this] {
+                        if (form->submit())
+                            statusText.set("All fields valid — submitted!");
+                        else
+                            statusText.set("Please fix the highlighted fields.");
+                    })->setBackgroundColor(Color::fromRGB(33, 150, 243))
+                      ->setTextColor(Color::fromRGB(255, 255, 255))
+                      ->setBorderRadius(6)
+                      ->setPadding(12),
+                })
+            ->setGap(16);
+
         return Box({
                        Text("Input Types Demo")
                            ->setFontSize(22)
                            ->setFontWeight(FontWeight::Bold),
-
-                       row("Text", textInput),
-                       row("Email (built-in validation)", emailInput),
-                       row("Password (masked)", passwordInput),
-                       row("Number (filtered keystrokes)", numberInput),
-                       row("Tel (custom validator: 7+ digits)", telInput),
-                       row("Url (built-in validation)", urlInput),
-                       row("Search", searchInput),
-
+                       form,
                        Text(statusText)
                            ->setFontSize(13)
                            ->setTextColor(Color::fromRGB(33, 150, 243)),
