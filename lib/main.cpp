@@ -24,19 +24,19 @@ public:
         auto textInput = TextInput("Just plain text")->setWidth(320);
 
         // Email — built-in regex validation, flags after first blur/edit.
-        auto emailInput = EmailInput("you@example.com")->setWidth(320);
+        auto emailInput = TextInput("you@example.com")->setInputType(InputType::Email)->setWidth(320);
         emailInput->setOnValidationChanged([this](bool ok)
                                             { statusText.set(ok ? "Email looks valid" : "Email looks invalid"); });
 
         // Password — masked with bullets, no built-in validation.
-        auto passwordInput = PasswordInput("Password")->setWidth(320);
+        auto passwordInput = TextInput("Password")->setInputType(InputType::Password)->setWidth(320);
 
         // Number — keystrokes filtered to digits/one '.'/leading '-'.
-        auto numberInput = NumberTextInput("Age")->setWidth(320);
+        auto numberInput = TextInput("Age")->setInputType(InputType::Number)->setWidth(320);
 
         // Tel — no built-in check, so a custom validator is supplied here
         // (require at least 7 digits) to show setValidator() in action.
-        auto telInput = TextInput("Phone")->setType(InputType::Tel)->setWidth(320);
+        auto telInput = TextInput("Phone")->setInputType(InputType::Tel)->setWidth(320);
         telInput->setValidator([](const std::string &s)
                                {
             if (s.empty()) return true;
@@ -46,10 +46,10 @@ public:
             return digits >= 7; });
 
         // Url — built-in scheme:// check.
-        auto urlInput = TextInput("https://example.com")->setType(InputType::Url)->setWidth(320);
+        auto urlInput = TextInput("https://example.com")->setInputType(InputType::Url)->setWidth(320);
 
         // Search — no built-in validation, just the DOM search keyboard hint.
-        auto searchInput = TextInput("Search...")->setType(InputType::Search)->setWidth(320);
+        auto searchInput = TextInput("Search...")->setInputType(InputType::Search)->setWidth(320);
 
         return Box({
                        Text("Input Types Demo")
