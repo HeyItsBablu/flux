@@ -89,7 +89,7 @@ namespace
 
     // Runs vswhere/vcvars/cmake configure+build. Returns {exit code, project root}.
     // project root is empty on failure.
-    std::pair<int, fs::path> configure_and_build(bool /*release*/)
+    std::pair<int, fs::path> configure_and_build(bool release, const std::string &build_dir)
     {
         auto root = find_project_root();
         if (!root)
@@ -111,7 +111,7 @@ namespace
             return {1, {}};
         }
 
-        const std::string build_dir = "build\\msvc";
+
 
         std::string command =
             "cd /d \"" + root->string() + "\" && "
@@ -119,14 +119,14 @@ namespace
             vcvars.string() + "\" && "
                               "cmake -S . -B " +
             build_dir + " -G Ninja "
-                        "-DCMAKE_BUILD_TYPE=Debug "
+                        "-DCMAKE_BUILD_TYPE=" + std::string(release ? "Release" : "Debug") + " "
                         "-DCMAKE_C_COMPILER=cl.exe "
                         "-DCMAKE_CXX_COMPILER=cl.exe "
                         "-DFLUX_BUILD_CLI=OFF && "
                         "cmake --build " +
             build_dir;
 
-        std::printf("Building flux (Debug, Windows)...\n\n");
+        std::printf("Building flux (%s, Windows)...\n\n", release ? "Release" : "Debug");
         int rc = std::system(command.c_str());
         if (rc != 0)
         {
@@ -177,7 +177,7 @@ int windows_doctor()
 
 int windows_build(bool release)
 {
-    auto [rc, root] = configure_and_build(release);
+    auto [rc, root] = configure_and_build(release, release ? "build\\msvc-release" : "build\\msvc");
     if (rc == 0)
     {
         std::printf("\nBuild succeeded.\n");
@@ -187,11 +187,11 @@ int windows_build(bool release)
 
 int windows_run(bool release)
 {
-    auto [rc, root] = configure_and_build(release);
+    auto [rc, root] = configure_and_build(release, release ? "build\\msvc-release" : "build\\msvc");
     if (rc != 0)
         return rc;
 
-    fs::path exe = root / "build" / "msvc" / "windows" / "flux_app.exe";
+    fs::path exe = root / "build" / (release ? "msvc-release" : "msvc") / "windows" / "flux_app.exe";
     if (!fs::exists(exe))
     {
         std::fprintf(stderr, "\nBuild succeeded but could not find %s\n", exe.string().c_str());
@@ -200,4 +200,11 @@ int windows_run(bool release)
 
     std::printf("\nLaunching %s...\n\n", exe.string().c_str());
     return std::system(("\"" + exe.string() + "\"").c_str());
+}
+
+// Exposed for windows_installer.cpp — installer packaging always builds
+// Release, and needs the resulting project root + build dir back.
+std::pair<int, fs::path> windows_configure_and_build(bool release, const std::string &build_dir)
+{
+    return configure_and_build(release, build_dir);
 }

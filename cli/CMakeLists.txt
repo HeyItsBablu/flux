@@ -45,12 +45,14 @@ endif()
 target_include_directories(flux_cli PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+    ${CMAKE_CURRENT_SOURCE_DIR}/platform
 )
 
 target_sources(flux_cli PRIVATE platform/build_android.cpp)
 
 if(WIN32)
     target_sources(flux_cli PRIVATE platform/build_windows.cpp)
+    target_sources(flux_cli PRIVATE installer/windows_installer.cpp)
 elseif(APPLE)
     target_sources(flux_cli PRIVATE platform/build_macos.cpp)
 elseif(UNIX)

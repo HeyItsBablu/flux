@@ -9,6 +9,7 @@
 int windows_build(bool release);
 int windows_run(bool release);
 int windows_doctor();
+int windows_release();
 #elif defined(__APPLE__)
 int macos_build(bool release);
 int macos_run(bool release);
@@ -32,6 +33,7 @@ void print_usage() {
   std::printf("  flux create <name>                  Scaffold a new project\n");
   std::printf("  flux run <platform> [--release]     Build and launch\n");
   std::printf("  flux build <platform> [--release]   Build only\n");
+  std::printf("  flux release <platform>             Build a distributable installer\n");
   std::printf("  flux doctor [platform]              Check host toolchain\n");
   std::printf("  flux add <package> [--ref <ref>]    Add a dependency\n");
   std::printf("  flux remove <package>               Remove a dependency\n\n");
@@ -122,14 +124,29 @@ int stub_not_implemented(const std::string &platform) {
   return 1;
 }
 
+
+int dispatch_release(const std::string &platform) {
+  if (platform == "windows") {
+#if defined(_WIN32)
+    return windows_release();
+#else
+    std::fprintf(stderr,
+                 "flux: 'windows' release requires running flux from a Windows host.\n");
+    return 1;
+#endif
+  }
+
+  std::fprintf(stderr,
+               "flux: 'release' is not implemented for '%s' yet.\n",
+               platform.c_str());
+  return 1;
+}
+
+
 int dispatch(const std::string &command, const std::string &platform,
              bool release) {
   if (platform == "windows") {
 #if defined(_WIN32)
-    if (release) {
-      std::printf("note: --release is not implemented yet, building Debug "
-                  "instead.\n\n");
-    }
     return (command == "run") ? windows_run(false) : windows_build(false);
 #else
     std::fprintf(
@@ -256,6 +273,22 @@ int main(int argc, char **argv) {
 
     return cmd_create(project_name);
   }
+
+  if (command == "release") {
+    if (argc < 3) {
+      std::fprintf(stderr, "flux: missing platform argument.\n\n");
+      print_usage();
+      return 1;
+    }
+    std::string platform = argv[2];
+    if (!is_valid_platform(platform)) {
+      std::fprintf(stderr, "flux: unknown platform '%s'\n\n", platform.c_str());
+      print_usage();
+      return 1;
+    }
+    return dispatch_release(platform);
+  }
+
 
   if (command != "run" && command != "build") {
     std::fprintf(stderr, "flux: unknown command '%s'\n\n", command.c_str());
