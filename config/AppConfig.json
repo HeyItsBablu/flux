@@ -3,6 +3,7 @@
   "bundleId": "com.example.myapplication",
   "version": "1.0.0",
   "build":   1,
+  "icon": "assets/flux.png",
   "window": {
     "width": 1280,
     "height": 720,

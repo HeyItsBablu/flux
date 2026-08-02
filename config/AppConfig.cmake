@@ -8,12 +8,22 @@ string(JSON FLUX_APP_NAME      GET ${FLUX_CONFIG_JSON} name)
 string(JSON FLUX_APP_BUNDLE_ID GET ${FLUX_CONFIG_JSON} bundleId)
 string(JSON FLUX_APP_VERSION   GET ${FLUX_CONFIG_JSON} version)
 string(JSON FLUX_APP_BUILD     GET ${FLUX_CONFIG_JSON} build)
+string(JSON FLUX_APP_ICON      GET ${FLUX_CONFIG_JSON} icon)
 
 
 string(JSON FLUX_APP_WINDOW_WIDTH  GET ${FLUX_CONFIG_JSON} window width)
 string(JSON FLUX_APP_WINDOW_HEIGHT GET ${FLUX_CONFIG_JSON} window height)
 string(JSON FLUX_APP_FULLSCREEN    GET ${FLUX_CONFIG_JSON} window fullscreen)
 string(JSON FLUX_APP_MAXIMIZE      GET ${FLUX_CONFIG_JSON} window maximize)
+
+
+# Absolute path to the icon source, resolved once here so every platform
+# (Win32 RC compiler, Linux/SDL2 runtime loader, Android's Gradle task)
+# reads the same file without each re-deriving the relative path.
+get_filename_component(FLUX_APP_ICON_PATH
+    "${CMAKE_CURRENT_LIST_DIR}/../${FLUX_APP_ICON}"
+    ABSOLUTE
+)
 
 if(FLUX_APP_FULLSCREEN)
     set(FLUX_APP_FULLSCREEN_BOOL 1)
