@@ -386,13 +386,14 @@ preset, you can use it for subsequent builds:
 ```bash
 flux run <platform> [--release]     # Build and launch
 flux build <platform> [--release]   # Build only
+flux release <platform> [--format]  # Build Release + package an installer
 flux doctor [platform]              # Check host toolchain
 flux add <package> [--ref <ref>]    # Add a dependency
 flux remove <package>               # Remove a dependency
 flux install                        # Install dependencies from flux.deps.json
 ```
 
-Supported platforms: `windows`, `linux`, `macos`, `android`. `web` is
+Supported platforms: `windows`, `linux`, `macos`, `android`V. `web` is
 recognized as a valid platform name but is **not implemented yet** — the
 CLI will tell you so rather than erroring as "unknown platform." Use the
 `run-web` script above for that one.
@@ -407,10 +408,65 @@ running on Windows; running it from macOS/Linux reports that a Windows
 host is required, rather than silently failing.
 (This host restriction does not apply to `android`.)
 
-> **`--release` is currently a no-op.** The CLI accepts the flag but
-> always builds Debug and prints a note saying so — there is no way to
-> produce a Release build via the CLI today. Use the CMake presets below
-> directly if you need a Release binary.
+> **`--release` is currently a no-op for `run`/`build`.** Both commands
+> accept the flag but always build Debug and print a note saying so, on
+> every platform including Windows and Linux. Use `flux release
+> <platform>` (below) or the CMake presets further down if you need an
+> actual Release binary.
+
+### `flux release`
+
+Unlike `run`/`build --release`, `flux release <platform>` **does** produce
+a real Release build — and packages it into a platform-native installer.
+Currently implemented for `windows` and `linux`; `macos` is not yet
+supported and reports so rather than erroring silently.
+
+```bash
+flux release windows
+flux release linux                  # AppImage — no install step, run directly
+flux release linux --format deb     # .deb — installs via apt, full desktop integration
+```
+
+**Windows** needs Inno Setup 6 installed, with `ISCC.exe` reachable on
+`PATH` or at its default install location — `flux doctor windows` checks
+for it.
+
+**Linux** needs, in addition to the packages listed under
+[Install dependencies](#install-dependencies) above:
+
+```bash
+sudo apt install imagemagick   # icon resizing, both formats
+```
+
+plus, for the default AppImage format, `linuxdeploy` and `appimagetool`.
+These aren't apt-installable — download the `x86_64.AppImage` builds and
+place them on `PATH` or in `~/.cache/flux/tools/`:
+
+```bash
+mkdir -p ~/.cache/flux/tools && cd ~/.cache/flux/tools
+curl -L -o linuxdeploy-x86_64.AppImage \
+  https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+curl -L -o appimagetool-x86_64.AppImage \
+  https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+chmod +x linuxdeploy-x86_64.AppImage appimagetool-x86_64.AppImage
+```
+
+If running either tool directly fails with a FUSE-related error (common on
+minimal installs or containers), install `libfuse2`/`libfuse2t64` — the CLI
+also falls back to `--appimage-extract` automatically in that case.
+
+`--format deb` needs only `dpkg-deb`, which ships with `dpkg` on any
+Debian/Ubuntu system — nothing extra to install.
+
+Run `flux doctor linux` to check all of the above at once; AppImage/`.deb`
+tooling is reported but doesn't fail the overall doctor check, since it's
+only needed for `flux release`, not `flux build`/`flux run`.
+
+Both platforms pull the app name, bundle ID, version, publisher, and icon
+straight from `config/AppConfig.json` — see [AppConfig.json](#appconfigjson)
+below — so a default `flux release` needs no extra configuration beyond
+that file being filled in correctly. See the [README](README.md#flux-release-platform)
+for output paths and optional project-specific installer template overrides.
 
 ---
 

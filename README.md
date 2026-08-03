@@ -2791,3 +2791,34 @@ flux run linux
 | `linux` | Runs CMake + GCC/Clang build, launches `build/app` |
 | `android` | Runs `gradlew installDebug` against `android/`, then launches the app via `adb shell am start` on the connected device/emulator |
 
+#### `flux release <platform>`
+
+Builds a Release binary and packages it into a distributable installer.
+
+```bash
+flux release windows
+flux release linux                  # AppImage (default)
+flux release linux --format deb     # .deb package
+```
+
+| Platform | Output | Requires |
+|---|---|---|
+| `windows` | `dist/windows/<name>-Setup-<version>.exe` (Inno Setup) | Inno Setup 6 (`ISCC.exe` on PATH or default install location) |
+| `linux` (default) | `dist/linux/<name>-<version>-x86_64.AppImage` | `linuxdeploy` + `appimagetool` (PATH or `~/.cache/flux/tools/`), ImageMagick `convert` |
+| `linux --format deb` | `dist/linux/<pkg-name>_<version>_amd64.deb` | `dpkg-deb` (ships with `dpkg`), ImageMagick `convert` |
+| `macos` | not implemented yet | — |
+
+Both platforms read the app name, version, publisher, and icon from
+`config/AppConfig.json` (see [AppConfig.json](INSTALL.md#appconfigjson) in
+INSTALL.md) — nothing else to configure for a default build. Run
+`flux doctor <platform>` first to confirm the required packaging tools are
+present; missing ones are reported with download links.
+
+Project-specific installer templates are optional and override the built-in
+defaults when present:
+
+| Platform | Override path | Default used otherwise |
+|---|---|---|
+| `windows` | `installer/windows/app.iss` | Built-in Inno Setup script |
+| `linux` (both formats) | `installer/linux/app.desktop` | Built-in `.desktop` file |
+| `linux --format deb` | `installer/linux/control` | Built-in `DEBIAN/control` |
