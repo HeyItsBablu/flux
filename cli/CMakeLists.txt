@@ -57,6 +57,7 @@ elseif(APPLE)
     target_sources(flux_cli PRIVATE platform/build_macos.cpp)
 elseif(UNIX)
     target_sources(flux_cli PRIVATE platform/build_linux.cpp)
+    target_sources(flux_cli PRIVATE installer/linux_installer.cpp)
 endif()
 
 set_target_properties(flux_cli PROPERTIES OUTPUT_NAME "flux")
