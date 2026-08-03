@@ -18,7 +18,7 @@ int macos_doctor();
 int linux_build(bool release);
 int linux_run(bool release);
 int linux_doctor();
-int linux_release();
+int linux_release(const std::string &format);
 #endif
 
 // Buildable/runnable from any host — only needs gradlew + adb in PATH.
@@ -35,6 +35,7 @@ void print_usage() {
   std::printf("  flux run <platform> [--release]     Build and launch\n");
   std::printf("  flux build <platform> [--release]   Build only\n");
   std::printf("  flux release <platform>             Build a distributable installer\n");
+  std::printf("                    --format deb       (linux only; default: appimage)\n");
   std::printf("  flux doctor [platform]              Check host toolchain\n");
   std::printf("  flux add <package> [--ref <ref>]    Add a dependency\n");
   std::printf("  flux remove <package>               Remove a dependency\n\n");
@@ -126,7 +127,7 @@ int stub_not_implemented(const std::string &platform) {
 }
 
 
-int dispatch_release(const std::string &platform) {
+int dispatch_release(const std::string &platform, const std::string &format) {
   if (platform == "windows") {
 #if defined(_WIN32)
     return windows_release();
@@ -139,7 +140,7 @@ int dispatch_release(const std::string &platform) {
 
   if (platform == "linux") {
 #if defined(__linux__)
-    return linux_release();
+    return linux_release(format);
 #else
     std::fprintf(stderr,
                  "flux: 'linux' release requires running flux from a Linux host.\n");
@@ -298,7 +299,14 @@ int main(int argc, char **argv) {
       print_usage();
       return 1;
     }
-    return dispatch_release(platform);
+    std::string format;
+    for (int i = 3; i < argc; ++i) {
+      std::string a = argv[i];
+      if (a == "--format" && i + 1 < argc) {
+        format = argv[++i];
+      }
+    }
+    return dispatch_release(platform, format);
   }
 
 
