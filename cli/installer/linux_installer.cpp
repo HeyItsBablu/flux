@@ -34,6 +34,45 @@ bool tool_on_path(const std::string &cmd) {
   return std::system(("command -v " + cmd + " > /dev/null 2>&1").c_str()) == 0;
 }
 
+// linuxdeploy validates icon dimensions strictly against the freedesktop
+// icon theme spec (must be square, one of a fixed set of sizes) — unlike
+// Windows' .ico, which bundles multiple resolutions and needs no resize
+// step. FLUX_APP_ICON_PATH is a single arbitrary-size PNG shared across
+// all platforms, so Linux needs its own resize pass before handing the
+// icon to linuxdeploy.
+bool resize_icon(const fs::path &src, const fs::path &dst, int size) {
+  std::string cmd = "convert \"" + src.string() + "\" -resize " +
+                     std::to_string(size) + "x" + std::to_string(size) +
+                     "! \"" + dst.string() + "\"";
+  return std::system(cmd.c_str()) == 0;
+}
+
+
+// AppImages themselves require FUSE to execute directly, which isn't
+// guaranteed present (containers, minimal installs, newer Ubuntu's
+// libfuse2 → libfuse2t64 rename all trip this). --appimage-extract
+// sidesteps FUSE entirely by unpacking once and running the extracted
+// AppRun directly from then on.
+std::optional<fs::path> extract_appimage(const fs::path &appImage, const fs::path &cacheDir) {
+  fs::path extractedDir = cacheDir / (appImage.stem().string() + "-extracted");
+  fs::path appRun = extractedDir / "AppRun";
+  if (fs::exists(appRun))
+    return appRun;
+
+  std::string cmd = "cd \"" + cacheDir.string() + "\" && \"" + appImage.string() +
+                     "\" --appimage-extract > /dev/null 2>&1";
+  if (std::system(cmd.c_str()) != 0)
+    return std::nullopt;
+
+  fs::path extracted = cacheDir / "squashfs-root";
+  if (!fs::exists(extracted))
+    return std::nullopt;
+  fs::rename(extracted, extractedDir);
+  return fs::exists(appRun) ? std::optional(appRun) : std::nullopt;
+}
+
+
+
 // linuxdeploy/appimagetool ship as standalone AppImages themselves (the
 // usual distribution form on their GitHub Releases pages) — so unlike
 // ISCC.exe there's no installer to detect, just "is it somewhere runnable".
@@ -44,8 +83,19 @@ std::optional<fs::path> find_tool(const std::string &name, const fs::path &cache
     return fs::path(name); // resolved via PATH when spawned
 
   fs::path cached = cacheDir / name;
-  if (fs::exists(cached))
-    return cached;
+  if (fs::exists(cached)) {
+    // Try running it directly first — cheap check, works when FUSE is
+    // available and skips the extraction step entirely.
+    std::string probe = "\"" + cached.string() + "\" --appimage-help > /dev/null 2>&1";
+    if (std::system(probe.c_str()) == 0)
+      return cached;
+
+    std::fprintf(stderr,
+        "note: %s could not run directly (likely missing FUSE) — "
+        "falling back to --appimage-extract.\n", name.c_str());
+    if (auto appRun = extract_appimage(cached, cacheDir))
+      return appRun;
+  }
 
   return std::nullopt;
 }
@@ -105,10 +155,19 @@ int linux_release() {
   std::string iconName = "flux_app_icon";
   bool haveIcon = fs::exists(iconSrc);
   if (haveIcon) {
-    std::string ext = iconSrc.extension().string();
-    fs::copy_file(iconSrc, appDir / (iconName + ext),
-                  fs::copy_options::overwrite_existing);
-    iconName += ext == ".png" ? "" : ""; // appimagetool wants just the base name in .desktop
+    if (!tool_on_path("convert")) {
+      std::fprintf(stderr,
+          "\nERROR: ImageMagick's `convert` is required to resize the app "
+          "icon for AppImage packaging (linuxdeploy requires square, "
+          "standard-size icons). Install it with:\n"
+          "  sudo apt install imagemagick\n");
+      return 1;
+    }
+    fs::path resizedIcon = appDir / (iconName + ".png");
+    if (!resize_icon(iconSrc, resizedIcon, 256)) {
+      std::fprintf(stderr, "\nERROR: failed to resize icon %s\n", iconSrc.string().c_str());
+      return 1;
+    }
   } else {
     std::fprintf(stderr,
         "WARNING: icon at %s not found — AppImage will use a default icon.\n",
@@ -158,7 +217,7 @@ int linux_release() {
       "--executable \"" + (appDir / "usr" / "bin" / "flux_app").string() + "\" "
       "--desktop-file \"" + (appDir / desktopFileName).string() + "\"";
   if (haveIcon)
-    deployCmd += " --icon-file \"" + (appDir / (iconName + iconSrc.extension().string())).string() + "\"";
+    deployCmd += " --icon-file \"" + (appDir / (iconName + ".png")).string() + "\"";
 
   std::printf("\nRunning linuxdeploy...\n\n");
   int deployRc = std::system(deployCmd.c_str());

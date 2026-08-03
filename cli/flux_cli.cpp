@@ -18,6 +18,7 @@ int macos_doctor();
 int linux_build(bool release);
 int linux_run(bool release);
 int linux_doctor();
+int linux_release();
 #endif
 
 // Buildable/runnable from any host — only needs gradlew + adb in PATH.
@@ -135,6 +136,17 @@ int dispatch_release(const std::string &platform) {
     return 1;
 #endif
   }
+
+  if (platform == "linux") {
+#if defined(__linux__)
+    return linux_release();
+#else
+    std::fprintf(stderr,
+                 "flux: 'linux' release requires running flux from a Linux host.\n");
+    return 1;
+#endif
+  }
+
 
   std::fprintf(stderr,
                "flux: 'release' is not implemented for '%s' yet.\n",
