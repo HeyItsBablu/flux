@@ -83,6 +83,27 @@ namespace flux_detail
     inline constexpr bool is_sequence_v =
         has_value_type_v<T> && !has_mapped_type_v<T>;
 
+    // Detects whether T supports operator== via expression SFINAE. Used to
+    // make State<T>::set()/update()'s "skip if unchanged" optimization
+    // opt-in rather than a hard requirement — types without == (structs
+    // missing the operator, types holding std::function, etc.) simply
+    // always notify instead of failing to compile. This also correctly
+    // cascades through containers: is_equality_comparable_v<vector<T>> is
+    // false whenever T itself lacks ==, because vector<T>::operator==
+    // needs T's == and the expression below fails to substitute.
+    template <typename T, typename = void>
+    struct is_equality_comparable : std::false_type
+    {
+    };
+    template <typename T>
+    struct is_equality_comparable<
+        T, std::void_t<decltype(std::declval<const T &>() == std::declval<const T &>())>>
+        : std::true_type
+    {
+    };
+    template <typename T>
+    inline constexpr bool is_equality_comparable_v = is_equality_comparable<T>::value;
+
 } // namespace flux_detail
 
 // ---------------------------------------------------------------------------
@@ -350,8 +371,13 @@ public:
     // This makes set() idempotent and prevents double-notification when
     // multiple paths (e.g. onSelectionChanged + bindValue) both call set()
     // with the same value.
+    //
+    // Only applies when T supports operator== (see is_equality_comparable_v
+    // above). Types without it just always notify — correct, just skips
+    // the redundant-call optimization.
     void set(T newValue)
     {
+        if constexpr (flux_detail::is_equality_comparable_v<T>)
         {
             std::lock_guard<std::mutex> lk(stateMutex);
             if (value == newValue)
@@ -367,8 +393,11 @@ public:
         {
             std::lock_guard<std::mutex> lock(stateMutex);
             T newValue = updater(value);
-            if (value == newValue)
-                return;
+            if constexpr (flux_detail::is_equality_comparable_v<T>)
+            {
+                if (value == newValue)
+                    return;
+            }
             value = std::move(newValue);
             dispatchValue = value;
             notifyObserversLocked();
