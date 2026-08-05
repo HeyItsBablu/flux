@@ -34,9 +34,16 @@
 
 using SampleID = uint32_t;
 using VoiceHandle = uint64_t;
+using TrackID = uint32_t;
+using BusID = uint32_t;
+ 
 
 constexpr SampleID kInvalidSample = 0;
 constexpr VoiceHandle kInvalidVoice = 0;
+constexpr TrackID kInvalidTrack = 0;
+constexpr BusID kInvalidBus = 0;
+constexpr BusID kMasterBus = 1; // always valid once init() has run
+ 
 
 class AudioEngine
 {
@@ -81,7 +88,7 @@ public:
     // 2.0 = one octave up, 0.5 = one octave down. Convert from semitones
     // with std::pow(2.f, semitones / 12.f).
     VoiceHandle play(SampleID sample, float gain = 1.0f, float pan = 0.0f, bool loop = false,
-                      float pitchRatio = 1.0f);
+                      float pitchRatio = 1.0f, TrackID track = kInvalidTrack);
 
 
     // Sample-accurate variant. targetSampleTime is an absolute value from
@@ -89,8 +96,12 @@ public:
     // instead of "next audio callback". 0 (default) preserves the original
     // "as soon as possible" behavior; if targetSampleTime has already
     // passed by the time the command is applied, it's clamped to now.
+    // track routes this voice into a Track's buffer instead of straight to
+    // master — kInvalidTrack (default) preserves pre-routing-graph behavior.
     VoiceHandle play(SampleID sample, float gain, float pan, bool loop,
-                      float pitchRatio, uint64_t targetSampleTime);
+                      float pitchRatio, uint64_t targetSampleTime,
+                      TrackID track = kInvalidTrack);
+ 
 
     // ── Streaming voices ──────────────────────────────────────────────────────
     // For sources that can't be pre-decoded (e.g. a video file's audio track,
@@ -106,12 +117,14 @@ public:
     // audio track) simply never return negative, and the caller owns
     // lifetime and calls stopVoice() when done.
     VoiceHandle playStream(StreamCallback cb, uint32_t sourceSampleRate,
-                           float gain = 1.0f, float pan = 0.0f);
-
+                           float gain = 1.0f, float pan = 0.0f,
+                           TrackID track = kInvalidTrack);
 
     // Sample-accurate variant, same semantics as the play() overload above.
     VoiceHandle playStream(StreamCallback cb, uint32_t sourceSampleRate,
-                           float gain, float pan, uint64_t targetSampleTime);
+                           float gain, float pan, uint64_t targetSampleTime,
+                           TrackID track = kInvalidTrack);
+
 
     void stopVoice(VoiceHandle voice);
     void setVoiceGain(VoiceHandle voice, float gain);
@@ -123,6 +136,27 @@ public:
 
     bool isVoiceActive(VoiceHandle voice) const;
     float getVoiceProgress(VoiceHandle voice) const; // 0..1
+
+    // ── Routing: Tracks & Buses ──────────────────────────────────────────────
+    // Fixed pools, sized at init() (see Impl::kMaxTracks/kMaxBuses in the
+    // .cpp). kMasterBus (id 1) always exists after init() and can't be
+    // destroyed. A voice started with track == kInvalidTrack — every
+    // existing play()/playStream() call site, via the new param's default —
+    // mixes straight to master, exactly matching pre-routing-graph behavior.
+
+    TrackID createTrack();                // kInvalidTrack if the pool is full
+    void destroyTrack(TrackID t);
+    void setTrackGain(TrackID t, float gain);
+    void setTrackPan(TrackID t, float pan);
+    void setTrackMute(TrackID t, bool muted);
+    void setTrackSolo(TrackID t, bool soloed);
+    void setTrackSendBus(TrackID t, BusID bus); // default: kMasterBus
+
+    BusID createBus();                    // kInvalidBus if the pool is full
+    void destroyBus(BusID b);              // no-op on kMasterBus
+    void setBusGain(BusID b, float gain);
+    void setBusSendBus(BusID b, BusID dest); // default: kMasterBus; no-op on kMasterBus itself
+
 
     // ── Master ────────────────────────────────────────────────────────────────
     void setMasterVolume(float v); // 0..1

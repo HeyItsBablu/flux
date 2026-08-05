@@ -64,6 +64,11 @@ struct Voice
     bool loop = false;
     float pitchRatio = 1.f; // 1.0 = normal speed/pitch
 
+    TrackID track = kInvalidTrack; // routes this voice's render into a
+                                   // Track buffer instead of straight to
+                                   // master. Audio-thread-only, set from
+                                   // Command::trackArg in applyCommand().
+
     // Audio-thread-only. Set by applyCommand() when a StartVoice/
     // StartStreamVoice command's targetFrame lands mid-block; consumed
     // (and reset to 0) the next time mix() processes this voice.
@@ -76,6 +81,44 @@ struct Voice
     float prevSample = 0.f; // carries continuity across callback blocks
     std::vector<float> streamScratch;
 };
+
+
+// ============================================================================
+// Routing graph — Track / Bus
+// ============================================================================
+//
+// Unlike Voice, every field here is atomic and written DIRECTLY from the UI
+// thread — no command-queue round trip. These are coarse "set and forget"
+// mixer parameters, not sample-accurate events like a voice start, so a
+// relaxed atomic write/read pair is enough. The one place ordering matters
+// is create: every other field is reset BEFORE `active` is published true
+// (release), so mix() never observes a half-initialized slot.
+//
+// Known limitation: setBusSendBus() only guards against a bus sending
+// directly to itself. A longer cycle (B -> C -> B) isn't rejected — it
+// won't hang (mix() does one single pass per stage, not a graph walk), but
+// it will build up gain across blocks into a runaway/feedback sound. Worth
+// a real cycle check before this is exposed in end-user UI.
+//
+struct Track
+{
+    std::atomic<bool> active{false};
+    std::atomic<float> gain{1.f};
+    std::atomic<float> pan{0.f}; // reserved for a future per-track pan-law stage; not yet applied in mix()
+    std::atomic<bool> muted{false};
+    std::atomic<bool> soloed{false};
+    std::atomic<BusID> sendBus{kMasterBus};
+    std::vector<float> buffer; // audio-thread-only; sized once at init()
+};
+
+struct Bus
+{
+    std::atomic<bool> active{false};
+    std::atomic<float> gain{1.f};
+    std::atomic<BusID> sendBus{kInvalidBus}; // master's is ignored (terminal)
+    std::vector<float> buffer; // audio-thread-only; sized once at init()
+};
+
 
 // ============================================================================
 // Command queue (single-producer / single-consumer ring buffer)
@@ -110,6 +153,7 @@ struct Command
     // matching every pre-existing call site.
     uint64_t targetFrame = 0;
     float pitchArg = 1.f; // pitchRatio, only used by StartVoice
+    TrackID trackArg = kInvalidTrack; // only used by StartVoice/StartStreamVoice
 };
 
 class SpscCommandQueue
@@ -160,6 +204,24 @@ struct AudioEngine::Impl
 
     std::vector<Voice> voices;
     SpscCommandQueue commands{1024};
+
+    // ── Routing graph ─────────────────────────────────────────────────────
+    static constexpr uint32_t kMaxTracks = 64;
+    static constexpr uint32_t kMaxBuses = 16;
+    // Upper bound on frames-per-callback, used to size Track/Bus scratch
+    // buffers once at init() so mix() never allocates. Real device periods
+    // are almost always a few hundred to a few thousand frames; mix()
+    // clamps rather than reallocate if a backend ever exceeds this.
+    static constexpr uint32_t kMaxBlockFrames = 8192;
+
+    std::array<Track, kMaxTracks> tracks;
+    std::array<Bus, kMaxBuses> buses;
+
+    // Destination for voices with track == kInvalidTrack — the
+    // pre-routing-graph "straight to master" path. Folded into the master
+    // bus at the end of mix(), same effective result as before this change.
+    std::vector<float> legacyScratch;
+
 
     // Hands out increasing start-order stamps for voice stealing. UI-thread
     // only (both play() and playStream() are called from the UI thread).
@@ -297,10 +359,30 @@ struct AudioEngine::Impl
             }
         }
 
+        // Routing-graph buffers are sized for kMaxBlockFrames; clamp
+        // defensively rather than write past them if a backend ever
+        // requests a larger callback than that (see the constant's comment
+        // in Impl — should never happen in practice).
+        ma_uint32 mixFrames = std::min(frameCount, kMaxBlockFrames);
+        size_t n = (size_t)mixFrames * channels;
+
         std::memset(output, 0, sizeof(float) * frameCount * channels);
+        for (auto &t : tracks)
+            if (t.active.load(std::memory_order_relaxed))
+                std::fill_n(t.buffer.data(), n, 0.f);
+        for (auto &b : buses)
+            if (b.active.load(std::memory_order_relaxed))
+                std::fill_n(b.buffer.data(), n, 0.f);
+        std::fill_n(legacyScratch.data(), n, 0.f);
 
-        float master = masterVolume.load(std::memory_order_relaxed);
+        bool anySolo = std::any_of(tracks.begin(), tracks.end(), [](const Track &t) {
+            return t.active.load(std::memory_order_relaxed) &&
+                   t.soloed.load(std::memory_order_relaxed);
+        });
 
+        // 1) Voices render into their track's buffer, or legacyScratch if
+        //    unrouted (track == kInvalidTrack — every pre-existing call
+        //    site, via the new param's default).
         for (auto &v : voices)
         {
             if (!v.active.load(std::memory_order_relaxed))
@@ -308,16 +390,27 @@ struct AudioEngine::Impl
             if (v.paused.load(std::memory_order_relaxed))
                 continue;
 
+            float *dest = legacyScratch.data();
+            if (v.track != kInvalidTrack && v.track <= kMaxTracks)
+            {
+                Track &vt = tracks[v.track - 1];
+                if (vt.active.load(std::memory_order_relaxed))
+                    dest = vt.buffer.data();
+            }
+
             // Consume this voice's start offset (0 for every voice except
             // one that was just started mid-block by applyCommand()).
             ma_uint32 startOffset = v.pendingOffset;
             v.pendingOffset = 0;
 
-            // Equal-power pan law.
+            // Equal-power pan law. Master volume is intentionally NOT
+            // applied here anymore — it's applied once, to the summed
+            // master bus, in step 4 below (also where a Phase 5 limiter
+            // will eventually run).
             float panClamped = std::max(-1.f, std::min(1.f, v.pan));
             float angle = (panClamped + 1.f) * 0.25f * 3.14159265f; // 0..pi/2
-            float gainL = std::cos(angle) * v.gain * master;
-            float gainR = std::sin(angle) * v.gain * master;
+            float gainL = std::cos(angle) * v.gain;
+            float gainR = std::sin(angle) * v.gain;
 
             if (v.isStream)
             {
@@ -355,9 +448,9 @@ struct AudioEngine::Impl
                     float s1 = (idx0 < neededSrc) ? v.streamScratch[idx0] : s0;
                     float mono = s0 + (s1 - s0) * frac;
 
-                    output[i * channels + 0] += mono * gainL;
+                    dest[i * channels + 0] += mono * gainL;
                     if (channels > 1)
-                        output[i * channels + 1] += mono * gainR;
+                        dest[i * channels + 1] += mono * gainR;
 
                     pos += ratio;
                 }
@@ -406,9 +499,9 @@ struct AudioEngine::Impl
                 float sampL = f0[0] + (f1[0] - f0[0]) * frac;
                 float sampR = (s.channels > 1) ? f0[1] + (f1[1] - f0[1]) * frac : sampL;
 
-                output[i * channels + 0] += sampL * gainL;
+                dest[i * channels + 0] += sampL * gainL;
                 if (channels > 1)
-                    output[i * channels + 1] += sampR * gainR;
+                    dest[i * channels + 1] += sampR * gainR;
 
                 v.framePos += v.pitchRatio;
             }
@@ -417,6 +510,58 @@ struct AudioEngine::Impl
                 v.progress.store(
                     std::min(1.f, static_cast<float>(v.framePos / static_cast<double>(s.frameCount))),
                     std::memory_order_relaxed);
+        }
+        // 2) Tracks -> their send bus (mute/solo applied here).
+        for (auto &t : tracks)
+        {
+            if (!t.active.load(std::memory_order_relaxed))
+                continue;
+            bool muted = t.muted.load(std::memory_order_relaxed);
+            bool soloed = t.soloed.load(std::memory_order_relaxed);
+            if (muted || (anySolo && !soloed))
+                continue; // Phase 5: insert-effect chain runs on t.buffer here, before the send
+
+            BusID sendId = t.sendBus.load(std::memory_order_relaxed);
+            if (sendId == kInvalidBus || sendId > kMaxBuses)
+                sendId = kMasterBus;
+            Bus &dest = buses[sendId - 1];
+            if (!dest.active.load(std::memory_order_relaxed))
+                continue;
+
+            float g = t.gain.load(std::memory_order_relaxed);
+            for (size_t i = 0; i < n; i++)
+                dest.buffer[i] += t.buffer[i] * g;
+        }
+
+        // 3) Aux buses -> their send bus. Slot 0 is master (terminal, never
+        //    sends anywhere) so the scan starts at index 1.
+        for (uint32_t i = 1; i < kMaxBuses; i++)
+        {
+            Bus &b = buses[i];
+            if (!b.active.load(std::memory_order_relaxed))
+                continue;
+            BusID sendId = b.sendBus.load(std::memory_order_relaxed);
+            if (sendId == kInvalidBus || sendId > kMaxBuses)
+                continue; // Phase 5: insert-effect chain runs on b.buffer here, before the send
+
+            Bus &dest = buses[sendId - 1];
+            if (!dest.active.load(std::memory_order_relaxed))
+                continue;
+
+            float g = b.gain.load(std::memory_order_relaxed);
+            for (size_t j = 0; j < n; j++)
+                dest.buffer[j] += b.buffer[j] * g;
+        }
+
+        // 4) Master: fold in unrouted ("legacy") voices, apply master gain
+        //    and volume, write the final interleaved frame to output.
+        //    Phase 5: limiter runs on master.buffer before this final scale.
+        {
+            Bus &master = buses[kMasterBus - 1];
+            float masterGain = master.gain.load(std::memory_order_relaxed);
+            float mv = masterVolume.load(std::memory_order_relaxed);
+            for (size_t i = 0; i < n; i++)
+                output[i] = (master.buffer[i] + legacyScratch[i]) * masterGain * mv;
         }
 
         clockFrames.fetch_add(frameCount, std::memory_order_relaxed);
@@ -452,6 +597,7 @@ struct AudioEngine::Impl
             v.gain = cmd.floatArg;
             v.loop = cmd.boolArg;
             v.pitchRatio = cmd.pitchArg;
+            v.track = cmd.trackArg;
             v.progress.store(0.f, std::memory_order_relaxed);
             v.pendingOffset = offset;
             // v.active was already set true by play() on the UI thread.
@@ -464,6 +610,7 @@ struct AudioEngine::Impl
             v.prevSample = 0.f;
             v.gain = cmd.floatArg;
             v.loop = false;
+            v.track = cmd.trackArg;
             v.progress.store(0.f, std::memory_order_relaxed);
             v.pendingOffset = offset;
             // v.active was already set true by playStream() on the UI thread.
@@ -522,6 +669,28 @@ bool AudioEngine::init(uint32_t sampleRate, uint32_t channels, uint32_t maxVoice
     m_impl->sampleRate = sampleRate;
     m_impl->channels = channels;
     m_impl->voices = std::vector<Voice>(maxVoices); // fixed pool, no runtime growth
+
+    // Size every routing-graph scratch buffer once, up front — mix() never
+    // allocates. Buffers stay this size regardless of actual per-callback
+    // frameCount; mix() only ever touches the leading frameCount*channels
+    // floats of each.
+    {
+        size_t scratchFloats = (size_t)Impl::kMaxBlockFrames * channels;
+        for (auto &t : m_impl->tracks)
+            t.buffer.assign(scratchFloats, 0.f);
+        for (auto &b : m_impl->buses)
+            b.buffer.assign(scratchFloats, 0.f);
+        m_impl->legacyScratch.assign(scratchFloats, 0.f);
+    }
+
+    // Master bus (id 1 / slot 0) always exists and is never destroyed.
+    {
+        Bus &master = m_impl->buses[kMasterBus - 1];
+        master.gain.store(1.f, std::memory_order_relaxed);
+        master.sendBus.store(kInvalidBus, std::memory_order_relaxed); // terminal
+        master.active.store(true, std::memory_order_release);
+    }
+
 
     ma_device_config cfg = ma_device_config_init(ma_device_type_playback);
     cfg.playback.format = ma_format_f32;
@@ -633,10 +802,16 @@ bool AudioEngine::isSampleValid(SampleID id) const
 
 // ── Voices ─────────────────────────────────────────────────────────────────
 
+VoiceHandle AudioEngine::play(SampleID sample, float gain, float pan, bool loop,
+                              float pitchRatio, TrackID track)
+{
+    return play(sample, gain, pan, loop, pitchRatio, 0, track);
+}
 
 
 VoiceHandle AudioEngine::play(SampleID sample, float gain, float pan, bool loop,
-                              float pitchRatio, uint64_t targetSampleTime)
+                              float pitchRatio, uint64_t targetSampleTime,
+                              TrackID track)
 {
     ensureInitialized();
     if (!m_impl->deviceInitialized)
@@ -670,6 +845,7 @@ VoiceHandle AudioEngine::play(SampleID sample, float gain, float pan, bool loop,
     cmd.boolArg = loop;
     cmd.pitchArg = pitchRatio;
     cmd.targetFrame = targetSampleTime;
+    cmd.trackArg = track;
 
     if (!m_impl->commands.push(std::move(cmd)))
     {
@@ -694,13 +870,14 @@ VoiceHandle AudioEngine::play(SampleID sample, float gain, float pan, bool loop,
 }
 
 VoiceHandle AudioEngine::playStream(StreamCallback cb, uint32_t sourceSampleRate,
-                                    float gain, float pan)
+                                    float gain, float pan, TrackID track)
 {
-    return playStream(std::move(cb), sourceSampleRate, gain, pan, 0);
+    return playStream(std::move(cb), sourceSampleRate, gain, pan, 0, track);
 }
 
 VoiceHandle AudioEngine::playStream(StreamCallback cb, uint32_t sourceSampleRate,
-                                    float gain, float pan, uint64_t targetSampleTime)
+                                    float gain, float pan, uint64_t targetSampleTime,
+                                    TrackID track)
 {
     ensureInitialized();
     if (!m_impl->deviceInitialized || !cb)
@@ -721,6 +898,7 @@ VoiceHandle AudioEngine::playStream(StreamCallback cb, uint32_t sourceSampleRate
     cmd.uintArg = sourceSampleRate;
     cmd.floatArg = gain;
     cmd.targetFrame = targetSampleTime;
+    cmd.trackArg = track;
 
     if (!m_impl->commands.push(std::move(cmd)))
     {
@@ -844,6 +1022,121 @@ bool AudioEngine::isVoicePaused(VoiceHandle voice) const
         return false;
     return v.paused.load(std::memory_order_relaxed);
 }
+
+// ── Routing: Tracks & Buses ──────────────────────────────────────────────
+// createTrack()/createBus() are UI-thread only (same as play()/
+// playStream()), so plain scan-then-claim is race-free — no CAS needed,
+// same reasoning as Impl::reserveVoiceSlot()'s comment.
+
+TrackID AudioEngine::createTrack()
+{
+    for (uint32_t i = 0; i < Impl::kMaxTracks; i++)
+    {
+        Track &t = m_impl->tracks[i];
+        if (t.active.load(std::memory_order_relaxed))
+            continue;
+
+        // Reset every field BEFORE publishing active=true (release), so
+        // mix() never observes a half-initialized slot.
+        t.gain.store(1.f, std::memory_order_relaxed);
+        t.pan.store(0.f, std::memory_order_relaxed);
+        t.muted.store(false, std::memory_order_relaxed);
+        t.soloed.store(false, std::memory_order_relaxed);
+        t.sendBus.store(kMasterBus, std::memory_order_relaxed);
+        t.active.store(true, std::memory_order_release);
+        return (TrackID)(i + 1);
+    }
+    return kInvalidTrack; // pool exhausted
+}
+
+void AudioEngine::destroyTrack(TrackID t)
+{
+    if (t == kInvalidTrack || t > Impl::kMaxTracks)
+        return;
+    m_impl->tracks[t - 1].active.store(false, std::memory_order_release);
+    // Buffer contents are left as-is — harmless; mix() skips inactive
+    // tracks, and the buffer is fully cleared (fill_n) before any future
+    // createTrack() reuses this slot.
+}
+
+void AudioEngine::setTrackGain(TrackID t, float gain)
+{
+    if (t == kInvalidTrack || t > Impl::kMaxTracks)
+        return;
+    m_impl->tracks[t - 1].gain.store(gain, std::memory_order_relaxed);
+}
+
+void AudioEngine::setTrackPan(TrackID t, float pan)
+{
+    if (t == kInvalidTrack || t > Impl::kMaxTracks)
+        return;
+    m_impl->tracks[t - 1].pan.store(pan, std::memory_order_relaxed);
+}
+
+void AudioEngine::setTrackMute(TrackID t, bool muted)
+{
+    if (t == kInvalidTrack || t > Impl::kMaxTracks)
+        return;
+    m_impl->tracks[t - 1].muted.store(muted, std::memory_order_relaxed);
+}
+
+void AudioEngine::setTrackSolo(TrackID t, bool soloed)
+{
+    if (t == kInvalidTrack || t > Impl::kMaxTracks)
+        return;
+    m_impl->tracks[t - 1].soloed.store(soloed, std::memory_order_relaxed);
+}
+
+void AudioEngine::setTrackSendBus(TrackID t, BusID bus)
+{
+    if (t == kInvalidTrack || t > Impl::kMaxTracks)
+        return;
+    if (bus == kInvalidBus || bus > Impl::kMaxBuses)
+        bus = kMasterBus;
+    m_impl->tracks[t - 1].sendBus.store(bus, std::memory_order_relaxed);
+}
+
+BusID AudioEngine::createBus()
+{
+    // Slot 0 (id 1) is permanently reserved for kMasterBus — scan starts at 1.
+    for (uint32_t i = 1; i < Impl::kMaxBuses; i++)
+    {
+        Bus &b = m_impl->buses[i];
+        if (b.active.load(std::memory_order_relaxed))
+            continue;
+
+        b.gain.store(1.f, std::memory_order_relaxed);
+        b.sendBus.store(kMasterBus, std::memory_order_relaxed);
+        b.active.store(true, std::memory_order_release);
+        return (BusID)(i + 1);
+    }
+    return kInvalidBus; // pool exhausted
+}
+
+void AudioEngine::destroyBus(BusID b)
+{
+    if (b == kInvalidBus || b == kMasterBus || b > Impl::kMaxBuses)
+        return; // master is permanent
+    m_impl->buses[b - 1].active.store(false, std::memory_order_release);
+}
+
+void AudioEngine::setBusGain(BusID b, float gain)
+{
+    if (b == kInvalidBus || b > Impl::kMaxBuses)
+        return;
+    m_impl->buses[b - 1].gain.store(gain, std::memory_order_relaxed);
+}
+
+void AudioEngine::setBusSendBus(BusID b, BusID dest)
+{
+    if (b == kInvalidBus || b == kMasterBus || b > Impl::kMaxBuses)
+        return; // master's send is terminal, not settable
+    if (dest == kInvalidBus || dest > Impl::kMaxBuses || dest == b)
+        dest = kMasterBus; // self-send guard only — see the cycle-limitation
+                            // note on the Track/Bus struct definitions
+    m_impl->buses[b - 1].sendBus.store(dest, std::memory_order_relaxed);
+}
+
 
 // ── Master ─────────────────────────────────────────────────────────────────
 
