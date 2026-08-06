@@ -9,9 +9,9 @@
 
 #include <cctype>
 #include <fstream>
+#include <memory>
 #include <sstream>
 #include <unordered_map>
-#include <memory>
 
 // ============================================================================
 // Data model
@@ -25,6 +25,14 @@ struct StepData {
   float probability = 1.0f;   // 0..1, chance this step fires when its turn
                               // comes up; 1.0 = always fires (default,
                               // matches old behavior exactly)
+
+  float microTiming = 0.f; // -0.5..+0.5, fraction of ONE STEP's duration
+                           // to nudge this hit early(-)/late(+). 0 =
+                           // exactly on the grid (default, matches old
+                           // behavior exactly). Combined additively with
+                           // the pattern's `swing` below at fire time —
+                           // see StepScheduler::tick()/
+                           // TimelineScheduler::_tickPatternClip().
 };
 
 // Absolute cap every pattern's step vectors are allocated to, regardless of
@@ -35,7 +43,6 @@ struct StepData {
 // hidden. See StepScheduler::kMaxSteps for the same constant, scoped there
 // for code that already includes this header transitively.
 static constexpr int kSeqMaxSteps = 64;
-
 
 struct StepHit {
   float freqHz;
@@ -65,11 +72,20 @@ struct ArrangementEntry {
 struct Pattern {
   std::string name;
   bool active = false;
-  int numSteps = 16;      // logical length in steps — <= kSeqMaxSteps.
-                           // Acts as this pattern's "time signature" length.
-  int stepsPerBeat = 4;    // subdivision: 4 = 16th notes, 3 = triplet feel,
-                           // etc. Together with numSteps this is the
-                           // per-pattern stand-in for a full time signature.
+  int numSteps = 16;    // logical length in steps — <= kSeqMaxSteps.
+                        // Acts as this pattern's "time signature" length.
+  int stepsPerBeat = 4; // subdivision: 4 = 16th notes, 3 = triplet feel,
+                        // etc. Together with numSteps this is the
+                        // per-pattern stand-in for a full time signature.
+
+  float swing = 0.f; // 0..75, percent. Classic groovebox swing: every
+                     // odd-indexed step (the "off" 16th/8th/etc.) is
+                     // delayed by (swing/100 * 0.5) of a step's
+                     // duration. 0 = straight timing (default, matches
+                     // old behavior exactly). 75 is roughly the
+                     // triplet-feel ceiling most grooveboxes cap at —
+                     // past that the off-beat starts colliding with
+                     // the following on-beat step.
   std::vector<std::vector<StepData>> steps; // [track][step]
 };
 
@@ -135,7 +151,8 @@ public:
         patternSlots[i].numSteps = kDefaultSteps;
         patternSlots[i].stepsPerBeat = 4;
         // Always allocate at kMaxSteps — see the comment on kSeqMaxSteps.
-        patternSlots[i].steps.assign(_numTracks, std::vector<StepData>(kMaxSteps));
+        patternSlots[i].steps.assign(_numTracks,
+                                     std::vector<StepData>(kMaxSteps));
         activeSlots.push_back(i);
         return i;
       }
@@ -148,14 +165,14 @@ public:
       return -1;
     int dst = addPattern(patternSlots[srcSlot].name + " copy");
     if (dst >= 0) {
-      patternSlots[dst].steps = patternSlots[srcSlot].steps; // deep copy of step data
+      patternSlots[dst].steps =
+          patternSlots[srcSlot].steps; // deep copy of step data
       patternSlots[dst].numSteps = patternSlots[srcSlot].numSteps;
       patternSlots[dst].stepsPerBeat = patternSlots[srcSlot].stepsPerBeat;
     }
 
     return dst;
   }
-
 
   // Changes the logical length of `slot`. No data is moved or dropped —
   // steps beyond newLen just stop being played/edited until the pattern is
@@ -173,6 +190,12 @@ public:
     if (slot < 0 || slot >= kMaxPatterns || !patternSlots[slot].active)
       return;
     patternSlots[slot].stepsPerBeat = std::max(1, spb);
+  }
+
+  void setPatternSwing(int slot, float swingPercent) {
+    if (slot < 0 || slot >= kMaxPatterns || !patternSlots[slot].active)
+      return;
+    patternSlots[slot].swing = std::max(0.f, std::min(75.f, swingPercent));
   }
 
   void deletePattern(int slot) {
@@ -252,6 +275,14 @@ public:
       int patternLen = std::max(1, pat.numSteps);
       bool anySoloed = std::any_of(trackSoloed.begin(), trackSoloed.end(),
                                    [](bool b) { return b; });
+      uint64_t stepFrames = _framesPerStep(pat.stepsPerBeat);
+      // Classic groovebox swing: only odd-indexed steps (the "off" hit of
+      // each pair) get delayed. Even/on-beat steps are never swung, which
+      // is what keeps swing from drifting the downbeat itself.
+      int64_t swingOffsetFrames =
+          (currentStep % 2 == 1)
+              ? (int64_t)((pat.swing / 100.0) * 0.5 * (double)stepFrames)
+              : 0;
       for (size_t t = 0; t < pat.steps.size(); t++) {
         const StepData &step = pat.steps[t][currentStep];
         if (!step.on)
@@ -262,7 +293,20 @@ public:
         if (step.probability < 1.0f &&
             (float)std::rand() / (float)RAND_MAX > step.probability)
           continue; // dice roll missed — step is silently skipped this pass
-        fireStep(trackVoice[t], step, _nextStepFrame);
+
+        // Per-step micro-timing nudge, plus this step's share of the
+        // pattern's swing (0 for even steps). Clamped so a large negative
+        // nudge can never push the target frame before frame 0 — matters
+        // mainly right at transport start.
+        int64_t microFrames =
+            (int64_t)((double)step.microTiming * (double)stepFrames);
+        int64_t totalOffset = microFrames + swingOffsetFrames;
+        uint64_t targetFrame =
+            (totalOffset < 0 && (uint64_t)(-totalOffset) > _nextStepFrame)
+                ? 0
+                : (uint64_t)((int64_t)_nextStepFrame + totalOffset);
+
+        fireStep(trackVoice[t], step, targetFrame);
       }
 
       currentStep++;
@@ -271,7 +315,7 @@ public:
         _advancePlayback(); // pattern boundary — advance the song if in song
                             // mode
       }
-      _nextStepFrame += _framesPerStep(pat.stepsPerBeat);
+      _nextStepFrame += stepFrames;
     }
   }
 
@@ -326,8 +370,8 @@ public:
 
     _fireSynthStep(hit, step, effectiveGain, targetFrame);
   }
-private:
 
+private:
   // Bundles the two pieces of per-note state the envelope callback needs.
   // A single make_shared<> here replaces the previous pair of separate
   // shared_ptr<float>/shared_ptr<int> allocations per note fired.
@@ -373,7 +417,6 @@ private:
                       targetFrame);
   }
 };
-
 
 // ============================================================================
 // Timeline model — Phase 3.
@@ -484,7 +527,7 @@ public:
     while (_nextPulseFrame < now + lookahead) {
       bool anyTrackSoloed =
           std::any_of(timeline.tracks.begin(), timeline.tracks.end(),
-                     [](const TimelineTrack &t) { return t.soloed; });
+                      [](const TimelineTrack &t) { return t.soloed; });
 
       for (auto &track : timeline.tracks) {
         bool audible = !track.muted && (!anyTrackSoloed || track.soloed);
@@ -543,9 +586,17 @@ private:
 
     int stepIndex = (int)((rel / pulsesPerStep) % pat.numSteps);
 
-    bool anySoloed = std::any_of(_seq.trackSoloed.begin(), _seq.trackSoloed.end(),
-                                 [](bool b) { return b; });
-    for (size_t t = 0; t < pat.steps.size() && t < _seq.trackVoice.size(); t++) {
+    uint64_t stepFrames = (uint64_t)pulsesPerStep * _framesPerPulse();
+    int64_t swingOffsetFrames =
+        (stepIndex % 2 == 1)
+            ? (int64_t)((pat.swing / 100.0) * 0.5 * (double)stepFrames)
+            : 0;
+
+    bool anySoloed =
+        std::any_of(_seq.trackSoloed.begin(), _seq.trackSoloed.end(),
+                    [](bool b) { return b; });
+    for (size_t t = 0; t < pat.steps.size() && t < _seq.trackVoice.size();
+         t++) {
       const StepData &step = pat.steps[t][stepIndex];
       if (!step.on)
         continue;
@@ -555,7 +606,16 @@ private:
       if (step.probability < 1.0f &&
           (float)std::rand() / (float)RAND_MAX > step.probability)
         continue;
-      StepScheduler::fireStep(_seq.trackVoice[t], step, targetFrame);
+
+      int64_t microFrames =
+          (int64_t)((double)step.microTiming * (double)stepFrames);
+      int64_t totalOffset = microFrames + swingOffsetFrames;
+      uint64_t adjustedTarget =
+          (totalOffset < 0 && (uint64_t)(-totalOffset) > targetFrame)
+              ? 0
+              : (uint64_t)((int64_t)targetFrame + totalOffset);
+
+      StepScheduler::fireStep(_seq.trackVoice[t], step, adjustedTarget);
     }
   }
 };
@@ -577,28 +637,50 @@ inline std::string esc(const std::string &s) {
   out.reserve(s.size());
   for (char c : s) {
     switch (c) {
-    case '"': out += "\\\""; break;
-    case '\\': out += "\\\\"; break;
-    case '\n': out += "\\n"; break;
-    case '\r': out += "\\r"; break;
-    case '\t': out += "\\t"; break;
-    default: out += c;
+    case '"':
+      out += "\\\"";
+      break;
+    case '\\':
+      out += "\\\\";
+      break;
+    case '\n':
+      out += "\\n";
+      break;
+    case '\r':
+      out += "\\r";
+      break;
+    case '\t':
+      out += "\\t";
+      break;
+    default:
+      out += c;
     }
   }
   return out;
 }
 
 struct JVal {
-  enum class Type { Null, Bool, Number, String, Array, Object } type = Type::Null;
+  enum class Type {
+    Null,
+    Bool,
+    Number,
+    String,
+    Array,
+    Object
+  } type = Type::Null;
   double num = 0;
   bool boolean = false;
   std::string str;
   std::vector<JVal> arr;
   std::vector<std::pair<std::string, JVal>> obj;
 
-  double asDouble(double def = 0) const { return type == Type::Number ? num : def; }
+  double asDouble(double def = 0) const {
+    return type == Type::Number ? num : def;
+  }
   int asInt(int def = 0) const { return type == Type::Number ? (int)num : def; }
-  bool asBool(bool def = false) const { return type == Type::Bool ? boolean : def; }
+  bool asBool(bool def = false) const {
+    return type == Type::Bool ? boolean : def;
+  }
   std::string asString(const std::string &def = "") const {
     return type == Type::String ? str : def;
   }
@@ -621,67 +703,112 @@ struct JVal {
 class Parser {
 public:
   explicit Parser(const std::string &s) : _s(s) {}
-  bool parse(JVal &out) { _skipWs(); return _parseValue(out); }
+  bool parse(JVal &out) {
+    _skipWs();
+    return _parseValue(out);
+  }
 
 private:
   const std::string &_s;
   size_t _i = 0;
 
-  void _skipWs() { while (_i < _s.size() && std::isspace((unsigned char)_s[_i])) _i++; }
+  void _skipWs() {
+    while (_i < _s.size() && std::isspace((unsigned char)_s[_i]))
+      _i++;
+  }
   char _peek() const { return _i < _s.size() ? _s[_i] : '\0'; }
-  bool _consume(char c) { _skipWs(); if (_peek() != c) return false; _i++; return true; }
+  bool _consume(char c) {
+    _skipWs();
+    if (_peek() != c)
+      return false;
+    _i++;
+    return true;
+  }
 
   bool _parseValue(JVal &out) {
     _skipWs();
     char c = _peek();
-    if (c == '{') return _parseObject(out);
-    if (c == '[') return _parseArray(out);
-    if (c == '"') return _parseString(out);
-    if (c == 't' || c == 'f') return _parseBool(out);
-    if (c == 'n') { _i += 4; out.type = JVal::Type::Null; return true; }
+    if (c == '{')
+      return _parseObject(out);
+    if (c == '[')
+      return _parseArray(out);
+    if (c == '"')
+      return _parseString(out);
+    if (c == 't' || c == 'f')
+      return _parseBool(out);
+    if (c == 'n') {
+      _i += 4;
+      out.type = JVal::Type::Null;
+      return true;
+    }
     return _parseNumber(out);
   }
 
   bool _parseObject(JVal &out) {
-    if (!_consume('{')) return false;
+    if (!_consume('{'))
+      return false;
     out.type = JVal::Type::Object;
     _skipWs();
-    if (_peek() == '}') { _i++; return true; }
+    if (_peek() == '}') {
+      _i++;
+      return true;
+    }
     while (true) {
       _skipWs();
       JVal key;
-      if (!_parseString(key)) return false;
-      if (!_consume(':')) return false;
+      if (!_parseString(key))
+        return false;
+      if (!_consume(':'))
+        return false;
       JVal val;
-      if (!_parseValue(val)) return false;
+      if (!_parseValue(val))
+        return false;
       out.obj.emplace_back(key.str, std::move(val));
       _skipWs();
-      if (_peek() == ',') { _i++; continue; }
-      if (_peek() == '}') { _i++; break; }
+      if (_peek() == ',') {
+        _i++;
+        continue;
+      }
+      if (_peek() == '}') {
+        _i++;
+        break;
+      }
       return false;
     }
     return true;
   }
 
   bool _parseArray(JVal &out) {
-    if (!_consume('[')) return false;
+    if (!_consume('['))
+      return false;
     out.type = JVal::Type::Array;
     _skipWs();
-    if (_peek() == ']') { _i++; return true; }
+    if (_peek() == ']') {
+      _i++;
+      return true;
+    }
     while (true) {
       JVal val;
-      if (!_parseValue(val)) return false;
+      if (!_parseValue(val))
+        return false;
       out.arr.push_back(std::move(val));
       _skipWs();
-      if (_peek() == ',') { _i++; continue; }
-      if (_peek() == ']') { _i++; break; }
+      if (_peek() == ',') {
+        _i++;
+        continue;
+      }
+      if (_peek() == ']') {
+        _i++;
+        break;
+      }
       return false;
     }
     return true;
   }
 
   bool _parseString(JVal &out) {
-    if (!_consume('"')) return false;
+    if (!_consume('"'))
+      return false;
     out.type = JVal::Type::String;
     std::string s;
     while (_i < _s.size() && _s[_i] != '"') {
@@ -689,47 +816,75 @@ private:
       if (c == '\\' && _i < _s.size()) {
         char e = _s[_i++];
         switch (e) {
-        case 'n': s += '\n'; break;
-        case 't': s += '\t'; break;
-        case 'r': s += '\r'; break;
-        case '"': s += '"'; break;
-        case '\\': s += '\\'; break;
-        case '/': s += '/'; break;
-        default: s += e;
+        case 'n':
+          s += '\n';
+          break;
+        case 't':
+          s += '\t';
+          break;
+        case 'r':
+          s += '\r';
+          break;
+        case '"':
+          s += '"';
+          break;
+        case '\\':
+          s += '\\';
+          break;
+        case '/':
+          s += '/';
+          break;
+        default:
+          s += e;
         }
       } else {
         s += c;
       }
     }
-    if (_i >= _s.size()) return false; // unterminated
+    if (_i >= _s.size())
+      return false; // unterminated
     _i++;
     out.str = std::move(s);
     return true;
   }
 
   bool _parseBool(JVal &out) {
-    if (_s.compare(_i, 4, "true") == 0) { out.type = JVal::Type::Bool; out.boolean = true; _i += 4; return true; }
-    if (_s.compare(_i, 5, "false") == 0) { out.type = JVal::Type::Bool; out.boolean = false; _i += 5; return true; }
+    if (_s.compare(_i, 4, "true") == 0) {
+      out.type = JVal::Type::Bool;
+      out.boolean = true;
+      _i += 4;
+      return true;
+    }
+    if (_s.compare(_i, 5, "false") == 0) {
+      out.type = JVal::Type::Bool;
+      out.boolean = false;
+      _i += 5;
+      return true;
+    }
     return false;
   }
 
   bool _parseNumber(JVal &out) {
     size_t start = _i;
-    if (_peek() == '-') _i++;
-    while (_i < _s.size() && (std::isdigit((unsigned char)_s[_i]) || _s[_i] == '.' ||
-                              _s[_i] == 'e' || _s[_i] == 'E' || _s[_i] == '+' || _s[_i] == '-'))
+    if (_peek() == '-')
       _i++;
-    if (_i == start) return false;
+    while (_i < _s.size() &&
+           (std::isdigit((unsigned char)_s[_i]) || _s[_i] == '.' ||
+            _s[_i] == 'e' || _s[_i] == 'E' || _s[_i] == '+' || _s[_i] == '-'))
+      _i++;
+    if (_i == start)
+      return false;
     out.type = JVal::Type::Number;
     out.num = std::atof(_s.substr(start, _i - start).c_str());
     return true;
   }
 };
 
-inline bool parse(const std::string &text, JVal &out) { return Parser(text).parse(out); }
+inline bool parse(const std::string &text, JVal &out) {
+  return Parser(text).parse(out);
+}
 
 } // namespace SeqJson
-
 
 // ============================================================================
 // TimelineSurface — draws Timeline tracks/clips and handles click input.
@@ -750,7 +905,7 @@ public:
   static constexpr float kTrackHeight = 56.f;
 
   Timeline *timeline = nullptr;
-  StepScheduler *seq = nullptr;         // for pattern name lookups only
+  StepScheduler *seq = nullptr;           // for pattern name lookups only
   TimelineScheduler *scheduler = nullptr; // for playhead position only
   ClipID selectedClip = 0;
 
@@ -879,6 +1034,7 @@ class SequencerApp : public Widget {
   std::vector<std::vector<State<double>>> _velocitySliderState;
   std::vector<std::vector<State<double>>> _pitchSliderState;
   std::vector<std::vector<State<double>>> _probabilitySliderState;
+  std::vector<std::vector<State<double>>> _microTimingSliderState;
 
   // Display name for whatever instrument is loaded on each track.
   std::vector<State<std::string>> _instrumentNameState;
@@ -906,13 +1062,13 @@ class SequencerApp : public Widget {
       std::vector<ArrangementEntry>{}};
   uint64_t _nextArrangementEntryId = 1;
 
-
   // Tracks which pattern the grid is currently showing, mirrored into a
   // State<int> purely so cell-color bindings recompute (grayed-out /
   // inert columns beyond the pattern's length) whenever it changes — same
   // mechanism as _currentStepState driving the playhead highlight.
   State<int> _patternLengthState{16};
   State<int> _patternSpbState{4};
+  State<double> _patternSwingState{0.0};
 
   // Full file path per track's loaded sample, so Save Project can write it
   // back out. _instrumentNameState only keeps the display name (basename),
@@ -937,29 +1093,35 @@ class SequencerApp : public Widget {
         _undoStack.erase(_undoStack.begin());
     }
     void undo() {
-      if (_undoStack.empty()) return;
+      if (_undoStack.empty())
+        return;
       Entry e = std::move(_undoStack.back());
       _undoStack.pop_back();
       e.undo();
       _redoStack.push_back(std::move(e));
     }
     void redo() {
-      if (_redoStack.empty()) return;
+      if (_redoStack.empty())
+        return;
       Entry e = std::move(_redoStack.back());
       _redoStack.pop_back();
       e.redo();
       _undoStack.push_back(std::move(e));
     }
-    void clear() { _undoStack.clear(); _redoStack.clear(); }
+    void clear() {
+      _undoStack.clear();
+      _redoStack.clear();
+    }
 
   private:
-    struct Entry { Fn undo, redo; };
+    struct Entry {
+      Fn undo, redo;
+    };
     static constexpr size_t kMaxDepth = 200;
     std::vector<Entry> _undoStack;
     std::vector<Entry> _redoStack;
   };
   UndoStack _undoStack;
-
 
   // ── Timeline (Phase 3) ────────────────────────────────────────────────
   Timeline _timeline;
@@ -1000,6 +1162,7 @@ public:
     _velocitySliderState.resize(_seq->trackVoice.size());
     _pitchSliderState.resize(_seq->trackVoice.size());
     _probabilitySliderState.resize(_seq->trackVoice.size());
+    _microTimingSliderState.resize(_seq->trackVoice.size());
     _muteState.reserve(_seq->trackVoice.size());
     _soloState.reserve(_seq->trackVoice.size());
     _trackVolumeState.reserve(_seq->trackVoice.size());
@@ -1008,12 +1171,14 @@ public:
       _cellState[t].reserve(StepScheduler::kMaxSteps);
       _velocitySliderState[t].reserve(StepScheduler::kMaxSteps);
       _pitchSliderState[t].reserve(StepScheduler::kMaxSteps);
+      _microTimingSliderState[t].reserve(StepScheduler::kMaxSteps);
       _probabilitySliderState[t].reserve(StepScheduler::kMaxSteps);
       for (int s = 0; s < StepScheduler::kMaxSteps; s++) {
         _cellState[t].emplace_back(false);
         _velocitySliderState[t].emplace_back(1.0);
         _pitchSliderState[t].emplace_back(0.0);
         _probabilitySliderState[t].emplace_back(1.0);
+        _microTimingSliderState[t].emplace_back(0.0);
       }
       // Seed mixer UI state from the track's actual initial gain/pan
       // (set just above via the trackVoice = {...} assignment) so the
@@ -1058,13 +1223,14 @@ public:
     bool withinLength = s < editingPat.numSteps;
 
     bool viewingLivePattern = (_seq->editingSlot == _seq->playingSlot);
-    bool isPlayhead =
-        _seq->playing && viewingLivePattern && withinLength && (_seq->currentStep == s);
+    bool isPlayhead = _seq->playing && viewingLivePattern && withinLength &&
+                      (_seq->currentStep == s);
     if (isPlayhead)
       return Color::fromRGB(220, 50, 50);
 
     if (!withinLength)
-      return Color::fromRGB(245, 245, 245); // beyond current pattern length — inert
+      return Color::fromRGB(245, 245,
+                            245); // beyond current pattern length — inert
 
     const StepData &step = editingPat.steps[t][s];
     if (!step.on)
@@ -1089,10 +1255,13 @@ public:
         _velocitySliderState[t][s].set(step.velocity);
         _pitchSliderState[t][s].set((double)step.pitchSemitones);
         _probabilitySliderState[t][s].set((double)step.probability);
+        _microTimingSliderState[t][s].set((double)step.microTiming);
       }
     }
-    _patternLengthState.set(pat.numSteps); // triggers grid recolor (grayed-out inert columns)
+    _patternLengthState.set(
+        pat.numSteps); // triggers grid recolor (grayed-out inert columns)
     _patternSpbState.set(pat.stepsPerBeat);
+    _patternSwingState.set((double)pat.swing);
   }
 
   void _loadTrackSample(size_t t, const std::string &path) {
@@ -1111,7 +1280,6 @@ public:
     if (t >= _trackSamplePath.size())
       _trackSamplePath.resize(t + 1);
     _trackSamplePath[t] = path;
-
 
     size_t slash = path.find_last_of("/\\");
     _instrumentNameState[t].set(
@@ -1132,7 +1300,8 @@ public:
 
   void _createPattern() {
     int prevEditing = _seq->editingSlot;
-    std::string name = "Pattern " + std::to_string(_seq->activeSlots.size() + 1);
+    std::string name =
+        "Pattern " + std::to_string(_seq->activeSlots.size() + 1);
     int newSlot = _createPatternCore(name);
     if (newSlot < 0)
       return;
@@ -1181,7 +1350,8 @@ public:
   void _deleteCurrentPattern() {
     int slot = _seq->editingSlot;
     if (_seq->activeSlots.size() <= 1)
-      return; // StepScheduler refuses this too; bail before pushing a no-op undo entry
+      return; // StepScheduler refuses this too; bail before pushing a no-op
+              // undo entry
 
     Pattern snapshot = _seq->patternSlots[slot]; // deep copy, incl. step data
     std::vector<ArrangementEntry> removedEntries;
@@ -1200,12 +1370,14 @@ public:
     _undoStack.push(
         [this, slot, snapshot, removedEntries, removedPositions] {
           _seq->patternSlots[slot] = snapshot;
-          if (std::find(_seq->activeSlots.begin(), _seq->activeSlots.end(), slot) ==
-              _seq->activeSlots.end())
+          if (std::find(_seq->activeSlots.begin(), _seq->activeSlots.end(),
+                        slot) == _seq->activeSlots.end())
             _seq->activeSlots.push_back(slot);
           for (size_t i = 0; i < removedEntries.size(); i++) {
-            size_t pos = std::min(removedPositions[i], _seq->arrangement.size());
-            _seq->arrangement.insert(_seq->arrangement.begin() + pos, removedEntries[i]);
+            size_t pos =
+                std::min(removedPositions[i], _seq->arrangement.size());
+            _seq->arrangement.insert(_seq->arrangement.begin() + pos,
+                                     removedEntries[i]);
           }
           _seq->setEditingPattern(slot);
           _refreshGridFromPattern();
@@ -1219,7 +1391,6 @@ public:
           _rebuildArrangementStateFromScheduler();
         });
   }
-
 
   void _rebuildArrangementStateFromScheduler() {
     _arrangementState.set(_seq->arrangement);
@@ -1246,13 +1417,11 @@ public:
 
     _arrangementState.push_back(e);
 
-
-    _undoStack.push(
-        [this, id = e.id] { _removeArrangementEntryByIdCore(id); },
-        [this, e] {
-          _seq->arrangement.push_back(e);
-          _arrangementState.push_back(e);
-        });
+    _undoStack.push([this, id = e.id] { _removeArrangementEntryByIdCore(id); },
+                    [this, e] {
+                      _seq->arrangement.push_back(e);
+                      _arrangementState.push_back(e);
+                    });
   }
 
   void _removeArrangementEntryByIdCore(uint64_t id) {
@@ -1271,7 +1440,11 @@ public:
     ArrangementEntry removed{};
     size_t pos = _seq->arrangement.size();
     for (size_t i = 0; i < _seq->arrangement.size(); i++)
-      if (_seq->arrangement[i].id == id) { removed = _seq->arrangement[i]; pos = i; break; }
+      if (_seq->arrangement[i].id == id) {
+        removed = _seq->arrangement[i];
+        pos = i;
+        break;
+      }
     if (pos == _seq->arrangement.size())
       return; // not found
 
@@ -1280,12 +1453,12 @@ public:
     _undoStack.push(
         [this, removed, pos] {
           size_t insertAt = std::min(pos, _seq->arrangement.size());
-          _seq->arrangement.insert(_seq->arrangement.begin() + insertAt, removed);
+          _seq->arrangement.insert(_seq->arrangement.begin() + insertAt,
+                                   removed);
           _rebuildArrangementStateFromScheduler();
         },
         [this, id] { _removeArrangementEntryByIdCore(id); });
   }
-
 
   void _adjustArrangementRepeat(uint64_t id, int delta) {
     int oldCount = 1, newCount = 1;
@@ -1305,9 +1478,9 @@ public:
         [this, id, oldCount] { _setArrangementRepeatCore(id, oldCount); },
         [this, id, newCount] { _setArrangementRepeatCore(id, newCount); });
   }
-int _timelineCanvasWidthPx() const {
+  int _timelineCanvasWidthPx() const {
     return (int)(64 * TimelineSurface::kPxPerBeat); // 16-bar initial extent;
-                                                     // grows are a follow-up
+                                                    // grows are a follow-up
   }
   int _timelineCanvasHeightPx() const {
     return std::max(1, (int)_timeline.tracks.size()) *
@@ -1378,8 +1551,9 @@ int _timelineCanvasWidthPx() const {
     if (_selectedClipId == 0)
       return;
     for (auto &track : _timeline.tracks) {
-      auto it = std::find_if(track.clips.begin(), track.clips.end(),
-                             [this](const Clip &c) { return c.id == _selectedClipId; });
+      auto it = std::find_if(
+          track.clips.begin(), track.clips.end(),
+          [this](const Clip &c) { return c.id == _selectedClipId; });
       if (it != track.clips.end()) {
         track.clips.erase(it);
         break;
@@ -1389,259 +1563,279 @@ int _timelineCanvasWidthPx() const {
   }
   void _setArrangementRepeatCore(uint64_t id, int count) {
     for (auto &e : _seq->arrangement)
-      if (e.id == id) { e.repeatCount = count; break; }
+      if (e.id == id) {
+        e.repeatCount = count;
+        break;
+      }
     _arrangementState.set(_seq->arrangement);
   }
 
- void _saveProject(const std::string &path) {
-   std::ostringstream out;
-   out << "{\n";
-   out << "  \"version\": 1,\n";
-   out << "  \"bpm\": " << _seq->bpm << ",\n";
-   out << "  \"songMode\": " << (_seq->songMode ? "true" : "false") << ",\n";
-   out << "  \"editingSlot\": " << _seq->editingSlot << ",\n";
-   out << "  \"tracks\": [\n";
-   for (size_t t = 0; t < _seq->trackVoice.size(); t++) {
-     const StepHit &hit = _seq->trackVoice[t];
-     out << "    {"
-         << "\"freqHz\":" << hit.freqHz << ","
-         << "\"gain\":" << hit.gain << ","
-         << "\"pan\":" << hit.pan << ","
-         << "\"samplePath\":\""
-         << SeqJson::esc(t < _trackSamplePath.size() ? _trackSamplePath[t] : "") << "\","
-         << "\"muted\":" << (_seq->trackMuted[t] ? "true" : "false") << ","
-         << "\"soloed\":" << (_seq->trackSoloed[t] ? "true" : "false") << "}"
-         << (t + 1 < _seq->trackVoice.size() ? "," : "") << "\n";
-   }
-   out << "  ],\n";
-   out << "  \"patterns\": [\n";
-   bool firstPat = true;
-   for (int slot : _seq->activeSlots) {
-     const Pattern &pat = _seq->patternSlots[slot];
-     if (!firstPat) out << ",\n";
-     firstPat = false;
-     out << "    {\"slot\":" << slot << ",\"name\":\"" << SeqJson::esc(pat.name)
-         << "\",\"numSteps\":" << pat.numSteps << ",\"stepsPerBeat\":" << pat.stepsPerBeat
-         << ",\"steps\":[";
-     for (size_t t = 0; t < pat.steps.size(); t++) {
-       out << "[";
-       // Serialize all kMaxSteps, not just numSteps, so steps hidden by a
-       // shorter length round-trip through save/load intact.
-       for (int s = 0; s < StepScheduler::kMaxSteps; s++) {
-         const StepData &st = pat.steps[t][s];
-         out << "{\"on\":" << (st.on ? "true" : "false")
-             << ",\"velocity\":" << st.velocity
-             << ",\"pitch\":" << st.pitchSemitones
-             << ",\"probability\":" << st.probability << "}"
-             << (s + 1 < StepScheduler::kMaxSteps ? "," : "");
-       }
-       out << "]" << (t + 1 < pat.steps.size() ? "," : "");
-     }
-     out << "]}";
-   }
-   out << "\n  ],\n";
-   out << "  \"arrangement\": [\n";
-   for (size_t i = 0; i < _seq->arrangement.size(); i++) {
-     const ArrangementEntry &e = _seq->arrangement[i];
-     out << "    {\"id\":" << e.id << ",\"patternSlot\":" << e.patternSlot
-         << ",\"repeatCount\":" << e.repeatCount << "}"
-         << (i + 1 < _seq->arrangement.size() ? "," : "") << "\n";
-   }
-   out << "  ],\n";
-   out << "  \"timelineTracks\": [\n";
-   for (size_t ti = 0; ti < _timeline.tracks.size(); ti++) {
-     const TimelineTrack &tt = _timeline.tracks[ti];
-     out << "    {\"id\":" << tt.id << ",\"name\":\"" << SeqJson::esc(tt.name)
-         << "\",\"muted\":" << (tt.muted ? "true" : "false")
-         << ",\"soloed\":" << (tt.soloed ? "true" : "false")
-         << ",\"clips\":[";
-     for (size_t ci = 0; ci < tt.clips.size(); ci++) {
-       const Clip &c = tt.clips[ci];
-       out << "{\"id\":" << c.id
-           << ",\"type\":" << (int)c.type
-           << ",\"startBeat\":" << c.startBeat
-           << ",\"lengthBeats\":" << c.lengthBeats
-           << ",\"patternSlot\":" << c.patternSlot
-           << ",\"audioFilePath\":\"" << SeqJson::esc(c.audioFilePath) << "\""
-           << ",\"audioStartOffsetSec\":" << c.audioStartOffsetSec
-           << ",\"gain\":" << c.gain
-           << ",\"fadeInBeats\":" << c.fadeInBeats
-           << ",\"fadeOutBeats\":" << c.fadeOutBeats << "}"
-           << (ci + 1 < tt.clips.size() ? "," : "");
-     }
-     out << "]}" << (ti + 1 < _timeline.tracks.size() ? "," : "") << "\n";
-   }
-   out << "  ]\n}\n";
-   std::ofstream f(path, std::ios::binary);
-   if (f) f << out.str();
- }
- void _loadProject(const std::string &path) {
-   std::ifstream f(path, std::ios::binary);
-   if (!f) return;
-   std::ostringstream ss;
-   ss << f.rdbuf();
-   SeqJson::JVal root;
-   if (!SeqJson::parse(ss.str(), root) || root.type != SeqJson::JVal::Type::Object)
-     return; // malformed file — leave the current project untouched
-   _seq->stop();
-   _currentStepState.set(-1);
-   _seq->bpm = root["bpm"].asDouble(_seq->bpm);
-   _bpmState.set(_seq->bpm);
-   // ── Tracks ──────────────────────────────────────────────────────────
-   const auto &tracksArr = root["tracks"].arr;
-   for (size_t t = 0; t < tracksArr.size() && t < _seq->trackVoice.size(); t++) {
-     const SeqJson::JVal &tj = tracksArr[t];
-     _seq->trackVoice[t].freqHz = (float)tj["freqHz"].asDouble(_seq->trackVoice[t].freqHz);
-     _seq->trackVoice[t].gain = (float)tj["gain"].asDouble(_seq->trackVoice[t].gain);
-     _seq->trackVoice[t].pan = (float)tj["pan"].asDouble(_seq->trackVoice[t].pan);
-     _seq->trackMuted[t] = tj["muted"].asBool(false);
-     _seq->trackSoloed[t] = tj["soloed"].asBool(false);
-     _trackVolumeState[t].set((double)_seq->trackVoice[t].gain);
-     _trackPanState[t].set((double)_seq->trackVoice[t].pan);
-     _muteState[t].set(_seq->trackMuted[t]);
-     _soloState[t].set(_seq->trackSoloed[t]);
-     std::string samplePath = tj["samplePath"].asString("");
-     if (!samplePath.empty())
-       _loadTrackSample(t, samplePath);
-   }
-   // ── Patterns ────────────────────────────────────────────────────────
-   // deletePattern() refuses to remove the last remaining pattern, so
-   // repeatedly deleting activeSlots.front() leaves exactly one slot
-   // standing — that slot gets overwritten by the file's first pattern
-   // below (or left as an empty default if the file has none).
-   while (_seq->activeSlots.size() > 1)
-     _seq->deletePattern(_seq->activeSlots.front());
-   const auto &patternsArr = root["patterns"].arr;
-   std::unordered_map<int, int> fileSlotToRealSlot;
-   bool first = true;
-   for (const auto &pj : patternsArr) {
-     int wantedNumSteps = pj["numSteps"].asInt(16);
-     int spb = pj["stepsPerBeat"].asInt(4);
-     std::string name = pj["name"].asString("Pattern");
-     int realSlot;
-     if (first) {
-       realSlot = _seq->activeSlots.front();
-       _seq->patternSlots[realSlot].name = name;
-       first = false;
-     } else {
-       realSlot = _seq->addPattern(name);
-       if (realSlot < 0) break; // kMaxPatterns exhausted — rest of file dropped
-     }
-     _seq->setPatternLength(realSlot, wantedNumSteps);
-     _seq->setPatternStepsPerBeat(realSlot, spb);
-     fileSlotToRealSlot[pj["slot"].asInt(-1)] = realSlot;
-     Pattern &pat = _seq->patternSlots[realSlot];
-     const auto &stepsArr = pj["steps"].arr;
-     for (size_t t = 0; t < stepsArr.size() && t < pat.steps.size(); t++) {
-       const auto &trackSteps = stepsArr[t].arr;
-       for (size_t s = 0; s < trackSteps.size() && (int)s < StepScheduler::kMaxSteps; s++) {
-         const SeqJson::JVal &sj = trackSteps[s];
-         StepData &sd = pat.steps[t][s];
-         sd.on = sj["on"].asBool(false);
-         sd.velocity = (float)sj["velocity"].asDouble(1.0);
-         sd.pitchSemitones = (float)sj["pitch"].asDouble(0.0);
-         sd.probability = (float)sj["probability"].asDouble(1.0);
-       }
-     }
-   }
-   // ── Arrangement ─────────────────────────────────────────────────────
-   _seq->arrangement.clear();
-   _arrangementState.clear();
-   uint64_t maxId = 0;
-   for (const auto &aj : root["arrangement"].arr) {
-     auto it = fileSlotToRealSlot.find(aj["patternSlot"].asInt(-1));
-     if (it == fileSlotToRealSlot.end())
-       continue; // referenced a pattern slot the file never defined
-     ArrangementEntry e;
-     e.id = (uint64_t)aj["id"].asInt((int)(maxId + 1));
-     e.patternSlot = it->second;
-     e.repeatCount = std::max(1, aj["repeatCount"].asInt(1));
-     maxId = std::max(maxId, e.id);
-     _seq->arrangement.push_back(e);
-     _arrangementState.push_back(e);
-   }
-   _nextArrangementEntryId = maxId + 1;
-   bool wantSongMode = root["songMode"].asBool(false);
-   _seq->setSongMode(wantSongMode);
-   _songModeState.set(wantSongMode);
-   int wantEditing = root["editingSlot"].asInt(-1);
-   auto editIt = fileSlotToRealSlot.find(wantEditing);
-   int realEditing = editIt != fileSlotToRealSlot.end() ? editIt->second : _seq->activeSlots.front();
-   _seq->setEditingPattern(realEditing);
-   _refreshGridFromPattern();
-   _syncPatternDropdown();
+  void _saveProject(const std::string &path) {
+    std::ostringstream out;
+    out << "{\n";
+    out << "  \"version\": 1,\n";
+    out << "  \"bpm\": " << _seq->bpm << ",\n";
+    out << "  \"songMode\": " << (_seq->songMode ? "true" : "false") << ",\n";
+    out << "  \"editingSlot\": " << _seq->editingSlot << ",\n";
+    out << "  \"tracks\": [\n";
+    for (size_t t = 0; t < _seq->trackVoice.size(); t++) {
+      const StepHit &hit = _seq->trackVoice[t];
+      out << "    {"
+          << "\"freqHz\":" << hit.freqHz << ","
+          << "\"gain\":" << hit.gain << ","
+          << "\"pan\":" << hit.pan << ","
+          << "\"samplePath\":\""
+          << SeqJson::esc(t < _trackSamplePath.size() ? _trackSamplePath[t]
+                                                      : "")
+          << "\","
+          << "\"muted\":" << (_seq->trackMuted[t] ? "true" : "false") << ","
+          << "\"soloed\":" << (_seq->trackSoloed[t] ? "true" : "false") << "}"
+          << (t + 1 < _seq->trackVoice.size() ? "," : "") << "\n";
+    }
+    out << "  ],\n";
+    out << "  \"patterns\": [\n";
+    bool firstPat = true;
+    for (int slot : _seq->activeSlots) {
+      const Pattern &pat = _seq->patternSlots[slot];
+      if (!firstPat)
+        out << ",\n";
+      firstPat = false;
+      out << "    {\"slot\":" << slot << ",\"name\":\""
+          << SeqJson::esc(pat.name) << "\",\"numSteps\":" << pat.numSteps
+          << ",\"stepsPerBeat\":" << pat.stepsPerBeat
+          << ",\"swing\":" << pat.swing << ",\"steps\":[";
+      for (size_t t = 0; t < pat.steps.size(); t++) {
+        out << "[";
+        // Serialize all kMaxSteps, not just numSteps, so steps hidden by a
+        // shorter length round-trip through save/load intact.
+        for (int s = 0; s < StepScheduler::kMaxSteps; s++) {
+          const StepData &st = pat.steps[t][s];
+          out << "{\"on\":" << (st.on ? "true" : "false")
+              << ",\"velocity\":" << st.velocity
+              << ",\"pitch\":" << st.pitchSemitones
+              << ",\"probability\":" << st.probability
+              << ",\"microTiming\":" << st.microTiming << "}"
 
+              << (s + 1 < StepScheduler::kMaxSteps ? "," : "");
+        }
+        out << "]" << (t + 1 < pat.steps.size() ? "," : "");
+      }
+      out << "]}";
+    }
+    out << "\n  ],\n";
+    out << "  \"arrangement\": [\n";
+    for (size_t i = 0; i < _seq->arrangement.size(); i++) {
+      const ArrangementEntry &e = _seq->arrangement[i];
+      out << "    {\"id\":" << e.id << ",\"patternSlot\":" << e.patternSlot
+          << ",\"repeatCount\":" << e.repeatCount << "}"
+          << (i + 1 < _seq->arrangement.size() ? "," : "") << "\n";
+    }
+    out << "  ],\n";
+    out << "  \"timelineTracks\": [\n";
+    for (size_t ti = 0; ti < _timeline.tracks.size(); ti++) {
+      const TimelineTrack &tt = _timeline.tracks[ti];
+      out << "    {\"id\":" << tt.id << ",\"name\":\"" << SeqJson::esc(tt.name)
+          << "\",\"muted\":" << (tt.muted ? "true" : "false")
+          << ",\"soloed\":" << (tt.soloed ? "true" : "false") << ",\"clips\":[";
+      for (size_t ci = 0; ci < tt.clips.size(); ci++) {
+        const Clip &c = tt.clips[ci];
+        out << "{\"id\":" << c.id << ",\"type\":" << (int)c.type
+            << ",\"startBeat\":" << c.startBeat
+            << ",\"lengthBeats\":" << c.lengthBeats
+            << ",\"patternSlot\":" << c.patternSlot << ",\"audioFilePath\":\""
+            << SeqJson::esc(c.audioFilePath) << "\""
+            << ",\"audioStartOffsetSec\":" << c.audioStartOffsetSec
+            << ",\"gain\":" << c.gain << ",\"fadeInBeats\":" << c.fadeInBeats
+            << ",\"fadeOutBeats\":" << c.fadeOutBeats << "}"
+            << (ci + 1 < tt.clips.size() ? "," : "");
+      }
+      out << "]}" << (ti + 1 < _timeline.tracks.size() ? "," : "") << "\n";
+    }
+    out << "  ]\n}\n";
+    std::ofstream f(path, std::ios::binary);
+    if (f)
+      f << out.str();
+  }
+  void _loadProject(const std::string &path) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f)
+      return;
+    std::ostringstream ss;
+    ss << f.rdbuf();
+    SeqJson::JVal root;
+    if (!SeqJson::parse(ss.str(), root) ||
+        root.type != SeqJson::JVal::Type::Object)
+      return; // malformed file — leave the current project untouched
+    _seq->stop();
+    _currentStepState.set(-1);
+    _seq->bpm = root["bpm"].asDouble(_seq->bpm);
+    _bpmState.set(_seq->bpm);
+    // ── Tracks ──────────────────────────────────────────────────────────
+    const auto &tracksArr = root["tracks"].arr;
+    for (size_t t = 0; t < tracksArr.size() && t < _seq->trackVoice.size();
+         t++) {
+      const SeqJson::JVal &tj = tracksArr[t];
+      _seq->trackVoice[t].freqHz =
+          (float)tj["freqHz"].asDouble(_seq->trackVoice[t].freqHz);
+      _seq->trackVoice[t].gain =
+          (float)tj["gain"].asDouble(_seq->trackVoice[t].gain);
+      _seq->trackVoice[t].pan =
+          (float)tj["pan"].asDouble(_seq->trackVoice[t].pan);
+      _seq->trackMuted[t] = tj["muted"].asBool(false);
+      _seq->trackSoloed[t] = tj["soloed"].asBool(false);
+      _trackVolumeState[t].set((double)_seq->trackVoice[t].gain);
+      _trackPanState[t].set((double)_seq->trackVoice[t].pan);
+      _muteState[t].set(_seq->trackMuted[t]);
+      _soloState[t].set(_seq->trackSoloed[t]);
+      std::string samplePath = tj["samplePath"].asString("");
+      if (!samplePath.empty())
+        _loadTrackSample(t, samplePath);
+    }
+    // ── Patterns ────────────────────────────────────────────────────────
+    // deletePattern() refuses to remove the last remaining pattern, so
+    // repeatedly deleting activeSlots.front() leaves exactly one slot
+    // standing — that slot gets overwritten by the file's first pattern
+    // below (or left as an empty default if the file has none).
+    while (_seq->activeSlots.size() > 1)
+      _seq->deletePattern(_seq->activeSlots.front());
+    const auto &patternsArr = root["patterns"].arr;
+    std::unordered_map<int, int> fileSlotToRealSlot;
+    bool first = true;
+    for (const auto &pj : patternsArr) {
+      int wantedNumSteps = pj["numSteps"].asInt(16);
+      int spb = pj["stepsPerBeat"].asInt(4);
+      float swing = (float)pj["swing"].asDouble(0.0);
+      std::string name = pj["name"].asString("Pattern");
+      int realSlot;
+      if (first) {
+        realSlot = _seq->activeSlots.front();
+        _seq->patternSlots[realSlot].name = name;
+        first = false;
+      } else {
+        realSlot = _seq->addPattern(name);
+        if (realSlot < 0)
+          break; // kMaxPatterns exhausted — rest of file dropped
+      }
+      _seq->setPatternLength(realSlot, wantedNumSteps);
+      _seq->setPatternStepsPerBeat(realSlot, spb);
+      _seq->setPatternSwing(realSlot, swing);
+      fileSlotToRealSlot[pj["slot"].asInt(-1)] = realSlot;
+      Pattern &pat = _seq->patternSlots[realSlot];
+      const auto &stepsArr = pj["steps"].arr;
+      for (size_t t = 0; t < stepsArr.size() && t < pat.steps.size(); t++) {
+        const auto &trackSteps = stepsArr[t].arr;
+        for (size_t s = 0;
+             s < trackSteps.size() && (int)s < StepScheduler::kMaxSteps; s++) {
+          const SeqJson::JVal &sj = trackSteps[s];
+          StepData &sd = pat.steps[t][s];
+          sd.on = sj["on"].asBool(false);
+          sd.velocity = (float)sj["velocity"].asDouble(1.0);
+          sd.pitchSemitones = (float)sj["pitch"].asDouble(0.0);
+          sd.probability = (float)sj["probability"].asDouble(1.0);
+          sd.microTiming = (float)sj["microTiming"].asDouble(0.0);
+        }
+      }
+    }
+    // ── Arrangement ─────────────────────────────────────────────────────
+    _seq->arrangement.clear();
+    _arrangementState.clear();
+    uint64_t maxId = 0;
+    for (const auto &aj : root["arrangement"].arr) {
+      auto it = fileSlotToRealSlot.find(aj["patternSlot"].asInt(-1));
+      if (it == fileSlotToRealSlot.end())
+        continue; // referenced a pattern slot the file never defined
+      ArrangementEntry e;
+      e.id = (uint64_t)aj["id"].asInt((int)(maxId + 1));
+      e.patternSlot = it->second;
+      e.repeatCount = std::max(1, aj["repeatCount"].asInt(1));
+      maxId = std::max(maxId, e.id);
+      _seq->arrangement.push_back(e);
+      _arrangementState.push_back(e);
+    }
+    _nextArrangementEntryId = maxId + 1;
+    bool wantSongMode = root["songMode"].asBool(false);
+    _seq->setSongMode(wantSongMode);
+    _songModeState.set(wantSongMode);
+    int wantEditing = root["editingSlot"].asInt(-1);
+    auto editIt = fileSlotToRealSlot.find(wantEditing);
+    int realEditing = editIt != fileSlotToRealSlot.end()
+                          ? editIt->second
+                          : _seq->activeSlots.front();
+    _seq->setEditingPattern(realEditing);
+    _refreshGridFromPattern();
+    _syncPatternDropdown();
 
-   // ── Timeline (Phase 3 clips) ────────────────────────────────────────
-   // Release engine tracks owned by whatever timeline was in memory
-   // before this load, then rebuild from the file. Old files (version 1)
-   // simply have no "timelineTracks" key, which SeqJson::JVal::operator[]
-   // resolves to an empty array — _timeline.tracks just ends up empty,
-   // same as a brand new project.
-   for (auto &track : _timeline.tracks)
-     if (track.engineTrack != kInvalidTrack)
-       AudioEngine::get().destroyTrack(track.engineTrack);
-   _timeline.tracks.clear();
+    // ── Timeline (Phase 3 clips) ────────────────────────────────────────
+    // Release engine tracks owned by whatever timeline was in memory
+    // before this load, then rebuild from the file. Old files (version 1)
+    // simply have no "timelineTracks" key, which SeqJson::JVal::operator[]
+    // resolves to an empty array — _timeline.tracks just ends up empty,
+    // same as a brand new project.
+    for (auto &track : _timeline.tracks)
+      if (track.engineTrack != kInvalidTrack)
+        AudioEngine::get().destroyTrack(track.engineTrack);
+    _timeline.tracks.clear();
 
-   uint64_t maxClipId = 0;
-   uint32_t maxTimelineTrackId = 0;
-   for (const auto &ttj : root["timelineTracks"].arr) {
-     TimelineTrack tt;
-     tt.id = (TimelineTrackID)ttj["id"].asInt(0);
-     tt.name = ttj["name"].asString("Track");
-     tt.muted = ttj["muted"].asBool(false);
-     tt.soloed = ttj["soloed"].asBool(false);
-     tt.engineTrack = AudioEngine::get().createTrack(); // reserved for
-                                                        // future per-clip
-                                                        // routing, same
-                                                        // as _addTimelineTrack
-     maxTimelineTrackId = std::max(maxTimelineTrackId, (uint32_t)tt.id);
+    uint64_t maxClipId = 0;
+    uint32_t maxTimelineTrackId = 0;
+    for (const auto &ttj : root["timelineTracks"].arr) {
+      TimelineTrack tt;
+      tt.id = (TimelineTrackID)ttj["id"].asInt(0);
+      tt.name = ttj["name"].asString("Track");
+      tt.muted = ttj["muted"].asBool(false);
+      tt.soloed = ttj["soloed"].asBool(false);
+      tt.engineTrack = AudioEngine::get().createTrack(); // reserved for
+                                                         // future per-clip
+                                                         // routing, same
+                                                         // as _addTimelineTrack
+      maxTimelineTrackId = std::max(maxTimelineTrackId, (uint32_t)tt.id);
 
-     for (const auto &cj : ttj["clips"].arr) {
-       Clip clip;
-       clip.id = (ClipID)cj["id"].asInt(0);
-       clip.type = (cj["type"].asInt(0) == 1) ? ClipType::Audio : ClipType::Pattern;
-       clip.startBeat = cj["startBeat"].asDouble(0.0);
-       clip.lengthBeats = cj["lengthBeats"].asDouble(4.0);
-       clip.audioFilePath = cj["audioFilePath"].asString("");
-       clip.audioStartOffsetSec = cj["audioStartOffsetSec"].asDouble(0.0);
-       clip.gain = (float)cj["gain"].asDouble(1.0);
-       clip.fadeInBeats = (float)cj["fadeInBeats"].asDouble(0.0);
-       clip.fadeOutBeats = (float)cj["fadeOutBeats"].asDouble(0.0);
+      for (const auto &cj : ttj["clips"].arr) {
+        Clip clip;
+        clip.id = (ClipID)cj["id"].asInt(0);
+        clip.type =
+            (cj["type"].asInt(0) == 1) ? ClipType::Audio : ClipType::Pattern;
+        clip.startBeat = cj["startBeat"].asDouble(0.0);
+        clip.lengthBeats = cj["lengthBeats"].asDouble(4.0);
+        clip.audioFilePath = cj["audioFilePath"].asString("");
+        clip.audioStartOffsetSec = cj["audioStartOffsetSec"].asDouble(0.0);
+        clip.gain = (float)cj["gain"].asDouble(1.0);
+        clip.fadeInBeats = (float)cj["fadeInBeats"].asDouble(0.0);
+        clip.fadeOutBeats = (float)cj["fadeOutBeats"].asDouble(0.0);
 
-       if (clip.type == ClipType::Pattern) {
-         // patternSlot was remapped once already when patterns were
-         // loaded above (see fileSlotToRealSlot) — apply the same
-         // remap here so a clip points at the right live slot, and
-         // drop it if it referenced a pattern slot the file never
-         // defined (mirrors the arrangement-loading behavior above).
-         auto slotIt = fileSlotToRealSlot.find(cj["patternSlot"].asInt(-1));
-         if (slotIt == fileSlotToRealSlot.end())
-           continue;
-         clip.patternSlot = slotIt->second;
-       } else {
-         clip.patternSlot = -1; // AudioClip — not pattern-backed
-       }
+        if (clip.type == ClipType::Pattern) {
+          // patternSlot was remapped once already when patterns were
+          // loaded above (see fileSlotToRealSlot) — apply the same
+          // remap here so a clip points at the right live slot, and
+          // drop it if it referenced a pattern slot the file never
+          // defined (mirrors the arrangement-loading behavior above).
+          auto slotIt = fileSlotToRealSlot.find(cj["patternSlot"].asInt(-1));
+          if (slotIt == fileSlotToRealSlot.end())
+            continue;
+          clip.patternSlot = slotIt->second;
+        } else {
+          clip.patternSlot = -1; // AudioClip — not pattern-backed
+        }
 
-       maxClipId = std::max(maxClipId, (uint64_t)clip.id);
-       tt.clips.push_back(clip);
-     }
-     _timeline.tracks.push_back(std::move(tt));
-   }
-   _nextClipId = maxClipId + 1;
-   _nextTimelineTrackId = maxTimelineTrackId + 1;
-   _selectedClipId = 0;
-   if (_timelineSurface)
-     _timelineSurface->selectedClip = 0;
-   _timelineSelectionLabel.set("No clip selected");
-   if (_timelineCanvas) {
-     _timelineCanvas->setCanvasSize(_timelineCanvasWidthPx(),
-                                    _timelineCanvasHeightPx());
-     _timelineCanvas->redraw();
-   }
+        maxClipId = std::max(maxClipId, (uint64_t)clip.id);
+        tt.clips.push_back(clip);
+      }
+      _timeline.tracks.push_back(std::move(tt));
+    }
+    _nextClipId = maxClipId + 1;
+    _nextTimelineTrackId = maxTimelineTrackId + 1;
+    _selectedClipId = 0;
+    if (_timelineSurface)
+      _timelineSurface->selectedClip = 0;
+    _timelineSelectionLabel.set("No clip selected");
+    if (_timelineCanvas) {
+      _timelineCanvas->setCanvasSize(_timelineCanvasWidthPx(),
+                                     _timelineCanvasHeightPx());
+      _timelineCanvas->redraw();
+    }
 
-   _undoStack.clear(); // a freshly loaded project starts with a clean history
- }
+    _undoStack.clear(); // a freshly loaded project starts with a clean history
+  }
 
   WidgetPtr _buildArrangementChip(const ArrangementEntry &entry) {
     return Row({
@@ -1703,11 +1897,13 @@ int _timelineCanvasWidthPx() const {
                      _undoStack.push(
                          [this, slot, t, s, oldVal] {
                            _seq->patternSlots[slot].steps[t][s].on = oldVal;
-                           if (_seq->editingSlot == slot) _cellState[t][s].set(oldVal);
+                           if (_seq->editingSlot == slot)
+                             _cellState[t][s].set(oldVal);
                          },
                          [this, slot, t, s, newVal] {
                            _seq->patternSlots[slot].steps[t][s].on = newVal;
-                           if (_seq->editingSlot == slot) _cellState[t][s].set(newVal);
+                           if (_seq->editingSlot == slot)
+                             _cellState[t][s].set(newVal);
                          });
                    })
                 ->setWidth(28)
@@ -1763,6 +1959,16 @@ int _timelineCanvasWidthPx() const {
                                          .steps[t][s]
                                          .probability = (float)v;
                                      _probabilitySliderState[t][s].set(v);
+                                   }),
+                               Text("Micro-timing")->setFontSize(11),
+                               Slider(-0.5, 0.5, 0.05)
+                                   ->setValue(_microTimingSliderState[t][s])
+                                   ->setWidth(140)
+                                   ->setOnValueChanged([this, t, s](double v) {
+                                     _seq->patternSlots[_seq->editingSlot]
+                                         .steps[t][s]
+                                         .microTiming = (float)v;
+                                     _microTimingSliderState[t][s].set(v);
                                    }),
                            })
                         ->setGap(4)
@@ -1858,17 +2064,20 @@ int _timelineCanvasWidthPx() const {
                       int slot = _seq->editingSlot;
                       int oldLen = _seq->patternSlots[slot].numSteps;
                       int newLen = (int)v;
-                      if (newLen == oldLen) return;
+                      if (newLen == oldLen)
+                        return;
                       _seq->setPatternLength(slot, newLen);
                       _patternLengthState.set(newLen);
                       _undoStack.push(
                           [this, slot, oldLen] {
                             _seq->setPatternLength(slot, oldLen);
-                            if (_seq->editingSlot == slot) _patternLengthState.set(oldLen);
+                            if (_seq->editingSlot == slot)
+                              _patternLengthState.set(oldLen);
                           },
                           [this, slot, newLen] {
                             _seq->setPatternLength(slot, newLen);
-                            if (_seq->editingSlot == slot) _patternLengthState.set(newLen);
+                            if (_seq->editingSlot == slot)
+                              _patternLengthState.set(newLen);
                           });
                     }),
                 Text("Subdiv:"),
@@ -1883,6 +2092,17 @@ int _timelineCanvasWidthPx() const {
                       // iterate on rapidly via the spinner, same reasoning as
                       // sliders being excluded above.
                     }),
+                Text("Swing:"),
+                NumberInput(0.0, 75.0, 1.0)
+                    ->setValue(_patternSwingState)
+                    ->setWidth(70)
+                    ->setOnValueChanged([this](double v) {
+                      int slot = _seq->editingSlot;
+                      _seq->setPatternSwing(slot, (float)v);
+                      _patternSwingState.set(_seq->patternSlots[slot].swing);
+                      // Not undo-tracked — same "feel" reasoning as Subdiv.
+                    }),
+
                 Text(_currentStepState,
                      [this](int) {
                        return "Playing: " +
@@ -1952,10 +2172,8 @@ int _timelineCanvasWidthPx() const {
         Row({
                 Text("Timeline:")->setFontWeight(FontWeight::Bold),
                 Button("+ Add Track", [this] { _addTimelineTrack(); }),
-                Button("▶ Play",
-                       [this] { _timelineScheduler->start(); }),
-                Button("■ Stop",
-                       [this] { _timelineScheduler->stop(); }),
+                Button("▶ Play", [this] { _timelineScheduler->start(); }),
+                Button("■ Stop", [this] { _timelineScheduler->stop(); }),
                 Button("Delete Clip",
                        [this] { _deleteSelectedTimelineClip(); }),
                 Text(_timelineSelectionLabel)->setFontSize(12),
@@ -1964,9 +2182,7 @@ int _timelineCanvasWidthPx() const {
             ->setAlignItems(AlignItems::Center);
 
     auto timelineSection =
-        Column({timelineToolbar, _timelineCanvas})
-            ->setGap(8);
-
+        Column({timelineToolbar, _timelineCanvas})->setGap(8);
 
     auto transportRow =
         Row({
@@ -1982,11 +2198,18 @@ int _timelineCanvasWidthPx() const {
                     ->setWidth(90)
                     ->setOnValueChanged([this](double v) {
                       double old = _seq->bpm;
-                      if (v == old) return;
+                      if (v == old)
+                        return;
                       _seq->bpm = v;
                       _undoStack.push(
-                          [this, old] { _seq->bpm = old; _bpmState.set(old); },
-                          [this, v] { _seq->bpm = v; _bpmState.set(v); });
+                          [this, old] {
+                            _seq->bpm = old;
+                            _bpmState.set(old);
+                          },
+                          [this, v] {
+                            _seq->bpm = v;
+                            _bpmState.set(v);
+                          });
                     }),
                 Button("Undo", [this] { _undoStack.undo(); }),
                 Button("Redo", [this] { _undoStack.redo(); }),
@@ -1995,11 +2218,15 @@ int _timelineCanvasWidthPx() const {
                     ->setDefaultFilename("project.fluxseq")
                     ->setDefaultExtension("fluxseq")
                     ->addFilter("Flux Sequencer Project", {"*.fluxseq"})
-                    ->setOnChanged([this](const std::string &path) { _saveProject(path); }),
+                    ->setOnChanged([this](const std::string &path) {
+                      _saveProject(path);
+                    }),
                 FilePicker("Load Project")
                     ->setMode(FilePickerMode::Open)
                     ->addFilter("Flux Sequencer Project", {"*.fluxseq"})
-                    ->setOnChanged([this](const std::string &path) { _loadProject(path); }),
+                    ->setOnChanged([this](const std::string &path) {
+                      _loadProject(path);
+                    }),
             })
             ->setGap(12)
             ->setAlignItems(AlignItems::Center);
