@@ -44,6 +44,12 @@ struct StepData {
 // for code that already includes this header transitively.
 static constexpr int kSeqMaxSteps = 64;
 
+// One track's synth timbre — oscillator shape plus a one-shot ADSR
+// envelope. Every step fired on this track uses the same instrument
+// settings; per-step variation is still just velocity/pitch/probability/
+// microTiming on StepData, same as before this change.
+enum class OscWaveform { Sine, Saw, Square, Triangle };
+
 struct StepHit {
   float freqHz;
   float gain;
@@ -52,6 +58,26 @@ struct StepHit {
   // synth test tone. Per-step pitch (StepData::pitchSemitones) applies to
   // sample playback too, via AudioEngine::play()'s pitchRatio argument.
   SampleID sampleId = kInvalidSample;
+
+  // ── Synth voice (used only when sampleId is invalid — see fireStep) ──
+  OscWaveform waveform = OscWaveform::Sine;
+
+  // One-shot ADSR, all in seconds except sustainLevel (0..1, the level
+  // held during the sustain phase). Defaults reproduce the ORIGINAL
+  // fixed envelope exactly: 0s attack (jump straight to full volume),
+  // 0.15s linear decay down to sustainLevel=0, 0s sustain hold, 0s
+  // release (nothing left to release once decay already reached 0) —
+  // i.e. every existing project's synth tracks sound identical after
+  // this change unless the person explicitly opens the new Synth panel.
+  float attackSec = 0.f;
+  float decaySec = 0.15f;
+  float sustainLevel = 0.f;
+  float sustainSec = 0.f; // how long to HOLD at sustainLevel before
+                          // releasing — there's no separate "note off"
+                          // event in a one-shot step fire, so sustain
+                          // duration has to be an explicit parameter
+                          // rather than "however long the key is held".
+  float releaseSec = 0.f;
 };
 
 // One entry in the song arrangement. `id` is a stable identity used for
@@ -373,12 +399,67 @@ public:
 
 private:
   // Bundles the two pieces of per-note state the envelope callback needs.
-  // A single make_shared<> here replaces the previous pair of separate
-  // shared_ptr<float>/shared_ptr<int> allocations per note fired.
+  // A single make_shared<> here replaces what would otherwise be a pair of
+  // separate shared_ptr<float>/shared_ptr<int> allocations per note fired.
   struct SynthNoteState {
     float phase = 0.f;
-    int samplesLeft = 0;
+    int samplesElapsed = 0;
   };
+
+  // Single-cycle waveform lookup at a given phase (radians, unwrapped —
+  // may exceed 2*pi, this function wraps it). Sine matches the original
+  // exactly; saw/square/triangle are unit-amplitude, DC-free, computed
+  // from the same phase accumulator so switching waveform on a track
+  // doesn't change pitch tracking or phase-continuity behavior at all.
+  static float _oscSample(OscWaveform wf, float phase) {
+    constexpr float kTwoPi = 2.0f * 3.14159265f;
+    if (wf == OscWaveform::Sine)
+      return std::sin(phase);
+
+    float p = std::fmod(phase, kTwoPi);
+    if (p < 0.f)
+      p += kTwoPi;
+    float norm = p / kTwoPi; // 0..1 across one cycle
+
+    switch (wf) {
+    case OscWaveform::Saw:
+      return 2.0f * norm - 1.0f;
+    case OscWaveform::Square:
+      return (norm < 0.5f) ? 1.0f : -1.0f;
+    case OscWaveform::Triangle:
+      return (norm < 0.5f) ? (4.0f * norm - 1.0f) : (3.0f - 4.0f * norm);
+    default:
+      return std::sin(phase);
+    }
+  }
+
+  // Piecewise-linear one-shot ADSR, evaluated from a sample count elapsed
+  // since note start. `total*Samples` are precomputed once per note (see
+  // _fireSynthStep) rather than recomputed per sample.
+  static float _adsrEnvelope(int samplesElapsed, int attackSamples,
+                             int decaySamples, int sustainSamples,
+                             int releaseSamples, float sustainLevel) {
+    int n = samplesElapsed;
+    if (n < attackSamples)
+      return attackSamples > 0 ? (float)n / (float)attackSamples : 1.0f;
+    n -= attackSamples;
+
+    if (n < decaySamples) {
+      float t = decaySamples > 0 ? (float)n / (float)decaySamples : 1.0f;
+      return 1.0f + (sustainLevel - 1.0f) * t; // 1 -> sustainLevel
+    }
+    n -= decaySamples;
+
+    if (n < sustainSamples)
+      return sustainLevel;
+    n -= sustainSamples;
+
+    if (n < releaseSamples) {
+      float t = releaseSamples > 0 ? (float)n / (float)releaseSamples : 1.0f;
+      return sustainLevel * (1.0f - t); // sustainLevel -> 0
+    }
+    return 0.0f; // fully released
+  }
 
   static void _fireSynthStep(const StepHit &hit, const StepData &step,
                              float effectiveGain, uint64_t targetFrame) {
@@ -391,22 +472,37 @@ private:
     float phaseInc =
         (2.0f * 3.14159265f * pitchedFreq) / (float)engine.sampleRate();
 
-    // Simple decaying envelope so each hit sounds like a "note" instead
-    // of an infinite drone — decays over ~150ms then goes silent.
-    state->samplesLeft = (int)(engine.sampleRate() * 0.15);
-    int totalSamples = state->samplesLeft;
+    float sr = (float)engine.sampleRate();
+    int attackSamples = std::max(0, (int)(hit.attackSec * sr));
+    int decaySamples = std::max(0, (int)(hit.decaySec * sr));
+    int sustainSamples = std::max(0, (int)(hit.sustainSec * sr));
+    int releaseSamples = std::max(0, (int)(hit.releaseSec * sr));
+    int totalSamples =
+        attackSamples + decaySamples + sustainSamples + releaseSamples;
+    // Degenerate case: every phase is 0 seconds (e.g. a project loaded
+    // with all-zero ADSR fields). Give it one sample of silence instead
+    // of a note that never ends — matches the old code's implicit
+    // guarantee that a fired step always eventually frees its voice.
+    if (totalSamples <= 0)
+      totalSamples = 1;
+
+    float sustainLevel = std::max(0.f, std::min(1.f, hit.sustainLevel));
+    OscWaveform waveform = hit.waveform;
 
     AudioEngine::StreamCallback cb =
-        [state, phaseInc, totalSamples](float *buf, int frames) -> int {
-      if (state->samplesLeft <= 0)
+        [state, phaseInc, attackSamples, decaySamples, sustainSamples,
+         releaseSamples, totalSamples, sustainLevel,
+         waveform](float *buf, int frames) -> int {
+      if (state->samplesElapsed >= totalSamples)
         return -1; // fully decayed — engine frees this voice slot
 
       for (int i = 0; i < frames; i++) {
         float env =
-            (float)state->samplesLeft / (float)totalSamples; // linear decay
-        buf[i] = std::sin(state->phase) * env * 0.3f;
+            _adsrEnvelope(state->samplesElapsed, attackSamples, decaySamples,
+                          sustainSamples, releaseSamples, sustainLevel);
+        buf[i] = _oscSample(waveform, state->phase) * env * 0.3f;
         state->phase += phaseInc;
-        state->samplesLeft--;
+        state->samplesElapsed++;
       }
       return frames;
     };
@@ -1046,6 +1142,20 @@ class SequencerApp : public Widget {
   std::vector<State<double>> _trackVolumeState;
   std::vector<State<double>> _trackPanState;
 
+  // Synth voice UI state — mirrors trackVoice[t]'s waveform/ADSR fields
+  // the same way _trackVolumeState/_trackPanState mirror gain/pan.
+  // _waveformState holds an index into kWaveformNames, not the enum
+  // itself, since Dropdown works in terms of option indices.
+  std::vector<State<int>> _waveformState;
+  std::vector<State<double>> _attackState;
+  std::vector<State<double>> _decayState;
+  std::vector<State<double>> _sustainLevelState;
+  std::vector<State<double>> _sustainHoldState;
+  std::vector<State<double>> _releaseState;
+
+  static constexpr const char *kWaveformNames[] = {"Sine", "Saw", "Square",
+                                                   "Triangle"};
+
   // Pattern selector. NOTE: assumes Dropdown() returns a shared_ptr to a
   // concrete widget type exposing setOptions()/setSelectedIndex() — matches
   // the chained-method style used throughout this framework, but double
@@ -1167,6 +1277,12 @@ public:
     _soloState.reserve(_seq->trackVoice.size());
     _trackVolumeState.reserve(_seq->trackVoice.size());
     _trackPanState.reserve(_seq->trackVoice.size());
+    _waveformState.reserve(_seq->trackVoice.size());
+    _attackState.reserve(_seq->trackVoice.size());
+    _decayState.reserve(_seq->trackVoice.size());
+    _sustainLevelState.reserve(_seq->trackVoice.size());
+    _sustainHoldState.reserve(_seq->trackVoice.size());
+    _releaseState.reserve(_seq->trackVoice.size());
     for (size_t t = 0; t < _seq->trackVoice.size(); t++) {
       _cellState[t].reserve(StepScheduler::kMaxSteps);
       _velocitySliderState[t].reserve(StepScheduler::kMaxSteps);
@@ -1187,6 +1303,12 @@ public:
       _soloState.emplace_back(false);
       _trackVolumeState.emplace_back((double)_seq->trackVoice[t].gain);
       _trackPanState.emplace_back((double)_seq->trackVoice[t].pan);
+      _waveformState.emplace_back((int)_seq->trackVoice[t].waveform);
+      _attackState.emplace_back((double)_seq->trackVoice[t].attackSec);
+      _decayState.emplace_back((double)_seq->trackVoice[t].decaySec);
+      _sustainLevelState.emplace_back((double)_seq->trackVoice[t].sustainLevel);
+      _sustainHoldState.emplace_back((double)_seq->trackVoice[t].sustainSec);
+      _releaseState.emplace_back((double)_seq->trackVoice[t].releaseSec);
     }
 
     // Seed the initial pattern (slot 0, created by StepScheduler's ctor)
@@ -1396,6 +1518,15 @@ public:
     _arrangementState.set(_seq->arrangement);
   }
 
+  void _refreshSynthStateFromTrack(size_t t) {
+    _waveformState[t].set((int)_seq->trackVoice[t].waveform);
+    _attackState[t].set((double)_seq->trackVoice[t].attackSec);
+    _decayState[t].set((double)_seq->trackVoice[t].decaySec);
+    _sustainLevelState[t].set((double)_seq->trackVoice[t].sustainLevel);
+    _sustainHoldState[t].set((double)_seq->trackVoice[t].sustainSec);
+    _releaseState[t].set((double)_seq->trackVoice[t].releaseSec);
+  }
+
   void _syncPatternDropdown() {
     std::vector<std::string> labels;
     for (int slot : _seq->activeSlots)
@@ -1584,6 +1715,12 @@ public:
           << "\"freqHz\":" << hit.freqHz << ","
           << "\"gain\":" << hit.gain << ","
           << "\"pan\":" << hit.pan << ","
+          << "\"waveform\":" << (int)hit.waveform << ","
+          << "\"attackSec\":" << hit.attackSec << ","
+          << "\"decaySec\":" << hit.decaySec << ","
+          << "\"sustainLevel\":" << hit.sustainLevel << ","
+          << "\"sustainSec\":" << hit.sustainSec << ","
+          << "\"releaseSec\":" << hit.releaseSec << ","
           << "\"samplePath\":\""
           << SeqJson::esc(t < _trackSamplePath.size() ? _trackSamplePath[t]
                                                       : "")
@@ -1681,10 +1818,23 @@ public:
           (float)tj["gain"].asDouble(_seq->trackVoice[t].gain);
       _seq->trackVoice[t].pan =
           (float)tj["pan"].asDouble(_seq->trackVoice[t].pan);
+      _seq->trackVoice[t].waveform =
+          (OscWaveform)tj["waveform"].asInt((int)_seq->trackVoice[t].waveform);
+      _seq->trackVoice[t].attackSec =
+          (float)tj["attackSec"].asDouble(_seq->trackVoice[t].attackSec);
+      _seq->trackVoice[t].decaySec =
+          (float)tj["decaySec"].asDouble(_seq->trackVoice[t].decaySec);
+      _seq->trackVoice[t].sustainLevel =
+          (float)tj["sustainLevel"].asDouble(_seq->trackVoice[t].sustainLevel);
+      _seq->trackVoice[t].sustainSec =
+          (float)tj["sustainSec"].asDouble(_seq->trackVoice[t].sustainSec);
+      _seq->trackVoice[t].releaseSec =
+          (float)tj["releaseSec"].asDouble(_seq->trackVoice[t].releaseSec);
       _seq->trackMuted[t] = tj["muted"].asBool(false);
       _seq->trackSoloed[t] = tj["soloed"].asBool(false);
       _trackVolumeState[t].set((double)_seq->trackVoice[t].gain);
       _trackPanState[t].set((double)_seq->trackVoice[t].pan);
+      _refreshSynthStateFromTrack(t);
       _muteState[t].set(_seq->trackMuted[t]);
       _soloState[t].set(_seq->trackSoloed[t]);
       std::string samplePath = tj["samplePath"].asString("");
@@ -1993,6 +2143,83 @@ public:
                       ->setWidth(80)
                       ->setOnChanged([this, t](const std::string &path) {
                         _loadTrackSample(t, path);
+                      }),
+
+                  ContextMenu(
+                      Button("Synth", [] {})
+                          ->setWidth(56)
+                          ->setHeight(24)
+                          ->setBorderRadius(4)
+                          ->setBackgroundColor(Color::fromRGB(235, 235, 245)),
+                      {
+                          ContextMenuItem::Widget(
+                              Column(
+                                  {
+                                      Text("Waveform")->setFontSize(11),
+                                      Dropdown(
+                                          {"Sine", "Saw", "Square", "Triangle"})
+                                          ->setSelectedIndex(_waveformState[t])
+                                          ->setWidth(120)
+                                          ->setOnSelectionChanged(
+                                              [this, t](int idx,
+                                                        const std::string &) {
+                                                _seq->trackVoice[t].waveform =
+                                                    (OscWaveform)idx;
+                                                _waveformState[t].set(idx);
+                                              }),
+                                      Text("Attack (s)")->setFontSize(11),
+                                      Slider(0.0, 2.0, 0.01)
+                                          ->setValue(_attackState[t])
+                                          ->setWidth(140)
+                                          ->setOnValueChanged(
+                                              [this, t](double v) {
+                                                _seq->trackVoice[t].attackSec =
+                                                    (float)v;
+                                                _attackState[t].set(v);
+                                              }),
+                                      Text("Decay (s)")->setFontSize(11),
+                                      Slider(0.0, 2.0, 0.01)
+                                          ->setValue(_decayState[t])
+                                          ->setWidth(140)
+                                          ->setOnValueChanged(
+                                              [this, t](double v) {
+                                                _seq->trackVoice[t].decaySec =
+                                                    (float)v;
+                                                _decayState[t].set(v);
+                                              }),
+                                      Text("Sustain level")->setFontSize(11),
+                                      Slider(0.0, 1.0, 0.05)
+                                          ->setValue(_sustainLevelState[t])
+                                          ->setWidth(140)
+                                          ->setOnValueChanged([this,
+                                                               t](double v) {
+                                            _seq->trackVoice[t].sustainLevel =
+                                                (float)v;
+                                            _sustainLevelState[t].set(v);
+                                          }),
+                                      Text("Sustain hold (s)")->setFontSize(11),
+                                      Slider(0.0, 2.0, 0.01)
+                                          ->setValue(_sustainHoldState[t])
+                                          ->setWidth(140)
+                                          ->setOnValueChanged(
+                                              [this, t](double v) {
+                                                _seq->trackVoice[t].sustainSec =
+                                                    (float)v;
+                                                _sustainHoldState[t].set(v);
+                                              }),
+                                      Text("Release (s)")->setFontSize(11),
+                                      Slider(0.0, 2.0, 0.01)
+                                          ->setValue(_releaseState[t])
+                                          ->setWidth(140)
+                                          ->setOnValueChanged(
+                                              [this, t](double v) {
+                                                _seq->trackVoice[t].releaseSec =
+                                                    (float)v;
+                                                _releaseState[t].set(v);
+                                              }),
+                                  })
+                                  ->setGap(4)
+                                  ->setPadding(8)),
                       }),
               })
               ->setGap(8)
