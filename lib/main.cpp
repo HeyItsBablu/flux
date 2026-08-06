@@ -11,6 +11,7 @@
 #include <fstream>
 #include <sstream>
 #include <unordered_map>
+#include <memory>
 
 // ============================================================================
 // Data model
@@ -261,7 +262,7 @@ public:
         if (step.probability < 1.0f &&
             (float)std::rand() / (float)RAND_MAX > step.probability)
           continue; // dice roll missed — step is silently skipped this pass
-        _fireStep(trackVoice[t], step, _nextStepFrame);
+        fireStep(trackVoice[t], step, _nextStepFrame);
       }
 
       currentStep++;
@@ -303,8 +304,13 @@ private:
     return std::max<uint64_t>(1, frames);
   }
 
-  static void _fireStep(const StepHit &hit, const StepData &step,
-                        uint64_t targetFrame) {
+public:
+  // Exposed so TimelineScheduler (Phase 3) fires pattern-clip steps through
+  // the exact same envelope/pitch/velocity/sample logic the classic
+  // pattern-chain scheduler uses — one firing code path, two schedulers.
+  static void fireStep(const StepHit &hit, const StepData &step,
+                       uint64_t targetFrame) {
+
     auto &engine = AudioEngine::get();
     float velocity = std::max(0.f, std::min(1.f, step.velocity));
     float effectiveGain = hit.gain * velocity;
@@ -320,6 +326,7 @@ private:
 
     _fireSynthStep(hit, step, effectiveGain, targetFrame);
   }
+private:
 
   // Bundles the two pieces of per-note state the envelope callback needs.
   // A single make_shared<> here replaces the previous pair of separate
@@ -364,6 +371,192 @@ private:
     // return), so the engine frees the voice slot once the decay finishes.
     engine.playStream(cb, engine.sampleRate(), effectiveGain, hit.pan,
                       targetFrame);
+  }
+};
+
+
+// ============================================================================
+// Timeline model — Phase 3.
+//
+// A TimelineTrack (NOT the same concept as StepScheduler's 4 fixed
+// instrument rows, and NOT AudioEngine::TrackID, though each one owns an
+// AudioEngine Track for future per-clip routing — see the TODO on
+// TimelineScheduler::tick()) holds an ordered set of Clips positioned at
+// arbitrary points on a linear beats timeline, instead of the old
+// pattern-chain "song mode" order. Per the roadmap: "a step-pattern becomes
+// one kind of clip (PatternClip)".
+//
+// AudioClip fields exist on Clip already so the struct doesn't need a
+// breaking shape change later, but AudioClip playback, waveform display,
+// recording, and non-destructive trim/fade are NOT implemented yet — see
+// the roadmap notes at the bottom of this file's diff summary.
+// ============================================================================
+
+using ClipID = uint64_t;
+using TimelineTrackID = uint32_t;
+
+enum class ClipType { Pattern, Audio };
+
+// startBeat/lengthBeats live on a timeline-global beat axis, independent of
+// any individual pattern's own stepsPerBeat/numSteps — that's what lets
+// clips built from differently-subdivided patterns sit on one timeline.
+// TimelineScheduler maps global position to each clip's own pattern grid
+// internally (see kPPQ).
+struct Clip {
+  ClipID id = 0;
+  ClipType type = ClipType::Pattern;
+  double startBeat = 0.0;
+  double lengthBeats = 4.0;
+
+  // ── PatternClip ──────────────────────────────────────────────────────
+  int patternSlot = -1; // index into StepScheduler::patternSlots
+
+  // ── AudioClip (stub — not yet played back or editable; see notes) ────
+  std::string audioFilePath;
+  double audioStartOffsetSec = 0.0;
+  float gain = 1.0f;
+  float fadeInBeats = 0.0f;
+  float fadeOutBeats = 0.0f;
+};
+
+struct TimelineTrack {
+  TimelineTrackID id = 0;
+  std::string name;
+  TrackID engineTrack = kInvalidTrack; // reserved for per-clip engine
+                                       // routing — not wired yet, see
+                                       // TimelineScheduler::tick()
+  std::vector<Clip> clips;
+  bool muted = false;
+  bool soloed = false;
+};
+
+struct Timeline {
+  std::vector<TimelineTrack> tracks;
+};
+
+// ============================================================================
+// TimelineScheduler — walks Timeline clips and fires PatternClip steps at
+// the right sample-accurate time, using StepScheduler::fireStep() so the
+// actual sound produced is identical to pattern/song mode.
+//
+// Uses a fixed PPQN (pulses per quarter-note/beat) tick instead of a
+// per-clip "next step" cursor, because different clips can be built from
+// patterns with different stepsPerBeat — a single shared pulse grid is
+// what makes "does this clip have a step due right now" a cheap modulo
+// check instead of N independent float-drift-prone timers. kPPQ=96 divides
+// evenly by every subdivision StepScheduler currently exposes (1-8) plus
+// common tuplet values, so pattern step boundaries always land exactly on
+// a pulse with no rounding.
+// ============================================================================
+
+class TimelineScheduler {
+public:
+  static constexpr int kPPQ = 96;
+
+  Timeline timeline;
+  bool playing = false;
+  int64_t currentPulse = 0;
+
+  // References StepScheduler's pattern storage (patternSlots) and
+  // instrument tracks (trackVoice/trackMuted/trackSoloed) directly rather
+  // than duplicating them — patterns are shared data between the classic
+  // pattern-chain transport and the timeline transport, per the roadmap's
+  // "keep the old step-grid behavior working as PatternClip".
+  explicit TimelineScheduler(StepScheduler &seq) : _seq(seq) {}
+
+  void start() {
+    playing = true;
+    currentPulse = 0;
+    _nextPulseFrame = AudioEngine::get().currentSampleTime();
+  }
+  void stop() { playing = false; }
+
+  double playheadBeats() const { return (double)currentPulse / kPPQ; }
+
+  void tick() {
+    if (!playing)
+      return;
+
+    auto &engine = AudioEngine::get();
+    uint64_t now = engine.currentSampleTime();
+    uint64_t lookahead = (uint64_t)(engine.sampleRate() * 0.1);
+
+    while (_nextPulseFrame < now + lookahead) {
+      bool anyTrackSoloed =
+          std::any_of(timeline.tracks.begin(), timeline.tracks.end(),
+                     [](const TimelineTrack &t) { return t.soloed; });
+
+      for (auto &track : timeline.tracks) {
+        bool audible = !track.muted && (!anyTrackSoloed || track.soloed);
+        if (!audible)
+          continue;
+        // TODO(engine routing): steps fire via StepScheduler::fireStep(),
+        // which always calls AudioEngine::play()/playStream() with
+        // track=kInvalidTrack (straight to master) — track.engineTrack is
+        // allocated but not yet threaded through. Per-instrument audio
+        // (StepHit) has no TrackID of its own either, so wiring this up
+        // means deciding whether routing is per-TimelineTrack or
+        // per-instrument-row first; left as a follow-up rather than
+        // guessing. Mute/solo above work regardless, since they gate
+        // whether steps fire at all, not how they're mixed.
+        for (auto &clip : track.clips) {
+          if (clip.type != ClipType::Pattern)
+            continue; // AudioClip playback not implemented yet
+          _tickPatternClip(clip, _nextPulseFrame);
+        }
+      }
+
+      currentPulse++;
+      _nextPulseFrame += _framesPerPulse();
+    }
+  }
+
+private:
+  StepScheduler &_seq;
+  uint64_t _nextPulseFrame = 0;
+
+  uint64_t _framesPerPulse() const {
+    double secondsPerBeat = 60.0 / _seq.bpm; // shares StepScheduler's bpm —
+                                             // one tempo for the whole app
+    double secondsPerPulse = secondsPerBeat / kPPQ;
+    uint64_t frames =
+        (uint64_t)(secondsPerPulse * AudioEngine::get().sampleRate());
+    return std::max<uint64_t>(1, frames);
+  }
+
+  void _tickPatternClip(const Clip &clip, uint64_t targetFrame) {
+    int64_t clipStartPulse = (int64_t)std::llround(clip.startBeat * kPPQ);
+    int64_t clipLenPulses = (int64_t)std::llround(clip.lengthBeats * kPPQ);
+    int64_t rel = currentPulse - clipStartPulse;
+    if (rel < 0 || rel >= clipLenPulses)
+      return; // playhead isn't inside this clip's span
+
+    if (clip.patternSlot < 0 || clip.patternSlot >= StepScheduler::kMaxPatterns)
+      return;
+    Pattern &pat = _seq.patternSlots[clip.patternSlot];
+    if (!pat.active || pat.numSteps <= 0)
+      return;
+
+    int pulsesPerStep = std::max(1, kPPQ / std::max(1, pat.stepsPerBeat));
+    if (rel % pulsesPerStep != 0)
+      return; // not a step boundary for this pattern's subdivision
+
+    int stepIndex = (int)((rel / pulsesPerStep) % pat.numSteps);
+
+    bool anySoloed = std::any_of(_seq.trackSoloed.begin(), _seq.trackSoloed.end(),
+                                 [](bool b) { return b; });
+    for (size_t t = 0; t < pat.steps.size() && t < _seq.trackVoice.size(); t++) {
+      const StepData &step = pat.steps[t][stepIndex];
+      if (!step.on)
+        continue;
+      bool audible = !_seq.trackMuted[t] && (!anySoloed || _seq.trackSoloed[t]);
+      if (!audible)
+        continue;
+      if (step.probability < 1.0f &&
+          (float)std::rand() / (float)RAND_MAX > step.probability)
+        continue;
+      StepScheduler::fireStep(_seq.trackVoice[t], step, targetFrame);
+    }
   }
 };
 
@@ -537,6 +730,135 @@ inline bool parse(const std::string &text, JVal &out) { return Parser(text).pars
 
 } // namespace SeqJson
 
+
+// ============================================================================
+// TimelineSurface — draws Timeline tracks/clips and handles click input.
+// Pan/zoom/scrollbars come free from CanvasWidget's built-in viewport (see
+// the Canvas docs — middle-drag or space+drag to pan, ctrl+scroll to zoom);
+// mouse coordinates arrive already in canvas-space, so beat math below
+// doesn't need to account for scroll/zoom manually.
+//
+// Deliberately does NOT mutate `timeline` directly — every interaction goes
+// through onEmptyClick/onClipClick so SequencerApp remains the single
+// source of truth (same call-back-into-owner shape FilePickerWidget uses),
+// which keeps the door open for undo support on timeline edits later.
+// ============================================================================
+
+class TimelineSurface : public RenderSurface {
+public:
+  static constexpr float kPxPerBeat = 40.f;
+  static constexpr float kTrackHeight = 56.f;
+
+  Timeline *timeline = nullptr;
+  StepScheduler *seq = nullptr;         // for pattern name lookups only
+  TimelineScheduler *scheduler = nullptr; // for playhead position only
+  ClipID selectedClip = 0;
+
+  std::function<void(int trackIndex, double beat)> onEmptyClick;
+  std::function<void(ClipID)> onClipClick;
+
+  void initialize(int, int) override {}
+  void resize(int, int) override {}
+  void destroy() override {}
+  void update(double) override {}
+
+  void render(Canvas2D &ctx) override {
+    float w = (float)ctx.width();
+    float h = (float)ctx.height();
+
+    ctx.setFillColor(Color::fromRGB(250, 250, 252));
+    ctx.fillRect(0, 0, w, h);
+
+    if (!timeline)
+      return;
+
+    // Beat grid — heavier line every bar (4 beats).
+    int totalBeats = (int)(w / kPxPerBeat) + 1;
+    for (int b = 0; b <= totalBeats; b++) {
+      float x = b * kPxPerBeat;
+      ctx.setStrokeColor((b % 4 == 0) ? Color::fromRGB(190, 190, 200)
+                                      : Color::fromRGB(225, 225, 230));
+      ctx.setLineWidth(1);
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, h);
+      ctx.stroke();
+    }
+
+    // Track lanes + clips.
+    for (size_t ti = 0; ti < timeline->tracks.size(); ti++) {
+      float laneY = ti * kTrackHeight;
+      ctx.setStrokeColor(Color::fromRGB(210, 210, 215));
+      ctx.beginPath();
+      ctx.moveTo(0, laneY);
+      ctx.lineTo(w, laneY);
+      ctx.stroke();
+
+      for (const Clip &clip : timeline->tracks[ti].clips) {
+        if (clip.type != ClipType::Pattern)
+          continue; // AudioClip rendering not implemented yet
+        float cx = (float)(clip.startBeat * kPxPerBeat);
+        float cw = (float)(clip.lengthBeats * kPxPerBeat);
+        bool selected = clip.id == selectedClip;
+
+        ctx.setFillColor(selected ? Color::fromRGB(99, 179, 237)
+                                  : Color::fromRGB(150, 150, 235));
+        ctx.fillRoundedRect(cx + 1, laneY + 4, std::max(4.f, cw - 2),
+                            kTrackHeight - 8, 4);
+
+        std::string label = "Clip";
+        if (seq && clip.patternSlot >= 0 &&
+            clip.patternSlot < (int)seq->patternSlots.size())
+          label = seq->patternSlots[clip.patternSlot].name;
+
+        ctx.setFillColor(Color::fromRGB(255, 255, 255));
+        ctx.setFont("12px sans");
+        ctx.setTextAlign(CanvasTextAlign::Left);
+        ctx.setTextBaseline(TextBaseline::Top);
+        ctx.fillText(label, cx + 6, laneY + 8);
+      }
+    }
+
+    // Playhead.
+    if (scheduler && scheduler->playing) {
+      float px = (float)(scheduler->playheadBeats() * kPxPerBeat);
+      ctx.setStrokeColor(Color::fromRGB(220, 50, 50));
+      ctx.setLineWidth(2);
+      ctx.beginPath();
+      ctx.moveTo(px, 0);
+      ctx.lineTo(px, h);
+      ctx.stroke();
+    }
+  }
+
+  void onMouseDown(float x, float y) override {
+    if (!timeline || timeline->tracks.empty())
+      return;
+    int ti = (int)(y / kTrackHeight);
+    if (ti < 0 || ti >= (int)timeline->tracks.size())
+      return;
+    double beat = x / kPxPerBeat;
+
+    for (const Clip &clip : timeline->tracks[ti].clips) {
+      if (clip.type == ClipType::Pattern && beat >= clip.startBeat &&
+          beat < clip.startBeat + clip.lengthBeats) {
+        if (onClipClick)
+          onClipClick(clip.id);
+        return;
+      }
+    }
+
+    if (onEmptyClick)
+      onEmptyClick(ti, beat);
+  }
+
+  // Only needed while something is actually playing (playhead sweep);
+  // idle editing is fully event-driven via redraw() from the App side.
+  bool needsContinuousRedraw() const override {
+    return scheduler && scheduler->playing;
+  }
+};
+
 // ============================================================================
 // UI
 // ============================================================================
@@ -638,11 +960,28 @@ class SequencerApp : public Widget {
   };
   UndoStack _undoStack;
 
+
+  // ── Timeline (Phase 3) ────────────────────────────────────────────────
+  Timeline _timeline;
+  std::unique_ptr<TimelineScheduler> _timelineScheduler; // built in ctor,
+                                                         // after _seq exists
+  uint64_t _nextClipId = 1;
+  TimelineTrackID _nextTimelineTrackId = 1;
+  ClipID _selectedClipId = 0;
+
+  std::shared_ptr<CanvasWidget> _timelineCanvas;
+  std::shared_ptr<TimelineSurface> _timelineSurface;
+
+  // Shown next to the timeline so the user can see/delete the current
+  // selection without a full side panel widget. Text() binds to this.
+  State<std::string> _timelineSelectionLabel{"No clip selected"};
+
 public:
   SequencerApp() {
     AudioEngine::get().init();
 
     _seq = std::make_shared<StepScheduler>(4);
+    _timelineScheduler = std::make_unique<TimelineScheduler>(*_seq);
     _seq->trackVoice = {
         {110.f, 1.0f, -0.6f}, // low tom-ish
         {220.f, 0.9f, -0.2f},
@@ -966,7 +1305,88 @@ public:
         [this, id, oldCount] { _setArrangementRepeatCore(id, oldCount); },
         [this, id, newCount] { _setArrangementRepeatCore(id, newCount); });
   }
+int _timelineCanvasWidthPx() const {
+    return (int)(64 * TimelineSurface::kPxPerBeat); // 16-bar initial extent;
+                                                     // grows are a follow-up
+  }
+  int _timelineCanvasHeightPx() const {
+    return std::max(1, (int)_timeline.tracks.size()) *
+           (int)TimelineSurface::kTrackHeight;
+  }
 
+  void _addTimelineTrack() {
+    TimelineTrack tt;
+    tt.id = _nextTimelineTrackId++;
+    tt.name = "Track " + std::to_string(_timeline.tracks.size() + 1);
+    tt.engineTrack = AudioEngine::get().createTrack(); // reserved for
+                                                       // future per-clip
+                                                       // routing — see
+                                                       // TimelineScheduler
+    _timeline.tracks.push_back(std::move(tt));
+
+    if (_timelineCanvas)
+      _timelineCanvas->setCanvasSize(_timelineCanvasWidthPx(),
+                                     _timelineCanvasHeightPx());
+    if (_timelineCanvas)
+      _timelineCanvas->redraw();
+  }
+
+  void _timelineAddClipAt(int trackIndex, double beat) {
+    if (trackIndex < 0 || trackIndex >= (int)_timeline.tracks.size())
+      return;
+
+    Clip clip;
+    clip.id = _nextClipId++;
+    clip.type = ClipType::Pattern;
+    clip.patternSlot = _seq->editingSlot;
+
+    const Pattern &pat = _seq->patternSlots[clip.patternSlot];
+    clip.lengthBeats =
+        std::max(0.25, (double)pat.numSteps / std::max(1, pat.stepsPerBeat));
+    clip.startBeat = std::max(0.0, std::round(beat));
+
+    _timeline.tracks[trackIndex].clips.push_back(clip);
+    _timelineSelectClip(clip.id);
+    if (_timelineCanvas)
+      _timelineCanvas->redraw();
+  }
+
+  void _timelineSelectClip(ClipID id) {
+    _selectedClipId = id;
+    if (_timelineSurface)
+      _timelineSurface->selectedClip = id;
+
+    std::string label = "No clip selected";
+    for (const auto &track : _timeline.tracks)
+      for (const auto &clip : track.clips)
+        if (clip.id == id && clip.type == ClipType::Pattern) {
+          std::string patName =
+              (clip.patternSlot >= 0 &&
+               clip.patternSlot < (int)_seq->patternSlots.size())
+                  ? _seq->patternSlots[clip.patternSlot].name
+                  : "?";
+          label = patName + " @ beat " + std::to_string((int)clip.startBeat) +
+                  ", " + std::to_string(clip.lengthBeats) + " beats long";
+        }
+    _timelineSelectionLabel.set(label);
+
+    if (_timelineCanvas)
+      _timelineCanvas->redraw();
+  }
+
+  void _deleteSelectedTimelineClip() {
+    if (_selectedClipId == 0)
+      return;
+    for (auto &track : _timeline.tracks) {
+      auto it = std::find_if(track.clips.begin(), track.clips.end(),
+                             [this](const Clip &c) { return c.id == _selectedClipId; });
+      if (it != track.clips.end()) {
+        track.clips.erase(it);
+        break;
+      }
+    }
+    _timelineSelectClip(0);
+  }
   void _setArrangementRepeatCore(uint64_t id, int count) {
     for (auto &e : _seq->arrangement)
       if (e.id == id) { e.repeatCount = count; break; }
@@ -1414,6 +1834,46 @@ public:
                })
             ->setGap(8);
 
+    // ── Timeline (Phase 3) ────────────────────────────────────────────
+    if (!_timelineCanvas) {
+      _timelineCanvas = Canvas(900, 260);
+      _timelineCanvas->setScrollbarsEnabled(true);
+      _timelineCanvas->setViewportEnabled(true);
+      _timelineCanvas->setCanvasSize(_timelineCanvasWidthPx(),
+                                     _timelineCanvasHeightPx());
+
+      _timelineSurface = _timelineCanvas->setSurface<TimelineSurface>();
+      _timelineSurface->timeline = &_timeline;
+      _timelineSurface->seq = _seq.get();
+      _timelineSurface->scheduler = _timelineScheduler.get();
+      _timelineSurface->onEmptyClick = [this](int idx, double beat) {
+        _timelineAddClipAt(idx, beat);
+      };
+      _timelineSurface->onClipClick = [this](ClipID id) {
+        _timelineSelectClip(id);
+      };
+    }
+
+    auto timelineToolbar =
+        Row({
+                Text("Timeline:")->setFontWeight(FontWeight::Bold),
+                Button("+ Add Track", [this] { _addTimelineTrack(); }),
+                Button("▶ Play",
+                       [this] { _timelineScheduler->start(); }),
+                Button("■ Stop",
+                       [this] { _timelineScheduler->stop(); }),
+                Button("Delete Clip",
+                       [this] { _deleteSelectedTimelineClip(); }),
+                Text(_timelineSelectionLabel)->setFontSize(12),
+            })
+            ->setGap(8)
+            ->setAlignItems(AlignItems::Center);
+
+    auto timelineSection =
+        Column({timelineToolbar, _timelineCanvas})
+            ->setGap(8);
+
+
     auto transportRow =
         Row({
                 Button("▶ Play", [this] { _seq->start(); }),
@@ -1454,11 +1914,14 @@ public:
       _timerId = FluxUI::getCurrentInstance()->setInterval(25, [this] {
         _seq->tick();
         _currentStepState.set(_seq->currentStep);
+        _timelineScheduler->tick();
+        if (_timelineCanvas && _timelineScheduler->playing)
+          _timelineCanvas->redraw();
       });
     }
 
     return Column({transportRow, patternBar, arrangementBar,
-                   Column({trackRows})->setGap(6)})
+                   Column({trackRows})->setGap(6), timelineSection})
         ->setGap(16)
         ->setPadding(24);
   }
