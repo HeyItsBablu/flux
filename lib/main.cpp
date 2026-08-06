@@ -1447,6 +1447,30 @@ int _timelineCanvasWidthPx() const {
          << ",\"repeatCount\":" << e.repeatCount << "}"
          << (i + 1 < _seq->arrangement.size() ? "," : "") << "\n";
    }
+   out << "  ],\n";
+   out << "  \"timelineTracks\": [\n";
+   for (size_t ti = 0; ti < _timeline.tracks.size(); ti++) {
+     const TimelineTrack &tt = _timeline.tracks[ti];
+     out << "    {\"id\":" << tt.id << ",\"name\":\"" << SeqJson::esc(tt.name)
+         << "\",\"muted\":" << (tt.muted ? "true" : "false")
+         << ",\"soloed\":" << (tt.soloed ? "true" : "false")
+         << ",\"clips\":[";
+     for (size_t ci = 0; ci < tt.clips.size(); ci++) {
+       const Clip &c = tt.clips[ci];
+       out << "{\"id\":" << c.id
+           << ",\"type\":" << (int)c.type
+           << ",\"startBeat\":" << c.startBeat
+           << ",\"lengthBeats\":" << c.lengthBeats
+           << ",\"patternSlot\":" << c.patternSlot
+           << ",\"audioFilePath\":\"" << SeqJson::esc(c.audioFilePath) << "\""
+           << ",\"audioStartOffsetSec\":" << c.audioStartOffsetSec
+           << ",\"gain\":" << c.gain
+           << ",\"fadeInBeats\":" << c.fadeInBeats
+           << ",\"fadeOutBeats\":" << c.fadeOutBeats << "}"
+           << (ci + 1 < tt.clips.size() ? "," : "");
+     }
+     out << "]}" << (ti + 1 < _timeline.tracks.size() ? "," : "") << "\n";
+   }
    out << "  ]\n}\n";
    std::ofstream f(path, std::ios::binary);
    if (f) f << out.str();
@@ -1546,6 +1570,76 @@ int _timelineCanvasWidthPx() const {
    _seq->setEditingPattern(realEditing);
    _refreshGridFromPattern();
    _syncPatternDropdown();
+
+
+   // ── Timeline (Phase 3 clips) ────────────────────────────────────────
+   // Release engine tracks owned by whatever timeline was in memory
+   // before this load, then rebuild from the file. Old files (version 1)
+   // simply have no "timelineTracks" key, which SeqJson::JVal::operator[]
+   // resolves to an empty array — _timeline.tracks just ends up empty,
+   // same as a brand new project.
+   for (auto &track : _timeline.tracks)
+     if (track.engineTrack != kInvalidTrack)
+       AudioEngine::get().destroyTrack(track.engineTrack);
+   _timeline.tracks.clear();
+
+   uint64_t maxClipId = 0;
+   uint32_t maxTimelineTrackId = 0;
+   for (const auto &ttj : root["timelineTracks"].arr) {
+     TimelineTrack tt;
+     tt.id = (TimelineTrackID)ttj["id"].asInt(0);
+     tt.name = ttj["name"].asString("Track");
+     tt.muted = ttj["muted"].asBool(false);
+     tt.soloed = ttj["soloed"].asBool(false);
+     tt.engineTrack = AudioEngine::get().createTrack(); // reserved for
+                                                        // future per-clip
+                                                        // routing, same
+                                                        // as _addTimelineTrack
+     maxTimelineTrackId = std::max(maxTimelineTrackId, (uint32_t)tt.id);
+
+     for (const auto &cj : ttj["clips"].arr) {
+       Clip clip;
+       clip.id = (ClipID)cj["id"].asInt(0);
+       clip.type = (cj["type"].asInt(0) == 1) ? ClipType::Audio : ClipType::Pattern;
+       clip.startBeat = cj["startBeat"].asDouble(0.0);
+       clip.lengthBeats = cj["lengthBeats"].asDouble(4.0);
+       clip.audioFilePath = cj["audioFilePath"].asString("");
+       clip.audioStartOffsetSec = cj["audioStartOffsetSec"].asDouble(0.0);
+       clip.gain = (float)cj["gain"].asDouble(1.0);
+       clip.fadeInBeats = (float)cj["fadeInBeats"].asDouble(0.0);
+       clip.fadeOutBeats = (float)cj["fadeOutBeats"].asDouble(0.0);
+
+       if (clip.type == ClipType::Pattern) {
+         // patternSlot was remapped once already when patterns were
+         // loaded above (see fileSlotToRealSlot) — apply the same
+         // remap here so a clip points at the right live slot, and
+         // drop it if it referenced a pattern slot the file never
+         // defined (mirrors the arrangement-loading behavior above).
+         auto slotIt = fileSlotToRealSlot.find(cj["patternSlot"].asInt(-1));
+         if (slotIt == fileSlotToRealSlot.end())
+           continue;
+         clip.patternSlot = slotIt->second;
+       } else {
+         clip.patternSlot = -1; // AudioClip — not pattern-backed
+       }
+
+       maxClipId = std::max(maxClipId, (uint64_t)clip.id);
+       tt.clips.push_back(clip);
+     }
+     _timeline.tracks.push_back(std::move(tt));
+   }
+   _nextClipId = maxClipId + 1;
+   _nextTimelineTrackId = maxTimelineTrackId + 1;
+   _selectedClipId = 0;
+   if (_timelineSurface)
+     _timelineSurface->selectedClip = 0;
+   _timelineSelectionLabel.set("No clip selected");
+   if (_timelineCanvas) {
+     _timelineCanvas->setCanvasSize(_timelineCanvasWidthPx(),
+                                    _timelineCanvasHeightPx());
+     _timelineCanvas->redraw();
+   }
+
    _undoStack.clear(); // a freshly loaded project starts with a clean history
  }
 
