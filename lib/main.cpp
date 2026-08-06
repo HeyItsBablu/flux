@@ -10,6 +10,7 @@
 #include <cctype>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <unordered_map>
 
@@ -1153,9 +1154,6 @@ class SequencerApp : public Widget {
   std::vector<State<double>> _sustainHoldState;
   std::vector<State<double>> _releaseState;
 
-  static constexpr const char *kWaveformNames[] = {"Sine", "Saw", "Square",
-                                                   "Triangle"};
-
   // Pattern selector. NOTE: assumes Dropdown() returns a shared_ptr to a
   // concrete widget type exposing setOptions()/setSelectedIndex() — matches
   // the chained-method style used throughout this framework, but double
@@ -1232,6 +1230,12 @@ class SequencerApp : public Widget {
     std::vector<Entry> _redoStack;
   };
   UndoStack _undoStack;
+
+  // Single-step clipboard for the context menu's Copy/Paste buttons.
+  // Deliberately NOT part of project save/load — this is transient
+  // editing state, same as an OS clipboard, not project data. Empty
+  // (nullopt) until the user copies a step for the first time.
+  std::optional<StepData> _stepClipboard;
 
   // ── Timeline (Phase 3) ────────────────────────────────────────────────
   Timeline _timeline;
@@ -1608,6 +1612,54 @@ public:
     _undoStack.push(
         [this, id, oldCount] { _setArrangementRepeatCore(id, oldCount); },
         [this, id, newCount] { _setArrangementRepeatCore(id, newCount); });
+  }
+
+  void _copyStep(size_t t, int s) {
+    const Pattern &pat = _seq->patternSlots[_seq->editingSlot];
+    _stepClipboard = pat.steps[t][s]; // copies on/velocity/pitch/probability/
+                                      // microTiming as a single snapshot
+  }
+
+  void _pasteStep(size_t t, int s) {
+    if (!_stepClipboard.has_value())
+      return; // nothing copied yet
+
+    int slot = _seq->editingSlot;
+    StepData oldVal = _seq->patternSlots[slot].steps[t][s];
+    StepData newVal = *_stepClipboard;
+    if (oldVal.on == newVal.on && oldVal.velocity == newVal.velocity &&
+        oldVal.pitchSemitones == newVal.pitchSemitones &&
+        oldVal.probability == newVal.probability &&
+        oldVal.microTiming == newVal.microTiming)
+      return; // pasting an identical step onto itself — no-op, no undo entry
+
+    _seq->patternSlots[slot].steps[t][s] = newVal;
+    _applyStepToUI(t, s, newVal);
+
+    _undoStack.push(
+        [this, slot, t, s, oldVal] {
+          _seq->patternSlots[slot].steps[t][s] = oldVal;
+          if (_seq->editingSlot == slot)
+            _applyStepToUI(t, s, oldVal);
+        },
+        [this, slot, t, s, newVal] {
+          _seq->patternSlots[slot].steps[t][s] = newVal;
+          if (_seq->editingSlot == slot)
+            _applyStepToUI(t, s, newVal);
+        });
+  }
+
+  // Pushes a StepData's fields into every bound UI slider/cell for (t, s)
+  // in one place — factored out of _pasteStep's undo/redo lambdas so a
+  // paste updates all five sliders (on, velocity, pitch, probability,
+  // microTiming) the same way _refreshGridFromPattern does for a whole
+  // pattern switch, just for a single cell.
+  void _applyStepToUI(size_t t, int s, const StepData &step) {
+    _cellState[t][s].set(step.on);
+    _velocitySliderState[t][s].set((double)step.velocity);
+    _pitchSliderState[t][s].set((double)step.pitchSemitones);
+    _probabilitySliderState[t][s].set((double)step.probability);
+    _microTimingSliderState[t][s].set((double)step.microTiming);
   }
   int _timelineCanvasWidthPx() const {
     return (int)(64 * TimelineSurface::kPxPerBeat); // 16-bar initial extent;
@@ -2079,48 +2131,66 @@ public:
             cell,
             {
                 ContextMenuItem::Widget(
-                    Column({
-                               Text("Velocity")->setFontSize(11),
-                               Slider(0.0, 1.0, 0.05)
-                                   ->setValue(_velocitySliderState[t][s])
-                                   ->setWidth(140)
-                                   ->setOnValueChanged([this, t, s](double v) {
-                                     _seq->patternSlots[_seq->editingSlot]
-                                         .steps[t][s]
-                                         .velocity = (float)v;
-                                     _velocitySliderState[t][s].set(v);
-                                   }),
-                               Text("Pitch (semitones)")->setFontSize(11),
-                               Slider(-24.0, 24.0, 1.0)
-                                   ->setValue(_pitchSliderState[t][s])
-                                   ->setWidth(140)
-                                   ->setOnValueChanged([this, t, s](double v) {
-                                     _seq->patternSlots[_seq->editingSlot]
-                                         .steps[t][s]
-                                         .pitchSemitones = (float)v;
-                                     _pitchSliderState[t][s].set(v);
-                                   }),
-                               Text("Probability")->setFontSize(11),
-                               Slider(0.0, 1.0, 0.05)
-                                   ->setValue(_probabilitySliderState[t][s])
-                                   ->setWidth(140)
-                                   ->setOnValueChanged([this, t, s](double v) {
-                                     _seq->patternSlots[_seq->editingSlot]
-                                         .steps[t][s]
-                                         .probability = (float)v;
-                                     _probabilitySliderState[t][s].set(v);
-                                   }),
-                               Text("Micro-timing")->setFontSize(11),
-                               Slider(-0.5, 0.5, 0.05)
-                                   ->setValue(_microTimingSliderState[t][s])
-                                   ->setWidth(140)
-                                   ->setOnValueChanged([this, t, s](double v) {
-                                     _seq->patternSlots[_seq->editingSlot]
-                                         .steps[t][s]
-                                         .microTiming = (float)v;
-                                     _microTimingSliderState[t][s].set(v);
-                                   }),
-                           })
+                    Column(
+                        {
+                            Row({
+                                    Button("Copy",
+                                           [this, t, s] { _copyStep(t, s); })
+                                        ->setWidth(64)
+                                        ->setHeight(22)
+                                        ->setBorderRadius(4)
+                                        ->setBackgroundColor(
+                                            Color::fromRGB(230, 230, 230)),
+                                    Button("Paste",
+                                           [this, t, s] { _pasteStep(t, s); })
+                                        ->setWidth(64)
+                                        ->setHeight(22)
+                                        ->setBorderRadius(4)
+                                        ->setBackgroundColor(
+                                            Color::fromRGB(230, 230, 230)),
+                                })
+                                ->setGap(6),
+                            Text("Velocity")->setFontSize(11),
+                            Slider(0.0, 1.0, 0.05)
+                                ->setValue(_velocitySliderState[t][s])
+                                ->setWidth(140)
+                                ->setOnValueChanged([this, t, s](double v) {
+                                  _seq->patternSlots[_seq->editingSlot]
+                                      .steps[t][s]
+                                      .velocity = (float)v;
+                                  _velocitySliderState[t][s].set(v);
+                                }),
+                            Text("Pitch (semitones)")->setFontSize(11),
+                            Slider(-24.0, 24.0, 1.0)
+                                ->setValue(_pitchSliderState[t][s])
+                                ->setWidth(140)
+                                ->setOnValueChanged([this, t, s](double v) {
+                                  _seq->patternSlots[_seq->editingSlot]
+                                      .steps[t][s]
+                                      .pitchSemitones = (float)v;
+                                  _pitchSliderState[t][s].set(v);
+                                }),
+                            Text("Probability")->setFontSize(11),
+                            Slider(0.0, 1.0, 0.05)
+                                ->setValue(_probabilitySliderState[t][s])
+                                ->setWidth(140)
+                                ->setOnValueChanged([this, t, s](double v) {
+                                  _seq->patternSlots[_seq->editingSlot]
+                                      .steps[t][s]
+                                      .probability = (float)v;
+                                  _probabilitySliderState[t][s].set(v);
+                                }),
+                            Text("Micro-timing")->setFontSize(11),
+                            Slider(-0.5, 0.5, 0.05)
+                                ->setValue(_microTimingSliderState[t][s])
+                                ->setWidth(140)
+                                ->setOnValueChanged([this, t, s](double v) {
+                                  _seq->patternSlots[_seq->editingSlot]
+                                      .steps[t][s]
+                                      .microTiming = (float)v;
+                                  _microTimingSliderState[t][s].set(v);
+                                }),
+                        })
                         ->setGap(4)
                         ->setPadding(8)),
             });
