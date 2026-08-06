@@ -3,15 +3,20 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include<cstdlib>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
-    // ============================================================================
-    // Data model
-    // ============================================================================
+#include <cctype>
+#include <fstream>
+#include <sstream>
+#include <unordered_map>
 
-    struct StepData {
+// ============================================================================
+// Data model
+// ============================================================================
+
+struct StepData {
   bool on = false;
   float velocity = 1.0f;      // 0..1, scales this hit's gain
   float pitchSemitones = 0.f; // -24..+24, shifts freqHz for synth tracks only
@@ -20,6 +25,16 @@
                               // comes up; 1.0 = always fires (default,
                               // matches old behavior exactly)
 };
+
+// Absolute cap every pattern's step vectors are allocated to, regardless of
+// that pattern's current logical length (Pattern::numSteps). This means
+// changing a pattern's length is just an int assignment — no resize, no
+// out-of-bounds risk, and shrinking-then-growing a pattern doesn't lose
+// steps programmed beyond the shorter length; they're just inert while
+// hidden. See StepScheduler::kMaxSteps for the same constant, scoped there
+// for code that already includes this header transitively.
+static constexpr int kSeqMaxSteps = 64;
+
 
 struct StepHit {
   float freqHz;
@@ -40,7 +55,6 @@ struct ArrangementEntry {
   int repeatCount = 1; // number of times this entry loops before the
                        // arrangement advances to the next entry
 
-
   bool operator==(const ArrangementEntry &other) const {
     return id == other.id && patternSlot == other.patternSlot &&
            repeatCount == other.repeatCount;
@@ -50,6 +64,11 @@ struct ArrangementEntry {
 struct Pattern {
   std::string name;
   bool active = false;
+  int numSteps = 16;      // logical length in steps — <= kSeqMaxSteps.
+                           // Acts as this pattern's "time signature" length.
+  int stepsPerBeat = 4;    // subdivision: 4 = 16th notes, 3 = triplet feel,
+                           // etc. Together with numSteps this is the
+                           // per-pattern stand-in for a full time signature.
   std::vector<std::vector<StepData>> steps; // [track][step]
 };
 
@@ -61,7 +80,12 @@ struct Pattern {
 
 class StepScheduler {
 public:
-  static constexpr int kSteps = 16;
+  // kSteps is gone — pattern length is now per-pattern (Pattern::numSteps).
+  // kMaxSteps is the fixed allocation size every pattern's step vectors use
+  // (see the comment on kSeqMaxSteps above); kDefaultSteps is what a newly
+  // created pattern starts at.
+  static constexpr int kMaxSteps = kSeqMaxSteps;
+  static constexpr int kDefaultSteps = 16;
   static constexpr int kMaxPatterns =
       8; // fixed pool — same tradeoff as the
          // engine's 64-voice pool: simple,
@@ -107,7 +131,10 @@ public:
       if (!patternSlots[i].active) {
         patternSlots[i].active = true;
         patternSlots[i].name = name;
-        patternSlots[i].steps.assign(_numTracks, std::vector<StepData>(kSteps));
+        patternSlots[i].numSteps = kDefaultSteps;
+        patternSlots[i].stepsPerBeat = 4;
+        // Always allocate at kMaxSteps — see the comment on kSeqMaxSteps.
+        patternSlots[i].steps.assign(_numTracks, std::vector<StepData>(kMaxSteps));
         activeSlots.push_back(i);
         return i;
       }
@@ -119,10 +146,32 @@ public:
     if (srcSlot < 0 || srcSlot >= kMaxPatterns || !patternSlots[srcSlot].active)
       return -1;
     int dst = addPattern(patternSlots[srcSlot].name + " copy");
-    if (dst >= 0)
-      patternSlots[dst].steps =
-          patternSlots[srcSlot].steps; // deep copy of step data
+    if (dst >= 0) {
+      patternSlots[dst].steps = patternSlots[srcSlot].steps; // deep copy of step data
+      patternSlots[dst].numSteps = patternSlots[srcSlot].numSteps;
+      patternSlots[dst].stepsPerBeat = patternSlots[srcSlot].stepsPerBeat;
+    }
+
     return dst;
+  }
+
+
+  // Changes the logical length of `slot`. No data is moved or dropped —
+  // steps beyond newLen just stop being played/edited until the pattern is
+  // lengthened again. Clamped to [1, kMaxSteps].
+  void setPatternLength(int slot, int newLen) {
+    if (slot < 0 || slot >= kMaxPatterns || !patternSlots[slot].active)
+      return;
+    newLen = std::max(1, std::min(kMaxSteps, newLen));
+    patternSlots[slot].numSteps = newLen;
+    if (playingSlot == slot && currentStep >= newLen)
+      currentStep = 0; // playhead was past the new (shorter) end
+  }
+
+  void setPatternStepsPerBeat(int slot, int spb) {
+    if (slot < 0 || slot >= kMaxPatterns || !patternSlots[slot].active)
+      return;
+    patternSlots[slot].stepsPerBeat = std::max(1, spb);
   }
 
   void deletePattern(int slot) {
@@ -199,6 +248,7 @@ public:
 
     while (_nextStepFrame < now + lookahead) {
       Pattern &pat = patternSlots[playingSlot];
+      int patternLen = std::max(1, pat.numSteps);
       bool anySoloed = std::any_of(trackSoloed.begin(), trackSoloed.end(),
                                    [](bool b) { return b; });
       for (size_t t = 0; t < pat.steps.size(); t++) {
@@ -215,12 +265,12 @@ public:
       }
 
       currentStep++;
-      if (currentStep >= kSteps) {
+      if (currentStep >= patternLen) {
         currentStep = 0;
         _advancePlayback(); // pattern boundary — advance the song if in song
                             // mode
       }
-      _nextStepFrame += _framesPerStep();
+      _nextStepFrame += _framesPerStep(pat.stepsPerBeat);
     }
   }
 
@@ -244,8 +294,8 @@ private:
     _repeatsRemaining = std::max(1, arrangement[arrangementPos].repeatCount);
   }
 
-  uint64_t _framesPerStep() const {
-    double secondsPerStep = 60.0 / bpm / 4.0; // 16th notes, 4 per beat
+  uint64_t _framesPerStep(int stepsPerBeat) const {
+    double secondsPerStep = 60.0 / bpm / std::max(1, stepsPerBeat);
     uint64_t frames =
         (uint64_t)(secondsPerStep * AudioEngine::get().sampleRate());
     // Guard against tick()'s while-loop spinning forever if this ever
@@ -318,6 +368,176 @@ private:
 };
 
 // ============================================================================
+// Minimal embedded JSON — project save/load only.
+//
+// Deliberately NOT a general-purpose JSON library: no unicode escapes, no
+// exponent edge cases beyond what strtod handles, no streaming. It exists so
+// project files don't take on an undocumented dependency on whatever
+// JsonValue backs JsonBuilder/JsonStreamBuilder elsewhere in the framework
+// (that type's write-side API isn't visible from here). Don't reuse this
+// outside sequencer project I/O without hardening it first.
+// ============================================================================
+namespace SeqJson {
+
+inline std::string esc(const std::string &s) {
+  std::string out;
+  out.reserve(s.size());
+  for (char c : s) {
+    switch (c) {
+    case '"': out += "\\\""; break;
+    case '\\': out += "\\\\"; break;
+    case '\n': out += "\\n"; break;
+    case '\r': out += "\\r"; break;
+    case '\t': out += "\\t"; break;
+    default: out += c;
+    }
+  }
+  return out;
+}
+
+struct JVal {
+  enum class Type { Null, Bool, Number, String, Array, Object } type = Type::Null;
+  double num = 0;
+  bool boolean = false;
+  std::string str;
+  std::vector<JVal> arr;
+  std::vector<std::pair<std::string, JVal>> obj;
+
+  double asDouble(double def = 0) const { return type == Type::Number ? num : def; }
+  int asInt(int def = 0) const { return type == Type::Number ? (int)num : def; }
+  bool asBool(bool def = false) const { return type == Type::Bool ? boolean : def; }
+  std::string asString(const std::string &def = "") const {
+    return type == Type::String ? str : def;
+  }
+
+  const JVal *find(const std::string &key) const {
+    for (auto &kv : obj)
+      if (kv.first == key)
+        return &kv.second;
+    return nullptr;
+  }
+  // Never returns null — a missing key just yields a Null JVal, so chained
+  // access like val["tracks"].arr doesn't need a null check at each step.
+  const JVal &operator[](const std::string &key) const {
+    static const JVal kNull{};
+    const JVal *v = find(key);
+    return v ? *v : kNull;
+  }
+};
+
+class Parser {
+public:
+  explicit Parser(const std::string &s) : _s(s) {}
+  bool parse(JVal &out) { _skipWs(); return _parseValue(out); }
+
+private:
+  const std::string &_s;
+  size_t _i = 0;
+
+  void _skipWs() { while (_i < _s.size() && std::isspace((unsigned char)_s[_i])) _i++; }
+  char _peek() const { return _i < _s.size() ? _s[_i] : '\0'; }
+  bool _consume(char c) { _skipWs(); if (_peek() != c) return false; _i++; return true; }
+
+  bool _parseValue(JVal &out) {
+    _skipWs();
+    char c = _peek();
+    if (c == '{') return _parseObject(out);
+    if (c == '[') return _parseArray(out);
+    if (c == '"') return _parseString(out);
+    if (c == 't' || c == 'f') return _parseBool(out);
+    if (c == 'n') { _i += 4; out.type = JVal::Type::Null; return true; }
+    return _parseNumber(out);
+  }
+
+  bool _parseObject(JVal &out) {
+    if (!_consume('{')) return false;
+    out.type = JVal::Type::Object;
+    _skipWs();
+    if (_peek() == '}') { _i++; return true; }
+    while (true) {
+      _skipWs();
+      JVal key;
+      if (!_parseString(key)) return false;
+      if (!_consume(':')) return false;
+      JVal val;
+      if (!_parseValue(val)) return false;
+      out.obj.emplace_back(key.str, std::move(val));
+      _skipWs();
+      if (_peek() == ',') { _i++; continue; }
+      if (_peek() == '}') { _i++; break; }
+      return false;
+    }
+    return true;
+  }
+
+  bool _parseArray(JVal &out) {
+    if (!_consume('[')) return false;
+    out.type = JVal::Type::Array;
+    _skipWs();
+    if (_peek() == ']') { _i++; return true; }
+    while (true) {
+      JVal val;
+      if (!_parseValue(val)) return false;
+      out.arr.push_back(std::move(val));
+      _skipWs();
+      if (_peek() == ',') { _i++; continue; }
+      if (_peek() == ']') { _i++; break; }
+      return false;
+    }
+    return true;
+  }
+
+  bool _parseString(JVal &out) {
+    if (!_consume('"')) return false;
+    out.type = JVal::Type::String;
+    std::string s;
+    while (_i < _s.size() && _s[_i] != '"') {
+      char c = _s[_i++];
+      if (c == '\\' && _i < _s.size()) {
+        char e = _s[_i++];
+        switch (e) {
+        case 'n': s += '\n'; break;
+        case 't': s += '\t'; break;
+        case 'r': s += '\r'; break;
+        case '"': s += '"'; break;
+        case '\\': s += '\\'; break;
+        case '/': s += '/'; break;
+        default: s += e;
+        }
+      } else {
+        s += c;
+      }
+    }
+    if (_i >= _s.size()) return false; // unterminated
+    _i++;
+    out.str = std::move(s);
+    return true;
+  }
+
+  bool _parseBool(JVal &out) {
+    if (_s.compare(_i, 4, "true") == 0) { out.type = JVal::Type::Bool; out.boolean = true; _i += 4; return true; }
+    if (_s.compare(_i, 5, "false") == 0) { out.type = JVal::Type::Bool; out.boolean = false; _i += 5; return true; }
+    return false;
+  }
+
+  bool _parseNumber(JVal &out) {
+    size_t start = _i;
+    if (_peek() == '-') _i++;
+    while (_i < _s.size() && (std::isdigit((unsigned char)_s[_i]) || _s[_i] == '.' ||
+                              _s[_i] == 'e' || _s[_i] == 'E' || _s[_i] == '+' || _s[_i] == '-'))
+      _i++;
+    if (_i == start) return false;
+    out.type = JVal::Type::Number;
+    out.num = std::atof(_s.substr(start, _i - start).c_str());
+    return true;
+  }
+};
+
+inline bool parse(const std::string &text, JVal &out) { return Parser(text).parse(out); }
+
+} // namespace SeqJson
+
+// ============================================================================
 // UI
 // ============================================================================
 
@@ -364,6 +584,60 @@ class SequencerApp : public Widget {
       std::vector<ArrangementEntry>{}};
   uint64_t _nextArrangementEntryId = 1;
 
+
+  // Tracks which pattern the grid is currently showing, mirrored into a
+  // State<int> purely so cell-color bindings recompute (grayed-out /
+  // inert columns beyond the pattern's length) whenever it changes — same
+  // mechanism as _currentStepState driving the playhead highlight.
+  State<int> _patternLengthState{16};
+  State<int> _patternSpbState{4};
+
+  // Full file path per track's loaded sample, so Save Project can write it
+  // back out. _instrumentNameState only keeps the display name (basename),
+  // which isn't enough to reload from.
+  std::vector<std::string> _trackSamplePath;
+
+  // Generic undo/redo. See _undoStack's class comment for scope — it
+  // covers discrete edits (step toggles, pattern/arrangement add-remove,
+  // length/BPM changes) but deliberately not continuous slider drags
+  // (velocity/pitch/probability/volume/pan), since Slider's API only
+  // exposes onValueChanged with no drag-end hook to coalesce into one
+  // undo entry — wiring it in as-is would flood the stack with one entry
+  // per pixel of drag.
+  class UndoStack {
+  public:
+    using Fn = std::function<void()>;
+
+    void push(Fn undo, Fn redo) {
+      _redoStack.clear(); // a fresh action invalidates old redo history
+      _undoStack.push_back({std::move(undo), std::move(redo)});
+      if (_undoStack.size() > kMaxDepth)
+        _undoStack.erase(_undoStack.begin());
+    }
+    void undo() {
+      if (_undoStack.empty()) return;
+      Entry e = std::move(_undoStack.back());
+      _undoStack.pop_back();
+      e.undo();
+      _redoStack.push_back(std::move(e));
+    }
+    void redo() {
+      if (_redoStack.empty()) return;
+      Entry e = std::move(_redoStack.back());
+      _redoStack.pop_back();
+      e.redo();
+      _undoStack.push_back(std::move(e));
+    }
+    void clear() { _undoStack.clear(); _redoStack.clear(); }
+
+  private:
+    struct Entry { Fn undo, redo; };
+    static constexpr size_t kMaxDepth = 200;
+    std::vector<Entry> _undoStack;
+    std::vector<Entry> _redoStack;
+  };
+  UndoStack _undoStack;
+
 public:
   SequencerApp() {
     AudioEngine::get().init();
@@ -392,11 +666,11 @@ public:
     _trackVolumeState.reserve(_seq->trackVoice.size());
     _trackPanState.reserve(_seq->trackVoice.size());
     for (size_t t = 0; t < _seq->trackVoice.size(); t++) {
-      _cellState[t].reserve(StepScheduler::kSteps);
-      _velocitySliderState[t].reserve(StepScheduler::kSteps);
-      _pitchSliderState[t].reserve(StepScheduler::kSteps);
-      _probabilitySliderState[t].reserve(StepScheduler::kSteps);
-      for (int s = 0; s < StepScheduler::kSteps; s++) {
+      _cellState[t].reserve(StepScheduler::kMaxSteps);
+      _velocitySliderState[t].reserve(StepScheduler::kMaxSteps);
+      _pitchSliderState[t].reserve(StepScheduler::kMaxSteps);
+      _probabilitySliderState[t].reserve(StepScheduler::kMaxSteps);
+      for (int s = 0; s < StepScheduler::kMaxSteps; s++) {
         _cellState[t].emplace_back(false);
         _velocitySliderState[t].emplace_back(1.0);
         _pitchSliderState[t].emplace_back(0.0);
@@ -414,9 +688,9 @@ public:
     // Seed the initial pattern (slot 0, created by StepScheduler's ctor)
     // with a basic four-on-the-floor + offbeat hat pattern.
     Pattern &initial = _seq->patternSlots[_seq->editingSlot];
-    for (int s = 0; s < StepScheduler::kSteps; s += 4)
+    for (int s = 0; s < initial.numSteps; s += 4)
       initial.steps[0][s].on = true;
-    for (int s = 2; s < StepScheduler::kSteps; s += 4)
+    for (int s = 2; s < initial.numSteps; s += 4)
       initial.steps[3][s].on = true;
 
     _refreshGridFromPattern(); // pull the seeded pattern into the bound cell
@@ -440,13 +714,20 @@ public:
   // no highlight appears here; a known simplification rather than an
   // auto-follow feature.
   Color _colorForCell(size_t t, int s) const {
+
+    const Pattern &editingPat = _seq->patternSlots[_seq->editingSlot];
+    bool withinLength = s < editingPat.numSteps;
+
     bool viewingLivePattern = (_seq->editingSlot == _seq->playingSlot);
     bool isPlayhead =
-        _seq->playing && viewingLivePattern && (_seq->currentStep == s);
+        _seq->playing && viewingLivePattern && withinLength && (_seq->currentStep == s);
     if (isPlayhead)
       return Color::fromRGB(220, 50, 50);
 
-    const StepData &step = _seq->patternSlots[_seq->editingSlot].steps[t][s];
+    if (!withinLength)
+      return Color::fromRGB(245, 245, 245); // beyond current pattern length — inert
+
+    const StepData &step = editingPat.steps[t][s];
     if (!step.on)
       return Color::fromRGB(230, 230, 230);
 
@@ -463,7 +744,7 @@ public:
   void _refreshGridFromPattern() {
     const Pattern &pat = _seq->patternSlots[_seq->editingSlot];
     for (size_t t = 0; t < pat.steps.size(); t++) {
-      for (int s = 0; s < StepScheduler::kSteps; s++) {
+      for (int s = 0; s < StepScheduler::kMaxSteps; s++) {
         const StepData &step = pat.steps[t][s];
         _cellState[t][s].set(step.on);
         _velocitySliderState[t][s].set(step.velocity);
@@ -471,6 +752,8 @@ public:
         _probabilitySliderState[t][s].set((double)step.probability);
       }
     }
+    _patternLengthState.set(pat.numSteps); // triggers grid recolor (grayed-out inert columns)
+    _patternSpbState.set(pat.stepsPerBeat);
   }
 
   void _loadTrackSample(size_t t, const std::string &path) {
@@ -486,34 +769,121 @@ public:
     if (old != kInvalidSample)
       AudioEngine::get().unloadSample(old);
 
+    if (t >= _trackSamplePath.size())
+      _trackSamplePath.resize(t + 1);
+    _trackSamplePath[t] = path;
+
+
     size_t slash = path.find_last_of("/\\");
     _instrumentNameState[t].set(
         slash == std::string::npos ? path : path.substr(slash + 1));
   }
 
-  void _createPattern() {
-    int newSlot = _seq->addPattern(
-        "Pattern " + std::to_string(_seq->activeSlots.size() + 1));
-    if (newSlot < 0)
-      return; // fixed pool (kMaxPatterns) exhausted
-    _seq->setEditingPattern(newSlot);
+  // Core creation logic with no undo-stack side effects — shared by the
+  // initial user action and by redo().
+  int _createPatternCore(const std::string &name) {
+    int slot = _seq->addPattern(name);
+    if (slot < 0)
+      return -1; // fixed pool (kMaxPatterns) exhausted
+    _seq->setEditingPattern(slot);
     _refreshGridFromPattern();
     _syncPatternDropdown();
+    return slot;
   }
 
-  void _duplicateCurrentPattern() {
-    int dup = _seq->duplicatePattern(_seq->editingSlot);
-    if (dup < 0)
+  void _createPattern() {
+    int prevEditing = _seq->editingSlot;
+    std::string name = "Pattern " + std::to_string(_seq->activeSlots.size() + 1);
+    int newSlot = _createPatternCore(name);
+    if (newSlot < 0)
       return;
+
+    _undoStack.push(
+        [this, newSlot, prevEditing] {
+          _seq->deletePattern(newSlot);
+          _seq->setEditingPattern(prevEditing);
+          _refreshGridFromPattern();
+          _syncPatternDropdown();
+        },
+        [this, name] { _createPatternCore(name); });
+  }
+
+  int _duplicatePatternCore(int srcSlot) {
+    int dup = _seq->duplicatePattern(srcSlot);
+    if (dup < 0)
+      return -1;
     _seq->setEditingPattern(dup);
     _refreshGridFromPattern();
     _syncPatternDropdown();
+    return dup;
+  }
+
+  void _duplicateCurrentPattern() {
+    int srcSlot = _seq->editingSlot;
+    int dup = _duplicatePatternCore(srcSlot);
+    if (dup < 0)
+      return;
+
+    _undoStack.push(
+        [this, dup, srcSlot] {
+          _seq->deletePattern(dup);
+          _seq->setEditingPattern(srcSlot);
+          _refreshGridFromPattern();
+          _syncPatternDropdown();
+        },
+        // Best-effort: if srcSlot has since been deleted/reused by other
+        // edits between undo and redo, this silently duplicates whatever
+        // now occupies that slot. Full fidelity would need a deep
+        // snapshot of srcSlot at push-time; not worth the memory cost for
+        // a redo of a duplicate.
+        [this, srcSlot] { _duplicatePatternCore(srcSlot); });
   }
 
   void _deleteCurrentPattern() {
-    _seq->deletePattern(_seq->editingSlot);
+    int slot = _seq->editingSlot;
+    if (_seq->activeSlots.size() <= 1)
+      return; // StepScheduler refuses this too; bail before pushing a no-op undo entry
+
+    Pattern snapshot = _seq->patternSlots[slot]; // deep copy, incl. step data
+    std::vector<ArrangementEntry> removedEntries;
+    std::vector<size_t> removedPositions;
+    for (size_t i = 0; i < _seq->arrangement.size(); i++)
+      if (_seq->arrangement[i].patternSlot == slot) {
+        removedEntries.push_back(_seq->arrangement[i]);
+        removedPositions.push_back(i);
+      }
+
+    _seq->deletePattern(slot);
     _refreshGridFromPattern();
     _syncPatternDropdown();
+    _rebuildArrangementStateFromScheduler();
+
+    _undoStack.push(
+        [this, slot, snapshot, removedEntries, removedPositions] {
+          _seq->patternSlots[slot] = snapshot;
+          if (std::find(_seq->activeSlots.begin(), _seq->activeSlots.end(), slot) ==
+              _seq->activeSlots.end())
+            _seq->activeSlots.push_back(slot);
+          for (size_t i = 0; i < removedEntries.size(); i++) {
+            size_t pos = std::min(removedPositions[i], _seq->arrangement.size());
+            _seq->arrangement.insert(_seq->arrangement.begin() + pos, removedEntries[i]);
+          }
+          _seq->setEditingPattern(slot);
+          _refreshGridFromPattern();
+          _syncPatternDropdown();
+          _rebuildArrangementStateFromScheduler();
+        },
+        [this, slot] {
+          _seq->deletePattern(slot);
+          _refreshGridFromPattern();
+          _syncPatternDropdown();
+          _rebuildArrangementStateFromScheduler();
+        });
+  }
+
+
+  void _rebuildArrangementStateFromScheduler() {
+    _arrangementState.set(_seq->arrangement);
   }
 
   void _syncPatternDropdown() {
@@ -536,9 +906,17 @@ public:
     _seq->arrangement.push_back(e);
 
     _arrangementState.push_back(e);
+
+
+    _undoStack.push(
+        [this, id = e.id] { _removeArrangementEntryByIdCore(id); },
+        [this, e] {
+          _seq->arrangement.push_back(e);
+          _arrangementState.push_back(e);
+        });
   }
 
-  void _removeArrangementEntryById(uint64_t id) {
+  void _removeArrangementEntryByIdCore(uint64_t id) {
     for (size_t i = 0; i < _seq->arrangement.size(); i++) {
       if (_seq->arrangement[i].id == id) {
         _seq->arrangement.erase(_seq->arrangement.begin() + i);
@@ -550,17 +928,206 @@ public:
     }
   }
 
-  void _adjustArrangementRepeat(uint64_t id, int delta) {
-    for (auto &e : _seq->arrangement)
-      if (e.id == id)
-        e.repeatCount = std::max(1, e.repeatCount + delta);
+  void _removeArrangementEntryById(uint64_t id) {
+    ArrangementEntry removed{};
+    size_t pos = _seq->arrangement.size();
+    for (size_t i = 0; i < _seq->arrangement.size(); i++)
+      if (_seq->arrangement[i].id == id) { removed = _seq->arrangement[i]; pos = i; break; }
+    if (pos == _seq->arrangement.size())
+      return; // not found
 
-    // Rebuild the mirrored State<vector> in one shot so Map() picks up the
-    // new repeatCount. Keys are still entry.id, so Map reuses the cached
-    // chip widgets by identity — only the ones whose repeatCount actually
-    // changed end up rebuilding.
+    _removeArrangementEntryByIdCore(id);
+
+    _undoStack.push(
+        [this, removed, pos] {
+          size_t insertAt = std::min(pos, _seq->arrangement.size());
+          _seq->arrangement.insert(_seq->arrangement.begin() + insertAt, removed);
+          _rebuildArrangementStateFromScheduler();
+        },
+        [this, id] { _removeArrangementEntryByIdCore(id); });
+  }
+
+
+  void _adjustArrangementRepeat(uint64_t id, int delta) {
+    int oldCount = 1, newCount = 1;
+    for (auto &e : _seq->arrangement)
+      if (e.id == id) {
+        oldCount = e.repeatCount;
+        e.repeatCount = std::max(1, e.repeatCount + delta);
+        newCount = e.repeatCount;
+        break;
+      }
+    if (oldCount == newCount)
+      return; // clamped at the floor — nothing actually changed
+
+    _arrangementState.set(_seq->arrangement);
+
+    _undoStack.push(
+        [this, id, oldCount] { _setArrangementRepeatCore(id, oldCount); },
+        [this, id, newCount] { _setArrangementRepeatCore(id, newCount); });
+  }
+
+  void _setArrangementRepeatCore(uint64_t id, int count) {
+    for (auto &e : _seq->arrangement)
+      if (e.id == id) { e.repeatCount = count; break; }
     _arrangementState.set(_seq->arrangement);
   }
+
+ void _saveProject(const std::string &path) {
+   std::ostringstream out;
+   out << "{\n";
+   out << "  \"version\": 1,\n";
+   out << "  \"bpm\": " << _seq->bpm << ",\n";
+   out << "  \"songMode\": " << (_seq->songMode ? "true" : "false") << ",\n";
+   out << "  \"editingSlot\": " << _seq->editingSlot << ",\n";
+   out << "  \"tracks\": [\n";
+   for (size_t t = 0; t < _seq->trackVoice.size(); t++) {
+     const StepHit &hit = _seq->trackVoice[t];
+     out << "    {"
+         << "\"freqHz\":" << hit.freqHz << ","
+         << "\"gain\":" << hit.gain << ","
+         << "\"pan\":" << hit.pan << ","
+         << "\"samplePath\":\""
+         << SeqJson::esc(t < _trackSamplePath.size() ? _trackSamplePath[t] : "") << "\","
+         << "\"muted\":" << (_seq->trackMuted[t] ? "true" : "false") << ","
+         << "\"soloed\":" << (_seq->trackSoloed[t] ? "true" : "false") << "}"
+         << (t + 1 < _seq->trackVoice.size() ? "," : "") << "\n";
+   }
+   out << "  ],\n";
+   out << "  \"patterns\": [\n";
+   bool firstPat = true;
+   for (int slot : _seq->activeSlots) {
+     const Pattern &pat = _seq->patternSlots[slot];
+     if (!firstPat) out << ",\n";
+     firstPat = false;
+     out << "    {\"slot\":" << slot << ",\"name\":\"" << SeqJson::esc(pat.name)
+         << "\",\"numSteps\":" << pat.numSteps << ",\"stepsPerBeat\":" << pat.stepsPerBeat
+         << ",\"steps\":[";
+     for (size_t t = 0; t < pat.steps.size(); t++) {
+       out << "[";
+       // Serialize all kMaxSteps, not just numSteps, so steps hidden by a
+       // shorter length round-trip through save/load intact.
+       for (int s = 0; s < StepScheduler::kMaxSteps; s++) {
+         const StepData &st = pat.steps[t][s];
+         out << "{\"on\":" << (st.on ? "true" : "false")
+             << ",\"velocity\":" << st.velocity
+             << ",\"pitch\":" << st.pitchSemitones
+             << ",\"probability\":" << st.probability << "}"
+             << (s + 1 < StepScheduler::kMaxSteps ? "," : "");
+       }
+       out << "]" << (t + 1 < pat.steps.size() ? "," : "");
+     }
+     out << "]}";
+   }
+   out << "\n  ],\n";
+   out << "  \"arrangement\": [\n";
+   for (size_t i = 0; i < _seq->arrangement.size(); i++) {
+     const ArrangementEntry &e = _seq->arrangement[i];
+     out << "    {\"id\":" << e.id << ",\"patternSlot\":" << e.patternSlot
+         << ",\"repeatCount\":" << e.repeatCount << "}"
+         << (i + 1 < _seq->arrangement.size() ? "," : "") << "\n";
+   }
+   out << "  ]\n}\n";
+   std::ofstream f(path, std::ios::binary);
+   if (f) f << out.str();
+ }
+ void _loadProject(const std::string &path) {
+   std::ifstream f(path, std::ios::binary);
+   if (!f) return;
+   std::ostringstream ss;
+   ss << f.rdbuf();
+   SeqJson::JVal root;
+   if (!SeqJson::parse(ss.str(), root) || root.type != SeqJson::JVal::Type::Object)
+     return; // malformed file — leave the current project untouched
+   _seq->stop();
+   _currentStepState.set(-1);
+   _seq->bpm = root["bpm"].asDouble(_seq->bpm);
+   _bpmState.set(_seq->bpm);
+   // ── Tracks ──────────────────────────────────────────────────────────
+   const auto &tracksArr = root["tracks"].arr;
+   for (size_t t = 0; t < tracksArr.size() && t < _seq->trackVoice.size(); t++) {
+     const SeqJson::JVal &tj = tracksArr[t];
+     _seq->trackVoice[t].freqHz = (float)tj["freqHz"].asDouble(_seq->trackVoice[t].freqHz);
+     _seq->trackVoice[t].gain = (float)tj["gain"].asDouble(_seq->trackVoice[t].gain);
+     _seq->trackVoice[t].pan = (float)tj["pan"].asDouble(_seq->trackVoice[t].pan);
+     _seq->trackMuted[t] = tj["muted"].asBool(false);
+     _seq->trackSoloed[t] = tj["soloed"].asBool(false);
+     _trackVolumeState[t].set((double)_seq->trackVoice[t].gain);
+     _trackPanState[t].set((double)_seq->trackVoice[t].pan);
+     _muteState[t].set(_seq->trackMuted[t]);
+     _soloState[t].set(_seq->trackSoloed[t]);
+     std::string samplePath = tj["samplePath"].asString("");
+     if (!samplePath.empty())
+       _loadTrackSample(t, samplePath);
+   }
+   // ── Patterns ────────────────────────────────────────────────────────
+   // deletePattern() refuses to remove the last remaining pattern, so
+   // repeatedly deleting activeSlots.front() leaves exactly one slot
+   // standing — that slot gets overwritten by the file's first pattern
+   // below (or left as an empty default if the file has none).
+   while (_seq->activeSlots.size() > 1)
+     _seq->deletePattern(_seq->activeSlots.front());
+   const auto &patternsArr = root["patterns"].arr;
+   std::unordered_map<int, int> fileSlotToRealSlot;
+   bool first = true;
+   for (const auto &pj : patternsArr) {
+     int wantedNumSteps = pj["numSteps"].asInt(16);
+     int spb = pj["stepsPerBeat"].asInt(4);
+     std::string name = pj["name"].asString("Pattern");
+     int realSlot;
+     if (first) {
+       realSlot = _seq->activeSlots.front();
+       _seq->patternSlots[realSlot].name = name;
+       first = false;
+     } else {
+       realSlot = _seq->addPattern(name);
+       if (realSlot < 0) break; // kMaxPatterns exhausted — rest of file dropped
+     }
+     _seq->setPatternLength(realSlot, wantedNumSteps);
+     _seq->setPatternStepsPerBeat(realSlot, spb);
+     fileSlotToRealSlot[pj["slot"].asInt(-1)] = realSlot;
+     Pattern &pat = _seq->patternSlots[realSlot];
+     const auto &stepsArr = pj["steps"].arr;
+     for (size_t t = 0; t < stepsArr.size() && t < pat.steps.size(); t++) {
+       const auto &trackSteps = stepsArr[t].arr;
+       for (size_t s = 0; s < trackSteps.size() && (int)s < StepScheduler::kMaxSteps; s++) {
+         const SeqJson::JVal &sj = trackSteps[s];
+         StepData &sd = pat.steps[t][s];
+         sd.on = sj["on"].asBool(false);
+         sd.velocity = (float)sj["velocity"].asDouble(1.0);
+         sd.pitchSemitones = (float)sj["pitch"].asDouble(0.0);
+         sd.probability = (float)sj["probability"].asDouble(1.0);
+       }
+     }
+   }
+   // ── Arrangement ─────────────────────────────────────────────────────
+   _seq->arrangement.clear();
+   _arrangementState.clear();
+   uint64_t maxId = 0;
+   for (const auto &aj : root["arrangement"].arr) {
+     auto it = fileSlotToRealSlot.find(aj["patternSlot"].asInt(-1));
+     if (it == fileSlotToRealSlot.end())
+       continue; // referenced a pattern slot the file never defined
+     ArrangementEntry e;
+     e.id = (uint64_t)aj["id"].asInt((int)(maxId + 1));
+     e.patternSlot = it->second;
+     e.repeatCount = std::max(1, aj["repeatCount"].asInt(1));
+     maxId = std::max(maxId, e.id);
+     _seq->arrangement.push_back(e);
+     _arrangementState.push_back(e);
+   }
+   _nextArrangementEntryId = maxId + 1;
+   bool wantSongMode = root["songMode"].asBool(false);
+   _seq->setSongMode(wantSongMode);
+   _songModeState.set(wantSongMode);
+   int wantEditing = root["editingSlot"].asInt(-1);
+   auto editIt = fileSlotToRealSlot.find(wantEditing);
+   int realEditing = editIt != fileSlotToRealSlot.end() ? editIt->second : _seq->activeSlots.front();
+   _seq->setEditingPattern(realEditing);
+   _refreshGridFromPattern();
+   _syncPatternDropdown();
+   _undoStack.clear(); // a freshly loaded project starts with a clean history
+ }
 
   WidgetPtr _buildArrangementChip(const ArrangementEntry &entry) {
     return Row({
@@ -605,16 +1172,29 @@ public:
 
     for (size_t t = 0; t < _seq->trackVoice.size(); t++) {
       std::vector<WidgetPtr> stepButtons;
-      for (int s = 0; s < StepScheduler::kSteps; s++) {
+      for (int s = 0; s < StepScheduler::kMaxSteps; s++) {
         bool downbeatAccent = (s % 4 == 0);
 
         auto cell =
             Button("",
                    [this, t, s] {
-                     StepData &step =
-                         _seq->patternSlots[_seq->editingSlot].steps[t][s];
-                     step.on = !step.on;
-                     _cellState[t][s].set(step.on);
+                     int slot = _seq->editingSlot;
+                     Pattern &pat = _seq->patternSlots[slot];
+                     if (s >= pat.numSteps)
+                       return; // beyond the pattern's current length — inert
+                     bool oldVal = pat.steps[t][s].on;
+                     bool newVal = !oldVal;
+                     pat.steps[t][s].on = newVal;
+                     _cellState[t][s].set(newVal);
+                     _undoStack.push(
+                         [this, slot, t, s, oldVal] {
+                           _seq->patternSlots[slot].steps[t][s].on = oldVal;
+                           if (_seq->editingSlot == slot) _cellState[t][s].set(oldVal);
+                         },
+                         [this, slot, t, s, newVal] {
+                           _seq->patternSlots[slot].steps[t][s].on = newVal;
+                           if (_seq->editingSlot == slot) _cellState[t][s].set(newVal);
+                         });
                    })
                 ->setWidth(28)
                 ->setHeight(28)
@@ -659,17 +1239,17 @@ public:
                                          .steps[t][s]
                                          .pitchSemitones = (float)v;
                                      _pitchSliderState[t][s].set(v);
-                                    }),
-                                Text("Probability")->setFontSize(11),
-                                Slider(0.0, 1.0, 0.05)
-                                    ->setValue(_probabilitySliderState[t][s])
-                                    ->setWidth(140)
-                                    ->setOnValueChanged([this, t, s](double v) {
-                                      _seq->patternSlots[_seq->editingSlot]
-                                          .steps[t][s]
-                                          .probability = (float)v;
-                                      _probabilitySliderState[t][s].set(v);
-                                    }),
+                                   }),
+                               Text("Probability")->setFontSize(11),
+                               Slider(0.0, 1.0, 0.05)
+                                   ->setValue(_probabilitySliderState[t][s])
+                                   ->setWidth(140)
+                                   ->setOnValueChanged([this, t, s](double v) {
+                                     _seq->patternSlots[_seq->editingSlot]
+                                         .steps[t][s]
+                                         .probability = (float)v;
+                                     _probabilitySliderState[t][s].set(v);
+                                   }),
                            })
                         ->setGap(4)
                         ->setPadding(8)),
@@ -756,6 +1336,39 @@ public:
                 Button("+ New", [this] { _createPattern(); }),
                 Button("Duplicate", [this] { _duplicateCurrentPattern(); }),
                 Button("Delete", [this] { _deleteCurrentPattern(); }),
+                Text("Len:"),
+                NumberInput(1.0, (double)StepScheduler::kMaxSteps, 1.0)
+                    ->setValue(_patternLengthState)
+                    ->setWidth(70)
+                    ->setOnValueChanged([this](double v) {
+                      int slot = _seq->editingSlot;
+                      int oldLen = _seq->patternSlots[slot].numSteps;
+                      int newLen = (int)v;
+                      if (newLen == oldLen) return;
+                      _seq->setPatternLength(slot, newLen);
+                      _patternLengthState.set(newLen);
+                      _undoStack.push(
+                          [this, slot, oldLen] {
+                            _seq->setPatternLength(slot, oldLen);
+                            if (_seq->editingSlot == slot) _patternLengthState.set(oldLen);
+                          },
+                          [this, slot, newLen] {
+                            _seq->setPatternLength(slot, newLen);
+                            if (_seq->editingSlot == slot) _patternLengthState.set(newLen);
+                          });
+                    }),
+                Text("Subdiv:"),
+                NumberInput(1.0, 8.0, 1.0)
+                    ->setValue(_patternSpbState)
+                    ->setWidth(60)
+                    ->setOnValueChanged([this](double v) {
+                      int slot = _seq->editingSlot;
+                      _seq->setPatternStepsPerBeat(slot, (int)v);
+                      _patternSpbState.set((int)v);
+                      // Not undo-tracked: subdivision is a "feel" tweak users
+                      // iterate on rapidly via the spinner, same reasoning as
+                      // sliders being excluded above.
+                    }),
                 Text(_currentStepState,
                      [this](int) {
                        return "Playing: " +
@@ -813,7 +1426,26 @@ public:
                 NumberInput(40.0, 240.0, 1.0)
                     ->setValue(_bpmState)
                     ->setWidth(90)
-                    ->setOnValueChanged([this](double v) { _seq->bpm = v; }),
+                    ->setOnValueChanged([this](double v) {
+                      double old = _seq->bpm;
+                      if (v == old) return;
+                      _seq->bpm = v;
+                      _undoStack.push(
+                          [this, old] { _seq->bpm = old; _bpmState.set(old); },
+                          [this, v] { _seq->bpm = v; _bpmState.set(v); });
+                    }),
+                Button("Undo", [this] { _undoStack.undo(); }),
+                Button("Redo", [this] { _undoStack.redo(); }),
+                FilePicker("Save Project")
+                    ->setMode(FilePickerMode::Save)
+                    ->setDefaultFilename("project.fluxseq")
+                    ->setDefaultExtension("fluxseq")
+                    ->addFilter("Flux Sequencer Project", {"*.fluxseq"})
+                    ->setOnChanged([this](const std::string &path) { _saveProject(path); }),
+                FilePicker("Load Project")
+                    ->setMode(FilePickerMode::Open)
+                    ->addFilter("Flux Sequencer Project", {"*.fluxseq"})
+                    ->setOnChanged([this](const std::string &path) { _loadProject(path); }),
             })
             ->setGap(12)
             ->setAlignItems(AlignItems::Center);
