@@ -380,7 +380,7 @@ public:
   // the exact same envelope/pitch/velocity/sample logic the classic
   // pattern-chain scheduler uses — one firing code path, two schedulers.
   static void fireStep(const StepHit &hit, const StepData &step,
-                       uint64_t targetFrame) {
+                       uint64_t targetFrame, TrackID track = kInvalidTrack) {
 
     auto &engine = AudioEngine::get();
     float velocity = std::max(0.f, std::min(1.f, step.velocity));
@@ -391,11 +391,11 @@ public:
       // as gain, pitch via pitchRatio.
       float pitchRatio = std::pow(2.0f, step.pitchSemitones / 12.0f);
       engine.play(hit.sampleId, effectiveGain, hit.pan, /*loop=*/false,
-                  pitchRatio, targetFrame);
+                  pitchRatio, targetFrame, track);
       return;
     }
 
-    _fireSynthStep(hit, step, effectiveGain, targetFrame);
+    _fireSynthStep(hit, step, effectiveGain, targetFrame, track);
   }
 
 private:
@@ -463,7 +463,8 @@ private:
   }
 
   static void _fireSynthStep(const StepHit &hit, const StepData &step,
-                             float effectiveGain, uint64_t targetFrame) {
+                             float effectiveGain, uint64_t targetFrame,
+                             TrackID track = kInvalidTrack) {
     auto &engine = AudioEngine::get();
     auto state = std::make_shared<SynthNoteState>();
 
@@ -511,7 +512,7 @@ private:
     // Fire-and-forget: the envelope signals its own completion (negative
     // return), so the engine frees the voice slot once the decay finishes.
     engine.playStream(cb, engine.sampleRate(), effectiveGain, hit.pan,
-                      targetFrame);
+                      targetFrame, track);
   }
 };
 
@@ -630,30 +631,45 @@ public:
         bool audible = !track.muted && (!anyTrackSoloed || track.soloed);
         if (!audible)
           continue;
-        // TODO(engine routing): steps fire via StepScheduler::fireStep(),
-        // which always calls AudioEngine::play()/playStream() with
-        // track=kInvalidTrack (straight to master) — track.engineTrack is
-        // allocated but not yet threaded through. Per-instrument audio
-        // (StepHit) has no TrackID of its own either, so wiring this up
-        // means deciding whether routing is per-TimelineTrack or
-        // per-instrument-row first; left as a follow-up rather than
-        // guessing. Mute/solo above work regardless, since they gate
-        // whether steps fire at all, not how they're mixed.
         for (auto &clip : track.clips) {
-          if (clip.type != ClipType::Pattern)
-            continue; // AudioClip playback not implemented yet
-          _tickPatternClip(clip, _nextPulseFrame);
+          if (clip.type == ClipType::Pattern)
+            _tickPatternClip(track, clip, _nextPulseFrame);
+          else if (clip.type == ClipType::Audio)
+            _tickAudioClipBoundary(track, clip, _nextPulseFrame, audible);
         }
       }
 
       currentPulse++;
       _nextPulseFrame += _framesPerPulse();
     }
+
+    // Fades are recomputed once per tick() call, not once per pulse above —
+    // see _updateAudioClipFades()'s comment for why.
+    _updateAudioClipFades();
   }
 
 private:
   StepScheduler &_seq;
   uint64_t _nextPulseFrame = 0;
+
+  // ── Audio clip playback state ──────────────────────────────────────
+  // Sample bank lookups are cached by path so re-entering the same
+  // AudioClip (loop mode, or just playing the timeline more than once)
+  // doesn't re-decode the file every time the playhead crosses it.
+  std::unordered_map<std::string, SampleID> _audioSampleCache;
+
+  struct ActiveAudioClip {
+    VoiceHandle voice = kInvalidVoice;
+    double startBeat = 0.0;
+    double lengthBeats = 4.0;
+    float baseGain = 1.0f;
+    float fadeInBeats = 0.f;
+    float fadeOutBeats = 0.f;
+  };
+  // Keyed by Clip::id rather than voice handle — lets
+  // _tickAudioClipBoundary detect "already started" / "time to stop"
+  // without a second lookup into the Timeline's track/clip vectors.
+  std::unordered_map<ClipID, ActiveAudioClip> _activeAudioClips;
 
   uint64_t _framesPerPulse() const {
     double secondsPerBeat = 60.0 / _seq.bpm; // shares StepScheduler's bpm —
@@ -664,7 +680,8 @@ private:
     return std::max<uint64_t>(1, frames);
   }
 
-  void _tickPatternClip(const Clip &clip, uint64_t targetFrame) {
+  void _tickPatternClip(const TimelineTrack &track, const Clip &clip,
+                        uint64_t targetFrame) {
     int64_t clipStartPulse = (int64_t)std::llround(clip.startBeat * kPPQ);
     int64_t clipLenPulses = (int64_t)std::llround(clip.lengthBeats * kPPQ);
     int64_t rel = currentPulse - clipStartPulse;
@@ -712,7 +729,117 @@ private:
               ? 0
               : (uint64_t)((int64_t)targetFrame + totalOffset);
 
-      StepScheduler::fireStep(_seq.trackVoice[t], step, adjustedTarget);
+      StepScheduler::fireStep(_seq.trackVoice[t], step, adjustedTarget,
+                              track.engineTrack);
+    }
+  }
+
+  // Starts/stops AudioClip playback as the playhead crosses each clip's
+  // boundaries. Called once per pulse per clip, same cadence as
+  // _tickPatternClip — cheap integer comparisons dominate the common case
+  // where the playhead isn't at a boundary.
+  void _tickAudioClipBoundary(const TimelineTrack &track, const Clip &clip,
+                              uint64_t targetFrame, bool audible) {
+    int64_t clipStartPulse = (int64_t)std::llround(clip.startBeat * kPPQ);
+    int64_t clipLenPulses = (int64_t)std::llround(clip.lengthBeats * kPPQ);
+    if (clipLenPulses <= 0)
+      return; // degenerate zero/negative-length clip — nothing to play
+
+    int64_t rel = currentPulse - clipStartPulse;
+    if (rel == 0) {
+      // Known simplification: a track muted/soloed-out at the exact
+      // instant a clip would start simply never starts it — unmuting
+      // later in the same clip's span doesn't retroactively start
+      // playback, matching how pattern-clip steps are gated at fire time
+      // rather than continuously.
+      if (audible)
+        _startAudioClip(track, clip, targetFrame);
+    } else if (rel == clipLenPulses) {
+      _stopAudioClip(clip.id);
+    }
+  }
+
+  void _startAudioClip(const TimelineTrack &track, const Clip &clip,
+                       uint64_t targetFrame) {
+    if (_activeAudioClips.count(clip.id))
+      return; // already sounding — guards against a double-fire
+
+    auto &engine = AudioEngine::get();
+    SampleID sampleId = kInvalidSample;
+    auto cacheIt = _audioSampleCache.find(clip.audioFilePath);
+    if (cacheIt != _audioSampleCache.end()) {
+      sampleId = cacheIt->second;
+    } else {
+      sampleId = engine.loadSample(clip.audioFilePath);
+      if (sampleId != kInvalidSample)
+        _audioSampleCache[clip.audioFilePath] = sampleId;
+    }
+    if (sampleId == kInvalidSample)
+      return; // missing/undecodable file — silently skip, same treatment
+              // as a pattern track's bad instrument sample
+
+    // Start silent if fading in — _updateAudioClipFades() (called once
+    // per tick(), not per pulse) brings it up to baseGain over
+    // fadeInBeats. Otherwise start at full gain immediately.
+    float initialGain = (clip.fadeInBeats > 0.f) ? 0.f : clip.gain;
+    VoiceHandle v = engine.play(sampleId, initialGain, /*pan=*/0.f,
+                                /*loop=*/false, /*pitchRatio=*/1.f, targetFrame,
+                                track.engineTrack);
+    if (v == kInvalidVoice)
+      return;
+
+    if (clip.audioStartOffsetSec > 0.0) {
+      float durSec = engine.getSampleDurationSeconds(sampleId);
+      // Known simplification: seekVoice() is a separately-queued command,
+      // not part of the same sample-accurate StartVoice command as play()
+      // above, so the seek can land a block or two after the voice
+      // actually starts — a few ms of audible pre-roll from frame 0 on
+      // trims with a nonzero start offset. Fixing it means adding a
+      // start-offset field to StartVoice itself.
+      if (durSec > 0.f)
+        engine.seekVoice(
+            v, (float)std::min(1.0, clip.audioStartOffsetSec / (double)durSec));
+    }
+
+    _activeAudioClips[clip.id] = {
+        v,         clip.startBeat,   clip.lengthBeats,
+        clip.gain, clip.fadeInBeats, clip.fadeOutBeats};
+  }
+
+  void _stopAudioClip(ClipID id) {
+    auto it = _activeAudioClips.find(id);
+    if (it == _activeAudioClips.end())
+      return;
+    AudioEngine::get().stopVoice(it->second.voice);
+    _activeAudioClips.erase(it);
+  }
+
+  // Applies per-clip fade in/out as a plain gain ramp, recomputed once per
+  // tick() call (~25ms, the same cadence the transport UI polls at) rather
+  // than per pulse — the engine has no gain-ramp command yet (that's a
+  // Phase 4 automation-lane concern), so this is a coarse
+  // sampled-and-held approximation of a fade, not a sample-accurate one.
+  void _updateAudioClipFades() {
+    auto &engine = AudioEngine::get();
+    double posBeats = playheadBeats();
+    for (auto it = _activeAudioClips.begin(); it != _activeAudioClips.end();) {
+      ActiveAudioClip &av = it->second;
+      if (!engine.isVoiceActive(av.voice)) {
+        it = _activeAudioClips.erase(it); // finished naturally (shorter
+                                          // than the clip's box)
+        continue;
+      }
+      double elapsed = posBeats - av.startBeat;
+      double remaining = (av.startBeat + av.lengthBeats) - posBeats;
+      float fadeGain = 1.f;
+      if (av.fadeInBeats > 0.f && elapsed < av.fadeInBeats)
+        fadeGain =
+            std::min(fadeGain, (float)std::max(0.0, elapsed / av.fadeInBeats));
+      if (av.fadeOutBeats > 0.f && remaining < av.fadeOutBeats)
+        fadeGain = std::min(fadeGain,
+                            (float)std::max(0.0, remaining / av.fadeOutBeats));
+      engine.setVoiceGain(av.voice, av.baseGain * fadeGain);
+      ++it;
     }
   }
 };
@@ -1047,20 +1174,27 @@ public:
       ctx.stroke();
 
       for (const Clip &clip : timeline->tracks[ti].clips) {
-        if (clip.type != ClipType::Pattern)
-          continue; // AudioClip rendering not implemented yet
         float cx = (float)(clip.startBeat * kPxPerBeat);
         float cw = (float)(clip.lengthBeats * kPxPerBeat);
         bool selected = clip.id == selectedClip;
+        bool isAudio = clip.type == ClipType::Audio;
 
-        ctx.setFillColor(selected ? Color::fromRGB(99, 179, 237)
-                                  : Color::fromRGB(150, 150, 235));
+        ctx.setFillColor(selected  ? Color::fromRGB(99, 179, 237)
+                         : isAudio ? Color::fromRGB(235, 165, 95)
+                                   : Color::fromRGB(150, 150, 235));
         ctx.fillRoundedRect(cx + 1, laneY + 4, std::max(4.f, cw - 2),
                             kTrackHeight - 8, 4);
 
         std::string label = "Clip";
-        if (seq && clip.patternSlot >= 0 &&
-            clip.patternSlot < (int)seq->patternSlots.size())
+        if (isAudio) {
+          size_t slash = clip.audioFilePath.find_last_of("/\\");
+          label = clip.audioFilePath.empty()
+                      ? "Audio"
+                      : (slash == std::string::npos
+                             ? clip.audioFilePath
+                             : clip.audioFilePath.substr(slash + 1));
+        } else if (seq && clip.patternSlot >= 0 &&
+                   clip.patternSlot < (int)seq->patternSlots.size())
           label = seq->patternSlots[clip.patternSlot].name;
 
         ctx.setFillColor(Color::fromRGB(255, 255, 255));
@@ -1092,8 +1226,7 @@ public:
     double beat = x / kPxPerBeat;
 
     for (const Clip &clip : timeline->tracks[ti].clips) {
-      if (clip.type == ClipType::Pattern && beat >= clip.startBeat &&
-          beat < clip.startBeat + clip.lengthBeats) {
+      if (beat >= clip.startBeat && beat < clip.startBeat + clip.lengthBeats) {
         if (onClipClick)
           onClipClick(clip.id);
         return;
@@ -1251,6 +1384,13 @@ class SequencerApp : public Widget {
   // Shown next to the timeline so the user can see/delete the current
   // selection without a full side panel widget. Text() binds to this.
   State<std::string> _timelineSelectionLabel{"No clip selected"};
+
+  // Set by the "Load Audio…" FilePicker's onChanged; the NEXT empty-space
+  // click on the timeline consumes it and places an AudioClip there
+  // instead of the default PatternClip, then clears it. Reuses
+  // TimelineSurface::onEmptyClick's existing (trackIndex, beat) callback
+  // rather than adding a second click-handling path.
+  std::string _pendingAudioClipPath;
 
 public:
   SequencerApp() {
@@ -1690,6 +1830,12 @@ public:
   void _timelineAddClipAt(int trackIndex, double beat) {
     if (trackIndex < 0 || trackIndex >= (int)_timeline.tracks.size())
       return;
+    if (!_pendingAudioClipPath.empty()) {
+      std::string path = _pendingAudioClipPath;
+      _pendingAudioClipPath.clear();
+      _timelineAddAudioClipAt(trackIndex, beat, path);
+      return;
+    }
 
     Clip clip;
     clip.id = _nextClipId++;
@@ -1700,6 +1846,37 @@ public:
     clip.lengthBeats =
         std::max(0.25, (double)pat.numSteps / std::max(1, pat.stepsPerBeat));
     clip.startBeat = std::max(0.0, std::round(beat));
+
+    _timeline.tracks[trackIndex].clips.push_back(clip);
+    _timelineSelectClip(clip.id);
+    if (_timelineCanvas)
+      _timelineCanvas->redraw();
+  }
+
+  // Places a picked audio file as an AudioClip at (trackIndex, beat).
+  // Length defaults to the sample's real duration converted to beats at
+  // the project's current bpm — same "auto-size from content" convention
+  // _timelineAddClipAt uses for PatternClip length.
+  void _timelineAddAudioClipAt(int trackIndex, double beat,
+                               const std::string &path) {
+    if (trackIndex < 0 || trackIndex >= (int)_timeline.tracks.size())
+      return;
+
+    SampleID id = AudioEngine::get().loadSample(path);
+    double lengthBeats = 4.0; // fallback if the file fails to decode
+    if (id != kInvalidSample) {
+      float durSec = AudioEngine::get().getSampleDurationSeconds(id);
+      if (durSec > 0.f)
+        lengthBeats = std::max(0.25, (double)durSec * (_seq->bpm / 60.0));
+    }
+
+    Clip clip;
+    clip.id = _nextClipId++;
+    clip.type = ClipType::Audio;
+    clip.audioFilePath = path;
+    clip.startBeat = std::max(0.0, std::round(beat));
+    clip.lengthBeats = lengthBeats;
+    clip.gain = 1.0f;
 
     _timeline.tracks[trackIndex].clips.push_back(clip);
     _timelineSelectClip(clip.id);
@@ -2469,6 +2646,19 @@ public:
         Row({
                 Text("Timeline:")->setFontWeight(FontWeight::Bold),
                 Button("+ Add Track", [this] { _addTimelineTrack(); }),
+                FilePicker("Load Audio…")
+                    ->setMode(FilePickerMode::Open)
+                    ->addFilter("Audio", {"*.wav", "*.mp3", "*.ogg", "*.flac"})
+                    ->setWidth(120)
+                    ->setOnChanged([this](const std::string &path) {
+                      _pendingAudioClipPath = path;
+                      size_t slash = path.find_last_of("/\\");
+                      _timelineSelectionLabel.set(
+                          "Click the timeline to place: " +
+                          (slash == std::string::npos
+                               ? path
+                               : path.substr(slash + 1)));
+                    }),
                 Button("▶ Play", [this] { _timelineScheduler->start(); }),
                 Button("■ Stop", [this] { _timelineScheduler->stop(); }),
                 Button("Delete Clip",
