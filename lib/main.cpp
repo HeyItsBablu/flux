@@ -9,6 +9,7 @@
 
 #include <cctype>
 #include <fstream>
+#include <iomanip>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -1128,6 +1129,10 @@ public:
   static constexpr float kPxPerBeat = 40.f;
   static constexpr float kTrackHeight = 56.f;
 
+  // Hit-test radius for grabbing a fade handle — larger than the 4px dot
+  // actually drawn, so it's easy to grab without pixel-perfect aim.
+  static constexpr float kHandleHitRadius = 8.f;
+
   Timeline *timeline = nullptr;
   StepScheduler *seq = nullptr;           // for pattern name lookups only
   TimelineScheduler *scheduler = nullptr; // for playhead position only
@@ -1135,6 +1140,15 @@ public:
 
   std::function<void(int trackIndex, double beat)> onEmptyClick;
   std::function<void(ClipID)> onClipClick;
+
+  // Fade-handle drag lifecycle — mirrors mouseDown/Move/Up 1:1 rather than
+  // a single "onFadeChanged" callback, so SequencerApp can snapshot the
+  // pre-drag value on Start and coalesce the whole drag into one undo
+  // entry on End, the same way step-cell undo entries are pushed once per
+  // discrete edit rather than once per intermediate value.
+  std::function<void(ClipID, bool isFadeIn)> onFadeDragStart;
+  std::function<void(ClipID, bool isFadeIn, double beats)> onFadeDrag;
+  std::function<void(ClipID, bool isFadeIn)> onFadeDragEnd;
 
   void initialize(int, int) override {}
   void resize(int, int) override {}
@@ -1202,6 +1216,37 @@ public:
         ctx.setTextAlign(CanvasTextAlign::Left);
         ctx.setTextBaseline(TextBaseline::Top);
         ctx.fillText(label, cx + 6, laneY + 8);
+
+        // Fade ramps + drag handles — AudioClip only, since fadeIn/OutBeats
+        // is only honored in playback for AudioClip today (see
+        // TimelineScheduler::_updateAudioClipFades). Drawn as a diagonal
+        // line from the clip's bottom edge up to full volume at the fade
+        // width, same convention as most DAW timelines, with a small
+        // white dot at the top end that doubles as the drag target.
+        if (isAudio) {
+          float top = laneY + 4;
+          float bottom = laneY + kTrackHeight - 4;
+          float fadeInPx =
+              std::min((float)(clip.fadeInBeats * kPxPerBeat), cw * 0.5f);
+          float fadeOutPx =
+              std::min((float)(clip.fadeOutBeats * kPxPerBeat), cw * 0.5f);
+
+          ctx.setStrokeColor(Color::fromRGB(255, 255, 255));
+          ctx.setLineWidth(2);
+          ctx.beginPath();
+          ctx.moveTo(cx + 1, bottom);
+          ctx.lineTo(cx + 1 + fadeInPx, top);
+          ctx.stroke();
+
+          ctx.beginPath();
+          ctx.moveTo(cx + cw - 1 - fadeOutPx, top);
+          ctx.lineTo(cx + cw - 1, bottom);
+          ctx.stroke();
+
+          ctx.setFillColor(Color::fromRGB(255, 255, 255));
+          ctx.fillCircle(cx + 1 + fadeInPx, top, 4);
+          ctx.fillCircle(cx + cw - 1 - fadeOutPx, top, 4);
+        }
       }
     }
 
@@ -1225,6 +1270,37 @@ public:
       return;
     double beat = x / kPxPerBeat;
 
+    float top = ti * kTrackHeight + 4;
+
+    // Fade handles take priority over clip-select/empty-click — they sit
+    // right at a clip's edges, exactly where a body click would otherwise
+    // fire instead.
+    for (const Clip &clip : timeline->tracks[ti].clips) {
+      if (clip.type != ClipType::Audio)
+        continue;
+      float cx = (float)(clip.startBeat * kPxPerBeat);
+      float cw = (float)(clip.lengthBeats * kPxPerBeat);
+      float fadeInPx =
+          std::min((float)(clip.fadeInBeats * kPxPerBeat), cw * 0.5f);
+      float fadeOutPx =
+          std::min((float)(clip.fadeOutBeats * kPxPerBeat), cw * 0.5f);
+
+      if (_withinHandle(x, y, cx + 1 + fadeInPx, top)) {
+        _draggingFadeClipId = clip.id;
+        _draggingFadeIsIn = true;
+        if (onFadeDragStart)
+          onFadeDragStart(clip.id, true);
+        return;
+      }
+      if (_withinHandle(x, y, cx + cw - 1 - fadeOutPx, top)) {
+        _draggingFadeClipId = clip.id;
+        _draggingFadeIsIn = false;
+        if (onFadeDragStart)
+          onFadeDragStart(clip.id, false);
+        return;
+      }
+    }
+
     for (const Clip &clip : timeline->tracks[ti].clips) {
       if (beat >= clip.startBeat && beat < clip.startBeat + clip.lengthBeats) {
         if (onClipClick)
@@ -1237,10 +1313,62 @@ public:
       onEmptyClick(ti, beat);
   }
 
+  void onMouseMove(float x, float) override {
+    if (_draggingFadeClipId == 0 || !timeline)
+      return;
+    Clip *clip = _findClip(_draggingFadeClipId);
+    if (!clip) {
+      _draggingFadeClipId = 0; // clip was deleted mid-drag — bail cleanly
+      return;
+    }
+
+    double mouseBeat = x / kPxPerBeat;
+    double beats = _draggingFadeIsIn
+                       ? (mouseBeat - clip->startBeat)
+                       : ((clip->startBeat + clip->lengthBeats) - mouseBeat);
+    // Clamp to [0, half the clip's length] — mirrors the fillRoundedRect/
+    // ramp-line clamp above, so the handle can never be dragged past its
+    // opposite counterpart.
+    beats = std::max(0.0, std::min(beats, clip->lengthBeats * 0.5));
+
+    if (onFadeDrag)
+      onFadeDrag(_draggingFadeClipId, _draggingFadeIsIn, beats);
+  }
+
+  void onMouseUp(float, float) override {
+    if (_draggingFadeClipId == 0)
+      return;
+    if (onFadeDragEnd)
+      onFadeDragEnd(_draggingFadeClipId, _draggingFadeIsIn);
+    _draggingFadeClipId = 0;
+  }
+
+
+
   // Only needed while something is actually playing (playhead sweep);
   // idle editing is fully event-driven via redraw() from the App side.
   bool needsContinuousRedraw() const override {
-    return scheduler && scheduler->playing;
+    return (scheduler && scheduler->playing) || _draggingFadeClipId != 0;
+  }
+
+
+private:
+  ClipID _draggingFadeClipId = 0;
+  bool _draggingFadeIsIn = false;
+
+  static bool _withinHandle(float x, float y, float hx, float hy) {
+    float dx = x - hx, dy = y - hy;
+    return (dx * dx + dy * dy) <= (kHandleHitRadius * kHandleHitRadius);
+  }
+
+  Clip *_findClip(ClipID id) {
+    if (!timeline)
+      return nullptr;
+    for (auto &track : timeline->tracks)
+      for (auto &c : track.clips)
+        if (c.id == id)
+          return &c;
+    return nullptr;
   }
 };
 
@@ -1391,6 +1519,14 @@ class SequencerApp : public Widget {
   // TimelineSurface::onEmptyClick's existing (trackIndex, beat) callback
   // rather than adding a second click-handling path.
   std::string _pendingAudioClipPath;
+
+  // Fade-handle drag scratch state — the value captured at
+  // onFadeDragStart, so onFadeDragEnd can push a single before/after undo
+  // entry for the whole drag instead of one per onFadeDrag call. Not a
+  // State<> since it's never bound to a widget, just plain scratch data
+  // between the three callbacks.
+  float _fadeDragOldValue = 0.f;
+
 
 public:
   SequencerApp() {
@@ -1884,6 +2020,55 @@ public:
       _timelineCanvas->redraw();
   }
 
+
+
+  Clip *_findTimelineClip(ClipID id) {
+    for (auto &track : _timeline.tracks)
+      for (auto &c : track.clips)
+        if (c.id == id)
+          return &c;
+    return nullptr;
+  }
+
+  void _timelineFadeDragStart(ClipID id, bool isFadeIn) {
+    Clip *clip = _findTimelineClip(id);
+    if (!clip)
+      return;
+    _fadeDragOldValue = isFadeIn ? clip->fadeInBeats : clip->fadeOutBeats;
+  }
+
+  // Applies the live value during a drag — called on every onFadeDrag,
+  // deliberately with no undo-stack push (see _fadeDragOldValue's comment).
+  void _timelineSetFadeCore(ClipID id, bool isFadeIn, float beats) {
+    Clip *clip = _findTimelineClip(id);
+    if (!clip)
+      return;
+    if (isFadeIn)
+      clip->fadeInBeats = beats;
+    else
+      clip->fadeOutBeats = beats;
+    if (_timelineCanvas)
+      _timelineCanvas->redraw();
+  }
+
+  void _timelineFadeDragEnd(ClipID id, bool isFadeIn) {
+    Clip *clip = _findTimelineClip(id);
+    if (!clip)
+      return;
+    float oldVal = _fadeDragOldValue;
+    float newVal = isFadeIn ? clip->fadeInBeats : clip->fadeOutBeats;
+    if (oldVal == newVal)
+      return; // a click with no actual drag movement — no-op, no undo entry
+
+    _undoStack.push(
+        [this, id, isFadeIn, oldVal] {
+          _timelineSetFadeCore(id, isFadeIn, oldVal);
+        },
+        [this, id, isFadeIn, newVal] {
+          _timelineSetFadeCore(id, isFadeIn, newVal);
+        });
+  }
+
   void _timelineSelectClip(ClipID id) {
     _selectedClipId = id;
     if (_timelineSurface)
@@ -1900,6 +2085,24 @@ public:
                   : "?";
           label = patName + " @ beat " + std::to_string((int)clip.startBeat) +
                   ", " + std::to_string(clip.lengthBeats) + " beats long";
+
+        } else if (clip.id == id && clip.type == ClipType::Audio) {
+          // Previously fell through to "No clip selected" for AudioClips —
+          // this branch is new, not just a fade-UI addition, but it's the
+          // natural place to also surface the current fade values while
+          // dragging a handle.
+          size_t slash = clip.audioFilePath.find_last_of("/\\");
+          std::string base =
+              clip.audioFilePath.empty()
+                  ? "Audio"
+                  : (slash == std::string::npos
+                         ? clip.audioFilePath
+                         : clip.audioFilePath.substr(slash + 1));
+          std::ostringstream lbl;
+          lbl << base << " @ beat " << (int)clip.startBeat << " · fade "
+              << std::fixed << std::setprecision(1) << clip.fadeInBeats
+              << "b in / " << clip.fadeOutBeats << "b out";
+          label = lbl.str();
         }
     _timelineSelectionLabel.set(label);
 
@@ -2639,6 +2842,17 @@ public:
       };
       _timelineSurface->onClipClick = [this](ClipID id) {
         _timelineSelectClip(id);
+      };
+
+      _timelineSurface->onFadeDragStart = [this](ClipID id, bool isFadeIn) {
+        _timelineFadeDragStart(id, isFadeIn);
+      };
+      _timelineSurface->onFadeDrag = [this](ClipID id, bool isFadeIn,
+                                            double beats) {
+        _timelineSetFadeCore(id, isFadeIn, (float)beats);
+      };
+      _timelineSurface->onFadeDragEnd = [this](ClipID id, bool isFadeIn) {
+        _timelineFadeDragEnd(id, isFadeIn);
       };
     }
 
