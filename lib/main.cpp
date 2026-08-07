@@ -15,6 +15,7 @@
 #include <optional>
 #include <sstream>
 #include <unordered_map>
+#include <cstring>
 
 // ============================================================================
 // Data model
@@ -596,7 +597,6 @@ class TimelineScheduler {
 public:
   static constexpr int kPPQ = 96;
 
- 
   Timeline &timeline;
   bool playing = false;
   int64_t currentPulse = 0;
@@ -606,7 +606,8 @@ public:
   // than duplicating them — patterns are shared data between the classic
   // pattern-chain transport and the timeline transport, per the roadmap's
   // "keep the old step-grid behavior working as PatternClip".
-  TimelineScheduler(StepScheduler &seq, Timeline &tl) : _seq(seq), timeline(tl) {}
+  TimelineScheduler(StepScheduler &seq, Timeline &tl)
+      : _seq(seq), timeline(tl) {}
 
   void start() {
     playing = true;
@@ -741,14 +742,15 @@ private:
   // boundaries. Called once per pulse per clip, same cadence as
   // _tickPatternClip — cheap integer comparisons dominate the common case
   // where the playhead isn't at a boundary.
-void _tickAudioClipBoundary(const TimelineTrack &track, const Clip &clip,
-                             uint64_t targetFrame, bool audible) {
+  void _tickAudioClipBoundary(const TimelineTrack &track, const Clip &clip,
+                              uint64_t targetFrame, bool audible) {
     int64_t clipStartPulse = (int64_t)std::llround(clip.startBeat * kPPQ);
     int64_t clipLenPulses = (int64_t)std::llround(clip.lengthBeats * kPPQ);
-    if (clipLenPulses <= 0) return;
+    if (clipLenPulses <= 0)
+      return;
 
     int64_t rel = currentPulse - clipStartPulse;
-    if (rel == 0){
+    if (rel == 0) {
       // Known simplification: a track muted/soloed-out at the exact
       // instant a clip would start simply never starts it — unmuting
       // later in the same clip's span doesn't retroactively start
@@ -761,26 +763,29 @@ void _tickAudioClipBoundary(const TimelineTrack &track, const Clip &clip,
     }
   }
 
-void _startAudioClip(const TimelineTrack &track, const Clip &clip, uint64_t targetFrame) {
+  void _startAudioClip(const TimelineTrack &track, const Clip &clip,
+                       uint64_t targetFrame) {
 
-    if (_activeAudioClips.count(clip.id)) return;
+    if (_activeAudioClips.count(clip.id))
+      return;
 
     auto &engine = AudioEngine::get();
     SampleID sampleId = kInvalidSample;
     auto cacheIt = _audioSampleCache.find(clip.audioFilePath);
     if (cacheIt != _audioSampleCache.end()) {
-        sampleId = cacheIt->second;
+      sampleId = cacheIt->second;
     } else {
-        sampleId = engine.loadSample(clip.audioFilePath);
-        if (sampleId != kInvalidSample)
-            _audioSampleCache[clip.audioFilePath] = sampleId;
+      sampleId = engine.loadSample(clip.audioFilePath);
+      if (sampleId != kInvalidSample)
+        _audioSampleCache[clip.audioFilePath] = sampleId;
     }
     if (sampleId == kInvalidSample) {
-        return;
+      return;
     }
 
     float initialGain = (clip.fadeInBeats > 0.f) ? 0.f : clip.gain;
-    VoiceHandle v = engine.play(sampleId, initialGain, 0.f, false, 1.f, targetFrame, track.engineTrack);
+    VoiceHandle v = engine.play(sampleId, initialGain, 0.f, false, 1.f,
+                                targetFrame, track.engineTrack);
 
     if (v == kInvalidVoice)
       return;
@@ -1107,6 +1112,54 @@ inline bool parse(const std::string &text, JVal &out) {
 
 } // namespace SeqJson
 
+
+// ============================================================================
+// Minimal mono 16-bit PCM WAV writer — recording output only.
+//
+// Deliberately not routed through AudioEngine: bounceToWav() there writes
+// the engine's realtime mix output via a private ma_encoder, not an
+// arbitrary in-memory buffer, so it can't serialize a captured take.
+// Standard 44-byte RIFF/WAVE header, no extension chunks — sufficient
+// for round-tripping through AudioEngine::loadSample() afterward, which
+// is the only consumer.
+// ============================================================================
+inline bool writeWavMono16(const std::string &path,
+                           const std::vector<float> &samples,
+                           uint32_t sampleRate) {
+  std::ofstream f(path, std::ios::binary);
+  if (!f)
+    return false;
+
+  uint32_t dataBytes = (uint32_t)(samples.size() * sizeof(int16_t));
+  uint32_t byteRate = sampleRate * 1 /*channel*/ * sizeof(int16_t);
+  uint16_t blockAlign = (uint16_t)sizeof(int16_t);
+  uint32_t riffSize = 36 + dataBytes;
+  auto writeU32 = [&](uint32_t v) { f.write(reinterpret_cast<const char *>(&v), 4); };
+  auto writeU16 = [&](uint16_t v) { f.write(reinterpret_cast<const char *>(&v), 2); };
+
+  f.write("RIFF", 4);
+  writeU32(riffSize);
+  f.write("WAVE", 4);
+  f.write("fmt ", 4);
+  writeU32(16); // fmt chunk size (PCM)
+  writeU16(1);  // format tag: PCM
+  writeU16(1);  // channels: mono
+  writeU32(sampleRate);
+  writeU32(byteRate);
+  writeU16(blockAlign);
+  writeU16(16); // bits per sample
+  f.write("data", 4);
+  writeU32(dataBytes);
+
+  for (float s : samples) {
+    float clamped = std::max(-1.f, std::min(1.f, s));
+    int16_t pcm = (int16_t)std::lround(clamped * 32767.f);
+    f.write(reinterpret_cast<const char *>(&pcm), 2);
+  }
+  return (bool)f;
+}
+
+
 // ============================================================================
 // TimelineSurface — draws Timeline tracks/clips and handles click input.
 // Pan/zoom/scrollbars come free from CanvasWidget's built-in viewport (see
@@ -1129,12 +1182,27 @@ public:
   // actually drawn, so it's easy to grab without pixel-perfect aim.
   static constexpr float kHandleHitRadius = 8.f;
 
+  // Trim handle geometry — narrower than the fade dot's hit radius since
+  // trim handles sit flush against the clip edge instead of floating
+  // inward, and a small hit-pad is added separately in onMouseDown so
+  // they're still easy to grab without visually ballooning the bar.
+  static constexpr float kTrimHandleWidth = 5.f;
+  static constexpr float kTrimHandleHitPad = 4.f;
+
   // Bars rendered per clip, independent of the clip's current pixel
   // width — bars just stretch across whatever width the clip occupies,
   // so a future zoom (kPxPerBeat change) doesn't require re-fetching
   // peaks at a different resolution.
   static constexpr int kWaveformBuckets = 128;
 
+
+  // Resolution the FULL file's waveform is cached at, before any
+  // per-clip cropping. Higher than kWaveformBuckets so a heavily
+  // trimmed clip (showing a small slice of a long file) still has
+  // enough source detail to max-reduce from instead of just repeating
+  // a handful of hi-res samples — same reasoning as the engine's own
+  // DecodedSample::peaksHiRes cache.
+  static constexpr int kSourceWaveformBuckets = 512;
 
   Timeline *timeline = nullptr;
   StepScheduler *seq = nullptr;           // for pattern name lookups only
@@ -1152,6 +1220,16 @@ public:
   std::function<void(ClipID, bool isFadeIn)> onFadeDragStart;
   std::function<void(ClipID, bool isFadeIn, double beats)> onFadeDrag;
   std::function<void(ClipID, bool isFadeIn)> onFadeDragEnd;
+
+  // Trim-handle drag lifecycle — same start/move/end shape as the fade
+  // handles above. Unlike fades (which report a relative beats-from-edge
+  // offset), trim reports the dragged edge's ABSOLUTE timeline beat
+  // position: trimming the left edge moves the clip's startBeat itself,
+  // so SequencerApp needs to know where the mouse actually is, not just
+  // an offset from a moving reference point.
+  std::function<void(ClipID, bool isLeftEdge)> onTrimDragStart;
+  std::function<void(ClipID, bool isLeftEdge, double absoluteBeat)> onTrimDrag;
+  std::function<void(ClipID, bool isLeftEdge)> onTrimDragEnd;
 
   void initialize(int, int) override {}
   void resize(int, int) override {}
@@ -1222,23 +1300,21 @@ public:
 
         // Waveform preview + fade ramps/handles — AudioClip only.
         //
-        // Known simplification: the waveform is stretched across the
-        // clip's FULL current width using peaks from the whole decoded
-        // file, regardless of audioStartOffsetSec/lengthBeats — i.e. it
-        // doesn't yet crop to the actually-trimmed region. Once trim
-        // handles exist (next up) this should slice the peaks array to
-        // the trimmed span instead of showing the whole file's shape.
+        // The waveform shown is cropped to [audioStartOffsetSec,
+        // audioStartOffsetSec + lengthBeats-in-seconds] of the source
+        // file — see _peaksForClip() — so trimming visibly changes what
+        // shape is drawn, not just the clip's box width.
         if (isAudio) {
 
-          const std::vector<float> &peaks = _peaksForClip(clip);
+          std::vector<float> peaks = _peaksForClip(clip);
           if (!peaks.empty()) {
             float midY = laneY + kTrackHeight * 0.5f;
             float maxHalfHeight = (kTrackHeight - 12.f) * 0.5f;
             ctx.setStrokeColor(Color::fromRGB(255, 255, 255));
             ctx.setLineWidth(1.5f);
             for (size_t i = 0; i < peaks.size(); i++) {
-              float bx = cx + 1 + (cw - 2) * ((float)i + 0.5f) /
-                                     (float)peaks.size();
+              float bx =
+                  cx + 1 + (cw - 2) * ((float)i + 0.5f) / (float)peaks.size();
               // sqrt boosts quiet-but-present audio into a visible shape —
               // linear scaling leaves anything under ~0.3 peak (common for
               // normally-mastered material) reading as a near-flat line.
@@ -1250,7 +1326,6 @@ public:
               ctx.stroke();
             }
           }
-
 
           float top = laneY + 4;
           float bottom = laneY + kTrackHeight - 4;
@@ -1274,6 +1349,18 @@ public:
           ctx.setFillColor(Color::fromRGB(255, 255, 255));
           ctx.fillCircle(cx + 1 + fadeInPx, top, 4);
           ctx.fillCircle(cx + cw - 1 - fadeOutPx, top, 4);
+
+          // Trim handles — thin grab bars at the clip's TRUE left/right
+          // edges, confined to the lower ~60% of the clip so they don't
+          // overlap the fade handles living in the top strip above.
+          float trimTop = laneY + kTrackHeight * 0.4f;
+          float trimBottom = laneY + kTrackHeight - 4;
+          bool draggingThis = (clip.id == _draggingTrimClipId);
+          ctx.setFillColor(draggingThis ? Color::fromRGB(255, 205, 80)
+                                        : Color::fromRGB(255, 255, 255));
+          ctx.fillRect(cx, trimTop, kTrimHandleWidth, trimBottom - trimTop);
+          ctx.fillRect(cx + cw - kTrimHandleWidth, trimTop, kTrimHandleWidth,
+                       trimBottom - trimTop);
         }
       }
     }
@@ -1327,6 +1414,30 @@ public:
           onFadeDragStart(clip.id, false);
         return;
       }
+
+      float trimTop = top + kTrackHeight * 0.4f - 4.f; // 'top' here is
+                                                       // laneY+4; shift
+                                                       // down past the
+                                                       // fade-handle strip
+      float trimBottom = ti * kTrackHeight + kTrackHeight - 4;
+      if (y >= trimTop && y <= trimBottom) {
+        if (x >= cx - kTrimHandleHitPad &&
+            x <= cx + kTrimHandleWidth + kTrimHandleHitPad) {
+          _draggingTrimClipId = clip.id;
+          _draggingTrimIsLeft = true;
+          if (onTrimDragStart)
+            onTrimDragStart(clip.id, true);
+          return;
+        }
+        if (x >= cx + cw - kTrimHandleWidth - kTrimHandleHitPad &&
+            x <= cx + cw + kTrimHandleHitPad) {
+          _draggingTrimClipId = clip.id;
+          _draggingTrimIsLeft = false;
+          if (onTrimDragStart)
+            onTrimDragStart(clip.id, false);
+          return;
+        }
+      }
     }
 
     for (const Clip &clip : timeline->tracks[ti].clips) {
@@ -1342,49 +1453,65 @@ public:
   }
 
   void onMouseMove(float x, float) override {
-    if (_draggingFadeClipId == 0 || !timeline)
+    if (!timeline)
       return;
-    Clip *clip = _findClip(_draggingFadeClipId);
-    if (!clip) {
-      _draggingFadeClipId = 0; // clip was deleted mid-drag — bail cleanly
+
+    if (_draggingFadeClipId != 0) {
+      Clip *clip = _findClip(_draggingFadeClipId);
+      if (!clip) {
+        _draggingFadeClipId = 0; // clip deleted mid-drag — bail cleanly
+        return;
+      }
+      double mouseBeat = x / kPxPerBeat;
+      double beats = _draggingFadeIsIn
+                         ? (mouseBeat - clip->startBeat)
+                         : ((clip->startBeat + clip->lengthBeats) - mouseBeat);
+      beats = std::max(0.0, std::min(beats, clip->lengthBeats * 0.5));
+      if (onFadeDrag)
+        onFadeDrag(_draggingFadeClipId, _draggingFadeIsIn, beats);
       return;
     }
 
-    double mouseBeat = x / kPxPerBeat;
-    double beats = _draggingFadeIsIn
-                       ? (mouseBeat - clip->startBeat)
-                       : ((clip->startBeat + clip->lengthBeats) - mouseBeat);
-    // Clamp to [0, half the clip's length] — mirrors the fillRoundedRect/
-    // ramp-line clamp above, so the handle can never be dragged past its
-    // opposite counterpart.
-    beats = std::max(0.0, std::min(beats, clip->lengthBeats * 0.5));
-
-    if (onFadeDrag)
-      onFadeDrag(_draggingFadeClipId, _draggingFadeIsIn, beats);
+    if (_draggingTrimClipId != 0) {
+      Clip *clip = _findClip(_draggingTrimClipId);
+      if (!clip) {
+        _draggingTrimClipId = 0; // clip deleted mid-drag — bail cleanly
+        return;
+      }
+      double mouseBeat = x / kPxPerBeat;
+      if (onTrimDrag)
+        onTrimDrag(_draggingTrimClipId, _draggingTrimIsLeft, mouseBeat);
+    }
   }
 
   void onMouseUp(float, float) override {
-    if (_draggingFadeClipId == 0)
-      return;
-    if (onFadeDragEnd)
-      onFadeDragEnd(_draggingFadeClipId, _draggingFadeIsIn);
-    _draggingFadeClipId = 0;
+    if (_draggingFadeClipId != 0) {
+      if (onFadeDragEnd)
+        onFadeDragEnd(_draggingFadeClipId, _draggingFadeIsIn);
+      _draggingFadeClipId = 0;
+    }
+    if (_draggingTrimClipId != 0) {
+      if (onTrimDragEnd)
+        onTrimDragEnd(_draggingTrimClipId, _draggingTrimIsLeft);
+      _draggingTrimClipId = 0;
+    }
   }
-
-
 
   // Only needed while something is actually playing (playhead sweep);
   // idle editing is fully event-driven via redraw() from the App side.
   bool needsContinuousRedraw() const override {
-    return (scheduler && scheduler->playing) || _draggingFadeClipId != 0;
+    return (scheduler && scheduler->playing) || _draggingFadeClipId != 0 ||
+           _draggingTrimClipId != 0;
   }
-
 
 private:
   ClipID _draggingFadeClipId = 0;
   bool _draggingFadeIsIn = false;
 
-  // Waveform preview cache, keyed by file path. Deliberately separate
+  ClipID _draggingTrimClipId = 0;
+  bool _draggingTrimIsLeft = false;
+
+  // Whole-file waveform cache, keyed by file path. Deliberately separate
   // from TimelineScheduler::_audioSampleCache — different owner,
   // different lifetime (this only needs to live as long as the canvas
   // keeps redrawing, not as long as playback does) — even though it
@@ -1392,28 +1519,85 @@ private:
   // sample bank if both caches want it. Not worth threading a shared
   // cache across the scheduler/surface boundary just for a read-only
   // peak lookup.
-  std::unordered_map<std::string, std::vector<float>> _peaksCache;
+  //
+  // Stores the FULL file's shape at kSourceWaveformBuckets resolution,
+  // never the cropped/trimmed view — cropping depends on each clip's
+  // live audioStartOffsetSec/lengthBeats (which change mid-drag), so it
+  // has to be recomputed per clip per render, not cached per file.
+  struct CachedWaveform {
+    std::vector<float> peaks;  // kSourceWaveformBuckets buckets across
+                               // the file's full duration
+    float durationSec = 0.f;
+  };
+  std::unordered_map<std::string, CachedWaveform> _waveformCache;
 
-  const std::vector<float> &_peaksForClip(const Clip &clip) {
-    static const std::vector<float> kEmpty;
-    if (clip.audioFilePath.empty())
-      return kEmpty;
-
-    auto it = _peaksCache.find(clip.audioFilePath);
-    if (it != _peaksCache.end())
+  const CachedWaveform &_fullWaveformForFile(const std::string &path) {
+    auto it = _waveformCache.find(path);
+    if (it != _waveformCache.end())
       return it->second;
 
     auto &engine = AudioEngine::get();
-    SampleID id = engine.loadSample(clip.audioFilePath);
-    std::vector<float> peaks =
-        (id != kInvalidSample) ? engine.getSamplePeaks(id, kWaveformBuckets)
-                               : std::vector<float>{};
-    // Cache even on failure (as an empty vector) so a missing/undecodable
-    // file doesn't retry a doomed loadSample() call on every redraw.
-    return _peaksCache.emplace(clip.audioFilePath, std::move(peaks))
-        .first->second;
+    SampleID id = engine.loadSample(path);
+    CachedWaveform wf;
+    if (id != kInvalidSample) {
+      wf.peaks = engine.getSamplePeaks(id, kSourceWaveformBuckets);
+      wf.durationSec = engine.getSampleDurationSeconds(id);
+    }
+    // Cache even on failure (empty peaks, 0 duration) so a missing/
+    // undecodable file doesn't retry a doomed loadSample() call on
+    // every redraw.
+    return _waveformCache.emplace(path, std::move(wf)).first->second;
   }
 
+  // Crops the cached full-file waveform down to the span this clip
+  // actually plays — [audioStartOffsetSec, audioStartOffsetSec +
+  // lengthBeats-in-seconds] — then max-reduces that span down to at
+  // most kWaveformBuckets output bars. Recomputed on every render()
+  // call (not cached per clip) since trim/fade dragging changes the
+  // inputs continuously; the source scan is at most
+  // kSourceWaveformBuckets elements, cheap enough for the ~25ms
+  // redraw cadence dragging already runs at (see needsContinuousRedraw).
+  std::vector<float> _peaksForClip(const Clip &clip) {
+    if (clip.audioFilePath.empty())
+      return {};
+    const CachedWaveform &wf = _fullWaveformForFile(clip.audioFilePath);
+    if (wf.peaks.empty() || wf.durationSec <= 0.f)
+      return wf.peaks; // duration unknown — fall back to the whole shape
+                       // rather than showing nothing
+
+    double bpm = (seq && seq->bpm > 0.0) ? seq->bpm : 120.0;
+    double lengthSec = clip.lengthBeats * (60.0 / bpm);
+    double startSec = std::max(0.0, clip.audioStartOffsetSec);
+    double endSec =
+        std::min((double)wf.durationSec, startSec + lengthSec);
+    if (endSec <= startSec)
+      return {};
+    size_t srcCount = wf.peaks.size();
+    size_t startIdx = (size_t)std::min<double>(
+        (double)srcCount, (startSec / wf.durationSec) * srcCount);
+    size_t endIdx = (size_t)std::min<double>(
+        (double)srcCount, (endSec / wf.durationSec) * srcCount);
+    if (endIdx <= startIdx)
+      endIdx = std::min(srcCount, startIdx + 1);
+    size_t croppedCount = endIdx - startIdx;
+
+    size_t outBucketsSz =
+        std::max<size_t>(1, std::min((size_t)kWaveformBuckets, croppedCount));
+    int outBuckets = (int)outBucketsSz;
+    std::vector<float> out(outBuckets, 0.f);
+    for (int i = 0; i < outBuckets; i++) {
+      size_t s = startIdx + (size_t)((double)i * croppedCount / outBuckets);
+      size_t e =
+          startIdx + (size_t)((double)(i + 1) * croppedCount / outBuckets);
+      e = std::max(e, s + 1);
+      e = std::min(e, endIdx);
+      float peak = 0.f;
+      for (size_t j = s; j < e; j++)
+        peak = std::max(peak, wf.peaks[j]);
+      out[i] = peak;
+    }
+    return out;
+  }
 
   static bool _withinHandle(float x, float y, float hx, float hy) {
     float dx = x - hx, dy = y - hy;
@@ -1586,6 +1770,38 @@ class SequencerApp : public Widget {
   // between the three callbacks.
   float _fadeDragOldValue = 0.f;
 
+  // Trim-drag scratch state — snapshot of the three fields trimming can
+  // touch together (startBeat/lengthBeats/audioStartOffsetSec), captured
+  // at drag start so onTrimDragEnd can push ONE undo entry for the whole
+  // drag, same coalescing reasoning as _fadeDragOldValue above. Also
+  // caches the source sample's real duration for clamping — looked up
+  // once at drag start rather than on every mouse-move.
+  double _trimDragOldStartBeat = 0.0;
+  double _trimDragOldLengthBeats = 0.0;
+  double _trimDragOldAudioOffsetSec = 0.0;
+  float _trimDragSampleDurationSec = 0.f;
+
+
+  // ── Audio recording (Phase 3) ────────────────────────────────────────
+  bool _isRecording = false;
+  State<bool> _recordingState{false}; // drives the Record button's color
+
+  // Mono float samples accumulated by the capture callback. Written ONLY
+  // by AudioEngine's capture thread while recording is active, and read
+  // back on the UI thread only after stopCapture() has joined that
+  // thread (see _stopRecording) — that ordering is what makes this safe
+  // without a mutex, same discipline the engine's own capture doc
+  // describes for CaptureCallback.
+  std::vector<float> _recordBuffer;
+  int _recordTrackIndex = -1;   // which _timeline.tracks[] slot the
+                                // in-progress take will land on
+  double _recordStartBeat = 0.0;
+  uint32_t _recordSampleRate = 48000;
+  uint64_t _nextRecordingIndex = 1; // suffixes generated .wav filenames
+
+  int _recordTargetTrackIndex = 0; // UI selection from the dropdown below,
+                                   // read at record-start time
+  std::shared_ptr<DropdownWidget> _recordTrackDropdown;
 
 public:
   SequencerApp() {
@@ -1665,6 +1881,12 @@ public:
   ~SequencerApp() {
     if (_timerId)
       FluxUI::getCurrentInstance()->clearInterval(_timerId);
+
+
+    // Don't leave the capture device running if the widget is destroyed
+    // mid-recording.
+    if (_isRecording)
+      AudioEngine::get().stopCapture();
 
     // Release any samples this instance loaded onto tracks.
     for (auto &track : _seq->trackVoice)
@@ -2020,6 +2242,7 @@ public:
                                      _timelineCanvasHeightPx());
     if (_timelineCanvas)
       _timelineCanvas->redraw();
+    _syncRecordTrackDropdown();
   }
 
   void _timelineAddClipAt(int trackIndex, double beat) {
@@ -2079,6 +2302,106 @@ public:
       _timelineCanvas->redraw();
   }
 
+  void _syncRecordTrackDropdown() {
+    if (!_recordTrackDropdown)
+      return;
+    std::vector<std::string> labels;
+    for (auto &t : _timeline.tracks)
+      labels.push_back(t.name);
+    _recordTrackDropdown->setOptions(labels);
+    if (_recordTargetTrackIndex >= (int)_timeline.tracks.size())
+      _recordTargetTrackIndex = std::max(0, (int)_timeline.tracks.size() - 1);
+  }
+
+  // Called DIRECTLY on AudioEngine's capture audio thread (see
+  // AudioEngine::startCapture's doc comment) — no locks, no allocation
+  // beyond the vector growth itself, which is the same tradeoff every
+  // other realtime callback in this codebase (e.g. StreamCallback) makes.
+  void _onCaptureFrames(const float *buf, uint32_t frames, uint32_t channels) {
+    if (!_isRecording)
+      return;
+    size_t oldSize = _recordBuffer.size();
+    _recordBuffer.resize(oldSize + frames);
+    if (channels <= 1) {
+      std::memcpy(_recordBuffer.data() + oldSize, buf, frames * sizeof(float));
+    } else {
+      // Downmix defensively even though _startRecording always requests
+      // channels=1 — guards against a future caller changing that.
+      for (uint32_t i = 0; i < frames; i++)
+        _recordBuffer[oldSize + i] = buf[i * channels];
+    }
+  }
+
+  void _startRecording() {
+    if (_isRecording || _timeline.tracks.empty())
+      return;
+    _recordTrackIndex = std::max(
+        0, std::min((int)_timeline.tracks.size() - 1, _recordTargetTrackIndex));
+    _recordBuffer.clear();
+    _recordSampleRate = AudioEngine::get().sampleRate();
+    // Land the new clip wherever the timeline playhead currently is, so
+    // recording along with playback places the take in sync; recording
+    // with the transport stopped just starts the clip at beat 0, same
+    // "auto-size from content" spirit as _timelineAddAudioClipAt.
+    _recordStartBeat =
+        _timelineScheduler->playing ? _timelineScheduler->playheadBeats() : 0.0;
+
+    bool ok = AudioEngine::get().startCapture(
+        [this](const float *buf, uint32_t frames, uint32_t channels) {
+          _onCaptureFrames(buf, frames, channels);
+        },
+        /*channels=*/1, _recordSampleRate);
+    if (!ok)
+      return; // device busy/unavailable — silent no-op, same pattern
+              // every other bool-returning AudioEngine call uses here
+
+    _isRecording = true;
+    _recordingState.set(true);
+  }
+
+  void _stopRecording() {
+    if (!_isRecording)
+      return;
+    AudioEngine::get().stopCapture(); // joins the capture thread — safe to
+                                      // read _recordBuffer from here on
+    _isRecording = false;
+    _recordingState.set(false);
+
+    if (_recordBuffer.empty() || _recordTrackIndex < 0 ||
+        _recordTrackIndex >= (int)_timeline.tracks.size())
+      return; // nothing captured, or the target track vanished mid-take
+              // (e.g. deleted) — drop the take rather than guess
+
+    std::string path =
+        "flux_recording_" + std::to_string(_nextRecordingIndex++) + ".wav";
+    if (!writeWavMono16(path, _recordBuffer, _recordSampleRate)) {
+      _recordBuffer.clear();
+      return; // couldn't write the file — drop the take rather than add
+              // a clip pointing at nothing
+    }
+
+    double lengthSec =
+        (double)_recordBuffer.size() / (double)_recordSampleRate;
+    double lengthBeats = std::max(0.05, lengthSec * (_seq->bpm / 60.0));
+
+    Clip clip;
+    clip.id = _nextClipId++;
+    clip.type = ClipType::Audio;
+    clip.audioFilePath = path;
+    clip.startBeat = _recordStartBeat;
+    clip.lengthBeats = lengthBeats;
+    clip.gain = 1.0f;
+
+    _timeline.tracks[_recordTrackIndex].clips.push_back(clip);
+    _timelineSelectClip(clip.id);
+    if (_timelineCanvas)
+      _timelineCanvas->redraw();
+
+    _recordBuffer.clear();
+    _recordBuffer.shrink_to_fit(); // release the (possibly large) capture
+                                   // buffer now that it's safely on disk
+  }
+
 
 
   Clip *_findTimelineClip(ClipID id) {
@@ -2119,12 +2442,112 @@ public:
     if (oldVal == newVal)
       return; // a click with no actual drag movement — no-op, no undo entry
 
+    _undoStack.push([this, id, isFadeIn,
+                     oldVal] { _timelineSetFadeCore(id, isFadeIn, oldVal); },
+                    [this, id, isFadeIn, newVal] {
+                      _timelineSetFadeCore(id, isFadeIn, newVal);
+                    });
+  }
+
+  void _timelineTrimDragStart(ClipID id, bool isLeftEdge) {
+    Clip *clip = _findTimelineClip(id);
+    if (!clip)
+      return;
+    _trimDragOldStartBeat = clip->startBeat;
+    _trimDragOldLengthBeats = clip->lengthBeats;
+    _trimDragOldAudioOffsetSec = clip->audioStartOffsetSec;
+
+    // Cache the source's real duration once per drag so
+    // _timelineSetTrimCore can clamp the right-edge handle without a
+    // sample-bank lookup on every mouse-move.
+    SampleID sid = AudioEngine::get().loadSample(clip->audioFilePath);
+    _trimDragSampleDurationSec =
+        (sid != kInvalidSample)
+            ? AudioEngine::get().getSampleDurationSeconds(sid)
+            : 0.f;
+  }
+
+  // Applies the live value during a drag — no undo-stack push per move,
+  // same reasoning as _timelineSetFadeCore. `absoluteBeat` is the dragged
+  // edge's position on the timeline's global beat axis (see the comment
+  // on TimelineSurface::onTrimDrag for why this isn't a relative offset
+  // the way fade's is).
+  void _timelineSetTrimCore(ClipID id, bool isLeftEdge, double absoluteBeat) {
+    Clip *clip = _findTimelineClip(id);
+    if (!clip)
+      return;
+
+    double secPerBeat = 60.0 / _seq->bpm;
+    // A trimmed clip always keeps at least this many beats — avoids a
+    // zero/negative-length clip if the handles get dragged past
+    // each other.
+    constexpr double kMinLengthBeats = 0.05;
+
+    if (isLeftEdge) {
+      double rightEdge = clip->startBeat + clip->lengthBeats;
+      double newStart =
+          std::max(0.0, std::min(absoluteBeat, rightEdge - kMinLengthBeats));
+
+      // Moving the left edge right trims audio off the front (and vice
+      // versa) — the source's own start offset moves by the same delta,
+      // clamped so it can never go negative (can't trim before the
+      // sample's own frame 0). If that clamp bites, the edge itself is
+      // pulled back in step so startBeat/offset stay in sync.
+      double deltaBeats = newStart - clip->startBeat;
+      double newOffsetSec =
+          std::max(0.0, clip->audioStartOffsetSec + deltaBeats * secPerBeat);
+      double actualDeltaSec = newOffsetSec - clip->audioStartOffsetSec;
+      double actualDeltaBeats = actualDeltaSec / secPerBeat;
+
+      clip->startBeat += actualDeltaBeats;
+      clip->lengthBeats = rightEdge - clip->startBeat;
+      clip->audioStartOffsetSec = newOffsetSec;
+    } else {
+      double newLen = std::max(kMinLengthBeats, absoluteBeat - clip->startBeat);
+      if (_trimDragSampleDurationSec > 0.f) {
+        double maxLenSec =
+            (double)_trimDragSampleDurationSec - clip->audioStartOffsetSec;
+        newLen =
+            std::min(newLen, std::max(kMinLengthBeats, maxLenSec / secPerBeat));
+      }
+      clip->lengthBeats = newLen;
+    }
+
+    if (_timelineCanvas)
+      _timelineCanvas->redraw();
+  }
+
+  void _timelineTrimDragEnd(ClipID id, bool /*isLeftEdge*/) {
+    Clip *clip = _findTimelineClip(id);
+    if (!clip)
+      return;
+    double oldStart = _trimDragOldStartBeat;
+    double oldLen = _trimDragOldLengthBeats;
+    double oldOffset = _trimDragOldAudioOffsetSec;
+    double newStart = clip->startBeat;
+    double newLen = clip->lengthBeats;
+    double newOffset = clip->audioStartOffsetSec;
+    if (oldStart == newStart && oldLen == newLen && oldOffset == newOffset)
+      return; // a click with no real movement — no-op, no undo entry
+
     _undoStack.push(
-        [this, id, isFadeIn, oldVal] {
-          _timelineSetFadeCore(id, isFadeIn, oldVal);
+        [this, id, oldStart, oldLen, oldOffset] {
+          if (Clip *c = _findTimelineClip(id)) {
+            c->startBeat = oldStart;
+            c->lengthBeats = oldLen;
+            c->audioStartOffsetSec = oldOffset;
+            if (_timelineCanvas)
+              _timelineCanvas->redraw();
+          }
         },
-        [this, id, isFadeIn, newVal] {
-          _timelineSetFadeCore(id, isFadeIn, newVal);
+        [this, id, newStart, newLen, newOffset] {
+          if (Clip *c = _findTimelineClip(id)) {
+            c->startBeat = newStart;
+            c->lengthBeats = newLen;
+            c->audioStartOffsetSec = newOffset;
+            if (_timelineCanvas)
+              _timelineCanvas->redraw();
+          }
         });
   }
 
@@ -2151,12 +2574,11 @@ public:
           // natural place to also surface the current fade values while
           // dragging a handle.
           size_t slash = clip.audioFilePath.find_last_of("/\\");
-          std::string base =
-              clip.audioFilePath.empty()
-                  ? "Audio"
-                  : (slash == std::string::npos
-                         ? clip.audioFilePath
-                         : clip.audioFilePath.substr(slash + 1));
+          std::string base = clip.audioFilePath.empty()
+                                 ? "Audio"
+                                 : (slash == std::string::npos
+                                        ? clip.audioFilePath
+                                        : clip.audioFilePath.substr(slash + 1));
           std::ostringstream lbl;
           lbl << base << " @ beat " << (int)clip.startBeat << " · fade "
               << std::fixed << std::setprecision(1) << clip.fadeInBeats
@@ -2913,7 +3335,32 @@ public:
       _timelineSurface->onFadeDragEnd = [this](ClipID id, bool isFadeIn) {
         _timelineFadeDragEnd(id, isFadeIn);
       };
+
+      _timelineSurface->onTrimDragStart = [this](ClipID id, bool isLeft) {
+        _timelineTrimDragStart(id, isLeft);
+      };
+      _timelineSurface->onTrimDrag = [this](ClipID id, bool isLeft,
+                                            double absBeat) {
+        _timelineSetTrimCore(id, isLeft, absBeat);
+      };
+      _timelineSurface->onTrimDragEnd = [this](ClipID id, bool isLeft) {
+        _timelineTrimDragEnd(id, isLeft);
+      };
     }
+
+    // Built once alongside the rest of the timeline toolbar (build() only
+    // runs once — see the comment on _cellState) so _recordTrackDropdown
+    // is available for _syncRecordTrackDropdown() to update later.
+    std::vector<std::string> recordTrackLabels;
+    for (auto &t : _timeline.tracks)
+      recordTrackLabels.push_back(t.name);
+    _recordTrackDropdown =
+        Dropdown(recordTrackLabels)
+            ->setOnSelectionChanged([this](int idx, const std::string &) {
+              _recordTargetTrackIndex = idx;
+            })
+            ->setWidth(140);
+
 
     auto timelineToolbar =
         Row({
@@ -2936,6 +3383,18 @@ public:
                 Button("■ Stop", [this] { _timelineScheduler->stop(); }),
                 Button("Delete Clip",
                        [this] { _deleteSelectedTimelineClip(); }),
+                Text("Record to:"),
+                _recordTrackDropdown,
+                Button("● Record", [this] { _startRecording(); })
+                    ->setWidth(90)
+                    ->setBackgroundColor(
+                        _recordingState,
+                        [](bool rec) {
+                          return rec ? Color::fromRGB(220, 50, 50)
+                                    : Color::fromRGB(235, 235, 245);
+                        }),
+                Button("■ Stop Rec", [this] { _stopRecording(); }),
+
                 Text(_timelineSelectionLabel)->setFontSize(12),
             })
             ->setGap(8)
