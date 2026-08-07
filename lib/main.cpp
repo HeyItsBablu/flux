@@ -597,6 +597,15 @@ struct TimelineTrack {
   // sample-accurate ramp command yet (that's still a Phase 4 stretch/
   // Phase 5 item), just a per-~25ms update.
   std::vector<AutomationLane> automationLanes;
+
+  // ── Automation lane display (UI-only, not persisted) ─────────────────
+  // Which lane, if any, TimelineSurface draws below this track's clips.
+  // Lives on the track rather than as a parallel vector in SequencerApp
+  // so TimelineSurface — which only ever sees a Timeline*, not the app's
+  // own State vectors — can read it directly during render()/hit-testing,
+  // the same way it already reads muted/soloed.
+  bool automationVisible = false;
+  AutomationParam automationDisplayParam = AutomationParam::TrackVolume;
 };
 
 struct Timeline {
@@ -1273,6 +1282,26 @@ public:
   // DecodedSample::peaksHiRes cache.
   static constexpr int kSourceWaveformBuckets = 512;
 
+  // Automation lane geometry/behavior. Drag overflow/delete thresholds
+  // are expressed as a fraction of the lane's own value range rather
+  // than raw pixels, so they behave consistently regardless of lane
+  // height or which parameter (Volume vs Pan, different ranges) is
+  // showing.
+  static constexpr float kAutomationLaneHeight = 56.f;
+  static constexpr float kAutomationPointRadius = 4.f;
+  static constexpr float kAutomationPadding = 8.f;
+  static constexpr float kAutomationOverflowFrac = 0.4f; // how far past
+                                                         // [lo,hi] a
+                                                         // dragged point
+                                                         // may stray
+                                                         // before being
+                                                         // clamped
+  static constexpr float kAutomationDeleteFrac = 0.12f;  // how far past
+                                                         // [lo,hi] before
+                                                         // release marks
+                                                         // the point for
+                                                         // deletion
+
   Timeline *timeline = nullptr;
   StepScheduler *seq = nullptr;           // for pattern name lookups only
   TimelineScheduler *scheduler = nullptr; // for playhead position only
@@ -1300,6 +1329,27 @@ public:
   std::function<void(ClipID, bool isLeftEdge, double absoluteBeat)> onTrimDrag;
   std::function<void(ClipID, bool isLeftEdge)> onTrimDragEnd;
 
+  // Automation-point interaction. Click empty lane space to add a point;
+  // drag an existing point to change its value (beat is fixed once
+  // placed — only the vertical position is draggable); drag it well past
+  // the lane's top/bottom edge and release to delete it. Same
+  // start/move/end shape as the fade/trim handles above, and the same
+  // "live-apply during drag, coalesce into one undo entry on end"
+  // contract — SequencerApp mutates the real point on every
+  // onAutomationPointDrag call with no undo push, then decides
+  // commit-vs-delete in onAutomationPointDragEnd.
+  std::function<void(int trackIndex, AutomationParam param, double beat,
+                     float value)>
+      onAutomationPointAdd;
+  std::function<void(int trackIndex, AutomationParam param, int pointIndex)>
+      onAutomationPointDragStart;
+  std::function<void(int trackIndex, AutomationParam param, int pointIndex,
+                     float value)>
+      onAutomationPointDrag;
+  std::function<void(int trackIndex, AutomationParam param, int pointIndex,
+                     bool deleted)>
+      onAutomationPointDragEnd;
+
   void initialize(int, int) override {}
   void resize(int, int) override {}
   void destroy() override {}
@@ -1314,6 +1364,8 @@ public:
 
     if (!timeline)
       return;
+
+    _recomputeLaneLayout();
 
     // Beat grid — heavier line every bar (4 beats).
     int totalBeats = (int)(w / kPxPerBeat) + 1;
@@ -1330,7 +1382,7 @@ public:
 
     // Track lanes + clips.
     for (size_t ti = 0; ti < timeline->tracks.size(); ti++) {
-      float laneY = ti * kTrackHeight;
+      float laneY = _laneTops[ti];
       ctx.setStrokeColor(Color::fromRGB(210, 210, 215));
       ctx.beginPath();
       ctx.moveTo(0, laneY);
@@ -1432,6 +1484,80 @@ public:
                        trimBottom - trimTop);
         }
       }
+
+      if (timeline->tracks[ti].automationVisible) {
+        float autoTop = _laneTops[ti] + kTrackHeight;
+        float autoBottom = autoTop + kAutomationLaneHeight;
+
+        ctx.setFillColor(Color::fromRGB(246, 246, 250));
+        ctx.fillRect(0, autoTop, w, kAutomationLaneHeight);
+        ctx.setStrokeColor(Color::fromRGB(210, 210, 215));
+        ctx.beginPath();
+        ctx.moveTo(0, autoTop);
+        ctx.lineTo(w, autoTop);
+        ctx.stroke();
+
+        AutomationParam param = timeline->tracks[ti].automationDisplayParam;
+        float lo, hi;
+        _automationValueRange(param, lo, hi);
+        float top = autoTop + kAutomationPadding;
+        float bottom = autoBottom - kAutomationPadding;
+
+        AutomationLane *lane = _findLane(timeline->tracks[ti], param);
+
+        ctx.setFillColor(Color::fromRGB(90, 90, 100));
+        ctx.setFont("10px sans");
+        ctx.setTextAlign(CanvasTextAlign::Left);
+        ctx.setTextBaseline(TextBaseline::Top);
+        ctx.fillText(param == AutomationParam::TrackVolume ? "Volume" : "Pan",
+                     6, autoTop + 3);
+
+        if (!lane || lane->points.empty()) {
+          // No points yet — a flat reference line at the default value,
+          // so there's something visible to click on.
+          float defaultValue =
+              (param == AutomationParam::TrackVolume) ? 1.f : 0.f;
+          float y = _automationValueToY(defaultValue, lo, hi, top, bottom);
+          ctx.setStrokeColor(Color::fromRGB(190, 190, 205));
+          ctx.setLineWidth(1);
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(w, y);
+          ctx.stroke();
+        } else {
+          ctx.setStrokeColor(Color::fromRGB(120, 130, 220));
+          ctx.setLineWidth(1.5f);
+          ctx.beginPath();
+          // Hold flat before the first point and after the last — matches
+          // TimelineScheduler::_evaluateLane's own clamped-hold semantics
+          // so the drawn curve is exactly what will play.
+          float firstY = _automationValueToY(lane->points.front().value, lo, hi,
+                                             top, bottom);
+          ctx.moveTo(0, firstY);
+          ctx.lineTo((float)(lane->points.front().beat * kPxPerBeat), firstY);
+          for (const AutomationPoint &pt : lane->points)
+            ctx.lineTo((float)(pt.beat * kPxPerBeat),
+                       _automationValueToY(pt.value, lo, hi, top, bottom));
+          float lastY = _automationValueToY(lane->points.back().value, lo, hi,
+                                            top, bottom);
+          ctx.lineTo(w, lastY);
+          ctx.stroke();
+
+          for (size_t i = 0; i < lane->points.size(); i++) {
+            float px = (float)(lane->points[i].beat * kPxPerBeat);
+            float py =
+                _automationValueToY(lane->points[i].value, lo, hi, top, bottom);
+            bool dragging =
+                ((int)ti == _draggingAutoTrack && param == _draggingAutoParam &&
+                 (int)i == _draggingAutoPointIndex);
+            ctx.setFillColor(dragging && _draggingAutoMarkedDelete
+                                 ? Color::fromRGB(220, 60, 60)
+                             : dragging ? Color::fromRGB(255, 205, 80)
+                                        : Color::fromRGB(120, 130, 220));
+            ctx.fillCircle(px, py, kAutomationPointRadius);
+          }
+        }
+      }
     }
 
     // Playhead.
@@ -1449,12 +1575,22 @@ public:
   void onMouseDown(float x, float y) override {
     if (!timeline || timeline->tracks.empty())
       return;
-    int ti = (int)(y / kTrackHeight);
-    if (ti < 0 || ti >= (int)timeline->tracks.size())
+    _recomputeLaneLayout();
+    LaneHit hit = _hitTestLane(y);
+    if (hit.trackIndex < 0)
       return;
+
+    if (hit.inAutomation) {
+      _handleAutomationMouseDown(hit.trackIndex, hit.regionTop, x, y);
+      return;
+    }
+
+    int ti = hit.trackIndex;
     double beat = x / kPxPerBeat;
 
-    float top = ti * kTrackHeight + 4;
+    float top = hit.regionTop + 4;
+    float laneTopY = hit.regionTop; // for trimBottom below, since ti no
+                                    // longer implies a fixed row height
 
     // Fade handles take priority over clip-select/empty-click — they sit
     // right at a clip's edges, exactly where a body click would otherwise
@@ -1488,7 +1624,7 @@ public:
                                                        // laneY+4; shift
                                                        // down past the
                                                        // fade-handle strip
-      float trimBottom = ti * kTrackHeight + kTrackHeight - 4;
+      float trimBottom = laneTopY + kTrackHeight - 4;
       if (y >= trimTop && y <= trimBottom) {
         if (x >= cx - kTrimHandleHitPad &&
             x <= cx + kTrimHandleWidth + kTrimHandleHitPad) {
@@ -1521,9 +1657,47 @@ public:
       onEmptyClick(ti, beat);
   }
 
-  void onMouseMove(float x, float) override {
+  void onMouseMove(float x, float y) override {
     if (!timeline)
       return;
+
+    _recomputeLaneLayout();
+
+    if (_draggingAutoTrack >= 0) {
+      if (_draggingAutoTrack >= (int)timeline->tracks.size()) {
+        _resetAutoDrag();
+        return;
+      }
+      TimelineTrack &track = timeline->tracks[_draggingAutoTrack];
+      AutomationLane *lane = _findLane(track, _draggingAutoParam);
+      if (!lane || _draggingAutoPointIndex < 0 ||
+          _draggingAutoPointIndex >= (int)lane->points.size()) {
+        _resetAutoDrag(); // point deleted/lane cleared mid-drag — bail
+        return;
+      }
+
+      float lo, hi;
+      _automationValueRange(_draggingAutoParam, lo, hi);
+      float autoTop = _laneTops[_draggingAutoTrack] + kTrackHeight;
+      float top = autoTop + kAutomationPadding;
+      float bottom = autoTop + kAutomationLaneHeight - kAutomationPadding;
+      float range = hi - lo;
+
+      float value = _automationYToValue(y, lo, hi, top, bottom);
+      float lo2 = lo - range * kAutomationOverflowFrac;
+      float hi2 = hi + range * kAutomationOverflowFrac;
+      value = std::max(lo2, std::min(hi2, value));
+
+      // Marked here, acted on at release — lets the dot keep following
+      // the mouse right up to mouse-up instead of snapping back early.
+      _draggingAutoMarkedDelete = value < lo - range * kAutomationDeleteFrac ||
+                                  value > hi + range * kAutomationDeleteFrac;
+
+      if (onAutomationPointDrag)
+        onAutomationPointDrag(_draggingAutoTrack, _draggingAutoParam,
+                              _draggingAutoPointIndex, value);
+      return;
+    }
 
     if (_draggingFadeClipId != 0) {
       Clip *clip = _findClip(_draggingFadeClipId);
@@ -1554,6 +1728,13 @@ public:
   }
 
   void onMouseUp(float, float) override {
+    if (_draggingAutoTrack >= 0) {
+      if (onAutomationPointDragEnd)
+        onAutomationPointDragEnd(_draggingAutoTrack, _draggingAutoParam,
+                                 _draggingAutoPointIndex,
+                                 _draggingAutoMarkedDelete);
+      _resetAutoDrag();
+    }
     if (_draggingFadeClipId != 0) {
       if (onFadeDragEnd)
         onFadeDragEnd(_draggingFadeClipId, _draggingFadeIsIn);
@@ -1570,7 +1751,7 @@ public:
   // idle editing is fully event-driven via redraw() from the App side.
   bool needsContinuousRedraw() const override {
     return (scheduler && scheduler->playing) || _draggingFadeClipId != 0 ||
-           _draggingTrimClipId != 0;
+           _draggingTrimClipId != 0 || _draggingAutoTrack >= 0;
   }
 
 private:
@@ -1579,6 +1760,129 @@ private:
 
   ClipID _draggingTrimClipId = 0;
   bool _draggingTrimIsLeft = false;
+
+  // Automation-point drag state — identifies the point being dragged by
+  // (track, param, index) since points have no stable ID; see
+  // SequencerApp::_timelineAutomationPointDragEnd for why beat is used
+  // as the identity key once we're back on the app side.
+  int _draggingAutoTrack = -1;
+  AutomationParam _draggingAutoParam = AutomationParam::TrackVolume;
+  int _draggingAutoPointIndex = -1;
+  bool _draggingAutoMarkedDelete = false;
+
+  void _resetAutoDrag() {
+    _draggingAutoTrack = -1;
+    _draggingAutoPointIndex = -1;
+    _draggingAutoMarkedDelete = false;
+  }
+
+  // Per-track top Y, recomputed at the start of every render()/
+  // onMouseDown()/onMouseMove() — a track's total height depends on
+  // whether its automation lane is shown, so this can't stay a fixed
+  // `ti * kTrackHeight` anymore. Cheap for the handful of tracks this
+  // app supports.
+  std::vector<float> _laneTops;
+
+  void _recomputeLaneLayout() {
+    _laneTops.assign(timeline->tracks.size(), 0.f);
+    float y = 0.f;
+    for (size_t i = 0; i < timeline->tracks.size(); i++) {
+      _laneTops[i] = y;
+      y += kTrackHeight;
+      if (timeline->tracks[i].automationVisible)
+        y += kAutomationLaneHeight;
+    }
+  }
+
+  struct LaneHit {
+    int trackIndex = -1;
+    bool inAutomation = false;
+    float regionTop = 0.f; // top Y of whichever region was hit
+  };
+
+  LaneHit _hitTestLane(float y) const {
+    for (size_t i = 0; i < timeline->tracks.size(); i++) {
+      float clipTop = _laneTops[i];
+      float clipBottom = clipTop + kTrackHeight;
+      if (y >= clipTop && y < clipBottom)
+        return {(int)i, false, clipTop};
+      if (timeline->tracks[i].automationVisible) {
+        float autoTop = clipBottom;
+        float autoBottom = autoTop + kAutomationLaneHeight;
+        if (y >= autoTop && y < autoBottom)
+          return {(int)i, true, autoTop};
+      }
+    }
+    return {};
+  }
+
+  static AutomationLane *_findLane(TimelineTrack &track,
+                                   AutomationParam param) {
+    for (auto &l : track.automationLanes)
+      if (l.param == param)
+        return &l;
+    return nullptr;
+  }
+
+  static void _automationValueRange(AutomationParam p, float &lo, float &hi) {
+    if (p == AutomationParam::TrackVolume) {
+      lo = 0.f;
+      hi = 1.5f;
+    } else {
+      lo = -1.f;
+      hi = 1.f;
+    }
+  }
+
+  static float _automationValueToY(float value, float lo, float hi, float top,
+                                   float bottom) {
+    float t = (hi > lo) ? (value - lo) / (hi - lo) : 0.f;
+    return bottom - t * (bottom - top);
+  }
+
+  static float _automationYToValue(float y, float lo, float hi, float top,
+                                   float bottom) {
+    float t = (bottom > top) ? (bottom - y) / (bottom - top) : 0.f;
+    return lo + t * (hi - lo);
+  }
+
+  void _handleAutomationMouseDown(int ti, float laneTop, float x, float y) {
+    TimelineTrack &track = timeline->tracks[ti];
+    AutomationParam param = track.automationDisplayParam;
+    AutomationLane *lane = _findLane(track, param);
+
+    float lo, hi;
+    _automationValueRange(param, lo, hi);
+    float top = laneTop + kAutomationPadding;
+    float bottom = laneTop + kAutomationLaneHeight - kAutomationPadding;
+
+    if (lane) {
+      for (size_t i = 0; i < lane->points.size(); i++) {
+        float px = (float)(lane->points[i].beat * kPxPerBeat);
+        float py =
+            _automationValueToY(lane->points[i].value, lo, hi, top, bottom);
+        float dx = x - px, dy = y - py;
+        if (dx * dx + dy * dy <= kHandleHitRadius * kHandleHitRadius) {
+          _draggingAutoTrack = ti;
+          _draggingAutoParam = param;
+          _draggingAutoPointIndex = (int)i;
+          _draggingAutoMarkedDelete = false;
+          if (onAutomationPointDragStart)
+            onAutomationPointDragStart(ti, param, (int)i);
+          return;
+        }
+      }
+    }
+
+    // Empty space in the lane — place a new point here. Beat is NOT
+    // rounded (unlike clip placement) so a curve can be shaped with
+    // sub-beat precision.
+    double beat = std::max(0.0, (double)(x / kPxPerBeat));
+    float value =
+        std::max(lo, std::min(hi, _automationYToValue(y, lo, hi, top, bottom)));
+    if (onAutomationPointAdd)
+      onAutomationPointAdd(ti, param, beat, value);
+  }
 
   // Whole-file waveform cache, keyed by file path. Deliberately separate
   // from TimelineScheduler::_audioSampleCache — different owner,
@@ -1832,6 +2136,10 @@ class SequencerApp : public Widget {
   std::vector<State<bool>> _timelineMuteState;
   std::vector<State<bool>> _timelineSoloState;
   std::vector<State<double>> _timelinePeakState; // 0..~1.5, polled each tick
+  std::vector<State<bool>> _timelineAutoLaneVisibleState; // per-track
+                                                          // "show
+                                                          // automation
+                                                          // lane" toggle
   std::vector<std::shared_ptr<DropdownWidget>> _sendDropdowns;
   std::shared_ptr<Widget> _mixerStripsRow; // built once, children appended
 
@@ -2307,8 +2615,13 @@ public:
                                                     // grows are a follow-up
   }
   int _timelineCanvasHeightPx() const {
-    return std::max(1, (int)_timeline.tracks.size()) *
-           (int)TimelineSurface::kTrackHeight;
+    int total = 0;
+    for (auto &t : _timeline.tracks) {
+      total += (int)TimelineSurface::kTrackHeight;
+      if (t.automationVisible)
+        total += (int)TimelineSurface::kAutomationLaneHeight;
+    }
+    return std::max((int)TimelineSurface::kTrackHeight, total);
   }
 
   void _addTimelineTrack() {
@@ -2348,6 +2661,7 @@ public:
     _timelineMuteState.emplace_back(false);
     _timelineSoloState.emplace_back(false);
     _timelinePeakState.emplace_back(0.0);
+    _timelineAutoLaneVisibleState.emplace_back(false);
     auto sendDropdown =
         Dropdown(_sendBusLabels())
             ->setOnSelectionChanged([this, idx](int optIdx,
@@ -2380,12 +2694,31 @@ public:
       w->hasBackground = true;
     });
 
-    auto volPtButton = Button("+Vol pt", [this, idx] {
-                         _addVolumeAutomationPointAtPlayhead(idx);
-                       })->setHeight(20);
-    volPtButton->fontSize = 10; // ButtonWidget has no setFontSize() chain
-                                // method — fontSize is a plain field on
-                                // the base Widget, set it directly.
+    auto autoParamDropdown =
+        Dropdown({"Volume", "Pan"})
+            ->setWidth(80)
+            ->setOnSelectionChanged(
+                [this, idx](int optIdx, const std::string &) {
+                  _timeline.tracks[idx].automationDisplayParam =
+                      (optIdx == 1) ? AutomationParam::TrackPan
+                                    : AutomationParam::TrackVolume;
+                  if (_timelineCanvas)
+                    _timelineCanvas->redraw();
+                });
+
+    auto autoLaneToggle =
+        Toggle("Lane")
+            ->setValue(_timelineAutoLaneVisibleState[idx])
+            ->setOnToggleChanged([this, idx](bool v) {
+              _timeline.tracks[idx].automationVisible = v;
+              // Lane visibility changes each track's total height, so the
+              // canvas has to be resized, same as adding/removing a track.
+              if (_timelineCanvas) {
+                _timelineCanvas->setCanvasSize(_timelineCanvasWidthPx(),
+                                               _timelineCanvasHeightPx());
+                _timelineCanvas->redraw();
+              }
+            });
 
     auto strip =
         Column({
@@ -2427,7 +2760,7 @@ public:
                        ->setGap(4),
                    Text("Send")->setFontSize(10),
                    sendDropdown,
-                   volPtButton,
+                   Row({autoParamDropdown, autoLaneToggle})->setGap(4),
                })
             ->setGap(4)
             ->setWidth(90)
@@ -2447,6 +2780,7 @@ public:
     _timelineMuteState.clear();
     _timelineSoloState.clear();
     _timelinePeakState.clear();
+    _timelineAutoLaneVisibleState.clear();
     _sendDropdowns.clear();
     if (_mixerStripsRow)
       _mixerStripsRow->children.clear();
@@ -2456,25 +2790,45 @@ public:
       _mixerStripsRow->markNeedsLayout();
   }
 
-  // Minimal automation authoring: captures the current playhead beat and
-  // this strip's current fader value as a point on that track's volume
-  // lane (creating the lane on first use). A visual lane editor on
-  // TimelineSurface is the natural follow-up; this unblocks "automation
-  // exists and is audible" without it.
-  void _addVolumeAutomationPointAtPlayhead(size_t idx) {
-    TimelineTrack &tt = _timeline.tracks[idx];
+  AutomationLane *_findAutomationLane(int trackIndex, AutomationParam param) {
+    if (trackIndex < 0 || trackIndex >= (int)_timeline.tracks.size())
+      return nullptr;
+    for (auto &l : _timeline.tracks[trackIndex].automationLanes)
+      if (l.param == param)
+        return &l;
+    return nullptr;
+  }
+
+  static void _automationRange(AutomationParam p, float &lo, float &hi) {
+    if (p == AutomationParam::TrackVolume) {
+      lo = 0.f;
+      hi = 1.5f;
+    } else {
+      lo = -1.f;
+      hi = 1.f;
+    }
+  }
+
+  // Click-to-add from TimelineSurface. Creates the lane on first use, same
+  // sorted-insert-or-replace-at-exact-beat logic the old playhead button
+  // used. Undo-tracked (unlike the old button, which explicitly wasn't) —
+  // clicking a specific point on the timeline is a deliberate, discrete
+  // edit in a way that isn't true of rapid slider iteration.
+  void _timelineAutomationPointAdd(int trackIndex, AutomationParam param,
+                                   double beat, float value) {
+    if (trackIndex < 0 || trackIndex >= (int)_timeline.tracks.size())
+      return;
+    TimelineTrack &tt = _timeline.tracks[trackIndex];
     AutomationLane *lane = nullptr;
     for (auto &l : tt.automationLanes)
-      if (l.param == AutomationParam::TrackVolume) {
+      if (l.param == param) {
         lane = &l;
         break;
       }
     if (!lane) {
-      tt.automationLanes.push_back({AutomationParam::TrackVolume, {}, true});
+      tt.automationLanes.push_back({param, {}, true});
       lane = &tt.automationLanes.back();
     }
-    double beat = _timelineScheduler->playheadBeats();
-    float value = (float)_timelineVolumeState[idx].get();
 
     AutomationPoint pt{beat, value};
     auto it = std::lower_bound(
@@ -2482,13 +2836,150 @@ public:
         [](const AutomationPoint &a, const AutomationPoint &b) {
           return a.beat < b.beat;
         });
-    if (it != lane->points.end() && it->beat == beat)
-      it->value = value; // replace a point at the exact same beat
+    size_t insertIdx = (size_t)(it - lane->points.begin());
+    bool replaced = (it != lane->points.end() && it->beat == beat);
+    AutomationPoint oldPt = replaced ? *it : AutomationPoint{};
+    if (replaced)
+      it->value = value;
     else
       lane->points.insert(it, pt);
 
-    // Not undo-tracked — same "feel" reasoning as pattern swing/subdiv:
-    // this is an authoring action the user iterates on rapidly by ear.
+    if (_timelineCanvas)
+      _timelineCanvas->redraw();
+
+    _undoStack.push(
+        [this, trackIndex, param, insertIdx, replaced, oldPt] {
+          AutomationLane *l = _findAutomationLane(trackIndex, param);
+          if (!l || insertIdx >= l->points.size())
+            return;
+          if (replaced)
+            l->points[insertIdx] = oldPt;
+          else
+            l->points.erase(l->points.begin() + insertIdx);
+          if (_timelineCanvas)
+            _timelineCanvas->redraw();
+        },
+        [this, trackIndex, param, insertIdx, replaced, pt] {
+          AutomationLane *l = _findAutomationLane(trackIndex, param);
+          if (!l)
+            return;
+          if (replaced && insertIdx < l->points.size())
+            l->points[insertIdx] = pt;
+          else
+            l->points.insert(
+                l->points.begin() + std::min(insertIdx, l->points.size()), pt);
+          if (_timelineCanvas)
+            _timelineCanvas->redraw();
+        });
+  }
+
+  float _autoDragOldValue = 0.f; // scratch, mirrors _fadeDragOldValue
+
+  void _timelineAutomationPointDragStart(int trackIndex, AutomationParam param,
+                                         int pointIndex) {
+    AutomationLane *lane = _findAutomationLane(trackIndex, param);
+    if (!lane || pointIndex < 0 || pointIndex >= (int)lane->points.size())
+      return;
+    _autoDragOldValue = lane->points[pointIndex].value;
+  }
+
+  // Live-apply during drag — no undo push, same as _timelineSetFadeCore.
+  // Deliberately left unclamped: TimelineSurface lets a dragged point
+  // stray outside [lo, hi] as a "let go to delete" affordance, so the
+  // underlying value has to be able to reflect that transiently.
+  void _timelineAutomationPointDragCore(int trackIndex, AutomationParam param,
+                                        int pointIndex, float value) {
+    AutomationLane *lane = _findAutomationLane(trackIndex, param);
+    if (!lane || pointIndex < 0 || pointIndex >= (int)lane->points.size())
+      return;
+    lane->points[pointIndex].value = value;
+    if (_timelineCanvas)
+      _timelineCanvas->redraw();
+  }
+
+  // `beat` (not `pointIndex`) is used as the identity key inside the undo/
+  // redo lambdas below — indices shift if other points get added/removed
+  // between now and an eventual undo, but a point's beat never changes
+  // once placed (see the note on TimelineSurface's drag lifecycle), so
+  // it's the stable handle. Same best-effort tradeoff the rest of this
+  // file's undo entries make (e.g. duplicatePattern's redo comment).
+  void _timelineAutomationPointDragEnd(int trackIndex, AutomationParam param,
+                                       int pointIndex, bool deleted) {
+    AutomationLane *lane = _findAutomationLane(trackIndex, param);
+    if (!lane || pointIndex < 0 || pointIndex >= (int)lane->points.size())
+      return;
+
+    double beat = lane->points[pointIndex].beat;
+    float oldValue = _autoDragOldValue;
+
+    if (deleted) {
+      AutomationPoint removed = lane->points[pointIndex];
+      lane->points.erase(lane->points.begin() + pointIndex);
+      if (_timelineCanvas)
+        _timelineCanvas->redraw();
+
+      _undoStack.push(
+          [this, trackIndex, param, pointIndex, removed] {
+            AutomationLane *l = _findAutomationLane(trackIndex, param);
+            if (!l)
+              return;
+            size_t idx = std::min((size_t)pointIndex, l->points.size());
+            l->points.insert(l->points.begin() + idx, removed);
+            if (_timelineCanvas)
+              _timelineCanvas->redraw();
+          },
+          [this, trackIndex, param, beat] {
+            AutomationLane *l = _findAutomationLane(trackIndex, param);
+            if (!l)
+              return;
+            for (size_t i = 0; i < l->points.size(); i++)
+              if (l->points[i].beat == beat) {
+                l->points.erase(l->points.begin() + i);
+                break;
+              }
+            if (_timelineCanvas)
+              _timelineCanvas->redraw();
+          });
+      return;
+    }
+
+    // Clamp the committed value back into range — only the live drag is
+    // allowed to stray outside [lo, hi].
+    float lo, hi;
+    _automationRange(param, lo, hi);
+    float newValue = std::max(lo, std::min(hi, lane->points[pointIndex].value));
+    lane->points[pointIndex].value = newValue;
+    if (_timelineCanvas)
+      _timelineCanvas->redraw();
+
+    if (oldValue == newValue)
+      return; // a click with no real movement — no-op, no undo entry
+
+    _undoStack.push(
+        [this, trackIndex, param, beat, oldValue] {
+          AutomationLane *l = _findAutomationLane(trackIndex, param);
+          if (!l)
+            return;
+          for (auto &p : l->points)
+            if (p.beat == beat) {
+              p.value = oldValue;
+              break;
+            }
+          if (_timelineCanvas)
+            _timelineCanvas->redraw();
+        },
+        [this, trackIndex, param, beat, newValue] {
+          AutomationLane *l = _findAutomationLane(trackIndex, param);
+          if (!l)
+            return;
+          for (auto &p : l->points)
+            if (p.beat == beat) {
+              p.value = newValue;
+              break;
+            }
+          if (_timelineCanvas)
+            _timelineCanvas->redraw();
+        });
   }
 
   void _timelineAddClipAt(int trackIndex, double beat) {
@@ -3590,6 +4081,23 @@ public:
       _timelineSurface->onTrimDragEnd = [this](ClipID id, bool isLeft) {
         _timelineTrimDragEnd(id, isLeft);
       };
+
+      _timelineSurface->onAutomationPointAdd =
+          [this](int ti, AutomationParam p, double beat, float value) {
+            _timelineAutomationPointAdd(ti, p, beat, value);
+          };
+      _timelineSurface->onAutomationPointDragStart =
+          [this](int ti, AutomationParam p, int idx) {
+            _timelineAutomationPointDragStart(ti, p, idx);
+          };
+      _timelineSurface->onAutomationPointDrag =
+          [this](int ti, AutomationParam p, int idx, float value) {
+            _timelineAutomationPointDragCore(ti, p, idx, value);
+          };
+      _timelineSurface->onAutomationPointDragEnd =
+          [this](int ti, AutomationParam p, int idx, bool deleted) {
+            _timelineAutomationPointDragEnd(ti, p, idx, deleted);
+          };
     }
 
     if (!_mixerStripsRow) {
