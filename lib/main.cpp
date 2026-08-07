@@ -630,6 +630,11 @@ struct Timeline {
 class TimelineScheduler {
 public:
   static constexpr int kPPQ = 96;
+  // Matches the ~25ms cadence tick() is actually driven at (see
+  // SequencerApp's setInterval(25, ...)). Each automation poll
+  // schedules a ramp covering the gap until the next one, so playback
+  // hears a smooth interpolation instead of a stair-step.
+  static constexpr double kAutomationPollSeconds = 0.025;
 
   Timeline &timeline;
   bool playing = false;
@@ -907,6 +912,12 @@ private:
 
   void _updateAutomation() {
     double posBeats = playheadBeats();
+    auto &engine = AudioEngine::get();
+    uint64_t now = engine.currentSampleTime();
+    uint64_t rampFrames = std::max<uint64_t>(
+        1, (uint64_t)((double)engine.sampleRate() * kAutomationPollSeconds));
+    uint64_t endFrame = now + rampFrames;
+
     for (auto &track : timeline.tracks) {
       if (track.engineTrack == kInvalidTrack)
         continue;
@@ -915,9 +926,9 @@ private:
           continue;
         float v = _evaluateLane(lane, posBeats);
         if (lane.param == AutomationParam::TrackVolume)
-          AudioEngine::get().setTrackGain(track.engineTrack, v);
+          engine.rampTrackGain(track.engineTrack, v, now, endFrame);
         else
-          AudioEngine::get().setTrackPan(track.engineTrack, v);
+          engine.rampTrackPan(track.engineTrack, v, now, endFrame);
       }
     }
   }
@@ -2143,6 +2154,18 @@ class SequencerApp : public Widget {
   std::vector<std::shared_ptr<DropdownWidget>> _sendDropdowns;
   std::shared_ptr<Widget> _mixerStripsRow; // built once, children appended
 
+  // Mirrors each channel strip's send-dropdown selection so it can be
+  // programmatically restored on project load (Dropdown needs a bound
+  // State to move selection from code, same as _dropdownIndexState
+  // does for the pattern dropdown).
+  std::vector<State<int>> _timelineSendIndexState;
+
+  // ── Aux bus RETURN strips (Phase 4 completion) ──────────────────────
+  std::vector<State<double>> _auxBusVolumeState;
+  std::vector<State<double>> _auxBusPeakState;
+  std::shared_ptr<Widget> _auxBusStripsRow;
+
+
   std::vector<BusID> _auxBuses;
   std::vector<std::string> _auxBusNames;
 
@@ -2662,10 +2685,14 @@ public:
     _timelineSoloState.emplace_back(false);
     _timelinePeakState.emplace_back(0.0);
     _timelineAutoLaneVisibleState.emplace_back(false);
+    _timelineSendIndexState.emplace_back(0);
+
     auto sendDropdown =
         Dropdown(_sendBusLabels())
+        ->setSelectedIndex(_timelineSendIndexState[idx])
             ->setOnSelectionChanged([this, idx](int optIdx,
                                                 const std::string &) {
+                                                  _timelineSendIndexState[idx].set(optIdx);
               BusID bus = (optIdx <= 0 || optIdx - 1 >= (int)_auxBuses.size())
                               ? kMasterBus
                               : _auxBuses[optIdx - 1];
@@ -2781,6 +2808,7 @@ public:
     _timelineSoloState.clear();
     _timelinePeakState.clear();
     _timelineAutoLaneVisibleState.clear();
+    _timelineSendIndexState.clear();
     _sendDropdowns.clear();
     if (_mixerStripsRow)
       _mixerStripsRow->children.clear();
@@ -2789,6 +2817,59 @@ public:
     if (_mixerStripsRow)
       _mixerStripsRow->markNeedsLayout();
   }
+
+
+  // Bus RETURN channel strip — name, meter, and a volume fader feeding
+  // AudioEngine::setBusGain(). Aux buses in this model always send to
+  // master, so unlike a track strip there's no send dropdown here.
+  void _appendAuxBusStrip(size_t idx) {
+    _auxBusVolumeState.emplace_back(1.0);
+    _auxBusPeakState.emplace_back(0.0);
+
+    auto meter = Box({})
+                     ->setWidth(14)
+                     ->setHeight(56)
+                     ->setBorderRadius(2)
+                     ->setBackgroundColor(Color::fromRGB(90, 220, 60));
+    _auxBusPeakState[idx].bindProperty(meter, [](Widget *w, const double &v) {
+      int g = (int)std::min(220.0, 90 + 160 * v);
+      int r = (int)std::min(230.0, 40 + 200 * std::max(0.0, v - 0.7));
+      w->backgroundColor = Color::fromRGB(r, g, 60);
+      w->hasBackground = true;
+    });
+
+    BusID busId = _auxBuses[idx];
+    auto strip =
+        Column({
+                   Text(_auxBusNames[idx])->setFontSize(11)->setWidth(80),
+                   meter,
+                   Slider(0.0, 1.5, 0.01)
+                       ->setValue(_auxBusVolumeState[idx])
+                       ->setWidth(80)
+                       ->setOnValueChanged([busId](double v) {
+                         AudioEngine::get().setBusGain(busId, (float)v);
+                       }),
+               })
+            ->setGap(4)
+            ->setWidth(90)
+            ->setPadding(6)
+            ->setBackgroundColor(Color::fromRGB(232, 240, 236))
+            ->setBorderRadius(6);
+
+    _auxBusStripsRow->addChild(strip);
+  }
+
+  void _rebuildAuxBusStrips() {
+    _auxBusVolumeState.clear();
+    _auxBusPeakState.clear();
+    if (_auxBusStripsRow)
+      _auxBusStripsRow->children.clear();
+    for (size_t i = 0; i < _auxBuses.size(); i++)
+      _appendAuxBusStrip(i);
+    if (_auxBusStripsRow)
+      _auxBusStripsRow->markNeedsLayout();
+  }
+
 
   AutomationLane *_findAutomationLane(int trackIndex, AutomationParam param) {
     if (trackIndex < 0 || trackIndex >= (int)_timeline.tracks.size())
@@ -3418,9 +3499,19 @@ public:
     out << "  \"timelineTracks\": [\n";
     for (size_t ti = 0; ti < _timeline.tracks.size(); ti++) {
       const TimelineTrack &tt = _timeline.tracks[ti];
+      BusID sendBus = AudioEngine::get().getTrackSendBus(tt.engineTrack);
+      int sendIndex = 0;
+      for (size_t bi = 0; bi < _auxBuses.size(); bi++)
+        if (_auxBuses[bi] == sendBus) {
+          sendIndex = (int)bi + 1;
+          break;
+        }
       out << "    {\"id\":" << tt.id << ",\"name\":\"" << SeqJson::esc(tt.name)
           << "\",\"muted\":" << (tt.muted ? "true" : "false")
-          << ",\"soloed\":" << (tt.soloed ? "true" : "false") << ",\"clips\":[";
+          << ",\"soloed\":" << (tt.soloed ? "true" : "false")
+          << ",\"gain\":" << AudioEngine::get().getTrackGain(tt.engineTrack)
+          << ",\"pan\":" << AudioEngine::get().getTrackPan(tt.engineTrack)
+          << ",\"sendIndex\":" << sendIndex << ",\"clips\":[";
       for (size_t ci = 0; ci < tt.clips.size(); ci++) {
         const Clip &c = tt.clips[ci];
         out << "{\"id\":" << c.id << ",\"type\":" << (int)c.type
@@ -3434,6 +3525,13 @@ public:
             << (ci + 1 < tt.clips.size() ? "," : "");
       }
       out << "]}" << (ti + 1 < _timeline.tracks.size() ? "," : "") << "\n";
+    }
+    out << "  ],\n";
+    out << "  \"auxBuses\": [\n";
+    for (size_t i = 0; i < _auxBuses.size(); i++) {
+      out << "    {\"name\":\"" << SeqJson::esc(_auxBusNames[i])
+          << "\",\"gain\":" << AudioEngine::get().getBusGain(_auxBuses[i])
+          << "}" << (i + 1 < _auxBuses.size() ? "," : "") << "\n";
     }
     out << "  ]\n}\n";
     std::ofstream f(path, std::ios::binary);
@@ -3575,6 +3673,7 @@ public:
 
     uint64_t maxClipId = 0;
     uint32_t maxTimelineTrackId = 0;
+    std::vector<int> loadedSendIndex;
     for (const auto &ttj : root["timelineTracks"].arr) {
       TimelineTrack tt;
       tt.id = (TimelineTrackID)ttj["id"].asInt(0);
@@ -3586,6 +3685,12 @@ public:
                                                          // routing, same
                                                          // as _addTimelineTrack
       maxTimelineTrackId = std::max(maxTimelineTrackId, (uint32_t)tt.id);
+    
+      AudioEngine::get().setTrackGain(tt.engineTrack,
+                                      (float)ttj["gain"].asDouble(1.0));
+      AudioEngine::get().setTrackPan(tt.engineTrack,
+                                     (float)ttj["pan"].asDouble(0.0));
+      loadedSendIndex.push_back(ttj["sendIndex"].asInt(0));
 
       for (const auto &cj : ttj["clips"].arr) {
         Clip clip;
@@ -3621,7 +3726,45 @@ public:
     }
     _nextClipId = maxClipId + 1;
     _nextTimelineTrackId = maxTimelineTrackId + 1;
+
+    // ── Aux buses ─────────────────────────────────────────────────────
+    // Tear down whatever aux buses were in memory before this load, then
+    // recreate from the file — must happen before track sends are
+    // resolved below, since a saved sendIndex only makes sense against
+    // the new (post-load) _auxBuses list.
+    for (BusID b : _auxBuses)
+      AudioEngine::get().destroyBus(b);
+    _auxBuses.clear();
+    _auxBusNames.clear();
+    std::vector<double> loadedAuxGains;
+    for (const auto &bj : root["auxBuses"].arr) {
+      BusID b = AudioEngine::get().createBus();
+      if (b == kInvalidBus)
+        break; // pool exhausted — rest of the file's buses are dropped
+      double gain = bj["gain"].asDouble(1.0);
+      AudioEngine::get().setBusGain(b, (float)gain);
+      _auxBuses.push_back(b);
+      _auxBusNames.push_back(
+          bj["name"].asString("Aux " + std::to_string(_auxBuses.size())));
+      loadedAuxGains.push_back(gain);
+    }
+    _rebuildAuxBusStrips();
+    for (size_t i = 0; i < loadedAuxGains.size(); i++)
+      _auxBusVolumeState[i].set(loadedAuxGains[i]);
+
     _rebuildMixerStrips();
+    for (size_t i = 0; i < _timeline.tracks.size(); i++) {
+      TrackID et = _timeline.tracks[i].engineTrack;
+      _timelineVolumeState[i].set((double)AudioEngine::get().getTrackGain(et));
+      _timelinePanState[i].set((double)AudioEngine::get().getTrackPan(et));
+
+      int sendIdx = (i < loadedSendIndex.size()) ? loadedSendIndex[i] : 0;
+      BusID bus = (sendIdx <= 0 || sendIdx - 1 >= (int)_auxBuses.size())
+                      ? kMasterBus
+                      : _auxBuses[sendIdx - 1];
+      AudioEngine::get().setTrackSendBus(et, bus);
+      _timelineSendIndexState[i].set(sendIdx);
+    }
     _selectedClipId = 0;
     if (_timelineSurface)
       _timelineSurface->selectedClip = 0;
@@ -4110,6 +4253,12 @@ public:
         _appendChannelStrip(i);
     }
 
+    if (!_auxBusStripsRow) {
+      _auxBusStripsRow = Row({})->setGap(8)->setAlignItems(AlignItems::Start);
+      for (size_t i = 0; i < _auxBuses.size(); i++)
+        _appendAuxBusStrip(i);
+    }
+
     auto mixerSection =
         Column({
                    Row({
@@ -4128,11 +4277,17 @@ public:
                                         std::to_string(_auxBuses.size()));
                                     for (auto &dd : _sendDropdowns)
                                       dd->setOptions(_sendBusLabels());
+                                      _appendAuxBusStrip(_auxBuses.size() - 1);
                                   }),
                        })
                        ->setGap(12)
                        ->setAlignItems(AlignItems::Center),
                    _mixerStripsRow,
+                   Text("Aux Returns")
+                       ->setFontSize(12)
+                       ->setFontWeight(FontWeight::Bold),
+                   _auxBusStripsRow,
+
                })
             ->setGap(8);
 
@@ -4256,6 +4411,9 @@ public:
           _timelinePeakState[i].set(AudioEngine::get().getTrackPeakLevel(
               _timeline.tracks[i].engineTrack));
         }
+        for (size_t i = 0; i < _auxBuses.size(); i++)
+          _auxBusPeakState[i].set(
+              AudioEngine::get().getBusPeakLevel(_auxBuses[i]));
       });
     }
 

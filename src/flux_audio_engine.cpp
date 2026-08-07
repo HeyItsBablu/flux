@@ -121,13 +121,30 @@ struct Voice {
 struct Track {
   std::atomic<bool> active{false};
   std::atomic<float> gain{1.f};
-  std::atomic<float> pan{0.f}; // reserved for a future per-track pan-law stage;
-                               // not yet applied in mix()
+  std::atomic<float> pan{0.f}; // equal-power pan law, applied per-sample
+                               // in mix() step 2 below.
   std::atomic<bool> muted{false};
   std::atomic<bool> soloed{false};
   std::atomic<BusID> sendBus{kMasterBus};
   std::atomic<float> peakLevel{0.f}; // audio-thread-written, UI-thread-read
   std::vector<float> buffer; // audio-thread-only; sized once at init()
+
+ // ── Sample-accurate gain/pan ramps (audio-thread-only) ────────────────
+ // Set by applyCommand() on RampTrackGain/RampTrackPan, consumed
+ // per-sample in mix() step 2. `gain`/`pan` above always hold the most
+ // recently *reached* value (updated at the end of every mix() block)
+ // so a new ramp — or a plain instant setTrackGain/Pan from the UI
+ // thread — always starts from a correct point, not a stale one.
+ bool gainRampActive = false;
+ float gainRampStart = 1.f;
+ float gainRampTarget = 1.f;
+ uint64_t gainRampStartFrame = 0;
+ uint64_t gainRampEndFrame = 0;
+ bool panRampActive = false;
+ float panRampStart = 0.f;
+ float panRampTarget = 0.f;
+ uint64_t panRampStartFrame = 0;
+ uint64_t panRampEndFrame = 0;
 };
 
 struct Bus {
@@ -152,6 +169,9 @@ enum class CmdType : uint8_t {
   SetMasterVolume,
   PauseVoice,
   ResumeVoice,
+  RampTrackGain,
+  RampTrackPan,
+
 };
 
 struct Command {
@@ -170,6 +190,14 @@ struct Command {
   uint64_t targetFrame = 0;
   float pitchArg = 1.f;             // pitchRatio, only used by StartVoice
   TrackID trackArg = kInvalidTrack; // only used by StartVoice/StartStreamVoice
+
+  // Only used by RampTrackGain/RampTrackPan — absolute engine
+  // sample-time bounds of the ramp itself. Distinct from targetFrame
+  // (which stays 0/"apply ASAP" for these commands): targetFrame
+  // governs when applyCommand() *registers* the ramp, these govern
+  // when the ramp actually starts/finishes interpolating.
+  uint64_t rampStartFrame = 0;
+  uint64_t rampEndFrame = 0;
 };
 
 class SpscCommandQueue {
@@ -584,6 +612,10 @@ struct AudioEngine::Impl {
     }
 
     // 2) Tracks -> their send bus (mute/solo applied here).
+    // Sample-accurate per-frame so gain/pan ramps from automation lanes
+    // (RampTrackGain/RampTrackPan) interpolate smoothly instead of
+    // stepping once per block. Pan is now genuinely applied here too —
+    // previously the field was stored but never mixed in.
     for (auto &t : tracks) {
       if (!t.active.load(std::memory_order_relaxed))
         continue;
@@ -601,11 +633,65 @@ struct AudioEngine::Impl {
       if (!dest.active.load(std::memory_order_relaxed))
         continue;
 
-      float g = t.gain.load(std::memory_order_relaxed);
-      for (size_t i = 0; i < n; i++)
-        dest.buffer[i] += t.buffer[i] * g;
+      float lastGain = t.gain.load(std::memory_order_relaxed);
+      float lastPan = t.pan.load(std::memory_order_relaxed);
 
-      // printf("track active=%d muted=%d gain=%f sendBus=%u\n", t.active.load(), t.muted.load(), g, sendId);
+      for (ma_uint32 f = 0; f < mixFrames; f++) {
+        uint64_t frameTime = blockStart + f;
+
+        float g = lastGain;
+        if (t.gainRampActive) {
+          if (frameTime >= t.gainRampEndFrame) {
+            g = t.gainRampTarget;
+          } else if (frameTime <= t.gainRampStartFrame ||
+                     t.gainRampEndFrame <= t.gainRampStartFrame) {
+            g = t.gainRampStart;
+          } else {
+            double frac = double(frameTime - t.gainRampStartFrame) /
+                         double(t.gainRampEndFrame - t.gainRampStartFrame);
+            g = t.gainRampStart +
+                (t.gainRampTarget - t.gainRampStart) * (float)frac;
+          }
+        }
+
+        float p = lastPan;
+        if (t.panRampActive) {
+          if (frameTime >= t.panRampEndFrame) {
+            p = t.panRampTarget;
+          } else if (frameTime <= t.panRampStartFrame ||
+                     t.panRampEndFrame <= t.panRampStartFrame) {
+            p = t.panRampStart;
+          } else {
+            double frac = double(frameTime - t.panRampStartFrame) /
+                         double(t.panRampEndFrame - t.panRampStartFrame);
+            p = t.panRampStart + (t.panRampTarget - t.panRampStart) * (float)frac;
+          }
+        }
+
+        lastGain = g;
+        lastPan = p;
+
+        float panClamped = std::max(-1.f, std::min(1.f, p));
+        float angle = (panClamped + 1.f) * 0.25f * 3.14159265f; // 0..pi/2
+        float gL = std::cos(angle) * g;
+        float gR = std::sin(angle) * g;
+
+        dest.buffer[f * channels + 0] += t.buffer[f * channels + 0] * gL;
+        if (channels > 1)
+          dest.buffer[f * channels + 1] += t.buffer[f * channels + 1] * gR;
+      }
+
+      // Ramps that completed within this block are done; latch the
+      // reached value so the next block — or the next ramp/instant
+      // set's start-point read — sees the settled value, not a stale
+      // target.
+      if (t.gainRampActive && blockStart + mixFrames >= t.gainRampEndFrame)
+        t.gainRampActive = false;
+      if (t.panRampActive && blockStart + mixFrames >= t.panRampEndFrame)
+        t.panRampActive = false;
+      t.gain.store(lastGain, std::memory_order_relaxed);
+      t.pan.store(lastPan, std::memory_order_relaxed);
+
     }
 
     // 3) Aux buses -> their send bus. Slot 0 is master (terminal, never
@@ -661,6 +747,27 @@ struct AudioEngine::Impl {
       masterVolume.store(cmd.floatArg, std::memory_order_relaxed);
       return;
     }
+    if (cmd.type == CmdType::RampTrackGain ||
+        cmd.type == CmdType::RampTrackPan) {
+      if (cmd.trackArg != kInvalidTrack && cmd.trackArg <= kMaxTracks) {
+        Track &vt = tracks[cmd.trackArg - 1];
+        if (cmd.type == CmdType::RampTrackGain) {
+          vt.gainRampStart = vt.gain.load(std::memory_order_relaxed);
+          vt.gainRampTarget = cmd.floatArg;
+          vt.gainRampStartFrame = cmd.rampStartFrame;
+          vt.gainRampEndFrame = cmd.rampEndFrame;
+          vt.gainRampActive = true;
+        } else {
+          vt.panRampStart = vt.pan.load(std::memory_order_relaxed);
+          vt.panRampTarget = cmd.floatArg;
+          vt.panRampStartFrame = cmd.rampStartFrame;
+          vt.panRampEndFrame = cmd.rampEndFrame;
+          vt.panRampActive = true;
+        }
+      }
+      return;
+    }
+
 
     if (cmd.slot >= voices.size())
       return;
@@ -1138,6 +1245,11 @@ TrackID AudioEngine::createTrack() {
     t.soloed.store(false, std::memory_order_relaxed);
     t.sendBus.store(kMasterBus, std::memory_order_relaxed);
     t.peakLevel.store(0.f, std::memory_order_relaxed);
+    // Ramp state is audio-thread-only and only ever touched while
+    // active is true, so resetting plain (non-atomic) fields here,
+    // before publish, is safe.
+    t.gainRampActive = false;
+    t.panRampActive = false;
     t.active.store(true, std::memory_order_release);
     return (TrackID)(i + 1);
   }
@@ -1184,6 +1296,58 @@ void AudioEngine::setTrackSendBus(TrackID t, BusID bus) {
     bus = kMasterBus;
   m_impl->tracks[t - 1].sendBus.store(bus, std::memory_order_relaxed);
 }
+
+
+void AudioEngine::rampTrackGain(TrackID t, float target, uint64_t startFrame,
+                                uint64_t endFrame) {
+  if (t == kInvalidTrack || t > Impl::kMaxTracks)
+    return;
+  Command cmd;
+  cmd.type = CmdType::RampTrackGain;
+  cmd.trackArg = t;
+  cmd.floatArg = target;
+  cmd.rampStartFrame = startFrame;
+  cmd.rampEndFrame = std::max(startFrame, endFrame);
+  m_impl->commands.push(std::move(cmd));
+}
+
+void AudioEngine::rampTrackPan(TrackID t, float target, uint64_t startFrame,
+                               uint64_t endFrame) {
+  if (t == kInvalidTrack || t > Impl::kMaxTracks)
+    return;
+  Command cmd;
+  cmd.type = CmdType::RampTrackPan;
+  cmd.trackArg = t;
+  cmd.floatArg = target;
+  cmd.rampStartFrame = startFrame;
+  cmd.rampEndFrame = std::max(startFrame, endFrame);
+  m_impl->commands.push(std::move(cmd));
+}
+
+float AudioEngine::getTrackGain(TrackID t) const {
+  if (t == kInvalidTrack || t > Impl::kMaxTracks)
+    return 1.f;
+  return m_impl->tracks[t - 1].gain.load(std::memory_order_relaxed);
+}
+
+float AudioEngine::getTrackPan(TrackID t) const {
+  if (t == kInvalidTrack || t > Impl::kMaxTracks)
+    return 0.f;
+  return m_impl->tracks[t - 1].pan.load(std::memory_order_relaxed);
+}
+
+BusID AudioEngine::getTrackSendBus(TrackID t) const {
+  if (t == kInvalidTrack || t > Impl::kMaxTracks)
+    return kMasterBus;
+  return m_impl->tracks[t - 1].sendBus.load(std::memory_order_relaxed);
+}
+
+float AudioEngine::getBusGain(BusID b) const {
+  if (b == kInvalidBus || b > Impl::kMaxBuses)
+    return 1.f;
+  return m_impl->buses[b - 1].gain.load(std::memory_order_relaxed);
+}
+
 
 BusID AudioEngine::createBus() {
   // Slot 0 (id 1) is permanently reserved for kMasterBus — scan starts at 1.

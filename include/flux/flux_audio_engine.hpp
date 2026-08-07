@@ -163,6 +163,29 @@ public:
   void setTrackSolo(TrackID t, bool soloed);
   void setTrackSendBus(TrackID t, BusID bus); // default: kMasterBus
 
+  // Sample-accurate linear ramp of a track's gain/pan from its current
+  // value to `target`, interpolated per-sample between startFrame and
+  // endFrame (both in currentSampleTime() space). Used by automation
+  // lanes so playback doesn't hear a ~25ms staircase between polls —
+  // each poll schedules a ramp covering the interval until the next
+  // one. A ramp already in progress is replaced: the new ramp starts
+  // from wherever the old one had interpolated to, not from a stale
+  // target. endFrame <= startFrame degenerates to an immediate set,
+  // same as setTrackGain/setTrackPan.
+  void rampTrackGain(TrackID t, float target, uint64_t startFrame,
+                     uint64_t endFrame);
+  void rampTrackPan(TrackID t, float target, uint64_t startFrame,
+                    uint64_t endFrame);
+
+  // Current settled value — reflects the most recently reached point
+  // of any ramp, or the last instant set. Used by project save so a
+  // mixer strip's gain/pan round-trips even though the UI-side State
+  // isn't the source of truth (the engine is).
+  float getTrackGain(TrackID t) const;
+  float getTrackPan(TrackID t) const;
+  BusID getTrackSendBus(TrackID t) const;
+  float getBusGain(BusID b) const;
+
   BusID createBus();        // kInvalidBus if the pool is full
   void destroyBus(BusID b); // no-op on kMasterBus
   void setBusGain(BusID b, float gain);
