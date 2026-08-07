@@ -31,6 +31,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <vector>
 
 using SampleID = uint32_t;
 using VoiceHandle = uint64_t;
@@ -68,6 +69,19 @@ public:
 
   float getSampleDurationSeconds(SampleID id) const;
   bool isSampleValid(SampleID id) const;
+
+  // Lightweight peak-per-bucket waveform summary for UI display (e.g. a
+  // timeline clip's waveform preview). One value per bucket, 0..1 — the
+  // max absolute sample magnitude within that bucket, downmixed across
+  // channels for peak purposes only (playback itself is unaffected and
+  // stays fully multi-channel). Computed once at load time and cached —
+  // see DecodedSample::peaksHiRes in flux_audio_engine.cpp — so repeated
+  // calls (e.g. once per canvas redraw) are cheap regardless of file
+  // size. maxBuckets is a ceiling, not exact: very short samples, or a
+  // request larger than the cached resolution, may return fewer.
+  // Returns an empty vector if id is invalid.
+  std::vector<float> getSamplePeaks(SampleID id, int maxBuckets = 256) const;
+
 
   // ── Voices ────────────────────────────────────────────────────────────────
   // Every call to play() is an independent, overlappable voice — calling it

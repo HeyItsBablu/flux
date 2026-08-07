@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <string>
+
 #include <vector>
 
 #include <cctype>
@@ -595,7 +596,8 @@ class TimelineScheduler {
 public:
   static constexpr int kPPQ = 96;
 
-  Timeline timeline;
+ 
+  Timeline &timeline;
   bool playing = false;
   int64_t currentPulse = 0;
 
@@ -604,7 +606,7 @@ public:
   // than duplicating them — patterns are shared data between the classic
   // pattern-chain transport and the timeline transport, per the roadmap's
   // "keep the old step-grid behavior working as PatternClip".
-  explicit TimelineScheduler(StepScheduler &seq) : _seq(seq) {}
+  TimelineScheduler(StepScheduler &seq, Timeline &tl) : _seq(seq), timeline(tl) {}
 
   void start() {
     playing = true;
@@ -739,15 +741,14 @@ private:
   // boundaries. Called once per pulse per clip, same cadence as
   // _tickPatternClip — cheap integer comparisons dominate the common case
   // where the playhead isn't at a boundary.
-  void _tickAudioClipBoundary(const TimelineTrack &track, const Clip &clip,
-                              uint64_t targetFrame, bool audible) {
+void _tickAudioClipBoundary(const TimelineTrack &track, const Clip &clip,
+                             uint64_t targetFrame, bool audible) {
     int64_t clipStartPulse = (int64_t)std::llround(clip.startBeat * kPPQ);
     int64_t clipLenPulses = (int64_t)std::llround(clip.lengthBeats * kPPQ);
-    if (clipLenPulses <= 0)
-      return; // degenerate zero/negative-length clip — nothing to play
+    if (clipLenPulses <= 0) return;
 
     int64_t rel = currentPulse - clipStartPulse;
-    if (rel == 0) {
+    if (rel == 0){
       // Known simplification: a track muted/soloed-out at the exact
       // instant a clip would start simply never starts it — unmuting
       // later in the same clip's span doesn't retroactively start
@@ -760,32 +761,27 @@ private:
     }
   }
 
-  void _startAudioClip(const TimelineTrack &track, const Clip &clip,
-                       uint64_t targetFrame) {
-    if (_activeAudioClips.count(clip.id))
-      return; // already sounding — guards against a double-fire
+void _startAudioClip(const TimelineTrack &track, const Clip &clip, uint64_t targetFrame) {
+
+    if (_activeAudioClips.count(clip.id)) return;
 
     auto &engine = AudioEngine::get();
     SampleID sampleId = kInvalidSample;
     auto cacheIt = _audioSampleCache.find(clip.audioFilePath);
     if (cacheIt != _audioSampleCache.end()) {
-      sampleId = cacheIt->second;
+        sampleId = cacheIt->second;
     } else {
-      sampleId = engine.loadSample(clip.audioFilePath);
-      if (sampleId != kInvalidSample)
-        _audioSampleCache[clip.audioFilePath] = sampleId;
+        sampleId = engine.loadSample(clip.audioFilePath);
+        if (sampleId != kInvalidSample)
+            _audioSampleCache[clip.audioFilePath] = sampleId;
     }
-    if (sampleId == kInvalidSample)
-      return; // missing/undecodable file — silently skip, same treatment
-              // as a pattern track's bad instrument sample
+    if (sampleId == kInvalidSample) {
+        return;
+    }
 
-    // Start silent if fading in — _updateAudioClipFades() (called once
-    // per tick(), not per pulse) brings it up to baseGain over
-    // fadeInBeats. Otherwise start at full gain immediately.
     float initialGain = (clip.fadeInBeats > 0.f) ? 0.f : clip.gain;
-    VoiceHandle v = engine.play(sampleId, initialGain, /*pan=*/0.f,
-                                /*loop=*/false, /*pitchRatio=*/1.f, targetFrame,
-                                track.engineTrack);
+    VoiceHandle v = engine.play(sampleId, initialGain, 0.f, false, 1.f, targetFrame, track.engineTrack);
+
     if (v == kInvalidVoice)
       return;
 
@@ -1127,11 +1123,18 @@ inline bool parse(const std::string &text, JVal &out) {
 class TimelineSurface : public RenderSurface {
 public:
   static constexpr float kPxPerBeat = 40.f;
-  static constexpr float kTrackHeight = 56.f;
+  static constexpr float kTrackHeight = 108.f;
 
   // Hit-test radius for grabbing a fade handle — larger than the 4px dot
   // actually drawn, so it's easy to grab without pixel-perfect aim.
   static constexpr float kHandleHitRadius = 8.f;
+
+  // Bars rendered per clip, independent of the clip's current pixel
+  // width — bars just stretch across whatever width the clip occupies,
+  // so a future zoom (kPxPerBeat change) doesn't require re-fetching
+  // peaks at a different resolution.
+  static constexpr int kWaveformBuckets = 128;
+
 
   Timeline *timeline = nullptr;
   StepScheduler *seq = nullptr;           // for pattern name lookups only
@@ -1217,13 +1220,38 @@ public:
         ctx.setTextBaseline(TextBaseline::Top);
         ctx.fillText(label, cx + 6, laneY + 8);
 
-        // Fade ramps + drag handles — AudioClip only, since fadeIn/OutBeats
-        // is only honored in playback for AudioClip today (see
-        // TimelineScheduler::_updateAudioClipFades). Drawn as a diagonal
-        // line from the clip's bottom edge up to full volume at the fade
-        // width, same convention as most DAW timelines, with a small
-        // white dot at the top end that doubles as the drag target.
+        // Waveform preview + fade ramps/handles — AudioClip only.
+        //
+        // Known simplification: the waveform is stretched across the
+        // clip's FULL current width using peaks from the whole decoded
+        // file, regardless of audioStartOffsetSec/lengthBeats — i.e. it
+        // doesn't yet crop to the actually-trimmed region. Once trim
+        // handles exist (next up) this should slice the peaks array to
+        // the trimmed span instead of showing the whole file's shape.
         if (isAudio) {
+
+          const std::vector<float> &peaks = _peaksForClip(clip);
+          if (!peaks.empty()) {
+            float midY = laneY + kTrackHeight * 0.5f;
+            float maxHalfHeight = (kTrackHeight - 12.f) * 0.5f;
+            ctx.setStrokeColor(Color::fromRGB(255, 255, 255));
+            ctx.setLineWidth(1.5f);
+            for (size_t i = 0; i < peaks.size(); i++) {
+              float bx = cx + 1 + (cw - 2) * ((float)i + 0.5f) /
+                                     (float)peaks.size();
+              // sqrt boosts quiet-but-present audio into a visible shape —
+              // linear scaling leaves anything under ~0.3 peak (common for
+              // normally-mastered material) reading as a near-flat line.
+              float visualPeak = std::sqrt(std::max(0.f, peaks[i]));
+              float half = std::max(1.f, visualPeak * maxHalfHeight);
+              ctx.beginPath();
+              ctx.moveTo(bx, midY - half);
+              ctx.lineTo(bx, midY + half);
+              ctx.stroke();
+            }
+          }
+
+
           float top = laneY + 4;
           float bottom = laneY + kTrackHeight - 4;
           float fadeInPx =
@@ -1355,6 +1383,37 @@ public:
 private:
   ClipID _draggingFadeClipId = 0;
   bool _draggingFadeIsIn = false;
+
+  // Waveform preview cache, keyed by file path. Deliberately separate
+  // from TimelineScheduler::_audioSampleCache — different owner,
+  // different lifetime (this only needs to live as long as the canvas
+  // keeps redrawing, not as long as playback does) — even though it
+  // means the same file can end up decoded twice into the engine's
+  // sample bank if both caches want it. Not worth threading a shared
+  // cache across the scheduler/surface boundary just for a read-only
+  // peak lookup.
+  std::unordered_map<std::string, std::vector<float>> _peaksCache;
+
+  const std::vector<float> &_peaksForClip(const Clip &clip) {
+    static const std::vector<float> kEmpty;
+    if (clip.audioFilePath.empty())
+      return kEmpty;
+
+    auto it = _peaksCache.find(clip.audioFilePath);
+    if (it != _peaksCache.end())
+      return it->second;
+
+    auto &engine = AudioEngine::get();
+    SampleID id = engine.loadSample(clip.audioFilePath);
+    std::vector<float> peaks =
+        (id != kInvalidSample) ? engine.getSamplePeaks(id, kWaveformBuckets)
+                               : std::vector<float>{};
+    // Cache even on failure (as an empty vector) so a missing/undecodable
+    // file doesn't retry a doomed loadSample() call on every redraw.
+    return _peaksCache.emplace(clip.audioFilePath, std::move(peaks))
+        .first->second;
+  }
+
 
   static bool _withinHandle(float x, float y, float hx, float hy) {
     float dx = x - hx, dy = y - hy;
@@ -1533,7 +1592,7 @@ public:
     AudioEngine::get().init();
 
     _seq = std::make_shared<StepScheduler>(4);
-    _timelineScheduler = std::make_unique<TimelineScheduler>(*_seq);
+    _timelineScheduler = std::make_unique<TimelineScheduler>(*_seq, _timeline);
     _seq->trackVoice = {
         {110.f, 1.0f, -0.6f}, // low tom-ish
         {220.f, 0.9f, -0.2f},
@@ -2887,10 +2946,15 @@ public:
 
     auto transportRow =
         Row({
-                Button("▶ Play", [this] { _seq->start(); }),
+                Button("▶ Play",
+                       [this] {
+                         _seq->start();
+                         _timelineScheduler->start();
+                       }),
                 Button("■ Stop",
                        [this] {
                          _seq->stop();
+                         _timelineScheduler->stop();
                          _currentStepState.set(-1);
                        }),
                 Text("BPM:"),

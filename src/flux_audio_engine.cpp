@@ -32,7 +32,25 @@ struct DecodedSample {
   uint32_t sampleRate = 0;
   uint64_t frameCount =
       0; // frames, not samples (frame = one sample per channel)
+
+
+  // Precomputed once, right after decode (see Impl::decode()) — one
+  // max-abs peak value per bucket, downmixed across channels, spanning
+  // the sample's full length at a fixed resolution. Exists purely for
+  // AudioEngine::getSamplePeaks() (UI waveform previews); never read by
+  // the audio callback. Computing it once here means a UI redrawing
+  // every frame (e.g. while dragging a fade handle over a clip) never
+  // re-scans raw sample data — getSamplePeaks() just downsamples this
+  // array further if the caller asks for a coarser resolution.
+  std::vector<float> peaksHiRes;
 };
+
+
+// Resolution DecodedSample::peaksHiRes is computed at. High enough that
+// getSamplePeaks() downsampling to any UI-reasonable bucket count (a
+// clip a few hundred px wide) still has plenty of source detail to
+// max-reduce from, without scanning the full sample array per call.
+static constexpr int kPeakCacheBuckets = 512;
 
 // ============================================================================
 // Voice pool
@@ -322,6 +340,28 @@ struct AudioEngine::Impl {
     out->frameCount = framesRead;
     out->interleaved.resize(static_cast<size_t>(framesRead) * cfg.channels);
 
+    // Precompute waveform peaks once, right after decode — see the
+    // comment on DecodedSample::peaksHiRes for why this happens here
+    // rather than lazily on first UI request.
+    if (out->frameCount > 0 && out->channels > 0) {
+      out->peaksHiRes.assign(kPeakCacheBuckets, 0.f);
+      for (int b = 0; b < kPeakCacheBuckets; b++) {
+        uint64_t startFrame =
+            (uint64_t)b * out->frameCount / kPeakCacheBuckets;
+        uint64_t endFrame =
+            std::min(out->frameCount,
+                     (uint64_t)(b + 1) * out->frameCount / kPeakCacheBuckets);
+        float peak = 0.f;
+        for (uint64_t f = startFrame; f < endFrame; f++) {
+          const float *frame = &out->interleaved[f * out->channels];
+          for (uint32_t c = 0; c < out->channels; c++)
+            peak = std::max(peak, std::fabs(frame[c]));
+        }
+        out->peaksHiRes[b] = peak;
+      }
+    }
+
+
     ma_decoder_uninit(&decoder);
     if (outFrameCount)
       *outFrameCount = framesRead;
@@ -535,6 +575,7 @@ struct AudioEngine::Impl {
                   // the send
 
       BusID sendId = t.sendBus.load(std::memory_order_relaxed);
+
       if (sendId == kInvalidBus || sendId > kMaxBuses)
         sendId = kMasterBus;
       Bus &dest = buses[sendId - 1];
@@ -544,6 +585,8 @@ struct AudioEngine::Impl {
       float g = t.gain.load(std::memory_order_relaxed);
       for (size_t i = 0; i < n; i++)
         dest.buffer[i] += t.buffer[i] * g;
+
+      // printf("track active=%d muted=%d gain=%f sendBus=%u\n", t.active.load(), t.muted.load(), g, sendId);
     }
 
     // 3) Aux buses -> their send bus. Slot 0 is master (terminal, never
@@ -803,6 +846,35 @@ bool AudioEngine::isSampleValid(SampleID id) const {
   std::lock_guard<std::mutex> lk(m_impl->bankMutex);
   return m_impl->bank.find(id) != m_impl->bank.end();
 }
+
+std::vector<float> AudioEngine::getSamplePeaks(SampleID id,
+                                               int maxBuckets) const {
+  std::lock_guard<std::mutex> lk(m_impl->bankMutex);
+  auto it = m_impl->bank.find(id);
+  if (it == m_impl->bank.end() || it->second->peaksHiRes.empty())
+    return {};
+
+  const std::vector<float> &hiRes = it->second->peaksHiRes;
+  maxBuckets = std::max(1, maxBuckets);
+  if ((int)hiRes.size() <= maxBuckets)
+    return hiRes; // already at or below the requested resolution
+
+  // Downsample by grouping consecutive hi-res buckets and taking their
+  // max — max (not average) preserves transient peaks a waveform view
+  // exists to show; averaging would just smear them into the noise floor.
+  std::vector<float> out(maxBuckets, 0.f);
+  for (int i = 0; i < maxBuckets; i++) {
+    size_t start = (size_t)i * hiRes.size() / maxBuckets;
+    size_t end =
+        std::min(hiRes.size(), (size_t)(i + 1) * hiRes.size() / maxBuckets);
+    float peak = 0.f;
+    for (size_t j = start; j < end; j++)
+      peak = std::max(peak, hiRes[j]);
+    out[i] = peak;
+  }
+  return out;
+}
+
 
 // ── Voices ─────────────────────────────────────────────────────────────────
 
