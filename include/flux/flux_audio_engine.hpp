@@ -170,6 +170,18 @@ public:
   setBusSendBus(BusID b,
                 BusID dest); // default: kMasterBus; no-op on kMasterBus itself
 
+
+  // ── Metering ──────────────────────────────────────────────────────────
+  // Post-fader-in, pre-send peak level for the given track/bus, 0..~1.5
+  // (unclamped — a hot signal can exceed 1.0, which is exactly what a
+  // meter should show). Updated once per audio callback on the audio
+  // thread with a simple peak-hold-and-decay (~15%/block release) so a
+  // UI polling this on a timer (e.g. every 25ms) gets a readable VU-style
+  // needle instead of a value that's already zero by the time it's read.
+  // Returns 0.f for an invalid/inactive id.
+  float getTrackPeakLevel(TrackID t) const;
+  float getBusPeakLevel(BusID b) const;
+
   // ── Master ────────────────────────────────────────────────────────────────
   void setMasterVolume(float v); // 0..1
   float getMasterVolume() const;

@@ -126,6 +126,7 @@ struct Track {
   std::atomic<bool> muted{false};
   std::atomic<bool> soloed{false};
   std::atomic<BusID> sendBus{kMasterBus};
+  std::atomic<float> peakLevel{0.f}; // audio-thread-written, UI-thread-read
   std::vector<float> buffer; // audio-thread-only; sized once at init()
 };
 
@@ -133,6 +134,7 @@ struct Bus {
   std::atomic<bool> active{false};
   std::atomic<float> gain{1.f};
   std::atomic<BusID> sendBus{kInvalidBus}; // master's is ignored (terminal)
+  std::atomic<float> peakLevel{0.f};
   std::vector<float> buffer; // audio-thread-only; sized once at init()
 };
 
@@ -564,6 +566,23 @@ struct AudioEngine::Impl {
                               v.framePos / static_cast<double>(s.frameCount))),
             std::memory_order_relaxed);
     }
+
+
+    // 1.5) Peak-meter each active track's buffer, post-voice-render,
+    // pre-send — this is "what's actually happening on this track"
+    // regardless of mute/solo, matching how a real channel strip meter
+    // still shows signal on a muted channel.
+    for (auto &t : tracks) {
+      if (!t.active.load(std::memory_order_relaxed))
+        continue;
+      float peak = 0.f;
+      for (size_t i = 0; i < n; i++)
+        peak = std::max(peak, std::fabs(t.buffer[i]));
+      float prev = t.peakLevel.load(std::memory_order_relaxed);
+      t.peakLevel.store(std::max(peak, prev * 0.85f),
+                        std::memory_order_relaxed);
+    }
+
     // 2) Tracks -> their send bus (mute/solo applied here).
     for (auto &t : tracks) {
       if (!t.active.load(std::memory_order_relaxed))
@@ -608,6 +627,20 @@ struct AudioEngine::Impl {
       for (size_t j = 0; j < n; j++)
         dest.buffer[j] += b.buffer[j] * g;
     }
+
+    // 3.5) Meter every bus (including master) now that all sends for
+    // this block have landed — same peak-hold-and-decay as tracks.
+    for (auto &b : buses) {
+      if (!b.active.load(std::memory_order_relaxed))
+        continue;
+      float peak = 0.f;
+      for (size_t i = 0; i < n; i++)
+        peak = std::max(peak, std::fabs(b.buffer[i]));
+      float prev = b.peakLevel.load(std::memory_order_relaxed);
+      b.peakLevel.store(std::max(peak, prev * 0.85f),
+                        std::memory_order_relaxed);
+    }
+
 
     // 4) Master: fold in unrouted ("legacy") voices, apply master gain
     //    and volume, write the final interleaved frame to output.
@@ -1104,6 +1137,7 @@ TrackID AudioEngine::createTrack() {
     t.muted.store(false, std::memory_order_relaxed);
     t.soloed.store(false, std::memory_order_relaxed);
     t.sendBus.store(kMasterBus, std::memory_order_relaxed);
+    t.peakLevel.store(0.f, std::memory_order_relaxed);
     t.active.store(true, std::memory_order_release);
     return (TrackID)(i + 1);
   }
@@ -1185,6 +1219,21 @@ void AudioEngine::setBusSendBus(BusID b, BusID dest) {
     dest = kMasterBus; // self-send guard only — see the cycle-limitation
                        // note on the Track/Bus struct definitions
   m_impl->buses[b - 1].sendBus.store(dest, std::memory_order_relaxed);
+}
+
+
+// ── Metering ─────────────────────────────────────────────────────────────
+
+float AudioEngine::getTrackPeakLevel(TrackID t) const {
+  if (t == kInvalidTrack || t > Impl::kMaxTracks)
+    return 0.f;
+  return m_impl->tracks[t - 1].peakLevel.load(std::memory_order_relaxed);
+}
+
+float AudioEngine::getBusPeakLevel(BusID b) const {
+  if (b == kInvalidBus || b > Impl::kMaxBuses)
+    return 0.f;
+  return m_impl->buses[b - 1].peakLevel.load(std::memory_order_relaxed);
 }
 
 // ── Offline render ────────────────────────────────────────────────────────

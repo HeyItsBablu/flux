@@ -9,13 +9,13 @@
 #include <vector>
 
 #include <cctype>
+#include <cstring>
 #include <fstream>
 #include <iomanip>
 #include <memory>
 #include <optional>
 #include <sstream>
 #include <unordered_map>
-#include <cstring>
 
 // ============================================================================
 // Data model
@@ -563,6 +563,22 @@ struct Clip {
   float fadeOutBeats = 0.0f;
 };
 
+enum class AutomationParam { TrackVolume, TrackPan };
+
+struct AutomationPoint {
+  double beat = 0.0;
+  float value = 1.0f; // TrackVolume: 0..1.5 gain. TrackPan: -1..1.
+};
+
+struct AutomationLane {
+  AutomationParam param = AutomationParam::TrackVolume;
+  std::vector<AutomationPoint> points; // MUST stay sorted by beat — every
+                                       // inserter below maintains this
+                                       // invariant rather than sorting on
+                                       // every evaluate() call.
+  bool enabled = true;
+};
+
 struct TimelineTrack {
   TimelineTrackID id = 0;
   std::string name;
@@ -572,6 +588,15 @@ struct TimelineTrack {
   std::vector<Clip> clips;
   bool muted = false;
   bool soloed = false;
+
+  // ── Automation (Phase 4) ─────────────────────────────────────────────
+  // A lane is a sorted list of (beat, value) points; TimelineScheduler
+  // linearly interpolates between them and writes the result straight to
+  // the AudioEngine Track each tick(), same "coarse sampled-and-held"
+  // philosophy _updateAudioClipFades() already uses for clip fades — no
+  // sample-accurate ramp command yet (that's still a Phase 4 stretch/
+  // Phase 5 item), just a per-~25ms update.
+  std::vector<AutomationLane> automationLanes;
 };
 
 struct Timeline {
@@ -650,6 +675,11 @@ public:
     // Fades are recomputed once per tick() call, not once per pulse above —
     // see _updateAudioClipFades()'s comment for why.
     _updateAudioClipFades();
+
+    // Same cadence/reasoning as fades — automation values are a coarse
+    // sampled-and-held approximation, recomputed once per tick() (~25ms),
+    // not per pulse.
+    _updateAutomation();
   }
 
 private:
@@ -842,6 +872,44 @@ private:
                             (float)std::max(0.0, remaining / av.fadeOutBeats));
       engine.setVoiceGain(av.voice, av.baseGain * fadeGain);
       ++it;
+    }
+  }
+  // Linear interpolation between the two points straddling `beat`;
+  // clamps to the first/last point outside the lane's own span (holds
+  // flat before the first point and after the last, standard DAW
+  // automation-lane behavior).
+  static float _evaluateLane(const AutomationLane &lane, double beat) {
+    const auto &pts = lane.points;
+    if (pts.empty())
+      return lane.param == AutomationParam::TrackVolume ? 1.0f : 0.0f;
+    if (beat <= pts.front().beat)
+      return pts.front().value;
+    if (beat >= pts.back().beat)
+      return pts.back().value;
+    for (size_t i = 0; i + 1 < pts.size(); i++) {
+      if (beat >= pts[i].beat && beat <= pts[i + 1].beat) {
+        double span = pts[i + 1].beat - pts[i].beat;
+        double t = span > 0.0 ? (beat - pts[i].beat) / span : 0.0;
+        return pts[i].value + (float)t * (pts[i + 1].value - pts[i].value);
+      }
+    }
+    return pts.back().value; // unreachable given the clamps above
+  }
+
+  void _updateAutomation() {
+    double posBeats = playheadBeats();
+    for (auto &track : timeline.tracks) {
+      if (track.engineTrack == kInvalidTrack)
+        continue;
+      for (auto &lane : track.automationLanes) {
+        if (!lane.enabled || lane.points.empty())
+          continue;
+        float v = _evaluateLane(lane, posBeats);
+        if (lane.param == AutomationParam::TrackVolume)
+          AudioEngine::get().setTrackGain(track.engineTrack, v);
+        else
+          AudioEngine::get().setTrackPan(track.engineTrack, v);
+      }
     }
   }
 };
@@ -1112,7 +1180,6 @@ inline bool parse(const std::string &text, JVal &out) {
 
 } // namespace SeqJson
 
-
 // ============================================================================
 // Minimal mono 16-bit PCM WAV writer — recording output only.
 //
@@ -1134,8 +1201,12 @@ inline bool writeWavMono16(const std::string &path,
   uint32_t byteRate = sampleRate * 1 /*channel*/ * sizeof(int16_t);
   uint16_t blockAlign = (uint16_t)sizeof(int16_t);
   uint32_t riffSize = 36 + dataBytes;
-  auto writeU32 = [&](uint32_t v) { f.write(reinterpret_cast<const char *>(&v), 4); };
-  auto writeU16 = [&](uint16_t v) { f.write(reinterpret_cast<const char *>(&v), 2); };
+  auto writeU32 = [&](uint32_t v) {
+    f.write(reinterpret_cast<const char *>(&v), 4);
+  };
+  auto writeU16 = [&](uint16_t v) {
+    f.write(reinterpret_cast<const char *>(&v), 2);
+  };
 
   f.write("RIFF", 4);
   writeU32(riffSize);
@@ -1158,7 +1229,6 @@ inline bool writeWavMono16(const std::string &path,
   }
   return (bool)f;
 }
-
 
 // ============================================================================
 // TimelineSurface — draws Timeline tracks/clips and handles click input.
@@ -1194,7 +1264,6 @@ public:
   // so a future zoom (kPxPerBeat change) doesn't require re-fetching
   // peaks at a different resolution.
   static constexpr int kWaveformBuckets = 128;
-
 
   // Resolution the FULL file's waveform is cached at, before any
   // per-clip cropping. Higher than kWaveformBuckets so a heavily
@@ -1525,8 +1594,8 @@ private:
   // live audioStartOffsetSec/lengthBeats (which change mid-drag), so it
   // has to be recomputed per clip per render, not cached per file.
   struct CachedWaveform {
-    std::vector<float> peaks;  // kSourceWaveformBuckets buckets across
-                               // the file's full duration
+    std::vector<float> peaks; // kSourceWaveformBuckets buckets across
+                              // the file's full duration
     float durationSec = 0.f;
   };
   std::unordered_map<std::string, CachedWaveform> _waveformCache;
@@ -1568,8 +1637,7 @@ private:
     double bpm = (seq && seq->bpm > 0.0) ? seq->bpm : 120.0;
     double lengthSec = clip.lengthBeats * (60.0 / bpm);
     double startSec = std::max(0.0, clip.audioStartOffsetSec);
-    double endSec =
-        std::min((double)wf.durationSec, startSec + lengthSec);
+    double endSec = std::min((double)wf.durationSec, startSec + lengthSec);
     if (endSec <= startSec)
       return {};
     size_t srcCount = wf.peaks.size();
@@ -1752,6 +1820,24 @@ class SequencerApp : public Widget {
   std::shared_ptr<CanvasWidget> _timelineCanvas;
   std::shared_ptr<TimelineSurface> _timelineSurface;
 
+  // ── Mixer (Phase 4) ──────────────────────────────────────────────────
+  // Parallel, index-matched with _timeline.tracks — same convention
+  // _cellState/_velocitySliderState use for the step grid. Built
+  // incrementally in _addTimelineTrack (never truncated — tracks aren't
+  // removable yet, matching the existing timeline model) and fully
+  // rebuilt by _rebuildMixerStrips() after a project load, since load
+  // replaces _timeline.tracks wholesale.
+  std::vector<State<double>> _timelineVolumeState;
+  std::vector<State<double>> _timelinePanState;
+  std::vector<State<bool>> _timelineMuteState;
+  std::vector<State<bool>> _timelineSoloState;
+  std::vector<State<double>> _timelinePeakState; // 0..~1.5, polled each tick
+  std::vector<std::shared_ptr<DropdownWidget>> _sendDropdowns;
+  std::shared_ptr<Widget> _mixerStripsRow; // built once, children appended
+
+  std::vector<BusID> _auxBuses;
+  std::vector<std::string> _auxBusNames;
+
   // Shown next to the timeline so the user can see/delete the current
   // selection without a full side panel widget. Text() binds to this.
   State<std::string> _timelineSelectionLabel{"No clip selected"};
@@ -1781,7 +1867,6 @@ class SequencerApp : public Widget {
   double _trimDragOldAudioOffsetSec = 0.0;
   float _trimDragSampleDurationSec = 0.f;
 
-
   // ── Audio recording (Phase 3) ────────────────────────────────────────
   bool _isRecording = false;
   State<bool> _recordingState{false}; // drives the Record button's color
@@ -1793,8 +1878,8 @@ class SequencerApp : public Widget {
   // without a mutex, same discipline the engine's own capture doc
   // describes for CaptureCallback.
   std::vector<float> _recordBuffer;
-  int _recordTrackIndex = -1;   // which _timeline.tracks[] slot the
-                                // in-progress take will land on
+  int _recordTrackIndex = -1; // which _timeline.tracks[] slot the
+                              // in-progress take will land on
   double _recordStartBeat = 0.0;
   uint32_t _recordSampleRate = 48000;
   uint64_t _nextRecordingIndex = 1; // suffixes generated .wav filenames
@@ -1881,7 +1966,6 @@ public:
   ~SequencerApp() {
     if (_timerId)
       FluxUI::getCurrentInstance()->clearInterval(_timerId);
-
 
     // Don't leave the capture device running if the widget is destroyed
     // mid-recording.
@@ -2243,6 +2327,168 @@ public:
     if (_timelineCanvas)
       _timelineCanvas->redraw();
     _syncRecordTrackDropdown();
+    _appendChannelStrip(_timeline.tracks.size() - 1);
+  }
+
+  std::vector<std::string> _sendBusLabels() const {
+    std::vector<std::string> labels = {"Master"};
+    labels.insert(labels.end(), _auxBusNames.begin(), _auxBusNames.end());
+    return labels;
+  }
+
+  // Builds one channel strip for _timeline.tracks[idx] and appends it —
+  // never rebuilds existing strips, so per-track slider drag state
+  // (untracked by undo, same reasoning as the step-grid's velocity
+  // sliders) survives adding more tracks.
+  void _appendChannelStrip(size_t idx) {
+    TimelineTrack &tt = _timeline.tracks[idx];
+
+    _timelineVolumeState.emplace_back(1.0);
+    _timelinePanState.emplace_back(0.0);
+    _timelineMuteState.emplace_back(false);
+    _timelineSoloState.emplace_back(false);
+    _timelinePeakState.emplace_back(0.0);
+    auto sendDropdown =
+        Dropdown(_sendBusLabels())
+            ->setOnSelectionChanged([this, idx](int optIdx,
+                                                const std::string &) {
+              BusID bus = (optIdx <= 0 || optIdx - 1 >= (int)_auxBuses.size())
+                              ? kMasterBus
+                              : _auxBuses[optIdx - 1];
+              AudioEngine::get().setTrackSendBus(
+                  _timeline.tracks[idx].engineTrack, bus);
+            })
+            ->setWidth(90);
+    _sendDropdowns.push_back(sendDropdown);
+
+    auto meter = Box({})
+                     ->setWidth(14)
+                     ->setHeight(56)
+                     ->setBorderRadius(2)
+                     ->setBackgroundColor(Color::fromRGB(90, 220, 60));
+
+    // BoxWidget has no State-bound setBackgroundColor overload (that's a
+    // ButtonWidget convenience) — bind directly via State::bindProperty
+    // instead, same mechanism, works on any Widget.
+    _timelinePeakState[idx].bindProperty(meter, [](Widget *w, const double &v) {
+      // Green -> amber as level approaches/exceeds 1.0 — cheap
+      // two-stop gradient, good enough for a first pass; a proper
+      // multi-segment LED-bar meter is a follow-up.
+      int g = (int)std::min(220.0, 90 + 160 * v);
+      int r = (int)std::min(230.0, 40 + 200 * std::max(0.0, v - 0.7));
+      w->backgroundColor = Color::fromRGB(r, g, 60);
+      w->hasBackground = true;
+    });
+
+    auto volPtButton = Button("+Vol pt", [this, idx] {
+                         _addVolumeAutomationPointAtPlayhead(idx);
+                       })->setHeight(20);
+    volPtButton->fontSize = 10; // ButtonWidget has no setFontSize() chain
+                                // method — fontSize is a plain field on
+                                // the base Widget, set it directly.
+
+    auto strip =
+        Column({
+                   Text(tt.name)->setFontSize(11)->setWidth(80),
+                   meter,
+                   Slider(0.0, 1.5, 0.01)
+                       ->setValue(_timelineVolumeState[idx])
+                       ->setWidth(80)
+                       ->setOnValueChanged([this, idx](double v) {
+                         AudioEngine::get().setTrackGain(
+                             _timeline.tracks[idx].engineTrack, (float)v);
+                       }),
+                   Slider(-1.0, 1.0, 0.1)
+                       ->setValue(_timelinePanState[idx])
+                       ->setWidth(80)
+                       ->setOnValueChanged([this, idx](double v) {
+                         AudioEngine::get().setTrackPan(
+                             _timeline.tracks[idx].engineTrack, (float)v);
+                       }),
+                   Row({
+                           Toggle("M")
+                               ->setValue(_timelineMuteState[idx])
+                               ->setOnToggleChanged([this, idx](bool v) {
+                                 // Gates clip firing at the SCHEDULER level
+                                 // (TimelineScheduler::tick already reads
+                                 // track.muted/soloed) — deliberately not
+                                 // also calling AudioEngine::setTrackMute,
+                                 // so there's exactly one source of truth
+                                 // for "is this track audible" instead of
+                                 // two that could disagree.
+                                 _timeline.tracks[idx].muted = v;
+                               }),
+                           Toggle("S")
+                               ->setValue(_timelineSoloState[idx])
+                               ->setOnToggleChanged([this, idx](bool v) {
+                                 _timeline.tracks[idx].soloed = v;
+                               }),
+                       })
+                       ->setGap(4),
+                   Text("Send")->setFontSize(10),
+                   sendDropdown,
+                   volPtButton,
+               })
+            ->setGap(4)
+            ->setWidth(90)
+            ->setPadding(6)
+            ->setBackgroundColor(Color::fromRGB(238, 238, 244))
+            ->setBorderRadius(6);
+
+    _mixerStripsRow->addChild(strip);
+  }
+
+  // Full rebuild after a project load replaces _timeline.tracks wholesale
+  // — same "clear and re-append" shape _loadProject already uses for the
+  // timeline canvas itself.
+  void _rebuildMixerStrips() {
+    _timelineVolumeState.clear();
+    _timelinePanState.clear();
+    _timelineMuteState.clear();
+    _timelineSoloState.clear();
+    _timelinePeakState.clear();
+    _sendDropdowns.clear();
+    if (_mixerStripsRow)
+      _mixerStripsRow->children.clear();
+    for (size_t i = 0; i < _timeline.tracks.size(); i++)
+      _appendChannelStrip(i);
+    if (_mixerStripsRow)
+      _mixerStripsRow->markNeedsLayout();
+  }
+
+  // Minimal automation authoring: captures the current playhead beat and
+  // this strip's current fader value as a point on that track's volume
+  // lane (creating the lane on first use). A visual lane editor on
+  // TimelineSurface is the natural follow-up; this unblocks "automation
+  // exists and is audible" without it.
+  void _addVolumeAutomationPointAtPlayhead(size_t idx) {
+    TimelineTrack &tt = _timeline.tracks[idx];
+    AutomationLane *lane = nullptr;
+    for (auto &l : tt.automationLanes)
+      if (l.param == AutomationParam::TrackVolume) {
+        lane = &l;
+        break;
+      }
+    if (!lane) {
+      tt.automationLanes.push_back({AutomationParam::TrackVolume, {}, true});
+      lane = &tt.automationLanes.back();
+    }
+    double beat = _timelineScheduler->playheadBeats();
+    float value = (float)_timelineVolumeState[idx].get();
+
+    AutomationPoint pt{beat, value};
+    auto it = std::lower_bound(
+        lane->points.begin(), lane->points.end(), pt,
+        [](const AutomationPoint &a, const AutomationPoint &b) {
+          return a.beat < b.beat;
+        });
+    if (it != lane->points.end() && it->beat == beat)
+      it->value = value; // replace a point at the exact same beat
+    else
+      lane->points.insert(it, pt);
+
+    // Not undo-tracked — same "feel" reasoning as pattern swing/subdiv:
+    // this is an authoring action the user iterates on rapidly by ear.
   }
 
   void _timelineAddClipAt(int trackIndex, double beat) {
@@ -2380,8 +2626,7 @@ public:
               // a clip pointing at nothing
     }
 
-    double lengthSec =
-        (double)_recordBuffer.size() / (double)_recordSampleRate;
+    double lengthSec = (double)_recordBuffer.size() / (double)_recordSampleRate;
     double lengthBeats = std::max(0.05, lengthSec * (_seq->bpm / 60.0));
 
     Clip clip;
@@ -2401,8 +2646,6 @@ public:
     _recordBuffer.shrink_to_fit(); // release the (possibly large) capture
                                    // buffer now that it's safely on disk
   }
-
-
 
   Clip *_findTimelineClip(ClipID id) {
     for (auto &track : _timeline.tracks)
@@ -2887,6 +3130,7 @@ public:
     }
     _nextClipId = maxClipId + 1;
     _nextTimelineTrackId = maxTimelineTrackId + 1;
+    _rebuildMixerStrips();
     _selectedClipId = 0;
     if (_timelineSurface)
       _timelineSurface->selectedClip = 0;
@@ -3348,6 +3592,42 @@ public:
       };
     }
 
+    if (!_mixerStripsRow) {
+      _mixerStripsRow = Row({})->setGap(8)->setAlignItems(AlignItems::Start);
+      // Any tracks already added before this first build() call (there
+      // aren't any yet — SequencerApp starts with zero timeline tracks —
+      // but this keeps _appendChannelStrip/_mixerStripsRow construction
+      // order-independent) get their strips built now.
+      for (size_t i = 0; i < _timeline.tracks.size(); i++)
+        _appendChannelStrip(i);
+    }
+
+    auto mixerSection =
+        Column({
+                   Row({
+                           Text("Mixer")->setFontWeight(FontWeight::Bold),
+                           Button("+ Aux Bus",
+                                  [this] {
+                                    BusID b = AudioEngine::get().createBus();
+                                    if (b == kInvalidBus)
+                                      return; // pool exhausted — silent
+                                              // no-op, same policy every
+                                              // other bool/ID-returning
+                                              // engine call gets here
+                                    _auxBuses.push_back(b);
+                                    _auxBusNames.push_back(
+                                        "Aux " +
+                                        std::to_string(_auxBuses.size()));
+                                    for (auto &dd : _sendDropdowns)
+                                      dd->setOptions(_sendBusLabels());
+                                  }),
+                       })
+                       ->setGap(12)
+                       ->setAlignItems(AlignItems::Center),
+                   _mixerStripsRow,
+               })
+            ->setGap(8);
+
     // Built once alongside the rest of the timeline toolbar (build() only
     // runs once — see the comment on _cellState) so _recordTrackDropdown
     // is available for _syncRecordTrackDropdown() to update later.
@@ -3360,7 +3640,6 @@ public:
               _recordTargetTrackIndex = idx;
             })
             ->setWidth(140);
-
 
     auto timelineToolbar =
         Row({
@@ -3387,12 +3666,13 @@ public:
                 _recordTrackDropdown,
                 Button("● Record", [this] { _startRecording(); })
                     ->setWidth(90)
-                    ->setBackgroundColor(
-                        _recordingState,
-                        [](bool rec) {
-                          return rec ? Color::fromRGB(220, 50, 50)
-                                    : Color::fromRGB(235, 235, 245);
-                        }),
+                    ->setBackgroundColor(_recordingState,
+                                         [](bool rec) {
+                                           return rec ? Color::fromRGB(220, 50,
+                                                                       50)
+                                                      : Color::fromRGB(235, 235,
+                                                                       245);
+                                         }),
                 Button("■ Stop Rec", [this] { _stopRecording(); }),
 
                 Text(_timelineSelectionLabel)->setFontSize(12),
@@ -3462,11 +3742,18 @@ public:
         _timelineScheduler->tick();
         if (_timelineCanvas && _timelineScheduler->playing)
           _timelineCanvas->redraw();
+        for (size_t i = 0; i < _timeline.tracks.size(); i++) {
+          if (_timeline.tracks[i].engineTrack == kInvalidTrack)
+            continue;
+          _timelinePeakState[i].set(AudioEngine::get().getTrackPeakLevel(
+              _timeline.tracks[i].engineTrack));
+        }
       });
     }
 
     return Column({transportRow, patternBar, arrangementBar,
-                   Column({trackRows})->setGap(6), timelineSection})
+                   Column({trackRows})->setGap(6), timelineSection,
+                   mixerSection})
         ->setGap(16)
         ->setPadding(24);
   }
