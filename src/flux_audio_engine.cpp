@@ -226,6 +226,79 @@ struct BiquadFilterEffect {
   }
 };
 
+
+// Feed-forward, log-domain compressor. Params are atomics (UI-thread
+// writes, same "coarse set and forget" contract as the filter above);
+// the envelope follower itself is audio-thread-only. Detection is
+// stereo-linked — a single envelope tracks the loudest channel each
+// sample, and the resulting gain reduction is applied identically to
+// every channel, so compressing a stereo signal doesn't pull its image
+// off-center.
+struct CompressorEffect {
+  std::atomic<bool> active{false};
+  std::atomic<float> thresholdDb{-18.f};
+  std::atomic<float> ratio{4.f};
+  std::atomic<float> attackMs{10.f};
+  std::atomic<float> releaseMs{100.f};
+  std::atomic<float> makeupDb{0.f};
+
+  // Audio-thread-only envelope state (linear domain — avoids a log()
+  // every sample just to update the follower; only converted to dB
+  // once per sample for the threshold/ratio math below).
+  float envelope = 0.f;
+
+  // Last computed reduction, exposed read-only for a UI meter.
+  std::atomic<float> gainReductionDb{0.f};
+
+  void resetState() { envelope = 0.f; }
+
+  // One-pole time constant -> per-sample coefficient. timeMs <= 0 would
+  // divide by zero / be instant; clamp to a small positive floor.
+  static float _coeffFromMs(float timeMs, uint32_t sampleRate) {
+    float t = std::max(0.1f, timeMs) * 0.001f;
+    return std::exp(-1.0f / (t * (float)sampleRate));
+  }
+
+  void process(float *buf, ma_uint32 frames, uint32_t channels,
+              uint32_t sampleRate) {
+    if (!active.load(std::memory_order_relaxed))
+      return;
+
+    float thresh = thresholdDb.load(std::memory_order_relaxed);
+    float r = std::max(1.f, ratio.load(std::memory_order_relaxed));
+    float attackCoeff =
+        _coeffFromMs(attackMs.load(std::memory_order_relaxed), sampleRate);
+    float releaseCoeff =
+        _coeffFromMs(releaseMs.load(std::memory_order_relaxed), sampleRate);
+    float makeup = makeupDb.load(std::memory_order_relaxed);
+    uint32_t ch = std::min<uint32_t>(channels, 2);
+
+    float lastReductionDb = 0.f;
+    for (ma_uint32 i = 0; i < frames; i++) {
+      // Stereo-linked detector: loudest channel this sample.
+      float peak = 0.f;
+      for (uint32_t c = 0; c < ch; c++)
+        peak = std::max(peak, std::fabs(buf[i * channels + c]));
+
+      // Attack when the input is louder than the current envelope,
+      // release when it's quieter — standard peak-follower behavior.
+      float coeff = (peak > envelope) ? attackCoeff : releaseCoeff;
+      envelope = peak + (envelope - peak) * coeff;
+      float envDb = 20.f * std::log10(std::max(envelope, 1e-6f));
+      float reductionDb = 0.f;
+      if (envDb > thresh)
+        reductionDb = (thresh + (envDb - thresh) / r) - envDb; // <= 0
+      lastReductionDb = reductionDb;
+
+      float gainLin = std::pow(10.f, (reductionDb + makeup) / 20.f);
+      for (uint32_t c = 0; c < ch; c++)
+        buf[i * channels + c] *= gainLin;
+    }
+    gainReductionDb.store(lastReductionDb, std::memory_order_relaxed);
+  }
+};
+
+
 // One insert slot: currently only Biquad exists, so the tag just gates
 // whether the embedded filter runs. Adding a second effect type later
 // (compressor/delay/reverb) means adding its own embedded struct here
@@ -235,17 +308,23 @@ struct BiquadFilterEffect {
 struct InsertSlot {
   std::atomic<InsertEffectType> type{InsertEffectType::None};
   BiquadFilterEffect biquad;
+  CompressorEffect compressor;
 
   void process(float *buf, ma_uint32 frames, uint32_t channels,
               uint32_t sampleRate) {
-    if (type.load(std::memory_order_relaxed) == InsertEffectType::Biquad)
+    InsertEffectType t = type.load(std::memory_order_relaxed);
+    if (t == InsertEffectType::Biquad)
       biquad.process(buf, frames, channels, sampleRate);
+    else if (t == InsertEffectType::Compressor)
+      compressor.process(buf, frames, channels, sampleRate);
   }
 
   void reset() {
     type.store(InsertEffectType::None, std::memory_order_relaxed);
     biquad.active.store(false, std::memory_order_relaxed);
     biquad.resetState();
+    compressor.active.store(false, std::memory_order_relaxed);
+    compressor.resetState();
   }
 };
 
@@ -1595,6 +1674,113 @@ bool AudioEngine::getBusFilterInsert(BusID b, uint32_t slot, bool &enabled,
   return true;
 }
 
+void AudioEngine::setTrackCompressorInsert(TrackID t, uint32_t slot,
+                                           bool enabled, float thresholdDb,
+                                           float ratio, float attackMs,
+                                           float releaseMs, float makeupDb) {
+  if (t == kInvalidTrack || t > Impl::kMaxTracks || slot >= kMaxInserts)
+    return;
+  InsertSlot &s = m_impl->tracks[t - 1].inserts[slot];
+  if (s.type.load(std::memory_order_relaxed) != InsertEffectType::Compressor) {
+    s.compressor.resetState();
+    s.type.store(InsertEffectType::Compressor, std::memory_order_relaxed);
+  }
+  s.compressor.thresholdDb.store(thresholdDb, std::memory_order_relaxed);
+  s.compressor.ratio.store(ratio, std::memory_order_relaxed);
+  s.compressor.attackMs.store(attackMs, std::memory_order_relaxed);
+  s.compressor.releaseMs.store(releaseMs, std::memory_order_relaxed);
+  s.compressor.makeupDb.store(makeupDb, std::memory_order_relaxed);
+  s.compressor.active.store(enabled, std::memory_order_relaxed);
+}
+
+void AudioEngine::setBusCompressorInsert(BusID b, uint32_t slot, bool enabled,
+                                         float thresholdDb, float ratio,
+                                         float attackMs, float releaseMs,
+                                         float makeupDb) {
+  if (b == kInvalidBus || b > Impl::kMaxBuses || slot >= kMaxInserts)
+    return;
+  InsertSlot &s = m_impl->buses[b - 1].inserts[slot];
+  if (s.type.load(std::memory_order_relaxed) != InsertEffectType::Compressor) {
+    s.compressor.resetState();
+    s.type.store(InsertEffectType::Compressor, std::memory_order_relaxed);
+  }
+  s.compressor.thresholdDb.store(thresholdDb, std::memory_order_relaxed);
+  s.compressor.ratio.store(ratio, std::memory_order_relaxed);
+  s.compressor.attackMs.store(attackMs, std::memory_order_relaxed);
+  s.compressor.releaseMs.store(releaseMs, std::memory_order_relaxed);
+  s.compressor.makeupDb.store(makeupDb, std::memory_order_relaxed);
+  s.compressor.active.store(enabled, std::memory_order_relaxed);
+}
+
+bool AudioEngine::getTrackCompressorInsert(TrackID t, uint32_t slot,
+                                           bool &enabled, float &thresholdDb,
+                                           float &ratio, float &attackMs,
+                                           float &releaseMs,
+                                           float &makeupDb) const {
+  enabled = false;
+  thresholdDb = -18.f;
+  ratio = 4.f;
+  attackMs = 10.f;
+  releaseMs = 100.f;
+  makeupDb = 0.f;
+  if (t == kInvalidTrack || t > Impl::kMaxTracks || slot >= kMaxInserts)
+    return false;
+  const InsertSlot &s = m_impl->tracks[t - 1].inserts[slot];
+  if (s.type.load(std::memory_order_relaxed) != InsertEffectType::Compressor)
+    return false;
+  enabled = s.compressor.active.load(std::memory_order_relaxed);
+  thresholdDb = s.compressor.thresholdDb.load(std::memory_order_relaxed);
+  ratio = s.compressor.ratio.load(std::memory_order_relaxed);
+  attackMs = s.compressor.attackMs.load(std::memory_order_relaxed);
+  releaseMs = s.compressor.releaseMs.load(std::memory_order_relaxed);
+  makeupDb = s.compressor.makeupDb.load(std::memory_order_relaxed);
+  return true;
+}
+
+bool AudioEngine::getBusCompressorInsert(BusID b, uint32_t slot,
+                                         bool &enabled, float &thresholdDb,
+                                         float &ratio, float &attackMs,
+                                         float &releaseMs,
+                                         float &makeupDb) const {
+  enabled = false;
+  thresholdDb = -18.f;
+  ratio = 4.f;
+  attackMs = 10.f;
+  releaseMs = 100.f;
+  makeupDb = 0.f;
+  if (b == kInvalidBus || b > Impl::kMaxBuses || slot >= kMaxInserts)
+    return false;
+  const InsertSlot &s = m_impl->buses[b - 1].inserts[slot];
+  if (s.type.load(std::memory_order_relaxed) != InsertEffectType::Compressor)
+    return false;
+  enabled = s.compressor.active.load(std::memory_order_relaxed);
+  thresholdDb = s.compressor.thresholdDb.load(std::memory_order_relaxed);
+  ratio = s.compressor.ratio.load(std::memory_order_relaxed);
+  attackMs = s.compressor.attackMs.load(std::memory_order_relaxed);
+  releaseMs = s.compressor.releaseMs.load(std::memory_order_relaxed);
+  makeupDb = s.compressor.makeupDb.load(std::memory_order_relaxed);
+  return true;
+}
+
+float AudioEngine::getTrackCompressorGainReduction(TrackID t,
+                                                   uint32_t slot) const {
+  if (t == kInvalidTrack || t > Impl::kMaxTracks || slot >= kMaxInserts)
+    return 0.f;
+  const InsertSlot &s = m_impl->tracks[t - 1].inserts[slot];
+  if (s.type.load(std::memory_order_relaxed) != InsertEffectType::Compressor)
+    return 0.f;
+  return s.compressor.gainReductionDb.load(std::memory_order_relaxed);
+}
+
+float AudioEngine::getBusCompressorGainReduction(BusID b,
+                                                 uint32_t slot) const {
+  if (b == kInvalidBus || b > Impl::kMaxBuses || slot >= kMaxInserts)
+    return 0.f;
+  const InsertSlot &s = m_impl->buses[b - 1].inserts[slot];
+  if (s.type.load(std::memory_order_relaxed) != InsertEffectType::Compressor)
+    return 0.f;
+  return s.compressor.gainReductionDb.load(std::memory_order_relaxed);
+}
 
 
 BusID AudioEngine::createBus() {

@@ -2171,6 +2171,7 @@ class SequencerApp : public Widget {
   // engine-side changes. Index-parallel with _timeline.tracks / _auxBuses,
   // same convention every other per-strip vector in this file uses.
   static constexpr uint32_t kFilterInsertSlot = 0;
+  static constexpr uint32_t kCompressorInsertSlot = 1;
 
   std::vector<State<bool>> _timelineFilterEnabledState;
   std::vector<State<int>> _timelineFilterTypeState;
@@ -2181,6 +2182,21 @@ class SequencerApp : public Widget {
   std::vector<State<int>> _auxFilterTypeState;
   std::vector<State<double>> _auxFilterCutoffState;
   std::vector<State<double>> _auxFilterQState;
+
+
+  std::vector<State<bool>> _timelineCompEnabledState;
+  std::vector<State<double>> _timelineCompThresholdState;
+  std::vector<State<double>> _timelineCompRatioState;
+  std::vector<State<double>> _timelineCompAttackState;
+  std::vector<State<double>> _timelineCompReleaseState;
+  std::vector<State<double>> _timelineCompMakeupState;
+
+  std::vector<State<bool>> _auxCompEnabledState;
+  std::vector<State<double>> _auxCompThresholdState;
+  std::vector<State<double>> _auxCompRatioState;
+  std::vector<State<double>> _auxCompAttackState;
+  std::vector<State<double>> _auxCompReleaseState;
+  std::vector<State<double>> _auxCompMakeupState;
 
 
 
@@ -2710,6 +2726,77 @@ public:
     _timelineFilterCutoffState.emplace_back(1000.0);
     _timelineFilterQState.emplace_back(0.707);
 
+    _timelineCompEnabledState.emplace_back(false);
+    _timelineCompThresholdState.emplace_back(-18.0);
+    _timelineCompRatioState.emplace_back(4.0);
+    _timelineCompAttackState.emplace_back(10.0);
+    _timelineCompReleaseState.emplace_back(100.0);
+    _timelineCompMakeupState.emplace_back(0.0);
+
+    auto compEnabledToggle =
+        Toggle("Comp")
+            ->setValue(_timelineCompEnabledState[idx])
+            ->setOnToggleChanged([this, idx](bool v) {
+              _updateTrackCompressor(idx, &v, nullptr, nullptr, nullptr,
+                                     nullptr, nullptr);
+            });
+
+    auto compThresholdSlider =
+        Slider(-60.0, 0.0, 1.0)
+            ->setValue(_timelineCompThresholdState[idx])
+            ->setWidth(80)
+            ->setOnValueChanged([this, idx](double v) {
+              _timelineCompThresholdState[idx].set(v);
+              float f = (float)v;
+              _updateTrackCompressor(idx, nullptr, &f, nullptr, nullptr,
+                                     nullptr, nullptr);
+            });
+
+    auto compRatioSlider =
+        Slider(1.0, 20.0, 0.5)
+            ->setValue(_timelineCompRatioState[idx])
+            ->setWidth(80)
+            ->setOnValueChanged([this, idx](double v) {
+              _timelineCompRatioState[idx].set(v);
+              float f = (float)v;
+              _updateTrackCompressor(idx, nullptr, nullptr, &f, nullptr,
+                                     nullptr, nullptr);
+            });
+
+    auto compAttackSlider =
+        Slider(0.1, 200.0, 0.5)
+            ->setValue(_timelineCompAttackState[idx])
+            ->setWidth(80)
+            ->setOnValueChanged([this, idx](double v) {
+              _timelineCompAttackState[idx].set(v);
+              float f = (float)v;
+              _updateTrackCompressor(idx, nullptr, nullptr, nullptr, &f,
+                                     nullptr, nullptr);
+            });
+
+    auto compReleaseSlider =
+        Slider(10.0, 1000.0, 5.0)
+            ->setValue(_timelineCompReleaseState[idx])
+            ->setWidth(80)
+            ->setOnValueChanged([this, idx](double v) {
+              _timelineCompReleaseState[idx].set(v);
+              float f = (float)v;
+              _updateTrackCompressor(idx, nullptr, nullptr, nullptr, nullptr,
+                                     &f, nullptr);
+            });
+
+    auto compMakeupSlider =
+        Slider(0.0, 24.0, 0.5)
+            ->setValue(_timelineCompMakeupState[idx])
+            ->setWidth(80)
+            ->setOnValueChanged([this, idx](double v) {
+              _timelineCompMakeupState[idx].set(v);
+              float f = (float)v;
+              _updateTrackCompressor(idx, nullptr, nullptr, nullptr, nullptr,
+                                     nullptr, &f);
+            });
+
+
     auto filterEnabledToggle =
         Toggle("Filter")
             ->setValue(_timelineFilterEnabledState[idx])
@@ -2859,6 +2946,12 @@ public:
                    filterTypeDropdown,
                    filterCutoffSlider,
                    filterQSlider,
+                   compEnabledToggle,
+                   compThresholdSlider,
+                   compRatioSlider,
+                   compAttackSlider,
+                   compReleaseSlider,
+                   compMakeupSlider,
                })
             ->setGap(4)
             ->setWidth(90)
@@ -2884,6 +2977,12 @@ public:
     _timelineFilterTypeState.clear();
     _timelineFilterCutoffState.clear();
     _timelineFilterQState.clear();
+    _timelineCompEnabledState.clear();
+    _timelineCompThresholdState.clear();
+    _timelineCompRatioState.clear();
+    _timelineCompAttackState.clear();
+    _timelineCompReleaseState.clear();
+    _timelineCompMakeupState.clear();
     _sendDropdowns.clear();
     if (_mixerStripsRow)
       _mixerStripsRow->children.clear();
@@ -2906,6 +3005,77 @@ public:
     _auxFilterTypeState.emplace_back(0);
     _auxFilterCutoffState.emplace_back(1000.0);
     _auxFilterQState.emplace_back(0.707);
+
+    _auxCompEnabledState.emplace_back(false);
+    _auxCompThresholdState.emplace_back(-18.0);
+    _auxCompRatioState.emplace_back(4.0);
+    _auxCompAttackState.emplace_back(10.0);
+    _auxCompReleaseState.emplace_back(100.0);
+    _auxCompMakeupState.emplace_back(0.0);
+
+    auto compEnabledToggle =
+        Toggle("Comp")
+            ->setValue(_auxCompEnabledState[idx])
+            ->setOnToggleChanged([this, idx](bool v) {
+              _updateAuxCompressor(idx, &v, nullptr, nullptr, nullptr,
+                                   nullptr, nullptr);
+            });
+
+    auto compThresholdSlider =
+        Slider(-60.0, 0.0, 1.0)
+            ->setValue(_auxCompThresholdState[idx])
+            ->setWidth(80)
+            ->setOnValueChanged([this, idx](double v) {
+              _auxCompThresholdState[idx].set(v);
+              float f = (float)v;
+              _updateAuxCompressor(idx, nullptr, &f, nullptr, nullptr,
+                                   nullptr, nullptr);
+            });
+
+    auto compRatioSlider =
+        Slider(1.0, 20.0, 0.5)
+            ->setValue(_auxCompRatioState[idx])
+            ->setWidth(80)
+            ->setOnValueChanged([this, idx](double v) {
+              _auxCompRatioState[idx].set(v);
+              float f = (float)v;
+              _updateAuxCompressor(idx, nullptr, nullptr, &f, nullptr,
+                                   nullptr, nullptr);
+            });
+
+    auto compAttackSlider =
+        Slider(0.1, 200.0, 0.5)
+            ->setValue(_auxCompAttackState[idx])
+            ->setWidth(80)
+            ->setOnValueChanged([this, idx](double v) {
+              _auxCompAttackState[idx].set(v);
+              float f = (float)v;
+              _updateAuxCompressor(idx, nullptr, nullptr, nullptr, &f,
+                                   nullptr, nullptr);
+            });
+
+    auto compReleaseSlider =
+        Slider(10.0, 1000.0, 5.0)
+            ->setValue(_auxCompReleaseState[idx])
+            ->setWidth(80)
+            ->setOnValueChanged([this, idx](double v) {
+              _auxCompReleaseState[idx].set(v);
+              float f = (float)v;
+              _updateAuxCompressor(idx, nullptr, nullptr, nullptr, nullptr,
+                                   &f, nullptr);
+            });
+
+    auto compMakeupSlider =
+        Slider(0.0, 24.0, 0.5)
+            ->setValue(_auxCompMakeupState[idx])
+            ->setWidth(80)
+            ->setOnValueChanged([this, idx](double v) {
+              _auxCompMakeupState[idx].set(v);
+              float f = (float)v;
+              _updateAuxCompressor(idx, nullptr, nullptr, nullptr, nullptr,
+                                   nullptr, &f);
+            });
+
 
     auto filterEnabledToggle =
         Toggle("Filter")
@@ -2974,6 +3144,13 @@ public:
                    filterTypeDropdown,
                    filterCutoffSlider,
                    filterQSlider,
+                   compEnabledToggle,
+                   compThresholdSlider,
+                   compRatioSlider,
+                   compAttackSlider,
+                   compReleaseSlider,
+                   compMakeupSlider,
+
                })
             ->setGap(4)
             ->setWidth(90)
@@ -2991,6 +3168,13 @@ public:
     _auxFilterTypeState.clear();
     _auxFilterCutoffState.clear();
     _auxFilterQState.clear();
+    _auxCompEnabledState.clear();
+    _auxCompThresholdState.clear();
+    _auxCompRatioState.clear();
+    _auxCompAttackState.clear();
+    _auxCompReleaseState.clear();
+    _auxCompMakeupState.clear();
+
     if (_auxBusStripsRow)
       _auxBusStripsRow->children.clear();
     for (size_t i = 0; i < _auxBuses.size(); i++)
@@ -3046,6 +3230,61 @@ public:
     AudioEngine::get().setBusFilterInsert(bus, kFilterInsertSlot, enabled,
                                           type, cutoff, q);
   }
+
+  void _updateTrackCompressor(size_t idx, const bool *newEnabled,
+                              const float *newThresh, const float *newRatio,
+                              const float *newAttack, const float *newRelease,
+                              const float *newMakeup) {
+    TrackID et = _timeline.tracks[idx].engineTrack;
+    bool enabled;
+    float thresh, ratio, attack, release, makeup;
+    AudioEngine::get().getTrackCompressorInsert(
+        et, kCompressorInsertSlot, enabled, thresh, ratio, attack, release,
+        makeup);
+    if (newEnabled)
+      enabled = *newEnabled;
+    if (newThresh)
+      thresh = *newThresh;
+    if (newRatio)
+      ratio = *newRatio;
+    if (newAttack)
+      attack = *newAttack;
+    if (newRelease)
+      release = *newRelease;
+    if (newMakeup)
+      makeup = *newMakeup;
+    AudioEngine::get().setTrackCompressorInsert(
+        et, kCompressorInsertSlot, enabled, thresh, ratio, attack, release,
+        makeup);
+  }
+
+  void _updateAuxCompressor(size_t idx, const bool *newEnabled,
+                            const float *newThresh, const float *newRatio,
+                            const float *newAttack, const float *newRelease,
+                            const float *newMakeup) {
+    BusID bus = _auxBuses[idx];
+    bool enabled;
+    float thresh, ratio, attack, release, makeup;
+    AudioEngine::get().getBusCompressorInsert(
+        bus, kCompressorInsertSlot, enabled, thresh, ratio, attack, release,
+        makeup);
+    if (newEnabled)
+      enabled = *newEnabled;
+    if (newThresh)
+      thresh = *newThresh;
+    if (newRatio)
+      ratio = *newRatio;
+    if (newAttack)
+      attack = *newAttack;
+    if (newRelease)
+      release = *newRelease;
+    if (newMakeup)
+      makeup = *newMakeup;
+    AudioEngine::get().setBusCompressorInsert(
+        bus, kCompressorInsertSlot, enabled, thresh, ratio, attack, release,
+        makeup);
+  }
+
 
 
 
@@ -3689,6 +3928,11 @@ public:
      float fCutoff, fQ;
      AudioEngine::get().getTrackFilterInsert(tt.engineTrack, kFilterInsertSlot,
                                              fEnabled, fType, fCutoff, fQ);
+      bool cEnabled;
+      float cThresh, cRatio, cAttack, cRelease, cMakeup;
+      AudioEngine::get().getTrackCompressorInsert(
+          tt.engineTrack, kCompressorInsertSlot, cEnabled, cThresh, cRatio,
+          cAttack, cRelease, cMakeup);
       out << "    {\"id\":" << tt.id << ",\"name\":\"" << SeqJson::esc(tt.name)
           << "\",\"muted\":" << (tt.muted ? "true" : "false")
           << ",\"soloed\":" << (tt.soloed ? "true" : "false")
@@ -3697,7 +3941,11 @@ public:
           << ",\"sendIndex\":" << sendIndex
           << ",\"filterEnabled\":" << (fEnabled ? "true" : "false")
           << ",\"filterType\":" << (int)fType << ",\"filterCutoff\":" << fCutoff
-          << ",\"filterQ\":" << fQ << ",\"clips\":[";
+          << ",\"filterQ\":" << fQ
+          << ",\"compEnabled\":" << (cEnabled ? "true" : "false")
+          << ",\"compThreshold\":" << cThresh << ",\"compRatio\":" << cRatio
+          << ",\"compAttack\":" << cAttack << ",\"compRelease\":" << cRelease
+          << ",\"compMakeup\":" << cMakeup << ",\"clips\":[";
       for (size_t ci = 0; ci < tt.clips.size(); ci++) {
         const Clip &c = tt.clips[ci];
         out << "{\"id\":" << c.id << ",\"type\":" << (int)c.type
@@ -3720,11 +3968,20 @@ public:
       float fCutoff, fQ;
       AudioEngine::get().getBusFilterInsert(_auxBuses[i], kFilterInsertSlot,
                                             fEnabled, fType, fCutoff, fQ);
+      bool cEnabled;
+      float cThresh, cRatio, cAttack, cRelease, cMakeup;
+      AudioEngine::get().getBusCompressorInsert(
+          _auxBuses[i], kCompressorInsertSlot, cEnabled, cThresh, cRatio,
+          cAttack, cRelease, cMakeup);
       out << "    {\"name\":\"" << SeqJson::esc(_auxBusNames[i])
           << "\",\"gain\":" << AudioEngine::get().getBusGain(_auxBuses[i])
           << ",\"filterEnabled\":" << (fEnabled ? "true" : "false")
           << ",\"filterType\":" << (int)fType << ",\"filterCutoff\":" << fCutoff
-          << ",\"filterQ\":" << fQ << "}"
+          << ",\"filterQ\":" << fQ
+          << ",\"compEnabled\":" << (cEnabled ? "true" : "false")
+          << ",\"compThreshold\":" << cThresh << ",\"compRatio\":" << cRatio
+          << ",\"compAttack\":" << cAttack << ",\"compRelease\":" << cRelease
+          << ",\"compMakeup\":" << cMakeup << "}"
           << (i + 1 < _auxBuses.size() ? "," : "") << "\n";
     }
     out << "  ]\n}\n";
@@ -3872,6 +4129,13 @@ public:
       FilterType type = FilterType::LowPass;
       float cutoff = 1000.f;
       float q = 0.707f;
+      bool compEnabled = false;
+      float compThreshold = -18.f;
+      float compRatio = 4.f;
+      float compAttack = 10.f;
+      float compRelease = 100.f;
+      float compMakeup = 0.f;
+
     };
     std::vector<int> loadedSendIndex;
     std::vector<LoadedFilter> loadedTrackFilter;
@@ -3902,6 +4166,16 @@ public:
       AudioEngine::get().setTrackFilterInsert(tt.engineTrack, kFilterInsertSlot,
                                               lf.enabled, lf.type, lf.cutoff,
                                               lf.q);
+      lf.compEnabled = ttj["compEnabled"].asBool(false);
+      lf.compThreshold = (float)ttj["compThreshold"].asDouble(-18.0);
+      lf.compRatio = (float)ttj["compRatio"].asDouble(4.0);
+      lf.compAttack = (float)ttj["compAttack"].asDouble(10.0);
+      lf.compRelease = (float)ttj["compRelease"].asDouble(100.0);
+      lf.compMakeup = (float)ttj["compMakeup"].asDouble(0.0);
+      AudioEngine::get().setTrackCompressorInsert(
+          tt.engineTrack, kCompressorInsertSlot, lf.compEnabled,
+          lf.compThreshold, lf.compRatio, lf.compAttack, lf.compRelease,
+          lf.compMakeup);
       loadedTrackFilter.push_back(lf);
 
       for (const auto &cj : ttj["clips"].arr) {
@@ -3965,6 +4239,15 @@ public:
       lf.q = (float)bj["filterQ"].asDouble(0.707);
       AudioEngine::get().setBusFilterInsert(b, kFilterInsertSlot, lf.enabled,
                                             lf.type, lf.cutoff, lf.q);
+      lf.compEnabled = bj["compEnabled"].asBool(false);
+      lf.compThreshold = (float)bj["compThreshold"].asDouble(-18.0);
+      lf.compRatio = (float)bj["compRatio"].asDouble(4.0);
+      lf.compAttack = (float)bj["compAttack"].asDouble(10.0);
+      lf.compRelease = (float)bj["compRelease"].asDouble(100.0);
+      lf.compMakeup = (float)bj["compMakeup"].asDouble(0.0);
+      AudioEngine::get().setBusCompressorInsert(
+          b, kCompressorInsertSlot, lf.compEnabled, lf.compThreshold,
+          lf.compRatio, lf.compAttack, lf.compRelease, lf.compMakeup);
       loadedAuxFilter.push_back(lf);
 
       _auxBuses.push_back(b);
@@ -3979,6 +4262,12 @@ public:
       _auxFilterTypeState[i].set((int)loadedAuxFilter[i].type);
       _auxFilterCutoffState[i].set((double)loadedAuxFilter[i].cutoff);
       _auxFilterQState[i].set((double)loadedAuxFilter[i].q);
+      _auxCompEnabledState[i].set(loadedAuxFilter[i].compEnabled);
+      _auxCompThresholdState[i].set((double)loadedAuxFilter[i].compThreshold);
+      _auxCompRatioState[i].set((double)loadedAuxFilter[i].compRatio);
+      _auxCompAttackState[i].set((double)loadedAuxFilter[i].compAttack);
+      _auxCompReleaseState[i].set((double)loadedAuxFilter[i].compRelease);
+      _auxCompMakeupState[i].set((double)loadedAuxFilter[i].compMakeup);
     }
 
     _rebuildMixerStrips();
@@ -3999,6 +4288,16 @@ public:
         _timelineFilterTypeState[i].set((int)loadedTrackFilter[i].type);
         _timelineFilterCutoffState[i].set((double)loadedTrackFilter[i].cutoff);
         _timelineFilterQState[i].set((double)loadedTrackFilter[i].q);
+        _timelineCompEnabledState[i].set(loadedTrackFilter[i].compEnabled);
+        _timelineCompThresholdState[i].set(
+            (double)loadedTrackFilter[i].compThreshold);
+        _timelineCompRatioState[i].set((double)loadedTrackFilter[i].compRatio);
+        _timelineCompAttackState[i].set(
+            (double)loadedTrackFilter[i].compAttack);
+        _timelineCompReleaseState[i].set(
+            (double)loadedTrackFilter[i].compRelease);
+        _timelineCompMakeupState[i].set(
+            (double)loadedTrackFilter[i].compMakeup);
       }
     }
     _selectedClipId = 0;

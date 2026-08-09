@@ -47,7 +47,7 @@ constexpr BusID kMasterBus = 1; // always valid once init() has run
 // ── Insert effects ─────────────────────────────────────────────
 enum class FilterType : uint8_t { LowPass, HighPass, BandPass, Notch };
 
-enum class InsertEffectType : uint8_t { None, Biquad };
+enum class InsertEffectType : uint8_t { None, Biquad, Compressor };
 
 // Fixed number of insert slots per Track/Bus, same fixed-pool philosophy
 // as kMaxTracks/kMaxVoices — bounded, real-time-safe, no runtime growth.
@@ -198,6 +198,36 @@ public:
   bool getBusFilterInsert(BusID b, uint32_t slot, bool &enabled,
                           FilterType &type, float &cutoffHz,
                           float &resonanceQ) const;
+
+  // ── Compressor insert ────────────────────────────────────────────────
+  // Same "set params, implicitly claims the slot" contract as the filter
+  // above. thresholdDb: level above which reduction kicks in (typical
+  // -30..-6). ratio: input:output above threshold, 1 = no compression,
+  // >=20 reads as a soft limiter. attackMs/releaseMs: envelope follower
+  // time constants. makeupDb: static gain added after reduction, to
+  // compensate the level lost by compressing.
+  void setTrackCompressorInsert(TrackID t, uint32_t slot, bool enabled,
+                                float thresholdDb, float ratio,
+                                float attackMs, float releaseMs,
+                                float makeupDb);
+  void setBusCompressorInsert(BusID b, uint32_t slot, bool enabled,
+                              float thresholdDb, float ratio, float attackMs,
+                              float releaseMs, float makeupDb);
+
+  bool getTrackCompressorInsert(TrackID t, uint32_t slot, bool &enabled,
+                                float &thresholdDb, float &ratio,
+                                float &attackMs, float &releaseMs,
+                                float &makeupDb) const;
+  bool getBusCompressorInsert(BusID b, uint32_t slot, bool &enabled,
+                              float &thresholdDb, float &ratio,
+                              float &attackMs, float &releaseMs,
+                              float &makeupDb) const;
+
+  // Current gain reduction in dB (0 = no reduction, negative = reducing),
+  // for a live UI meter. 0.f if slot is invalid/not a compressor.
+  float getTrackCompressorGainReduction(TrackID t, uint32_t slot) const;
+  float getBusCompressorGainReduction(BusID b, uint32_t slot) const;
+
 
 
   // Sample-accurate linear ramp of a track's gain/pan from its current
