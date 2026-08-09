@@ -44,6 +44,16 @@ constexpr TrackID kInvalidTrack = 0;
 constexpr BusID kInvalidBus = 0;
 constexpr BusID kMasterBus = 1; // always valid once init() has run
 
+// ── Insert effects ─────────────────────────────────────────────
+enum class FilterType : uint8_t { LowPass, HighPass, BandPass, Notch };
+
+enum class InsertEffectType : uint8_t { None, Biquad };
+
+// Fixed number of insert slots per Track/Bus, same fixed-pool philosophy
+// as kMaxTracks/kMaxVoices — bounded, real-time-safe, no runtime growth.
+constexpr uint32_t kMaxInserts = 4;
+
+
 class AudioEngine {
 public:
   using StreamCallback = std::function<int(float *buf, int frames)>;
@@ -162,6 +172,33 @@ public:
   void setTrackMute(TrackID t, bool muted);
   void setTrackSolo(TrackID t, bool soloed);
   void setTrackSendBus(TrackID t, BusID bus); // default: kMasterBus
+
+  // ── Insert effects ────────────────────────────────────────────────────
+  // slot is 0..kMaxInserts-1. Slots process in order (0 first) before the
+  // track's send. Setting params on a slot that's currently None
+  // implicitly assigns it that effect type; params on a slot processing a
+  // different effect type are ignored until that slot is cleared. All of
+  // this is plain atomic writes from the UI thread — no command queue
+  // round-trip, same as setTrackGain/setTrackPan — since these are coarse
+  // "set and forget" params, not sample-accurate events.
+  void setTrackFilterInsert(TrackID t, uint32_t slot, bool enabled,
+                            FilterType type, float cutoffHz,
+                            float resonanceQ);
+  void clearTrackInsert(TrackID t, uint32_t slot);
+
+  void setBusFilterInsert(BusID b, uint32_t slot, bool enabled,
+                          FilterType type, float cutoffHz, float resonanceQ);
+  void clearBusInsert(BusID b, uint32_t slot);
+
+  // Readback for UI/project save. Returns false (all-default output) for
+  // an invalid id, out-of-range slot, or a slot that isn't a filter.
+  bool getTrackFilterInsert(TrackID t, uint32_t slot, bool &enabled,
+                            FilterType &type, float &cutoffHz,
+                            float &resonanceQ) const;
+  bool getBusFilterInsert(BusID b, uint32_t slot, bool &enabled,
+                          FilterType &type, float &cutoffHz,
+                          float &resonanceQ) const;
+
 
   // Sample-accurate linear ramp of a track's gain/pan from its current
   // value to `target`, interpolated per-sample between startFrame and

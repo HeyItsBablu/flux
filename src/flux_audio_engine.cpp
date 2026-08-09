@@ -101,6 +101,155 @@ struct Voice {
   std::vector<float> streamScratch;
 };
 
+
+// ============================================================================
+// Insert effects
+// ============================================================================
+//
+// Params (type/cutoff/Q) are atomics written directly from the UI thread —
+// same "coarse set and forget" contract as Track::gain/pan. `active`
+// gates whether process() does anything so a disabled slot is a cheap
+// atomic load, not a silent no-op filter still running its math.
+//
+// Coefficients and the two-channel biquad history (x1/x2/y1/y2 per
+// channel — up to stereo) are audio-thread-only, recomputed only when
+// the cached params no longer match the live atomics, so a UI slider
+// that isn't currently moving costs nothing beyond three atomic loads
+// and a compare per block.
+struct BiquadFilterEffect {
+  std::atomic<bool> active{false};
+  std::atomic<uint8_t> filterType{(uint8_t)FilterType::LowPass};
+  std::atomic<float> cutoffHz{1000.f};
+  std::atomic<float> resonanceQ{0.707f}; // ~0.707 = Butterworth (no peak)
+
+  struct ChannelState {
+    float x1 = 0.f, x2 = 0.f, y1 = 0.f, y2 = 0.f;
+  };
+  std::array<ChannelState, 2> state; // audio-thread-only
+
+  // Cached normalized coefficients + the params they were computed
+  // from — recomputed only on change (see process()).
+  float b0 = 1.f, b1 = 0.f, b2 = 0.f, a1 = 0.f, a2 = 0.f;
+  float cachedCutoff = -1.f;
+  float cachedQ = -1.f;
+  uint8_t cachedType = 255;
+
+  // Reset audio-thread-only state to silence — called when a slot is
+  // freshly (re)claimed so stale history from a previous effect on this
+  // slot doesn't leak into new audio.
+  void resetState() {
+    state[0] = ChannelState{};
+    state[1] = ChannelState{};
+    cachedCutoff = -1.f; // forces coefficient recompute next process()
+  }
+
+  void recomputeCoeffsIfNeeded(uint32_t sampleRate) {
+    float cutoff = cutoffHz.load(std::memory_order_relaxed);
+    float q = resonanceQ.load(std::memory_order_relaxed);
+    uint8_t type = filterType.load(std::memory_order_relaxed);
+    if (cutoff == cachedCutoff && q == cachedQ && type == cachedType)
+      return;
+    cachedCutoff = cutoff;
+    cachedQ = q;
+    cachedType = type;
+
+    // Standard RBJ (Robert Bristow-Johnson) biquad cookbook formulas.
+    float freq = std::max(20.f, std::min(cutoff, (float)sampleRate * 0.49f));
+    float w0 = 2.f * 3.14159265f * freq / (float)sampleRate;
+    float cosw0 = std::cos(w0), sinw0 = std::sin(w0);
+    float qq = std::max(0.1f, q);
+    float alpha = sinw0 / (2.f * qq);
+
+    float b0n, b1n, b2n, a0n, a1n, a2n;
+    switch ((FilterType)type) {
+    case FilterType::HighPass:
+      b0n = (1.f + cosw0) / 2.f;
+      b1n = -(1.f + cosw0);
+      b2n = (1.f + cosw0) / 2.f;
+      a0n = 1.f + alpha;
+      a1n = -2.f * cosw0;
+      a2n = 1.f - alpha;
+      break;
+    case FilterType::BandPass:
+      b0n = alpha;
+      b1n = 0.f;
+      b2n = -alpha;
+      a0n = 1.f + alpha;
+      a1n = -2.f * cosw0;
+      a2n = 1.f - alpha;
+      break;
+    case FilterType::Notch:
+      b0n = 1.f;
+      b1n = -2.f * cosw0;
+      b2n = 1.f;
+      a0n = 1.f + alpha;
+      a1n = -2.f * cosw0;
+      a2n = 1.f - alpha;
+      break;
+    case FilterType::LowPass:
+    default:
+      b0n = (1.f - cosw0) / 2.f;
+      b1n = 1.f - cosw0;
+      b2n = (1.f - cosw0) / 2.f;
+      a0n = 1.f + alpha;
+      a1n = -2.f * cosw0;
+      a2n = 1.f - alpha;
+      break;
+    }
+    b0 = b0n / a0n;
+    b1 = b1n / a0n;
+    b2 = b2n / a0n;
+    a1 = a1n / a0n;
+    a2 = a2n / a0n;
+  }
+
+  // In-place, per-channel Direct Form I biquad. channels is clamped to 2
+  // (this engine has no >2-channel path elsewhere either).
+  void process(float *buf, ma_uint32 frames, uint32_t channels,
+              uint32_t sampleRate) {
+    if (!active.load(std::memory_order_relaxed))
+      return;
+    recomputeCoeffsIfNeeded(sampleRate);
+    uint32_t ch = std::min<uint32_t>(channels, 2);
+    for (uint32_t c = 0; c < ch; c++) {
+      ChannelState &st = state[c];
+      for (ma_uint32 i = 0; i < frames; i++) {
+        float x0 = buf[i * channels + c];
+        float y0 = b0 * x0 + b1 * st.x1 + b2 * st.x2 - a1 * st.y1 - a2 * st.y2;
+        st.x2 = st.x1;
+        st.x1 = x0;
+        st.y2 = st.y1;
+        st.y1 = y0;
+        buf[i * channels + c] = y0;
+      }
+    }
+  }
+};
+
+// One insert slot: currently only Biquad exists, so the tag just gates
+// whether the embedded filter runs. Adding a second effect type later
+// (compressor/delay/reverb) means adding its own embedded struct here
+// and a case in whatever drives process() per slot — not a new
+// allocation or a virtual call, keeping this consistent with the rest
+// of the file's zero-alloc audio-callback discipline.
+struct InsertSlot {
+  std::atomic<InsertEffectType> type{InsertEffectType::None};
+  BiquadFilterEffect biquad;
+
+  void process(float *buf, ma_uint32 frames, uint32_t channels,
+              uint32_t sampleRate) {
+    if (type.load(std::memory_order_relaxed) == InsertEffectType::Biquad)
+      biquad.process(buf, frames, channels, sampleRate);
+  }
+
+  void reset() {
+    type.store(InsertEffectType::None, std::memory_order_relaxed);
+    biquad.active.store(false, std::memory_order_relaxed);
+    biquad.resetState();
+  }
+};
+
+
 // ============================================================================
 // Routing graph — Track / Bus
 // ============================================================================
@@ -145,6 +294,9 @@ struct Track {
  float panRampTarget = 0.f;
  uint64_t panRampStartFrame = 0;
  uint64_t panRampEndFrame = 0;
+
+  // ── Insert effects ────────────────────────────────────────
+  std::array<InsertSlot, kMaxInserts> inserts;
 };
 
 struct Bus {
@@ -153,6 +305,9 @@ struct Bus {
   std::atomic<BusID> sendBus{kInvalidBus}; // master's is ignored (terminal)
   std::atomic<float> peakLevel{0.f};
   std::vector<float> buffer; // audio-thread-only; sized once at init()
+
+  // ── Insert effects ────────────────────────────────────────
+  std::array<InsertSlot, kMaxInserts> inserts;
 };
 
 // ============================================================================
@@ -622,8 +777,7 @@ struct AudioEngine::Impl {
       bool muted = t.muted.load(std::memory_order_relaxed);
       bool soloed = t.soloed.load(std::memory_order_relaxed);
       if (muted || (anySolo && !soloed))
-        continue; // Phase 5: insert-effect chain runs on t.buffer here, before
-                  // the send
+        continue; 
 
       BusID sendId = t.sendBus.load(std::memory_order_relaxed);
 
@@ -632,6 +786,12 @@ struct AudioEngine::Impl {
       Bus &dest = buses[sendId - 1];
       if (!dest.active.load(std::memory_order_relaxed))
         continue;
+
+      // insert-effect chain, pre-fader, pre-send — processes
+      // t.buffer in place before the gain/pan loop below reads it.
+      for (auto &slot : t.inserts)
+        slot.process(t.buffer.data(), mixFrames, channels, sampleRate);
+
 
       float lastGain = t.gain.load(std::memory_order_relaxed);
       float lastPan = t.pan.load(std::memory_order_relaxed);
@@ -702,9 +862,10 @@ struct AudioEngine::Impl {
         continue;
       BusID sendId = b.sendBus.load(std::memory_order_relaxed);
       if (sendId == kInvalidBus || sendId > kMaxBuses)
-        continue; // Phase 5: insert-effect chain runs on b.buffer here, before
-                  // the send
+        continue;
 
+      for (auto &slot : b.inserts)
+        slot.process(b.buffer.data(), mixFrames, channels, sampleRate);
       Bus &dest = buses[sendId - 1];
       if (!dest.active.load(std::memory_order_relaxed))
         continue;
@@ -1249,6 +1410,8 @@ TrackID AudioEngine::createTrack() {
     // active is true, so resetting plain (non-atomic) fields here,
     // before publish, is safe.
     t.gainRampActive = false;
+    for (auto &slot : t.inserts)
+      slot.reset();
     t.panRampActive = false;
     t.active.store(true, std::memory_order_release);
     return (TrackID)(i + 1);
@@ -1348,6 +1511,91 @@ float AudioEngine::getBusGain(BusID b) const {
   return m_impl->buses[b - 1].gain.load(std::memory_order_relaxed);
 }
 
+void AudioEngine::setTrackFilterInsert(TrackID t, uint32_t slot,
+                                       bool enabled, FilterType type,
+                                       float cutoffHz, float resonanceQ) {
+  if (t == kInvalidTrack || t > Impl::kMaxTracks || slot >= kMaxInserts)
+    return;
+  InsertSlot &s = m_impl->tracks[t - 1].inserts[slot];
+  if (s.type.load(std::memory_order_relaxed) != InsertEffectType::Biquad) {
+    s.biquad.resetState(); // freshly claiming this slot — clear stale
+                           // history from whatever was here before
+    s.type.store(InsertEffectType::Biquad, std::memory_order_relaxed);
+  }
+  s.biquad.filterType.store((uint8_t)type, std::memory_order_relaxed);
+  s.biquad.cutoffHz.store(cutoffHz, std::memory_order_relaxed);
+  s.biquad.resonanceQ.store(resonanceQ, std::memory_order_relaxed);
+  s.biquad.active.store(enabled, std::memory_order_relaxed);
+}
+
+void AudioEngine::clearTrackInsert(TrackID t, uint32_t slot) {
+  if (t == kInvalidTrack || t > Impl::kMaxTracks || slot >= kMaxInserts)
+    return;
+  m_impl->tracks[t - 1].inserts[slot].reset();
+}
+
+void AudioEngine::setBusFilterInsert(BusID b, uint32_t slot, bool enabled,
+                                     FilterType type, float cutoffHz,
+                                     float resonanceQ) {
+  if (b == kInvalidBus || b > Impl::kMaxBuses || slot >= kMaxInserts)
+    return;
+  InsertSlot &s = m_impl->buses[b - 1].inserts[slot];
+  if (s.type.load(std::memory_order_relaxed) != InsertEffectType::Biquad) {
+    s.biquad.resetState();
+    s.type.store(InsertEffectType::Biquad, std::memory_order_relaxed);
+  }
+  s.biquad.filterType.store((uint8_t)type, std::memory_order_relaxed);
+  s.biquad.cutoffHz.store(cutoffHz, std::memory_order_relaxed);
+  s.biquad.resonanceQ.store(resonanceQ, std::memory_order_relaxed);
+  s.biquad.active.store(enabled, std::memory_order_relaxed);
+}
+
+void AudioEngine::clearBusInsert(BusID b, uint32_t slot) {
+  if (b == kInvalidBus || b > Impl::kMaxBuses || slot >= kMaxInserts)
+    return;
+  m_impl->buses[b - 1].inserts[slot].reset();
+}
+
+bool AudioEngine::getTrackFilterInsert(TrackID t, uint32_t slot,
+                                       bool &enabled, FilterType &type,
+                                       float &cutoffHz,
+                                       float &resonanceQ) const {
+  enabled = false;
+  type = FilterType::LowPass;
+  cutoffHz = 1000.f;
+  resonanceQ = 0.707f;
+  if (t == kInvalidTrack || t > Impl::kMaxTracks || slot >= kMaxInserts)
+    return false;
+  const InsertSlot &s = m_impl->tracks[t - 1].inserts[slot];
+  if (s.type.load(std::memory_order_relaxed) != InsertEffectType::Biquad)
+    return false;
+  enabled = s.biquad.active.load(std::memory_order_relaxed);
+  type = (FilterType)s.biquad.filterType.load(std::memory_order_relaxed);
+  cutoffHz = s.biquad.cutoffHz.load(std::memory_order_relaxed);
+  resonanceQ = s.biquad.resonanceQ.load(std::memory_order_relaxed);
+  return true;
+}
+
+bool AudioEngine::getBusFilterInsert(BusID b, uint32_t slot, bool &enabled,
+                                     FilterType &type, float &cutoffHz,
+                                     float &resonanceQ) const {
+  enabled = false;
+  type = FilterType::LowPass;
+  cutoffHz = 1000.f;
+  resonanceQ = 0.707f;
+  if (b == kInvalidBus || b > Impl::kMaxBuses || slot >= kMaxInserts)
+    return false;
+  const InsertSlot &s = m_impl->buses[b - 1].inserts[slot];
+  if (s.type.load(std::memory_order_relaxed) != InsertEffectType::Biquad)
+    return false;
+  enabled = s.biquad.active.load(std::memory_order_relaxed);
+  type = (FilterType)s.biquad.filterType.load(std::memory_order_relaxed);
+  cutoffHz = s.biquad.cutoffHz.load(std::memory_order_relaxed);
+  resonanceQ = s.biquad.resonanceQ.load(std::memory_order_relaxed);
+  return true;
+}
+
+
 
 BusID AudioEngine::createBus() {
   // Slot 0 (id 1) is permanently reserved for kMasterBus — scan starts at 1.
@@ -1358,6 +1606,8 @@ BusID AudioEngine::createBus() {
 
     b.gain.store(1.f, std::memory_order_relaxed);
     b.sendBus.store(kMasterBus, std::memory_order_relaxed);
+    for (auto &slot : b.inserts)
+      slot.reset();
     b.active.store(true, std::memory_order_release);
     return (BusID)(i + 1);
   }
