@@ -2165,6 +2165,24 @@ class SequencerApp : public Widget {
   std::vector<State<double>> _auxBusPeakState;
   std::shared_ptr<Widget> _auxBusStripsRow;
 
+  // ── Insert-effect UI state ─────────────────────────────────
+  // One filter slot (engine insert slot 0) exposed per strip for now;
+  // kMaxInserts leaves room for more slots' worth of UI later with no
+  // engine-side changes. Index-parallel with _timeline.tracks / _auxBuses,
+  // same convention every other per-strip vector in this file uses.
+  static constexpr uint32_t kFilterInsertSlot = 0;
+
+  std::vector<State<bool>> _timelineFilterEnabledState;
+  std::vector<State<int>> _timelineFilterTypeState;
+  std::vector<State<double>> _timelineFilterCutoffState;
+  std::vector<State<double>> _timelineFilterQState;
+
+  std::vector<State<bool>> _auxFilterEnabledState;
+  std::vector<State<int>> _auxFilterTypeState;
+  std::vector<State<double>> _auxFilterCutoffState;
+  std::vector<State<double>> _auxFilterQState;
+
+
 
   std::vector<BusID> _auxBuses;
   std::vector<std::string> _auxBusNames;
@@ -2687,6 +2705,54 @@ public:
     _timelineAutoLaneVisibleState.emplace_back(false);
     _timelineSendIndexState.emplace_back(0);
 
+    _timelineFilterEnabledState.emplace_back(false);
+    _timelineFilterTypeState.emplace_back(0);
+    _timelineFilterCutoffState.emplace_back(1000.0);
+    _timelineFilterQState.emplace_back(0.707);
+
+    auto filterEnabledToggle =
+        Toggle("Filter")
+            ->setValue(_timelineFilterEnabledState[idx])
+            ->setOnToggleChanged([this, idx](bool v) {
+              _updateTrackFilter(idx, &v, nullptr, nullptr, nullptr);
+            });
+
+    auto filterTypeDropdown =
+        Dropdown({"LP", "HP", "BP", "Notch"})
+            ->setSelectedIndex(_timelineFilterTypeState[idx])
+            ->setWidth(80)
+            ->setOnSelectionChanged([this, idx](int optIdx,
+                                                const std::string &) {
+              _timelineFilterTypeState[idx].set(optIdx);
+              FilterType t = (FilterType)optIdx;
+              _updateTrackFilter(idx, nullptr, &t, nullptr, nullptr);
+            });
+
+    // Linear 20Hz-20kHz for now — a log-scaled slider would feel more
+    // natural but this UI framework's Slider is linear-only; a proper
+    // log-taper control is a follow-up, not a blocker for the filter
+    // being usable.
+    auto filterCutoffSlider =
+        Slider(20.0, 20000.0, 10.0)
+            ->setValue(_timelineFilterCutoffState[idx])
+            ->setWidth(80)
+            ->setOnValueChanged([this, idx](double v) {
+              _timelineFilterCutoffState[idx].set(v);
+              float c = (float)v;
+              _updateTrackFilter(idx, nullptr, nullptr, &c, nullptr);
+            });
+
+    auto filterQSlider =
+        Slider(0.1, 10.0, 0.1)
+            ->setValue(_timelineFilterQState[idx])
+            ->setWidth(80)
+            ->setOnValueChanged([this, idx](double v) {
+              _timelineFilterQState[idx].set(v);
+              float q = (float)v;
+              _updateTrackFilter(idx, nullptr, nullptr, nullptr, &q);
+            });
+
+
     auto sendDropdown =
         Dropdown(_sendBusLabels())
         ->setSelectedIndex(_timelineSendIndexState[idx])
@@ -2788,6 +2854,11 @@ public:
                    Text("Send")->setFontSize(10),
                    sendDropdown,
                    Row({autoParamDropdown, autoLaneToggle})->setGap(4),
+                   Text("Insert")->setFontSize(10),
+                   filterEnabledToggle,
+                   filterTypeDropdown,
+                   filterCutoffSlider,
+                   filterQSlider,
                })
             ->setGap(4)
             ->setWidth(90)
@@ -2809,6 +2880,10 @@ public:
     _timelinePeakState.clear();
     _timelineAutoLaneVisibleState.clear();
     _timelineSendIndexState.clear();
+    _timelineFilterEnabledState.clear();
+    _timelineFilterTypeState.clear();
+    _timelineFilterCutoffState.clear();
+    _timelineFilterQState.clear();
     _sendDropdowns.clear();
     if (_mixerStripsRow)
       _mixerStripsRow->children.clear();
@@ -2823,8 +2898,53 @@ public:
   // AudioEngine::setBusGain(). Aux buses in this model always send to
   // master, so unlike a track strip there's no send dropdown here.
   void _appendAuxBusStrip(size_t idx) {
-    _auxBusVolumeState.emplace_back(1.0);
-    _auxBusPeakState.emplace_back(0.0);
+     _auxBusVolumeState.emplace_back(1.0);
+     _auxBusPeakState.emplace_back(0.0);
+    
+
+    _auxFilterEnabledState.emplace_back(false);
+    _auxFilterTypeState.emplace_back(0);
+    _auxFilterCutoffState.emplace_back(1000.0);
+    _auxFilterQState.emplace_back(0.707);
+
+    auto filterEnabledToggle =
+        Toggle("Filter")
+            ->setValue(_auxFilterEnabledState[idx])
+            ->setOnToggleChanged([this, idx](bool v) {
+              _updateAuxFilter(idx, &v, nullptr, nullptr, nullptr);
+            });
+
+    auto filterTypeDropdown =
+        Dropdown({"LP", "HP", "BP", "Notch"})
+            ->setSelectedIndex(_auxFilterTypeState[idx])
+            ->setWidth(80)
+            ->setOnSelectionChanged([this, idx](int optIdx,
+                                                const std::string &) {
+              _auxFilterTypeState[idx].set(optIdx);
+              FilterType t = (FilterType)optIdx;
+              _updateAuxFilter(idx, nullptr, &t, nullptr, nullptr);
+            });
+
+    auto filterCutoffSlider =
+        Slider(20.0, 20000.0, 10.0)
+            ->setValue(_auxFilterCutoffState[idx])
+            ->setWidth(80)
+            ->setOnValueChanged([this, idx](double v) {
+              _auxFilterCutoffState[idx].set(v);
+              float c = (float)v;
+              _updateAuxFilter(idx, nullptr, nullptr, &c, nullptr);
+            });
+
+    auto filterQSlider =
+        Slider(0.1, 10.0, 0.1)
+            ->setValue(_auxFilterQState[idx])
+            ->setWidth(80)
+            ->setOnValueChanged([this, idx](double v) {
+              _auxFilterQState[idx].set(v);
+              float q = (float)v;
+              _updateAuxFilter(idx, nullptr, nullptr, nullptr, &q);
+            });
+
 
     auto meter = Box({})
                      ->setWidth(14)
@@ -2849,6 +2969,11 @@ public:
                        ->setOnValueChanged([busId](double v) {
                          AudioEngine::get().setBusGain(busId, (float)v);
                        }),
+                   Text("Insert")->setFontSize(10),
+                   filterEnabledToggle,
+                   filterTypeDropdown,
+                   filterCutoffSlider,
+                   filterQSlider,
                })
             ->setGap(4)
             ->setWidth(90)
@@ -2862,6 +2987,10 @@ public:
   void _rebuildAuxBusStrips() {
     _auxBusVolumeState.clear();
     _auxBusPeakState.clear();
+    _auxFilterEnabledState.clear();
+    _auxFilterTypeState.clear();
+    _auxFilterCutoffState.clear();
+    _auxFilterQState.clear();
     if (_auxBusStripsRow)
       _auxBusStripsRow->children.clear();
     for (size_t i = 0; i < _auxBuses.size(); i++)
@@ -2869,6 +2998,55 @@ public:
     if (_auxBusStripsRow)
       _auxBusStripsRow->markNeedsLayout();
   }
+
+  // Read-modify-write against the engine's own stored insert params —
+  // the engine (not the UI State) is the source of truth for a filter's
+  // four fields, same pattern getTrackGain/getTrackPan already use for
+  // gain/pan. Only the field(s) passed non-null are overridden; the
+  // others round-trip through unchanged. Passing all-null just re-applies
+  // whatever's already there (used by load, see below).
+  void _updateTrackFilter(size_t idx, const bool *newEnabled,
+                          const FilterType *newType, const float *newCutoff,
+                          const float *newQ) {
+    TrackID et = _timeline.tracks[idx].engineTrack;
+    bool enabled;
+    FilterType type;
+    float cutoff, q;
+    AudioEngine::get().getTrackFilterInsert(et, kFilterInsertSlot, enabled,
+                                            type, cutoff, q);
+    if (newEnabled)
+      enabled = *newEnabled;
+    if (newType)
+      type = *newType;
+    if (newCutoff)
+      cutoff = *newCutoff;
+    if (newQ)
+      q = *newQ;
+    AudioEngine::get().setTrackFilterInsert(et, kFilterInsertSlot, enabled,
+                                            type, cutoff, q);
+  }
+
+  void _updateAuxFilter(size_t idx, const bool *newEnabled,
+                        const FilterType *newType, const float *newCutoff,
+                        const float *newQ) {
+    BusID bus = _auxBuses[idx];
+    bool enabled;
+    FilterType type;
+    float cutoff, q;
+    AudioEngine::get().getBusFilterInsert(bus, kFilterInsertSlot, enabled,
+                                          type, cutoff, q);
+    if (newEnabled)
+      enabled = *newEnabled;
+    if (newType)
+      type = *newType;
+    if (newCutoff)
+      cutoff = *newCutoff;
+    if (newQ)
+      q = *newQ;
+    AudioEngine::get().setBusFilterInsert(bus, kFilterInsertSlot, enabled,
+                                          type, cutoff, q);
+  }
+
 
 
   AutomationLane *_findAutomationLane(int trackIndex, AutomationParam param) {
@@ -3506,12 +3684,20 @@ public:
           sendIndex = (int)bi + 1;
           break;
         }
+     bool fEnabled;
+     FilterType fType;
+     float fCutoff, fQ;
+     AudioEngine::get().getTrackFilterInsert(tt.engineTrack, kFilterInsertSlot,
+                                             fEnabled, fType, fCutoff, fQ);
       out << "    {\"id\":" << tt.id << ",\"name\":\"" << SeqJson::esc(tt.name)
           << "\",\"muted\":" << (tt.muted ? "true" : "false")
           << ",\"soloed\":" << (tt.soloed ? "true" : "false")
           << ",\"gain\":" << AudioEngine::get().getTrackGain(tt.engineTrack)
           << ",\"pan\":" << AudioEngine::get().getTrackPan(tt.engineTrack)
-          << ",\"sendIndex\":" << sendIndex << ",\"clips\":[";
+          << ",\"sendIndex\":" << sendIndex
+          << ",\"filterEnabled\":" << (fEnabled ? "true" : "false")
+          << ",\"filterType\":" << (int)fType << ",\"filterCutoff\":" << fCutoff
+          << ",\"filterQ\":" << fQ << ",\"clips\":[";
       for (size_t ci = 0; ci < tt.clips.size(); ci++) {
         const Clip &c = tt.clips[ci];
         out << "{\"id\":" << c.id << ",\"type\":" << (int)c.type
@@ -3529,9 +3715,17 @@ public:
     out << "  ],\n";
     out << "  \"auxBuses\": [\n";
     for (size_t i = 0; i < _auxBuses.size(); i++) {
+      bool fEnabled;
+      FilterType fType;
+      float fCutoff, fQ;
+      AudioEngine::get().getBusFilterInsert(_auxBuses[i], kFilterInsertSlot,
+                                            fEnabled, fType, fCutoff, fQ);
       out << "    {\"name\":\"" << SeqJson::esc(_auxBusNames[i])
           << "\",\"gain\":" << AudioEngine::get().getBusGain(_auxBuses[i])
-          << "}" << (i + 1 < _auxBuses.size() ? "," : "") << "\n";
+          << ",\"filterEnabled\":" << (fEnabled ? "true" : "false")
+          << ",\"filterType\":" << (int)fType << ",\"filterCutoff\":" << fCutoff
+          << ",\"filterQ\":" << fQ << "}"
+          << (i + 1 < _auxBuses.size() ? "," : "") << "\n";
     }
     out << "  ]\n}\n";
     std::ofstream f(path, std::ios::binary);
@@ -3673,7 +3867,14 @@ public:
 
     uint64_t maxClipId = 0;
     uint32_t maxTimelineTrackId = 0;
+    struct LoadedFilter {
+      bool enabled = false;
+      FilterType type = FilterType::LowPass;
+      float cutoff = 1000.f;
+      float q = 0.707f;
+    };
     std::vector<int> loadedSendIndex;
+    std::vector<LoadedFilter> loadedTrackFilter;
     for (const auto &ttj : root["timelineTracks"].arr) {
       TimelineTrack tt;
       tt.id = (TimelineTrackID)ttj["id"].asInt(0);
@@ -3691,6 +3892,17 @@ public:
       AudioEngine::get().setTrackPan(tt.engineTrack,
                                      (float)ttj["pan"].asDouble(0.0));
       loadedSendIndex.push_back(ttj["sendIndex"].asInt(0));
+
+
+      LoadedFilter lf;
+      lf.enabled = ttj["filterEnabled"].asBool(false);
+      lf.type = (FilterType)ttj["filterType"].asInt(0);
+      lf.cutoff = (float)ttj["filterCutoff"].asDouble(1000.0);
+      lf.q = (float)ttj["filterQ"].asDouble(0.707);
+      AudioEngine::get().setTrackFilterInsert(tt.engineTrack, kFilterInsertSlot,
+                                              lf.enabled, lf.type, lf.cutoff,
+                                              lf.q);
+      loadedTrackFilter.push_back(lf);
 
       for (const auto &cj : ttj["clips"].arr) {
         Clip clip;
@@ -3737,20 +3949,37 @@ public:
     _auxBuses.clear();
     _auxBusNames.clear();
     std::vector<double> loadedAuxGains;
+    std::vector<LoadedFilter> loadedAuxFilter;
     for (const auto &bj : root["auxBuses"].arr) {
       BusID b = AudioEngine::get().createBus();
       if (b == kInvalidBus)
         break; // pool exhausted — rest of the file's buses are dropped
       double gain = bj["gain"].asDouble(1.0);
       AudioEngine::get().setBusGain(b, (float)gain);
+
+
+      LoadedFilter lf;
+      lf.enabled = bj["filterEnabled"].asBool(false);
+      lf.type = (FilterType)bj["filterType"].asInt(0);
+      lf.cutoff = (float)bj["filterCutoff"].asDouble(1000.0);
+      lf.q = (float)bj["filterQ"].asDouble(0.707);
+      AudioEngine::get().setBusFilterInsert(b, kFilterInsertSlot, lf.enabled,
+                                            lf.type, lf.cutoff, lf.q);
+      loadedAuxFilter.push_back(lf);
+
       _auxBuses.push_back(b);
       _auxBusNames.push_back(
           bj["name"].asString("Aux " + std::to_string(_auxBuses.size())));
       loadedAuxGains.push_back(gain);
     }
     _rebuildAuxBusStrips();
-    for (size_t i = 0; i < loadedAuxGains.size(); i++)
+    for (size_t i = 0; i < loadedAuxGains.size(); i++) {
       _auxBusVolumeState[i].set(loadedAuxGains[i]);
+      _auxFilterEnabledState[i].set(loadedAuxFilter[i].enabled);
+      _auxFilterTypeState[i].set((int)loadedAuxFilter[i].type);
+      _auxFilterCutoffState[i].set((double)loadedAuxFilter[i].cutoff);
+      _auxFilterQState[i].set((double)loadedAuxFilter[i].q);
+    }
 
     _rebuildMixerStrips();
     for (size_t i = 0; i < _timeline.tracks.size(); i++) {
@@ -3764,6 +3993,13 @@ public:
                       : _auxBuses[sendIdx - 1];
       AudioEngine::get().setTrackSendBus(et, bus);
       _timelineSendIndexState[i].set(sendIdx);
+
+      if (i < loadedTrackFilter.size()) {
+        _timelineFilterEnabledState[i].set(loadedTrackFilter[i].enabled);
+        _timelineFilterTypeState[i].set((int)loadedTrackFilter[i].type);
+        _timelineFilterCutoffState[i].set((double)loadedTrackFilter[i].cutoff);
+        _timelineFilterQState[i].set((double)loadedTrackFilter[i].q);
+      }
     }
     _selectedClipId = 0;
     if (_timelineSurface)
