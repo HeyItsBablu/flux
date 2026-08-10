@@ -841,7 +841,7 @@ struct MidiNote {
   int pitch = 60;         // 0..127
   double startBeat = 0.0; // relative to the owning clip's startBeat
   double lengthBeats = 1.0;
-  float velocity = 0.8f;  // 0..1
+  float velocity = 0.8f; // 0..1
 };
 
 // startBeat/lengthBeats live on a timeline-global beat axis, independent of
@@ -894,6 +894,12 @@ struct TimelineTrack {
   std::vector<Clip> clips;
   bool muted = false;
   bool soloed = false;
+
+  // Display color for this track's playlist row and clips — assigned
+  // from a fixed palette when the track is created (see
+  // SequencerApp::kTrackColorPalette), matching FL Studio's convention
+  // of a distinct color per playlist track.
+  Color color = Color::fromRGB(150, 150, 235);
 
   // Fixed synth voice MIDI clips on this track play through — reuses
   // StepScheduler::fireStep exactly, so a MIDI note sounds through the
@@ -1079,7 +1085,6 @@ private:
       StepScheduler::fireStep(hit, sd, targetFrame, track.engineTrack);
     }
   }
-
 
   uint64_t _framesPerPulse() const {
     double secondsPerBeat = 60.0 / _seq.bpm; // shares StepScheduler's bpm —
@@ -1733,7 +1738,7 @@ inline bool read(const std::string &path, std::vector<MidiNote> &outNotes) {
       uint8_t hi = status & 0xF0;
 
       if (status == 0xFF) { // meta event — skipped, see function comment
-        i++; // meta type
+        i++;                // meta type
         uint32_t len = readVarLen(data, i);
         i += len;
       } else if (status == 0xF0 || status == 0xF7) { // sysex
@@ -1749,10 +1754,9 @@ inline bool read(const std::string &path, std::vector<MidiNote> &outNotes) {
           auto it = pending.find(pitch);
           if (it != pending.end()) {
             double startBeat = (double)it->second.first / division;
-            double lenBeats = std::max(
-                0.01, (double)(ticks - it->second.first) / division);
-            outNotes.push_back(
-                {pitch, startBeat, lenBeats, it->second.second});
+            double lenBeats =
+                std::max(0.01, (double)(ticks - it->second.first) / division);
+            outNotes.push_back({pitch, startBeat, lenBeats, it->second.second});
             pending.erase(it);
           }
         }
@@ -1787,19 +1791,21 @@ inline bool write(const std::string &path, const std::vector<MidiNote> &notes,
   std::vector<Event> events;
   events.reserve(notes.size() * 2);
   for (const auto &n : notes) {
-    uint32_t onTick = (uint32_t)std::max(
-        0.0, std::round(n.startBeat * kTicksPerQuarter));
+    uint32_t onTick =
+        (uint32_t)std::max(0.0, std::round(n.startBeat * kTicksPerQuarter));
     uint32_t offTick = (uint32_t)std::max(
         (double)onTick + 1.0,
         std::round((n.startBeat + n.lengthBeats) * kTicksPerQuarter));
     events.push_back({onTick, true, n.pitch, n.velocity});
     events.push_back({offTick, false, n.pitch, n.velocity});
   }
-  std::stable_sort(events.begin(), events.end(),
-                   [](const Event &a, const Event &b) { return a.tick < b.tick; });
+  std::stable_sort(
+      events.begin(), events.end(),
+      [](const Event &a, const Event &b) { return a.tick < b.tick; });
 
   std::vector<uint8_t> track;
-  uint32_t usPerQuarter = (uint32_t)std::llround(60000000.0 / std::max(1.0, bpm));
+  uint32_t usPerQuarter =
+      (uint32_t)std::llround(60000000.0 / std::max(1.0, bpm));
   writeVarLen(track, 0);
   track.push_back(0xFF);
   track.push_back(0x51);
@@ -1814,8 +1820,9 @@ inline bool write(const std::string &path, const std::vector<MidiNote> &notes,
     lastTick = e.tick;
     track.push_back(e.isOn ? 0x90 : 0x80);
     track.push_back((uint8_t)std::max(0, std::min(127, e.pitch)));
-    track.push_back(e.isOn ? (uint8_t)std::max(1, std::min(127, (int)(e.velocity * 127)))
-                           : 0);
+    track.push_back(
+        e.isOn ? (uint8_t)std::max(1, std::min(127, (int)(e.velocity * 127)))
+               : 0);
   }
   writeVarLen(track, 0);
   track.push_back(0xFF);
@@ -1835,13 +1842,13 @@ inline bool write(const std::string &path, const std::vector<MidiNote> &notes,
 
   std::vector<uint8_t> trackHeader{'M', 'T', 'r', 'k'};
   writeU32BE(trackHeader, (uint32_t)track.size());
-  f.write(reinterpret_cast<const char *>(trackHeader.data()), trackHeader.size());
+  f.write(reinterpret_cast<const char *>(trackHeader.data()),
+          trackHeader.size());
   f.write(reinterpret_cast<const char *>(track.data()), track.size());
   return (bool)f;
 }
 
 } // namespace MidiFile
-
 
 // ============================================================================
 // TimelineSurface — draws Timeline tracks/clips and handles click input.
@@ -1963,7 +1970,7 @@ public:
     float w = (float)ctx.width();
     float h = (float)ctx.height();
 
-    ctx.setFillColor(Color::fromRGB(250, 250, 252));
+    ctx.setFillColor(Color::fromRGB(30, 32, 40));
     ctx.fillRect(0, 0, w, h);
 
     if (!timeline)
@@ -1975,8 +1982,8 @@ public:
     int totalBeats = (int)(w / kPxPerBeat) + 1;
     for (int b = 0; b <= totalBeats; b++) {
       float x = b * kPxPerBeat;
-      ctx.setStrokeColor((b % 4 == 0) ? Color::fromRGB(190, 190, 200)
-                                      : Color::fromRGB(225, 225, 230));
+      ctx.setStrokeColor((b % 4 == 0) ? Color::fromRGB(70, 74, 86)
+                                      : Color::fromRGB(50, 53, 63));
       ctx.setLineWidth(1);
       ctx.beginPath();
       ctx.moveTo(x, 0);
@@ -1987,7 +1994,19 @@ public:
     // Track lanes + clips.
     for (size_t ti = 0; ti < timeline->tracks.size(); ti++) {
       float laneY = _laneTops[ti];
-      ctx.setStrokeColor(Color::fromRGB(210, 210, 215));
+      const Color &trackColor = timeline->tracks[ti].color;
+
+      // Faint colored row wash, tinted by the track's own color — lets
+      // each row read at a glance the way FL's colored playlist rows do,
+      // even before you look at any clip.
+      ctx.setFillColor(_blendOverBg(trackColor, 0.14f));
+      ctx.fillRect(0, laneY, w, kTrackHeight);
+
+      // Narrow color chip at the very left edge of the row.
+      ctx.setFillColor(trackColor);
+      ctx.fillRect(0, laneY, 4, kTrackHeight);
+
+      ctx.setStrokeColor(Color::fromRGB(50, 53, 63));
       ctx.beginPath();
       ctx.moveTo(0, laneY);
       ctx.lineTo(w, laneY);
@@ -2000,12 +2019,26 @@ public:
         bool isAudio = clip.type == ClipType::Audio;
         bool isMidi = clip.type == ClipType::Midi;
 
-        ctx.setFillColor(selected  ? Color::fromRGB(99, 179, 237)
-                         : isAudio ? Color::fromRGB(235, 165, 95)
-                         : isMidi  ? Color::fromRGB(120, 200, 140)
-                                   : Color::fromRGB(150, 150, 235));
+        // Clip keeps its track's color regardless of type — selection is
+        // shown as a highlight outline instead of replacing the color,
+        // so a multi-track selection stays readable against colored
+        // rows (this mirrors FL: clips keep their track's hue, a
+        // selected clip just gets a brighter outline).
+        Color clipFill = selected ? _lighten(trackColor, 0.3f) : trackColor;
+        ctx.setFillColor(clipFill);
         ctx.fillRoundedRect(cx + 1, laneY + 4, std::max(4.f, cw - 2),
-                            kTrackHeight - 8, 4);
+                            kTrackHeight - 8, 3);
+        if (selected) {
+          ctx.setStrokeColor(Color::fromRGB(255, 255, 255));
+          ctx.setLineWidth(1.5f);
+          ctx.strokeRoundedRect(cx + 1, laneY + 4, std::max(4.f, cw - 2),
+                                kTrackHeight - 8, 3);
+        }
+
+        // Darker header strip across the top, like FL's clip name bar
+        // sitting above the waveform.
+        ctx.setFillColor(_darken(trackColor, 0.35f));
+        ctx.fillRect(cx + 1, laneY + 4, std::max(4.f, cw - 2), 14);
 
         std::string label = "Clip";
         if (isAudio) {
@@ -2050,7 +2083,6 @@ public:
             ctx.fillRoundedRect(nx, ny, nw, 3, 1);
           }
         }
-
 
         // Waveform preview + fade ramps/handles — AudioClip only.
         //
@@ -2196,7 +2228,7 @@ public:
     // Playhead.
     if (scheduler && scheduler->playing) {
       float px = (float)(scheduler->playheadBeats() * kPxPerBeat);
-      ctx.setStrokeColor(Color::fromRGB(220, 50, 50));
+      ctx.setStrokeColor(Color::fromRGB(140, 210, 90));
       ctx.setLineWidth(2);
       ctx.beginPath();
       ctx.moveTo(px, 0);
@@ -2604,6 +2636,25 @@ private:
     return out;
   }
 
+  // Canvas2D here has no alpha-fill call, so a "tinted over dark
+  // background" wash is precomputed in RGB space instead of using real
+  // alpha compositing. Background is assumed to be (30,32,40) — see
+  // render()'s fillRect above.
+  static Color _blendOverBg(const Color &c, float amount) {
+    return Color::fromRGB((int)(c.r * amount + 30 * (1.f - amount)),
+                          (int)(c.g * amount + 32 * (1.f - amount)),
+                          (int)(c.b * amount + 40 * (1.f - amount)));
+  }
+  static Color _lighten(const Color &c, float t) {
+    return Color::fromRGB((int)(c.r + (255 - c.r) * t),
+                          (int)(c.g + (255 - c.g) * t),
+                          (int)(c.b + (255 - c.b) * t));
+  }
+  static Color _darken(const Color &c, float t) {
+    return Color::fromRGB((int)(c.r * (1.f - t)), (int)(c.g * (1.f - t)),
+                          (int)(c.b * (1.f - t)));
+  }
+
   static bool _withinHandle(float x, float y, float hx, float hy) {
     float dx = x - hx, dy = y - hy;
     return (dx * dx + dy * dy) <= (kHandleHitRadius * kHandleHitRadius);
@@ -2648,7 +2699,7 @@ public:
 
   void render(Canvas2D &ctx) override {
     ctx.setFillColor(_dragging ? Color::fromRGB(130, 140, 220)
-                                : Color::fromRGB(212, 212, 220));
+                               : Color::fromRGB(212, 212, 220));
     ctx.fillRect(0, 0, (float)ctx.width(), (float)ctx.height());
   }
 
@@ -2679,7 +2730,6 @@ private:
   bool _dragging = false;
   float _lastPos = 0.f;
 };
-
 
 // ============================================================================
 // UI
@@ -2904,6 +2954,20 @@ class SequencerApp : public Widget {
   static constexpr uint32_t kDelayInsertSlot = 2;
   static constexpr uint32_t kReverbInsertSlot = 3;
 
+  // Cycled through as tracks are added — chosen to read clearly against
+  // the dark timeline background, same spirit as FL's per-track color
+  // chips in the screenshot.
+  static constexpr Color kTrackColorPalette[] = {
+      Color::fromRGB(214, 132, 158), // pink
+      Color::fromRGB(189, 178, 96),  // olive
+      Color::fromRGB(140, 176, 103), // green
+      Color::fromRGB(94, 150, 150),  // teal
+      Color::fromRGB(104, 96, 168),  // violet
+      Color::fromRGB(176, 96, 140),  // magenta
+      Color::fromRGB(176, 108, 92),  // rust
+      Color::fromRGB(96, 140, 176),  // blue
+  };
+
   std::vector<State<bool>> _timelineFilterEnabledState;
   std::vector<State<int>> _timelineFilterTypeState;
   std::vector<State<double>> _timelineFilterCutoffState;
@@ -3021,7 +3085,6 @@ class SequencerApp : public Widget {
       std::vector<std::string>{}};
   int _sampleBrowserTargetTrack = 0;
   std::shared_ptr<DropdownWidget> _sampleBrowserTrackDropdown;
-
 
 public:
   SequencerApp() {
@@ -3581,6 +3644,9 @@ public:
                                                        // future per-clip
                                                        // routing — see
                                                        // TimelineScheduler
+    tt.color = kTrackColorPalette[_timeline.tracks.size() %
+                                  (sizeof(kTrackColorPalette) /
+                                   sizeof(kTrackColorPalette[0]))];
     _timeline.tracks.push_back(std::move(tt));
 
     if (_timelineCanvas)
@@ -4710,7 +4776,8 @@ public:
       _recordTargetTrackIndex = std::max(0, (int)_timeline.tracks.size() - 1);
   }
   // ── Multi-panel layout helpers (Phase 7) ────────────────────────────
-  std::shared_ptr<CanvasWidget> _makeVSplitter(std::function<void(int)> onDrag) {
+  std::shared_ptr<CanvasWidget>
+  _makeVSplitter(std::function<void(int)> onDrag) {
     // 6px wide, tall enough to span a panel row; see PanelSplitterSurface's
     // class comment for why this can't just be Full-height like a Box.
     auto canvas = Canvas(6, 700);
@@ -4721,7 +4788,8 @@ public:
     surface->onDrag = std::move(onDrag);
     return canvas;
   }
-  std::shared_ptr<CanvasWidget> _makeHSplitter(std::function<void(int)> onDrag) {
+  std::shared_ptr<CanvasWidget>
+  _makeHSplitter(std::function<void(int)> onDrag) {
     auto canvas = Canvas(1400, 6);
     canvas->setViewportEnabled(false);
     canvas->setScrollbarsEnabled(false);
@@ -4741,10 +4809,10 @@ public:
                    Button("Load",
                           [this, path] {
                             if (_sampleBrowserTargetTrack >= 0 &&
-                                _sampleBrowserTargetTrack  < 
+                                _sampleBrowserTargetTrack <
                                     (int)_seq->trackVoice.size())
-                              _loadTrackSample((size_t)_sampleBrowserTargetTrack,
-                                               path);
+                              _loadTrackSample(
+                                  (size_t)_sampleBrowserTargetTrack, path);
                           })
                        ->setWidth(56)
                        ->setHeight(22)
@@ -4898,7 +4966,6 @@ public:
       return;
     MidiFile::write(path, clip->midiNotes, _seq->bpm);
   }
-
 
   void _timelineFadeDragStart(ClipID id, bool isFadeIn) {
     Clip *clip = _findTimelineClip(id);
@@ -5265,8 +5332,7 @@ public:
               << ",\"velocity\":" << n.velocity << "}"
               << (ni + 1 < c.midiNotes.size() ? "," : "");
         }
-        out << "]}"
-            << (ci + 1 < tt.clips.size() ? "," : "");
+        out << "]}" << (ci + 1 < tt.clips.size() ? "," : "");
       }
       out << "]}" << (ti + 1 < _timeline.tracks.size() ? "," : "") << "\n";
     }
@@ -5421,7 +5487,6 @@ public:
         _layerNameState[t][i].set(_basenameOf(layer.samplePath));
       }
 
-
       _seq->trackMuted[t] = tj["muted"].asBool(false);
       _seq->trackSoloed[t] = tj["soloed"].asBool(false);
       _trackVolumeState[t].set((double)_seq->trackVoice[t].gain);
@@ -5548,6 +5613,9 @@ public:
       tt.name = ttj["name"].asString("Track");
       tt.muted = ttj["muted"].asBool(false);
       tt.soloed = ttj["soloed"].asBool(false);
+      tt.color = kTrackColorPalette[_timeline.tracks.size() %
+                                    (sizeof(kTrackColorPalette) /
+                                     sizeof(kTrackColorPalette[0]))];
       tt.engineTrack = AudioEngine::get().createTrack(); // reserved for
                                                          // future per-clip
                                                          // routing, same
@@ -6751,8 +6819,8 @@ public:
                          ->setPadding(8);
 
     auto leftSplitter = _makeVSplitter([this](int dx) {
-      _leftPanelWidth = std::max(
-          kMinPanelSize, std::min(kMaxPanelSize, _leftPanelWidth + dx));
+      _leftPanelWidth = std::max(kMinPanelSize,
+                                 std::min(kMaxPanelSize, _leftPanelWidth + dx));
       _leftPanelBox->setWidth(_leftPanelWidth);
     });
     auto rightSplitter = _makeVSplitter([this](int dx) {
@@ -6765,11 +6833,10 @@ public:
       _rightPanelBox->setWidth(_rightPanelWidth);
     });
 
-    auto mainPanelsRow =
-        Row({_leftPanelBox, leftSplitter, centerPanel, rightSplitter,
-             _rightPanelBox})
-            ->setGap(0)
-            ->setFlexGrow(1);
+    auto mainPanelsRow = Row({_leftPanelBox, leftSplitter, centerPanel,
+                              rightSplitter, _rightPanelBox})
+                             ->setGap(0)
+                             ->setFlexGrow(1);
 
     // ── Sample browser (bottom panel) ───────────────────────────────────
     std::vector<std::string> sampleBrowserTrackLabels;
@@ -6804,20 +6871,19 @@ public:
             ->setGap(8)
             ->setAlignItems(AlignItems::Center);
 
-    auto sampleBrowserList =
-        Box({
-                Map<std::string>(
-                    _sampleBrowserFilesState,
-                    [](int, const std::string &p) {
-                      return FlexItemKey::fromString(p);
-                    },
-                    [this](int, const std::string &path) {
-                      return _buildSampleBrowserRow(path);
-                    }),
-            })
-            ->setDisplay(Display::Flex)
-            ->setDirection(FlexDirection::Column)
-            ->setGap(4);
+    auto sampleBrowserList = Box({
+                                     Map<std::string>(
+                                         _sampleBrowserFilesState,
+                                         [](int, const std::string &p) {
+                                           return FlexItemKey::fromString(p);
+                                         },
+                                         [this](int, const std::string &path) {
+                                           return _buildSampleBrowserRow(path);
+                                         }),
+                                 })
+                                 ->setDisplay(Display::Flex)
+                                 ->setDirection(FlexDirection::Column)
+                                 ->setGap(4);
 
     _bottomPanelBox = Box({sampleBrowserToolbar, sampleBrowserList})
                           ->setDisplay(Display::Flex)
@@ -6840,8 +6906,8 @@ public:
       _bottomPanelBox->setHeight(_bottomPanelHeight);
     });
 
-    return Column({transportRow, mainPanelsRow, bottomSplitter,
-                   _bottomPanelBox})
+    return Column(
+               {transportRow, mainPanelsRow, bottomSplitter, _bottomPanelBox})
         ->setGap(8)
         ->setPadding(16)
         ->setWidthMode(SizeMode::Full)
