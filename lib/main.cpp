@@ -2172,6 +2172,8 @@ class SequencerApp : public Widget {
   // same convention every other per-strip vector in this file uses.
   static constexpr uint32_t kFilterInsertSlot = 0;
   static constexpr uint32_t kCompressorInsertSlot = 1;
+  static constexpr uint32_t kDelayInsertSlot = 2;
+  static constexpr uint32_t kReverbInsertSlot = 3;
 
   std::vector<State<bool>> _timelineFilterEnabledState;
   std::vector<State<int>> _timelineFilterTypeState;
@@ -2197,6 +2199,29 @@ class SequencerApp : public Widget {
   std::vector<State<double>> _auxCompAttackState;
   std::vector<State<double>> _auxCompReleaseState;
   std::vector<State<double>> _auxCompMakeupState;
+
+
+  std::vector<State<bool>> _timelineDelayEnabledState;
+  std::vector<State<double>> _timelineDelayTimeState;
+  std::vector<State<double>> _timelineDelayFeedbackState;
+  std::vector<State<double>> _timelineDelayMixState;
+
+  std::vector<State<bool>> _timelineReverbEnabledState;
+  std::vector<State<double>> _timelineReverbRoomState;
+  std::vector<State<double>> _timelineReverbDampingState;
+  std::vector<State<double>> _timelineReverbMixState;
+
+
+
+  std::vector<State<bool>> _auxDelayEnabledState;
+  std::vector<State<double>> _auxDelayTimeState;
+  std::vector<State<double>> _auxDelayFeedbackState;
+  std::vector<State<double>> _auxDelayMixState;
+
+  std::vector<State<bool>> _auxReverbEnabledState;
+  std::vector<State<double>> _auxReverbRoomState;
+  std::vector<State<double>> _auxReverbDampingState;
+  std::vector<State<double>> _auxReverbMixState;
 
 
 
@@ -2733,6 +2758,92 @@ public:
     _timelineCompReleaseState.emplace_back(100.0);
     _timelineCompMakeupState.emplace_back(0.0);
 
+    _timelineDelayEnabledState.emplace_back(false);
+    _timelineDelayTimeState.emplace_back(300.0);
+    _timelineDelayFeedbackState.emplace_back(0.35);
+    _timelineDelayMixState.emplace_back(0.3);
+
+    _timelineReverbEnabledState.emplace_back(false);
+    _timelineReverbRoomState.emplace_back(0.5);
+    _timelineReverbDampingState.emplace_back(0.5);
+    _timelineReverbMixState.emplace_back(0.3);
+
+
+    auto delayEnabledToggle =
+        Toggle("Delay")
+            ->setValue(_timelineDelayEnabledState[idx])
+            ->setOnToggleChanged([this, idx](bool v) {
+              _updateTrackDelay(idx, &v, nullptr, nullptr, nullptr);
+            });
+
+    auto delayTimeSlider =
+        Slider(1.0, (double)AudioEngine::kDelayMaxMs, 5.0)
+            ->setValue(_timelineDelayTimeState[idx])
+            ->setWidth(80)
+            ->setOnValueChanged([this, idx](double v) {
+              _timelineDelayTimeState[idx].set(v);
+              float f = (float)v;
+              _updateTrackDelay(idx, nullptr, &f, nullptr, nullptr);
+            });
+
+    auto delayFeedbackSlider =
+        Slider(0.0, 0.95, 0.01)
+            ->setValue(_timelineDelayFeedbackState[idx])
+            ->setWidth(80)
+            ->setOnValueChanged([this, idx](double v) {
+              _timelineDelayFeedbackState[idx].set(v);
+              float f = (float)v;
+              _updateTrackDelay(idx, nullptr, nullptr, &f, nullptr);
+            });
+
+    auto delayMixSlider =
+        Slider(0.0, 1.0, 0.01)
+            ->setValue(_timelineDelayMixState[idx])
+            ->setWidth(80)
+            ->setOnValueChanged([this, idx](double v) {
+              _timelineDelayMixState[idx].set(v);
+              float f = (float)v;
+              _updateTrackDelay(idx, nullptr, nullptr, nullptr, &f);
+            });
+
+    auto reverbEnabledToggle =
+        Toggle("Reverb")
+            ->setValue(_timelineReverbEnabledState[idx])
+            ->setOnToggleChanged([this, idx](bool v) {
+              _updateTrackReverb(idx, &v, nullptr, nullptr, nullptr);
+            });
+
+    auto reverbRoomSlider =
+        Slider(0.0, 1.0, 0.01)
+            ->setValue(_timelineReverbRoomState[idx])
+            ->setWidth(80)
+            ->setOnValueChanged([this, idx](double v) {
+              _timelineReverbRoomState[idx].set(v);
+              float f = (float)v;
+              _updateTrackReverb(idx, nullptr, &f, nullptr, nullptr);
+            });
+
+    auto reverbDampingSlider =
+        Slider(0.0, 1.0, 0.01)
+            ->setValue(_timelineReverbDampingState[idx])
+            ->setWidth(80)
+            ->setOnValueChanged([this, idx](double v) {
+              _timelineReverbDampingState[idx].set(v);
+              float f = (float)v;
+              _updateTrackReverb(idx, nullptr, nullptr, &f, nullptr);
+            });
+
+    auto reverbMixSlider =
+        Slider(0.0, 1.0, 0.01)
+            ->setValue(_timelineReverbMixState[idx])
+            ->setWidth(80)
+            ->setOnValueChanged([this, idx](double v) {
+              _timelineReverbMixState[idx].set(v);
+              float f = (float)v;
+              _updateTrackReverb(idx, nullptr, nullptr, nullptr, &f);
+            });
+
+
     auto compEnabledToggle =
         Toggle("Comp")
             ->setValue(_timelineCompEnabledState[idx])
@@ -2952,6 +3063,15 @@ public:
                    compAttackSlider,
                    compReleaseSlider,
                    compMakeupSlider,
+                   delayEnabledToggle,
+                   delayTimeSlider,
+                   delayFeedbackSlider,
+                   delayMixSlider,
+                   reverbEnabledToggle,
+                   reverbRoomSlider,
+                   reverbDampingSlider,
+                   reverbMixSlider,
+
                })
             ->setGap(4)
             ->setWidth(90)
@@ -2983,6 +3103,16 @@ public:
     _timelineCompAttackState.clear();
     _timelineCompReleaseState.clear();
     _timelineCompMakeupState.clear();
+    _timelineDelayEnabledState.clear();
+    _timelineDelayTimeState.clear();
+    _timelineDelayFeedbackState.clear();
+    _timelineDelayMixState.clear();
+    _timelineReverbEnabledState.clear();
+    _timelineReverbRoomState.clear();
+    _timelineReverbDampingState.clear();
+    _timelineReverbMixState.clear();
+
+    
     _sendDropdowns.clear();
     if (_mixerStripsRow)
       _mixerStripsRow->children.clear();
@@ -3012,6 +3142,90 @@ public:
     _auxCompAttackState.emplace_back(10.0);
     _auxCompReleaseState.emplace_back(100.0);
     _auxCompMakeupState.emplace_back(0.0);
+
+    _auxDelayEnabledState.emplace_back(false);
+    _auxDelayTimeState.emplace_back(300.0);
+    _auxDelayFeedbackState.emplace_back(0.35);
+    _auxDelayMixState.emplace_back(0.3);
+
+    _auxReverbEnabledState.emplace_back(false);
+    _auxReverbRoomState.emplace_back(0.5);
+    _auxReverbDampingState.emplace_back(0.5);
+    _auxReverbMixState.emplace_back(0.3);
+
+    auto delayEnabledToggle =
+        Toggle("Delay")
+            ->setValue(_auxDelayEnabledState[idx])
+            ->setOnToggleChanged([this, idx](bool v) {
+              _updateAuxDelay(idx, &v, nullptr, nullptr, nullptr);
+            });
+
+    auto delayTimeSlider =
+        Slider(1.0, (double)AudioEngine::kDelayMaxMs, 5.0)
+            ->setValue(_auxDelayTimeState[idx])
+            ->setWidth(80)
+            ->setOnValueChanged([this, idx](double v) {
+              _auxDelayTimeState[idx].set(v);
+              float f = (float)v;
+              _updateAuxDelay(idx, nullptr, &f, nullptr, nullptr);
+            });
+
+    auto delayFeedbackSlider =
+        Slider(0.0, 0.95, 0.01)
+            ->setValue(_auxDelayFeedbackState[idx])
+            ->setWidth(80)
+            ->setOnValueChanged([this, idx](double v) {
+              _auxDelayFeedbackState[idx].set(v);
+              float f = (float)v;
+              _updateAuxDelay(idx, nullptr, nullptr, &f, nullptr);
+            });
+
+    auto delayMixSlider =
+        Slider(0.0, 1.0, 0.01)
+            ->setValue(_auxDelayMixState[idx])
+            ->setWidth(80)
+            ->setOnValueChanged([this, idx](double v) {
+              _auxDelayMixState[idx].set(v);
+              float f = (float)v;
+              _updateAuxDelay(idx, nullptr, nullptr, nullptr, &f);
+            });
+    auto reverbEnabledToggle =
+        Toggle("Reverb")
+            ->setValue(_auxReverbEnabledState[idx])
+            ->setOnToggleChanged([this, idx](bool v) {
+              _updateAuxReverb(idx, &v, nullptr, nullptr, nullptr);
+            });
+
+    auto reverbRoomSlider =
+        Slider(0.0, 1.0, 0.01)
+            ->setValue(_auxReverbRoomState[idx])
+            ->setWidth(80)
+            ->setOnValueChanged([this, idx](double v) {
+              _auxReverbRoomState[idx].set(v);
+              float f = (float)v;
+              _updateAuxReverb(idx, nullptr, &f, nullptr, nullptr);
+            });
+
+    auto reverbDampingSlider =
+        Slider(0.0, 1.0, 0.01)
+            ->setValue(_auxReverbDampingState[idx])
+            ->setWidth(80)
+            ->setOnValueChanged([this, idx](double v) {
+              _auxReverbDampingState[idx].set(v);
+              float f = (float)v;
+              _updateAuxReverb(idx, nullptr, nullptr, &f, nullptr);
+            });
+
+    auto reverbMixSlider =
+        Slider(0.0, 1.0, 0.01)
+            ->setValue(_auxReverbMixState[idx])
+            ->setWidth(80)
+            ->setOnValueChanged([this, idx](double v) {
+              _auxReverbMixState[idx].set(v);
+              float f = (float)v;
+              _updateAuxReverb(idx, nullptr, nullptr, nullptr, &f);
+            });
+
 
     auto compEnabledToggle =
         Toggle("Comp")
@@ -3150,6 +3364,15 @@ public:
                    compAttackSlider,
                    compReleaseSlider,
                    compMakeupSlider,
+                   delayEnabledToggle,
+                   delayTimeSlider,
+                   delayFeedbackSlider,
+                   delayMixSlider,
+                   reverbEnabledToggle,
+                   reverbRoomSlider,
+                   reverbDampingSlider,
+                   reverbMixSlider,
+                  
 
                })
             ->setGap(4)
@@ -3174,6 +3397,14 @@ public:
     _auxCompAttackState.clear();
     _auxCompReleaseState.clear();
     _auxCompMakeupState.clear();
+    _auxDelayEnabledState.clear();
+    _auxDelayTimeState.clear();
+    _auxDelayFeedbackState.clear();
+    _auxDelayMixState.clear();
+    _auxReverbEnabledState.clear();
+    _auxReverbRoomState.clear();
+    _auxReverbDampingState.clear();
+    _auxReverbMixState.clear();
 
     if (_auxBusStripsRow)
       _auxBusStripsRow->children.clear();
@@ -3284,6 +3515,86 @@ public:
         bus, kCompressorInsertSlot, enabled, thresh, ratio, attack, release,
         makeup);
   }
+
+  void _updateTrackDelay(size_t idx, const bool *newEnabled,
+                         const float *newTime, const float *newFeedback,
+                         const float *newMix) {
+    TrackID et = _timeline.tracks[idx].engineTrack;
+    bool enabled;
+    float time, fb, mix;
+    AudioEngine::get().getTrackDelayInsert(et, kDelayInsertSlot, enabled,
+                                           time, fb, mix);
+    if (newEnabled)
+      enabled = *newEnabled;
+    if (newTime)
+      time = *newTime;
+    if (newFeedback)
+      fb = *newFeedback;
+    if (newMix)
+      mix = *newMix;
+    AudioEngine::get().setTrackDelayInsert(et, kDelayInsertSlot, enabled,
+                                           time, fb, mix);
+  }
+
+  void _updateAuxDelay(size_t idx, const bool *newEnabled,
+                       const float *newTime, const float *newFeedback,
+                       const float *newMix) {
+    BusID bus = _auxBuses[idx];
+    bool enabled;
+    float time, fb, mix;
+    AudioEngine::get().getBusDelayInsert(bus, kDelayInsertSlot, enabled, time,
+                                         fb, mix);
+    if (newEnabled)
+      enabled = *newEnabled;
+    if (newTime)
+      time = *newTime;
+    if (newFeedback)
+      fb = *newFeedback;
+    if (newMix)
+      mix = *newMix;
+    AudioEngine::get().setBusDelayInsert(bus, kDelayInsertSlot, enabled, time,
+                                         fb, mix);
+  }
+  void _updateTrackReverb(size_t idx, const bool *newEnabled,
+                          const float *newRoom, const float *newDamping,
+                          const float *newMix) {
+    TrackID et = _timeline.tracks[idx].engineTrack;
+    bool enabled;
+    float room, damping, mix;
+    AudioEngine::get().getTrackReverbInsert(et, kReverbInsertSlot, enabled,
+                                            room, damping, mix);
+    if (newEnabled)
+      enabled = *newEnabled;
+    if (newRoom)
+      room = *newRoom;
+    if (newDamping)
+      damping = *newDamping;
+    if (newMix)
+      mix = *newMix;
+    AudioEngine::get().setTrackReverbInsert(et, kReverbInsertSlot, enabled,
+                                            room, damping, mix);
+  }
+
+  void _updateAuxReverb(size_t idx, const bool *newEnabled,
+                        const float *newRoom, const float *newDamping,
+                        const float *newMix) {
+    BusID bus = _auxBuses[idx];
+    bool enabled;
+    float room, damping, mix;
+    AudioEngine::get().getBusReverbInsert(bus, kReverbInsertSlot, enabled,
+                                          room, damping, mix);
+    if (newEnabled)
+      enabled = *newEnabled;
+    if (newRoom)
+      room = *newRoom;
+    if (newDamping)
+      damping = *newDamping;
+    if (newMix)
+      mix = *newMix;
+    AudioEngine::get().setBusReverbInsert(bus, kReverbInsertSlot, enabled,
+                                          room, damping, mix);
+  }
+
 
 
 
@@ -3933,6 +4244,14 @@ public:
       AudioEngine::get().getTrackCompressorInsert(
           tt.engineTrack, kCompressorInsertSlot, cEnabled, cThresh, cRatio,
           cAttack, cRelease, cMakeup);
+      bool dEnabled;
+      float dTime, dFeedback, dMix;
+      AudioEngine::get().getTrackDelayInsert(tt.engineTrack, kDelayInsertSlot,
+                                             dEnabled, dTime, dFeedback, dMix);
+      bool rEnabled;
+      float rRoom, rDamping, rMix;
+      AudioEngine::get().getTrackReverbInsert(tt.engineTrack, kReverbInsertSlot,
+                                              rEnabled, rRoom, rDamping, rMix);
       out << "    {\"id\":" << tt.id << ",\"name\":\"" << SeqJson::esc(tt.name)
           << "\",\"muted\":" << (tt.muted ? "true" : "false")
           << ",\"soloed\":" << (tt.soloed ? "true" : "false")
@@ -3945,7 +4264,13 @@ public:
           << ",\"compEnabled\":" << (cEnabled ? "true" : "false")
           << ",\"compThreshold\":" << cThresh << ",\"compRatio\":" << cRatio
           << ",\"compAttack\":" << cAttack << ",\"compRelease\":" << cRelease
-          << ",\"compMakeup\":" << cMakeup << ",\"clips\":[";
+          << ",\"compMakeup\":" << cMakeup
+          << ",\"delayEnabled\":" << (dEnabled ? "true" : "false")
+          << ",\"delayTime\":" << dTime << ",\"delayFeedback\":" << dFeedback
+          << ",\"delayMix\":" << dMix
+          << ",\"reverbEnabled\":" << (rEnabled ? "true" : "false")
+          << ",\"reverbRoom\":" << rRoom << ",\"reverbDamping\":" << rDamping
+          << ",\"reverbMix\":" << rMix << ",\"clips\":[";
       for (size_t ci = 0; ci < tt.clips.size(); ci++) {
         const Clip &c = tt.clips[ci];
         out << "{\"id\":" << c.id << ",\"type\":" << (int)c.type
@@ -3973,6 +4298,14 @@ public:
       AudioEngine::get().getBusCompressorInsert(
           _auxBuses[i], kCompressorInsertSlot, cEnabled, cThresh, cRatio,
           cAttack, cRelease, cMakeup);
+      bool dEnabled;
+      float dTime, dFeedback, dMix;
+      AudioEngine::get().getBusDelayInsert(_auxBuses[i], kDelayInsertSlot,
+                                           dEnabled, dTime, dFeedback, dMix);
+      bool rEnabled;
+      float rRoom, rDamping, rMix;
+      AudioEngine::get().getBusReverbInsert(_auxBuses[i], kReverbInsertSlot,
+                                            rEnabled, rRoom, rDamping, rMix);
       out << "    {\"name\":\"" << SeqJson::esc(_auxBusNames[i])
           << "\",\"gain\":" << AudioEngine::get().getBusGain(_auxBuses[i])
           << ",\"filterEnabled\":" << (fEnabled ? "true" : "false")
@@ -3981,7 +4314,13 @@ public:
           << ",\"compEnabled\":" << (cEnabled ? "true" : "false")
           << ",\"compThreshold\":" << cThresh << ",\"compRatio\":" << cRatio
           << ",\"compAttack\":" << cAttack << ",\"compRelease\":" << cRelease
-          << ",\"compMakeup\":" << cMakeup << "}"
+          << ",\"compMakeup\":" << cMakeup
+          << ",\"delayEnabled\":" << (dEnabled ? "true" : "false")
+          << ",\"delayTime\":" << dTime << ",\"delayFeedback\":" << dFeedback
+          << ",\"delayMix\":" << dMix
+          << ",\"reverbEnabled\":" << (rEnabled ? "true" : "false")
+          << ",\"reverbRoom\":" << rRoom << ",\"reverbDamping\":" << rDamping
+          << ",\"reverbMix\":" << rMix << "}"
           << (i + 1 < _auxBuses.size() ? "," : "") << "\n";
     }
     out << "  ]\n}\n";
@@ -4135,6 +4474,14 @@ public:
       float compAttack = 10.f;
       float compRelease = 100.f;
       float compMakeup = 0.f;
+      bool delayEnabled = false;
+      float delayTime = 300.f;
+      float delayFeedback = 0.35f;
+      float delayMix = 0.3f;
+      bool reverbEnabled = false;
+      float reverbRoom = 0.5f;
+      float reverbDamping = 0.5f;
+      float reverbMix = 0.3f;
 
     };
     std::vector<int> loadedSendIndex;
@@ -4176,6 +4523,21 @@ public:
           tt.engineTrack, kCompressorInsertSlot, lf.compEnabled,
           lf.compThreshold, lf.compRatio, lf.compAttack, lf.compRelease,
           lf.compMakeup);
+      lf.delayEnabled = ttj["delayEnabled"].asBool(false);
+      lf.delayTime = (float)ttj["delayTime"].asDouble(300.0);
+      lf.delayFeedback = (float)ttj["delayFeedback"].asDouble(0.35);
+      lf.delayMix = (float)ttj["delayMix"].asDouble(0.3);
+      AudioEngine::get().setTrackDelayInsert(
+          tt.engineTrack, kDelayInsertSlot, lf.delayEnabled, lf.delayTime,
+          lf.delayFeedback, lf.delayMix);
+      lf.reverbEnabled = ttj["reverbEnabled"].asBool(false);
+      lf.reverbRoom = (float)ttj["reverbRoom"].asDouble(0.5);
+      lf.reverbDamping = (float)ttj["reverbDamping"].asDouble(0.5);
+      lf.reverbMix = (float)ttj["reverbMix"].asDouble(0.3);
+      AudioEngine::get().setTrackReverbInsert(
+          tt.engineTrack, kReverbInsertSlot, lf.reverbEnabled, lf.reverbRoom,
+          lf.reverbDamping, lf.reverbMix);
+
       loadedTrackFilter.push_back(lf);
 
       for (const auto &cj : ttj["clips"].arr) {
@@ -4248,6 +4610,20 @@ public:
       AudioEngine::get().setBusCompressorInsert(
           b, kCompressorInsertSlot, lf.compEnabled, lf.compThreshold,
           lf.compRatio, lf.compAttack, lf.compRelease, lf.compMakeup);
+      lf.delayEnabled = bj["delayEnabled"].asBool(false);
+      lf.delayTime = (float)bj["delayTime"].asDouble(300.0);
+      lf.delayFeedback = (float)bj["delayFeedback"].asDouble(0.35);
+      lf.delayMix = (float)bj["delayMix"].asDouble(0.3);
+      AudioEngine::get().setBusDelayInsert(b, kDelayInsertSlot,
+                                           lf.delayEnabled, lf.delayTime,
+                                           lf.delayFeedback, lf.delayMix);
+      lf.reverbEnabled = bj["reverbEnabled"].asBool(false);
+      lf.reverbRoom = (float)bj["reverbRoom"].asDouble(0.5);
+      lf.reverbDamping = (float)bj["reverbDamping"].asDouble(0.5);
+      lf.reverbMix = (float)bj["reverbMix"].asDouble(0.3);
+      AudioEngine::get().setBusReverbInsert(b, kReverbInsertSlot,
+                                            lf.reverbEnabled, lf.reverbRoom,
+                                            lf.reverbDamping, lf.reverbMix);
       loadedAuxFilter.push_back(lf);
 
       _auxBuses.push_back(b);
@@ -4268,6 +4644,14 @@ public:
       _auxCompAttackState[i].set((double)loadedAuxFilter[i].compAttack);
       _auxCompReleaseState[i].set((double)loadedAuxFilter[i].compRelease);
       _auxCompMakeupState[i].set((double)loadedAuxFilter[i].compMakeup);
+      _auxDelayEnabledState[i].set(loadedAuxFilter[i].delayEnabled);
+      _auxDelayTimeState[i].set((double)loadedAuxFilter[i].delayTime);
+      _auxDelayFeedbackState[i].set((double)loadedAuxFilter[i].delayFeedback);
+      _auxDelayMixState[i].set((double)loadedAuxFilter[i].delayMix);
+      _auxReverbEnabledState[i].set(loadedAuxFilter[i].reverbEnabled);
+      _auxReverbRoomState[i].set((double)loadedAuxFilter[i].reverbRoom);
+      _auxReverbDampingState[i].set((double)loadedAuxFilter[i].reverbDamping);
+      _auxReverbMixState[i].set((double)loadedAuxFilter[i].reverbMix);
     }
 
     _rebuildMixerStrips();
@@ -4298,6 +4682,18 @@ public:
             (double)loadedTrackFilter[i].compRelease);
         _timelineCompMakeupState[i].set(
             (double)loadedTrackFilter[i].compMakeup);
+        _timelineDelayEnabledState[i].set(loadedTrackFilter[i].delayEnabled);
+        _timelineDelayTimeState[i].set(
+            (double)loadedTrackFilter[i].delayTime);
+        _timelineDelayFeedbackState[i].set(
+            (double)loadedTrackFilter[i].delayFeedback);
+        _timelineDelayMixState[i].set((double)loadedTrackFilter[i].delayMix);
+        _timelineReverbEnabledState[i].set(loadedTrackFilter[i].reverbEnabled);
+        _timelineReverbRoomState[i].set(
+            (double)loadedTrackFilter[i].reverbRoom);
+        _timelineReverbDampingState[i].set(
+            (double)loadedTrackFilter[i].reverbDamping);
+        _timelineReverbMixState[i].set((double)loadedTrackFilter[i].reverbMix);
       }
     }
     _selectedClipId = 0;

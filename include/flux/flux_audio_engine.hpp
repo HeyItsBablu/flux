@@ -47,7 +47,7 @@ constexpr BusID kMasterBus = 1; // always valid once init() has run
 // ── Insert effects ─────────────────────────────────────────────
 enum class FilterType : uint8_t { LowPass, HighPass, BandPass, Notch };
 
-enum class InsertEffectType : uint8_t { None, Biquad, Compressor };
+enum class InsertEffectType : uint8_t { None, Biquad, Compressor, Delay, Reverb };
 
 // Fixed number of insert slots per Track/Bus, same fixed-pool philosophy
 // as kMaxTracks/kMaxVoices — bounded, real-time-safe, no runtime growth.
@@ -227,6 +227,46 @@ public:
   // for a live UI meter. 0.f if slot is invalid/not a compressor.
   float getTrackCompressorGainReduction(TrackID t, uint32_t slot) const;
   float getBusCompressorGainReduction(BusID b, uint32_t slot) const;
+
+  // ── Delay insert ──────────────────────────────────────────────────────
+  // Simple feedback delay line, per-channel (no cross-channel ping-pong).
+  // delayMs: 0..2000 (kDelayMaxMs). feedback: 0..0.98, how much of the
+  // delayed signal feeds back into the line — higher values ring out
+  // longer. mix: 0 (fully dry) .. 1 (fully wet).
+  void setTrackDelayInsert(TrackID t, uint32_t slot, bool enabled,
+                           float delayMs, float feedback, float mix);
+  void setBusDelayInsert(BusID b, uint32_t slot, bool enabled, float delayMs,
+                         float feedback, float mix);
+
+  bool getTrackDelayInsert(TrackID t, uint32_t slot, bool &enabled,
+                           float &delayMs, float &feedback, float &mix) const;
+  bool getBusDelayInsert(BusID b, uint32_t slot, bool &enabled,
+                         float &delayMs, float &feedback, float &mix) const;
+
+  static constexpr float kDelayMaxMs = 2000.f;
+
+
+  // ── Reverb insert ────────────────────────────────────────────────────
+  // Basic Schroeder-style reverb: 4 parallel comb filters summed, then
+  // fed through 2 series allpass filters, computed independently per
+  // channel (with a small tap-length offset on channel 1 for stereo
+  // width, Freeverb-style). Same "set params, implicitly claims the
+  // slot" contract as the other inserts above.
+  // roomSize: 0..1 — maps to comb feedback (higher = longer decay tail).
+  // damping: 0..1 — one-pole lowpass in each comb's feedback path
+  // (higher = darker/duller tail, closer to a real room).
+  // mix: 0 (fully dry) .. 1 (fully wet).
+  void setTrackReverbInsert(TrackID t, uint32_t slot, bool enabled,
+                            float roomSize, float damping, float mix);
+  void setBusReverbInsert(BusID b, uint32_t slot, bool enabled,
+                          float roomSize, float damping, float mix);
+
+  bool getTrackReverbInsert(TrackID t, uint32_t slot, bool &enabled,
+                            float &roomSize, float &damping,
+                            float &mix) const;
+  bool getBusReverbInsert(BusID b, uint32_t slot, bool &enabled,
+                          float &roomSize, float &damping, float &mix) const;
+
 
 
 

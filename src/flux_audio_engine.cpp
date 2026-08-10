@@ -298,6 +298,226 @@ struct CompressorEffect {
   }
 };
 
+// Simple feedback delay line, one circular buffer per channel (up to
+// stereo). Params are atomics (UI-thread writes); the buffer itself is
+// audio-thread-only EXCEPT for ensureCapacity(), which is deliberately
+// called from the UI thread (see setTrackDelayInsert/setBusDelayInsert,
+// which already have m_impl->sampleRate on hand) at the moment this
+// slot is first claimed as a delay — a one-time heap allocation, same
+// "coarse setup on the UI thread, steady-state work on the audio
+// thread" split the rest of this file already uses (e.g. shared_ptr
+// sample handoff in play()). process() itself only reads/writes into
+// the already-sized buffer, never resizes.
+struct DelayEffect {
+  std::atomic<bool> active{false};
+  std::atomic<float> delayMs{300.f};
+  std::atomic<float> feedback{0.35f};
+  std::atomic<float> mix{0.3f}; // 0 = dry, 1 = fully wet
+
+  std::array<std::vector<float>, 2> buffer; // audio-thread-read/write,
+                                            // UI-thread-resized (see
+                                            // ensureCapacity)
+  uint32_t writePos = 0;
+  uint32_t bufferSampleRate = 0; // sampleRate the buffer was sized for —
+                                // lets ensureCapacity() no-op on repeat
+                                // calls at the same rate
+  // UI-thread only. Sizes the buffer for AudioEngine::kDelayMaxMs at the
+  // given sample rate. Safe to call repeatedly — only resizes (and
+  // zeros) when the rate actually changed or the buffer was never sized.
+  void ensureCapacity(uint32_t sampleRate) {
+    if (bufferSampleRate == sampleRate && !buffer[0].empty())
+      return;
+    uint32_t samples =
+        (uint32_t)(AudioEngine::kDelayMaxMs / 1000.f * (float)sampleRate) + 1;
+    buffer[0].assign(samples, 0.f);
+    buffer[1].assign(samples, 0.f);
+    bufferSampleRate = sampleRate;
+    writePos = 0;
+  }
+
+  // Zeros existing buffer contents without resizing — called when a
+  // slot is reclaimed (e.g. track/bus recreated) so stale echoes from
+  // whatever previously used this slot don't leak into new audio.
+  void resetState() {
+    for (auto &b : buffer)
+      std::fill(b.begin(), b.end(), 0.f);
+    writePos = 0;
+  }
+
+  void process(float *buf, ma_uint32 frames, uint32_t channels,
+              uint32_t sampleRate) {
+    if (!active.load(std::memory_order_relaxed))
+      return;
+    if (buffer[0].empty())
+      return; // capacity not yet established — shouldn't normally
+              // happen (setTrack/BusDelayInsert always calls
+              // ensureCapacity before marking a slot active), but
+              // guards against a stray call in between.
+
+    float dMs =
+        std::min(delayMs.load(std::memory_order_relaxed), AudioEngine::kDelayMaxMs);
+    float fb = std::max(
+        0.f, std::min(0.98f, feedback.load(std::memory_order_relaxed)));
+    float wet = std::max(0.f, std::min(1.f, mix.load(std::memory_order_relaxed)));
+
+    uint32_t bufLen = (uint32_t)buffer[0].size();
+    uint32_t delaySamples = std::min<uint32_t>(
+        bufLen - 1, (uint32_t)(dMs / 1000.f * (float)sampleRate));
+
+    uint32_t ch = std::min<uint32_t>(channels, 2);
+    for (ma_uint32 i = 0; i < frames; i++) {
+      uint32_t readPos = (writePos + bufLen - delaySamples) % bufLen;
+      for (uint32_t c = 0; c < ch; c++) {
+        std::vector<float> &b = buffer[c];
+        float delayed = b[readPos];
+        float input = buf[i * channels + c];
+        b[writePos] = input + delayed * fb;
+        buf[i * channels + c] = input * (1.f - wet) + delayed * wet;
+      }
+      writePos = (writePos + 1) % bufLen;
+    }
+  }
+};
+
+// Classic Schroeder reverb: 4 parallel comb filters (each a delay line
+// with damped feedback) summed together, then passed through 2 series
+// allpass filters to diffuse the comb structure's periodicity into
+// something less metallic. This is deliberately the textbook topology
+// (not Freeverb's fuller 8-comb/4-allpass network) — same "simplest
+// thing that sounds like a room" tradeoff DelayEffect makes with a
+// single feedback line instead of a multi-tap network.
+//
+// Tuning table lengths are the standard Schroeder/Freeverb reference
+// values at 44.1kHz; ensureCapacity() rescales them to the engine's
+// actual sample rate. Channel 1 (right) gets each tap length nudged by
+// a small constant offset so the two channels decorrelate slightly —
+// without it, a mono source reverbs identically in both channels and
+// the result sounds narrow/phasey when panned.
+struct ReverbEffect {
+  std::atomic<bool> active{false};
+  std::atomic<float> roomSize{0.5f}; // 0..1
+  std::atomic<float> damping{0.5f};  // 0..1
+  std::atomic<float> mix{0.3f};      // 0 dry .. 1 wet
+
+  static constexpr int kNumCombs = 4;
+  static constexpr int kNumAllpasses = 2;
+  static constexpr int kStereoSpread = 23; // samples, right-channel offset
+  static constexpr int kCombTunings[kNumCombs] = {1116, 1188, 1277, 1356};
+  static constexpr int kAllpassTunings[kNumAllpasses] = {556, 441};
+
+  struct CombState {
+    std::vector<float> buffer;
+    uint32_t writePos = 0;
+    float filterStore = 0.f; // one-pole damping-filter history
+  };
+  struct AllpassState {
+    std::vector<float> buffer;
+    uint32_t writePos = 0;
+  };
+
+  std::array<std::array<CombState, kNumCombs>, 2> combs;
+  std::array<std::array<AllpassState, kNumAllpasses>, 2> allpasses;
+  uint32_t bufferSampleRate = 0; // rate the buffers were sized for — lets
+                                 // ensureCapacity() no-op on repeat calls,
+                                 // same convention as DelayEffect's field
+
+  // UI-thread only, same reasoning/placement as DelayEffect::ensureCapacity
+  // (called at the moment this slot is first claimed as a reverb).
+  void ensureCapacity(uint32_t sampleRate) {
+    if (bufferSampleRate == sampleRate && !combs[0][0].buffer.empty())
+      return;
+    float scale = (float)sampleRate / 44100.f;
+    for (int c = 0; c < 2; c++) {
+      int spread = (c == 1) ? kStereoSpread : 0;
+      for (int i = 0; i < kNumCombs; i++) {
+        int len = (int)(kCombTunings[i] * scale) + spread;
+        combs[c][i].buffer.assign((size_t)std::max(1, len), 0.f);
+        combs[c][i].writePos = 0;
+        combs[c][i].filterStore = 0.f;
+      }
+      for (int i = 0; i < kNumAllpasses; i++) {
+        int len = (int)(kAllpassTunings[i] * scale) + spread;
+        allpasses[c][i].buffer.assign((size_t)std::max(1, len), 0.f);
+        allpasses[c][i].writePos = 0;
+      }
+    }
+    bufferSampleRate = sampleRate;
+  }
+
+  // Zeros existing buffer contents without resizing — same "slot
+  // reclaimed" contract as DelayEffect::resetState.
+  void resetState() {
+    for (auto &chArr : combs)
+      for (auto &c : chArr) {
+        std::fill(c.buffer.begin(), c.buffer.end(), 0.f);
+        c.writePos = 0;
+        c.filterStore = 0.f;
+      }
+    for (auto &chArr : allpasses)
+      for (auto &a : chArr) {
+        std::fill(a.buffer.begin(), a.buffer.end(), 0.f);
+        a.writePos = 0;
+      }
+  }
+
+  void process(float *buf, ma_uint32 frames, uint32_t channels,
+              uint32_t sampleRate) {
+    if (!active.load(std::memory_order_relaxed))
+      return;
+    if (combs[0][0].buffer.empty())
+      return; // capacity not yet established — guards a stray call before
+              // setTrack/BusReverbInsert's ensureCapacity, same as Delay
+
+    float room = std::max(0.f, std::min(1.f, roomSize.load(std::memory_order_relaxed)));
+    float damp = std::max(0.f, std::min(1.f, damping.load(std::memory_order_relaxed)));
+    float wet = std::max(0.f, std::min(1.f, mix.load(std::memory_order_relaxed)));
+
+    // Feedback range keeps the tail stable (never >=1.0) while still
+    // reaching a long, obviously "big room" decay at roomSize=1.
+    float feedback = 0.7f + room * 0.28f; // 0.70..0.98
+    float dampCoeff = damp * 0.4f;        // 0..0.4 one-pole lowpass coeff
+
+    uint32_t ch = std::min<uint32_t>(channels, 2);
+    for (uint32_t c = 0; c < ch; c++) {
+      for (ma_uint32 i = 0; i < frames; i++) {
+        float input = buf[i * channels + c];
+
+        // 4 parallel damped combs, summed and averaged.
+        float combSum = 0.f;
+        for (int k = 0; k < kNumCombs; k++) {
+          CombState &cs = combs[c][k];
+          uint32_t len = (uint32_t)cs.buffer.size();
+          float delayed = cs.buffer[cs.writePos];
+          // One-pole lowpass in the feedback path — this is what makes
+          // the tail "damp" (darken) over time instead of ringing at a
+          // constant timbre forever.
+          cs.filterStore = delayed * (1.f - dampCoeff) + cs.filterStore * dampCoeff;
+          cs.buffer[cs.writePos] = input + cs.filterStore * feedback;
+          cs.writePos = (cs.writePos + 1) % len;
+          combSum += delayed;
+        }
+        combSum *= 1.f / (float)kNumCombs;
+
+        // 2 series allpasses to diffuse the comb bank's periodicity.
+        // Standard Schroeder allpass form, fixed internal gain 0.5.
+        float apOut = combSum;
+        for (int k = 0; k < kNumAllpasses; k++) {
+          AllpassState &as = allpasses[c][k];
+          uint32_t len = (uint32_t)as.buffer.size();
+          float bufOut = as.buffer[as.writePos];
+          float apIn = apOut;
+          apOut = -apIn + bufOut;
+          as.buffer[as.writePos] = apIn + bufOut * 0.5f;
+          as.writePos = (as.writePos + 1) % len;
+        }
+
+        buf[i * channels + c] = input * (1.f - wet) + apOut * wet;
+      }
+    }
+  }
+};
+
+
 
 // One insert slot: currently only Biquad exists, so the tag just gates
 // whether the embedded filter runs. Adding a second effect type later
@@ -309,6 +529,8 @@ struct InsertSlot {
   std::atomic<InsertEffectType> type{InsertEffectType::None};
   BiquadFilterEffect biquad;
   CompressorEffect compressor;
+  DelayEffect delay;
+  ReverbEffect reverb;
 
   void process(float *buf, ma_uint32 frames, uint32_t channels,
               uint32_t sampleRate) {
@@ -317,6 +539,10 @@ struct InsertSlot {
       biquad.process(buf, frames, channels, sampleRate);
     else if (t == InsertEffectType::Compressor)
       compressor.process(buf, frames, channels, sampleRate);
+    else if (t == InsertEffectType::Delay)
+      delay.process(buf, frames, channels, sampleRate);
+    else if (t == InsertEffectType::Reverb)
+      reverb.process(buf, frames, channels, sampleRate);
   }
 
   void reset() {
@@ -325,6 +551,10 @@ struct InsertSlot {
     biquad.resetState();
     compressor.active.store(false, std::memory_order_relaxed);
     compressor.resetState();
+    delay.active.store(false, std::memory_order_relaxed);
+    delay.resetState();
+    reverb.active.store(false, std::memory_order_relaxed);
+    reverb.resetState();
   }
 };
 
@@ -1782,6 +2012,151 @@ float AudioEngine::getBusCompressorGainReduction(BusID b,
   return s.compressor.gainReductionDb.load(std::memory_order_relaxed);
 }
 
+void AudioEngine::setTrackDelayInsert(TrackID t, uint32_t slot, bool enabled,
+                                      float delayMs, float feedback,
+                                      float mix) {
+  if (t == kInvalidTrack || t > Impl::kMaxTracks || slot >= kMaxInserts)
+    return;
+  InsertSlot &s = m_impl->tracks[t - 1].inserts[slot];
+  if (s.type.load(std::memory_order_relaxed) != InsertEffectType::Delay) {
+    s.delay.resetState();
+    s.delay.ensureCapacity(m_impl->sampleRate); // UI-thread allocation —
+                                                // see DelayEffect's comment
+    s.type.store(InsertEffectType::Delay, std::memory_order_relaxed);
+  }
+  s.delay.delayMs.store(delayMs, std::memory_order_relaxed);
+  s.delay.feedback.store(feedback, std::memory_order_relaxed);
+  s.delay.mix.store(mix, std::memory_order_relaxed);
+  s.delay.active.store(enabled, std::memory_order_relaxed);
+}
+
+void AudioEngine::setBusDelayInsert(BusID b, uint32_t slot, bool enabled,
+                                    float delayMs, float feedback,
+                                    float mix) {
+  if (b == kInvalidBus || b > Impl::kMaxBuses || slot >= kMaxInserts)
+    return;
+  InsertSlot &s = m_impl->buses[b - 1].inserts[slot];
+  if (s.type.load(std::memory_order_relaxed) != InsertEffectType::Delay) {
+    s.delay.resetState();
+    s.delay.ensureCapacity(m_impl->sampleRate);
+    s.type.store(InsertEffectType::Delay, std::memory_order_relaxed);
+  }
+  s.delay.delayMs.store(delayMs, std::memory_order_relaxed);
+  s.delay.feedback.store(feedback, std::memory_order_relaxed);
+  s.delay.mix.store(mix, std::memory_order_relaxed);
+  s.delay.active.store(enabled, std::memory_order_relaxed);
+}
+
+bool AudioEngine::getTrackDelayInsert(TrackID t, uint32_t slot,
+                                      bool &enabled, float &delayMs,
+                                      float &feedback, float &mix) const {
+  enabled = false;
+  delayMs = 300.f;
+  feedback = 0.35f;
+  mix = 0.3f;
+  if (t == kInvalidTrack || t > Impl::kMaxTracks || slot >= kMaxInserts)
+    return false;
+  const InsertSlot &s = m_impl->tracks[t - 1].inserts[slot];
+  if (s.type.load(std::memory_order_relaxed) != InsertEffectType::Delay)
+    return false;
+  enabled = s.delay.active.load(std::memory_order_relaxed);
+  delayMs = s.delay.delayMs.load(std::memory_order_relaxed);
+  feedback = s.delay.feedback.load(std::memory_order_relaxed);
+  mix = s.delay.mix.load(std::memory_order_relaxed);
+  return true;
+}
+
+bool AudioEngine::getBusDelayInsert(BusID b, uint32_t slot, bool &enabled,
+                                    float &delayMs, float &feedback,
+                                    float &mix) const {
+  enabled = false;
+  delayMs = 300.f;
+  feedback = 0.35f;
+  mix = 0.3f;
+  if (b == kInvalidBus || b > Impl::kMaxBuses || slot >= kMaxInserts)
+    return false;
+  const InsertSlot &s = m_impl->buses[b - 1].inserts[slot];
+  if (s.type.load(std::memory_order_relaxed) != InsertEffectType::Delay)
+    return false;
+  enabled = s.delay.active.load(std::memory_order_relaxed);
+  delayMs = s.delay.delayMs.load(std::memory_order_relaxed);
+  feedback = s.delay.feedback.load(std::memory_order_relaxed);
+  mix = s.delay.mix.load(std::memory_order_relaxed);
+  return true;
+}
+
+void AudioEngine::setTrackReverbInsert(TrackID t, uint32_t slot,
+                                       bool enabled, float roomSize,
+                                       float damping, float mix) {
+  if (t == kInvalidTrack || t > Impl::kMaxTracks || slot >= kMaxInserts)
+    return;
+  InsertSlot &s = m_impl->tracks[t - 1].inserts[slot];
+  if (s.type.load(std::memory_order_relaxed) != InsertEffectType::Reverb) {
+    s.reverb.resetState();
+    s.reverb.ensureCapacity(m_impl->sampleRate); // UI-thread allocation —
+                                                 // see ReverbEffect's comment
+    s.type.store(InsertEffectType::Reverb, std::memory_order_relaxed);
+  }
+  s.reverb.roomSize.store(roomSize, std::memory_order_relaxed);
+  s.reverb.damping.store(damping, std::memory_order_relaxed);
+  s.reverb.mix.store(mix, std::memory_order_relaxed);
+  s.reverb.active.store(enabled, std::memory_order_relaxed);
+}
+
+void AudioEngine::setBusReverbInsert(BusID b, uint32_t slot, bool enabled,
+                                     float roomSize, float damping,
+                                     float mix) {
+  if (b == kInvalidBus || b > Impl::kMaxBuses || slot >= kMaxInserts)
+    return;
+  InsertSlot &s = m_impl->buses[b - 1].inserts[slot];
+  if (s.type.load(std::memory_order_relaxed) != InsertEffectType::Reverb) {
+    s.reverb.resetState();
+    s.reverb.ensureCapacity(m_impl->sampleRate);
+    s.type.store(InsertEffectType::Reverb, std::memory_order_relaxed);
+  }
+  s.reverb.roomSize.store(roomSize, std::memory_order_relaxed);
+  s.reverb.damping.store(damping, std::memory_order_relaxed);
+  s.reverb.mix.store(mix, std::memory_order_relaxed);
+  s.reverb.active.store(enabled, std::memory_order_relaxed);
+}
+
+bool AudioEngine::getTrackReverbInsert(TrackID t, uint32_t slot,
+                                       bool &enabled, float &roomSize,
+                                       float &damping, float &mix) const {
+  enabled = false;
+  roomSize = 0.5f;
+  damping = 0.5f;
+  mix = 0.3f;
+  if (t == kInvalidTrack || t > Impl::kMaxTracks || slot >= kMaxInserts)
+    return false;
+  const InsertSlot &s = m_impl->tracks[t - 1].inserts[slot];
+  if (s.type.load(std::memory_order_relaxed) != InsertEffectType::Reverb)
+    return false;
+  enabled = s.reverb.active.load(std::memory_order_relaxed);
+  roomSize = s.reverb.roomSize.load(std::memory_order_relaxed);
+  damping = s.reverb.damping.load(std::memory_order_relaxed);
+  mix = s.reverb.mix.load(std::memory_order_relaxed);
+  return true;
+}
+
+bool AudioEngine::getBusReverbInsert(BusID b, uint32_t slot, bool &enabled,
+                                     float &roomSize, float &damping,
+                                     float &mix) const {
+  enabled = false;
+  roomSize = 0.5f;
+  damping = 0.5f;
+  mix = 0.3f;
+  if (b == kInvalidBus || b > Impl::kMaxBuses || slot >= kMaxInserts)
+    return false;
+  const InsertSlot &s = m_impl->buses[b - 1].inserts[slot];
+  if (s.type.load(std::memory_order_relaxed) != InsertEffectType::Reverb)
+    return false;
+  enabled = s.reverb.active.load(std::memory_order_relaxed);
+  roomSize = s.reverb.roomSize.load(std::memory_order_relaxed);
+  damping = s.reverb.damping.load(std::memory_order_relaxed);
+  mix = s.reverb.mix.load(std::memory_order_relaxed);
+  return true;
+}
 
 BusID AudioEngine::createBus() {
   // Slot 0 (id 1) is permanently reserved for kMasterBus — scan starts at 1.
