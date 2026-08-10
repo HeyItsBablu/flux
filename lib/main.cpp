@@ -82,6 +82,75 @@ struct StepHit {
                           // duration has to be an explicit parameter
                           // rather than "however long the key is held".
   float releaseSec = 0.f;
+
+  // ── Extra oscillators (Osc 1 above is always active) ────────────────
+  // Opt-in layers for detune/unison-style thickening. Defaults
+  // (enabled=false) reproduce the original single-oscillator sound
+  // exactly unless the person opens the new Synth panel, same
+  // backward-compat contract the ADSR defaults already follow.
+  static constexpr int kNumExtraOscillators = 2;
+  struct ExtraOscillator {
+    bool enabled = false;
+    OscWaveform waveform = OscWaveform::Sine;
+    float detuneSemitones = 0.f; // -24..+24, relative to Osc 1's pitch
+    float levelMix = 0.5f;       // 0..1, this layer's share of the mix
+                                 // (normalized against Osc 1 at fire
+                                 // time — see StepScheduler::fireStep)
+  };
+  std::array<ExtraOscillator, kNumExtraOscillators> extraOscillators{};
+
+  // ── Filter stage (per-voice, disabled by default) ───────────────────
+  // Reuses FilterType/the RBJ biquad math already used by track/bus
+  // filter inserts (see StepScheduler::_computeBiquadCoeffs), but this
+  // instance is per-note, not per-track — a note's filter sweep is
+  // independent of whatever's on the track's mixer strip.
+  bool filterEnabled = false;
+  FilterType filterType = FilterType::LowPass;
+  float filterCutoffHz = 2000.f;
+  float filterResonanceQ = 0.707f;
+  float filterEnvAmount = 0.f; // -1..1, how many octaves (see
+                               // kFilterEnvOctaveRange) the note's own
+                               // ADSR envelope shifts the cutoff by
+
+  // ── LFO (one per voice, disabled by default) ─────────────────────────
+  enum class LfoTarget : uint8_t { None, Pitch, FilterCutoff, Amplitude };
+  bool lfoEnabled = false;
+  LfoTarget lfoTarget = LfoTarget::Pitch;
+  float lfoRateHz = 5.f; // 0.1..20
+  float lfoDepth = 0.f;  // 0..1, meaning scaled per target — see
+                         // kLfoPitchSemitoneRange/kLfoFilterOctaveRange/
+                         // kLfoAmplitudeDepthRange in fireStep
+
+  // ── Sample layers (velocity zones + round-robin) ─────────────────────
+  // Opt-in multi-sample instrument: each layer covers a velocity range
+  // [velocityMin, velocityMax] (0..1, matching StepData::velocity's own
+  // range). When a step's velocity falls inside more than one layer's
+  // range, fireStep() cycles round-robin through the matches via
+  // roundRobinCursor. An unconfigured StepHit (every layer's sampleId
+  // left at kInvalidSample, the default) falls through to the legacy
+  // single-sample `sampleId` field above exactly as before this change —
+  // every existing project's sample tracks behave identically unless the
+  // person explicitly opens the new Sample Layers panel.
+  static constexpr int kMaxSampleLayers = 8;
+  struct SampleLayer {
+    SampleID sampleId = kInvalidSample;
+    std::string samplePath;  // full path, so project save/load can reload
+                             // it (mirrors SequencerApp::_trackSamplePath's
+                             // role for the legacy single-sample field)
+    float velocityMin = 0.f; // 0..1, inclusive
+    float velocityMax = 1.f; // 0..1, inclusive
+  };
+  std::array<SampleLayer, kMaxSampleLayers> sampleLayers{};
+
+  // UI-thread-only cycling cursor for round-robin — advances every time
+  // fireStep() resolves a note against 2+ layers matching the same
+  // velocity. mutable because fireStep() takes StepHit by const& (same
+  // const-correctness as the rest of this firing path), but this is
+  // playback state, not instrument configuration. Safe without
+  // synchronization: fireStep() is only ever called from the UI-thread
+  // scheduler tick, never the audio thread (see StepScheduler::tick()/
+  // TimelineScheduler::tick()).
+  mutable int roundRobinCursor = 0;
 };
 
 // One entry in the song arrangement. `id` is a stable identity used for
@@ -389,6 +458,25 @@ public:
     float velocity = std::max(0.f, std::min(1.f, step.velocity));
     float effectiveGain = hit.gain * velocity;
 
+    bool anyLayerConfigured = false;
+    for (int i = 0; i < StepHit::kMaxSampleLayers; i++)
+      if (hit.sampleLayers[i].sampleId != kInvalidSample) {
+        anyLayerConfigured = true;
+        break;
+      }
+
+    if (anyLayerConfigured) {
+      SampleID resolved = _resolveSampleForVelocity(hit, velocity);
+      if (resolved == kInvalidSample)
+        return; // velocity falls in a gap with no configured layer —
+                // silent, matching a real sampler's empty zone rather
+                // than surprising the person with a synth tone instead
+      float pitchRatio = std::pow(2.0f, step.pitchSemitones / 12.0f);
+      engine.play(resolved, effectiveGain, hit.pan, /*loop=*/false, pitchRatio,
+                  targetFrame, track);
+      return;
+    }
+
     if (engine.isSampleValid(hit.sampleId)) {
       // Sample-backed track: sample-accurate one-shot, velocity applied
       // as gain, pitch via pitchRatio.
@@ -402,12 +490,43 @@ public:
   }
 
 private:
-  // Bundles the two pieces of per-note state the envelope callback needs.
-  // A single make_shared<> here replaces what would otherwise be a pair of
-  // separate shared_ptr<float>/shared_ptr<int> allocations per note fired.
+  // Picks which of hit.sampleLayers[] to play for this velocity. If
+  // exactly one layer covers `velocity`, plays that one; if several do,
+  // cycles round-robin through them via hit.roundRobinCursor so
+  // repeated hits at the same velocity don't always sound identical
+  // (classic drum-sampler behavior). Returns kInvalidSample if
+  // layers are configured but none cover this velocity.
+  static SampleID _resolveSampleForVelocity(const StepHit &hit,
+                                            float velocity) {
+    int matchIdx[StepHit::kMaxSampleLayers];
+    int matchCount = 0;
+    for (int i = 0; i < StepHit::kMaxSampleLayers; i++) {
+      const auto &layer = hit.sampleLayers[i];
+      if (layer.sampleId == kInvalidSample)
+        continue;
+      if (velocity >= layer.velocityMin && velocity <= layer.velocityMax)
+        matchIdx[matchCount++] = i;
+    }
+    if (matchCount == 0)
+      return kInvalidSample;
+    int pick = matchIdx[hit.roundRobinCursor % matchCount];
+    hit.roundRobinCursor++;
+    return hit.sampleLayers[pick].sampleId;
+  }
+
+  // Bundles all per-note state the oscillator/envelope/filter/LFO
+  // callback needs — one make_shared<> per note fired, same allocation
+  // shape as before this change, just a richer payload.
   struct SynthNoteState {
-    float phase = 0.f;
+    static constexpr int kMaxVoiceOscillators =
+        1 + StepHit::kNumExtraOscillators;
+    std::array<float, kMaxVoiceOscillators> phase{}; // per-oscillator phase
     int samplesElapsed = 0;
+    float lfoPhase = 0.f;
+    // Mono Direct-Form-I biquad history — one channel only, since
+    // playStream()'s StreamCallback produces mono (see AudioEngine's
+    // class doc on playStream).
+    float filterX1 = 0.f, filterX2 = 0.f, filterY1 = 0.f, filterY2 = 0.f;
   };
 
   // Single-cycle waveform lookup at a given phase (radians, unwrapped —
@@ -465,50 +584,220 @@ private:
     return 0.0f; // fully released
   }
 
+  // RBJ (Robert Bristow-Johnson) biquad cookbook formulas — the same
+  // math BiquadFilterEffect uses for track/bus filter inserts (see
+  // flux_audio_engine.cpp), duplicated here since that struct is
+  // private to the engine's .cpp and this per-voice filter is a
+  // different instance with different lifetime (one per note, not one
+  // per track/bus slot).
+  static void _computeBiquadCoeffs(FilterType type, float cutoffHz, float q,
+                                   float sampleRate, float &b0, float &b1,
+                                   float &b2, float &a1, float &a2) {
+    float freq = std::max(20.f, std::min(cutoffHz, sampleRate * 0.49f));
+    float w0 = 2.f * 3.14159265f * freq / sampleRate;
+    float cosw0 = std::cos(w0), sinw0 = std::sin(w0);
+    float qq = std::max(0.1f, q);
+    float alpha = sinw0 / (2.f * qq);
+
+    float b0n, b1n, b2n, a0n, a1n, a2n;
+    switch (type) {
+    case FilterType::HighPass:
+      b0n = (1.f + cosw0) / 2.f;
+      b1n = -(1.f + cosw0);
+      b2n = (1.f + cosw0) / 2.f;
+      a0n = 1.f + alpha;
+      a1n = -2.f * cosw0;
+      a2n = 1.f - alpha;
+      break;
+    case FilterType::BandPass:
+      b0n = alpha;
+      b1n = 0.f;
+      b2n = -alpha;
+      a0n = 1.f + alpha;
+      a1n = -2.f * cosw0;
+      a2n = 1.f - alpha;
+      break;
+    case FilterType::Notch:
+      b0n = 1.f;
+      b1n = -2.f * cosw0;
+      b2n = 1.f;
+      a0n = 1.f + alpha;
+      a1n = -2.f * cosw0;
+      a2n = 1.f - alpha;
+      break;
+    case FilterType::LowPass:
+    default:
+      b0n = (1.f - cosw0) / 2.f;
+      b1n = 1.f - cosw0;
+      b2n = (1.f - cosw0) / 2.f;
+      a0n = 1.f + alpha;
+      a1n = -2.f * cosw0;
+      a2n = 1.f - alpha;
+      break;
+    }
+    b0 = b0n / a0n;
+    b1 = b1n / a0n;
+    b2 = b2n / a0n;
+    a1 = a1n / a0n;
+    a2 = a2n / a0n;
+  }
+
   static void _fireSynthStep(const StepHit &hit, const StepData &step,
                              float effectiveGain, uint64_t targetFrame,
                              TrackID track = kInvalidTrack) {
     auto &engine = AudioEngine::get();
     auto state = std::make_shared<SynthNoteState>();
+    float sr = (float)engine.sampleRate();
 
-    // Pitch shift: each semitone is a factor of 2^(1/12).
+    // Pitch shift: each semitone is a factor of 2^(1/12). Applied to the
+    // shared pitched root every oscillator detunes from, so a pitch-bent
+    // step still detunes correctly relative to itself.
     float pitchedFreq =
         hit.freqHz * std::pow(2.0f, step.pitchSemitones / 12.0f);
-    float phaseInc =
-        (2.0f * 3.14159265f * pitchedFreq) / (float)engine.sampleRate();
 
-    float sr = (float)engine.sampleRate();
+    // ── Oscillator setup ────────────────────────────────────────────
+    // Osc 1 (hit.waveform) is always active — this is exactly the old
+    // single-oscillator behavior. extraOscillators[] are opt-in layers;
+    // levels are normalized below so enabling more layers thickens the
+    // tone rather than just making it louder.
+    constexpr int kNumOsc = SynthNoteState::kMaxVoiceOscillators;
+    std::array<bool, kNumOsc> oscEnabled{};
+    std::array<OscWaveform, kNumOsc> oscWaveform{};
+    std::array<float, kNumOsc> oscPhaseInc{};
+    std::array<float, kNumOsc> oscLevel{};
+
+    oscEnabled[0] = true;
+    oscWaveform[0] = hit.waveform;
+    oscPhaseInc[0] = (2.0f * 3.14159265f * pitchedFreq) / sr;
+    oscLevel[0] = 1.f;
+    float totalLevel = 1.f;
+    for (int i = 0; i < StepHit::kNumExtraOscillators; i++) {
+      const auto &extra = hit.extraOscillators[i];
+      oscEnabled[i + 1] = extra.enabled;
+      if (!extra.enabled)
+        continue;
+      oscWaveform[i + 1] = extra.waveform;
+      float detunedFreq =
+          pitchedFreq * std::pow(2.0f, extra.detuneSemitones / 12.0f);
+      oscPhaseInc[i + 1] = (2.0f * 3.14159265f * detunedFreq) / sr;
+      oscLevel[i + 1] = std::max(0.f, std::min(1.f, extra.levelMix));
+      totalLevel += oscLevel[i + 1];
+    }
+    for (int i = 0; i < kNumOsc; i++)
+      if (oscEnabled[i])
+        oscLevel[i] /= totalLevel;
+
+    // ── Envelope setup (unchanged from before this change) ───────────
     int attackSamples = std::max(0, (int)(hit.attackSec * sr));
     int decaySamples = std::max(0, (int)(hit.decaySec * sr));
     int sustainSamples = std::max(0, (int)(hit.sustainSec * sr));
     int releaseSamples = std::max(0, (int)(hit.releaseSec * sr));
     int totalSamples =
         attackSamples + decaySamples + sustainSamples + releaseSamples;
-    // Degenerate case: every phase is 0 seconds (e.g. a project loaded
-    // with all-zero ADSR fields). Give it one sample of silence instead
-    // of a note that never ends — matches the old code's implicit
-    // guarantee that a fired step always eventually frees its voice.
     if (totalSamples <= 0)
       totalSamples = 1;
-
     float sustainLevel = std::max(0.f, std::min(1.f, hit.sustainLevel));
-    OscWaveform waveform = hit.waveform;
+
+    // ── Filter setup ──────────────────────────────────────────────
+    bool filterEnabled = hit.filterEnabled;
+    FilterType filterType = hit.filterType;
+    float filterBaseCutoff = hit.filterCutoffHz;
+    float filterQ = hit.filterResonanceQ;
+    float filterEnvAmount = std::max(-1.f, std::min(1.f, hit.filterEnvAmount));
+    // How many octaves the envelope can swing the cutoff at full amount —
+    // +-4 covers "barely open" to "fully open" across a 20Hz-20kHz sweep.
+    constexpr float kFilterEnvOctaveRange = 4.f;
+
+    // ── LFO setup ─────────────────────────────────────────────────
+    bool lfoEnabled = hit.lfoEnabled;
+    StepHit::LfoTarget lfoTarget = hit.lfoTarget;
+    float lfoPhaseInc =
+        2.0f * 3.14159265f * std::max(0.01f, hit.lfoRateHz) / sr;
+    float lfoDepth = std::max(0.f, std::min(1.f, hit.lfoDepth));
+    // Depth -> musical-range scaling, one ceiling per target.
+    constexpr float kLfoPitchSemitoneRange = 12.f; // depth=1 -> +-1 octave
+    constexpr float kLfoFilterOctaveRange = 3.f;   // depth=1 -> +-3 octaves
+    constexpr float kLfoAmplitudeDepthRange = 1.f; // depth=1 -> full tremolo
 
     AudioEngine::StreamCallback cb =
-        [state, phaseInc, attackSamples, decaySamples, sustainSamples,
-         releaseSamples, totalSamples, sustainLevel,
-         waveform](float *buf, int frames) -> int {
+        [state, oscEnabled, oscWaveform, oscPhaseInc, oscLevel, attackSamples,
+         decaySamples, sustainSamples, releaseSamples, totalSamples,
+         sustainLevel, filterEnabled, filterType, filterBaseCutoff, filterQ,
+         filterEnvAmount, lfoEnabled, lfoTarget, lfoPhaseInc, lfoDepth,
+         sr](float *buf, int frames) -> int {
       if (state->samplesElapsed >= totalSamples)
         return -1; // fully decayed — engine frees this voice slot
+
+      // Block-rate (not per-sample) modulation update: LFO value,
+      // pitch/amplitude multipliers, and filter coefficients are
+      // computed once per callback rather than once per sample —
+      // same "coarse, not sample-accurate" tradeoff the rest of the
+      // app makes for modulation (e.g. automation lanes update every
+      // ~25ms). Plenty smooth for a musical LFO/filter sweep without
+      // per-sample trig cost.
+      float lfoValue = lfoEnabled ? std::sin(state->lfoPhase) : 0.f;
+
+      float pitchMul = 1.f;
+      if (lfoEnabled && lfoTarget == StepHit::LfoTarget::Pitch)
+        pitchMul = std::pow(
+            2.0f, (lfoDepth * kLfoPitchSemitoneRange * lfoValue) / 12.0f);
+
+      float ampMul = 1.f;
+      if (lfoEnabled && lfoTarget == StepHit::LfoTarget::Amplitude)
+        // Tremolo dips below 1 with the LFO rather than swinging
+        // above too, matching how tremolo is normally perceived.
+        ampMul =
+            1.f - lfoDepth * kLfoAmplitudeDepthRange * 0.5f * (1.f - lfoValue);
+
+      float b0 = 1.f, b1 = 0.f, b2 = 0.f, a1 = 0.f, a2 = 0.f;
+      if (filterEnabled) {
+        float envAtBlockStart =
+            _adsrEnvelope(state->samplesElapsed, attackSamples, decaySamples,
+                          sustainSamples, releaseSamples, sustainLevel);
+        float cutoff = filterBaseCutoff *
+                       std::pow(2.0f, filterEnvAmount * kFilterEnvOctaveRange *
+                                          envAtBlockStart);
+        if (lfoEnabled && lfoTarget == StepHit::LfoTarget::FilterCutoff)
+          cutoff *= std::pow(2.0f, lfoDepth * kLfoFilterOctaveRange * lfoValue);
+        cutoff = std::max(20.f, std::min(cutoff, sr * 0.49f));
+        _computeBiquadCoeffs(filterType, cutoff, filterQ, sr, b0, b1, b2, a1,
+                             a2);
+      }
 
       for (int i = 0; i < frames; i++) {
         float env =
             _adsrEnvelope(state->samplesElapsed, attackSamples, decaySamples,
                           sustainSamples, releaseSamples, sustainLevel);
-        buf[i] = _oscSample(waveform, state->phase) * env * 0.3f;
-        state->phase += phaseInc;
+
+        float mixSample = 0.f;
+        for (int o = 0; o < kNumOsc; o++) {
+          if (!oscEnabled[o])
+            continue;
+          mixSample +=
+              _oscSample(oscWaveform[o], state->phase[o]) * oscLevel[o];
+          state->phase[o] += oscPhaseInc[o] * pitchMul;
+        }
+
+        float sampleOut = mixSample * env * ampMul * 0.3f;
+
+        if (filterEnabled) {
+          float y0 = b0 * sampleOut + b1 * state->filterX1 +
+                     b2 * state->filterX2 - a1 * state->filterY1 -
+                     a2 * state->filterY2;
+          state->filterX2 = state->filterX1;
+          state->filterX1 = sampleOut;
+          state->filterY2 = state->filterY1;
+          state->filterY1 = y0;
+          sampleOut = y0;
+        }
+
+        buf[i] = sampleOut;
         state->samplesElapsed++;
       }
+
+      if (lfoEnabled)
+        state->lfoPhase += lfoPhaseInc * (float)frames;
+
       return frames;
     };
 
@@ -2041,6 +2330,52 @@ class SequencerApp : public Widget {
   std::vector<State<double>> _sustainHoldState;
   std::vector<State<double>> _releaseState;
 
+  // Extra-oscillator UI state — flat, index-parallel-with-tracks vectors
+  // per field, same convention as every other per-strip vector in this
+  // file (e.g. _timelineFilterEnabledState), rather than an array of
+  // State<> per track (State<> isn't default-constructible, so it can't
+  // sit inside a fixed-size std::array the way plain fields can).
+  std::vector<State<bool>> _osc2EnabledState;
+  std::vector<State<int>> _osc2WaveformState;
+  std::vector<State<double>> _osc2DetuneState;
+  std::vector<State<double>> _osc2LevelState;
+  std::vector<State<bool>> _osc3EnabledState;
+  std::vector<State<int>> _osc3WaveformState;
+  std::vector<State<double>> _osc3DetuneState;
+  std::vector<State<double>> _osc3LevelState;
+
+  // Per-voice filter UI state. Named with a "Synth" prefix to avoid
+  // colliding with the mixer's _timelineFilterEnabledState (a different
+  // filter, on the track's insert chain rather than the note itself).
+  std::vector<State<bool>> _synthFilterEnabledState;
+  std::vector<State<int>> _synthFilterTypeState;
+  std::vector<State<double>> _synthFilterCutoffState;
+  std::vector<State<double>> _synthFilterQState;
+  std::vector<State<double>> _synthFilterEnvAmountState;
+
+  // Per-voice LFO UI state.
+  std::vector<State<bool>> _synthLfoEnabledState;
+  std::vector<State<int>> _synthLfoTargetState;
+  std::vector<State<double>> _synthLfoRateState;
+  std::vector<State<double>> _synthLfoDepthState;
+
+  // Sample-layer UI state — index-parallel [track][layer], same
+  // "flat vector of vectors" convention _cellState uses for the step
+  // grid (State<> isn't default-constructible, so these can't live in
+  // a fixed std::array the way plain StepHit::SampleLayer fields do).
+  // Every track always has all kMaxSampleLayers rows built (mirrors
+  // the step grid always allocating kMaxSteps cells) — an unused row
+  // just shows "Empty" until a sample is loaded into it.
+  std::vector<std::vector<State<std::string>>> _layerNameState;
+  std::vector<std::vector<State<double>>> _layerVelMinState;
+  std::vector<std::vector<State<double>>> _layerVelMaxState;
+
+  // Full file path per (track, layer), so Save Project can write it
+  // back out — same role _trackSamplePath plays for the legacy
+  // single-sample field. Not a State<>: never bound to a widget
+  // directly, only read at save time.
+  std::vector<std::vector<std::string>> _layerSamplePath;
+
   // Pattern selector. NOTE: assumes Dropdown() returns a shared_ptr to a
   // concrete widget type exposing setOptions()/setSelectedIndex() — matches
   // the chained-method style used throughout this framework, but double
@@ -2185,7 +2520,6 @@ class SequencerApp : public Widget {
   std::vector<State<double>> _auxFilterCutoffState;
   std::vector<State<double>> _auxFilterQState;
 
-
   std::vector<State<bool>> _timelineCompEnabledState;
   std::vector<State<double>> _timelineCompThresholdState;
   std::vector<State<double>> _timelineCompRatioState;
@@ -2200,7 +2534,6 @@ class SequencerApp : public Widget {
   std::vector<State<double>> _auxCompReleaseState;
   std::vector<State<double>> _auxCompMakeupState;
 
-
   std::vector<State<bool>> _timelineDelayEnabledState;
   std::vector<State<double>> _timelineDelayTimeState;
   std::vector<State<double>> _timelineDelayFeedbackState;
@@ -2211,8 +2544,6 @@ class SequencerApp : public Widget {
   std::vector<State<double>> _timelineReverbDampingState;
   std::vector<State<double>> _timelineReverbMixState;
 
-
-
   std::vector<State<bool>> _auxDelayEnabledState;
   std::vector<State<double>> _auxDelayTimeState;
   std::vector<State<double>> _auxDelayFeedbackState;
@@ -2222,8 +2553,6 @@ class SequencerApp : public Widget {
   std::vector<State<double>> _auxReverbRoomState;
   std::vector<State<double>> _auxReverbDampingState;
   std::vector<State<double>> _auxReverbMixState;
-
-
 
   std::vector<BusID> _auxBuses;
   std::vector<std::string> _auxBusNames;
@@ -2313,6 +2642,23 @@ public:
     _sustainLevelState.reserve(_seq->trackVoice.size());
     _sustainHoldState.reserve(_seq->trackVoice.size());
     _releaseState.reserve(_seq->trackVoice.size());
+    _osc2EnabledState.reserve(_seq->trackVoice.size());
+    _osc2WaveformState.reserve(_seq->trackVoice.size());
+    _osc2DetuneState.reserve(_seq->trackVoice.size());
+    _osc2LevelState.reserve(_seq->trackVoice.size());
+    _osc3EnabledState.reserve(_seq->trackVoice.size());
+    _osc3WaveformState.reserve(_seq->trackVoice.size());
+    _osc3DetuneState.reserve(_seq->trackVoice.size());
+    _osc3LevelState.reserve(_seq->trackVoice.size());
+    _synthFilterEnabledState.reserve(_seq->trackVoice.size());
+    _synthFilterTypeState.reserve(_seq->trackVoice.size());
+    _synthFilterCutoffState.reserve(_seq->trackVoice.size());
+    _synthFilterQState.reserve(_seq->trackVoice.size());
+    _synthFilterEnvAmountState.reserve(_seq->trackVoice.size());
+    _synthLfoEnabledState.reserve(_seq->trackVoice.size());
+    _synthLfoTargetState.reserve(_seq->trackVoice.size());
+    _synthLfoRateState.reserve(_seq->trackVoice.size());
+    _synthLfoDepthState.reserve(_seq->trackVoice.size());
     for (size_t t = 0; t < _seq->trackVoice.size(); t++) {
       _cellState[t].reserve(StepScheduler::kMaxSteps);
       _velocitySliderState[t].reserve(StepScheduler::kMaxSteps);
@@ -2339,6 +2685,33 @@ public:
       _sustainLevelState.emplace_back((double)_seq->trackVoice[t].sustainLevel);
       _sustainHoldState.emplace_back((double)_seq->trackVoice[t].sustainSec);
       _releaseState.emplace_back((double)_seq->trackVoice[t].releaseSec);
+
+      const auto &osc2 = _seq->trackVoice[t].extraOscillators[0];
+      _osc2EnabledState.emplace_back(osc2.enabled);
+      _osc2WaveformState.emplace_back((int)osc2.waveform);
+      _osc2DetuneState.emplace_back((double)osc2.detuneSemitones);
+      _osc2LevelState.emplace_back((double)osc2.levelMix);
+      const auto &osc3 = _seq->trackVoice[t].extraOscillators[1];
+      _osc3EnabledState.emplace_back(osc3.enabled);
+      _osc3WaveformState.emplace_back((int)osc3.waveform);
+      _osc3DetuneState.emplace_back((double)osc3.detuneSemitones);
+      _osc3LevelState.emplace_back((double)osc3.levelMix);
+
+      _synthFilterEnabledState.emplace_back(_seq->trackVoice[t].filterEnabled);
+      _synthFilterTypeState.emplace_back((int)_seq->trackVoice[t].filterType);
+      _synthFilterCutoffState.emplace_back(
+          (double)_seq->trackVoice[t].filterCutoffHz);
+      _synthFilterQState.emplace_back(
+          (double)_seq->trackVoice[t].filterResonanceQ);
+      _synthFilterEnvAmountState.emplace_back(
+          (double)_seq->trackVoice[t].filterEnvAmount);
+
+      _synthLfoEnabledState.emplace_back(_seq->trackVoice[t].lfoEnabled);
+      // Dropdown offers Pitch/FilterCutoff/Amplitude only (LfoTarget::None
+      // is implied by the Enabled toggle), so index = enum value - 1.
+      _synthLfoTargetState.emplace_back((int)_seq->trackVoice[t].lfoTarget - 1);
+      _synthLfoRateState.emplace_back((double)_seq->trackVoice[t].lfoRateHz);
+      _synthLfoDepthState.emplace_back((double)_seq->trackVoice[t].lfoDepth);
     }
 
     // Seed the initial pattern (slot 0, created by StepScheduler's ctor)
@@ -2348,6 +2721,21 @@ public:
       initial.steps[0][s].on = true;
     for (int s = 2; s < initial.numSteps; s += 4)
       initial.steps[3][s].on = true;
+    _layerNameState.resize(_seq->trackVoice.size());
+    _layerVelMinState.resize(_seq->trackVoice.size());
+    _layerVelMaxState.resize(_seq->trackVoice.size());
+    _layerSamplePath.resize(_seq->trackVoice.size());
+    for (size_t t = 0; t < _seq->trackVoice.size(); t++) {
+      _layerNameState[t].reserve(StepHit::kMaxSampleLayers);
+      _layerVelMinState[t].reserve(StepHit::kMaxSampleLayers);
+      _layerVelMaxState[t].reserve(StepHit::kMaxSampleLayers);
+      _layerSamplePath[t].resize(StepHit::kMaxSampleLayers);
+      for (int i = 0; i < StepHit::kMaxSampleLayers; i++) {
+        _layerNameState[t].emplace_back("Empty");
+        _layerVelMinState[t].emplace_back(0.0);
+        _layerVelMaxState[t].emplace_back(1.0);
+      }
+    }
 
     _refreshGridFromPattern(); // pull the seeded pattern into the bound cell
                                // states
@@ -2363,9 +2751,13 @@ public:
       AudioEngine::get().stopCapture();
 
     // Release any samples this instance loaded onto tracks.
-    for (auto &track : _seq->trackVoice)
+    for (auto &track : _seq->trackVoice) {
       if (track.sampleId != kInvalidSample)
         AudioEngine::get().unloadSample(track.sampleId);
+      for (auto &layer : track.sampleLayers)
+        if (layer.sampleId != kInvalidSample)
+          AudioEngine::get().unloadSample(layer.sampleId);
+    }
   }
 
   // Combined color logic for a single (track, step) cell in the CURRENTLY
@@ -2419,6 +2811,42 @@ public:
         pat.numSteps); // triggers grid recolor (grayed-out inert columns)
     _patternSpbState.set(pat.stepsPerBeat);
     _patternSwingState.set((double)pat.swing);
+  }
+
+  static std::string _basenameOf(const std::string &path) {
+    if (path.empty())
+      return "Empty";
+    size_t slash = path.find_last_of("/\\");
+    return slash == std::string::npos ? path : path.substr(slash + 1);
+  }
+
+  void _loadSampleLayer(size_t t, int layerIdx, const std::string &path) {
+    if (path.empty())
+      return;
+    SampleID newId = AudioEngine::get().loadSample(path);
+    if (newId == kInvalidSample)
+      return; // decode failed — leave whatever was in this layer alone
+
+    auto &layer = _seq->trackVoice[t].sampleLayers[layerIdx];
+    SampleID old = layer.sampleId;
+    layer.sampleId = newId;
+    layer.samplePath = path;
+    if (old != kInvalidSample)
+      AudioEngine::get().unloadSample(old);
+
+    _layerSamplePath[t][layerIdx] = path;
+    _layerNameState[t][layerIdx].set(_basenameOf(path));
+  }
+
+  void _clearSampleLayer(size_t t, int layerIdx) {
+    auto &layer = _seq->trackVoice[t].sampleLayers[layerIdx];
+    if (layer.sampleId != kInvalidSample) {
+      AudioEngine::get().unloadSample(layer.sampleId);
+      layer.sampleId = kInvalidSample;
+    }
+    layer.samplePath.clear();
+    _layerSamplePath[t][layerIdx].clear();
+    _layerNameState[t][layerIdx].set("Empty");
   }
 
   void _loadTrackSample(size_t t, const std::string &path) {
@@ -2560,6 +2988,29 @@ public:
     _sustainLevelState[t].set((double)_seq->trackVoice[t].sustainLevel);
     _sustainHoldState[t].set((double)_seq->trackVoice[t].sustainSec);
     _releaseState[t].set((double)_seq->trackVoice[t].releaseSec);
+
+    const auto &osc2 = _seq->trackVoice[t].extraOscillators[0];
+    _osc2EnabledState[t].set(osc2.enabled);
+    _osc2WaveformState[t].set((int)osc2.waveform);
+    _osc2DetuneState[t].set((double)osc2.detuneSemitones);
+    _osc2LevelState[t].set((double)osc2.levelMix);
+    const auto &osc3 = _seq->trackVoice[t].extraOscillators[1];
+    _osc3EnabledState[t].set(osc3.enabled);
+    _osc3WaveformState[t].set((int)osc3.waveform);
+    _osc3DetuneState[t].set((double)osc3.detuneSemitones);
+    _osc3LevelState[t].set((double)osc3.levelMix);
+
+    _synthFilterEnabledState[t].set(_seq->trackVoice[t].filterEnabled);
+    _synthFilterTypeState[t].set((int)_seq->trackVoice[t].filterType);
+    _synthFilterCutoffState[t].set((double)_seq->trackVoice[t].filterCutoffHz);
+    _synthFilterQState[t].set((double)_seq->trackVoice[t].filterResonanceQ);
+    _synthFilterEnvAmountState[t].set(
+        (double)_seq->trackVoice[t].filterEnvAmount);
+
+    _synthLfoEnabledState[t].set(_seq->trackVoice[t].lfoEnabled);
+    _synthLfoTargetState[t].set((int)_seq->trackVoice[t].lfoTarget - 1);
+    _synthLfoRateState[t].set((double)_seq->trackVoice[t].lfoRateHz);
+    _synthLfoDepthState[t].set((double)_seq->trackVoice[t].lfoDepth);
   }
 
   void _syncPatternDropdown() {
@@ -2768,7 +3219,6 @@ public:
     _timelineReverbDampingState.emplace_back(0.5);
     _timelineReverbMixState.emplace_back(0.3);
 
-
     auto delayEnabledToggle =
         Toggle("Delay")
             ->setValue(_timelineDelayEnabledState[idx])
@@ -2843,7 +3293,6 @@ public:
               _updateTrackReverb(idx, nullptr, nullptr, nullptr, &f);
             });
 
-
     auto compEnabledToggle =
         Toggle("Comp")
             ->setValue(_timelineCompEnabledState[idx])
@@ -2907,7 +3356,6 @@ public:
                                      nullptr, &f);
             });
 
-
     auto filterEnabledToggle =
         Toggle("Filter")
             ->setValue(_timelineFilterEnabledState[idx])
@@ -2919,12 +3367,12 @@ public:
         Dropdown({"LP", "HP", "BP", "Notch"})
             ->setSelectedIndex(_timelineFilterTypeState[idx])
             ->setWidth(80)
-            ->setOnSelectionChanged([this, idx](int optIdx,
-                                                const std::string &) {
-              _timelineFilterTypeState[idx].set(optIdx);
-              FilterType t = (FilterType)optIdx;
-              _updateTrackFilter(idx, nullptr, &t, nullptr, nullptr);
-            });
+            ->setOnSelectionChanged(
+                [this, idx](int optIdx, const std::string &) {
+                  _timelineFilterTypeState[idx].set(optIdx);
+                  FilterType t = (FilterType)optIdx;
+                  _updateTrackFilter(idx, nullptr, &t, nullptr, nullptr);
+                });
 
     // Linear 20Hz-20kHz for now — a log-scaled slider would feel more
     // natural but this UI framework's Slider is linear-only; a proper
@@ -2950,13 +3398,12 @@ public:
               _updateTrackFilter(idx, nullptr, nullptr, nullptr, &q);
             });
 
-
     auto sendDropdown =
         Dropdown(_sendBusLabels())
-        ->setSelectedIndex(_timelineSendIndexState[idx])
+            ->setSelectedIndex(_timelineSendIndexState[idx])
             ->setOnSelectionChanged([this, idx](int optIdx,
                                                 const std::string &) {
-                                                  _timelineSendIndexState[idx].set(optIdx);
+              _timelineSendIndexState[idx].set(optIdx);
               BusID bus = (optIdx <= 0 || optIdx - 1 >= (int)_auxBuses.size())
                               ? kMasterBus
                               : _auxBuses[optIdx - 1];
@@ -3112,7 +3559,6 @@ public:
     _timelineReverbDampingState.clear();
     _timelineReverbMixState.clear();
 
-    
     _sendDropdowns.clear();
     if (_mixerStripsRow)
       _mixerStripsRow->children.clear();
@@ -3122,14 +3568,12 @@ public:
       _mixerStripsRow->markNeedsLayout();
   }
 
-
   // Bus RETURN channel strip — name, meter, and a volume fader feeding
   // AudioEngine::setBusGain(). Aux buses in this model always send to
   // master, so unlike a track strip there's no send dropdown here.
   void _appendAuxBusStrip(size_t idx) {
-     _auxBusVolumeState.emplace_back(1.0);
-     _auxBusPeakState.emplace_back(0.0);
-    
+    _auxBusVolumeState.emplace_back(1.0);
+    _auxBusPeakState.emplace_back(0.0);
 
     _auxFilterEnabledState.emplace_back(false);
     _auxFilterTypeState.emplace_back(0);
@@ -3226,13 +3670,12 @@ public:
               _updateAuxReverb(idx, nullptr, nullptr, nullptr, &f);
             });
 
-
     auto compEnabledToggle =
         Toggle("Comp")
             ->setValue(_auxCompEnabledState[idx])
             ->setOnToggleChanged([this, idx](bool v) {
-              _updateAuxCompressor(idx, &v, nullptr, nullptr, nullptr,
-                                   nullptr, nullptr);
+              _updateAuxCompressor(idx, &v, nullptr, nullptr, nullptr, nullptr,
+                                   nullptr);
             });
 
     auto compThresholdSlider =
@@ -3242,8 +3685,8 @@ public:
             ->setOnValueChanged([this, idx](double v) {
               _auxCompThresholdState[idx].set(v);
               float f = (float)v;
-              _updateAuxCompressor(idx, nullptr, &f, nullptr, nullptr,
-                                   nullptr, nullptr);
+              _updateAuxCompressor(idx, nullptr, &f, nullptr, nullptr, nullptr,
+                                   nullptr);
             });
 
     auto compRatioSlider =
@@ -3253,8 +3696,8 @@ public:
             ->setOnValueChanged([this, idx](double v) {
               _auxCompRatioState[idx].set(v);
               float f = (float)v;
-              _updateAuxCompressor(idx, nullptr, nullptr, &f, nullptr,
-                                   nullptr, nullptr);
+              _updateAuxCompressor(idx, nullptr, nullptr, &f, nullptr, nullptr,
+                                   nullptr);
             });
 
     auto compAttackSlider =
@@ -3264,8 +3707,8 @@ public:
             ->setOnValueChanged([this, idx](double v) {
               _auxCompAttackState[idx].set(v);
               float f = (float)v;
-              _updateAuxCompressor(idx, nullptr, nullptr, nullptr, &f,
-                                   nullptr, nullptr);
+              _updateAuxCompressor(idx, nullptr, nullptr, nullptr, &f, nullptr,
+                                   nullptr);
             });
 
     auto compReleaseSlider =
@@ -3275,8 +3718,8 @@ public:
             ->setOnValueChanged([this, idx](double v) {
               _auxCompReleaseState[idx].set(v);
               float f = (float)v;
-              _updateAuxCompressor(idx, nullptr, nullptr, nullptr, nullptr,
-                                   &f, nullptr);
+              _updateAuxCompressor(idx, nullptr, nullptr, nullptr, nullptr, &f,
+                                   nullptr);
             });
 
     auto compMakeupSlider =
@@ -3290,7 +3733,6 @@ public:
                                    nullptr, &f);
             });
 
-
     auto filterEnabledToggle =
         Toggle("Filter")
             ->setValue(_auxFilterEnabledState[idx])
@@ -3302,12 +3744,12 @@ public:
         Dropdown({"LP", "HP", "BP", "Notch"})
             ->setSelectedIndex(_auxFilterTypeState[idx])
             ->setWidth(80)
-            ->setOnSelectionChanged([this, idx](int optIdx,
-                                                const std::string &) {
-              _auxFilterTypeState[idx].set(optIdx);
-              FilterType t = (FilterType)optIdx;
-              _updateAuxFilter(idx, nullptr, &t, nullptr, nullptr);
-            });
+            ->setOnSelectionChanged(
+                [this, idx](int optIdx, const std::string &) {
+                  _auxFilterTypeState[idx].set(optIdx);
+                  FilterType t = (FilterType)optIdx;
+                  _updateAuxFilter(idx, nullptr, &t, nullptr, nullptr);
+                });
 
     auto filterCutoffSlider =
         Slider(20.0, 20000.0, 10.0)
@@ -3328,7 +3770,6 @@ public:
               float q = (float)v;
               _updateAuxFilter(idx, nullptr, nullptr, nullptr, &q);
             });
-
 
     auto meter = Box({})
                      ->setWidth(14)
@@ -3372,7 +3813,6 @@ public:
                    reverbRoomSlider,
                    reverbDampingSlider,
                    reverbMixSlider,
-                  
 
                })
             ->setGap(4)
@@ -3448,8 +3888,8 @@ public:
     bool enabled;
     FilterType type;
     float cutoff, q;
-    AudioEngine::get().getBusFilterInsert(bus, kFilterInsertSlot, enabled,
-                                          type, cutoff, q);
+    AudioEngine::get().getBusFilterInsert(bus, kFilterInsertSlot, enabled, type,
+                                          cutoff, q);
     if (newEnabled)
       enabled = *newEnabled;
     if (newType)
@@ -3458,8 +3898,8 @@ public:
       cutoff = *newCutoff;
     if (newQ)
       q = *newQ;
-    AudioEngine::get().setBusFilterInsert(bus, kFilterInsertSlot, enabled,
-                                          type, cutoff, q);
+    AudioEngine::get().setBusFilterInsert(bus, kFilterInsertSlot, enabled, type,
+                                          cutoff, q);
   }
 
   void _updateTrackCompressor(size_t idx, const bool *newEnabled,
@@ -3469,9 +3909,9 @@ public:
     TrackID et = _timeline.tracks[idx].engineTrack;
     bool enabled;
     float thresh, ratio, attack, release, makeup;
-    AudioEngine::get().getTrackCompressorInsert(
-        et, kCompressorInsertSlot, enabled, thresh, ratio, attack, release,
-        makeup);
+    AudioEngine::get().getTrackCompressorInsert(et, kCompressorInsertSlot,
+                                                enabled, thresh, ratio, attack,
+                                                release, makeup);
     if (newEnabled)
       enabled = *newEnabled;
     if (newThresh)
@@ -3484,9 +3924,9 @@ public:
       release = *newRelease;
     if (newMakeup)
       makeup = *newMakeup;
-    AudioEngine::get().setTrackCompressorInsert(
-        et, kCompressorInsertSlot, enabled, thresh, ratio, attack, release,
-        makeup);
+    AudioEngine::get().setTrackCompressorInsert(et, kCompressorInsertSlot,
+                                                enabled, thresh, ratio, attack,
+                                                release, makeup);
   }
 
   void _updateAuxCompressor(size_t idx, const bool *newEnabled,
@@ -3496,9 +3936,9 @@ public:
     BusID bus = _auxBuses[idx];
     bool enabled;
     float thresh, ratio, attack, release, makeup;
-    AudioEngine::get().getBusCompressorInsert(
-        bus, kCompressorInsertSlot, enabled, thresh, ratio, attack, release,
-        makeup);
+    AudioEngine::get().getBusCompressorInsert(bus, kCompressorInsertSlot,
+                                              enabled, thresh, ratio, attack,
+                                              release, makeup);
     if (newEnabled)
       enabled = *newEnabled;
     if (newThresh)
@@ -3511,9 +3951,9 @@ public:
       release = *newRelease;
     if (newMakeup)
       makeup = *newMakeup;
-    AudioEngine::get().setBusCompressorInsert(
-        bus, kCompressorInsertSlot, enabled, thresh, ratio, attack, release,
-        makeup);
+    AudioEngine::get().setBusCompressorInsert(bus, kCompressorInsertSlot,
+                                              enabled, thresh, ratio, attack,
+                                              release, makeup);
   }
 
   void _updateTrackDelay(size_t idx, const bool *newEnabled,
@@ -3522,8 +3962,8 @@ public:
     TrackID et = _timeline.tracks[idx].engineTrack;
     bool enabled;
     float time, fb, mix;
-    AudioEngine::get().getTrackDelayInsert(et, kDelayInsertSlot, enabled,
-                                           time, fb, mix);
+    AudioEngine::get().getTrackDelayInsert(et, kDelayInsertSlot, enabled, time,
+                                           fb, mix);
     if (newEnabled)
       enabled = *newEnabled;
     if (newTime)
@@ -3532,13 +3972,12 @@ public:
       fb = *newFeedback;
     if (newMix)
       mix = *newMix;
-    AudioEngine::get().setTrackDelayInsert(et, kDelayInsertSlot, enabled,
-                                           time, fb, mix);
+    AudioEngine::get().setTrackDelayInsert(et, kDelayInsertSlot, enabled, time,
+                                           fb, mix);
   }
 
-  void _updateAuxDelay(size_t idx, const bool *newEnabled,
-                       const float *newTime, const float *newFeedback,
-                       const float *newMix) {
+  void _updateAuxDelay(size_t idx, const bool *newEnabled, const float *newTime,
+                       const float *newFeedback, const float *newMix) {
     BusID bus = _auxBuses[idx];
     bool enabled;
     float time, fb, mix;
@@ -3581,8 +4020,8 @@ public:
     BusID bus = _auxBuses[idx];
     bool enabled;
     float room, damping, mix;
-    AudioEngine::get().getBusReverbInsert(bus, kReverbInsertSlot, enabled,
-                                          room, damping, mix);
+    AudioEngine::get().getBusReverbInsert(bus, kReverbInsertSlot, enabled, room,
+                                          damping, mix);
     if (newEnabled)
       enabled = *newEnabled;
     if (newRoom)
@@ -3591,13 +4030,9 @@ public:
       damping = *newDamping;
     if (newMix)
       mix = *newMix;
-    AudioEngine::get().setBusReverbInsert(bus, kReverbInsertSlot, enabled,
-                                          room, damping, mix);
+    AudioEngine::get().setBusReverbInsert(bus, kReverbInsertSlot, enabled, room,
+                                          damping, mix);
   }
-
-
-
-
 
   AutomationLane *_findAutomationLane(int trackIndex, AutomationParam param) {
     if (trackIndex < 0 || trackIndex >= (int)_timeline.tracks.size())
@@ -4177,6 +4612,35 @@ public:
           << "\"sustainLevel\":" << hit.sustainLevel << ","
           << "\"sustainSec\":" << hit.sustainSec << ","
           << "\"releaseSec\":" << hit.releaseSec << ","
+          << "\"osc2Enabled\":"
+          << (hit.extraOscillators[0].enabled ? "true" : "false") << ","
+          << "\"osc2Waveform\":" << (int)hit.extraOscillators[0].waveform << ","
+          << "\"osc2Detune\":" << hit.extraOscillators[0].detuneSemitones << ","
+          << "\"osc2Level\":" << hit.extraOscillators[0].levelMix << ","
+          << "\"osc3Enabled\":"
+          << (hit.extraOscillators[1].enabled ? "true" : "false") << ","
+          << "\"osc3Waveform\":" << (int)hit.extraOscillators[1].waveform << ","
+          << "\"osc3Detune\":" << hit.extraOscillators[1].detuneSemitones << ","
+          << "\"osc3Level\":" << hit.extraOscillators[1].levelMix << ","
+          << "\"synthFilterEnabled\":" << (hit.filterEnabled ? "true" : "false")
+          << ","
+          << "\"synthFilterType\":" << (int)hit.filterType << ","
+          << "\"synthFilterCutoffHz\":" << hit.filterCutoffHz << ","
+          << "\"synthFilterResonanceQ\":" << hit.filterResonanceQ << ","
+          << "\"synthFilterEnvAmount\":" << hit.filterEnvAmount << ","
+          << "\"lfoEnabled\":" << (hit.lfoEnabled ? "true" : "false") << ","
+          << "\"lfoTarget\":" << (int)hit.lfoTarget << ","
+          << "\"lfoRateHz\":" << hit.lfoRateHz << ","
+          << "\"lfoDepth\":" << hit.lfoDepth << ","
+          << "\"sampleLayers\":[";
+      for (int i = 0; i < StepHit::kMaxSampleLayers; i++) {
+        const auto &layer = hit.sampleLayers[i];
+        out << "{\"path\":\"" << SeqJson::esc(layer.samplePath) << "\","
+            << "\"velMin\":" << layer.velocityMin << ","
+            << "\"velMax\":" << layer.velocityMax << "}"
+            << (i + 1 < StepHit::kMaxSampleLayers ? "," : "");
+      }
+      out << "],"
           << "\"samplePath\":\""
           << SeqJson::esc(t < _trackSamplePath.size() ? _trackSamplePath[t]
                                                       : "")
@@ -4234,11 +4698,11 @@ public:
           sendIndex = (int)bi + 1;
           break;
         }
-     bool fEnabled;
-     FilterType fType;
-     float fCutoff, fQ;
-     AudioEngine::get().getTrackFilterInsert(tt.engineTrack, kFilterInsertSlot,
-                                             fEnabled, fType, fCutoff, fQ);
+      bool fEnabled;
+      FilterType fType;
+      float fCutoff, fQ;
+      AudioEngine::get().getTrackFilterInsert(tt.engineTrack, kFilterInsertSlot,
+                                              fEnabled, fType, fCutoff, fQ);
       bool cEnabled;
       float cThresh, cRatio, cAttack, cRelease, cMakeup;
       AudioEngine::get().getTrackCompressorInsert(
@@ -4365,6 +4829,78 @@ public:
           (float)tj["sustainSec"].asDouble(_seq->trackVoice[t].sustainSec);
       _seq->trackVoice[t].releaseSec =
           (float)tj["releaseSec"].asDouble(_seq->trackVoice[t].releaseSec);
+
+      _seq->trackVoice[t].extraOscillators[0].enabled =
+          tj["osc2Enabled"].asBool(false);
+      _seq->trackVoice[t].extraOscillators[0].waveform =
+          (OscWaveform)tj["osc2Waveform"].asInt(0);
+      _seq->trackVoice[t].extraOscillators[0].detuneSemitones =
+          (float)tj["osc2Detune"].asDouble(0.0);
+      _seq->trackVoice[t].extraOscillators[0].levelMix =
+          (float)tj["osc2Level"].asDouble(0.5);
+      _seq->trackVoice[t].extraOscillators[1].enabled =
+          tj["osc3Enabled"].asBool(false);
+      _seq->trackVoice[t].extraOscillators[1].waveform =
+          (OscWaveform)tj["osc3Waveform"].asInt(0);
+      _seq->trackVoice[t].extraOscillators[1].detuneSemitones =
+          (float)tj["osc3Detune"].asDouble(0.0);
+      _seq->trackVoice[t].extraOscillators[1].levelMix =
+          (float)tj["osc3Level"].asDouble(0.5);
+
+      _seq->trackVoice[t].filterEnabled =
+          tj["synthFilterEnabled"].asBool(false);
+      _seq->trackVoice[t].filterType =
+          (FilterType)tj["synthFilterType"].asInt(0);
+      _seq->trackVoice[t].filterCutoffHz =
+          (float)tj["synthFilterCutoffHz"].asDouble(2000.0);
+      _seq->trackVoice[t].filterResonanceQ =
+          (float)tj["synthFilterResonanceQ"].asDouble(0.707);
+      _seq->trackVoice[t].filterEnvAmount =
+          (float)tj["synthFilterEnvAmount"].asDouble(0.0);
+
+      _seq->trackVoice[t].lfoEnabled = tj["lfoEnabled"].asBool(false);
+      _seq->trackVoice[t].lfoTarget =
+          (StepHit::LfoTarget)tj["lfoTarget"].asInt(1);
+      _seq->trackVoice[t].lfoRateHz = (float)tj["lfoRateHz"].asDouble(5.0);
+      _seq->trackVoice[t].lfoDepth = (float)tj["lfoDepth"].asDouble(0.0);
+
+      // Release any layer samples this track already holds (e.g. from a
+      // previous project in memory) before applying the file's layers —
+      // same "unload old, load new" discipline _loadTrackSample uses for
+      // the legacy single-sample field.
+      const auto &layersArr = tj["sampleLayers"].arr;
+      for (int i = 0; i < StepHit::kMaxSampleLayers; i++) {
+        auto &layer = _seq->trackVoice[t].sampleLayers[i];
+        if (layer.sampleId != kInvalidSample) {
+          AudioEngine::get().unloadSample(layer.sampleId);
+          layer.sampleId = kInvalidSample;
+        }
+        layer.samplePath.clear();
+
+        if (i < (int)layersArr.size()) {
+          const auto &lj = layersArr[i];
+          layer.velocityMin = (float)lj["velMin"].asDouble(0.0);
+          layer.velocityMax = (float)lj["velMax"].asDouble(1.0);
+          std::string path = lj["path"].asString("");
+          if (!path.empty()) {
+            SampleID id = AudioEngine::get().loadSample(path);
+            if (id != kInvalidSample) {
+              layer.sampleId = id;
+              layer.samplePath = path;
+            }
+          }
+        } else {
+          layer.velocityMin = 0.f;
+          layer.velocityMax = 1.f;
+        }
+
+        _layerSamplePath[t][i] = layer.samplePath;
+        _layerVelMinState[t][i].set((double)layer.velocityMin);
+        _layerVelMaxState[t][i].set((double)layer.velocityMax);
+        _layerNameState[t][i].set(_basenameOf(layer.samplePath));
+      }
+
+
       _seq->trackMuted[t] = tj["muted"].asBool(false);
       _seq->trackSoloed[t] = tj["soloed"].asBool(false);
       _trackVolumeState[t].set((double)_seq->trackVoice[t].gain);
@@ -4482,7 +5018,6 @@ public:
       float reverbRoom = 0.5f;
       float reverbDamping = 0.5f;
       float reverbMix = 0.3f;
-
     };
     std::vector<int> loadedSendIndex;
     std::vector<LoadedFilter> loadedTrackFilter;
@@ -4497,13 +5032,12 @@ public:
                                                          // routing, same
                                                          // as _addTimelineTrack
       maxTimelineTrackId = std::max(maxTimelineTrackId, (uint32_t)tt.id);
-    
+
       AudioEngine::get().setTrackGain(tt.engineTrack,
                                       (float)ttj["gain"].asDouble(1.0));
       AudioEngine::get().setTrackPan(tt.engineTrack,
                                      (float)ttj["pan"].asDouble(0.0));
       loadedSendIndex.push_back(ttj["sendIndex"].asInt(0));
-
 
       LoadedFilter lf;
       lf.enabled = ttj["filterEnabled"].asBool(false);
@@ -4527,16 +5061,16 @@ public:
       lf.delayTime = (float)ttj["delayTime"].asDouble(300.0);
       lf.delayFeedback = (float)ttj["delayFeedback"].asDouble(0.35);
       lf.delayMix = (float)ttj["delayMix"].asDouble(0.3);
-      AudioEngine::get().setTrackDelayInsert(
-          tt.engineTrack, kDelayInsertSlot, lf.delayEnabled, lf.delayTime,
-          lf.delayFeedback, lf.delayMix);
+      AudioEngine::get().setTrackDelayInsert(tt.engineTrack, kDelayInsertSlot,
+                                             lf.delayEnabled, lf.delayTime,
+                                             lf.delayFeedback, lf.delayMix);
       lf.reverbEnabled = ttj["reverbEnabled"].asBool(false);
       lf.reverbRoom = (float)ttj["reverbRoom"].asDouble(0.5);
       lf.reverbDamping = (float)ttj["reverbDamping"].asDouble(0.5);
       lf.reverbMix = (float)ttj["reverbMix"].asDouble(0.3);
-      AudioEngine::get().setTrackReverbInsert(
-          tt.engineTrack, kReverbInsertSlot, lf.reverbEnabled, lf.reverbRoom,
-          lf.reverbDamping, lf.reverbMix);
+      AudioEngine::get().setTrackReverbInsert(tt.engineTrack, kReverbInsertSlot,
+                                              lf.reverbEnabled, lf.reverbRoom,
+                                              lf.reverbDamping, lf.reverbMix);
 
       loadedTrackFilter.push_back(lf);
 
@@ -4593,7 +5127,6 @@ public:
       double gain = bj["gain"].asDouble(1.0);
       AudioEngine::get().setBusGain(b, (float)gain);
 
-
       LoadedFilter lf;
       lf.enabled = bj["filterEnabled"].asBool(false);
       lf.type = (FilterType)bj["filterType"].asInt(0);
@@ -4614,9 +5147,9 @@ public:
       lf.delayTime = (float)bj["delayTime"].asDouble(300.0);
       lf.delayFeedback = (float)bj["delayFeedback"].asDouble(0.35);
       lf.delayMix = (float)bj["delayMix"].asDouble(0.3);
-      AudioEngine::get().setBusDelayInsert(b, kDelayInsertSlot,
-                                           lf.delayEnabled, lf.delayTime,
-                                           lf.delayFeedback, lf.delayMix);
+      AudioEngine::get().setBusDelayInsert(b, kDelayInsertSlot, lf.delayEnabled,
+                                           lf.delayTime, lf.delayFeedback,
+                                           lf.delayMix);
       lf.reverbEnabled = bj["reverbEnabled"].asBool(false);
       lf.reverbRoom = (float)bj["reverbRoom"].asDouble(0.5);
       lf.reverbDamping = (float)bj["reverbDamping"].asDouble(0.5);
@@ -4683,8 +5216,7 @@ public:
         _timelineCompMakeupState[i].set(
             (double)loadedTrackFilter[i].compMakeup);
         _timelineDelayEnabledState[i].set(loadedTrackFilter[i].delayEnabled);
-        _timelineDelayTimeState[i].set(
-            (double)loadedTrackFilter[i].delayTime);
+        _timelineDelayTimeState[i].set((double)loadedTrackFilter[i].delayTime);
         _timelineDelayFeedbackState[i].set(
             (double)loadedTrackFilter[i].delayFeedback);
         _timelineDelayMixState[i].set((double)loadedTrackFilter[i].delayMix);
@@ -4745,6 +5277,78 @@ public:
         ->setPaddingHV(8, 4)
         ->setBackgroundColor(Color::fromRGB(240, 240, 250))
         ->setBorderRadius(6);
+  }
+
+  WidgetPtr _buildSampleLayerPanel(size_t t) {
+    std::vector<WidgetPtr> rows;
+    rows.push_back(
+        Text("Velocity zones — same range on multiple layers = round-robin")
+            ->setFontSize(10)
+            ->setWidth(220));
+    for (int i = 0; i < StepHit::kMaxSampleLayers; i++) {
+      auto loadPicker =
+          FilePicker()
+              ->setMode(FilePickerMode::Open)
+              ->setTitle("Load layer sample")
+              ->addFilter("Audio", {"*.wav", "*.mp3", "*.ogg", "*.flac"})
+              ->setWidth(50)
+              ->setOnChanged([this, t, i](const std::string &path) {
+                _loadSampleLayer(t, i, path);
+              });
+
+      auto velMinSlider = Slider(0.0, 1.0, 0.01)
+                              ->setValue(_layerVelMinState[t][i])
+                              ->setWidth(60)
+                              ->setOnValueChanged([this, t, i](double v) {
+                                auto &layer =
+                                    _seq->trackVoice[t].sampleLayers[i];
+                                layer.velocityMin = (float)v;
+                                if (layer.velocityMin > layer.velocityMax) {
+                                  layer.velocityMax = layer.velocityMin;
+                                  _layerVelMaxState[t][i].set(v);
+                                }
+                                _layerVelMinState[t][i].set(v);
+                              });
+
+      auto velMaxSlider = Slider(0.0, 1.0, 0.01)
+                              ->setValue(_layerVelMaxState[t][i])
+                              ->setWidth(60)
+                              ->setOnValueChanged([this, t, i](double v) {
+                                auto &layer =
+                                    _seq->trackVoice[t].sampleLayers[i];
+                                layer.velocityMax = (float)v;
+                                if (layer.velocityMax < layer.velocityMin) {
+                                  layer.velocityMin = layer.velocityMax;
+                                  _layerVelMinState[t][i].set(v);
+                                }
+                                _layerVelMaxState[t][i].set(v);
+                              });
+
+      rows.push_back(
+          Row({
+                  Text("L" + std::to_string(i + 1))
+                      ->setFontSize(10)
+                      ->setWidth(16),
+                  loadPicker,
+                  Text(_layerNameState[t][i])
+                      ->setFontSize(10)
+                      ->setWidth(60)
+                      ->setOverflow(TextOverflow::Ellipsis)
+                      ->setMaxLines(1),
+                  Text("min")->setFontSize(9),
+                  velMinSlider,
+                  Text("max")->setFontSize(9),
+                  velMaxSlider,
+                  Button("x", [this, t, i] { _clearSampleLayer(t, i); })
+                      ->setWidth(18)
+                      ->setHeight(18)
+                      ->setBorderRadius(3)
+                      ->setBackgroundColor(Color::fromRGB(230, 230, 230)),
+              })
+              ->setGap(4)
+              ->setAlignItems(AlignItems::Center));
+    }
+    return Column({rows})->setGap(4)->setPadding(8);
   }
 
   WidgetPtr build() override {
@@ -4895,7 +5499,7 @@ public:
                           ContextMenuItem::Widget(
                               Column(
                                   {
-                                      Text("Waveform")->setFontSize(11),
+                                      Text("Osc 1 waveform")->setFontSize(11),
                                       Dropdown(
                                           {"Sine", "Saw", "Square", "Triangle"})
                                           ->setSelectedIndex(_waveformState[t])
@@ -4957,9 +5561,224 @@ public:
                                                     (float)v;
                                                 _releaseState[t].set(v);
                                               }),
+                                      Text("── Osc 2 ──")
+                                          ->setFontSize(11)
+                                          ->setFontWeight(FontWeight::Bold),
+                                      Toggle("Enabled")
+                                          ->setValue(_osc2EnabledState[t])
+                                          ->setOnToggleChanged(
+                                              [this, t](bool v) {
+                                                _seq->trackVoice[t]
+                                                    .extraOscillators[0]
+                                                    .enabled = v;
+                                                _osc2EnabledState[t].set(v);
+                                              }),
+                                      Dropdown(
+                                          {"Sine", "Saw", "Square", "Triangle"})
+                                          ->setSelectedIndex(
+                                              _osc2WaveformState[t])
+                                          ->setWidth(120)
+                                          ->setOnSelectionChanged(
+                                              [this, t](int idx,
+                                                        const std::string &) {
+                                                _seq->trackVoice[t]
+                                                    .extraOscillators[0]
+                                                    .waveform =
+                                                    (OscWaveform)idx;
+                                                _osc2WaveformState[t].set(idx);
+                                              }),
+                                      Text("Detune (semitones)")
+                                          ->setFontSize(11),
+                                      Slider(-24.0, 24.0, 0.5)
+                                          ->setValue(_osc2DetuneState[t])
+                                          ->setWidth(140)
+                                          ->setOnValueChanged(
+                                              [this, t](double v) {
+                                                _seq->trackVoice[t]
+                                                    .extraOscillators[0]
+                                                    .detuneSemitones = (float)v;
+                                                _osc2DetuneState[t].set(v);
+                                              }),
+                                      Text("Level")->setFontSize(11),
+                                      Slider(0.0, 1.0, 0.05)
+                                          ->setValue(_osc2LevelState[t])
+                                          ->setWidth(140)
+                                          ->setOnValueChanged(
+                                              [this, t](double v) {
+                                                _seq->trackVoice[t]
+                                                    .extraOscillators[0]
+                                                    .levelMix = (float)v;
+                                                _osc2LevelState[t].set(v);
+                                              }),
+
+                                      Text("── Osc 3 ──")
+                                          ->setFontSize(11)
+                                          ->setFontWeight(FontWeight::Bold),
+                                      Toggle("Enabled")
+                                          ->setValue(_osc3EnabledState[t])
+                                          ->setOnToggleChanged(
+                                              [this, t](bool v) {
+                                                _seq->trackVoice[t]
+                                                    .extraOscillators[1]
+                                                    .enabled = v;
+                                                _osc3EnabledState[t].set(v);
+                                              }),
+                                      Dropdown(
+                                          {"Sine", "Saw", "Square", "Triangle"})
+                                          ->setSelectedIndex(
+                                              _osc3WaveformState[t])
+                                          ->setWidth(120)
+                                          ->setOnSelectionChanged(
+                                              [this, t](int idx,
+                                                        const std::string &) {
+                                                _seq->trackVoice[t]
+                                                    .extraOscillators[1]
+                                                    .waveform =
+                                                    (OscWaveform)idx;
+                                                _osc3WaveformState[t].set(idx);
+                                              }),
+                                      Text("Detune (semitones)")
+                                          ->setFontSize(11),
+                                      Slider(-24.0, 24.0, 0.5)
+                                          ->setValue(_osc3DetuneState[t])
+                                          ->setWidth(140)
+                                          ->setOnValueChanged(
+                                              [this, t](double v) {
+                                                _seq->trackVoice[t]
+                                                    .extraOscillators[1]
+                                                    .detuneSemitones = (float)v;
+                                                _osc3DetuneState[t].set(v);
+                                              }),
+                                      Text("Level")->setFontSize(11),
+                                      Slider(0.0, 1.0, 0.05)
+                                          ->setValue(_osc3LevelState[t])
+                                          ->setWidth(140)
+                                          ->setOnValueChanged(
+                                              [this, t](double v) {
+                                                _seq->trackVoice[t]
+                                                    .extraOscillators[1]
+                                                    .levelMix = (float)v;
+                                                _osc3LevelState[t].set(v);
+                                              }),
+
+                                      Text("── Filter ──")
+                                          ->setFontSize(11)
+                                          ->setFontWeight(FontWeight::Bold),
+                                      Toggle("Enabled")
+                                          ->setValue(
+                                              _synthFilterEnabledState[t])
+                                          ->setOnToggleChanged([this,
+                                                                t](bool v) {
+                                            _seq->trackVoice[t].filterEnabled =
+                                                v;
+                                            _synthFilterEnabledState[t].set(v);
+                                          }),
+                                      Dropdown({"LP", "HP", "BP", "Notch"})
+                                          ->setSelectedIndex(
+                                              _synthFilterTypeState[t])
+                                          ->setWidth(120)
+                                          ->setOnSelectionChanged(
+                                              [this, t](int idx,
+                                                        const std::string &) {
+                                                _seq->trackVoice[t].filterType =
+                                                    (FilterType)idx;
+                                                _synthFilterTypeState[t].set(
+                                                    idx);
+                                              }),
+                                      Text("Cutoff (Hz)")->setFontSize(11),
+                                      Slider(20.0, 20000.0, 10.0)
+                                          ->setValue(_synthFilterCutoffState[t])
+                                          ->setWidth(140)
+                                          ->setOnValueChanged([this,
+                                                               t](double v) {
+                                            _seq->trackVoice[t].filterCutoffHz =
+                                                (float)v;
+                                            _synthFilterCutoffState[t].set(v);
+                                          }),
+                                      Text("Resonance (Q)")->setFontSize(11),
+                                      Slider(0.1, 10.0, 0.1)
+                                          ->setValue(_synthFilterQState[t])
+                                          ->setWidth(140)
+                                          ->setOnValueChanged([this,
+                                                               t](double v) {
+                                            _seq->trackVoice[t]
+                                                .filterResonanceQ = (float)v;
+                                            _synthFilterQState[t].set(v);
+                                          }),
+                                      Text("Envelope amount")->setFontSize(11),
+                                      Slider(-1.0, 1.0, 0.05)
+                                          ->setValue(
+                                              _synthFilterEnvAmountState[t])
+                                          ->setWidth(140)
+                                          ->setOnValueChanged([this,
+                                                               t](double v) {
+                                            _seq->trackVoice[t]
+                                                .filterEnvAmount = (float)v;
+                                            _synthFilterEnvAmountState[t].set(
+                                                v);
+                                          }),
+
+                                      Text("── LFO ──")
+                                          ->setFontSize(11)
+                                          ->setFontWeight(FontWeight::Bold),
+                                      Toggle("Enabled")
+                                          ->setValue(_synthLfoEnabledState[t])
+                                          ->setOnToggleChanged([this,
+                                                                t](bool v) {
+                                            _seq->trackVoice[t].lfoEnabled = v;
+                                            _synthLfoEnabledState[t].set(v);
+                                          }),
+                                      Dropdown({"Pitch", "Filter Cutoff",
+                                                "Amplitude"})
+                                          ->setSelectedIndex(
+                                              _synthLfoTargetState[t])
+                                          ->setWidth(120)
+                                          ->setOnSelectionChanged(
+                                              [this, t](int idx,
+                                                        const std::string &) {
+                                                // idx 0/1/2 -> LfoTarget::
+                                                // Pitch/FilterCutoff/Amplitude
+                                                // (None is implied by the
+                                                // Enabled toggle above).
+                                                _seq->trackVoice[t].lfoTarget =
+                                                    (StepHit::LfoTarget)(idx +
+                                                                         1);
+                                                _synthLfoTargetState[t].set(
+                                                    idx);
+                                              }),
+                                      Text("Rate (Hz)")->setFontSize(11),
+                                      Slider(0.1, 20.0, 0.1)
+                                          ->setValue(_synthLfoRateState[t])
+                                          ->setWidth(140)
+                                          ->setOnValueChanged(
+                                              [this, t](double v) {
+                                                _seq->trackVoice[t].lfoRateHz =
+                                                    (float)v;
+                                                _synthLfoRateState[t].set(v);
+                                              }),
+                                      Text("Depth")->setFontSize(11),
+                                      Slider(0.0, 1.0, 0.05)
+                                          ->setValue(_synthLfoDepthState[t])
+                                          ->setWidth(140)
+                                          ->setOnValueChanged(
+                                              [this, t](double v) {
+                                                _seq->trackVoice[t].lfoDepth =
+                                                    (float)v;
+                                                _synthLfoDepthState[t].set(v);
+                                              }),
                                   })
                                   ->setGap(4)
                                   ->setPadding(8)),
+                      }),
+
+                  ContextMenu(
+                      Button("Layers", [] {})
+                          ->setWidth(56)
+                          ->setHeight(24)
+                          ->setBorderRadius(4)
+                          ->setBackgroundColor(Color::fromRGB(235, 245, 235)),
+                      {
+                          ContextMenuItem::Widget(_buildSampleLayerPanel(t)),
                       }),
               })
               ->setGap(8)
@@ -5208,7 +6027,7 @@ public:
                                         std::to_string(_auxBuses.size()));
                                     for (auto &dd : _sendDropdowns)
                                       dd->setOptions(_sendBusLabels());
-                                      _appendAuxBusStrip(_auxBuses.size() - 1);
+                                    _appendAuxBusStrip(_auxBuses.size() - 1);
                                   }),
                        })
                        ->setGap(12)
