@@ -12,6 +12,7 @@
 #include <cstring>
 #include <fstream>
 #include <iomanip>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -828,7 +829,20 @@ private:
 using ClipID = uint64_t;
 using TimelineTrackID = uint32_t;
 
-enum class ClipType { Pattern, Audio };
+enum class ClipType { Pattern, Audio, Midi };
+
+// One note in a MidiClip. startBeat/lengthBeats are relative to the
+// CLIP's own startBeat (i.e. a note at startBeat=0 fires the instant the
+// clip's box begins), matching how AudioClip's audioStartOffsetSec is
+// clip-relative rather than timeline-absolute. pitch is a standard MIDI
+// note number (60 = middle C) so import/export round-trips through a
+// real .mid file without any remapping.
+struct MidiNote {
+  int pitch = 60;         // 0..127
+  double startBeat = 0.0; // relative to the owning clip's startBeat
+  double lengthBeats = 1.0;
+  float velocity = 0.8f;  // 0..1
+};
 
 // startBeat/lengthBeats live on a timeline-global beat axis, independent of
 // any individual pattern's own stepsPerBeat/numSteps — that's what lets
@@ -850,6 +864,9 @@ struct Clip {
   float gain = 1.0f;
   float fadeInBeats = 0.0f;
   float fadeOutBeats = 0.0f;
+
+  // ── MidiClip ──────────────────────────────────────────────────────────
+  std::vector<MidiNote> midiNotes; // only used when type == ClipType::Midi
 };
 
 enum class AutomationParam { TrackVolume, TrackPan };
@@ -878,7 +895,15 @@ struct TimelineTrack {
   bool muted = false;
   bool soloed = false;
 
-  // ── Automation (Phase 4) ─────────────────────────────────────────────
+  // Fixed synth voice MIDI clips on this track play through — reuses
+  // StepScheduler::fireStep exactly, so a MIDI note sounds through the
+  // identical oscillator/envelope/filter/LFO path a PatternClip step
+  // does. No per-track UI to edit this yet (see roadmap note); pitch 60
+  // (middle C) plays at freqHz unshifted, matching a real synth's "root
+  // key" convention.
+  StepHit midiInstrument{261.6256f, 0.8f, 0.0f};
+
+  // ── Automation ─────────────────────────────────────────────
   // A lane is a sorted list of (beat, value) points; TimelineScheduler
   // linearly interpolates between them and writes the result straight to
   // the AudioEngine Track each tick(), same "coarse sampled-and-held"
@@ -968,6 +993,8 @@ public:
             _tickPatternClip(track, clip, _nextPulseFrame);
           else if (clip.type == ClipType::Audio)
             _tickAudioClipBoundary(track, clip, _nextPulseFrame, audible);
+          else if (clip.type == ClipType::Midi)
+            _tickMidiClip(track, clip, _nextPulseFrame);
         }
       }
 
@@ -1007,6 +1034,52 @@ private:
   // _tickAudioClipBoundary detect "already started" / "time to stop"
   // without a second lookup into the Timeline's track/clip vectors.
   std::unordered_map<ClipID, ActiveAudioClip> _activeAudioClips;
+
+  // Fires any MidiClip notes whose startBeat lands exactly on this pulse.
+  // O(notes-in-clip) per pulse — fine for the note counts a hand-authored
+  // or imported clip realistically has; a sorted-cursor version (like
+  // _tickPatternClip's modulo check) would be needed if that ever stops
+  // being true.
+  //
+  // fireStep() has no separate "note off" event, so a note's duration is
+  // baked into a synthesized envelope per note (decay=0, hold at full
+  // volume for the note's length, short release) rather than driving the
+  // instrument's own configured ADSR — this trades away the instrument's
+  // authored envelope shape for correct note length, same tradeoff
+  // StepData::sustainSec already makes for one-shot pattern steps.
+  void _tickMidiClip(const TimelineTrack &track, const Clip &clip,
+                     uint64_t targetFrame) {
+    int64_t clipStartPulse = (int64_t)std::llround(clip.startBeat * kPPQ);
+    int64_t rel = currentPulse - clipStartPulse;
+    if (rel < 0)
+      return;
+    int64_t clipLenPulses = (int64_t)std::llround(clip.lengthBeats * kPPQ);
+    if (rel >= clipLenPulses)
+      return; // past the clip's box — no new notes start, matches
+              // PatternClip's own length gate
+
+    for (const MidiNote &note : clip.midiNotes) {
+      int64_t noteStartPulse = (int64_t)std::llround(note.startBeat * kPPQ);
+      if (noteStartPulse != rel)
+        continue;
+
+      StepData sd;
+      sd.on = true;
+      sd.velocity = std::max(0.f, std::min(1.f, note.velocity));
+      sd.pitchSemitones = (float)(note.pitch - 60); // 60 = instrument's
+                                                    // unshifted pitch
+
+      StepHit hit = track.midiInstrument;
+      double lengthSec = note.lengthBeats * (60.0 / _seq.bpm);
+      hit.decaySec = 0.f;
+      hit.sustainLevel = 1.f;
+      hit.sustainSec = (float)std::max(0.02, lengthSec);
+      hit.releaseSec = 0.05f;
+
+      StepScheduler::fireStep(hit, sd, targetFrame, track.engineTrack);
+    }
+  }
+
 
   uint64_t _framesPerPulse() const {
     double secondsPerBeat = 60.0 / _seq.bpm; // shares StepScheduler's bpm —
@@ -1540,6 +1613,237 @@ inline bool writeWavMono16(const std::string &path,
 }
 
 // ============================================================================
+// Minimal Standard MIDI File (SMF) reader/writer — piano-roll clip
+// import/export only. Reads/writes note-on/note-off pairs; every other
+// MIDI event type is skipped on read and never emitted on write. SMPTE-
+// format divisions are rejected. Multi-track SMF files are merged into
+// one flat note list on import — channel/track origin is dropped, same
+// simplification SeqJson makes for not being a general-purpose library.
+// ============================================================================
+namespace MidiFile {
+
+constexpr uint16_t kTicksPerQuarter = 480;
+
+inline uint32_t readVarLen(const std::vector<uint8_t> &d, size_t &i) {
+  uint32_t value = 0;
+  uint8_t byte;
+  do {
+    if (i >= d.size())
+      return value;
+    byte = d[i++];
+    value = (value << 7) | (byte & 0x7F);
+  } while (byte & 0x80);
+  return value;
+}
+
+inline void writeVarLen(std::vector<uint8_t> &out, uint32_t value) {
+  uint8_t buf[4];
+  int count = 0;
+  buf[count++] = value & 0x7F;
+  value >>= 7;
+  while (value > 0) {
+    buf[count++] = (value & 0x7F) | 0x80;
+    value >>= 7;
+  }
+  for (int i = count - 1; i >= 0; i--)
+    out.push_back(buf[i]);
+}
+
+inline void writeU32BE(std::vector<uint8_t> &out, uint32_t v) {
+  out.push_back((v >> 24) & 0xFF);
+  out.push_back((v >> 16) & 0xFF);
+  out.push_back((v >> 8) & 0xFF);
+  out.push_back(v & 0xFF);
+}
+inline void writeU16BE(std::vector<uint8_t> &out, uint16_t v) {
+  out.push_back((v >> 8) & 0xFF);
+  out.push_back(v & 0xFF);
+}
+
+// Ticks convert straight to beats via `division`, ignoring tempo
+// meta-events entirely — a MIDI file's own musical grid is independent
+// of its authored playback tempo, same way a piano roll works in any
+// DAW. Returns false only on a structurally broken/unreadable file (bad
+// header, SMPTE division); a file with zero notes still returns true
+// with an empty outNotes.
+inline bool read(const std::string &path, std::vector<MidiNote> &outNotes) {
+  std::ifstream f(path, std::ios::binary);
+  if (!f)
+    return false;
+  std::vector<uint8_t> data((std::istreambuf_iterator<char>(f)),
+                            std::istreambuf_iterator<char>());
+  if (data.size() < 14)
+    return false;
+
+  size_t i = 0;
+  auto readTag = [&](const char *tag) {
+    if (i + 4 > data.size())
+      return false;
+    bool ok = std::memcmp(data.data() + i, tag, 4) == 0;
+    i += 4;
+    return ok;
+  };
+  auto readU32 = [&]() {
+    uint32_t v = ((uint32_t)data[i] << 24) | ((uint32_t)data[i + 1] << 16) |
+                 ((uint32_t)data[i + 2] << 8) | (uint32_t)data[i + 3];
+    i += 4;
+    return v;
+  };
+  auto readU16 = [&]() {
+    uint16_t v = ((uint16_t)data[i] << 8) | (uint16_t)data[i + 1];
+    i += 2;
+    return v;
+  };
+
+  if (!readTag("MThd"))
+    return false;
+  uint32_t headerLen = readU32();
+  uint16_t format = readU16();
+  uint16_t numTracks = readU16();
+  uint16_t division = readU16();
+  (void)format;
+  if (division & 0x8000)
+    return false; // SMPTE division — not supported
+  i += (headerLen > 6) ? (headerLen - 6) : 0;
+
+  for (uint16_t t = 0; t < numTracks && i + 8 <= data.size(); t++) {
+    if (!readTag("MTrk"))
+      return false;
+    uint32_t trackLen = readU32();
+    size_t trackEnd = std::min(data.size(), i + trackLen);
+
+    uint64_t ticks = 0;
+    uint8_t runningStatus = 0;
+    // pitch -> (tick the note-on happened, velocity). A second note-on
+    // for the same pitch before its note-off just restarts that
+    // pitch's pending start tick.
+    std::unordered_map<int, std::pair<uint64_t, float>> pending;
+
+    while (i < trackEnd) {
+      ticks += readVarLen(data, i);
+      if (i >= trackEnd)
+        break;
+      uint8_t status = data[i];
+      if (status < 0x80) {
+        status = runningStatus; // running status — don't consume this byte
+      } else {
+        i++;
+      }
+      runningStatus = status;
+      uint8_t hi = status & 0xF0;
+
+      if (status == 0xFF) { // meta event — skipped, see function comment
+        i++; // meta type
+        uint32_t len = readVarLen(data, i);
+        i += len;
+      } else if (status == 0xF0 || status == 0xF7) { // sysex
+        uint32_t len = readVarLen(data, i);
+        i += len;
+      } else if (hi == 0x90 || hi == 0x80) { // note on / note off
+        uint8_t pitch = data[i++];
+        uint8_t vel = data[i++];
+        bool isOn = (hi == 0x90 && vel > 0);
+        if (isOn) {
+          pending[pitch] = {ticks, vel / 127.f};
+        } else {
+          auto it = pending.find(pitch);
+          if (it != pending.end()) {
+            double startBeat = (double)it->second.first / division;
+            double lenBeats = std::max(
+                0.01, (double)(ticks - it->second.first) / division);
+            outNotes.push_back(
+                {pitch, startBeat, lenBeats, it->second.second});
+            pending.erase(it);
+          }
+        }
+      } else if (hi == 0xA0 || hi == 0xB0 || hi == 0xE0) {
+        i += 2; // poly aftertouch / CC / pitch bend
+      } else if (hi == 0xC0 || hi == 0xD0) {
+        i += 1; // program change / channel aftertouch
+      } else {
+        break; // unrecognized status — bail out of this track
+      }
+    }
+    i = trackEnd;
+  }
+  return true;
+}
+
+// Writes a single-track format-0 SMF: one tempo meta-event at tick 0
+// (derived from `bpm`, purely for playback tempo in another DAW) plus
+// note-on/note-off pairs sorted by tick. Notes are always written at
+// kTicksPerQuarter ticks/beat regardless of bpm, matching read()'s own
+// tempo-independent tick->beat conversion — round-tripping a clip
+// through write() then read() reproduces the same beats even if bpm
+// changed in between.
+inline bool write(const std::string &path, const std::vector<MidiNote> &notes,
+                  double bpm) {
+  struct Event {
+    uint32_t tick;
+    bool isOn;
+    int pitch;
+    float velocity;
+  };
+  std::vector<Event> events;
+  events.reserve(notes.size() * 2);
+  for (const auto &n : notes) {
+    uint32_t onTick = (uint32_t)std::max(
+        0.0, std::round(n.startBeat * kTicksPerQuarter));
+    uint32_t offTick = (uint32_t)std::max(
+        (double)onTick + 1.0,
+        std::round((n.startBeat + n.lengthBeats) * kTicksPerQuarter));
+    events.push_back({onTick, true, n.pitch, n.velocity});
+    events.push_back({offTick, false, n.pitch, n.velocity});
+  }
+  std::stable_sort(events.begin(), events.end(),
+                   [](const Event &a, const Event &b) { return a.tick < b.tick; });
+
+  std::vector<uint8_t> track;
+  uint32_t usPerQuarter = (uint32_t)std::llround(60000000.0 / std::max(1.0, bpm));
+  writeVarLen(track, 0);
+  track.push_back(0xFF);
+  track.push_back(0x51);
+  track.push_back(0x03);
+  track.push_back((usPerQuarter >> 16) & 0xFF);
+  track.push_back((usPerQuarter >> 8) & 0xFF);
+  track.push_back(usPerQuarter & 0xFF);
+
+  uint32_t lastTick = 0;
+  for (const auto &e : events) {
+    writeVarLen(track, e.tick - lastTick);
+    lastTick = e.tick;
+    track.push_back(e.isOn ? 0x90 : 0x80);
+    track.push_back((uint8_t)std::max(0, std::min(127, e.pitch)));
+    track.push_back(e.isOn ? (uint8_t)std::max(1, std::min(127, (int)(e.velocity * 127)))
+                           : 0);
+  }
+  writeVarLen(track, 0);
+  track.push_back(0xFF);
+  track.push_back(0x2F);
+  track.push_back(0x00);
+
+  std::ofstream f(path, std::ios::binary);
+  if (!f)
+    return false;
+
+  std::vector<uint8_t> header{'M', 'T', 'h', 'd'};
+  writeU32BE(header, 6);
+  writeU16BE(header, 0); // format 0
+  writeU16BE(header, 1); // one track
+  writeU16BE(header, kTicksPerQuarter);
+  f.write(reinterpret_cast<const char *>(header.data()), header.size());
+
+  std::vector<uint8_t> trackHeader{'M', 'T', 'r', 'k'};
+  writeU32BE(trackHeader, (uint32_t)track.size());
+  f.write(reinterpret_cast<const char *>(trackHeader.data()), trackHeader.size());
+  f.write(reinterpret_cast<const char *>(track.data()), track.size());
+  return (bool)f;
+}
+
+} // namespace MidiFile
+
+
+// ============================================================================
 // TimelineSurface — draws Timeline tracks/clips and handles click input.
 // Pan/zoom/scrollbars come free from CanvasWidget's built-in viewport (see
 // the Canvas docs — middle-drag or space+drag to pan, ctrl+scroll to zoom);
@@ -1694,9 +1998,11 @@ public:
         float cw = (float)(clip.lengthBeats * kPxPerBeat);
         bool selected = clip.id == selectedClip;
         bool isAudio = clip.type == ClipType::Audio;
+        bool isMidi = clip.type == ClipType::Midi;
 
         ctx.setFillColor(selected  ? Color::fromRGB(99, 179, 237)
                          : isAudio ? Color::fromRGB(235, 165, 95)
+                         : isMidi  ? Color::fromRGB(120, 200, 140)
                                    : Color::fromRGB(150, 150, 235));
         ctx.fillRoundedRect(cx + 1, laneY + 4, std::max(4.f, cw - 2),
                             kTrackHeight - 8, 4);
@@ -1709,6 +2015,8 @@ public:
                       : (slash == std::string::npos
                              ? clip.audioFilePath
                              : clip.audioFilePath.substr(slash + 1));
+        } else if (isMidi) {
+          label = "MIDI (" + std::to_string(clip.midiNotes.size()) + " notes)";
         } else if (seq && clip.patternSlot >= 0 &&
                    clip.patternSlot < (int)seq->patternSlots.size())
           label = seq->patternSlots[clip.patternSlot].name;
@@ -1718,6 +2026,31 @@ public:
         ctx.setTextAlign(CanvasTextAlign::Left);
         ctx.setTextBaseline(TextBaseline::Top);
         ctx.fillText(label, cx + 6, laneY + 8);
+
+        // Piano-roll-lite preview: each note as a thin horizontal bar,
+        // vertical position mapped from pitch across whatever range the
+        // clip's own notes span. Not editable here — dragging/resizing
+        // individual notes is a separate piano-roll-editor feature, not
+        // part of this pass.
+        if (isMidi && !clip.midiNotes.empty()) {
+          int minPitch = 127, maxPitch = 0;
+          for (const auto &n : clip.midiNotes) {
+            minPitch = std::min(minPitch, n.pitch);
+            maxPitch = std::max(maxPitch, n.pitch);
+          }
+          int pitchSpan = std::max(1, maxPitch - minPitch);
+          float noteAreaTop = laneY + 22;
+          float noteAreaBottom = laneY + kTrackHeight - 4;
+          ctx.setFillColor(Color::fromRGB(255, 255, 255));
+          for (const auto &n : clip.midiNotes) {
+            float nx = cx + (float)(n.startBeat * kPxPerBeat);
+            float nw = std::max(2.f, (float)(n.lengthBeats * kPxPerBeat) - 1);
+            float t = (float)(n.pitch - minPitch) / pitchSpan;
+            float ny = noteAreaBottom - t * (noteAreaBottom - noteAreaTop) - 2;
+            ctx.fillRoundedRect(nx, ny, nw, 3, 1);
+          }
+        }
+
 
         // Waveform preview + fade ramps/handles — AudioClip only.
         //
@@ -4390,6 +4723,52 @@ public:
     return nullptr;
   }
 
+  // Imports a Standard MIDI File as a new MidiClip at beat 0. Creates a
+  // fresh timeline track for it if none exist yet, mirroring how MIDI
+  // import is usually "drop a new instrument track" rather than
+  // requiring an existing empty track to target.
+  void _importMidiFile(const std::string &path) {
+    std::vector<MidiNote> notes;
+    if (!MidiFile::read(path, notes) || notes.empty())
+      return; // unreadable/unsupported file, or no notes found — silent
+              // no-op, same policy every other bool-returning load path
+              // in this file uses
+
+    if (_timeline.tracks.empty())
+      _addTimelineTrack();
+    int trackIndex = (int)_timeline.tracks.size() - 1;
+
+    Clip clip;
+    clip.id = _nextClipId++;
+    clip.type = ClipType::Midi;
+    clip.startBeat = 0.0;
+    clip.midiNotes = std::move(notes);
+    double maxEnd = 0.0;
+    for (const auto &n : clip.midiNotes)
+      maxEnd = std::max(maxEnd, n.startBeat + n.lengthBeats);
+    clip.lengthBeats = std::max(1.0, maxEnd);
+
+    _timeline.tracks[trackIndex].clips.push_back(clip);
+    _timelineSelectClip(clip.id);
+    if (_timelineCanvas) {
+      _timelineCanvas->setCanvasSize(_timelineCanvasWidthPx(),
+                                     _timelineCanvasHeightPx());
+      _timelineCanvas->redraw();
+    }
+  }
+
+  // Exports the currently selected clip to a .mid file. No-ops (with no
+  // error dialog) if nothing's selected or the selection isn't a
+  // MidiClip — the toolbar button's own label makes the requirement
+  // clear rather than needing a popup.
+  void _exportSelectedClipToMidi(const std::string &path) {
+    Clip *clip = _findTimelineClip(_selectedClipId);
+    if (!clip || clip->type != ClipType::Midi)
+      return;
+    MidiFile::write(path, clip->midiNotes, _seq->bpm);
+  }
+
+
   void _timelineFadeDragStart(ClipID id, bool isFadeIn) {
     Clip *clip = _findTimelineClip(id);
     if (!clip)
@@ -4562,6 +4941,9 @@ public:
               << std::fixed << std::setprecision(1) << clip.fadeInBeats
               << "b in / " << clip.fadeOutBeats << "b out";
           label = lbl.str();
+        } else if (clip.id == id && clip.type == ClipType::Midi) {
+          label = "MIDI clip @ beat " + std::to_string((int)clip.startBeat) +
+                  ", " + std::to_string(clip.midiNotes.size()) + " notes";
         }
     _timelineSelectionLabel.set(label);
 
@@ -4744,7 +5126,15 @@ public:
             << SeqJson::esc(c.audioFilePath) << "\""
             << ",\"audioStartOffsetSec\":" << c.audioStartOffsetSec
             << ",\"gain\":" << c.gain << ",\"fadeInBeats\":" << c.fadeInBeats
-            << ",\"fadeOutBeats\":" << c.fadeOutBeats << "}"
+            << ",\"fadeOutBeats\":" << c.fadeOutBeats << ",\"midiNotes\":[";
+        for (size_t ni = 0; ni < c.midiNotes.size(); ni++) {
+          const MidiNote &n = c.midiNotes[ni];
+          out << "{\"pitch\":" << n.pitch << ",\"startBeat\":" << n.startBeat
+              << ",\"lengthBeats\":" << n.lengthBeats
+              << ",\"velocity\":" << n.velocity << "}"
+              << (ni + 1 < c.midiNotes.size() ? "," : "");
+        }
+        out << "]}"
             << (ci + 1 < tt.clips.size() ? "," : "");
       }
       out << "]}" << (ti + 1 < _timeline.tracks.size() ? "," : "") << "\n";
@@ -5077,8 +5467,10 @@ public:
       for (const auto &cj : ttj["clips"].arr) {
         Clip clip;
         clip.id = (ClipID)cj["id"].asInt(0);
-        clip.type =
-            (cj["type"].asInt(0) == 1) ? ClipType::Audio : ClipType::Pattern;
+        int typeInt = cj["type"].asInt(0);
+        clip.type = (typeInt == 1)   ? ClipType::Audio
+                    : (typeInt == 2) ? ClipType::Midi
+                                     : ClipType::Pattern;
         clip.startBeat = cj["startBeat"].asDouble(0.0);
         clip.lengthBeats = cj["lengthBeats"].asDouble(4.0);
         clip.audioFilePath = cj["audioFilePath"].asString("");
@@ -5086,6 +5478,15 @@ public:
         clip.gain = (float)cj["gain"].asDouble(1.0);
         clip.fadeInBeats = (float)cj["fadeInBeats"].asDouble(0.0);
         clip.fadeOutBeats = (float)cj["fadeOutBeats"].asDouble(0.0);
+
+        for (const auto &nj : cj["midiNotes"].arr) {
+          MidiNote note;
+          note.pitch = nj["pitch"].asInt(60);
+          note.startBeat = nj["startBeat"].asDouble(0.0);
+          note.lengthBeats = nj["lengthBeats"].asDouble(1.0);
+          note.velocity = (float)nj["velocity"].asDouble(0.8);
+          clip.midiNotes.push_back(note);
+        }
 
         if (clip.type == ClipType::Pattern) {
           // patternSlot was remapped once already when patterns were
@@ -5098,7 +5499,7 @@ public:
             continue;
           clip.patternSlot = slotIt->second;
         } else {
-          clip.patternSlot = -1; // AudioClip — not pattern-backed
+          clip.patternSlot = -1; // Audio/MidiClip — not pattern-backed
         }
 
         maxClipId = std::max(maxClipId, (uint64_t)clip.id);
@@ -6070,6 +6471,22 @@ public:
                           (slash == std::string::npos
                                ? path
                                : path.substr(slash + 1)));
+                    }),
+                FilePicker("Import MIDI…")
+                    ->setMode(FilePickerMode::Open)
+                    ->addFilter("MIDI", {"*.mid", "*.midi"})
+                    ->setWidth(120)
+                    ->setOnChanged([this](const std::string &path) {
+                      _importMidiFile(path);
+                    }),
+                FilePicker("Export MIDI")
+                    ->setMode(FilePickerMode::Save)
+                    ->setDefaultFilename("clip.mid")
+                    ->setDefaultExtension("mid")
+                    ->addFilter("MIDI", {"*.mid"})
+                    ->setWidth(120)
+                    ->setOnChanged([this](const std::string &path) {
+                      _exportSelectedClipToMidi(path);
                     }),
                 Button("▶ Play", [this] { _timelineScheduler->start(); }),
                 Button("■ Stop", [this] { _timelineScheduler->stop(); }),
