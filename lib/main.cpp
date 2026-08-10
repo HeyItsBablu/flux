@@ -2621,6 +2621,67 @@ private:
 };
 
 // ============================================================================
+// PanelSplitterSurface — thin draggable divider between two resizable
+// panels (Phase 7 multi-panel layout). Reuses the Canvas2D/RenderSurface
+// machinery TimelineSurface already relies on for custom drawing + drag,
+// rather than adding a second drag mechanism to BoxWidget itself — a
+// splitter only ever needs one drag axis and a pixel-delta callback, not
+// BoxWidget's full scrollbar/gesture stack.
+//
+// dragAxisIsY selects which mouse coordinate the delta is computed from:
+// false for a narrow vertical bar between side-by-side panels (drag
+// left/right resizes width), true for a wide horizontal bar between
+// stacked panels (drag up/down resizes height). The bar's OWN drawn
+// thickness is independent of this — see _makeVSplitter/_makeHSplitter's
+// fixed canvas sizes, since this widget has no Full-along-one-axis sizing
+// option the way a Box would.
+// ============================================================================
+class PanelSplitterSurface : public RenderSurface {
+public:
+  bool dragAxisIsY = false;
+  std::function<void(int deltaPx)> onDrag;
+
+  void initialize(int, int) override {}
+  void resize(int, int) override {}
+  void destroy() override {}
+  void update(double) override {}
+
+  void render(Canvas2D &ctx) override {
+    ctx.setFillColor(_dragging ? Color::fromRGB(130, 140, 220)
+                                : Color::fromRGB(212, 212, 220));
+    ctx.fillRect(0, 0, (float)ctx.width(), (float)ctx.height());
+  }
+
+  // Assumes the canvas keeps receiving move/up events for the duration of
+  // the drag even once the cursor leaves its own (deliberately tiny) 6px
+  // strip — the same assumption TimelineSurface's fade/trim/automation
+  // drags already make about mouse capture during an active press.
+  void onMouseDown(float x, float y) override {
+    _dragging = true;
+    _lastPos = dragAxisIsY ? y : x;
+  }
+  void onMouseMove(float x, float y) override {
+    if (!_dragging)
+      return;
+    float pos = dragAxisIsY ? y : x;
+    int delta = (int)std::round(pos - _lastPos);
+    if (delta == 0)
+      return;
+    _lastPos = pos;
+    if (onDrag)
+      onDrag(delta);
+  }
+  void onMouseUp(float, float) override { _dragging = false; }
+
+  bool needsContinuousRedraw() const override { return _dragging; }
+
+private:
+  bool _dragging = false;
+  float _lastPos = 0.f;
+};
+
+
+// ============================================================================
 // UI
 // ============================================================================
 
@@ -2939,6 +3000,28 @@ class SequencerApp : public Widget {
   int _recordTargetTrackIndex = 0; // UI selection from the dropdown below,
                                    // read at record-start time
   std::shared_ptr<DropdownWidget> _recordTrackDropdown;
+
+  // ── Multi-panel layout (Phase 7) ────────────────────────────────────
+  // Left = tracks/pattern grid, right = mixer, bottom = sample browser,
+  // each independently resizable by dragging the splitter next to it.
+  // Sizes are plain ints (not State<>) because they only ever drive a
+  // direct setWidth()/setHeight() call on the panel's own Box — nothing
+  // else in the tree needs to react to a resize.
+  static constexpr int kMinPanelSize = 160;
+  static constexpr int kMaxPanelSize = 900;
+  int _leftPanelWidth = 420;
+  int _rightPanelWidth = 340;
+  int _bottomPanelHeight = 220;
+  BoxWidgetPtr _leftPanelBox;
+  BoxWidgetPtr _rightPanelBox;
+  BoxWidgetPtr _bottomPanelBox;
+
+  // ── Sample browser (Phase 7) ─────────────────────────────────────────
+  State<std::vector<std::string>> _sampleBrowserFilesState{
+      std::vector<std::string>{}};
+  int _sampleBrowserTargetTrack = 0;
+  std::shared_ptr<DropdownWidget> _sampleBrowserTrackDropdown;
+
 
 public:
   SequencerApp() {
@@ -4625,6 +4708,54 @@ public:
     _recordTrackDropdown->setOptions(labels);
     if (_recordTargetTrackIndex >= (int)_timeline.tracks.size())
       _recordTargetTrackIndex = std::max(0, (int)_timeline.tracks.size() - 1);
+  }
+  // ── Multi-panel layout helpers (Phase 7) ────────────────────────────
+  std::shared_ptr<CanvasWidget> _makeVSplitter(std::function<void(int)> onDrag) {
+    // 6px wide, tall enough to span a panel row; see PanelSplitterSurface's
+    // class comment for why this can't just be Full-height like a Box.
+    auto canvas = Canvas(6, 700);
+    canvas->setViewportEnabled(false);
+    canvas->setScrollbarsEnabled(false);
+    auto surface = canvas->setSurface<PanelSplitterSurface>();
+    surface->dragAxisIsY = false;
+    surface->onDrag = std::move(onDrag);
+    return canvas;
+  }
+  std::shared_ptr<CanvasWidget> _makeHSplitter(std::function<void(int)> onDrag) {
+    auto canvas = Canvas(1400, 6);
+    canvas->setViewportEnabled(false);
+    canvas->setScrollbarsEnabled(false);
+    auto surface = canvas->setSurface<PanelSplitterSurface>();
+    surface->dragAxisIsY = true;
+    surface->onDrag = std::move(onDrag);
+    return canvas;
+  }
+
+  WidgetPtr _buildSampleBrowserRow(const std::string &path) {
+    return Row({
+                   Text(_basenameOf(path))
+                       ->setFontSize(12)
+                       ->setWidth(200)
+                       ->setOverflow(TextOverflow::Ellipsis)
+                       ->setMaxLines(1),
+                   Button("Load",
+                          [this, path] {
+                            if (_sampleBrowserTargetTrack >= 0 &&
+                                _sampleBrowserTargetTrack  < 
+                                    (int)_seq->trackVoice.size())
+                              _loadTrackSample((size_t)_sampleBrowserTargetTrack,
+                                               path);
+                          })
+                       ->setWidth(56)
+                       ->setHeight(22)
+                       ->setBorderRadius(4)
+                       ->setBackgroundColor(Color::fromRGB(230, 230, 230)),
+               })
+        ->setGap(8)
+        ->setAlignItems(AlignItems::Center)
+        ->setPaddingHV(6, 4)
+        ->setBackgroundColor(Color::fromRGB(248, 248, 250))
+        ->setBorderRadius(4);
   }
 
   // Called DIRECTLY on AudioEngine's capture audio thread (see
@@ -6584,11 +6715,137 @@ public:
       });
     }
 
-    return Column({transportRow, patternBar, arrangementBar,
-                   Column({trackRows})->setGap(6), timelineSection,
-                   mixerSection})
-        ->setGap(16)
-        ->setPadding(24);
+    // ── Multi-panel layout (Phase 7) ───────────────────────────────────
+    // Left = tracks/pattern grid, center = pattern controls + timeline,
+    // right = mixer, bottom = sample browser. Each boundary is an
+    // independently draggable PanelSplitterSurface; panel sizes live in
+    // plain int members that the splitter's onDrag callback clamps and
+    // re-applies directly via setWidth()/setHeight() on the panel's own
+    // Box, rather than routing through State<>.
+    //
+    // Known simplification: the left panel holds the FULL per-track
+    // header + step grid (trackRows, built above), not a trimmed track-
+    // header-only rail the way a real DAW's left sidebar would —
+    // splitting the header column from the step grid so they scroll
+    // independently while staying row-synced would need a shared scroll
+    // offset between two separate Box scrollables, which this framework
+    // doesn't wire up today. Scrolling the whole thing horizontally
+    // inside a resizable panel is the honest, achievable version for now.
+    auto tracksPanelContent = Column({trackRows})->setGap(6);
+    _leftPanelBox = Box({tracksPanelContent})
+                        ->setWidth(_leftPanelWidth)
+                        ->setScrollable(true)
+                        ->setPadding(8);
+
+    auto centerPanel = Box({patternBar, arrangementBar, timelineSection})
+                           ->setDisplay(Display::Flex)
+                           ->setDirection(FlexDirection::Column)
+                           ->setGap(12)
+                           ->setFlexGrow(1)
+                           ->setScrollable(true)
+                           ->setPadding(8);
+
+    _rightPanelBox = Box({mixerSection})
+                         ->setWidth(_rightPanelWidth)
+                         ->setScrollable(true)
+                         ->setPadding(8);
+
+    auto leftSplitter = _makeVSplitter([this](int dx) {
+      _leftPanelWidth = std::max(
+          kMinPanelSize, std::min(kMaxPanelSize, _leftPanelWidth + dx));
+      _leftPanelBox->setWidth(_leftPanelWidth);
+    });
+    auto rightSplitter = _makeVSplitter([this](int dx) {
+      // Dragging this splitter right (dx > 0) moves it away from the
+      // mixer, toward center — shrinks the mixer. Opposite sign from
+      // leftSplitter, which grows its panel as the divider moves further
+      // from center.
+      _rightPanelWidth = std::max(
+          kMinPanelSize, std::min(kMaxPanelSize, _rightPanelWidth - dx));
+      _rightPanelBox->setWidth(_rightPanelWidth);
+    });
+
+    auto mainPanelsRow =
+        Row({_leftPanelBox, leftSplitter, centerPanel, rightSplitter,
+             _rightPanelBox})
+            ->setGap(0)
+            ->setFlexGrow(1);
+
+    // ── Sample browser (bottom panel) ───────────────────────────────────
+    std::vector<std::string> sampleBrowserTrackLabels;
+    for (size_t t = 0; t < _seq->trackVoice.size(); t++)
+      sampleBrowserTrackLabels.push_back("Track " + std::to_string(t + 1));
+    _sampleBrowserTrackDropdown =
+        Dropdown(sampleBrowserTrackLabels)
+            ->setOnSelectionChanged([this](int idx, const std::string &) {
+              _sampleBrowserTargetTrack = idx;
+            })
+            ->setWidth(110);
+
+    auto sampleBrowserToolbar =
+        Row({
+                Text("Sample Browser")->setFontWeight(FontWeight::Bold),
+                FilePicker("+ Add Samples…")
+                    ->setMode(FilePickerMode::OpenMultiple)
+                    ->addFilter("Audio", {"*.wav", "*.mp3", "*.ogg", "*.flac"})
+                    ->setWidth(140)
+                    ->setOnMultiChanged(
+                        [this](const std::vector<std::string> &paths) {
+                          for (auto &p : paths) {
+                            auto cur = _sampleBrowserFilesState.get();
+                            if (std::find(cur.begin(), cur.end(), p) ==
+                                cur.end())
+                              _sampleBrowserFilesState.push_back(p);
+                          }
+                        }),
+                Text("Assign to:"),
+                _sampleBrowserTrackDropdown,
+            })
+            ->setGap(8)
+            ->setAlignItems(AlignItems::Center);
+
+    auto sampleBrowserList =
+        Box({
+                Map<std::string>(
+                    _sampleBrowserFilesState,
+                    [](int, const std::string &p) {
+                      return FlexItemKey::fromString(p);
+                    },
+                    [this](int, const std::string &path) {
+                      return _buildSampleBrowserRow(path);
+                    }),
+            })
+            ->setDisplay(Display::Flex)
+            ->setDirection(FlexDirection::Column)
+            ->setGap(4);
+
+    _bottomPanelBox = Box({sampleBrowserToolbar, sampleBrowserList})
+                          ->setDisplay(Display::Flex)
+                          ->setDirection(FlexDirection::Column)
+                          ->setGap(8)
+                          ->setHeight(_bottomPanelHeight)
+                          ->setWidthMode(SizeMode::Full)
+                          ->setScrollable(true)
+                          ->setPadding(8);
+
+    auto bottomSplitter = _makeHSplitter([this](int dy) {
+      // Divider moving down (dy > 0) means it's moving away from the
+      // bottom panel toward the panels above — shrinks the bottom panel,
+      // same "away from center shrinks" convention as rightSplitter.
+      // Fixed at 1400px wide (see _makeHSplitter) rather than stretching
+      // to the window — CanvasWidget has no Full-width sizing option the
+      // way Box does; known simplification.
+      _bottomPanelHeight = std::max(
+          kMinPanelSize / 2, std::min(kMaxPanelSize, _bottomPanelHeight - dy));
+      _bottomPanelBox->setHeight(_bottomPanelHeight);
+    });
+
+    return Column({transportRow, mainPanelsRow, bottomSplitter,
+                   _bottomPanelBox})
+        ->setGap(8)
+        ->setPadding(16)
+        ->setWidthMode(SizeMode::Full)
+        ->setHeightMode(SizeMode::Full);
   }
 };
 
